@@ -612,6 +612,11 @@ struct ResolvedPlacement
 {
     float position[3] = {0.0f, 0.0f, 0.0f};
     float yawDeg = 0.0f;
+    //! RFG-028: the placement's own scale, already folded through the parent chain
+    //! by the EBIN reader. Dropping it silently was drawing every scaled instance at
+    //! its prefab's full size -- Everon's scales run 0.7 to 1.0, so a stand of trees
+    //! came out up to 43% too large with nothing in the manifest to show for it.
+    float scale = 1.0f;
     bool terrainRelative = false;
     uint32_t mesh = 0; //!< index into the mesh list
 };
@@ -710,6 +715,7 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
         // downstream of it uses index 1 and discards pitch and roll -- a documented
         // reduction of the reader, not an omission here.
         item.yawDeg = placement.angles[1];
+        item.scale = (std::isfinite(placement.scale) && placement.scale > 0.0f) ? placement.scale : 1.0f;
         // The Y rule, measured over Everon's 1.23 M placements: with a Flags block
         // 96.3% sit within half a metre of the terrain, without one the median Y is
         // exactly 0. Reading every Y as absolute buries the houses a median 29 m
@@ -1128,7 +1134,15 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
                     const uint16_t raw = terrain.heights[static_cast<size_t>(sz) * gridW + sx];
                     y += static_cast<float>(raw) * d.heightScale + d.heightOffset;
                 }
-                AddObject(Vector3(item.position[0], y, item.position[2]), item.yawDeg, shape->second);
+                Object* placedObject =
+                    AddObject(Vector3(item.position[0], y, item.position[2]), item.yawDeg, shape->second);
+                // `AddObject` has no scale parameter, and the engine keeps scale in the
+                // orientation matrix rather than beside it -- `FrameBase::SetOrientation`
+                // recovers `_scale` from the matrix it is handed. So the scale goes on
+                // through the orientation, which is also why it must be applied AFTER
+                // the object exists rather than folded into the call.
+                if (placedObject != nullptr && std::fabs(item.scale - 1.0f) > 1e-3f)
+                    placedObject->SetOrientation(placedObject->Orientation() * Matrix3(MScale, item.scale));
                 ++added;
             }
             // Where the towns are. A world this size has no obvious place to point a

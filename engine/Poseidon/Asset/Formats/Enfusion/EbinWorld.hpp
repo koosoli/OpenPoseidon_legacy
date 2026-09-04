@@ -97,7 +97,34 @@ struct EbinPlacement
     //! height lives with the exporter that has a terrain to resolve against
     //! (`IsTerrainRelative` in XobCommand.cpp).
     bool hasFlags = false;
+
+    //! RFG-027: the shape of a spline entity, in the entity's OWN local frame.
+    //!
+    //! Everon's roads are not models. There is no baked road geometry anywhere in
+    //! the archives -- `pak list -f road` returns shaders, one generator script and
+    //! a handful of materials, and nothing else -- because Enfusion builds the strip
+    //! at load time from `RoadGeneratorEntity` (2,207 of them on Everon), `RoadEntity`
+    //! (189) and `SplineShapeEntity` (73).
+    //!
+    //! The points are `SplinePoints { ShapePoint { Position } ... }`, read from an
+    //! instrumented walk rather than guessed. They are LOCAL to `coords` where the
+    //! road declares one and world coordinates where it does not -- a road is usually
+    //! declared at the origin, so both readings agree in practice, but the caller
+    //! composes rather than assuming.
+    std::vector<float> points;  //!< x,y,z triples
+    float width = 0.0f;         //!< `Width`, metres; 0 when the road leaves it default
+    bool closedSpline = false;  //!< `IsClosedSpline`
+    std::string materialGuid;   //!< `Material`, resolvable through the resource database
 };
+
+//! Whether a class name is one whose f32[3] arrays are a spline centreline.
+//!
+//! A closed set rather than a substring test: `PowerlineEntity` and `RiverEntity`
+//! are splines too, and sweeping them in here would draw power cables as tarmac.
+inline bool IsRoadSplineClass(const std::string& className)
+{
+    return className == "RoadGeneratorEntity" || className == "RoadEntity";
+}
 
 struct EbinWorld
 {

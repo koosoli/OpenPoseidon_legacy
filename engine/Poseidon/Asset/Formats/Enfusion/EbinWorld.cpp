@@ -168,7 +168,14 @@ class Reader
                         current->hasFlags = true;
                 return Skip(8);
             case 0x05: // interned GUID as a value
-                return Skip(2);
+            {
+                if (!_c.Has(2))
+                    return Refuse("interned GUID truncated");
+                const uint16_t index = _c.U16();
+                if (decl.name == "Material" && _roadIndex != kNoPlacement && index < _world.guids.size())
+                    _world.placements[_roadIndex].materialGuid = _world.guids[index];
+                return true;
+            }
             case 0x06: // f32
             {
                 if (!_c.Has(4))
@@ -177,6 +184,8 @@ class Reader
                 if (decl.name == "scale")
                     if (EbinPlacement* current = Current())
                         current->scale = value;
+                if (decl.name == "Width" && _roadIndex != kNoPlacement)
+                    _world.placements[_roadIndex].width = value;
                 return true;
             }
             case 0x07: // f32[2]
@@ -205,12 +214,37 @@ class Reader
                         current->angles[2] = v[2];
                     }
                 }
+                // RFG-027: a road's shape. Measured structure, not a guess:
+                //
+                //   RoadEntity { coords, SplinePoints { ShapePoint { Position } ... },
+                //                IsClosedSpline, Type, Width, Material, VScale }
+                //
+                // Kept against `_roadIndex` and not `Current()` because a `ShapePoint`
+                // is itself an entity block: by the time its `Position` is read, the
+                // current entity is the point, not the road. Those point entities are
+                // then dropped by the no-`coords` rule below, which is why 2,396 road
+                // entities looked shapeless and why the class histogram names no point
+                // class at all.
+                if (decl.name == "Position" && _roadIndex != kNoPlacement)
+                {
+                    EbinPlacement& road = _world.placements[_roadIndex];
+                    road.points.push_back(v[0]);
+                    road.points.push_back(v[1]);
+                    road.points.push_back(v[2]);
+                }
                 return true;
             }
             case 0x09: // f32[4]
                 return Skip(16);
             case 0x0B: // bool
-                return Skip(1);
+            {
+                if (!_c.Has(1))
+                    return Refuse("bool truncated");
+                const uint8_t value = _c.U8();
+                if (decl.name == "IsClosedSpline" && _roadIndex != kNoPlacement)
+                    _world.placements[_roadIndex].closedSpline = value != 0;
+                return true;
+            }
             case 0x0C: // string
             {
                 if (!_c.Has(2))
@@ -237,9 +271,11 @@ class Reader
         if (!_c.Has(4))
             return Refuse("array count truncated");
         const uint32_t count = _c.U32();
+
         for (uint32_t i = 0; i < count; ++i)
             if (!Value(elementTag, _c.size, decl, inherited, depth))
                 return false;
+
         return true;
     }
 
@@ -272,6 +308,7 @@ class Reader
 
             EbinPlacement placement;
             placement.className = decl.name.empty() ? inherited.name : decl.name;
+            const bool isRoad = IsRoadSplineClass(placement.className);
             placement.prefabGuid = decl.Prefab().empty() ? inherited.Prefab() : decl.Prefab();
 
             // A nested entity's transform is LOCAL to the entity that contains it,
@@ -305,6 +342,9 @@ class Reader
             _world.placements.push_back(placement);
             const size_t index = _world.placements.size() - 1;
             _currentIndex = index;
+            const size_t outerRoad = _roadIndex;
+            if (isRoad)
+                _roadIndex = index;
 
             Declaration pass;
             pass.name = placement.className;
@@ -331,12 +371,13 @@ class Reader
                 child.angles[1] += parentYawDeg;
                 child.scale *= parentScale;
             }
-            if (!_world.placements[index].hasPosition)
+            if (!_world.placements[index].hasPosition && _world.placements[index].points.empty())
                 _world.placements.erase(_world.placements.begin() + static_cast<ptrdiff_t>(index));
             // Restoring an INDEX, not a pointer: the push_back above may have
             // reallocated the vector. `outerIndex` is always < index because the
             // parent was pushed first, so the erase cannot have moved it.
             _currentIndex = outerIndex;
+            _roadIndex = outerRoad;
             return ok;
         }
         if (first == 0x0D || first == 0x43 || first == 0x44 || first == 0x45 || first == 0x0E)
@@ -374,6 +415,8 @@ class Reader
     //! same reallocation could dangle.
     static constexpr size_t kNoPlacement = static_cast<size_t>(-1);
     size_t _currentIndex = kNoPlacement;
+    //! The road entity whose subtree is being walked, or kNoPlacement outside one.
+    size_t _roadIndex = kNoPlacement;
 
     EbinPlacement* Current() { return _currentIndex == kNoPlacement ? nullptr : &_world.placements[_currentIndex]; }
 };

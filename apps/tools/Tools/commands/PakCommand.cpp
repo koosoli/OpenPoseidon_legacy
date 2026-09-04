@@ -160,9 +160,10 @@ int ListEntries(const std::string& root, const std::string& filter)
 //! The check that matters is byte accounting over the WHOLE set: a record-stream
 //! walk that is one field width wrong still consumes most small files and only
 //! diverges on the large ones, so a spot check passes where the census does not.
-int Worlds(const std::string& root, const std::string& filter)
+int Worlds(const std::string& root, const std::string& filter, int topClasses, bool roads)
 {
     size_t files = 0, closed = 0, placements = 0;
+    std::map<std::string, size_t> classCounts;
     uint64_t declaredBytes = 0, consumedBytes = 0;
     const std::string needle = LowerCopy(filter);
 
@@ -192,6 +193,47 @@ int Worlds(const std::string& root, const std::string& filter)
                 closed++;
                 consumedBytes += world.consumed;
                 placements += world.placements.size();
+                if (topClasses > 0)
+                    for (const auto& item : world.placements)
+                        ++classCounts[item.className];
+                if (roads)
+                {
+                    size_t withPoints = 0, without = 0, totalPoints = 0;
+                    double totalLength = 0.0;
+                    size_t shown = 0;
+                    for (const auto& item : world.placements)
+                    {
+                        if (!IsRoadSplineClass(item.className))
+                            continue;
+                        if (item.points.empty())
+                        {
+                            ++without;
+                            continue;
+                        }
+                        ++withPoints;
+                        const size_t count = item.points.size() / 3;
+                        totalPoints += count;
+                        for (size_t i = 1; i < count; ++i)
+                        {
+                            const float dx = item.points[i * 3 + 0] - item.points[(i - 1) * 3 + 0];
+                            const float dy = item.points[i * 3 + 1] - item.points[(i - 1) * 3 + 1];
+                            const float dz = item.points[i * 3 + 2] - item.points[(i - 1) * 3 + 2];
+                            totalLength += std::sqrt(double(dx) * dx + double(dy) * dy + double(dz) * dz);
+                        }
+                        if (shown < 3)
+                        {
+                            ++shown;
+                            std::cout << "    road " << item.className << " at [" << int(item.position[0]) << " "
+                                      << int(item.position[1]) << " " << int(item.position[2]) << "] " << count
+                                      << " points, first local [" << item.points[0] << " " << item.points[1] << " "
+                                      << item.points[2] << "]\n";
+                        }
+                    }
+                    std::cout << "    roads: " << withPoints << " with a centreline, " << without << " without, "
+                              << totalPoints << " points, " << std::fixed << std::setprecision(1)
+                              << totalLength / 1000.0 << " km\n"
+                              << std::defaultfloat;
+                }
                 if (world.placements.size() > 10000)
                     std::cout << "  " << std::left << std::setw(46) << entry.path << std::setw(12)
                               << world.placements.size() << " placements, " << world.entityBlocks << " entity blocks\n";
@@ -205,6 +247,19 @@ int Worlds(const std::string& root, const std::string& filter)
     std::cout << "\n" << closed << " / " << files << " .ent files close their byte accounting.\n";
     std::cout << consumedBytes << " / " << declaredBytes << " bytes accounted for.\n";
     std::cout << placements << " placements with a transform.\n";
+    if (topClasses > 0 && !classCounts.empty())
+    {
+        // A class histogram, because "the roads are missing" is a claim about a class
+        // name and nothing else in this tool can say whether the name is even present.
+        std::vector<std::pair<size_t, std::string>> ranked;
+        ranked.reserve(classCounts.size());
+        for (const auto& [name, count] : classCounts)
+            ranked.emplace_back(count, name);
+        std::sort(ranked.begin(), ranked.end(), std::greater<>());
+        std::cout << "\n" << ranked.size() << " distinct classes; top " << topClasses << ":\n";
+        for (int i = 0; i < topClasses && i < static_cast<int>(ranked.size()); ++i)
+            std::cout << "  " << std::setw(10) << ranked[i].first << "  " << ranked[i].second << "\n";
+    }
     return closed == files ? 0 : 1;
 }
 
@@ -2063,10 +2118,14 @@ void PakCommand::Setup(CLI::App& app)
     {
         static std::string root;
         static std::string filter;
+        static int topClasses = 0;
+        static bool roads = false;
         auto* cmd = pak->add_subcommand("worlds", "Read every .ent (EBIN) world and report closure and placements");
         cmd->add_option("input", root, "A .pak file, or a directory to search")->required();
         cmd->add_option("-f,--filter", filter, "Only paths containing this substring");
-        cmd->callback([]() { std::exit(Worlds(root, filter)); });
+        cmd->add_option("--classes", topClasses, "Also print the N commonest entity classes");
+        cmd->add_flag("--roads", roads, "Report road spline centrelines");
+        cmd->callback([]() { std::exit(Worlds(root, filter, topClasses, roads)); });
     }
     {
         static std::string root;
