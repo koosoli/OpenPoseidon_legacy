@@ -1070,8 +1070,22 @@ AlphaStats::Kind TextureWgpu::GetAlphaClass()
     {
         return static_cast<AlphaStats::Kind>(_alphaClass);
     }
+    // RFG-024: no source yet means NOT YET KNOWN, not opaque.
+    //
+    // The answer below is cached at the end of this function, so a caller that asks
+    // before Init() has run pins the texture to Opaque for the rest of its life --
+    // and the callers are ordinary ones: SectionGpuOwned asks while a shape is being
+    // built, which for a natively loaded world happens before the texture is
+    // touched. A leaf card that gets asked at the wrong moment is a solid quad
+    // afterwards no matter what its alpha says, with nothing logged anywhere.
+    //
+    // Returning without caching costs one extra classification later and cannot be
+    // wrong; caching a guess cannot be undone.
+    if (!_src)
+    {
+        return AlphaStats::Opaque;
+    }
     AlphaStats::Kind kind = AlphaStats::Opaque;
-    if (_src)
     {
         const bool hasAlpha = _src->IsAlpha();
         const bool chroma = _src->IsTransparent();
@@ -1099,7 +1113,27 @@ AlphaStats::Kind TextureWgpu::GetAlphaClass()
                 AlphaScanPath path = AlphaScanPath::FullDecode;
                 if (!ScanTopMipAlphaBlocks(path))
                 {
-                    _alphaStats = ScanTopMipAlphaStats(Name());
+                    // RFG-025: scan the SOURCE when it has the pixels, not the file.
+                    //
+                    // ScanTopMipAlphaStats re-opens by name, which assumes the name is
+                    // a file. It is not always: a composite `enfa|coverage|colour`
+                    // name (RFG-023) exists precisely because the image is two files
+                    // merged, and re-reading it finds nothing, reports no alpha, and
+                    // the leaf becomes a solid quad. The source has already done the
+                    // work; ask it.
+                    bool scannedFromSource = false;
+                    if (_src != nullptr && _nMipmaps > 0 && _mipmaps[0].DstFormat() == PacARGB8888 && _w > 0 &&
+                        _h > 0)
+                    {
+                        std::vector<uint8_t> top(static_cast<size_t>(_w) * static_cast<size_t>(_h) * 4);
+                        if (_src->GetMipmapData(top.data(), _mipmaps[0], 0))
+                        {
+                            _alphaStats = ClassifyAlpha(top.data(), static_cast<size_t>(_w) * static_cast<size_t>(_h));
+                            scannedFromSource = true;
+                        }
+                    }
+                    if (!scannedFromSource)
+                        _alphaStats = ScanTopMipAlphaStats(Name());
                 }
                 if (profiled)
                 {

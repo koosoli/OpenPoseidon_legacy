@@ -797,6 +797,33 @@ LODShapeWithShadow* BuildShapeFromXob(const EnfusionMount& mount, const std::str
     // -- so the merge moved into the texture source, named through `enfa|`, where
     // the engine's own path uploads and classifies it.
 
+    // What the DRAW path will see per section: its material and its alpha class.
+    // The engine routes alpha by material family, not by texture histogram (see
+    // ShapeDraw's own note), so "no material" and "wrong class" are the two answers
+    // and they are not the same bug.
+    {
+        static int reportedSec = 0;
+        if (reportedSec < 4 && LowerCopy(xobPath).find("vegetation") != std::string::npos && shape->NLevels() > 0)
+        {
+            ++reportedSec;
+            const Shape* level = shape->Level(0);
+            std::string report;
+            for (int i = 0; level != nullptr && i < level->NSections() && i < 4; ++i)
+            {
+                const ShapeSection& sec = level->GetSection(i);
+                const char* mat = sec.surfMat.IsNull() ? nullptr : sec.surfMat->GetName().Data();
+                Texture* tex = sec.properties.GetTexture();
+                report += (report.empty() ? "" : " | ") + std::to_string(i) + ": mat '" +
+                          (mat != nullptr && *mat != 0 ? mat : "(none)") + "' tex '" +
+                          (tex != nullptr && tex->Name() != nullptr ? tex->Name() : "(none)") + "'";
+                // Deliberately NOT GetAlphaClass() here: asking before the texture has
+                // a source used to pin it to Opaque forever (RFG-024), and a
+                // diagnostic that changes what it measures is worse than none.
+            }
+            LOG_INFO(World, "Enfusion native load: sections of '{}' -- {}", xobPath, report);
+        }
+    }
+
     // The LOD ladder as the engine sees it. A tree that draws as a flat card at
     // forty metres is either a cutout that did not punch or the WRONG LEVEL, and
     // those look identical from outside.
