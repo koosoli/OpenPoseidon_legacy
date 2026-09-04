@@ -630,7 +630,7 @@ impl Default for WgrSkyVisibility {
 // cutout (Stage 1) / MapType vegetation (Stage 2). Two vec4 worth, packed for the shader:
 //   foliage  = (trans_scale, distortion, trans_power, wrap)
 //   foliageb = (ambient_boost, normal_bend[bush], crown_y_offset[bush], fill_fade_end)
-//   foliagec = (gi_strength, tree_bend, tree_crown_y, _pad)
+//   foliagec = (gi_strength, tree_bend, tree_crown_y, dusk_curve)
 #[repr(C)]
 #[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct WgrFoliage {
@@ -647,7 +647,11 @@ pub struct WgrFoliage {
     pub gi_strength: f32,
     pub tree_bend: f32, // TREE spherical-normal blend (leaf sections only; trunk keeps its normal)
     pub tree_crown_y: f32, // TREE crown-centre Y lift (larger than a bush — centre sits mid-trunk)
-    pub _pad2: f32,
+    // FOLIAGE-DUSK: exponent applied to `daylight` (sun_dir_world.w) for the two FOLIAGE-ONLY
+    // ambient terms in shade() and nowhere else. 1.0 = the pre-2026-09 curve exactly; < 1 keeps
+    // the value near 1 through the golden hour and still reaches 0 at real night, because
+    // pow(0, k) == 0. See shading.wgsl and Poseidon::FoliageDuskCurve().
+    pub dusk_curve: f32,
     // VEG-SWAY - geometric wind on vegetation MODELS. Two further vec4 lanes
     // (frame.foliaged / frame.foliagee). CameraGroup::new sizes the UBO from
     // size_of::<WgrFoliage>() and the upload writes the struct whole, so growing it here is
@@ -679,7 +683,7 @@ impl Default for WgrFoliage {
             gi_strength: 0.44,
             tree_bend: 0.7,
             tree_crown_y: -0.52,
-            _pad2: 0.0,
+            dusk_curve: 0.35,
             // VEG-SWAY defaults, kept in sync with C++ Engine::FoliageSettings. The wind
             // vector defaults to the WindConditions base heading (atan2(2,4)) so a frame
             // rendered before the first push still leans somewhere sensible rather than

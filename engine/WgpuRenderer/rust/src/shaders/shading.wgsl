@@ -429,7 +429,22 @@ fn shade(
             // after the atmospheric sun has gone down. SUN-only, published by the CPU in
             // sun_dir_world.w -- sun_diffuse carries the moon too, and a full moon must not
             // read as 40% daylight here.
-            let daylight = frame.sun_dir_world.w;
+            //
+            // FOLIAGE-DUSK. `daylight` is published from the SUN RADIANCE through a hard
+            // (0.002 -> 0.04) ramp (EngineWgpu.cpp:2833-2837), and at a low sun the air mass
+            // eats the transmittance -- so it collapses well BEFORE the geometric sunset. The
+            // two lines below are the only foliage-only ambient terms in the renderer, so at
+            // golden hour near-field leaves lost up to ~7x ambient while the terrain, houses
+            // and rocks beside them kept theirs: trees went black and stood out. The night
+            // purpose (a forest must not glow after dark) is kept EXACTLY, because pow(0, k)
+            // is 0 for any k > 0 and pow(1, k) is 1 -- the curve only lifts the middle. k is
+            // frame.foliagec.w (dev panel: Foliage > "Dusk curve"); 1.0 restores the old look
+            // bit for bit, and a 0 lane (a renderer that predates this) also reads as 1.0.
+            let daylight_raw = frame.sun_dir_world.w;
+            var dusk_k = 1.0;
+            if (kc.w > 0.0) { dusk_k = clamp(kc.w, 0.05, 1.0); }
+            var daylight = 0.0;
+            if (daylight_raw > 0.0) { daylight = pow(min(daylight_raw, 1.0), dusk_k); }
             ambient *= 1.0 + (kb.x - 1.0) * fade * daylight;
             // The sky irradiance is tuned for daylight readability. Leaving its full
             // strength on a leaf/card at night makes entire forests appear self-lit,

@@ -640,7 +640,10 @@ struct WgrFoliage
     float gi_strength;    /* cheap GI: scale ambient by terrain light level, 0 = off */
     float tree_bend;      /* TREE spherical-normal blend (leaf sections only; trunk unaffected) */
     float tree_crown_y;   /* TREE crown-centre Y lift (larger than bush — centre sits mid-trunk) */
-    float _pad2;
+    /* FOLIAGE-DUSK: exponent applied to `daylight` for the two foliage-only ambient terms
+     * (1.0 = the legacy curve exactly; < 1 holds the golden hour up and still hits 0 at
+     * night). Was a pad lane; see Poseidon::FoliageDuskCurve() and shading.wgsl. */
+    float dusk_curve;
     /* VEG-SWAY — geometric wind on vegetation MODELS (trees/bushes/forest patches). Before this,
      * the wgpu path animated grass and nothing else: neither object vertex shader had any
      * time-varying term, so a forest stood dead still in a gale. These eight floats extend the

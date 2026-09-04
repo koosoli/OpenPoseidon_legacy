@@ -57,6 +57,7 @@
 #include <Poseidon/UI/Settings/AspectRatio.hpp>
 #include <Poseidon/UI/Controls/UIControls.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
+#include <Poseidon/Graphics/Core/FoliageDusk.hpp>
 #include <Poseidon/Graphics/Rendering/WaterInteractionBridge.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
@@ -3927,7 +3928,13 @@ void DrawFoliageTab()
 
     Engine::FoliageSettings f = GEngine->GetFoliageSettings();
     bool changed = false;
-    changed |= ResetToDefaultsButton(f);
+    if (ResetToDefaultsButton(f))
+    {
+        // ResetToDefaultsButton copies a default-constructed struct; the dusk curve lives
+        // outside that struct (see FoliageDusk.hpp), so it is reset by hand here.
+        Poseidon::SetFoliageDuskCurve(Poseidon::kFoliageDuskCurveDefault);
+        changed = true;
+    }
 
     changed |= Dev::SliderFloat("Transmission", &f.transScale, 0.0f, 2.0f, "%.2f");
     Dev::PanelHelp("  DICE fast-SSS: light through the leaf, lifting the dark/backlit side (0 = off)");
@@ -3941,6 +3948,20 @@ void DrawFoliageTab()
     // (see FoliageSettings::ambientBoost), and a slider that cannot reach it hides that.
     changed |= Dev::SliderFloat("Ambient boost", &f.ambientBoost, 0.0f, 4.0f, "%.2f");
     Dev::PanelHelp("  sky-ambient multiplier for foliage only (1 = off); fades with distance");
+    // FOLIAGE-DUSK. Sits next to Ambient boost because it decides WHEN that boost (and the
+    // foliage night floor) is allowed to fade: both are gated on `daylight`, which collapses
+    // before the geometric sunset and used to black out trees in the golden hour. Not part of
+    // FoliageSettings only because Engine.hpp was out of bounds for this change --
+    // Poseidon::FoliageDuskCurve() is the storage, and the reset buttons below cover it.
+    float duskCurve = Poseidon::FoliageDuskCurve();
+    if (Dev::SliderFloat("Dusk curve", &duskCurve, 0.05f, 1.0f, "%.2f"))
+    {
+        Poseidon::SetFoliageDuskCurve(duskCurve);
+        changed = true;
+    }
+    Dev::PanelHelp("  exponent on `daylight` for the two foliage-only ambient terms above.");
+    Dev::PanelHelp("  1.00 = the pre-2026-09 look exactly (trees go dark during golden hour);");
+    Dev::PanelHelp("  lower holds the evening up. Night is identical at every setting (0^k = 0).");
     changed |= Dev::SliderFloat("GI (ambient x light)", &f.giStrength, 0.0f, 1.0f, "%.2f");
     Dev::PanelHelp("  scale ambient by terrain light level so shadowed foliage stops glowing (0 = off)");
     changed |= Dev::SliderFloat("Fill fade end (m)", &f.fillFadeEnd, 0.0f, 1000.0f, "%.0f");
@@ -3961,6 +3982,7 @@ void DrawFoliageTab()
     if (Dev::Button("Reset foliage to defaults"))
     {
         f = Engine::FoliageSettings{};
+        Poseidon::SetFoliageDuskCurve(Poseidon::kFoliageDuskCurveDefault);
         changed = true;
     }
     Dev::PanelSameLine();
@@ -3970,6 +3992,9 @@ void DrawFoliageTab()
         f.wrap = 0.0f;
         f.ambientBoost = 1.0f;
         f.normalBend = 0.0f;
+        // "Disable" means the legacy response, not the softened one: k = 1 is the untouched
+        // daylight ramp the shader had before FOLIAGE-DUSK.
+        Poseidon::SetFoliageDuskCurve(1.0f);
         changed = true;
     }
 
@@ -3980,10 +4005,10 @@ void DrawFoliageTab()
     Dev::PanelHelp("Current tuning (copy back to share):");
     char summary[256];
     snprintf(summary, sizeof(summary),
-             "foliage: trans=%.2f dist=%.2f transPow=%.1f wrap=%.2f amb=%.2f gi=%.2f fadeEnd=%.0f | "
+             "foliage: trans=%.2f dist=%.2f transPow=%.1f wrap=%.2f amb=%.2f dusk=%.2f gi=%.2f fadeEnd=%.0f | "
              "bush=%.2f/%.2f tree=%.2f/%.2f",
-             f.transScale, f.distortion, f.transPower, f.wrap, f.ambientBoost, f.giStrength, f.fillFadeEnd,
-             f.normalBend, f.crownYOffset, f.treeBend, f.treeCrownY);
+             f.transScale, f.distortion, f.transPower, f.wrap, f.ambientBoost, Poseidon::FoliageDuskCurve(),
+             f.giStrength, f.fillFadeEnd, f.normalBend, f.crownYOffset, f.treeBend, f.treeCrownY);
     ImGui::SetNextItemWidth(-1.0f);
     Dev::InputText("##foliageSummary", summary, sizeof(summary), ImGuiInputTextFlags_ReadOnly);
     if (Dev::Button("Copy foliage summary to clipboard"))

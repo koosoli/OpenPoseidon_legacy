@@ -12,6 +12,7 @@
 #include <Poseidon/Foundation/Framework/AppFrame.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Foundation/Platform/GamePaths.hpp>
+#include <Poseidon/Graphics/Core/FoliageDusk.hpp>
 #include <Poseidon/Graphics/Core/MeshVertex.hpp>
 #include <Poseidon/Graphics/Core/ZBiasMath.hpp>
 #include <Poseidon/Graphics/Shared/SdlWindow.hpp>
@@ -10354,12 +10355,15 @@ void EngineWgpu::PushRenderParams()
     const float fAmbBoost = foliageAblate ? 1.0f : _foliage.ambientBoost;
     const float fNormalBend = foliageAblate ? 0.0f : _foliage.normalBend;
     const float fTreeBend = foliageAblate ? 0.0f : _foliage.treeBend;
+    // FOLIAGE-DUSK (Poseidon::FoliageDuskCurve, dev panel: Foliage > "Dusk curve"). 1.0 is the
+    // untouched daylight ramp, so the ablation takes it too.
+    const float fDuskCurve = foliageAblate ? 1.0f : Poseidon::FoliageDuskCurve();
 
     // Foliage lighting (emulated leaf SSS for alpha-tested vegetation); rides the Frame UBO.
     p.foliage = {
         fTrans,                _foliage.distortion,  _foliage.transPower,   fWrap,
         fAmbBoost,             fNormalBend,          _foliage.crownYOffset, _foliage.fillFadeEnd,
-        _foliage.giStrength,   fTreeBend,            _foliage.treeCrownY,   0.0f,
+        _foliage.giStrength,   fTreeBend,            _foliage.treeCrownY,   fDuskCurve,
         swayAmp,               _foliage.swaySpeed,   swayDirX,              swayDirZ,
         swayTime,              swayGust,             _foliage.swayLeafFlutter,
         std::clamp(_foliage.swayStiffness, 0.25f, 4.0f),

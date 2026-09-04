@@ -45,7 +45,7 @@ struct Frame {
     // in the camera upload (mirrors WgrFoliage). Read by shade() for cutout/vegetation draws.
     //   foliage  = (trans_scale, distortion, trans_power, wrap)
     //   foliageb = (ambient_boost, normal_bend[bush], crown_y_offset[bush], fill_fade_end)
-    //   foliagec = (gi_strength, tree_bend, tree_crown_y, _)
+    //   foliagec = (gi_strength, tree_bend, tree_crown_y, dusk_curve)
     // `foliageb`/`foliagec` not `foliage2`/`foliage3`: naga_oil forbids composable identifiers
     // ending in a digit.
     //   foliaged = (sway_strength, sway_speed, wind_dir_x, wind_dir_z)
