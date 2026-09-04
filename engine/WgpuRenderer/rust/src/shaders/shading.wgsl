@@ -371,13 +371,17 @@ fn shade(
         }
         // Glass canopies: keep only a fraction of the sky wash so they read as glazing, not a lit
         // diffuse dome (the direct sun sheen + any glint still sit on top).
-        // NOTE, and it is a note about what this is NOT. `is_translucent` means "this draw is
-        // alpha-blended", not "this is glass": the alpha classifier calls a texture BLEND from
-        // 2% partial-alpha texels, and a road sign's plate (89% fully opaque, 2.5% soft border)
-        // therefore lands here too. That made this term the obvious suspect for the owner's
-        // black road signs on Nogova -- and it is NOT the cause. Measured 2026-08-29: setting
-        // this factor to 1.0 leaves the sign exactly as dark. Left as it is, and recorded so the
-        // next reader does not spend the same afternoon on it.
+        // `is_translucent` now means "this draw carries MATFLAG_GLASS" -- the MAT-051 alpha
+        // histogram (pctClear < 5, pctPartial > 80, aMean < 128, EngineWgpu.cpp:4956) -- and no
+        // longer "this draw went through the alpha-blend pipeline". The old wording of this note
+        // recorded the reason: the alpha classifier calls a texture BLEND from a soft border
+        // alone, so a road sign's plate and, measured 2026-09-04, every original OFP/CWA road
+        // surface (asf_new.paa: 11.5% clear, 10.4% partial, aMean 212) landed here and lost 80%
+        // of its sky ambient as if it were a cockpit window. See shader3d.wgsl's call site.
+        //
+        // Kept from that note, because it is still true and still saves an afternoon: this term
+        // is NOT what makes the Nogova road SIGNS dark. Measured 2026-08-29, setting the factor
+        // to 1.0 left the sign exactly as dark. The signs are a separate fault.
         if (is_translucent) {
             ambient *= 0.2;
         }

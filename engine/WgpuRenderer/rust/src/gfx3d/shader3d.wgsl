@@ -958,7 +958,31 @@ fn shade_fragment(in: VsOut) -> vec4<f32> {
         base.rgb, m, shading_normal, geometric_normal, in.world_pos, in.fog, dwx, dwy, linear,
         // The per-draw path has no retained model id, so no baked volume applies.
         1.0, vec3<f32>(0.0), foliage_shadow_ao,
-        veg_cutout, translucent > 0.5, veg_cutout,
+        // shade()'s `is_translucent` damps the sky-dome ambient to 0.2 so a canopy pane
+        // reads as GLAZING rather than a lit diffuse dome. `translucent` alone cannot carry
+        // that: it is a PIPELINE override (line 242) meaning "this draw went through the
+        // alpha-blend pipeline", and shading.wgsl's own note at the damp site says so --
+        // "`is_translucent` means 'this draw is alpha-blended', not 'this is glass'".
+        //
+        // MEASURED (PoseidonTools model inspect --classify, O.pbo road/): every original
+        // OFP/CWA road surface is such a draw. asf_new.paa / sil_new.paa / ces_hned.paa all
+        // classify BLEND, so asf/sil/ces/kos/kr_new_* -- the whole Everon/Malden/Kolgujev
+        // road set -- lost 80% of its sky ambient as if it were a cockpit window. It is not
+        // remotely glass by the engine's own measured discriminator: MAT-051 demands
+        // pctClear < 5, pctPartial > 80, aMean < 128 (EngineWgpu.cpp:4956), and asf_new.paa
+        // reports pctClear 11.5, pctPartial 10.4, aMean 212 -- an opaque asphalt strip with
+        // a soft alpha edge, i.e. a road DECAL.
+        //
+        // So key the damp on the flag that already answers "is this glass" -- the same
+        // MAT-051 classification that grants the sheen -- instead of on the blend pipeline.
+        // Narrowing only: a draw that gets MATFLAG_GLASS is by construction one that also
+        // set `translucent`, so every genuine glass pane keeps exactly the shading it had.
+        // The retained path already passes `false` here (gpu_driven.wgsl:933), so this also
+        // removes a standing disagreement between the two paths about the same surface.
+        // `translucent` is kept in the conjunction rather than dropped: an override the
+        // module no longer references can be eliminated before pipeline creation, and the
+        // constant mod.rs supplies for it (gfx3d/mod.rs:4517) then has no target.
+        veg_cutout, translucent > 0.5 && (material_flags(material) & MATFLAG_GLASS) != 0u, veg_cutout,
         (material_flags(material) & MATFLAG_COCKPIT) != 0u, in.clip.xy,
         !(veg_cutout && foliage_screen_ao < 0.5),
     );

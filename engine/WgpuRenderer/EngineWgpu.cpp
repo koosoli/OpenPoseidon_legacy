@@ -4149,6 +4149,17 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
         // (c) is the discriminator. Shape::Norm() is +Y for the A2 road models decoded out
         // of roads_e, MeshBuild.cpp:44 negates it, and shading.wgsl clamps
         // max(dot(N, -sun_dir_world), 0) -- so a +Y source normal yields no sun term at all.
+        //
+        // SCOPE, measured 2026-09-04 and recorded because the sentence above was read as a
+        // statement about roads in general and sent a session after the wrong bug: that is
+        // an ARMA 2 (roads_e) finding and it does NOT hold for the original OFP/CWA roads.
+        // Every LOD of every road-surface model in O.pbo -- asf*, sil*, ces*, kos*,
+        // kr_new_* , 102 LODs over 43 models, no exception -- stores meanNorm = (0, -1, 0), already
+        // DOWN in the file, so MeshBuild's negation hands the shader (0, +1, 0) and the sun
+        // term on Everon/Malden/Kolgujev is correct by construction. (Decoded straight out
+        // of the ODOL v7 vertex table: clip/uv/pos/norm arrays, each a count followed by its
+        // data, all four counts equal to NVertex.) A dark road on those maps is therefore
+        // never this; look at the ambient path instead.
         // Note GL33 shares BuildVertices AND the same clamp, so a plain sign error would
         // band both backends; it does not, which is why the PATH matters as much as the
         // values. A road that never appears in this log took the CPU FaceArray::Draw branch
