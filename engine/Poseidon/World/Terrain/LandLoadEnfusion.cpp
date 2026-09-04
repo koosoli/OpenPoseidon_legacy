@@ -41,6 +41,7 @@
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/Graphics/Textures/EddsReader.hpp>
 #include <Poseidon/Graphics/Textures/Image.hpp>
+#include <Poseidon/Graphics/Textures/PAADecoder.hpp>
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
 
@@ -823,8 +824,42 @@ LODShapeWithShadow* BuildShapeFromXob(const EnfusionMount& mount, const std::str
                             alphaRgba[(static_cast<size_t>(sy) * aw + sx) * 4];
                     }
                 }
-                Ref<Texture> merged = bank->CreateDynamic(cw, ch, colourRgba.data(),
-                                                          static_cast<uint32_t>(colourRgba.size()), true);
+                // Cutout, said explicitly. The material census is unambiguous: Enfusion
+                // binds OpacityMap as COVERAGE and never as a blend, and a dynamic
+                // texture has no source for GetAlphaClass to scan, so without this the
+                // merged image is classified Opaque and the leaf is a solid quad again.
+                // Say what the coverage actually contains. "The cutout does not work"
+                // has three causes -- no alpha, inverted alpha, and an alpha the
+                // material never consults -- and they want different fixes.
+                {
+                    static int reportedAlpha = 0;
+                    if (reportedAlpha < 3)
+                    {
+                        ++reportedAlpha;
+                        int lo = 255, hi = 0;
+                        long long sum = 0;
+                        size_t clear = 0;
+                        const size_t texels = colourRgba.size() / 4;
+                        for (size_t i = 0; i < texels; ++i)
+                        {
+                            const int a = colourRgba[i * 4 + 3];
+                            lo = std::min(lo, a);
+                            hi = std::max(hi, a);
+                            sum += a;
+                            if (a == 0)
+                                ++clear;
+                        }
+                        LOG_INFO(World,
+                                 "Enfusion native load: coverage for '{}' from '{}': {}x{}, alpha min {} max {} "
+                                 "mean {} clear {:.1f}%",
+                                 colour, opacityPath, cw, ch, lo, hi,
+                                 texels > 0 ? static_cast<int>(sum / static_cast<long long>(texels)) : -1,
+                                 texels > 0 ? 100.0 * static_cast<double>(clear) / static_cast<double>(texels) : 0.0);
+                    }
+                }
+                Ref<Texture> merged =
+                    bank->CreateDynamic(cw, ch, colourRgba.data(), static_cast<uint32_t>(colourRgba.size()), true,
+                                        static_cast<int>(Poseidon::AlphaStats::Cutout));
                 if (merged)
                     level->RegisterTexture(merged, existing);
             }

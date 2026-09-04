@@ -186,8 +186,12 @@ class AbstractTextBank
 
     // Dynamic texture from raw RGBA pixels. mipmap=true: backend generates a full
     // mip chain on create and regenerates on update.
+    //! `alphaClass` is an `AlphaStats::Kind`, or -1 for "decide as usual". It exists
+    //! because a dynamic texture has no ITextureSource, so `GetAlphaClass` has nothing
+    //! to scan and keeps the base Opaque -- which silently turns a cutout into a solid
+    //! quad. A caller that BUILT the pixels knows what they are; nobody else can.
     virtual Texture* CreateDynamic(int /*w*/, int /*h*/, const void* /*rgba*/, uint32_t /*size*/,
-                                   bool /*mipmap*/ = false)
+                                   bool /*mipmap*/ = false, int /*alphaClass*/ = -1)
     {
         return nullptr;
     }

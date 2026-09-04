@@ -114,6 +114,8 @@ class TextureWgpu : public Texture
     bool IsAlpha() const override { return _dynamic || (_src && _src->IsAlpha()); }
     Color GetColor() override { return _src ? _src->GetAverageColor() : HBlack; }
     AlphaStats::Kind GetAlphaClass() override;
+    //! Set by a caller that BUILT the pixels; see TextureBank::CreateDynamic.
+    void SetAlphaClassHint(AlphaStats::Kind kind) { _alphaClass = static_cast<signed char>(kind); }
     // The full histogram behind GetAlphaClass — valid after GetAlphaClass()
     // has run its scan. MAT-051 keys the glass sheen on pctClear/pctPartial,
     // which the Kind alone cannot express.

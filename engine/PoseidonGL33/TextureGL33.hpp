@@ -326,7 +326,10 @@ class TextBankGL33 : public AbstractTextBank
     Ref<Texture> Load(RStringB name) override;
     Ref<Texture> LoadInterpolated(RStringB n1, RStringB n2, float factor) override;
 
-    Texture* CreateDynamic(int w, int h, const void* rgba, uint32_t size, bool mipmap = false) override;
+    //! `alphaClass` is ignored here: the GL33 backend is the reference fallback and
+    //! its dynamic textures are fonts. See TextureBank::CreateDynamic.
+    Texture* CreateDynamic(int w, int h, const void* rgba, uint32_t size, bool mipmap = false,
+                           int alphaClass = -1) override;
     void UpdateDynamic(Texture* tex, const void* rgba, uint32_t size) override;
 
     void StopAll();

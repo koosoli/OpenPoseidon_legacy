@@ -128,7 +128,8 @@ class TextureBankWgpu : public AbstractTextBank
     }
     void FlushBank(QFBank*) override {}
 
-    Texture* CreateDynamic(int w, int h, const void* rgba, uint32_t size, bool mipmap = false) override;
+    Texture* CreateDynamic(int w, int h, const void* rgba, uint32_t size, bool mipmap = false,
+                           int alphaClass = -1) override;
     void UpdateDynamic(Texture* tex, const void* rgba, uint32_t size) override;
 };
 

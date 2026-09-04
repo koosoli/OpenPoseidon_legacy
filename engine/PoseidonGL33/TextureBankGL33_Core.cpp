@@ -454,7 +454,7 @@ int TextBankGL33::CreateGPUSurface(SurfaceInfoGL33& surface, const TextureDescGL
     return 0;
 }
 
-Texture* TextBankGL33::CreateDynamic(int w, int h, const void* rgba, uint32_t size, bool mipmap)
+Texture* TextBankGL33::CreateDynamic(int w, int h, const void* rgba, uint32_t size, bool mipmap, int /*alphaClass*/)
 {
     int idx = FindFree();
     TextureGL33* tex = new TextureGL33();
