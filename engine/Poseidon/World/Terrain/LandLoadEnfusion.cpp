@@ -101,6 +101,80 @@ const char* WantedWorld()
 //   * A small mip, not the top one. An Everon ground BCR is 2048^2 BC7 and this is a
 //     layer that gets minified anyway, so mip N costs nothing and keeps 22 materials
 //     off the memory budget.
+//! The measured key order, in one place because two callers need it: the terrain's
+//! surface palette and the model converter's texture slot. Picking the colour layer
+//! by FILENAME instead broke on three consecutive Arma generations and twice drew a
+//! whole island white.
+std::string ColourTextureOf(const Poseidon::Asset::Material::EmatMaterial& material)
+{
+    std::string path = material.TextureOf("BCRMap");
+    if (path.empty())
+        path = material.TextureOf("AlbedoMap");
+    if (path.empty())
+        path = material.TextureOf("BCR_1");
+    return path;
+}
+
+//! Reads one `.emat` out of the mount, parents resolved.
+bool LoadEmatFromMount(const EnfusionMount& mount, const std::string& ematPath,
+                       Poseidon::Asset::Material::EmatMaterial& out)
+{
+    namespace Mat = Poseidon::Asset::Material;
+    std::vector<uint8_t> bytes;
+    if (!mount.Read(ematPath, bytes))
+        return false;
+    out = Mat::ParseEmat(std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size()));
+    if (!out.valid())
+        return false;
+    Mat::ResolveEmatInheritance(out,
+                                [&mount](const std::string& parentPath, std::string& text)
+                                {
+                                    std::vector<uint8_t> parentBytes;
+                                    if (!mount.Read(parentPath, parentBytes))
+                                        return false;
+                                    text.assign(reinterpret_cast<const char*>(parentBytes.data()),
+                                                parentBytes.size());
+                                    return true;
+                                });
+    return true;
+}
+
+//! RFG-015: what the converter asks about a model's materials, answered from the
+//! archives.
+//!
+//! The asset CLI answers these by BAKING -- it writes a `.paa` beside the converted
+//! `.p3d` and names that. The native path writes nothing, so it names the `.edds`
+//! inside the archive and lets the texture layer's mount fallback open it. Same
+//! question, no file.
+class MountMaterialSink : public Poseidon::Asset::Formats::Enfusion::XobMaterialSink
+{
+  public:
+    explicit MountMaterialSink(const EnfusionMount& mount) : _mount(mount) {}
+
+    bool HideFaces(const std::string&) const override { return false; }
+
+    std::string TexturePath(const std::string& materialSource) const override
+    {
+        const auto cached = _cache.find(materialSource);
+        if (cached != _cache.end())
+            return cached->second;
+        Poseidon::Asset::Material::EmatMaterial material;
+        std::string path;
+        if (LoadEmatFromMount(_mount, materialSource, material))
+            path = ColourTextureOf(material);
+        _cache.emplace(materialSource, path);
+        return path;
+    }
+
+    //! Empty: the `.emat` path the `.xob` already names is the best material string
+    //! available, and naming a file that does not exist is strictly worse.
+    std::string MaterialField(const std::string&) const override { return {}; }
+
+  private:
+    const EnfusionMount& _mount;
+    mutable std::unordered_map<std::string, std::string> _cache;
+};
+
 Ref<Texture> ResolveSurfaceTexture(const EnfusionMount& mount, const std::string& ematPath, std::string& why)
 {
     namespace Mat = Poseidon::Asset::Material;
@@ -128,11 +202,7 @@ Ref<Texture> ResolveSurfaceTexture(const EnfusionMount& mount, const std::string
                                     return true;
                                 });
 
-    std::string texturePath = material.TextureOf("BCRMap");
-    if (texturePath.empty())
-        texturePath = material.TextureOf("AlbedoMap");
-    if (texturePath.empty())
-        texturePath = material.TextureOf("BCR_1");
+    std::string texturePath = ColourTextureOf(material);
     if (texturePath.empty())
     {
         // A colour-only material. The engine already has a mechanism for exactly this
@@ -618,7 +688,8 @@ LODShapeWithShadow* BuildShapeFromXob(const EnfusionMount& mount, const std::str
     // written and the models draw untextured until the material side lands.
     Fmt::MLOD::WriteModel model;
     Enf::ConvertStats stats;
-    if (!Enf::ConvertXob(bytes, options, nullptr, xobPath, model, stats, why))
+    const MountMaterialSink sink(mount);
+    if (!Enf::ConvertXob(bytes, options, &sink, xobPath, model, stats, why))
         return nullptr;
 
     const std::vector<char> buffer = Fmt::MLODWriter::writeToBuffer(model);
@@ -638,7 +709,25 @@ LODShapeWithShadow* BuildShapeFromXob(const EnfusionMount& mount, const std::str
     // model is handed in.
     LODShapeWithShadow* shape = Poseidon::Shapes.NewFromModel(xobPath.c_str(), false, true, parsed, nullptr);
     if (shape == nullptr)
+    {
         why = "ShapeBank refused the model";
+        return shape;
+    }
+    // What the model asks the renderer for, said once. "The trees are white" has two
+    // very different causes -- the faces name nothing, or they name something that
+    // will not open -- and they want opposite fixes.
+    static int reported = 0;
+    if (reported < 3 && shape->NLevels() > 0)
+    {
+        ++reported;
+        const Shape* level = shape->Level(0);
+        std::string first;
+        if (level != nullptr && level->NTextures() > 0 && level->GetTexture(0) != nullptr)
+            first = level->GetTexture(0)->Name();
+        LOG_INFO(World, "Enfusion native load: '{}' level 0 has {} sections, {} textures, first '{}'", xobPath,
+                 level != nullptr ? level->NSections() : -1, level != nullptr ? level->NTextures() : -1,
+                 first.empty() ? "(none)" : first);
+    }
     return shape;
 }
 } // namespace

@@ -1,5 +1,8 @@
 #pragma once
 
+#include <Poseidon/Asset/Formats/Enfusion/EnfusionMount.hpp>
+#include <cstring>
+#include <vector>
 #include <Poseidon/IO/FileServer.hpp>
 #include <Poseidon/Foundation/Memory/FastAlloc.hpp>
 #include <Poseidon/Foundation/Containers/StaticArray.hpp>
@@ -21,6 +24,26 @@ public:
   {
     _name = name;
     _data.AutoOpen(_name);
+    // RFG-017: a natively loaded Enfusion world names files INSIDE a `.pak`, which
+    // no bank can open. The texture streamer re-opens every mip THROUGH this cache,
+    // so a fallback further down (in the DDS source) gets the first read and then
+    // every mip after it fails -- which is how Everon's trees kept their textures
+    // and still drew white.
+    //
+    // Last resort on purpose: the file layer is asked first and the mount is closed
+    // for every world that is not Enfusion, so this costs one failed AutoOpen on a
+    // path that was already failing.
+    if (_data.fail())
+    {
+      const auto &mount = Poseidon::Asset::Formats::Enfusion::EnfusionMount::Instance();
+      std::vector<uint8_t> bytes;
+      if (mount.IsOpen() && mount.Read(name, bytes) && !bytes.empty())
+      {
+        FileBufferMemory *buffer = new FileBufferMemory(static_cast<int>(bytes.size()));
+        memcpy(buffer->GetWritableData(), bytes.data(), bytes.size());
+        _data.OpenBuffer(Ref<IFileBuffer>(buffer));
+      }
+    }
   }
   FileInCache( QIFStreamB &in, const char *name )
   {

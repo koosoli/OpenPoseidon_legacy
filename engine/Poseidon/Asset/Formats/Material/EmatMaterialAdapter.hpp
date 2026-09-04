@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Poseidon/Asset/Formats/Enfusion/EnfusionMount.hpp>
 #include <Poseidon/Asset/Formats/Material/EmatSource.hpp>
 #include <Poseidon/Asset/Formats/Material/MaterialChannels.hpp>
 #include <Poseidon/Asset/Formats/Material/RvMaterialSource.hpp>
@@ -212,6 +213,19 @@ inline bool ReadEmatTextLooseExact(const std::string& path, std::string& out)
 // which is the ordinary case for every non-DayZ material and must not be an error.
 inline bool ReadEmatTextExact(const std::string& path, std::string& out)
 {
+    // RFG-014: a natively loaded Enfusion world names its materials INSIDE a `.pak`,
+    // which the file layer cannot open. Asked first because when the mount is open
+    // the world being drawn came out of it; it is closed for every other world, so
+    // this is inert everywhere else.
+    {
+        const auto& mount = Poseidon::Asset::Formats::Enfusion::EnfusionMount::Instance();
+        std::vector<uint8_t> bytes;
+        if (mount.IsOpen() && mount.Read(path, bytes))
+        {
+            out.assign(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+            return true;
+        }
+    }
     QIFStreamB file;
     file.AutoOpen(path.c_str());
     if (file.fail())

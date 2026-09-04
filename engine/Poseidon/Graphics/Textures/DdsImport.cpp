@@ -1,3 +1,5 @@
+#include <Poseidon/Graphics/Textures/Image.hpp>
+#include <Poseidon/Asset/Formats/Enfusion/EnfusionMount.hpp>
 #include <Poseidon/Graphics/Textures/DdsImport.hpp>
 
 #include <Poseidon/Foundation/Framework/Log.hpp>
@@ -17,6 +19,17 @@ namespace
 
 bool SlurpFile(const char* name, std::vector<uint8_t>& out)
 {
+    // RFG-014: a natively loaded Enfusion world names textures that live INSIDE a
+    // `.pak`, which no part of the file layer can open -- `QFBank` is a concrete PBO
+    // class, not an interface. The mount is asked FIRST because when it is open the
+    // world being drawn is the one it came from, and asking the file layer for a
+    // Reforger path first only costs a miss. It is closed for every other world, so
+    // this is inert on Everon, Chernarus and the rest.
+    {
+        const auto& mount = Poseidon::Asset::Formats::Enfusion::EnfusionMount::Instance();
+        if (mount.IsOpen() && mount.Read(name, out))
+            return true;
+    }
     if (GFileServer)
     {
         QIFStream in;
@@ -139,6 +152,50 @@ bool TextureSourceDDS::InitFromMemory(const void* data, size_t size, const char*
     if (_levels.empty())
         return false;
 
+    // RFG-016: BC4/BC5/BC7 have no PacFormat and never will -- the Pac container is a
+    // 2001 format and these are not in it. But `ConvertPixels` decodes all three, so
+    // decode here and hand the rest of the pipeline plain RGBA rather than refusing
+    // the file. Reforger's ground and object albedos are BC7 to a texture, so without
+    // this every native Enfusion model draws white while the file itself loaded fine.
+    //
+    // The cost is real and bounded: a decoded mip is 4 bytes a texel instead of 1, so
+    // this trades VRAM for the file being usable at all. Only formats the block path
+    // cannot carry take it; DXT1/3/5 stay compressed end to end.
+    if (_format == PixelFormat::BC4 || _format == PixelFormat::BC5 || _format == PixelFormat::BC7)
+    {
+        bool decoded = true;
+        for (DDSMipLevel& level : _levels)
+        {
+            if (level.width <= 0 || level.height <= 0 || level.data.empty())
+                continue;
+            std::vector<uint8_t> rgba(static_cast<size_t>(level.width) * static_cast<size_t>(level.height) * 4);
+            if (!ConvertPixels(level.data.data(), rgba.data(), level.width, level.height, _format,
+                               PixelFormat::RGBA8888))
+            {
+                decoded = false;
+                break;
+            }
+            // ARGB8888 is what ToPacFormat maps every non-block format to, and in
+            // this engine that name means B,G,R,A in memory -- Image::FromFile does
+            // the same swap at its own call site. Decoding to RGBA and labelling it
+            // ARGB uploads a blue island, or nothing at all.
+            for (size_t i = 0; i + 2 < rgba.size(); i += 4)
+                std::swap(rgba[i], rgba[i + 2]);
+            level.data = std::move(rgba);
+        }
+        if (!decoded)
+        {
+            LOG_ERROR(Graphics, "DDS {}: pixel format {} could not be decoded to RGBA", who,
+                      static_cast<int>(_format));
+            return false;
+        }
+        _format = PixelFormat::ARGB8888;
+        // Do NOT claim alpha here. BC7 carries a fourth channel whether or not the
+        // author used it, and forcing the flag put every leaf card on the blended
+        // path -- the first run of this drew Everon's trees as flat white shards.
+        // The existing format rule below decides, exactly as it does for a .paa.
+    }
+
     _pacFormat = ToPacFormat(_format);
     if (!IsBlockFormat(_format) && _format != PixelFormat::ARGB8888 && _format != PixelFormat::RGBA8888)
     {
@@ -252,6 +309,9 @@ bool TextureSourceDDS::GetMipmapData(void* mem, const PacLevelMem& mip, int leve
 
 bool TextureSourceDDSFactory::Check(const char* name)
 {
+    const auto& mount = Poseidon::Asset::Formats::Enfusion::EnfusionMount::Instance();
+    if (mount.IsOpen() && mount.Has(name))
+        return true;
     return QIFStreamB::FileExist(name);
 }
 
