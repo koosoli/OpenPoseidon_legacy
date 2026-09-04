@@ -1115,7 +1115,11 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
                     if (static_cast<size_t>(item.mesh) >= meshes.size())
                         continue;
                     const std::string& path = meshes[item.mesh].first;
-                    if (LowerCopy(path).find("structures") == std::string::npos)
+                    const std::string lower = LowerCopy(path);
+                    // Houses, not harbour furniture: piers and signs are "structures"
+                    // too and there are thousands of them along the coast.
+                    if (lower.find("structures/residential") == std::string::npos &&
+                        lower.find("/house") == std::string::npos && lower.find("village") == std::string::npos)
                         continue;
                     ++shown;
                     LOG_INFO(World, "Enfusion native load: building at [{:.0f} {:.0f} {:.0f}] {}",
