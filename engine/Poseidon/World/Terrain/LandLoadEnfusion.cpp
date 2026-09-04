@@ -1153,6 +1153,24 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
                 AddObject(Vector3(item.position[0], y, item.position[2]), item.yawDeg, shape->second);
                 ++added;
             }
+            // Where the towns are. A world this size has no obvious place to point a
+            // camera, and "fly around until you find a house" is not a method.
+            {
+                int shown = 0;
+                for (const ResolvedPlacement& item : placed)
+                {
+                    if (shown >= 4)
+                        break;
+                    if (static_cast<size_t>(item.mesh) >= meshes.size())
+                        continue;
+                    const std::string& path = meshes[item.mesh].first;
+                    if (LowerCopy(path).find("structures") == std::string::npos)
+                        continue;
+                    ++shown;
+                    LOG_INFO(World, "Enfusion native load: building at [{:.0f} {:.0f} {:.0f}] {}",
+                             item.position[0], item.position[1], item.position[2], path);
+                }
+            }
             LOG_INFO(World,
                      "Enfusion native load: built {} of {} meshes ({} failed) in {} ms, placed {} objects "
                      "(caps {} models / {} objects){}",
