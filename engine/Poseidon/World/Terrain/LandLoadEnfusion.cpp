@@ -139,6 +139,40 @@ bool LoadEmatFromMount(const EnfusionMount& mount, const std::string& ematPath,
     return true;
 }
 
+//! One `.edds` out of the archives, decoded to RGBA at or below `maxEdge`.
+bool DecodeEddsRgba(const EnfusionMount& mount, const std::string& path, int maxEdge, int& width, int& height,
+                    std::vector<uint8_t>& rgba)
+{
+    std::vector<uint8_t> bytes;
+    if (!mount.Read(path, bytes))
+        return false;
+    if (!Poseidon::IsEddsBuffer(bytes.data(), bytes.size()))
+        return false;
+    const Poseidon::EddsImage image = Poseidon::ReadEddsBuffer(bytes.data(), bytes.size());
+    if (!image.valid() || image.mipmaps.empty())
+        return false;
+    size_t level = 0;
+    for (size_t i = 0; i < image.mipmaps.size(); ++i)
+    {
+        level = i;
+        if (image.mipmaps[i].width <= maxEdge && image.mipmaps[i].height <= maxEdge)
+            break;
+    }
+    const auto& mip = image.mipmaps[level];
+    if (mip.width <= 0 || mip.height <= 0 || mip.data.empty())
+        return false;
+    rgba.assign(static_cast<size_t>(mip.width) * static_cast<size_t>(mip.height) * 4, 0);
+    if (!Poseidon::ConvertPixels(mip.data.data(), rgba.data(), mip.width, mip.height, image.format,
+                                 Poseidon::PixelFormat::RGBA8888))
+        return false;
+    if (image.format == Poseidon::PixelFormat::ARGB8888)
+        for (size_t i = 0; i + 2 < rgba.size(); i += 4)
+            std::swap(rgba[i], rgba[i + 2]);
+    width = mip.width;
+    height = mip.height;
+    return true;
+}
+
 //! RFG-015: what the converter asks about a model's materials, answered from the
 //! archives.
 //!
@@ -155,16 +189,47 @@ class MountMaterialSink : public Poseidon::Asset::Formats::Enfusion::XobMaterial
 
     std::string TexturePath(const std::string& materialSource) const override
     {
+        return Resolve(materialSource).colour;
+    }
+
+    //! RFG-019: the opacity map that belongs to a colour texture, or empty.
+    //!
+    //! Enfusion keeps a leaf's coverage in its OWN file -- `..._A.edds` beside the
+    //! `_BCR` -- and the adapter's own census says so in as many words: "the alpha
+    //! is in BCR alpha" is false, it lives in `OpacityMap`, 1,715 files, bound as
+    //! coverage and never as a blend. Looked up by the colour path because that is
+    //! what a built shape's texture is named after.
+    std::string OpacityForColour(const std::string& colourPath) const
+    {
+        const auto hit = _byColour.find(colourPath);
+        return hit == _byColour.end() ? std::string() : hit->second;
+    }
+
+  private:
+    struct Resolved
+    {
+        std::string colour;
+        std::string opacity;
+    };
+
+    const Resolved& Resolve(const std::string& materialSource) const
+    {
         const auto cached = _cache.find(materialSource);
         if (cached != _cache.end())
             return cached->second;
+        Resolved out;
         Poseidon::Asset::Material::EmatMaterial material;
-        std::string path;
         if (LoadEmatFromMount(_mount, materialSource, material))
-            path = ColourTextureOf(material);
-        _cache.emplace(materialSource, path);
-        return path;
+        {
+            out.colour = ColourTextureOf(material);
+            out.opacity = material.TextureOf("OpacityMap");
+        }
+        if (!out.colour.empty() && !out.opacity.empty())
+            _byColour.emplace(LowerCopy(out.colour), out.opacity);
+        return _cache.emplace(materialSource, std::move(out)).first->second;
     }
+
+  public:
 
     //! Empty: the `.emat` path the `.xob` already names is the best material string
     //! available, and naming a file that does not exist is strictly worse.
@@ -172,7 +237,8 @@ class MountMaterialSink : public Poseidon::Asset::Formats::Enfusion::XobMaterial
 
   private:
     const EnfusionMount& _mount;
-    mutable std::unordered_map<std::string, std::string> _cache;
+    mutable std::unordered_map<std::string, Resolved> _cache;
+    mutable std::unordered_map<std::string, std::string> _byColour;
 };
 
 Ref<Texture> ResolveSurfaceTexture(const EnfusionMount& mount, const std::string& ematPath, std::string& why)
@@ -713,6 +779,58 @@ LODShapeWithShadow* BuildShapeFromXob(const EnfusionMount& mount, const std::str
         why = "ShapeBank refused the model";
         return shape;
     }
+    // RFG-019: fold each colour texture's OpacityMap into its alpha channel and swap
+    // the merged image onto the shape. The converting exporter does the same thing by
+    // baking one `.paa`; this does it in memory, with no file.
+    //
+    // Done here rather than in the texture layer because it is a MATERIAL fact -- two
+    // files belong together and only the `.emat` says which two. A texture asked for
+    // by name cannot know it has a partner.
+    if (AbstractTextBank* bank = Poseidon::GEngine != nullptr ? Poseidon::GEngine->TextBank() : nullptr)
+    {
+        for (int levelIndex = 0; levelIndex < shape->NLevels(); ++levelIndex)
+        {
+            Shape* level = shape->Level(levelIndex);
+            if (level == nullptr)
+                continue;
+            for (int t = 0; t < level->NTextures(); ++t)
+            {
+                Texture* existing = level->GetTexture(t);
+                if (existing == nullptr || existing->Name() == nullptr)
+                    continue;
+                const std::string colour = LowerCopy(existing->Name());
+                const std::string opacityPath = sink.OpacityForColour(colour);
+                if (opacityPath.empty())
+                    continue;
+
+                int cw = 0, ch = 0, aw = 0, ah = 0;
+                std::vector<uint8_t> colourRgba;
+                std::vector<uint8_t> alphaRgba;
+                if (!DecodeEddsRgba(mount, colour, 512, cw, ch, colourRgba))
+                    continue;
+                if (!DecodeEddsRgba(mount, opacityPath, 512, aw, ah, alphaRgba))
+                    continue;
+                // Nearest-sample the coverage onto the colour's grid: the two are
+                // authored at the same size but the mip each one settled on need not
+                // match, and a size mismatch here would read past the end.
+                for (int y = 0; y < ch; ++y)
+                {
+                    const int sy = ah > 0 ? y * ah / ch : 0;
+                    for (int x = 0; x < cw; ++x)
+                    {
+                        const int sx = aw > 0 ? x * aw / cw : 0;
+                        colourRgba[(static_cast<size_t>(y) * cw + x) * 4 + 3] =
+                            alphaRgba[(static_cast<size_t>(sy) * aw + sx) * 4];
+                    }
+                }
+                Ref<Texture> merged = bank->CreateDynamic(cw, ch, colourRgba.data(),
+                                                          static_cast<uint32_t>(colourRgba.size()), true);
+                if (merged)
+                    level->RegisterTexture(merged, existing);
+            }
+        }
+    }
+
     // What the model asks the renderer for, said once. "The trees are white" has two
     // very different causes -- the faces name nothing, or they name something that
     // will not open -- and they want opposite fixes.
