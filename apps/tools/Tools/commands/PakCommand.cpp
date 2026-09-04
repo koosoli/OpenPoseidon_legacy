@@ -198,6 +198,24 @@ int Worlds(const std::string& root, const std::string& filter, int topClasses, b
                         ++classCounts[item.className];
                 if (roads)
                 {
+                    // Where the towns are, measured rather than guessed: the densest
+                    // 200 m cells of building placements. Framing a capture by eye
+                    // costs a two-minute run per attempt and most attempts miss.
+                    std::map<std::pair<int, int>, size_t> townCells;
+                    for (const auto& item : world.placements)
+                        if (item.className == "SCR_DestructibleBuildingEntity")
+                            ++townCells[{int(item.position[0] / 200.0f), int(item.position[2] / 200.0f)}];
+                    std::vector<std::pair<size_t, std::pair<int, int>>> towns;
+                    for (const auto& [cell, count] : townCells)
+                        towns.emplace_back(count, cell);
+                    std::sort(towns.begin(), towns.end(), std::greater<>());
+                    for (size_t i = 0; i < towns.size() && i < 8; ++i)
+                        std::cout << "    town " << towns[i].first << " buildings at "
+                                  << towns[i].second.first * 200 + 100 << " "
+                                  << towns[i].second.second * 200 + 100 << std::endl;
+                }
+                if (roads)
+                {
                     size_t withPoints = 0, without = 0, totalPoints = 0, withMaterial = 0, withWidth = 0, withPrefab = 0;
                     std::vector<std::pair<double, std::string>> longest;
                     double totalLength = 0.0;

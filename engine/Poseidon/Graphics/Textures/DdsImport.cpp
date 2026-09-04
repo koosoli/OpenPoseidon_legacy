@@ -95,6 +95,13 @@ PacFormat ToPacFormat(PixelFormat format)
     }
 }
 
+std::string LowerCopy(std::string s)
+{
+    for (char& c : s)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+}
+
 bool IsBlockFormat(PixelFormat format)
 {
     return format == PixelFormat::DXT1 || format == PixelFormat::DXT3 || format == PixelFormat::DXT5;
@@ -220,6 +227,25 @@ bool TextureSourceDDS::InitFromMemory(const void* data, size_t size, const char*
         // author used it, and forcing the flag put every leaf card on the blended
         // path -- the first run of this drew Everon's trees as flat white shards.
         // The existing format rule below decides, exactly as it does for a .paa.
+
+        // RFG-033: in Enfusion, `_BCR` stands for Base Colour + ROUGHNESS. The fourth
+        // channel is a material property, not coverage -- and read as coverage it
+        // makes a plastered wall as see-through as its roughness map is dark. That is
+        // the whole of "many houses look transparent or as if walls were missing":
+        // Everon's buildings are BC7 `_BCR` albedos to a texture.
+        //
+        // Forced opaque rather than merely not flagged, because `_hasAlpha` is only
+        // one of the two readers: the alpha-class scan looks at the PIXELS. A leaf's
+        // real coverage arrives through the `enfa|` composite path in Init(), which
+        // writes this channel afterwards, so nothing that genuinely has a cutout
+        // loses it here.
+        if (LowerCopy(who).find("_bcr") != std::string::npos)
+        {
+            for (DDSMipLevel& level : _levels)
+                for (size_t i = 3; i < level.data.size(); i += 4)
+                    level.data[i] = 255;
+            _hasAlpha = false;
+        }
     }
 
     _pacFormat = ToPacFormat(_format);

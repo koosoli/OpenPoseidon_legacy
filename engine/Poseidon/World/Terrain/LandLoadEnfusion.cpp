@@ -239,9 +239,26 @@ class MountMaterialSink : public Poseidon::Asset::Formats::Enfusion::XobMaterial
 
   public:
 
-    //! Empty: the `.emat` path the `.xob` already names is the best material string
-    //! available, and naming a file that does not exist is strictly worse.
-    std::string MaterialField(const std::string&) const override { return {}; }
+    //! RFG-034: the `.emat` path, and it must NOT be empty.
+    //!
+    //! This returned nothing on the argument that naming a file which cannot be
+    //! opened is worse than naming none. That argument expired when the mount
+    //! fallback landed in `ReadEmatTextExact`: the file opens now.
+    //!
+    //! What the empty string cost, all from one cause. With no surface material the
+    //! section's `alpha_ref` stays 0, and `veg_cutout` in both model shaders is
+    //! `is_veg && alpha_ref > 0`. So every leaf card lost, at once: the two-sided
+    //! normal flip (half of every card unlit -- "the trees look flat"), the crown
+    //! normals, the leaf sub-surface term, the depth write, and its place in the
+    //! retained GPU set. The blended route it fell back to is also the one that
+    //! makes a card cast a full rectangular shadow or none.
+    //!
+    //! `EmatUsesLeafCards` keys on `MatPBRTreeCrown`/`Grass`/`OpacityMap`/`AlphaTest`,
+    //! which is exactly what these materials declare.
+    std::string MaterialField(const std::string& materialSource) const override
+    {
+        return _mount.Has(materialSource) ? materialSource : std::string();
+    }
 
   private:
     const EnfusionMount& _mount;
@@ -1430,6 +1447,8 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
                              });
 
             size_t added = 0;
+            size_t buriedObjects = 0;
+            std::string firstBuried;
             for (const ResolvedPlacement& item : placed)
             {
                 if (added >= objectCap)
@@ -1461,6 +1480,20 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
                 // the object exists rather than folded into the call.
                 if (placedObject != nullptr && std::fabs(item.scale - 1.0f) > 1e-3f)
                     placedObject->SetOrientation(placedObject->Orientation() * Matrix3(MScale, item.scale));
+                // RFG-035: count what ends up under the ground. "The buildings are
+                // missing" and "the buildings are buried" look identical from the
+                // air and have different causes, and nothing so far could tell them
+                // apart. Measured against the engine's own surface, which is what the
+                // player stands on.
+                if (y < SurfaceY(item.position[0], item.position[2]) - 2.0f)
+                {
+                    ++buriedObjects;
+                    if (firstBuried.empty())
+                        firstBuried = meshes[item.mesh].first + " at [" + std::to_string(int(item.position[0])) +
+                                      " " + std::to_string(int(item.position[2])) + "] " +
+                                      std::to_string(int(SurfaceY(item.position[0], item.position[2]) - y)) +
+                                      " m under";
+                }
                 ++added;
             }
             // Where the towns are. A world this size has no obvious place to point a
@@ -1487,8 +1520,9 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
             }
             LOG_INFO(World,
                      "Enfusion native load: built {} of {} meshes ({} failed) in {} ms, placed {} objects "
-                     "(caps {} models / {} objects){}",
-                     built, meshes.size(), buildFailed, buildMs, added, modelCap, objectCap,
+                     "({} more than 2 m under the terrain){}{}",
+                     built, meshes.size(), buildFailed, buildMs, added, buriedObjects,
+                     firstBuried.empty() ? "" : ("; first: " + firstBuried),
                      firstBuildFailure.empty() ? "" : ("; first build failure: " + firstBuildFailure));
 
             // RFG-027: the road network. One shape per road rather than one shared
