@@ -751,6 +751,11 @@ LODShapeWithShadow* BuildShapeFromXob(const EnfusionMount& mount, const std::str
     // centre, which sinks a tree by half its height.
     options.fixOrientation = true;
     options.fixOrigin = true;
+    // RFG-022: keep the authored LOD spacing. Reforger ladders span 1:500 in screen
+    // coverage and their last level is a four-triangle impostor; numbering the levels
+    // 1..5 brings that impostor in to a few tens of metres, which reads as a forest of
+    // flat cards.
+    options.lodFromThreshold = true;
     // The native path has no texture baker, so the `.xob`'s own material paths are
     // written and the models draw untextured until the material side lands.
     Fmt::MLOD::WriteModel model;
@@ -863,6 +868,26 @@ LODShapeWithShadow* BuildShapeFromXob(const EnfusionMount& mount, const std::str
                 if (merged)
                     level->RegisterTexture(merged, existing);
             }
+        }
+    }
+
+    // The LOD ladder as the engine sees it. A tree that draws as a flat card at
+    // forty metres is either a cutout that did not punch or the WRONG LEVEL, and
+    // those look identical from outside.
+    {
+        static int reportedLod = 0;
+        if (reportedLod < 3 && LowerCopy(xobPath).find("/tree/") != std::string::npos)
+        {
+            ++reportedLod;
+            std::string ladder;
+            for (int i = 0; i < shape->NLevels(); ++i)
+            {
+                const Shape* lvl = shape->Level(i);
+                ladder += (ladder.empty() ? "" : ", ") + std::to_string(i) + ": res " +
+                          std::to_string(shape->Resolution(i)) + " tris " +
+                          std::to_string(lvl != nullptr ? lvl->NFaces() : -1);
+            }
+            LOG_INFO(World, "Enfusion native load: LOD ladder for '{}' -- {}", xobPath, ladder);
         }
     }
 

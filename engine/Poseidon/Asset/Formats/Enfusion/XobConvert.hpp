@@ -137,6 +137,20 @@ struct ConvertOptions
     //! Fact 9, for inspection: use every COLL shape whatever its layer, so a fire
     //! geometry mesh and a foliage volume become walls too. Off by default.
     bool geometryAllLayers = false;
+    //! RFG-022: derive each visual LOD's resolution from the `.xob`'s OWN threshold
+    //! ratios instead of numbering the levels 1/2/3/4/5.
+    //!
+    //! The rank convention matches native Arma 3 ladders and is right for a model
+    //! whose levels are spaced like Arma 3's. Reforger's are not: a spruce is
+    //! authored at screen coverages 0.5 / 0.15 / 0.02 / 0.005 / 0.001, a range of
+    //! 1:500, and its last level is FOUR TRIANGLES meant for the horizon. Squeezed
+    //! into 1..5 that billboard arrives at a few tens of metres, which is what a
+    //! forest of flat cards at close range actually is.
+    //!
+    //! Preserving the ratios keeps LOD 0 at `resolution` exactly, so near-field
+    //! behaviour is unchanged, and pushes the impostor back out to where it was
+    //! authored to appear.
+    bool lodFromThreshold = false;
     TextureOptions textures;
 };
 
@@ -277,6 +291,22 @@ inline float VisualLodResolution(size_t rank, float base)
     return base * static_cast<float>(rank + 1);
 }
 
+//! Resolution from the authored threshold ratio: level 0 keeps `base`, and each
+//! coarser level is `base * (finestThreshold / itsThreshold)`.
+//!
+//! Falls back to the rank convention when the thresholds cannot carry it -- a
+//! non-positive or non-decreasing ladder would produce equal or descending
+//! resolutions, and MLOD requires them strictly ascending.
+inline float VisualLodResolutionFromThreshold(size_t rank, float base, float finestThreshold, float threshold)
+{
+    if (!(finestThreshold > 0.0f) || !(threshold > 0.0f) || threshold > finestThreshold)
+        return VisualLodResolution(rank, base);
+    const float scaled = base * (finestThreshold / threshold);
+    // Guard the same contract from the other side: a ratio that rounds to the
+    // previous level's value is no better than the rank convention.
+    return scaled > base ? scaled : VisualLodResolution(rank, base);
+}
+
 //! `sourcePath` is the `.xob`'s own path in the pak; it decides fact 8's `map` property
 //! and nothing else. Empty disables the property (a caller with no path has no class).
 inline bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& options,
@@ -346,7 +376,11 @@ inline bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& 
         // engine's decision, not this file's.
         if (!stats.mapProperty.empty())
             writeLod.properties.push_back({"map", stats.mapProperty});
-        writeLod.resolution = VisualLodResolution(rank, options.resolution);
+        writeLod.resolution =
+            options.lodFromThreshold
+                ? VisualLodResolutionFromThreshold(rank, options.resolution,
+                                                   header.lods[lodOrder[0]].threshold, header.lods[lodIndex].threshold)
+                : VisualLodResolution(rank, options.resolution);
         if (!(writeLod.resolution < 900.0f) || !std::isfinite(writeLod.resolution))
         {
             error = "LOD " + std::to_string(lodIndex) + " maps outside the visual resolution range";
