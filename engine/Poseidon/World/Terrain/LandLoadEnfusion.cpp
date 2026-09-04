@@ -112,9 +112,35 @@ std::string ColourTextureOf(const Poseidon::Asset::Material::EmatMaterial& mater
     std::string path = material.TextureOf("BCRMap");
     if (path.empty())
         path = material.TextureOf("AlbedoMap");
+    // RFG-039: a `MatPBRMulti` numbers its layers, and layer 1 is not always the one
+    // carrying an albedo -- `BarrelMetal_01` declares `Color_1` and `NMO_1` with no
+    // `BCR_1`, and its actual maps are `BCR_2`..`BCR_4`. Taking only `BCR_1` left the
+    // barrel white while four albedos sat in the same file.
+    for (int layer = 1; layer <= 4 && path.empty(); ++layer)
+        path = material.TextureOf("BCR_" + std::to_string(layer));
     if (path.empty())
-        path = material.TextureOf("BCR_1");
+        path = material.TextureOf("GBufferAlbedo");
     return path;
+}
+
+//! RFG-039: `enfc|R,G,B` for a material whose colour is a CONSTANT, not a map.
+//!
+//! Reforger's `MatPBRBasic` frequently carries no albedo at all -- 71 sections in one
+//! village -- only a `Color` property. A section with no texture draws white, so a
+//! material saying "dark grey" produced a bright white crash barrier. The colour is
+//! there; nothing was reading it.
+std::string ColourConstantOf(const Poseidon::Asset::Material::EmatMaterial& material)
+{
+    const auto* property = material.Find("Color");
+    if (property == nullptr || property->values.size() < 3)
+        return {};
+    for (int i = 0; i < 3; ++i)
+        if (!property->values[static_cast<size_t>(i)].isNumber)
+            return {};
+    char text[96];
+    std::snprintf(text, sizeof(text), "enfc|%.4f,%.4f,%.4f", property->values[0].number, property->values[1].number,
+                  property->values[2].number);
+    return text;
 }
 
 //! Reads one `.emat` out of the mount, parents resolved.
@@ -187,7 +213,12 @@ class MountMaterialSink : public Poseidon::Asset::Formats::Enfusion::XobMaterial
   public:
     explicit MountMaterialSink(const EnfusionMount& mount) : _mount(mount) {}
 
-    bool HideFaces(const std::string&) const override { return false; }
+    //! RFG-039: hide a decal that brought no albedo -- see Resolve().
+    bool HideFaces(const std::string& materialSource) const override
+    {
+        const Resolved& resolved = Resolve(materialSource);
+        return resolved.decal && resolved.colour.empty();
+    }
 
     std::string TexturePath(const std::string& materialSource) const override
     {
@@ -218,6 +249,7 @@ class MountMaterialSink : public Poseidon::Asset::Formats::Enfusion::XobMaterial
     {
         std::string colour;
         std::string opacity;
+        bool decal = false;
     };
 
     const Resolved& Resolve(const std::string& materialSource) const
@@ -231,9 +263,36 @@ class MountMaterialSink : public Poseidon::Asset::Formats::Enfusion::XobMaterial
         {
             out.colour = ColourTextureOf(material);
             out.opacity = material.TextureOf("OpacityMap");
+            out.decal = material.className == "MatPBRDecal";
+            if (out.colour.empty())
+            {
+                // A decal is an overlay on the surface underneath it, and nothing here
+                // can composite one. Drawn as an ordinary face it is a white rectangle
+                // stuck to a wall, so a decal with no albedo of its own is hidden --
+                // absent is closer to right than white.
+                if (!out.decal)
+                    out.colour = ColourConstantOf(material);
+                out.opacity.clear();
+            }
         }
         if (!out.colour.empty() && !out.opacity.empty())
             _byColour.emplace(LowerCopy(out.colour), out.opacity);
+        // RFG-038: name the materials that yield no colour texture at all. 71 sections
+        // in one village bind nothing, and a section with no texture draws white --
+        // which is what "many buildings are white and untextured" is made of.
+        if (out.colour.empty())
+        {
+            static int reported = 0;
+            if (reported < 25)
+            {
+                ++reported;
+                std::string keys;
+                for (const auto& property : material.properties)
+                    keys += (keys.empty() ? "" : ",") + property.name;
+                LOG_WARN(World, "Enfusion native load: NO COLOUR for '{}' (class '{}', texture keys: {})",
+                         materialSource, material.className, keys.empty() ? "none" : keys);
+            }
+        }
         return _cache.emplace(materialSource, std::move(out)).first->second;
     }
 
@@ -1070,6 +1129,32 @@ LODShapeWithShadow* BuildShapeFromXob(const EnfusionMount& mount, const std::str
                           std::to_string(lvl != nullptr ? lvl->NFaces() : -1);
             }
             LOG_INFO(World, "Enfusion native load: LOD ladder for '{}' -- {}", xobPath, ladder);
+        }
+    }
+
+    // RFG-038: every distinct texture a built shape actually binds, counted once.
+    // "Many buildings are white and untextured" cannot be checked against the
+    // untextured-section warning -- that fires only when a section binds NOTHING, and
+    // all 166 of those were roads. A wrong texture is bound, not absent, so the list
+    // of what IS bound is the only thing that can name it.
+    if (std::getenv("POSEIDON_REFORGER_TEXTURE_CENSUS") != nullptr && shape->NLevels() > 0)
+    {
+        static std::map<std::string, size_t> census;
+        static size_t shapesSeen = 0;
+        const Shape* level = shape->Level(0);
+        for (int i = 0; level != nullptr && i < level->NSections(); ++i)
+        {
+            Texture* tex = level->GetSection(i).properties.GetTexture();
+            ++census[tex != nullptr && tex->Name() != nullptr ? tex->Name() : "(none)"];
+        }
+        if (++shapesSeen % 200 == 0)
+        {
+            std::vector<std::pair<size_t, std::string>> ranked;
+            for (const auto& [path, count] : census)
+                ranked.emplace_back(count, path);
+            std::sort(ranked.begin(), ranked.end(), std::greater<>());
+            for (size_t i = 0; i < ranked.size() && i < 40; ++i)
+                LOG_INFO(World, "Enfusion texture census: {}x '{}'", ranked[i].first, ranked[i].second);
         }
     }
 

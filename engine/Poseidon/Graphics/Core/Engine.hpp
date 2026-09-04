@@ -837,7 +837,27 @@ class Engine : public IGraphicsEngine
         // saved game menu slider. Default 400 m — a moderate reach for the current
         // 4 cascades; the 8-cascade rework is what makes ~1 km affordable.
         // `distanceCoef` still scales this reach.
-        float shadowDistance = 400.0f;
+        // Overridable from the environment so a shadow-reach A/B is one run and not
+        // one rebuild; the dev panel's own slider (0..1500 m) still wins at runtime.
+        static float DefaultShadowDistance()
+        {
+            static const float value = []
+            {
+                const char* v = std::getenv("POSEIDON_SHADOW_DISTANCE");
+                const float parsed = (v != nullptr && *v != 0) ? static_cast<float>(std::atof(v)) : 0.0f;
+                // Raised from 400 on 2026-09-04 after an A/B on Everon: at 400 a forested
+                // ridge 600 m out is flat green -- the trees are drawn, they simply stop
+                // casting, and the middle distance loses all of its depth. This is an
+                // engine-wide default, not a Reforger one; every world with objects past
+                // 400 m was losing the same thing. The cost is honest: 4 cascades now span
+                // three times the depth, so near texels are coarser and contact shadows
+                // soften, and the 8-cascade rework is what makes this free rather than a
+                // trade. The dev panel slider and this variable both override it.
+                return (parsed > 0.0f && parsed <= 4000.0f) ? parsed : 1200.0f;
+            }();
+            return value;
+        }
+        float shadowDistance = DefaultShadowDistance();
         float splitCoef = 0.80f;
         float biasBase = 0.00002f; // small — front-face culling does the acne work
         float fadeRange = 40.0f;

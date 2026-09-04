@@ -102,6 +102,22 @@ std::string LowerCopy(std::string s)
     return s;
 }
 
+//! RFG-039: `enfc|R,G,B` -- a flat colour, with no file behind it.
+//!
+//! Reforger's `MatPBRBasic` often carries no albedo map at all, only a `Color`
+//! constant: `HouseRuin_01_BrickPile_MLOD`, `CrashBarrier_MLOD`,
+//! `CrateWooden_Plain_MLOD` and 70-odd others in one village. A section with no
+//! texture draws WHITE, so a material that says "this is dark grey" produced a
+//! bright white crash barrier -- which is what "many buildings are white and
+//! untextured" is actually made of. It is not a missing texture; it is a texture
+//! that was never meant to exist.
+bool SplitEnfusionColourName(const char* name, float rgb[3])
+{
+    if (name == nullptr || std::strncmp(name, "enfc|", 5) != 0)
+        return false;
+    return std::sscanf(name + 5, "%f,%f,%f", &rgb[0], &rgb[1], &rgb[2]) == 3;
+}
+
 bool IsBlockFormat(PixelFormat format)
 {
     return format == PixelFormat::DXT1 || format == PixelFormat::DXT3 || format == PixelFormat::DXT5;
@@ -264,6 +280,40 @@ bool TextureSourceDDS::Init(const char* name, PacLevelMem* mips, int maxMips)
 {
     _name = name;
 
+    // RFG-039: a flat colour needs no file. Built at 4x4 rather than 1x1 because the
+    // mip chain and the pitch arithmetic downstream both assume a real image.
+    float solid[3] = {1.0f, 1.0f, 1.0f};
+    if (SplitEnfusionColourName(name, solid))
+    {
+        const auto channel = [](float v)
+        { return static_cast<uint8_t>(v <= 0.0f ? 0.0f : (v >= 1.0f ? 255.0f : v * 255.0f + 0.5f)); };
+        // ARGB8888 in this engine means B,G,R,A in memory.
+        const uint8_t texel[4] = {channel(solid[2]), channel(solid[1]), channel(solid[0]), 255};
+        DDSMipLevel level;
+        level.width = 4;
+        level.height = 4;
+        level.data.resize(4 * 4 * 4);
+        for (size_t i = 0; i < level.data.size(); i += 4)
+            std::memcpy(level.data.data() + i, texel, 4);
+        _levels.clear();
+        _levels.push_back(std::move(level));
+        _format = PixelFormat::ARGB8888;
+        _pacFormat = ToPacFormat(_format);
+        _w = 4;
+        _h = 4;
+        _hasAlpha = false;
+        _mipmaps = 1;
+        _avgColor = AverageOfSmallest(_levels, _format);
+        _isTransparent = false;
+        if (mips != nullptr && maxMips > 0)
+        {
+            mips[0]._w = 4;
+            mips[0]._h = 4;
+            mips[0]._sFormat = _pacFormat;
+        }
+        return true;
+    }
+
     // RFG-023: `enfa|<coverage>|<colour>` -- load the colour, then fold the coverage
     // file into its alpha. Enfusion keeps a leaf's opacity in a separate texture, so
     // this is the only point at which the two can become one image without the engine
@@ -423,6 +473,9 @@ bool TextureSourceDDS::GetMipmapData(void* mem, const PacLevelMem& mip, int leve
 
 bool TextureSourceDDSFactory::Check(const char* name)
 {
+    float solid[3];
+    if (SplitEnfusionColourName(name, solid))
+        return true;
     std::string colour, coverage;
     if (SplitEnfusionAlphaName(name, colour, coverage))
         name = colour.c_str();
