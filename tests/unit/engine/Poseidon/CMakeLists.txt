@@ -157,6 +157,7 @@ set(POSEIDON_TEST_SOURCES
     Graphics/test_fan_decompose.cpp
     Graphics/test_zbias_math.cpp
     Graphics/test_mipmap_layout.cpp
+    Graphics/test_texture_dummy_size.cpp
     Graphics/test_gl_state_cache_audit.cpp
     Graphics/test_ibo_bind_audit.cpp
     Graphics/test_buffer_usage_audit.cpp
@@ -455,6 +456,7 @@ list(APPEND POSEIDON_TEST_SOURCES
 
     # IO tests (batch-15)
     World/test_io_types.cpp
+    IO/test_mapFile.cpp
     IO/test_paramFileExt.cpp
     IO/test_paramFile_defaults.cpp
 
