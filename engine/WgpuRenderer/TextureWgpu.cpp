@@ -1167,6 +1167,24 @@ AlphaStats::Kind TextureWgpu::GetAlphaClass()
         kind = ClassifyTextureAlpha(hasAlpha, chroma, oneBit, decodedPtr);
     }
     _alphaClass = static_cast<signed char>(kind);
+    // One-shot per run, for the leaf-cutout investigation: the verdict AND the
+    // numbers it came from. "The cards are solid" has never been the same question
+    // as "the alpha is missing", and only this line separates them.
+    {
+        static std::atomic<uint32_t> logged{0};
+        const char* n = Name();
+        if (n != nullptr && std::strstr(n, "polyplane") != nullptr &&
+            logged.fetch_add(1, std::memory_order_relaxed) < 4)
+        {
+            LOG_INFO(Graphics,
+                     "Alpha class for {}: kind {} (hasAlpha {} chroma {} oneBit {}) -- aMin {} aMax {} clear {:.1f}% "
+                     "partial {:.1f}%",
+                     n, static_cast<int>(kind), _src != nullptr && _src->IsAlpha() ? 1 : 0,
+                     _src != nullptr && _src->IsTransparent() ? 1 : 0,
+                     _src != nullptr && _src->GetFormat() == PacDXT1 ? 1 : 0, _alphaStats.aMin, _alphaStats.aMax,
+                     _alphaStats.pctClear, _alphaStats.pctPartial);
+        }
+    }
     return kind;
 }
 

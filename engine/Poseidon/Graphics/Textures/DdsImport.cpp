@@ -281,8 +281,20 @@ bool TextureSourceDDS::Init(const char* name, PacLevelMem* mips, int maxMips)
                     for (int x = 0; x < dstLevel.width; ++x)
                     {
                         const int sx = x * srcLevel.width / dstLevel.width;
-                        dstLevel.data[(static_cast<size_t>(y) * dstLevel.width + x) * 4 + 3] =
-                            srcLevel.data[(static_cast<size_t>(sy) * srcLevel.width + sx) * 4];
+                        // The BRIGHTEST channel, not channel 0.
+                        //
+                        // A coverage map is single-channel (BC4 / R8), and the colour
+                        // path above swaps red and blue to reach ARGB8888's B,G,R,A
+                        // order -- which moves that one channel out of index 0. Taking
+                        // index 0 read the swapped-in zero: measured as
+                        // "aMin 0 aMax 0 clear 100.0%", an image that is entirely
+                        // transparent and therefore classified opaque, which is a leaf
+                        // card drawn as a solid quad. max() does not care which slot
+                        // the value ended up in.
+                        const size_t src = (static_cast<size_t>(sy) * srcLevel.width + sx) * 4;
+                        const uint8_t coverageValue =
+                            std::max({srcLevel.data[src], srcLevel.data[src + 1], srcLevel.data[src + 2]});
+                        dstLevel.data[(static_cast<size_t>(y) * dstLevel.width + x) * 4 + 3] = coverageValue;
                     }
                 }
             }
