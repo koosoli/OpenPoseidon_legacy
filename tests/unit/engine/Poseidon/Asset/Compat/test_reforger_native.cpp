@@ -238,13 +238,16 @@ TEST_CASE("Reforger native: the engine reads Everon's terrain, world and models 
 //
 // That is the only reader-level piece a native path is missing, and it is roughly a
 // hundred lines. Everything else on the critical path is already in the library.
-TEST_CASE("Reforger native: the prefab graph is the one reader that is not engine-side", "[compat][reforger][rfg-002]")
+TEST_CASE("Reforger native: the prefab graph is engine-side now", "[compat][reforger][rfg-002][rfg-010]")
 {
     // Walk up from __FILE__ until the repo root appears, rather than counting parent
     // levels: the first attempt at this counted two too few and skipped silently, which
     // is exactly the failure mode a test recording a known gap must not have.
-    const std::filesystem::path relative = std::filesystem::path("apps") / "tools" / "Tools" / "commands" /
-                                           "XobCommand.cpp";
+    // RFG-010 moved it. This case is inverted rather than deleted: the gap it used to
+    // record is closed, and what matters now is that it STAYS closed -- a second copy
+    // growing back inside the tool is exactly the drift this was written to catch.
+    const std::filesystem::path relative = std::filesystem::path("engine") / "Poseidon" / "Asset" / "Formats" /
+                                           "Enfusion" / "PrefabResolve.hpp";
     std::filesystem::path repoTools;
     std::error_code ec;
     for (std::filesystem::path dir = std::filesystem::path(__FILE__).parent_path(); !dir.empty();
@@ -259,14 +262,16 @@ TEST_CASE("Reforger native: the prefab graph is the one reader that is not engin
             break; // reached the drive root
     }
     if (repoTools.empty())
-        SKIP("XobCommand.cpp not found above __FILE__; the repository layout changed");
+        SKIP("PrefabResolve.hpp not found above __FILE__; the repository layout changed");
 
     std::ifstream f(repoTools);
     const std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
     REQUIRE(!text.empty());
 
-    // If this ever fails because the resolver MOVED into the engine, that is the good
-    // outcome: delete this case and update RFG-002, because the gap it records is closed.
     CHECK(text.find("ResolvePrefabModel") != std::string::npos);
     CHECK(text.find("FindObjectReference") != std::string::npos);
+    // The two traps the walk exists for, so a rewrite that drops either is loud:
+    // m_sPhaseModel names a `.xob` too, and a prefab may inherit its mesh.
+    CHECK(text.find("m_sPhaseModel") != std::string::npos);
+    CHECK(text.find("depthLimit") != std::string::npos);
 }
