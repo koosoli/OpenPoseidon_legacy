@@ -1321,6 +1321,11 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
     {
         _gi.interiorMix = std::clamp(std::strtof(gm, nullptr), 0.0f, 1.0f);
     }
+    // REN-GI-010: WGR_GI_INDOOR_SKY=0 is the pre-fix probe integration exactly, for the A/B.
+    if (const char* gis = std::getenv("WGR_GI_INDOOR_SKY"))
+    {
+        _gi.indoorSky = std::clamp(std::strtof(gis, nullptr), 0.0f, 1.0f);
+    }
     if (const char* gb = std::getenv("WGR_GI_BASIS"))
     {
         // REN-GI-009: `cube` restores the six-face ambient cube exactly, `sh` the first-order
@@ -1334,10 +1339,10 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
     }
     LOG_INFO(Graphics,
              "Wgpu GI probe volume: {} (WGR_GI), weight {:.2f}, spacing {:.1f} m, {} rays; sun proxy {} "
-             "(WGR_GI_RSM, {} samples, radius {:.0f} m, gain {:.2f}); basis {}",
+             "(WGR_GI_RSM, {} samples, radius {:.0f} m, gain {:.2f}); basis {}; indoor sky occlusion {:.2f}",
              _gi.enabled ? "on" : "OFF", _gi.weight, _gi.spacing, _gi.rays,
              _gi.rsmSamples > 0 ? "on" : "OFF", _gi.rsmSamples, _gi.rsmRadius, _gi.rsmGain,
-             _gi.basis == 0 ? "ambient cube" : (_gi.basis == 1 ? "SH-1" : "SH-2"));
+             _gi.basis == 0 ? "ambient cube" : (_gi.basis == 1 ? "SH-1" : "SH-2"), _gi.indoorSky);
     // Through the log sink, not eprintln!/stderr: renderer diagnostics that must survive into
     // --log-file have to go through the sink or they are simply not there when you read the log.
     LOG_INFO(Graphics,
@@ -10418,6 +10423,7 @@ void EngineWgpu::PushRenderParams()
         _gi.rayLength,
         _gi.rsmRadius,
         _gi.rsmGain,
+        _gi.indoorSky,
     };
     // REN-THR-013: queued; the worker applies it before wgr_render_frame.
     _pendingSet.renderParams = p;

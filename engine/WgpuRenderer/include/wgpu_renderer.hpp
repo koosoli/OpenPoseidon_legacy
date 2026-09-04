@@ -704,7 +704,7 @@ struct WgrSkyVis
 };
 
 /* REN-GI-001 -- the irradiance probe volume (hybrid GI, stage 1). Mirrors the Rust WgrGi
- * #[repr(C)]; 64 bytes, no padding. Pushed every frame inside WgrRenderParams. */
+ * #[repr(C)]; 68 bytes, no padding. Pushed every frame inside WgrRenderParams. */
 struct WgrGi
 {
     uint32_t enabled;        /* 0 = the analytic sky-dome ambient only (pre-GI behaviour) */
@@ -723,6 +723,10 @@ struct WgrGi
     float    ray_length;     /* metres a probe ray looks for terrain */
     float    rsm_radius;     /* REN-GI-002: gather radius around the probe, metres */
     float    rsm_gain;       /* REN-GI-002: scale on the gathered sun bounce */
+    float    indoor_sky;     /* REN-GI-010: how much a probe's own sky occlusion attenuates its
+                              * LATERAL sky rays. 0 = the pre-fix integration exactly (nothing
+                              * tested a sideways ray against a wall, so an indoor probe was
+                              * nearly as bright as one outdoors); 1 = full. */
 };
 
 /* Picture Mode depth of field. Mirrors the Rust WgrDepthOfField #[repr(C)] and feeds dof.wgsl.
@@ -1839,7 +1843,7 @@ static_assert(sizeof(WgrFoliage) == 80, "WgrFoliage layout must match the Rust #
 static_assert(sizeof(WgrGtao) == 52, "WgrGtao layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrSkyVis) == 44, "WgrSkyVis layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrDepthOfField) == 52, "WgrDepthOfField layout must match the Rust #[repr(C)] struct");
-static_assert(sizeof(WgrRenderParams) == 612, "WgrRenderParams layout must match the Rust #[repr(C)] struct"); // REN-GI-001: + WgrGi (64)
+static_assert(sizeof(WgrRenderParams) == 616, "WgrRenderParams layout must match the Rust #[repr(C)] struct"); // REN-GI-010: WgrGi 64 -> 68
 static_assert(sizeof(WgrFrameParams) == 16, "WgrFrameParams layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrCameraShadow) == 352, "WgrCameraShadow layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrCamera) == 576, "WgrCamera layout must match the Rust #[repr(C)] struct");

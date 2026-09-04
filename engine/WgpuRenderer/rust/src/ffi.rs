@@ -825,6 +825,10 @@ pub struct WgrGi {
     pub ray_length: f32,
     pub rsm_radius: f32,
     pub rsm_gain: f32,
+    /// REN-GI-010: how much a probe's own sky occlusion attenuates its LATERAL sky rays.
+    /// 0 = the pre-fix integration exactly (nothing ever tested a sideways ray against a wall,
+    /// so an indoor probe was nearly as bright as one on the lawn); 1 = full.
+    pub indoor_sky: f32,
 }
 
 // Interior sky visibility (LIT-020, docs/interior-sky-visibility-plan.md). Distinct from
@@ -1503,7 +1507,7 @@ const _: () = assert!(std::mem::size_of::<WgrFoliage>() == 80);
 const _: () = assert!(std::mem::size_of::<WgrGtao>() == 52);
 const _: () = assert!(std::mem::size_of::<WgrSkyVis>() == 44);
 const _: () = assert!(std::mem::size_of::<WgrDepthOfField>() == 52);
-const _: () = assert!(std::mem::size_of::<WgrRenderParams>() == 612); // REN-GI-001: + WgrGi (64)
+const _: () = assert!(std::mem::size_of::<WgrRenderParams>() == 616); // REN-GI-010: WgrGi 64 -> 68
 const _: () = assert!(std::mem::size_of::<WgrFrameParams>() == 16);
 const _: () = assert!(std::mem::size_of::<WgrCameraShadow>() == 352);
 const _: () = assert!(std::mem::size_of::<WgrCamera>() == 576);

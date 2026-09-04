@@ -53,6 +53,11 @@ pub struct GiSettings {
     pub rays: u32,
     pub weight: f32,
     pub interior_mix: f32,
+    /// REN-GI-010: how much of a probe's own sky occlusion applies to the LATERAL sky rays.
+    /// 0 restores the pre-fix integration exactly (walls occluded nothing sideways, so an
+    /// indoor probe was nearly as bright as one outdoors); 1 attenuates a probe's sky by the
+    /// dome maps' reach at its own position.
+    pub indoor_sky: f32,
     pub spacing: f32,
     pub hysteresis: f32,
     pub ground_albedo: [f32; 3],
@@ -72,6 +77,7 @@ impl Default for GiSettings {
             rays: 24,
             weight: 1.0,
             interior_mix: 0.25,
+            indoor_sky: 1.0,
             spacing: 2.5,
             hysteresis: 0.3,
             ground_albedo: [0.22, 0.25, 0.16],
@@ -92,6 +98,7 @@ impl GiSettings {
         self.rays = p.rays.clamp(8, 64);
         self.weight = p.weight.clamp(0.0, 1.0);
         self.interior_mix = p.interior_mix.clamp(0.0, 1.0);
+        self.indoor_sky = p.indoor_sky.clamp(0.0, 1.0);
         self.spacing = p.spacing.clamp(1.0, 16.0);
         self.hysteresis = p.hysteresis.clamp(0.05, 1.0);
         self.ground_albedo = p.ground_albedo;
@@ -496,7 +503,13 @@ impl GiProbes {
             dims: [NX as f32, NY as f32, NZ as f32, (self.frame % BATCHES) as f32],
             knobs: [s.hysteresis, s.ground_gain, s.wall_albedo, s.rays as f32],
             ground: [s.ground_albedo[0], s.ground_albedo[1], s.ground_albedo[2], s.ray_length],
-            reset: [if self.moved { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0],
+            reset: [
+                if self.moved { 1.0 } else { 0.0 },
+                // REN-GI-010: the indoor sky occlusion knob, read once per probe in cs_gi_probes.
+                s.indoor_sky,
+                0.0,
+                0.0,
+            ],
             rsm_vp: view.view_proj.to_cols_array(),
             rsm_inv_vp: inv.to_cols_array(),
             rsm: [

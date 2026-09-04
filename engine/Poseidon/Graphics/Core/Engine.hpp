@@ -1183,6 +1183,15 @@ class Engine : public IGraphicsEngine
         int rays = 24;
         float weight = 1.0f;
         float interiorMix = 0.25f;
+        /// REN-GI-010. A probe's rays were only ever tested against the terrain heightfield and,
+        /// for UPWARD directions, the interior-sky dome maps: no lateral ray was ever tested
+        /// against a wall, so a probe standing in a room drank full sky radiance from more than
+        /// half the sphere and came out nearly as bright as one on the lawn. Shading then blends
+        /// that over the analytic ambient at `weight` (1.0), which keeps only `interiorMix` of the
+        /// per-pixel interior AO the probes replaced -- so the room's ambient went from x0.32 to
+        /// x0.83 and interiors read as bright as outdoors. This attenuates each probe's sky by the
+        /// dome maps' reach AT THE PROBE. 0 = the pre-fix integration exactly.
+        float indoorSky = 1.0f;
         float spacing = 2.5f;
         float hysteresis = 0.3f;
         float groundAlbedo[3] = {0.22f, 0.25f, 0.16f};

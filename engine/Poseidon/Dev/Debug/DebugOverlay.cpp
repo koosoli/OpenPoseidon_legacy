@@ -4321,6 +4321,12 @@ void DrawGiTab()
     Dev::PanelHelp("  0 = the old ambient exactly, 1 = the probes alone");
     changed |= ImGui::SliderFloat("Interior AO share", &gi.interiorMix, 0.0f, 1.0f, "%.2f");
     Dev::PanelHelp("  how much of the per-pixel interior-sky darkening still applies on top");
+    changed |= ImGui::SliderFloat("Indoor sky occlusion", &gi.indoorSky, 0.0f, 1.0f, "%.2f");
+    Dev::PanelHelp("  REN-GI-010. A probe's rays are tested against the terrain and, going UP,");
+    Dev::PanelHelp("  against the interior-sky dome maps -- never sideways against a wall. So a");
+    Dev::PanelHelp("  probe in a room took full sky from every horizontal direction and lit the");
+    Dev::PanelHelp("  interior almost as brightly as the field outside. This darkens each probe");
+    Dev::PanelHelp("  by how much sky it can see at its own position. 0 = the old look exactly.");
     changed |= ImGui::SliderFloat("Spacing (m)", &gi.spacing, 1.0f, 16.0f, "%.1f");
     changed |= ImGui::SliderInt("Rays per probe update", &gi.rays, 8, 64);
     changed |= ImGui::SliderFloat("Hysteresis", &gi.hysteresis, 0.05f, 1.0f, "%.2f");

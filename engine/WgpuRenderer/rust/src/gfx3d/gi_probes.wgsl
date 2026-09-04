@@ -20,7 +20,7 @@
 // is the indirect + sky term, which shade() blends over its analytic sky-dome ambient. The
 // integration accumulates with hysteresis into a storage buffer and mirrors the result into a
 // sampled 3D texture (six y-slabs of 8 probes: slab k = axis k) for the fragment shaders.
-#import frame::{frame, sky_sh, sky_irradiance, terrain_sun_shadow, cloud_sun_shadow, interior_sky_reach_dir, sky_vis_ao}
+#import frame::{frame, sky_sh, sky_irradiance, terrain_sun_shadow, cloud_sun_shadow, interior_sky_reach_dir, interior_sky_reach, sky_vis_ao}
 
 struct HmParams {
     origin: vec2<f32>,
@@ -42,6 +42,7 @@ struct GiParams {
     knobs: vec4<f32>,         // x = hysteresis, y = ground gain, z = wall albedo, w = rays
     ground: vec4<f32>,        // rgb = ground albedo, w = ray length (m)
     reset: vec4<f32>,         // x = 1 when the volume moved this frame (history invalid)
+                              // y = REN-GI-010 indoor sky occlusion, 0..1 (0 = pre-fix exactly)
     rsm_vp: mat4x4<f32>,      // ABSOLUTE world -> sun proxy clip (ortho)
     rsm_inv_vp: mat4x4<f32>,  // sun proxy clip -> absolute world
     rsm: vec4<f32>,           // x = gather radius (m), y = samples, z = gain, w = valid (0/1)
@@ -133,7 +134,11 @@ fn fib_dir(i: u32, k: u32, rot: f32) -> vec3<f32> {
 
 // Radiance arriving at probe p from direction d (sky and the two occluder proxies), and the
 // distance to what it hit (a large value when it saw the sky).
-fn ray_radiance(p: vec3<f32>, d: vec3<f32>) -> vec4<f32> {
+//
+// `probe_sky` is REN-GI-010: how much of the sky THIS PROBE can see at all, already resolved by
+// the caller (once per probe, not once per ray — the dome lookup is 45 depth taps). See the
+// step-3 note below for why a probe indoors needs it.
+fn ray_radiance(p: vec3<f32>, d: vec3<f32>, probe_sky: f32) -> vec4<f32> {
     let ray_len = gi.ground.w;
     // 1. Terrain: exponentially spaced march against the heightfield.
     if (hm_params.enabled > 0.5 && d.y < 0.95) {
@@ -179,7 +184,23 @@ fn ray_radiance(p: vec3<f32>, d: vec3<f32>) -> vec4<f32> {
         }
     }
     // 3. Sky: nothing in the way, so the distance is "far" for the visibility test.
-    return vec4<f32>(sky_radiance(d), ray_len * 4.0);
+    //
+    // REN-GI-010 — but only as much sky as this PROBE can see. The two occluders above are the
+    // heightfield and the dome maps, and the dome branch is gated on `d.y > 0.1`: NOTHING in
+    // this function ever tested a lateral or downward ray against a WALL. So a probe standing in
+    // a room took FULL sky radiance from every horizontal direction — more than half the sphere —
+    // and came out nearly as bright as one on the lawn outside. Shading then blends that over the
+    // analytic ambient at `weight` (1.0 by default), so the per-pixel interior AO it replaced
+    // survives only at `interior_mix` (0.25): the room's ambient went from x0.32 to x0.83 and the
+    // interior read as bright as the field. That is the "indoors is as bright as outdoors" report.
+    //
+    // The dome reach AT THE PROBE is the fix that needs no new structure: it is exactly "is this
+    // point under a roof", which is the same question a lateral ray inside a sealed room should
+    // answer no to. It is not a wall test — a probe beside a wall in the open is untouched (its
+    // reach is 1), which is the conservative direction. Outdoors reach is 1 and this line is the
+    // pre-fix expression bit for bit; `reset.y` = 0 (dev panel "Indoor sky occlusion" at 0)
+    // restores the old look exactly on any scene.
+    return vec4<f32>(sky_radiance(d) * probe_sky, ray_len * 4.0);
 }
 
 // Blend one face into the state buffer and mirror it into the sampled texture's slab. The
@@ -227,6 +248,11 @@ fn cs_gi_probes(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     let k = max(u32(gi.knobs.w), 8u);
     let rot = hash11(f32(idx) + 17.0 * gi.dims.w) * 6.2831853;
+    // REN-GI-010: how much sky this probe sees, resolved ONCE. Per ray it would be 45 depth taps
+    // x `rays` per probe update, which is the difference between a rounding error and a pass.
+    // `interior_sky_reach` already returns 1 when the interior-sky feature is off, so the knob
+    // and that gate agree without a second condition here.
+    let probe_sky = mix(1.0, interior_sky_reach(p), clamp(gi.reset.y, 0.0, 1.0));
     var e0 = vec3<f32>(0.0);
     var e1 = vec3<f32>(0.0);
     var e2 = vec3<f32>(0.0);
@@ -257,7 +283,7 @@ fn cs_gi_probes(@builtin(global_invocation_id) gid: vec3<u32>) {
     let w = 4.0 * PI / f32(k);
     for (var i = 0u; i < k; i++) {
         let d = fib_dir(i, k, rot);
-        let ray = ray_radiance(p, d);
+        let ray = ray_radiance(p, d, probe_sky);
         let l = ray.rgb * w;
         let dist = ray.w;
         let dsq = dist * dist;
