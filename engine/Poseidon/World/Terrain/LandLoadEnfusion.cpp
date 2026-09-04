@@ -1514,9 +1514,23 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
                 if (!(entry.second < meshIsNear.size() && meshIsNear[entry.second]))
                     byCount.push_back(entry);
 
+            // Furniture counted separately: "the houses are empty" is a claim about a
+            // subtree of the asset tree, and the mesh histogram's top five will never
+            // show it -- a village has thousands of trees and a handful of chairs.
+            size_t furnitureMeshes = 0, furniturePlacements = 0;
+            for (size_t i = 0; i < meshes.size(); ++i)
+            {
+                const std::string lower = LowerCopy(meshes[i].first);
+                if (lower.find("/furniture/") == std::string::npos &&
+                    lower.find("/props/civilian/") == std::string::npos)
+                    continue;
+                ++furnitureMeshes;
+                furniturePlacements += meshes[i].second;
+            }
             LOG_INFO(World,
-                     "Enfusion native load: {} placements and {} distinct meshes within {:.0f} m of [{:.0f} {:.0f}]",
-                     nearPlacements, nearMeshes, nearRadius, focusX, focusZ);
+                     "Enfusion native load: {} placements and {} distinct meshes within {:.0f} m of [{:.0f} {:.0f}]; "
+                     "furniture and civilian props: {} meshes, {} placements world-wide",
+                     nearPlacements, nearMeshes, nearRadius, focusX, focusZ, furnitureMeshes, furniturePlacements);
 
             std::unordered_map<uint32_t, LODShapeWithShadow*> shapes;
             size_t built = 0;
