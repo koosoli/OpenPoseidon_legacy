@@ -1060,6 +1060,11 @@ static bool LodGovernorTargetDrive()
 
 void Scene::AdjustComplexity()
 {
+    // POSEIDON_LOD_TRACE: once per frame, after the whole object walk (Pass1) has offered
+    // every visible object and before the governor moves _lodInvWidth, so the value logged
+    // is the one that selected the level. No-op unless the env var is set.
+    LodTraceFlush();
+
     float oldLodInvWidth = _lodInvWidth;
 
     // adjust lodInvWidth so we are on the line given by points

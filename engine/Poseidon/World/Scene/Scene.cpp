@@ -18,6 +18,8 @@
 #include <Poseidon/Foundation/Math/MathOpt.hpp>
 #include <Poseidon/Foundation/Memory/CheckMem.hpp>
 #include <algorithm>
+#include <cctype>
+#include <cstring>
 #include <map>
 #include <string>
 #include <vector>
@@ -891,6 +893,117 @@ void Scene::BeginObjects()
 
 DEFINE_FAST_ALLOCATOR(SortObject)
 
+// POSEIDON_LOD_TRACE — one log line that answers "which LOD is the thing in front of me
+// actually drawing, and how much geometry is in that LOD".
+//
+// This question cost a whole session on 2026-09-05 (Reforger trees looking too coarse at 5 m)
+// because nothing in a running frame says it. `WGR_COVERAGE_NONE_CENSUS` names models,
+// the governor trace names `_lodInvWidth`, and neither joins them to a distance and a
+// chosen level for ONE object. Worse, the object most likely to be asked about --
+// vegetation -- is GPU-driven Full coverage, so it never reaches AdjustComplexity() and
+// cannot be traced from the draw list at all. Hence the observe call sits in
+// ObjectForDrawing BEFORE the divert.
+//
+// The level printed is Scene::LevelFromDistance2's, i.e. the CPU path. That is also the
+// retained path's answer: cull.wgsl:213-231 reimplements FindSqrtLevel over the same
+// `detail2 * lod_scale^2` from the same `_lodInvWidth` and `Camera::Left()` pushed by
+// wgr_set_cull_params, so a divergence here would be a bug in one of the two, not an
+// expected difference.
+//
+// POSEIDON_LOD_TRACE=1        trace the camera-nearest visible object of any kind
+// POSEIDON_LOD_TRACE=betula   ... nearest whose shape name contains "betula" (no case)
+static const char* LodTraceFilter()
+{
+    static const char* const filter = []() -> const char*
+    {
+        const char* v = std::getenv("POSEIDON_LOD_TRACE");
+        if (!v || !*v || std::strcmp(v, "0") == 0)
+        {
+            return nullptr;
+        }
+        return std::strcmp(v, "1") == 0 ? "" : v;
+    }();
+    return filter;
+}
+
+static bool LodTraceNameMatches(const char* name, const char* needle)
+{
+    if (!*needle)
+    {
+        return true;
+    }
+    if (!name)
+    {
+        return false;
+    }
+    std::string haystack(name), lowerNeedle(needle);
+    for (char& c : haystack)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    for (char& c : lowerNeedle)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return haystack.find(lowerNeedle) != std::string::npos;
+}
+
+void Scene::LodTraceObserve(LODShapeWithShadow* shape, float dist2, float oScale, Vector3Par direction)
+{
+    const char* filter = LodTraceFilter();
+    if (!filter || _lodTraceDone || !shape)
+    {
+        return;
+    }
+    if (_lodTraceShape && dist2 >= _lodTraceDist2)
+    {
+        return;
+    }
+    if (!LodTraceNameMatches(shape->Name(), filter))
+    {
+        return;
+    }
+    _lodTraceShape = shape;
+    _lodTraceDist2 = dist2;
+    _lodTraceScale = oScale;
+    _lodTraceDir = direction;
+}
+
+void Scene::LodTraceFlush()
+{
+    LODShapeWithShadow* shape = _lodTraceShape;
+    _lodTraceShape = nullptr;
+    if (!shape || _lodTraceDone || !_camera)
+    {
+        return;
+    }
+    // Skip the first second or so of drawn frames: with POSEIDON_LOD_TRACE=1 the first frame
+    // is the intro/loading camera, and a one-shot line spent there answers nothing.
+    if (++_lodTraceFrames < 60)
+    {
+        return;
+    }
+    _lodTraceDone = true;
+
+    const float dist = sqrt(_lodTraceDist2);
+    const int level = LevelFromDistance2(shape, _lodTraceDist2, _lodTraceScale, _lodTraceDir, _camera->Direction());
+    const float camLeft = _camera->Left();
+    // The value FindSqrtLevel compares the ladder against, un-squared (SceneDraw.cpp:640).
+    const float resol = dist * _lodInvWidth * camLeft;
+
+    std::string ladder;
+    for (int i = 0; i < shape->NLevels(); i++)
+    {
+        char buf[96];
+        std::snprintf(buf, sizeof(buf), "%s%d:res %g faces %d", i ? " " : "", i, shape->Resolution(i),
+                      shape->Level(i) ? shape->Level(i)->NFaces() : -1);
+        ladder += buf;
+    }
+    const int faces = (level >= 0 && level < shape->NLevels() && shape->Level(level)) ? shape->Level(level)->NFaces() : -1;
+
+    LOG_INFO(Graphics,
+             "LODTRACE {} dist {:.2f} m -> level {} ({} faces); resol {:.4f} = dist * lodInvWidth {:.5f} * camLeft "
+             "{:.3f} (rails {:.5f}..{:.5f}); bsphere {:.2f} m scale {:.2f}; ladder [{}]",
+             shape->Name() ? shape->Name() : "<unnamed>", dist, level, faces, resol, _lodInvWidth, camLeft,
+             _minLodInvWidth, _maxLodInvWidth, shape->BoundingSphere(), _lodTraceScale, ladder.c_str());
+}
+
 #define MaxDistance2(obj) (Square(ENGINE_CONFIG.objectsZ))
 
 void Scene::ObjectForDrawing(Object* obj, int forceLOD, ClipFlags clip)
@@ -921,6 +1034,15 @@ void Scene::ObjectForDrawing(Object* obj, int forceLOD, ClipFlags clip)
     // EVERY visible object (~160 K/frame at 20 km view distance with the whole island in view), so
     // even the virtual dispatch is worth dropping. 0 (None) for GL33 / dynamics / unregistered
     // shapes, so they fall straight through to the CPU path below.
+    // POSEIDON_LOD_TRACE, before the divert: a Full-coverage object returns two lines below
+    // and never reaches AdjustComplexity, which is exactly the case (vegetation) the trace
+    // exists for. Off unless the env var is set — LodTraceObserve's first test is the cached
+    // filter pointer.
+    if (LodTraceFilter())
+    {
+        LodTraceObserve(shape, _camera->Position().Distance2Inline(pos), obj->Scale(), obj->Direction());
+    }
+
     const int gpuCov = obj->GetGpuCoverage();
     if (gpuCov == static_cast<int>(GpuDrawCoverage::Full))
     {

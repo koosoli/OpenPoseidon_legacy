@@ -202,6 +202,15 @@ class Scene
 
     mutable float _lodInvWidth;
 
+    // POSEIDON_LOD_TRACE state (see Scene.cpp). Nearest matching shape seen during the
+    // current frame's object walk, flushed and logged ONCE by AdjustComplexity().
+    LODShapeWithShadow* _lodTraceShape = nullptr;
+    float _lodTraceDist2 = 0.0f;
+    float _lodTraceScale = 1.0f;
+    Vector3 _lodTraceDir{0.0f, 0.0f, 1.0f};
+    int _lodTraceFrames = 0;
+    bool _lodTraceDone = false;
+
     float _frameRateSettings;
     float _qualitySettings;
 
@@ -366,6 +375,12 @@ class Scene
                            Vector3Par viewDirection);
     int LevelShadowFromDistance2(LODShape* shape, float distance2, float oScale, Vector3Par direction,
                                  Vector3Par viewDirection);
+
+    // POSEIDON_LOD_TRACE — see Scene.cpp. Observe() is called for EVERY visible object
+    // (before the GPU-driven divert, so retained vegetation is included); Flush() logs the
+    // camera-nearest match once per process.
+    void LodTraceObserve(LODShapeWithShadow* shape, float dist2, float oScale, Vector3Par direction);
+    void LodTraceFlush();
 
     void AdjustComplexity();
 
