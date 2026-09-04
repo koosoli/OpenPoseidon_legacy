@@ -218,6 +218,20 @@ inline std::string MapPropertyForXob(const std::string& sourcePath)
             return debris ? "hide" : "bush";
         if (base.rfind("t_", 0) == 0 && has("/vegetation/tree/"))
             return debris ? "hide" : "tree";
+        // RFG-042: `p_` under `/vegetation/plant/` -- nettles, weeds, ferns, the
+        // knee-high layer. These fell through to `hide`, which costs them the canopy
+        // flags, and the canopy flags are what the wind is gated on: measured in
+        // gpu_driven.wgsl, sway applies only to INST_CANOPY_BUSH|TREE|FOREST. So a
+        // field of nettles stood perfectly still next to a swaying hedge.
+        //
+        // Classed as `bush` and not `tree` deliberately: a tree's crown-Y lift assumes
+        // a bounding centre at mid-trunk, and a 40 cm plant has no trunk.
+        //
+        // Rocks are unaffected and always were -- `/rocks/` returns `rock` above, and
+        // MapRock reaches none of the canopy branches. That gate is the same one that
+        // keeps a fence post from swaying.
+        if (base.rfind("p_", 0) == 0 && has("/vegetation/plant/"))
+            return debris ? "hide" : "bush";
         return "hide";
     }
     if (has("/structures/"))
