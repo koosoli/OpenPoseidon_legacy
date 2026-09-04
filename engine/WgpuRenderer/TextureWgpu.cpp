@@ -1565,6 +1565,37 @@ uint64_t TextureWgpu::EnsureUploaded()
                     ++admit.texturePrepared;
             }
         }
+        // RFG-018: an UNCOMPRESSED source that is already decoded in memory.
+        //
+        // Everything below this point re-opens the file and decodes it as a PAA,
+        // which is the only route the non-block path ever had. That is fine for a
+        // world whose textures are PAAs -- including the CONVERTED Reforger world,
+        // whose exporter bakes them, which is exactly why that path works and this
+        // one did not. A natively loaded `.edds` is neither: it is already parsed,
+        // its pixels are in `_src`, and re-reading it to decode it as a format it
+        // is not can only fail.
+        //
+        // So: if the source has pixels and they are 32-bit, upload them. This is
+        // also the general case for any non-DXT source, not a Reforger special.
+        if (!_gpuHandle && _src != nullptr && _nMipmaps > 0 &&
+            dst == PacARGB8888 && _w > 0 && _h > 0)
+        {
+            std::vector<uint8_t> pixels(static_cast<size_t>(_w) * static_cast<size_t>(_h) * 4);
+            if (_src->GetMipmapData(pixels.data(), _mipmaps[0], 0))
+            {
+                // PacARGB8888 means B,G,R,A in memory here, and the renderer wants
+                // R,G,B,A. Image::FromFile does the same swap at its own call site;
+                // skipping it is a blue island.
+                if (dst == PacARGB8888)
+                    for (size_t i = 0; i + 2 < pixels.size(); i += 4)
+                        std::swap(pixels[i], pixels[i + 2]);
+                CheckProducerMayTouchRenderer("texture create");
+                _gpuHandle = wgr_texture_create_in_slot(
+                    r, static_cast<uint32_t>(_w), static_cast<uint32_t>(_h), WGR_TEXTURE_RGBA8, 1,
+                    WGR_TEXTURE_GEN_MIPS, pixels.data(), static_cast<uint32_t>(pixels.size()), AcquireSlotLease());
+                GTextureStreamStats.frameUploadBytes.fetch_add(pixels.size(), std::memory_order_relaxed);
+            }
+        }
         QIFStreamB stream;
         if (!_gpuHandle)
             stream.AutoOpen(Name());
