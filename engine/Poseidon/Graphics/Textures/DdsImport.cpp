@@ -268,6 +268,41 @@ bool TextureSourceDDS::InitFromMemory(const void* data, size_t size, const char*
                       static_cast<int>(_format));
             return false;
         }
+        // RFG-045: a two-channel normal lands in R,G -- the engine reads A,G.
+        //
+        // `decode_nohq` (gpu_driven.wgsl:635) takes `vec2(texel.a, texel.g)`, which is the
+        // DXT5nm convention every `_nohq.paa` in the OFP/Arma corpus uses. BC5 is by
+        // definition a two-channel format and puts the normal in R,G, so read that way the
+        // X component comes from an alpha channel that carries nothing -- a constant 255,
+        // i.e. x = +1, a normal pointing fully sideways on every texel. That is the
+        // silvery-blue sheen Reforger leaves picked up the moment normal maps started
+        // loading at all.
+        //
+        // Fixed on the data side rather than in the shader: copying R into A makes the
+        // existing decode correct without giving the shader a second convention to branch
+        // on.
+        //
+        // Gated on the NAME as well as on BC5, and the name is the one that matters here:
+        // measured, every Reforger `_NMO` is BC7 (format 13), not BC5. BC7 keeps all four
+        // channels, and Enfusion's packing is Normal.x / Normal.y / roughness / metalness --
+        // so reading X out of alpha reads METALNESS. BC5 is covered too because it is a
+        // two-channel format by definition and can carry nothing else.
+        if (_format == PixelFormat::BC5 || LowerCopy(who).find("_nmo") != std::string::npos)
+        {
+            for (DDSMipLevel& level : _levels)
+                for (size_t i = 0; i + 3 < level.data.size(); i += 4)
+                    level.data[i + 3] = level.data[i + 2]; // ARGB8888 in memory is B,G,R,A
+        }
+        {
+            static int reportedNormal = 0;
+            if (reportedNormal < 4 && LowerCopy(who).find("_nmo") != std::string::npos)
+            {
+                ++reportedNormal;
+                LOG_INFO(Graphics, "EDDS normal map {}: source format {} decoded to 32-bit", who,
+                         static_cast<int>(_format));
+            }
+        }
+
         _format = PixelFormat::ARGB8888;
         // Do NOT claim alpha here. BC7 carries a fourth channel whether or not the
         // author used it, and forcing the flag put every leaf card on the blended
