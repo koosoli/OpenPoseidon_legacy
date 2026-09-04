@@ -266,6 +266,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     Asset/Formats/P3D/test_odol40_arma1.cpp
     Asset/Formats/P3D/test_odol40_material_layout.cpp
     Asset/Formats/P3D/test_model_proxy_bounds.cpp
+    Asset/Formats/P3D/test_p3d_model_load.cpp
     Asset/Addon/test_virtual_path.cpp
     Graphics/Textures/test_paa_taggs.cpp
     Graphics/Textures/test_prepared_textures.cpp

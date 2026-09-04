@@ -344,6 +344,11 @@ class Object: public NetworkObject, public FrameBase, public IAnimator
 	virtual bool IsAnimated( int level ) const; // appearence changed with Animate
 	virtual bool IsAnimatedShadow( int level ) const; // shadow changed with Animate
 
+	// Animate rewrites the SHARED Shape's vertices for this object (destruction deformation),
+	// so it must never be the head -- or a member -- of an instanced run: every instance in the
+	// run draws from the head's deformed mesh. See Object.cpp.
+	virtual bool DeformsSharedShape( int level ) const;
+
 	// Change object position. Used when object is already present in landscape.
 	virtual void Move(Matrix4Par transform);
 	virtual void Move(Vector3Par position);

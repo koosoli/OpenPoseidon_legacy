@@ -12,7 +12,9 @@
 namespace Poseidon
 {
 bool ParseConfig(RStringB dir, void* context);
+bool ParseResource(RStringB dir, void* context);
 bool IsConfigOverriddenByMod();
+bool IsMenuOverriddenByMod();
 void MergeBaseConfigExtra();
 } // namespace Poseidon
 
@@ -27,6 +29,15 @@ bool LoadConfigModThenBase(const char* modDir)
     if (Poseidon::ParseConfig(modDir, nullptr))
         return true;
     Poseidon::ParseConfig("", nullptr);
+    return false;
+}
+
+// Same replay for bin/resource.cpp, which EnumDirectories walks the same way.
+bool LoadResourceModThenBase(const char* modDir)
+{
+    if (Poseidon::ParseResource(modDir, nullptr))
+        return true;
+    Poseidon::ParseResource("", nullptr);
     return false;
 }
 
@@ -120,4 +131,15 @@ TEST_CASE("with no config-replacement mod the base loads and applies its own con
         registry.LoadFromConfig(*cfgLangs);
     CHECK(registry.Find("Tundra") != nullptr);
     registry.ResetToDefaults();
+}
+
+// A mod's bin/resource.cpp that cannot be preprocessed is a FAILED candidate: the enumeration
+// must carry on to the base resource rather than stopping on a half-parsed one.
+TEST_CASE("a malformed mod resource falls back to the base resource", "[config][mods][replace]")
+{
+    CwdGuard cwd(FixtureRoot());
+
+    CHECK_FALSE(LoadResourceModThenBase("mod"));
+    CHECK_FALSE(Poseidon::IsMenuOverriddenByMod());
+    CHECK(Res.FindEntry("RscDisplayLoadMission") != nullptr);
 }

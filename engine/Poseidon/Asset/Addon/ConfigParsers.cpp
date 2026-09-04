@@ -241,7 +241,13 @@ bool ParseResource(RStringB dir, void* context)
         RString fileName;
         if (ResolveFileInDir(binDir, "resource.cpp", file, fileName))
         {
-            ParseTextFileFromResolvedPath(Res, file, fileName);
+            // A resource.cpp that fails preprocessing (a missing #include, say) is a FAILED
+            // directory candidate, not a loaded one. Reporting success here left Res holding
+            // whatever partial parse happened and stopped EnumDirectories, so the base
+            // resource never got its turn and the menu came up empty. ParseConfig already
+            // propagates its parse result the same way (ParseConfigFromDir, line 153).
+            if (!ParseTextFileFromResolvedPath(Res, file, fileName))
+                return false;
             ok = true;
             binDirUsed = binDir;
             break;

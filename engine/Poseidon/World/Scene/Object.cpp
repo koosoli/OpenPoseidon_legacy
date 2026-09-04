@@ -233,6 +233,24 @@ bool Object::IsAnimated(int level) const
     return false;
 }
 
+// True when drawing this object mutates the SHARED Shape rather than only its own instance
+// transform. Distinct from IsAnimated: a ClipLand tree also "animates", but the wgpu path
+// conforms it in the vertex shader (PublishConformPlane) and leaves the shared mesh alone,
+// so it may still be batched. A destroyed building genuinely rewrites the shared vertex
+// positions in Animate, and Deanimate restores them only afterwards -- so an instanced run
+// that drew the head once would render every OTHER copy of that model with the wreck's
+// geometry. Trees are exempt for the same reason IsAnimated exempts them: DestructTree
+// swaps the shape, it does not deform it.
+bool Object::DeformsSharedShape(int level) const
+{
+    Shape* shape = _shape->Level(level);
+    if (!shape || shape->NFaces() <= 0)
+    {
+        return false;
+    }
+    return _isDestroyed && _destroyPhase > 0 && GetDestructType() != DestructTree;
+}
+
 bool Object::IsAnimatedShadow(int level) const
 {
     if (_isDestroyed && _destroyPhase > 0)

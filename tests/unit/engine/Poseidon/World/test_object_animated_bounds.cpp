@@ -39,6 +39,14 @@ class CountingObject : public ObjectPlain
 
     int AnimateCalls() const { return _animateCalls; }
 
+    // _isDestroyed / _destroyPhase are protected and normally set by the damage system
+    // (Dammage.cpp SetDestroyPhase); the test double reaches them directly.
+    void MarkDestroyed()
+    {
+        _isDestroyed = true;
+        _destroyPhase = 255;
+    }
+
   private:
     int _animateCalls = 0;
 };
@@ -88,6 +96,35 @@ TEST_CASE("Object caches undamaged land-clipped bounds", "[World][Object][Bounds
 // have (it SIGSEGVs) -- the invalidation itself is two assignments at the top of both
 // Move overloads (Object.cpp) and is exercised by every streamed world. A unit test for
 // it needs the landscape test scaffolding, not a bigger bare-object test.
+
+TEST_CASE("Destroyed objects report shared shape deformation", "[World][Object][Instancing]")
+{
+    // The instanced-run batcher in SceneDraw asks this before it makes an object the head
+    // of a run, or admits one to a run: Static() alone is true for a wreck, and a wreck
+    // deforms the shared Shape that every other copy of the model draws from.
+    Ref<LODShapeWithShadow> lod = new LODShapeWithShadow();
+    Shape* level = new Shape();
+    lod->AddShape(level, 0.0f);
+
+    Ref<CountingObject> object = new CountingObject(lod, 1);
+    // An empty level is never deformed, whatever its damage state.
+    CHECK_FALSE(object->DeformsSharedShape(0));
+
+    Poly face;
+    face.Init();
+    face.SetN(0);
+    level->AddFace(face);
+    // Intact: batchable.
+    CHECK_FALSE(object->DeformsSharedShape(0));
+
+    object->SetDestructType(DestructBuilding);
+    object->MarkDestroyed();
+    CHECK(object->DeformsSharedShape(0));
+
+    // DestructTree swaps the shape instead of deforming it, so a felled tree stays batchable.
+    object->SetDestructType(DestructTree);
+    CHECK_FALSE(object->DeformsSharedShape(0));
+}
 
 TEST_CASE("Object::RenderId is stable, unique and nonzero", "[World][Object][RenderId]")
 {

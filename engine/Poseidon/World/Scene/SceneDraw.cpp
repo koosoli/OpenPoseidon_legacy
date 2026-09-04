@@ -2455,10 +2455,14 @@ void Scene::DrawObjectsAndShadowsPass1()
             int runEnd = i + 1;
             const int headSpecial = sShape->Special() | oi->object->GetObjSpecial();
             const render::LegacySpec headSpec = render::SplitLegacy(headSpecial);
-            const bool headBatchable = noLocalLights && oi->object->Static() && sShape->NProxies() == 0 &&
-                                       !render::Has(headSpec.routing, render::Routing::OnSurface) &&
-                                       !render::Has(headSpec.routing, render::Routing::IsColored) &&
-                                       oi->object != GWorld->CameraOn();
+            // DeformsSharedShape: a destroyed building stays Static(), so Static() alone does
+            // not keep it out of a run. Its Animate rewrites the SHARED Shape, and an
+            // instanced run draws the head once for all K transforms -- so one wreck in the
+            // run would give every intact copy of that model the wreck's geometry.
+            const bool headBatchable =
+                noLocalLights && oi->object->Static() && !oi->object->DeformsSharedShape(oi->drawLOD) &&
+                sShape->NProxies() == 0 && !render::Has(headSpec.routing, render::Routing::OnSurface) &&
+                !render::Has(headSpec.routing, render::Routing::IsColored) && oi->object != GWorld->CameraOn();
             if (subOn)
             {
                 // Not mutually exclusive by construction -- an object can fail several
@@ -2490,6 +2494,7 @@ void Scene::DrawObjectsAndShadowsPass1()
                         SortObject* oj = _drawMergers[runEnd];
                         if (oj->object->GetShape() != shape || oj->drawLOD != oi->drawLOD ||
                             oj->passNum != oi->passNum || !oj->object->Static() ||
+                            oj->object->DeformsSharedShape(oj->drawLOD) ||
                             (sShape->Special() | oj->object->GetObjSpecial()) != headSpecial || oj->distance2 < d2lo ||
                             oj->distance2 > d2hi)
                         {
