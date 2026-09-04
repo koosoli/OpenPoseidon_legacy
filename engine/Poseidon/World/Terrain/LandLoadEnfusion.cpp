@@ -1645,6 +1645,23 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
                     LOG_INFO(World, "Enfusion native load: building at [{:.0f} {:.0f} {:.0f}] {}",
                              item.position[0], item.position[1], item.position[2], path);
                 }
+                // The same locator for interior dressing: "are the houses furnished"
+                // is answered by standing in front of one, and finding one by eye
+                // costs a run per guess.
+                size_t shownProps = 0;
+                for (const ResolvedPlacement& item : placed)
+                {
+                    if (shownProps >= 6)
+                        break;
+                    if (static_cast<size_t>(item.mesh) >= meshes.size())
+                        continue;
+                    const std::string lower = LowerCopy(meshes[item.mesh].first);
+                    if (lower.find("/furniture/") == std::string::npos)
+                        continue;
+                    ++shownProps;
+                    LOG_INFO(World, "Enfusion native load: furniture at [{:.0f} {:.0f} {:.0f}] {}",
+                             item.position[0], item.position[1], item.position[2], meshes[item.mesh].first);
+                }
             }
             LOG_INFO(World,
                      "Enfusion native load: built {} of {} meshes ({} failed) in {} ms, placed {} objects "
