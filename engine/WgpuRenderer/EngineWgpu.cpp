@@ -3221,6 +3221,21 @@ void EngineWgpu::NextFrame()
                 }
                 sb.splits = {_smCascades.splitViewDist[0], _smCascades.splitViewDist[1], _smCascades.splitViewDist[2],
                              _smCascades.splitViewDist[3]};
+                // RFG-077: say where the object cascades end, once per change. "Are there
+                // tree shadows on that hillside" has been answered from the default
+                // (1200 m) and from a grass-cascade line that is not this; the number that
+                // decides it is the last split the terrain and objects actually sample.
+                {
+                    static float saidSplits[4] = {-1.f, -1.f, -1.f, -1.f};
+                    const float* sv = _smCascades.splitViewDist;
+                    if (saidSplits[0] != sv[0] || saidSplits[1] != sv[1] || saidSplits[2] != sv[2] || saidSplits[3] != sv[3])
+                    {
+                        for (int k = 0; k < 4; ++k)
+                            saidSplits[k] = sv[k];
+                        LOG_INFO(Graphics, "Wgpu object shadow cascades: splits {:.0f} / {:.0f} / {:.0f} / {:.0f} m",
+                                 sv[0], sv[1], sv[2], sv[3]);
+                    }
+                }
                 sb.omni_radius = {_smCascades.omniRadius[0], _smCascades.omniRadius[1], _smCascades.omniRadius[2],
                                   _smCascades.omniRadius[3]};
                 sb.ctl = {static_cast<float>(_smCascades.count), static_cast<float>(_smCascades.omniCount),

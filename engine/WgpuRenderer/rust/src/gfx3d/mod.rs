@@ -1566,6 +1566,11 @@ impl StorageArray {
             return false;
         }
         let cap = bytes.next_power_of_two().max(4096);
+        // RFG-078: remember the largest request per label. When a buffer comes back
+        // invalid the only question is whether the ASK was absurd (a count overflowed
+        // into next_power_of_two) or the card was simply full, and the log had neither
+        // number.
+        crate::gfx3d::storage_array_note(self.label, cap);
         self.buf = Some(device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(self.label),
             size: cap,
@@ -2592,6 +2597,21 @@ pub(crate) fn skin_bake_over_limit_log_line() -> Option<String> {
         "skin bake disabled: the shared vertex pool is {} bytes and a bind group entry          cannot exceed max_storage_buffer_binding_size. Characters lose GPU skinning          until the resident mesh set shrinks.",
         size
     ))
+}
+
+/// RFG-078: the largest `StorageArray::ensure` request seen since the last report,
+/// with its label. Reported from lib.rs; this module has no logger.
+static STORAGE_ARRAY_MAX: std::sync::Mutex<Option<(&'static str, u64)>> = std::sync::Mutex::new(None);
+pub(crate) fn storage_array_note(label: &'static str, bytes: u64) {
+    if let Ok(mut g) = STORAGE_ARRAY_MAX.lock() {
+        if g.map(|(_, b)| bytes > b).unwrap_or(true) {
+            *g = Some((label, bytes));
+        }
+    }
+}
+pub(crate) fn storage_array_log_line() -> Option<String> {
+    let taken = STORAGE_ARRAY_MAX.lock().ok().and_then(|mut g| g.take());
+    taken.map(|(label, bytes)| format!("storage array grew: {} to {:.1} MB", label, bytes as f64 / 1048576.0))
 }
 
 pub(crate) fn normal_relief_log_line() -> String {

@@ -41,6 +41,28 @@ const INDEX_SIZE: u64 = 4; // Uint32
 /// RFG-076: the pool buffers' current byte sizes, reported from lib.rs on the frame after
 /// they change. A native Reforger world drove the pool past what the device would
 /// allocate, `create_buffer` came back invalid, and there was no number anywhere.
+/// RFG-079: the last 16 pool buffer events in order -- (re)make with bytes, retire,
+/// and the retired-list clear that destroys them. `wgr_geo_pool_ibuf` was reported
+/// INVALID at a write while the pool was 17 MB; that is not out-of-memory, it is a
+/// question of which generation of the buffer was written when, and only the order
+/// can answer it.
+pub(crate) static GEO_POOL_EVENTS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+pub(crate) fn pool_event(what: &str) {
+    if let Ok(mut g) = GEO_POOL_EVENTS.lock() {
+        if g.len() >= 16 {
+            g.remove(0);
+        }
+        g.push(what.to_string());
+    }
+}
+pub(crate) fn geometry_pool_events_log_line() -> Option<String> {
+    let taken: Vec<String> = GEO_POOL_EVENTS.lock().ok().map(|mut g| std::mem::take(&mut *g)).unwrap_or_default();
+    if taken.is_empty() {
+        return None;
+    }
+    Some(format!("geometry pool events: {}", taken.join(" > ")))
+}
+
 pub(crate) static GEO_POOL_VBUF_BYTES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 pub(crate) static GEO_POOL_IBUF_BYTES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static GEO_POOL_REPORTED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -329,6 +351,7 @@ impl GeometryPool {
         // evidence was an empty landscape and two validation errors naming the label.
         let bytes = verts as u64 * VERT_SIZE;
         GEO_POOL_VBUF_BYTES.store(bytes, std::sync::atomic::Ordering::Relaxed);
+        pool_event(&format!("make vbuf {:.1}MB", bytes as f64 / 1048576.0));
         device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("wgr_geo_pool_vbuf"),
             size: verts as u64 * VERT_SIZE,
@@ -347,6 +370,7 @@ impl GeometryPool {
         // evidence was an empty landscape and two validation errors naming the label.
         let bytes = indices as u64 * INDEX_SIZE;
         GEO_POOL_IBUF_BYTES.store(bytes, std::sync::atomic::Ordering::Relaxed);
+        pool_event(&format!("make ibuf {:.1}MB", bytes as f64 / 1048576.0));
         device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("wgr_geo_pool_ibuf"),
             size: indices as u64 * INDEX_SIZE,
@@ -359,6 +383,7 @@ impl GeometryPool {
     }
 
     fn retire(&mut self, old: wgpu::Buffer) {
+        pool_event(&format!("retire {:.1}MB", old.size() as f64 / 1048576.0));
         self.retired.push(old);
     }
 
@@ -374,6 +399,9 @@ impl GeometryPool {
     // Returns true if a shrink actually reallocated (the caller must then drop any cache
     // holding a pool buffer, exactly as it does for a growth).
     pub fn frame_submitted(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) -> bool {
+        if !self.retired.is_empty() {
+            pool_event(&format!("clear {} retired", self.retired.len()));
+        }
         self.retired.clear();
         self.maybe_shrink(device, queue)
     }
@@ -505,6 +533,19 @@ impl GeometryPool {
         }
         let vbase = self.alloc_verts(device, queue, verts.len() as u32);
         let ibase = self.alloc_indices(device, queue, indices.len() as u32);
+        // RFG-079: a write past the end of either buffer is reported here, once, with the
+        // numbers. `wgr_geo_pool_ibuf` went INVALID at a write with the pool at 2 MB and no
+        // growth or retire in between -- so the write itself is the suspect.
+        {
+            let vend = vbase as u64 * VERT_SIZE + verts.len() as u64 * VERT_SIZE;
+            let iend = ibase as u64 * INDEX_SIZE + indices.len() as u64 * INDEX_SIZE;
+            if vend > self.vbuf.size() || iend > self.ibuf.size() {
+                pool_event(&format!(
+                    "OVERRUN write v[{}+{}]/{} i[{}+{}]/{}",
+                    vbase, verts.len(), self.vbuf.size() / VERT_SIZE, ibase, indices.len(), self.ibuf.size() / INDEX_SIZE
+                ));
+            }
+        }
         queue.write_buffer(
             &self.vbuf,
             vbase as u64 * VERT_SIZE,
