@@ -53,6 +53,10 @@ namespace Poseidon
 void Landscape::Init()
 {
     int i, x, z;
+    // RFG-062: GLandscape is a reused singleton, so a world loaded after a native
+    // Reforger one would otherwise inherit its surface names and grow Everon's clutter
+    // on Malden. The native loader refills this immediately after calling Init().
+    _enfusionSurfaces.Resize(0);
     const ParamEntry& sky = Remaster >> "CfgLandscapeSky";
     RStringB skyName = sky >> "sky" >> "model";
     RStringB starsName = sky >> "stars" >> "model";

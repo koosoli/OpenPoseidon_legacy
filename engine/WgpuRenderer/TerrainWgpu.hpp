@@ -7,6 +7,7 @@
 
 #include <wgpu_renderer.hpp>
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -16,6 +17,27 @@ class EngineWgpu;
 class Landscape;
 class Camera;
 class TextureWgpu;
+
+// The grass geography word and clutter atlas geometry, shared by the two bakes
+// that write it (the Arma-generation LCA mask bake in TerrainWgpu.cpp and the
+// Enfusion surface bake in TerrainWgpuEnfusionClutter.cpp). The full bit layout
+// is documented at the top of TerrainWgpu.cpp; it is mirrored by GEO_* in
+// grass/grass.wgsl, so all three change together.
+namespace GrassGeo
+{
+constexpr uint32_t TextureCell = 0x80000000u;
+constexpr uint32_t AuthoredCell = 0x00008000u;
+constexpr uint32_t CoverageShift = 16u;
+constexpr uint32_t CoverageMask = 0x007f0000u;
+constexpr uint32_t SurfaceShift = 23u;
+constexpr uint32_t SurfaceMask = 0x0f800000u;
+constexpr uint32_t RunCountShift = 28u;
+constexpr uint32_t RunCountMask = 0x70000000u;
+constexpr uint32_t AtlasLayers = 32;
+constexpr uint32_t AtlasMaxRun = 8;
+constexpr int AtlasSize = 512;
+constexpr uint32_t BakedMask = TextureCell | AuthoredCell | CoverageMask | SurfaceMask | RunCountMask;
+} // namespace GrassGeo
 
 // Draws the terrain via wgpu: uploads the heightmap once per map, builds a CDLOD
 // quadtree, and each frame emits the selected grid nodes as GPU instances.
@@ -54,6 +76,12 @@ class TerrainWgpu : public ITerrainRenderer
     // OFP world and on any world whose clutter did not resolve -- both keep the
     // procedural blades. Read by EngineWgpu to auto-enable the photo-tuft path.
     bool GrassHasMapClutterAtlas() const { return !_clutterAtlas.empty() && _clutterAtlasLayers > 1; }
+    // RFG-062: the native Enfusion clutter binding (TerrainWgpuEnfusionClutter.cpp).
+    // `HasEnfusionSurfaces` is false on every world that is not a natively loaded
+    // Reforger one, which is what the dev panel greys the checkbox on.
+    bool HasEnfusionSurfaces() const { return _hasEnfusionSurfaces; }
+    bool EnfusionClutterEnabled() const { return _enfusionClutterEnabled; }
+    void SetEnfusionClutterEnabled(bool enabled);
     // Photographed clump families actually found on disk, in atlas-layer order
     // (index 0 = the primary clump). Discovered, never hardcoded, so dropping a
     // grass pack into assets/grass/more_grass is all it takes to get one.
@@ -84,6 +112,14 @@ class TerrainWgpu : public ITerrainRenderer
     // the authored surfaces; it is set only on a world change, so a live toggle
     // is not undone by the next re-upload.
     bool BakeAuthoredGrassMask(const Landscape& land, std::vector<uint32_t>& geography, bool refreshSelection);
+    // RFG-062: the same per-cell answer for a NATIVELY loaded Enfusion world, which
+    // has no LCA mask to decode but does carry one authored surface index per land
+    // cell and the surface's `.emat` path per palette entry. Walks the map's own
+    // ClutterConfig -> set -> collection -> plant chain out of the mounted `.pak`s
+    // and builds the same contiguous-run atlas the Arma path builds. Returns false
+    // -- and leaves `geography` untouched -- on every other world. Implemented in
+    // TerrainWgpuEnfusionClutter.cpp.
+    bool BakeEnfusionClutter(const Landscape& land, std::vector<uint32_t>& geography, bool refreshSelection);
     // Builds the world's own clutter atlas: one layer per clutter class, the
     // classes of a surface consecutive so the shader selects within a run.
     // `surfaces` is (surface texture key, character) in the order the runs
@@ -161,6 +197,11 @@ class TerrainWgpu : public ITerrainRenderer
     std::string _grassBladeAtlasWorld;
     std::vector<bool> _grassSurfaceEnabled;
     bool _grassNeedsCompatibilityOverride = false;
+    // RFG-062: set at upload from Landscape::GetEnfusionSurfaceCount(), so the dev
+    // panel can say "this world has no Enfusion surfaces" rather than offering a
+    // switch that does nothing. Default ON where the world IS Enfusion.
+    bool _hasEnfusionSurfaces = false;
+    bool _enfusionClutterEnabled = true;
 
     // The map's own clutter definitions, rebuilt per world. Empty for every OFP
     // world by construction (that generation defines none of these classes) and

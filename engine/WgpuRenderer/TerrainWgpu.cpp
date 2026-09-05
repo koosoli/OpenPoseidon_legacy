@@ -65,14 +65,16 @@ constexpr int TerrainGridN = 32;
 //   bits 28-30  reserved, always 0.
 //   bit  31     GrassTextureCell -- this cell can grow grass at all.
 // ---------------------------------------------------------------------------
-constexpr uint32_t GrassTextureCell = 0x80000000u;
-constexpr uint32_t GrassAuthoredCell = 0x00008000u;
-constexpr uint32_t GrassCoverageShift = 16u;
-constexpr uint32_t GrassCoverageMask = 0x007f0000u;
-constexpr uint32_t GrassSurfaceShift = 23u;
-constexpr uint32_t GrassSurfaceMask = 0x0f800000u;
-constexpr uint32_t GrassRunCountShift = 28u;
-constexpr uint32_t GrassRunCountMask = 0x70000000u;
+// Aliases: the values themselves live in TerrainWgpu.hpp so the Enfusion clutter
+// bake in its own translation unit writes exactly the same word.
+constexpr uint32_t GrassTextureCell = GrassGeo::TextureCell;
+constexpr uint32_t GrassAuthoredCell = GrassGeo::AuthoredCell;
+constexpr uint32_t GrassCoverageShift = GrassGeo::CoverageShift;
+constexpr uint32_t GrassCoverageMask = GrassGeo::CoverageMask;
+constexpr uint32_t GrassSurfaceShift = GrassGeo::SurfaceShift;
+constexpr uint32_t GrassSurfaceMask = GrassGeo::SurfaceMask;
+constexpr uint32_t GrassRunCountShift = GrassGeo::RunCountShift;
+constexpr uint32_t GrassRunCountMask = GrassGeo::RunCountMask;
 
 // The world's clutter atlas. 32 layers because a surface's clutter classes must
 // occupy a CONTIGUOUS run -- that is what lets the shader select one with
@@ -84,9 +86,9 @@ constexpr uint32_t GrassRunCountMask = 0x70000000u;
 // 512 rather than 1024 square: this atlas feeds the MID ring only, the plates
 // are 54-89% empty so a cropped sub-image carries what a whole 1024 plate did,
 // and 32 layers at 512 is 42.7 MB against the 48 MB nine 1024 layers cost.
-constexpr uint32_t GrassAtlasLayers = 32;
-constexpr uint32_t GrassAtlasMaxRun = 8;
-constexpr int GrassAtlasSize = 512;
+constexpr uint32_t GrassAtlasLayers = GrassGeo::AtlasLayers;
+constexpr uint32_t GrassAtlasMaxRun = GrassGeo::AtlasMaxRun;
+constexpr int GrassAtlasSize = GrassGeo::AtlasSize;
 // Every bit this file writes on top of GeographyInfo, so a re-bake starts clean.
 constexpr uint32_t GrassBakedMask =
     GrassTextureCell | GrassAuthoredCell | GrassCoverageMask | GrassSurfaceMask | GrassRunCountMask;
@@ -1804,20 +1806,48 @@ void TerrainWgpu::UploadGeography(const Landscape& land)
         return;
     }
     const int layerCount = std::max(0, land.GetNTextures());
+    // RFG-062: a natively loaded Enfusion world names its palette entries by `.emat`
+    // path. Its Textures are CreateDynamic handles with no name at all, so both the
+    // legacy signals below classify every one of Everon's 22 surfaces as not-grass
+    // ("0 of 22 layers grass-capable ... 1 layers the surface catalogue recognised"),
+    // and the whole-world fallback does not fire because that stray 1 keeps
+    // resolvedLayers non-zero. The native bake answers this world instead.
+    _hasEnfusionSurfaces = land.GetEnfusionSurfaceCount() == layerCount && layerCount > 0;
+    const auto layerName = [&](int i) -> std::string
+    {
+        if (_hasEnfusionSurfaces)
+        {
+            return land.GetEnfusionSurface(i);
+        }
+        return land.GetTexture(i) ? land.GetTexture(i)->Name() : "<null>";
+    };
     bool layersChanged = static_cast<int>(_grassSurfaceNames.size()) != layerCount;
     if (!layersChanged)
     {
         for (int i = 0; i < layerCount; ++i)
         {
-            const char* name = land.GetTexture(i) ? land.GetTexture(i)->Name() : "<null>";
-            if (_grassSurfaceNames[static_cast<size_t>(i)] != name)
+            if (_grassSurfaceNames[static_cast<size_t>(i)] != layerName(i))
             {
                 layersChanged = true;
                 break;
             }
         }
     }
-    if (layersChanged)
+    if (layersChanged && _hasEnfusionSurfaces)
+    {
+        // Every surface starts selectable; BakeEnfusionClutter narrows it to the ones
+        // whose ClutterConfig actually resolved a plant.
+        _grassSurfaceNames.clear();
+        _grassSurfaceEnabled.assign(static_cast<size_t>(layerCount), true);
+        for (int i = 0; i < layerCount; ++i)
+        {
+            _grassSurfaceNames.emplace_back(layerName(i));
+        }
+        LOG_INFO(Graphics, "Wgpu grass surfaces: {} native Enfusion surfaces; the legacy name/class classification is "
+                           "skipped on this world",
+                 layerCount);
+    }
+    else if (layersChanged)
     {
         _grassSurfaceNames.clear();
         _grassSurfaceEnabled.clear();
@@ -1950,7 +1980,11 @@ void TerrainWgpu::UploadGeography(const Landscape& land)
         BuildSurfaceCatalog(land);
         _surfaceCatalogWorld = world;
     }
-    const bool authored = BakeAuthoredGrassMask(land, geography, layersChanged);
+    // RFG-062: the native Enfusion answer first, because a natively loaded world has
+    // no authored A3 materials at all and BakeAuthoredGrassMask would return false
+    // for it -- which is exactly the state that left Everon bare.
+    const bool nativeClutter = BakeEnfusionClutter(land, geography, layersChanged);
+    const bool authored = nativeClutter || BakeAuthoredGrassMask(land, geography, layersChanged);
     if (!authored)
     {
         // THE hazard, and it lives here rather than in the upload: the atlas is a

@@ -60,6 +60,7 @@ add_library(WgpuRenderer STATIC
     EngineWgpuTextInput.cpp
     GraphicsBackendWgpu.cpp
     TerrainWgpu.cpp
+    TerrainWgpuEnfusionClutter.cpp
     WaterWgpu.cpp
     TextureWgpu.cpp
     TextureBankWgpu.cpp

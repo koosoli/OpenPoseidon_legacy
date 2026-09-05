@@ -1485,6 +1485,11 @@ class Engine : public IGraphicsEngine
         // Auto is the default. midPhotoTuft is kept for saved-settings compatibility and reads
         // as source 2 when set.
         int clutterSource = 0;
+        // RFG-062: bind a NATIVELY loaded Enfusion world's ground clutter from the map's own
+        // ClutterConfig chain in the `.pak`s. Default on, and inert by construction on every
+        // world that is not one (Landscape::GetEnfusionSurfaceCount() is 0 there), so this is
+        // a switch for the native path only -- it does not touch OFP or Arma worlds.
+        bool enfusionClutter = true;
         float densityBoost = 4.0f; // turns base spacing into a denser placement grid
         float height = 1.40f;      // authored blade height multiplier
         // The default follows the weather system that also drives smoke,
@@ -1550,6 +1555,10 @@ class Engine : public IGraphicsEngine
       /// True while the loaded world supplied its OWN clutter (CfgSurfaces atlas), i.e. what
       /// GrassSettings::clutterSource 0 (Auto) would draw here. False on every OFP world.
       virtual bool HasGrassMapClutter() const { return false; }
+      /// True while the loaded world is a natively loaded Enfusion (Arma Reforger) one, i.e.
+      /// while GrassSettings::enfusionClutter has anything to act on. False everywhere else,
+      /// which is what the Grass tab greys the switch on.
+      virtual bool HasEnfusionSurfaces() const { return false; }
 
       /// The photographed clump families actually discovered on disk, in atlas
       /// layer order (0 = the primary clump). Nothing about them is hardcoded:

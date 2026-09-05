@@ -3380,6 +3380,29 @@ void DrawGrassTab()
     Dev::PanelHelp("Photo cards are alpha-tested clump plates for close and mid grass; procedural is stable "
                    "individual textured blades nearby and ribbons in the mid ring. Everything in THIS section "
                    "does nothing unless cards are on screen.");
+    // RFG-062: where the map atlas COMES FROM on a natively loaded Reforger world.
+    {
+        const bool nativeWorld = GEngine->HasEnfusionSurfaces();
+        ImGui::BeginDisabled(!nativeWorld);
+        if (Dev::Checkbox("Enfusion map clutter (native Reforger worlds)", &grass.enfusionClutter))
+        {
+            changed = true;
+        }
+        ImGui::EndDisabled();
+        if (nativeWorld)
+        {
+            Dev::PanelHelp("Walks the world's own ClutterConfig -> clutter set -> collection -> plant chain out of "
+                           "the mounted .pak archives and builds the per-surface card atlas from it, exactly where "
+                           "the Arma path uses CfgSurfaces. Off falls back to the procedural blades. Rebuilding the "
+                           "atlas takes a moment on the frame the switch moves.");
+        }
+        else
+        {
+            Dev::PanelHelp("This world is not a natively loaded Enfusion (Arma Reforger) one, so the switch has "
+                           "nothing to act on. A CONVERTED Reforger world is an Arma-format world and takes the "
+                           "CfgSurfaces path above instead.");
+        }
+    }
     ImGui::BeginDisabled(!(grass.clutterSource == 2 || (grass.clutterSource == 0 && GEngine->HasGrassMapClutter())));
     changed |= Dev::SliderFloat("Photo clump brightness", &grass.photoTuftBrightness, 0.50f, 2.50f, "%.2fx");
     Dev::PanelHelp("1.00 = the calibrated source plate; raise it to lift dark clumps.");

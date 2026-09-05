@@ -1353,6 +1353,9 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
     const int paletteSize = std::max<int>(1, static_cast<int>(d.materials.size()));
     _texture.Resize(paletteSize);
     _a3TerrainMaterials.Resize(paletteSize);
+    // RFG-062: the surface NAME per palette entry, which is what the renderer's clutter
+    // binding hangs on. The palette already carries it -- it just never left this file.
+    _enfusionSurfaces.Resize(paletteSize);
     int bound = 0;
     std::string firstFailure;
     for (int i = 0; i < paletteSize; ++i)
@@ -1368,6 +1371,7 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
         _texture[i].offsetUV = true;
         if (static_cast<size_t>(i) >= d.materials.size())
             continue;
+        _enfusionSurfaces[i] = RStringB(d.materials[i].c_str());
         std::string why;
         _texture[i].texture = ResolveSurfaceTexture(EnfusionMount::Instance(), d.materials[i], why);
         if (_texture[i].texture)

@@ -532,6 +532,15 @@ class Landscape : public SerializeClass
     // entry; the WGPU path consumes this lossless authored description.
     AutoArray<A3TerrainMaterial> _a3TerrainMaterials;
 
+    // RFG-062: the Enfusion `.emat` surface path per terrain palette entry, filled ONLY
+    // by the native Reforger loader (LandLoadEnfusion.cpp). Every other world leaves it
+    // empty, which is what keeps the native clutter binding inert by CONSTRUCTION rather
+    // than by a name test that could one day match an OFP texture. Kept beside
+    // _a3TerrainMaterials rather than inside it: an A3TerrainMaterial with a non-zero
+    // surfaceCount flips the terrain shader onto the paged authored path, which a native
+    // world has no satellite or LCA mask to feed.
+    AutoArray<RStringB> _enfusionSurfaces;
+
     Array2D<short> _tex;
     Array2D<ObjectList> _objects;
 
@@ -975,6 +984,13 @@ class Landscape : public SerializeClass
     const A3TerrainMaterial* GetA3TerrainMaterial(int id) const
     {
         return id >= 0 && id < _a3TerrainMaterials.Size() ? &_a3TerrainMaterials[id] : nullptr;
+    }
+    // The Enfusion surface `.emat` this palette entry was bound from, or "" -- and 0 on
+    // every world that is not a natively loaded Reforger one. See _enfusionSurfaces.
+    int GetEnfusionSurfaceCount() const { return _enfusionSurfaces.Size(); }
+    const char* GetEnfusionSurface(int id) const
+    {
+        return id >= 0 && id < _enfusionSurfaces.Size() ? (const char*)_enfusionSurfaces[id] : "";
     }
 
     // data access

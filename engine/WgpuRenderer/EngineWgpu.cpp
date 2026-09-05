@@ -10061,6 +10061,13 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
     {
         clutterSource = 2; // legacy checkbox / saved setting
     }
+    // RFG-062: the native Enfusion binding is a WORLD-side fact -- it decides what the
+    // atlas and the geography bits contain -- so it is applied to the terrain rather
+    // than pushed into the per-frame params. The call is a no-op unless the flag moved.
+    if (_terrain != nullptr)
+    {
+        _terrain->SetEnfusionClutterEnabled(settings.enfusionClutter);
+    }
     const bool haveMapAtlas = _terrain && _terrain->GrassHasMapClutterAtlas();
     const bool mapClutter = clutterSource == 0 && haveMapAtlas;
     const bool photoTuft = mapClutter || clutterSource == 2;
@@ -10328,6 +10335,11 @@ bool EngineWgpu::HasGrassPhotoClumps() const
 bool EngineWgpu::HasGrassMapClutter() const
 {
     return _terrain && _terrain->GrassHasMapClutterAtlas();
+}
+
+bool EngineWgpu::HasEnfusionSurfaces() const
+{
+    return _terrain && _terrain->HasEnfusionSurfaces();
 }
 
 int EngineWgpu::GetGrassPhotoFamilyCount() const
