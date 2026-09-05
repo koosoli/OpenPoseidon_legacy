@@ -2620,6 +2620,35 @@ void Landscape::InitObjectVehicles()
                 }
             }
         }
+        // RFG-080: the buildings too. A house-class model was promoted to a Building
+        // and REMOVED from the cell lists above, so the cell walk never sees it --
+        // and the pub is exactly such a model. Measured at the café at [5093 3996]:
+        // `hospoda_mesto.p3d` 7.8 m from the camera, thirteen chair proxies inside
+        // it, and "things: 0 from proxies of 0 parents". `changed` still holds the
+        // promoted objects, so they get the same proxy test here.
+        if (mt.proxies)
+        {
+            for (int i = 0; i < changed.Size(); i++)
+            {
+                Object*             obj = changed[i];
+                LODShapeWithShadow* shape = obj ? obj->GetShape() : nullptr;
+                if (!shape || shape->NLevels() <= 0)
+                    continue;
+                const Shape* lod0 = shape->LevelOpaque(0);
+                if (!lod0)
+                    continue;
+                for (int p = 0; p < lod0->NProxies(); p++)
+                {
+                    const ProxyObject& proxy = lod0->Proxy(p);
+                    const LODShape*    pshape = proxy.obj ? proxy.obj->GetShape() : nullptr;
+                    if (MapThings::ThingTypeForShape(pshape))
+                    {
+                        parents.Add(obj);
+                        break;
+                    }
+                }
+            }
+        }
         for (int i = 0; i < replace.Size(); i++)
         {
             Object*       obj = replace[i];
