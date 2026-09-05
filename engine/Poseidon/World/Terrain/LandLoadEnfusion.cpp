@@ -1448,6 +1448,18 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
                 return (v != nullptr && *v != 0) ? static_cast<float>(std::atof(v)) : 800.0f;
             }();
 
+            const auto isStructure = [](const std::string& path)
+            {
+                const std::string lower = LowerCopy(path);
+                return lower.find("/structures/") != std::string::npos ||
+                       lower.find("/props/") != std::string::npos ||
+                       lower.find("/military/") != std::string::npos;
+            };
+
+            std::vector<bool> meshIsStructure(meshes.size(), false);
+            for (size_t i = 0; i < meshes.size(); ++i)
+                meshIsStructure[i] = isStructure(meshes[i].first);
+
             std::vector<bool> meshIsNear(meshes.size(), false);
             size_t nearPlacements = 0;
             for (const ResolvedPlacement& item : placed)
@@ -1472,14 +1484,6 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
             // bug and is not one. Every second slot now goes to a structure while any
             // structure is left unbuilt, so a town has houses at any budget that can
             // afford trees.
-            const auto isStructure = [](const std::string& path)
-            {
-                const std::string lower = LowerCopy(path);
-                return lower.find("/structures/") != std::string::npos ||
-                       lower.find("/props/") != std::string::npos ||
-                       lower.find("/military/") != std::string::npos;
-            };
-
             std::vector<std::pair<size_t, uint32_t>> structures;
             std::vector<std::pair<size_t, uint32_t>> others;
             for (size_t i = 0; i < meshes.size(); ++i)
@@ -1578,6 +1582,8 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
             size_t buriedObjects = 0;
             size_t buriedStructures = 0;
             size_t rescuedObjects = 0;
+            size_t floatingObjects = 0;
+            std::string firstFloating;
             std::string firstBuried;
             std::string firstBuriedStructure;
             for (const ResolvedPlacement& item : placed)
@@ -1591,16 +1597,20 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
                 float y = item.position[1];
                 if (item.terrainRelative)
                 {
-                    // Against the RAW Enfusion heightfield, not SurfaceY: the engine's
-                    // grid is resampled from 2 m to 6.25 m, so its surface is not the
-                    // one these offsets were authored against, and on a slope the
-                    // difference is what makes a tree float or sink.
-                    const uint32_t sx = std::min<uint32_t>(
-                        gridW - 1, static_cast<uint32_t>(item.position[0] / d.cellSize + 0.5f));
-                    const uint32_t sz = std::min<uint32_t>(
-                        gridH - 1, static_cast<uint32_t>(item.position[2] / d.cellSize + 0.5f));
-                    const uint16_t raw = terrain.heights[static_cast<size_t>(sz) * gridW + sx];
-                    y += static_cast<float>(raw) * d.heightScale + d.heightOffset;
+                    // RFG-051: against the surface that is DRAWN, not the one the file
+                    // was authored on.
+                    //
+                    // This used the raw 2 m Enfusion heightfield, on the reasoning that
+                    // the offsets were authored against it and our 12.5 m resample is a
+                    // different surface. True, and exactly backwards for rendering: an
+                    // object has to stand on the ground the player can see. On flat land
+                    // the two agree within centimetres and the choice does not show. At
+                    // a cliff they differ by the height of the cliff -- and Everon's
+                    // coast came out with a curtain of boulders hanging a hundred metres
+                    // up in the air, tracing the clifftop exactly, because each one sat
+                    // correctly on a fine-grid surface that is nowhere near the coarse
+                    // one underneath it.
+                    y += SurfaceY(item.position[0], item.position[2]);
                 }
                 // RFG-047: rescue a placement that would land absurdly deep.
                 //
@@ -1618,7 +1628,20 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
                 // reading is simply wrong and the offset reading is the one that puts
                 // the part back on its building.
                 const float groundHere = SurfaceY(item.position[0], item.position[2]);
-                if (!item.terrainRelative && y < groundHere - 10.0f)
+                // Structures ONLY, and that restriction was learned the expensive way.
+                //
+                // Applied to everything, the rescue lifted Everon's coastal boulders into
+                // the sky: a beach rock sits at an absolute Y of a couple of metres, and
+                // where it stands at the foot of a cliff the 12.5 m terrain sample reads
+                // the CLIFF TOP, a hundred metres up. The rock then looks "buried" and is
+                // rescued to ground + 2 -- a hundred metres above where it belongs, and
+                // clearly visible as rocks hanging in mid-air over the coast road.
+                //
+                // The mechanism this repairs only ever applied to structures: a building
+                // part whose Y is an offset within its parent. Rocks and vegetation are
+                // placed absolutely and must be left alone, however wrong the coarse
+                // terrain says they look.
+                if (!item.terrainRelative && y < groundHere - 10.0f && meshIsStructure[item.mesh])
                 {
                     y = groundHere + item.position[1];
                     ++rescuedObjects;
@@ -1637,6 +1660,23 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
                 // air and have different causes, and nothing so far could tell them
                 // apart. Measured against the engine's own surface, which is what the
                 // player stands on.
+                // RFG-052: the mirror of the buried counter. Everon's coast shows a
+                // curtain of boulders hanging in mid-air, and three plausible causes were
+                // each ruled out by a capture that looked identical -- the rescue rule,
+                // the fine-vs-coarse height source, and the land grid resolution. None of
+                // them moved a pixel. So the objects say what they are instead of being
+                // guessed at: a counter cannot be argued with the way a screenshot can.
+                if (y > groundHere + 50.0f)
+                {
+                    ++floatingObjects;
+                    if (firstFloating.empty())
+                        firstFloating = meshes[item.mesh].first + " at [" +
+                                        std::to_string(int(item.position[0])) + " " +
+                                        std::to_string(int(item.position[2])) + "] " +
+                                        std::to_string(int(y - groundHere)) + " m up, coordsY " +
+                                        std::to_string(int(item.position[1])) +
+                                        (item.terrainRelative ? " (terrain-relative)" : " (absolute)");
+                }
                 if (y < groundHere - 2.0f)
                 {
                     ++buriedObjects;
@@ -1817,7 +1857,9 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
                 for (const auto& [path, count] : textureUse)
                     LOG_INFO(World, "Enfusion native load: road surface {}x '{}'", count,
                              path.empty() ? "(none)" : path);
-                LOG_INFO(World, "Enfusion native load: {} roads built ({} failed, {} textured), {:.1f} km, {} ms",
+                LOG_INFO(World, "Enfusion native load: {} objects more than 50 m above the terrain{}",
+                     floatingObjects, firstFloating.empty() ? "" : ("; first: " + firstFloating));
+            LOG_INFO(World, "Enfusion native load: {} roads built ({} failed, {} textured), {:.1f} km, {} ms",
                          roadsBuilt, roadsFailed, roadTextured, roadKm,
                          Poseidon::Foundation::GlobalTickCount() - roadStart);
             }
