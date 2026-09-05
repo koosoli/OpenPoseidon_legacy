@@ -8,6 +8,7 @@
 #include <Poseidon/IO/Streams/QBStream.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <cstring>
 #include <fstream>
 
@@ -90,6 +91,15 @@ PacFormat ToPacFormat(PixelFormat format)
             return PacDXT3;
         case PixelFormat::DXT5:
             return PacDXT5;
+        // RFG-047. Reached only when the compressed pass-through is on and the levels
+        // were left as blocks; the decode branch rewrites _format to ARGB8888 first, so
+        // a decoded texture never lands here.
+        case PixelFormat::BC4:
+            return PacBC4;
+        case PixelFormat::BC5:
+            return PacBC5;
+        case PixelFormat::BC7:
+            return PacBC7;
         default:
             return PacARGB8888;
     }
@@ -120,7 +130,8 @@ bool SplitEnfusionColourName(const char* name, float rgb[3])
 
 bool IsBlockFormat(PixelFormat format)
 {
-    return format == PixelFormat::DXT1 || format == PixelFormat::DXT3 || format == PixelFormat::DXT5;
+    return format == PixelFormat::DXT1 || format == PixelFormat::DXT3 || format == PixelFormat::DXT5 ||
+           format == PixelFormat::BC4 || format == PixelFormat::BC5 || format == PixelFormat::BC7;
 }
 
 inline uint16_t To1555(int r, int g, int b, int a)
@@ -157,12 +168,41 @@ PackedColor AverageOfSmallest(const std::vector<DDSMipLevel>& levels, PixelForma
                        static_cast<uint8_t>(sumB / pixels), static_cast<uint8_t>(sumA / pixels));
 }
 
+// RFG-047. `std::atomic` rather than a plain bool: the object-stream workers construct
+// texture sources off the main thread, and the switch is flipped from the dev panel.
+std::atomic<bool> GDdsCompressedPassthrough{false};
+
 } // namespace
+
+void SetDdsCompressedPassthrough(bool on)
+{
+    const bool was = GDdsCompressedPassthrough.exchange(on, std::memory_order_relaxed);
+    if (was != on)
+        LOG_INFO(Graphics,
+                 "DDS compressed pass-through {} -- BC4/BC5/BC7 are {} (already-uploaded textures keep the "
+                 "form they were loaded in; reload the world for a clean A/B)",
+                 on ? "ON" : "OFF", on ? "handed to the GPU as blocks" : "decoded to 32-bit as before");
+}
+
+bool DdsCompressedPassthrough()
+{
+    return GDdsCompressedPassthrough.load(std::memory_order_relaxed);
+}
+
+bool IsEnfusionRgNormalName(const char* name)
+{
+    // The same predicate RFG-045 used for its channel copy, and for the same reason: every
+    // Reforger normal map measured is `*_NMO`, and every one of them is BC7 (format 13),
+    // packing Normal.x / Normal.y / roughness / metalness. A BC5 file is a two-channel
+    // format by definition and can carry nothing else, so it qualifies on format alone --
+    // but the format is not visible from a name, so the caller ORs that in itself.
+    return name != nullptr && LowerCopy(name).find("_nmo") != std::string::npos;
+}
 
 TextureSourceDDS::TextureSourceDDS() = default;
 TextureSourceDDS::~TextureSourceDDS() = default;
 
-bool TextureSourceDDS::InitFromMemory(const void* data, size_t size, const char* nameForErrors)
+bool TextureSourceDDS::InitFromMemory(const void* data, size_t size, const char* nameForErrors, bool forceDecode)
 {
     const char* who = nameForErrors ? nameForErrors : "?";
 
@@ -201,6 +241,139 @@ bool TextureSourceDDS::InitFromMemory(const void* data, size_t size, const char*
     if (_levels.empty())
         return false;
 
+    // RFG-047: the level cap, shared by BOTH paths so the A/B moves ONE variable.
+    //
+    // RFG-044 introduced it as a decode-cost cap; it is really a texel-budget cap and it
+    // belongs to the texture, not to the decoder. Sharing it means the compressed and the
+    // decoded upload of the same file describe the SAME image at the SAME resolution, so
+    // the difference between them is bytes and nothing else -- which is the only way the
+    // saving can be quoted as a number rather than as a trade.
+    const auto capLevels = [this]
+    {
+        const int maxEdge = []
+        {
+            const char* v = std::getenv("POSEIDON_DECODED_MAX_EDGE");
+            const int parsed = (v != nullptr && *v != 0) ? std::atoi(v) : 0;
+            return (parsed >= 64 && parsed <= 8192) ? parsed : 1024;
+        }();
+        size_t firstLevel = 0;
+        while (firstLevel + 1 < _levels.size() &&
+               (_levels[firstLevel].width > maxEdge || _levels[firstLevel].height > maxEdge))
+            ++firstLevel;
+        if (firstLevel > 0)
+        {
+            _levels.erase(_levels.begin(), _levels.begin() + static_cast<ptrdiff_t>(firstLevel));
+            _w = _levels[0].width;
+            _h = _levels[0].height;
+        }
+    };
+
+    // RFG-047: hand the blocks straight through when the backend speaks them.
+    //
+    // The decode below exists only because the Pac container has no name for these three
+    // formats; the GPU has had one since D3D11. Passing them through saves 4x the bytes for
+    // BC7 and 8x for BC5, AND the decode itself. Everything the decode path does on the way
+    // (the alpha copies, the coverage merge) has to be answered another way, so this is
+    // deliberately NARROW -- it declines whenever it cannot answer honestly, and the decode
+    // path below is then unchanged:
+    //
+    //   * `enfa|` composites (RFG-023) merge a SECOND file into the alpha channel. There is
+    //     no way to do that to a compressed block without re-encoding, so Init() forces the
+    //     decode for them. That is where Everon's cutout foliage lives, which is also why
+    //     the alpha classification below can be conservative.
+    //   * a BC7 whose alpha is NOT flat is declined, unless the name says the fourth channel
+    //     is a material property rather than coverage (`_BCR` -- Base Colour + Roughness,
+    //     RFG-033). The alpha CLASS is decided from decoded pixels several layers away
+    //     (TextureWgpu::GetAlphaClass) and a wrong verdict there draws a wall see-through;
+    //     rather than teach that scan a fourth block codec, anything that might need it
+    //     keeps the old path. Measured on Everon, the population that matters (`_BCR`
+    //     albedos and `_NMO` normals) is covered.
+    //   * BC4/BC5 have no alpha channel at all -- BC5 samples as (r, g, 0, 1) -- so there is
+    //     nothing to classify and they always pass through.
+    //
+    // The normal-map channel swap (RFG-045) cannot be done here either; see
+    // IsEnfusionRgNormalName and the section flag it feeds.
+    const bool dxgiBlock =
+        _format == PixelFormat::BC4 || _format == PixelFormat::BC5 || _format == PixelFormat::BC7;
+    if (dxgiBlock && !forceDecode && DdsCompressedPassthrough())
+    {
+        capLevels();
+        const bool roughnessInAlpha = LowerCopy(who).find("_bcr") != std::string::npos;
+        // One decode, of the SMALLEST level -- typically 4x4 or 8x8. It answers two
+        // questions the block data cannot: the average colour (the distant-LOD stand-in,
+        // which AverageOfSmallest returns black for on a block format), and whether the
+        // alpha channel is flat enough that no classification is needed.
+        bool alphaIsFlat = true;
+        PackedColor average = PackedBlack;
+        {
+            const DDSMipLevel& small = _levels.back();
+            const size_t texels = static_cast<size_t>(small.width) * static_cast<size_t>(small.height);
+            std::vector<uint8_t> rgba(texels * 4);
+            if (texels > 0 && !small.data.empty() &&
+                ConvertPixels(small.data.data(), rgba.data(), small.width, small.height, _format,
+                              PixelFormat::RGBA8888))
+            {
+                uint64_t sumR = 0, sumG = 0, sumB = 0, sumA = 0;
+                uint8_t aMin = 255, aMax = 0;
+                for (size_t i = 0; i < texels; ++i)
+                {
+                    sumR += rgba[i * 4 + 0];
+                    sumG += rgba[i * 4 + 1];
+                    sumB += rgba[i * 4 + 2];
+                    const uint8_t a = rgba[i * 4 + 3];
+                    sumA += a;
+                    aMin = std::min(aMin, a);
+                    aMax = std::max(aMax, a);
+                }
+                average = PackedColor(static_cast<uint8_t>(sumR / texels), static_cast<uint8_t>(sumG / texels),
+                                      static_cast<uint8_t>(sumB / texels), static_cast<uint8_t>(sumA / texels));
+                // 250 rather than 255: BC7's alpha endpoint interpolation is lossy, so an
+                // authored opaque texture can come back a couple of levels short.
+                alphaIsFlat = aMin >= 250;
+            }
+            else
+            {
+                alphaIsFlat = false; // could not look: decline rather than guess
+            }
+        }
+        const bool noAlphaChannel = _format == PixelFormat::BC4 || _format == PixelFormat::BC5;
+        if (noAlphaChannel || alphaIsFlat || roughnessInAlpha)
+        {
+            // Never claim coverage on this path: BC7 carries a fourth channel whether or
+            // not the author used it, and the one population that deliberately uses it
+            // (`_BCR`) uses it for ROUGHNESS. A texture with real coverage was declined
+            // above and is on the decode path, where the old rules still apply.
+            _hasAlpha = false;
+            _avgColor = average;
+            _pacFormat = ToPacFormat(_format);
+            _mipmaps = static_cast<int>(_levels.size());
+            _isTransparent = false;
+            {
+                static int reportedPassthrough = 0;
+                if (reportedPassthrough < 8)
+                {
+                    ++reportedPassthrough;
+                    LOG_INFO(Graphics, "EDDS {}: {}x{} format {} uploaded COMPRESSED ({} levels, {} bytes)", who, _w,
+                             _h, static_cast<int>(_format), _mipmaps, [&]
+                             {
+                                 size_t total = 0;
+                                 for (const DDSMipLevel& l : _levels)
+                                     total += l.data.size();
+                                 return total;
+                             }());
+                }
+            }
+            return true;
+        }
+        static int reportedDecline = 0;
+        if (reportedDecline < 8)
+        {
+            ++reportedDecline;
+            LOG_INFO(Graphics, "EDDS {}: format {} has live alpha -- decoding rather than passing blocks through", who,
+                     static_cast<int>(_format));
+        }
+    }
+
     // RFG-016: BC4/BC5/BC7 have no PacFormat and never will -- the Pac container is a
     // 2001 format and these are not in it. But `ConvertPixels` decodes all three, so
     // decode here and hand the rest of the pipeline plain RGBA rather than refusing
@@ -225,22 +398,7 @@ bool TextureSourceDDS::InitFromMemory(const void* data, size_t size, const char*
         // pure saving: no resampling, no quality question beyond the cap itself. 1024
         // is four times the texels of 2048 and is the size at which a Reforger wall
         // texture still reads correctly at arm's length.
-        const int maxEdge = []
-        {
-            const char* v = std::getenv("POSEIDON_DECODED_MAX_EDGE");
-            const int parsed = (v != nullptr && *v != 0) ? std::atoi(v) : 0;
-            return (parsed >= 64 && parsed <= 8192) ? parsed : 1024;
-        }();
-        size_t firstLevel = 0;
-        while (firstLevel + 1 < _levels.size() &&
-               (_levels[firstLevel].width > maxEdge || _levels[firstLevel].height > maxEdge))
-            ++firstLevel;
-        if (firstLevel > 0)
-        {
-            _levels.erase(_levels.begin(), _levels.begin() + static_cast<ptrdiff_t>(firstLevel));
-            _w = _levels[0].width;
-            _h = _levels[0].height;
-        }
+        capLevels();
 
         bool decoded = true;
         for (DDSMipLevel& level : _levels)
@@ -391,7 +549,7 @@ bool TextureSourceDDS::Init(const char* name, PacLevelMem* mips, int maxMips)
     if (!SlurpFile(composite ? compositeColour.c_str() : name, buffer) || buffer.empty())
         return false;
 
-    if (!InitFromMemory(buffer.data(), buffer.size(), name))
+    if (!InitFromMemory(buffer.data(), buffer.size(), name, /*forceDecode=*/composite))
         return false;
 
     if (composite)
@@ -399,7 +557,8 @@ bool TextureSourceDDS::Init(const char* name, PacLevelMem* mips, int maxMips)
         std::vector<uint8_t> coverageBytes;
         TextureSourceDDS coverage;
         if (SlurpFile(compositeCoverage.c_str(), coverageBytes) && !coverageBytes.empty() &&
-            coverage.InitFromMemory(coverageBytes.data(), coverageBytes.size(), compositeCoverage.c_str()) &&
+            coverage.InitFromMemory(coverageBytes.data(), coverageBytes.size(), compositeCoverage.c_str(),
+                                    /*forceDecode=*/true) &&
             !coverage._levels.empty())
         {
             // Both are 32-bit here: InitFromMemory decodes BC4/BC5/BC7 and leaves raw

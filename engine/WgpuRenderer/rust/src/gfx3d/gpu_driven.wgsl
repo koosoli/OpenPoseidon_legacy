@@ -135,6 +135,13 @@ const SECTION_NIGHT_EMITTER: u32 = 2u;
 // (walls_l3.rvmat: TexGen4 tex1, every layer TexGen tex); sampling the mask with the tiling uv
 // painted its plaster/dirt/metal regions as rectangles across the wall.
 const SECTION_MASK_UV1: u32 = 4u;
+// SectionMaterial.flags bit 3 (WGR_MODEL_SECTION_NORMAL_RG, RFG-047): this section's normal
+// map is an Enfusion `_NMO` uploaded COMPRESSED (BC5 or BC7), so its x/y live in (r, g), not
+// in the DXT5nm (a, g). While these textures were decoded to 32-bit, RFG-045 copied R into A
+// on the CPU and this shader never had to know; a compressed upload has no CPU-side pixel to
+// write, so the convention rides here instead. Clear for every PAA `_nohq` and for a decoded
+// `_NMO`, both of which keep the (a, g) read.
+const SECTION_NORMAL_RG: u32 = 8u;
 
 // Equirect lookup into the sky reflection env map. Copied from water.wgsl's sky_env_sample
 // rather than reinvented, so both consumers agree with fs_sky_env's convention in sky.wgsl:
@@ -632,8 +639,11 @@ fn vs_gpu(
 // so mixing raw texels tilts the surface wrongly exactly where the mask transitions, which
 // is the seam the blend exists to hide.
 // (`texel`, not `sample`: WGSL reserves `sample` as an interpolation enumerant.)
-fn decode_nohq(texel: vec4<f32>) -> vec3<f32> {
-    var xy = vec2<f32>(texel.a, texel.g) * 2.0 - vec2<f32>(1.0);
+fn decode_nohq_packed(texel: vec4<f32>, rg_packed: bool) -> vec3<f32> {
+    // (r, g) for a compressed Enfusion `_NMO` (SECTION_NORMAL_RG), (a, g) for everything
+    // else. `select` rather than a branch: both channels are already in the fetched texel,
+    // so there is nothing to skip and nothing to make non-uniform.
+    var xy = vec2<f32>(select(texel.a, texel.r, rg_packed), texel.g) * 2.0 - vec2<f32>(1.0);
     if (matdbg_flag(MATDBG_INVERT_NORMAL_Y)) {
         xy.y = -xy.y;
     }
@@ -828,11 +838,17 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
         // normal on the same tiling rate as the colour it belongs to. Flat +Z when the
         // material names no layer-0 normal — the honest identity to blend the rest against.
         var normal_ts = vec3<f32>(0.0, 0.0, 1.0);
+        // One flag for the whole section: layer 0's normal and the three Multi layer
+        // normals come from the same material, so they are the same convention. Reforger's
+        // MatPBRMulti layers are `_NMO` files exactly like its base normal.
+        let normal_rg = (sm.flags & SECTION_NORMAL_RG) != 0u;
         if (sm.normal_slot != 0u) {
             let uv0 = in.uv * sm.layer_uv[0].xy + sm.layer_uv[0].zw;
-            normal_ts = decode_nohq(textureSampleBias(textures[sm.normal_slot], samplers[sm.sampler_idx], uv0, frame.renscale.x));
+            normal_ts = decode_nohq_packed(
+                textureSampleBias(textures[sm.normal_slot], samplers[sm.sampler_idx], uv0, frame.renscale.x),
+                normal_rg);
         }
-        // Decode each layer's normal, THEN blend — see decode_nohq on why the packed texels
+        // Decode each layer's normal, THEN blend — see decode_nohq_packed on why the packed texels
         // must not be mixed. The weighted sum of unit vectors is renormalised at the end.
         var n_sum = vec3<f32>(0.0);
         var n_weight = 0.0;
@@ -845,8 +861,9 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
                 continue;
             }
             let uvn = in.uv * sm.layer_uv[i + 1u].xy + sm.layer_uv[i + 1u].zw;
-            let layer_n = decode_nohq(
-                textureSampleBias(textures[sm.layer_normal_slot[i]], samplers[sm.sampler_idx], uvn, frame.renscale.x));
+            let layer_n = decode_nohq_packed(
+                textureSampleBias(textures[sm.layer_normal_slot[i]], samplers[sm.sampler_idx], uvn, frame.renscale.x),
+                normal_rg);
             n_sum = n_sum + layer_n * layer_w[i];
             n_weight = n_weight + layer_w[i];
         }

@@ -40,8 +40,10 @@ constexpr Layout ComputeLayout(PacFormat format, int w, int h) noexcept
     switch (format)
     {
         case PacDXT1:
+        case PacBC4:
         {
-            // 4x4 blocks, 8 bytes per block.
+            // 4x4 blocks, 8 bytes per block.  BC4 is one channel at the same block
+            // size as BC1 (RFG-047).
             int blockCols = (w + 3) / 4;
             int blockRows = (h + 3) / 4;
             out.tightPitch = blockCols * 8;
@@ -56,8 +58,11 @@ constexpr Layout ComputeLayout(PacFormat format, int w, int h) noexcept
         case PacDXT3:
         case PacDXT4:
         case PacDXT5:
+        case PacBC5:
+        case PacBC7:
         {
-            // 4x4 blocks, 16 bytes per block.
+            // 4x4 blocks, 16 bytes per block.  BC5 (two channels) and BC7 (RGBA) share
+            // BC2/BC3's block size (RFG-047).
             int blockCols = (w + 3) / 4;
             int blockRows = (h + 3) / 4;
             out.tightPitch = blockCols * 16;

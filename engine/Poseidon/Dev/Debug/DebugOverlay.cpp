@@ -4700,6 +4700,19 @@ void DrawMaterialDebugTab()
                           "unenhanced original in the same frame.\n"
                           "Stock content has no such files, so this changes nothing without an\n"
                           "enhancement pack present.");
+    const bool compressedWas = settings.compressedEnfusionTextures;
+    changed |= Dev::Checkbox("Enfusion compressed textures (BC7/BC5/BC4)", &settings.compressedEnfusionTextures);
+    if (Dev::PanelItemHovered())
+        ImGui::SetTooltip(
+            "Reforger's albedos are BC7 and its normal maps BC7/BC5. The 2001 Pac container has no\n"
+            "name for those, so they used to be DECODED to 32-bit on the way in -- 4x the bytes of\n"
+            "BC7, 8x those of BC5 -- which is what exhausted GPU memory on native Everon at ~1,200\n"
+            "models. On, the blocks go to the GPU untouched, at the same resolution.\n"
+            "\n"
+            "NOT a per-fragment switch: it changes what is uploaded, so it applies to textures\n"
+            "loaded AFTER the flip, and the shader flag for a compressed normal map's channel\n"
+            "order is baked when a model registers. Reload the world for a clean A/B.\n"
+            "Greyed out with no effect if the adapter cannot take BC textures.");
     changed |= Dev::Checkbox("Invert Normal Map Y (diagnostic)", &settings.invertNormalY);
     Dev::PanelHelp("Compare only under fixed lighting; this does not edit the imported material.");
     changed |= Dev::Checkbox("Disable SMDI / Specular-Gloss", &settings.disableSpecularGloss);
@@ -4712,6 +4725,25 @@ void DrawMaterialDebugTab()
                    "there is nothing to switch off; the checkboxes that suggested otherwise were removed.");
     if (changed)
         GEngine->SetMaterialDebugSettings(settings);
+    // RFG-047: persisted the moment it is toggled, with no Save button.
+    //
+    // Every other control on this tab is a per-fragment switch that takes effect on the
+    // next frame, so a session-only value is honest for them. This one only fully applies
+    // to what is loaded AFTER it, which makes "relaunch and look" the real A/B -- and a
+    // switch you have to set again after every relaunch is a switch that silently measures
+    // the wrong thing. SeedRendererEnvFromGraphicsConfig reads it back at boot.
+    if (compressedWas != settings.compressedEnfusionTextures)
+    {
+        const std::string cfgPath = GamePaths::Instance().UserDir() + "graphics.cfg";
+        GraphicsConfig cfg;
+        cfg.Load(cfgPath);
+        cfg.enfusionCompressedTextures = settings.compressedEnfusionTextures ? 1 : 0;
+        if (cfg.Save(cfgPath))
+            LOG_INFO(Graphics, "Dev panel: Enfusion compressed textures {} (persisted to graphics.cfg)",
+                     settings.compressedEnfusionTextures ? "ON" : "OFF");
+        else
+            LOG_ERROR(Graphics, "Dev panel: saving '{}' failed", cfgPath);
+    }
 
     const Engine::MaterialDebugInfo info = GEngine->GetMaterialDebugInfo();
     Dev::PanelSeparator();

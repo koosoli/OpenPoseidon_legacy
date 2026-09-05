@@ -1022,6 +1022,18 @@ void SeedRendererEnvFromGraphicsConfig()
         setenv("WGR_DLSS", "0", 1);
 #endif
     }
+    // RFG-047: the compressed-texture choice, seeded for exactly the same reason MSAA is --
+    // EngineWgpu reads it while the renderer is created, before any world can load, and a
+    // texture already uploaded keeps the form it was loaded in. Only the OFF case is
+    // written: an absent variable means "the panel default", which is on.
+    if (cfg.enfusionCompressedTextures == 0)
+    {
+#ifdef _WIN32
+        _putenv_s("POSEIDON_ENFUSION_COMPRESSED", "0");
+#else
+        setenv("POSEIDON_ENFUSION_COMPRESSED", "0", 1);
+#endif
+    }
     if (cfg.dlssSharpen == 0)
     {
 #ifdef _WIN32

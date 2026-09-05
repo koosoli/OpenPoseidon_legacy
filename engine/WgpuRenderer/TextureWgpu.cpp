@@ -4,6 +4,7 @@
 
 #include <Poseidon/Graphics/Core/MipmapLayout.hpp>
 #include <Poseidon/Graphics/Textures/BlockCompression.hpp>
+#include <Poseidon/Graphics/Textures/DdsImport.hpp> // IsEnfusionRgNormalName (RFG-047)
 #include <Poseidon/Graphics/Textures/PAADecoder.hpp>
 #include <Poseidon/Graphics/Textures/PreparedTextures.hpp>     // worker-prepared mip chains
 #include <Poseidon/Graphics/Textures/ProceduralTexture.hpp>
@@ -66,6 +67,16 @@ int BcFormatFor(PacFormat fmt)
         case PacDXT4:
         case PacDXT5:
             return WGR_TEXTURE_BC3;
+        // RFG-047. These three reach here only from a DDS/EDDS source with the compressed
+        // pass-through on; no PAA can name them. Everything downstream in EnsureUploaded is
+        // format-agnostic -- the sizes come from render::mipmap::ComputeLayout, which knows
+        // their block sizes -- so adding them here is the whole of the upload change.
+        case PacBC4:
+            return WGR_TEXTURE_BC4;
+        case PacBC5:
+            return WGR_TEXTURE_BC5;
+        case PacBC7:
+            return WGR_TEXTURE_BC7;
         default:
             return -1;
     }
@@ -1217,6 +1228,25 @@ bool TextureWgpu::HasAlphaHoles()
         (void)GetAlphaClass();
     }
     return _alphaStatsScanned && _alphaStats.pctClear >= 2.0;
+}
+
+bool TextureWgpu::NormalIsRgPacked() const
+{
+    if (_nMipmaps <= 0)
+    {
+        return false;
+    }
+    const PacFormat dst = _mipmaps[0].DstFormat();
+    // BC5 is a two-channel format by definition: there is no alpha to read at all (it
+    // samples as (r, g, 0, 1)), so this holds whatever the file is called.
+    if (dst == PacBC5)
+    {
+        return true;
+    }
+    // BC7 keeps four channels and is also what every ordinary Enfusion ALBEDO is, so the
+    // name has to decide. Measured, every Reforger normal map is `*_NMO` and BC7, packing
+    // Normal.x / Normal.y / roughness / metalness -- reading X from alpha reads metalness.
+    return dst == PacBC7 && IsEnfusionRgNormalName(Name());
 }
 
 void TextureWgpu::InitDynamic(int w, int h, const void* rgba, uint32_t size)

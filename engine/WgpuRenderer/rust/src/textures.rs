@@ -13,6 +13,12 @@ pub enum TextureFormat {
     Bc1,
     Bc2,
     Bc3,
+    // RFG-047 -- the DXGI-era block formats Enfusion content is authored in. All three
+    // ride the SAME wgpu feature bit as BC1-BC3 (TEXTURE_COMPRESSION_BC), so an adapter
+    // that can take a DXT texture can take these; `bc_supported` already gates them.
+    Bc4,
+    Bc5,
+    Bc7,
 }
 
 impl TextureFormat {
@@ -22,6 +28,9 @@ impl TextureFormat {
             1 => Some(TextureFormat::Bc1),
             2 => Some(TextureFormat::Bc2),
             3 => Some(TextureFormat::Bc3),
+            4 => Some(TextureFormat::Bc4),
+            5 => Some(TextureFormat::Bc5),
+            6 => Some(TextureFormat::Bc7),
             _ => None,
         }
     }
@@ -32,6 +41,14 @@ impl TextureFormat {
             TextureFormat::Bc1 => wgpu::TextureFormat::Bc1RgbaUnorm,
             TextureFormat::Bc2 => wgpu::TextureFormat::Bc2RgbaUnorm,
             TextureFormat::Bc3 => wgpu::TextureFormat::Bc3RgbaUnorm,
+            // Unorm, not UnormSrgb, and not Snorm: the C++ side hands these over for
+            // Enfusion albedos (already treated as unorm by every other path here) and
+            // for _NMO normal maps, whose x/y are stored 0..1 and unpacked in the
+            // shader. Bc5RgUnorm samples as (r, g, 0, 1) -- there is no alpha to read,
+            // which is exactly why decode_nohq needs the RG flag for these.
+            TextureFormat::Bc4 => wgpu::TextureFormat::Bc4RUnorm,
+            TextureFormat::Bc5 => wgpu::TextureFormat::Bc5RgUnorm,
+            TextureFormat::Bc7 => wgpu::TextureFormat::Bc7RgbaUnorm,
         }
     }
 
@@ -42,8 +59,10 @@ impl TextureFormat {
     pub(crate) fn bytes_per_row(self, width: u32) -> u32 {
         match self {
             TextureFormat::Rgba8 => width * 4,
-            TextureFormat::Bc1 => width.div_ceil(4) * 8,
-            TextureFormat::Bc2 | TextureFormat::Bc3 => width.div_ceil(4) * 16,
+            TextureFormat::Bc1 | TextureFormat::Bc4 => width.div_ceil(4) * 8,
+            TextureFormat::Bc2 | TextureFormat::Bc3 | TextureFormat::Bc5 | TextureFormat::Bc7 => {
+                width.div_ceil(4) * 16
+            }
         }
     }
 

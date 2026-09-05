@@ -1035,6 +1035,16 @@ class Engine : public IGraphicsEngine
         // which have no RVMAT of their own. Off turns every legacy section back to its 2001
         // shading, which is the only way to see the enhancement's actual contribution A/B.
         bool legacyEnhancement = true;
+        // RFG-047: hand Enfusion's BC7/BC5/BC4 textures to the GPU COMPRESSED instead of
+        // decoding them to 32-bit. On by default when the adapter supports it (every
+        // D3D12-class GPU does); off restores the RFG-016 decode.
+        //
+        // This one is NOT a per-fragment switch like the rest of this struct. It changes
+        // what is UPLOADED, so it applies to textures loaded after the flip -- and to the
+        // section flag that tells the shader which channels a compressed normal map uses,
+        // which is baked when a model registers. Reload the world (or relaunch, with the
+        // value persisted to graphics.cfg) for a clean A/B; the panel says so.
+        bool compressedEnfusionTextures = true;
     };
     struct MaterialDebugInfo
     {

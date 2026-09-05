@@ -9330,8 +9330,22 @@ fn multi_blends_layer_normals_with_the_same_weights_as_the_colours() {
     // reconstructed), and z is not linear in the stored channels, so a mix of raw texels
     // tilts the surface wrongly exactly at the mask transitions.
     assert!(
-        src.contains("fn decode_nohq(texel: vec4<f32>) -> vec3<f32>"),
+        src.contains("fn decode_nohq_packed(texel: vec4<f32>, rg_packed: bool) -> vec3<f32>"),
         "the NOHQ decode must be factored out so every layer is unpacked BEFORE blending"
+    );
+    // RFG-047: the CHANNEL PAIR is a per-section property, and both the base normal and the
+    // three layer normals must read the same one. A compressed Enfusion `_NMO` puts x/y in
+    // (r, g); every PAA `_nohq` and every decoded `_NMO` (RFG-045 copies R into A) is (a, g).
+    // One flag read, passed to both call sites -- if the layers ever took a different value
+    // than layer 0, a Multi wall would blend two conventions and tilt at the mask seams.
+    assert!(
+        src.contains("let normal_rg = (sm.flags & SECTION_NORMAL_RG) != 0u;"),
+        "the RG-packed convention must come from the section flag, not be guessed per texture"
+    );
+    assert_eq!(
+        src.matches("                normal_rg);").count(),
+        2,
+        "both the base normal and the layer normals must decode with the same convention flag"
     );
     // The layer sample feeds decode_nohq directly -- nothing accumulates a raw texel.
     let layer_sample =
@@ -9342,7 +9356,7 @@ fn multi_blends_layer_normals_with_the_same_weights_as_the_colours() {
     );
     let decoded = src
         .split_once(layer_sample)
-        .map(|(head, _)| head.trim_end().ends_with("decode_nohq("))
+        .map(|(head, _)| head.trim_end().ends_with("decode_nohq_packed("))
         .unwrap_or(false);
     assert!(
         decoded,

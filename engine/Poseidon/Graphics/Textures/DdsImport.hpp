@@ -22,6 +22,32 @@ namespace Poseidon
 // open blocker on this branch is the renderer running out of device resources at
 // exactly that scale -- so inflating every texture 8x on the way in is the one thing
 // this must not do.
+// RFG-047 -- hand BC4/BC5/BC7 to the backend COMPRESSED instead of decoding them.
+//
+// RFG-016 decodes these three to 32-bit because the 2001 Pac container has no name for
+// them; that costs 4x the bytes of BC7 and 8x those of BC5, and it is what made Everon
+// exhaust GPU memory at ~1,200 models (RFG-044 then capped the decoded edge at 1024 as a
+// stopgap). Every D3D12-class GPU decodes all three in hardware, so the limit was never
+// the hardware -- it was this intermediate format.
+//
+// A process-wide switch rather than a parameter because the decision belongs to the
+// BACKEND (wgpu speaks BC4/5/7; the GL33 fallback is a GL 3.3 core context and does not),
+// while the call site is a texture factory that knows nothing about either. Default OFF,
+// so nothing changes until a backend that can take the blocks turns it on:
+// EngineWgpu::Init does, when the adapter reports TEXTURE_COMPRESSION_BC.
+void SetDdsCompressedPassthrough(bool on);
+bool DdsCompressedPassthrough();
+
+// RFG-047 -- true when `name` is an Enfusion normal map whose X lives in RED, not alpha.
+//
+// The shader's `decode_nohq` reads (alpha, green), the DXT5nm convention of every
+// `_nohq.paa` in the OFP/Arma corpus. RFG-045 satisfied it by copying R into A while
+// decoding. A compressed upload cannot do that -- there is no CPU-side pixel to write --
+// so the CONSUMER has to be told instead, and this is the single predicate both sides
+// use. Exposed here (rather than duplicated in the renderer) so the decode path's channel
+// copy and the compressed path's shader flag can never disagree about which files it is.
+bool IsEnfusionRgNormalName(const char* name);
+
 class TextureSourceDDS : public ITextureSource
 {
     RStringB _name;
@@ -53,7 +79,11 @@ class TextureSourceDDS : public ITextureSource
 
     // Testable entry point -- decode from an in-memory buffer, so unit tests can
     // exercise the container without initialising the file server.
-    bool InitFromMemory(const void* data, size_t size, const char* nameForErrors);
+    //
+    // `forceDecode` suppresses the RFG-047 compressed pass-through for this one texture.
+    // Init() sets it for both halves of an `enfa|` composite, whose whole purpose is to
+    // write one file's coverage into another file's alpha channel -- which needs pixels.
+    bool InitFromMemory(const void* data, size_t size, const char* nameForErrors, bool forceDecode = false);
 };
 
 class TextureSourceDDSFactory : public ITextureSourceFactory

@@ -1193,6 +1193,29 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
 
     _wbank = new TextureBankWgpu(_renderer);
 
+    // RFG-047: BC4/BC5/BC7 go to the GPU as blocks when the adapter can take them.
+    //
+    // The gate is the adapter's OWN answer (capability bit 0 = TEXTURE_COMPRESSION_BC,
+    // lib.rs), not a guess from the vendor string: an adapter without it would refuse the
+    // texture and return handle 0, i.e. a white object with no error. When it is absent the
+    // switch stays off and every BC4/5/7 file takes the RFG-016 decode exactly as before.
+    //
+    // Ordered AFTER the bank is constructed and BEFORE any world loads, which is the window
+    // in which the choice is free: a texture already uploaded keeps the form it was loaded
+    // in, so the dev-panel toggle below is honest only for what is loaded after it.
+    // POSEIDON_ENFUSION_COMPRESSED=0 pins it off for a capture that must not have it; the
+    // dev panel and graphics.cfg are the supported controls.
+    {
+        const bool bcCapable = (GetRuntimeCapabilityFlags() & 1u) != 0u;
+        const char* env = std::getenv("POSEIDON_ENFUSION_COMPRESSED");
+        const bool wanted = (env == nullptr || env[0] == 0) ? _materialDebug.compressedEnfusionTextures
+                                                            : (env[0] != '0');
+        _materialDebug.compressedEnfusionTextures = wanted;
+        SetDdsCompressedPassthrough(bcCapable && wanted);
+        LOG_INFO(Graphics, "Wgpu: Enfusion compressed textures (BC7/BC5/BC4) {} (adapter BC support: {})",
+                 (bcCapable && wanted) ? "ON" : "OFF", bcCapable ? "yes" : "NO -- decode path forced");
+    }
+
     // Procedural-blade definition strength, WGR_GRASS_CONTRAST. One number scales
     // the whole blade-look group away from the legacy flat wash: 0 is the exact
     // pre-2026-08 look (no self shadow, contrast 1, no hue drift, root 0.70), 1 is
@@ -5816,8 +5839,10 @@ uint64_t EngineWgpu::ResolveMaterialSpecularMap(const ShapeSection& section)
 //
 // A procedural Stage1 is a genuine constant (`#(argb,8,8,3)color(0.5,0.5,1,1,NOHQ)`
 // is a flat normal) and generates like any other, so it binds here too.
-uint64_t EngineWgpu::ResolveMaterialNormalMap(const ShapeSection& section)
+uint64_t EngineWgpu::ResolveMaterialNormalMap(const ShapeSection& section, bool* rgPackedOut)
 {
+    if (rgPackedOut != nullptr)
+        *rgPackedOut = false;
     // NOT honoured here any more. Baking the toggle into the material record meant it
     // only applied to shapes registered AFTER the flip, and nothing re-registers a live
     // one -- so on a loaded world it did nothing at all. The retained shader now reads it
@@ -5880,6 +5905,11 @@ uint64_t EngineWgpu::ResolveMaterialNormalMap(const ShapeSection& section)
     Ref<Texture> texture = _wbank->Load(loadName.c_str());
     auto*        wgpuTexture = static_cast<TextureWgpu*>(texture.GetRef());
     const uint64_t handle = wgpuTexture ? wgpuTexture->EnsureUploaded() : 0;
+    // RFG-047: asked AFTER the upload, because the answer depends on the form the texture
+    // was loaded in and only a resolved source can say. A handle of 0 leaves it false --
+    // the section is on the white fallback and has no normal to decode either way.
+    if (rgPackedOut != nullptr && handle != 0 && wgpuTexture != nullptr)
+        *rgPackedOut = wgpuTexture->NormalIsRgPacked();
     return report(handle, handle ? "" : "upload failed", loadName);
 }
 
@@ -6526,6 +6556,74 @@ static uint64_t g_bakedSectionsUntextured = 0;
 static uint64_t g_bakedSectionTris = 0;
 static uint64_t g_bakedSectionTrisUntextured = 0;
 
+const char* EngineWgpu::AdmitRejectName(AdmitReject r)
+{
+    switch (r)
+    {
+        case AdmitReject::Admitted: return "admitted";
+        case AdmitReject::NotStatic: return "not-static";
+        case AdmitReject::Destroyed: return "destroyed";
+        case AdmitReject::AlreadyIn: return "already-retained";
+        case AdmitReject::NoShape: return "no-shape";
+        case AdmitReject::MatDebugRvmat: return "material-debug-rvmat";
+        case AdmitReject::LegacyPlants: return "legacy-a1-plants";
+        case AdmitReject::WindowFallback: return "window-fallback";
+        case AdmitReject::FoliageBail: return "foliage-bail";
+        case AdmitReject::StaticEmitter: return "static-emitter";
+        case AdmitReject::IndexOverflow: return "index-overflow";
+        case AdmitReject::EmptyMesh: return "empty-mesh";
+        case AdmitReject::NoOwnedSection: return "no-owned-section";
+        default: return "?";
+    }
+}
+
+// One tally per offer. `shapeLevel` marks the FIRST time a shape reaches this reason, so the
+// per-shape column counts assets and the per-object column counts placements -- two numbers that
+// differ by three orders of magnitude on a Reforger world and answer different questions ("which
+// asset is refused" vs "how much of the map does it cost").
+void EngineWgpu::NoteAdmitReject(AdmitReject r, const LODShapeWithShadow* shape, bool shapeLevel)
+{
+    const size_t i = static_cast<size_t>(r);
+    if (i >= static_cast<size_t>(AdmitReject::Count))
+        return;
+    ++_admitObjects[i];
+    if (shapeLevel)
+    {
+        ++_admitShapes[i];
+        if (_admitFirstShape[i].empty() && shape && shape->Name())
+            _admitFirstShape[i] = shape->Name();
+    }
+}
+
+// The census, as one block. Printed on demand (the Interior Sky tab's probe button) rather than
+// at a fixed frame: on a streamed world the interesting number is what admission has done by the
+// time you are standing somewhere, and a load-time line cannot know that.
+void EngineWgpu::LogAdmissionCensus() const
+{
+    uint32_t offered = 0;
+    for (size_t i = 0; i < static_cast<size_t>(AdmitReject::Count); ++i)
+        offered += _admitObjects[i];
+    LOG_INFO(Graphics, "Retained admission census: {} objects offered, {} admitted ({:.1f}%), {} distinct shapes",
+             offered, _admitObjects[0], offered ? 100.0f * float(_admitObjects[0]) / float(offered) : 0.0f,
+             _gpuModels.size());
+    for (size_t i = 1; i < static_cast<size_t>(AdmitReject::Count); ++i)
+    {
+        if (_admitObjects[i] == 0 && _admitShapes[i] == 0)
+            continue;
+        LOG_INFO(Graphics, "  refused {:>20}: {} objects ({:.1f}%), {} shapes; first: {}",
+                 AdmitRejectName(static_cast<AdmitReject>(i)), _admitObjects[i],
+                 offered ? 100.0f * float(_admitObjects[i]) / float(offered) : 0.0f, _admitShapes[i],
+                 _admitFirstShape[i].empty() ? "-" : _admitFirstShape[i].c_str());
+    }
+    if (offered == 0)
+    {
+        LOG_WARN(Graphics,
+                 "Retained admission census: NOTHING was ever offered. SceneObjectCreated never "
+                 "ran with a live renderer -- the world was placed before the GPU-driven path "
+                 "existed, and nothing re-offers it. That is an ordering bug, not a filter.");
+    }
+}
+
 uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
 {
     if (auto found = _gpuModels.find(shape); found != _gpuModels.end())
@@ -6592,6 +6690,9 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
     std::vector<WgrModelSection> sections;
     std::vector<WgrModelMaterial> materials;
     bool eligible = true;
+    // Which bail turned `eligible` off, remembered so the census can attribute this shape's
+    // placements without re-running registration. Set beside every `eligible = false`.
+    AdmitReject rejectWhy = AdmitReject::Admitted;
     bool isConform = false;
     // §9 Approach A: a merged forest mesh (whole-shape MapType) gets per-tree crown centres baked
     // per LOD so vs_gpu can bend its cutout normals radially per tree (its single instance centre
@@ -6617,6 +6718,7 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
         if (loggedLegacyPlantFallback.insert(std::string(shape->Name())).second)
             LOG_INFO(Graphics, "GpuModel vegetation fallback: model={} reason=legacy-a1-plants", shape->Name());
         eligible = false;
+        rejectWhy = AdmitReject::LegacyPlants;
     }
 
     for (int level = 0; level < shape->NLevels() && eligible; level++)
@@ -6669,6 +6771,7 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
                              shape->Name(), level, i, texture->Name());
                 }
                 eligible = false;
+                rejectWhy = AdmitReject::WindowFallback;
                 break;
             }
             // TreeAdv leaf cards have antialiased alpha, so their texture histogram is Blend
@@ -6791,6 +6894,7 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
                 if (!treeAdvRetained)
                 {
                     eligible = false;
+                    rejectWhy = AdmitReject::FoliageBail;
                     break;
                 }
             }
@@ -6802,6 +6906,7 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
             if (StaticEmitterRadianceTarget(shSec.surfMat) < 1.0f)
             {
                 eligible = false;
+                rejectWhy = AdmitReject::StaticEmitter;
                 break;
             }
             // SectionRetainedRefuses is the same subtraction Shape::Draw's skip applies, and it
@@ -6905,6 +7010,7 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
                       "indices wrap; refusing the retained path for this shape",
                       shape->Name(), level, nv, kMaxMeshVertices);
             eligible = false;
+            rejectWhy = AdmitReject::IndexOverflow;
             break;
         }
         if (std::getenv("WGR_INSTANCE_TRACE"))
@@ -6918,6 +7024,7 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
         if (verts.empty() || ni <= 0)
         {
             eligible = false;
+            rejectWhy = AdmitReject::EmptyMesh;
             break;
         }
         uint64_t mesh = 0;
@@ -7186,7 +7293,15 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
             mat.specular_texture_id = ResolveMaterialSpecularMap(s->GetSection(i));
             // Stage1. Same ordering dependency: the translation cache is populated
             // by ResolveMaterialBaseColour above.
-            mat.normal_texture_id = ResolveMaterialNormalMap(s->GetSection(i));
+            bool normalRgPacked = false;
+            mat.normal_texture_id = ResolveMaterialNormalMap(s->GetSection(i), &normalRgPacked);
+            // RFG-047: tell the shader which two channels the normal is in. Only ever set
+            // for a compressed Enfusion `_NMO`; a decoded one keeps RFG-045's R-into-A copy
+            // and leaves this clear, so the two forms of the same file shade identically.
+            if (normalRgPacked)
+            {
+                sec.flags |= WGR_MODEL_SECTION_NORMAL_RG;
+            }
             // DZ-003: an EnvironmentMap in the material is the declaration "this surface is
             // reflective". Rides in the section's flags word (WgrModelMaterial is
             // size-locked); the shader adds a Fresnel-weighted sky reflection for it and
@@ -7304,6 +7419,44 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
         model = op.model;
         _resourceOps.push_back(std::move(op));
     }
+    // The census's shape-level verdict. `eligible` with nothing to draw is its OWN reason and
+    // the one most likely to be the answer on imported content: every bail above is narrow and
+    // env-gated, while "no section survived ClassifyGpuSection" is what a whole material family
+    // the classifier does not recognise looks like.
+    if (model == WGR_INVALID_MODEL && rejectWhy == AdmitReject::Admitted)
+    {
+        rejectWhy = AdmitReject::NoOwnedSection;
+        // "No section survived" is one step short of an answer: it says the classifier refused
+        // everything without saying on what grounds, and the grounds are four different
+        // predicates over the section spec, the texture's alpha histogram and the material path.
+        // Dump LOD 0 for the first few shapes that land here so the run that reports the
+        // histogram also names the predicate -- otherwise this costs a second session and a
+        // second world load to learn what one printf already knew.
+        static int loggedNoOwned = 0;
+        if (loggedNoOwned < 3)
+        {
+            ++loggedNoOwned;
+            const Shape* s0 = shape->NLevels() > 0 ? shape->Level(0) : nullptr;
+            LOG_WARN(Graphics, "GpuModel no-owned-section: {} lods={} lod0 sections={}", shape->Name(),
+                     shape->NLevels(), s0 ? s0->NSections() : -1);
+            for (int i = 0; s0 && i < s0->NSections() && i < 8; ++i)
+            {
+                const ShapeSection& shSec = s0->GetSection(i);
+                auto* sectionTexture = static_cast<TextureWgpu*>(shSec.properties.GetTexture());
+                const int spec = shSec.properties.Special();
+                const render::RenderPassDescriptor desc =
+                    render::BuildRenderPassDescriptor(render::SplitLegacy(spec));
+                LOG_WARN(Graphics,
+                         "  section {}: special=0x{:x} blend={} surface={} tex={} alpha={} mat={} owned={}", i, spec,
+                         static_cast<int>(desc.blend), static_cast<int>(desc.surface),
+                         sectionTexture ? sectionTexture->Name() : "(none)",
+                         sectionTexture ? static_cast<int>(sectionTexture->GetAlphaClass()) : -1,
+                         shSec.surfMat.IsNull() ? "(none)" : shSec.surfMat->GetName().Data(),
+                         SectionGpuOwned(shSec) ? 1 : 0);
+            }
+        }
+    }
+    _gpuModelReject[shape] = rejectWhy;
     _gpuModels[shape] = model;
     // Cache coverage so SceneObjectCreated can tag each instance and GpuDrivenCoverage can tell
     // the scene loop whether to suppress the whole CPU draw or only the GPU-owned sections.
@@ -7891,11 +8044,15 @@ void EngineWgpu::SceneObjectCreated(Object* obj)
     // has no destroyed-variant geometry yet).
     if (!obj->Static() || obj->IsDestroyed() || _gpuInstances.count(obj) != 0)
     {
+        NoteAdmitReject(!obj->Static() ? AdmitReject::NotStatic
+                                       : (obj->IsDestroyed() ? AdmitReject::Destroyed : AdmitReject::AlreadyIn),
+                        obj->GetShape(), false);
         return;
     }
     LODShapeWithShadow* shape = obj->GetShape();
     if (!shape)
     {
+        NoteAdmitReject(AdmitReject::NoShape, nullptr, false);
         return;
     }
     // Material Debug's first slice deliberately exercises the ordinary direct
@@ -7914,11 +8071,18 @@ void EngineWgpu::SceneObjectCreated(Object* obj)
             {
                 const ShapeSection& sec = lod->GetSection(section);
                 if (sec.surfMat && ContainsNoCase(sec.surfMat->GetName().Data(), _materialDebugRvmatMatch))
+                {
+                    NoteAdmitReject(AdmitReject::MatDebugRvmat, shape, _gpuModels.count(shape) == 0);
                     return;
+                }
             }
         }
     }
     AdmitTimer sceneTimer(&render::GObjectAdmitProfile.sceneMs);
+    // Whether THIS call is the first sight of the shape decides the census's per-shape column:
+    // registration is cached, so every later placement of the same asset is an object-level
+    // event only. Asked before RegisterGpuModel, which populates the map.
+    const bool firstSight = _gpuModelReject.count(shape) == 0;
     uint32_t model = WGR_INVALID_MODEL;
     {
         AdmitTimer registerTimer(&render::GObjectAdmitProfile.registerMs);
@@ -7926,8 +8090,11 @@ void EngineWgpu::SceneObjectCreated(Object* obj)
     }
     if (model == WGR_INVALID_MODEL)
     {
+        const auto why = _gpuModelReject.find(shape);
+        NoteAdmitReject(why != _gpuModelReject.end() ? why->second : AdmitReject::NoOwnedSection, shape, firstSight);
         return; // ineligible shape -> object drawn by the CPU path
     }
+    NoteAdmitReject(AdmitReject::Admitted, shape, firstSight);
     // Terrain conform: ForestPlain -> mode-1 plane, ClipLand veg/fences -> mode-2, else rigid.
     const ConformPlane cp = GpuConformFor(*obj, *shape, _gpuConformShapes.count(shape) != 0);
     const WgrInstance inst = BuildGpuInstance(*obj, model, cp);
@@ -8616,6 +8783,7 @@ void EngineWgpu::ProbeInteriorSkyMap()
 {
     ++_interiorSkyProbe;
     PushRenderParams(); // carries the new counter; the renderer logs on its next frame
+    LogAdmissionCensus();
 
     const Camera* camera = GScene ? GScene->GetCamera() : nullptr;
     if (!camera)

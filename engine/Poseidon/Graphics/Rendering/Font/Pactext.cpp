@@ -1400,6 +1400,9 @@ void PacLevelMem::SetDestFormat(PacFormat dFormat, int align)
         // bytes per block (half a byte per pixel), every other DXT stores 16
         // (one byte per pixel).
         case PacDXT1:
+        // RFG-047: BC4 is BC1's block size with one channel -- 8 bytes per 4x4 block,
+        // i.e. half a byte per texel, so the same row pitch.
+        case PacBC4:
             _pitch = _w / 2;
             break;
         // DXT3 and DXT4 set their pitch and then fell through into the failure
@@ -1417,6 +1420,10 @@ void PacLevelMem::SetDestFormat(PacFormat dFormat, int align)
         case PacDXT3:
         case PacDXT4:
         case PacDXT5:
+        // RFG-047: BC5 (two channels) and BC7 (RGBA) are 16 bytes per 4x4 block, the
+        // same one byte per texel as BC2/BC3.
+        case PacBC5:
+        case PacBC7:
             _pitch = _w;
             break;
         default:

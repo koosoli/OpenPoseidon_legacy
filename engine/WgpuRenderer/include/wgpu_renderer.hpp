@@ -130,7 +130,14 @@ enum WgrTextureFormat : int32_t
     WGR_TEXTURE_RGBA8 = 0,
     WGR_TEXTURE_BC1 = 1, // DXT1
     WGR_TEXTURE_BC2 = 2, // DXT3
-    WGR_TEXTURE_BC3 = 3  // DXT5
+    WGR_TEXTURE_BC3 = 3, // DXT5
+    /* RFG-047 -- the DXGI-era block formats. No PAA/PAC magic word exists for these;
+     * they arrive only from a DDS/EDDS source (Enfusion content) and are handed to the
+     * GPU compressed instead of being decoded to 32-bit. Same TEXTURE_COMPRESSION_BC
+     * feature bit as BC1-BC3, so the same adapter gate covers them. */
+    WGR_TEXTURE_BC4 = 4, /* one channel, 8 bytes / 4x4 block */
+    WGR_TEXTURE_BC5 = 5, /* two channels, 16 bytes / 4x4 block; samples as (r, g, 0, 1) */
+    WGR_TEXTURE_BC7 = 6  /* RGBA, 16 bytes / 4x4 block */
 };
 
 enum WgrBlend : uint32_t
@@ -390,7 +397,20 @@ enum WgrModelSectionFlags : uint32_t
      * WGR_DRAW3D_NIGHT_EMITTER. */
     WGR_MODEL_SECTION_NIGHT_EMITTER = 2u,
     /* Multi's mask stage is authored on uvSource "tex1": sample it with WgrMeshVertex::uv1. */
-    WGR_MODEL_SECTION_MASK_UV1 = 4u
+    WGR_MODEL_SECTION_MASK_UV1 = 4u,
+    /* RFG-047: this section's normal map packs X in RED, not in alpha.
+     *
+     * `decode_nohq` reads (alpha, green) -- the DXT5nm convention of every `_nohq.paa` in
+     * the OFP/Arma corpus. Enfusion's `_NMO` maps put x/y in (r, g); BC5 is a two-channel
+     * format and can do nothing else, and Reforger's BC7 `_NMO` uses the remaining two
+     * channels for roughness and metalness, so reading X out of alpha reads METALNESS.
+     *
+     * While those textures were DECODED, RFG-045 fixed this on the data side by copying R
+     * into A. A compressed upload has no CPU-side pixel to write, so the convention has to
+     * ride to the shader instead -- which is what this bit is. Set only for a section whose
+     * bound normal map was uploaded compressed; on the decoded path RFG-045's copy still
+     * happens and this bit stays clear, so both forms shade identically. */
+    WGR_MODEL_SECTION_NORMAL_RG = 8u
 };
 
 /* Per-section shading, parallel to a model's sections (one per section). The RAW

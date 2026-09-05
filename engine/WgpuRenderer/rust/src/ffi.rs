@@ -268,6 +268,11 @@ pub const WGR_DRAW3D_REFLECTIVE: u32 = 2;
 pub const WGR_MODEL_SECTION_NIGHT_EMITTER: u32 = 2;
 // WgrModelSection::flags bit 2: Multi's mask stage is authored on uvSource "tex1".
 pub const WGR_MODEL_SECTION_MASK_UV1: u32 = 4;
+// WgrModelSection::flags bit 3 (RFG-047): this section's normal map is an Enfusion `_NMO`
+// uploaded COMPRESSED (BC5/BC7), so its x/y are in (r, g) rather than the DXT5nm (a, g).
+// Read by gpu_driven.wgsl's SECTION_NORMAL_RG; there is no Rust-side behaviour, the constant
+// exists so both sides of the ABI name the bit in one place.
+pub const WGR_MODEL_SECTION_NORMAL_RG: u32 = 8;
 pub const WGR_DRAW3D_NIGHT_EMITTER: u32 = 4;
 // WgrDraw3D::flags bit 3 (MAT-051): classic GLASS -- alpha-blended pane whose texture is
 // continuous partial alpha. The shader floors output alpha so the pane reads head-on.

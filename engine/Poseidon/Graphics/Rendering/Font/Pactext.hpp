@@ -56,6 +56,13 @@ enum PacFormat
 	PacP8,PacAI88,PacRGB565,PacARGB1555,PacARGB4444,
 	PacARGB8888,
 	PacDXT1,PacDXT2,PacDXT3,PacDXT4,PacDXT5,
+	// RFG-047 -- the DXGI-era block formats, which the 2001 Pac CONTAINER cannot hold
+	// and never will (they have no PAA magic word; PixelFormat.hpp says so). They are
+	// here only as an in-memory format LABEL, so a source that read them out of a DDS/EDDS
+	// can hand them to a backend that speaks them without a decode. Nothing writes them
+	// to a .paa/.pac, and PAADecoder's `format >= PacDXT1 && format <= PacDXT5` range
+	// tests deliberately exclude them: appended AFTER PacDXT5 so those keep their meaning.
+	PacBC4,PacBC5,PacBC7,
 	PacFormatN
 };
 

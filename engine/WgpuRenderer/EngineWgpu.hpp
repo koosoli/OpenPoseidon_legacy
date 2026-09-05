@@ -10,6 +10,7 @@
 #include <Poseidon/Graphics/Shared/SDLEventWindow.hpp>
 #include <Poseidon/Foundation/Types/LLinks.hpp>
 #include <Poseidon/Foundation/Types/Pointers.hpp>       // Ref<> (MAT-050's untextured stand-in)
+#include <Poseidon/Graphics/Textures/DdsImport.hpp>    // SetDdsCompressedPassthrough (RFG-047)
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>   // Texture, complete for the Ref<> member
 #include <Poseidon/Foundation/Memory/MemFreeReq.hpp>
 #include <Poseidon/Asset/Formats/Material/MaterialChannels.hpp>
@@ -21,6 +22,7 @@
 #include <list>   // parked GPU model LRU
 #include <memory>
 #include <span>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <thread>
@@ -413,6 +415,12 @@ class EngineWgpu : public EngineDummy
     void SetMaterialDebugSettings(const MaterialDebugSettings& s) override
     {
         _materialDebug = s;
+        // RFG-047 is the one setting here that is not a frame-UBO switch: it decides how the
+        // next texture is UPLOADED. Pushed to the loader rather than to the shader, and only
+        // when the adapter can take blocks -- otherwise turning it on would ask for a texture
+        // format the device refuses, which fails silently as a white object.
+        SetDdsCompressedPassthrough(_materialDebug.compressedEnfusionTextures &&
+                                    (GetRuntimeCapabilityFlags() & 1u) != 0u);
         PushMaterialDebug();
     }
 
@@ -847,6 +855,45 @@ class EngineWgpu : public EngineDummy
     // returning its model id or WGR_INVALID_MODEL if it is ineligible for the GPU path.
     uint32_t RegisterGpuModel(LODShapeWithShadow* shape);
 
+    // --- Retained-path admission census -----------------------------------------------------
+    //
+    // Why this exists at all: every one of the bails below is a `return` or an `eligible = false`
+    // with, at best, a once-per-model LOG_INFO behind an env var. So a world where 148,000 of
+    // 150,000 placements never reach the GPU path looks EXACTLY like a world where they all did,
+    // and answering "why is this house not retained" cost a session of reading branches. The
+    // census counts every offer and every refusal by reason, per OBJECT and per SHAPE, and names
+    // the first shape that hit each -- so the question is answered by one run instead of one
+    // investigation.
+    enum class AdmitReject
+    {
+        Admitted = 0,
+        NotStatic,      // Object::Static() false (dynamics stay on the CPU path)
+        Destroyed,      // destroyed / mid-destruction: no destroyed-variant geometry on the GPU
+        AlreadyIn,      // a second offer for an object already retained
+        NoShape,        // no LODShapeWithShadow
+        MatDebugRvmat,  // the material-debug RVMAT filter is holding this model on the direct path
+        LegacyPlants,   // WGR_PLANTS_FALLBACK (off by default)
+        WindowFallback, // WGR_WINDOW_FALLBACK (off by default)
+        FoliageBail,    // Blend-classified leaf cards with WGR_TREEADV_RETAINED off
+        StaticEmitter,  // lamp/light fixture kept on the direct path for the emitter cap
+        IndexOverflow,  // > u32 vertices in a LOD
+        EmptyMesh,      // a LOD with no vertices or no indices
+        NoOwnedSection, // eligible, but no section survived ClassifyGpuSection -> nothing to draw
+        Count
+    };
+    static const char* AdmitRejectName(AdmitReject r);
+    // Per-object and per-shape tallies, indexed by AdmitReject.
+    uint32_t _admitObjects[static_cast<size_t>(AdmitReject::Count)] = {};
+    uint32_t _admitShapes[static_cast<size_t>(AdmitReject::Count)] = {};
+    // The first shape to hit each reason -- a name is worth more than a count when the next step
+    // is to open the asset.
+    std::string _admitFirstShape[static_cast<size_t>(AdmitReject::Count)];
+    // Why each registered shape was refused, so an object can be attributed without re-running
+    // the (expensive) registration.
+    std::unordered_map<const LODShapeWithShadow*, AdmitReject> _gpuModelReject;
+    void NoteAdmitReject(AdmitReject r, const LODShapeWithShadow* shape, bool shapeLevel);
+    void LogAdmissionCensus() const;
+
     std::vector<CameraEntry> _cameras;
     uint32_t _currentCamera = 0;
     bool _haveCamera = false;
@@ -922,7 +969,12 @@ class EngineWgpu : public EngineDummy
     // A section's tangent-space normal map (RVMAT Stage1) when its RVMAT names a
     // loadable one, or 0. Same reason as the two above: the per-draw path bound it
     // and the retained set, which owns nearly every world section, did not.
-    uint64_t ResolveMaterialNormalMap(const ShapeSection& section);
+    // `rgPackedOut`, when given, reports whether the bound normal map packs X in RED
+    // (RFG-047) -- an Enfusion `_NMO` that reached the GPU compressed. Out-param rather
+    // than a second lookup because the answer is a property of the TextureWgpu this
+    // function has just resolved, and re-finding it would mean repeating the whole
+    // material-cache walk. nullptr for the per-draw callers, which have their own path.
+    uint64_t ResolveMaterialNormalMap(const ShapeSection& section, bool* rgPackedOut = nullptr);
     // A section's environment (reflection) map when its material names a loadable one,
     // or 0. DZ-003: DayZ water is authored as a near-black constant plus a reflection,
     // so a non-zero answer here is what marks a surface reflective for the shader.
