@@ -450,6 +450,11 @@ struct WgrModelMaterial
     /* Per layer, including layer 0 at index 0: (scale_u, scale_v, offset_u, offset_v).
      * RVMAT authors these transforms diagonally, so a full 3x3 is not carried. */
     float layer_uv[4][4];
+    /* RFG-072: per layer, layer 0 at index 0: the colour the layer's tile is worn in, a
+     * LINEAR multiplier (Enfusion's `Color_N`; identity for every other material). The
+     * shared one-metre library tiles are colourless by design -- 436 tiles serve 2,889 of
+     * Everon's structure materials -- and this is where each wall becomes its own. */
+    float layer_colour[4][4];
 };
 
 /* One drawable LOD level: its FindSqrtLevel resolution threshold (_resolutions[i]) +
@@ -499,7 +504,7 @@ struct WgrInstance
 };
 
 static_assert(sizeof(WgrModelSection) == 24, "WgrModelSection must match Rust");
-static_assert(sizeof(WgrModelMaterial) == 216, "WgrModelMaterial must match Rust");
+static_assert(sizeof(WgrModelMaterial) == 280, "WgrModelMaterial must match Rust");
 static_assert(sizeof(WgrModelLod) == 16, "WgrModelLod must match Rust");
 static_assert(sizeof(WgrInstance) == 144, "WgrInstance must match Rust");
 

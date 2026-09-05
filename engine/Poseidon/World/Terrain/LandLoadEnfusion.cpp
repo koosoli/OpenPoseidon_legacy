@@ -1562,6 +1562,12 @@ LODShapeWithShadow* BuildShapeFromXob(const EnfusionMount& mount, const std::str
     // 1..5 brings that impostor in to a few tens of metres, which reads as a forest of
     // flat cards.
     options.lodFromThreshold = true;
+    // RFG-072: BOTH UV sets. A `MatPBRMulti` paints its GLOBAL_MASK in the `.xob`'s second
+    // stream (`UVSrcGlobalMaps "UV set 2"`), and without this block the mask sampled the
+    // first -- the metre-scale tiling unwrap, u[-16..32] on Church_01's walls -- and
+    // repeated ~47 times across the wall as dark patches. The exporter has had the flag
+    // since AST-011C; the native path never set it, so no native model had a `uv1`.
+    options.secondUv = true;
     // The native path has no texture baker, so the `.xob`'s own material paths are
     // written and the models draw untextured until the material side lands.
     Fmt::MLOD::WriteModel model;

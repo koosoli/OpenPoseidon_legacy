@@ -1066,6 +1066,16 @@ void SeedRendererEnvFromGraphicsConfig()
         setenv("POSEIDON_ENFUSION_TINT_MULTIPLY", "0", 1);
 #endif
     }
+    // RFG-072: same shape. Read where a shape registers its materials, which on the first
+    // load is before the dev panel exists.
+    if (cfg.enfusionMultiLayers == 0)
+    {
+#ifdef _WIN32
+        _putenv_s("POSEIDON_ENFUSION_MULTI_LAYERS", "0");
+#else
+        setenv("POSEIDON_ENFUSION_MULTI_LAYERS", "0", 1);
+#endif
+    }
     if (cfg.dlssSharpen == 0)
     {
 #ifdef _WIN32

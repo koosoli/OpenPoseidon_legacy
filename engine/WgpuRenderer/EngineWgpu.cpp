@@ -45,6 +45,7 @@
 #include <Poseidon/Graphics/Shared/ScreenshotWriter.hpp>
 #include <Poseidon/Graphics/Textures/ProceduralTexture.hpp>
 #include <Poseidon/Graphics/Textures/TexturePreload.hpp>
+#include <Poseidon/Graphics/Textures/EnfusionTextureName.hpp>
 #include <Poseidon/World/Simulation/Animation/RtAnimation.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
@@ -6130,6 +6131,25 @@ bool EngineWgpu::MaterialIsReflective(const ShapeSection& section)
     return true;
 }
 
+// RFG-072: the census the owner asked for, with its denominator. Over DISTINCT `MatPBRMulti`
+// materials (counted once each, on the first section that resolves them): how many reach
+// the four-layer blend shader and how many collapse to a single image, and why. A section
+// whose material names no mask has nothing to blend; one whose mask failed to load is a
+// texture-format problem; one whose shape carries no second UV set blends on uv0 and
+// tiles the mask across the wall. Printed from RegisterGpuModel, which knows the shape.
+struct MultiLayerCensus
+{
+    size_t multi = 0;            //!< distinct MatPBRMulti materials seen
+    size_t composed = 0;         //!< reached the blend (mask bound)
+    size_t composedTinted = 0;   //!< of those, wearing per-layer Color_N
+    size_t composedUv1 = 0;      //!< of those, mask on the second UV set (per shape+material)
+    size_t composedUv0NoSet = 0; //!< mask wants uv1 but the shape has no second set -> uv0
+    size_t composedUv0 = 0;      //!< material itself puts the mask on uv0
+    size_t singleNoMask = 0;     //!< fell back: names no MaskMap
+    size_t singleMaskFailed = 0; //!< fell back: MaskMap named but did not upload
+};
+static MultiLayerCensus GMultiLayerCensus;
+
 // MAT-048 A/B lever. WGR_MULTI_LAYER_NORMALS=0 binds no layer normal maps at all, which
 // restores the pre-MAT-048 behaviour exactly: layer 0's normal shades the whole surface no
 // matter which layer the mask selects. Read once and announced through the GAME LOG (the
@@ -6168,6 +6188,9 @@ bool EngineWgpu::ResolveMaterialLayers(const ShapeSection& section, WgrModelMate
         uv[2] = 0.0f;
         uv[3] = 0.0f;
     }
+    // RFG-072: and identity colour, so a material with no `Color_N` multiplies by one.
+    for (auto& colour : material.layer_colour)
+        colour[0] = colour[1] = colour[2] = colour[3] = 1.0f;
     // Same as the normal map above: composeMultiLayers is a presentation switch honoured
     // per fragment by the retained shader, not baked into the record here.
     if (!section.surfMat)
@@ -6202,9 +6225,28 @@ bool EngineWgpu::ResolveMaterialLayers(const ShapeSection& section, WgrModelMate
     };
 
     using Slot = Asset::Material::MaterialSlot;
+    // RFG-072 census, over DISTINCT materials of the native family: how many reach the
+    // blend and how many fall back to one image, and why. The flag site in
+    // RegisterGpuModel adds the UV-set half and prints the line.
+    const bool nativeMulti = cached->second.shaderFamily == "MatPBRMulti";
+    static std::unordered_set<std::string> censused;
+    const bool firstSeen = nativeMulti && censused.insert(materialPath).second;
+    if (firstSeen)
+        ++GMultiLayerCensus.multi;
     const uint64_t mask = bind(Slot::Mask);
     if (!mask)
+    {
+        if (firstSeen)
+        {
+            if (cached->second.Find(Slot::Mask) == nullptr)
+                ++GMultiLayerCensus.singleNoMask;
+            else
+                ++GMultiLayerCensus.singleMaskFailed;
+        }
         return false; // no mask, no blend to drive -- layer 0 stands alone
+    }
+    if (firstSeen)
+        ++GMultiLayerCensus.composed;
 
     material.mask_texture_id = mask;
     layerUv(Slot::BaseColour, 0);
@@ -6226,6 +6268,23 @@ bool EngineWgpu::ResolveMaterialLayers(const ShapeSection& section, WgrModelMate
         material.layer_normal_texture_id[i] = MultiLayerNormalsEnabled() ? bind(normals[i]) : 0;
         layerUv(colours[i], i + 1);
     }
+    // RFG-072: each layer's `Color_N` as a linear multiplier, recorded by the adapter only
+    // for a material the native mount served (the converting exporter bakes the colour
+    // into its `.paa`). Under the Materials-tab switch; off leaves the identity above.
+    if (Poseidon::Enfusion::MultiLayersEnabled())
+    {
+        const Slot tinted[4] = {Slot::BaseColour, Slot::LayerColour1, Slot::LayerColour2, Slot::LayerColour3};
+        for (size_t i = 0; i < 4; ++i)
+        {
+            const auto* entry = cached->second.Find(tinted[i]);
+            if (!entry || !entry->tintPresent)
+                continue;
+            for (int c = 0; c < 4; ++c)
+                material.layer_colour[i][c] = entry->tint[c];
+            if (firstSeen && i == 0)
+                ++GMultiLayerCensus.composedTinted;
+        }
+    }
 
     static std::unordered_set<std::string> logged;
     if (logged.insert(materialPath).second)
@@ -6233,14 +6292,19 @@ bool EngineWgpu::ResolveMaterialLayers(const ShapeSection& section, WgrModelMate
         const auto* maskEntry = cached->second.Find(Slot::Mask);
         LOG_INFO(Graphics,
                  "Wgpu material: composed {} layers ({} layer normals) for {} family={} (uv scales {:.1f} {:.1f} "
-                 "{:.1f} {:.1f}; mask uvSource={})",
+                 "{:.1f} {:.1f}; mask uvSource={}; layer colours {:.2f},{:.2f},{:.2f} / {:.2f},{:.2f},{:.2f} / "
+                 "{:.2f},{:.2f},{:.2f} / {:.2f},{:.2f},{:.2f})",
                  1 + (material.layer_texture_id[0] != 0) + (material.layer_texture_id[1] != 0) +
                      (material.layer_texture_id[2] != 0),
                  (material.layer_normal_texture_id[0] != 0) + (material.layer_normal_texture_id[1] != 0) +
                      (material.layer_normal_texture_id[2] != 0),
                  materialPath, cached->second.shaderFamily, material.layer_uv[0][0], material.layer_uv[1][0],
                  material.layer_uv[2][0], material.layer_uv[3][0],
-                 maskEntry && !maskEntry->uvSource.empty() ? maskEntry->uvSource.c_str() : "tex");
+                 maskEntry && !maskEntry->uvSource.empty() ? maskEntry->uvSource.c_str() : "tex",
+                 material.layer_colour[0][0], material.layer_colour[0][1], material.layer_colour[0][2],
+                 material.layer_colour[1][0], material.layer_colour[1][1], material.layer_colour[1][2],
+                 material.layer_colour[2][0], material.layer_colour[2][1], material.layer_colour[2][2],
+                 material.layer_colour[3][0], material.layer_colour[3][1], material.layer_colour[3][2]);
     }
     return true;
 }
@@ -7427,10 +7491,49 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
             // Multi's further layers, same ordering dependency on the translation cache.
             ResolveMaterialLayers(s->GetSection(i), mat);
             // Multi's mask lives on the second UV set in the BI corpora (TexGen uvSource
-            // "tex1"); the shader samples it with uv1 when told so.
-            if (mat.mask_texture_id != 0 && MaterialMaskUsesUv1(s->GetSection(i)))
+            // "tex1") and in Reforger's (`UVSrcGlobalMaps "UV set 2"`, RFG-072); the shader
+            // samples it with uv1 when told so -- and ONLY when the shape carries a second
+            // set. Without one MeshBuild copies uv0 into uv1, so the flag would change nothing
+            // on a converted model exported without `--second-uv`, and the census below would
+            // claim a uv1 blend that never happened.
+            if (mat.mask_texture_id != 0)
             {
-                sec.flags |= WGR_MODEL_SECTION_MASK_UV1;
+                const bool wantsUv1 = MaterialMaskUsesUv1(s->GetSection(i));
+                const bool hasUv1 = s->HasUV1();
+                if (wantsUv1 && hasUv1)
+                {
+                    sec.flags |= WGR_MODEL_SECTION_MASK_UV1;
+                }
+                // RFG-072 census: the UV half, per distinct shape+material, and the line.
+                const ShapeSection& secM = s->GetSection(i);
+                const char* mpM = secM.surfMat ? secM.surfMat->GetName().Data() : nullptr;
+                static std::unordered_set<std::string> censused;
+                if (mpM && censused.insert(mpM).second)
+                {
+                    const auto cachedM = _materialBindings.find(mpM);
+                    if (cachedM != _materialBindings.end() && cachedM->second.shaderFamily == "MatPBRMulti")
+                    {
+                        if (wantsUv1 && hasUv1)
+                            ++GMultiLayerCensus.composedUv1;
+                        else if (wantsUv1)
+                            ++GMultiLayerCensus.composedUv0NoSet;
+                        else
+                            ++GMultiLayerCensus.composedUv0;
+                        const MultiLayerCensus& c = GMultiLayerCensus;
+                        const size_t n = c.multi;
+                        // Once at 1, 2, 4, 8, ... and every 50th after, so a load of 300
+                        // materials prints a dozen lines and the last one is the total.
+                        if ((n & (n - 1)) == 0 || n % 50 == 0)
+                            LOG_INFO(Graphics,
+                                     "Wgpu material: MatPBRMulti census -- {} distinct materials: {} reach the layer "
+                                     "blend ({} mask on UV set 2, {} on uv0 because the shape has no second set, {} "
+                                     "on uv0 by the material; {} wear Color_N per layer), {} fall back to one image "
+                                     "({} name no MaskMap, {} MaskMap failed to upload) [switch {}]",
+                                     n, c.composed, c.composedUv1, c.composedUv0NoSet, c.composedUv0, c.composedTinted,
+                                     c.singleNoMask + c.singleMaskFailed, c.singleNoMask, c.singleMaskFailed,
+                                     Poseidon::Enfusion::MultiLayersEnabled() ? "on" : "OFF");
+                    }
+                }
             }
             if (const float specScale = MaterialSpecularScale(s->GetSection(i), mat.specular_texture_id);
                 specScale < 1.0f)

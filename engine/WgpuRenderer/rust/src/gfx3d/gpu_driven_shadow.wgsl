@@ -65,6 +65,9 @@ struct SectionMaterial {
     _pad_layer2: u32,
     // Per layer, layer 0 at index 0: (scale_u, scale_v, offset_u, offset_v).
     layer_uv: array<vec4<f32>, 4>,
+    // RFG-072: per layer, layer 0 at index 0: the LINEAR colour multiplier on the layer's
+    // tile (Enfusion `Color_N`); identity for every other material.
+    layer_colour: array<vec4<f32>, 4>,
 };
 
 @group(0) @binding(0) var<uniform> pass_data: PassData;

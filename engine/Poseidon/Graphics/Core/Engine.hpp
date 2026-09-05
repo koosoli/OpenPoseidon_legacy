@@ -1065,6 +1065,12 @@ class Engine : public IGraphicsEngine
         // TEXELS a tinted tile is uploaded with, so relaunch (the value persists to
         // graphics.cfg) rather than trusting a reload to re-decode a cached texture.
         bool enfusionTintMultiply = true;
+        // RFG-072: feed the four-layer blend shader from a NATIVE MatPBRMulti as the material
+        // describes itself -- mask on the `.xob`'s second UV set, each layer's tile worn in
+        // its own `Color_N` -- instead of one flattened image. Registration-time like the
+        // two above (the material record is baked when a shape registers): reload the
+        // world for a clean A/B. Inert on every non-Enfusion world.
+        bool enfusionMultiLayers = true;
     };
     struct MaterialDebugInfo
     {

@@ -172,6 +172,11 @@ struct TranslatedSlot
     // layer onto one frame and loses the detail the surface reads as.
     RvUvTransform  uvTransform;
     SlotChannelMap channels;
+    // RFG-072: the colour this layer's tile is worn in -- Enfusion's per-layer `Color_N`,
+    // a LINEAR multiplier on the shared one-metre library tile (RFG-071 measured the
+    // reading). Identity when the source names none, so a consumer may multiply blind.
+    float          tint[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+    bool           tintPresent = false;
 };
 
 struct TranslatedMaterial

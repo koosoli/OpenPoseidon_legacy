@@ -150,5 +150,35 @@ inline void SetLayerTintLinearMultiply(bool on)
     GLayerTintLinearMultiply.store(on ? 1 : 0, std::memory_order_relaxed);
 }
 
+//! RFG-072 A/B switch: feed the renderer's four-layer blend shader from a NATIVE `MatPBRMulti`
+//! the way the material describes itself, instead of one flattened image.
+//!
+//! What "on" changes, all of it registration-time (the material record is baked when a
+//! shape registers, so reload the world after flipping it):
+//!   * the mask samples the model's SECOND UV set when the material says
+//!     `UVSrcGlobalMaps "UV set 2"` -- measured on Church_01.xob, set 0 spans u[-16..32]
+//!     v[-30..17] (a metre-scale tiling unwrap) and set 1 spans [0..1] (the unique unwrap
+//!     the GLOBAL_MASK is painted in), so on set 0 the mask repeated ~47 times across the
+//!     wall as dark patches;
+//!   * every layer's `Color_N` multiplies its tile in linear space (RFG-071's rule) inside
+//!     the shader, so layer 2..4 wear their colour and layer 1 no longer needs the baked
+//!     face tint that the material's own raw `BCR_1` used to override anyway.
+//! Off restores the RFG-071 state: mask on uv0, raw tiles, one tinted face image.
+inline std::atomic<int> GMultiLayersEnabled{-1};
+
+inline bool MultiLayersEnabled()
+{
+    int value = GMultiLayersEnabled.load(std::memory_order_relaxed);
+    if (value < 0)
+    {
+        const char* env = std::getenv("POSEIDON_ENFUSION_MULTI_LAYERS");
+        value = (env != nullptr && env[0] == '0') ? 0 : 1;
+        GMultiLayersEnabled.store(value, std::memory_order_relaxed);
+    }
+    return value != 0;
+}
+
+inline void SetMultiLayersEnabled(bool on) { GMultiLayersEnabled.store(on ? 1 : 0, std::memory_order_relaxed); }
+
 } // namespace Enfusion
 } // namespace Poseidon

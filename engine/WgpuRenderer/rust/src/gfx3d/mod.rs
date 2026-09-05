@@ -7475,6 +7475,7 @@ impl Gfx3d {
                 ],
                 _pad_layer: [0; 3],
                 layer_uv: m.layer_uv,
+                layer_colour: m.layer_colour,
             })
             .collect();
         let model =
@@ -9288,8 +9289,8 @@ fn multi_layer_normals_keep_every_layout_in_step() {
     // Mirrors the C++ static_assert in include/wgpu_renderer.hpp.
     assert_eq!(
         std::mem::size_of::<WgrModelMaterial>(),
-        216,
-        "WgrModelMaterial grew by three u64 handles (192 -> 216); wgpu_renderer.hpp must agree"
+        280,
+        "WgrModelMaterial grew by three u64 handles (192 -> 216) and RFG-072 layer_colour (-> 280); wgpu_renderer.hpp must agree"
     );
     assert_eq!(
         std::mem::offset_of!(WgrModelMaterial, layer_normal_texture_id),
@@ -9297,6 +9298,7 @@ fn multi_layer_normals_keep_every_layout_in_step() {
         "layer normals must follow layer_texture_id[3], leaving every earlier lane put"
     );
     assert_eq!(std::mem::offset_of!(WgrModelMaterial, layer_uv), 152);
+    assert_eq!(std::mem::offset_of!(WgrModelMaterial, layer_colour), 216);
 
     // The GPU-side struct: WGSL 16-aligns the trailing array<vec4<f32>>, Rust does not, so
     // the pad words are explicit and the offsets are the contract.
@@ -9308,7 +9310,11 @@ fn multi_layer_normals_keep_every_layout_in_step() {
         std::mem::offset_of!(cull::SectionMaterialGpu, layer_uv),
         128
     );
-    assert_eq!(std::mem::size_of::<cull::SectionMaterialGpu>(), 192);
+    assert_eq!(
+        std::mem::offset_of!(cull::SectionMaterialGpu, layer_colour),
+        192
+    );
+    assert_eq!(std::mem::size_of::<cull::SectionMaterialGpu>(), 256);
 
     // Both WGSL mirrors must declare the field, in the same place, with the same padding.
     for (name, src) in [
@@ -9321,6 +9327,10 @@ fn multi_layer_normals_keep_every_layout_in_step() {
         assert!(
             src.contains("layer_normal_slot: array<u32, 3>,"),
             "{name} must mirror SectionMaterialGpu::layer_normal_slot"
+        );
+        assert!(
+            src.contains("layer_colour: array<vec4<f32>, 4>,"),
+            "{name} must mirror SectionMaterialGpu::layer_colour (RFG-072)"
         );
         for pad in [
             "_pad_layer0: u32,",
@@ -9348,8 +9358,8 @@ fn multi_blends_layer_normals_with_the_same_weights_as_the_colours() {
         "the colour blend must publish its final per-layer weights for the normal blend"
     );
     assert!(
-        src.contains("blended + layer * lw[i]"),
-        "colours must use the renormalised weights"
+        src.contains("blended + tint_albedo(layer, sm.layer_colour[i + 1u].rgb) * lw[i]"),
+        "colours must use the renormalised weights (and RFG-072: each layer in its own Color_N)"
     );
     assert!(
         src.contains("layer_n * layer_w[i]"),

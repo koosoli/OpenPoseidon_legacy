@@ -4781,6 +4781,22 @@ void DrawMaterialDebugTab()
             "TEXELS a tinted tile is uploaded with, and both settings build the same texture\n"
             "NAME, so a cached upload is not re-decoded. RELAUNCH for a clean A/B; the value\n"
             "persists to graphics.cfg. Inert wherever no Color_N is applied.");
+    const bool multiWas = settings.enfusionMultiLayers;
+    changed |= Dev::Checkbox("Enfusion Multi layers (mask on UV set 2, Color_N per layer)", &settings.enfusionMultiLayers);
+    if (Dev::PanelItemHovered())
+        ImGui::SetTooltip(
+            "RFG-072. A native MatPBRMulti is a mask-blended stack of up to four shared one-metre\n"
+            "tiles. Off (the state before): the mask samples the model's FIRST UV set -- the\n"
+            "metre-scale tiling unwrap, u[-16..32] on Church_01's walls -- so it repeats ~47\n"
+            "times across the wall as dark patches, and every layer is its raw colourless tile.\n"
+            "On: the mask samples the SECOND UV set the material asks for (UVSrcGlobalMaps\n"
+            "\"UV set 2\", the [0..1] unwrap it was painted in) and each layer multiplies its tile\n"
+            "by its own Color_N in linear space.\n"
+            "\n"
+            "Registration-time, like the two switches above: the material record is baked when\n"
+            "a shape registers, so reload the world for a clean A/B. The value persists to\n"
+            "graphics.cfg. The log counts it: 'Wgpu material: MatPBRMulti census -- ...'.\n"
+            "Inert on every non-Enfusion world.");
     const bool compressedWas = settings.compressedEnfusionTextures;
     changed |= Dev::Checkbox("Enfusion compressed textures (BC7/BC5/BC4)", &settings.compressedEnfusionTextures);
     if (Dev::PanelItemHovered())
@@ -4858,6 +4874,21 @@ void DrawMaterialDebugTab()
                      "Dev panel: Enfusion Color_N linear multiply {} (persisted to graphics.cfg; relaunch for a "
                      "clean A/B -- both settings build the same texture name)",
                      settings.enfusionTintMultiply ? "ON" : "OFF");
+        else
+            LOG_ERROR(Graphics, "Dev panel: saving '{}' failed", cfgPath);
+    }
+
+    // RFG-072: same file, same push -- the shape registration reads the atomic.
+    if (multiWas != settings.enfusionMultiLayers)
+    {
+        Poseidon::Enfusion::SetMultiLayersEnabled(settings.enfusionMultiLayers);
+        const std::string cfgPath = GamePaths::Instance().UserDir() + "graphics.cfg";
+        GraphicsConfig cfg;
+        cfg.Load(cfgPath);
+        cfg.enfusionMultiLayers = settings.enfusionMultiLayers ? 1 : 0;
+        if (cfg.Save(cfgPath))
+            LOG_INFO(Graphics, "Dev panel: Enfusion Multi layers {} (persisted to graphics.cfg; reload the world)",
+                     settings.enfusionMultiLayers ? "ON" : "OFF");
         else
             LOG_ERROR(Graphics, "Dev panel: saving '{}' failed", cfgPath);
     }

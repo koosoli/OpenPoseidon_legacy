@@ -358,6 +358,36 @@ inline void SetEmatSlotUv(TranslatedMaterial& material, MaterialSlot slot, const
     }
 }
 
+// RFG-072: does the material's `key` (e.g. `UVSrcGlobalMaps`) name Enfusion's "UV set 2"?
+// Enfusion numbers its sets from 1, so "UV set 2" is the `.xob`'s second stream, index 1.
+inline bool EmatNamesUvSet2(const EmatMaterial& emat, const char* key)
+{
+    const EmatProperty* property = emat.Find(key);
+    if (!property || property->values.empty() || property->values[0].isNumber)
+        return false;
+    const std::string& text = property->values[0].text;
+    return !text.empty() && text.back() == '2';
+}
+
+// RFG-072: attach a layer's `Color_N` to a slot the material already bound. Absent or
+// malformed leaves the identity tint in place.
+inline void SetEmatSlotTint(TranslatedMaterial& material, MaterialSlot slot, const EmatMaterial& emat,
+                            const char* colourKey)
+{
+    float colour[4] = {};
+    if (!emat.Vec4Of(colourKey, colour))
+        return;
+    for (TranslatedSlot& entry : material.slots)
+    {
+        if (entry.slot != slot)
+            continue;
+        for (int c = 0; c < 4; ++c)
+            entry.tint[c] = colour[c];
+        entry.tintPresent = true;
+        return;
+    }
+}
+
 inline bool AddEmatSlot(TranslatedMaterial& material, const EmatMaterial& emat, const char* key, MaterialSlot slot)
 {
     const std::string path = emat.TextureOf(key);
@@ -448,8 +478,11 @@ inline TranslatedMaterial TranslateEmat(const EmatMaterial& emat, const std::str
     // bound at all. `ResolveMaterialLayers` maps LayerColour1..3 onto the shader's
     // layer_slot[0..2], which the shader weights by mask .r/.g/.b in that order, so the
     // whole chain is fixed by numbering it correctly here.
+    // RFG-072: remembered, because `Color_1` belongs to the tile and not to an object's own
+    // bake -- a `BCRMap` is already the colour it should be.
+    bool baseIsLayerTile = false;
     if (!AddFirstEmatSlot(out, emat, {"BCRMap", "AlbedoMap"}, MaterialSlot::BaseColour))
-        AddEmatSlot(out, emat, "BCR_1", MaterialSlot::BaseColour);
+        baseIsLayerTile = AddEmatSlot(out, emat, "BCR_1", MaterialSlot::BaseColour);
     AddFirstEmatSlot(out, emat, {"NMOMap", "GlobalNMOMap", "NTCMap", "NormalMap"}, MaterialSlot::NormalMap);
     AddEmatSlot(out, emat, "MaskMap", MaterialSlot::Mask);
     AddEmatSlot(out, emat, "BCR_2", MaterialSlot::LayerColour1);
@@ -467,17 +500,42 @@ inline TranslatedMaterial TranslateEmat(const EmatMaterial& emat, const std::str
     SetEmatSlotUv(out, MaterialSlot::LayerColour1, emat, "UVTransform_2", nullptr);
     SetEmatSlotUv(out, MaterialSlot::LayerColour2, emat, "UVTransform_3", nullptr);
     SetEmatSlotUv(out, MaterialSlot::LayerColour3, emat, "UVTransform_4", nullptr);
-    // And the mask on the section's OWN uv -- uvSource left unset, deliberately.
+    // RFG-072: and the mask on the SECOND UV set when the material says so.
     //
-    // These materials say `UVSrcGlobalMaps "UV set 2"`, and reading that as the engine's
-    // `tex1` is wrong. It numbers channels in the SOURCE `.xob`, and the converter does
-    // not preserve that numbering: it writes the object's primary unwrap as `#UVSet#` 0,
-    // which is the unwrap the mask is authored in. Measured on church_01 at
-    // 5168.77 3929.13 39.12 az 19.1 el -15.1 -- `WGR_MATERIAL_MASK_UV1=1` draws broad
-    // diagonal ribbons across the walls and roof; `=0` gives clean walls with the
-    // authored detail. The A/B knob stays because the RVMAT Multi corpora (Arma 2/3)
-    // genuinely do put the mask on tex1, and `MaterialMaskUsesUv1` still answers from
-    // the material for those.
+    // `UVSrcGlobalMaps "UV set 2"` (3,439 of the corpus's materials) names the `.xob`'s
+    // second UV stream, and that stream IS the unwrap the GLOBAL_MASK is painted in.
+    // Measured on Church_01.xob LOD0, ExtWalls part: set 0 spans u[-15.96..31.64]
+    // v[-29.59..17.34] -- a metre-scale tiling unwrap for the one-metre library tiles --
+    // and set 1 spans u[0.002..0.999] v[0.001..0.997], the unique unwrap. Every part with
+    // a global mask has two sets (69,194 of 93,597 parts corpus-wide, XobModel.hpp).
+    //
+    // This block used to say the opposite -- that "UV set 2" numbers the source and the
+    // converter writes the mask unwrap as set 0 -- on the evidence that
+    // `WGR_MATERIAL_MASK_UV1=1` drew diagonal ribbons on church_01. That A/B was vacuous
+    // twice over: the converted `church_01.p3d` carries NO `#UVSet#` block (the exporter
+    // was run without `--second-uv`, so `uv1` fell back to `uv` in MeshBuild), and the
+    // ribbons were the DXT1-compressed mask that the same commit (b5d85209) fixed with
+    // `maxMaskSize`. `tex1` is recorded here as the material's answer; the renderer still
+    // takes it only when the shape actually carries a second set (ClassifyGpuSection), so
+    // a converted model without one keeps uv0 exactly as before.
+    if (EmatNamesUvSet2(emat, "UVSrcGlobalMaps"))
+        SetEmatSlotUv(out, MaterialSlot::Mask, emat, std::string(), "tex1");
+
+    // RFG-072: each layer's `Color_N`, recorded beside its tile for a shader that can
+    // multiply per layer. Only for a material served by the NATIVE mount: the converting
+    // exporter already bakes the blended colour into the base `.paa` it deploys (MAT-054),
+    // and multiplying that again would tint it twice.
+    {
+        const auto& mount = Poseidon::Asset::Formats::Enfusion::EnfusionMount::Instance();
+        if (mount.IsOpen() && mount.Has(origin))
+        {
+            if (baseIsLayerTile)
+                SetEmatSlotTint(out, MaterialSlot::BaseColour, emat, "Color_1");
+            SetEmatSlotTint(out, MaterialSlot::LayerColour1, emat, "Color_2");
+            SetEmatSlotTint(out, MaterialSlot::LayerColour2, emat, "Color_3");
+            SetEmatSlotTint(out, MaterialSlot::LayerColour3, emat, "Color_4");
+        }
+    }
 
     // `GlobalMCRMap` (2,041 files) is NOT bound, and the omission is the point. The
     // slots this engine has are the ones whose channel layout was measured -- see

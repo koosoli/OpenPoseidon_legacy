@@ -138,6 +138,9 @@ pub struct SectionMaterialGpu {
     pub _pad_layer: [u32; 3],
     // Per layer, layer 0 at index 0: (scale_u, scale_v, offset_u, offset_v).
     pub layer_uv: [[f32; 4]; 4],
+    // RFG-072: per layer, layer 0 at index 0: the linear colour multiplier on the layer's
+    // tile (Enfusion `Color_N`), identity elsewhere. vec4-aligned already, no pad needed.
+    pub layer_colour: [[f32; 4]; 4],
 }
 
 // A permissive plane that never culls anything: dot(0, p) + BIG >= -radius always holds.

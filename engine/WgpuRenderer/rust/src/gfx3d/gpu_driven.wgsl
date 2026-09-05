@@ -11,6 +11,7 @@
 
 #import frame::{frame, reverse_z, fog_factor, atmo_applied, veg_sway_offset, matdbg_view, matdbg_flag, MATDBG_DISABLE_NORMAL, MATDBG_INVERT_NORMAL_Y, MATDBG_COMPOSE_MULTI, MATDBG_DISABLE_FRESNEL_ENV, MATDBG_DISABLE_SPECULAR}
 #import shading::{shade, ShadeMaterial}
+#import color::srgb_to_linear
 #import gbuffer::{oct_encode, a2c_coverage, mip_alpha_boost}
 // Terrain conform (group 4 heightmap + surface_y/surface_grad), shared with shader3d /
 // shadow_depth. Lets the GPU-driven VS conform ClipLand vegetation/fences to the ground per
@@ -97,6 +98,9 @@ struct SectionMaterial {
     _pad_layer2: u32,
     // Per layer, layer 0 at index 0: (scale_u, scale_v, offset_u, offset_v).
     layer_uv: array<vec4<f32>, 4>,
+    // RFG-072: per layer, layer 0 at index 0: the LINEAR colour multiplier on the layer's
+    // tile (Enfusion `Color_N`); identity for every other material.
+    layer_colour: array<vec4<f32>, 4>,
 };
 
 @group(1) @binding(0) var<storage, read> instances: array<Instance>;
@@ -148,6 +152,21 @@ const SECTION_NORMAL_RG: u32 = 8u;
 // u = azimuth (atan2(z, x)/2pi + 0.5, U-wrapped), v = 0 at zenith .. 1 at nadir (acos(y)/pi).
 // `dir` is a world-space direction; the result is LINEAR radiance, which is why the caller
 // only applies it on the HDR path.
+// RFG-072: wear a layer tile in its `Color_N`. The tile arrives sRGB-encoded (the albedo
+// formats are Unorm and shade() decodes them), and the colour is a LINEAR multiplier --
+// RFG-071 measured multiplying in gamma at 0.656x the authored bake against 1.29x in
+// linear -- so on the HDR path the sample is decoded, scaled and re-encoded here. The
+// gamma-naive LDR path multiplies as-is, which is the only arithmetic it has.
+fn tint_albedo(c: vec3<f32>, k: vec3<f32>) -> vec3<f32> {
+    if (linear > 0.5) {
+        let lin = srgb_to_linear(c) * k;
+        let lo = lin * 12.92;
+        let hi = 1.055 * pow(max(lin, vec3<f32>(0.0)), vec3<f32>(1.0 / 2.4)) - 0.055;
+        return select(hi, lo, lin <= vec3<f32>(0.0031308));
+    }
+    return c * k;
+}
+
 const ENV_TWO_PI: f32 = 6.28318530718;
 fn sky_env_sample(dir: vec3<f32>) -> vec3<f32> {
     let u = 0.5 + atan2(dir.z, dir.x) / ENV_TWO_PI;
@@ -699,6 +718,9 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
     var base = textureSampleBias(textures[sm.texture_slot],
                              samplers[sm.sampler_idx],
                              in.uv * sm.layer_uv[0].xy + sm.layer_uv[0].zw, frame.renscale.x);
+    // RFG-072: layer 0 worn in its own colour. Identity (1,1,1) for every material that
+    // names none, so this is a no-op outside a native MatPBRMulti. See tint_albedo.
+    base = vec4<f32>(tint_albedo(base.rgb, sm.layer_colour[0].rgb), base.a);
     // The final per-layer mask weights, hoisted out of the block below so the NORMAL blend
     // (MAT-048, further down) uses exactly the weights the colour blend used — one mask
     // sample, one set of weights, colours and normals agreeing per fragment by construction.
@@ -735,7 +757,8 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
             }
             let uv_i = in.uv * sm.layer_uv[i + 1u].xy + sm.layer_uv[i + 1u].zw;
             let layer = textureSampleBias(textures[sm.layer_slot[i]], samplers[sm.sampler_idx], uv_i, frame.renscale.x).rgb;
-            blended = blended + layer * lw[i];
+            // RFG-072: each further layer in ITS colour (`Color_2..4`), identity when unnamed.
+            blended = blended + tint_albedo(layer, sm.layer_colour[i + 1u].rgb) * lw[i];
         }
         let weight = min(total, 1.0);
         base = vec4<f32>(base.rgb * (1.0 - weight) + blended, base.a);
