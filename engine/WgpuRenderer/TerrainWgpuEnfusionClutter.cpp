@@ -596,7 +596,33 @@ bool TerrainWgpu::BakeEnfusionClutter(const Landscape& land, std::vector<uint32_
     int surfacesWithClutter = 0, surfacesWithSet = 0, plantsMissingTexture = 0, plantsDropped = 0;
     float maxWeight = 0.0f;
 
+    // RFG-064: hand out atlas layers by how much GROUND a surface covers, not by its
+    // index in the palette.
+    //
+    // There are 32 layers and Everon's palette is 22 surfaces deep. Walked in palette
+    // order, the four forest floors (indices 6-9) take all 32 between them and the
+    // island's two commonest grass surfaces reach the loop with nothing left -- so the
+    // measured result was "6 surfaces grew a run" and a player standing in a meadow saw
+    // bare ground. The forests were not more deserving; they were earlier.
+    //
+    // Coverage is counted from the same `GetTexture` lookup phase 2 uses, so the order
+    // is derived from the world actually being drawn rather than from a guess about
+    // which surfaces matter.
+    std::vector<size_t> cellsPerSurface(static_cast<size_t>(paletteSize), 0);
+    for (int z = 0; z < n; ++z)
+        for (int x = 0; x < n; ++x)
+        {
+            const int material = land.GetTexture(z, x);
+            if (material >= 0 && material < paletteSize)
+                ++cellsPerSurface[static_cast<size_t>(material)];
+        }
+    std::vector<int> surfaceOrder(static_cast<size_t>(paletteSize));
     for (int i = 0; i < paletteSize; ++i)
+        surfaceOrder[static_cast<size_t>(i)] = i;
+    std::stable_sort(surfaceOrder.begin(), surfaceOrder.end(), [&cellsPerSurface](int a, int b)
+                     { return cellsPerSurface[static_cast<size_t>(a)] > cellsPerSurface[static_cast<size_t>(b)]; });
+
+    for (const int i : surfaceOrder)
     {
         const std::string surface = land.GetEnfusionSurface(i);
         if (surface.empty())
