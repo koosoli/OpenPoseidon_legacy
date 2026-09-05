@@ -729,7 +729,37 @@ bool TerrainWgpu::BakeEnfusionClutter(const Landscape& land, std::vector<uint32_
     // (LandLoadEnfusion point-samples the 1 m TMAT into it), so the cell's answer
     // is a lookup. That is the whole reason this bake is cheap where the Arma one
     // costs 700 ms of image decoding.
-    const float invMax = 1.0f / maxWeight;
+    // RFG-065: normalise against the TYPICAL surface, not the densest one.
+    //
+    // Dividing by the maximum lets a single outlier decide what every other surface
+    // looks like. Everon's conifer floor scores 14.15 -- seven times a meadow -- so
+    // Grass_03 at 2.02 came out at 18 of 127 coverage, about 14%, and with the card
+    // coverage factor on top that is roughly three percent of the ground. Measured and
+    // visible: the cells were flagged, the atlas was resident, the cards were drawn,
+    // and a capture at eye height on a Grass_03 meadow showed bare earth. Nothing was
+    // broken; the grass was simply scaled into invisibility by a forest.
+    //
+    // The median makes the ordinary surface fully covered and lets the outliers
+    // saturate, which is the right way round: a meadow should look like a meadow, and
+    // a conifer floor is allowed to be the densest thing on the island without
+    // defining the scale for everything else.
+    float reference = maxWeight;
+    {
+        std::vector<float> weights;
+        weights.reserve(runs.size());
+        for (const SurfaceRun& run : runs)
+            if (run.layerCount != 0 && run.weight > 0.0f)
+                weights.push_back(run.weight);
+        if (!weights.empty())
+        {
+            const size_t middle = weights.size() / 2;
+            std::nth_element(weights.begin(), weights.begin() + static_cast<ptrdiff_t>(middle), weights.end());
+            reference = weights[middle];
+        }
+        if (!(reference > 0.0f))
+            reference = maxWeight;
+    }
+    const float invMax = 1.0f / reference;
     size_t grownCells = 0;
     for (int z = 0; z < n; ++z)
     {
