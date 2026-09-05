@@ -104,25 +104,92 @@ const char* WantedWorld()
 //   * A small mip, not the top one. An Everon ground BCR is 2048^2 BC7 and this is a
 //     layer that gets minified anyway, so mip N costs nothing and keeps 22 materials
 //     off the memory budget.
+//! RFG-066: WHICH of the four ways an Enfusion material can name an albedo answered.
+//!
+//! Not cosmetic. "The buildings are pale and grey" is a claim about a proportion, and
+//! before this there was no denominator anywhere in the load -- only a per-material
+//! warning capped at 25 lines, which can say "these failed" and can never say "and
+//! these 5,000 did not". The three earlier sessions that guessed at this each guessed
+//! at a bucket that turns out to be empty.
+enum class ColourKind
+{
+    None,      //!< nothing bindable; the section draws in the renderer's fallback
+    OwnMap,    //!< `BCRMap` / `AlbedoMap` / `GBufferAlbedo` -- the object's own albedo
+    LayerTile, //!< `BCR_1..4` -- a SHARED library tile, and see the census note below
+    Flat       //!< no map at all, only a constant `Color` (RFG-039's `enfc|`)
+};
+
 //! The measured key order, in one place because two callers need it: the terrain's
 //! surface palette and the model converter's texture slot. Picking the colour layer
 //! by FILENAME instead broke on three consecutive Arma generations and twice drew a
 //! whole island white.
-std::string ColourTextureOf(const Poseidon::Asset::Material::EmatMaterial& material)
+std::string ColourTextureOf(const Poseidon::Asset::Material::EmatMaterial& material, ColourKind* kind = nullptr)
 {
+    const auto answer = [kind](const std::string& path, ColourKind k)
+    {
+        if (kind != nullptr)
+            *kind = path.empty() ? ColourKind::None : k;
+        return path;
+    };
+
     std::string path = material.TextureOf("BCRMap");
     if (path.empty())
         path = material.TextureOf("AlbedoMap");
+    if (!path.empty())
+        return answer(path, ColourKind::OwnMap);
     // RFG-039: a `MatPBRMulti` numbers its layers, and layer 1 is not always the one
     // carrying an albedo -- `BarrelMetal_01` declares `Color_1` and `NMO_1` with no
     // `BCR_1`, and its actual maps are `BCR_2`..`BCR_4`. Taking only `BCR_1` left the
     // barrel white while four albedos sat in the same file.
+    //
+    // RFG-066 checked whether this order still leaves anything behind, over all 5,294
+    // `.emat` under `Assets/Structures/**` with inheritance resolved, and it does not:
+    // 2,176 answer a plain `BCRMap`, 2,889 a `BCR_N`, 121 only a flat `Color`, and the
+    // 108 that answer nothing are 30 `MatLightPortal` + 1 `MatLightSource` (not
+    // surfaces), 27 `MatPBRDecal` (already hidden below) and 50 genuinely empty base
+    // materials. NOTHING falls through to a named layer map -- `MudBCRMap` (1,875
+    // files) and `DirtBCRMap` (1,552) never occur without a `BCR_N` beside them, and
+    // corpus-wide exactly 2 of 10,313 materials would ever reach such a fallback. So
+    // the "take the dominant layer instead of nothing" repair this was expected to
+    // need would move zero materials, and is deliberately not written.
     for (int layer = 1; layer <= 4 && path.empty(); ++layer)
         path = material.TextureOf("BCR_" + std::to_string(layer));
-    if (path.empty())
-        path = material.TextureOf("GBufferAlbedo");
-    return path;
+    // Skipping a layer whose `Enabled_N` is 0, the way the converting exporter does
+    // (XobCommand.cpp), was measured too: layer 1 has no `Enabled_1` by construction
+    // and is present in every one of them, so "lowest present" and "lowest ENABLED"
+    // name the same tile in 0 of 9,745 `Assets/**` materials. The divergence from the
+    // exporter is real and it is inert.
+    if (!path.empty())
+        return answer(path, ColourKind::LayerTile);
+    return answer(material.TextureOf("GBufferAlbedo"), ColourKind::OwnMap);
 }
+
+//! RFG-066: what the load resolved, by kind, over the DISTINCT materials it touched.
+//!
+//! `tintDiscarded` is the one that names the reported defect. A `BCR_N` is not the
+//! object's albedo: it is a one-metre shared library tile out of `Assets/_SharedData`
+//! -- 2,548 of the 2,889 structure materials that use one, served by just 436 distinct
+//! tiles -- and what makes a given wall its own colour is the per-layer `Color_N`
+//! beside it. 2,608 of those 2,889 (90.3%) author one, median 0.385 0.356 0.322, and
+//! this path binds the raw tile and discards it. The converting exporter does not: it
+//! rescales the tile so its mean IS that colour (XobCommand.cpp, MAT-054). Doing the
+//! same here needs a tinted image, and the sink can only hand the renderer a NAME, so
+//! it needs either a new texture-name form in DdsImport.cpp or a per-layer tint in the
+//! renderer. Counted here so the size of the gap is on the record either way.
+struct ColourCensus
+{
+    size_t ownMap = 0;
+    size_t layerTile = 0;
+    size_t tintDiscarded = 0; //!< subset of layerTile: a `Color_N` was authored and dropped
+    size_t flat = 0;
+    size_t none = 0;
+    std::string firstTintDiscarded;
+    std::string firstNone;
+
+    size_t Total() const { return ownMap + layerTile + flat + none; }
+};
+
+ColourCensus GColourCensus;
 
 //! RFG-039: `enfc|R,G,B` for a material whose colour is a CONSTANT, not a map.
 //!
@@ -262,10 +329,11 @@ class MountMaterialSink : public Poseidon::Asset::Formats::Enfusion::XobMaterial
         if (cached != _cache.end())
             return cached->second;
         Resolved out;
+        ColourKind kind = ColourKind::None;
         Poseidon::Asset::Material::EmatMaterial material;
         if (LoadEmatFromMount(_mount, materialSource, material))
         {
-            out.colour = ColourTextureOf(material);
+            out.colour = ColourTextureOf(material, &kind);
             out.opacity = material.TextureOf("OpacityMap");
             out.decal = material.className == "MatPBRDecal";
             // RFG-061: the OTHER invisible family, missing here and present in the
@@ -296,7 +364,53 @@ class MountMaterialSink : public Poseidon::Asset::Formats::Enfusion::XobMaterial
                 if (!out.decal)
                     out.colour = ColourConstantOf(material);
                 out.opacity.clear();
+                if (!out.colour.empty())
+                    kind = ColourKind::Flat;
             }
+
+            // RFG-066: the census, over DISTINCT materials -- this branch runs once per
+            // `.emat`, on the cache miss, which is the denominator that means anything.
+            // Counting per SECTION would weight a material by how often the world uses
+            // it and answer a different question than "how many materials resolve".
+            switch (kind)
+            {
+                case ColourKind::OwnMap: ++GColourCensus.ownMap; break;
+                case ColourKind::Flat: ++GColourCensus.flat; break;
+                case ColourKind::LayerTile:
+                {
+                    ++GColourCensus.layerTile;
+                    // A `Color_N` beside the tile that this path cannot apply. Read from
+                    // the SAME layer index the tile came from, so the count says "this
+                    // material's own colour was dropped" and not merely "some Color_N
+                    // exists in the file".
+                    for (int layer = 1; layer <= 4; ++layer)
+                    {
+                        const std::string index = std::to_string(layer);
+                        if (material.TextureOf("BCR_" + index).empty())
+                            continue;
+                        float tint[4] = {};
+                        if (material.Vec4Of("Color_" + index, tint))
+                        {
+                            ++GColourCensus.tintDiscarded;
+                            if (GColourCensus.firstTintDiscarded.empty())
+                                GColourCensus.firstTintDiscarded = materialSource;
+                        }
+                        break;
+                    }
+                    break;
+                }
+                case ColourKind::None:
+                    ++GColourCensus.none;
+                    if (GColourCensus.firstNone.empty())
+                        GColourCensus.firstNone = materialSource;
+                    break;
+            }
+        }
+        else
+        {
+            ++GColourCensus.none;
+            if (GColourCensus.firstNone.empty())
+                GColourCensus.firstNone = materialSource;
         }
         if (!out.colour.empty() && !out.opacity.empty())
             _byColour.emplace(LowerCopy(out.colour), out.opacity);
@@ -1436,6 +1550,8 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
         return false;
 
     const DWORD start = Poseidon::Foundation::GlobalTickCount();
+    // RFG-066: a second load must not report the first one's materials.
+    GColourCensus = ColourCensus();
     const EnfusionTerrain terrain = AssembleTerrain(addonsDir);
     if (!terrain.error.empty())
     {
@@ -2228,6 +2344,23 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
     ProgressFrame();
     InitGeography();
     ProgressFinish();
+
+    // RFG-066: the denominator for "are the buildings' textures right". Without it the
+    // only material evidence in the log was a 25-line cap of failures, which cannot
+    // distinguish a repair that fixes 5% from one that fixes 90% -- and the three
+    // repairs that were proposed for this before it was measured each addressed a
+    // bucket that comes out at 0.
+    if (GColourCensus.Total() != 0)
+    {
+        LOG_INFO(World,
+                 "Enfusion native load: materials -- {} of {} resolved their own albedo map, {} a shared layer tile "
+                 "(of those {} discard an authored Color_N tint, first: '{}'), {} a flat colour, {} nothing (first: "
+                 "'{}')",
+                 GColourCensus.ownMap, GColourCensus.Total(), GColourCensus.layerTile, GColourCensus.tintDiscarded,
+                 GColourCensus.firstTintDiscarded.empty() ? "none" : GColourCensus.firstTintDiscarded.c_str(),
+                 GColourCensus.flat, GColourCensus.none,
+                 GColourCensus.firstNone.empty() ? "none" : GColourCensus.firstNone.c_str());
+    }
 
     LOG_INFO(World, "Enfusion native load: done in {} ms -- land {}x{} at {:.2f} m, terrain {}x{} at {:.2f} m",
              Poseidon::Foundation::GlobalTickCount() - start, landRange, landRange, landGrid, terrainRange,
