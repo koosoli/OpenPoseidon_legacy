@@ -147,6 +147,53 @@ static const Asset::Material::TranslatedSlot* EffectiveBaseColourStage(
     return nullptr;
 }
 
+// RFG-060: a face texture named `enfa|coverage|colour` is the ONLY complete albedo the
+// section has, and the material's Stage0 must not replace it.
+//
+// The two Reforger paths diverge here and nowhere else. Both run the same converter over
+// the same `.xob`, so both get the same mesh, the same UV set 0 and the same face texture
+// name; what differs is what the MATERIAL slot points at:
+//
+//   converted (`xob export`)  BCRMap -> `..._bcr_ca.paa`, the baked albedo with the
+//                             OpacityMap already folded into its alpha (MakeDeployedEmat
+//                             drops OpacityMap and writes `AlphaTest 1` in its place).
+//   native (LandLoadEnfusion) BCRMap -> the RAW `..._BCR.edds` inside the `.pak`, because
+//                             the section names the SOURCE `.emat` (RFG-034) and nothing
+//                             rewrites its keys.
+//
+// Measured on `Assets/Vegetation/Bush/Corylus_Avellana/b_corylus_avellana_1.xob`, LOD0
+// section 0: face texture `enfa|...polyplane_corylus_avellana_A.edds|...
+// polyplane_corylus_avellana_BCR.edds`, material `..._1_polyplane.emat` naming
+// `BCRMap ...polyplane_corylus_avellana_BCR.edds` + `OpacityMap ..._A.edds`. The colour
+// file is 512x1024, the coverage 256x512, and the two live in separate files exactly
+// because Enfusion never keeps opacity in a BCR: BCR alpha is ROUGHNESS, measured 99.8
+// to 100% partial across the corpus (EmatMaterialAdapter.hpp's own census).
+//
+// So the override below bound an albedo whose alpha is roughness, while the section's
+// cutout decision and `alpha_ref` came from the face texture and stayed set. An alpha
+// test against roughness discards almost nothing -- and a polyplane's per-face UV span is
+// a whole leaf CLUSTER (median 0.32 x 0.24 of the atlas on that model, not one leaf), so
+// what survives is the cluster image stretched over an undiscarded quad. That is the
+// "large hard polygons with a leaf texture on them" report, and the converted models were
+// immune only because their deployed `.emat` happens to name the folded `_ca.paa`.
+//
+// EmatMaterialAdapter.hpp says this in as many words where it declines to write a Stage0
+// into a generated RVMAT: "moving the colour into the material would quietly turn every
+// alpha-tested leaf card back into an opaque rectangle." The composite name is the same
+// statement from the other side -- it exists precisely because the coverage is a second
+// file -- so a section carrying one keeps it.
+//
+// Narrow on purpose: it can only fire where the face texture IS a composite, which is
+// built in exactly one place (LandLoadEnfusion's MountMaterialSink::TexturePath) out of
+// the same material's own BCRMap and OpacityMap. There is no case where the material's
+// bare BCRMap is a better albedo than the composite built from it.
+static bool FaceTextureIsEnfusionComposite(const ShapeSection& section)
+{
+    Texture* face = section.properties.GetTexture();
+    const char* name = face != nullptr ? face->Name() : nullptr;
+    return name != nullptr && std::strncmp(name, "enfa|", 5) == 0;
+}
+
 // PERF-015 A/B lever, and it governs BOTH halves of the per-section classification cost:
 // this search's allocations, and the material/texture classification caches below. One
 // switch, because they are one change -- measuring them apart would report two numbers
@@ -4419,15 +4466,21 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
         // caching a handle. Any material-debug selector keeps every section on the full
         // path below, so every diagnostic behaves exactly as before.
         bool bindServed = false;
+        // RFG-060: the face texture already carries this material's coverage; see
+        // FaceTextureIsEnfusionComposite. Asked once per section and used by both the
+        // cached and the full binding path below, which must agree or the same leaf card
+        // draws differently depending on whether the cache was warm.
+        const bool faceIsComposite = FaceTextureIsEnfusionComposite(section);
         if (materialPath && *materialPath && !materialDebugTarget && SectionBindCacheEnabled())
         {
             if (MaterialClass* bindSlot = MaterialClassSlot(section.surfMat); bindSlot && bindSlot->bindResolved)
             {
                 bindServed = true;
                 Pass1Submit::gSecBindFast.fetch_add(1, std::memory_order_relaxed);
-                if (bindSlot->baseKind == MaterialClass::BaseImage ||
-                    (bindSlot->baseKind == MaterialClass::BaseConstant &&
-                     (d.texture_id == 0 || bindSlot->isCalmWater)))
+                if (!faceIsComposite &&
+                    (bindSlot->baseKind == MaterialClass::BaseImage ||
+                     (bindSlot->baseKind == MaterialClass::BaseConstant &&
+                      (d.texture_id == 0 || bindSlot->isCalmWater))))
                 {
                     Ref<Texture> baseTexture = _wbank->Load(bindSlot->baseLoadName);
                     auto* wgpuBaseTexture = static_cast<TextureWgpu*>(baseTexture.GetRef());
@@ -4569,7 +4622,21 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                 const bool baseIsConstant = base && base->texture.isProcedural &&
                                             (d.texture_id == 0 || Asset::Material::IsCalmWater(translated)) &&
                                             render::procedural::Parse(base->texture.raw.c_str()).generated;
-                if (baseIsImage || baseIsConstant)
+                if (faceIsComposite && (baseIsImage || baseIsConstant))
+                {
+                    static std::unordered_set<const void*> loggedCompositeKept;
+                    static std::unordered_set<std::string> loggedCompositeKeptByPath;
+                    if (logOnceForMaterial(loggedCompositeKept, loggedCompositeKeptByPath))
+                        LOG_INFO(Graphics,
+                                 "Wgpu material: Stage0 NOT overriding an enfa| composite face texture rvmat={} "
+                                 "stage0={} face={}",
+                                 materialPath, base->texture.raw,
+                                 section.properties.GetTexture() != nullptr
+                                         && section.properties.GetTexture()->Name() != nullptr
+                                     ? section.properties.GetTexture()->Name()
+                                     : "");
+                }
+                else if (baseIsImage || baseIsConstant)
                 {
                     // A procedural stage is GENERATED from its own name and has no path, so the
                     // bank is handed the raw declaration; ResolveMaterialBaseColour does the same.
@@ -7184,9 +7251,28 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
                 const auto cachedW = _materialBindings.find(mpW);
                 return cachedW != _materialBindings.end() && Asset::Material::IsCalmWater(cachedW->second);
             }();
+            // RFG-060: an `enfa|coverage|colour` face texture is the only complete albedo
+            // the section has -- the material's Stage0 is the same image WITHOUT its
+            // coverage. See FaceTextureIsEnfusionComposite.
+            const bool faceIsComposite = FaceTextureIsEnfusionComposite(s->GetSection(i));
+            if (faceIsComposite && baseColour != 0)
+            {
+                const ShapeSection& secX = s->GetSection(i);
+                const char* mpX = secX.surfMat ? secX.surfMat->GetName().Data() : "<none>";
+                static std::unordered_set<std::string> loggedCompositeKept;
+                if (loggedCompositeKept.insert(std::string(shape->Name()) + "|" + (mpX ? mpX : "")).second)
+                    LOG_INFO(Graphics,
+                             "Wgpu material: Stage0 NOT overriding an enfa| composite face texture model={} lod={} "
+                             "section={} rvmat={}",
+                             shape->Name(), level, i, mpX);
+            }
             const bool constantYieldsToFace =
                 baseColour != 0 && baseFromConstant && faceHasTexture && !constantOverridesFace && !calmWaterConstant;
-            if (constantYieldsToFace)
+            if (faceIsComposite)
+            {
+                // Keep the composite. Nothing else in this block applies.
+            }
+            else if (constantYieldsToFace)
             {
                 const ShapeSection& secC = s->GetSection(i);
                 const char*         mpC = secC.surfMat ? secC.surfMat->GetName().Data() : "<none>";
