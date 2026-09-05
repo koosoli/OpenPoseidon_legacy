@@ -724,6 +724,40 @@ bool TextureSourceDDS::Init(const char* name, PacLevelMem* mips, int maxMips)
                     }
                 }
             }
+            // RFG-059: say what the coverage map actually contains, per channel.
+            //
+            // max(r,g,b) was chosen because the colour path's red/blue swap moves a
+            // single-channel value out of index 0, and max() does not care which slot it
+            // lands in. That is sound IF the file is single-channel. If it is not -- if
+            // an `_A` packs several masks across RGB -- then max() unions them and the
+            // card comes out nearly opaque with a few holes, which is exactly what the
+            // leaf cards look like. One is a fix and the other is a bug, and the two are
+            // indistinguishable from the merged alpha histogram alone. So the channels
+            // are reported separately, once per texture.
+            {
+                static std::atomic<int> said{0};
+                if (said.fetch_add(1) < 4 && !_levels.empty() && !coverage._levels.empty())
+                {
+                    const auto& lv = coverage._levels[0];
+                    long long sum[3] = {0, 0, 0};
+                    uint8_t lo[3] = {255, 255, 255}, hi[3] = {0, 0, 0};
+                    const size_t texels = lv.data.size() / 4;
+                    for (size_t i = 0; i < texels; ++i)
+                        for (int c = 0; c < 3; ++c)
+                        {
+                            const uint8_t v = lv.data[i * 4 + c];
+                            sum[c] += v;
+                            lo[c] = std::min(lo[c], v);
+                            hi[c] = std::max(hi[c], v);
+                        }
+                    if (texels > 0)
+                        LOG_INFO(Graphics,
+                                 "EDDS coverage '{}' {}x{}: ch0 {}..{} mean {} | ch1 {}..{} mean {} | ch2 {}..{} mean {}",
+                                 compositeCoverage, lv.width, lv.height, lo[0], hi[0], int(sum[0] / (long long)texels),
+                                 lo[1], hi[1], int(sum[1] / (long long)texels), lo[2], hi[2],
+                                 int(sum[2] / (long long)texels));
+                }
+            }
             _hasAlpha = true;
         }
         else

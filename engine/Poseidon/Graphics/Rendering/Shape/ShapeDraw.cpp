@@ -233,7 +233,18 @@ bool SectionGpuOwned(const ShapeSectionInfo& sec)
     // Opaque-class means the alpha test would pass everywhere; the two paths already
     // agree on how it looks. Owning it changes which shader draws it, not what it draws.
     if (tex->GetAlphaClass() == Poseidon::AlphaStats::Opaque)
-        return true;
+    {
+        // A/B lever while the retained pool's capacity is being measured: the first run
+        // with this rule on grew `wgr_geo_pool_vbuf` past what the device would give and
+        // the buffer went invalid. POSEIDON_OWN_OPAQUE_ALPHA=0 restores the old refusal.
+        static const bool ownOpaque = []
+        {
+            const char* v = std::getenv("POSEIDON_OWN_OPAQUE_ALPHA");
+            return !(v != nullptr && *v == '0');
+        }();
+        if (ownOpaque)
+            return true;
+    }
     // Blend histogram: owned when the material AUTHORS a cutout or an opaque route (TreeAdv leaf
     // cards and their bark), i.e. exactly when SectionIsBlend says it is not real translucency.
     // .emat materials are left to the CPU on an IsAlpha spec, as SectionRetainedRefuses leaves

@@ -1626,6 +1626,9 @@ impl Renderer {
         if let Some(line) = crate::gfx3d::skin_bake_over_limit_log_line() {
             log.log(log_level::WARN, &line);
         }
+        if let Some(line) = crate::gfx3d::pool::geometry_pool_log_line() {
+            log.log(log_level::INFO, &line);
+        }
         if gpu_driven_enabled {
             log.log(
                 log_level::INFO,

@@ -38,6 +38,29 @@ const INDEX_SIZE: u64 = 4; // Uint32
 // each extra growth is an extra full-pool GPU copy plus a bind-group rebuild, and the trade is
 // worth measuring rather than assuming. Clamped to [1.25, 2.0]: below 1.25 the copy count grows
 // faster than the memory saved.
+/// RFG-076: the pool buffers' current byte sizes, reported from lib.rs on the frame after
+/// they change. A native Reforger world drove the pool past what the device would
+/// allocate, `create_buffer` came back invalid, and there was no number anywhere.
+pub(crate) static GEO_POOL_VBUF_BYTES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub(crate) static GEO_POOL_IBUF_BYTES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static GEO_POOL_REPORTED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// One line whenever the pool has been (re)made since the last report, else None.
+pub(crate) fn geometry_pool_log_line() -> Option<String> {
+    use std::sync::atomic::Ordering::Relaxed;
+    let v = GEO_POOL_VBUF_BYTES.load(Relaxed);
+    let i = GEO_POOL_IBUF_BYTES.load(Relaxed);
+    let key = v ^ (i << 1);
+    if key == 0 || GEO_POOL_REPORTED.swap(key, Relaxed) == key {
+        return None;
+    }
+    Some(format!(
+        "geometry pool: vertex buffer {:.1} MB, index buffer {:.1} MB",
+        v as f64 / 1048576.0,
+        i as f64 / 1048576.0
+    ))
+}
+
 fn growth_factor() -> f64 {
     static FACTOR: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
     *FACTOR.get_or_init(|| {
@@ -300,6 +323,12 @@ impl GeometryPool {
     // later cull/indirect compute reads the ibuf; VERTEX/INDEX for the draw; COPY_* for
     // uploads and the growth copy.
     fn make_vbuf(device: &wgpu::Device, verts: u32) -> wgpu::Buffer {
+        // RFG-076: say how big the pool buffer is every time it is (re)made. The retained
+        // path had no number for this at all: a native Reforger world took the pool past
+        // what the device would allocate, `create_buffer` came back invalid, and the only
+        // evidence was an empty landscape and two validation errors naming the label.
+        let bytes = verts as u64 * VERT_SIZE;
+        GEO_POOL_VBUF_BYTES.store(bytes, std::sync::atomic::Ordering::Relaxed);
         device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("wgr_geo_pool_vbuf"),
             size: verts as u64 * VERT_SIZE,
@@ -312,6 +341,12 @@ impl GeometryPool {
     }
 
     fn make_ibuf(device: &wgpu::Device, indices: u32) -> wgpu::Buffer {
+        // RFG-076: say how big the pool buffer is every time it is (re)made. The retained
+        // path had no number for this at all: a native Reforger world took the pool past
+        // what the device would allocate, `create_buffer` came back invalid, and the only
+        // evidence was an empty landscape and two validation errors naming the label.
+        let bytes = indices as u64 * INDEX_SIZE;
+        GEO_POOL_IBUF_BYTES.store(bytes, std::sync::atomic::Ordering::Relaxed);
         device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("wgr_geo_pool_ibuf"),
             size: indices as u64 * INDEX_SIZE,
