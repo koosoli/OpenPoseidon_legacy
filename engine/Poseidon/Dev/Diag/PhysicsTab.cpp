@@ -12,6 +12,7 @@
 #include <Poseidon/Dev/Diag/PhysicsRayAudit.hpp>
 #include <Poseidon/World/Entities/Weapons/GrenadeFuse.hpp>
 #include <Poseidon/World/Physics/LooseObjects.hpp>
+#include <Poseidon/World/Scene/MapThings.hpp>
 #include <Poseidon/World/Entities/Weapons/Penetration.hpp>
 #include <Poseidon/World/Physics/PhysicsWorld.hpp>
 
@@ -483,6 +484,35 @@ void DrawPhysicsTab()
     if (ImGui::Button("Reset loose objects"))
     {
         LooseObjects::Reset();
+    }
+    ImGui::EndDisabled();
+
+    ImGui::SeparatorText("Map furniture");
+    MapThings::Settings& mapThings = MapThings::Get();
+    Dev::Checkbox("Map furniture with a thing class becomes a Thing", &mapThings.enabled);
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip(
+            "A world file's chairs, tables and pallets are scenery: NewObject makes\n"
+            "them ObjectPlain, and only a Thing ever reaches the physics above.\n"
+            "With this on, a map object -- or a proxy inside a building model --\n"
+            "whose shape a `simulation=\"thing\"` config class names is spawned as\n"
+            "that Thing at world load, and the static copy is removed or hidden.\n"
+            "\n"
+            "MEASURED on Everon's abel.wrp: the furniture is PROXIES, not map\n"
+            "objects (14 pallets are the only qualifying objects; 39 hruzdum\n"
+            "houses carry two chairs each). Read the InitObjectVehicles log line\n"
+            "for the count that actually happened.\n"
+            "\n"
+            "Applies on the next world load or mission restart, not live.\n"
+            "Env: POSEIDON_MAP_THINGS=0. Things only MOVE with loose objects on.");
+    }
+    ImGui::BeginDisabled(!mapThings.enabled);
+    Dev::Checkbox("...including proxies inside building models", &mapThings.proxies);
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("Off keeps only the object-level promotion, which on stock worlds is\n"
+                          "nearly nothing. Env: POSEIDON_MAP_THINGS_PROXIES=0.");
     }
     ImGui::EndDisabled();
 

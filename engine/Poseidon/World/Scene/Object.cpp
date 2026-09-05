@@ -1,6 +1,7 @@
 #include <Poseidon/Core/Application.hpp>
 
 #include <Poseidon/World/Scene/Object.hpp>
+#include <Poseidon/World/Scene/MapThings.hpp>
 #include <Poseidon/World/Scene/Object2DMapping.hpp>
 #include <Poseidon/Graphics/Core/TLVertex.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
@@ -964,6 +965,10 @@ void Object::DrawProxies(int level, ClipFlags clipFlags, const Matrix4& transfor
     const bool savedSkipGpuOwned = GSkipGpuOwnedSections;
     GSkipGpuOwnedSections = false;
 
+    // A proxy that MapThings turned into a Thing is drawn by that Thing; painting
+    // it here as well would show a chair that stays put behind the one that falls.
+    const bool hiddenProxies = MapThings::HasHiddenProxies(_shape);
+
     // draw all proxy objects
     for (int i = 0; i < sShape->NProxies(); i++)
     {
@@ -975,6 +980,10 @@ void Object::DrawProxies(int level, ClipFlags clipFlags, const Matrix4& transfor
             continue;
         }
         const ProxyObject& proxy = sShape->Proxy(i);
+        if (hiddenProxies && MapThings::ProxyHidden(_shape, proxy.obj->GetShape()))
+        {
+            continue;
+        }
 
         // smart clipping par of obj->Draw
         Matrix4Val pTransform = transform * proxy.obj->Transform();
@@ -1228,10 +1237,16 @@ int Object::GetProxyComplexity(int level, const FrameBase& pos, float dist2) con
 
     Shape* sShape = _shape->LevelOpaque(level);
 
+    const bool hiddenProxies = MapThings::HasHiddenProxies(_shape);
+
     // calculate default proxies (included in shape)
     for (int i = 0; i < sShape->NProxies(); i++)
     {
         const ProxyObject& proxy = sShape->Proxy(i);
+        if (hiddenProxies && MapThings::ProxyHidden(_shape, proxy.obj->GetShape()))
+        {
+            continue; // drawn (and budgeted) by its Thing
+        }
 
         // smart clipping par of obj->Draw
         Matrix4Val pTransform = pos.Transform() * proxy.obj->Transform();

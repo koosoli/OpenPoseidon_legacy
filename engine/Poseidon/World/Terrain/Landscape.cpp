@@ -6,6 +6,9 @@
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Scene/MapThings.hpp>
+#include <Poseidon/World/Scene/Thing.hpp>
+#include <Poseidon/AI/EntityAIType.hpp>
 #include <Poseidon/World/Weather/WindModel.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/Core/Global.hpp>
@@ -29,6 +32,7 @@
 #include <cstdlib>
 #include <functional>
 #include <memory>
+#include <unordered_set>
 #include <typeinfo>
 #include <utility>
 #include <Poseidon/Foundation/Containers/Array2D.hpp>
@@ -2548,11 +2552,147 @@ void Landscape::InitObjectVehicles()
             ++promoted;
         }
     }
+    const DWORD promoteMs = Poseidon::Foundation::GlobalTickCount() - promoteStart;
+
+    // SECOND promotion, by SHAPE NAME rather than by `class` property: map
+    // furniture that a `simulation="thing"` config class names becomes a Thing,
+    // which is the only class Box3D reaches. See MapThings.hpp for what was
+    // measured first -- on stock worlds the furniture is proxies inside
+    // building models, not map objects, so the proxy walk is the one that finds
+    // the chairs. Runs after the building walk so a Building's proxies are
+    // visited through the same landscape cells its ObjectPlain was in.
+    const DWORD thingStart = Poseidon::Foundation::GlobalTickCount();
+    MapThings::Promotion things;
+    const MapThings::Settings& mt = MapThings::Get();
+    MapThings::ResetHiddenProxies();
+    if (mt.enabled && GWorld)
+    {
+        const RString worldName = Glob.header.worldname;
+        // Mission restart: CleanUp emptied `_vehicles`, and the ObjectPlains
+        // those Things replaced left the landscape on the first run. Put the
+        // recorded ones back before the walk, which will then find no candidates.
+        MapThings::ReplayReplaced(worldName, things);
+
+        RefArray<Object>            replace;    // ObjectPlain -> Thing
+        RefArray<Object>            parents;    // objects with at least one qualifying proxy
+        std::unordered_set<const LODShape*> models;
+        for (int x = 0; x < _landRange; x++)
+        {
+            for (int z = 0; z < _landRange; z++)
+            {
+                ObjectList& list = _objects(x, z);
+                for (int i = 0; i < list.Size(); i++)
+                {
+                    Object* obj = list[i];
+                    if (!obj || obj->GetType() != Primary)
+                    {
+                        continue;
+                    }
+                    LODShapeWithShadow* shape = obj->GetShape();
+                    if (!shape || dyn_cast<Thing>(obj))
+                    {
+                        continue;
+                    }
+                    // Object level: only a plain object is replaced. A Building,
+                    // Forest or Road that happens to share a model with a thing
+                    // class keeps its own behaviour.
+                    if (dynamic_cast<ObjectPlain*>(obj) && MapThings::ThingTypeForShape(shape))
+                    {
+                        replace.Add(obj);
+                        models.insert(shape);
+                        continue;
+                    }
+                    if (!mt.proxies || shape->NLevels() <= 0)
+                    {
+                        continue;
+                    }
+                    const Shape* lod0 = shape->LevelOpaque(0);
+                    for (int p = 0; p < lod0->NProxies(); p++)
+                    {
+                        const ProxyObject& proxy = lod0->Proxy(p);
+                        const LODShape*    pshape = proxy.obj ? proxy.obj->GetShape() : nullptr;
+                        if (MapThings::ThingTypeForShape(pshape))
+                        {
+                            parents.Add(obj);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        for (int i = 0; i < replace.Size(); i++)
+        {
+            Object*       obj = replace[i];
+            EntityAIType* type = MapThings::ThingTypeForShape(obj->GetShape());
+            const int     id = obj->ID();
+            const Matrix4 transform = obj->Transform();
+            if (things.first.GetLength() == 0)
+            {
+                things.first = obj->GetShape()->Name();
+            }
+            Thing* thing = MapThings::Spawn(type, transform, id);
+            if (!thing)
+            {
+                ++things.failed;
+                continue;
+            }
+            RemoveObject(obj);
+            if (id >= 0)
+            {
+                _objectIds[id] = thing;
+            }
+            MapThings::RememberReplaced(worldName, type, transform, id);
+            ++things.objectsReplaced;
+        }
+        for (int i = 0; i < parents.Size(); i++)
+        {
+            Object*             obj = parents[i];
+            LODShapeWithShadow* shape = obj->GetShape();
+            const Shape*        lod0 = shape->LevelOpaque(0);
+            const Matrix4       parentTransform = obj->Transform();
+            bool                any = false;
+            for (int p = 0; p < lod0->NProxies(); p++)
+            {
+                const ProxyObject& proxy = lod0->Proxy(p);
+                const LODShape*    pshape = proxy.obj ? proxy.obj->GetShape() : nullptr;
+                EntityAIType*      type = MapThings::ThingTypeForShape(pshape);
+                if (!type)
+                {
+                    continue;
+                }
+                if (things.first.GetLength() == 0)
+                {
+                    things.first = pshape->Name();
+                }
+                // Same composition Object::DrawProxies uses to place the proxy.
+                if (!MapThings::Spawn(type, parentTransform * proxy.obj->Transform(), -1))
+                {
+                    ++things.failed;
+                    continue;
+                }
+                models.insert(pshape);
+                MapThings::HideProxy(shape, pshape);
+                ++things.proxiesPromoted;
+                any = true;
+            }
+            if (any)
+            {
+                ++things.parentsWithProxies;
+            }
+        }
+        things.distinctModels = (long long)models.size();
+    }
     LOG_INFO(World,
              "InitObjectVehicles: scanned {} object slots in {}x{} land cells ({} primary, {} with a resolved "
-             "shape, {} named a class) in {} ms; promoted {} to buildings in {} ms",
+             "shape, {} named a class) in {} ms; promoted {} to buildings in {} ms; things: {} from map objects "
+             "(+{} replayed) and {} from proxies of {} parents, {} distinct models, {} refused, first: {} "
+             "in {} ms [{}]",
              visited, _landRange, _landRange, primaries, withShape, (long long)changed.Size(), scanMs, promoted,
-             Poseidon::Foundation::GlobalTickCount() - promoteStart);
+             promoteMs, things.objectsReplaced, things.objectsReplayed, things.proxiesPromoted,
+             things.parentsWithProxies, things.distinctModels, things.failed,
+             things.first.GetLength() ? (const char*)things.first : "-",
+             Poseidon::Foundation::GlobalTickCount() - thingStart,
+             !mt.enabled ? "map things OFF" : (mt.proxies ? "map things on, proxies on" : "map things on, proxies OFF"));
 }
 
 Object* Landscape::AddObject(Vector3Par pos, float head, LODShapeWithShadow* shape, void* user)
