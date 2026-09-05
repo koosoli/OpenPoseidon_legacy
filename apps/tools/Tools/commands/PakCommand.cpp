@@ -5,7 +5,9 @@
 #include <Poseidon/Asset/Formats/Enfusion/PakArchive.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/TerrainMaterials.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/TerrainTile.hpp>
+#include <Poseidon/Asset/Formats/Enfusion/ClutterSet.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/EbinWorld.hpp>
+#include <Poseidon/Asset/Formats/Enfusion/EnfusionMount.hpp>
 #include <Poseidon/Asset/Formats/Material/EmatSource.hpp>
 #include <Poseidon/Asset/Formats/World/Oprw25.hpp>
 #include <Poseidon/Graphics/Shared/PNGWriter.hpp>
@@ -2314,6 +2316,65 @@ void PakCommand::Setup(CLI::App& app)
         cmd->add_option("input", root, "A .pak file, or a directory to search")->required();
         cmd->add_option("-f,--filter", filter, "Only paths containing this substring (case-insensitive)");
         cmd->callback([]() { std::exit(ListEntries(root, filter)); });
+    }
+    {
+        static std::string root;
+        static std::string surfaceFilter;
+        auto* cmd = pak->add_subcommand("clutter", "Report Reforger's own ground cover per terrain surface");
+        cmd->add_option("input", root, "A .pak file, or a directory to search")->required();
+        cmd->add_option("-f,--filter", surfaceFilter, "Only surfaces containing this substring");
+        cmd->callback(
+            []()
+            {
+                EnfusionMount mount;
+                if (!mount.Open(root))
+                {
+                    std::cerr << "no .pak archives under " << root << std::endl;
+                    std::exit(1);
+                }
+                const std::string needle = LowerCopy(surfaceFilter);
+                size_t surfaces = 0, withBlades = 0, withPlants = 0, plantTotal = 0;
+                std::set<std::string> distinctModels;
+                for (const std::string& path : mount.FindAll(".emat"))
+                {
+                    const std::string lower = LowerCopy(path);
+                    if (lower.find("terrains/") == std::string::npos ||
+                        lower.find("/surfaces/") == std::string::npos)
+                        continue;
+                    if (!needle.empty() && lower.find(needle) == std::string::npos)
+                        continue;
+                    ++surfaces;
+                    const SurfaceClutter clutter = ReadSurfaceClutter(mount, path);
+                    if (!clutter.valid())
+                    {
+                        std::cout << "  UNRESOLVED " << path << ": " << clutter.error << std::endl;
+                        continue;
+                    }
+                    if (clutter.blades.valid())
+                        ++withBlades;
+                    if (!clutter.plants.empty())
+                        ++withPlants;
+                    plantTotal += clutter.plants.size();
+                    for (const auto& plant : clutter.plants)
+                        distinctModels.insert(LowerCopy(plant.model));
+                    if (withPlants <= 3 && !clutter.plants.empty())
+                    {
+                        std::cout << "  " << path << std::endl;
+                        std::cout << "    blades " << clutter.blades.plants << " plants x "
+                                  << clutter.blades.bladesPerPlant << " blades, height "
+                                  << clutter.blades.height << " m, atlas " << clutter.blades.colour << std::endl;
+                        std::cout << "    mask " << clutter.distributionMap << std::endl;
+                        for (const auto& plant : clutter.plants)
+                            std::cout << "    plant " << plant.model << " density " << plant.density << " scale "
+                                      << plant.minScale << ".." << plant.maxScale << std::endl;
+                    }
+                }
+                std::cout << std::endl << surfaces << " terrain surfaces; " << withBlades
+                          << " carry a procedural blade layer, " << withPlants << " carry scattered plants ("
+                          << plantTotal << " definitions, " << distinctModels.size() << " distinct models)."
+                          << std::endl;
+                std::exit(0);
+            });
     }
     {
         static std::string root;
