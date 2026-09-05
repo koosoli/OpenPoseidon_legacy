@@ -558,6 +558,9 @@ bool TerrainWgpu::BakeEnfusionClutter(const Landscape& land, std::vector<uint32_
     {
         return false; // every non-native world takes this exit before touching anything
     }
+    // Recorded before any of the early exits below: SetEnfusionClutterEnabled compares
+    // against it every frame, and a stale value would re-upload the geography each frame.
+    _enfusionRoadClearBaked = Landscape::EnfusionRoadClutterClear();
     if (!_enfusionClutterEnabled)
     {
         LOG_INFO(Graphics, "Wgpu grass: native Enfusion clutter is OFF (dev panel: Grass > Enfusion map clutter)");
@@ -761,6 +764,16 @@ bool TerrainWgpu::BakeEnfusionClutter(const Landscape& land, std::vector<uint32_
     }
     const float invMax = 1.0f / reference;
     size_t grownCells = 0;
+    // RFG-027 x RFG-063: roads are draped ribbons, not surfaces, so the cell under a
+    // road still names its grass surface and would grow clutter THROUGH the tarmac.
+    // The native loader marks the cells each ribbon crosses (Landscape::_enfusionRoadCells,
+    // half width + 1 m verge); a marked cell keeps its authored bits for the dev panel
+    // but gets no TextureCell. Whole 12.5 m cells go, so a strip of meadow beside a
+    // 6-8 m road goes with it -- the honest first cut at this grid. The finer answers
+    // are a sub-cell mask (a bit per 12.5/4 m quadrant in the geography word) or a
+    // distance-to-road test in the clutter placement shader; neither is built here.
+    const bool clearRoads = _enfusionRoadClearBaked && land.HasEnfusionRoadCells();
+    size_t roadCleared = 0;
     for (int z = 0; z < n; ++z)
     {
         for (int x = 0; x < n; ++x)
@@ -789,8 +802,15 @@ bool TerrainWgpu::BakeEnfusionClutter(const Landscape& land, std::vector<uint32_
             word |= (static_cast<uint32_t>(run.layerCount) << GrassGeo::RunCountShift) & GrassGeo::RunCountMask;
             if (quantised > 0 && selected)
             {
-                word |= GrassGeo::TextureCell;
-                ++grownCells;
+                if (clearRoads && land.GetEnfusionRoadCell(z, x))
+                {
+                    ++roadCleared;
+                }
+                else
+                {
+                    word |= GrassGeo::TextureCell;
+                    ++grownCells;
+                }
             }
             geography[cell] = word;
         }
@@ -807,17 +827,24 @@ bool TerrainWgpu::BakeEnfusionClutter(const Landscape& land, std::vector<uint32_
 
     const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
     LOG_INFO(Graphics,
-             "Wgpu grass Enfusion clutter: {} of {} land cells grow clutter ({:.1f}%), peak surface weight {:.2f}, "
-             "{} atlas layers, {:.0f} ms",
+             "Wgpu grass Enfusion clutter: {} of {} land cells grow clutter ({:.1f}%), {} cells cleared under roads "
+             "({}), peak surface weight {:.2f}, {} atlas layers, {:.0f} ms",
              grownCells, static_cast<size_t>(n) * static_cast<size_t>(n),
-             100.0 * static_cast<double>(grownCells) / static_cast<double>(static_cast<size_t>(n) * n), maxWeight,
-             layerCount, ms);
+             100.0 * static_cast<double>(grownCells) / static_cast<double>(static_cast<size_t>(n) * n), roadCleared,
+             clearRoads ? "road clearing ON" : (land.HasEnfusionRoadCells() ? "road clearing OFF" : "no road mask"),
+             maxWeight, layerCount, ms);
     return grownCells > 0;
 }
 
 void TerrainWgpu::SetEnfusionClutterEnabled(bool enabled)
 {
-    if (_enfusionClutterEnabled == enabled)
+    // Called every frame from EngineWgpu with the panel's value, so this is also where
+    // the road-clearing switch (Landscape::EnfusionRoadClutterClear, set by the dev
+    // panel) gets noticed: a move re-runs the same invalidation the clutter flag does.
+    // Inert on a world without a road mask -- nothing the bake reads would change.
+    const bool roadClearMoved = _uploaded != nullptr && _uploaded->HasEnfusionRoadCells() &&
+                                Landscape::EnfusionRoadClutterClear() != _enfusionRoadClearBaked;
+    if (_enfusionClutterEnabled == enabled && !roadClearMoved)
     {
         return;
     }

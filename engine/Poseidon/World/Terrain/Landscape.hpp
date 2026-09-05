@@ -540,6 +540,18 @@ class Landscape : public SerializeClass
     // surfaceCount flips the terrain shader onto the paged authored path, which a native
     // world has no satellite or LCA mask to feed.
     AutoArray<RStringB> _enfusionSurfaces;
+    // RFG-027/056 + clutter: one byte per 12.5 m land cell (row-major, z * _landRange + x),
+    // non-zero where an Enfusion road ribbon runs through the cell. Roads are not a
+    // surface here -- they are draped triangle bands built from the RoadEntity splines
+    // in LandLoadEnfusion.cpp -- so the cell under the tarmac keeps its grass surface
+    // index, and without this mask the clutter bake grows grass ON the road. Filled by
+    // the native loader only; empty (Size 0) on every other world, which is what keeps
+    // the clutter-clearing inert there. Cleared in Init() like _enfusionSurfaces.
+    std::vector<uint8_t> _enfusionRoadCells;
+    // Dev switch (Grass > "Clutter cleared under Enfusion roads"): whether the bake
+    // honours _enfusionRoadCells. A process-wide flag rather than a GrassSettings field
+    // because the mask is a WORLD fact that lives here; the terrain re-bakes when it moves.
+    static bool s_enfusionRoadClutterClear;
 
     Array2D<short> _tex;
     Array2D<ObjectList> _objects;
@@ -992,6 +1004,18 @@ class Landscape : public SerializeClass
     {
         return id >= 0 && id < _enfusionSurfaces.Size() ? (const char*)_enfusionSurfaces[id] : "";
     }
+    // True when an Enfusion road ribbon crosses land cell (z, x); always false on a
+    // world the native Reforger loader did not build. See _enfusionRoadCells.
+    bool HasEnfusionRoadCells() const { return !_enfusionRoadCells.empty(); }
+    bool GetEnfusionRoadCell(int z, int x) const
+    {
+        if (z < 0 || x < 0 || z >= _landRange || x >= _landRange)
+            return false;
+        const size_t cell = static_cast<size_t>(z) * static_cast<size_t>(_landRange) + static_cast<size_t>(x);
+        return cell < _enfusionRoadCells.size() && _enfusionRoadCells[cell] != 0;
+    }
+    static bool EnfusionRoadClutterClear() { return s_enfusionRoadClutterClear; }
+    static void SetEnfusionRoadClutterClear(bool clear) { s_enfusionRoadClutterClear = clear; }
 
     // data access
     GeographyInfo GetGeography(int x, int z) const;

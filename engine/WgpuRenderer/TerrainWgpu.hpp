@@ -213,6 +213,10 @@ class TerrainWgpu : public ITerrainRenderer
     // switch that does nothing. Default ON where the world IS Enfusion.
     bool _hasEnfusionSurfaces = false;
     bool _enfusionClutterEnabled = true;
+    // The Landscape::EnfusionRoadClutterClear() value the last bake honoured, so the
+    // per-frame SetEnfusionClutterEnabled call can notice the dev switch moved and
+    // re-bake -- the switch lives on Landscape (a world fact), not in GrassSettings.
+    bool _enfusionRoadClearBaked = true;
     // RFG-065. One record per palette entry; `detail == nullptr` means the entry
     // resolved no `.emat` colour and keeps the legacy route untouched.
     struct EnfusionGroundMaterial

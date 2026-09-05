@@ -3396,6 +3396,17 @@ void DrawGrassTab()
         {
             changed = true;
         }
+        // RFG-027 x RFG-063: the land cells under the draped road ribbons get no clutter.
+        // A Landscape-side flag rather than a GrassSettings field -- the road mask is a
+        // world fact -- so it is NOT written by "Save as default"; the terrain re-bakes
+        // on the next frame when it moves. Does nothing on a world without native roads.
+        {
+            bool clearRoads = Landscape::EnfusionRoadClutterClear();
+            if (Dev::Checkbox("Clutter cleared under Enfusion roads", &clearRoads))
+            {
+                Landscape::SetEnfusionRoadClutterClear(clearRoads);
+            }
+        }
         if (nativeWorld)
         {
             Dev::PanelHelp("Tiles each surface at the ScaleUV its own .emat declares (2..8 m; 36 of the 51 "

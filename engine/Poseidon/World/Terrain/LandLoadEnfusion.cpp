@@ -2392,6 +2392,14 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
                 size_t roadsBuilt = 0, roadsFailed = 0, roadTextured = 0;
                 std::map<std::string, size_t> textureUse;
                 double roadKm = 0.0;
+                // The land cells under the tarmac, for the clutter bake. A road is a
+                // draped ribbon, not a surface, so the 12.5 m cell beneath it keeps its
+                // grass index and would grow clutter through the road; Enfusion's own
+                // road generator punches the clutter out under the carriageway (the
+                // `cs_clutter_prepare$HOLES` permutation in the corpus). One byte per
+                // cell, marked below as each ribbon is built.
+                _enfusionRoadCells.assign(static_cast<size_t>(_landRange) * static_cast<size_t>(_landRange), 0);
+                size_t roadCells = 0;
                 for (size_t r = 0; r < roads.size(); ++r)
                 {
                     ResolvedRoad& road = roads[r];
@@ -2508,6 +2516,58 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
                     if (!road.texture.empty())
                         ++roadTextured;
                     ++textureUse[road.texture];
+                    // Mark every land cell within half the road width plus a 1 m verge of
+                    // the centreline. The dense points are up to 4 m apart (up to ~8 m
+                    // where a source segment rounded down to one step), so each segment
+                    // is walked at 2 m and each sample tests the cells it can reach as a
+                    // disc against the cell SQUARE -- a cell the ribbon merely clips at a
+                    // corner is cleared too, which is what actually keeps grass off the
+                    // tarmac at this grid. The same default width BuildRoadShape uses.
+                    {
+                        const float reach = 0.5f * ((road.width > 0.1f) ? road.width : 6.0f) + 1.0f;
+                        const float reach2 = reach * reach;
+                        for (size_t i = 0; i + 1 < pointCount; ++i)
+                        {
+                            const float ax = road.origin[0] + road.points[i * 3 + 0];
+                            const float az = road.origin[2] + road.points[i * 3 + 2];
+                            const float bx = road.origin[0] + road.points[(i + 1) * 3 + 0];
+                            const float bz = road.origin[2] + road.points[(i + 1) * 3 + 2];
+                            const float length = std::sqrt((bx - ax) * (bx - ax) + (bz - az) * (bz - az));
+                            const int sub = std::max(1, static_cast<int>(std::ceil(length / 2.0f)));
+                            for (int k = 0; k <= sub; ++k)
+                            {
+                                const float t = static_cast<float>(k) / static_cast<float>(sub);
+                                const float px = ax + (bx - ax) * t;
+                                const float pz = az + (bz - az) * t;
+                                const int x0 = std::max(0, static_cast<int>(std::floor((px - reach) * _invLandGrid)));
+                                const int x1 = std::min(_landRange - 1,
+                                                        static_cast<int>(std::floor((px + reach) * _invLandGrid)));
+                                const int z0 = std::max(0, static_cast<int>(std::floor((pz - reach) * _invLandGrid)));
+                                const int z1 = std::min(_landRange - 1,
+                                                        static_cast<int>(std::floor((pz + reach) * _invLandGrid)));
+                                for (int cz = z0; cz <= z1; ++cz)
+                                {
+                                    const float zMin = static_cast<float>(cz) * _landGrid;
+                                    const float dz = std::max({zMin - pz, 0.0f, pz - (zMin + _landGrid)});
+                                    for (int cx = x0; cx <= x1; ++cx)
+                                    {
+                                        const float xMin = static_cast<float>(cx) * _landGrid;
+                                        const float dx = std::max({xMin - px, 0.0f, px - (xMin + _landGrid)});
+                                        if (dx * dx + dz * dz > reach2)
+                                            continue;
+                                        uint8_t& cell = _enfusionRoadCells[static_cast<size_t>(cz) *
+                                                                               static_cast<size_t>(_landRange) +
+                                                                           static_cast<size_t>(cx)];
+                                        if (cell == 0)
+                                        {
+                                            cell = 1;
+                                            ++roadCells;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     // The vertices are already local to `origin`, and a road carries
                     // no rotation of its own -- the spline is authored in world axes.
                     AddObject(Vector3(road.origin[0], road.origin[1], road.origin[2]), road.yawDeg, shape);
@@ -2518,9 +2578,12 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
                              path.empty() ? "(none)" : path);
                 LOG_INFO(World, "Enfusion native load: {} objects more than 50 m above the terrain{}",
                      floatingObjects, firstFloating.empty() ? "" : ("; first: " + firstFloating));
-            LOG_INFO(World, "Enfusion native load: {} roads built ({} failed, {} textured), {:.1f} km, {} ms",
-                         roadsBuilt, roadsFailed, roadTextured, roadKm,
-                         Poseidon::Foundation::GlobalTickCount() - roadStart);
+            LOG_INFO(World,
+                     "Enfusion native load: {} roads built ({} failed, {} textured), {:.1f} km, {} of {} land cells "
+                     "under roads ({:.2f}%), {} ms",
+                     roadsBuilt, roadsFailed, roadTextured, roadKm, roadCells, _enfusionRoadCells.size(),
+                     _enfusionRoadCells.empty() ? 0.0 : 100.0 * double(roadCells) / double(_enfusionRoadCells.size()),
+                     Poseidon::Foundation::GlobalTickCount() - roadStart);
             }
         }
     }
