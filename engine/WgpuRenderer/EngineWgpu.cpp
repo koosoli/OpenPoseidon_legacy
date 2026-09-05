@@ -5376,11 +5376,27 @@ bool GpuSectionMaterialIsCutout(const Ref<TexMaterial>& surfMat, TextureWgpu* te
            GpuSectionMaterialUsesLeafCards(surfMat);
 }
 
+
+// RFG-074: name the classifier's refusals, once per (reason, texture). Every one of
+// these was a bare `return false`, and the church's ten opaque wall sections went
+// through one of them unseen while the census reported the layer path healthy.
+static void TraceClassifyReject(const ShapeSection& sec, const char* why)
+{
+    static std::unordered_set<std::string> said;
+    auto* face = static_cast<TextureWgpu*>(sec.properties.GetTexture());
+    const char* faceName = face && face->GetName().Data() ? face->GetName().Data() : "(none)";
+    const char* mat = sec.surfMat && sec.surfMat->GetName().Data() ? sec.surfMat->GetName().Data() : "(null)";
+    if (said.insert(std::string(why) + "|" + faceName).second)
+        LOG_INFO(Graphics, "Wgpu material: classifier REFUSED ({}) surfMat='{}' face='{}'", why, mat, faceName);
+}
+
 bool ClassifyGpuSection(const Shape& s, uint64_t mesh, const AutoArray<render::mesh::MeshSection>& secs, int i,
                         WgrModelSection& secOut, WgrModelMaterial& matOut)
 {
     if (i >= secs.Size())
     {
+        // (index out of range: no section to name)
+
         return false;
     }
     const ShapeSection& sec = s.GetSection(i);
@@ -5394,6 +5410,8 @@ bool ClassifyGpuSection(const Shape& s, uint64_t mesh, const AutoArray<render::m
     // Answering it differently here is how a section ends up drawn by nobody.
     if (!SectionGpuOwned(sec))
     {
+        TraceClassifyReject(sec, "SectionGpuOwned false");
+
         return false;
     }
 
@@ -5401,6 +5419,8 @@ bool ClassifyGpuSection(const Shape& s, uint64_t mesh, const AutoArray<render::m
     const int indexCount = ms.end - ms.beg;
     if (indexCount <= 0)
     {
+        TraceClassifyReject(sec, "no indices");
+
         return false;
     }
     secOut.mesh = mesh;
@@ -5439,6 +5459,8 @@ bool ClassifyGpuSection(const Shape& s, uint64_t mesh, const AutoArray<render::m
     if (alphaClass == Poseidon::AlphaStats::Blend && !bark && !materialCutout && !legacyPlantCutout &&
         !blendOpaqueRoute)
     {
+        TraceClassifyReject(sec, "blend/opaque route");
+
         return false;
     }
     float alphaRef = AlphaRefFromDesc(desc);
@@ -6193,14 +6215,34 @@ bool EngineWgpu::ResolveMaterialLayers(const ShapeSection& section, WgrModelMate
         colour[0] = colour[1] = colour[2] = colour[3] = 1.0f;
     // Same as the normal map above: composeMultiLayers is a presentation switch honoured
     // per fragment by the retained shader, not baked into the record here.
+    // RFG-074: every early exit here says so, once per material. They were silent, and
+    // a silent exit is how a MatPBRMulti church wall drew for an afternoon as one tinted
+    // brick tile while the layer census reported itself healthy -- it only ever counted
+    // the sections that got PAST these lines.
+    static std::unordered_set<std::string> saidSkip;
+    const auto skip = [&](const char* why, const char* what)
+    {
+        if (saidSkip.insert(std::string(why) + "|" + what).second)
+            LOG_INFO(Graphics, "Wgpu material: layers SKIPPED ({}) for {}", why, what);
+    };
     if (!section.surfMat)
+    {
+        auto* face = static_cast<TextureWgpu*>(section.properties.GetTexture());
+        skip("section has no surfMat", face && face->GetName().Data() ? face->GetName().Data() : "(no face texture)");
         return false;
+    }
     const char* materialPath = section.surfMat->GetName().Data();
     if (!materialPath || !*materialPath)
+    {
+        skip("surfMat has no name", "(unnamed)");
         return false;
+    }
     const auto cached = _materialBindings.find(materialPath);
     if (cached == _materialBindings.end())
+    {
+        skip("no base-colour binding yet", materialPath);
         return false; // ResolveMaterialBaseColour fills the cache first
+    }
 
     const auto layerUv = [&](Asset::Material::MaterialSlot slot, size_t index)
     {
@@ -6236,6 +6278,14 @@ bool EngineWgpu::ResolveMaterialLayers(const ShapeSection& section, WgrModelMate
     const uint64_t mask = bind(Slot::Mask);
     if (!mask)
     {
+        // RFG-074: the fourth silent exit, and the one the church wall took. Reported
+        // for EVERY family, because the census above only counts "MatPBRMulti" and a
+        // material whose family string came out as anything else vanished here unseen.
+        static std::unordered_set<std::string> saidNoMask;
+        if (saidNoMask.insert(materialPath).second)
+            LOG_INFO(Graphics, "Wgpu material: layers SKIPPED (mask handle 0; slot {}) for {} family='{}'",
+                     cached->second.Find(Slot::Mask) == nullptr ? "absent" : "present, upload failed", materialPath,
+                     cached->second.shaderFamily);
         if (firstSeen)
         {
             if (cached->second.Find(Slot::Mask) == nullptr)
@@ -7208,6 +7258,25 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
             // index range). Either way the GPU doesn't draw it: skip, don't fail the model.
             if (!ClassifyGpuSection(*s, mesh, secs, i, sec, mat))
             {
+                // RFG-074: for the traced shape, say which sections the classifier
+                // REJECTED and what they carried -- these never reach the layer path.
+                {
+                    static const std::string traceShape2 = []
+                    {
+                        const char* v = std::getenv("POSEIDON_TRACE_SHAPE");
+                        return std::string(v != nullptr ? v : "");
+                    }();
+                    if (!traceShape2.empty() && shape != nullptr && shape->Name() != nullptr &&
+                        std::string(shape->Name()).find(traceShape2) != std::string::npos)
+                    {
+                        const ShapeSection& rs = s->GetSection(i);
+                        auto* face = static_cast<TextureWgpu*>(rs.properties.GetTexture());
+                        LOG_INFO(Graphics, "Wgpu material: TRACE-REJECT {} level {} section {} alpha={} surfMat='{}' face='{}'",
+                                 shape->Name(), level, i, face ? static_cast<int>(face->GetAlphaClass()) : -1,
+                                 rs.surfMat && rs.surfMat->GetName().Data() ? rs.surfMat->GetName().Data() : "(null)",
+                                 face && face->GetName().Data() ? face->GetName().Data() : "(none)");
+                    }
+                }
                 continue;
             }
             // The RVMAT's albedo wins over the section's face texture, which on
@@ -7489,6 +7558,36 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
                 }
             }
             // Multi's further layers, same ordering dependency on the translation cache.
+            // RFG-074: name every shape whose sections reach the layer resolver, once.
+            // Whether an object is on the retained path has been argued from admission
+            // percentages; this answers it per shape, by name, at the only call site.
+            {
+                static std::unordered_set<std::string> saidClassified;
+                const char* nm = (shape != nullptr && shape->Name() != nullptr) ? shape->Name() : "(unnamed)";
+                if (saidClassified.insert(nm).second)
+                    LOG_INFO(Graphics, "Wgpu material: retained classifier reached shape {}", nm);
+            }
+            // RFG-074: for one named shape, print every (level, section) with the surfMat
+            // name the classifier actually sees. The church's LOD0 materials never appear
+            // in any material log while its coarse-level materials do, and no earlier
+            // exit accounts for it -- so the classifier is asked directly what it holds.
+            {
+                static const std::string traceShape = []
+                {
+                    const char* v = std::getenv("POSEIDON_TRACE_SHAPE");
+                    return std::string(v != nullptr ? v : "");
+                }();
+                if (!traceShape.empty() && shape != nullptr && shape->Name() != nullptr &&
+                    std::string(shape->Name()).find(traceShape) != std::string::npos)
+                {
+                    const ShapeSection& sec = s->GetSection(i);
+                    auto* face = static_cast<TextureWgpu*>(sec.properties.GetTexture());
+                    LOG_INFO(Graphics, "Wgpu material: TRACE {} level {} section {} surfMat='{}' face='{}'",
+                             shape->Name(), level, i,
+                             sec.surfMat && sec.surfMat->GetName().Data() ? sec.surfMat->GetName().Data() : "(null)",
+                             face && face->GetName().Data() ? face->GetName().Data() : "(none)");
+                }
+            }
             ResolveMaterialLayers(s->GetSection(i), mat);
             // Multi's mask lives on the second UV set in the BI corpora (TexGen uvSource
             // "tex1") and in Reforger's (`UVSrcGlobalMaps "UV set 2"`, RFG-072); the shader

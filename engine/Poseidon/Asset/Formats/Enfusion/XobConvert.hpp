@@ -403,7 +403,25 @@ inline bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& 
         // finest and so blows past 900 on the ratio alone. A model with one badly
         // spaced coarse level is worth having; a village with no houses in it is not.
         if (!(writeLod.resolution < 900.0f) || !std::isfinite(writeLod.resolution))
-            writeLod.resolution = VisualLodResolution(rank, options.resolution);
+        {
+            // RFG-072: the fallback must stay ABOVE the level before it.
+            //
+            // RFG-029 fell back to the rank convention, base * (rank + 1): rank 5 gets
+            // 6, rank 6 gets 7. Measured on Church_01 (thresholds 0.5 / 0.15 / 0.02 /
+            // 0.005 / 0.001 / 0.0002 / 0.0001) the ratio ladder is 1, 3.3, 25, 100, 500
+            // and then, out of range, 6 and 7 -- so the 2,806-triangle far level sits at
+            // resolution 6, BELOW the 41,756-triangle lod2 at 25, and the engine picks
+            // it point-blank. Ten metres from the wall the church bound only
+            // `Church_01_Ext_MLOD_Yellow_V2.emat`, its baked far material, and never
+            // `ExtWalls`; that is why no wall-material fix could show.
+            //
+            // Nothing in MLODWriter or the loader enforces the ascending order the
+            // comments assert, so a descending value is not refused, it is obeyed. The
+            // out-of-range level is therefore placed past the last in-range one, at a
+            // fixed step, and pinned under the 900 ceiling.
+            const float previous = out.lods.empty() ? options.resolution : out.lods.back().resolution;
+            writeLod.resolution = std::min(899.0f, std::max(previous * 1.6f, 600.0f));
+        }
         if (!(writeLod.resolution < 900.0f) || !std::isfinite(writeLod.resolution))
         {
             error = "LOD " + std::to_string(lodIndex) + " maps outside the visual resolution range";

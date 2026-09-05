@@ -1630,7 +1630,19 @@ LODShapeWithShadow* BuildShapeFromXob(const EnfusionMount& mount, const std::str
     // and they are not the same bug.
     {
         static int reportedSec = 0;
-        if (reportedSec < 6 && LowerCopy(xobPath).find("betula") != std::string::npos && shape->NLevels() > 0)
+        // RFG-073: the section report was pinned to "betula" while the leaf cutout was
+        // being chased, and stayed pinned. Every building question since then -- which
+        // material a church wall actually carries, whether a section merged into a decal
+        // -- ran into "the church never appears in any section line" and was read as
+        // evidence about the church. It was evidence about this filter.
+        // POSEIDON_REFORGER_LOG_SECTIONS=<substring> chooses the model; unset keeps the
+        // old default so the log does not grow by 1,248 models.
+        static const std::string sectionFilter = []
+        {
+            const char* v = std::getenv("POSEIDON_REFORGER_LOG_SECTIONS");
+            return LowerCopy((v != nullptr && *v != 0) ? v : "betula");
+        }();
+        if (reportedSec < 6 && LowerCopy(xobPath).find(sectionFilter) != std::string::npos && shape->NLevels() > 0)
         {
             ++reportedSec;
             const Shape* level = shape->Level(0);

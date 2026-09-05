@@ -219,6 +219,21 @@ bool SectionGpuOwned(const ShapeSectionInfo& sec)
         return true;
     if (render::IsLegacyPlantCutoutTexture(tex->Name()) || render::IsEnfusionCoverageTexture(tex->Name()))
         return true;
+    // RFG-075: an IsAlpha-spec section whose texture the histogram calls OPAQUE is owned.
+    //
+    // The spec comes from `tex->IsAlpha()` -- "the format carries an alpha channel" --
+    // and every Reforger BC7 albedo does: its alpha is ROUGHNESS (measured 254.9 mean,
+    // 99.8-100% partial), not coverage. So every tinted wall, roof and floor on Everon
+    // arrived here with IsAlpha set and an Opaque class, matched none of the branches
+    // above, and fell out the bottom to the per-section path -- which draws it opaque
+    // anyway, and is the one path with no layer blend. Measured on Church_01: all ten
+    // opaque LOD0 sections refused, 162 refusals in the run, every one of them an
+    // `enft|` texture, every one for this reason.
+    //
+    // Opaque-class means the alpha test would pass everywhere; the two paths already
+    // agree on how it looks. Owning it changes which shader draws it, not what it draws.
+    if (tex->GetAlphaClass() == Poseidon::AlphaStats::Opaque)
+        return true;
     // Blend histogram: owned when the material AUTHORS a cutout or an opaque route (TreeAdv leaf
     // cards and their bark), i.e. exactly when SectionIsBlend says it is not real translucency.
     // .emat materials are left to the CPU on an IsAlpha spec, as SectionRetainedRefuses leaves
