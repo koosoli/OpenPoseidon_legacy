@@ -2317,6 +2317,41 @@ void PakCommand::Setup(CLI::App& app)
     }
     {
         static std::string root;
+        static std::string wanted;
+        static int maxBytes = 8192;
+        auto* cmd = pak->add_subcommand("cat", "Print one archive entry as text");
+        cmd->add_option("input", root, "A .pak file, or a directory to search")->required();
+        cmd->add_option("-e,--entry", wanted, "Path inside the archive (case-insensitive substring)")->required();
+        cmd->add_option("-n,--bytes", maxBytes, "Maximum bytes to print (default 8192)");
+        cmd->callback(
+            []()
+            {
+                const std::string needle = LowerCopy(wanted);
+                for (const std::string& path : FindPaks(root))
+                {
+                    PakArchive archive;
+                    if (!archive.Open(path))
+                        continue;
+                    for (const PakEntry& entry : archive.Entries())
+                    {
+                        if (LowerCopy(entry.path).find(needle) == std::string::npos)
+                            continue;
+                        std::vector<uint8_t> bytes;
+                        if (!archive.Read(entry, bytes))
+                            continue;
+                        std::cout << "=== " << entry.path << " (" << bytes.size() << " bytes) ===" << std::endl;
+                        const size_t n = std::min(bytes.size(), static_cast<size_t>(maxBytes));
+                        std::cout.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(n));
+                        std::cout << std::endl;
+                        std::exit(0);
+                    }
+                }
+                std::cerr << "no entry matching '" << wanted << "'" << std::endl;
+                std::exit(1);
+            });
+    }
+    {
+        static std::string root;
         static std::string filter;
         static int topClasses = 0;
         static bool roads = false;
