@@ -876,7 +876,12 @@ inline Matrix3 BoneBasis(const float q[4])
     const float s = 2.0f / norm;
     // Conjugated: the vector part is negated on the way in, which is exactly the
     // transpose of the textbook matrix and costs nothing to write out directly.
-    const float x = -q[0], y = -q[1], z = -q[2], w = q[3];
+    // RFG-068: no longer conjugated. This negation existed only to cancel the mirrored
+    // yaw that AddObject was applying; with the sign fixed at the placement it would
+    // mirror the sockets instead. The curtain-prop evidence in the comment above --
+    // `angles 0 -90 0` beside a socket quaternion of (0, -0.707, 0, 0.707) -- matches
+    // WITHOUT the conjugation, which is what says the two changes belong together.
+    const float x = q[0], y = q[1], z = q[2], w = q[3];
     return Matrix3(1.0f - s * (y * y + z * z), s * (x * y - z * w), s * (x * z + y * w), s * (x * y + z * w),
                    1.0f - s * (x * x + z * z), s * (y * z - x * w), s * (x * z - y * w), s * (y * z + x * w),
                    1.0f - s * (x * x + y * y));
@@ -1166,9 +1171,36 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
         // so every piece is laid flat and the run stops being flush. The converted map
         // has the same defect from the same reduction, which is what says the fault is
         // here and not in either map's placement code.
-        item.yawDeg = placement.angles[1];
-        item.pitchDeg = placement.angles[0];
-        item.rollDeg = placement.angles[2];
+        // RFG-068: NEGATE all three. The engine's rotation matrices are the transpose
+        // of the textbook ones, and Enfusion's `angles` are the textbook ones.
+        //
+        // `Matrix3P::SetRotationY` (Math3DP.cpp:393) builds [[c,0,-s],[0,1,0],[s,0,c]],
+        // which is Ry(-theta) in the usual convention, and `Landscape::AddObject`
+        // (Landscape.cpp:2563) uses exactly that. So every natively placed object stood
+        // at MINUS its authored yaw -- mirrored, not merely offset.
+        //
+        // Measured on Everon: neighbouring pairs of the same modular prefab, rotated
+        // back into the model frame, land exactly on a local axis --
+        //
+        //   ConcreteKerb_01_2m_v2   2,406 of 2,406 pairs (100%) with the textbook
+        //                           rotation, 296 with the engine's
+        //   Pier_01                 123 of 126 (97.6%) against 0 of 126
+        //   39 modular families     8,180 of 14,277 against 993
+        //
+        // Two places in this repo already do the yaw ARITHMETIC by hand -- the child
+        // composition in EbinWorld.cpp and the road pre-rotation below -- and both write
+        // `x' = c*x + s*z`, the textbook form, and both produce correct results. Only the
+        // object path went through `MRotationY`, and only it was mirrored. The comment at
+        // the road rotation claims it is "the same basis AddObject builds"; it is the
+        // transpose, and that wrong sentence is why this took three sessions to find.
+        //
+        // Pitch and roll are transposed for the same reason, which is why RFG-058 applied
+        // them and nothing looked better: with the old signs a tilted module was measured
+        // WORSE than applying no tilt at all (median axis error 5.65 deg against 3.37).
+        // Negated, it is 2.04 deg.
+        item.yawDeg = -placement.angles[1];
+        item.pitchDeg = -placement.angles[0];
+        item.rollDeg = -placement.angles[2];
         item.scale = (std::isfinite(placement.scale) && placement.scale > 0.0f) ? placement.scale : 1.0f;
         // The Y rule, measured over Everon's 1.23 M placements: with a Flags block
         // 96.3% sit within half a metre of the terrain, without one the median Y is
