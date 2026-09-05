@@ -217,7 +217,9 @@ class MountMaterialSink : public Poseidon::Asset::Formats::Enfusion::XobMaterial
     bool HideFaces(const std::string& materialSource) const override
     {
         const Resolved& resolved = Resolve(materialSource);
-        return resolved.decal && resolved.colour.empty();
+        // A water-erase sheet is hidden whether or not it resolved a colour: unlike a
+        // decal, it has no legitimate visible form at all.
+        return resolved.waterErase || (resolved.decal && resolved.colour.empty());
     }
 
     std::string TexturePath(const std::string& materialSource) const override
@@ -250,6 +252,7 @@ class MountMaterialSink : public Poseidon::Asset::Formats::Enfusion::XobMaterial
         std::string colour;
         std::string opacity;
         bool decal = false;
+        bool waterErase = false;
     };
 
     const Resolved& Resolve(const std::string& materialSource) const
@@ -264,6 +267,25 @@ class MountMaterialSink : public Poseidon::Asset::Formats::Enfusion::XobMaterial
             out.colour = ColourTextureOf(material);
             out.opacity = material.TextureOf("OpacityMap");
             out.decal = material.className == "MatPBRDecal";
+            // RFG-061: the OTHER invisible family, missing here and present in the
+            // converting exporter since MAT-050.
+            //
+            // A `*WaterErase*` material is Enfusion's water-suppression surface: a big
+            // flat sheet whose only job is to stop water drawing under a pier or inside
+            // a hull. It carries no albedo because it is never meant to be seen. Drawn
+            // opaque in fallback grey it becomes exactly what shows up on Everon's
+            // shoreline in both maps -- an enormous stretched sail of sand-coloured
+            // nothing, hanging across the view.
+            //
+            // Matched on the material PATH as well as the class name, because the
+            // exporter found both spellings in the corpus and matching only one leaves
+            // half of them drawing.
+            {
+                const std::string lowerPath = LowerCopy(materialSource);
+                const std::string lowerClass = LowerCopy(material.className);
+                out.waterErase = lowerPath.find("watererase") != std::string::npos ||
+                                 lowerClass.find("watererase") != std::string::npos;
+            }
             if (out.colour.empty())
             {
                 // A decal is an overlay on the surface underneath it, and nothing here
