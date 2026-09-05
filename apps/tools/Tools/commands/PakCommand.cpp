@@ -2380,10 +2380,19 @@ void PakCommand::Setup(CLI::App& app)
         static std::string root;
         static std::string wanted;
         static int maxBytes = 8192;
+        static std::string outPath;
         auto* cmd = pak->add_subcommand("cat", "Print one archive entry as text");
         cmd->add_option("input", root, "A .pak file, or a directory to search")->required();
         cmd->add_option("-e,--entry", wanted, "Path inside the archive (case-insensitive substring)")->required();
         cmd->add_option("-n,--bytes", maxBytes, "Maximum bytes to print (default 8192)");
+        // RFG-067: write to a FILE, in binary.
+        //
+        // Printing an archive entry to stdout is fine for text and destroys anything
+        // else on Windows, where the C runtime turns every 0x0A into 0D 0A on the way
+        // out. A 5.6 MB `.edds` extracted that way grew corrupt in a way that reads as
+        // "this file has no ENF1 marker" -- a container error for a container that was
+        // never touched.
+        cmd->add_option("-o,--out", outPath, "Write the entry to this file instead (binary, exact bytes)");
         cmd->callback(
             []()
             {
@@ -2400,6 +2409,15 @@ void PakCommand::Setup(CLI::App& app)
                         std::vector<uint8_t> bytes;
                         if (!archive.Read(entry, bytes))
                             continue;
+                        if (!outPath.empty())
+                        {
+                            std::ofstream out(outPath, std::ios::binary);
+                            out.write(reinterpret_cast<const char*>(bytes.data()),
+                                      static_cast<std::streamsize>(bytes.size()));
+                            std::cout << entry.path << " -> " << outPath << " (" << bytes.size() << " bytes)"
+                                      << std::endl;
+                            std::exit(out ? 0 : 1);
+                        }
                         std::cout << "=== " << entry.path << " (" << bytes.size() << " bytes) ===" << std::endl;
                         const size_t n = std::min(bytes.size(), static_cast<size_t>(maxBytes));
                         std::cout.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(n));

@@ -554,6 +554,46 @@ static void setupImageEddsCensus(CLI::App& image)
                     for (size_t i = 0; i < image.mipmaps.size(); ++i)
                         std::cout << "  level " << i << ": " << image.mipmaps[i].width << "x" << image.mipmaps[i].height
                                   << ", " << image.mipmaps[i].data.size() << " bytes\n";
+
+                    // RFG-066: per-channel statistics, because a texture's NAME is not a
+                    // statement about its packing.
+                    //
+                    // Reforger writes both `_NMO` and `_NHO` maps and they are not the
+                    // same layout. The terrain relief was deliberately left unbound for
+                    // exactly this reason: binding a normal map with the wrong channels
+                    // lights a whole island wrongly, and a suffix is not evidence. A
+                    // normal's two axes sit near 128 with a wide spread; a height,
+                    // roughness or occlusion channel does not.
+                    if (!image.mipmaps.empty())
+                    {
+                        std::vector<uint8_t> rgba(static_cast<size_t>(image.mipmaps[0].width) *
+                                                      static_cast<size_t>(image.mipmaps[0].height) * 4u,
+                                                  0);
+                        if (Poseidon::ConvertPixels(image.mipmaps[0].data.data(), rgba.data(), image.mipmaps[0].width,
+                                                    image.mipmaps[0].height, image.format,
+                                                    Poseidon::PixelFormat::RGBA8888))
+                        {
+                            const size_t texels = rgba.size() / 4;
+                            for (int c = 0; c < 4; ++c)
+                            {
+                                long long sum = 0, sumSq = 0;
+                                uint8_t lo = 255, hi = 0;
+                                for (size_t t = 0; t < texels; ++t)
+                                {
+                                    const uint8_t v = rgba[t * 4 + static_cast<size_t>(c)];
+                                    sum += v;
+                                    sumSq += static_cast<long long>(v) * v;
+                                    lo = std::min(lo, v);
+                                    hi = std::max(hi, v);
+                                }
+                                const double mean = texels ? double(sum) / double(texels) : 0.0;
+                                const double var = texels ? double(sumSq) / double(texels) - mean * mean : 0.0;
+                                std::cout << "  channel " << c << ": " << int(lo) << ".." << int(hi) << " mean "
+                                          << std::fixed << std::setprecision(1) << mean << " sd "
+                                          << std::sqrt(var > 0.0 ? var : 0.0) << std::defaultfloat << "\n";
+                            }
+                        }
+                    }
                 }
             }
 
