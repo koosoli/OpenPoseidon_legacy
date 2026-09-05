@@ -544,12 +544,37 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<
     // The eager compatibility path remains byte-for-byte in spirit: every
     // legacy tile enters the layer array. On modern worlds, bind only a small
     // set of distinct surface albedos as the far-field fallback.
+    // RFG-065: on a natively loaded Enfusion world the palette entry's own `.emat` says
+    // how its ground is tiled and what its middle-distance map is. Built once per world;
+    // the table is empty everywhere else and the loop below is then unchanged.
+    BuildEnfusionGroundMaterials(land);
     if (!paged)
     {
         for (int i = 0; i < materialCount; ++i)
         {
-            materials[static_cast<size_t>(i)].legacy = bindLayer(land.GetTexture(i), false);
-            materials[static_cast<size_t>(i)].satellite = materials[static_cast<size_t>(i)].legacy;
+            WgrTerrainMaterial& material = materials[static_cast<size_t>(i)];
+            const EnfusionGroundMaterial* enf = static_cast<size_t>(i) < _enfusionGround.size()
+                                                    ? &_enfusionGround[static_cast<size_t>(i)]
+                                                    : nullptr;
+            // The Enfusion detail image REPLACES the layer the loader bound, because that
+            // one has a single mip level (CreateDynamic) and is unusable once the tiling
+            // goes from the 12.5 m land cell to the authored few metres. It is still the
+            // `legacy` slot, so with the dev switch off the ground is the same image at
+            // the same UV as before -- only mipped.
+            Texture* colour = enf != nullptr && enf->detail != nullptr ? enf->detail : land.GetTexture(i);
+            material.legacy = bindLayer(colour, false);
+            material.satellite = material.legacy;
+            if (enf != nullptr && enf->detail != nullptr)
+            {
+                material.enfusion = 1;
+                material.detail_scale = enf->detailScale;
+                material.middle_scale = enf->middleScale;
+                material.middle_blend = enf->middleBlend;
+                material.detail_max = enf->detailMax;
+                material.detail_fade = enf->detailFade;
+                if (enf->middle != nullptr)
+                    material.middle = bindLayer(enf->middle, false);
+            }
         }
     }
     else
@@ -2718,6 +2743,10 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     _params.swash_amp = coast.swashAmp;
     _params.wet_height = coast.wetHeight;
     _params.wet_darken = coast.wetDarken;
+    // RFG-065: the native Enfusion ground is a per-frame weight, so the dev panel's
+    // checkbox is a live A/B with no re-upload. It reaches the shader as 0 on every
+    // world whose materials do not set `enfusion`, so it is inert there by data.
+    _params.enfusion_ground = _enfusionGroundEnabled ? 1.0f : 0.0f;
     _engine.QueueTerrainParams(_params); // REN-THR-013: queued, applied before wgr_render_frame
 
     if (camera == nullptr)

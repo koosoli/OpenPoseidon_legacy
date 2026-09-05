@@ -82,6 +82,12 @@ class TerrainWgpu : public ITerrainRenderer
     bool HasEnfusionSurfaces() const { return _hasEnfusionSurfaces; }
     bool EnfusionClutterEnabled() const { return _enfusionClutterEnabled; }
     void SetEnfusionClutterEnabled(bool enabled);
+    // RFG-065: the native Enfusion GROUND material (TerrainWgpuEnfusionSurface.cpp) --
+    // the `.emat`'s own ScaleUV tiling and its middle-distance map, instead of one
+    // image stretched over each 12.5 m land cell. A per-frame uniform weight, so this
+    // is a live A/B and 0 is bit-exact the legacy ground.
+    bool EnfusionGroundEnabled() const { return _enfusionGroundEnabled; }
+    void SetEnfusionGroundEnabled(bool enabled) { _enfusionGroundEnabled = enabled; }
     // Photographed clump families actually found on disk, in atlas-layer order
     // (index 0 = the primary clump). Discovered, never hardcoded, so dropping a
     // grass pack into assets/grass/more_grass is all it takes to get one.
@@ -120,6 +126,11 @@ class TerrainWgpu : public ITerrainRenderer
     // -- and leaves `geography` untouched -- on every other world. Implemented in
     // TerrainWgpuEnfusionClutter.cpp.
     bool BakeEnfusionClutter(const Landscape& land, std::vector<uint32_t>& geography, bool refreshSelection);
+    // RFG-065: reads each palette entry's `.emat` and builds the mipped detail/middle
+    // ground textures it names. Cached per world; returns false and leaves the table
+    // empty on every world that is not a natively loaded Reforger one. Implemented in
+    // TerrainWgpuEnfusionSurface.cpp.
+    bool BuildEnfusionGroundMaterials(const Landscape& land);
     // Builds the world's own clutter atlas: one layer per clutter class, the
     // classes of a surface consecutive so the shader selects within a run.
     // `surfaces` is (surface texture key, character) in the order the runs
@@ -202,6 +213,23 @@ class TerrainWgpu : public ITerrainRenderer
     // switch that does nothing. Default ON where the world IS Enfusion.
     bool _hasEnfusionSurfaces = false;
     bool _enfusionClutterEnabled = true;
+    // RFG-065. One record per palette entry; `detail == nullptr` means the entry
+    // resolved no `.emat` colour and keeps the legacy route untouched.
+    struct EnfusionGroundMaterial
+    {
+        Texture* detail = nullptr;  //!< BCRMap, mipped, tiled at `detailScale`
+        Texture* middle = nullptr;  //!< BCRMiddleMap, or null
+        float detailScale = 0.0f;   //!< 1 / ScaleUV, repeats per world metre
+        float middleScale = 0.0f;   //!< 1 / MiddleScaleUV
+        float middleBlend = 0.0f;   //!< MiddleBCRBlend, clamped to 0..1
+        float detailMax = 0.0f;     //!< DetailMaxDistance, m
+        float detailFade = 0.0f;    //!< DetailBlendDistance, m (the band's WIDTH)
+    };
+    std::vector<EnfusionGroundMaterial> _enfusionGround;
+    //! Keeps the built textures alive for as long as the world is loaded.
+    std::vector<Ref<Texture>> _enfusionGroundTextures;
+    std::string _enfusionGroundWorld;
+    bool _enfusionGroundEnabled = true;
 
     // The map's own clutter definitions, rebuilt per world. Empty for every OFP
     // world by construction (that generation defines none of these classes) and

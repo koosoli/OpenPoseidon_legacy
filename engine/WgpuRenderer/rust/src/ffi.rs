@@ -1032,7 +1032,10 @@ pub struct WgrTerrainParams {
     pub swash_amp: f32,
     pub wet_height: f32,
     pub wet_darken: f32,
-    pub _pad0: f32,
+    // RFG-065: master weight for the NATIVE Enfusion ground material (the `.emat`'s own
+    // ScaleUV tiling and its middle-distance map). 0 = the legacy one-image-per-50-m-cell
+    // route, byte for byte. Zero on every world that is not a natively loaded Reforger one.
+    pub enfusion_ground: f32,
     pub _pad1: f32,
 }
 
@@ -1070,6 +1073,18 @@ pub struct WgrTerrainMaterial {
     pub satellite_uv: WgrTerrainUv,
     pub mask_uv: WgrTerrainUv,
     pub surface_uvs: [WgrTerrainUv; WGR_TERRAIN_SURFACE_SLOTS],
+    // RFG-065 -- a NATIVELY loaded Enfusion (Reforger) surface, read from the palette
+    // entry's own `.emat`. `surface_count` stays 0 there (no LCA mask, no satellite), so
+    // these modify the LEGACY branch rather than the authored one. All zero elsewhere.
+    // See wgpu_renderer.hpp for what each field is and the corpus counts behind it.
+    pub enfusion: u32,
+    pub detail_scale: f32,
+    pub middle: u32,
+    pub middle_scale: f32,
+    pub middle_blend: f32,
+    pub detail_max: f32,
+    pub detail_fade: f32,
+    pub _pad2: u32,
 }
 
 // One terrain node (shared grid mesh at world-xz `origin`, `size` wide, level
@@ -1514,7 +1529,7 @@ const _: () = assert!(std::mem::size_of::<WgrTerrainSunShadow>() == 16);
 // 20 header words, then satellite/mask UVs and six per-slot UVs of two vec4
 // each. The WGSL `TerrainMaterial` in terrain.wgsl mirrors this byte for byte.
 const _: () = assert!(std::mem::size_of::<WgrTerrainUv>() == 32);
-const _: () = assert!(std::mem::size_of::<WgrTerrainMaterial>() == 336);
+const _: () = assert!(std::mem::size_of::<WgrTerrainMaterial>() == 368);
 const _: () = assert!(std::mem::size_of::<WgrSkyVisibility>() == 32);
 const _: () = assert!(std::mem::size_of::<WgrFoliage>() == 80);
 const _: () = assert!(std::mem::size_of::<WgrGtao>() == 52);

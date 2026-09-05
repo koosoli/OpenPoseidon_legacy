@@ -370,11 +370,11 @@ MipInfo TextureBankWgpu::UseMipmap(Texture* tex, int /*level*/, int /*top*/)
     return MipInfo(tex, 0);
 }
 
-Texture* TextureBankWgpu::CreateDynamic(int w, int h, const void* rgba, uint32_t size, bool /*mipmap*/,
+Texture* TextureBankWgpu::CreateDynamic(int w, int h, const void* rgba, uint32_t size, bool mipmap,
                                        int alphaClass)
 {
     auto* texture = new TextureWgpu(this);
-    texture->InitDynamic(w, h, rgba, size);
+    texture->InitDynamic(w, h, rgba, size, mipmap);
     // A dynamic texture has no ITextureSource, so GetAlphaClass has nothing to scan
     // and keeps the base Opaque. That is right for a font atlas and wrong for a leaf
     // card whose coverage the caller just folded in by hand, which draws as a solid

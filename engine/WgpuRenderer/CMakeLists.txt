@@ -61,6 +61,7 @@ add_library(WgpuRenderer STATIC
     GraphicsBackendWgpu.cpp
     TerrainWgpu.cpp
     TerrainWgpuEnfusionClutter.cpp
+    TerrainWgpuEnfusionSurface.cpp
     WaterWgpu.cpp
     TextureWgpu.cpp
     TextureBankWgpu.cpp

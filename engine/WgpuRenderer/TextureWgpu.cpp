@@ -1273,7 +1273,7 @@ bool TextureWgpu::NormalIsRgPacked() const
     return dst == PacBC7 && IsEnfusionRgNormalName(Name());
 }
 
-void TextureWgpu::InitDynamic(int w, int h, const void* rgba, uint32_t size)
+void TextureWgpu::InitDynamic(int w, int h, const void* rgba, uint32_t size, bool genMips)
 {
     _dynamic = true;
     _uploadTried = true;
@@ -1283,7 +1283,8 @@ void TextureWgpu::InitDynamic(int w, int h, const void* rgba, uint32_t size)
     if (WgrRenderer* r = _bank ? _bank->Renderer() : nullptr)
     {
         CheckProducerMayTouchRenderer("texture create");
-        _gpuHandle = wgr_texture_create(r, static_cast<uint32_t>(w), static_cast<uint32_t>(h), WGR_TEXTURE_RGBA8, 1, 0,
+        _gpuHandle = wgr_texture_create(r, static_cast<uint32_t>(w), static_cast<uint32_t>(h), WGR_TEXTURE_RGBA8, 1,
+                                        genMips ? WGR_TEXTURE_GEN_MIPS : 0u,
                                         static_cast<const uint8_t*>(rgba), size);
     }
     if (!_gpuHandle)

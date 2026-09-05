@@ -59,7 +59,11 @@ class TextureWgpu : public Texture
     bool _alphaForcedByFormat = false;
 
     int Init();
-    void InitDynamic(int w, int h, const void* rgba, uint32_t size);
+    // `genMips` asks the backend to build the mip chain from level 0. A dynamic
+    // texture is single-level by default, which is right for a font atlas or a
+    // clutter card and WRONG for anything that gets minified -- an Enfusion ground
+    // layer tiled every few metres (RFG-065) is aliasing noise without it.
+    void InitDynamic(int w, int h, const void* rgba, uint32_t size, bool genMips = false);
     // Reserve _slotLease if not already held; returns it (0 = none available).
     uint32_t AcquireSlotLease();
 

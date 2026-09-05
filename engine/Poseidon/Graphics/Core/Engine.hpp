@@ -1490,6 +1490,13 @@ class Engine : public IGraphicsEngine
         // world that is not one (Landscape::GetEnfusionSurfaceCount() is 0 there), so this is
         // a switch for the native path only -- it does not touch OFP or Arma worlds.
         bool enfusionClutter = true;
+        // RFG-065: bind a NATIVELY loaded Enfusion world's GROUND MATERIAL from the palette
+        // entry's own `.emat` -- its `ScaleUV` tiling and its middle-distance map -- instead
+        // of stretching one image over each 12.5 m land cell. Lives beside `enfusionClutter`
+        // because both are the same world's own data read out of the same `.pak`s, and both
+        // are inert by construction on every world that is not one. It is the GROUND, not
+        // the grass; the panel groups them, the shader does not.
+        bool enfusionGround = true;
         float densityBoost = 4.0f; // turns base spacing into a denser placement grid
         float height = 1.40f;      // authored blade height multiplier
         // The default follows the weather system that also drives smoke,

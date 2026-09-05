@@ -3388,6 +3388,23 @@ void DrawGrassTab()
         {
             changed = true;
         }
+        // RFG-065. The GROUND, not the grass -- it sits here because it is the same
+        // world's own `.emat` data read out of the same archives, and the panel has no
+        // other home for a native-Reforger terrain switch.
+        if (Dev::Checkbox("Enfusion ground material (native Reforger worlds)", &grass.enfusionGround))
+        {
+            changed = true;
+        }
+        if (nativeWorld)
+        {
+            Dev::PanelHelp("Tiles each surface at the ScaleUV its own .emat declares (2..8 m; 36 of the 51 "
+                           "shipped surfaces name one) instead of stretching one image over each 12.5 m "
+                           "land cell, and crossfades in the surface's BCRMiddleMap past DetailMaxDistance. Off is "
+                           "the previous ground, bit for bit -- it is a live per-frame weight, so this is an "
+                           "A/B with no reload. The .emat's NHOMap and SatMapBlend are NOT bound yet; the "
+                           "boot log's 'Wgpu Enfusion ground:' line counts what was found against what was "
+                           "bound.");
+        }
         ImGui::EndDisabled();
         if (nativeWorld)
         {

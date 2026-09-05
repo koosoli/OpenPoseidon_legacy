@@ -30,7 +30,10 @@ struct TerrainParams {
     swash_amp: f32,
     wet_height: f32,
     wet_darken: f32,
-    _pad0: f32,
+    // RFG-065: master weight for the NATIVE Enfusion ground material. 0 = the legacy
+    // one-image-per-land-cell route, byte for byte. Never non-zero on a world whose
+    // materials do not set `enfusion`, so this is inert everywhere but Reforger.
+    enfusion_ground: f32,
     _pad1: f32,
 };
 
@@ -59,10 +62,11 @@ struct TerrainUv {
     u: vec4<f32>,
     v: vec4<f32>,
 };
-// Mirrors WgrTerrainMaterial (wgpu_renderer.hpp / ffi.rs), 336 bytes. The two
+// Mirrors WgrTerrainMaterial (wgpu_renderer.hpp / ffi.rs), 368 bytes. The two
 // pad words are load-bearing: they carry the header to the 16-byte boundary the
 // TerrainUv rows need, and a skew here renders as the wrong ground, not as an
-// error. Both sides carry a size assert; keep all three in step.
+// error. Both sides carry a size assert; keep all three in step. 368 bytes since
+// RFG-065 appended the native Enfusion block at the end.
 const TERRAIN_SURFACE_SLOTS: u32 = 6u;
 struct TerrainMaterial {
     legacy: u32,
@@ -81,6 +85,17 @@ struct TerrainMaterial {
     satellite_uv: TerrainUv,
     mask_uv: TerrainUv,
     surface_uvs: array<TerrainUv, 6>,
+    // RFG-065 -- the native Enfusion surface block. `surface_count` is 0 on those
+    // materials (an `.emat` has no LCA mask and no satellite), so these ride the
+    // LEGACY branch, not the authored one.
+    enfusion: u32,
+    detail_scale: f32,
+    middle: u32,
+    middle_scale: f32,
+    middle_blend: f32,
+    detail_max: f32,
+    detail_fade: f32,
+    _pad2: u32,
 };
 @group(2) @binding(6) var<storage, read> terrain_materials: array<TerrainMaterial>;
 
@@ -388,6 +403,63 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
                         world_dwx: vec3<f32>, world_dwy: vec3<f32>) -> AuthoredCell {
     let material = terrain_materials[entry & CELL_LAYER_MASK];
     let authored_weight = clamp(a3_surface_blend, 0.0, 1.0);
+    // --- RFG-065: the NATIVE Enfusion surface ----------------------------------------
+    //
+    // A Reforger `.emat` is not the Arma stack and must not be routed through it: it has
+    // no LCA mask and no satellite tile, so `surface_count` is 0 and everything above
+    // would early-out. What it DOES carry is the two things the legacy branch gets
+    // wrong by a wide margin.
+    //
+    // 1. TILING. The legacy route maps one image onto each land cell, and a native
+    //    Everon land cell is 12.5 m (12,800 m / a 1024-cell land grid). The corpus
+    //    authors `ScaleUV` 2..8 m -- median 4, on 36 of the 51 shipped surfaces -- so
+    //    the ground is drawn 12.5/ScaleUV times too coarse: 6.25x at ScaleUV 2, 3.1x at
+    //    the median. It also parks the texture's period exactly on the land grid, so a
+    //    cell IS a texture and the tiling reads as a lattice. The UV here is
+    //    world-space, so it is continuous across cell borders and needs no jitter; the
+    //    four-cell blend above still crossfades between SURFACES.
+    //
+    // 2. MIDDLE DISTANCE. Enfusion crossfades the detail map out over
+    //    [DetailMaxDistance - DetailBlendDistance, DetailMaxDistance] and replaces it
+    //    with `BCRMiddleMap` at `MiddleScaleUV` (20..150 m). At the authored 4 m tiling
+    //    that fade is not optional decoration: it is what stops a 4 m period from
+    //    becoming a lattice in the middle distance.
+    //
+    // What is NOT here, and why: `NHOMap` (37 of 51) is left unbound because the channel
+    // packing of an `_NHO` has not been MEASURED on this corpus -- `_NMO`/`_nopx` put X
+    // in alpha and Y in green, and assuming the same for a differently-named map lights
+    // the whole island by a guess. `SatMapBlend` is zero on 19 of the 37 that declare it
+    // and needs Everon's 2,500 `_supertexture.edds` paged in, which is a build, not a
+    // binding.
+    if (material.enfusion != 0u && tp.enfusion_ground > 0.0) {
+        let wxz = vec2<f32>(world_pos.x, world_pos.z);
+        let duv = vec2<f32>(world_dwx.x, world_dwx.z);
+        let dvv = vec2<f32>(world_dwy.x, world_dwy.z);
+        let d_uv = wxz * material.detail_scale;
+        var rgb = textureSampleGrad(ground[material.legacy], ground_samp, d_uv,
+                                    duv * material.detail_scale, dvv * material.detail_scale).rgb;
+        if (material.middle != 0u && material.middle_blend > 0.0) {
+            let m_uv = wxz * material.middle_scale;
+            let mid = textureSampleGrad(ground[material.middle], ground_samp, m_uv,
+                                        duv * material.middle_scale, dvv * material.middle_scale).rgb;
+            // `detail_fade` is the WIDTH of the band, not its start: every surface in the
+            // corpus has DetailBlendDistance <= DetailMaxDistance, and reading it as a
+            // start would put Asphalt_01 (500/450) and Grass_03 (50/50) on opposite
+            // sides of the same rule.
+            let far = smoothstep(max(material.detail_max - material.detail_fade, 0.0),
+                                 max(material.detail_max, 1.0), length(view_pos));
+            rgb = mix(rgb, mid, far * clamp(material.middle_blend, 0.0, 1.0));
+        }
+        // Blended, not switched, so the dev panel's A/B is a crossfade and 0 is
+        // BIT-EXACT the legacy sample below. Full on costs ONE fetch (two with a
+        // middle map): the legacy tap is only taken while the slider is between.
+        if (tp.enfusion_ground >= 0.999) {
+            return AuthoredCell(rgb, vec3<f32>(0.0, 0.0, 1.0));
+        }
+        let legacy_rgb = sample_cell(material.legacy, cell, tile_uv, ddx, ddy);
+        return AuthoredCell(mix(legacy_rgb, rgb, clamp(tp.enfusion_ground, 0.0, 1.0)),
+                            vec3<f32>(0.0, 0.0, 1.0));
+    }
     // The normal renderer must remain byte-for-byte on the established cell
     // path while the authored composition is evaluated and compared.
     // This also avoids applying an unavailable texgen to legacy descriptors.

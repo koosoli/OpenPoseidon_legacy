@@ -612,7 +612,7 @@ impl Grass {
             swash_amp: 0.0,
             wet_height: 0.0,
             wet_darken: 1.0,
-            _pad0: 0.0,
+            enfusion_ground: 0.0,
             _pad1: 0.0,
         };
         queue.write_buffer(&terrain_params, 0, bytemuck::bytes_of(&terrain_default));

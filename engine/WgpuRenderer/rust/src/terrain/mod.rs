@@ -425,7 +425,7 @@ impl Terrain {
             swash_amp: 0.15,
             wet_height: 1.2,
             wet_darken: 0.55,
-            _pad0: 0.0,
+            enfusion_ground: 0.0,
             _pad1: 0.0,
         };
         queue.write_buffer(&params_ubo, 0, bytemuck::bytes_of(&default_params));
@@ -1803,4 +1803,64 @@ fn build_grid(device: &wgpu::Device) -> (wgpu::Buffer, wgpu::Buffer, u32) {
         usage: wgpu::BufferUsages::INDEX,
     });
     (vbuf, ibuf, indices.len() as u32)
+}
+
+#[cfg(test)]
+mod enfusion_ground_tests {
+    use crate::ffi::{WgrTerrainMaterial, WgrTerrainParams};
+
+    // RFG-065. The Enfusion block is read by OFFSET, not by name: a field added to the
+    // WGSL struct in a different order than to the two Rust/C++ ones renders as the
+    // wrong ground rather than as an error, which is the failure mode the existing size
+    // assert exists to catch and cannot catch on its own. So pin the tail order too.
+    #[test]
+    fn the_shader_carries_the_enfusion_block_in_the_abi_order() {
+        let src = include_str!("terrain.wgsl");
+        let tail = src
+            .split("surface_uvs: array<TerrainUv, 6>,")
+            .nth(1)
+            .expect("terrain.wgsl must declare the surface UV array");
+        let fields: Vec<&str> = [
+            "enfusion: u32,",
+            "detail_scale: f32,",
+            "middle: u32,",
+            "middle_scale: f32,",
+            "middle_blend: f32,",
+            "detail_max: f32,",
+            "detail_fade: f32,",
+        ]
+        .into_iter()
+        .collect();
+        let mut at = 0usize;
+        for field in fields {
+            let found = tail[at..]
+                .find(field)
+                .unwrap_or_else(|| panic!("terrain.wgsl is missing `{field}` after surface_uvs"));
+            at += found + field.len();
+        }
+        // 336 before the block, 32 after it. A skew here is silent on the GPU.
+        assert_eq!(std::mem::size_of::<WgrTerrainMaterial>(), 368);
+    }
+
+    // The master weight sits in the terrain params, not in a pipeline override, so the
+    // dev panel can A/B it live. If it stops being read the switch becomes a no-op that
+    // still moves in the UI.
+    #[test]
+    fn the_master_weight_is_a_per_frame_uniform_the_shader_reads() {
+        let src = include_str!("terrain.wgsl");
+        assert!(
+            src.contains("enfusion_ground: f32,"),
+            "TerrainParams must carry the master weight"
+        );
+        assert!(
+            src.contains("tp.enfusion_ground > 0.0"),
+            "the Enfusion ground branch must be gated on the per-frame weight"
+        );
+        assert!(
+            src.contains("tp.enfusion_ground >= 0.999"),
+            "full on must skip the legacy tap rather than blending against it"
+        );
+        // Zero-initialised, so no world that never sets it can take the branch.
+        assert_eq!(std::mem::size_of::<WgrTerrainParams>(), 64);
+    }
 }

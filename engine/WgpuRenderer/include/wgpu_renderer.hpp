@@ -924,7 +924,11 @@ struct WgrTerrainParams
     float swash_amp;
     float wet_height;
     float wet_darken;
-    float _pad0;
+    /* RFG-065: master weight for the NATIVE Enfusion ground material (the `.emat`'s own
+     * ScaleUV tiling and its middle-distance map). 0 = the legacy one-image-per-50-m-cell
+     * route, byte for byte; 1 = the authored surface. Zero on every world that is not a
+     * natively loaded Reforger one, because no material there sets `enfusion`. */
+    float enfusion_ground;
     float _pad1;
 };
 
@@ -2186,12 +2190,37 @@ extern "C"
         WgrTerrainUv satellite_uv;
         WgrTerrainUv mask_uv;
         WgrTerrainUv surface_uvs[WGR_TERRAIN_SURFACE_SLOTS];
+        /* RFG-065 -- a NATIVELY loaded Enfusion (Reforger) surface, read from the
+         * palette entry's own `.emat`. Appended rather than folded into the fields
+         * above because none of them fits: an Enfusion surface has no LCA mask and no
+         * satellite, so `surface_count` stays 0 and the legacy branch is what these
+         * modify. All zero on every other world.
+         *
+         *   enfusion         1 = this palette entry resolved an `.emat`; 0 = not one
+         *   detail_scale     1 / ScaleUV, in repeats per metre of WORLD xz. The legacy
+         *                    route maps one image onto each 12.5 m land cell; the corpus
+         *                    authors 2..8 m (median 4, n=36 of 51), so the ground is
+         *                    drawn 12.5/ScaleUV too coarse -- 3.1x at the median -- and
+         *                    its period sits exactly on the land grid.
+         *   middle           BCRMiddleMap's layer index, 0 = none
+         *   middle_scale     1 / MiddleScaleUV (20..150 m, n=29)
+         *   middle_blend     MiddleBCRBlend clamped to 0..1 (12 of 37 author 0)
+         *   detail_max       DetailMaxDistance: metres at which the detail map is gone
+         *   detail_fade      DetailBlendDistance: width of the crossfade below it */
+        uint32_t enfusion;
+        float detail_scale;
+        uint32_t middle;
+        float middle_scale;
+        float middle_blend;
+        float detail_max;
+        float detail_fade;
+        uint32_t _pad2;
     };
     /* 20 header words, then the satellite/mask UVs and six per-slot UVs of two
      * vec4 each. The WGSL `TerrainMaterial` in terrain.wgsl must be kept to the
-     * same 336 bytes: a skew here renders as the wrong ground, not as an error. */
+     * same 368 bytes: a skew here renders as the wrong ground, not as an error. */
     static_assert(sizeof(WgrTerrainUv) == 32, "WgrTerrainUv layout must match the Rust #[repr(C)] struct");
-    static_assert(sizeof(WgrTerrainMaterial) == 336,
+    static_assert(sizeof(WgrTerrainMaterial) == 368,
                   "WgrTerrainMaterial layout must match the Rust #[repr(C)] struct");
     WGR_API void wgr_terrain_set_materials(WgrRenderer* renderer, const WgrTerrainMaterial* materials,
                                            uint32_t count);

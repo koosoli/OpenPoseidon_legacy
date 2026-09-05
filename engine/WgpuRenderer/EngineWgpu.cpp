@@ -10067,6 +10067,7 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
     if (_terrain != nullptr)
     {
         _terrain->SetEnfusionClutterEnabled(settings.enfusionClutter);
+        _terrain->SetEnfusionGroundEnabled(settings.enfusionGround);
     }
     const bool haveMapAtlas = _terrain && _terrain->GrassHasMapClutterAtlas();
     const bool mapClutter = clutterSource == 0 && haveMapAtlas;
