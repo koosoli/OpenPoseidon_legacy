@@ -2714,6 +2714,25 @@ void EngineWgpu::StopRenderThread()
 
 void EngineWgpu::NextFrame()
 {
+    // RFG-048: fire the interior-sky probe from a HEADLESS run.
+    //
+    // The measurement lives behind a dev-panel button, which a screenshot harness
+    // cannot press -- so the one question it answers ("is the house even on the GPU
+    // path?") was unanswerable without a person at the keyboard. Counting frames here
+    // rather than seconds because the world streams in and an early probe measures the
+    // loading screen, which is exactly the mistake this diagnostic was rebuilt to stop
+    // making.
+    {
+        static const int probeFrame = []
+        {
+            const char* v = std::getenv("POSEIDON_INTERIOR_SKY_PROBE");
+            return (v != nullptr && *v != 0) ? std::atoi(v) : 0;
+        }();
+        static int frames = 0;
+        if (probeFrame > 0 && ++frames == probeFrame)
+            ProbeInteriorSkyMap();
+    }
+
     if (_renderer)
     {
         // REN-THR-015: apply a panel toggle HERE -- top of the frame, nothing in flight,
