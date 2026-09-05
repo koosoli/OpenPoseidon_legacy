@@ -1576,7 +1576,10 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
 
             size_t added = 0;
             size_t buriedObjects = 0;
+            size_t buriedStructures = 0;
+            size_t rescuedObjects = 0;
             std::string firstBuried;
+            std::string firstBuriedStructure;
             for (const ResolvedPlacement& item : placed)
             {
                 if (added >= objectCap)
@@ -1599,6 +1602,27 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
                     const uint16_t raw = terrain.heights[static_cast<size_t>(sz) * gridW + sx];
                     y += static_cast<float>(raw) * d.heightScale + d.heightOffset;
                 }
+                // RFG-047: rescue a placement that would land absurdly deep.
+                //
+                // The Y rule reads a flagless `coords` Y as terrain-relative only when
+                // it is within 2 m of zero (RFG-011's measurement: flagless placements
+                // have median Y 0). A flagless part with Y = 9 -- a loudspeaker on a
+                // pole, a chimney, a gutter -- falls outside that and is read as an
+                // absolute 9 m above sea level, which on a 117 m hill puts it 108 m
+                // underground. Measured: 265 structures buried, the deepest by exactly
+                // that mechanism.
+                //
+                // Ten metres, not two: a rock or a pipe embedded a couple of metres
+                // into the ground is authored that way and must stay. Nothing is
+                // deliberately ten metres under Everon, so below that the absolute
+                // reading is simply wrong and the offset reading is the one that puts
+                // the part back on its building.
+                const float groundHere = SurfaceY(item.position[0], item.position[2]);
+                if (!item.terrainRelative && y < groundHere - 10.0f)
+                {
+                    y = groundHere + item.position[1];
+                    ++rescuedObjects;
+                }
                 Object* placedObject =
                     AddObject(Vector3(item.position[0], y, item.position[2]), item.yawDeg, shape->second);
                 // `AddObject` has no scale parameter, and the engine keeps scale in the
@@ -1613,9 +1637,26 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
                 // air and have different causes, and nothing so far could tell them
                 // apart. Measured against the engine's own surface, which is what the
                 // player stands on.
-                if (y < SurfaceY(item.position[0], item.position[2]) - 2.0f)
+                if (y < groundHere - 2.0f)
                 {
                     ++buriedObjects;
+                    // Split by category, because the two halves mean opposite things.
+                    // A rock or a pipe sunk into the ground is authored that way; a
+                    // HOUSE two metres under is a height-rule bug. A single total
+                    // cannot tell them apart and so cannot be acted on.
+                    {
+                        const std::string lower = LowerCopy(meshes[item.mesh].first);
+                        if (lower.find("/structures/") != std::string::npos ||
+                            lower.find("/houses/") != std::string::npos)
+                        {
+                            ++buriedStructures;
+                            if (firstBuriedStructure.empty())
+                                firstBuriedStructure = meshes[item.mesh].first + " at [" +
+                                                       std::to_string(int(item.position[0])) + " " +
+                                                       std::to_string(int(item.position[2])) + "] " +
+                                                       std::to_string(int(groundHere - y)) + " m under";
+                        }
+                    }
                     if (firstBuried.empty())
                         firstBuried = meshes[item.mesh].first + " at [" + std::to_string(int(item.position[0])) +
                                       " " + std::to_string(int(item.position[2])) + "] " +
@@ -1665,9 +1706,11 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
             }
             LOG_INFO(World,
                      "Enfusion native load: built {} of {} meshes ({} failed) in {} ms, placed {} objects "
-                     "({} more than 2 m under the terrain){}{}",
-                     built, meshes.size(), buildFailed, buildMs, added, buriedObjects,
-                     firstBuried.empty() ? "" : ("; first: " + firstBuried),
+                     "({} more than 2 m under the terrain, {} of them structures, {} rescued from below 10 m){}{}",
+                     built, meshes.size(), buildFailed, buildMs, added, buriedObjects, buriedStructures,
+                     rescuedObjects,
+                     firstBuriedStructure.empty() ? (firstBuried.empty() ? "" : ("; first: " + firstBuried))
+                                                  : ("; first structure: " + firstBuriedStructure),
                      firstBuildFailure.empty() ? "" : ("; first build failure: " + firstBuildFailure));
 
             // RFG-027: the road network. One shape per road rather than one shared
