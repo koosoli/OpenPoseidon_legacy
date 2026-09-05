@@ -224,6 +224,11 @@ class TerrainWgpu : public ITerrainRenderer
         float middleBlend = 0.0f;   //!< MiddleBCRBlend, clamped to 0..1
         float detailMax = 0.0f;     //!< DetailMaxDistance, m
         float detailFade = 0.0f;    //!< DetailBlendDistance, m (the band's WIDTH)
+        //! MiddleColor: a LINEAR multiplier on the middle map (RFG-071's rule), 1 when
+        //! the material declares none. Applied per fragment, not baked into the tile,
+        //! because the tile is shared: Dirt_01_Middle_BCR serves 12 materials under 9
+        //! different MiddleColors.
+        float middleColor[3] = {1.0f, 1.0f, 1.0f};
     };
     std::vector<EnfusionGroundMaterial> _enfusionGround;
     //! Keeps the built textures alive for as long as the world is loaded.

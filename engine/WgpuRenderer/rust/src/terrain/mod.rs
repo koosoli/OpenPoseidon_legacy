@@ -1828,6 +1828,7 @@ mod enfusion_ground_tests {
             "middle_blend: f32,",
             "detail_max: f32,",
             "detail_fade: f32,",
+            "middle_color: vec3<f32>,",
         ]
         .into_iter()
         .collect();
@@ -1838,8 +1839,23 @@ mod enfusion_ground_tests {
                 .unwrap_or_else(|| panic!("terrain.wgsl is missing `{field}` after surface_uvs"));
             at += found + field.len();
         }
-        // 336 before the block, 32 after it. A skew here is silent on the GPU.
-        assert_eq!(std::mem::size_of::<WgrTerrainMaterial>(), 368);
+        // 336 before the block, 48 after it: 32 of scalars, then MiddleColor on its own
+        // 16-byte row (a WGSL vec3 aligns to 16). A skew here is silent on the GPU.
+        assert_eq!(std::mem::size_of::<WgrTerrainMaterial>(), 384);
+        assert_eq!(std::mem::offset_of!(WgrTerrainMaterial, middle_color), 368);
+    }
+
+    // The tint is a multiplier in LINEAR (RFG-071), and the ground blend runs in gamma
+    // until the fold at the end of fs_main. If the multiply ever moves out of that
+    // round-trip it becomes the "multiply in gamma" reading RFG-071 measured at 0.66x,
+    // and Dirt_01's middle tile goes from 97/86/73 to 38/30/21.
+    #[test]
+    fn the_middle_tint_multiplies_in_linear_space() {
+        let src = include_str!("terrain.wgsl");
+        assert!(
+            src.contains("ground_linear_to_srgb(srgb_to_linear(mid) * max(material.middle_color"),
+            "MiddleColor must multiply the middle texel between a decode and a re-encode"
+        );
     }
 
     // The master weight sits in the terrain params, not in a pipeline override, so the

@@ -2209,7 +2209,14 @@ extern "C"
          *   middle_scale     1 / MiddleScaleUV (20..150 m, n=29)
          *   middle_blend     MiddleBCRBlend clamped to 0..1 (12 of 37 author 0)
          *   detail_max       DetailMaxDistance: metres at which the detail map is gone
-         *   detail_fade      DetailBlendDistance: width of the crossfade below it */
+         *   detail_fade      DetailBlendDistance: width of the crossfade below it
+         *   middle_color     MiddleColor, a multiplier applied to the middle map's
+         *                    texel in LINEAR (the rule RFG-071 measured for Color_N).
+         *                    1,1,1 when the material names none. The middle maps that
+         *                    come with one are brightness tiles -- Dirt_01_Middle_BCR
+         *                    is 216/216/216 -- and without it they are light grey
+         *                    where the material says dark brown. Sits on its own
+         *                    16-byte row (WGSL vec3 alignment); the pad closes it. */
         uint32_t enfusion;
         float detail_scale;
         uint32_t middle;
@@ -2218,12 +2225,15 @@ extern "C"
         float detail_max;
         float detail_fade;
         uint32_t _pad2;
+        float middle_color[3];
+        uint32_t _pad3;
     };
     /* 20 header words, then the satellite/mask UVs and six per-slot UVs of two
-     * vec4 each. The WGSL `TerrainMaterial` in terrain.wgsl must be kept to the
-     * same 368 bytes: a skew here renders as the wrong ground, not as an error. */
+     * vec4 each, then the Enfusion block. The WGSL `TerrainMaterial` in terrain.wgsl
+     * must be kept to the same 384 bytes: a skew here renders as the wrong ground,
+     * not as an error. */
     static_assert(sizeof(WgrTerrainUv) == 32, "WgrTerrainUv layout must match the Rust #[repr(C)] struct");
-    static_assert(sizeof(WgrTerrainMaterial) == 368,
+    static_assert(sizeof(WgrTerrainMaterial) == 384,
                   "WgrTerrainMaterial layout must match the Rust #[repr(C)] struct");
     WGR_API void wgr_terrain_set_materials(WgrRenderer* renderer, const WgrTerrainMaterial* materials,
                                            uint32_t count);

@@ -96,8 +96,22 @@ struct TerrainMaterial {
     detail_max: f32,
     detail_fade: f32,
     _pad2: u32,
+    // MiddleColor: a LINEAR multiplier on the middle map's texel (1,1,1 when the
+    // material names none). Own 16-byte row; `_pad3` closes it to 384 bytes.
+    middle_color: vec3<f32>,
+    _pad3: u32,
 };
 @group(2) @binding(6) var<storage, read> terrain_materials: array<TerrainMaterial>;
+
+// The inverse of color::srgb_to_linear, for the one place the ground path has to
+// go back: the Enfusion middle tint below is applied in linear (it is a multiplier
+// on radiance, RFG-071) while the ground blend stays in gamma until the fold at
+// the end of fs_main. Piecewise, so it round-trips the toe exactly.
+fn ground_linear_to_srgb(c: vec3<f32>) -> vec3<f32> {
+    let lo = c * 12.92;
+    let hi = 1.055 * pow(max(c, vec3<f32>(0.0)), vec3<f32>(1.0 / 2.4)) - 0.055;
+    return select(hi, lo, c <= vec3<f32>(0.0031308));
+}
 
 fn hm_load(ix: i32, iz: i32) -> f32 {
     let cx = clamp(ix, 0, i32(tp.hm_width) - 1);
@@ -440,8 +454,22 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
                                     duv * material.detail_scale, dvv * material.detail_scale).rgb;
         if (material.middle != 0u && material.middle_blend > 0.0) {
             let m_uv = wxz * material.middle_scale;
-            let mid = textureSampleGrad(ground[material.middle], ground_samp, m_uv,
+            var mid = textureSampleGrad(ground[material.middle], ground_samp, m_uv,
                                         duv * material.middle_scale, dvv * material.middle_scale).rgb;
+            // `MiddleColor` is a multiplier in LINEAR on the middle texel -- the rule
+            // RFG-071 measured for `Color_N` against Enfusion's own bakes, and the one
+            // the pairs in this corpus confirm: Dirt_01_Middle_BCR is a 216/216/216
+            // brightness tile; times Dirt_01's MiddleColor (0.175, 0.137, 0.095) in
+            // linear it lands on 97/86/73, beside Dirt_01_BCR's own measured mean of
+            // 88/80/69, and Dirt_03's (190/185/181 x 0.262/0.23/0.192) on 103/94/85
+            // against its detail's 102/96/89. Multiplied in gamma the same tile would
+            // be 38/30/21, and left untinted it is the light grey the forest floor was
+            // fading to past DetailMaxDistance. Applied here and not baked into the
+            // tile because the tile is SHARED: one image, nine tints on Everon.
+            // Skipped at 1,1,1 so the untinted materials pay no pow().
+            if (any(material.middle_color < vec3<f32>(0.999))) {
+                mid = ground_linear_to_srgb(srgb_to_linear(mid) * max(material.middle_color, vec3<f32>(0.0)));
+            }
             // `detail_fade` is the WIDTH of the band, not its start: every surface in the
             // corpus has DetailBlendDistance <= DetailMaxDistance, and reading it as a
             // start would put Asphalt_01 (500/450) and Grass_03 (50/50) on opposite

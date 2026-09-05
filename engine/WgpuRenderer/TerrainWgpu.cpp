@@ -572,6 +572,8 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<
                 material.middle_blend = enf->middleBlend;
                 material.detail_max = enf->detailMax;
                 material.detail_fade = enf->detailFade;
+                for (int c = 0; c < 3; ++c)
+                    material.middle_color[c] = enf->middleColor[c];
                 if (enf->middle != nullptr)
                     material.middle = bindLayer(enf->middle, false);
             }

@@ -32,8 +32,44 @@
 //                  [DetailMaxDistance - DetailBlendDistance, DetailMaxDistance].
 //                  At the authored 4 m tiling this is not decoration: it is what
 //                  stops a 4 m period becoming a lattice in the middle distance.
+//   MiddleColor    18 of 51 after inheritance; 6 of Everon's 22 palette entries, 5
+//                  of which bind a middle map (ForestDeciduous_02 authors
+//                  MiddleBCRBlend 0). RFG-073. A LINEAR multiplier on the middle
+//                  texel -- the rule RFG-071 measured for `Color_N` against
+//                  Enfusion's own bakes -- and on this corpus the pairing is the
+//                  proof: all 6 Everon carriers use `Dirt_01_Middle_BCR`, a
+//                  brightness tile measured at 216/216/216 (sd 12.6, the three
+//                  channels identical), while the middle maps of the other 16
+//                  entries are already coloured (Grass_01_Middle 62/71/45, SeaBed
+//                  51/45/37) and name no MiddleColor. Multiplied in linear, 216 x
+//                  Dirt_01's (0.175, 0.137, 0.095) is 97/86/72 beside Dirt_01_BCR's
+//                  own measured 88/80/69; Dirt_02 predicts 97/82/62 against 95/82/67;
+//                  ForestDeciduous_01 101/80/68 against 97/80/64; Dirt_03 (190/185/
+//                  181 x 0.262/0.23/0.192) 103/94/84 against 102/96/89. Multiplied
+//                  in gamma the same tile is 38/30/21. Left out, as it was, the
+//                  coniferous floor faded from brown (103/86/65) to the untinted
+//                  216 grey past DetailMaxDistance: the white forest floor at 50 m.
+//                  Applied in the shader, not baked into the tile, because the tile
+//                  is SHARED: that one image serves 17 materials under 12 distinct
+//                  MiddleColors (Everon: 6 under 4), and a bake would need a copy
+//                  per tint where the cache holds one.
 //
 // WHAT THIS DELIBERATELY DOES NOT BIND, with the measurement that decided it:
+//
+//   Color          21 of 51 declare one on the DETAIL level (Everon: 11 of 22),
+//                  0.15..1.0, mostly a grey 0.58..0.91. Whether it multiplies the
+//                  detail map alone, the whole material, or nothing cannot be read
+//                  off a bake the way MiddleColor can, but one continuity CAN be
+//                  measured: the middle map (MiddleColor applied) against the
+//                  detail it takes over from at DetailMaxDistance, over the 19
+//                  materials with a Color and a non-zero middle blend. Mean |log|
+//                  luminance ratio: Color unused 0.221, applied to both 0.219,
+//                  applied to the detail alone 0.367 (Everon's 7: 0.136 / 0.136 /
+//                  0.209). Concrete_01 is the worked case: 119 untinted against its
+//                  middle's 118; tinted by its Color 0.592 it would be 93 handing
+//                  over to 118. "Detail alone" is rejected; the other two readings
+//                  are indistinguishable on this data, so it stays unbound.
+//   Diffuse        14 of 51 declare it and every one is `1 1 1 1`. Nothing to bind.
 //
 //   NHOMap         37 of 51.  The channel packing of an `_NHO` has NOT been measured
 //                  on this corpus. `_NMO`/`_nopx` put normal X in alpha and Y in
@@ -73,6 +109,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -132,6 +169,17 @@ Ref<Texture> LoadMippedGroundTexture(const EnfusionMount& mount, const std::stri
     return texture;
 }
 
+//! A/B for the MiddleColor tint: `POSEIDON_ENFUSION_MIDDLE_COLOR=0` leaves every middle
+//! map untinted (the pre-RFG-073 picture). Load-time, like the layer-tint switch in
+//! EnfusionTextureName.hpp, because the value rides the material table that is built
+//! once per world; the dev panel's "Enfusion ground material" switch covers the whole
+//! branch, tint included, live.
+bool MiddleColorEnabled()
+{
+    const char* env = std::getenv("POSEIDON_ENFUSION_MIDDLE_COLOR");
+    return env == nullptr || env[0] != '0';
+}
+
 } // namespace
 
 // Reads every palette entry's `.emat` once per world and fills `_enfusionGround`.
@@ -183,6 +231,8 @@ bool TerrainWgpu::BuildEnfusionGroundMaterials(const Landscape& land)
     // entries", so a number that does not move after a change says the change did
     // not reach the data, which no per-surface spot check can say.
     int emats = 0, bcr = 0, nho = 0, middle = 0, scaled = 0, satmap = 0, bound = 0, middleBound = 0;
+    int middleColour = 0, middleColourApplied = 0;
+    const bool tintOn = MiddleColorEnabled();
     for (int i = 0; i < layerCount; ++i)
     {
         const std::string ematPath = land.GetEnfusionSurface(i);
@@ -246,6 +296,12 @@ bool TerrainWgpu::BuildEnfusionGroundMaterials(const Landscape& land)
         // weight; clamped to 1 here because the only thing this shader can do with it
         // is crossfade. Recorded as an interpretation, not a measurement.
         out.middleBlend = std::clamp(middleBlend, 0.0f, 1.0f);
+        // Counted whether or not the middle map binds, so the number is a property of
+        // the palette and not of what happened to load.
+        float middleColor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+        const bool hasMiddleColor = material.Vec4Of("MiddleColor", middleColor);
+        if (hasMiddleColor)
+            ++middleColour;
         if (out.middleBlend > 0.0f)
         {
             if (Texture* mid = load(middlePath, kMiddleMaxEdge); mid != nullptr)
@@ -253,6 +309,15 @@ bool TerrainWgpu::BuildEnfusionGroundMaterials(const Landscape& land)
                 out.middle = mid;
                 out.middleScale = 1.0f / (middleScale > 0.0f ? middleScale : 50.0f);
                 ++middleBound;
+                if (hasMiddleColor && tintOn)
+                {
+                    // Multiplier, so clamped to the unit range rather than normalised:
+                    // a value above 1 would be a brightening no bake in the corpus
+                    // shows, and the corpus maximum is 0.644 (SulfurStream).
+                    for (int c = 0; c < 3; ++c)
+                        out.middleColor[c] = std::clamp(middleColor[c], 0.0f, 1.0f);
+                    ++middleColourApplied;
+                }
             }
             else
             {
@@ -273,8 +338,9 @@ bool TerrainWgpu::BuildEnfusionGroundMaterials(const Landscape& land)
     LOG_INFO(Graphics,
              "Wgpu Enfusion ground: {} of {} palette entries read an .emat; {} BCR, {} NHO (not bound: packing "
              "unmeasured), {} middle BCR, {} ScaleUV, {} SatMapBlend>0 (not bound: needs the supertexture pages); "
-             "bound {} detail + {} middle over {} distinct images",
-             emats, layerCount, bcr, nho, middle, scaled, satmap, bound, middleBound, _enfusionGroundTextures.size());
+             "bound {} detail + {} middle over {} distinct images; {} MiddleColor declared, {} MiddleColor applied{}",
+             emats, layerCount, bcr, nho, middle, scaled, satmap, bound, middleBound, _enfusionGroundTextures.size(),
+             middleColour, middleColourApplied, tintOn ? "" : " (POSEIDON_ENFUSION_MIDDLE_COLOR=0)");
     return bound > 0;
 }
 

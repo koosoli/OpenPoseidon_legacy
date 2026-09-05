@@ -1085,6 +1085,10 @@ pub struct WgrTerrainMaterial {
     pub detail_max: f32,
     pub detail_fade: f32,
     pub _pad2: u32,
+    // MiddleColor, a LINEAR multiplier on the middle map's texel; 1,1,1 when absent.
+    // Own 16-byte row because the WGSL side is a vec3.
+    pub middle_color: [f32; 3],
+    pub _pad3: u32,
 }
 
 // One terrain node (shared grid mesh at world-xz `origin`, `size` wide, level
@@ -1529,7 +1533,7 @@ const _: () = assert!(std::mem::size_of::<WgrTerrainSunShadow>() == 16);
 // 20 header words, then satellite/mask UVs and six per-slot UVs of two vec4
 // each. The WGSL `TerrainMaterial` in terrain.wgsl mirrors this byte for byte.
 const _: () = assert!(std::mem::size_of::<WgrTerrainUv>() == 32);
-const _: () = assert!(std::mem::size_of::<WgrTerrainMaterial>() == 368);
+const _: () = assert!(std::mem::size_of::<WgrTerrainMaterial>() == 384);
 const _: () = assert!(std::mem::size_of::<WgrSkyVisibility>() == 32);
 const _: () = assert!(std::mem::size_of::<WgrFoliage>() == 80);
 const _: () = assert!(std::mem::size_of::<WgrGtao>() == 52);
