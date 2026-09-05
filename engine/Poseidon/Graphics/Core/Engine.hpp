@@ -1170,6 +1170,17 @@ class Engine : public IGraphicsEngine
     virtual InteriorSkySettings GetInteriorSkySettings() const { return {}; }
     virtual void SetInteriorSkySettings(const InteriorSkySettings& /*s*/) {}
 
+    /// Measure the interior sky-visibility map WHERE THE CAMERA IS NOW, into the log.
+    ///
+    /// The renderer already reports the map's occluder coverage -- but exactly once, ~2 s after
+    /// the map goes active, which on a streamed world is the loading screen: the object stream
+    /// has admitted a fraction of the neighbourhood and the camera is not where the player will
+    /// stand. That single line then reads as evidence about a building the measurement never
+    /// saw. This asks again, at the pose that matters, and prints the C++ half of the answer
+    /// (how many retained instances are inside the box, and which) beside it -- the pair that
+    /// separates "nothing retained is in the box" from "the cull or the draw is broken".
+    virtual void ProbeInteriorSkyMap() {}
+
     // REN-GI-001: the irradiance probe volume (hybrid GI, stage 1). Same pattern: stored on
     // the engine, folded into the render-params block by PushRenderParams. WGR_GI=0 turns it
     // off; the dev panel's GI tab and the graphics options own the rest.

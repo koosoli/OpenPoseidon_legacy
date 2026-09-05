@@ -84,6 +84,11 @@ pub struct SkyVisSettings {
     /// themselves are produced at load time behind WGR_SKY_BAKE_VOLUMES; this is the runtime
     /// switch that decides whether shading reads them, so the two approaches can be A/B'd live.
     pub baked: bool,
+    /// Map-coverage probe REQUEST COUNTER (see WgrSkyVis::probe). Not a look setting: the
+    /// renderer compares it against the last value it acted on and logs the diagnostic when it
+    /// changes, so the owner can measure the map where they are standing rather than only at
+    /// the ~2 s startup one-shot, which measures the loading screen.
+    pub probe: u32,
     /// 1 = draw the reach factor as greyscale instead of lighting with it. Shipped WITH the
     /// effect, not after it: judging this through sun + SH ambient + fog + tonemap is much
     /// harder than looking at the buffer.
@@ -112,6 +117,7 @@ impl Default for SkyVisSettings {
             // Engine::InteriorSkySettings comment for the full finding.
             directional: 0.0,
             baked: true,
+            probe: 0,
             debug: false,
         }
     }
@@ -131,6 +137,7 @@ impl SkyVisSettings {
         self.bias = p.bias.clamp(0.0, 16.0);
         self.directional = p.directional.clamp(0.0, 1.0);
         self.baked = p.baked != 0;
+        self.probe = p.probe;
         self.debug = p.debug != 0;
     }
 

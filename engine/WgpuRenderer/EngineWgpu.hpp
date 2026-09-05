@@ -471,6 +471,7 @@ class EngineWgpu : public EngineDummy
         _interiorSky = s;
         PushRenderParams();
     }
+    void ProbeInteriorSkyMap() override;
     // REN-GI-001
     GiSettings GetGiSettings() const override { return _gi; }
     void SetGiSettings(const GiSettings& s) override
@@ -943,6 +944,9 @@ class EngineWgpu : public EngineDummy
     float MaterialSpecularScale(const ShapeSection& section, uint64_t specularMap);
     // Interior sky visibility (docs/interior-sky-visibility-plan.md), pushed via PushRenderParams.
     InteriorSkySettings _interiorSky;
+    // Request counter for the map-coverage diagnostic (WgrSkyVis::probe). Bumped by
+    // ProbeInteriorSkyMap, pushed with the render params, never reset.
+    uint32_t _interiorSkyProbe = 0;
     GiSettings _gi; // REN-GI-001
     GrassSettings _grass;
     // Whether the photo-tuft path is live. It decides how far grass casts shadows: the mid ring

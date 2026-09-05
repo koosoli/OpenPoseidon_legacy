@@ -8027,23 +8027,36 @@ impl Gfx3d {
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-    ) -> (bool, bool, u32, u32) {
+    ) -> (bool, bool, u32, [u32; cull::CULL_VARIANT_COUNT as usize]) {
         // Read the ARGS, not the counters: the counter buffers carry no COPY_SRC, and the args
         // are the actual draw payload anyway. instance_count 0 is the unfilled tail.
-        let words = (cull::CULL_VARIANT_COUNT as u64
-            * self.cull.variant_capacity() as u64
-            * (INDIRECT_ARG_SIZE / 4))
-            .min(1 << 20);
-        let survivors = self
-            .cull
-            .sky_out_args(0)
-            .map(|a| {
-                read_u32_buffer(device, queue, a, words)
-                    .chunks_exact((INDIRECT_ARG_SIZE / 4) as usize)
+        //
+        // EVERY variant, and no word cap. Both were wrong together and in the same direction:
+        // args are laid out variant-major (variant * variant_capacity + slot), the cap was
+        // 1 << 20 words and one variant alone is 262144 * 5 = 1310720 of them -- so the read
+        // saw 80% of variant 0 and NOTHING of variant 1, and reported "0 sub-draws" for a cull
+        // that had emitted plenty of them. A diagnostic that reads part of the buffer and
+        // reports a whole-buffer conclusion is worse than none: it was quoted as evidence that
+        // the sky cull emits nothing. 2 variants x 262144 slots x 20 B is 10.5 MB read once
+        // per request, which is what a one-shot diagnostic can afford.
+        let cap = self.cull.variant_capacity() as u64;
+        let arg_words = (INDIRECT_ARG_SIZE / 4) as usize;
+        let words = cull::CULL_VARIANT_COUNT as u64 * cap * arg_words as u64;
+        let mut survivors = [0u32; cull::CULL_VARIANT_COUNT as usize];
+        if let Some(a) = self.cull.sky_out_args(0) {
+            let raw = read_u32_buffer(device, queue, a, words);
+            for (v, slot) in survivors.iter_mut().enumerate() {
+                let lo = v * cap as usize * arg_words;
+                let hi = (lo + cap as usize * arg_words).min(raw.len());
+                if lo >= hi {
+                    continue;
+                }
+                *slot = raw[lo..hi]
+                    .chunks_exact(arg_words)
                     .filter(|d| d[1] != 0)
-                    .count() as u32
-            })
-            .unwrap_or(0);
+                    .count() as u32;
+            }
+        }
         (
             self.cull.sky_out_args(0).is_some(),
             !self.gpu_sky_group1.is_empty(),

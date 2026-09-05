@@ -853,6 +853,13 @@ pub struct WgrSkyVis {
     // Producing the volumes still needs WGR_SKY_BAKE_VOLUMES at startup (the bake is load-time);
     // this only decides whether the shading reads them.
     pub baked: u32,
+    // A REQUEST COUNTER, not a flag: every increment asks the renderer to log the map-coverage
+    // diagnostic on the next frame it renders. The startup one-shot in lib.rs fires ~2 s in and
+    // can never fire again, so the only measurement anyone ever had was of the loading screen --
+    // taken before the object stream has admitted the neighbourhood the player is standing in.
+    // A counter rather than a bool because render params are pushed every frame: a bool would
+    // have to be cleared by a second push and could be missed between them.
+    pub probe: u32,
 }
 
 impl Default for WgrSkyVis {
@@ -872,6 +879,7 @@ impl Default for WgrSkyVis {
             bias: d.bias,
             directional: d.directional,
             baked: d.baked as u32,
+            probe: d.probe,
         }
     }
 }
@@ -1505,9 +1513,9 @@ const _: () = assert!(std::mem::size_of::<WgrTerrainMaterial>() == 336);
 const _: () = assert!(std::mem::size_of::<WgrSkyVisibility>() == 32);
 const _: () = assert!(std::mem::size_of::<WgrFoliage>() == 80);
 const _: () = assert!(std::mem::size_of::<WgrGtao>() == 52);
-const _: () = assert!(std::mem::size_of::<WgrSkyVis>() == 44);
+const _: () = assert!(std::mem::size_of::<WgrSkyVis>() == 48); // + probe counter
 const _: () = assert!(std::mem::size_of::<WgrDepthOfField>() == 52);
-const _: () = assert!(std::mem::size_of::<WgrRenderParams>() == 616); // REN-GI-010: WgrGi 64 -> 68
+const _: () = assert!(std::mem::size_of::<WgrRenderParams>() == 620); // REN-GI-010 WgrGi 64->68, sky-vis probe 44->48
 const _: () = assert!(std::mem::size_of::<WgrFrameParams>() == 16);
 const _: () = assert!(std::mem::size_of::<WgrCameraShadow>() == 352);
 const _: () = assert!(std::mem::size_of::<WgrCamera>() == 576);

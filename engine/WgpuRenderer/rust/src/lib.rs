@@ -884,6 +884,12 @@ pub struct Renderer {
     // has no scene yet, and burning a one-shot flag on it means the diagnostic never fires.
     interior_sky_dbg_frames: u32,
     interior_sky_dbg_logged: bool,
+    // The last WgrSkyVis::probe counter this renderer acted on. The one-shot above fires ~2 s
+    // after the map goes active, which on a streamed world is the LOADING SCREEN: the retained
+    // set is still filling and the camera is not where the player will stand. That made the only
+    // measurement anyone had a measurement of the wrong moment, and nothing could ever ask again.
+    // The dev panel's "Measure map coverage now" bumps the counter; a change re-arms the report.
+    interior_sky_probe_seen: u32,
     // Depth+normal prepass (docs/depth-prepass-plan.md). Ships unconditionally on wgpu
     // (decision 8); WGR_PREPASS=0 is a TEMPORARY dev A/B for bring-up validation only,
     // not a shipped runtime flag. When on, the first (world) depth segment gets a
@@ -1912,6 +1918,7 @@ impl Renderer {
             gtao_dbg_logged: false,
             interior_sky_dbg_frames: 0,
             interior_sky_dbg_logged: false,
+            interior_sky_probe_seen: 0,
             prepass_enabled,
             suppress_world_objects: false,
             cull_debug_draw: false,
@@ -4211,9 +4218,27 @@ impl Renderer {
         // a fully rendered map from a settled scene. 0.0% here means the pass drew nothing and
         // the whole feature is inert — the failure mode that otherwise looks identical to
         // success, since an empty map reads as "open sky everywhere".
+        // An explicit request re-arms the one-shot, and does so WITHOUT the 120-frame wait: the
+        // caller is standing where they want the answer and the scene around them is settled.
+        {
+            let want = self.gfx3d.interior_sky_settings().probe;
+            if want != self.interior_sky_probe_seen {
+                self.interior_sky_probe_seen = want;
+                self.interior_sky_dbg_logged = false;
+                self.interior_sky_dbg_frames = 121;
+            }
+        }
         if self.gfx3d.interior_sky_active() && !self.interior_sky_dbg_logged {
             self.interior_sky_dbg_frames += 1;
             if self.interior_sky_dbg_frames > 120 {
+                // Which measurement this is. A startup line describes the loading screen and a
+                // requested one describes where the player is standing; they are not comparable
+                // and were previously indistinguishable in a log.
+                let tag = if self.interior_sky_probe_seen > 0 {
+                    "requested"
+                } else {
+                    "startup"
+                };
                 let st = self
                     .gfx3d
                     .interior_sky_debug_state(&self.device, &self.queue);
@@ -4234,15 +4259,18 @@ impl Renderer {
                             log_level::WARN
                         },
                         &format!(
-                            "[wgr] interior sky maps: {res}x{res} x{} — occluder coverage per direction                              (zenith first): {per_dir} (args={} bind={} instances={} sub_draws={}){}",
+                            "[wgr] interior sky maps ({tag}): {res}x{res} x{} — occluder coverage per direction                              (zenith first): {per_dir} (args={} bind={} instances={} sub_draws per variant (solid+cutout)={}){}",
                             cov.len(),
                             st.0,
                             st.1,
                             st.2,
-                            st.3,
+                            st.3.iter()
+                                .map(|v| v.to_string())
+                                .collect::<Vec<_>>()
+                                .join("+"),
                             if total > 0.0 {
                                 ""
-                            } else if st.3 == 0 {
+                            } else if st.3.iter().all(|v| *v == 0) {
                                 " — ALL EMPTY and the sky cull emitted no sub-draws: either nothing                                  retained is within the box (legitimate on open terrain — widen it                                  with WGR_INTERIOR_SKY_EXTENT to check) or the cull views are                                  broken. Sky reach is 1 everywhere either way."
                             } else {
                                 " — ALL EMPTY despite sub-draws: the cull kept geometry but nothing                                  rasterised. That is a VP or pass fault, not an empty neighbourhood."

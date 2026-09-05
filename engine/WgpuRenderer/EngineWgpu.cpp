@@ -58,6 +58,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cfloat>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -8584,6 +8585,78 @@ void EngineWgpu::GetZCoefs(float& zAdd, float& zMult)
     zMult = 1.0f - (1.0f - c.zMult) * mult;
 }
 
+// The C++ half of the interior-sky measurement (Engine::ProbeInteriorSkyMap).
+//
+// The renderer's own line says how much of the depth map holds an occluder. On its own that
+// number cannot tell "the box is empty" from "the cull kept nothing" from "the draw rasterised
+// nothing", because all three print 0.00%. THIS half answers the first of the three from the
+// producer side, where the answer is a plain loop over the retained table: how many instances
+// the engine put on the GPU path inside the same box, and what they are. A house that reads as
+// zero here was never handed to the renderer at all, and no amount of shader work will find it.
+void EngineWgpu::ProbeInteriorSkyMap()
+{
+    ++_interiorSkyProbe;
+    PushRenderParams(); // carries the new counter; the renderer logs on its next frame
+
+    const Camera* camera = GScene ? GScene->GetCamera() : nullptr;
+    if (!camera)
+    {
+        LOG_INFO(Graphics, "Interior sky probe: no scene camera; renderer half will still log");
+        return;
+    }
+    const Vector3 camPos = camera->Position();
+    // The SAME box the map covers, so the two halves of the answer describe one volume. `extent`
+    // is a HALF-extent and the box is axis-aligned, which is why this is a box test and not a
+    // sphere: a sphere of radius `extent` would count corners the map never sees.
+    const float extent = _interiorSky.extent;
+    int inBox = 0;
+    int within12 = 0;
+    // The three nearest, by square distance, so the line names what is actually overhead rather
+    // than whatever the hash order happened to reach first.
+    const char* nearName[3] = {nullptr, nullptr, nullptr};
+    float nearD2[3] = {FLT_MAX, FLT_MAX, FLT_MAX};
+    for (const auto& [obj, inst] : _gpuInstances)
+    {
+        const Vector3 d = inst.pos - camPos;
+        if (std::fabs(d.X()) > extent || std::fabs(d.Z()) > extent)
+            continue;
+        ++inBox;
+        const float d2 = d.SquareSize();
+        if (d2 < 144.0f)
+            ++within12;
+        const char* name = inst.shape ? inst.shape->Name() : "?";
+        for (int i = 0; i < 3; ++i)
+        {
+            if (d2 < nearD2[i])
+            {
+                for (int j = 2; j > i; --j)
+                {
+                    nearD2[j] = nearD2[j - 1];
+                    nearName[j] = nearName[j - 1];
+                }
+                nearD2[i] = d2;
+                nearName[i] = name;
+                break;
+            }
+        }
+    }
+    LOG_INFO(Graphics,
+             "Interior sky probe at [{:.0f} {:.0f} {:.1f}]: retained instances total={} in the "
+             "{:.0f} m box={} within 12 m={}; nearest: {} ({:.1f} m), {} ({:.1f} m), {} ({:.1f} m)",
+             camPos.X(), camPos.Z(), camPos.Y(), _gpuInstances.size(), extent, inBox, within12,
+             nearName[0] ? nearName[0] : "-", nearD2[0] < FLT_MAX ? std::sqrt(nearD2[0]) : -1.0f,
+             nearName[1] ? nearName[1] : "-", nearD2[1] < FLT_MAX ? std::sqrt(nearD2[1]) : -1.0f,
+             nearName[2] ? nearName[2] : "-", nearD2[2] < FLT_MAX ? std::sqrt(nearD2[2]) : -1.0f);
+    if (inBox == 0)
+    {
+        LOG_WARN(Graphics,
+                 "Interior sky probe: NOTHING retained inside the box. The map is correct and "
+                 "empty -- the building around the camera never reached the GPU-driven path, so "
+                 "neither the per-frame maps nor the Stage 2 bake can see it. Chase admission "
+                 "(SceneObjectCreated / RegisterGpuModel), not the shader.");
+    }
+}
+
 void EngineWgpu::SetTonemapSettings(const TonemapSettings& s)
 {
     _tonemap = s;
@@ -10406,6 +10479,7 @@ void EngineWgpu::PushRenderParams()
         _interiorSky.bias,
         _interiorSky.directional,
         _interiorSky.baked ? 1u : 0u,
+        _interiorSkyProbe,
     };
 
     p.gi = {

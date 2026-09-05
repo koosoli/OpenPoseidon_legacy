@@ -701,6 +701,9 @@ struct WgrSkyVis
     float bias;          /* depth bias, metres (stops open ground occluding itself) */
     float directional;   /* 0 = uniform dimming, 1 = ambient arrives from the open direction */
     uint32_t baked;      /* 1 = apply the per-model BAKED volumes (Stage 2) instead of the maps */
+    uint32_t probe;      /* REQUEST COUNTER: each increment makes the renderer log the map's
+                          * occluder coverage on its next frame. The startup one-shot fires ~2 s
+                          * in and never again, which only ever measured the loading screen. */
 };
 
 /* REN-GI-001 -- the irradiance probe volume (hybrid GI, stage 1). Mirrors the Rust WgrGi
@@ -1841,9 +1844,9 @@ static_assert(sizeof(WgrTerrainSunShadow) == 16, "WgrTerrainSunShadow layout mus
 static_assert(sizeof(WgrSkyVisibility) == 32, "WgrSkyVisibility layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrFoliage) == 80, "WgrFoliage layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrGtao) == 52, "WgrGtao layout must match the Rust #[repr(C)] struct");
-static_assert(sizeof(WgrSkyVis) == 44, "WgrSkyVis layout must match the Rust #[repr(C)] struct");
+static_assert(sizeof(WgrSkyVis) == 48, "WgrSkyVis layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrDepthOfField) == 52, "WgrDepthOfField layout must match the Rust #[repr(C)] struct");
-static_assert(sizeof(WgrRenderParams) == 616, "WgrRenderParams layout must match the Rust #[repr(C)] struct"); // REN-GI-010: WgrGi 64 -> 68
+static_assert(sizeof(WgrRenderParams) == 620, "WgrRenderParams layout must match the Rust #[repr(C)] struct"); // REN-GI-010 WgrGi 64->68, sky-vis probe 44->48
 static_assert(sizeof(WgrFrameParams) == 16, "WgrFrameParams layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrCameraShadow) == 352, "WgrCameraShadow layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrCamera) == 576, "WgrCamera layout must match the Rust #[repr(C)] struct");

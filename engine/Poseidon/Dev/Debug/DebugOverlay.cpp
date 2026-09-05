@@ -4472,6 +4472,23 @@ void DrawInteriorSkyTab()
     }
 
     Dev::PanelSeparator();
+    Dev::PanelHelp("Is the map SEEING anything? An empty map and a working one look identical");
+    Dev::PanelHelp("in the picture: an untouched texel means 'open sky', so a map that drew");
+    Dev::PanelHelp("nothing simply leaves every surface unshaded and reads as success.");
+    if (Dev::Button("Measure map coverage now (to the log)"))
+    {
+        GEngine->ProbeInteriorSkyMap();
+    }
+    Dev::PanelHelp("  writes two lines: 'Interior sky probe at [x z y]' (how many retained");
+    Dev::PanelHelp("  instances the ENGINE has inside the box, and the nearest three), and");
+    Dev::PanelHelp("  '[wgr] interior sky maps (requested)' (what fraction of each of the five");
+    Dev::PanelHelp("  depth layers holds an occluder). Together they say which half is at");
+    Dev::PanelHelp("  fault: no instances = the building never reached the GPU-driven path;");
+    Dev::PanelHelp("  instances but 0.00%% coverage = the cull or the draw. The startup line");
+    Dev::PanelHelp("  fires ~2 s in and measures the LOADING SCREEN -- press this where you");
+    Dev::PanelHelp("  are standing instead.");
+
+    Dev::PanelSeparator();
     if (Dev::Button("Reset interior sky to defaults"))
     {
         const bool keepEnabled = is.enabled;
