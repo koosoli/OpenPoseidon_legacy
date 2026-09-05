@@ -1043,6 +1043,18 @@ void SeedRendererEnvFromGraphicsConfig()
         setenv("POSEIDON_ENFUSION_COMPRESSED", "0", 1);
 #endif
     }
+    // RFG-070: same shape, same reason. The layer tint is decided while the world's
+    // materials resolve, which happens before the dev panel exists on the first load, so
+    // the persisted OFF has to be in the environment by then. Only OFF is written: an
+    // absent variable means the default, which is on.
+    if (cfg.enfusionLayerTint == 0)
+    {
+#ifdef _WIN32
+        _putenv_s("POSEIDON_ENFUSION_LAYER_TINT", "0");
+#else
+        setenv("POSEIDON_ENFUSION_LAYER_TINT", "0", 1);
+#endif
+    }
     if (cfg.dlssSharpen == 0)
     {
 #ifdef _WIN32

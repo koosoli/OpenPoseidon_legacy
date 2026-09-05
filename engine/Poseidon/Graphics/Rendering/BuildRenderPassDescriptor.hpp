@@ -2,6 +2,7 @@
 
 #include <Poseidon/Graphics/Rendering/RenderFlags.hpp>
 #include <Poseidon/Graphics/Rendering/RenderPassDescriptor.hpp>
+#include <Poseidon/Graphics/Textures/EnfusionTextureName.hpp> // RFG-070 `enft|` tint wrapper
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -310,9 +311,11 @@ inline RenderPassDescriptor BuildRenderPassDescriptor(const LegacySpec& spec, co
 //! section would carry a surface material and answer through `EmatUsesLeafCards`.
 //! Measured: the sections still report `mat '(none)'`, because the engine's material
 //! loader does not read `.emat`. The name is the only signal that survives the trip.
+//! RFG-070: read through an `enft|` layer tint. The tint changes the tile's colour and
+//! nothing else; the material's own statement that this surface is coverage is unaffected.
 inline bool IsEnfusionCoverageTexture(const char* texturePath)
 {
-    return texturePath != nullptr && std::strncmp(texturePath, "enfa|", 5) == 0;
+    return texturePath != nullptr && std::strncmp(Enfusion::SkipLayerTint(texturePath), "enfa|", 5) == 0;
 }
 
 inline bool IsLegacyPlantCutoutTexture(const char* texturePath)

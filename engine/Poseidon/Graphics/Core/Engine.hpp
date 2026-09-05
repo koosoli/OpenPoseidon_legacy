@@ -1045,6 +1045,18 @@ class Engine : public IGraphicsEngine
         // which is baked when a model registers. Reload the world (or relaunch, with the
         // value persisted to graphics.cfg) for a clean A/B; the panel says so.
         bool compressedEnfusionTextures = true;
+        // RFG-070: rescale Reforger's SHARED one-metre layer tiles to the per-layer
+        // `Color_N` the material authored, instead of binding the raw tile. 436 distinct
+        // tiles serve 2,889 of Everon's structure materials, which is why unrelated walls
+        // came out the same pale grey; 90.3% of those materials say what colour they
+        // should be and the native path threw it away. On by default.
+        //
+        // Like the switch above and unlike the rest of this struct, this is NOT a
+        // per-fragment switch. It decides the texture NAME the world loader hands the
+        // renderer, so it applies to what is loaded after the flip: reload the world (or
+        // relaunch, with the value persisted to graphics.cfg) for a clean A/B. Inert on
+        // every non-Enfusion world -- nothing else builds these names.
+        bool enfusionLayerTint = true;
     };
     struct MaterialDebugInfo
     {

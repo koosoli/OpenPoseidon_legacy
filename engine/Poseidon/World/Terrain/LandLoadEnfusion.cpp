@@ -42,6 +42,7 @@
 #include <Poseidon/Core/ProgressSystem.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/Graphics/Textures/EddsReader.hpp>
+#include <Poseidon/Graphics/Textures/EnfusionTextureName.hpp> // RFG-070 `enft|` layer tint
 #include <Poseidon/Graphics/Textures/Image.hpp>
 #include <Poseidon/Graphics/Textures/PAADecoder.hpp>
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
@@ -171,16 +172,24 @@ std::string ColourTextureOf(const Poseidon::Asset::Material::EmatMaterial& mater
 //! -- 2,548 of the 2,889 structure materials that use one, served by just 436 distinct
 //! tiles -- and what makes a given wall its own colour is the per-layer `Color_N`
 //! beside it. 2,608 of those 2,889 (90.3%) author one, median 0.385 0.356 0.322, and
-//! this path binds the raw tile and discards it. The converting exporter does not: it
-//! rescales the tile so its mean IS that colour (XobCommand.cpp, MAT-054). Doing the
-//! same here needs a tinted image, and the sink can only hand the renderer a NAME, so
-//! it needs either a new texture-name form in DdsImport.cpp or a per-layer tint in the
-//! renderer. Counted here so the size of the gap is on the record either way.
+//! this path used to bind the raw tile and discard it: unrelated walls came out the
+//! same pale grey because they were literally the same square metre of texture.
+//!
+//! RFG-070 closed that. The tint now travels to the texture source as an `enft|r,g,b|`
+//! wrapper around the name and the tile is rescaled to have it as its mean, which is
+//! MAT-054's rule from the converting exporter (XobCommand.cpp) rather than a second
+//! one. So `tintApplied` is what the repair does and `tintDiscarded` is what is LEFT --
+//! and it must be read as "still dropped", not "dropped by design". It stays non-zero
+//! only for materials that declare a `Color_N` this cannot resolve to a usable mix, and
+//! for every material when the dev panel's switch is off, which is the A/B.
 struct ColourCensus
 {
     size_t ownMap = 0;
     size_t layerTile = 0;
-    size_t tintDiscarded = 0; //!< subset of layerTile: a `Color_N` was authored and dropped
+    size_t tintAuthored = 0;  //!< subset of layerTile: the material authored a `Color_N` at all
+    size_t tintApplied = 0;   //!< subset of tintAuthored: RFG-070 rescaled the tile to it
+    size_t tintDiscarded = 0; //!< subset of tintAuthored: it was authored and still dropped
+    size_t tintMaskWeighted = 0; //!< subset of tintApplied: a `MaskMap` decided the layer mix
     size_t flat = 0;
     size_t none = 0;
     std::string firstTintDiscarded;
@@ -269,6 +278,112 @@ bool DecodeEddsRgba(const EnfusionMount& mount, const std::string& path, int max
     return true;
 }
 
+//! RFG-070: the colour a shared layer tile is supposed to be worn in.
+//!
+//! This is MAT-054's rule (XobCommand.cpp:1030-1200), read out of the converting exporter
+//! rather than re-derived, because the two paths drawing the same building in two colours
+//! is a worse outcome than either colour being slightly wrong.
+//!
+//! What the exporter established, and what is copied verbatim:
+//!
+//!   * the TILE is the base layer -- the lowest present index -- because the mask weights
+//!     OVERLAY layers (mud, rust, weathering) over a base, and picking the heaviest-weighted
+//!     layer's tile swaps a church's ceramic roof for painted metal plates.
+//!   * the COLOUR is the `Color_N` of every present, enabled layer, weighted by the
+//!     `MaskMap`'s channel means -- R, G, B weight layers 2, 3, 4 and layer 1 takes the
+//!     remainder, measured as a partition of unity on WaterTower_02's global mask.
+//!   * first-wins is NOT good enough and this is the model that proved it: WaterTower_01's
+//!     `Color_2` is a near-black blue (0.031 0.133 0.191) and its concrete and steel are
+//!     0.381 and 0.402 grey, so taking layer 2 alone paints the whole tower near-black.
+//!
+//! One deliberate divergence, and it is a cost divergence, not a rule divergence: the mask
+//! is decoded at a SMALL mip (64 px) instead of full size. Only its per-channel mean is
+//! wanted and a mip is a box average, so the number is the same one; what changes is that
+//! a world load does not decode a few thousand 2k masks to get it.
+struct LayerTint
+{
+    bool authored = false;     //!< a `Color_N` sits beside a `BCR_N` in this material
+    bool resolved = false;     //!< subset of authored: `rgb` below is usable
+    bool maskWeighted = false; //!< the mix came from a `MaskMap` and not from equal weights
+    float rgb[3] = {0.0f, 0.0f, 0.0f};
+};
+
+LayerTint ResolveLayerTint(const EnfusionMount& mount, const Poseidon::Asset::Material::EmatMaterial& material)
+{
+    LayerTint out;
+
+    // The mask's channel means. Layer 1 is the base and takes whatever the three overlay
+    // channels leave; a mask that will not decode is not an error, it just means the
+    // layers weigh the same -- still a guess, but an unbiased one, where file order is not.
+    float weight[5] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f}; // 1-based
+    const std::string maskPath = material.TextureOf("MaskMap");
+    if (!maskPath.empty())
+    {
+        int width = 0, height = 0;
+        std::vector<uint8_t> rgba;
+        if (DecodeEddsRgba(mount, maskPath, 64, width, height, rgba) && !rgba.empty())
+        {
+            const size_t texels = rgba.size() / 4;
+            double covered = 0.0;
+            for (int c = 0; c < 3; ++c)
+            {
+                double sum = 0.0;
+                for (size_t t = 0; t < texels; ++t)
+                    sum += rgba[t * 4 + static_cast<size_t>(c)];
+                const double mean = sum / (255.0 * static_cast<double>(texels));
+                weight[c + 2] = static_cast<float>(mean);
+                covered += mean;
+            }
+            weight[1] = static_cast<float>(covered < 1.0 ? 1.0 - covered : 0.0);
+            out.maskWeighted = true;
+        }
+    }
+
+    float total = 0.0f;
+    float blended[3] = {0.0f, 0.0f, 0.0f};
+    for (int layer = 1; layer <= 4; ++layer)
+    {
+        const std::string index = std::to_string(layer);
+        if (material.TextureOf("BCR_" + index).empty())
+            continue;
+        float enabled = 1.0f;
+        material.FloatOf("Enabled_" + index, enabled);
+        if (enabled == 0.0f)
+            continue;
+        float colour[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+        if (!material.Vec4Of("Color_" + index, colour))
+            continue;
+        const float w = out.maskWeighted ? weight[layer] : 1.0f;
+        for (int c = 0; c < 3; ++c)
+            blended[c] += colour[c] * w;
+        total += w;
+    }
+    // `authored` and `resolved` are two different questions and the census needs both.
+    // A material can declare a `Color_N` that this cannot use -- every weight landing on
+    // a layer that has no colour, or a mask saying the base layer is the whole surface
+    // while the base declares no `Color_1`. Those are the ones that must still be counted
+    // as a dropped tint, because they are exactly the case where the wall keeps the
+    // shared tile's colour and the log would otherwise claim the gap was closed.
+    for (int layer = 1; layer <= 4 && !out.authored; ++layer)
+    {
+        float colour[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+        if (!material.TextureOf("BCR_" + std::to_string(layer)).empty() &&
+            material.Vec4Of("Color_" + std::to_string(layer), colour))
+            out.authored = true;
+    }
+    if (total > 1e-4f)
+    {
+        for (int c = 0; c < 3; ++c)
+            out.rgb[c] = blended[c] / total;
+        out.resolved = true;
+    }
+    else
+    {
+        out.maskWeighted = false;
+    }
+    return out;
+}
+
 //! RFG-015: what the converter asks about a model's materials, answered from the
 //! archives.
 //!
@@ -293,12 +408,19 @@ class MountMaterialSink : public Poseidon::Asset::Formats::Enfusion::XobMaterial
     std::string TexturePath(const std::string& materialSource) const override
     {
         const Resolved& r = Resolve(materialSource);
-        if (r.colour.empty() || r.opacity.empty())
+        if (r.colour.empty())
             return r.colour;
         // RFG-023: name the coverage WITH the colour so the texture layer can make
         // them one image. A face that names only the colour can never be a cutout,
         // and Enfusion keeps the coverage in its own file.
-        return "enfa|" + r.opacity + "|" + r.colour;
+        std::string name = r.opacity.empty() ? r.colour : "enfa|" + r.opacity + "|" + r.colour;
+        // RFG-070: and wrap the layer colour around whichever of the two that was. The
+        // tint is OUTERMOST because the texture source strips it first and then reads the
+        // rest exactly as it did before -- which is the only reason a tinted cutout is
+        // still a cutout everywhere downstream.
+        if (r.tinted && Poseidon::Enfusion::LayerTintEnabled())
+            name = Poseidon::Enfusion::MakeLayerTintName(r.tint, name);
+        return name;
     }
 
     //! RFG-019: the opacity map that belongs to a colour texture, or empty.
@@ -321,6 +443,12 @@ class MountMaterialSink : public Poseidon::Asset::Formats::Enfusion::XobMaterial
         std::string opacity;
         bool decal = false;
         bool waterErase = false;
+        //! RFG-070: the layer colour this material wears its shared tile in, when it has
+        //! one. Resolved once per `.emat` here rather than at every TexturePath call --
+        //! it costs a `MaskMap` decode, and the cache below is what keeps that at one per
+        //! material instead of one per section.
+        bool tinted = false;
+        float tint[3] = {0.0f, 0.0f, 0.0f};
     };
 
     const Resolved& Resolve(const std::string& materialSource) const
@@ -379,23 +507,29 @@ class MountMaterialSink : public Poseidon::Asset::Formats::Enfusion::XobMaterial
                 case ColourKind::LayerTile:
                 {
                     ++GColourCensus.layerTile;
-                    // A `Color_N` beside the tile that this path cannot apply. Read from
-                    // the SAME layer index the tile came from, so the count says "this
-                    // material's own colour was dropped" and not merely "some Color_N
-                    // exists in the file".
-                    for (int layer = 1; layer <= 4; ++layer)
+                    // RFG-070: the tile is SHARED -- 436 distinct one-metre tiles serve all
+                    // 2,889 structure materials that use one -- so what makes a given wall
+                    // its own colour is the `Color_N` beside it. Resolved here, applied
+                    // through the name in TexturePath, and counted three ways because
+                    // "authored" and "applied" are different claims and the difference is
+                    // the size of the remaining gap.
+                    const LayerTint tint = ResolveLayerTint(_mount, material);
+                    if (tint.authored)
+                        ++GColourCensus.tintAuthored;
+                    if (tint.resolved && Poseidon::Enfusion::LayerTintEnabled())
                     {
-                        const std::string index = std::to_string(layer);
-                        if (material.TextureOf("BCR_" + index).empty())
-                            continue;
-                        float tint[4] = {};
-                        if (material.Vec4Of("Color_" + index, tint))
-                        {
-                            ++GColourCensus.tintDiscarded;
-                            if (GColourCensus.firstTintDiscarded.empty())
-                                GColourCensus.firstTintDiscarded = materialSource;
-                        }
-                        break;
+                        out.tinted = true;
+                        for (int c = 0; c < 3; ++c)
+                            out.tint[c] = tint.rgb[c];
+                        ++GColourCensus.tintApplied;
+                        if (tint.maskWeighted)
+                            ++GColourCensus.tintMaskWeighted;
+                    }
+                    else if (tint.authored)
+                    {
+                        ++GColourCensus.tintDiscarded;
+                        if (GColourCensus.firstTintDiscarded.empty())
+                            GColourCensus.firstTintDiscarded = materialSource;
                     }
                     break;
                 }
@@ -2386,12 +2520,14 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
     {
         LOG_INFO(World,
                  "Enfusion native load: materials -- {} of {} resolved their own albedo map, {} a shared layer tile "
-                 "(of those {} discard an authored Color_N tint, first: '{}'), {} a flat colour, {} nothing (first: "
-                 "'{}')",
-                 GColourCensus.ownMap, GColourCensus.Total(), GColourCensus.layerTile, GColourCensus.tintDiscarded,
+                 "(of those {} author a Color_N tint: {} applied [{} mask-weighted], {} still discarded, first: "
+                 "'{}'), {} a flat colour, {} nothing (first: '{}'){}",
+                 GColourCensus.ownMap, GColourCensus.Total(), GColourCensus.layerTile, GColourCensus.tintAuthored,
+                 GColourCensus.tintApplied, GColourCensus.tintMaskWeighted, GColourCensus.tintDiscarded,
                  GColourCensus.firstTintDiscarded.empty() ? "none" : GColourCensus.firstTintDiscarded.c_str(),
                  GColourCensus.flat, GColourCensus.none,
-                 GColourCensus.firstNone.empty() ? "none" : GColourCensus.firstNone.c_str());
+                 GColourCensus.firstNone.empty() ? "none" : GColourCensus.firstNone.c_str(),
+                 Poseidon::Enfusion::LayerTintEnabled() ? "" : " [RFG-070 layer tint OFF]");
     }
 
     LOG_INFO(World, "Enfusion native load: done in {} ms -- land {}x{} at {:.2f} m, terrain {}x{} at {:.2f} m",

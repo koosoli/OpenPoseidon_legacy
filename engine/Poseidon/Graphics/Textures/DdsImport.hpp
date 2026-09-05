@@ -48,6 +48,16 @@ bool DdsCompressedPassthrough();
 // copy and the compressed path's shader flag can never disagree about which files it is.
 bool IsEnfusionRgNormalName(const char* name);
 
+// RFG-070 -- rescale decoded ARGB8888 (B,G,R,A in memory) levels so the TOP level's
+// per-channel mean becomes the linear colour `rgb`, sRGB-encoded.
+//
+// The `enft|r,g,b|` texture name reaches this; see the definition for the rule and for
+// which two things it does differently from the converting exporter it copies. Declared
+// here rather than left file-local so the channel ORDER can be pinned by a test: the whole
+// defect class this fixes is a per-channel one, and applying r,g,b in index order to a
+// B,G,R buffer turns beige walls blue -- which looks like a working tint until you look.
+void ApplyEnfusionLayerTint(std::vector<DDSMipLevel>& levels, const float rgb[3]);
+
 class TextureSourceDDS : public ITextureSource
 {
     RStringB _name;

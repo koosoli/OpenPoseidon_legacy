@@ -191,7 +191,11 @@ static bool FaceTextureIsEnfusionComposite(const ShapeSection& section)
 {
     Texture* face = section.properties.GetTexture();
     const char* name = face != nullptr ? face->Name() : nullptr;
-    return name != nullptr && std::strncmp(name, "enfa|", 5) == 0;
+    // RFG-070: an `enft|` tint wraps the composite, and the protection has to survive it.
+    // The material's Stage0 is the RAW `_BCR.edds` -- untinted as well as uncovered -- so
+    // letting it win here throws away the layer colour at the same moment it throws away
+    // the coverage.
+    return name != nullptr && std::strncmp(Poseidon::Enfusion::SkipLayerTint(name), "enfa|", 5) == 0;
 }
 
 // PERF-015 A/B lever, and it governs BOTH halves of the per-section classification cost:

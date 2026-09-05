@@ -80,6 +80,7 @@
 #include <Poseidon/Foundation/Common/GamePaths.hpp>
 #include <Poseidon/UI/Settings/GraphicsApply.hpp>
 #include <Poseidon/UI/Settings/GraphicsConfig.hpp>
+#include <Poseidon/Graphics/Textures/EnfusionTextureName.hpp> // RFG-070 layer-tint switch
 #include <Evaluator/express.hpp>
 #include <filesystem>
 
@@ -4740,6 +4741,25 @@ void DrawMaterialDebugTab()
                           "unenhanced original in the same frame.\n"
                           "Stock content has no such files, so this changes nothing without an\n"
                           "enhancement pack present.");
+    const bool tintWas = settings.enfusionLayerTint;
+    changed |= Dev::Checkbox("Enfusion shared-tile colour (Color_N)", &settings.enfusionLayerTint);
+    if (Dev::PanelItemHovered())
+        ImGui::SetTooltip(
+            "Reforger's MatPBRMulti materials have no albedo of their own: they name a BCR_N,\n"
+            "which is a SHARED one-metre library tile out of Assets/_SharedData. 436 distinct\n"
+            "tiles serve 2,889 of Everon's structure materials, so unrelated walls came out the\n"
+            "same pale grey because they were the same square metre of texture.\n"
+            "\n"
+            "What makes a wall its own colour is the per-layer Color_N beside the tile, and 90.3%%\n"
+            "of those materials declare one. On, the tile is rescaled so its mean IS that colour\n"
+            "(mask-weighted across the layers) -- the same rule the xob exporter bakes into its\n"
+            ".paa. Off binds the raw tile, which is what this path did before.\n"
+            "\n"
+            "NOT a per-fragment switch: it decides the texture NAME the world loader hands the\n"
+            "renderer, so it applies to what is loaded AFTER the flip. Reload the world for a\n"
+            "clean A/B. Inert on every non-Enfusion world.\n"
+            "The load's own count is in the log: 'materials -- ... a shared layer tile (of those\n"
+            "N author a Color_N tint: M applied ...)'.");
     const bool compressedWas = settings.compressedEnfusionTextures;
     changed |= Dev::Checkbox("Enfusion compressed textures (BC7/BC5/BC4)", &settings.compressedEnfusionTextures);
     if (Dev::PanelItemHovered())
@@ -4781,6 +4801,23 @@ void DrawMaterialDebugTab()
         if (cfg.Save(cfgPath))
             LOG_INFO(Graphics, "Dev panel: Enfusion compressed textures {} (persisted to graphics.cfg)",
                      settings.compressedEnfusionTextures ? "ON" : "OFF");
+        else
+            LOG_ERROR(Graphics, "Dev panel: saving '{}' failed", cfgPath);
+    }
+    // RFG-070: persisted for the same reason, and pushed to the WORLD LOADER rather than
+    // through the renderer -- the switch is read where the texture name is built, in
+    // LandLoadEnfusion, which the graphics engine never sees.
+    if (tintWas != settings.enfusionLayerTint)
+    {
+        Poseidon::Enfusion::SetLayerTintEnabled(settings.enfusionLayerTint);
+        const std::string cfgPath = GamePaths::Instance().UserDir() + "graphics.cfg";
+        GraphicsConfig cfg;
+        cfg.Load(cfgPath);
+        cfg.enfusionLayerTint = settings.enfusionLayerTint ? 1 : 0;
+        if (cfg.Save(cfgPath))
+            LOG_INFO(Graphics,
+                     "Dev panel: Enfusion shared-tile colour {} (persisted to graphics.cfg; reload the world)",
+                     settings.enfusionLayerTint ? "ON" : "OFF");
         else
             LOG_ERROR(Graphics, "Dev panel: saving '{}' failed", cfgPath);
     }

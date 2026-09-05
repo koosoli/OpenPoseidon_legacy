@@ -4,11 +4,13 @@
 
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Graphics/Textures/EddsReader.hpp>
+#include <Poseidon/Graphics/Textures/EnfusionTextureName.hpp> // RFG-070 `enft|` layer tint
 #include <Poseidon/IO/FileServer.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstring>
 #include <fstream>
 
@@ -173,6 +175,57 @@ PackedColor AverageOfSmallest(const std::vector<DDSMipLevel>& levels, PixelForma
 std::atomic<bool> GDdsCompressedPassthrough{false};
 
 } // namespace
+
+//! RFG-070: rescale a SHARED library tile to the colour the material authored for it.
+//!
+//! This is MAT-054's rule (XobCommand.cpp:1665-1685), moved to the native path, and it is
+//! deliberately the same arithmetic rather than a second one:
+//!
+//!   * per channel, gain = target / mean, so a grey tile becomes olive and keeps its grain;
+//!   * a channel whose mean is ~0 is left alone rather than multiplied by infinity;
+//!   * `Color_N` is LINEAR and the tile's texels are sRGB-ENCODED, so the target is encoded
+//!     before the two are compared. Matching them raw is about a stop and a half too dark
+//!     -- the exporter measured WaterTower_01 rendering as a flat black sphere that way.
+//!
+//! Two things differ from the exporter and both are forced by where this runs:
+//!
+//!   * the mean comes from the TOP level and the gain is applied to every level. The
+//!     exporter has one image and regenerates its mips; here the mip chain is already in
+//!     the file, and a per-level mean would give each mip its own gain -- the same wall
+//!     changing colour as you walk away from it.
+//!   * alpha is not touched. Coverage arrives through `enfa|` (already merged by the time
+//!     this runs) or not at all, and the fourth channel of a `_BCR` is roughness.
+void ApplyEnfusionLayerTint(std::vector<DDSMipLevel>& levels, const float rgb[3])
+{
+    if (levels.empty())
+        return;
+    const DDSMipLevel& top = levels.front();
+    const size_t texels = top.data.size() / 4;
+    if (texels == 0)
+        return;
+    const auto linearToSrgb = [](double v)
+    { return v <= 0.0031308 ? 12.92 * v : 1.055 * std::pow(v, 1.0 / 2.4) - 0.055; };
+    // ARGB8888 in this engine means B,G,R,A in memory, so channel 0 is BLUE. Applying the
+    // material's r,g,b in index order tints a beige wall blue -- the trap the `enfc|` flat
+    // colour above already documents, and the one this has to get right per channel and
+    // not just on average.
+    const int channelOfRgb[3] = {2, 1, 0}; // r -> byte 2, g -> byte 1, b -> byte 0
+    for (int c = 0; c < 3; ++c)
+    {
+        const size_t byte = static_cast<size_t>(channelOfRgb[c]);
+        double sum = 0.0;
+        for (size_t t = 0; t < texels; ++t)
+            sum += top.data[t * 4 + byte];
+        const double mean = sum / (255.0 * static_cast<double>(texels));
+        if (!(mean > 1e-3))
+            continue;
+        const double target = linearToSrgb(std::clamp<double>(rgb[c], 0.0, 1.0));
+        const double gain = target / mean;
+        for (DDSMipLevel& level : levels)
+            for (size_t at = byte; at < level.data.size(); at += 4)
+                level.data[at] = static_cast<uint8_t>(std::clamp(level.data[at] * gain + 0.5, 0.0, 255.0));
+    }
+}
 
 void SetDdsCompressedPassthrough(bool on)
 {
@@ -503,8 +556,27 @@ bool TextureSourceDDS::Init(const char* name, PacLevelMem* mips, int maxMips)
 {
     _name = name;
 
+    // RFG-070: `enft|r,g,b|<inner>` -- strip the tint FIRST and let everything below see
+    // the name it would have seen anyway. That is what makes the two composite forms
+    // nest: a leaf card on a tinted shared tile is `enft|...|enfa|coverage|colour`, and
+    // the coverage merge and the tint are then two independent steps in one Init.
+    //
+    // `_name` keeps the WHOLE name on purpose. It is the texture bank's cache key, so two
+    // materials tinting the same tile differently must not collide -- and it is what the
+    // renderer's `enfa|` tests read, which is why they go through SkipLayerTint.
+    float layerTint[3] = {1.0f, 1.0f, 1.0f};
+    const char* inner = name;
+    const bool tinted = Enfusion::SplitLayerTintName(name, layerTint, &inner);
+    if (tinted)
+        name = inner;
+
     // RFG-039: a flat colour needs no file. Built at 4x4 rather than 1x1 because the
     // mip chain and the pitch arithmetic downstream both assume a real image.
+    //
+    // Not tinted, deliberately: an `enfc|` colour IS the material's own constant, so
+    // rescaling it to a second constant would be applying the same number twice. The
+    // sink never builds that pairing, and this returns before the tint below in case it
+    // ever does.
     float solid[3] = {1.0f, 1.0f, 1.0f};
     if (SplitEnfusionColourName(name, solid))
     {
@@ -549,7 +621,10 @@ bool TextureSourceDDS::Init(const char* name, PacLevelMem* mips, int maxMips)
     if (!SlurpFile(composite ? compositeColour.c_str() : name, buffer) || buffer.empty())
         return false;
 
-    if (!InitFromMemory(buffer.data(), buffer.size(), name, /*forceDecode=*/composite))
+    // A tint needs PIXELS, the same way the coverage merge does -- there is no way to
+    // rescale a BC7 block in place. So a tinted tile is uploaded 32-bit rather than
+    // compressed, which is the RFG-047 cost, paid only by the materials that ask for it.
+    if (!InitFromMemory(buffer.data(), buffer.size(), name, /*forceDecode=*/composite || tinted))
         return false;
 
     if (composite)
@@ -605,6 +680,24 @@ bool TextureSourceDDS::Init(const char* name, PacLevelMem* mips, int maxMips)
             LOG_WARN(Graphics, "EDDS {}: coverage '{}' did not load; the cutout will be solid", name,
                      compositeCoverage);
         }
+    }
+
+    // RFG-070: and now the colour. AFTER the coverage merge, so the two orders cannot
+    // interact -- the merge only writes alpha and the tint only reads and writes RGB, but
+    // running the tint first would compute its mean over an alpha channel that is about to
+    // change, and the next person to read this would have to prove that does not matter.
+    if (tinted)
+    {
+        ApplyEnfusionLayerTint(_levels, layerTint);
+        // The distant-LOD stand-in is derived from the pixels, so it has to be re-derived
+        // from the tinted ones. Left alone it hands the far tier the SHARED tile's colour,
+        // which is the whole defect this exists to fix, just at a distance.
+        _avgColor = AverageOfSmallest(_levels, _format);
+        static std::atomic<int> saidTint{0};
+        if (saidTint.fetch_add(1) < 4)
+            LOG_INFO(Graphics, "EDDS layer tint {:.3f},{:.3f},{:.3f} applied to '{}' ({} levels, avg now {},{},{})",
+                     layerTint[0], layerTint[1], layerTint[2], name, _levels.size(), _avgColor.R8(), _avgColor.G8(),
+                     _avgColor.B8());
     }
 
     const int count = std::min(_mipmaps, maxMips);
@@ -697,6 +790,11 @@ bool TextureSourceDDS::GetMipmapData(void* mem, const PacLevelMem& mip, int leve
 
 bool TextureSourceDDSFactory::Check(const char* name)
 {
+    // RFG-070: the tint wrapper decides nothing about whether the file exists, so it comes
+    // off before any of the questions below are asked. Without this a tinted name reaches
+    // QIFStreamB::FileExist verbatim, misses, and the section falls back to white -- the
+    // exact defect the tint was added to fix, arriving through the factory instead.
+    name = Enfusion::SkipLayerTint(name);
     float solid[3];
     if (SplitEnfusionColourName(name, solid))
         return true;

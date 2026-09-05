@@ -11,6 +11,7 @@
 #include <Poseidon/Foundation/Types/LLinks.hpp>
 #include <Poseidon/Foundation/Types/Pointers.hpp>       // Ref<> (MAT-050's untextured stand-in)
 #include <Poseidon/Graphics/Textures/DdsImport.hpp>    // SetDdsCompressedPassthrough (RFG-047)
+#include <Poseidon/Graphics/Textures/EnfusionTextureName.hpp> // SkipLayerTint (RFG-070)
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>   // Texture, complete for the Ref<> member
 #include <Poseidon/Foundation/Memory/MemFreeReq.hpp>
 #include <Poseidon/Asset/Formats/Material/MaterialChannels.hpp>

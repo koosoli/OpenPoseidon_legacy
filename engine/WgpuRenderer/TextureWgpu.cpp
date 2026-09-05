@@ -5,6 +5,7 @@
 #include <Poseidon/Graphics/Core/MipmapLayout.hpp>
 #include <Poseidon/Graphics/Textures/BlockCompression.hpp>
 #include <Poseidon/Graphics/Textures/DdsImport.hpp> // IsEnfusionRgNormalName (RFG-047)
+#include <Poseidon/Graphics/Textures/EnfusionTextureName.hpp> // SkipLayerTint (RFG-070)
 #include <Poseidon/Graphics/Textures/PAADecoder.hpp>
 #include <Poseidon/Graphics/Textures/PreparedTextures.hpp>     // worker-prepared mip chains
 #include <Poseidon/Graphics/Textures/ProceduralTexture.hpp>
@@ -1113,6 +1114,11 @@ AlphaStats::Kind TextureWgpu::GetAlphaClass()
     // being reported as the trees looking wrong, after the coverage itself was fixed.
     if (const char* name = Name())
     {
+        // RFG-070: through the tint wrapper. A shared layer tile rescaled to its material's
+        // own colour is the same image it was for this question -- a tinted cutout is still
+        // a cutout, and a tinted opaque wall must still answer Opaque, which it does because
+        // the tint writes only RGB and never alpha.
+        name = Enfusion::SkipLayerTint(name);
         if (std::strncmp(name, "enfa|", 5) == 0)
         {
             _alphaClass = static_cast<int>(AlphaStats::Cutout);

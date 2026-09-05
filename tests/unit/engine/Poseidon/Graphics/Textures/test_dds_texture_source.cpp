@@ -14,9 +14,12 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <Poseidon/Graphics/Textures/DdsImport.hpp>
+#include <Poseidon/Graphics/Textures/EnfusionTextureName.hpp>
 
+#include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <string>
 #include <vector>
 
 using Poseidon::PacARGB1555;
@@ -244,4 +247,108 @@ TEST_CASE("DDS source: mip 0 is the largest level", "[graphics][edds][dz-002]")
     uint8_t out[16] = {};
     REQUIRE(source.GetMipmapData(out, mip, 0));
     REQUIRE(out[0] == 0x22); // the 2x2 fill, not the 1x1 one
+}
+
+// ---------------------------------------------------------------------------------
+// RFG-070: the `enft|r,g,b|` layer tint.
+//
+// Everon's buildings read as one pale grey because a `MatPBRMulti` names no albedo of its
+// own -- it names a `BCR_N`, which is a SHARED one-metre library tile, and 436 of them
+// serve 2,889 of the island's structure materials. The per-layer `Color_N` beside the tile
+// is what makes a wall its own colour, and the native path threw it away.
+//
+// Two things are pinned here and they are the two that fail silently.
+
+TEST_CASE("Enfusion layer tint: r,g,b lands in R,G,B and not in B,G,R", "[graphics][edds][rfg-070]")
+{
+    // The trap: decoded levels are ARGB8888, which in this engine means B,G,R,A in memory.
+    // A tint applied in index order paints a beige wall blue -- and it still LOOKS like a
+    // working tint, because the image does change colour. Only a per-channel assertion
+    // catches it, so the target here is deliberately lopsided: strongly red, barely blue.
+    std::vector<Poseidon::DDSMipLevel> levels(1);
+    levels[0].width = 2;
+    levels[0].height = 2;
+    levels[0].data.assign(2 * 2 * 4, 0);
+    for (size_t t = 0; t < 4; ++t)
+    {
+        levels[0].data[t * 4 + 0] = 128; // B
+        levels[0].data[t * 4 + 1] = 128; // G
+        levels[0].data[t * 4 + 2] = 128; // R
+        levels[0].data[t * 4 + 3] = 200; // A -- roughness on a _BCR; must survive untouched
+    }
+    const float rgb[3] = {0.9f, 0.5f, 0.05f}; // linear
+    Poseidon::ApplyEnfusionLayerTint(levels, rgb);
+
+    const uint8_t b = levels[0].data[0];
+    const uint8_t g = levels[0].data[1];
+    const uint8_t r = levels[0].data[2];
+    REQUIRE(r > g);
+    REQUIRE(g > b);
+    // sRGB(0.9) ~ 0.955 -> ~244; sRGB(0.05) ~ 0.2416 -> ~62. Loose bounds: what is being
+    // pinned is which byte moved where, not the encoder's last digit.
+    REQUIRE(r > 230);
+    REQUIRE(b < 90);
+    // Alpha is coverage or roughness and is never the tint's business.
+    REQUIRE(levels[0].data[3] == 200);
+}
+
+TEST_CASE("Enfusion layer tint: one gain for the whole mip chain", "[graphics][edds][rfg-070]")
+{
+    // A per-level mean would give each mip its own gain, and the same wall would change
+    // colour as you walked away from it. The gain comes from level 0 and is applied to all.
+    std::vector<Poseidon::DDSMipLevel> levels(2);
+    levels[0].width = 2;
+    levels[0].height = 2;
+    levels[0].data.assign(2 * 2 * 4, 100);
+    levels[1].width = 1;
+    levels[1].height = 1;
+    levels[1].data.assign(4, 100);
+    const float rgb[3] = {0.25f, 0.25f, 0.25f};
+    Poseidon::ApplyEnfusionLayerTint(levels, rgb);
+    REQUIRE(levels[0].data[0] == levels[1].data[0]);
+    REQUIRE(levels[0].data[2] == levels[1].data[2]);
+}
+
+TEST_CASE("Enfusion layer tint: a zero channel is left alone", "[graphics][edds][rfg-070]")
+{
+    // gain = target / mean, and a tile with a dead channel would be multiplied by infinity.
+    std::vector<Poseidon::DDSMipLevel> levels(1);
+    levels[0].width = 1;
+    levels[0].height = 1;
+    levels[0].data = {0, 60, 60, 255}; // B dead
+    const float rgb[3] = {0.5f, 0.5f, 0.5f};
+    Poseidon::ApplyEnfusionLayerTint(levels, rgb);
+    REQUIRE(levels[0].data[0] == 0);
+    REQUIRE(levels[0].data[2] > 60);
+}
+
+TEST_CASE("Enfusion composite names nest: tint outside coverage", "[graphics][edds][rfg-070]")
+{
+    // The claim this pins is COMPOSABILITY. A leaf card on a tinted shared tile is both
+    // forms at once, and three separate places in the renderer test `strncmp(name,
+    // "enfa|", 5)` by hand to decide whether a section is a cutout, whether the material's
+    // Stage0 may override the face texture, and which pass it draws in. Wrapping a tint
+    // around the name must not change any of those three answers -- so every one of them
+    // reads through SkipLayerTint, and this is the test that says what that has to do.
+    const float rgb[3] = {0.385f, 0.356f, 0.322f}; // the corpus median Color_N
+    const std::string inner = "enfa|assets/x_A.edds|assets/x_BCR.edds";
+    const std::string name = Poseidon::Enfusion::MakeLayerTintName(rgb, inner);
+
+    REQUIRE(name.rfind("enft|", 0) == 0);
+    REQUIRE(std::string(Poseidon::Enfusion::SkipLayerTint(name.c_str())) == inner);
+    REQUIRE(std::strncmp(Poseidon::Enfusion::SkipLayerTint(name.c_str()), "enfa|", 5) == 0);
+
+    float back[3] = {0.0f, 0.0f, 0.0f};
+    const char* rest = nullptr;
+    REQUIRE(Poseidon::Enfusion::SplitLayerTintName(name.c_str(), back, &rest));
+    REQUIRE(std::string(rest) == inner);
+    for (int c = 0; c < 3; ++c)
+        REQUIRE(std::abs(back[c] - rgb[c]) < 1e-3f);
+
+    // An untinted name passes through untouched, which is what keeps every non-Enfusion
+    // world inert: nothing else in the engine ever builds one of these.
+    const char* plain = "data\wall.paa";
+    REQUIRE(Poseidon::Enfusion::SkipLayerTint(plain) == plain);
+    REQUIRE(!Poseidon::Enfusion::SplitLayerTintName(plain, back, &rest));
+    REQUIRE(!Poseidon::Enfusion::SplitLayerTintName("enft|0.5,0.5,0.5", back, &rest)); // no inner
 }
