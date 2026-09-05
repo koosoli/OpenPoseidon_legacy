@@ -409,6 +409,23 @@ inline bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& 
             error = "LOD " + std::to_string(lodIndex) + " maps outside the visual resolution range";
             return false;
         }
+        // RFG-054: how coarse a level is allowed to be, judged by what is left of it.
+        //
+        // Measured on Everon: `t_betula_pendula_1s` maps its 6-TRIANGLE level to
+        // resolution 100, and `t_betula_pendula_2sw` maps a 6-triangle level to 500.
+        // Resolution 100 is mid-distance, not the horizon, so a birch wood turns into a
+        // field of six-triangle stubs while it is still plainly a wood -- which reads
+        // as a bright, flat, contrastless mass rather than as trees.
+        //
+        // The threshold ratio RFG-022 preserves is the AUTHORED spacing, and it is
+        // right about the ORDER of the levels; what it cannot supply is the unit. Enfusion
+        // thresholds and this engine's resolutions have never been shown to share one.
+        // So the ratio still orders the ladder, and a floor keeps a level that has almost
+        // no geometry left from being reached while the object still fills pixels.
+        //
+        // Deliberately a floor and not a drop: the level is real, the file wants it, and
+        // at true distance it is exactly what should draw.
+        const size_t triangleFloor = 32;
         bool anySecondSet = false;
 
         for (const XobPart& part : lod.parts)
@@ -605,6 +622,21 @@ inline bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& 
         stats.points += writeLod.points.size();
         stats.triangles += writeLod.faces.size();
         stats.lodsWritten++;
+        if (writeLod.faces.size() < triangleFloor && rank > 0)
+        {
+            // Pushed out in proportion to how little is left: a 4-triangle card goes
+            // furthest, a 30-triangle one barely moves.
+            const float scarcity = static_cast<float>(triangleFloor) /
+                                   static_cast<float>(writeLod.faces.empty() ? 1 : writeLod.faces.size());
+            const float pushed = writeLod.resolution * scarcity;
+            writeLod.resolution = pushed < 899.0f ? pushed : 899.0f;
+            // The ladder must stay strictly ascending, so never fall below the level
+            // before it -- MLOD rejects an equal or descending resolution outright.
+            if (!out.lods.empty() && writeLod.resolution <= out.lods.back().resolution)
+                writeLod.resolution = out.lods.back().resolution * 1.5f;
+            if (!(writeLod.resolution < 900.0f))
+                writeLod.resolution = 899.0f;
+        }
         out.lods.push_back(std::move(writeLod));
     }
 

@@ -270,6 +270,129 @@ int Worlds(const std::string& root, const std::string& filter, int topClasses, b
                                       << item.points[2] << "]\n";
                         }
                     }
+                    // Where the houses are. A 200 m cell histogram over the building
+                    // classes, because "fly somewhere and look" costs a five-minute run
+                    // per guess and the file already knows the answer.
+                    {
+                        std::map<std::pair<int, int>, size_t> cells;
+                        for (const auto& q : world.placements)
+                        {
+                            if (q.className.find("Building") == std::string::npos &&
+                                q.className.find("StaticModel") == std::string::npos)
+                                continue;
+                            cells[{int(q.position[0] / 200.0f), int(q.position[2] / 200.0f)}]++;
+                        }
+                        std::vector<std::pair<size_t, std::pair<int, int>>> best;
+                        (void)0;
+                        for (const auto& [cell, count] : cells)
+                            best.emplace_back(count, cell);
+                        std::sort(best.begin(), best.end(), std::greater<>());
+                        for (size_t i = 0; i < best.size() && i < 6; ++i)
+                            std::cout << "    densest " << best[i].first << " buildings at ["
+                                      << best[i].second.first * 200 + 100 << " "
+                                      << best[i].second.second * 200 + 100 << "]" << std::endl;
+                        // Individual buildings in the densest cell, so a camera can be
+                        // put in front of one instead of hunting for it at five minutes
+                        // a guess.
+                        if (!best.empty())
+                        {
+                            size_t shownHere = 0;
+                            for (const auto& q : world.placements)
+                            {
+                                if (shownHere >= 6)
+                                    break;
+                                if (q.className.find("Building") == std::string::npos)
+                                    continue;
+                                if (int(q.position[0] / 200.0f) != best[0].second.first ||
+                                    int(q.position[2] / 200.0f) != best[0].second.second)
+                                    continue;
+                                std::cout << "      building at [" << int(q.position[0]) << " "
+                                          << int(q.position[1]) << " " << int(q.position[2])
+                                          << "] yaw " << int(q.angles[1]) << std::endl;
+                                ++shownHere;
+                            }
+                        }
+                    }
+                    // RFG-053: does the recorded yaw agree with the direction a run of
+                    // modular pieces actually runs in?
+                    //
+                    // Walkways, jetties, fences and retaining walls are built from
+                    // repeated modules laid end to end, so a run of the SAME prefab whose
+                    // neighbours sit one module apart is a ruler: the bearing from one to
+                    // the next is the direction the run goes, and the piece has to face
+                    // along it. Histogramming (bearing - yaw) over thousands of such
+                    // pairs says whether the convention is right, off by a constant, or
+                    // mirrored -- which a screenshot of a crooked fence cannot.
+                    {
+                        std::map<std::string, std::vector<const EbinPlacement*>> byPrefab;
+                        for (const auto& q : world.placements)
+                            if (!q.prefabGuid.empty() && q.hasPosition)
+                                byPrefab[q.prefabGuid].push_back(&q);
+
+                        std::map<int, size_t> offsets; // (bearing - yaw) in 15-degree bins
+                        size_t pairs = 0;
+                        for (const auto& [guid, list] : byPrefab)
+                        {
+                            if (list.size() < 8)
+                                continue;
+                            for (size_t a = 0; a < list.size(); ++a)
+                            {
+                                // Nearest neighbour of the same prefab, within one module.
+                                double bestSq = 1e30;
+                                const EbinPlacement* mate = nullptr;
+                                for (size_t b = 0; b < list.size(); ++b)
+                                {
+                                    if (b == a)
+                                        continue;
+                                    const double dx = list[b]->position[0] - list[a]->position[0];
+                                    const double dz = list[b]->position[2] - list[a]->position[2];
+                                    const double sq = dx * dx + dz * dz;
+                                    if (sq < bestSq)
+                                    {
+                                        bestSq = sq;
+                                        mate = list[b];
+                                    }
+                                }
+                                if (mate == nullptr || bestSq < 0.25 || bestSq > 144.0)
+                                    continue; // touching duplicates, or not a run
+                                // SAME HEADING, or it is not a run. Without this the
+                                // "nearest copy of the same prefab" is any scattered
+                                // instance -- a hedge, a bollard, a rock -- and the
+                                // histogram comes out flat at 8-9% per bin, which is
+                                // exactly what a uniform distribution looks like and
+                                // says nothing about the convention. A flat result from
+                                // a loose test is not evidence of no effect.
+                                if (std::fabs(mate->angles[1] - list[a]->angles[1]) > 1.0f)
+                                    continue;
+                                const double dx = mate->position[0] - list[a]->position[0];
+                                const double dz = mate->position[2] - list[a]->position[2];
+                                double bearing = std::atan2(dx, dz) * 57.29577951;
+                                double delta = bearing - list[a]->angles[1];
+                                while (delta < 0.0)
+                                    delta += 360.0;
+                                while (delta >= 360.0)
+                                    delta -= 360.0;
+                                // A module may run either way along its own axis, so fold
+                                // 180 degrees together -- otherwise every run splits its
+                                // votes between two bins and neither looks decisive.
+                                if (delta >= 180.0)
+                                    delta -= 180.0;
+                                offsets[int(delta / 15.0) * 15]++;
+                                ++pairs;
+                            }
+                        }
+                        std::vector<std::pair<size_t, int>> ranked;
+                        for (const auto& [bin, count] : offsets)
+                            ranked.emplace_back(count, bin);
+                        std::sort(ranked.begin(), ranked.end(), std::greater<>());
+                        std::cout << "    module runs: " << pairs << " neighbour pairs; (bearing - yaw) mod 180:"
+                                  << std::endl;
+                        for (size_t i = 0; i < ranked.size() && i < 5; ++i)
+                            std::cout << "      " << ranked[i].second << "-" << ranked[i].second + 15 << " deg: "
+                                      << ranked[i].first << " ("
+                                      << (pairs ? 100.0 * double(ranked[i].first) / double(pairs) : 0.0) << "%)"
+                                      << std::endl;
+                    }
                     std::sort(longest.begin(), longest.end(), std::greater<>());
                     for (size_t i = 0; i < longest.size() && i < 6; ++i)
                         std::cout << "    longest " << int(longest[i].first) << " m at " << longest[i].second << std::endl;
