@@ -111,5 +111,44 @@ inline bool LayerTintEnabled()
 
 inline void SetLayerTintEnabled(bool on) { GLayerTintEnabled.store(on ? 1 : 0, std::memory_order_relaxed); }
 
+//! RFG-071 A/B switch: WHAT `Color_N` means once RFG-070 has decided to apply it.
+//!
+//! RFG-070 read it as the surface's LINEAR mean and rescaled the tile so its sRGB mean is
+//! `linearToSrgb(Color_N)`. Measured against Enfusion's own baked albedos -- the
+//! `*_MLOD_BCR.edds` its toolchain bakes from the very same layered material, which is the
+//! only ground truth in the corpus for what the surface is supposed to look like -- that
+//! rule comes out 1.82x too bright (median over 35 paired materials, 105 channels) and
+//! flatter than the bake (median max/min channel ratio 1.040 against the bake's 1.132),
+//! because encoding the target compresses the channel ratios. Reading `Color_N` as a
+//! LINEAR MULTIPLIER on the tile instead -- `out = linearToSrgb(srgbToLinear(texel) * C)`,
+//! the physical meaning of a colour tint -- lands at 1.29x with a third less scatter
+//! (mean |log ratio| 0.403 against 0.644) and a chroma of 1.088. Two other readings were
+//! measured and are worse than both: rescaling to a raw gamma target 0.83x/0.588, and
+//! multiplying in gamma 0.656x/0.656.
+//!
+//! ON is the multiply. OFF restores RFG-070's rescale exactly, which is the A/B.
+//!
+//! Load-time, like the switch above and for the same reason: this decides the TEXELS a
+//! tinted tile is uploaded with, and an uploaded texture keeps what it was uploaded with.
+//! Reload the world after flipping it.
+inline std::atomic<int> GLayerTintLinearMultiply{-1};
+
+inline bool LayerTintLinearMultiply()
+{
+    int value = GLayerTintLinearMultiply.load(std::memory_order_relaxed);
+    if (value < 0)
+    {
+        const char* env = std::getenv("POSEIDON_ENFUSION_TINT_MULTIPLY");
+        value = (env != nullptr && env[0] == '0') ? 0 : 1;
+        GLayerTintLinearMultiply.store(value, std::memory_order_relaxed);
+    }
+    return value != 0;
+}
+
+inline void SetLayerTintLinearMultiply(bool on)
+{
+    GLayerTintLinearMultiply.store(on ? 1 : 0, std::memory_order_relaxed);
+}
+
 } // namespace Enfusion
 } // namespace Poseidon

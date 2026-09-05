@@ -4760,6 +4760,27 @@ void DrawMaterialDebugTab()
             "clean A/B. Inert on every non-Enfusion world.\n"
             "The load's own count is in the log: 'materials -- ... a shared layer tile (of those\n"
             "N author a Color_N tint: M applied ...)'.");
+    const bool tintMulWas = settings.enfusionTintMultiply;
+    changed |= Dev::Checkbox("Enfusion Color_N multiplies (linear)", &settings.enfusionTintMultiply);
+    if (Dev::PanelItemHovered())
+        ImGui::SetTooltip(
+            "WHAT the switch above's colour means, once it has been applied.\n"
+            "\n"
+            "Off is what shipped: Color_N is read as the surface's LINEAR mean and the tile is\n"
+            "rescaled so its sRGB mean is linearToSrgb(Color_N). On, Color_N MULTIPLIES the tile\n"
+            "in linear space -- out = linearToSrgb(srgbToLinear(texel) * C) -- which is what a\n"
+            "colour tint physically is.\n"
+            "\n"
+            "Measured against the albedo Enfusion's own toolchain bakes from the SAME layered\n"
+            "material (*_MLOD_BCR.edds), over 35 materials where the pairing is unambiguous:\n"
+            "off predicts 1.82x the authored mean (mean |log ratio| 0.644) and a flatter surface\n"
+            "(chroma 1.040 against the bake's 1.132); on predicts 1.29x (0.403) at chroma 1.088.\n"
+            "1.82x in an 8-bit sRGB mean is ~3.6x the radiance -- the white farmhouse.\n"
+            "\n"
+            "NOT a per-fragment switch, and a stronger form of the one above: it decides the\n"
+            "TEXELS a tinted tile is uploaded with, and both settings build the same texture\n"
+            "NAME, so a cached upload is not re-decoded. RELAUNCH for a clean A/B; the value\n"
+            "persists to graphics.cfg. Inert wherever no Color_N is applied.");
     const bool compressedWas = settings.compressedEnfusionTextures;
     changed |= Dev::Checkbox("Enfusion compressed textures (BC7/BC5/BC4)", &settings.compressedEnfusionTextures);
     if (Dev::PanelItemHovered())
@@ -4818,6 +4839,25 @@ void DrawMaterialDebugTab()
             LOG_INFO(Graphics,
                      "Dev panel: Enfusion shared-tile colour {} (persisted to graphics.cfg; reload the world)",
                      settings.enfusionLayerTint ? "ON" : "OFF");
+        else
+            LOG_ERROR(Graphics, "Dev panel: saving '{}' failed", cfgPath);
+    }
+
+    // RFG-071: written to the same file and pushed to the same place -- the texture source
+    // reads it while the object stream decodes, which is neither the renderer nor the world
+    // loader, so the atomic in EnfusionTextureName is the only thing both sides share.
+    if (tintMulWas != settings.enfusionTintMultiply)
+    {
+        Poseidon::Enfusion::SetLayerTintLinearMultiply(settings.enfusionTintMultiply);
+        const std::string cfgPath = GamePaths::Instance().UserDir() + "graphics.cfg";
+        GraphicsConfig cfg;
+        cfg.Load(cfgPath);
+        cfg.enfusionTintMultiply = settings.enfusionTintMultiply ? 1 : 0;
+        if (cfg.Save(cfgPath))
+            LOG_INFO(Graphics,
+                     "Dev panel: Enfusion Color_N linear multiply {} (persisted to graphics.cfg; relaunch for a "
+                     "clean A/B -- both settings build the same texture name)",
+                     settings.enfusionTintMultiply ? "ON" : "OFF");
         else
             LOG_ERROR(Graphics, "Dev panel: saving '{}' failed", cfgPath);
     }

@@ -1057,6 +1057,14 @@ class Engine : public IGraphicsEngine
         // relaunch, with the value persisted to graphics.cfg) for a clean A/B. Inert on
         // every non-Enfusion world -- nothing else builds these names.
         bool enfusionLayerTint = true;
+        // RFG-071: and WHAT that colour means. On, `Color_N` multiplies the tile in linear
+        // space, which is what a tint physically is and what Enfusion's own baked albedos
+        // measure as (median 1.29x the authored mean over 35 paired materials, against
+        // 1.82x for the rule below). Off restores RFG-070's rescale-the-mean, which is
+        // the A/B. Load-time in the same way, and for a stronger reason: it decides the
+        // TEXELS a tinted tile is uploaded with, so relaunch (the value persists to
+        // graphics.cfg) rather than trusting a reload to re-decode a cached texture.
+        bool enfusionTintMultiply = true;
     };
     struct MaterialDebugInfo
     {

@@ -305,6 +305,8 @@ bool GraphicsConfig::Load(const std::string& path)
         enfusionCompressedTextures = (int)*e;
     if (auto* e = cfg.FindEntry("enfusionLayerTint"))
         enfusionLayerTint = (int)*e;
+    if (auto* e = cfg.FindEntry("enfusionTintMultiply"))
+        enfusionTintMultiply = (int)*e;
     if (auto* e = cfg.FindEntry("multitexturing"))
         multitexturing = (int)*e != 0;
     if (auto* e = cfg.FindEntry("brightness"))
@@ -335,6 +337,7 @@ bool GraphicsConfig::Save(const std::string& path) const
     cfg.Add("dlssSharpen", dlssSharpen);
     cfg.Add("enfusionCompressedTextures", enfusionCompressedTextures);
     cfg.Add("enfusionLayerTint", enfusionLayerTint);
+    cfg.Add("enfusionTintMultiply", enfusionTintMultiply);
     cfg.Add("multitexturing", multitexturing ? 1 : 0);
     cfg.Add("brightness", brightness);
     cfg.Add("gamma", gamma);

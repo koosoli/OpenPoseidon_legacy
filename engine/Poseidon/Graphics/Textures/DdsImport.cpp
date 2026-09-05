@@ -187,6 +187,13 @@ std::atomic<bool> GDdsCompressedPassthrough{false};
 //!     before the two are compared. Matching them raw is about a stop and a half too dark
 //!     -- the exporter measured WaterTower_01 rendering as a flat black sphere that way.
 //!
+//! RFG-071 SUPERSEDES the second of those, and WaterTower_01 is exactly why: it is the one
+//! model in a 35-material paired census where the encode-the-target rule lands on the
+//! authored bake (107/116/120 against a predicted 118/123/127), and it is the model the
+//! rule was calibrated on. Over the other 34 the same rule runs 1.82x bright. `Color_N`
+//! multiplies -- see the block inside the function -- and this rescale is now the A/B
+//! branch, kept because it is what shipped and what the converting exporter still bakes.
+//!
 //! Two things differ from the exporter and both are forced by where this runs:
 //!
 //!   * the mean comes from the TOP level and the gain is applied to every level. The
@@ -205,11 +212,55 @@ void ApplyEnfusionLayerTint(std::vector<DDSMipLevel>& levels, const float rgb[3]
         return;
     const auto linearToSrgb = [](double v)
     { return v <= 0.0031308 ? 12.92 * v : 1.055 * std::pow(v, 1.0 / 2.4) - 0.055; };
+    const auto srgbToLinear = [](double v)
+    { return v <= 0.04045 ? v / 12.92 : std::pow((v + 0.055) / 1.055, 2.4); };
     // ARGB8888 in this engine means B,G,R,A in memory, so channel 0 is BLUE. Applying the
     // material's r,g,b in index order tints a beige wall blue -- the trap the `enfc|` flat
     // colour above already documents, and the one this has to get right per channel and
     // not just on average.
     const int channelOfRgb[3] = {2, 1, 0}; // r -> byte 2, g -> byte 1, b -> byte 0
+
+    // RFG-071: `Color_N` is a MULTIPLIER, not the surface's mean.
+    //
+    // The rule below (kept, as the A/B) reads it as a linear mean and rescales the tile to
+    // it. Measured against the only ground truth the corpus has -- `*_MLOD_BCR.edds`, the
+    // albedo Enfusion's OWN toolchain bakes from the very same layered material -- over 35
+    // materials where the pairing is unambiguous (one bake, one MatPBRMulti with a MaskMap
+    // and a Color_N in the folder), predicting the bake's per-channel mean from the
+    // mask-weighted Color_N mix:
+    //
+    //   rescale to linearToSrgb(C)   median 1.82x the authored mean, mean |log| 0.644
+    //   rescale to C                 median 0.83x                  , mean |log| 0.588
+    //   multiply in linear (this)    median 1.29x                  , mean |log| 0.403
+    //   multiply in gamma            median 0.66x                  , mean |log| 0.656
+    //
+    // 1.82x in an 8-bit sRGB mean is ~3.6x the radiance, which is the reported defect: every
+    // MatPBRMulti surface -- walls, benches, fences, signs -- washed out while the same
+    // frame's cobblestone and tree trunks, which carry their own `BCRMap` and are never
+    // tinted, looked right. It is also FLATTER: encoding the target compresses the channel
+    // ratios, so the median max/min channel ratio came out 1.040 against the bake's 1.132
+    // (this rule: 1.088). A near-white paint tile at Color_1 = (0.287, 0.192, 0.07) is the
+    // worked example -- rescaled it reaches (0.573, 0.482, 0.297), a grey wall.
+    //
+    // Per-texel through a 256-entry LUT, so the tile keeps its grain in LINEAR terms rather
+    // than having its gamma-space grain scaled; that is what a tint physically is.
+    if (Poseidon::Enfusion::LayerTintLinearMultiply())
+    {
+        for (int c = 0; c < 3; ++c)
+        {
+            const double k = std::clamp<double>(rgb[c], 0.0, 1.0);
+            uint8_t lut[256];
+            for (int v = 0; v < 256; ++v)
+                lut[v] = static_cast<uint8_t>(
+                    std::clamp(linearToSrgb(srgbToLinear(v / 255.0) * k) * 255.0 + 0.5, 0.0, 255.0));
+            const size_t byte = static_cast<size_t>(channelOfRgb[c]);
+            for (DDSMipLevel& level : levels)
+                for (size_t at = byte; at < level.data.size(); at += 4)
+                    level.data[at] = lut[level.data[at]];
+        }
+        return;
+    }
+
     for (int c = 0; c < 3; ++c)
     {
         const size_t byte = static_cast<size_t>(channelOfRgb[c]);

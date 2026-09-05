@@ -106,6 +106,7 @@ public:
 	// than applied live. The dev panel's Materials tab writes it.
 	int       enfusionCompressedTextures = 1;
 	int       enfusionLayerTint = 1;            // RFG-070 shared-tile colour rescale
+	int       enfusionTintMultiply = 1;         // RFG-071 Color_N multiplies in linear space
 	float     renderScale      = 1.0f;          // 1.0 = AUTO (renderer default, incl. DLSS Quality).
 	                                            // <1 upscaling pin, >1 SSAA pin; live on wgpu.
 	                                             // 1.0 = off; up to 2.0.  The only general cure for

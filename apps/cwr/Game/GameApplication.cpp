@@ -1055,6 +1055,17 @@ void SeedRendererEnvFromGraphicsConfig()
         setenv("POSEIDON_ENFUSION_LAYER_TINT", "0", 1);
 #endif
     }
+    // RFG-071: same shape again. This one is read in the TEXTURE SOURCE, which the object
+    // stream reaches even earlier than the material resolve, so an absent variable meaning
+    // the default (multiply) is the only safe spelling.
+    if (cfg.enfusionTintMultiply == 0)
+    {
+#ifdef _WIN32
+        _putenv_s("POSEIDON_ENFUSION_TINT_MULTIPLY", "0");
+#else
+        setenv("POSEIDON_ENFUSION_TINT_MULTIPLY", "0", 1);
+#endif
+    }
     if (cfg.dlssSharpen == 0)
     {
 #ifdef _WIN32
