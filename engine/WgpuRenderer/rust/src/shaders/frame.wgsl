@@ -517,6 +517,20 @@ fn spec_power_to_gloss(spec_power: f32) -> f32 {
 // engine widens/narrows [fogStart, fogMax] per weather, so THAT is the atmosphere-density
 // / "not every morning is foggy" control. Per-fragment: foliage, fences and transparents
 // all fog by their own pixel distance; 2D never calls this.
+//
+// REN-ATM-001. `g_atmo_amount` records what this invocation's aerial-perspective blend actually
+// was, so a caller can COUNT the term rather than assert it: -1 = apply_fog never ran or bailed
+// (no atmosphere on this fragment), >= 0 = the airlight mix weight that was applied. It is a
+// per-invocation private, so it costs a register and no memory traffic, and it is set by the fog
+// code itself -- a census reading it cannot drift away from the path it is measuring the way a
+// re-evaluated copy of the condition would.
+var<private> g_atmo_amount: f32 = -1.0;
+
+// REN-ATM-001: did THIS fragment receive the aerial-perspective term? See `g_atmo_amount`.
+fn atmo_applied() -> bool {
+    return g_atmo_amount >= 0.0;
+}
+
 fn apply_fog(rgb: vec3<f32>, world_pos_rel: vec3<f32>) -> vec3<f32> {
     if (frame.params.fog_enabled <= 0.5 || frame.params.fog_inv_range <= 0.0) {
         return rgb;
@@ -563,6 +577,7 @@ fn apply_fog(rgb: vec3<f32>, world_pos_rel: vec3<f32>) -> vec3<f32> {
     let clip = frame.proj * frame.view * vec4<f32>(world_pos_rel, 1.0);
     let uv = (clip.xy / clip.w) * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5, 0.5);
     let inscat = textureSampleLevel(froxel_tex, froxel_samp, vec3<f32>(uv, sqrt(u)), 0.0).rgb;
+    g_atmo_amount = amount; // REN-ATM-001 census witness; see g_atmo_amount.
     return mix(rgb, inscat, amount);
 }
 

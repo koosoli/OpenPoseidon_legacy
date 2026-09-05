@@ -1577,8 +1577,11 @@ struct WgrObjectStats
     uint32_t main_whatif_tris[4];
     float whatif_scale[4];
     /* REN-OBJ-003: object fragment census -- colour, colour cutout, prepass, prepass cutout.
+     * REN-ATM-001 adds [4..7]: shaded fragments that got the aerial-perspective term, split
+     * opaque / cutout / vegetation-cutout, then the ones that got none ([4]+[5]+[7] = shaded
+     * total, so the array carries its own denominator).
      * Zeros unless WGR_OBJECT_COUNT_FRAGMENTS=1, whose timings are not quotable. */
-    uint32_t fragments[4];
+    uint32_t fragments[8];
 
     /* The CPU-replayed object path (transparent, decal, skinned/baked, non-standard depth).
      * These never reach the cull shader, so they are invisible in every count above. */

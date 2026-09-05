@@ -5,7 +5,7 @@
 // point): the plain pipeline binds `object`, the skinned pipeline binds the
 // bone `palette` (from the skin module). Shadowing is the shared cascade kernel.
 
-#import frame::{frame, reverse_z, fog_factor, terrain_sun_shadow, apply_fog, veg_sway_offset, matdbg_flag, MATDBG_DISABLE_FRESNEL_ENV}
+#import frame::{frame, reverse_z, fog_factor, atmo_applied, terrain_sun_shadow, apply_fog, veg_sway_offset, matdbg_flag, MATDBG_DISABLE_FRESNEL_ENV}
 #import shadow::shadow_strength
 #import skin::{skin_pos, skin_normal}
 #import lighting::lights_contrib
@@ -97,7 +97,7 @@ fn material_flags(m: Material) -> u32 {
 // and with mip_feedback.rs.
 @group(1) @binding(4) var<storage, read_write> mip_feedback: array<atomic<u32>>;
 
-const MIPFB_HEADER_WORDS: u32 = 4u;
+const MIPFB_HEADER_WORDS: u32 = 8u;
 const MIPFB_CODE_BASE: u32 = 16u;
 
 // Record the mip this fragment wanted of `slot`. `duvx`/`duvy` are the caller's UV derivatives,
@@ -107,6 +107,9 @@ const MIPFB_CODE_BASE: u32 = 16u;
 // texture table. renscale.w == 0 disables it; slot 0 is the white bindless fallback.
 // REN-OBJ-003: the per-draw path's share of the object fragment census (words 0/1; it has no
 // prepass twin of its own). Same buffer, same words as gpu_driven.wgsl.
+// REN-ATM-001 adds words 4..7 (atmosphere by family) here too -- see the word map in
+// gpu_driven.wgsl. Both paths write the same words on purpose: the question they answer is
+// per-family, not per-path, so the two must sum rather than be told apart.
 fn census(word: u32) {
     if (count_fragments > 0.5) {
         atomicAdd(&mip_feedback[word], 1u);
@@ -986,6 +989,18 @@ fn shade_fragment(in: VsOut) -> vec4<f32> {
         (material_flags(material) & MATFLAG_COCKPIT) != 0u, in.clip.xy,
         !(veg_cutout && foliage_screen_ao < 0.5),
     );
+    // REN-ATM-001: the per-draw twin of gpu_driven.wgsl's atmosphere census -- same words, same
+    // witness. Both paths draw vegetation (retained trees go GPU-driven, scripted/near ones do
+    // not), so counting only one of them would leave exactly the gap the measurement exists to
+    // close. `alpha_ref` is the pipeline override here, not a per-section field.
+    if (atmo_applied()) {
+        census(select(4u, 5u, alpha_ref > 0.0));
+        if (veg_cutout) {
+            census(6u);
+        }
+    } else {
+        census(7u);
+    }
     // DZ-003 -- Fresnel-weighted sky reflection for materials that declared themselves
     // reflective. Every other draw takes the branch not-taken and is bit-identical to
     // before. `linear` gates it to the HDR target: the env map is linear radiance that

@@ -3087,7 +3087,10 @@ pub struct WgrObjectStats {
     pub whatif_scale: [f32; 4],
     /// REN-OBJ-003: object fragment census (colour, colour cutout, prepass, prepass cutout);
     /// zeros unless WGR_OBJECT_COUNT_FRAGMENTS=1 (then timings are not quotable).
-    pub fragments: [u32; 4],
+    /// REN-ATM-001 owns words 4..7: shaded fragments that received the aerial-perspective term,
+    /// split opaque / cutout / vegetation-cutout, then the ones that received none. Word map and
+    /// reasoning in gpu_driven.wgsl.
+    pub fragments: [u32; 8],
 
     /// CPU-replayed object path (never reaches the cull shader).
     pub direct_calls: u32,

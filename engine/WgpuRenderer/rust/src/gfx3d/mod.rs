@@ -8555,8 +8555,9 @@ impl Gfx3d {
         self.depth_size
     }
 
-    /// REN-OBJ-003: the last harvested object fragment census (mip-feedback header words 0..3).
-    pub fn object_fragment_census(&self) -> [u32; 4] {
+    /// REN-OBJ-003 + REN-ATM-001: the last harvested object fragment census (mip-feedback
+    /// header words 0..7). Word map in gpu_driven.wgsl.
+    pub fn object_fragment_census(&self) -> [u32; 8] {
         self.mip_feedback.fragment_counts()
     }
 
@@ -9827,6 +9828,102 @@ fn both_object_shaders_force_full_coverage_on_opaque_sections() {
         assert!(
             window.contains("out_a = 1.0;"),
             "{name} must force full coverage on opaque sections; without it              alpha_to_coverage turns a non-coverage alpha channel into holes"
+        );
+    }
+}
+
+// REN-ATM-001. The Arma 3 complaint this pins, in the owner's words: "trees are not affected by
+// god rays, because of that during sun set they look too dark". The mechanism behind that
+// complaint is a vegetation path that skips the atmospheric term the rest of the scene gets, so
+// at low sun the landscape loses contrast and the foliage does not, and the trees stand out as
+// hard dark shapes.
+//
+// Here there is exactly ONE aerial-perspective function -- frame.wgsl's apply_fog, which samples
+// the froxel volume -- and every family that draws world geometry calls it. This test is what
+// keeps that true. It is a source audit rather than a render comparison on purpose: "the trees
+// look dark at sunset" is true of a correct renderer too, so a screenshot cannot decide it, and
+// the thing that WOULD decide it is whether the leaf fragments went through the same function.
+#[test]
+fn every_world_geometry_family_takes_the_same_aerial_perspective() {
+    // The one implementation. If a second one ever appears, this is the test that should be
+    // failing rather than a bug report six months later about foliage that does not sit in the
+    // air the way the terrain behind it does.
+    let frame = include_str!("../shaders/frame.wgsl");
+    assert!(
+        frame.contains("fn apply_fog(rgb: vec3<f32>, world_pos_rel: vec3<f32>) -> vec3<f32> {"),
+        "frame.wgsl must own the single aerial-perspective function"
+    );
+    assert!(
+        frame.contains("let inscat = textureSampleLevel(froxel_tex, froxel_samp,"),
+        "apply_fog must take its colour from the aerial-perspective froxel, not a flat constant"
+    );
+    // Every family that puts world geometry on screen. shading.wgsl covers BOTH object paths
+    // (shader3d and gpu_driven call the same shade()), which is where vegetation lives.
+    for (name, src) in [
+        ("shaders/shading.wgsl", include_str!("../shaders/shading.wgsl")),
+        ("terrain/terrain.wgsl", include_str!("../terrain/terrain.wgsl")),
+        ("grass/grass.wgsl", include_str!("../grass/grass.wgsl")),
+        ("far/far.wgsl", include_str!("../far/far.wgsl")),
+    ] {
+        assert!(
+            src.contains("apply_fog(") && src.contains("apply_fog"),
+            "{name} must apply the shared aerial perspective"
+        );
+    }
+    // The object path's fog must sit in the SHARED tail of shade(), after the lighting and
+    // outside any foliage branch -- that is the property that makes a leaf card and a wall take
+    // the same atmosphere. Nothing between the leaf lighting and the fog may return early.
+    let shading = include_str!("../shaders/shading.wgsl");
+    let at = shading
+        .find("rgb = apply_fog(rgb, world_pos);")
+        .expect("shading.wgsl must fog through apply_fog");
+    let tail = &shading[at..];
+    assert!(
+        tail.matches("return rgb;").count() >= 1,
+        "apply_fog must be on shade()'s single common exit path"
+    );
+    // And the census witness is set by the fog itself, so a count of it cannot drift away from
+    // the code path it claims to measure.
+    assert!(
+        frame.contains("g_atmo_amount = amount;") && frame.contains("fn atmo_applied() -> bool {"),
+        "apply_fog must record what it did for the REN-ATM-001 census"
+    );
+}
+
+// REN-ATM-001, the measuring half: both object paths bin their shaded fragments by whether the
+// atmospheric term reached them, into the same census words. Vegetation gets its own word
+// because "cutout" also means fences, grills and decals, and the question was about leaves.
+#[test]
+fn both_object_shaders_count_the_atmosphere_by_family() {
+    for (name, src, aref) in [
+        ("shader3d.wgsl", include_str!("shader3d.wgsl"), "alpha_ref"),
+        (
+            "gpu_driven.wgsl",
+            include_str!("gpu_driven.wgsl"),
+            "sm.alpha_ref",
+        ),
+    ] {
+        assert!(
+            src.contains(&format!("census(select(4u, 5u, {aref} > 0.0));")),
+            "{name} must split the with-term count into opaque (4) and cutout (5)"
+        );
+        assert!(
+            src.contains("if (veg_cutout) {\n            census(6u);"),
+            "{name} must count the vegetation subset into word 6"
+        );
+        assert!(
+            src.contains("census(7u);"),
+            "{name} must count shaded fragments that got NO atmospheric term into word 7, or the \
+             census has no way to report the defect it exists to detect"
+        );
+        // The slot region starts after the header, and the shaders carry their own copy of where
+        // that is. A disagreement reinterprets every stored mip code as another slot's.
+        assert!(
+            src.contains(&format!(
+                "const MIPFB_HEADER_WORDS: u32 = {}u;",
+                crate::gfx3d::mip_feedback::HEADER_WORDS
+            )),
+            "{name}'s MIPFB_HEADER_WORDS must equal mip_feedback::HEADER_WORDS"
         );
     }
 }

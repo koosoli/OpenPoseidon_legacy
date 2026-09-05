@@ -2167,7 +2167,7 @@ impl Renderer {
 
     // PERF-005 — this frame's object accounting: the GPU cull's per-view counters plus the
     // CPU-replayed direct-draw tally.
-    fn object_stats(&self) -> (crate::gfx3d::cull::CullStats, DirectDrawStats, u32, [u32; 4]) {
+    fn object_stats(&self) -> (crate::gfx3d::cull::CullStats, DirectDrawStats, u32, [u32; 8]) {
         (
             self.gfx3d.object_stats(),
             self.direct_draws.get(),

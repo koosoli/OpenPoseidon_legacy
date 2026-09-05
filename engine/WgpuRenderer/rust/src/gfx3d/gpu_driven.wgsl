@@ -9,7 +9,7 @@
 // Rigid opaque only: terrain-conformed vegetation, skinned, and transparent draws stay on
 // the CPU path (they never enter the retained instance set), so this VS has no conform.
 
-#import frame::{frame, reverse_z, fog_factor, veg_sway_offset, matdbg_view, matdbg_flag, MATDBG_DISABLE_NORMAL, MATDBG_INVERT_NORMAL_Y, MATDBG_COMPOSE_MULTI, MATDBG_DISABLE_FRESNEL_ENV, MATDBG_DISABLE_SPECULAR}
+#import frame::{frame, reverse_z, fog_factor, atmo_applied, veg_sway_offset, matdbg_view, matdbg_flag, MATDBG_DISABLE_NORMAL, MATDBG_INVERT_NORMAL_Y, MATDBG_COMPOSE_MULTI, MATDBG_DISABLE_FRESNEL_ENV, MATDBG_DISABLE_SPECULAR}
 #import shading::{shade, ShadeMaterial}
 #import gbuffer::{oct_encode, a2c_coverage, mip_alpha_boost}
 // Terrain conform (group 4 heightmap + surface_y/surface_grad), shared with shader3d /
@@ -367,17 +367,26 @@ fn baked_sky_visibility(model: u32, model_pos: vec3<f32>) -> f32 {
 @group(1) @binding(8) var<storage, read_write> mip_feedback: array<atomic<u32>>;
 
 // Kept in step with mip_feedback.rs: HEADER_WORDS and MIP_CODE_BASE.
-const MIPFB_HEADER_WORDS: u32 = 4u;
+const MIPFB_HEADER_WORDS: u32 = 8u;
 const MIPFB_CODE_BASE: u32 = 16u;
 
 
 // OBJECT FRAGMENT CENSUS (REN-OBJ-003; WGR_OBJECT_COUNT_FRAGMENTS=1). The mip-feedback buffer's
-// four header words are spare and cleared to zero every frame, so they count fragments per
+// header words are spare and cleared to zero every frame, so they count fragments per
 // object pass without a new binding: 0 = colour pass, 1 = colour pass cutout variant,
 // 2 = depth prepass, 3 = depth prepass cutout variant. Behind a pipeline constant so the
 // production shader carries no atomic; a counting run's timings are not quotable, its counts
 // are -- they turn a pass's milliseconds into nanoseconds per fragment, which is the number
 // that says whether the pass is paying per pixel or per triangle.
+//
+// REN-ATM-001 adds four more, answering "does vegetation get the same atmospheric term as
+// everything else" with a number instead of a screenshot: 4 = shaded OPAQUE fragments that
+// received the aerial-perspective term, 5 = shaded CUTOUT fragments that received it, 6 = the
+// vegetation subset of word 5 (leaf cards: is_veg AND alpha_ref > 0), 7 = shaded fragments that
+// received NO atmospheric term, whatever their family. 4 + 5 + 7 is the shaded total, so the
+// words carry their own denominator. Word 7 is the one that would be non-zero if the leaf path
+// were shortcutting the atmosphere the way Arma 3's is; word 6 / word 5 says how much of the
+// cutout traffic is foliage. The witness is `atmo_applied()`, set by apply_fog itself.
 fn census(word: u32) {
     if (count_fragments > 0.5) {
         atomicAdd(&mip_feedback[word], 1u);
@@ -952,6 +961,18 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
         veg_cutout, false, veg_cutout, false, in.clip.xy,
         !(veg_cutout && foliage_screen_ao < 0.5),
     );
+    // REN-ATM-001: read back what shade()'s apply_fog actually did to THIS fragment and bin it by
+    // shader family. Placed immediately after shade() so nothing between the fog and the count can
+    // change the answer, and keyed on the same `veg_cutout` / `sm.alpha_ref` the leaf lighting
+    // uses, so "the vegetation path" means here exactly what it means there.
+    if (atmo_applied()) {
+        census(select(4u, 5u, sm.alpha_ref > 0.0));
+        if (veg_cutout) {
+            census(6u);
+        }
+    } else {
+        census(7u);
+    }
     // DZ-003 -- Fresnel-weighted sky reflection for materials that declared themselves
     // reflective (DayZ's CalmWater family). Every other section takes the branch
     // not-taken and is bit-identical to before -- measured: outside the pond quad, the

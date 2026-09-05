@@ -38,10 +38,13 @@ use std::sync::mpsc;
 ///
 /// Nothing writes them today: the rotation pair reaches the shader through the frame uniform's
 /// two spare `renscale` lanes, which is a uniform-buffer read rather than a storage load in
-/// every fragment. They are held anyway so the per-slot region starts at a 16-byte offset —
-/// `clear_buffer` only demands 4, but a header is the obvious place for a future per-frame
-/// scalar and moving the slot base later would silently reinterpret every stored code.
-pub const HEADER_WORDS: u32 = 4;
+/// every fragment. They are held anyway so the per-slot region starts at an aligned offset and
+/// because a header is the obvious place for a per-frame scalar — REN-OBJ-003 and REN-ATM-001
+/// both took that offer, which is why this is 8 and not 4. MOVING IT IS AN ABI CHANGE IN BOTH
+/// DIRECTIONS: the slot base is `HEADER_WORDS`, mirrored as `MIPFB_HEADER_WORDS` in
+/// gpu_driven.wgsl and shader3d.wgsl, and a disagreement silently reinterprets every stored
+/// mip code as some other slot's.
+pub const HEADER_WORDS: u32 = 8;
 const HEADER_BYTES: u64 = HEADER_WORDS as u64 * 4;
 
 /// Level 0 encodes to this; level 15 encodes to `MIP_CODE_BASE - 15`. Kept in step with the
@@ -86,14 +89,15 @@ pub struct MipFeedback {
     /// whether this instrument ran at all, as opposed to reporting zeros because it never did.
     harvests: u64,
     enabled: bool,
-    /// REN-OBJ-003: the four header words as last harvested -- the object fragment census
+    /// REN-OBJ-003: the eight header words as last harvested -- the object fragment census
     /// (colour, colour cutout, prepass, prepass cutout) when WGR_OBJECT_COUNT_FRAGMENTS=1,
-    /// zeros otherwise.
-    frag_counts: [u32; 4],
+    /// zeros otherwise. REN-ATM-001 owns words 4..7 (atmosphere-by-family); the word map lives
+    /// in gpu_driven.wgsl next to the shader that writes them.
+    frag_counts: [u32; 8],
     /// The header words are never cleared (begin_frame clears from HEADER_BYTES), so the
     /// census accumulates for the life of the buffer; per-frame values are the delta between
     /// two harvests divided by the frames between them.
-    frag_cumulative_prev: [u32; 4],
+    frag_cumulative_prev: [u32; 8],
     frag_prev_frame: u64,
 }
 
@@ -125,8 +129,8 @@ impl MipFeedback {
             frame: 0,
             harvests: 0,
             enabled,
-            frag_counts: [0; 4],
-            frag_cumulative_prev: [0; 4],
+            frag_counts: [0; 8],
+            frag_cumulative_prev: [0; 8],
             frag_prev_frame: 0,
         }
     }
@@ -254,14 +258,14 @@ impl MipFeedback {
                         let data = buf.slice(..).get_mapped_range();
                         let words = data.len() / 4;
                         {
-                            let mut cur = [0u32; 4];
+                            let mut cur = [0u32; HEADER_WORDS as usize];
                             for (k, w) in cur.iter_mut().enumerate() {
                                 if k < words {
                                     *w = u32::from_le_bytes(data[k * 4..k * 4 + 4].try_into().unwrap_or([0; 4]));
                                 }
                             }
                             let frames = frame.saturating_sub(self.frag_prev_frame).max(1);
-                            for k in 0..4 {
+                            for k in 0..HEADER_WORDS as usize {
                                 // A count below the previous one means the buffer was
                                 // reallocated (ensure() grew it) and restarted from zero:
                                 // the new value is then the whole delta, not a wrap.
@@ -319,7 +323,7 @@ impl MipFeedback {
     }
 
     /// REN-OBJ-003: the object fragment census from the last harvest.
-    pub fn fragment_counts(&self) -> [u32; 4] {
+    pub fn fragment_counts(&self) -> [u32; 8] {
         self.frag_counts
     }
 

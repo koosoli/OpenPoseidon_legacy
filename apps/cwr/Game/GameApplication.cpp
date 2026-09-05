@@ -264,9 +264,18 @@ bool WriteCaptureMetrics(const std::string& path)
             for (int i = 0; i < 4; ++i)
                 cJSON_AddItemToArray(hist, cJSON_CreateNumber(gt.history[i]));
             // REN-OBJ-003: the object fragment census; all zeros unless the counting build ran.
+            // Words 4..7 are REN-ATM-001's atmosphere-by-family split -- see Engine.hpp. They are
+            // also mirrored under "atmosphere" below with names, because the question they answer
+            // ("do leaves get the same aerial perspective as walls") is not one anybody should
+            // have to reconstruct from array indices at 19:30 game time.
             cJSON* fr = cJSON_AddArrayToObject(o, "fragments");
-            for (int i = 0; i < 4; ++i)
+            for (int i = 0; i < 8; ++i)
                 cJSON_AddItemToArray(fr, cJSON_CreateNumber(objects.fragments[i]));
+            cJSON* atm = cJSON_AddObjectToObject(o, "atmosphere");
+            cJSON_AddNumberToObject(atm, "opaque_with_term", objects.fragments[4]);
+            cJSON_AddNumberToObject(atm, "cutout_with_term", objects.fragments[5]);
+            cJSON_AddNumberToObject(atm, "vegetation_with_term", objects.fragments[6]);
+            cJSON_AddNumberToObject(atm, "shaded_without_term", objects.fragments[7]);
             cJSON* wi = cJSON_AddArrayToObject(gov, "whatif_tris");
             cJSON* ws = cJSON_AddArrayToObject(gov, "whatif_scale");
             for (int i = 0; i < 4; ++i)

@@ -9564,8 +9564,11 @@ bool EngineWgpu::GetObjectStatsFromRenderer(ObjectStatsOut& out) const
     {
         out.mainWhatIfTris[k] = s.main_whatif_tris[k];
         out.whatIfScale[k] = s.whatif_scale[k];
-        out.fragments[k] = s.fragments[k];
     }
+    // REN-ATM-001 widened the census to eight words; it is no longer the same length as the
+    // what-if arrays above and must not share their loop.
+    for (int k = 0; k < 8; ++k)
+        out.fragments[k] = s.fragments[k];
     out.directCalls = s.direct_calls;
     out.directIndirectCalls = s.direct_indirect_calls;
     out.directInstances = s.direct_instances;
