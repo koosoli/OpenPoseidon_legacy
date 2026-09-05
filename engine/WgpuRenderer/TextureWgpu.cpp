@@ -1096,6 +1096,30 @@ AlphaStats::Kind TextureWgpu::GetAlphaClass()
     {
         return AlphaStats::Opaque;
     }
+
+    // RFG-055: an Enfusion OpacityMap is COVERAGE. It is never a blend.
+    //
+    // The composite `enfa|opacity|colour` name exists precisely because Enfusion keeps
+    // a leaf's coverage in its own `..._A.edds` beside the `_BCR`. The material census
+    // behind RFG-019 counted 1,715 such files and found every one bound as coverage and
+    // none as a blend -- so this is the material's own statement, not an inference from
+    // the pixels.
+    //
+    // The histogram cannot reach that conclusion on its own. A Reforger leaf card is an
+    // ANTI-ALIASED cutout: its edge pixels carry partial alpha on purpose, measured at
+    // 6.6% of the texture, and a classifier that reads partial alpha as "blend" calls it
+    // one. Blended, the cards draw back-to-front with no alpha-to-coverage, so a stand of
+    // birch loses its edges and washes out into a pale, flat mass -- the thing that keeps
+    // being reported as the trees looking wrong, after the coverage itself was fixed.
+    if (const char* name = Name())
+    {
+        if (std::strncmp(name, "enfa|", 5) == 0)
+        {
+            _alphaClass = static_cast<int>(AlphaStats::Cutout);
+            return AlphaStats::Cutout;
+        }
+    }
+
     AlphaStats::Kind kind = AlphaStats::Opaque;
     {
         const bool hasAlpha = _src->IsAlpha();

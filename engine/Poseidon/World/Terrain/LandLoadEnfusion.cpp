@@ -694,6 +694,9 @@ struct ResolvedPlacement
     //! its prefab's full size -- Everon's scales run 0.7 to 1.0, so a stand of trees
     //! came out up to 43% too large with nothing in the manifest to show for it.
     float scale = 1.0f;
+    //! RFG-058: pitch and roll, in degrees. Kept because 65% of Everon uses them.
+    float pitchDeg = 0.0f;
+    float rollDeg = 0.0f;
     bool terrainRelative = false;
     uint32_t mesh = 0; //!< index into the mesh list
 };
@@ -850,10 +853,19 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
         item.position[0] = placement.position[0];
         item.position[1] = placement.position[1];
         item.position[2] = placement.position[2];
-        // Yaw only. The reader carries a Euler triple in degrees and everything
-        // downstream of it uses index 1 and discards pitch and roll -- a documented
-        // reduction of the reader, not an omission here.
+        // RFG-058: the WHOLE triple. This kept index 1 and discarded pitch and roll,
+        // described as a documented reduction rather than an omission. Measured over
+        // Everon, that reduction throws away the orientation of 804,254 of 1,233,078
+        // placements -- 65.2%, with tilts up to 230 degrees.
+        //
+        // It is what makes walkways, jetties and stepped paths sit wrong: a run of
+        // modules following a slope carries its slope in the two angles being dropped,
+        // so every piece is laid flat and the run stops being flush. The converted map
+        // has the same defect from the same reduction, which is what says the fault is
+        // here and not in either map's placement code.
         item.yawDeg = placement.angles[1];
+        item.pitchDeg = placement.angles[0];
+        item.rollDeg = placement.angles[2];
         item.scale = (std::isfinite(placement.scale) && placement.scale > 0.0f) ? placement.scale : 1.0f;
         // The Y rule, measured over Everon's 1.23 M placements: with a Flags block
         // 96.3% sit within half a metre of the terrain, without one the median Y is
@@ -1653,8 +1665,21 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
                 // recovers `_scale` from the matrix it is handed. So the scale goes on
                 // through the orientation, which is also why it must be applied AFTER
                 // the object exists rather than folded into the call.
-                if (placedObject != nullptr && std::fabs(item.scale - 1.0f) > 1e-3f)
-                    placedObject->SetOrientation(placedObject->Orientation() * Matrix3(MScale, item.scale));
+                if (placedObject != nullptr)
+                {
+                    // Yaw is already in the orientation AddObject built, so only the two
+                    // it has no parameter for are applied here, and they are applied in
+                    // the object's OWN frame -- right-multiplied -- so a tilt stays a
+                    // tilt of the piece rather than becoming a swing about the world.
+                    Matrix3 orientation = placedObject->Orientation();
+                    if (std::fabs(item.pitchDeg) > 0.01f)
+                        orientation = orientation * Matrix3(MRotationX, item.pitchDeg * 0.01745329252f);
+                    if (std::fabs(item.rollDeg) > 0.01f)
+                        orientation = orientation * Matrix3(MRotationZ, item.rollDeg * 0.01745329252f);
+                    if (std::fabs(item.scale - 1.0f) > 1e-3f)
+                        orientation = orientation * Matrix3(MScale, item.scale);
+                    placedObject->SetOrientation(orientation);
+                }
                 // RFG-035: count what ends up under the ground. "The buildings are
                 // missing" and "the buildings are buried" look identical from the
                 // air and have different causes, and nothing so far could tell them
@@ -1809,6 +1834,35 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
                     const size_t pointCount = road.points.size() / 3;
                     if (pointCount < 2)
                         continue;
+
+                    // RFG-056: rotate into world space FIRST, then drape, then place with
+                    // no rotation of its own.
+                    //
+                    // The height was being sampled at the UNROTATED point and the ribbon
+                    // drawn at the rotated one, so every road with a yaw was fitted to the
+                    // ground somewhere it does not run. On flat ground that is invisible;
+                    // on anything else the tarmac hangs in the air or sinks, and it is
+                    // visibly turned against the terrain it is supposed to follow.
+                    //
+                    // Rotating the points removes the whole class of error rather than
+                    // patching the sample position: after this there is only one place the
+                    // road can be, and the drape and the draw agree by construction.
+                    if (std::fabs(road.yawDeg) > 0.01f)
+                    {
+                        const float yaw = road.yawDeg * 0.01745329252f;
+                        const float c = std::cos(yaw);
+                        const float sn = std::sin(yaw);
+                        for (size_t i = 0; i < pointCount; ++i)
+                        {
+                            const float lx = road.points[i * 3 + 0];
+                            const float lz = road.points[i * 3 + 2];
+                            // The same basis Landscape::AddObject builds from a heading:
+                            // aside = (c, 0, -s), dir = (s, 0, c).
+                            road.points[i * 3 + 0] = c * lx + sn * lz;
+                            road.points[i * 3 + 2] = -sn * lx + c * lz;
+                        }
+                        road.yawDeg = 0.0f;
+                    }
 
                     // The height rule: DRAPE on the engine's own terrain.
                     //

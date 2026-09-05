@@ -2576,6 +2576,24 @@ pub(crate) fn sky_specular() -> f32 {
 /// The one-line announcement of both, for the GAME log — same reasoning as
 /// `ambient_normal_mapped_log_line`: the launcher discards stderr, so a lever announced only
 /// there cannot be matched to a captured dawn screenshot.
+/// RFG-050: set when the skin bake had to be skipped because the shared vertex pool
+/// outgrew `max_storage_buffer_binding_size`. Reported from `lib.rs` rather than
+/// logged here, which is this module's convention -- it has no logger of its own.
+pub(crate) static SKIN_BAKE_OVER_LIMIT: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
+/// The one-shot line for it, or None while the pool fits.
+pub(crate) fn skin_bake_over_limit_log_line() -> Option<String> {
+    let size = SKIN_BAKE_OVER_LIMIT.swap(0, std::sync::atomic::Ordering::Relaxed);
+    if size == 0 {
+        return None;
+    }
+    Some(format!(
+        "skin bake disabled: the shared vertex pool is {} bytes and a bind group entry          cannot exceed max_storage_buffer_binding_size. Characters lose GPU skinning          until the resident mesh set shrinks.",
+        size
+    ))
+}
+
 pub(crate) fn normal_relief_log_line() -> String {
     let cav = normal_cavity();
     let spec = sky_specular();
@@ -5061,6 +5079,26 @@ impl Gfx3d {
         // offset per-group by in_base_vertex; only the per-mesh skin buffer (binding 1)
         // differs between meshes. Whole-buffer, so the bind is stable frame-to-frame.
         let pool_vbuf = self.pool.vbuf();
+
+        // RFG-050: binding 0 is the WHOLE shared vertex pool, and a bind group entry
+        // cannot exceed `max_storage_buffer_binding_size`. On stock content the pool is
+        // nowhere near it; with 3,118 distinct Reforger meshes resident it reached
+        // 2,281,701,376 bytes against a 2,147,483,644 limit, wgpu refused the bind, and
+        // every frame after that failed `get_current_texture`. A black window, and the
+        // auto-screenshot still reporting success.
+        //
+        // Skipping the bake is a real loss -- characters stop being GPU-skinned -- but a
+        // world that says so and keeps drawing is worth more than one that dies, and the
+        // line names the number that has to come down. Checked here rather than at pool
+        // growth because this is the only place the whole pool is bound.
+        let max_binding = device.limits().max_storage_buffer_binding_size as u64;
+        if pool_vbuf.size() > max_binding {
+            SKIN_BAKE_OVER_LIMIT.store(pool_vbuf.size(), std::sync::atomic::Ordering::Relaxed);
+            self.bake_groups.clear();
+            self.skin_base_vertex.clear();
+            return;
+        }
+
         let mut new_binds: Vec<(MeshKey, wgpu::BindGroup)> = Vec::new();
         for g in &self.bake_groups {
             if self.bake_bind_cache.contains_key(&g.mesh)

@@ -385,6 +385,37 @@ int Worlds(const std::string& root, const std::string& filter, int topClasses, b
                         for (const auto& [bin, count] : offsets)
                             ranked.emplace_back(count, bin);
                         std::sort(ranked.begin(), ranked.end(), std::greater<>());
+                        // How many placements actually use pitch or roll? The reader
+                        // keeps a Euler triple and every consumer downstream reads index
+                        // 1 and throws the other two away. If a walkway module is tilted
+                        // to follow a slope, that tilt is in the two being discarded --
+                        // and the converted map shows the same defect, which is what
+                        // says the fault is in the shared reduction and not in either
+                        // map's own placement code.
+                        {
+                            size_t tilted = 0, total = 0;
+                            std::string worstName;
+                            float worst = 0.0f;
+                            for (const auto& q : world.placements)
+                            {
+                                if (!q.hasPosition)
+                                    continue;
+                                ++total;
+                                const float tilt = std::max(std::fabs(q.angles[0]), std::fabs(q.angles[2]));
+                                if (tilt > 0.5f)
+                                {
+                                    ++tilted;
+                                    if (tilt > worst)
+                                    {
+                                        worst = tilt;
+                                        worstName = q.className;
+                                    }
+                                }
+                            }
+                            std::cout << "    tilt: " << tilted << " of " << total << " placements carry pitch or roll ("
+                                      << (total ? 100.0 * double(tilted) / double(total) : 0.0)
+                                      << "%), worst " << worst << " deg on " << worstName << std::endl;
+                        }
                         std::cout << "    module runs: " << pairs << " neighbour pairs; (bearing - yaw) mod 180:"
                                   << std::endl;
                         for (size_t i = 0; i < ranked.size() && i < 5; ++i)
