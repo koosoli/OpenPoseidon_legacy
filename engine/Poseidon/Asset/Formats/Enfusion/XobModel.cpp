@@ -211,10 +211,42 @@ XobHeader ReadXobHeader(const void* data, size_t size)
     for (XobVec3& point : out.points)
         point = cursor.Vec3();
 
-    // The bone hierarchy is fixed-width and is not decoded -- only the render
-    // geometry is wanted -- but it still has to be stepped over exactly or every
-    // offset after it is wrong.
-    cursor.Skip(kBoneRecordSize * out.boneCount);
+    // RFG-064: the bone array is DECODED now, not stepped over. It used to be
+    // skipped on the grounds that only render geometry was wanted; that is what
+    // left Everon's houses with holes where their doors and windows belong,
+    // because Enfusion attaches those as separate prefabs bound to these bones.
+    //
+    // The layout was read off the corpus, not guessed: on FarmHouse_E_1L01.xob the
+    // name ordinals run 27..52 against a 26-bone header and name `Scene_Root` plus
+    // 25 sockets; the trailing pair is 0xffff / first-child on the root and
+    // next-sibling / 0xffff on the rest, which is what identified it as hierarchy
+    // links rather than a transform tail. The record stays 36 bytes either way, so
+    // a misread here cannot shift the offsets that follow.
+    if (kBoneRecordSize * out.boneCount > cursor.Remaining())
+    {
+        out.error = "bone array of " + std::to_string(out.boneCount) + " records overruns HEAD";
+        return out;
+    }
+    out.bones.resize(out.boneCount);
+    for (XobBone& bone : out.bones)
+    {
+        const uint16_t nameOrdinal = cursor.U16();
+        bone.parent = cursor.U16();
+        if (nameOrdinal < out.strings.size())
+            bone.name = out.strings[nameOrdinal];
+        bone.translation = cursor.Vec3();
+        bone.rotation[0] = cursor.F32();
+        bone.rotation[1] = cursor.F32();
+        bone.rotation[2] = cursor.F32();
+        bone.rotation[3] = cursor.F32();
+        cursor.U16(); // next sibling, 0xffff for none
+        cursor.U16(); // first child, 0xffff for none
+    }
+    if (!cursor.ok())
+    {
+        out.error = "bone array overruns HEAD";
+        return out;
+    }
 
     out.lods.resize(lodCount);
     for (XobLodDesc& lod : out.lods)

@@ -31,6 +31,7 @@
 #include <Poseidon/Asset/Formats/Enfusion/ResourceDatabase.hpp>
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/XobConvert.hpp>
+#include <Poseidon/Asset/Formats/Enfusion/XobModel.hpp>
 #include <Poseidon/Asset/Formats/P3D/MLODLoader.hpp>
 #include <Poseidon/Asset/Formats/P3D/MLODWriter.hpp>
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
@@ -665,6 +666,14 @@ struct PlacementSummary
     size_t meshResolved = 0;
     size_t distinctMeshes = 0;
     size_t terrainRelative = 0;
+    // RFG-064, the attachment side. Counted separately from the mesh totals above
+    // because "the houses are missing" and "the houses have no doors" are different
+    // failures and the placement histogram cannot tell them apart.
+    size_t slotPrefabs = 0;    //!< distinct prefabs whose .et chain declared slots
+    size_t slotBones = 0;      //!< socket bones that matched a slot rule
+    size_t slotUnresolved = 0; //!< of those, bones whose part prefab gave no .xob
+    size_t slotBuildings = 0;  //!< PLACEMENTS that carry at least one attachment
+    std::string slotFailure;
     std::string firstFailure;
     std::string error;
 };
@@ -706,6 +715,60 @@ bool LoadResourceDatabases(const std::string& addonsDir, std::unordered_map<std:
     return true;
 }
 
+//! RFG-064: one part hung off a named bone of its building's mesh.
+//!
+//! Everon's houses had holes where their doors, gates and windows belong because
+//! `ResolvePrefabModel` returns exactly one `.xob` per prefab and Enfusion keeps the
+//! openings as SEPARATE prefabs bound to socket bones of the shell. The bone gives
+//! the transform and the prefab gives the mesh; the pair is what this record is.
+//!
+//! Already FLATTENED into the shell's model space: a door set is a frame with its
+//! own `socket_door_left` carrying the leaf, so the tree is two or three deep and
+//! composing it once per prefab beats composing it once per placement.
+struct MeshAttachment
+{
+    Vector3 offset;    //!< in the shell's model space
+    Matrix3 basis;     //!< part model space -> shell model space
+    uint32_t mesh = 0; //!< index into the ATTACHMENT mesh list
+};
+
+//! Everything one building prefab hangs on itself. Keyed per prefab, not per mesh:
+//! two prefabs can share a shell `.xob` and dress it differently.
+struct AttachSet
+{
+    std::vector<MeshAttachment> parts;
+};
+
+constexpr uint32_t kNoAttachSet = 0xffffffffu;
+
+//! A socket bone's rotation, in the convention the rest of this loader already uses.
+//!
+//! The `.xob` stores a quaternion and the engine's `MRotationY` is the TRANSPOSE of
+//! the textbook quaternion matrix, so one of the two readings is 180 degrees wrong on
+//! every wall and the difference is not visible on a symmetric door frame. Measured
+//! rather than picked: `FarmHouse_E_1L01_Base.et` places three curtain props by
+//! explicit `angles` next to the sockets of the windows they hang in -- the curtain
+//! in the +X wall carries `angles 0 -90 0` and the sockets in that same wall carry
+//! `(0, -0.707, 0, 0.707)`, while the curtains in the -Z wall carry `angles 0 0 0`
+//! against an identity socket quaternion. So a socket quaternion of yaw theta is the
+//! same rotation the loader already feeds `AddObject` as theta degrees, and since
+//! `AddObject` builds it with `Matrix4(MRotationY, ...)` the matching quaternion
+//! matrix is the textbook one CONJUGATED.
+inline Matrix3 BoneBasis(const float q[4])
+{
+    const float norm = q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3];
+    if (!(norm > 1e-6f))
+        return Matrix3(1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f);
+    const float s = 2.0f / norm;
+    // Conjugated: the vector part is negated on the way in, which is exactly the
+    // transpose of the textbook matrix and costs nothing to write out directly.
+    const float x = -q[0], y = -q[1], z = -q[2], w = q[3];
+    return Matrix3(1.0f - s * (y * y + z * z), s * (x * y - z * w), s * (x * z + y * w), s * (x * y + z * w),
+                   1.0f - s * (x * x + z * z), s * (y * z - x * w), s * (x * z - y * w), s * (y * z + x * w),
+                   1.0f - s * (x * x + y * y));
+}
+
+
 //! One placement, resolved: where it goes and which `.xob` draws it.
 struct ResolvedPlacement
 {
@@ -721,6 +784,7 @@ struct ResolvedPlacement
     float rollDeg = 0.0f;
     bool terrainRelative = false;
     uint32_t mesh = 0; //!< index into the mesh list
+    uint32_t attachSet = kNoAttachSet; //!< RFG-064: index into the attachment sets, or none
 };
 
 //! RFG-027: one road, ready to become a strip of geometry.
@@ -734,10 +798,106 @@ struct ResolvedRoad
     std::string material;                 //!< the `.emat` the texture came from
 };
 
+namespace Enf = Poseidon::Asset::Formats::Enfusion;
+
+/// RFG-064: the caches one attachment walk needs, kept for the whole world load.
+///
+/// All three are keyed on a path rather than a placement because the work is per
+/// ASSET: Everon places one farmhouse prefab thousands of times, and reading its
+/// shell `.xob` -- a multi-megabyte zlib decompress -- once per placement would cost
+/// more than the rest of the world load put together.
+struct AttachWorkspace
+{
+    const EnfusionMount* mount = nullptr;
+    std::unordered_map<std::string, std::string> partToMesh;              //!< `.et` (lower) -> `.xob`
+    std::unordered_map<std::string, std::vector<Enf::XobBone>> meshBones; //!< `.xob` -> its bones
+    std::unordered_map<std::string, uint32_t> index;                      //!< `.xob` -> attachment mesh slot
+    std::vector<size_t> counts;                                           //!< placements per attachment mesh
+};
+
+const std::vector<Enf::XobBone>& BonesOf(AttachWorkspace& ws, const std::string& xobPath, PlacementSummary& summary)
+{
+    const auto hit = ws.meshBones.find(xobPath);
+    if (hit != ws.meshBones.end())
+        return hit->second;
+    std::vector<Enf::XobBone> bones;
+    std::vector<uint8_t> blob;
+    if (ws.mount->Read(xobPath, blob))
+    {
+        const Enf::XobHeader header = Enf::ReadXobHeader(blob.data(), blob.size());
+        if (header.valid())
+            bones = header.bones;
+        else if (summary.slotFailure.empty())
+            summary.slotFailure = xobPath + ": " + header.error;
+    }
+    return ws.meshBones.emplace(xobPath, std::move(bones)).first->second;
+}
+
+/// Every part a prefab hangs on its shell, flattened into the shell's model space.
+///
+/// Recursive because the tree is: `FarmHouse_E_1L01_Base.et` binds
+/// `DoorSet_Village_E_01_L_EXT_ST_M1.et` to `socket_door_ext_left_01`, and that door
+/// SET is itself a frame mesh with a `socket_door_LEFT` bone carrying the leaf. Stop
+/// at the frame and every doorway has a frame and no door in it -- which looks like
+/// the hole this whole change is here to close.
+void CollectAttachments(AttachWorkspace& ws, PlacementSummary& summary, const std::string& etPath,
+                        const std::string& xobPath, const Vector3& offset, const Matrix3& basis, int depth,
+                        std::vector<MeshAttachment>& out)
+{
+    // Three levels is building -> set -> leaf, which is the deepest the corpus goes;
+    // the limit is here to bound authored data, not to express an expectation.
+    if (depth > 2)
+        return;
+    const Enf::PrefabSlots slots = Enf::ResolvePrefabSlots(*ws.mount, etPath);
+    if (slots.empty())
+        return;
+    if (depth == 0)
+        ++summary.slotPrefabs;
+
+    // Copied, not referenced: the recursive call below inserts into `meshBones`.
+    const std::vector<Enf::XobBone> bones = BonesOf(ws, xobPath, summary);
+    for (const Enf::XobBone& bone : bones)
+    {
+        const std::string partEt = Enf::SlotPrefabForBone(slots, bone.name);
+        if (partEt.empty())
+            continue;
+        ++summary.slotBones;
+        const std::string key = LowerCopy(partEt);
+        auto cached = ws.partToMesh.find(key);
+        if (cached == ws.partToMesh.end())
+        {
+            const Enf::PrefabResolution resolved = Enf::ResolvePrefabModel(*ws.mount, partEt);
+            if (resolved.xobPath.empty() && summary.slotFailure.empty())
+                summary.slotFailure = partEt + ": " + resolved.reason;
+            cached = ws.partToMesh.emplace(key, resolved.xobPath).first;
+        }
+        if (cached->second.empty())
+        {
+            ++summary.slotUnresolved;
+            continue;
+        }
+
+        MeshAttachment part;
+        part.basis = basis * BoneBasis(bone.rotation);
+        part.offset = offset + basis * Vector3(bone.translation.x, bone.translation.y, bone.translation.z);
+        auto slot = ws.index.find(cached->second);
+        if (slot == ws.index.end())
+        {
+            slot = ws.index.emplace(cached->second, static_cast<uint32_t>(ws.counts.size())).first;
+            ws.counts.push_back(0);
+        }
+        part.mesh = slot->second;
+        out.push_back(part);
+
+        CollectAttachments(ws, summary, partEt, cached->second, part.offset, part.basis, depth + 1, out);
+    }
+}
+
 PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string& addonsDir,
                                    std::vector<std::pair<std::string, size_t>>& meshes,
-                                   std::vector<ResolvedPlacement>& resolved,
-                                   std::vector<ResolvedRoad>& roads)
+                                   std::vector<ResolvedPlacement>& resolved, std::vector<ResolvedRoad>& roads,
+                                   std::vector<std::pair<std::string, size_t>>& attachMeshes,
+                                   std::vector<AttachSet>& attachSets)
 {
     namespace Enf = Poseidon::Asset::Formats::Enfusion;
     PlacementSummary out;
@@ -779,6 +939,13 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
     std::unordered_map<std::string, std::string> prefabToMesh;
     std::unordered_map<std::string, uint32_t> meshIndex;
     std::vector<size_t> meshCounts;
+    // RFG-064: the attachment side keeps its OWN mesh list. Sharing the main one
+    // would put doors and windows into the histogram the model cap ranks, and a
+    // door is a rare mesh by construction -- Everon uses hundreds of distinct ones --
+    // so the cap would drop exactly the parts this is here to restore.
+    std::unordered_map<std::string, uint32_t> prefabToAttach;
+    AttachWorkspace workspace;
+    workspace.mount = &mount;
     resolved.reserve(world.placements.size());
     // Resolved once per material GUID: 2,370 roads share a couple of dozen surfaces
     // and each resolution reads an `.emat` out of an archive.
@@ -895,8 +1062,39 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
         // under, because SCR_DestructibleBuildingEntity is 93% flagless.
         item.terrainRelative = !placement.hasFlags && std::fabs(placement.position[1]) < 2.0f;
         item.mesh = slot->second;
+        // RFG-064: the parts this prefab hangs off its shell's socket bones. Once
+        // per DISTINCT prefab GUID, like the mesh above.
+        auto attachCached = prefabToAttach.find(placement.prefabGuid);
+        if (attachCached == prefabToAttach.end())
+        {
+            uint32_t setIndex = kNoAttachSet;
+            const auto guidHit = byGuid.find(placement.prefabGuid);
+            if (guidHit != byGuid.end())
+            {
+                AttachSet set;
+                const Matrix3 identity(1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f);
+                CollectAttachments(workspace, out, guidHit->second, cached->second, Vector3(0.0f, 0.0f, 0.0f), identity, 0, set.parts);
+                if (!set.parts.empty())
+                {
+                    setIndex = static_cast<uint32_t>(attachSets.size());
+                    attachSets.push_back(std::move(set));
+                }
+            }
+            attachCached = prefabToAttach.emplace(placement.prefabGuid, setIndex).first;
+        }
+        item.attachSet = attachCached->second;
+        if (item.attachSet != kNoAttachSet)
+        {
+            ++out.slotBuildings;
+            for (const MeshAttachment& part : attachSets[item.attachSet].parts)
+                ++workspace.counts[part.mesh];
+        }
+
         resolved.push_back(item);
     }
+    attachMeshes.resize(workspace.counts.size());
+    for (const auto& [path, index] : workspace.index)
+        attachMeshes[index] = {path, workspace.counts[index]};
     out.distinctMeshes = meshCounts.size();
     meshes.resize(meshCounts.size());
     for (const auto& [path, index] : meshIndex)
@@ -1418,8 +1616,10 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
         std::vector<std::pair<std::string, size_t>> meshes;
         std::vector<ResolvedPlacement> placed;
         std::vector<ResolvedRoad> roads;
-        const PlacementSummary summary =
-            ResolvePlacements(EnfusionMount::Instance(), addonsDir, meshes, placed, roads);
+        std::vector<std::pair<std::string, size_t>> attachMeshes;
+        std::vector<AttachSet> attachSets;
+        const PlacementSummary summary = ResolvePlacements(EnfusionMount::Instance(), addonsDir, meshes, placed,
+                                                           roads, attachMeshes, attachSets);
         if (!summary.error.empty())
         {
             LOG_WARN(World, "Enfusion native load: placements unavailable: {}", summary.error);
@@ -1602,6 +1802,35 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
                     LOG_WARN(World, "Enfusion native load: OVERSIZED '{}' radius {:.0f} m, {} placements",
                              meshes[index].first, shape->BoundingSphere(), meshes[index].second);
             }
+            // RFG-064: attachment meshes are built OUTSIDE the model cap, on purpose.
+            //
+            // The cap ranks meshes by placement count, and a door or a window is a
+            // rare mesh by construction -- Everon draws hundreds of distinct ones,
+            // each on a handful of houses. Ranked against 820,184 trees they never
+            // make the budget, so a cap of 350-450 models (the owner's usual run)
+            // would build every house shell and not one of the openings, and the
+            // repair would show as nothing at all. They are cheap to make that
+            // exception for: a door frame is two orders of magnitude smaller than a
+            // house, and the count is bounded by how many distinct parts the built
+            // shells actually reference.
+            std::unordered_map<uint32_t, LODShapeWithShadow*> attachShapes;
+            size_t attachBuilt = 0, attachBuildFailed = 0;
+            std::string firstAttachFailure;
+            for (size_t i = 0; i < attachMeshes.size(); ++i)
+            {
+                std::string why;
+                LODShapeWithShadow* shape =
+                    BuildShapeFromXob(EnfusionMount::Instance(), attachMeshes[i].first, why);
+                if (shape == nullptr)
+                {
+                    ++attachBuildFailed;
+                    if (firstAttachFailure.empty())
+                        firstAttachFailure = attachMeshes[i].first + ": " + why;
+                    continue;
+                }
+                attachShapes.emplace(static_cast<uint32_t>(i), shape);
+                ++attachBuilt;
+            }
             const DWORD buildMs = Poseidon::Foundation::GlobalTickCount() - buildStart;
 
             // Near first here too: the object cap walks this list in order, so leaving
@@ -1617,6 +1846,8 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
                              });
 
             size_t added = 0;
+            size_t attachPlaced = 0;
+            size_t attachSkipped = 0;
             size_t buriedObjects = 0;
             size_t buriedStructures = 0;
             size_t rescuedObjects = 0;
@@ -1705,6 +1936,38 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
                     if (std::fabs(item.scale - 1.0f) > 1e-3f)
                         orientation = orientation * Matrix3(MScale, item.scale);
                     placedObject->SetOrientation(orientation);
+
+                    // RFG-064: the doors, gates and windows this building hangs on
+                    // itself. `orientation` is the FINISHED house frame -- yaw, tilt
+                    // and scale -- so a part rides all three, which is what makes it
+                    // stay in its opening on a house standing on a slope.
+                    //
+                    // Not counted against `objectCap`: that budget exists to bound
+                    // how much of the island is built, and a door is not a separate
+                    // decision from the house it is in. Halving a house is worse than
+                    // exceeding the cap by the number of its openings.
+                    if (item.attachSet != kNoAttachSet)
+                    {
+                        for (const MeshAttachment& part : attachSets[item.attachSet].parts)
+                        {
+                            const auto partShape = attachShapes.find(part.mesh);
+                            if (partShape == attachShapes.end())
+                            {
+                                ++attachSkipped;
+                                continue;
+                            }
+                            const Vector3 here = Vector3(item.position[0], y, item.position[2]) +
+                                                 orientation * part.offset;
+                            Object* attached = AddObject(here, item.yawDeg, partShape->second);
+                            if (attached == nullptr)
+                            {
+                                ++attachSkipped;
+                                continue;
+                            }
+                            attached->SetOrientation(orientation * part.basis);
+                            ++attachPlaced;
+                        }
+                    }
                 }
                 // RFG-035: count what ends up under the ground. "The buildings are
                 // missing" and "the buildings are buried" look identical from the
@@ -1803,6 +2066,22 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
                      firstBuriedStructure.empty() ? (firstBuried.empty() ? "" : ("; first: " + firstBuried))
                                                   : ("; first structure: " + firstBuriedStructure),
                      firstBuildFailure.empty() ? "" : ("; first build failure: " + firstBuildFailure));
+
+            // RFG-064: the one line that says whether the houses got their doors
+            // back. Everything else about this feature is invisible from the air --
+            // a house with no door and a house with a door look the same from 200 m
+            // and identical in the placement histogram -- so the numbers say it
+            // instead: how many buildings declared openings, how many bones matched a
+            // part, how many parts were actually put in the world, and how many were
+            // lost and to what.
+            LOG_INFO(World,
+                     "Enfusion native load: attachments: {} prefabs declared slots over {} socket bones "
+                     "({} unresolved), {} distinct part meshes ({} built, {} failed); {} parts placed on {} "
+                     "buildings, {} skipped{}{}",
+                     summary.slotPrefabs, summary.slotBones, summary.slotUnresolved, attachMeshes.size(),
+                     attachBuilt, attachBuildFailed, attachPlaced, summary.slotBuildings, attachSkipped,
+                     summary.slotFailure.empty() ? "" : ("; first slot failure: " + summary.slotFailure),
+                     firstAttachFailure.empty() ? "" : ("; first build failure: " + firstAttachFailure));
 
             // RFG-027: the road network. One shape per road rather than one shared
             // shape placed many times, because every road is a different length and

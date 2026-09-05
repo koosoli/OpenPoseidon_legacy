@@ -209,6 +209,26 @@ struct XobLodDesc
 };
 
 //! HEAD, decoded. `error` empty means every closure below held.
+//! RFG-064 -- one node of the `.xob` skeleton.
+//!
+//! Enfusion hangs a building's doors, gates and windows off named bones of the
+//! house mesh (`socket_door_ext_left_01`, `Socket_Win_110x142_008`), so a reader
+//! that skips the bone array cannot place any of them. Measured on
+//! `FarmHouse_E_1L01.xob`: 26 bones, one `Scene_Root` and 25 sockets, and its
+//! prefab names exactly those 25.
+//!
+//! The record is 36 bytes and every field of it was read off the corpus rather
+//! than assumed: u16 name ordinal, u16 parent, f32[3] translation, f32[4]
+//! quaternion (x,y,z,w), u16 next sibling, u16 first child -- the last two being
+//! 0xffff for "none", which is what identified them.
+struct XobBone
+{
+    std::string name;
+    uint16_t parent = 0;
+    XobVec3 translation;
+    float rotation[4] = {0.0f, 0.0f, 0.0f, 1.0f}; //!< x, y, z, w
+};
+
 struct XobHeader
 {
     uint32_t version = 0;
@@ -219,6 +239,7 @@ struct XobHeader
     std::vector<std::string> strings;
     std::vector<XobMaterial> materials;
     std::vector<XobVec3> points;
+    std::vector<XobBone> bones;
     std::vector<XobLodDesc> lods;
 
     //! Reported separately because each catches a different class of mistake, and
