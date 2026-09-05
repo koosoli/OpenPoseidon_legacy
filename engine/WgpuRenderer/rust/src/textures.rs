@@ -838,8 +838,19 @@ fn write_mip(
             rows_per_image: Some(format.rows(height)),
         },
         wgpu::Extent3d {
-            width,
-            height,
+            // RFG-049a: a block-compressed copy extent must be a multiple of the block
+            // size. The tail of a mip chain is not: a 1024 texture ends 2x2 and 1x1, and
+            // wgpu refuses those with "Copy height is not a multiple of block height" --
+            // one validation error per mip, after which the device is poisoned and every
+            // later frame fails `get_current_texture`. The picture is a black window and
+            // the auto-screenshot still reports success, so the mip tail looks like a
+            // renderer crash rather than an alignment rule.
+            //
+            // Rounded UP rather than skipped: the level exists in the file, the physical
+            // size of a 2x2 BC7 level is one 4x4 block, and that block is what the file
+            // holds. Skipping would leave the texture with fewer mips than it declared.
+            width: if format.is_block_compressed() { width.max(4) } else { width },
+            height: if format.is_block_compressed() { height.max(4) } else { height },
             depth_or_array_layers: 1,
         },
     );
