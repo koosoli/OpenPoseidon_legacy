@@ -1515,6 +1515,11 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
         // pixels. The river fades out over its last 0.6 m of fall so the two surfaces never
         // composite twice and the junction has no step.
         if (body_kind == 2) {
+            // Below the sea datum there is no river surface at all: the sea is drawn there and
+            // two surfaces a few centimetres apart z-fight. Discard, not fade.
+            if (in.body_level <= wp.sea_level) {
+                discard;
+            }
             body_coverage = body_coverage * smoothstep(0.0, 0.6, in.body_level - wp.sea_level);
         }
         body_profile = i32(k.w + 0.5);
