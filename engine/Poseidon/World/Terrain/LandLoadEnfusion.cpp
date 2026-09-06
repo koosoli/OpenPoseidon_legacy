@@ -23,6 +23,7 @@
 // and it is deliberate — 2048 x 2048 over 12.8 km is 6.25 m a cell, the same figure
 // the converting exporter produces, so the two routes are comparable.
 
+#include <Poseidon/Dev/Diag/StreamingDiag.hpp> // RFG-097/099: the nativeStreaming lever
 #include <Poseidon/World/Terrain/Landscape.hpp>
 
 #include <Poseidon/Asset/Formats/Enfusion/EbinWorld.hpp>
@@ -2137,11 +2138,7 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
             // of the load, so each level became a private CPU/GPU copy -- 5944 buffers,
             // 863 MB, identical for every budget. The stream's cold path builds the shape
             // when the first placement needs it, after the renderer registered it.
-            const bool streamNative = []
-            {
-                const char* v = std::getenv("POSEIDON_REFORGER_STREAM");
-                return v != nullptr && *v == '1';
-            }();
+            const bool streamNative = Poseidon::Dev::GResidencyLevers().nativeStreaming; // RFG-097/099, Streaming tab
             for (size_t i = 0; !streamNative && i < byCount.size() && built < modelCap; ++i)
             {
                 const uint32_t index = byCount[i].second;
@@ -2232,9 +2229,10 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
             // Budget, radius and window growth are the stream's own knobs
             // (WGR_OBJECT_STREAM_MAX_OBJECTS / _RADIUS_CELLS); POSEIDON_REFORGER_STREAM=0
             // restores the radius-at-load behaviour for an A/B.
-            // OFF by default until the retained/direct duplication under streaming is fixed
-            // (measured: 1,572 MB of direct-path copies, OOM); POSEIDON_REFORGER_STREAM=1 opts in.
-            // (streamNative is decided above the shape build, see RFG-099.)
+            // ON by default since RFG-099 (the direct-path duplication is fixed; 24 ms/frame
+            // streamed against 46 ms for the radius path at the church). The Streaming tab's
+            // "Native Reforger worlds stream their objects" lever / POSEIDON_REFORGER_STREAM=0
+            // restore the radius-at-load behaviour; streamNative is read above the shape build.
             size_t streamed = 0, streamedParts = 0;
             if (streamNative)
             {
@@ -2767,7 +2765,7 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
         LOG_INFO(World,
                  "Enfusion native load: STREAMING -- {} placements binned into {} land cells, {} models "
                  "({} terrain-relative), budget {} resident, window {} cells; largest bounding centre of a "
-                 "pre-built shape {:.2f} m [POSEIDON_REFORGER_STREAM=1 opted in]",
+                 "pre-built shape {:.2f} m [POSEIDON_REFORGER_STREAM=0 or the Streaming tab restore the radius at load]",
                  _modernObjectPlacements.size(), _modernObjectCells.size(), _modernObjectModels.size(),
                  streamedTerrainRelativeTotal, _modernObjectBudget, _modernObjectRadius, maxBoundingCentreTotal);
     }

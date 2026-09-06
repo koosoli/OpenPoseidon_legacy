@@ -1189,9 +1189,11 @@ under streaming. Result at the full 20,000-object budget: direct buffers 116 MB 
 shared, "not spent"), retained 491 MB, **0 wgpu errors**, 6,097 instances in the main
 pass at the church. RFG-101: streamed objects fold into the geography as they arrive
 (InitGeography saw an empty landscape), the terrain re-uploads it throttled; the church
-cells read hard=3 and the clutter no longer grows through the nave. Streaming is still
-opt-in (`POSEIDON_REFORGER_STREAM=1`) until the per-frame cost is measured against the
-radius path.
+cells read hard=3 and the clutter no longer grows through the nave. Measured against the
+radius path at the church (same pose, same build): **24 ms/frame streamed against 46 ms
+for the radius path** (419k registered objects, 50k main-pass instances), so streaming is
+now the DEFAULT for native worlds -- Streaming tab "Native Reforger worlds stream their
+objects", or `POSEIDON_REFORGER_STREAM=0`, restore the radius at load.
 
 **RFG-102 (2026-09-06, build `6840b7f8`+): the "strange textures" inside and outside the
 houses were the `.xob` reader.** The dedup vertex stream stores its UV sets interleaved

@@ -98,6 +98,12 @@ struct ResidencyLevers
     //                                                 path holds draws through that mesh instead
     //                                                 of a second copy in the geometry pool
     bool  shareRetainedMeshes = true;
+    //   nativeStreaming POSEIDON_REFORGER_STREAM=0 turns it OFF: RFG-097/099, a native
+    //   Reforger world hands every placement to the object stream instead of placing a
+    //   radius at load. Measured at the church: 24 ms/frame streamed against 46 ms for
+    //   the radius path (419k registered objects), 0 wgpu errors at the 20k budget, and
+    //   the world exists beyond 300 m. Read at world load.
+    bool  nativeStreaming = true;
     //   compressComposites  POSEIDON_COMPRESS_COMPOSITES=0 turns it OFF: RFG-092, an `enfa|`
     //                                                 leaf composite is encoded to BC3 on the
     //                                                 CPU instead of uploaded as RGBA8 (4x)
@@ -121,6 +127,8 @@ inline ResidencyLevers& GResidencyLevers()
             l.layerTintInShader = (*v == '0');
         if (const char* v = std::getenv("WGR_SHARE_RETAINED_MESHES"))
             l.shareRetainedMeshes = !(*v == '0');
+        if (const char* v = std::getenv("POSEIDON_REFORGER_STREAM"))
+            l.nativeStreaming = !(*v == '0');
         if (const char* v = std::getenv("POSEIDON_COMPRESS_COMPOSITES"))
             l.compressComposites = !(*v == '0');
         return l;

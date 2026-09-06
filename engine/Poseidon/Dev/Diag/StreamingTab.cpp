@@ -65,6 +65,12 @@ void DrawStreamingTab()
                           "shared BC7 tile and the shader multiplies the layer colour. Baked: one tinted RGBA8\n"
                           "copy per (colour, tile) pair -- measured 3,480 MB for 671 of them on Everon.\n"
                           "Applies to textures first drawn from now on; reload the world for all of them.");
+    Checkbox("Native Reforger worlds stream their objects (RFG-097/099)", &levers.nativeStreaming);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("POSEIDON_REFORGER_STREAM=0 turns this off. Every placement of a native world goes to\n"
+                          "the object stream (budget WGR_OBJECT_STREAM_MAX_OBJECTS, default 20000) instead of a\n"
+                          "300 m radius placed at load. Measured at the church: 24 ms/frame streamed, 46 ms for\n"
+                          "the radius path. Read at world load -- reload the world to apply.");
     Checkbox("CPU-path buffers share the retained model's mesh (RFG-088)", &levers.shareRetainedMeshes);
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("WGR_SHARE_RETAINED_MESHES=0 turns this off. A Partial model (interior proxies, a glass\n"

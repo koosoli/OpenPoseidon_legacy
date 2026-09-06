@@ -293,3 +293,19 @@ must not be guessed — `RESEARCHED` under-claims safely, `INTEGRATED` does not.
 If you park something, add it here with the reason and the unpark condition. If you unpark
 something, delete its entry in the same commit as the work — an entry that is quietly wrong
 is worse than no page.
+
+## Native Everon: forest contrast and the church doors (parked 2026-09-06)
+
+- **Forest looks flat.** The owner's forest pose (4697.60 3998.02 50.23 az 220.6 el -5.0)
+  shows pines with little tonal range. Ruled out so far: the layer tint (a LINEAR
+  multiplier, applied correctly), the canopy flags (native trees carry `map=tree/bush`, so
+  the foliage lighting runs), UV decode (RFG-102 fixed the buildings; polyplanes were never
+  striped). What is left is lighting: the polyplane composites get no self-shadow / AO and
+  the foliage wrap flattens them. Needs a side-by-side with Reforger at the same pose and
+  hour before tuning anything.
+- **Church doors "inside the building".** RFG-100 measured the door sockets: the big
+  doors sit at the shell origin, which is the doorway between porch and nave; the owner's
+  pose is in the porch. They are placed correctly and CLOSED. Reforger opens them by
+  interaction; a default-open state for `Door_*` parts would need the door prefab's open
+  angle, which the loader does not read.
+
