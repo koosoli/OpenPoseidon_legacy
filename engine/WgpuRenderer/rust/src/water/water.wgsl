@@ -652,6 +652,21 @@ fn vs_water(
         let b = wp.bodies[3 * (body_index - 1) + 1];
         surface_level = b.x;
         body_wave = max(b.y, 0.0);
+        // Bed-following reach: the surface is the terrain along the centreline plus a depth,
+        // sampled from the same heightmap the CPU reads, so a river lies in its valley.
+        if (b.w > 0.0) {
+            let e = wp.bodies[3 * (body_index - 1)];
+            let f = wp.bodies[3 * (body_index - 1) + 2];
+            let fc = cos(f.w);
+            let fs = sin(f.w);
+            let world_v = origin + grid * size;
+            let dxz = world_v - e.xy;
+            let along = fc * dxz.x + fs * dxz.y;
+            let centre = e.xy + vec2<f32>(fc, fs) * along;
+            if (seabed_contains(centre)) {
+                surface_level = seabed_height(centre) + b.w;
+            }
+        }
     }
     let world_xz_fine = origin + grid * size;
     let dist = length(vec3<f32>(world_xz_fine.x, surface_level, world_xz_fine.y) - frame.cam_pos.xyz);
@@ -1503,7 +1518,7 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
         let u = (fc * dxz.x + fs * dxz.y) / max(e.z, 1e-3);
         let v = (-fs * dxz.x + fc * dxz.y) / max(e.w, 1e-3);
         let d = u * u + v * v;
-        body_kind = i32(k.z + 0.5);
+        body_kind = i32(k.z + 0.5) / 8;
         body_flow = normalize(f.xy + vec2<f32>(1e-4, 0.0));
         body_flow_speed = max(f.z, 0.0);
         if (d > 1.06) {
@@ -1522,7 +1537,7 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
             }
             body_coverage = body_coverage * smoothstep(0.0, 0.6, in.body_level - wp.sea_level);
         }
-        body_profile = i32(k.w + 0.5);
+        body_profile = i32(k.z + 0.5) % 8;
     }
 
     let interaction_cell = 1.0;

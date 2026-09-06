@@ -674,6 +674,8 @@ void RegisterBodyFixtures()
             river.flowZ = -river.gradientZ / gl;
             river.flowSpeed = v.size() > 9 ? v[9] : 1.2f;
         }
+        // Rivers follow their bed by default: 0.6 m over the centreline terrain.
+        river.bedDepth = v.size() > 11 ? v[11] : 0.6f;
         // Optional field 10: heading of the reach in degrees (0 = world +x); the ellipse's long
         // axis follows it. Default: the downhill direction.
         if (v.size() > 10)
@@ -1304,8 +1306,11 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
             const float farRange = _ranges.empty() ? 4000.0f : _ranges.back();
             const bool tileIt = dx * dx + dz * dz <= farRange * farRange;
             _params.bodies[3 * i] = {b.centreX, b.centreZ, b.radiusX, b.radiusZ};
-            _params.bodies[3 * i + 1] = {b.level, b.waveScale, static_cast<float>(b.kind),
-                                         static_cast<float>(b.profile)};
+            // kind and profile share one lane (kind * 8 + profile); .w is the bed-following depth
+            // (0 = plane mode).
+            _params.bodies[3 * i + 1] = {b.level, b.waveScale,
+                                         static_cast<float>(static_cast<int>(b.kind) * 8 + static_cast<int>(b.profile)),
+                                         b.bedDepth};
             _params.bodies[3 * i + 2] = {b.flowX, b.flowZ, b.flowSpeed, b.rotation};
             const float x0 = std::floor(b.MinX() / tile) * tile;
             const float z0 = std::floor(b.MinZ() / tile) * tile;

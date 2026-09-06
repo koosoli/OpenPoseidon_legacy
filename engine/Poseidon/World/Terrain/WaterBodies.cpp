@@ -1,5 +1,7 @@
 #include <Poseidon/World/Terrain/WaterBodies.hpp>
 
+#include <Poseidon/World/Terrain/Landscape.hpp>
+
 #include <algorithm>
 #include <cmath>
 
@@ -46,7 +48,18 @@ bool WaterBody::Contains(float x, float z) const
 
 float WaterBody::SurfaceLevelAt(float x, float z) const
 {
-    return level + gradientX * (x - centreX) + gradientZ * (z - centreZ);
+    const float plane = level + gradientX * (x - centreX) + gradientZ * (z - centreZ);
+    if (bedDepth > 0.0f && GLandscape != nullptr)
+    {
+        // Project onto the centreline (local x axis) and read the bed there.
+        float lx, lz;
+        ToLocal(x, z, lx, lz);
+        const float c = std::cos(rotation), s = std::sin(rotation);
+        const float cx = centreX + c * lx;
+        const float cz = centreZ + s * lx;
+        return GLandscape->SurfaceY(cx, cz) + bedDepth;
+    }
+    return plane;
 }
 
 uint32_t WaterBodyRegistry::Add(WaterBody body)

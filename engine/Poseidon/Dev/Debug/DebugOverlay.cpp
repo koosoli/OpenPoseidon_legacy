@@ -6317,6 +6317,7 @@ void DrawWaterTab()
             river.gradientX = -0.004f * hx;
             river.gradientZ = -0.004f * hz;
             river.waveScale = 0.05f;
+            river.bedDepth = 0.6f;
             river.flowX = hx;
             river.flowZ = hz;
             river.flowSpeed = 1.2f;

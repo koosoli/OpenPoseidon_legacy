@@ -69,6 +69,11 @@ struct WaterBody
     // Yaw of the ellipse's local x axis in the world xz plane (radians; 0 = world +x). A river
     // reach follows its heading; lakes leave it at 0.
     float rotation = 0.0f;
+    // Bed-following (rivers): when > 0 the surface is the TERRAIN height along the reach's
+    // centreline plus this depth, instead of the plane above. A plane cannot follow a valley
+    // floor; the centreline profile can, and the CPU and GPU sample the same heightfield.
+    // 0 = plane mode (lakes).
+    float bedDepth = 0.0f;
 
     // World-axis half extents of the rotated ellipse (its bounding box).
     float ExtentX() const;
