@@ -37,7 +37,7 @@ class Mission
 					azimut=60.0;
 					id=1;
 					side="WEST";
-					vehicle="PBR";
+					vehicle="BoatW";
 					skill=0.2;
 				};
 				class Item1

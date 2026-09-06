@@ -1284,13 +1284,22 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
         for (size_t i = 0; i < bodyCount; ++i)
         {
             const WaterBody& b = bodies[i];
+            // Distance cull: a body whose nearest point is beyond the ocean's last CDLOD range
+            // contributes nothing visible; its table entry stays (containment, compositor) but
+            // no nodes are tiled for it. Keeps the many-bodies case bounded by what is near.
+            const float camX = camera->Position().X();
+            const float camZ = camera->Position().Z();
+            const float dx = std::max(std::abs(camX - b.centreX) - b.radiusX, 0.0f);
+            const float dz = std::max(std::abs(camZ - b.centreZ) - b.radiusZ, 0.0f);
+            const float farRange = _ranges.empty() ? 4000.0f : _ranges.back();
+            const bool tileIt = dx * dx + dz * dz <= farRange * farRange;
             _params.bodies[3 * i] = {b.centreX, b.centreZ, b.radiusX, b.radiusZ};
             _params.bodies[3 * i + 1] = {b.level, b.waveScale, static_cast<float>(b.kind),
                                          static_cast<float>(b.profile)};
             _params.bodies[3 * i + 2] = {b.flowX, b.flowZ, b.flowSpeed, 0.0f};
             const float x0 = std::floor(b.MinX() / tile) * tile;
             const float z0 = std::floor(b.MinZ() / tile) * tile;
-            for (float z = z0; z < b.MaxZ(); z += tile)
+            for (float z = z0; tileIt && z < b.MaxZ(); z += tile)
             {
                 for (float x = x0; x < b.MaxX(); x += tile)
                 {
