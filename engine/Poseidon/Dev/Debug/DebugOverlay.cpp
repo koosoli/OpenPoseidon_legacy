@@ -6255,6 +6255,12 @@ void DrawWaterTab()
                    "different phenomena -- water breaking on land versus a crest collapsing under its own "
                    "steepness -- and 'Foam intensity' used to scale both, so calming the ocean also "
                    "stripped the surf.");
+    changed |= Dev::Checkbox("Whitecaps need wind (WRL-002)", &s.whitecapWindGate);
+    Dev::PanelTooltip("ON: whitecap foam, its persistent history and wind-torn spray are scaled by the "
+                      "latched wind speed -- none below ~4 m/s, full at the 12 m/s reference sea -- at all "
+                      "three sources. OFF: crest geometry alone decides, so a calm sea still carries a lace "
+                      "of foam and floating spray sprites (the previous behaviour, for A/B). Impact and wake "
+                      "splashes are not gated.");
     changed |= Dev::SliderFloat("Wave foam intensity", &s.waveFoamIntensity, 0.0f, 2.0f, "%.2f");
     Dev::PanelTooltip("Whitecaps and persistent breaker foam. 0 = none; the shoreline band is unaffected.");
     changed |= Dev::SliderFloat("Deep-water falloff", &s.waveFoamDeepFalloff, 0.0f, 1.0f, "%.2f");

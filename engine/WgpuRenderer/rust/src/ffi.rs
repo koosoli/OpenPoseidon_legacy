@@ -1362,7 +1362,8 @@ pub struct WgrWaterParams {
     // band). yzw carry wave-foam intensity / deep falloff / planar edge fade. (sizeof 256 -> 272.)
     pub underwater_gate: WgrVec4,
     // WRL-002 — x = shared optical model on (1) / previous physical composite (0), consulted
-    // only while look_params.x is on. yzw reserved. (sizeof 272 -> 288, matching C++.)
+    // only while look_params.x is on; y = whitecap wind gate on (1) / crest-only (0).
+    // zw reserved. (sizeof 272 -> 288, matching C++.)
     pub optics_params: WgrVec4,
 }
 

@@ -14,7 +14,7 @@
 #import shadow::shadow_strength
 #import color::srgb_to_linear
 #import water_fft_sampling::fft_aperiodic_uv
-#import water_optics::{water_extinction, water_transmittance, water_inscatter, water_albedo_along_path}
+#import water_optics::{water_extinction, water_transmittance, water_inscatter, water_albedo_along_path, whitecap_wind_factor}
 
 const PI: f32 = 3.14159265359;
 
@@ -2023,7 +2023,10 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
         // that much sooner. The deep-water end is now tunable: the fixed 0.55 still left open
         // ocean noticeably capped, and whitecaps out there should be occasional, not general.
         let deep_falloff = clamp(wp.underwater_gate.z, 0.0, 1.0);
-        let break_readiness = mix(1.05, mix(1.05, 0.12, deep_falloff), deep_water);
+        // WRL-002: and a crest only whitecaps when there is wind to make it (the same gate the
+        // foam injection and the spray emitter use, so all three sources agree).
+        let wind_gate = select(1.0, whitecap_wind_factor(wp.fft_wind_sea.z), wp.optics_params.y > 0.5);
+        let break_readiness = mix(1.05, mix(1.05, 0.12, deep_falloff), deep_water) * wind_gate;
         breaker_foam = clamp(crest_top * mix(0.28, 0.72, jacobian_break) * crest_shape * break_readiness,
             0.0, 1.0);
     }

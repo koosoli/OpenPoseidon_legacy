@@ -876,8 +876,8 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
                                std::clamp(look.waveFoamIntensity, 0.0f, 2.0f),
                                std::clamp(look.waveFoamDeepFalloff, 0.0f, 1.0f),
                                std::clamp(look.reflectionEdgeFade, 0.02f, 0.49f)};
-    // WRL-002 — shared optical model switch (x); yzw reserved.
-    _params.optics_params = {look.sharedOptics ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f};
+    // WRL-002 — shared optical model switch (x), whitecap wind gate (y); zw reserved.
+    _params.optics_params = {look.sharedOptics ? 1.0f : 0.0f, look.whitecapWindGate ? 1.0f : 0.0f, 0.0f, 0.0f};
     _params.sea_params = {look.seaStateCoupling ? 1.0f : 0.0f,
                           look.seaStateCoupling ? SeaStateResidualAmplitude(look.waveAmp) : look.waveAmp,
                           look.lowQuality ? 1.0f : 0.0f, look.shoreWaveGain};

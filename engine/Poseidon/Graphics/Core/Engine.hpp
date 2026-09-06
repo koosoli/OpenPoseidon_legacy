@@ -2364,7 +2364,13 @@ class Engine : public IGraphicsEngine
         // which is far brighter than a surface albedo would suggest — so the body colour has to
         // carry actual brightness in blue while staying dark in red.
         float shallowColor[3] = {0.070f, 0.290f, 0.320f}; // coastal turquoise
-        float deepColor[3] = {0.014f, 0.105f, 0.240f};    // saturated deep ocean blue
+        // WRL-002: the deep swatch now also sets the absorption hue (water_optics), so it
+        // decides what the water turns into with depth, not just what the far body looks
+        // like. Owner direction 2026-09-06: "the sea can also be a darker blue green the
+        // deeper it goes" -- pulled from the ultramarine (0.014, 0.105, 0.240) toward a
+        // darker teal, so a deepening column drifts blue-green and darker rather than
+        // saturating to a brighter navy.
+        float deepColor[3] = {0.010f, 0.085f, 0.135f};    // dark blue-green deep ocean
         // 1/m extinction. Applied directly (the old 0.15/m floor saturated every bay to the deep
         // colour by ~20 m, so the turquoise only survived at the waterline); ~0.035 spreads the
         // shallow -> deep transition over ~60 m, which is what a real shelf looks like from above.
@@ -2421,6 +2427,10 @@ class Engine : public IGraphicsEngine
         // framebuffer alpha that blended the background in a second time). Only consulted
         // while physicalLook is on.
         bool sharedOptics = true;
+        // WRL-002 — whitecaps (persistent foam injection, crest whitecaps and wind-torn spray)
+        // are gated by the latched wind speed: none below ~4 m/s, full at the 12 m/s reference
+        // sea. OFF reproduces crest-geometry-only whitecaps for A/B.
+        bool whitecapWindGate = true;
         float glitterGain = 1.0f;    // sun-specular gain (1 = the model's own energy)
         float sssGain = 1.0f;        // subsurface / backlit-crest gain
         float reflectionGain = 0.7f; // environment-reflection gain (1 = uncapped physical Fresnel)

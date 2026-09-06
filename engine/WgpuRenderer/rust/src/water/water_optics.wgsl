@@ -90,6 +90,18 @@ fn water_inscatter(albedo: vec3<f32>, light: vec3<f32>, transmittance: vec3<f32>
     return albedo * light / OPTICS_PI * (vec3<f32>(1.0) - clamp(transmittance, vec3<f32>(0.0), vec3<f32>(1.0)));
 }
 
+// WRL-002 — whitecap coverage versus wind. Whitecaps are essentially absent below about
+// 4 m/s (Beaufort 3 is "scattered whitecaps" at 5.5 m/s) and grow steeply with wind
+// (Monahan's coverage law goes as roughly U^3.4). One gate, applied at every whitecap
+// source: the persistent-foam injection, the crest whitecap term on the surface, and the
+// spray emitter. Before this, foam and spray were driven by crest geometry alone, so a
+// 5 m/s sea carried a lace of whitecaps and floating spray sprites. Anchored so the
+// 12 m/s reference sea is untouched (factor 1.0).
+fn whitecap_wind_factor(wind_speed: f32) -> f32 {
+    let s = smoothstep(3.5, 12.0, max(wind_speed, 0.0));
+    return s * s;
+}
+
 // How far along a path the authored colour drifts from the short-path (shallow) swatch to
 // the long-path (deep) one. Uses the mean extinction so a swatch that is pure blue does
 // not drift at a different rate per channel.

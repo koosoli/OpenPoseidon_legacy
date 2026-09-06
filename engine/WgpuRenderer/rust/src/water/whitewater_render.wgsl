@@ -6,6 +6,7 @@
 #import frame::{frame, reverse_z, fog_factor}
 #import color::srgb_to_linear
 #import water_fft_sampling::fft_aperiodic_uv
+#import water_optics::whitecap_wind_factor
 
 const TAU: f32 = 6.28318530718;
 const G: f32 = 9.81;
@@ -31,6 +32,7 @@ struct WaterParams {
     fft_control: vec4<f32>, fft_wind_sea: vec4<f32>,
     fft_cascade_lengths: vec4<f32>, flow_direction_speed: vec4<f32>,
     debug_params: vec4<f32>, look_params: vec4<f32>, sea_params: vec4<f32>,
+    underwater_params: vec4<f32>, underwater_gate: vec4<f32>, optics_params: vec4<f32>,
 };
 
 // This is deliberately the same group-1 interface as water.wgsl.  The unused
@@ -187,7 +189,9 @@ fn vs_whitewater(
     // Low water quality drops spray entirely along with the screen-space reflections.
     let spray_enabled = step(0.5, wp.debug_params.y) * (1.0 - step(0.5, wp.sea_params.z));
     let spray_activity = clamp(wp.debug_params.z, 0.0, 1.0);
-    let source_strength = max(crest.breaking, interaction_splash) * spray_enabled * spray_activity;
+    // WRL-002: wind-torn spray needs wind. Impact splashes are local events and stay ungated.
+    let wind_gate = select(1.0, whitecap_wind_factor(wp.fft_wind_sea.z), wp.optics_params.y > 0.5);
+    let source_strength = max(crest.breaking * wind_gate, interaction_splash) * spray_enabled * spray_activity;
 
     // Ballistics with air drag, rather than a scripted parabola. Closed-form solution of
     // dv/dt = -g - v/tau:

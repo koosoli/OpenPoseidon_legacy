@@ -1,7 +1,8 @@
 #import water_fft_sampling::fft_aperiodic_uv
+#import water_optics::whitecap_wind_factor
 
 struct InteractionParams { domain: vec4<f32>, previous_domain: vec4<f32>, grid: vec4<f32>, physics: vec4<f32>, misc: vec4<f32>, weather: vec4<f32>, };
-struct WaterParams { world_origin: vec2<f32>, terrain_grid: f32, sea_level: f32, hm_width: u32, hm_height: u32, time: f32, wave_amp: f32, wave_choppy: f32, wave_speed: f32, wave_scale: f32, fade_start: f32, fade_end: f32, warp_amp: f32, spec_power: f32, spec_intensity: f32, alpha: f32, shadow_dim: f32, color_ext: f32, coast_fade: f32, shallow_color: vec4<f32>, deep_color: vec4<f32>, foam_width: f32, foam_intensity: f32, swash_amp: f32, swash_speed: f32, fft_control: vec4<f32>, fft_wind_sea: vec4<f32>, fft_cascade_lengths: vec4<f32>, flow_direction_speed: vec4<f32>, };
+struct WaterParams { world_origin: vec2<f32>, terrain_grid: f32, sea_level: f32, hm_width: u32, hm_height: u32, time: f32, wave_amp: f32, wave_choppy: f32, wave_speed: f32, wave_scale: f32, fade_start: f32, fade_end: f32, warp_amp: f32, spec_power: f32, spec_intensity: f32, alpha: f32, shadow_dim: f32, color_ext: f32, coast_fade: f32, shallow_color: vec4<f32>, deep_color: vec4<f32>, foam_width: f32, foam_intensity: f32, swash_amp: f32, swash_speed: f32, fft_control: vec4<f32>, fft_wind_sea: vec4<f32>, fft_cascade_lengths: vec4<f32>, flow_direction_speed: vec4<f32>, debug_params: vec4<f32>, look_params: vec4<f32>, sea_params: vec4<f32>, underwater_params: vec4<f32>, underwater_gate: vec4<f32>, optics_params: vec4<f32>, };
 @group(0) @binding(0) var<uniform> interaction_params: InteractionParams;
 @group(0) @binding(1) var<uniform> water: WaterParams;
 @group(0) @binding(2) var previous_foam: texture_2d<f32>;
@@ -53,6 +54,8 @@ fn diffuse_history(centre_uv: vec2<f32>, texel: vec2<f32>, flow: vec2<f32>, radi
 
 fn fft_source(world: vec2<f32>) -> f32 {
     if (water.fft_control.x <= 0.5) { return 0.0; }
+    // WRL-002: whitecaps need wind, not just crest geometry (Water tab "Whitecaps need wind").
+    let wind_gate = select(1.0, whitecap_wind_factor(water.fft_wind_sea.z), water.optics_params.y > 0.5);
     var source = 0.0;
     for (var layer: i32 = 0; layer < 4; layer = layer + 1) {
         let cfg = cascades.config[u32(layer)];
@@ -66,7 +69,7 @@ fn fft_source(world: vec2<f32>) -> f32 {
         // Returning a per-second injection rate lets the history pass preserve the
         // reference threshold instead of whitening every mildly compressed texel.
         let foam_factor = max(cfg.whitecap_threshold - auxiliary.x, 0.0);
-        source = max(source, foam_factor * max(cfg.foam_scale, 0.0) * 7.5);
+        source = max(source, foam_factor * max(cfg.foam_scale, 0.0) * 7.5 * wind_gate);
     }
     return source;
 }

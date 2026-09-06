@@ -361,7 +361,7 @@ impl Water {
             // Off until the Water tab says otherwise, matching WaterSettings' default.
             underwater_gate: [0.0, 0.0, 0.0, 0.0],
             // WRL-002 shared optics on; the C++ side pushes the Water tab's value each frame.
-            optics_params: [1.0, 0.0, 0.0, 0.0],
+            optics_params: [1.0, 1.0, 0.0, 0.0],
         };
         queue.write_buffer(&params_ubo, 0, bytemuck::bytes_of(&default_params));
 
@@ -1986,6 +1986,35 @@ mod tests {
             "surface carries a private extinction curve"
         );
         assert!(shader.contains("#import water_optics::"));
+    }
+
+    #[test]
+    fn whitecaps_need_wind_at_every_source() {
+        // The three whitecap sources read the same gate, and the prefix-declared WaterParams
+        // structs in the foam and spray shaders reach optics_params (a prefix struct that
+        // stops short of it would read zero and silently disable the gate).
+        for (name, text) in [
+            ("foam.wgsl", include_str!("foam.wgsl")),
+            ("water.wgsl", include_str!("water.wgsl")),
+            ("whitewater_render.wgsl", include_str!("whitewater_render.wgsl")),
+        ] {
+            assert!(text.contains("optics_params"), "{name} cannot see optics_params");
+            assert!(text.contains("whitecap_wind_factor("), "{name} does not gate on wind");
+            assert!(text.contains("water_optics::"), "{name} must import the shared gate, not copy it");
+        }
+        // Rust mirror of the gate's anchors: nothing at a calm 3 m/s, everything at the 12 m/s
+        // reference sea, and monotone between.
+        let gate = |u: f32| {
+            let t = ((u - 3.5) / 8.5).clamp(0.0, 1.0);
+            let s = t * t * (3.0 - 2.0 * t);
+            s * s
+        };
+        assert_eq!(gate(3.0), 0.0);
+        assert_eq!(gate(12.0), 1.0);
+        assert!(gate(5.0) < 0.05, "a 5 m/s sea should carry almost no whitecaps: {}", gate(5.0));
+        assert!(gate(8.0) > gate(6.0) && gate(10.0) > gate(8.0));
+        let wgsl = include_str!("water_optics.wgsl");
+        assert!(wgsl.contains("smoothstep(3.5, 12.0, max(wind_speed, 0.0))"));
     }
 
     #[test]

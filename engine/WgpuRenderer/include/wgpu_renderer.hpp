@@ -1319,7 +1319,10 @@ struct WgrWaterParams
      *    composited in-shader with full coverage); 0 = the previous physical composite (separate
      *    Beer-Lambert curve, seabed-visibility falloff and shallow->deep lerp) for A/B. Only
      *    consulted while look_params.x (physical composite) is on.
-     * y/z/w reserved. Appended at the struct end; sizeof moves 272 -> 288 with the Rust side. */
+     * y: 1 = whitecap sources (persistent foam injection, crest whitecaps, wind-torn spray) are
+     *    gated by the latched wind speed (none below ~4 m/s, full at 12 m/s); 0 = crest geometry
+     *    alone decides, as before.
+     * z/w reserved. Appended at the struct end; sizeof moves 272 -> 288 with the Rust side. */
     WgrVec4 optics_params;
 };
 
