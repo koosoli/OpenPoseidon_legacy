@@ -6205,6 +6205,32 @@ void DrawWaterTab()
         ImGui::Unindent();
         ImGui::EndDisabled();
     }
+    // WRL-007: two named presets. Low keeps body boundaries, optics and depth correctness and
+    // drops reflection/detail work; Balanced is the shipped default.
+    Dev::PanelHelp("Presets (WRL-007):");
+    Dev::PanelSameLine();
+    if (Dev::Button("Low"))
+    {
+        s.lowQuality = true;
+        s.geometryQuality = 0;
+        s.fftResolution = 256;
+        s.rifleImpactSpray = false;
+        s.underwaterEffect = true;
+        changed = true;
+    }
+    Dev::PanelSameLine();
+    if (Dev::Button("Balanced"))
+    {
+        const Engine::WaterSettings d{};
+        s.lowQuality = d.lowQuality;
+        s.geometryQuality = d.geometryQuality;
+        s.fftResolution = d.fftResolution;
+        s.rifleImpactSpray = d.rifleImpactSpray;
+        s.underwaterEffect = d.underwaterEffect;
+        changed = true;
+    }
+    Dev::PanelTooltip("Low: no SSR/planar, Performance mesh range, 256 FFT, no spray billboards; bodies, "
+                      "optics and the underwater volume stay correct. Balanced: the shipped defaults.");
     changed |= Dev::Checkbox("Low water quality (performance)", &s.lowQuality);
     Dev::PanelTooltip("Drops SSR, planar reflection, bicubic filtering and the two smallest wave "
                       "cascades. The reflected camera and its sky, terrain, objects, clouds and mip "

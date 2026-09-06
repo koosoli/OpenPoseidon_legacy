@@ -1,0 +1,68 @@
+version=11;
+class Mission
+{
+	randomSeed=1234;
+	class Intel { year=1985; month=6; day=21; hour=12; minute=0; };
+	class Groups
+	{
+		items=2;
+		class Item0
+		{
+			side="WEST";
+			class Vehicles
+			{
+				items=1;
+				class Item0
+				{
+					position[]={7050.0,0.0,6500.0};
+					azimut=90.0;
+					id=0;
+					side="WEST";
+					vehicle="SoldierWB";
+					player="PLAYER COMMANDER";
+					leader=1;
+					skill=1.0;
+				};
+			};
+		};
+		class Item1
+		{
+			side="WEST";
+			class Vehicles
+			{
+				items=3;
+				class Item0
+				{
+					position[]={7235.0,0.0,6340.0};
+					azimut=60.0;
+					id=1;
+					side="WEST";
+					vehicle="PBR";
+					skill=0.2;
+				};
+				class Item1
+				{
+					position[]={7270.0,0.0,6365.0};
+					azimut=300.0;
+					id=2;
+					side="WEST";
+					vehicle="BoatW";
+					skill=0.2;
+				};
+				class Item2
+				{
+					position[]={7250.0,0.0,6330.0};
+					azimut=0.0;
+					id=3;
+					side="EMPTY";
+					vehicle="Barrel1";
+					skill=0.2;
+				};
+			};
+		};
+
+	};
+};
+class Intro { randomSeed=1; class Intel { }; };
+class OutroWin { randomSeed=2; class Intel { }; };
+class OutroLoose { randomSeed=3; class Intel { }; };

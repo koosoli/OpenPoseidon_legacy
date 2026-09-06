@@ -628,6 +628,29 @@ void RegisterBodyFixtures()
         const uint32_t id = registry.Add(lake);
         LOG_INFO(Graphics, "Water body fixture: lake #{} at ({:.0f}, {:.0f}) r=({:.0f}, {:.0f}) level {:.2f} wave x{:.2f}",
                  id, lake.centreX, lake.centreZ, lake.radiusX, lake.radiusZ, lake.level, lake.waveScale);
+        // WRL-007 resource stress: WGR_WATER_LAKE_GRID=n replicates the lake n x n on a 2.5-radius
+        // pitch, so "many distant ponds" can be measured against the 16-body draw cap.
+        std::vector<float> g;
+        if (ParseFloatList(std::getenv("WGR_WATER_LAKE_GRID"), g) && g[0] >= 2.0f)
+        {
+            const int n = std::clamp(static_cast<int>(g[0]), 2, 8);
+            for (int gz = 0; gz < n; ++gz)
+            {
+                for (int gx = 0; gx < n; ++gx)
+                {
+                    if (gx == 0 && gz == 0)
+                    {
+                        continue;
+                    }
+                    WaterBody copy = lake;
+                    copy.centreX += gx * lake.radiusX * 2.5f;
+                    copy.centreZ += gz * lake.radiusZ * 2.5f;
+                    registry.Add(copy);
+                }
+            }
+            LOG_INFO(Graphics, "Water body fixture: lake grid {}x{} -> {} bodies registered", n, n,
+                     registry.Bodies().size());
+        }
     }
     if (ParseFloatList(std::getenv("WGR_WATER_RIVER"), v) && v.size() >= 7)
     {
