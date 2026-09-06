@@ -60,8 +60,12 @@ struct WaterParams {
     // z = deep-water falloff for that wave foam, 0 = break the same everywhere, 1 = open ocean
     //     stays nearly smooth. w reserved.
     underwater_gate: vec4<f32>,
-    // WRL-002: x = shared optical model (1) / previous physical composite (0). yzw reserved.
+    // WRL-002: x = shared optical model (1) / previous physical composite (0), y = whitecap
+    // wind gate, z = local surface level under the camera, w = its wave scale.
     optics_params: vec4<f32>,
+    // WRL-003: body table, two lanes per body: [2i] = ellipse (cx, cz, rx, rz),
+    // [2i+1] = (level, wave scale, kind, profile). See wgpu_renderer.hpp.
+    bodies: array<vec4<f32>, 32>,
 };
 
 // Must match GRID_N in water/mod.rs -- this drives the CDLOD morph target, so a
@@ -527,6 +531,8 @@ struct VsOut {
     @location(2) fog: f32,             // 1 = keep colour, 0 = full fog
     @location(3) shore_dir: vec2<f32>,
     @location(4) shore_factor: f32,
+    @location(5) body_level: f32,  // WRL-003: this node's mean surface level
+    @location(6) body_id: f32,     // WRL-003: 0 = ocean, i + 1 = wp.bodies entry i
 };
 
 // Terrain heightmap for the vertex-stage seabed clamp (see clamp_to_seabed below).
@@ -608,7 +614,7 @@ fn seabed_shore_direction(world_xz: vec2<f32>) -> vec2<f32> {
 // It is also the physically right constraint. Wave height is depth-limited (H ~ 0.78 * d):
 // real water cannot hold a trough deeper than its own depth either. Waves therefore flatten
 // into the beach as they shoal instead of being clipped by it.
-fn clamp_to_seabed_height(seabed_y: f32, y: f32) -> f32 {
+fn clamp_to_seabed_height(seabed_y: f32, y: f32, surface_level: f32) -> f32 {
     // Sits just above the ground so the surface never coincides with terrain depth exactly,
     // which would z-fight along the waterline instead of tearing.
     //
@@ -618,7 +624,7 @@ fn clamp_to_seabed_height(seabed_y: f32, y: f32) -> f32 {
     // the ground, painting the sea over beaches and hillsides. Seaward of the waterline the
     // seabed is below sea level, so the cap is inactive and the clamp does its job; landward
     // the floor collapses to sea level and the surface is occluded exactly as before.
-    let floor_y = min(seabed_y + 0.02, wp.sea_level);
+    let floor_y = min(seabed_y + 0.02, surface_level);
     return max(y, floor_y);
 }
 
@@ -633,10 +639,22 @@ fn vs_water(
     @location(4) morph: vec2<f32>,   // (morph_start, morph_end) camera-distance band
     @location(5) shore_dir: vec2<f32>,
     @location(6) shore_factor: f32,
+    @location(7) body: f32,
 ) -> VsOut {
     let grid = grid_in.xy;
+    // WRL-003: a node's body lane selects its surface. 0 = the ocean plane; i + 1 = wp.bodies[i],
+    // which carries its own mean level and wave scale. Bodies get no shore-breaker train (that
+    // is an ocean swell shoaling on a beach) and no tide.
+    let body_index = i32(body + 0.5);
+    var surface_level = wp.sea_level;
+    var body_wave = 1.0;
+    if (body_index > 0) {
+        let b = wp.bodies[2 * (body_index - 1) + 1];
+        surface_level = b.x;
+        body_wave = max(b.y, 0.0);
+    }
     let world_xz_fine = origin + grid * size;
-    let dist = length(vec3<f32>(world_xz_fine.x, wp.sea_level, world_xz_fine.y) - frame.cam_pos.xyz);
+    let dist = length(vec3<f32>(world_xz_fine.x, surface_level, world_xz_fine.y) - frame.cam_pos.xyz);
 
     // Morph toward the coarser even lattice near the LOD boundary; both the wave sample
     // and the drawn geometry use this morphed base so adjacent levels agree (crack-free).
@@ -656,12 +674,12 @@ fn vs_water(
     // a shared world position now produces identical output regardless of its owning node.
     var vertex_shore_factor = shore_factor;
     var vertex_shore_dir = shore_dir;
-    var base_seabed = wp.sea_level - 1000.0;
+    var base_seabed = surface_level - 1000.0;
     var horizontal_keep = 1.0;
     let has_seabed = seabed_contains(base_xz);
     if (has_seabed) {
         base_seabed = seabed_height(base_xz);
-        let local_depth = max(wp.sea_level - base_seabed, 0.0);
+        let local_depth = max(surface_level - base_seabed, 0.0);
         vertex_shore_factor = 1.0 - smoothstep(2.0, 30.0, local_depth);
         // Bottom friction constrains horizontal orbital motion at the beach. This also keeps
         // the base-position seabed sample valid where a tear can occur, avoiding a second
@@ -676,14 +694,16 @@ fn vs_water(
     if (wp.fft_control.x > 0.5) {
         disp = fft_geometry_disp(base_xz, dist, vertex_shore_factor);
     }
-    disp = disp + shore_breaker_disp(base_xz, vertex_shore_dir, vertex_shore_factor);
-    disp = vec3<f32>(disp.x * horizontal_keep, disp.y, disp.z * horizontal_keep);
+    if (body_index == 0) {
+        disp = disp + shore_breaker_disp(base_xz, vertex_shore_dir, vertex_shore_factor);
+    }
+    disp = vec3<f32>(disp.x * horizontal_keep, disp.y, disp.z * horizontal_keep) * body_wave;
     let interaction = interaction_sample(base_xz);
-    let y = wp.sea_level + disp.y + interaction.r * 2.5 - grid_in.z * (size / GRID_N) * skirt_k;
+    let y = surface_level + disp.y + interaction.r * 2.5 - grid_in.z * (size / GRID_N) * skirt_k;
     // Horizontal movement has faded to zero where the clamp is load-bearing, so the single
     // base-position seabed sample remains conservative without another four texture loads.
     let displaced_xz = vec2<f32>(base_xz.x + disp.x, base_xz.y + disp.z);
-    let clamped_y = select(y, clamp_to_seabed_height(base_seabed, y), has_seabed);
+    let clamped_y = select(y, clamp_to_seabed_height(base_seabed, y, surface_level), has_seabed);
     let world_rel = vec3<f32>(displaced_xz.x, clamped_y, displaced_xz.y) - frame.cam_pos.xyz;
 
     var out: VsOut;
@@ -692,7 +712,9 @@ fn vs_water(
     out.base_xz = base_xz;
     out.fog = fog_factor(length(world_rel));
     out.shore_dir = vertex_shore_dir;
-    out.shore_factor = vertex_shore_factor;
+    out.shore_factor = select(vertex_shore_factor, 0.0, body_index > 0);
+    out.body_level = surface_level;
+    out.body_id = body;
     return out;
 }
 
@@ -1459,6 +1481,26 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
     // foam_noise_lod reduces to foam_noise's original sharp smoothstep(0.32, 0.64).
     let foam_fp = select(foam_footprint, 0.0, shore_foam_legacy > 0.5);
 
+    // WRL-003: a bounded body ends at its containment ellipse, with a short soft rim; the ocean
+    // plane never does. Discarding here (after the derivatives above) keeps everything below
+    // uniform for the fragments that survive.
+    let body_index = i32(in.body_id + 0.5);
+    var body_coverage = 1.0;
+    var body_profile = -1;
+    if (body_index > 0) {
+        let e = wp.bodies[2 * (body_index - 1)];
+        let k = wp.bodies[2 * (body_index - 1) + 1];
+        let world_xz = in.world_pos.xz + frame.cam_pos.xz;
+        let u = (world_xz.x - e.x) / max(e.z, 1e-3);
+        let v = (world_xz.y - e.y) / max(e.w, 1e-3);
+        let d = u * u + v * v;
+        if (d > 1.06) {
+            discard;
+        }
+        body_coverage = 1.0 - smoothstep(0.94, 1.03, d);
+        body_profile = i32(k.w + 0.5);
+    }
+
     let interaction_cell = 1.0;
     let h_l = interaction_sample(in.base_xz - vec2<f32>(interaction_cell, 0.0)).r;
     let h_r = interaction_sample(in.base_xz + vec2<f32>(interaction_cell, 0.0)).r;
@@ -1566,7 +1608,11 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
             ssr = reflected_scene(in.world_pos, refl_dir, normal_variation);
             ssr.a = ssr.a * ssr_distance_weight;
         }
-        planar_refl = planar_reflection(in.world_pos, base_normal, roughness);
+        // A bounded body at another elevation must never sample the SEA's planar transform as
+        // if it were its own (plan section 5, WRL-005); it keeps the sky/environment sample.
+        if (body_index == 0) {
+            planar_refl = planar_reflection(in.world_pos, base_normal, roughness);
+        }
     }
     refl = mix(refl, ssr.rgb, ssr.a);
     // Retain stable planar parallax, but keep its cloud layer deliberately softer
@@ -1615,14 +1661,31 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
     // The 1/PI is inside water_inscatter: outgoing radiance from a Lambertian scatterer is
     // albedo * irradiance / PI, the same normalisation the foam material below uses.
     let hue_bias = clamp(wp.underwater_params.z, 0.0, 1.0);
-    let sigma_t = surface_extinction(hue_bias);
+    var sigma_t = surface_extinction(hue_bias);
+    // WRL-003 / WRL-004: per-body profiles as conservative multipliers on the shared model
+    // (the plan's clear lake, turbid lake, slow river, fast shallow river). Authoring data is
+    // absent, so these are modest, and the ocean (profile -1) is untouched.
+    var body_shallow = shallow_col;
+    var body_deep = deep_col;
+    if (body_profile == 0) {
+        sigma_t = sigma_t * 0.6; // clear lake: longer visibility, the bed shows
+    } else if (body_profile == 1 || body_profile == 3) {
+        sigma_t = sigma_t * 3.0; // turbid lake / fast shallow river: short, brown-green
+        let murk = vec3<f32>(0.16, 0.17, 0.10);
+        body_deep = select(murk, srgb_to_linear(murk), linear > 0.5);
+        body_shallow = mix(body_shallow, body_deep, 0.5);
+    } else if (body_profile == 2) {
+        sigma_t = sigma_t * 1.6; // slow river: a little greener and shorter than the sea
+        let river = vec3<f32>(0.05, 0.14, 0.13);
+        body_deep = select(river, srgb_to_linear(river), linear > 0.5);
+    }
     // Opacity, physical meaning: 1.0 is the model itself; lowering it lets MORE of the
     // background through (T lifted toward 1). It used to be a framebuffer alpha that
     // blended the background a second time over a colour that already contained it.
     let transmittance = mix(water_transmittance(sigma_t, path_length), vec3<f32>(1.0),
         1.0 - clamp(wp.alpha, 0.0, 1.0));
     let body_light = sun_ambient * amb_ao + sun_diffuse * ndl * sun_vis * (1.0 - physical_fresnel);
-    let body_albedo = water_albedo_along_path(shallow_col, deep_col, sigma_t, path_length);
+    let body_albedo = water_albedo_along_path(body_shallow, body_deep, sigma_t, path_length);
     let body_radiance = water_inscatter(body_albedo, body_light, transmittance);
     // The background the water transmits: the refracted sample when its depth test says
     // it is genuinely behind the surface, otherwise this pixel's own opaque sample, which
@@ -1857,7 +1920,7 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
         max(wp.flow_direction_speed.z, 0.0) * select(0.0, 1.0, wp.flow_direction_speed.w > 0.5);
     let spray_wind = normalize(wp.fft_wind_sea.xy + vec2<f32>(1e-4, 0.0)) * max(wp.fft_wind_sea.z, 0.5);
 
-    let surface_wave = in.world_pos.y + frame.cam_pos.y - wp.sea_level;
+    let surface_wave = in.world_pos.y + frame.cam_pos.y - in.body_level;
     let shore_break = smoothstep(0.015, 0.12, surface_wave);
 
     // Shoreline foam: churning procedural noise in a band along the (swash-moved) edge. The band
@@ -2095,8 +2158,8 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
     // Physical: the colour above already contains the transmitted background, so the only
     // thing the framebuffer blend may still do is the geometric shore fade (and foam forces
     // coverage). Legacy keeps its Fresnel-raised opacity, which double-blends by design.
-    let legacy_alpha = max(mix(wp.alpha, 1.0, fresnel) * shore, combined_foam);
-    let physical_alpha = max(shore, combined_foam);
+    let legacy_alpha = max(mix(wp.alpha, 1.0, fresnel) * shore, combined_foam) * body_coverage;
+    let physical_alpha = max(shore, combined_foam) * body_coverage;
     let alpha = select(legacy_alpha, physical_alpha, physical_look && shared_optics);
     return vec4<f32>(rgb, alpha);
 }

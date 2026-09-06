@@ -1,4 +1,6 @@
 #include "WaterWgpu.hpp"
+#include <Poseidon/World/Terrain/WaterBodies.hpp>
+#include <sstream>
 
 #include "CdlodDriver.hpp"
 #include "EngineWgpu.hpp"
@@ -576,6 +578,79 @@ bool WaterWgpu::UpdateSeaWind(float now)
     return true;
 }
 
+namespace
+{
+// WRL-003 — synthetic body fixtures, the only water bodies any current world can supply (stock
+// worlds have none; imported ponds carry no elevation or extent). Parsed once per map change:
+//   WGR_WATER_LAKE=x,z,rx,rz,level[,waveScale[,profile]]
+//   WGR_WATER_RIVER=x,z,rx,rz,level,gradX,gradZ[,waveScale[,profile]]
+// The registry is simulation-owned; this producer only re-registers the fixtures when the map
+// changes, because until a loader owns body data there is nothing else that would clear it.
+bool ParseFloatList(const char* text, std::vector<float>& out)
+{
+    out.clear();
+    if (text == nullptr || text[0] == '\0')
+    {
+        return false;
+    }
+    std::string item;
+    std::stringstream stream(text);
+    while (std::getline(stream, item, ','))
+    {
+        char* end = nullptr;
+        const float value = std::strtof(item.c_str(), &end);
+        if (end == item.c_str())
+        {
+            return false;
+        }
+        out.push_back(value);
+    }
+    return !out.empty();
+}
+
+void RegisterBodyFixtures()
+{
+    WaterBodyRegistry& registry = GetWaterBodies();
+    registry.Clear();
+    std::vector<float> v;
+    if (ParseFloatList(std::getenv("WGR_WATER_LAKE"), v) && v.size() >= 5)
+    {
+        WaterBody lake;
+        lake.kind = WaterBodyKind::Lake;
+        lake.centreX = v[0];
+        lake.centreZ = v[1];
+        lake.radiusX = v[2];
+        lake.radiusZ = v[3];
+        lake.level = v[4];
+        lake.waveScale = v.size() > 5 ? v[5] : 0.08f;
+        lake.profile = v.size() > 6 ? static_cast<WaterBodyProfile>(std::clamp(static_cast<int>(v[6]), 0, 3))
+                                    : WaterBodyProfile::ClearLake;
+        const uint32_t id = registry.Add(lake);
+        LOG_INFO(Graphics, "Water body fixture: lake #{} at ({:.0f}, {:.0f}) r=({:.0f}, {:.0f}) level {:.2f} wave x{:.2f}",
+                 id, lake.centreX, lake.centreZ, lake.radiusX, lake.radiusZ, lake.level, lake.waveScale);
+    }
+    if (ParseFloatList(std::getenv("WGR_WATER_RIVER"), v) && v.size() >= 7)
+    {
+        WaterBody river;
+        river.kind = WaterBodyKind::River;
+        river.centreX = v[0];
+        river.centreZ = v[1];
+        river.radiusX = v[2];
+        river.radiusZ = v[3];
+        river.level = v[4];
+        river.gradientX = v[5];
+        river.gradientZ = v[6];
+        river.waveScale = v.size() > 7 ? v[7] : 0.05f;
+        river.profile = v.size() > 8 ? static_cast<WaterBodyProfile>(std::clamp(static_cast<int>(v[8]), 0, 3))
+                                     : WaterBodyProfile::SlowRiver;
+        const uint32_t id = registry.Add(river);
+        LOG_INFO(Graphics, "Water body fixture: river #{} at ({:.0f}, {:.0f}) r=({:.0f}, {:.0f}) level {:.2f} grad ({:.4f}, {:.4f})",
+                 id, river.centreX, river.centreZ, river.radiusX, river.radiusZ, river.level, river.gradientX,
+                 river.gradientZ);
+    }
+}
+} // namespace
+
 bool WaterWgpu::RebuildIfNeeded(const Landscape& land)
 {
     const int range = land.GetTerrainRange();
@@ -585,6 +660,7 @@ bool WaterWgpu::RebuildIfNeeded(const Landscape& land)
         return false;
     }
     BuildQuadtree(land);
+    RegisterBodyFixtures();
     _built = &land;
     _builtRange = range;
     _builtName = name;
@@ -670,11 +746,22 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
     const Vector3 cameraPos = camera->Position();
     // Post-processing is a camera effect.  Player-body water depth is useful for
     // splash events, but using it here made wading apply underwater fog above water.
-    float localSurface = land.GetSeaLevel();
+    // WRL-003: camera containment selects the body whose water the eye is in. The registry is
+    // simulation-owned and the lookup is arithmetic, so this never depends on what is drawn.
+    // A camera below a lake's elevation but outside its ellipse stays over the sea datum.
+    float cameraBodyLevel = land.GetSeaLevel();
+    float cameraBodyWave = 1.0f;
+    if (const WaterBody* cameraBody = GetWaterBodies().Find(cameraPos.X(), cameraPos.Z()))
+    {
+        cameraBodyLevel = cameraBody->SurfaceLevelAt(cameraPos.X(), cameraPos.Z());
+        cameraBodyWave = cameraBody->waveScale;
+    }
+    float localSurface = cameraBodyLevel;
     if (look.cascadePreset == 1)
     {
         localSurface += ReferenceSurfaceHeight(cameraPos.X(), cameraPos.Z(), _params.time, look.waveAmp, look.waveSpeed,
-                                               look.waveScale);
+                                               look.waveScale) *
+                        cameraBodyWave;
     }
     // Small asymmetric hysteresis keeps the compositor from flickering when the eye
     // rides exactly on a moving FFT crest.
@@ -876,8 +963,11 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
                                std::clamp(look.waveFoamIntensity, 0.0f, 2.0f),
                                std::clamp(look.waveFoamDeepFalloff, 0.0f, 1.0f),
                                std::clamp(look.reflectionEdgeFade, 0.02f, 0.49f)};
-    // WRL-002 — shared optical model switch (x), whitecap wind gate (y); zw reserved.
-    _params.optics_params = {look.sharedOptics ? 1.0f : 0.0f, look.whitecapWindGate ? 1.0f : 0.0f, 0.0f, 0.0f};
+    // WRL-002 — shared optical model switch (x), whitecap wind gate (y). WRL-003 — the local
+    // surface level under the camera (z) and its body's wave scale (w, 1 on the sea), which the
+    // underwater compositor engages and marches against.
+    _params.optics_params = {look.sharedOptics ? 1.0f : 0.0f, look.whitecapWindGate ? 1.0f : 0.0f, cameraBodyLevel,
+                             std::max(cameraBodyWave, 1.0e-3f)};
     _params.sea_params = {look.seaStateCoupling ? 1.0f : 0.0f,
                           look.seaStateCoupling ? SeaStateResidualAmplitude(look.waveAmp) : look.waveAmp,
                           look.lowQuality ? 1.0f : 0.0f, look.shoreWaveGain};
@@ -1145,6 +1235,59 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
     _selected.clear();
     SelectVisibleCdlod(_tree, _rootIndex, _numLevels, _ranges, _morphRegion, *camera, rx0, rz0, rx1, rz1, belowSea,
                        emit);
+
+    // WRL-003 — bounded bodies. Each registered lake / river reach fills two lanes of the body
+    // table and is tiled with leaf-size nodes over its bounding box (the fragment shader clips to
+    // the ellipse). No CDLOD morph: every body node is level 0 with the morph band pushed out of
+    // reach, so adjacent tiles agree. Metadata scales with body count; nothing else does — the
+    // FFT, foam and interaction fields are shared and camera-anchored.
+    {
+        const std::vector<WaterBody>& bodies = GetWaterBodies().Bodies();
+        const size_t bodyCount = std::min<size_t>(bodies.size(), WGR_WATER_MAX_BODIES);
+        for (WgrVec4& lane : _params.bodies)
+        {
+            lane = {0.0f, 0.0f, 0.0f, 0.0f};
+        }
+        const float tile = std::max(_leafSize, 1.0f);
+        size_t bodyNodes = 0;
+        for (size_t i = 0; i < bodyCount; ++i)
+        {
+            const WaterBody& b = bodies[i];
+            _params.bodies[2 * i] = {b.centreX, b.centreZ, b.radiusX, b.radiusZ};
+            _params.bodies[2 * i + 1] = {b.level, b.waveScale, static_cast<float>(b.kind),
+                                         static_cast<float>(b.profile)};
+            const float x0 = std::floor(b.MinX() / tile) * tile;
+            const float z0 = std::floor(b.MinZ() / tile) * tile;
+            for (float z = z0; z < b.MaxZ(); z += tile)
+            {
+                for (float x = x0; x < b.MaxX(); x += tile)
+                {
+                    WgrWaterNode node{};
+                    node.origin = {x, z};
+                    node.size = tile;
+                    node.lod = 0;
+                    node.morph_start = 1.0e9f;
+                    node.morph_end = 1.0e9f;
+                    node.shore_direction = {0.0f, 0.0f};
+                    node.shore_factor = 0.0f;
+                    node.body = static_cast<float>(i + 1);
+                    _selected.push_back(node);
+                    ++bodyNodes;
+                }
+            }
+        }
+        if (bodies.size() > bodyCount)
+        {
+            static bool warned = false;
+            if (!warned)
+            {
+                warned = true;
+                LOG_WARN(Graphics, "Water bodies: {} registered, only the first {} are drawn (WGR_WATER_MAX_BODIES)",
+                         bodies.size(), WGR_WATER_MAX_BODIES);
+            }
+        }
+        (void)bodyNodes;
+    }
 
     // WTR-LOD diagnostic: the per-LOD mesh-density work only pays off if the selection
     // actually spreads across levels. With _baseMult = 8 and a 32-texel leaf, ranges[0]

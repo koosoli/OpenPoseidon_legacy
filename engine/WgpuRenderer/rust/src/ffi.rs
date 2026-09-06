@@ -1363,9 +1363,15 @@ pub struct WgrWaterParams {
     pub underwater_gate: WgrVec4,
     // WRL-002 — x = shared optical model on (1) / previous physical composite (0), consulted
     // only while look_params.x is on; y = whitecap wind gate on (1) / crest-only (0).
-    // zw reserved. (sizeof 272 -> 288, matching C++.)
+    // z = local surface level under the camera, w = its wave scale (0 = lane unused).
+    // (sizeof 272 -> 288, matching C++.)
     pub optics_params: WgrVec4,
+    // WRL-003 — body table: [2i] = ellipse (cx, cz, rx, rz), [2i+1] = (level, wave scale, kind,
+    // profile). See wgpu_renderer.hpp. (sizeof 288 -> 800, matching C++.)
+    pub bodies: [WgrVec4; WGR_WATER_MAX_BODIES * 2],
 }
+
+pub const WGR_WATER_MAX_BODIES: usize = 16;
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -1426,7 +1432,8 @@ pub struct WgrWaterNode {
     pub morph_end: f32,
     pub shore_direction: WgrVec2,
     pub shore_factor: f32,
-    pub _shore_pad: f32,
+    // WRL-003: 0 = ocean plane, i + 1 = WgrWaterParams.bodies entry i.
+    pub body: f32,
 }
 
 #[repr(C)]
@@ -1571,7 +1578,7 @@ const _: () = assert!(std::mem::size_of::<WgrGrassDownwash>() == 16);
 // (GrassParams.photo / .place / .photo_mix / .layer_weights[2]). 4736 + 32 for
 // the card-coverage / procedural-look pair (GrassParams.card_look / .blade_look).
 const _: () = assert!(std::mem::size_of::<WgrGrassParams>() == 4784);
-const _: () = assert!(std::mem::size_of::<WgrWaterParams>() == 288);
+const _: () = assert!(std::mem::size_of::<WgrWaterParams>() == 800);
 const _: () = assert!(std::mem::size_of::<WgrWaterNode>() == 40);
 const _: () = assert!(std::mem::size_of::<WgrWaterBatch>() == 16);
 const _: () = assert!(std::mem::size_of::<WgrWaterInteractionEvent>() == 64);

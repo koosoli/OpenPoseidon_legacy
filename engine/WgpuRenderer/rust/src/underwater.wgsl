@@ -82,7 +82,10 @@ fn surface_height_at(world_xz: vec2<f32>) -> f32 {
         let uv = fft_aperiodic_uv(scaled_xz, length_m, layer, warp);
         // fft_sample scales the stored displacement by the same factor it dilates the
         // lookup by, so wave steepness stays constant. Match that here.
-        height = height + textureSampleLevel(fft_displacement, scene_samp, uv, layer, 0.0).y * scale;
+        // WRL-003: water_controls.w is the camera body's wave scale (1 on the sea), so a lake's
+        // waterline is searched against its ripples, not the ocean swell.
+        height = height + textureSampleLevel(fft_displacement, scene_samp, uv, layer, 0.0).y * scale *
+            max(params.water_controls.w, 0.0);
     }
     return height;
 }

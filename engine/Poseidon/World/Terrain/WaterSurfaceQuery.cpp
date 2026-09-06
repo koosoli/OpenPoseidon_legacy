@@ -45,6 +45,11 @@ constexpr WaveComponent Waves[] = {
 
 WaterSurfaceSample QueryWaterSurface(float worldX, float worldZ, float time, float seaLevel)
 {
+    return QueryWaterSurfaceScaled(worldX, worldZ, time, seaLevel, 1.0f);
+}
+
+WaterSurfaceSample QueryWaterSurfaceScaled(float worldX, float worldZ, float time, float seaLevel, float waveScale)
+{
     WaterSurfaceSample sample = {seaLevel, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f};
     float slopeX = 0.0f;
     float slopeZ = 0.0f;
@@ -75,7 +80,7 @@ WaterSurfaceSample QueryWaterSurface(float worldX, float worldZ, float time, flo
     for (const WaveComponent& wave : Waves)
     {
         const float length = std::max(wave.length * lengthScale, 1.0f);
-        const float amplitude = wave.amplitude * amplitudeScale;
+        const float amplitude = wave.amplitude * amplitudeScale * std::max(waveScale, 0.0f);
         const float waveNumber = Pi2 / length;
         // Deep-water dispersion, nudged by the stable renderer wind-speed default.
         const float angularSpeed = std::sqrt(Gravity * waveNumber) * (0.75f + WindSpeed * 0.12f) * speedScale;

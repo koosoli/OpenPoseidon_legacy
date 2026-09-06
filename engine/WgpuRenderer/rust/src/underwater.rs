@@ -749,6 +749,7 @@ impl Underwater {
         sea_level: f32,
         debug_view: f32,
         wave_scale: f32,
+        body_wave_scale: f32,
         density: f32,
         color_bias: f32,
         caustic_gain: f32,
@@ -772,7 +773,7 @@ impl Underwater {
                 shallow_color,
                 deep_color,
                 cascade_lengths,
-                water_controls: [warp_amp, sea_level, wave_scale, 0.0],
+                water_controls: [warp_amp, sea_level, wave_scale, body_wave_scale],
                 underwater_tuning: [density, color_bias, caustic_gain, 0.0],
             }),
         );

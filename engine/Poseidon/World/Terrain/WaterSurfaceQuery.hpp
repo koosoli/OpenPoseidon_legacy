@@ -30,4 +30,10 @@ struct WaterSurfaceSample
 // matches the rendered sea in scale, period and roughness rather than crest for crest.
 WaterSurfaceSample QueryWaterSurface(float worldX, float worldZ, float time, float seaLevel);
 
+// WRL-003 / WRL-006b — the same predictor for a bounded body: `surfaceLevel` is the body's local
+// mean surface at (worldX, worldZ) and `waveScale` scales every component amplitude (a sheltered
+// lake carries ripples, not swell). waveScale 1.0 reproduces QueryWaterSurface exactly.
+WaterSurfaceSample QueryWaterSurfaceScaled(float worldX, float worldZ, float time, float surfaceLevel,
+                                           float waveScale);
+
 } // namespace Poseidon

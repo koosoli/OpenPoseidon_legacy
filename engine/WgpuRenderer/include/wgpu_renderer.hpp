@@ -1215,6 +1215,10 @@ struct WgrGrassParams
  * clock (seconds). The look block (wave_amp..alpha) is the live-tunable water look,
  * edited by the ImGui Water tab; `fade_start`/`fade_end` flatten wave detail with
  * distance (metres) to kill far-field moiré. All refreshed every frame. */
+/* WRL-003 — maximum number of bounded water bodies (lakes / river reaches) the water shader can
+ * draw in one frame. Metadata scales with this, nothing else does. */
+#define WGR_WATER_MAX_BODIES 16u
+
 struct WgrWaterParams
 {
     WgrVec2 world_origin;
@@ -1322,8 +1326,18 @@ struct WgrWaterParams
      * y: 1 = whitecap sources (persistent foam injection, crest whitecaps, wind-torn spray) are
      *    gated by the latched wind speed (none below ~4 m/s, full at 12 m/s); 0 = crest geometry
      *    alone decides, as before.
-     * z/w reserved. Appended at the struct end; sizeof moves 272 -> 288 with the Rust side. */
+     * z: local mean surface level under the camera (the containing body's, else sea level);
+     * w: that body's wave scale (1.0 for the sea; 0 = lane not written, use sea_level).
+     * Appended at the struct end; sizeof moves 272 -> 288 with the Rust side. */
     WgrVec4 optics_params;
+    /* WRL-003 — water-body table, the per-body presentation contract in its minimal form.
+     * Two lanes per body: [2i] = centre x, centre z, radius x, radius z (an ellipse; the
+     * fragment shader discards outside it), [2i+1] = mean surface level, wave scale,
+     * kind (1 lake, 2 river), profile (0 clear lake, 1 turbid lake, 2 slow river, 3 fast
+     * shallow river). A node whose `body` lane is i + 1 draws entry i. Unused entries are
+     * zero. Immutable per frame; weather and interaction inputs stay in the lanes above.
+     * Appended at the struct end; sizeof moves 288 -> 800 with the Rust side. */
+    WgrVec4 bodies[WGR_WATER_MAX_BODIES * 2];
 };
 
 struct WgrWaterCascadeConfig
@@ -1748,7 +1762,11 @@ struct WgrWaterNode
      * shoreward breaker train without rotating the global open-ocean FFT field. */
     WgrVec2 shore_direction;
     float shore_factor;
-    float _shore_pad;
+    /* WRL-003 — which water body this node draws: 0 = the global ocean plane at
+     * WgrWaterParams.sea_level, i + 1 = WgrWaterParams.bodies entry i (its own level, wave
+     * scale, containment ellipse and profile). Was a padding lane, so every existing
+     * producer already writes the ocean value. */
+    float body;
 };
 
 /* A run [first_node, first_node+node_count) of WgrFrame.water_nodes drawn with the
@@ -1919,7 +1937,7 @@ static_assert(sizeof(WgrGrassTrack) == 16, "WgrGrassTrack layout must match the 
 static_assert(sizeof(WgrGrassDownwash) == 16, "WgrGrassDownwash layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrSmokeShadowBlob) == 32, "WgrSmokeShadowBlob layout must match the Rust #[repr(C)] struct");
   static_assert(sizeof(WgrGrassParams) == 4784, "WgrGrassParams layout must match the Rust #[repr(C)] struct");
-static_assert(sizeof(WgrWaterParams) == 288, "WgrWaterParams layout must match the Rust #[repr(C)] struct");
+static_assert(sizeof(WgrWaterParams) == 800, "WgrWaterParams layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrWaterNode) == 40, "WgrWaterNode layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrWaterBatch) == 16, "WgrWaterBatch layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrWaterInteractionEvent) == 64 && alignof(WgrWaterInteractionEvent) == 16, "WgrWaterInteractionEvent must match Rust");

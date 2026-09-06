@@ -3,6 +3,7 @@
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Terrain/WaterSurfaceQuery.hpp>
+#include <Poseidon/World/Terrain/WaterBodies.hpp>
 #include <stdlib.h>
 #include <cmath>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
@@ -602,10 +603,24 @@ void Landscape::GroundCollision(GroundCollisionBuffer& retVal, Object* with, con
             surfaceY = SurfaceY(pos[0], pos[2], &dX, &dZ, &texture);
         }
         float underLevel = surfaceY + above - pos[1];
-        if (surfaceY < _seaLevelWave)
+        // WRL-003 / WRL-006b — the local water surface is the containing BODY's mean level when
+        // the point lies inside a registered lake or river, and the global sea otherwise. This is
+        // the one place a hull point learns its immersion, so an elevated lake supports a boat
+        // through exactly the force/torque model the sea does, with the body's own wave scale
+        // (a lake has ripples, not swell) and its own `underFlat` datum -- never the sea's.
+        // With no bodies registered (every stock world) this is a single empty-vector check.
+        float localSeaLevel = _seaLevelWave;
+        float localWaveScale = 1.0f;
+        if (const WaterBody* body = GetWaterBodies().Find(pos[0], pos[2]))
+        {
+            // The body carries no tide: its level already is the mean surface.
+            localSeaLevel = body->SurfaceLevelAt(pos[0], pos[2]);
+            localWaveScale = body->waveScale;
+        }
+        if (surfaceY < localSeaLevel)
         {
             // simulate water "bump" waves
-            float bumpySea = _seaLevelWave;
+            float bumpySea = localSeaLevel;
             if (bumpy)
             {
                 float bumpX = pos[0] * 0.3;
@@ -651,7 +666,8 @@ void Landscape::GroundCollision(GroundCollisionBuffer& retVal, Object* with, con
             }();
             if (waveBuoyancy)
             {
-                bumpySea = QueryWaterSurface(pos[0], pos[2], Glob.time.toFloat(), _seaLevelWave).height;
+                bumpySea =
+                    QueryWaterSurfaceScaled(pos[0], pos[2], Glob.time.toFloat(), localSeaLevel, localWaveScale).height;
             }
 
             // water on level bumpySea
@@ -666,7 +682,7 @@ void Landscape::GroundCollision(GroundCollisionBuffer& retVal, Object* with, con
             info.under = underWater;
             // The same depth with the wave taken out; see UndergroundInfo::underFlat for why the
             // two have to be told apart now that `bumpySea` follows a real surface.
-            info.underFlat = above + _seaLevelWave - pos[1];
+            info.underFlat = above + localSeaLevel - pos[1];
             info.pos = pos;
             info.pos[1] = bumpySea; // applied directly on surface
             info.dX = 0;

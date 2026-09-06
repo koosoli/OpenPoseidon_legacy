@@ -72,6 +72,7 @@
 #include <Poseidon/World/Entities/Vehicles/Transport.hpp>
 #include <Poseidon/World/Scene/Object.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Terrain/WaterBodies.hpp>
 #include <Poseidon/AI/AICenter.hpp>
 #include <Poseidon/AI/AIGroup.hpp>
 #include <Poseidon/AI/AIUnit.hpp>
@@ -6236,6 +6237,76 @@ void DrawWaterTab()
     Dev::PanelTooltip("Column-depth band the churning foam spans (peaks ~1/4 in). 0 = no foam.");
     changed |= Dev::SliderFloat("Foam intensity", &s.foamIntensity, 0.0f, 2.0f, "%.2f");
     Dev::PanelTooltip("Brightness / coverage of the shoreline foam.");
+
+    Dev::PanelSeparator();
+    Dev::PanelHeading("Water bodies (WRL-003, synthetic fixtures)");
+    {
+        WaterBodyRegistry& registry = GetWaterBodies();
+        ImGui::Text("Registered bodies: %d   generation: %u", static_cast<int>(registry.Bodies().size()),
+                    registry.Generation());
+        Dev::PanelHelp("Stock worlds have no inland water and imported ponds carry no elevation or extent, so "
+                       "lakes and rivers are fixtures until a loader supplies them. A body is an ellipse with "
+                       "its own mean level (a river reach slopes), its own small wave scale, and a profile. The "
+                       "surface draws inside it at that level, the underwater compositor engages against it, "
+                       "and hull points inside it float on it (Collisions.cpp). Also settable for captures "
+                       "with WGR_WATER_LAKE=x,z,rx,rz,level[,wave[,profile]] and "
+                       "WGR_WATER_RIVER=x,z,rx,rz,level,gradX,gradZ[,wave[,profile]].");
+        const bool haveCamera = GScene && GScene->GetCamera() && GLandscape;
+        ImGui::BeginDisabled(!haveCamera);
+        if (Dev::Button("Add lake at camera"))
+        {
+            const Vector3 cam = GScene->GetCamera()->Position();
+            WaterBody lake;
+            lake.kind = WaterBodyKind::Lake;
+            lake.profile = WaterBodyProfile::ClearLake;
+            lake.centreX = cam.X();
+            lake.centreZ = cam.Z();
+            lake.radiusX = 80.0f;
+            lake.radiusZ = 60.0f;
+            // 1.5 m above the ground under the camera: the parts of the ellipse whose terrain
+            // rises above that stay dry (the terrain occludes the surface), the rest floods.
+            lake.level = GLandscape->SurfaceYAboveWater(cam.X(), cam.Z()) + 1.5f;
+            lake.waveScale = 0.08f;
+            registry.Add(lake);
+        }
+        Dev::PanelSameLine();
+        if (Dev::Button("Add river at camera"))
+        {
+            const Vector3 cam = GScene->GetCamera()->Position();
+            const Vector3 dir = GScene->GetCamera()->Direction();
+            WaterBody river;
+            river.kind = WaterBodyKind::River;
+            river.profile = WaterBodyProfile::SlowRiver;
+            // Axis-aligned reach along the camera's dominant heading, falling downstream (the
+            // way the camera looks) at 4 mm per metre; the ellipse is world-aligned for now.
+            const bool alongX = std::abs(dir.X()) >= std::abs(dir.Z());
+            const float sign = alongX ? (dir.X() >= 0.0f ? 1.0f : -1.0f) : (dir.Z() >= 0.0f ? 1.0f : -1.0f);
+            river.centreX = cam.X() + (alongX ? sign * 200.0f : 0.0f);
+            river.centreZ = cam.Z() + (alongX ? 0.0f : sign * 200.0f);
+            river.radiusX = alongX ? 220.0f : 25.0f;
+            river.radiusZ = alongX ? 25.0f : 220.0f;
+            river.level = GLandscape->SurfaceYAboveWater(cam.X(), cam.Z()) + 1.0f;
+            river.gradientX = alongX ? -0.004f * sign : 0.0f;
+            river.gradientZ = alongX ? 0.0f : -0.004f * sign;
+            river.waveScale = 0.05f;
+            river.flowX = alongX ? sign : 0.0f;
+            river.flowZ = alongX ? 0.0f : sign;
+            river.flowSpeed = 1.2f;
+            registry.Add(river);
+        }
+        ImGui::EndDisabled();
+        Dev::PanelSameLine();
+        if (Dev::Button("Clear bodies"))
+        {
+            registry.Clear();
+        }
+        for (const WaterBody& b : registry.Bodies())
+        {
+            ImGui::Text("  #%u %s at (%.0f, %.0f) r=(%.0f, %.0f) level %.2f wave x%.2f", b.id,
+                        b.kind == WaterBodyKind::Lake ? "lake" : "river", b.centreX, b.centreZ, b.radiusX, b.radiusZ,
+                        b.level, b.waveScale);
+        }
+    }
 
     Dev::PanelSeparator();
     Dev::PanelHeading("Ripple diagnostics");

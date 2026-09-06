@@ -362,6 +362,7 @@ impl Water {
             underwater_gate: [0.0, 0.0, 0.0, 0.0],
             // WRL-002 shared optics on; the C++ side pushes the Water tab's value each frame.
             optics_params: [1.0, 1.0, 0.0, 0.0],
+            bodies: [[0.0; 4]; crate::ffi::WGR_WATER_MAX_BODIES * 2],
         };
         queue.write_buffer(&params_ubo, 0, bytemuck::bytes_of(&default_params));
 
@@ -699,7 +700,7 @@ impl Water {
         let grid_attrs = wgpu::vertex_attr_array![0 => Float32x3];
         let inst_attrs = wgpu::vertex_attr_array![
             1 => Float32x2, 2 => Float32, 3 => Uint32, 4 => Float32x2,
-            5 => Float32x2, 6 => Float32
+            5 => Float32x2, 6 => Float32, 7 => Float32
         ];
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("wgr_water_pipeline"),
@@ -974,7 +975,26 @@ impl Water {
     /// when it is dry, so callers can ramp with it instead of switching on a flag.
     pub fn underwater_params(&self) -> Option<(f32, f32, f32)> {
         self.last_params
-            .map(|p| (p.sea_level, p.time, p.fft_control[3].max(0.0)))
+            .map(|p| (Self::local_surface_level(&p), p.time, p.fft_control[3].max(0.0)))
+    }
+
+    /// WRL-003: the mean surface under the camera. The producer writes the containing body's
+    /// level (or sea level) into optics_params.z with the body's wave scale in .w; a producer
+    /// that never wrote the lane (w == 0) means "the sea".
+    fn local_surface_level(p: &WgrWaterParams) -> f32 {
+        if p.optics_params[3] > 0.0 {
+            p.optics_params[2]
+        } else {
+            p.sea_level
+        }
+    }
+
+    fn local_wave_scale(p: &WgrWaterParams) -> f32 {
+        if p.optics_params[3] > 0.0 {
+            p.optics_params[3]
+        } else {
+            1.0
+        }
     }
 
     /// True when the live Water-tab performance mode has disabled reflection work.
@@ -1055,19 +1075,20 @@ impl Water {
     /// aperiodic world coordinates as the visible water surface. `wave_scale` is the
     /// Water-tab lookup dilation; the compositor needs it for the same reason the
     /// surface shader does, or its idea of the waterline drifts from the drawn waves.
-    pub fn underwater_spectrum(&self) -> ([f32; 4], u32, f32, f32, f32, f32) {
+    pub fn underwater_spectrum(&self) -> ([f32; 4], u32, f32, f32, f32, f32, f32) {
         self.last_params
             .map(|p| {
                 (
                     p.fft_cascade_lengths,
                     self.fft.as_ref().map_or(0, |f| f.active_layers()),
                     p.warp_amp,
-                    p.sea_level,
+                    Self::local_surface_level(&p),
                     p.debug_params[0],
                     p.wave_scale,
+                    Self::local_wave_scale(&p),
                 )
             })
-            .unwrap_or(([1.0; 4], 0, 0.0, 0.0, 0.0, 1.0))
+            .unwrap_or(([1.0; 4], 0, 0.0, 0.0, 0.0, 1.0, 1.0))
     }
 
     pub fn fft_enabled(&self) -> bool {
@@ -1974,7 +1995,7 @@ mod tests {
         ));
         // ...and therefore returns geometric coverage only, never a Fresnel-raised alpha that
         // would blend the background in a second time.
-        assert!(shader.contains("let physical_alpha = max(shore, combined_foam);"));
+        assert!(shader.contains("let physical_alpha = max(shore, combined_foam) * body_coverage;"));
         assert!(shader.contains(
             "let alpha = select(legacy_alpha, physical_alpha, physical_look && shared_optics);"
         ));
@@ -1986,6 +2007,33 @@ mod tests {
             "surface carries a private extinction curve"
         );
         assert!(shader.contains("#import water_optics::"));
+    }
+
+    #[test]
+    fn bounded_bodies_draw_inside_their_ellipse_at_their_own_level() {
+        let shader = include_str!("water.wgsl");
+        // The vertex stage takes the level from the node's body, the ocean keeps sea_level...
+        assert!(shader.contains("@location(7) body: f32,"));
+        assert!(shader.contains("var surface_level = wp.sea_level;"));
+        assert!(shader.contains("surface_level = b.x;"));
+        // ...the seabed clamp caps at THAT level, not the sea's (or a lake above sea level would
+        // be flattened onto the sea)...
+        assert!(shader.contains("fn clamp_to_seabed_height(seabed_y: f32, y: f32, surface_level: f32)"));
+        assert!(shader.contains("let floor_y = min(seabed_y + 0.02, surface_level);"));
+        assert!(!shader.contains("min(seabed_y + 0.02, wp.sea_level)"));
+        // ...the fragment stage discards outside the containment ellipse and fades the rim...
+        assert!(shader.contains("if (d > 1.06) {\n            discard;"));
+        assert!(shader.contains("body_coverage = 1.0 - smoothstep(0.94, 1.03, d);"));
+        // ...and a body never samples the sea's planar reflection as its own.
+        assert!(shader.contains("if (body_index == 0) {\n            planar_refl = planar_reflection("));
+        // Rust mirror of the containment: box corner outside, axis ends inside, rim soft.
+        let contains = |x: f32, z: f32, cx: f32, cz: f32, rx: f32, rz: f32| {
+            let u = (x - cx) / rx;
+            let v = (z - cz) / rz;
+            u * u + v * v <= 1.06
+        };
+        assert!(contains(1099.0, 2000.0, 1000.0, 2000.0, 100.0, 50.0));
+        assert!(!contains(1095.0, 2045.0, 1000.0, 2000.0, 100.0, 50.0));
     }
 
     #[test]
@@ -2020,7 +2068,7 @@ mod tests {
     #[test]
     fn debug_params_appended_without_shifting_existing_lanes() {
         use crate::ffi::WgrWaterParams;
-        assert_eq!(std::mem::size_of::<WgrWaterParams>(), 288);
+        assert_eq!(std::mem::size_of::<WgrWaterParams>(), 800);
         assert_eq!(
             std::mem::offset_of!(WgrWaterParams, debug_params),
             192,
@@ -2051,6 +2099,14 @@ mod tests {
             272,
             "optics_params must be appended after underwater_gate, not inserted before it"
         );
+        assert_eq!(
+            std::mem::offset_of!(WgrWaterParams, bodies),
+            288,
+            "the body table must be appended after optics_params, not inserted before it"
+        );
+        // The node's body lane replaced a padding float: same size, same offset as the pad.
+        assert_eq!(std::mem::size_of::<crate::ffi::WgrWaterNode>(), 40);
+        assert_eq!(std::mem::offset_of!(crate::ffi::WgrWaterNode, body), 36);
         // flow_direction_speed (the previous last field) must not have moved.
         assert_eq!(
             std::mem::offset_of!(WgrWaterParams, flow_direction_speed),

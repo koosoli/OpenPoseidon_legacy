@@ -10278,7 +10278,12 @@ void EngineWgpu::SyncWaterLookProfile()
         // v2 adds the optics/quality/sea/underwater groups. The reader keys off the group
         // names and ignores unknown ones, so a v1 profile still loads — its missing groups
         // simply keep the code defaults, which is the behaviour v1 had for them anyway.
-        out << "v 2\nwave " << s.waveAmp << ' ' << s.waveChoppy << ' ' << s.waveSpeed << ' ' << s.waveScale << '\n';
+        // v3 (WRL-002): the `colour` group of a v2 profile is IGNORED on load. Every v2 file
+        // on disk was an automatic snapshot of the code defaults at the time (the Water tab
+        // saves whatever it holds on any edit, so the swatches were written unchanged), and
+        // that pinned the old ultramarine deep swatch over any later default. A v3 profile's
+        // colours were written by this code and are honoured.
+        out << "v 3\nwave " << s.waveAmp << ' ' << s.waveChoppy << ' ' << s.waveSpeed << ' ' << s.waveScale << '\n';
         out << "colour " << s.shallowColor[0] << ' ' << s.shallowColor[1] << ' ' << s.shallowColor[2] << ' '
             << s.deepColor[0] << ' ' << s.deepColor[1] << ' ' << s.deepColor[2] << '\n';
         out << "coast " << s.colorExt << ' ' << s.coastFade << ' ' << s.foamWidth << ' ' << s.foamIntensity << ' '
@@ -10312,18 +10317,32 @@ void EngineWgpu::SyncWaterLookProfile()
     _waterLook = WaterSettings{};
     std::ifstream in(pathFor(map));
     std::string key;
+    int version = 0;
     while (in >> key)
     {
         if (key == "v")
         {
-            int v;
-            in >> v;
+            in >> version;
         }
         else if (key == "wave")
             in >> _waterLook.waveAmp >> _waterLook.waveChoppy >> _waterLook.waveSpeed >> _waterLook.waveScale;
         else if (key == "colour")
-            in >> _waterLook.shallowColor[0] >> _waterLook.shallowColor[1] >> _waterLook.shallowColor[2] >>
-                _waterLook.deepColor[0] >> _waterLook.deepColor[1] >> _waterLook.deepColor[2];
+        {
+            float c[6] = {};
+            in >> c[0] >> c[1] >> c[2] >> c[3] >> c[4] >> c[5];
+            if (version >= 3)
+            {
+                std::copy(c, c + 3, _waterLook.shallowColor);
+                std::copy(c + 3, c + 6, _waterLook.deepColor);
+            }
+            else
+            {
+                LOG_INFO(Graphics,
+                         "Water look: ignoring the v{} colour group of '{}' (an automatic snapshot of old defaults); "
+                         "the code defaults apply until the swatches are edited in the Water tab",
+                         version, map);
+            }
+        }
         else if (key == "coast")
             in >> _waterLook.colorExt >> _waterLook.coastFade >> _waterLook.foamWidth >> _waterLook.foamIntensity >>
                 _waterLook.swashAmp >> _waterLook.swashSpeed >> _waterLook.wetHeight >> _waterLook.wetDarken;
