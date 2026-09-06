@@ -99,6 +99,11 @@ class Cloudlet: public Smoke
 	float _t, _dt;
 	Ref<CloudletTTable> _cloudletTTable;
 	Color _cloudletColor;
+
+	// SMK-030 containment state. `_roomId` is -1 for outdoors AND for "not asked yet";
+	// `_roomChecked` separates the two, so the one spawn query happens exactly once.
+	int _roomId = -1;
+	bool _roomChecked = false;
 		
 	public:
 	Cloudlet( LODShapeWithShadow *shape, float duration, float loopedDuration=0 );
@@ -161,6 +166,28 @@ struct LegacySmokeScale
     float rise = 1.3f;
 };
 LegacySmokeScale& GLegacySmokeScale();
+
+// SMK-030: containment for the LEGACY cloudlets -- which is every smoke the game
+// actually produces (grenades, exhaust, wheel dust, burning wrecks, explosions). The
+// modern SmokeVolume system carries the room/portal containment work, and nothing in
+// gameplay routes through it (SmokeSystem.hpp: "Both spawn paths are dev-driven"), so a
+// smoke grenade thrown in a house has always poured straight through the walls.
+//
+// The cost rule is the one that makes this affordable: EVERY cloudlet asks
+// `IndoorRoomAt` ONCE, at its first step. Outdoors -- exhaust, dust, artillery, every
+// plume in the open -- that is the only query it will ever make. Only a cloudlet that
+// starts inside a room pays the per-step `IndoorContainStep`, which is a voxel walk over
+// the cached per-building interior, not a geometry sweep.
+struct LegacySmokeContainment
+{
+    bool enabled = true;      //!< POSEIDON_SMOKE_CONTAIN_LEGACY=0 turns it off
+    float slide = 0.15f;      //!< velocity kept along the blocked direction (0 = stop dead)
+    long long spawnQueries = 0;
+    long long stepQueries = 0;
+    long long blocked = 0;
+    long long indoor = 0;
+};
+LegacySmokeContainment& GLegacySmokeContainment();
 
 class CloudletSource: public SerializeClass
 {

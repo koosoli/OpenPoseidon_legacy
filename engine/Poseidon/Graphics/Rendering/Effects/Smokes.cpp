@@ -1,5 +1,8 @@
 
 #include <Poseidon/Core/Config/EngineConfig.hpp>
+#include <cstdlib>
+#include <algorithm>
+#include <Poseidon/World/Effects/SmokeWorldQuery.hpp> // SMK-030: room lookup + contained step
 #include <Poseidon/Graphics/Rendering/Effects/Smokes.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/World/World.hpp>
@@ -820,7 +823,59 @@ void Cloudlet::Simulate(float deltaT, SimulationImportance prec)
     Friction(_speed[2], _zFriction, 0, deltaT);
     Limit(_speed[1], _minYSpeed, _maxYSpeed);
     SetOrientScaleOnly(_growSize * _size);
-    SetPosition(Position() + _speed * deltaT);
+
+    // SMK-030: keep the step inside the room it started in. Outdoors this costs one
+    // room lookup for the whole life of the cloudlet (see the header note).
+    const Vector3 from = Position();
+    Vector3 to = from + _speed * deltaT;
+    LegacySmokeContainment& contain = GLegacySmokeContainment();
+    if (contain.enabled)
+    {
+        if (!_roomChecked)
+        {
+            _roomChecked = true;
+            int room = -1;
+            ++contain.spawnQueries;
+            _roomId = GSmokeWorldQuery().IndoorRoomAt(from, room) ? room : -1;
+            if (_roomId >= 0)
+                ++contain.indoor;
+        }
+        if (_roomId >= 0)
+        {
+            ++contain.stepQueries;
+            const SmokeContainStep step = GSmokeWorldQuery().IndoorContainStep(from, to, _roomId);
+            if (!step.allowed)
+            {
+                ++contain.blocked;
+                to = step.position;
+                // Remove the velocity INTO the wall and keep a little of the rest, so smoke
+                // slides along the surface and curls instead of stopping dead against it.
+                const float into = _speed * step.normal;
+                if (into < 0.0f)
+                    _speed -= step.normal * (into * (1.0f + contain.slide));
+            }
+            // Follow legitimate room changes (an open doorway); -1 means it left the
+            // building, and from then on this cloudlet is outdoors and free.
+            _roomId = step.room;
+        }
+    }
+    SetPosition(to);
+    if (contain.enabled)
+    {
+        // SMK-030: the counters, at most every two seconds and only while they move. This
+        // is the number that says whether the containment budget is being respected: one
+        // spawn query per cloudlet, per-step work only for the indoor ones.
+        static float nextReport = 0.0f;
+        static long long lastStep = -1;
+        const float now = Glob.time.toFloat();
+        if (now >= nextReport && contain.stepQueries != lastStep)
+        {
+            nextReport = now + 2.0f;
+            lastStep = contain.stepQueries;
+            LOG_INFO(World, "SMK-030 legacy containment: {} cloudlets asked for a room, {} started indoors, {} contained steps, {} blocked at a wall",
+                     contain.spawnQueries, contain.indoor, contain.stepQueries, contain.blocked);
+        }
+    }
 
     _t += _dt * deltaT;
     _constantColor = PackedColor(_cloudletColor * _cloudletTTable->GetColor(_t));
@@ -881,6 +936,20 @@ void CloudletSource::Simulate(Vector3Par pos, Vector3Par speed, float deltaT)
         Cloudlet* cloudlet = Drop(pos, speed);
         GLOB_WORLD->AddCloudlet(cloudlet);
     }
+}
+
+LegacySmokeContainment& GLegacySmokeContainment()
+{
+    static LegacySmokeContainment containment = []
+    {
+        LegacySmokeContainment c;
+        if (const char* v = std::getenv("POSEIDON_SMOKE_CONTAIN_LEGACY"))
+            c.enabled = !(*v == '0');
+        if (const char* v = std::getenv("POSEIDON_SMOKE_CONTAIN_SLIDE"))
+            c.slide = std::clamp(static_cast<float>(std::atof(v)), 0.0f, 1.0f);
+        return c;
+    }();
+    return containment;
 }
 
 LegacySmokeScale& GLegacySmokeScale()

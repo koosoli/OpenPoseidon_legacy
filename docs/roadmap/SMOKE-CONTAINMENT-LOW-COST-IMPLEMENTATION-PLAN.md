@@ -217,3 +217,43 @@ Store evidence in `docs/roadmap/evidence/` under a unique SMC stage/date prefix.
 These SMC IDs are local to this plan. Do not append them to [status-ledger.yaml](status-ledger.yaml) as authorised Preview-0 tickets. Inspect the active scope convention and [renderer-systems-ledger.yaml](renderer-systems-ledger.yaml) before recording implementation. Update the older smoke handover with a link to this plan when implementation supersedes its instructions; do not erase historical evidence.
 
 If metadata is inadequate, retain the existing reactive fallback and mark that building's containment guarantee unsupported. A bounded geometry-query fallback may improve it, but a missing collision wall cannot be fixed by a shader parameter. Continue independent supported work and present the exact remaining asset/visual blocker. Completion means smoke respects verified solid boundaries, still passes open doors, looks better in motion, and meets measured resource limits.
+
+## 9. Implementation status (2026-09-07)
+
+**The plan's premise needed correcting before any of it could pay off.** An audit of the
+routing (section 3, item 1) found that NOTHING in gameplay reaches `SmokeVolume`, where all
+the containment work lives: `SmokeSystem.hpp:24` says so in as many words ("Both spawn paths
+are dev-driven"). Every smoke the player sees is a LEGACY cloudlet -- smoke grenades
+(`SmokeShell` holds a `SmokeSource`), vehicle exhaust and wheel dust, burning wrecks,
+explosion fire and craters, muzzle clouds -- and `Cloudlet::Simulate` was pure ballistics
+with no collision, no room and no world query of any kind. So the walls were never leaking:
+gameplay smoke had no containment to leak through.
+
+**SMK-030 (done):** legacy cloudlets are contained.
+- Every cloudlet asks `IndoorRoomAt` ONCE, at its first step. Outdoor smoke -- exhaust,
+  dust, artillery, every plume in the open -- never asks again, which is what keeps this
+  affordable.
+- A cloudlet that started in a room is stepped with `IndoorContainStep` (the cached
+  per-building voxel walk, not a geometry sweep). Blocked steps lose the velocity INTO the
+  wall and keep a slice along it, so smoke slides and curls instead of stopping dead;
+  legitimate room changes through open doorways are followed, and a cloudlet that leaves the
+  building is outdoors and free from then on.
+- Switchable: Smoke tab "Game smoke stays in its room (SMK-030)" plus wall-slide slider,
+  `POSEIDON_SMOKE_CONTAIN_LEGACY=0` / `POSEIDON_SMOKE_CONTAIN_SLIDE`. Counters (asked /
+  indoors / steps / blocked) are on the tab and in the load log.
+- Measured, smoke grenade in the Everon cafe, same pose and seed A/B: cloudlet simulation
+  0.11-0.18 ms with containment against 0.07-0.15 ms without, i.e. **+0.03 ms with 730
+  indoor particles**; whole-frame 6.28 ms on against 6.52 ms off (noise). 1,574 spawn
+  queries and 11,361 blocked steps over the run. Zero wgpu errors. The room fills with
+  smoke instead of draining through the walls.
+
+**Not done, and what the plan should be read as next:**
+- Outdoors-to-indoors is still free: a plume outside a house can drift in. The one-way case
+  (smoke made inside stays inside) is the one the owner reported; the other direction needs
+  the swept broad-phase of section 4.3.
+- Rendered footprint (section 4.4) is untouched for cloudlets: a big billboard next to a
+  wall can still paint through it. `SmokeVolume::Draw` already has the clearance and
+  depth-pull clamps to copy; that is the next cheapest win.
+- Dynamic door leaves (SMC-003) and precise apertures remain as written; containment
+  quality is still capped by the building's fire-geometry quality.
+

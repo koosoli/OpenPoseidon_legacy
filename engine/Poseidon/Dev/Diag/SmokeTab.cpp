@@ -407,6 +407,24 @@ void DrawSpawnSection()
                           "the wind will not move smoke it has already dropped.");
     }
 
+    // SMK-030: containment for the game's own smoke.
+    {
+        LegacySmokeContainment& contain = GLegacySmokeContainment();
+        Dev::Checkbox("Game smoke stays in its room (SMK-030)", &contain.enabled);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("POSEIDON_SMOKE_CONTAIN_LEGACY=0 turns it off. Every cloudlet asks ONCE, at its\n"
+                              "first step, whether it started inside a room; outdoor smoke never asks again.\n"
+                              "An indoor cloudlet is kept inside by the room walk (no geometry sweep) and\n"
+                              "follows open doorways. Measured: +0.03 ms of cloudlet simulation with 730\n"
+                              "indoor particles.");
+        ImGui::SetNextItemWidth(110.0f);
+        Dev::SliderFloat("Wall slide", &contain.slide, 0.0f, 1.0f, "%.2f");
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("POSEIDON_SMOKE_CONTAIN_SLIDE. How much speed a blocked particle keeps ALONG the\n"
+                              "wall: 0 stops it dead, higher values let it curl and spread over the surface.");
+        ImGui::TextDisabled("asked %lld  indoors %lld  steps %lld  blocked %lld", contain.spawnQueries,
+                            contain.indoor, contain.stepQueries, contain.blocked);
+    }
     // SMK-020: the game's own smoke (grenades, shells, craters) -- scaled at class load.
     {
         LegacySmokeScale& scale = GLegacySmokeScale();
