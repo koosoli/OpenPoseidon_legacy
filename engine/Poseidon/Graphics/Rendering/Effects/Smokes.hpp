@@ -167,6 +167,17 @@ struct LegacySmokeScale
 {
     float lifetime = 2.0f;
     float rise = 1.3f;
+    // SMK-034: the LOOK. CfgCloudlets is authored for 2001's particle budget, which is why a
+    // plume reads as a handful of separate blobs sailing past each other. The cure is the
+    // standard one: more particles, each smaller and thinner, fading in over a longer grow-up
+    // so none of them pops into existence. All four are multipliers on the authored numbers,
+    // applied when a cloudlet class is loaded, so the shape of every effect is preserved.
+    // POSEIDON_SMOKE_LOOK=0 restores the authored values exactly.
+    bool  look = true;
+    float density = 1.7f;  //!< divides `interval`: this many times as many particles
+    float size = 0.85f;    //!< multiplies `cloudletSize`
+    float alpha = 0.62f;   //!< multiplies `cloudletAlpha` -- thinner, so overlapping reads as one body
+    float grow = 1.6f;     //!< multiplies `cloudletGrowUp` and the fades: no pop-in, no pop-out
 };
 LegacySmokeScale& GLegacySmokeScale();
 

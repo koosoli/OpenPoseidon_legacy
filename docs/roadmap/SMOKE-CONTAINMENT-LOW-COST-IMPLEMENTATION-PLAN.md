@@ -281,3 +281,18 @@ Cost of the shipped defaults, smoke grenade in the Everon cafe, same pose A/B: c
 simulation 0.24-0.26 ms with containment against 0.08-0.12 ms without; whole frame 6.0-6.9 ms
 against 6.4 ms, i.e. noise. 736 of 1,574 particles indoors, 12,555 steps blocked at a wall.
 
+### 9.2 SMK-034: the look (2026-09-07)
+
+Section 4.5 asked for "less obvious billboards" at similar cost. CfgCloudlets is authored for
+2001's particle budget, which is why a plume reads as a handful of separate blobs sailing past
+each other. Four multipliers, applied where SMK-020 already scales the class at load, so every
+effect keeps its authored shape: particles x1.7 (the `interval` divided), size x0.85, alpha
+x0.62, grow-up and both fades x1.6. More, smaller, thinner puffs that fade in and out instead
+of popping overlap into one body.
+
+Measured on the same grenade, 20 m away: cloudlet simulation 0.47-0.49 ms with the look pass
+against 0.32-0.38 ms without, whole frame in the noise. Switchable in the Smoke tab (checkbox
+plus the four multipliers as sliders) and by POSEIDON_SMOKE_LOOK=0 /
+POSEIDON_SMOKE_LOOK_DENSITY / _SIZE / _ALPHA. It applies when a cloudlet class is loaded, so
+for shots that is the next mission start.
+

@@ -1061,6 +1061,14 @@ LegacySmokeScale& GLegacySmokeScale()
             s.lifetime = std::clamp(static_cast<float>(std::atof(v)), 0.1f, 10.0f);
         if (const char* v = std::getenv("POSEIDON_SMOKE_RISE_SCALE"))
             s.rise = std::clamp(static_cast<float>(std::atof(v)), 0.1f, 5.0f);
+        if (const char* v = std::getenv("POSEIDON_SMOKE_LOOK"))
+            s.look = !(*v == '0');
+        if (const char* v = std::getenv("POSEIDON_SMOKE_LOOK_DENSITY"))
+            s.density = std::clamp(static_cast<float>(std::atof(v)), 0.25f, 6.0f);
+        if (const char* v = std::getenv("POSEIDON_SMOKE_LOOK_SIZE"))
+            s.size = std::clamp(static_cast<float>(std::atof(v)), 0.25f, 3.0f);
+        if (const char* v = std::getenv("POSEIDON_SMOKE_LOOK_ALPHA"))
+            s.alpha = std::clamp(static_cast<float>(std::atof(v)), 0.1f, 2.0f);
         return s;
     }();
     return scale;
@@ -1069,14 +1077,19 @@ LegacySmokeScale& GLegacySmokeScale()
 void CloudletSource::Load(const ParamEntry& cls)
 {
     const LegacySmokeScale& scale = GLegacySmokeScale();
-    _interval = cls >> "interval";
+    // SMK-034: the look multipliers, or 1.0 each when the lever is off.
+    const float lookDensity = scale.look ? scale.density : 1.0f;
+    const float lookSize = scale.look ? scale.size : 1.0f;
+    const float lookAlpha = scale.look ? scale.alpha : 1.0f;
+    const float lookGrow = scale.look ? scale.grow : 1.0f;
+    _interval = static_cast<float>(cls >> "interval") / lookDensity;
     _cloudletDuration = static_cast<float>(cls >> "cloudletDuration") * scale.lifetime; // SMK-020
     _cloudletAnimPeriod = cls >> "cloudletAnimPeriod";
-    _cloudletSize = cls >> "cloudletSize";
-    _cloudletAlpha = cls >> "cloudletAlpha";
-    _cloudletGrowUp = cls >> "cloudletGrowUp";
-    _cloudletFadeIn = cls >> "cloudletFadeIn";
-    _cloudletFadeOut = cls >> "cloudletFadeOut";
+    _cloudletSize = static_cast<float>(cls >> "cloudletSize") * lookSize;
+    _cloudletAlpha = static_cast<float>(cls >> "cloudletAlpha") * lookAlpha;
+    _cloudletGrowUp = static_cast<float>(cls >> "cloudletGrowUp") * lookGrow;
+    _cloudletFadeIn = static_cast<float>(cls >> "cloudletFadeIn") * lookGrow;
+    _cloudletFadeOut = static_cast<float>(cls >> "cloudletFadeOut") * lookGrow;
     _cloudletAccY = cls >> "cloudletAccY";
     _cloudletMinYSpeed = static_cast<float>(cls >> "cloudletMinYSpeed") * scale.rise; // SMK-020
     _cloudletMaxYSpeed = static_cast<float>(cls >> "cloudletMaxYSpeed") * scale.rise;

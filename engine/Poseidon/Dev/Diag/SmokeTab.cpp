@@ -451,6 +451,21 @@ void DrawSpawnSection()
     // SMK-020: the game's own smoke (grenades, shells, craters) -- scaled at class load.
     {
         LegacySmokeScale& scale = GLegacySmokeScale();
+        // SMK-034: the look multipliers. Applied when a cloudlet class is LOADED, so a change
+        // here reaches shots at the next mission start, like the lifetime scale below.
+        Dev::Checkbox("Denser, softer game smoke (SMK-034)", &scale.look);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("POSEIDON_SMOKE_LOOK=0 restores the authored CfgCloudlets values exactly.");
+        ImGui::SetNextItemWidth(110.0f);
+        Dev::SliderFloat("Particles x", &scale.density, 0.25f, 6.0f, "%.2f");
+        Dev::PanelSameLine();
+        ImGui::SetNextItemWidth(110.0f);
+        Dev::SliderFloat("Puff size x", &scale.size, 0.25f, 3.0f, "%.2f");
+        ImGui::SetNextItemWidth(110.0f);
+        Dev::SliderFloat("Puff alpha x", &scale.alpha, 0.1f, 2.0f, "%.2f");
+        Dev::PanelSameLine();
+        ImGui::SetNextItemWidth(110.0f);
+        Dev::SliderFloat("Fade/grow x", &scale.grow, 0.25f, 4.0f, "%.2f");
         ImGui::SetNextItemWidth(110.0f);
         Dev::SliderFloat("Game smoke lifetime x", &scale.lifetime, 0.1f, 10.0f, "%.2f");
         if (ImGui::IsItemHovered())
