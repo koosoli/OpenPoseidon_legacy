@@ -64,6 +64,7 @@
 #include <Poseidon/Foundation/Memory/CheckMem.hpp>
 #include <Poseidon/Foundation/Memory/MemFreeReq.hpp>
 #include <Poseidon/World/World.hpp>
+#include <Poseidon/World/Entities/Weapons/Shots.hpp> // ZEUS-THROW: Shot, NewShot
 #include <Poseidon/World/WorldInputContext.hpp>
 #include <Poseidon/World/Scene/Camera/CamEffects.hpp>
 #include <Poseidon/World/Scene/Camera/CameraHold.hpp>
@@ -1199,6 +1200,69 @@ void DrawZeusWeatherAndTime(bool worldAvailable)
     ImGui::EndDisabled();
 }
 
+// ZEUS-THROW: launch an ammo class from the scene camera -- the free-fly camera when Zeus
+// is active, otherwise whatever the player looks through. The recipe is the engine's own
+// FireMissile: NewNonAIVehicle resolves the AmmoType by config name and NewShot builds the
+// right Shot subclass (shell, missile, rocket, bomb...), then orient, speed, position and
+// AddFastVehicle. No parent: the shot has no owner, exactly like a scripted createVehicle.
+namespace
+{
+struct ZeusThrowPreset
+{
+    const char* label;
+    const char* className;
+    float       speed; // m/s along the view direction
+    float       loft;  // m/s added straight up (a lob for hand grenades)
+};
+const ZeusThrowPreset kZeusThrowPresets[] = {
+    {"Hand grenade", "GrenadeHand", 18.0f, 4.0f}, {"40 mm grenade", "Grenade", 70.0f, 0.0f},
+    {"LAW rocket", "AT4", 120.0f, 0.0f},          {"Hellfire", "Hellfire", 150.0f, 0.0f},
+    {"Zuni rocket", "Zuni", 200.0f, 0.0f},        {"Maverick", "Maverick", 200.0f, 0.0f},
+    {"73 mm shell", "Shell73", 500.0f, 0.0f},     {"120 mm shell", "Shell120", 800.0f, 0.0f},
+    {"Bomb", "Bomb", 5.0f, 0.0f},
+};
+int   s_zeusThrowPreset = 0;
+char  s_zeusThrowClass[64] = "GrenadeHand";
+float s_zeusThrowSpeed = 18.0f;
+float s_zeusThrowLoft = 4.0f;
+bool  s_zeusThrowHotkey = true;
+int   s_zeusThrowCount = 0;
+
+void ZeusThrow()
+{
+    if (!GWorld || !GScene || !GLandscape || GLandscape->GetLandRange() <= 0)
+    {
+        s_zeusStatus = "Throw needs a loaded world.";
+        return;
+    }
+    const Camera* camera = GScene->GetCamera();
+    if (!camera)
+        return;
+    Entity* entity = NewNonAIVehicle(RString(s_zeusThrowClass));
+    Shot* shot = entity ? dyn_cast<Shot>(entity) : nullptr;
+    if (!shot)
+    {
+        if (entity)
+            entity->SetDelete();
+        s_zeusStatus = std::string("'") + s_zeusThrowClass + "' is not an ammo class (CfgAmmo).";
+        return;
+    }
+    const Vector3 forward = camera->Direction().Normalized();
+    const Vector3 origin = camera->Position() + forward * 2.0f;
+    shot->SetOrient(forward, VUp);
+    shot->SetSpeed(forward * s_zeusThrowSpeed + VUp * s_zeusThrowLoft);
+    shot->SetPosition(origin);
+    GWorld->AddFastVehicle(shot);
+    ++s_zeusThrowCount;
+    char buf[160];
+    std::snprintf(buf, sizeof(buf), "Threw %s #%d at %.0f m/s from [%.1f %.1f %.1f].", s_zeusThrowClass,
+                  s_zeusThrowCount, s_zeusThrowSpeed, origin[0], origin[2], origin[1]);
+    s_zeusStatus = buf;
+    LOG_INFO(World, "ZEUS-THROW: {}", buf);
+}
+
+} // namespace
+
 void DrawZeusTab()
 {
     const bool worldAvailable = ZeusWorldAvailable();
@@ -1302,6 +1366,41 @@ void DrawZeusTab()
         }
     }
     Dev::PanelTooltip("Puts the current free-fly position on the clipboard in the order this box expects.");
+    ImGui::EndDisabled();
+
+    ImGui::Spacing();
+    Dev::PanelHeading("Throw from camera");
+    Dev::PanelSeparator();
+    ImGui::BeginDisabled(!worldAvailable);
+    {
+        const char* labels[IM_ARRAYSIZE(kZeusThrowPresets)];
+        for (int i = 0; i < IM_ARRAYSIZE(kZeusThrowPresets); ++i)
+            labels[i] = kZeusThrowPresets[i].label;
+        ImGui::SetNextItemWidth(160.0f);
+        if (Dev::Combo("Ammo", &s_zeusThrowPreset, labels, IM_ARRAYSIZE(kZeusThrowPresets)))
+        {
+            const ZeusThrowPreset& preset = kZeusThrowPresets[s_zeusThrowPreset];
+            std::snprintf(s_zeusThrowClass, sizeof(s_zeusThrowClass), "%s", preset.className);
+            s_zeusThrowSpeed = preset.speed;
+            s_zeusThrowLoft = preset.loft;
+        }
+        Dev::PanelSameLine();
+        ImGui::SetNextItemWidth(140.0f);
+        ImGui::InputText("class##zeusthrow", s_zeusThrowClass, sizeof(s_zeusThrowClass));
+        Dev::PanelTooltip("Any CfgAmmo class name: shells, missiles, rockets, bombs, grenades, mines.");
+        ImGui::SetNextItemWidth(160.0f);
+        Dev::SliderFloat("Speed (m/s)", &s_zeusThrowSpeed, 1.0f, 1000.0f, "%.0f");
+        Dev::PanelSameLine();
+        ImGui::SetNextItemWidth(120.0f);
+        Dev::SliderFloat("Loft (m/s up)", &s_zeusThrowLoft, 0.0f, 20.0f, "%.1f");
+        if (Dev::Button("Throw"))
+            ZeusThrow();
+        Dev::PanelSameLine();
+        Dev::Checkbox("Hotkey: G in free-fly, Ctrl+G always", &s_zeusThrowHotkey);
+        Dev::PanelTooltip("Launches from the scene camera 2 m ahead, along the view direction, in free-fly\n"
+                          "and in normal play alike. Missiles fly straight (no target); shells and bombs\n"
+                          "follow ballistics; hand grenades fuse as in the game.");
+    }
     ImGui::EndDisabled();
 
     ImGui::Spacing();
@@ -7294,6 +7393,16 @@ void ProcessEvent(const SDL_Event& event)
                          event.key.scancode == SDL_SCANCODE_F8))
         {
             ToggleVisible();
+            return;
+        }
+        // ZEUS-THROW: G while the Zeus free-fly camera is active, Ctrl+G at any time (plain G
+        // is the gear key when playing). Raw SDL scancode like the other panel shortcuts, so
+        // it works whether or not the panel is visible; a focused text field keeps its keys.
+        if (event.key.scancode == SDL_SCANCODE_G && s_zeusThrowHotkey && (s_zeusCamera || ctrlDown) &&
+            !ImGui::GetIO().WantTextInput)
+        {
+            ZeusThrow();
+            s_zeusConsumeKeyboardEvent = true;
             return;
         }
         const bool shiftDown = (event.key.mod & SDL_KMOD_SHIFT) != 0;

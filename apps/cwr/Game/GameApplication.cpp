@@ -1897,6 +1897,9 @@ void GameApplication::RunMainLoop()
                 SDL_Event ev = {};
                 ev.type = SDL_EVENT_KEY_DOWN;
                 ev.key.scancode = ak.scancode;
+                // The ImGui SDL3 backend maps letter keys through the KEYCODE; an event with
+                // only a scancode reaches the game but never a dev-panel hotkey.
+                ev.key.key = SDL_GetKeyFromScancode(ak.scancode, ak.mod, false);
                 ev.key.mod = ak.mod;
                 SDL_PushEvent(&ev);
                 ev.type = SDL_EVENT_KEY_UP;
