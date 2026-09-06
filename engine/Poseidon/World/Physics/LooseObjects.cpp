@@ -7,8 +7,13 @@
 
 #include <Poseidon/Foundation/Framework/Log.hpp>
 
+#include <Poseidon/World/Scene/Thing.hpp>
+#include <Poseidon/World/World.hpp>
+
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
+#include <unordered_set>
 #include <vector>
 
 namespace Poseidon::LooseObjects
@@ -30,6 +35,98 @@ Settings g_settings = []
 /// the solver actually moved something rather than merely being asked to.
 int   g_owned = 0;
 float g_reportIn = 0.0f;
+
+// RFG-095: the physics world knew the terrain and nothing else, so a chair shot in the
+// pub fell through the floor and flew through the walls: every wall it met was a
+// drawing, not a body. Static bodies are registered for the map objects around a loose
+// object when its body is spawned -- the pub around the chair, the fence beside the
+// table -- once per object, from the same geometry / fire / roadway levels the engine
+// collides against. Radius and a per-world cap keep it bounded; both are settings.
+std::unordered_set<const Object*> g_staticRegistered;
+int                               g_staticBodies = 0;
+double                            g_staticMs = 0.0;
+
+void RegisterStaticsAround(Physics::PhysicsWorld& world, const Entity& thing, float radius)
+{
+    if (!GLandscape || radius <= 0.0f)
+        return;
+    const auto began = std::chrono::steady_clock::now();
+    const Vector3 pos = thing.WorldPosition();
+    int xMin = 0, xMax = 0, zMin = 0, zMax = 0;
+    ObjRadiusRectangle(xMin, xMax, zMin, zMax, pos, pos, radius);
+    const int range = GLandscape->GetLandRange();
+    int added = 0;
+    int candidates = 0, noGeometry = 0, degenerate = 0, refused = 0, buildingsSeen = 0;
+    const auto tryRegister = [&](Object* obj, LODShapeWithShadow* shape)
+    {
+        ++candidates;
+        const Physics::RegisterResult result = world.RegisterStaticDetailed(shape, obj->Transform());
+        switch (result.outcome)
+        {
+            case Physics::RegisterResult::Outcome::Registered: ++g_staticBodies; ++added; break;
+            case Physics::RegisterResult::Outcome::NoGeometryLod: ++noGeometry; break;
+            case Physics::RegisterResult::Outcome::AllComponentsDegenerate: ++degenerate; break;
+            case Physics::RegisterResult::Outcome::BackendRefused: ++refused; break;
+        }
+    };
+    for (int z = std::max(zMin, 0); z <= zMax && z < range; ++z)
+        for (int x = std::max(xMin, 0); x <= xMax && x < range; ++x)
+        {
+            const ObjectList& list = GLandscape->GetObjects(z, x);
+            for (int i = 0; i < list.Size(); ++i)
+            {
+                Object* obj = list[i];
+                if (obj == nullptr || obj == &thing || !obj->Static() || obj->GetType() == Temporary ||
+                    obj->GetType() == TypeTempVehicle)
+                    continue;
+                if (dyn_cast<Thing>(obj) != nullptr)
+                    continue; // another loose object: a body of its own, never a wall
+                LODShapeWithShadow* shape = obj->GetShape();
+                if (shape == nullptr)
+                    continue;
+                if ((obj->WorldPosition() - pos).SquareSize() > radius * radius)
+                    continue;
+                if (g_staticBodies >= g_settings.staticCap || !g_staticRegistered.insert(obj).second)
+                    continue;
+                tryRegister(obj, shape);
+            }
+        }
+    // The BUILDINGS are not in the cell lists: a house-class model is promoted to a
+    // Building entity and removed from them at world load (the RFG-080 trap, met again),
+    // and the pub around the chair is exactly such a model. They live on the world's
+    // building list.
+    if (GWorld != nullptr)
+    {
+        for (int i = 0; i < GWorld->NBuildings(); ++i)
+        {
+            Entity* building = GWorld->GetBuilding(i);
+            if (building == nullptr || building == &thing)
+                continue;
+            LODShapeWithShadow* shape = building->GetShape();
+            if (shape == nullptr)
+                continue;
+            if ((building->WorldPosition() - pos).SquareSize() > radius * radius)
+                continue;
+            ++buildingsSeen;
+            if (g_staticBodies >= g_settings.staticCap || !g_staticRegistered.insert(building).second)
+                continue;
+            tryRegister(building, shape);
+        }
+    }
+    const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count();
+    g_staticMs += ms;
+    static int reported = 0;
+    if (added > 0 || reported < 6)
+    {
+        ++reported;
+        LOG_INFO(World,
+                 "LOOSEOBJ: {} static bodies registered around {} at [{:.0f} {:.0f} {:.0f}] within {:.0f} m ({} candidates: "
+                 "{} no geometry LOD, {} degenerate, {} refused; {} buildings in range of {} on the world list; {} total, "
+                 "{:.1f} ms, {:.1f} ms cumulative)",
+                 added, thing.GetDebugName().Data(), pos.X(), pos.Y(), pos.Z(), radius, candidates, noGeometry, degenerate,
+                 refused, buildingsSeen, GWorld != nullptr ? GWorld->NBuildings() : -1, g_staticBodies, ms, g_staticMs);
+    }
+}
 
 /// PHY-030: bring the world up ourselves.
 ///
@@ -90,7 +187,13 @@ bool TerrainBroughtUp()
 
 Settings& Get() { return g_settings; }
 
-void Reset() { g_settings = Settings{}; }
+void Reset()
+{
+    g_settings = Settings{};
+    g_staticRegistered.clear();
+    g_staticBodies = 0;
+    g_staticMs = 0.0;
+}
 
 void Release(Physics::BodyId& body)
 {
@@ -150,6 +253,7 @@ bool Step(Entity& thing, Physics::BodyId& body)
         {
             return false;
         }
+        RegisterStaticsAround(*world, thing, g_settings.staticRadius);
     }
 
     Physics::BodyMotion motion;

@@ -106,7 +106,10 @@ void Thing::Simulate(float deltaT, SimulationImportance prec)
     // ONE hand-over point in the whole engine, and this is it: Thing is the only
     // class that reads a pose back out of physics. Off by default; LooseObjects
     // owns every rule about when this is allowed.
-    if (LooseObjects::Step(*this, _physicsBody))
+    // RFG-095: only a disturbed Thing owns a body (see _physicsWake); an untouched one stays
+    // the static scenery it was placed as, with the legacy simulation below.
+    if ((_physicsBody.IsValid() || _physicsWake || _speed.SquareSize() > 0.01f) &&
+        LooseObjects::Step(*this, _physicsBody))
     {
         return;
     }
@@ -347,8 +350,15 @@ void Thing::Simulate(float deltaT, SimulationImportance prec)
     }
 }
 
+void Thing::HitBy(EntityAI* owner, float howMuch, RString ammo)
+{
+    _physicsWake = true; // RFG-095
+    base::HitBy(owner, howMuch, ammo);
+}
+
 void Thing::CrashDammage(float ammount, const Vector3& pos)
 {
+    _physicsWake = true; // RFG-095
     ammount *= GetType()->GetInvArmor();
     LocalDammage(nullptr, this, pos, ammount, GetRadius());
 }

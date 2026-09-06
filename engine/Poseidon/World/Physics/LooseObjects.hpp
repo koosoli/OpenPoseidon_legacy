@@ -37,6 +37,10 @@ struct Settings
     /// can be made to shove like an empty one or an anchor without a rebuild.
     float mass = 30.0f;
     float friction = 0.6f;
+    // RFG-095: map objects within this many metres of a loose object become static bodies
+    // when its body is spawned (0 = none), up to `staticCap` per world.
+    float staticRadius = 30.0f;
+    int   staticCap = 4000;
     float restitution = 0.05f;
 };
 

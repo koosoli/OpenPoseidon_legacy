@@ -42,6 +42,11 @@ class Thing: public VehicleSupply
 	/// physics is switched on AND this object is ours to move; see LooseObjects,
 	/// which owns every rule about when that is true.
 	Physics::BodyId _physicsBody;
+	// RFG-095: a Thing gets a physics body only once something DISTURBS it -- a hit, a
+	// collision, a push. Giving all 528 pieces of Everon's furniture a body at world
+	// load made every chair settle against its table and every table against its
+	// chairs, and the café had rearranged itself before anyone fired a shot.
+	bool _physicsWake = false;
 
 	typedef VehicleSupply base;
 
@@ -60,6 +65,7 @@ class Thing: public VehicleSupply
 	float Rigid() const override {return 1;} // how much energy is transfered in collision
 
 	void CrashDammage( float ammount, const Vector3 &pos=VZero );
+	void HitBy( EntityAI *owner, float howMuch, RString ammo ) override; // RFG-095: wakes the body
 
 	// building are usually empty
 	void Sound( bool inside, float deltaT ) override;
