@@ -1198,6 +1198,12 @@ struct WgrGrassParams
      * pivot the card contrast turns about, so contrast cannot double as a
      * brightness change. Renderer-derived; ignored on input. */
     float photo_layer_means[36];
+    /* RFG-091: the ground colour Reforger's blade layer takes on. A PlantMat blends its
+       atlas towards the satellite map (`SatMapLerp 0.8`); the native path has no satellite
+       pages yet, so the caller passes the mean linear albedo of the surface behind the
+       atlas as the tint and the PlantMat's lerp as the amount. Zero = untinted. */
+    float native_tint[3];
+    float native_tint_lerp;
 };
 
 // --- Water (GPU CDLOD surface) -----------------------------------------------
@@ -1900,7 +1906,7 @@ static_assert(sizeof(WgrGrassBatch) == 16, "WgrGrassBatch layout must match the 
 static_assert(sizeof(WgrGrassTrack) == 16, "WgrGrassTrack layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrGrassDownwash) == 16, "WgrGrassDownwash layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrSmokeShadowBlob) == 32, "WgrSmokeShadowBlob layout must match the Rust #[repr(C)] struct");
-  static_assert(sizeof(WgrGrassParams) == 4768, "WgrGrassParams layout must match the Rust #[repr(C)] struct");
+  static_assert(sizeof(WgrGrassParams) == 4784, "WgrGrassParams layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrWaterParams) == 272, "WgrWaterParams layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrWaterNode) == 40, "WgrWaterNode layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrWaterBatch) == 16, "WgrWaterBatch layout must match the Rust #[repr(C)] struct");

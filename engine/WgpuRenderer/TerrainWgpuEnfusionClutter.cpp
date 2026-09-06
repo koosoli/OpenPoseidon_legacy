@@ -955,6 +955,7 @@ bool TerrainWgpu::UploadEnfusionBladeAtlas(const Landscape& land)
                      { return cellsPerSurface[static_cast<size_t>(a)] > cellsPerSurface[static_cast<size_t>(b)]; });
 
     std::string plantMat, surfaceName;
+    ConfNode    surfaceMat;
     for (const int i : order)
     {
         const std::string surface = land.GetEnfusionSurface(i);
@@ -968,6 +969,7 @@ bool TerrainWgpu::UploadEnfusionBladeAtlas(const Landscape& land)
             continue;
         plantMat = StripGuid(*value);
         surfaceName = surface;
+        surfaceMat = material;
         break;
     }
     if (plantMat.empty())
@@ -1045,12 +1047,18 @@ bool TerrainWgpu::UploadEnfusionBladeAtlas(const Landscape& land)
         const int y0 = std::clamp(static_cast<int>(r.v0 * ch), 0, ch - 1);
         const int y1 = std::clamp(static_cast<int>(r.v1 * ch), y0 + 1, ch);
         const int rw = x1 - x0, rh = y1 - y0;
-        // Crop, then fit to the layer width keeping the tuft's aspect, bottom-aligned.
+        // Crop, then STRETCH to the whole layer. Bottom-aligning at the tuft's own aspect
+        // left the plant in the lower third of the blade quad, exactly where the shader's
+        // root shade and root occlusion are strongest, and the field came out black. The
+        // blade quad is a thin strip; a tuft stretched onto it reads as blade streaks,
+        // which at 10 cm is what the eye gets from Reforger's cover too. (The faithful
+        // port is Reforger's own geometry -- `Plants 8` x `BladesCount 3` crossed CARDS
+        // of the whole tuft -- which is the card path at blade spacing; parked.)
         std::vector<uint8_t> crop(static_cast<size_t>(rw) * rh * 4u);
         for (int y = 0; y < rh; ++y)
             std::memcpy(crop.data() + static_cast<size_t>(y) * rw * 4,
                         colour.data() + (static_cast<size_t>(y0 + y) * cw + x0) * 4, static_cast<size_t>(rw) * 4);
-        const int fitH = std::clamp(static_cast<int>(std::lround(static_cast<double>(LayerW) * rh / rw)), 8, LayerH);
+        const int fitH = LayerH;
         std::vector<uint8_t> fitted(static_cast<size_t>(LayerW) * fitH * 4u);
         stbir_resize_uint8_linear(crop.data(), rw, rh, rw * 4, fitted.data(), LayerW, fitH, LayerW * 4, STBIR_RGBA);
         uint8_t* dst = layers.data() + static_cast<size_t>(layer) * LayerW * LayerH * 4u;
@@ -1066,6 +1074,34 @@ bool TerrainWgpu::UploadEnfusionBladeAtlas(const Landscape& land)
     EngineWgpu::AcquireProducerWindow("grass blade atlas");
     wgr_grass_set_blade_atlas(_renderer, LayerW, LayerH, Layers, layers.data());
     _enfusionBladeHeight = std::clamp(mat.Number("Height", 0.0f), 0.0f, 2.0f);
+    // RFG-091: the ground colour behind the atlas. Reforger lerps the blade towards the
+    // satellite map by `SatMapLerp`; with no satellite pages here, the mean linear albedo
+    // of the surface's own BCR (its detail tile) is the stand-in.
+    _enfusionBladeTintLerp = 0.0f;
+    {
+        const std::string* bcrKey = surfaceMat.Key("BCRMap");
+        if (bcrKey == nullptr || bcrKey->empty())
+            bcrKey = surfaceMat.Key("AlbedoMap");
+        int tw = 0, th = 0;
+        std::vector<uint8_t> tile;
+        if (bcrKey != nullptr && !bcrKey->empty() && DecodeEdds(mount, StripGuid(*bcrKey), 64, tw, th, tile) &&
+            tw > 0 && th > 0)
+        {
+            double sum[3] = {0.0, 0.0, 0.0};
+            const size_t texels = static_cast<size_t>(tw) * th;
+            for (size_t t = 0; t < texels; ++t)
+                for (int c = 0; c < 3; ++c)
+                    sum[c] += std::pow(tile[t * 4 + static_cast<size_t>(c)] / 255.0, 2.2); // sRGB -> linear
+            for (int c = 0; c < 3; ++c)
+                _enfusionBladeTint[c] = static_cast<float>(sum[c] / static_cast<double>(texels));
+            _enfusionBladeTintLerp = std::clamp(mat.Number("SatMapLerp", 0.8f), 0.0f, 1.0f);
+            LOG_INFO(Graphics,
+                     "Wgpu grass: native blades lean {:.0f}% towards the ground colour ({:.3f}, {:.3f}, {:.3f} linear) "
+                     "of '{}'",
+                     _enfusionBladeTintLerp * 100.0f, _enfusionBladeTint[0], _enfusionBladeTint[1],
+                     _enfusionBladeTint[2], StripGuid(*bcrKey));
+        }
+    }
     // POSEIDON_ENFUSION_BLADES_DUMP=<dir>: the eight layers as PNGs, so "the blades look
     // wrong" can be split into "the crop is wrong" and "the shading is wrong".
     if (const char* dumpDir = std::getenv("POSEIDON_ENFUSION_BLADES_DUMP"); dumpDir != nullptr && *dumpDir != '\0')

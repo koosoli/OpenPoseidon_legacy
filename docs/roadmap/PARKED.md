@@ -46,6 +46,16 @@ Konvertierung"): the native loader is live work on `asset-obs-001` (RFG-0xx seri
 code -- roads, rotation, doors/windows, clutter, layer tint, church walls, café Things). The
 converted map is a source of solved sub-problems, not the quality bar.
 
+### Reforger's blade layer as its own geometry
+**Parked 2026-09-06.** A `PlantMat` is `Plants 8` x `BladesCount 3` crossed CARDS of a whole
+tuft cut from its atlas, 10 cm tall. RFG-089..091 put that atlas on our near-ring blade
+strips (tuft stretched onto the thin quad, ground-tinted by the surface's mean albedo in
+place of the satellite map, root shade and grading chain bypassed), which reads right at
+eye height but is not the geometry. The faithful port is the card path at blade spacing
+with the PlantMat's `DistributionAtlasUVs` as the card atlas and `Height` as the card size --
+and the satellite pages bound for the tint (`SatMapLerp 0.8`), which the native terrain
+does not have either. Unparks together with the supertexture pages.
+
 ### EFX reverb environments
 **Parked 2026-08-30 by the owner** after an A/B: *"klingt nicht richtig und nicht gut"*.
 Behind `POSEIDON_EXPERIMENTAL_EAX=1`, default off. One concrete defect was found inside it

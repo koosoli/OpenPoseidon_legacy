@@ -10453,6 +10453,8 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
     params.near_blades_only = _terrain != nullptr ? std::max(_terrain->GrassEnfusionBladeHeight(), 0.0f) : 0.0f;
     if (params.near_blades_only > 0.0f && params.near_blades_only < 0.01f)
         params.near_blades_only = 0.01f;
+    // RFG-091: and the ground colour those blades lean towards.
+    params.native_tint_lerp = _terrain != nullptr ? _terrain->GrassEnfusionBladeTint(params.native_tint) : 0.0f;
     _grassPhotoTuftActive = photoTuft;
     // Announce through the game log, on transition. A silent auto-enable is indistinguishable
     // from a broken one: the previous capture pair moved 229 pixels and could not tell whether

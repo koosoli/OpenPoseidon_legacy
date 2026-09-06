@@ -108,6 +108,9 @@ struct GrassParams {
     // the world's own blade atlas on the near ring, its clutter plants as mid cards
     // from the camera outward). .yzw spare. Mirrors `near_blades_only` in mod.rs.
     native: vec4<f32>,
+    // RFG-091: .x = how far the native blade takes the ground colour in native.yzw
+    // (the PlantMat's SatMapLerp), .yzw spare.
+    native2: vec4<f32>,
     // Opaque bounding box per photo layer, (u0, u1, v0, v1) in texture space.
     // The card quad is trimmed to it: the margin outside can never survive the
     // alpha test, so rasterising it was pure overdraw on a fill-bound path.
@@ -1495,7 +1498,18 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
     // read as one pale wash (the owner's "grass looks flat"). Re-apply 75% of
     // the procedural root shade on top, so the Blade root shade slider governs
     // the textured near field too instead of going inert inside 35 m.
-    let textured = blade.rgb * variation * gust_highlight * mix(1.0, root, 0.75);
+    var textured = blade.rgb * variation * gust_highlight * mix(1.0, root, 0.75);
+    if (grass.native.x > 0.0 && grass.native2.x > 0.0) {
+        // RFG-091: Reforger's blade layer is authored grey-green and takes its colour from
+        // the satellite map (`SatMapLerp 0.8`). With no satellite pages on the native path,
+        // the ground's mean albedo stands in: the atlas keeps its luminance structure, the
+        // ground lends its hue and saturation.
+        let luma = vec3<f32>(0.2126, 0.7152, 0.0722);
+        let ground = grass.native.yzw;
+        let recoloured = ground * (dot(blade.rgb, luma) / max(dot(ground, luma), 0.02));
+        // No root shade: the atlas tuft carries its own base darkening.
+        textured = mix(blade.rgb, recoloured, clamp(grass.native2.x, 0.0, 1.0)) * variation * gust_highlight;
+    }
     // shape_mix.w scales the photo texture globally on top of the distance fade
     // already in blade_uv.w, so the detail can be dialled back without deleting
     // the atlas and falling all the way to procedural.
@@ -1506,13 +1520,21 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
     // so it lines up with neither the dry patches nor the density. 0 = none.
     let hue_field = clump_noise(world.xz, 0.09, 0x7a1c3e5du);
     let hue_tint = mix(vec3<f32>(1.10, 1.00, 0.78), vec3<f32>(0.88, 1.00, 1.12), hue_field);
-    let hued = graded * mix(vec3<f32>(1.0), hue_tint, blade_hue_variation());
+    // The hue drift exists for the procedural blades; on a native atlas it read as lilac.
+    let hued = graded * mix(vec3<f32>(1.0), hue_tint, blade_hue_variation() * select(1.0, 0.0, grass.native.x > 0.0));
     // Contrast about the palette's own mid-tone (the root/tip pair at half height
     // and mean root shade), so 1.0 is exactly the untouched palette. Applied
     // before the tint, so the tint still does what it did.
     let pivot = mix(base, tip, 0.5) * 0.65;
-    let albedo = grass.tint_procedural.rgb *
+    var albedo = grass.tint_procedural.rgb *
         max((hued - pivot) * blade_contrast() + pivot, vec3<f32>(0.0));
+    if (grass.native.x > 0.0) {
+        // RFG-091: the grading chain above (saturation, dry patches, hue drift, contrast
+        // about a GREEN pivot, the procedural tint) was built for the procedural blades;
+        // on a grey-brown native atlas the contrast step pushed every blade away from
+        // green -- towards magenta. The native blade is its atlas, ground-tinted, lit.
+        albedo = textured;
+    }
     // Bend card normals toward an upright rounded-blade normal. This avoids
     // the flat dark-side look of a raw ribbon while preserving its silhouette.
     let n = normalize(mix(normalize(in.normal), vec3<f32>(0.0, 1.0, 0.0), 0.24));
@@ -1522,7 +1544,10 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
     let terrain_shadow = terrain_sun_shadow(world.xz, world.y);
     let cloud_lit = cloud_sun_shadow(world.xz);
     // Blade-on-blade: (sun occlusion, ambient AO). Identity at strength 0.
-    let self_shadow = blade_self_shadow_terms(in.world_rel, n, in.height_t);
+    // RFG-091: the blade-on-blade terms assume a bare procedural blade; the native atlas is
+    // already a lit tuft, and the two together were black.
+    let self_shadow = select(blade_self_shadow_terms(in.world_rel, n, in.height_t), vec2<f32>(0.0, 1.0),
+                             grass.native.x > 0.0);
     let direct = frame.sun_diffuse.rgb * mix(ndl, wrap, 0.35) *
         (1.0 - max(terrain_shadow, self_shadow.x)) * cloud_lit;
     let ambient = sky_irradiance(normalize(mix(n, vec3<f32>(0.0, 1.0, 0.0), 0.45))) * sky_vis_ao(world.xz) *

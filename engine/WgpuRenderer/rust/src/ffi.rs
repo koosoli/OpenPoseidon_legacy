@@ -1294,6 +1294,9 @@ pub struct WgrGrassParams {
     /// The pivot the card contrast turns about, so contrast cannot double as a
     /// brightness change. Renderer-derived; ignored on input.
     pub photo_layer_means: [f32; 36],
+    /// RFG-091: see `native_tint` in wgpu_renderer.h.
+    pub native_tint: [f32; 3],
+    pub native_tint_lerp: f32,
 }
 
 // Per-map + per-frame water parameters (a small UBO). See wgpu_renderer.hpp.
@@ -1563,7 +1566,7 @@ const _: () = assert!(std::mem::size_of::<WgrGrassDownwash>() == 16);
 // block and eight per-layer weights complete five further vec4s
 // (GrassParams.photo / .place / .photo_mix / .layer_weights[2]). 4736 + 32 for
 // the card-coverage / procedural-look pair (GrassParams.card_look / .blade_look).
-const _: () = assert!(std::mem::size_of::<WgrGrassParams>() == 4768);
+const _: () = assert!(std::mem::size_of::<WgrGrassParams>() == 4784);
 const _: () = assert!(std::mem::size_of::<WgrWaterParams>() == 272);
 const _: () = assert!(std::mem::size_of::<WgrWaterNode>() == 40);
 const _: () = assert!(std::mem::size_of::<WgrWaterBatch>() == 16);

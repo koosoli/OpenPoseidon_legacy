@@ -350,7 +350,10 @@ struct GrassParams {
     // RFG-090: mirrors `native` in grass.wgsl. .x = near ring keeps its blades while
     // cards are on, and the mid ring's cards begin at the camera; .yzw spare.
     near_blades_only: f32,
-    _native_pad: [f32; 3],
+    native_tint: [f32; 3],
+    // RFG-091: mirrors `native2` in grass.wgsl: .x = tint lerp, .yzw spare.
+    native_tint_lerp: f32,
+    _native2_pad: [f32; 3],
     // Renderer-derived from the uploaded atlas, never from the caller.
     photo_layer_bounds: [f32; 128],
     photo_layer_means: [f32; 128],
@@ -790,7 +793,9 @@ impl Grass {
             card_flutter: card_tone.flutter,
             wind_scroll: 1.0,
             near_blades_only: 0.0,
-            _native_pad: [0.0; 3],
+            native_tint: [0.0; 3],
+            native_tint_lerp: 0.0,
+            _native2_pad: [0.0; 3],
             photo_layer_bounds: default_layer_bounds(),
             photo_layer_means: default_layer_means(),
         };
@@ -2061,8 +2066,10 @@ impl Grass {
             } else {
                 1.0
             },
-            near_blades_only: if params.near_blades_only != 0.0 { 1.0 } else { 0.0 },
-            _native_pad: [0.0; 3],
+            near_blades_only: params.near_blades_only.max(0.0),
+            native_tint: params.native_tint,
+            native_tint_lerp: params.native_tint_lerp.clamp(0.0, 1.0),
+            _native2_pad: [0.0; 3],
             // Always the renderer's own measurement of the loaded atlas.
             photo_layer_bounds: self.tuft_bounds,
             photo_layer_means: self.tuft_means,

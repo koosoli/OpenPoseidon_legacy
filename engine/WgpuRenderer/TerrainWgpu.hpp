@@ -65,6 +65,13 @@ class TerrainWgpu : public ITerrainRenderer
     bool GrassNearBladesFromEnfusion() const { return _grassBladeAtlasWorld.rfind("enfusion:", 0) == 0; }
     // RFG-090: the PlantMat's authored `Height` (m) behind that atlas, 0 when none.
     float GrassEnfusionBladeHeight() const { return GrassNearBladesFromEnfusion() ? _enfusionBladeHeight : 0.0f; }
+    // RFG-091: the ground colour the native blades lean towards, and by how much (0 = none).
+    float GrassEnfusionBladeTint(float out[3]) const
+    {
+        for (int c = 0; c < 3; ++c)
+            out[c] = _enfusionBladeTint[c];
+        return GrassNearBladesFromEnfusion() ? _enfusionBladeTintLerp : 0.0f;
+    }
     void SetEnfusionBladesEnabled(bool enabled);
     // Reports whether the photo-card atlas actually reached the renderer, so an
     // absent atlas and a switched-off opt-in stop looking identical in the log.
@@ -226,6 +233,8 @@ class TerrainWgpu : public ITerrainRenderer
     bool _enfusionClutterEnabled = true;
     bool _enfusionBladesEnabled = true; // RFG-089
     float _enfusionBladeHeight = 0.0f;  // RFG-090
+    float _enfusionBladeTint[3] = {0.0f, 0.0f, 0.0f}; // RFG-091: mean linear albedo of the surface
+    float _enfusionBladeTintLerp = 0.0f;              // RFG-091: the PlantMat's SatMapLerp
     // The Landscape::EnfusionRoadClutterClear() value the last bake honoured, so the
     // per-frame SetEnfusionClutterEnabled call can notice the dev switch moved and
     // re-bake -- the switch lives on Landscape (a world fact), not in GrassSettings.
