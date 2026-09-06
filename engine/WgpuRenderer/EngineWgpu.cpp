@@ -1,4 +1,5 @@
 #include <Poseidon/Dev/Diag/StreamingDiag.hpp> // RFG-085 residency levers
+#include <Poseidon/World/Scene/MapThings.hpp>    // RFG-095 hidden proxies
 #include <Poseidon/Dev/Diag/FixedStepStats.hpp> // REN-THR-004: ticks per frame beside the frame hash
 #include "EngineWgpu.hpp"
 #include <atomic>
@@ -8435,6 +8436,14 @@ bool EngineWgpu::EmitGpuProxies(Object* parent, LODShapeWithShadow* shape)
     {
         const ProxyObject& proxy = s->Proxy(i);
         LODShapeWithShadow* pshape = proxy.obj ? proxy.obj->GetShape() : nullptr;
+        // RFG-095: a proxy that MapThings replaced with a Thing is drawn by that Thing and by
+        // nothing else. Object::DrawProxies already skipped it; this path did not, so every
+        // chair the owner shot left a copy of itself standing where the GPU child instance
+        // still drew it. Not an eligibility failure either: the parent may still go Full.
+        if (pshape != nullptr && MapThings::ProxyHidden(shape, pshape))
+        {
+            continue;
+        }
         // Full coverage == the proxy shape has no CPU complement and no nested proxies, so the
         // GPU can draw it whole; anything Partial/ineligible would need its own complement/proxy
         // handling (not done for nested proxies) -> that proxy stays on the CPU, and the parent

@@ -149,7 +149,8 @@ void SmokeSource::Load(const ParamEntry& cls)
     _density = cls >> "density";
     _size = cls >> "cloudletSize";
     _sourceSize = cls >> "size";
-    _timeToLive = cls >> "timeToLive";
+    // SMK-020: a source that emits for a fixed time emits for longer too (0 = forever stays 0).
+    _timeToLive = static_cast<float>(cls >> "timeToLive") * GLegacySmokeScale().lifetime;
     float in = cls >> "in";
     SetIn(in);
     float out = cls >> "out";
@@ -882,10 +883,25 @@ void CloudletSource::Simulate(Vector3Par pos, Vector3Par speed, float deltaT)
     }
 }
 
+LegacySmokeScale& GLegacySmokeScale()
+{
+    static LegacySmokeScale scale = []
+    {
+        LegacySmokeScale s;
+        if (const char* v = std::getenv("POSEIDON_SMOKE_LIFETIME_SCALE"))
+            s.lifetime = std::clamp(static_cast<float>(std::atof(v)), 0.1f, 10.0f);
+        if (const char* v = std::getenv("POSEIDON_SMOKE_RISE_SCALE"))
+            s.rise = std::clamp(static_cast<float>(std::atof(v)), 0.1f, 5.0f);
+        return s;
+    }();
+    return scale;
+}
+
 void CloudletSource::Load(const ParamEntry& cls)
 {
+    const LegacySmokeScale& scale = GLegacySmokeScale();
     _interval = cls >> "interval";
-    _cloudletDuration = cls >> "cloudletDuration";
+    _cloudletDuration = static_cast<float>(cls >> "cloudletDuration") * scale.lifetime; // SMK-020
     _cloudletAnimPeriod = cls >> "cloudletAnimPeriod";
     _cloudletSize = cls >> "cloudletSize";
     _cloudletAlpha = cls >> "cloudletAlpha";
@@ -893,8 +909,8 @@ void CloudletSource::Load(const ParamEntry& cls)
     _cloudletFadeIn = cls >> "cloudletFadeIn";
     _cloudletFadeOut = cls >> "cloudletFadeOut";
     _cloudletAccY = cls >> "cloudletAccY";
-    _cloudletMinYSpeed = cls >> "cloudletMinYSpeed";
-    _cloudletMaxYSpeed = cls >> "cloudletMaxYSpeed";
+    _cloudletMinYSpeed = static_cast<float>(cls >> "cloudletMinYSpeed") * scale.rise; // SMK-020
+    _cloudletMaxYSpeed = static_cast<float>(cls >> "cloudletMaxYSpeed") * scale.rise;
     _cloudletColor = ::GetColor(cls >> "cloudletColor");
     _cloudletInitT = cls >> "initT";
     _cloudletDeltaT = cls >> "deltaT";

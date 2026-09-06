@@ -146,6 +146,22 @@ class Cloudlet: public Smoke
 	USE_FAST_ALLOCATOR;
 };
 
+// SMK-020: the legacy cloudlet smoke (every grenade, shell, crater and exhaust in the
+// game) is authored in CfgCloudlets for 2001's particle budget: a grenade's puff lives
+// 0.2-6 s and rises 0-6 m/s. The owner asked for smoke that lasts longer and travels
+// further. These scale what CfgCloudlets says at the moment a cloudlet class is loaded:
+// lifetime multiplies the particle life and the source's emission time, rise multiplies
+// the vertical speed (wind drift is baked in at spawn, so a longer life already drifts
+// further). Seeded from POSEIDON_SMOKE_LIFETIME_SCALE / POSEIDON_SMOKE_RISE_SCALE; the
+// Smoke tab edits them live, and a class loaded after that picks the new values up --
+// which for shots is the next mission start.
+struct LegacySmokeScale
+{
+    float lifetime = 2.0f;
+    float rise = 1.3f;
+};
+LegacySmokeScale& GLegacySmokeScale();
+
 class CloudletSource: public SerializeClass
 {
 	protected:

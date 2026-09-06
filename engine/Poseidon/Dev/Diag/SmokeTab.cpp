@@ -25,6 +25,7 @@
 
 #include <Poseidon/Dev/Debug/DevPanelWidgets.hpp>
 #include <Poseidon/Dev/Diag/SmokeTab.hpp>
+#include <Poseidon/Graphics/Rendering/Effects/Smokes.hpp> // SMK-020 GLegacySmokeScale
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
@@ -406,6 +407,22 @@ void DrawSpawnSection()
                           "the wind will not move smoke it has already dropped.");
     }
 
+    // SMK-020: the game's own smoke (grenades, shells, craters) -- scaled at class load.
+    {
+        LegacySmokeScale& scale = GLegacySmokeScale();
+        ImGui::SetNextItemWidth(110.0f);
+        Dev::SliderFloat("Game smoke lifetime x", &scale.lifetime, 0.1f, 10.0f, "%.2f");
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("POSEIDON_SMOKE_LIFETIME_SCALE. Multiplies every CfgCloudlets particle life and\n"
+                              "source emission time. Applies to cloudlet classes loaded from now on:\n"
+                              "for shots that is the next mission start.");
+        Dev::PanelSameLine();
+        ImGui::SetNextItemWidth(110.0f);
+        Dev::SliderFloat("Game smoke rise x", &scale.rise, 0.1f, 5.0f, "%.2f");
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("POSEIDON_SMOKE_RISE_SCALE. Multiplies the cloudlet vertical speed; wind drift\n"
+                              "already scales with the longer life.");
+    }
     ImGui::SetNextItemWidth(110.0f);
     Dev::SliderFloat("Legacy density", &GLegacyDensity, 0.1f, 3.0f, "%.2f");
     Dev::PanelSameLine();
