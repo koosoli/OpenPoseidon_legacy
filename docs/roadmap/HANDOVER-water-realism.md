@@ -3,7 +3,7 @@
 Date: 2026-09-06. Plan: [WATER-REALISM-LOW-COST-IMPLEMENTATION-PLAN.md](WATER-REALISM-LOW-COST-IMPLEMENTATION-PLAN.md).
 Branch `water-realism` on `safety`, created from `safety/asset-obs-001` at `37a16e16`; upstream had not moved by the end of the session (0 behind). Nothing is merged anywhere. Worktree: `.claude/worktrees/water`, own build dir.
 
-**Installed in the game folder at handover:** `water-realism 331b0f0f 2026-09-06_14:09 deploy-ps1` (exe and DLL from the same build, via `scripts\Deploy.ps1`). The owner is on this build. The other agent's `asset-obs-001 7ece440a` pair was replaced; `7fe5875b` contains it (it is the branch base plus these commits).
+**Installed in the game folder at handover:** `water-realism 2417669d 2026-09-06_14:50 deploy-ps1` (exe and DLL from the same build, via `scripts\Deploy.ps1`). The owner is on this build. The other agent's `asset-obs-001 7ece440a` pair was replaced; `7fe5875b` contains it (it is the branch base plus these commits).
 
 ## Commits
 
@@ -13,6 +13,7 @@ Branch `water-realism` on `safety`, created from `safety/asset-obs-001` at `37a1
 | `a1710b3f` | WRL-002 | Whitecap/foam/spray gated by wind at all three sources (switch: Wave foam > "Whitecaps need wind"); deep swatch default → dark teal (0.010, 0.085, 0.135) per the owner's note. |
 | `7fe5875b` | WRL-003 (+ lake parts of 003a/006, 006b hook) | Simulation-owned `WaterBodyRegistry`; body-aware collision surface; per-node `body` lane and a 16-entry body table (params → 800 B); ellipse-clipped per-body draw at its own level; camera containment feeds the compositor; fixtures (env + Water tab). Also the v3 water-look profile rule (v2 `colour` ignored). |
 | `331b0f0f` | owner defaults + WRL-004 start | waveScale 0.65 and specPower 140 as defaults (v2 profile values equal to the old defaults are dropped so they reach the install); a third body-table lane carries per-body flow (params 800 → 1056 B); bodies get 15% of the shoreline foam band and no swash, which removed the lake's bright rim; river fixture flows downhill. |
+| `2417669d` | owner default + WRL-006 step 7 | Underwater effect ON by default (profiles v4; an older profile's on/off flag is ignored, its tuning kept). The compositor clips each ray's wet path at the camera body's ellipse exit, so a ray leaving a lake sideways below its surface is not fogged past the bank. Bench with the effect on and a dry camera: the underwater rows read -1 (the pass does not run dry), water rows unchanged. |
 | (docs) | WRL-001..003 | `docs/roadmap/evidence/WRL-00{1,2,3}-*.md` and six PNGs. |
 
 Files touched outside the water-owned set, all minimal hooks: `EngineWgpu.cpp` (profile v3 read/write only), `Collisions.cpp` (one branch: local body surface), `WaterSurfaceQuery.{hpp,cpp}` (scaled overload), `DebugOverlay.cpp` (Water tab controls), `wgpu_renderer.hpp` / `ffi.rs` / `lib.rs` (ABI lanes, underwater view field). `TerrainWgpu.cpp`, `LandLoadEnfusion.cpp`, `Landscape.cpp` untouched. `Cargo.lock` untouched.
@@ -44,7 +45,7 @@ Visual (author's reading; owner acceptance pending): whitecap lace from the air 
 - **WRL-003a:** the inland-only frame fixture (no ocean submitted) is NOT exercised: with the CDLOD ocean always submitted on stock worlds there is no such frame today. Imported-world migration (CalmWater surfaces → bodies) is not started; there is no loader that produces body metadata.
 - **WRL-004:** river flow now comes from the body table (done); still missing: two-phase advection, bank slowdown, foam streaks, per-body interaction/foam pools (fields are camera-anchored and shared, so events leak between bodies at the same XZ); profile tuning with real assets; polygon boundaries and connected mouths.
 - **WRL-005:** reflection budget work not started (bodies simply skip planar and keep the sky sample).
-- **WRL-006:** finite ray intervals through the side of a lake and dry cavities under a lake are NOT handled: the compositor uses the containing body's plane, so a ray leaving a lake sideways below its level is still fogged. Caustics for bodies use the shared field.
+- **WRL-006:** side exits are clipped to the body ellipse (done, single-frame evidence `WRL-006-2417669d-lakeexit.png`; the froxel in-scatter volume is not clipped the same way yet). Dry cavities under a lake, per-body caustics and the camera-versus-player split are NOT handled.
 - **WRL-006b:** boats on a lake/river are NOT verified. The collision hook is in; nobody has placed a boat on the fixture. Needs a mission with a small and a large boat on `WGR_WATER_LAKE`, the ocean regression captures, and an observer.
 - **WRL-007:** presets/rollout not started.
 
