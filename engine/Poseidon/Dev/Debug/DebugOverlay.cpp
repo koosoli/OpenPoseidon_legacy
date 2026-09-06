@@ -1227,6 +1227,24 @@ float s_zeusThrowSpeed = 18.0f;
 float s_zeusThrowLoft = 4.0f;
 bool  s_zeusThrowHotkey = true;
 int   s_zeusThrowCount = 0;
+// Harness seed: POSEIDON_ZEUS_THROW=<class>[:<speed>[:<loft>]] presets the throw so --auto-keys
+// can fire a chosen ammo without a hand on the tab.
+const bool s_zeusThrowSeeded = []
+{
+    const char* v = std::getenv("POSEIDON_ZEUS_THROW");
+    if (!v || !*v)
+        return false;
+    std::string spec(v);
+    const size_t c1 = spec.find(':');
+    std::snprintf(s_zeusThrowClass, sizeof(s_zeusThrowClass), "%s", spec.substr(0, c1).c_str());
+    if (c1 != std::string::npos)
+    {
+        const size_t c2 = spec.find(':', c1 + 1);
+        s_zeusThrowSpeed = static_cast<float>(std::atof(spec.substr(c1 + 1, c2 == std::string::npos ? std::string::npos : c2 - c1 - 1).c_str()));
+        s_zeusThrowLoft = c2 == std::string::npos ? 0.0f : static_cast<float>(std::atof(spec.substr(c2 + 1).c_str()));
+    }
+    return true;
+}();
 
 void ZeusThrow()
 {

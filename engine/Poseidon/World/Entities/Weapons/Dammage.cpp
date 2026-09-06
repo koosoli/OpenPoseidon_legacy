@@ -485,18 +485,42 @@ void Object::SetDestroyed(float anim)
 {
     int phase = toIntFloor(anim * 255);
     saturate(phase, 0, 255);
+    const int oldPhase = _destroyPhase;
     SetDestroyPhase(phase);
     bool wasDestroyed = _isDestroyed;
     _isDestroyed = phase > 0;
-    if (_isDestroyed && !wasDestroyed)
+    // DST-001: key the "just destroyed" work on the FIRST non-zero phase, not on the
+    // _isDestroyed flip alone. Building::Simulate marks a dead house with NeverDestroy()
+    // (_isDestroyed = true, phase 0) before ObjectDestructed's first SetDestroyed, so the
+    // flip had already happened, SceneObjectRemoved never ran, and the retained renderer
+    // kept drawing the intact house over the CPU-side collapse: two direct 120 mm hits
+    // took the Everon hospoda to total 1.35 and nothing changed on screen.
+    if ((_isDestroyed && !wasDestroyed) || (phase > 0 && oldPhase == 0))
     {
-        // GPU-driven rendering (docs/gpu-culling-and-depth-plan.md Stage 3b): the GPU path
-        // holds only the intact geometry, so once an object starts being destroyed drop it
-        // from the retained scene — the CPU path then draws its destroyed/animated geometry.
-        // No-op unless WGR_GPU_DRIVEN is on and the object was handed over.
         if (GEngine)
         {
             GEngine->SceneObjectRemoved(this);
+        }
+        // DST-002: from here the collapse morph rewrites this shape's vertices every frame
+        // (Object::Animate -> MakeDestroyed). A CPU-path vertex buffer that SHARES the
+        // retained model's mesh (RFG-088) refuses to re-upload -- it cannot, the mesh belongs
+        // to every intact copy of the same house -- so the morph stayed on the CPU and the
+        // building kept its undamaged geometry on screen: measured on Everon, two 120 mm
+        // shells took `hospoda_mesto` to total dammage 1.35 with no visible change. Give the
+        // shape its own DYNAMIC buffers, which are never shared and re-upload when the
+        // vertices change. Intact copies keep drawing from the retained model.
+        if (_shape != nullptr)
+        {
+            for (int level = 0; level < _shape->NLevels(); level++)
+            {
+                if (!_shape->IsNormalLevel(level))
+                    continue;
+                if (Shape* lvl = _shape->Level(level))
+                {
+                    lvl->ReleaseVBuffer();
+                    lvl->ConvertToVBuffer(VBDynamic);
+                }
+            }
         }
         if (GetType() == Primary)
         {
