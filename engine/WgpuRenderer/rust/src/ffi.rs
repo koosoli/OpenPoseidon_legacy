@@ -1359,8 +1359,11 @@ pub struct WgrWaterParams {
     // x = underwater effect enabled (1) or off (0). Gates the compositor itself; the depth in
     // fft_control.w only gates the water shader's own tint, so without this lane the pass kept
     // running with the effect switched off (a submerged camera is always inside the engage
-    // band). yzw reserved. (sizeof 256 -> 272, matching C++.)
+    // band). yzw carry wave-foam intensity / deep falloff / planar edge fade. (sizeof 256 -> 272.)
     pub underwater_gate: WgrVec4,
+    // WRL-002 — x = shared optical model on (1) / previous physical composite (0), consulted
+    // only while look_params.x is on. yzw reserved. (sizeof 272 -> 288, matching C++.)
+    pub optics_params: WgrVec4,
 }
 
 #[repr(C)]
@@ -1567,7 +1570,7 @@ const _: () = assert!(std::mem::size_of::<WgrGrassDownwash>() == 16);
 // (GrassParams.photo / .place / .photo_mix / .layer_weights[2]). 4736 + 32 for
 // the card-coverage / procedural-look pair (GrassParams.card_look / .blade_look).
 const _: () = assert!(std::mem::size_of::<WgrGrassParams>() == 4784);
-const _: () = assert!(std::mem::size_of::<WgrWaterParams>() == 272);
+const _: () = assert!(std::mem::size_of::<WgrWaterParams>() == 288);
 const _: () = assert!(std::mem::size_of::<WgrWaterNode>() == 40);
 const _: () = assert!(std::mem::size_of::<WgrWaterBatch>() == 16);
 const _: () = assert!(std::mem::size_of::<WgrWaterInteractionEvent>() == 64);

@@ -65,6 +65,12 @@ pub fn build_composer() -> Composer {
             include_str!("../water/fft_sampling.wgsl"),
             "water/fft_sampling.wgsl",
         ),
+        // WRL-002: the one optical model shared by the water surface and the underwater
+        // compositor (absorption / scattering / transmittance / in-scatter).
+        (
+            include_str!("../water/water_optics.wgsl"),
+            "water/water_optics.wgsl",
+        ),
         (include_str!("gbuffer.wgsl"), "gbuffer.wgsl"),
         (include_str!("frame.wgsl"), "frame.wgsl"),
         (include_str!("skin.wgsl"), "skin.wgsl"),

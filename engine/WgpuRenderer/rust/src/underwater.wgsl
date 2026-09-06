@@ -1,3 +1,6 @@
+#import water_fft_sampling::fft_aperiodic_uv
+#import water_optics::{water_extinction, water_transmittance}
+
 // cam_above is the camera's height above the local water surface in metres (negative = the eye is
 // submerged). inv_view_proj unprojects a forward-NDC point to a CAMERA-RELATIVE world position,
 // exactly as Frame.inv_view_proj does — it is inverted view-and-proj-separately in f64 on the Rust
@@ -21,12 +24,6 @@ struct Params {
 // converge without letting an infinite path turn the screen into one flat colour.
 const CAUSTIC_STRENGTH: f32 = 0.16;
 
-fn srgb_to_linear_v3(c: vec3<f32>) -> vec3<f32> {
-    let lo = c / 12.92;
-    let hi = pow((c + vec3<f32>(0.055)) / 1.055, vec3<f32>(2.4));
-    return select(hi, lo, c <= vec3<f32>(0.04045));
-}
-
 fn safe_normalize(v: vec3<f32>) -> vec3<f32> {
     return v / max(length(v), 1e-5);
 }
@@ -40,56 +37,9 @@ fn safe_normalize(v: vec3<f32>) -> vec3<f32> {
 @group(0) @binding(6) var fft_displacement: texture_2d_array<f32>;
 
 // --- Wavy surface lookup -------------------------------------------------------------
-// Duplicated from water_fft_sampling, as underwater_caustics.wgsl already duplicates it:
-// this module is built with include_str!, not the naga_oil composer the water shaders use,
-// so it cannot #import. Keep the three functions below byte-identical in behaviour to
-// water/fft_sampling.wgsl or the compositor's waterline will sit somewhere the drawn
-// surface is not.
-fn fft_hash(cell: vec2<i32>) -> f32 {
-    let c = vec2<u32>(cell) & vec2<u32>(0xffffu);
-    var n = c.x * 1597334677u + c.y * 3812015801u;
-    n = (n ^ (n >> 15u)) * 2246822519u;
-    n = n ^ (n >> 13u);
-    return f32(n & 0x00ffffffu) / 16777216.0;
-}
-
-fn fft_value_noise(p: vec2<f32>) -> f32 {
-    let cell = vec2<i32>(floor(p));
-    let f = fract(p);
-    let s = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
-    let a = fft_hash(cell);
-    let b = fft_hash(cell + vec2<i32>(1, 0));
-    let c = fft_hash(cell + vec2<i32>(0, 1));
-    let d = fft_hash(cell + vec2<i32>(1, 1));
-    return mix(mix(a, b, s.x), mix(c, d, s.x), s.y);
-}
-
-fn fft_aperiodic_uv(world_xz: vec2<f32>, tile_length: f32, layer: i32, amplitude: f32) -> vec2<f32> {
-    if (amplitude <= 0.0) {
-        return fract(world_xz / max(tile_length, 1.0));
-    }
-    let l = f32(layer);
-    let broad_p = world_xz * 0.00173 + vec2<f32>(l * 13.7, l * -19.1);
-    let fine_p = world_xz * 0.00891 + vec2<f32>(l * -7.3, l * 11.9);
-    let broad = vec2<f32>(
-        fft_value_noise(broad_p),
-        fft_value_noise(broad_p + vec2<f32>(41.3, 17.9))
-    ) * 2.0 - vec2<f32>(1.0);
-    let fine = vec2<f32>(
-        fft_value_noise(fine_p),
-        fft_value_noise(fine_p + vec2<f32>(23.1, 37.7))
-    ) * 2.0 - vec2<f32>(1.0);
-    let warped = world_xz + (broad * 0.72 + fine * 0.28) * max(amplitude, 0.0) *
-        (1.0 + l * 0.17);
-    let angle = 0.173 * l + 0.071;
-    let ca = cos(angle);
-    let sa = sin(angle);
-    let rotated = vec2<f32>(
-        ca * warped.x - sa * warped.y,
-        sa * warped.x + ca * warped.y
-    );
-    return fract(rotated / max(tile_length, 1.0) + vec2<f32>(0.173 * l, 0.347 * l));
-}
+// fft_aperiodic_uv is imported from water_fft_sampling (WRL-002): this module is now
+// composed through naga_oil like the water shaders, so the compositor's waterline uses
+// the same lookup as the drawn surface by construction instead of by discipline.
 
 // Vertical wave displacement above `sea_level` at a world XZ, summed over the cascades
 // that actually move geometry.
@@ -319,33 +269,16 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     }
     let color = textureSampleLevel(scene_tex, scene_samp, sample_uv, 0.0).rgb;
 
-    // Absorption hue comes from the AUTHORED water colour, so submerging does not change
-    // substance: the Water tab's deep swatch is what tints the surface from above, and it
-    // is now what tints the volume from inside. It used to be a fixed (0.280, 0.065, 0.020)
-    // curve that had no connection to the water you swam into, which is why the underwater
-    // blue read as a different — and more turquoise — liquid than the sea above it.
-    //
-    // Only the hue is taken. Using the swatch directly as a transmittance
-    // (pow(deep, path*ext)) is what an earlier rewrite did, and the authored deep colour is
-    // dark enough that it killed almost all transmission within a few metres. Normalising
-    // the per-channel absorption to the same MEAN as the curve it replaces keeps the
-    // overall density where it was tuned, and moves only the balance between channels.
+    // WRL-002: the extinction is the SAME function the surface shader uses (water_optics),
+    // fed the same clarity slider and deep swatch, so the water you look into and the water
+    // you swim in are one substance. "Density" (underwater_tuning.x) scales it for the
+    // compositor only; "Colour bias" (underwater_tuning.y) keeps its meaning of mixing the
+    // swatch hue toward the retired neutral curve.
     let ext = max(params.time_height_range_ext.w, 1e-3);
-    // Water tab "Density". 1.0 reproduces the tuned default.
-    let density = max(ext * 2.5, 0.12) * max(params.underwater_tuning.x, 0.0);
-    let deep_lin = srgb_to_linear_v3(clamp(params.deep_color.rgb, vec3<f32>(1e-4), vec3<f32>(1.0)));
-    // -log(colour) is the absorption that would produce that colour over unit depth; the
-    // darkest channel absorbs most, which is what makes deep water blue.
-    let absorb = -log(deep_lin);
-    let mean_absorb = max((absorb.r + absorb.g + absorb.b) / 3.0, 1e-4);
-    // 0.1216 is the mean of the retired (0.280, 0.065, 0.020) curve, so a neutral swatch
-    // reproduces the previous density exactly. Water tab "Colour bias" blends between the
-    // water's own hue and that curve, so the two looks can be compared live.
-    let water_hue = absorb * (0.1216 / mean_absorb);
-    let neutral_hue = vec3<f32>(0.280, 0.065, 0.020);
+    let density = max(params.underwater_tuning.x, 0.0);
     let bias = clamp(params.underwater_tuning.y, 0.0, 1.0);
-    let extinction_rgb = mix(neutral_hue, water_hue, bias) * density;
-    let transmittance = exp(-extinction_rgb * path_m);
+    let extinction_rgb = water_extinction(params.deep_color.rgb, ext, bias) * density;
+    let transmittance = water_transmittance(extinction_rgb, path_m);
 
     // The frustum-aligned volume carries integrated, terrain/object-shadowed in-scattering.
     // A single trilinear sample replaces the former uniform blue haze.

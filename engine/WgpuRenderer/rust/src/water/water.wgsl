@@ -14,6 +14,7 @@
 #import shadow::shadow_strength
 #import color::srgb_to_linear
 #import water_fft_sampling::fft_aperiodic_uv
+#import water_optics::{water_extinction, water_transmittance, water_inscatter, water_albedo_along_path}
 
 const PI: f32 = 3.14159265359;
 
@@ -59,6 +60,8 @@ struct WaterParams {
     // z = deep-water falloff for that wave foam, 0 = break the same everywhere, 1 = open ocean
     //     stays nearly smooth. w reserved.
     underwater_gate: vec4<f32>,
+    // WRL-002: x = shared optical model (1) / previous physical composite (0). yzw reserved.
+    optics_params: vec4<f32>,
 };
 
 // Must match GRID_N in water/mod.rs -- this drives the CDLOD morph target, so a
@@ -1002,9 +1005,15 @@ fn optical_refract(view_dir: vec3<f32>, normal: vec3<f32>, eta: f32) -> vec3<f32
     return eta * view_dir + (eta * cos_i - sqrt(k)) * normal;
 }
 
+// WRL-002: the surface's extinction is water_optics::water_extinction — the same function,
+// the same clarity slider, the same deep swatch and the same hue bias the underwater
+// compositor uses. Legacy mode keeps the old neutral curve by passing bias 0.
+fn surface_extinction(hue_bias: f32) -> vec3<f32> {
+    return water_extinction(wp.deep_color.rgb, wp.color_ext, hue_bias);
+}
+
 fn beer_lambert_attenuation(water_path_length: f32) -> vec3<f32> {
-    let extinction_rgb = vec3<f32>(0.280, 0.065, 0.020) * max(wp.color_ext * 2.5, 0.12);
-    return exp(-extinction_rgb * max(water_path_length, 0.0));
+    return water_transmittance(surface_extinction(0.0), water_path_length);
 }
 
 fn smith_schlick_g1(ndx: f32, roughness: f32) -> f32 {
@@ -1584,30 +1593,55 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
     let transmission = (1.0 - physical_fresnel) * 0.85;
     let legacy_transmitted = mix(ocean_body * (1.0 - rgb_transmittance * 0.4) + rgb * rgb_transmittance, refracted.color * rgb_transmittance, refracted.valid * transmission);
 
-    // WTR-LOOK — physical body radiance: the water volume lit by ambient + sun, with the seabed
-    // showing through weighted by the RGB transmittance instead of an authored lerp. The sun's
-    // lambertian term belongs here (it is body scattering, not a separate light add), so the
-    // direct-light block below contributes only specular + subsurface scattering and nothing is
-    // counted twice.
-    // The missing 1/PI. Outgoing radiance from a Lambertian surface is albedo * irradiance / PI —
-    // the normalisation that makes the BRDF integrate to the albedo over the hemisphere. This term
-    // was multiplying albedo by irradiance directly, so the water body came out PI (~3.14) times too
-    // bright. That is why the sea stayed light no matter how dark the deep colour was set: the hue
-    // was correct and only the magnitude was wrong.
+    // WTR-LOOK / WRL-002 — physical body radiance through the shared optical model.
     //
-    // The foam path a hundred lines below already does this correctly (`foam_albedo / PI`), so the
-    // two materials in this same shader disagreed by a factor of PI.
-    let body_radiance = ocean_body * (sun_ambient * amb_ao + sun_diffuse * ndl * sun_vis * (1.0 - physical_fresnel)) / PI;
-    // You were right that the water was simply too transparent. Beer-Lambert extinction alone is not
-    // enough: clear water still passes most blue-green light over tens of metres, so the refracted
-    // scene kept showing through and the sea never read as a body with a colour of its own. Real
-    // water looks opaque well before extinction kills the transmitted image, because INSCATTERED
-    // light accumulates along the path and drowns it. This scalar visibility term models that
-    // buildup, so past roughly eight metres of column the surface shows its own colour.
-    let seabed_visibility = exp(-water_depth * max(wp.color_ext * 1.6, 0.05));
-    let seabed_share = rgb_transmittance * seabed_visibility;
-    let seabed_through = refracted.color * seabed_share + body_radiance * (1.0 - seabed_share);
-    let physical_transmitted = mix(body_radiance, seabed_through, refracted.valid);
+    // Three things used to attenuate the seabed here, each with its own constant: a
+    // hard-coded red-absorbing Beer-Lambert curve, a scalar "seabed visibility" falloff
+    // (a scattering term that was never called one), and an authored shallow->deep lerp
+    // with a sqrt darkening on top. The underwater compositor derived a fourth from the
+    // deep swatch. water_optics now owns all of it:
+    //   sigma_t       = absorption(deep swatch hue, clarity) + scattering(clarity)
+    //   T             = exp(-sigma_t * path)               transmitted seabed image
+    //   L_body        = albedo * E / PI * (1 - T)           single-scatter glow, 0 at zero path
+    //   result        = background * T + L_body
+    // and the SAME sigma_t is what the compositor fogs with when the eye goes under, so the
+    // water seen from above and from inside is one liquid.
+    //
+    // `E` is the irradiance at the surface (ambient with AO, plus the sun's cosine term
+    // less what Fresnel reflects). That is the single-scatter closed form for a slab lit
+    // from above; light is not re-integrated along the path, which is the documented
+    // approximation for this stage (section 3.1 of the plan).
+    //
+    // The 1/PI is inside water_inscatter: outgoing radiance from a Lambertian scatterer is
+    // albedo * irradiance / PI, the same normalisation the foam material below uses.
+    let hue_bias = clamp(wp.underwater_params.z, 0.0, 1.0);
+    let sigma_t = surface_extinction(hue_bias);
+    // Opacity, physical meaning: 1.0 is the model itself; lowering it lets MORE of the
+    // background through (T lifted toward 1). It used to be a framebuffer alpha that
+    // blended the background a second time over a colour that already contained it.
+    let transmittance = mix(water_transmittance(sigma_t, path_length), vec3<f32>(1.0),
+        1.0 - clamp(wp.alpha, 0.0, 1.0));
+    let body_light = sun_ambient * amb_ao + sun_diffuse * ndl * sun_vis * (1.0 - physical_fresnel);
+    let body_albedo = water_albedo_along_path(shallow_col, deep_col, sigma_t, path_length);
+    let body_radiance = water_inscatter(body_albedo, body_light, transmittance);
+    // The background the water transmits: the refracted sample when its depth test says
+    // it is genuinely behind the surface, otherwise this pixel's own opaque sample, which
+    // the depth test already guarantees is behind the water. Either way the shader now
+    // ALWAYS composites the background itself, so the physical path returns full coverage
+    // below and the framebuffer blend cannot add the background a second time.
+    let own_background = textureSampleLevel(scene_color, scene_samp, uv, 0.0).rgb;
+    let background = select(own_background, refracted.color, refracted.valid > 0.5);
+    let shared_optics_transmitted = background * transmittance + body_radiance;
+    // The composite this replaced, kept selectable (Water tab "Shared optical model" off) so
+    // the two can be A/B'd on the same frame. Note it composites the background only where
+    // the refracted sample was valid; that is why its alpha below still had to blend.
+    let prev_body_radiance = ocean_body * (sun_ambient * amb_ao + sun_diffuse * ndl * sun_vis * (1.0 - physical_fresnel)) / PI;
+    let prev_seabed_visibility = exp(-water_depth * max(wp.color_ext * 1.6, 0.05));
+    let prev_seabed_share = rgb_transmittance * prev_seabed_visibility;
+    let prev_seabed_through = refracted.color * prev_seabed_share + prev_body_radiance * (1.0 - prev_seabed_share);
+    let prev_physical_transmitted = mix(prev_body_radiance, prev_seabed_through, refracted.valid);
+    let shared_optics = wp.optics_params.x > 0.5;
+    let physical_transmitted = select(prev_physical_transmitted, shared_optics_transmitted, shared_optics);
 
     let physical_look = wp.look_params.x > 0.5;
     let transmitted = select(legacy_transmitted, physical_transmitted, physical_look);
@@ -1641,8 +1675,11 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
     rgb = mix(transmitted, refl, reflection_weight);
 
     // fft_control.w carries submersion depth in metres now, not a 0/1 flag.
+    // WRL-002: in physical mode the compositor owns the eye->surface segment (it marches to
+    // the crossing and attenuates that path), so fogging the surface here as well counted
+    // the same water twice. Legacy keeps its own tint for A/B.
     let is_underwater = wp.fft_control.w > 0.0;
-    if (is_underwater) {
+    if (is_underwater && !(physical_look && shared_optics)) {
         let uw_dist = length(in.world_pos);
         let uw_extinction = 1.0 - exp(-uw_dist * vec3<f32>(0.20, 0.08, 0.03));
         let uw_fog_color = deep_col * 0.90 + vec3<f32>(0.0, 0.04, 0.08);
@@ -2052,6 +2089,11 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
     // to transparent as the (swash-moved) column depth -> 0, so the hard coast cut becomes a
     // gentle wash over the visible wet beach; foam forces opacity where it sits.
     let shore = smoothstep(0.0, wp.coast_fade, eff_depth);
-    let alpha = max(mix(wp.alpha, 1.0, fresnel) * shore, combined_foam);
+    // Physical: the colour above already contains the transmitted background, so the only
+    // thing the framebuffer blend may still do is the geometric shore fade (and foam forces
+    // coverage). Legacy keeps its Fresnel-raised opacity, which double-blends by design.
+    let legacy_alpha = max(mix(wp.alpha, 1.0, fresnel) * shore, combined_foam);
+    let physical_alpha = max(shore, combined_foam);
+    let alpha = select(legacy_alpha, physical_alpha, physical_look && shared_optics);
     return vec4<f32>(rgb, alpha);
 }

@@ -1,3 +1,5 @@
+#import water_optics::{water_extinction, optics_srgb_to_linear}
+
 struct Params {
     time_height_range_ext: vec4<f32>,
     camera_pos_layers: vec4<f32>,
@@ -42,11 +44,6 @@ struct CameraShadow {
 @group(0) @binding(6) var csm_cmp: sampler_comparison;
 @group(0) @binding(7) var<uniform> csm: CameraShadow;
 
-fn srgb_to_linear_v3(c: vec3<f32>) -> vec3<f32> {
-    let lo = c / 12.92;
-    let hi = pow((c + vec3<f32>(0.055)) / 1.055, vec3<f32>(2.4));
-    return select(hi, lo, c <= vec3<f32>(0.04045));
-}
 
 fn water_path_length(ray_dir: vec3<f32>, target_distance: f32, cam_above: f32) -> f32 {
     if (cam_above >= 0.0) {
@@ -131,17 +128,12 @@ fn cs_underwater_froxel(@builtin(global_invocation_id) gid: vec3<u32>) {
     let max_dist = params.time_height_range_ext.z;
     let cam_above = params.time_height_range_ext.y;
     let ext = max(params.time_height_range_ext.w, 1e-3);
-    let shallow = srgb_to_linear_v3(clamp(params.shallow_color.xyz, vec3<f32>(1e-4), vec3<f32>(1.0)));
-    let deep = srgb_to_linear_v3(clamp(params.deep_color.xyz, vec3<f32>(1e-4), vec3<f32>(1.0)));
-    // Same derivation as the compositor: absorption hue from the authored deep swatch,
-    // normalised to the mean of the retired (0.280, 0.065, 0.020) curve so density is
-    // unchanged. The two passes must agree or the in-scattering would be a different
-    // colour from the extinction it is supposed to balance.
-    let absorb = -log(deep);
-    let mean_absorb = max((absorb.r + absorb.g + absorb.b) / 3.0, 1e-4);
+    let shallow = optics_srgb_to_linear(clamp(params.shallow_color.xyz, vec3<f32>(1e-4), vec3<f32>(1.0)));
+    let deep = optics_srgb_to_linear(clamp(params.deep_color.xyz, vec3<f32>(1e-4), vec3<f32>(1.0)));
+    // WRL-002: the same water_extinction the compositor and the surface use, so the
+    // in-scattering balances the extinction it sits under by construction.
     let bias = clamp(params.underwater_tuning.y, 0.0, 1.0);
-    let extinction_rgb = mix(vec3<f32>(0.280, 0.065, 0.020), absorb * (0.1216 / mean_absorb), bias) *
-        max(ext * 2.5, 0.12) * max(params.underwater_tuning.x, 0.0);
+    let extinction_rgb = water_extinction(params.deep_color.xyz, ext, bias) * max(params.underwater_tuning.x, 0.0);
     let shallow_peak = max(max(shallow.r, shallow.g), max(shallow.b, 1e-4));
     let deep_peak = max(max(deep.r, deep.g), max(deep.b, 1e-4));
     let shallow_unit = shallow / shallow_peak;

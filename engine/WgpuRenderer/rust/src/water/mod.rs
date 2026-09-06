@@ -360,6 +360,8 @@ impl Water {
             underwater_params: [1.5, 1.0, 1.0, 1.0],
             // Off until the Water tab says otherwise, matching WaterSettings' default.
             underwater_gate: [0.0, 0.0, 0.0, 0.0],
+            // WRL-002 shared optics on; the C++ side pushes the Water tab's value each frame.
+            optics_params: [1.0, 0.0, 0.0, 0.0],
         };
         queue.write_buffer(&params_ubo, 0, bytemuck::bytes_of(&default_params));
 
@@ -1859,10 +1861,137 @@ mod tests {
     // reorder on either side of the FFI boundary fails here, not as a silent UBO misread in the
     // shader. underwater_params (the Water tab's live underwater tuning) is the newest tail
     // lane and is locked the same way.
+    // WRL-002 — Rust mirror of water_optics.wgsl, pinned against the analytical limits the
+    // plan asks for (section 3.1): zero path, increasing depth, zero scattering, and the
+    // reflection/transmission limits. If the WGSL constants change, change these too.
+    mod optics_mirror {
+        pub const NEUTRAL_HUE: [f32; 3] = [0.280, 0.065, 0.020];
+        pub const NEUTRAL_MEAN: f32 = 0.1216;
+        pub fn srgb_to_linear(c: f32) -> f32 {
+            if c <= 0.04045 {
+                c / 12.92
+            } else {
+                ((c + 0.055) / 1.055).powf(2.4)
+            }
+        }
+        pub fn absorption_hue(deep: [f32; 3]) -> [f32; 3] {
+            let lin = deep.map(|c| srgb_to_linear(c.clamp(1e-4, 1.0)));
+            let absorb = lin.map(|c| -c.ln());
+            let mean = (absorb[0] + absorb[1] + absorb[2]) / 3.0;
+            absorb.map(|a| a * (NEUTRAL_MEAN / mean.max(1e-4)))
+        }
+        pub fn extinction(deep: [f32; 3], clarity: f32, bias: f32) -> [f32; 3] {
+            let hue = absorption_hue(deep);
+            let b = bias.clamp(0.0, 1.0);
+            let scale = (clarity * 2.5).max(0.12);
+            let scatter = clarity.max(0.0) * 1.6;
+            [0, 1, 2].map(|i| (NEUTRAL_HUE[i] * (1.0 - b) + hue[i] * b) * scale + scatter)
+        }
+        pub fn transmittance(sigma_t: [f32; 3], path: f32) -> [f32; 3] {
+            sigma_t.map(|s| (-s.max(0.0) * path.max(0.0)).exp())
+        }
+        pub fn inscatter(albedo: [f32; 3], light: [f32; 3], t: [f32; 3]) -> [f32; 3] {
+            [0, 1, 2].map(|i| {
+                albedo[i] * light[i] / std::f32::consts::PI * (1.0 - t[i].clamp(0.0, 1.0))
+            })
+        }
+    }
+
+    #[test]
+    fn shared_optics_mirror_matches_the_wgsl_constants() {
+        let wgsl = include_str!("water_optics.wgsl");
+        assert!(wgsl.contains("#define_import_path water_optics"));
+        assert!(wgsl.contains("vec3<f32>(0.280, 0.065, 0.020)"));
+        assert!(wgsl.contains("NEUTRAL_ABSORPTION_MEAN: f32 = 0.1216"));
+        assert!(wgsl.contains("max(clarity * 2.5, 0.12)"));
+        assert!(wgsl.contains("max(clarity, 0.0) * 1.6"));
+        // The neutral mean really is the mean of the neutral curve.
+        let m = (0.280_f32 + 0.065 + 0.020) / 3.0;
+        assert!((m - optics_mirror::NEUTRAL_MEAN).abs() < 1e-3);
+    }
+
+    #[test]
+    fn shared_optics_analytical_limits() {
+        use optics_mirror::*;
+        let deep = [0.014_f32, 0.105, 0.240]; // shipped deep swatch
+        let sigma_t = extinction(deep, 0.16, 1.0);
+        for s in sigma_t {
+            assert!(s > 0.0 && s.is_finite());
+        }
+        // Zero path: nothing transmitted is lost and nothing is scattered in — a dry ray is
+        // the background exactly.
+        let t0 = transmittance(sigma_t, 0.0);
+        assert_eq!(t0, [1.0, 1.0, 1.0]);
+        assert_eq!(inscatter([0.1, 0.3, 0.4], [1.0, 1.0, 1.0], t0), [0.0, 0.0, 0.0]);
+        // A negative path (numerical noise on a dry ray) never amplifies.
+        assert_eq!(transmittance(sigma_t, -3.0), [1.0, 1.0, 1.0]);
+        // Monotone: more water, less background, more body; red dies before blue.
+        let mut prev_t = t0;
+        for path in [0.5_f32, 1.0, 2.0, 5.0, 10.0, 40.0] {
+            let t = transmittance(sigma_t, path);
+            for i in 0..3 {
+                assert!(t[i] < prev_t[i], "T must fall with path ({path} m, ch {i})");
+            }
+            assert!(t[0] < t[2], "red must be absorbed faster than blue at {path} m");
+            prev_t = t;
+        }
+        // Deep limit: the body saturates at albedo * light / PI and the background is gone.
+        let t_deep = transmittance(sigma_t, 400.0);
+        let body = inscatter([0.1, 0.3, 0.4], [3.0, 3.0, 3.0], t_deep);
+        for i in 0..3 {
+            assert!(t_deep[i] < 1e-6);
+            let limit = [0.1_f32, 0.3, 0.4][i] * 3.0 / std::f32::consts::PI;
+            assert!((body[i] - limit).abs() < 1e-5);
+        }
+        // Zero clarity: absorption floors at 0.12/m of the hue and scattering is exactly zero,
+        // so the extinction is finite, positive, and no division by zero anywhere.
+        let clear = extinction(deep, 0.0, 1.0);
+        let hue = absorption_hue(deep);
+        for i in 0..3 {
+            assert!((clear[i] - hue[i] * 0.12).abs() < 1e-6);
+        }
+        // Bias 0 reproduces the retired neutral curve exactly (compatibility endpoint).
+        let neutral = extinction(deep, 0.16, 0.0);
+        for i in 0..3 {
+            assert!((neutral[i] - (NEUTRAL_HUE[i] * 0.4 + 0.256)).abs() < 1e-6);
+        }
+        // A black swatch still yields a finite hue (the 1e-4 clamp), never NaN.
+        for v in absorption_hue([0.0, 0.0, 0.0]) {
+            assert!(v.is_finite());
+        }
+    }
+
+    #[test]
+    fn shared_optics_composite_owns_the_background_once() {
+        let shader = include_str!("water.wgsl");
+        // The physical path composites the background itself...
+        assert!(shader.contains(
+            "let shared_optics_transmitted = background * transmittance + body_radiance;"
+        ));
+        // ...falls back to the pixel's own opaque sample rather than dropping the background...
+        assert!(shader.contains(
+            "let background = select(own_background, refracted.color, refracted.valid > 0.5);"
+        ));
+        // ...and therefore returns geometric coverage only, never a Fresnel-raised alpha that
+        // would blend the background in a second time.
+        assert!(shader.contains("let physical_alpha = max(shore, combined_foam);"));
+        assert!(shader.contains(
+            "let alpha = select(legacy_alpha, physical_alpha, physical_look && shared_optics);"
+        ));
+        // The surface fogs a submerged view only when the compositor does not own that segment.
+        assert!(shader.contains("if (is_underwater && !(physical_look && shared_optics)) {"));
+        // One extinction: no private curve survives in the surface shader.
+        assert!(
+            !shader.contains("vec3<f32>(0.280, 0.065, 0.020)"),
+            "surface carries a private extinction curve"
+        );
+        assert!(shader.contains("#import water_optics::"));
+    }
+
     #[test]
     fn debug_params_appended_without_shifting_existing_lanes() {
         use crate::ffi::WgrWaterParams;
-        assert_eq!(std::mem::size_of::<WgrWaterParams>(), 272);
+        assert_eq!(std::mem::size_of::<WgrWaterParams>(), 288);
         assert_eq!(
             std::mem::offset_of!(WgrWaterParams, debug_params),
             192,
@@ -1887,6 +2016,11 @@ mod tests {
             std::mem::offset_of!(WgrWaterParams, underwater_gate),
             256,
             "underwater_gate must be appended after underwater_params, not inserted before it"
+        );
+        assert_eq!(
+            std::mem::offset_of!(WgrWaterParams, optics_params),
+            272,
+            "optics_params must be appended after underwater_gate, not inserted before it"
         );
         // flow_direction_speed (the previous last field) must not have moved.
         assert_eq!(

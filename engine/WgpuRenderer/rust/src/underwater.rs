@@ -40,6 +40,8 @@ const _: () = assert!(std::mem::size_of::<Params>() == 208);
 
 #[test]
 fn underwater_wgsl_validates() {
+    // All three passes #import the shared water optics (and the FFT lookup), so they
+    // validate through the same composer the runtime builds them with.
     for (name, source) in [
         ("underwater.wgsl", include_str!("underwater.wgsl")),
         (
@@ -51,13 +53,14 @@ fn underwater_wgsl_validates() {
             include_str!("underwater_caustics.wgsl"),
         ),
     ] {
-        let module = naga::front::wgsl::parse_str(source).unwrap_or_else(|e| panic!("{name}: {e}"));
-        naga::valid::Validator::new(
-            naga::valid::ValidationFlags::all(),
-            naga::valid::Capabilities::all(),
-        )
-        .validate(&module)
-        .unwrap_or_else(|e| panic!("{name}: {e}"));
+        let mut composer = crate::shaders::build_composer();
+        composer
+            .make_naga_module(naga_oil::compose::NagaModuleDescriptor {
+                source,
+                file_path: name,
+                ..Default::default()
+            })
+            .unwrap_or_else(|e| panic!("{name}: {}", e.emit_to_string(&composer)));
     }
 }
 
@@ -70,16 +73,20 @@ fn underwater_refraction_rejects_foreground_depth_leaks() {
     // Absorption hue is derived from the authored deep swatch, not a fixed curve, so the
     // volume is the same substance as the surface. The 0.1216 normaliser is the mean of
     // the curve it replaced and is what keeps the density where it was tuned.
-    assert!(shader.contains("let absorb = -log(deep_lin);"));
-    assert!(shader.contains("(0.1216 / mean_absorb)"));
-    // The old curve survives only as the bias=0 endpoint of the Water tab's "Colour bias"
-    // slider, so the two looks can be compared live. It must never be the extinction on its
-    // own again — that is the state where the volume was a different liquid from the surface.
-    assert!(shader.contains("let extinction_rgb = mix(neutral_hue, water_hue, bias) * density;"));
-    // Both underwater passes must derive it the same way or the in-scattering would be a
-    // different colour from the extinction it balances.
+    // WRL-002: no private extinction derivation anywhere in the underwater passes. All
+    // three go through water_optics::water_extinction, the function the surface uses.
+    for (name, text) in [
+        ("underwater.wgsl", shader),
+        ("underwater_froxel.wgsl", include_str!("underwater_froxel.wgsl")),
+    ] {
+        assert!(
+            text.contains("water_extinction(params.deep_color"),
+            "{name} must take its extinction from water_optics"
+        );
+        assert!(!text.contains("-log("), "{name} carries a private absorption derivation");
+        assert!(!text.contains("0.280"), "{name} carries a private neutral curve");
+    }
     let froxel = include_str!("underwater_froxel.wgsl");
-    assert!(froxel.contains("(0.1216 / mean_absorb)"));
     assert!(froxel.contains("params.underwater_tuning.y"));
     assert!(shader.contains("underwater_froxel"));
     assert!(!shader.contains("pow(deep_linear"));
@@ -93,6 +100,11 @@ fn underwater_volume_is_shadowed_and_caustics_follow_fft() {
     assert!(froxel.contains("froxel_out"));
     let caustics = include_str!("underwater_caustics.wgsl");
     assert!(caustics.contains("fft_dynamics"));
+    // The FFT lookup is imported, never copied: a copy is a waterline that drifts.
+    for (name, text) in [("underwater.wgsl", include_str!("underwater.wgsl")), ("underwater_caustics.wgsl", caustics)] {
+        assert!(text.contains("#import water_fft_sampling::fft_aperiodic_uv"), "{name}");
+        assert!(!text.contains("fn fft_aperiodic_uv"), "{name} still carries a private fft_aperiodic_uv");
+    }
     assert!(caustics.contains("fft_auxiliary"));
     assert!(caustics.contains("fft_aperiodic_uv"));
 }
@@ -300,12 +312,20 @@ fn a_submerged_eye_on_a_calm_sea_reproduces_the_plane_answer() {
 
 #[test]
 fn default_absorption_keeps_useful_midrange_visibility() {
-    let extinction_scale = (0.16_f32 * 2.5).max(0.12);
-    let transmission = |sigma: f32, distance: f32| (-sigma * extinction_scale * distance).exp();
-
-    assert!(transmission(0.280, 10.0) > 0.30);
-    assert!(transmission(0.065, 10.0) > 0.75);
-    assert!(transmission(0.020, 30.0) > 0.75);
+    // Rust mirror of water_optics: sigma_t = hue * max(2.5 * clarity, 0.12) + 1.6 * clarity,
+    // at the shipped clarity of 0.16 and the neutral hue (bias 0). The scattering term is
+    // what the old surface shader called "seabed visibility"; the compositor now shares it.
+    let clarity = 0.16_f32;
+    let sigma_t = |hue: f32| hue * (clarity * 2.5).max(0.12) + clarity * 1.6;
+    let transmission = |hue: f32, distance: f32| (-sigma_t(hue) * distance).exp();
+    // Zero path is exactly one, monotone in distance.
+    assert_eq!(transmission(0.280, 0.0), 1.0);
+    assert!(transmission(0.065, 5.0) > transmission(0.065, 10.0));
+    // Blue-green still carries a useful image at 5 m and red is gone well before green.
+    assert!(transmission(0.020, 5.0) > 0.20);
+    assert!(transmission(0.280, 5.0) < transmission(0.065, 5.0));
+    // And the volume closes down: nothing of the seabed survives 40 m, whatever the channel.
+    assert!(transmission(0.020, 40.0) < 0.05);
 }
 
 struct Volume {
@@ -336,12 +356,18 @@ impl Underwater {
     pub fn new(
         device: &wgpu::Device,
         format: wgpu::TextureFormat,
+        composer: &mut naga_oil::compose::Composer,
         volume_storage_supported: bool,
     ) -> Self {
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("wgr_underwater_shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("underwater.wgsl").into()),
-        });
+        // WRL-002: composed through the shared module set so the compositor can #import the
+        // water optics and the FFT lookup instead of carrying private copies of both.
+        let shader = crate::shaders::make_module(
+            device,
+            composer,
+            "wgr_underwater_shader",
+            include_str!("underwater.wgsl"),
+            "underwater.wgsl",
+        );
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("wgr_underwater_layout"),
             entries: &[
@@ -502,10 +528,13 @@ impl Underwater {
         let caustic_view = caustic_tex.create_view(&wgpu::TextureViewDescriptor::default());
 
         let volume = volume_storage_supported.then(|| {
-            let froxel_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("wgr_underwater_froxel_shader"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("underwater_froxel.wgsl").into()),
-            });
+            let froxel_shader = crate::shaders::make_module(
+                device,
+                composer,
+                "wgr_underwater_froxel_shader",
+                include_str!("underwater_froxel.wgsl"),
+                "underwater_froxel.wgsl",
+            );
             let uniform = |binding| wgpu::BindGroupLayoutEntry {
                 binding,
                 visibility: wgpu::ShaderStages::COMPUTE,
@@ -581,10 +610,13 @@ impl Underwater {
                     cache: None,
                 });
 
-            let caustic_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("wgr_underwater_caustic_shader"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("underwater_caustics.wgsl").into()),
-            });
+            let caustic_shader = crate::shaders::make_module(
+                device,
+                composer,
+                "wgr_underwater_caustic_shader",
+                include_str!("underwater_caustics.wgsl"),
+                "underwater_caustics.wgsl",
+            );
             let caustic_layout =
                 device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                     label: Some("wgr_underwater_caustic_layout"),

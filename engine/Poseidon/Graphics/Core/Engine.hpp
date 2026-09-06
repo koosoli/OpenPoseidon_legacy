@@ -2412,6 +2412,15 @@ class Engine : public IGraphicsEngine
         // variance-filtered roughness so glitter stays stable with distance, and gives SSS its own
         // light path. Keep the legacy path selectable for A/B captures.
         bool physicalLook = true;
+        // WRL-002 — shared optical model. ON: the surface composites through water_optics
+        // (one absorption + scattering extinction derived from the deep swatch and Colour
+        // clarity, a single-scatter body glow that is zero at zero path, and the transmitted
+        // background composited in-shader at full coverage), and the underwater compositor
+        // fogs with the SAME extinction. OFF: the previous physical composite, kept for A/B
+        // (separate Beer-Lambert curve, seabed-visibility falloff, shallow->deep lerp, and a
+        // framebuffer alpha that blended the background in a second time). Only consulted
+        // while physicalLook is on.
+        bool sharedOptics = true;
         float glitterGain = 1.0f;    // sun-specular gain (1 = the model's own energy)
         float sssGain = 1.0f;        // subsurface / backlit-crest gain
         float reflectionGain = 0.7f; // environment-reflection gain (1 = uncapped physical Fresnel)

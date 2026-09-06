@@ -1754,7 +1754,7 @@ impl Renderer {
             );
         }
         let tonemap = hdr_enabled.then(|| Tonemap::new(&device, config.format));
-        let underwater = Underwater::new(&device, color_format, fft_storage_supported);
+        let underwater = Underwater::new(&device, color_format, &mut composer, fft_storage_supported);
         let bloom = hdr_enabled.then(|| Bloom::new(&device, HDR_FORMAT));
         // God rays composite into the HDR scene target, so like bloom they only exist on the
         // HDR path. Default ON; `WGR_GODRAYS=0` ablates it for an A/B capture.

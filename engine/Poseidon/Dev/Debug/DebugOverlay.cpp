@@ -6094,7 +6094,9 @@ void DrawWaterTab()
     changed |= Dev::SliderFloat("Specular intensity", &s.specIntensity, 0.0f, 60.0f, "%.2f");
     Dev::PanelTooltip("Sun-glint brightness. Un-clamped on HDR so it blooms.");
     changed |= Dev::SliderFloat("Opacity", &s.alpha, 0.0f, 1.0f, "%.2f");
-    Dev::PanelTooltip("Base opacity looking straight down (grazing angles go opaque via Fresnel).");
+    Dev::PanelTooltip("Legacy composite: base opacity looking straight down (grazing angles go opaque "
+                      "via Fresnel). Shared optical model: 1 = the physical transmission; lower lets "
+                      "more of the background through than the water's extinction would.");
     changed |= Dev::SliderFloat("Shadow dim", &s.shadowDim, 0.0f, 1.0f, "%.2f");
     Dev::PanelTooltip("Terrain + CSM sun-shadow always removes the glint/direct sun on shadowed water; "
                       "this additionally darkens the shadowed surface (0 = physical sun-only removal).");
@@ -6107,6 +6109,14 @@ void DrawWaterTab()
                       "OFF: the legacy composite (Fresnel capped at 0.43-0.72, specular scaled to 0.12x, "
                       "SSS multiplied by the near-black deep colour). Toggle for a direct A/B.");
     ImGui::BeginDisabled(!s.physicalLook);
+    changed |= Dev::Checkbox("Shared optical model (WRL-002)", &s.sharedOptics);
+    Dev::PanelTooltip("ON: one absorption + scattering extinction, derived from the Deep colour and "
+                      "Colour clarity, drives the seabed transmission, the body glow AND the underwater "
+                      "compositor, so the water seen from above and from inside is one liquid. The "
+                      "background is composited in the shader at full coverage, so Opacity now lifts the "
+                      "transmission instead of alpha-blending the background a second time.\n"
+                      "OFF: the previous physical composite (separate hard-coded absorption curve, "
+                      "seabed-visibility falloff and shallow->deep lerp) for a same-frame A/B.");
     changed |= Dev::SliderFloat("Sun glitter gain", &s.glitterGain, 0.0f, 3.0f, "%.2f");
     Dev::PanelTooltip("Sun-specular gain; 1 = the model's own energy. This is the sparkle path — raise it "
                       "if the sun track looks dull, lower it if crests fire white specks.");
@@ -6216,7 +6226,9 @@ void DrawWaterTab()
                       "column depth reconstructed from the opaque-depth prepass.");
     changed |= Dev::SliderFloat("Colour clarity", &s.colorExt, 0.02f, 3.0f, "%.3f", ImGuiSliderFlags_Logarithmic);
     Dev::PanelTooltip("Extinction (1/m): higher = the tint reaches the deep colour in shallower water, "
-                      "so the depth colouring reads stronger. Lower = subtler, more uniform colour.");
+                      "so the depth colouring reads stronger. Lower = subtler, more uniform colour.\n"
+                      "Shared optical model: absorption = 2.5x this (hue from the Deep colour, floor "
+                      "0.12/m) and scattering = 1.6x this, for the surface AND the underwater volume.");
     changed |= Dev::SliderFloat("Soft edge width (m)", &s.coastFade, 0.0f, 3.0f, "%.2f");
     Dev::PanelTooltip("Metres of water depth over which the shoreline fades transparent -> opaque. "
                       "Large values look misty/foggy at the coast; lower it for a crisper waterline.");
