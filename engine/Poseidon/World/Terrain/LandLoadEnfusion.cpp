@@ -2268,6 +2268,13 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
                     if (entry.second != nullptr)
                         maxBoundingCentreTotal = std::max(maxBoundingCentreTotal, entry.second->BoundingCenter().Size());
                 _modernObjectStreaming = true;
+                // RFG-103: arm the worker pre-parser for the native models. The OPRW path has
+                // had it since the stream existed; the native branch never called it, so every
+                // cold `.xob` parsed on the main thread (measured 226 ms parse + 220 ms adapt per
+                // house: the hitches). The worker reads the pak (one ifstream per read) and runs
+                // the pure converter; the adapt stays on the main thread (see
+                // WGR_OBJECT_STREAM_ASYNC_ADAPT and the heap note).
+                EnsureModernObjectPreparer();
                 EnableGeographyAccumulation(); // RFG-101: streamed objects fill the geography
                 _modernObjectResidencyPending = false;
                 _modernObjectCenterX = -0x3fffffff;

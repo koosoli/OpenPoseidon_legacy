@@ -1195,6 +1195,21 @@ for the radius path** (419k registered objects, 50k main-pass instances), so str
 now the DEFAULT for native worlds -- Streaming tab "Native Reforger worlds stream their
 objects", or `POSEIDON_REFORGER_STREAM=0`, restore the radius at load.
 
+**RFG-103 (2026-09-06): the stream's worker pre-parser now serves native models.** The
+native branch never armed it, and the worker only knew loose files, so every `.xob` came
+back "not loose" (prep=0/503) and parsed on the main thread: 226 ms parse + 220 ms adapt
+per house -- the owner's hitches. The worker now takes the world loader's external `.xob`
+loader (pak read per call, pure converter). Measured at the village pose: 496 of 503 cold
+models prepared on the workers, main-thread parse 16.4 s -> 2 ms cumulative; what is left
+on the main thread is the optimise/register step (7.6 s over 503 models, ~15 ms each).
+
+Where the owner's 36 ms frame goes at the village (his log, 3440x1440 DLSS Quality):
+grass ~10 ms of the colour pass (measured by ablation: 11.4 -> 1.5 ms residual with
+`WGR_GRASS_DENSITY=0`), shadow cascades 8-11 ms (c3 alone 4-6 ms), water up to 10 ms when
+the sea is in view (draw 7 + planar 2), the rest ~8 ms. All three have dev-tab levers:
+Grass density/distance, Shadow distance (default 1200 m) and caster LOD bias, Water tab
+"Low" preset.
+
 **RFG-102 (2026-09-06, build `6840b7f8`+): the "strange textures" inside and outside the
 houses were the `.xob` reader.** The dedup vertex stream stores its UV sets interleaved
 per vertex; read as one plane per set, every two-set model had every other vertex's uv0

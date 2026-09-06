@@ -275,6 +275,26 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
         try
         {
             model = ModelCache::LoadLooseFile(path, &error, &opened);
+            // RFG-103: a native `.xob` is not a loose file -- it lives in a Reforger pak. The
+            // world loader's external loader (ModelCache::SetExternalLoader) reads the pak
+            // (one ifstream per read) and runs the pure converter, so it is safe here; without
+            // this every native model was "not loose" and fell back to the main thread
+            // (measured: prep=0/503, sync=503, 226 ms parse hitches per house).
+            if (!opened && !model)
+            {
+                const size_t n = path.size();
+                const bool xob = n > 4 && (path[n - 4] == '.') && (path[n - 3] == 'x' || path[n - 3] == 'X') &&
+                                 (path[n - 2] == 'o' || path[n - 2] == 'O') && (path[n - 1] == 'b' || path[n - 1] == 'B');
+                if (xob)
+                    if (ModelCache::ExternalLoader external = ModelCache::GetExternalLoader())
+                    {
+                        std::string why;
+                        model = external(path, why);
+                        opened = true; // it was ours to load; a null model is a parse failure, not "not loose"
+                        if (!model)
+                            error = why.empty() ? "external loader declined" : why;
+                    }
+            }
         }
         catch (const std::exception& e)
         {
