@@ -989,6 +989,26 @@ impl Water {
         }
     }
 
+    /// WRL-006: the containment ellipse (cx, cz, rx, rz) of the body the camera is in, from
+    /// the same table the surface draws, so the compositor can stop attenuating where a ray
+    /// leaves the body through its side. rx == 0 means "no body: the sea".
+    pub fn camera_body_ellipse(&self, cam_xz: [f32; 2]) -> [f32; 4] {
+        let Some(p) = self.last_params else { return [0.0; 4] };
+        let mut best: Option<[f32; 4]> = None;
+        for i in 0..crate::ffi::WGR_WATER_MAX_BODIES {
+            let e = p.bodies[3 * i];
+            if e[2] <= 0.0 || e[3] <= 0.0 {
+                continue;
+            }
+            let u = (cam_xz[0] - e[0]) / e[2];
+            let v = (cam_xz[1] - e[1]) / e[3];
+            if u * u + v * v <= 1.0 && best.is_none_or(|b| e[2] * e[3] < b[2] * b[3]) {
+                best = Some(e);
+            }
+        }
+        best.unwrap_or([0.0; 4])
+    }
+
     fn local_wave_scale(p: &WgrWaterParams) -> f32 {
         if p.optics_params[3] > 0.0 {
             p.optics_params[3]

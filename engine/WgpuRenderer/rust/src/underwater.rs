@@ -34,9 +34,11 @@ struct Params {
     // (1 = hue from the authored deep swatch, 0 = the old neutral curve), z = caustic gain,
     // w reserved.
     underwater_tuning: [f32; 4],
+    // WRL-006: camera body's containment ellipse (cx, cz, rx, rz); rx == 0 = the sea.
+    body_ellipse: [f32; 4],
 }
 
-const _: () = assert!(std::mem::size_of::<Params>() == 208);
+const _: () = assert!(std::mem::size_of::<Params>() == 224);
 
 #[test]
 fn underwater_wgsl_validates() {
@@ -129,7 +131,9 @@ fn underwater_waterline_follows_the_wavy_surface() {
     assert!(shader.contains("fn ray_above_surface"));
     assert!(shader.contains("fn wavy_water_path_length"));
     assert!(shader.contains("fft_displacement"));
-    assert!(shader.contains("let path_m = wavy_water_path_length("));
+    assert!(shader.contains("var path_m = wavy_water_path_length("));
+    // WRL-006: the wet path stops at the camera body's side.
+    assert!(shader.contains("path_m = min(path_m, max(t_exit, 0.0));"));
     // The stride must stay under the shortest cascade that carries displacement, or a
     // crest can pass between two samples unseen.
     assert!(WATERLINE_PROBE_M / WATERLINE_STEPS as f32 <= 20.0);
@@ -750,6 +754,7 @@ impl Underwater {
         debug_view: f32,
         wave_scale: f32,
         body_wave_scale: f32,
+        body_ellipse: [f32; 4],
         density: f32,
         color_bias: f32,
         caustic_gain: f32,
@@ -775,6 +780,7 @@ impl Underwater {
                 cascade_lengths,
                 water_controls: [warp_amp, sea_level, wave_scale, body_wave_scale],
                 underwater_tuning: [density, color_bias, caustic_gain, 0.0],
+                body_ellipse,
             }),
         );
         if let Some(volume) = &self.volume {

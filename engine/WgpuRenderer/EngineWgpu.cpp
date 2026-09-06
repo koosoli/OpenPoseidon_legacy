@@ -10283,7 +10283,7 @@ void EngineWgpu::SyncWaterLookProfile()
         // saves whatever it holds on any edit, so the swatches were written unchanged), and
         // that pinned the old ultramarine deep swatch over any later default. A v3 profile's
         // colours were written by this code and are honoured.
-        out << "v 3\nwave " << s.waveAmp << ' ' << s.waveChoppy << ' ' << s.waveSpeed << ' ' << s.waveScale << '\n';
+        out << "v 4\nwave " << s.waveAmp << ' ' << s.waveChoppy << ' ' << s.waveSpeed << ' ' << s.waveScale << '\n';
         out << "colour " << s.shallowColor[0] << ' ' << s.shallowColor[1] << ' ' << s.shallowColor[2] << ' '
             << s.deepColor[0] << ' ' << s.deepColor[1] << ' ' << s.deepColor[2] << '\n';
         out << "coast " << s.colorExt << ' ' << s.coastFade << ' ' << s.foamWidth << ' ' << s.foamIntensity << ' '
@@ -10382,7 +10382,10 @@ void EngineWgpu::SyncWaterLookProfile()
             in >> on >> _waterLook.underwaterEnterDepth >> _waterLook.underwaterExitDepth >>
                 _waterLook.underwaterEngageBand >> _waterLook.underwaterDensity >> _waterLook.underwaterColorBias >>
                 _waterLook.underwaterCausticGain;
-            _waterLook.underwaterEffect = on != 0;
+            // v4: the on/off flag of an older profile was an automatic snapshot of the old
+            // default (off); the current default applies. Thresholds and tuning are kept.
+            if (version >= 4)
+                _waterLook.underwaterEffect = on != 0;
         }
         else
             in.ignore(std::numeric_limits<std::streamsize>::max(), '\n');

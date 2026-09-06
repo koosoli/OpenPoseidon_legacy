@@ -11,6 +11,7 @@ struct Params {
     cascade_lengths: vec4<f32>,
     water_controls: vec4<f32>,
     underwater_tuning: vec4<f32>,
+    body_ellipse: vec4<f32>,
 };
 
 struct TerrainShadowMap {

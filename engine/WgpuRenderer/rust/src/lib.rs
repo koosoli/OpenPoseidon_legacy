@@ -93,6 +93,8 @@ struct UnderwaterView {
     wave_scale: f32,
     // WRL-003: the camera's body scales the wavy-surface search (a lake has ripples, not swell).
     body_wave_scale: f32,
+    // WRL-006: containment ellipse of the camera's body (rx == 0: none).
+    body_ellipse: [f32; 4],
     // Water-tab underwater tuning: absorption density multiplier, colour bias 0..1, caustic gain.
     density: f32,
     color_bias: f32,
@@ -1951,6 +1953,7 @@ impl Renderer {
                 debug_view: 0.0,
                 wave_scale: 1.0,
                 body_wave_scale: 1.0,
+                body_ellipse: [0.0; 4],
                 density: 1.0,
                 color_bias: 1.0,
                 caustic_gain: 1.0,
@@ -3792,6 +3795,7 @@ impl Renderer {
                 debug_view: underwater_spectrum.4,
                 wave_scale: underwater_spectrum.5,
                 body_wave_scale: underwater_spectrum.6,
+                body_ellipse: self.water.camera_body_ellipse([cam.cam_pos[0], cam.cam_pos[2]]),
                 density: underwater_tuning.1,
                 color_bias: underwater_tuning.2,
                 caustic_gain: underwater_tuning.3,
@@ -3812,6 +3816,7 @@ impl Renderer {
                 debug_view: underwater_spectrum.4,
                 wave_scale: underwater_spectrum.5,
                 body_wave_scale: underwater_spectrum.6,
+                body_ellipse: [0.0; 4],
                 density: underwater_tuning.1,
                 color_bias: underwater_tuning.2,
                 caustic_gain: underwater_tuning.3,
@@ -4587,6 +4592,7 @@ impl Renderer {
                 view.debug_view,
                 view.wave_scale,
                 view.body_wave_scale,
+                view.body_ellipse,
                 view.density,
                 view.color_bias,
                 view.caustic_gain,

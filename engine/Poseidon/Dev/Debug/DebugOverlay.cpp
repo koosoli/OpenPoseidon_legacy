@@ -6163,7 +6163,7 @@ void DrawWaterTab()
     Dev::PanelTooltip("Strength of the shoaling swell that runs in toward the beach. The train "
                       "grows (Green's law) and its crests sharpen as the water shallows.");
     changed |= Dev::Checkbox("Underwater effect", &s.underwaterEffect);
-    Dev::PanelTooltip("OFF by default — the look is not good enough to ship on yet. ON: metric "
+    Dev::PanelTooltip("ON by default (owner decision 2026-09-06). ON: metric "
                       "underwater extinction and in-scattering using the Water tab's "
                       "shallow/deep colours, classifying each view ray separately near the "
                       "surface so a half-submerged view keeps its above-water part, plus "

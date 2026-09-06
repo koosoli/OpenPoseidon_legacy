@@ -18,6 +18,8 @@ struct Params {
     // x = absorption density multiplier, y = colour bias (1 = hue from the authored deep
     // swatch, 0 = the retired neutral curve), z = caustic gain, w reserved.
     underwater_tuning: vec4<f32>,
+    // WRL-006: the camera body's containment ellipse (cx, cz, rx, rz); rx == 0 means the sea.
+    body_ellipse: vec4<f32>,
 };
 
 // Cleared reversed-Z depth has no finite target. This is far enough for the water volume to
@@ -264,7 +266,25 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // time_height_range_ext.y is the CPU's single whole-screen height above the flat
     // datum; it survives only as the no-FFT fallback inside wavy_water_path_length.
     let cam_above = params.time_height_range_ext.y;
-    let path_m = wavy_water_path_length(ray_dir, target_distance, cam_above);
+    var path_m = wavy_water_path_length(ray_dir, target_distance, cam_above);
+    // WRL-006: a bounded body ends at its side. A ray can leave a lake through its ellipse
+    // while still below the lake's surface, and beyond that exit there is no water to
+    // attenuate. Solve |u0 + d t|^2 = 1 in the ellipse's normalised frame for the exit t.
+    if (params.body_ellipse.z > 0.0 && params.body_ellipse.w > 0.0) {
+        let e = params.body_ellipse;
+        let u0 = vec2<f32>((params.camera_pos_layers.x - e.x) / e.z, (params.camera_pos_layers.z - e.y) / e.w);
+        let d = vec2<f32>(ray_dir.x / e.z, ray_dir.z / e.w);
+        let a = dot(d, d);
+        let b = 2.0 * dot(u0, d);
+        let c = dot(u0, u0) - 1.0;
+        if (a > 1e-8) {
+            let disc = b * b - 4.0 * a * c;
+            if (disc >= 0.0) {
+                let t_exit = (-b + sqrt(disc)) / (2.0 * a);
+                path_m = min(path_m, max(t_exit, 0.0));
+            }
+        }
+    }
     if (path_m <= 1e-4) {
         // The compositor runs in a small band above the surface for split waterline views.
         // Rays that never enter water must remain completely untouched, including refraction.

@@ -2501,16 +2501,14 @@ class Engine : public IGraphicsEngine
         // extinction to the portion of each ray below the surface, and uses the authored
         // shallow/deep colours.
         //
-        // OFF by default: the look is not good enough to ship on, and it is the owner's call
-        // that the water reads better without it than with it in its current state. Turn it on
-        // from the dev overlay's Water tab ("Underwater effect") to work on it or to A/B its
-        // cost.
+        // ON by default since 2026-09-06 (owner decision, after WRL-002 gave the volume the
+        // same optics as the surface). The Water tab checkbox still switches it off.
         //
         // The flag gates BOTH the fullscreen compositor and the water shader's own underwater
         // tint (they share fft_control.w), so with it off a submerged view is the plain scene
         // seen through the water surface, with no volume and no distance fog either. That is
         // deliberate: half the effect is not better than none of it.
-        bool underwaterEffect = false;
+        bool underwaterEffect = true;
 
         // Underwater tuning, all live from the Water tab so the look can be dialled in without
         // a rebuild. Every one of these is inert while underwaterEffect is off.
