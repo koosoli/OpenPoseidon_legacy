@@ -561,23 +561,45 @@ bool ReadXobLod(const void* data, size_t size, const XobHeader& header, size_t l
         }
 
         part.uvSets.resize(desc.uvSetCount);
+        part.uvSetDescs = desc.uvSets;
         for (uint8_t s = 0; s < desc.uvSetCount; ++s)
-        {
             part.uvSets[s].resize(desc.vertexCount);
-            for (XobVec2& uv : part.uvSets[s])
-                uv = UnpackXobUv(cursor.U32(), desc.uvSets[s]);
+        if (XobUvPlanar())
+        {
+            for (uint8_t s = 0; s < desc.uvSetCount; ++s)
+                for (XobVec2& uv : part.uvSets[s])
+                    uv = UnpackXobUv(cursor.U32(), desc.uvSets[s]);
+        }
+        else
+        {
+            for (size_t v = 0; v < desc.vertexCount; ++v)
+                for (uint8_t s = 0; s < desc.uvSetCount; ++s)
+                    part.uvSets[s][v] = UnpackXobUv(cursor.U32(), desc.uvSets[s]);
         }
 
         part.renderSource.resize(desc.renderVertexCount);
         part.tangents.resize(desc.renderVertexCount);
         part.bitangents.resize(desc.renderVertexCount);
+        const int uvWord = XobRenderUvWord();
+        if (uvWord > 0)
+        {
+            part.renderUvSets.resize(desc.uvSetCount);
+            for (uint8_t s = 0; s < desc.uvSetCount; ++s)
+                part.renderUvSets[s].resize(desc.renderVertexCount);
+        }
         for (size_t v = 0; v < desc.renderVertexCount; ++v)
         {
             part.renderSource[v] = cursor.U32();
             for (uint8_t s = 0; s < desc.uvSetCount; ++s)
             {
-                const XobVec3 tangent = UnpackXobDirection(cursor.U32());
-                const XobVec3 bitangent = UnpackXobDirection(cursor.U32());
+                // RFG-102: one of the two per-set words is the packed UV (POSEIDON_XOB_UV_RENDER
+                // picks which); the other is the tangent. Without the switch: tangent, bitangent.
+                const uint32_t word1 = cursor.U32();
+                const uint32_t word2 = cursor.U32();
+                if (uvWord > 0)
+                    part.renderUvSets[s][v] = UnpackXobUv(uvWord == 1 ? word1 : word2, desc.uvSets[s]);
+                const XobVec3 tangent = UnpackXobDirection(uvWord == 1 ? word2 : word1);
+                const XobVec3 bitangent = uvWord > 0 ? tangent : UnpackXobDirection(word2);
                 // Only set 0's frame is kept: set 1 is a lightmap/detail channel and
                 // nothing downstream consumes a second tangent basis.
                 if (s == 0)

@@ -43,6 +43,10 @@ struct XobUvCensus
     size_t      partsOutOfRange = 0;
     size_t      partsDegenerate = 0;
     std::string firstOutOfRange;
+    // RFG-102: the FIRST set (what the base colour samples). Buckets by the wider of the
+    // u/v spans, and the first few wide parts with the range/extra they were unpacked with.
+    size_t set0Parts = 0, set0SpanLe1 = 0, set0SpanLe8 = 0, set0SpanLe64 = 0, set0SpanGt64 = 0;
+    std::vector<std::string> set0Wide;
 };
 inline XobUvCensus& GXobUvCensus()
 {
@@ -548,6 +552,31 @@ inline bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& 
 
             const bool hasSecond = part.uvSets.size() > 1 && part.uvSets[1].size() == part.positions.size();
             anySecondSet = anySecondSet || hasSecond;
+            if (!part.uvSets.empty() && part.uvSets[0].size() == part.positions.size())
+            {
+                float u0 = 1e9f, u1 = -1e9f, v0 = 1e9f, v1 = -1e9f;
+                for (const XobVec2& uv : part.uvSets[0])
+                {
+                    u0 = std::min(u0, uv.u); u1 = std::max(u1, uv.u);
+                    v0 = std::min(v0, uv.v); v1 = std::max(v1, uv.v);
+                }
+                const float span = std::max(u1 - u0, v1 - v0);
+                XobUvCensus& c = GXobUvCensus();
+                ++c.set0Parts;
+                if (span <= 1.01f) ++c.set0SpanLe1;
+                else if (span <= 8.0f) ++c.set0SpanLe8;
+                else if (span <= 64.0f) ++c.set0SpanLe64;
+                else ++c.set0SpanGt64;
+                if (span > 8.0f && c.set0Wide.size() < 12)
+                {
+                    const XobUvSet d = part.uvSetDescs.empty() ? XobUvSet{} : part.uvSetDescs[0];
+                    char buf[300];
+                    std::snprintf(buf, sizeof(buf), "%s part %zu: u[%.2f..%.2f] v[%.2f..%.2f] desc u[%.2f..%.2f] v[%.2f..%.2f] extra=%.3f verts=%zu",
+                                  sourcePath.c_str(), static_cast<size_t>(&part - &lod.parts[0]), u0, u1, v0, v1, d.uMin, d.uMax, d.vMin, d.vMax, d.extra,
+                                  part.positions.size());
+                    c.set0Wide.push_back(buf);
+                }
+            }
             // RFG-096: a census of the SECOND UV set, because the MatPBRMulti mask is sampled
             // through it and a wall wearing a triangular patchwork is what a wrong set looks
             // like. Counted per part: values outside [-0.01, 1.01] and sets whose span is
@@ -574,14 +603,25 @@ inline bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& 
                 }
             }
 
+            // RFG-102: with render-stream UVs the face runs over list B; the corner's
+            // position/normal come through renderSource, its UV from the render vertex.
+            const bool renderUv = !part.renderUvSets.empty() && part.renderIndices.size() == part.indices.size() &&
+                                  part.renderUvSets[0].size() == part.renderSource.size();
             for (size_t t = 0; t + 2 < part.indices.size(); t += 3)
             {
                 uint16_t corner[3] = {part.indices[t], part.indices[t + 1], part.indices[t + 2]};
+                uint16_t rcorner[3] = {part.renderIndices[t], part.renderIndices[t + 1], part.renderIndices[t + 2]};
+                if (renderUv)
+                    for (int c = 0; c < 3; ++c)
+                        corner[c] = static_cast<uint16_t>(part.renderSource[rcorner[c]]);
                 // Two independent reasons to swap, so XOR: asking for both is asking for
                 // the original order back, and silently applying one twice would be the
                 // kind of cancellation this file exists to make impossible.
                 if (options.flipWinding != options.fixOrientation)
+                {
                     std::swap(corner[0], corner[1]);
+                    std::swap(rcorner[0], rcorner[1]);
+                }
 
                 {
                     const XobVec3& p0 = part.positions[corner[0]];
@@ -612,12 +652,12 @@ inline bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& 
                     const int32_t point = remap[corner[c]];
                     face.vertices[c].point = point;
                     face.vertices[c].normal = point;
-                    face.vertices[c].u = part.uvSets[0][corner[c]].u;
-                    face.vertices[c].v = part.uvSets[0][corner[c]].v;
+                    face.vertices[c].u = renderUv ? part.renderUvSets[0][rcorner[c]].u : part.uvSets[0][corner[c]].u;
+                    face.vertices[c].v = renderUv ? part.renderUvSets[0][rcorner[c]].v : part.uvSets[0][corner[c]].v;
                     if (hasSecond)
                     {
-                        face.vertices[c].u1 = part.uvSets[1][corner[c]].u;
-                        face.vertices[c].v1 = part.uvSets[1][corner[c]].v;
+                        face.vertices[c].u1 = (renderUv && part.renderUvSets.size() > 1) ? part.renderUvSets[1][rcorner[c]].u : part.uvSets[1][corner[c]].u;
+                        face.vertices[c].v1 = (renderUv && part.renderUvSets.size() > 1) ? part.renderUvSets[1][rcorner[c]].v : part.uvSets[1][corner[c]].v;
                     }
                 }
                 writeLod.faces.push_back(std::move(face));

@@ -1193,6 +1193,16 @@ cells read hard=3 and the clutter no longer grows through the nave. Streaming is
 opt-in (`POSEIDON_REFORGER_STREAM=1`) until the per-frame cost is measured against the
 radius path.
 
+**RFG-102 (2026-09-06, build `6840b7f8`+): the "strange textures" inside and outside the
+houses were the `.xob` reader.** The dedup vertex stream stores its UV sets interleaved
+per vertex; read as one plane per set, every two-set model had every other vertex's uv0
+replaced by a uv1 -- sane values at the vertices (census: 8,000 of 9,160 parts with a
+span <= 64), a full-range gradient across every triangle. One-set parts (windows, poles)
+were never affected, which is what pointed at the set count. Three other readings were
+measured and refuted first (unsigned halves, IEEE half floats, render-stream words). The
+owner's two poses now show carpet, wallpaper, tiles and doors inside and plaster, mural
+and sockle outside.
+
 Open, in the order they should be acted on:
 
 1. **The native loader needs the same byte budget the object stream has.** It places

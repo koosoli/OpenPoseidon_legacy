@@ -4,6 +4,8 @@
 
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -132,12 +134,108 @@ inline XobVec3 UnpackXobDirection(uint32_t packed)
 //! Unpacks a 32-bit packed UV (2 x s16) through its set's rect. The signed halves
 //! span the rect end to end, so the rect -- not the raw value -- is what puts a UV
 //! in texture space; ignoring it leaves every atlased part on the wrong tile.
+// RFG-102: how the two 16-bit halves of a packed UV are read. Measured on the walls,
+// floors and doors of Everon's houses: "signed" (the original read, centred on the set's
+// mid-range) and "unsigned" (0..65535 over [min,max]) both leave every triangle with a
+// full-range gradient -- the stripes -- because neither is the encoding. POSEIDON_XOB_UV_MODE
+// = signed | unsigned | half selects the read; half (IEEE binary16, the set's min/max are
+// then plain bounds) is the default.
+enum class XobUvMode { Signed, Unsigned, Half };
+//! RFG-102: the dedup stream's UV sets are stored INTERLEAVED per vertex (uv0, uv1 for
+//! vertex 0, then vertex 1, ...), not one plane per set. Read planar, a two-set part had
+//! every other vertex's uv0 replaced by a uv1 -- sane per-vertex values, full-range
+//! gradients across the triangle: the stripes on every wall, floor and door, while
+//! one-set parts (windows, poles) were untouched. POSEIDON_XOB_UV_PLANAR=1 restores the old read.
+inline bool XobUvPlanar()
+{
+    static const bool p = []
+    {
+        const char* v = std::getenv("POSEIDON_XOB_UV_PLANAR");
+        return v != nullptr && *v == '1';
+    }();
+    return p;
+}
+//! RFG-102: which of the two per-set words of a render vertex is the packed UV
+//! (1 = first, 2 = second); 0 = none, UVs come from the dedup stream as before.
+//! POSEIDON_XOB_UV_RENDER=0|1|2.
+inline int XobRenderUvWord()
+{
+    static const int w = []
+    {
+        const char* v = std::getenv("POSEIDON_XOB_UV_RENDER");
+        if (!v) return 0; // measured: both render words are tangent frames (noise as UV)
+        return (*v == '1') ? 1 : (*v == '2' ? 2 : 0);
+    }();
+    return w;
+}
+inline XobUvMode XobUvDecodeMode()
+{
+    static const XobUvMode m = []
+    {
+        const char* v = std::getenv("POSEIDON_XOB_UV_MODE");
+        if (v && (*v == 'u' || *v == 'U')) return XobUvMode::Unsigned;
+        if (v && (*v == 'h' || *v == 'H')) return XobUvMode::Half;
+        return XobUvMode::Signed; // measured: unsigned and half both leave 8,757 of 9,160 parts with a span > 64
+    }();
+    return m;
+}
+
+inline float XobHalfToFloat(uint16_t h)
+{
+    const uint32_t sign = (h >> 15) & 1u;
+    const uint32_t exp = (h >> 10) & 0x1Fu;
+    const uint32_t mant = h & 0x3FFu;
+    uint32_t bits;
+    if (exp == 0)
+    {
+        if (mant == 0)
+            bits = sign << 31;
+        else
+        {
+            // subnormal: normalise
+            uint32_t e = 127 - 15 + 1;
+            uint32_t m = mant;
+            while ((m & 0x400u) == 0)
+            {
+                m <<= 1;
+                --e;
+            }
+            m &= 0x3FFu;
+            bits = (sign << 31) | (e << 23) | (m << 13);
+        }
+    }
+    else if (exp == 31)
+        bits = (sign << 31) | 0x7F800000u | (mant << 13);
+    else
+        bits = (sign << 31) | ((exp - 15 + 127) << 23) | (mant << 13);
+    float f;
+    std::memcpy(&f, &bits, sizeof(f));
+    return f;
+}
+
 inline XobVec2 UnpackXobUv(uint32_t packed, const XobUvSet& set)
 {
-    const int16_t rawU = static_cast<int16_t>(packed & 0xFFFFu);
-    const int16_t rawV = static_cast<int16_t>((packed >> 16) & 0xFFFFu);
-    const float fractionU = (static_cast<float>(rawU) / 32767.0f + 1.0f) * 0.5f;
-    const float fractionV = (static_cast<float>(rawV) / 32767.0f + 1.0f) * 0.5f;
+    const XobUvMode mode = XobUvDecodeMode();
+    if (mode == XobUvMode::Half)
+    {
+        XobVec2 out;
+        out.u = XobHalfToFloat(static_cast<uint16_t>(packed & 0xFFFFu));
+        out.v = XobHalfToFloat(static_cast<uint16_t>((packed >> 16) & 0xFFFFu));
+        return out;
+    }
+    float fractionU, fractionV;
+    if (mode == XobUvMode::Signed)
+    {
+        const int16_t rawU = static_cast<int16_t>(packed & 0xFFFFu);
+        const int16_t rawV = static_cast<int16_t>((packed >> 16) & 0xFFFFu);
+        fractionU = (static_cast<float>(rawU) / 32767.0f + 1.0f) * 0.5f;
+        fractionV = (static_cast<float>(rawV) / 32767.0f + 1.0f) * 0.5f;
+    }
+    else
+    {
+        fractionU = static_cast<float>(packed & 0xFFFFu) / 65535.0f;
+        fractionV = static_cast<float>((packed >> 16) & 0xFFFFu) / 65535.0f;
+    }
     XobVec2 out;
     out.u = set.uMin + (set.uMax - set.uMin) * fractionU;
     out.v = set.vMin + (set.vMax - set.vMin) * fractionV;
@@ -267,6 +365,10 @@ struct XobPart
     std::vector<XobVec3> positions;
     std::vector<XobVec3> normals;
     std::vector<std::vector<XobVec2>> uvSets; //!< uvSets[set][vertex]
+    std::vector<XobUvSet> uvSetDescs;         //!< the per-set range/extra the UVs were unpacked with
+    //! RFG-102: UVs read from the RENDER stream (per render vertex, list B), one vector per
+    //! set; empty unless XobRenderUvWord() > 0. The dedup stream cannot carry a UV seam.
+    std::vector<std::vector<XobVec2>> renderUvSets;
     std::vector<uint32_t> colours;            //!< empty unless the format declares one
     std::vector<uint16_t> indices;            //!< list A, 3 per triangle
 
