@@ -602,6 +602,32 @@ bool TextureSourceDDS::InitFromMemory(const void* data, size_t size, const char*
         }
     }
 
+    // RFG-098: R8 -- a single-channel mask. Reforger's murals (the painted adverts on
+    // village gables, `Murals_NAVA_A.edds`, 2048^2) and other masks arrive as one byte per
+    // texel, and the PAA-era format table has no such thing, so the material lost its mask
+    // with an error on every load. Expanded to grey ARGB8888: every reader downstream
+    // takes that, and a mask is read from one channel anyway.
+    if (_format == PixelFormat::R8)
+    {
+        for (DDSMipLevel& level : _levels)
+        {
+            const size_t texels = static_cast<size_t>(level.width) * static_cast<size_t>(level.height);
+            if (level.data.size() < texels)
+                continue;
+            std::vector<uint8_t> rgba(texels * 4);
+            for (size_t t = 0; t < texels; ++t)
+            {
+                const uint8_t v = level.data[t];
+                rgba[t * 4 + 0] = v; // B
+                rgba[t * 4 + 1] = v; // G
+                rgba[t * 4 + 2] = v; // R
+                rgba[t * 4 + 3] = 255;
+            }
+            level.data = std::move(rgba);
+        }
+        _format = PixelFormat::ARGB8888;
+        _hasAlpha = false;
+    }
     _pacFormat = ToPacFormat(_format);
     if (!IsBlockFormat(_format) && _format != PixelFormat::ARGB8888 && _format != PixelFormat::RGBA8888)
     {

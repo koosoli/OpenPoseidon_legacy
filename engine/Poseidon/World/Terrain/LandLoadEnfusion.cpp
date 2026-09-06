@@ -31,6 +31,7 @@
 #include <Poseidon/Asset/Formats/Enfusion/ResourceDatabase.hpp>
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/XobConvert.hpp>
+#include <Poseidon/World/Model/ModelCache.hpp> // RFG-097 external loader
 #include <Poseidon/Asset/Formats/Enfusion/XobModel.hpp>
 #include <Poseidon/Asset/Formats/P3D/MLODLoader.hpp>
 #include <Poseidon/Asset/Formats/P3D/MLODWriter.hpp>
@@ -1537,7 +1538,11 @@ LODShapeWithShadow* BuildRoadShape(const std::vector<float>& points, float width
 /// forever; `writeToBuffer` / `loadFromBuffer` are pure memory, so the round trip
 /// costs one serialise plus one parse per DISTINCT model and buys all of that.
 /// Nothing is written to disk.
-LODShapeWithShadow* BuildShapeFromXob(const EnfusionMount& mount, const std::string& xobPath, std::string& why)
+//! RFG-097: the model half of BuildShapeFromXob, on its own so the object stream's cold
+//! path (ModelCache) can build a native model by NAME when a placement far from the
+//! start comes into range. Everything about how a `.xob` becomes a Model lives here.
+std::shared_ptr<Poseidon::Model::Model> BuildModelFromXob(const EnfusionMount& mount, const std::string& xobPath,
+                                                          std::string& why)
 {
     namespace Enf = Poseidon::Asset::Formats::Enfusion;
     namespace Fmt = Poseidon::Asset::Formats;
@@ -1610,6 +1615,14 @@ LODShapeWithShadow* BuildShapeFromXob(const EnfusionMount& mount, const std::str
         why = "MLOD loader produced no levels";
         return nullptr;
     }
+    return parsed;
+}
+
+LODShapeWithShadow* BuildShapeFromXob(const EnfusionMount& mount, const std::string& xobPath, std::string& why)
+{
+    std::shared_ptr<Poseidon::Model::Model> parsed = BuildModelFromXob(mount, xobPath, why);
+    if (!parsed)
+        return nullptr;
     // The name is only a cache key here -- no file is opened, because the parsed
     // model is handed in.
     LODShapeWithShadow* shape = Poseidon::Shapes.NewFromModel(xobPath.c_str(), false, true, parsed, nullptr);
@@ -1728,12 +1741,33 @@ LODShapeWithShadow* BuildShapeFromXob(const EnfusionMount& mount, const std::str
 }
 } // namespace
 
+namespace
+{
+//! RFG-097: the ModelCache's route to a native `.xob` by name (see ModelCache::SetExternalLoader).
+std::shared_ptr<Poseidon::Model::Model> LoadXobModelForCache(const std::string& path, std::string& why)
+{
+    const EnfusionMount& mount = EnfusionMount::Instance();
+    if (!mount.IsOpen())
+    {
+        why = "Enfusion archives are not mounted";
+        return nullptr;
+    }
+    return BuildModelFromXob(mount, path, why);
+}
+} // namespace
+
 bool Landscape::LoadEnfusionNative(const char* addonsDir)
 {
+    // RFG-097: from here on a `.xob` name is loadable through the ShapeBank like any
+    // other model name, which is what lets the object stream bring native placements
+    // into range on its own.
+    ModelCache::SetExternalLoader(&LoadXobModelForCache);
     if (addonsDir == nullptr || *addonsDir == 0)
         return false;
 
     const DWORD start = Poseidon::Foundation::GlobalTickCount();
+    size_t streamedTerrainRelativeTotal = 0; // RFG-097, reported at the end of the load
+    float  maxBoundingCentreTotal = 0.0f;
     // RFG-066: a second load must not report the first one's materials.
     GColourCensus = ColourCensus();
     const EnfusionTerrain terrain = AssembleTerrain(addonsDir);
@@ -2155,8 +2189,121 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
             std::string firstFloating;
             std::string firstBuried;
             std::string firstBuriedStructure;
+            // RFG-097: STREAM the world instead of placing a radius of it.
+            //
+            // Until now every placement inside `nearRadius` of the start became a static
+            // object at load and nothing outside it ever existed: fly 300 m and the terrain
+            // is bare. The converted worlds never had that problem because the OPRW loader
+            // hands its placements to the object stream (LandSave.cpp, `_modernObject*`),
+            // which admits by distance from the camera, evicts what falls out of the window
+            // and loads a model the first time a placement needs it. The native path now
+            // does the same: every placement -- shell and attached door alike -- is a stream
+            // placement carrying its `.xob` path, and the ShapeBank can load that path cold
+            // through ModelCache's external loader (installed at the top of this function).
+            // Budget, radius and window growth are the stream's own knobs
+            // (WGR_OBJECT_STREAM_MAX_OBJECTS / _RADIUS_CELLS); POSEIDON_REFORGER_STREAM=0
+            // restores the radius-at-load behaviour for an A/B.
+            // OFF by default until the retained/direct duplication under streaming is fixed
+            // (measured: 1,572 MB of direct-path copies, OOM); POSEIDON_REFORGER_STREAM=1 opts in.
+            const bool streamNative = []
+            {
+                const char* v = std::getenv("POSEIDON_REFORGER_STREAM");
+                return v != nullptr && *v == '1';
+            }();
+            size_t streamed = 0, streamedParts = 0;
+            if (streamNative)
+            {
+                _modernObjectModels.clear();
+                _modernObjectModels.reserve(meshes.size() + attachMeshes.size());
+                for (const auto& mesh : meshes)
+                    _modernObjectModels.emplace_back(mesh.first.c_str());
+                for (const auto& mesh : attachMeshes)
+                    _modernObjectModels.emplace_back(mesh.first.c_str());
+                _modernObjectPlacements.clear();
+                _modernObjectPlacements.reserve(placed.size() * 2);
+                _modernObjectCells.assign(static_cast<size_t>(_landRange) * _landRange, {});
+                _modernObjectCellActive.assign(_modernObjectCells.size(), 0);
+                _modernObjectCellDesired.assign(_modernObjectCells.size(), 0);
+                _modernObjectCellCursor.assign(_modernObjectCells.size(), 0);
+                _modernObjectCandidates.clear();
+                _modernObjectCandidatesValid = false;
+                _modernObjectCandidateCenterX = -0x3fffffff;
+                _modernObjectCandidateCenterZ = -0x3fffffff;
+                _modernObjectCandidateRadius = 0;
+                if (const char* radius = std::getenv("WGR_OBJECT_STREAM_RADIUS_CELLS"))
+                    _modernObjectRadius = std::clamp(static_cast<int>(std::strtol(radius, nullptr, 10)), 8, _landRange);
+                if (const char* budget = std::getenv("WGR_OBJECT_STREAM_MAX_OBJECTS"))
+                    _modernObjectBudget =
+                        static_cast<uint32_t>(std::clamp<long>(std::strtol(budget, nullptr, 10), 1000, 1000000));
+                else
+                    _modernObjectBudget = 20000;
+                // The near shapes were built above (they warm the ShapeBank for the first
+                // window); measure their bounding centres, because AddObject offsets an object
+                // by its centre and ObjectCreate does not -- with the converter's autocenter=0
+                // the two agree only if the centre is the origin.
+                for (const auto& entry : shapes)
+                    if (entry.second != nullptr)
+                        maxBoundingCentreTotal = std::max(maxBoundingCentreTotal, entry.second->BoundingCenter().Size());
+                _modernObjectStreaming = true;
+                _modernObjectResidencyPending = false;
+                _modernObjectCenterX = -0x3fffffff;
+                _modernObjectCenterZ = -0x3fffffff;
+                _modernResidentObjectCount = 0;
+            }
+            const auto pushStreamPlacement = [&](uint32_t modelIndex, const Vector3& position, const Matrix3& orientation)
+            {
+                ModernObjectPlacement placement;
+                placement.id = NewObjectID();
+                placement.modelIndex = modelIndex;
+                const Vector3 aside = orientation.DirectionAside();
+                const Vector3 up = orientation.DirectionUp();
+                const Vector3 dir = orientation.Direction();
+                placement.rows = {aside.X(), aside.Y(), aside.Z(), up.X(), up.Y(), up.Z(),
+                                  dir.X(),   dir.Y(),   dir.Z(),   position.X(), position.Y(), position.Z()};
+                const int cx = std::clamp(static_cast<int>(std::floor(position.X() * _invLandGrid)), 0, _landRange - 1);
+                const int cz = std::clamp(static_cast<int>(std::floor(position.Z() * _invLandGrid)), 0, _landRange - 1);
+                const uint32_t index = static_cast<uint32_t>(_modernObjectPlacements.size());
+                _modernObjectPlacements.push_back(std::move(placement));
+                _modernObjectCells[static_cast<size_t>(cz) * _landRange + cx].push_back(index);
+            };
             for (const ResolvedPlacement& item : placed)
             {
+                if (streamNative)
+                {
+                    float y = item.position[1];
+                    if (item.terrainRelative)
+                    {
+                        y += SurfaceY(item.position[0], item.position[2]);
+                        ++streamedTerrainRelativeTotal;
+                    }
+                    const float groundHere = SurfaceY(item.position[0], item.position[2]);
+                    // RFG-047, kept: a structure the coordinates put more than 10 m under the
+                    // drawn surface stands on it instead.
+                    if (!item.terrainRelative && y < groundHere - 10.0f && meshIsStructure[item.mesh])
+                        y = groundHere + item.position[1];
+                    // The same basis AddObject + the orientation block below build, so a
+                    // streamed object stands exactly where the placed one did (RFG-068 signs).
+                    Matrix3 orientation(MRotationY, item.yawDeg * (H_PI / 180));
+                    if (std::fabs(item.pitchDeg) > 0.01f)
+                        orientation = orientation * Matrix3(MRotationX, item.pitchDeg * 0.01745329252f);
+                    if (std::fabs(item.rollDeg) > 0.01f)
+                        orientation = orientation * Matrix3(MRotationZ, item.rollDeg * 0.01745329252f);
+                    if (std::fabs(item.scale - 1.0f) > 1e-3f)
+                        orientation = orientation * Matrix3(MScale, item.scale);
+                    const Vector3 position(item.position[0], y, item.position[2]);
+                    pushStreamPlacement(item.mesh, position, orientation);
+                    ++streamed;
+                    if (item.attachSet != kNoAttachSet)
+                    {
+                        for (const MeshAttachment& part : attachSets[item.attachSet].parts)
+                        {
+                            pushStreamPlacement(static_cast<uint32_t>(meshes.size() + part.mesh),
+                                                position + orientation * part.offset, orientation * part.basis);
+                            ++streamedParts;
+                        }
+                    }
+                    continue;
+                }
                 if (added >= objectCap)
                     break;
                 const auto shape = shapes.find(item.mesh);
@@ -2589,6 +2736,15 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
     }
 
     ProgressFrame();
+    if (_modernObjectStreaming)
+    {
+        LOG_INFO(World,
+                 "Enfusion native load: STREAMING -- {} placements binned into {} land cells, {} models "
+                 "({} terrain-relative), budget {} resident, window {} cells; largest bounding centre of a "
+                 "pre-built shape {:.2f} m [POSEIDON_REFORGER_STREAM=1 opted in]",
+                 _modernObjectPlacements.size(), _modernObjectCells.size(), _modernObjectModels.size(),
+                 streamedTerrainRelativeTotal, _modernObjectBudget, _modernObjectRadius, maxBoundingCentreTotal);
+    }
     {
         // RFG-096: the second UV set carries the MatPBRMulti mask; say what it looked like.
         const auto& uv = Poseidon::Asset::Formats::Enfusion::GXobUvCensus();

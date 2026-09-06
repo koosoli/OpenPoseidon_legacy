@@ -1,5 +1,7 @@
 
 #include <Poseidon/World/Model/ModelCache.hpp>
+#include <cctype>
+#include <cstring>
 #include <Poseidon/World/Model/Model.hpp>
 #include <Poseidon/Asset/Formats/Common/FormatDetector.hpp>
 #include <utility>
@@ -203,6 +205,25 @@ std::shared_ptr<Poseidon::Model::Model> ModelCache::LoadLooseFile(const std::str
     return DeriveOrHit(bytes.data(), static_cast<int>(bytes.size()), filePath, info.signature, sha, lastError);
 }
 
+namespace
+{
+ModelCache::ExternalLoader g_externalLoader = nullptr;
+
+bool EndsWithNoCase(const std::string& s, const char* suffix)
+{
+    const size_t n = std::strlen(suffix);
+    if (s.size() < n)
+        return false;
+    for (size_t i = 0; i < n; ++i)
+        if (std::tolower(static_cast<unsigned char>(s[s.size() - n + i])) != suffix[i])
+            return false;
+    return true;
+}
+} // namespace
+
+void ModelCache::SetExternalLoader(ExternalLoader loader) { g_externalLoader = loader; }
+ModelCache::ExternalLoader ModelCache::GetExternalLoader() { return g_externalLoader; }
+
 std::shared_ptr<Poseidon::Model::Model> ModelCache::loadFromFile(const std::string& filePath)
 {
     // Same sequence as before the split: loose file first, PBO banks only when the loose
@@ -211,6 +232,16 @@ std::shared_ptr<Poseidon::Model::Model> ModelCache::loadFromFile(const std::stri
     auto model = LoadLooseFile(filePath, &_lastError, &opened);
     if (!opened)
     {
+        // RFG-097: a native `.xob` name is answered by the world loader's converter, not
+        // by a file; the PBO route would only fail slower.
+        if (g_externalLoader != nullptr && EndsWithNoCase(filePath, ".xob"))
+        {
+            std::string why;
+            auto external = g_externalLoader(filePath, why);
+            if (!external)
+                _lastError = why.empty() ? "external loader declined" : why;
+            return external;
+        }
         // Fallback to PBO archives
         if (GFileServer)
         {

@@ -38,6 +38,14 @@ public:
     static std::shared_ptr<Model::Model> LoadLooseFile(const std::string& filePath, std::string* error,
                                                        bool* opened);
 
+    /// RFG-097: a loader for names no file or PBO answers -- a natively mounted Reforger
+    /// `.xob`, built through the same converter the world loader uses. Installed by the
+    /// native world loader while its archives are mounted; null otherwise. Consulted by
+    /// `loadFromFile` only after the loose-file and PBO paths have both declined.
+    using ExternalLoader = std::shared_ptr<Model::Model> (*)(const std::string& path, std::string& why);
+    static void SetExternalLoader(ExternalLoader loader);
+    static ExternalLoader GetExternalLoader();
+
     bool isLoaded(const std::string& filePath) const;
 
     std::shared_ptr<Model::Model> get(const std::string& filePath) const;
