@@ -2589,6 +2589,15 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
     }
 
     ProgressFrame();
+    {
+        // RFG-096: the second UV set carries the MatPBRMulti mask; say what it looked like.
+        const auto& uv = Poseidon::Asset::Formats::Enfusion::GXobUvCensus();
+        LOG_INFO(World,
+                 "Enfusion native load: UV set 2 census -- {} parts carry one, {} outside [0,1], {} degenerate (all "
+                 "corners one texel), first outside: {}",
+                 uv.partsWithSecond, uv.partsOutOfRange, uv.partsDegenerate,
+                 uv.firstOutOfRange.empty() ? "-" : uv.firstOutOfRange.c_str());
+    }
     InitGeography();
     ProgressFinish();
 

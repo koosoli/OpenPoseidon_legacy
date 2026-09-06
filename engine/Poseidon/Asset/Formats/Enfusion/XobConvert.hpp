@@ -28,10 +28,28 @@
 #include <algorithm>
 #include <cmath>
 #include <cctype>
+#include <cstdio>
 #include <cstdint>
 #include <string>
 #include <unordered_set>
 #include <vector>
+
+namespace Poseidon::Asset::Formats::Enfusion
+{
+//! RFG-096: what the second UV set of every converted part looked like (see XobConvert).
+struct XobUvCensus
+{
+    size_t      partsWithSecond = 0;
+    size_t      partsOutOfRange = 0;
+    size_t      partsDegenerate = 0;
+    std::string firstOutOfRange;
+};
+inline XobUvCensus& GXobUvCensus()
+{
+    static XobUvCensus census;
+    return census;
+}
+} // namespace Poseidon::Asset::Formats::Enfusion
 
 namespace Poseidon::Asset::Formats::Enfusion
 {
@@ -530,6 +548,31 @@ inline bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& 
 
             const bool hasSecond = part.uvSets.size() > 1 && part.uvSets[1].size() == part.positions.size();
             anySecondSet = anySecondSet || hasSecond;
+            // RFG-096: a census of the SECOND UV set, because the MatPBRMulti mask is sampled
+            // through it and a wall wearing a triangular patchwork is what a wrong set looks
+            // like. Counted per part: values outside [-0.01, 1.01] and sets whose span is
+            // under 0.01 (every corner the same texel).
+            if (hasSecond)
+            {
+                float u0 = 1e9f, u1 = -1e9f, v0 = 1e9f, v1 = -1e9f;
+                for (const XobVec2& uv : part.uvSets[1])
+                {
+                    u0 = std::min(u0, uv.u); u1 = std::max(u1, uv.u);
+                    v0 = std::min(v0, uv.v); v1 = std::max(v1, uv.v);
+                }
+                XobUvCensus& c = GXobUvCensus();
+                ++c.partsWithSecond;
+                if (u0 < -0.01f || v0 < -0.01f || u1 > 1.01f || v1 > 1.01f)
+                    ++c.partsOutOfRange;
+                if (u1 - u0 < 0.01f && v1 - v0 < 0.01f)
+                    ++c.partsDegenerate;
+                if (c.firstOutOfRange.empty() && (u0 < -0.01f || v0 < -0.01f || u1 > 1.01f || v1 > 1.01f))
+                {
+                    char buf[160];
+                    std::snprintf(buf, sizeof(buf), "%s u[%.2f..%.2f] v[%.2f..%.2f]", sourcePath.c_str(), u0, u1, v0, v1);
+                    c.firstOutOfRange = buf;
+                }
+            }
 
             for (size_t t = 0; t + 2 < part.indices.size(); t += 3)
             {
