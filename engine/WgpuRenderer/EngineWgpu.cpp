@@ -2114,6 +2114,19 @@ void EngineWgpu::ApplyPendingRendererSettings(PendingRendererSettings& p)
         wgr_grass_set_card_spacing(_renderer, p.grassCardSpacing);
         p.grassSpacingDirty = false;
     }
+    {
+        // RFG-090: a Reforger clutter atlas is authored albedo; the photo-plate tone
+        // normalisation bleached it (measured: a field of white nettles at luma 0.63).
+        const bool enfusionCards = _terrain != nullptr && _terrain->GrassHasMapClutterAtlas();
+        static int lastEnfusionCards = -1;
+        if (static_cast<int>(enfusionCards) != lastEnfusionCards)
+        {
+            lastEnfusionCards = static_cast<int>(enfusionCards);
+            wgr_grass_set_card_tone_enabled(_renderer, enfusionCards ? 0u : 1u);
+            LOG_INFO(Graphics, "Wgpu grass cards: photo tone normalisation {} ({})", enfusionCards ? "OFF" : "on",
+                     enfusionCards ? "Reforger clutter atlas is authored albedo" : "photo plates");
+        }
+    }
     if (p.grassParamsDirty)
     {
         wgr_grass_set_params(_renderer, &p.grassParams);
@@ -10433,6 +10446,13 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
     const bool mapClutter = clutterSource == 0 && haveMapAtlas;
     const bool photoTuft = mapClutter || clutterSource == 2;
     params.use_photo_tuft = photoTuft ? 1.0f : 0.0f;
+    // RFG-090: with Reforger's blade atlas on the near ring, the ring draws BLADES and the
+    // clutter cards move to the mid ring from the camera outward. Measured before this:
+    // near 40 of 6,400 candidates placed (cards, 1.5 m grid) and no blade anywhere.
+    // The lane carries the PlantMat's authored blade height (m); 0 = off.
+    params.near_blades_only = _terrain != nullptr ? std::max(_terrain->GrassEnfusionBladeHeight(), 0.0f) : 0.0f;
+    if (params.near_blades_only > 0.0f && params.near_blades_only < 0.01f)
+        params.near_blades_only = 0.01f;
     _grassPhotoTuftActive = photoTuft;
     // Announce through the game log, on transition. A silent auto-enable is indistinguishable
     // from a broken one: the previous capture pair moved 229 pixels and could not tell whether
@@ -10461,6 +10481,10 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
     params.blade_arch = std::clamp(settings.bladeArch, 0.0f, 3.0f);
     params.clump_renderer = settings.clumpRenderer ? 1.0f : 0.0f;
     params.photo_tuft_brightness = std::clamp(settings.photoTuftBrightness, 0.5f, 2.5f);
+    // RFG-090: the 0.625 plate brightness is for photographed A3 clumps; a Reforger clutter
+    // atlas is authored albedo and keeps its own values.
+    if (_terrain != nullptr && _terrain->GrassHasMapClutterAtlas())
+        params.photo_tuft_brightness = 1.0f;
     params.photo_tuft_mix = std::clamp(settings.photoTuftMix, 0.0f, 1.0f);
     params.photo_tuft_patch_size = std::clamp(settings.photoTuftPatchSize, 4.0f, 80.0f);
     params.photo_contrast = std::clamp(settings.photoContrast, 0.5f, 2.5f);

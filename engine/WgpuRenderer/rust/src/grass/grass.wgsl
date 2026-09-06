@@ -104,6 +104,10 @@ struct GrassParams {
     //        (see card_tone_gain), .z = wind flutter the cards take, 0..1
     //        (see vs_grass_mid_tuft), .w spare
     card_tone: vec4<f32>,
+    // RFG-090: .x = near ring keeps blades while cards are on (native Reforger worlds:
+    // the world's own blade atlas on the near ring, its clutter plants as mid cards
+    // from the camera outward). .yzw spare. Mirrors `near_blades_only` in mod.rs.
+    native: vec4<f32>,
     // Opaque bounding box per photo layer, (u0, u1, v0, v1) in texture space.
     // The card quad is trimmed to it: the margin outside can never survive the
     // alpha test, so rasterising it was pure overdraw on a fill-bound path.
@@ -180,7 +184,16 @@ const LAYERS: u32 = 8u;
 // The near ring swaps to cards only under the clump renderer (renderer.x), which
 // is the same condition draw() uses to pick near_tuft_* over the blade pipeline.
 fn cards_on_mid() -> bool { return grass.species_mix.w > 0.5; }
-fn cards_on_near() -> bool { return cards_on_mid() && grass.renderer.x > 0.5; }
+// native.x carries the world's own blade HEIGHT in metres when it is on (0 = off), so one
+// lane says both "blades on the near ring" and how tall Reforger authored them.
+fn cards_on_near() -> bool { return cards_on_mid() && grass.renderer.x > 0.5 && grass.native.x <= 0.0; }
+// RFG-090: the stock near blade is ~0.45 m; a PlantMat's `Height 0.1` is the cover Reforger
+// draws, and a knee-high field of it would be neither world's grass.
+fn native_blade_height_scale() -> f32 {
+    return select(1.0, clamp(grass.native.x / 0.45, 0.15, 1.0), grass.native.x > 0.0);
+}
+// RFG-090: cards on the mid ring only, so they must reach the camera themselves.
+fn mid_cards_from_camera() -> bool { return cards_on_mid() && !cards_on_near(); }
 
 // Placement spacing for photo cards, in metres, shared by BOTH rings when they
 // draw cards. This is the density control for the card path and it is
@@ -989,11 +1002,11 @@ fn cs_place_mid(@builtin(global_invocation_id) gid: vec3<u32>) {
     let band = min(lod_band(), grass.near_radius * 0.5);
     // A small overlap avoids a bare annulus at the detailed/mid and mid/far
     // joins; the dissolve band widens that overlap into a real crossfade.
-    let mid_start = max(0.0, grass.near_radius - mid_spacing * 1.5 - band);
+    let mid_start = select(max(0.0, grass.near_radius - mid_spacing * 1.5 - band), 0.0, mid_cards_from_camera());
     if (distance2 < mid_start * mid_start || distance2 > mid_end * mid_end || seed > coverage) { return; }
     // Fade IN as the near ring fades out, and OUT as the far ring fades in.
     let distance = sqrt(distance2);
-    let fade_in = smoothstep(mid_start, max(mid_start, grass.near_radius), distance);
+    let fade_in = select(smoothstep(mid_start, max(mid_start, grass.near_radius), distance), 1.0, mid_cards_from_camera());
     let fade_out = 1.0 - smoothstep(max(mid_end - band, mid_start), mid_end, distance);
     let mid_fade = min(fade_in, fade_out);
     if (!lod_dissolve(cell_id, mid_fade)) { return; }
@@ -1151,7 +1164,7 @@ fn vs_grass(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) i
     let blade_axis = vec3<f32>(-sin(base_angle), 0.0, cos(base_angle));
     let base_offset = radial * (clump_spread * mix(0.18, 1.0, blade_seed));
     let height = mix(0.32, 0.81, hash11(inst.xz + vec2<f32>(f32(blade) * 7.0, f32(blade) * 13.0))) *
-        grass.blade_height * shape.y * clump_height * lod_height_scale(inst_packed.z);
+        grass.blade_height * shape.y * clump_height * lod_height_scale(inst_packed.z) * native_blade_height_scale();
     let card_widen = mix(1.0, max(grass.cards.z, 1.0), grass.cards.x);
     let width = mix(0.016, 0.043, blade_seed) * shape.x * max(grass.species_mix.z, 0.05) * card_widen;
     let bend_jitter = 1.0 + (hash11(inst.xz + vec2<f32>(f32(blade) * 23.0, 57.0)) * 2.0 - 1.0) * clamp(grass.shape_mix.z, 0.0, 1.0);
@@ -1222,7 +1235,7 @@ fn vs_grass_mid(@builtin(vertex_index) vertex_index: u32, @builtin(instance_inde
     let blade_axis = vec3<f32>(-sin(base_angle), 0.0, cos(base_angle));
     let base_offset = radial * mix(0.025, 0.16, blade_seed);
     let height = mix(0.29, 0.71, hash11(inst.xz + vec2<f32>(f32(blade) * 7.0, f32(blade) * 13.0))) *
-        grass.blade_height * shape.y * lod_height_scale(inst_packed.z);
+        grass.blade_height * shape.y * lod_height_scale(inst_packed.z) * native_blade_height_scale();
     let width = mix(0.016, 0.038, blade_seed) * shape.x * max(grass.species_mix.z, 0.05);
     let static_bend = radial * mix(0.10, 0.32, hash11(inst.xz + vec2<f32>(f32(blade) * 19.0, 31.0))) * height;
     let depth = imprint_depth();

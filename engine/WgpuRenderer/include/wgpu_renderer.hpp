@@ -1184,7 +1184,13 @@ struct WgrGrassParams
      * Occupies one of the two lanes that were `_pad_look`, so the struct layout and
      * every existing field offset are untouched. */
     float wind_scroll;
-    float _pad_look;
+    /* RFG-090: nonzero = the NEAR ring draws blades even when photo cards are on, and
+       the mid ring's cards start at the camera instead of at near_radius. On a natively
+       loaded Reforger world the near ring had become the clutter-card ring (40 cards in
+       a 1.5 m grid, no blades at all), so the world's own blade atlas (RFG-089) was never
+       drawn. 0 = the previous behaviour everywhere. Takes the last `_pad_look` lane, so
+       no offset moves. */
+    float near_blades_only;
     /* Opaque bounding box per photo layer, (u0, u1, v0, v1) in texture space.
      * Renderer-derived from the uploaded atlas; ignored on input. */
     float photo_layer_bounds[36];
@@ -2416,6 +2422,9 @@ WGR_API void wgr_set_render_params(WgrRenderer* renderer, const WgrRenderParams*
     /* Photo-card placement grid (m). 1.11 = the map's own clutter grid; lower packs cards
      * denser than the map declares, up to the procedural blade density. Clamped 0.16..4.0. */
     WGR_API void wgr_grass_set_card_spacing(WgrRenderer* renderer, float spacing);
+    /* RFG-090: photo-card tone normalisation (WGR_GRASS_CARD_TONE) on/off. Off while the
+       clutter atlas is a natively loaded Reforger world's own albedo. */
+    WGR_API void wgr_grass_set_card_tone_enabled(WgrRenderer* renderer, uint32_t enabled);
     /* Smoke -> ground shadow: this frame's particles, splatted into the cloud shadow map so
      * every lit surface darkens under a plume. blobs may be null with count 0 to clear. */
     WGR_API void wgr_set_smoke_shadow(WgrRenderer* renderer, const WgrSmokeShadowBlob* blobs, uint32_t count,

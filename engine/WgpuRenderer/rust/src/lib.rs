@@ -2136,6 +2136,10 @@ impl Renderer {
         self.grass.set_card_spacing(spacing);
     }
 
+    fn set_grass_card_tone_enabled(&mut self, enabled: bool) {
+        self.grass.set_card_tone_enabled(enabled);
+    }
+
     // Material Debug (dev panel, Materials tab) for the retained GPU-driven path.
     // `flags`: bit0 disable normal map, bit1 invert normal Y, bit2 compose Multi layers.
     fn set_material_debug(&mut self, view: u32, flags: u32) {

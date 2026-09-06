@@ -141,6 +141,23 @@ impl Grass {
             self.card_spacing = spacing.clamp(CARD_SPACING_RANGE.0, CARD_SPACING_RANGE.1);
         }
     }
+
+    /// RFG-090: photo-card tone on/off (see `card_tone_off`). Applies at the next
+    /// set_params, which C++ pushes every frame.
+    pub fn set_card_tone_enabled(&mut self, enabled: bool) {
+        self.card_tone_off = !enabled;
+    }
+
+    /// RFG-090: the near ring draws cards only when cards are on, the clump renderer is
+    /// on AND the caller has not asked for blades on the near ring (native Reforger
+    /// worlds with their own blade atlas). Mirrors `cards_on_near` in grass.wgsl and the
+    /// placement-side `cards_near`; the three used to be computed separately and the
+    /// vertex path stayed on cards after placement had moved to blades.
+    fn near_draws_cards(&self) -> bool {
+        self.tuft_enabled
+            && self.last_params.clump_renderer != 0.0
+            && self.last_params.near_blades_only == 0.0
+    }
 }
 
 fn card_spacing_from_env() -> f32 {
@@ -330,6 +347,10 @@ struct GrassParams {
     card_tone_gain_max: f32,
     card_flutter: f32,
     wind_scroll: f32,
+    // RFG-090: mirrors `native` in grass.wgsl. .x = near ring keeps its blades while
+    // cards are on, and the mid ring's cards begin at the camera; .yzw spare.
+    near_blades_only: f32,
+    _native_pad: [f32; 3],
     // Renderer-derived from the uploaded atlas, never from the caller.
     photo_layer_bounds: [f32; 128],
     photo_layer_means: [f32; 128],
@@ -559,6 +580,10 @@ pub struct Grass {
     card_a2c: bool,
     // Photo-card tone lift and wind flutter; see CardTone.
     card_tone: CardTone,
+    /// RFG-090: the photo-card tone (target luma + gain) exists for flatly lit A3 plates.
+    /// A Reforger clutter atlas is authored BCR albedo and was being pushed to luma 0.63
+    /// at up to 8x gain -- a field of white plants. Off while that atlas is the source.
+    card_tone_off: bool,
     // Lines for the GAME log, drained by lib.rs (which owns the LogSink) after
     // every set_params / set_tufts. eprintln! goes to a stderr the launcher
     // discards, so a lever announced only there cannot be proven from a run.
@@ -764,6 +789,8 @@ impl Grass {
             card_tone_gain_max: card_tone.gain_max,
             card_flutter: card_tone.flutter,
             wind_scroll: 1.0,
+            near_blades_only: 0.0,
+            _native_pad: [0.0; 3],
             photo_layer_bounds: default_layer_bounds(),
             photo_layer_means: default_layer_means(),
         };
@@ -1537,6 +1564,7 @@ impl Grass {
             card_spacing,
             card_a2c,
             card_tone,
+            card_tone_off: false,
             pending_log: vec![cards_line, shadow_line],
             announced_cards: None,
         }
@@ -1843,7 +1871,9 @@ impl Grass {
         // procedural ribbons on the sparse card grid.
         let clump_renderer = params.clump_renderer != 0.0;
         let cards_mid = self.have_tuft && params.use_photo_tuft != 0.0;
-        let cards_near = cards_mid && clump_renderer;
+        // RFG-090: a native world keeps blades on the near ring (cards move to the mid
+        // ring, which then starts at the camera -- see cs_place_mid).
+        let cards_near = cards_mid && clump_renderer && params.near_blades_only == 0.0;
         // Must mirror cs_place's `near_spacing` (near_placement_spacing in grass.wgsl).
         let near_spacing =
             near_placement_spacing(spacing, clump_renderer, cards_near, self.card_spacing);
@@ -2020,7 +2050,7 @@ impl Grass {
             blade_hue_variation: params.blade_hue_variation.clamp(0.0, 1.0),
             blade_root_shade: params.blade_root_shade.clamp(0.0, 0.95),
             // Renderer-owned, like card_spacing: the caller has no say.
-            card_tone_target: self.card_tone.target,
+            card_tone_target: if self.card_tone_off { 0.0 } else { self.card_tone.target },
             card_tone_gain_max: self.card_tone.gain_max,
             card_flutter: self.card_tone.flutter,
             // Passed through from the caller, clamped rather than trusted: 0 would
@@ -2031,6 +2061,8 @@ impl Grass {
             } else {
                 1.0
             },
+            near_blades_only: if params.near_blades_only != 0.0 { 1.0 } else { 0.0 },
+            _native_pad: [0.0; 3],
             // Always the renderer's own measurement of the loaded atlas.
             photo_layer_bounds: self.tuft_bounds,
             photo_layer_means: self.tuft_means,
@@ -2238,7 +2270,7 @@ impl Grass {
             }
         }
         // Vertex counts mirror reset_indirect's per-LOD vertex-per-instance values.
-        let photo_near = self.tuft_enabled && self.last_params.clump_renderer != 0.0;
+        let photo_near = self.near_draws_cards();
         self.stats.near_vertices = self.stats.near_instances
             * if photo_near {
                 12
@@ -2274,7 +2306,7 @@ impl Grass {
     fn census_line(&self) -> String {
         let s = self.stats;
         let clump = self.last_params.clump_renderer != 0.0;
-        let near_cards = self.tuft_enabled && clump;
+        let near_cards = self.near_draws_cards();
         let near_blades: u32 = if clump { 12 } else { 6 };
         // Triangles and distinct vertices per instance, by representation.
         let (near_tris, near_verts) = if near_cards { (4u32, 12u32) } else { (near_blades * 10, near_blades * 12) };
@@ -2345,7 +2377,7 @@ impl Grass {
         queue.write_buffer(&self.mid_placement_count, 0, bytemuck::bytes_of(&0u32));
         queue.write_buffer(&self.far_placement_count, 0, bytemuck::bytes_of(&0u32));
         // GRS-030 doubles blades per clump and spaces centres farther apart.
-        let near_verts: u32 = if self.tuft_enabled && self.last_params.clump_renderer != 0.0 {
+        let near_verts: u32 = if self.near_draws_cards() {
             12
         } else if self.last_params.clump_renderer != 0.0 {
             360
@@ -2362,7 +2394,7 @@ impl Grass {
         // The blade table collapses 30 draw slots onto 12 distinct vertices; the card
         // path keeps identity indices because its vertex shader decodes vertex_index
         // itself. Mode 0 = blades, 1 = cards.
-        let near_mode: u8 = u8::from(self.tuft_enabled && self.last_params.clump_renderer != 0.0);
+        let near_mode: u8 = u8::from(self.near_draws_cards());
         if self.near_index_mode.get() != near_mode {
             self.near_index_mode.set(near_mode);
             let table = if near_mode == 1 {
@@ -2487,7 +2519,7 @@ impl Grass {
         pass.draw_indexed_indirect(&self.mid_indirect, 0);
         let near_pipeline = match (
             kind,
-            self.tuft_enabled && self.last_params.clump_renderer != 0.0,
+            self.near_draws_cards(),
         ) {
             (GrassPass::Color, true) => &self.near_tuft_color_pipeline,
             (GrassPass::ColorNoWrite, true) => &self.near_tuft_color_no_write_pipeline,
@@ -2521,7 +2553,7 @@ impl Grass {
         // the timer row below only ever shows the last of them.
         self.shadow_draws.set(self.shadow_draws.get() + 1);
         timers.begin_pass(pass, Region::GrassShadow);
-        let near_shadow_pipeline = if self.tuft_enabled && self.last_params.clump_renderer != 0.0 {
+        let near_shadow_pipeline = if self.near_draws_cards() {
             &self.tuft_shadow_pipeline
         } else {
             &self.shadow_pipeline

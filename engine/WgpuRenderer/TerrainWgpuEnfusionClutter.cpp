@@ -43,6 +43,7 @@
 #include <Poseidon/Foundation/Logging/Logging.hpp>
 #include <Poseidon/Graphics/Textures/EddsReader.hpp>
 #include <Poseidon/Graphics/Textures/Image.hpp>
+#include <Poseidon/Graphics/Shared/PNGWriter.hpp> // RFG-090 blade-layer dump
 #include <Poseidon/World/Terrain/Landscape.hpp>
 
 #include <stb_image_resize2.h>
@@ -1064,6 +1065,22 @@ bool TerrainWgpu::UploadEnfusionBladeAtlas(const Landscape& land)
 
     EngineWgpu::AcquireProducerWindow("grass blade atlas");
     wgr_grass_set_blade_atlas(_renderer, LayerW, LayerH, Layers, layers.data());
+    _enfusionBladeHeight = std::clamp(mat.Number("Height", 0.0f), 0.0f, 2.0f);
+    // POSEIDON_ENFUSION_BLADES_DUMP=<dir>: the eight layers as PNGs, so "the blades look
+    // wrong" can be split into "the crop is wrong" and "the shading is wrong".
+    if (const char* dumpDir = std::getenv("POSEIDON_ENFUSION_BLADES_DUMP"); dumpDir != nullptr && *dumpDir != '\0')
+    {
+        for (int layer = 0; layer < Layers; ++layer)
+        {
+            char path[512];
+            std::snprintf(path, sizeof(path), "%s/enfusion_blade_%d.png", dumpDir, layer);
+            Poseidon::PNGWriter::WritePNG(path, LayerW, LayerH, 4, layers.data() + static_cast<size_t>(layer) * LayerW * LayerH * 4u);
+        }
+        char path[512];
+        std::snprintf(path, sizeof(path), "%s/enfusion_blade_atlas.png", dumpDir);
+        Poseidon::PNGWriter::WritePNG(path, cw, ch, 4, colour.data());
+        LOG_INFO(Graphics, "Wgpu grass: blade layers dumped to {}", dumpDir);
+    }
     _grassBladeAtlasWorld = worldKey;
     LOG_INFO(Graphics,
              "Wgpu grass: near blades from Reforger PlantMat '{}' (surface '{}', atlas {}x{}, {} distinct of {} "

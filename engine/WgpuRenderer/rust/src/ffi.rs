@@ -1284,7 +1284,9 @@ pub struct WgrGrassParams {
     /// See WGR_GRASS_PARAMS `wind_scroll` in wgpu_renderer.h. Takes one of the
     /// two former `_pad_look` lanes, so no offset moves.
     pub wind_scroll: f32,
-    pub _pad_look: f32,
+    /// RFG-090: see `near_blades_only` in wgpu_renderer.h -- blades on the near ring
+    /// with cards on the mid ring from the camera outward. Last `_pad_look` lane.
+    pub near_blades_only: f32,
     /// Opaque bounding box per photo layer, (u0, u1, v0, v1) in texture space.
     /// Renderer-derived from the uploaded atlas; ignored on input.
     pub photo_layer_bounds: [f32; 36],
@@ -3653,6 +3655,20 @@ pub unsafe extern "C" fn wgr_grass_set_card_spacing(renderer: *mut WgrRenderer, 
     }
     let renderer = unsafe { &mut *renderer };
     renderer.set_grass_card_spacing(spacing);
+}
+
+/// RFG-090: photo-card tone normalisation on/off. Off when the clutter atlas is a Reforger
+/// world's own BCR albedo, which needs no plate normalisation and was being bleached by it.
+///
+/// # Safety
+/// `renderer` must be a live renderer or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_grass_set_card_tone_enabled(renderer: *mut WgrRenderer, enabled: u32) {
+    if renderer.is_null() {
+        return;
+    }
+    let renderer = unsafe { &mut *renderer };
+    renderer.set_grass_card_tone_enabled(enabled != 0);
 }
 
 /// One smoke particle for the ground-shadow pass. Layout matches

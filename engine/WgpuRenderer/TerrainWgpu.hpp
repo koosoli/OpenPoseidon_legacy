@@ -60,6 +60,11 @@ class TerrainWgpu : public ITerrainRenderer
     // Enfusion's blades rather than the stock meadow photos. Returns false (and uploads
     // nothing) on any world that is not Enfusion, so the stock atlas still applies there.
     bool UploadEnfusionBladeAtlas(const Landscape& land);
+    // RFG-090: true while the near ring's blade atlas is the world's own PlantMat, which
+    // is when the near ring must draw blades rather than clutter cards.
+    bool GrassNearBladesFromEnfusion() const { return _grassBladeAtlasWorld.rfind("enfusion:", 0) == 0; }
+    // RFG-090: the PlantMat's authored `Height` (m) behind that atlas, 0 when none.
+    float GrassEnfusionBladeHeight() const { return GrassNearBladesFromEnfusion() ? _enfusionBladeHeight : 0.0f; }
     void SetEnfusionBladesEnabled(bool enabled);
     // Reports whether the photo-card atlas actually reached the renderer, so an
     // absent atlas and a switched-off opt-in stop looking identical in the log.
@@ -220,6 +225,7 @@ class TerrainWgpu : public ITerrainRenderer
     bool _hasEnfusionSurfaces = false;
     bool _enfusionClutterEnabled = true;
     bool _enfusionBladesEnabled = true; // RFG-089
+    float _enfusionBladeHeight = 0.0f;  // RFG-090
     // The Landscape::EnfusionRoadClutterClear() value the last bake honoured, so the
     // per-frame SetEnfusionClutterEnabled call can notice the dev switch moved and
     // re-bake -- the switch lives on Landscape (a world fact), not in GrassSettings.
