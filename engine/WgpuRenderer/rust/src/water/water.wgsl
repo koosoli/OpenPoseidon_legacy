@@ -1488,18 +1488,35 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
     var body_coverage = 1.0;
     var body_profile = -1;
     var body_edge = 0.0; // normalised ellipse radius^2 at this fragment (1 = the bank)
+    var body_kind = 0;
+    var body_flow = vec2<f32>(0.0);
+    var body_flow_speed = 0.0;
     if (body_index > 0) {
         let e = wp.bodies[3 * (body_index - 1)];
         let k = wp.bodies[3 * (body_index - 1) + 1];
+        let f = wp.bodies[3 * (body_index - 1) + 2];
         let world_xz = in.world_pos.xz + frame.cam_pos.xz;
-        let u = (world_xz.x - e.x) / max(e.z, 1e-3);
-        let v = (world_xz.y - e.y) / max(e.w, 1e-3);
+        // The ellipse frame follows the body's heading (a river reach is a rotated ellipse).
+        let fc = cos(f.w);
+        let fs = sin(f.w);
+        let dxz = world_xz - e.xy;
+        let u = (fc * dxz.x + fs * dxz.y) / max(e.z, 1e-3);
+        let v = (-fs * dxz.x + fc * dxz.y) / max(e.w, 1e-3);
         let d = u * u + v * v;
+        body_kind = i32(k.z + 0.5);
+        body_flow = normalize(f.xy + vec2<f32>(1e-4, 0.0));
+        body_flow_speed = max(f.z, 0.0);
         if (d > 1.06) {
             discard;
         }
         body_coverage = 1.0 - smoothstep(0.94, 1.03, d);
         body_edge = d;
+        // Connected mouth: where a reach's surface comes down to the sea, the sea owns the
+        // pixels. The river fades out over its last 0.6 m of fall so the two surfaces never
+        // composite twice and the junction has no step.
+        if (body_kind == 2) {
+            body_coverage = body_coverage * smoothstep(0.0, 0.6, in.body_level - wp.sea_level);
+        }
         body_profile = i32(k.w + 0.5);
     }
 
@@ -1509,7 +1526,33 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
     let h_d = interaction_sample(in.base_xz - vec2<f32>(0.0, interaction_cell)).r;
     let h_u = interaction_sample(in.base_xz + vec2<f32>(0.0, interaction_cell)).r;
     let state = evaluate_water_surface(in);
-    let n = state.shading_normal;
+    var n = state.shading_normal;
+    // WRL-004: a river's surface detail is carried by its flow. Two advection phases half a
+    // period apart, cross-faded, so the pattern travels without the reset pulse a single
+    // scrolling phase produces; ripples are stretched along the flow (streaky), and the
+    // amplitude follows the flow speed and eases at the bank with the flow itself.
+    if (body_kind == 2 && body_flow_speed > 0.01) {
+        let along = body_flow;
+        let across = vec2<f32>(-along.y, along.x);
+        let speed = body_flow_speed * mix(1.0, 0.15, smoothstep(0.55, 1.0, body_edge));
+        let period = 4.0;
+        let t1 = fract(wp.time / period);
+        let t2 = fract(wp.time / period + 0.5);
+        let w1 = 1.0 - abs(2.0 * t1 - 1.0);
+        let w2 = 1.0 - abs(2.0 * t2 - 1.0);
+        let local = vec2<f32>(dot(in.base_xz, along) * 0.35, dot(in.base_xz, across) * 1.6);
+        let p1 = local - vec2<f32>(speed * t1 * period * 0.35, 0.0);
+        let p2 = local - vec2<f32>(speed * t2 * period * 0.35, 0.0) + vec2<f32>(17.3, 9.1);
+        let e = 0.05;
+        let s1 = vec2<f32>(micro_fbm(p1 + vec2<f32>(e, 0.0), 0.0) - micro_fbm(p1 - vec2<f32>(e, 0.0), 0.0),
+                           micro_fbm(p1 + vec2<f32>(0.0, e), 0.0) - micro_fbm(p1 - vec2<f32>(0.0, e), 0.0)) / (2.0 * e);
+        let s2 = vec2<f32>(micro_fbm(p2 + vec2<f32>(e, 0.0), 0.0) - micro_fbm(p2 - vec2<f32>(e, 0.0), 0.0),
+                           micro_fbm(p2 + vec2<f32>(0.0, e), 0.0) - micro_fbm(p2 - vec2<f32>(0.0, e), 0.0)) / (2.0 * e);
+        let slope_local = (s1 * w1 + s2 * w2) / max(w1 + w2, 1e-3);
+        let slope_world = along * slope_local.x * 0.35 + across * slope_local.y * 1.6;
+        let strength = 0.03 * clamp(speed / 1.5, 0.2, 1.5) * wave_fade(length(in.world_pos));
+        n = normalize(vec3<f32>(n.x - slope_world.x * strength, n.y, n.z - slope_world.y * strength));
+    }
     let base_normal = state.geometric_normal;
     let roughness = water_roughness(wp.spec_power, state.slope_variance_lost, base_normal, n);
     let v = normalize(-in.world_pos);              // surface -> camera
@@ -2130,7 +2173,27 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
     // collapsing under its own steepness -- and wanting more of one while wanting less of the
     // other is the normal case, not an exotic one.
     let wave_scale = max(wp.underwater_gate.y, 0.0);
-    let unstructured_foam = max(foam, max(persistent_foam, breaker_foam) * foam_scale * wave_scale) +
+    // WRL-004 foam streaks: a fast reach carries thin foam lines along its flow, densest at
+    // the banks where the water is slowest and the bubbles collect. Two phases again, so the
+    // streaks travel without a pulse.
+    var river_streak = 0.0;
+    if (body_kind == 2 && body_flow_speed > 0.3) {
+        let along = body_flow;
+        let across = vec2<f32>(-along.y, along.x);
+        let period = 6.0;
+        let t1 = fract(wp.time / period);
+        let t2 = fract(wp.time / period + 0.5);
+        let w1 = 1.0 - abs(2.0 * t1 - 1.0);
+        let w2 = 1.0 - abs(2.0 * t2 - 1.0);
+        let local = vec2<f32>(dot(in.base_xz, along) * 0.12, dot(in.base_xz, across) * 1.1);
+        let q1 = local - vec2<f32>(body_flow_speed * t1 * period * 0.12, 0.0);
+        let q2 = local - vec2<f32>(body_flow_speed * t2 * period * 0.12, 0.0) + vec2<f32>(5.7, 3.3);
+        let streak = (foam_noise_lod(q1, wp.time, foam_fp * 0.5) * w1 + foam_noise_lod(q2, wp.time, foam_fp * 0.5) * w2) /
+            max(w1 + w2, 1e-3);
+        let bank = smoothstep(0.35, 0.95, body_edge);
+        river_streak = smoothstep(0.58, 0.82, streak) * clamp(body_flow_speed / 2.0, 0.0, 1.0) * (0.25 + 0.75 * bank) * 0.55;
+    }
+    let unstructured_foam = max(max(foam, river_streak), max(persistent_foam, breaker_foam) * foam_scale * wave_scale) +
         spray_flecks * foam_scale * wave_scale;
     var combined_foam = 0.0;
     if (unstructured_foam > 0.001) {

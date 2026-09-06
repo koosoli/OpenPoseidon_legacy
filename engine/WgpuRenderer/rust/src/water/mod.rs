@@ -992,21 +992,25 @@ impl Water {
     /// WRL-006: the containment ellipse (cx, cz, rx, rz) of the body the camera is in, from
     /// the same table the surface draws, so the compositor can stop attenuating where a ray
     /// leaves the body through its side. rx == 0 means "no body: the sea".
-    pub fn camera_body_ellipse(&self, cam_xz: [f32; 2]) -> [f32; 4] {
-        let Some(p) = self.last_params else { return [0.0; 4] };
-        let mut best: Option<[f32; 4]> = None;
+    pub fn camera_body_ellipse(&self, cam_xz: [f32; 2]) -> ([f32; 4], [f32; 2]) {
+        let Some(p) = self.last_params else { return ([0.0; 4], [1.0, 0.0]) };
+        let mut best: Option<([f32; 4], [f32; 2])> = None;
         for i in 0..crate::ffi::WGR_WATER_MAX_BODIES {
             let e = p.bodies[3 * i];
             if e[2] <= 0.0 || e[3] <= 0.0 {
                 continue;
             }
-            let u = (cam_xz[0] - e[0]) / e[2];
-            let v = (cam_xz[1] - e[1]) / e[3];
-            if u * u + v * v <= 1.0 && best.is_none_or(|b| e[2] * e[3] < b[2] * b[3]) {
-                best = Some(e);
+            let rot = p.bodies[3 * i + 2][3];
+            let (s, c) = rot.sin_cos();
+            let dx = cam_xz[0] - e[0];
+            let dz = cam_xz[1] - e[1];
+            let u = (c * dx + s * dz) / e[2];
+            let v = (-s * dx + c * dz) / e[3];
+            if u * u + v * v <= 1.0 && best.is_none_or(|b| e[2] * e[3] < b.0[2] * b.0[3]) {
+                best = Some((e, [c, s]));
             }
         }
-        best.unwrap_or([0.0; 4])
+        best.unwrap_or(([0.0; 4], [1.0, 0.0]))
     }
 
     fn local_wave_scale(p: &WgrWaterParams) -> f32 {
@@ -2054,6 +2058,32 @@ mod tests {
         };
         assert!(contains(1099.0, 2000.0, 1000.0, 2000.0, 100.0, 50.0));
         assert!(!contains(1095.0, 2045.0, 1000.0, 2000.0, 100.0, 50.0));
+    }
+
+    #[test]
+    fn rivers_advect_in_two_phases_and_end_at_the_sea() {
+        let shader = include_str!("water.wgsl");
+        // Oriented reach: containment and the compositor use the body's heading.
+        assert!(shader.contains("let fc = cos(f.w);"));
+        assert!(include_str!("../underwater.wgsl").contains("let fc = params.body_frame.x;"));
+        assert!(include_str!("../underwater_froxel.wgsl").contains("let fc = params.body_frame.x;"));
+        // Two phases half a period apart with triangle weights: at any time the weights sum to
+        // one and neither phase is sampled at its own reset, so there is no pulse.
+        assert!(shader.contains("let t2 = fract(wp.time / period + 0.5);"));
+        assert!(shader.contains("let w1 = 1.0 - abs(2.0 * t1 - 1.0);"));
+        for t in [0.0_f32, 0.1, 0.25, 0.5, 0.75, 0.99] {
+            let t1 = t.fract();
+            let t2 = (t + 0.5).fract();
+            let w1 = 1.0 - (2.0 * t1 - 1.0).abs();
+            let w2 = 1.0 - (2.0 * t2 - 1.0).abs();
+            assert!((w1 + w2 - 1.0).abs() < 1e-5, "weights at {t}: {w1} + {w2}");
+            // the phase at its reset (t == 0) carries zero weight
+            if t1 < 1e-6 { assert!(w1 < 1e-5); }
+        }
+        // The mouth fade hands the last 0.6 m of fall to the sea.
+        assert!(shader.contains("smoothstep(0.0, 0.6, in.body_level - wp.sea_level)"));
+        // Streaks only on a moving reach, strongest at the bank.
+        assert!(shader.contains("if (body_kind == 2 && body_flow_speed > 0.3) {"));
     }
 
     #[test]

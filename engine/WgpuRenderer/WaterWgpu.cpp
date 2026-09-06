@@ -674,6 +674,16 @@ void RegisterBodyFixtures()
             river.flowZ = -river.gradientZ / gl;
             river.flowSpeed = v.size() > 9 ? v[9] : 1.2f;
         }
+        // Optional field 10: heading of the reach in degrees (0 = world +x); the ellipse's long
+        // axis follows it. Default: the downhill direction.
+        if (v.size() > 10)
+        {
+            river.rotation = v[10] * 3.14159265f / 180.0f;
+        }
+        else if (gl > 1.0e-6f)
+        {
+            river.rotation = std::atan2(river.flowZ, river.flowX);
+        }
         const uint32_t id = registry.Add(river);
         LOG_INFO(Graphics, "Water body fixture: river #{} at ({:.0f}, {:.0f}) r=({:.0f}, {:.0f}) level {:.2f} grad ({:.4f}, {:.4f})",
                  id, river.centreX, river.centreZ, river.radiusX, river.radiusZ, river.level, river.gradientX,
@@ -1296,7 +1306,7 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
             _params.bodies[3 * i] = {b.centreX, b.centreZ, b.radiusX, b.radiusZ};
             _params.bodies[3 * i + 1] = {b.level, b.waveScale, static_cast<float>(b.kind),
                                          static_cast<float>(b.profile)};
-            _params.bodies[3 * i + 2] = {b.flowX, b.flowZ, b.flowSpeed, 0.0f};
+            _params.bodies[3 * i + 2] = {b.flowX, b.flowZ, b.flowSpeed, b.rotation};
             const float x0 = std::floor(b.MinX() / tile) * tile;
             const float z0 = std::floor(b.MinZ() / tile) * tile;
             for (float z = z0; tileIt && z < b.MaxZ(); z += tile)

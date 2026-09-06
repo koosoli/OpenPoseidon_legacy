@@ -66,11 +66,19 @@ struct WaterBody
     float flowX = 0.0f;
     float flowZ = 0.0f;
     float flowSpeed = 0.0f;
+    // Yaw of the ellipse's local x axis in the world xz plane (radians; 0 = world +x). A river
+    // reach follows its heading; lakes leave it at 0.
+    float rotation = 0.0f;
 
-    float MinX() const { return centreX - radiusX; }
-    float MaxX() const { return centreX + radiusX; }
-    float MinZ() const { return centreZ - radiusZ; }
-    float MaxZ() const { return centreZ + radiusZ; }
+    // World-axis half extents of the rotated ellipse (its bounding box).
+    float ExtentX() const;
+    float ExtentZ() const;
+    float MinX() const { return centreX - ExtentX(); }
+    float MaxX() const { return centreX + ExtentX(); }
+    float MinZ() const { return centreZ - ExtentZ(); }
+    float MaxZ() const { return centreZ + ExtentZ(); }
+    // World xz -> the ellipse's local frame (unrotated, centred).
+    void ToLocal(float x, float z, float& lx, float& lz) const;
     float Area() const;
     bool Contains(float x, float z) const;
     // Mean surface elevation at a world XZ (the plane, before waves).

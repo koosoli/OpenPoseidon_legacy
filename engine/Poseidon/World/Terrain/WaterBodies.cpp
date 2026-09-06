@@ -11,14 +11,36 @@ float WaterBody::Area() const
     return 3.14159265f * std::max(radiusX, 0.0f) * std::max(radiusZ, 0.0f);
 }
 
+float WaterBody::ExtentX() const
+{
+    const float c = std::cos(rotation), s = std::sin(rotation);
+    return std::sqrt(radiusX * c * radiusX * c + radiusZ * s * radiusZ * s);
+}
+
+float WaterBody::ExtentZ() const
+{
+    const float c = std::cos(rotation), s = std::sin(rotation);
+    return std::sqrt(radiusX * s * radiusX * s + radiusZ * c * radiusZ * c);
+}
+
+void WaterBody::ToLocal(float x, float z, float& lx, float& lz) const
+{
+    const float dx = x - centreX, dz = z - centreZ;
+    const float c = std::cos(rotation), s = std::sin(rotation);
+    lx = c * dx + s * dz;
+    lz = -s * dx + c * dz;
+}
+
 bool WaterBody::Contains(float x, float z) const
 {
     if (radiusX <= 0.0f || radiusZ <= 0.0f)
     {
         return false;
     }
-    const float u = (x - centreX) / radiusX;
-    const float v = (z - centreZ) / radiusZ;
+    float lx, lz;
+    ToLocal(x, z, lx, lz);
+    const float u = lx / radiusX;
+    const float v = lz / radiusZ;
     return u * u + v * v <= 1.0f;
 }
 

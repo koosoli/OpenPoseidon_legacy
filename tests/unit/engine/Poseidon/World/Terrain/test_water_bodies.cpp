@@ -92,6 +92,21 @@ TEST_CASE("Registry lifecycle: ids are stable, generation moves on every change"
     REQUIRE(reg.Generation() == g3);
 }
 
+TEST_CASE("A rotated reach contains along its heading, not the world axes", "[World][Terrain][Water]")
+{
+    WaterBody reach = Lake(0.0f, 0.0f, 200.0f, 20.0f, 30.0f);
+    reach.kind = WaterBodyKind::River;
+    reach.rotation = 3.14159265f * 0.5f; // heading +z
+    REQUIRE(reach.Contains(0.0f, 150.0f));
+    REQUIRE_FALSE(reach.Contains(150.0f, 0.0f));
+    REQUIRE(reach.ExtentX() == Catch::Approx(20.0f).margin(1e-3f));
+    REQUIRE(reach.ExtentZ() == Catch::Approx(200.0f).margin(1e-3f));
+    WaterBodyRegistry reg;
+    reg.Add(reach);
+    REQUIRE(reg.Find(5.0f, -180.0f) != nullptr);
+    REQUIRE(reg.Find(-60.0f, 0.0f) == nullptr);
+}
+
 TEST_CASE("Degenerate bodies contain nothing", "[World][Terrain][Water]")
 {
     WaterBodyRegistry reg;

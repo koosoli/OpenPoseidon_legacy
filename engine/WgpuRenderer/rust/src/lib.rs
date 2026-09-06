@@ -95,6 +95,8 @@ struct UnderwaterView {
     body_wave_scale: f32,
     // WRL-006: containment ellipse of the camera's body (rx == 0: none).
     body_ellipse: [f32; 4],
+    // (cos, sin) of the body's heading, for the ellipse frame.
+    body_frame: [f32; 2],
     // Water-tab underwater tuning: absorption density multiplier, colour bias 0..1, caustic gain.
     density: f32,
     color_bias: f32,
@@ -1954,6 +1956,7 @@ impl Renderer {
                 wave_scale: 1.0,
                 body_wave_scale: 1.0,
                 body_ellipse: [0.0; 4],
+                body_frame: [1.0, 0.0],
                 density: 1.0,
                 color_bias: 1.0,
                 caustic_gain: 1.0,
@@ -3795,7 +3798,8 @@ impl Renderer {
                 debug_view: underwater_spectrum.4,
                 wave_scale: underwater_spectrum.5,
                 body_wave_scale: underwater_spectrum.6,
-                body_ellipse: self.water.camera_body_ellipse([cam.cam_pos[0], cam.cam_pos[2]]),
+                body_ellipse: self.water.camera_body_ellipse([cam.cam_pos[0], cam.cam_pos[2]]).0,
+                body_frame: self.water.camera_body_ellipse([cam.cam_pos[0], cam.cam_pos[2]]).1,
                 density: underwater_tuning.1,
                 color_bias: underwater_tuning.2,
                 caustic_gain: underwater_tuning.3,
@@ -3817,6 +3821,7 @@ impl Renderer {
                 wave_scale: underwater_spectrum.5,
                 body_wave_scale: underwater_spectrum.6,
                 body_ellipse: [0.0; 4],
+                body_frame: [1.0, 0.0],
                 density: underwater_tuning.1,
                 color_bias: underwater_tuning.2,
                 caustic_gain: underwater_tuning.3,
@@ -4593,6 +4598,7 @@ impl Renderer {
                 view.wave_scale,
                 view.body_wave_scale,
                 view.body_ellipse,
+                view.body_frame,
                 view.density,
                 view.color_bias,
                 view.caustic_gain,

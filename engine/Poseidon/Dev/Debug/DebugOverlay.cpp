@@ -6303,20 +6303,22 @@ void DrawWaterTab()
             WaterBody river;
             river.kind = WaterBodyKind::River;
             river.profile = WaterBodyProfile::SlowRiver;
-            // Axis-aligned reach along the camera's dominant heading, falling downstream (the
-            // way the camera looks) at 4 mm per metre; the ellipse is world-aligned for now.
-            const bool alongX = std::abs(dir.X()) >= std::abs(dir.Z());
-            const float sign = alongX ? (dir.X() >= 0.0f ? 1.0f : -1.0f) : (dir.Z() >= 0.0f ? 1.0f : -1.0f);
-            river.centreX = cam.X() + (alongX ? sign * 200.0f : 0.0f);
-            river.centreZ = cam.Z() + (alongX ? 0.0f : sign * 200.0f);
-            river.radiusX = alongX ? 220.0f : 25.0f;
-            river.radiusZ = alongX ? 25.0f : 220.0f;
+            // A reach along the camera's heading (rotated ellipse), falling downstream the way
+            // the camera looks at 4 mm per metre.
+            const float hl = std::sqrt(dir.X() * dir.X() + dir.Z() * dir.Z());
+            const float hx = hl > 1e-4f ? dir.X() / hl : 1.0f;
+            const float hz = hl > 1e-4f ? dir.Z() / hl : 0.0f;
+            river.centreX = cam.X() + hx * 200.0f;
+            river.centreZ = cam.Z() + hz * 200.0f;
+            river.radiusX = 220.0f;
+            river.radiusZ = 25.0f;
+            river.rotation = std::atan2(hz, hx);
             river.level = GLandscape->SurfaceYAboveWater(cam.X(), cam.Z()) + 1.0f;
-            river.gradientX = alongX ? -0.004f * sign : 0.0f;
-            river.gradientZ = alongX ? 0.0f : -0.004f * sign;
+            river.gradientX = -0.004f * hx;
+            river.gradientZ = -0.004f * hz;
             river.waveScale = 0.05f;
-            river.flowX = alongX ? sign : 0.0f;
-            river.flowZ = alongX ? 0.0f : sign;
+            river.flowX = hx;
+            river.flowZ = hz;
             river.flowSpeed = 1.2f;
             registry.Add(river);
         }

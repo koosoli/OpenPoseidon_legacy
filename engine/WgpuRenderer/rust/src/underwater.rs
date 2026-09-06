@@ -36,9 +36,11 @@ struct Params {
     underwater_tuning: [f32; 4],
     // WRL-006: camera body's containment ellipse (cx, cz, rx, rz); rx == 0 = the sea.
     body_ellipse: [f32; 4],
+    // (cos, sin, 0, 0) of the body's heading.
+    body_frame: [f32; 4],
 }
 
-const _: () = assert!(std::mem::size_of::<Params>() == 224);
+const _: () = assert!(std::mem::size_of::<Params>() == 240);
 
 #[test]
 fn underwater_wgsl_validates() {
@@ -755,6 +757,7 @@ impl Underwater {
         wave_scale: f32,
         body_wave_scale: f32,
         body_ellipse: [f32; 4],
+        body_frame: [f32; 2],
         density: f32,
         color_bias: f32,
         caustic_gain: f32,
@@ -781,6 +784,7 @@ impl Underwater {
                 water_controls: [warp_amp, sea_level, wave_scale, body_wave_scale],
                 underwater_tuning: [density, color_bias, caustic_gain, 0.0],
                 body_ellipse,
+                body_frame: [body_frame[0], body_frame[1], 0.0, 0.0],
             }),
         );
         if let Some(volume) = &self.volume {

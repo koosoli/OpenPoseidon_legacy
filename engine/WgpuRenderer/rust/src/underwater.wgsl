@@ -20,6 +20,7 @@ struct Params {
     underwater_tuning: vec4<f32>,
     // WRL-006: the camera body's containment ellipse (cx, cz, rx, rz); rx == 0 means the sea.
     body_ellipse: vec4<f32>,
+    body_frame: vec4<f32>,
 };
 
 // Cleared reversed-Z depth has no finite target. This is far enough for the water volume to
@@ -272,8 +273,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // attenuate. Solve |u0 + d t|^2 = 1 in the ellipse's normalised frame for the exit t.
     if (params.body_ellipse.z > 0.0 && params.body_ellipse.w > 0.0) {
         let e = params.body_ellipse;
-        let u0 = vec2<f32>((params.camera_pos_layers.x - e.x) / e.z, (params.camera_pos_layers.z - e.y) / e.w);
-        let d = vec2<f32>(ray_dir.x / e.z, ray_dir.z / e.w);
+        let fc = params.body_frame.x;
+        let fs = params.body_frame.y;
+        let dxz = vec2<f32>(params.camera_pos_layers.x - e.x, params.camera_pos_layers.z - e.y);
+        let u0 = vec2<f32>((fc * dxz.x + fs * dxz.y) / e.z, (-fs * dxz.x + fc * dxz.y) / e.w);
+        let d = vec2<f32>((fc * ray_dir.x + fs * ray_dir.z) / e.z, (-fs * ray_dir.x + fc * ray_dir.z) / e.w);
         let a = dot(d, d);
         let b = 2.0 * dot(u0, d);
         let c = dot(u0, u0) - 1.0;
