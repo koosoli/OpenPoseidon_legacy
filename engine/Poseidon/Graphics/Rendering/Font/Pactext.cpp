@@ -2123,6 +2123,17 @@ ITextureSourceFactory* SelectTextureSourceFactory(const char* name)
     {
         return nullptr;
     }
+    // RFG-081: `enfc|R,G,B` is a flat colour with no file behind it (DdsImport.cpp,
+    // RFG-039), so it has no extension either, and GetFileExt read its last decimal
+    // fraction as one: "Unrecognized texture type '.1880': 'enfc|0.1680,0.1850,0.1880'".
+    // Three materials per Everon load lost their colour that way, silently textureless.
+    // The DDS source is the one that understands the name; hand it over before the
+    // extension is looked at. The other `enf*|` names carry a real `.edds` at the end
+    // and were never affected.
+    if (strncmp(name, "enfc|", 5) == 0)
+    {
+        return GTextureSourceDDSFactory;
+    }
     const char* ext = GetFileExt(filename);
     if (!strcmpi(ext, ".pac") || !strcmpi(ext, ".paa"))
     {

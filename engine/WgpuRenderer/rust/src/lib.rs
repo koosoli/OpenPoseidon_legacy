@@ -120,6 +120,13 @@ fn srgb_to_linear_ch(c: f32) -> f32 {
 struct RuntimeDiagnostics {
     device_loss: Mutex<Option<String>>,
     uncaptured_error: Mutex<Option<String>>,
+    /// RFG-082: errors that arrived while `uncaptured_error` was already holding one.
+    /// The slot used to be overwritten, so the FIRST error of a poll window -- the
+    /// out-of-memory that made a buffer invalid -- was replaced by the hundreds of
+    /// "Buffer ... is invalid" that followed it, and the log showed only the
+    /// consequences. Measured on Everon with RFG-075: 1,695 invalid-buffer errors and
+    /// not one allocation failure, because every one of them had been overwritten.
+    suppressed_errors: std::sync::atomic::AtomicU32,
 }
 
 struct ScreenshotPixels {
@@ -130,16 +137,42 @@ struct ScreenshotPixels {
 
 impl RuntimeDiagnostics {
     fn take_messages(&self) -> (Option<String>, Option<String>) {
+        let suppressed = self
+            .suppressed_errors
+            .swap(0, std::sync::atomic::Ordering::Relaxed);
+        let error = self
+            .uncaptured_error
+            .lock()
+            .expect("device diagnostics poisoned")
+            .take()
+            .map(|message| {
+                if suppressed > 0 {
+                    format!("{message} (+{suppressed} more errors in this poll window, not shown)")
+                } else {
+                    message
+                }
+            });
         (
             self.device_loss
                 .lock()
                 .expect("device diagnostics poisoned")
                 .take(),
-            self.uncaptured_error
-                .lock()
-                .expect("device diagnostics poisoned")
-                .take(),
+            error,
         )
+    }
+
+    /// Keeps the first error of a poll window; later ones only count.
+    fn note_uncaptured_error(&self, message: String) {
+        let mut slot = self
+            .uncaptured_error
+            .lock()
+            .expect("device diagnostics poisoned");
+        if slot.is_none() {
+            *slot = Some(message);
+        } else {
+            self.suppressed_errors
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
     }
 }
 
@@ -300,6 +333,19 @@ mod runtime_diagnostics_tests {
             )
         );
         // A frame must not keep reporting stale failures after it consumed them.
+        assert_eq!(diagnostics.take_messages(), (None, None));
+    }
+
+    #[test]
+    fn keeps_the_first_error_of_a_window_and_counts_the_rest() {
+        let diagnostics = RuntimeDiagnostics::default();
+        diagnostics.note_uncaptured_error("out of memory".to_owned());
+        diagnostics.note_uncaptured_error("buffer is invalid".to_owned());
+        diagnostics.note_uncaptured_error("buffer is invalid".to_owned());
+        assert_eq!(
+            diagnostics.take_messages().1,
+            Some("out of memory (+2 more errors in this poll window, not shown)".to_owned())
+        );
         assert_eq!(diagnostics.take_messages(), (None, None));
     }
 }
@@ -1345,11 +1391,7 @@ impl Renderer {
         });
         let error_diagnostics = Arc::clone(&runtime_diagnostics);
         device.on_uncaptured_error(Arc::new(move |error| {
-            *error_diagnostics
-                .uncaptured_error
-                .lock()
-                .expect("device diagnostics poisoned") =
-                Some(format!("wgpu uncaptured error: {error}"));
+            error_diagnostics.note_uncaptured_error(format!("wgpu uncaptured error: {error}"));
         }));
 
         let present_modes = surface.get_capabilities(&adapter).present_modes;
@@ -3242,6 +3284,17 @@ impl Renderer {
         }
         if let Some(message) = uncaptured_error {
             self.log.log(log_level::ERROR, &message);
+        }
+        // RFG-082: the geometry-pool and storage-array rings were drained once, at
+        // start-up, so a grow or retire that happened a minute later was never written
+        // anywhere -- which is how "no grow events" was read as "the pool is not the
+        // problem" while the pool was being re-created into a full heap. Drained here,
+        // every frame, they land next to the error they explain.
+        if let Some(line) = crate::gfx3d::pool::geometry_pool_events_log_line() {
+            self.log.log(log_level::INFO, &line);
+        }
+        if let Some(line) = crate::gfx3d::storage_array_log_line() {
+            self.log.log(log_level::INFO, &line);
         }
         use wgpu::CurrentSurfaceTexture as Cst;
         match self.surface.get_current_texture() {

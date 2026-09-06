@@ -1629,19 +1629,43 @@ void ParamClass::Parse(QIStream& in, ParamFile* file)
                 }
                 c = in.get();
             }
-            // find opening brace
-            while (c != '{')
+            while (isspace(c))
             {
-                if (!isspace(c))
-                {
-                    ErrorMessage("%s: '%c' encountered instead of '{'", (const char*)GetContext(), c);
-                    return;
-                }
                 c = in.get();
             }
-            // parse section content
-            section->Parse(in, file);
-            newEntry = section;
+            if (c == ';')
+            {
+                // `class Table;` -- an EXTERNAL declaration, the standard way a config
+                // fragment names a class it does not define so that classes below it can
+                // derive from it (`class TableHospoda: Table { ... }`). The parser used to
+                // hit the ';' in the brace loop below, report "';' encountered instead of
+                // '{'" and RETURN -- which threw away the rest of the enclosing section, so
+                // an overlay that declared its base parsed to an empty CfgVehicles and the
+                // merge added nothing, while still printing "Written:". Measured 2026-09-06
+                // on docs/gameplay/cwa-cafe-furniture.cpp: byte-identical output.
+                //
+                // The declaration becomes an empty class of that name. In an overlay that
+                // is exactly what ParamClass::Update wants: for a class the destination
+                // already has, zero entries and no base means "leave it alone"; for a
+                // derived class beside it, the base is found by NAME in the destination.
+                newEntry = section;
+            }
+            else
+            {
+                // find opening brace
+                while (c != '{')
+                {
+                    if (!isspace(c))
+                    {
+                        ErrorMessage("%s: '%c' encountered instead of '{'", (const char*)GetContext(), c);
+                        return;
+                    }
+                    c = in.get();
+                }
+                // parse section content
+                section->Parse(in, file);
+                newEntry = section;
+            }
         }
         else if (!strcmp(word, "enum"))
         {

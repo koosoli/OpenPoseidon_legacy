@@ -996,3 +996,54 @@ TEST_CASE("ParamFile - An overlay class without a base keeps the base it is patc
         REQUIRE(c->FindEntry("x") == nullptr); // and no longer from A
     }
 }
+
+// An overlay fragment can only derive from a class it does not carry by DECLARING it:
+// `class Table;`. The parser used to stop the enclosing section at that ';' -- the whole
+// overlay parsed to an empty CfgVehicles and the merge added nothing while reporting
+// success (docs/gameplay/cwa-cafe-furniture.cpp, 2026-09-06).
+TEST_CASE("ParamFile - Overlay may declare an external base class", "[paramfile][inherit][overlay]")
+{
+    const char* baseText = "class CfgVehicles {\n"
+                           "    class Thing { simulation = \"thing\"; };\n"
+                           "    class Table : Thing { model = \"stulsuplik_proxy.p3d\"; mapSize = 0.7; };\n"
+                           "};\n";
+    const char* overlayText = "class CfgVehicles {\n"
+                              "    class Table;\n"
+                              "    class TableHospoda : Table { model = \"stul_hospoda.p3d\"; };\n"
+                              "};\n";
+
+    ParamFile base;
+    QIStream  baseIn(baseText, strlen(baseText));
+    base.Parse(baseIn);
+
+    ParamFile overlay;
+    QIStream  overlayIn(overlayText, strlen(overlayText));
+    overlay.Parse(overlayIn);
+
+    // The declaration survives parsing as an empty class, and the class after it too.
+    const ParamClass* overlayVehicles = overlay.GetClass("CfgVehicles");
+    REQUIRE(overlayVehicles != nullptr);
+    REQUIRE(overlayVehicles->GetClass("Table") != nullptr);
+    REQUIRE(overlayVehicles->GetClass("Table")->GetEntryCount() == 0);
+    REQUIRE(overlayVehicles->GetClass("TableHospoda") != nullptr);
+
+    base.Update(overlay);
+
+    const ParamClass* vehicles = base.GetClass("CfgVehicles");
+    REQUIRE(vehicles != nullptr);
+    const ParamClass* table = vehicles->GetClass("Table");
+    const ParamClass* hospoda = vehicles->GetClass("TableHospoda");
+    REQUIRE(table != nullptr);
+    REQUIRE(hospoda != nullptr);
+
+    // The declared base is untouched: still derives from Thing, still has its own model.
+    REQUIRE(table->GetEntryCount() == 2);
+    REQUIRE(std::string(table->FindEntry("model")->GetValue().Data()) == "stulsuplik_proxy.p3d");
+    REQUIRE(table->FindEntry("simulation") != nullptr);
+
+    // The new class derives from the destination's Table: its own model, Table's mapSize,
+    // Thing's simulation.
+    REQUIRE(std::string(hospoda->FindEntry("model")->GetValue().Data()) == "stul_hospoda.p3d");
+    REQUIRE(hospoda->FindEntry("mapSize") != nullptr);
+    REQUIRE(hospoda->FindEntry("simulation") != nullptr);
+}

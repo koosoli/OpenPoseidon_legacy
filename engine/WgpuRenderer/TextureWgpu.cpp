@@ -829,6 +829,39 @@ thread_local TopMipHandoff GTopMipHandoff;
 // unchanged from the file-local struct this replaces.
 Poseidon::Dev::TextureStreamCounters& GTextureStreamStats = Poseidon::Dev::GTextureStreamCounters();
 
+// RFG-083: what the resident object textures ARE, by size, so a residency number can be
+// read. "1,703 textures, 3.63 GB" says nothing about whether the answer is a mip bias
+// (a few huge textures) or streaming (many modest ones); the bucket line does.
+// Counted at creation, so it is the set that reached the GPU, not the set on disk.
+namespace
+{
+constexpr int          kUploadBuckets = 6; // <=256, 512, 1024, 2048, 4096, >4096
+std::atomic<uint64_t>  GUploadBucketCount[kUploadBuckets];
+std::atomic<uint64_t>  GUploadBucketBytes[kUploadBuckets];
+void NoteUploadSize(int w, int h, uint64_t bytes)
+{
+    const int side = std::max(w, h);
+    const int b = side <= 256 ? 0 : side <= 512 ? 1 : side <= 1024 ? 2 : side <= 2048 ? 3 : side <= 4096 ? 4 : 5;
+    GUploadBucketCount[b].fetch_add(1, std::memory_order_relaxed);
+    GUploadBucketBytes[b].fetch_add(bytes, std::memory_order_relaxed);
+}
+} // namespace
+
+std::string TextureUploadHistogramLine()
+{
+    static const char* names[kUploadBuckets] = {"<=256", "512", "1024", "2048", "4096", ">4096"};
+    std::string        out = "object texture uploads by size (count / MB):";
+    for (int b = 0; b < kUploadBuckets; b++)
+    {
+        char buf[64];
+        std::snprintf(buf, sizeof(buf), " %s=%llu/%.0f", names[b],
+                      (unsigned long long)GUploadBucketCount[b].load(std::memory_order_relaxed),
+                      GUploadBucketBytes[b].load(std::memory_order_relaxed) / 1048576.0);
+        out += buf;
+    }
+    return out;
+}
+
 bool TextureStreamStatsEnabled()
 {
     // getenv walks the process environment block and costs ~2.1 us per call — measured on
@@ -876,6 +909,7 @@ void ReportTextureStreamStats(uint64_t uploads)
              GAlphaMaskDemotions.load(std::memory_order_relaxed),
              GFormatAlphaDemotions.load(std::memory_order_relaxed), alphaUs / 1000.0,
              (readUs + createUs + fallbackUs + alphaUs) / 1000.0);
+    LOG_INFO(Graphics, "Wgpu {}", TextureUploadHistogramLine());
 }
 
 } // namespace
@@ -1610,6 +1644,8 @@ uint64_t TextureWgpu::EnsureUploaded()
             _gpuHandle = wgr_texture_create_in_slot(r, static_cast<uint32_t>(_w), static_cast<uint32_t>(_h), bcFormat,
                                                     static_cast<uint32_t>(levelCount), 0, blocks.data(),
                                                     static_cast<uint32_t>(blocks.size()), AcquireSlotLease());
+            if (_gpuHandle)
+                NoteUploadSize(_w, _h, blocks.size());
             if (timed)
             {
                 const uint64_t createDelta = NowUs() - createBegan;
@@ -1671,6 +1707,7 @@ uint64_t TextureWgpu::EnsureUploaded()
             {
                 _w = prepared.width;
                 _h = prepared.height;
+                NoteUploadSize(_w, _h, prepared.rgba.size() * 4 / 3); // with generated mips
                 GTextureStreamStats.frameUploadBytes.fetch_add(prepared.rgba.size(), std::memory_order_relaxed);
                 if (timed)
                     GTextureStreamStats.preparedHits.fetch_add(1, std::memory_order_relaxed);
@@ -1706,6 +1743,7 @@ uint64_t TextureWgpu::EnsureUploaded()
                 _gpuHandle = wgr_texture_create_in_slot(
                     r, static_cast<uint32_t>(_w), static_cast<uint32_t>(_h), WGR_TEXTURE_RGBA8, 1,
                     WGR_TEXTURE_GEN_MIPS, pixels.data(), static_cast<uint32_t>(pixels.size()), AcquireSlotLease());
+                NoteUploadSize(_w, _h, pixels.size() * 4 / 3);
                 GTextureStreamStats.frameUploadBytes.fetch_add(pixels.size(), std::memory_order_relaxed);
             }
         }
@@ -1724,6 +1762,7 @@ uint64_t TextureWgpu::EnsureUploaded()
                     WGR_TEXTURE_GEN_MIPS, img.rgba.data(), static_cast<uint32_t>(img.rgba.size()), AcquireSlotLease());
                 _w = img.width;
                 _h = img.height;
+                NoteUploadSize(_w, _h, img.rgba.size() * 4 / 3);
                 GTextureStreamStats.frameUploadBytes.fetch_add(img.rgba.size(), std::memory_order_relaxed);
             }
         }
