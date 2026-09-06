@@ -3,7 +3,7 @@
 Date: 2026-09-06. Plan: [WATER-REALISM-LOW-COST-IMPLEMENTATION-PLAN.md](WATER-REALISM-LOW-COST-IMPLEMENTATION-PLAN.md).
 Branch `water-realism` on `safety`, created from `safety/asset-obs-001` at `37a16e16`; upstream had not moved by the end of the session (0 behind). Nothing is merged anywhere. Worktree: `.claude/worktrees/water`, own build dir.
 
-**Installed in the game folder at handover:** `water-realism f8477c0b 2026-09-06_16:00 deploy-ps1` (exe and DLL from the same build, via `scripts\Deploy.ps1`). The owner is on this build. The other agent's `asset-obs-001 7ece440a` pair was replaced; `7fe5875b` contains it (it is the branch base plus these commits).
+**Installed in the game folder at handover:** `water-realism 54749c9c 2026-09-06_16:59 deploy-ps1` (exe and DLL from the same build, via `scripts\Deploy.ps1`). The owner is on this build. The other agent's `asset-obs-001 7ece440a` pair was replaced; `7fe5875b` contains it (it is the branch base plus these commits).
 
 ## Commits
 
@@ -17,6 +17,7 @@ Branch `water-realism` on `safety`, created from `safety/asset-obs-001` at `37a1
 | `cc44a5a8` | WRL-004/006 + owner request | Objects falling into water splash (one hook in `Entity::Simulate`, `WaterEntrySplash.cpp`); river flow eases toward the bank; the in-scatter volume is clipped at the body side like the compositor. |
 | `22a874fa` | WRL-006b/007 fixtures | `tests/perf/missions/lake_boat.eden` (two `BoatW` + a barrel dropped below the lake surface), Water tab "Low"/"Balanced" presets, `WGR_WATER_LAKE_GRID=n` stress fixture. |
 | `f8477c0b` | WRL-007 | Body nodes distance-culled past the last CDLOD range; boat class fixed. |
+| `5c347a8b`, `e144e87b`, `54749c9c` | WRL-004 rivers | Oriented reach (rotation), two-phase flow advection of the surface detail, flow-aligned foam streaks, mouth fade + below-sea discard, and bed-following surfaces (centreline terrain + depth, CPU and GPU from the same heightfield). Fixture that renders on Everon: `WGR_WATER_RIVER=7250,6290,45,9,37,0,-0.27,0.05,2,1.2,90,0.6` (fields: x,z,rx,rz,level,gradX,gradZ,wave,profile,speed,heading°,bedDepth); picture `evidence/WRL-004-54749c9c-river.png`. |
 | (docs) | WRL-001..007 | `docs/roadmap/evidence/WRL-00{1,2,3}-*.md` and six PNGs. |
 
 Files touched outside the water-owned set, all minimal hooks: `EngineWgpu.cpp` (profile v3 read/write only), `Collisions.cpp` (one branch: local body surface), `WaterSurfaceQuery.{hpp,cpp}` (scaled overload), `DebugOverlay.cpp` (Water tab controls), `wgpu_renderer.hpp` / `ffi.rs` / `lib.rs` (ABI lanes, underwater view field). `TerrainWgpu.cpp`, `LandLoadEnfusion.cpp`, `Landscape.cpp` untouched. `Cargo.lock` untouched.
@@ -50,7 +51,7 @@ Fixtures, poses and the exact "what to look for" list are in [WRL-004-007-rollou
 
 - **WRL-002 remainder:** glint/roughness audit at altitude (step 2), rain response capture, a moving-camera sequence, and a native-resolution bench arm. Alternated A/B rounds for a frame-total verdict.
 - **WRL-003a:** the inland-only frame fixture (no ocean submitted) is NOT exercised: with the CDLOD ocean always submitted on stock worlds there is no such frame today. Imported-world migration (CalmWater surfaces → bodies) is not started; there is no loader that produces body metadata.
-- **WRL-004:** river flow and bank slowdown done; still missing: two-phase advection, foam streaks/turbulence, per-body interaction pools, profile tuning with real assets, polygon boundaries and connected mouths.
+- **WRL-004:** rivers done as oriented, bed-following reaches with two-phase advection, streaks, bank slowdown and a sea mouth; still missing: obstacle turbulence, per-body interaction pools, profile tuning with real assets, polygon (multi-segment) rivers and river-to-river connections.
 - **WRL-005:** reflection budget work not started (bodies simply skip planar and keep the sky sample).
 - **WRL-006:** side exits clipped for extinction and in-scatter (done); camera-versus-player is inherent (camera decides submersion). Dry cavities under a lake and per-body caustics are NOT handled.
 - **WRL-006b:** the collision hook and the `lake_boat.eden` mission are in; nobody has WATCHED a boat on the lake yet (owner's pass). Planing/turn/grounding/sinking checks, multi-boat CPU cost and the headless path are undone.
