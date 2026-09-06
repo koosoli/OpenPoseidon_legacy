@@ -188,6 +188,7 @@ class EngineWgpu : public EngineDummy
     void SceneObjectMoved(Object* obj) override;
     GpuDrawCoverage GpuDrivenCoverage(const Object* obj) const override;
     bool GpuDrivenProxy(const Object* parent, int level, int proxyIndex) const override;
+    void SceneObjectProxiesChanged(Object* obj) override;
     void SuppressWorldObjects(bool suppress) override;
 
     // Software-T&L path: 3D-in-UI objects (e.g. the menu laptop) arrive here with

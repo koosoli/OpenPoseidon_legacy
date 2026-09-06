@@ -3861,6 +3861,22 @@ VertexBuffer* EngineWgpu::CreateVertexBuffer(const Shape& src, VBType type)
             _sharedSlotOf[shared->second] = slot;
         }
     }
+    // RFG-097 diagnostic: the first large buffers that do NOT share, by type, so "1,572 MB
+    // of direct-path buffers on a streamed world" can be attributed to a producer.
+    {
+        static std::atomic<uint32_t> reported{0};
+        const size_t bytes = slot->verts.size() * sizeof(SVertex) + slot->indices.size() * sizeof(uint32_t);
+        if (slot->sharedProducer == 0 && bytes >= (1u << 20) && reported.fetch_add(1, std::memory_order_relaxed) < 12)
+        {
+            const char* tex = nullptr;
+            if (src.NSections() > 0)
+                if (Texture* t = src.GetSection(0).properties.GetTexture())
+                    tex = t->Name();
+            LOG_INFO(Graphics, "Wgpu CPU buffer (own copy): {:.1f} MB nv={} type={} sections={} first tex='{}' retained-level-known={}",
+                     bytes / 1048576.0, nv, static_cast<int>(type), src.NSections(), tex ? tex : "-",
+                     _retainedMeshOfLevel.count(&src) ? "yes" : "no");
+        }
+    }
     {
         ResourceOp op;
         op.kind = ResourceOp::CpuMeshCreate;
@@ -8794,6 +8810,44 @@ void EngineWgpu::SceneObjectMoved(Object* obj)
     }
 }
 
+// RFG-095b: re-emit a registered parent's GPU proxies from the CURRENT hidden set.
+//
+// Buildings are registered (SceneObjectCreated -> EmitGpuProxies) while the landscape adds
+// them; MapThings promotes their furniture proxies to Things and hides the originals only
+// afterwards (Landscape::InitObjectVehicles). The hidden check in EmitGpuProxies therefore
+// saw an empty set, and every promoted chair kept a GPU twin at its authored spot: shoot the
+// Thing and "a copy" stays behind, z-fighting with it until it moves (the owner's report).
+void EngineWgpu::SceneObjectProxiesChanged(Object* obj)
+{
+    if (!_renderer || !obj)
+    {
+        return;
+    }
+    auto it = _gpuInstances.find(obj);
+    if (it == _gpuInstances.end())
+    {
+        return;
+    }
+    LODShapeWithShadow* shape = obj->GetShape();
+    if (!shape || shape != it->second.shape)
+    {
+        return;
+    }
+    RemoveGpuProxies(obj);
+    const auto covIt = _gpuModelCoverage.find(shape);
+    GpuDrawCoverage cov = covIt != _gpuModelCoverage.end() ? covIt->second : GpuDrawCoverage::Full;
+    if (cov == GpuDrawCoverage::Partial)
+    {
+        const bool allProxiesGpu = EmitGpuProxies(obj, shape);
+        if (allProxiesGpu && _gpuModelComplement.count(shape) == 0)
+        {
+            cov = GpuDrawCoverage::Full;
+        }
+    }
+    it->second.coverage = cov;
+    obj->SetGpuCoverage(static_cast<int>(cov));
+}
+
 GpuDrawCoverage EngineWgpu::GpuDrivenCoverage(const Object* obj) const
 {
     // O(1) field read (Object::_gpuCoverage), stamped by Scene{ObjectCreated,Removed,Moved}. This
@@ -9809,6 +9863,9 @@ void EngineWgpu::LogObjectPerfRow()
         LOG_INFO(Graphics, "Objects counts: readback pending (registered={})", o.registeredInstances);
         return;
     }
+    // RFG-097: the retained admission census beside the counts, so a stream that admits
+    // objects after the first frame says what it refused and why, while the run is alive.
+    LogAdmissionCensus();
     LOG_INFO(Graphics,
              "Objects counts: registered={} | main inst={} sections={} tris={} | "
              "colour inst={} sections={} (solid={} alpha={}) tris={} (solid={} alpha={}) | "

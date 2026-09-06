@@ -2575,6 +2575,17 @@ void Landscape::InitObjectVehicles()
 
         RefArray<Object>            replace;    // ObjectPlain -> Thing
         RefArray<Object>            parents;    // objects with at least one qualifying proxy
+        // RFG-095c: a parent is collected ONCE. The cell scan below and the RFG-080 walk over
+        // `changed` (buildings the promotion just created) both reach the same Building, and a
+        // large building is listed in several land cells besides; every duplicate spawned the
+        // whole furniture set again -- 528 Things for 264 proxies at the Everon café, two
+        // Things at exactly the same spot, one of which flew when shot while "a copy" stayed.
+        std::unordered_set<const Object*> parentSeen;
+        const auto addParent = [&](Object* parent)
+        {
+            if (parentSeen.insert(parent).second)
+                parents.Add(parent);
+        };
         std::unordered_set<const LODShape*> models;
         for (int x = 0; x < _landRange; x++)
         {
@@ -2613,7 +2624,7 @@ void Landscape::InitObjectVehicles()
                         const LODShape*    pshape = proxy.obj ? proxy.obj->GetShape() : nullptr;
                         if (MapThings::ThingTypeForShape(pshape))
                         {
-                            parents.Add(obj);
+                            addParent(obj);
                             break;
                         }
                     }
@@ -2643,7 +2654,7 @@ void Landscape::InitObjectVehicles()
                     const LODShape*    pshape = proxy.obj ? proxy.obj->GetShape() : nullptr;
                     if (MapThings::ThingTypeForShape(pshape))
                     {
-                        parents.Add(obj);
+                        addParent(obj);
                         break;
                     }
                 }
@@ -2707,6 +2718,10 @@ void Landscape::InitObjectVehicles()
             if (any)
             {
                 ++things.parentsWithProxies;
+                // RFG-095b: the building was registered with the retained renderer before its
+                // furniture was hidden; let it re-emit its GPU proxies from the hidden set.
+                if (GEngine)
+                    GEngine->SceneObjectProxiesChanged(obj);
             }
         }
         things.distinctModels = (long long)models.size();

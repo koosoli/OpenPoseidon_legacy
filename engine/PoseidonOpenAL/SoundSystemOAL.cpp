@@ -650,6 +650,26 @@ static bool ComputeEFXTarget(SoundEnvironmentType type, float envSize, EFXEAXREV
     if (type != SERoom)
     {
         preset.flDensity = envSize / 100.0f;
+        // AUD-010: the DX8-parity size scaling above multiplies the preset's decay by
+        // envSize/defaultSize -- for "city" (7.5 m preset, 45 m from the classifier for one
+        // hard object in the cell) that is x6, a 16 s tail on every shot in any village:
+        // "alles klingt nach Echo, als wäre alles in einer Höhle, auch wenn ich draussen bin".
+        // Outdoors the tail is capped and the reverb energy halved; both tunable until ears
+        // have judged them (POSEIDON_EAX_OUTDOOR_DECAY_MAX seconds, POSEIDON_EAX_OUTDOOR_GAIN,
+        // 0 = no outdoor reverb at all).
+        static const float outdoorDecayMax = []
+        {
+            const char* v = std::getenv("POSEIDON_EAX_OUTDOOR_DECAY_MAX");
+            return v ? std::clamp(static_cast<float>(std::atof(v)), 0.1f, 20.0f) : 1.5f;
+        }();
+        static const float outdoorGain = []
+        {
+            const char* v = std::getenv("POSEIDON_EAX_OUTDOOR_GAIN");
+            return v ? std::clamp(static_cast<float>(std::atof(v)), 0.0f, 1.0f) : 0.5f;
+        }();
+        preset.flDecayTime = std::min(preset.flDecayTime, outdoorDecayMax);
+        preset.flReflectionsGain *= outdoorGain;
+        preset.flLateReverbGain *= outdoorGain;
     }
     if (preset.flDensity < AL_EAXREVERB_MIN_DENSITY)
         preset.flDensity = AL_EAXREVERB_MIN_DENSITY;

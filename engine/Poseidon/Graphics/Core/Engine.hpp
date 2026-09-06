@@ -2608,6 +2608,11 @@ class Engine : public IGraphicsEngine
     // §12d: is proxy `proxyIndex` at parent LOD `level` drawn by the GPU retained scene (as a child
     // instance)? Object::DrawProxies skips it if so, to avoid double-drawing the furniture.
     virtual bool GpuDrivenProxy(const Object* /*parent*/, int /*level*/, int /*proxyIndex*/) const { return false; }
+    // RFG-095b: the set of proxies a parent should draw changed after it was registered -- the
+    // furniture promotion (MapThings) runs AFTER the buildings were added, so the GPU proxy
+    // instances it hides were already emitted. The renderer re-emits from the current hidden set.
+    // Appended at the class end for the same vtable-slot reason as the two above.
+    virtual void SceneObjectProxiesChanged(Object* /*obj*/) {}
 
     // WTR-002 — GPU water-pipeline pass timings (Water tab, dev-only). Copies up to maxCount
     // per-region times in milliseconds into outMs (indexed by the renderer's fixed region
