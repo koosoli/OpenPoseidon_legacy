@@ -2,7 +2,7 @@
 
 Created: 2026-09-06  
 Revision: 3 — explicit boat/object buoyancy and body-aware physics integration, building on revision 2's rendering and cost gates.  
-Status: PROPOSED — documentation only; implementation has not been authorised by this document.  
+Status: IN PROGRESS — authorised and partly implemented on branch `water-realism` on 2026-09-06; see the status section at the end for what is done and what is not.  
 Scope: WGPU ocean, lake, river, shoreline, and underwater presentation, with preservation and body-aware integration of existing boat/object buoyancy.  
 Objective: visibly more convincing water while keeping the balanced preset close to current frame time and bounding resource growth.
 
@@ -371,3 +371,22 @@ Exclude full fluid simulation, general shallow-water solvers, waterfall renderin
 Stop the affected package when required asset metadata is genuinely unavailable, a reproducible external blocker has no safe alternative, an unresolved safety/external-authority decision is needed, or required visual judgement cannot be automated. Diagnose the specific blocker and retain completed independent work. Do not substitute a global sea plane for inland bodies, silently increase budgets, or mark a stage verified because it compiles.
 
 The intended result is a coherent, scalable water system with distinct ocean, lake and river character and matching underwater optics. Success is demonstrated by matched visual evidence and measured resource use, not by the number of effects enabled.
+
+
+## 9. Implementation status (2026-09-06, branch `water-realism`, author verification only)
+
+Evidence: `evidence/WRL-001-baseline-20260906.md`, `evidence/WRL-002-surface-optics-20260906.md`, `evidence/WRL-003-bounded-bodies-20260906.md`, `evidence/WRL-004-007-rollout-20260906.md`; commits and fixtures in `HANDOVER-water-realism.md`. Owner acceptance of the look is pending throughout; the owner does the visual testing.
+
+| package | done | not done |
+| --- | --- | --- |
+| WRL-001 | Baseline bench (`perf_water.eden`, installed `7ece440a`), production-path inventory, body-data availability report (stock worlds have no inland water; imported ponds carry no elevation/extent), resource caps frozen, ranked defect list. | Native-resolution arm (both late arms reported reconstruction off at 2305x965), moving-camera sequence. |
+| WRL-002 | One optical model (`water/water_optics.wgsl`) shared by surface, compositor, froxel and caustics; background composited once, no double fog, Opacity redefined; whitecaps/foam/spray gated by wind at all three sources; deep swatch to dark teal; owner defaults scale 0.65 / specular 140; per-map profile versioning (v4) so auto-saved old defaults stop pinning new ones. Measured: water rows 9.1–9.7 ms → 8.2–9.3 ms at the old profile, no regression; ~10.5 ms at the owner's later profile (amplitude 1.0). | Glint/roughness audit at altitude, rain capture, alternated A/B rounds for a frame-total verdict. |
+| WRL-003 | Simulation-owned `WaterBodyRegistry` (id, generation, kind, rotated ellipse, level + gradient, wave scale, flow, profile, bed-following depth); deterministic overlap; body table (16) in the water params; per-node body lane; per-body draw at its own level, ellipse discard with soft rim; camera containment feeds the compositor; fixtures (env + Water tab); 8 C++ unit tests. | Polygon boundaries, connected/overlapping-body rules beyond "smaller wins", a loader that produces body metadata (none exists). |
+| WRL-003a | Synthetic lake vertical slice: draws inside its ellipse at 25 m with the sea 22 m lower in the same frame; bed from the opaque snapshot; measured cost 1–4 leaf nodes per body. | Migrating imported CalmWater ponds/rivers onto the body path; the inland-only frame (no ocean submitted); MSAA/reconstruction matrix for bodies. |
+| WRL-004 | Rivers as oriented, bed-following reaches; per-body flow lane; two-phase flow advection of the surface detail; flow-aligned foam streaks; bank slowdown from the body boundary; lakes get 15% surf and no swash; four profile multipliers; mouth fade into the sea and below-sea discard; objects falling into water splash (all entity classes, local surface). | Obstacle turbulence, per-body interaction/foam pools, profile tuning with real assets, multi-segment rivers and river-to-river junctions. |
+| WRL-005 | Bodies never sample the sea's planar transform (sky fallback); one planar view per frame with the existing hysteresis; refraction depth validation kept. | Reduced-resolution refraction/SSR experiments, reflection caching, reflected-cloud sample-count work. |
+| WRL-006 | Compositor engages against the camera body's level and wave scale; extinction and in-scatter clipped at the body's side (ellipse exit, heading-aware); underwater effect on by default; camera decides submersion (player depth stays visual-only). | Dry cavities under a lake, per-body caustics, total-internal-reflection audit. |
+| WRL-006b | Collision hook: hull points inside a body use its level, wave scale and datum (`Collisions.cpp`); `lake_boat.eden` mission drops two `BoatW` and a barrel below the lake surface. | Nobody has WATCHED a boat on a lake; planing/turn/grounding/sinking checks, multi-boat CPU cost, headless/server path. |
+| WRL-007 | Low/Balanced presets; `WGR_WATER_LAKE_GRID=n` stress fixture; body nodes distance-culled past the last CDLOD range; 16-body draw cap with a warning. | Lifecycle stress (resize, teleport, reload with bodies), true native-vs-reconstructed measurement, ledger entry in `renderer-systems-ledger.yaml`. |
+
+Switches (Water tab): "Shared optical model (WRL-002)", "Whitecaps need wind (WRL-002)", "Underwater effect", "Low"/"Balanced", "Water bodies" (add lake/river at camera, clear). Fixture envs: `WGR_WATER_LAKE`, `WGR_WATER_RIVER`, `WGR_WATER_LAKE_GRID`.
