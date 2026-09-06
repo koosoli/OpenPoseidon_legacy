@@ -257,3 +257,27 @@ gameplay smoke had no containment to leak through.
 - Dynamic door leaves (SMC-003) and precise apertures remain as written; containment
   quality is still capped by the building's fire-geometry quality.
 
+### 9.1 Second pass (2026-09-07): draw footprint, wind, and the one that was too expensive
+
+- **SMK-032 (done, on):** the DRAWN puff is clamped to the room clearance plus a 10 cm soft
+  edge, the same rule `SmokeVolume::Draw` uses, so a billboard beside a wall no longer paints
+  through it. The clearance query is NOT cheap (it walks the interior), so each particle
+  re-measures at most every 0.25 s, staggered at spawn; measured at 28 ms of cloudlet
+  simulation when every indoor particle asked every frame, 0.1 ms with the cache.
+- **SMK-033 (done, on):** no wind indoors. Legacy smoke bakes the wind into a particle's
+  speed at the moment it is dropped, so a plume lit inside a house was blown across the room
+  by the weather outside -- and with containment holding it, piled against the wall. The
+  wind lookup costs one geography array read per SPAWN, and the room query only when the
+  cell holds a solid object.
+- **SMK-031 (implemented, OFF by default):** an outdoor plume drifting INTO a house. The
+  check needs `IndoorRoomAt` at the step destination; that needs `BuildingContaining`, which
+  caches only positive results, so every outdoor sample runs two full `Landscape::IsInside`
+  passes. Measured 21-24 ms of cloudlet simulation in a village against 0.25 ms for
+  everything else here, and the cheap gates do not help where every cell holds a building.
+  Making it affordable means a negative cache inside `BuildingContaining` -- a change to a
+  query several systems share, which wants its own measurement. The switch is in the tab.
+
+Cost of the shipped defaults, smoke grenade in the Everon cafe, same pose A/B: cloudlet
+simulation 0.24-0.26 ms with containment against 0.08-0.12 ms without; whole frame 6.0-6.9 ms
+against 6.4 ms, i.e. noise. 736 of 1,574 particles indoors, 12,555 steps blocked at a wall.
+

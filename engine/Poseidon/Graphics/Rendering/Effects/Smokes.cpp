@@ -70,6 +70,47 @@ bool GetPos(Poseidon::Foundation::Vector3P&, const class GameValue&);
 namespace Poseidon
 {
 
+// SMK-031: does the land cell under `pos` hold a solid object at all? A geography array
+// read, so smoke over open ground never reaches the room query behind it.
+static bool HardObjectsNear(Vector3Par pos)
+{
+    if (GLandscape == nullptr)
+        return false;
+    const int range = GLandscape->GetLandRange();
+    const int x = toIntFloor(pos.X() * InvLandGrid);
+    const int z = toIntFloor(pos.Z() * InvLandGrid);
+    if (x < 0 || z < 0 || x >= range || z >= range)
+        return false;
+    const GeographyInfo geog = GLandscape->GetGeography(x, z);
+    return geog.u.howManyHardObjects > 0 || geog.u.full != 0;
+}
+
+// SMK-033: the wind a cloudlet is born with. Legacy smoke bakes the wind into its speed at
+// the moment it is dropped and never consults the wind again, so a plume lit INSIDE a house
+// used to be blown across the room by the weather outside -- and, once containment holds it
+// against the wall, it simply piles up there. Indoors the wind is not felt.
+//
+// Cost: one geography array read per spawn, and the room query only when the cell holds a
+// solid object at all. This is a per-SPAWN query, not per step -- the reason SMK-031's
+// per-step version of the same lookup is off by default.
+static Vector3 LegacySmokeWind(Vector3Par pos, float coef)
+{
+    if (GLandscape == nullptr)
+        return VZero;
+    const Vector3 wind = GLandscape->GetWind() * coef;
+    LegacySmokeContainment& contain = GLegacySmokeContainment();
+    if (!contain.enabled || !contain.windOutdoorsOnly || !HardObjectsNear(pos))
+        return wind;
+    int room = -1;
+    ++contain.windQueries;
+    if (GSmokeWorldQuery().IndoorRoomAt(pos, room))
+    {
+        ++contain.windBlocked;
+        return VZero;
+    }
+    return wind;
+}
+
 bool SmokeSource::Simulate(Vector3Par pos, Vector3Par speed, float deltaT, SimulationImportance prec)
 {
     if (_inTime > 0)
@@ -105,7 +146,7 @@ bool SmokeSource::Simulate(Vector3Par pos, Vector3Par speed, float deltaT, Simul
             saturate(_generalize, MinGeneralize, 3);
             _nextTime += _interval * _generalize * _generalize;
             float size05 = 0.5 * _sourceSize;
-            Vector3Val windSpeed = GLandscape->GetWind() * 0.5;
+            Vector3Val windSpeed = LegacySmokeWind(pos, 0.5f); // SMK-033
             Vector3 speed(GRandGen.RandomValue() * (1 + _sourceSize) - (0.5 + size05) + _speed[0],
                           GRandGen.RandomValue() - 0.5 + _speed[1],
                           GRandGen.RandomValue() * (1 + _sourceSize) - (0.5 + size05) + _speed[2]);
@@ -822,8 +863,6 @@ void Cloudlet::Simulate(float deltaT, SimulationImportance prec)
     Friction(_speed[0], _xFriction, 0, deltaT);
     Friction(_speed[2], _zFriction, 0, deltaT);
     Limit(_speed[1], _minYSpeed, _maxYSpeed);
-    SetOrientScaleOnly(_growSize * _size);
-
     // SMK-030: keep the step inside the room it started in. Outdoors this costs one
     // room lookup for the whole life of the cloudlet (see the header note).
     const Vector3 from = Position();
@@ -858,8 +897,61 @@ void Cloudlet::Simulate(float deltaT, SimulationImportance prec)
             // building, and from then on this cloudlet is outdoors and free.
             _roomId = step.room;
         }
+        else if (contain.blockOutsideIn && HardObjectsNear(to))
+        {
+            // SMK-031: outdoors, but over a land cell that holds a solid object -- the only
+            // place a building can be. Ask at intervals, not every step.
+            const float now = Glob.time.toFloat();
+            if (now >= _nextOutsideCheck)
+            {
+                _nextOutsideCheck = now + contain.outsideInterval;
+                ++contain.outsideChecks;
+                int roomTo = -1;
+                if (GSmokeWorldQuery().IndoorRoomAt(to, roomTo))
+                {
+                    int roomFrom = -1;
+                    if (GSmokeWorldQuery().IndoorRoomAt(from, roomFrom))
+                    {
+                        // It was inside all along (its spawn query missed, or it slipped in
+                        // between two checks). Adopt the room and let containment hold it.
+                        _roomId = roomFrom;
+                    }
+                    else
+                    {
+                        // Outside going in: hold it at the wall and take the speed that was
+                        // carrying it inwards.
+                        ++contain.blockedIn;
+                        to = from;
+                        _speed *= contain.slide;
+                    }
+                }
+            }
+        }
     }
     SetPosition(to);
+
+    // SMK-032: the drawn footprint. Indoors, clamp the billboard to the room clearance so a
+    // puff beside a wall cannot paint through it; the 10 cm is the soft edge the modern path
+    // uses. Outdoors this costs nothing: the branch is not taken.
+    float drawScale = _growSize * _size;
+    if (contain.enabled && contain.clampDraw && _roomId >= 0)
+    {
+        const float now = Glob.time.toFloat();
+        if (_clearance < 0.0f || now >= _nextClearanceCheck)
+        {
+            // Staggered so the whole plume does not re-measure in the same frame.
+            _nextClearanceCheck = now + contain.drawInterval * (0.75f + 0.5f * GRandGen.RandomValue());
+            ++contain.drawQueries;
+            _clearance = GSmokeWorldQuery().IndoorClearanceAt(Position(), _roomId, _size);
+        }
+        const float allowed = floatMax(_clearance + 0.10f, 0.08f);
+        if (allowed < drawScale)
+        {
+            ++contain.drawClamped;
+            drawScale = allowed;
+        }
+    }
+    SetOrientScaleOnly(drawScale);
     if (contain.enabled)
     {
         // SMK-030: the counters, at most every two seconds and only while they move. This
@@ -947,6 +1039,14 @@ LegacySmokeContainment& GLegacySmokeContainment()
             c.enabled = !(*v == '0');
         if (const char* v = std::getenv("POSEIDON_SMOKE_CONTAIN_SLIDE"))
             c.slide = std::clamp(static_cast<float>(std::atof(v)), 0.0f, 1.0f);
+        if (const char* v = std::getenv("POSEIDON_SMOKE_CONTAIN_OUTSIDE_IN"))
+            c.blockOutsideIn = (*v == '1');
+        if (const char* v = std::getenv("POSEIDON_SMOKE_CONTAIN_DRAW"))
+            c.clampDraw = !(*v == '0');
+        if (const char* v = std::getenv("POSEIDON_SMOKE_WIND_INDOORS"))
+            c.windOutdoorsOnly = !(*v == '1');
+        if (const char* v = std::getenv("POSEIDON_SMOKE_CONTAIN_DRAW_INTERVAL"))
+            c.drawInterval = std::clamp(static_cast<float>(std::atof(v)), 0.02f, 2.0f);
         return c;
     }();
     return containment;
@@ -1161,7 +1261,7 @@ void DustSource::Simulate(Vector3Par pos, Vector3Par speed, float density, float
         _nextTime += _interval * _generalize * _generalize;
         const float size2 = 2 * _size;
         const float size05 = 0.5 * _size;
-        Vector3Val windSpeed = GLandscape->GetWind() * _windCoef;
+        Vector3Val windSpeed = LegacySmokeWind(pos, _windCoef); // SMK-033
         Vector3 cSpeed((GRandGen.RandomValue() * (1 + _size) - (0.5 + size05)) * 2,
                        GRandGen.RandomValue() * 1 + size2 * 1,
                        (GRandGen.RandomValue() * (1 + _size) - (0.5 + size05)) * 2);

@@ -422,8 +422,31 @@ void DrawSpawnSection()
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("POSEIDON_SMOKE_CONTAIN_SLIDE. How much speed a blocked particle keeps ALONG the\n"
                               "wall: 0 stops it dead, higher values let it curl and spread over the surface.");
+        Dev::Checkbox("Outdoor smoke cannot drift into a house (SMK-031, costly)", &contain.blockOutsideIn);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("OFF by default; POSEIDON_SMOKE_CONTAIN_OUTSIDE_IN=1 turns it on. Measured at\n"
+                              "21-24 ms of cloudlet simulation in a village against 0.25 ms for the rest of the\n"
+                              "containment: the room query behind it runs two full Landscape::IsInside passes\n"
+                              "per outdoor sample, because BuildingContaining caches only hits. The cheap gates\n"
+                              "(cell holds a solid object, then once every quarter second) do not help in a\n"
+                              "village, where every cell does.");
+        Dev::Checkbox("Clamp the drawn puff to the room (SMK-032)", &contain.clampDraw);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("POSEIDON_SMOKE_CONTAIN_DRAW=0 turns it off. A billboard beside a wall paints\n"
+                              "through it whatever the particle centre does. Indoors the sprite is clamped to\n"
+                              "the room clearance plus a 10 cm soft edge, as SmokeVolume::Draw already does.");
         ImGui::TextDisabled("asked %lld  indoors %lld  steps %lld  blocked %lld", contain.spawnQueries,
                             contain.indoor, contain.stepQueries, contain.blocked);
+        Dev::Checkbox("No wind indoors (SMK-033)", &contain.windOutdoorsOnly);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("POSEIDON_SMOKE_WIND_INDOORS=1 restores the old behaviour. Legacy smoke bakes the\n"
+                              "wind into a particle's speed at the moment it is dropped and never consults the\n"
+                              "wind again, so a plume lit INSIDE a house was blown across the room by the\n"
+                              "weather outside -- and with containment holding it, piled against the wall.\n"
+                              "Costs one geography read per spawn; the room query only near a solid object.");
+        ImGui::TextDisabled("outside checks %lld  kept out %lld  draw queries %lld  clamped %lld",
+                            contain.outsideChecks, contain.blockedIn, contain.drawQueries, contain.drawClamped);
+        ImGui::TextDisabled("wind queries %lld  wind blocked %lld", contain.windQueries, contain.windBlocked);
     }
     // SMK-020: the game's own smoke (grenades, shells, craters) -- scaled at class load.
     {

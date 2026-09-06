@@ -104,6 +104,9 @@ class Cloudlet: public Smoke
 	// `_roomChecked` separates the two, so the one spawn query happens exactly once.
 	int _roomId = -1;
 	bool _roomChecked = false;
+	float _nextOutsideCheck = 0.0f;    //!< SMK-031: next time this outdoor cloudlet may ask
+	float _nextClearanceCheck = 0.0f;  //!< SMK-032: next time the drawn size may be re-measured
+	float _clearance = -1.0f;          //!< SMK-032: last measured room clearance, -1 = none yet
 		
 	public:
 	Cloudlet( LODShapeWithShadow *shape, float duration, float loopedDuration=0 );
@@ -182,10 +185,39 @@ struct LegacySmokeContainment
 {
     bool enabled = true;      //!< POSEIDON_SMOKE_CONTAIN_LEGACY=0 turns it off
     float slide = 0.15f;      //!< velocity kept along the blocked direction (0 = stop dead)
+    // SMK-031: the other direction -- an OUTDOOR plume drifting into a house. OFF by
+    // default, and the reason is measured, not assumed: the check needs IndoorRoomAt at the
+    // step's destination, IndoorRoomAt needs BuildingContaining, and BuildingContaining
+    // caches only POSITIVE results -- so every outdoor query runs two full
+    // Landscape::IsInside passes. At ~0.4 ms each that is 21-24 ms of cloudlet simulation in
+    // a village, against 0.28 ms for everything else here. The gates below (the land cell
+    // must hold a solid object, then once every `outsideInterval` seconds per particle) are
+    // not enough, because in a village every cell holds one. Turning this on is a deliberate
+    // trade; making it cheap means a negative cache in BuildingContaining, which is a change
+    // to a shared query and wants its own measurement.
+    bool blockOutsideIn = false; //!< POSEIDON_SMOKE_CONTAIN_OUTSIDE_IN=1 turns it on
+    float outsideInterval = 0.25f;
+    // SMK-032: the DRAWN footprint. A billboard beside a wall paints through it whatever
+    // the particle centre does; indoors the puff is clamped to the room clearance, which is
+    // what SmokeVolume::Draw already does for the modern path.
+    bool clampDraw = true;      //!< POSEIDON_SMOKE_CONTAIN_DRAW=0 turns it off
+    // The clearance query walks the interior voxels and is FAR from free: measured at 28 ms
+    // of cloudlet simulation when every indoor particle asked every frame. Each particle
+    // re-measures at this interval instead (staggered at spawn), and a puff moves centimetres
+    // in that time.
+    float drawInterval = 0.25f;
+    // SMK-033: legacy smoke bakes the wind in at spawn. Indoors there is no wind to bake.
+    bool windOutdoorsOnly = true; //!< POSEIDON_SMOKE_WIND_INDOORS=1 restores the old behaviour
+    long long windQueries = 0;
+    long long windBlocked = 0;
     long long spawnQueries = 0;
     long long stepQueries = 0;
     long long blocked = 0;
     long long indoor = 0;
+    long long outsideChecks = 0;
+    long long blockedIn = 0;
+    long long drawQueries = 0;
+    long long drawClamped = 0;
 };
 LegacySmokeContainment& GLegacySmokeContainment();
 
