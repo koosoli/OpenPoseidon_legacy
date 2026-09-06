@@ -16,8 +16,10 @@
 // so it can increment these, and Poseidon-side consumers can read them without a
 // Poseidon -> WgpuRenderer link edge or a new Engine vtable slot.
 
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <cstdlib>
 
 #include <Poseidon/Graphics/Textures/PreparedTextures.hpp>
 #include <Poseidon/World/Terrain/ObjectStreamPrepare.hpp>
@@ -66,6 +68,59 @@ struct TextureStreamCounters
 };
 
 TextureStreamCounters& GTextureStreamCounters();
+
+// RFG-085: the residency LEVERS -- the knobs that trade visual quality or feature scope for
+// VRAM, in one place the Streaming tab can edit and the consumers read every time they
+// decide. Each is seeded from the environment variable that used to be its only control, so
+// a launch script keeps working; the panel changes the live value.
+//
+//   textureMipBias      WGR_TEXTURE_MIP_BIAS      drops the N finest mips of block-compressed
+//                                                 object textures at upload (next uploads only)
+//   ownOpaqueAlpha      POSEIDON_OWN_OPAQUE_ALPHA  RFG-075: a section whose texture carries an
+//                                                 alpha channel but is opaque-class is still
+//                                                 GPU-owned (the MatPBRMulti layer blend)
+//   skyBakeMinEnclosed  WGR_SKY_BAKE_MIN_ENCLOSED  RFG-084: a model's sky-visibility volume is
+//                                                 kept only if this fraction of voxels is enclosed
+//   skyVolumeBudgetMb   WGR_SKY_VOLUME_MB          ... and only up to this many MB in total
+struct ResidencyLevers
+{
+    int   textureMipBias = 0;
+    bool  ownOpaqueAlpha = true;
+    float skyBakeMinEnclosed = 0.02f;
+    int   skyVolumeBudgetMb = 256;
+    //   layerTintInShader   POSEIDON_LAYER_TINT_BAKED=1 turns it OFF: RFG-086, an `enft|`
+    //                                                 face texture draws through its untinted
+    //                                                 BC7 tile and the shader multiplies the
+    //                                                 layer colour, instead of a tinted RGBA8 copy
+    bool  layerTintInShader = true;
+    //   shareRetainedMeshes WGR_SHARE_RETAINED_MESHES=0 turns it OFF: RFG-088, a CPU-path
+    //                                                 vertex buffer for a level the retained
+    //                                                 path holds draws through that mesh instead
+    //                                                 of a second copy in the geometry pool
+    bool  shareRetainedMeshes = true;
+};
+
+inline ResidencyLevers& GResidencyLevers()
+{
+    static ResidencyLevers levers = []
+    {
+        ResidencyLevers l;
+        if (const char* v = std::getenv("WGR_TEXTURE_MIP_BIAS"))
+            l.textureMipBias = std::clamp(std::atoi(v), 0, 4);
+        if (const char* v = std::getenv("POSEIDON_OWN_OPAQUE_ALPHA"))
+            l.ownOpaqueAlpha = !(*v == '0');
+        if (const char* v = std::getenv("WGR_SKY_BAKE_MIN_ENCLOSED"))
+            l.skyBakeMinEnclosed = std::clamp((float)std::atof(v), 0.0f, 1.0f);
+        if (const char* v = std::getenv("WGR_SKY_VOLUME_MB"))
+            l.skyVolumeBudgetMb = std::clamp(std::atoi(v), 0, 4096);
+        if (const char* v = std::getenv("POSEIDON_LAYER_TINT_BAKED"))
+            l.layerTintInShader = (*v == '0');
+        if (const char* v = std::getenv("WGR_SHARE_RETAINED_MESHES"))
+            l.shareRetainedMeshes = !(*v == '0');
+        return l;
+    }();
+    return levers;
+}
 
 // FileCache (the synchronous file server's MRU of whole decompressed files): hits
 // share cached bytes, misses pay the open+decompress on the caller's thread -- the

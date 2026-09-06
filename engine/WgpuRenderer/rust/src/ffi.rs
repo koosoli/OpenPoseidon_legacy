@@ -3436,6 +3436,24 @@ pub unsafe extern "C" fn wgr_set_gtao_scale(renderer: *mut WgrRenderer, scale: u
     }));
 }
 
+/// RFG-085: the sky-bake gate (`Gfx3d::finish_sky_bake`): a model's sky-visibility volume is
+/// kept only when at least `min_enclosed` of its voxels see less than half the sky, and only
+/// while the kept volumes total under `budget_mb`. Seeded from WGR_SKY_BAKE_MIN_ENCLOSED /
+/// WGR_SKY_VOLUME_MB; the dev panel drives it from here.
+///
+/// # Safety
+/// `renderer` must be a live renderer handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_set_sky_bake_gate(renderer: *mut WgrRenderer, min_enclosed: f32, budget_mb: u32) {
+    if renderer.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        renderer.set_sky_bake_gate(min_enclosed, budget_mb);
+    }));
+}
+
 /// The current AO march resolution (see `wgr_set_gtao_scale`), so a dev panel can show the live
 /// value rather than a control that drifts out of sync with what the renderer is doing.
 ///

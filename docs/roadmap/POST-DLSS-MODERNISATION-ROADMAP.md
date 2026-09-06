@@ -1143,6 +1143,43 @@ Use CPU and GPU memory budgets rather than arbitrary item-count limits. Add hyst
 so assets near a boundary are not repeatedly loaded and evicted. The target is
 predictable frame time, not merely file loading on another thread.
 
+**Measured 2026-09-06 (native Everon under a stress load, RTX 3070 / 8 GB, build `49465ca9`).**
+The native loader at `POSEIDON_REFORGER_MAX_MODELS=100000` -- the owner's "load everything
+in range" stress -- dies with `Out of Memory` (+62,187 follow-on errors) and a lost device.
+Two diagnostics were lying by omission until this session, which is why the failure had been
+attributed to RFG-075 (the church-wall classification): the uncaptured-error slot kept only
+the LAST error of a poll window, and the pool/storage event rings were drained once at
+start-up. With the first error kept (RFG-082) and the rings drained every frame, the heap
+reads:
+
+| allocation | bytes | note |
+|---|---:|---|
+| geometry pool vbuf / ibuf | **4,352 / 512 MB** | doubling from 17 MB; the retired half is freed only at `clear` |
+| object textures | **4,373 MB** (2,046 textures) | 1024-class: 1,195 textures, 4,102 MB -- 3.4 MB each, so a large share are RGBA8 composites (`enfa|`, `enft|`), not BC7 |
+| `wgr_sky_volume_data` | **1,024 MB -> 256 MB** | every registered model was baked and kept at 256 KB; gated now (RFG-084/085) |
+| tracked total | 12,866 MB of a 5,612 MB budget | the native path has NO byte-driven admission at all |
+
+Done in this session: the diagnostics (RFG-082), the upload histogram split BC / RGBA8
+(RFG-083), the sky-bake gate with a dev-panel lever (RFG-084/085: 1,024 kept, 820 dropped
+as open, 656 over the 256 MB budget), and the `Streaming` tab now edits the residency
+levers live (texture mip bias, RFG-075 ownership, sky gate).
+
+Open, in the order they should be acted on:
+
+1. **The native loader needs the same byte budget the object stream has.** It places
+   157,313 objects as static landscape objects and registers models by distance up to
+   `MAX_MODELS`; nothing reads `tracked_bytes`. At the owner's play configuration (800
+   models, 300 m) the heap is fine; the stress configuration cannot be made to fit an
+   8 GB card without eviction by distance, which is this phase's item 2 applied to the
+   native path.
+2. **RGBA8 composites cost 4x.** An `enfa|` leaf composite decodes a BC7 albedo to splice
+   the coverage into alpha and is uploaded uncompressed with generated mips. Either
+   re-encode on the worker (no BC encoder in the tree today) or bind coverage as a
+   second texture and keep the BC7 albedo as-is; the histogram row says how much is at
+   stake per world.
+3. **The pool's doubling keeps the retired buffer until `clear`** -- peak is 1.5x live
+   during a grow, which on a 4 GB pool is the difference between fitting and not.
+
 ## Phase 8 — Deterministic-effects simulation task graph
 
 The whole-engine fixed step is already complete. The next simulation milestone is to

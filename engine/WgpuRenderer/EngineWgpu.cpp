@@ -1,3 +1,4 @@
+#include <Poseidon/Dev/Diag/StreamingDiag.hpp> // RFG-085 residency levers
 #include <Poseidon/Dev/Diag/FixedStepStats.hpp> // REN-THR-004: ticks per frame beside the frame hash
 #include "EngineWgpu.hpp"
 #include <atomic>
@@ -848,6 +849,13 @@ class VertexBufferWgpu : public VertexBuffer
         // strictly better than fulfilling it and then destroying it: no pool allocation, no
         // bind-cache clear, no generation bump for a mesh nobody can name any more.
         slot->dead = true;
+        if (slot->sharedProducer != 0 && !slot->ownsShared)
+        {
+            // RFG-088: the retained model owns the pool allocation; nothing to destroy here.
+            std::vector<SVertex>().swap(slot->verts);
+            std::vector<VertexIndex>().swap(slot->indices);
+            return;
+        }
         if (slot->renderer == 0)
         {
             std::vector<SVertex>().swap(slot->verts);
@@ -882,6 +890,12 @@ class VertexBufferWgpu : public VertexBuffer
     {
         if (skinned || !renderer || !slot)
         {
+            return;
+        }
+        if (slot->sharedProducer != 0)
+        {
+            // RFG-088: the bytes are the retained model's; a static level never changes them.
+            bufferDirty = false;
             return;
         }
         // Skip when the geometry hasn't changed since it was last made current. bufferDirty
@@ -956,6 +970,16 @@ class VertexBufferWgpu : public VertexBuffer
     // and weights, marking the mesh eligible for the skinned pipeline.
     void SetSkinData(const AnimationRTWeights& weightTable, const Shape& bindShape) override
     {
+        if (slot && slot->sharedProducer != 0)
+        {
+            // RFG-088: skinning rewrites the mesh, and this one belongs to the retained model.
+            // Retained registration refuses non-static objects, so a shared level is a static
+            // one and this should not be reached; logged rather than assumed.
+            static std::atomic<uint32_t> logged{0};
+            if (logged.fetch_add(1, std::memory_order_relaxed) < 4)
+                LOG_WARN(Graphics, "Wgpu: SetSkinData on a buffer sharing a retained mesh -- skin ignored");
+            return;
+        }
         if (skinned || !renderer || !slot || bindShape.NVertex() != vertexCount)
         {
             return;
@@ -2134,6 +2158,19 @@ void EngineWgpu::ApplyPendingRendererSettings(PendingRendererSettings& p)
         wgr_set_lens_flare(_renderer, p.lensFlare);
         p.skyScalarsDirty = false;
     }
+    {
+        // RFG-085: the sky-bake gate follows the Streaming tab's levers. Pushed only when a
+        // value changed, so the steady state costs one comparison per frame.
+        const Poseidon::Dev::ResidencyLevers& levers = Poseidon::Dev::GResidencyLevers();
+        static float lastMinEnclosed = -1.0f;
+        static int   lastBudgetMb = -1;
+        if (levers.skyBakeMinEnclosed != lastMinEnclosed || levers.skyVolumeBudgetMb != lastBudgetMb)
+        {
+            lastMinEnclosed = levers.skyBakeMinEnclosed;
+            lastBudgetMb = levers.skyVolumeBudgetMb;
+            wgr_set_sky_bake_gate(_renderer, lastMinEnclosed, static_cast<uint32_t>(std::max(lastBudgetMb, 0)));
+        }
+    }
     // PERF-022
     if (p.planarPadDirty)
     {
@@ -2187,6 +2224,35 @@ void EngineWgpu::EnqueueInstanceRemove(uint32_t handle)
     _instFreeHandles.push_back(handle);
 }
 
+
+// RFG-087: what fills the geometry pool, by producer. A pool that grows to 2,176 MB on a
+// world with 800 retained models is not being filled by those models -- and the retained
+// registration is the only place anyone had been looking. Counted at the drain, where every
+// wgr_mesh_create passes, in the two kinds the drain distinguishes: the retained model path
+// (MeshCreate) and the CPU direct path's vertex buffers (CpuMeshCreate), which every shape
+// the direct path draws creates, per LOD, whether or not it was ever "registered".
+namespace
+{
+struct GeometryPoolFill
+{
+    // 0 = retained model meshes, 1 = direct-path buffers with their own pool bytes,
+    // 2 = direct-path buffers SHARING a retained mesh (RFG-088): bytes not spent.
+    std::atomic<uint64_t> count[3]{};
+    std::atomic<uint64_t> bytes[3]{};
+    std::atomic<uint64_t> largest[3]{};
+    void Note(int kind, uint64_t b)
+    {
+        count[kind].fetch_add(1, std::memory_order_relaxed);
+        bytes[kind].fetch_add(b, std::memory_order_relaxed);
+        uint64_t seen = largest[kind].load(std::memory_order_relaxed);
+        while (b > seen && !largest[kind].compare_exchange_weak(seen, b, std::memory_order_relaxed))
+        {
+        }
+    }
+};
+GeometryPoolFill GGeometryPoolFill;
+} // namespace
+
 void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
 {
     if (ops.empty())
@@ -2216,6 +2282,7 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
             _meshIdOf[op.mesh] = wgr_mesh_create(
                 _renderer, AsMeshVerts(op.verts),
                 WgrSlice<uint32_t>{reinterpret_cast<const uint32_t*>(op.indices.data()), U32(op.indices.size())});
+            GGeometryPoolFill.Note(0, op.verts.size() * sizeof(SVertex) + op.indices.size() * sizeof(uint32_t));
             break;
         }
         case ResourceOp::MeshDestroy:
@@ -2223,7 +2290,22 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
             const auto it = _meshIdOf.find(op.mesh);
             if (it != _meshIdOf.end())
             {
-                wgr_mesh_destroy(_renderer, it->second);
+                // RFG-088: a CPU buffer still drawing through this mesh takes it over; the
+                // allocation dies with that buffer instead (VertexBufferWgpu's destructor).
+                bool handedOver = false;
+                if (const auto sh = _sharedSlotOf.find(op.mesh); sh != _sharedSlotOf.end())
+                {
+                    if (std::shared_ptr<CpuMeshSlot> slot = sh->second.lock(); slot && !slot->dead && slot->renderer != 0)
+                    {
+                        slot->ownsShared = true;
+                        handedOver = true;
+                    }
+                    _sharedSlotOf.erase(sh);
+                }
+                if (!handedOver)
+                {
+                    wgr_mesh_destroy(_renderer, it->second);
+                }
                 _meshIdOf.erase(it);
             }
             break;
@@ -2237,6 +2319,23 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
             {
                 break;
             }
+            if (op.cpu->sharedProducer != 0)
+            {
+                // RFG-088: draw through the retained mesh if it still exists; its create
+                // was queued before this one, so `_meshIdOf` already names it.
+                if (const auto shared = _meshIdOf.find(op.cpu->sharedProducer); shared != _meshIdOf.end())
+                {
+                    op.cpu->renderer = shared->second;
+                    GGeometryPoolFill.Note(2, op.cpu->verts.size() * sizeof(SVertex) +
+                                                  op.cpu->indices.size() * sizeof(uint32_t));
+                    std::vector<SVertex>().swap(op.cpu->verts);
+                    std::vector<VertexIndex>().swap(op.cpu->indices);
+                    break;
+                }
+                _sharedSlotOf.erase(op.cpu->sharedProducer);
+                op.cpu->sharedProducer = 0; // the retained mesh is gone: own copy after all
+            }
+            GGeometryPoolFill.Note(1, op.cpu->verts.size() * sizeof(SVertex) + op.cpu->indices.size() * sizeof(uint32_t));
             op.cpu->renderer =
                 wgr_mesh_create(_renderer, AsMeshVerts(op.cpu->verts),
                                 WgrSlice<uint32_t>{reinterpret_cast<const uint32_t*>(op.cpu->indices.data()),
@@ -3733,6 +3832,21 @@ VertexBuffer* EngineWgpu::CreateVertexBuffer(const Shape& src, VBType type)
     slot->producer = _nextMeshHandle++; // one handle space with the retained meshes
     slot->verts = std::move(verts);
     slot->indices = std::move(indices);
+    // RFG-088: a STATIC buffer for a level the retained path already holds draws through that
+    // mesh. Measured on native Everon at 800 retained models: the retained meshes were 759 MB
+    // and the direct-path buffers 880 MB of the same pool, the largest mesh 12.9 MB on both
+    // sides -- every Partial building (interior proxies, a glass complement) uploaded its
+    // LODs twice, and the pool grew to 2,176 MB, which is the allocation the device refused.
+    // The vertices are still built here: if the retained mesh is gone by the time the drain
+    // runs, the slot falls back to its own copy (drain, CpuMeshCreate).
+    if (type != VBDynamic && type != VBSmallDiscardable && Poseidon::Dev::GResidencyLevers().shareRetainedMeshes)
+    {
+        if (const auto shared = _retainedMeshOfLevel.find(&src); shared != _retainedMeshOfLevel.end())
+        {
+            slot->sharedProducer = shared->second;
+            _sharedSlotOf[shared->second] = slot;
+        }
+    }
     {
         ResourceOp op;
         op.kind = ResourceOp::CpuMeshCreate;
@@ -7243,6 +7357,12 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
         }
         _gpuMeshes.insert(mesh);
         modelMeshes.push_back(mesh);
+        // RFG-088: this level's retained mesh holds exactly the bytes CreateVertexBuffer
+        // would build for it, unless it was conformed (BuildOrigVertices) or crown-patched.
+        if (!isForest && !(levelConform && s->OriginalPosValid()))
+        {
+            _retainedMeshOfLevel[s] = mesh;
+        }
         if (render::GObjectAdmitProfile.active)
             ++render::GObjectAdmitProfile.meshes;
         AutoArray<render::mesh::MeshSection> secs;
@@ -8181,6 +8301,13 @@ uint32_t EngineWgpu::DestroyGpuModelMeshes(const LODShapeWithShadow* shape)
     uint32_t releasedMeshes = 0;
     if (const auto found = _gpuModelMeshes.find(shape); found != _gpuModelMeshes.end())
     {
+        // RFG-088: the level entries that named these meshes go first, so a CPU buffer created
+        // from now on builds its own copy rather than sharing a mesh that is being destroyed.
+        for (auto it = _retainedMeshOfLevel.begin(); it != _retainedMeshOfLevel.end();)
+        {
+            const bool gone = std::find(found->second.begin(), found->second.end(), it->second) != found->second.end();
+            it = gone ? _retainedMeshOfLevel.erase(it) : std::next(it);
+        }
         for (uint64_t mesh : found->second)
         {
             // Same scripted insertion broke this brace-less if: the counter became the
@@ -9630,6 +9757,14 @@ void EngineWgpu::LogObjectPerfRow()
     if (_opsFrames > 0)
     {
         const auto mean = [&](uint32_t total) { return static_cast<double>(total) / _opsFrames; };
+        LOG_INFO(Graphics,
+         "Geometry pool fill (cumulative): retained models {} meshes {:.0f} MB (largest {:.1f} MB) | direct-path "
+                 "buffers {} meshes {:.0f} MB (largest {:.1f} MB) | shared with a retained mesh {} buffers, {:.0f} MB "
+                 "not spent",
+                 GGeometryPoolFill.count[0].load(), GGeometryPoolFill.bytes[0].load() / 1048576.0,
+                 GGeometryPoolFill.largest[0].load() / 1048576.0, GGeometryPoolFill.count[1].load(),
+                 GGeometryPoolFill.bytes[1].load() / 1048576.0, GGeometryPoolFill.largest[1].load() / 1048576.0,
+                 GGeometryPoolFill.count[2].load(), GGeometryPoolFill.bytes[2].load() / 1048576.0);
         LOG_INFO(Graphics,
                  "Renderer mutation ops over {} frames -- mean/peak: inst add={:.2f}/{} update={:.2f}/{} "
                  "remove={:.2f}/{} | mesh create={:.2f}/{} destroy={:.2f}/{} | model reg={:.2f}/{} | "

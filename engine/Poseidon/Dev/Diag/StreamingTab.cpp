@@ -43,6 +43,47 @@ void DrawStreamingTab()
 {
     const StreamingSnapshot s = CollectStreamingSnapshot();
 
+    // RFG-085: the levers that trade quality or scope for VRAM, live. Each is seeded from the
+    // environment variable named in its tooltip; the panel edits the running value.
+    PanelHeading("Residency levers");
+    PanelHelp("what to give up when the card is full; every one of these ships ON or 0 by default");
+    ResidencyLevers& levers = GResidencyLevers();
+    ImGui::SetNextItemWidth(160.0f);
+    ImGui::SliderInt("texture mip bias", &levers.textureMipBias, 0, 4);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("WGR_TEXTURE_MIP_BIAS. Drops the N finest mip levels of every block-compressed\n"
+                          "object texture at UPLOAD: 1 = quarter the bytes, half the resolution.\n"
+                          "Applies to textures uploaded from now on; reload the world for all of them.");
+    Checkbox("own opaque-class sections with an alpha channel (RFG-075)", &levers.ownOpaqueAlpha);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("POSEIDON_OWN_OPAQUE_ALPHA. Every Reforger BCR carries alpha (roughness); with this\n"
+                          "off those sections fall back to the per-draw path, which has no layer blend --\n"
+                          "church walls go flat -- but registers less geometry in the pool.");
+    Checkbox("layer tint in the shader, not baked into RGBA8 copies (RFG-086)", &levers.layerTintInShader);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("POSEIDON_LAYER_TINT_BAKED=1 turns this off. An enft| face texture draws through its\n"
+                          "shared BC7 tile and the shader multiplies the layer colour. Baked: one tinted RGBA8\n"
+                          "copy per (colour, tile) pair -- measured 3,480 MB for 671 of them on Everon.\n"
+                          "Applies to textures first drawn from now on; reload the world for all of them.");
+    Checkbox("CPU-path buffers share the retained model's mesh (RFG-088)", &levers.shareRetainedMeshes);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("WGR_SHARE_RETAINED_MESHES=0 turns this off. A Partial model (interior proxies, a glass\n"
+                          "complement) draws its LODs on both paths; without sharing each LOD sits in the pool\n"
+                          "twice -- measured 759 MB retained + 880 MB direct on Everon at 800 models.\n"
+                          "Applies to buffers created from now on.");
+    ImGui::SetNextItemWidth(160.0f);
+    ImGui::SliderFloat("sky bake: min enclosed", &levers.skyBakeMinEnclosed, 0.0f, 0.5f, "%.2f");
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("WGR_SKY_BAKE_MIN_ENCLOSED. A model's sky-visibility volume (256 KB) is kept only\n"
+                          "when this fraction of its voxels sees less than half the sky. 0 keeps every\n"
+                          "volume, including a tree's, which reads as 'sky fully visible' anyway.");
+    ImGui::SetNextItemWidth(160.0f);
+    ImGui::SliderInt("sky bake: budget MB", &levers.skyVolumeBudgetMb, 0, 2048);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("WGR_SKY_VOLUME_MB. Total bytes of kept volumes; bakes past it are dropped.\n"
+                          "Measured: 1,024 MB before the gate on a 100k-model Everon, 256 MB after.");
+    ImGui::Spacing();
+
     PanelHeading("Texture uploads");
     PanelHelp("cumulative; WGR_TEXTURE_STREAM_STATS=0 disables the timing half");
     if (ImGui::BeginTable("tex", 2, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg))

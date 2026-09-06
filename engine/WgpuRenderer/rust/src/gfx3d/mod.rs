@@ -3537,6 +3537,20 @@ pub struct Gfx3d {
     // Rebuilt when a new model bakes, which is a load-time event, not a per-frame one.
     sky_volume_meta: StorageArray,
     sky_volume_data: StorageArray,
+    /// RFG-084: what the bake gate decided, for the log. Every registered model was baked
+    /// and every bake was KEPT -- 16,384 voxels x 16 bytes = 256 KB each -- so a 100k-model
+    /// Everon put `wgr_sky_volume_data` at 1,024 MB on an 8 GB card, one eighth of the heap
+    /// for volumes that mostly said "the sky is fully visible here" (a tree, a fence, a
+    /// rock). Kept: volumes that enclose something; dropped: the open ones, and anything
+    /// past the byte budget.
+    sky_bakes_kept: u32,
+    sky_bakes_dropped_open: u32,
+    sky_bakes_dropped_budget: u32,
+    sky_bake_bytes: u64,
+    /// RFG-085: the gate's two knobs, set from C++ (`wgr_set_sky_bake_gate`); the
+    /// environment seeds them at construction so a launch script still works.
+    sky_gate_min_enclosed: f32,
+    sky_gate_budget_bytes: u64,
     sky_volumes_dirty: bool,
     // Depth ARRAY: one layer per sampled sky direction. (texture, per-layer render views,
     // the D2Array view the shader samples).
@@ -4315,6 +4329,19 @@ impl Gfx3d {
             staging_refusals: FxHashMap::default(),
             sky_volume_meta: StorageArray::new("wgr_sky_volume_meta"),
             sky_volume_data: StorageArray::new("wgr_sky_volume_data"),
+            sky_bakes_kept: 0,
+            sky_bakes_dropped_open: 0,
+            sky_bakes_dropped_budget: 0,
+            sky_bake_bytes: 0,
+            sky_gate_min_enclosed: std::env::var("WGR_SKY_BAKE_MIN_ENCLOSED")
+                .ok()
+                .and_then(|v| v.parse::<f32>().ok())
+                .unwrap_or(0.02),
+            sky_gate_budget_bytes: std::env::var("WGR_SKY_VOLUME_MB")
+                .ok()
+                .and_then(|v| v.parse::<u64>().ok())
+                .unwrap_or(256)
+                * 1_048_576,
             sky_volumes_dirty: false,
             interior_sky_target: None,
             interior_sky_gen: 0,
@@ -7643,8 +7670,43 @@ impl Gfx3d {
         // indistinguishable from a working one downstream — the same failure mode the per-frame
         // map's coverage check exists for. `enclosed` is the fraction of voxels that see less
         // than half the sky; a building with any interior must have some.
+        let enclosed = vis.iter().filter(|v| v[3] < 0.5).count() as f32 / vis.len() as f32;
+        // RFG-084: the gate. An open volume is one the shader would read as "no volume" --
+        // every voxel sees the sky -- so dropping it changes nothing on screen and saves its
+        // 256 KB. The floor and the budget are both overridable, and the decision is counted
+        // so the summary line below can say what was kept.
+        //   WGR_SKY_BAKE_MIN_ENCLOSED   fraction of voxels seeing < half the sky (default 0.02)
+        //   WGR_SKY_VOLUME_MB           byte budget for all kept volumes (default 256)
+        let min_enclosed = self.sky_gate_min_enclosed;
+        let budget_bytes = self.sky_gate_budget_bytes;
+        let bytes = (vis.len() * 16) as u64;
+        let verdict = if enclosed < min_enclosed {
+            self.sky_bakes_dropped_open += 1;
+            false
+        } else if self.sky_bake_bytes + bytes > budget_bytes {
+            self.sky_bakes_dropped_budget += 1;
+            false
+        } else {
+            self.sky_bakes_kept += 1;
+            self.sky_bake_bytes += bytes;
+            true
+        };
+        let decided = self.sky_bakes_kept + self.sky_bakes_dropped_open + self.sky_bakes_dropped_budget;
+        if decided % 500 == 0 || (self.sky_bakes_dropped_budget == 1 && !verdict) {
+            self.queued_log.push(format!(
+                "[wgr] sky bake gate: {} kept ({:.1} MB), {} dropped as open (< {:.0}% enclosed), {} dropped over the {} MB budget",
+                self.sky_bakes_kept,
+                self.sky_bake_bytes as f64 / 1048576.0,
+                self.sky_bakes_dropped_open,
+                min_enclosed * 100.0,
+                self.sky_bakes_dropped_budget,
+                budget_bytes / 1_048_576,
+            ));
+        }
+        if !verdict {
+            return;
+        }
         if self.sky_volumes.len() < 8 {
-            let enclosed = vis.iter().filter(|v| v[3] < 0.5).count() as f32 / vis.len() as f32;
             let mean = vis.iter().map(|v| v[3]).sum::<f32>() / vis.len() as f32;
             // Queued rather than printed: Gfx3d has no log sink, and eprintln! never reaches
             // --log-file, so a diagnostic written that way is missing exactly when it is read.
@@ -8716,6 +8778,13 @@ impl Gfx3d {
     /// and past that the denoise can no longer reconstruct a contact shadow it never sampled.
     pub fn set_gtao_scale(&mut self, scale: u32) {
         self.gtao_scale = scale.clamp(1, 2);
+    }
+
+    /// RFG-085: the sky-bake gate's knobs (see `finish_sky_bake`). Applies to bakes that
+    /// finish after the call; volumes already kept stay until the next world load.
+    pub fn set_sky_bake_gate(&mut self, min_enclosed: f32, budget_mb: u32) {
+        self.sky_gate_min_enclosed = min_enclosed.clamp(0.0, 1.0);
+        self.sky_gate_budget_bytes = budget_mb as u64 * 1_048_576;
     }
 
     pub fn gtao_debug_on(&self) -> bool {

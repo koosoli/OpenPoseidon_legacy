@@ -2391,6 +2391,13 @@ WGR_API void wgr_set_render_params(WgrRenderer* renderer, const WgrRenderParams*
     WGR_API void wgr_set_gtao_scale(WgrRenderer* renderer, uint32_t scale);
     WGR_API uint32_t wgr_get_gtao_scale(const WgrRenderer* renderer);
 
+    /* RFG-085: the sky-bake gate. A model's baked sky-visibility volume (256 KB each) is kept
+       only when at least `min_enclosed` of its voxels see less than half the sky -- an open
+       volume reads as "no volume" in the shader -- and only while the kept total is under
+       `budget_mb`. Measured on a 100k-model Everon: 1,024 MB of volumes before the gate,
+       256 MB after (1,024 kept, 820 open, 656 over budget). */
+    WGR_API void wgr_set_sky_bake_gate(WgrRenderer* renderer, float min_enclosed, uint32_t budget_mb);
+
     /* CLD-020: strength of the cloud shadow the deck casts on terrain, objects, grass and water.
        0 = off (every surface reads fully lit); 1 = the full computed transmittance. Its own entry
        point rather than a field in WgrSkyLook, because growing that struct changes a size the ABI

@@ -29,6 +29,9 @@ class TextureWgpu : public Texture
     PacLevelMem _mipmaps[MAX_MIPMAPS];
 
     uint64_t _gpuHandle = 0;
+    /// RFG-086: for an `enft|r,g,b|inner` name, the INNER texture this one draws through
+    /// instead of uploading a tinted RGBA8 copy of it. See EnsureUploaded.
+    Ref<Texture> _tintDelegate;
     uint64_t _lastUsedFrame = 0;
     uint32_t _residentPins = 0;
     // REN-RES-001: the bindless slot this texture's uploads occupy, reserved for the

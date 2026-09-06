@@ -2,6 +2,7 @@
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Dev/Diag/ScopedTimer.hpp>
+#include <Poseidon/Dev/Diag/StreamingDiag.hpp> // RFG-085 residency levers
 #include <Poseidon/Foundation/Threads/ThreadAffinity.hpp>
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
@@ -234,15 +235,12 @@ bool SectionGpuOwned(const ShapeSectionInfo& sec)
     // agree on how it looks. Owning it changes which shader draws it, not what it draws.
     if (tex->GetAlphaClass() == Poseidon::AlphaStats::Opaque)
     {
-        // A/B lever while the retained pool's capacity is being measured: the first run
-        // with this rule on grew `wgr_geo_pool_vbuf` past what the device would give and
-        // the buffer went invalid. POSEIDON_OWN_OPAQUE_ALPHA=0 restores the old refusal.
-        static const bool ownOpaque = []
-        {
-            const char* v = std::getenv("POSEIDON_OWN_OPAQUE_ALPHA");
-            return !(v != nullptr && *v == '0');
-        }();
-        if (ownOpaque)
+        // RFG-085: a live lever (Streaming tab), seeded from POSEIDON_OWN_OPAQUE_ALPHA=0 for
+        // the old refusal. The run that first grew `wgr_geo_pool_vbuf` past the device with
+        // this rule on was a 100k-model stress load, not this rule: measured with the first
+        // error kept (RFG-082), the heap was 4.4 GB of pool, 4.4 GB of textures and 1 GB of
+        // sky volumes before any of these sections registered.
+        if (Poseidon::Dev::GResidencyLevers().ownOpaqueAlpha)
             return true;
     }
     // Blend histogram: owned when the material AUTHORS a cutout or an opaque route (TreeAdv leaf

@@ -86,6 +86,12 @@ struct CpuMeshSlot
     // same frame (ObjectClasses.cpp's gpuConform block depends on it), and it still does.
     std::vector<SVertex> verts;
     std::vector<VertexIndex> indices;
+    // RFG-088: when non-zero, this buffer DRAWS THROUGH the retained model's mesh for the same
+    // LOD instead of owning a second copy of the same vertices in the pool. `ownsShared` flips
+    // on if the retained model is released first: the pool allocation then belongs to this
+    // slot and dies with it. See EngineWgpu::CreateVertexBuffer.
+    uint64_t sharedProducer = 0;
+    bool ownsShared = false;
 };
 
 // REN-THR-011 -- the back edge a CPU-path vertex buffer needs and must not own outright.
@@ -776,6 +782,14 @@ class EngineWgpu : public EngineDummy
     // the expensive pool meshes and textures are released when the last streamed
     // instance leaves the working set, then rebuilt if that shape returns.
     std::unordered_map<const LODShapeWithShadow*, std::vector<uint64_t>> _gpuModelMeshes;
+    // RFG-088: level Shape -> the retained mesh (producer handle) built from exactly the
+    // vertices CreateVertexBuffer would build, so a CPU-path buffer for that level can share
+    // it. Conform levels (BuildOrigVertices) and forest levels (crown-patched conform words)
+    // are NOT entered: their retained bytes differ from the CPU build.
+    std::unordered_map<const Shape*, uint64_t> _retainedMeshOfLevel;
+    // RFG-088: producer mesh -> the CPU slot drawing through it, for the ownership hand-over
+    // at MeshDestroy.
+    std::unordered_map<uint64_t, std::weak_ptr<CpuMeshSlot>> _sharedSlotOf;
     std::unordered_map<const LODShapeWithShadow*, std::vector<TextureWgpu*>> _gpuModelTextures;
     std::unordered_map<const LODShapeWithShadow*, uint32_t> _gpuModelRefs;
     void RetainGpuModel(const LODShapeWithShadow* shape);

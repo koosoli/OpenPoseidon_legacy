@@ -6147,6 +6147,10 @@ impl Renderer {
         self.gfx3d.set_gtao_scale(scale);
     }
 
+    fn set_sky_bake_gate(&mut self, min_enclosed: f32, budget_mb: u32) {
+        self.gfx3d.set_sky_bake_gate(min_enclosed, budget_mb);
+    }
+
     fn gtao_scale(&self) -> u32 {
         self.gfx3d.gtao_scale()
     }

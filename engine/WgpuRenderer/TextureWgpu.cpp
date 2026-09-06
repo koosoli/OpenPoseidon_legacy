@@ -836,14 +836,18 @@ Poseidon::Dev::TextureStreamCounters& GTextureStreamStats = Poseidon::Dev::GText
 namespace
 {
 constexpr int          kUploadBuckets = 6; // <=256, 512, 1024, 2048, 4096, >4096
-std::atomic<uint64_t>  GUploadBucketCount[kUploadBuckets];
-std::atomic<uint64_t>  GUploadBucketBytes[kUploadBuckets];
-void NoteUploadSize(int w, int h, uint64_t bytes)
+// Two rows: block-compressed uploads and RGBA8 ones, because they differ 4x in bytes at
+// the same size and the fix differs too (a BC texture's answer is a mip bias, an RGBA one's
+// is to stop uploading it uncompressed).
+std::atomic<uint64_t>  GUploadBucketCount[2][kUploadBuckets];
+std::atomic<uint64_t>  GUploadBucketBytes[2][kUploadBuckets];
+void NoteUploadSize(int w, int h, uint64_t bytes, bool blockCompressed)
 {
     const int side = std::max(w, h);
     const int b = side <= 256 ? 0 : side <= 512 ? 1 : side <= 1024 ? 2 : side <= 2048 ? 3 : side <= 4096 ? 4 : 5;
-    GUploadBucketCount[b].fetch_add(1, std::memory_order_relaxed);
-    GUploadBucketBytes[b].fetch_add(bytes, std::memory_order_relaxed);
+    const int row = blockCompressed ? 0 : 1;
+    GUploadBucketCount[row][b].fetch_add(1, std::memory_order_relaxed);
+    GUploadBucketBytes[row][b].fetch_add(bytes, std::memory_order_relaxed);
 }
 } // namespace
 
@@ -851,13 +855,17 @@ std::string TextureUploadHistogramLine()
 {
     static const char* names[kUploadBuckets] = {"<=256", "512", "1024", "2048", "4096", ">4096"};
     std::string        out = "object texture uploads by size (count / MB):";
-    for (int b = 0; b < kUploadBuckets; b++)
+    for (int row = 0; row < 2; row++)
     {
-        char buf[64];
-        std::snprintf(buf, sizeof(buf), " %s=%llu/%.0f", names[b],
-                      (unsigned long long)GUploadBucketCount[b].load(std::memory_order_relaxed),
-                      GUploadBucketBytes[b].load(std::memory_order_relaxed) / 1048576.0);
-        out += buf;
+        out += row == 0 ? " BC:" : " | RGBA8:";
+        for (int b = 0; b < kUploadBuckets; b++)
+        {
+            char buf[64];
+            std::snprintf(buf, sizeof(buf), " %s=%llu/%.0f", names[b],
+                          (unsigned long long)GUploadBucketCount[row][b].load(std::memory_order_relaxed),
+                          GUploadBucketBytes[row][b].load(std::memory_order_relaxed) / 1048576.0);
+            out += buf;
+        }
     }
     return out;
 }
@@ -1443,15 +1451,10 @@ Color TextureWgpu::GetPixel(int level, float u, float v) const
 // Until the Rust side moves, this bounds the demand instead of improving the supply.
 int TextureMipBias()
 {
-    static const int bias = []
-    {
-        const char* v = std::getenv("WGR_TEXTURE_MIP_BIAS");
-        const int parsed = v ? std::atoi(v) : 0;
-        // Clamped: a bias large enough to consume the whole chain would leave nothing to
-        // upload, and the floor below keeps at least one level regardless.
-        return parsed > 0 ? std::min(parsed, 4) : 0;
-    }();
-    return bias;
+    // RFG-085: a live lever (Streaming tab), seeded from WGR_TEXTURE_MIP_BIAS. Clamped: a
+    // bias large enough to consume the whole chain would leave nothing to upload, and the
+    // floor below keeps at least one level regardless.
+    return std::clamp(Poseidon::Dev::GResidencyLevers().textureMipBias, 0, 4);
 }
 
 uint64_t TextureWgpu::EnsureUploaded()
@@ -1459,6 +1462,47 @@ uint64_t TextureWgpu::EnsureUploaded()
     if (_bank)
     {
         _bank->NoteTextureUse(this);
+    }
+    // RFG-086: an `enft|r,g,b|inner` face texture draws through its INNER image.
+    //
+    // The tint used to be BAKED: DdsImport decoded the BC7 tile, multiplied it, and the
+    // result went to the GPU as RGBA8 with generated mips -- 5.6 MB for a 1024^2 tile that
+    // is 1.4 MB as BC7, and one such copy per (tint, tile) pair, because every wall colour
+    // is its own name. Measured on native Everon at the owner's play configuration (800
+    // models, 300 m) once RFG-075 sent the MatPBRMulti walls down the retained path:
+    // 671 RGBA8 textures of the 1024 class, 3,480 MB, against 635 MB for the 514 BC7 ones
+    // -- and a lost device at 7.5 GB tracked on an 8 GB card.
+    //
+    // The retained path already carries the same colour as `layer_colour[0]` (RFG-072) and
+    // multiplies it in the shader, so for it the bake was not just 4x the bytes, it was the
+    // tint applied TWICE on every `enft|enfa|...` composite. Delegating to the inner name
+    // keeps the shared BC7 tile shared and lets the shader do the one multiply. The
+    // direct (per-draw) path has no layer colour and draws these untinted now; RFG-075
+    // leaves it almost nothing of this family, and POSEIDON_LAYER_TINT_BAKED=1 (or the
+    // Streaming tab) restores the bake for an A/B.
+    if (_tintDelegate)
+    {
+        auto* inner = static_cast<TextureWgpu*>(_tintDelegate.GetRef());
+        return inner ? inner->EnsureUploaded() : 0;
+    }
+    if (_bank && !_uploadTried && Poseidon::Dev::GResidencyLevers().layerTintInShader)
+    {
+        const char* innerName = nullptr;
+        float       rgb[3];
+        if (Poseidon::Enfusion::SplitLayerTintName(Name(), rgb, &innerName) && innerName != nullptr &&
+            *innerName != '\0')
+        {
+            Ref<Texture> inner = _bank->Load(innerName);
+            if (inner && inner.GetRef() != this)
+            {
+                _tintDelegate = inner;
+                static std::atomic<uint32_t> delegated{0};
+                if (delegated.fetch_add(1, std::memory_order_relaxed) < 4)
+                    LOG_INFO(Graphics, "Wgpu texture: layer tint in shader -- '{}' draws through '{}'", Name(),
+                             innerName);
+                return static_cast<TextureWgpu*>(inner.GetRef())->EnsureUploaded();
+            }
+        }
     }
     if (_gpuHandle || _uploadTried)
     {
@@ -1645,7 +1689,7 @@ uint64_t TextureWgpu::EnsureUploaded()
                                                     static_cast<uint32_t>(levelCount), 0, blocks.data(),
                                                     static_cast<uint32_t>(blocks.size()), AcquireSlotLease());
             if (_gpuHandle)
-                NoteUploadSize(_w, _h, blocks.size());
+                NoteUploadSize(_w, _h, blocks.size(), true);
             if (timed)
             {
                 const uint64_t createDelta = NowUs() - createBegan;
@@ -1707,7 +1751,7 @@ uint64_t TextureWgpu::EnsureUploaded()
             {
                 _w = prepared.width;
                 _h = prepared.height;
-                NoteUploadSize(_w, _h, prepared.rgba.size() * 4 / 3); // with generated mips
+                NoteUploadSize(_w, _h, prepared.rgba.size() * 4 / 3, false); // with generated mips
                 GTextureStreamStats.frameUploadBytes.fetch_add(prepared.rgba.size(), std::memory_order_relaxed);
                 if (timed)
                     GTextureStreamStats.preparedHits.fetch_add(1, std::memory_order_relaxed);
@@ -1743,7 +1787,7 @@ uint64_t TextureWgpu::EnsureUploaded()
                 _gpuHandle = wgr_texture_create_in_slot(
                     r, static_cast<uint32_t>(_w), static_cast<uint32_t>(_h), WGR_TEXTURE_RGBA8, 1,
                     WGR_TEXTURE_GEN_MIPS, pixels.data(), static_cast<uint32_t>(pixels.size()), AcquireSlotLease());
-                NoteUploadSize(_w, _h, pixels.size() * 4 / 3);
+                NoteUploadSize(_w, _h, pixels.size() * 4 / 3, false);
                 GTextureStreamStats.frameUploadBytes.fetch_add(pixels.size(), std::memory_order_relaxed);
             }
         }
@@ -1762,7 +1806,7 @@ uint64_t TextureWgpu::EnsureUploaded()
                     WGR_TEXTURE_GEN_MIPS, img.rgba.data(), static_cast<uint32_t>(img.rgba.size()), AcquireSlotLease());
                 _w = img.width;
                 _h = img.height;
-                NoteUploadSize(_w, _h, img.rgba.size() * 4 / 3);
+                NoteUploadSize(_w, _h, img.rgba.size() * 4 / 3, false);
                 GTextureStreamStats.frameUploadBytes.fetch_add(img.rgba.size(), std::memory_order_relaxed);
             }
         }

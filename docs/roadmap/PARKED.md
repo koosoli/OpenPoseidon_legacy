@@ -41,6 +41,10 @@ six of the eight formats already have engine-side readers, two of them (`.edds`,
 are already wired into the runtime, and exactly one reader (the `.et` prefab graph, ~100
 lines) is missing engine-side. Plan and sizing in `RFG-002`; steps 1 and 2 are independent
 and carry no runtime risk when someone picks it up.
+**Un-parked 2026-09-01 by the owner** ("reforger Karte muss geladen werden können ohne
+Konvertierung"): the native loader is live work on `asset-obs-001` (RFG-0xx series in the
+code -- roads, rotation, doors/windows, clutter, layer tint, church walls, café Things). The
+converted map is a source of solved sub-problems, not the quality bar.
 
 ### EFX reverb environments
 **Parked 2026-08-30 by the owner** after an A/B: *"klingt nicht richtig und nicht gut"*.
