@@ -2334,7 +2334,7 @@ class Engine : public IGraphicsEngine
         float waveAmp = 1.00f;       // authored reference amplitude (was a calmer 0.40 default)
         float waveChoppy = 1.0f;     // 1 = reference horizontal displacement
         float waveSpeed = 1.0f;      // 1 = reference dispersion time
-        float waveScale = 1.0f;      // 1 = reference cascade wavelengths
+        float waveScale = 0.65f;     // owner default 2026-09-06 (was 1.0 = reference cascade wavelengths)
         // Distance detail LOD: wave detail flattens between these (metres), killing the
         // far-field moiré / repetition — past fadeEnd the water is a smooth horizon mirror.
         float fadeStart = 589.0f;
@@ -2346,7 +2346,7 @@ class Engine : public IGraphicsEngine
         // playable world, which breaks the period without disturbing the wave shape. 0 reproduces
         // the reference project's exact sampling (and its tiling); a few metres is enough.
         float warpAmp = 5.0f;
-        float specPower = 11.0f;     // sun-glint sharpness
+        float specPower = 140.0f;    // sun-glint sharpness (owner default 2026-09-06, was 11)
         float specIntensity = 3.82f; // sun-glint brightness (HDR, blooms)
         float alpha = 1.00f;         // base opacity (Fresnel raises it toward 1 at grazing angles)
         // Sun shadow: terrain heightfield + CSM occlusion removes the sun glint and

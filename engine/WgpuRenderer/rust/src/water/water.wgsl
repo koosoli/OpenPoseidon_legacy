@@ -65,7 +65,7 @@ struct WaterParams {
     optics_params: vec4<f32>,
     // WRL-003: body table, two lanes per body: [2i] = ellipse (cx, cz, rx, rz),
     // [2i+1] = (level, wave scale, kind, profile). See wgpu_renderer.hpp.
-    bodies: array<vec4<f32>, 32>,
+    bodies: array<vec4<f32>, 48>,
 };
 
 // Must match GRID_N in water/mod.rs -- this drives the CDLOD morph target, so a
@@ -649,7 +649,7 @@ fn vs_water(
     var surface_level = wp.sea_level;
     var body_wave = 1.0;
     if (body_index > 0) {
-        let b = wp.bodies[2 * (body_index - 1) + 1];
+        let b = wp.bodies[3 * (body_index - 1) + 1];
         surface_level = b.x;
         body_wave = max(b.y, 0.0);
     }
@@ -1488,8 +1488,8 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
     var body_coverage = 1.0;
     var body_profile = -1;
     if (body_index > 0) {
-        let e = wp.bodies[2 * (body_index - 1)];
-        let k = wp.bodies[2 * (body_index - 1) + 1];
+        let e = wp.bodies[3 * (body_index - 1)];
+        let k = wp.bodies[3 * (body_index - 1) + 1];
         let world_xz = in.world_pos.xz + frame.cam_pos.xz;
         let u = (world_xz.x - e.x) / max(e.z, 1e-3);
         let v = (world_xz.y - e.y) / max(e.w, 1e-3);
@@ -1913,11 +1913,19 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
     // Swash: a gentle oscillation of the near-shore waterline (cosmetic — buoyancy stays flat).
     // It raises/lowers the EFFECTIVE column depth so the transparent edge + foam breathe in and
     // out over the wet beach. The body colour keeps the true depth so it doesn't flicker.
-    let swash = sin(TWO_PI * wp.time * wp.swash_speed);
-    let eff_depth = water_depth + swash * wp.swash_amp;
-    let coast_flow = shallow_flow(water_depth, in.base_xz);
-    let river_flow = normalize(wp.flow_direction_speed.xy + vec2<f32>(1e-4, 0.0)) *
+    // WRL-004: a body's own flow (table lane [3i+2]) drives its advection; the ocean keeps the
+    // global lane. A lake has no swash and a much weaker shoreline band ("little surf").
+    var river_flow = normalize(wp.flow_direction_speed.xy + vec2<f32>(1e-4, 0.0)) *
         max(wp.flow_direction_speed.z, 0.0) * select(0.0, 1.0, wp.flow_direction_speed.w > 0.5);
+    var body_surf = 1.0;
+    if (body_index > 0) {
+        let f = wp.bodies[3 * (body_index - 1) + 2];
+        river_flow = normalize(f.xy + vec2<f32>(1e-4, 0.0)) * max(f.z, 0.0);
+        body_surf = 0.15;
+    }
+    let swash = sin(TWO_PI * wp.time * wp.swash_speed);
+    let eff_depth = water_depth + swash * wp.swash_amp * body_surf;
+    let coast_flow = shallow_flow(water_depth, in.base_xz);
     let spray_wind = normalize(wp.fft_wind_sea.xy + vec2<f32>(1e-4, 0.0)) * max(wp.fft_wind_sea.z, 0.5);
 
     let surface_wave = in.world_pos.y + frame.cam_pos.y - in.body_level;
@@ -1995,7 +2003,7 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
         let meander = clamp(meander_a * 0.6 + meander_b * 0.4, 0.0, 1.0);
         ft_deep = ft * (1.0 + max(foam_band_meander, 0.0) * meander);
     }
-    let foam_band = smoothstep(0.0, 0.06, ft) * (1.0 - smoothstep(band_fade_start, band_outer, ft_deep));
+    let foam_band = smoothstep(0.0, 0.06, ft) * (1.0 - smoothstep(band_fade_start, band_outer, ft_deep)) * body_surf;
     // coast_flow points toward land. Sampling x + v*t moves a pattern in -v, so
     // the old wash visibly travelled offshore. x - v*t makes each band advance landward.
     var foam = 0.0;

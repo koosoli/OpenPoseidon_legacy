@@ -1331,13 +1331,14 @@ struct WgrWaterParams
      * Appended at the struct end; sizeof moves 272 -> 288 with the Rust side. */
     WgrVec4 optics_params;
     /* WRL-003 — water-body table, the per-body presentation contract in its minimal form.
-     * Two lanes per body: [2i] = centre x, centre z, radius x, radius z (an ellipse; the
-     * fragment shader discards outside it), [2i+1] = mean surface level, wave scale,
+     * Three lanes per body: [3i] = centre x, centre z, radius x, radius z (an ellipse; the
+     * fragment shader discards outside it), [3i+2] = flow x, flow z, speed m/s (visual
+     * advection only), [3i+1] = mean surface level, wave scale,
      * kind (1 lake, 2 river), profile (0 clear lake, 1 turbid lake, 2 slow river, 3 fast
      * shallow river). A node whose `body` lane is i + 1 draws entry i. Unused entries are
      * zero. Immutable per frame; weather and interaction inputs stay in the lanes above.
-     * Appended at the struct end; sizeof moves 288 -> 800 with the Rust side. */
-    WgrVec4 bodies[WGR_WATER_MAX_BODIES * 2];
+     * Appended at the struct end; sizeof moves 288 -> 1056 with the Rust side. */
+    WgrVec4 bodies[WGR_WATER_MAX_BODIES * 3];
 };
 
 struct WgrWaterCascadeConfig
@@ -1937,7 +1938,7 @@ static_assert(sizeof(WgrGrassTrack) == 16, "WgrGrassTrack layout must match the 
 static_assert(sizeof(WgrGrassDownwash) == 16, "WgrGrassDownwash layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrSmokeShadowBlob) == 32, "WgrSmokeShadowBlob layout must match the Rust #[repr(C)] struct");
   static_assert(sizeof(WgrGrassParams) == 4784, "WgrGrassParams layout must match the Rust #[repr(C)] struct");
-static_assert(sizeof(WgrWaterParams) == 800, "WgrWaterParams layout must match the Rust #[repr(C)] struct");
+static_assert(sizeof(WgrWaterParams) == 1056, "WgrWaterParams layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrWaterNode) == 40, "WgrWaterNode layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrWaterBatch) == 16, "WgrWaterBatch layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrWaterInteractionEvent) == 64 && alignof(WgrWaterInteractionEvent) == 16, "WgrWaterInteractionEvent must match Rust");

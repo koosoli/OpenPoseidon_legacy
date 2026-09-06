@@ -362,7 +362,7 @@ impl Water {
             underwater_gate: [0.0, 0.0, 0.0, 0.0],
             // WRL-002 shared optics on; the C++ side pushes the Water tab's value each frame.
             optics_params: [1.0, 1.0, 0.0, 0.0],
-            bodies: [[0.0; 4]; crate::ffi::WGR_WATER_MAX_BODIES * 2],
+            bodies: [[0.0; 4]; crate::ffi::WGR_WATER_MAX_BODIES * 3],
         };
         queue.write_buffer(&params_ubo, 0, bytemuck::bytes_of(&default_params));
 
@@ -2068,7 +2068,7 @@ mod tests {
     #[test]
     fn debug_params_appended_without_shifting_existing_lanes() {
         use crate::ffi::WgrWaterParams;
-        assert_eq!(std::mem::size_of::<WgrWaterParams>(), 800);
+        assert_eq!(std::mem::size_of::<WgrWaterParams>(), 1056);
         assert_eq!(
             std::mem::offset_of!(WgrWaterParams, debug_params),
             192,

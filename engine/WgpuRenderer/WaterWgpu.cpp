@@ -643,6 +643,14 @@ void RegisterBodyFixtures()
         river.waveScale = v.size() > 7 ? v[7] : 0.05f;
         river.profile = v.size() > 8 ? static_cast<WaterBodyProfile>(std::clamp(static_cast<int>(v[8]), 0, 3))
                                      : WaterBodyProfile::SlowRiver;
+        // Flow runs downhill: opposite the surface gradient, 1.2 m/s unless given.
+        const float gl = std::sqrt(river.gradientX * river.gradientX + river.gradientZ * river.gradientZ);
+        if (gl > 1.0e-6f)
+        {
+            river.flowX = -river.gradientX / gl;
+            river.flowZ = -river.gradientZ / gl;
+            river.flowSpeed = v.size() > 9 ? v[9] : 1.2f;
+        }
         const uint32_t id = registry.Add(river);
         LOG_INFO(Graphics, "Water body fixture: river #{} at ({:.0f}, {:.0f}) r=({:.0f}, {:.0f}) level {:.2f} grad ({:.4f}, {:.4f})",
                  id, river.centreX, river.centreZ, river.radiusX, river.radiusZ, river.level, river.gradientX,
@@ -1253,9 +1261,10 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
         for (size_t i = 0; i < bodyCount; ++i)
         {
             const WaterBody& b = bodies[i];
-            _params.bodies[2 * i] = {b.centreX, b.centreZ, b.radiusX, b.radiusZ};
-            _params.bodies[2 * i + 1] = {b.level, b.waveScale, static_cast<float>(b.kind),
+            _params.bodies[3 * i] = {b.centreX, b.centreZ, b.radiusX, b.radiusZ};
+            _params.bodies[3 * i + 1] = {b.level, b.waveScale, static_cast<float>(b.kind),
                                          static_cast<float>(b.profile)};
+            _params.bodies[3 * i + 2] = {b.flowX, b.flowZ, b.flowSpeed, 0.0f};
             const float x0 = std::floor(b.MinX() / tile) * tile;
             const float z0 = std::floor(b.MinZ() / tile) * tile;
             for (float z = z0; z < b.MaxZ(); z += tile)

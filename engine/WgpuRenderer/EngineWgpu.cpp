@@ -10325,7 +10325,14 @@ void EngineWgpu::SyncWaterLookProfile()
             in >> version;
         }
         else if (key == "wave")
+        {
             in >> _waterLook.waveAmp >> _waterLook.waveChoppy >> _waterLook.waveSpeed >> _waterLook.waveScale;
+            // v2 snapshot rule: a value equal to the OLD code default was never tuned, only
+            // auto-saved, so the current default wins for it (owner default changes must reach
+            // the install). A value that differs (Everon's amplitude 0.42) is honoured.
+            if (version < 3 && _waterLook.waveScale == 1.0f)
+                _waterLook.waveScale = WaterSettings{}.waveScale;
+        }
         else if (key == "colour")
         {
             float c[6] = {};
@@ -10349,8 +10356,12 @@ void EngineWgpu::SyncWaterLookProfile()
         else if (key == "surface")
             in >> _waterLook.glitterGain >> _waterLook.sssGain >> _waterLook.reflectionGain;
         else if (key == "optics")
+        {
             in >> _waterLook.alpha >> _waterLook.specPower >> _waterLook.specIntensity >> _waterLook.shadowDim >>
                 _waterLook.warpAmp >> _waterLook.fadeStart >> _waterLook.fadeEnd;
+            if (version < 3 && _waterLook.specPower == 11.0f)
+                _waterLook.specPower = WaterSettings{}.specPower;
+        }
         else if (key == "quality")
         {
             int low = 0;
