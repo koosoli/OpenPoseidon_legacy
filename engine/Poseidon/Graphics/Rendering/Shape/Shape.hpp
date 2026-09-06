@@ -1215,6 +1215,17 @@ class ShapeBank
 	// Shape::Draw's T&L gate rejects it and it falls to the software path, which
 	// draws it unlit and with no material.
 	void OptimizeOneShape(LODShape *shape);
+	// RFG-099: while set, a shape NewFromModel finishes is announced to the renderer
+	// (Engine::WorldShapeLoaded) before its vertex buffers are built. The world loaders
+	// set it around their loads; weapons, characters and UI shapes never see it.
+	struct WorldModelScope
+	{
+		explicit WorldModelScope(ShapeBank& bank) : _bank(bank), _prev(bank._worldModelScope) { bank._worldModelScope = true; }
+		~WorldModelScope() { _bank._worldModelScope = _prev; }
+		ShapeBank& _bank;
+		bool _prev;
+	};
+	bool _worldModelScope = false;
 	void ReleaseAllVBuffers();
 
 	// Iterate every cached shape.  Order unspecified.  Skips entries

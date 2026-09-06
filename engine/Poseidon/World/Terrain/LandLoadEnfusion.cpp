@@ -1134,6 +1134,15 @@ void CollectAttachments(AttachWorkspace& ws, PlacementSummary& summary, const st
         MeshAttachment part;
         part.basis = basis * BoneBasis(bone.rotation);
         part.offset = offset + basis * Vector3(bone.translation.x, bone.translation.y, bone.translation.z);
+        {
+            // RFG-100 diagnosis: the church's attachments, bone by bone.
+            static int attachDiag = 0;
+            if (LowerCopy(xobPath).find("church_01") != std::string::npos && attachDiag++ < 24)
+                LOG_INFO(World, "RFG-100 attach: parent '{}' bone '{}' parent={} t=[{:.2f} {:.2f} {:.2f}] q=[{:.3f} {:.3f} {:.3f} {:.3f}] -> part '{}' offset=[{:.2f} {:.2f} {:.2f}] depth={}",
+                         xobPath, bone.name, bone.parent, bone.translation.x, bone.translation.y, bone.translation.z,
+                         bone.rotation[0], bone.rotation[1], bone.rotation[2], bone.rotation[3], cached->second,
+                         part.offset.X(), part.offset.Y(), part.offset.Z(), depth);
+        }
         auto slot = ws.index.find(cached->second);
         if (slot == ws.index.end())
         {
@@ -1336,6 +1345,15 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
         item.yawDeg = -placement.angles[1];
         item.pitchDeg = -placement.angles[0];
         item.rollDeg = -placement.angles[2];
+        {
+            // RFG-100 diagnosis: every church_01* placement as resolved (doors stand in the nave).
+            static int churchDiag = 0;
+            if (LowerCopy(cached->second).find("church_01") != std::string::npos && churchDiag++ < 12)
+                LOG_INFO(World, "RFG-100 placement: '{}' class='{}' pos=[{:.2f} {:.2f} {:.2f}] angles=[{:.1f} {:.1f} {:.1f}] scale={:.2f} flags={} points={}",
+                         cached->second, placement.className, placement.position[0], placement.position[1], placement.position[2],
+                         placement.angles[0], placement.angles[1], placement.angles[2], placement.scale, placement.hasFlags ? 1 : 0,
+                         placement.points.size());
+        }
         item.scale = (std::isfinite(placement.scale) && placement.scale > 0.0f) ? placement.scale : 1.0f;
         // The Y rule, measured over Everon's 1.23 M placements: with a Flags block
         // 96.3% sit within half a metre of the terrain, without one the median Y is
@@ -1625,6 +1643,7 @@ LODShapeWithShadow* BuildShapeFromXob(const EnfusionMount& mount, const std::str
         return nullptr;
     // The name is only a cache key here -- no file is opened, because the parsed
     // model is handed in.
+    Poseidon::ShapeBank::WorldModelScope worldModel(Poseidon::Shapes); // RFG-099
     LODShapeWithShadow* shape = Poseidon::Shapes.NewFromModel(xobPath.c_str(), false, true, parsed, nullptr);
     if (shape == nullptr)
     {
@@ -2113,7 +2132,17 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
             size_t buildFailed = 0;
             std::string firstBuildFailure;
             const DWORD buildStart = Poseidon::Foundation::GlobalTickCount();
-            for (size_t i = 0; i < byCount.size() && built < modelCap; ++i)
+            // RFG-097/099: under streaming NO shape is pre-built here. A shape built now
+            // has no object yet when ShapeBank::OptimizeAll converts every level at the end
+            // of the load, so each level became a private CPU/GPU copy -- 5944 buffers,
+            // 863 MB, identical for every budget. The stream's cold path builds the shape
+            // when the first placement needs it, after the renderer registered it.
+            const bool streamNative = []
+            {
+                const char* v = std::getenv("POSEIDON_REFORGER_STREAM");
+                return v != nullptr && *v == '1';
+            }();
+            for (size_t i = 0; !streamNative && i < byCount.size() && built < modelCap; ++i)
             {
                 const uint32_t index = byCount[i].second;
                 std::string why;
@@ -2205,11 +2234,7 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
             // restores the radius-at-load behaviour for an A/B.
             // OFF by default until the retained/direct duplication under streaming is fixed
             // (measured: 1,572 MB of direct-path copies, OOM); POSEIDON_REFORGER_STREAM=1 opts in.
-            const bool streamNative = []
-            {
-                const char* v = std::getenv("POSEIDON_REFORGER_STREAM");
-                return v != nullptr && *v == '1';
-            }();
+            // (streamNative is decided above the shape build, see RFG-099.)
             size_t streamed = 0, streamedParts = 0;
             if (streamNative)
             {
@@ -2245,6 +2270,7 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
                     if (entry.second != nullptr)
                         maxBoundingCentreTotal = std::max(maxBoundingCentreTotal, entry.second->BoundingCenter().Size());
                 _modernObjectStreaming = true;
+                EnableGeographyAccumulation(); // RFG-101: streamed objects fill the geography
                 _modernObjectResidencyPending = false;
                 _modernObjectCenterX = -0x3fffffff;
                 _modernObjectCenterZ = -0x3fffffff;
@@ -2753,6 +2779,10 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
                  "corners one texel), first outside: {}",
                  uv.partsWithSecond, uv.partsOutOfRange, uv.partsDegenerate,
                  uv.firstOutOfRange.empty() ? "-" : uv.firstOutOfRange.c_str());
+        LOG_INFO(World, "Enfusion native load: UV set 1 census (RFG-102) -- {} parts: span<=1: {}, <=8: {}, <=64: {}, >64: {}",
+                 uv.set0Parts, uv.set0SpanLe1, uv.set0SpanLe8, uv.set0SpanLe64, uv.set0SpanGt64);
+        for (const std::string& w : uv.set0Wide)
+            LOG_INFO(World, "RFG-102 wide UV set 1: {}", w);
     }
     InitGeography();
     ProgressFinish();

@@ -941,6 +941,20 @@ class Landscape : public SerializeClass
 
     // init geography information
     void InitGeography();
+    // RFG-101: streamed worlds have no objects in their cells when InitGeography runs, so
+    // every cell reads "no hard objects" and clutter grows through church floors. Objects the
+    // stream creates afterwards are folded into the geography here with InitGeography's own
+    // per-object rule and thresholds; the cell only ever gets denser (evictions do not undo
+    // it -- a house that streamed out is still a house).
+    void EnableGeographyAccumulation();
+    void AccumulateGeographyForObject(Object* obj);
+    bool _geoAccumEnabled = false;
+    // Bumped whenever accumulation changed a cell; the terrain renderer re-uploads its
+    // geography texture when it sees a new value (throttled there).
+    uint32_t _geographyRevision = 0;
+    uint32_t GeographyRevision() const { return _geographyRevision; }
+    std::vector<float> _geoAccumTotalArea, _geoAccumHardArea;
+    std::vector<uint16_t> _geoAccumTotalCount, _geoAccumHardCount;
     void InitMountains();
     void InitSoundMap();
     void InitDynSounds(const ParamEntry& entry);

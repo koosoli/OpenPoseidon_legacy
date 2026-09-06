@@ -123,6 +123,11 @@ class TerrainWgpu : public ITerrainRenderer
     void UpdateGroundTexturePages(const Landscape& land, const Camera& camera, bool force);
     void UploadIndexMap(const Landscape& land);
     void UploadGeography(const Landscape& land);
+    // RFG-101: re-upload the geography when the landscape folded streamed objects into it
+    // (Landscape::GeographyRevision), at most every couple of seconds.
+    void RefreshGeographyIfChanged(const Landscape& land);
+    uint32_t _geographyRevisionUploaded = 0;
+    double _geographyRefreshLastMs = 0.0;
     // Reads the map's own CfgSurfaces / CfgSurfaceCharacters / clutter out of the
     // Arma-generation `config.bin` files of the archives that own THIS world's
     // terrain textures. Only those archives: merging a whole modern config tree is

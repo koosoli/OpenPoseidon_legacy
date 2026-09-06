@@ -3872,6 +3872,26 @@ VertexBuffer* EngineWgpu::CreateVertexBuffer(const Shape& src, VBType type)
             if (src.NSections() > 0)
                 if (Texture* t = src.GetSection(0).properties.GetTexture())
                     tex = t->Name();
+            // Which registered model (if any) owns this level, and under which accessor?
+            std::string owner = "level in NO registered model";
+            for (const auto& [mshape, mid] : _gpuModels)
+            {
+                for (int l = 0; l < mshape->NLevels(); l++)
+                {
+                    const bool asLevel = mshape->Level(l) == &src;
+                    const bool asOpaque = mshape->LevelOpaque(l) == &src;
+                    if (asLevel || asOpaque)
+                    {
+                        owner = std::string("owner='") + mshape->Name() + "' level=" + std::to_string(l) +
+                                (asLevel ? " via Level()" : "") + (asOpaque ? " via LevelOpaque()" : "") +
+                                " meshes-registered=" + std::to_string(_gpuModelMeshes.count(mshape));
+                        break;
+                    }
+                }
+                if (owner[0] == 'o')
+                    break;
+            }
+            LOG_INFO(Graphics, "Wgpu CPU buffer (own copy) owner: {}", owner);
             LOG_INFO(Graphics, "Wgpu CPU buffer (own copy): {:.1f} MB nv={} type={} sections={} first tex='{}' retained-level-known={}",
                      bytes / 1048576.0, nv, static_cast<int>(type), src.NSections(), tex ? tex : "-",
                      _retainedMeshOfLevel.count(&src) ? "yes" : "no");
@@ -8846,6 +8866,23 @@ void EngineWgpu::SceneObjectProxiesChanged(Object* obj)
     }
     it->second.coverage = cov;
     obj->SetGpuCoverage(static_cast<int>(cov));
+}
+
+// RFG-099: register a freshly loaded world model BEFORE ShapeBank optimises it, so the CPU
+// vertex buffers OptimizeRendering builds find their level in _retainedMeshOfLevel and share
+// the retained mesh (RFG-088) instead of uploading a private copy. Only world models arrive
+// here (ShapeBank::WorldModelScope); animated shapes never take the retained path anyway.
+void EngineWgpu::WorldShapeLoaded(LODShapeWithShadow* shape)
+{
+    if (!_gpuDriven || !_renderer || !shape || shape->GetAllowAnimation())
+    {
+        return;
+    }
+    if (!Poseidon::Dev::GResidencyLevers().shareRetainedMeshes)
+    {
+        return;
+    }
+    RegisterGpuModel(shape);
 }
 
 GpuDrawCoverage EngineWgpu::GpuDrivenCoverage(const Object* obj) const

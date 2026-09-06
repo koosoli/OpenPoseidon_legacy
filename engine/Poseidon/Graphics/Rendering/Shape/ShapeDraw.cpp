@@ -825,6 +825,9 @@ LODShapeWithShadow* ShapeBank::NewFromModel(const char* name, bool reversed, boo
     if (_bulkOptimizeDone)
     {
         const auto optimizeStart = ::Poseidon::Dev::Perf::Now();
+        // RFG-099: let the retained renderer own the mesh first (see Engine::WorldShapeLoaded).
+        if (_worldModelScope && GEngine)
+            GEngine->WorldShapeLoaded(shape);
         OptimizeOneShape(shape);
         if (timing)
             timing->optimizeMs = ::Poseidon::Dev::Perf::ElapsedMs(optimizeStart);

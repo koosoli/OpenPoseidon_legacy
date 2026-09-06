@@ -1177,6 +1177,22 @@ build `37d587ce`+: 2,586 MB tracked at the owner's configuration -- 7,549 -> 2,5
 over the day -- and the RGBA8 row of the upload histogram is empty above 512 px. Every
 object texture on native Everon is now block-compressed.**
 
+**Re-measured 2026-09-06 evening -- native STREAMING (RFG-097/099/101), build `db4db94c`+.**
+The native loader can hand every placement to the object stream (1,296,350 placements,
+1,773 models, cold `.xob` loads through ModelCache's external loader). It first died of
+memory at any budget: 5,944 direct-path meshes / 863 MB that never changed with the
+budget, none of whose levels belonged to a registered model -- `ShapeBank::OptimizeAll`
+converts every level at the end of the load, before any object has registered the shape
+(RFG-088 sharing needs the retained mesh first). RFG-099: `Engine::WorldShapeLoaded`
+registers a world model before its buffers are built, and the loader pre-builds no shape
+under streaming. Result at the full 20,000-object budget: direct buffers 116 MB (453 MB
+shared, "not spent"), retained 491 MB, **0 wgpu errors**, 6,097 instances in the main
+pass at the church. RFG-101: streamed objects fold into the geography as they arrive
+(InitGeography saw an empty landscape), the terrain re-uploads it throttled; the church
+cells read hard=3 and the clutter no longer grows through the nave. Streaming is still
+opt-in (`POSEIDON_REFORGER_STREAM=1`) until the per-frame cost is measured against the
+radius path.
+
 Open, in the order they should be acted on:
 
 1. **The native loader needs the same byte budget the object stream has.** It places

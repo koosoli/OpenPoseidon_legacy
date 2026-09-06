@@ -10,6 +10,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <cmath>
+#include <cstring>
+#include <algorithm>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Containers/Array.hpp>
 #include <Poseidon/Foundation/Containers/Array2D.hpp>
@@ -99,6 +101,134 @@ static const RStringB& GetRoadString()
 }
 
 // If geography information is already present, detect it and return as fast as possible.
+
+void Landscape::EnableGeographyAccumulation()
+{
+    const size_t cells = static_cast<size_t>(_landRange) * _landRange;
+    _geoAccumTotalArea.assign(cells, 0.0f);
+    _geoAccumHardArea.assign(cells, 0.0f);
+    _geoAccumTotalCount.assign(cells, 0);
+    _geoAccumHardCount.assign(cells, 0);
+    _geoAccumEnabled = true;
+}
+
+void Landscape::AccumulateGeographyForObject(Object* obj)
+{
+    if (!_geoAccumEnabled || !obj || obj->GetType() != Primary)
+        return;
+    LODShape* shape = obj->GetShape();
+    static int accumCalls = 0, accumSkipped = 0;
+    ++accumCalls;
+    // InitGeography's rule wants a mass and a Geometry LOD with components. Converted
+    // native (.xob) models carry neither -- the church reports mass 0 and no geometry
+    // level -- so for a shape without those the visual bounds decide, and anything
+    // narrower than a metre (a bush, a sign) still stays out.
+    const bool hasPhysicalRule = shape && shape->Mass() >= 10.0 && shape->FindGeometryLevel() >= 0 &&
+                                 shape->GetGeomComponents().Size() > 0;
+    const bool hasVisualBounds = shape && shape->NLevels() > 0 && floatMax(shape->Max()[0], shape->Max()[2]) >= 1.0f;
+    if (!hasPhysicalRule && !hasVisualBounds)
+    {
+        ++accumSkipped;
+        if (accumSkipped <= 5 && shape)
+            LOG_INFO(World, "RFG-101 skip '{}': mass={:.1f} geomLevel={} components={} max=[{:.1f} {:.1f}]", shape->Name(),
+                     shape->Mass(), shape->FindGeometryLevel(), shape->GetGeomComponents().Size(), shape->Max()[0],
+                     shape->Max()[2]);
+        return;
+    }
+    if (accumCalls % 1000 == 1)
+        LOG_INFO(World, "RFG-101 geography accumulation: {} objects seen, {} skipped, revision {}", accumCalls,
+                 accumSkipped, _geographyRevision);
+    // Same classification InitGeography applies (see below): trees/tents are soft,
+    // indestructible things count double, forests are not objects.
+    int hardWeight = 0;
+    if (dyn_cast<ForestPlain>(obj) == nullptr)
+    {
+        if (obj->GetDestructType() == DestructNo)
+            hardWeight = 2;
+        else if (obj->GetDestructType() != DestructTree && obj->GetDestructType() != DestructTent)
+            hardWeight = 1;
+    }
+    // A converted native model has no destruct class the rule can read (the church
+    // came through as "tree"-class soft); without the physical rule its bounds are the
+    // only evidence, and a thing wider than a metre is a hard obstacle for clutter.
+    if (!hasPhysicalRule && dyn_cast<ForestPlain>(obj) == nullptr && hardWeight == 0)
+        hardWeight = 1;
+    // A converted native model is autodetected as DestructTree whatever it is (the church
+    // measured destruct=3), which the rule reads as soft. Only real vegetation is soft.
+    if (hardWeight == 0 && dyn_cast<ForestPlain>(obj) == nullptr && obj->GetDestructType() == DestructTree &&
+        shape->Name() && std::strstr(shape->Name(), ".xob") && !std::strstr(shape->Name(), "vegetation/"))
+        hardWeight = 1;
+    const float objRad = floatMax(shape->Max()[0], shape->Max()[2]);
+    const Vector3 objCenter = obj->PositionModelToWorld(shape->GeometryCenter());
+    const float xMaxObj = objCenter.X() + objRad, xMinObj = objCenter.X() - objRad;
+    const float zMaxObj = objCenter.Z() + objRad, zMinObj = objCenter.Z() - objRad;
+    const int cx0 = std::clamp(toIntFloor(xMinObj * _invLandGrid), 0, _landRange - 1);
+    const int cx1 = std::clamp(toIntFloor(xMaxObj * _invLandGrid), 0, _landRange - 1);
+    const int cz0 = std::clamp(toIntFloor(zMinObj * _invLandGrid), 0, _landRange - 1);
+    const int cz1 = std::clamp(toIntFloor(zMaxObj * _invLandGrid), 0, _landRange - 1);
+    const float cellArea = _landGrid * _landGrid;
+    for (int z = cz0; z <= cz1; z++)
+    {
+        for (int x = cx0; x <= cx1; x++)
+        {
+            const float xMin = x * _landGrid, xMax = xMin + _landGrid;
+            const float zMin = z * _landGrid, zMax = zMin + _landGrid;
+            const float ax0 = floatMax(xMinObj, xMin), ax1 = floatMin(xMaxObj, xMax);
+            const float az0 = floatMax(zMinObj, zMin), az1 = floatMin(zMaxObj, zMax);
+            if (ax1 <= ax0 || az1 <= az0)
+                continue;
+            const float area = (ax1 - ax0) * (az1 - az0);
+            const size_t i = static_cast<size_t>(z) * _landRange + x;
+            _geoAccumTotalArea[i] += area;
+            _geoAccumTotalCount[i] = static_cast<uint16_t>(std::min(65535, _geoAccumTotalCount[i] + 1));
+            if (hardWeight == 2)
+            {
+                _geoAccumHardArea[i] += area * 4;
+                _geoAccumHardCount[i] = static_cast<uint16_t>(std::min(65535, _geoAccumHardCount[i] + 2));
+            }
+            else if (hardWeight == 1)
+            {
+                _geoAccumHardArea[i] += area;
+                _geoAccumHardCount[i] = static_cast<uint16_t>(std::min(65535, _geoAccumHardCount[i] + 1));
+            }
+            const float totalArea = _geoAccumTotalArea[i], hardArea = _geoAccumHardArea[i];
+            const int totalCount = _geoAccumTotalCount[i], hardCount = _geoAccumHardCount[i];
+            int howMany = 0, hard = 0, full = 0;
+            if (totalArea >= cellArea * 9 / 10)
+                full = 1;
+            else if (totalArea >= cellArea / 2 || totalCount >= 20)
+                howMany = 3;
+            else if (totalArea >= cellArea / 4 || totalCount >= 10)
+                howMany = 2;
+            else if (totalCount > 0)
+                howMany = 1;
+            if (hardArea >= cellArea / 3 || hardCount >= 8)
+                hard = 3;
+            else if (hardArea >= cellArea / 6 || hardCount >= 4)
+                hard = 2;
+            else if (hardCount > 0)
+                hard = 1;
+            GeographyInfo& geog = _geography(x, z);
+            const uint32_t before = geog.packed;
+            if (full)
+                geog.u.full = 1;
+            if (static_cast<int>(geog.u.howManyObjects) < howMany)
+                geog.u.howManyObjects = howMany;
+            if (static_cast<int>(geog.u.howManyHardObjects) < hard)
+                geog.u.howManyHardObjects = hard;
+            if (geog.packed != before)
+                ++_geographyRevision;
+        }
+    }
+    {
+        static int churchDiag = 0;
+        if (shape->Name() && std::strstr(shape->Name(), "hurch_01") && churchDiag++ < 4)
+            LOG_INFO(World, "RFG-101 church accumulated: '{}' mass={:.0f} rad={:.1f} hardWeight={} destruct={} forest={} cells x{}..{} z{}..{} hard@centre={}",
+                     shape->Name(), shape->Mass(), objRad, hardWeight, static_cast<int>(obj->GetDestructType()),
+                     dyn_cast<ForestPlain>(obj) != nullptr ? 1 : 0, cx0, cx1, cz0, cz1,
+                     static_cast<int>(_geography((cx0 + cx1) / 2, (cz0 + cz1) / 2).u.howManyHardObjects));
+    }
+}
 
 void Landscape::InitGeography()
 {

@@ -3945,6 +3945,7 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                     // AddObject / GPU registration. Held by a Ref across the create so the
                     // freshly built shape (refcount 0 out of the bank) cannot die between the
                     // two calls; the Object takes its own reference inside.
+                    ShapeBank::WorldModelScope worldModel(Shapes); // RFG-099
                     Ref<LODShapeWithShadow> installedShape =
                         Shapes.NewFromModel(modelName, false, true, std::move(preparsed), &timing, preadapted);
                     shapeMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -
@@ -3962,6 +3963,8 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
             {
                 admitted = nullptr;
             }
+            if (admitted != nullptr && _geoAccumEnabled)
+                AccumulateGeographyForObject(admitted); // RFG-101
             const double totalMs =
                 std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - createStart).count();
             if (cold)

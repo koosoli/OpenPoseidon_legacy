@@ -1825,6 +1825,19 @@ bool TerrainWgpu::BakeAuthoredGrassMask(const Landscape& land, std::vector<uint3
     return true;
 }
 
+void TerrainWgpu::RefreshGeographyIfChanged(const Landscape& land)
+{
+    if (_uploaded != &land || land.GeographyRevision() == _geographyRevisionUploaded)
+        return;
+    const double nowMs =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    if (nowMs - _geographyRefreshLastMs < 2000.0)
+        return;
+    _geographyRefreshLastMs = nowMs;
+    LOG_INFO(Graphics, "RFG-101 geography re-upload: revision {} -> {}", _geographyRevisionUploaded, land.GeographyRevision());
+    UploadGeography(land);
+}
+
 void TerrainWgpu::UploadGeography(const Landscape& land)
 {
     const int n = land.GetLandRange();
@@ -1971,6 +1984,7 @@ void TerrainWgpu::UploadGeography(const Landscape& land)
         }
     }
 
+    _geographyRevisionUploaded = land.GeographyRevision(); // RFG-101
     std::vector<uint32_t> geography(static_cast<size_t>(n) * n);
     for (int z = 0; z < n; ++z)
     {
@@ -2712,6 +2726,7 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     const Landscape& land = *GLandscape;
     Camera* camera = scene.GetCamera();
     const bool uploaded = UploadIfNeeded(land);
+    RefreshGeographyIfChanged(land); // RFG-101: streamed objects densify the geography
     if (camera != nullptr)
     {
         // RenderSnapshot S4: the residency update -- a WORLD-STATE MUTATION -- no longer

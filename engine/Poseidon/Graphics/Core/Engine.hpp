@@ -2630,6 +2630,13 @@ class Engine : public IGraphicsEngine
     // instances it hides were already emitted. The renderer re-emits from the current hidden set.
     // Appended at the class end for the same vtable-slot reason as the two above.
     virtual void SceneObjectProxiesChanged(Object* /*obj*/) {}
+    // RFG-099: a WORLD model (object stream cold load, native loader) finished loading and is
+    // about to build its CPU vertex buffers. The retained renderer registers it first, so those
+    // buffers can share the retained mesh instead of each becoming a private copy. Measured
+    // before this hook under native streaming: 5944 direct-path meshes, 863 MB, none of whose
+    // levels belonged to a registered model -- the shapes were converted before any object
+    // using them was admitted. Appended at the class end (vtable-slot rule).
+    virtual void WorldShapeLoaded(LODShapeWithShadow* /*shape*/) {}
 
     // WTR-002 — GPU water-pipeline pass timings (Water tab, dev-only). Copies up to maxCount
     // per-region times in milliseconds into outMs (indexed by the renderer's fixed region
