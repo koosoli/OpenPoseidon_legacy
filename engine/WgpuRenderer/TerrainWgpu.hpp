@@ -55,6 +55,12 @@ class TerrainWgpu : public ITerrainRenderer
     void UploadGrassTuft(const std::string& worldKey);
     // GRS-F: upload eight opaque photo layers for the near blade geometry.
     void UploadGrassBladeAtlas(const std::string& worldKey);
+    // RFG-089: the same eight layers cut from a natively loaded Reforger world's OWN blade
+    // atlas -- the `PlantMat` of its commonest grass surface -- so the near ring draws
+    // Enfusion's blades rather than the stock meadow photos. Returns false (and uploads
+    // nothing) on any world that is not Enfusion, so the stock atlas still applies there.
+    bool UploadEnfusionBladeAtlas(const Landscape& land);
+    void SetEnfusionBladesEnabled(bool enabled);
     // Reports whether the photo-card atlas actually reached the renderer, so an
     // absent atlas and a switched-off opt-in stop looking identical in the log.
     void ReportPhotoClumpState() const;
@@ -213,6 +219,7 @@ class TerrainWgpu : public ITerrainRenderer
     // switch that does nothing. Default ON where the world IS Enfusion.
     bool _hasEnfusionSurfaces = false;
     bool _enfusionClutterEnabled = true;
+    bool _enfusionBladesEnabled = true; // RFG-089
     // The Landscape::EnfusionRoadClutterClear() value the last bake honoured, so the
     // per-frame SetEnfusionClutterEnabled call can notice the dev switch moved and
     // re-bake -- the switch lives on Landscape (a world fact), not in GrassSettings.

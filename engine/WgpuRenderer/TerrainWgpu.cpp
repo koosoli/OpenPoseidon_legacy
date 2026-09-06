@@ -2128,7 +2128,12 @@ void TerrainWgpu::UploadGeography(const Landscape& land)
     // Arma <-> Arma transition rebuilds.
     const std::string atlasKey = anyAuthored ? ("arma:" + world) : std::string("loose");
     UploadGrassTuft(atlasKey);
-    UploadGrassBladeAtlas(atlasKey);
+    // RFG-089: a native Reforger world brings its own blades; everything else keeps the
+    // stock meadow atlas.
+    if (!(_enfusionBladesEnabled && UploadEnfusionBladeAtlas(land)))
+    {
+        UploadGrassBladeAtlas(atlasKey);
+    }
 }
 
 // GRS-E — upload an authored photographed grass clump for the mid LOD's crossed

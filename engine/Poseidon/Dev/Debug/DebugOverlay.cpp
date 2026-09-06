@@ -3389,6 +3389,17 @@ void DrawGrassTab()
         {
             changed = true;
         }
+        // RFG-089: the blade IMAGES, from the PlantMat atlas of the world's commonest grass.
+        if (Dev::Checkbox("Enfusion blade atlas on the near ring (native Reforger worlds)", &grass.enfusionBlades))
+        {
+            changed = true;
+        }
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("Reforger's own ground cover is a procedural PlantMat: a blade atlas plus the\n"
+                              "rectangles it picks tufts from. On, the near ring's eight blade layers are cut\n"
+                              "from that atlas; off, the stock meadow photos. POSEIDON_ENFUSION_BLADES=0.");
+        }
         // RFG-065. The GROUND, not the grass -- it sits here because it is the same
         // world's own `.emat` data read out of the same archives, and the panel has no
         // other home for a native-Reforger terrain switch.

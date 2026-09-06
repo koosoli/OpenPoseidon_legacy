@@ -6,6 +6,8 @@
 #define __ENGINE_HPP
 
 #include <Poseidon/Core/Types.hpp>
+
+#include <cstdlib> // RFG-089: env seed for GrassSettings::enfusionBlades
 #include <Poseidon/Foundation/Math/Math3D.hpp>
 #include <Poseidon/Graphics/Rendering/Colors.hpp>
 #include <Poseidon/Graphics/Rendering/Draw/Font.hpp>
@@ -1516,6 +1518,13 @@ class Engine : public IGraphicsEngine
         // world that is not one (Landscape::GetEnfusionSurfaceCount() is 0 there), so this is
         // a switch for the native path only -- it does not touch OFP or Arma worlds.
         bool enfusionClutter = true;
+        // RFG-089: the near-ring blade IMAGES from the world's own PlantMat atlas (native
+        // Reforger worlds only). POSEIDON_ENFUSION_BLADES=0 seeds it off.
+        bool enfusionBlades = []
+        {
+            const char* v = std::getenv("POSEIDON_ENFUSION_BLADES");
+            return !(v != nullptr && *v == '0');
+        }();
         // RFG-065: bind a NATIVELY loaded Enfusion world's GROUND MATERIAL from the palette
         // entry's own `.emat` -- its `ScaleUV` tiling and its middle-distance map -- instead
         // of stretching one image over each 12.5 m land cell. Lives beside `enfusionClutter`

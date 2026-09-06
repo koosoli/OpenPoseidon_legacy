@@ -48,6 +48,8 @@
 #include <stb_image_resize2.h>
 
 #include <algorithm>
+#include <cmath>
+#include <cstdlib>
 #include <initializer_list>
 #include <cctype>
 #include <chrono>
@@ -834,6 +836,252 @@ bool TerrainWgpu::BakeEnfusionClutter(const Landscape& land, std::vector<uint32_
              clearRoads ? "road clearing ON" : (land.HasEnfusionRoadCells() ? "road clearing OFF" : "no road mask"),
              maxWeight, layerCount, ms);
     return grownCells > 0;
+}
+
+// RFG-089: Reforger's blade layer, from the file that defines it.
+//
+// Everon's short ground cover is not a model and not our procedural grass: each grass
+// surface `.emat` names a `PlantMat`, a procedural `Grass` material (`Plants 8`,
+// `BladesCount 3`, `Height 0.1`) whose BCR + opacity pair is a blade ATLAS, and whose
+// `DistributionAtlasUVs` block lists the sub-rectangles (u0 u1 v0 v1) the engine picks
+// tufts from, weighted by `Distribution`. The near ring here already draws eight photo
+// blade layers (UploadGrassBladeAtlas); this cuts those eight from the world's own atlas
+// instead, most-weighted rectangles first, each placed bottom-aligned at the blade's
+// width so the tuft's proportions survive (blade_uv v = 1 at the base). Nothing about
+// blade geometry, density or wind changes -- only the image on the blade.
+//
+// Read from the commonest palette surface that names a PlantMat, because the atlas is
+// one texture for the whole world and that surface is what most of the ground shows.
+namespace
+{
+struct AtlasRect
+{
+    float u0 = 0.0f, u1 = 1.0f, v0 = 0.0f, v1 = 1.0f;
+    float weight = 1.0f;
+};
+
+// `DistributionAtlasUVs { u0 u1 v0 v1 ... }` and `Distribution "w w w ..."` out of the raw
+// material text: the block is rows of bare numbers, which the key/value parser folds into
+// nothing useful, so it is read by hand.
+void ReadAtlasRects(const std::string& text, std::vector<AtlasRect>& out)
+{
+    std::vector<float> weights;
+    if (const size_t d = text.find("Distribution \""); d != std::string::npos)
+    {
+        const size_t open = text.find('"', d);
+        const size_t close = open == std::string::npos ? std::string::npos : text.find('"', open + 1);
+        if (open != std::string::npos && close != std::string::npos)
+        {
+            const std::string list = text.substr(open + 1, close - open - 1);
+            size_t at = 0;
+            while (at < list.size())
+            {
+                char* end = nullptr;
+                const float v = std::strtof(list.c_str() + at, &end);
+                if (end == list.c_str() + at)
+                    break;
+                weights.push_back(v);
+                at = static_cast<size_t>(end - list.c_str());
+                while (at < list.size() && list[at] == ' ')
+                    ++at;
+            }
+        }
+    }
+    const size_t b = text.find("DistributionAtlasUVs");
+    if (b == std::string::npos)
+        return;
+    const size_t open = text.find('{', b);
+    const size_t close = open == std::string::npos ? std::string::npos : text.find('}', open);
+    if (open == std::string::npos || close == std::string::npos)
+        return;
+    const std::string body = text.substr(open + 1, close - open - 1);
+    std::vector<float> numbers;
+    size_t at = 0;
+    while (at < body.size())
+    {
+        while (at < body.size() && (body[at] == ' ' || body[at] == '\n' || body[at] == '\r' || body[at] == '\t'))
+            ++at;
+        if (at >= body.size())
+            break;
+        char* end = nullptr;
+        const float v = std::strtof(body.c_str() + at, &end);
+        if (end == body.c_str() + at)
+            break;
+        numbers.push_back(v);
+        at = static_cast<size_t>(end - body.c_str());
+    }
+    for (size_t i = 0; i + 3 < numbers.size(); i += 4)
+    {
+        AtlasRect r;
+        r.u0 = numbers[i];
+        r.u1 = numbers[i + 1];
+        r.v0 = numbers[i + 2];
+        r.v1 = numbers[i + 3];
+        const size_t index = i / 4;
+        r.weight = index < weights.size() ? weights[index] : 1.0f;
+        if (r.u1 > r.u0 && r.v1 > r.v0)
+            out.push_back(r);
+    }
+}
+} // namespace
+
+bool TerrainWgpu::UploadEnfusionBladeAtlas(const Landscape& land)
+{
+    const int paletteSize = land.GetEnfusionSurfaceCount();
+    if (paletteSize <= 0 || !_renderer)
+        return false;
+    const EnfusionMount& mount = EnfusionMount::Instance();
+    if (!mount.IsOpen())
+        return false;
+    const int n = land.GetLandRange();
+    if (n <= 0)
+        return false;
+
+    // The commonest surface that names a PlantMat.
+    std::vector<size_t> cellsPerSurface(static_cast<size_t>(paletteSize), 0);
+    for (int z = 0; z < n; ++z)
+        for (int x = 0; x < n; ++x)
+        {
+            const int material = land.GetTexture(z, x);
+            if (material >= 0 && material < paletteSize)
+                ++cellsPerSurface[static_cast<size_t>(material)];
+        }
+    std::vector<int> order(static_cast<size_t>(paletteSize));
+    for (int i = 0; i < paletteSize; ++i)
+        order[static_cast<size_t>(i)] = i;
+    std::stable_sort(order.begin(), order.end(),
+                     [&cellsPerSurface](int a, int b)
+                     { return cellsPerSurface[static_cast<size_t>(a)] > cellsPerSurface[static_cast<size_t>(b)]; });
+
+    std::string plantMat, surfaceName;
+    for (const int i : order)
+    {
+        const std::string surface = land.GetEnfusionSurface(i);
+        if (surface.empty())
+            continue;
+        ConfNode material;
+        if (!ReadConf(mount, surface, material))
+            continue;
+        const std::string* value = material.Key("PlantMat");
+        if (value == nullptr || value->empty())
+            continue;
+        plantMat = StripGuid(*value);
+        surfaceName = surface;
+        break;
+    }
+    if (plantMat.empty())
+    {
+        LOG_INFO(Graphics, "Wgpu grass: no palette surface names a PlantMat; near blades keep the stock atlas");
+        return false;
+    }
+    const std::string worldKey = "enfusion:" + plantMat;
+    if (_grassBladeAtlasWorld == worldKey)
+        return true;
+
+    std::vector<uint8_t> raw;
+    if (!mount.Read(plantMat, raw))
+    {
+        LOG_WARN(Graphics, "Wgpu grass: PlantMat '{}' unreadable; near blades keep the stock atlas", plantMat);
+        return false;
+    }
+    const std::string text(reinterpret_cast<const char*>(raw.data()), raw.size());
+    ConfNode mat;
+    if (!ParseConfText(text, mat))
+        return false;
+    const std::string* colourKey = mat.Key("BCRMap");
+    const std::string* opacityKey = mat.Key("OpacityMap");
+    if (colourKey == nullptr || opacityKey == nullptr)
+    {
+        LOG_WARN(Graphics, "Wgpu grass: PlantMat '{}' has no BCRMap/OpacityMap pair", plantMat);
+        return false;
+    }
+    std::vector<AtlasRect> rects;
+    ReadAtlasRects(text, rects);
+    if (rects.empty())
+        rects.push_back(AtlasRect{}); // the whole atlas as one tuft, rather than nothing
+    std::stable_sort(rects.begin(), rects.end(), [](const AtlasRect& a, const AtlasRect& b) { return a.weight > b.weight; });
+    // Distinct rectangles only: the list repeats a rectangle to weight it, and eight copies
+    // of one tuft would be a poorer field than eight different ones.
+    std::vector<AtlasRect> distinct;
+    for (const AtlasRect& r : rects)
+    {
+        bool seen = false;
+        for (const AtlasRect& d : distinct)
+            seen = seen || (std::fabs(d.u0 - r.u0) < 1e-4f && std::fabs(d.u1 - r.u1) < 1e-4f &&
+                            std::fabs(d.v0 - r.v0) < 1e-4f && std::fabs(d.v1 - r.v1) < 1e-4f);
+        if (!seen)
+            distinct.push_back(r);
+    }
+
+    int cw = 0, ch = 0, aw = 0, ah = 0;
+    std::vector<uint8_t> colour, opacity;
+    if (!DecodeEdds(mount, StripGuid(*colourKey), 2048, cw, ch, colour) ||
+        !DecodeEdds(mount, StripGuid(*opacityKey), 2048, aw, ah, opacity))
+    {
+        LOG_WARN(Graphics, "Wgpu grass: PlantMat '{}' atlas undecodable; near blades keep the stock atlas", plantMat);
+        return false;
+    }
+    if (aw != cw || ah != ch)
+    {
+        std::vector<uint8_t> resized(static_cast<size_t>(cw) * ch * 4u);
+        stbir_resize_uint8_linear(opacity.data(), aw, ah, aw * 4, resized.data(), cw, ch, cw * 4, STBIR_RGBA);
+        opacity.swap(resized);
+        aw = cw;
+        ah = ch;
+    }
+    // Opacity sits in the coverage map; the BCR alpha is roughness (measured, RFG-049).
+    for (size_t i = 0; i + 3 < colour.size(); i += 4)
+        colour[i + 3] = std::max({opacity[i + 0], opacity[i + 1], opacity[i + 2]});
+
+    constexpr int LayerW = 64, LayerH = 256, Layers = 8;
+    std::vector<uint8_t> layers(static_cast<size_t>(LayerW) * LayerH * 4u * Layers, 0u);
+    std::string report;
+    for (int layer = 0; layer < Layers; ++layer)
+    {
+        const AtlasRect& r = distinct[static_cast<size_t>(layer) % distinct.size()];
+        const int x0 = std::clamp(static_cast<int>(r.u0 * cw), 0, cw - 1);
+        const int x1 = std::clamp(static_cast<int>(r.u1 * cw), x0 + 1, cw);
+        const int y0 = std::clamp(static_cast<int>(r.v0 * ch), 0, ch - 1);
+        const int y1 = std::clamp(static_cast<int>(r.v1 * ch), y0 + 1, ch);
+        const int rw = x1 - x0, rh = y1 - y0;
+        // Crop, then fit to the layer width keeping the tuft's aspect, bottom-aligned.
+        std::vector<uint8_t> crop(static_cast<size_t>(rw) * rh * 4u);
+        for (int y = 0; y < rh; ++y)
+            std::memcpy(crop.data() + static_cast<size_t>(y) * rw * 4,
+                        colour.data() + (static_cast<size_t>(y0 + y) * cw + x0) * 4, static_cast<size_t>(rw) * 4);
+        const int fitH = std::clamp(static_cast<int>(std::lround(static_cast<double>(LayerW) * rh / rw)), 8, LayerH);
+        std::vector<uint8_t> fitted(static_cast<size_t>(LayerW) * fitH * 4u);
+        stbir_resize_uint8_linear(crop.data(), rw, rh, rw * 4, fitted.data(), LayerW, fitH, LayerW * 4, STBIR_RGBA);
+        uint8_t* dst = layers.data() + static_cast<size_t>(layer) * LayerW * LayerH * 4u;
+        for (int y = 0; y < fitH; ++y)
+            std::memcpy(dst + static_cast<size_t>(LayerH - fitH + y) * LayerW * 4,
+                        fitted.data() + static_cast<size_t>(y) * LayerW * 4, static_cast<size_t>(LayerW) * 4);
+        char line[64];
+        std::snprintf(line, sizeof(line), "%s%d:[%.2f-%.2f,%.2f-%.2f]w%.0f", layer ? " " : "", layer, r.u0, r.u1,
+                      r.v0, r.v1, r.weight);
+        report += line;
+    }
+
+    EngineWgpu::AcquireProducerWindow("grass blade atlas");
+    wgr_grass_set_blade_atlas(_renderer, LayerW, LayerH, Layers, layers.data());
+    _grassBladeAtlasWorld = worldKey;
+    LOG_INFO(Graphics,
+             "Wgpu grass: near blades from Reforger PlantMat '{}' (surface '{}', atlas {}x{}, {} distinct of {} "
+             "rects, Plants {} BladesCount {} Height {:.2f} m) [{}]",
+             plantMat, surfaceName, cw, ch, distinct.size(), rects.size(), static_cast<int>(mat.Number("Plants", 0)),
+             static_cast<int>(mat.Number("BladesCount", 0)), mat.Number("Height", 0.0f), report);
+    return true;
+}
+
+void TerrainWgpu::SetEnfusionBladesEnabled(bool enabled)
+{
+    if (_enfusionBladesEnabled == enabled)
+        return;
+    _enfusionBladesEnabled = enabled;
+    // Drop the key so the next geography upload re-decides which atlas the near ring gets.
+    _grassBladeAtlasWorld.clear();
+    if (_uploaded != nullptr)
+        UploadGeography(*_uploaded);
 }
 
 void TerrainWgpu::SetEnfusionClutterEnabled(bool enabled)

@@ -1164,6 +1164,14 @@ Done in this session: the diagnostics (RFG-082), the upload histogram split BC /
 as open, 656 over the 256 MB budget), and the `Streaming` tab now edits the residency
 levers live (texture mip bias, RFG-075 ownership, sky gate).
 
+**Re-measured 2026-09-06 after RFG-086/088 (shader tint, shared meshes), build `33773f97`.**
+The owner's configuration (800 models, 300 m) now runs at **3,557 MB tracked, zero
+errors** (was 7,549 MB and a lost device); pool 1,088 MB, 6,686 CPU buffers sharing
+757 MB. The 100k stress still dies, but at 5,589 MB tracked with 9,565 retained meshes
+(1,580 MB) and 2.3 GB of textures -- 237 RGBA8 leaf composites (`enfa|`) are the last
+1,166 MB of uncompressed uploads. Without eviction by distance it cannot fit; that is
+item 1 below.
+
 Open, in the order they should be acted on:
 
 1. **The native loader needs the same byte budget the object stream has.** It places
