@@ -844,9 +844,17 @@ constexpr int          kUploadBuckets = 6; // <=256, 512, 1024, 2048, 4096, >409
 // is to stop uploading it uncompressed).
 std::atomic<uint64_t>  GUploadBucketCount[2][kUploadBuckets];
 std::atomic<uint64_t>  GUploadBucketBytes[2][kUploadBuckets];
-void NoteUploadSize(int w, int h, uint64_t bytes, bool blockCompressed)
+void NoteUploadSize(int w, int h, uint64_t bytes, bool blockCompressed, const char* name = nullptr)
 {
     const int side = std::max(w, h);
+    // RFG-093: the first few LARGE uncompressed uploads by name, because the histogram can
+    // only say "100 of the 1024 class are RGBA8" and not which family they are.
+    if (!blockCompressed && side >= 1024 && name != nullptr)
+    {
+        static std::atomic<uint32_t> logged{0};
+        if (logged.fetch_add(1, std::memory_order_relaxed) < 16)
+            LOG_INFO(Graphics, "Wgpu texture: RGBA8 upload {}x{} '{}'", w, h, name);
+    }
     const int b = side <= 256 ? 0 : side <= 512 ? 1 : side <= 1024 ? 2 : side <= 2048 ? 3 : side <= 4096 ? 4 : 5;
     const int row = blockCompressed ? 0 : 1;
     GUploadBucketCount[row][b].fetch_add(1, std::memory_order_relaxed);
@@ -1842,7 +1850,7 @@ uint64_t TextureWgpu::EnsureUploaded()
             {
                 _w = prepared.width;
                 _h = prepared.height;
-                NoteUploadSize(_w, _h, prepared.rgba.size() * 4 / 3, false); // with generated mips
+                NoteUploadSize(_w, _h, prepared.rgba.size() * 4 / 3, false, Name()); // with generated mips
                 GTextureStreamStats.frameUploadBytes.fetch_add(prepared.rgba.size(), std::memory_order_relaxed);
                 if (timed)
                     GTextureStreamStats.preparedHits.fetch_add(1, std::memory_order_relaxed);
@@ -1892,7 +1900,7 @@ uint64_t TextureWgpu::EnsureUploaded()
                     _gpuHandle = wgr_texture_create_in_slot(
                         r, static_cast<uint32_t>(_w), static_cast<uint32_t>(_h), WGR_TEXTURE_RGBA8, 1,
                         WGR_TEXTURE_GEN_MIPS, pixels.data(), static_cast<uint32_t>(pixels.size()), AcquireSlotLease());
-                    NoteUploadSize(_w, _h, pixels.size() * 4 / 3, false);
+                    NoteUploadSize(_w, _h, pixels.size() * 4 / 3, false, Name());
                 }
                 GTextureStreamStats.frameUploadBytes.fetch_add(pixels.size(), std::memory_order_relaxed);
             }
@@ -1912,7 +1920,7 @@ uint64_t TextureWgpu::EnsureUploaded()
                     WGR_TEXTURE_GEN_MIPS, img.rgba.data(), static_cast<uint32_t>(img.rgba.size()), AcquireSlotLease());
                 _w = img.width;
                 _h = img.height;
-                NoteUploadSize(_w, _h, img.rgba.size() * 4 / 3, false);
+                NoteUploadSize(_w, _h, img.rgba.size() * 4 / 3, false, Name());
                 GTextureStreamStats.frameUploadBytes.fetch_add(img.rgba.size(), std::memory_order_relaxed);
             }
         }

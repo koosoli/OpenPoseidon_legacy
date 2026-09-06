@@ -402,7 +402,18 @@ bool TextureSourceDDS::InitFromMemory(const void* data, size_t size, const char*
     if (dxgiBlock && !forceDecode && DdsCompressedPassthrough())
     {
         capLevels();
-        const bool roughnessInAlpha = LowerCopy(who).find("_bcr") != std::string::npos;
+        // RFG-094: alpha that is DATA, not coverage, by the name's packing suffix. `_bcr`
+        // keeps roughness there (measured, RFG-049); `_nmo` occlusion, `_nho` occlusion,
+        // `_ntc` cavity, `_mask` / `_cmask` a layer or clutter weight. None of them is a
+        // cutout, so none needs the decode that "live alpha" used to buy: on native Everon
+        // at play settings the decoded normal maps and masks were the last 100 RGBA8
+        // uploads of the 1024 class, 500 MB, and every one of them a BC7/BC5 file.
+        const std::string lowerWho = LowerCopy(who);
+        const bool roughnessInAlpha = lowerWho.find("_bcr") != std::string::npos;
+        const bool dataInAlpha = roughnessInAlpha || lowerWho.find("_nmo") != std::string::npos ||
+                                 lowerWho.find("_nho") != std::string::npos ||
+                                 lowerWho.find("_ntc") != std::string::npos ||
+                                 lowerWho.find("_mask") != std::string::npos;
         // One decode, of the SMALLEST level -- typically 4x4 or 8x8. It answers two
         // questions the block data cannot: the average colour (the distant-LOD stand-in,
         // which AverageOfSmallest returns black for on a block format), and whether the
@@ -441,7 +452,7 @@ bool TextureSourceDDS::InitFromMemory(const void* data, size_t size, const char*
             }
         }
         const bool noAlphaChannel = _format == PixelFormat::BC4 || _format == PixelFormat::BC5;
-        if (noAlphaChannel || alphaIsFlat || roughnessInAlpha)
+        if (noAlphaChannel || alphaIsFlat || dataInAlpha)
         {
             // Never claim coverage on this path: BC7 carries a fourth channel whether or
             // not the author used it, and the one population that deliberately uses it

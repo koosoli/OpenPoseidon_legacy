@@ -1172,6 +1172,11 @@ errors** (was 7,549 MB and a lost device); pool 1,088 MB, 6,686 CPU buffers shar
 1,166 MB of uncompressed uploads. Without eviction by distance it cannot fit; that is
 item 1 below.
 
+**Re-measured again after RFG-092/094 (leaf composites to BC3, packed maps pass through),
+build `37d587ce`+: 2,586 MB tracked at the owner's configuration -- 7,549 -> 2,586 MB
+over the day -- and the RGBA8 row of the upload histogram is empty above 512 px. Every
+object texture on native Everon is now block-compressed.**
+
 Open, in the order they should be acted on:
 
 1. **The native loader needs the same byte budget the object stream has.** It places
