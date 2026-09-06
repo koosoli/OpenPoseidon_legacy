@@ -71,6 +71,11 @@ void DrawStreamingTab()
                           "complement) draws its LODs on both paths; without sharing each LOD sits in the pool\n"
                           "twice -- measured 759 MB retained + 880 MB direct on Everon at 800 models.\n"
                           "Applies to buffers created from now on.");
+    Checkbox("leaf composites (enfa|) encoded to BC3 instead of RGBA8 (RFG-092)", &levers.compressComposites);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("POSEIDON_COMPRESS_COMPOSITES=0 turns this off. A coverage-spliced leaf albedo went\n"
+                          "up as RGBA8 with generated mips, 4x the bytes of a block format -- 693 MB on Everon\n"
+                          "at play settings. Applies to textures uploaded from now on.");
     ImGui::SetNextItemWidth(160.0f);
     ImGui::SliderFloat("sky bake: min enclosed", &levers.skyBakeMinEnclosed, 0.0f, 0.5f, "%.2f");
     if (ImGui::IsItemHovered())

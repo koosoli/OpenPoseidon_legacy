@@ -98,6 +98,10 @@ struct ResidencyLevers
     //                                                 path holds draws through that mesh instead
     //                                                 of a second copy in the geometry pool
     bool  shareRetainedMeshes = true;
+    //   compressComposites  POSEIDON_COMPRESS_COMPOSITES=0 turns it OFF: RFG-092, an `enfa|`
+    //                                                 leaf composite is encoded to BC3 on the
+    //                                                 CPU instead of uploaded as RGBA8 (4x)
+    bool  compressComposites = true;
 };
 
 inline ResidencyLevers& GResidencyLevers()
@@ -117,6 +121,8 @@ inline ResidencyLevers& GResidencyLevers()
             l.layerTintInShader = (*v == '0');
         if (const char* v = std::getenv("WGR_SHARE_RETAINED_MESHES"))
             l.shareRetainedMeshes = !(*v == '0');
+        if (const char* v = std::getenv("POSEIDON_COMPRESS_COMPOSITES"))
+            l.compressComposites = !(*v == '0');
         return l;
     }();
     return levers;

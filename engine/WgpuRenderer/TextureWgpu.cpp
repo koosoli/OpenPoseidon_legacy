@@ -17,6 +17,9 @@
 #include <Poseidon/IO/Streams/QBStream.hpp>
 #include <Poseidon/IO/Streams/QStream.hpp>
 
+#define STB_DXT_IMPLEMENTATION
+#include <stb_dxt.h> // RFG-092: BC3 for the Enfusion leaf composites
+
 #include <algorithm>
 #include <atomic>
 #include <cctype>
@@ -848,6 +851,75 @@ void NoteUploadSize(int w, int h, uint64_t bytes, bool blockCompressed)
     const int row = blockCompressed ? 0 : 1;
     GUploadBucketCount[row][b].fetch_add(1, std::memory_order_relaxed);
     GUploadBucketBytes[row][b].fetch_add(bytes, std::memory_order_relaxed);
+}
+} // namespace
+
+// RFG-092: an `enfa|coverage|colour` leaf composite is a BC7 albedo whose alpha was replaced
+// by the coverage map, and it went to the GPU as RGBA8 with generated mips -- 5.6 MB for a
+// 1024^2 texture that is 1.4 MB as a block format. Measured on native Everon at the owner's
+// configuration: 141 of them, 693 MB, the last uncompressed uploads left after RFG-086;
+// 237 / 1,166 MB under the 100k stress. BC3 is RGB + an interpolated alpha block, which is
+// exactly what a cutout wants; the chain is built here (box filter, alpha included, so the
+// coverage thins at distance the way the GPU's own mips did) and every level encoded with
+// stb_dxt. Not BC7: no encoder in the tree, and a leaf card does not need its quality.
+namespace
+{
+bool EncodeBc3Chain(const uint8_t* rgba, int width, int height, std::vector<uint8_t>& blocks,
+                    std::vector<uint32_t>& offsets, int& levels)
+{
+    if (rgba == nullptr || width < 4 || height < 4)
+        return false;
+    std::vector<uint8_t> level(rgba, rgba + static_cast<size_t>(width) * height * 4);
+    int w = width, h = height;
+    blocks.clear();
+    offsets.clear();
+    levels = 0;
+    uint8_t block[64];
+    uint8_t out[16];
+    while (true)
+    {
+        offsets.push_back(static_cast<uint32_t>(blocks.size()));
+        const int bw = (w + 3) / 4, bh = (h + 3) / 4;
+        for (int by = 0; by < bh; ++by)
+            for (int bx = 0; bx < bw; ++bx)
+            {
+                for (int y = 0; y < 4; ++y)
+                    for (int x = 0; x < 4; ++x)
+                    {
+                        const int sx = std::min(bx * 4 + x, w - 1), sy = std::min(by * 4 + y, h - 1);
+                        std::memcpy(block + (y * 4 + x) * 4, level.data() + (static_cast<size_t>(sy) * w + sx) * 4, 4);
+                    }
+                stb_compress_dxt_block(out, block, 1, STB_DXT_NORMAL);
+                blocks.insert(blocks.end(), out, out + 16);
+            }
+        ++levels;
+        if (w <= 4 && h <= 4)
+            break;
+        const int nw = std::max(w / 2, 1), nh = std::max(h / 2, 1);
+        std::vector<uint8_t> next(static_cast<size_t>(nw) * nh * 4);
+        for (int y = 0; y < nh; ++y)
+            for (int x = 0; x < nw; ++x)
+                for (int c = 0; c < 4; ++c)
+                {
+                    const int x0 = std::min(x * 2, w - 1), x1 = std::min(x * 2 + 1, w - 1);
+                    const int y0 = std::min(y * 2, h - 1), y1 = std::min(y * 2 + 1, h - 1);
+                    const int sum = level[(static_cast<size_t>(y0) * w + x0) * 4 + c] +
+                                    level[(static_cast<size_t>(y0) * w + x1) * 4 + c] +
+                                    level[(static_cast<size_t>(y1) * w + x0) * 4 + c] +
+                                    level[(static_cast<size_t>(y1) * w + x1) * 4 + c];
+                    next[(static_cast<size_t>(y) * nw + x) * 4 + c] = static_cast<uint8_t>((sum + 2) / 4);
+                }
+        level.swap(next);
+        w = nw;
+        h = nh;
+    }
+    return true;
+}
+
+bool CompositeWantsBc3(const char* name)
+{
+    return name != nullptr && std::strncmp(name, "enfa|", 5) == 0 &&
+           Poseidon::Dev::GResidencyLevers().compressComposites;
 }
 } // namespace
 
@@ -1743,11 +1815,30 @@ uint64_t TextureWgpu::EnsureUploaded()
             render::PreparedTextureStore::Instance().TakeDecoded(render::PreparedTextureStore::Key(Name()), prepared))
         {
             CheckProducerMayTouchRenderer("texture create");
-            _gpuHandle = wgr_texture_create(r, static_cast<uint32_t>(prepared.width),
-                                            static_cast<uint32_t>(prepared.height), WGR_TEXTURE_RGBA8, 1,
-                                            WGR_TEXTURE_GEN_MIPS, prepared.rgba.data(),
-                                            static_cast<uint32_t>(prepared.rgba.size()));
-            if (_gpuHandle)
+            std::vector<uint8_t>  bc3;
+            std::vector<uint32_t> bc3Offsets;
+            int                   bc3Levels = 0;
+            if (CompositeWantsBc3(Name()) &&
+                EncodeBc3Chain(prepared.rgba.data(), prepared.width, prepared.height, bc3, bc3Offsets, bc3Levels))
+            {
+                _gpuHandle = wgr_texture_create_in_slot(r, static_cast<uint32_t>(prepared.width),
+                                                        static_cast<uint32_t>(prepared.height), WGR_TEXTURE_BC3,
+                                                        static_cast<uint32_t>(bc3Levels), 0, bc3.data(),
+                                                        static_cast<uint32_t>(bc3.size()), AcquireSlotLease());
+                if (_gpuHandle)
+                {
+                    _w = prepared.width;
+                    _h = prepared.height;
+                    NoteUploadSize(_w, _h, bc3.size(), true);
+                    GTextureStreamStats.frameUploadBytes.fetch_add(bc3.size(), std::memory_order_relaxed);
+                }
+            }
+            if (!_gpuHandle)
+                _gpuHandle = wgr_texture_create(r, static_cast<uint32_t>(prepared.width),
+                                                static_cast<uint32_t>(prepared.height), WGR_TEXTURE_RGBA8, 1,
+                                                WGR_TEXTURE_GEN_MIPS, prepared.rgba.data(),
+                                                static_cast<uint32_t>(prepared.rgba.size()));
+            if (_gpuHandle && bc3.empty())
             {
                 _w = prepared.width;
                 _h = prepared.height;
@@ -1784,10 +1875,25 @@ uint64_t TextureWgpu::EnsureUploaded()
                     for (size_t i = 0; i + 2 < pixels.size(); i += 4)
                         std::swap(pixels[i], pixels[i + 2]);
                 CheckProducerMayTouchRenderer("texture create");
-                _gpuHandle = wgr_texture_create_in_slot(
-                    r, static_cast<uint32_t>(_w), static_cast<uint32_t>(_h), WGR_TEXTURE_RGBA8, 1,
-                    WGR_TEXTURE_GEN_MIPS, pixels.data(), static_cast<uint32_t>(pixels.size()), AcquireSlotLease());
-                NoteUploadSize(_w, _h, pixels.size() * 4 / 3, false);
+                std::vector<uint8_t>  bc3;
+                std::vector<uint32_t> bc3Offsets;
+                int                   bc3Levels = 0;
+                if (CompositeWantsBc3(Name()) && EncodeBc3Chain(pixels.data(), _w, _h, bc3, bc3Offsets, bc3Levels))
+                {
+                    _gpuHandle = wgr_texture_create_in_slot(
+                        r, static_cast<uint32_t>(_w), static_cast<uint32_t>(_h), WGR_TEXTURE_BC3,
+                        static_cast<uint32_t>(bc3Levels), 0, bc3.data(), static_cast<uint32_t>(bc3.size()),
+                        AcquireSlotLease());
+                    if (_gpuHandle)
+                        NoteUploadSize(_w, _h, bc3.size(), true);
+                }
+                if (!_gpuHandle)
+                {
+                    _gpuHandle = wgr_texture_create_in_slot(
+                        r, static_cast<uint32_t>(_w), static_cast<uint32_t>(_h), WGR_TEXTURE_RGBA8, 1,
+                        WGR_TEXTURE_GEN_MIPS, pixels.data(), static_cast<uint32_t>(pixels.size()), AcquireSlotLease());
+                    NoteUploadSize(_w, _h, pixels.size() * 4 / 3, false);
+                }
                 GTextureStreamStats.frameUploadBytes.fetch_add(pixels.size(), std::memory_order_relaxed);
             }
         }
