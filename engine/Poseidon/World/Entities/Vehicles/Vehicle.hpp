@@ -294,6 +294,10 @@ class Entity: public Object
 	RemoteInterp _remoteInterp; // MP: eases this unit toward server updates when it is remote (anti-warp)
 
 	AutoArray<float> _animateTexturesTimes;
+	// WRL-004: where this entity was last step, for the water-entry splash (see
+	// World/Simulation/WaterEntrySplash.hpp). Valid once Simulate has run once.
+	Vector3 _waterSplashPrev = VZero;
+	bool _waterSplashPrevValid = false;
 	AutoArray<AnimationInstance> _animations;
 
 	public:

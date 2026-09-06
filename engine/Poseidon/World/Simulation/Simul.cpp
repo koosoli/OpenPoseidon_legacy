@@ -2,6 +2,7 @@
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
+#include <Poseidon/World/Simulation/WaterEntrySplash.hpp>
 #include <Poseidon/World/Entities/Infantry/PilotHead.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/Core/Global.hpp>
@@ -54,6 +55,19 @@ namespace Poseidon
 void Entity::Simulate(float deltaT, SimulationImportance prec)
 {
     const EntityType* type = GetNonAIType();
+
+    // WRL-004: anything that falls into water splashes. One place for every entity
+    // (things, cars, tanks, aircraft, soldiers); the helper decides from the previous
+    // and current position whether the bottom crossed the local surface going down.
+    {
+        const Vector3 now = WorldPosition();
+        if (_waterSplashPrevValid)
+        {
+            EmitWaterEntrySplash(*this, _waterSplashPrev, ObjectSpeed());
+        }
+        _waterSplashPrev = now;
+        _waterSplashPrevValid = true;
+    }
 
     for (int i = 0; i < _animateTexturesTimes.Size(); i++)
     {

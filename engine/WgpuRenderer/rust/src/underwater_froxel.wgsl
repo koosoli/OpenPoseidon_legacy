@@ -147,10 +147,27 @@ fn cs_underwater_froxel(@builtin(global_invocation_id) gid: vec3<u32>) {
     var previous_dist = 0.0;
     var previous_water_path = 0.0;
     var last_visibility = 1.0;
+    // WRL-006: the in-scattering stops where the ray leaves the camera's body through its
+    // side, the same ellipse-exit rule the compositor applies to extinction.
+    var body_exit = 1.0e9;
+    if (params.body_ellipse.z > 0.0 && params.body_ellipse.w > 0.0) {
+        let e = params.body_ellipse;
+        let u0 = vec2<f32>((params.camera_pos_layers.x - e.x) / e.z, (params.camera_pos_layers.z - e.y) / e.w);
+        let d = vec2<f32>(ray.x / e.z, ray.z / e.w);
+        let a = dot(d, d);
+        let b = 2.0 * dot(u0, d);
+        let c = dot(u0, u0) - 1.0;
+        if (a > 1e-8) {
+            let disc = b * b - 4.0 * a * c;
+            if (disc >= 0.0) {
+                body_exit = max((-b + sqrt(disc)) / (2.0 * a), 0.0);
+            }
+        }
+    }
     for (var z = 0u; z < dims.z; z = z + 1u) {
         let w = (f32(z) + 0.5) / f32(dims.z);
         let target_dist = max_dist * w * w;
-        let water_path = water_path_length(ray, target_dist, cam_above);
+        let water_path = min(water_path_length(ray, target_dist, cam_above), body_exit);
         let segment_m = max(water_path - previous_water_path, 0.0);
         if (segment_m > 1e-4) {
             let midpoint = mix(previous_dist, target_dist, 0.5);

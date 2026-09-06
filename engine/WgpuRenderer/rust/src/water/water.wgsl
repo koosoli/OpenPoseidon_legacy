@@ -1487,6 +1487,7 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
     let body_index = i32(in.body_id + 0.5);
     var body_coverage = 1.0;
     var body_profile = -1;
+    var body_edge = 0.0; // normalised ellipse radius^2 at this fragment (1 = the bank)
     if (body_index > 0) {
         let e = wp.bodies[3 * (body_index - 1)];
         let k = wp.bodies[3 * (body_index - 1) + 1];
@@ -1498,6 +1499,7 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
             discard;
         }
         body_coverage = 1.0 - smoothstep(0.94, 1.03, d);
+        body_edge = d;
         body_profile = i32(k.w + 0.5);
     }
 
@@ -1920,7 +1922,10 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
     var body_surf = 1.0;
     if (body_index > 0) {
         let f = wp.bodies[3 * (body_index - 1) + 2];
-        river_flow = normalize(f.xy + vec2<f32>(1e-4, 0.0)) * max(f.z, 0.0);
+        // WRL-004 bank slowdown: the flow eases to ~15% at the bank, from the body's own
+        // boundary distance (authored bank data would replace this; screen depth never does).
+        river_flow = normalize(f.xy + vec2<f32>(1e-4, 0.0)) * max(f.z, 0.0) *
+            mix(1.0, 0.15, smoothstep(0.55, 1.0, body_edge));
         body_surf = 0.15;
     }
     let swash = sin(TWO_PI * wp.time * wp.swash_speed);
