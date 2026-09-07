@@ -1543,10 +1543,12 @@ class EngineWgpu : public EngineDummy
     LocalShadowLight _localShadowLights[kMaxLocalShadows] = {};
     //! LGT-010: the shadow-view bits a caster at this position belongs in.
     uint32_t LocalShadowCasterMask(float relX, float relY, float relZ) const;
-    //! LGT-015: view-projection for local view `k`, cone or cube face. ONE definition: the
-    //! frame UBO and the depth pass must agree exactly or the map is sampled through a
-    //! different matrix than it was rendered with, which reads as shadow everywhere.
-    Poseidon::shadow::Mat4 LocalShadowVP(int k) const;
+    //! LGT-025: view-projection for local view `k`, cone or cube face, expressed relative to
+    //! `camPos`. The absolute projection is the same whatever basis it is written in, so the
+    //! depth pass and each camera may use their own -- and they MUST: a receiver works in ITS
+    //! camera's space, so a matrix built around a different origin mis-samples by the delta
+    //! between them and every local light reads as fully occluded.
+    Poseidon::shadow::Mat4 LocalShadowVP(int k, const float camPos[3]) const;
     int _localShadowCount = 0;
 
     // Dev-panel overlay for the current frame

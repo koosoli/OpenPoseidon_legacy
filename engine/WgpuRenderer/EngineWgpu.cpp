@@ -1880,7 +1880,7 @@ bool EngineWgpu::SetSwapInterval(int interval)
 // each shadowing light's reach -- deliberately generous (it ignores the cone, so a caster
 // beside the beam is still submitted) because the cost of a false positive is one clipped
 // draw and the cost of a false negative is a missing shadow, which is a visible bug.
-Poseidon::shadow::Mat4 EngineWgpu::LocalShadowVP(int k) const
+Poseidon::shadow::Mat4 EngineWgpu::LocalShadowVP(int k, const float camPos[3]) const
 {
     const Poseidon::Dev::LocalShadowSettings& ls = Poseidon::Dev::GLocalShadowSettings();
     const LocalShadowLight& L = _localShadowLights[k];
@@ -1888,7 +1888,7 @@ Poseidon::shadow::Mat4 EngineWgpu::LocalShadowVP(int k) const
     // further away spends depth on invisible geometry.
     const float reach = std::clamp(L.startAtten * ls.rangeScale, 2.0f, ls.rangeMax);
     const Poseidon::shadow::Vec3 pos{L.pos[0], L.pos[1], L.pos[2]};
-    const Poseidon::shadow::Vec3 cam{_smCamPos[0], _smCamPos[1], _smCamPos[2]};
+    const Poseidon::shadow::Vec3 cam{camPos[0], camPos[1], camPos[2]};
     if (L.cubeFace >= 0)
     {
         return Poseidon::shadow::PointFaceVP(pos, L.cubeFace, std::max(ls.nearD, 0.01f), reach, cam);
@@ -3693,9 +3693,21 @@ void EngineWgpu::NextFrame()
                 // for THIS frame just above, so `_localShadowCount` is already final here.
                 {
                     const Poseidon::Dev::LocalShadowSettings& ls = Poseidon::Dev::GLocalShadowSettings();
+                    // LGT-025. This is inside the per-CAMERA loop, and it used to build every
+                    // camera's lookup matrices around `_smCamPos` -- the origin the depth pass
+                    // and the casters use. For the main view those coincide and it worked. For
+                    // any SECOND camera in the frame they do not, and a receiver that samples a
+                    // matrix built around a different origin misses by the delta between them:
+                    // not a small error, a total one, so every local light reads as fully
+                    // occluded and the lit world goes black. That is the owner's "es
+                    // funktioniert nicht immer", and his own guess at the trigger was exactly
+                    // right -- "der spieler unten ist aber freefly oben" is two cameras.
+                    // The absolute projection is identical either way; only the basis it is
+                    // written in changes, so the depth pass keeps _smCamPos below and each
+                    // camera gets its own here.
                     for (int k = 0; k < _localShadowCount && k < kMaxLocalShadows; k++)
                     {
-                        const Poseidon::shadow::Mat4 vp = LocalShadowVP(k);
+                        const Poseidon::shadow::Mat4 vp = LocalShadowVP(k, _cameras[i].pos);
                         std::memcpy(sb.local_vp[k].m, vp.m.data(), sizeof(sb.local_vp[k].m));
                     }
                     // {count, darkness, texel_size, first_layer}. first_layer is where the
@@ -3898,7 +3910,9 @@ void EngineWgpu::NextFrame()
                 }
                 for (int k = 0; k < _localShadowCount && k < kMaxLocalShadows; k++)
                 {
-                    const Poseidon::shadow::Mat4 vp = LocalShadowVP(k);
+                    // LGT-025: the DEPTH pass renders casters that were made relative to
+                    // _smCamPos, so its matrices stay in that basis. See the per-camera site.
+                    const Poseidon::shadow::Mat4 vp = LocalShadowVP(k, _smCamPos);
                     std::memcpy(frame.shadow.local_vp[k].m, vp.m.data(), sizeof(frame.shadow.local_vp[k].m));
                 }
             }
