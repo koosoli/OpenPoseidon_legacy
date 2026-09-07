@@ -345,8 +345,30 @@ void StreetLamp::CreateLight(Matrix4Par pos)
             {
                 Ref<LightPointVisible> point = new LightPointVisible(shape, diffuse, ambient);
                 point->SetBrightness(radius);
+                // LGT-014. radiusScale shrinks the flat CORE, which is the whole point of
+                // LAMP-004 -- but reach was 10x the core, so it shrank that too and the
+                // lamps went out as the owner backed away ("wenn ich weiter weg bin ... ist
+                // das licht nicht mehr zu sehen"). Scale the reach back up by the same
+                // factor: the pool stays small, the lamp is still there from 500 m.
+                point->SetEndAttenScale(10.0f / std::max(lampSet.radiusScale, 0.02f));
                 point->SetPosition(pos.FastTransform(_lightPos));
                 _light = point;
+                if (lampSet.spill > 0.0f)
+                {
+                    // LGT-014. The spill used to exist only on the cone path, so with cones
+                    // off a lamp was one tight pool and nothing else -- which is the "more
+                    // falloff, spill should light the surroundings a bit more" the owner
+                    // asked for, missing. A second, dim, WIDE point light at the same place
+                    // is the falloff: the bright core stays small (radiusScale) and this one
+                    // washes the street and the house fronts around it without lifting them
+                    // to floodlight.
+                    _spill = new LightPointVisible(shape, diffuse * lampSet.spill, ambient * lampSet.spill);
+                    _spill->SetBrightness(radius * lampSet.spillRadius);
+                    _spill->SetEndAttenScale(
+                        10.0f / std::max(lampSet.radiusScale * lampSet.spillRadius, 0.02f));
+                    _spill->SetPosition(pos.FastTransform(_lightPos));
+                    GLOB_SCENE->AddLight(_spill);
+                }
             }
             _lightGeneration = lampSet.generation;
             GLOB_SCENE->AddLight(_light);

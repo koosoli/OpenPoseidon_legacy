@@ -3380,7 +3380,11 @@ void EngineWgpu::NextFrame()
                     L.coneOuter = src.coneOuter;
                     L.startAtten = src.startAtten;
                 }
-                pl.dir = {src.dir.X(), src.dir.Y(), src.dir.Z(), kind};
+                // LGT-014: a POINT light's dir.xyz is unused by the shader, so the reach
+                // multiplier rides in dir.x rather than growing the 64-byte light struct.
+                // A spot keeps its axis there and keeps the historical 10x reach.
+                pl.dir = src.spot ? WgrVec4{src.dir.X(), src.dir.Y(), src.dir.Z(), kind}
+                                  : WgrVec4{src.endAttenScale, 0.0f, 0.0f, kind};
                 _lights.push_back(pl);
             }
             _localShadowCount = localShadowSlots;

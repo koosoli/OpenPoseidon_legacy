@@ -154,6 +154,10 @@ struct PresentationSnapshot
         // beam's own edge away.
         float coneOuter = 0.0f;
         float coneInner = 0.0f; //!< inner half-angle, radians: full brightness inside it
+        //! LGT-014: reach as a multiple of startAtten. Also the score's range, below, which
+        //! is why a lamp with a deliberately small core used to fall out of the light budget
+        //! at a distance as well as fading out of the shader.
+        float endAttenScale = 10.0f;
     };
     static constexpr int kMaxLights = 256;
     int lightCount = 0;

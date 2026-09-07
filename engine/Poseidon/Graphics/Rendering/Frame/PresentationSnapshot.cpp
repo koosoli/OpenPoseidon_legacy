@@ -173,7 +173,8 @@ static void FillPresentationSnapshot(PresentationSnapshot& snap)
                 entry.spot = isSpot;
                 entry.coneOuter = isSpot ? desc.phi : 0.0f;   // LGT-010
                 entry.coneInner = isSpot ? desc.theta : 0.0f; // LGT-011
-                const float range = std::max(desc.startAtten * 10.0f, 1.0f);
+                entry.endAttenScale = desc.endAttenScale; // LGT-014
+                const float range = std::max(desc.startAtten * desc.endAttenScale, 1.0f);
                 const float score = desc.pos.Distance2(cameraPos) / (range * range);
                 candidates.push_back({score, entry});
             }

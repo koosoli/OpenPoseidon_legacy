@@ -82,7 +82,14 @@ struct LampLightSettings
     // light's, and LGT-011 fixed it: a lamp now opens to the 36 degrees it actually declares.
     // A cone is also the only kind of local light that can cast a shadow (a point needs six
     // maps), which is what the owner asked for: "strassenlaternen machen noch keine schatten".
-    bool cone = true;
+    // BACK OFF (2026-09-07, second smoke test). Turning lamps into cones to make them
+    // shadow-capable changed what they LIGHT: a cone only lights inside its cone, so from
+    // any distance outside the beam the lamp went dark. The owner: "wenn ich weiter weg bin
+    // von einem strassen licht ... ist das licht nicht mehr zu sehen, das ist eine
+    // regression". He is right, and the lesson is the same one as the indoor light gate:
+    // do not change what a light DOES in order to make a feature possible. Point lights need
+    // shadows of their own (six faces); that is the work, not this.
+    bool cone = false;
     // Sodium-vapour orange. The 2001 config asks for (0.90, 0.80, 0.60), a warm white --
     // which is a 1985 idea of a lamp, not what a period street lamp looked like. The owner
     // asked for orange; POSEIDON_LAMP_COLOR=r,g,b overrides, colorOverride=false keeps the
@@ -93,10 +100,10 @@ struct LampLightSettings
     // surroundings absolutely black, which is as wrong as the floodlight was. A second,
     // weak, omnidirectional light per lamp is the spill -- the surroundings stay lit, much
     // less than the pool under the lamp. 0 = pure spot. POSEIDON_LAMP_SPILL.
-    float spill = 0.30f;
+    float spill = 0.22f;
     // Radius of that spill light relative to the pool's. Small: it is the glow around a
     // lamp, not a second floodlight. POSEIDON_LAMP_SPILL_RADIUS.
-    float spillRadius = 0.45f;
+    float spillRadius = 2.20f;
     unsigned generation = 0;
 };
 
@@ -111,7 +118,11 @@ LampLightSettings& GLampLightSettings();
 // slice. See docs/roadmap/LGT-010-LOCAL-LIGHT-SHADOWS-PLAN.md.
 struct LocalShadowSettings
 {
-    bool enabled = false;   //!< POSEIDON_LOCAL_SHADOWS=1. OFF until measured, per the plan.
+    // ON as of LGT-014. It shipped off under the LGT-010 rule "a lever defaulted off is
+    // acceptable, a changed default is not" -- but the owner has now asked for local-light
+    // shadows in three consecutive messages, so off IS the regression. The lever stays:
+    // POSEIDON_LOCAL_SHADOWS=0, or the Lighting tab.
+    bool enabled = true;   //!< POSEIDON_LOCAL_SHADOWS=1. OFF until measured, per the plan.
     int maxLights = 2;      //!< POSEIDON_LOCAL_SHADOW_LIGHTS: how many get a layer at once.
     // The near plane of the light's own frustum, metres. Perspective depth precision is
     // spent between the near plane and a few times its distance, so this is NOT "as small as

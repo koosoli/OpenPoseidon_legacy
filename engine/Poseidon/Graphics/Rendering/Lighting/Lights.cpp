@@ -902,6 +902,7 @@ void LightPoint::GetDescription(LightDescription& desc) const
     desc.diffuse = GetDiffuse();
     desc.phi = 0;
     desc.theta = 0;
+    desc.endAttenScale = _endAttenScale; // LGT-014
 }
 
 LightReflector::LightReflector(LODShapeWithShadow* shape, ColorVal color, ColorVal ambient, float angle, float size)
@@ -1102,6 +1103,17 @@ void LightReflector::ToDraw(ClipFlags clipFlags, bool dimmed)
     // sehen". POSEIDON_LIGHT_VOLUME_CONE=1 restores it.
     if (!Poseidon::Dev::GLightVolumeCone().enabled)
     {
+        // ...but the LAMP still glows. Skipping the draw entirely turned every headlight
+        // dark: this call is what puts the bulb on screen as well as the shaft, so removing
+        // it made a car look like it was driving with its lights off while lighting the road.
+        // The wedge is what was ugly; the glowing bulb is not.
+        if (GScene->MainLight()->NightEffect() >= 0.01 && !dimmed)
+        {
+            Color c = GetObjectColor();
+            const float invSize = InvSqrt(c.R() * c.R() + c.G() * c.G() + c.B() * c.B());
+            c = c * invSize;
+            GScene->DrawVolumeLight(GScene->Preloaded(HalfLight), PackedColor(c), *this, _size * 0.5f);
+        }
         return;
     }
     if (GScene->MainLight()->NightEffect() < 0.01)

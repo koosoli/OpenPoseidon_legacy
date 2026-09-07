@@ -136,7 +136,9 @@ struct PhysicsProbeSettings
     // illuminating shapes machen auch keinen schattenwurf". They could not -- a point light
     // needs six shadow maps and only a cone needs one, so a probe that emits light has to be
     // a cone before it can occlude anything. Untick it for a bare glowing ball.
-    bool  lightSpot = true;
+    // BACK OFF for the same reason the street lamps went back: a cone lights only inside its
+    // cone, and a probe is meant to light the room it is thrown into. Tick it for a torch.
+    bool  lightSpot = false;
     float lightConeOuter = 0.55f; //!< outer half-angle, radians (~31 degrees)
     //! Aim the cone along the VIEW direction instead of straight down -- a torch rather than a
     //! lamp. A downward cone puts its shadow under the caster where nothing can see it; a

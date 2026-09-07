@@ -121,7 +121,16 @@ fn lights_contrib(world_rel: vec3<f32>, normal_ws: vec3<f32>, mat_diffuse: vec3<
         let to_light = (light.pos.xyz - frame.cam_pos.xyz) - world_rel;
         let size2 = dot(to_light, to_light);
         let start_atten2 = light.pos.w * light.pos.w;
-        let end_atten2 = start_atten2 * 100.0;
+        // LGT-014: reach used to be hardwired at 10x the start attenuation, which welded a
+        // light's CORE SIZE to its RANGE -- shrink one to stop a street lamp reading as a
+        // floodlight and the lamp also stops existing 90 m away. A point light carries its
+        // own multiplier in dir.x (its dir.xyz is otherwise unused here); anything that does
+        // not, spots included, keeps the 10.
+        var end_mult = 10.0;
+        if (light.dir.w < 0.5 && light.dir.x > 0.0) {
+            end_mult = light.dir.x;
+        }
+        let end_atten2 = start_atten2 * end_mult * end_mult;
         if (size2 >= end_atten2) {
             continue;
         }

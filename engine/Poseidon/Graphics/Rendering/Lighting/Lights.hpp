@@ -28,6 +28,13 @@ struct LightDescription // D3D-like light description
 	float startAtten; // distance with intensity 1, falloff starts here
 	// for spotlight only: inner and outer cone angles
 	float theta,phi; // see corresponding D3DLIGHT8 members
+	// LGT-014: how far past startAtten the light still reaches, as a multiple of it. The
+	// shader has always cut a local light at 10x its start attenuation, so START RADIUS AND
+	// REACH WERE THE SAME NUMBER -- which is why shrinking a street lamp's core to get a
+	// pool instead of a floodlight also shrank its reach from ~500 m to ~90 m, and the owner
+	// saw lamps vanish as he backed away. They are separate properties and this separates
+	// them. 10 is the historical value, so a light that says nothing behaves as before.
+	float endAttenScale = 10.0f;
 };
 
 class Light: public RefCountWithLinks, virtual public Poseidon::Frame
@@ -231,11 +238,15 @@ class LightPoint: public LightPositionedColored
 
 	protected:
 	float _startAtten;
+	float _endAttenScale = 10.0f; //!< LGT-014, see LightDescription::endAttenScale
 
 	public:
 	LightPoint();
 	LightPoint( ColorVal diffuse, ColorVal ambient );
 	void SetBrightness( float coef ){_startAtten=50*coef;}
+	//! Reach, as a multiple of startAtten. Raise it when the core is deliberately small.
+	void SetEndAttenScale( float scale ){_endAttenScale=scale;}
+	float GetEndAttenScale() const {return _endAttenScale;}
 	float Brightness() const override;
 	float SortBrightness() const override;
 	Color GetObjectColor() const override;
