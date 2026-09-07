@@ -45,12 +45,34 @@ const LOCAL_MAX_INSIDE2: f32 = 0.98063081; // (cos 8deg)^2
 //
 // The 3x3 PCF is the same shape the cascades use. A single tap on a perspective map gives a
 // hard, crawling edge, and a spot's map is small enough that one extra kernel is cheap.
-fn local_shadow_lit(world_rel: vec3<f32>, slot: i32) -> f32 {
+// `normal_ws`, `to_light_dist` and `tan_outer` are what turn a constant depth bias into a
+// NORMAL-OFFSET one -- the same cure the cascades use, and the reason the first working
+// version produced grain instead of silhouettes.
+//
+// A perspective shadow map's texel covers more world the further it is from the light, so a
+// single constant bias is either useless up close or a peter-panning gap far away. The world
+// size of one texel here is 2 * tan(halfFov) * distance / resolution, and every term of that
+// is already available: the resolution in local_ctl.z and the cone's tangent recovered from
+// the cos^2 the light already carries for its cone test. Pushing the receiver along its own
+// normal by a texel or two, scaled by how obliquely the light strikes it, moves the sample
+// off the surface that is shadowing itself without moving the shadow's edge.
+fn local_shadow_lit(world_rel: vec3<f32>, normal_ws: vec3<f32>, to_light_dir: vec3<f32>,
+                    to_light_dist: f32, tan_outer: f32, slot: i32) -> f32 {
     let n_local = i32(frame.shadow.local_ctl.x);
     if (slot < 0 || slot >= n_local) {
         return 1.0;
     }
-    let clip = frame.shadow.local_vp[slot] * vec4<f32>(world_rel, 1.0);
+    // One texel of this light's map, in world metres, at this receiver's distance.
+    let texel_world = 2.0 * tan_outer * 1.15 * max(to_light_dist, 0.1) * frame.shadow.local_ctl.z;
+    // Obliquely lit surfaces need more of it: across one texel their depth changes by
+    // texel * tan(angle to the light), so the offset is scaled by sin over cos of that
+    // angle -- the same shape the cascades' ShadowBias uses, clamped so a surface seen
+    // edge-on cannot demand an unbounded push.
+    let ndl = clamp(dot(normal_ws, to_light_dir), 0.0, 1.0);
+    let sin_t = sqrt(max(0.0, 1.0 - ndl * ndl));
+    let oblique = clamp(sin_t / max(ndl, 0.15), 0.0, 4.0);
+    let offset_pos = world_rel + normal_ws * (texel_world * (1.0 + 1.5 * oblique));
+    let clip = frame.shadow.local_vp[slot] * vec4<f32>(offset_pos, 1.0);
     if (clip.w <= 0.0) {
         return 1.0; // behind the light: its cone term has already rejected this fragment
     }
@@ -64,7 +86,9 @@ fn local_shadow_lit(world_rel: vec3<f32>, slot: i32) -> f32 {
     // light, so a slope-scaled bias would want the derivative of a value this function does
     // not have; the constant is what the cascades use as their floor and it is enough at the
     // ranges a headlight covers.
-    let bias = 0.0015;
+    // Small now, and only there to absorb depth quantisation: the normal offset above is
+    // what keeps a surface from shadowing itself.
+    let bias = 0.0004;
     let texel = frame.shadow.local_ctl.z;
     var lit = 0.0;
     for (var y = -1; y <= 1; y = y + 1) {
@@ -144,7 +168,14 @@ fn lights_contrib(world_rel: vec3<f32>, normal_ws: vec3<f32>, mat_diffuse: vec3<
         // the diffuse AND the ambient this light adds -- an unshadowed ambient term is what
         // made a wall's far side glow in the first place.
         if (shadow_slot >= 0) {
-            cone = cone * local_shadow_lit(world_rel, shadow_slot);
+            // The cone's tangent, recovered from the cos^2 the light already carries: the
+            // shadow map's field of view is that cone, so this is the map's own geometry
+            // rather than a guess.
+            let c2 = clamp(light.diffuse.w, 0.02, 0.9999);
+            let tan_outer = sqrt(max(1.0 - c2, 0.0) / c2);
+            let dist_l = sqrt(size2);
+            cone = cone * local_shadow_lit(world_rel, normal_ws, to_light / max(dist_l, 1e-4), dist_l,
+                                           tan_outer, shadow_slot);
             if (cone <= 0.0) {
                 continue;
             }

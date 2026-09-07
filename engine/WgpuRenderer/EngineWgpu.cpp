@@ -9552,7 +9552,16 @@ bool EngineWgpu::DumpShadowMap(const char* path)
         return false;
     }
     std::vector<float> depth(static_cast<size_t>(res) * res, 1.0f);
-    const uint32_t got = wgr_shadow_map_read(_renderer, 0, depth.data(), U32(depth.size()));
+    // LGT-010: POSEIDON_SHADOW_DUMP_LAYER picks which layer of the array is dumped. 0..3 are
+    // the sun's cascades; `_smCascades.count + k` is local light k. Reading the LIGHT's own
+    // depth map is the only way to tell "the shadow term is wrong" from "nothing was ever
+    // rendered into the map it samples", and those two look identical on screen.
+    static const uint32_t dumpLayer = []
+    {
+        const char* v = std::getenv("POSEIDON_SHADOW_DUMP_LAYER");
+        return v ? static_cast<uint32_t>(std::max(0, std::atoi(v))) : 0u;
+    }();
+    const uint32_t got = wgr_shadow_map_read(_renderer, dumpLayer, depth.data(), U32(depth.size()));
     if (!got)
     {
         return false;
