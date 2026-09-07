@@ -5860,9 +5860,13 @@ impl Gfx3d {
         // pass UBO must be set up even when there are no CPU casters this frame; only the CPU
         // caster bucketing below is skipped when `casters` is empty.
         let gpu_shadows = self.gpu_driven_enabled;
+        // The third term is a "nothing to draw" test, and it was written when the only
+        // possible caster sources were the sun's. A local view still needs its TARGET and its
+        // pass UBO built even on a frame with no casters at all -- otherwise shadow_map_read
+        // has nothing to read and the map cannot even be looked at.
         if (count == 0 && want_local == 0)
             || pass.resolution == 0
-            || (casters.is_empty() && !gpu_shadows && !grass.casts_shadows())
+            || (casters.is_empty() && !gpu_shadows && !grass.casts_shadows() && want_local == 0)
         {
             self.shadow_plan.clear();
             self.local_shadow_count = 0;

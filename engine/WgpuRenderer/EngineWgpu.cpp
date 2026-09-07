@@ -3626,8 +3626,15 @@ void EngineWgpu::NextFrame()
                 }
                 sb.omni_radius = {_smCascades.omniRadius[0], _smCascades.omniRadius[1], _smCascades.omniRadius[2],
                                   _smCascades.omniRadius[3]};
-                sb.ctl = {static_cast<float>(_smCascades.count), static_cast<float>(_smCascades.omniCount),
-                          _smTuning.fadeRange, _smTuning.biasBase};
+                // LGT-010: the SUN's cascade count for the SAMPLING side must be zero on a
+                // frame where the sun has no valid cascades. Otherwise shadow_strength keeps
+                // reading cascade layer 0 -- which is exactly the layer a local light's view
+                // now renders into on a night frame -- and every surface in the world came
+                // back occluded. That is what turned the torch test from "grain" into "the
+                // whole lit region is black": not the local shadow at all, the SUN's,
+                // sampling the light's map by mistake.
+                sb.ctl = {static_cast<float>(sunShadowActive ? _smCascades.count : 0),
+                          static_cast<float>(_smCascades.omniCount), _smTuning.fadeRange, _smTuning.biasBase};
                 sb.ctlb = {1.0f / static_cast<float>(_smCascadeRes), darkness, _smTuning.normalOffset, _smTuning.pcf};
                 sb.cam_fwd = {_cameras[i].dir[0], _cameras[i].dir[1], _cameras[i].dir[2], 0.0f};
                 sb.sun_dir = {_smCascades.sunDir.x, _smCascades.sunDir.y, _smCascades.sunDir.z, 0.0f};
@@ -3659,7 +3666,8 @@ void EngineWgpu::NextFrame()
                     // and sampling a layer that does not exist reads as "occluded everywhere".
                     // One number, one source.
                     sb.local_ctl = {static_cast<float>(_localShadowCount), ls.darkness,
-                                    1.0f / static_cast<float>(_smCascadeRes),
+                                    1.0f / static_cast<float>(_smCascadeRes > 0 ? _smCascadeRes
+                                                                              : std::max(_smTuning.resolution, 1024)),
                                     static_cast<float>(sunShadowActive ? _smCascades.count : 0)};
                 }
             }
@@ -3750,7 +3758,13 @@ void EngineWgpu::NextFrame()
             // cascade matrices into the pass with them.
             frame.shadow.count = sunShadowActive ? U32(_smCascades.count) : 0u;
             frame.shadow.omni_count = U32(_smCascades.omniCount);
-            frame.shadow.resolution = U32(_smCascadeRes);
+            // `_smCascadeRes` is written only by SetShadowCascades, which does not run at
+            // night -- so it is 0 then, and `pass.resolution == 0` made prepare_shadows
+            // return before it could allocate a single layer. That is the LAST of the gates
+            // this feature had to pass through, and like the others it exists because the
+            // shadow pass was only ever the sun's.
+            const int shadowRes = _smCascadeRes > 0 ? _smCascadeRes : std::max(_smTuning.resolution, 1024);
+            frame.shadow.resolution = U32(shadowRes);
             // Which cascades can actually receive grass-shadow fragments.
             //
             // Grass::draw_shadow submits the near-ring blades into whatever pass it is handed,
@@ -9594,7 +9608,10 @@ bool EngineWgpu::DumpShadowMap(const char* path)
     {
         return false;
     }
-    const int res = _smTuning.resolution;
+    // The TARGET's resolution, not the tuning's. shadow_map_read refuses when the buffer is
+    // smaller than the layer, and those two numbers are allowed to differ -- which made every
+    // dump return "FAILED" with nothing to say why.
+    const int res = std::max(_smCascadeRes, _smTuning.resolution);
     if (res <= 0)
     {
         return false;
