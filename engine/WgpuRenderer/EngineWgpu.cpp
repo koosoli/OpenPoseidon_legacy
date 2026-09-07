@@ -25,6 +25,7 @@
 #include <Poseidon/Graphics/Rendering/BuildRenderPassDescriptor.hpp>
 #include <Poseidon/Graphics/Rendering/AsciiSearch.hpp>
 #include <Poseidon/World/Scene/Pass1Submit.hpp>
+#include <Poseidon/World/Entities/Infantry/Head.hpp> // FACE-001 diagnostics
 #include <Poseidon/Graphics/Rendering/Primitives/Poly.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/Graphics/Rendering/RenderFlags.hpp>
@@ -814,6 +815,9 @@ class VertexBufferWgpu : public VertexBuffer
     // `skinned` flips on once SetSkinData has uploaded the bind pose + weights
     // `palette` holds the current frame's model-space bone matrices
     bool skinned = false;
+    // FACE-001: true while the last Update uploaded a CPU-posed frame of a skinned mesh,
+    // so the next non-posed Update knows it owes the bind pose a restore.
+    bool wasCpuPosed = false;
     int paletteCount = 0;
     std::vector<Matrix4> palette;
 
@@ -890,14 +894,73 @@ class VertexBufferWgpu : public VertexBuffer
     // mesh that re-derives byte-identical geometry), skipping just the GPU copy.
     void Update(const Shape& src, bool dynamic) override
     {
-        if (skinned || !renderer || !slot)
+        if (!renderer || !slot)
         {
             return;
+        }
+        // FACE-001: a skinned mesh normally stays at bind pose because the GPU poses it.
+        // While `cpuPosed` is set the animation system poses it on the CPU instead (the
+        // soldier face rig writes vertex offsets no bone matrix can express), so the posed
+        // bytes MUST be uploaded and the draw must not re-skin them. When the request drops
+        // the mesh has to go back to holding its bind pose, or the skinned pipeline would
+        // pose an already-posed mesh for the rest of its life.
+        if (skinned)
+        {
+            if (!cpuPosed)
+            {
+                if (wasCpuPosed && src.OriginalPosValid() && src.NVertex() == vertexCount && slot->sharedProducer == 0)
+                {
+                    wasCpuPosed = false;
+                    Poseidon::GFaceDiag().updRestore++;
+                    std::vector<SVertex> bind(static_cast<size_t>(vertexCount));
+                    render::mesh::BuildOrigVertices(src, bind.data());
+                    haveUploadHash = false;
+                    bufferDirty = false;
+                    if (slot->renderer == 0)
+                    {
+                        slot->verts = std::move(bind);
+                    }
+                    else if (uploader)
+                    {
+                        wgr_uploader_mesh_update(uploader, slot->renderer, AsMeshVerts(bind));
+                    }
+                    else
+                    {
+                        wgr_mesh_update(renderer, slot->renderer, AsMeshVerts(bind));
+                    }
+                }
+                Poseidon::GFaceDiag().updSkinSkip++;
+                return;
+            }
+            wasCpuPosed = true;
+            Poseidon::FaceAnimDiag& fd = Poseidon::GFaceDiag();
+            fd.updSkinPosed++;
+            fd.updBytes += vertexCount;
+            if (Poseidon::FaceDebugEnabled() && src.OriginalPosValid())
+            {
+                // The one oracle that cannot lie about whether the CPU pose is real: how far
+                // the shape's live vertices sit from its bind pose at the moment of upload.
+                float worst = 0;
+                for (int i = 0; i < src.NVertex(); i++)
+                {
+                    const float d2 = (src.Pos(i) - src.OrigPos(i)).SquareSize();
+                    if (d2 > worst)
+                    {
+                        worst = d2;
+                    }
+                }
+                const double w = std::sqrt(static_cast<double>(worst));
+                if (w > fd.poseMaxDelta)
+                {
+                    fd.poseMaxDelta = w;
+                }
+            }
         }
         if (slot->sharedProducer != 0)
         {
             // RFG-088: the bytes are the retained model's; a static level never changes them.
             bufferDirty = false;
+            if (cpuPosed) { Poseidon::GFaceDiag().updShared++; }
             return;
         }
         // Skip when the geometry hasn't changed since it was last made current. bufferDirty
@@ -912,10 +975,12 @@ class VertexBufferWgpu : public VertexBuffer
         // verts changed" — only bufferDirty does).
         if (!bufferDirty && (!isDynamic || haveUploadHash))
         {
+            if (cpuPosed) { Poseidon::GFaceDiag().updClean++; }
             return;
         }
         if (src.NVertex() != vertexCount)
         {
+            if (cpuPosed) { Poseidon::GFaceDiag().updCount++; }
             return;
         }
         std::vector<SVertex> verts(static_cast<size_t>(vertexCount));
@@ -932,14 +997,36 @@ class VertexBufferWgpu : public VertexBuffer
         {
             render::mesh::BuildVertices(src, verts.data());
         }
+        // FACE-001 kill door: POSEIDON_FACE_LIFT displaces every uploaded vertex of a
+        // CPU-posed mesh by that many metres in +Z. If the character does not visibly move,
+        // the bytes this function uploads are not the bytes the draw reads, and no amount of
+        // arguing about the face selections matters.
+        if (cpuPosed)
+        {
+            static const float lift = []
+            {
+                const char* e = std::getenv("POSEIDON_FACE_LIFT");
+                return e ? static_cast<float>(std::atof(e)) : 0.0f;
+            }();
+            if (lift != 0.0f)
+            {
+                for (auto& v : verts)
+                {
+                    v.pos = Vector3P(v.pos.X(), v.pos.Y(), v.pos.Z() + lift);
+                }
+            }
+            Poseidon::GFaceDiag().drawVerts = vertexCount;
+        }
         bufferDirty = false;
         const uint64_t hash = HashVertices(verts.data(), verts.size() * sizeof(SVertex));
         if (haveUploadHash && hash == lastUploadHash)
         {
+            if (cpuPosed) { Poseidon::GFaceDiag().updHash++; }
             return;
         }
         lastUploadHash = hash;
         haveUploadHash = true;
+        if (cpuPosed) { Poseidon::GFaceDiag().updSent++; }
         // REN-THR-009 — the one per-frame producer-side mutation that does NOT go through
         // the exclusive renderer handle. The audit found this path touches nothing
         // structural: a shared slotmap lookup, two field reads, and one
@@ -955,15 +1042,22 @@ class VertexBufferWgpu : public VertexBuffer
         // ClipLand selector, and it runs in the same draw phase as the create.
         if (slot->renderer == 0)
         {
+            if (cpuPosed) { Poseidon::GFaceDiag().updPending++; }
             slot->verts = std::move(verts);
             return;
         }
         if (uploader)
         {
-            wgr_uploader_mesh_update(uploader, slot->renderer, AsMeshVerts(verts));
+            const uint32_t okUp = wgr_uploader_mesh_update(uploader, slot->renderer, AsMeshVerts(verts));
+            if (cpuPosed)
+            {
+                Poseidon::GFaceDiag().updUploader++;
+                if (okUp == 0) { Poseidon::GFaceDiag().updRefused++; }
+            }
         }
         else
         {
+            if (cpuPosed) { Poseidon::GFaceDiag().updDirect++; }
             wgr_mesh_update(renderer, slot->renderer, AsMeshVerts(verts));
         }
     }
@@ -1292,6 +1386,19 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
         SetDdsCompressedPassthrough(bcCapable && wanted);
         LOG_INFO(Graphics, "Wgpu: Enfusion compressed textures (BC7/BC5/BC4) {} (adapter BC support: {})",
                  (bcCapable && wanted) ? "ON" : "OFF", bcCapable ? "yes" : "NO -- decode path forced");
+    }
+
+    // MAT-NET-001: the netting depth-write lever. The dev panel is the supported control;
+    // this exists because the panel holds the mouse, so an automated A/B capture cannot
+    // tick the box -- and "things behind netting look strange" is a claim that has to be
+    // shown in two frames from one binary, not argued.
+    {
+        if (const char* env = std::getenv("POSEIDON_NET_DEPTH"))
+        {
+            _materialDebug.coverageMaskDepth = (env[0] != '0');
+        }
+        LOG_INFO(Graphics, "Wgpu: netting drawn as a depth-writing cutout (MAT-NET-001) {}",
+                 _materialDebug.coverageMaskDepth ? "ON" : "OFF");
     }
 
     // Procedural-blade definition strength, WGR_GRASS_CONTRAST. One number scales
@@ -1881,6 +1988,28 @@ float AlphaRefFromDesc(const render::RenderPassDescriptor& desc)
 {
     const bool test = desc.alpha == render::AlphaMode::Test || desc.alpha == render::AlphaMode::TestAndBlend;
     return test ? desc.alphaRef / 255.0f : 0.0f;
+}
+
+// MAT-NET-001: is this Blend-classified histogram actually a punch-through COVERAGE MASK
+// whose edges were antialiased (and, in ARGB4444, quantised to 16 alpha levels) rather than
+// a genuinely translucent surface?
+//
+// Two conditions, and they are the mirror image of the MAT-051 glass rule (pctClear < 5 and
+// pctPartial > 80): a mask has real HOLES -- a substantial share of texels at exactly a=0 --
+// and its partial texels are a MINORITY, because they are the perimeter of those holes and
+// not the body of the surface. Glass, smoke, halos and material-driven fades fail both.
+//
+// Thresholds against the measured stock CWA corpus (Dta/Data.pbo, PoseidonTools image
+// inspect). Masks, all accepted: pletivo_opak 88.0/10.6, pletivo_opak_dark32 81.1/15.3,
+// barbedwire_plot 85.1/8.7, barbedwire 76.5/21.7, barbedwire2 72.1/26.1, drat_svetlo_s
+// 57.7/21.8, m1a1_dratram_side 73.2/14.4, m1a1_dratram_back 54.6/14.0, maskovaci_sit_new
+// 39.9/32.7 (clear% / partial%). Rejected, and correctly: uh60_skla_ca canopy glass
+// (<5 clear, 99 partial) and mask_sit_2x1_ridka.paa (15.4/49.3) -- the latter is a real
+// mask but half its area is partial, so it stays on the conservative side of the line
+// rather than widening the rule until glass falls in.
+bool IsCoverageMaskAlpha(const Poseidon::AlphaStats& st)
+{
+    return st.pctClear >= 25.0 && st.pctPartial <= 40.0;
 }
 
 // True when nothing in the material can make the surface see-through, so any
@@ -4329,10 +4458,17 @@ void EngineWgpu::BeginMeshTL(const Shape& sMesh, int spec, bool dynamic)
 
     buf->Update(sMesh, dynamic);
 
-    if (!buf->skinned || buf->paletteCount <= 0)
+    // FACE-001: while the mesh is CPU-posed it carries its own final vertices; handing it a
+    // palette as well would pose it twice.
+    if (buf->cpuPosed)
+    {
+        Poseidon::GFaceDiag().drawPosed++;
+    }
+    if (!buf->skinned || buf->cpuPosed || buf->paletteCount <= 0)
     {
         return;
     }
+    Poseidon::GFaceDiag().drawPalette++;
 
     // Feedback to the animation system: this mesh is GPU-skinned so its CPU skinning can be skipped next frame
     buf->drawnSkinned = true;
@@ -5156,6 +5292,12 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     Pass1Submit::Scope p1sAlpha(Pass1Submit::gSecAlphaNs);
     render::BlendMode blend = desc.blend;
     float alphaRef = AlphaRefFromDesc(desc);
+    // MAT-NET-001: set when the coverage-mask rule below re-routes a Blend-classified
+    // punch-through mask (netting) to a depth-WRITING alpha test. The blend revisit pass
+    // has already demoted `desc.depth` to ReadOnly (GBlendSectionDepthReadOnly), so the
+    // blend flip alone would leave the surface out of the depth buffer, which is the whole
+    // bug; the depth mode has to be restored explicitly.
+    bool coverageMaskDepthWrite = false;
     // TreeAdv leaf cards are authored with antialiased alpha, which the texture
     // histogram calls Blend. Their RVMAT family is nevertheless alpha-tested;
     // without this matching discard the black transparent texels depth-write in
@@ -5195,6 +5337,46 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
         blend = render::BlendMode::Opaque;
         alphaRef = std::max(alphaRef, 0.5f);
     }
+    else if (_materialDebug.coverageMaskDepth && blend == render::BlendMode::AlphaBlend && tex != 0 && texture &&
+             alphaClass == Poseidon::AlphaStats::Blend && MaterialIsFullyOpaque(_curMaterial) &&
+             IsCoverageMaskAlpha(texture->AlphaStatsView()))
+    {
+        // MAT-NET-001, the owner's "things behind transparent netting look strange".
+        //
+        // Netting (chain-link, barbed wire, camo net) is a punch-through MASK whose edges were
+        // antialiased and then quantised into ARGB4444's 16 alpha levels. The histogram sees
+        // those edge texels as partial alpha and calls the whole texture Blend, so the section
+        // goes to the back-to-front revisit pass, which draws depth-test-only. Measured on the
+        // stock CWA corpus (Dta/Data.pbo), every one of them:
+        //     pletivo_opak.paa       (pletivo.p3d, the chain-link panel)  88.0% clear, 10.6% partial
+        //     pletivo_opak_dark32    (pletivo_wired.p3d)                  81.1% clear, 15.3% partial
+        //     barbedwire_plot.paa    (pletivo_wired.p3d)                  85.1% clear,  8.7% partial
+        //     maskovaci_sit_new.paa  (camo net)                           39.9% clear, 32.7% partial
+        //     m1a1_dratram_side.paa  (tank wire screen)                   73.2% clear, 14.4% partial
+        // and mask_sit_2x1_ridka has a DXT1 twin that already classifies CUTOUT -- the same
+        // mask, authored twice, routed two different ways purely by container.
+        //
+        // Not writing depth is not merely a sorting nicety here: the temporal upscaler's
+        // velocity is reconstructed from the DEPTH BUFFER ALONE (rust/src/temporal.wgsl
+        // fs_velocity), so a netting pixel is handed the motion of whatever is BEHIND it. A
+        // fence at 3 m over a background at 100 m parallaxes ~30x faster than the velocity it
+        // is given, and the history-control mask (fs_history_control) covers only sky and
+        // water, so DLSS is told to trust that history fully. The wire pattern smears across
+        // whatever is seen through it -- worst at the 67% render scale the DLSS route enables
+        // by default. GTAO has the same shape of error: gtao_ao() is a screen-space fetch, so
+        // the wire is shaded with the ambient occlusion of the geometry behind it.
+        //
+        // The rule is the mirror image of the MAT-051 glass rule below (pctClear < 5, mostly
+        // partial): a real mask has a substantial share of FULLY CLEAR texels and only a
+        // minority of partial ones -- the partials are the perimeter of the holes, not the
+        // body of the surface. Glass, smoke and genuine fades fail it on both counts.
+        // Treat it exactly as the Cutout class above is treated -- hard discard, opaque
+        // blend, MSAA alpha-to-coverage still antialiases the wire -- and restore the depth
+        // WRITE the revisit pass took away, which is the half that fixes the depth consumers.
+        blend = render::BlendMode::Opaque;
+        alphaRef = std::max(alphaRef, 0.5f);
+        coverageMaskDepthWrite = true;
+    }
     else if (blend == render::BlendMode::AlphaBlend && tex != 0 && alphaClass == Poseidon::AlphaStats::Opaque &&
              MaterialIsFullyOpaque(_curMaterial))
     {
@@ -5219,7 +5401,7 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     }
     d.blend = BlendFromDesc(blend);
     d.sampler = U32(SamplerForSpec(effectiveSpec));
-    d.depth = DepthFromDesc(desc.depth);
+    d.depth = coverageMaskDepthWrite ? WGR_DEPTH_TEST_WRITE : DepthFromDesc(desc.depth);
     d.alpha_ref = alphaRef;
     p1sAlpha.Close();
     if (LegacyTextureTraceEnabled())
@@ -9098,7 +9280,7 @@ void EngineWgpu::AddShadowCaster(const Shape& sMesh, const Matrix4& modelToWorld
     // pass poses it on the GPU; the scene's Animate() set buf->palette just
     // before this call.
     uint32_t paletteSlot = WGR_NO_PALETTE;
-    if (buf->skinned && buf->paletteCount > 0)
+    if (buf->skinned && !buf->cpuPosed && buf->paletteCount > 0) // FACE-001
     {
         buf->drawnSkinned = true;
         Matrix4 worldRel = modelToWorld;
@@ -10425,11 +10607,11 @@ void EngineWgpu::SyncWaterLookProfile()
         else if (key == "surface")
         {
             in >> _waterLook.glitterGain >> _waterLook.sssGain >> _waterLook.reflectionGain;
-            // v5: the reflection gain in a v4-or-older file is an automatic snapshot of the
-            // code default of the day -- the Water tab saves the whole subset on any edit --
-            // so it pinned 0.7 over the new 0.22 on every install that had ever touched the
-            // tab. Same failure the v3 colour rule exists for: a default that cannot reach
-            // the owner is a default that was never changed, and nothing warns you.
+            // v5: reflectionGain in a v4-or-older file is an automatic snapshot of the code
+            // default of the day (the Water tab saves the whole subset on any edit), so it
+            // pinned 0.7 over the new 0.22 on every install that had ever opened the tab.
+            // Same failure the v3 colour rule exists for: a default that cannot reach the
+            // owner is a default that was never changed, and nothing warns you.
             if (version < 5)
             {
                 _waterLook.reflectionGain = WaterSettings{}.reflectionGain;

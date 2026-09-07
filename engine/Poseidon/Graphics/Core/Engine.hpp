@@ -1037,6 +1037,21 @@ class Engine : public IGraphicsEngine
         // which have no RVMAT of their own. Off turns every legacy section back to its 2001
         // shading, which is the only way to see the enhancement's actual contribution A/B.
         bool legacyEnhancement = true;
+        // MAT-NET-001: a Blend-classified texture whose histogram is really a punch-through
+        // COVERAGE MASK with antialiased edges (netting, chain-link, barbed wire, camo net)
+        // is drawn as a depth-WRITING alpha test instead of a translucent blend. On by
+        // default; off restores the blend and, with it, the missing depth -- which is the
+        // A/B for "things behind transparent netting look strange", because the temporal
+        // upscaler's velocity and the screen-space AO both come from that depth buffer.
+        // Per-draw and CPU-side, so it takes effect on the next frame with no reload.
+        // OFF, and the reason is the owner's: "Zaun hat eh nie probleme gemacht, nur das
+        // kamu netz". The rule was measured on chain-link, which was never the complaint,
+        // and it has NOT been verified on a camo net -- a very different histogram (27%
+        // fully opaque texels against a fence's ~1%), where a hard 0.5 discard could
+        // plausibly look worse. Everon carries no camo net at all; the only ones in the
+        // game folder are the Arma 3 Stratis shelters. Until it is looked at through one,
+        // this ships off rather than changing something that worked.
+        bool coverageMaskDepth = false;
         // RFG-047: hand Enfusion's BC7/BC5/BC4 textures to the GPU COMPRESSED instead of
         // decoding them to 32-bit. On by default when the adapter supports it (every
         // D3D12-class GPU does); off restores the RFG-016 decode.
@@ -2434,11 +2449,11 @@ class Engine : public IGraphicsEngine
         float glitterGain = 1.0f;    // sun-specular gain (1 = the model's own energy)
         float sssGain = 1.0f;        // subsurface / backlit-crest gain
         // 0.22 on the owner's instruction (was 0.7). NOTE for anyone changing this again:
-        // reflectionGain lives in the water-look profile's `surface` group, so a new default
-        // is DEAD on any install that already has %APPDATA%\CWR\water-look\<map>.cfg --
-        // which is every install, because the Water tab writes the whole subset on any edit.
-        // The profile version was bumped to 5 and the reader drops this one field from older
-        // files, the same rule the v3 colour group needed and for the same reason.
+        // reflectionGain is in the profile's `surface` group, so a new default is dead on
+        // any install that already has %APPDATA%\CWR\water-look\<map>.cfg -- which is
+        // every install, because the Water tab writes the whole subset on any edit. The
+        // profile version was bumped to 5 and the reader drops this one field from older
+        // files for exactly that reason.
         float reflectionGain = 0.22f; // environment-reflection gain (1 = uncapped physical Fresnel)
         // How much wider the planar reflection renders than the screen's field of view. The
         // reflected camera otherwise inherits the main projection exactly, so a grazing reflection

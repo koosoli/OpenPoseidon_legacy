@@ -1421,18 +1421,12 @@ void DrawZeusTab()
         // DST-003: how far a wrecked building comes down.
         DestructionLook& destruct = GDestructionLook();
         Dev::Checkbox("Buildings collapse further (DST-003)", &destruct.enabled);
-        Dev::PanelTooltip("POSEIDON_DESTRUCT_LOOK=0 restores the 2001 collapse exactly. The destruction
-"
-                          "squashes a model's vertices towards the ground, but the 2001 height term takes
-"
-                          "at most 20% off, so a hit house shears and sags and then stands there. This
-"
-                          "scales that term alone; the sideways scatter is left as authored, because
-"
-                          "scaling THAT pulls the walls apart rather than down.
-"
-                          "The destroyed shape is cached per model, so a change here applies to buildings
-"
+        Dev::PanelTooltip("POSEIDON_DESTRUCT_LOOK=0 restores the 2001 collapse exactly. The destruction\n"
+                          "squashes a model's vertices towards the ground, but the 2001 height term takes\n"
+                          "at most 20% off, so a hit house shears and sags and then stands there. This\n"
+                          "scales that term alone; the sideways scatter is left as authored, because\n"
+                          "scaling THAT pulls the walls apart rather than down.\n"
+                          "The destroyed shape is cached per model, so a change here applies to buildings\n"
                           "that have not been destroyed yet.");
         ImGui::SetNextItemWidth(160.0f);
         Dev::SliderFloat("Collapse x", &destruct.squash, 1.0f, 6.0f, "%.1f");
@@ -4900,6 +4894,36 @@ void DrawMaterialDebugTab()
                           "unenhanced original in the same frame.\n"
                           "Stock content has no such files, so this changes nothing without an\n"
                           "enhancement pack present.");
+    changed |= Dev::Checkbox("Netting draws as a depth-writing cutout (MAT-NET-001)", &settings.coverageMaskDepth);
+    if (Dev::PanelItemHovered())
+        ImGui::SetTooltip(
+            "Chain-link, barbed wire and camo net are punch-through MASKS whose edges were\n"
+            "antialiased and then quantised into ARGB4444's 16 alpha levels. The texture\n"
+            "histogram reads those edge texels as partial alpha and calls the whole texture\n"
+            "BLEND, so the section goes to the back-to-front revisit pass -- which draws\n"
+            "depth-test-only. Measured on stock CWA: pletivo_opak.paa (the chain-link panel)\n"
+            "is 88.0%% fully clear and 10.6%% partial; barbedwire_plot 85.1/8.7; the camo net\n"
+            "maskovaci_sit_new 39.9/32.7. mask_sit_2x1_ridka even ships a DXT1 twin that\n"
+            "already classifies CUTOUT -- the same mask, routed two ways by container alone.\n"
+            "\n"
+            "A surface missing from the depth buffer is not just a sorting question here. The\n"
+            "temporal upscaler reconstructs its motion vectors from DEPTH ALONE, so a netting\n"
+            "pixel is handed the motion of whatever is behind it -- a fence at 3 m in front of\n"
+            "a 100 m background parallaxes about 30x faster than the velocity it is given, and\n"
+            "the history-control (reactive) mask covers only sky and water, so DLSS is told to\n"
+            "trust that history fully. The wire pattern then smears over whatever is seen\n"
+            "through it, worst at the 67%% render scale the DLSS route enables by default.\n"
+            "Screen-space AO has the same shape of error: it is fetched by screen position, so\n"
+            "the wire shades with the ambient occlusion of the geometry behind it.\n"
+            "\n"
+            "On: hard discard at alpha 0.5, opaque blend, depth WRITE restored (MSAA\n"
+            "alpha-to-coverage still antialiases the wire) -- the same treatment the Cutout\n"
+            "class already gets. Off: the old blend, for the A/B. Per-draw and CPU-side, so it\n"
+            "applies from the next frame; no reload.\n"
+            "\n"
+            "The rule is the mirror of the MAT-051 glass rule: >=25%% fully clear AND <=40%%\n"
+            "partial. Glass (uh60_skla_ca: <5%% clear, 99%% partial) fails both and keeps its\n"
+            "blend, as do smoke and material-driven fades.");
     const bool tintWas = settings.enfusionLayerTint;
     changed |= Dev::Checkbox("Enfusion shared-tile colour (Color_N)", &settings.enfusionLayerTint);
     if (Dev::PanelItemHovered())
