@@ -1159,7 +1159,7 @@ void LightPointVisible::ToDraw(ClipFlags clipFlags, bool dimmed)
     // not a lamp the size of a house. This is the fix for "wenn ich ueber eine stadt fliege
     // ist es einfach schwarz"; the ILLUMINATION at that range is correctly almost nothing,
     // and always was -- what a real lamp shows you from 200 m is its bulb.
-    GScene->DrawVolumeLight(_shape, PackedColor(c), *this, _size, 0.006f, 2.5f);
+    GScene->DrawVolumeLight(_shape, PackedColor(c), *this, _size, 0.012f, 2.5f);
 }
 
 void LightPointVisible::Load(const ParamEntry& cls)

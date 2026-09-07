@@ -362,7 +362,8 @@ void StreetLamp::CreateLight(Matrix4Par pos)
                     // is the falloff: the bright core stays small (radiusScale) and this one
                     // washes the street and the house fronts around it without lifting them
                     // to floodlight.
-                    _spill = new LightPointVisible(shape, diffuse * lampSet.spill, ambient * lampSet.spill);
+                    _spill = new LightPointVisible(shape, diffuse * lampSet.spill,
+                                                   ambient * (lampSet.spill * lampSet.spillAmbient));
                     _spill->SetBrightness(radius * lampSet.spillRadius);
                     _spill->SetEndAttenScale(
                         10.0f / std::max(lampSet.radiusScale * lampSet.spillRadius, 0.02f));

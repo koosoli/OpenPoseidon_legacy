@@ -111,10 +111,17 @@ struct LampLightSettings
     // surroundings absolutely black, which is as wrong as the floodlight was. A second,
     // weak, omnidirectional light per lamp is the spill -- the surroundings stay lit, much
     // less than the pool under the lamp. 0 = pure spot. POSEIDON_LAMP_SPILL.
-    float spill = 0.45f;
+    float spill = 0.80f;
     // Radius of that spill light relative to the pool's. Small: it is the glow around a
     // lamp, not a second floodlight. POSEIDON_LAMP_SPILL_RADIUS.
     float spillRadius = 5.56f;
+    // LGT-022: the spill's own AMBIENT, separately from the pool's. The ambient term is added
+    // with no regard to which way a surface faces, so it lifts every wall, roof and leaf
+    // uniformly -- that is precisely what reads as floodlight. Zero here lets the spill be
+    // strong enough to carry the far field (which is what you see flying over a lit town)
+    // while staying directional, so near the lamp it still looks like a pool and a wall facing
+    // away stays dark. POSEIDON_LAMP_SPILL_AMBIENT.
+    float spillAmbient = 0.0f;
     unsigned generation = 0;
 };
 

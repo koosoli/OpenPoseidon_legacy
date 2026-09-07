@@ -116,6 +116,8 @@ LampLightSettings& GLampLightSettings()
             s.cone = (std::atoi(v) != 0);
         if (const char* v = std::getenv("POSEIDON_LAMP_SPILL"))
             s.spill = static_cast<float>(std::atof(v));
+        if (const char* v = std::getenv("POSEIDON_LAMP_SPILL_AMBIENT"))
+            s.spillAmbient = std::clamp(static_cast<float>(std::atof(v)), 0.0f, 1.0f);
         if (const char* v = std::getenv("POSEIDON_LAMP_SPILL_RADIUS"))
         {
             const double d = std::atof(v);

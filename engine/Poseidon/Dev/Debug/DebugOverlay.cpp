@@ -1552,6 +1552,10 @@ void DrawZeusTab()
     static const char* const kLampSpillTip =
         "A second, dim, wide light at the same bulb. It is what you see when you fly over a lit town; the core "
         "alone is almost nothing at 100 m and that is correct inverse-square behaviour, not a bug.";
+    static const char* const kSpillAmbientTip =
+        "The spill's direction-independent term. Zero keeps the spill directional, so it can be strong enough to "
+        "carry the far field without lifting every wall and roof uniformly -- a flat lift is exactly what reads as "
+        "floodlight rather than as street lamps.";
     static const char* const kLocalShadowTip =
         "Point lights get six shadow faces each, spots one; all of them are tiles in one depth layer. Four lights "
         "is twenty-four of the twenty-four views, so this is the whole budget.";
@@ -1565,6 +1569,7 @@ void DrawZeusTab()
         const float beforeRadius = lamp.radiusScale;
         const float beforeSpill = lamp.spill;
         const float beforeSpillR = lamp.spillRadius;
+        const float beforeSpillA = lamp.spillAmbient;
         const float beforeBright = lamp.brightnessScale;
         const float beforeAmbient = lamp.ambientScale;
         ImGui::SetNextItemWidth(160.0f);
@@ -1576,11 +1581,15 @@ void DrawZeusTab()
         ImGui::SetNextItemWidth(160.0f);
         Dev::SliderFloat("Spill reach", &lamp.spillRadius, 1.0f, 12.0f, "%.2f");
         ImGui::SetNextItemWidth(160.0f);
+        Dev::SliderFloat("Spill ambient", &lamp.spillAmbient, 0.0f, 1.0f, "%.2f");
+        Dev::PanelTooltip(kSpillAmbientTip);
+        ImGui::SetNextItemWidth(160.0f);
         Dev::SliderFloat("Lamp brightness", &lamp.brightnessScale, 0.1f, 3.0f, "%.2f");
         ImGui::SetNextItemWidth(160.0f);
         Dev::SliderFloat("Lamp ambient", &lamp.ambientScale, 0.0f, 1.0f, "%.2f");
         if (lamp.radiusScale != beforeRadius || lamp.spill != beforeSpill || lamp.spillRadius != beforeSpillR ||
-            lamp.brightnessScale != beforeBright || lamp.ambientScale != beforeAmbient)
+            lamp.spillAmbient != beforeSpillA || lamp.brightnessScale != beforeBright ||
+            lamp.ambientScale != beforeAmbient)
         {
             // StreetLamp::CreateLight rebuilds a lamp whose generation moved; without this
             // the sliders do nothing until a lamp happens to be re-created.
