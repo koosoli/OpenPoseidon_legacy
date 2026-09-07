@@ -116,8 +116,16 @@ struct PhysicsProbeSettings
     bool  selfIllum = true;
     /// Light colour, RGB 0..1, and how far it reaches. Brightness maps to
     /// LightPoint::SetBrightness, whose attenuation start is 50x this.
+    //! The light shines in the probe's OWN colour. A red ball that casts warm white light
+    //! is two unrelated controls pretending to be one thing: you set a colour and the lamp
+    //! ignored it. Off decouples them and `lightColor` below applies instead.
+    bool  lightUsesProbeColor = true;
     float lightColor[3] = {1.00f, 0.90f, 0.72f};
-    float lightBrightness = 1.0f;
+    // 0.05, the bottom of the slider, on the owner's instruction. SetBrightness is really
+    // "set radius" -- LightPoint makes _startAtten 50 * this -- so 1.0 was a fifty-metre
+    // core that lit a whole village from one thrown ball. 0.05 is a 2.5 m pool: a lamp you
+    // can put somewhere, not a floodlight, and the slider goes up from there.
+    float lightBrightness = 0.05f;
     //! Size of the visible halo the light draws around itself -- the glow, as opposed to
     //! what the light does to the world. LightPointVisible::SetSize; 0 hides it entirely.
     float lightGlow = 1.0f;

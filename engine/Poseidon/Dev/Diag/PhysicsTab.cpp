@@ -279,8 +279,17 @@ void DrawPhysicsTab()
     if (s.emitLight)
     {
         ImGui::SameLine();
+        Dev::Checkbox("Shine in the probe's colour", &s.lightUsesProbeColor);
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("POSEIDON_PROBE_LIGHT_OWN_COLOR=0 decouples them. On, the light emits the colour\n"
+                              "set in the Colour picker above -- a red ball lights the street red. Off, the\n"
+                              "separate Light colour beside this applies instead.");
+        }
+        ImGui::BeginDisabled(s.lightUsesProbeColor);
         ImGui::SetNextItemWidth(160.0f);
         ImGui::ColorEdit3("Light", s.lightColor, ImGuiColorEditFlags_NoInputs);
+        ImGui::EndDisabled();
         ImGui::SetNextItemWidth(140.0f);
         Dev::SliderFloat("Brightness", &s.lightBrightness, 0.05f, 8.0f, "%.2f");
         Dev::PanelSameLine();
