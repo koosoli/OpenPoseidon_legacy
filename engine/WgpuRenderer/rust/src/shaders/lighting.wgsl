@@ -56,6 +56,21 @@ const LOCAL_MAX_INSIDE2: f32 = 0.98063081; // (cos 8deg)^2
 // the cos^2 the light already carries for its cone test. Pushing the receiver along its own
 // normal by a texel or two, scaled by how obliquely the light strikes it, moves the sample
 // off the surface that is shadowing itself without moving the shadow's edge.
+const LOCAL_ATLAS_GRID: f32 = 4.0;
+
+// LGT-015: which face of a point light's cube a fragment falls in, in the same order the CPU
+// builds the six matrices: +X, -X, +Y, -Y, +Z, -Z. `from_light` points light -> fragment.
+fn cube_face_of(from_light: vec3<f32>) -> i32 {
+    let a = abs(from_light);
+    if (a.x >= a.y && a.x >= a.z) {
+        return select(1, 0, from_light.x > 0.0);
+    }
+    if (a.y >= a.z) {
+        return select(3, 2, from_light.y > 0.0);
+    }
+    return select(5, 4, from_light.z > 0.0);
+}
+
 fn local_shadow_lit(world_rel: vec3<f32>, normal_ws: vec3<f32>, to_light_dir: vec3<f32>,
                     to_light_dist: f32, tan_outer: f32, slot: i32) -> f32 {
     let n_local = i32(frame.shadow.local_ctl.x);
@@ -63,7 +78,11 @@ fn local_shadow_lit(world_rel: vec3<f32>, normal_ws: vec3<f32>, to_light_dir: ve
         return 1.0;
     }
     // One texel of this light's map, in world metres, at this receiver's distance.
-    let texel_world = 2.0 * tan_outer * 1.15 * max(to_light_dist, 0.1) * frame.shadow.local_ctl.z;
+    // local_ctl.z is one ATLAS texel; a tile is 1/GRID of the atlas, so a TILE texel covers
+    // GRID times as much world. Getting this wrong under-offsets by 4x and the surface
+    // shadows itself in stripes.
+    let texel_world =
+        2.0 * tan_outer * 1.15 * max(to_light_dist, 0.1) * frame.shadow.local_ctl.z * LOCAL_ATLAS_GRID;
     // Obliquely lit surfaces need more of it: across one texel their depth changes by
     // texel * tan(angle to the light), so the offset is scaled by sin over cos of that
     // angle -- the same shape the cascades' ShadowBias uses, clamped so a surface seen
@@ -80,8 +99,15 @@ fn local_shadow_lit(world_rel: vec3<f32>, normal_ws: vec3<f32>, to_light_dir: ve
     if (ndc.x < -1.0 || ndc.x > 1.0 || ndc.y < -1.0 || ndc.y > 1.0 || ndc.z < 0.0 || ndc.z > 1.0) {
         return 1.0; // outside the light's own map: nothing was rendered to occlude with
     }
-    let uv = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
-    let layer = i32(frame.shadow.local_ctl.w) + slot;
+    // LGT-015: every local view is a TILE in one layer, not a layer of its own. The tile's
+    // own [0,1] uv is mapped into its cell, and the PCF taps are clamped a half-texel inside
+    // it -- without that clamp a tap at the rim reads the neighbouring light's depth, which
+    // shows up as a hard rectangle of false shadow rather than as noise.
+    let grid = LOCAL_ATLAS_GRID;
+    let tile = 1.0 / grid;
+    let cell = vec2<f32>(f32(slot % i32(grid)), f32(slot / i32(grid))) * tile;
+    let uv_tile = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+    let layer = i32(frame.shadow.local_ctl.w);
     // Constant depth bias. A perspective map's texel footprint grows with distance from the
     // light, so a slope-scaled bias would want the derivative of a value this function does
     // not have; the constant is what the cascades use as their floor and it is enough at the
@@ -90,11 +116,14 @@ fn local_shadow_lit(world_rel: vec3<f32>, normal_ws: vec3<f32>, to_light_dir: ve
     // what keeps a surface from shadowing itself.
     let bias = 0.0004;
     let texel = frame.shadow.local_ctl.z;
+    let lo = cell + vec2<f32>(texel * 0.5);
+    let hi = cell + vec2<f32>(tile - texel * 0.5);
     var lit = 0.0;
     for (var y = -1; y <= 1; y = y + 1) {
         for (var x = -1; x <= 1; x = x + 1) {
             let off = vec2<f32>(f32(x), f32(y)) * texel;
-            lit = lit + textureSampleCompareLevel(shadow_map, shadow_samp, uv + off, layer, ndc.z - bias);
+            let uv = clamp(cell + uv_tile * tile + off, lo, hi);
+            lit = lit + textureSampleCompareLevel(shadow_map, shadow_samp, uv, layer, ndc.z - bias);
         }
     }
     lit = lit * (1.0 / 9.0);
@@ -141,6 +170,14 @@ fn lights_contrib(world_rel: vec3<f32>, normal_ws: vec3<f32>, mat_diffuse: vec3<
         var shadow_slot = -1;
         if (light.dir.w > 1.5) {
             shadow_slot = i32(light.dir.w) - 2;
+        }
+        // LGT-015: a POINT light that owns a shadow cube. It cannot use the same encoding as
+        // a spot -- `dir.w > 0.5` is what makes a light a spot, and a lamp that became a spot
+        // to get a shadow is the regression this fixes -- so it goes negative instead:
+        // -(1 + first slot), with the light's six faces in slots first..first+5.
+        var cube_first = -1;
+        if (light.dir.w < -0.5) {
+            cube_first = i32(-light.dir.w) - 1;
         }
         if (light.dir.w > 0.5) {
             // inside = (light -> fragment) . beam axis; cos^2 = inside^2 / size2.
@@ -200,6 +237,20 @@ fn lights_contrib(world_rel: vec3<f32>, normal_ws: vec3<f32>, mat_diffuse: vec3<
             if (cone <= 0.0) {
                 continue;
             }
+        }
+        // LGT-015: the point light's cube. Six 90-degree faces, so the face's half-angle
+        // tangent is exactly 1; which face is chosen from the major axis of light -> fragment,
+        // the same rule the CPU used to order the six matrices.
+        var point_occl = 1.0;
+        if (cube_first >= 0) {
+            let dist_p = sqrt(size2);
+            let face = cube_face_of(-to_light);
+            point_occl = local_shadow_lit(world_rel, normal_ws, to_light / max(dist_p, 1e-4), dist_p,
+                                          1.0, cube_first + face);
+            if (point_occl <= 0.0) {
+                continue;
+            }
+            cone = cone * point_occl;
         }
         let cos_fi = dot(to_light, normal_ws);
         if (cos_fi > 0.0) {

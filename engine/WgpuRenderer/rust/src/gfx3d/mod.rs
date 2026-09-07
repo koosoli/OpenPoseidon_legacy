@@ -66,7 +66,16 @@ const SKY_UBO_SLOT: usize = MAX_CASCADES as usize;
 // cascades AND past the sky-visibility block, so all three families can be live in the same
 // frame without a slot ever colliding -- which is the whole reason the sky map could reuse
 // the cascade pipeline, and the reason these can too.
-const MAX_LOCAL_SHADOWS: usize = 4;
+// LGT-015: sixteen local shadow VIEWS, all in ONE extra depth layer.
+//
+// Four was one layer each, at the cascades' own resolution -- 16 MB of depth per light at
+// 2048, which is why the count could not grow and why a point light (six faces) was ruled
+// out as unaffordable. It is a tiling problem, not a memory problem: one 2048 layer holds a
+// 4x4 grid of 512 tiles, and 512 is ample for a lamp or a headlight. So sixteen views now
+// cost what ONE used to, a point light's cube is six tiles, and the array grows by exactly
+// one layer no matter how many local lights there are.
+const MAX_LOCAL_SHADOWS: usize = 16;
+const LOCAL_ATLAS_GRID: u32 = 4; // 4x4 tiles in the one local layer
 const LOCAL_UBO_SLOT: usize = SKY_UBO_SLOT + sky_vis::DIRECTION_COUNT + 1;
 
 // Polygon-offset variants (mirror GL33's SetPolygonOffsetForDecals / ..ForShadows):
@@ -5878,7 +5887,8 @@ impl Gfx3d {
         let local = (pass.local_count as usize).min(MAX_LOCAL_SHADOWS);
         self.local_shadow_count = local;
         self.local_shadow_first_layer = count as usize;
-        self.ensure_shadow_target(device, pass.resolution, count + local as u32);
+        // LGT-015: the local views share ONE layer, tiled. `+1` not `+local`.
+        self.ensure_shadow_target(device, pass.resolution, count + u32::from(local > 0));
         self.ensure_shadow_pipelines(device);
 
         self.shadow_pass_ubo
@@ -6091,7 +6101,11 @@ impl Gfx3d {
             forced.unwrap_or(pass.grass_cascade_mask)
         };
         let local = self.local_shadow_count;
-        let total_views = (count as usize + local).min(target.layers as usize);
+        // LGT-015: locals are tiles in ONE layer now, so the layer count no longer caps the
+        // view count -- clamping `total_views` to it would have silently dropped every local
+        // view past the first.
+        let total_views = count as usize + local;
+        let local_tile = target.res / LOCAL_ATLAS_GRID;
         for c in 0..total_views {
             // Which pass-UBO slot holds this view's light view-projection. The cascades are
             // slots 0..count-1; the locals sit past the sky-visibility block so all three
@@ -6102,6 +6116,15 @@ impl Gfx3d {
                 LOCAL_UBO_SLOT + (c - count as usize)
             };
             let is_local = c >= count as usize;
+            // LGT-015: every local view renders into the SAME layer, each in its own tile, so
+            // only the first may clear it -- the rest must load or they erase their neighbours.
+            let attach_layer = if is_local { count as usize } else { c };
+            let local_index = c - count as usize;
+            let depth_load = if is_local && local_index > 0 {
+                wgpu::LoadOp::Load
+            } else {
+                wgpu::LoadOp::Clear(1.0)
+            };
             // PERF-005: one region PER CASCADE. Shadows were the largest single unattributed
             // suspect and a single "shadows" number cannot tell you which cascade to shrink —
             // cascade 0 covers metres and cascade 3 covers hundreds of them, so their costs and
@@ -6116,9 +6139,9 @@ impl Gfx3d {
                 label: Some("wgr_shadow_cascade"),
                 color_attachments: &[],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &target.layer_views[c],
+                    view: &target.layer_views[attach_layer],
                     depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(1.0),
+                        load: depth_load,
                         store: wgpu::StoreOp::Store,
                     }),
                     stencil_ops: None,
@@ -6133,6 +6156,15 @@ impl Gfx3d {
             // invalidates it — set it once per cascade instead of per draw.
             let pass_ubo_off = (ubo_slot as u64 * self.shadow_pass_ubo.stride) as u32;
             rp.set_bind_group(0, pass_bind, &[pass_ubo_off]);
+            if is_local {
+                // This view's tile. The scissor matters as much as the viewport: a viewport
+                // only maps NDC, it does not stop a triangle that lands outside the tile from
+                // writing into a neighbour's depth.
+                let tx = (local_index as u32 % LOCAL_ATLAS_GRID) * local_tile;
+                let ty = (local_index as u32 / LOCAL_ATLAS_GRID) * local_tile;
+                rp.set_viewport(tx as f32, ty as f32, local_tile as f32, local_tile as f32, 0.0, 1.0);
+                rp.set_scissor_rect(tx, ty, local_tile, local_tile);
+            }
 
             // CPU casters for this cascade (the retained GPU set is drawn below; a section
             // owned by the GPU is suppressed CPU-side in AddShadowCaster, so no double-draw).

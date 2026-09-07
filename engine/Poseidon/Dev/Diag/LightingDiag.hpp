@@ -122,8 +122,11 @@ struct LocalShadowSettings
     // acceptable, a changed default is not" -- but the owner has now asked for local-light
     // shadows in three consecutive messages, so off IS the regression. The lever stays:
     // POSEIDON_LOCAL_SHADOWS=0, or the Lighting tab.
-    bool enabled = true;   //!< POSEIDON_LOCAL_SHADOWS=1. OFF until measured, per the plan.
-    int maxLights = 2;      //!< POSEIDON_LOCAL_SHADOW_LIGHTS: how many get a layer at once.
+    bool enabled = true;   //!< POSEIDON_LOCAL_SHADOWS=0 turns local light shadows off.
+    int maxLights = 3;      //!< POSEIDON_LOCAL_SHADOW_LIGHTS: how many get shadow views at once.
+                            //!< LGT-015: a spot costs one view of sixteen, a point costs six
+                            //!< (its cube), so three lights is the point where the view budget
+                            //!< and this one run out together for a street full of lamps.
     // The near plane of the light's own frustum, metres. Perspective depth precision is
     // spent between the near plane and a few times its distance, so this is NOT "as small as
     // possible": 1 cm on a 40 m beam is shadow acne.

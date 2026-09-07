@@ -939,3 +939,60 @@ TEST_CASE("ShadowMath spot: the margin keeps the cone edge off the frustum borde
     REQUIRE(std::fabs(n.x) < 1.0f);   // inside the map
     REQUIRE(std::fabs(n.x) > 0.75f);  // but out near the rim, not wastefully central
 }
+
+// LGT-015: a point light's shadow is six 90-degree faces, and the ONE thing that can go
+// silently wrong is the face ORDER -- the shader picks a face from the major axis of
+// light -> fragment and must land on the matrix that was rendered with. A mismatch does not
+// crash and does not look like a bug in the face selection; it shadows the wrong side of the
+// world. So the test is exactly that round trip, for all six directions.
+namespace
+{
+//! The shader's cube_face_of(), in C++. Kept identical on purpose.
+int CubeFaceOf(const Vec3& fromLight)
+{
+    const float ax = std::fabs(fromLight.x), ay = std::fabs(fromLight.y), az = std::fabs(fromLight.z);
+    if (ax >= ay && ax >= az)
+        return fromLight.x > 0.0f ? 0 : 1;
+    if (ay >= az)
+        return fromLight.y > 0.0f ? 2 : 3;
+    return fromLight.z > 0.0f ? 4 : 5;
+}
+} // namespace
+
+TEST_CASE("ShadowMath point: the face the shader picks is the face that was rendered", "[Graphics][ShadowMath]")
+{
+    const Vec3 camPos{5500.0f, 30.0f, -4700.0f};
+    const Vec3 lightPos = camPos + Vec3{0.0f, 6.0f, 0.0f};
+
+    // Six axis directions plus six diagonals that fall clearly inside one face each.
+    const Vec3 dirs[] = {{1, 0, 0},    {-1, 0, 0},   {0, 1, 0},     {0, -1, 0},    {0, 0, 1},     {0, 0, -1},
+                         {1, 0.3f, 0}, {0, 1, 0.3f}, {0.3f, 0, -1}, {-1, 0.2f, 0}, {0, -1, 0.2f}, {0.2f, 0, 1}};
+    for (const Vec3& d : dirs)
+    {
+        const int face = CubeFaceOf(d);
+        REQUIRE(face >= 0);
+        REQUIRE(face < 6);
+        const Mat4 vp = PointFaceVP(lightPos, face, 0.2f, 60.0f, camPos);
+        for (int i = 0; i < 16; i++)
+        {
+            REQUIRE(std::isfinite(vp.m[i]));
+        }
+        // A point 10 m from the bulb along that direction, expressed camera-relative like
+        // every receiver is, must land inside the map its own face selection chose.
+        const Vec3 p = (lightPos - camPos) + d * (10.0f / std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z));
+        REQUIRE(InCascade(vp, p));
+    }
+}
+
+TEST_CASE("ShadowMath point: a face does not cover its neighbours", "[Graphics][ShadowMath]")
+{
+    // The faces must PARTITION the sphere, not overlap it: exactly 90 degrees, no margin.
+    // If a face were widened "for safety" it would claim geometry a neighbour also claims,
+    // and the seam would self-shadow instead of closing.
+    const Vec3 camPos{0.0f, 0.0f, 0.0f};
+    const Mat4 plusX = PointFaceVP({0.0f, 0.0f, 0.0f}, 0, 0.2f, 60.0f, camPos);
+    REQUIRE(InCascade(plusX, {10.0f, 0.0f, 0.0f}));         // straight down +X: covered
+    REQUIRE_FALSE(InCascade(plusX, {-10.0f, 0.0f, 0.0f}));  // the opposite face
+    REQUIRE_FALSE(InCascade(plusX, {0.0f, 10.0f, 0.0f}));   // +Y's face
+    REQUIRE_FALSE(InCascade(plusX, {0.0f, 0.0f, 10.0f}));   // +Z's face
+}

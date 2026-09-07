@@ -1880,6 +1880,27 @@ bool EngineWgpu::SetSwapInterval(int interval)
 // each shadowing light's reach -- deliberately generous (it ignores the cone, so a caster
 // beside the beam is still submitted) because the cost of a false positive is one clipped
 // draw and the cost of a false negative is a missing shadow, which is a visible bug.
+Poseidon::shadow::Mat4 EngineWgpu::LocalShadowVP(int k) const
+{
+    const Poseidon::Dev::LocalShadowSettings& ls = Poseidon::Dev::GLocalShadowSettings();
+    const LocalShadowLight& L = _localShadowLights[k];
+    // The light's own reach. Past it the light contributes nothing, so rendering casters
+    // further away spends depth on invisible geometry.
+    const float reach = std::clamp(L.startAtten * ls.rangeScale, 2.0f, ls.rangeMax);
+    const Poseidon::shadow::Vec3 pos{L.pos[0], L.pos[1], L.pos[2]};
+    const Poseidon::shadow::Vec3 cam{_smCamPos[0], _smCamPos[1], _smCamPos[2]};
+    if (L.cubeFace >= 0)
+    {
+        return Poseidon::shadow::PointFaceVP(pos, L.cubeFace, std::max(ls.nearD, 0.01f), reach, cam);
+    }
+    // A cone angle of 0 means the source never told us one; fall back to something a
+    // lamp-shaped light plausibly has rather than to a pinhole, which would clip its own
+    // pool away.
+    const float cone = L.coneOuter > 0.01f ? L.coneOuter : 0.45f;
+    return Poseidon::shadow::SpotLightVP(pos, {L.dir[0], L.dir[1], L.dir[2]}, cone, std::max(ls.nearD, 0.01f), reach,
+                                         cam);
+}
+
 uint32_t EngineWgpu::LocalShadowCasterMask(float relX, float relY, float relZ) const
 {
     if (_localShadowCount <= 0)
@@ -3342,9 +3363,13 @@ void EngineWgpu::NextFrame()
             // meet takes the ones that matter -- and it is STABLE frame to frame for the
             // same reason the light list is.
             Poseidon::Dev::LocalShadowSettings& localShadow = Poseidon::Dev::GLocalShadowSettings();
-            const int localShadowWanted =
-                localShadow.enabled ? std::clamp(localShadow.maxLights, 0, kMaxLocalShadows) : 0;
+            // LGT-015: maxLights counts LIGHTS; slots are views. A spot spends one, a point
+            // spends six (its cube). Both budgets bind, so a frame gets whichever runs out
+            // first -- which is what stops one point light near the camera from silently
+            // consuming every view.
+            const int localShadowWanted = localShadow.enabled ? std::max(localShadow.maxLights, 0) : 0;
             int localShadowSlots = 0;
+            int localShadowLights = 0;
             for (size_t i = 0; i < selected; ++i)
             {
                 const render::frame::PresentationSnapshot::LocalLight& src = snap.lights[i];
@@ -3370,15 +3395,30 @@ void EngineWgpu::NextFrame()
                 //   1        = spot, no shadow
                 //   2 + slot = spot, shadowed by local view `slot`
                 float kind = src.spot ? 1.0f : 0.0f;
-                if (src.spot && localShadowSlots < localShadowWanted)
+                const int needSlots = src.spot ? 1 : 6;
+                if (localShadowLights < localShadowWanted && localShadowSlots + needSlots <= kMaxLocalShadows)
                 {
-                    const int slot = localShadowSlots++;
-                    kind = 2.0f + static_cast<float>(slot);
-                    LocalShadowLight& L = _localShadowLights[slot];
-                    L.pos[0] = src.pos.X(), L.pos[1] = src.pos.Y(), L.pos[2] = src.pos.Z();
-                    L.dir[0] = src.dir.X(), L.dir[1] = src.dir.Y(), L.dir[2] = src.dir.Z();
-                    L.coneOuter = src.coneOuter;
-                    L.startAtten = src.startAtten;
+                    const int first = localShadowSlots;
+                    localShadowSlots += needSlots;
+                    ++localShadowLights;
+                    // The encoding, and why a point cannot share the spot's. dir.w > 0.5 is
+                    // what MAKES a light a spot in lights_contrib, so a point light could not
+                    // be given a positive slot without turning into a cone -- which is exactly
+                    // the regression LGT-014 undid. Points go negative instead.
+                    //   0          point, no shadow
+                    //   1          spot, no shadow
+                    //   2 + slot   spot shadowed by view `slot`
+                    //   -(1+first) point shadowed by the cube in views first..first+5
+                    kind = src.spot ? 2.0f + static_cast<float>(first) : -(1.0f + static_cast<float>(first));
+                    for (int f = 0; f < needSlots; ++f)
+                    {
+                        LocalShadowLight& L = _localShadowLights[first + f];
+                        L.pos[0] = src.pos.X(), L.pos[1] = src.pos.Y(), L.pos[2] = src.pos.Z();
+                        L.dir[0] = src.dir.X(), L.dir[1] = src.dir.Y(), L.dir[2] = src.dir.Z();
+                        L.coneOuter = src.coneOuter;
+                        L.startAtten = src.startAtten;
+                        L.cubeFace = src.spot ? -1 : f;
+                    }
                 }
                 // LGT-014: a POINT light's dir.xyz is unused by the shader, so the reach
                 // multiplier rides in dir.x rather than growing the 64-byte light struct.
@@ -3648,17 +3688,7 @@ void EngineWgpu::NextFrame()
                     const Poseidon::Dev::LocalShadowSettings& ls = Poseidon::Dev::GLocalShadowSettings();
                     for (int k = 0; k < _localShadowCount && k < kMaxLocalShadows; k++)
                     {
-                        const LocalShadowLight& L = _localShadowLights[k];
-                        // The light's own reach. Past it the light contributes nothing, so
-                        // rendering casters further away spends depth on invisible geometry.
-                        const float reach = std::clamp(L.startAtten * ls.rangeScale, 2.0f, ls.rangeMax);
-                        // A cone angle of 0 means the source never told us one; fall back to
-                        // something a lamp-shaped light plausibly has rather than to a
-                        // pinhole, which would clip its own pool away.
-                        const float cone = L.coneOuter > 0.01f ? L.coneOuter : 0.45f;
-                        const Poseidon::shadow::Mat4 vp = Poseidon::shadow::SpotLightVP(
-                            {L.pos[0], L.pos[1], L.pos[2]}, {L.dir[0], L.dir[1], L.dir[2]}, cone,
-                            std::max(ls.nearD, 0.01f), reach, {_smCamPos[0], _smCamPos[1], _smCamPos[2]});
+                        const Poseidon::shadow::Mat4 vp = LocalShadowVP(k);
                         std::memcpy(sb.local_vp[k].m, vp.m.data(), sizeof(sb.local_vp[k].m));
                     }
                     // {count, darkness, texel_size, first_layer}. first_layer is where the
@@ -3861,12 +3891,7 @@ void EngineWgpu::NextFrame()
                 }
                 for (int k = 0; k < _localShadowCount && k < kMaxLocalShadows; k++)
                 {
-                    const LocalShadowLight& L = _localShadowLights[k];
-                    const float reach = std::clamp(L.startAtten * ls.rangeScale, 2.0f, ls.rangeMax);
-                    const float cone = L.coneOuter > 0.01f ? L.coneOuter : 0.45f;
-                    const Poseidon::shadow::Mat4 vp = Poseidon::shadow::SpotLightVP(
-                        {L.pos[0], L.pos[1], L.pos[2]}, {L.dir[0], L.dir[1], L.dir[2]}, cone,
-                        std::max(ls.nearD, 0.01f), reach, {_smCamPos[0], _smCamPos[1], _smCamPos[2]});
+                    const Poseidon::shadow::Mat4 vp = LocalShadowVP(k);
                     std::memcpy(frame.shadow.local_vp[k].m, vp.m.data(), sizeof(frame.shadow.local_vp[k].m));
                 }
             }

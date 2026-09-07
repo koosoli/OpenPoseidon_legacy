@@ -25,7 +25,7 @@ struct ShadowBlock {
     // LGT-010: one perspective view-projection per shadowing spot light, and
     // {count, darkness, texel_size, first_layer}. Separate from cascade_vp because
     // these are selected by light index rather than by distance.
-    local_vp: array<mat4x4<f32>, 4>,
+    local_vp: array<mat4x4<f32>, 16>,
     local_ctl: vec4<f32>,
 };
 

@@ -748,6 +748,22 @@ Mat4 OmniSphereLightVP(const Vec3& camPos, float radius, const Vec3& sunDir, con
     return Mul(Ortho(minX, maxX, minY, maxY, -zMax, -zMin), lv);
 }
 
+Mat4 PointFaceVP(const Vec3& lightPos, int face, float nearD, float farD, const Vec3& camPos)
+{
+    static const Vec3 kDir[6] = {{1.0f, 0.0f, 0.0f},  {-1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f},
+                                 {0.0f, -1.0f, 0.0f}, {0.0f, 0.0f, 1.0f},  {0.0f, 0.0f, -1.0f}};
+    // The up vector only has to be perpendicular to the face's axis; which perpendicular does
+    // not matter, because the receiver reads the map through the very same matrix.
+    static const Vec3 kUp[6] = {{0.0f, 1.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 1.0f},
+                                {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 1.0f, 0.0f}};
+    const int f6 = (face < 0 || face > 5) ? 0 : face;
+    const Mat4 view = LookAt(lightPos, lightPos + kDir[f6], kUp[f6]);
+    float n = nearD > 1e-3f ? nearD : 1e-3f;
+    float fa = farD > n * 1.01f ? farD : n * 1.01f;
+    const Mat4 proj = Perspective(1.57079632679f, 1.0f, n, fa); // exactly 90 degrees, square
+    return ToCameraRelative(Mul(proj, view), camPos);
+}
+
 Mat4 SpotLightVP(const Vec3& lightPos, const Vec3& lightDir, float outerHalfAngle, float nearD, float farD,
                  const Vec3& camPos, float marginScale)
 {

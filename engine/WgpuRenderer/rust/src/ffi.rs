@@ -936,7 +936,7 @@ pub struct WgrCameraShadow {
     // LGT-010: one perspective view-projection per shadowing spot light, kept separate from
     // the sun's cascades because they are selected differently (by light index, not by
     // distance) and are a different projection kind.
-    pub local_vp: [WgrMat4; 4],
+    pub local_vp: [WgrMat4; 16],
     pub local_ctl: WgrVec4, // {count, darkness, texel_size (1/res), first_layer}
 }
 
@@ -1002,7 +1002,7 @@ pub struct WgrShadowPass {
     // same depth array as the cascades.
     pub local_count: u32,
     pub local_pad: [u32; 3],
-    pub local_vp: [WgrMat4; 4],
+    pub local_vp: [WgrMat4; 16],
 }
 
 #[repr(u32)]
@@ -1576,11 +1576,13 @@ const _: () = assert!(std::mem::size_of::<WgrDepthOfField>() == 52);
 const _: () = assert!(std::mem::size_of::<WgrRenderParams>() == 620); // REN-GI-010 WgrGi 64->68, sky-vis probe 44->48
 const _: () = assert!(std::mem::size_of::<WgrFrameParams>() == 16);
 // LGT-010 grew this by four mat4 (local_vp) and one vec4 (local_ctl): 352 + 256 + 16.
-const _: () = assert!(std::mem::size_of::<WgrCameraShadow>() == 624);
-const _: () = assert!(std::mem::size_of::<WgrCamera>() == 848);
+// LGT-015 took local_vp from four to sixteen (+768): a point light needs six of them.
+const _: () = assert!(std::mem::size_of::<WgrCameraShadow>() == 1392);
+const _: () = assert!(std::mem::size_of::<WgrCamera>() == 1616);
 const _: () = assert!(std::mem::size_of::<WgrShadowCaster>() == 136);
 // LGT-010 grew this by local_count + 3 pad words + four mat4: 288 + 16 + 256.
-const _: () = assert!(std::mem::size_of::<WgrShadowPass>() == 560);
+// LGT-015: four mat4 -> sixteen (+768).
+const _: () = assert!(std::mem::size_of::<WgrShadowPass>() == 1328);
 const _: () = assert!(std::mem::size_of::<WgrCmd>() == 8);
 const _: () = assert!(std::mem::size_of::<WgrOverlayVertex>() == 20);
 const _: () = assert!(std::mem::size_of::<WgrOverlayDraw>() == 40);
@@ -1603,7 +1605,7 @@ const _: () = assert!(std::mem::align_of::<WgrWaterInteractionEvent>() == 16);
 const _: () = assert!(std::mem::size_of::<WgrWaterInteractionParams>() == 96);
 const _: () = assert!(std::mem::align_of::<WgrWaterInteractionParams>() == 16);
 const _: () = assert!(std::mem::size_of::<WgrSlice<WgrCamera>>() == 16);
-const _: () = assert!(std::mem::size_of::<WgrFrame>() == 848);
+const _: () = assert!(std::mem::size_of::<WgrFrame>() == 1616);
 const _: () = assert!(std::mem::size_of::<WgrFarInstance>() == 32);
 const _: () = assert!(std::mem::size_of::<WgrAbiCheck>() == 28);
 

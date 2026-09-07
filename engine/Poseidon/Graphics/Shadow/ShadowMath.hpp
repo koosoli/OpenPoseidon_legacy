@@ -273,6 +273,17 @@ CascadeSet BuildShadowCascades(const CascadeBuildParams& p);
 Mat4 SpotLightVP(const Vec3& lightPos, const Vec3& lightDir, float outerHalfAngle, float nearD, float farD,
                  const Vec3& camPos, float marginScale = 1.15f);
 
+// LGT-015: one face of a point light's shadow cube, camera-relative like everything else
+// here. `face` is 0..5 in the order +X, -X, +Y, -Y, +Z, -Z -- the SAME order the shader's
+// cube_face_of() derives from the major axis of light -> fragment, and the two must not
+// drift apart: a mismatched order does not fail, it shadows the wrong side of the world.
+//
+// The field of view is exactly 90 degrees with no margin. A cube's faces tile the sphere
+// only if they meet exactly; widening one for safety would overlap its neighbours and make
+// the seam self-shadow instead of closing it. The seams are handled by the receiver picking
+// the face by the same rule the matrix was built with, not by overlap.
+Mat4 PointFaceVP(const Vec3& lightPos, int face, float nearD, float farD, const Vec3& camPos);
+
 Mat4 OmniSphereLightVP(const Vec3& camPos, float radius, const Vec3& sunDir, const Vec3& up, int resolution,
                        float zPad);
 

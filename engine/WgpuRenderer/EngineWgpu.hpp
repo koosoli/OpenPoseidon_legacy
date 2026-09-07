@@ -1527,17 +1527,26 @@ class EngineWgpu : public EngineDummy
     // snapshot's own light record so the matrix can be built from position, direction and
     // cone without a second lookup; `_localShadowCount` is what every consumer gates on, so
     // "no light qualified" and "the feature is off" are the same well-defined zero.
-    static constexpr int kMaxLocalShadows = 4;
+    // LGT-015: sixteen VIEWS, not sixteen lights -- they are tiles in one depth layer, so a
+    // point light spends six of them on its cube and a spot spends one.
+    static constexpr int kMaxLocalShadows = 16;
     struct LocalShadowLight
     {
         float pos[3] = {0.0f, 0.0f, 0.0f}; // ABSOLUTE world; the matrix is made camera-relative
         float dir[3] = {0.0f, -1.0f, 0.0f};
         float coneOuter = 0.0f;  // outer half angle, radians
         float startAtten = 0.0f; // the light's own reach, before the range multiplier
+        //! LGT-015: -1 = this view is a spot's cone; 0..5 = this view is one cube face of a
+        //! point light, in PointFaceVP's order.
+        int cubeFace = -1;
     };
     LocalShadowLight _localShadowLights[kMaxLocalShadows] = {};
     //! LGT-010: the shadow-view bits a caster at this position belongs in.
     uint32_t LocalShadowCasterMask(float relX, float relY, float relZ) const;
+    //! LGT-015: view-projection for local view `k`, cone or cube face. ONE definition: the
+    //! frame UBO and the depth pass must agree exactly or the map is sampled through a
+    //! different matrix than it was rendered with, which reads as shadow everywhere.
+    Poseidon::shadow::Mat4 LocalShadowVP(int k) const;
     int _localShadowCount = 0;
 
     // Dev-panel overlay for the current frame
