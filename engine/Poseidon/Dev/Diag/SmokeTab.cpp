@@ -479,6 +479,50 @@ void DrawSpawnSection()
             ImGui::SetTooltip("POSEIDON_SMOKE_RISE_SCALE. Multiplies the cloudlet vertical speed; wind drift\n"
                               "already scales with the longer life.");
     }
+    // SMK-035: lighting and self-shadowing for the game's own smoke. Live -- it is applied
+    // per particle per step, so a change here shows on smoke already in the air.
+    {
+        LegacySmokeShading& shading = GLegacySmokeShading();
+        Dev::Checkbox("Lit, self-shadowing game smoke (SMK-035)", &shading.enabled);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("POSEIDON_SMOKE_SHADE=0 restores the flat 2001 colour. Cloudlets are lit by\n"
+                              "nothing at all: the colour is the authored cloudletColor times a temperature\n"
+                              "ramp, identical for every particle in a plume, at every hour of the day. This\n"
+                              "shades each particle from the scene's own sun and darkens it by how deep in\n"
+                              "the column it sits, which is what gives a plume a light side, a dark side and\n"
+                              "an interior. Hot particles (fireballs, muzzle flashes) are emissive and are\n"
+                              "left exactly as authored.");
+        ImGui::SetNextItemWidth(110.0f);
+        Dev::SliderFloat("Self-shadow", &shading.selfShadow, 0.0f, 1.0f, "%.2f");
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("POSEIDON_SMOKE_SHADE_SELFSHADOW. How dark the inside of a plume gets. 0 is a\n"
+                              "uniformly lit plume; high values give a near-black core with bright fringes,\n"
+                              "which is what a dense sooty column actually looks like.");
+        Dev::PanelSameLine();
+        ImGui::SetNextItemWidth(110.0f);
+        Dev::SliderFloat("Translucency", &shading.wrap, 0.0f, 4.0f, "%.2f");
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("POSEIDON_SMOKE_SHADE_WRAP. How far light wraps around the puff. 0 is a hard\n"
+                              "surface lighting term that makes the away side black; higher is lit through,\n"
+                              "and flatter.");
+        ImGui::SetNextItemWidth(110.0f);
+        Dev::SliderFloat("Sun x", &shading.diffuse, 0.0f, 3.0f, "%.2f");
+        Dev::PanelSameLine();
+        ImGui::SetNextItemWidth(110.0f);
+        Dev::SliderFloat("Ambient x", &shading.ambient, 0.0f, 3.0f, "%.2f");
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("POSEIDON_SMOKE_SHADE_DIFFUSE / _AMBIENT scale the scene's own two light terms.\n"
+                              "Both at 1.0 means smoke is lit exactly like the rest of the world, so it goes\n"
+                              "warm at dusk and dark at night instead of staying white.");
+        ImGui::SetNextItemWidth(110.0f);
+        Dev::SliderFloat("Emissive above K", &shading.emissiveT, 0.0f, 3000.0f, "%.0f");
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("POSEIDON_SMOKE_SHADE_EMISSIVE_T. Particles hotter than this make their own\n"
+                              "light and are not shaded at all; the shading fades in over the 400 K below it.\n"
+                              "CfgCloudlets tracks a real temperature per particle, so this separates a\n"
+                              "fireball from the smoke it leaves behind.");
+        ImGui::TextDisabled("shaded %lld  left emissive %lld", shading.shaded, shading.emissive);
+    }
     ImGui::SetNextItemWidth(110.0f);
     Dev::SliderFloat("Legacy density", &GLegacyDensity, 0.1f, 3.0f, "%.2f");
     Dev::PanelSameLine();

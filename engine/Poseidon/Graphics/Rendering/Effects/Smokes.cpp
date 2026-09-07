@@ -156,7 +156,7 @@ bool SmokeSource::Simulate(Vector3Par pos, Vector3Par speed, float deltaT, Simul
             CloudletSource::SetSize((GRandGen.RandomValue() + 2) * _size * 2);
             CloudletSource::SetAlpha(_inOutDensity * _density * 0.7);
             //  simulate cloudlet source
-            Cloudlet* cloudlet = Drop(pos + offset, speed);
+            Cloudlet* cloudlet = Drop(pos + offset, speed, &pos);
             cloudlet->SetSpeed(speed + windSpeed);
             GLOB_WORLD->AddCloudlet(cloudlet);
         }
@@ -970,7 +970,57 @@ void Cloudlet::Simulate(float deltaT, SimulationImportance prec)
     }
 
     _t += _dt * deltaT;
-    _constantColor = PackedColor(_cloudletColor * _cloudletTTable->GetColor(_t));
+    _shadeAge += deltaT; // SMK-035
+    Color color = _cloudletColor * _cloudletTTable->GetColor(_t);
+
+    // SMK-035: shade the particle. See the header for why a flat colour is what makes a
+    // plume look like a decal.
+    LegacySmokeShading& shading = GLegacySmokeShading();
+    if (shading.enabled)
+    {
+        // A hot particle is emissive: a fireball and a muzzle flash make their own light and
+        // must not be shaded by the sun. Fade the shading in as the particle cools.
+        float lit = 1.0f;
+        if (_t > shading.emissiveT - shading.emissiveBand)
+        {
+            lit = (shading.emissiveT - _t) / floatMax(shading.emissiveBand, 1.0f);
+        }
+        saturate(lit, 0.0f, 1.0f);
+        if (lit <= 0.0f)
+        {
+            ++shading.emissive;
+        }
+        else
+        {
+            ++shading.shaded;
+            const Vector3 d = Position() - _shadeOrigin;
+            // How far along its life this particle is -- see the header: that, and not any
+            // distance in metres, is what says how much smoke surrounds it.
+            float age = _shadeAge / _shadeLife;
+            saturate(age, 0.0f, 1.0f);
+            // The pseudo-normal, outward from the column's axis with the vertical flattened:
+            // that is the surface of the plume, which is the part the eye is looking at.
+            Vector3 n(d.X(), d.Y() * 0.35f, d.Z());
+            const float len = n.Size();
+            n = (len > 1e-3f) ? n * (1.0f / len) : VUp;
+            const LightSun* sun = GLOB_SCENE->MainLight();
+            const Vector3 toLight = -sun->Direction();
+            // Wrap-around diffuse: smoke is translucent, so the far side is lit through
+            // rather than black.
+            float wrap = (n * toLight + shading.wrap) / (1.0f + shading.wrap);
+            saturate(wrap, 0.0f, 1.0f);
+            // Optical depth: the root of a plume is thick and dark, the fringe it has spread
+            // out into is thin and bright. This is the self-shadow, and it is what stops a
+            // plume reading as one flat grey decal.
+            const float depth = 1.0f - age;
+            const float occ = 1.0f - shading.selfShadow * depth;
+            Color scene = sun->Ambient() * shading.ambient + sun->Diffuse() * (wrap * occ * shading.diffuse);
+            scene.SetA(1.0f);
+            const Color unlit(1.0f, 1.0f, 1.0f, 1.0f);
+            color = color * (scene * lit + unlit * (1.0f - lit));
+        }
+    }
+    _constantColor = PackedColor(color);
 
     Smoke::Simulate(deltaT, prec);
 }
@@ -1002,7 +1052,7 @@ CloudletSource::CloudletSource(LODShapeWithShadow* shape, float interval)
     _cloudletTTable->Set(0).color = HWhite;
 }
 
-Cloudlet* CloudletSource::Drop(Vector3Par pos, Vector3Par speed)
+Cloudlet* CloudletSource::Drop(Vector3Par pos, Vector3Par speed, const Vector3* centre)
 {
     Cloudlet* cloudlet = new Cloudlet(_cloudletShape, _cloudletAnimPeriod, _cloudletDuration);
     cloudlet->SetFades(_cloudletFadeIn, _cloudletFadeOut);
@@ -1015,6 +1065,10 @@ Cloudlet* CloudletSource::Drop(Vector3Par pos, Vector3Par speed)
     cloudlet->SetColor(PackedColor(colorA0));
     float delta = _cloudletDeltaT * (0.7 + 0.6 * GRandGen.RandomValue());
     cloudlet->SetTemperature(_cloudletInitT, delta, _cloudletTTable);
+    // SMK-035: where this particle's plume starts, and the life it is given -- the yardstick
+    // the optical depth is measured against.
+    const float life = floatMax(_cloudletFadeIn + _cloudletDuration + _cloudletFadeOut, 0.05f);
+    cloudlet->SetShadeOrigin(centre ? *centre : pos, life);
     cloudlet->SetPosition(pos);
     return cloudlet;
 }
@@ -1050,6 +1104,28 @@ LegacySmokeContainment& GLegacySmokeContainment()
         return c;
     }();
     return containment;
+}
+
+LegacySmokeShading& GLegacySmokeShading()
+{
+    static LegacySmokeShading shading = []
+    {
+        LegacySmokeShading s;
+        if (const char* v = std::getenv("POSEIDON_SMOKE_SHADE"))
+            s.enabled = !(*v == '0');
+        if (const char* v = std::getenv("POSEIDON_SMOKE_SHADE_AMBIENT"))
+            s.ambient = std::clamp(static_cast<float>(std::atof(v)), 0.0f, 3.0f);
+        if (const char* v = std::getenv("POSEIDON_SMOKE_SHADE_DIFFUSE"))
+            s.diffuse = std::clamp(static_cast<float>(std::atof(v)), 0.0f, 3.0f);
+        if (const char* v = std::getenv("POSEIDON_SMOKE_SHADE_WRAP"))
+            s.wrap = std::clamp(static_cast<float>(std::atof(v)), 0.0f, 4.0f);
+        if (const char* v = std::getenv("POSEIDON_SMOKE_SHADE_SELFSHADOW"))
+            s.selfShadow = std::clamp(static_cast<float>(std::atof(v)), 0.0f, 1.0f);
+        if (const char* v = std::getenv("POSEIDON_SMOKE_SHADE_EMISSIVE_T"))
+            s.emissiveT = std::clamp(static_cast<float>(std::atof(v)), 0.0f, 5000.0f);
+        return s;
+    }();
+    return shading;
 }
 
 LegacySmokeScale& GLegacySmokeScale()
@@ -1283,7 +1359,7 @@ void DustSource::Simulate(Vector3Par pos, Vector3Par speed, float density, float
         float cSize = floatMax(_size, _size * 3 * density);
         CloudletSource::SetSize((GRandGen.RandomValue() + 2) * cSize);
         // simulate cloudlet source
-        Cloudlet* cloudlet = Drop(pos + offset, cSpeed * density * 0.5 + windSpeed + speed);
+        Cloudlet* cloudlet = Drop(pos + offset, cSpeed * density * 0.5 + windSpeed + speed, &pos);
         cloudlet->SetClimbRate(_cloudletAccY, _cloudletMinYSpeed, _cloudletMaxYSpeed);
         cloudlet->SetSideSpeed(0, 0, 1.5, 1.5);
         GLOB_WORLD->AddCloudlet(cloudlet);
@@ -1351,7 +1427,7 @@ void WeaponCloudsSource::Simulate(Vector3Par pos, Vector3Par speed, float densit
         float cSize = floatMax(size, size * 3 * density);
         CloudletSource::SetSize((GRandGen.RandomValue() + 2) * cSize);
         // simulate cloudlet source
-        Cloudlet* cloudlet = Drop(pos + offset, speed);
+        Cloudlet* cloudlet = Drop(pos + offset, speed, &pos);
 
         float newSize = GetSize() * _generalize * (0.5 + 1.0 * GRandGen.RandomValue());
         cloudlet->SetGrowUp(_cloudletGrowUp, newSize);

@@ -107,7 +107,19 @@ class Cloudlet: public Smoke
 	float _nextOutsideCheck = 0.0f;    //!< SMK-031: next time this outdoor cloudlet may ask
 	float _nextClearanceCheck = 0.0f;  //!< SMK-032: next time the drawn size may be re-measured
 	float _clearance = -1.0f;          //!< SMK-032: last measured room clearance, -1 = none yet
-		
+
+	// SMK-035 shading state, both snapshotted at spawn from the source that dropped this
+	// particle. `_shadeOrigin` is the plume's ORIGIN, not the particle's own spawn point --
+	// the offset between them is what gives the pseudo-normal its lateral direction.
+	// `_shadeAge` / `_shadeLife` are the optical-depth yardstick, and they are AGE, not
+	// metres: a plume's root is where the smoke is thickest and its fringe is where it has
+	// spread out and thinned, so how far along a particle is in its life says how much smoke
+	// is around it. Metres cannot say that -- a grenade's plume is 6 m across and an
+	// artillery column is 60, and the class does not know which it belongs to.
+	Vector3 _shadeOrigin = VZero;
+	float _shadeAge = 0.0f;
+	float _shadeLife = 1.0f;
+
 	public:
 	Cloudlet( LODShapeWithShadow *shape, float duration, float loopedDuration=0 );
 
@@ -131,6 +143,8 @@ class Cloudlet: public Smoke
 	}
 	void SetColor(ColorVal color) {_cloudletColor = color;}
 	void SetTemperature(float t, float dt, CloudletTTable *table);
+	//! SMK-035: where the plume this particle belongs to starts, and how long it lives.
+	void SetShadeOrigin(Vector3Par origin, float life) {_shadeOrigin = origin; _shadeLife = life; _shadeAge = 0;}
 
 	float CloudletClippingCoef() const override;
 	SimulationImportance WorstImportance() const override;
@@ -232,6 +246,45 @@ struct LegacySmokeContainment
 };
 LegacySmokeContainment& GLegacySmokeContainment();
 
+// SMK-035: cloudlets are not lit by anything. `_constantColor` is the authored
+// `cloudletColor` times a temperature ramp and nothing else, so every particle in a plume
+// carries the SAME colour whatever the time of day, wherever the sun is and however deep
+// in the column it sits. That is the whole reason smoke reads as a flat grey decal: a
+// plume has no light side, no dark side and no interior.
+//
+// This shades each particle on the CPU, once per simulation step, from the scene's own
+// sun (so dusk smoke is warm and night smoke is dark, like everything else in the world):
+//
+//   n     -- a pseudo-normal. A billboard has none, so use the particle's offset from the
+//            plume origin, with the vertical flattened: on the shell of a rising column
+//            that points outward, which is the surface the eye actually sees.
+//   wrap  -- wrap-around diffuse, (n.L + w)/(1 + w). Smoke is translucent; a hard N.L
+//            would make the far side black, and it is not, it is lit through.
+//   depth -- how much smoke lies between this particle and the outside. Low in the column
+//            and near its axis is deep; the top and the fringe are thin. This is the
+//            self-shadow term, and it is what makes a dense plume nearly black in the
+//            middle and bright at the edges.
+//
+// A HOT particle is emissive, not lit: a fireball, a muzzle flash and a tracer make their
+// own light, and shading one would be wrong. Above `emissiveT` the shading fades out, so
+// every explosion and gun effect in CfgCloudlets is left exactly as authored.
+//
+// Cost is a dozen float operations per particle per step; there is no query and nothing is
+// cached. POSEIDON_SMOKE_SHADE=0 restores the flat 2001 colour exactly.
+struct LegacySmokeShading
+{
+    bool enabled = true;        //!< POSEIDON_SMOKE_SHADE=0 turns it off
+    float ambient = 1.0f;       //!< scales the scene's ambient term
+    float diffuse = 1.0f;       //!< scales the scene's directional term
+    float wrap = 0.55f;         //!< translucency: 0 = hard N.L, 1 = almost flat
+    float selfShadow = 0.55f;   //!< how dark the inside of a plume gets, 0..1
+    float emissiveT = 700.0f;   //!< K: above this the particle glows and is not shaded
+    float emissiveBand = 400.0f;//!< K: the fade width below emissiveT
+    long long shaded = 0;       //!< particles shaded since start
+    long long emissive = 0;     //!< particles left alone because they were hot
+};
+LegacySmokeShading& GLegacySmokeShading();
+
 class CloudletSource: public SerializeClass
 {
 	protected:
@@ -290,7 +343,9 @@ class CloudletSource: public SerializeClass
 	Color GetColor() const {return _cloudletColor;}
 	void SetColor(ColorVal color) {_cloudletColor = color;}
 
-	Cloudlet *Drop( Vector3Par pos, Vector3Par speed );
+	//! `centre` is the plume ORIGIN when `pos` is a jittered spawn point around it (SMK-035);
+	//! passing nothing means the two are the same.
+	Cloudlet *Drop( Vector3Par pos, Vector3Par speed, const Vector3 *centre = nullptr );
 	void Simulate
 	(
 		Vector3Par pos, Vector3Par speed, float deltaT
