@@ -1,5 +1,6 @@
 #include <Poseidon/Dev/Diag/LightingDiag.hpp>
 #include <cstdlib>
+#include <algorithm>
 #include <cstdio>
 
 namespace Poseidon::Dev
@@ -9,6 +10,26 @@ LightCounters& GLightCounters()
 {
     static LightCounters counters;
     return counters;
+}
+
+IndoorLightGate& GIndoorLightGate()
+{
+    static IndoorLightGate gate = []
+    {
+        IndoorLightGate g;
+        if (const char* v = std::getenv("POSEIDON_INDOOR_LIGHT_GATE"))
+            g.enabled = (std::atoi(v) != 0);
+        if (const char* v = std::getenv("POSEIDON_INDOOR_LIGHT_RADIUS"))
+        {
+            const double d = std::atof(v);
+            if (d > 0.0)
+                g.indoorRadius = static_cast<float>(d);
+        }
+        if (const char* v = std::getenv("POSEIDON_INDOOR_LIGHT_LEAK"))
+            g.indoorLeak = std::clamp(static_cast<float>(std::atof(v)), 0.0f, 1.0f);
+        return g;
+    }();
+    return gate;
 }
 
 LampLightSettings& GLampLightSettings()

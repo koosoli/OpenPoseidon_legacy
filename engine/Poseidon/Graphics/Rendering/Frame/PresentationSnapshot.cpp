@@ -14,6 +14,8 @@
 #include <Poseidon/Foundation/Framework/Log.hpp>
 
 #include <Poseidon/Dev/Diag/SnapshotDiag.hpp>
+#include <Poseidon/Dev/Diag/LightingDiag.hpp>
+#include <Poseidon/World/Effects/SmokeWorldQuery.hpp>
 
 #include <algorithm>
 #include <array>
@@ -134,6 +136,39 @@ static void FillPresentationSnapshot(PresentationSnapshot& snap)
             };
             std::vector<Candidate> candidates;
             const Vector3 cameraPos = snap.hasCamera ? snap.cameraPos : VZero;
+
+            // LGT-001: is the camera inside a room? Cached, because the room query behind
+            // this runs two full Landscape::IsInside passes when the answer is "outdoors"
+            // (BuildingContaining caches only hits -- the same measurement that made
+            // SMK-031 too dear), and a camera does not change room in a millimetre.
+            Poseidon::Dev::IndoorLightGate& gate = Poseidon::Dev::GIndoorLightGate();
+            bool cameraIndoors = false;
+            if (gate.enabled && snap.hasCamera)
+            {
+                static float lastQuery = -1000.0f;
+                static Vector3 lastPos = VZero;
+                static bool lastResult = false;
+                const float now = Glob.time.toFloat();
+                if (now - lastQuery > 0.25f || cameraPos.Distance2(lastPos) > 1.0f)
+                {
+                    lastQuery = now;
+                    lastPos = cameraPos;
+                    int room = -1;
+                    ++gate.cameraQueries;
+                    // Two steps, the same pair SmokeTab::CameraIndoors uses and for the
+                    // same reason: many buildings carry no interior Paths data at all, so
+                    // the room query answers "outdoors" while you are demonstrably standing
+                    // in a room. A roof overhead is the fallback that catches those.
+                    lastResult = GSmokeWorldQuery().IndoorRoomAt(cameraPos, room) ||
+                                 GSmokeWorldQuery().IsSheltered(cameraPos, 6.0f);
+                }
+                cameraIndoors = lastResult;
+                if (cameraIndoors)
+                {
+                    ++gate.framesIndoors;
+                }
+            }
+            const float indoorRadius2 = gate.indoorRadius * gate.indoorRadius;
             const int n = GScene->NLights();
             candidates.reserve(n);
             for (int i = 0; i < n; i++)
@@ -146,14 +181,29 @@ static void FillPresentationSnapshot(PresentationSnapshot& snap)
                 const bool isSpot = desc.type == LTSpotLight;
                 if (desc.type != LTPoint && !isSpot)
                     continue; // point + spot only; the sun is the directional main light
-                const float gate = light->IsDaylightVisible() ? 1.0f : night;
-                if (gate <= 0.0f)
+                const float gateFactor = light->IsDaylightVisible() ? 1.0f : night;
+                if (gateFactor <= 0.0f)
                     continue;
+                // LGT-001: a light out in the street cannot reach a room the walls close,
+                // and today nothing stops it -- there is no occlusion term in the shader.
+                // Distance is the cheap stand-in for "is it in here with me": a lamp you
+                // carry inside, or a glowing probe thrown through a door, is close; the
+                // twenty lamps down the road are not.
+                float indoorScale = 1.0f;
+                if (cameraIndoors && desc.pos.Distance2(cameraPos) > indoorRadius2)
+                {
+                    if (gate.indoorLeak <= 0.0f)
+                    {
+                        ++gate.lightsDropped;
+                        continue;
+                    }
+                    indoorScale = gate.indoorLeak;
+                }
                 PresentationSnapshot::LocalLight entry;
                 entry.pos = desc.pos;
                 entry.startAtten = desc.startAtten;
-                entry.diffuse = desc.diffuse * gate;
-                entry.ambient = desc.ambient * gate;
+                entry.diffuse = desc.diffuse * (gateFactor * indoorScale);
+                entry.ambient = desc.ambient * (gateFactor * indoorScale);
                 entry.dir = desc.dir;
                 entry.dir.Normalize();
                 entry.spot = isSpot;

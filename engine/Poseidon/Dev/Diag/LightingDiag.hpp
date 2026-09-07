@@ -97,6 +97,36 @@ struct LampLightSettings
 
 LampLightSettings& GLampLightSettings();
 
+// LGT-001: local lights have NO occlusion term. lights_contrib does distance, a cone for
+// spots, and N.L -- and nothing at all about what is between the light and the fragment.
+// Street lamps therefore shine straight through walls, and that is the ENTIRE night
+// illumination inside an Everon house: measured 17.95 mean luma standing in the cafe at
+// 23:00 with the lamps on, and 0.00 with them off. The room is not dimly lit, it is lit by
+// twenty lamps out in the street that the walls do not stop.
+//
+// Real occlusion means a shadow map per local light, which is a project. This is the cheap
+// gate that answers the owner's actual complaint -- "if no light can hit the inside of a
+// building at night it should not be bright": while the CAMERA is inside a room, a local
+// light further than `indoorRadius` from it cannot plausibly be in that room, so it is
+// scaled by `indoorLeak` (0 = dropped). A lamp you carry inside, or a glowing probe thrown
+// through a door, is within the radius and still lights the room.
+//
+// It is a GATE, not shadows: it cannot let light in through a window, and it changes with
+// the camera rather than per fragment. Both of those are the honest limits of doing this
+// without a shadow map. Daylight is untouched -- the whole block only runs at night, since
+// the light selection itself is gated on nightEffect.
+struct IndoorLightGate
+{
+    bool enabled = true;      //!< POSEIDON_INDOOR_LIGHT_GATE=0 turns it off
+    float indoorRadius = 7.0f;//!< POSEIDON_INDOOR_LIGHT_RADIUS: metres; inside this a light counts as "in here"
+    float indoorLeak = 0.0f;  //!< POSEIDON_INDOOR_LIGHT_LEAK: 0..1 of an outside light that still reaches in
+    // Counters, so "the room went dark" can be told from "the query never ran".
+    long long cameraQueries = 0;
+    long long framesIndoors = 0;
+    long long lightsDropped = 0;
+};
+IndoorLightGate& GIndoorLightGate();
+
 // Call after changing any field above.
 void LampLightSettingsChanged();
 
