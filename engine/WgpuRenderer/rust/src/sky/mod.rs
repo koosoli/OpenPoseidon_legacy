@@ -32,6 +32,48 @@ fn sky_wgsl_validates() {
     .expect("sky.wgsl validate");
 }
 
+// SKY-002. The stars were already added to the sky BEFORE the cloud composite, and they still
+// came through an opaque overcast at ~0.65 of their clear-sky brightness, because the cloud march
+// is lit by `bg` and `bg` was the full sky radiance AT THAT PIXEL -- so a star lit the cloud in
+// front of itself and the composite's `bg*trans + inscatter` handed it back as inscatter.
+//
+// This is a source-text assertion rather than a rendered one because the cloud march is a separate
+// depth-aware pass over the scene, which the headless single-pass sky harness cannot record; the
+// rendered proof is the night clear-vs-overcast capture pair. What it CAN pin is the thing that
+// regressed: that neither cloud caller is handed the star-carrying lane again.
+#[test]
+fn the_cloud_march_is_not_lit_by_the_stars() {
+    let src = include_str!("sky.wgsl");
+    // The split exists and the weight actually gates the lookup (weight 0 must not merely scale
+    // star_field by zero -- it must skip it, or the cloud pass pays for a term it discards, with
+    // a g_px_angle that was never set in that entry point).
+    assert!(
+        src.contains("fn sky_radiance_weighted(dir: vec3<f32>, star_weight: f32)")
+            && src.contains("if (star_weight > 0.001) {"),
+        "sky_radiance must take a star weight and skip star_field when it is zero"
+    );
+    // Both cloud callers take the star-free lane...
+    let cloud_bg = src.matches("let bg = sky_radiance_cloud_bg(dir);").count();
+    assert!(
+        cloud_bg >= 3,
+        "fs_sky, fs_cloud and fs_sky_env must all take the star-free sky as the cloud ambient \
+         (found {cloud_bg} of 3)"
+    );
+    // ...and nothing marches clouds against the full sky radiance any more.
+    assert!(
+        !src.contains("march_clouds(pos, dir, sun, radiance, color,")
+            && !src.contains("radiance, color, 0.0, 1e12)")
+            && !src.contains("sky.params.y, color)"),
+        "a cloud march is still being handed the star-carrying sky radiance"
+    );
+    // And the strength is a real lane, not a hard-coded 1 -- WGR_STAR_OCCLUSION=0 has to restore
+    // the old look exactly, or there is no A/B for the next person who doubts this.
+    assert!(
+        src.contains("night_sky: vec4<f32>") && src.contains("1.0 - sky.night_sky.x"),
+        "the star cloud-occlusion strength must ride a UBO lane"
+    );
+}
+
 // Same offline guard for the standalone SH-projection compute (create_shader_module'd, so it is
 // not covered by the naga_oil entry-shader compose test).
 #[test]
@@ -607,6 +649,11 @@ struct SkyUniform {
     // cumulus deck (0..1, 0 = shipped), zw reserved. Both arrive here already eased. See
     // sky.wgsl's `cirrus` lane and its AMOUNT / MATCH blocks.
     cirrus: [f32; 4],
+    // SKY-002. x = STAR CLOUD-OCCLUSION strength [0,1]. Renderer-written, like `cirrus` and
+    // cloud4.w, so no FFI struct changes size. See sky.wgsl's `night_sky` lane for what it does
+    // and why the "stars are added before the cloud composite" arrangement was not enough on its
+    // own. yzw reserved (0).
+    night_sky: [f32; 4],
 }
 
 // The atmosphere-only fields that determine the LUTs (sun/night/exposure excluded,
@@ -881,6 +928,34 @@ fn milky_way_from_env() -> f32 {
     v
 }
 
+/// `WGR_STAR_OCCLUSION=<0..1>` — how completely a cloud deck hides the stars behind it.
+///
+/// 1 (default) is the correct answer and the shipped look: the cloud march is lit by the
+/// STAR-FREE sky, so an overcast night has no stars in it and a broken deck keeps only the ones
+/// in its gaps. 0 restores the pre-SKY-002 behaviour exactly — the deck's ambient source is the
+/// full sky radiance at that pixel, stars included, so every star re-lights the cloud standing in
+/// front of it and returns at roughly the cloud's ambient fraction (measured: 0.65 of the clear-sky
+/// value under a 0.95-coverage overcast, which is why "clouds don't hide the stars" was the
+/// report). Anything between the two is a straight lerp on the star term alone.
+///
+/// An env knob rather than a dev slider because the whole path from a Dev Tools control to this
+/// value runs through EngineWgpu.cpp, which this change was not allowed to touch. The master gain
+/// (Dev Tools -> Sky -> Stars -> "Star brightness") still turns the night sky off entirely, and
+/// `WGR_ABLATE=clouds` still turns the deck off, so both ends of the A/B are reachable from the
+/// panel; only the middle needs this.
+fn star_cloud_occlusion_from_env() -> f32 {
+    let Ok(raw) = std::env::var("WGR_STAR_OCCLUSION") else {
+        return 1.0;
+    };
+    let Ok(v) = raw.trim().parse::<f32>() else {
+        eprintln!("[wgr] sky: WGR_STAR_OCCLUSION='{raw}' is not a number - ignoring");
+        return 1.0;
+    };
+    let v = v.clamp(0.0, 1.0);
+    eprintln!("[wgr] sky: star cloud-occlusion {v} from WGR_STAR_OCCLUSION");
+    v
+}
+
 pub struct Sky {
     // Main fullscreen sky pipeline (targets the scene format).
     sky_pipeline: wgpu::RenderPipeline,
@@ -936,6 +1011,10 @@ pub struct Sky {
     /// growing it moves the assert. 0 turns the band off and leaves the point stars alone.
     /// Startup override: `WGR_MILKYWAY=<0..3>`.
     milky_way: f32,
+    /// SKY-002: how much of the star field is withheld from the sky radiance the CLOUD march uses
+    /// as its ambient source, written to the sky UBO's `night_sky.x`. 1 = a deck hides the stars
+    /// behind it; 0 = the pre-SKY-002 behaviour. `WGR_STAR_OCCLUSION=<0..1>`.
+    star_cloud_occlusion: f32,
     /// The star-catalogue buffers. Only ever read through `sky_bind`; held here so the buffers
     /// outlive the bind group that references them.
     _star_cell_buf: wgpu::Buffer,
@@ -2017,6 +2096,7 @@ impl Sky {
             // "Star brightness" slider as the point stars, so the dev panel can still take the
             // whole night sky to zero; this lane only sets the band's weight against the stars.
             milky_way: milky_way_from_env(),
+            star_cloud_occlusion: star_cloud_occlusion_from_env(),
             _star_cell_buf: star_cell_buf,
             _star_list_buf: star_list_buf,
             // Matches Engine::SkySettings' safe default.  The C++ side normally pushes this on
@@ -2304,6 +2384,7 @@ impl Sky {
                 // See `milky_way` in the struct above for why it rides here.
                 self.milky_way,
             ],
+            night_sky: [self.star_cloud_occlusion, 0.0, 0.0, 0.0],
         };
         queue.write_buffer(&self.uniform_buf, 0, bytemuck::bytes_of(&u));
         // Terrain sun-shadow mask mapping for cs_froxel's occlusion lookup (own copy so
@@ -2955,7 +3036,10 @@ mod cirrus_puffiness_tests {
         // ...and NOT on the env bake, where a jittered march reads as a checkerboard once the
         // 256x128 texels are magnified by a water reflection. Same reasoning the deck records.
         assert!(
-            src.contains("cirrus_layer(pos, dir, sun, radiance, color, 0.0, 1e12)"),
+            // `bg`, not `color`: SKY-002 split the env bake's two lanes, so the ambient the shell
+            // is lit by is the star-free sky while `color` (what the water reflects) keeps its
+            // stars. The 0.0 jitter argument is what this assertion is actually about.
+            src.contains("cirrus_layer(pos, dir, sun, radiance, bg, 0.0, 1e12)"),
             "the env bake must march the cirrus shell without jitter"
         );
         // AMOUNT's midpoint knot IS the old CIRRUS_COVER constant and stays the default;
@@ -3159,6 +3243,9 @@ mod sky_uniform_layout_tests {
             // The second layer's AMOUNT / MATCH sliders. Renderer-written, like cloud4.w — but
             // unlike it they needed a lane of their own, so this list moves with them.
             "cirrus",
+            // SKY-002's star cloud-occlusion strength. Renderer-written like `cirrus`, and on this
+            // list for the same reason: the two structs are only kept in step by this assertion.
+            "night_sky",
         ];
         assert_eq!(
             wgsl, rust,

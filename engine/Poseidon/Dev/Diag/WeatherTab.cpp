@@ -901,6 +901,13 @@ void DrawWeatherStateSection()
     ImGui::TextDisabled("Actual: overcast %.2f, fog %.2f", GWorld->GetOvercast(), GWorld->GetFog());
     ImGui::TextDisabled("Overcast also drives the wind: mean speed and gust envelope");
     ImGui::TextDisabled("both scale with it unless the override above is on.");
+    // SKY-002. Overcast is also the night sky's star occlusion, and that is not obvious from
+    // either end: the deck is nearly black after dark, so the only visible evidence that raising
+    // this did anything to the sky is the stars going out.
+    ImGui::TextDisabled("At night, overcast is what hides the STARS: it drives the wgpu deck's");
+    ImGui::TextDisabled("coverage (Sky tab -> 'Coverage follows weather'), and the deck's own");
+    ImGui::TextDisabled("transmittance is what the star field is multiplied by. Strength:");
+    ImGui::TextDisabled("WGR_STAR_OCCLUSION=<0..1> (1 = default, 0 = stars punch through).");
 }
 
 } // namespace

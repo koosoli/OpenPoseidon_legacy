@@ -57,8 +57,17 @@ struct Sky {
     //       depth, opacity and phase all move together toward the deck. 1 = a second cumulus
     //       deck above the first rather than a cirrus veil.
     //   z = EDGE SOFTNESS (0..1, 0 = the layer exactly as it rendered before this existed).
-    //   w = reserved (0).
+    //   w = the Milky Way band's gain.
     cirrus: vec4<f32>,
+    // SKY-002. x = STAR CLOUD-OCCLUSION strength [0,1]: how much of the star field is withheld
+    // from the sky radiance that the cloud march uses as its AMBIENT SOURCE. The deck is lit by
+    // `bg` (see march_clouds), and `bg` was the FULL sky radiance at that same pixel — stars
+    // included — so every star re-lit the cloud standing in front of it and came back through an
+    // opaque overcast at roughly the cloud's ambient fraction. 1 = the cloud is lit by the
+    // STAR-FREE sky, so a deck hides the stars behind it exactly as it hides the sky behind them;
+    // 0 = the pre-SKY-002 behaviour, bit for bit. Renderer-written (`WGR_STAR_OCCLUSION`).
+    // yzw reserved (0).
+    night_sky: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> sky: Sky;
@@ -429,7 +438,25 @@ fn hash21(p: vec2<f32>) -> f32 {
 // haze + the authored night-sky floor, WITHOUT the sun disc (callers that want the disc add it
 // against the true, unfloored `dir`). Shared by the fullscreen sky (fs_sky) and the reflection
 // environment map (fs_sky_env), so the water surface reflects the exact same sky.
-fn sky_radiance(dir: vec3<f32>) -> vec3<f32> {
+// Star radiance alone: the catalogue field + the Milky Way band, gated to night by sun altitude
+// and scaled by the master gain (Dev Tools -> Sky -> Stars -> "Star brightness"). Split out of
+// sky_radiance so a caller can ask for a STAR-FREE sky; see sky_radiance_weighted.
+fn star_radiance(dir: vec3<f32>, sun: vec3<f32>) -> vec3<f32> {
+    let night_blend_stars = 1.0 - smoothstep(sky.night_params.y, sky.night_params.x, sun.y);
+    let star_amount = max(sky.output.y, 0.0);
+    if (star_amount > 0.001 && night_blend_stars > 0.0) {
+        return star_field(dir, sun) * star_amount * night_blend_stars;
+    }
+    return vec3<f32>(0.0);
+}
+
+// `star_weight` scales the star term ONLY. 1 = the sky as the eye sees it. Anything less is the
+// sky handed to the CLOUD march as its ambient source: the deck must not be lit by the stars it
+// is standing in front of, or an opaque overcast returns them at its ambient fraction (~0.65 of
+// the star's own radiance, measured). Weight 0 skips star_field entirely, so the cloud pass gets
+// CHEAPER as well as correct — and it never had a valid `g_px_angle` to feed it anyway (the
+// derivative is taken in fs_sky, not in fs_cloud).
+fn sky_radiance_weighted(dir: vec3<f32>, star_weight: f32) -> vec3<f32> {
     let sun = normalize(sky.sun_dir.xyz);
     let planet_r = sky.params.z;
     let top_r = planet_r + sky.params.w;
@@ -460,13 +487,12 @@ fn sky_radiance(dir: vec3<f32>) -> vec3<f32> {
         color = mix(color, fog, clamp(th, 0.0, 1.0));
     }
 
-    let night_blend_stars = 1.0 - smoothstep(sky.night_params.y, sky.night_params.x, sun.y);
     // Stars. Added with the night floor and BEFORE the cloud composite below, so a cloud deck
     // covers them exactly as it covers the sky behind it -- stars punching through overcast is the
-    // giveaway that they were pasted on at the end.
-    let star_amount = max(sky.output.y, 0.0);
-    if (star_amount > 0.001 && night_blend_stars > 0.0) {
-        color = color + star_field(dir, sun) * star_amount * night_blend_stars;
+    // giveaway that they were pasted on at the end. Being ahead of the composite is NECESSARY but
+    // not SUFFICIENT: see star_weight on this function.
+    if (star_weight > 0.001) {
+        color = color + star_radiance(dir, sun) * star_weight;
     }
 
     // Night-sky floor: an authored deep-blue that fills in as the sun drops below the horizon
@@ -479,6 +505,18 @@ fn sky_radiance(dir: vec3<f32>) -> vec3<f32> {
     }
 
     return max(color, vec3<f32>(0.0));
+}
+
+// The sky as the EYE sees it (stars at full weight).
+fn sky_radiance(dir: vec3<f32>) -> vec3<f32> {
+    return sky_radiance_weighted(dir, 1.0);
+}
+
+// The sky the CLOUD march is allowed to be lit BY. Identical to sky_radiance wherever there are no
+// stars -- daytime is bit-for-bit unchanged, because star_radiance is already zero above the
+// night threshold -- and star-free at night in proportion to night_sky.x.
+fn sky_radiance_cloud_bg(dir: vec3<f32>) -> vec3<f32> {
+    return sky_radiance_weighted(dir, clamp(1.0 - sky.night_sky.x, 0.0, 1.0));
 }
 
 // ---- Volumetric clouds (plan Stage 5) ----------------------------------------
@@ -1837,7 +1875,16 @@ fn fs_sky(in: VsOut) -> @location(0) vec4<f32> {
     let cam_alt = max(sky.night_zenith.w, 0.0);
     let pos = vec3<f32>(0.0, planet_r + cam_alt, 0.0);
 
-    var color = sky_radiance(dir);
+    // Two lanes on purpose: `bg` is what a CLOUD standing on this ray may be lit by (star-free at
+    // night), `color` is what the eye sees. With the default occlusion of 1 exactly one of the two
+    // star_field lookups below actually runs, so this costs nothing over the single call it
+    // replaces -- and the disc's short cloud march below stops being lit by the star behind it.
+    let bg = sky_radiance_cloud_bg(dir);
+    let star_occl = clamp(sky.night_sky.x, 0.0, 1.0);
+    var color = bg;
+    if (star_occl > 0.001) {
+        color = color + star_radiance(dir, sun) * star_occl;
+    }
 
     // Clouds are NO LONGER drawn here — they are a depth-aware over-scene composite (fs_cloud +
     // fs_cloud_composite) so they occlude terrain and envelop the camera when flown through. The sky
@@ -1858,7 +1905,7 @@ fn fs_sky(in: VsOut) -> @location(0) vec4<f32> {
                       dot(dir, moon_dir) > cos(max(sky.moon_params.x, 1.0e-4));
         var disc_cover = 1.0;
         if (cos_sun > cos_radius || in_moon) {
-            let t = disc_cloud_cover(pos, dir, sun, sky.sun_dir.w * sky.params.y, color);
+            let t = disc_cloud_cover(pos, dir, sun, sky.sun_dir.w * sky.params.y, bg);
             disc_cover = t * t;
         }
         if (cos_sun > cos_radius) {
@@ -1901,7 +1948,14 @@ fn fs_sky_env(in: VsOut) -> @location(0) vec4<f32> {
     let polar = in.uv.y * PI;              // 0 = up, PI = down
     let sp = sin(polar);
     let dir = vec3<f32>(sp * cos(azimuth), cos(polar), sp * sin(azimuth));
-    var color = sky_radiance(dir);
+    // Same two lanes as fs_sky: the reflected sky keeps its stars, the cloud march that runs over
+    // it does not get to be lit by them.
+    let bg = sky_radiance_cloud_bg(dir);
+    let star_occl = clamp(sky.night_sky.x, 0.0, 1.0);
+    var color = bg;
+    if (star_occl > 0.001) {
+        color = color + star_radiance(dir, normalize(sky.sun_dir.xyz)) * star_occl;
+    }
     // Cheap low-step cloud path (few primary + light steps): the 256x128 env map is re-baked
     // every frame and projected to SH-9, so the full detailed march would both cost a lot AND
     // alias the wind-scrolled noise into temporal SH flicker. Low frequencies are all SH keeps.
@@ -1914,12 +1968,12 @@ fn fs_sky_env(in: VsOut) -> @location(0) vec4<f32> {
     // march bands slightly instead, but the low step count + huge texels blur that away; the smooth
     // result is what the SH projection + reflection want.
     let radiance = sky.sun_dir.w * sky.params.y;
-    let deck = march_clouds(pos, dir, sun, radiance, color, 12.0, 2, 0.0, 1e12);
+    let deck = march_clouds(pos, dir, sun, radiance, bg, 12.0, 2, 0.0, 1e12);
     // The cirrus layer goes into the env bake too, so the water reflects — and the SH ambient sees —
     // the same two-layer sky the camera does. It runs in whatever mode the Sky tab selected, and
     // the env map is only 256x128, so even the volumetric path is a rounding error here; the
     // measured cost of the layer as a whole is dominated by the full-resolution cloud pass.
-    let cloud = cloud_over_cirrus(deck, cirrus_layer(pos, dir, sun, radiance, color, 0.0, 1e12));
+    let cloud = cloud_over_cirrus(deck, cirrus_layer(pos, dir, sun, radiance, bg, 0.0, 1e12));
     return vec4<f32>(color * cloud.trans + cloud.inscatter, 1.0);
 }
 
@@ -1952,7 +2006,10 @@ fn fs_cloud(in: VsOut) -> @location(0) vec4<f32> {
         scene_dist = length(wh.xyz / wh.w);
     }
 
-    let bg = sky_radiance(dir); // local sky colour for the cloud ambient
+    // Local sky colour for the cloud AMBIENT -- star-free (see sky_radiance_cloud_bg). This is the
+    // pixel where the bug lived: with the full sky radiance here, a star's radiance became the
+    // ambient lighting the cloud in front of it, so the composite handed it straight back.
+    let bg = sky_radiance_cloud_bg(dir);
     let radiance = sky.sun_dir.w * sky.params.y;
     let deck = march_clouds(pos, dir, sun, radiance, bg,
                             CLOUD_STEPS, CLOUD_LIGHT_STEPS, hash21(in.clip.xy), scene_dist);
