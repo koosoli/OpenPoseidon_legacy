@@ -1892,7 +1892,7 @@ uint32_t EngineWgpu::LocalShadowCasterMask(float relX, float relY, float relZ) c
     for (int k = 0; k < _localShadowCount && k < kMaxLocalShadows; k++)
     {
         const LocalShadowLight& L = _localShadowLights[k];
-        const float reach = std::max(L.startAtten * ls.rangeScale, 2.0f);
+        const float reach = std::clamp(L.startAtten * ls.rangeScale, 2.0f, ls.rangeMax);
         const float dx = (relX + _smCamPos[0]) - L.pos[0];
         const float dy = (relY + _smCamPos[1]) - L.pos[1];
         const float dz = (relZ + _smCamPos[2]) - L.pos[2];
@@ -3627,7 +3627,7 @@ void EngineWgpu::NextFrame()
                         const LocalShadowLight& L = _localShadowLights[k];
                         // The light's own reach. Past it the light contributes nothing, so
                         // rendering casters further away spends depth on invisible geometry.
-                        const float reach = std::max(L.startAtten * ls.rangeScale, 2.0f);
+                        const float reach = std::clamp(L.startAtten * ls.rangeScale, 2.0f, ls.rangeMax);
                         // A cone angle of 0 means the source never told us one; fall back to
                         // something a lamp-shaped light plausibly has rather than to a
                         // pinhole, which would clip its own pool away.
@@ -3810,7 +3810,7 @@ void EngineWgpu::NextFrame()
                 for (int k = 0; k < _localShadowCount && k < kMaxLocalShadows; k++)
                 {
                     const LocalShadowLight& L = _localShadowLights[k];
-                    const float reach = std::max(L.startAtten * ls.rangeScale, 2.0f);
+                    const float reach = std::clamp(L.startAtten * ls.rangeScale, 2.0f, ls.rangeMax);
                     const float cone = L.coneOuter > 0.01f ? L.coneOuter : 0.45f;
                     const Poseidon::shadow::Mat4 vp = Poseidon::shadow::SpotLightVP(
                         {L.pos[0], L.pos[1], L.pos[2]}, {L.dir[0], L.dir[1], L.dir[2]}, cone,

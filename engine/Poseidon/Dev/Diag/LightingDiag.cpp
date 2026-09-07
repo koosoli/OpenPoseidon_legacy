@@ -32,6 +32,12 @@ LocalShadowSettings& GLocalShadowSettings()
             if (d > 0.0)
                 v.rangeScale = static_cast<float>(d);
         }
+        if (const char* e = std::getenv("POSEIDON_LOCAL_SHADOW_RANGE_MAX"))
+        {
+            const double d = std::atof(e);
+            if (d > 0.0)
+                v.rangeMax = static_cast<float>(d);
+        }
         if (const char* e = std::getenv("POSEIDON_LOCAL_SHADOW_DARKNESS"))
             v.darkness = std::clamp(static_cast<float>(std::atof(e)), 0.0f, 1.0f);
         return v;

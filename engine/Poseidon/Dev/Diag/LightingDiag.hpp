@@ -115,6 +115,12 @@ struct LocalShadowSettings
     // How far the shadow reaches, as a multiple of the light's own attenuation start. Past
     // its own reach a light contributes nothing, so rendering casters there is wasted depth.
     float rangeScale = 6.0f;//!< POSEIDON_LOCAL_SHADOW_RANGE
+    // ...but never past this, whatever the light claims. `startAtten` means different things
+    // to different light kinds -- LightPoint makes it 50 x brightness while LightReflector
+    // makes it 200 / sqrt(brightness), which measured 368 m for a hand-held torch. A shadow
+    // map stretched over two kilometres has metre-wide texels and resolves nothing; the cap
+    // is what keeps the depth precision where the light actually falls.
+    float rangeMax = 90.0f; //!< POSEIDON_LOCAL_SHADOW_RANGE_MAX, metres
     float darkness = 1.0f;  //!< POSEIDON_LOCAL_SHADOW_DARKNESS: 0 = no occlusion, 1 = full
     // Counters that separate "no light qualified" from "the pass never ran".
     long long framesWithShadow = 0;

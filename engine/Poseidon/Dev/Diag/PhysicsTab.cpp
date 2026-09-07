@@ -324,6 +324,7 @@ void DrawPhysicsTab()
             Dev::PanelSameLine();
             ImGui::SetNextItemWidth(140.0f);
             Dev::SliderFloat("Cone (rad)", &s.lightConeOuter, 0.05f, 1.4f, "%.2f");
+            Dev::Checkbox("Aim along the view", &s.lightSpotAimView);
             Dev::PanelTooltip("POSEIDON_PROBE_CONE. Outer half-angle of the beam. The lit pool follows this\n"
                               "now (LGT-011); it used to be hardcoded at 12 degrees for every spot in the\n"
                               "game, whatever the light itself said.");

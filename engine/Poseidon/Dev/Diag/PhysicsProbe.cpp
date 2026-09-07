@@ -40,6 +40,16 @@ const bool s_probeEnvSeeded = []
         s_settings.selfIllum = !(*v == '0');
     if (const char* v = std::getenv("POSEIDON_PROBE_HOTKEYS"))
         s_settings.hotkeys = !(*v == '0');
+    if (const char* v = std::getenv("POSEIDON_PROBE_GLOW"))
+        s_settings.lightGlow = std::clamp(static_cast<float>(std::atof(v)), 0.0f, 8.0f);
+    if (const char* v = std::getenv("POSEIDON_PROBE_LIGHT_OWN_COLOR"))
+        s_settings.lightUsesProbeColor = !(*v == '0');
+    if (const char* v = std::getenv("POSEIDON_PROBE_SPOT"))
+        s_settings.lightSpot = !(*v == '0');
+    if (const char* v = std::getenv("POSEIDON_PROBE_CONE"))
+        s_settings.lightConeOuter = std::clamp(static_cast<float>(std::atof(v)), 0.05f, 1.4f);
+    if (const char* v = std::getenv("POSEIDON_PROBE_AIM_VIEW"))
+        s_settings.lightSpotAimView = !(*v == '0');
     return true;
 }();
 
@@ -213,7 +223,13 @@ void SubmitProbeLight(Vector3Par position)
         rf->SetBrightness(s_settings.lightBrightness);
         rf->SetSize(s_settings.lightGlow);
         rf->SetAngle(s_settings.lightConeOuter);
-        rf->SetOrient(Vector3(0, -1, 0), Vector3(0, 0, 1));
+        Vector3 aim(0, -1, 0);
+        if (s_settings.lightSpotAimView && GScene != nullptr && GScene->GetCamera() != nullptr)
+        {
+            aim = GScene->GetCamera()->Direction();
+        }
+        const Vector3 up = (std::fabs(aim.Y()) > 0.99f) ? Vector3(0, 0, 1) : Vector3(0, 1, 0);
+        rf->SetOrient(aim, up);
     }
 }
 

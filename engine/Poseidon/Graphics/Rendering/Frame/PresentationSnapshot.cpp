@@ -120,6 +120,20 @@ static void FillPresentationSnapshot(PresentationSnapshot& snap)
     {
         const float night = snap.nightEffect;
         bool anyDaylight = false;
+        {
+            // LGT-010 cross-check, at the SOURCE of the light list. The renderer-side gauge
+            // reported "0 candidates, nightEffect 0.000, sceneLights 0" on a frame that
+            // renders as a lamp-lit night village -- so one of the two is reading something
+            // other than what it names, and this says which.
+            static float nextSay = 0.0f;
+            const float now = Glob.time.toFloat();
+            if (now >= nextSay)
+            {
+                nextSay = now + 3.0f;
+                LOG_INFO(Graphics, "LGT-010 snapshot: scene lights {} nightEffect {:.3f} hasMainLight {}",
+                         GScene != nullptr ? GScene->NLights() : -1, night, snap.hasMainLight);
+            }
+        }
         for (int i = 0, n = GScene->NLights(); i < n && !anyDaylight; ++i)
         {
             const Light* light = GScene->GetLight(i);

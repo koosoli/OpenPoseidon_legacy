@@ -134,6 +134,11 @@ struct PhysicsProbeSettings
     //! makes a thrown probe able to cast a shadow at all (LGT-010).
     bool  lightSpot = false;
     float lightConeOuter = 0.55f; //!< outer half-angle, radians (~31 degrees)
+    //! Aim the cone along the VIEW direction instead of straight down -- a torch rather than a
+    //! lamp. A downward cone puts its shadow under the caster where nothing can see it; a
+    //! horizontal one throws a silhouette across the ground and onto walls, which is the only
+    //! way to look at a shadow and judge it.
+    bool  lightSpotAimView = false;
     /// Ambient the light adds regardless of surface orientation. Small on purpose:
     /// a big ambient term flattens exactly the shading you opened this to look at.
     float lightAmbient = 0.06f;
