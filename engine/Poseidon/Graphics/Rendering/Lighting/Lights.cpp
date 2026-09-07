@@ -1,5 +1,6 @@
 
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
+#include <Poseidon/Dev/Diag/LightingDiag.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Ephemeris.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
@@ -1095,6 +1096,14 @@ Color LightReflector::GetObjectColor() const
 void LightReflector::ToDraw(ClipFlags clipFlags, bool dimmed)
 {
     // reflector: draw volumetrical light object
+    // LGT-012: off by default. This wedge is 2001's stand-in for volumetric scattering, and
+    // beside a headlight that now casts a real shadow it reads as a solid grey cone hanging
+    // in the air -- the owner: "den lichtkegel von headlights sollte man ueberhaupt nicht
+    // sehen". POSEIDON_LIGHT_VOLUME_CONE=1 restores it.
+    if (!Poseidon::Dev::GLightVolumeCone().enabled)
+    {
+        return;
+    }
     if (GScene->MainLight()->NightEffect() < 0.01)
     {
         return;

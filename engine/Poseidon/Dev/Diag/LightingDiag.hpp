@@ -77,7 +77,12 @@ struct LampLightSettings
     // a whole night village measured mean luma 0.3 against 100 with point lights -- and
     // they crowded the point lights out of the fixed light budget on score. A street lamp
     // wants a small core and a real falloff, not a searchlight.
-    bool cone = false;
+    // ON as of LGT-012. It was off because LightReflector's beam measured as a 12 degree
+    // searchlight that lit nothing -- but that was the SHADER's hardcoded cone, not the
+    // light's, and LGT-011 fixed it: a lamp now opens to the 36 degrees it actually declares.
+    // A cone is also the only kind of local light that can cast a shadow (a point needs six
+    // maps), which is what the owner asked for: "strassenlaternen machen noch keine schatten".
+    bool cone = true;
     // Sodium-vapour orange. The 2001 config asks for (0.90, 0.80, 0.60), a warm white --
     // which is a 1985 idea of a lamp, not what a period street lamp looked like. The owner
     // asked for orange; POSEIDON_LAMP_COLOR=r,g,b overrides, colorOverride=false keeps the
@@ -120,7 +125,11 @@ struct LocalShadowSettings
     // makes it 200 / sqrt(brightness), which measured 368 m for a hand-held torch. A shadow
     // map stretched over two kilometres has metre-wide texels and resolves nothing; the cap
     // is what keeps the depth precision where the light actually falls.
-    float rangeMax = 90.0f; //!< POSEIDON_LOCAL_SHADOW_RANGE_MAX, metres
+    // The owner's report: "die schatten von fahrzeugen gehen nicht weit genug". 90 m was
+    // chosen to keep the depth precision usable, not from anything a headlight needs; a beam
+    // reaches further than that down a road. Raised, and still a lever, because the trade is
+    // real: doubling the range halves the effective texel density.
+    float rangeMax = 180.0f; //!< POSEIDON_LOCAL_SHADOW_RANGE_MAX, metres
     float darkness = 1.0f;  //!< POSEIDON_LOCAL_SHADOW_DARKNESS: 0 = no occlusion, 1 = full
     // Counters that separate "no light qualified" from "the pass never ran".
     long long framesWithShadow = 0;
@@ -128,6 +137,18 @@ struct LocalShadowSettings
     long long candidatesSeen = 0;
 };
 LocalShadowSettings& GLocalShadowSettings();
+
+// LGT-012: the VOLUME cone a reflector draws around itself -- the translucent shaft you see
+// coming out of a headlight, not the pool it casts. The owner: "ich denke den lichtkegel von
+// headlights sollte man ueberhaupt nicht sehen". It is a 2001 stand-in for volumetric
+// scattering and it reads as a solid grey wedge next to lighting that now has real
+// occlusion, so it is off. POSEIDON_LIGHT_VOLUME_CONE=1 brings it back.
+struct LightVolumeConeSettings
+{
+    bool enabled = false;
+};
+LightVolumeConeSettings& GLightVolumeCone();
+
 
 // Call after changing any field above.
 void LampLightSettingsChanged();

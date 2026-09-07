@@ -69,6 +69,7 @@
 #include <Poseidon/World/Scene/Camera/CamEffects.hpp>
 #include <Poseidon/World/Scene/Camera/CameraHold.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
+#include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
 #include <Poseidon/World/Entities/Vehicles/Transport.hpp>
 #include <Poseidon/World/Scene/Object.hpp>
@@ -1227,6 +1228,60 @@ float s_zeusThrowSpeed = 18.0f;
 float s_zeusThrowLoft = 4.0f;
 bool  s_zeusThrowHotkey = true;
 int   s_zeusThrowCount = 0;
+
+// LGT-013: a head torch on the camera. The owner asked for one, and it is also the rig this
+// whole feature was missing: a light you AIM, that goes where you look, in free-fly as well
+// as on foot -- so a shadow can be put where it can actually be judged instead of hoping a
+// street lamp stands in a useful place.
+//
+// A cone, not a point: only a cone needs one shadow map instead of six, so a point-light
+// torch could not cast at all. It follows the SCENE camera (GScene->GetCamera()), which is
+// what is actually being rendered in every mode -- CameraOn() is the entity the view is
+// attached to, and in free-fly that is the player standing wherever they were left.
+bool s_headlampOn = false;
+float s_headlampBrightness = 1.4f;
+float s_headlampCone = 0.42f;
+float s_headlampColor[3] = {1.00f, 0.96f, 0.88f};
+Ref<LightReflector> s_headlamp;
+
+void UpdateHeadlamp()
+{
+    if (GScene == nullptr)
+    {
+        return;
+    }
+    if (!s_headlampOn)
+    {
+        if (s_headlamp)
+        {
+            // Left in the scene's list but black: removing and re-adding a light per toggle
+            // is how a light list gets corrupted, and a black light costs nothing.
+            s_headlamp->SetDiffuse(HBlack);
+            s_headlamp->SetAmbient(HBlack);
+        }
+        return;
+    }
+    const Camera* cam = GScene->GetCamera();
+    if (cam == nullptr)
+    {
+        return;
+    }
+    if (!s_headlamp)
+    {
+        s_headlamp = new LightReflector(GScene->Preloaded(HalfLight), HBlack, HBlack, s_headlampCone);
+        GScene->AddLight(s_headlamp);
+    }
+    const Color diffuse(s_headlampColor[0], s_headlampColor[1], s_headlampColor[2], 1.0f);
+    s_headlamp->SetDiffuse(diffuse);
+    s_headlamp->SetAmbient(diffuse * 0.04f);
+    s_headlamp->SetBrightness(s_headlampBrightness);
+    s_headlamp->SetAngle(s_headlampCone);
+    // A little ahead of the eye so the camera's own near plane cannot sit inside the lamp.
+    const Vector3 dir = cam->Direction();
+    s_headlamp->SetPosition(cam->Position() + dir * 0.35f);
+    const Vector3 up = (std::fabs(dir.Y()) > 0.99f) ? Vector3(0, 0, 1) : Vector3(0, 1, 0);
+    s_headlamp->SetOrient(dir, up);
+}
 // Harness seed: POSEIDON_ZEUS_THROW=<class>[:<speed>[:<loft>]] presets the throw so --auto-keys
 // can fire a chosen ammo without a hand on the tab.
 const bool s_zeusThrowSeeded = []
@@ -1418,6 +1473,29 @@ void DrawZeusTab()
         Dev::PanelTooltip("Launches from the scene camera 2 m ahead, along the view direction, in free-fly\n"
                           "and in normal play alike. Missiles fly straight (no target); shells and bombs\n"
                           "follow ballistics; hand grenades fuse as in the game.");
+        // LGT-013: the head torch.
+        if (Dev::Checkbox("Head torch (follows the view)", &s_headlampOn))
+        {
+            UpdateHeadlamp();
+        }
+        Dev::PanelTooltip("A cone light on the CAMERA, in free-fly as well as on foot. A cone and not\n"
+                          "a point because only a cone needs one shadow map instead of six, so a point\n"
+                          "torch could not cast a shadow at all.\n"
+                          "\n"
+                          "Shadows still need POSEIDON_LOCAL_SHADOWS=1; without it this lights the\n"
+                          "world and occludes nothing, which is what every local light did before\n"
+                          "LGT-010.");
+        if (s_headlampOn)
+        {
+            ImGui::SetNextItemWidth(140.0f);
+            Dev::SliderFloat("Torch brightness", &s_headlampBrightness, 0.1f, 6.0f, "%.2f");
+            Dev::PanelSameLine();
+            ImGui::SetNextItemWidth(140.0f);
+            Dev::SliderFloat("Torch cone", &s_headlampCone, 0.08f, 1.2f, "%.2f");
+            ImGui::SetNextItemWidth(160.0f);
+            ImGui::ColorEdit3("Torch colour", s_headlampColor, ImGuiColorEditFlags_NoInputs);
+        }
+
         // DST-003: how far a wrecked building comes down.
         DestructionLook& destruct = GDestructionLook();
         Dev::Checkbox("Buildings collapse further (DST-003)", &destruct.enabled);
@@ -7517,6 +7595,10 @@ void NewFrame()
 {
     if (!s_initialized)
         return;
+    // LGT-013: the head torch follows the camera every frame, not only while its tab is
+    // open. A light that goes out when you close the panel would be a torch you cannot use
+    // while looking at anything.
+    UpdateHeadlamp();
     if (!AppConfig::Instance().DevMode() && s_visible)
         SetVisible(false);
     // Toggle the software cursor with panel visibility.  When the panel is

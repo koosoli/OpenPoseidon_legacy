@@ -148,13 +148,25 @@ fn lights_contrib(world_rel: vec3<f32>, normal_ws: vec3<f32>, mat_diffuse: vec3<
             var max_inside2 = LOCAL_MAX_INSIDE2;
             if (light.diffuse.w > 0.0) {
                 min_inside2 = light.diffuse.w;
-                max_inside2 = select(min(light.diffuse.w + 0.02, 0.9999), light.ambient.w,
-                                     light.ambient.w > light.diffuse.w);
+                // No inner angle from the light: give it a real penumbra rather than the
+                // 0.02 sliver of cos^2 this used to use, which is a hard edge in all but
+                // name. A quarter of the cone is what a headlight's own optics do.
+                let implied_inner = min_inside2 + (1.0 - min_inside2) * 0.35;
+                max_inside2 = select(implied_inner, light.ambient.w, light.ambient.w > light.diffuse.w);
             }
             if (cos2 < min_inside2) {
                 continue;
             }
-            cone = clamp((cos2 - min_inside2) / max(max_inside2 - min_inside2, 1e-4), 0.0, 1.0);
+            // LGT-012: ramp in the ANGLE, not in cos^2, and smoothstep it. cos^2 compresses
+            // near the axis and stretches at the rim, so a linear ramp in it puts almost all
+            // of the falloff in the last degree -- which is what made the beam edge read as a
+            // cut-out disc rather than a light. The angle domain spreads it evenly and the
+            // smoothstep removes the two hard derivative breaks at the ends.
+            let a_out = acos(sqrt(clamp(min_inside2, 0.0, 1.0)));
+            let a_in = acos(sqrt(clamp(max_inside2, 0.0, 1.0)));
+            let a_here = acos(sqrt(clamp(cos2, 0.0, 1.0)));
+            let t = clamp((a_out - a_here) / max(a_out - a_in, 1e-4), 0.0, 1.0);
+            cone = t * t * (3.0 - 2.0 * t);
         }
         // GL33's flat-core / inverse-square attenuation, but with the tail smoothly
         // windowed to zero at end_atten2. GL33 cuts the tail hard — invisible in its

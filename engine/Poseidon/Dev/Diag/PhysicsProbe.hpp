@@ -132,7 +132,11 @@ struct PhysicsProbeSettings
     //! Make the probe a downward CONE instead of a bare point. A point light shines in every
     //! direction and would need six shadow maps; a cone needs one, so this is the switch that
     //! makes a thrown probe able to cast a shadow at all (LGT-010).
-    bool  lightSpot = false;
+    // ON as of LGT-012, because the owner's expectation is the right one: "die probe self
+    // illuminating shapes machen auch keinen schattenwurf". They could not -- a point light
+    // needs six shadow maps and only a cone needs one, so a probe that emits light has to be
+    // a cone before it can occlude anything. Untick it for a bare glowing ball.
+    bool  lightSpot = true;
     float lightConeOuter = 0.55f; //!< outer half-angle, radians (~31 degrees)
     //! Aim the cone along the VIEW direction instead of straight down -- a torch rather than a
     //! lamp. A downward cone puts its shadow under the caster where nothing can see it; a

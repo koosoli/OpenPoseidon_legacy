@@ -11,6 +11,18 @@ LightCounters& GLightCounters()
     return counters;
 }
 
+LightVolumeConeSettings& GLightVolumeCone()
+{
+    static LightVolumeConeSettings s = []
+    {
+        LightVolumeConeSettings v;
+        if (const char* e = std::getenv("POSEIDON_LIGHT_VOLUME_CONE"))
+            v.enabled = (std::atoi(e) != 0);
+        return v;
+    }();
+    return s;
+}
+
 LocalShadowSettings& GLocalShadowSettings()
 {
     static LocalShadowSettings s = []
