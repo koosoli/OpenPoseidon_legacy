@@ -100,6 +100,10 @@ protected:
 	bool _pilotLight; // switch the light on/off
 	Ref<LightPointVisible> _light;
 	Vector3 _lightPos;
+	// Poseidon::Dev::LampLightSettings::generation the live _light was built with. A
+	// dev-panel change bumps that counter; CreateLight then rebuilds this light so a
+	// slider is visible rather than only affecting lamps created afterwards.
+	unsigned _lightGeneration = 0;
 	
 public:
 	StreetLamp( LODShapeWithShadow *shape, StreetLampType *type, int id );

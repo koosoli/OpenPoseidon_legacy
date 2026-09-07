@@ -10,6 +10,7 @@
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Random/randomGen.hpp>
 #include <Poseidon/Core/Global.hpp>
+#include <Poseidon/Dev/Diag/LightingDiag.hpp>
 #include <string.h>
 #include <cmath>
 #include <cstdlib> // std::getenv - WGR_ROAD_LEGACY_SURFACE (RoadConformsOnGpu)
@@ -192,6 +193,15 @@ void StreetLampType::Load(const ParamEntry& par)
     _colorDiffuse = GetColor(par >> "colorDiffuse");
     _colorAmbient = GetColor(par >> "colorAmbient");
     _brightness = par >> "brightness";
+
+    // LAMP-003: the config numbers that decide the pool size. `brightness` is not an
+    // intensity -- LightPoint::SetBrightness turns it into _startAtten = 50*brightness,
+    // a flat full-strength core of that radius with an inverse-square tail cut at 10x.
+    // Log it once per lamp type so a night capture can be read against real numbers.
+    LOG_INFO(World, "LAMP-003 type {}: brightness={:.3f} -> startAtten={:.1f} m, reach={:.0f} m; "
+                    "diffuse=({:.2f},{:.2f},{:.2f}) ambient=({:.2f},{:.2f},{:.2f})",
+             (const char*)GetName(), _brightness, 50.0f * _brightness, 500.0f * _brightness, _colorDiffuse.R(),
+             _colorDiffuse.G(), _colorDiffuse.B(), _colorAmbient.R(), _colorAmbient.G(), _colorAmbient.B());
 }
 
 void StreetLampType::InitShape()
@@ -261,27 +271,52 @@ void StreetLampDiagCount(bool lit)
 
 void StreetLampDiagReport()
 {
+    // Edge-triggered, not purely time-throttled. A 5-second throttle silently swallowed the
+    // one report that mattered: --test-world-hour applies the clock ~17 ms after the lamps
+    // first evaluate, so the re-decision landed inside the throttle window and the log kept
+    // showing the stale noon verdict. Always print when the counters move.
     static float next = 0.0f;
+    static long long lastSeen = -1, lastLit = -1, lastAdded = -1;
+    const bool changed = (s_lampsLit != lastLit) || (s_lampsAdded != lastAdded);
     const float now = Glob.time.toFloat();
-    if (now < next)
+    if (!changed && now < next)
         return;
     next = now + 5.0f;
-    LOG_INFO(World, "LAMP-001: {} lamp simulations since start, {} of them switched on, {} lights added to the scene",
+    lastSeen = s_lampsSeen;
+    lastLit = s_lampsLit;
+    lastAdded = s_lampsAdded;
+    LOG_INFO(World, "LAMP-001: {} lamp simulations since start, {} of them switched on, {} lamp lights live in the scene",
              s_lampsSeen, s_lampsLit, s_lampsAdded);
 }
 
 void StreetLamp::CreateLight(Matrix4Par pos)
 {
     StreetLampDiagCount(_pilotLight);
-    StreetLampDiagReport();
+    // The report used to run HERE, i.e. before the ++s_lampsAdded below, so the first call
+    // always printed "0 lights added" even when it was about to add one -- a diagnostic
+    // that could not distinguish "did not add" from "has not added yet". Report last.
+    const Poseidon::Dev::LampLightSettings& lampSet = Poseidon::Dev::GLampLightSettings();
+    if (_light && _lightGeneration != lampSet.generation)
+    {
+        // The dev lever moved: drop the light so the branch below rebuilds it with the
+        // new radius/brightness. Rebuilding rather than mutating keeps this to one code
+        // path, and LightPointVisible has no setter for diffuse/ambient anyway.
+        _light.Free();
+        --s_lampsAdded;
+    }
     if (!_light)
     {
-        if (_pilotLight)
+        if (_pilotLight && lampSet.enabled)
         {
             Ref<LODShapeWithShadow> shape = GLOB_SCENE->Preloaded(HalfLight);
-            _light = new LightPointVisible(shape, Type()->_colorDiffuse, Type()->_colorAmbient);
+            _light = new LightPointVisible(shape, Type()->_colorDiffuse * lampSet.brightnessScale,
+                                           Type()->_colorAmbient * lampSet.brightnessScale);
             _light->SetPosition(pos.FastTransform(_lightPos));
-            _light->SetBrightness(Type()->_brightness);
+            // SetBrightness is really "set radius": LightPoint::SetBrightness does
+            // _startAtten = 50 * coef, and the shader is full-brightness inside
+            // startAtten and cut at 10x it. See LampLightSettings for the measurement.
+            _light->SetBrightness(Type()->_brightness * lampSet.radiusScale);
+            _lightGeneration = lampSet.generation;
             //_light->SetDirection(Vector3(0,-1,0),Vector3(0,0,1));
             //	this,,Vector3(0,-1,0),0.5
             GLOB_SCENE->AddLight(_light);
@@ -293,8 +328,10 @@ void StreetLamp::CreateLight(Matrix4Par pos)
         if (!_pilotLight)
         {
             _light.Free();
+            --s_lampsAdded;
         }
     }
+    StreetLampDiagReport();
 }
 
 void StreetLamp::SimulateSwitch()
@@ -305,10 +342,13 @@ void StreetLamp::SimulateSwitch()
         // are indistinguishable from the outside, and the first is the one a missing
         // "lampa" hit selection would produce on every lamp in the world.
         static float next = 0.0f;
+        static float lastTod = -1.0f;
         const float now = Glob.time.toFloat();
-        if (now >= next)
+        const float tod = Glob.clock.GetTimeOfDay();
+        if (now >= next || fabs(tod - lastTod) > 0.005f)
         {
             next = now + 5.0f;
+            lastTod = tod;
             LOG_INFO(World, "LAMP-001 gate: totalDammage={:.3f} bulbHit={:.3f} bulbPtr={} timeOfDay={:.4f} timeInYear={:.1f} sunY={:.3f} state={}",
                      GetTotalDammage(), GetHit(Type()->_bulbHit), (const void*)&Type()->_bulbHit, Glob.clock.GetTimeOfDay(), Glob.clock.GetTimeInYear(),
                      GLOB_SCENE->MainLight()->SunDirection().Y(),

@@ -23,4 +23,43 @@ struct LightCounters
 
 LightCounters& GLightCounters();
 
+// LAMP-003: the street-lamp look lever.
+//
+// Measured on Everon at the cafe, 23:00, mission Intel night (asset-obs-001):
+// with WGR_MAX_ACTIVE_LIGHTS=0 the village frame is mean luma 0.11 -- essentially
+// black, stars and moon only. With the lamps on it is 105.6. So at night the street
+// lamps are not *a* light source in an OFP village, they are the ONLY one, and the
+// scene ambient contributes nothing worth measuring.
+//
+// That makes the lamp's reach the whole look. StreetLamp passes CfgNonAIVehicles
+// `brightness` to LightPoint::SetBrightness, which is `_startAtten = 50 * coef`
+// (Lights.hpp), and the shader (rust/src/shaders/lighting.wgsl, lights_contrib)
+// gives every point light a FLAT FULL-BRIGHTNESS CORE out to startAtten and an
+// inverse-square tail cut at 10x that. A lamp with brightness 1 therefore floods a
+// 50 m sphere at full strength and still reaches 500 m -- which is why the whole
+// village lights up flat instead of each lamp laying down a small pool.
+//
+// radiusScale multiplies the coef handed to SetBrightness (so it scales startAtten
+// and the 10x cutoff with it); brightnessScale multiplies the lamp's diffuse and
+// ambient colour. Both default to 1.0: the shipped look is NOT retuned here, the
+// lever exists so the owner can pick the pool size and so any capture says which
+// value produced it. `enabled` is the A/B (no lamp light at all) without needing
+// the renderer-side WGR_MAX_ACTIVE_LIGHTS, which also kills vehicle lights.
+//
+// `generation` bumps on every change; StreetLamp::CreateLight rebuilds a light whose
+// generation is stale, so a dev-panel slider takes effect on the next lamp simulation
+// (or immediately, if the panel broadcasts Landscape::OnTimeSkipped).
+struct LampLightSettings
+{
+    bool enabled = true;
+    float radiusScale = 1.0f;
+    float brightnessScale = 1.0f;
+    unsigned generation = 0;
+};
+
+LampLightSettings& GLampLightSettings();
+
+// Call after changing any field above.
+void LampLightSettingsChanged();
+
 } // namespace Poseidon::Dev

@@ -1420,6 +1420,21 @@ void World::SetDate(int year, int month, int day, int hour, int minute)
     LightSun* sun = _scene.MainLight();
     sun->Recalculate(this);
     _scene.MainLightChanged();
+
+    // LAMP-002: SetDate is a time JUMP, so every static object that latched a decision
+    // against the old clock has to re-decide. Street lamps are the visible case: a
+    // StreetLamp evaluates its LSAuto day/night gate in Init() and then only again when
+    // it re-simulates (SetSimulationPrecision(12.1256), and static objects out of the
+    // active set may not re-simulate at all), so after `setDate [...,23,0]` -- or after
+    // --test-world-hour, which calls this from the app loop -- a night village stayed
+    // dark for the whole session. World::Simulate already broadcasts this once on
+    // _firstFrame for the mission-load path (mission Intel time); the jump path had no
+    // equivalent. SkipDayTime does broadcast it, which is why `skipTime` lit lamps and
+    // `setDate` did not.
+    if (GLandscape)
+    {
+        GLandscape->OnTimeSkipped();
+    }
 }
 
 void World::ProcessNetwork()
