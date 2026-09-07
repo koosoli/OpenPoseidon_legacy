@@ -169,10 +169,7 @@ void SubmitProbeLight(Vector3Par position)
     }
     LightPointVisible* light = s_probeLights[static_cast<std::size_t>(s_probeLightsUsed)];
     ++s_probeLightsUsed;
-    // The colour you set on the probe is the colour it shines. Anything else makes the
-    // Colour picker a lie: you tint the ball red and it lights the street warm white.
-    const float* rgb = s_settings.lightUsesProbeColor ? s_settings.solidColor : s_settings.lightColor;
-    const Color diffuse(rgb[0], rgb[1], rgb[2], 1.0f);
+    const Color diffuse(s_settings.lightColor[0], s_settings.lightColor[1], s_settings.lightColor[2], 1.0f);
     light->SetPosition(position);
     light->SetDiffuse(diffuse);
     light->SetAmbient(diffuse * s_settings.lightAmbient);
