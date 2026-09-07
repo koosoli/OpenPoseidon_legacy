@@ -52,6 +52,13 @@ class AnimationRTWeights
 
 	void Init( Shape *shape );
 	void AddSelection( Shape *shape, int selIndex, int matrixIndex );
+	// FACE-002: move every vertex of a named selection ONTO `matrixIndex` at full weight,
+	// discarding whatever it was bound to. Unlike AddSelection this does not blend -- the
+	// face rig needs the whole offset, not a share of it. Returns the matrix index those
+	// vertices were bound to before (the most common one), or -1 if the selection is empty,
+	// unweighted, or does not agree on a single parent bone. Vertices whose bone already
+	// lies in [faceLo,faceHi) belong to an earlier face group and are left with it.
+	int ReplaceSelection( Shape *shape, int selIndex, int matrixIndex, int faceLo, int faceHi );
 	int	MatrixIndex( RStringB name ) const;
 	void Normalize();
 	bool IsSimple() const {return _isSimple;}
@@ -92,12 +99,23 @@ struct WeightInfoName
 	WeightInfoName(){shape=nullptr,skeleton=nullptr;}
 };
 
+// FACE-002: the 2001 face rig moves eight named selections. See Head.hpp.
+const int NFaceGroups = 8;
+
 class WeightInfo: public RefCount
 {
 	WeightInfoName _name;
 	AnimationRTWeights _data[MAX_LOD_LEVELS];
 
 	public:
+	// FACE-002: index of the first of NFaceGroups synthetic bones reserved on the skeleton
+	// for the face rig, or -1 when this (shape, skeleton) pair has no face selections.
+	// `_faceParent[level][group]` is the bone those vertices were bound to before the
+	// rebind -- the face bone is that bone's matrix with the face offset added to its
+	// translation -- or -1 where the group is absent from that level.
+	int _faceBoneBase = -1;
+	signed char _faceParent[MAX_LOD_LEVELS][NFaceGroups];
+
 	WeightInfo();
 	WeightInfo( const WeightInfoName &name );
 

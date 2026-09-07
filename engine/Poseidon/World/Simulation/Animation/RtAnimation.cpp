@@ -156,6 +156,99 @@ void AnimationRTWeights::AddSelection(Shape* shape, int selIndex, int matrixInde
     _needNormalize = true;
 }
 
+int AnimationRTWeights::ReplaceSelection(Shape* shape, int selIndex, int matrixIndex, int faceLo, int faceHi)
+{
+    if (selIndex < 0)
+    {
+        return -1;
+    }
+    const NamedSelection& sel = shape->NamedSel(selIndex);
+    if (sel.Size() <= 0)
+    {
+        return -1;
+    }
+    // Tally the parent bone before overwriting it. A face selection sits inside the head,
+    // so in practice every vertex agrees; the tally is here so that a rig which does NOT
+    // agree is detected (the caller refuses it) instead of silently tearing the face off
+    // whichever bone lost the vote.
+    // Vertices already claimed by an EARLIER face group (dominant bone inside [faceLo,faceHi))
+    // are left alone rather than stolen: the OFP face selections overlap (a lower-lip vertex
+    // is often a mouth-corner vertex too), and dropping a whole group because it shares a few
+    // vertices would cost more motion than the shared vertices following the first group does.
+    int bestSel = -1;
+    int agree = 0;
+    int disagree = 0;
+    for (int si = 0; si < sel.Size(); si++)
+    {
+        const AnimationRTWeight& entry = _data[sel[si]];
+        if (entry.Size() <= 0)
+        {
+            disagree++;
+            continue;
+        }
+        int dom = entry[0].GetSel();
+        float domW = entry[0].GetWeight();
+        for (int i = 1; i < entry.Size(); i++)
+        {
+            if (entry[i].GetWeight() > domW)
+            {
+                domW = entry[i].GetWeight(), dom = entry[i].GetSel();
+            }
+        }
+        if (dom >= faceLo && dom < faceHi)
+        {
+            continue; // already owned by an earlier face group
+        }
+        if (bestSel < 0)
+        {
+            bestSel = dom, agree = 1;
+        }
+        else if (dom == bestSel)
+        {
+            agree++;
+        }
+        else
+        {
+            disagree++;
+        }
+    }
+    if (bestSel < 0 || disagree > 0 || agree <= 0)
+    {
+        return -1;
+    }
+
+    int moved = 0;
+    for (int si = 0; si < sel.Size(); si++)
+    {
+        AnimationRTWeight& entry = _data[sel[si]];
+        if (entry.Size() > 0)
+        {
+            int dom = entry[0].GetSel();
+            float domW = entry[0].GetWeight();
+            for (int i = 1; i < entry.Size(); i++)
+            {
+                if (entry[i].GetWeight() > domW)
+                {
+                    domW = entry[i].GetWeight(), dom = entry[i].GetSel();
+                }
+            }
+            if (dom >= faceLo && dom < faceHi)
+            {
+                continue;
+            }
+        }
+        entry.Clear();
+        entry.Add(AnimationRTPair(matrixIndex, 1.0f));
+        moved++;
+    }
+    if (moved <= 0)
+    {
+        return -1;
+    }
+    _needNormalize = true;
+    return bestSel;
+}
+
 void AnimationRTWeights::Normalize()
 {
     if (!_needNormalize)
@@ -175,11 +268,26 @@ void AnimationRTWeights::Normalize()
     _needNormalize = false;
 }
 
-WeightInfo::WeightInfo() {}
+static void ClearFaceParents(signed char (&parents)[MAX_LOD_LEVELS][NFaceGroups])
+{
+    for (int l = 0; l < MAX_LOD_LEVELS; l++)
+    {
+        for (int g = 0; g < NFaceGroups; g++)
+        {
+            parents[l][g] = -1;
+        }
+    }
+}
+
+WeightInfo::WeightInfo()
+{
+    ClearFaceParents(_faceParent);
+}
 
 WeightInfo::WeightInfo(const WeightInfoName& name)
 {
     _name = name;
+    ClearFaceParents(_faceParent);
 }
 
 AnimationRTPhase::AnimationRTPhase() = default;

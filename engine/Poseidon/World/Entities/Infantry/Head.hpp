@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Poseidon/World/Simulation/Animation/Animation.hpp>
+#include <Poseidon/World/Simulation/Animation/RtAnimation.hpp>
 #include <Poseidon/Foundation/Time/Time.hpp>
 
 
@@ -100,6 +101,49 @@ public:
 //       uniform of offsets, applied in the vertex shader alongside the bone palette.
 // (b) is the cheaper one at runtime and the only one that scales to several talkers, but it
 // costs a vertex-format field and a shader change in every mesh pipeline.
+// FACE-002 -- THE FIX FOR THE ABOVE, and it needs no renderer change at all.
+//
+// FACE-001 concluded that making the face move on wgpu needs either a private per-object
+// mesh or a new per-draw offset channel plus a shader change. Both are true of the CPU-pose
+// route; neither is necessary, because the channel already exists.
+//
+// A wgpu skinned draw already carries a PER-OBJECT, per-draw bone palette: 128 mat4 in a
+// dynamic-offset UBO, rewritten for every draw (EngineWgpu::BeginMeshTL) and read by
+// vs_skinned as `palette.m[bones.x]` with `bones` a per-vertex Uint8x4. An OFP soldier
+// skeleton uses a few dozen of those 128 slots. So:
+//
+//   * reserve NFaceGroups synthetic bones on the man skeleton (they match no named
+//     selection, so Skeleton::Prepare ignores them),
+//   * at type-load time rebind the vertices of the eight face selections off the head bone
+//     and onto those synthetic bones -- this is SHARED, identical for every soldier of the
+//     model, so it changes nothing per object and rides the existing one-time SetSkinData,
+//   * each frame, before ApplyMatrices, set faceBone[k] = parentBone[k] with the face
+//     offset added to its translation.
+//
+// The offset is then per-OBJECT because the palette is per-object, which is exactly what
+// the shared vertex buffer could never be. Nothing is uploaded per frame that was not
+// already being uploaded, no vertex format changes, no WGSL changes, no WgrDraw3D field,
+// no ABI bump. GL33 gets the same motion from the same matrices through
+// ApplyMatricesSimple/Complex, so there is one path, not two.
+//
+// Two known approximations, both stated rather than hidden:
+//   * where two face selections share a vertex, the vertex follows the FIRST group that
+//     claims it (AnimationRTWeights::ReplaceSelection) instead of summing both offsets.
+//   * a group whose vertices do not all hang off one parent bone is refused and that group
+//     simply does not move; the rest still do.
+// POSEIDON_FACE_BONES=0 disables the rig and restores the (wgpu-broken) CPU-pose route.
+enum FaceGroup
+{
+	FaceEyelid, FaceLip, FaceLMouth, FaceMMouth, FaceRMouth, FaceLBrow, FaceMBrow, FaceRBrow
+};
+static_assert(FaceRBrow + 1 == NFaceGroups, "FaceGroup and NFaceGroups disagree");
+
+bool FaceBoneRigEnabled();
+
+// Reserve the face bones on `skeleton` and rebind the face selections of every graphical
+// level of `lShape` onto them. Idempotent; call after Skeleton::Prepare has filled `weights`.
+void SetupFaceBoneRig(Skeleton *skeleton, LODShapeWithShadow *lShape, WeightInfo &weights);
+
 struct FaceAnimationLook
 {
     bool enabled = false; //!< POSEIDON_FACE_ANIM=1 -- re-arm the CPU-pose route (does not work; see above)
@@ -241,6 +285,16 @@ public:
 	// FACE-001: true when this head is applying CPU-space vertex offsets that no bone
 	// matrix can express, so the shape must be skinned on the CPU this frame.
 	bool HasVertexAnimation() const;
+
+	// FACE-002: write this head's face pose into the reserved face bones of `matrices`,
+	// which must already be sized by PrepareMatrices. Call once per level per frame,
+	// BEFORE AnimationRT::ApplyMatrices. Returns true when the rig carried the pose, in
+	// which case Animate/Deanimate must not also offset the shared vertices.
+	bool ApplyFaceBones(const HeadType &type, const WeightInfo &weights, int level,
+	                    Matrix4Array &matrices, bool isDead);
+
+	// FACE-002: set by ApplyFaceBones; read by Animate/Deanimate to suppress the CPU offsets.
+	bool _faceBonesActive = false;
 
 protected:
 	void NextRandomLip();

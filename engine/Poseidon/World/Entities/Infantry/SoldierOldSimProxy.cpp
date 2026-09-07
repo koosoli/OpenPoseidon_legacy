@@ -874,7 +874,21 @@ void Man::ApplyAnimation(int level, RStringB move, float time)
     RequestFaceCpuPose(level); // FACE-001, before Apply reaches ApplyMatrices
     if (anim)
     {
-        anim->Apply(weights, GetShape(), level, time);
+        // FACE-002: AnimationRT::Apply's own Prepare+ApplyMatrices is inlined here so the
+        // face bones can be written between the two. Without that step they would reach
+        // ApplyMatrices as the identity PrepareMatrices leaves them at, and the face
+        // vertices -- which are bound to them -- would stay at bind pose while the head
+        // moved, i.e. the face would come off the head.
+        MATRIX_4_ARRAY(matrix, 128);
+        anim->PrepareMatrices(matrix, time, 1);
+        if (matrix.Size() > 0)
+        {
+            // AnimationRT::Apply returns early on an animation with no phases; matching
+            // that here matters, because ApplyMatrices on an empty array means "restore
+            // the bind pose", which Apply would never have asked for.
+            _head.ApplyFaceBones(Type()->_head, weights, level, matrix, _isDead);
+            AnimationRT::ApplyMatrices(weights, GetShape(), level, matrix);
+        }
     }
     BasicAnimation(level);
 }
@@ -1014,6 +1028,11 @@ void Man::Animate(int level)
                                           legsRes.Size());
         }
 
+        // FACE-002: the face pose rides reserved bones of this object's own palette. It has
+        // to be written after the head/aiming/legs CombineTransform above (it reads the
+        // parent bone's final orientation) and before ApplyMatrices consumes the array.
+        _head.ApplyFaceBones(type->_head, type->GetWeights(), level, matrix, _isDead);
+
         AnimationRT::ApplyMatrices(type->GetWeights(), _shape, level, matrix);
     }
 
@@ -1108,6 +1127,10 @@ MovesType::MovesType(const MovesTypeName& name)
             anim->SetLooped((*entry) >> "looped");
         }
     }
+
+    // FACE-002: after the LAST Prepare -- Prepare re-Inits the weights, so a rig built
+    // inside the loop would be wiped by the next move.
+    SetupFaceBoneRig(_name.motionType->GetSkeleton(), shape, GetWeights());
 }
 
 MovesType::~MovesType() = default;

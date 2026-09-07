@@ -363,6 +363,222 @@ static float FaceOffsetGain()
     return g;
 }
 
+namespace Poseidon
+{
+bool FaceBoneRigEnabled()
+{
+    static const bool on = []
+    {
+        const char* e = getenv("POSEIDON_FACE_BONES");
+        return !(e && atoi(e) == 0);
+    }();
+    return on;
+}
+
+// The eight face selections, in FaceGroup order. These are the same asset names
+// HeadType::InitShape binds; they are looked up here by name so the rig does not depend on
+// HeadType having been initialised first (MovesType and ManType are built independently).
+static const char* const GFaceSelNames[NFaceGroups] = {
+    "vicka",       // FaceEyelid
+    "spodni ret",  // FaceLip
+    "lkoutek",     // FaceLMouth
+    "skoutek",     // FaceMMouth
+    "pkoutek",     // FaceRMouth
+    "loboci",      // FaceLBrow
+    "soboci",      // FaceMBrow
+    "poboci",      // FaceRBrow
+};
+
+// Synthetic bone names. They deliberately do NOT match any named selection, so
+// Skeleton::Prepare's FindNamedSel lookup skips them and only ReplaceSelection below binds
+// anything to them.
+static const char* const GFaceBoneNames[NFaceGroups] = {
+    "%face_eyelid", "%face_lip", "%face_lmouth", "%face_mmouth",
+    "%face_rmouth", "%face_lbrow", "%face_mbrow", "%face_rbrow",
+};
+
+void SetupFaceBoneRig(Skeleton* skeleton, LODShapeWithShadow* lShape, WeightInfo& weights)
+{
+    if (!FaceBoneRigEnabled() || !skeleton || !lShape)
+    {
+        return;
+    }
+    // Reserve the bones. NewBone is a find-or-append, so this is idempotent, and because it
+    // appends, any bone a later-loading RTM introduces lands ABOVE the face bones -- the
+    // indices captured by the one-time SetSkinData upload never move under us.
+    const int base = skeleton->NewBone(RStringB(GFaceBoneNames[0]));
+    for (int g = 1; g < NFaceGroups; g++)
+    {
+        const int b = skeleton->NewBone(RStringB(GFaceBoneNames[g]));
+        if (b != base + g)
+        {
+            LOG_WARN(World, "FACE-002: face bones are not contiguous ({} != {}); rig disabled",
+                     b, base + g);
+            weights._faceBoneBase = -1;
+            return;
+        }
+    }
+    // The palette is 128 entries and the last is reserved for unweighted vertices, so a
+    // skeleton that has already grown past that has no room for the rig.
+    if (base + NFaceGroups > 127)
+    {
+        LOG_WARN(World, "FACE-002: no palette room for the face rig (base {}); disabled", base);
+        weights._faceBoneBase = -1;
+        return;
+    }
+
+    weights._faceBoneBase = base;
+    int bound = 0;
+    for (int level = 0; level < lShape->NLevels() && level < MAX_LOD_LEVELS; level++)
+    {
+        Shape* shape = lShape->Level(level);
+        // Only graphical levels: memory / geometry / fire levels are posed through code
+        // paths that do not run ApplyFaceBones, and a face bone left at identity there
+        // would tear the face off the head.
+        if (!shape || !lShape->IsNormalLevel(level))
+        {
+            continue;
+        }
+        for (int g = 0; g < NFaceGroups; g++)
+        {
+            const int selIndex = shape->FindNamedSel(RStringB(GFaceSelNames[g]));
+            if (selIndex < 0)
+            {
+                continue;
+            }
+            const int parent =
+                weights[level].ReplaceSelection(shape, selIndex, base + g, base, base + NFaceGroups);
+            if (parent >= 0)
+            {
+                weights._faceParent[level][g] = static_cast<signed char>(parent);
+                bound++;
+            }
+        }
+        weights[level].Normalize();
+    }
+    if (bound <= 0)
+    {
+        weights._faceBoneBase = -1; // no face selections in this model at all
+    }
+    LOG_INFO(World, "FACE-002: face bone rig base={} groups bound={} on '{}'", base, bound,
+             (const char*)lShape->GetName());
+}
+} // namespace Poseidon
+
+bool Head::ApplyFaceBones(const HeadType& /*type*/, const WeightInfo& weights, int level, Matrix4Array& matrices,
+                          bool isDead)
+{
+    _faceBonesActive = false;
+    const int base = weights._faceBoneBase;
+    if (base < 0 || level < 0 || level >= MAX_LOD_LEVELS)
+    {
+        return false;
+    }
+    if (base + NFaceGroups > matrices.Size())
+    {
+        return false;
+    }
+
+    // The CPU route offset along `up = trans * VUp`, where `trans` was the head transform in
+    // model space. The parent bone's own orientation IS that frame, already blended and
+    // already carrying CombineTransform's head turn, so it is read from there rather than
+    // recomputed.
+    int anyParent = -1;
+    for (int g = 0; g < NFaceGroups; g++)
+    {
+        const int p = weights._faceParent[level][g];
+        if (p >= 0 && p < matrices.Size())
+        {
+            anyParent = p;
+            break;
+        }
+    }
+    if (anyParent < 0)
+    {
+        return false;
+    }
+    Matrix3 orient = matrices[anyParent].Orientation();
+    orient.Orthogonalize();
+    const Vector3 up = orient * VUp;
+
+    Vector3 delta[NFaceGroups];
+    for (int g = 0; g < NFaceGroups; g++)
+    {
+        delta[g] = VZero;
+    }
+
+    // ---- exactly the offsets Head::Animate would have written into the vertices ----
+    if (!isDead)
+    {
+        float winkPhase = (_forceWinkPhase >= 0) ? 2 * _forceWinkPhase : 2.0f * _winkPhase;
+        if (winkPhase > 1)
+        {
+            winkPhase = 2.0f - winkPhase;
+        }
+        delta[FaceEyelid] += winkPhase * -0.015f * up;
+
+        if (_lipInfo)
+        {
+            const float lipPhase = _lipInfo->GetPhase();
+            if (lipPhase > -0.1f)
+            {
+                delta[FaceLip] += lipPhase * -0.02f * up;
+                delta[FaceLMouth] += lipPhase * -0.01f * up;
+                delta[FaceRMouth] += lipPhase * -0.01f * up;
+            }
+            else
+            {
+                if (_lipInfo->CurrentCursor() < _lipInfo->PhonemeCount())
+                {
+                    LOG_WARN(Audio,
+                             "Lip: terminated mid-stream at offset={:.3f}s, lipPhase={:.4f}, cursor={}/{} -- "
+                             "character will stop lip animation until next say",
+                             _lipInfo->ElapsedOffset(), lipPhase, _lipInfo->CurrentCursor(),
+                             _lipInfo->PhonemeCount());
+                }
+                _lipInfo = nullptr;
+            }
+        }
+        else if (_randomLip)
+        {
+            delta[FaceLip] += _actualRandomLip * -0.02f * up;
+            delta[FaceLMouth] += _actualRandomLip * -0.01f * up;
+            delta[FaceRMouth] += _actualRandomLip * -0.01f * up;
+        }
+    }
+
+    const float coefNew = _mimicPhase;
+    const float coefOld = 1.0f - _mimicPhase;
+    const float gain = FaceOffsetGain();
+#define FACE_MIMIC(g, x) \
+    delta[g] += orient * (coefOld * x##Old + coefNew * x + (Vector3)x##Random)
+    FACE_MIMIC(FaceRBrow, _rBrow);
+    FACE_MIMIC(FaceMBrow, _mBrow);
+    FACE_MIMIC(FaceLBrow, _lBrow);
+    FACE_MIMIC(FaceRMouth, _rMouth);
+    FACE_MIMIC(FaceMMouth, _mMouth);
+    FACE_MIMIC(FaceLMouth, _lMouth);
+#undef FACE_MIMIC
+
+    for (int g = 0; g < NFaceGroups; g++)
+    {
+        const int p = weights._faceParent[level][g];
+        if (p < 0 || p >= matrices.Size())
+        {
+            continue;
+        }
+        Matrix4 m = matrices[p];
+        m.SetPosition(m.Position() + delta[g] * gain);
+        matrices[base + g] = m;
+        if (delta[g].SquareSize() > 1e-12f)
+        {
+            GFaceDiag().offsets++;
+        }
+    }
+    _faceBonesActive = true;
+    return true;
+}
+
 static void OffsetAnimation(const Animation& anim, Shape* shape, int level, Vector3Par offsetIn)
 {
     int selection = anim.GetSelection(level);
@@ -413,6 +629,14 @@ void Head::Animate(const HeadType& type, LODShape* lShape, int level, bool isDea
     else
     {
         type._glasses.Hide(lShape, level);
+    }
+
+    // FACE-002: the pose is already in the bone palette this frame, and it is per-object
+    // there. Writing it into the shared vertices as well would double it on GL33 and, on
+    // wgpu, would be thrown away by the next unit's bind-pose restore (FACE-001).
+    if (_faceBonesActive)
+    {
+        return;
     }
 
     Vector3 up = trans * VUp;
@@ -497,6 +721,12 @@ void Head::Animate(const HeadType& type, LODShape* lShape, int level, bool isDea
 
 void Head::Deanimate(const HeadType& type, LODShape* lShape, int level, bool isDead, Matrix3Par trans, bool hiddenHead)
 {
+    // FACE-002: nothing was written into the shared vertices, so there is nothing to undo.
+    if (_faceBonesActive)
+    {
+        return;
+    }
+
     const_cast<Matrix3&>(trans).Orthogonalize();
 
     Shape* shape = lShape->Level(level);
