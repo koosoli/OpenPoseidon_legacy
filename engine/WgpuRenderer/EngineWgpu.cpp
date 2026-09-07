@@ -19,6 +19,7 @@
 #include <Poseidon/Graphics/Core/ZBiasMath.hpp>
 #include <Poseidon/Graphics/Shared/SdlWindow.hpp>
 #include <Poseidon/Graphics/Core/TLVertex.hpp>
+#include <Poseidon/Graphics/Rendering/Effects/SmokeVolumetric.hpp> // SMK-037 soft particles
 #include <Poseidon/Graphics/Rendering/Primitives/Draw2DGeometry.hpp>
 #include <Poseidon/Graphics/Rendering/Primitives/MeshBuild.hpp>
 #include <Poseidon/Graphics/Rendering/BuildRenderPassDescriptor.hpp>
@@ -2114,6 +2115,22 @@ void EngineWgpu::ApplyPendingRendererSettings(PendingRendererSettings& p)
     {
         wgr_grass_set_card_spacing(_renderer, p.grassCardSpacing);
         p.grassSpacingDirty = false;
+    }
+    {
+        // SMK-037: the soft-particle lever, read straight off GSmokeSoftParticles rather than
+        // routed through PendingRendererSettings -- growing that struct is a wider change than
+        // two scalars need, and a torn read of a bool and a float here costs one frame of a
+        // slider drag. Pushed only when they move, so a settled panel calls nothing.
+        const SmokeSoftParticles& soft = GSmokeSoftParticles();
+        static int lastSoftEnabled = -1;
+        static float lastSoftFade = -1.0f;
+        const int wantSoft = soft.enabled ? 1 : 0;
+        if (wantSoft != lastSoftEnabled || soft.fade != lastSoftFade)
+        {
+            lastSoftEnabled = wantSoft;
+            lastSoftFade = soft.fade;
+            wgr_set_soft_particles(_renderer, static_cast<uint32_t>(wantSoft), soft.fade);
+        }
     }
     {
         // RFG-090: a Reforger clutter atlas is authored albedo; the photo-plate tone
@@ -11670,7 +11687,22 @@ void EngineWgpu::DrawDecal(Vector3Par screen, float rhw, float sizeX, float size
     // a volume -- it must be TESTED against the world (so a wall in front hides it)
     // and must never WRITE (so it does not punch a hole in whatever is drawn behind
     // it later in the alpha pass). That is a fixed policy, not a per-spec choice.
-    AppendTriangles(ResolveTexture(mip), BlendForSpec(specFlags), SamplerForSpec(specFlags), WGR_DEPTH_TEST, quad);
+    //
+    // SMK-037: and when the soft-particle lever is on, WGR_DEPTH_TEST_SOFT -- the same
+    // depth policy exactly, plus the fragment-stage fade that turns the razor edge where
+    // this quad's plane crosses the ground or a wall into a soft intersection. A decal is
+    // a sprite standing in for a volume, which is precisely the case the fade is for, so
+    // every decal gets it: the puffs, and the light halos and flares that share this call.
+    // Safe to send unconditionally -- a renderer with the path off treats it as
+    // WGR_DEPTH_TEST -- but gated anyway so the counter means what it says.
+    SmokeSoftParticles& soft = GSmokeSoftParticles();
+    WgrDepthMode decalDepth = WGR_DEPTH_TEST;
+    if (soft.enabled)
+    {
+        decalDepth = WGR_DEPTH_TEST_SOFT;
+        ++soft.batches;
+    }
+    AppendTriangles(ResolveTexture(mip), BlendForSpec(specFlags), SamplerForSpec(specFlags), decalDepth, quad);
 }
 
 // Rotated sibling of DrawDecal: same immediate 2D batch, same depth policy

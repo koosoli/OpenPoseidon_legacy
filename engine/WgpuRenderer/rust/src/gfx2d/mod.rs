@@ -7,6 +7,18 @@ use crate::textures::SharedTextures;
 // Linear filter + clamp both axes (point<<2 | clampV<<1 | clampU).
 const OVERLAY_SAMPLER: usize = 3;
 
+/// SMK-037: the per-frame camera + tuning the soft-particle fragment stage needs.
+/// `active` is the only thing the shader branches on, and it is false unless the frame
+/// actually recorded a depth snapshot against this camera.
+#[derive(Clone, Copy, Default)]
+pub struct SoftGlobals {
+    pub active: bool,
+    pub fade: f32,
+    /// Render-target size in pixels (NOT the swapchain size -- see shader.wgsl).
+    pub render: [f32; 2],
+    pub inv_view_proj: [f32; 16],
+}
+
 pub struct Gfx2d {
     globals_buffer: wgpu::Buffer,
     globals_bind: wgpu::BindGroup,
@@ -14,6 +26,15 @@ pub struct Gfx2d {
     // `pipelines` -> scene colour target; `pipelines_display` -> swapchain (UI phase).
     pipelines: [[wgpu::RenderPipeline; 3]; 3],
     pipelines_display: [[wgpu::RenderPipeline; 3]; 3],
+    // SMK-037: depth mode 3 (WGR_DEPTH_TEST_SOFT). Same depth state as mode 1 -- test,
+    // no write -- but a fourth bind group carrying the scene-depth snapshot and the
+    // fs_soft entry point that fades against it. A separate pipeline LAYOUT, so the three
+    // sets above and the dev overlay keep their three-group layout untouched.
+    pipelines_soft: [wgpu::RenderPipeline; 3],
+    pipelines_soft_display: [wgpu::RenderPipeline; 3],
+    soft_layout: wgpu::BindGroupLayout,
+    soft_bind: Option<wgpu::BindGroup>,
+    soft_gen: u64,
 
     vbuf: Option<wgpu::Buffer>,
     vbuf_cap: u64,
@@ -61,8 +82,10 @@ impl Gfx2d {
 
         let globals_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("wgr_2d_globals"),
-            // 32 bytes: vec2 screen size + vec2 padding + vec4 fog colour.
-            size: 32,
+            // 128 bytes: vec2 screen + vec2 pad + vec4 fog + vec4 soft params + vec4 camera
+            // forward + mat4 inverse view-projection (SMK-037; zero and unread when the
+            // soft path is off).
+            size: 128,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -182,6 +205,81 @@ impl Gfx2d {
         let pipelines = make_set(surface_format, sample_count);
         let pipelines_display = make_set(overlay_format, 1);
 
+        // SMK-037: the soft set. Depth state is mode 1 exactly (test, never write): a
+        // cloudlet must still be hidden by a wall in front of it and must still not punch
+        // a hole in the alpha pass behind it. The only difference is the fragment stage.
+        let soft_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("wgr_2d_soft_layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    // The snapshot is a plain R32Float colour target, not a depth texture:
+                    // an unfilterable float sample, read with textureLoad.
+                    sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            }],
+        });
+        let soft_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("wgr_2d_soft_pipeline_layout"),
+            bind_group_layouts: &[
+                Some(&globals_layout),
+                Some(&textures.texture_layout),
+                Some(&textures.sampler_layout),
+                Some(&soft_layout),
+            ],
+            immediate_size: 0,
+        });
+        let make_soft = |blend: Option<wgpu::BlendState>,
+                         format: wgpu::TextureFormat,
+                         samples: u32| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("wgr_2d_soft_pipeline"),
+                layout: Some(&soft_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs_main"),
+                    compilation_options: Default::default(),
+                    buffers: std::slice::from_ref(&vbuf_layout),
+                },
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    cull_mode: None,
+                    ..Default::default()
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: DEPTH_FORMAT,
+                    depth_write_enabled: Some(false),
+                    depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
+                multisample: wgpu::MultisampleState {
+                    count: samples,
+                    ..Default::default()
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("fs_soft"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        let pipelines_soft: [wgpu::RenderPipeline; 3] =
+            std::array::from_fn(|b| make_soft(blends[b], surface_format, sample_count));
+        let pipelines_soft_display: [wgpu::RenderPipeline; 3] =
+            std::array::from_fn(|b| make_soft(blends[b], overlay_format, 1));
+
         let overlay_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("wgr_overlay_shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("overlay.wgsl").into()),
@@ -237,6 +335,11 @@ impl Gfx2d {
             globals_bind,
             pipelines,
             pipelines_display,
+            pipelines_soft,
+            pipelines_soft_display,
+            soft_layout,
+            soft_bind: None,
+            soft_gen: u64::MAX,
             vbuf: None,
             vbuf_cap: 0,
             overlay_pipeline,
@@ -255,7 +358,10 @@ impl Gfx2d {
         fog: [f32; 3],
         verts: &[WgrVertex2D],
     ) {
-        // 8 floats: screen.xy, pad.xy, fog.rgb, pad.
+        // 8 floats: screen.xy, pad.xy, fog.rgb, pad. The SMK-037 lanes that follow are
+        // written separately by `update_soft_globals`, because the camera they carry is
+        // only derived later in the frame (with the sky) and a stale one would fade
+        // sprites against the previous frame's view.
         let globals = [screen.x, screen.y, 0.0, 0.0, fog[0], fog[1], fog[2], 0.0];
         queue.write_buffer(&self.globals_buffer, 0, bytemuck::bytes_of(&globals));
 
@@ -301,16 +407,81 @@ impl Gfx2d {
         } else {
             &self.pipelines
         };
-        let set = sets.get(b.depth as usize).unwrap_or(&sets[0]);
-        let pipeline = set
-            .get(b.blend as usize)
-            .unwrap_or(&set[WgrBlend::Alpha as usize]);
+        // SMK-037: depth mode 3 = WGR_DEPTH_TEST_SOFT. It needs a snapshot bind group; if
+        // this frame has none (the soft lever is off, or the camera drew no world), fall
+        // back to mode 1 -- the depth state is identical, so the sprite draws exactly as it
+        // did before the feature existed rather than not at all.
+        let soft = (b.depth == 3).then_some(self.soft_bind.as_ref()).flatten();
+        let pipeline = match soft {
+            Some(_) => {
+                let set = if display {
+                    &self.pipelines_soft_display
+                } else {
+                    &self.pipelines_soft
+                };
+                set.get(b.blend as usize)
+                    .unwrap_or(&set[WgrBlend::Alpha as usize])
+            }
+            None => {
+                let idx = if b.depth == 3 { 1 } else { b.depth as usize };
+                let set = sets.get(idx).unwrap_or(&sets[0]);
+                set.get(b.blend as usize)
+                    .unwrap_or(&set[WgrBlend::Alpha as usize])
+            }
+        };
         pass.set_pipeline(pipeline);
         pass.set_vertex_buffer(0, vbuf.slice(..));
         pass.set_bind_group(0, &self.globals_bind, &[]);
         pass.set_bind_group(1, textures.texture_bind(b.texture_id), &[]);
         pass.set_bind_group(2, textures.sampler_bind(b.sampler.index()), &[]);
+        if let Some(bind) = soft {
+            pass.set_bind_group(3, bind, &[]);
+        }
         pass.draw(b.first_vertex..(b.first_vertex + b.vertex_count), 0..1);
+    }
+
+    /// SMK-037: the tail of the globals block -- everything the soft fragment stage reads.
+    /// Written after the frame's camera is known; a no-op cost when the path is off, and
+    /// zeroes leave `soft.y` at 0 so even a soft pipeline would fade nothing.
+    pub fn update_soft_globals(&self, queue: &wgpu::Queue, soft: &SoftGlobals) {
+        let mut tail = [0.0f32; 24];
+        tail[0] = soft.fade;
+        tail[1] = if soft.active { 1.0 } else { 0.0 };
+        tail[2] = soft.render[0];
+        tail[3] = soft.render[1];
+        tail[8..24].copy_from_slice(&soft.inv_view_proj);
+        queue.write_buffer(&self.globals_buffer, 32, bytemuck::bytes_of(&tail));
+    }
+
+    /// SMK-037: point the soft pipelines at this frame's depth snapshot. `depth_gen` changes
+    /// when the view does (render resize), which is the only time the bind group is
+    /// rebuilt. Passing None un-binds it, so every soft batch falls back to plain mode 1.
+    pub fn set_soft_depth(
+        &mut self,
+        device: &wgpu::Device,
+        view: Option<&wgpu::TextureView>,
+        depth_gen: u64,
+    ) {
+        match view {
+            None => {
+                self.soft_bind = None;
+                self.soft_gen = u64::MAX;
+            }
+            Some(view) => {
+                if self.soft_bind.is_some() && self.soft_gen == depth_gen {
+                    return;
+                }
+                self.soft_bind = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("wgr_2d_soft_bind"),
+                    layout: &self.soft_layout,
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(view),
+                    }],
+                }));
+                self.soft_gen = depth_gen;
+            }
+        }
     }
 
     pub fn prepare_overlay(

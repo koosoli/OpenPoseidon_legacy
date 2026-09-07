@@ -155,7 +155,16 @@ enum WgrDepthMode : uint32_t
 {
     WGR_DEPTH_NONE = 0,      // no test, no write
     WGR_DEPTH_TEST = 1,      // test (LessEqual), no write
-    WGR_DEPTH_TEST_WRITE = 2 // test (LessEqual) + write
+    WGR_DEPTH_TEST_WRITE = 2, // test (LessEqual) + write
+    /* SMK-037 SOFT PARTICLES. Same depth state as WGR_DEPTH_TEST -- test, never write --
+       but the fragment stage additionally fades the sprite's alpha by how close its own
+       depth is to the scene depth behind it, so a billboard meets a wall or the ground as a
+       soft intersection instead of the razor edge the depth test alone produces.
+       2D batches only. Submitted by EngineWgpu::DrawDecal for cloudlets, and only while
+       wgr_set_soft_particles has been called with enabled != 0 -- with the path off the
+       renderer treats this exactly as WGR_DEPTH_TEST, so it is always safe to send.
+       Adds no struct and no size: WgrDraw2DBatch.depth is a plain uint32. */
+    WGR_DEPTH_TEST_SOFT = 3
 };
 
 /* Selects what a WgrCmd does when the frame's command stream is replayed. */
@@ -2419,6 +2428,14 @@ typedef struct WgrTemporalInfo
     /* 0 none/native, 1 DLSS, 2 FSR1, 3 bilinear. */
     uint32_t active_upscaler;
 } WgrTemporalInfo;
+
+/* SMK-037: live soft-particle state. `enabled` gates the whole renderer-side path -- the
+   per-frame scene-depth snapshot is recorded only while it is set, and with it clear any
+   batch still carrying WGR_DEPTH_TEST_SOFT draws exactly as WGR_DEPTH_TEST did. `fade_metres`
+   is the separation at which a sprite reaches full opacity (clamped 0.05..20).
+   Its own entry point rather than a field in an existing struct: growing one of those changes
+   a size that is part of the ABI handshake. */
+WGR_API void wgr_set_soft_particles(WgrRenderer* renderer, uint32_t enabled, float fade_metres);
 
 WGR_API void wgr_set_temporal_tuning(WgrRenderer* renderer, const WgrTemporalTuning* tuning);
 WGR_API void wgr_get_temporal_info(WgrRenderer* renderer, WgrTemporalInfo* info);

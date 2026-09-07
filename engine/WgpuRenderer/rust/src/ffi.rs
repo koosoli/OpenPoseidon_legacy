@@ -128,6 +128,11 @@ pub enum WgrDepthMode {
     None = 0,
     Test = 1,
     TestWrite = 2,
+    // SMK-037: identical depth state to Test (test, never write); it selects the
+    // soft-particle fragment stage instead. The engine submits it for cloudlet decals only,
+    // and only while the Smoke tab's soft-particle lever is on. `WgrDraw2DBatch.depth` is a
+    // plain u32, so this adds no ABI size and an older exe simply never sends it.
+    TestSoft = 3,
 }
 
 #[repr(C)]
@@ -1808,6 +1813,27 @@ pub unsafe extern "C" fn wgr_get_temporal_info(
         let renderer = unsafe { &mut *renderer };
         let out = renderer.temporal_info();
         unsafe { *info = out };
+    }));
+}
+
+/// SMK-037: push the live soft-particle knobs (dev panel / env seed). Null-safe.
+///
+/// `enabled` gates the whole path renderer-side: with it 0 no depth snapshot is recorded and
+/// any batch still marked WGR_DEPTH_TEST_SOFT falls back to the plain depth-tested pipeline.
+///
+/// # Safety
+/// `renderer` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_set_soft_particles(
+    renderer: *mut WgrRenderer,
+    enabled: u32,
+    fade_metres: f32,
+) {
+    if renderer.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        unsafe { &mut *renderer }.set_soft_particles(enabled != 0, fade_metres);
     }));
 }
 

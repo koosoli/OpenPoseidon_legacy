@@ -26,6 +26,7 @@
 #include <Poseidon/Dev/Debug/DevPanelWidgets.hpp>
 #include <Poseidon/Dev/Diag/SmokeTab.hpp>
 #include <Poseidon/Graphics/Rendering/Effects/Smokes.hpp> // SMK-020 GLegacySmokeScale
+#include <Poseidon/Graphics/Rendering/Effects/SmokeVolumetric.hpp> // SMK-037 soft particles
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
@@ -407,6 +408,35 @@ void DrawSpawnSection()
                           "the wind will not move smoke it has already dropped.");
     }
 
+    // SMK-037: how the game's smoke MEETS the world. Renderer state, not simulation, so it
+    // sits at the head of the legacy block rather than among the containment queries.
+    {
+        SmokeSoftParticles& soft = GSmokeSoftParticles();
+        Dev::Checkbox("Soft particles: smoke fades into geometry (SMK-037)", &soft.enabled);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("POSEIDON_SMOKE_SOFT=1 turns it on; OFF is the shipped default.\n"
+                              "Every cloudlet is a flat screen-space quad depth-tested against the world, so\n"
+                              "where its plane crosses the ground, a wall or a soldier the test kills one half\n"
+                              "and keeps the other and the boundary is a HARD LINE across the sprite. A puff\n"
+                              "resting on the ground is cut by a razor edge along the terrain. This fades the\n"
+                              "sprite's alpha by how close it is to whatever is behind it, so the billboard\n"
+                              "meets geometry as a soft intersection -- the single most visible reason the\n"
+                              "smoke reads as a decal glued in front of the world rather than a body of gas\n"
+                              "standing in it.\n"
+                              "Costs one full-screen scene-depth copy per frame, recorded ONLY while this is\n"
+                              "on: the transparent pass has the depth buffer attached writable and so cannot\n"
+                              "also sample it.");
+        ImGui::SetNextItemWidth(110.0f);
+        Dev::SliderFloat("Contact fade m", &soft.fade, 0.05f, 4.0f, "%.2f");
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("POSEIDON_SMOKE_SOFT_FADE. Metres of separation at which the sprite reaches full\n"
+                              "opacity. 0.5 m is the measured default, and a puff RADIUS (1.5 m) is the wrong\n"
+                              "instinct: looking down a lawn at a shallow angle puts the ground a metre or two\n"
+                              "behind nearly every puff along the view ray, so 1.5 m guts the whole plume.\n"
+                              "0.05 m reproduces the old hard-edged image almost exactly, which is the setting\n"
+                              "to compare against.");
+        ImGui::TextDisabled("soft decal batches %lld", soft.batches);
+    }
     // SMK-030: containment for the game's own smoke.
     {
         LegacySmokeContainment& contain = GLegacySmokeContainment();

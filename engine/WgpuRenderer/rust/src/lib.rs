@@ -17,6 +17,7 @@ mod handles;
 mod log;
 mod planar_mips;
 mod shaders;
+mod soft_particles;
 mod sky;
 mod temporal;
 mod terrain;
@@ -43,7 +44,7 @@ use crate::ffi::{
     WgrWaterCascadeConfig, WgrWaterInteractionEvent, WgrWaterInteractionParams, WgrWaterNode,
     WgrWaterParams,
 };
-use crate::gfx2d::Gfx2d;
+use crate::gfx2d::{Gfx2d, SoftGlobals};
 use crate::gfx3d::{Gfx3d, env_f32};
 use crate::godrays::{GodRayFrame, GodRaySettings, GodRays};
 use crate::gpu_timers::{GpuTimers, Region as TimerRegion};
@@ -881,6 +882,14 @@ pub struct Renderer {
     // the camera the SKY pass chose, captured at the sky upload and consumed in run_tonemap.
     godrays: Option<GodRays>,
     godrays_frame: Option<GodRayFrame>,
+    // SMK-037 SOFT PARTICLES. The scene-depth snapshot the cloudlet billboards fade against,
+    // plus the two live knobs the Smoke tab pushes. `soft_enabled` gates BOTH the snapshot pass
+    // and the C++ side's choice of depth mode, so with it off nothing here is recorded, no
+    // pipeline changes, and the 2D path is byte-for-byte what it was.
+    soft_particles: soft_particles::SoftParticles,
+    soft_enabled: bool,
+    soft_fade: f32,
+    soft_globals: SoftGlobals,
     /// The shafts have already been composited for this frame, inside the world segment and
     /// BEFORE the transparent draws. See the call site for why they moved there.
     godrays_composited: bool,
@@ -1765,6 +1774,8 @@ impl Renderer {
         // God rays composite into the HDR scene target, so like bloom they only exist on the
         // HDR path. Default ON; `WGR_GODRAYS=0` ablates it for an A/B capture.
         let godrays = hdr_enabled.then(|| GodRays::new(&device, HDR_FORMAT, sample_count));
+        // SMK-037: created unconditionally (one pipeline, no target until a frame asks).
+        let soft_particles = soft_particles::SoftParticles::new(&device);
         let planar_mips = PlanarMips::new(&device, HDR_FORMAT);
         let exposure = hdr_enabled.then(|| Exposure::new(&device, &queue));
         // The sky targets the scene color format (HDR target or swapchain), matching
@@ -1963,6 +1974,10 @@ impl Renderer {
             },
             godrays,
             godrays_frame: None,
+            soft_particles,
+            soft_enabled: false,
+            soft_fade: 1.5,
+            soft_globals: SoftGlobals::default(),
             godrays_composited: false,
             frame_depth_final_resolved: false,
             far_depth_resolve_current: false,
@@ -2824,6 +2839,13 @@ impl Renderer {
     // REN-TEMP-001 §6.7: live tuning from the dev panel. Everything here applies on
     // the NEXT frame — targets resize lazily, the DLSS feature recreates on any
     // extent/flag change, and a scale change raises an explicit history reset.
+    /// SMK-037: the live soft-particle knobs. Cheap and idempotent -- nothing is created or
+    /// destroyed here; `soft_enabled` is read once per frame when the sky camera is derived.
+    fn set_soft_particles(&mut self, enabled: bool, fade_metres: f32) {
+        self.soft_enabled = enabled;
+        self.soft_fade = fade_metres.clamp(0.05, 20.0);
+    }
+
     fn set_temporal_tuning(&mut self, t: &ffi::WgrTemporalTuning) {
         self.temporal.enabled = t.temporal_on != 0;
         self.dlss_runtime_on = t.dlss_on != 0;
@@ -4511,6 +4533,34 @@ impl Renderer {
             csm: cam_shadow,
             terrain: shadow_mapping,
         });
+        // SMK-037: the same camera, handed to the 2D pipeline so a cloudlet billboard can
+        // unproject the scene depth under it and fade against the surface it is about to cut
+        // into. Derived HERE, with the sky, for exactly the reason the god rays are: this is
+        // the camera the visible geometry drew with, and re-picking one later drifts.
+        //
+        // The shader unprojects the sprite's OWN device depth with this same matrix rather
+        // than trusting `rhw`, so nothing beyond the matrix and the render size is needed.
+        self.soft_globals = SoftGlobals::default();
+        if self.soft_enabled {
+            if let Some((ivp, _, _)) = sky_ivp {
+                let (rw, rh) = self.render_size();
+                self.soft_globals = SoftGlobals {
+                    active: true,
+                    fade: self.soft_fade,
+                    render: [rw as f32, rh as f32],
+                    inv_view_proj: glam::Mat4::from_cols_array_2d(&ivp).to_cols_array(),
+                };
+            }
+        }
+        self.gfx2d
+            .update_soft_globals(&self.queue, &self.soft_globals);
+        if !self.soft_globals.active {
+            // No camera, or the lever is off: unbind, so any batch the engine still marked
+            // soft falls back to the plain depth-tested pipeline instead of fading against
+            // a snapshot left over from an earlier frame.
+            self.gfx2d.set_soft_depth(&self.device, None, 0);
+            self.soft_particles.invalidate();
+        }
         if let Some((ivp, cam_pos, cam_shadow)) = sky_ivp {
             self.sky.upload(
                 &self.queue,
@@ -5475,6 +5525,34 @@ impl Renderer {
                 self.gpu_timers.begin(&mut encoder, TimerRegion::GodRays);
                 self.render_god_rays(&mut encoder, &target);
                 self.gpu_timers.end(&mut encoder, TimerRegion::GodRays);
+            }
+
+            // SMK-037: freeze the scene depth for the soft-particle fade, HERE -- after the
+            // opaque world, water and clouds have all written depth, and before the
+            // transparent replay below, which is where the cloudlets are. The copy exists
+            // because that replay attaches depth read-write and so cannot also sample it;
+            // see soft_particles.wgsl. Recorded only while the lever is on, and only in the
+            // world segment (a post-ClearDepth weapon segment has its own depth, and no
+            // smoke).
+            if start == 0 && !resolved && self.soft_globals.active {
+                self.ensure_far_depth_resolve(&mut encoder);
+                if let Some(depth_view) = self.gfx3d.water_depth_view().cloned() {
+                    let (rw, rh) = self.render_size();
+                    let dgen = self.gfx3d.depth_gen();
+                    self.soft_particles.record(
+                        &self.device,
+                        &mut encoder,
+                        &depth_view,
+                        dgen,
+                        rw,
+                        rh,
+                    );
+                    if self.soft_particles.valid() {
+                        let view = self.soft_particles.view().cloned();
+                        self.gfx2d
+                            .set_soft_depth(&self.device, view.as_ref(), dgen);
+                    }
+                }
             }
 
             // The rest of the plan's world draws, now that water and clouds are down.
