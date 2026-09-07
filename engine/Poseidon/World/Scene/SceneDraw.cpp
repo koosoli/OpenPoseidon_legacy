@@ -32,6 +32,7 @@ using Poseidon::Foundation::IsOutOfMemory;
 using Poseidon::Foundation::MStorage;
 using Poseidon::Foundation::Time;
 #include <Poseidon/World/Scene/Scene.hpp>
+#include <Poseidon/Dev/Diag/LightingDiag.hpp>
 #include <Poseidon/World/Scene/Pass1Submit.hpp>
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
 #include <Poseidon/UI/Settings/GameSettingsConfig.hpp>
@@ -2746,7 +2747,18 @@ void Scene::DrawObjectsAndShadowsPass2()
             const float moonFactor = floatMax(0.0f, floatMin(1.0f, _mainLight->MoonLightAmount()));
             const float shadowFactor = floatMax(sunFactor, moonFactor);
             GEngine->SetShadowMapSunFactor(shadowFactor);
-            if (shadowFactor > 0.01f)
+            // LGT-010, the last of six gates that all encode "the shadow pass is the SUN's".
+            // At night with no moon this factor is zero and the entire caster collection was
+            // skipped -- so a local light's depth map was allocated, cleared, and left empty,
+            // which against a LessEqual compare reads as "lit everywhere". The shadow could
+            // not exist for exactly the hours a lamp or a headlight exists for.
+            //
+            // Keyed on the LEVER rather than on a live light count: this is the collection
+            // that decides what a shadow map can contain, and it runs before the renderer has
+            // chosen which lights get a view. With the lever off the condition is unchanged.
+            const bool localShadowsWanted =
+                Poseidon::Dev::GLocalShadowSettings().enabled && Poseidon::Dev::GLocalShadowSettings().maxLights > 0;
+            if (shadowFactor > 0.01f || localShadowsWanted)
             {
                 RenderShadowMapDepthPass(nDraw);
             }
