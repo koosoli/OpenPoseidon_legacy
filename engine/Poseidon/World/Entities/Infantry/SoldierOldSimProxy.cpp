@@ -871,6 +871,7 @@ void Man::ApplyAnimation(int level, RStringB move, float time)
     WeightInfo& weights = type->GetWeights();
     MoveId moveId = type->GetMoveId(move);
     AnimationRT* anim = type->GetAnimation(moveId);
+    RequestFaceCpuPose(level); // FACE-001, before Apply reaches ApplyMatrices
     if (anim)
     {
         anim->Apply(weights, GetShape(), level, time);
@@ -909,6 +910,41 @@ Vector3 Man::GetPilotPosition(CameraType camType) const
     return AnimatePoint(level, sel[0]);
 }
 
+// FACE-001: the face rig writes CPU vertex offsets (Head::Animate -> OffsetAnimation).
+// A GPU-skinned mesh is uploaded once at bind pose and posed in the vertex shader, so
+// those offsets never reach the screen. Ask for a CPU-posed frame while the head has any
+// such offset to apply -- the request is read by AnimationRT::ApplyMatrices (which then
+// skins on the CPU) and by the backend (which then draws this mesh unskinned and uploads
+// the posed vertices). It MUST be set before ApplyMatrices, not in BasicAnimation, which
+// runs after it.
+void Man::RequestFaceCpuPose(int level)
+{
+    Shape* shape = _shape->Level(level);
+    VertexBuffer* vb = shape ? shape->GetVertexBuffer() : nullptr;
+    FaceAnimDiag& d = GFaceDiag();
+    d.request++;
+    if (!vb)
+    {
+        d.requestNoVb++;
+    }
+    else
+    {
+        vb->cpuPosed = _head.HasVertexAnimation();
+        if (vb->cpuPosed)
+        {
+            d.requestSet++;
+            d.poseLevel = level;
+            d.poseVerts = shape->NVertex();
+            d.vbSet = reinterpret_cast<unsigned long long>(vb);
+        }
+        else
+        {
+            d.vbUnset = reinterpret_cast<unsigned long long>(vb);
+        }
+    }
+    FaceDiagTick("request");
+}
+
 void Man::Animate(int level)
 {
     Shape* shape = _shape->Level(level);
@@ -916,6 +952,7 @@ void Man::Animate(int level)
     {
         return;
     }
+    RequestFaceCpuPose(level);
     const ManType* type = Type();
 
     // check for special case: animating one-point level

@@ -96,6 +96,12 @@ public:
 	// skinned path; read (and cleared) by the animation system to skip the CPU
 	// skinning of shapes the GPU already skins.
 	bool drawnSkinned = false;
+	// FACE-001: set by an object whose pose is NOT fully expressible as bone matrices --
+	// the OFP face rig offsets named selections (lip / mouth corners / eyelid / brows)
+	// directly in CPU vertex space, and a GPU-skinned mesh never re-uploads those bytes.
+	// While true the animation system does the skinning on the CPU and the backend draws
+	// this mesh through the UNSKINNED pipeline, uploading the posed vertices as usual.
+	bool cpuPosed = false;
 	~VertexBuffer() override {}
 
 	// update vertices if necessary

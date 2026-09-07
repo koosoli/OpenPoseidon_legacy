@@ -727,6 +727,7 @@ class Man: public Person
 	void AnimatedMinMax( int level, Vector3 *minMax ) override;
 	void AnimatedBSphere( int level, Vector3 &bCenter, float &bRadius, bool isAnimated ) override;
 
+	void RequestFaceCpuPose( int level ); // FACE-001
 	void BasicAnimation( int level );
 	void BasicDeanimation( int level );
 

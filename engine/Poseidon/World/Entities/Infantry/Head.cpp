@@ -13,6 +13,7 @@
 #include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
 #include <Poseidon/UI/Settings/GameSettingsConfig.hpp>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <string>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
@@ -24,6 +25,81 @@ using namespace Poseidon;
 namespace Poseidon
 {
 RString GetUserDirectory();
+}
+
+namespace Poseidon
+{
+FaceAnimationLook& GFaceAnimation()
+{
+    static FaceAnimationLook look = []
+    {
+        FaceAnimationLook l;
+        if (const char* e = getenv("POSEIDON_FACE_ANIM"))
+        {
+            l.enabled = (atoi(e) != 0);
+        }
+        if (const char* e = getenv("POSEIDON_FACE_ANIM_ALWAYS"))
+        {
+            l.always = (atoi(e) != 0);
+        }
+        return l;
+    }();
+    return look;
+}
+} // namespace Poseidon
+
+namespace Poseidon
+{
+FaceAnimDiag& GFaceDiag()
+{
+    static FaceAnimDiag d;
+    return d;
+}
+
+bool FaceDebugEnabled()
+{
+    static const bool on = []
+    {
+        const char* e = getenv("POSEIDON_FACE_DEBUG");
+        return e && atoi(e) != 0;
+    }();
+    return on;
+}
+
+void FaceDiagTick(const char* where)
+{
+    if (!FaceDebugEnabled())
+    {
+        return;
+    }
+    static int n = 0;
+    if (++n % 200 != 0)
+    {
+        return;
+    }
+    const FaceAnimDiag& d = GFaceDiag();
+    LOG_INFO(Audio,
+             "FACE-001 [{}] req={} noVb={} set={} offs={} cpuKept={} gpuSkin={} updPosed={} updSkip={} "
+             "drawPosed={} drawPal={} verts={} | shared={} clean={} cnt={} hash={} sent={} maxDelta={:.4f} | lvl={} lvlVerts={} drawVerts={} lipSel={} eyeSel={} lmSel={} rmSel={} | pend={} upl={} dir={} refused={} | restore={} vbSet={:#x} vbUnset={:#x}",
+             where, d.request, d.requestNoVb, d.requestSet, d.offsets, d.cpuSkinKept, d.gpuSkinned, d.updSkinPosed,
+             d.updSkinSkip, d.drawPosed, d.drawPalette, d.updBytes, d.updShared, d.updClean, d.updCount,
+             d.updHash, d.updSent, d.poseMaxDelta, d.poseLevel, d.poseVerts, d.drawVerts, d.lipSelSize, d.eyeSelSize, d.lmSelSize, d.rmSelSize,
+             d.updPending, d.updUploader, d.updDirect, d.updRefused, d.updRestore, d.vbSet, d.vbUnset);
+}
+} // namespace Poseidon
+
+bool Head::HasVertexAnimation() const
+{
+    const FaceAnimationLook& look = GFaceAnimation();
+    if (!look.enabled)
+    {
+        return false;
+    }
+    if (look.always)
+    {
+        return true; // wink and micro-mimics too, at the cost of CPU skinning every character
+    }
+    return _lipInfo != nullptr || _randomLip;
 }
 
 bool ManLipInfo::AttachWave(IWave* wave, float freq)
@@ -274,20 +350,43 @@ void Head::SetRandomLip(bool set)
     _randomLip = set;
 }
 
-static void OffsetAnimation(const Animation& anim, Shape* shape, int level, Vector3Par offset)
+// FACE-001 kill door: POSEIDON_FACE_GAIN scales every face offset. At 30 the deformation
+// is unmissable, which separates "the offsets never reach the screen" from "they reach it
+// and are too small to measure" without any argument about magnitudes.
+static float FaceOffsetGain()
+{
+    static const float g = []
+    {
+        const char* e = getenv("POSEIDON_FACE_GAIN");
+        return e ? static_cast<float>(atof(e)) : 1.0f;
+    }();
+    return g;
+}
+
+static void OffsetAnimation(const Animation& anim, Shape* shape, int level, Vector3Par offsetIn)
 {
     int selection = anim.GetSelection(level);
     if (selection < 0)
     {
         return;
     }
+    const Vector3 offset = offsetIn * FaceOffsetGain();
     const NamedSelection& sel = shape->NamedSel(selection);
     for (int i = 0; i < sel.Size(); i++)
     {
         int posI = sel[i];
         shape->SetPos(posI) += offset;
     }
+    // FACE-001: InvalidateNormals alone is not enough. `bufferDirty` (InvalidateBuffer) is
+    // the backend's ONLY change signal for a vertex buffer -- VertexBufferWgpu::Update
+    // returns in O(1) on a clean buffer -- so the face offsets were written into vertices
+    // that were never re-uploaded.
+    shape->InvalidateBuffer();
     shape->InvalidateNormals();
+    if (sel.Size() > 0 && offset.SquareSize() > 1e-12f)
+    {
+        GFaceDiag().offsets++;
+    }
 }
 
 #define OFFSET_ANIM(x) \
@@ -333,6 +432,17 @@ void Head::Animate(const HeadType& type, LODShape* lShape, int level, bool isDea
         if (winkPhase > 1)
         {
             winkPhase = 2.0 - winkPhase;
+        }
+        if (FaceDebugEnabled())
+        {
+            const int lipSel = type._lip.GetSelection(level);
+            GFaceDiag().lipSelSize = lipSel >= 0 ? shape->NamedSel(lipSel).Size() : -1;
+            const int eyeSel = type._eyelid.GetSelection(level);
+            GFaceDiag().eyeSelSize = eyeSel >= 0 ? shape->NamedSel(eyeSel).Size() : -1;
+            const int lmSel = type._lMouth.GetSelection(level);
+            GFaceDiag().lmSelSize = lmSel >= 0 ? shape->NamedSel(lmSel).Size() : -1;
+            const int rmSel = type._rMouth.GetSelection(level);
+            GFaceDiag().rmSelSize = rmSel >= 0 ? shape->NamedSel(rmSel).Size() : -1;
         }
         OffsetAnimation(type._eyelid, shape, level, winkPhase * -0.015 * up);
 

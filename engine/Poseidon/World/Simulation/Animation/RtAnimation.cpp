@@ -1,6 +1,7 @@
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/World/Simulation/Animation/RtAnimation.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
+#include <Poseidon/World/Entities/Infantry/Head.hpp>
 #include <Poseidon/Asset/Formats/RTM/RTMReader.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
 #include <Poseidon/Foundation/Types/ScopeLock.hpp>
@@ -1010,8 +1011,19 @@ void AnimationRT::ApplyMatrices(const WeightInfo& lWeights, LODShape* lShape, in
     {
         Shape* shape = lShape->Level(level);
         VertexBuffer* vb = shape ? shape->GetVertexBuffer() : nullptr;
-        if (shape && vb && shape->OriginalPosValid())
+        // FACE-001: `cpuPosed` means this mesh ALSO carries CPU-space vertex offsets this
+        // frame (the soldier face rig: lip sync, wink, mimics). No bone matrix can express
+        // them, and a GPU-skinned mesh is never re-uploaded, so the offsets would be written
+        // and thrown away. Fall through to the CPU skinning below; the backend reads the same
+        // flag and draws this mesh unskinned.
+        if (shape && vb && vb->cpuPosed)
         {
+            // deliberately not diverted to the GPU
+            GFaceDiag().cpuSkinKept++;
+        }
+        else if (shape && vb && shape->OriginalPosValid())
+        {
+            GFaceDiag().gpuSkinned++;
             vb->SetSkinData(lWeights[level], *shape);
             vb->SetPalette(matrices.Data(), matrices.Size());
             const bool skipCpu = vb->drawnSkinned;
