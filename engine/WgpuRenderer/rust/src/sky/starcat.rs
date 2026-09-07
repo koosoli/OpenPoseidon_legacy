@@ -334,6 +334,13 @@ fn parse(bytes: &[u8]) -> Option<Vec<StarRecord>> {
     Some(out)
 }
 
+/// The shipped catalogue, compiled into the binary. Yale Bright Star Catalogue, 5th edition
+/// (Hoffleit & Warren), as distributed by CDS/ADC as V/50 -- PUBLIC DOMAIN, which is why it is
+/// this one and not HYG (CC BY-SA, which would need attribution and a redistribution story).
+/// Built by tools/sky/make_star_catalogue.py --bsc; 8404 stars to visual magnitude 6.50, the
+/// naked-eye limit, brightest Sirius at -1.46.
+const EMBEDDED_CATALOGUE: &[u8] = include_bytes!("../../../../../resources/sky/bright_stars.pstar");
+
 // ---------------------------------------------------------------------------------------------
 // Build.
 // ---------------------------------------------------------------------------------------------
@@ -357,6 +364,22 @@ impl StarCatalogue {
                     );
                 }
             }
+        }
+        // SKY-002: the real catalogue is COMPILED IN, so it cannot be lost by a deploy, a
+        // partial copy, or someone moving just the executable. At 131 KiB that is a trivial
+        // price for a file that must never be missing -- and it makes the external paths above
+        // an OVERRIDE rather than a requirement, which is what you want for a data file a
+        // curious owner might swap.
+        //
+        // The generated placeholder stays as the last resort so the module still compiles and
+        // runs in a tree that has not built the .pstar yet, and the name it reports says
+        // plainly which of the three you are looking at.
+        match parse(EMBEDDED_CATALOGUE) {
+            Some(recs) if !recs.is_empty() => {
+                let n = recs.len();
+                return Self::build(recs, format!("embedded Yale BSC5 ({n} stars)"));
+            }
+            _ => eprintln!("[wgr] sky: the EMBEDDED star catalogue failed to parse - this is a build error"),
         }
         let recs = generate_placeholder(5000);
         let n = recs.len();

@@ -586,6 +586,25 @@ The authoritative license text for each crate is delivered into the Cargo regist
 at build time.
 ---
 
+## Sky data (shipped in `resources/sky/`)
+
+Both files below are **public domain**. They are shipped converted, not verbatim: the
+converters are `tools/sky/make_star_catalogue.py` and `tools/sky/make_milkyway.py`, and the
+originals are not kept in the tree.
+
+| File | Source | Licence |
+|---|---|---|
+| `bright_stars.pstar` | Yale Bright Star Catalogue, 5th ed. (Hoffleit & Warren), as distributed by CDS/ADC as catalogue V/50 | Public domain |
+| `milkyway.pskytex` | NASA/Goddard SVS, *Deep Star Maps 2020* (svs.gsfc.nasa.gov/4851), derived from ESA Gaia DR2 | Public domain |
+
+NASA asks for credit where it does not require it, so: *Milky Way imagery courtesy NASA/Goddard
+Space Flight Center Scientific Visualization Studio, from ESA/Gaia/DPAC data.*
+
+A note on what was **not** used, because it will come up again: star-sky textures published on
+mod sites are usually someone else's derived asset with no redistribution licence, and are
+GPL-incompatible regardless of how freely they are downloaded. The two sources above were
+chosen because they can actually be shipped.
+
 ## Notes
 
 - The copyright lines for the vcpkg dependencies in §2 are summarised for reference.
