@@ -1224,8 +1224,20 @@ fn lunar_cloud_light(pos: vec3<f32>, sun: vec3<f32>) -> LunarLight {
 //
 // It is deliberately the LOW end of what that measurement supports: the 0.196 is read after the
 // tonemapper, which compresses, so the true scene-space ratio is higher and 0.5 errs toward a
-// night that is too dark rather than one that glows. Measured result at the near-full moon of the
-// capture set: sky mean 21.6/255 against 0.22/255 with no moon and 121.8/255 in daylight.
+// night that is too dark rather than one that glows.
+//
+// MEASURED on the shipped build, mean sky luma over the top 55% of frame. The two rows differ
+// only in where the moon was put, which is the point -- the term follows the ephemeris rather
+// than a constant, so the number is supposed to move with elevation and phase:
+//   full moon forced to 45 deg (WGR_MOON_AZEL=180,45, WGR_MOON_PHASE=1)   31.36
+//   near-full moon at 52 deg from the mission date                        24.15  (predicted 24.37)
+//   same frame, WGR_MOON_CLOUDS=0                                          0.22
+//   moon below the horizon                                                 0.29
+//   clear night, same moon                                                 9.00
+// The 24.15 landing within 1% of the 24.37 this calibration predicts is the check that the
+// linear-in-irradiance argument above is doing real work and is not a fitted constant.
+// Daylight control at this value: overcast day 126.6965 with the term on against 126.6666 with
+// it off, max per-pixel 6/255 -- the same spread two identical-path runs show.
 const MOON_CLOUD_MS: f32 = 0.50;
 
 fn march_clouds(
