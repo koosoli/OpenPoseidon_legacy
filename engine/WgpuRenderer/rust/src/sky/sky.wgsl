@@ -66,7 +66,15 @@ struct Sky {
     // opaque overcast at roughly the cloud's ambient fraction. 1 = the cloud is lit by the
     // STAR-FREE sky, so a deck hides the stars behind it exactly as it hides the sky behind them;
     // 0 = the pre-SKY-002 behaviour, bit for bit. Renderer-written (`WGR_STAR_OCCLUSION`).
-    // yzw reserved (0).
+    //
+    // SKY-004. y = MOONLIGHT ON THE CLOUD DECKS, as a gain on the physical lunar irradiance the
+    // moon disc already carries (1 = default, 0 = the pre-SKY-004 behaviour bit for bit, i.e. the
+    // decks are lit by the sun alone and an overcast night is black). Renderer-written
+    // (`WGR_MOON_CLOUDS`). z = STYLISTIC BLUE SHIFT [0,1] on that light only (`WGR_MOON_CLOUD_BLUE`,
+    // default 0 = physical). Moonlight is REFLECTED SUNLIGHT and is therefore very close to the
+    // sun's own colour -- the blue "moonlight" of film is an artefact of human scotopic vision, not
+    // of the light -- so the blue is off unless somebody asks for it, and it is a look knob that
+    // says so rather than a number quietly baked into the tint. w reserved (0).
     night_sky: vec4<f32>,
 };
 
@@ -1104,6 +1112,122 @@ struct CloudResult {
 // Both halves must use the same number or the rescale would clip a range the march still visits.
 const CLOUD_TRANS_CUT: f32 = 0.02;
 
+// ---- SKY-004: the lunar light source for the cloud decks ----------------------
+//
+// Before this, `sun_col = sample_transmittance(pos, sun) * radiance` was the ONLY light the cloud
+// march had. At night that samples the transmittance LUT toward a sun below the horizon, which is
+// zero, so a night deck's entire output was its ambient term -- and once SKY-003 took the stars out
+// of that ambient, an overcast night was genuinely black. It should not be: a full moon over an
+// overcast is a soft grey dome you can walk by, and a broken deck under one has lit tops and dark
+// bases exactly as it does by day.
+//
+// PHYSICALLY this is not a new light model, it is the SAME light model with the other body in it.
+// Everything needed was already in the UBO because the moon DISC needs it: a real lunar ephemeris
+// (position accurate to ~0.015 deg), the illuminated fraction, and `moon_params.z` -- the disc's
+// radiance scale, which C++ builds as
+//
+//     sunIntensity * exposure * moonIntensity * (moonBrightness / max(illum, 0.02)) * scale
+//
+// i.e. the sun's own irradiance units, times the moon-to-sun ratio, times the empirical lunar phase
+// function, divided by the lit fraction to turn total brightness into per-area radiance. Multiply
+// that back by the illuminated fraction and you have the lunar IRRADIANCE in exactly the units
+// `radiance` is in, phase already folded in. So the phase here is not faked and not a cosine: it is
+// whatever the ephemeris says the moon is doing tonight, and a quarter moon lights the deck about
+// an order of magnitude less than a full one, which is the real behaviour.
+//
+// The moon-to-sun ratio itself is `moonIntensity`, default 0.06 -- NOT the true 1e-6. That is a
+// deliberate pre-existing choice of this renderer (see the Moon panel's tooltip): the frame is not
+// tone-mapped through a scotopic response, so the honest ratio renders as black. Riding the same
+// number means the deck is lit at precisely the fraction the GROUND is lit at, so cloud and terrain
+// agree about how bright the night is instead of drifting apart under one slider.
+//
+// COLOUR is the sun's, near enough (moonlight IS sunlight, off a slightly reddish regolith), which
+// is why the tint below is the moon disc's own 1.0/0.97/0.92 rather than anything blue. The blue
+// moonlight of film is scotopic vision, not photometry. `night_sky.z` will lerp toward a cold
+// blue-grey for anyone who wants the cinematic look, and it is 0 by default so nobody gets it by
+// accident.
+struct LunarLight {
+    dir: vec3<f32>,  // unit direction TO the moon
+    col: vec3<f32>,  // irradiance at the deck: atmosphere-attenuated, tinted, gated, gained
+    on: f32,         // 0 = no lunar term at all -- skip the light march entirely
+};
+
+fn lunar_cloud_light(pos: vec3<f32>, sun: vec3<f32>) -> LunarLight {
+    var l: LunarLight;
+    l.dir = vec3<f32>(0.0, 1.0, 0.0);
+    l.col = vec3<f32>(0.0);
+    l.on = 0.0;
+    let gain = sky.night_sky.y;
+    if (gain <= 0.0) {
+        return l; // WGR_MOON_CLOUDS=0 -- the pre-SKY-004 behaviour, bit for bit
+    }
+    // Total lunar irradiance: per-area disc radiance scale x the lit fraction. Zero whenever the
+    // Moon panel has turned the body off (moonIntensity or moonBrightnessScale at 0 drive
+    // moon_params.z to 0), so one knob still kills the moon everywhere it appears.
+    let irr = max(sky.moon_params.z, 0.0) * clamp(sky.moon_params.y, 0.0, 1.0);
+    if (irr <= 0.0) {
+        return l;
+    }
+    let moon = normalize(sky.moon_dir.xyz);
+    // TWO GATES, both smooth, both one-sided.
+    //
+    // 1. The moon must be UP. A moonless night must stay black -- that is the whole point of a
+    //    moonless night, and a deck glowing with a moon below the horizon would be worse than the
+    //    black it replaced. Faded over ~3 deg so moonrise is a gradual filling-in rather than a
+    //    frame where the sky changes.
+    // 2. The SUN must be down. Not because the moon stops existing by day (it does not, and the
+    //    disc is still drawn), but because daylight is a control that must not move: below -2 deg
+    //    of solar elevation this is 1 and above the horizon it is exactly 0, so every daytime
+    //    frame takes the early-out above and is bit-identical to the pre-SKY-004 build. -2 deg is
+    //    the same threshold the scene's own moonlight hand-off already uses, so the deck and the
+    //    ground start being moonlit at the same moment.
+    let up = smoothstep(-0.05, 0.02, moon.y);
+    let night = 1.0 - smoothstep(-0.035, 0.0, sun.y);
+    let k = up * night * gain;
+    if (k <= 0.0) {
+        return l;
+    }
+    // Reddened toward the horizon by the same transmittance LUT that reddens the sun, so a low moon
+    // lights the deck with the low moon's own colour instead of a constant grey.
+    let blue = clamp(sky.night_sky.z, 0.0, 1.0);
+    let tint = mix(vec3<f32>(1.0, 0.97, 0.92), vec3<f32>(0.60, 0.76, 1.05), blue);
+    l.dir = moon;
+    l.col = sample_transmittance(pos, moon) * (irr * k) * tint;
+    l.on = 1.0;
+    return l;
+}
+
+// How much of the lunar irradiance comes back out of a THICK deck as diffuse glow, per unit of
+// isotropic radiance. This is the term that makes a moonlit overcast a grey dome rather than a
+// black one, and it is the lunar stand-in for something the solar path gets for free: by day the
+// deck's fill light is `amb_sky`, the atmosphere's own radiance at that pixel, and the atmosphere
+// march has no lunar source in it, so at night `amb_sky` collapses to the authored night floor.
+//
+// It matters most exactly where the DIRECT term is useless. Under 0.95 coverage the optical depth
+// from the deck's base to the moon is large, so `exp(-od)` is ~0 for every sample the eye can see,
+// and a direct-only lunar term would have changed nothing about the reported symptom. Real
+// overcast is dominated by multiple scattering; this is the same cheap stand-in the phase function
+// already makes for it (mixing toward 1/4pi with coverage), applied to magnitude instead of shape.
+//
+// Weighted by coverage so it does NOT paint a broken deck flat: at low coverage the look should be
+// the direct term's lit tops and shadowed bases, which is what a few moonlit cumulus actually look
+// like, and the fill only takes over as the deck closes.
+//
+// THE VALUE IS CALIBRATED AGAINST THE DAYLIGHT CONTROL, not chosen by eye. The physical statement
+// is that an overcast dome's brightness is linear in the irradiance falling on it, whatever body
+// supplies it -- so the lunar fill should be the same fraction of the LUNAR irradiance that the
+// solar fill is of the SOLAR irradiance. The solar fill is `amb_sky`, i.e. the sky's own radiance
+// `bg`, and the day control measures that ratio directly: an 0.95-coverage overcast at 64 deg solar
+// elevation renders at 0.196 display-linear, which through `ambient * ao_floor` with
+// ao_floor = 0.69 and cloud2.z = 1 puts amb_sky at ~0.284, against an effective solar irradiance of
+// sunIntensity*exposure*T = 0.564*0.9 = 0.51. That ratio is 0.56, so 0.5 here.
+//
+// It is deliberately the LOW end of what that measurement supports: the 0.196 is read after the
+// tonemapper, which compresses, so the true scene-space ratio is higher and 0.5 errs toward a
+// night that is too dark rather than one that glows. Measured result at the near-full moon of the
+// capture set: sky mean 21.6/255 against 0.22/255 with no moon and 121.8/255 in daylight.
+const MOON_CLOUD_MS: f32 = 0.50;
+
 fn march_clouds(
     pos: vec3<f32>,
     dir: vec3<f32>,
@@ -1163,6 +1287,27 @@ fn march_clouds(
     let phase_hg = mix(hg(cos_t, sky.cloud2.x), hg(cos_t, -0.15), 0.5);
     let phase = mix(phase_hg, 1.0 / (4.0 * PI), cov * 0.7);
     let sun_col = sample_transmittance(pos, sun) * radiance;
+    // Is the solar light march worth running at all? Below the horizon the transmittance LUT
+    // returns ~0 toward the sun, so `direct` is a light march whose result is multiplied by zero --
+    // paid on every cloudy sample of every night frame. Skipping it is exactly neutral (the term
+    // IS zero, not merely small) and it is what pays for the lunar march below: at night the deck
+    // now does one light march toward the moon instead of one toward the sun, so the night cost of
+    // this feature is about nothing rather than double.
+    let sun_lit = dot(sun_col, vec3<f32>(0.2126, 0.7152, 0.0722)) > 1.0e-6;
+    // SKY-004: the moon as a second light source. `on` is 0 in daylight (and with no moon up, and
+    // with the feature off), and every lunar term below is gated on it, so a daytime frame runs
+    // precisely the code it ran before.
+    let ml = lunar_cloud_light(pos, sun);
+    let cos_m = dot(dir, ml.dir);
+    // Same phase construction as the sun's -- a cloud does not know which body lit it, and the
+    // forward silver lining round a moon behind a thin deck is a real and rather good-looking
+    // thing. Built unconditionally (it is arithmetic, no taps) and multiplied by `on`.
+    let phase_m_hg = mix(hg(cos_m, sky.cloud2.x), hg(cos_m, -0.15), 0.5);
+    let phase_m = mix(phase_m_hg, 1.0 / (4.0 * PI), cov * 0.7);
+    // The multiple-scattering fill. Height-graded with the ambient below rather than added flat, so
+    // even a fully overcast moonlit deck keeps a top-to-bottom gradient instead of reading as a
+    // uniform grey card.
+    let amb_moon = ml.col * (MOON_CLOUD_MS * mix(0.25, 1.0, cov) * ml.on);
 
     // Cloud ambient = the local sky radiance already computed for the background (bg): right
     // magnitude + colour, and FREE (vs the old per-pixel zenith raymarch_sky). BUT desaturate it
@@ -1192,23 +1337,45 @@ fn march_clouds(
         let dens = cloud_density(p) * far_fade;
         if (dens > 0.001) {
             let sigma = dens * ext;
-            // Light march toward the sun with exponentially growing steps -> optical depth.
-            var od = 0.0;
-            var lt = 0.0;
-            var ls = ls_base * 0.3;
-            for (var j = 0; j < light_steps; j = j + 1) {
-                lt += ls;
-                let lp = p + sun * lt;
-                let ld = select(cloud_density(lp), cloud_density_light(lp), CLOUD_LIGHT_COARSE > 0.5);
-                od += ld * ext * ls;
-                ls *= 1.6;
-            }
-            let sun_t = exp(-od);
             // Beer-Powder dark-edge term (the silver-lining / fluffy look).
             let powder = 1.0 - exp(-2.0 * sigma * dt);
-            let direct = sun_col * sun_t * phase * mix(1.0, powder, sky.cloud2.y);
+            let beer = mix(1.0, powder, sky.cloud2.y);
+            // Light march toward the sun with exponentially growing steps -> optical depth.
+            var direct = vec3<f32>(0.0);
+            if (sun_lit) {
+                var od = 0.0;
+                var lt = 0.0;
+                var ls = ls_base * 0.3;
+                for (var j = 0; j < light_steps; j = j + 1) {
+                    lt += ls;
+                    let lp = p + sun * lt;
+                    let ld = select(cloud_density(lp), cloud_density_light(lp), CLOUD_LIGHT_COARSE > 0.5);
+                    od += ld * ext * ls;
+                    ls *= 1.6;
+                }
+                direct = sun_col * exp(-od) * phase * beer;
+            }
+            // SKY-004: the identical march toward the MOON. Same steps, same growth, same
+            // Beer-Powder -- it is the same physics with a different body, and self-shadowing is
+            // what gives a moonlit broken deck its lit tops and dark bases. This is the loop the
+            // solar skip above pays for.
+            if (ml.on > 0.5) {
+                var od_m = 0.0;
+                var lt_m = 0.0;
+                var ls_m = ls_base * 0.3;
+                for (var j = 0; j < light_steps; j = j + 1) {
+                    lt_m += ls_m;
+                    let lp = p + ml.dir * lt_m;
+                    let ld = select(cloud_density(lp), cloud_density_light(lp), CLOUD_LIGHT_COARSE > 0.5);
+                    od_m += ld * ext * ls_m;
+                    ls_m *= 1.6;
+                }
+                direct = direct + ml.col * exp(-od_m) * phase_m * beer;
+            }
             let hfp = clamp((length(p) - (sky.params.z + sky.cloud0.z)) / thick, 0.0, 1.0);
-            let ambient = amb_sky * mix(ao_floor, 1.0, hfp); // darker undersides (cheap AO)
+            // darker undersides (cheap AO). The lunar multiple-scattering fill rides the SAME
+            // height gradient as the sky ambient, so it cannot flatten the deck.
+            let ambient = (amb_sky + amb_moon) * mix(ao_floor, 1.0, hfp);
             let scatter = direct + ambient;
             let seg = exp(-sigma * dt);
             // In-scattered radiance over the segment: T * albedo * J * (1 - exp(-sigma*dt)), with
@@ -1670,7 +1837,17 @@ fn cirrus_layer(pos: vec3<f32>, dir: vec3<f32>, sun: vec3<f32>, radiance: f32, b
     // hue the direct sun happens to be, which at a low sun turned them olive-brown; a real
     // cumulus base is blue-grey precisely BECAUSE the sun is what the cloud above has removed and
     // sky ambient is what is left.
-    let lit_sun = sun_col * phase;
+    // SKY-004: the moon lights the high layer too. A cirrostratus veil under a full moon is one of
+    // the more recognisable night skies there is -- a pale halo-ringed sheet with the stars going
+    // soft behind it -- and the layer is optically thin, so this needs no light march: it is the
+    // same `lit_sun` lane with the other body's irradiance and phase in it, which also means it
+    // inherits the MATCH self-shading term at line ~1913 for free.
+    let ml = lunar_cloud_light(pos, sun);
+    let cos_m = dot(dir, ml.dir);
+    let ice_phase_m = mix(hg(cos_m, 0.75), 1.0 / (4.0 * PI), 0.55);
+    let deck_phase_m = mix(hg(cos_m, clamp(sky.cloud2.x, 0.0, 0.95)), 1.0 / (4.0 * PI), 0.25);
+    let phase_m = mix(ice_phase_m, deck_phase_m, sh.match_deck);
+    let lit_sun = sun_col * phase + ml.col * (phase_m * ml.on);
     let lit = lit_sun + ambient;
     // Fade in off the horizon, where the sheet is hundreds of km away and haze owns the sky.
     let horizon_fade = smoothstep(0.015, 0.07, dir.y);

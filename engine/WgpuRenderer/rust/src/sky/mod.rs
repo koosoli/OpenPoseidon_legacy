@@ -74,6 +74,70 @@ fn the_cloud_march_is_not_lit_by_the_stars() {
     );
 }
 
+// SKY-004. The cloud decks now have a lunar light source. Three things about it are load-bearing
+// and none of them is visible in a compile: that daylight cannot move, that a MOONLESS night stays
+// black, and that the whole thing is switchable. All three live in `lunar_cloud_light`'s gates.
+//
+// Source-text, for the same reason `the_cloud_march_is_not_lit_by_the_stars` is: the deck march is
+// a separate depth-aware pass over the scene (fs_cloud) that the headless single-pass sky harness
+// cannot record, and fs_sky only ever asks it for a scalar disc cover. The rendered proof is the
+// four-way capture set (overcast+moon / overcast+no moon / clear night / overcast day).
+#[test]
+fn the_cloud_decks_have_a_gated_lunar_light() {
+    let src = include_str!("sky.wgsl");
+    assert!(
+        src.contains("fn lunar_cloud_light(pos: vec3<f32>, sun: vec3<f32>) -> LunarLight"),
+        "the lunar cloud light source is gone"
+    );
+    // 1. SWITCHABLE, on a real UBO lane -- not a hard-coded 1. WGR_MOON_CLOUDS=0 must restore the
+    //    old look, or there is no A/B for the next person who doubts this.
+    assert!(
+        src.contains("let gain = sky.night_sky.y;") && src.contains("if (gain <= 0.0) {"),
+        "the moonlight gain must ride a UBO lane and 0 must skip the term entirely"
+    );
+    // 2. PHASE is the ephemeris', not a fake: irradiance is the disc's radiance scale times the
+    //    illuminated fraction, which reconstructs the empirical lunar phase function C++ divided
+    //    out. A constant here would be a moon that lights the deck the same at new and full.
+    assert!(
+        src.contains("max(sky.moon_params.z, 0.0) * clamp(sky.moon_params.y, 0.0, 1.0)"),
+        "lunar irradiance must be the disc scale x the illuminated fraction (phase included)"
+    );
+    // 3. THE TWO GATES. `up` keeps a moonless night black -- the owner asked for that explicitly --
+    //    and `night` makes every daylight frame take the early-out, so daylight is bit-identical
+    //    rather than merely close.
+    assert!(
+        src.contains("let up = smoothstep(-0.05, 0.02, moon.y);")
+            && src.contains("let night = 1.0 - smoothstep(-0.035, 0.0, sun.y);")
+            && src.contains("let k = up * night * gain;"),
+        "the moon-up and sun-down gates must both be present and multiplied together"
+    );
+    // 4. The colour is the SUN's. Moonlight is reflected sunlight; the blue is scotopic vision, not
+    //    photometry. If a blue constant ever becomes the default, this fails and says why.
+    assert!(
+        src.contains("let blue = clamp(sky.night_sky.z, 0.0, 1.0);")
+            && src.contains("mix(vec3<f32>(1.0, 0.97, 0.92), vec3<f32>(0.60, 0.76, 1.05), blue)"),
+        "moonlight on clouds must default to the sun's colour, with the blue shift switchable"
+    );
+    // 5. Both decks take it: the cumulus march (with a real light march, so tops light and bases
+    //    shadow) and the thin cirrus sheet (no march needed).
+    assert_eq!(
+        src.matches("lunar_cloud_light(pos, sun)").count(),
+        2,
+        "both march_clouds and cirrus_layer must take the lunar light"
+    );
+    assert!(
+        src.contains("direct = direct + ml.col * exp(-od_m) * phase_m * beer;"),
+        "the deck's lunar term must be self-shadowed by its own light march"
+    );
+    // 6. The night cost stays flat: the solar light march is skipped when the sun contributes
+    //    nothing, which is exactly the frames where the lunar one runs.
+    assert!(
+        src.contains("let sun_lit = dot(sun_col, vec3<f32>(0.2126, 0.7152, 0.0722)) > 1.0e-6;")
+            && src.contains("if (sun_lit) {"),
+        "the solar light march must be skipped when the sun is below the horizon"
+    );
+}
+
 // Same offline guard for the standalone SH-projection compute (create_shader_module'd, so it is
 // not covered by the naga_oil entry-shader compose test).
 #[test]
@@ -652,7 +716,8 @@ struct SkyUniform {
     // SKY-002. x = STAR CLOUD-OCCLUSION strength [0,1]. Renderer-written, like `cirrus` and
     // cloud4.w, so no FFI struct changes size. See sky.wgsl's `night_sky` lane for what it does
     // and why the "stars are added before the cloud composite" arrangement was not enough on its
-    // own. yzw reserved (0).
+    // own. SKY-004: y = moonlight gain on the cloud decks, z = the stylistic blue shift on that
+    // light. w reserved (0).
     night_sky: [f32; 4],
 }
 
@@ -956,6 +1021,55 @@ fn star_cloud_occlusion_from_env() -> f32 {
     v
 }
 
+/// `WGR_MOON_CLOUDS=<0..4>` — gain on the MOONLIGHT that reaches the cloud decks. 1 (default) is
+/// the physical answer: the deck is lit by exactly the lunar irradiance the moon disc already
+/// carries — `moon_params.z * illuminated_fraction`, which is the sun's irradiance times the
+/// renderer's moon-to-sun ratio times the ephemeris' own phase function — so cloud and ground
+/// agree about how bright the night is, and one Moon-panel slider still moves both.
+///
+/// 0 restores the pre-SKY-004 behaviour bit for bit: the decks see the sun alone, the sun is below
+/// the horizon, and an overcast night is black. That is the A/B, and it is the switch the standing
+/// "anything on by default must be switchable" rule asks for.
+///
+/// An env knob and not a dev slider for the reason `WGR_STAR_OCCLUSION` gives above and no other:
+/// every path from a Dev Tools control down to this value runs through EngineWgpu.cpp, which this
+/// change was not allowed to touch. Both ENDS remain reachable from the panel today — Dev Tools ->
+/// Sky -> Moon -> "Moon brightness scale" at 0 turns the moon off everywhere including here, and
+/// "Moonlight intensity" scales the irradiance this reads.
+fn moon_cloud_light_from_env() -> f32 {
+    let Ok(raw) = std::env::var("WGR_MOON_CLOUDS") else {
+        return 1.0;
+    };
+    let Ok(v) = raw.trim().parse::<f32>() else {
+        eprintln!("[wgr] sky: WGR_MOON_CLOUDS='{raw}' is not a number - ignoring");
+        return 1.0;
+    };
+    let v = v.clamp(0.0, 4.0);
+    eprintln!("[wgr] sky: moonlight on clouds x{v} from WGR_MOON_CLOUDS");
+    v
+}
+
+/// `WGR_MOON_CLOUD_BLUE=<0..1>` — a deliberate, declared STYLISTIC choice, default 0 (off).
+///
+/// Moonlight is reflected sunlight. Its spectrum is the sun's, very slightly reddened by the
+/// regolith, and the blue "moonlight" everyone recognises is an artefact of human scotopic vision
+/// (rods peak bluer than cones and carry no colour of their own) — it is in the observer, not in
+/// the light. So the default tint on the cloud decks is the moon disc's own 1.0/0.97/0.92, and this
+/// exists so that anyone who wants the cinematic look can ask for it explicitly and know that is
+/// what they asked for, rather than finding a blue constant baked into a "physical" path.
+fn moon_cloud_blue_from_env() -> f32 {
+    let Ok(raw) = std::env::var("WGR_MOON_CLOUD_BLUE") else {
+        return 0.0;
+    };
+    let Ok(v) = raw.trim().parse::<f32>() else {
+        eprintln!("[wgr] sky: WGR_MOON_CLOUD_BLUE='{raw}' is not a number - ignoring");
+        return 0.0;
+    };
+    let v = v.clamp(0.0, 1.0);
+    eprintln!("[wgr] sky: stylistic blue shift {v} on moonlit clouds from WGR_MOON_CLOUD_BLUE");
+    v
+}
+
 pub struct Sky {
     // Main fullscreen sky pipeline (targets the scene format).
     sky_pipeline: wgpu::RenderPipeline,
@@ -1015,6 +1129,13 @@ pub struct Sky {
     /// as its ambient source, written to the sky UBO's `night_sky.x`. 1 = a deck hides the stars
     /// behind it; 0 = the pre-SKY-002 behaviour. `WGR_STAR_OCCLUSION=<0..1>`.
     star_cloud_occlusion: f32,
+    /// SKY-004: gain on the moonlight reaching the cloud decks, written to `night_sky.y`.
+    /// 1 = the physical lunar irradiance the moon disc already carries; 0 = the pre-SKY-004
+    /// behaviour (sun-only decks, black overcast night). `WGR_MOON_CLOUDS=<0..4>`.
+    moon_cloud_light: f32,
+    /// SKY-004: stylistic blue shift on that light only, written to `night_sky.z`. 0 (default) is
+    /// physical — moonlight is reflected sunlight. `WGR_MOON_CLOUD_BLUE=<0..1>`.
+    moon_cloud_blue: f32,
     /// The star-catalogue buffers. Only ever read through `sky_bind`; held here so the buffers
     /// outlive the bind group that references them.
     _star_cell_buf: wgpu::Buffer,
@@ -2097,6 +2218,8 @@ impl Sky {
             // whole night sky to zero; this lane only sets the band's weight against the stars.
             milky_way: milky_way_from_env(),
             star_cloud_occlusion: star_cloud_occlusion_from_env(),
+            moon_cloud_light: moon_cloud_light_from_env(),
+            moon_cloud_blue: moon_cloud_blue_from_env(),
             _star_cell_buf: star_cell_buf,
             _star_list_buf: star_list_buf,
             // Matches Engine::SkySettings' safe default.  The C++ side normally pushes this on
@@ -2384,7 +2507,12 @@ impl Sky {
                 // See `milky_way` in the struct above for why it rides here.
                 self.milky_way,
             ],
-            night_sky: [self.star_cloud_occlusion, 0.0, 0.0, 0.0],
+            night_sky: [
+                self.star_cloud_occlusion,
+                self.moon_cloud_light,
+                self.moon_cloud_blue,
+                0.0,
+            ],
         };
         queue.write_buffer(&self.uniform_buf, 0, bytemuck::bytes_of(&u));
         // Terrain sun-shadow mask mapping for cs_froxel's occlusion lookup (own copy so

@@ -908,6 +908,18 @@ void DrawWeatherStateSection()
     ImGui::TextDisabled("coverage (Sky tab -> 'Coverage follows weather'), and the deck's own");
     ImGui::TextDisabled("transmittance is what the star field is multiplied by. Strength:");
     ImGui::TextDisabled("WGR_STAR_OCCLUSION=<0..1> (1 = default, 0 = stars punch through).");
+    // SKY-004. The other half of the same question, and the one people ask first: with the stars
+    // hidden, what is an overcast night lit BY? The moon, now -- and only when there is one up.
+    ImGui::TextDisabled("");
+    ImGui::TextDisabled("The deck is lit by the MOON at night (Sky tab -> Moon for position,");
+    ImGui::TextDisabled("phase and 'Moonlight intensity'). A full moon over full overcast is a");
+    ImGui::TextDisabled("soft grey dome; a broken deck gets lit tops and dark bases. With NO");
+    ImGui::TextDisabled("moon up the night stays black, which is correct -- check the Moon");
+    ImGui::TextDisabled("readout's elevation before calling a black night a bug. Gain:");
+    ImGui::TextDisabled("WGR_MOON_CLOUDS=<0..4> (1 = physical default, 0 = sun-only decks).");
+    ImGui::TextDisabled("WGR_MOON_CLOUD_BLUE=<0..1> is a STYLISTIC cold tint, 0 by default:");
+    ImGui::TextDisabled("moonlight is reflected sunlight, and film's blue moonlight is an");
+    ImGui::TextDisabled("artefact of scotopic vision rather than of the light itself.");
 }
 
 } // namespace
