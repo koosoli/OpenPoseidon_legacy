@@ -98,7 +98,12 @@ public:
 protected:
 	LightState _lightState;
 	bool _pilotLight; // switch the light on/off
-	Ref<LightPointVisible> _light;
+	// LAMP-004: a point light OR a downward spot, depending on the dev lever, so the
+	// declared type has to be the common base of both.
+	Ref<LightPositionedColored> _light;
+	// LAMP-004: the weak omni light beside the cone. The cone CUTS -- lights_contrib
+	// skips a fragment outside it entirely -- so without this the surroundings are black.
+	Ref<LightPointVisible> _spill;
 	Vector3 _lightPos;
 	// Poseidon::Dev::LampLightSettings::generation the live _light was built with. A
 	// dev-panel change bumps that counter; CreateLight then rebuilds this light so a

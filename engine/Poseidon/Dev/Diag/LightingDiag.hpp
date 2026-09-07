@@ -52,8 +52,46 @@ LightCounters& GLightCounters();
 struct LampLightSettings
 {
     bool enabled = true;
-    float radiusScale = 1.0f;
+    // LAMP-004. The flat core is what made a village read as floodlight: lights_contrib is
+    // full strength out to startAtten (= 50 * brightness metres, i.e. FIFTY) and only then
+    // falls off inverse-square. Shrinking the core is what turns a lamp into a pool -- at
+    // 0.18 the ground under a lamp is ~9x the far field, measured.
+    float radiusScale = 0.18f;
     float brightnessScale = 1.0f;
+    // The other half, and the one that actually reads as flood: the per-light AMBIENT term
+    // is added with NO regard to which way a surface faces, so it lifts every wall, roof
+    // and leaf in range uniformly. Cutting it keeps the pool on the ground and still leaves
+    // the surroundings visible, which is what "a nice falloff" means here.
+    // POSEIDON_LAMP_AMBIENT_SCALE=1 restores the authored value.
+    float ambientScale = 0.30f;
+    // LAMP-004. A street lamp was an omnidirectional point light, and the shader gives a
+    // point light a FLAT full-strength core out to startAtten before any falloff -- twenty
+    // 50 m white cores in one village, which is floodlight, not lamps. The renderer has
+    // carried a spot path all along (WgrLight::dir.w, lights_contrib's `cone` term), it was
+    // only ever used for headlights. A lamp points DOWN, so it should use it.
+    //
+    // POSEIDON_LAMP_CONE=1 turns it on. OFF by default, and the reason is measured:
+    // LightReflector is a HEADLIGHT. Its cone is hardcoded at 12 degrees (MIN_INSIDE in
+    // Lights.cpp) and its SetBrightness means something else again (200 * InvSqrt(...),
+    // so ~258 m instead of 50). Twenty 12-degree beams straight down lit almost nothing --
+    // a whole night village measured mean luma 0.3 against 100 with point lights -- and
+    // they crowded the point lights out of the fixed light budget on score. A street lamp
+    // wants a small core and a real falloff, not a searchlight.
+    bool cone = false;
+    // Sodium-vapour orange. The 2001 config asks for (0.90, 0.80, 0.60), a warm white --
+    // which is a 1985 idea of a lamp, not what a period street lamp looked like. The owner
+    // asked for orange; POSEIDON_LAMP_COLOR=r,g,b overrides, colorOverride=false keeps the
+    // authored colour.
+    bool colorOverride = true;
+    float color[3] = {1.00f, 0.58f, 0.20f};
+    // The cone CUTS: lights_contrib `continue`s outside it, so a pure spot leaves the
+    // surroundings absolutely black, which is as wrong as the floodlight was. A second,
+    // weak, omnidirectional light per lamp is the spill -- the surroundings stay lit, much
+    // less than the pool under the lamp. 0 = pure spot. POSEIDON_LAMP_SPILL.
+    float spill = 0.30f;
+    // Radius of that spill light relative to the pool's. Small: it is the glow around a
+    // lamp, not a second floodlight. POSEIDON_LAMP_SPILL_RADIUS.
+    float spillRadius = 0.45f;
     unsigned generation = 0;
 };
 

@@ -302,6 +302,7 @@ void StreetLamp::CreateLight(Matrix4Par pos)
         // new radius/brightness. Rebuilding rather than mutating keeps this to one code
         // path, and LightPointVisible has no setter for diffuse/ambient anyway.
         _light.Free();
+        _spill.Free();
         --s_lampsAdded;
     }
     if (!_light)
@@ -309,16 +310,45 @@ void StreetLamp::CreateLight(Matrix4Par pos)
         if (_pilotLight && lampSet.enabled)
         {
             Ref<LODShapeWithShadow> shape = GLOB_SCENE->Preloaded(HalfLight);
-            _light = new LightPointVisible(shape, Type()->_colorDiffuse * lampSet.brightnessScale,
-                                           Type()->_colorAmbient * lampSet.brightnessScale);
-            _light->SetPosition(pos.FastTransform(_lightPos));
-            // SetBrightness is really "set radius": LightPoint::SetBrightness does
-            // _startAtten = 50 * coef, and the shader is full-brightness inside
-            // startAtten and cut at 10x it. See LampLightSettings for the measurement.
-            _light->SetBrightness(Type()->_brightness * lampSet.radiusScale);
+            // LAMP-004: the lamp's colour. The authored (0.90, 0.80, 0.60) is a warm white;
+            // a period street lamp is sodium orange, which is what the owner asked for.
+            const Color authored = Type()->_colorDiffuse;
+            const Color diffuse = (lampSet.colorOverride
+                                       ? Color(lampSet.color[0], lampSet.color[1], lampSet.color[2], authored.A())
+                                       : authored) *
+                                  lampSet.brightnessScale;
+            const Color ambient = Type()->_colorAmbient * (lampSet.brightnessScale * lampSet.ambientScale);
+            // SetBrightness is really "set radius" on both light kinds: _startAtten = 50 *
+            // coef, and the shader is full-brightness INSIDE startAtten and cut at 10x it.
+            const float radius = Type()->_brightness * lampSet.radiusScale;
+            if (lampSet.cone)
+            {
+                // A street lamp points at the ground. As a point light it lit the sky, the
+                // rooftops and the next village equally -- see LampLightSettings. The spot
+                // path already exists end to end (LightReflector -> LTSpotLight ->
+                // WgrLight::dir.w -> the `cone` term in lights_contrib); nothing but
+                // headlights had ever used it.
+                Ref<LightReflector> spot = new LightReflector(shape, diffuse, ambient, H_PI * 0.25f);
+                spot->SetBrightness(radius);
+                spot->SetPosition(pos.FastTransform(_lightPos));
+                spot->SetOrient(Vector3(0, -1, 0), Vector3(0, 0, 1));
+                _light = spot;
+                if (lampSet.spill > 0.0f)
+                {
+                    _spill = new LightPointVisible(shape, diffuse * lampSet.spill, ambient * lampSet.spill);
+                    _spill->SetBrightness(radius * lampSet.spillRadius);
+                    _spill->SetPosition(pos.FastTransform(_lightPos));
+                    GLOB_SCENE->AddLight(_spill);
+                }
+            }
+            else
+            {
+                Ref<LightPointVisible> point = new LightPointVisible(shape, diffuse, ambient);
+                point->SetBrightness(radius);
+                point->SetPosition(pos.FastTransform(_lightPos));
+                _light = point;
+            }
             _lightGeneration = lampSet.generation;
-            //_light->SetDirection(Vector3(0,-1,0),Vector3(0,0,1));
-            //	this,,Vector3(0,-1,0),0.5
             GLOB_SCENE->AddLight(_light);
             ++s_lampsAdded;
         }
@@ -328,6 +358,7 @@ void StreetLamp::CreateLight(Matrix4Par pos)
         if (!_pilotLight)
         {
             _light.Free();
+            _spill.Free();
             --s_lampsAdded;
         }
     }
