@@ -241,8 +241,39 @@ void StreetLamp::Init(Matrix4Par pos)
     CreateLight(pos);
 }
 
+// LAMP-001 diagnostic. It has to distinguish three states that all look like "the village
+// is dark": no StreetLamp objects were created at all (the models' `class` property never
+// promoted them), lamps exist but are switched off, and lamps exist and are lit. A counter
+// that can only say "0 lights" cannot tell the first from the second.
+namespace
+{
+long long s_lampsSeen = 0;
+long long s_lampsLit = 0;
+long long s_lampsAdded = 0;
+} // namespace
+
+void StreetLampDiagCount(bool lit)
+{
+    ++s_lampsSeen;
+    if (lit)
+        ++s_lampsLit;
+}
+
+void StreetLampDiagReport()
+{
+    static float next = 0.0f;
+    const float now = Glob.time.toFloat();
+    if (now < next)
+        return;
+    next = now + 5.0f;
+    LOG_INFO(World, "LAMP-001: {} lamp simulations since start, {} of them switched on, {} lights added to the scene",
+             s_lampsSeen, s_lampsLit, s_lampsAdded);
+}
+
 void StreetLamp::CreateLight(Matrix4Par pos)
 {
+    StreetLampDiagCount(_pilotLight);
+    StreetLampDiagReport();
     if (!_light)
     {
         if (_pilotLight)
@@ -254,6 +285,7 @@ void StreetLamp::CreateLight(Matrix4Par pos)
             //_light->SetDirection(Vector3(0,-1,0),Vector3(0,0,1));
             //	this,,Vector3(0,-1,0),0.5
             GLOB_SCENE->AddLight(_light);
+            ++s_lampsAdded;
         }
     }
     else
@@ -267,6 +299,22 @@ void StreetLamp::CreateLight(Matrix4Par pos)
 
 void StreetLamp::SimulateSwitch()
 {
+    {
+        // LAMP-001: which of the three gates is holding the lamp off. All three have to be
+        // in one line: "the bulb is broken", "it is daytime" and "the lamp is destroyed"
+        // are indistinguishable from the outside, and the first is the one a missing
+        // "lampa" hit selection would produce on every lamp in the world.
+        static float next = 0.0f;
+        const float now = Glob.time.toFloat();
+        if (now >= next)
+        {
+            next = now + 5.0f;
+            LOG_INFO(World, "LAMP-001 gate: totalDammage={:.3f} bulbHit={:.3f} bulbPtr={} timeOfDay={:.4f} timeInYear={:.1f} sunY={:.3f} state={}",
+                     GetTotalDammage(), GetHit(Type()->_bulbHit), (const void*)&Type()->_bulbHit, Glob.clock.GetTimeOfDay(), Glob.clock.GetTimeInYear(),
+                     GLOB_SCENE->MainLight()->SunDirection().Y(),
+                     static_cast<int>(_lightState));
+        }
+    }
     if (GetTotalDammage() < 0.3 && GetHit(Type()->_bulbHit) < 0.5f)
     {
         switch (_lightState)
