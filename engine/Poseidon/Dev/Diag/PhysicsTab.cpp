@@ -283,6 +283,15 @@ void DrawPhysicsTab()
         ImGui::ColorEdit3("Light", s.lightColor, ImGuiColorEditFlags_NoInputs);
         ImGui::SetNextItemWidth(140.0f);
         Dev::SliderFloat("Brightness", &s.lightBrightness, 0.05f, 8.0f, "%.2f");
+        Dev::PanelSameLine();
+        ImGui::SetNextItemWidth(140.0f);
+        Dev::SliderFloat("Glow", &s.lightGlow, 0.0f, 8.0f, "%.2f");
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("POSEIDON_PROBE_GLOW. The visible halo the light draws around itself -- what the\n"
+                              "lamp LOOKS like, as opposed to what Brightness does to the world. 0 hides the\n"
+                              "halo and leaves only the illumination.");
+        }
         ImGui::SameLine();
         ImGui::SetNextItemWidth(140.0f);
         Dev::SliderFloat("Light ambient", &s.lightAmbient, 0.0f, 0.5f, "%.3f");

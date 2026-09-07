@@ -118,6 +118,9 @@ struct PhysicsProbeSettings
     /// LightPoint::SetBrightness, whose attenuation start is 50x this.
     float lightColor[3] = {1.00f, 0.90f, 0.72f};
     float lightBrightness = 1.0f;
+    //! Size of the visible halo the light draws around itself -- the glow, as opposed to
+    //! what the light does to the world. LightPointVisible::SetSize; 0 hides it entirely.
+    float lightGlow = 1.0f;
     /// Ambient the light adds regardless of surface orientation. Small on purpose:
     /// a big ambient term flattens exactly the shading you opened this to look at.
     float lightAmbient = 0.06f;

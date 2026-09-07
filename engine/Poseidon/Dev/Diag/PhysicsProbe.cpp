@@ -1,4 +1,5 @@
 #include <Poseidon/Dev/Diag/PhysicsProbe.hpp>
+#include <Poseidon/Dev/Diag/PhysicsCorpus.hpp>
 
 #include <Poseidon/Dev/Diag/ProbeMeshes.hpp>
 
@@ -115,7 +116,7 @@ std::vector<Ref<Object>> s_solidObjects;
 // PROBE-LIGHT: one LightPoint per probe, pooled like the solid objects. The scene owns
 // them once added, so the pool is only ever grown; a light that is not wanted this frame
 // is turned black rather than removed, which keeps the scene's light list stable.
-std::vector<Ref<LightPoint>> s_probeLights;
+std::vector<Ref<LightPointVisible>> s_probeLights;
 int s_probeLightsUsed = 0;
 int                      s_solidUsed = 0;
 
@@ -159,20 +160,46 @@ void SubmitProbeLight(Vector3Par position)
     }
     if (s_probeLightsUsed >= static_cast<int>(s_probeLights.size()))
     {
-        Ref<LightPoint> light = new LightPoint(HBlack, HBlack);
+        // LightPointVisible, not LightPoint: it draws a halo of its own, which is the GLOW
+        // the owner asked for -- what the lamp looks like, as opposed to what it does to
+        // the world. The shape is the engine's own preloaded light sprite.
+        Ref<LightPointVisible> light = new LightPointVisible(GScene->Preloaded(HalfLight), HBlack, HBlack);
         GScene->AddLight(light);
         s_probeLights.push_back(light);
     }
-    LightPoint* light = s_probeLights[static_cast<std::size_t>(s_probeLightsUsed)];
+    LightPointVisible* light = s_probeLights[static_cast<std::size_t>(s_probeLightsUsed)];
     ++s_probeLightsUsed;
     const Color diffuse(s_settings.lightColor[0], s_settings.lightColor[1], s_settings.lightColor[2], 1.0f);
     light->SetPosition(position);
     light->SetDiffuse(diffuse);
     light->SetAmbient(diffuse * s_settings.lightAmbient);
     light->SetBrightness(s_settings.lightBrightness);
+    light->SetSize(s_settings.lightGlow);
 }
 
 } // namespace
+
+// PHY-021: the world's colliders, on demand.
+//
+// The physics world starts EMPTY. Terrain and static objects are registered only by
+// PhysicsCorpus, which until now ran solely from the tab's "Register world colliders"
+// button or POSEIDON_PHYSICS_CORPUS. So the first thing anyone did with this tab -- spawn
+// a shape -- dropped it into a world with no ground in it, and it fell for ever. Measured
+// three separate times while trying to photograph a probe: "ground 16.33 clearance
+// -140.200", the landscape knowing exactly where its surface is while the physics had
+// never been told.
+//
+// A probe that falls through the planet reads as a broken feature, not as a missing setup
+// step, so the setup step is no longer optional: the first spawn does it.
+void EnsureWorldColliders()
+{
+    if (PhysicsCorpusHasRun())
+    {
+        return;
+    }
+    LOG_WARN(World, "PHY-021: registering world colliders on first probe spawn (the physics world was empty)");
+    RunPhysicsCorpus();
+}
 
 PhysicsProbeSettings& ProbeSettings() { return s_settings; }
 
@@ -185,6 +212,7 @@ void ResetProbeSettings()
 
 bool SpawnModelProbe(const char* nameFragment, float throwSpeed)
 {
+    EnsureWorldColliders(); // PHY-021: a model probe takes its own path to the physics world
     if (!GWorld || !GScene || !GLandscape || !nameFragment || !*nameFragment)
     {
         return false;
@@ -354,6 +382,7 @@ void SpawnPhysicsProbe(float throwSpeed)
     {
         return;
     }
+    EnsureWorldColliders();
     if (s_settings.shape == 4)
     {
         SpawnModelProbe(s_settings.modelFilter, throwSpeed);
