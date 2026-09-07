@@ -1116,8 +1116,10 @@ void LightReflector::ToDraw(ClipFlags clipFlags, bool dimmed)
             // is ON from across a street, which is what the owner asked for and what the old
             // 3.5%-of-a-metre marker could never be. Capped at 1.2 m so a truck coming at you
             // does not grow a sun.
-            GScene->DrawVolumeLight(GScene->Preloaded(HalfLight), PackedColor(c), *this, _size * 0.5f, 0.020f,
-                                    1.2f);
+            // LGT-023: no angular floor here either, for the saucer reason above. The bulb is
+            // drawn at its authored size; what makes a vehicle's lamps read as lit is that
+            // this call happens at all, which is the LGT-014 fix.
+            GScene->DrawVolumeLight(GScene->Preloaded(HalfLight), PackedColor(c), *this, _size * 0.5f, 0.0f, 1.2f);
         }
         return;
     }
@@ -1159,7 +1161,14 @@ void LightPointVisible::ToDraw(ClipFlags clipFlags, bool dimmed)
     // not a lamp the size of a house. This is the fix for "wenn ich ueber eine stadt fliege
     // ist es einfach schwarz"; the ILLUMINATION at that range is correctly almost nothing,
     // and always was -- what a real lamp shows you from 200 m is its bulb.
-    GScene->DrawVolumeLight(_shape, PackedColor(c), *this, _size, 0.012f, 2.5f);
+    // LGT-023: WITHDRAWN. The angular floor was meant to keep a lamp visible from the air,
+    // and it fails twice: the marker was never the reason the air view is dark (the lamp's own
+    // SHADE occludes the bulb when you look down at it), and HalfLight is a flat world-space
+    // disc, so scaling it up produces a grey saucer hanging beside the lamp rather than a
+    // glow. Seen in a capture at ~30 m. The far field is carried by the spill light instead,
+    // which is measured and does not draw anything. POSEIDON_LIGHT_GLARE turns the floor back
+    // on for anyone who wants to look at it.
+    GScene->DrawVolumeLight(_shape, PackedColor(c), *this, _size, 0.0f, 2.5f);
 }
 
 void LightPointVisible::Load(const ParamEntry& cls)
