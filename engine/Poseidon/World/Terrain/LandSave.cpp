@@ -1707,11 +1707,52 @@ bool Landscape::LoadOptimized(QIStream& f, float landGrid)
     AutoArray<InitPtr<Object>> idCache;
     AutoArray<AutoArray<InitPtr<Object>>> conflicts;
 
+    // FLOAT CENSUS (the OPRW twin of RFG-052, which only ever covered the native
+    // Enfusion loader). A classic .wrp stores a placement's Y as the BOUNDING CENTRE
+    // of the model, not its base -- measurable in the data: every kostel3 on Everon
+    // sits 17.2 m over the heightfield, every kostelik 5-7 m, every flat road 0.9 m,
+    // i.e. exactly half the model's height. Landscape::ObjectCreate undoes that with
+    // the BoundingCenter() correction. If a shape's bounding box is not there when
+    // that correction runs, the correction is a no-op and the object is left standing
+    // at its own half-height -- which is what "a house that flies" looks like.
+    //
+    // Nothing said when that happened. This counts it, and names the worst one, so a
+    // report of a floating building can be answered from the boot log instead of from
+    // a screenshot hunt across 12.8 km of island.
+    int floatingObjects = 0;
+    float worstFloat = 0.0f;
+    RStringB worstFloatName;
+    Vector3 worstFloatPos(0, 0, 0);
+
     for (int i = 0; i < reader.GetObjectCount(); i++)
     {
         const auto& obj = reader.GetObject(i);
         int x, z;
         Object* o = ObjectCreate(obj.id, obj.name, obj.transform, &x, &z);
+
+        if (o != nullptr)
+        {
+            const LODShapeWithShadow* shape = o->GetShape();
+            // Measure the DRAWN bottom, not the placement origin: an object stands on
+            // the ground when the low corner of its bounding box does, and a model whose
+            // box never arrived reports an empty one, which is itself the defect.
+            if (shape != nullptr && shape->Max().Y() > shape->Min().Y())
+            {
+                const Vector3 pos = o->Position();
+                const float bottom = pos.Y() + shape->Min().Y();
+                const float above = bottom - SurfaceY(pos.X(), pos.Z());
+                if (above > 5.0f)
+                {
+                    ++floatingObjects;
+                    if (above > worstFloat)
+                    {
+                        worstFloat = above;
+                        worstFloatName = obj.name;
+                        worstFloatPos = pos;
+                    }
+                }
+            }
+        }
 
         idCache.Access(obj.id);
         if (idCache[obj.id])
@@ -1742,6 +1783,19 @@ bool Landscape::LoadOptimized(QIStream& f, float landGrid)
                 swap(o1, o2);
             o2->SetID(newID++);
         }
+    }
+
+    if (floatingObjects == 0)
+    {
+        LOG_INFO(World, "OPRW load: 0 of {} objects stand more than 5 m above the terrain",
+                 reader.GetObjectCount());
+    }
+    else
+    {
+        LOG_INFO(World,
+                 "OPRW load: {} of {} objects stand more than 5 m above the terrain; worst '{}' at {}, {}, {} is {} m",
+                 floatingObjects, reader.GetObjectCount(), worstFloatName.Data(), worstFloatPos.X(), worstFloatPos.Y(),
+                 worstFloatPos.Z(), worstFloat);
     }
 
     ProgressFinish();
