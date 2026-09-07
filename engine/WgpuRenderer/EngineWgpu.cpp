@@ -10352,7 +10352,7 @@ void EngineWgpu::SyncWaterLookProfile()
         // saves whatever it holds on any edit, so the swatches were written unchanged), and
         // that pinned the old ultramarine deep swatch over any later default. A v3 profile's
         // colours were written by this code and are honoured.
-        out << "v 4\nwave " << s.waveAmp << ' ' << s.waveChoppy << ' ' << s.waveSpeed << ' ' << s.waveScale << '\n';
+        out << "v 5\nwave " << s.waveAmp << ' ' << s.waveChoppy << ' ' << s.waveSpeed << ' ' << s.waveScale << '\n';
         out << "colour " << s.shallowColor[0] << ' ' << s.shallowColor[1] << ' ' << s.shallowColor[2] << ' '
             << s.deepColor[0] << ' ' << s.deepColor[1] << ' ' << s.deepColor[2] << '\n';
         out << "coast " << s.colorExt << ' ' << s.coastFade << ' ' << s.foamWidth << ' ' << s.foamIntensity << ' '
@@ -10423,7 +10423,22 @@ void EngineWgpu::SyncWaterLookProfile()
             in >> _waterLook.colorExt >> _waterLook.coastFade >> _waterLook.foamWidth >> _waterLook.foamIntensity >>
                 _waterLook.swashAmp >> _waterLook.swashSpeed >> _waterLook.wetHeight >> _waterLook.wetDarken;
         else if (key == "surface")
+        {
             in >> _waterLook.glitterGain >> _waterLook.sssGain >> _waterLook.reflectionGain;
+            // v5: the reflection gain in a v4-or-older file is an automatic snapshot of the
+            // code default of the day -- the Water tab saves the whole subset on any edit --
+            // so it pinned 0.7 over the new 0.22 on every install that had ever touched the
+            // tab. Same failure the v3 colour rule exists for: a default that cannot reach
+            // the owner is a default that was never changed, and nothing warns you.
+            if (version < 5)
+            {
+                _waterLook.reflectionGain = WaterSettings{}.reflectionGain;
+                LOG_INFO(Graphics,
+                         "Water look: ignoring the v{} reflection gain of '{}' (an automatic snapshot of the old "
+                         "default); the code default {:.2f} applies until it is edited in the Water tab",
+                         version, map, _waterLook.reflectionGain);
+            }
+        }
         else if (key == "optics")
         {
             in >> _waterLook.alpha >> _waterLook.specPower >> _waterLook.specIntensity >> _waterLook.shadowDim >>

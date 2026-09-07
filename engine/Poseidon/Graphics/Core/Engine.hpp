@@ -2433,7 +2433,13 @@ class Engine : public IGraphicsEngine
         bool whitecapWindGate = true;
         float glitterGain = 1.0f;    // sun-specular gain (1 = the model's own energy)
         float sssGain = 1.0f;        // subsurface / backlit-crest gain
-        float reflectionGain = 0.7f; // environment-reflection gain (1 = uncapped physical Fresnel)
+        // 0.22 on the owner's instruction (was 0.7). NOTE for anyone changing this again:
+        // reflectionGain lives in the water-look profile's `surface` group, so a new default
+        // is DEAD on any install that already has %APPDATA%\CWR\water-look\<map>.cfg --
+        // which is every install, because the Water tab writes the whole subset on any edit.
+        // The profile version was bumped to 5 and the reader drops this one field from older
+        // files, the same rule the v3 colour group needed and for the same reason.
+        float reflectionGain = 0.22f; // environment-reflection gain (1 = uncapped physical Fresnel)
         // How much wider the planar reflection renders than the screen's field of view. The
         // reflected camera otherwise inherits the main projection exactly, so a grazing reflection
         // needs directions that were never rendered, the lookup falls off the edge of the target,
