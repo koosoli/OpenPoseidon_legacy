@@ -94,3 +94,43 @@ This is what makes a village affordable.
 - The ABI: add entry points, do not re-lay existing structs. `WgrLight` is size-asserted at
   64 bytes and `dir.w` already carries the spot flag; a shadow slot can ride there as
   `2 + slot` without touching the layout.
+
+---
+
+## What landed, 2026-09-07 (LGT-014 .. LGT-017)
+
+Slice 1 and slice 4 both landed, and slice 4 arrived earlier than planned because
+the owner rejected the alternative: LGT-012 tried to make lamps shadow-capable by
+turning them into CONES, which changed what they LIT and made them vanish from
+any angle outside the beam. The lesson from `05438333` repeated itself almost
+exactly — do not change what a light does in order to make a feature possible.
+
+- **LGT-014** undid that. It also found the older defect underneath it: the
+  shader cut a local light at 10x its start attenuation, so a light's CORE SIZE
+  and its RANGE were one number, and LAMP-004's small lamp core had quietly cut
+  lamp reach from ~500 m to ~90 m. `LightDescription::endAttenScale` separates
+  them. And `LightReflector::ToDraw` drew the bulb as well as the volumetric
+  wedge, so suppressing the wedge made every vehicle look unlit.
+- **LGT-015** gave point lights six-face cube shadows. What made six affordable
+  was tiling, not memory: local views are now 4x4 tiles in ONE depth layer, so
+  sixteen views cost what one used to. `dir.w` goes NEGATIVE for a shadowed
+  point, because positive is what makes a light a spot.
+- **LGT-016**: a light must not be occluded by the object it lives inside. The
+  first cube capture was black because the probe's own emitting sphere filled all
+  six faces. `LocalShadowSettings::selfRadius`.
+- **LGT-017**: the beam ramp runs axis-to-rim now, not inner-angle-to-outer. The
+  flat top inside the inner angle is what made a headlight read as a disc with an
+  edge; the shaping exponent rides in `ambient.w`, the channel the inner angle
+  vacated.
+
+Verified in captures: street lamps and self-illuminating probes cast shadows and
+stay omnidirectional; a night interior went from mean luma 22.03 to 1.53 with
+light still arriving through the opening — real occlusion this time, not the
+camera gate that was rejected; and an explosion's point light claims a six-face
+cube for the ~0.2 s it lives (gauge: "0 of 1 lights are spots, 6 own a shadow
+view"), which is the same path rockets and fire take.
+
+**Slices 2 and 3 are still open**, and slice 3 is what a full village needs: the
+budget is three lights / sixteen views, everything re-renders every frame, and a
+street lamp's shadow never changes. Cache the static ones and invalidate on a
+dynamic caster entering.
