@@ -34,7 +34,8 @@
 #include <Poseidon/Asset/Formats/Material/MaterialChannels.hpp>
 #include <Poseidon/Graphics/Rendering/Shape/ClipShape.hpp>
 #include <Poseidon/Graphics/Rendering/Shape/ObjectAdmitProfile.hpp> // streamed-admission split timers
-#include <Poseidon/Dev/Diag/LightingDiag.hpp> // per-frame local-light gauges (Forward+ gate evidence)
+#include <Poseidon/Dev/Diag/LightingDiag.hpp>
+#include <Poseidon/Graphics/Shadow/ShadowMath.hpp> // per-frame local-light gauges (Forward+ gate evidence)
 #include <Poseidon/Graphics/Rendering/Frame/PresentationSnapshot.hpp> // RenderSnapshot S1: the frame's environment block
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
 #include <Poseidon/World/MapTypes.hpp>                         // MapBush (spherical/canopy-normal flagging)
@@ -3308,6 +3309,14 @@ void EngineWgpu::NextFrame()
             }();
             const size_t selected = std::min(size_t(snap.lightCount), envCap);
             _lights.reserve(selected);
+            // LGT-010: how many of this frame's lights may own a shadow layer. The snapshot
+            // has already sorted by score (near/bright first), so taking the first spots we
+            // meet takes the ones that matter -- and it is STABLE frame to frame for the
+            // same reason the light list is.
+            Poseidon::Dev::LocalShadowSettings& localShadow = Poseidon::Dev::GLocalShadowSettings();
+            const int localShadowWanted =
+                localShadow.enabled ? std::clamp(localShadow.maxLights, 0, kMaxLocalShadows) : 0;
+            int localShadowSlots = 0;
             for (size_t i = 0; i < selected; ++i)
             {
                 const render::frame::PresentationSnapshot::LocalLight& src = snap.lights[i];
@@ -3315,8 +3324,48 @@ void EngineWgpu::NextFrame()
                 pl.pos = {src.pos.X(), src.pos.Y(), src.pos.Z(), src.startAtten};
                 pl.diffuse = {src.diffuse.R(), src.diffuse.G(), src.diffuse.B(), 0.0f};
                 pl.ambient = {src.ambient.R(), src.ambient.G(), src.ambient.B(), 0.0f};
-                pl.dir = {src.dir.X(), src.dir.Y(), src.dir.Z(), src.spot ? 1.0f : 0.0f};
+                // LGT-010: dir.w is the light KIND, and it carries the shadow slot with it
+                // rather than growing WgrLight -- that struct is size-asserted at 64 bytes
+                // on both sides of the ABI, and the shader's only test is `> 0.5` for
+                // "is a spot", which 2 + slot satisfies unchanged.
+                //   0        = point, no shadow
+                //   1        = spot, no shadow
+                //   2 + slot = spot, shadowed by local view `slot`
+                float kind = src.spot ? 1.0f : 0.0f;
+                if (src.spot && localShadowSlots < localShadowWanted)
+                {
+                    const int slot = localShadowSlots++;
+                    kind = 2.0f + static_cast<float>(slot);
+                    LocalShadowLight& L = _localShadowLights[slot];
+                    L.pos[0] = src.pos.X(), L.pos[1] = src.pos.Y(), L.pos[2] = src.pos.Z();
+                    L.dir[0] = src.dir.X(), L.dir[1] = src.dir.Y(), L.dir[2] = src.dir.Z();
+                    L.coneOuter = src.coneOuter;
+                    L.startAtten = src.startAtten;
+                }
+                pl.dir = {src.dir.X(), src.dir.Y(), src.dir.Z(), kind};
                 _lights.push_back(pl);
+            }
+            _localShadowCount = localShadowSlots;
+            localShadow.candidatesSeen += static_cast<long long>(snap.lightCandidates);
+            localShadow.lightsShadowed += localShadowSlots;
+            if (localShadowSlots > 0)
+            {
+                ++localShadow.framesWithShadow;
+            }
+            {
+                // A gauge that can say "the pass ran and nothing qualified" separately from
+                // "the pass never ran" -- the trap this project keeps rediscovering.
+                static int saidCount = -1;
+                static bool saidEnabled = false;
+                if (saidCount != localShadowSlots || saidEnabled != localShadow.enabled)
+                {
+                    saidCount = localShadowSlots;
+                    saidEnabled = localShadow.enabled;
+                    LOG_INFO(Graphics,
+                             "LGT-010 local shadows: {} -- {} of {} candidate lights own a shadow view (want {})",
+                             localShadow.enabled ? "ON" : "off", localShadowSlots, snap.lightCandidates,
+                             localShadowWanted);
+                }
             }
             Poseidon::Dev::GLightCounters().candidates = snap.lightCandidates;
             Poseidon::Dev::GLightCounters().cap = static_cast<uint32_t>(envCap);
@@ -3517,6 +3566,31 @@ void EngineWgpu::NextFrame()
                 sb.ctlb = {1.0f / static_cast<float>(_smCascadeRes), darkness, _smTuning.normalOffset, _smTuning.pcf};
                 sb.cam_fwd = {_cameras[i].dir[0], _cameras[i].dir[1], _cameras[i].dir[2], 0.0f};
                 sb.sun_dir = {_smCascades.sunDir.x, _smCascades.sunDir.y, _smCascades.sunDir.z, 0.0f};
+                // LGT-010: one perspective view per shadowing spot. The light list was built
+                // for THIS frame just above, so `_localShadowCount` is already final here.
+                {
+                    const Poseidon::Dev::LocalShadowSettings& ls = Poseidon::Dev::GLocalShadowSettings();
+                    for (int k = 0; k < _localShadowCount && k < kMaxLocalShadows; k++)
+                    {
+                        const LocalShadowLight& L = _localShadowLights[k];
+                        // The light's own reach. Past it the light contributes nothing, so
+                        // rendering casters further away spends depth on invisible geometry.
+                        const float reach = std::max(L.startAtten * ls.rangeScale, 2.0f);
+                        // A cone angle of 0 means the source never told us one; fall back to
+                        // something a lamp-shaped light plausibly has rather than to a
+                        // pinhole, which would clip its own pool away.
+                        const float cone = L.coneOuter > 0.01f ? L.coneOuter : 0.45f;
+                        const Poseidon::shadow::Mat4 vp = Poseidon::shadow::SpotLightVP(
+                            {L.pos[0], L.pos[1], L.pos[2]}, {L.dir[0], L.dir[1], L.dir[2]}, cone,
+                            std::max(ls.nearD, 0.01f), reach, {_smCamPos[0], _smCamPos[1], _smCamPos[2]});
+                        std::memcpy(sb.local_vp[k].m, vp.m.data(), sizeof(sb.local_vp[k].m));
+                    }
+                    // {count, darkness, texel_size, first_layer}. first_layer is where the
+                    // local views begin in the shared depth array, i.e. after the cascades.
+                    sb.local_ctl = {static_cast<float>(_localShadowCount), ls.darkness,
+                                    1.0f / static_cast<float>(_smCascadeRes),
+                                    static_cast<float>(_smCascades.count)};
+                }
             }
         }
 

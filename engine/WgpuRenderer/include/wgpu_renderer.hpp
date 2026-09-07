@@ -826,6 +826,12 @@ struct WgrCameraShadow
     WgrVec4 ctlb;          // {texel_size (1/res), darkness, normal_offset_scale, pcf}
     WgrVec4 cam_fwd;       // xyz = camera forward (eye-depth cascade select)
     WgrVec4 sun_dir;       // xyz = sun travel direction (normal-offset bias)
+    /* LGT-010 local-light shadows. Kept SEPARATE from cascade_vp rather than extending it:
+     * the cascades are the sun's, orthographic and selected by distance, while these are one
+     * perspective view per shadowing spot selected by the light's own index. Sharing an array
+     * would save 256 bytes and cost every reader the question "which kind is layer 5". */
+    WgrMat4 local_vp[4];   // camera-relative spot view-projections (0..1 NDC z)
+    WgrVec4 local_ctl;     // {count, darkness, texel_size (1/res), first_layer}
 };
 
 /* A view + projection pair, plus the frame-global params (see WgrFrameParams).
@@ -1962,8 +1968,10 @@ static_assert(sizeof(WgrSkyVis) == 48, "WgrSkyVis layout must match the Rust #[r
 static_assert(sizeof(WgrDepthOfField) == 52, "WgrDepthOfField layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrRenderParams) == 620, "WgrRenderParams layout must match the Rust #[repr(C)] struct"); // REN-GI-010 WgrGi 64->68, sky-vis probe 44->48
 static_assert(sizeof(WgrFrameParams) == 16, "WgrFrameParams layout must match the Rust #[repr(C)] struct");
-static_assert(sizeof(WgrCameraShadow) == 352, "WgrCameraShadow layout must match the Rust #[repr(C)] struct");
-static_assert(sizeof(WgrCamera) == 576, "WgrCamera layout must match the Rust #[repr(C)] struct");
+static_assert(sizeof(WgrCameraShadow) == 352 + 4 * 64 + 16,
+              "WgrCameraShadow layout must match the Rust #[repr(C)] struct");
+static_assert(sizeof(WgrCamera) == 576 + 4 * 64 + 16,
+              "WgrCamera layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrShadowCaster) == 136, "WgrShadowCaster layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrShadowPass) == 288, "WgrShadowPass layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrCmd) == 8, "WgrCmd layout must match the Rust #[repr(C)] struct");

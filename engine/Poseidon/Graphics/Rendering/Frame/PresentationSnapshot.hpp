@@ -147,6 +147,12 @@ struct PresentationSnapshot
         Color ambient = HBlack;
         Vector3 dir = VForward;
         bool spot = false;
+        // LGT-010: the OUTER cone half-angle, radians. Dropped until now because nothing
+        // downstream needed it -- the shader's cone term is a fixed pair of constants. A
+        // shadow view does need it: it is the field of view of the camera standing at the
+        // bulb, and getting it wrong either wastes the whole map on empty cone or clips the
+        // beam's own edge away.
+        float coneOuter = 0.0f;
     };
     static constexpr int kMaxLights = 256;
     int lightCount = 0;

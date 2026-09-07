@@ -1523,6 +1523,20 @@ class EngineWgpu : public EngineDummy
     // leave this stale from an earlier frame — which only stopped mattering because the old
     // cascade gate skipped those frames entirely. It no longer does; see both sites.
     float _smCamPos[3] = {0.0f, 0.0f, 0.0f};
+    // LGT-010: the lights that own a shadow layer this frame, and how many. Kept as the
+    // snapshot's own light record so the matrix can be built from position, direction and
+    // cone without a second lookup; `_localShadowCount` is what every consumer gates on, so
+    // "no light qualified" and "the feature is off" are the same well-defined zero.
+    static constexpr int kMaxLocalShadows = 4;
+    struct LocalShadowLight
+    {
+        float pos[3] = {0.0f, 0.0f, 0.0f}; // ABSOLUTE world; the matrix is made camera-relative
+        float dir[3] = {0.0f, -1.0f, 0.0f};
+        float coneOuter = 0.0f;  // outer half angle, radians
+        float startAtten = 0.0f; // the light's own reach, before the range multiplier
+    };
+    LocalShadowLight _localShadowLights[kMaxLocalShadows] = {};
+    int _localShadowCount = 0;
 
     // Dev-panel overlay for the current frame
     std::vector<WgrOverlayVertex> _overlayVerts;

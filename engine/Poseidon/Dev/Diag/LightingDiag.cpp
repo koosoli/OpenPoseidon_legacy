@@ -11,6 +11,34 @@ LightCounters& GLightCounters()
     return counters;
 }
 
+LocalShadowSettings& GLocalShadowSettings()
+{
+    static LocalShadowSettings s = []
+    {
+        LocalShadowSettings v;
+        if (const char* e = std::getenv("POSEIDON_LOCAL_SHADOWS"))
+            v.enabled = (std::atoi(e) != 0);
+        if (const char* e = std::getenv("POSEIDON_LOCAL_SHADOW_LIGHTS"))
+            v.maxLights = std::clamp(std::atoi(e), 0, 4);
+        if (const char* e = std::getenv("POSEIDON_LOCAL_SHADOW_NEAR"))
+        {
+            const double d = std::atof(e);
+            if (d > 0.0)
+                v.nearD = static_cast<float>(d);
+        }
+        if (const char* e = std::getenv("POSEIDON_LOCAL_SHADOW_RANGE"))
+        {
+            const double d = std::atof(e);
+            if (d > 0.0)
+                v.rangeScale = static_cast<float>(d);
+        }
+        if (const char* e = std::getenv("POSEIDON_LOCAL_SHADOW_DARKNESS"))
+            v.darkness = std::clamp(static_cast<float>(std::atof(e)), 0.0f, 1.0f);
+        return v;
+    }();
+    return s;
+}
+
 LampLightSettings& GLampLightSettings()
 {
     // Seeded once from the environment so a capture harness can sweep the lamp look

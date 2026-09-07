@@ -157,6 +157,7 @@ static void FillPresentationSnapshot(PresentationSnapshot& snap)
                 entry.dir = desc.dir;
                 entry.dir.Normalize();
                 entry.spot = isSpot;
+                entry.coneOuter = isSpot ? desc.phi : 0.0f; // LGT-010
                 const float range = std::max(desc.startAtten * 10.0f, 1.0f);
                 const float score = desc.pos.Distance2(cameraPos) / (range * range);
                 candidates.push_back({score, entry});

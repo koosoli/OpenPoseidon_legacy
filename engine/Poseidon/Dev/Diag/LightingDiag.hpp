@@ -97,6 +97,32 @@ struct LampLightSettings
 
 LampLightSettings& GLampLightSettings();
 
+// LGT-010: shadows for LOCAL lights -- headlights, street lamps, a glowing physics probe.
+// Until now the renderer had shadow maps for the SUN only (four cascade layers), and
+// lights_contrib had no occlusion term at all, so every local light shone through walls.
+//
+// A shadow view for a spot is one more layer in the depth array the cascades already live
+// in, and one more perspective matrix. Points would need six faces each and are not in this
+// slice. See docs/roadmap/LGT-010-LOCAL-LIGHT-SHADOWS-PLAN.md.
+struct LocalShadowSettings
+{
+    bool enabled = false;   //!< POSEIDON_LOCAL_SHADOWS=1. OFF until measured, per the plan.
+    int maxLights = 2;      //!< POSEIDON_LOCAL_SHADOW_LIGHTS: how many get a layer at once.
+    // The near plane of the light's own frustum, metres. Perspective depth precision is
+    // spent between the near plane and a few times its distance, so this is NOT "as small as
+    // possible": 1 cm on a 40 m beam is shadow acne.
+    float nearD = 0.35f;    //!< POSEIDON_LOCAL_SHADOW_NEAR
+    // How far the shadow reaches, as a multiple of the light's own attenuation start. Past
+    // its own reach a light contributes nothing, so rendering casters there is wasted depth.
+    float rangeScale = 6.0f;//!< POSEIDON_LOCAL_SHADOW_RANGE
+    float darkness = 1.0f;  //!< POSEIDON_LOCAL_SHADOW_DARKNESS: 0 = no occlusion, 1 = full
+    // Counters that separate "no light qualified" from "the pass never ran".
+    long long framesWithShadow = 0;
+    long long lightsShadowed = 0;
+    long long candidatesSeen = 0;
+};
+LocalShadowSettings& GLocalShadowSettings();
+
 // Call after changing any field above.
 void LampLightSettingsChanged();
 

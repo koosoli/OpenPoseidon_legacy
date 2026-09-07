@@ -933,6 +933,11 @@ pub struct WgrCameraShadow {
     pub ctlb: WgrVec4,        // {texel_size (1/res), darkness, normal_offset_scale, pcf}
     pub cam_fwd: WgrVec4,     // xyz = camera forward (eye-depth cascade select)
     pub sun_dir: WgrVec4,     // xyz = sun travel direction (normal-offset bias)
+    // LGT-010: one perspective view-projection per shadowing spot light, kept separate from
+    // the sun's cascades because they are selected differently (by light index, not by
+    // distance) and are a different projection kind.
+    pub local_vp: [WgrMat4; 4],
+    pub local_ctl: WgrVec4, // {count, darkness, texel_size (1/res), first_layer}
 }
 
 #[repr(C)]
@@ -1565,8 +1570,9 @@ const _: () = assert!(std::mem::size_of::<WgrSkyVis>() == 48); // + probe counte
 const _: () = assert!(std::mem::size_of::<WgrDepthOfField>() == 52);
 const _: () = assert!(std::mem::size_of::<WgrRenderParams>() == 620); // REN-GI-010 WgrGi 64->68, sky-vis probe 44->48
 const _: () = assert!(std::mem::size_of::<WgrFrameParams>() == 16);
-const _: () = assert!(std::mem::size_of::<WgrCameraShadow>() == 352);
-const _: () = assert!(std::mem::size_of::<WgrCamera>() == 576);
+// LGT-010 grew this by four mat4 (local_vp) and one vec4 (local_ctl): 352 + 256 + 16.
+const _: () = assert!(std::mem::size_of::<WgrCameraShadow>() == 624);
+const _: () = assert!(std::mem::size_of::<WgrCamera>() == 848);
 const _: () = assert!(std::mem::size_of::<WgrShadowCaster>() == 136);
 const _: () = assert!(std::mem::size_of::<WgrShadowPass>() == 288);
 const _: () = assert!(std::mem::size_of::<WgrCmd>() == 8);
