@@ -17,6 +17,7 @@ use crate::ffi::WgrSky;
 // CPU reference port of the atmosphere math, for objective colour unit tests.
 #[cfg(test)]
 mod reference;
+pub mod starcat;
 
 // Guards every sky.wgsl edit: parse + validate the module offline so a WGSL error
 // surfaces in CI/tests instead of as a pipeline-creation panic at runtime.
@@ -863,6 +864,23 @@ fn cirrus_puff_from_env() -> Option<(f32, f32, f32)> {
     Some(v)
 }
 
+/// `WGR_MILKYWAY=<0..3>` — startup override for the Milky Way band's weight. 1 is the shipped
+/// look, 0 leaves only the point stars. It exists so a capture run (which has no dev panel) can
+/// A/B the band against the catalogue stars, and so the band can be turned off on the spot if a
+/// world's authored night floor is bright enough to make it read as haze.
+fn milky_way_from_env() -> f32 {
+    let Ok(raw) = std::env::var("WGR_MILKYWAY") else {
+        return 1.0;
+    };
+    let Ok(v) = raw.trim().parse::<f32>() else {
+        eprintln!("[wgr] sky: WGR_MILKYWAY='{raw}' is not a number - ignoring");
+        return 1.0;
+    };
+    let v = v.clamp(0.0, 3.0);
+    eprintln!("[wgr] sky: milky way gain {v} from WGR_MILKYWAY");
+    v
+}
+
 pub struct Sky {
     // Main fullscreen sky pipeline (targets the scene format).
     sky_pipeline: wgpu::RenderPipeline,
@@ -912,6 +930,16 @@ pub struct Sky {
     cloud_shadow_span: f32,
     cloud_shadow_map_params: [f32; 4],
     star_intensity: f32,
+    /// Milky Way band gain, written to the sky UBO's `cirrus.w`. That lane was documented
+    /// "reserved (0)" and read by nobody -- the same spare-lane trick as `cirrus_mode` on
+    /// `output.w`, taken for the same reason: WgrSkyLook's size is part of the ABI handshake and
+    /// growing it moves the assert. 0 turns the band off and leaves the point stars alone.
+    /// Startup override: `WGR_MILKYWAY=<0..3>`.
+    milky_way: f32,
+    /// The star-catalogue buffers. Only ever read through `sky_bind`; held here so the buffers
+    /// outlive the bind group that references them.
+    _star_cell_buf: wgpu::Buffer,
+    _star_list_buf: wgpu::Buffer,
     /// Lens-flare gain. 0 disables the effect outright (the shader early-outs).
     lens_flare: f32,
     /// Second cloud layer (high cirrus) mode, written to the sky UBO's `output.w`:
@@ -1069,6 +1097,20 @@ impl Sky {
             ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
             count: None,
         };
+        // Bright-star catalogue (see starcat.rs). Two read-only storage buffers at 10/11: the
+        // cube-grid cell index and the star records themselves. Fragment-only -- fs_sky and
+        // fs_sky_env are the only entry points that reference them, and the froxel/cloud-shadow
+        // compute passes use their own layouts, so nothing else pays for them.
+        let star_buf_entry = |binding: u32| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        };
         let sky_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("wgr_sky_layout"),
             entries: &[
@@ -1078,7 +1120,30 @@ impl Sky {
                 tex_entry(3),
                 cloud_tex_entry,
                 cloud_sampler_entry,
+                star_buf_entry(10),
+                star_buf_entry(11),
             ],
+        });
+
+        // Built once at device creation. The catalogue is a few hundred KB and never changes at
+        // runtime, so there is no upload path and no dirty flag: swapping in a different
+        // catalogue is a restart, which is what a data file swap is anyway.
+        let star_cat = starcat::StarCatalogue::load();
+        eprintln!(
+            "[wgr] sky: star catalogue {} -- {} cell entries in {} cells",
+            star_cat.source,
+            star_cat.stars.len(),
+            starcat::CELL_COUNT
+        );
+        let star_cell_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("wgr_sky_star_cells"),
+            contents: bytemuck::cast_slice(&star_cat.cells),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+        let star_list_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("wgr_sky_star_list"),
+            contents: bytemuck::cast_slice(&star_cat.stars),
+            usage: wgpu::BufferUsages::STORAGE,
         });
         // Only the main sky pass draws into the (MSAA) scene target; the transmittance +
         // multiscatter LUTs are single-sample offscreen renders, so each pipeline takes its
@@ -1361,6 +1426,14 @@ impl Sky {
                 wgpu::BindGroupEntry {
                     binding: 6,
                     resource: wgpu::BindingResource::Sampler(&cloud_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 10,
+                    resource: star_cell_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 11,
+                    resource: star_list_buf.as_entire_binding(),
                 },
             ],
         });
@@ -1940,6 +2013,12 @@ impl Sky {
             // complaint. Additive on top of the authored night floor, so it brightens nothing
             // during the day -- night_blend gates it to zero while the sun is up.
             star_intensity: 1.0,
+            // Milky Way on by default at its authored strength. It is scaled by the same
+            // "Star brightness" slider as the point stars, so the dev panel can still take the
+            // whole night sky to zero; this lane only sets the band's weight against the stars.
+            milky_way: milky_way_from_env(),
+            _star_cell_buf: star_cell_buf,
+            _star_list_buf: star_list_buf,
             // Matches Engine::SkySettings' safe default.  The C++ side normally pushes this on
             // the first frame, but keep the renderer's own initial state safe as well.
             lens_flare: 0.0,
@@ -2221,7 +2300,9 @@ impl Sky {
                 self.cirrus_amount_now,
                 self.cirrus_match_now,
                 self.cirrus_soft_now,
-                0.0,
+                // w was "reserved (0)" and read by nobody -- now the Milky Way band's gain.
+                // See `milky_way` in the struct above for why it rides here.
+                self.milky_way,
             ],
         };
         queue.write_buffer(&self.uniform_buf, 0, bytemuck::bytes_of(&u));

@@ -6085,6 +6085,29 @@ void DrawSkyTab()
     Dev::PanelSeparator();
     Dev::PanelHeading("Stars");
     changed |= Dev::SliderFloat("Star brightness", &s.starIntensity, 0.0f, 4.0f, "%.2f");
+    Dev::PanelTooltip("Master gain for the whole night sky: the catalogue stars AND the Milky Way "
+                      "band. 0 turns both off outright (the shader early-outs), which is the "
+                      "switch for the feature as a whole.");
+    // NOTE: this help block used to sit below, under "Lens flare", where it read as documentation
+    // for the flare. It describes the stars; it belongs here.
+    Dev::PanelHelp("A bright-star CATALOGUE, not a texture and no longer a hash: each star carries a real "
+                   "right ascension, declination, visual magnitude and B-V colour index, so the "
+                   "constellations, the relative brightnesses and the star colours are the real ones and "
+                   "stay sharp at any resolution. Magnitude is logarithmic and is compressed to about 16:1 "
+                   "on screen -- the raw 1000:1 flux range would hide the faint majority and blow out "
+                   "Sirius. Brighter stars also draw slightly larger discs, which is what makes a "
+                   "constellation pop out of the field.\n"
+                   "The diffuse Milky Way band is a separate term (points cannot make a continuous glow) "
+                   "placed on the real galactic great circle. It is a PROCEDURAL PLACEHOLDER until the "
+                   "NASA SVS Deep Star Maps texture is in the tree -- the band is in the right place, its "
+                   "internal shape is invented. WGR_MILKYWAY=<0..3> weights it against the stars.\n"
+                   "Gated to night by sun altitude, so it cannot affect a daytime sky, and added before "
+                   "the cloud composite so a deck covers the stars the way it covers the sky behind them. "
+                   "The field turns about the CELESTIAL POLE (a fixed mid-northern latitude), not about "
+                   "the zenith, so stars rise in the east and arc over instead of spinning flat like a "
+                   "plate. The sun's bearing is the clock -- it advances at the same 15 deg an hour the "
+                   "real sky turns at. No twinkle: that needs a per-frame clock the sky UBO does not "
+                   "carry, and faking it from the sun's bearing would change over hours, not seconds.");
 
     Dev::PanelSeparator();
     Dev::PanelHeading("Lens flare");
@@ -6101,11 +6124,6 @@ void DrawSkyTab()
                           "Off costs nothing: the shader early-outs on the gain.");
     if (flareOn)
         changed |= Dev::SliderFloat("Flare intensity", &s.lensFlare, 0.05f, 4.0f, "%.2f");
-    Dev::PanelHelp("Procedural star field, gated to night by sun altitude -- it cannot affect a daytime sky. "
-                   "Added before the cloud composite, so a deck covers the stars the way it covers the sky "
-                   "behind them. It wheels with the sun's bearing, which is the celestial clock, so stars "
-                   "drift through the night. No twinkle: that needs a per-frame clock the sky UBO does not "
-                   "carry, and faking it from the sun's bearing would change over hours, not seconds.");
 
     Dev::PanelSeparator();
     Dev::PanelHeading("Night floor");

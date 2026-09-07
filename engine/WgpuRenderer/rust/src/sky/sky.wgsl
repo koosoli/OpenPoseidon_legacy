@@ -738,20 +738,230 @@ fn cloud_density_light(p: vec3<f32>) -> f32 {
     return base * grad;
 }
 
-// A procedural star field on the celestial sphere.
+// ================================================================================================
+// NIGHT SKY: a bright-star CATALOGUE plus a Milky Way band.
 //
-// Cube-grid rather than spherical coordinates: lat/long bunches stars at the poles, and the
-// bunching is obvious the moment you look up. Quantising the unit direction itself gives cells of
-// roughly equal solid angle, so density is even across the sky.
+// What this replaces: a hashed cube grid that dropped one random star per cell with a random
+// magnitude and a hashed colour. Even density, no constellations, no recognisable relative
+// brightness. It read as a dot screen because that is what it was.
 //
-// One star per cell at a hashed offset. The sharp falloff is what makes a star read as a POINT
-// rather than a blob -- the width is a fraction of a cell, so at typical resolutions a star lands
-// on one or two pixels, which is what it should be.
-fn star_hash3(c: vec3<f32>) -> vec3<f32> {
-    var p = vec3<f32>(dot(c, vec3<f32>(127.1, 311.7, 74.7)),
-                      dot(c, vec3<f32>(269.5, 183.3, 246.1)),
-                      dot(c, vec3<f32>(113.5, 271.9, 124.6)));
-    return fract(sin(p) * 43758.5453123);
+// What it is now:
+//   * Stars come from `star_list` -- real right ascension / declination / visual magnitude /
+//     B-V colour index, converted on the CPU (see starcat.rs) into a unit vector in the
+//     EQUATORIAL frame, a linear amplitude, a linear RGB colour and an angular radius.
+//     Evaluated analytically per pixel, so they stay sharp at any resolution.
+//   * `star_cells` is a cube-grid acceleration structure: one u32 per cell holding
+//     (count << 24) | offset into star_list. A pixel reads ONE cell, so the inner loop sees a
+//     couple of stars, not a couple of thousand. Stars whose disc spills over a cell boundary
+//     were duplicated into the neighbouring cell at build time.
+//   * The Milky Way is a separate diffuse term. Points cannot make that glow -- it is the one
+//     part of a real night sky that is genuinely a continuous field. See `milky_way`.
+//
+// The rotation is the other half of "looks real". The old field wheeled the sky about the
+// ZENITH, which spins the whole bowl flat like a plate and is the thing people notice is wrong
+// even when they cannot name it. Stars turn about the CELESTIAL POLE, which at mid latitudes
+// sits ~45 deg off the zenith, so they rise in the east, arc over, and set in the west. That
+// tilt is one constant (STAR_LATITUDE) and it is most of the effect.
+// ================================================================================================
+
+const STAR_GRID_N: u32 = 64u;
+
+// Observer latitude in radians -- the tilt of the celestial pole away from the zenith. NOT an
+// ephemeris input: the owner's bar is "looks right and turns plausibly", and a fixed mid-northern
+// latitude gives the familiar arc. Everon/Malden sit in a vaguely northern-European climate, so
+// 45 deg N is the honest guess rather than a computed one.
+const STAR_LATITUDE: f32 = 0.7854;
+
+// Overall radiance scale for a magnitude-6.5 star (the faintest in the catalogue). Everything
+// brighter scales up from here through the magnitude curve baked into `amp`. This is the knob to
+// turn if the field is too dim or too shouty; the dev panel's "Star brightness" multiplies it.
+const STAR_GAIN: f32 = 0.26;
+
+// Peak surface radiance of the Milky Way band, in the same units. It is a DIFFUSE glow, so it has
+// to sit well below a star's peak or it reads as fog.
+const MILKY_WAY_GAIN: f32 = 0.075;
+
+// North galactic pole and galactic centre as unit vectors in equatorial J2000 coordinates
+// (RA 12h51.4m / Dec +27.13, and RA 17h45.6m / Dec -28.94). These place the band where it really
+// is on the celestial sphere, so the procedural placeholder below and a real equirectangular
+// Milky Way map land in the SAME place -- swapping one for the other does not move the band.
+const NGP_EQ: vec3<f32> = vec3<f32>(-0.86777, -0.19754, 0.45598);
+const GC_EQ: vec3<f32> = vec3<f32>(-0.05489, -0.87345, -0.48389);
+
+struct StarGpu {
+    dir: vec3<f32>,   // unit vector, equatorial frame (+z = north celestial pole, +x = RA 0h)
+    amp: f32,         // linear brightness (magnitude curve already applied)
+    color: vec3<f32>, // linear RGB, normalised to luminance 1
+    radius: f32,      // angular radius of the disc, radians
+};
+
+@group(0) @binding(10) var<storage, read> star_cells: array<u32>;
+@group(0) @binding(11) var<storage, read> star_list: array<StarGpu>;
+
+// Angular size of one pixel, radians. Written at the top of each fragment entry point -- i.e. in
+// UNIFORM control flow, which is where a derivative is allowed. star_field is called from inside
+// a branch, so it cannot take the derivative itself. Zero (the default, for any path that does
+// not set it) simply means "no pixel floor", which is safe.
+var<private> g_px_angle: f32 = 0.0;
+
+// Integer bit-mixing hash on the noise lattice. NOT the fract(sin(dot(...))) idiom the old star
+// field used: that one is not white noise, it is a smooth function sampled coarsely, and on a
+// low-frequency lattice like the Milky Way's its correlations show up as hard-edged diamonds
+// across the whole sky. Those diamonds were visible in the first capture of this feature and read
+// convincingly as a cloud-composite artefact -- they were the hash. Same lesson as the cloud
+// march's dithering note further up this file.
+fn mw_hash(p: vec3<i32>) -> f32 {
+    var n: u32 = bitcast<u32>(p.x) * 1597334677u;
+    n = n ^ (bitcast<u32>(p.y) * 3812015801u);
+    n = n ^ (bitcast<u32>(p.z) * 2654435761u);
+    n = n ^ (n >> 15u);
+    n = n * 2246822519u;
+    n = n ^ (n >> 13u);
+    n = n * 3266489917u;
+    n = n ^ (n >> 16u);
+    return f32(n) * (1.0 / 4294967296.0);
+}
+
+// Cube-face cell address for a unit direction. MUST match `cell_index` in starcat.rs exactly.
+// A divergence does not error: stars simply stop appearing in bands, which reads as a shader bug
+// and is not one.
+fn star_cell_index(d: vec3<f32>) -> u32 {
+    let a = abs(d);
+    var face: u32 = 0u;
+    var sc: f32 = 0.0;
+    var tc: f32 = 0.0;
+    var ma: f32 = 1.0;
+    if (a.x >= a.y && a.x >= a.z) {
+        ma = a.x;
+        if (d.x > 0.0) {
+            face = 0u;
+            sc = -d.z;
+            tc = -d.y;
+        } else {
+            face = 1u;
+            sc = d.z;
+            tc = -d.y;
+        }
+    } else if (a.y >= a.z) {
+        ma = a.y;
+        if (d.y > 0.0) {
+            face = 2u;
+            sc = d.x;
+            tc = d.z;
+        } else {
+            face = 3u;
+            sc = d.x;
+            tc = -d.z;
+        }
+    } else {
+        ma = a.z;
+        if (d.z > 0.0) {
+            face = 4u;
+            sc = d.x;
+            tc = -d.y;
+        } else {
+            face = 5u;
+            sc = -d.x;
+            tc = -d.y;
+        }
+    }
+    let inv = 1.0 / max(ma, 1e-8);
+    let n = f32(STAR_GRID_N);
+    let uu = 0.5 * (sc * inv + 1.0);
+    let vv = 0.5 * (tc * inv + 1.0);
+    let i = u32(clamp(floor(uu * n), 0.0, n - 1.0));
+    let j = u32(clamp(floor(vv * n), 0.0, n - 1.0));
+    return face * STAR_GRID_N * STAR_GRID_N + j * STAR_GRID_N + i;
+}
+
+// World direction -> equatorial (catalogue) direction, given the hour angle the sky has turned
+// through. The basis is built from the celestial pole, so the whole field pivots about that axis
+// rather than about the zenith.
+fn to_celestial(dir: vec3<f32>, hour_angle: f32) -> vec3<f32> {
+    let clat = cos(STAR_LATITUDE);
+    let slat = sin(STAR_LATITUDE);
+    // World frame here is +Y up, +Z the horizontal bearing the pole leans toward (north),
+    // +X the one 90 deg clockwise from it (east).
+    let pole = vec3<f32>(0.0, slat, clat);
+    let east = vec3<f32>(1.0, 0.0, 0.0);
+    let nrth = cross(pole, east); // completes a right-handed basis with `pole` as +z
+    let c = vec3<f32>(dot(dir, east), dot(dir, nrth), dot(dir, pole));
+    let ca = cos(hour_angle);
+    let sa = sin(hour_angle);
+    return vec3<f32>(c.x * ca - c.y * sa, c.x * sa + c.y * ca, c.z);
+}
+
+// Value noise on the sphere, for the Milky Way's clumping and its dust lanes. Cheap and only ever
+// evaluated once per pixel.
+fn mw_noise(p: vec3<f32>) -> f32 {
+    let i = floor(p);
+    let ii = vec3<i32>(i);
+    let f = fract(p);
+    let w = f * f * (3.0 - 2.0 * f);
+    let c000 = mw_hash(ii + vec3<i32>(0, 0, 0));
+    let c100 = mw_hash(ii + vec3<i32>(1, 0, 0));
+    let c010 = mw_hash(ii + vec3<i32>(0, 1, 0));
+    let c110 = mw_hash(ii + vec3<i32>(1, 1, 0));
+    let c001 = mw_hash(ii + vec3<i32>(0, 0, 1));
+    let c101 = mw_hash(ii + vec3<i32>(1, 0, 1));
+    let c011 = mw_hash(ii + vec3<i32>(0, 1, 1));
+    let c111 = mw_hash(ii + vec3<i32>(1, 1, 1));
+    let x00 = mix(c000, c100, w.x);
+    let x10 = mix(c010, c110, w.x);
+    let x01 = mix(c001, c101, w.x);
+    let x11 = mix(c011, c111, w.x);
+    return mix(mix(x00, x10, w.y), mix(x01, x11, w.y), w.z);
+}
+
+// The Milky Way, as a diffuse band on the galactic great circle.
+//
+// PLACEHOLDER. The real article is NASA SVS "Deep Star Maps 2020" (public domain, derived from
+// Gaia DR2), which is an equirectangular image and would be sampled here in galactic coordinates.
+// Everything around that sample is already correct: the galactic pole and centre above are the
+// real ones, so the band sits where it belongs and a texture drops straight in. What is fake is
+// only the SHAPE of the glow -- a Gaussian across galactic latitude, brightened toward the centre,
+// broken up with noise, and cut by a dark rift along the mid-plane where the dust really is.
+//
+// `dir_eq` is already in the equatorial frame, i.e. it has been through to_celestial.
+fn milky_way(dir_eq: vec3<f32>) -> vec3<f32> {
+    let gain = max(sky.cirrus.w, 0.0);
+    if (gain <= 0.0) {
+        return vec3<f32>(0.0);
+    }
+    // Galactic latitude (0 = the plane) and longitude (0 = the centre).
+    let sb = clamp(dot(dir_eq, NGP_EQ), -1.0, 1.0);
+    let b = asin(sb);
+    let gy = cross(NGP_EQ, GC_EQ);
+    let l = atan2(dot(dir_eq, gy), dot(dir_eq, GC_EQ));
+
+    // The band. Sigma ~7.5 deg with a 16 deg skirt so it does not end abruptly.
+    //
+    // These were three times wider on the first attempt (10 deg core, 26 deg skirt) and the result
+    // was not a band at all: the skirt lifted the WHOLE sky by a couple of percent, which reads as
+    // overcast haze and hid the stars. The measurement that caught it was an ablation --
+    // WGR_MILKYWAY=0 turned the "cloud" off. If this ever looks like weather again, ablate before
+    // theorising: a diffuse term that covers the sky is indistinguishable from one that is too wide.
+    let core_band = exp(-(b * b) / (2.0 * 0.13 * 0.13));
+    let skirt = 0.14 * exp(-(b * b) / (2.0 * 0.24 * 0.24));
+    // The bulge toward Sagittarius: the brightest part of the sky by a wide margin.
+    let bulge = 1.0 + 1.9 * exp(-(l * l) / (2.0 * 0.55 * 0.55));
+
+    // Clumping: two octaves, so it is not a smooth airbrushed arc.
+    let n1 = mw_noise(dir_eq * 7.0);
+    let n2 = mw_noise(dir_eq * 19.0);
+    let clump = 0.55 + 0.75 * n1 + 0.30 * n2;
+
+    // The Great Rift: a dust lane straight down the middle, darker than the band around it.
+    // Without it the band reads as an airbrush stroke rather than as a galaxy seen edge-on.
+    let rift_wobble = 0.045 * (mw_noise(dir_eq * 4.0) - 0.5);
+    let bd = b - rift_wobble;
+    let rift = 1.0 - 0.62 * exp(-(bd * bd) / (2.0 * 0.045 * 0.045)) * (0.5 + 0.9 * mw_noise(dir_eq * 11.0));
+
+    let amount = max((core_band + skirt) * bulge * clump * rift, 0.0);
+    // Slightly warm in the bulge, slightly cool off-plane -- integrated starlight, not a nebula.
+    let tint = mix(vec3<f32>(0.80, 0.85, 1.00), vec3<f32>(1.00, 0.93, 0.80),
+                   clamp(bulge - 1.0, 0.0, 1.0));
+    return tint * (amount * MILKY_WAY_GAIN * gain);
 }
 
 fn star_field(dir_in: vec3<f32>, sun: vec3<f32>) -> vec3<f32> {
@@ -760,41 +970,47 @@ fn star_field(dir_in: vec3<f32>, sun: vec3<f32>) -> vec3<f32> {
     // hour the sky really turns at, so the stars drift through the night for free and stay
     // consistent with wherever the sun comes up.
     let ang = atan2(sun.z, sun.x);
-    let ca = cos(ang);
-    let sa = sin(ang);
-    let dir = vec3<f32>(dir_in.x * ca - dir_in.z * sa, dir_in.y, dir_in.x * sa + dir_in.z * ca);
+    let dir = to_celestial(dir_in, ang);
 
     // Below the horizon there is no sky to put stars in, and near it atmospheric extinction takes
-    // them out well before the geometric horizon -- so fade rather than cut.
-    let horizon = smoothstep(-0.02, 0.22, dir.y);
+    // them out well before the geometric horizon -- so fade rather than cut. Measured on the WORLD
+    // up direction, not the celestial one: the horizon does not tilt with the pole.
+    let horizon = smoothstep(-0.02, 0.16, dir_in.y);
     if (horizon <= 0.0) {
         return vec3<f32>(0.0);
     }
 
-    let scale = 190.0;
-    let p = dir * scale;
-    let cell = floor(p);
-    let h = star_hash3(cell);
-    // Only a fraction of cells hold a star; without this the sky is a uniform dot screen.
-    if (h.x > 0.10) {
-        return vec3<f32>(0.0);
+    var col = milky_way(dir);
+
+    // One cell lookup. The build side duplicated any star whose disc crosses a cell boundary into
+    // the neighbouring cell, so a single cell is enough -- no 3x3 neighbourhood, and no special
+    // case at a cube-face seam (which is exactly where an arithmetic neighbourhood would be wrong).
+    let packed = star_cells[star_cell_index(dir)];
+    let count = packed >> 24u;
+    let offset = packed & 0x00FFFFFFu;
+    // Floor the disc at roughly a pixel. A star smaller than a pixel does not get dimmer as you
+    // raise the resolution, it FLICKERS -- it drops in and out as the sample point moves across
+    // it. The area term below takes the brightness back out, so widening the disc conserves the
+    // star's total light instead of making the sky brighter at low resolution.
+    let px = g_px_angle * 0.75;
+    for (var k: u32 = 0u; k < count; k = k + 1u) {
+        let s = star_list[offset + k];
+        let cd = clamp(dot(dir, s.dir), -1.0, 1.0);
+        // Chord length; for the sub-degree angles involved it equals the arc to well inside a
+        // part in 10^6, and it costs one sqrt instead of an acos.
+        let d = sqrt(max(2.0 - 2.0 * cd, 0.0));
+        let r = max(s.radius, px);
+        if (d < r) {
+            let t = 1.0 - d / r;
+            let area = (s.radius * s.radius) / (r * r);
+            col = col + s.color * (s.amp * t * t * area);
+        }
     }
-    let centre = cell + vec3<f32>(0.25) + h * 0.5;
-    let d = length(p - centre);
-    let core = 1.0 - smoothstep(0.0, 0.42, d);
-    if (core <= 0.0) {
-        return vec3<f32>(0.0);
-    }
-    // Magnitude: mostly faint with a few bright ones, which is what the real distribution looks
-    // like. A uniform brightness reads as a texture rather than a sky.
-    let mag = pow(h.y, 3.0);
+
     // No twinkle. Scintillation needs a per-frame clock and this UBO has none; faking it from the
     // sun's bearing would change on the scale of hours, which is not twinkling. Left out rather
     // than approximated into something that only looks like a bug.
-    //
-    // Colour by spectral class, kept subtle -- most stars read white to the naked eye.
-    let tint = mix(vec3<f32>(1.0, 0.86, 0.72), vec3<f32>(0.78, 0.86, 1.0), h.z);
-    return tint * (core * core * mag * horizon);
+    return col * (STAR_GAIN * horizon);
 }
 
 // View-ray parametric interval [t0, t1] inside the cloud shell, robust for camera below /
@@ -1612,6 +1828,10 @@ fn disc_cloud_cover(pos: vec3<f32>, dir: vec3<f32>, sun: vec3<f32>, radiance: f3
 @fragment
 fn fs_sky(in: VsOut) -> @location(0) vec4<f32> {
     let dir = normalize(in.ray_dir);
+    // Pixel angular size, for the star discs' anti-aliasing floor. Taken HERE, at the top of the
+    // entry point, because a derivative is only defined in uniform control flow and star_field
+    // runs inside a branch. See g_px_angle.
+    g_px_angle = length(fwidth(dir));
     let sun = normalize(sky.sun_dir.xyz);
     let planet_r = sky.params.z;
     let cam_alt = max(sky.night_zenith.w, 0.0);
