@@ -119,6 +119,12 @@ class Cloudlet: public Smoke
 	Vector3 _shadeOrigin = VZero;
 	float _shadeAge = 0.0f;
 	float _shadeLife = 1.0f;
+	// SMK-036 ground-shadow state. The ground is sampled ONCE, at the same first step the
+	// room query happens on: a cloudlet lives seconds and travels metres, and the terrain
+	// under it does not move.
+	float _drawScale = 1.0f;
+	float _groundY = 0.0f;
+	bool _groundChecked = false;
 
 	public:
 	Cloudlet( LODShapeWithShadow *shape, float duration, float loopedDuration=0 );
@@ -143,6 +149,8 @@ class Cloudlet: public Smoke
 	}
 	void SetColor(ColorVal color) {_cloudletColor = color;}
 	void SetTemperature(float t, float dt, CloudletTTable *table);
+	//! SMK-036: this particle as a ground-shadow blob; false if it is too faint to bother.
+	bool SampleShadow(struct CloudletShadowSample &out) const;
 	//! SMK-035: where the plume this particle belongs to starts, and how long it lives.
 	void SetShadeOrigin(Vector3Par origin, float life) {_shadeOrigin = origin; _shadeLife = life; _shadeAge = 0;}
 
@@ -189,7 +197,10 @@ struct LegacySmokeScale
     // POSEIDON_SMOKE_LOOK=0 restores the authored values exactly.
     bool  look = true;
     float density = 1.7f;  //!< divides `interval`: this many times as many particles
-    float size = 0.85f;    //!< multiplies `cloudletSize`
+    // Was 0.85 when SMK-034 landed. The owner looked at it and said smaller puffs do NOT
+    // look better, so the size is back to what CfgCloudlets authors and the density and the
+    // thinner alpha do the work of making the plume read as one body.
+    float size = 1.0f;     //!< multiplies `cloudletSize`
     float alpha = 0.62f;   //!< multiplies `cloudletAlpha` -- thinner, so overlapping reads as one body
     float grow = 1.6f;     //!< multiplies `cloudletGrowUp` and the fades: no pop-in, no pop-out
 };
@@ -280,10 +291,38 @@ struct LegacySmokeShading
     float selfShadow = 0.55f;   //!< how dark the inside of a plume gets, 0..1
     float emissiveT = 700.0f;   //!< K: above this the particle glows and is not shaded
     float emissiveBand = 400.0f;//!< K: the fade width below emissiveT
+    // SMK-036: the shadow the plume throws on the GROUND. The renderer already has this
+    // pass -- SmokeVolume feeds it (SmokeSystem::CollectShadowBlobs) and it is why the dev
+    // smoke darkens the grass under it. The game's own cloudlets were never in it, so the
+    // smoke that gameplay actually produces has always floated over a fully lit world.
+    //
+    // MEASURED LIMIT, so nobody re-discovers it: the pass writes into the CLOUD shadow map,
+    // which is 512 texels over a span sized from the draw distance -- about 7.8 m per texel
+    // at a 4 km span (sky/mod.rs CLOUD_SHADOW_DIM). A smoke grenade's plume is ~6 m across,
+    // i.e. under ONE texel, and the shader widens every blob to 0.6 of a texel so it lands at
+    // all. So this shows up for a BIG plume (a burning wreck, an artillery column -- the sizes
+    // the dev SmokeVolume was tuned at) and is invisible for a hand grenade. Turning the
+    // strength up does not sharpen it, it dims the whole landscape: measured at strength 20,
+    // 1406 blobs, the terrain, houses and trees all darkened together. A crisp grenade shadow
+    // needs a finer, plume-local shadow region, not a bigger number here.
+    bool groundShadow = true;   //!< POSEIDON_SMOKE_GROUND_SHADOW_LEGACY=0 turns it off
+    float groundWeight = 1.3f;  //!< POSEIDON_SMOKE_GROUND_SHADOW_LEGACY_WEIGHT
     long long shaded = 0;       //!< particles shaded since start
     long long emissive = 0;     //!< particles left alone because they were hot
+    long long blobs = 0;        //!< cloudlets handed to the ground-shadow pass last frame
 };
 LegacySmokeShading& GLegacySmokeShading();
+
+//! SMK-036: one cloudlet's contribution to the renderer's ground-shadow pass.
+struct CloudletShadowSample
+{
+    Vector3 pos;
+    float radius = 0.0f;
+    float density = 0.0f;
+    float heightAboveGround = 0.0f;
+};
+//! Returns false for anything that is not a legacy cloudlet, or is too faint to matter.
+bool SampleCloudletShadow(const Entity* entity, CloudletShadowSample& out);
 
 class CloudletSource: public SerializeClass
 {

@@ -352,7 +352,7 @@ void Object::Animate(int level)
                 destShape = _shape->MakeTreeDestroyed();
                 break;
             default:
-                destShape = _shape->MakeDestroyed();
+                destShape = _shape->MakeDestroyed(1.0f, GDestructionLook().enabled ? GDestructionLook().squash : 1.0f);
                 break;
         }
         Shape* destLevel = destShape->Level(level);

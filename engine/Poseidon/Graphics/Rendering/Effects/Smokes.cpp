@@ -866,6 +866,14 @@ void Cloudlet::Simulate(float deltaT, SimulationImportance prec)
     // SMK-030: keep the step inside the room it started in. Outdoors this costs one
     // room lookup for the whole life of the cloudlet (see the header note).
     const Vector3 from = Position();
+    // SMK-036: the ground under this particle, sampled ONCE. A cloudlet lives seconds and
+    // travels metres; the terrain under it does not move, and the shadow pass only needs to
+    // know how far the blob floats above it.
+    if (!_groundChecked)
+    {
+        _groundChecked = true;
+        _groundY = GSmokeWorldQuery().FloorHeightBelow(from);
+    }
     Vector3 to = from + _speed * deltaT;
     LegacySmokeContainment& contain = GLegacySmokeContainment();
     if (contain.enabled)
@@ -951,6 +959,7 @@ void Cloudlet::Simulate(float deltaT, SimulationImportance prec)
             drawScale = allowed;
         }
     }
+    _drawScale = drawScale; // SMK-036
     SetOrientScaleOnly(drawScale);
     if (contain.enabled)
     {
@@ -1023,6 +1032,31 @@ void Cloudlet::Simulate(float deltaT, SimulationImportance prec)
     _constantColor = PackedColor(color);
 
     Smoke::Simulate(deltaT, prec);
+}
+
+bool Cloudlet::SampleShadow(CloudletShadowSample& out) const
+{
+    const LegacySmokeShading& shading = GLegacySmokeShading();
+    // The alpha the particle is actually being drawn with -- fades included, because
+    // Smoke::Simulate packs `_alpha * _fadeValue` into the constant colour every step.
+    const float density = GetConstantColor().A8() * (1.0f / 255.0f) * shading.groundWeight;
+    if (density <= 0.02f)
+    {
+        return false;
+    }
+    out.pos = Position();
+    out.radius = floatMax(_drawScale, 0.05f);
+    out.density = density;
+    out.heightAboveGround = floatMax(out.pos.Y() - _groundY, 0.0f);
+    return true;
+}
+
+bool SampleCloudletShadow(const Entity* entity, CloudletShadowSample& out)
+{
+    // The world's cloudlet list also holds SmokeVolumes, script particles and Things, so
+    // the cast is doing real work here -- it is not a formality.
+    const Cloudlet* cloudlet = dynamic_cast<const Cloudlet*>(entity);
+    return cloudlet != nullptr && cloudlet->SampleShadow(out);
 }
 
 void Cloudlet::SetTemperature(float t, float dt, CloudletTTable* table)
@@ -1123,6 +1157,10 @@ LegacySmokeShading& GLegacySmokeShading()
             s.selfShadow = std::clamp(static_cast<float>(std::atof(v)), 0.0f, 1.0f);
         if (const char* v = std::getenv("POSEIDON_SMOKE_SHADE_EMISSIVE_T"))
             s.emissiveT = std::clamp(static_cast<float>(std::atof(v)), 0.0f, 5000.0f);
+        if (const char* v = std::getenv("POSEIDON_SMOKE_GROUND_SHADOW_LEGACY"))
+            s.groundShadow = !(*v == '0');
+        if (const char* v = std::getenv("POSEIDON_SMOKE_GROUND_SHADOW_LEGACY_WEIGHT"))
+            s.groundWeight = std::clamp(static_cast<float>(std::atof(v)), 0.0f, 4.0f);
         return s;
     }();
     return shading;

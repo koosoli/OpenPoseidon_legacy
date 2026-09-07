@@ -598,7 +598,10 @@ class Shape: public Poseidon::VertexTable
 	const AnimationPhase &GetAnimationPhase( int i ) const {return _phase[i];}
 
 	// destruction of objects
-	void MakeDestroyed( float yOffset, Vector3Par bCenter, int seed, float coef=1 );
+	// DST-003: `squash` scales ONLY the loss of height (the 2001 code caps it at 20%,
+	// which is why a wrecked house slumps rather than collapses); `coef` is the lateral
+	// scatter and stays as authored.
+	void MakeDestroyed( float yOffset, Vector3Par bCenter, int seed, float coef=1, float squash=1 );
 	void MakeTreeDestroyed( float yOffset, Vector3Par bCenter, int seed, float coef=1 );
 	
 	// some object have hand defined destructed shape
@@ -1136,7 +1139,7 @@ class LODShapeWithShadow: public LODShape
 	void CreateShadow();
 	void ShadowChanged(){_shadow.Free();}
 
-	LODShape *MakeDestroyed( float coef=1 ); // building/engine type
+	LODShape *MakeDestroyed( float coef=1, float squash=1 ); // building/engine type
 	LODShape *MakeTreeDestroyed( float coef=1 ); // tree type
 	
 	USE_FAST_ALLOCATOR;

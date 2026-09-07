@@ -1418,6 +1418,25 @@ void DrawZeusTab()
         Dev::PanelTooltip("Launches from the scene camera 2 m ahead, along the view direction, in free-fly\n"
                           "and in normal play alike. Missiles fly straight (no target); shells and bombs\n"
                           "follow ballistics; hand grenades fuse as in the game.");
+        // DST-003: how far a wrecked building comes down.
+        DestructionLook& destruct = GDestructionLook();
+        Dev::Checkbox("Buildings collapse further (DST-003)", &destruct.enabled);
+        Dev::PanelTooltip("POSEIDON_DESTRUCT_LOOK=0 restores the 2001 collapse exactly. The destruction
+"
+                          "squashes a model's vertices towards the ground, but the 2001 height term takes
+"
+                          "at most 20% off, so a hit house shears and sags and then stands there. This
+"
+                          "scales that term alone; the sideways scatter is left as authored, because
+"
+                          "scaling THAT pulls the walls apart rather than down.
+"
+                          "The destroyed shape is cached per model, so a change here applies to buildings
+"
+                          "that have not been destroyed yet.");
+        ImGui::SetNextItemWidth(160.0f);
+        Dev::SliderFloat("Collapse x", &destruct.squash, 1.0f, 6.0f, "%.1f");
+        Dev::PanelTooltip("POSEIDON_DESTRUCT_SQUASH. 1.0 is the authored 20% maximum height loss.");
     }
     ImGui::EndDisabled();
 

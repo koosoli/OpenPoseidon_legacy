@@ -1,5 +1,7 @@
 
 #include <Poseidon/World/Scene/Object.hpp>
+#include <cstdlib>
+#include <algorithm>
 #include <Random/randomGen.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
@@ -13,7 +15,24 @@ namespace Poseidon::Foundation
 template class Ref<ConvexComponent>;
 } // namespace Poseidon::Foundation
 
-void Shape::MakeDestroyed(float yOffset, Vector3Par bCenter, int seed, float coef)
+namespace Poseidon
+{
+DestructionLook& GDestructionLook()
+{
+    static DestructionLook look = []
+    {
+        DestructionLook l;
+        if (const char* v = std::getenv("POSEIDON_DESTRUCT_LOOK"))
+            l.enabled = !(*v == '0');
+        if (const char* v = std::getenv("POSEIDON_DESTRUCT_SQUASH"))
+            l.squash = std::clamp(static_cast<float>(std::atof(v)), 1.0f, 6.0f);
+        return l;
+    }();
+    return look;
+}
+} // namespace Poseidon
+
+void Shape::MakeDestroyed(float yOffset, Vector3Par bCenter, int seed, float coef, float squash)
 {
     // hold all points on ground level
     int i;
@@ -24,8 +43,13 @@ void Shape::MakeDestroyed(float yOffset, Vector3Par bCenter, int seed, float coe
         saturateMax(yFactor, 0.1);
         int iSeed = toIntFloor(pos[0] + pos[1] + pos[2]) & 0x3ff + seed;
         // randomize height above ground level
-        pos[1] = ((1 - GRandGen.RandomValue(iSeed) * 0.2 * coef) * yFactor +
-                  (GRandGen.RandomValue(iSeed + 1) - 0.5) * 0.1 * coef - yOffset);
+        // DST-003: the 2001 term takes at most 20% of the height off, which is why a
+        // wrecked house slumps and shears but never comes down. `squash` scales that term
+        // and nothing else -- the lateral scatter below is left exactly as authored, because
+        // scaling THAT shreds the walls sideways into spaghetti instead of collapsing them.
+        float drop = GRandGen.RandomValue(iSeed) * 0.2 * squash;
+        saturate(drop, 0.0f, 0.92f);
+        pos[1] = ((1 - drop) * yFactor + (GRandGen.RandomValue(iSeed + 1) - 0.5) * 0.1 * coef - yOffset);
         // randomize position
         pos[0] += (GRandGen.RandomValue(iSeed + 2) - 0.5) * yFactor * 0.25 * coef;
         pos[2] += (GRandGen.RandomValue(iSeed + 3) - 0.5) * yFactor * 0.55 * coef;
@@ -68,7 +92,7 @@ void Shape::MakeTreeDestroyed(float yOffset, Vector3Par bCenter, int seed, float
     RecalculateNormals(true);
 }
 
-LODShape* LODShapeWithShadow::MakeDestroyed(float coef)
+LODShape* LODShapeWithShadow::MakeDestroyed(float coef, float squash)
 {
     if (!_destroyed)
     {
@@ -82,7 +106,7 @@ LODShape* LODShapeWithShadow::MakeDestroyed(float coef)
                 Shape* shape = _destroyed->Level(level);
                 if (shape)
                 {
-                    shape->MakeDestroyed(yOffset, _destroyed->BoundingCenter(), seed, coef);
+                    shape->MakeDestroyed(yOffset, _destroyed->BoundingCenter(), seed, coef, squash);
 #if USE_QUADS
                     if (shape->PosQuad().Size() >= 0)
                     {

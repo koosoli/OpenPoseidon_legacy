@@ -521,7 +521,21 @@ void DrawSpawnSection()
                               "light and are not shaded at all; the shading fades in over the 400 K below it.\n"
                               "CfgCloudlets tracks a real temperature per particle, so this separates a\n"
                               "fireball from the smoke it leaves behind.");
-        ImGui::TextDisabled("shaded %lld  left emissive %lld", shading.shaded, shading.emissive);
+        Dev::Checkbox("Game smoke shadows the ground (SMK-036)", &shading.groundShadow);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("POSEIDON_SMOKE_GROUND_SHADOW_LEGACY=0 turns it off. The renderer already had\n"
+                              "this pass and the dev SmokeVolume fed it, which is why dev smoke darkened the\n"
+                              "grass under it and a thrown smoke grenade did not: the game's own cloudlets\n"
+                              "were never handed to it. They are now. The global strength slider for the\n"
+                              "pass is the one this tab already exposes for the modern smoke.");
+        Dev::PanelSameLine();
+        ImGui::SetNextItemWidth(110.0f);
+        Dev::SliderFloat("Ground x", &shading.groundWeight, 0.0f, 4.0f, "%.2f");
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("POSEIDON_SMOKE_GROUND_SHADOW_LEGACY_WEIGHT. Multiplies the particle's own\n"
+                              "drawn opacity to get the shadow it casts.");
+        ImGui::TextDisabled("shaded %lld  left emissive %lld  ground blobs %lld", shading.shaded, shading.emissive,
+                            shading.blobs);
     }
     ImGui::SetNextItemWidth(110.0f);
     Dev::SliderFloat("Legacy density", &GLegacyDensity, 0.1f, 3.0f, "%.2f");

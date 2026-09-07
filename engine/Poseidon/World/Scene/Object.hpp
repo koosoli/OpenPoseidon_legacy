@@ -84,6 +84,25 @@ enum DestructType
 	DestructDefault, // Autodetect as one of above during object loading
 };
 
+// DST-003: how far a destroyed building comes down. The 2001 destruction squashes the
+// model's vertices towards the ground and jitters them, but the height term takes at most
+// 20% off (Shape::MakeDestroyed), so a hit house shears and sags and then stands there --
+// it never reads as collapsed. `squash` scales that term alone; the lateral scatter is
+// left as authored, because scaling THAT pulls the walls apart sideways rather than down.
+//
+// This is engine behaviour, not data: the `Land_` class prefix and the `ruins` model entry
+// documented on the wiki are Armed Assault and later. Cold War Assault's own config has
+// neither key anywhere in it, so there is no authored ruin to swap a building for.
+//
+// The destroyed shape is built ONCE per model and cached on the LODShape, so a change here
+// reaches models that have not been destroyed yet, not the ones already lying about.
+struct DestructionLook
+{
+    bool enabled = true;    //!< POSEIDON_DESTRUCT_LOOK=0 restores the 2001 collapse exactly
+    float squash = 3.0f;    //!< POSEIDON_DESTRUCT_SQUASH, 1.0 = as authored
+};
+DestructionLook& GDestructionLook();
+
 class CollisionBuffer;
 
 // Place USE_CASTING on a class that should be recognized by dynamic casting.

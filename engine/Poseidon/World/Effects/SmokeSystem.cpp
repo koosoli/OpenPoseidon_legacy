@@ -5,6 +5,7 @@
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/Graphics/Rendering/Effects/Smokes.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
+#include <Poseidon/Core/Global.hpp>
 
 #include <algorithm>
 #include <cstdlib>
@@ -298,6 +299,47 @@ void SmokeSystem::CollectShadowBlobs(std::vector<ShadowBlob>& out, std::size_t m
             continue;
         }
         volume->AppendShadowBlobs(out);
+    }
+    // SMK-036: and the game's OWN smoke. Every grenade, wreck and shell burst is a legacy
+    // cloudlet, none of which was ever in this pass -- which is why the dev smoke darkened
+    // the grass under it and a thrown smoke grenade did not. The world's cloudlet list also
+    // carries SmokeVolumes (already handled above), script particles and Things, so
+    // SampleCloudletShadow rejects everything that is not a cloudlet.
+    LegacySmokeShading& shading = GLegacySmokeShading();
+    shading.blobs = 0;
+    if (shading.groundShadow && GWorld != nullptr)
+    {
+        CloudletShadowSample sample;
+        const int n = GWorld->NCloudlets();
+        for (int i = 0; i < n; i++)
+        {
+            if (!SampleCloudletShadow(GWorld->GetCloudlet(i), sample))
+            {
+                continue;
+            }
+            ShadowBlob b{};
+            b.x = sample.pos.X();
+            b.y = sample.pos.Y();
+            b.z = sample.pos.Z();
+            b.radius = sample.radius;
+            b.density = sample.density;
+            b.heightAboveGround = sample.heightAboveGround;
+            out.push_back(b);
+            ++shading.blobs;
+        }
+    }
+    {
+        // SMK-036 diagnostic. It must be able to say "the pass ran and found nothing"
+        // separately from "the pass never ran", so it logs the world's cloudlet count too.
+        static float nextReport = 0.0f;
+        const float now = Glob.time.toFloat();
+        if (now >= nextReport)
+        {
+            nextReport = now + 2.0f;
+            LOG_INFO(World, "SMK-036 ground shadow: legacy={} strength={:.2f} cloudlets={} blobs={} total={}",
+                     shading.groundShadow, _groundShadowStrength, GWorld != nullptr ? GWorld->NCloudlets() : -1,
+                     shading.blobs, static_cast<long long>(out.size()));
+        }
     }
     if (out.size() > maxBlobs)
     {
