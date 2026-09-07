@@ -3504,9 +3504,22 @@ void EngineWgpu::NextFrame()
             _shadowCasters.clear();
             _castersPendingMesh.clear(); // indices into it (REN-THR-011)
         }
-        const bool shadowActive =
+        // LGT-010: the shadow pass is the SUN's pass, and at night there is no sun -- the
+        // cascades are not built, `_smCascadesValid` is false, and the whole pass is skipped.
+        // Local light shadows live in the same depth array and the same pass, so they were
+        // silently impossible for exactly the hours they exist for. This is what that cost:
+        // the depth side never learned the local view count, no layer was allocated, and the
+        // shader sampled a layer that does not exist -- which is not "no shadow", it is
+        // whatever a sampler returns for an out-of-range layer, and it read as grain.
+        //
+        // So the pass runs when EITHER family has work. The sun's own cascade count is
+        // separately zeroed below when its cascades are invalid, so a night frame draws the
+        // local views and no sun cascades rather than sun cascades with stale matrices.
+        const bool localShadowsWanted = _localShadowCount > 0;
+        const bool sunShadowActive =
             _smCascadesValid && (!_shadowCasters.empty() ||
                                  (!ShadowLegacyGateEnabled() && (gpuDrivenShadowCasters || grassShadowCasters)));
+        const bool shadowActive = sunShadowActive || localShadowsWanted;
 
         // WGR_SHADOW_GATE_TRACE=1 — the one measurement that decides whether the gate above was
         // ever the owner's bug. Everything in the comment block is static reading; nobody has
@@ -3639,9 +3652,15 @@ void EngineWgpu::NextFrame()
                     }
                     // {count, darkness, texel_size, first_layer}. first_layer is where the
                     // local views begin in the shared depth array, i.e. after the cascades.
+                    // first_layer MUST be the same number the depth pass uses, and that is
+                    // `frame.shadow.count` -- which is ZERO on a night frame, because the sun
+                    // has no cascades then. Using _smCascades.count here instead sent the
+                    // shader to layer 4 while the renderer had put the light's map in layer 0,
+                    // and sampling a layer that does not exist reads as "occluded everywhere".
+                    // One number, one source.
                     sb.local_ctl = {static_cast<float>(_localShadowCount), ls.darkness,
                                     1.0f / static_cast<float>(_smCascadeRes),
-                                    static_cast<float>(_smCascades.count)};
+                                    static_cast<float>(sunShadowActive ? _smCascades.count : 0)};
                 }
             }
         }
@@ -3727,7 +3746,9 @@ void EngineWgpu::NextFrame()
         frame.palette = backing.palette;
         if (shadowActive)
         {
-            frame.shadow.count = U32(_smCascades.count);
+            // Zero when the sun has no valid cascades: the local views must not drag stale
+            // cascade matrices into the pass with them.
+            frame.shadow.count = sunShadowActive ? U32(_smCascades.count) : 0u;
             frame.shadow.omni_count = U32(_smCascades.omniCount);
             frame.shadow.resolution = U32(_smCascadeRes);
             // Which cascades can actually receive grass-shadow fragments.
@@ -3807,6 +3828,19 @@ void EngineWgpu::NextFrame()
             {
                 const Poseidon::Dev::LocalShadowSettings& ls = Poseidon::Dev::GLocalShadowSettings();
                 frame.shadow.local_count = U32(_localShadowCount);
+                {
+                    // Does the DEPTH side get the same count the sampling side did? A layer
+                    // that was never allocated reads back as a failure, and a shader that
+                    // samples a missing layer returns something -- which is indistinguishable
+                    // from a wrong shadow.
+                    static int said = -1;
+                    if (said != _localShadowCount)
+                    {
+                        said = _localShadowCount;
+                        LOG_INFO(Graphics, "LGT-010 depth pass: local_count {} cascades {}", _localShadowCount,
+                                 _smCascades.count);
+                    }
+                }
                 for (int k = 0; k < _localShadowCount && k < kMaxLocalShadows; k++)
                 {
                     const LocalShadowLight& L = _localShadowLights[k];
@@ -9378,7 +9412,17 @@ void EngineWgpu::SetShadowCascades(const shadow::CascadeSet& cascades, int resol
     // Gated on `_smCascadesValid` so EnsureCamera() cannot push a camera on a frame where the
     // shadow system is off (in practice the scene camera is long since pushed by the time the
     // pass2 shadow block runs — SceneDraw.cpp:2323 — so this is a no-op read, not a push).
-    if (_smCascadesValid && !ShadowLegacyGateEnabled())
+    // LGT-010: ...OR when a local light wants a shadow view. Both writers of `_smCamPos` hung
+    // on `_smCascadesValid`, which is false at night -- so the origin every camera-relative
+    // shadow matrix is built against was STALE for exactly the hours a spot light exists for,
+    // and the local views projected the world from somewhere the camera no longer was. That
+    // is what made every lit surface read as occluded.
+    //
+    // `_localShadowCount` is last frame's here (the light list is assembled later in the
+    // frame). That is deliberate and harmless: it changes when a light comes or goes, not
+    // per frame, and a one-frame lag on an ORIGIN is a metre at walking speed -- against the
+    // alternative of a stale origin from hours ago.
+    if ((_smCascadesValid || _localShadowCount > 0) && !ShadowLegacyGateEnabled())
     {
         EnsureCamera();
         const CameraEntry& cam = _cameras[_currentCamera];
@@ -9390,7 +9434,11 @@ void EngineWgpu::SetShadowCascades(const shadow::CascadeSet& cascades, int resol
 
 void EngineWgpu::AddShadowCaster(const Shape& sMesh, const Matrix4& modelToWorld)
 {
-    if (!_renderer || !_smCascadesValid)
+    // LGT-010: a local light's shadow needs casters too, and at night `_smCascadesValid` is
+    // false -- so this returned before submitting a single one. The pass then rendered empty
+    // local layers, which a LessEqual compare against a 1.0 clear reads as "lit everywhere":
+    // the feature could not have worked at night whatever the shader did.
+    if (!_renderer || (!_smCascadesValid && _localShadowCount <= 0))
     {
         return;
     }
@@ -10628,6 +10676,26 @@ void EngineWgpu::FlushPendingScreenshot()
     }();
     if (eager)
         WaitRenderIdle();
+    // LGT-010: dump a shadow-array layer to a PNG once, N frames in. Driven from the
+    // environment rather than the mission script, because the script route
+    // (triShadowSceneDump) sits behind a mission whose own init exits early and produced
+    // nothing twice. This runs from NextFrame on the producer thread, next to the
+    // screenshot path, so it is a legal place to take the exclusive renderer handle.
+    {
+        static const char* dumpPath = std::getenv("POSEIDON_SHADOW_DUMP_PNG");
+        static const int dumpFrame = [] {
+            const char* v = std::getenv("POSEIDON_SHADOW_DUMP_FRAME");
+            return v ? std::max(1, std::atoi(v)) : 600;
+        }();
+        static int frames = 0;
+        static bool done = false;
+        if (dumpPath != nullptr && !done && ++frames >= dumpFrame)
+        {
+            done = true;
+            const bool ok = DumpShadowMap(dumpPath);
+            LOG_INFO(Graphics, "LGT-010 shadow layer dump -> '{}' {}", dumpPath, ok ? "written" : "FAILED");
+        }
+    }
     if (!_renderer || _pendingScreenshotPath.GetLength() == 0)
         return;
     WaitRenderIdle(); // exclusive renderer handle below (REN-THR-012)

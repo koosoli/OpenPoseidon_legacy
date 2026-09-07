@@ -5852,15 +5852,20 @@ impl Gfx3d {
         grass: &Grass,
     ) {
         let count = pass.count.min(MAX_CASCADES);
+        // LGT-010: local views are work too. At night the sun has no cascades (count == 0)
+        // and this used to return immediately -- so a spot light's shadow was impossible for
+        // exactly the hours a spot light exists for.
+        let want_local = (pass.local_count as usize).min(MAX_LOCAL_SHADOWS);
         // The GPU-driven set casts its own shadows (draw_gpu_driven_shadow), so the target +
         // pass UBO must be set up even when there are no CPU casters this frame; only the CPU
         // caster bucketing below is skipped when `casters` is empty.
         let gpu_shadows = self.gpu_driven_enabled;
-        if count == 0
+        if (count == 0 && want_local == 0)
             || pass.resolution == 0
             || (casters.is_empty() && !gpu_shadows && !grass.casts_shadows())
         {
             self.shadow_plan.clear();
+            self.local_shadow_count = 0;
             return;
         }
         // LGT-010: local light views live in layers count..count+local-1 of the SAME depth
@@ -6041,10 +6046,12 @@ impl Gfx3d {
         timers: &crate::gpu_timers::GpuTimers,
     ) {
         let count = pass.count.min(MAX_CASCADES);
-        // The GPU-driven set casts on its own, so render even with no CPU casters (as long as
-        // the target + pass UBO exist). Nothing to do only when both sources are empty.
+        // LGT-010: see prepare_shadows -- a night frame has no sun cascades and still has
+        // local light views to render.
         let gpu_shadows = self.gpu_driven_enabled;
-        if count == 0 || (casters.is_empty() && !gpu_shadows && !grass.casts_shadows()) {
+        if (count == 0 && self.local_shadow_count == 0)
+            || (casters.is_empty() && !gpu_shadows && !grass.casts_shadows())
+        {
             return;
         }
         let (Some(target), Some(pass_bind)) = (
