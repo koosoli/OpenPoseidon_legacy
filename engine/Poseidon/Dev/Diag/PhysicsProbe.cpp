@@ -8,6 +8,7 @@
 #include <Poseidon/World/Scene/ObjLine.hpp>
 #include <Poseidon/World/Scene/Object.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
+#include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <cstring>
 #include <Poseidon/World/World.hpp>
@@ -24,6 +25,22 @@ namespace
 {
 
 PhysicsProbeSettings s_settings;
+
+// Harness seeds. The probe settings live behind a panel that holds the mouse, so an
+// automated capture cannot tick a box -- these are the only way to A/B the probe light
+// from a command line. They are read ONCE, at first use.
+const bool s_probeEnvSeeded = []
+{
+    if (const char* v = std::getenv("POSEIDON_PROBE_LIGHT"))
+        s_settings.emitLight = !(*v == '0');
+    if (const char* v = std::getenv("POSEIDON_PROBE_LIGHT_BRIGHTNESS"))
+        s_settings.lightBrightness = std::clamp(static_cast<float>(std::atof(v)), 0.05f, 8.0f);
+    if (const char* v = std::getenv("POSEIDON_PROBE_UNLIT"))
+        s_settings.selfIllum = !(*v == '0');
+    if (const char* v = std::getenv("POSEIDON_PROBE_HOTKEYS"))
+        s_settings.hotkeys = !(*v == '0');
+    return true;
+}();
 
 // Line pool, same shape as the ballistics trail view: reuse one Object per
 // segment rather than allocating per frame, and stop at a budget so a runaway
@@ -95,6 +112,11 @@ std::vector<ModelProbe> s_modelProbes;
 // Solid probes reuse one Object per drawn body, like the line pool: an Object
 // carries a transform, so it cannot be shared between two bodies in one frame.
 std::vector<Ref<Object>> s_solidObjects;
+// PROBE-LIGHT: one LightPoint per probe, pooled like the solid objects. The scene owns
+// them once added, so the pool is only ever grown; a light that is not wanted this frame
+// is turned black rather than removed, which keeps the scene's light list stable.
+std::vector<Ref<LightPoint>> s_probeLights;
+int s_probeLightsUsed = 0;
 int                      s_solidUsed = 0;
 
 /// Submits a unit mesh scaled and rotated into place. Object has no scale of its
@@ -124,6 +146,30 @@ void SubmitSolid(LODShapeWithShadow* mesh, Vector3Par position, Vector3Par x, Ve
     obj->SetPosition(position);
     obj->SetConstantColor(color);
     GScene->ObjectForDrawing(obj);
+}
+
+/// PROBE-LIGHT: place (or create) the pooled light for one probe. Returns quietly when
+/// lights are off -- the caller still runs, so the "turn the rest black" pass below can
+/// tell "no probes this frame" from "lights disabled".
+void SubmitProbeLight(Vector3Par position)
+{
+    if (!GScene || s_probeLightsUsed >= 64)
+    {
+        return;
+    }
+    if (s_probeLightsUsed >= static_cast<int>(s_probeLights.size()))
+    {
+        Ref<LightPoint> light = new LightPoint(HBlack, HBlack);
+        GScene->AddLight(light);
+        s_probeLights.push_back(light);
+    }
+    LightPoint* light = s_probeLights[static_cast<std::size_t>(s_probeLightsUsed)];
+    ++s_probeLightsUsed;
+    const Color diffuse(s_settings.lightColor[0], s_settings.lightColor[1], s_settings.lightColor[2], 1.0f);
+    light->SetPosition(position);
+    light->SetDiffuse(diffuse);
+    light->SetAmbient(diffuse * s_settings.lightAmbient);
+    light->SetBrightness(s_settings.lightBrightness);
 }
 
 } // namespace
@@ -598,6 +644,31 @@ void DrawPhysicsProbes()
         PackedColor(0xff000000u | (channel(s_settings.solidColor[0]) << 16) |
                     (channel(s_settings.solidColor[1]) << 8) | channel(s_settings.solidColor[2]));
     s_solidUsed = 0;
+
+    // PROBE-LIGHT: a probe you can throw and roll is the only MOVING light source the
+    // engine's test scenes have, which is what makes it useful for checking dynamic
+    // lighting and the shadows it casts. Lights are placed for every probe, model probes
+    // included, whether or not the solid mesh is being drawn.
+    s_probeLightsUsed = 0;
+    if (s_settings.emitLight)
+    {
+        for (const Physics::ProbeSample& sample : samples)
+        {
+            SubmitProbeLight(sample.position);
+        }
+    }
+    // Every pooled light beyond the ones used this frame goes black. They stay in the
+    // scene's list -- removing and re-adding lights per frame is how a light list gets
+    // corrupted -- but a black light contributes nothing.
+    for (std::size_t i = static_cast<std::size_t>(s_probeLightsUsed); i < s_probeLights.size(); ++i)
+    {
+        s_probeLights[i]->SetDiffuse(HBlack);
+        s_probeLights[i]->SetAmbient(HBlack);
+    }
+    // PROBE-LIGHT: with the probe lit from inside, its own surface should read as the
+    // lamp it now is rather than as a dark ball. IsLight is the engine's own unlit
+    // routing (BuildRenderPassDescriptor: LightingMode::Unlit).
+    SetProbeMeshSelfIllum(s_settings.emitLight && s_settings.selfIllum);
 
     if (s_settings.drawSolid)
     {

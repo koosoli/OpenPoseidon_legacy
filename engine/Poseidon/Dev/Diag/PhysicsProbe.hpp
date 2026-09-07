@@ -102,6 +102,25 @@ struct PhysicsProbeSettings
     /// green and sand from one end to the other. Model probes keep their own
     /// textures -- tinting a jeep red would hide the thing you spawned it to see.
     float solidColor[3] = {0.85f, 0.15f, 0.10f};
+    /// PROBE-LIGHT: make each probe a light SOURCE, so a shape you can throw and
+    /// roll becomes a movable lamp for checking dynamic lighting and the shadows it
+    /// casts. Drop one down a dark street, throw one into a room, roll one past a
+    /// wall -- the thing the engine's static test scenes cannot give you is a light
+    /// that MOVES, and a physics probe already moves convincingly.
+    ///
+    /// OFF by default: a lit probe changes the scene it is being used to measure,
+    /// and somebody dropping a domino row should not have the street light up.
+    bool  emitLight = false;
+    /// Also draw the probe itself unlit, at full colour, so it reads as the lamp it
+    /// now is instead of as a dark ball sitting inside its own light.
+    bool  selfIllum = true;
+    /// Light colour, RGB 0..1, and how far it reaches. Brightness maps to
+    /// LightPoint::SetBrightness, whose attenuation start is 50x this.
+    float lightColor[3] = {1.00f, 0.90f, 0.72f};
+    float lightBrightness = 1.0f;
+    /// Ambient the light adds regardless of surface orientation. Small on purpose:
+    /// a big ambient term flattens exactly the shading you opened this to look at.
+    float lightAmbient = 0.06f;
     /// Let the player shove probes by walking into them.
     /// OFF by default. Ctrl+B/N/M are ordinary game keys otherwise, and a dev
     /// tool has no business claiming them until it is asked to.

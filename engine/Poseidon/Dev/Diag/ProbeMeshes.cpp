@@ -231,4 +231,41 @@ LODShapeWithShadow* ProbeCylinderMesh()
     return mesh;
 }
 
+void SetProbeMeshSelfIllum(bool unlit)
+{
+    // The meshes are function-local statics built on first use, so asking for them here
+    // is what guarantees all three exist before the flag is applied to them -- a mesh
+    // built later picks up ProbeSpecial and would silently miss the flag otherwise.
+    LODShapeWithShadow* meshes[] = {ProbeBoxMesh(), ProbeSphereMesh(), ProbeCylinderMesh()};
+    const int special = unlit ? (ProbeSpecial | IsLight) : ProbeSpecial;
+    static int applied = -1;
+    if (applied == special)
+    {
+        return; // nothing to do, and SetSpecial walks every face
+    }
+    applied = special;
+    for (LODShapeWithShadow* lShape : meshes)
+    {
+        if (lShape == nullptr)
+        {
+            continue;
+        }
+        lShape->SetSpecial(special);
+        for (int level = 0; level < lShape->NLevels(); level++)
+        {
+            Shape* shape = lShape->Level(level);
+            if (shape == nullptr)
+            {
+                continue;
+            }
+            shape->SetSpecial(special);
+            for (Offset f = shape->BeginFaces(); f < shape->EndFaces(); shape->NextFace(f))
+            {
+                shape->Face(f).SetSpecial(special);
+            }
+            shape->FindSections();
+        }
+    }
+}
+
 } // namespace Poseidon::Dev

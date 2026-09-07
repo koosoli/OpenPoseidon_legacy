@@ -262,6 +262,44 @@ void DrawPhysicsTab()
             "Primitives only. A model probe keeps its own textures --\n"
             "tinting a jeep red would hide the thing you spawned it to see.");
     }
+    // PROBE-LIGHT: turn a probe into a movable lamp.
+    Dev::Checkbox("Probe emits light", &s.emitLight);
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip(
+            "Every live probe becomes a point light. A shape you can place, drop, throw\n"
+            "and roll is the only MOVING light source available here, which is what makes\n"
+            "it useful for checking dynamic lighting and the shadows it casts: throw one\n"
+            "into a room, roll one past a wall, drop one down a dark street.\n"
+            "\n"
+            "OFF by default -- a lit probe changes the scene it is being used to measure,\n"
+            "and somebody laying a domino row should not have the street light up.\n"
+            "Capped at 64 lights; beyond that the extra probes are dark.");
+    }
+    if (s.emitLight)
+    {
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(160.0f);
+        ImGui::ColorEdit3("Light", s.lightColor, ImGuiColorEditFlags_NoInputs);
+        ImGui::SetNextItemWidth(140.0f);
+        Dev::SliderFloat("Brightness", &s.lightBrightness, 0.05f, 8.0f, "%.2f");
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(140.0f);
+        Dev::SliderFloat("Light ambient", &s.lightAmbient, 0.0f, 0.5f, "%.3f");
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("What the light adds regardless of which way a surface faces. Small on\n"
+                              "purpose: a big ambient term flattens exactly the shading you opened\n"
+                              "this to look at.");
+        }
+        Dev::Checkbox("Draw the probe unlit", &s.selfIllum);
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("The probe's own surface at full colour, unshaded, so it reads as the lamp\n"
+                              "it now is instead of as a dark ball sitting inside its own light.\n"
+                              "Primitives only -- a model probe keeps its own materials.");
+        }
+    }
     ImGui::SameLine();
     Dev::Checkbox("Outline", &s.drawOutline);
     if (ImGui::IsItemHovered())

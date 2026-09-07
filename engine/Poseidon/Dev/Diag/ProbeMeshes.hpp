@@ -24,4 +24,12 @@ LODShapeWithShadow* ProbeSphereMesh();
 /// Radius 1, from y = -1 to y = +1, with caps.
 LODShapeWithShadow* ProbeCylinderMesh();
 
+/// PROBE-LIGHT: draw the probe meshes UNLIT at full colour (`IsLight`, which
+/// BuildRenderPassDescriptor routes to LightingMode::Unlit) instead of shaded by the
+/// scene. Only meaningful for a probe that is carrying its own light: otherwise the
+/// probe should be lit like everything around it, which is half of what a physics
+/// check is judging. Applies to every already-built mesh, so it takes effect on the
+/// next frame with no respawn.
+void SetProbeMeshSelfIllum(bool unlit);
+
 } // namespace Poseidon::Dev
