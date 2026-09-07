@@ -3385,11 +3385,15 @@ void EngineWgpu::NextFrame()
                 // shadow map sized to the real cone did not line up with the lit pool.
                 // cos^2 rather than the angle: that is the form lights_contrib compares in.
                 const float cosO = std::cos(std::clamp(src.coneOuter, 0.0f, 1.55f));
-                const float cosI = std::cos(std::clamp(src.coneInner, 0.0f, 1.55f));
                 pl.diffuse = {src.diffuse.R(), src.diffuse.G(), src.diffuse.B(),
                               src.coneOuter > 0.001f ? cosO * cosO : 0.0f};
+                // LGT-017: ambient.w carried cos^2 of the AUTHORED INNER ANGLE, which the
+                // beam no longer uses -- the flat top it described is exactly what made a
+                // headlight read as a disc with an edge on a wall. The channel now carries
+                // the beam's shaping exponent instead, so the profile is per light and the
+                // 64-byte struct is untouched.
                 pl.ambient = {src.ambient.R(), src.ambient.G(), src.ambient.B(),
-                              src.coneInner > 0.001f ? cosI * cosI : 0.0f};
+                              Poseidon::Dev::GSpotBeam().shape};
                 // LGT-010: dir.w is the light KIND, and it carries the shadow slot with it
                 // rather than growing WgrLight -- that struct is size-asserted at 64 bytes
                 // on both sides of the ABI, and the shader's only test is `> 0.5` for

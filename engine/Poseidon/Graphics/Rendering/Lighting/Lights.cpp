@@ -1107,7 +1107,7 @@ void LightReflector::ToDraw(ClipFlags clipFlags, bool dimmed)
         // dark: this call is what puts the bulb on screen as well as the shaft, so removing
         // it made a car look like it was driving with its lights off while lighting the road.
         // The wedge is what was ugly; the glowing bulb is not.
-        if (GScene->MainLight()->NightEffect() >= 0.01 && !dimmed)
+        if (_drawHalo && GScene->MainLight()->NightEffect() >= 0.01 && !dimmed)
         {
             Color c = GetObjectColor();
             const float invSize = InvSqrt(c.R() * c.R() + c.G() * c.G() + c.B() * c.B());

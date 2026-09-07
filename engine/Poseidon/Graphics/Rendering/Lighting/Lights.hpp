@@ -286,8 +286,14 @@ class LightReflector: public LightPositionedColored
 	Ref<LODShapeWithShadow> _shape;
 	float _startAtten;
 	float _size;
+	//! LGT-017: a reflector CARRIED BY THE VIEWER draws no bulb. The glow billboard sits right
+	//! in front of the eye there, so it reads as a grey blob in the middle of the screen
+	//! rather than as a lamp seen from outside. Vehicles keep theirs -- that IS the "the
+	//! vehicle's own lights should look lit" the owner asked for.
+	bool _drawHalo = true;
 
 	public:
+	void SetDrawHalo( bool on ){_drawHalo=on;}
 	LightReflector();
 	LightReflector
 	(

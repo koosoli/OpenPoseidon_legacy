@@ -1243,9 +1243,20 @@ int   s_zeusThrowCount = 0;
 // torch could not cast at all. It follows the SCENE camera (GScene->GetCamera()), which is
 // what is actually being rendered in every mode -- CameraOn() is the entity the view is
 // attached to, and in free-fly that is the player standing wherever they were left.
-bool s_headlampOn = false;
-float s_headlampBrightness = 1.4f;
-float s_headlampCone = 0.42f;
+// LGT-017: seeded from the environment so a capture can turn the torch on. It is a
+// camera-following light, which makes it the only way to aim a beam at a chosen wall from a
+// scripted pose -- without this the torch could only ever be judged by hand.
+bool s_headlampOn = [] { const char* e = std::getenv("POSEIDON_HEADLAMP"); return e && std::atoi(e) != 0; }();
+float s_headlampBrightness = [] {
+    const char* e = std::getenv("POSEIDON_HEADLAMP_BRIGHTNESS");
+    const double d = e ? std::atof(e) : 0.0;
+    return d > 0.0 ? static_cast<float>(d) : 3.0f;
+}();
+float s_headlampCone = [] {
+    const char* e = std::getenv("POSEIDON_HEADLAMP_CONE");
+    const double d = e ? std::atof(e) : 0.0;
+    return d > 0.0 ? static_cast<float>(d) : 0.55f;
+}();
 float s_headlampColor[3] = {1.00f, 0.96f, 0.88f};
 Ref<LightReflector> s_headlamp;
 
@@ -1274,6 +1285,7 @@ void UpdateHeadlamp()
     if (!s_headlamp)
     {
         s_headlamp = new LightReflector(GScene->Preloaded(HalfLight), HBlack, HBlack, s_headlampCone);
+        s_headlamp->SetDrawHalo(false); // LGT-017: the viewer's own bulb is in the viewer's eye
         GScene->AddLight(s_headlamp);
     }
     const Color diffuse(s_headlampColor[0], s_headlampColor[1], s_headlampColor[2], 1.0f);

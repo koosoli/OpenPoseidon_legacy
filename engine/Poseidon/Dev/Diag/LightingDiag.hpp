@@ -49,6 +49,17 @@ LightCounters& GLightCounters();
 // `generation` bumps on every change; StreetLamp::CreateLight rebuilds a light whose
 // generation is stale, so a dev-panel slider takes effect on the next lamp simulation
 // (or immediately, if the panel broadcasts Landscape::OnTimeSkipped).
+// LGT-017: the shape of a spot light's beam, as an exponent on its axis-to-rim ramp.
+// 1 is a plain smoothstep -- correct, and too dim, because a headlight used to be FLAT out
+// to its authored inner angle and everything was tuned against that. Below 1 restores a hot
+// centre while the rim still arrives at zero with a zero derivative, which is what stops the
+// beam reading as a disc with an edge on a wall. POSEIDON_SPOT_BEAM_SHAPE overrides.
+struct SpotBeamSettings
+{
+    float shape = 0.35f;
+};
+SpotBeamSettings& GSpotBeam();
+
 struct LampLightSettings
 {
     bool enabled = true;

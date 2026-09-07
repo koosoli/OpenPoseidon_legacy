@@ -59,6 +59,22 @@ LocalShadowSettings& GLocalShadowSettings()
     return s;
 }
 
+SpotBeamSettings& GSpotBeam()
+{
+    static SpotBeamSettings s = []
+    {
+        SpotBeamSettings v;
+        if (const char* e = std::getenv("POSEIDON_SPOT_BEAM_SHAPE"))
+        {
+            const double d = std::atof(e);
+            if (d > 0.0)
+                v.shape = static_cast<float>(d);
+        }
+        return v;
+    }();
+    return s;
+}
+
 LampLightSettings& GLampLightSettings()
 {
     // Seeded once from the environment so a capture harness can sweep the lamp look
