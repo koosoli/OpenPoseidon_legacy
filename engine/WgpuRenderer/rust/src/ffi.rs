@@ -1674,6 +1674,7 @@ const fn wgr_layout_hash() -> u32 {
     // buffer with the handshake reporting no problem at all -- the silent-mismatch failure
     // rule 0 exists for, in the one direction where it corrupts the caller's stack.
     h = hash_size(h, sz::<WgrObjectStats>());
+    h = hash_size(h, sz::<WgrSmokeVolumeParams>()); // SMK-038
     h
 }
 
@@ -1835,6 +1836,92 @@ pub unsafe extern "C" fn wgr_set_soft_particles(
     let _ = catch_unwind(AssertUnwindSafe(|| {
         unsafe { &mut *renderer }.set_soft_particles(enabled != 0, fade_metres);
     }));
+}
+
+/// SMK-038: live tuning for the volumetric smoke field. Mirrors `WgrSmokeVolumeParams`
+/// exactly (96 bytes) and is part of the layout hash.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct WgrSmokeVolumeParams {
+    pub mode: u32,
+    pub cell_size: f32,
+    pub march_steps: u32,
+    pub sun_steps: u32,
+    pub sun_step_len: f32,
+    pub density: f32,
+    pub extinction: f32,
+    pub albedo: f32,
+    pub anisotropy: f32,
+    pub self_shadow: f32,
+    pub jitter: f32,
+    pub scale: u32,
+    pub sun_dir: WgrVec4,
+    pub sun_radiance: WgrVec4,
+    pub ambient: WgrVec4,
+}
+
+/// Push the volumetric-smoke tuning. Null-safe; with `mode` 0 the subsystem is inert.
+///
+/// # Safety
+/// `renderer` must be live; `params` must point to one valid struct or be null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_set_smoke_volume(
+    renderer: *mut WgrRenderer,
+    params: *const WgrSmokeVolumeParams,
+) {
+    if renderer.is_null() || params.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let p = unsafe { *params };
+        unsafe { &mut *renderer }.set_smoke_volume(&p);
+    }));
+}
+
+/// This frame's smoke particles for froxel injection. Null-safe.
+///
+/// # Safety
+/// `blobs` must point at `count` valid `WgrSmokeShadowBlob`s, or be null with `count == 0`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_set_smoke_volume_blobs(
+    renderer: *mut WgrRenderer,
+    blobs: *const WgrSmokeShadowBlob,
+    count: u32,
+) {
+    if renderer.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let slice: &[WgrSmokeShadowBlob] = if blobs.is_null() || count == 0 {
+            &[]
+        } else {
+            unsafe { std::slice::from_raw_parts(blobs, count as usize) }
+        };
+        // Byte-identical layouts (both 32 bytes, two vec4s), asserted on the C++ side.
+        let as_vol: &[crate::smoke_volume::SmokeBlob] = unsafe {
+            std::slice::from_raw_parts(
+                slice.as_ptr() as *const crate::smoke_volume::SmokeBlob,
+                slice.len(),
+            )
+        };
+        unsafe { &mut *renderer }.set_smoke_volume_blobs(as_vol);
+    }));
+}
+
+/// Accepted particle count (low 32) and frames marched (high 32). Zero on a null renderer.
+///
+/// # Safety
+/// `renderer` must be live or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_get_smoke_volume_stats(renderer: *const WgrRenderer) -> u64 {
+    if renderer.is_null() {
+        return 0;
+    }
+    catch_unwind(AssertUnwindSafe(|| {
+        let r = unsafe { &*renderer };
+        u64::from(r.smoke_volume.last_blob_count) | (r.smoke_volume.frames_marched << 32)
+    }))
+    .unwrap_or(0)
 }
 
 /// Queue one capture of the next fully composited swapchain frame.

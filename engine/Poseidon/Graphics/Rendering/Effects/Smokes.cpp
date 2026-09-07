@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <Poseidon/World/Effects/SmokeWorldQuery.hpp> // SMK-030: room lookup + contained step
 #include <Poseidon/Graphics/Rendering/Effects/Smokes.hpp>
+#include <Poseidon/Graphics/Rendering/Effects/SmokeVolumetric.hpp> // SMK-038 system selector
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
@@ -669,6 +670,19 @@ void Cloudlet::Draw(int level, ClipFlags clipFlags, const FrameBase& frame)
 {
 #if !ALPHA_SPLIT
     PoseidonAssert(level != LOD_INVISIBLE);
+    // SMK-038: with the volumetric system selected, a particle that was INJECTED into the
+    // froxel field must not also be drawn as a sprite -- that renders the same smoke twice.
+    // The test is the injection predicate itself (SampleShadow), not the mode alone, so a
+    // particle too faint to inject still draws, and so does every hot emissive one: a
+    // fireball and a muzzle flash are not smoke and are not in the field.
+    if (SmokeBillboardsSuppressed())
+    {
+        CloudletShadowSample sample;
+        if (SampleShadow(sample))
+        {
+            return;
+        }
+    }
     DrawDecal(level, clipFlags, frame);
 #endif
 }

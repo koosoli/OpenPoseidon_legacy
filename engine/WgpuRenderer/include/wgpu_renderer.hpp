@@ -1030,6 +1030,36 @@ struct WgrSmokeShadowBlob
     WgrVec4 density;    /* x optical density, y height above ground (m), zw unused */
 };
 
+/* SMK-038 VOLUMETRIC SMOKE. Live tuning for the froxel field + raymarch that can stand in
+   for the 2001 cloudlet billboards. Its own struct and its own entry point rather than
+   fields on an existing one: growing a struct that already crosses the ABI changes a size
+   the handshake checks, and this is a whole subsystem's worth of knobs.
+
+   The particles themselves arrive separately, through wgr_set_smoke_volume_blobs, in the
+   same WgrSmokeShadowBlob layout the ground-shadow pass already uses -- one collection on
+   the engine side feeds both. */
+struct WgrSmokeVolumeParams
+{
+    /* 0 = legacy billboards only and this whole subsystem is inert; 1 = volumetric (the
+       engine also stops drawing the billboards it injected); 2 = BOTH, a debug view that
+       double-counts the smoke on purpose so the two can be compared in one frame. */
+    uint32_t mode;
+    float cell_size;      /* metres per froxel; grid is a fixed 128 x 64 x 128 cells */
+    uint32_t march_steps; /* samples along the view ray */
+    uint32_t sun_steps;   /* samples along the secondary march toward the sun, 0 = flat */
+    float sun_step_len;   /* metres, first sun step (they widen geometrically) */
+    float density;        /* multiplies the injected optical density */
+    float extinction;     /* multiplies sigma_t at march time */
+    float albedo;         /* single-scattering albedo; soot is dark, steam is near 1 */
+    float anisotropy;     /* Henyey-Greenstein g; >0 forward-scatters, which rims a backlit plume */
+    float self_shadow;    /* 0 = no sun march at all, 1 = its full effect */
+    float jitter;         /* per-pixel step jitter; trades banding for noise */
+    uint32_t scale;       /* 1 = march at render res, 2 = half res, ... */
+    WgrVec4 sun_dir;      /* xyz = unit direction TOWARD the sun */
+    WgrVec4 sun_radiance; /* rgb */
+    WgrVec4 ambient;      /* rgb the smoke picks up from the sky */
+};
+
 struct WgrGrassDownwash
 {
     float x;
@@ -1946,6 +1976,7 @@ static_assert(sizeof(WgrGrassBatch) == 16, "WgrGrassBatch layout must match the 
 static_assert(sizeof(WgrGrassTrack) == 16, "WgrGrassTrack layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrGrassDownwash) == 16, "WgrGrassDownwash layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrSmokeShadowBlob) == 32, "WgrSmokeShadowBlob layout must match the Rust #[repr(C)] struct");
+static_assert(sizeof(WgrSmokeVolumeParams) == 96, "WgrSmokeVolumeParams layout must match the Rust #[repr(C)] struct");
   static_assert(sizeof(WgrGrassParams) == 4784, "WgrGrassParams layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrWaterParams) == 1056, "WgrWaterParams layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrWaterNode) == 40, "WgrWaterNode layout must match the Rust #[repr(C)] struct");
@@ -2437,6 +2468,21 @@ typedef struct WgrTemporalInfo
    a size that is part of the ABI handshake. */
 WGR_API void wgr_set_soft_particles(WgrRenderer* renderer, uint32_t enabled, float fade_metres);
 
+/* SMK-038: push the volumetric-smoke tuning (dev panel / env seed). With mode 0 nothing in
+   the subsystem runs and nothing is allocated. */
+WGR_API void wgr_set_smoke_volume(WgrRenderer* renderer, const WgrSmokeVolumeParams* params);
+
+/* SMK-038: this frame's smoke particles for injection into the froxel field. Same layout as
+   the ground-shadow blobs, and the engine fills one array for both. Capped renderer-side
+   (2048); wgr_get_smoke_volume_blobs reports how many were ACCEPTED, so a clipped plume is
+   visible in the panel rather than silent. Empty is a valid publish (clears the field). */
+WGR_API void wgr_set_smoke_volume_blobs(WgrRenderer* renderer, const WgrSmokeShadowBlob* blobs, uint32_t count);
+
+/* SMK-038: particles accepted last publish, in the low 32 bits; frames the march actually
+   ran, in the high 32. A counter that can say "switched on and nothing arrived" apart from
+   "switched on and marching" -- the distinction a screenshot cannot make. */
+WGR_API uint64_t wgr_get_smoke_volume_stats(const WgrRenderer* renderer);
+
 WGR_API void wgr_set_temporal_tuning(WgrRenderer* renderer, const WgrTemporalTuning* tuning);
 WGR_API void wgr_get_temporal_info(WgrRenderer* renderer, WgrTemporalInfo* info);
 
@@ -2705,6 +2751,7 @@ constexpr uint32_t WgrLayoutHash()
     // a size disagreement between exe and DLL would have been written past this side's buffer
     // with the handshake reporting no problem -- a silent mismatch that corrupts the caller.
     h = WgrHashSize(h, sizeof(WgrObjectStats));
+    h = WgrHashSize(h, sizeof(WgrSmokeVolumeParams)); // SMK-038
     return h;
 }
 

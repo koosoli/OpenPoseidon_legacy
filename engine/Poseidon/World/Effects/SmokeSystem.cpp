@@ -283,10 +283,10 @@ void SmokeSystem::BeginFrame()
     ResetSmokeSweepCount();
 }
 
-void SmokeSystem::CollectShadowBlobs(std::vector<ShadowBlob>& out, std::size_t maxBlobs) const
+void SmokeSystem::CollectShadowBlobs(std::vector<ShadowBlob>& out, std::size_t maxBlobs, bool force) const
 {
     out.clear();
-    if (_groundShadowStrength <= 0.0f)
+    if (!force && _groundShadowStrength <= 0.0f)
     {
         return;
     }
@@ -307,7 +307,7 @@ void SmokeSystem::CollectShadowBlobs(std::vector<ShadowBlob>& out, std::size_t m
     // SampleCloudletShadow rejects everything that is not a cloudlet.
     LegacySmokeShading& shading = GLegacySmokeShading();
     shading.blobs = 0;
-    if (shading.groundShadow && GWorld != nullptr)
+    if ((force || shading.groundShadow) && GWorld != nullptr)
     {
         CloudletShadowSample sample;
         const int n = GWorld->NCloudlets();
@@ -324,6 +324,13 @@ void SmokeSystem::CollectShadowBlobs(std::vector<ShadowBlob>& out, std::size_t m
             b.radius = sample.radius;
             b.density = sample.density;
             b.heightAboveGround = sample.heightAboveGround;
+            if (out.size() >= maxBlobs)
+            {
+                // The cap was declared and never enforced on this branch. SMK-038 raises it
+                // to 2048 for injection, which makes overrunning it a real possibility
+                // rather than a theoretical one.
+                break;
+            }
             out.push_back(b);
             ++shading.blobs;
         }

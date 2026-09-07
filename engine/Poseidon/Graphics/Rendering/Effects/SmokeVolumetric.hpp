@@ -61,4 +61,74 @@ struct SmokeSoftParticles
 };
 SmokeSoftParticles& GSmokeSoftParticles();
 
+// SMK-038: THE VOLUMETRIC SYSTEM, selectable alongside the legacy cloudlets.
+//
+// What soft particles cannot fix. SMK-037 repairs the EDGE of a billboard where it meets
+// geometry; it cannot give the sprite an interior, cannot stop the plume's silhouette
+// popping as the camera moves around it, and cannot light it by anything but the per-particle
+// approximation SMK-035 added -- which guesses optical depth from a particle's AGE, because a
+// sprite has no density field to look through. And every sprite is still the same round
+// texture at the same screen-space roll, so a column reads as repeated identical puffs.
+//
+// This is the other approach: a camera-anchored 3D density grid (128 x 64 x 128 froxels; the
+// cell size sets the reach) that the frame's smoke particles are SCATTERED into by a compute
+// pass, and a raymarch that integrates it front to back, stops at the scene depth, and
+// composites by transmittance. Stopping at scene depth is what gives soft intersections for
+// free -- there is no per-sprite trick left to get wrong. The self-shadow is a short second
+// march toward the sun per sample, which is light actually travelling through the medium
+// rather than a guess from a particle's age.
+//
+// The particles it eats are the ones SampleCloudletShadow already collects for the
+// ground-shadow pass, so gameplay smoke feeds it with no new plumbing in the simulation.
+//
+// MODE 1 ALSO STOPS THE BILLBOARDS DRAWING. Anything injected into the field must not also
+// be drawn as a sprite or the smoke is rendered twice. Mode 2 keeps both deliberately: it is
+// the A/B view, not a shipping setting.
+//
+// REACH IS THE TRADE, and it is the honest limitation of any camera-anchored volume. At the
+// default 1 m cell the box is 128 x 64 x 128 metres around the camera, and smoke outside it
+// is not rendered at all in mode 1. Raise the cell size for reach, lower it for detail.
+enum class SmokeSystemMode : int
+{
+    Legacy = 0,     //!< the 2001 billboards, unchanged; the volumetric subsystem is inert
+    Volumetric = 1, //!< the froxel field; the injected billboards stop drawing
+    Both = 2,       //!< debug A/B: double-counts the smoke on purpose
+};
+
+struct SmokeVolumetricParams
+{
+    // Legacy, per the standing rule for a new render path. POSEIDON_SMOKE_SYSTEM=1 selects
+    // the volumetric system, =2 draws both.
+    SmokeSystemMode mode = SmokeSystemMode::Legacy;
+    float cellSize = 1.0f;     //!< POSEIDON_SMOKE_VOL_CELL: metres per froxel
+    int marchSteps = 48;       //!< POSEIDON_SMOKE_VOL_STEPS: samples along the view ray
+    int sunSteps = 4;          //!< POSEIDON_SMOKE_VOL_SUN_STEPS: 0 = no self-shadow march
+    float sunStepLen = 1.5f;   //!< metres, first sun step; they widen geometrically
+    // 0.3, and the number is measured, not chosen. The injected sigma is a SUM over every
+    // particle covering a cell, and a smoke grenade puts hundreds of cloudlets into a few
+    // cubic metres -- at 1.0 the field saturates to a featureless white slab with the grid's
+    // own box edges showing through it. 0.03 is thin mist, 0.1 a haze, 0.3 a body of smoke
+    // that veils a house and a bush without going flat. Halving the cell size roughly
+    // doubles the density needed for the same look, because the same particles land in
+    // eight times as many cells.
+    float density = 0.3f;      //!< POSEIDON_SMOKE_VOL_DENSITY
+    float extinction = 1.0f;   //!< multiplies sigma_t at march time
+    float albedo = 0.9f;       //!< single-scattering albedo: soot is dark, steam near 1
+    float anisotropy = 0.35f;  //!< Henyey-Greenstein g; >0 rims a backlit plume
+    float selfShadow = 1.0f;   //!< POSEIDON_SMOKE_VOL_SELFSHADOW, 0..1
+    float jitter = 1.0f;       //!< step jitter: trades banding for noise
+    int scale = 2;             //!< POSEIDON_SMOKE_VOL_SCALE: 1 = render res, 2 = half
+    //! Counters, read back from the renderer so the panel can separate "on but nothing
+    //! arrived" from "on and marching" -- the one thing a screenshot cannot tell you.
+    long long blobs = 0;
+    long long framesMarched = 0;
+};
+SmokeVolumetricParams& GSmokeVolumetric();
+
+//! True when the legacy billboard for an INJECTED particle must not be drawn as well.
+inline bool SmokeBillboardsSuppressed()
+{
+    return GSmokeVolumetric().mode == SmokeSystemMode::Volumetric;
+}
+
 } // namespace Poseidon

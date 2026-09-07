@@ -408,6 +408,97 @@ void DrawSpawnSection()
                           "the wind will not move smoke it has already dropped.");
     }
 
+    // SMK-038: WHICH SMOKE SYSTEM draws. The head of the tab, because everything below it
+    // is a lever on one system or the other.
+    {
+        SmokeVolumetricParams& vol = GSmokeVolumetric();
+        int mode = static_cast<int>(vol.mode);
+        const char* modes[] = {"Legacy billboards (2001)", "Volumetric field", "Both (A/B, double-counts)"};
+        ImGui::SetNextItemWidth(240.0f);
+        if (Dev::Combo("Smoke system (SMK-038)", &mode, modes, IM_ARRAYSIZE(modes)))
+        {
+            vol.mode = static_cast<SmokeSystemMode>(mode);
+        }
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("POSEIDON_SMOKE_SYSTEM=0/1/2. Legacy is the 2001 billboard system every\n"
+                              "grenade, wreck and shell burst has always used, with the SMK-034/035/036/037\n"
+                              "levers below. Volumetric scatters the same particles into a camera-anchored\n"
+                              "128x64x128 froxel grid and raymarches it: real depth intersection, a real\n"
+                              "interior, and a self-shadow marched toward the sun instead of guessed from a\n"
+                              "particle's age. In Volumetric the injected billboards STOP drawing, or the\n"
+                              "smoke would be rendered twice; 'Both' keeps them on purpose so the two can be\n"
+                              "seen in one frame, and is an A/B view, not a setting to play with.\n"
+                              "REACH IS THE TRADE: the grid is cell size x 128/64/128 metres around the\n"
+                              "camera and smoke outside it is not drawn at all in Volumetric.");
+        if (vol.mode != SmokeSystemMode::Legacy)
+        {
+            ImGui::SetNextItemWidth(110.0f);
+            Dev::SliderFloat("Froxel cell m", &vol.cellSize, 0.25f, 4.0f, "%.2f");
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("POSEIDON_SMOKE_VOL_CELL. Metres per grid cell. The grid is a fixed\n"
+                                  "128 x 64 x 128 CELLS, so this alone sets both the detail and the reach:\n"
+                                  "1 m gives a 128 m box with metre-scale detail, 2 m gives 256 m and half\n"
+                                  "the detail. There is no free lunch here -- the memory is fixed.");
+            Dev::PanelSameLine();
+            ImGui::SetNextItemWidth(110.0f);
+            Dev::SliderInt("March steps", &vol.marchSteps, 8, 128);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("POSEIDON_SMOKE_VOL_STEPS. Samples along each view ray. This is the single\n"
+                                  "biggest cost term; the integration is analytic per step, so lowering it\n"
+                                  "loses detail rather than changing the plume's overall opacity.");
+            ImGui::SetNextItemWidth(110.0f);
+            Dev::SliderInt("Sun march steps", &vol.sunSteps, 0, 12);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("POSEIDON_SMOKE_VOL_SUN_STEPS. The SECOND march, from each sample toward\n"
+                                  "the sun, which is the self-shadow. 0 makes the plume uniformly lit and is\n"
+                                  "the cheapest ablation for measuring what it costs. Steps widen\n"
+                                  "geometrically, so 4 already reaches ~11 m at the default step length.");
+            Dev::PanelSameLine();
+            ImGui::SetNextItemWidth(110.0f);
+            Dev::SliderFloat("Self-shadow", &vol.selfShadow, 0.0f, 1.0f, "%.2f");
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("POSEIDON_SMOKE_VOL_SELFSHADOW. Blends between a flat plume and the full\n"
+                                  "sun march. Unlike the step count this costs nothing to change -- the march\n"
+                                  "still runs -- so it is the LOOK knob and the step count is the COST knob.");
+            ImGui::SetNextItemWidth(110.0f);
+            Dev::SliderFloat("Density x", &vol.density, 0.0f, 8.0f, "%.2f");
+            Dev::PanelSameLine();
+            ImGui::SetNextItemWidth(110.0f);
+            Dev::SliderFloat("Extinction x", &vol.extinction, 0.0f, 8.0f, "%.2f");
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("POSEIDON_SMOKE_VOL_DENSITY scales what is written INTO the field;\n"
+                                  "POSEIDON_SMOKE_VOL_EXTINCTION scales how much the march is absorbed by it.\n"
+                                  "They look similar and are not: density also feeds the sun march, so raising\n"
+                                  "it darkens the plume's core, while extinction alone just makes it opaquer.");
+            ImGui::SetNextItemWidth(110.0f);
+            Dev::SliderFloat("Albedo", &vol.albedo, 0.0f, 1.0f, "%.2f");
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("POSEIDON_SMOKE_VOL_ALBEDO. Single-scattering albedo: how much of what the\n"
+                                  "medium takes out of a ray it scatters rather than absorbs. Sooty diesel\n"
+                                  "smoke is low and dark; steam and white smoke grenades are near 1.");
+            Dev::PanelSameLine();
+            ImGui::SetNextItemWidth(110.0f);
+            Dev::SliderFloat("Forward scatter g", &vol.anisotropy, -0.9f, 0.9f, "%.2f");
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("POSEIDON_SMOKE_VOL_G. Henyey-Greenstein asymmetry. Positive throws light\n"
+                                  "forward, which is what makes a backlit plume glow at its rim; 0 is\n"
+                                  "isotropic and reads flat.");
+            ImGui::SetNextItemWidth(110.0f);
+            Dev::SliderInt("March scale", &vol.scale, 1, 4);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("POSEIDON_SMOKE_VOL_SCALE. 1 marches at render resolution, 2 at half and\n"
+                                  "upsamples with a nearest-DEPTH pick (not bilinear -- bilinear bleeds smoke\n"
+                                  "that marched past a foreground silhouette back over it). Half resolution is\n"
+                                  "the standard cost control and quarters the march work.");
+            ImGui::TextDisabled("particles injected %lld   frames marched %lld", vol.blobs, vol.framesMarched);
+            if (vol.framesMarched > 0 && vol.blobs == 0)
+            {
+                ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f),
+                                   "Marching, but NO particles reached the field - throw some smoke.");
+            }
+        }
+        ImGui::Separator();
+    }
     // SMK-037: how the game's smoke MEETS the world. Renderer state, not simulation, so it
     // sits at the head of the legacy block rather than among the containment queries.
     {

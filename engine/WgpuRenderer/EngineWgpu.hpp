@@ -1141,6 +1141,12 @@ class EngineWgpu : public EngineDummy
         WgrTerrainParams terrainParams{};
         bool terrainParamsDirty = false;
         std::vector<WgrSmokeShadowBlob> smokeBlobs;
+        // SMK-038: the same particles again, uncapped by the ground-shadow gates and
+        // with a larger cap, for froxel injection. Collected only while the volumetric
+        // system is selected, so the legacy path pays nothing.
+        std::vector<WgrSmokeShadowBlob> smokeVolumeBlobs;
+        WgrSmokeVolumeParams smokeVolume{};
+        bool smokeVolumeDirty = false;
         float smokeStrength = 0.0f;
         bool smokeDirty = false;
         float cloudShadowStrength = 0.0f, starIntensity = 0.0f, lensFlare = 0.0f;

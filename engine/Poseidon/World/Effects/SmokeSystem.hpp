@@ -117,7 +117,10 @@ class SmokeSystem
     /// first, capped at `maxBlobs`. `strength` is the global multiplier the panel
     /// exposes. Cost is a walk over the live particles; called once per frame by
     /// the renderer, not by the panel.
-    void CollectShadowBlobs(std::vector<ShadowBlob>& out, std::size_t maxBlobs) const;
+    //! `force` ignores the ground-shadow strength/enable gates. SMK-038 needs the same
+    //! particle list for froxel injection, and that has nothing to do with whether the
+    //! ground-shadow pass is switched on.
+    void CollectShadowBlobs(std::vector<ShadowBlob>& out, std::size_t maxBlobs, bool force = false) const;
 
     float GroundShadowStrength() const { return _groundShadowStrength; }
     void SetGroundShadowStrength(float strength) { _groundShadowStrength = strength; }

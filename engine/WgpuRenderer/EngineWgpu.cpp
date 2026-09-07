@@ -2116,6 +2116,21 @@ void EngineWgpu::ApplyPendingRendererSettings(PendingRendererSettings& p)
         wgr_grass_set_card_spacing(_renderer, p.grassCardSpacing);
         p.grassSpacingDirty = false;
     }
+    if (p.smokeVolumeDirty)
+    {
+        // SMK-038. Params first, then the particles: with mode 0 the renderer drops both on
+        // the floor, so the order only matters for readability.
+        wgr_set_smoke_volume(_renderer, &p.smokeVolume);
+        wgr_set_smoke_volume_blobs(_renderer, p.smokeVolumeBlobs.empty() ? nullptr : p.smokeVolumeBlobs.data(),
+                                   static_cast<uint32_t>(p.smokeVolumeBlobs.size()));
+        p.smokeVolumeDirty = false;
+        // Read the counters straight back: they are the only thing that separates
+        // "selected but no smoke reached the field" from "selected and marching".
+        const uint64_t stats = wgr_get_smoke_volume_stats(_renderer);
+        SmokeVolumetricParams& vol = GSmokeVolumetric();
+        vol.blobs = static_cast<long long>(stats & 0xffffffffu);
+        vol.framesMarched = static_cast<long long>(stats >> 32);
+    }
     {
         // SMK-037: the soft-particle lever, read straight off GSmokeSoftParticles rather than
         // routed through PendingRendererSettings -- growing that struct is a wider change than
@@ -11108,6 +11123,65 @@ void EngineWgpu::PushRenderParams()
             _pendingSet.smokeBlobs.assign(packed.begin(), packed.end());
             _pendingSet.smokeStrength = GSmokeSystem.GroundShadowStrength();
             _pendingSet.smokeDirty = true;
+
+            // SMK-038: the same particles for froxel injection, but collected with `force`
+            // (the ground-shadow strength gate has nothing to do with whether the volumetric
+            // system wants them) and at the injection cap, which is four times the shadow
+            // pass's -- injection costs per particle, the shadow pass costs per particle PER
+            // SHADOW TEXEL. Collected only while the volumetric system is selected, so
+            // choosing Legacy costs a comparison.
+            SmokeVolumetricParams& vol = GSmokeVolumetric();
+            if (vol.mode != SmokeSystemMode::Legacy)
+            {
+                static std::vector<SmokeSystem::ShadowBlob> volBlobs;
+                GSmokeSystem.CollectShadowBlobs(volBlobs, 2048, true);
+                _pendingSet.smokeVolumeBlobs.resize(volBlobs.size());
+                for (std::size_t i = 0; i < volBlobs.size(); ++i)
+                {
+                    _pendingSet.smokeVolumeBlobs[i].pos_radius = {volBlobs[i].x, volBlobs[i].y, volBlobs[i].z,
+                                                                  volBlobs[i].radius};
+                    _pendingSet.smokeVolumeBlobs[i].density = {volBlobs[i].density, volBlobs[i].heightAboveGround,
+                                                               0.0f, 0.0f};
+                }
+            }
+            else
+            {
+                _pendingSet.smokeVolumeBlobs.clear();
+            }
+            // The sun the smoke is lit by is the one SMK-035 already shades the billboards
+            // with, so the two systems cannot disagree about the time of day.
+            WgrSmokeVolumeParams vp{};
+            vp.mode = static_cast<uint32_t>(vol.mode);
+            vp.cell_size = vol.cellSize;
+            vp.march_steps = static_cast<uint32_t>(vol.marchSteps);
+            vp.sun_steps = static_cast<uint32_t>(vol.sunSteps);
+            vp.sun_step_len = vol.sunStepLen;
+            vp.density = vol.density;
+            vp.extinction = vol.extinction;
+            vp.albedo = vol.albedo;
+            vp.anisotropy = vol.anisotropy;
+            vp.self_shadow = vol.selfShadow;
+            vp.jitter = vol.jitter;
+            vp.scale = static_cast<uint32_t>(vol.scale);
+            if (GLOB_SCENE != nullptr && GLOB_SCENE->MainLight() != nullptr)
+            {
+                const LightSun* sun = GLOB_SCENE->MainLight();
+                const Vector3 toSun = -sun->Direction();
+                vp.sun_dir = {toSun.X(), toSun.Y(), toSun.Z(), 0.0f};
+                const LegacySmokeShading& sh = GLegacySmokeShading();
+                const Color diffuse = sun->Diffuse() * sh.diffuse;
+                const Color ambient = sun->Ambient() * sh.ambient;
+                vp.sun_radiance = {diffuse.R(), diffuse.G(), diffuse.B(), 0.0f};
+                vp.ambient = {ambient.R(), ambient.G(), ambient.B(), 0.0f};
+            }
+            else
+            {
+                vp.sun_dir = {0.0f, 1.0f, 0.0f, 0.0f};
+                vp.sun_radiance = {1.0f, 1.0f, 1.0f, 0.0f};
+                vp.ambient = {0.2f, 0.2f, 0.24f, 0.0f};
+            }
+            _pendingSet.smokeVolume = vp;
+            _pendingSet.smokeVolumeDirty = true;
         }
         _pendingSet.cloudShadowStrength = std::clamp(_sky.cloudShadowStrength, 0.0f, 1.0f);
         _pendingSet.starIntensity = std::clamp(_sky.starIntensity, 0.0f, 4.0f);

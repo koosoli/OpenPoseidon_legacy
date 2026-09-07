@@ -17,6 +17,7 @@ mod handles;
 mod log;
 mod planar_mips;
 mod shaders;
+mod smoke_volume;
 mod soft_particles;
 mod sky;
 mod temporal;
@@ -886,6 +887,12 @@ pub struct Renderer {
     // plus the two live knobs the Smoke tab pushes. `soft_enabled` gates BOTH the snapshot pass
     // and the C++ side's choice of depth mode, so with it off nothing here is recorded, no
     // pipeline changes, and the 2D path is byte-for-byte what it was.
+    // SMK-038: the volumetric smoke field. Inert (and allocation-free beyond its pipelines)
+    // until the Smoke tab selects it.
+    pub(crate) smoke_volume: smoke_volume::SmokeVolume,
+    smoke_sun_dir: [f32; 3],
+    smoke_sun_radiance: [f32; 3],
+    smoke_ambient: [f32; 3],
     soft_particles: soft_particles::SoftParticles,
     soft_enabled: bool,
     soft_fade: f32,
@@ -1776,6 +1783,9 @@ impl Renderer {
         let godrays = hdr_enabled.then(|| GodRays::new(&device, HDR_FORMAT, sample_count));
         // SMK-037: created unconditionally (one pipeline, no target until a frame asks).
         let soft_particles = soft_particles::SoftParticles::new(&device);
+        // SMK-038: same -- pipelines and the froxel texture, but no march target and no work
+        // recorded until the mode is switched off Legacy.
+        let smoke_volume = smoke_volume::SmokeVolume::new(&device, color_format, sample_count);
         let planar_mips = PlanarMips::new(&device, HDR_FORMAT);
         let exposure = hdr_enabled.then(|| Exposure::new(&device, &queue));
         // The sky targets the scene color format (HDR target or swapchain), matching
@@ -1974,6 +1984,10 @@ impl Renderer {
             },
             godrays,
             godrays_frame: None,
+            smoke_volume,
+            smoke_sun_dir: [0.0, 1.0, 0.0],
+            smoke_sun_radiance: [1.0, 1.0, 1.0],
+            smoke_ambient: [0.2, 0.2, 0.24],
             soft_particles,
             soft_enabled: false,
             soft_fade: 1.5,
@@ -2841,6 +2855,33 @@ impl Renderer {
     // extent/flag change, and a scale change raises an explicit history reset.
     /// SMK-037: the live soft-particle knobs. Cheap and idempotent -- nothing is created or
     /// destroyed here; `soft_enabled` is read once per frame when the sky camera is derived.
+    /// SMK-038: the volumetric-smoke tuning, plus the frame's sun, which the engine already
+    /// computes for the legacy per-particle shading -- taking it from there rather than from
+    /// the sky UBO keeps one source of truth for "what is lighting the smoke".
+    fn set_smoke_volume(&mut self, p: &ffi::WgrSmokeVolumeParams) {
+        self.smoke_volume.set_tuning(&smoke_volume::Tuning {
+            mode: p.mode,
+            cell_size: p.cell_size,
+            march_steps: p.march_steps,
+            sun_steps: p.sun_steps,
+            sun_step_len: p.sun_step_len,
+            density: p.density,
+            extinction: p.extinction,
+            albedo: p.albedo,
+            anisotropy: p.anisotropy,
+            self_shadow: p.self_shadow,
+            jitter: p.jitter,
+            scale: p.scale,
+        });
+        self.smoke_sun_dir = [p.sun_dir[0], p.sun_dir[1], p.sun_dir[2]];
+        self.smoke_sun_radiance = [p.sun_radiance[0], p.sun_radiance[1], p.sun_radiance[2]];
+        self.smoke_ambient = [p.ambient[0], p.ambient[1], p.ambient[2]];
+    }
+
+    fn set_smoke_volume_blobs(&mut self, blobs: &[smoke_volume::SmokeBlob]) {
+        self.smoke_volume.set_blobs(&self.queue, blobs);
+    }
+
     fn set_soft_particles(&mut self, enabled: bool, fade_metres: f32) {
         self.soft_enabled = enabled;
         self.soft_fade = fade_metres.clamp(0.05, 20.0);
@@ -5534,6 +5575,43 @@ impl Renderer {
             // see soft_particles.wgsl. Recorded only while the lever is on, and only in the
             // world segment (a post-ClearDepth weapon segment has its own depth, and no
             // smoke).
+            // SMK-038: the volumetric smoke, composited HERE for exactly the reasons the
+            // clouds and the god rays are: the march stops at the SCENE depth, and an
+            // alpha-blended draw writes none -- so running it after the transparents would
+            // paint smoke straight over every window, fence and iron sight in front of it.
+            // After the opaque world, water and clouds; before the transparent replay.
+            if start == 0 && !resolved && self.smoke_volume.active() {
+                self.ensure_far_depth_resolve(&mut encoder);
+                if let (Some(depth_view), Some(frame)) = (
+                    self.gfx3d.water_depth_view().cloned(),
+                    self.godrays_frame,
+                ) {
+                    let (rw, rh) = self.render_size();
+                    let cam = [frame.cam_pos[0], frame.cam_pos[1], frame.cam_pos[2]];
+                    // Flatten the camera-relative inverse view-projection the sky derived.
+                    let m = frame.inv_view_proj;
+                    let mut ivp = [0.0f32; 16];
+                    for c in 0..4 {
+                        for r in 0..4 {
+                            ivp[c * 4 + r] = m[c][r];
+                        }
+                    }
+                    self.smoke_volume.record(
+                        &self.device,
+                        &self.queue,
+                        &mut encoder,
+                        &target,
+                        &depth_view,
+                        (rw, rh),
+                        cam,
+                        ivp,
+                        self.smoke_sun_dir,
+                        self.smoke_sun_radiance,
+                        self.smoke_ambient,
+                    );
+                }
+            }
+
             if start == 0 && !resolved && self.soft_globals.active {
                 self.ensure_far_depth_resolve(&mut encoder);
                 if let Some(depth_view) = self.gfx3d.water_depth_view().cloned() {
