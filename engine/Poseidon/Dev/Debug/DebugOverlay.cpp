@@ -1093,9 +1093,14 @@ void DrawZeusWeatherAndTime(bool worldAvailable)
     if (!editingHour)
         hour = Glob.clock.GetTimeOfDay() * 24.0f;
 
-    ImGui::Spacing();
-    Dev::PanelHeading("Weather and time");
-    Dev::PanelSeparator();
+    if (!ImGui::CollapsingHeader("Weather and time##zeus"))
+    {
+        // Collapsed: no widget ran this frame, so nothing can still be mid-drag.
+        editingOvercast = false;
+        editingFog = false;
+        editingHour = false;
+        return;
+    }
 
     const bool available = worldAvailable && DebugCheats::Cmd_SetWeather::Available();
     ImGui::BeginDisabled(!available);
@@ -1344,6 +1349,11 @@ void DrawZeusTab()
     Dev::PanelHelp("native free-fly camera and live spawning");
     Dev::PanelSeparator();
 
+    // The tab is a long wall of controls, so every group below is a collapsing
+    // section and only the two the owner reaches for first open by default.
+    // Nothing here changes what a control does -- this is grouping only.
+    if (ImGui::CollapsingHeader("Free-fly camera##zeus", ImGuiTreeNodeFlags_DefaultOpen))
+    {
     ImGui::BeginDisabled(!worldAvailable);
     if (!s_zeusCamera)
     {
@@ -1363,10 +1373,9 @@ void DrawZeusTab()
     ImGui::EndDisabled();
     if (Dev::PanelItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
         ImGui::SetTooltip("WASD moves, Q/Z changes altitude, and the mouse looks around.\nKeypad +/- changes zoom.");
+    }
 
-    ImGui::Spacing();
-    Dev::PanelHeading("Player camera");
-    Dev::PanelSeparator();
+    if (ImGui::CollapsingHeader("Player camera##zeus"))
     {
         // Third person (the Numpad-Enter "Person view" toggle) is not a
         // keybinding problem when it does nothing -- World.cpp forces the
@@ -1406,9 +1415,8 @@ void DrawZeusTab()
                           "forbids it), the camera snaps back to first person -- the gate wins, as with the key.");
     }
 
-    ImGui::Spacing();
-    Dev::PanelHeading("Go to coordinates");
-    Dev::PanelSeparator();
+    if (ImGui::CollapsingHeader("Go to coordinates##zeus"))
+    {
     ImGui::BeginDisabled(!worldAvailable);
     ImGui::SetNextItemWidth(-1.0f);
     // Enter in the box is the same as pressing the button: pasting a pose and hitting
@@ -1440,10 +1448,10 @@ void DrawZeusTab()
     }
     Dev::PanelTooltip("Puts the current free-fly position on the clipboard in the order this box expects.");
     ImGui::EndDisabled();
+    }
 
-    ImGui::Spacing();
-    Dev::PanelHeading("Throw from camera");
-    Dev::PanelSeparator();
+    if (ImGui::CollapsingHeader("Throw from camera##zeus"))
+    {
     ImGui::BeginDisabled(!worldAvailable);
     {
         const char* labels[IM_ARRAYSIZE(kZeusThrowPresets)];
@@ -1473,7 +1481,15 @@ void DrawZeusTab()
         Dev::PanelTooltip("Launches from the scene camera 2 m ahead, along the view direction, in free-fly\n"
                           "and in normal play alike. Missiles fly straight (no target); shells and bombs\n"
                           "follow ballistics; hand grenades fuse as in the game.");
-        // LGT-013: the head torch.
+    }
+    ImGui::EndDisabled();
+    }
+
+    // LGT-013: the head torch.
+    if (ImGui::CollapsingHeader("Head torch##zeus"))
+    {
+    ImGui::BeginDisabled(!worldAvailable);
+    {
         if (Dev::Checkbox("Head torch (follows the view)", &s_headlampOn))
         {
             UpdateHeadlamp();
@@ -1496,7 +1512,15 @@ void DrawZeusTab()
             ImGui::ColorEdit3("Torch colour", s_headlampColor, ImGuiColorEditFlags_NoInputs);
         }
 
-        // DST-003: how far a wrecked building comes down.
+    }
+    ImGui::EndDisabled();
+    }
+
+    // DST-003: how far a wrecked building comes down.
+    if (ImGui::CollapsingHeader("Building destruction##zeus"))
+    {
+    ImGui::BeginDisabled(!worldAvailable);
+    {
         DestructionLook& destruct = GDestructionLook();
         Dev::Checkbox("Buildings collapse further (DST-003)", &destruct.enabled);
         Dev::PanelTooltip("POSEIDON_DESTRUCT_LOOK=0 restores the 2001 collapse exactly. The destruction\n"
@@ -1511,10 +1535,10 @@ void DrawZeusTab()
         Dev::PanelTooltip("POSEIDON_DESTRUCT_SQUASH. 1.0 is the authored 20% maximum height loss.");
     }
     ImGui::EndDisabled();
+    }
 
-    ImGui::Spacing();
-    Dev::PanelHeading("Spawn at camera aim");
-    Dev::PanelSeparator();
+    if (ImGui::CollapsingHeader("Spawn at camera aim##zeus", ImGuiTreeNodeFlags_DefaultOpen))
+    {
     ImGui::BeginDisabled(!worldAvailable);
     if (Dev::RadioButton("Unit", s_zeusSpawnKind == 0))
     {
@@ -1574,10 +1598,10 @@ void DrawZeusTab()
     }
     ImGui::EndDisabled();
     ImGui::EndDisabled();
+    }
 
-    ImGui::Spacing();
-    Dev::PanelHeading("Zeus-spawned object editing");
-    Dev::PanelSeparator();
+    if (ImGui::CollapsingHeader("Selection and clipboard##zeus"))
+    {
     ImGui::BeginDisabled(!s_zeusCamera);
     if (Dev::Button("Select under cursor"))
         Defer(
@@ -1638,6 +1662,7 @@ void DrawZeusTab()
     ImGui::EndDisabled();
     ImGui::EndDisabled();
     ImGui::EndDisabled();
+    }
 
     DrawZeusWeatherAndTime(worldAvailable);
 

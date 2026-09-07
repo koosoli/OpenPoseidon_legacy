@@ -127,6 +127,13 @@ struct LocalShadowSettings
                             //!< LGT-015: a spot costs one view of sixteen, a point costs six
                             //!< (its cube), so three lights is the point where the view budget
                             //!< and this one run out together for a street full of lamps.
+    // LGT-016: a caster whose ORIGIN is closer to the bulb than this is not submitted to
+    // that light's shadow views. The light is INSIDE it, and a closed mesh around a light
+    // occludes every direction at once -- which is not a subtle artefact: the first cube
+    // capture had six faces each filled edge to edge by the emitting sphere's own shell, and
+    // the whole village went black. A self-illuminating object is the obvious case; a lamp
+    // is safe because the post model's origin is metres from the bulb.
+    float selfRadius = 1.2f;
     // The near plane of the light's own frustum, metres. Perspective depth precision is
     // spent between the near plane and a few times its distance, so this is NOT "as small as
     // possible": 1 cm on a 40 m beam is shadow acne.

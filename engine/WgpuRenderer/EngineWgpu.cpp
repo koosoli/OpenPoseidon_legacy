@@ -1917,7 +1917,10 @@ uint32_t EngineWgpu::LocalShadowCasterMask(float relX, float relY, float relZ) c
         const float dx = (relX + _smCamPos[0]) - L.pos[0];
         const float dy = (relY + _smCamPos[1]) - L.pos[1];
         const float dz = (relZ + _smCamPos[2]) - L.pos[2];
-        if (dx * dx + dy * dy + dz * dz <= reach * reach)
+        const float d2 = dx * dx + dy * dy + dz * dz;
+        // LGT-016: too close is as disqualifying as too far. See LocalShadowSettings.
+        const float self2 = ls.selfRadius * ls.selfRadius;
+        if (d2 <= reach * reach && d2 >= self2)
         {
             mask |= 1u << (firstBit + k);
         }
