@@ -998,6 +998,11 @@ pub struct WgrShadowPass {
     // Camera world position: casters are camera-relative, so the depth shader adds
     // this back to reconstruct absolute world xz for surface_y (terrain conform).
     pub cam_pos: WgrVec4,
+    // LGT-010: shadow views for LOCAL lights, rendered into layers count..count+n-1 of the
+    // same depth array as the cascades.
+    pub local_count: u32,
+    pub local_pad: [u32; 3],
+    pub local_vp: [WgrMat4; 4],
 }
 
 #[repr(u32)]
@@ -1574,7 +1579,8 @@ const _: () = assert!(std::mem::size_of::<WgrFrameParams>() == 16);
 const _: () = assert!(std::mem::size_of::<WgrCameraShadow>() == 624);
 const _: () = assert!(std::mem::size_of::<WgrCamera>() == 848);
 const _: () = assert!(std::mem::size_of::<WgrShadowCaster>() == 136);
-const _: () = assert!(std::mem::size_of::<WgrShadowPass>() == 288);
+// LGT-010 grew this by local_count + 3 pad words + four mat4: 288 + 16 + 256.
+const _: () = assert!(std::mem::size_of::<WgrShadowPass>() == 560);
 const _: () = assert!(std::mem::size_of::<WgrCmd>() == 8);
 const _: () = assert!(std::mem::size_of::<WgrOverlayVertex>() == 20);
 const _: () = assert!(std::mem::size_of::<WgrOverlayDraw>() == 40);
@@ -1597,7 +1603,7 @@ const _: () = assert!(std::mem::align_of::<WgrWaterInteractionEvent>() == 16);
 const _: () = assert!(std::mem::size_of::<WgrWaterInteractionParams>() == 96);
 const _: () = assert!(std::mem::align_of::<WgrWaterInteractionParams>() == 16);
 const _: () = assert!(std::mem::size_of::<WgrSlice<WgrCamera>>() == 16);
-const _: () = assert!(std::mem::size_of::<WgrFrame>() == 576);
+const _: () = assert!(std::mem::size_of::<WgrFrame>() == 848);
 const _: () = assert!(std::mem::size_of::<WgrFarInstance>() == 32);
 const _: () = assert!(std::mem::size_of::<WgrAbiCheck>() == 28);
 

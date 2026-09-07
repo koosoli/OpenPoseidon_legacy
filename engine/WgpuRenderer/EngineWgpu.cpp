@@ -3748,6 +3748,24 @@ void EngineWgpu::NextFrame()
             // _currentCamera, which may have advanced to a HUD/weapon camera by now); the
             // depth shader adds cam_pos back to sample the terrain conform at the right xz.
             frame.shadow.cam_pos = {_smCamPos[0], _smCamPos[1], _smCamPos[2], 0.0f};
+            // LGT-010: the same spot matrices the camera block got, handed to the DEPTH pass
+            // so it knows where to render from. Recomputed rather than copied out of a camera:
+            // `cameras[i]` is a per-view array and the shadow pass is one per frame, so
+            // reaching into it would silently pick whichever view happened to be last.
+            {
+                const Poseidon::Dev::LocalShadowSettings& ls = Poseidon::Dev::GLocalShadowSettings();
+                frame.shadow.local_count = U32(_localShadowCount);
+                for (int k = 0; k < _localShadowCount && k < kMaxLocalShadows; k++)
+                {
+                    const LocalShadowLight& L = _localShadowLights[k];
+                    const float reach = std::max(L.startAtten * ls.rangeScale, 2.0f);
+                    const float cone = L.coneOuter > 0.01f ? L.coneOuter : 0.45f;
+                    const Poseidon::shadow::Mat4 vp = Poseidon::shadow::SpotLightVP(
+                        {L.pos[0], L.pos[1], L.pos[2]}, {L.dir[0], L.dir[1], L.dir[2]}, cone,
+                        std::max(ls.nearD, 0.01f), reach, {_smCamPos[0], _smCamPos[1], _smCamPos[2]});
+                    std::memcpy(frame.shadow.local_vp[k].m, vp.m.data(), sizeof(frame.shadow.local_vp[k].m));
+                }
+            }
             frame.shadow_casters = backing.shadowCasters;
         }
         frame.overlay_verts = backing.overlayVerts;

@@ -908,6 +908,13 @@ struct WgrShadowPass
     // Camera world position: casters are camera-relative, so the depth shader adds
     // this back to reconstruct absolute world xz for surface_y (terrain conform).
     WgrVec4 cam_pos;
+    /* LGT-010: shadow views for LOCAL lights, rendered into layers `count .. count+n-1` of
+     * the same depth array the cascades use. A separate family rather than more cascades,
+     * exactly as the interior sky-visibility map is a separate family: they are selected
+     * differently and they are a different projection kind. */
+    uint32_t local_count;
+    uint32_t local_pad[3];
+    WgrMat4 local_vp[4];
 };
 
 /* One entry in the frame's submission-ordered command stream. */
@@ -1973,7 +1980,9 @@ static_assert(sizeof(WgrCameraShadow) == 352 + 4 * 64 + 16,
 static_assert(sizeof(WgrCamera) == 576 + 4 * 64 + 16,
               "WgrCamera layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrShadowCaster) == 136, "WgrShadowCaster layout must match the Rust #[repr(C)] struct");
-static_assert(sizeof(WgrShadowPass) == 288, "WgrShadowPass layout must match the Rust #[repr(C)] struct");
+// LGT-010 grew this by local_count + 3 pad words + four mat4: 288 + 16 + 256.
+static_assert(sizeof(WgrShadowPass) == 288 + 16 + 4 * 64,
+              "WgrShadowPass layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrCmd) == 8, "WgrCmd layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrOverlayVertex) == 20, "WgrOverlayVertex layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrOverlayDraw) == 40, "WgrOverlayDraw layout must match the Rust #[repr(C)] struct");
@@ -1992,7 +2001,9 @@ static_assert(sizeof(WgrWaterBatch) == 16, "WgrWaterBatch layout must match the 
 static_assert(sizeof(WgrWaterInteractionEvent) == 64 && alignof(WgrWaterInteractionEvent) == 16, "WgrWaterInteractionEvent must match Rust");
 static_assert(sizeof(WgrWaterInteractionParams) == 96 && alignof(WgrWaterInteractionParams) == 16, "WgrWaterInteractionParams must match Rust");
 static_assert(sizeof(WgrFarInstance) == 32, "WgrFarInstance layout must match the Rust #[repr(C)] struct");
-static_assert(sizeof(WgrFrame) == 576, "WgrFrame layout must match the Rust #[repr(C)] struct");
+// WgrFrame embeds WgrShadowPass, so LGT-010 grew it by the same 272 bytes.
+static_assert(sizeof(WgrFrame) == 576 + 16 + 4 * 64,
+              "WgrFrame layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrAbiCheck) == 28, "WgrAbiCheck layout must match Rust");
 
 // --- Functions ---------------------------------------------------------------
