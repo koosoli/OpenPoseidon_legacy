@@ -748,6 +748,32 @@ Mat4 OmniSphereLightVP(const Vec3& camPos, float radius, const Vec3& sunDir, con
     return Mul(Ortho(minX, maxX, minY, maxY, -zMax, -zMin), lv);
 }
 
+Mat4 SpotLightVP(const Vec3& lightPos, const Vec3& lightDir, float outerHalfAngle, float nearD, float farD,
+                 const Vec3& camPos, float marginScale)
+{
+    Vec3 dir = Normalize(lightDir);
+    if (!(dir.x * dir.x + dir.y * dir.y + dir.z * dir.z > 0.5f))
+    {
+        dir = Vec3{0.0f, -1.0f, 0.0f}; // a degenerate direction: point it at the ground
+    }
+    // LookAt's basis is undefined when `up` is parallel to the view direction, and a street
+    // lamp points STRAIGHT DOWN -- the one case a naive (0,1,0) gets wrong every time.
+    const Vec3 up = (std::fabs(dir.y) > 0.99f) ? Vec3{0.0f, 0.0f, 1.0f} : Vec3{0.0f, 1.0f, 0.0f};
+    const Mat4 view = LookAt(lightPos, lightPos + dir, up);
+
+    float half = outerHalfAngle * (marginScale > 0.0f ? marginScale : 1.0f);
+    // Clamped well short of 90 degrees: tan() runs away there, and a cone that wide is not a
+    // spot any more -- it wants the six faces of a point light instead.
+    const float kMaxHalf = 1.4f; // ~80 degrees
+    const float kMinHalf = 0.02f;
+    half = half < kMinHalf ? kMinHalf : (half > kMaxHalf ? kMaxHalf : half);
+
+    float n = nearD > 1e-3f ? nearD : 1e-3f;
+    float f = farD > n * 1.01f ? farD : n * 1.01f;
+    const Mat4 proj = Perspective(2.0f * half, 1.0f, n, f);
+    return ToCameraRelative(Mul(proj, view), camPos);
+}
+
 CascadeSet BuildShadowCascadesTiered(const CascadeBuildParams& p)
 {
     CascadeSet cs;

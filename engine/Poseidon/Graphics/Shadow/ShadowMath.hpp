@@ -253,6 +253,26 @@ CascadeSet BuildShadowCascades(const CascadeBuildParams& p);
 // fit misses casters behind/beside the camera whose shadow falls into the view;
 // this does not. World-snapped in double like CascadeLightVPStable; returns the
 // camera-relative light-VP (camera at the origin).
+// LGT-010: the light view-projection for a SPOT (a vehicle headlight, a downward street
+// lamp). The sun's cascades are orthographic because its rays are parallel; a spot has a
+// position and a cone, so it is a perspective projection -- literally a second camera
+// standing at the bulb and looking down the beam.
+//
+// `outerHalfAngle` is the HALF angle of the cone in radians (the beam's edge from its
+// axis). The frustum is opened wider than that by `marginScale`, because a cone edge lying
+// exactly on the frustum border loses its PCF taps: the neighbouring texels a soft-shadow
+// filter reads are off the map, and the shadow frays along the rim of the light pool.
+//
+// `nearD` matters more here than for a cascade. Depth precision in a perspective projection
+// is spent almost entirely between the near plane and a few times its distance, so a near
+// plane of 1 cm on a 40 m beam throws the precision away and returns shadow acne. Callers
+// pass something on the order of a tenth of the beam length.
+//
+// Returned CAMERA-RELATIVE, like every other matrix here, because the depth pass draws
+// camera-relative casters.
+Mat4 SpotLightVP(const Vec3& lightPos, const Vec3& lightDir, float outerHalfAngle, float nearD, float farD,
+                 const Vec3& camPos, float marginScale = 1.15f);
+
 Mat4 OmniSphereLightVP(const Vec3& camPos, float radius, const Vec3& sunDir, const Vec3& up, int resolution,
                        float zPad);
 

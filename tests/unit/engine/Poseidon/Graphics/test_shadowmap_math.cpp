@@ -866,3 +866,76 @@ TEST_CASE("ShadowMath tiered: cascade set records the normalized sun direction",
     REQUIRE(Length(cs.sunDir) == Catch::Approx(1.0f).margin(1e-5f));
     REQUIRE(cs.sunDir.y < 0.0f);
 }
+
+// ---------------------------------------------------------------------------
+// LGT-010: the spot-light view-projection. A vehicle headlight and a downward
+// street lamp are perspective views from the bulb, not orthographic slabs, and
+// the two cases that break a naive implementation are a light pointing straight
+// down (LookAt's basis degenerates against a (0,1,0) up) and a cone edge sitting
+// exactly on the frustum border (PCF taps read off the map and the pool frays).
+// ---------------------------------------------------------------------------
+
+TEST_CASE("ShadowMath spot: the beam is covered and the world outside it is not", "[Graphics][ShadowMath]")
+{
+    // Everon-scale camera so the camera-relative conversion is actually exercised.
+    const Vec3 camPos{5500.0f, 30.0f, -4700.0f};
+    // A headlight 2 m in front of the camera, shining along -Z, 20 degree half angle.
+    const Vec3 lightPos = camPos + Vec3{0.0f, 0.0f, -2.0f};
+    const Vec3 dir{0.0f, 0.0f, -1.0f};
+    const float halfAngle = 20.0f * 3.14159265f / 180.0f;
+    const Mat4 vp = SpotLightVP(lightPos, dir, halfAngle, 0.5f, 40.0f, camPos);
+
+    // Camera-relative points, as the depth pass supplies them.
+    // On the beam axis, well inside near/far: dead centre of the map.
+    const Vec3 onAxis = TransformPoint(vp, Vec3{0.0f, 0.0f, -12.0f});
+    REQUIRE(std::fabs(onAxis.x) < 1e-3f);
+    REQUIRE(std::fabs(onAxis.y) < 1e-3f);
+    REQUIRE(onAxis.z > 0.0f);
+    REQUIRE(onAxis.z < 1.0f);
+
+    // Inside the cone at 10 m: 10*tan(20deg) = 3.6 m off axis. Covered.
+    REQUIRE(InCascade(vp, {2.0f, 0.0f, -12.0f}));
+    REQUIRE(InCascade(vp, {0.0f, 2.0f, -12.0f}));
+
+    // Far outside the cone at the same depth is NOT covered -- the map is the beam,
+    // not the world.
+    REQUIRE_FALSE(InCascade(vp, {40.0f, 0.0f, -12.0f}));
+    // Behind the light entirely: not covered.
+    REQUIRE_FALSE(InCascade(vp, {0.0f, 0.0f, +12.0f}));
+    // Past the far plane: not covered.
+    REQUIRE_FALSE(InCascade(vp, {0.0f, 0.0f, -400.0f}));
+}
+
+TEST_CASE("ShadowMath spot: a lamp pointing straight down does not degenerate", "[Graphics][ShadowMath]")
+{
+    // The case a (0,1,0) up vector gets wrong every time: dir is parallel to up, the
+    // cross product is zero, and LookAt returns a basis full of NaNs. A street lamp
+    // points straight down, so this is the common case rather than a corner one.
+    const Vec3 camPos{5500.0f, 30.0f, -4700.0f};
+    const Vec3 lightPos = camPos + Vec3{0.0f, 6.0f, 0.0f}; // 6 m up, on the pole
+    const Mat4 vp = SpotLightVP(lightPos, {0.0f, -1.0f, 0.0f}, 0.6f, 0.5f, 30.0f, camPos);
+
+    for (int i = 0; i < 16; i++)
+    {
+        REQUIRE(std::isfinite(vp.m[i]));
+    }
+    // The ground under the lamp is in the map; a point far to the side is not.
+    REQUIRE(InCascade(vp, {0.0f, 0.0f, 0.0f}));      // directly below, at camera height
+    REQUIRE_FALSE(InCascade(vp, {60.0f, 0.0f, 0.0f}));
+}
+
+TEST_CASE("ShadowMath spot: the margin keeps the cone edge off the frustum border", "[Graphics][ShadowMath]")
+{
+    // A point exactly ON the cone edge must land INSIDE the map with room to spare,
+    // or its PCF neighbourhood samples off the edge and the rim of the light pool
+    // frays. With marginScale 1.15 the edge should sit around 1/1.15 of the way out.
+    const Vec3 camPos{0.0f, 0.0f, 0.0f};
+    const float halfAngle = 20.0f * 3.14159265f / 180.0f;
+    const Mat4 vp = SpotLightVP({0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, -1.0f}, halfAngle, 0.5f, 50.0f, camPos);
+
+    const float depth = 10.0f;
+    const float edge = depth * std::tan(halfAngle);
+    const Vec3 n = TransformPoint(vp, Vec3{edge, 0.0f, -depth});
+    REQUIRE(std::fabs(n.x) < 1.0f);   // inside the map
+    REQUIRE(std::fabs(n.x) > 0.75f);  // but out near the rim, not wastefully central
+}
