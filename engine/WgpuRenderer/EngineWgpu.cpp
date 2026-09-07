@@ -1876,6 +1876,34 @@ bool EngineWgpu::SetSwapInterval(int interval)
     return true;
 }
 
+// LGT-010: which local light views this caster belongs in. A sphere-vs-point test against
+// each shadowing light's reach -- deliberately generous (it ignores the cone, so a caster
+// beside the beam is still submitted) because the cost of a false positive is one clipped
+// draw and the cost of a false negative is a missing shadow, which is a visible bug.
+uint32_t EngineWgpu::LocalShadowCasterMask(float relX, float relY, float relZ) const
+{
+    if (_localShadowCount <= 0)
+    {
+        return 0u;
+    }
+    const Poseidon::Dev::LocalShadowSettings& ls = Poseidon::Dev::GLocalShadowSettings();
+    const int firstBit = _smCascades.count;
+    uint32_t mask = 0u;
+    for (int k = 0; k < _localShadowCount && k < kMaxLocalShadows; k++)
+    {
+        const LocalShadowLight& L = _localShadowLights[k];
+        const float reach = std::max(L.startAtten * ls.rangeScale, 2.0f);
+        const float dx = (relX + _smCamPos[0]) - L.pos[0];
+        const float dy = (relY + _smCamPos[1]) - L.pos[1];
+        const float dz = (relZ + _smCamPos[2]) - L.pos[2];
+        if (dx * dx + dy * dy + dz * dz <= reach * reach)
+        {
+            mask |= 1u << (firstBit + k);
+        }
+    }
+    return mask;
+}
+
 void EngineWgpu::ResizeSurface(int w, int h)
 {
     WaitRenderIdle(); // exclusive renderer handle below (REN-THR-012)
@@ -3322,8 +3350,18 @@ void EngineWgpu::NextFrame()
                 const render::frame::PresentationSnapshot::LocalLight& src = snap.lights[i];
                 WgrLight pl{};
                 pl.pos = {src.pos.X(), src.pos.Y(), src.pos.Z(), src.startAtten};
-                pl.diffuse = {src.diffuse.R(), src.diffuse.G(), src.diffuse.B(), 0.0f};
-                pl.ambient = {src.ambient.R(), src.ambient.G(), src.ambient.B(), 0.0f};
+                // LGT-011: the light's OWN cone, in the two alpha channels that were sent as
+                // zero. The shader had 12 and 8 degrees hardcoded for every spot in the game,
+                // so a headlight authored with a 36 degree beam lit a 12 degree pinhole --
+                // which is why spot lights read as "they light almost nothing", and why a
+                // shadow map sized to the real cone did not line up with the lit pool.
+                // cos^2 rather than the angle: that is the form lights_contrib compares in.
+                const float cosO = std::cos(std::clamp(src.coneOuter, 0.0f, 1.55f));
+                const float cosI = std::cos(std::clamp(src.coneInner, 0.0f, 1.55f));
+                pl.diffuse = {src.diffuse.R(), src.diffuse.G(), src.diffuse.B(),
+                              src.coneOuter > 0.001f ? cosO * cosO : 0.0f};
+                pl.ambient = {src.ambient.R(), src.ambient.G(), src.ambient.B(),
+                              src.coneInner > 0.001f ? cosI * cosI : 0.0f};
                 // LGT-010: dir.w is the light KIND, and it carries the shadow slot with it
                 // rather than growing WgrLight -- that struct is size-asserted at 64 bytes
                 // on both sides of the ABI, and the shader's only test is `> 0.5` for
@@ -3355,16 +3393,30 @@ void EngineWgpu::NextFrame()
             {
                 // A gauge that can say "the pass ran and nothing qualified" separately from
                 // "the pass never ran" -- the trap this project keeps rediscovering.
+                // Keyed on the SPOT count as well as the slot count. Keying on slots alone
+                // said "0 of 0" once and then stayed silent while the world filled with
+                // lights -- so it could not tell "no light qualified" from "no light exists",
+                // which is the whole reason this gauge is here.
+                int spots = 0;
+                for (size_t j = 0; j < selected; ++j)
+                {
+                    if (snap.lights[j].spot)
+                        ++spots;
+                }
                 static int saidCount = -1;
+                static int saidSpots = -1;
                 static bool saidEnabled = false;
-                if (saidCount != localShadowSlots || saidEnabled != localShadow.enabled)
+                if (saidCount != localShadowSlots || saidSpots != spots || saidEnabled != localShadow.enabled)
                 {
                     saidCount = localShadowSlots;
+                    saidSpots = spots;
                     saidEnabled = localShadow.enabled;
                     LOG_INFO(Graphics,
-                             "LGT-010 local shadows: {} -- {} of {} candidate lights own a shadow view (want {})",
-                             localShadow.enabled ? "ON" : "off", localShadowSlots, snap.lightCandidates,
-                             localShadowWanted);
+                             "LGT-010 local shadows: {} -- {} of {} lights in the frame are spots, {} own a "
+                             "shadow view (want {}, {} candidates, nightEffect {:.3f}, sunY {:.3f}, sceneLights {})",
+                             localShadow.enabled ? "ON" : "off", spots, selected, localShadowSlots,
+                             localShadowWanted, snap.lightCandidates, snap.nightEffect, snap.sunDirection.Y(),
+                             GScene != nullptr ? GScene->NLights() : -1);
                 }
             }
             Poseidon::Dev::GLightCounters().candidates = snap.lightCandidates;
@@ -9472,7 +9524,14 @@ void EngineWgpu::AddShadowCaster(const Shape& sMesh, const Matrix4& modelToWorld
         run.palette_slot = paletteSlot;
         run.alpha_ref = alphaRef;
         run.sampler = 0;
-        run.cascade_mask = 0xF;
+        // LGT-010: bits 0..3 are the sun's cascades; bit (cascadeCount + k) is local light
+        // k. A caster is masked into a light's view only when it is within that light's
+        // reach -- without this every object in the world would be transformed into every
+        // light view, which is exactly the cost that makes people say shadowed local lights
+        // are impossible.
+        // The caster's transform here is CAMERA-RELATIVE (see the note on shadow.cam_pos);
+        // the lights are absolute. Compare in one space or the mask is silently always empty.
+        run.cascade_mask = 0xF | LocalShadowCasterMask(run.world.m[12], run.world.m[13], run.world.m[14]);
         run.conform0 = conform0;
         run.conform2 = conform2;
         haveRun = true;

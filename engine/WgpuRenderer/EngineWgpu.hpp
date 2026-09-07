@@ -1536,6 +1536,8 @@ class EngineWgpu : public EngineDummy
         float startAtten = 0.0f; // the light's own reach, before the range multiplier
     };
     LocalShadowLight _localShadowLights[kMaxLocalShadows] = {};
+    //! LGT-010: the shadow-view bits a caster at this position belongs in.
+    uint32_t LocalShadowCasterMask(float relX, float relY, float relZ) const;
     int _localShadowCount = 0;
 
     // Dev-panel overlay for the current frame

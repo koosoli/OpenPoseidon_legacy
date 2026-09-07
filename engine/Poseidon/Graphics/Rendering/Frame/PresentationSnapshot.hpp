@@ -153,6 +153,7 @@ struct PresentationSnapshot
         // bulb, and getting it wrong either wastes the whole map on empty cone or clips the
         // beam's own edge away.
         float coneOuter = 0.0f;
+        float coneInner = 0.0f; //!< inner half-angle, radians: full brightness inside it
     };
     static constexpr int kMaxLights = 256;
     int lightCount = 0;

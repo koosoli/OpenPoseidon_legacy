@@ -310,6 +310,24 @@ void DrawPhysicsTab()
                               "purpose: a big ambient term flattens exactly the shading you opened\n"
                               "this to look at.");
         }
+        Dev::Checkbox("Cone (needed for shadows)", &s.lightSpot);
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("POSEIDON_PROBE_SPOT=1. A point light shines in every direction and would need\n"
+                              "six shadow maps; a cone needs one. So this is the switch that makes a probe\n"
+                              "able to cast a shadow at all -- with it off the probe lights the world but\n"
+                              "occludes nothing, which is what every local light in the game did before\n"
+                              "LGT-010.");
+        }
+        if (s.lightSpot)
+        {
+            Dev::PanelSameLine();
+            ImGui::SetNextItemWidth(140.0f);
+            Dev::SliderFloat("Cone (rad)", &s.lightConeOuter, 0.05f, 1.4f, "%.2f");
+            Dev::PanelTooltip("POSEIDON_PROBE_CONE. Outer half-angle of the beam. The lit pool follows this\n"
+                              "now (LGT-011); it used to be hardcoded at 12 degrees for every spot in the\n"
+                              "game, whatever the light itself said.");
+        }
         Dev::Checkbox("Draw the probe unlit", &s.selfIllum);
         if (ImGui::IsItemHovered())
         {

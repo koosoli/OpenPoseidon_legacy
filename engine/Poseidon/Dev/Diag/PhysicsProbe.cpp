@@ -116,7 +116,8 @@ std::vector<Ref<Object>> s_solidObjects;
 // PROBE-LIGHT: one LightPoint per probe, pooled like the solid objects. The scene owns
 // them once added, so the pool is only ever grown; a light that is not wanted this frame
 // is turned black rather than removed, which keeps the scene's light list stable.
-std::vector<Ref<LightPointVisible>> s_probeLights;
+std::vector<Ref<LightPositionedColored>> s_probeLights;
+bool s_probeSpotPool = false;
 int s_probeLightsUsed = 0;
 int                      s_solidUsed = 0;
 
@@ -158,16 +159,42 @@ void SubmitProbeLight(Vector3Par position)
     {
         return;
     }
+    // A cone and a point are different Light subclasses, so a change of kind has to rebuild
+    // the pooled light rather than mutate it.
+    if (!s_probeLights.empty() && s_probeSpotPool != s_settings.lightSpot)
+    {
+        for (auto& l : s_probeLights)
+        {
+            if (l)
+            {
+                l->SetDiffuse(HBlack);
+                l->SetAmbient(HBlack);
+            }
+        }
+        s_probeLights.clear();
+    }
+    s_probeSpotPool = s_settings.lightSpot;
     if (s_probeLightsUsed >= static_cast<int>(s_probeLights.size()))
     {
         // LightPointVisible, not LightPoint: it draws a halo of its own, which is the GLOW
         // the owner asked for -- what the lamp looks like, as opposed to what it does to
         // the world. The shape is the engine's own preloaded light sprite.
-        Ref<LightPointVisible> light = new LightPointVisible(GScene->Preloaded(HalfLight), HBlack, HBlack);
+        Ref<LightPositionedColored> light;
+        if (s_settings.lightSpot)
+        {
+            Ref<LightReflector> spot =
+                new LightReflector(GScene->Preloaded(HalfLight), HBlack, HBlack, s_settings.lightConeOuter);
+            spot->SetOrient(Vector3(0, -1, 0), Vector3(0, 0, 1)); // a lamp points at the floor
+            light = spot;
+        }
+        else
+        {
+            light = new LightPointVisible(GScene->Preloaded(HalfLight), HBlack, HBlack);
+        }
         GScene->AddLight(light);
         s_probeLights.push_back(light);
     }
-    LightPointVisible* light = s_probeLights[static_cast<std::size_t>(s_probeLightsUsed)];
+    LightPositionedColored* light = s_probeLights[static_cast<std::size_t>(s_probeLightsUsed)];
     ++s_probeLightsUsed;
     // The colour you set on the probe is the colour it shines. Anything else makes the
     // Colour picker a lie: you tint the ball red and it lights the street warm white.
@@ -176,8 +203,18 @@ void SubmitProbeLight(Vector3Par position)
     light->SetPosition(position);
     light->SetDiffuse(diffuse);
     light->SetAmbient(diffuse * s_settings.lightAmbient);
-    light->SetBrightness(s_settings.lightBrightness);
-    light->SetSize(s_settings.lightGlow);
+    if (auto* pv = dynamic_cast<LightPointVisible*>(light))
+    {
+        pv->SetBrightness(s_settings.lightBrightness);
+        pv->SetSize(s_settings.lightGlow);
+    }
+    else if (auto* rf = dynamic_cast<LightReflector*>(light))
+    {
+        rf->SetBrightness(s_settings.lightBrightness);
+        rf->SetSize(s_settings.lightGlow);
+        rf->SetAngle(s_settings.lightConeOuter);
+        rf->SetOrient(Vector3(0, -1, 0), Vector3(0, 0, 1));
+    }
 }
 
 } // namespace

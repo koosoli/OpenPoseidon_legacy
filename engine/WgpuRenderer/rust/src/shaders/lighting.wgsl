@@ -1,6 +1,6 @@
 #define_import_path lighting
 
-#import frame::{frame, lights}
+#import frame::{frame, lights, shadow_map, shadow_samp}
 #import color::srgb_to_linear
 
 // Sun lighting matching GL33's lit path: diffuse * N.L + ambient (eye
@@ -38,6 +38,47 @@ const LOCAL_MAX_INSIDE2: f32 = 0.98063081; // (cos 8deg)^2
 // mat_diffuse/mat_ambient modulate the per-light colour (GL33's matDif/matAmb;
 // pass white for terrain). Quadratic falloff past the light's start distance, cut
 // off at 100x; the light colours already fold in NightEffect, so day = no-op.
+// LGT-010: how much of local light `slot` reaches this fragment. 1 = lit, 0 = fully
+// shadowed. `world_rel` is camera-relative and local_vp is built camera-relative to the same
+// camera, so no rebasing is needed here -- getting that wrong is the classic way this comes
+// out either uniformly lit or uniformly black.
+//
+// The 3x3 PCF is the same shape the cascades use. A single tap on a perspective map gives a
+// hard, crawling edge, and a spot's map is small enough that one extra kernel is cheap.
+fn local_shadow_lit(world_rel: vec3<f32>, slot: i32) -> f32 {
+    let n_local = i32(frame.shadow.local_ctl.x);
+    if (slot < 0 || slot >= n_local) {
+        return 1.0;
+    }
+    let clip = frame.shadow.local_vp[slot] * vec4<f32>(world_rel, 1.0);
+    if (clip.w <= 0.0) {
+        return 1.0; // behind the light: its cone term has already rejected this fragment
+    }
+    let ndc = clip.xyz / clip.w;
+    if (ndc.x < -1.0 || ndc.x > 1.0 || ndc.y < -1.0 || ndc.y > 1.0 || ndc.z < 0.0 || ndc.z > 1.0) {
+        return 1.0; // outside the light's own map: nothing was rendered to occlude with
+    }
+    let uv = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+    let layer = i32(frame.shadow.local_ctl.w) + slot;
+    // Constant depth bias. A perspective map's texel footprint grows with distance from the
+    // light, so a slope-scaled bias would want the derivative of a value this function does
+    // not have; the constant is what the cascades use as their floor and it is enough at the
+    // ranges a headlight covers.
+    let bias = 0.0015;
+    let texel = frame.shadow.local_ctl.z;
+    var lit = 0.0;
+    for (var y = -1; y <= 1; y = y + 1) {
+        for (var x = -1; x <= 1; x = x + 1) {
+            let off = vec2<f32>(f32(x), f32(y)) * texel;
+            lit = lit + textureSampleCompareLevel(shadow_map, shadow_samp, uv + off, layer, ndc.z - bias);
+        }
+    }
+    lit = lit * (1.0 / 9.0);
+    // `darkness` scales how much occlusion is applied, so 0 restores the unshadowed look
+    // exactly for an A/B without a rebuild.
+    return mix(1.0, lit, frame.shadow.local_ctl.y);
+}
+
 fn lights_contrib(world_rel: vec3<f32>, normal_ws: vec3<f32>, mat_diffuse: vec3<f32>, mat_ambient: vec3<f32>, linear: f32) -> vec3<f32> {
     var acc = vec3<f32>(0.0);
     let count = u32(max(frame.cam_pos.w, 0.0));
@@ -61,6 +102,13 @@ fn lights_contrib(world_rel: vec3<f32>, normal_ws: vec3<f32>, mat_diffuse: vec3<
             continue;
         }
         var cone = 1.0;
+        // LGT-010: dir.w is the light kind. 0 = point, 1 = spot, 2+n = spot shadowed by
+        // local view n. The spot test is unchanged (`> 0.5`), which is why the slot could be
+        // carried here without growing the 64-byte light struct.
+        var shadow_slot = -1;
+        if (light.dir.w > 1.5) {
+            shadow_slot = i32(light.dir.w) - 2;
+        }
         if (light.dir.w > 0.5) {
             // inside = (light -> fragment) . beam axis; cos^2 = inside^2 / size2.
             let inside = -dot(to_light, light.dir.xyz);
@@ -68,10 +116,21 @@ fn lights_contrib(world_rel: vec3<f32>, normal_ws: vec3<f32>, mat_diffuse: vec3<
                 continue;
             }
             let cos2 = (inside * inside) / size2;
-            if (cos2 < LOCAL_MIN_INSIDE2) {
+            // LGT-011: the light's own cone when it supplies one (cos^2 of the outer and
+            // inner half-angles, in the two alpha channels), and the old hardcoded 12/8
+            // degrees when it does not -- so a light that says nothing behaves exactly as
+            // before and this cannot regress anything that was working.
+            var min_inside2 = LOCAL_MIN_INSIDE2;
+            var max_inside2 = LOCAL_MAX_INSIDE2;
+            if (light.diffuse.w > 0.0) {
+                min_inside2 = light.diffuse.w;
+                max_inside2 = select(min(light.diffuse.w + 0.02, 0.9999), light.ambient.w,
+                                     light.ambient.w > light.diffuse.w);
+            }
+            if (cos2 < min_inside2) {
                 continue;
             }
-            cone = clamp((cos2 - LOCAL_MIN_INSIDE2) / (LOCAL_MAX_INSIDE2 - LOCAL_MIN_INSIDE2), 0.0, 1.0);
+            cone = clamp((cos2 - min_inside2) / max(max_inside2 - min_inside2, 1e-4), 0.0, 1.0);
         }
         // GL33's flat-core / inverse-square attenuation, but with the tail smoothly
         // windowed to zero at end_atten2. GL33 cuts the tail hard — invisible in its
@@ -81,13 +140,25 @@ fn lights_contrib(world_rel: vec3<f32>, normal_ws: vec3<f32>, mat_diffuse: vec3<
         let base_atten = select(1.0, start_atten2 / size2, size2 >= start_atten2);
         let fade = clamp(1.0 - (size2 / end_atten2) * (size2 / end_atten2), 0.0, 1.0);
         let atten = base_atten * fade * fade;
+        // The occlusion term local lights never had. Applied to the cone factor so it scales
+        // the diffuse AND the ambient this light adds -- an unshadowed ambient term is what
+        // made a wall's far side glow in the first place.
+        if (shadow_slot >= 0) {
+            cone = cone * local_shadow_lit(world_rel, shadow_slot);
+            if (cone <= 0.0) {
+                continue;
+            }
+        }
         let cos_fi = dot(to_light, normal_ws);
         if (cos_fi > 0.0) {
             let ndotl = cos_fi * inverseSqrt(size2);
             acc += (l_diffuse * mat_diffuse * ndotl + l_ambient * mat_ambient) * (atten * cone);
         } else {
-            // Back-facing: ambient only, no cone gate (GL33 parity).
-            acc += l_ambient * mat_ambient * atten;
+            // Back-facing: ambient only, no cone gate (GL33 parity) -- except for the
+            // shadow, which must apply here too. A surface facing away from the light still
+            // received its ambient through a wall before this.
+            let occl = select(1.0, cone, shadow_slot >= 0);
+            acc += l_ambient * mat_ambient * (atten * occl);
         }
     }
     return acc;

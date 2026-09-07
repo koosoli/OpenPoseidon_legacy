@@ -129,6 +129,11 @@ struct PhysicsProbeSettings
     //! Size of the visible halo the light draws around itself -- the glow, as opposed to
     //! what the light does to the world. LightPointVisible::SetSize; 0 hides it entirely.
     float lightGlow = 1.0f;
+    //! Make the probe a downward CONE instead of a bare point. A point light shines in every
+    //! direction and would need six shadow maps; a cone needs one, so this is the switch that
+    //! makes a thrown probe able to cast a shadow at all (LGT-010).
+    bool  lightSpot = false;
+    float lightConeOuter = 0.55f; //!< outer half-angle, radians (~31 degrees)
     /// Ambient the light adds regardless of surface orientation. Small on purpose:
     /// a big ambient term flattens exactly the shading you opened this to look at.
     float lightAmbient = 0.06f;

@@ -62,6 +62,12 @@ const MAX_CASCADES: u32 = 4;
 // lets the sky map reuse the cascades' pass-UBO layout (and therefore their whole pipeline)
 // instead of duplicating one.
 const SKY_UBO_SLOT: usize = MAX_CASCADES as usize;
+// LGT-010: the shadow pass UBO's slots for LOCAL light views (spot shadows). Past the
+// cascades AND past the sky-visibility block, so all three families can be live in the same
+// frame without a slot ever colliding -- which is the whole reason the sky map could reuse
+// the cascade pipeline, and the reason these can too.
+const MAX_LOCAL_SHADOWS: usize = 4;
+const LOCAL_UBO_SLOT: usize = SKY_UBO_SLOT + sky_vis::DIRECTION_COUNT + 1;
 
 // Polygon-offset variants (mirror GL33's SetPolygonOffsetForDecals / ..ForShadows):
 // decals nudge coplanar overlays toward the camera; ZBias overlay faces (signs) get
@@ -3493,6 +3499,12 @@ pub struct Gfx3d {
     // Per-cascade instanced draw plan over `shadow_caster_ssbo` (built in prepare_shadows,
     // replayed in render_shadow_passes). Indexed [cascade][bucket].
     shadow_plan: Vec<Vec<ShadowBucket>>,
+    // LGT-010: how many local light views this frame has, and which depth-array layer they
+    // start at. Both are read by the render pass and by the sampling side, so they are state
+    // rather than arguments -- and `local_shadow_count == 0` is the single, well-defined
+    // "no local shadows" that every consumer gates on.
+    local_shadow_count: usize,
+    local_shadow_first_layer: usize,
     shadow_caster_layout: wgpu::BindGroupLayout,
     shadow_caster_bind: Option<wgpu::BindGroup>,
     shadow_shader: wgpu::ShaderModule,
@@ -4302,6 +4314,8 @@ impl Gfx3d {
             shadow_pass_ubo,
             shadow_caster_ssbo,
             shadow_plan: Vec::new(),
+            local_shadow_count: 0,
+            local_shadow_first_layer: 0,
             shadow_caster_layout,
             shadow_caster_bind: None,
             shadow_shader,
@@ -5849,10 +5863,17 @@ impl Gfx3d {
             self.shadow_plan.clear();
             return;
         }
-        self.ensure_shadow_target(device, pass.resolution, count);
+        // LGT-010: local light views live in layers count..count+local-1 of the SAME depth
+        // array. One array, three families -- the cascades, the sky-visibility map and now
+        // the spots -- which is what keeps this to one pipeline and one bind group.
+        let local = (pass.local_count as usize).min(MAX_LOCAL_SHADOWS);
+        self.local_shadow_count = local;
+        self.local_shadow_first_layer = count as usize;
+        self.ensure_shadow_target(device, pass.resolution, count + local as u32);
         self.ensure_shadow_pipelines(device);
 
-        self.shadow_pass_ubo.ensure(device, count as usize);
+        self.shadow_pass_ubo
+            .ensure(device, LOCAL_UBO_SLOT + MAX_LOCAL_SHADOWS);
         let buf = self.shadow_pass_ubo.buf.as_ref().unwrap();
         for c in 0..count as usize {
             let entry = ShadowPassUbo {
@@ -5862,6 +5883,17 @@ impl Gfx3d {
             queue.write_buffer(
                 buf,
                 c as u64 * self.shadow_pass_ubo.stride,
+                bytemuck::bytes_of(&entry),
+            );
+        }
+        for k in 0..local {
+            let entry = ShadowPassUbo {
+                light_vp: pass.local_vp[k],
+                cam_pos: pass.cam_pos,
+            };
+            queue.write_buffer(
+                buf,
+                (LOCAL_UBO_SLOT + k) as u64 * self.shadow_pass_ubo.stride,
                 bytemuck::bytes_of(&entry),
             );
         }
@@ -5883,7 +5915,11 @@ impl Gfx3d {
         // cascade-independent, but its bucket position isn't).
         let mut caster_gpu: Vec<ShadowCasterGpu> = Vec::with_capacity(casters.len());
         let mut bucket_index: FxHashMap<ShadowBucketKey, usize> = FxHashMap::default();
-        for c in 0..count as usize {
+        // LGT-010: views, not cascades. 0..count are the sun's; count..count+local are the
+        // spot lights'. A caster's mask bit is its VIEW index throughout -- C++ sets bit
+        // count+k for the lights whose volume it falls in -- so one plan and one loop serve
+        // both families and there is no second index space to get wrong.
+        for c in 0..(count as usize + local) {
             // Buckets in first-seen order + their member caster indices.
             let mut buckets: Vec<(u32, Vec<u32>)> = Vec::new();
             bucket_index.clear();
@@ -6043,7 +6079,18 @@ impl Gfx3d {
             });
             forced.unwrap_or(pass.grass_cascade_mask)
         };
-        for c in 0..count.min(target.layers) as usize {
+        let local = self.local_shadow_count;
+        let total_views = (count as usize + local).min(target.layers as usize);
+        for c in 0..total_views {
+            // Which pass-UBO slot holds this view's light view-projection. The cascades are
+            // slots 0..count-1; the locals sit past the sky-visibility block so all three
+            // families can be live in one frame without colliding.
+            let ubo_slot = if c < count as usize {
+                c
+            } else {
+                LOCAL_UBO_SLOT + (c - count as usize)
+            };
+            let is_local = c >= count as usize;
             // PERF-005: one region PER CASCADE. Shadows were the largest single unattributed
             // suspect and a single "shadows" number cannot tell you which cascade to shrink —
             // cascade 0 covers metres and cascade 3 covers hundreds of them, so their costs and
@@ -6073,7 +6120,7 @@ impl Gfx3d {
             // Group 0 (pass UBO, this cascade's light-VP) shares one layout across every
             // shadow pipeline and is bound first, so a later pipeline switch never
             // invalidates it — set it once per cascade instead of per draw.
-            let pass_ubo_off = (c as u64 * self.shadow_pass_ubo.stride) as u32;
+            let pass_ubo_off = (ubo_slot as u64 * self.shadow_pass_ubo.stride) as u32;
             rp.set_bind_group(0, pass_bind, &[pass_ubo_off]);
 
             // CPU casters for this cascade (the retained GPU set is drawn below; a section
@@ -6162,7 +6209,10 @@ impl Gfx3d {
             // WGR_GRASS_SHADOW_CASCADES caps how many cascades receive them. Default 4 keeps
             // today's behaviour exactly; the point of the knob is to measure what the far
             // cascades actually contribute before changing what anyone sees.
-            if (grass_mask & (1u32 << c)) != 0 {
+            // Grass casts into the SUN's cascades only. A headlight transforming the whole
+            // near ring would be the single most expensive thing in this feature, and the
+            // shadow of a blade under a car is not what anyone opened it for.
+            if !is_local && (grass_mask & (1u32 << c)) != 0 {
                 grass.draw_shadow(&mut rp, pass_bind, pass_ubo_off, timers);
             }
             // The pass must CLOSE before the encoder-level end timestamp — writing it while `rp`
@@ -8252,12 +8302,27 @@ impl Gfx3d {
         // then casts survivors into the cascade depth map (draw_gpu_driven_shadow). count = 0
         // (shadows off) clears the views so no shadow dispatch runs.
         let n_cascades = (shadow.count as usize).min(MAX_CASCADES as usize);
-        self.cull.set_shadow_view_count(device, n_cascades);
+        // LGT-010: the local light views are more entries in the SAME cull view set, which is
+        // a Vec rather than a fixed array -- so the GPU-driven static set (where the buildings
+        // are, and therefore where a headlight's interesting shadow comes from) casts into
+        // them with no new culling path at all.
+        let n_local = (shadow.local_count as usize).min(MAX_LOCAL_SHADOWS);
+        self.cull
+            .set_shadow_view_count(device, n_cascades + n_local);
         let scam = glam::Vec3::new(shadow.cam_pos[0], shadow.cam_pos[1], shadow.cam_pos[2]);
         for c in 0..n_cascades {
             let lvp = glam::Mat4::from_cols_array(&shadow.light_vp[c]);
             self.cull.set_shadow_params(
                 c,
+                cull::params_from_shadow_cascade(lvp, scam, self.cull_inputs),
+            );
+        }
+        for k in 0..n_local {
+            // Same helper as a cascade: it takes a view-projection and builds frustum planes
+            // from it, and a perspective VP has six perfectly good planes like an ortho one.
+            let lvp = glam::Mat4::from_cols_array(&shadow.local_vp[k]);
+            self.cull.set_shadow_params(
+                n_cascades + k,
                 cull::params_from_shadow_cascade(lvp, scam, self.cull_inputs),
             );
         }
