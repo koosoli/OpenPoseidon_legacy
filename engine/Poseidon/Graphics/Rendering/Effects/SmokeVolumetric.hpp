@@ -43,7 +43,13 @@ struct SmokeSoftParticles
 {
     // OFF until measured, per the project's rule for a new render path. The measurement
     // and the capture that justify the default live in the commit message.
-    bool enabled = false;    //!< POSEIDON_SMOKE_SOFT=1 turns it on
+    // ON as of SMK-039. It was landed off because a new render path ships off until it is
+    // measured; it now is, on both counts. Cost: +0.08 ms with smoke on screen, +0.015 ms
+    // with none (that second number isolates the per-frame depth snapshot, which is the
+    // only part that runs when nothing is drawing). Look: the straight scissor cut where a
+    // plume crosses grass, a bush or a wall is gone, verified in the capture -- this only
+    // ever REMOVES an artefact, it cannot introduce one.
+    bool enabled = true;     //!< POSEIDON_SMOKE_SOFT=0 turns it off
     //! Metres of separation at which the sprite is at full opacity. Smaller = a tighter,
     //! harder contact; larger = a longer, mistier fade.
     //!

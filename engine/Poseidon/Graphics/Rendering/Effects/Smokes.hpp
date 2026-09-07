@@ -124,6 +124,8 @@ class Cloudlet: public Smoke
 	// under it does not move.
 	float _drawScale = 1.0f;
 	float _groundY = 0.0f;
+	//! SMK-039: the alpha the source asked for, before the dispersal thinning scales it.
+	float _alpha0 = -1.0f;
 	bool _groundChecked = false;
 
 	public:
@@ -312,6 +314,32 @@ struct LegacySmokeShading
     long long blobs = 0;        //!< cloudlets handed to the ground-shadow pass last frame
 };
 LegacySmokeShading& GLegacySmokeShading();
+
+// SMK-039: how a plume DIES. CfgCloudlets grows a puff to full size over `cloudletGrowUp`
+// and then holds it there for the rest of its life, fading it out on a timer. Real smoke
+// does the opposite: it keeps entraining air, so the puffs keep growing AND keep drifting
+// apart, and the same smoke spread through more air is thinner. That is why the legacy
+// plume ends as a clump of still-solid blobs that wink out, instead of dissolving.
+//
+// Three coupled terms, all driven by the particle's own age:
+//   expand -- the puff keeps growing after grow-up, to `expand` times its size at death.
+//   thin   -- the density that expansion implies. A puff `k` times wider holds the same
+//             smoke over k^2 more area, so its opacity falls as k^-2*thin. This is what
+//             makes the end of a plume fade out instead of shrinking away.
+//   spread -- an outward drift from the plume's axis that RAMPS with age, so the puffs
+//             separate as they rise rather than staying in the column they were born in.
+//
+// The point of all three is that a particle should be invisible BEFORE it is deleted.
+// POSEIDON_SMOKE_DISPERSE=0 restores the authored behaviour exactly.
+struct LegacySmokeDisperse
+{
+    bool enabled = true;
+    float expand = 1.9f;   //!< POSEIDON_SMOKE_DISPERSE_EXPAND: size multiplier at end of life
+    float thin = 1.0f;     //!< POSEIDON_SMOKE_DISPERSE_THIN: 0 = expand without thinning
+    float spread = 0.45f;  //!< POSEIDON_SMOKE_DISPERSE_SPREAD: outward drift, m/s^2 at end of life
+    float floorAlpha = 0.05f; //!< never thin below this fraction, or a fresh plume goes see-through
+};
+LegacySmokeDisperse& GLegacySmokeDisperse();
 
 //! SMK-036: one cloudlet's contribution to the renderer's ground-shadow pass.
 struct CloudletShadowSample

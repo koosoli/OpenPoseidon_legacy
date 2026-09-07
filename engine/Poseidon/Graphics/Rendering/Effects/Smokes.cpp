@@ -879,6 +879,25 @@ void Cloudlet::Simulate(float deltaT, SimulationImportance prec)
     Limit(_speed[1], _minYSpeed, _maxYSpeed);
     // SMK-030: keep the step inside the room it started in. Outdoors this costs one
     // room lookup for the whole life of the cloudlet (see the header note).
+    // SMK-039: how far through its life this particle is. Shared by the dispersal below
+    // and by the shading's optical depth further down -- one definition, not two.
+    float ageFrac = _shadeAge / floatMax(_shadeLife, 0.01f);
+    saturate(ageFrac, 0.0f, 1.0f);
+    LegacySmokeDisperse& disperse = GLegacySmokeDisperse();
+    if (disperse.enabled && disperse.spread > 0.0f)
+    {
+        // Push the puff away from its plume's axis, harder the older it is, so a column
+        // opens out as it rises instead of staying the width it was born. Horizontal only:
+        // the vertical is what the class's own climb rate is for.
+        Vector3 lateral = Position() - _shadeOrigin;
+        lateral[1] = 0.0f;
+        const float dist = lateral.Size();
+        if (dist > 0.05f)
+        {
+            _speed += lateral * ((disperse.spread * ageFrac * deltaT) / dist);
+        }
+    }
+
     const Vector3 from = Position();
     // SMK-036: the ground under this particle, sampled ONCE. A cloudlet lives seconds and
     // travels metres; the terrain under it does not move, and the shadow pass only needs to
@@ -956,6 +975,21 @@ void Cloudlet::Simulate(float deltaT, SimulationImportance prec)
     // puff beside a wall cannot paint through it; the 10 cm is the soft edge the modern path
     // uses. Outdoors this costs nothing: the branch is not taken.
     float drawScale = _growSize * _size;
+    if (disperse.enabled)
+    {
+        // Keep growing after grow-up, and thin by what that expansion implies: the same
+        // smoke spread over k^2 more area is k^-2 as opaque. This is the whole trick -- a
+        // puff that fades as it swells is gone before it is deleted, and nothing pops.
+        const float k = 1.0f + (disperse.expand - 1.0f) * ageFrac;
+        drawScale *= k;
+        if (_alpha0 < 0.0f)
+        {
+            _alpha0 = _alpha; // the source's authored alpha, captured on the first step
+        }
+        float density = 1.0f / std::pow(k, 2.0f * disperse.thin);
+        saturate(density, disperse.floorAlpha, 1.0f);
+        _alpha = _alpha0 * density;
+    }
     if (contain.enabled && contain.clampDraw && _roomId >= 0)
     {
         const float now = Glob.time.toFloat();
@@ -1018,9 +1052,9 @@ void Cloudlet::Simulate(float deltaT, SimulationImportance prec)
             ++shading.shaded;
             const Vector3 d = Position() - _shadeOrigin;
             // How far along its life this particle is -- see the header: that, and not any
-            // distance in metres, is what says how much smoke surrounds it.
-            float age = _shadeAge / _shadeLife;
-            saturate(age, 0.0f, 1.0f);
+            // distance in metres, is what says how much smoke surrounds it. Computed once
+            // at the top of this function (SMK-039).
+            const float age = ageFrac;
             // The pseudo-normal, outward from the column's axis with the vertical flattened:
             // that is the surface of the plume, which is the part the eye is looking at.
             Vector3 n(d.X(), d.Y() * 0.35f, d.Z());
@@ -1152,6 +1186,24 @@ LegacySmokeContainment& GLegacySmokeContainment()
         return c;
     }();
     return containment;
+}
+
+LegacySmokeDisperse& GLegacySmokeDisperse()
+{
+    static LegacySmokeDisperse disperse = []
+    {
+        LegacySmokeDisperse d;
+        if (const char* v = std::getenv("POSEIDON_SMOKE_DISPERSE"))
+            d.enabled = !(*v == '0');
+        if (const char* v = std::getenv("POSEIDON_SMOKE_DISPERSE_EXPAND"))
+            d.expand = std::clamp(static_cast<float>(std::atof(v)), 1.0f, 6.0f);
+        if (const char* v = std::getenv("POSEIDON_SMOKE_DISPERSE_THIN"))
+            d.thin = std::clamp(static_cast<float>(std::atof(v)), 0.0f, 2.0f);
+        if (const char* v = std::getenv("POSEIDON_SMOKE_DISPERSE_SPREAD"))
+            d.spread = std::clamp(static_cast<float>(std::atof(v)), 0.0f, 5.0f);
+        return d;
+    }();
+    return disperse;
 }
 
 LegacySmokeShading& GLegacySmokeShading()

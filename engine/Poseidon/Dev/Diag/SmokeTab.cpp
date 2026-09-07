@@ -505,7 +505,7 @@ void DrawSpawnSection()
         SmokeSoftParticles& soft = GSmokeSoftParticles();
         Dev::Checkbox("Soft particles: smoke fades into geometry (SMK-037)", &soft.enabled);
         if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("POSEIDON_SMOKE_SOFT=1 turns it on; OFF is the shipped default.\n"
+            ImGui::SetTooltip("POSEIDON_SMOKE_SOFT=0 turns it off; ON is the shipped default.\n"
                               "Every cloudlet is a flat screen-space quad depth-tested against the world, so\n"
                               "where its plane crosses the ground, a wall or a soldier the test kills one half\n"
                               "and keeps the other and the boundary is a HARD LINE across the sprite. A puff\n"
@@ -657,6 +657,38 @@ void DrawSpawnSection()
                               "drawn opacity to get the shadow it casts.");
         ImGui::TextDisabled("shaded %lld  left emissive %lld  ground blobs %lld", shading.shaded, shading.emissive,
                             shading.blobs);
+    }
+    // SMK-039: how a plume dies. Live -- these are applied per particle per step, so a
+    // change here reaches smoke already in the air.
+    {
+        LegacySmokeDisperse& disperse = GLegacySmokeDisperse();
+        Dev::Checkbox("Plumes disperse instead of winking out (SMK-039)", &disperse.enabled);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("POSEIDON_SMOKE_DISPERSE=0 restores the authored behaviour. CfgCloudlets grows a\n"
+                              "puff to full size and then HOLDS it there for the rest of its life, fading it out\n"
+                              "on a timer -- so a plume ends as a clump of still-solid blobs that wink out. Real\n"
+                              "smoke keeps entraining air: the puffs keep growing, keep drifting apart, and the\n"
+                              "same smoke spread through more air is thinner. The point of all three sliders is\n"
+                              "that a particle should be INVISIBLE before it is deleted.");
+        ImGui::SetNextItemWidth(110.0f);
+        Dev::SliderFloat("Expand to x", &disperse.expand, 1.0f, 6.0f, "%.2f");
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("POSEIDON_SMOKE_DISPERSE_EXPAND. How much bigger a puff is at death than at the\n"
+                              "end of its grow-up. 1.0 = the authored behaviour, hold size and wink out.");
+        Dev::PanelSameLine();
+        ImGui::SetNextItemWidth(110.0f);
+        Dev::SliderFloat("Thin with size", &disperse.thin, 0.0f, 2.0f, "%.2f");
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("POSEIDON_SMOKE_DISPERSE_THIN. The density the expansion implies: a puff k times\n"
+                              "wider holds the same smoke over k^2 more area, so opacity falls as k^-2 at 1.0.\n"
+                              "0 swells the puff without thinning it, which looks like an inflating balloon.");
+        ImGui::SetNextItemWidth(110.0f);
+        Dev::SliderFloat("Drift apart", &disperse.spread, 0.0f, 5.0f, "%.2f");
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("POSEIDON_SMOKE_DISPERSE_SPREAD. Outward acceleration away from the plume's axis,\n"
+                              "ramped with the particle's age, so a column opens out as it rises instead of\n"
+                              "staying the width it was born. Horizontal only -- the vertical is what the\n"
+                              "cloudlet class's own climb rate is for.");
     }
     ImGui::SetNextItemWidth(110.0f);
     Dev::SliderFloat("Legacy density", &GLegacyDensity, 0.1f, 3.0f, "%.2f");
