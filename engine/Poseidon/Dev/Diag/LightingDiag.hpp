@@ -111,10 +111,10 @@ struct LampLightSettings
     // surroundings absolutely black, which is as wrong as the floodlight was. A second,
     // weak, omnidirectional light per lamp is the spill -- the surroundings stay lit, much
     // less than the pool under the lamp. 0 = pure spot. POSEIDON_LAMP_SPILL.
-    float spill = 0.22f;
+    float spill = 0.45f;
     // Radius of that spill light relative to the pool's. Small: it is the glow around a
     // lamp, not a second floodlight. POSEIDON_LAMP_SPILL_RADIUS.
-    float spillRadius = 2.20f;
+    float spillRadius = 5.56f;
     unsigned generation = 0;
 };
 
@@ -134,7 +134,7 @@ struct LocalShadowSettings
     // shadows in three consecutive messages, so off IS the regression. The lever stays:
     // POSEIDON_LOCAL_SHADOWS=0, or the Lighting tab.
     bool enabled = true;   //!< POSEIDON_LOCAL_SHADOWS=0 turns local light shadows off.
-    int maxLights = 3;      //!< POSEIDON_LOCAL_SHADOW_LIGHTS: how many get shadow views at once.
+    int maxLights = 4;      //!< POSEIDON_LOCAL_SHADOW_LIGHTS: how many get shadow views at once.
                             //!< LGT-015: a spot costs one view of sixteen, a point costs six
                             //!< (its cube), so three lights is the point where the view budget
                             //!< and this one run out together for a street full of lamps.

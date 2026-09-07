@@ -1247,10 +1247,23 @@ int   s_zeusThrowCount = 0;
 // camera-following light, which makes it the only way to aim a beam at a chosen wall from a
 // scripted pose -- without this the torch could only ever be judged by hand.
 bool s_headlampOn = [] { const char* e = std::getenv("POSEIDON_HEADLAMP"); return e && std::atoi(e) != 0; }();
+// LGT-020: STRENGTH, a plain multiplier on the emitted colour. It used to be fed to
+// SetBrightness, which is a reach in disguise -- so turning the torch up made it carry across
+// a whole village instead of making it brighter.
 float s_headlampBrightness = [] {
     const char* e = std::getenv("POSEIDON_HEADLAMP_BRIGHTNESS");
     const double d = e ? std::atof(e) : 0.0;
-    return d > 0.0 ? static_cast<float>(d) : 3.0f;
+    return d > 0.0 ? static_cast<float>(d) : 1.0f;
+}();
+// LGT-020: REACH, in metres, and it is a torch: "ist ja nur eine kleine taschenlampe". This is
+// the flat-core radius; the shader keeps full strength inside it and falls off inverse-square
+// after, so what the beam lands on is as bright indoors as out -- a wall at 3 m and a wall at
+// 8 m both sit inside the core. That is the "so hell drinnen wie draussen" half of the ask;
+// what stops it lighting the next village is the range, not the strength.
+float s_headlampRange = [] {
+    const char* e = std::getenv("POSEIDON_HEADLAMP_RANGE");
+    const double d = e ? std::atof(e) : 0.0;
+    return d > 0.0 ? static_cast<float>(d) : 9.0f;
 }();
 float s_headlampCone = [] {
     const char* e = std::getenv("POSEIDON_HEADLAMP_CONE");
@@ -1289,9 +1302,9 @@ void UpdateHeadlamp()
         GScene->AddLight(s_headlamp);
     }
     const Color diffuse(s_headlampColor[0], s_headlampColor[1], s_headlampColor[2], 1.0f);
-    s_headlamp->SetDiffuse(diffuse);
-    s_headlamp->SetAmbient(diffuse * 0.04f);
-    s_headlamp->SetBrightness(s_headlampBrightness);
+    s_headlamp->SetDiffuse(diffuse * s_headlampBrightness);
+    s_headlamp->SetAmbient(diffuse * (0.04f * s_headlampBrightness));
+    s_headlamp->SetRange(s_headlampRange); // LGT-020: reach, not strength
     s_headlamp->SetAngle(s_headlampCone);
     // A little ahead of the eye so the camera's own near plane cannot sit inside the lamp.
     const Vector3 dir = cam->Direction();
@@ -1516,16 +1529,76 @@ void DrawZeusTab()
         if (s_headlampOn)
         {
             ImGui::SetNextItemWidth(140.0f);
-            Dev::SliderFloat("Torch brightness", &s_headlampBrightness, 0.1f, 6.0f, "%.2f");
+            Dev::SliderFloat("Torch strength", &s_headlampBrightness, 0.1f, 6.0f, "%.2f");
             Dev::PanelSameLine();
             ImGui::SetNextItemWidth(140.0f);
             Dev::SliderFloat("Torch cone", &s_headlampCone, 0.08f, 1.2f, "%.2f");
+            ImGui::SetNextItemWidth(140.0f);
+            Dev::SliderFloat("Torch reach m", &s_headlampRange, 2.0f, 60.0f, "%.0f");
             ImGui::SetNextItemWidth(160.0f);
             ImGui::ColorEdit3("Torch colour", s_headlampColor, ImGuiColorEditFlags_NoInputs);
         }
 
     }
     ImGui::EndDisabled();
+    }
+
+    // Tooltips kept to one line each on purpose: a C++ string literal containing a newline
+    // escape, written through a script, is the edit that has broken this build four times.
+    static const char* const kLampPoolTip =
+        "The lamp's bright core, as a fraction of the authored radius. Small is what makes a pool instead of a "
+        "floodlight -- and it is also why a town looks dark from the air, because reach falls as the square of it. "
+        "The spill below is what carries the far field.";
+    static const char* const kLampSpillTip =
+        "A second, dim, wide light at the same bulb. It is what you see when you fly over a lit town; the core "
+        "alone is almost nothing at 100 m and that is correct inverse-square behaviour, not a bug.";
+    static const char* const kLocalShadowTip =
+        "Point lights get six shadow faces each, spots one; all of them are tiles in one depth layer. Four lights "
+        "is twenty-four of the twenty-four views, so this is the whole budget.";
+
+    // LGT-018: the street-lamp and local-shadow levers. These shipped as environment
+    // variables only, which means the owner could not taste them -- and every one of them is
+    // a taste call with a real trade-off behind it, so they belong on a slider.
+    if (ImGui::CollapsingHeader("Street lamps and light shadows##zeus"))
+    {
+        Poseidon::Dev::LampLightSettings& lamp = Poseidon::Dev::GLampLightSettings();
+        const float beforeRadius = lamp.radiusScale;
+        const float beforeSpill = lamp.spill;
+        const float beforeSpillR = lamp.spillRadius;
+        const float beforeBright = lamp.brightnessScale;
+        const float beforeAmbient = lamp.ambientScale;
+        ImGui::SetNextItemWidth(160.0f);
+        Dev::SliderFloat("Pool size", &lamp.radiusScale, 0.05f, 1.0f, "%.2f");
+        Dev::PanelTooltip(kLampPoolTip);
+        ImGui::SetNextItemWidth(160.0f);
+        Dev::SliderFloat("Spill strength", &lamp.spill, 0.0f, 1.0f, "%.2f");
+        Dev::PanelTooltip(kLampSpillTip);
+        ImGui::SetNextItemWidth(160.0f);
+        Dev::SliderFloat("Spill reach", &lamp.spillRadius, 1.0f, 12.0f, "%.2f");
+        ImGui::SetNextItemWidth(160.0f);
+        Dev::SliderFloat("Lamp brightness", &lamp.brightnessScale, 0.1f, 3.0f, "%.2f");
+        ImGui::SetNextItemWidth(160.0f);
+        Dev::SliderFloat("Lamp ambient", &lamp.ambientScale, 0.0f, 1.0f, "%.2f");
+        if (lamp.radiusScale != beforeRadius || lamp.spill != beforeSpill || lamp.spillRadius != beforeSpillR ||
+            lamp.brightnessScale != beforeBright || lamp.ambientScale != beforeAmbient)
+        {
+            // StreetLamp::CreateLight rebuilds a lamp whose generation moved; without this
+            // the sliders do nothing until a lamp happens to be re-created.
+            lamp.generation++;
+        }
+
+        ImGui::Separator();
+        Poseidon::Dev::LocalShadowSettings& ls = Poseidon::Dev::GLocalShadowSettings();
+        Dev::Checkbox("Local lights cast shadows", &ls.enabled);
+        Dev::PanelTooltip(kLocalShadowTip);
+        ImGui::SetNextItemWidth(160.0f);
+        Dev::SliderInt("Shadowing lights", &ls.maxLights, 0, 4);
+        ImGui::SetNextItemWidth(160.0f);
+        Dev::SliderFloat("Shadow darkness", &ls.darkness, 0.0f, 1.0f, "%.2f");
+        ImGui::SetNextItemWidth(160.0f);
+        Dev::SliderFloat("Self radius m", &ls.selfRadius, 0.0f, 4.0f, "%.2f");
+        ImGui::SetNextItemWidth(160.0f);
+        Dev::SliderFloat("Beam shape", &Poseidon::Dev::GSpotBeam().shape, 0.15f, 1.5f, "%.2f");
     }
 
     // DST-003: how far a wrecked building comes down.

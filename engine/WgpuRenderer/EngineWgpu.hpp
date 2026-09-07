@@ -1529,7 +1529,7 @@ class EngineWgpu : public EngineDummy
     // "no light qualified" and "the feature is off" are the same well-defined zero.
     // LGT-015: sixteen VIEWS, not sixteen lights -- they are tiles in one depth layer, so a
     // point light spends six of them on its cube and a spot spends one.
-    static constexpr int kMaxLocalShadows = 16;
+    static constexpr int kMaxLocalShadows = 24;
     struct LocalShadowLight
     {
         float pos[3] = {0.0f, 0.0f, 0.0f}; // ABSOLUTE world; the matrix is made camera-relative

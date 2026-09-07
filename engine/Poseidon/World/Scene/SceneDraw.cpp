@@ -2982,7 +2982,8 @@ void Scene::DrawDiagModel(Vector3Par pos, LODShapeWithShadow* shape, float size,
     GetLandscape()->ShowObject(star);
 }
 
-void Scene::DrawVolumeLight(LODShapeWithShadow* shape, PackedColor color, const Frame& pos, float size)
+void Scene::DrawVolumeLight(LODShapeWithShadow* shape, PackedColor color, const Frame& pos, float size,
+                            float minAngular, float maxWorld)
 {
     if (!shape)
     {
@@ -3007,6 +3008,54 @@ void Scene::DrawVolumeLight(LODShapeWithShadow* shape, PackedColor color, const 
         size *= 0.035f;
     }
 
+    // LGT-018. The marker above is a world-space object a few centimetres across, and that is
+    // the whole reason a lit village looks black from the air and a truck's headlight reads as
+    // off: at any distance it falls below a pixel, and the ILLUMINATION cannot stand in for it
+    // because a lamp's inverse-square falloff from a small core is genuinely almost nothing at
+    // 200 m. Real lamps are visible at that range as the GLARE OF THE BULB, not as lit ground.
+    // So the marker gets a minimum angle: it never shrinks below a couple of pixels, exactly
+    // as a glare sprite does not. Near the camera the floor is below the authored size and
+    // nothing changes, so this cannot alter the look the owner already accepted.
+    // POSEIDON_LIGHT_GLARE scales the angular floor (0 disables it, 1 is the shipped value);
+    // POSEIDON_LIGHT_GLARE_DIAG=1 reports what the marker actually resolved to, because "the
+    // halo is too small" and "the halo is never drawn" look identical from outside.
+    static const float glareScale = []
+    {
+        const char* e = std::getenv("POSEIDON_LIGHT_GLARE");
+        const double d = e ? std::atof(e) : -1.0;
+        return d >= 0.0 ? static_cast<float>(d) : 1.0f;
+    }();
+    minAngular *= glareScale;
+    maxWorld *= glareScale;
+    if (minAngular > 0.0f && _camera)
+    {
+        const float dist = (pos.Position() - _camera->Position()).Size();
+        const float floorWorld = dist * minAngular;
+        if (floorWorld > size)
+        {
+            size = floorWorld;
+        }
+        if (maxWorld > 0.0f && size > maxWorld)
+        {
+            size = maxWorld;
+        }
+    }
+
+    static const bool glareDiag = [] { const char* e = std::getenv("POSEIDON_LIGHT_GLARE_DIAG"); return e && std::atoi(e) != 0; }();
+    if (glareDiag)
+    {
+        static int seen = 0;
+        static float lastSize = -1.0f;
+        // Report on a CHANGE, not once: a single line at frame 1 cannot tell "never drawn
+        // again" from "drawn every frame at the same size".
+        if (++seen <= 3 || std::fabs(size - lastSize) > lastSize * 0.25f)
+        {
+            lastSize = size;
+            const float dist = _camera ? (pos.Position() - _camera->Position()).Size() : -1.0f;
+            LOG_INFO(Graphics, "LGT-018 glare: marker #{} size {:.3f} m at {:.1f} m (minAngular {:.4f})", seen, size,
+                     dist, minAngular);
+        }
+    }
     Ref<Object> object = new ObjectColored(shape, -1);
     // draw light shape
     object->SetTransform(pos.Transform());

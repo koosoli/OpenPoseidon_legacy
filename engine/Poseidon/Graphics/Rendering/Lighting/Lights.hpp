@@ -294,6 +294,11 @@ class LightReflector: public LightPositionedColored
 
 	public:
 	void SetDrawHalo( bool on ){_drawHalo=on;}
+	//! LGT-020: the reach, in metres, set DIRECTLY. SetBrightness is not a brightness at all --
+	//! it is 200*InvSqrt(diffuse/coef), i.e. a reach, so turning a torch "up" made it carry
+	//! 350 m across a village instead of making it brighter. Intensity belongs in the colour.
+	void SetRange( float metres ){_startAtten=metres>0.01f?metres:0.01f;}
+	float GetRange() const {return _startAtten;}
 	LightReflector();
 	LightReflector
 	(

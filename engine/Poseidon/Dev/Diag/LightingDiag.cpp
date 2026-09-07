@@ -31,7 +31,7 @@ LocalShadowSettings& GLocalShadowSettings()
         if (const char* e = std::getenv("POSEIDON_LOCAL_SHADOWS"))
             v.enabled = (std::atoi(e) != 0);
         if (const char* e = std::getenv("POSEIDON_LOCAL_SHADOW_LIGHTS"))
-            v.maxLights = std::clamp(std::atoi(e), 0, 16);
+            v.maxLights = std::clamp(std::atoi(e), 0, 24);
         if (const char* e = std::getenv("POSEIDON_LOCAL_SHADOW_NEAR"))
         {
             const double d = std::atof(e);

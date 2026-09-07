@@ -74,8 +74,14 @@ const SKY_UBO_SLOT: usize = MAX_CASCADES as usize;
 // 4x4 grid of 512 tiles, and 512 is ample for a lamp or a headlight. So sixteen views now
 // cost what ONE used to, a point light's cube is six tiles, and the array grows by exactly
 // one layer no matter how many local lights there are.
-const MAX_LOCAL_SHADOWS: usize = 16;
-const LOCAL_ATLAS_GRID: u32 = 4; // 4x4 tiles in the one local layer
+// LGT-021: twenty-four views, an 8x8 grid. Sixteen was two point lights, so in a village with
+// twenty street lamps two of them cast a shadow and the owner reasonably said street lamps do
+// not cast shadows. Twenty-four is FOUR lamps -- the nearest four, which is what you are
+// looking at. The ceiling is the u32 `cascade_mask`: a caster's view bit is cascadeCount + k,
+// so 32 - 4 cascades = 28 local views is the hard limit of the current bucketing.
+// Tiles drop 512 -> 256, which for a lamp lighting ~10 m is about 8 cm per texel.
+const MAX_LOCAL_SHADOWS: usize = 24;
+const LOCAL_ATLAS_GRID: u32 = 8; // 8x8 tiles in the one local layer
 const LOCAL_UBO_SLOT: usize = SKY_UBO_SLOT + sky_vis::DIRECTION_COUNT + 1;
 
 // Polygon-offset variants (mirror GL33's SetPolygonOffsetForDecals / ..ForShadows):

@@ -1112,7 +1112,12 @@ void LightReflector::ToDraw(ClipFlags clipFlags, bool dimmed)
             Color c = GetObjectColor();
             const float invSize = InvSqrt(c.R() * c.R() + c.G() * c.G() + c.B() * c.B());
             c = c * invSize;
-            GScene->DrawVolumeLight(GScene->Preloaded(HalfLight), PackedColor(c), *this, _size * 0.5f);
+            // LGT-018: 0.020 rad is about eighteen pixels at 1080p -- a headlight you can see
+            // is ON from across a street, which is what the owner asked for and what the old
+            // 3.5%-of-a-metre marker could never be. Capped at 1.2 m so a truck coming at you
+            // does not grow a sun.
+            GScene->DrawVolumeLight(GScene->Preloaded(HalfLight), PackedColor(c), *this, _size * 0.5f, 0.020f,
+                                    1.2f);
         }
         return;
     }
@@ -1149,7 +1154,12 @@ void LightPointVisible::ToDraw(ClipFlags clipFlags, bool dimmed)
         return;
     }
     Color c = GetObjectColor();
-    GScene->DrawVolumeLight(_shape, PackedColor(c), *this, _size);
+    // LGT-018: 0.006 rad is roughly six pixels at 1080p -- a street lamp stays a point of
+    // light from the air instead of vanishing. Capped at 2.5 m: the marker is a glare sprite,
+    // not a lamp the size of a house. This is the fix for "wenn ich ueber eine stadt fliege
+    // ist es einfach schwarz"; the ILLUMINATION at that range is correctly almost nothing,
+    // and always was -- what a real lamp shows you from 200 m is its bulb.
+    GScene->DrawVolumeLight(_shape, PackedColor(c), *this, _size, 0.006f, 2.5f);
 }
 
 void LightPointVisible::Load(const ParamEntry& cls)

@@ -417,7 +417,12 @@ class Scene
 
     void DrawDiagModel(Vector3Par pos, LODShapeWithShadow* shape, float size = 0.1, PackedColor color = PackedWhite);
     void DrawCollisionStar(Vector3Par pos, float size = 0.1, PackedColor color = PackedWhite);
-    void DrawVolumeLight(LODShapeWithShadow* shape, PackedColor color, const Frame& pos, float size);
+    //! LGT-018: `minAngular` is the smallest angle (radians) the marker may subtend. A light
+    //! marker is a WORLD-SPACE object, so without a floor it shrinks below one pixel and the
+    //! lamp simply is not there any more -- which is why flying over a lit village showed
+    //! black, and why a truck's headlight read as switched off. `maxWorld` caps the other end.
+    void DrawVolumeLight(LODShapeWithShadow* shape, PackedColor color, const Frame& pos, float size,
+                         float minAngular = 0.0f, float maxWorld = 0.0f);
 
     bool ShadowPos(Vector3Par pos, Vector3& aprox, LightSun* light);
 

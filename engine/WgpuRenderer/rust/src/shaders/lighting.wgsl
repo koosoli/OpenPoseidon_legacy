@@ -56,7 +56,7 @@ const LOCAL_MAX_INSIDE2: f32 = 0.98063081; // (cos 8deg)^2
 // the cos^2 the light already carries for its cone test. Pushing the receiver along its own
 // normal by a texel or two, scaled by how obliquely the light strikes it, moves the sample
 // off the surface that is shadowing itself without moving the shadow's edge.
-const LOCAL_ATLAS_GRID: f32 = 4.0;
+const LOCAL_ATLAS_GRID: f32 = 8.0;
 
 // LGT-015: which face of a point light's cube a fragment falls in, in the same order the CPU
 // builds the six matrices: +X, -X, +Y, -Y, +Z, -Z. `from_light` points light -> fragment.
@@ -228,9 +228,23 @@ fn lights_contrib(world_rel: vec3<f32>, normal_ws: vec3<f32>, mat_diffuse: vec3<
         // clamped LDR output, but the HDR exposure turns that discontinuity into a
         // visible ring. The window is ~1 across the near field (it only bites as the
         // fragment approaches the cutoff), so it doesn't change GL33's near look.
+        // LGT-019: inverse square, and this is where it was NOT being respected.
+        //
+        // `base_atten` is honest: inside the bulb radius the light is flat (you are inside the
+        // emitter), and outside it is exactly r^2/d^2. The offender was the window below. It
+        // used to be (1 - (d/end)^2)^2, which does not switch on near the cutoff at all -- it
+        // is already taking 44% of the light at HALF the range and 75% at 0.7 of it. Every
+        // local light in the game was therefore far dimmer at distance than inverse square
+        // says, on top of the small core, which is most of why a lit village read as black
+        // from the air.
+        //
+        // The window's only job is to stop the hard cut at end_atten showing as a ring in HDR,
+        // so it now bites over the last 15% of the range and nothing before it. Inverse square
+        // holds across the whole useful field.
         let base_atten = select(1.0, start_atten2 / size2, size2 >= start_atten2);
-        let fade = clamp(1.0 - (size2 / end_atten2) * (size2 / end_atten2), 0.0, 1.0);
-        let atten = base_atten * fade * fade;
+        let d_frac = sqrt(size2 / max(end_atten2, 1e-6));
+        let fade = 1.0 - smoothstep(0.85, 1.0, d_frac);
+        let atten = base_atten * fade;
         // The occlusion term local lights never had. Applied to the cone factor so it scales
         // the diffuse AND the ambient this light adds -- an unshadowed ambient term is what
         // made a wall's far side glow in the first place.
