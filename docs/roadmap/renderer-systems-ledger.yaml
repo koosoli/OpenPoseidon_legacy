@@ -162,8 +162,16 @@ systems:
       2026-09-08 Nogova follow-up: reversed-Z cancellation and fixed-point scene depth
       produced long horizontal shoreline bands at altitude. Float depth is now requested
       when supported; the 8 km installed-game capture removes those bands. Open-ocean
-      seams/coverage edges remain. See decisions/NOGOVA-VISUAL-20260908.md; this is author
+      seams remained at that checkpoint. See decisions/NOGOVA-VISUAL-20260908.md; this is author
       smoke evidence, not owner acceptance of every water artifact.
+
+      2026-09-09: offshore ocean now continues beyond the fixed water root using
+      lazy aligned CDLOD selection, without another FFT or terrain allocation.
+      Installed d243cae4 removes the straight offshore boundary and passes the
+      negative-corner downward capture. Seven-sample coastal/aerial comparisons
+      show about 0.15 ms additional water GPU time, not a universal benchmark.
+      Terrain remains finite; other water artifacts are not declared solved.
+      See decisions/OCEAN-CONTINUATION-20260909.md.
 
       2026-09-08 follow-up adds wind-oriented high-wave foam coverage and caps
       wave-only horizontal drag for small planing boats. Installed BoatW A/B
