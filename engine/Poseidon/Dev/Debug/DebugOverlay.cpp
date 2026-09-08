@@ -1585,6 +1585,11 @@ void DrawZeusTab()
         const float beforeSpillA = lamp.spillAmbient;
         const float beforeBright = lamp.brightnessScale;
         const float beforeAmbient = lamp.ambientScale;
+        bool colourChanged = Dev::Checkbox("Override lamp colour", &lamp.colorOverride);
+        ImGui::BeginDisabled(!lamp.colorOverride);
+        colourChanged |= Dev::ColorEdit3("Lamp colour", lamp.color);
+        ImGui::EndDisabled();
+        Dev::PanelTooltip("Applies to existing street lamps immediately. Disable the override to use each lamp's authored colour.");
         ImGui::SetNextItemWidth(160.0f);
         Dev::SliderFloat("Pool size", &lamp.radiusScale, 0.05f, 1.0f, "%.2f");
         Dev::PanelTooltip(kLampPoolTip);
@@ -1597,10 +1602,10 @@ void DrawZeusTab()
         Dev::SliderFloat("Spill ambient", &lamp.spillAmbient, 0.0f, 1.0f, "%.2f");
         Dev::PanelTooltip(kSpillAmbientTip);
         ImGui::SetNextItemWidth(160.0f);
-        Dev::SliderFloat("Lamp brightness", &lamp.brightnessScale, 0.1f, 3.0f, "%.2f");
+        Dev::SliderFloat("Lamp intensity", &lamp.brightnessScale, 0.0f, 8.0f, "%.2f");
         ImGui::SetNextItemWidth(160.0f);
         Dev::SliderFloat("Lamp ambient", &lamp.ambientScale, 0.0f, 1.0f, "%.2f");
-        if (lamp.radiusScale != beforeRadius || lamp.spill != beforeSpill || lamp.spillRadius != beforeSpillR ||
+        if (colourChanged || lamp.radiusScale != beforeRadius || lamp.spill != beforeSpill || lamp.spillRadius != beforeSpillR ||
             lamp.spillAmbient != beforeSpillA || lamp.brightnessScale != beforeBright ||
             lamp.ambientScale != beforeAmbient)
         {

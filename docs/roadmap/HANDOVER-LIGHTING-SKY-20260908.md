@@ -11,6 +11,10 @@ It records the 50 km default/settings, float-depth coastline fix, zero-normal Da
 sign fix, blended-surface scattering and the held LLDR monitor. The branch/deploy
 hashes below describe the earlier handover, not this follow-up.
 
+Next follow-up: [ROTOR-SMOKE-WATER-20260908.md](decisions/ROTOR-SMOKE-WATER-20260908.md)
+records rotor pose isolation, lamp controls, smoke measurements, boat drag and foam,
+including the still-open visual checks and additional infantry/cloud reports.
+
 | | |
 |---|---|
 | Worktree | `.claude/worktrees/asset-obs` — **work here, not in the main checkout** |

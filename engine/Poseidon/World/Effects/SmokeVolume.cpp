@@ -1164,8 +1164,7 @@ void SmokeVolume::Draw(int level, ClipFlags clipFlags, const FrameBase& frame)
     {
         const float cell = std::max(Lerp(_params.startRadius, _params.endRadius, 0.5f), 0.5f);
         const float invCell = 1.0f / cell;
-        _hash.clear();
-        _hash.reserve(_particles.size() * 2);
+        _hash.Clear(_particles.size() * 2);
         auto key = [](int x, int y, int z) -> uint64_t
         {
             // 21 bits per axis, offset so negatives pack.
@@ -1174,10 +1173,19 @@ void SmokeVolume::Draw(int level, ClipFlags clipFlags, const FrameBase& frame)
             const uint64_t uz = static_cast<uint64_t>(z + (1 << 20)) & 0x1FFFFF;
             return (ux << 42) | (uy << 21) | uz;
         };
+        const auto particleDensity = [&](const SmokeParticle& p)
+        {
+            const float lf = std::clamp(p.age / std::max(p.lifetime, 1e-3f), 0.0f, 1.0f);
+            const float alive = lf < 1.0f - _params.fadeOut ? 1.0f : (1.0f - lf) / std::max(_params.fadeOut, 1e-3f);
+            return _params.opacity * p.alphaJitter * alive;
+        };
+        // Each ray samples a cell total, not individual neighbours. Accumulate
+        // once so a dense/downwash-compressed plume cannot turn this quadratic.
         for (int i = 0; i < static_cast<int>(_particles.size()); ++i)
         {
             const Vector3& p = _particles[i].position;
-            _hash.emplace(key(toIntFloor(p.X() * invCell), toIntFloor(p.Y() * invCell), toIntFloor(p.Z() * invCell)), i);
+            _hash.Add(key(toIntFloor(p.X() * invCell), toIntFloor(p.Y() * invCell), toIntFloor(p.Z() * invCell)),
+                      particleDensity(_particles[i]));
         }
 
         // March toward the sun in steps of one cell, up to `steps` cells;
@@ -1189,6 +1197,9 @@ void SmokeVolume::Draw(int level, ClipFlags clipFlags, const FrameBase& frame)
         for (int i = 0; i < static_cast<int>(_particles.size()); ++i)
         {
             const SmokeParticle& self = _particles[i];
+            const uint64_t selfKey = key(toIntFloor(self.position.X() * invCell),
+                                         toIntFloor(self.position.Y() * invCell), toIntFloor(self.position.Z() * invCell));
+            const float selfDensity = particleDensity(self);
             float density = 0.0f;
             Vector3 probe = self.position;
             for (int st = 0; st < steps; ++st)
@@ -1197,18 +1208,8 @@ void SmokeVolume::Draw(int level, ClipFlags clipFlags, const FrameBase& frame)
                 const int cx = toIntFloor(probe.X() * invCell);
                 const int cy = toIntFloor(probe.Y() * invCell);
                 const int cz = toIntFloor(probe.Z() * invCell);
-                auto range = _hash.equal_range(key(cx, cy, cz));
-                for (auto it = range.first; it != range.second; ++it)
-                {
-                    if (it->second == i)
-                    {
-                        continue;
-                    }
-                    const SmokeParticle& other = _particles[it->second];
-                    const float lf = std::clamp(other.age / std::max(other.lifetime, 1e-3f), 0.0f, 1.0f);
-                    const float alive = lf < 1.0f - _params.fadeOut ? 1.0f : (1.0f - lf) / std::max(_params.fadeOut, 1e-3f);
-                    density += _params.opacity * other.alphaJitter * alive;
-                }
+                const uint64_t probeKey = key(cx, cy, cz);
+                density += _hash.SampleExcluding(probeKey, selfKey, selfDensity);
             }
             _shadowScratch[i] = std::exp(-density * _params.selfShadowStrength);
         }
@@ -1506,9 +1507,9 @@ void SmokeVolume::Draw(int level, ClipFlags clipFlags, const FrameBase& frame)
         }
         LOG_INFO(World,
                  "SmokeVolume: particles={} decals={} centre={:.1f},{:.1f},{:.1f} radius={:.2f} emitting={} "
-                 "sweeps={} hits={} sheltered={} indoor={}",
+                 "sweeps={} hits={} sheltered={} indoor={} sim_us={:.0f} rays_counter={}",
                  _particles.size(), issued, Position().X(), Position().Y(), Position().Z(), GetRadius(),
-                 _emitting ? 1 : 0, _diagSweeps, _diagHits, sheltered, indoor);
+                 _emitting ? 1 : 0, _diagSweeps, _diagHits, sheltered, indoor, _lastSimulateUs, SmokeSweepCount());
         _diagSweeps = 0;
         _diagHits = 0;
     }

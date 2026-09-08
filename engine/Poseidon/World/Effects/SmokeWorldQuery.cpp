@@ -6,6 +6,7 @@
 #include <Poseidon/World/Scene/Object.hpp>
 
 #include <cmath>
+#include <cstdlib>
 
 namespace Poseidon
 {
@@ -156,6 +157,44 @@ class PoseidonSmokeWorldQuery final : public ISmokeWorldQuery
         if (GLandscape == nullptr)
         {
             return result;
+        }
+
+        // The seven offset rays share one conservative broad phase. In open
+        // air none can hit: avoid seven identical walks of the object grid.
+        static const bool broadPhase = []
+        {
+            const char* v = std::getenv("POSEIDON_SMOKE_BROADPHASE");
+            return !(v && v[0] == '0');
+        }();
+        if (broadPhase)
+        {
+            int xMin, xMax, zMin, zMax;
+            ::ObjRadiusRectangle(xMin, xMax, zMin, zMax, from, to, radius);
+            const Vector3 centre = (from + to) * 0.5f;
+            const float reach = (to - from).Size() * 0.5f + std::max(radius, 0.0f);
+            bool candidate = false;
+            for (int z = zMin; z <= zMax && !candidate; ++z)
+            {
+                for (int x = xMin; x <= xMax && !candidate; ++x)
+                {
+                    const ObjectList& objects = GLandscape->GetObjects(z, x);
+                    for (int i = 0; i < objects.Size(); ++i)
+                    {
+                        const Object* object = objects[i];
+                        if (object->GetType() == Temporary || object->GetType() == TypeTempVehicle)
+                            continue;
+                        if (object->GetType() == Network && object->GetShape()->FindGeometryLevel() < 0)
+                            continue;
+                        if ((object->Position() - centre).SquareSize() <= Square(reach + object->GetRadius()))
+                        {
+                            candidate = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (!candidate)
+                return result;
         }
 
         // Centre ray first: it is the cheapest and, for a particle heading

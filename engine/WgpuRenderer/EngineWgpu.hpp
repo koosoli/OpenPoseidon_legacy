@@ -931,6 +931,9 @@ class EngineWgpu : public EngineDummy
     // Palette slot for the current skinned mesh, pre-multiplied once in BeginMeshTL
     // and shared by all its sections; WGR_NO_PALETTE when the mesh isn't skinned.
     uint32_t _currentPaletteSlot = WGR_NO_PALETTE;
+    VertexBuffer* _currentCpuPose = nullptr;
+    const Shape* _currentCpuPoseSource = nullptr;
+    uint64_t _cpuPoseFrame = 0;
 
     TLVertexTable* _swMesh = nullptr;
     uint64_t _swTexture = 0;

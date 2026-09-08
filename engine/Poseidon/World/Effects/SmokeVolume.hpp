@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
+#include <Poseidon/World/Effects/SmokeDensityGrid.hpp>
 
 #include <vector>
 #include <algorithm>
@@ -426,7 +427,7 @@ class SmokeVolume : public Entity
     /// Per-particle transmittance toward the sun, rebuilt each Draw. Scratch,
     /// kept as a member so the allocation is not paid every frame.
     std::vector<float> _shadowScratch;
-    std::unordered_multimap<uint64_t, int> _hash;
+    SmokeDensityGrid _hash;
 
     /// Flame particles. Same struct, far fewer fields used: no collision, no
     /// shelter, they live under a second. Kept separate so the smoke loop's

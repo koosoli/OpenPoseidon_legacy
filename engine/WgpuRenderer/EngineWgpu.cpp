@@ -811,6 +811,11 @@ class VertexBufferWgpu : public VertexBuffer
     // produced a per-frame `wgr_3d_vbuf` staging copy + barrier for unchanged data.
     uint64_t lastUploadHash = 0;
     bool haveUploadHash = false;
+    // Queued draws must not all observe the last helicopter's CPU pose.
+    // Copies belong to this shape buffer and are reused only in a later frame.
+    std::vector<std::unique_ptr<VertexBufferWgpu>> poseCopies;
+    uint64_t poseFrame = 0;
+    size_t nextPoseCopy = 0;
 
     // GPU skinning state
     // `skinned` flips on once SetSkinData has uploaded the bind pose + weights
@@ -2234,6 +2239,9 @@ void EngineWgpu::InitDraw(bool clear, PackedColor color)
     // without a world, tools) — it captures solely when nothing has since the last
     // FinishDraw, so a dead world's values never leak into a later frame.
     render::frame::CapturePresentationSnapshotIfStale();
+    ++_cpuPoseFrame;
+    _currentCpuPose = nullptr;
+    _currentCpuPoseSource = nullptr;
     _verts.clear();
     _batches.clear();
     _draws3d.clear();
@@ -4779,6 +4787,8 @@ void EngineWgpu::BeginMeshTL(const Shape& sMesh, int spec, bool dynamic)
 {
     _meshSpec = spec;
     _currentPaletteSlot = WGR_NO_PALETTE;
+    _currentCpuPose = nullptr;
+    _currentCpuPoseSource = nullptr;
 
     auto* buf = static_cast<VertexBufferWgpu*>(sMesh.GetVertexBuffer());
     if (!buf)
@@ -4786,6 +4796,33 @@ void EngineWgpu::BeginMeshTL(const Shape& sMesh, int spec, bool dynamic)
         return;
     }
 
+    const auto* object = static_cast<const Object*>(GetDrawObject());
+    static const bool captureHelicopterPose = []
+    {
+        const char* v = std::getenv("WGR_HELI_POSE_SNAPSHOTS");
+        return !(v && v[0] == '0');
+    }();
+    if (captureHelicopterPose && object && dyn_cast<const Helicopter>(object) && !buf->skinned && buf->isDynamic)
+    {
+        AcquireProducerWindow("helicopter CPU pose");
+        if (buf->poseFrame != _cpuPoseFrame)
+        {
+            buf->poseFrame = _cpuPoseFrame;
+            buf->nextPoseCopy = 0;
+        }
+        const size_t index = buf->nextPoseCopy++;
+        if (index == buf->poseCopies.size())
+            buf->poseCopies.emplace_back(static_cast<VertexBufferWgpu*>(CreateVertexBuffer(sMesh, VBDynamic)));
+        auto* copy = buf->poseCopies[index].get();
+        if (copy)
+        {
+            copy->bufferDirty = true;
+            copy->Update(sMesh, true);
+            _currentCpuPose = copy;
+            _currentCpuPoseSource = &sMesh;
+            return;
+        }
+    }
     buf->Update(sMesh, dynamic);
 
     // FACE-001: while the mesh is CPU-posed it carries its own final vertices; handing it a
@@ -4820,6 +4857,8 @@ void EngineWgpu::BeginMeshTL(const Shape& sMesh, int spec, bool dynamic)
 void EngineWgpu::EndMeshTL(const Shape& /*sMesh*/)
 {
     _currentPaletteSlot = WGR_NO_PALETTE;
+    _currentCpuPose = nullptr;
+    _currentCpuPoseSource = nullptr;
 }
 
 void EngineWgpu::SetMaterial(const TLMaterial& mat, const LightList& /*lights*/, const render::LegacySpec& /*spec*/)
@@ -4898,7 +4937,8 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
         return;
     }
 
-    auto* buf = static_cast<VertexBufferWgpu*>(sMesh.GetVertexBuffer());
+    auto* buf = static_cast<VertexBufferWgpu*>(_currentCpuPose && _currentCpuPoseSource == &sMesh
+                                                 ? _currentCpuPose : sMesh.GetVertexBuffer());
     if (!buf || buf->sections.Size() == 0 || end <= beg || end > buf->sections.Size())
     {
         return;

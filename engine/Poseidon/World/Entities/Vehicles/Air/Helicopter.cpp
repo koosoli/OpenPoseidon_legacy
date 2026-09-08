@@ -31,6 +31,8 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <cmath>
+#include <cstdlib>
+#include <unordered_map>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Containers/Array.hpp>
 #include <Poseidon/Foundation/Math/MathDefs.hpp>
@@ -1079,6 +1081,19 @@ void Helicopter::DammageDeanimation(int level)
 
 void Helicopter::Animate(int level)
 {
+    static const bool rotorDiag = std::getenv("POSEIDON_ROTOR_DIAG") != nullptr;
+    if (rotorDiag)
+    {
+        static std::unordered_map<uint32_t, float> nextReport;
+        float& next = nextReport[RenderId()];
+        if (Glob.time.toFloat() >= next)
+        {
+            next = Glob.time.toFloat() + 1.0f;
+            LOG_INFO(Graphics, "Rotor pose: object={} pos={:.1f},{:.1f},{:.1f} speed={:.3f} phase={:.3f} lod={} mainBlur={} tailBlur={}",
+                     RenderId(), Position().X(), Position().Y(), Position().Z(), _rotorSpeed, _rotorPosition, level,
+                     Type()->_hRotorMove.GetSelection(level), Type()->_vRotorMove.GetSelection(level));
+        }
+    }
     if (_rotorSpeed < 0.6)
     {
         Type()->_hRotorMove.Hide(_shape, level);
@@ -1086,8 +1101,12 @@ void Helicopter::Animate(int level)
     }
     else
     {
-        Type()->_hRotorStill.Hide(_shape, level);
-        Type()->_vRotorStill.Hide(_shape, level);
+        // Some distant LODs have blades but no blur selection. Keep their
+        // rotating blades rather than hiding the only rotor geometry.
+        if (Type()->_hRotorMove.GetSelection(level) >= 0)
+            Type()->_hRotorStill.Hide(_shape, level);
+        if (Type()->_vRotorMove.GetSelection(level) >= 0)
+            Type()->_vRotorStill.Hide(_shape, level);
     }
     if (Type()->_rotorH.GetSelection(level) >= 0)
     {

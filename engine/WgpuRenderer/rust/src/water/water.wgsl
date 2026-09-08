@@ -2216,8 +2216,22 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
         let bank = smoothstep(0.35, 0.95, body_edge);
         river_streak = smoothstep(0.58, 0.82, streak) * clamp(body_flow_speed / 2.0, 0.0, 1.0) * (0.25 + 0.75 * bank) * 0.55;
     }
-    let unstructured_foam = max(max(foam, river_streak), max(persistent_foam, breaker_foam) * foam_scale * wave_scale) +
-        spray_flecks * foam_scale * wave_scale;
+    // Break the periodic FFT crest outlines into irregular wind-stretched rafts.
+    // World-space, incommensurate scales avoid repeating the simulation tile;
+    // filtering preserves average coverage once these rafts become sub-pixel.
+    let foam_drift = in.base_xz - spray_wind * wp.time * 0.15;
+    let foam_wind_dir = normalize(wp.fft_wind_sea.xy + vec2<f32>(1e-4, 0.0));
+    let foam_crosswind = vec2<f32>(-foam_wind_dir.y, foam_wind_dir.x);
+    let raft_uv = vec2<f32>(dot(foam_drift, foam_wind_dir) * 0.035,
+                            dot(foam_drift, foam_crosswind) * 0.12);
+    let raft_coarse = vnoise_lod(raft_uv, foam_fp * 0.12);
+    let raft_detail = vnoise_lod(vec2<f32>(raft_uv.x * 1.73 - raft_uv.y * 0.61,
+                                          raft_uv.x * 0.61 + raft_uv.y * 1.73) + vec2<f32>(19.7, 43.1),
+                                foam_fp * 0.221);
+    let raft_coverage = mix(0.18, 1.0, smoothstep(0.25, 0.75, raft_coarse * 0.65 + raft_detail * 0.35));
+    let unstructured_foam = max(max(foam, river_streak),
+        max(persistent_foam, breaker_foam) * foam_scale * wave_scale * raft_coverage) +
+        spray_flecks * foam_scale * wave_scale * raft_coverage;
     var combined_foam = 0.0;
     if (unstructured_foam > 0.001) {
         // This one multiplies EVERY foam source, so its aliasing was modulating the shoreline

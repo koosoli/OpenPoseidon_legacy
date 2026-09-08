@@ -504,6 +504,7 @@ list(APPEND POSEIDON_TEST_SOURCES
 
     # Rendering tests
     Graphics/Rendering/test_smokes.cpp
+    Graphics/Rendering/test_smoke_density_grid.cpp
     Graphics/Rendering/test_pactext.cpp
 
     # Weapons tests

@@ -1,6 +1,7 @@
 #include <Poseidon/Core/Application.hpp>
 
 #include <Poseidon/World/Entities/Vehicles/Misc/Ship.hpp>
+#include <Poseidon/World/Entities/Vehicles/Misc/BoatWaterResponse.hpp>
 #include <Poseidon/AI/AI.hpp>
 
 #include <Poseidon/World/Entities/Weapons/Shots.hpp>
@@ -19,6 +20,8 @@
 
 #include <Poseidon/Foundation/Enums/EnumNames.hpp>
 #include <cmath>
+#include <cstdlib>
+#include <unordered_map>
 #include <Poseidon/Foundation/Containers/Array.hpp>
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
@@ -303,6 +306,19 @@ void Ship::Simulate(float deltaT, SimulationImportance prec)
 
     Vector3Val speed = ModelSpeed();
     float speedSize = fabs(speed.Z());
+    static const bool boatDiag = std::getenv("POSEIDON_BOAT_DIAG") != nullptr;
+    if (boatDiag)
+    {
+        static std::unordered_map<uint32_t, float> nextReport;
+        float& next = nextReport[RenderId()];
+        if (Glob.time.toFloat() >= next)
+        {
+            next = Glob.time.toFloat() + 1.0f;
+            LOG_INFO(Physics, "Boat response: t={:.1f} object={} pos={:.1f},{:.1f},{:.1f} forward={:.3f} thrust={:.2f},{:.2f} brake={}",
+                     Glob.time.toFloat(), RenderId(), Position().X(), Position().Y(), Position().Z(), speed.Z(),
+                     _thrustL, _thrustR, static_cast<bool>(_pilotBrake));
+        }
+    }
 
     float delta;
 
@@ -651,9 +667,17 @@ void Ship::Simulate(float deltaT, SimulationImportance prec)
 #endif
 
                             // second is "water friction" - causing no momentum
-                            pForce[0] = speed[0] * fabs(speed[0]) * 0.50 * info.under + speed[0] * info.under * 4;
+                            static const bool waveDrag = []
+                            {
+                                const char* v = std::getenv("POSEIDON_BOAT_WAVE_DRAG");
+                                return !(v && v[0] == '0');
+                            }();
+                            const float dragDepth = smallShip && waveDrag
+                                                        ? PlaningWaterDragDepth(info.under, info.underFlat)
+                                                        : info.under;
+                            pForce[0] = speed[0] * fabs(speed[0]) * 0.50 * dragDepth + speed[0] * dragDepth * 4;
                             pForce[1] = speed[1] * fabs(speed[1]) * 40 + speed[1] * 30;
-                            pForce[2] = (fabs(speed[2]) * 0.02 + 0.06) * speed[2] * info.under;
+                            pForce[2] = (fabs(speed[2]) * 0.02 + 0.06) * speed[2] * dragDepth;
 
                             if (_pilotBrake)
                             {
@@ -665,7 +689,10 @@ void Ship::Simulate(float deltaT, SimulationImportance prec)
                                 pForce *= 200;
                             }
 
-                            pForce = DirectionModelToWorld(pForce * info.under) * GetMass() * (1.0 / 7000);
+                            pForce[0] *= dragDepth;
+                            pForce[1] *= info.under; // Keep vertical wave damping and buoyancy unchanged.
+                            pForce[2] *= dragDepth;
+                            pForce = DirectionModelToWorld(pForce) * GetMass() * (1.0 / 7000);
 #if ARROWS
                             AddForce(wCenter + pCenter, -pForce * InvMass(), Color(1, 0, 1, 0.5));
 #endif
