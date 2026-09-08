@@ -69,6 +69,12 @@ fn snow_depth(world_xz: vec2<f32>) -> f32 {
     let edge = min(min(t.x, t.y), min(511.0 - t.x, 511.0 - t.y));
     return max(0.0, depth - deficit * smoothstep(0.0, 24.0, edge));
 }
+fn snow_gradient(xz: vec2<f32>) -> vec3<f32> {
+    let h = 0.125;
+    let dx = (snow_depth(xz + vec2<f32>(h, 0.0)) - snow_depth(xz - vec2<f32>(h, 0.0))) / (2.0 * h);
+    let dz = (snow_depth(xz + vec2<f32>(0.0, h)) - snow_depth(xz - vec2<f32>(0.0, h))) / (2.0 * h);
+    return vec3<f32>(-dx, 0.0, -dz);
+}
 // Bindless ground textures: one texture_2d per Landscape texture index, native
 // size/format/mips. Indexed non-uniformly per fragment (needs the device's
 // SAMPLED_TEXTURE_..._NON_UNIFORM_INDEXING feature).
@@ -952,10 +958,7 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
         var snow_rgb = vec3<f32>(0.70, 0.75, 0.80) * (1.0 - compacted * 0.28);
         if (linear <= 0.5) { snow_rgb = ground_linear_to_srgb(snow_rgb); }
         rgb = mix(rgb, snow_rgb, coverage);
-        let h = 0.125;
-        let dx = (snow_depth(in.world_xz + vec2<f32>(h, 0.0)) - snow_depth(in.world_xz - vec2<f32>(h, 0.0))) / (2.0 * h);
-        let dz = (snow_depth(in.world_xz + vec2<f32>(0.0, h)) - snow_depth(in.world_xz - vec2<f32>(0.0, h))) / (2.0 * h);
-        n = normalize(mix(n, geometric_n, coverage) + vec3<f32>(-dx, 0.0, -dz) * geometric_n.y * dry);
+        n = normalize(mix(n, geometric_n, coverage) + snow_gradient(in.world_xz) * geometric_n.y * dry);
     }
 
     // Combined sun shadow: CSM (objects + near contact) and the long-range
@@ -1099,7 +1102,11 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
 // space (view translation is zeroed, so the direction transform is a pure rotation).
 @fragment
 fn fs_terrain_prepass(in: VsOut) -> @location(0) vec2<f32> {
-    let n = sample_normal(in.world_xz, tp.terrain_grid);
+    var n = sample_normal(in.world_xz, tp.terrain_grid);
+    if (snow.info.w > 0.0) {
+        let dry = smoothstep(tp.sea_level, tp.sea_level + 0.25, sample_height(in.world_xz));
+        n = normalize(n + snow_gradient(in.world_xz) * n.y * dry);
+    }
     let n_view = (frame.view * vec4<f32>(n, 0.0)).xyz;
     return oct_encode(normalize(n_view));
 }

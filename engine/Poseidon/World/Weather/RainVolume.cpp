@@ -570,8 +570,11 @@ void RainSystem::Draw()
         Color colour = tint;
         colour.SetA(_params.opacity * (1.0f - fog));
 
+        // Flare0 encodes its soft mask in RGB on black, unlike the alpha rain
+        // texture. Its native additive blend avoids opaque dark flake quads.
+        const int specials = kRainSpecials | (_params.snowflakes ? IsLight : 0);
         GEngine->DrawDecalRotated(posp, invNearPos, halfWidthPx, lengthPx * 0.5f, PackedColor(colour), mip,
-                                  kRainSpecials, dirX, dirY);
+                                  specials, dirX, dirY);
         ++_stats.streakDecals;
         ++_stats.drawnDrops;
     }

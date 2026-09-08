@@ -930,7 +930,7 @@ void DrawWeatherTab()
     if (ImGui::CollapsingHeader("Experimental snow"))
     {
         auto& snow = GSnow();
-        ImGui::Checkbox("Enable snow cover (experimental)", &snow.enabled);
+        ImGui::Checkbox("Enable snow cover (wgpu experiment)", &snow.enabled);
         ImGui::Checkbox("Accumulate new snow", &snow.falling);
         ImGui::SliderFloat("Snowfall (m/min)", &snow.metresPerMinute, 0.0f, 0.2f, "%.3f");
         ImGui::SliderFloat("Maximum snow depth (m)", &snow.maxDepth, 0.05f, 1.0f, "%.2f");

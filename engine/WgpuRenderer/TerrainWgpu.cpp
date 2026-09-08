@@ -2772,7 +2772,7 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     _params.enfusion_ground = _enfusionGroundEnabled ? 1.0f : 0.0f;
     _engine.QueueTerrainParams(_params); // REN-THR-013: queued, applied before wgr_render_frame
     const auto& snow = GSnow();
-    if (camera && (snow.enabled || _snowWasEnabled) &&
+    if (camera && (snow.enabled || _snowWasEnabled || uploaded) &&
         (snow.enabled != _snowWasEnabled || uploaded || _params.time < _snowUploadTime || _params.time - _snowUploadTime >= 0.1f))
     {
         _engine.QueueSnow(snow.Snapshot(camera->Position().X(), camera->Position().Z()));
