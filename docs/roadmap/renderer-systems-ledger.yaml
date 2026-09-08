@@ -411,6 +411,13 @@ systems:
       Considerably further than "stages 0 and 1 landed" (the RND-030 summary) and
       further than the plan's own "Stage 2 in progress".
 
+      2026-09-09: paired primary-density sampling was measured and rejected
+      (about 0.43 ms extra march cost, no convincing grain benefit). Native
+      rendering also retains grain. The engine history mask goes to a reserved
+      SDK input; do not claim its GPU readback proves current DLSS consumption.
+      Cloud motion vectors and motion-trailing acceptance remain open. See
+      decisions/CLOUD-GRAIN-EXPERIMENT-20260909.md.
+
       Stages 0 and 1 (plumbing, clear-sky single scattering, sun disc) — done.
       Stage 2 (Hillaire LUT model) — present, not merely in progress: LUT machinery
       appears throughout sky/mod.rs and sky.wgsl. Stage 4 (aerial perspective

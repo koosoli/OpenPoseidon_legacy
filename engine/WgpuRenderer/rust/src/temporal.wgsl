@@ -72,7 +72,9 @@ fn fs_velocity(in: VsOut) -> @location(0) vec2<f32> {
 // ---------------------------------------------------------------------------------
 // REN-TEMP-001J — history control ("reactive"): per-pixel 0..1, higher = trust the
 // temporal history LESS. Engine-owned semantics (plan §16); the DLSS backend feeds it
-// as the SDK's TransparencyMask. v1 covers the two classes the owner's play sessions
+// as the SDK's reserved TransparencyMask: this does not prove a current DLSS model
+// consumes it. Keep the engine mask semantics separate from vendor support.
+// v1 covers the two classes the owner's play sessions
 // confirmed and that provably have no usable motion vectors:
 //   * sky/clouds (stored depth = far clear): cloud drift and the procedural sky's
 //     animation are unvectorised — misc.x strength;

@@ -590,7 +590,8 @@ impl Ngx {
         motion: &mut NgxResourceVk,
         exposure: Option<&mut NgxResourceVk>,
         // Engine "history control" (plan Phase 11), fed as the SDK's TransparencyMask:
-        // 0..1, higher = trust temporal history less at this pixel.
+        // Engine intent: 0..1, higher = trust history less. The SDK reserves this
+        // input; current models do NOT promise to consume it. See CLOUD-GRAIN-EXPERIMENT-20260909.
         history_control: Option<&mut NgxResourceVk>,
         output: &mut NgxResourceVk,
         jitter_px: [f32; 2],

@@ -203,6 +203,13 @@ Bring-up war stories (recorded because each cost a debug cycle):
 
 ## Phase 10/11 v1 — history-control mask (commit 657a0122, deployed)
 
+2026-09-09 correction: the Vulkan SDK labels TransparencyMask unused/reserved.
+Its separate BiasCurrentColorMask is also not a safe current-model replacement:
+the current programming guide section 3.15 advises against using it (legacy F
+only). Mask generation/readback is not evidence of an effective DLSS input.
+See docs/roadmap/decisions/CLOUD-GRAIN-EXPERIMENT-20260909.md. The following is the
+historical implementation report, not a current anti-ghosting guarantee.
+
 Engine-owned reactive semantics, fed to DLSS as the SDK's TransparencyMask (this SDK
 generation has no separate "reactive" input): sky/cloud pixels (far-clear depth) at
 WGR_REACTIVE_SKY=0.4, water-surface pixels (opaque depth reconstructs below sea level)

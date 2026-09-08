@@ -26,6 +26,11 @@ performance/visual limits: [SMOKE-CONTACT-20260908.md](decisions/SMOKE-CONTACT-2
 Camera-basis diagnostic and attached-bulb visibility follow-up:
 [LOCAL-LIGHT-GUARDS-20260908.md](decisions/LOCAL-LIGHT-GUARDS-20260908.md).
 
+Experimental, mission-local terrain snow and its tested limits:
+[EXPERIMENTAL-SNOW-20260909.md](decisions/EXPERIMENTAL-SNOW-20260909.md).
+Rejected paired-density cloud experiment and the SDK history-mask caveat:
+[CLOUD-GRAIN-EXPERIMENT-20260909.md](decisions/CLOUD-GRAIN-EXPERIMENT-20260909.md).
+
 | | |
 |---|---|
 | Worktree | `.claude/worktrees/asset-obs` — **work here, not in the main checkout** |
