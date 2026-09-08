@@ -359,7 +359,9 @@ class PoseidonSmokeWorldQuery final : public ISmokeWorldQuery
         result.position = to;
         result.room = room;
 
-        const Object* obj = BuildingContaining(to);
+        // The source owns this step. Its endpoint may already lie beyond a
+        // solid wall, where looking up a building would lose containment.
+        const Object* obj = BuildingContaining(from);
         if (obj == nullptr)
         {
             return result;

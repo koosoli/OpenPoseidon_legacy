@@ -56,3 +56,22 @@ fluid solver. No wholesale replacement or higher-cost volumetric default was
 enabled. Remaining work: exact sphere/solid collision rather than the seven-ray
 approximation, voxel-field bleed at thin walls, identifying the indoor simulation
 spikes, and assessing richer rolling smoke without increasing the default budget.
+
+## Source-room follow-up
+
+IndoorContainStep now looks up the building at the source, not the destination:
+an endpoint beyond a wall is not evidence that the particle was outdoors. The
+caller passes the actual integrated position instead of a two-tick lookahead.
+The old lookahead could assign an outdoor/different room to a particle that had
+not crossed a portal yet, dropping its current room's render-radius bound early.
+No additional sweep, wind/downwash change or larger particle budget is involved.
+
+PoseidonGame/PoseidonTests build passed. BuildingInterior, render bounds, density
+and local-light tests: 758 assertions / 57 cases passed. New source-room model
+coverage pins an indoor step and a solid-roof crossing whose destination is
+outside. It does not exercise live building-instance lookup or prove every door.
+
+Installed-game verification is pending: the game lock refused deployment at
+22:18 because the owner has a running instance. That instance is untouched.
+The existing 12-metre building cache still lacks explicit per-particle building
+identity; multi-building ambiguity and indoor performance remain open.

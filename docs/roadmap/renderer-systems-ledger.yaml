@@ -65,6 +65,8 @@ systems:
       from a later larger puff. Bounds/density/wind/airflow tests pass and installed
       Nogova captures completed on 700246eb. Full wall/roof containment, door
       traversal, indoor frame-time spikes and richer smoke appearance remain open.
+      Source-building lookup and actual-step room assignment are corrected and
+      model-tested; installed verification awaits the owner's free game lock.
       See decisions/SMOKE-CONTACT-20260908.md for evidence and limitations; this
       entry does not assert completion of the containment implementation plan.
     production_call_sites:

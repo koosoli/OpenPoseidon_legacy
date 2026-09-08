@@ -176,6 +176,24 @@ TEST_CASE("Building interior clearance bounds an indoor smoke billboard",
     REQUIRE(nearRoof < 0.30f);
 }
 
+TEST_CASE("Smoke source room remains authoritative when the destination is outside",
+          "[BuildingInterior][Smoke][SmokeSourceRoom]")
+{
+    BuildingInterior interior = BuildingInteriorTestAccess::MakeColumn({0, 0, 0xFE, 0xFF, 0xFF});
+    const Vector3 source(0.125f, 0.125f, 0.125f);
+    const Vector3 current(0.125f, 0.375f, 0.125f);
+    const Vector3 outside(0.125f, 1.125f, 0.125f);
+    REQUIRE(interior.ClassifyModel(outside) == -1);
+    const auto actual = interior.ContainedStepModel(source, current, 0);
+    REQUIRE_FALSE(actual.blocked);
+    REQUIRE(actual.room == 0);
+    REQUIRE(actual.position.Y() == Catch::Approx(current.Y()));
+    const auto crossing = interior.ContainedStepModel(source, outside, 0);
+    REQUIRE(crossing.blocked);
+    REQUIRE(crossing.room == 0);
+    REQUIRE(crossing.position.Y() < 0.5f);
+}
+
 TEST_CASE("Particle rain follows wind speed and direction and relaxes after a gust change",
           "[Rain][Weather][Wind]")
 {

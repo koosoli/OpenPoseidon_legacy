@@ -532,9 +532,9 @@ void SmokeVolume::Collide(SmokeParticle& particle, Vector3Par previousPosition, 
     // velocity response below is the same bookkeeping the reactive path does.
     if (_params.contain && particle.roomId >= 0)
     {
-        const float ahead = deltaT * 2.0f;
-        const Vector3 lookahead = particle.position + particle.velocity * ahead;
-        const SmokeContainStep step = query.IndoorContainStep(previousPosition, lookahead, particle.roomId);
+        // Do not assign the room of a predicted future point to a particle
+        // still inside. That prematurely dropped its wall/roof render bounds.
+        const SmokeContainStep step = query.IndoorContainStep(previousPosition, particle.position, particle.roomId);
         ++_diagSweeps;
 
         if (!step.allowed)
