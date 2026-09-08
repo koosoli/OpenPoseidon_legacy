@@ -49,6 +49,32 @@ verification_note: >-
   word for the other is not verification.
 
 systems:
+  - id: RSYS-SMOKE-CONTAINMENT
+    title: Smoke surface bounds and containment
+    plan: docs/roadmap/SMOKE-CONTAINMENT-LOW-COST-IMPLEMENTATION-PLAN.md
+    status: PARTIAL
+    owner: null
+    audited: 2026-09-08
+    completeness: >-
+      Existing particle motion, room lookup, ray-ring collision, wind and rotor
+      airflow remain active. Density-cell aggregation and conservative broad-phase
+      rejection are implemented; the earlier outdoor 8x wind test measured 27%
+      lower simulation CPU time, not a universal improvement.
+      Sprite, shadow and volume injection now share surface-limited radii and a
+      cached query result. Contact padding is stored at impact rather than inferred
+      from a later larger puff. Bounds/density/wind/airflow tests pass and installed
+      Nogova captures completed on 700246eb. Full wall/roof containment, door
+      traversal, indoor frame-time spikes and richer smoke appearance remain open.
+      See decisions/SMOKE-CONTACT-20260908.md for evidence and limitations; this
+      entry does not assert completion of the containment implementation plan.
+    production_call_sites:
+      - file: engine/Poseidon/World/Effects/SmokeVolume.cpp
+        symbol: SmokeParticleRenderRadius
+      - file: engine/Poseidon/World/Effects/SmokeVolume.hpp
+        symbol: AppendShadowBlobs
+      - file: engine/Poseidon/World/Effects/SmokeWorldQuery.cpp
+        symbol: SweepSphere
+
   - id: RSYS-SHADOW-CASCADES
     title: Cascaded shadow maps
     plan: engine/WgpuRenderer/docs/cascaded-shadow-map-plan.md

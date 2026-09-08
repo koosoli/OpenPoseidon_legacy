@@ -34,6 +34,10 @@ shelter and the simulation's collision schedule are unchanged.
   Includes downward rotor wake, ground outflow, stopped rotors and wind response.
 - PoseidonGame and PoseidonTests build. Matched eb0981a9 EXE/DLL installed using
   Deploy.ps1 and the game lock at 20:48, then successful installed-game captures.
+- Final shared-cache build 700246eb installed at 20:54 (EXE 20:53:45, DLL
+  20:53:30). smoke-wall-final completed normally at 30 seconds with the same
+  settings. No engine panic/exception was found. Late instantaneous simulation
+  samples range from 12 to 44 ms; sampling is too sparse for a p95 claim.
 - Nogova hasic_zbroj at 7731.6/25.3/4421.4: 8x smoke, wind 18, volumetric mode 1,
   30-second before/after captures from 7764.82/4408.71/30, heading 290, pitch -5.
   Private smoke-wall-before/after files in .tmp-nogova. The building is visible
