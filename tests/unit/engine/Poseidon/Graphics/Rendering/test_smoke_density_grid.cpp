@@ -81,3 +81,30 @@ TEST_CASE("Smoke cell totals match the neighbour walk including self exclusion",
     CHECK(grid.SampleExcluding(3, 3, 0.7f) == 0.0f);
     CHECK(grid.SampleExcluding(0, 3, 0.7f) == 0.0f);
 }
+
+TEST_CASE("Cached smoke sort depths preserve the per-camera draw order", "[smoke][draw-order]")
+{
+    std::vector<Poseidon::SmokeParticle> particles(4096);
+    for (int i = 0; i < static_cast<int>(particles.size()); ++i)
+        particles[i].position = Vector3((i * 31) % 101, (i * 7) % 13, (i * 43) % 97);
+    std::vector<float> depths;
+    std::vector<int> order;
+    for (float heading : {0.0f, 0.7f, 2.4f})
+    {
+        Matrix4 view;
+        view.SetRotationY(heading);
+        view.SetPosition(Vector3(7764, 23, 4408));
+        std::vector<int> reference(particles.size());
+        for (int i = 0; i < static_cast<int>(reference.size()); ++i)
+            reference[i] = i;
+        std::sort(reference.begin(), reference.end(), [&](int a, int b)
+                  { return (view * particles[a].position).Z() > (view * particles[b].position).Z(); });
+        Poseidon::BuildSmokeDrawOrder(particles, view, depths, order);
+        REQUIRE(order == reference);
+        REQUIRE(depths.size() == particles.size());
+    }
+    particles.clear();
+    Poseidon::BuildSmokeDrawOrder(particles, M4Identity, depths, order);
+    REQUIRE(order.empty());
+    REQUIRE(depths.empty());
+}

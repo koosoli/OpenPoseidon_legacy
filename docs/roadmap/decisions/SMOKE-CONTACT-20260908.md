@@ -75,3 +75,17 @@ Installed-game verification is pending: the game lock refused deployment at
 22:18 because the owner has a running instance. That instance is untouched.
 The existing 12-metre building cache still lacks explicit per-particle building
 identity; multi-building ambiguity and indoor performance remain open.
+
+## Sort-depth caching
+
+BuildSmokeDrawOrder computes the camera-space depth once per particle, then sorts
+indices using the cached floats rather than transforming both particles on every
+comparison. Scratch storage is retained between draws (one extra float per
+particle); it is rebuilt for every camera, not reused across different views.
+No GPU resource, density, particle count or motion change is involved.
+
+The production helper matches the old comparator's exact index order for 4096
+particles, including equal depths, at three camera headings; empty input is also
+covered. Combined targeted tests: 766 assertions / 58 cases. PoseidonGame and
+PoseidonTests build passed. Installed timing/visual verification still waits for
+the free game lock; no measured total-frame speedup is claimed.

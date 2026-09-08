@@ -1075,6 +1075,19 @@ float SmokeParticleRenderRadius(const SmokeParticle& particle, const SmokeParams
     return radius;
 }
 
+void BuildSmokeDrawOrder(const std::vector<SmokeParticle>& particles, const Matrix4& toView,
+                         std::vector<float>& depths, std::vector<int>& order)
+{
+    depths.resize(particles.size());
+    order.resize(particles.size());
+    for (int i = 0; i < static_cast<int>(particles.size()); ++i)
+    {
+        depths[i] = (toView * particles[i].position).Z();
+        order[i] = i;
+    }
+    std::sort(order.begin(), order.end(), [&](int a, int b) { return depths[a] > depths[b]; });
+}
+
 float SmokeVolume::RenderRadius(const SmokeParticle& particle) const
 {
     if (particle.renderRadius < 0.0f)
@@ -1248,17 +1261,7 @@ void SmokeVolume::Draw(int level, ClipFlags clipFlags, const FrameBase& frame)
     // array stable and costs one pass.
     Matrix4Val toView = GScene->ScaledInvTransform();
 
-    _drawOrder.clear();
-    _drawOrder.reserve(_particles.size());
-    for (int i = 0; i < static_cast<int>(_particles.size()); ++i)
-    {
-        _drawOrder.push_back(i);
-    }
-    std::sort(_drawOrder.begin(), _drawOrder.end(),
-              [&](int a, int b)
-              {
-                  return (toView * _particles[a].position).Z() > (toView * _particles[b].position).Z();
-              });
+    BuildSmokeDrawOrder(_particles, toView, _drawDepth, _drawOrder);
 
     const Vector3 cameraPosition = camera.Position();
     int issued = 0;

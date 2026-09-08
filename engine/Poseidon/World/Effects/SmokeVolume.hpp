@@ -283,6 +283,8 @@ struct SmokeParticle
 class ISmokeWorldQuery;
 float SmokeParticleRenderRadius(const SmokeParticle& particle, const SmokeParams& params,
                                const ISmokeWorldQuery& query);
+void BuildSmokeDrawOrder(const std::vector<SmokeParticle>& particles, const Matrix4& toView,
+                         std::vector<float>& depths, std::vector<int>& order);
 
 class SmokeVolume : public Entity
 {
@@ -456,6 +458,7 @@ class SmokeVolume : public Entity
     float _fireLightPhase = 0.0f;
     void UpdateFireLight(float deltaT);
     std::vector<int> _drawOrder;
+    std::vector<float> _drawDepth;
 
     Vector3 _emitterPosition{VZero};
     float _emitAccumulator = 0.0f;

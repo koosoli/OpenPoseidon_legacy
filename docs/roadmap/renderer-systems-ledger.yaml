@@ -67,6 +67,8 @@ systems:
       traversal, indoor frame-time spikes and richer smoke appearance remain open.
       Source-building lookup and actual-step room assignment are corrected and
       model-tested; installed verification awaits the owner's free game lock.
+      Sort-depth caching is equivalence-tested at 4096 particles and three camera
+      headings; runtime cost comparison remains pending, not a claimed speedup.
       See decisions/SMOKE-CONTACT-20260908.md for evidence and limitations; this
       entry does not assert completion of the containment implementation plan.
     production_call_sites:
