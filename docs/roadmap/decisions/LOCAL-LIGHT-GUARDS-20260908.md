@@ -21,7 +21,7 @@
   All three attached-light classes now override it. A base-pointer dispatch test
   pins the contract and the reflector's visible-bulb switch.
 - WGPU attached reflectors replace their grey HalfLight mesh with a compact
-  screen-facing core, at the existing marker-size setting. Two additive quads
+  screen-facing core, at the existing marker-size setting. Eight additive quads
   provide headroom without changing packed vertex/FFI layouts or other lights.
   The core bypasses diffuse eye accommodation, retains source visibility and
   front-facing checks, and is disabled for hidden-bulb head torches.
@@ -39,6 +39,14 @@
   local shadow views (cache reuse observed). No camera-basis warning or runtime
   validation error. That build's carrier exclusion remained inert until the
   virtual dispatch correction above; do not credit it with fixing self-occlusion.
-- Compact-core runtime comparison is pending; appearance is not yet accepted.
+- Installed 15e4df73 core-after capture removes the grey plate across the jeep.
+  In the fixed lens ROI x=610..671, y=359..382, RGB-mean peak rises 122 -> 134
+  while area mean falls 36.83 -> 20.22 against af66c260. Still too dim for a lit
+  lens, so the core-only accumulation is raised from two to eight layers without
+  increasing its footprint. The player is moved away from the freefly lens in
+  this fixture revision to avoid camera-inside-player artifacts.
+- Rear capture has foliage between the camera and jeep and no visible front
+  bulb; that is not an unobstructed rear-hemisphere acceptance test.
+- Eight-layer core runtime comparison is pending; appearance is not yet accepted.
 - Indoor two-camera visual validation, additional shadow views and far impostor
   coverage remain open as listed in the original handover.

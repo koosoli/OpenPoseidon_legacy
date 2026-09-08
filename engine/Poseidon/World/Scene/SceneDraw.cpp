@@ -350,8 +350,8 @@ void Scene::DrawFlare(ColorVal color, Vector3Par lightPos, bool secondary, float
                 if (mip.IsOK())
                 {
                     float sizeCoef = texture->AWidth() * (1.0f / 64);
-                    GEngine->DrawDecal(lightPos, 1, sizeX * sizeCoef, sizeY * sizeCoef, color, mip, special);
-                    if (emissiveCore)
+                    const int layers = emissiveCore ? 8 : 1;
+                    for (int layer = 0; layer < layers; ++layer)
                         GEngine->DrawDecal(lightPos, 1, sizeX * sizeCoef, sizeY * sizeCoef, color, mip, special);
                 }
             }
@@ -631,7 +631,7 @@ void Scene::DrawFlares()
                         core = core * (1.0f / peak);
                         core.SetA(floatMin(gain * facing, 1.0f));
                         // A compact screen-facing lens, not the flat HalfLight mesh.
-                        // Two additive quads avoid the packed-colour radiance ceiling
+                        // Additive quads avoid the packed-colour radiance ceiling
                         // without another shader, texture or fullscreen pass.
                         DrawFlare(core, light->Position(), false,
                                   glow.markerSize / (0.2f * distance), true);
