@@ -31,9 +31,17 @@ def box_lod(size, texture='', material='', resolution=1.0, geometry=False):
     for face, q in enumerate(quads):
         # P3DM loader swaps 0/1 and 2/3. Match the geometry-mass regression fixture.
         order = [q[1], q[0], q[3], q[2]]
-        uv = [(1, 1), (0, 1), (0, 0), (1, 0)]
         data += struct.pack('<I', 4)
-        for p, (u, v) in zip(order, uv):
+        for p in order:
+            px, py, pz = points[p]
+            if face in (2, 4):
+                u, v = (px + x) / (2*x), 1 - py / y
+                if face == 4:
+                    u = 1 - u
+            elif face in (3, 5):
+                u, v = (pz + zz) / (2*zz), 1 - py / y
+            else:
+                u, v = (px + x) / (2*x), (pz + zz) / (2*zz)
             data += struct.pack('<IIff', p, face, u, v)
         data += struct.pack('<I', 0) + z(texture) + z(material)
     data += b'TAGG'
