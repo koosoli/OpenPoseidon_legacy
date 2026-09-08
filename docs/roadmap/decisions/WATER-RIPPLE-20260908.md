@@ -25,7 +25,12 @@ is disabled or changed. The same shared path handles bullets, wakes and wash.
   It also checks that the production expression matches the tested equation.
   This is not a GPU pixel-output test.
 - `PoseidonGame` and `PoseidonTests` build successfully.
-- Installed before/after interaction demo smoke: pending deployment.
+- Installed before/after interaction demo smoke passed: baseline `63264739`
+  versus fixed `ad817127`, both exit 0. The baseline capture has a broad smooth
+  interior surrounded by wave detail; the fixed capture retains wave detail
+  across that interior. Both captures use the same camera and settings, but
+  independent launches are not exact phase-matched simulation frames.
+- Fixed EXE/DLL deployed together under the game lock, stamp `ad817127`.
 - Exact owner shooting sequence and visual acceptance are not yet verified.
 
 Private capture fixture: `.tmp-rotor-smoke/ripple.ps1`, fixed Nogova water view,
