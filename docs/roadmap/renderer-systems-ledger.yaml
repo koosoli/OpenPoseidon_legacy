@@ -108,7 +108,14 @@ systems:
       retained buoyancy and improved speed under swell. Foam appearance, infantry
       water shadows remain open. Dead infantry surface support is implemented and
       captured in calm/high-wave Nogova fixtures; exact rendered crest alignment
-      and campaign boarding remain open (decisions/INFANTRY-WATER-20260908.md).
+      remains open; the owner confirms campaign boarding was a false report
+      (decisions/INFANTRY-WATER-20260908.md).
+      Direct-sun normal-variance filtering reduces hard glitter in the installed
+      61d0febc aerial comparison without extra texture fetches or FFT work.
+      Short GPU measurements show no obvious cost jump, not a proven speedup.
+      Cloud reconstruction/history masking, visual acceptance gaps and the
+      Waterline reference assessment are recorded in
+      decisions/WATER-CLOUD-FILTERING-20260908.md.
       Rotor/smoke/lamp changes and
       measured evidence are in decisions/ROTOR-SMOKE-WATER-20260908.md.
 

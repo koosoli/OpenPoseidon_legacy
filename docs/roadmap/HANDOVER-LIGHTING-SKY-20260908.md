@@ -18,6 +18,9 @@ The floating-body implementation and its limits are recorded in
 [INFANTRY-WATER-20260908.md](decisions/INFANTRY-WATER-20260908.md).
 Selective upstream review and the verified scene-preloader lifecycle port:
 [UPSTREAM-REVIEW-20260908.md](decisions/UPSTREAM-REVIEW-20260908.md).
+Water/cloud filtering, remaining body alignment and visual acceptance gaps, and
+the owner's Waterline video reference:
+[WATER-CLOUD-FILTERING-20260908.md](decisions/WATER-CLOUD-FILTERING-20260908.md).
 
 | | |
 |---|---|

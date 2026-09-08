@@ -15,7 +15,8 @@ bodies retain the normal cleanup path. Dead players no longer receive the living
 player's competing spring buoyancy, and dead AI receives no repeated drowning damage.
 
 This deliberately does NOT grant living AI swimming or change boarding logic.
-The reported campaign deaths still need mission/save reproduction.
+The owner subsequently confirmed that the tester was mistaken: boat boarding and
+unloading always worked. That suspected campaign bug is withdrawn; do not pursue it.
 
 ## Checks
 
@@ -32,6 +33,8 @@ The reported campaign deaths still need mission/save reproduction.
 ## Limits / follow-up
 
 Water collision uses the existing CPU wave predictor, NOT GPU FFT readback.
+The owner subsequently confirmed that bodies sometimes hover above or disappear
+below rendered waves. This is unresolved, not accepted floating behaviour.
 It follows local wave scale and time but does not match every rendered crest.
 These captures prove surface support, not perfect crest alignment, natural drift,
 ragdoll motion, every death animation, multiplayer or mission-specific boarding.
