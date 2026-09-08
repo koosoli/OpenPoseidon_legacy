@@ -4,6 +4,7 @@
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <Poseidon/IO/Streams/QStream.hpp>
 #include <Poseidon/World/Entities/Infantry/SoldierOld.hpp>
+#include <Poseidon/World/Entities/Infantry/BodyWaterResponse.hpp>
 #include <Poseidon/World/Entities/Weapons/Weapons.hpp>
 
 #include <cstring>
@@ -43,6 +44,15 @@ Ref<WeaponType> MakeWeaponRef(const ParamEntry& entry, int weaponType)
 TEST_CASE("soldierOld.hpp compiles", "[Infantry][soldierOld]")
 {
     SUCCEED("header included successfully");
+}
+
+TEST_CASE("Dead infantry water support preserves immersion and limits ascent", "[Infantry][body-water]")
+{
+    CHECK(BodyWaterSupport(0.62f, 0.5f, 0.02f) == Catch::Approx(0.0f).margin(0.00001f));
+    CHECK(BodyWaterSupport(20.0f, 0.0f, 0.02f) == Catch::Approx(0.03f));
+    CHECK(BodyWaterSupport(20.0f, 0.0f, 0.0f) == 0.0f);
+    CHECK(BodyWaterSupport(20.0f, 0.0f, -1.0f) == 0.0f);
+    CHECK(BodyWaterSupport(0.32f, 0.5f, 0.02f) == Catch::Approx(-0.3f));
 }
 
 TEST_CASE("WeaponType::IsBinocular centralizes canonical binocular detection", "[Infantry][soldierOld][binocular]")

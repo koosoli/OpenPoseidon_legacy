@@ -1,4 +1,5 @@
 #include <Poseidon/World/Entities/Infantry/SoldierOldCommon.hpp>
+#include <Poseidon/World/Entities/Infantry/BodyWaterResponse.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <Poseidon/Graphics/Rendering/WaterInteractionBridge.hpp>
@@ -337,7 +338,7 @@ void Man::Simulate(float deltaT, SimulationImportance prec)
             pForce[0] = 0;
             pForce[1] = -G_CONST * GetMass();
             pForce[2] = 0;
-            if (playerControlled && _waterBuoyancyContact)
+            if (playerControlled && !IsDead() && _waterBuoyancyContact)
             {
                 const float waveTime = Glob.time.toFloat();
                 const float seaLevel = GLOB_LAND->GetSeaLevel();
@@ -576,7 +577,8 @@ void Man::Simulate(float deltaT, SimulationImportance prec)
             }
             else
             {
-                if (IsDead() && _whenKilled < Glob.time - 5 && _lastMovementTime < Glob.time - 5 && wasLandContact &&
+                if (IsDead() && (!_waterContact || _hideBody >= 1) &&
+                    _whenKilled < Glob.time - 5 && _lastMovementTime < Glob.time - 5 && wasLandContact &&
                     _hideBody >= _hideBodyWanted)
                 {
                     // simulation suspended - dead body is in steady position
@@ -616,6 +618,16 @@ void Man::Simulate(float deltaT, SimulationImportance prec)
                         else if (info.type == GroundWater)
                         {
                             saturateMax(_waterDepth, info.under - underBias);
+                            const float support = BodyWaterSupport(info.under, underBias, deltaT);
+                            if (support > maxUnder)
+                            {
+                                maxUnder = support;
+                                _landContact = true;
+                                landDX = landDZ = 0;
+                            }
+                            // Floating bodies must not enter the static corpse/shadow cache.
+                            if (_hideBody < 1)
+                                _lastMovementTime = Glob.time;
                         }
                     }
                 }
@@ -913,7 +925,7 @@ void Man::Simulate(float deltaT, SimulationImportance prec)
             {
                 maxSafeDepth = 0.6f;
             }
-            if (_waterDepth > maxSafeDepth && !playerControlled)
+            if (_waterDepth > maxSafeDepth && !playerControlled && !IsDead())
             {
                 float drown = (_waterDepth - maxSafeDepth) * (1.0f / 0.5f);
                 saturateMin(drown, 2);
@@ -925,7 +937,7 @@ void Man::Simulate(float deltaT, SimulationImportance prec)
             _waterContact = false;
         }
 
-        if (playerControlled)
+        if (playerControlled && !IsDead())
         {
             const WaterSurfaceSample water =
                 QueryWaterSurface(Position().X(), Position().Z(), Glob.time.toFloat(), GLOB_LAND->GetSeaLevel());

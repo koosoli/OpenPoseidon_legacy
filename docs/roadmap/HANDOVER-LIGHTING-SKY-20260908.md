@@ -14,6 +14,8 @@ hashes below describe the earlier handover, not this follow-up.
 Next follow-up: [ROTOR-SMOKE-WATER-20260908.md](decisions/ROTOR-SMOKE-WATER-20260908.md)
 records rotor pose isolation, lamp controls, smoke measurements, boat drag and foam,
 including the still-open visual checks and additional infantry/cloud reports.
+The floating-body implementation and its limits are recorded in
+[INFANTRY-WATER-20260908.md](decisions/INFANTRY-WATER-20260908.md).
 
 | | |
 |---|---|

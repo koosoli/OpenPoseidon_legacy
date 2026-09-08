@@ -106,7 +106,10 @@ systems:
       2026-09-08 follow-up adds wind-oriented high-wave foam coverage and caps
       wave-only horizontal drag for small planing boats. Installed BoatW A/B
       retained buoyancy and improved speed under swell. Foam appearance, infantry
-      water shadows and floating bodies remain open. Rotor/smoke/lamp changes and
+      water shadows remain open. Dead infantry surface support is implemented and
+      captured in calm/high-wave Nogova fixtures; exact rendered crest alignment
+      and campaign boarding remain open (decisions/INFANTRY-WATER-20260908.md).
+      Rotor/smoke/lamp changes and
       measured evidence are in decisions/ROTOR-SMOKE-WATER-20260908.md.
 
       PLANAR REFLECTION EDGE, open as of 2026-08-06. Looking DOWN at water leaves a
