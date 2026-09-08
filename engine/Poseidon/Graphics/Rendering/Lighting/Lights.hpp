@@ -12,6 +12,56 @@ struct LightContext
 	Vector3 position;
 };
 
+// LGT-025 -- the owner's "der headlight und die strassenlampe muessen wirklich glowen so dass
+// man etwas verblendet wird". Two separate things make a lit bulb read as lit, and only one of
+// them was on under wgpu.
+//
+// THE CORE is the HalfLight billboard Scene::DrawVolumeLight puts at the bulb. Measured at the
+// cafe at 23:00, 40 m from a street lamp: its peak pixel is 199/255, while the wall the same
+// lamp lights peaks at 222 and the brightest pixel in the whole frame is 241. The bulb is
+// DIMMER than the surface it illuminates, which is the report in one number. It is dim because
+// LightReflector/LightPointVisible normalise the colour to unit LENGTH before packing it -- a
+// warm (0.9, 0.8, 0.6) lamp leaves that as (0.66, 0.59, 0.44), so the marker is asked for 66%
+// of white and gets it. `peakNormalised` asks for peak = 1 instead, which is free: the light it
+// CASTS is a different object entirely (the LightPoint) and is not touched.
+//
+// THE HALO is the flare sprite Scene::DrawFlares draws for every active light the camera can
+// see, with the reflector's own cone test (LightReflector::FlareIntensity returns 0 unless the
+// camera is INSIDE the beam) already deciding when an oncoming headlight should dazzle. It is
+// alive on wgpu but throttled to nothing: alpha capped at 0.10 and size 0.030 against GL33's
+// 0.2 / 0.22, from an era when the sprite was a large opaque core that read as a solar disc.
+// `strength` and `size` scale those two caps.
+//
+// Deliberately NOT a bigger HalfLight billboard: LGT-023 tried an angular size floor on it and
+// it drew a grey SAUCER beside the lamp, because HalfLight is a flat world-space disc. The
+// billboard keeps its authored size; the soft falloff comes from the flare texture, which is
+// what a halo is actually made of.
+//
+// What this canNOT do, measured rather than assumed -- see the report on LGT-025. The wgpu HDR
+// bloom knee is at 1.0 scene-referred and NOTHING in a night frame reaches it: with
+// WGR_BLOOM_INTENSITY=2.0 (fifty times the shipped 0.04) the lamp head region moves 14.6 -> 14.8
+// and the wall 77.2 -> 77.9, i.e. the pyramid is inert. The bulb cannot exceed 1.0 because every
+// stage of the path it takes is 8-bit or clamped -- PackedColor at the DrawVolumeLight API,
+// TLVertex::color in DoLightLighting, WgrVertex2D::color (u32) in the wgpu 2D vertex, and
+// gfx2d/shader.wgsl's `textureSample * in.color`; and EngineWgpu's BlendForSpec has no additive
+// case at all, so the IsLight sprite is SrcAlpha/OneMinusSrcAlpha and cannot accumulate past
+// its own source either. A real HDR glare needs one of those widened; none of them is in this
+// change's reach.
+struct BulbGlowSettings
+{
+	bool enabled = true;      //!< POSEIDON_BULB_GLOW=0 restores the pre-LGT-025 look exactly.
+	bool peakNormalised = true; //!< POSEIDON_BULB_GLOW_PEAK=0 keeps the unit-length colour.
+	float strength = 4.0f;    //!< POSEIDON_BULB_GLOW_STRENGTH: scales the wgpu flare alpha cap.
+	float size = 6.0f;        //!< POSEIDON_BULB_GLOW_SIZE: scales the wgpu flare sprite size.
+	// A reflector (headlight, searchlight) flares only inside its +/-12 degree cone. That is
+	// correct for the beam and wrong for the bulb -- a lens you can see is a lens that glows.
+	// This is the halo a reflector keeps OUTSIDE its cone, as a fraction of the in-cone value,
+	// faded by cos^2 of the off-axis angle so it reaches zero side-on and never flares from
+	// behind. POSEIDON_BULB_GLOW_SIDE=0 is the 2001 hard cut.
+	float sideGlow = 0.30f;   //!< POSEIDON_BULB_GLOW_SIDE
+};
+BulbGlowSettings& GBulbGlow();
+
 struct TLMaterial;
 
 enum LightKind

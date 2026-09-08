@@ -27,6 +27,62 @@ using namespace Poseidon;
 namespace Poseidon
 {
 
+// LGT-025. Read once; see BulbGlowSettings in Lights.hpp for what each field buys and for the
+// measurement that says why this is a flare sprite and not an HDR value.
+BulbGlowSettings& GBulbGlow()
+{
+    static BulbGlowSettings s = []
+    {
+        BulbGlowSettings v;
+        if (const char* e = std::getenv("POSEIDON_BULB_GLOW"))
+            v.enabled = (std::atoi(e) != 0);
+        if (const char* e = std::getenv("POSEIDON_BULB_GLOW_PEAK"))
+            v.peakNormalised = (std::atoi(e) != 0);
+        if (const char* e = std::getenv("POSEIDON_BULB_GLOW_STRENGTH"))
+        {
+            const double d = std::atof(e);
+            if (d >= 0.0)
+                v.strength = static_cast<float>(d);
+        }
+        if (const char* e = std::getenv("POSEIDON_BULB_GLOW_SIZE"))
+        {
+            const double d = std::atof(e);
+            if (d >= 0.0)
+                v.size = static_cast<float>(d);
+        }
+        if (const char* e = std::getenv("POSEIDON_BULB_GLOW_SIDE"))
+        {
+            const double d = std::atof(e);
+            if (d >= 0.0)
+                v.sideGlow = static_cast<float>(d);
+        }
+        return v;
+    }();
+    return s;
+}
+
+// The bulb marker's own colour, normalised so the brightest channel is 1. The 2001 code
+// normalised to unit LENGTH, which asks a warm lamp for ~66% of white and is why the marker
+// measured dimmer than the wall it lights. Hue is preserved either way; only the level moves,
+// and only on the MARKER -- the Light object that illuminates the world is untouched.
+static Color BulbMarkerColor(const Color& authored)
+{
+    if (GBulbGlow().enabled && GBulbGlow().peakNormalised)
+    {
+        float peak = authored.R();
+        if (authored.G() > peak)
+            peak = authored.G();
+        if (authored.B() > peak)
+            peak = authored.B();
+        if (peak > 1e-4f)
+            return authored * (1.0f / peak);
+        return authored;
+    }
+    const float invSize = InvSqrt(authored.R() * authored.R() + authored.G() * authored.G() +
+                                  authored.B() * authored.B());
+    return authored * invSize;
+}
+
 static const Color BackgroundColor(0.55, 0.6, 0.8);
 static const Color FullSunColor(0.85, 0.75, 0.4);
 
@@ -942,9 +998,34 @@ float LightReflector::FlareIntensity(Vector3Par camPos, Vector3Par camDir) const
 
     float minInside2 = size2 * (MIN_INSIDE * MIN_INSIDE);
     float inside2 = inside * inside;
+    // LGT-025. The 2001 rule is "a reflector flares only if the camera is inside its cone",
+    // and the cone here is +/-12 degrees. That is right for the BEAM -- being dazzled is a
+    // property of standing in it -- but it is not right for the BULB: a headlight lens you
+    // can see at all is a visibly glowing thing from any angle, and this hard zero is why a
+    // parked jeep photographed from 30 degrees off its axis showed no halo at all while the
+    // same code lit a street lamp beautifully. Measured: with the flare fix in place, a
+    // headlight at 20 m and ~30 degrees off axis moved the frame by a peak of 37/255, which
+    // is the run-to-run noise floor -- i.e. nothing.
+    //
+    // Outside the cone the flare is not cut, it is FADED, by cos^2 of the off-axis angle
+    // scaled to `sideGlow`. At the cone edge the two meet; at 90 degrees it is zero, so a
+    // headlight still cannot flare from behind. POSEIDON_BULB_GLOW_SIDE=0 restores the hard
+    // cut exactly, and so does POSEIDON_BULB_GLOW=0.
+    float sideFloor = 0.0f;
     if (inside2 < minInside2)
     {
-        return 0;
+        const BulbGlowSettings& glow = GBulbGlow();
+        if (!glow.enabled || glow.sideGlow <= 0.0f)
+        {
+            return 0;
+        }
+        const float cosAxis = inside * InvSqrt(size2); // in (0, MIN_INSIDE)
+        const float t = cosAxis * float(1.0 / MIN_INSIDE);
+        sideFloor = glow.sideGlow * t * t;
+        if (sideFloor <= 1.0e-4f)
+        {
+            return 0;
+        }
     }
 
     float atten = 1;
@@ -969,7 +1050,10 @@ float LightReflector::FlareIntensity(Vector3Par camPos, Vector3Par camDir) const
         {
             inside = (inside2 - minInside2) * (1 / (maxInside2 - minInside2));
         }
-        atten *= inside;
+        // LGT-025: `inside` is NEGATIVE outside the cone (the numerator above goes negative),
+        // which is why the early return could not simply be deleted. floatMax lets the side
+        // term take over exactly where the cone term runs out.
+        atten *= floatMax(inside, sideFloor);
         return atten * cosFi;
     }
     else
@@ -1109,9 +1193,9 @@ void LightReflector::ToDraw(ClipFlags clipFlags, bool dimmed)
         // The wedge is what was ugly; the glowing bulb is not.
         if (_drawHalo && GScene->MainLight()->NightEffect() >= 0.01 && !dimmed)
         {
-            Color c = GetObjectColor();
-            const float invSize = InvSqrt(c.R() * c.R() + c.G() * c.G() + c.B() * c.B());
-            c = c * invSize;
+            // LGT-025: peak-normalised, so a warm headlight's marker is asked for white
+            // rather than for 66% of it. See BulbMarkerColor.
+            Color c = BulbMarkerColor(GetObjectColor());
             // LGT-018: 0.020 rad is about eighteen pixels at 1080p -- a headlight you can see
             // is ON from across a street, which is what the owner asked for and what the old
             // 3.5%-of-a-metre marker could never be. Capped at 1.2 m so a truck coming at you
@@ -1155,7 +1239,10 @@ void LightPointVisible::ToDraw(ClipFlags clipFlags, bool dimmed)
     {
         return;
     }
-    Color c = GetObjectColor();
+    // LGT-025: peak-normalised (see BulbMarkerColor). A lamp's diffuse is an authored warm
+    // colour whose brightest channel is well under 1, so the bulb marker measured 199/255
+    // against a 222 wall -- the emitter darker than what it lights.
+    Color c = BulbMarkerColor(GetObjectColor());
     // LGT-018: 0.006 rad is roughly six pixels at 1080p -- a street lamp stays a point of
     // light from the air instead of vanishing. Capped at 2.5 m: the marker is a glare sprite,
     // not a lamp the size of a house. This is the fix for "wenn ich ueber eine stadt fliege

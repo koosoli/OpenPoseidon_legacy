@@ -1625,6 +1625,11 @@ void DrawZeusTab()
         Dev::SliderFloat("Glow size", &glow.size, 0.0f, 16.0f, "%.2f");
         Dev::PanelTooltip("POSEIDON_BULB_GLOW_SIZE. Scales the halo's screen size "
                           "(1.0 = the old wgpu 0.030, about two pixels).");
+        ImGui::SetNextItemWidth(160.0f);
+        Dev::SliderFloat("Glow off-beam", &glow.sideGlow, 0.0f, 1.0f, "%.2f");
+        Dev::PanelTooltip("POSEIDON_BULB_GLOW_SIDE. How much halo a HEADLIGHT keeps when you "
+                          "are not standing in its beam. 0 is the 2001 hard cut at 12 degrees, "
+                          "which is why a parked car's lamps read as off from the side.");
         Dev::Checkbox("Bulb core at peak white", &glow.peakNormalised);
         Dev::PanelTooltip("POSEIDON_BULB_GLOW_PEAK=0 restores the unit-length colour "
                           "normalisation, which asks a warm bulb for ~66% of white.");

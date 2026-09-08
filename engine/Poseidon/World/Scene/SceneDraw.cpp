@@ -378,6 +378,21 @@ void Scene::DrawFlare(ColorVal color, Vector3Par lightPos, bool secondary, float
     }
 }
 
+// LGT-025: one line per distinct (light slot, verdict) pair, not one per frame -- a per-frame
+// line at 60 Hz buries the answer, and a once-only line cannot tell "stopped happening" from
+// "never happened".
+static void LGT025FlareVerdict(int slot, const char* verdict, float intensity, float occ, float alpha)
+{
+    static char lastVerdict[16][32] = {};
+    if (slot < 0 || slot >= 16)
+        return;
+    if (std::strncmp(lastVerdict[slot], verdict, sizeof(lastVerdict[0]) - 1) == 0)
+        return;
+    std::strncpy(lastVerdict[slot], verdict, sizeof(lastVerdict[0]) - 1);
+    LOG_INFO(Graphics, "LGT-025 flare: light #{} -> {} (intensity {:.4f} occ {:.3f} alpha {:.4f})", slot,
+             verdict, intensity, occ, alpha);
+}
+
 void Scene::DrawFlares()
 {
     if (!GetLandscape())
@@ -453,6 +468,24 @@ void Scene::DrawFlares()
             }
         }
     }
+    // LGT-025 diagnostic. Five separate `continue`s and a multiplicative occlusion term stand
+    // between an active light and its halo, and from outside the frame every one of them looks
+    // identical: no halo. POSEIDON_BULB_GLOW_DIAG=1 prints which of them fired, once per
+    // distinct verdict, so "the sprite is too small" and "the sprite is never drawn" stop being
+    // the same observation. It exists because raising the size and alpha caps by 4x moved not
+    // one pixel, which no amount of tuning could have explained.
+    static const bool glowDiag = []
+    { const char* e = std::getenv("POSEIDON_BULB_GLOW_DIAG"); return e && std::atoi(e) != 0; }();
+    if (glowDiag)
+    {
+        static int reported = 0;
+        if (reported < 4)
+        {
+            ++reported;
+            LOG_INFO(Graphics, "LGT-025 flare: night {:.2f} activeLights {} maxLights {}", night,
+                     _aLights.Size(), ENGINE_CONFIG.maxLights);
+        }
+    }
     if (night >= 0.2)
     {
         // draw flares from active lights
@@ -464,23 +497,50 @@ void Scene::DrawFlares()
             Vector3 dir = camPos - light->Position();
             if (dir * GetCamera()->Direction() > 0)
             {
+                if (glowDiag)
+                    LGT025FlareVerdict(i, "behind camera", 0.0f, 0.0f, 0.0f);
                 continue; // this one has no flare
             }
             float intensity = light->FlareIntensity(camPos, camDir);
             if (intensity < 0.01)
             {
+                if (glowDiag)
+                    LGT025FlareVerdict(i, "intensity", intensity, 0.0f, 0.0f);
                 continue;
             }
             // light
 
             // check if light position is visible from camera position
+            //
+            // LGT-025: the ray was cast along `dir`, which is camPos - lightPos -- i.e. FROM
+            // the light AWAY from the camera. So this asked "is there ground behind me",
+            // and for any camera near the ground the answer is yes, t <= 1, visLand = 0.
+            // The sun arm of this same function has it right (it casts along -lightDir, i.e.
+            // TOWARDS the sun); only the local-light arm has the sign inverted.
+            //
+            // Measured, which is how it was found at all: at the cafe at 23:00 with
+            // POSEIDON_BULB_GLOW_DIAG=1, of sixteen active lights the two STRONGEST that the
+            // camera could see -- intensity 0.884 and 0.149, the near street lamps -- were
+            // both thrown away here, and the only two that ever reached DrawFlare were
+            // distant ones at 0.012 and 0.017. Raising the sprite's size and alpha caps by
+            // 4x moved not a single pixel, because the lights those caps applied to were a
+            // hundredth as bright as the ones this line was discarding.
+            //
+            // The magnitude convention is unchanged: `toLight` is NOT normalised, so t is in
+            // units of the camera-to-light distance and `1.1` is "10% past the light".
+            // Gated on the same switch as the rest of LGT-025, so POSEIDON_BULB_GLOW=0 is a
+            // true restore of what shipped -- reversed ray included -- and the two arms of
+            // the A/B differ by exactly this change and nothing else.
+            const Vector3 toLight = GBulbGlow().enabled ? Vector3(light->Position() - camPos) : dir;
             float visLand = 1;
             if (ENGINE_CONFIG.enableHWTL)
             {
-                float t = GLandscape->IntersectWithGroundOrSea(nullptr, cPos, dir, 0, 1.1);
+                float t = GLandscape->IntersectWithGroundOrSea(nullptr, cPos, toLight, 0, 1.1);
                 visLand = t > 1;
             }
 
+            if (visLand <= 0 && glowDiag)
+                LGT025FlareVerdict(i, "visLand", intensity, 0.0f, 0.0f);
             if (visLand > 0)
             {
                 Color lightColor = light->GetObjectColor();
@@ -490,12 +550,62 @@ void Scene::DrawFlares()
                 // emitter marker while WGPU's physical point/spot contribution lights
                 // nearby surfaces. GL33 retains the original tuned sprite.
                 const bool wgpu = AppConfig::Instance().GetRenderBackend() == "wgpu";
-                float a = visLand * intensity * (wgpu ? 0.18f : 0.35f);
-                float occ = GetOcclusions()->TestSphereWSpace(light->Position(), 0.4);
+                // LGT-025. The paragraph above is why this sprite was shrunk to nothing on
+                // wgpu, and the shrinking is the owner's "es muss wirklich glowen": at 0.030
+                // the halo is 0.3% of the screen half-height, i.e. two pixels, and at an
+                // alpha cap of 0.10 it is invisible against a lit wall. The disc it was
+                // protecting against came from the SIZE of an opaque core, not from a halo,
+                // and Flare0 is a soft radial texture -- so the answer is a WIDER, softer
+                // sprite that is still capped well below opaque, not a return to 2001's.
+                //
+                // Both are dev-switchable (Lighting tab / POSEIDON_BULB_GLOW*) because both
+                // are taste calls, and because the cap is what separates "glow" from "solar
+                // disc" and the owner is the one who gets to place that line.
+                const BulbGlowSettings& glow = GBulbGlow();
+                const float gain = glow.enabled ? glow.strength : 1.0f;
+                const float span = glow.enabled ? glow.size : 1.0f;
+                float a = visLand * intensity * (wgpu ? 0.18f * gain : 0.35f);
+                // LGT-025: a HEADLIGHT is mounted flush in the vehicle it belongs to, so a
+                // 0.4 m occlusion sphere centred on the bulb is mostly full of that
+                // vehicle's own bonnet and grille -- and the occlusion buffer duly answers
+                // "hidden". Measured on the crewed jeep at 20 m: the two headlights pass
+                // every other gate (intensity 0.1360 with the off-beam term below) and are
+                // killed here, occ 0.000, every frame. Same shape as LGT-016's selfRadius --
+                // a light inside a closed mesh occludes itself in every direction.
+                //
+                // Sample a little way TOWARDS the camera instead: a bulb you can see has
+                // clear air in front of it. The offset is capped at half the distance, so a
+                // light metres away is not sampled past its own midpoint, and it moves the
+                // probe along the line the camera already looks down -- so a lamp genuinely
+                // behind a wall stays behind that wall and stays dark.
+                //
+                // NOT SUFFICIENT, and recorded as such so the next session does not read
+                // this as solved: re-measured on the same jeep, the headlights still report
+                // occ 0.000 every frame. 0.8 m at 20 m is a fifth of a degree, and the
+                // vehicle's silhouette in the occlusion buffer is far coarser than that. It
+                // does help lights that are only PARTLY covered (the same capture gained
+                // 3,335 changed pixels elsewhere), which is why it stays. The real fix is to
+                // let the occlusion query ignore the light's own AttachedOn() object, and
+                // that lives in Occlusion::TestSphereWSpace, not here.
+                Vector3 occPos = light->Position();
+                if (glow.enabled)
+                {
+                    const Vector3 toCam = camPos - light->Position();
+                    const float len = toCam.Size();
+                    if (len > 1.0e-3f)
+                        occPos = light->Position() + toCam * (floatMin(0.8f, len * 0.5f) / len);
+                }
+                float occ = GetOcclusions()->TestSphereWSpace(occPos, glow.enabled ? 0.2f : 0.4f);
                 a *= occ;
-                saturateMin(a, wgpu ? 0.10f : 0.2f);
+                // Still a hard ceiling, just a higher one: an alpha of 1 would paint the
+                // flare's own core over the bulb as a flat opaque blob, which is exactly the
+                // artefact the 0.10 was defending against.
+                saturateMin(a, wgpu ? floatMin(0.10f * gain, 0.75f) : 0.2f);
+                if (glowDiag)
+                    LGT025FlareVerdict(i, a > 0.001f ? "drawn" : "occluded", intensity, occ, a);
                 lightColor.SetA(a);
-                DrawFlare(lightColor, light->Position(), false, wgpu ? 0.030f : 0.22f);
+                DrawFlare(lightColor, light->Position(), false,
+                          wgpu ? floatMin(0.030f * span, 1.0f) : 0.22f);
             }
         }
     }
