@@ -73,6 +73,37 @@ TEST_CASE("CDLOD ranges form a geometric ladder", "[terrain][cdlod]")
     REQUIRE(ranges[4] == Catch::Approx(9600.0f));
 }
 
+TEST_CASE("Procedural ocean selection matches a stored flat CDLOD tree", "[terrain][cdlod][ocean]")
+{
+    std::vector<CdlodNode> tree;
+    const int root = BuildFlatTree(tree, -3200.0f, 6400.0f, LeafSize * 32, 5);
+    std::vector<float> ranges;
+    ComputeCdlodRanges(LeafSize * 4, 2.0f, 6, ranges);
+    for (float x : {-10000.0f, -3200.0f, 0.0f, 3200.0f, 40000.0f})
+    {
+        for (float y : {0.0f, 20.0f, 8000.0f})
+        {
+            std::vector<CdlodSelection> stored, lazy;
+            auto visible = [](const CdlodNode& n) { return n.originZ + n.size > 7000.0f; };
+            const bool a = SelectCdlod(tree, root, 5, x, y, 7000.0f, ranges, 0.25f, visible,
+                [&](const CdlodSelection& s) { stored.push_back(s); });
+            const bool b = SelectFlatCdlod(tree[root], x, y, 7000.0f, ranges, 0.25f, visible,
+                [&](const CdlodSelection& s) { lazy.push_back(s); });
+            REQUIRE(a == b);
+            REQUIRE(stored.size() == lazy.size());
+            for (size_t i = 0; i < stored.size(); ++i)
+            {
+                CHECK(stored[i].originX == lazy[i].originX);
+                CHECK(stored[i].originZ == lazy[i].originZ);
+                CHECK(stored[i].size == lazy[i].size);
+                CHECK(stored[i].level == lazy[i].level);
+                CHECK(stored[i].morphStart == lazy[i].morphStart);
+                CHECK(stored[i].morphEnd == lazy[i].morphEnd);
+            }
+        }
+    }
+}
+
 TEST_CASE("CDLOD node distance is zero inside and Euclidean outside", "[terrain][cdlod]")
 {
     CdlodNode n{};

@@ -107,6 +107,34 @@ bool SelectCdlod(const std::vector<CdlodNode>& nodes, int idx, int lodLevel, flo
     return true;
 }
 
+// Flat ocean roots need no stored descendants or terrain scan. Select lazily,
+// with exactly the same distance/morph policy as the terrain-backed tree.
+template <typename VisibleFn, typename EmitFn>
+bool SelectFlatCdlod(const CdlodNode& n, float camX, float camY, float camZ,
+                     const std::vector<float>& ranges, float morphRegion, VisibleFn&& visible, EmitFn&& emit)
+{
+    const int level = n.level;
+    const float distSq = CdlodNodeDistanceSq(n, camX, camY, camZ);
+    if (distSq > ranges[level] * ranges[level]) return false;
+    if (!visible(n)) return true;
+    if (level == 0 || distSq > ranges[level - 1] * ranges[level - 1])
+    {
+        EmitCdlodNode(n, level, ranges, morphRegion, emit);
+        return true;
+    }
+    for (int c = 0; c < 4; ++c)
+    {
+        CdlodNode child = n;
+        child.size *= 0.5f;
+        child.level = level - 1;
+        child.originX += (c & 1) * child.size;
+        child.originZ += (c >> 1) * child.size;
+        if (!SelectFlatCdlod(child, camX, camY, camZ, ranges, morphRegion, visible, emit) && visible(child))
+            EmitCdlodNode(child, child.level, ranges, morphRegion, emit);
+    }
+    return true;
+}
+
 // Recursive builder for BuildCdlodTree. `leafBounds(oxTexel, ozTexel, spanTexels,
 // minY, maxY)` fills the world-height extent of a leaf covering the texel square
 // [ox, ox+span] x [oz, oz+span]; interior nodes aggregate their children.

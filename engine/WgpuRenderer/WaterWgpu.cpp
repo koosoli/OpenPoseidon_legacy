@@ -490,6 +490,7 @@ void WaterWgpu::BuildQuadtree(const Landscape& land)
     ComputeCdlodRanges(_leafSize * _baseMult, _lodRatio, _numLevels, _ranges);
     _treeMin = originTexel * grid;
     _treeMax = (originTexel + rootTexels) * grid;
+    LOG_INFO(Graphics, "Water core bounds: [{:.0f}, {:.0f}] m on both axes", _treeMin, _treeMax);
 
     // Highest possible sea surface (max tide) plus a wave-crest margin: nodes whose
     // terrain never rises to this height are entirely underwater and join the tree;
@@ -1278,6 +1279,63 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
     _selected.clear();
     SelectVisibleCdlod(_tree, _rootIndex, _numLevels, _ranges, _morphRegion, *camera, rx0, rz0, rx1, rz1, belowSea,
                        emit);
+
+    // Continue the ocean beyond the fixed map-centred root. Roots are aligned to
+    // that existing lattice, never translated with the camera (FFT seams/swimming).
+    // Only visible descendants are generated: no extra heightmap, FFT or tree build.
+    static const bool oceanContinuation = EnvFloat("WGR_OCEAN_CONTINUATION", 1.0f) != 0.0f;
+    if (oceanContinuation)
+    {
+        const float span = _treeMax - _treeMin;
+        const Vector3 p = camera->Position();
+        const float reach = std::min(camera->Far(), _ranges.back());
+        if (span > 0.0f && std::isfinite(reach) && reach > 0.0f &&
+            std::isfinite(p.X()) && std::isfinite(p.Y()) && std::isfinite(p.Z()))
+        {
+            const double ix0 = std::floor((double(p.X()) - reach - _treeMin) / span);
+            const double iz0 = std::floor((double(p.Z()) - reach - _treeMin) / span);
+            const double ix1 = std::floor((double(p.X()) + reach - _treeMin) / span);
+            const double iz1 = std::floor((double(p.Z()) + reach - _treeMin) / span);
+            const float padding = std::max(4.0f, _params.wave_amp * 4.0f + 2.0f);
+            auto visibleOcean = [&](const CdlodNode& n)
+            {
+                if (CdlodNodeDistanceSq(n, p.X(), p.Y(), p.Z()) > reach * reach) return false;
+                const Vector3 centre(n.originX + n.size * 0.5f, _params.sea_level,
+                                     n.originZ + n.size * 0.5f);
+                const float radius = std::sqrt(n.size * n.size * 0.5f + padding * padding);
+                return !camera->IsClipped(centre, radius, 1);
+            };
+            auto emitOcean = [&](const CdlodSelection& s)
+            {
+                WgrWaterNode node{};
+                node.origin = {s.originX, s.originZ};
+                node.size = s.size;
+                node.lod = static_cast<uint32_t>(s.level);
+                node.morph_start = s.morphStart;
+                node.morph_end = s.morphEnd;
+                _selected.push_back(node);
+            };
+            const int countX = static_cast<int>(ix1 - ix0 + 1.0);
+            const int countZ = static_cast<int>(iz1 - iz0 + 1.0);
+            for (int z = 0; z < countZ; ++z)
+            {
+                const double iz = iz0 + z;
+                for (int x = 0; x < countX; ++x)
+                {
+                    const double ix = ix0 + x;
+                    if (ix == 0.0 && iz == 0.0) continue; // Existing terrain-aware root owns this square.
+                    CdlodNode root{};
+                    root.originX = static_cast<float>(_treeMin + ix * span);
+                    root.originZ = static_cast<float>(_treeMin + iz * span);
+                    root.size = span;
+                    root.level = _numLevels - 1;
+                    root.minY = _params.sea_level - padding;
+                    root.maxY = _params.sea_level + padding;
+                    SelectFlatCdlod(root, p.X(), p.Y(), p.Z(), _ranges, _morphRegion, visibleOcean, emitOcean);
+                }
+            }
+        }
+    }
 
     // WRL-003 — bounded bodies. Each registered lake / river reach fills two lanes of the body
     // table and is tiled with leaf-size nodes over its bounding box (the fragment shader clips to
