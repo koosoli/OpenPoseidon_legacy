@@ -28,6 +28,8 @@ Camera-basis diagnostic and attached-bulb visibility follow-up:
 
 Experimental, mission-local terrain snow and its tested limits:
 [EXPERIMENTAL-SNOW-20260909.md](decisions/EXPERIMENTAL-SNOW-20260909.md).
+Playable optional physics/material campus and installed-menu evidence:
+[SHOWCASE-LAB-20260909.md](decisions/SHOWCASE-LAB-20260909.md).
 Rejected paired-density cloud experiment and the SDK history-mask caveat:
 [CLOUD-GRAIN-EXPERIMENT-20260909.md](decisions/CLOUD-GRAIN-EXPERIMENT-20260909.md).
 

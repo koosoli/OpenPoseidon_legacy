@@ -55,6 +55,11 @@ try {
  Send @{cmd='exec';code='hint ""; showCinemaBorder false; labCamera = "camera" camCreate [9483,3488,9]; labCamera cameraEffect ["internal","back"]; labCamera camSetTarget [9503,3507,0]; labCamera camCommit 0'}
  Start-Sleep -Seconds 4
  Send @{cmd='screenshot';path=(Join-Path $out 'campus.png')}
+ Send @{cmd='exec';code='labCamera camSetPos [9495.3,3497,1.2]; labCamera camSetTarget [9495.3,3504,0.85]; labCamera camCommit 0'}
+ Start-Sleep -Seconds 1
+ Send @{cmd='exec';code='[player,player,labThrow] exec "action.sqs"'}
+ Start-Sleep -Seconds 3
+ Send @{cmd='screenshot';path=(Join-Path $out 'stack-impact.png')}
  Send @{cmd='exec';code='[player,player,labReset] exec "action.sqs"'}
  Start-Sleep -Seconds 2
  Send @{cmd='exec';code='labCamera camSetPos [9515,3499,2]; labCamera camSetTarget [9515,3510,1.5]; labCamera camCommit 0; [player,player,labLight] exec "action.sqs"'}
@@ -65,6 +70,13 @@ try {
  Send @{cmd='exec';code='[player,player,labDay] exec "action.sqs"'}
  Start-Sleep -Seconds 4
  Send @{cmd='screenshot';path=(Join-Path $out 'materials-night.png')}
+ Send @{cmd='eval';code='triPhysicsShowcase "throw"'}
+ Send @{cmd='eval';code='triPhysicsShowcase "throw"'}
+ Send @{cmd='eval';code='triPhysicsShowcase "throw"'}
+ Send @{cmd='eval';code='triPhysicsShowcase "throw"'}
+ Send @{cmd='exec';code='[player,player,labCool] exec "action.sqs"'}
+ Start-Sleep -Seconds 2
+ Send @{cmd='screenshot';path=(Join-Path $out 'lights-cool.png')}
  Send @{cmd='eval';code='triPhysicsShowcase "invalid"'}
  Send @{cmd='exec';code='[player,player,labClear] exec "action.sqs"'}
  Send @{cmd='exit'}
@@ -75,4 +87,5 @@ try {
  if (!$p.HasExited) {$p.Kill()}
 }
 if (!(Select-String -LiteralPath $log -SimpleMatch 'SHOWCASE: ready')) {throw 'Mission init did not finish'}
+if (Select-String -LiteralPath $log -Pattern 'upload failed showcase_lab|failed to upload texture showcase_lab|UNHANDLED EXCEPTION') {throw 'Showcase asset/runtime error'}
 Write-Output "Showcase captures: $out"
