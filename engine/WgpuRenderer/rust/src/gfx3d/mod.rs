@@ -34,7 +34,39 @@ use crate::textures::SharedTextures;
 // Depth + stencil: the stencil aspect gives per-poly shadow exclusion (a pixel is
 // darkened by at most one shadow polygon, so overlapping shadow casters don't
 // compound — mirrors GL33's stencil EQUAL 0 / INCR shadow path).
-pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24PlusStencil8;
+pub fn depth_format(device: &wgpu::Device) -> wgpu::TextureFormat {
+    depth_format_for_features(device.features())
+}
+
+// Reversed Z needs floating-point storage to retain shoreline precision at 50 km.
+// Keep stencil for projected shadows, with a fallback for older adapters.
+fn depth_format_for_features(features: wgpu::Features) -> wgpu::TextureFormat {
+    if features.contains(wgpu::Features::DEPTH32FLOAT_STENCIL8) {
+        wgpu::TextureFormat::Depth32FloatStencil8
+    } else {
+        wgpu::TextureFormat::Depth24PlusStencil8
+    }
+}
+
+#[test]
+fn scene_depth_uses_float_when_enabled_and_preserves_stencil_fallback() {
+    assert_eq!(depth_format_for_features(wgpu::Features::DEPTH32FLOAT_STENCIL8),
+               wgpu::TextureFormat::Depth32FloatStencil8);
+    assert_eq!(depth_format_for_features(wgpu::Features::empty()),
+               wgpu::TextureFormat::Depth24PlusStencil8);
+}
+
+fn scene_depth_can_serve_ui(samples: u32, scene: (u32, u32), output: (u32, u32)) -> bool {
+    samples == 1 && scene == output
+}
+
+#[test]
+fn ui_depth_requires_matching_sample_count_and_size() {
+    assert!(scene_depth_can_serve_ui(1, (1280, 720), (1280, 720)));
+    assert!(!scene_depth_can_serve_ui(4, (1280, 720), (1280, 720)));
+    assert!(!scene_depth_can_serve_ui(1, (858, 482), (1280, 720)));
+    assert!(!scene_depth_can_serve_ui(1, (2560, 1440), (1280, 720)));
+}
 
 // Depth+normal prepass G-buffer target (docs/depth-prepass-plan.md, decision 9): a
 // view-space octahedral normal, Rg16Float (compact + banding-free for SSAO/GTAO/SSR).
@@ -4826,7 +4858,7 @@ impl Gfx3d {
                 ..Default::default()
             },
             depth_stencil: Some(wgpu::DepthStencilState {
-                format: DEPTH_FORMAT,
+                format: depth_format(device),
                 depth_write_enabled: Some(write),
                 depth_compare: Some(if test {
                     // Reversed-Z (see shader3d.wgsl): nearer geometry has the larger
@@ -4937,7 +4969,7 @@ impl Gfx3d {
                 ..Default::default()
             },
             depth_stencil: Some(wgpu::DepthStencilState {
-                format: DEPTH_FORMAT,
+                format: depth_format(device),
                 depth_write_enabled: Some(true),
                 // Reversed-Z: nearer geometry has the larger depth value.
                 depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
@@ -5404,7 +5436,7 @@ impl Gfx3d {
             mip_level_count: 1,
             sample_count: self.sample_count,
             dimension: wgpu::TextureDimension::D2,
-            format: DEPTH_FORMAT,
+            format: depth_format(device),
             // TEXTURE_BINDING so the depth aspect can be sampled: the Hi-Z copy pass reads it
             // directly at 1x, and the MSAA depth-resolve pass reads it multisampled at Nx.
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
@@ -5488,13 +5520,13 @@ impl Gfx3d {
         // being active) so a live toggle picks up the current size without a resize.
     }
 
-    // Single-sample UI-phase depth-stencil (MSAA only): the post-tonemap 2D composites to the
+    // Single-sample UI-phase depth-stencil: the post-tonemap 2D composites to the
     // 1x swapchain and needs a matching-sample depth attachment for its (1x) pipelines. Sized
     // separately from the scene depth — under render scale (REN-TEMP-001B) the scene depth is
     // render-resolution while this one must match the OUTPUT-resolution swapchain.
     pub fn ensure_ui_depth(&mut self, device: &wgpu::Device, width: u32, height: u32) {
         let size = (width.max(1), height.max(1));
-        if self.sample_count <= 1 {
+        if scene_depth_can_serve_ui(self.sample_count, self.depth_size, size) {
             self.ui_depth = None;
             return;
         }
@@ -5511,7 +5543,7 @@ impl Gfx3d {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: DEPTH_FORMAT,
+            format: depth_format(device),
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             view_formats: &[],
         });

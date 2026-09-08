@@ -1289,7 +1289,8 @@ impl Renderer {
             | mdic_avail
             | vertex_writable_storage
             | ts_request
-            | early_depth;
+            | early_depth
+            | (adapter.features() & wgpu::Features::DEPTH32FLOAT_STENCIL8);
         // REN-TEMP-001M: the initialised NGX context + raw handles, present only when
         // the hal device route succeeded AND NGX reported DLSS available. Same
         // strict-fallback rule as the instance: any failure names itself and the
@@ -1525,7 +1526,7 @@ impl Renderer {
             .and_then(|v| v.parse::<u32>().ok())
             .unwrap_or(4);
         let sample_count = if hdr_enabled && msaa_req > 1 {
-            let ok = [color_format, gfx3d::DEPTH_FORMAT, gfx3d::NORMAL_FORMAT]
+            let ok = [color_format, gfx3d::depth_format(&device), gfx3d::NORMAL_FORMAT]
                 .iter()
                 .all(|&f| {
                     adapter
@@ -1551,6 +1552,10 @@ impl Renderer {
                 &format!("wgpu MSAA enabled: {sample_count}x (WGR_MSAA)"),
             );
         }
+        log.log(
+            log_level::INFO,
+            &format!("wgpu scene depth: {:?}", gfx3d::depth_format(&device)),
+        );
         if hdr_enabled {
             log.log(log_level::INFO, "wgpu HDR path enabled (WGR_HDR)");
         }
@@ -3321,7 +3326,7 @@ impl Renderer {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: crate::gfx3d::DEPTH_FORMAT,
+            format: crate::gfx3d::depth_format(&self.device),
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
@@ -3977,9 +3982,8 @@ impl Renderer {
             .depth_view()
             .ok_or("depth target missing")?
             .clone();
-        // MSAA only: the single-sample depth the post-tonemap UI phase attaches instead of the
-        // multisampled scene depth (its 2D draws composite to the 1x swapchain). None at 1x, where
-        // `depth` is already single-sample and serves both phases.
+        // UI depth must match both the swapchain's sample count AND output size.
+        // Even at 1x the scene depth cannot serve UI when render scale is not 100%.
         let ui_depth = self.gfx3d.ui_depth_view().cloned();
         // The prepass' view-space normal G-buffer target (None when the prepass is
         // disabled). Cloned (Arc) so no borrow of self is held across the segment loop.

@@ -145,6 +145,17 @@ mod tests {
     }
 
     #[test]
+    fn legacy_zero_normals_reach_the_geometric_fallback_in_colour_and_prepass() {
+        for shader in [include_str!("../gfx3d/shader3d.wgsl"), include_str!("../gfx3d/gpu_driven.wgsl")] {
+            assert!(!shader.contains("normalize(in.normal)"),
+                    "normalizing first destroys the zero-normal sentinel on legacy signs");
+            assert!(shader.contains("let geometric_normal = surface_normal(in.normal"));
+            assert_eq!(shader.matches("let surface_n = surface_normal(in.normal").count(), 2,
+                       "both the 1x and A2C normal prepasses must use the same fallback");
+        }
+    }
+
+    #[test]
     fn entry_shaders_compose() {
         compose(
             include_str!("../gfx3d/shader3d.wgsl"),

@@ -407,9 +407,16 @@ void Man::DrawProxies(int level, ClipFlags clipFlags, const Matrix4& transform, 
         Shape* shape = pshape->LevelOpaque(pLevel);
         int shapeSpec = shape->Special();
         const bool isCockpitProxy = (level == type->_insideView || GWorld->GetCameraType() == CamGunner);
+        // The parent's blend census does not include the held weapon. Submit its
+        // complete cockpit mesh once, rather than losing displays/glass when the
+        // soldier has no blend pass of its own.
+        if (isCockpitProxy && GSectionFilter == SectionClassFilter::BlendOnly)
+            continue;
+        const SectionClassFilter savedFilter = GSectionFilter;
         if (isCockpitProxy)
         {
             shapeSpec |= NoDropdown | FogDisabled;
+            GSectionFilter = SectionClassFilter::All;
         }
         const render::PassKindHint savedHint = GEngine->GetPassKindHint();
         if (isCockpitProxy)
@@ -421,6 +428,7 @@ void Man::DrawProxies(int level, ClipFlags clipFlags, const Matrix4& transform, 
         }
         shape->PrepareTextures(z2, shapeSpec);
         shape->Draw(this, lights, ClipAll, shapeSpec, pTransform, invPTransform);
+        GSectionFilter = savedFilter;
         GEngine->SetPassKindHint(savedHint);
     }
 

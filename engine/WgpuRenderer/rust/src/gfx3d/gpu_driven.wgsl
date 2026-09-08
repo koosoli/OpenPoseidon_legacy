@@ -10,7 +10,7 @@
 // the CPU path (they never enter the retained instance set), so this VS has no conform.
 
 #import frame::{frame, reverse_z, fog_factor, atmo_applied, veg_sway_offset, matdbg_view, matdbg_flag, MATDBG_DISABLE_NORMAL, MATDBG_INVERT_NORMAL_Y, MATDBG_COMPOSE_MULTI, MATDBG_DISABLE_FRESNEL_ENV, MATDBG_DISABLE_SPECULAR}
-#import shading::{shade, ShadeMaterial}
+#import shading::{shade, ShadeMaterial, surface_normal}
 #import color::srgb_to_linear
 #import gbuffer::{oct_encode, a2c_coverage, mip_alpha_boost}
 // Terrain conform (group 4 heightmap + surface_y/surface_grad), shared with shader3d /
@@ -849,7 +849,7 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
     // frame comes from the interpolated UV0 / world-position derivatives -- the same
     // recovery the per-draw path uses, and the reason this needs no vertex-format change.
     // Decode matches it too: NOHQ stores X in A and Y in G, Z is reconstructed.
-    let geometric_normal = normalize(in.normal);
+    let geometric_normal = surface_normal(in.normal, in.world_pos, dwx, dwy);
     var shading_normal = geometric_normal;
     // Hoisted out of the branch: the Visualize Normal view needs it for sections that
     // bind no normal map too, where flat (0,0,1) is the honest answer (WGSL rule 7).
@@ -1064,6 +1064,7 @@ fn fs_gpu_early(in: VsOut) -> @location(0) vec4<f32> {
 
 @fragment
 fn fs_gpu_prepass(in: VsOut) -> @location(0) vec2<f32> {
+    let surface_n = surface_normal(in.normal, in.world_pos, dpdx(in.world_pos), dpdy(in.world_pos));
     census(2u);
     if (prepass_clipped(in.world_pos)) {
         discard;
@@ -1082,7 +1083,7 @@ fn fs_gpu_prepass(in: VsOut) -> @location(0) vec2<f32> {
     }
     // in.normal is world space; the view matrix's translation is zeroed, so transforming the
     // direction gives view space (matches shader3d::fs_prepass).
-    let n_view = (frame.view * vec4<f32>(normalize(in.normal), 0.0)).xyz;
+    let n_view = (frame.view * vec4<f32>(surface_n, 0.0)).xyz;
     return oct_encode(normalize(n_view));
 }
 
@@ -1093,6 +1094,7 @@ fn fs_gpu_prepass(in: VsOut) -> @location(0) vec2<f32> {
 // per-fragment opaque/cutout split rather than a pipeline override.
 @fragment
 fn fs_gpu_prepass_a2c(in: VsOut) -> @location(0) vec4<f32> {
+    let surface_n = surface_normal(in.normal, in.world_pos, dpdx(in.world_pos), dpdy(in.world_pos));
     census(2u);
     census(3u);
     if (prepass_clipped(in.world_pos)) {
@@ -1110,7 +1112,7 @@ fn fs_gpu_prepass_a2c(in: VsOut) -> @location(0) vec4<f32> {
             discard;
         }
     }
-    let n_view = (frame.view * vec4<f32>(normalize(in.normal), 0.0)).xyz;
+    let n_view = (frame.view * vec4<f32>(surface_n, 0.0)).xyz;
     let oct = oct_encode(normalize(n_view));
     return vec4<f32>(oct.x, oct.y, 0.0, cov);
 }

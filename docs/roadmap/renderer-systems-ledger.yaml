@@ -97,6 +97,12 @@ systems:
       renderer plans. The surface itself — FFT cascades, shoaling, foam, interaction,
       planar reflection and SSR — is live and is the default look.
 
+      2026-09-08 Nogova follow-up: reversed-Z cancellation and fixed-point scene depth
+      produced long horizontal shoreline bands at altitude. Float depth is now requested
+      when supported; the 8 km installed-game capture removes those bands. Open-ocean
+      seams/coverage edges remain. See decisions/NOGOVA-VISUAL-20260908.md; this is author
+      smoke evidence, not owner acceptance of every water artifact.
+
       PLANAR REFLECTION EDGE, open as of 2026-08-06. Looking DOWN at water leaves a
       visible boundary where the cloud reflection stops. Three attempts, each fixing a
       real thing and none fixing this: the reflected camera was inheriting the screen's
@@ -234,6 +240,11 @@ systems:
       a depth-aspect view; normal_view() is exposed and bound; both named consumers
       landed — water takes water_depth_view via set_depth_view, and Hi-Z takes the
       nearest resolve.
+
+      2026-09-08: scene depth/stencil uses Depth32FloatStencil8 when enabled on the
+      device, falling back to Depth24PlusStencil8. Both object normal prepasses use
+      the same geometric fallback as colour shading for legacy zero-normal vertices;
+      normalizing those vertices first made the Nogova Davle sign black.
 
       Stage 3 — one item of three. Foliage cutout uses alpha-to-coverage in BOTH the
       colour and prepass pipelines (foliage_a2c drives alpha_to_coverage_enabled at

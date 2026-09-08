@@ -4,7 +4,7 @@ use crate::ffi::{
     WGR_GRASS_DOWNWASH_COUNT, WGR_GRASS_TRACK_COUNT, WgrGrassDownwash, WgrGrassParams,
     WgrGrassTrack, WgrTerrainParams,
 };
-use crate::gfx3d::{DEPTH_FORMAT, NORMAL_FORMAT};
+use crate::gfx3d::{depth_format, NORMAL_FORMAT};
 use crate::terrain::Terrain;
 
 // The near placement grid is SIZED FROM THE RADIUS, not fixed. A fixed grid had
@@ -1207,7 +1207,7 @@ impl Grass {
                     ..Default::default()
                 },
                 depth_stencil: Some(wgpu::DepthStencilState {
-                    format: DEPTH_FORMAT,
+                    format: depth_format(device),
                     depth_write_enabled: Some(depth_write),
                     depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
                     stencil: Default::default(),

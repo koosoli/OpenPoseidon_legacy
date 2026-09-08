@@ -1,7 +1,7 @@
 use glam::Vec2;
 
 use crate::ffi::{WgrBlend, WgrDraw2DBatch, WgrOverlayDraw, WgrOverlayVertex, WgrVertex2D};
-use crate::gfx3d::DEPTH_FORMAT;
+use crate::gfx3d::depth_format;
 use crate::textures::SharedTextures;
 
 // Linear filter + clamp both axes (point<<2 | clampV<<1 | clampU).
@@ -139,7 +139,7 @@ impl Gfx2d {
                     ..Default::default()
                 },
                 depth_stencil: Some(wgpu::DepthStencilState {
-                    format: DEPTH_FORMAT,
+                    format: depth_format(device),
                     depth_write_enabled: Some(write),
                     depth_compare: Some(if test {
                         // Reverse Z
@@ -251,7 +251,7 @@ impl Gfx2d {
                     ..Default::default()
                 },
                 depth_stencil: Some(wgpu::DepthStencilState {
-                    format: DEPTH_FORMAT,
+                    format: depth_format(device),
                     depth_write_enabled: Some(false),
                     depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
                     stencil: wgpu::StencilState::default(),

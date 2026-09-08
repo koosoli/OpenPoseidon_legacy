@@ -14,7 +14,7 @@
 #import color::srgb_to_linear
 #import gbuffer::{oct_encode, a2c_coverage, mip_alpha_boost}
 // Shared fragment shading, also used by the GPU-driven indirect path (gpu_driven.wgsl).
-#import shading::{shade, ShadeMaterial}
+#import shading::{shade, ShadeMaterial, surface_normal}
 // Group(4) terrain heightmap + surface_y, shared with the shadow depth pass.
 // surface_grad tilts conformed veg normals to follow the ground slope (color pass only).
 #import conform::{surface_y, surface_grad, surface_y_raster, hm_params}
@@ -753,7 +753,7 @@ fn shade_fragment(in: VsOut) -> vec4<f32> {
         // the displacement runs along the surface's real UV directions.
         let duv_dx = dpdx(in.uv);
         let duv_dy = dpdy(in.uv);
-        let n_geo = normalize(in.normal);
+        let n_geo = surface_normal(in.normal, in.world_pos, dwx, dwy);
         var t_raw = dwx * duv_dy.y - dwy * duv_dx.y;
         var b_raw = dwy * duv_dx.x - dwx * duv_dy.x;
         if (dot(in.tangent, in.tangent) > 1e-10 && dot(in.binormal, in.binormal) > 1e-10) {
@@ -927,7 +927,7 @@ fn shade_fragment(in: VsOut) -> vec4<f32> {
     // tangent frame from the actual interpolated UV0/world-position derivatives;
     // this is deterministic and lets Stage1 use its declared `tex` source without
     // fabricating tangent handedness in the canonical model representation.
-    let geometric_normal = normalize(in.normal);
+    let geometric_normal = surface_normal(in.normal, in.world_pos, dwx, dwy);
     var shading_normal = geometric_normal;
     if (material.normal_map.z > 0.5) {
         let authored_frame = dot(in.tangent, in.tangent) > 1e-10 && dot(in.binormal, in.binormal) > 1e-10;
@@ -1097,6 +1097,7 @@ fn surface_scattering(pos: vec3<f32>) -> vec3<f32> {
 // the textureSample stays legal.
 @fragment
 fn fs_prepass(in: VsOut) -> @location(0) vec2<f32> {
+    let surface_n = surface_normal(in.normal, in.world_pos, dpdx(in.world_pos), dpdy(in.world_pos));
     census(2u);
     if (alpha_ref > 0.0) {
         let packed = bitcast<u32>(materials[in.instance].emissive.w);
@@ -1109,7 +1110,7 @@ fn fs_prepass(in: VsOut) -> @location(0) vec2<f32> {
     }
     // in.normal is world space (camera-relative world uses the same orientation); the
     // view matrix's translation is zeroed, so multiplying the direction gives view space.
-    let n_view = (frame.view * vec4<f32>(normalize(in.normal), 0.0)).xyz;
+    let n_view = (frame.view * vec4<f32>(surface_n, 0.0)).xyz;
     return oct_encode(normalize(n_view));
 }
 
@@ -1120,6 +1121,7 @@ fn fs_prepass(in: VsOut) -> @location(0) vec2<f32> {
 // the colour pass will shade (terrain fills the rest -> no background halo at edges).
 @fragment
 fn fs_prepass_a2c(in: VsOut) -> @location(0) vec4<f32> {
+    let surface_n = surface_normal(in.normal, in.world_pos, dpdx(in.world_pos), dpdy(in.world_pos));
     census(2u);
     census(3u);
     let packed = bitcast<u32>(materials[in.instance].emissive.w);
@@ -1130,7 +1132,7 @@ fn fs_prepass_a2c(in: VsOut) -> @location(0) vec4<f32> {
     if (cov <= 0.0) {
         discard;
     }
-    let n_view = (frame.view * vec4<f32>(normalize(in.normal), 0.0)).xyz;
+    let n_view = (frame.view * vec4<f32>(surface_n, 0.0)).xyz;
     let oct = oct_encode(normalize(n_view));
     return vec4<f32>(oct.x, oct.y, 0.0, cov);
 }

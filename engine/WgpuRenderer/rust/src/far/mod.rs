@@ -22,7 +22,7 @@
 //! them feed the Hi-Z pyramid would let a box occlude the real geometry it stands in for.
 
 use crate::ffi::WgrFarInstance;
-use crate::gfx3d::DEPTH_FORMAT;
+use crate::gfx3d::depth_format;
 use crate::gfx3d::cull::CullInputs;
 
 /// Compacted-output partition sizes, in instances. One buffer, two fixed partitions: cards
@@ -247,7 +247,7 @@ impl Far {
         // write depth — they are opaque stand-ins for opaque things, and without the write
         // a nearer proxy would not hide a farther one.
         let depth_stencil = wgpu::DepthStencilState {
-            format: DEPTH_FORMAT,
+            format: depth_format(device),
             depth_write_enabled: Some(true),
             depth_compare: Some(wgpu::CompareFunction::GreaterEqual), // reversed-Z
             stencil: wgpu::StencilState::default(),

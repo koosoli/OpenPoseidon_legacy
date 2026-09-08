@@ -2246,7 +2246,7 @@ pub fn build_gpu_pipeline(
         ("count_fragments", super::count_fragments() as f64),
     ];
     let depth_stencil = wgpu::DepthStencilState {
-        format: super::DEPTH_FORMAT,
+        format: super::depth_format(device),
         depth_write_enabled: Some(true),
         depth_compare: Some(wgpu::CompareFunction::GreaterEqual), // reversed-Z
         stencil: wgpu::StencilState::default(),
@@ -2551,7 +2551,7 @@ pub fn build_cull_debug_pipeline(
         immediate_size: 0,
     });
     let depth_stencil = wgpu::DepthStencilState {
-        format: super::DEPTH_FORMAT,
+        format: super::depth_format(device),
         depth_write_enabled: Some(false),
         depth_compare: Some(wgpu::CompareFunction::Always), // debug: always on top
         stencil: wgpu::StencilState::default(),

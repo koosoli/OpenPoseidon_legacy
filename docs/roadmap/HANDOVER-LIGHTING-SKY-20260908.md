@@ -5,6 +5,12 @@ anything. **Read this before touching the renderer.**
 
 ## Where everything is
 
+Follow-up for the owner's Nogova report: see
+[NOGOVA-VISUAL-20260908.md](decisions/NOGOVA-VISUAL-20260908.md).
+It records the 50 km default/settings, float-depth coastline fix, zero-normal Davle
+sign fix, blended-surface scattering and the held LLDR monitor. The branch/deploy
+hashes below describe the earlier handover, not this follow-up.
+
 | | |
 |---|---|
 | Worktree | `.claude/worktrees/asset-obs` — **work here, not in the main checkout** |

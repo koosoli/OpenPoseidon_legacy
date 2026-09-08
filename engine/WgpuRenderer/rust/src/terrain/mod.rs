@@ -2,7 +2,7 @@ use bytemuck::Zeroable;
 use wgpu::util::DeviceExt;
 
 use crate::ffi::{WgrTerrainMaterial, WgrTerrainNode, WgrTerrainParams};
-use crate::gfx3d::{DEPTH_FORMAT, NORMAL_FORMAT};
+use crate::gfx3d::{depth_format, NORMAL_FORMAT};
 
 mod skyvis;
 
@@ -807,7 +807,7 @@ impl Terrain {
                     ..Default::default()
                 },
                 depth_stencil: Some(wgpu::DepthStencilState {
-                    format: DEPTH_FORMAT,
+                    format: depth_format(device),
                     depth_write_enabled: Some(depth_write),
                     // Reversed-Z: nearer geometry has the larger depth value.
                     depth_compare: Some(wgpu::CompareFunction::GreaterEqual),

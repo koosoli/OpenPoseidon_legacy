@@ -57,8 +57,24 @@ fn rotate_between(src_n: vec3<f32>, dst_n: vec3<f32>, v: vec3<f32>) -> vec3<f32>
 }
 
 // world_pos is camera-relative; dwx/dwy = dpdx/dpdy(world_pos), computed in the entry point
-// under uniform control flow (before any discard). `linear` selects the HDR path,
-// `is_cutout` the alpha-tested-foliage canopy-AO branch, `foliage_shadow_ao` its constant.
+// under uniform control flow (before any discard).
+fn surface_normal(normal: vec3<f32>, world_pos: vec3<f32>, dwx: vec3<f32>, dwy: vec3<f32>) -> vec3<f32> {
+    let len2 = dot(normal, normal);
+    if (len2 > 1e-8) {
+        return normal * inverseSqrt(len2);
+    }
+    // Legacy sign/overlay vertices can carry zero normals. Resolve these BEFORE
+    // normal mapping and cavity shading, not after normalize(0) has produced NaNs.
+    let face = cross(dwx, dwy);
+    let face_len2 = dot(face, face);
+    if (face_len2 > 1e-20) {
+        let n = face * inverseSqrt(face_len2);
+        return select(n, -n, dot(n, world_pos) > 0.0);
+    }
+    return vec3<f32>(0.0, 1.0, 0.0);
+}
+
+// `linear` selects HDR; `is_cutout` and `foliage_shadow_ao` select canopy shading.
 fn shade(
     albedo_in: vec3<f32>,
     mat: ShadeMaterial,
@@ -152,12 +168,7 @@ fn shade(
     // — a flat DC-only fallback would leave it noticeably darker than that face (no directional
     // sky, no sun N.L). For every real (unit-ish) normal this is bit-identical to normalize().
     let n_len = length(normal);
-    var nrm = normal / max(n_len, 1e-4);
-    if (n_len < 1e-4) {
-        var n_geo = normalize(cross(dwx, dwy));
-        // world_pos is camera-relative (camera at the origin), so the front hemisphere faces it.
-        nrm = select(n_geo, -n_geo, dot(n_geo, world_pos) > 0.0);
-    }
+    var nrm = surface_normal(normal, world_pos, dwx, dwy);
     // Two-sided foliage. A leaf card is a thin surface authored with ONE normal, and the canopy
     // is built from cards facing every direction, so roughly half of any tree is seen from its
     // back face. Those keep a normal pointing away from the viewer: N.L collapses to zero and the

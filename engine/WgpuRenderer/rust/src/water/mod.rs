@@ -1,7 +1,7 @@
 use wgpu::util::DeviceExt;
 
 use crate::ffi::{WgrWaterNode, WgrWaterParams};
-use crate::gfx3d::DEPTH_FORMAT;
+use crate::gfx3d::depth_format;
 mod interaction;
 use interaction::Interaction;
 mod fft;
@@ -734,7 +734,7 @@ impl Water {
             // first, nearer) occlude water, but depth-write OFF so overlapping wave
             // tiles never self-occlude — nothing 3D draws behind water in-segment.
             depth_stencil: Some(wgpu::DepthStencilState {
-                format: DEPTH_FORMAT,
+                format: depth_format(device),
                 depth_write_enabled: Some(false),
                 depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
                 stencil: wgpu::StencilState::default(),
@@ -788,7 +788,7 @@ impl Water {
             // Spray belongs above the surface but must still be hidden by terrain,
             // hulls, and other opaque scene geometry.
             depth_stencil: Some(wgpu::DepthStencilState {
-                format: DEPTH_FORMAT,
+                format: depth_format(device),
                 depth_write_enabled: Some(false),
                 depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
                 stencil: wgpu::StencilState::default(),
