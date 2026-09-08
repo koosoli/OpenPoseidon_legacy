@@ -69,6 +69,9 @@ systems:
       model-tested; installed verification awaits the owner's free game lock.
       Sort-depth caching is equivalence-tested at 4096 particles and three camera
       headings; runtime cost comparison remains pending, not a claimed speedup.
+      Transient crater dust no longer enters dense smoke ground shadows; installed
+      Desert rifle-impact A/B on ea3c0494 preserves sprites and removes broad dark
+      patches. See decisions/DESERT-IMPACT-SHADOW-20260908.md for test limitations.
       See decisions/SMOKE-CONTACT-20260908.md for evidence and limitations; this
       entry does not assert completion of the containment implementation plan.
     production_call_sites:
