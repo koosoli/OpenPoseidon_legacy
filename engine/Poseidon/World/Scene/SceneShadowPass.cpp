@@ -9,6 +9,7 @@
 #include <Poseidon/World/Simulation/FrameInv.hpp>
 #include <Poseidon/Graphics/Rendering/Primitives/Poly.hpp>
 #include <Poseidon/Graphics/Shadow/ShadowMath.hpp>
+#include <Poseidon/Graphics/Shadow/ShadowCasterLod.hpp>
 
 #include <chrono>
 #include <cstring>
@@ -353,6 +354,12 @@ void Scene::RenderShadowMapDepthPass(int nDraw)
         // invisible) but whose shadow falls into view — e.g. someone behind the
         // camera — casts from its shadow LOD so the omni tiers still pick it up.
         int geomLOD = (oi->drawLOD != LOD_INVISIBLE) ? oi->drawLOD : oi->shadowLOD;
+        if (shadow::NeedsExteriorCasterLod(*oi->shape, geomLOD))
+        {
+            // Interior meshes intentionally omit the player's head or vehicle hull.
+            geomLOD = LevelFromDistance2(oi->shape, oi->distance2, oi->object->Scale(), oi->object->Direction(),
+                                         GetCamera()->Direction());
+        }
         if (geomLOD == LOD_INVISIBLE && ShadowRecoverLodEnabled())
         {
             // Both main-view LODs are invisible (occluded in view, and past the
@@ -542,6 +549,11 @@ void Scene::RenderShadowMapDepthPassGpu(int nDraw)
             continue;
         }
         int geomLOD = (oi->drawLOD != LOD_INVISIBLE) ? oi->drawLOD : oi->shadowLOD;
+        if (shadow::NeedsExteriorCasterLod(*oi->shape, geomLOD))
+        {
+            geomLOD = LevelFromDistance2(oi->shape, oi->distance2, oi->object->Scale(), oi->object->Direction(),
+                                         cam->Direction());
+        }
         if (geomLOD == LOD_INVISIBLE && ShadowRecoverLodEnabled())
         {
             // See ShadowRecoverLodEnabled: recover a caster LOD the main-view

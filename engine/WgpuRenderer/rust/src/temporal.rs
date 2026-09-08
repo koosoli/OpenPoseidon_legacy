@@ -130,6 +130,8 @@ struct HistoryControlPass {
     layout: wgpu::BindGroupLayout,
     bind: Option<wgpu::BindGroup>,
     bound_depth_gen: u64,
+    bound_cloud: Option<wgpu::TextureView>,
+    clear_cloud: wgpu::TextureView,
     pipeline: wgpu::RenderPipeline,
 }
 
@@ -936,8 +938,9 @@ impl Temporal {
         depth_gen: u64,
         render_size: (u32, u32),
         sea_level: Option<f32>,
+        cloud: Option<&wgpu::TextureView>,
     ) {
-        if !self.enabled || (self.reactive_sky <= 0.0 && self.reactive_water <= 0.0) {
+        if !self.enabled {
             return;
         }
         self.ensure_shader(device);
@@ -962,13 +965,24 @@ impl Temporal {
                 dimension: wgpu::TextureDimension::D2,
                 format: wgpu::TextureFormat::R8Unorm,
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                    | wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_SRC,
                 view_formats: &[],
             });
             let view = target.create_view(&wgpu::TextureViewDescriptor::default());
             let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("wgr_history_control_layout"),
                 entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
                     wgpu::BindGroupLayoutEntry {
                         binding: 0,
                         visibility: wgpu::ShaderStages::FRAGMENT,
@@ -1027,6 +1041,21 @@ impl Temporal {
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
+            let clear_cloud = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("wgr_history_clear_cloud"),
+                size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            queue.write_texture(
+                clear_cloud.as_image_copy(), &[0, 0, 0, 255],
+                wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(4), rows_per_image: Some(1) },
+                clear_cloud.size(),
+            );
             self.history_control = Some(HistoryControlPass {
                 target,
                 view,
@@ -1035,6 +1064,8 @@ impl Temporal {
                 layout,
                 bind: None,
                 bound_depth_gen: u64::MAX,
+                bound_cloud: None,
+                clear_cloud: clear_cloud.create_view(&Default::default()),
                 pipeline,
             });
         }
@@ -1050,12 +1081,17 @@ impl Temporal {
             sea_level.unwrap_or(f32::MIN),
         ];
         let hc = self.history_control.as_mut().expect("history control");
+        let cloud = cloud.unwrap_or(&hc.clear_cloud);
         queue.write_buffer(&hc.uniform, 0, bytemuck::bytes_of(&params));
-        if hc.bind.is_none() || hc.bound_depth_gen != depth_gen {
+        if hc.bind.is_none() || hc.bound_depth_gen != depth_gen || hc.bound_cloud.as_ref() != Some(cloud) {
             hc.bind = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("wgr_history_control_bind"),
                 layout: &hc.layout,
                 entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::TextureView(cloud),
+                    },
                     wgpu::BindGroupEntry {
                         binding: 0,
                         resource: wgpu::BindingResource::TextureView(depth),
@@ -1067,6 +1103,7 @@ impl Temporal {
                 ],
             }));
             hc.bound_depth_gen = depth_gen;
+            hc.bound_cloud = Some(cloud.clone());
         }
         encoder.push_debug_group("wgr_history_control");
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1527,6 +1564,72 @@ mod tests {
     // non-vacuous both ways — a translated camera must produce NON-zero velocity and a
     // static one zero — so an all-zeros output cannot pass as success.
     #[test]
+    fn cloud_history_mask_covers_terrain_and_clears_when_disabled() {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let adapter = pollster::block_on(instance.request_adapter(&Default::default()))
+            .expect("GPU adapter required for history mask regression");
+        let (device, queue) = pollster::block_on(adapter.request_device(&Default::default()))
+            .expect("GPU device required for history mask regression");
+        let size = wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 };
+        let depth = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("mask_test_depth"), size, mip_level_count: 1, sample_count: 1,
+            dimension: wgpu::TextureDimension::D2, format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let depth_view = depth.create_view(&Default::default());
+        let cloud = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("mask_test_cloud"), size, mip_level_count: 1, sample_count: 1,
+            dimension: wgpu::TextureDimension::D2, format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        queue.write_texture(cloud.as_image_copy(), &[0, 0, 0, 64],
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(4), rows_per_image: Some(1) }, size);
+        let cloud_view = cloud.create_view(&Default::default());
+        let readback = device.create_buffer(&wgpu::BufferDescriptor {
+            label: None, size: 256, mapped_at_creation: false,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        });
+        let mut t = Temporal::from_env();
+        t.enabled = true;
+        t.reactive_water = 0.0;
+        let mut cam = crate::ffi::WgrCamera::zeroed();
+        cam.view = glam::Mat4::IDENTITY.to_cols_array();
+        cam.proj = glam::Mat4::perspective_infinite_reverse_rh(1.0, 1.0, 0.5).to_cols_array();
+        t.begin_frame(&cam, (1, 1));
+        // Same depth generation across all runs: adding/removing the cloud view
+        // must invalidate the bind independently, and zero tuning must clear it.
+        for (cloud, strength, expected) in [
+            (None, 1.0, 0u8), (Some(&cloud_view), 1.0, 191),
+            (Some(&cloud_view), 0.5, 96), (Some(&cloud_view), 0.0, 0), (None, 1.0, 0),
+        ] {
+            t.reactive_sky = strength;
+            let mut encoder = device.create_command_encoder(&Default::default());
+            drop(encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: None, color_attachments: &[],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &depth_view,
+                    depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0.5), store: wgpu::StoreOp::Store }),
+                    stencil_ops: None,
+                }), timestamp_writes: None, occlusion_query_set: None, multiview_mask: None,
+            }));
+            t.render_history_control(&device, &queue, &mut encoder, &depth_view, 1, (1, 1), None, cloud);
+            encoder.copy_texture_to_buffer(t.history_control_texture().unwrap().as_image_copy(),
+                wgpu::TexelCopyBufferInfo { buffer: &readback,
+                    layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(256), rows_per_image: Some(1) } }, size);
+            queue.submit([encoder.finish()]);
+            let (tx, rx) = std::sync::mpsc::channel();
+            readback.slice(..).map_async(wgpu::MapMode::Read, move |r| { tx.send(r).unwrap(); });
+            device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+            rx.recv().unwrap().unwrap();
+            let actual = readback.slice(..).get_mapped_range()[0];
+            readback.unmap();
+            assert!(actual.abs_diff(expected) <= 1, "mask {actual}, expected {expected}");
+        }
+    }
+
+    #[test]
     fn velocity_pass_runs_headlessly_and_reprojection_answers_both_ways() {
         let instance =
             wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
@@ -1636,7 +1739,7 @@ mod tests {
             t.render_debug_resolve(&device, &queue, &mut encoder, &color_view, (W, H));
             t.render_debug_resolve(&device, &queue, &mut encoder, &color_view, (W, H));
             // REN-TEMP-001J: history-control pipeline (lazily built like the others).
-            t.render_history_control(&device, &queue, &mut encoder, &depth_view, 1, (W, H), Some(5.0));
+            t.render_history_control(&device, &queue, &mut encoder, &depth_view, 1, (W, H), Some(5.0), None);
             t.render_debug(
                 &device,
                 &queue,

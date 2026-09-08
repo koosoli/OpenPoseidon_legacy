@@ -1,9 +1,27 @@
 #include <catch2/catch_test_macros.hpp>
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
+#include <Poseidon/Graphics/Shadow/ShadowCasterLod.hpp>
 #include <Poseidon/World/Scene/Object.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 
 using namespace Poseidon;
+
+TEST_CASE("Interior draw LODs require an exterior shadow caster", "[World][shadow-caster-lod]")
+{
+    Ref<LODShapeWithShadow> shape = new LODShapeWithShadow();
+    shape->AddShape(new Shape(), 0.5f);
+    shape->AddShape(new Shape(), 10.0f);
+    shape->AddShape(new Shape(), VIEW_GUNNER);
+    shape->AddShape(new Shape(), VIEW_PILOT);
+    shape->AddShape(new Shape(), VIEW_CARGO);
+    CHECK_FALSE(shadow::NeedsExteriorCasterLod(*shape, -1));
+    CHECK_FALSE(shadow::NeedsExteriorCasterLod(*shape, 0));
+    CHECK_FALSE(shadow::NeedsExteriorCasterLod(*shape, 1));
+    CHECK(shadow::NeedsExteriorCasterLod(*shape, 2));
+    CHECK(shadow::NeedsExteriorCasterLod(*shape, 3));
+    CHECK(shadow::NeedsExteriorCasterLod(*shape, 4));
+    CHECK_FALSE(shadow::NeedsExteriorCasterLod(*shape, 5));
+}
 
 namespace
 {

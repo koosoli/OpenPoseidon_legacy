@@ -1578,6 +1578,11 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
     }
     let base_normal = state.geometric_normal;
     let roughness = water_roughness(wp.spec_power, state.slope_variance_lost, base_normal, n);
+    // Filter sub-pixel glitter analytically, without extra texture samples.
+    // Cascade filtering alone misses normal variation still present within a pixel.
+    let normal_dx = dpdx(n);
+    let normal_dy = dpdy(n);
+    let pixel_normal_variance = 0.5 * (dot(normal_dx, normal_dx) + dot(normal_dy, normal_dy));
     let v = normalize(-in.world_pos);              // surface -> camera
     let l = normalize(-frame.sun_dir_world.xyz);   // surface -> sun
     let world_y = in.world_pos.y + frame.cam_pos.y;
@@ -1917,7 +1922,8 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
         // near crest gets a tight sparkle while the horizon settles into a broad stable sheen. The
         // reference's fixed 0.4 roughness can do neither, and aliases badly with distance — this is
         // the term where we go past it rather than merely matching it.
-        let spec_alpha = clamp(roughness, 0.075, 0.45);
+        let roughness4 = roughness * roughness * roughness * roughness;
+        let spec_alpha = clamp(sqrt(sqrt(roughness4 + min(pixel_normal_variance, 0.04))), 0.075, 0.45);
         let ndh = max(dot(n, halfway), 0.0);
         let vdh = max(dot(v, halfway), 0.0);
         let d_term = godot_ggx_distribution(ndh, spec_alpha);

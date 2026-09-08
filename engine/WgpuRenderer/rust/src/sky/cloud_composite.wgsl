@@ -5,11 +5,11 @@
 //
 // The upsample is DEPTH-AWARE (bilateral). A plain bilinear stretch of the half-res buffer smears the
 // cloud-vs-geometry silhouette — a sharp foreground occluder (the player's aircraft) ends up with a
-// jaggy, half-res cloud edge against its full-res outline. So each full-res pixel blends the 4 nearest
-// low-res cloud texels weighted by BOTH the bilinear tent AND how well each texel's scene depth matches
+// jaggy, half-res cloud edge against its full-res outline. Each full-res pixel blends a 3x3 neighbourhood
+// of low-res cloud texels weighted by BOTH a Gaussian AND how well each texel's scene depth matches
 // this pixel's scene depth. Across a depth discontinuity (plane vs sky behind) the mismatched texels
-// are rejected, so the cloud edge snaps to the full-res geometry silhouette. In smooth regions all four
-// depths agree and it degrades to ordinary bilinear. Separate module (not sky.wgsl) so it keeps its own
+// are downweighted to preserve the full-res geometry silhouette. In smooth regions this also filters
+// fixed ray-march jitter. Separate module (not sky.wgsl) so it keeps its own
 // group(0) binding namespace.
 
 @group(0) @binding(0) var cloud_lo: texture_2d<f32>;
@@ -41,14 +41,9 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let px = vec2<i32>(clamp(in.uv, vec2<f32>(0.0), vec2<f32>(0.9999)) * full);
     let d_ref = textureLoad(scene_depth, px, 0);
 
-    // The 4 low-res texels straddling this uv, with the bilinear fractional weights.
+    // Centre the reconstruction kernel on the nearest low-res texel.
     let cf = in.uv * lo - 0.5;
-    let base = floor(cf);
-    let fr = cf - base;
-    let bi = vec4<f32>((1.0 - fr.x) * (1.0 - fr.y), fr.x * (1.0 - fr.y),
-                       (1.0 - fr.x) * fr.y, fr.x * fr.y);
-    let off = array<vec2<f32>, 4>(vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 0.0),
-                                  vec2<f32>(0.0, 1.0), vec2<f32>(1.0, 1.0));
+    let base = floor(cf + 0.5);
 
     // Linearise the reference depth to ~view distance before comparing. Raw reversed-Z is hopelessly
     // non-linear: an occluder a km below the clouds has depth ~near/dist ~ 5e-5, a hair away from the
@@ -59,20 +54,24 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
     var acc = vec4<f32>(0.0);
     var wsum = 0.0;
-    for (var k = 0; k < 4; k = k + 1) {
-        let tc = base + off[k];
+    // A small spatial reconstruction kernel suppresses fixed march jitter.
+    // It adds no ray-march steps, temporal lag or additional render target.
+    for (var k = 0; k < 9; k = k + 1) {
+        let tc = base + vec2<f32>(f32(k % 3 - 1), f32(k / 3 - 1));
         let tci = clamp(vec2<i32>(tc), vec2<i32>(0), lo_i);
         let cloud = textureLoad(cloud_lo, tci, 0);
         // Depth this low-res texel represents: the full-res depth at its centre (each low-res pixel was
         // marched from one full-res depth tap). exp(-K * relative-distance-diff) rejects mismatched taps
         // at a silhouette (=> edge snaps to the full-res geometry outline) and is ~1 where depth is flat
-        // (=> plain bilinear). The small floor keeps a bilinear fallback so a thin sliver whose depth
+        // (=> spatial smoothing). The small floor keeps a spatial fallback so a thin sliver whose depth
         // matches no tap can't collapse to transmittance 0 (which would punch a black hole).
         let cpx = vec2<i32>(clamp((tc + 0.5) / lo, vec2<f32>(0.0), vec2<f32>(0.9999)) * full);
         let d_lo = textureLoad(scene_depth, cpx, 0);
         let lin_lo = 1.0 / max(d_lo, 1e-6);
         let rel = abs(lin_ref - lin_lo) / max(max(lin_ref, lin_lo), 1e-6);
-        let w = bi[k] * max(exp(-rel * 24.0), 0.02);
+        let delta = tc - cf;
+        let spatial = exp2(-2.0 * dot(delta, delta));
+        let w = spatial * max(exp(-rel * 24.0), 0.02);
         acc += cloud * w;
         wsum += w;
     }

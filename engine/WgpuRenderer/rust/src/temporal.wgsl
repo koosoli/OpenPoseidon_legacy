@@ -84,6 +84,7 @@ fn fs_velocity(in: VsOut) -> @location(0) vec2<f32> {
 
 @group(0) @binding(0) var hc_depth: texture_depth_2d;
 @group(0) @binding(1) var<uniform> hc: TemporalParams;
+@group(0) @binding(2) var hc_cloud: texture_2d<f32>;
 
 @fragment
 fn fs_history_control(in: VsOut) -> @location(0) vec4<f32> {
@@ -102,6 +103,14 @@ fn fs_history_control(in: VsOut) -> @location(0) vec4<f32> {
             mask = max(mask, hc.misc.y);
         }
     }
+    // Over-scene clouds also cover terrain, whose depth and motion vectors belong
+    // to the ground behind them. Cloud alpha stores transmittance, not opacity.
+    let cloud_dims = textureDimensions(hc_cloud);
+    let cloud_uv = in.pos.xy / vec2<f32>(textureDimensions(hc_depth));
+    let cloud_px = clamp(vec2<i32>(cloud_uv * vec2<f32>(cloud_dims)),
+                         vec2<i32>(0), vec2<i32>(cloud_dims) - vec2<i32>(1));
+    let opacity = clamp(1.0 - textureLoad(hc_cloud, cloud_px, 0).a, 0.0, 1.0);
+    mask = max(mask, opacity * hc.misc.x);
     return vec4<f32>(mask, 0.0, 0.0, 1.0);
 }
 

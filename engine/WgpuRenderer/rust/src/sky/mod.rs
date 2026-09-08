@@ -1187,6 +1187,7 @@ pub struct Sky {
     // the resolved scene depth via group(1)), then cloud_composite blends it over the lit scene.
     // cloud_lo resizes with the scene. Only used on the HDR (linear) path.
     cloud_pipeline: wgpu::RenderPipeline,
+    cloud_temporal_view: Option<wgpu::TextureView>,
     /// REN-SKY-004: the same march at a low step count, for the planar reflection only.
     cloud_pipeline_reflection: wgpu::RenderPipeline,
     cloud_depth_layout: wgpu::BindGroupLayout,
@@ -2211,6 +2212,7 @@ impl Sky {
             env_view,
             cloud_noise_tex,
             cloud_pipeline,
+            cloud_temporal_view: None,
             cloud_pipeline_reflection,
             cloud_depth_layout,
             cloud_lo: Vec::new(),
@@ -2355,6 +2357,7 @@ impl Sky {
         cam_pos: [f32; 4],
         draw_distance: f32,
     ) -> Option<String> {
+        self.cloud_temporal_view = None;
         let span = self.select_cloud_shadow_span(draw_distance);
         let changed = span != self.cloud_shadow_span;
         self.cloud_shadow_span = span;
@@ -2628,6 +2631,10 @@ impl Sky {
         self.linear > 0.5 && sky.cloud0[0] > 0.001
     }
 
+    pub fn cloud_temporal_view(&self) -> Option<&wgpu::TextureView> {
+        self.cloud_temporal_view.as_ref()
+    }
+
     // Phase 1: march the clouds at LOW RES into cloud_lo, bounding each ray at the resolved scene
     // depth so they occlude terrain / envelop the camera. (Re)allocates cloud_lo at half the scene
     // size on resize and rebuilds the composite bind. `upload` + `render_luts` must have run first.
@@ -2728,6 +2735,9 @@ impl Sky {
             .clone()
             .expect("cloud depth bind just built");
         let lo_view = &self.cloud_lo[slot].view;
+        if !reflection {
+            self.cloud_temporal_view = Some(lo_view.clone());
+        }
         encoder.push_debug_group("wgr_cloud");
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("wgr_cloud"),

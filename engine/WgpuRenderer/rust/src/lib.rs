@@ -2422,6 +2422,7 @@ impl Renderer {
                         depth_gen,
                         render_size,
                         sea,
+                        self.sky.cloud_temporal_view(),
                     );
                 }
                 // REN-TEMP-001H: moving rigid objects overwrite their camera-only
