@@ -314,6 +314,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     Graphics/Rendering/test_odol_v7_wire_format.cpp
     Graphics/Rendering/test_shape_section_inheritance.cpp
     Graphics/Rendering/test_render_flags.cpp
+    Graphics/Rendering/test_light_visibility.cpp
     Graphics/Rendering/test_render_pass_descriptor.cpp
     Graphics/Rendering/test_build_render_pass_descriptor.cpp
     Graphics/Rendering/test_ascii_search.cpp

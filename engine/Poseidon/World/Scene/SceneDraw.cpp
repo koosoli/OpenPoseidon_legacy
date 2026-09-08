@@ -302,9 +302,9 @@ void Scene::EndObjects()
     // sort by screen size
 }
 
-void Scene::DrawFlare(ColorVal color, Vector3Par lightPos, bool secondary, float sizeScale)
+void Scene::DrawFlare(ColorVal color, Vector3Par lightPos, bool secondary, float sizeScale, bool emissiveCore)
 {
-    Color lightColor = color * GEngine->GetAccomodateEye();
+    Color lightColor = emissiveCore ? color : color * GEngine->GetAccomodateEye();
     float oldA = lightColor.A();
     // we can draw flares now
     // flare positions between posLight (0) and screen center (1)
@@ -351,6 +351,8 @@ void Scene::DrawFlare(ColorVal color, Vector3Par lightPos, bool secondary, float
                 {
                     float sizeCoef = texture->AWidth() * (1.0f / 64);
                     GEngine->DrawDecal(lightPos, 1, sizeX * sizeCoef, sizeY * sizeCoef, color, mip, special);
+                    if (emissiveCore)
+                        GEngine->DrawDecal(lightPos, 1, sizeX * sizeCoef, sizeY * sizeCoef, color, mip, special);
                 }
             }
         }
@@ -618,6 +620,23 @@ void Scene::DrawFlares()
                 lightColor.SetA(a);
                 DrawFlare(lightColor, light->Position(), false,
                           wgpu ? floatMin(0.030f * span, 1.0f) : 0.22f);
+                if (wgpu && glow.enabled && light->HasVisibleBulb() && light->AttachedOn() && occ > 0.0f)
+                {
+                    const float distance = floatMax(dir.Size(), 0.1f);
+                    const float facing = floatMax(0.0f, dir.DotProduct(light->Direction()) / distance);
+                    Color core = light->GetObjectColor();
+                    const float peak = floatMax(core.R(), floatMax(core.G(), core.B()));
+                    if (peak > 1.0e-4f && glow.markerSize > 0.0f)
+                    {
+                        core = core * (1.0f / peak);
+                        core.SetA(floatMin(gain * facing, 1.0f));
+                        // A compact screen-facing lens, not the flat HalfLight mesh.
+                        // Two additive quads avoid the packed-colour radiance ceiling
+                        // without another shader, texture or fullscreen pass.
+                        DrawFlare(core, light->Position(), false,
+                                  glow.markerSize / (0.2f * distance), true);
+                    }
+                }
             }
         }
     }

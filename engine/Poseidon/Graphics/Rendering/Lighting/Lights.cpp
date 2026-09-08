@@ -1199,6 +1199,10 @@ void LightReflector::ToDraw(ClipFlags clipFlags, bool dimmed)
         // The wedge is what was ugly; the glowing bulb is not.
         if (_drawHalo && GScene->MainLight()->NightEffect() >= 0.01 && !dimmed)
         {
+            // WGPU draws the compact, occlusion-gated lens in Scene::DrawFlares.
+            // HalfLight is a flat mesh and reads as a grey plate across the grille.
+            if (AppConfig::Instance().GetRenderBackend() == "wgpu" && GBulbGlow().enabled && AttachedOn())
+                return;
             // LGT-025: peak-normalised, so a warm headlight's marker is asked for white
             // rather than for 66% of it. See BulbMarkerColor.
             Color c = BulbMarkerColor(GetObjectColor());

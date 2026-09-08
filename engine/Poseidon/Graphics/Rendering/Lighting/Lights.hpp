@@ -120,7 +120,8 @@ protected:
 
 	virtual void GetDescription(LightDescription &desc) const = 0;
 
-	Object *AttachedOn(){return nullptr;}
+	virtual Object *AttachedOn(){return nullptr;}
+	virtual bool HasVisibleBulb() const {return false;}
 
 	Light();
 	~Light() override;
@@ -358,6 +359,7 @@ class LightReflector: public LightPositionedColored
 
 	public:
 	void SetDrawHalo( bool on ){_drawHalo=on;}
+	bool HasVisibleBulb() const override {return _drawHalo;}
 	//! LGT-020: the reach, in metres, set DIRECTLY. SetBrightness is not a brightness at all --
 	//! it is 200*InvSqrt(diffuse/coef), i.e. a reach, so turning a torch "up" made it carry
 	//! 350 m across a village instead of making it brighter. Intensity belongs in the colour.
@@ -421,7 +423,7 @@ class LightReflectorOnVehicle: public LightReflector,public AttachedOnVehicle
 	AttachedOnVehicle(vehicle,position,direction)
 	{
 	}
-	Object *AttachedOn(){return AttachedOnVehicle::AttachedOn();}
+	Object *AttachedOn() override {return AttachedOnVehicle::AttachedOn();}
 };
 class LightPseudoReflectorOnVehicle: public LightPseudoReflector,public AttachedOnVehicle
 {
@@ -431,7 +433,7 @@ class LightPseudoReflectorOnVehicle: public LightPseudoReflector,public Attached
 		LODShapeWithShadow *shape,
 		Object *vehicle, Vector3Par position, Vector3Par direction
 	);
-	Object *AttachedOn(){return AttachedOnVehicle::AttachedOn();}
+	Object *AttachedOn() override {return AttachedOnVehicle::AttachedOn();}
 };
 class LightPointOnVehicle: public LightPointVisible,public AttachedOnVehicle
 {
@@ -447,7 +449,7 @@ class LightPointOnVehicle: public LightPointVisible,public AttachedOnVehicle
 	(
 		Object *vehicle, Vector3Par position
 	);
-	Object *AttachedOn(){return AttachedOnVehicle::AttachedOn();}
+	Object *AttachedOn() override {return AttachedOnVehicle::AttachedOn();}
 
 	void Load(const ParamEntry &cls);
 };

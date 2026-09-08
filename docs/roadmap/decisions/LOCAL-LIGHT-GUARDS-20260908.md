@@ -16,6 +16,15 @@
   soft-particle fading. Both decal variants now honor NoZBuf. Ordinary smoke
   retains depth testing; the unrotated path retains its optional soft fade.
   Six policy assertions pin this separation; no shader or ABI change is needed.
+- Carrier discovery also required fixing Light::AttachedOn: the base method was
+  non-virtual and always returned null through the Light pointer in DrawFlares.
+  All three attached-light classes now override it. A base-pointer dispatch test
+  pins the contract and the reflector's visible-bulb switch.
+- WGPU attached reflectors replace their grey HalfLight mesh with a compact
+  screen-facing core, at the existing marker-size setting. Two additive quads
+  provide headroom without changing packed vertex/FFI layouts or other lights.
+  The core bypasses diffuse eye accommodation, retains source visibility and
+  front-facing checks, and is disabled for hidden-bulb head torches.
 
 ## Evidence and remaining work
 
@@ -25,7 +34,11 @@
 - Installed baseline is 700246eb. Private fixture .tmp-bulb/fixed.eden explicitly
   positions a crewed jeep and logs its coordinates; the original car-lit mission
   cannot be assumed to keep its initial vehicle position.
-- Runtime visibility comparison is pending. This is not acceptance of the bulb
-  appearance: the old HalfLight marker is still grey and needs a separate fix.
+- Installed af66c260 versus 700246eb: positioned-before/after captures show the
+  street-lamp flare restored by NoZBuf, with stable jeep position and 14 active
+  local shadow views (cache reuse observed). No camera-basis warning or runtime
+  validation error. That build's carrier exclusion remained inert until the
+  virtual dispatch correction above; do not credit it with fixing self-occlusion.
+- Compact-core runtime comparison is pending; appearance is not yet accepted.
 - Indoor two-camera visual validation, additional shadow views and far impostor
   coverage remain open as listed in the original handover.

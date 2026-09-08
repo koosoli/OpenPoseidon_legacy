@@ -75,6 +75,26 @@ systems:
       - file: engine/Poseidon/World/Effects/SmokeWorldQuery.cpp
         symbol: SweepSphere
 
+  - id: RSYS-LOCAL-LIGHT-VISIBILITY
+    title: Local-light camera bases and visible vehicle bulbs
+    plan: docs/roadmap/HANDOVER-LIGHTING-SKY-20260908.md
+    status: PARTIAL
+    owner: null
+    audited: 2026-09-08
+    completeness: >-
+      Per-camera local-shadow lookup bases have a one-metre/non-finite diagnostic
+      guard. Screen flares now honor NoZBuf without disabling smoke depth tests;
+      the installed night comparison shows the previously hidden street-lamp flare.
+      Attached-light carrier dispatch and compact vehicle bulb cores are implemented
+      with tests; their installed visual comparison is still pending. Interior
+      two-camera acceptance and a measured larger local-shadow view budget remain
+      open. See decisions/LOCAL-LIGHT-GUARDS-20260908.md for evidence and limits.
+    production_call_sites:
+      - file: engine/WgpuRenderer/EngineWgpu.cpp
+        symbol: LocalShadowBasisMismatch
+      - file: engine/Poseidon/World/Scene/SceneDraw.cpp
+        symbol: HasVisibleBulb
+
   - id: RSYS-SHADOW-CASCADES
     title: Cascaded shadow maps
     plan: engine/WgpuRenderer/docs/cascaded-shadow-map-plan.md
