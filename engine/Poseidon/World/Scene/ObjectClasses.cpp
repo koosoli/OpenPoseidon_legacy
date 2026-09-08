@@ -371,6 +371,30 @@ void StreetLamp::CreateLight(Matrix4Par pos)
                     GLOB_SCENE->AddLight(_spill);
                 }
             }
+            // LGT-024 gauge. Every reach argument this session rested on Type()->_brightness
+            // and nobody had ever printed it. POSEIDON_LAMP_DIAG=1 prints, once per distinct
+            // value, what a lamp's numbers actually come out as -- core radius, start
+            // attenuation and the distance past which the shader drops the light entirely.
+            {
+                static const bool diag = std::getenv("POSEIDON_LAMP_DIAG") != nullptr;
+                if (diag)
+                {
+                    static float lastBrightness = -1.0f;
+                    if (std::fabs(Type()->_brightness - lastBrightness) > 1e-4f)
+                    {
+                        lastBrightness = Type()->_brightness;
+                        const float startAtten = 50.0f * radius;
+                        const float endScale = 10.0f / std::max(lampSet.radiusScale, 0.02f);
+                        LOG_INFO(Graphics,
+                                 "LGT-024 lamp: cfg brightness {:.4f} -> radius {:.4f}, startAtten {:.2f} m, cutoff "
+                                 "{:.1f} m; spill startAtten {:.2f} m, cutoff {:.1f} m",
+                                 Type()->_brightness, radius, startAtten, startAtten * endScale,
+                                 startAtten * lampSet.spillRadius,
+                                 startAtten * lampSet.spillRadius *
+                                     (10.0f / std::max(lampSet.radiusScale * lampSet.spillRadius, 0.02f)));
+                    }
+                }
+            }
             _lightGeneration = lampSet.generation;
             GLOB_SCENE->AddLight(_light);
             ++s_lampsAdded;
