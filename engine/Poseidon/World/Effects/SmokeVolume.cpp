@@ -350,12 +350,6 @@ void SmokeVolume::Integrate(SmokeParticle& particle, float deltaT)
     particle.velocity += acceleration * deltaT;
 }
 
-float SmokeVolume::sphereRadiusFor(const SmokeParticle& particle) const
-{
-    const float lf = std::clamp(particle.age / std::max(particle.lifetime, 1e-3f), 0.0f, 1.0f);
-    return std::max(Lerp(_params.startRadius, _params.endRadius, lf) * _params.collisionRadiusScale, 0.05f);
-}
-
 // ---------------------------------------------------------------------------
 // Disturbance
 // ---------------------------------------------------------------------------
@@ -548,7 +542,8 @@ void SmokeVolume::Collide(SmokeParticle& particle, Vector3Par previousPosition, 
             ++_diagHits;
 
             particle.planeNormal = step.normal;
-            particle.planeOffset = step.normal.DotProduct(step.position) + sphereRadius * 0.5f;
+            particle.planePadding = sphereRadius * 0.5f;
+            particle.planeOffset = step.normal.DotProduct(step.position) + particle.planePadding;
             particle.planeValid = true;
 
             const float distance = particle.planeNormal.DotProduct(particle.position) - particle.planeOffset;
@@ -629,7 +624,8 @@ void SmokeVolume::Collide(SmokeParticle& particle, Vector3Par previousPosition, 
 
     // Cache the contact as a half-space and place the particle just outside it.
     particle.planeNormal = hit.normal;
-    particle.planeOffset = hit.normal.DotProduct(hit.position) + sphereRadius * 0.5f;
+    particle.planePadding = sphereRadius * 0.5f;
+    particle.planeOffset = hit.normal.DotProduct(hit.position) + particle.planePadding;
     particle.planeValid = true;
 
     const float distance = particle.planeNormal.DotProduct(particle.position) - particle.planeOffset;
@@ -1055,6 +1051,34 @@ void SmokeVolume::Simulate(float deltaT, SimulationImportance prec)
     _lastSimulateUs = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - begin).count();
 }
 
+float SmokeParticleRenderRadius(const SmokeParticle& particle, const SmokeParams& params,
+                               const ISmokeWorldQuery& query)
+{
+    const float life = std::clamp(particle.age / std::max(particle.lifetime, 1e-3f), 0.0f, 1.0f);
+    const float authored = Lerp(params.startRadius, params.endRadius, life);
+    float radius = std::max((params.balloons ? params.balloonSize : authored) * particle.sizeJitter, 0.0f);
+    if (!params.contain || !params.collide)
+        return radius;
+    if (particle.roomId >= 0)
+    {
+        const float clearance = query.IndoorClearanceAt(particle.position, particle.roomId, radius);
+        radius = std::min(radius, std::max(clearance - 0.025f, 0.0f));
+    }
+    if (particle.planeValid)
+    {
+        // planeOffset includes the simulation's half-radius contact padding.
+        const float clearance = particle.planeNormal.DotProduct(particle.position) - particle.planeOffset +
+                                particle.planePadding;
+        radius = std::min(radius, std::max(clearance - 0.025f, 0.0f));
+    }
+    return radius;
+}
+
+float SmokeVolume::RenderRadius(const SmokeParticle& particle) const
+{
+    return SmokeParticleRenderRadius(particle, _params, GSmokeWorldQuery());
+}
+
 void SmokeVolume::Draw(int level, ClipFlags clipFlags, const FrameBase& frame)
 {
     const auto begin = std::chrono::steady_clock::now();
@@ -1156,7 +1180,6 @@ void SmokeVolume::Draw(int level, ClipFlags clipFlags, const FrameBase& frame)
     const Color ambientColour = sun->Ambient() * GEngine->GetAccomodateEye();
     const float nightFactor = sun->NightEffect();
     const Color tint(_params.red, _params.green, _params.blue, 1.0f);
-    const ISmokeWorldQuery& worldQuery = GSmokeWorldQuery();
 
     // Precompute each particle's transmittance to the sun. A coarse spatial hash
     // (cell = one typical puff) makes the neighbour march O(k) per particle.
@@ -1256,29 +1279,9 @@ void SmokeVolume::Draw(int level, ClipFlags clipFlags, const FrameBase& frame)
             fade = (1.0f - lifeFraction) / _params.fadeOut;
         }
 
-        float size = _params.balloons ? _params.balloonSize * particle.sizeJitter
-                                      : Lerp(_params.startRadius, _params.endRadius, lifeFraction) * particle.sizeJitter;
-        if (_params.contain && particle.roomId >= 0)
-        {
-            // Centre containment is not visual containment: a large soft
-            // billboard can overlap a ceiling while its centre remains well
-            // inside the room. Clamp every indoor puff to the cached voxel
-            // clearance, not only after a collision plane has been acquired.
-            const float clearance = worldQuery.IndoorClearanceAt(particle.position, particle.roomId, size);
-            size = std::min(size, std::max(clearance + 0.10f, 0.08f));
-        }
-        // A puff pressed against a wall is DRAWN no wider than its distance to
-        // that wall (plus a small bleed). Containment keeps the centre inside
-        // the room; this keeps the picture inside too -- a 5 m sprite whose
-        // centre is 1 m from a wall would otherwise paint 4 m of smoke through
-        // it however well the simulation behaved. The dense core is unaffected
-        // in open air (no plane, no clamp).
-        if (particle.planeValid && _params.contain)
-        {
-            const float toPlane = particle.planeNormal.DotProduct(particle.position) - particle.planeOffset;
-            const float allowed = std::max(toPlane + sphereRadiusFor(particle) * 0.5f, 0.0f) + 0.15f;
-            size = std::min(size, std::max(allowed, 0.08f));
-        }
+        const float size = RenderRadius(particle);
+        if (size < 0.05f)
+            continue;
 
         // A fixed amount of soot spread over a growing puff gets thinner. Without
         // this the plume keeps its birth opacity at every size and reads as a

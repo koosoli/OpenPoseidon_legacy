@@ -269,6 +269,7 @@ struct SmokeParticle
     float sweepTimer = 0.0f;    ///< seconds until the next sphere sweep
     Vector3 planeNormal{VZero}; ///< cached contact plane from the last sweep
     float planeOffset = 0.0f;   ///< plane is { p : dot(n, p) >= planeOffset }
+    float planePadding = 0.0f;  ///< padding when this contact was acquired, not the growing puff radius
     bool planeValid = false;
     float sizeJitter = 1.0f;
     float alphaJitter = 1.0f;
@@ -277,6 +278,10 @@ struct SmokeParticle
     float groundY = 0.0f;   ///< floor height under the particle, from the last clamp
     int roomId = -1;        ///< room id from BuildingInterior, -1 = outdoors / untracked
 };
+
+class ISmokeWorldQuery;
+float SmokeParticleRenderRadius(const SmokeParticle& particle, const SmokeParams& params,
+                               const ISmokeWorldQuery& query);
 
 class SmokeVolume : public Entity
 {
@@ -334,7 +339,11 @@ class SmokeVolume : public Entity
             {
                 continue;
             }
-            const float radius = (_params.startRadius + (_params.endRadius - _params.startRadius) * lf) * p.sizeJitter;
+            const float radius = RenderRadius(p);
+            // The volume injector has a 5 cm minimum radius. Do not inflate a
+            // clipped-away puff back through its contact surface there.
+            if (radius < 0.05f)
+                continue;
             Blob b{};
             b.x = p.position.X();
             b.y = p.position.Y();
@@ -400,7 +409,7 @@ class SmokeVolume : public Entity
     /// particles radially out of their way. Velocity is estimated from last
     /// frame's position; one frame of latency is invisible at plume scales.
     void ApplyDisturbance(float deltaT);
-    float sphereRadiusFor(const SmokeParticle& particle) const;
+    float RenderRadius(const SmokeParticle& particle) const;
     void UpdateBounds();
 
     // Disturbance scratch: previous positions for the velocity estimate, and
