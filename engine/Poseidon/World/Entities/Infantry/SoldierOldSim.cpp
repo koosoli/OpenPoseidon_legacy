@@ -929,7 +929,7 @@ void Man::Simulate(float deltaT, SimulationImportance prec)
             }
         }
 
-        if (change)
+        if (change && !GetHierachyParent())
         {
             float legDX = landDX;
             float legDZ = landDZ;
