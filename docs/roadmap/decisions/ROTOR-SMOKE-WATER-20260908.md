@@ -25,7 +25,10 @@ Base: `725ccc0c`. Foreign `Cargo.lock` is excluded and unchanged.
   [formula reference](https://tannerhelland.com/2012/09/18/convert-temperature-rgb-algorithm-code.html).
   Game/tests build passed; targeted light/decal/basis tests passed 359 assertions
   in 4 cases, including temperature endpoints, non-finite input and unchanged mode
-  default. Installation/UI verification awaits the owner's running game closing.
+  default. Installed as paired EXE/DLL 63264739 at 22:36 after the game lock became
+  free. The 20-second installed night capture temperature-build-smoke completed
+  normally, without a panic/renderer validation error. Interactive Kelvin/RGB
+  slider operation still needs visual verification; the capture uses default RGB.
 - Smoke self-shadow density is summed once per occupied cell, then sampled without
   repeatedly walking every neighbour. Unit tests compare to the previous sum.
   Empty-space sphere sweeps now reject cells with no overlapping object bounds
