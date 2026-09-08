@@ -21,6 +21,8 @@ Selective upstream review and the verified scene-preloader lifecycle port:
 Water/cloud filtering, remaining body alignment and visual acceptance gaps, and
 the owner's Waterline video reference:
 [WATER-CLOUD-FILTERING-20260908.md](decisions/WATER-CLOUD-FILTERING-20260908.md).
+Smoke wall/roof bounds, shared render-query caching and remaining indoor
+performance/visual limits: [SMOKE-CONTACT-20260908.md](decisions/SMOKE-CONTACT-20260908.md).
 
 | | |
 |---|---|

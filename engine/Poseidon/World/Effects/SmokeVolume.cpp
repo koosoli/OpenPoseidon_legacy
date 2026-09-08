@@ -233,6 +233,7 @@ void SmokeVolume::SpawnSmoke(Vector3Par position, Vector3Par velocity, float siz
 
 void SmokeVolume::Integrate(SmokeParticle& particle, float deltaT)
 {
+    particle.renderRadius = -1.0f;
     const ISmokeWorldQuery& query = GSmokeWorldQuery();
 
     // -- shelter ----------------------------------------------------------
@@ -1076,7 +1077,9 @@ float SmokeParticleRenderRadius(const SmokeParticle& particle, const SmokeParams
 
 float SmokeVolume::RenderRadius(const SmokeParticle& particle) const
 {
-    return SmokeParticleRenderRadius(particle, _params, GSmokeWorldQuery());
+    if (particle.renderRadius < 0.0f)
+        particle.renderRadius = SmokeParticleRenderRadius(particle, _params, GSmokeWorldQuery());
+    return particle.renderRadius;
 }
 
 void SmokeVolume::Draw(int level, ClipFlags clipFlags, const FrameBase& frame)

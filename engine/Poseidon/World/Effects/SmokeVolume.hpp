@@ -277,6 +277,7 @@ struct SmokeParticle
     float swayPhase = 0.0f; ///< balloon bob phase, so they do not move as one
     float groundY = 0.0f;   ///< floor height under the particle, from the last clamp
     int roomId = -1;        ///< room id from BuildingInterior, -1 = outdoors / untracked
+    mutable float renderRadius = -1.0f; ///< shared by sprite, shadow and volumetric collection
 };
 
 class ISmokeWorldQuery;
@@ -298,7 +299,12 @@ class SmokeVolume : public Entity
     /// Live edit. Existing particles keep their assigned lifetime but pick up
     /// every other change on their next tick, which is what makes the dev panel
     /// sliders useful rather than only applying to new smoke.
-    void SetParams(const SmokeParams& params) { _params = params; }
+    void SetParams(const SmokeParams& params)
+    {
+        _params = params;
+        for (SmokeParticle& particle : _particles)
+            particle.renderRadius = -1.0f;
+    }
 
     void SetEmitterPosition(Vector3Par position);
     Vector3 EmitterPosition() const { return _emitterPosition; }
