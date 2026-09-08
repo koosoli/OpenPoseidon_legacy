@@ -496,6 +496,7 @@ void Scene::DrawFlares()
         for (int i = 0; i < _aLights.Size(); i++)
         {
             Light* light = _aLights[i];
+            const bool wgpu = AppConfig::Instance().GetRenderBackend() == "wgpu";
             Vector3 dir = camPos - light->Position();
             if (dir * GetCamera()->Direction() > 0)
             {
@@ -530,12 +531,11 @@ void Scene::DrawFlares()
             //
             // The magnitude convention is unchanged: `toLight` is NOT normalised, so t is in
             // units of the camera-to-light distance and `1.1` is "10% past the light".
-            // Gated on the same switch as the rest of LGT-025, so POSEIDON_BULB_GLOW=0 is a
-            // true restore of what shipped -- reversed ray included -- and the two arms of
-            // the A/B differ by exactly this change and nothing else.
-            const Vector3 toLight = GBulbGlow().enabled ? Vector3(light->Position() - camPos) : dir;
+            // WGPU always needs this visibility check: its flare decal intentionally
+            // has no depth test. The legacy GL33 diagnostic switch is unchanged.
+            const Vector3 toLight = (wgpu || GBulbGlow().enabled) ? Vector3(light->Position() - camPos) : dir;
             float visLand = 1;
-            if (ENGINE_CONFIG.enableHWTL)
+            if (wgpu || ENGINE_CONFIG.enableHWTL)
             {
                 float t = GLandscape->IntersectWithGroundOrSea(nullptr, cPos, toLight, 0, 1.1);
                 visLand = t > 1;
@@ -551,7 +551,6 @@ void Scene::DrawFlares()
                 // core reads as a solar disc even at a low alpha. Keep it as a compact
                 // emitter marker while WGPU's physical point/spot contribution lights
                 // nearby surfaces. GL33 retains the original tuned sprite.
-                const bool wgpu = AppConfig::Instance().GetRenderBackend() == "wgpu";
                 // LGT-025. The paragraph above is why this sprite was shrunk to nothing on
                 // wgpu, and the shrinking is the owner's "es muss wirklich glowen": at 0.030
                 // the halo is 0.3% of the screen half-height, i.e. two pixels, and at an
@@ -598,17 +597,29 @@ void Scene::DrawFlares()
                         occPos = light->Position() + toCam * (floatMin(0.8f, len * 0.5f) / len);
                 }
                 float occ = GetOcclusions()->TestSphereWSpace(occPos, glow.enabled ? 0.2f : 0.4f);
-                if (wgpu && glow.enabled && light->AttachedOn())
+                if (wgpu)
                 {
-                    // The coarse depth buffer has no object identity. For attached bulbs,
-                    // query view geometry instead, excluding only their own carrier (and
-                    // the first-person camera carrier). FlareIntensity already rejects
-                    // the rear hemisphere; terrain visibility was checked above.
+                    // NoZBuf flares need source visibility for ALL local lights, not
+                    // just attached headlights. A coarse shifted sphere can miss a
+                    // wall or car covering a street lamp. Keep the attached-light
+                    // self exclusion, but do not let the glow style disable occlusion.
                     CollisionBuffer blockers;
                     Object* cameraCarrier = GWorld->GetCameraEffect() ? nullptr : GWorld->CameraOn();
                     GLandscape->ObjectCollision(blockers, cameraCarrier, light->AttachedOn(),
                                                 camPos, light->Position(), 0.0f, ObjIntersectView);
                     occ = blockers.Size() == 0 ? 1.0f : 0.0f;
+                    if (glowDiag)
+                    {
+                        static int samples = 0;
+                        if (samples++ < 32)
+                        {
+                            const Vector3 source = light->Position();
+                            Object* blocker = blockers.Size() ? blockers[0].object.GetRef() : nullptr;
+                            LOG_INFO(Graphics, "LGT-025 geometry: source ({:.2f},{:.2f},{:.2f}) blockers {} first {}",
+                                     source.X(), source.Y(), source.Z(), blockers.Size(),
+                                     blocker && blocker->GetShape() ? blocker->GetShape()->Name() : "none");
+                        }
+                    }
                 }
                 a *= occ;
                 // Still a hard ceiling, just a higher one: an alpha of 1 would paint the

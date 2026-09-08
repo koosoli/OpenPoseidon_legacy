@@ -50,3 +50,30 @@
 - Eight-layer core runtime comparison is pending; appearance is not yet accepted.
 - Indoor two-camera visual validation, additional shadow views and far impostor
   coverage remain open as listed in the original handover.
+
+## Street-lamp occlusion follow-up
+
+Owner reports lamp glow/cones through cars, hills and buildings. The NoZBuf
+flare restoration exposed an incomplete source-visibility contract: accurate
+view-geometry rays were only used for attached lights with glow enabled.
+Unattached street lamps still relied on a coarse sphere shifted toward the
+camera. WGPU terrain visibility also depended on the legacy enableHWTL flag,
+and disabling the glow styling restored the backwards terrain ray.
+
+WGPU now always traces terrain toward the source and tests view geometry for
+every eligible local flare, excluding only an attached carrier and the
+first-person camera carrier as before. Glow styling cannot disable visibility.
+GL33 policy is unchanged. The existing intensity/behind-camera/terrain gates
+bound the extra object queries; no additional GPU pass or shadow-map budget.
+The optional glow diagnostic logs up to 32 source/blocker samples.
+
+Private fixture `.tmp-bulb/occlusion.eden` holds an Ural between the camera and
+an existing Everon street lamp. Baseline `ad817127`, `truck-before.png`, visibly
+draws the lamp glow on the truck silhouette. A first fixture that attempted to
+spawn the abstract `StreetLamp` type crashed the baseline and was discarded;
+the working fixture uses an existing map lamp instead.
+
+Build and existing light/decal/shadow-basis tests pass (359 assertions, 4 cases).
+Fixed installed comparison pending. This changes source glare visibility, not
+surface illumination/shadow allocation or volumetric-light transport; those
+must not be claimed fixed by a source-ray change.
