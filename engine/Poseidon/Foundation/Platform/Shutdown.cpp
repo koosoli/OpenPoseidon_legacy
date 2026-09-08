@@ -1,4 +1,5 @@
 #include <Poseidon/Core/Config/EngineConfig.hpp>
+#include <Poseidon/Dev/Diag/PhysicsProbe.hpp>
 #include <Poseidon/Foundation/Logging/Logging.hpp>
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
 #include <Poseidon/Core/Config/Config.hpp>
@@ -126,6 +127,9 @@ void UnloadGameData(bool keepEngine)
     {
         GEngine->StopAll();
     }
+    // Probe pools otherwise release GPU meshes from static destructors after
+    // the renderer/uploader has already gone away.
+    Dev::ShutdownPhysicsProbes();
     if (GWorld)
     {
         delete GWorld, GWorld = nullptr;

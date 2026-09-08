@@ -37,13 +37,20 @@
   ground-placement used the seabed and an initially submerged body could emit
   a fictitious surface impact. Placement now uses the local water/ground maximum;
   the first immersion observation cannot count as an impact. A regression test
-  covers submerged initialization. The capture wrapper initially misreported
-  failure because PowerShell exposed a null ExitCode despite complete shutdown.
+  covers submerged initialization. Although the log said Shutdown complete,
+  retaining the process handle established an actual post-shutdown access
+  violation, not a successful exit. LLDB on the minidump traces it to the
+  static s_solidObjects destructor freeing a mesh through an already destroyed
+  WGPU uploader. Release probe pools before World/renderer teardown and replace
+  raw static mesh caches with resettable owning references. Remount can rebuild
+  the meshes rather than reusing freed pointers.
 - Full-suite readback exposed uninitialized model halfExtents and ProbeSample
   axis. Initialize both; capsule axis follows its actual local X orientation.
   Existing world-isolation/worker determinism tests then pass unchanged.
-- Installed Nogova light/heavy captures pending; private fixture
+- Installed final clean-exit Nogova light/heavy captures pending; private fixture
   `.tmp-bulb/probe-water.ps1` uses the actual Physics-tab auto-spawn route.
+  Important profile trap: Nogova's key is `noe_noe_wrp.cfg`, not `noe.cfg`.
+  The latter was ignored in earlier fixtures; verify Water look applied in logs.
 
 ## Limits
 

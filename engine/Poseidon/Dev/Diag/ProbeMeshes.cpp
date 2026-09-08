@@ -20,6 +20,8 @@ namespace
 // shadow reads as floating, and the shadow is half of what tells you it is
 // actually touching.
 constexpr int ProbeSpecial = IsColored;
+Ref<LODShapeWithShadow> s_boxMesh, s_sphereMesh, s_cylinderMesh;
+int s_appliedSpecial = -1;
 
 /// Builds one shape from flat-shaded quads and triangles. `indices` holds 3 or 4
 /// entries per face; `counts` says which.
@@ -77,7 +79,7 @@ LODShapeWithShadow* Build(const std::vector<Vector3>& positions, const std::vect
 
 LODShapeWithShadow* ProbeBoxMesh()
 {
-    static LODShapeWithShadow* mesh = []
+    if (!s_boxMesh) s_boxMesh = []
     {
         // 24 vertices, not 8: a shared corner would average three face normals and
         // give a cube soft, rounded-looking shading. Four own vertices per face
@@ -115,12 +117,12 @@ LODShapeWithShadow* ProbeBoxMesh()
         // Already clockwise from outside.
         return Build(positions, normals, indices, counts, false);
     }();
-    return mesh;
+    return s_boxMesh;
 }
 
 LODShapeWithShadow* ProbeSphereMesh()
 {
-    static LODShapeWithShadow* mesh = []
+    if (!s_sphereMesh) s_sphereMesh = []
     {
         // A UV sphere. 16x8 is round enough at the sizes a probe is looked at and
         // cheap enough that a hundred of them cost nothing.
@@ -162,12 +164,12 @@ LODShapeWithShadow* ProbeSphereMesh()
         // Same convention as the box.
         return Build(positions, normals, indices, counts, false);
     }();
-    return mesh;
+    return s_sphereMesh;
 }
 
 LODShapeWithShadow* ProbeCylinderMesh()
 {
-    static LODShapeWithShadow* mesh = []
+    if (!s_cylinderMesh) s_cylinderMesh = []
     {
         constexpr int Sides = 16;
         std::vector<Vector3> positions;
@@ -228,7 +230,15 @@ LODShapeWithShadow* ProbeCylinderMesh()
         // one shape the owner could see through.
         return Build(positions, normals, indices, counts, true);
     }();
-    return mesh;
+    return s_cylinderMesh;
+}
+
+void ReleaseProbeMeshes()
+{
+    s_boxMesh.Free();
+    s_sphereMesh.Free();
+    s_cylinderMesh.Free();
+    s_appliedSpecial = -1;
 }
 
 void SetProbeMeshSelfIllum(bool unlit)
@@ -238,12 +248,11 @@ void SetProbeMeshSelfIllum(bool unlit)
     // built later picks up ProbeSpecial and would silently miss the flag otherwise.
     LODShapeWithShadow* meshes[] = {ProbeBoxMesh(), ProbeSphereMesh(), ProbeCylinderMesh()};
     const int special = unlit ? (ProbeSpecial | IsLight) : ProbeSpecial;
-    static int applied = -1;
-    if (applied == special)
+    if (s_appliedSpecial == special)
     {
         return; // nothing to do, and SetSpecial walks every face
     }
-    applied = special;
+    s_appliedSpecial = special;
     for (LODShapeWithShadow* lShape : meshes)
     {
         if (lShape == nullptr)

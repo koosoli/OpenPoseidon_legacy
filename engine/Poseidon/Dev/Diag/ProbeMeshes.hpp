@@ -31,5 +31,6 @@ LODShapeWithShadow* ProbeCylinderMesh();
 /// check is judging. Applies to every already-built mesh, so it takes effect on the
 /// next frame with no respawn.
 void SetProbeMeshSelfIllum(bool unlit);
+void ReleaseProbeMeshes();
 
 } // namespace Poseidon::Dev

@@ -591,6 +591,18 @@ void ClearPhysicsProbes()
     s_modelProbes.clear();
 }
 
+void ShutdownPhysicsProbes()
+{
+    ClearPhysicsProbes();
+    s_solidObjects.clear();
+    s_lineObjects.clear();
+    s_lineShapes.clear();
+    s_probeLights.clear();
+    s_poolUsed = s_solidUsed = s_probeLightsUsed = 0;
+    ReleaseProbeMeshes();
+    if (auto* world = Physics::GetPhysicsWorld()) world->Destroy();
+}
+
 void UpdatePhysicsProbeWind()
 {
     Physics::PhysicsWorld* world = Physics::GetPhysicsWorld();
