@@ -1,7 +1,7 @@
 """Build the original, redistributable Showcase Lab addon (stdlib only).
 
 No retail assets are copied. Output is deterministic: authored P3DM boxes,
-uncompressed TGA material swatches and an uncompressed PBO container.
+uncompressed PAA material swatches and an uncompressed PBO container.
 """
 import argparse
 import math
@@ -46,8 +46,8 @@ def box_lod(size, texture='', material='', resolution=1.0, geometry=False):
 def model(size, texture, material):
     lods = [box_lod(size, texture, material),
             box_lod(size, resolution=1e13, geometry=True),
-            box_lod(size, resolution=4e13, geometry=True),
-            box_lod(size, resolution=5e13, geometry=True)]
+            box_lod(size, resolution=6e15, geometry=True),
+            box_lod(size, resolution=7e15, geometry=True)]
     return b'MLOD' + struct.pack('<II', 257, len(lods)) + b''.join(lods)
 
 
@@ -69,7 +69,7 @@ def tga(normal=False):
 
 
 def material(normal, specular):
-    normal_path = r'showcase_lab\ribs_nohq.tga' if normal else '#(argb,8,8,3)color(0.5,0.5,1,1,NOHQ)'
+    normal_path = r'showcase_lab\ribs_nohq.paa' if normal else '#(argb,8,8,3)color(0.5,0.5,1,1,NOHQ)'
     return f'''ambient[]={{1,1,1,1}};
 diffuse[]={{1,1,1,1}};
 forcedDiffuse[]={{0,0,0,0}};
@@ -83,8 +83,25 @@ class Stage2 {{texture="#(argb,8,8,3)color(0,{specular},0.7,1,SMDI)"; uvSource="
 '''.encode('ascii')
 
 
+def paa(normal=False):
+    pixels = tga(normal)[18:]
+    n = 128
+    data = struct.pack('<HH', 0x8888, 0)
+    while n:
+        data += struct.pack('<HH', n, n) + len(pixels).to_bytes(3, 'little') + pixels
+        smaller = bytearray()
+        for y in range(n // 2):
+            for x in range(n // 2):
+                for c in range(4):
+                    smaller.append(sum(pixels[((y*2+dy)*n+x*2+dx)*4+c]
+                                       for dy in range(2) for dx in range(2)) // 4)
+        pixels = bytes(smaller)
+        n //= 2
+    return data + bytes(4)
+
+
 def build():
-    files = {'grid_co.tga': tga(), 'ribs_nohq.tga': tga(True)}
+    files = {'grid_co.paa': paa(), 'ribs_nohq.paa': paa(True)}
     classes = []
     for name, size, normal, specular in [
         ('PanelFlat', (2, 3, .15), False, .05),
@@ -95,7 +112,7 @@ def build():
         ('Plinth', (1, .4, 1), False, .05),
     ]:
         files[name + '.rvmat'] = material(normal, specular)
-        files[name + '.p3d'] = model(size, r'showcase_lab\grid_co.tga', 'showcase_lab\\' + name + '.rvmat')
+        files[name + '.p3d'] = model(size, r'showcase_lab\grid_co.paa', 'showcase_lab\\' + name + '.rvmat')
         classes.append(f'class Lab{name}: House {{scope=2; displayName="Lab {name}"; model="\\showcase_lab\\{name}.p3d"; armor=10000;}};')
     files['config.cpp'] = ('''class CfgPatches {class ShowcaseLab {units[]={"LabPanelFlat","LabPanelNormal","LabPanelGloss","LabWall","LabRoof","LabPlinth"}; weapons[]={}; requiredVersion=1.96; requiredAddons[]={};};};
 class CfgVehicles {class House;

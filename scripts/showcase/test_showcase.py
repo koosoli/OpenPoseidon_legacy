@@ -45,8 +45,9 @@ class ShowcaseAssets(unittest.TestCase):
         self.assertEqual(len(pixels), 128 * 128 * 4)
         self.assertGreater(len(set(pixels[1::4])), 8)
         self.assertGreater(len(set(pixels[3::4])), 8)
-        self.assertIn(b'ribs_nohq.tga', lab.material(True, .05))
-        self.assertNotIn(b'ribs_nohq.tga', lab.material(False, .05))
+        self.assertIn(b'ribs_nohq.paa', lab.material(True, .05))
+        self.assertNotIn(b'ribs_nohq.paa', lab.material(False, .05))
+        self.assertEqual(lab.paa()[:4], struct.pack('<HH', 0x8888, 0))
 
 
 if __name__ == '__main__':

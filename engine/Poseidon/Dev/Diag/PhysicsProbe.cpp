@@ -674,6 +674,7 @@ bool PhysicsShowcaseCommand(const char* command)
         ClearPhysicsProbes(); // A deliberate four-light budget, not 42 shadowed lamps.
         s_settings.shape = 0;
         s_settings.emitLight = true;
+        s_settings.placeOnGround = false;
         s_settings.hotkeys = false; // Mission actions enforce the four-light budget.
         s_settings.lightUsesProbeColor = false;
         s_settings.lightBrightness = 0.12f;

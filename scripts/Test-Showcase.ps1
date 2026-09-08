@@ -40,7 +40,7 @@ try {
  }
  Start-Sleep -Seconds 18
  Send @{cmd='eval';code='typeOf labNormal'}
- Send @{cmd='exec';code='hint ""; labCamera = "camera" camCreate [9498,3486,9]; labCamera cameraEffect ["internal","back"]; labCamera camSetTarget [9502,3507,0]; labCamera camCommit 0'}
+ Send @{cmd='exec';code='hint ""; showCinemaBorder false; labCamera = "camera" camCreate [9483,3488,9]; labCamera cameraEffect ["internal","back"]; labCamera camSetTarget [9503,3507,0]; labCamera camCommit 0'}
  Start-Sleep -Seconds 4
  Send @{cmd='screenshot';path=(Join-Path $out 'campus.png')}
  Send @{cmd='exec';code='[player,player,labReset] exec "action.sqs"'}

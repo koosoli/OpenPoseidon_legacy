@@ -7,12 +7,20 @@ labLeft = "LabWall" createVehicle [9508,3504,0]
 labRight = "LabWall" createVehicle [9522,3504,0]
 labRoof = "LabRoof" createVehicle [9515,3504,4.5]
 labRoof setPos [9515,3504,4.5]
+labFlat setPos [9510,3510,1.5]
+labNormal setPos [9515,3510,1.5]
+labGloss setPos [9520,3510,1.5]
+labLeft setPos [9508,3504,2.25]
+labRight setPos [9522,3504,2.25]
 labJeep = "Jeep" createVehicle [9480,3525,0]
 labTruck = "Ural" createVehicle [9488,3525,0]
 labHeli = "UH60" createVehicle [9460,3525,0]
 labJeep setDir 180
 labTruck setDir 180
 labHeli setDir 180
+labJeep setPos [9480,3525,0]
+labTruck setPos [9488,3525,0]
+labHeli setPos [9460,3525,0]
 player addMagazine "M16"
 player addMagazine "M16"
 player addMagazine "M16"
