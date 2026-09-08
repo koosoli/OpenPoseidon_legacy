@@ -11,6 +11,11 @@
   Terrain visibility and the reflector's front-hemisphere/intensity gates remain.
   Non-attached lights, GL33 and the disabled bulb-glow path are unchanged.
 - No larger marker, increased light intensity, shadow budget or new GPU pass.
+- A second visibility blocker was found in EngineWgpu::DrawDecal: it ignored
+  NoZBuf and tested screen flares at synthetic far-plane depth, also applying
+  soft-particle fading. Both decal variants now honor NoZBuf. Ordinary smoke
+  retains depth testing; the unrotated path retains its optional soft fade.
+  Six policy assertions pin this separation; no shader or ABI change is needed.
 
 ## Evidence and remaining work
 

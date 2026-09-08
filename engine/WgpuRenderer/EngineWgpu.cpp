@@ -29,6 +29,7 @@
 #include <Poseidon/Graphics/Rendering/Primitives/Poly.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/Graphics/Rendering/RenderFlags.hpp>
+#include <Poseidon/Graphics/Rendering/DecalDepth.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Material.hpp> // TexMaterial::Combine (GPU-driven material extract)
 #include <Poseidon/Asset/Formats/Material/EmatMaterialAdapter.hpp>
 #include <Poseidon/Asset/Formats/Material/MaterialChannels.hpp>
@@ -12485,16 +12486,15 @@ void EngineWgpu::DrawDecal(Vector3Par screen, float rhw, float sizeX, float size
     // and must never WRITE (so it does not punch a hole in whatever is drawn behind
     // it later in the alpha pass). That is a fixed policy, not a per-spec choice.
     //
-    // SMK-037: and when the soft-particle lever is on, WGR_DEPTH_TEST_SOFT -- the same
-    // depth policy exactly, plus the fragment-stage fade that turns the razor edge where
-    // this quad's plane crosses the ground or a wall into a soft intersection. A decal is
-    // a sprite standing in for a volume, which is precisely the case the fade is for, so
-    // every decal gets it: the puffs, and the light halos and flares that share this call.
-    // Safe to send unconditionally -- a renderer with the path off treats it as
-    // WGR_DEPTH_TEST -- but gated anyway so the counter means what it says.
+    // Flares are the exception: Scene::DrawFlare explicitly sets NoZBuf after
+    // checking source visibility. Its synthetic z=1 is not a world depth, and
+    // testing it (or soft-fading it) hides the flare behind every opaque surface.
     SmokeSoftParticles& soft = GSmokeSoftParticles();
+    const auto policy = render::SelectDecalDepth(specFlags, soft.enabled);
     WgrDepthMode decalDepth = WGR_DEPTH_TEST;
-    if (soft.enabled)
+    if (policy == render::DecalDepth::None)
+        decalDepth = WGR_DEPTH_NONE;
+    else if (policy == render::DecalDepth::Soft)
     {
         decalDepth = WGR_DEPTH_TEST_SOFT;
         ++soft.batches;
@@ -12570,7 +12570,9 @@ void EngineWgpu::DrawDecalRotated(Vector3Par screen, float rhw, float sizeX, flo
     const WgrVertex2D v3 = corner(-sizeY, +sizeX, 0.0f, 1.0f);
     const WgrVertex2D quad[6] = {v0, v1, v2, v0, v2, v3};
 
-    AppendTriangles(ResolveTexture(mip), BlendForSpec(specFlags), SamplerForSpec(specFlags), WGR_DEPTH_TEST, quad);
+    const WgrDepthMode decalDepth = render::SelectDecalDepth(specFlags, false) == render::DecalDepth::None
+                                       ? WGR_DEPTH_NONE : WGR_DEPTH_TEST;
+    AppendTriangles(ResolveTexture(mip), BlendForSpec(specFlags), SamplerForSpec(specFlags), decalDepth, quad);
 }
 
 // 3D line primitive: Object::DrawLines projects the shape, then submits every edge

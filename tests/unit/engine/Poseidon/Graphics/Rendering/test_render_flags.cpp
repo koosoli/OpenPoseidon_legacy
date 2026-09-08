@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <Poseidon/Core/Types.hpp>
 #include <Poseidon/Graphics/Rendering/RenderFlags.hpp>
+#include <Poseidon/Graphics/Rendering/DecalDepth.hpp>
 #include <cstdint>
 
 // Phase 1 starts by mirroring each legacy bit into one of three typed
@@ -15,6 +16,18 @@
 // before it can confuse the bridge code in phase 1.2.
 
 using namespace Poseidon::render;
+
+TEST_CASE("Screen flares bypass particle depth without disabling smoke depth", "[Graphics][DecalDepth]")
+{
+    const int flare = NoZBuf | IsLight | IsAlphaFog;
+    const int smoke = NoZWrite | IsAlpha | IsAlphaFog;
+    REQUIRE(SelectDecalDepth(flare, true) == DecalDepth::None);
+    REQUIRE(SelectDecalDepth(flare, false) == DecalDepth::None);
+    REQUIRE(SelectDecalDepth(smoke, true) == DecalDepth::Soft);
+    REQUIRE(SelectDecalDepth(smoke, false) == DecalDepth::Test);
+    REQUIRE(SelectDecalDepth(NoZBuf | NoZWrite, true) == DecalDepth::None);
+    REQUIRE(SelectDecalDepth(0, false) == DecalDepth::Test);
+}
 
 namespace
 {
