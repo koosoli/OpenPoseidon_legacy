@@ -32,10 +32,10 @@
   versus sinking equal-radius bodies, dry land, 100 m/s entry of a 0.01 kg
   sphere, a 600 kg cubic-metre box settling to 60 percent immersion independent
   of the sphere-radius slider, and horizontal shore entry.
-- First installed high-wave test completed normally and reported light bodies
+- First installed test reached the screenshot and reported light bodies
   rising from depth and riding the CPU wave surface. It exposed two edge cases:
-  ground-placement used the seabed and an initially submerged body could emit
-  a fictitious surface impact. Placement now uses the local water/ground maximum;
+  primitive ground-placement used the seabed and an initially submerged body could emit
+  a fictitious surface impact. Primitive placement now uses the local water/ground maximum;
   the first immersion observation cannot count as an impact. A regression test
   covers submerged initialization. Although the log said Shutdown complete,
   retaining the process handle established an actual post-shutdown access
@@ -47,10 +47,25 @@
 - Full-suite readback exposed uninitialized model halfExtents and ProbeSample
   axis. Initialize both; capsule axis follows its actual local X orientation.
   Existing world-isolation/worker determinism tests then pass unchanged.
-- Installed final clean-exit Nogova light/heavy captures pending; private fixture
-  `.tmp-bulb/probe-water.ps1` uses the actual Physics-tab auto-spawn route.
+- Installed `169059df`: light/heavy Nogova captures both exit with process code
+  0, including static teardown. Private `.tmp-bulb/probe-water.ps1` uses the
+  actual Physics-tab auto-spawn route, radius 0.5 m, two bodies (placed/thrown),
+  camera (7900,4500,10), azimuth 0, elevation -65, 25-second capture.
+  At 100 kg, final centres remain around y=3.5 at the water surface. At 1000 kg,
+  both settle at y=-14.53 above terrain -15.03, radius clearance 0.50 m.
+  The heavy thrown body's entry reports speed 8.81 m/s and strength 4.5.
+  Captures `probe-water-light-verified` and `probe-water-heavy-verified` show
+  the large near-surface silhouettes versus the smaller bodies on the seabed.
+  This is a dynamics check, not acceptance of probe material shading or exact
+  crest alignment. No frame-time speedup is claimed.
+- `probe-water-splash`, 10.3-second capture, shows the white entry spray,
+  droplets and disturbed water around the impacting heavy body; process exit 0.
+  The 10.0-second capture was one simulation tick before entry and does not
+  establish absence of the effect. Spray beauty is not owner-accepted.
   Important profile trap: Nogova's key is `noe_noe_wrp.cfg`, not `noe.cfg`.
   The latter was ignored in earlier fixtures; verify Water look applied in logs.
+  Final comparison confirms amplitude 0.200 in both logs. Earlier runs that
+  attempted to tune `noe.cfg` actually used the default amplitude 1.000.
 
 ## Limits
 
