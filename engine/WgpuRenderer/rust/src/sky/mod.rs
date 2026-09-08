@@ -17,6 +17,7 @@ use crate::ffi::WgrSky;
 // CPU reference port of the atmosphere math, for objective colour unit tests.
 #[cfg(test)]
 mod reference;
+pub mod milkyway;
 pub mod starcat;
 
 // Guards every sky.wgsl edit: parse + validate the module offline so a WGSL error
@@ -1322,6 +1323,7 @@ impl Sky {
                 cloud_sampler_entry,
                 star_buf_entry(10),
                 star_buf_entry(11),
+                tex_entry(12),
             ],
         });
 
@@ -1345,6 +1347,32 @@ impl Sky {
             contents: bytemuck::cast_slice(&star_cat.stars),
             usage: wgpu::BufferUsages::STORAGE,
         });
+        // SKY-005: the Milky Way, as the NASA SVS Deep Star Maps 2020 band. Compiled in for the
+        // same reason the catalogue is -- 4 MB that must never go missing -- and decoded by
+        // `milkyway::load`, which is a header read and a memcpy because tools/sky/make_milkyway.py
+        // did the real work offline. The renderer deliberately has no image decoder.
+        let mw = milkyway::load();
+        eprintln!("[wgr] sky: milky way texture {} ({}x{})", mw.source, mw.width, mw.height);
+        let mw_tex = device.create_texture_with_data(
+            queue,
+            &wgpu::TextureDescriptor {
+                label: Some("wgr_sky_milkyway"),
+                size: wgpu::Extent3d {
+                    width: mw.width,
+                    height: mw.height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba16Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            },
+            wgpu::util::TextureDataOrder::LayerMajor,
+            &mw.texels,
+        );
+        let mw_view = mw_tex.create_view(&wgpu::TextureViewDescriptor::default());
         // Only the main sky pass draws into the (MSAA) scene target; the transmittance +
         // multiscatter LUTs are single-sample offscreen renders, so each pipeline takes its
         // own sample count.
@@ -1634,6 +1662,10 @@ impl Sky {
                 wgpu::BindGroupEntry {
                     binding: 11,
                     resource: star_list_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 12,
+                    resource: wgpu::BindingResource::TextureView(&mw_view),
                 },
             ],
         });

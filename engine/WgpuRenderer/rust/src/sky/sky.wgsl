@@ -826,6 +826,11 @@ const STAR_GAIN: f32 = 0.26;
 // Peak surface radiance of the Milky Way band, in the same units. It is a DIFFUSE glow, so it has
 // to sit well below a star's peak or it reads as fog.
 const MILKY_WAY_GAIN: f32 = 0.075;
+// The texture carries real relative radiance, so this is one exposure number rather than the
+// stack of shape constants the procedural band needs. Set so the band reads at roughly the
+// brightness the procedural one did at the same star gain, which is what the owner has already
+// seen and accepted; it is a taste knob and WGR_MILKYWAY scales it.
+const MILKY_WAY_TEX_GAIN: f32 = 0.85;
 
 // North galactic pole and galactic centre as unit vectors in equatorial J2000 coordinates
 // (RA 12h51.4m / Dec +27.13, and RA 17h45.6m / Dec -28.94). These place the band where it really
@@ -843,6 +848,12 @@ struct StarGpu {
 
 @group(0) @binding(10) var<storage, read> star_cells: array<u32>;
 @group(0) @binding(11) var<storage, read> star_list: array<StarGpu>;
+// SKY-005: the Milky Way band. Equirectangular in the EQUATORIAL frame -- the same frame
+// star_list uses -- so it needs no separate rotation: whatever to_celestial() does to the stars
+// happens to the band too, and the two can never drift apart. Sampled with cloud_samp because
+// that one REPEATS in u, and an equirectangular map wraps at RA 0h; a clamping sampler would
+// leave a visible seam down the sky there.
+@group(0) @binding(12) var milkyway_tex: texture_2d<f32>;
 
 // Angular size of one pixel, radians. Written at the top of each fragment entry point -- i.e. in
 // UNIFORM control flow, which is where a derivative is allowed. star_field is called from inside
@@ -969,10 +980,31 @@ fn mw_noise(p: vec3<f32>) -> f32 {
 // broken up with noise, and cut by a dark rift along the mid-plane where the dust really is.
 //
 // `dir_eq` is already in the equatorial frame, i.e. it has been through to_celestial.
+// SKY-005. The band is a PHOTOGRAPH now (NASA SVS Deep Star Maps 2020, Gaia DR2) rather than
+// the procedural arc below, which stays as the fallback for a build whose texture failed to
+// load -- the loader reports which one you have.
+//
+// Its point sources were stripped offline (tools/sky/make_milkyway.py): our bright stars come
+// from the catalogue as real discs, and keeping the map's would draw every one of them twice,
+// once sharp and once as a blurry blob underneath in slightly the wrong place. What is left is
+// the diffuse glow, which is the one thing a point catalogue cannot produce.
 fn milky_way(dir_eq: vec3<f32>) -> vec3<f32> {
     let gain = max(sky.cirrus.w, 0.0);
     if (gain <= 0.0) {
         return vec3<f32>(0.0);
+    }
+    let dims = textureDimensions(milkyway_tex);
+    if (dims.x > 4u) {
+        // Equatorial spherical coordinates in the frame StarGpu documents: +z is the north
+        // celestial pole, +x is RA 0h. Row 0 of the map is declination +90, matching the
+        // converter's header.
+        let ra = atan2(dir_eq.y, dir_eq.x);
+        let dec = asin(clamp(dir_eq.z, -1.0, 1.0));
+        let uv = vec2<f32>(fract(ra / (2.0 * PI)), 0.5 - dec / PI);
+        // Level 0 explicitly: this is called from inside a branch, where a derivative-taking
+        // sample is undefined, and there is only one level anyway.
+        let band = textureSampleLevel(milkyway_tex, cloud_samp, uv, 0.0).rgb;
+        return band * (MILKY_WAY_TEX_GAIN * gain);
     }
     // Galactic latitude (0 = the plane) and longitude (0 = the centre).
     let sb = clamp(dot(dir_eq, NGP_EQ), -1.0, 1.0);
