@@ -1450,11 +1450,10 @@ fn evaluate_water_surface(in: VsOut) -> WaterSurfaceState {
     let slope_fine = vec2<f32>(h_l_f - h_r_f, h_d_f - h_u_f) * 8.5;
     let slope_wide = vec2<f32>(h_l_w - h_r_w, h_d_w - h_u_w) * 3.2;
     let combined_slope = slope_fine + slope_wide;
-    let interaction_normal = normalize(vec3<f32>(combined_slope.x, 1.0, combined_slope.y));
-
-    let interaction_mag = abs(h_l_f) + abs(h_r_f) + abs(h_d_f) + abs(h_u_f) + abs(interaction_texel.r);
-    let interaction_weight = smoothstep(0.00005, 0.004, interaction_mag);
-    n = normalize(mix(n, interaction_normal, interaction_weight * 0.95));
+    // Add height gradients, not normals: residual interaction height must never
+    // replace the FFT/shore waves with an almost-flat ripple-only surface.
+    // Multiplying by n.y adds slopes without dividing by a near-horizontal normal.
+    n = normalize(n + vec3<f32>(combined_slope.x, 0.0, combined_slope.y) * n.y * 0.95);
     
     let flow_speed = max(wp.flow_direction_speed.z, 0.0);
     let flow_dir = normalize(wp.flow_direction_speed.xy + vec2<f32>(1e-4, 0.0)) * flow_speed;

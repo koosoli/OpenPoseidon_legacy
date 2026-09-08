@@ -169,6 +169,11 @@ systems:
       Cloud reconstruction/history masking, visual acceptance gaps and the
       Waterline reference assessment are recorded in
       decisions/WATER-CLOUD-FILTERING-20260908.md.
+      Bullet/ripple calm patches: interaction normals now add height gradients to
+      the ocean normal instead of replacing up to 95 percent of it based on
+      residual height. Zero ripple slope preserves FFT/shore waves, with no added
+      samples or passes. All 17 water unit/composition tests and the game build
+      pass; installed runtime evidence is in decisions/WATER-RIPPLE-20260908.md.
       Rotor/smoke/lamp changes and
       measured evidence are in decisions/ROTOR-SMOKE-WATER-20260908.md.
 

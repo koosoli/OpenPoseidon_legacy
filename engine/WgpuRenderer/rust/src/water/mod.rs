@@ -1521,6 +1521,34 @@ fn build_grid(device: &wgpu::Device) -> (wgpu::Buffer, wgpu::Buffer, u32) {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn fading_ripples_preserve_underlying_ocean_slopes() {
+        use glam::{Vec2, Vec3};
+
+        let shader = include_str!("water.wgsl");
+        assert!(shader.contains("n = normalize(n + vec3<f32>(combined_slope.x, 0.0, combined_slope.y) * n.y * 0.95)"));
+        assert!(!shader.contains("interaction_weight"));
+        let combine = |n: Vec3, slope: Vec2| {
+            (n + Vec3::new(slope.x, 0.0, slope.y) * n.y * 0.95).normalize()
+        };
+        for ocean in [Vec3::Y, Vec3::new(0.4, 1.0, -0.7).normalize(),
+                      Vec3::new(-1.0, 0.001, 0.2).normalize()] {
+            // A flat residual offset can outlive visible ripples. Its absolute
+            // height is irrelevant: equal neighbours always have zero slope.
+            for height in [0.0_f32, 0.00001, 0.001, 0.1, -0.1] {
+                let flat_slope = Vec2::splat(height - height) * (8.5 + 3.2);
+                assert!(combine(ocean, flat_slope).abs_diff_eq(ocean, 1e-6));
+            }
+            let ripple = Vec2::new(0.3, -0.2);
+            let active = combine(ocean, ripple);
+            assert!(active.is_finite());
+            assert!(active.abs_diff_eq(
+                Vec3::new(ocean.x / ocean.y + ripple.x * 0.95, 1.0,
+                          ocean.z / ocean.y + ripple.y * 0.95).normalize(), 1e-6));
+            assert!(combine(ocean, ripple * 1e-7).abs_diff_eq(ocean, 1e-6));
+        }
+    }
+
+    #[test]
     fn shoreline_geometry_uses_world_continuous_height_field_inputs() {
         let shader = include_str!("water.wgsl");
         assert!(shader.contains("let has_seabed = seabed_contains(base_xz)"));
