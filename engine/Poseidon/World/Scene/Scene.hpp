@@ -198,6 +198,11 @@ class Scene
     float _tacticalVisibility;                    // AI sensors
     float _rainRange;                             // display boundaries main control
     float _fogMaxRange, _fogMinRange;             // display boundaries
+    // FAR-001: the view-distance-derived display fog range, kept alongside the
+    // possibly-overridden one so the far-plane policy has a stable input.
+    float _baseFogMaxRange{0.0f};
+    // FAR-001: altitude-derived display fog range; 0 means no override.
+    float _aerialFogMaxRange{0.0f};
     float _shadowFogMaxRange, _shadowFogMinRange; // display boundaries
 
     mutable float _lodInvWidth;
@@ -349,6 +354,28 @@ class Scene
 
     float GetFogMaxRange() const { return _fogMaxRange; }
     float GetFogMinRange() const { return _fogMinRange; }
+
+    /// FAR-001. The display fog range the view-distance slider alone implies --
+    /// i.e. what `GetFogMaxRange()` returned before the aerial override existed,
+    /// and what it still returns at ground level.
+    ///
+    /// The far-plane policy needs the BASE value, not the current one: it feeds
+    /// its own previous answer back in otherwise, and a range that is used to
+    /// compute the next range ratchets upwards frame by frame until it hits a
+    /// clamp. Anything asking "how far does the player's setting see" wants this;
+    /// anything shading a pixel wants `GetFogMaxRange()`.
+    float GetBaseFogMaxRange() const { return _baseFogMaxRange; }
+
+    /// FAR-001. Override the display fog range with an altitude-derived one, or
+    /// pass 0 to release the override and fall back to the view-distance-derived
+    /// value.
+    ///
+    /// Only ever RAISES the range (`ResetFog` ignores a value below the base), so
+    /// this cannot be used to shorten a player's view. Rebuilding the fog tables
+    /// is not free, so a call that does not move the range by more than a metre
+    /// is dropped -- which also means a ground-level frame, where the argument is
+    /// a steady 0, never rebuilds anything.
+    void SetAerialFogMaxRange(float range);
     float GetShadowFogMaxRange() const { return _shadowFogMaxRange; }
     float GetShadowFogMinRange() const { return _shadowFogMinRange; }
 

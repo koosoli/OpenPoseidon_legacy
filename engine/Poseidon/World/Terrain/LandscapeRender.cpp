@@ -8,6 +8,7 @@
 
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
+#include <Poseidon/World/Scene/Camera/AerialRange.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/Graphics/Core/TLVertex.hpp>
 #include <Poseidon/World/World.hpp>
@@ -330,14 +331,46 @@ const int WaterFlags = SpecularTexture;
 
 #define SEAMS 1
 
-Ref<LandSegment> Landscape::GenerateSegment(const LandBegEnd& rect, bool deferGPU)
+Ref<LandSegment> Landscape::GenerateSegment(const LandBegEnd& rect, bool deferGPU, int lodLevel)
 {
 #if LOG_SEG
     LOG_DEBUG(World, "GenerateSegment {},{}", rect.xBeg, rect.zBeg);
 #endif
     LandSegment* seg = new LandSegment;
-    GenerateSegmentInto(seg, rect, deferGPU);
+    GenerateSegmentInto(seg, rect, deferGPU, lodLevel);
     return seg;
+}
+
+void Landscape::SetCoarseRing(float camX, float camZ, float radius, int lod)
+{
+    _coarseRingX = camX;
+    _coarseRingZ = camZ;
+    _coarseRingRadius = (lod > 0 && radius > 0.0f) ? radius : 0.0f;
+    _coarseRingLod = (_coarseRingRadius > 0.0f) ? lod : 0;
+}
+
+int Landscape::RequiredSegmentLod(int xBeg, int zBeg) const
+{
+    if (_coarseRingRadius <= 0.0f)
+    {
+        return 0;
+    }
+
+    // Distance to the segment's FARTHEST corner, not its centre. A segment that
+    // straddles the ring must come out LOD 0, because a coarse segment sharing an
+    // edge with the fine interior is where a visible crack would be; pushing the
+    // test out to the far corner keeps the whole boundary layer fine and moves
+    // the seam entirely into the hazed region.
+    const float segWorld = LandSegmentSize * _landGrid;
+    const float x0 = xBeg * _landGrid;
+    const float z0 = zBeg * _landGrid;
+    const float dx = floatMax(fabs(x0 - _coarseRingX), fabs(x0 + segWorld - _coarseRingX));
+    const float dz = floatMax(fabs(z0 - _coarseRingZ), fabs(z0 + segWorld - _coarseRingZ));
+    if (dx * dx + dz * dz <= _coarseRingRadius * _coarseRingRadius)
+    {
+        return 0;
+    }
+    return _coarseRingLod;
 }
 
 void Landscape::GenerateSegmentInto(LandSegment* seg, const LandBegEnd& rect, bool deferGPU, int lodLevel)
@@ -1187,7 +1220,38 @@ void Landscape::DrawWater(const LandBegEnd& bigRect, Scene& scene)
     // segment _wTable meshes below. GL33 has no water renderer and falls through.
     if (IWaterRenderer* water = GEngine->GetWaterRenderer())
     {
-        water->DrawWater(scene, bigRect.xBeg, bigRect.zBeg, bigRect.xEnd, bigRect.zEnd);
+        // FAR-001: optionally cap how far the water surface follows the opened-up
+        // far plane. See AerialRange.hpp `waterReach` for the measurement -- the
+        // water is where essentially all the cost of a longer reach lives, and it
+        // is the one thing here that cannot be made cheaper by being made coarser
+        // without editing the water renderer.
+        //
+        // Clamped rather than replaced, so this can only ever SHRINK the
+        // rectangle: at 0 (the default) or at ground level the water gets exactly
+        // the rectangle it has always had.
+        LandBegEnd wRect = bigRect;
+        const float reach = Aerial::Settings().waterReach;
+        if (reach > 0.0f)
+        {
+            const Vector3 camPos = scene.GetCamera()->Position();
+            const float inv = GetInvLandGrid();
+            const int cx = toIntFloor(camPos.X() * inv);
+            const int cz = toIntFloor(camPos.Z() * inv);
+            const int cells = toIntCeil(reach * inv);
+            if (wRect.xBeg < cx - cells)
+                wRect.xBeg = cx - cells;
+            if (wRect.zBeg < cz - cells)
+                wRect.zBeg = cz - cells;
+            if (wRect.xEnd > cx + cells)
+                wRect.xEnd = cx + cells;
+            if (wRect.zEnd > cz + cells)
+                wRect.zEnd = cz + cells;
+            if (wRect.xEnd <= wRect.xBeg || wRect.zEnd <= wRect.zBeg)
+            {
+                wRect = bigRect;
+            }
+        }
+        water->DrawWater(scene, wRect.xBeg, wRect.zBeg, wRect.xEnd, wRect.zEnd);
         return;
     }
 
@@ -2046,6 +2110,27 @@ void Landscape::Draw(Scene& scene)
         GEngine->FlushQueues();
 
         camera.SetClipRange(oldNear, oldFar);
+    }
+
+    // FAR-001. Arm the coarse ring for this frame, before the rectangle is built.
+    //
+    // The rectangle itself needs no edit: it is already derived from
+    // `GetFogMaxRange()`, and that is the number the aerial policy widens, so the
+    // terrain reaches exactly as far as the haze lets you see and not one segment
+    // further. What DOES need saying is which of those segments may be coarse.
+    //
+    // The ring radius is `horizontZ`, the view-distance slider -- deliberately
+    // NOT the widened fog range. `horizontZ` is untouched by the altitude policy,
+    // so the fine interior is always precisely the region the player's own
+    // setting covers, and every segment the game would have drawn without FAR-001
+    // is still drawn at full detail. When the fog range has not been widened, the
+    // ring is at or beyond the rectangle's own edge and nothing is coarse at all.
+    {
+        const Aerial::AerialRangeSettings& aerial = Aerial::Settings();
+        const bool widened = scene.GetFogMaxRange() > scene.GetBaseFogMaxRange() + 1.0f;
+        const Vector3 camPos = scene.GetCamera()->Position();
+        SetCoarseRing(camPos.X(), camPos.Z(), ENGINE_CONFIG.horizontZ,
+                      (widened && aerial.coarseTerrain) ? aerial.coarseLod : 0);
     }
 
     // project points limiting viewpoint

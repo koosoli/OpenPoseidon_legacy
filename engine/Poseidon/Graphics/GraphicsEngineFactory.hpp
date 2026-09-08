@@ -103,6 +103,26 @@ class GraphicsEngineFactory
     static bool IsBackendAvailable(GraphicsBackend backend);
     static const char* GetBackendName(GraphicsBackend backend);
 
+    /// Code name ("wgpu", "gl33", "dummy") of the backend that most recently
+    /// created an Engine successfully, or "" before any has.
+    ///
+    /// FAR-001 added this because there was no way to ask, from the engine side,
+    /// WHICH backend is running. `Engine` exposes capability predicates
+    /// (`IsWBuffer`, `ProceduralSkyActive`) but no identity, and the two things
+    /// are not interchangeable -- `ProceduralSkyActive()` is false on wgpu when
+    /// the procedural sky is switched off, so using it as a backend probe reads
+    /// "this is GL33" for a wgpu run with one unrelated feature disabled.
+    ///
+    /// The specific question FAR-001 needs answered is whether the projection is
+    /// infinite-far reversed-Z (wgpu, where the far plane costs no depth
+    /// precision at all) or finite forward-Z (GL33, where it costs plenty). That
+    /// is a property of the backend, not of any Engine capability flag, and the
+    /// backend's own headers are off limits to the world tree.
+    ///
+    /// Recorded here rather than overridden in each backend so that no renderer
+    /// has to be edited to answer it.
+    static const char* ActiveBackendCode();
+
     static void ResetForTesting();
 
   private:

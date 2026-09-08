@@ -14,6 +14,7 @@
 #include <Poseidon/Dev/Diag/FlightTab.hpp>
 
 #include <Poseidon/World/Entities/Vehicles/Air/FlightCeiling.hpp>
+#include <Poseidon/World/Scene/Camera/AerialRange.hpp>
 
 // See the note in PictureModeTab.cpp: Foundation's DebugLog macro eats an ImGui
 // member of the same name.
@@ -178,6 +179,99 @@ void DrawFlightTab()
     {
         ImGui::SetTooltip("Stock value 10000, which never bound because the air ran out first.\n"
                           "Keep it above the rotary-wing ceiling above or it starts to.");
+    }
+
+    // FAR-001. This lives on the flight tab rather than in a tab of its own
+    // because it is the other half of the same defect: the sliders above decide
+    // how high an aircraft can climb, and these decide whether there is a world
+    // underneath it when it gets there.
+    Aerial::AerialRangeSettings& a = Aerial::Settings();
+
+    ImGui::SeparatorText("Ground visibility from altitude (far plane)");
+    Dev::PanelHelp("The camera far plane USED TO BE the view distance -- one number answered both\n"
+                   "'what may be drawn' and 'what has faded into haze'. Ground 5 km below an\n"
+                   "aircraft is 5 km away, so at the default 900 m view distance the world stopped\n"
+                   "being drawn from about 900 m of altitude upwards: at 5,000 m, cloud and sky and\n"
+                   "no ground at all.\n\n"
+                   "They are separate numbers now, and both open with altitude ABOVE GROUND on a\n"
+                   "law that does not touch the view-distance slider. Below the start altitude\n"
+                   "nothing here runs, so ground play is bit-identical. Uncheck to restore the old\n"
+                   "single-number behaviour.");
+
+    Dev::Checkbox("Altitude-scaled far plane (default on)", &a.enabled);
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("Off restores the pre-FAR-001 engine exactly: far plane == fog range ==\n"
+                          "the view-distance-derived number, at every altitude.\n"
+                          "Same as POSEIDON_AERIAL_RANGE=0.");
+    }
+
+    Dev::Checkbox("Coarse terrain in the far ring (default on)", &a.coarseTerrain);
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("Terrain beyond the ordinary view distance is generated at a reduced LOD.\n"
+                          "Off draws the whole opened-up rectangle at full detail -- which is the\n"
+                          "A/B that prices the coarse tier, and is expensive.\n"
+                          "Same as POSEIDON_AERIAL_COARSE_TERRAIN=0.");
+    }
+
+    Dev::SliderInt("Far-ring LOD", &a.coarseLod, 0, 2);
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("0 = full detail (equivalent to unchecking the box above), 2 = coarsest.\n"
+                          "On Everon's 50 m land grid, LOD 2 is one quad per land cell.");
+    }
+
+    Dev::SliderFloat("Reach per metre of altitude", &a.reachFactor, 1.0f, 6.0f, "%.1f x");
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("Slant reach as a multiple of height above ground. 3 means an eye at\n"
+                          "5 km sees 15 km, which is about the whole of Everon (12.8 km across).\n"
+                          "Costs roughly with the square of this. Same as POSEIDON_AERIAL_REACH.");
+    }
+
+    Dev::SliderFloat("Start altitude", &a.startAlt, 0.0f, 3000.0f, "%.0f m AGL");
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("Below this the policy is completely inert and the engine runs exactly\n"
+                          "the code it ran before. Raise it to push the change further away from\n"
+                          "helicopter altitudes.");
+    }
+
+    Dev::SliderFloat("Full-strength altitude", &a.fullAlt, 100.0f, 6000.0f, "%.0f m AGL");
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("The reach ramps in smoothly between the start altitude and this one.\n"
+                          "Set them close together and you will see the haze step as you climb.");
+    }
+
+    Dev::SliderFloat("Maximum reach", &a.maxReach, 2000.0f, 40000.0f, "%.0f m");
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("Hard ceiling on the far plane, and so on the terrain rectangle and the\n"
+                          "water surface. This is the number that bounds the cost at 14 km.");
+    }
+
+    Dev::SliderFloat("Water reach cap (0 = follow)", &a.waterReach, 0.0f, 24000.0f, "%.0f m");
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("How far the WATER surface follows the opened far plane.\n\n"
+                          "The water IS where the whole cost lives -- at 5,000 m the GPU frame went\n"
+                          "6.2 -> 11.2 ms, of which terrain was +0.23 and water +5.2 -- but this\n"
+                          "slider does NOT buy it back. Measured at 8,000 m: no cap 5.44 ms,\n"
+                          "12 km 5.54, 6 km 4.96. That is run spread. The cost is FILL, not area:\n"
+                          "the sea covers the same screen however far the rectangle goes.\n\n"
+                          "Kept as a diagnostic handle on the water from outside the water\n"
+                          "renderer. Same as POSEIDON_AERIAL_WATER_REACH.");
+    }
+
+    Dev::SliderFloat("Maximum reach (GL33)", &a.finiteFarReach, 2000.0f, 20000.0f, "%.0f m");
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("GL33 keeps a FINITE forward-Z projection, where depth precision is a\n"
+                          "far/near ratio -- so the far plane costs precision there and z-fights if\n"
+                          "opened as far as wgpu's. wgpu's projection is infinite-far reversed-Z\n"
+                          "and is insensitive to the far plane, so it uses the slider above.");
     }
 }
 

@@ -6,6 +6,7 @@
 #include <Poseidon/Core/Application.hpp>
 #include <stddef.h>
 #include <algorithm>
+#include <string>
 #include <Poseidon/Foundation/platform.hpp>
 
 namespace Poseidon
@@ -72,6 +73,15 @@ std::vector<const RegisteredGraphicsBackend*> PreferredBackends()
                   return lhs->registrationOrder < rhs->registrationOrder;
               });
     return ordered;
+}
+
+/// FAR-001: which backend actually created the live Engine. Written only on a
+/// successful create, so a failed attempt at a preferred backend during Auto
+/// selection does not leave a lie behind for the one that succeeds after it.
+std::string& ActiveBackendCodeStorage()
+{
+    static std::string code;
+    return code;
 }
 
 const char* CodeForBackend(GraphicsBackend backend)
@@ -141,7 +151,10 @@ Engine* GraphicsEngineFactory::Create(const std::string& requestedBackend, const
     if (backend == nullptr || !IsDescriptorAvailable(backend->descriptor))
         return nullptr;
 
-    return backend->descriptor.create(params);
+    Engine* engine = backend->descriptor.create(params);
+    if (engine != nullptr)
+        ActiveBackendCodeStorage() = backend->descriptor.codeName;
+    return engine;
 }
 
 bool GraphicsEngineFactory::Register(const GraphicsBackendDescriptor& descriptor)
@@ -158,10 +171,18 @@ Engine* GraphicsEngineFactory::CreateAuto(const GraphicsEngineParams& params)
 
         Engine* engine = backend->descriptor.create(params);
         if (engine != nullptr)
+        {
+            ActiveBackendCodeStorage() = backend->descriptor.codeName;
             return engine;
+        }
     }
 
     return nullptr;
+}
+
+const char* GraphicsEngineFactory::ActiveBackendCode()
+{
+    return ActiveBackendCodeStorage().c_str();
 }
 
 bool GraphicsEngineFactory::IsBackendAvailable(GraphicsBackend backend)
@@ -223,6 +244,7 @@ const char* GraphicsEngineFactory::GetBackendName(GraphicsBackend backend)
 void GraphicsEngineFactory::ResetForTesting()
 {
     GraphicsBackendRegistry().clear();
+    ActiveBackendCodeStorage().clear();
 }
 
 void RegisterDummyGraphicsBackend()

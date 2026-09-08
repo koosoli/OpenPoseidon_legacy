@@ -840,6 +840,12 @@ class Landscape : public SerializeClass
     RefArray<LightPoint> _staticMarkerLights;
     LandCache _segCache;
 
+    // FAR-001 coarse ring state, refreshed once per Landscape::Draw. Radius 0
+    // (the default, and what a ground-level frame leaves it at) means disarmed.
+    float _coarseRingX{0.0f}, _coarseRingZ{0.0f};
+    float _coarseRingRadius{0.0f};
+    int _coarseRingLod{0};
+
     // AutoArray<WaterLevel> _waters; // reflection levels in current scene
 
     SurfaceInfo _waterSurface;
@@ -1091,8 +1097,39 @@ class Landscape : public SerializeClass
     void DrawMesh(Scene& scene, TLVertexTable& table, const Shape& vMesh, Vector3Par offset, const LandBegEnd& rect,
                   bool isWater);
 
-    Ref<LandSegment> GenerateSegment(const LandBegEnd& rect, bool deferGPU = false);
+    Ref<LandSegment> GenerateSegment(const LandBegEnd& rect, bool deferGPU = false, int lodLevel = 0);
     void GenerateSegmentInto(LandSegment* seg, const LandBegEnd& rect, bool deferGPU = false, int lodLevel = 0);
+
+    /// FAR-001, the terrain half. Arm (or disarm) the COARSE RING: terrain
+    /// further than `radius` from (camX, camZ) is generated at `lod` instead of
+    /// LOD 0.
+    ///
+    /// Why a ring is needed at all. Opening the far plane widens the terrain
+    /// rectangle that `Landscape::Draw` builds, and at a 15 km reach on Everon's
+    /// 50 m land grid that rectangle is roughly 600 x 600 cells -- about 5,600
+    /// segments where ordinary play draws a few dozen. At LOD 0 with Everon's
+    /// subdivision that is 1,089 vertices per segment, so the segment cache alone
+    /// would want a couple of hundred megabytes and the draw would be hopeless.
+    /// At LOD 2 it is 81 vertices per segment, a factor of thirteen, and the far
+    /// ring becomes affordable. Measured numbers are in the FAR-001 write-up.
+    ///
+    /// The LOD machinery for this already existed -- `GenerateSegmentInto` has
+    /// implemented strides for LOD 1 and 2 all along -- but every call site
+    /// passed 0, under the comment "All segments generated at LOD 0 to prevent
+    /// T-junction gaps". That reason is sound where it was written and does not
+    /// apply here: the seam this creates is a single ring at `radius`, which is
+    /// the ordinary view distance, i.e. exactly the distance at which the haze
+    /// has already gone opaque. Inside the ring nothing changes, so ground play
+    /// cannot grow a crack it did not have.
+    ///
+    /// `radius <= 0` or `lod <= 0` disarms it and every segment is LOD 0 again,
+    /// which is the pre-FAR-001 behaviour and what the dev-panel switch restores.
+    void SetCoarseRing(float camX, float camZ, float radius, int lod);
+
+    /// The LOD a segment whose near corner is at (xBeg, zBeg) in land-grid cells
+    /// must be generated at. 0 unless the coarse ring is armed and the segment
+    /// lies entirely outside it.
+    int RequiredSegmentLod(int xBeg, int zBeg) const;
     void FinalizeSegmentGPU(LandSegment* seg);
 
     void DrawRect(Scene& scene, const LandBegEnd& rect);

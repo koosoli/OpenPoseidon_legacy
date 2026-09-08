@@ -59,6 +59,8 @@ extern void SDLGamepad_PlayRamp(float beg, float end, float dur);
 
 #include <Poseidon/Core/Progress.hpp>
 
+#include <Poseidon/Graphics/GraphicsEngineFactory.hpp>
+#include <Poseidon/World/Scene/Camera/AerialRange.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/World/Scene/Camera/CameraHold.hpp>
 #include <Poseidon/World/Entities/Vehicles/Air/Airplane.hpp>
@@ -106,6 +108,67 @@ namespace Poseidon
 {
 extern int gPerfDrawCalls;
 }
+
+namespace
+{
+
+/// FAR-001. Resolve the altitude-dependent far plane, and push the matching haze
+/// range into the scene. Returns the far plane to hand to
+/// `Camera::SetPerspectiveForView`.
+///
+/// This is the ONE place the two numbers are decided, and it is deliberately the
+/// same statement that used to conflate them (World.cpp, the camera setup at the
+/// end of the per-frame camera update) rather than something buried in the scene:
+/// the far plane is a camera property, so the camera's own setup is where a
+/// reader will look for it.
+///
+/// Altitude is measured ABOVE THE TERRAIN, not above sea level. Fifty metres over
+/// a nine-hundred-metre mountain is low flying and has to keep looking like low
+/// flying; only genuine altitude buys reach.
+///
+/// Below the policy's start altitude this returns `scene.GetFogMaxRange()`
+/// unchanged and does not touch the scene at all -- not even to write the same
+/// value back -- so ordinary ground play runs exactly the code it ran before, and
+/// the fog tables are not rebuilt. That is what the ground-level control capture
+/// is checking.
+float ApplyAerialRange(Poseidon::Scene& scene, Vector3Val camPos)
+{
+    // The range the engine would have used without any of this: the value
+    // `ResetFog` derives from the view-distance slider. Asking the scene for its
+    // BASE range (rather than its current one) matters, because the current one
+    // may already carry a previous frame's aerial override and feeding that back
+    // in would ratchet.
+    const float fogBase = scene.GetBaseFogMaxRange();
+
+    float altAboveGround = camPos.Y();
+    if (Poseidon::GLandscape)
+    {
+        // SurfaceYAboveWater rather than SurfaceY: over the sea the relevant floor
+        // is the water, and a camera 3 m above the waves must not be treated as
+        // 3 m + the depth of the seabed.
+        altAboveGround = camPos.Y() - Poseidon::GLandscape->SurfaceYAboveWater(camPos.X(), camPos.Z());
+    }
+
+    // wgpu overrides the projection to INFINITE-FAR REVERSED-Z, where depth
+    // precision is governed by the near plane and is entirely insensitive to the
+    // far plane -- opening it to 24 km there costs nothing. GL33 keeps a finite
+    // forward-Z projection, where precision is a far/near ratio and 24 km over a
+    // 0.08 m near plane is exactly what z-fights, so it gets the much smaller
+    // `finiteFarReach` instead. The backend cannot be asked about this through
+    // any Engine capability flag, hence ActiveBackendCode().
+    const char* backend = Poseidon::GraphicsEngineFactory::ActiveBackendCode();
+    const bool infiniteFarZ = backend != nullptr && std::strcmp(backend, "wgpu") == 0;
+
+    const Poseidon::Aerial::AerialRange r = Poseidon::Aerial::Resolve(fogBase, altAboveGround, infiniteFarZ);
+
+    // Inert: leave the scene alone entirely. `SetAerialFogMaxRange(0)` is still
+    // cheap (it early-outs when already zero) and is what releases a previous
+    // frame's override as an aircraft descends.
+    scene.SetAerialFogMaxRange(r.active ? r.fogMaxRange : 0.0f);
+    return r.farPlane;
+}
+
+} // namespace
 
 // Time acceleration limits (PageUp/PageDown in-game)
 constexpr double kTimeAccMin = 1.0;
@@ -1595,7 +1658,16 @@ void World::Simulate(float deltaT, bool& enableDraw)
         // normal soldier fov is about 0.85
         float cNear = 0.067f / fov;
         saturate(cNear, 0.07f, 0.2f);
-        camera.SetPerspectiveForView(GEngine, cNear, _scene.GetFogMaxRange(), fov);
+        // FAR-001: the far plane and the fog range were literally this one
+        // expression -- `GetFogMaxRange()` was handed straight in as `cFar`, which
+        // is why an aircraft above ~900 m flew over a world that had stopped being
+        // drawn (see World/Scene/Camera/AerialRange.hpp for the measurements).
+        // They are resolved separately now. `ApplyAerialRange` returns the far
+        // plane and, as a side effect, pushes the matching haze range into the
+        // scene; below the policy's start altitude it returns `GetFogMaxRange()`
+        // itself and touches nothing, so ordinary ground play is unchanged.
+        const float cFar = ApplyAerialRange(_scene, camera.Position());
+        camera.SetPerspectiveForView(GEngine, cNear, cFar, fov);
         camera.Adjust(GEngine);
     }
 

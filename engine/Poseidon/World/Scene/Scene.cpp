@@ -141,11 +141,43 @@ void Scene::ResetFog()
     ENGINE_CONFIG.horizontZ = floatMin(_rainRange + 20, ENGINE_CONFIG.tacticalZ);
     minRange = MAX_FOG * 0.3f, maxRange = MAX_FOG;
     UpdateFogRange(minRange, maxRange, _rainRange);
-    _fog.Set(minRange, maxRange, FOG_FUNCTION);
-    _fogMinRange = minRange, _fogMaxRange = maxRange;
+    _baseFogMaxRange = maxRange;
+
+    // FAR-001: the DISPLAY fog range, and only that one, may be widened by the
+    // altitude policy. Computed into separate locals rather than by mutating
+    // `minRange`/`maxRange` on purpose -- `_tacticalFog` below is built from
+    // `minRange`, and tactical fog is a gameplay-visibility quantity, not a
+    // shading one. Widening it because the camera is in an aircraft would change
+    // what the game considers visible, which is exactly the ground-play spillover
+    // this whole change exists to avoid.
+    float dispMin = minRange, dispMax = maxRange;
+    if (_aerialFogMaxRange > dispMax)
+    {
+        dispMax = _aerialFogMaxRange;
+        dispMin = dispMax * 0.3f;
+    }
+    _fog.Set(dispMin, dispMax, FOG_FUNCTION);
+    _fogMinRange = dispMin, _fogMaxRange = dispMax;
     // sky fog is constant
     _skyFog.Set(MinSkyFog, MaxSkyFog, FOG_FUNCTION);
     _tacticalFog.Set(minRange, _tacticalVisibility, FOG_FUNCTION);
+}
+
+void Scene::SetAerialFogMaxRange(float range)
+{
+    if (range < 0.0f)
+    {
+        range = 0.0f;
+    }
+    // A metre of hysteresis. Without it every frame of a climb rebuilds four
+    // 256-entry fog tables for a change too small to see; with it, level flight
+    // and all of ground play rebuild nothing at all.
+    if (fabs(range - _aerialFogMaxRange) < 1.0f)
+    {
+        return;
+    }
+    _aerialFogMaxRange = range;
+    ResetFog();
 }
 
 void Scene::SetTacticalVisibility(float tv, float rainRange)

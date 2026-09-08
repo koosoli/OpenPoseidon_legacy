@@ -1247,22 +1247,28 @@ bool LandCache::VerifyStructure() const
 
 Ref<LandSegment> LandCache::Segment(Landscape* land, const LandBegEnd& rect, float currentTime)
 {
+    // FAR-001: the LOD this segment must be at, given the coarse ring armed for
+    // this frame. Always 0 inside the ordinary view distance, and always 0 while
+    // the ring is disarmed -- which is every frame of ground play, so this is the
+    // literal 0 that used to be hard-coded at the Lookup below.
+    const int requiredLod = land->RequiredSegmentLod(rect.xBeg, rect.zBeg);
+
     // When terrain caching is disabled, regenerate every segment every frame
     if (ENGINE_CONFIG.noTerrainCache)
     {
         auto gt0 = TerrainProfile::Now();
-        Ref<LandSegment> seg = land->GenerateSegment(rect);
+        Ref<LandSegment> seg = land->GenerateSegment(rect, false, requiredLod);
         GTerrainProfile.generateSegCycles += (TerrainProfile::Now() - gt0);
         GTerrainProfile.segmentsCacheMiss++;
         GTerrainProfile.segmentsDrawn++;
         return seg;
     }
 
-    auto result = _cache.Lookup(rect.xBeg, rect.zBeg, 0, currentTime,
+    auto result = _cache.Lookup(rect.xBeg, rect.zBeg, requiredLod, currentTime,
                                 [&](int, int, int lod, float time)
                                 {
                                     auto gt0 = TerrainProfile::Now();
-                                    Ref<LandSegment> seg = land->GenerateSegment(rect);
+                                    Ref<LandSegment> seg = land->GenerateSegment(rect, false, lod);
                                     GTerrainProfile.generateSegCycles += (TerrainProfile::Now() - gt0);
 
                                     auto slot = std::make_unique<LandCacheSlot>();
@@ -1294,6 +1300,8 @@ void LandCache::Fill(Landscape* land, const Frame& pos, float currentTime, float
 
     // Pass 1: collect cache-miss rects
     std::vector<LandBegEnd> missRects;
+    // FAR-001: the LOD each miss must be generated at, parallel to missRects.
+    std::vector<int> missLods;
     int x = toIntFloor(pos.Position().X() * land->GetInvLandGrid());
     int z = toIntFloor(pos.Position().Z() * land->GetInvLandGrid());
     LOG_DEBUG(Core, "LandCache fill: maxN={} cached={} pos=({},{}) grid={}", _cache.GetMaxN(), (int)_cache.Size(),
@@ -1315,10 +1323,21 @@ void LandCache::Fill(Landscape* land, const Frame& pos, float currentTime, float
                     }
                     int xxx = x + xx * LandSegmentSize;
                     int zzz = z + zz * LandSegmentSize;
+                    // FAR-001. This used to compare against a literal 0, which
+                    // made `Fill` the enemy of any coarse tier: it walks outwards
+                    // from the camera and EVICTS-AND-REGENERATES every cached
+                    // segment that is not LOD 0, so a far ring built by the draw
+                    // path would be quietly rebuilt at full detail by the
+                    // prefetch path on the next recentre -- costing the
+                    // regeneration and delivering none of the saving, with no
+                    // symptom but a slow frame. Both paths ask the same policy
+                    // now. With the ring disarmed it still yields 0 everywhere
+                    // and this is the behaviour it always had.
+                    const int wantLod = land->RequiredSegmentLod(xxx, zzz);
                     auto* existing = _cache.Find(xxx, zzz);
                     if (existing)
                     {
-                        if (existing->lodLevel != 0)
+                        if (existing->lodLevel != wantLod)
                         {
                             _cache.Remove(xxx, zzz);
                             LandBegEnd rect;
@@ -1327,6 +1346,7 @@ void LandCache::Fill(Landscape* land, const Frame& pos, float currentTime, float
                             rect.xEnd = xxx + LandSegmentSize;
                             rect.zEnd = zzz + LandSegmentSize;
                             missRects.push_back(rect);
+                            missLods.push_back(wantLod);
                             continue;
                         }
                         _cache.TouchMRU(xxx, zzz, currentTime);
@@ -1340,6 +1360,7 @@ void LandCache::Fill(Landscape* land, const Frame& pos, float currentTime, float
                     rect.xEnd = xxx + LandSegmentSize;
                     rect.zEnd = zzz + LandSegmentSize;
                     missRects.push_back(rect);
+                    missLods.push_back(wantLod);
                 }
             }
         }
@@ -1361,17 +1382,19 @@ void LandCache::Fill(Landscape* land, const Frame& pos, float currentTime, float
         newSegs[i] = new LandSegment;
     auto t2ms = (TerrainProfile::Now() - t2) / 3e6;
 
-    // All segments generated at LOD 0 to prevent T-junction gaps
+    // Segments are generated at LOD 0 inside the ordinary view distance -- which
+    // is where T-junction gaps would be visible, and is everything during ground
+    // play -- and at the coarse-ring LOD only outside it (FAR-001).
     // Pass 3: parallel CPU generation via TaskPool (deferred GPU)
     auto gt0 = TerrainProfile::Now();
     if (pool && nMiss > 1)
     {
         pool->ParallelFor(static_cast<uint32_t>(nMiss),
-                          [land, &missRects, &newSegs](uint32_t start, uint32_t end)
+                          [land, &missRects, &missLods, &newSegs](uint32_t start, uint32_t end)
                           {
                               for (uint32_t i = start; i < end; i++)
                               {
-                                  land->GenerateSegmentInto(newSegs[i], missRects[i], true, 0);
+                                  land->GenerateSegmentInto(newSegs[i], missRects[i], true, missLods[i]);
                               }
                           });
     }
@@ -1379,7 +1402,7 @@ void LandCache::Fill(Landscape* land, const Frame& pos, float currentTime, float
     {
         for (int i = 0; i < nMiss; i++)
         {
-            land->GenerateSegmentInto(newSegs[i], missRects[i], true, 0);
+            land->GenerateSegmentInto(newSegs[i], missRects[i], true, missLods[i]);
         }
     }
     auto t3ms = (TerrainProfile::Now() - gt0) / 3e6;
@@ -1402,7 +1425,10 @@ void LandCache::Fill(Landscape* land, const Frame& pos, float currentTime, float
         auto slot = std::make_unique<LandCacheSlot>();
         slot->xBeg = missRects[i].xBeg;
         slot->zBeg = missRects[i].zBeg;
-        slot->lodLevel = 0;
+        // Must record the LOD it was actually generated at, not 0: the cache
+        // invalidates on a lodLevel mismatch, so a slot that lies about its LOD is
+        // regenerated every single frame (FAR-001).
+        slot->lodLevel = missLods[i];
         slot->lastUsed = currentTime;
         slot->segment = seg;
         _cache.Insert(std::move(slot));
