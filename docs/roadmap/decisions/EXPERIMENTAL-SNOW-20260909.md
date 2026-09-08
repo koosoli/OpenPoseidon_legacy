@@ -37,8 +37,28 @@ and sampling, but retains the approximately 1 MiB GPU buffer.
 C++ snow/CDLOD tests: 3,823 assertions across ten cases passed. Covers negative
 coordinates, camera round trips, no age decay, capped-depth snowfall filling,
 interpolated trails, teleport rejection, reset and invalid input guards.
-Native C++/Rust build passed before the final culling-margin change; final build
-and installed-game visual acceptance are pending in this checkpoint.
+The final snow/CDLOD/rain run passed 3,863 assertions across 17 cases, including
+filling all 32,768 storage chunks and proving overflow does not evict old tracks.
+Native C++/Rust build and installed-game validation passed. Code commits
+587824b3 and 5453ac8d were pushed to both safety refs before deployment; the
+installed matched EXE/DLL pair is 5453ac8d.
+
+Private `.tmp-bulb/snow.Intro` uses an actual walking SoldierWB, a driven Jeep,
+and a GrenadeHand on the dry Desert plateau at 9500/3500. `snow-persistent.png`
+at 70 seconds shows boot prints, both wheel ruts and the exposed grenade circle
+after the camera moves to x=12000 and returns. `snow-refill.png` at 70 seconds
+with new precipitation at 0.3 m/min covers the old marks and grenade circle.
+`snow-off.png` shows the original dry surface. `snow-final.png` checks the
+corrected native additive Flare0 blend (the initial alpha blend made dark
+rectangles) and shared snow normals in the colour and prepass shaders. Flakes
+remain stylised screen-space sprites, not physically lit snow scattering.
+All five capture processes exited 0, without shader validation/script errors.
+
+Last seven terrain GPU samples: disabled median 0.326 ms; final snowfall 0.357 ms
+(prepass plus colour), at 1280x720 on RTX 3070 with DLSS. This is a short separate-
+launch scene comparison, not a universal frame-cost guarantee or a 4K benchmark.
+The Weather controls compile and bind directly to the tested field; actual
+interactive slider operation and long-session/high-density stress remain unverified.
 
 ## Destructible terrain feasibility
 

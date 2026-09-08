@@ -77,6 +77,22 @@ TEST_CASE("Snow rejects invalid inputs and snowfall fills even at maximum depth"
     CHECK(snow.Snapshot(1e30f, 0)[3] == 0.0f);
 }
 
+TEST_CASE("Snow storage cap never evicts existing depressions", "[snow][terrain]")
+{
+    SnowField snow;
+    snow.enabled = true;
+    snow.Deposit(0.2f);
+    for (size_t i = 0; i < SnowField::MaxChunks; ++i)
+        snow.Stamp(float(i) * 2.0f + 0.5625f, 0.5625f, 0.125f);
+    REQUIRE(snow.Chunks() == SnowField::MaxChunks);
+    const float first = snow.DeficitAt(4, 4);
+    REQUIRE(first > 0.0f);
+    snow.Stamp(-20.0f, -20.0f, 1.0f);
+    CHECK(snow.Chunks() == SnowField::MaxChunks);
+    CHECK(snow.Rejected() > 0);
+    CHECK(snow.DeficitAt(4, 4) == first);
+}
+
 namespace
 {
 constexpr float LeafSize = 200.0f; // 32 samples * 6.25 m, Nogova-like
