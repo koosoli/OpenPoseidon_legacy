@@ -700,6 +700,12 @@ unbuilt_candidates: >-
       TexGen axes. Main terrain prepass and colour have named GPU timer regions,
       and final captures pass on CWA, A1, A2/OA, A3 and DayZ. See PERF-004.
 
+      2026-09-09 satellite assessment: authored satellite/detail-distance fallback
+      already exists. Automatic classic-world colour baking remains unimplemented
+      and is deferred: current Nogova aerial terrain total median is 0.424 ms,
+      not evidence of a material-sampling bottleneck. No cache speedup is claimed.
+      See decisions/TERRAIN-SATMAP-ASSESSMENT-20260909.md for scope and revisit gates.
+
       NO PLAN DOCUMENT EXISTS. engine/WgpuRenderer/docs/ holds three terrain-named
       plans and none of them is this system: terrain-fractal-detail-plan.md and
       gpu-terrain-water-cull-plan.md are both in this file's own
