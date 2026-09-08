@@ -21,7 +21,8 @@ namespace Poseidon
 template <typename ExtraVisibleFn, typename EmitFn>
 inline void SelectVisibleCdlod(const std::vector<CdlodNode>& tree, int rootIndex, int numLevels,
                                const std::vector<float>& ranges, float morphRegion, Camera& camera, float rx0,
-                               float rz0, float rx1, float rz1, ExtraVisibleFn&& extraVisible, EmitFn&& emit)
+                               float rz0, float rx1, float rz1, ExtraVisibleFn&& extraVisible, EmitFn&& emit,
+                               float displacementMargin = 0.0f)
 {
     if (rootIndex < 0 || numLevels <= 0 || rx1 <= rx0 || rz1 <= rz0)
     {
@@ -44,7 +45,7 @@ inline void SelectVisibleCdlod(const std::vector<CdlodNode>& tree, int rootIndex
         const Vector3 center(n.originX + n.size * 0.5f, (n.minY + n.maxY) * 0.5f, n.originZ + n.size * 0.5f);
         const float dy = n.maxY - n.minY;
         const float radius = 0.5f * std::sqrt(2.0f * n.size * n.size + dy * dy);
-        return !camera.IsClipped(center, radius, 1);
+        return !camera.IsClipped(center, radius + displacementMargin, 1);
     };
 
     SelectCdlod(tree, rootIndex, numLevels - 1, camPos.X(), camPos.Y(), camPos.Z(), ranges, morphRegion, visible,

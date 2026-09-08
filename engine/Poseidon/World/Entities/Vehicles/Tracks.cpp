@@ -1,4 +1,5 @@
 #include <Poseidon/Core/Config/EngineConfig.hpp>
+#include <Poseidon/World/Weather/SnowField.hpp>
 
 #include <Poseidon/World/Entities/Vehicles/Tracks.hpp>
 #include <Poseidon/Core/Global.hpp>
@@ -215,6 +216,30 @@ void TrackDraw::SetOffsets(Vector3Par lOffset, Vector3Par rOffset, Texture* text
     _offsets = true;
     _texture = texture;
     _alpha = alpha;
+}
+
+void TrackDraw::UpdateSnow(const Frame& pos, bool terminate)
+{
+    if (!GSnow().enabled || !_offsets || terminate)
+    {
+        _snowLastValid = false;
+        return;
+    }
+    const Vector3 left = pos.PositionModelToWorld(_lOffset);
+    const Vector3 right = pos.PositionModelToWorld(_rOffset);
+    const Vector3 centre = (left + right) * 0.5f;
+    const float ground = GLandscape->SurfaceY(centre.X(), centre.Z());
+    const float road = GLandscape->RoadSurfaceY(centre.X(), centre.Z());
+    if (ground <= GLandscape->GetSeaLevel() || road > ground + 0.3f)
+    {
+        _snowLastValid = false;
+        return;
+    }
+    if (_snowLastValid && _snowLast.Distance2(centre) < 0.01f) return;
+    const Vector3 from = _snowLastValid ? _snowLast : centre;
+    GSnow().Trail(from.X(), from.Z(), centre.X(), centre.Z(), std::max(0.125f, left.Distance(right) * 0.5f));
+    _snowLast = centre;
+    _snowLastValid = true;
 }
 
 TrackStep* TrackDraw::Update(const Frame& pos, bool force)

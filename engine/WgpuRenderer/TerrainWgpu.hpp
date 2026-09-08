@@ -127,6 +127,8 @@ class TerrainWgpu : public ITerrainRenderer
     // (Landscape::GeographyRevision), at most every couple of seconds.
     void RefreshGeographyIfChanged(const Landscape& land);
     uint32_t _geographyRevisionUploaded = 0;
+    float _snowUploadTime = -1.0f;
+    bool _snowWasEnabled = false;
     double _geographyRefreshLastMs = 0.0;
     // Reads the map's own CfgSurfaces / CfgSurfaceCharacters / clutter out of the
     // Arma-generation `config.bin` files of the archives that own THIS world's

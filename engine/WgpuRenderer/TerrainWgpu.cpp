@@ -1,4 +1,5 @@
 #include "TerrainWgpu.hpp"
+#include <Poseidon/World/Weather/SnowField.hpp>
 
 #include "CdlodDriver.hpp"
 #include "EngineWgpu.hpp"
@@ -2770,6 +2771,14 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     // world whose materials do not set `enfusion`, so it is inert there by data.
     _params.enfusion_ground = _enfusionGroundEnabled ? 1.0f : 0.0f;
     _engine.QueueTerrainParams(_params); // REN-THR-013: queued, applied before wgr_render_frame
+    const auto& snow = GSnow();
+    if (camera && (snow.enabled || _snowWasEnabled) &&
+        (snow.enabled != _snowWasEnabled || uploaded || _params.time < _snowUploadTime || _params.time - _snowUploadTime >= 0.1f))
+    {
+        _engine.QueueSnow(snow.Snapshot(camera->Position().X(), camera->Position().Z()));
+        _snowUploadTime = _params.time;
+        _snowWasEnabled = snow.enabled;
+    }
 
     if (camera == nullptr)
     {
@@ -2818,7 +2827,7 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     // extent so seabed always underlies the ocean.)
     SelectVisibleCdlod(
         _tree, _rootIndex, _numLevels, _ranges, _morphRegion, *camera, rx0, rz0, rx1, rz1,
-        [](const CdlodNode&) { return true; }, emit);
+        [](const CdlodNode&) { return true; }, emit, snow.enabled ? snow.Depth() : 0.0f);
 
     _engine.SubmitTerrain(_selected);
     // The procedural path must remain available on maps that use the modern GPU

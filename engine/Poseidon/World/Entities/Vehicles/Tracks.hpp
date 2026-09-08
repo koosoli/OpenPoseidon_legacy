@@ -59,6 +59,8 @@ class TrackDraw: public RefCount
 	Ref<TrackStep> _lastPart;
 	bool _offsets;
 	Vector3 _lOffset,_rOffset; // points in object model
+	Vector3 _snowLast = VZero;
+	bool _snowLastValid = false;
 	
 	Texture *_texture;
 	float _alpha;
@@ -71,6 +73,7 @@ class TrackDraw: public RefCount
 		Texture *texture, float alpha
 	);
 	TrackStep *Update( const Frame &pos, bool force );
+	void UpdateSnow(const Frame& pos, bool terminate);
 
 	Vector3Val LeftPos() const {return _lOffset;}
 	Vector3Val RightPos() const {return _rOffset;}
@@ -121,6 +124,7 @@ class TrackOptimized: public TrackAccumulator
 	public:
 	TrackOptimized( const LODShape *lShape );
 	void Update( const Frame &pos, float deltaT, bool terminate );
+	void UpdateSnow(const Frame& pos, bool terminate) { _left.UpdateSnow(pos, terminate); _right.UpdateSnow(pos, terminate); }
 
 	Vector3 LeftPos() const {return _left.CenterPos();}
 	Vector3 RightPos() const {return _right.CenterPos();}
@@ -135,6 +139,7 @@ class TrackOptimizedFour: public TrackAccumulator
 	public:
 	TrackOptimizedFour( const LODShape *lShape );
 	void Update( const Frame &pos, float deltaT, bool terminate );
+	void UpdateSnow(const Frame& pos, bool terminate) { _fLeft.UpdateSnow(pos, terminate); _fRight.UpdateSnow(pos, terminate); _bLeft.UpdateSnow(pos, terminate); _bRight.UpdateSnow(pos, terminate); }
 
 	Vector3 BackLeftPos() const {return _bLeft.CenterPos();}
 	Vector3 BackRightPos() const {return _bRight.CenterPos();}

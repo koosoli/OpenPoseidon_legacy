@@ -137,6 +137,7 @@ pub struct Terrain {
     group2_layout: wgpu::BindGroupLayout,
 
     params_ubo: wgpu::Buffer,
+    snow_buffer: wgpu::Buffer,
     params: WgrTerrainParams,
     #[allow(dead_code)] // kept alive: group1_bind references its view
     heightmap: wgpu::Texture,
@@ -284,6 +285,16 @@ impl Terrain {
                     binding: 3,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new((4 + 512 * 512) * 4),
+                    },
                     count: None,
                 },
             ],
@@ -469,6 +480,12 @@ impl Terrain {
             mipmap_filter: wgpu::MipmapFilterMode::Nearest,
             ..Default::default()
         });
+        let snow_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("wgr_experimental_snow"),
+            size: (4 + 512 * 512) * 4,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         let group1_bind = make_group1(
             device,
             &group1_layout,
@@ -476,6 +493,7 @@ impl Terrain {
             &heightmap_view,
             &shadow_mask_view,
             &mask_sampler,
+            &snow_buffer,
         );
 
         // Sun-shadow sweep: uniform + compute pipeline + bind group. Range cap =
@@ -872,6 +890,7 @@ impl Terrain {
             group1_layout,
             group2_layout,
             params_ubo,
+            snow_buffer,
             params: default_params,
             heightmap,
             heightmap_view,
@@ -947,6 +966,12 @@ impl Terrain {
         self.params = params;
     }
 
+    pub fn set_snow(&mut self, queue: &wgpu::Queue, data: &[f32]) {
+        if data.len() == 4 + 512 * 512 && data.iter().all(|v| v.is_finite()) {
+            queue.write_buffer(&self.snow_buffer, 0, bytemuck::cast_slice(data));
+        }
+    }
+
     pub fn set_heightmap(
         &mut self,
         device: &wgpu::Device,
@@ -993,6 +1018,7 @@ impl Terrain {
             &view,
             &mask_view,
             &self.mask_sampler,
+            &self.snow_buffer,
         );
         self.shadow_sweep_bind = make_sweep_bind(
             device,
@@ -1120,6 +1146,7 @@ impl Terrain {
                     &hview,
                     &mview,
                     &self.mask_sampler,
+                    &self.snow_buffer,
                 );
                 self.shadow_sweep_bind = make_sweep_bind(
                     device,
@@ -1595,6 +1622,7 @@ fn make_group1(
     heightmap_view: &wgpu::TextureView,
     mask_view: &wgpu::TextureView,
     mask_sampler: &wgpu::Sampler,
+    snow_buffer: &wgpu::Buffer,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("wgr_terrain_group1_bind"),
@@ -1615,6 +1643,10 @@ fn make_group1(
             wgpu::BindGroupEntry {
                 binding: 3,
                 resource: wgpu::BindingResource::Sampler(mask_sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: snow_buffer.as_entire_binding(),
             },
         ],
     })

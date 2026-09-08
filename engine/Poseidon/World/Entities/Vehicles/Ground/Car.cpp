@@ -1467,6 +1467,8 @@ void Car::Simulate(float deltaT, SimulationImportance prec)
             _head.Move(deltaT, moveTrans, *this);
         }
 
+        _track.UpdateSnow(*this, !_landContact || DirectionUp().Y() < 0.3f);
+
         if (EnableVisualEffects(prec))
         {
             if (DirectionUp().Y() >= 0.3f)

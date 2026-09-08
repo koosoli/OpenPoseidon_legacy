@@ -1,5 +1,7 @@
 #include <Poseidon/Core/Game/GameLoop.hpp> // LockstepPacingActive (SIM-815)
 #include <Poseidon/Core/Application.hpp>
+#include <Poseidon/World/Weather/SnowField.hpp>
+#include <Poseidon/World/Weather/RainVolume.hpp>
 #include <Poseidon/Dev/Diag/FixedStepStats.hpp>
 #include <Poseidon/UI/Locale/Stringtable/CodepageTranscode.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
@@ -854,6 +856,20 @@ static void GetPosArray(AutoArray<Vector3>& tgt, const ParamEntry& cfg)
 
 void World::InitLandscape(Landscape* landscape)
 {
+    GSnow().Reset();
+    GSnowFlakes.ClearParticles();
+    GSnow().enabled = false;
+    if (const char* depth = std::getenv("POSEIDON_SNOW_TEST_DEPTH"))
+    {
+        GSnow().enabled = true;
+        GSnow().falling = false;
+        GSnow().Deposit(std::strtof(depth, nullptr));
+        if (const char* rate = std::getenv("POSEIDON_SNOW_TEST_RATE"))
+        {
+            GSnow().falling = true;
+            GSnow().metresPerMinute = std::clamp(std::strtof(rate, nullptr), 0.0f, 1.0f);
+        }
+    }
     // AST-004 -- the derived model cache's only eviction point.
     //
     // It is HERE, at a level change, and not on every Put, for two reasons.

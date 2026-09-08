@@ -706,6 +706,12 @@ unbuilt_candidates: >-
       not evidence of a material-sampling bottleneck. No cache speedup is claimed.
       See decisions/TERRAIN-SATMAP-ASSESSMENT-20260909.md for scope and revisit gates.
 
+      2026-09-09 experimental snow: off-by-default Weather tab terrain layer,
+      persistent mission-local foot/vehicle/explosion depressions, filled only
+      by new snowfall. GPU camera-window detail does not evict CPU tracks.
+      No ground collision changes, roof coverage or save/network persistence.
+      Runtime acceptance pending; see decisions/EXPERIMENTAL-SNOW-20260909.md.
+
       NO PLAN DOCUMENT EXISTS. engine/WgpuRenderer/docs/ holds three terrain-named
       plans and none of them is this system: terrain-fractal-detail-plan.md and
       gpu-terrain-water-cull-plan.md are both in this file's own

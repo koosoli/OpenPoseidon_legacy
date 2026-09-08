@@ -1,4 +1,5 @@
 #include <Poseidon/World/Entities/Infantry/SoldierOldCommon.hpp>
+#include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <limits.h>
@@ -202,7 +203,7 @@ bool Man::AdvanceMoveQueue(float deltaT, float adjustSpeed, float& moveX, float&
                     step = true;
                     _soundStepOverride = prim->GetSoundOverride();
                 }
-                if (step && EnableVisualEffects(prec) && ValueTest(&MoveInfo::OnLand) < 0.5f)
+                if (step && (EnableVisualEffects(prec) || GSnow().enabled) && ValueTest(&MoveInfo::OnLand) < 0.5f)
                 {
                     int index = (left ? Type()->_stepLIndex : Type()->_stepRIndex);
                     if (index >= 0)
@@ -226,8 +227,15 @@ bool Man::AdvanceMoveQueue(float deltaT, float adjustSpeed, float& moveX, float&
                         float yr = GLandscape->RoadSurfaceYAboveWater(pos);
                         if (yr <= ys + 0.2f)
                         {
+                            if (GSnow().enabled && ys > GLandscape->GetSeaLevel())
+                            {
+                                const Vector3 toe = pos + Direction() * 0.075f;
+                                const Vector3 heel = pos - Direction() * 0.075f;
+                                GSnow().Stamp(toe.X(), toe.Z(), 0.125f);
+                                GSnow().Stamp(heel.X(), heel.Z(), 0.125f);
+                            }
                             LODShapeWithShadow* shape =
-                                markTtl > 0.0f ? GScene->Preloaded(left ? FootStepL : FootStepR) : nullptr;
+                                EnableVisualEffects(prec) && markTtl > 0.0f ? GScene->Preloaded(left ? FootStepL : FootStepR) : nullptr;
                             if (shape)
                             {
                                 Ref<Mark> mark = new Mark(shape, 0.25f, timeToLive);

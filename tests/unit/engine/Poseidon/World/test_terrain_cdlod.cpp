@@ -2,11 +2,80 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <Poseidon/World/Terrain/TerrainCdlod.hpp>
+#include <Poseidon/World/Weather/SnowField.hpp>
 
 #include <cmath>
+#include <limits>
 #include <vector>
 
 using namespace Poseidon;
+
+TEST_CASE("Experimental snow persists until new precipitation fills tracks", "[snow][terrain]")
+{
+    SnowField snow;
+    CHECK_FALSE(snow.enabled);
+    snow.enabled = true;
+    snow.Deposit(0.3f);
+    snow.Stamp(0.0625f, 0.0625f, 0.3f, 1.0f);
+    REQUIRE(snow.DeficitAt(0, 0) == Catch::Approx(0.3f));
+    snow.falling = false;
+    for (int i = 0; i < 600; ++i) snow.Advance(1.0f);
+    CHECK(snow.DeficitAt(0, 0) == Catch::Approx(0.3f));
+    const auto before = snow.Snapshot(0, 0);
+    const auto elsewhere = snow.Snapshot(90000, -90000);
+    CHECK(snow.Snapshot(0, 0) == before);
+    snow.Deposit(0.1f);
+    CHECK(snow.DeficitAt(0, 0) == Catch::Approx(0.2f));
+    snow.Deposit(0.3f);
+    CHECK(snow.DeficitAt(0, 0) == 0.0f);
+    CHECK(snow.Depth() == Catch::Approx(0.5f));
+    snow.Stamp(-0.0625f, -0.0625f, 0.2f);
+    CHECK(snow.DeficitAt(-1, -1) > 0.0f);
+    snow.enabled = false;
+    CHECK(snow.Snapshot(0, 0)[3] == 0.0f);
+    snow.enabled = true;
+    CHECK(snow.DeficitAt(-1, -1) > 0.0f);
+    snow.Reset();
+    CHECK(snow.Chunks() == 0);
+    CHECK(snow.Depth() == 0.0f);
+}
+
+TEST_CASE("Snow tracks interpolate travel and ignore teleports", "[snow][terrain]")
+{
+    SnowField snow;
+    snow.enabled = true;
+    snow.Deposit(0.2f);
+    snow.Trail(0, 0, 10, 0, 0.2f);
+    for (int x = 0; x < 80; ++x) CHECK(snow.DeficitAt(x, 0) > 0.0f);
+    const auto count = snow.Chunks();
+    snow.Trail(0, 0, 10000, 0, 0.2f);
+    CHECK(snow.Chunks() == count);
+    snow.Stamp(2, 2, 3, 1.0f);
+    CHECK(snow.DeficitAt(16, 16) == Catch::Approx(0.2f));
+    snow.Deposit(0.1f);
+    CHECK(snow.DeficitAt(16, 16) == Catch::Approx(0.1f));
+}
+
+TEST_CASE("Snow rejects invalid inputs and snowfall fills even at maximum depth", "[snow][terrain]")
+{
+    SnowField snow;
+    snow.enabled = true;
+    snow.Deposit(0.5f);
+    snow.Stamp(0.0625f, 0.0625f, 0.3f, 1.0f);
+    snow.metresPerMinute = 0.1f;
+    for (int i = 0; i < 60; ++i) snow.Advance(1.0f);
+    CHECK(snow.Depth() == Catch::Approx(0.5f));
+    CHECK(snow.DeficitAt(0, 0) == Catch::Approx(0.4f));
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const auto count = snow.Chunks();
+    snow.Trail(0, 0, 1, 1, nan);
+    snow.Stamp(nan, 0, 1);
+    snow.Deposit(nan);
+    CHECK(snow.Chunks() == count);
+    CHECK(snow.Depth() == Catch::Approx(0.5f));
+    CHECK(snow.Snapshot(nan, 0)[3] == 0.0f);
+    CHECK(snow.Snapshot(1e30f, 0)[3] == 0.0f);
+}
 
 namespace
 {

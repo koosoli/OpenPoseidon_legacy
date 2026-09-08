@@ -2253,6 +2253,8 @@ extern "C"
     /* Refresh the terrain params UBO without re-uploading the heightmap. Cheap; called every
      * frame to animate the coast wet band (sea_level / time / swash / wet_*). */
     WGR_API void wgr_terrain_set_params(WgrRenderer* renderer, const WgrTerrainParams* params);
+    /* Experimental snow: four header floats followed by a 512x512 deficit window. */
+    WGR_API void wgr_terrain_set_snow(WgrRenderer* renderer, const float* data, uint32_t count);
 
     /* Set the terrain ground layers: `handles[i]` is the wgr_texture_create
      * handle for Landscape texture index i (0 = the built-in white fallback).

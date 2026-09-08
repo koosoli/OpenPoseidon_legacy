@@ -45,6 +45,7 @@ enum RainOcclusion
 
 struct RainParams
 {
+    bool snowflakes = false;
 	// -- field ------------------------------------------------------------
 	// Defaults are what a mid-range GPU holds at frame time WITH occlusion on.
 	// Density is the first thing to raise and the last thing you miss; the
@@ -277,5 +278,6 @@ private:
 
 /// The live rain authority, next to GWind.
 extern RainSystem GRain;
+extern RainSystem GSnowFlakes;
 
 } // namespace Poseidon

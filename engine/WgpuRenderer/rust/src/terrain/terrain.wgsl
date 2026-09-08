@@ -49,6 +49,26 @@ const GRID_N: f32 = 32.0;
 // two never double-shadow the same ground.
 @group(1) @binding(2) var shadow_mask: texture_2d<f32>;
 @group(1) @binding(3) var shadow_mask_samp: sampler;
+struct SnowData {
+    info: vec4<f32>, // world origin xz, texel metres, undisturbed depth
+    deficits: array<f32>,
+};
+@group(1) @binding(4) var<storage, read> snow: SnowData;
+
+fn snow_depth(world_xz: vec2<f32>) -> f32 {
+    let depth = snow.info.w;
+    if (depth <= 0.0) { return 0.0; }
+    let t = (world_xz - snow.info.xy) / max(snow.info.z, 0.125) - vec2<f32>(0.5);
+    if (any(t < vec2<f32>(0.0)) || any(t >= vec2<f32>(511.0))) { return depth; }
+    let b = vec2<u32>(floor(t));
+    let f = fract(t);
+    let i = b.y * 512u + b.x;
+    let deficit = mix(mix(snow.deficits[i], snow.deficits[i + 1u], f.x),
+                      mix(snow.deficits[i + 512u], snow.deficits[i + 513u], f.x), f.y);
+    // Detail LOD only: leaving this window never deletes the persistent CPU track.
+    let edge = min(min(t.x, t.y), min(511.0 - t.x, 511.0 - t.y));
+    return max(0.0, depth - deficit * smoothstep(0.0, 24.0, edge));
+}
 // Bindless ground textures: one texture_2d per Landscape texture index, native
 // size/format/mips. Indexed non-uniformly per fragment (needs the device's
 // SAMPLED_TEXTURE_..._NON_UNIFORM_INDEXING feature).
@@ -697,7 +717,9 @@ fn vs_terrain(
     let grid_coarse = (round(gidx * 0.5) * 2.0) / GRID_N;
     let world_xz = origin + mix(grid, grid_coarse, morph_k) * size;
 
-    let height = sample_height(world_xz) - grid_in.z * (size / GRID_N) * skirt_k;
+    let bare_height = sample_height(world_xz);
+    let snow_height = snow_depth(world_xz) * smoothstep(tp.sea_level, tp.sea_level + 0.25, bare_height);
+    let height = bare_height + snow_height - grid_in.z * (size / GRID_N) * skirt_k;
     let world_rel = vec3<f32>(world_xz.x, height, world_xz.y) - frame.cam_pos.xyz;
 
     var out: VsOut;
@@ -920,6 +942,20 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
         n = normalize(t_axis * authored_normal_ts.x
                     + b_axis * authored_normal_ts.y
                     + geometric_n * max(authored_normal_ts.z, 1e-3));
+    }
+
+    if (snow.info.w > 0.0) {
+        let dry = smoothstep(tp.sea_level, tp.sea_level + 0.25, sample_height(in.world_xz));
+        let snow_h = snow_depth(in.world_xz) * dry;
+        let coverage = smoothstep(0.002, 0.04, snow_h) * smoothstep(0.35, 0.7, geometric_n.y);
+        let compacted = clamp(1.0 - snow_h / max(snow.info.w, 0.001), 0.0, 1.0);
+        var snow_rgb = vec3<f32>(0.70, 0.75, 0.80) * (1.0 - compacted * 0.28);
+        if (linear <= 0.5) { snow_rgb = ground_linear_to_srgb(snow_rgb); }
+        rgb = mix(rgb, snow_rgb, coverage);
+        let h = 0.125;
+        let dx = (snow_depth(in.world_xz + vec2<f32>(h, 0.0)) - snow_depth(in.world_xz - vec2<f32>(h, 0.0))) / (2.0 * h);
+        let dz = (snow_depth(in.world_xz + vec2<f32>(0.0, h)) - snow_depth(in.world_xz - vec2<f32>(0.0, h))) / (2.0 * h);
+        n = normalize(mix(n, geometric_n, coverage) + vec3<f32>(-dx, 0.0, -dz) * geometric_n.y * dry);
     }
 
     // Combined sun shadow: CSM (objects + near contact) and the long-range

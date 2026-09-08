@@ -1392,6 +1392,8 @@ void Tank::Simulate(float deltaT, SimulationImportance prec)
             IsMoved();
         }
 
+        _track.UpdateSnow(*this, !_landContact || DirectionUp().Y() < 0.3f);
+
         // simulate track drawing
         if (EnableVisualEffects(prec))
         {

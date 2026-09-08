@@ -1,4 +1,5 @@
 #include <Poseidon/Core/Global.hpp>
+#include <Poseidon/World/Weather/SnowField.hpp>
 #include "SimVehicleCost.hpp" // PERF-023
 #include <Poseidon/Input/CheatCode.hpp>
 #include <Poseidon/Input/ControllerUiLayout.hpp>
@@ -749,6 +750,7 @@ void World::SimulateFastVehicles(float deltaT, VehicleSimulation simul)
 
 void World::SimulateCloudlets(float deltaT)
 {
+    GSnow().Advance(deltaT);
     SimulationImportance prec = SimulateVisibleFar;
 
     // POSEIDON_TEST_SMOKE=1 drops one new-system plume in front of the camera a

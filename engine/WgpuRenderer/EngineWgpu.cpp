@@ -2440,6 +2440,11 @@ void EngineWgpu::ApplyPendingRendererSettings(PendingRendererSettings& p)
         wgr_terrain_set_params(_renderer, &p.terrainParams);
         p.terrainParamsDirty = false;
     }
+    if (!p.snowData.empty())
+    {
+        wgr_terrain_set_snow(_renderer, p.snowData.data(), static_cast<uint32_t>(p.snowData.size()));
+        p.snowData.clear();
+    }
     if (p.smokeDirty)
     {
         wgr_set_smoke_shadow(_renderer, p.smokeBlobs.empty() ? nullptr : p.smokeBlobs.data(),

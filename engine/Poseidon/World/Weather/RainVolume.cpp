@@ -22,6 +22,7 @@
 namespace Poseidon
 {
 RainSystem GRain;
+RainSystem GSnowFlakes;
 
 namespace
 {
@@ -478,7 +479,7 @@ void RainSystem::Draw()
     {
         return;
     }
-    Texture* texture = GScene->Preloaded(TextureRain);
+    Texture* texture = GScene->Preloaded(_params.snowflakes ? Flare0 : TextureRain);
     if (texture == nullptr)
     {
         return;
@@ -517,7 +518,7 @@ void RainSystem::Draw()
         // point, which an axis-aligned decal cannot carry (the bead chains
         // this replaced were a workaround for exactly that).
         const float leanRatio = horizontalSpeed / speed;
-        const float streakLength = _params.streakLength * (1.0f + leanRatio);
+        const float streakLength = _params.streakLength * (_params.snowflakes ? 1.0f : 1.0f + leanRatio);
         const Vector3 tailWorld = drop.position - velocity * (streakLength / speed);
 
         Vector3 headView = toView * drop.position;

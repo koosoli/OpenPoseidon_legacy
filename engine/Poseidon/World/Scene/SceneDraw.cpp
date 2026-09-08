@@ -1,4 +1,5 @@
 #include <Poseidon/Core/Application.hpp>
+#include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/Foundation/Algorithms/RadixSort.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Core/Global.hpp>
@@ -705,11 +706,32 @@ void Scene::ObjectsDrawn()
     // RainOff must mute BOTH layers, so the legacy overlay is gated too -- it is no
     // longer unconditional. RainBoth draws both for A/B comparison.
     const RainMode mode = GRain.Mode();
-    if (mode == RainLegacy || mode == RainBoth)
+    if (!GSnow().enabled) GSnowFlakes.ClearParticles();
+    if (GSnow().enabled)
+    {
+        RainParams flakes;
+        flakes.snowflakes = true;
+        flakes.targetDrops = 700;
+        flakes.maxDrops = 900;
+        flakes.areaRadius = 12.0f;
+        flakes.spawnHeight = 8.0f;
+        flakes.fallSpeed = 1.2f;
+        flakes.streakLength = 0.055f;
+        flakes.streakWidth = 0.055f;
+        flakes.red = flakes.green = flakes.blue = 0.95f;
+        flakes.windResponse = 0.6f;
+        flakes.splashes = false;
+        flakes.densityOverride = GSnow().falling ? std::clamp(GSnow().metresPerMinute * 30.0f, 0.0f, 1.0f) : 0.0f;
+        GSnowFlakes.SetMode(RainParticle);
+        GSnowFlakes.SetForceWeatherRain(false);
+        GSnowFlakes.SetParams(flakes);
+        GSnowFlakes.UpdateAndDraw();
+    }
+    else if (mode == RainLegacy || mode == RainBoth)
     {
         DrawRain();
     }
-    if (mode == RainParticle || mode == RainBoth)
+    if (!GSnow().enabled && (mode == RainParticle || mode == RainBoth))
     {
         GRain.UpdateAndDraw();
     }

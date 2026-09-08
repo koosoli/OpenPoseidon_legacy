@@ -1,4 +1,5 @@
 #include <Poseidon/Core/Application.hpp>
+#include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
@@ -934,6 +935,14 @@ void Landscape::ExplosionDammageEffects(EntityAI* owner, Shot* shot, Object* dir
     if (!type)
     {
         return;
+    }
+
+    if (GSnow().enabled && type->explosive)
+    {
+        const float surface = SurfaceY(pos.X(), pos.Z());
+        const float radius = std::clamp(type->indirectHitRange, 0.5f, 15.0f);
+        if (surface > GetSeaLevel() && std::abs(pos.Y() - surface) < radius)
+            GSnow().Stamp(pos.X(), pos.Z(), radius, 1.0f);
     }
 
     // Grass reactions are visual-only and are deliberately driven from this

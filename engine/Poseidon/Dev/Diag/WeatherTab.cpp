@@ -28,6 +28,7 @@
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Weather/RainVolume.hpp>
 #include <Poseidon/World/Weather/WindModel.hpp>
+#include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/World/World.hpp>
 
 #include <algorithm>
@@ -926,6 +927,20 @@ void DrawWeatherStateSection()
 
 void DrawWeatherTab()
 {
+    if (ImGui::CollapsingHeader("Experimental snow"))
+    {
+        auto& snow = GSnow();
+        ImGui::Checkbox("Enable snow cover (experimental)", &snow.enabled);
+        ImGui::Checkbox("Accumulate new snow", &snow.falling);
+        ImGui::SliderFloat("Snowfall (m/min)", &snow.metresPerMinute, 0.0f, 0.2f, "%.3f");
+        ImGui::SliderFloat("Maximum snow depth (m)", &snow.maxDepth, 0.05f, 1.0f, "%.2f");
+        if (ImGui::Button("Add 10 cm of snow")) snow.Deposit(0.1f);
+        ImGui::SameLine();
+        if (ImGui::Button("Clear snow and tracks")) snow.Reset();
+        ImGui::Text("Depth %.1f cm; persistent chunks %zu / %zu", snow.Depth() * 100.0f, snow.Chunks(), SnowField::MaxChunks);
+        if (snow.Rejected()) ImGui::TextWrapped("Track storage full: existing tracks retained; new stamps skipped.");
+        ImGui::TextWrapped("Mission-local terrain experiment. Tracks do not expire with time or camera movement; only new snowfall fills them. No savegame/network replication or changed ground collision yet.");
+    }
     DrawReadout();
     ImGui::Spacing();
     DrawOverrideSection();
