@@ -36,6 +36,7 @@
 #include <Poseidon/Graphics/Rendering/Shape/ObjectAdmitProfile.hpp> // streamed-admission split timers
 #include <Poseidon/Dev/Diag/LightingDiag.hpp>
 #include <Poseidon/Graphics/Shadow/ShadowMath.hpp> // per-frame local-light gauges (Forward+ gate evidence)
+#include <Poseidon/Graphics/Shadow/ShadowBasis.hpp>
 #include <Poseidon/Graphics/Rendering/Frame/PresentationSnapshot.hpp> // RenderSnapshot S1: the frame's environment block
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
 #include <Poseidon/World/MapTypes.hpp>                         // MapBush (spherical/canopy-normal flagging)
@@ -3771,9 +3772,23 @@ void EngineWgpu::NextFrame()
                     // The absolute projection is identical either way; only the basis it is
                     // written in changes, so the depth pass keeps _smCamPos below and each
                     // camera gets its own here.
+                    const float* localShadowBasis = _cameras[i].pos;
+                    static bool reportedBasisMismatch = false;
+                    if (Poseidon::shadow::LocalShadowBasisMismatch(
+                            localShadowBasis, cameras[i].cam_pos.x, cameras[i].cam_pos.y,
+                            cameras[i].cam_pos.z, _localShadowCount) && !reportedBasisMismatch)
+                    {
+                        reportedBasisMismatch = true;
+                        LOG_ERROR(Graphics,
+                                  "LGT-025: camera {} local-shadow lookup basis mismatch: "
+                                  "camera=[{},{},{}] basis=[{},{},{}] views={}",
+                                  i, cameras[i].cam_pos.x, cameras[i].cam_pos.y, cameras[i].cam_pos.z,
+                                  localShadowBasis[0], localShadowBasis[1], localShadowBasis[2],
+                                  _localShadowCount);
+                    }
                     for (int k = 0; k < _localShadowCount && k < kMaxLocalShadows; k++)
                     {
-                        const Poseidon::shadow::Mat4 vp = LocalShadowVP(k, _cameras[i].pos);
+                        const Poseidon::shadow::Mat4 vp = LocalShadowVP(k, localShadowBasis);
                         std::memcpy(sb.local_vp[k].m, vp.m.data(), sizeof(sb.local_vp[k].m));
                     }
                     // {count, darkness, texel_size, first_layer}. first_layer is where the

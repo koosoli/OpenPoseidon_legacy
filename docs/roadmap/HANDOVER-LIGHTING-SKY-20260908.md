@@ -23,6 +23,8 @@ the owner's Waterline video reference:
 [WATER-CLOUD-FILTERING-20260908.md](decisions/WATER-CLOUD-FILTERING-20260908.md).
 Smoke wall/roof bounds, shared render-query caching and remaining indoor
 performance/visual limits: [SMOKE-CONTACT-20260908.md](decisions/SMOKE-CONTACT-20260908.md).
+Camera-basis diagnostic and attached-bulb visibility follow-up:
+[LOCAL-LIGHT-GUARDS-20260908.md](decisions/LOCAL-LIGHT-GUARDS-20260908.md).
 
 | | |
 |---|---|

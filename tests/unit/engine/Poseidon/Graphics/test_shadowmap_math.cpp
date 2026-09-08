@@ -2,6 +2,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <Poseidon/Graphics/Shadow/ShadowMath.hpp>
+#include <Poseidon/Graphics/Shadow/ShadowBasis.hpp>
+#include <limits>
 
 #include <cmath>
 #include <stddef.h>
@@ -16,6 +18,21 @@
 // "correct occlusion" objectively.
 
 using namespace Poseidon::shadow;
+
+TEST_CASE("Local shadow basis guard detects receiver origin errors", "[Graphics][ShadowMath][ShadowBasis]")
+{
+    const float basis[] = {7764.0f, 23.0f, 4408.0f};
+    REQUIRE_FALSE(LocalShadowBasisMismatch(basis, 7764, 23, 4408, 24));
+    REQUIRE_FALSE(LocalShadowBasisMismatch(basis, 7765, 23, 4408, 24));
+    REQUIRE(LocalShadowBasisMismatch(basis, 7765.01f, 23, 4408, 24));
+    REQUIRE(LocalShadowBasisMismatch(basis, 7764.8f, 23.8f, 4408, 1));
+    REQUIRE(LocalShadowBasisMismatch(basis, 7764, 8000, 4408, 1));
+    REQUIRE_FALSE(LocalShadowBasisMismatch(basis, 7764, 8000, 4408, 0));
+    REQUIRE(LocalShadowBasisMismatch(basis, std::numeric_limits<float>::quiet_NaN(), 23, 4408, 1));
+    // Separate depth and receiver origins are valid when each lookup uses its own basis.
+    const float receiver[] = {7764, 8000, 4408};
+    REQUIRE_FALSE(LocalShadowBasisMismatch(receiver, 7764, 8000, 4408, 24));
+}
 
 namespace
 {

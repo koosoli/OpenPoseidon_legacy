@@ -596,6 +596,18 @@ void Scene::DrawFlares()
                         occPos = light->Position() + toCam * (floatMin(0.8f, len * 0.5f) / len);
                 }
                 float occ = GetOcclusions()->TestSphereWSpace(occPos, glow.enabled ? 0.2f : 0.4f);
+                if (wgpu && glow.enabled && light->AttachedOn())
+                {
+                    // The coarse depth buffer has no object identity. For attached bulbs,
+                    // query view geometry instead, excluding only their own carrier (and
+                    // the first-person camera carrier). FlareIntensity already rejects
+                    // the rear hemisphere; terrain visibility was checked above.
+                    CollisionBuffer blockers;
+                    Object* cameraCarrier = GWorld->GetCameraEffect() ? nullptr : GWorld->CameraOn();
+                    GLandscape->ObjectCollision(blockers, cameraCarrier, light->AttachedOn(),
+                                                camPos, light->Position(), 0.0f, ObjIntersectView);
+                    occ = blockers.Size() == 0 ? 1.0f : 0.0f;
+                }
                 a *= occ;
                 // Still a hard ceiling, just a higher one: an alpha of 1 would paint the
                 // flare's own core over the bulb as a flat opaque blob, which is exactly the
