@@ -31,7 +31,7 @@ try {
  $reader=[IO.StreamReader]::new($stream)
  $writer=[IO.StreamWriter]::new($stream,[Text.UTF8Encoding]::new($false))
  $writer.AutoFlush=$true
- function Send($command) {
+ function Send($command, $expected=$null) {
   $writer.WriteLine(($command | ConvertTo-Json -Compress))
   do {
    $line=$reader.ReadLine()
@@ -39,19 +39,20 @@ try {
    $r=$line | ConvertFrom-Json
   } while ($null -eq $r.ok)
   if (!$r.ok) {throw $line}
+  if ($null -ne $expected -and $r.result -cne $expected) {throw "Unexpected result: $line; expected $expected"}
   Write-Output $line
  }
  Start-Sleep -Seconds 18
  if ($Menu) {
   Send @{cmd='exec';code='triSetLanguage "English"; triClickText "SINGLE MISSION"'}
   Start-Sleep -Seconds 3
-  Send @{cmd='eval';code='triAssertListText [101,"Showcase Lab - Physics and Light"]'}
-  Send @{cmd='eval';code='triSelectListByData [101,"ShowcaseLab.Intro"]'}
+  Send @{cmd='eval';code='triAssertListText [101,"Showcase Lab - Physics and Light"]'} '"OK"'
+  Send @{cmd='eval';code='triSelectListByData [101,"ShowcaseLab.Intro"]'} 'true'
   Send @{cmd='screenshot';path=(Join-Path $out 'mission-menu.png')}
   Send @{cmd='exec';code='triClickText "Play"'}
   Start-Sleep -Seconds 18
  }
- Send @{cmd='eval';code='typeOf labNormal'}
+ Send @{cmd='eval';code='typeOf labNormal'} '"LabPanelNormal"'
  Send @{cmd='exec';code='hint ""; showCinemaBorder false; labCamera = "camera" camCreate [9483,3488,9]; labCamera cameraEffect ["internal","back"]; labCamera camSetTarget [9503,3507,0]; labCamera camCommit 0'}
  Start-Sleep -Seconds 4
  Send @{cmd='screenshot';path=(Join-Path $out 'campus.png')}
@@ -70,14 +71,14 @@ try {
  Send @{cmd='exec';code='[player,player,labDay] exec "action.sqs"'}
  Start-Sleep -Seconds 4
  Send @{cmd='screenshot';path=(Join-Path $out 'materials-night.png')}
- Send @{cmd='eval';code='triPhysicsShowcase "throw"'}
- Send @{cmd='eval';code='triPhysicsShowcase "throw"'}
- Send @{cmd='eval';code='triPhysicsShowcase "throw"'}
- Send @{cmd='eval';code='triPhysicsShowcase "throw"'}
+ Send @{cmd='eval';code='triPhysicsShowcase "throw"'} '"OK"'
+ Send @{cmd='eval';code='triPhysicsShowcase "throw"'} '"OK"'
+ Send @{cmd='eval';code='triPhysicsShowcase "throw"'} '"OK"'
+ Send @{cmd='eval';code='triPhysicsShowcase "throw"'} '"REFUSED"'
  Send @{cmd='exec';code='[player,player,labCool] exec "action.sqs"'}
  Start-Sleep -Seconds 2
  Send @{cmd='screenshot';path=(Join-Path $out 'lights-cool.png')}
- Send @{cmd='eval';code='triPhysicsShowcase "invalid"'}
+ Send @{cmd='eval';code='triPhysicsShowcase "invalid"'} '"REFUSED"'
  Send @{cmd='exec';code='[player,player,labClear] exec "action.sqs"'}
  Send @{cmd='exit'}
  if (!$p.WaitForExit(30000)) {throw 'Exit timed out'}
