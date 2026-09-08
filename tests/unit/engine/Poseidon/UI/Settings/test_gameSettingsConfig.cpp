@@ -109,7 +109,10 @@ TEST_CASE("GameSettingsConfig: normalize clamps preferred view distance", "[Sett
     CHECK(cfg.Normalize(env));
     CHECK(cfg.preferredViewDistance == GameSettingsConfig::kMinViewDistance);
 
-    cfg.preferredViewDistance = 6000.0f;
+    // Derived from the constant rather than a literal: this was 6000, which stopped being
+    // over-range the moment the maximum went from 5 km to 10 km (VD-001), and the test then
+    // failed for the uninteresting reason that its input had become legal.
+    cfg.preferredViewDistance = GameSettingsConfig::kMaxViewDistance + 1000.0f;
     CHECK(cfg.Normalize(env));
     CHECK(cfg.preferredViewDistance == GameSettingsConfig::kMaxViewDistance);
 }

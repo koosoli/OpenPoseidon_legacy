@@ -20,9 +20,21 @@ struct ViewDistances
 struct ViewDistanceLimits
 {
     float minView = 100.0f;
-    float maxView = 5000.0f;
+    // Keep in step with GameSettingsConfig::kMaxViewDistance (VD-001, 2026-09-08); the two
+    // clamps are applied one after the other and the lower of them is what a player gets.
+    float maxView = 10000.0f;
     float minObject = 100.0f;
-    float objectCap = 3000.0f; // objects never exceed this
+    // 5 km, raised from 3 km on 2026-09-08 (VD-001). This is the same value the --vd CLI
+    // override has been granting all along (GameStateExtUi.cpp SetVisibility), so it is not a
+    // new operating point -- it is the one that was already reachable in dev builds, measured
+    // and made available to players.
+    //
+    // Measured, stock Everon aerial pose (see GameSettingsConfig.hpp for the full table):
+    // going from 900 m to 5 km of objects took the drawn set from 742 to 6,857 instances and
+    // 36.5k to 214k triangles, for +0.05 ms in `Objects: colour alpha-test` and +1.44 ms of
+    // GPU frame -- of which +1.24 ms was the water surface, not the objects. Objects are
+    // close to free here; that is why this cap could move and shadowCap below could not.
+    float objectCap = 5000.0f; // objects never exceed this
     float minShadow = 50.0f;
     float shadowCap = 500.0f;            // shadows never exceed this
     float objectRatio = 600.0f / 900.0f; // objects = objectRatio * view

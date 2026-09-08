@@ -141,6 +141,24 @@ param(
     # stays the default; pass it whenever the resolution is part of what you are measuring.
     [switch]$Windowed,
 
+    # Extra command-line arguments appended verbatim to every repeat of this arm, AFTER the
+    # ones this script builds.  An arm is normally defined by -Env, but not every lever is an
+    # environment variable: the view-distance override is a CLI flag (--vd N, which bypasses
+    # the 5000 m clamp in Scene::SetPreferredViewDistance) and there was previously no way to
+    # sweep it from here at all.  Pass as a plain array, one token per element:
+    #   -ExtraArgs @('--vd','10000')
+    # Quote anything containing spaces yourself; these are joined into the command line as-is.
+    [string[]]$ExtraArgs = @(),
+
+    # --log-level for the run.  A parameter rather than something you pass through -ExtraArgs,
+    # because CLI11 refuses a repeated option outright ("--log-level: At Most 1 required but
+    # received 2") and the run then dies before it renders anything.  'debug' is what you want
+    # when a setting appears not to apply -- several of the lines that say what the engine
+    # actually resolved (view distance, subdivision) are LOG_DEBUG.  Keep 'info' for timing
+    # runs: debug logging is itself a per-frame cost.
+    [ValidateSet('trace', 'debug', 'info', 'warn', 'error')]
+    [string]$LogLevel = 'info',
+
     # Proceed even though another game process is already resident (marks repeats contended).
     [switch]$AllowConcurrent,
 
@@ -417,7 +435,8 @@ try {
         $argumentParts += '--log-file'
         $argumentParts += Quote-Arg $logPath
         $argumentParts += '--log-level'
-        $argumentParts += 'info'
+        $argumentParts += $LogLevel
+        foreach ($extra in $ExtraArgs) { $argumentParts += $extra }
         $argumentString = ($argumentParts -join ' ')
 
         Write-Output ""

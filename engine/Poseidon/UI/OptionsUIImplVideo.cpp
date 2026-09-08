@@ -10,6 +10,7 @@
 #include <Poseidon/UI/UITestEngine.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/Core/Progress.hpp>
+#include <Poseidon/UI/Settings/GameSettingsConfig.hpp> // kMaxViewDistance for the visibility slider
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
 #include <Poseidon/Core/SaveVersion.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
@@ -254,7 +255,12 @@ Control* DisplayOptionsVideo::OnCreateCtrl(int type, int idc, const ParamEntry& 
         {
             PoseidonAssert(type == CT_3DSLIDER);
             C3DSlider* ctrl = new C3DSlider(this, idc, cls);
-            ctrl->SetRange(log(500), log(5000));
+            // Was a hardcoded log(5000). It has to track kMaxViewDistance, or the classic
+            // Options page silently clamps a 10 km setting made on the modern page back down
+            // the moment this slider is built -- and the modern page is the one that is
+            // absent on an install that skipped Install.ps1, so the classic page is what a
+            // fair number of people actually use.
+            ctrl->SetRange(log(500), log(GameSettingsConfig::kMaxViewDistance));
             float range = ctrl->GetRange();
             ctrl->SetSpeed(0.01 * range, 0.1 * range);
             float value = GScene->GetPreferredViewDistance();
