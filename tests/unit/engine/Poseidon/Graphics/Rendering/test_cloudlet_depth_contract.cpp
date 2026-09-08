@@ -44,8 +44,34 @@ class InspectableCloudletSource : public CloudletSource
 {
   public:
     LODShapeWithShadow* ShapeForTest() const { return _cloudletShape; }
+    bool SmokeShadowForTest() const { return _smokeShadow; }
 };
 } // namespace
+
+TEST_CASE("Transient impact particles cannot enter the smoke shadow field", "[Graphics][Effects][Cloudlet]")
+{
+    InspectableCloudletSource source;
+    REQUIRE(source.SmokeShadowForTest());
+    source.SetSmokeShadow(false);
+    REQUIRE_FALSE(source.SmokeShadowForTest());
+    source.SetSmokeShadow(true);
+    REQUIRE(source.SmokeShadowForTest());
+
+    const std::string smokes =
+        ReadTextFile(RepoRoot() / "engine/Poseidon/Graphics/Rendering/Effects/Smokes.cpp");
+    REQUIRE(smokes.find("cloudlet->SetSmokeShadow(_smokeShadow)") != std::string::npos);
+    const size_t shadow = smokes.find("bool Cloudlet::SampleShadow");
+    const size_t density = smokes.find("const float density", shadow);
+    REQUIRE(smokes.substr(shadow, density - shadow).find("if (!_smokeShadow) return false") != std::string::npos);
+    const size_t init = smokes.find("void Crater::Init");
+    const size_t simulate = smokes.find("void Crater::Simulate", init);
+    REQUIRE(smokes.substr(init, simulate - init).find(
+        "_dust.SetSmokeShadow(_isSmoke && !_isBlood && !_isWater)") != std::string::npos);
+    const size_t serialize = smokes.find("LSError Crater::Serialize");
+    const size_t network = smokes.find("NetworkMessageType Crater::GetNMType", serialize);
+    REQUIRE(smokes.substr(serialize, network - serialize).find(
+        "_dust.SetSmokeShadow(_isSmoke && !_isBlood && !_isWater)") != std::string::npos);
+}
 
 TEST_CASE("Cloudlet billboard shapes never write depth", "[Graphics][Effects][Cloudlet]")
 {

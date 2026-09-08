@@ -1084,6 +1084,9 @@ void Cloudlet::Simulate(float deltaT, SimulationImportance prec)
 
 bool Cloudlet::SampleShadow(CloudletShadowSample& out) const
 {
+    // Impact dust, blood and droplets are not dense smoke. Keep their sprites,
+    // but do not inject opaque smoke shadows or substitute volumetric smoke.
+    if (!_smokeShadow) return false;
     const LegacySmokeShading& shading = GLegacySmokeShading();
     // The alpha the particle is actually being drawn with -- fades included, because
     // Smoke::Simulate packs `_alpha * _fadeValue` into the constant colour every step.
@@ -1137,6 +1140,7 @@ CloudletSource::CloudletSource(LODShapeWithShadow* shape, float interval)
 Cloudlet* CloudletSource::Drop(Vector3Par pos, Vector3Par speed, const Vector3* centre)
 {
     Cloudlet* cloudlet = new Cloudlet(_cloudletShape, _cloudletAnimPeriod, _cloudletDuration);
+    cloudlet->SetSmokeShadow(_smokeShadow);
     cloudlet->SetFades(_cloudletFadeIn, _cloudletFadeOut);
     cloudlet->SetGrowUp(_cloudletGrowUp, _cloudletSize * _generalize);
     cloudlet->SetAlpha(_cloudletAlpha);
@@ -1689,6 +1693,7 @@ void Crater::Init(float timeToLive, float size, bool smoke, bool blood, bool wat
     _isWater = water;
     _isBlood = blood && ENGINE_CONFIG.blood;
     _size = size;
+    _dust.SetSmokeShadow(_isSmoke && !_isBlood && !_isWater);
 
     // set crater parameters
     SetFades(0.1, timeToLive * 0.6);
@@ -1791,6 +1796,8 @@ LSError Crater::Serialize(ParamArchive& ar)
     PARAM_CHECK(ar.Serialize("smoke2", _smoke2, 1))
     PARAM_CHECK(ar.Serialize("smoke3", _smoke3, 1))
     PARAM_CHECK(ar.Serialize("dust", _dust, 1))
+    // Reconstruct from existing crater flags, including saves predating this policy.
+    _dust.SetSmokeShadow(_isSmoke && !_isBlood && !_isWater);
     PARAM_CHECK(ar.Serialize("size", _size, 1))
     PARAM_CHECK(ar.Serialize("dustTimeToLive", _dustTimeToLive, 1))
     return LSOK;

@@ -127,6 +127,7 @@ class Cloudlet: public Smoke
 	//! SMK-039: the alpha the source asked for, before the dispersal thinning scales it.
 	float _alpha0 = -1.0f;
 	bool _groundChecked = false;
+	bool _smokeShadow = true;
 
 	public:
 	Cloudlet( LODShapeWithShadow *shape, float duration, float loopedDuration=0 );
@@ -153,6 +154,7 @@ class Cloudlet: public Smoke
 	void SetTemperature(float t, float dt, CloudletTTable *table);
 	//! SMK-036: this particle as a ground-shadow blob; false if it is too faint to bother.
 	bool SampleShadow(struct CloudletShadowSample &out) const;
+	void SetSmokeShadow(bool enabled) {_smokeShadow = enabled;}
 	//! SMK-035: where the plume this particle belongs to starts, and how long it lives.
 	void SetShadeOrigin(Vector3Par origin, float life) {_shadeOrigin = origin; _shadeLife = life; _shadeAge = 0;}
 
@@ -365,6 +367,7 @@ class CloudletSource: public SerializeClass
 	float _cloudletAnimPeriod;
 	float _cloudletSize;
 	float _cloudletAlpha;
+	bool _smokeShadow = true;
 	float _cloudletGrowUp;
 	float _cloudletFadeIn;
 	float _cloudletFadeOut;
@@ -388,6 +391,7 @@ class CloudletSource: public SerializeClass
 	void SetInterval( float interval ){_interval=interval;}
 	void SetShape( LODShapeWithShadow *shape ){_cloudletShape=shape;}
 	void SetAlpha( float alpha ) {_cloudletAlpha=alpha;}
+	void SetSmokeShadow(bool enabled) {_smokeShadow = enabled;}
 	void SetSize( float size ) {_cloudletSize=size;}
 	void SetTimes( float duration, float animPeriod )
 	{
