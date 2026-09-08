@@ -45,3 +45,7 @@ Primary references, also verified in the local `.tmp-dlss-sdk` dependency:
 Consequently the older successful R8 mask readbacks only prove engine mask
 generation, not that DLSS acts on it. Cloud motion vectors and representative
 cloud depth are still absent. No cloud-trailing fix is claimed here.
+
+94101879 removes the density-pair experiment and is deployed. Final native build,
+sky WGSL validation, renderer-ledger validation and a repeat snow runtime smoke
+test pass. No new default GPU sampling cost remains from this rejected experiment.

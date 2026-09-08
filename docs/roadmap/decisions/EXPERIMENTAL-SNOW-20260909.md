@@ -60,6 +60,12 @@ launch scene comparison, not a universal frame-cost guarantee or a 4K benchmark.
 The Weather controls compile and bind directly to the tested field; actual
 interactive slider operation and long-session/high-density stress remain unverified.
 
+Final integration check: installed 94101879 after rejecting the separate cloud
+experiment; `.tmp-bulb/snow-installed-final.png` again exits 0. Combined targeted
+snow/CDLOD/rain/water/cloudlet tests pass 3,938 assertions in 28 cases; sky WGSL
+validation and the renderer-ledger validator also pass. Cargo.lock retains its
+original foreign-change SHA256 throughout.
+
 ## Destructible terrain feasibility
 
 Heightfield craters are feasible; caves and overhangs need a different geometry
