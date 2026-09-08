@@ -93,6 +93,9 @@ systems:
       with tests; their installed visual comparison is still pending. Interior
       two-camera acceptance and a measured larger local-shadow view budget remain
       open. See decisions/LOCAL-LIGHT-GUARDS-20260908.md for evidence and limits.
+      Zeus lamp controls also offer optional 1000..12000 K colour temperature,
+      retaining custom RGB, authored-colour fallback, intensity and spill controls.
+      Temperature math is tested; installed UI verification is pending.
     production_call_sites:
       - file: engine/WgpuRenderer/EngineWgpu.cpp
         symbol: LocalShadowBasisMismatch

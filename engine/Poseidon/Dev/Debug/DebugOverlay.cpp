@@ -1587,7 +1587,14 @@ void DrawZeusTab()
         const float beforeAmbient = lamp.ambientScale;
         bool colourChanged = Dev::Checkbox("Override lamp colour", &lamp.colorOverride);
         ImGui::BeginDisabled(!lamp.colorOverride);
+        colourChanged |= Dev::Checkbox("Use colour temperature", &lamp.useColorTemperature);
+        ImGui::BeginDisabled(!lamp.useColorTemperature);
+        colourChanged |= Dev::SliderFloat("Lamp temperature (K)", &lamp.colorTemperature, 1000.0f, 12000.0f, "%.0f K");
+        Dev::PanelTooltip("Approximate warm-to-cool lamp colour. Intensity is controlled separately. Disable temperature mode for custom RGB.");
+        ImGui::EndDisabled();
+        ImGui::BeginDisabled(lamp.useColorTemperature);
         colourChanged |= Dev::ColorEdit3("Lamp colour", lamp.color);
+        ImGui::EndDisabled();
         ImGui::EndDisabled();
         Dev::PanelTooltip("Applies to existing street lamps immediately. Disable the override to use each lamp's authored colour.");
         ImGui::SetNextItemWidth(160.0f);

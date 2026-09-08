@@ -16,6 +16,16 @@ Base: `725ccc0c`. Foreign `Cargo.lock` is excluded and unchanged.
 - Zeus street-lamp tools expose authored/override colour and intensity 0..8.
   Generation invalidation uses the existing StreetLamp::CreateLight rebuild path.
   Built successfully; interactive control operation is not yet visually verified.
+- Follow-up: the same section now offers optional colour-temperature mode,
+  1000..12000 K, separate from custom RGB. Temperature/mode changes increment
+  the same generation and existing lamps resolve the selected colour when rebuilt.
+  Default RGB and intensity are unchanged; turning off the colour override restores
+  authored colours. Pool size, spill strength/reach/ambient and glow remain available.
+  Temperature is an approximate display-RGB fit, not a spectral lamp simulation:
+  [formula reference](https://tannerhelland.com/2012/09/18/convert-temperature-rgb-algorithm-code.html).
+  Game/tests build passed; targeted light/decal/basis tests passed 359 assertions
+  in 4 cases, including temperature endpoints, non-finite input and unchanged mode
+  default. Installation/UI verification awaits the owner's running game closing.
 - Smoke self-shadow density is summed once per occupied cell, then sampled without
   repeatedly walking every neighbour. Unit tests compare to the previous sum.
   Empty-space sphere sweeps now reject cells with no overlapping object bounds

@@ -1,8 +1,26 @@
 #include <catch2/catch_test_macros.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/World/Scene/Object.hpp>
+#include <Poseidon/Dev/Diag/LightingDiag.hpp>
+#include <limits>
 
 using namespace Poseidon;
+
+TEST_CASE("Lamp temperatures are bounded and preserve the custom default", "[Graphics][LightVisibility]")
+{
+    const auto warm = Dev::LampTemperatureColor(2700);
+    const auto cool = Dev::LampTemperatureColor(12000);
+    REQUIRE(warm[0] > warm[1]);
+    REQUIRE(warm[1] > warm[2]);
+    REQUIRE(cool[2] > cool[0]);
+    REQUIRE(Dev::LampTemperatureColor(0) == Dev::LampTemperatureColor(1000));
+    REQUIRE(Dev::LampTemperatureColor(50000) == cool);
+    REQUIRE(Dev::LampTemperatureColor(std::numeric_limits<float>::quiet_NaN()) == warm);
+    for (int k = 1000; k <= 12000; k += 100)
+        for (const float channel : Dev::LampTemperatureColor(static_cast<float>(k)))
+            REQUIRE((channel >= 0 && channel <= 1));
+    REQUIRE_FALSE(Dev::LampLightSettings{}.useColorTemperature);
+}
 
 namespace
 {

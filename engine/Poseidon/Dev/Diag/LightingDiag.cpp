@@ -1,9 +1,25 @@
 #include <Poseidon/Dev/Diag/LightingDiag.hpp>
 #include <cstdlib>
 #include <cstdio>
+#include <algorithm>
+#include <cmath>
 
 namespace Poseidon::Dev
 {
+
+std::array<float, 3> LampTemperatureColor(float kelvin)
+{
+    // Approximate display-RGB temperature fit, matching the existing RGB control.
+    // Formula: tannerhelland.com/2012/09/18/convert-temperature-rgb-algorithm-code.html
+    const float t = std::clamp(std::isfinite(kelvin) ? kelvin : 2700.0f, 1000.0f, 12000.0f) / 100.0f;
+    const float r = t <= 66.0f ? 255.0f : 329.698727446f * std::pow(t - 60.0f, -0.1332047592f);
+    const float g = t <= 66.0f ? 99.4708025861f * std::log(t) - 161.1195681661f
+                              : 288.1221695283f * std::pow(t - 60.0f, -0.0755148492f);
+    const float b = t >= 66.0f ? 255.0f : t <= 19.0f ? 0.0f
+                                    : 138.5177312231f * std::log(t - 10.0f) - 305.0447927307f;
+    return {std::clamp(r / 255.0f, 0.0f, 1.0f), std::clamp(g / 255.0f, 0.0f, 1.0f),
+            std::clamp(b / 255.0f, 0.0f, 1.0f)};
+}
 
 LightCounters& GLightCounters()
 {

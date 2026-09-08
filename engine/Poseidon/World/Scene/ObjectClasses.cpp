@@ -313,8 +313,11 @@ void StreetLamp::CreateLight(Matrix4Par pos)
             // LAMP-004: the lamp's colour. The authored (0.90, 0.80, 0.60) is a warm white;
             // a period street lamp is sodium orange, which is what the owner asked for.
             const Color authored = Type()->_colorDiffuse;
+            const auto tint = lampSet.useColorTemperature
+                                  ? Poseidon::Dev::LampTemperatureColor(lampSet.colorTemperature)
+                                  : std::array<float, 3>{lampSet.color[0], lampSet.color[1], lampSet.color[2]};
             const Color diffuse = (lampSet.colorOverride
-                                       ? Color(lampSet.color[0], lampSet.color[1], lampSet.color[2], authored.A())
+                                       ? Color(tint[0], tint[1], tint[2], authored.A())
                                        : authored) *
                                   lampSet.brightnessScale;
             const Color ambient = Type()->_colorAmbient * (lampSet.brightnessScale * lampSet.ambientScale);

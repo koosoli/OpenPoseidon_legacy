@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 
 // Per-frame local-light gauges (roadmap Phase 3: "active-light count and lighting
 // shader cost"). Written once per frame by EngineWgpu's light selection, read by the
@@ -106,6 +107,8 @@ struct LampLightSettings
     // asked for orange; POSEIDON_LAMP_COLOR=r,g,b overrides, colorOverride=false keeps the
     // authored colour.
     bool colorOverride = true;
+    bool useColorTemperature = false;
+    float colorTemperature = 2700.0f;
     float color[3] = {1.00f, 0.58f, 0.20f};
     // The cone CUTS: lights_contrib `continue`s outside it, so a pure spot leaves the
     // surroundings absolutely black, which is as wrong as the floodlight was. A second,
@@ -210,5 +213,6 @@ LightVolumeConeSettings& GLightVolumeCone();
 
 // Call after changing any field above.
 void LampLightSettingsChanged();
+std::array<float, 3> LampTemperatureColor(float kelvin);
 
 } // namespace Poseidon::Dev
