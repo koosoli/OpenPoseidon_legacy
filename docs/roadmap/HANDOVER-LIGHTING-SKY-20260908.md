@@ -16,6 +16,8 @@ records rotor pose isolation, lamp controls, smoke measurements, boat drag and f
 including the still-open visual checks and additional infantry/cloud reports.
 The floating-body implementation and its limits are recorded in
 [INFANTRY-WATER-20260908.md](decisions/INFANTRY-WATER-20260908.md).
+Selective upstream review and the verified scene-preloader lifecycle port:
+[UPSTREAM-REVIEW-20260908.md](decisions/UPSTREAM-REVIEW-20260908.md).
 
 | | |
 |---|---|

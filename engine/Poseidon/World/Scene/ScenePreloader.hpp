@@ -10,8 +10,8 @@ class Scene;
 
 // ScenePreloader populates Scene's preloaded-shape slots from the
 // `CfgScenePreload` config tree.  Apps that render terrain / particles
-// / decals call `Initialize(scene)` once after the engine + scene are
-// constructed.  Apps that don't (utility tools) skip it; Scene's slots
+// / decals call `Initialize(scene)` for each new scene and `Shutdown()`
+// when it is destroyed. Apps that don't (utility tools) skip it; Scene's slots
 // stay null and every consumer's `if (Preloaded(X))` guard short-
 // circuits the feature.
 //
