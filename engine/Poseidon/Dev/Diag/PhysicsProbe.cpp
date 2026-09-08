@@ -706,6 +706,7 @@ bool PhysicsShowcaseCommand(const char* command)
         return true;
     }
     else return false;
+    if (!s_settings.emitLight) s_settings.placeOnGround = true;
     return true;
 }
 
