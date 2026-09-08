@@ -74,6 +74,20 @@ spawn the abstract `StreetLamp` type crashed the baseline and was discarded;
 the working fixture uses an existing map lamp instead.
 
 Build and existing light/decal/shadow-basis tests pass (359 assertions, 4 cases).
-Fixed installed comparison pending. This changes source glare visibility, not
+Installed `10fd28f4` passes the same truck capture and the unobstructed control;
+both terminate normally. The previously visible glow disappears from the truck
+silhouette: source ROI x=505..548, y=350..391 RGB-mean falls 40.42 -> 1.03,
+peak 162 -> 5.33 (8-bit capture units). The corresponding flare transitions to
+`occluded`, intensity 0.9863, occ 0, alpha 0.
+
+The unobstructed lamp at world (5097.94,23.80,4010.07) remains visibly glowing,
+with zero geometry blockers and alpha 0.4. The farther lamp at
+(5001.26,23.80,3986.82) reports `dum_mesto2.p3d` as its building blocker and no
+flare. Private captures: `truck-before`, `truck-after`,
+`occlusion-clear-control`. These establish vehicle blocking and a positive
+visibility control; building rejection is also confirmed in runtime logs.
+A separate above-ground hill silhouette replay is not yet captured.
+
+This changes source glare visibility, not
 surface illumination/shadow allocation or volumetric-light transport; those
 must not be claimed fixed by a source-ray change.

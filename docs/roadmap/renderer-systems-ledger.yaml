@@ -98,8 +98,10 @@ systems:
       Temperature math is tested; installed UI verification is pending.
       Street-lamp through-obstacle follow-up makes WGPU terrain rays independent
       of legacy HWTL/glow flags and extends exact view-geometry visibility to
-      unattached local lamps. The baseline truck fixture reproduces glow through
-      its silhouette; fixed runtime evidence is recorded in the same decision.
+      unattached local lamps. Installed 10fd28f4 removes reproduced glow through
+      a truck, retains the unobstructed lamp and reports building occlusion.
+      A separate hill silhouette capture remains open; evidence is in the same
+      decision. Surface-light transport is not changed by this source-glow fix.
     production_call_sites:
       - file: engine/WgpuRenderer/EngineWgpu.cpp
         symbol: LocalShadowBasisMismatch
