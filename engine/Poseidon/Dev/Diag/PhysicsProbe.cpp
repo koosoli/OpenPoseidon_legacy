@@ -630,7 +630,8 @@ bool PhysicsShowcaseCommand(const char* command)
         s_showcaseActive = true;
         ClearPhysicsProbes();
         ResetProbeSettings();
-        s_settings.selfIllum = false;
+        // Keep the probe tool's unlit diagnostic colour. Material/lighting
+        // comparisons belong to the authored gallery, not these debug meshes.
         s_settings.hotkeys = true;
         s_settings.mass = 2.0f;
         s_settings.radius = 0.3f;

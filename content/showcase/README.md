@@ -12,6 +12,8 @@ Use the `LAB:` entries in the player's action menu. The Help entry describes the
 stations. Dev Tools' Physics and Weather tabs remain available for deeper tuning.
 
 - Ahead: 24 stacked boxes and 18 dominoes. Shoot them, push them, or throw a body.
+  These use the probe tool's unlit diagnostic colour; judge surface lighting in
+  the gallery instead. The lit debug-mesh mode has visible shading artifacts.
 - Right: sheltered material gallery, labelled FLAT / NORMAL / GLOSS. Same planar
   geometry and grid albedo below the labels; different normal/specular inputs.
 - Behind: a driveable Jeep, Ural and UH60 for existing vehicle/weather features.

@@ -26,6 +26,10 @@ No stock config override, shader change, copied third-party art or new dependenc
   across repeated traces rather than being launched sideways as in the first run.
 - Script action reset, light mode, drop, night, clear exercised; unknown command
   returned REFUSED. Menu-run process exited 0.
+- Additional action run: thrown sphere contacts displaced stack body 1 from
+  (9494.86, 3504.00) to (9494.82, 3504.14); reset restored the field. Three further
+  light throws returned OK, the fifth light returned REFUSED; cool-light capture
+  showed the gallery lit blue. Clean process exit.
 
 ## Traps Found
 
@@ -46,3 +50,7 @@ browser exposed the reference title/description; the video frames were not
 inspected. Single-player diagnostic bodies are not saved or replicated. General
 Physics-tab overrides can exceed the mission-action budget. No universal FPS
 claim, vehicle-physics migration or closure of the older visual backlog.
+The first lit-probe capture showed severe shading stripes on the diagnostic
+primitives. The campus therefore retains the tool's original unlit colour
+default, not a claim that lit debug meshes were repaired. Authored gallery
+materials remain lit. This does not change the normal Physics tab's defaults.
