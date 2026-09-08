@@ -16,6 +16,14 @@
 
 using namespace Poseidon::Physics;
 
+TEST_CASE("a newly defined probe has no launch velocity", "[physics][showcase]")
+{
+    SphereProbeDef def;
+    REQUIRE(def.velocity[0] == 0.0f);
+    REQUIRE(def.velocity[1] == 0.0f);
+    REQUIRE(def.velocity[2] == 0.0f);
+}
+
 namespace
 {
 int waterEntries = 0;

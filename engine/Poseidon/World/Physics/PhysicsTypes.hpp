@@ -211,7 +211,7 @@ struct SphereProbeDef
     float yaw = 0.0f;
 
     Vector3 position;
-    Vector3 velocity;
+    Vector3 velocity{0, 0, 0};
     float   radius = 0.2f;
     /// kg. Converted to Box3D's density (kg/m^3) from the sphere's own volume, so
     /// the dev UI can speak in a unit a person has intuition about.

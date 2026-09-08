@@ -1,4 +1,4 @@
-param([string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
+param([string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault', [switch]$Menu)
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) { throw 'Use scripts/with-game-lock.sh' }
 $root=Split-Path $PSScriptRoot -Parent
@@ -12,6 +12,9 @@ $listener.Stop()
 $log=Join-Path $out 'showcase.log'
 $mission=Join-Path $GameDir 'Missions/ShowcaseLab.Intro'
 $argsGame=@('--render','wgpu','--window','--no-dev','--width','1280','--height','720','--harness',"$port",'--test-mission',('"'+$mission+'"'),'--log-file',('"'+$log+'"'),'--log-level','debug')
+if ($Menu) {
+ $argsGame=@('--render','wgpu','--window','--no-dev','--width','1280','--height','720','--harness',"$port",'--log-file',('"'+$log+'"'),'--log-level','debug')
+}
 $p=Start-Process -FilePath (Join-Path $GameDir 'OpenPoseidon.exe') -ArgumentList $argsGame -WorkingDirectory $GameDir -PassThru -WindowStyle Hidden
 $null=$p.Handle
 try {
@@ -39,6 +42,15 @@ try {
   Write-Output $line
  }
  Start-Sleep -Seconds 18
+ if ($Menu) {
+  Send @{cmd='exec';code='triSetLanguage "English"; triClickText "SINGLE MISSION"'}
+  Start-Sleep -Seconds 3
+  Send @{cmd='eval';code='triAssertListText [101,"Showcase Lab - Physics and Light"]'}
+  Send @{cmd='eval';code='triSelectListByData [101,"ShowcaseLab.Intro"]'}
+  Send @{cmd='screenshot';path=(Join-Path $out 'mission-menu.png')}
+  Send @{cmd='exec';code='triClickText "Play"'}
+  Start-Sleep -Seconds 18
+ }
  Send @{cmd='eval';code='typeOf labNormal'}
  Send @{cmd='exec';code='hint ""; showCinemaBorder false; labCamera = "camera" camCreate [9483,3488,9]; labCamera cameraEffect ["internal","back"]; labCamera camSetTarget [9503,3507,0]; labCamera camCommit 0'}
  Start-Sleep -Seconds 4

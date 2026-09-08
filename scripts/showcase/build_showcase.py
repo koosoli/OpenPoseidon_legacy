@@ -26,7 +26,8 @@ def box_lod(size, texture='', material='', resolution=1.0, geometry=False):
     normals = [(0, -1, 0), (0, 1, 0), (0, 0, -1), (1, 0, 0), (0, 0, 1), (-1, 0, 0)]
     data = b'P3DM' + struct.pack('<6I', 28, 256, 8, 6, 6, 0)
     data += b''.join(struct.pack('<3fI', *p, 0) for p in points)
-    data += b''.join(struct.pack('<3f', *n) for n in normals)
+    # Shape normals point inward. MeshBuild negates them for the GPU.
+    data += b''.join(struct.pack('<3f', *[-c for c in n]) for n in normals)
     for face, q in enumerate(quads):
         # P3DM loader swaps 0/1 and 2/3. Match the geometry-mass regression fixture.
         order = [q[1], q[0], q[3], q[2]]
@@ -83,8 +84,34 @@ class Stage2 {{texture="#(argb,8,8,3)color(0,{specular},0.7,1,SMDI)"; uvSource="
 '''.encode('ascii')
 
 
-def paa(normal=False):
-    pixels = tga(normal)[18:]
+def paa(normal=False, label=''):
+    pixels = bytearray(tga(normal)[18:])
+    if label:
+        font = {
+            'F': ['11111','10000','10000','11110','10000','10000','10000'],
+            'L': ['10000','10000','10000','10000','10000','10000','11111'],
+            'A': ['01110','10001','10001','11111','10001','10001','10001'],
+            'T': ['11111','00100','00100','00100','00100','00100','00100'],
+            'N': ['10001','11001','11001','10101','10011','10011','10001'],
+            'O': ['01110','10001','10001','10001','10001','10001','01110'],
+            'R': ['11110','10001','10001','11110','10100','10010','10001'],
+            'M': ['10001','11011','10101','10101','10001','10001','10001'],
+            'G': ['01110','10001','10000','10111','10001','10001','01110'],
+            'S': ['01111','10000','10000','01110','00001','00001','11110'],
+        }
+        for y in range(30):
+            for x in range(128):
+                at = (y * 128 + x) * 4
+                pixels[at:at+4] = bytes((24, 32, 40, 255))
+        left = (128 - len(label) * 12) // 2
+        for letter, char in enumerate(label):
+            for y, row in enumerate(font[char]):
+                for x, bit in enumerate(row):
+                    if bit == '1':
+                        for dy in range(2):
+                            for dx in range(2):
+                                at = ((y*2+dy+8)*128+left+letter*12+x*2+dx)*4
+                                pixels[at:at+4] = bytes((90, 195, 240, 255))
     n = 128
     data = struct.pack('<HH', 0x8888, 0)
     while n:
@@ -112,7 +139,11 @@ def build():
         ('Plinth', (1, .4, 1), False, .05),
     ]:
         files[name + '.rvmat'] = material(normal, specular)
-        files[name + '.p3d'] = model(size, r'showcase_lab\grid_co.paa', 'showcase_lab\\' + name + '.rvmat')
+        texture = 'grid_co.paa'
+        if name.startswith('Panel'):
+            texture = name + '_co.paa'
+            files[texture] = paa(label=name[5:].upper())
+        files[name + '.p3d'] = model(size, 'showcase_lab\\' + texture, 'showcase_lab\\' + name + '.rvmat')
         classes.append(f'class Lab{name}: House {{scope=2; displayName="Lab {name}"; model="\\showcase_lab\\{name}.p3d"; armor=10000;}};')
     files['config.cpp'] = ('''class CfgPatches {class ShowcaseLab {units[]={"LabPanelFlat","LabPanelNormal","LabPanelGloss","LabWall","LabRoof","LabPlinth"}; weapons[]={}; requiredVersion=1.96; requiredAddons[]={};};};
 class CfgVehicles {class House;
