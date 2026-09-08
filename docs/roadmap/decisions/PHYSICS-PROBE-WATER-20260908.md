@@ -28,10 +28,17 @@
 ## Verification
 
 - PoseidonGame/PoseidonTests build passed.
-- All physics tests pass: 1523 assertions / 40 cases. New tests cover floating
+- All physics tests pass: 1526 assertions / 41 cases. New tests cover floating
   versus sinking equal-radius bodies, dry land, 100 m/s entry of a 0.01 kg
   sphere, a 600 kg cubic-metre box settling to 60 percent immersion independent
   of the sphere-radius slider, and horizontal shore entry.
+- First installed high-wave test completed normally and reported light bodies
+  rising from depth and riding the CPU wave surface. It exposed two edge cases:
+  ground-placement used the seabed and an initially submerged body could emit
+  a fictitious surface impact. Placement now uses the local water/ground maximum;
+  the first immersion observation cannot count as an impact. A regression test
+  covers submerged initialization. The capture wrapper initially misreported
+  failure because PowerShell exposed a null ExitCode despite complete shutdown.
 - Full-suite readback exposed uninitialized model halfExtents and ProbeSample
   axis. Initialize both; capsule axis follows its actual local X orientation.
   Existing world-isolation/worker determinism tests then pass unchanged.

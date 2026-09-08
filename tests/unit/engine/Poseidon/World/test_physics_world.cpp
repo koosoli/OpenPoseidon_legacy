@@ -105,6 +105,20 @@ TEST_CASE("sideways shore entry emits without a downward throw", "[physics][Prob
     CHECK(waterEntries == 1);
 }
 
+TEST_CASE("already submerged probes do not fabricate a surface impact", "[physics][ProbeWater]")
+{
+    auto backend = CreatePhysicsBackend();
+    REQUIRE(backend->Create());
+    backend->SetWaterEnvironment({FlatProbeWater, CountProbeImpact});
+    waterEntries = 0;
+    SphereProbeDef def;
+    def.position = Vector3(5, -10, 0);
+    def.velocity = Vector3(0, -2, 0);
+    REQUIRE(backend->SpawnSphereProbe(def).IsValid());
+    for (int i = 0; i < 60; ++i) backend->Step(1.0f / 60.0f);
+    CHECK(waterEntries == 0);
+}
+
 namespace
 {
 

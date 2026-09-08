@@ -11,6 +11,7 @@
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Terrain/WaterBodies.hpp>
 #include <cstring>
 #include <Poseidon/World/World.hpp>
 
@@ -464,6 +465,13 @@ void SpawnPhysicsProbe(float throwSpeed)
 
     if (s_settings.placeOnGround && throwSpeed <= 0.0f)
     {
+        const auto placementHeight = [](Vector3Par p)
+        {
+            float water = GLandscape->GetSeaLevel();
+            if (const WaterBody* body = GetWaterBodies().Find(p[0], p[2]))
+                water = body->SurfaceLevelAt(p[0], p[2]);
+            return floatMax(GLandscape->SurfaceY(p[0], p[2]), water);
+        };
         // Walk the view ray out to 100 m and stop where it meets the ground, then
         // sit the body on top of it. Deliberately a march against SurfaceY rather
         // than a physics cast: the physics world may hold only terrain, and a
@@ -474,7 +482,7 @@ void SpawnPhysicsProbe(float throwSpeed)
         for (float t = 1.0f; t < 100.0f; t += 0.25f)
         {
             const Vector3 p = eye + forward * t;
-            if (GLandscape && p[1] <= GLandscape->SurfaceY(p[0], p[2]))
+            if (GLandscape && p[1] <= placementHeight(p))
             {
                 hit = t;
                 break;
@@ -483,7 +491,7 @@ void SpawnPhysicsProbe(float throwSpeed)
         if (hit > 0.0f)
         {
             const Vector3 p = eye + forward * hit;
-            const float   ground = GLandscape->SurfaceY(p[0], p[2]);
+            const float   ground = placementHeight(p);
             // Half the body's own height above the surface, plus a millimetre, so
             // it starts resting rather than interpenetrating and being shoved out.
             float lift = s_settings.radius;

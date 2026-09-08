@@ -239,6 +239,8 @@ public:
         const float gravity = std::max(-b3World_GetGravity(_world).y, 0.0f);
         for (Probe& probe : _probes)
         {
+            const bool firstWaterSample = !probe.waterObserved;
+            probe.waterObserved = true;
             probe.waterCooldown = std::max(0.0f, probe.waterCooldown - dt);
             const auto bounds = b3Body_ComputeAABB(probe.body);
             const auto p = b3Body_GetWorldCenterOfMass(probe.body);
@@ -265,7 +267,7 @@ public:
             const auto v = b3Body_GetLinearVelocity(probe.body);
             const float radius = std::max(0.02f, 0.5f * std::max(bounds.upperBound.x - bounds.lowerBound.x,
                                                                bounds.upperBound.z - bounds.lowerBound.z));
-            const bool entering = !probe.wet;
+            const bool entering = !probe.wet && !firstWaterSample;
             const Vector3 relative(v.x - water.velocity[0], v.y - water.velocity[1], v.z - water.velocity[2]);
             if (_water.impact && emitted < 8 && probe.waterCooldown <= 0.0f &&
                 relative.Size() > 0.25f && (entering || fraction < 0.98f))
@@ -1111,6 +1113,7 @@ private:
         float waterVolume = 0.0f;
         float waterCooldown = 0.0f;
         bool wet = false;
+        bool waterObserved = false;
     };
     std::vector<Probe> _probes;
     WindSettings       _wind;
