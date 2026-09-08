@@ -1,3 +1,15 @@
+// MEASURED CEILINGS, and the method, because the obvious one does not work: flying up cannot
+// measure a ceiling, since the AI climbs at a flat 10.4 m/s whatever margin is left. The
+// aircraft is spawned AT altitude and asked whether it holds.
+//
+//   A-10    ~10,000-10,600 m stock  ->  ~14,000-14,400 m, bracketed from both directions
+//   UH-60        ~2,280 m stock     ->  ~5,500-5,700 m
+//
+// The A/B at 3,111 m: the stock helicopter sinks to 2,251 m; the modern one CLIMBS AWAY, to
+// 4,903 m and still rising. An earlier write-up of this commit said it "holds 3,111 m dead
+// steady" -- that number was read out of a log while the run was still writing it, and it is
+// wrong. Recorded here rather than quietly dropped, because a measurement that is wrong in the
+// harmless direction is the kind nobody re-checks.
 #pragma once
 
 // AIR-010: the flight ceiling.
