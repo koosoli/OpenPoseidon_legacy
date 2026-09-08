@@ -2032,8 +2032,13 @@ impl Sky {
         let cloud_light_coarse = std::env::var("WGR_CLOUD_LIGHT_COARSE")
             .map(|v| v.trim() == "1")
             .unwrap_or(false);
-        let cloud_overrides: [(&str, f64); 3] = [
+        let cloud_density_pair = std::env::var("WGR_CLOUD_DENSITY_PAIR")
+            .map(|v| v.trim() == "1")
+            .unwrap_or(false);
+        eprintln!("[wgr] cloud density pair experiment: {cloud_density_pair}");
+        let cloud_overrides: [(&str, f64); 4] = [
             ("CLOUD_STEPS", cloud_steps),
+            ("CLOUD_DENSITY_PAIR", if cloud_density_pair { 1.0 } else { 0.0 }),
             ("CLOUD_LIGHT_STEPS", cloud_light_steps),
             ("CLOUD_LIGHT_COARSE", if cloud_light_coarse { 1.0 } else { 0.0 }),
         ];

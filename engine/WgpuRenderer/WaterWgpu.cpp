@@ -1524,6 +1524,8 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
                              all[WGR_GPU_TIMER_TERRAIN_PREPASS], all[WGR_GPU_TIMER_TERRAIN_COLOR],
                              std::max(all[WGR_GPU_TIMER_TERRAIN_PREPASS], 0.0f) +
                                  std::max(all[WGR_GPU_TIMER_TERRAIN_COLOR], 0.0f));
+                    LOG_INFO(Graphics, "Cloud GPU ms: march={:.3f} composite={:.3f}",
+                             all[WGR_GPU_TIMER_CLOUD_MARCH], all[WGR_GPU_TIMER_CLOUD_COMPOSITE]);
                 }
             }
         }

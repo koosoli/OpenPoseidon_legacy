@@ -546,6 +546,8 @@ override CLOUD_STEPS: f32 = 128.0;
 override CLOUD_LIGHT_STEPS: i32 = 4;
 // REN-SKY-002: 1 = the light march samples cloud_density_light (two taps), 0 = the full density.
 override CLOUD_LIGHT_COARSE: f32 = 1.0;
+// Opt-in quadrature experiment: two density taps, unchanged light-march budget.
+override CLOUD_DENSITY_PAIR: f32 = 0.0;
 // Volumetric march distance cap (m) along the view ray, measured from the shell entry. Grazing / in-
 // deck rays otherwise traverse tens of km of shell, which at the fixed step cap undersamples the
 // vertical structure into a bright band across the horizon (worst where cloud masses overlap). Bounding
@@ -1378,7 +1380,12 @@ fn march_clouds(
         // cap — NOT against t1, which may be a nearby occluder (a cloud in front of a hill must stay
         // solid). When t1 is the scene occluder we never reach the fade zone, so occlusion is crisp.
         let far_fade = 1.0 - smoothstep(0.6, 1.0, (t - t0) / CLOUD_MARCH_DIST);
-        let dens = cloud_density(p) * far_fade;
+        var dens = cloud_density(p) * far_fade;
+        if (CLOUD_DENSITY_PAIR > 0.5) {
+            let tq = t0 + (i + fract(jitter + 0.5)) * dt;
+            let qfade = 1.0 - smoothstep(0.6, 1.0, (tq - t0) / CLOUD_MARCH_DIST);
+            dens = 0.5 * (dens + cloud_density(pos + dir * tq) * qfade);
+        }
         if (dens > 0.001) {
             let sigma = dens * ext;
             // Beer-Powder dark-edge term (the silver-lining / fluffy look).
