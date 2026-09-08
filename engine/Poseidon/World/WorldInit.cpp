@@ -3,6 +3,7 @@
 #include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/World/Weather/RainVolume.hpp>
 #include <Poseidon/Dev/Diag/FixedStepStats.hpp>
+#include <Poseidon/Dev/Diag/PhysicsProbe.hpp>
 #include <Poseidon/UI/Locale/Stringtable/CodepageTranscode.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Foundation/Logging/Logging.hpp>
@@ -856,6 +857,7 @@ static void GetPosArray(AutoArray<Vector3>& tgt, const ParamEntry& cfg)
 
 void World::InitLandscape(Landscape* landscape)
 {
+    Dev::EndPhysicsShowcase();
     GSnow().Reset();
     GSnowFlakes.ClearParticles();
     GSnow().enabled = false;

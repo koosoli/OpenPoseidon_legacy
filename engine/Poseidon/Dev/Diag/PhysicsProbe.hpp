@@ -16,6 +16,9 @@ namespace Poseidon::Dev
 /// it; anything else launches it along the view direction.
 void SpawnPhysicsProbe(float throwSpeed);
 void ClearPhysicsProbes();
+// Mission actions for the optional, single-player showcase. Unknown commands are inert.
+bool PhysicsShowcaseCommand(const char* command);
+void EndPhysicsShowcase();
 // Release draw resources before the renderer, including during an in-process remount.
 void ShutdownPhysicsProbes();
 

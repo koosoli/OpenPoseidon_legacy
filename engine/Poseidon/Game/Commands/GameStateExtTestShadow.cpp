@@ -6,12 +6,19 @@
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/UI/Settings/GameSettingsConfig.hpp>
 #include <Poseidon/Dev/Debug/DebugOverlay.hpp>
+#include <Poseidon/Dev/Diag/PhysicsProbe.hpp>
 
 #include <cstdio>
 #include <cstring>
 
 using namespace Poseidon::Dev;
 using namespace Poseidon;
+
+GameValue TriPhysicsShowcase(const GameState*, GameValuePar arg)
+{
+    const GameStringType command = static_cast<GameStringType>(arg);
+    return GameValue(PhysicsShowcaseCommand(command) ? "OK" : "REFUSED");
+}
 
 namespace Poseidon
 {

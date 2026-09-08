@@ -1,0 +1,34 @@
+; Everything is mission-local. No weather or user-profile settings are saved.
+~1
+labFlat = "LabPanelFlat" createVehicle [9510,3510,0]
+labNormal = "LabPanelNormal" createVehicle [9515,3510,0]
+labGloss = "LabPanelGloss" createVehicle [9520,3510,0]
+labLeft = "LabWall" createVehicle [9508,3504,0]
+labRight = "LabWall" createVehicle [9522,3504,0]
+labRoof = "LabRoof" createVehicle [9515,3504,4.5]
+labRoof setPos [9515,3504,4.5]
+labJeep = "Jeep" createVehicle [9480,3525,0]
+labTruck = "Ural" createVehicle [9488,3525,0]
+labHeli = "UH60" createVehicle [9460,3525,0]
+labJeep setDir 180
+labTruck setDir 180
+labHeli setDir 180
+player addMagazine "M16"
+player addMagazine "M16"
+player addMagazine "M16"
+labReset = player addAction ["LAB: reset stacks / dominoes", "action.sqs"]
+labThrow = player addAction ["LAB: throw selected body", "action.sqs"]
+labDrop = player addAction ["LAB: place body at crosshair", "action.sqs"]
+labBall = player addAction ["LAB: select ball", "action.sqs"]
+labBox = player addAction ["LAB: select box", "action.sqs"]
+labLight = player addAction ["LAB: light mode (clears bodies)", "action.sqs"]
+labCool = player addAction ["LAB: cool light colour", "action.sqs"]
+labClear = player addAction ["LAB: clear bodies", "action.sqs"]
+labDay = player addAction ["LAB: day / night", "action.sqs"]
+labHelp = player addAction ["LAB: help / station guide", "action.sqs"]
+labNight = false
+~2
+logInfo (triPhysicsShowcase "reset")
+hint "SHOWCASE LAB\n\nAhead: stacks and dominoes. Shoot or throw bodies.\nRight: material gallery, left-to-right FLAT / NORMAL / GLOSS.\nBehind: driveable vehicles and helicopter.\n\nUse the LAB action-menu entries. Light mode clears the physics field and allows four lights.\nDev Tools: Physics and Weather for more controls."
+logInfo "SHOWCASE: ready"
+exit

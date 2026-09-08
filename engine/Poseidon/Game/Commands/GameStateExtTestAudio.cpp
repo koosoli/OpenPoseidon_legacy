@@ -189,6 +189,7 @@ GameValue TriShadowTuning(const GameState*);
 GameValue TriSetViewDistance(const GameState*, GameValuePar);
 GameValue TriAssertVisibility(const GameState*, GameValuePar);
 GameValue TriDevPanelShow(const GameState*, GameValuePar);
+GameValue TriPhysicsShowcase(const GameState*, GameValuePar);
 GameValue TriDevPanelSelectShadows(const GameState*);
 GameValue TriDevPanelSelectMemory(const GameState*);
 GameValue TriShadowSunFactor(const GameState*);
@@ -3188,6 +3189,7 @@ INIT_MODULE(GameStateExtTest, 3)
     GGameState.NewFunction(GameFunction(GameString, "triSetViewDistance", TriSetViewDistance, GameScalar));
     GGameState.NewFunction(GameFunction(GameString, "triAssertVisibility", TriAssertVisibility, GameString));
     GGameState.NewFunction(GameFunction(GameString, "triDevPanelShow", TriDevPanelShow, GameScalar));
+    GGameState.NewFunction(GameFunction(GameString, "triPhysicsShowcase", TriPhysicsShowcase, GameString));
     GGameState.NewNularOp(GameNular(GameString, "triDevPanelSelectShadows", TriDevPanelSelectShadows));
     GGameState.NewNularOp(GameNular(GameString, "triDevPanelSelectMemory", TriDevPanelSelectMemory));
     GGameState.NewNularOp(GameNular(GameString, "triShadowSunFactor", TriShadowSunFactor));

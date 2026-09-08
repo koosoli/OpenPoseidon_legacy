@@ -27,6 +27,8 @@ namespace
 {
 
 PhysicsProbeSettings s_settings;
+PhysicsProbeSettings s_beforeShowcase;
+bool s_showcaseActive = false;
 
 // Harness seeds. The probe settings live behind a panel that holds the mouse, so an
 // automated capture cannot tick a box -- these are the only way to A/B the probe light
@@ -593,6 +595,7 @@ void ClearPhysicsProbes()
 
 void ShutdownPhysicsProbes()
 {
+    EndPhysicsShowcase();
     ClearPhysicsProbes();
     s_solidObjects.clear();
     s_lineObjects.clear();
@@ -601,6 +604,100 @@ void ShutdownPhysicsProbes()
     s_poolUsed = s_solidUsed = s_probeLightsUsed = 0;
     ReleaseProbeMeshes();
     if (auto* world = Physics::GetPhysicsWorld()) world->Destroy();
+}
+
+void EndPhysicsShowcase()
+{
+    if (!s_showcaseActive) return;
+    ClearPhysicsProbes();
+    s_settings = s_beforeShowcase;
+    s_showcaseActive = false;
+}
+
+bool PhysicsShowcaseCommand(const char* command)
+{
+    if (!command || !GWorld || !GScene || !GScene->GetCamera() || !GLandscape)
+        return false;
+    const bool reset = !strcmp(command, "reset");
+    if (!reset && !s_showcaseActive) return false;
+    if (reset)
+    {
+        if (!s_showcaseActive)
+        {
+            s_beforeShowcase = s_settings;
+            RunPhysicsCorpus(); // The previous mission may have registered a different island.
+        }
+        s_showcaseActive = true;
+        ClearPhysicsProbes();
+        ResetProbeSettings();
+        s_settings.selfIllum = false;
+        s_settings.hotkeys = true;
+        s_settings.mass = 2.0f;
+        s_settings.radius = 0.3f;
+        EnsureWorldColliders();
+        auto& world = Physics::EnsurePhysicsWorld();
+        if (!world.Create()) return false;
+        // Desert campus: native terrain supports the bodies; the surrounding
+        // authored architecture is ordinary mission scenery, not physics authority.
+        for (int i = 0; i < 24; ++i)
+        {
+            Physics::SphereProbeDef def;
+            def.shape = Physics::ProbeShape::Box;
+            def.halfExtents = Vector3(0.42f, 0.3f, 0.42f);
+            const float x = 9494.0f + (i % 4) * 0.86f;
+            const float z = 3504.0f + ((i / 4) % 2) * 0.86f;
+            def.position = Vector3(x, GLandscape->SurfaceY(x, z) + 0.3f + (i / 8) * 0.605f, z);
+            def.mass = 2.0f;
+            def.friction = 0.6f;
+            def.restitution = 0.05f;
+            world.SpawnSphereProbe(def);
+        }
+        for (int i = 0; i < 18; ++i)
+        {
+            Physics::SphereProbeDef def;
+            def.shape = Physics::ProbeShape::Box;
+            def.halfExtents = Vector3(0.12f, 0.65f, 0.35f);
+            const float x = 9488.0f + i * 0.55f;
+            def.position = Vector3(x, GLandscape->SurfaceY(x, 3511.0f) + 0.652f, 3511.0f);
+            def.mass = 1.0f;
+            def.friction = 0.6f;
+            def.restitution = 0.05f;
+            world.SpawnSphereProbe(def);
+        }
+        return true;
+    }
+    if (!strcmp(command, "clear")) { ClearPhysicsProbes(); return true; }
+    if (!strcmp(command, "ball")) { s_settings.shape = 0; s_settings.emitLight = false; }
+    else if (!strcmp(command, "box")) { s_settings.shape = 2; s_settings.emitLight = false; }
+    else if (!strcmp(command, "light"))
+    {
+        ClearPhysicsProbes(); // A deliberate four-light budget, not 42 shadowed lamps.
+        s_settings.shape = 0;
+        s_settings.emitLight = true;
+        s_settings.hotkeys = false; // Mission actions enforce the four-light budget.
+        s_settings.lightUsesProbeColor = false;
+        s_settings.lightBrightness = 0.12f;
+        s_settings.lightColor[0] = 1.0f;
+        s_settings.lightColor[1] = 0.72f;
+        s_settings.lightColor[2] = 0.36f;
+    }
+    else if (!strcmp(command, "cool"))
+    {
+        s_settings.lightColor[0] = 0.25f;
+        s_settings.lightColor[1] = 0.65f;
+        s_settings.lightColor[2] = 1.0f;
+        return true;
+    }
+    else if (!strcmp(command, "throw") || !strcmp(command, "drop"))
+    {
+        std::vector<Physics::ProbeSample> samples;
+        if (auto* world = Physics::GetPhysicsWorld()) world->GetProbeSamples(samples);
+        if (samples.size() >= (s_settings.emitLight ? 4u : 128u)) return false;
+        SpawnPhysicsProbe(!strcmp(command, "throw") ? s_settings.throwSpeed : 0.0f);
+        return true;
+    }
+    else return false;
+    return true;
 }
 
 void UpdatePhysicsProbeWind()

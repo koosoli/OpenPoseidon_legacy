@@ -1,0 +1,45 @@
+_id = _this select 2
+? _id == labReset : goto "reset"
+? _id == labThrow : goto "throw"
+? _id == labDrop : goto "drop"
+? _id == labBall : goto "ball"
+? _id == labBox : goto "box"
+? _id == labLight : goto "light"
+? _id == labCool : goto "cool"
+? _id == labClear : goto "clear"
+? _id == labDay : goto "day"
+hint "PHYSICS: shoot the stacks, push the dominoes, or select and throw bodies. Reset rebuilds 42 bodies.\n\nGALLERY: left FLAT, middle ribbed NORMAL, right GLOSS. Same flat geometry and albedo. Enter light mode and throw/place up to four moving lamps. Toggle night for stronger contrast.\n\nVEHICLES: Jeep, Ural, UH60. Weather tab: clouds, wind and experimental snow. Physics tab: body mass, shape, friction and light colour/intensity.\n\nSingle player only. Probe bodies are not saved."
+exit
+#reset
+hint (triPhysicsShowcase "reset")
+exit
+#throw
+hint (triPhysicsShowcase "throw")
+exit
+#drop
+hint (triPhysicsShowcase "drop")
+exit
+#ball
+hint (triPhysicsShowcase "ball")
+exit
+#box
+hint (triPhysicsShowcase "box")
+exit
+#light
+hint (triPhysicsShowcase "light")
+exit
+#cool
+hint (triPhysicsShowcase "cool")
+exit
+#clear
+hint (triPhysicsShowcase "clear")
+exit
+#day
+? labNight : goto "sun"
+skipTime (22 - daytime)
+labNight = true
+exit
+#sun
+skipTime (17 - daytime)
+labNight = false
+exit
