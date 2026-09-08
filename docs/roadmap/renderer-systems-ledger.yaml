@@ -180,6 +180,10 @@ systems:
       residual height. Zero ripple slope preserves FFT/shore waves, with no added
       samples or passes. All 17 water unit/composition tests and the game build
       pass; installed runtime evidence is in decisions/WATER-RIPPLE-20260908.md.
+      Physics-owned dev objects now have mass/volume buoyancy, stable drag,
+      entry spray/ripple events and surface wakes. All 40 physics tests pass;
+      approximation limits and installed evidence are recorded in
+      decisions/PHYSICS-PROBE-WATER-20260908.md.
       Rotor/smoke/lamp changes and
       measured evidence are in decisions/ROTOR-SMOKE-WATER-20260908.md.
 

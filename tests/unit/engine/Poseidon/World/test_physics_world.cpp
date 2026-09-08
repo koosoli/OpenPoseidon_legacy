@@ -11,9 +11,99 @@
 #include <Poseidon/World/Physics/PhysicsWorld.hpp>
 
 #include <memory>
+#include <cmath>
 #include <vector>
 
 using namespace Poseidon::Physics;
+
+namespace
+{
+int waterEntries = 0;
+bool FlatProbeWater(Vector3Par p, ProbeWaterSample& water)
+{
+    water.height = 0;
+    water.velocity = Vector3(0, 0, 0);
+    return p[0] >= 0;
+}
+void CountProbeImpact(Vector3Par, Vector3Par, float, float, bool entering)
+{
+    if (entering) ++waterEntries;
+}
+}
+
+TEST_CASE("probe water supports displaced mass and damps fast entries", "[physics][ProbeWater]")
+{
+    auto backend = CreatePhysicsBackend();
+    REQUIRE(backend->Create());
+    backend->SetWaterEnvironment({FlatProbeWater, CountProbeImpact});
+    waterEntries = 0;
+    SphereProbeDef def;
+    def.velocity = Vector3(0, 0, 0);
+    def.radius = 0.5f; // 524 kg of displaced fresh water when fully submerged.
+    def.position = Vector3(5, 2, 0);
+    def.mass = 100;
+    const auto floating = backend->SpawnSphereProbe(def);
+    def.position = Vector3(10, 2, 0);
+    def.mass = 1000;
+    const auto sinking = backend->SpawnSphereProbe(def);
+    def.position = Vector3(-5, 2, 0);
+    const auto dry = backend->SpawnSphereProbe(def);
+    def.position = Vector3(15, 2, 0);
+    def.velocity = Vector3(0, -100, 0);
+    def.mass = 0.01f;
+    const auto fast = backend->SpawnSphereProbe(def);
+    for (int i = 0; i < 1200; ++i) backend->Step(1.0f / 60.0f);
+    BodyMotion motion;
+    REQUIRE(backend->GetBodyMotion(floating, motion));
+    CHECK(motion.position[1] > 0.1f);
+    CHECK(motion.position[1] < 0.5f);
+    CHECK(std::abs(motion.linearVelocity[1]) < 0.3f);
+    REQUIRE(backend->GetBodyMotion(sinking, motion));
+    CHECK(motion.position[1] < -5);
+    REQUIRE(backend->GetBodyMotion(dry, motion));
+    CHECK(motion.position[1] < -100);
+    REQUIRE(backend->GetBodyMotion(fast, motion));
+    CHECK(std::isfinite(motion.position[1]));
+    CHECK(std::abs(motion.linearVelocity[1]) < 1);
+    CHECK(waterEntries >= 3);
+    CHECK(waterEntries < 20);
+}
+
+TEST_CASE("box water balance uses box volume and the requested kilograms", "[physics][ProbeWater]")
+{
+    auto backend = CreatePhysicsBackend();
+    REQUIRE(backend->Create());
+    backend->SetWaterEnvironment({FlatProbeWater, CountProbeImpact});
+    SphereProbeDef def;
+    def.shape = ProbeShape::Box;
+    def.halfExtents = Vector3(0.5f, 0.5f, 0.5f);
+    def.radius = 0.1f; // Unrelated sphere slider must not change the box mass.
+    def.mass = 600;
+    def.position = Vector3(5, 1, 0);
+    def.velocity = Vector3(0, 0, 0);
+    const auto box = backend->SpawnSphereProbe(def);
+    for (int i = 0; i < 900; ++i) backend->Step(1.0f / 60.0f);
+    BodyMotion motion;
+    REQUIRE(backend->GetBodyMotion(box, motion));
+    CHECK(motion.position[1] > -0.15f);
+    CHECK(motion.position[1] < -0.05f); // 60% of a 1 m cube submerged.
+}
+
+TEST_CASE("sideways shore entry emits without a downward throw", "[physics][ProbeWater]")
+{
+    auto backend = CreatePhysicsBackend();
+    REQUIRE(backend->Create());
+    backend->SetWaterEnvironment({FlatProbeWater, CountProbeImpact});
+    waterEntries = 0;
+    SphereProbeDef def;
+    def.radius = 0.5f;
+    def.mass = 100;
+    def.position = Vector3(-0.5f, 0.4f, 0);
+    def.velocity = Vector3(5, 0, 0);
+    REQUIRE(backend->SpawnSphereProbe(def).IsValid());
+    for (int i = 0; i < 60; ++i) backend->Step(1.0f / 60.0f);
+    CHECK(waterEntries == 1);
+}
 
 namespace
 {

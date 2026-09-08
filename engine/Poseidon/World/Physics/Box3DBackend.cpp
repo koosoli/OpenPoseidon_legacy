@@ -226,7 +226,72 @@ public:
                 }
             }
         }
+        ApplyProbeWater(deltaSeconds);
         b3World_Step(_world, deltaSeconds, SubSteps);
+    }
+
+    void SetWaterEnvironment(const ProbeWaterEnvironment& water) override { _water = water; }
+
+    void ApplyProbeWater(float dt)
+    {
+        if (!_water.sample) return;
+        int emitted = 0;
+        const float gravity = std::max(-b3World_GetGravity(_world).y, 0.0f);
+        for (Probe& probe : _probes)
+        {
+            probe.waterCooldown = std::max(0.0f, probe.waterCooldown - dt);
+            const auto bounds = b3Body_ComputeAABB(probe.body);
+            const auto p = b3Body_GetWorldCenterOfMass(probe.body);
+            ProbeWaterSample water;
+            if (!_water.sample(Vector3(p.x, p.y, p.z), water))
+            {
+                probe.wet = false;
+                continue;
+            }
+            const float height = std::max(bounds.upperBound.y - bounds.lowerBound.y, 0.001f);
+            float fraction = std::clamp((water.height - bounds.lowerBound.y) / height, 0.0f, 1.0f);
+            // Exact spherical-cap volume; other hulls use their oriented world
+            // bounds for partial immersion, but their actual volume at full depth.
+            if (probe.kind == ProbeShape::Sphere) fraction = fraction * fraction * (3.0f - 2.0f * fraction);
+            if (fraction <= 0.0f)
+            {
+                // Surface bobbing is not a fresh impact. Rearm only after the
+                // bottom has genuinely cleared the water, not at float epsilon.
+                if (bounds.lowerBound.y > water.height + std::max(0.03f, height * 0.1f))
+                    probe.wet = false;
+                continue;
+            }
+            const float mass = std::max(b3Body_GetMass(probe.body), 0.001f);
+            const auto v = b3Body_GetLinearVelocity(probe.body);
+            const float radius = std::max(0.02f, 0.5f * std::max(bounds.upperBound.x - bounds.lowerBound.x,
+                                                               bounds.upperBound.z - bounds.lowerBound.z));
+            const bool entering = !probe.wet;
+            const Vector3 relative(v.x - water.velocity[0], v.y - water.velocity[1], v.z - water.velocity[2]);
+            if (_water.impact && emitted < 8 && probe.waterCooldown <= 0.0f &&
+                relative.Size() > 0.25f && (entering || fraction < 0.98f))
+            {
+                _water.impact(Vector3(p.x, water.height, p.z), relative, radius, mass, entering);
+                probe.waterCooldown = entering ? 0.3f : 0.15f;
+                ++emitted;
+            }
+            probe.wet = true;
+            const float displacedMass = 1000.0f * probe.waterVolume * fraction;
+            // Integrate quadratic drag implicitly so a light probe or hard throw
+            // cannot reverse velocity/explode from one explicit drag step.
+            Vector3 predicted = relative + Vector3(0, (displacedMass / mass - 1.0f) * gravity * dt, 0);
+            const float area = 3.14159265f * radius * radius * fraction;
+            predicted *= 1.0f / (1.0f + 250.0f * area * predicted.Size() * dt / mass);
+            // Bound buoyancy-generated rise by the remaining immersion this tick.
+            // Extremely low-density probes otherwise skip out of the surface in
+            // one step. Preserve any genuine pre-existing upward launch velocity.
+            predicted[1] = std::min(predicted[1], std::max(relative[1],
+                std::max(0.0f, water.height - bounds.lowerBound.y) * 0.5f / dt));
+            const Vector3 impulse = (predicted - relative + Vector3(0, gravity * dt, 0)) * mass;
+            b3Body_ApplyLinearImpulseToCenter(probe.body, ToB3(impulse), true);
+            const auto angular = b3Body_GetAngularVelocity(probe.body);
+            const float damping = 1.0f / (1.0f + 3.0f * fraction * dt);
+            b3Body_SetAngularVelocity(probe.body, b3Vec3{angular.x * damping, angular.y * damping, angular.z * damping});
+        }
     }
 
     BodyId AddStaticBody(const ConvexPiece* pieces, int pieceCount, const Matrix4& transform) override
@@ -532,6 +597,10 @@ public:
         }
 
         _probes.push_back(Probe{body, shape, def.radius, halfLength, def.shape, def.halfExtents});
+        _probes.back().waterVolume = b3Shape_ComputeMassData(shape).mass / b3Shape_GetDensity(shape);
+        // The initial density used a sphere estimate even for boxes/capsules.
+        // Make the UI's kilograms authoritative for every primitive shape.
+        b3Shape_SetDensity(shape, std::max(def.mass, 0.001f) / std::max(_probes.back().waterVolume, 1e-9f), true);
         ++_shapeCount;
         return Store(body, 1);
     }
@@ -648,6 +717,13 @@ public:
         Probe probe;
         probe.body = body;
         probe.kind = ProbeShape::Model;
+        std::vector<b3ShapeId> waterShapes(b3Body_GetShapeCount(body));
+        const int waterShapeCount = b3Body_GetShapes(body, waterShapes.data(), static_cast<int>(waterShapes.size()));
+        for (int i = 0; i < waterShapeCount; ++i)
+        {
+            const float density = b3Shape_GetDensity(waterShapes[i]);
+            if (density > 0.0f) probe.waterVolume += b3Shape_ComputeMassData(waterShapes[i]).mass / density;
+        }
         _probes.push_back(probe);
         return Store(body, static_cast<std::uint32_t>(attached));
     }
@@ -763,6 +839,7 @@ public:
             sample.axisX = Vector3(ax.x, ax.y, ax.z);
             sample.axisY = Vector3(ay.x, ay.y, ay.z);
             sample.axisZ = Vector3(az.x, az.y, az.z);
+            sample.axis = probe.kind == ProbeShape::Capsule ? sample.axisX * probe.halfLength : Vector3(0, 0, 0);
             out.push_back(sample);
         }
     }
@@ -1030,10 +1107,14 @@ private:
         /// `kind`, not `shape`: the b3ShapeId above already owns that name, and a
         /// second member called shape reads as the same thing.
         ProbeShape kind = ProbeShape::Sphere;
-        Vector3    halfExtents;
+        Vector3    halfExtents{0, 0, 0};
+        float waterVolume = 0.0f;
+        float waterCooldown = 0.0f;
+        bool wet = false;
     };
     std::vector<Probe> _probes;
     WindSettings       _wind;
+    ProbeWaterEnvironment _water;
 
     std::uint32_t _shapeCount = 0;
     std::uint32_t _queryOnlyShapes = 0;

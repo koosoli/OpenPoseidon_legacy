@@ -209,12 +209,13 @@ void DrawPhysicsTab()
     ImGui::SetNextItemWidth(200.0f);
     Dev::SliderFloat("Radius (m)", &s.radius, 0.02f, 10.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
     ImGui::SetNextItemWidth(200.0f);
-    Dev::SliderFloat("Mass (kg)", &s.mass, 0.01f, 100.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
+    Dev::SliderFloat("Mass (kg)", &s.mass, 0.01f, 10000.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
     if (ImGui::IsItemHovered())
     {
-        ImGui::SetTooltip("Kilograms, converted to Box3D's density through the sphere's own\n"
-                          "volume. A slider in kg/m3 would be exact and useless to picture.");
+        ImGui::SetTooltip("Actual mass for the selected shape. Water supports about 1000 kg\n"
+                          "per cubic metre displaced: density, not mass alone, decides sinking.");
     }
+    ImGui::TextDisabled("Water: automatic buoyancy, drag and entry splashes (approximate wave surface).");
     ImGui::SetNextItemWidth(200.0f);
     Dev::SliderFloat("Friction", &s.friction, 0.0f, 2.0f, "%.2f");
     ImGui::SetNextItemWidth(200.0f);

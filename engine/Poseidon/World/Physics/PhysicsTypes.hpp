@@ -282,4 +282,17 @@ struct WindSettings
     bool    enabled = false;
 };
 
+struct ProbeWaterSample
+{
+    float height = 0.0f;
+    Vector3 velocity{0, 0, 0};
+};
+
+// Injected at the engine boundary; standalone physics tests need no landscape.
+struct ProbeWaterEnvironment
+{
+    bool (*sample)(Vector3Par position, ProbeWaterSample& out) = nullptr;
+    void (*impact)(Vector3Par position, Vector3Par velocity, float radius, float mass, bool entering) = nullptr;
+};
+
 } // namespace Poseidon::Physics

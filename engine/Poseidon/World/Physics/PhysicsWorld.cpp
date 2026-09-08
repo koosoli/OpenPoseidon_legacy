@@ -1,10 +1,19 @@
 #include <Poseidon/World/Physics/PhysicsWorld.hpp>
+#include <Poseidon/Core/Global.hpp>
 
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
 #include <Poseidon/World/Physics/PhysicsBackend.hpp>
+#include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Terrain/WaterBodies.hpp>
+#include <Poseidon/World/Terrain/WaterSurfaceQuery.hpp>
+#include <Poseidon/Graphics/Rendering/WaterInteractionBridge.hpp>
+#include <Poseidon/Graphics/Rendering/Effects/Smokes.hpp>
+#include <Poseidon/World/World.hpp>
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
+#include <cstdlib>
 #include <iterator>
 #include <cstdint>
 #include <memory>
@@ -25,6 +34,69 @@ constexpr float MinComponentExtent = 1e-3f;
 constexpr int MinComponentPoints = 4;
 
 std::unique_ptr<PhysicsWorld> g_world;
+
+bool SampleProbeWater(Vector3Par p, ProbeWaterSample& out)
+{
+    if (!GLandscape) return false;
+    float level = GLandscape->GetSeaLevel();
+    float waveScale = 1.0f;
+    if (const WaterBody* body = GetWaterBodies().Find(p[0], p[2]))
+    {
+        level = body->SurfaceLevelAt(p[0], p[2]);
+        waveScale = body->waveScale;
+    }
+    if (GLandscape->SurfaceY(p[0], p[2]) >= level) return false;
+    const auto surface = QueryWaterSurfaceScaled(p[0], p[2], Glob.time.toFloat(), level, waveScale);
+    out.height = surface.height;
+    out.velocity = Vector3(surface.velocityX, 0, surface.velocityZ);
+    return true;
+}
+
+void ProbeWaterImpact(Vector3Par p, Vector3Par velocity, float radius, float mass, bool entering)
+{
+    const float speed = velocity.Size();
+    // Displaced water bounds the coupled mass: a dense projectile does not
+    // impart all of its kinetic energy to the surface instantaneously.
+    const float coupledMass = std::min(mass, 1000.0f * 4.1887902f * radius * radius * radius);
+    const float strength = std::clamp(std::sqrt(std::max(0.0f, coupledMass)) * speed * 0.035f, 0.02f, 4.5f);
+    HydroWaterInteractionEvent event{};
+    event.positionRadius[0] = p[0];
+    event.positionRadius[1] = p[2];
+    event.positionRadius[2] = std::clamp(radius * 1.5f, 0.15f, 8.0f);
+    event.positionRadius[3] = entering ? strength : strength * 0.15f;
+    event.velocityKind[0] = velocity[0];
+    event.velocityKind[1] = velocity[2];
+    event.velocityKind[2] = velocity[1];
+    event.velocityKind[3] = entering ? HydroWaterInteractionObject : HydroWaterInteractionContinuous;
+    event.timeLifeFoamMass[1] = 0.8f;
+    event.timeLifeFoamMass[2] = std::min(strength * 0.2f, 0.8f);
+    event.timeLifeFoamMass[3] = mass;
+    event.directionDepthFlags[3] = HydroWaterInteractionPendingImpulse;
+    SubmitWaterInteraction(event);
+    static const bool diagnostic = std::getenv("POSEIDON_PHYSICS_PROBE") != nullptr;
+    static int diagnosticSamples = 0;
+    if (diagnostic && diagnosticSamples < 32)
+    {
+        ++diagnosticSamples;
+        LOG_INFO(World, "PROBE-WATER: {} mass {:.3f} radius {:.3f} speed {:.3f} strength {:.3f} at ({:.2f},{:.2f},{:.2f})",
+                 entering ? "entry" : "wake", mass, radius, speed, event.positionRadius[3], p[0], p[1], p[2]);
+    }
+    if (!entering || !GWorld || speed < 0.5f) return;
+    WaterSource spray;
+    spray.SetSize(0.035f, std::clamp(radius * 0.1f, 0.05f, 0.25f));
+    spray.SetFades(0.06f, 0.03f, 0.35f);
+    spray.SetTimes(0.06f, 0.6f);
+    const int count = std::clamp(static_cast<int>(strength * 4.0f), 2, 12);
+    for (int i = 0; i < count; ++i)
+    {
+        const float angle = i * (6.2831853f / count);
+        const float spread = std::clamp(speed * 0.12f, 0.2f, 3.0f);
+        Vector3 v(std::cos(angle) * spread + velocity[0] * 0.1f,
+                  std::clamp(speed * 0.35f, 0.3f, 7.0f),
+                  std::sin(angle) * spread + velocity[2] * 0.1f);
+        if (Cloudlet* drop = spray.Drop(p, v)) GWorld->AddCloudlet(drop);
+    }
+}
 
 } // namespace
 
@@ -48,6 +120,7 @@ bool PhysicsWorld::Create()
         return false;
     }
     ResetCounters();
+    _backend->SetWaterEnvironment({SampleProbeWater, ProbeWaterImpact});
     return true;
 }
 

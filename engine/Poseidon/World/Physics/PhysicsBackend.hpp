@@ -103,6 +103,7 @@ public:
     /// here so the world is a real simulation that can be inspected, not so it
     /// can start driving anything.
     virtual void Step(float deltaSeconds) = 0;
+    virtual void SetWaterEnvironment(const ProbeWaterEnvironment&) {}
 
     /// One static body carrying `pieces` convex hulls, placed at `transform`.
     /// Returns an invalid id if every piece was refused.

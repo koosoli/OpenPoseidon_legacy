@@ -673,6 +673,8 @@ void AutoDropPhysicsProbes()
         }
     }
     LOG_WARN(World, "PHYSPROBE: auto-drop {} probe(s) r={}", wanted, s_settings.radius);
+    if (const char* m = std::getenv("POSEIDON_PHYSICS_PROBE_MASS"))
+        s_settings.mass = std::clamp(static_cast<float>(std::atof(m)), 0.01f, 10000.0f);
 
     // Spread across the view so at least one is likely to meet an object rather
     // than all of them stacking on the same patch of ground.
