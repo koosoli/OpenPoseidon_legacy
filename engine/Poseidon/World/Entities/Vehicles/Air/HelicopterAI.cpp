@@ -3,6 +3,7 @@
 #include <Poseidon/World/Entities/Weapons/Ballistics.hpp>
 
 #include <Poseidon/World/Entities/Vehicles/Air/Helicopter.hpp>
+#include <Poseidon/World/Entities/Vehicles/Air/FlightCeiling.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Core/Config/UserConfig.hpp>
 #include <Poseidon/AI/AI.hpp>
@@ -491,13 +492,29 @@ void HelicopterAuto::KeyboardPilot(AIUnit* unit, float deltaT)
         // Limit(_pilotHeight,4-canLand*3,150);
         // Limit(_pilotHeight,4-canLand*3,150);
         saturateMax(_pilotHeight, 4 - canLand * 3);
+        // AIR-010: the OTHER ceiling, and for a cadet-mode player it is the one
+        // that bites. This is the KEYBOARD path, so `_pilotHeight` is what the
+        // collective actually commands -- and in easy mode it was capped at 150 m
+        // ABOVE GROUND. No message, no shudder: the aircraft simply stops going
+        // up, thousands of metres below anything aerodynamic. Somebody hitting an
+        // "invisible wall" in a helicopter is almost certainly hitting this and
+        // not thin air.
+        //
+        // Both caps now come from the flight-ceiling settings so they can be
+        // moved together with the density curve, and the easy-mode one defaults
+        // to the aerodynamic ceiling rather than to 150 m -- high enough never to
+        // bind, so cadet mode ends where the air does, like expert mode. The
+        // expert value was already 10000 and never bound; it is kept as a setting
+        // rather than a literal because raising the heli ceiling past 10 km would
+        // silently make it start binding.
+        const Air::FlightCeilingSettings& fc = Air::FlightCeiling();
         if (USER_CONFIG.easyMode && GWorld->GetMode() != GModeNetware)
         {
-            saturateMin(_pilotHeight, 150);
+            saturateMin(_pilotHeight, fc.heliHelperMaxHeightEasy);
         }
         else
         {
-            saturateMin(_pilotHeight, 10000);
+            saturateMin(_pilotHeight, fc.heliHelperMaxHeight);
         }
     }
 

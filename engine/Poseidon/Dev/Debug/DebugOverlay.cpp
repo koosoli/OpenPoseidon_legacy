@@ -44,6 +44,7 @@
 #include <Poseidon/UI/Locale/MissionLanguageDetector.hpp>
 #include <Poseidon/UI/Locale/Stringtable/Stringtable.hpp>
 #include <Poseidon/Dev/Diag/FrameProfiler.hpp>
+#include <Poseidon/Dev/Diag/FlightTab.hpp>
 #include <Poseidon/Dev/Diag/LightingDiag.hpp>
 #include <Poseidon/Dev/Diag/BallisticsTab.hpp>
 #include <Poseidon/Dev/Diag/StreamingTab.hpp>
@@ -7246,6 +7247,11 @@ void DrawMainWindow()
         if (Dev::PanelTabItem("Smoke"))
         {
             Poseidon::Dev::DrawSmokeTab();
+            ImGui::EndTabItem();
+        }
+        if (Dev::PanelTabItem("Flight"))
+        {
+            Poseidon::Dev::DrawFlightTab();
             ImGui::EndTabItem();
         }
         ImGuiTabItemFlags memoryFlags = 0;

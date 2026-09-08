@@ -2,6 +2,7 @@
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 
 #include <Poseidon/World/Entities/Vehicles/Air/Airplane.hpp>
+#include <Poseidon/World/Entities/Vehicles/Air/FlightCeiling.hpp>
 #include <Poseidon/World/Entities/Weapons/Shots.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/World/World.hpp>
@@ -527,15 +528,13 @@ void Airplane::Simulate(float deltaT, SimulationImportance prec)
 
     Vector3Val speed = ModelSpeed();
 
-    float altCoef = 1;
-    float alt = Position().Y();
-
-    const float altFullForce = 5000;
-    const float altNoForce = 13000;
-    if (alt > altFullForce)
-    {
-        altCoef = 1 - (alt - altFullForce) * (1 / (altNoForce - altFullForce));
-    }
+    // AIR-010: available force in thin air. Was a straight line from 5000 m to
+    // zero at 13000 m -- and PAST 13000 m it went negative, inverting thrust,
+    // lift and (below) drag. Now an exponential falloff with a positive floor;
+    // FlightCeiling.hpp has the derivation and the runtime switch back to the
+    // stock curve.
+    const float alt = Position().Y();
+    const float altCoef = Air::PlaneAirCoef(alt);
 
     float flapEff = fabs(speed[2]) / (Type()->_landingSpeed * 0.65f) - 0.5f;
     saturate(flapEff, 0, 1);

@@ -1,6 +1,7 @@
 #include <Poseidon/Core/Global.hpp>
 
 #include <Poseidon/World/Entities/Vehicles/Air/Helicopter.hpp>
+#include <Poseidon/World/Entities/Vehicles/Air/FlightCeiling.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Core/Config/UserConfig.hpp>
 #include <Poseidon/AI/AI.hpp>
@@ -342,14 +343,11 @@ static Vector3 RotorUpForce(Vector3Val speed, float coef, float alt)
     saturate(fwdCoef, -1, 1);
     force[2] += force[1] * 0.1 * fwdCoef;
     /**/
-    // limit rotor forces in high altitude
-    const float altFullForce = 1000;
-    const float altNoForce = 3000;
-    if (alt > altFullForce)
-    {
-        float altCoef = 1 - (alt - altFullForce) * (1 / (altNoForce - altFullForce));
-        force *= altCoef;
-    }
+    // AIR-010: limit rotor forces in high altitude. Was a straight line from
+    // 1000 m to zero at 3000 m, and negative above that -- a rotor that pushed
+    // DOWN, harder the faster it spun. Now an exponential falloff with a positive
+    // floor; see FlightCeiling.hpp.
+    force *= Air::HeliAirCoef(alt);
     return force;
 }
 
