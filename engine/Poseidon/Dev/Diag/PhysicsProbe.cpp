@@ -882,7 +882,7 @@ void DrawPhysicsProbes()
     // PROBE-LIGHT: with the probe lit from inside, its own surface should read as the
     // lamp it now is rather than as a dark ball. IsLight is the engine's own unlit
     // routing (BuildRenderPassDescriptor: LightingMode::Unlit).
-    SetProbeMeshSelfIllum(s_settings.emitLight && s_settings.selfIllum);
+    SetProbeMeshSelfIllum((s_showcaseActive || s_settings.emitLight) && s_settings.selfIllum);
 
     if (s_settings.drawSolid)
     {
