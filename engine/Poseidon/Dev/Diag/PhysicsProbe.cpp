@@ -610,6 +610,13 @@ void EndPhysicsShowcase()
 {
     if (!s_showcaseActive) return;
     ClearPhysicsProbes();
+    for (auto& light : s_probeLights)
+    {
+        light->SetDiffuse(HBlack);
+        light->SetAmbient(HBlack);
+    }
+    s_probeLights.clear();
+    s_probeLightsUsed = 0;
     s_settings = s_beforeShowcase;
     s_showcaseActive = false;
 }
