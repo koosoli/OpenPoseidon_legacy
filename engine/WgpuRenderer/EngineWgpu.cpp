@@ -1933,6 +1933,17 @@ uint64_t EngineWgpu::LocalShadowLightKey(int k) const
     return h | 1ULL;
 }
 
+// NV-001: force the goggles on without a player wearing any. Read once -- this is a capture
+// and debugging lever, not a gameplay path.
+bool EngineWgpu::NightVisionForced()
+{
+    static const bool forced = [] {
+        const char* e = std::getenv("POSEIDON_NV_FORCE");
+        return e && std::atoi(e) != 0;
+    }();
+    return forced;
+}
+
 uint32_t EngineWgpu::LocalShadowCasterMask(float relX, float relY, float relZ) const
 {
     if (_localShadowCount <= 0)
@@ -11639,6 +11650,19 @@ void EngineWgpu::PushRenderParams()
         _tonemap.bloomIntensity,
         _tonemap.bloomThreshold,
         _tonemap.bloomKnee,
+        // NV-001. The whole reason night vision showed "no green, just darkness": the legacy
+        // path multiplied _accomodateEye onto the SUN colour a few thousand lines above, and
+        // the sky-lit branch immediately overwrote sunLin[] with the atmospheric radiance --
+        // so the filter was computed and discarded. Even surviving, it could not have worked:
+        // at night the sun contributes nothing, and local lights, moonlight and ambient never
+        // saw it. An intensifier amplifies the IMAGE, so it belongs in the tonemap.
+        //
+        // POSEIDON_NV_FORCE=1 turns the goggles on without a player wearing any, which is the
+        // only way to capture this from the scripted harness.
+        (GetNightVision() || NightVisionForced()) ? 1.0f : 0.0f,
+        _tonemap.nvGain,
+        _tonemap.nvNoise,
+        _tonemap.nvVignette,
     };
 
     // Picture Mode depth of field. The near plane is not a look setting but has to travel with

@@ -534,6 +534,14 @@ struct WgrTonemap
     float bloom_intensity; /* linear weight of the bloom added to the scene (0 = off) */
     float bloom_threshold; /* bloom soft-knee centre (scene-referred luminance) */
     float bloom_knee;      /* bloom soft-knee half-width */
+    /* NV-001 night vision, applied in the tonemap pass rather than as a light colour.
+     * The legacy filter (Engine::_accomodateEye = Color(0, 8, 0)) multiplied the SUN, which
+     * at night contributes nothing -- and on the sky-lit path it was overwritten a few lines
+     * later anyway. An image intensifier amplifies the IMAGE. 0 = off. */
+    float nv_strength;  /* 0 = off, 1 = full goggles */
+    float nv_gain;      /* linear amplification of the scene before the curve */
+    float nv_noise;     /* sensor grain amount */
+    float nv_vignette;  /* tube edge darkening, 0 = none */
 };
 
 /* Eye-adaptation / auto-exposure parameters (pushed inside WgrRenderParams via
@@ -1976,7 +1984,7 @@ static_assert(sizeof(WgrMeshVertex) == 68, "WgrMeshVertex must match the engine 
 static_assert(sizeof(WgrDraw2DBatch) == 32, "WgrDraw2DBatch layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrDraw3D) == 272, "WgrDraw3D layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrLight) == 64, "WgrLight layout must match the Rust #[repr(C)] struct");
-static_assert(sizeof(WgrTonemap) == 48, "WgrTonemap layout must match the Rust #[repr(C)] struct");
+static_assert(sizeof(WgrTonemap) == 64, "WgrTonemap layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrExposure) == 32, "WgrExposure layout must match the Rust #[repr(C)] struct");
 /* 18 vec4 = 288 bytes. Was 256 (16 vec4) before the moon disc added moon_params + moon_sun. */
 static_assert(sizeof(WgrSky) == 288, "WgrSky layout must match the Rust #[repr(C)] struct");
@@ -1992,7 +2000,7 @@ static_assert(sizeof(WgrFoliage) == 80, "WgrFoliage layout must match the Rust #
 static_assert(sizeof(WgrGtao) == 52, "WgrGtao layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrSkyVis) == 48, "WgrSkyVis layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrDepthOfField) == 52, "WgrDepthOfField layout must match the Rust #[repr(C)] struct");
-static_assert(sizeof(WgrRenderParams) == 620, "WgrRenderParams layout must match the Rust #[repr(C)] struct"); // REN-GI-010 WgrGi 64->68, sky-vis probe 44->48
+static_assert(sizeof(WgrRenderParams) == 636, "WgrRenderParams layout must match the Rust #[repr(C)] struct"); // REN-GI-010 WgrGi 64->68, sky-vis probe 44->48
 static_assert(sizeof(WgrFrameParams) == 16, "WgrFrameParams layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrCameraShadow) == 352 + 24 * 64 + 16,
               "WgrCameraShadow layout must match the Rust #[repr(C)] struct");

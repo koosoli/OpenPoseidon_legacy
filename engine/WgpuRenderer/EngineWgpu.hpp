@@ -1543,6 +1543,8 @@ class EngineWgpu : public EngineDummy
     LocalShadowLight _localShadowLights[kMaxLocalShadows] = {};
     //! LGT-010: the shadow-view bits a caster at this position belongs in.
     uint32_t LocalShadowCasterMask(float relX, float relY, float relZ) const;
+    //! NV-001: POSEIDON_NV_FORCE=1, so the goggles can be captured without a player.
+    static bool NightVisionForced();
     //! LGT-025: view-projection for local view `k`, cone or cube face, expressed relative to
     //! `camPos`. The absolute projection is the same whatever basis it is written in, so the
     //! depth pass and each camera may use their own -- and they MUST: a receiver works in ITS

@@ -26,6 +26,15 @@ struct Params {
     bloom_intensity: f32, // linear weight of the bloom pyramid added to the scene
     bloom_threshold: f32, // (used by the bloom passes; unused here)
     bloom_knee: f32,      // (used by the bloom passes; unused here)
+    // NV-001. Night vision belongs HERE and not in the lighting: an image intensifier
+    // amplifies the image that reached it. The legacy filter multiplied the SUN colour, which
+    // at night contributes nothing at all -- and on the sky-lit path it was overwritten a few
+    // lines further down in EngineWgpu, so it was computed and thrown away. That is the whole
+    // of "the NV are see through / no green just darkness".
+    nv_strength: f32,
+    nv_gain: f32,
+    nv_noise: f32,
+    nv_vignette: f32,
 };
 
 @group(0) @binding(0) var hdr_tex: texture_2d<f32>;
@@ -125,6 +134,18 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let bloom = textureSampleLevel(bloom_tex, bloom_samp, in.uv, 0.0).rgb;
     color += bloom * params.bloom_intensity;
 
+    // NV-001, first half: the gain, applied to LINEAR scene light before the curve, because
+    // that is what an intensifier does -- it multiplies the photons that arrived, and the
+    // filmic curve then rolls the result off exactly as it does for daylight. Amplifying after
+    // the curve instead would just wash a black frame to grey.
+    //
+    // The bloom pyramid is already summed in above, so a bright source blooms through the same
+    // gain and halates the way a real tube does around a lamp. That is free here and would have
+    // needed its own pass anywhere else.
+    if (params.nv_strength > 0.0) {
+        color *= mix(1.0, params.nv_gain, params.nv_strength);
+    }
+
     // Scene-referred (linear): exposure (x auto-exposure scale) + white balance.
     let auto_exp = textureLoad(exposure_tex, vec2<i32>(0, 0), 0).r;
     color *= params.exposure * auto_exp;
@@ -153,6 +174,28 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     color = mix(vec3<f32>(luma), color, params.saturation);
     color = color + params.lift * (1.0 - color);
     color *= params.gain;
+
+    // NV-001, second half: the tube. Display-referred, after the grade, because everything
+    // below is what the EYE sees through the eyepiece rather than what the sensor measured.
+    if (params.nv_strength > 0.0) {
+        // A phosphor screen is monochrome -- it has no idea what colour arrived. Collapse to
+        // luminance FIRST; tinting the original RGB instead leaves colour information that the
+        // real device cannot have, and it reads as a green filter over a colour picture.
+        let l = dot(color, LUMA);
+        // P43 phosphor, roughly. Not pure green: a real tube's white point sits slightly warm
+        // of the primary, and pure (0,1,0) looks like a colour key rather than a screen.
+        let phosphor = vec3<f32>(0.18, 1.0, 0.34);
+        var nv = phosphor * l;
+        // Sensor grain, scaled by DARKNESS: an intensifier is noisiest where it is working
+        // hardest, so a lit doorway is clean and the shadow beside it crawls. Uniform grain
+        // over the whole frame is the giveaway of a fake NV filter.
+        let grain = (ign(in.clip.xy + vec2<f32>(params.exposure * 977.0, 0.0)) - 0.5);
+        nv += phosphor * grain * params.nv_noise * (1.0 - clamp(l, 0.0, 1.0));
+        // The eyepiece. Radius from the frame centre in uv, so it follows the aspect.
+        let d = distance(in.uv, vec2<f32>(0.5, 0.5)) * 1.4142;
+        nv *= 1.0 - params.nv_vignette * smoothstep(0.45, 1.0, d);
+        color = mix(color, max(nv, vec3<f32>(0.0)), params.nv_strength);
+    }
 
     color = clamp(color, vec3<f32>(0.0), vec3<f32>(1.0));
     if (params.encode > 0.5) {

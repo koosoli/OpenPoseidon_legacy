@@ -369,6 +369,12 @@ pub struct WgrTonemap {
     pub bloom_intensity: f32, // linear weight of the bloom added to the scene (0 = off)
     pub bloom_threshold: f32, // bloom soft-knee centre (scene-referred luminance)
     pub bloom_knee: f32,      // bloom soft-knee half-width
+    // NV-001: night vision, as an IMAGE operation. See wgpu_renderer.hpp for why the legacy
+    // light-colour filter could never have worked here.
+    pub nv_strength: f32, // 0 = off, 1 = full goggles
+    pub nv_gain: f32,     // linear amplification of the scene before the curve
+    pub nv_noise: f32,    // sensor grain amount
+    pub nv_vignette: f32, // tube edge darkening, 0 = none
 }
 
 impl Default for WgrTonemap {
@@ -387,6 +393,10 @@ impl Default for WgrTonemap {
             bloom_intensity: 0.04,
             bloom_threshold: 1.0,
             bloom_knee: 0.5,
+            nv_strength: 0.0,
+            nv_gain: 40.0,
+            nv_noise: 0.10,
+            nv_vignette: 0.55,
         }
     }
 }
@@ -1564,7 +1574,7 @@ const _: () = assert!(std::mem::size_of::<WgrModelSection>() == 24);
 const _: () = assert!(std::mem::size_of::<WgrModelMaterial>() == 280);
 const _: () = assert!(std::mem::size_of::<WgrModelLod>() == 16);
 const _: () = assert!(std::mem::size_of::<WgrInstance>() == 144);
-const _: () = assert!(std::mem::size_of::<WgrTonemap>() == 48);
+const _: () = assert!(std::mem::size_of::<WgrTonemap>() == 64);
 // WgrSky 16 vec4 -> 18 (was 256 bytes) and WgrSkyRuntime 5 vec4 -> 7 (was 80): the moon
 // disc added moon_params + moon_sun to both. These two asserts, the matching
 // static_asserts in wgpu_renderer.hpp, and sky/mod.rs's field-ORDER test are the set that
@@ -1582,7 +1592,7 @@ const _: () = assert!(std::mem::size_of::<WgrFoliage>() == 80);
 const _: () = assert!(std::mem::size_of::<WgrGtao>() == 52);
 const _: () = assert!(std::mem::size_of::<WgrSkyVis>() == 48); // + probe counter
 const _: () = assert!(std::mem::size_of::<WgrDepthOfField>() == 52);
-const _: () = assert!(std::mem::size_of::<WgrRenderParams>() == 620); // REN-GI-010 WgrGi 64->68, sky-vis probe 44->48
+const _: () = assert!(std::mem::size_of::<WgrRenderParams>() == 636); // NV-001: WgrTonemap 48 -> 64 // REN-GI-010 WgrGi 64->68, sky-vis probe 44->48
 const _: () = assert!(std::mem::size_of::<WgrFrameParams>() == 16);
 // LGT-010 grew this by four mat4 (local_vp) and one vec4 (local_ctl): 352 + 256 + 16.
 // LGT-015 took local_vp from four to sixteen (+768): a point light needs six of them.

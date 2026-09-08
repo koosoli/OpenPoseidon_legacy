@@ -1884,6 +1884,11 @@ class Engine : public IGraphicsEngine
         float bloomIntensity = 0.04f; // linear weight of the bloom added to the scene
         float bloomThreshold = 1.0f;  // soft-knee centre (scene-referred luminance)
         float bloomKnee = 0.5f;       // soft-knee half-width
+        // NV-001 night vision. Whether the goggles are ON is not stored here -- that is
+        // Engine::_nightVision, driven by the player -- these are the LOOK of the tube.
+        float nvGain = 40.0f;      // linear amplification of scene light before the curve
+        float nvNoise = 0.10f;     // sensor grain, scaled by darkness in the shader
+        float nvVignette = 0.55f;  // eyepiece edge falloff, 0 = none
     };
     // True only on backends with an HDR resolve pass (wgpu w/ HDR enabled); gates
     // the ImGui Tonemap tab.
