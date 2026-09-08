@@ -59,6 +59,20 @@ struct BulbGlowSettings
 	// faded by cos^2 of the off-axis angle so it reaches zero side-on and never flares from
 	// behind. POSEIDON_BULB_GLOW_SIDE=0 is the 2001 hard cut.
 	float sideGlow = 0.30f;   //!< POSEIDON_BULB_GLOW_SIDE
+	// LGT-027. The MARKER -- the billboard drawn at the bulb itself, which is a different
+	// mechanism from the flare above and, unlike it, is not occlusion-gated. It is why a
+	// vehicle's lamps read as lit at all (LGT-014). It was drawn at `_size * 0.5` and then
+	// crushed again by 0.035 inside DrawVolumeLight, i.e. about 1.75 CENTIMETRES, which is a
+	// dot. A real headlight lens is 15 to 20 cm across, so this is the authored size in
+	// metres rather than a multiplier on a number nobody can read.
+	//
+	// It is a FIXED world size on purpose. LGT-023 withdrew an angular floor here because
+	// scaling a flat world-space billboard up with distance produced a grey saucer beside the
+	// lamp; a headlight-sized marker at a headlight has neither problem.
+	// LGT-027: back to roughly the authored size. Enlarging this was the wrong lever -- with
+	// additive blending a headlight-sized marker GLOWS, and without it no size looked like
+	// anything but fog. Measured at 0.45 m it swallowed the whole vehicle in grey.
+	float markerSize = 0.05f; //!< POSEIDON_BULB_GLOW_MARKER, metres across
 };
 BulbGlowSettings& GBulbGlow();
 

@@ -50,6 +50,12 @@ BulbGlowSettings& GBulbGlow()
             if (d >= 0.0)
                 v.size = static_cast<float>(d);
         }
+        if (const char* e = std::getenv("POSEIDON_BULB_GLOW_MARKER"))
+        {
+            const double d = std::atof(e);
+            if (d >= 0.0)
+                v.markerSize = static_cast<float>(d);
+        }
         if (const char* e = std::getenv("POSEIDON_BULB_GLOW_SIDE"))
         {
             const double d = std::atof(e);
@@ -1203,7 +1209,14 @@ void LightReflector::ToDraw(ClipFlags clipFlags, bool dimmed)
             // LGT-023: no angular floor here either, for the saucer reason above. The bulb is
             // drawn at its authored size; what makes a vehicle's lamps read as lit is that
             // this call happens at all, which is the LGT-014 fix.
-            GScene->DrawVolumeLight(GScene->Preloaded(HalfLight), PackedColor(c), *this, _size * 0.5f, 0.0f, 1.2f);
+            // LGT-027: the owner, correctly -- "fahrzeuge haben bereits ein glow in der birne,
+            // wir muessten den nur staerker machen". They do, and it was 1.75 cm across:
+            // `_size * 0.5` and then another 0.035 inside DrawVolumeLight. The size is now
+            // authored in metres. `/ 0.035` undoes that internal crush so the number here
+            // means what it says; the crush stays for the point-light path that was tuned
+            // against it.
+            const float marker = GBulbGlow().markerSize / 0.035f;
+            GScene->DrawVolumeLight(GScene->Preloaded(HalfLight), PackedColor(c), *this, marker, 0.0f, 1.2f);
         }
         return;
     }

@@ -2002,6 +2002,20 @@ namespace
 WgrBlend BlendForSpec(int spec)
 {
     const render::Backend b = render::SplitLegacy(spec).backend;
+    // LGT-027: a light sprite ADDS. This case was missing, and it is the reason a bulb could
+    // not be made to glow by any amount of tuning: SrcAlpha/OneMinusSrcAlpha converges on the
+    // sprite's own colour, so a grey billboard drawn over a night scene reads as fog and
+    // drawing it larger reads as a bigger patch of fog -- which is exactly what the owner and
+    // I kept seeing (the LGT-023 saucer, and again at 0.45 m here).
+    //
+    // The engine already SAYS so: BuildRenderPassDescriptor gives Backend::IsLight
+    // BlendMode::Additive, and GL33 consumes that through PassId::Light. The wgpu path never
+    // read it -- BlendForSpec only ever asked about the three alpha bits. One missing case,
+    // and it made an entire class of effect impossible on this backend.
+    if (render::Has(b, render::Backend::IsLight))
+    {
+        return WGR_BLEND_ADDITIVE;
+    }
     if (render::Has(b, render::Backend::IsAlpha) || render::Has(b, render::Backend::IsAlphaFog) ||
         render::Has(b, render::Backend::IsTransparent))
     {
