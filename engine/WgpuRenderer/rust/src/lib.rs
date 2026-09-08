@@ -3727,6 +3727,15 @@ impl Renderer {
         } else {
             None
         };
+        self.ensure_hdr(self.render_size().0, self.render_size().1);
+        if let Some((_, view)) = self.water_scene.as_ref() {
+            let generation = self.hdr_size.0 as u64 | ((self.hdr_size.1 as u64) << 32);
+            self.gfx3d.set_monitor_view(view, generation);
+        }
+        let surface_rays = self.godrays.as_ref()
+            .map(|rays| rays.surface_params(&self.sky_params))
+            .unwrap_or([[0.0; 4]; 4]);
+        self.gfx3d.set_surface_rays(&self.queue, &surface_rays);
         self.gfx3d.prepare(
             &self.device,
             &self.queue,
@@ -5742,6 +5751,35 @@ impl Renderer {
                 self.far_depth_resolve_current = false;
             }
 
+            // Freeze the completed world for the held LLDR screen, before the
+            // first-person segment paints the device over it. Reuse water's snapshot.
+            let has_monitor = draws3d.iter().any(|d| d.flags & ffi::WGR_DRAW3D_MONITOR != 0);
+            if !resolved && has_monitor && matches!(ops.get(end), Some(Plan3dOp::ClearDepth)) {
+                if let (Some((source, source_view)), Some((snapshot, snapshot_view))) =
+                    (self.hdr.as_ref(), self.water_scene.as_ref()) {
+                    if self.sample_count > 1 {
+                        let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                            label: Some("wgr_monitor_scene_resolve"),
+                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                view: source_view,
+                                depth_slice: None,
+                                resolve_target: Some(snapshot_view),
+                                ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+                            })],
+                            depth_stencil_attachment: None,
+                            timestamp_writes: None,
+                            occlusion_query_set: None,
+                            multiview_mask: None,
+                        });
+                        drop(pass);
+                    } else {
+                        encoder.copy_texture_to_texture(
+                            source.as_image_copy(), snapshot.as_image_copy(),
+                            wgpu::Extent3d { width: self.hdr_size.0, height: self.hdr_size.1, depth_or_array_layers: 1 },
+                        );
+                    }
+                }
+            }
             if end >= ops.len() {
                 break;
             }

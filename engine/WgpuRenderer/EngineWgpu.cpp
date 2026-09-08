@@ -3264,7 +3264,8 @@ void EngineWgpu::NextFrame()
             fogStart = snap.fogMinRange;
             const float fogEnd = snap.fogMaxRange;
             fogInvRange = (fogEnd > fogStart) ? 1.0f / (fogEnd - fogStart) : 0.0f;
-            fogEnabled = 1.0f;
+            // Zero weather fog means a clear view, not a mandatory cull-distance veil.
+            fogEnabled = (!snap.hasLandscape || snap.weatherFog > 0.0f) ? 1.0f : 0.0f;
         }
         // Aerial-perspective mode (fogEnabled == 2): when the procedural sky drives the
         // HDR path, the renderer fogs the scene with a deferred atmosphere pass, so the
@@ -5766,6 +5767,12 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     //    biased projection it never actually applies for HW-T&L, so they z-fight in
     //    wgpu; the level-scaled offset resolves them without over-biasing roads.
     d.flags = 0;
+    // The LLDR's authored translucent screen is a display, not an open hole.
+    if (texture && texture->Name() &&
+        std::strstr(texture->Name(), "lldr_monitor.paa") != nullptr)
+    {
+        d.flags |= WGR_DRAW3D_MONITOR;
+    }
     if (desc.blend != render::BlendMode::Shadow)
     {
         if (desc.surface == render::SurfaceMode::OnSurface)

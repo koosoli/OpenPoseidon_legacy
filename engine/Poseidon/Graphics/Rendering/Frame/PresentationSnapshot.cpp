@@ -195,6 +195,7 @@ static void FillPresentationSnapshot(PresentationSnapshot& snap)
     {
         snap.hasLandscape = true;
         snap.overcast = GLandscape->GetOvercast();
+        snap.weatherFog = GLandscape->GetFog();
         snap.seaLevel = GLandscape->GetSeaLevel();
         snap.landscapeRainDensity = GLandscape->GetRainDensity();
     }
@@ -440,6 +441,7 @@ void ValidatePresentationSnapshot()
     checkF("timeSeconds", cap.timeSeconds, now.timeSeconds);
     checkF("timeOfDay", cap.timeOfDay, now.timeOfDay);
     checkF("overcast", cap.overcast, now.overcast);
+    checkF("weatherFog", cap.weatherFog, now.weatherFog);
     checkF("seaLevel", cap.seaLevel, now.seaLevel);
     checkF("landscapeRainDensity", cap.landscapeRainDensity, now.landscapeRainDensity);
     checkF("rainEffectiveDensity", cap.rainEffectiveDensity, now.rainEffectiveDensity);

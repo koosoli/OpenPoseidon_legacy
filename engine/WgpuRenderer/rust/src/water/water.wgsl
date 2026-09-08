@@ -781,7 +781,10 @@ fn seabed_depth(frag_xy: vec2<f32>, surface_rel: vec3<f32>) -> f32 {
     }
     let clip_s = frame.proj * frame.view * vec4<f32>(surface_rel, 1.0);
     let ndc_xy = clip_s.xy / clip_s.w;
-    let seabed_h = frame.inv_view_proj * vec4<f32>(ndc_xy, 1.0 - d, 1.0);
+    // Keep reversed depth small: forming 1-d first quantizes kilometre-distant
+    // seabeds into horizontal bands. Distribute the inverse transform instead.
+    let seabed_h = frame.inv_view_proj * vec4<f32>(ndc_xy, 1.0, 1.0)
+        - frame.inv_view_proj[2] * d;
     let seabed_rel = seabed_h.xyz / seabed_h.w;
     return max(surface_rel.y - seabed_rel.y, 0.0);
 }

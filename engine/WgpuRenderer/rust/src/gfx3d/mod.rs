@@ -1040,6 +1040,9 @@ struct CameraGroup {
     // Frame-global light storage buffer (binding 3). Fixed capacity, created
     // once, so it stays valid across camera-UBO regrowth / shadow-target swaps.
     lights_buf: wgpu::Buffer,
+    surface_rays_buf: wgpu::Buffer,
+    monitor_view: wgpu::TextureView,
+    monitor_gen: u64,
     // Terrain sun-shadow (bindings 4-6): a clamping filter sampler and the
     // world->UV mapping uniform (both created once); the mask texture is owned by
     // Terrain and lent by view, so the bind rebuilds when its generation changes.
@@ -1278,6 +1281,26 @@ impl CameraGroup {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 16,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(64),
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 17,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
             ],
         });
         let lights_buf = device.create_buffer(&wgpu::BufferDescriptor {
@@ -1286,6 +1309,22 @@ impl CameraGroup {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let surface_rays_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("wgr_surface_rays"),
+            size: 64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let monitor_view = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("wgr_monitor_fallback"),
+            size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba16Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        }).create_view(&wgpu::TextureViewDescriptor::default());
         // Bilinear 2x2 hardware PCF per compare tap; LessEqual = lit when the
         // receiver is at or in front of the stored occluder depth.
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -1325,6 +1364,9 @@ impl CameraGroup {
             bind: None,
             bound_shadow_gen: u64::MAX,
             lights_buf,
+            surface_rays_buf,
+            monitor_view,
+            monitor_gen: u64::MAX,
             mask_sampler,
             mapping_buf,
             bound_mask_gen: u64::MAX,
@@ -1460,6 +1502,14 @@ impl CameraGroup {
                     wgpu::BindGroupEntry {
                         binding: 15,
                         resource: wgpu::BindingResource::TextureView(gi_dist_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 16,
+                        resource: self.surface_rays_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 17,
+                        resource: wgpu::BindingResource::TextureView(&self.monitor_view),
                     },
                 ],
             }));
@@ -6721,6 +6771,18 @@ impl Gfx3d {
         true
     }
 
+    pub fn set_surface_rays(&self, queue: &wgpu::Queue, params: &[[f32; 4]; 4]) {
+        queue.write_buffer(&self.cameras.surface_rays_buf, 0, bytemuck::cast_slice(params));
+    }
+
+    pub fn set_monitor_view(&mut self, view: &wgpu::TextureView, generation: u64) {
+        if self.cameras.monitor_gen != generation {
+            self.cameras.monitor_view = view.clone();
+            self.cameras.monitor_gen = generation;
+            self.cameras.bind = None;
+        }
+    }
+
     pub fn prepare(
         &mut self,
         device: &wgpu::Device,
@@ -7148,7 +7210,9 @@ impl Gfx3d {
                                     | (u32::from(d.flags & crate::ffi::WGR_DRAW3D_GLASS != 0)
                                         << 3)
                                     | (u32::from(d.flags & crate::ffi::WGR_DRAW3D_COCKPIT != 0)
-                                        << 4)) as f32,
+                                        << 4)
+                                    | (u32::from(d.flags & crate::ffi::WGR_DRAW3D_MONITOR != 0)
+                                        << 5)) as f32,
                             ],
                         })
                     }));

@@ -284,6 +284,7 @@ pub const WGR_DRAW3D_NIGHT_EMITTER: u32 = 4;
 pub const WGR_DRAW3D_GLASS: u32 = 8;
 // MAT-052: first-person cockpit draw -- shade with the flat scene ambient, not the sky dome.
 pub const WGR_DRAW3D_COCKPIT: u32 = 16;
+pub const WGR_DRAW3D_MONITOR: u32 = 32;
 
 // Per-section shading, parallel to a model's sections (one per section). The raw material is
 // folded with the frame sun in the GPU-driven fragment shader (matching the per-draw path);

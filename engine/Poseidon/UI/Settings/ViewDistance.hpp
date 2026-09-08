@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <optional>
+#include "GameSettingsConfig.hpp"
 
 namespace Poseidon
 {
@@ -22,7 +23,7 @@ struct ViewDistanceLimits
     float minView = 100.0f;
     // Keep in step with GameSettingsConfig::kMaxViewDistance (VD-001, 2026-09-08); the two
     // clamps are applied one after the other and the lower of them is what a player gets.
-    float maxView = 10000.0f;
+    float maxView = GameSettingsConfig::kMaxViewDistance;
     float minObject = 100.0f;
     // 5 km, raised from 3 km on 2026-09-08 (VD-001). This is the same value the --vd CLI
     // override has been granting all along (GameStateExtUi.cpp SetVisibility), so it is not a

@@ -346,6 +346,15 @@ struct SkySh {
 // REN-GI-003: the matching per-face distance moments (mean r, mean r^2), point-sampled.
 @group(0) @binding(15) var gi_probe_dist: texture_3d<f32>;
 
+struct SurfaceRays {
+    sun: vec4<f32>,
+    color: vec4<f32>,
+    tune: vec4<f32>,
+    shape: vec4<f32>,
+};
+@group(0) @binding(16) var<uniform> surface_rays: SurfaceRays;
+@group(0) @binding(17) var monitor_scene: texture_2d<f32>;
+
 // Diffuse sky irradiance for a world-space surface normal, from the SH-9 sky projection
 // (Ramamoorthi, "An Efficient Representation for Irradiance Environment Maps"), divided by PI so
 // it is the Lambertian ambient reflectance factor (final ambient = albedo * sky_irradiance * scale).
@@ -888,6 +897,12 @@ fn sky_vis_debug_value(world_xz: vec2<f32>) -> f32 {
 fn reverse_z(clip: vec4<f32>) -> vec4<f32> {
     var c = clip;
     c.z = c.w - c.z;
+    // Perspective depth must be reversed BEFORE subtracting kilometre-sized
+    // clip coordinates. The late subtraction loses the small near-plane term.
+    if (frame.proj[3].w == 0.0 && frame.proj[2].w != 0.0
+        && frame.proj[0].z == 0.0 && frame.proj[1].z == 0.0) {
+        c.z = fma(1.0 - frame.proj[2].z / frame.proj[2].w, clip.w, -frame.proj[3].z);
+    }
     return c;
 }
 

@@ -584,6 +584,21 @@ impl GodRays {
 
     /// Whether this frame is worth running at all. Checked before the depth resolve the march
     /// needs, so an off/night/overhead-sun frame costs literally nothing — not even the resolve.
+    pub fn surface_params(&self, sky: &WgrSky) -> [[f32; 4]; 4] {
+        if !self.active(sky) {
+            return [[0.0; 4]; 4];
+        }
+        let s = self.settings;
+        let light = sun_radiance(sky);
+        let (sigma, height) = aerosol_sigma(sky, s.density_multiplier());
+        [
+            [sky.sun_dir[0], sky.sun_dir[1], sky.sun_dir[2], sun_elevation_fade(sky.sun_dir[1])],
+            [light[0], light[1], light[2], height],
+            [s.intensity, sigma, s.distance, s.steps as f32],
+            [s.g, s.cloud_influence, 0.0, 0.0],
+        ]
+    }
+
     pub fn active(&self, sky: &WgrSky) -> bool {
         self.settings.enabled
             && self.settings.intensity > 0.0

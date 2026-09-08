@@ -7,6 +7,8 @@
 
 #import frame::{frame, reverse_z, fog_factor, atmo_applied, terrain_sun_shadow, apply_fog, veg_sway_offset, matdbg_flag, MATDBG_DISABLE_FRESNEL_ENV}
 #import shadow::shadow_strength
+#import frame::{surface_rays, cloud_shadow_tex, terrain_shadow_samp, terrain_shadow_map}
+#import frame::monitor_scene
 #import skin::{skin_pos, skin_normal}
 #import lighting::lights_contrib
 #import color::srgb_to_linear
@@ -811,6 +813,20 @@ fn shade_fragment(in: VsOut) -> vec4<f32> {
 
     // REN-TEMP-001D: material samples take the render-scale mip bias (0 at native scale).
     let base = textureSampleBias(textures[packed >> 3u], samplers[packed & 7u], uv, frame.renscale.x);
+    if ((material_flags(material) & 32u) != 0u && linear > 0.5) {
+        let dims = vec2<f32>(textureDimensions(monitor_scene));
+        let screen_uv = in.clip.xy / dims;
+        let scene = textureSampleLevel(monitor_scene, terrain_shadow_samp, screen_uv, 0.0).rgb;
+        let luminance = dot(scene, vec3<f32>(0.2126, 0.7152, 0.0722));
+        // Texture alpha defines the authored display aperture, including its black rim.
+        let aperture = 1.0 - smoothstep(0.90, 1.0, base.a);
+        let footprint = max(fwidth(uv.y) * 256.0, 0.0);
+        let lines = 1.0 - 0.10 * (0.5 + 0.5 * cos(uv.y * 256.0 * 6.2831853))
+            * (1.0 - smoothstep(0.5, 1.5, footprint));
+        let phosphor = vec3<f32>(0.30, 0.85, 0.48);
+        let signal = (luminance * 0.85 + 0.008) * lines;
+        return vec4<f32>(phosphor * signal * aperture, 1.0);
+    }
     let normal_sample = textureSampleBias(textures[normal_packed >> 3u], samplers[normal_packed & 7u], uv, frame.renscale.x);
     var normal_ts_xy = vec2<f32>(normal_sample.a, normal_sample.g) * 2.0 - vec2<f32>(1.0);
     if ((material_flags(material) & MATFLAG_INVERT_NORMAL_Y) != 0u) {
@@ -1022,7 +1038,54 @@ fn shade_fragment(in: VsOut) -> vec4<f32> {
     if ((material_flags(material) & MATFLAG_GLASS) != 0u) {
         out_a2 = max(out_a2, GLASS_MIN_ALPHA);
     }
+    if (translucent > 0.5 && linear > 0.5) {
+        out_rgb = out_rgb + surface_scattering(in.world_pos);
+    }
     return vec4<f32>(out_rgb, out_a2);
+}
+
+// Blended surfaces do not write scene depth. Integrate only the air IN FRONT
+// of this fragment; compositing the screen-space rays afterwards sees its background.
+fn surface_scattering(pos: vec3<f32>) -> vec3<f32> {
+    let end = min(length(pos), surface_rays.tune.z);
+    if (surface_rays.tune.x <= 0.0 || end <= 1.0) {
+        return vec3<f32>(0.0);
+    }
+    let ray = normalize(pos);
+    let sun = normalize(surface_rays.sun.xyz);
+    let g = clamp(surface_rays.shape.x, 0.0, 0.95);
+    let phase = (1.0 - g * g) / (12.566370614 * pow(max(1.0 + g * g - 2.0 * g * dot(ray, sun), 1e-4), 1.5));
+    let steps = i32(clamp(surface_rays.tune.w, 4.0, 48.0));
+    var previous = 0.0;
+    var transmit = 1.0;
+    var scatter = 0.0;
+    for (var i = 0; i < steps; i = i + 1) {
+        let u = f32(i + 1) / f32(steps);
+        let next = end * u * u;
+        let rel = ray * ((previous + next) * 0.5);
+        let world = frame.cam_pos.xyz + rel;
+        let sigma = surface_rays.tune.y * exp(-max(world.y, 0.0) / max(surface_rays.color.w, 1.0));
+        let segment = exp(-sigma * (next - previous));
+        let ground = world.xz - sun.xz * (world.y / max(sun.y, 0.05));
+        let uv = (ground - terrain_shadow_map.cloud_shadow.xy) * terrain_shadow_map.cloud_shadow.z;
+        var cloud = 1.0;
+        if (all(uv >= vec2<f32>(0.0)) && all(uv <= vec2<f32>(1.0))) {
+            let tap = textureSampleLevel(cloud_shadow_tex, terrain_shadow_samp, uv, 0.0);
+            let strength = terrain_shadow_map.cloud_shadow.w;
+            var t = tap.r;
+            if (strength > 0.25) { t = clamp(1.0 - (1.0 - t) / strength, 0.0, 1.0); }
+            if (strength <= 0.001) { t = 1.0; }
+            let visibility = mix(1.0, t, surface_rays.shape.y) * tap.g;
+            let edge = max(abs(uv.x - 0.5), abs(uv.y - 0.5)) * 2.0;
+            cloud = mix(visibility, 1.0, smoothstep(0.85, 1.0, edge));
+        }
+        let terrain = terrain_sun_shadow(world.xz, world.y);
+        let object = shadow_strength(rel, sun, 1.0, vec3<f32>(0.0), vec3<f32>(0.0));
+        scatter = scatter + transmit * cloud * (1.0 - max(terrain, object)) * (1.0 - segment);
+        transmit = transmit * segment;
+        previous = next;
+    }
+    return surface_rays.color.rgb * (scatter * phase * surface_rays.tune.x * surface_rays.sun.w);
 }
 
 // Depth + normal prepass fragment (docs/depth-prepass-plan.md). Reuses vs_main/

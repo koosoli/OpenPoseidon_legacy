@@ -19,10 +19,10 @@ TEST_CASE("ViewDistanceResolver EffectiveView picks mission vs preferred", "[Set
     CHECK(ViewDistanceResolver::EffectiveView(1500.0f, true, 600.0f) == Catch::Approx(600.0f));
     // respect on + no mission value: the preferred value
     CHECK(ViewDistanceResolver::EffectiveView(900.0f, true, std::nullopt) == Catch::Approx(900.0f));
-    // clamped to [100, 10000] (both the preferred and the mission value)
+    // clamped to [100, 50000] (both the preferred and the mission value)
     CHECK(ViewDistanceResolver::EffectiveView(50.0f, false, std::nullopt) == Catch::Approx(100.0f));
-    CHECK(ViewDistanceResolver::EffectiveView(99999.0f, false, std::nullopt) == Catch::Approx(10000.0f));
-    CHECK(ViewDistanceResolver::EffectiveView(900.0f, true, 99999.0f) == Catch::Approx(10000.0f));
+    CHECK(ViewDistanceResolver::EffectiveView(99999.0f, false, std::nullopt) == Catch::Approx(50000.0f));
+    CHECK(ViewDistanceResolver::EffectiveView(900.0f, true, 99999.0f) == Catch::Approx(50000.0f));
     // The default limits must agree with the settings clamp, or a value the Options page
     // accepts gets silently cut down by the resolver a moment later (VD-001).
     CHECK(ViewDistanceLimits{}.maxView == Catch::Approx(GameSettingsConfig::kMaxViewDistance));
@@ -54,7 +54,7 @@ TEST_CASE("ViewDistanceResolver Derive scales objects and shadows with the view 
     }
     {
         // The object cap binds above 7500 m of view (7500*2/3 = 5000), so a 10 km view --
-        // the new maximum -- draws terrain to 10 km and objects to 5 km, not 6.7 km.
+        // draws terrain to 10 km and simulation objects to 5 km, not 6.7 km.
         const ViewDistances d = ViewDistanceResolver::Derive(10000.0f);
         CHECK(d.view == Catch::Approx(10000.0f));
         CHECK(d.objects == Catch::Approx(5000.0f));

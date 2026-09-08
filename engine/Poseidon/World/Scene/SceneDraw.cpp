@@ -716,11 +716,11 @@ float Scene::GetObjectDrawDistance() const
                 return v;
             }
         }
-        return 1.5f; // objectsZ = 2/3 view -> 1.5x lands on the fog edge
+        return 0.0f; // default: follow the full render range, independently of simulation
     }();
 
     const float legacy = ENGINE_CONFIG.objectsZ;
-    float d = legacy * scale;
+    float d = scale > 0.0f ? legacy * scale : std::max(legacy, _fogMaxRange);
     // Never past the fog edge (in rain/fog _fogMaxRange shrinks below objectsZ, hence
     // the floor afterwards rather than a plain min).
     if (_fogMaxRange > 0.0f && d > _fogMaxRange)

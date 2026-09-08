@@ -95,6 +95,7 @@ struct PresentationSnapshot
     // GLandscape weather + sea state.
     bool hasLandscape = false;
     float overcast = 0.0f;
+    float weatherFog = 0.0f;
     float seaLevel = 0.0f;
     float landscapeRainDensity = 0.0f;
 

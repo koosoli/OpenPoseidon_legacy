@@ -47,13 +47,13 @@ std::string& SelectedVoiceLanguageStorage()
 
 float& SelectedPreferredViewDistanceStorage()
 {
-    static float distance = 900.0f;
+    static float distance = GameSettingsConfig::kMaxViewDistance;
     return distance;
 }
 
 bool& RespectMissionViewDistanceStorage()
 {
-    static bool enabled = true;
+    static bool enabled = false;
     return enabled;
 }
 
@@ -142,8 +142,8 @@ void GameSettingsConfig::LoadDefaults(const Environment& env)
     voiceLanguage = textLanguage;
     activeProfile.clear();
     blood = true;
-    preferredViewDistance = 900.0f;
-    respectMissionViewDistance = true;
+    preferredViewDistance = kMaxViewDistance;
+    respectMissionViewDistance = false;
 }
 
 bool GameSettingsConfig::Normalize()
@@ -359,7 +359,7 @@ void SetRespectMissionViewDistance(bool enabled)
 float ClampPreferredViewDistance(float distance)
 {
     if (!std::isfinite(distance))
-        return 900.0f;
+        return GameSettingsConfig::kMaxViewDistance;
     saturate(distance, GameSettingsConfig::kMinViewDistance, GameSettingsConfig::kMaxViewDistance);
     return distance;
 }

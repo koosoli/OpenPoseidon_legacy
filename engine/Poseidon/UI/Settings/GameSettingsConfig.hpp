@@ -18,13 +18,12 @@ class GameSettingsConfig
     std::string voiceLanguage;
     std::string activeProfile;
     bool blood = true;
-    float preferredViewDistance = 900.0f;
-    bool respectMissionViewDistance = true;
+    float preferredViewDistance = kMaxViewDistance;
+    bool respectMissionViewDistance = false;
 
     static constexpr float kMinViewDistance = 100.0f;
-    // 10 km, raised from 5 km on 2026-09-08 (VD-001) so the slider reaches what Arma 3 and
-    // Reforger offer.  The DEFAULT is still 900 m -- nobody's picture changes unless they
-    // move the slider, and every old value is still reachable on it.
+    // Historical VD-001 measurements at the former 10 km maximum follow.
+    // VD-002 raises the maximum and factory default to 50 km for whole-island views.
     //
     // Measured before raising it, stock Everon, 1600x900, wgpu, VSync pinned off, commit
     // b83e5cb9, 2 repeats per arm.  Camera 250 m up at 7250/6350 looking along the island,
@@ -44,7 +43,8 @@ class GameSettingsConfig
     // camera near the middle has already run out of island by ~3.3 km and everything past
     // that is sea and terrain. On stock CWA content a 10 km setting buys horizon, not
     // detail; it is worth having, but do not expect it to fill the distance with objects.
-    static constexpr float kMaxViewDistance = 10000.0f;
+    // VD-002: whole-island viewing, also used by the Options slider and resolver.
+    static constexpr float kMaxViewDistance = 50000.0f;
 
     void LoadDefaults();
     void LoadDefaults(const Environment& env);
