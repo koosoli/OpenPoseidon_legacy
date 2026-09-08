@@ -44,8 +44,12 @@ TEST_CASE("GraphicsConfig: factory defaults match spec", "[Settings][GraphicsCon
     CHECK(c.qualityPreset == GraphicsConfig::PresetUltra);
     CHECK(c.terrainDetail == GraphicsConfig::TierUltra);
     CHECK(c.objectLod == GraphicsConfig::TierUltra);
-    CHECK(c.shadowQuality == GraphicsConfig::TierHigh); // Ultra preset caps shadow at High
-    CHECK(c.particlesQuality == GraphicsConfig::TierHigh);
+    // GFX-001: Ultra across the board. These two rows are ON/OFF ONLY at the engine
+    // (GraphicsApply.cpp), so raising them is honest labelling rather than added quality --
+    // asserted here anyway, because a default that silently drifts is how a "Custom" preset
+    // appears in the UI for a player who never touched a slider.
+    CHECK(c.shadowQuality == GraphicsConfig::TierUltra);
+    CHECK(c.particlesQuality == GraphicsConfig::TierUltra);
     CHECK(c.vsync == GraphicsConfig::VsyncOn);
     CHECK(c.fpsCap == 0); // Unlimited
     CHECK(c.brightness == 1.6f);
@@ -300,14 +304,19 @@ TEST_CASE("GraphicsConfig: Load on missing file returns false, leaves instance u
 
 TEST_CASE("GraphicsConfig: PickPresetFromRam buckets correctly", "[Settings][GraphicsConfig]")
 {
+    // GFX-001: Ultra is the default, and autodetect only steps DOWN for a machine that
+    // genuinely cannot hold the working set. The old ladder had a High band between 8 and
+    // 16 GB and sent an unreadable RAM figure to High as well; both are gone deliberately,
+    // so these two lines are the change and not a regression.
     using G = GraphicsConfig;
-    CHECK(G::PickPresetFromRam(0) == G::PresetHigh);           // unknown → High
-    CHECK(G::PickPresetFromRam(2 * 1024) == G::PresetLow);     // 2 GB
-    CHECK(G::PickPresetFromRam(4 * 1024 - 1) == G::PresetLow); // just under 4 GB
-    CHECK(G::PickPresetFromRam(4 * 1024) == G::PresetMedium);  // exact 4 GB
-    CHECK(G::PickPresetFromRam(8 * 1024) == G::PresetHigh);    // exact 8 GB
-    CHECK(G::PickPresetFromRam(16 * 1024) == G::PresetUltra);  // exact 16 GB
-    CHECK(G::PickPresetFromRam(32 * 1024) == G::PresetUltra);  // 32 GB
+    CHECK(G::PickPresetFromRam(0) == G::PresetUltra);           // unknown → the default
+    CHECK(G::PickPresetFromRam(2 * 1024) == G::PresetLow);      // 2 GB
+    CHECK(G::PickPresetFromRam(4 * 1024 - 1) == G::PresetLow);  // just under 4 GB
+    CHECK(G::PickPresetFromRam(4 * 1024) == G::PresetMedium);   // exact 4 GB
+    CHECK(G::PickPresetFromRam(8 * 1024 - 1) == G::PresetMedium); // just under 8 GB
+    CHECK(G::PickPresetFromRam(8 * 1024) == G::PresetUltra);    // exact 8 GB — no High band now
+    CHECK(G::PickPresetFromRam(16 * 1024) == G::PresetUltra);   // exact 16 GB
+    CHECK(G::PickPresetFromRam(32 * 1024) == G::PresetUltra);   // 32 GB
 }
 
 TEST_CASE("GraphicsConfig: ApplyPresetToTiers stamps tier rows from bundle", "[Settings][GraphicsConfig]")

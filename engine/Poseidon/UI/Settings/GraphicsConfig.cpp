@@ -34,9 +34,10 @@ constexpr TierBundle kTierBundles[4] = {
     // High
     {GraphicsConfig::TierHigh, GraphicsConfig::TierHigh, GraphicsConfig::TierMedium, GraphicsConfig::TierLow,
      GraphicsConfig::TierHigh},
-    // Ultra — Shadow caps at High because the "Ultra shadow" tier
-    // needs a shadow-distance bias hook that doesn't exist yet.
-    {GraphicsConfig::TierUltra, GraphicsConfig::TierUltra, GraphicsConfig::TierHigh, GraphicsConfig::TierHigh,
+    // Ultra — every row at the top. Shadow and particles are ON/OFF only at the engine
+    // (GraphicsApply.cpp), so those two are honest labelling rather than added quality;
+    // terrain, object LOD and grass are the rows with teeth.
+    {GraphicsConfig::TierUltra, GraphicsConfig::TierUltra, GraphicsConfig::TierUltra, GraphicsConfig::TierUltra,
      GraphicsConfig::TierUltra},
 };
 
@@ -144,16 +145,23 @@ bool GraphicsConfig::Migrate(int refreshHz)
 
 GraphicsConfig::Preset GraphicsConfig::PickPresetFromRam(int ramMB)
 {
-    // Bucket boundaries in MB: 4 GB, 8 GB, 16 GB.  ramMB == 0 (unknown)
-    // returns High — middle-of-the-road on uncertain input.
-    if (ramMB <= 0)
-        return PresetHigh;
-    if (ramMB < 4 * 1024)
+    // GFX-001. The owner asked for Ultra to be the default, so a first boot now starts there
+    // and this only steps DOWN for a machine that genuinely cannot hold the working set.
+    //
+    // The buckets are RAM, and RAM is a proxy for the wrong thing -- the measured cost of
+    // Ultra on this content is GPU-bound and grass-dominated (about 28% of the frame), not
+    // memory-bound. A 32 GB machine with a weak GPU was already being told "Ultra" by this
+    // function and a 12 GB machine with a strong one was being held at High. Keeping only the
+    // low end means the guess is made where it is least likely to be wrong: below 8 GB the
+    // machine really will struggle, and above it the player can move one slider.
+    //
+    // ramMB == 0 means "could not read it", and that now means Ultra rather than High -- an
+    // unknown machine gets the default like everyone else, and the Options page is one click
+    // away if it is too much.
+    if (ramMB > 0 && ramMB < 4 * 1024)
         return PresetLow;
-    if (ramMB < 8 * 1024)
+    if (ramMB > 0 && ramMB < 8 * 1024)
         return PresetMedium;
-    if (ramMB < 16 * 1024)
-        return PresetHigh;
     return PresetUltra;
 }
 

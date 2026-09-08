@@ -67,9 +67,14 @@ public:
 	Preset    qualityPreset    = PresetUltra;
 	Tier      terrainDetail    = TierUltra;     // → grid 6.25 m
 	Tier      objectLod        = TierUltra;
-	Tier      shadowQuality    = TierHigh;      // High caps Shadow tier; "Ultra shadow" needs
-	                                             // shadow-distance bias hook that doesn't exist yet
-	Tier      particlesQuality = TierHigh;
+	// GFX-001: Ultra, at the owner's request that Ultra be the default across the board.
+	// HONEST NOTE, because the row will read "Ultra" and buy nothing: shadow and particle
+	// tiers are ON/OFF ONLY at the engine (GraphicsApply.cpp:135 and :140) -- Low, Medium,
+	// High and Ultra are indistinguishable until a shadow-distance bias hook and a tiered
+	// cloudlet density exist. These two are labelling, not quality; terrain, object LOD and
+	// grass are the three rows that actually do something.
+	Tier      shadowQuality    = TierUltra;
+	Tier      particlesQuality = TierUltra;
 	// Grass / ground clutter.  Ultra is the historical shipped behaviour (the
 	// renderer's "ultra dense" default: full density, 41 m detail ring), kept as
 	// the top of the ladder so an existing install renders exactly as before.
