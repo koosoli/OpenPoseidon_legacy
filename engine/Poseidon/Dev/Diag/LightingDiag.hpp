@@ -170,10 +170,29 @@ struct LocalShadowSettings
     // real: doubling the range halves the effective texel density.
     float rangeMax = 180.0f; //!< POSEIDON_LOCAL_SHADOW_RANGE_MAX, metres
     float darkness = 1.0f;  //!< POSEIDON_LOCAL_SHADOW_DARKNESS: 0 = no occlusion, 1 = full
+    // LGT-026 -- a street lamp does not move, and neither does the house beside it, so its six
+    // cube faces were being recomputed sixty times a second to produce an identical depth map.
+    // With the budget at four lights that is 24 depth passes a frame of almost entirely wasted
+    // work, and it is the difference between "four lamps can have shadows" and "every lamp near
+    // you can". A view's tile is rendered once and re-used until its light moves or changes
+    // shape, a caster inside its volume moves, the retained set changes, or the depth target's
+    // shape does. The CAMERA is deliberately not one of those: the depth map's contents are
+    // camera-independent (the camera-relative light matrix and the camera-relative caster worlds
+    // cancel), and only the per-camera LOOKUP matrix is camera-relative -- that is rebuilt from
+    // scratch every frame anyway, being a matrix multiply rather than a depth pass.
+    bool cacheStatic = true;   //!< POSEIDON_LOCAL_SHADOW_CACHE=0 renders every view every frame.
+    // The switch that makes a suspected stale tile a one-keypress question rather than an
+    // investigation. Getting invalidation wrong is worse than not caching -- a stale shadow is a
+    // shadow in the WRONG PLACE, which reads as a rendering bug and not as a performance choice
+    // -- so there has to be a way to rule it in or out without a rebuild or a restart.
+    bool forceRefresh = false; //!< POSEIDON_LOCAL_SHADOW_FORCE_REFRESH=1: re-render every view.
     // Counters that separate "no light qualified" from "the pass never ran".
     long long framesWithShadow = 0;
     long long lightsShadowed = 0;
     long long candidatesSeen = 0;
+    // LGT-026 -- last frame's cache verdict, for the Lighting tab and the stats log line.
+    int viewsRendered = 0;
+    int viewsCached = 0;
 };
 LocalShadowSettings& GLocalShadowSettings();
 

@@ -1901,6 +1901,38 @@ Poseidon::shadow::Mat4 EngineWgpu::LocalShadowVP(int k, const float camPos[3]) c
                                          cam);
 }
 
+// LGT-026: the identity of view k's light, as one number. Quantised before hashing -- a
+// light's position arrives through a chain of float arithmetic and the last bits of it move
+// on their own; a key that never matches is a cache that never caches, and it reports itself
+// as working. A centimetre and a milliradian are both far below what a shadow map at these
+// texel densities resolves.
+uint64_t EngineWgpu::LocalShadowLightKey(int k) const
+{
+    const Poseidon::Dev::LocalShadowSettings& ls = Poseidon::Dev::GLocalShadowSettings();
+    const LocalShadowLight& L = _localShadowLights[k];
+    auto mix = [](uint64_t h, uint64_t v) -> uint64_t { return (h ^ v) * 0x00000100000001B3ULL; };
+    auto q = [](float v, float scale)
+    { return static_cast<uint64_t>(static_cast<int64_t>(std::lround(static_cast<double>(v) * scale))); };
+    uint64_t h = 0xcbf29ce484222325ULL;
+    h = mix(h, q(L.pos[0], 100.0f));
+    h = mix(h, q(L.pos[1], 100.0f));
+    h = mix(h, q(L.pos[2], 100.0f));
+    h = mix(h, q(L.dir[0], 1000.0f));
+    h = mix(h, q(L.dir[1], 1000.0f));
+    h = mix(h, q(L.dir[2], 1000.0f));
+    h = mix(h, q(L.coneOuter, 1000.0f));
+    h = mix(h, q(L.startAtten, 100.0f));
+    h = mix(h, static_cast<uint64_t>(L.cubeFace + 1));
+    // The settings the matrix is BUILT from. Change the range or the near plane in the Lighting
+    // tab and every cached tile is wrong; without this the sliders would appear to do nothing.
+    h = mix(h, q(ls.nearD, 1000.0f));
+    h = mix(h, q(ls.rangeScale, 1000.0f));
+    h = mix(h, q(ls.rangeMax, 100.0f));
+    h = mix(h, q(ls.selfRadius, 1000.0f));
+    // Never 0: 0 is the "slot was empty last frame" sentinel.
+    return h | 1ULL;
+}
+
 uint32_t EngineWgpu::LocalShadowCasterMask(float relX, float relY, float relZ) const
 {
     if (_localShadowCount <= 0)
@@ -3915,6 +3947,36 @@ void EngineWgpu::NextFrame()
                     const Poseidon::shadow::Mat4 vp = LocalShadowVP(k, _smCamPos);
                     std::memcpy(frame.shadow.local_vp[k].m, vp.m.data(), sizeof(frame.shadow.local_vp[k].m));
                 }
+                // LGT-026: the cache switches, and this frame's per-light verdict. Everything
+                // here is ABSOLUTE and camera-independent on purpose -- the camera moving is
+                // NOT an invalidation of the depth MAP. `local_vp[k]` above is camera-relative,
+                // so it changes whenever the camera does, but the depth pass composes it with
+                // caster worlds expressed in the SAME origin and the two camera terms cancel:
+                // the depth written for a given absolute point is the same whatever origin it
+                // was written in. What genuinely IS camera-relative is the per-camera LOOKUP
+                // matrix a few hundred lines up, and that is rebuilt from scratch every frame
+                // regardless, being a matrix multiply and not a depth pass. Hashing local_vp
+                // here would have made every frame with a moving camera a full re-render, which
+                // is the one case a village most needs the cache for.
+                uint32_t flags = 0u;
+                if (ls.cacheStatic)
+                    flags |= 1u; // WgrShadowPass::local_flags bit 0
+                if (ls.forceRefresh)
+                    flags |= 2u; // bit 1 -- re-render everything this frame
+                frame.shadow.local_flags = flags;
+                uint32_t dirty = 0u;
+                for (int k = 0; k < kMaxLocalShadows; k++)
+                {
+                    const uint64_t key = (k < _localShadowCount) ? LocalShadowLightKey(k) : 0ULL;
+                    if (key != _localShadowKey[k])
+                    {
+                        // A slot whose light changed at all -- moved, re-aimed, re-ranged, or
+                        // simply occupied by a DIFFERENT light after the budget re-sorted.
+                        dirty |= (1u << k);
+                        _localShadowKey[k] = key;
+                    }
+                }
+                frame.shadow.local_dirty_mask = dirty;
             }
             frame.shadow_casters = backing.shadowCasters;
         }
@@ -10025,6 +10087,7 @@ const char* EngineWgpu::GetWaterGpuTimingName(int region) const
         "Worker enc: sky",                 // WGR_GPU_TIMER_WORKER_ENC_SKY (CPU column only)
         "Worker enc: draw",                // WGR_GPU_TIMER_WORKER_ENC_DRAW (CPU column only)
         "Worker enc: post",                // WGR_GPU_TIMER_WORKER_ENC_POST (CPU column only)
+        "Shadows: local lights",           // WGR_GPU_TIMER_LOCAL_SHADOW (LGT-026)
     };
     return (region >= 0 && region < (int)WGR_GPU_TIMER_REGION_COUNT) ? kNames[region] : "";
 }
@@ -10473,6 +10536,38 @@ bool EngineWgpu::GetGpuMemoryStats(GpuMemoryStatsOut& out) const
 void EngineWgpu::PublishRendererStats()
 {
     _publishedObjectStatsValid = GetObjectStatsFromRenderer(_publishedObjectStats);
+    // LGT-026: how many local shadow views actually re-rendered last frame, and how many were
+    // re-used. The whole point of the cache is a number, and without this one "it is cached"
+    // would be an assertion rather than a measurement -- the shadows look identical either way,
+    // which is exactly the property that makes a broken cache hard to notice.
+    if (_renderer)
+    {
+        uint32_t rendered = 0, cached = 0;
+        if (wgr_get_local_shadow_stats(_renderer, &rendered, &cached) != 0)
+        {
+            Poseidon::Dev::LocalShadowSettings& ls = Poseidon::Dev::GLocalShadowSettings();
+            ls.viewsRendered = static_cast<int>(rendered);
+            ls.viewsCached = static_cast<int>(cached);
+            static const bool kSay = []
+            {
+                const char* e = std::getenv("POSEIDON_LOCAL_SHADOW_STATS");
+                return e != nullptr && std::atoi(e) != 0;
+            }();
+            if (kSay)
+            {
+                static int saidR = -1;
+                static int saidC = -1;
+                if (saidR != ls.viewsRendered || saidC != ls.viewsCached)
+                {
+                    saidR = ls.viewsRendered;
+                    saidC = ls.viewsCached;
+                    LOG_INFO(Graphics, "LGT-026 local shadow views: {} rendered, {} re-used (cache {}{})",
+                             ls.viewsRendered, ls.viewsCached, ls.cacheStatic ? "on" : "off",
+                             ls.forceRefresh ? ", FORCED refresh" : "");
+                }
+            }
+        }
+    }
     _publishedGrassStatsValid = GetGrassStatsFromRenderer(_publishedGrassStats);
     _publishedMemoryStatsValid = GetGpuMemoryStatsFromRenderer(_publishedMemoryStats);
     {
@@ -10489,6 +10584,42 @@ void EngineWgpu::PublishRendererStats()
         std::memcpy(_publishedCpuTimings, cpu, sizeof(cpu));
         _publishedGpuTimingCount = gpuN;
         _publishedCpuTimingCount = cpuN;
+        // LGT-026: the local-shadow region, to the log. Every other region is readable only
+        // through the Objects tab, and a capture harness has no way to open a tab -- which is
+        // how 24 depth passes a frame stayed unmeasured for as long as they did. Gated, and a
+        // running mean rather than one frame: a single harvested sample of a sub-millisecond
+        // region is mostly noise.
+        static const bool kSayGpu = []
+        {
+            const char* e = std::getenv("POSEIDON_LOCAL_SHADOW_STATS");
+            return e != nullptr && std::atoi(e) != 0;
+        }();
+        if (kSayGpu && gpuN > (int)WGR_GPU_TIMER_LOCAL_SHADOW)
+        {
+            static double sum = 0.0;
+            static double sumFrame = 0.0;
+            static int n = 0;
+            // -1 is "the region did not run this frame", and with the cache on that is not a
+            // missing sample: it is a frame that spent NOTHING on local shadow views, which is
+            // exactly the number the A/B is about. Reading it as absent would have left the
+            // cached arm with no row at all -- a saving that reports as silence.
+            const float raw = gpu[WGR_GPU_TIMER_LOCAL_SHADOW];
+            const float ms = raw >= 0.0f ? raw : 0.0f;
+            const float frameMs = gpu[kFrameGpuRegionTotal];
+            if (frameMs >= 0.0f)
+            {
+                sum += ms;
+                sumFrame += (frameMs >= 0.0f ? frameMs : 0.0f);
+                if (++n >= 120)
+                {
+                    LOG_INFO(Graphics, "LGT-026 local shadow GPU: {:.3f} ms mean over {} samples (frame {:.3f} ms)",
+                             sum / n, n, sumFrame / n);
+                    sum = 0.0;
+                    sumFrame = 0.0;
+                    n = 0;
+                }
+            }
+        }
     }
 }
 

@@ -1550,6 +1550,14 @@ class EngineWgpu : public EngineDummy
     //! between them and every local light reads as fully occluded.
     Poseidon::shadow::Mat4 LocalShadowVP(int k, const float camPos[3]) const;
     int _localShadowCount = 0;
+    //! LGT-026: a hash of everything about view `k`'s LIGHT that changes what its depth map
+    //! contains -- its absolute position, its direction, its cone, its reach and its cube face,
+    //! plus the shadow settings those are read through. Absolute, so it is blind to the camera
+    //! (see the note on LocalShadowSettings::cacheStatic); computed here rather than in the
+    //! renderer because this is the only side that has the light.
+    uint64_t LocalShadowLightKey(int k) const;
+    //! Previous frame's keys. 0 = "no light in this slot last frame", which counts as changed.
+    uint64_t _localShadowKey[kMaxLocalShadows] = {};
 
     // Dev-panel overlay for the current frame
     std::vector<WgrOverlayVertex> _overlayVerts;

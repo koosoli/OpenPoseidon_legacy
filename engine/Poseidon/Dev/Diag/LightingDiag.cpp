@@ -54,6 +54,12 @@ LocalShadowSettings& GLocalShadowSettings()
             v.selfRadius = std::max(0.0f, static_cast<float>(std::atof(e)));
         if (const char* e = std::getenv("POSEIDON_LOCAL_SHADOW_DARKNESS"))
             v.darkness = std::clamp(static_cast<float>(std::atof(e)), 0.0f, 1.0f);
+        // LGT-026. The cache is the A/B arm every measurement of this feature is stated
+        // against, so it has to be reachable without a rebuild.
+        if (const char* e = std::getenv("POSEIDON_LOCAL_SHADOW_CACHE"))
+            v.cacheStatic = (std::atoi(e) != 0);
+        if (const char* e = std::getenv("POSEIDON_LOCAL_SHADOW_FORCE_REFRESH"))
+            v.forceRefresh = (std::atoi(e) != 0);
         return v;
     }();
     return s;

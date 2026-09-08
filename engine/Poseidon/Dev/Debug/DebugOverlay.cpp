@@ -1557,6 +1557,18 @@ void DrawZeusTab()
         "The spill's direction-independent term. Zero keeps the spill directional, so it can be strong enough to "
         "carry the far field without lifting every wall and roof uniformly -- a flat lift is exactly what reads as "
         "floodlight rather than as street lamps.";
+    static const char* const kBulbGlowTip =
+        "POSEIDON_BULB_GLOW=0. The bulb's own appearance -- a peak-white core plus a soft halo "
+        "sprite -- and nothing about the light it CASTS. A wgpu night frame has no value above "
+        "the 1.0 bloom knee, so this halo is drawn, not bloomed; see LGT-025.";
+    static const char* const kShadowCacheTip =
+        "POSEIDON_LOCAL_SHADOW_CACHE=0. A view is re-rendered only when its light, its casters or the "
+        "shadow settings change; a settled village re-uses all 24. Measured 2.90 ms -> 0.000, and the "
+        "whole frame 13.38 -> 8.17 ms, because the per-view cull dispatches go with it.";
+    static const char* const kShadowForceTip =
+        "POSEIDON_LOCAL_SHADOW_FORCE_REFRESH=1. Re-renders every view every frame with the cache still "
+        "on. This is the switch for telling a STALE shadow apart from a real one: if a shadow in the "
+        "wrong place survives this, the cache is not what put it there.";
     static const char* const kLocalShadowTip =
         "Point lights get six shadow faces each, spots one; all of them are tiles in one depth layer. Four lights "
         "is twenty-four of the twenty-four views, so this is the whole budget.";
@@ -1598,6 +1610,27 @@ void DrawZeusTab()
         }
 
         ImGui::Separator();
+        // LGT-025: how much a bulb GLOWS, as opposed to how much it lights. Both sliders
+        // touch only the marker and its halo; the light a lamp or a headlight casts on the
+        // ground is the Light object above and is not reachable from here.
+        BulbGlowSettings& glow = GBulbGlow();
+        Dev::Checkbox("Bulbs glow (LGT-025)", &glow.enabled);
+        Dev::PanelTooltip(kBulbGlowTip);
+        ImGui::BeginDisabled(!glow.enabled);
+        ImGui::SetNextItemWidth(160.0f);
+        Dev::SliderFloat("Glow strength", &glow.strength, 0.0f, 8.0f, "%.2f");
+        Dev::PanelTooltip("POSEIDON_BULB_GLOW_STRENGTH. Scales the halo's alpha cap "
+                          "(1.0 = the old wgpu 0.10, hard ceiling 0.75).");
+        ImGui::SetNextItemWidth(160.0f);
+        Dev::SliderFloat("Glow size", &glow.size, 0.0f, 16.0f, "%.2f");
+        Dev::PanelTooltip("POSEIDON_BULB_GLOW_SIZE. Scales the halo's screen size "
+                          "(1.0 = the old wgpu 0.030, about two pixels).");
+        Dev::Checkbox("Bulb core at peak white", &glow.peakNormalised);
+        Dev::PanelTooltip("POSEIDON_BULB_GLOW_PEAK=0 restores the unit-length colour "
+                          "normalisation, which asks a warm bulb for ~66% of white.");
+        ImGui::EndDisabled();
+
+        ImGui::Separator();
         Poseidon::Dev::LocalShadowSettings& ls = Poseidon::Dev::GLocalShadowSettings();
         Dev::Checkbox("Local lights cast shadows", &ls.enabled);
         Dev::PanelTooltip(kLocalShadowTip);
@@ -1609,6 +1642,13 @@ void DrawZeusTab()
         Dev::SliderFloat("Self radius m", &ls.selfRadius, 0.0f, 4.0f, "%.2f");
         ImGui::SetNextItemWidth(160.0f);
         Dev::SliderFloat("Beam shape", &Poseidon::Dev::GSpotBeam().shape, 0.15f, 1.5f, "%.2f");
+        // LGT-026: a street lamp never moves and neither does the house beside it, so its six
+        // cube faces were being recomputed sixty times a second to produce an identical depth
+        // map. Caching them takes the local-shadow pass from 2.90 ms to 0.000.
+        Dev::Checkbox("Cache static light shadows", &ls.cacheStatic);
+        Dev::PanelTooltip(kShadowCacheTip);
+        Dev::Checkbox("Force shadow re-render", &ls.forceRefresh);
+        Dev::PanelTooltip(kShadowForceTip);
     }
 
     // DST-003: how far a wrecked building comes down.

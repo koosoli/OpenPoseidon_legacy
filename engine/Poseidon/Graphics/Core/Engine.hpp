@@ -2759,7 +2759,10 @@ class Engine : public IGraphicsEngine
         kSkyGpuRegionEnv = 60,
         kSkyGpuRegionSh = 61,
         kSkyGpuRegionDraw = 62,
-        kGpuRegionEnd = 77, // + REN-GI + PERF-024 encode rows (WGR_GPU_TIMER_REGION_COUNT)
+        // LGT-026 - the local-light shadow views, all of them, as one region. The four
+        // per-cascade rows above stop at MAX_CASCADES, so the tiled local atlas was untimed.
+        kLocalShadowGpuRegion = 77,
+        kGpuRegionEnd = 78, // + REN-GI + PERF-024 encode rows (WGR_GPU_TIMER_REGION_COUNT)
         // Regions that are physically enclosed by another region (see GpuTimerContainedBy).
         kGrassGpuRegionShadow = 24,
         kTerrainGpuRegionColor = 32,

@@ -161,6 +161,10 @@ pub enum Region {
     WorkerEncSky = 74,    // the atmosphere LUTs, froxel, env bake, cloud march and the sky pass
     WorkerEncDraw = 75,   // the depth prepass and the 3D colour sub-pass replay, water included
     WorkerEncPost = 76,   // the post chain (tonemap, bloom, DoF, god rays), upscale and UI
+    // LGT-026: the local-light shadow views as one region. SHADOW_CASCADE_REGIONS is indexed
+    // by cascade number and has exactly MAX_CASCADES entries, so `SHADOW_CASCADE_REGIONS.get(c)`
+    // returned None for every local view and the whole tiled atlas was unmeasured.
+    LocalShadow = 77,
     FrameTotal = 25, // all submitted frame work; excludes acquire/present pacing
 }
 
@@ -173,7 +177,7 @@ pub const SHADOW_CASCADE_REGIONS: [Region; 4] = [
 ];
 
 /// Region count — the FFI getter's element contract (WGR_GPU_TIMER_REGION_COUNT).
-pub const REGION_COUNT: usize = 77;
+pub const REGION_COUNT: usize = 78;
 /// Water occupies [0, WATER_REGION_COUNT); grass occupies the remainder. The two
 /// debug tabs slice the shared array with these so neither shows the other's rows.
 /// Consumed on the C++ side (Engine::kWaterGpuRegionEnd) and by the layout test.
@@ -604,7 +608,8 @@ mod tests {
     // count + a few pinned indices catches accidental reordering on either side.
     #[test]
     fn region_indices_stay_ffi_stable() {
-        assert_eq!(REGION_COUNT, 77);
+        assert_eq!(REGION_COUNT, 78);
+        assert_eq!(Region::LocalShadow as u32, 77);
         assert_eq!(Region::SpectrumInit as u32, 0);
         assert_eq!(Region::FftCompose as u32, 4);
         assert_eq!(Region::Interaction as u32, 5);

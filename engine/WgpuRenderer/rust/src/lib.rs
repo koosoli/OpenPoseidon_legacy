@@ -2260,6 +2260,11 @@ impl Renderer {
 
     // PERF-005 — this frame's object accounting: the GPU cull's per-view counters plus the
     // CPU-replayed direct-draw tally.
+    // LGT-026 — how many local-light shadow views re-rendered / were re-used last frame.
+    fn local_shadow_view_stats(&self) -> (u32, u32) {
+        self.gfx3d.local_shadow_view_stats()
+    }
+
     fn object_stats(&self) -> (crate::gfx3d::cull::CullStats, DirectDrawStats, u32, [u32; 8]) {
         (
             self.gfx3d.object_stats(),

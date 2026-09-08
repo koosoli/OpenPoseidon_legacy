@@ -913,7 +913,19 @@ struct WgrShadowPass
      * exactly as the interior sky-visibility map is a separate family: they are selected
      * differently and they are a different projection kind. */
     uint32_t local_count;
-    uint32_t local_pad[3];
+    /* LGT-026 -- the static-view cache. Bit 0: the engine's cache switch is on (the Lighting
+     * tab / POSEIDON_LOCAL_SHADOW_CACHE). Bit 1: re-render every local view THIS frame whatever
+     * the keys say -- the force-refresh switch, so a suspected stale tile is one keypress to
+     * rule in or out rather than an investigation. Occupies what was a pad word, so the ABI is
+     * unchanged; same precedent as grass_cascade_mask above. */
+    uint32_t local_flags;
+    /* LGT-026 -- bit k set = view k's LIGHT changed since the previous frame: it moved, its
+     * cone/range/near changed, or a different light now occupies slot k. This is computed
+     * ENGINE-side because that is where the light's parameters exist in absolute world space;
+     * the renderer cannot see them, and everything it CAN see (the retained-set epoch, the
+     * caster set, the depth target's shape) it adds itself. */
+    uint32_t local_dirty_mask;
+    uint32_t local_pad[1];
     WgrMat4 local_vp[24];
 };
 
@@ -1556,7 +1568,14 @@ enum WgrGpuTimerRegion : uint32_t
     WGR_GPU_TIMER_WORKER_ENC_SKY = 74,
     WGR_GPU_TIMER_WORKER_ENC_DRAW = 75,
     WGR_GPU_TIMER_WORKER_ENC_POST = 76,
-    WGR_GPU_TIMER_REGION_COUNT = 77,
+    /* LGT-026: the LOCAL-LIGHT shadow views, all of them, as one number. The four
+     * WGR_GPU_TIMER_SHADOW_CASCADE_* rows are indexed by cascade number and stop at
+     * MAX_CASCADES, so every local view rendered into the tiled atlas layer was
+     * UNTIMED -- 24 depth passes a frame that no region named. One region and not
+     * one-per-view because the question this answers is "what does caching the
+     * static ones buy", and that is a per-frame total. */
+    WGR_GPU_TIMER_LOCAL_SHADOW = 77,
+    WGR_GPU_TIMER_REGION_COUNT = 78,
 };
 
 /* PERF-005 - region nesting, and the ONLY correct way to total this array.
@@ -2428,6 +2447,12 @@ extern "C"
 
     /* PERF-005 — this frame's object accounting. Returns 1 on success, 0 when unavailable. */
     WGR_API uint32_t wgr_get_object_stats(WgrRenderer* renderer, WgrObjectStats* out);
+
+    /* LGT-026 — how many local-light shadow views the last frame re-rendered, and how many it
+     * re-used from the cache. A correct cache changes nothing anyone can SEE, which is exactly
+     * what makes a broken one hard to notice, so this pair is the only way to tell a working
+     * cache from one that never hits. Returns 1 on success, 0 when unavailable. */
+    WGR_API uint32_t wgr_get_local_shadow_stats(WgrRenderer* renderer, uint32_t* rendered, uint32_t* cached);
 
     /* Current dynamic-resource residency accounting. Returns 1 on success. */
     WGR_API uint32_t wgr_get_memory_stats(WgrRenderer* renderer, WgrMemoryStats* out);

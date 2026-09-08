@@ -1001,7 +1001,16 @@ pub struct WgrShadowPass {
     // LGT-010: shadow views for LOCAL lights, rendered into layers count..count+n-1 of the
     // same depth array as the cascades.
     pub local_count: u32,
-    pub local_pad: [u32; 3],
+    /// LGT-026 cache control. Bit 0 = the engine's cache switch is on, bit 1 = re-render every
+    /// local view this frame regardless. Occupies what was a pad word, so the ABI is unchanged
+    /// (the `grass_cascade_mask` precedent above).
+    pub local_flags: u32,
+    /// LGT-026. Bit k set = view k's LIGHT changed since last frame -- it moved, its cone or
+    /// range changed, or a different light now occupies the slot. Computed engine-side, where
+    /// the light's parameters live in ABSOLUTE world space; the renderer adds the reasons only
+    /// it can see (the retained-set epoch, the caster set, the target's shape).
+    pub local_dirty_mask: u32,
+    pub local_pad: [u32; 1],
     pub local_vp: [WgrMat4; 24],
 }
 
@@ -3254,6 +3263,36 @@ pub struct WgrObjectStats {
     /// sustained identity bug was invisible after the eighth occurrence. Nonzero is a
     /// C++-side bug, never a renderer one.
     pub stale_instance_ops: u64,
+}
+
+/// LGT-026 — how many local-light shadow views the last frame RE-RENDERED, and how many it
+/// re-used from the cache. Returns 1 on success, 0 when the renderer or either out pointer is
+/// null. The cache is invisible in the picture by construction (a correct cache changes
+/// nothing anyone can see), so this pair is the only way to tell a working one from a broken
+/// one, or from one that never hits.
+///
+/// # Safety
+/// `renderer` must be a live `WgrRenderer` or null; `rendered` and `cached` must point at
+/// valid `u32`s or be null (in which case 0 is returned).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_get_local_shadow_stats(
+    renderer: *mut WgrRenderer,
+    rendered: *mut u32,
+    cached: *mut u32,
+) -> u32 {
+    if renderer.is_null() || rendered.is_null() || cached.is_null() {
+        return 0;
+    }
+    catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &*renderer };
+        let (r, c) = renderer.local_shadow_view_stats();
+        unsafe {
+            *rendered = r;
+            *cached = c;
+        }
+        1
+    }))
+    .unwrap_or(0)
 }
 
 /// Fill `out` with this frame's object accounting. Returns 1 on success, 0 when the

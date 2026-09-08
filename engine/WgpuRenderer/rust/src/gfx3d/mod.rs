@@ -2681,6 +2681,49 @@ pub(crate) fn interior_sky_cache() -> bool {
     })
 }
 
+/// LGT-026: local-light shadow views are cached per view and re-rendered only when something
+/// that can change their contents changes. Default ON; WGR_LOCAL_SHADOW_CACHE=0 redraws every
+/// view every frame (the pre-cache behaviour, and the A/B arm every measurement here is against).
+/// The engine can force the same thing per frame through `WgrShadowPass::local_flags` -- that is
+/// the dev-tools switch, so a suspected stale tile can be ruled in or out without a restart.
+pub(crate) fn local_shadow_cache_env() -> bool {
+    static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *V.get_or_init(|| {
+        let on = std::env::var("WGR_LOCAL_SHADOW_CACHE")
+            .map(|v| v.trim() != "0")
+            .unwrap_or(true);
+        eprintln!(
+            "[wgr] local shadow cache: {} (WGR_LOCAL_SHADOW_CACHE)",
+            if on { "on" } else { "OFF, every view every frame" }
+        );
+        on
+    })
+}
+
+/// Bit 0 of `WgrShadowPass::local_flags`: the engine's own cache switch (the Lighting tab).
+const LOCAL_FLAG_CACHE: u32 = 1 << 0;
+/// Bit 1: re-render every local view THIS frame, whatever the keys say. The switch that makes a
+/// stale tile a one-keypress question rather than an investigation.
+const LOCAL_FLAG_FORCE_REFRESH: u32 = 1 << 1;
+
+/// A 64-bit FNV-1a over the pieces of a local view's key. Not cryptographic and does not need to
+/// be: a collision costs one frame of a stale tile, and every input is quantised first so that
+/// float jitter cannot produce a spurious MISS -- which is the failure that matters, because a
+/// key that never matches is a cache that never caches and reports itself as working.
+#[inline]
+fn key_mix(h: u64, v: u64) -> u64 {
+    (h ^ v).wrapping_mul(0x0000_0100_0000_01B3)
+}
+
+/// Quantise a world-space metre to centimetres. `abs = rel + cam_pos` is reconstructed in f32 at
+/// world coordinates in the thousands, where one ulp is around half a millimetre, so the low bits
+/// of an absolute position move whenever the CAMERA moves even though the object did not. A
+/// centimetre grid is below anything a shadow map at these texel densities can resolve.
+#[inline]
+fn key_pos_cm(v: f32) -> u64 {
+    ((v * 100.0).round() as i64) as u64
+}
+
 fn gtao_scale_from_env() -> u32 {
     let scale = std::env::var("WGR_GTAO_SCALE")
         .ok()
@@ -3520,6 +3563,35 @@ pub struct Gfx3d {
     // "no local shadows" that every consumer gates on.
     local_shadow_count: usize,
     local_shadow_first_layer: usize,
+    // LGT-026 -- the local-view cache. A street lamp does not move, and neither does the house
+    // beside it, so its six faces were producing an identical depth map sixty times a second.
+    // Per view: the key it was last RENDERED with (None = the tile has never been drawn and
+    // must not be sampled). `local_view_refresh` is this frame's re-render set, read by BOTH
+    // the cull dispatch and the depth pass so the two can never disagree about which tiles are
+    // being rebuilt.
+    //
+    // WHY THE CAMERA IS NOT IN THE KEY. `pass.local_vp[k]` is camera-relative (LGT-025), so it
+    // changes every time the camera moves -- but the MAP it produces does not. The depth pass
+    // composes that matrix with caster worlds expressed in the SAME origin, so the two camera
+    // terms cancel and the depth written for a given absolute point is identical whatever the
+    // origin. What IS camera-relative is the per-camera LOOKUP matrix, and that is rebuilt from
+    // scratch every frame regardless (a matrix multiply, not a depth pass). Hence the key is
+    // built from ABSOLUTE, camera-independent quantities only: the light's own parameters
+    // (hashed C++-side, arriving as `local_dirty_mask`), the retained-set epoch, and the CPU
+    // casters' absolute positions quantised to a centimetre so f32 jitter in `abs = rel + cam`
+    // cannot pass for movement.
+    local_view_key: [Option<u64>; MAX_LOCAL_SHADOWS],
+    local_view_refresh: Vec<usize>,
+    // Last frame's shape. Any change here re-renders everything: the tiles move, the layer is
+    // reallocated, or the cull view indices shift under the cached tiles.
+    local_cache_shape: (u32, usize, u32, u64),
+    // What the log line and the Lighting tab report.
+    local_views_rendered: u32,
+    local_views_cached: u32,
+    // Depth-only pipeline that writes 1.0 over one tile. `LoadOp::Clear` clears the whole
+    // attachment and is not scissored, so it cannot be used to reset ONE tile of a shared
+    // layer -- which is exactly what a per-light cache needs. Three vertices.
+    local_tile_clear: Option<wgpu::RenderPipeline>,
     shadow_caster_layout: wgpu::BindGroupLayout,
     shadow_caster_bind: Option<wgpu::BindGroup>,
     shadow_shader: wgpu::ShaderModule,
@@ -4331,6 +4403,12 @@ impl Gfx3d {
             shadow_plan: Vec::new(),
             local_shadow_count: 0,
             local_shadow_first_layer: 0,
+            local_view_key: [None; MAX_LOCAL_SHADOWS],
+            local_view_refresh: Vec::new(),
+            local_cache_shape: (0, 0, 0, 0),
+            local_views_rendered: 0,
+            local_views_cached: 0,
+            local_tile_clear: None,
             shadow_caster_layout,
             shadow_caster_bind: None,
             shadow_shader,
@@ -5858,6 +5936,157 @@ impl Gfx3d {
         });
     }
 
+    // LGT-026: the depth-only "clear one tile" pipeline. `LoadOp::Clear` clears the whole
+    // attachment and takes no notice of the scissor, so with every local view sharing one
+    // tiled layer there is no clear op that resets a SINGLE tile -- and without one, a cache
+    // is impossible: view 0's clear would wipe the 23 tiles it is meant to preserve. Three
+    // vertices at z = far, depth-compare Always, viewport+scissor already set to the tile.
+    fn ensure_local_tile_clear(&mut self, device: &wgpu::Device) {
+        if self.local_tile_clear.is_some() {
+            return;
+        }
+        const SRC: &str = concat!(
+            "@vertex\n",
+            "fn vs_tile_clear(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4<f32> {\n",
+            "    var p = array<vec2<f32>, 3>(vec2<f32>(-1.0, -3.0), vec2<f32>(-1.0, 1.0), vec2<f32>(3.0, 1.0));\n",
+            "    return vec4<f32>(p[vi], 1.0, 1.0);\n",
+            "}\n",
+        );
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("wgr_local_tile_clear"),
+            source: wgpu::ShaderSource::Wgsl(SRC.into()),
+        });
+        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("wgr_local_tile_clear_layout"),
+            bind_group_layouts: &[],
+            immediate_size: 0,
+        });
+        self.local_tile_clear = Some(device.create_render_pipeline(
+            &wgpu::RenderPipelineDescriptor {
+                label: Some("wgr_local_tile_clear_pipe"),
+                layout: Some(&layout),
+                vertex: wgpu::VertexState {
+                    module: &module,
+                    entry_point: Some("vs_tile_clear"),
+                    buffers: &[],
+                    compilation_options: Default::default(),
+                },
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    cull_mode: None,
+                    ..Default::default()
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: SHADOW_FORMAT,
+                    depth_write_enabled: Some(true),
+                    // Always, not Less: this OVERWRITES whatever the tile held last frame.
+                    depth_compare: Some(wgpu::CompareFunction::Always),
+                    stencil: Default::default(),
+                    bias: Default::default(),
+                }),
+                multisample: Default::default(),
+                fragment: None,
+                multiview_mask: None,
+                cache: None,
+            },
+        ));
+    }
+
+    // LGT-026: decide which local views re-render this frame. See the field comment on
+    // `local_view_key` for why the CAMERA is deliberately not part of a key.
+    fn plan_local_cache(
+        &mut self,
+        pass: &WgrShadowPass,
+        casters: &[WgrShadowCaster],
+        count: usize,
+        local: usize,
+    ) {
+        self.local_view_refresh.clear();
+        if local == 0 {
+            self.local_views_rendered = 0;
+            self.local_views_cached = 0;
+            self.local_view_key = [None; MAX_LOCAL_SHADOWS];
+            return;
+        }
+        // The shape the cached tiles were drawn under. A change in ANY of it moves the tiles,
+        // reallocates the layer, or shifts the cull-view index a cached tile was filled from --
+        // all of which make a retained tile meaningless rather than merely stale.
+        let shape = (pass.resolution, count, local as u32, self.shadow_gen);
+        let shape_changed = shape != self.local_cache_shape;
+        self.local_cache_shape = shape;
+
+        let flags = pass.local_flags;
+        let cache_on = local_shadow_cache_env() && (flags & LOCAL_FLAG_CACHE) != 0;
+        let forced = (flags & LOCAL_FLAG_FORCE_REFRESH) != 0;
+        let epoch = self.cull.instance_epoch();
+
+        // Per-view content key over what the CPU caster list contributes to that view. The
+        // GPU-driven retained set contributes too, and it is not walkable from here -- its
+        // stand-in is `epoch`, which InstanceTable bumps on every add/update/remove.
+        let mut keys = [0u64; MAX_LOCAL_SHADOWS];
+        for key in keys.iter_mut().take(local) {
+            *key = key_mix(0xcbf2_9ce4_8422_2325, epoch);
+        }
+        for caster in casters.iter() {
+            if caster.index_count == 0 {
+                continue;
+            }
+            let mask = caster.cascade_mask >> count;
+            if mask == 0 {
+                continue;
+            }
+            // ABSOLUTE position, quantised: `world` is camera-relative, and the point of the
+            // key is to be blind to the camera and sensitive to the caster.
+            let ax = key_pos_cm(caster.world[12] + pass.cam_pos[0]);
+            let ay = key_pos_cm(caster.world[13] + pass.cam_pos[1]);
+            let az = key_pos_cm(caster.world[14] + pass.cam_pos[2]);
+            // ...and its orientation, at ~1e-3, so a turning vehicle invalidates but numerical
+            // noise in a parked one does not.
+            let mut rot = 0u64;
+            for i in [0usize, 1, 2, 4, 5, 6, 8, 9, 10] {
+                rot = key_mix(rot, ((caster.world[i] * 1000.0).round() as i64) as u64);
+            }
+            let ident = key_mix(
+                key_mix(
+                    key_mix(caster.mesh, u64::from(caster.index_begin)),
+                    u64::from(caster.index_count),
+                ),
+                u64::from(caster.palette_slot),
+            );
+            let contrib = key_mix(key_mix(key_mix(key_mix(ident, ax), ay), az), rot);
+            for (k, key) in keys.iter_mut().enumerate().take(local) {
+                if mask & (1u32 << k) != 0 {
+                    // XOR-accumulate: the caster list's ORDER is not part of what a view
+                    // renders, and making it part of the key would invalidate on a re-sort.
+                    *key ^= contrib;
+                }
+            }
+        }
+
+        for k in 0..local {
+            // The light's own parameters are hashed engine-side (absolute space); bit k of
+            // local_dirty_mask is that verdict.
+            let light_moved = (pass.local_dirty_mask & (1u32 << k)) != 0;
+            let stale = match self.local_view_key[k] {
+                Some(prev) => prev != keys[k] || light_moved,
+                // Never drawn: it MUST render. A tile nobody filled is not "cached", it is
+                // whatever the allocator left there, and it is sampled every frame.
+                None => true,
+            };
+            if !cache_on || forced || shape_changed || stale {
+                self.local_view_refresh.push(k);
+                self.local_view_key[k] = Some(keys[k]);
+            }
+        }
+        self.local_views_rendered = self.local_view_refresh.len() as u32;
+        self.local_views_cached = (local - self.local_view_refresh.len()) as u32;
+    }
+
+    /// LGT-026: how many local shadow views re-rendered / were re-used this frame.
+    pub fn local_shadow_view_stats(&self) -> (u32, u32) {
+        (self.local_views_rendered, self.local_views_cached)
+    }
+
     pub fn prepare_shadows(
         &mut self,
         device: &wgpu::Device,
@@ -5885,6 +6114,12 @@ impl Gfx3d {
         {
             self.shadow_plan.clear();
             self.local_shadow_count = 0;
+            self.local_view_refresh.clear();
+            self.local_views_rendered = 0;
+            self.local_views_cached = 0;
+            // Nothing renders this frame, so nothing that is cached can be trusted next frame
+            // either -- the tiles keep their contents but the world moved on without them.
+            self.local_view_key = [None; MAX_LOCAL_SHADOWS];
             return;
         }
         // LGT-010: local light views live in layers count..count+local-1 of the SAME depth
@@ -5896,6 +6131,8 @@ impl Gfx3d {
         // LGT-015: the local views share ONE layer, tiled. `+1` not `+local`.
         self.ensure_shadow_target(device, pass.resolution, count + u32::from(local > 0));
         self.ensure_shadow_pipelines(device);
+        self.ensure_local_tile_clear(device);
+        self.plan_local_cache(pass, casters, count as usize, local);
 
         self.shadow_pass_ubo
             .ensure(device, LOCAL_UBO_SLOT + MAX_LOCAL_SHADOWS);
@@ -6112,6 +6349,8 @@ impl Gfx3d {
         // view past the first.
         let total_views = count as usize + local;
         let local_tile = target.res / LOCAL_ATLAS_GRID;
+        // LGT-026: one bracket around the whole local block (see the region choice below).
+        let mut local_timer_open = false;
         for c in 0..total_views {
             // Which pass-UBO slot holds this view's light view-projection. The cascades are
             // slots 0..count-1; the locals sit past the sky-visibility block so all three
@@ -6126,7 +6365,15 @@ impl Gfx3d {
             // only the first may clear it -- the rest must load or they erase their neighbours.
             let attach_layer = if is_local { count as usize } else { c };
             let local_index = c - count as usize;
-            let depth_load = if is_local && local_index > 0 {
+            // LGT-026: a cached tile is not re-rendered at all. This is the whole saving --
+            // no pass, no cull consumption, no clear.
+            if is_local && !self.local_view_refresh.contains(&local_index) {
+                continue;
+            }
+            // LGT-026: and so a local view can no longer CLEAR THE LAYER, because the tiles it
+            // would wipe are the cached ones it is being run beside. Every local view loads and
+            // resets only its own tile, with the clear-quad below.
+            let depth_load = if is_local {
                 wgpu::LoadOp::Load
             } else {
                 wgpu::LoadOp::Clear(1.0)
@@ -6136,7 +6383,22 @@ impl Gfx3d {
             // cascade 0 covers metres and cascade 3 covers hundreds of them, so their costs and
             // their fixes are unrelated. Bracketed on the ENCODER around the whole cascade pass,
             // which needs no TIMESTAMP_QUERY_INSIDE_PASSES and captures the depth clear too.
-            let region = crate::gpu_timers::SHADOW_CASCADE_REGIONS.get(c).copied();
+            // LGT-026: SHADOW_CASCADE_REGIONS has exactly MAX_CASCADES entries and is indexed by
+            // cascade number, so every local view used to fall off the end of it and was timed by
+            // nothing at all -- up to 24 depth passes a frame that no region named. They get ONE
+            // region between them, bracketed ONCE around the whole local block rather than per
+            // view: a region is one begin/end pair per frame, so re-bracketing it per view would
+            // report the LAST view's cost under a name that reads as all of them.
+            let region = if is_local {
+                None
+            } else {
+                crate::gpu_timers::SHADOW_CASCADE_REGIONS.get(c).copied()
+            };
+            if is_local && !local_timer_open {
+                local_timer_open = true;
+                timers.cpu_begin(crate::gpu_timers::Region::LocalShadow);
+                timers.begin(encoder, crate::gpu_timers::Region::LocalShadow);
+            }
             if let Some(r) = region {
                 timers.cpu_begin(r);
                 timers.begin(encoder, r);
@@ -6161,7 +6423,6 @@ impl Gfx3d {
             // shadow pipeline and is bound first, so a later pipeline switch never
             // invalidates it — set it once per cascade instead of per draw.
             let pass_ubo_off = (ubo_slot as u64 * self.shadow_pass_ubo.stride) as u32;
-            rp.set_bind_group(0, pass_bind, &[pass_ubo_off]);
             if is_local {
                 // This view's tile. The scissor matters as much as the viewport: a viewport
                 // only maps NDC, it does not stop a triangle that lands outside the tile from
@@ -6170,7 +6431,17 @@ impl Gfx3d {
                 let ty = (local_index as u32 / LOCAL_ATLAS_GRID) * local_tile;
                 rp.set_viewport(tx as f32, ty as f32, local_tile as f32, local_tile as f32, 0.0, 1.0);
                 rp.set_scissor_rect(tx, ty, local_tile, local_tile);
+                // LGT-026: reset THIS tile and nothing else. The attachment loaded, because the
+                // other tiles in this layer are cached and a LoadOp::Clear would take them with
+                // it; the scissor above confines these three vertices to the tile.
+                if let Some(clear) = self.local_tile_clear.as_ref() {
+                    rp.set_pipeline(clear);
+                    rp.draw(0..3, 0..1);
+                }
             }
+            // AFTER the tile clear, not before: that pipeline's layout has no bind groups at
+            // all, and a pipeline whose layout is incompatible invalidates what is bound.
+            rp.set_bind_group(0, pass_bind, &[pass_ubo_off]);
 
             // CPU casters for this cascade (the retained GPU set is drawn below; a section
             // owned by the GPU is suppressed CPU-side in AddShadowCaster, so no double-draw).
@@ -6271,6 +6542,10 @@ impl Gfx3d {
                 timers.end(encoder, r);
                 timers.cpu_end(r);
             }
+        }
+        if local_timer_open {
+            timers.end(encoder, crate::gpu_timers::Region::LocalShadow);
+            timers.cpu_end(crate::gpu_timers::Region::LocalShadow);
         }
     }
 
@@ -9028,7 +9303,18 @@ impl Gfx3d {
         // cull too would spend four more query pairs to resolve a sub-0.1 ms item.
         timers.cpu_begin(crate::gpu_timers::Region::ObjCullShadow);
         timers.begin(encoder, crate::gpu_timers::Region::ObjCullShadow);
+        // LGT-026: a local view whose tile is being re-used does not need its cull re-run either
+        // -- nothing consumes the args it would produce. The cull views are laid out cascades
+        // first, locals after (see prepare_cull), and `local_view_refresh` is the SAME set the
+        // depth pass skips by, so the two cannot disagree about which tiles are being rebuilt.
+        let n_cascades = self
+            .cull
+            .shadow_view_count()
+            .saturating_sub(self.local_shadow_count);
         for c in 0..self.cull.shadow_view_count() {
+            if c >= n_cascades && !self.local_view_refresh.contains(&(c - n_cascades)) {
+                continue;
+            }
             self.cull.dispatch_shadow(encoder, c);
         }
         timers.end(encoder, crate::gpu_timers::Region::ObjCullShadow);
