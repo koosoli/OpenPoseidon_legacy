@@ -101,7 +101,11 @@ TEST_CASE("GamePage: view-distance row is a slider with metre text", "[UI][GameP
     TestableGamePage page;
     auto& p = page.Provider();
     CHECK(p.RowKind(2) == OptionsScrollList::KindSlider);
-    CHECK(p.RowValue(2) == 16);
+    // Derived, not hardcoded: the slider is 0..100 across [kMin, kMaxViewDistance], so the
+    // position of a given distance moves whenever the maximum does (it was 16 while the
+    // maximum was 5 km, and is 8 now that it is 10 km -- VD-001). What must NOT move is the
+    // distance itself, which is what the metre text below checks.
+    CHECK(p.RowValue(2) == GamePage::ViewDistanceToSlider(900.0f));
     CHECK(std::string(p.SliderValueText(2)) == "900 m");
 
     p.SetRowValue(2, 0);
