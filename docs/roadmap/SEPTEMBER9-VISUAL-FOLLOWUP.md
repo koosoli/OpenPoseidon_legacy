@@ -465,3 +465,36 @@ captures inspected, no gross escape plume; this does not prove thin-wall sealing
 Grid creation for unrelated neighbouring houses can hitch (one 85.5ms build).
 Follow-up rejects points outside the existing all-LOD bounding sphere plus 2m
 scaled grid margin before creating an interior; no change to actual room tests.
+
+f94eb275 built/pushed/deployed. Same 36 targeted tests pass. Installed 30s volume
+run exits 0, late sim ~2.0-2.3ms. Needed hasic_zbroj grid costs 30.5ms once;
+neighbouring 85.5ms bake is gone (other reached types 3.3/10.2ms). This does not
+eliminate all cold-grid hitches. Exterior volume image inspected: no large plume
+bleed visible, but an exterior view alone cannot certify every thin wall/roof.
+
+### Player head-shadow acceptance
+
+Installed f94eb275 head.noe, first-person look-down at 17:00, three orderly exit-0
+runs. sep9-head-detail-sharp.png clearly shows a complete helmet/head, shoulders,
+rifle and legs. Diagnostic uses PCF=0 and shadow distance=40m at unchanged 2048
+resolution; normal runtime reports 1200m and PCF=1, where the same silhouette is
+coarse/soft. External view also inspected. Thus the exterior-caster LOD fix is
+visually verified for this SoldierWB/player fixture, not all units/vehicles.
+No production shadow-distance/resolution/filter default was changed. Diagnostic
+uses a private test profile; normal settings remain unchanged.
+
+### Far-foliage rays investigation / active-game barrier
+
+Source inspection: the post-water replay happens after the godray composite.
+shader3d adds surface_scattering only when its translucent override is true;
+gfx3d sets that override from final Alpha blend mode. EngineWgpu can promote
+legacy plant/net masks to Opaque even in a late blend/whole-alpha revisit. Such
+late opaque draws have no surface scattering. This is a plausible mechanism,
+NOT yet the reproduced cause of screenshot 073829; do not brighten all trees or
+move rays back after transparents (the documented sign/cockpit regression).
+
+The requested new forest baseline was refused by the game lock: an outside-lock
+OpenPoseidon.exe launched normally at 17:15:35 (PID 61712, no harness arguments).
+It was not stopped or modified. No build/deploy was run concurrently. Next:
+capture late foliage draw classification and rays on/off at a verified forest
+pose after the installed-game slot is free, then apply a narrowly routed fix.
