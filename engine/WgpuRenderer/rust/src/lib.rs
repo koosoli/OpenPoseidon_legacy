@@ -5266,7 +5266,7 @@ impl Renderer {
             };
             // Classic transparent sorting can submit promoted cutouts/opaque objects
             // after Water. Their prepass depth already occludes the atmosphere, but a
-            // late colour write would erase its scattering. Replay that exact set early;
+            // late colour write would erase its scattering. Replay that exact set after water;
             // never move glass, decals, particles or post-ClearDepth cockpit segments.
             static EARLY_OPAQUE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
             let early_opaque = start == 0 && prepassed && water_split.is_some()
@@ -5412,9 +5412,6 @@ impl Renderer {
                         .begin_pass(&mut pass, TimerRegion::OpsPreWater);
                 }
                 render_ops(self, &mut pass, ops_pre_water, display_2d, false, prepassed, None);
-                if early_opaque {
-                    render_ops(self, &mut pass, ops_post_water, display_2d, false, prepassed, Some(true));
-                }
                 if time_segment {
                     self.gpu_timers
                         .end_pass(&mut pass, TimerRegion::OpsPreWater);
@@ -5564,9 +5561,18 @@ impl Renderer {
                     if visibility_query {
                         wpass.end_occlusion_query();
                     }
+                    if early_opaque {
+                        self.gpu_timers.end_pass(&mut wpass, TimerRegion::WaterDraw);
+                        // Preserve water ordering (including refraction snapshot contents).
+                        // Prepassed colour pipelines write neither depth nor stencil, so
+                        // they can share this read-only attachment without another pass.
+                        render_ops(self, &mut wpass, ops_post_water, display_2d, false, true, Some(true));
+                    }
                     drop(wpass);
                     encoder.pop_debug_group();
-                    self.gpu_timers.end(&mut encoder, TimerRegion::WaterDraw);
+                    if !early_opaque {
+                        self.gpu_timers.end(&mut encoder, TimerRegion::WaterDraw);
+                    }
                 }
             }
 
