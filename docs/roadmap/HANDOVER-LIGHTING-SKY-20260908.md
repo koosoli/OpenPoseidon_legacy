@@ -5,6 +5,10 @@ anything. **Read this before touching the renderer.**
 
 ## Where everything is
 
+Native Reforger performance, the 50 km fine-grid render guard, unused converted
+texture prefetch and a rejected shadow experiment:
+[NATIVE-REFORGER-PERF-20260909.md](decisions/NATIVE-REFORGER-PERF-20260909.md).
+
 Follow-up for the owner's Nogova report: see
 [NOGOVA-VISUAL-20260908.md](decisions/NOGOVA-VISUAL-20260908.md).
 It records the 50 km default/settings, float-depth coastline fix, zero-normal Davle
