@@ -765,3 +765,30 @@ profile on installed 4f1bd59c: exit 0, all expected heights and vehicle position
 heightfield ready=true. Fusion working set 2193-2261 MiB; sparse probe 1772-1820
 MiB. Fusion overview and 92 km probe capture inspected again. No claim that the
 whole native/Rust suite or older unrelated visual roadmap requests are complete.
+
+### Terrain brush radius and sideways cave request
+
+b51f877d adds Show brush radius at cursor (default on) in Map Editor. The free-fly
+overlay follows the ground with 96 segments, a centre marker and effective-radius
+label. Green=raise, amber=lower, red=not editable. Picking/radius are shared with
+PaintTerrainAtPixel, including the minimum 1.5-cell radius and editing bounds.
+It is an editor overlay, not depth-tested geometry. Existing settings resets
+restore the toggle; no extra per-frame work when the brush/preview is disabled.
+The panel now explains the 2049-sample painting limit and that height painting
+cannot create a roofed sideways cave. No misleading cave tool was exposed.
+
+Installed b51f877d acceptance: .tmp-bulb/brush.ps1 -Name brush-radius -RadiusView,
+using the existing Desert test mission and a 220 m free-fly camera. Amber/green
+64 m ring captures inspected. Hold/release heights 29.835 -> 23.1027 -> 16.0476,
+unchanged 16.0476 after release, raised to 22.0798; exit 0. Five targeted native
+cases pass (83 assertions), including the radius/paint-footprint test. Shutdown
+logs still contain four pre-existing LockCache unlock warnings, also present in
+the earlier original-map rocket acceptance before this change; not a clean-log
+claim. Off-centre physical mouse motion and high-DPI displays not separately
+automated. Both safety refs contain the change; Cargo.lock untouched.
+
+Sideways caves remain unimplemented, not a renderer-only workaround. The actual
+heightfield, infantry movement, projectile and PhysicsWorld integration points,
+plus a staged local 3D mesh/collision experiment, are documented in
+decisions/TERRAIN-CAVES-AND-BRUSH-20260909.md. Rendering a hole without replacing
+its solid hill collision is explicitly rejected as an incomplete implementation.
