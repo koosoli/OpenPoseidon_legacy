@@ -10,6 +10,7 @@
 #include <Poseidon/World/Physics/PhysicsBackend.hpp>
 #include <Poseidon/World/Physics/PhysicsWorld.hpp>
 #include <Poseidon/Dev/Diag/ShowcaseCastle.hpp>
+#include <Poseidon/Dev/Diag/ShowcaseContact.hpp>
 #include <Poseidon/World/Terrain/TerrainCrater.hpp>
 
 #include <memory>
@@ -20,6 +21,60 @@
 #include <cstdio>
 
 using namespace Poseidon::Physics;
+
+TEST_CASE("showcase block contacts sweep players and projectiles", "[physics][showcase-contact]")
+{
+    ProbeSample box;
+    box.shape = ProbeShape::Box;
+    box.position = Vector3(0, 0.4f, 0);
+    box.halfExtents = Vector3(1, 0.4f, 0.39f);
+    float t = 1;
+    Vector3 normal;
+    CHECK(Poseidon::Dev::SweepShowcaseBlock(box, Vector3(0,0.85f,-3), Vector3(0,0.85f,3),
+                                           0.3f, 0.55f, t, normal));
+    CHECK(t > 0.38f);
+    CHECK(t < 0.39f);
+    CHECK(normal.Z() < -0.99f);
+    t = 1;
+    CHECK_FALSE(Poseidon::Dev::SweepShowcaseBlock(box, Vector3(2,0.85f,-3), Vector3(2,0.85f,3),
+                                                 0.3f, 0.55f, t, normal));
+    t = 1;
+    CHECK(Poseidon::Dev::SweepShowcaseBlock(box, Vector3(0,0.4f,-100), Vector3(0,0.4f,100),
+                                           0, 0, t, normal));
+    CHECK(std::abs(t-0.49805f) < 0.00001f);
+    box.axisX = Vector3(0,0,1);
+    box.axisZ = Vector3(-1,0,0);
+    t = 1;
+    CHECK(Poseidon::Dev::SweepShowcaseBlock(box, Vector3(-3,0.4f,0), Vector3(3,0.4f,0),
+                                           0, 0, t, normal));
+    CHECK(normal.X() < -0.99f);
+    t = 1;
+    CHECK_FALSE(Poseidon::Dev::SweepShowcaseBlock(box, box.position, Vector3(3,0.4f,0),
+                                                 0.3f, 0.55f, t, normal));
+}
+
+TEST_CASE("showcase blast impulses decay and wake stacked bodies", "[physics][showcase-contact]")
+{
+    using Poseidon::Dev::ShowcaseBlastImpulse;
+    CHECK(ShowcaseBlastImpulse(Vector3(0,0,21), 20, 5).SquareSize() == 0);
+    CHECK(ShowcaseBlastImpulse(VZero, 0, 5).SquareSize() == 0);
+    CHECK(ShowcaseBlastImpulse(VZero, 20, 0).SquareSize() == 0);
+    CHECK(ShowcaseBlastImpulse(VZero, 20, 5).Y() == 40);
+    CHECK(ShowcaseBlastImpulse(Vector3(0,0,10), 20, 5).Z() == 10);
+    auto backend = CreatePhysicsBackend();
+    REQUIRE(backend->Create());
+    SphereProbeDef def;
+    def.shape = ProbeShape::Box;
+    def.halfExtents = Vector3(0.99f,0.4f,0.39f);
+    def.position = Vector3(0,2,2);
+    def.mass = 8;
+    const auto id = backend->SpawnSphereProbe(def);
+    REQUIRE(id.IsValid());
+    backend->ApplyImpulse(id, def.position, ShowcaseBlastImpulse(Vector3(0,0,2),20,5));
+    BodyMotion motion;
+    REQUIRE(backend->GetBodyMotion(id, motion));
+    CHECK(motion.linearVelocity.Z() > 4);
+}
 
 TEST_CASE("regional terrain collision edits cross tile seams and survive replacement", "[physics][terrain-patch]")
 {

@@ -1,5 +1,6 @@
 #include <Poseidon/World/Entities/Infantry/SoldierOldCommon.hpp>
 #include <Poseidon/World/Entities/Infantry/BodyWaterResponse.hpp>
+#include <Poseidon/Dev/Diag/PhysicsProbe.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <Poseidon/Graphics/Rendering/WaterInteractionBridge.hpp>
@@ -909,6 +910,17 @@ void Man::Simulate(float deltaT, SimulationImportance prec)
             _impulseTorque = VZero;
         }
 
+        if (playerControlled && IsLocal() && !IsDead())
+        {
+            const Vector3 desired = moveTrans.Position();
+            const Vector3 resolved = Poseidon::Dev::PhysicsShowcasePlayerMove(Position(), desired,
+                                                                             IsDown() ? 0.6f : 1.7f);
+            if (resolved.Distance2(desired) > 1e-8f)
+            {
+                moveTrans.SetPosition(resolved);
+                change = true;
+            }
+        }
         Move(moveTrans);
         DirectionWorldToModel(_modelSpeed, _speed);
 

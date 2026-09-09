@@ -498,3 +498,52 @@ OpenPoseidon.exe launched normally at 17:15:35 (PID 61712, no harness arguments)
 It was not stopped or modified. No build/deploy was run concurrently. Next:
 capture late foliage draw classification and rays on/off at a verified forest
 pose after the installed-game slot is free, then apply a narrowly routed fix.
+
+### Fast-freefly terrain temporal follow-up (pending validation)
+
+Owner reports terrain ghosting during fast freefly. Source inspection found that
+temporal.wgsl fs_velocity reconstructs jittered scene depth using an unjittered
+inverse camera without removing current projection jitter from the pixel NDC.
+Pending patch carries the existing apply_jitter offset in unused velocity-pass
+misc.xy and subtracts it before reconstruction and unjittered motion calculation.
+No new texture, draw, sampling loop, global history reset or shader ABI size.
+Added Rust projection-reference regression for translated/rotated camera with
+nonzero jitter at two resolutions. Not yet compiled/run or installed: normal
+OpenPoseidon PID 39868 is active and remains untouched; no concurrent build.
+Needs targeted temporal/shader tests, committed build and installed moving-camera
+DLSS A/B. This is a concrete temporal input correction, not yet proof that the
+owner's complete terrain trail is fixed. Terrain LOD/disocclusion and float-depth
+precision remain separate candidates; cloud motion history remains unresolved.
+
+### Nogova cloud / ocean horizon report
+
+Owner reproduction: freefly [8568.71, 4139.18, 305.40], azimuth 231.0,
+elevation -1.6. Clouds appear to enter the distant water horizon. Pending visual
+reproduction; outside-lock game PID 39868 remains active and untouched.
+Source candidate: cloud_interval clips against a spherical planet while the
+rendered ocean uses a flat sea plane. fs_cloud bounds against opaque scene depth;
+the water pass is depth-read-only, so this is not the water surface distance.
+A shallow downward ray can miss the sphere yet intersect the flat ocean, allowing
+far clouds to composite over water. Upsample edge leakage is a separate candidate.
+Do not hide this with fog or alter reflections blindly. Next test the exact pose
+with DLSS off/on and bounded water-surface cloud march; use actual GetSeaLevel,
+not hardcoded zero, and preserve cloud foreground/underwater/inland behaviour.
+No horizon shader change has been made or claimed verified yet.
+
+### Showcase castle gameplay contact follow-up
+
+Owner confirms grenades/missiles did not break the castle and the player walked
+through it. Root cause: probe rendering/rigid bodies were outside legacy object
+collision and radial damage; the kinematic proxy was explicitly one-way.
+Added opt-in showcase player swept block contact/slide, shell/grenade/missile
+block hits and a bounded radial impulse bridge from ExplosionDammage. Fused
+grenades retain bounce/fuse; scenery hits nearer than a block remain authoritative.
+Rotated blocks use live physics orientation, not their original castle grid.
+This is a conservative capsule/slab sandbox bridge, NOT a general character
+controller or networked rigid-body ownership migration. No AI/vehicle controller
+replacement; ordinary missions without the showcase are inert.
+Build passed; 19 assertions in two new contact/blast tests passed. Installed
+walk/gate/grenade/rocket checks pending. Added Test-Showcase.ps1 -CastleOnly.
+The pending temporal jitter correction also passed all 8 temporal Rust tests,
+including the headless velocity shader and translated/rotated camera reference.
+Game is closed again; runtime validation can proceed with the game-folder lock.

@@ -1,4 +1,4 @@
-param([string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault', [switch]$Menu, [switch]$InspectRoom)
+param([string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault', [switch]$Menu, [switch]$InspectRoom, [switch]$CastleOnly)
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) { throw 'Use scripts/with-game-lock.sh' }
 $root=Split-Path $PSScriptRoot -Parent
@@ -43,6 +43,38 @@ try {
   Write-Output $line
  }
  Start-Sleep -Seconds 18
+ if ($CastleOnly) {
+  Send @{cmd='exec';code='hint ""; player setPos [9493,3541,0]; player setDir 0; player switchCamera "INTERNAL"'}
+  Send @{cmd='eval';code='triPhysicsShowcase "castle"'} '"OK"'
+  Start-Sleep -Seconds 8
+  Send @{cmd='screenshot';path=(Join-Path $out 'castle-walk-before.png')}
+  Send @{cmd='key';sc=26;hold=$true}
+  Start-Sleep -Seconds 4
+  Send @{cmd='key_up';sc=26}
+  Send @{cmd='eval';code='getPos player'}
+  Send @{cmd='eval';code='((getPos player) select 1) > 3542 && ((getPos player) select 1) < 3545.5'} 'true'
+  Send @{cmd='screenshot';path=(Join-Path $out 'castle-walk-blocked.png')}
+  Send @{cmd='exec';code='player setPos [9500,3541,0]; player setDir 0'}
+  Send @{cmd='key';sc=26;hold=$true}
+  Start-Sleep -Seconds 3
+  Send @{cmd='key_up';sc=26}
+  Send @{cmd='eval';code='((getPos player) select 1) > 3547'} 'true'
+  Send @{cmd='exec';code='player setPos [9470,3510,0]; labCamera = "camera" camCreate [9473,3525,15]; labCamera cameraEffect ["internal","back"]; labCamera camSetTarget [9500,3555,4]; labCamera camCommit 0'}
+  Start-Sleep -Seconds 2
+  Send @{cmd='exec';code='labGrenade = "GrenadeHand" createVehicle [9493,3543.5,1]; labGrenade setVelocity [0,4,10]'}
+  Start-Sleep -Seconds 6
+  Send @{cmd='screenshot';path=(Join-Path $out 'castle-grenade.png')}
+  Send @{cmd='eval';code='triPhysicsShowcase "castle"'} '"OK"'
+  Start-Sleep -Seconds 8
+  Send @{cmd='exec';code='labRocket = "LAW" createVehicle [9493,3535,2]; labRocket setVelocity [0,0,100]'}
+  Start-Sleep -Seconds 4
+  Send @{cmd='screenshot';path=(Join-Path $out 'castle-rocket.png')}
+  Send @{cmd='exit'}
+  if (!$p.WaitForExit(30000)) {throw 'Exit timed out'}
+  if ($p.ExitCode -ne 0) {throw "Game exit $($p.ExitCode)"}
+  if (!(Select-String -LiteralPath $log -Pattern 'SHOWCASE blast:.*affected=[1-9]')) {throw 'No explosion reached the blocks'}
+  return
+ }
  if ($Menu) {
   Send @{cmd='exec';code='triSetLanguage "English"; triClickText "SINGLE MISSION"'}
   Start-Sleep -Seconds 3

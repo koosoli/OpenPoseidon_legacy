@@ -2,6 +2,7 @@
 #include <Poseidon/Dev/Diag/TerrainBrush.hpp>
 #include <Poseidon/Dev/Diag/PhysicsCorpus.hpp>
 #include <Poseidon/Dev/Diag/ShowcaseCastle.hpp>
+#include <Poseidon/Dev/Diag/ShowcaseContact.hpp>
 #include <Poseidon/Core/Global.hpp>
 
 #include <Poseidon/Dev/Diag/ProbeMeshes.hpp>
@@ -485,6 +486,65 @@ bool SpawnModelProbe(const char* nameFragment, float throwSpeed)
     LOG_WARN(World, "PHYSPROBE: model probe '{}' at ({:.1f} {:.1f} {:.1f}) mass {}", found->Name(), origin[0],
              origin[1], origin[2], s_settings.modelMass);
     return true;
+}
+
+bool PhysicsShowcaseProjectileContact(Vector3Par from, Vector3Par to, Vector3& hit, Vector3& normal)
+{
+    auto* world = Physics::GetPhysicsWorld();
+    if (!s_showcaseActive || !world || !world->IsCreated()) return false;
+    std::vector<Physics::ProbeSample> samples;
+    world->GetProbeSamples(samples);
+    float fraction = 1.0f;
+    bool contact = false;
+    for (const auto& sample : samples)
+        contact |= SweepShowcaseBlock(sample, from, to, 0, 0, fraction, normal);
+    if (contact) hit = from + (to-from)*fraction;
+    return contact;
+}
+
+void PhysicsShowcaseExplosion(Vector3Par position, float hit, float range)
+{
+    auto* world = Physics::GetPhysicsWorld();
+    if (!s_showcaseActive || !world || !world->IsCreated() || !(hit > 0) || !(range > 0)) return;
+    std::vector<Physics::ProbeSample> samples;
+    world->GetProbeSamples(samples);
+    int affected = 0;
+    for (const auto& sample : samples)
+    {
+        Vector3 impulse = ShowcaseBlastImpulse(sample.position-position, hit, range);
+        if (impulse.SquareSize() < 0.0001f) continue;
+        // Use the existing scenery visibility, so buildings/hills shield the demo.
+        const float visible = GLandscape->Visible(position, sample.position, 0.2f, nullptr, nullptr, ObjIntersectIFire);
+        if (visible <= 0) continue;
+        world->ApplyImpulse(sample.id, sample.position, impulse*visible);
+        ++affected;
+    }
+    LOG_INFO(Physics, "SHOWCASE blast: hit={} range={} affected={}", hit, range, affected);
+}
+
+Vector3 PhysicsShowcasePlayerMove(Vector3Par from, Vector3Par to, float height)
+{
+    auto* world = Physics::GetPhysicsWorld();
+    if (!s_showcaseActive || !world || !world->IsCreated()) return to;
+    std::vector<Physics::ProbeSample> samples;
+    world->GetProbeSamples(samples);
+    const float radius = std::max(0.3f, s_settings.playerRadius);
+    const Vector3 lift(0, height*0.5f, 0);
+    Vector3 position = from+lift, remaining = to-from;
+    for (int slide = 0; slide < 4 && remaining.SquareSize() > 1e-10f; ++slide)
+    {
+        float fraction = 1;
+        Vector3 normal = VZero;
+        bool contact = false;
+        for (const auto& sample : samples)
+            contact |= SweepShowcaseBlock(sample, position, position+remaining, radius,
+                                          std::max(0.0f, height*0.5f-radius), fraction, normal);
+        if (!contact) { position += remaining; break; }
+        position += remaining*fraction + normal*0.002f;
+        remaining *= 1-fraction;
+        remaining -= normal*std::min(0.0f, remaining.DotProduct(normal));
+    }
+    return position-lift;
 }
 
 void PhysicsProbeOnProjectileHit(Vector3Par from, Vector3Par to, float momentum)

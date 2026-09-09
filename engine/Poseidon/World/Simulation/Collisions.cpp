@@ -39,6 +39,7 @@ using Poseidon::Foundation::MStorage;
 #include <Poseidon/Network/Network.hpp>
 #include <Poseidon/World/Scene/Thing.hpp>
 #include <Poseidon/Dev/Diag/DiagModes.hpp>
+#include <Poseidon/Dev/Diag/PhysicsProbe.hpp>
 #define PROFILE_COLLISIONS 1
 
 #if PROFILE_COLLISIONS
@@ -1156,6 +1157,7 @@ void Landscape::ExplosionDammageEffects(EntityAI* owner, Shot* shot, Object* dir
 void Landscape::ExplosionDammage(EntityAI* owner, Shot* shot, Object* directHit, Vector3Par pos, Vector3Par dir,
                                  const AmmoType* type)
 {
+    Dev::PhysicsShowcaseExplosion(pos, type->indirectHit, type->indirectHitRange);
     bool enemyDammage = false;
 
     AIUnit* ownerUnit = owner ? owner->CommanderUnit() : nullptr;

@@ -782,6 +782,21 @@ bool ShotShell::TryPenetrate(const CollisionInfo& info, float deltaT)
     return true;
 }
 
+// Keep legacy scenery in front of a probe authoritative. Demo blocks are absent
+// from CollisionBuffer, so compare distances before choosing either hit path.
+static bool ShowcaseContactBeforeScenery(Vector3Par from, Vector3Par to, const CollisionBuffer& collision,
+                                        Vector3& hit, Vector3& normal)
+{
+    if (!Poseidon::Dev::PhysicsShowcaseProjectileContact(from, to, hit, normal)) return false;
+    for (int i = 0; i < collision.Size(); ++i)
+    {
+        const auto& info = collision[i];
+        if (info.object && info.object->PositionModelToTop(info.pos).Distance2(from) <= hit.Distance2(from))
+            return false;
+    }
+    return true;
+}
+
 void ShotShell::Simulate(float deltaT, SimulationImportance prec)
 {
     Point3 position = Position();
@@ -854,6 +869,17 @@ void ShotShell::Simulate(float deltaT, SimulationImportance prec)
         // test collision with objects
         CollisionBuffer collision;
         GLandscape->ObjectCollision(collision, this, _parent, Position(), position, 0);
+        Vector3 probeHit, probeNormal;
+        if (IsLocal() && ShowcaseContactBeforeScenery(Position(), position, collision, probeHit, probeNormal))
+        {
+            if (_fuseArmed) BounceOff(probeNormal, probeHit);
+            else
+            {
+                Detonate(probeHit, nullptr, probeNormal);
+                _delete = true;
+            }
+            return;
+        }
         // PHY-030: ask the physics world the same question and count the
         // disagreements. Watches only -- the legacy answer below is still the one
         // the game acts on, and the audit is off unless switched on.
@@ -1497,6 +1523,19 @@ void Missile::Simulate(float deltaT, SimulationImportance prec)
     {
         CollisionBuffer collision;
         GLandscape->ObjectCollision(collision, this, _parent, Position(), moveTrans.Position(), 0);
+        Vector3 probeHit, probeNormal;
+        if (ShowcaseContactBeforeScenery(Position(), moveTrans.Position(), collision, probeHit, probeNormal))
+        {
+            float size = Type()->hit * 0.003f;
+            saturate(size, MinExplosion, MaxExplosion);
+            Explosion* explosion = new Explosion(nullptr, _parent, size);
+            explosion->SetPosition(probeHit);
+            GLOB_WORLD->AddAnimal(explosion);
+            GetNetworkManager().CreateVehicle(explosion, VLTAnimal, "", -1);
+            GLandscape->ExplosionDammage(_parent, this, nullptr, probeHit, probeNormal, Type());
+            _delete = true;
+            return;
+        }
         if (collision.Size() > 0)
         {
             float minT = 1e10;

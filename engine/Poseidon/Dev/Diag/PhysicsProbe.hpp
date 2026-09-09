@@ -52,6 +52,10 @@ bool SpawnModelProbe(const char* nameFragment, float throwSpeed = 0.0f);
 /// Pushes whatever physics body a shot passed through. Called from the impact
 /// path; does nothing when no physics world exists.
 void PhysicsProbeOnProjectileHit(Vector3Par from, Vector3Par to, float momentum);
+// Optional single-player showcase bridge; ordinary mission physics is unchanged.
+bool PhysicsShowcaseProjectileContact(Vector3Par from, Vector3Par to, Vector3& hit, Vector3& normal);
+void PhysicsShowcaseExplosion(Vector3Par position, float hit, float range);
+Vector3 PhysicsShowcasePlayerMove(Vector3Par from, Vector3Par to, float height);
 
 /// Pushes the world's wind into the physics world, or clears it. Called once per
 /// frame so a change in weather reaches the probes without a respawn.
