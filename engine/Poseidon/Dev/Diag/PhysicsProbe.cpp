@@ -1,4 +1,5 @@
 #include <Poseidon/Dev/Diag/PhysicsProbe.hpp>
+#include <Poseidon/Dev/Diag/TerrainBrush.hpp>
 #include <Poseidon/Dev/Diag/PhysicsCorpus.hpp>
 #include <Poseidon/Dev/Diag/ShowcaseCastle.hpp>
 #include <Poseidon/Core/Global.hpp>
@@ -675,6 +676,7 @@ void ClearPhysicsProbes()
 
 void ShutdownPhysicsProbes()
 {
+    ResetTerrainBrush();
     EndPhysicsShowcase();
     ClearPhysicsProbes();
     s_solidObjects.clear();

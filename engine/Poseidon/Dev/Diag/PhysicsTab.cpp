@@ -9,6 +9,7 @@
 
 #include <Poseidon/Dev/Diag/PhysicsCorpus.hpp>
 #include <Poseidon/Dev/Diag/PhysicsProbe.hpp>
+#include <Poseidon/Dev/Diag/TerrainBrush.hpp>
 #include <Poseidon/Dev/Diag/PhysicsRayAudit.hpp>
 #include <Poseidon/World/Entities/Weapons/GrenadeFuse.hpp>
 #include <Poseidon/World/Physics/LooseObjects.hpp>
@@ -69,6 +70,15 @@ void PollHotkeys(PhysicsProbeSettings& s)
 
 void DrawPhysicsTab()
 {
+    ImGui::SeparatorText("Experimental terrain brush");
+    auto& brush = TerrainBrush();
+    Dev::Checkbox("Terrain painting in Zeus free-fly", &brush.enabled);
+    Dev::Checkbox("Raise terrain (otherwise excavate)", &brush.raise);
+    Dev::SliderFloat("Brush radius", &brush.radius,8.0f,250.0f,"%.1f m");
+    Dev::SliderFloat("Brush speed", &brush.metresPerSecond,0.1f,32.0f,"%.1f m/s");
+    ImGui::TextWrapped("Close the panel in Zeus free-fly and hold LEFT mouse to paint. "
+        "First edit may pause. Coarse maps use at least 1.5 grid cells of radius. "
+        "Experimental, single-player only: reload mission to undo. No saving, building relocation or AI path updates.");
     Physics::PhysicsWorld* world = Physics::GetPhysicsWorld();
     const bool             live = world && world->IsCreated();
 

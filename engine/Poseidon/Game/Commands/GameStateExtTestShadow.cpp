@@ -7,6 +7,8 @@
 #include <Poseidon/UI/Settings/GameSettingsConfig.hpp>
 #include <Poseidon/Dev/Debug/DebugOverlay.hpp>
 #include <Poseidon/Dev/Diag/PhysicsProbe.hpp>
+#include <Poseidon/Dev/Diag/TerrainBrush.hpp>
+#include <Poseidon/World/Terrain/Landscape.hpp>
 
 #include <cstdio>
 #include <cstring>
@@ -18,6 +20,26 @@ GameValue TriPhysicsShowcase(const GameState*, GameValuePar arg)
 {
     const GameStringType command = static_cast<GameStringType>(arg);
     return GameValue(PhysicsShowcaseCommand(command) ? "OK" : "REFUSED");
+}
+
+GameValue TriTerrainBrushMode(const GameState*, GameValuePar arg)
+{
+    const GameStringType mode = static_cast<GameStringType>(arg);
+    if (strcmp(mode,"off") == 0) { TerrainBrush().enabled=false; return GameValue("OK"); }
+    if (strcmp(mode,"raise") != 0 && strcmp(mode,"lower") != 0) return GameValue("REFUSED");
+    TerrainBrush().enabled = true;
+    TerrainBrush().raise = strcmp(mode,"raise") == 0;
+    return GameValue("OK");
+}
+
+GameValue TriTerrainHeight(const GameState*, GameValuePar arg)
+{
+    const GameArrayType& args = arg;
+    if (!GLandscape || args.Size()!=2 || args[0].GetType()!=GameScalar || args[1].GetType()!=GameScalar)
+        return GameValue(-1000000.0f);
+    const float x=args[0], z=args[1];
+    if (!std::isfinite(x) || !std::isfinite(z)) return GameValue(-1000000.0f);
+    return GameValue(GLandscape->SurfaceY(x,z));
 }
 
 namespace Poseidon

@@ -344,3 +344,10 @@ four-tile repeat edit mean 2.63ms (8 iterations). Not a whole-frame benchmark.
 Showcase crater now normalizes differing corpus/native grids once, then uses
 regional patches; render caches/GPU height upload still global. Installed test
 pending. Mouse painting and default explosion craters NOT yet enabled.
+
+af67b8d6 committed build exits 0, both safety refs pushed, matched pair installed.
+Final physics suite: 47 cases / 2086 assertions. Full installed Showcase exits 0;
+crater and restoration images inspected (sep9-local-terrain-*). First 7x7 patch
+includes grid normalization/partition: 383.3ms. Restore uses local patch: 1.52ms
+collision/cache initiation. Subsequent renderer height/quadtree work is outside
+that timer; do not quote it as whole-frame cost or enable default craters yet.

@@ -835,6 +835,17 @@ std::string AnswerServiceQuery(const char* what, cJSON* root)
 
 void RegisterKeyInjection(HarnessServer& hs)
 {
+    hs.RegisterCommand({"mouse_button", "Inject SDL mouse button state", {{"button","int",true},{"down","bool",true}}},
+        [](const std::string&, cJSON* root) -> std::string {
+            const int button = HarnessProtocol::GetInt(root,"button");
+            if (button < 1 || button > 5) return HarnessProtocol::ErrorResponse("invalid mouse button");
+            SDL_Event event{};
+            event.button.down = HarnessProtocol::GetBool(root,"down");
+            event.type = event.button.down ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP;
+            event.button.button = static_cast<Uint8>(button);
+            if (!SDL_PushEvent(&event)) return HarnessProtocol::ErrorResponse("mouse event rejected");
+            return HarnessProtocol::OkResponse();
+        });
     hs.RegisterCommand(
         {"key", "Inject SDL scancode key press", {{"sc", "int", true}, {"mod", "int", false}, {"hold", "bool", false}}},
         [](const std::string&, cJSON* root) -> std::string

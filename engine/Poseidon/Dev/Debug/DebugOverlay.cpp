@@ -51,6 +51,7 @@
 #include <Poseidon/Dev/Diag/AITab.hpp>
 #include <Poseidon/Dev/Diag/FixedStepTab.hpp>
 #include <Poseidon/Dev/Diag/PhysicsTab.hpp>
+#include <Poseidon/Dev/Diag/TerrainBrush.hpp>
 #include <Poseidon/Dev/Diag/PictureModeTab.hpp>
 #include <Poseidon/Dev/Diag/WeatherTab.hpp>
 #include <Poseidon/Dev/Diag/SmokeTab.hpp>
@@ -167,6 +168,8 @@ void ApplyDevPanelMouseState();
 // already implements collision-safe free flight and the normal movement
 // bindings.  Keeping it here also means it cannot leak into release builds.
 OLink<CameraVehicle> s_zeusCamera;
+bool s_terrainBrushDragging = false;
+Uint64 s_terrainBrushTickMs = 0;
 // showCinemaBorder is a GLOBAL that defaults to true, so ANY active camera effect draws the
 // cutscene letterbox -- the CinemaBorder model plus the widescreen pillarbox bars. Zeus free-fly
 // installs a camera effect, so it inherited the letterbox and the view shrank to a cinematic band
@@ -7612,6 +7615,7 @@ void ProcessEvent(const SDL_Event& event)
         return;
     s_zeusConsumeMouseEvent = false;
     s_zeusConsumeKeyboardEvent = false;
+    if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST) s_terrainBrushDragging = false;
     if (event.type == SDL_EVENT_WINDOW_FOCUS_GAINED && s_zeusCamera && !s_visible)
     {
         // SDL can restore the desktop cursor when a window regains focus even
@@ -7624,7 +7628,14 @@ void ProcessEvent(const SDL_Event& event)
         {
             s_zeusConsumeMouseEvent = true;
             const SDL_Keymod modifiers = SDL_GetModState();
-            if (Dev::PictureModeClickFocusEnabled())
+            if (Dev::TerrainBrush().enabled)
+            {
+                s_terrainBrushDragging = true;
+                s_terrainBrushTickMs = SDL_GetTicks();
+                s_zeusSuppressNextMouseUp = true;
+                s_zeusStatus = "Terrain brush: hold left mouse to paint.";
+            }
+            else if (Dev::PictureModeClickFocusEnabled())
             {
                 const ZeusPoint cursor = ZeusCursorPixel();
                 s_zeusSuppressNextMouseUp = true;
@@ -7669,6 +7680,12 @@ void ProcessEvent(const SDL_Event& event)
         {
             s_zeusConsumeMouseEvent = true;
             const ZeusPoint cursor = ZeusCursorPixel();
+            if (s_terrainBrushDragging)
+            {
+                const float seconds = std::min(0.25f,float(SDL_GetTicks()-s_terrainBrushTickMs)*0.001f);
+                Defer([cursor,seconds] { Dev::PaintTerrainAtPixel(cursor.x,cursor.y,seconds); });
+                s_terrainBrushDragging = false;
+            }
             if (s_zeusLassoDrag)
                 SelectZeusInRect(s_zeusLassoStartX, s_zeusLassoStartY, cursor.x, cursor.y);
             else if (s_zeusMoveDrag)
@@ -7820,6 +7837,18 @@ void NewFrame()
     // while looking at anything.
     UpdateHeadlamp();
     Dev::UpdatePictureModeFocus();
+    if (s_visible || !s_zeusCamera || !Dev::TerrainBrush().enabled)
+        s_terrainBrushDragging = false;
+    if (s_terrainBrushDragging && SDL_GetTicks()-s_terrainBrushTickMs >= 250)
+    {
+        const float seconds = std::min(0.25f,float(SDL_GetTicks()-s_terrainBrushTickMs)*0.001f);
+        s_terrainBrushTickMs = SDL_GetTicks();
+        const ZeusPoint cursor = ZeusCursorPixel();
+        Defer([cursor,seconds] {
+            s_zeusStatus = Dev::PaintTerrainAtPixel(cursor.x,cursor.y,seconds)
+                ? "Terrain brush: applied (mission-local)." : "Terrain brush: no editable land hit.";
+        });
+    }
     if (!AppConfig::Instance().DevMode() && s_visible)
         SetVisible(false);
     // Toggle the software cursor with panel visibility.  When the panel is
