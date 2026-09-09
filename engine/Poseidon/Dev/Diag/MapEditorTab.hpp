@@ -1,5 +1,6 @@
 #pragma once
 namespace Poseidon::Dev
 {
-bool DrawMapEditorTab();
+enum class MapEditorAction { None, StartPainting, RestoreTerrain };
+MapEditorAction DrawMapEditorTab();
 }

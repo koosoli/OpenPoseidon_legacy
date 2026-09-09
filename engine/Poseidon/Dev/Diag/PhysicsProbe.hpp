@@ -179,5 +179,6 @@ PhysicsProbeSettings& ProbeSettings();
 
 /// Restores the probe settings to their compiled defaults.
 void ResetProbeSettings();
+void ForgetShowcaseTerrainCrater();
 
 } // namespace Poseidon::Dev

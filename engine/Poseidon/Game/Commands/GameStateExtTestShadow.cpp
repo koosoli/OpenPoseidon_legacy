@@ -25,6 +25,7 @@ GameValue TriPhysicsShowcase(const GameState*, GameValuePar arg)
 GameValue TriTerrainBrushMode(const GameState*, GameValuePar arg)
 {
     const GameStringType mode = static_cast<GameStringType>(arg);
+    if (strcmp(mode,"restore") == 0) return GameValue(RestoreEditedTerrain() ? "OK" : "REFUSED");
     if (strcmp(mode,"off") == 0) { TerrainBrush().enabled=false; return GameValue("OK"); }
     if (strcmp(mode,"raise") != 0 && strcmp(mode,"lower") != 0) return GameValue("REFUSED");
     TerrainBrush().enabled = true;

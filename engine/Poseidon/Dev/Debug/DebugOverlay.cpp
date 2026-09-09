@@ -7340,7 +7340,16 @@ void DrawMainWindow()
         {
             const bool available = GWorld && GLandscape && GWorld->GetMode() != GModeNetware;
             ImGui::BeginDisabled(!available);
-            if (Dev::DrawMapEditorTab())
+            const auto editorAction = Dev::DrawMapEditorTab();
+            if (editorAction == Dev::MapEditorAction::RestoreTerrain)
+            {
+                s_terrainBrushDragging = false;
+                Defer([] {
+                    s_zeusStatus = Dev::RestoreEditedTerrain() ? "Terrain restored." :
+                        "Terrain restore refused: baseline/grid mismatch or collision creation failed.";
+                });
+            }
+            if (editorAction == Dev::MapEditorAction::StartPainting)
             {
                 EnableZeusCamera();
                 if (s_zeusCamera)

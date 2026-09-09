@@ -9,7 +9,7 @@
 
 namespace Poseidon::Dev
 {
-bool DrawMapEditorTab()
+MapEditorAction DrawMapEditorTab()
 {
     ImGui::SeparatorText("Terrain height painting");
     auto& brush = TerrainBrush();
@@ -27,7 +27,24 @@ bool DrawMapEditorTab()
         if (GLandscape->GetTerrainRange() > 2049)
             ImGui::TextWrapped("Painting unavailable: this world exceeds the current 2049-sample editing limit.");
     }
-    const bool start = Button("Start painting (free-fly)");
+    MapEditorAction action = Button("Start painting (free-fly)") ? MapEditorAction::StartPainting : MapEditorAction::None;
+    ImGui::BeginDisabled(!HasTerrainEditBaseline());
+    if (Button("Restore terrain: all craters and painted hills")) ImGui::OpenPopup("Restore terrain?");
+    ImGui::EndDisabled();
+    if (ImGui::BeginPopupModal("Restore terrain?", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        ImGui::TextUnformatted("Restore terrain to before the first edit in this mission?\n"
+            "This removes brush edits, rocket craters and the LAB crater.\n"
+            "It may pause briefly. Objects and settings are not reset.");
+        if (Button("Restore all terrain edits"))
+        {
+            action = MapEditorAction::RestoreTerrain;
+            ImGui::CloseCurrentPopup();
+        }
+        PanelSameLine();
+        if (Button("Cancel terrain restore")) ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
     ImGui::SeparatorText("How to paint");
     ImGui::TextWrapped("1. Choose Raise or Lower, radius and speed.\n"
         "2. Click Start painting to enter free-fly and close this panel.\n"
@@ -40,7 +57,8 @@ bool DrawMapEditorTab()
     {
     ImGui::TextWrapped("Single-player only. The first stroke may briefly pause while collision is prepared. "
         "Coarse terrain uses a minimum radius of 1.5 grid cells. Water cannot be painted. "
-        "Reload the mission to restore its original terrain. Buildings and AI paths are not updated.");
+        "Restore terrain removes all edits since the first stroke; reload also restores the mission. "
+        "Buildings and AI paths are not updated.");
     ImGui::TextWrapped("Sideways caves and tunnels are not supported by height painting. "
         "They need 3D terrain geometry plus matching movement, projectile and physics collision; "
         "lowering this brush creates an open crater, not a cave with a roof.");
@@ -57,6 +75,6 @@ bool DrawMapEditorTab()
         "minimum radius is 1.5 terrain grid cells. Buildings and AI paths are not updated. "
         "The first impact may pause briefly to prepare terrain collision. Turning off does not undo craters.");
     if (Button("Reset rocket crater settings")) ResetRocketCraters();
-    return start;
+    return action;
 }
 }

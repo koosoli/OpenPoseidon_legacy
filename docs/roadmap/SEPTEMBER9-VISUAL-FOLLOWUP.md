@@ -34,6 +34,18 @@ hidden-panel active Zeus brush, Left Alt reverses each held stroke and preview,
 requested slider minimum 0.5 m. Effective 1.5-cell support is deliberately not
 misrepresented as sub-grid geometry. Build and installed acceptance pending.
 
+0656f596 built/pushed/deployed. Two radius cases / 29 assertions pass. Installed
+hold/release/raise test exits 0: 29.835 -> 24.0394 -> 16.8815, released unchanged,
+raised 23.01. editor-controls-radius.png inspected: ring and input banner visible.
+This harness does not yet exercise physical wheel/Alt input; do not call those
+two controls visually accepted on this evidence alone.
+
+Terrain restore in progress: bounded pre-first-edit snapshot (up to ~16 MiB at
+the existing 2049 editing cap), shared by brush/rocket/LAB paths. Explicit
+confirmed action replaces physics terrain transactionally before visible heights;
+settings reset remains non-destructive. Baseline cleared on mission shutdown,
+grid changes refuse mismatched restoration. This does not yet enable Fusion editing.
+
 Owner authorised implementation after backup `codex/backup-asset-obs-20260909-bc766e19`.
 Worktree asset-obs only; foreign Cargo.lock excluded. Screenshots 070351, 070456,
 072225 and 073829 are reproduction evidence, not completion evidence.

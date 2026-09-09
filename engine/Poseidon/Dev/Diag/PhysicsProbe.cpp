@@ -49,6 +49,7 @@ bool SetShowcaseCrater(bool restore)
     const float spacing = land.GetTerrainGrid();
     // One explicitly invoked prototype, bounded memory; never an explosion hot path.
     if (range < 2 || range > 2049 || !(spacing > 0) || spacing > 50) return false;
+    if (!CaptureTerrainEditBaseline()) return false;
     if (!restore)
     {
         const float radius = std::max(24.0f, spacing * 3.0f);
@@ -734,8 +735,11 @@ void ClearPhysicsProbes()
     s_modelProbes.clear();
 }
 
+void ForgetShowcaseTerrainCrater() { s_craterSamples.clear(); }
+
 void ShutdownPhysicsProbes()
 {
+    ClearTerrainEditBaseline();
     ResetTerrainBrush();
     EndPhysicsShowcase();
     ClearPhysicsProbes();

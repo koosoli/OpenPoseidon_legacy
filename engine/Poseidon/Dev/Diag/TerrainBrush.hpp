@@ -20,6 +20,10 @@ bool TerrainBrushTargetAtPixel(float x, float y, TerrainBrushTarget& target);
 bool PaintTerrain(float x, float z, float radius, float delta);
 bool PaintTerrainAtPixel(float x, float y, float seconds, bool invert = false);
 void ResetTerrainBrush();
+bool CaptureTerrainEditBaseline();
+bool HasTerrainEditBaseline();
+bool RestoreEditedTerrain();
+void ClearTerrainEditBaseline();
 struct RocketCraterSettings
 {
     bool enabled = false;
