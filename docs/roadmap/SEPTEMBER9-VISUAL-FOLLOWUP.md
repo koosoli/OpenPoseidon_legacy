@@ -570,3 +570,15 @@ underwater/no-water-camera paths encode zero. No additional pass or texture fetc
 WGR_CLOUD_OCEAN_CLIP=0 is the A/B control. 39 sky tests passed (1 ignored), including
 WGSL validation and real-device pipelines. Installed A/B still pending; no claim
 yet that this closes the reported horizon appearance or temporal cloud trails.
+
+Installed abd8c50f A/B at the exact pose completed with exit 0 in both arms:
+.tmp-bulb/nogova-horizon-after.png and nogova-horizon-control.png (clip=0).
+The thin bright bands just below the flat sea edge disappear with clipping and
+return in the same-build control. Cloud above the horizon, island foreground
+and reflected sky remain visible. Last six GPU cloud-march samples: median
+1.009 ms enabled versus 1.031 ms disabled (ranges 0.970-1.320 / 0.992-1.514 ms).
+This small single-fixture comparison shows no evident extra cost, not a general
+benchmark. DLSS Quality was active (858x482 -> 1280x720). Cloud grain/history and
+low-resolution shapes near the horizon remain separate, unclosed quality issues.
+Latest installed game is abd8c50f, including the accepted castle contacts and
+the tested depth-jitter motion correction. No user settings or Cargo.lock edited.
