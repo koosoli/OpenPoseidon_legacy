@@ -282,3 +282,30 @@ and torch-width comparisons pending; no full acceptance claim yet.
   A/B evidence preserved as sep9-plane-filter-before/after-* in .tmp-bulb.
   Matched outdoor performance acceptance still pending.
 - Foreign Cargo.lock SHA256 remains unchanged (9A4E74D7...31A2E).
+
+### AI binocular movement, 85c6c78c
+
+AI observation now yields to requested forward/backward speed instead of
+reissuing BinocOn throughout the observation timer. Explicit BinocOff uses the
+existing lowering animation. Player action handling unchanged. Three binocular
+test cases / 14 assertions pass; committed build at two jobs exits 0, pushed to
+both safety refs and installed as matched EXE/DLL.
+
+Installed isolated doMove test on Desert exits 0 before and after. Baseline unit
+remains near north=3401.6 for two seconds, moves by second 3; changed build reaches
+north=3406.7 in the first second and the 3450 destination by second 8. Evidence:
+.tmp-bulb/binocular-baseline-valid-* and binocular-after-*. This reproduces a
+short delay, NOT the reported 30-second combat case. First harness attempt used
+unsupported currentWeapon/animationState script commands and timed out; excluded.
+Radio queue decoupling, overlapping voices and coordinated tactics remain open.
+
+- Nogova sky comparison at the owner's Davle pose: snow-off leaves broken clouds;
+  8x falling snow produces closed overcast. Both installed runs exit 0. Evidence
+  sep9-snow-sky-clear/storm. Overcast is render-only, no mission thunder mutation.
+- Max-density Showcase storm run exits 0; protected room floor remains bare and
+  no indoor flakes visible in room-lit. Preserved sep9-storm-room-* and log.
+- Next change: immediate offline CtxUI/CtxUIWithJoin command delivery while the
+  spoken message stays queued. Mission/automatic contexts and network games keep
+  existing timing. RadioMessageCommand consumes its serialized transmit flag
+  once, so later audio completion cannot deliver twice. Build and 4 focused
+  cases / 32 assertions pass; blocked-speech installed runtime acceptance pending.

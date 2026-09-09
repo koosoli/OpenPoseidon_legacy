@@ -1,4 +1,5 @@
 #include <Poseidon/AI/AI.hpp>
+#include <Poseidon/AI/CommandDelivery.hpp>
 #include <Poseidon/AI/ArcadeTemplate.hpp>
 #include <Poseidon/Core/SaveVersion.hpp>
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
@@ -12,6 +13,18 @@ using namespace Poseidon;
 TEST_CASE("ai compiles", "[ai]")
 {
     REQUIRE(sizeof(AIGroup) > 0);
+}
+
+TEST_CASE("Only direct offline player orders bypass speech delivery", "[ai][command-delivery]")
+{
+    CHECK(PlayerOrderBypassesSpeech(Command::CtxUI, false));
+    CHECK(PlayerOrderBypassesSpeech(Command::CtxUIWithJoin, false));
+    for (int context = Command::CtxUndefined; context <= Command::CtxUIWithJoin; ++context)
+    {
+        CHECK_FALSE(PlayerOrderBypassesSpeech(static_cast<Command::Context>(context), true));
+        if (context < Command::CtxUI)
+            CHECK_FALSE(PlayerOrderBypassesSpeech(static_cast<Command::Context>(context), false));
+    }
 }
 
 namespace

@@ -4,6 +4,7 @@
 #include <Poseidon/AI/AICostAccum.hpp> // PERF-014
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
 #include <Poseidon/AI/AIRadio.hpp>
+#include <Poseidon/AI/CommandDelivery.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Core/Config/UserConfig.hpp>
 
@@ -1589,6 +1590,17 @@ bool AIGroup::Think()
 // Communication with subgroups
 void CreateUnitsList(PackedBoolArray list, char* buffer);
 
+static void QueueGroupCommand(RadioChannel& radio, RadioMessageCommand* message, int language)
+{
+    Ref<RadioMessageCommand> keepAlive = message;
+    radio.Transmit(message, language);
+    if (PlayerOrderBypassesSpeech(message->GetContext(), GWorld->GetMode() == GModeNetware))
+    {
+        // Keep the spoken order queued, but do not wait on unrelated chatter.
+        message->Transmitted();
+    }
+}
+
 void AIGroup::SendCommand(Command& cmd, bool channelCenter)
 {
     cmd._id = _nextCmdId++;
@@ -1631,7 +1643,7 @@ void AIGroup::SendCommand(Command& cmd, bool channelCenter)
     AI_ERROR(GetCenter());
     RadioChannel& radio = channelCenter ? GetCenter()->GetRadio() : GetRadio();
     PackedBoolArray list;
-    radio.Transmit(new RadioMessageCommand(this, list, cmd, true, transmit), GetCenter()->GetLanguage());
+    QueueGroupCommand(radio, new RadioMessageCommand(this, list, cmd, true, transmit), GetCenter()->GetLanguage());
 }
 
 void AIGroup::SendCommand(Command& cmd, PackedBoolArray list, bool channelCenter)
@@ -1725,7 +1737,7 @@ void AIGroup::SendCommand(Command& cmd, PackedBoolArray list, bool channelCenter
 
     if (!list.IsEmpty())
     {
-        radio.Transmit(new RadioMessageCommand(this, list, cmd), GetCenter()->GetLanguage());
+        QueueGroupCommand(radio, new RadioMessageCommand(this, list, cmd), GetCenter()->GetLanguage());
     }
 }
 

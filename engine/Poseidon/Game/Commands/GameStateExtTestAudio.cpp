@@ -68,6 +68,7 @@ using namespace Poseidon::Dev;
 #include <Poseidon/Foundation/Common/GamePaths.hpp>
 #include <Poseidon/Foundation/Memory/CheckMem.hpp>
 #include <Poseidon/AI/AI.hpp>
+#include <Poseidon/AI/AIRadio.hpp>
 #include <Poseidon/AI/VehicleAI.hpp>
 #include <Poseidon/AI/Path/ArcadeWaypoint.hpp>
 #include <Poseidon/World/Entities/Vehicles/Transport.hpp>
@@ -2921,9 +2922,42 @@ GameValue TriIssueAutoHeal(const GameState* state, GameValuePar arg)
     return GameValue("OK");
 }
 
-/// triRadioEnabled -> bool. World::IsRadioEnabled() — the `enableRadio` scripting
-/// flag (drives radio-sentence audibility via World::SetActiveChannels). Used to
-/// prove enableRadio survives save/load.
+// Harness-only delivery probe: hold the speech queue while issuing an order.
+GameValue TriRadioDeliveryProbe(const GameState*, GameValuePar arg)
+{
+    const GameArrayType& args = arg;
+    if (args.Size() != 2 || args[0].GetType() != GameString || args[1].GetType() != GameObject)
+        return GameValue("FAIL:expected_mode_and_unit");
+    Object* object = GetObject(args[1]);
+    EntityAI* entity = object ? dyn_cast<EntityAI>(object) : nullptr;
+    AIUnit* unit = entity ? entity->CommanderUnit() : nullptr;
+    AIGroup* group = unit ? unit->GetGroup() : nullptr;
+    if (!group || !group->Leader() || unit == group->Leader() || GWorld->GetMode() == GModeNetware)
+        return GameValue("REFUSED");
+    const GameStringType mode = static_cast<GameStringType>(args[0]);
+    RadioChannel& radio = group->GetRadio();
+    if (strcmp(mode, "block") == 0)
+    {
+        radio.Transmit(new RadioMessageText(RString(), group->Leader(), 15.0f), group->GetCenter()->GetLanguage());
+        return GameValue("OK");
+    }
+    if (strcmp(mode, "status") == 0)
+        return GameValue(radio.GetActualMessage() && radio.GetActualMessage()->GetType() == RMTText ? "BLOCKED" : "FREE");
+    if (strcmp(mode, "ui") != 0 && strcmp(mode, "mission") != 0)
+        return GameValue("REFUSED");
+    Command command;
+    command._message = Command::Move;
+    command._destination = entity->Position() + Vector3(0, 0, 50);
+    command._discretion = Command::Undefined;
+    command._context = strcmp(mode, "ui") == 0 ? Command::CtxUI : Command::CtxMission;
+    command._time = Glob.time + 120;
+    PackedBoolArray list;
+    list.Set(unit->ID() - 1, true);
+    group->SendCommand(command, list);
+    return GameValue("OK");
+}
+
+/// triRadioEnabled -> bool; used to prove enableRadio survives save/load.
 GameValue TriRadioEnabled(const GameState* /*state*/)
 {
     if (!GWorld)
@@ -3194,6 +3228,7 @@ INIT_MODULE(GameStateExtTest, 3)
     GGameState.NewFunction(GameFunction(GameString, "triAssertVisibility", TriAssertVisibility, GameString));
     GGameState.NewFunction(GameFunction(GameString, "triDevPanelShow", TriDevPanelShow, GameScalar));
     GGameState.NewFunction(GameFunction(GameString, "triPhysicsShowcase", TriPhysicsShowcase, GameString));
+    GGameState.NewFunction(GameFunction(GameString, "triRadioDeliveryProbe", TriRadioDeliveryProbe, GameArray));
     GGameState.NewNularOp(GameNular(GameString, "triDevPanelSelectShadows", TriDevPanelSelectShadows));
     GGameState.NewNularOp(GameNular(GameString, "triDevPanelSelectMemory", TriDevPanelSelectMemory));
     GGameState.NewNularOp(GameNular(GameString, "triShadowSunFactor", TriShadowSunFactor));

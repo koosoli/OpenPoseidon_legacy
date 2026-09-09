@@ -2579,6 +2579,8 @@ void RadioMessageCommand::Transmitted()
     {
         return;
     }
+    // The serialized flag also guards later audio completion and reentrant confirmations.
+    _transmit = false;
 
     if (!_from)
     {
