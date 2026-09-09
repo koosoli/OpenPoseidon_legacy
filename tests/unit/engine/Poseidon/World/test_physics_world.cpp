@@ -20,7 +20,7 @@ using namespace Poseidon::Physics;
 TEST_CASE("Showcase castle leaves a gate and a bounded projectile budget", "[physics][showcase]")
 {
     const auto blocks = Poseidon::Dev::ShowcaseCastleLayout();
-    CHECK(blocks.size() == 488);
+    CHECK(blocks.size() == 485);
     CHECK(blocks.size() + 16 < 512);
     float maxHeight = 0;
     for (const auto& b : blocks)

@@ -702,10 +702,10 @@ bool PhysicsShowcaseCommand(const char* command)
         {
             Physics::SphereProbeDef def;
             def.shape = Physics::ProbeShape::Box;
-            def.halfExtents = block.side ? Vector3(0.39f, 0.4f, 0.99f) : Vector3(0.99f, 0.4f, 0.39f);
+            def.halfExtents = block.side ? Vector3(0.39f, 0.4f, 0.99f) : Vector3(block.halfWidth, 0.4f, 0.39f);
             const float x = 9500.0f + block.x, z = 3555.0f + block.z;
             def.position = Vector3(x, GLandscape->SurfaceY(x, z) + block.height, z);
-            def.mass = 8.0f; // Lightweight demo blocks, not a concrete building.
+            def.mass = 8.0f * block.halfWidth / 0.99f; // Uniform-density lightweight demo blocks.
             def.friction = 0.65f;
             def.restitution = 0.02f;
             world.SpawnSphereProbe(def);
@@ -756,6 +756,7 @@ void UpdatePhysicsProbeWind()
         {
             s_showcaseRoomLight = new LightPoint(HBlack, HBlack);
             s_showcaseRoomLight->SetBrightness(0.1f);
+            s_showcaseRoomLight->SetDaylightVisible(true);
             GScene->AddLight(s_showcaseRoomLight);
         }
         const float phase = Glob.time.toFloat() * 0.65f;

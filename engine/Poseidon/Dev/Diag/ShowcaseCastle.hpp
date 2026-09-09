@@ -7,6 +7,7 @@ struct CastleBlock
 {
     float x, z, height;
     bool side;
+    float halfWidth = 0.99f;
 };
 
 inline std::vector<CastleBlock> ShowcaseCastleLayout()
@@ -20,7 +21,11 @@ inline std::vector<CastleBlock> ShowcaseCastleLayout()
         {
             if (layer >= 10 && col != 0 && col != 15) continue;
             const float x = -15.0f + col * 2.0f;
-            if (!(layer < 4 && col >= 7 && col <= 8))
+            // One spanning lintel rests on the jambs. Separate floating bricks
+            // cannot bridge a gate without mortar or structural constraints.
+            if (layer == 4 && col == 6)
+                blocks.push_back({0.0f, -9.0f, y, false, 3.99f});
+            if (!(col >= 7 && col <= 8 && layer < 4) && !(layer == 4 && col >= 6 && col <= 9))
                 blocks.push_back({x, -9.0f, y, false});
             blocks.push_back({x, 9.0f, y, false});
         }

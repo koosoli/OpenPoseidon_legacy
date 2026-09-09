@@ -80,6 +80,19 @@ try {
  Send @{cmd='screenshot';path=(Join-Path $out 'lights-cool.png')}
  Send @{cmd='eval';code='triPhysicsShowcase "invalid"'} '"REFUSED"'
  Send @{cmd='exec';code='[player,player,labClear] exec "action.sqs"'}
+ Send @{cmd='eval';code='triPhysicsShowcase "castle"'} '"OK"'
+ Send @{cmd='exec';code='skipTime 12; labCamera camSetPos [9473,3525,15]; labCamera camSetTarget [9500,3555,4]; labCamera camCommit 0'}
+ Start-Sleep -Seconds 8
+ Send @{cmd='screenshot';path=(Join-Path $out 'castle-settled.png')}
+ Send @{cmd='eval';code='triPhysicsShowcase "throw"'} '"OK"'
+ Start-Sleep -Seconds 3
+ Send @{cmd='screenshot';path=(Join-Path $out 'castle-impact.png')}
+ Send @{cmd='exec';code='labCamera camSetPos [9547,3498,1.7]; labCamera camSetTarget [9547,3510,1.7]; labCamera camCommit 0'}
+ Start-Sleep -Seconds 2
+ Send @{cmd='screenshot';path=(Join-Path $out 'room-lit.png')}
+ Send @{cmd='eval';code='triPhysicsShowcase "roomlight"'} '"OK"'
+ Start-Sleep -Seconds 2
+ Send @{cmd='screenshot';path=(Join-Path $out 'room-unlit.png')}
  Send @{cmd='exit'}
  if (!$p.WaitForExit(30000)) {throw 'Exit timed out'}
  if ($p.ExitCode -ne 0) {throw "Game exit $($p.ExitCode)"}
