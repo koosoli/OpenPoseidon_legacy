@@ -387,6 +387,25 @@ TEST_CASE("CDLOD selection stays visible and morphs at each patch's level", "[te
     }
 }
 
+TEST_CASE("Prone body contact leaves a wide persistent snow depression", "[snow]")
+{
+    Poseidon::SnowField snow;
+    snow.enabled = true;
+    snow.Deposit(0.2f);
+    snow.PressBody(0,0,0,1);
+    CHECK(snow.DeficitAt(0,0) > 0.1f);
+    CHECK(snow.DeficitAt(0,3) > 0.1f);
+    CHECK(snow.DeficitAt(1,0) > 0.1f);
+    CHECK(snow.DeficitAt(5,0) == 0);
+    snow.falling = false;
+    snow.Advance(100);
+    CHECK(snow.DeficitAt(0,0) > 0.1f);
+    snow.Deposit(0.2f);
+    CHECK(snow.DeficitAt(0,0) == 0);
+    snow.PressBody(10,10,0,0);
+    CHECK(snow.DeficitAt(80,80) == 0);
+}
+
 TEST_CASE("Ocean reach follows sea intersections rather than the land far plane", "[terrain][cdlod]")
 {
     REQUIRE(CdlodSeaRayReach(40000, 0, -1, 0, 300000) == 40000);

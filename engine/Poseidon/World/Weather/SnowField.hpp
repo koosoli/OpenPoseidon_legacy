@@ -106,6 +106,14 @@ public:
             Stamp(ax + (bx - ax) * t, az + (bz - az) * t, radius, 0.8f);
         }
     }
+    void PressBody(float x, float z, float directionX, float directionZ)
+    {
+        const float length = std::hypot(directionX, directionZ);
+        if (!std::isfinite(length) || length < 0.001f) return;
+        const float dx = directionX / length * 0.55f;
+        const float dz = directionZ / length * 0.55f;
+        Trail(x-dx, z-dz, x+dx, z+dz, 0.3f);
+    }
     float DeficitAt(int ix, int iz) const
     {
         const int cx = FloorChunk(ix), cz = FloorChunk(iz);

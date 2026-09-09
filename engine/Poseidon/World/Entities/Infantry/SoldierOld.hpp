@@ -514,6 +514,7 @@ class Man: public Person
 	float _manScale;
 
 	float _hideBody, _hideBodyWanted;
+	float _snowBodyStampTime = 0.0f; // Cosmetic contact cadence, not serialized AI state.
 
 	void RecalcGunTransform(); // calculate _gunTrans from gunXRot ...
 

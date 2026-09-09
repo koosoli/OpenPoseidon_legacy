@@ -1,5 +1,6 @@
 #include <Poseidon/World/Entities/Infantry/SoldierOldCommon.hpp>
 #include <Poseidon/World/Entities/Infantry/BodyWaterResponse.hpp>
+#include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/Dev/Diag/PhysicsProbe.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
@@ -921,6 +922,22 @@ void Man::Simulate(float deltaT, SimulationImportance prec)
                 change = true;
             }
         }
+        if (GSnow().enabled && GSnow().Depth() > 0 && IsDown() && !IsDead() &&
+            (_landContact || _objectContact) && !freeFall && std::isfinite(deltaT) && deltaT > 0)
+        {
+            _snowBodyStampTime += std::min(deltaT, 0.1f);
+            if (_snowBodyStampTime >= 0.1f)
+            {
+                _snowBodyStampTime = 0;
+                const auto p = moveTrans.Position();
+                const float ground = GLandscape->SurfaceY(p.X(),p.Z());
+                // Do not stamp ground under a bridge, elevated floor or swimming soldier.
+                if (ground > GLandscape->GetSeaLevel() &&
+                    GLandscape->RoadSurfaceYAboveWater(p) <= ground+0.2f)
+                    GSnow().PressBody(p.X(),p.Z(),moveTrans.Direction().X(),moveTrans.Direction().Z());
+            }
+        }
+        else _snowBodyStampTime = 0;
         Move(moveTrans);
         DirectionWorldToModel(_modelSpeed, _speed);
 
