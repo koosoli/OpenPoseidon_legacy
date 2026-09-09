@@ -71,6 +71,20 @@ Pending fix retains coverage linearly and makes breaker diffusion dt-based; same
 textures/passes, unchanged shoreline and wake-channel formula. Runtime A/B switch
 WGR_BREAKER_HISTORY_LEGACY=1. Numerical/shader tests and installed images pending.
 
+be66665d installed: three history/numerical/shader tests pass. Bright matched
+offshore captures at wind 18, shore gain 0, wave gain 0.62 show the gain works
+(gain 0 removes the matte rafts; gain 2 strengthens them), but the desired
+breaking-crest quality is NOT accepted yet. Foam-pass median about 0.17 ms in
+both history modes; no claim of overall FPS improvement. Initial test profile
+used the wrong world filename; corrected to noe_noe_wrp.cfg and asserted the
+applied amplitude. Exposure 0.15 was too dark; fixture now uses 1.0.
+
+Next bounded experiment: deep-water suppression still attenuates even strongly
+compressed crests. Recover direct crest readiness only as the existing Jacobian
+breaking signal rises; retain calm-wind gating and unchanged shoreline readiness.
+One numerical regression test passes. WGR_DEEP_BREAKER_RECOVERY=0 preserves the
+previous direct-crest path for same-binary A/B. Installed validation pending.
+
 Owner authorised implementation after backup `codex/backup-asset-obs-20260909-bc766e19`.
 Worktree asset-obs only; foreign Cargo.lock excluded. Screenshots 070351, 070456,
 072225 and 073829 are reproduction evidence, not completion evidence.

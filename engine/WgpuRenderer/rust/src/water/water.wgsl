@@ -764,6 +764,7 @@ override foam_patch_gain: f32 = 1.0;
 // of `ft`. 0 = the previous ruler-straight ribbon. WGR_WATER_FOAM_MEANDER. See the meander block
 // in fs_water for why this is a stronger anti-repetition lever than another noise octave.
 override foam_band_meander: f32 = 0.34;
+override deep_breaker_recovery: f32 = 1.0;
 
 // Water column depth (m) at this fragment: reconstruct the seabed's camera-relative position
 // from the opaque prepass depth and take the vertical gap to the water surface. In the fragment
@@ -2175,7 +2176,11 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
         // WRL-002: and a crest only whitecaps when there is wind to make it (the same gate the
         // foam injection and the spray emitter use, so all three sources agree).
         let wind_gate = select(1.0, whitecap_wind_factor(wp.fft_wind_sea.z), wp.optics_params.y > 0.5);
-        let break_readiness = mix(1.05, mix(1.05, 0.12, deep_falloff), deep_water) * wind_gate;
+        // Depth suppresses ordinary swell, not a crest already strongly compressed.
+        // Reuse the geometric breaking signal; no extra samples or shoreline gain.
+        let depth_readiness = mix(1.05, mix(1.05, 0.12, deep_falloff), deep_water);
+        let break_readiness = mix(depth_readiness, 1.05,
+            jacobian_break * clamp(deep_breaker_recovery, 0.0, 1.0)) * wind_gate;
         breaker_foam = clamp(crest_top * mix(0.28, 0.72, jacobian_break) * crest_shape * break_readiness,
             0.0, 1.0);
     }

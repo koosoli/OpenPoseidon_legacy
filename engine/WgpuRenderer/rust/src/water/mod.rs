@@ -680,6 +680,9 @@ impl Water {
         let fs_constants = [("linear", linear)];
         let water_fs_constants = [
             ("linear", linear),
+            ("deep_breaker_recovery", std::env::var("WGR_DEEP_BREAKER_RECOVERY")
+                .ok().and_then(|v| v.parse::<f64>().ok())
+                .filter(|v| v.is_finite()).unwrap_or(1.0).clamp(0.0, 1.0)),
             ("shore_foam_legacy", shore_foam_legacy),
             ("foam_band_outer", foam_band_outer),
             ("foam_patch_gain", foam_patch_gain),
@@ -1657,6 +1660,24 @@ mod tests {
         assert!(cpp.contains("out << \"whitecaps \" << s.waveFoamIntensity"));
         assert!(cpp.contains("key == \"whitecaps\""));
         assert!(cpp.contains("in >> _waterLook.waveFoamIntensity >> _waterLook.waveFoamDeepFalloff >> windGate"));
+    }
+
+    #[test]
+    fn deep_breakers_recover_without_whitening_calm_swell_or_shore() {
+        let readiness = |deep: f32, falloff: f32, breaking: f32, wind: f32| {
+            let depth = 1.05 + ((1.05 + (0.12 - 1.05) * falloff) - 1.05) * deep;
+            (depth + (1.05 - depth) * breaking) * wind
+        };
+        assert!((readiness(1.0, 1.0, 0.0, 1.0) - 0.12).abs() < 1e-6);
+        assert!((readiness(1.0, 1.0, 1.0, 1.0) - 1.05).abs() < 1e-6);
+        for step in 0..=100 {
+            let breaking = step as f32 / 100.0;
+            assert_eq!(readiness(1.0, 1.0, breaking, 0.0), 0.0);
+            assert!((readiness(0.0, 1.0, breaking, 1.0) - 1.05).abs() < 1e-6);
+            assert!((readiness(1.0, 0.0, breaking, 1.0) - 1.05).abs() < 1e-6);
+        }
+        let shader = include_str!("water.wgsl");
+        assert!(shader.contains("jacobian_break * clamp(deep_breaker_recovery, 0.0, 1.0)) * wind_gate"));
     }
 
     // The shoreline foam patterned at distance because its noise is ANALYTIC — no mip chain — so
