@@ -37,3 +37,30 @@ Found: whitecap shader gain is multiplied by shoreline gain despite UI promising
 independent controls, and whitecap fields are absent from water-look persistence.
 Master reset already includes sky/water/roads but does not list them; lamp/glow/
 shadow settings are actually missing. Fixes and tests in progress, not yet deployed.
+
+## Implemented checkpoints (not overall completion)
+
+- 684b2871: independent wave-foam gain, persisted whitecap settings; dedicated
+  lighting reset and master reset coverage; Picture Mode max blur 4, optional
+  player-follow and free-fly click focus. 58 C++ cases / 4759 assertions and
+  whitecap Rust contract passed. Installed DOF lifecycle capture exits normally;
+  interactive focus and foam A/B acceptance still pending.
+- ac5eaaa9 / bcaec198: snowflake billboard length no longer collapses when viewed
+  along its velocity. Optional close-up snow geometry refines selected terrain
+  patches to <=0.125m samples within an 8m camera window, plus accumulation drift
+  variation. Collision remains bare ground; accumulation roof mask still open.
+- 4d14628d / 1714d132: large castle preset (485 dynamic blocks after adding a
+  supported lintel), ~32m span, 8m walls, 11m corner columns; moving room light,
+  material-room action entries. Build and 66 cases / 16007 assertions passed
+  before lintel follow-up; follow-up has 492 assertions / 2 cases passed.
+  Installed and pushed both safety refs; original backup ref untouched.
+  `scripts/Test-Showcase.ps1` exits normally with castle and light-on/off captures.
+  Images confirm standing gate and daylight room illumination toggling. Room
+  still has visible edge gaps; normal/gloss contrast and actual castle impact
+  remain acceptance work, not closed merely because the harness returned OK.
+- Investigation found incorrect bicubic FFT dynamics reconstruction: non-adjacent
+  pair sums, cross-axis denominator and reversed blend weights. Corrected using
+  the same four texture fetches; numerical reference test added. Not deployed yet.
+
+All other queue entries above remain open. No destructible-terrain or automatic
+satmap implementation is claimed by these checkpoints.

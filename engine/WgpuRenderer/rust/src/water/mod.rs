@@ -2155,6 +2155,45 @@ mod tests {
     }
 
     #[test]
+    fn bicubic_dynamics_matches_sixteen_tap_reference() {
+        let shader = include_str!("water.wgsl");
+        assert!(shader.contains("wx.x + wx.y, wx.z + wx.w, wy.x + wy.y, wy.z + wy.w"));
+        assert!(shader.contains("wx.y / g.x"));
+        assert!(shader.contains("wx.w / g.y"));
+        assert!(shader.contains("let w = g.yw / (g.xz + g.yw)"));
+        fn weights(t: f64) -> [f64; 4] {
+            [ (1.0-t).powi(3)/6.0, (3.0*t.powi(3)-6.0*t*t+4.0)/6.0,
+              (-3.0*t.powi(3)+3.0*t*t+3.0*t+1.0)/6.0, t.powi(3)/6.0 ]
+        }
+        let texel = |x: i32, y: i32| ((x.rem_euclid(8)*13 + y.rem_euclid(8)*7) % 19) as f64;
+        let bilinear = |x: f64, y: f64| {
+            let ix = x.floor() as i32;
+            let iy = y.floor() as i32;
+            let fx = x-x.floor();
+            let fy = y-y.floor();
+            (texel(ix,iy)*(1.0-fx)+texel(ix+1,iy)*fx)*(1.0-fy)
+                + (texel(ix,iy+1)*(1.0-fx)+texel(ix+1,iy+1)*fx)*fy
+        };
+        for x in [-1.00001_f64, -1.0, -0.99999, 0.0, 0.13, 0.49, 0.93, 7.99999, 8.0] {
+            for y in [-1.00001_f64, -0.99999, 0.0, 0.07, 0.76, 7.99999, 8.0] {
+                let wx = weights(x-x.floor());
+                let wy = weights(y-y.floor());
+                let gx = [wx[0]+wx[1], wx[2]+wx[3]];
+                let gy = [wy[0]+wy[1], wy[2]+wy[3]];
+                let hx = [x.floor()-1.0+wx[1]/gx[0], x.floor()+1.0+wx[3]/gx[1]];
+                let hy = [y.floor()-1.0+wy[1]/gy[0], y.floor()+1.0+wy[3]/gy[1]];
+                let mut four = 0.0;
+                let mut sixteen = 0.0;
+                for j in 0..2 { for i in 0..2 { four += bilinear(hx[i],hy[j])*gx[i]*gy[j]; } }
+                for j in 0..4 { for i in 0..4 {
+                    sixteen += texel(x.floor() as i32+i as i32-1, y.floor() as i32+j as i32-1)*wx[i]*wy[j];
+                } }
+                assert!((four-sixteen).abs() < 1e-10, "{x}/{y}: {four} vs {sixteen}");
+            }
+        }
+    }
+
+    #[test]
     fn debug_params_appended_without_shifting_existing_lanes() {
         use crate::ffi::WgrWaterParams;
         assert_eq!(std::mem::size_of::<WgrWaterParams>(), 1056);

@@ -278,13 +278,15 @@ fn texture_bicubic_displacement_at(uv: vec2<f32>, layer: i32, magnified: bool) -
     let wx = cubic_weights(fuv.x);
     let wy = cubic_weights(fuv.y);
 
-    let g = vec4<f32>(wx.x + wx.z, wx.y + wx.w, wy.x + wy.z, wy.y + wy.w);
+    // Collapse adjacent B-spline taps into hardware bilinear fetches. Each
+    // axis needs its own pair sums; non-adjacent sums create texel-edge jumps.
+    let g = vec4<f32>(wx.x + wx.y, wx.z + wx.w, wy.x + wy.y, wy.z + wy.w);
     let floor_uv = floor(uv_grid);
-    let hx0 = (wx.y / g.y + (-1.5 + floor_uv.x)) * inv_x;
-    let hx1 = (wx.w / g.w + ( 0.5 + floor_uv.x)) * inv_x;
+    let hx0 = (wx.y / g.x + (-1.5 + floor_uv.x)) * inv_x;
+    let hx1 = (wx.w / g.y + ( 0.5 + floor_uv.x)) * inv_x;
     let hy0 = (wy.y / g.z + (-1.5 + floor_uv.y)) * inv_y;
     let hy1 = (wy.w / g.w + ( 0.5 + floor_uv.y)) * inv_y;
-    let w = g.xz / (g.xz + g.yw);
+    let w = g.yw / (g.xz + g.yw);
 
     let s00 = textureSampleLevel(fft_displacement, fft_samp, vec2<f32>(hx0, hy0), layer, 0.0);
     let s10 = textureSampleLevel(fft_displacement, fft_samp, vec2<f32>(hx1, hy0), layer, 0.0);
