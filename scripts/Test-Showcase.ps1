@@ -44,7 +44,7 @@ try {
  }
  Start-Sleep -Seconds 18
  if ($CastleOnly) {
-  Send @{cmd='exec';code='hint ""; player setPos [9493,3541,0]; player setDir 0; player switchCamera "INTERNAL"'}
+  Send @{cmd='exec';code='hint ""; player setPos [9490,3559,0]; player setDir 0; player switchCamera "INTERNAL"'}
   Send @{cmd='eval';code='triPhysicsShowcase "castle"'} '"OK"'
   Start-Sleep -Seconds 8
   Send @{cmd='screenshot';path=(Join-Path $out 'castle-walk-before.png')}
@@ -52,11 +52,11 @@ try {
   Start-Sleep -Seconds 4
   Send @{cmd='key_up';sc=26}
   Send @{cmd='eval';code='getPos player'}
-  Send @{cmd='eval';code='((getPos player) select 1) > 3542 && ((getPos player) select 1) < 3545.5'} 'true'
   Send @{cmd='screenshot';path=(Join-Path $out 'castle-walk-blocked.png')}
-  Send @{cmd='exec';code='player setPos [9500,3541,0]; player setDir 0'}
+  Send @{cmd='eval';code='((getPos player) select 1) > 3560 && ((getPos player) select 1) < 3563.5'} 'true'
+  Send @{cmd='exec';code='player setPos [9498,3544,0]; player setDir 0'}
   Send @{cmd='key';sc=26;hold=$true}
-  Start-Sleep -Seconds 3
+  Start-Sleep -Seconds 2
   Send @{cmd='key_up';sc=26}
   Send @{cmd='eval';code='((getPos player) select 1) > 3547'} 'true'
   Send @{cmd='exec';code='player setPos [9470,3510,0]; labCamera = "camera" camCreate [9473,3525,15]; labCamera cameraEffect ["internal","back"]; labCamera camSetTarget [9500,3555,4]; labCamera camCommit 0'}
@@ -72,7 +72,8 @@ try {
   Send @{cmd='exit'}
   if (!$p.WaitForExit(30000)) {throw 'Exit timed out'}
   if ($p.ExitCode -ne 0) {throw "Game exit $($p.ExitCode)"}
-  if (!(Select-String -LiteralPath $log -Pattern 'SHOWCASE blast:.*affected=[1-9]')) {throw 'No explosion reached the blocks'}
+  if (!(Select-String -LiteralPath $log -Pattern 'SHOWCASE blast: hit=18 range=7 affected=[1-9]')) {throw 'Hand grenade missed the blocks'}
+  if (!(Select-String -LiteralPath $log -Pattern 'SHOWCASE blast: hit=150 range=2.5 affected=[1-9]')) {throw 'LAW missed the blocks'}
   return
  }
  if ($Menu) {

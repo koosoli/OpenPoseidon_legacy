@@ -547,3 +547,14 @@ walk/gate/grenade/rocket checks pending. Added Test-Showcase.ps1 -CastleOnly.
 The pending temporal jitter correction also passed all 8 temporal Rust tests,
 including the headless velocity shader and translated/rotated camera reference.
 Game is closed again; runtime validation can proceed with the game-folder lock.
+
+Installed acceptance on 3e8ecbde: Test-Showcase.ps1 -CastleOnly exited 0.
+Four seconds holding forward stopped the player at northing 3563.26, before
+the rear wall face 3563.61. Separate gate traversal passed. GrenadeHand
+(indirectHit 18/range 7) reached 332 bodies and visibly opened a breach;
+LAW (150/2.5) reached 99 and collapsed a larger wall section. Captures:
+build/showcase/smoke/castle-walk-blocked.png, castle-grenade.png, castle-rocket.png.
+49 physics cases / 2105 assertions passed. First front-wall fixture was invalid:
+manual view heading caused a diagonal path through the gate. The corrected
+fixture tests the continuous rear wall and the gate separately; not a code ablation.
+Cargo.lock remains unchanged from the owner's foreign edit.
