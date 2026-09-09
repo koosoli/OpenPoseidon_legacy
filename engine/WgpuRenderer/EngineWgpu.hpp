@@ -1194,7 +1194,8 @@ class EngineWgpu : public EngineDummy
         WgrInstance inst; // Add / Update payload; unused for Remove
     };
     std::vector<InstanceOp> _instanceOps;
-    std::vector<uint32_t> _instSlotOf;       // producer handle -> renderer slot (valid after drain)
+    std::vector<uint32_t> _instSlotOf;       // consumer-owned: producer handle -> renderer slot
+    uint32_t _nextInstanceHandle = 0;       // producer-owned; never reads/grows the consumer table
     std::vector<uint32_t> _instFreeHandles;  // recycled producer handles
     uint32_t EnqueueInstanceAdd(const WgrInstance& inst);
     void EnqueueInstanceUpdate(uint32_t handle, const WgrInstance& inst);

@@ -2504,8 +2504,7 @@ uint32_t EngineWgpu::EnqueueInstanceAdd(const WgrInstance& inst)
     }
     else
     {
-        handle = static_cast<uint32_t>(_instSlotOf.size());
-        _instSlotOf.push_back(0);
+        handle = _nextInstanceHandle++;
     }
     _instanceOps.push_back(InstanceOp{InstanceOp::Add, handle, inst});
     return handle;
@@ -2808,6 +2807,7 @@ void EngineWgpu::TranslateOverlayDrawHandles(std::vector<WgrOverlayDraw>& draws)
 
 void EngineWgpu::DrainInstanceOps(std::vector<InstanceOp>& ops)
 {
+    constexpr uint32_t InvalidInstanceSlot = ~uint32_t{0};
     if (ops.empty())
         return;
     if (!_renderer)
@@ -2819,6 +2819,17 @@ void EngineWgpu::DrainInstanceOps(std::vector<InstanceOp>& ops)
     }
     for (const InstanceOp& op : ops)
     {
+        // Only the consumer owns this table: enqueue can overlap this drain.
+        // Failed model translation must not leave a reused handle pointing at
+        // another live instance (nor make a later remove index past the table).
+        if (op.kind == InstanceOp::Add)
+        {
+            if (op.handle >= _instSlotOf.size())
+                _instSlotOf.resize(static_cast<size_t>(op.handle) + 1, InvalidInstanceSlot);
+            _instSlotOf[op.handle] = InvalidInstanceSlot;
+        }
+        else if (op.handle >= _instSlotOf.size() || _instSlotOf[op.handle] == InvalidInstanceSlot)
+            continue;
         switch (op.kind)
         {
         case InstanceOp::Add:
@@ -2848,6 +2859,7 @@ void EngineWgpu::DrainInstanceOps(std::vector<InstanceOp>& ops)
         }
         case InstanceOp::Remove:
             wgr_instance_remove(_renderer, _instSlotOf[op.handle]);
+            _instSlotOf[op.handle] = InvalidInstanceSlot;
             break;
         }
     }

@@ -455,6 +455,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     Input/test_mouse_state.cpp
     Input/test_keyboard_state.cpp
     Input/test_ui_key_repeat_sdl.cpp
+    Graphics/test_wgpu_instance_queue_contract.cpp
     Input/test_rumble_manager.cpp
 
     # IO tests (batch-15)
