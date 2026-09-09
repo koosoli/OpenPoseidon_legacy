@@ -145,6 +145,8 @@ def build():
         ('Wall', (.25, 4.5, 7), False, .05),
         ('Roof', (7, .3, 7), False, .05),
         ('Plinth', (1, .4, 1), False, .05),
+        ('RoomBack', (7, 4.5, .25), False, .02),
+        ('DoorSide', (3.15, 4.5, .25), False, .02),
     ]:
         files[name + '.rvmat'] = material(normal, specular)
         texture = 'grid_co.paa'
@@ -153,7 +155,7 @@ def build():
             files[texture] = paa(label=name[5:].upper())
         files[name + '.p3d'] = model(size, 'showcase_lab\\' + texture, 'showcase_lab\\' + name + '.rvmat')
         classes.append(f'class Lab{name}: House {{scope=2; displayName="Lab {name}"; model="\\showcase_lab\\{name}.p3d"; armor=10000;}};')
-    files['config.cpp'] = ('''class CfgPatches {class ShowcaseLab {units[]={"LabPanelFlat","LabPanelNormal","LabPanelGloss","LabWall","LabRoof","LabPlinth"}; weapons[]={}; requiredVersion=1.96; requiredAddons[]={};};};
+    files['config.cpp'] = ('''class CfgPatches {class ShowcaseLab {units[]={"LabPanelFlat","LabPanelNormal","LabPanelGloss","LabWall","LabRoof","LabPlinth","LabRoomBack","LabDoorSide"}; weapons[]={}; requiredVersion=1.96; requiredAddons[]={};};};
 class CfgVehicles {class House;
 ''' + '\n'.join(classes) + '\n};\n').encode('ascii')
     header = z('') + struct.pack('<5I', 0x56657273, 0, 0, 0, 0) + z('prefix') + z('showcase_lab') + b'\0'

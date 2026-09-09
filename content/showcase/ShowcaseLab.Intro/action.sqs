@@ -1,5 +1,8 @@
 _id = _this select 2
 ? _id == labReset : goto "reset"
+? _id == labCastle : goto "castle"
+? _id == labRoom : goto "room"
+? _id == labRoomLight : goto "roomlight"
 ? _id == labThrow : goto "throw"
 ? _id == labDrop : goto "drop"
 ? _id == labBall : goto "ball"
@@ -12,6 +15,20 @@ hint "PHYSICS: shoot the stacks, push the dominoes, or select and throw bodies. 
 exit
 #reset
 hint (triPhysicsShowcase "reset")
+exit
+#castle
+hint (triPhysicsShowcase "castle")
+player setPos [9500,3530,0]
+player setDir 0
+hint "BLOCK CASTLE\n32 m wide, 8 m walls and 11 m towers. Lightweight individual blocks. Shoot the walls or throw heavy bodies. Reset restores the small test field."
+exit
+#room
+player setPos [9547,3494,0]
+player setDir 0
+hint "ROTATING LIGHT ROOM\nEnter through the central doorway. The warm point light moves continuously around the room. NORMAL and GLOSS panels are on the back wall. LAB: toggle room light gives a direct off/on comparison."
+exit
+#roomlight
+hint (triPhysicsShowcase "roomlight")
 exit
 #throw
 hint (triPhysicsShowcase "throw")

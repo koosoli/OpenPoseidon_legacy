@@ -33,7 +33,8 @@ class ShowcaseAssets(unittest.TestCase):
             files.append((name, size))
         content = {name: stream.read(size) for name, size in files}
         self.assertEqual(stream.read(), b'')
-        self.assertEqual(len(content), 18)
+        self.assertEqual(len(content), 22)
+        self.assertIn(b'class LabDoorSide', content['config.cpp'])
         self.assertIn(b'class LabPanelNormal', content['config.cpp'])
         for name, data in content.items():
             if name.endswith('.p3d'):

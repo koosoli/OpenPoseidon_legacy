@@ -9,12 +9,28 @@
 
 #include <Poseidon/World/Physics/PhysicsBackend.hpp>
 #include <Poseidon/World/Physics/PhysicsWorld.hpp>
+#include <Poseidon/Dev/Diag/ShowcaseCastle.hpp>
 
 #include <memory>
 #include <cmath>
 #include <vector>
 
 using namespace Poseidon::Physics;
+
+TEST_CASE("Showcase castle leaves a gate and a bounded projectile budget", "[physics][showcase]")
+{
+    const auto blocks = Poseidon::Dev::ShowcaseCastleLayout();
+    CHECK(blocks.size() == 488);
+    CHECK(blocks.size() + 16 < 512);
+    float maxHeight = 0;
+    for (const auto& b : blocks)
+    {
+        CHECK_FALSE((b.z == -9 && b.height < 3.2f && b.x >= -1 && b.x <= 1));
+        maxHeight = std::max(maxHeight, b.height + 0.4f);
+    }
+    CHECK(maxHeight > 11);
+    CHECK(maxHeight < 12);
+}
 
 TEST_CASE("a newly defined probe has no launch velocity", "[physics][showcase]")
 {

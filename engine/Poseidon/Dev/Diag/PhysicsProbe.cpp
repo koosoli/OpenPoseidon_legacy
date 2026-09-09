@@ -1,5 +1,7 @@
 #include <Poseidon/Dev/Diag/PhysicsProbe.hpp>
 #include <Poseidon/Dev/Diag/PhysicsCorpus.hpp>
+#include <Poseidon/Dev/Diag/ShowcaseCastle.hpp>
+#include <Poseidon/Core/Global.hpp>
 
 #include <Poseidon/Dev/Diag/ProbeMeshes.hpp>
 
@@ -29,6 +31,9 @@ namespace
 PhysicsProbeSettings s_settings;
 PhysicsProbeSettings s_beforeShowcase;
 bool s_showcaseActive = false;
+bool s_showcaseCastle = false;
+Ref<LightPoint> s_showcaseRoomLight;
+bool s_showcaseRoomLit = true;
 
 // Harness seeds. The probe settings live behind a panel that holds the mouse, so an
 // automated capture cannot tick a box -- these are the only way to A/B the probe light
@@ -608,6 +613,9 @@ void ShutdownPhysicsProbes()
 
 void EndPhysicsShowcase()
 {
+    if (s_showcaseRoomLight)
+        s_showcaseRoomLight->SetDiffuse(HBlack);
+    s_showcaseRoomLight = nullptr;
     if (!s_showcaseActive) return;
     ClearPhysicsProbes();
     for (auto& light : s_probeLights)
@@ -629,6 +637,8 @@ bool PhysicsShowcaseCommand(const char* command)
     if (!reset && !s_showcaseActive) return false;
     if (reset)
     {
+        s_showcaseCastle = false;
+        s_showcaseRoomLit = true;
         if (!s_showcaseActive)
         {
             s_beforeShowcase = s_settings;
@@ -672,7 +682,37 @@ bool PhysicsShowcaseCommand(const char* command)
         }
         return true;
     }
-    if (!strcmp(command, "clear")) { ClearPhysicsProbes(); return true; }
+    if (!strcmp(command, "roomlight"))
+    {
+        s_showcaseRoomLit = !s_showcaseRoomLit;
+        return true;
+    }
+    if (!strcmp(command, "castle"))
+    {
+        ClearPhysicsProbes();
+        s_settings.emitLight = false;
+        s_settings.hotkeys = false;
+        s_settings.mass = 8.0f;
+        s_settings.radius = 0.5f;
+        s_settings.throwSpeed = 35.0f;
+        s_showcaseCastle = true;
+        auto& world = Physics::EnsurePhysicsWorld();
+        if (!world.Create()) return false;
+        for (const auto& block : ShowcaseCastleLayout())
+        {
+            Physics::SphereProbeDef def;
+            def.shape = Physics::ProbeShape::Box;
+            def.halfExtents = block.side ? Vector3(0.39f, 0.4f, 0.99f) : Vector3(0.99f, 0.4f, 0.39f);
+            const float x = 9500.0f + block.x, z = 3555.0f + block.z;
+            def.position = Vector3(x, GLandscape->SurfaceY(x, z) + block.height, z);
+            def.mass = 8.0f; // Lightweight demo blocks, not a concrete building.
+            def.friction = 0.65f;
+            def.restitution = 0.02f;
+            world.SpawnSphereProbe(def);
+        }
+        return true;
+    }
+    if (!strcmp(command, "clear")) { ClearPhysicsProbes(); s_showcaseCastle = false; return true; }
     if (!strcmp(command, "ball")) { s_settings.shape = 0; s_settings.emitLight = false; }
     else if (!strcmp(command, "box")) { s_settings.shape = 2; s_settings.emitLight = false; }
     else if (!strcmp(command, "light"))
@@ -699,7 +739,7 @@ bool PhysicsShowcaseCommand(const char* command)
     {
         std::vector<Physics::ProbeSample> samples;
         if (auto* world = Physics::GetPhysicsWorld()) world->GetProbeSamples(samples);
-        if (samples.size() >= (s_settings.emitLight ? 4u : 128u)) return false;
+        if (samples.size() >= (s_settings.emitLight ? 4u : s_showcaseCastle ? 512u : 128u)) return false;
         SpawnPhysicsProbe(!strcmp(command, "throw") ? s_settings.throwSpeed : 0.0f);
         return true;
     }
@@ -710,6 +750,20 @@ bool PhysicsShowcaseCommand(const char* command)
 
 void UpdatePhysicsProbeWind()
 {
+    if (s_showcaseActive && GScene && GLandscape)
+    {
+        if (!s_showcaseRoomLight)
+        {
+            s_showcaseRoomLight = new LightPoint(HBlack, HBlack);
+            s_showcaseRoomLight->SetBrightness(0.1f);
+            GScene->AddLight(s_showcaseRoomLight);
+        }
+        const float phase = Glob.time.toFloat() * 0.65f;
+        const float x = 9547.0f + std::cos(phase) * 3.0f;
+        const float z = 3504.0f + std::sin(phase) * 3.0f;
+        s_showcaseRoomLight->SetPosition(Vector3(x, GLandscape->SurfaceY(x, z) + 2.3f, z));
+        s_showcaseRoomLight->SetDiffuse(s_showcaseRoomLit ? Color(1.0f, 0.72f, 0.38f) : Color(HBlack));
+    }
     Physics::PhysicsWorld* world = Physics::GetPhysicsWorld();
     if (!world || !world->IsCreated())
     {
@@ -838,7 +892,7 @@ void DrawPhysicsProbes()
     static int traceFrame = 0;
     if (!samples.empty() && (++traceFrame % 60) == 0)
     {
-        for (std::size_t i = 0; i < samples.size(); ++i)
+        for (std::size_t i = 0; i < (s_showcaseCastle ? std::min<size_t>(samples.size(), 16) : samples.size()); ++i)
         {
             const Vector3& p = samples[i].position;
             const float ground = GLandscape ? GLandscape->SurfaceY(p[0], p[2]) : 0.0f;
