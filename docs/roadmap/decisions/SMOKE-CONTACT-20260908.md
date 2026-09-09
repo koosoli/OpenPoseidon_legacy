@@ -89,3 +89,42 @@ particles, including equal depths, at three camera headings; empty input is also
 covered. Combined targeted tests: 766 assertions / 58 cases. PoseidonGame and
 PoseidonTests build passed. Installed timing/visual verification still waits for
 the free game lock; no measured total-frame speedup is claimed.
+
+## Installed audit, 2026-09-09
+
+The previous pending-deployment notes are historical: both source-room and sort
+changes are included in the installed audit builds. Additional fix `8f2e8a65`
+requires the nearby cached building's actual room grid to contain the queried
+point. Proximity within 12 m alone could return a different building or an
+outdoor point as the cached interior. A synthetic two-building/outdoor/null test
+adds eight assertions. The validation is a room-grid lookup, not an extra sweep.
+Fallback lookup can run more frequently when the old cached answer was wrong;
+do not call that a guaranteed indoor performance win.
+
+The first post-deployment Nogova run crashed BEFORE test-smoke creation in
+EngineWgpu::DrainInstanceOps. An unchanged retry passed. Inspection found producer
+vector growth racing consumer slot accesses. `a4d09dbe` separates producer handle
+allocation from consumer-owned translation storage, and rejects invalid mappings.
+This is an independently exposed renderer defect, not evidence that the smoke
+cache fix caused the startup crash. The ownership contract test is source-level,
+not a thread sanitizer. Game/tests build passed; combined targeted suite passed
+98 cases / 29,353 assertions, including the correctly named `[body-water]` tag.
+
+Installed `a4d09dbe` completed four runs with orderly shutdown and no logged
+unhandled exception/panic: Nogova 30 s sprites, Nogova 30 s volumetric, two native
+Reforger Village 90 s captures (each 22,360 registered instances, complete terrain
+and settled preparation). This is bounded regression evidence, not a proof
+against all concurrency schedules.
+
+Nogova uses source 7731.6/25.3/4421.4, thickness 8, wind override 18/250/0.2,
+camera 7764.82/4408.71/30, heading 290, pitch -5. Correct mode switch is
+`POSEIDON_SMOKE_SYSTEM=0` or `1`. An earlier audit control mistakenly set unused
+`POSEIDON_SMOKE_RENDER_MODE=1`; that control was DEFAULT SPRITES, not volumetric.
+Do not use it to claim a volumetric before/after. Actual final volume image
+`audit-instance-volume.png` still shows exterior smoke around the building.
+Late individual sim samples ~9.8-13.9 ms / ~3900 particles are not a p95 or a
+controlled performance comparison. Thin-wall leakage and indoor spikes stay open.
+
+Raw local logs/images: `.tmp-nogova/audit-*`, `.tmp-bulb/audit-final-tests.log`,
+`.tmp-bulb/audit-instance-build.log`,
+`build/native-reforger-perf/Village-audit-instance/`.

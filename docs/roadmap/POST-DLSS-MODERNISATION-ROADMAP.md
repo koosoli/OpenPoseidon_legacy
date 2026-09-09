@@ -16,6 +16,16 @@ uses measurements as the gate for optional GPU features.
 
 ## Where the critical path stands, 2026-09-01
 
+**2026-09-09 owner-request audit:** the dated historical status below is not a
+blanket completion claim for the subsequent lighting/water/smoke requests.
+[REQUEST-AUDIT-20260909.md](REQUEST-AUDIT-20260909.md) records each request,
+acceptance evidence and remaining limits. Follow-ups `8f2e8a65` (smoke cache point
+validation) and `a4d09dbe` (consumer-only instance-slot storage) are built, tested,
+pushed to both safety refs and installed. 98 targeted cases / 29,353 assertions
+pass; two Nogova smoke and two full native Reforger runs terminate normally.
+Body/FFT alignment, DLSS cloud motion, thin-wall smoke/indoor spikes and remaining
+rotor/shadow visual acceptance are explicitly not closed by these checkpoints.
+
 **Step 9 (bounded, measurable render/simulation overlap) is DONE**, so the two tracks below
 it now run concurrently rather than in sequence. `WGR_RENDER_THREAD=1 WGR_RENDER_OVERLAP=1`,
 toggleable in the dev panel, proven frame-equivalent (901 of 901 scene frames identical to

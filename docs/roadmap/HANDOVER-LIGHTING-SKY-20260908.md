@@ -5,6 +5,15 @@ anything. **Read this before touching the renderer.**
 
 ## Where everything is
 
+Owner-request audit, 2026-09-09:
+[REQUEST-AUDIT-20260909.md](REQUEST-AUDIT-20260909.md) is the consolidated German
+status for every follow-up request. It separates implemented changes, measured
+acceptance, unresolved defects and declined experiments. Runtime `a4d09dbe` also
+fixes producer/consumer instance-slot storage ownership; `8f2e8a65` validates the
+smoke building cache against the queried room point. Four installed audit runs
+passed after the ownership fix. This does NOT close FFT body alignment, cloud
+motion history, thin-wall smoke or the outstanding rotor/shadow visual checks.
+
 Native Reforger performance, the 50 km fine-grid render guard, unused converted
 texture prefetch and a rejected shadow experiment:
 [NATIVE-REFORGER-PERF-20260909.md](decisions/NATIVE-REFORGER-PERF-20260909.md).
