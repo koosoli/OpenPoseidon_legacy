@@ -48,6 +48,8 @@
 #include <Poseidon/World/Model/ModelCache.hpp>
 #include <Poseidon/World/Model/ShapeAdapter.hpp>
 #include <Poseidon/World/Terrain/ObjectStreamPrepare.hpp>
+#include <Poseidon/Graphics/Textures/PreparedTextures.hpp>
+#include <Poseidon/Asset/Formats/Material/EmatMaterialAdapter.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -992,6 +994,41 @@ template <typename Fn> bool WaitFor(Fn&& fn, int maxMs = 30000)
     return fn();
 }
 } // namespace
+
+TEST_CASE("Native preparer ignores loose material decoys but keeps IR texture preparation", "[preparer][native]")
+{
+    if (!ObjectStreamPreparer::AsyncEnabled() || !Poseidon::render::PreparedTextureStore::Enabled())
+    {
+        SKIP("Requires asynchronous texture preparation");
+    }
+    const std::string materialPath = TestFixtures::GetTestFixturePath("material/native_prefetch_decoy.emat");
+    Poseidon::Asset::Material::EmatMaterial material;
+    REQUIRE(Poseidon::Asset::Material::ReadEmatFileLoose(materialPath, material));
+    REQUIRE(material.properties.size() == 1);
+    REQUIRE(material.properties[0].values[0].isTexture());
+    struct RestoreLoader
+    {
+        Poseidon::ModelCache::ExternalLoader previous = Poseidon::ModelCache::GetExternalLoader();
+        ~RestoreLoader() { Poseidon::ModelCache::SetExternalLoader(previous); }
+    } restore;
+    Poseidon::ModelCache::SetExternalLoader(+[](const std::string&, std::string&) {
+        auto model = std::make_shared<ModelIR::Model>();
+        model->lodLevels.emplace_back();
+        ModelIR::Material mat;
+        mat.materialPath = TestFixtures::GetTestFixturePath("material/native_prefetch_decoy.emat");
+        mat.texturePath = "native_prefetch_actual_missing.paa";
+        model->lodLevels[0].mesh.materials.push_back(std::move(mat));
+        return model;
+    });
+    ObjectStreamPreparer prep;
+    const std::string path = "native_prefetch_synthetic.xob";
+    prep.Reset(&path, 1);
+    REQUIRE(prep.Request(0));
+    REQUIRE(WaitFor([&] { return prep.Query(0) == ObjectStreamPreparer::State::Ready; }));
+    REQUIRE(prep.Take(0) != nullptr);
+    // The actual IR texture is attempted; the converted material's decoy is not.
+    CHECK(prep.SnapshotStats().texUnreadable == 1);
+}
 
 TEST_CASE("SIM-807 preparer classifies a parse that cannot happen", "[determinism][preparer]")
 {

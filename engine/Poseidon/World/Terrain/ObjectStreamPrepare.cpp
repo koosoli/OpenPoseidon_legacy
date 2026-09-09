@@ -272,6 +272,7 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
         ModelPtr model;
         std::string error;
         bool opened = false;
+        bool nativeArchiveModel = false;
         try
         {
             model = ModelCache::LoadLooseFile(path, &error, &opened);
@@ -290,6 +291,7 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                     {
                         std::string why;
                         model = external(path, why);
+                        nativeArchiveModel = model != nullptr;
                         opened = true; // it was ours to load; a null model is a parse failure, not "not loose"
                         if (!model)
                             error = why.empty() ? "external loader declined" : why;
@@ -364,6 +366,11 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
             // Enfusion-native reference that never became a PAA costs nothing.
             auto noteEmatTextures = [&](const std::string& materialPath)
             {
+                // Native XOBs resolve these names in the mounted pak, not the
+                // converter's loose deploy roots. Those may contain same-named
+                // EMATs pointing at unused PAAs (hundreds of MB with zero takes).
+                if (nativeArchiveModel)
+                    return;
                 if (materialPath.empty() || !Asset::Material::IsEmatMaterialPath(materialPath))
                     return;
                 Asset::Material::EmatMaterial emat;
