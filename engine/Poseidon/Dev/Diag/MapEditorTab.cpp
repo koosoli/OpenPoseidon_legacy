@@ -2,6 +2,7 @@
 #include <Poseidon/Dev/Diag/TerrainBrush.hpp>
 #include <Poseidon/Dev/Debug/DevPanelWidgets.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Terrain/TerrainCrater.hpp>
 #include <algorithm>
 #undef DebugLog
 #include <imgui.h>
@@ -13,6 +14,7 @@ bool DrawMapEditorTab()
     ImGui::SeparatorText("Terrain height painting");
     auto& brush = TerrainBrush();
     Checkbox("Enable terrain brush", &brush.enabled);
+    Checkbox("Show brush radius at cursor", &brush.showRadius);
     if (RadioButton("Raise / build hills", brush.raise)) brush.raise = true;
     PanelSameLine();
     if (RadioButton("Lower / dig craters", !brush.raise)) brush.raise = false;
@@ -21,7 +23,9 @@ bool DrawMapEditorTab()
     if (GLandscape)
     {
         const float grid = GLandscape->GetTerrainGrid();
-        ImGui::Text("Terrain grid: %.1f m | Effective radius: %.1f m", grid, std::max(brush.radius, grid*1.5f));
+        ImGui::Text("Terrain grid: %.1f m | Effective radius: %.1f m", grid, TerrainBrushRadius(brush.radius, grid));
+        if (GLandscape->GetTerrainRange() > 2049)
+            ImGui::TextWrapped("Painting unavailable: this world exceeds the current 2049-sample editing limit.");
     }
     const bool start = Button("Start painting (free-fly)");
     ImGui::SeparatorText("How to paint");
@@ -36,6 +40,9 @@ bool DrawMapEditorTab()
     ImGui::TextWrapped("Single-player only. The first stroke may briefly pause while collision is prepared. "
         "Coarse terrain uses a minimum radius of 1.5 grid cells. Water cannot be painted. "
         "Reload the mission to restore its original terrain. Buildings and AI paths are not updated.");
+    ImGui::TextWrapped("Sideways caves and tunnels are not supported by height painting. "
+        "They need 3D terrain geometry plus matching movement, projectile and physics collision; "
+        "lowering this brush creates an open crater, not a cave with a roof.");
     ImGui::TextWrapped("New maps from scratch, save/export and undo history are not implemented yet. "
         "This tab is the home for those future editor tools, not a finished map authoring pipeline.");
     }

@@ -39,7 +39,7 @@ bool PaintTerrain(float cx, float cz, float radius, float delta)
     if (range < 2 || range > 2049 || !(spacing > 0) || !std::isfinite(spacing) ||
         cx < 0 || cz < 0 || cx > (range-1)*spacing || cz > (range-1)*spacing)
         return false;
-    radius = std::max(std::min(radius,250.0f),spacing*1.5f);
+    radius = TerrainBrushRadius(radius, spacing);
     const int left = std::max(0,static_cast<int>(std::floor((cx-radius)/spacing)));
     const int top = std::max(0,static_cast<int>(std::floor((cz-radius)/spacing)));
     const int right = std::min(range-1,static_cast<int>(std::ceil((cx+radius)/spacing)));
@@ -81,10 +81,12 @@ bool PaintTerrain(float cx, float cz, float radius, float delta)
     return true;
 }
 
-bool PaintTerrainAtPixel(float x, float y, float seconds)
+bool TerrainBrushTargetAtPixel(float x, float y, TerrainBrushTarget& target)
 {
+    target = {};
     if (!settings.enabled || !GScene || !GScene->GetCamera() || !GLandscape ||
-        !std::isfinite(seconds) || seconds <= 0) return false;
+        !std::isfinite(x) || !std::isfinite(y) || !std::isfinite(settings.radius) || settings.radius <= 0)
+        return false;
     const Camera& camera = *GScene->GetCamera();
     const auto& projection = camera.Projection();
     if (std::abs(projection(0,0)) < 1e-6f || std::abs(projection(1,1)) < 1e-6f) return false;
@@ -97,7 +99,30 @@ bool PaintTerrainAtPixel(float x, float y, float seconds)
     if (GLandscape->IntersectWithGroundOrSea(&hit,sea,camera.Position(),direction,0,
                                             std::min(camera.Far(),50000.0f)) < 0 || sea)
         return false;
+    const int range = GLandscape->GetTerrainRange();
+    const float spacing = GLandscape->GetTerrainGrid();
+    if (!(spacing > 0) || !std::isfinite(spacing)) return false;
+    target.x = hit.X(); target.y = hit.Y(); target.z = hit.Z();
+    target.radius = TerrainBrushRadius(settings.radius, spacing);
+    target.editable = GWorld && GWorld->GetMode() != GModeNetware && range >= 2 && range <= 2049 &&
+        hit.X() >= 0 && hit.Z() >= 0 && hit.X() <= (range-1)*spacing && hit.Z() <= (range-1)*spacing;
+    if (target.editable)
+    {
+        const int left = std::max(0,static_cast<int>(std::floor((target.x-target.radius)/spacing)));
+        const int top = std::max(0,static_cast<int>(std::floor((target.z-target.radius)/spacing)));
+        const int right = std::min(range-1,static_cast<int>(std::ceil((target.x+target.radius)/spacing)));
+        const int bottom = std::min(range-1,static_cast<int>(std::ceil((target.z+target.radius)/spacing)));
+        target.editable = right-left+1 <= 257 && bottom-top+1 <= 257;
+    }
+    return true;
+}
+
+bool PaintTerrainAtPixel(float x, float y, float seconds)
+{
+    if (!std::isfinite(seconds) || seconds <= 0) return false;
+    TerrainBrushTarget target;
+    if (!TerrainBrushTargetAtPixel(x,y,target) || !target.editable) return false;
     const float delta = std::clamp(seconds,0.0f,0.25f)*std::clamp(settings.metresPerSecond,0.1f,32.0f);
-    return PaintTerrain(hit.X(),hit.Z(),settings.radius,settings.raise ? delta : -delta);
+    return PaintTerrain(target.x,target.z,target.radius,settings.raise ? delta : -delta);
 }
 }

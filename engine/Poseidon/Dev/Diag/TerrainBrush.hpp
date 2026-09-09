@@ -6,10 +6,17 @@ struct TerrainBrushSettings
 {
     bool enabled = false;
     bool raise = false;
+    bool showRadius = true;
     float radius = 64.0f;
     float metresPerSecond = 4.0f;
 };
 TerrainBrushSettings& TerrainBrush();
+struct TerrainBrushTarget
+{
+    float x = 0, y = 0, z = 0, radius = 0;
+    bool editable = false;
+};
+bool TerrainBrushTargetAtPixel(float x, float y, TerrainBrushTarget& target);
 bool PaintTerrain(float x, float z, float radius, float delta);
 bool PaintTerrainAtPixel(float x, float y, float seconds);
 void ResetTerrainBrush();

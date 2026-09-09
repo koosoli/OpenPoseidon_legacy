@@ -1039,10 +1039,48 @@ void DrawZeusInteractionOverlay()
     {
         char text[192];
         const auto& brush = Dev::TerrainBrush();
-        std::snprintf(text, sizeof(text), "MAP EDITOR | %s | radius %.0f m | %.1f m/s | Hold LMB to paint | Ctrl+` settings",
+        std::snprintf(text, sizeof(text), "MAP EDITOR | %s | requested radius %.0f m | %.1f m/s | Hold LMB to paint | Ctrl+` settings",
                       brush.raise ? "RAISE" : "LOWER", brush.radius, brush.metresPerSecond);
         draw->AddRectFilled(ImVec2(12, 64), ImVec2(12 + ImGui::CalcTextSize(text).x + 16, 92), IM_COL32(0,0,0,190));
         draw->AddText(ImVec2(20, 70), IM_COL32(255,230,150,255), text);
+        if (brush.showRadius)
+        {
+            const ZeusPoint cursor = ZeusCursorPixel();
+            Dev::TerrainBrushTarget target;
+            if (Dev::TerrainBrushTargetAtPixel(cursor.x, cursor.y, target))
+            {
+                const ImU32 colour = !target.editable ? IM_COL32(255,85,85,255) :
+                    brush.raise ? IM_COL32(100,255,150,255) : IM_COL32(255,195,65,255);
+                const float edge = (GLandscape->GetTerrainRange()-1)*GLandscape->GetTerrainGrid();
+                ZeusPoint previous;
+                bool previousValid = false;
+                // One pick ray and a bounded terrain-following ring, not one ray per segment.
+                for (int i = 0; i <= 96; ++i)
+                {
+                    const float angle = float(i) * (6.28318530718f / 96.0f);
+                    const float x = target.x + std::cos(angle)*target.radius;
+                    const float z = target.z + std::sin(angle)*target.radius;
+                    ZeusPoint pixel;
+                    const bool valid = x >= 0 && z >= 0 && x <= edge && z <= edge &&
+                        ZeusProjectToPixel(Vector3(x, GLandscape->SurfaceY(x,z)+0.15f, z), pixel);
+                    if (valid && previousValid)
+                    {
+                        const ImVec2 a = ZeusPixelToImGui(previous.x,previous.y);
+                        const ImVec2 b = ZeusPixelToImGui(pixel.x,pixel.y);
+                        draw->AddLine(a,b,IM_COL32(0,0,0,210),4.0f);
+                        draw->AddLine(a,b,colour,2.0f);
+                    }
+                    previous = pixel;
+                    previousValid = valid;
+                }
+                const ImVec2 centre = ZeusPixelToImGui(cursor.x,cursor.y);
+                draw->AddCircle(centre,4.0f,colour,12,2.0f);
+                std::snprintf(text,sizeof(text),"Radius %.1f m%s",target.radius,
+                              target.editable ? "" : " | not editable here");
+                draw->AddText(ImVec2(centre.x+13,centre.y+15),IM_COL32(0,0,0,255),text);
+                draw->AddText(ImVec2(centre.x+12,centre.y+14),colour,text);
+            }
+        }
     }
     if (s_zeusLassoDrag)
     {

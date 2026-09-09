@@ -1,8 +1,13 @@
 #pragma once
 #include <cmath>
+#include <algorithm>
 
 namespace Poseidon
 {
+inline float TerrainBrushRadius(float requested, float spacing)
+{
+    return std::max(std::min(requested, 250.0f), spacing * 1.5f);
+}
 inline bool RocketCraterGroundContact(float impactY, float groundY, float seaY)
 {
     return std::isfinite(impactY) && std::isfinite(groundY) && std::isfinite(seaY) &&

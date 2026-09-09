@@ -2,6 +2,7 @@
 #include <catch2/catch_approx.hpp>
 #include <Poseidon/World/Terrain/LandscapeLod.hpp>
 #include <Poseidon/World/Terrain/TerrainSubdivision.hpp>
+#include <Poseidon/World/Terrain/TerrainCrater.hpp>
 #include <unordered_set>
 #include <vector>
 #include <stdlib.h>
@@ -9,6 +10,22 @@
 #include <utility>
 
 using namespace Poseidon;
+
+TEST_CASE("Terrain brush preview radius matches the painted footprint", "[terrain-brush-radius]")
+{
+    CHECK(TerrainBrushRadius(8, 50) == 75);
+    CHECK(TerrainBrushRadius(64, 6.25f) == 64);
+    CHECK(TerrainBrushRadius(1000, 6.25f) == 250);
+    CHECK(TerrainBrushRadius(250, 200) == 300);
+    for (float spacing : {6.25f, 25.0f, 50.0f, 200.0f})
+    {
+        const float radius = TerrainBrushRadius(8, spacing);
+        CHECK(TerrainCraterDepth(radius, 0, radius, 4) == 0);
+        CHECK(TerrainCraterDepth(radius+1, 0, radius, 4) == 0);
+        CHECK(TerrainCraterDepth(radius*0.5f, 0, radius, 4) > 0);
+        CHECK(TerrainBrushRadius(radius, spacing) == radius);
+    }
+}
 
 TEST_CASE("Large world refinement stays within the heightfield allocation budget", "[terrain-size]")
 {
