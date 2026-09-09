@@ -22,6 +22,7 @@ struct TemporalParams {
     // xyz = cam_pos_cur - cam_pos_prev (metres, world); w = 1 history valid, 0 = reset
     // (first frame, size change, mode toggle) -> velocity is written as zero.
     cam_delta: vec4<f32>,
+    // Velocity pass: xy = current projection jitter in NDC. Debug pass:
     // x = debug magnitude scale, y unused, zw = the DEBUG target's size in pixels
     // (the velocity texture is render-res, the debug view draws at output-res).
     misc: vec4<f32>,
@@ -55,7 +56,9 @@ fn fs_velocity(in: VsOut) -> @location(0) vec2<f32> {
     // reprojects by camera rotation with negligible (sub-1e-4 px) translation parallax.
     let d = max(textureLoad(scene_depth, frag, 0), 1e-7);
     let uv = in.pos.xy / dims;
-    let ndc = vec2<f32>(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+    // Depth belongs to the jittered raster ray. Both matrices and the output
+    // motion are unjittered, so remove the current raster offset exactly once.
+    let ndc = vec2<f32>(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0) - tp.misc.xy;
     let rel_h = tp.inv_view_proj * vec4<f32>(ndc.x, ndc.y, 1.0 - d, 1.0);
     let rel = rel_h.xyz / rel_h.w;
     let prev_clip = tp.prev_view_proj * vec4<f32>(rel + tp.cam_delta.xyz, 1.0);

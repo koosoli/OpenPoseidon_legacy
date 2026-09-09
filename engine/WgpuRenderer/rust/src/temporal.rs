@@ -693,7 +693,13 @@ impl Temporal {
                 cur.cam_pos[2] - prev.cam_pos[2],
                 if self.reset { 0.0 } else { 1.0 },
             ],
-            misc: [0.0; 4],
+            // Depth was rasterized with apply_jitter; recover its unjittered ray.
+            misc: [
+                self.jitter_px[0] * 2.0 / self.render_size.0.max(1) as f32,
+                self.jitter_px[1] * 2.0 / self.render_size.1.max(1) as f32,
+                0.0,
+                0.0,
+            ],
         }
     }
 
@@ -1861,5 +1867,47 @@ mod tests {
         let back = prev * glam::Vec4::new(rel.x, rel.y, rel.z, 1.0);
         let back_ndc = glam::Vec2::new(back.x / back.w, back.y / back.w);
         assert!((back_ndc.x - 0.3).abs() < 1e-4 && (back_ndc.y + 0.4).abs() < 1e-4);
+    }
+
+    #[test]
+    fn jittered_depth_recovers_static_world_motion_during_camera_travel() {
+        let projection = glam::Mat4::perspective_rh(1.0, 1.6, 0.5, 50000.0);
+        let previous = crate::ffi::WgrCamera {
+            proj: projection.to_cols_array(),
+            view: glam::Mat4::IDENTITY.to_cols_array(),
+            ..crate::ffi::WgrCamera::zeroed()
+        };
+        let mut current = previous;
+        current.cam_pos = [10.0, 2.0, 4.0, 0.0];
+        current.view = glam::Mat4::from_rotation_y(0.25).to_cols_array();
+        let world = glam::Vec3::new(3.0, 1.0, -40.0);
+        for size in [(100, 100), (1280, 720)] {
+            let mut t = Temporal::from_env();
+            t.enabled = true;
+            t.begin_frame(&previous, size);
+            t.end_frame();
+            t.begin_frame(&current, size);
+            t.jitter_px = [0.49, -0.37];
+            let mut raster_proj = current.proj;
+            t.apply_jitter(&mut raster_proj);
+            let rel = world - glam::Vec3::new(10.0, 2.0, 4.0);
+            let view = glam::Mat4::from_cols_array(&current.view);
+            let raster_clip = glam::Mat4::from_cols_array(&raster_proj) * view * rel.extend(1.0);
+            let raster_ndc = raster_clip.truncate() / raster_clip.w;
+            let p = t.params();
+            let ndc = glam::Vec2::new(raster_ndc.x - p.misc[0], raster_ndc.y - p.misc[1]);
+            let reconstructed = glam::Mat4::from_cols_array(&p.inv_view_proj)
+                * glam::Vec4::new(ndc.x, ndc.y, raster_ndc.z, 1.0);
+            let recovered = reconstructed.truncate() / reconstructed.w
+                + glam::Vec3::new(p.cam_delta[0], p.cam_delta[1], p.cam_delta[2]);
+            let back = glam::Mat4::from_cols_array(&p.prev_view_proj) * recovered.extend(1.0);
+            let actual = ndc - glam::Vec2::new(back.x / back.w, back.y / back.w);
+            let cur_clip = projection * view * rel.extend(1.0);
+            let prev_clip = projection * world.extend(1.0);
+            let expected = glam::Vec2::new(cur_clip.x / cur_clip.w, cur_clip.y / cur_clip.w)
+                - glam::Vec2::new(prev_clip.x / prev_clip.w, prev_clip.y / prev_clip.w);
+            assert!((actual - expected).length() < 0.0001, "{actual:?} != {expected:?}");
+        }
+        assert!(include_str!("temporal.wgsl").contains("1.0 - uv.y * 2.0) - tp.misc.xy"));
     }
 }
