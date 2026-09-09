@@ -15,6 +15,7 @@
 #include <imgui.h>
 
 #include <Poseidon/Dev/Debug/DevPanelWidgets.hpp>
+#include <Poseidon/Dev/Diag/TerrainBrush.hpp>
 
 #include <Poseidon/Dev/Diag/BallisticsRecorder.hpp>
 #include <Poseidon/Dev/Diag/FixedStepStats.hpp>
@@ -197,6 +198,7 @@ void ResetPanelSettings()
     // is simply left alone, which is a visible gap rather than a silent one.
     // Physics probes and their world
     ResetProbeSettings();
+    ResetTerrainBrush(); // Settings only: never erase painted terrain from a global UI reset.
     // Picture Mode
     ResetPictureModeSettings();
     ResetLightingSettings();

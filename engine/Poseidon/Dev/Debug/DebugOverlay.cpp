@@ -52,6 +52,7 @@
 #include <Poseidon/Dev/Diag/FixedStepTab.hpp>
 #include <Poseidon/Dev/Diag/PhysicsTab.hpp>
 #include <Poseidon/Dev/Diag/TerrainBrush.hpp>
+#include <Poseidon/Dev/Diag/MapEditorTab.hpp>
 #include <Poseidon/Dev/Diag/PictureModeTab.hpp>
 #include <Poseidon/Dev/Diag/WeatherTab.hpp>
 #include <Poseidon/Dev/Diag/SmokeTab.hpp>
@@ -1034,6 +1035,15 @@ void DrawZeusInteractionOverlay()
     if (!camera)
         return;
     ImDrawList* draw = ImGui::GetForegroundDrawList();
+    if (Dev::TerrainBrush().enabled)
+    {
+        char text[192];
+        const auto& brush = Dev::TerrainBrush();
+        std::snprintf(text, sizeof(text), "MAP EDITOR | %s | radius %.0f m | %.1f m/s | Hold LMB to paint | Ctrl+` settings",
+                      brush.raise ? "RAISE" : "LOWER", brush.radius, brush.metresPerSecond);
+        draw->AddRectFilled(ImVec2(12, 64), ImVec2(12 + ImGui::CalcTextSize(text).x + 16, 92), IM_COL32(0,0,0,190));
+        draw->AddText(ImVec2(20, 70), IM_COL32(255,230,150,255), text);
+    }
     if (s_zeusLassoDrag)
     {
         // Track the engine cursor per frame rather than per SDL motion event:
@@ -7284,6 +7294,24 @@ void DrawMainWindow()
         if (Dev::PanelTabItem("Physics"))
         {
             Poseidon::Dev::DrawPhysicsTab();
+            ImGui::EndTabItem();
+        }
+        if (Dev::PanelTabItem("Map Editor"))
+        {
+            const bool available = GWorld && GLandscape && GWorld->GetMode() != GModeNetware;
+            ImGui::BeginDisabled(!available);
+            Dev::DrawMapEditorTab();
+            if (Dev::Button("Start painting (free-fly)"))
+            {
+                EnableZeusCamera();
+                if (s_zeusCamera)
+                {
+                    Dev::TerrainBrush().enabled = true;
+                    SetVisible(false);
+                }
+            }
+            ImGui::EndDisabled();
+            if (!available) ImGui::TextWrapped("Load a single-player mission to edit terrain.");
             ImGui::EndTabItem();
         }
         // Not a diagnostic: this tab CHANGES what the AI does. See AITab.cpp.
