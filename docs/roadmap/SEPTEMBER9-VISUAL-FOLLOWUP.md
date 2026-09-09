@@ -614,3 +614,28 @@ wall-clock seconds and flakes remained visible (.tmp-bulb/snow-pause-paused.png)
 14 Rain/Snow test cases / 9932 assertions pass on the final build. Installed
 e0683049, both safety branches pushed; foreign Cargo.lock hash unchanged.
 Ground snow appearance/geometry was not changed by this precipitation fix.
+
+### Map Editor tab and terrain-paint instructions
+
+94d96586 moves the brush from Physics into a dedicated Map Editor tab with
+Raise/Lower radio buttons, radius/speed, effective terrain-grid radius, explicit
+hold/release instructions and a Start painting button that enables Zeus freefly,
+arms the brush and hides the panel. A viewport banner identifies the active
+mode. Brush-only reset is explicit and also part of master Reset settings;
+neither reset erases the user's terrain. Multiplayer/no-world controls disabled.
+No new-map generation, terrain export, undo stack or building/AI relocation
+has been added or advertised as available.
+
+f486ff37 moves Start painting above the fold after inspecting the first capture.
+Installed final panel is fully visible at 1280x720 in the default-sized window:
+.tmp-bulb/map-editor-final-panel.png. Two installed brush runs exited 0. Final
+height checks: 29.835 -> 23.8911 -> 16.8503 while held, unchanged 16.8503 after
+release, then raised to 19.4914. .tmp-bulb/brush.ps1 supplies the mouse-hold test;
+it switches modes via the existing diagnostic command, not a UI-button click.
+
+Build passes. Targeted panel/terrain tests: 2 cases passed, 1 existing broad
+panel-source guard failed (6 assertions: old raw ImGui controls/hover calls in
+DebugOverlay outside this change). Confirmed e.g. Probe basis raw Combo already
+exists in f37fb9bb. New MapEditorTab.cpp is included in that guard and uses the
+filter wrappers; no failing controls originate there. Do not report the entire
+suite green. Installed f486ff37, pushed to both safety branches; Cargo.lock untouched.
