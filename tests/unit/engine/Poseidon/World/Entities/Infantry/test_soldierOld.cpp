@@ -5,6 +5,7 @@
 #include <Poseidon/IO/Streams/QStream.hpp>
 #include <Poseidon/World/Entities/Infantry/SoldierOld.hpp>
 #include <Poseidon/World/Entities/Infantry/BodyWaterResponse.hpp>
+#include <Poseidon/World/Entities/Infantry/InfantryObservation.hpp>
 #include <Poseidon/World/Entities/Weapons/Weapons.hpp>
 
 #include <cstring>
@@ -44,6 +45,17 @@ Ref<WeaponType> MakeWeaponRef(const ParamEntry& entry, int weaponType)
 TEST_CASE("soldierOld.hpp compiles", "[Infantry][soldierOld]")
 {
     SUCCEED("header included successfully");
+}
+
+TEST_CASE("AI binocular observation yields to forward and backward movement intent", "[Infantry][binocular]")
+{
+    CHECK(CanObserveWithBinoculars(true, 30.0f, 0.0f));
+    CHECK(CanObserveWithBinoculars(true, 1.0f, 0.05f));
+    CHECK_FALSE(CanObserveWithBinoculars(true, 30.0f, 0.2f));
+    CHECK_FALSE(CanObserveWithBinoculars(true, 30.0f, -0.2f));
+    CHECK_FALSE(CanObserveWithBinoculars(true, 30.0f, 6.0f));
+    CHECK_FALSE(CanObserveWithBinoculars(true, 0.0f, 0.0f));
+    CHECK_FALSE(CanObserveWithBinoculars(false, 30.0f, 0.0f));
 }
 
 TEST_CASE("Dead infantry water support preserves immersion and limits ascent", "[Infantry][body-water]")

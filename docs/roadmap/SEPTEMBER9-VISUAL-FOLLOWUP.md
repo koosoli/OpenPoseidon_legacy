@@ -265,3 +265,20 @@ and torch-width comparisons pending; no full acceptance claim yet.
   0.75-0.95 does not modify mission rain/thunder state; no new thunder forcing.
   POSEIDON_SNOW_TEST_FLAKES seeds repeatable dense checks. Combined snow/weather/
   light/procedural tests: 45 cases / 38727 assertions. Runtime/performance pending.
+
+### Installed 40fa7d5e follow-up
+
+- Two installed snow captures exit 0: sep9-storm-1x and sep9-storm-8x in
+  .tmp-bulb. Eightfold density is visibly stronger, about 7200 vs 900 live
+  flakes. Late samples: simulation+draw preparation roughly 0.08-0.10ms vs
+  0.61-0.75ms CPU. Short GPU frame samples are noisy (about 8-9ms both);
+  do not claim a GPU speedup. Default remains 1x. Camera looks at ground,
+  so these captures do not visually validate cloud cover; fixed exposure 0.1
+  also makes this fixture too dark for final artistic acceptance.
+- Receiver-plane filtering removes broad room sunlight bands. A jagged fringe
+  remains at the roof/wall junction. Installed InspectRoom run exits 0:
+  zero normal offset does not remove it; zero PCF greatly reduces its width.
+  Do not globally disable PCF or declare the room lighting complete. Current
+  A/B evidence preserved as sep9-plane-filter-before/after-* in .tmp-bulb.
+  Matched outdoor performance acceptance still pending.
+- Foreign Cargo.lock SHA256 remains unchanged (9A4E74D7...31A2E).

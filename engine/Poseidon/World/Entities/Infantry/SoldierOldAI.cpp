@@ -1,5 +1,6 @@
 #include <Poseidon/World/SimVehicleCost.hpp>
 #include <Poseidon/World/Entities/Infantry/SoldierOldCommon.hpp>
+#include <Poseidon/World/Entities/Infantry/InfantryObservation.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <cmath>
@@ -2062,9 +2063,13 @@ void Soldier::AIPilot(float deltaT, SimulationImportance prec)
         selAction = ManActWeaponOn;
         // LOG_DEBUG(Physics, "{}: action weapon",(const char *)GetDebugName());
     }
-    else if (BinocularSelected() && _lookTargetTimeLeft > 0)
+    else if (CanObserveWithBinoculars(BinocularSelected(), _lookTargetTimeLeft, speedWanted))
     {
         selAction = ManActBinocOn;
+    }
+    else if (IsBinocularInMove())
+    {
+        selAction = ManActBinocOff;
     }
     else if (IsHandGunSelected() && IsPrimaryWeaponInMove())
     {
