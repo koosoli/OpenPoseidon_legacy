@@ -2325,7 +2325,7 @@ extern "C"
         // Bit N selects worldPos for UV N; clear selects the terrain mesh's
         // local `tex` coordinates. Slots: satellite, mask, then surfaces 0..5.
         uint32_t uv_source_mask;
-        uint32_t _pad0;
+        uint32_t _pad0; // 1 = generated legacy far satellite; 0 = authored/ordinary.
         uint32_t _pad1;
         WgrTerrainUv satellite_uv;
         WgrTerrainUv mask_uv;

@@ -62,5 +62,22 @@ shadow settings are actually missing. Fixes and tests in progress, not yet deplo
   pair sums, cross-axis denominator and reversed blend weights. Corrected using
   the same four texture fetches; numerical reference test added. Not deployed yet.
 
-All other queue entries above remain open. No destructible-terrain or automatic
-satmap implementation is claimed by these checkpoints.
+- fa7a7af2: corrected bicubic filter built, numerical reference passed, installed
+  low-altitude ocean capture exits normally. Grid-like marks remain in that
+  particular view, so this correctness fix is not full acceptance of the owner's
+  near-water screenshot. Capture pair `.tmp-bulb/sep9-water-close-before/after.png`.
+- c625e1ea: reversible experimental Showcase crater at 9700/3600, 24m radius,
+  8m depth on Desert's 6.25m terrain grid (45 changed samples). CPU SurfaceY,
+  GPU heightmap/quadtree and Box3D heightfield all update; water bounds refresh
+  without restarting FFT. GPU material/grass atlases are not reuploaded.
+  Replacement physics terrain is constructed before destroying the old one;
+  dynamic bodies wake after replacement. Synthetic resting-body test confirms
+  settling into the excavated bowl with the original body handle intact.
+  62 cases / 15989 assertions passed. Installed harness exits 0, rejects a
+  duplicate crater and restores it. Log centre 29.835 -> 21.835 -> 29.835m;
+  `terrain-before/crater/restored.png` images show the geometry change.
+  Limitations: explicit LAB actions only, full heightfield rebuild pause,
+  single-player unsaved prototype, no automatic grenade damage, no tunnels,
+  not a general solution for navigation or objects built over excavated ground.
+
+Other queue entries remain open. Automatic satmap is not implemented yet.

@@ -1,5 +1,6 @@
 #include "TerrainWgpu.hpp"
 #include <Poseidon/World/Weather/SnowField.hpp>
+#include <Poseidon/World/Terrain/TerrainSatmap.hpp>
 
 #include "CdlodDriver.hpp"
 #include "EngineWgpu.hpp"
@@ -677,6 +678,23 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<
             ++complete;
     }
 
+    Ref<Texture> previousSatmap = _automaticSatmap;
+    if (!paged && authored == 0 && _enfusionGround.empty())
+    {
+        _automaticSatmap = BuildAutomaticSatmap(land);
+        if (_automaticSatmap)
+        {
+            const uint32_t slot = bindLayer(_automaticSatmap, false);
+            if (slot != 0)
+                for (auto& material : materials)
+                {
+                    material.satellite = slot;
+                    material._pad0 = 1; // Generated legacy far albedo, not an authored LCA.
+                }
+        }
+    }
+    else _automaticSatmap = nullptr;
+
     // Replace the terrain bind group before destroying pages referenced by the
     // previous group. Shared texture views then release cleanly on the Rust side.
     EngineWgpu::AcquireProducerWindow("terrain ground layers");
@@ -776,6 +794,62 @@ static std::vector<uint8_t> ReadVfsFile(const char* path)
     bytes.resize(static_cast<size_t>(file.rest()));
     file.read(bytes.data(), static_cast<int>(bytes.size()));
     return bytes;
+}
+
+Ref<Texture> TerrainWgpu::BuildAutomaticSatmap(const Landscape& land)
+{
+    const char* enabled = std::getenv("WGR_OFP_SATMAP");
+    const int count = land.GetNTextures(), range = land.GetLandRange();
+    if ((enabled && std::strcmp(enabled,"0") == 0) || count <= 0 || count > 256 || range < 2 || range > 512)
+        return nullptr;
+    const auto started = std::chrono::steady_clock::now();
+    constexpr int tileSize = 16, size = 1024;
+    using Tile = std::array<uint8_t,tileSize*tileSize*4>;
+    std::vector<Tile> tiles(static_cast<size_t>(count));
+    int decoded = 0;
+    for (int i=0; i<count; ++i)
+    {
+        Texture* texture = land.GetTexture(i);
+        if (!texture) return nullptr;
+        const auto bytes = ReadVfsFile(texture->Name());
+        if (bytes.empty()) return nullptr;
+        const auto image = DecodePAABuffer(bytes.data(),bytes.size(),!ContainsNoCase(texture->Name(),".pac"));
+        if (!image.valid()) return nullptr; // Never bake white missing tiles into a whole island.
+        if (!stbir_resize_uint8_linear(image.rgba.data(),image.width,image.height,image.width*4,
+                                      tiles[i].data(),tileSize,tileSize,tileSize*4,STBIR_RGBA)) return nullptr;
+        ++decoded;
+    }
+    const auto sample = [&](int cx,int cz,float x,float z)
+    {
+        const int id = std::clamp(land.GetTexture(std::clamp(cz,0,range-1),std::clamp(cx,0,range-1)),0,count-1);
+        const bool clampTile = land.ClampFlags(id) != NoClamp;
+        float u = clampTile ? std::clamp(x-cx,0.0f,1.0f) : x-std::floor(x);
+        float v = clampTile ? std::clamp(z-cz,0.0f,1.0f) : z-std::floor(z);
+        const float px = u*tileSize-0.5f, pz = v*tileSize-0.5f;
+        const int ix = static_cast<int>(std::floor(px)), iz = static_cast<int>(std::floor(pz));
+        const float fx = px-ix, fz = pz-iz;
+        std::array<float,3> color{};
+        for (int j=0; j<2; ++j) for (int i=0; i<2; ++i)
+        {
+            const int tx = clampTile ? std::clamp(ix+i,0,tileSize-1) : (ix+i+tileSize)%tileSize;
+            const int tz = clampTile ? std::clamp(iz+j,0,tileSize-1) : (iz+j+tileSize)%tileSize;
+            const float weight = (i ? fx : 1-fx)*(j ? fz : 1-fz);
+            for (int c=0; c<3; ++c) color[c] += tiles[id][(tz*tileSize+tx)*4+c]*weight;
+        }
+        return color;
+    };
+    std::vector<uint8_t> pixels(size*size*4);
+    for (int z=0; z<size; ++z) for (int x=0; x<size; ++x)
+    {
+        const auto color = SampleTerrainSatmap((x+0.5f)*range/size,(z+0.5f)*range/size,sample);
+        for (int c=0; c<3; ++c) pixels[(z*size+x)*4+c] = static_cast<uint8_t>(std::clamp(color[c]+0.5f,0.0f,255.0f));
+        pixels[(z*size+x)*4+3] = 255;
+    }
+    EngineWgpu::AcquireProducerWindow("automatic satellite albedo");
+    Ref<Texture> result = _engine.TextBank()->CreateDynamic(size,size,pixels.data(),static_cast<uint32_t>(pixels.size()),true);
+    LOG_INFO(Graphics,"OFP automatic satmap: {}x{} from {} tiles, {:.1f} ms, mipmapped ~5.3 MiB",size,size,decoded,
+             std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count());
+    return result;
 }
 
 void TerrainWgpu::BuildSurfaceCatalog(const Landscape& land)

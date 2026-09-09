@@ -2,6 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <Poseidon/World/Terrain/TerrainCdlod.hpp>
+#include <Poseidon/World/Terrain/TerrainSatmap.hpp>
 #include <Poseidon/World/Weather/SnowField.hpp>
 
 #include <cmath>
@@ -9,6 +10,25 @@
 #include <vector>
 
 using namespace Poseidon;
+
+TEST_CASE("automatic satellite blend keeps constant color and world axes", "[terrain][satmap]")
+{
+    const auto constant = [](int,int,float,float) { return std::array<float,3>{12,87,190}; };
+    for (float x : {-0.1f,0.0f,0.4f,0.5f,0.9f,1.0f,25.13f})
+    {
+        const auto c = SampleTerrainSatmap(x,0.7f,constant);
+        CHECK(std::abs(c[0]-12) < 0.001f);
+        CHECK(std::abs(c[1]-87) < 0.001f);
+        CHECK(std::abs(c[2]-190) < 0.001f);
+    }
+    const auto axes = [](int x,int z,float,float) { return std::array<float,3>{float(x),0,float(z)}; };
+    const auto centre = SampleTerrainSatmap(3.5f,7.5f,axes);
+    CHECK(centre[0] == 3);
+    CHECK(centre[2] == 7);
+    const auto edge = SampleTerrainSatmap(4.0f,8.0f,axes);
+    CHECK(edge[0] == 3.5f);
+    CHECK(edge[2] == 7.5f);
+}
 
 TEST_CASE("Experimental snow persists until new precipitation fills tracks", "[snow][terrain]")
 {

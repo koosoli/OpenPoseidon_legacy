@@ -522,6 +522,21 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
     // path while the authored composition is evaluated and compared.
     // This also avoids applying an unavailable texgen to legacy descriptors.
     if (material.surface_count == 0u || authored_weight == 0.0) {
+        if (material.pad0 == 1u && material.satellite != 0u) {
+            let far = smoothstep(800.0, 2400.0, length(view_pos));
+            if (far <= 0.0) {
+                return AuthoredCell(sample_cell(material.legacy,cell,tile_uv,ddx,ddy), vec3<f32>(0.0,0.0,1.0));
+            }
+            let inv_span = 1.0 / (tp.land_grid * f32(tp.land_range));
+            let uv = (world_pos.xz - tp.world_origin) * inv_span;
+            let satellite = textureSampleGrad(ground[material.satellite], ground_clamp_samp,
+                uv, world_dwx.xz * inv_span, world_dwy.xz * inv_span).rgb;
+            if (far >= 0.999) {
+                return AuthoredCell(satellite, vec3<f32>(0.0,0.0,1.0));
+            }
+            let near = sample_cell(material.legacy,cell,tile_uv,ddx,ddy);
+            return AuthoredCell(mix(near,satellite,far), vec3<f32>(0.0,0.0,1.0));
+        }
         return AuthoredCell(sample_cell(material.legacy, cell, tile_uv, ddx, ddy),
                             vec3<f32>(0.0, 0.0, 1.0));
     }

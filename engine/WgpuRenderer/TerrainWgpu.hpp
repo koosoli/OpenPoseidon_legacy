@@ -120,6 +120,8 @@ class TerrainWgpu : public ITerrainRenderer
     // pass a near-to-far camera working set and keep the remaining materials on
     // a shared coarse surface fallback.
     void UploadGroundTextures(const Landscape& land, const std::vector<int>* activeMaterials = nullptr);
+    Ref<Texture> BuildAutomaticSatmap(const Landscape& land);
+    Ref<Texture> _automaticSatmap;
     void UpdateGroundTexturePages(const Landscape& land, const Camera& camera, bool force);
     void UploadIndexMap(const Landscape& land);
     void UploadGeography(const Landscape& land);
