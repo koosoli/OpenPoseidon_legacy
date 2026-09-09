@@ -29,8 +29,9 @@ def box_lod(size, texture='', material='', resolution=1.0, geometry=False):
     # Shape normals point inward. MeshBuild negates them for the GPU.
     data += b''.join(struct.pack('<3f', *[-c for c in n]) for n in normals)
     for face, q in enumerate(quads):
-        # P3DM loader swaps 0/1 and 2/3. Match the geometry-mass regression fixture.
-        order = [q[1], q[0], q[3], q[2]]
+        # Collision planes keep their proven convex winding. Visible faces need
+        # the opposite winding after the MLOD swap for the renderer's CW front.
+        order = [q[1], q[0], q[3], q[2]] if geometry else q
         data += struct.pack('<I', 4)
         for p in order:
             px, py, pz = points[p]

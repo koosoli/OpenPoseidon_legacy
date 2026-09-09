@@ -192,3 +192,14 @@ term is sun-only in `shading.wgsl`. Night GLOSS demo is not considered fixed.
   without breaking campaign orders. Not implemented yet.
 - Multi-island OFP world: prefer flat neighbouring islands before a globe;
   investigate world data/coordinate/import constraints before claiming support.
+
+- a672c93e: installed 8x MSAA/DLSS-off A/B now renders the same Everon scene
+  instead of black; no sample-count validation errors, exit 0. Tester hardware
+  retest remains external. Both safety refs updated.
+- Room ablations: zero depth bias leaves the band, zero normal offset reduces
+  side leak, zero PCF shrinks fringe but main strip persists. 30m shadow reach
+  with 40m fade is not a valid quality comparison (fades room shadows away).
+  Visible Showcase P3DM faces appear reversed relative to CW front convention:
+  under the roof the sun-facing top is visible. Reverse visible LOD only;
+  collision/fire/view winding unchanged. Three asset tests pass; installed
+  visual comparison pending. No global shadow tuning changed.
