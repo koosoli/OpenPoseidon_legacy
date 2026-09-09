@@ -4132,6 +4132,8 @@ impl Renderer {
                     [m[8], m[9], m[10], m[11]],
                     [m[12], m[13], m[14], m[15]],
                 ];
+                // Reflections must see the sky, not be clipped by the mirror plane.
+                self.sky.set_ocean_level(None);
                 self.sky.upload(
                     &self.queue,
                     &self.sky_params,
@@ -4659,6 +4661,7 @@ impl Renderer {
             self.soft_particles.invalidate();
         }
         if let Some((ivp, cam_pos, cam_shadow)) = sky_ivp {
+            self.sky.set_ocean_level(self.water.ocean_level());
             self.sky.upload(
                 &self.queue,
                 &self.sky_params,

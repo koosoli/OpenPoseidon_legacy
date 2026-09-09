@@ -696,6 +696,7 @@ struct SkyUniform {
     output: [f32; 4],
     // xyz = absolute world camera position, so cs_froxel can turn a marched camera-
     // relative offset into a world position for the terrain sun-shadow mask lookup.
+    // w = height above the flat ocean (0 disables clipping, including reflected views).
     cam_pos: [f32; 4],
     // CLD-020 cloud sun-transmittance map. xy = world-xz of the map's min corner, SNAPPED to the
     // texel grid (an unsnapped origin makes the shadow pattern crawl whenever the camera moves,
@@ -1143,6 +1144,7 @@ pub struct Sky {
     _star_list_buf: wgpu::Buffer,
     /// Lens-flare gain. 0 disables the effect outright (the shader early-outs).
     lens_flare: f32,
+    ocean_level: Option<f32>,
     /// Second cloud layer (high cirrus) mode, written to the sky UBO's `output.w`:
     /// 0 = off, 1 = flat sheet, 2 = thin-shell volumetric march. Rides the spare lane of an
     /// existing vec4 rather than growing WgrSkyLook, for the reason stated on
@@ -2259,6 +2261,7 @@ impl Sky {
             // Matches Engine::SkySettings' safe default.  The C++ side normally pushes this on
             // the first frame, but keep the renderer's own initial state safe as well.
             lens_flare: 0.0,
+            ocean_level: None,
             // Second cloud layer on, volumetric, matching Engine::SkySettings' defaults. The env
             // override exists so the two modes can be A/B'd from a --benchmark run, which has no
             // dev panel: WGR_CIRRUS=0 off, 1 flat, 2 volumetric.
@@ -2377,6 +2380,12 @@ impl Sky {
     /// the shaders that SAMPLE the map. Two independently computed mappings would drift.
     pub fn cloud_shadow_mapping_current(&self) -> [f32; 4] {
         self.cloud_shadow_map_params
+    }
+
+    pub fn set_ocean_level(&mut self, level: Option<f32>) {
+        static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        let enabled = *ENABLED.get_or_init(|| std::env::var("WGR_CLOUD_OCEAN_CLIP").as_deref() != Ok("0"));
+        self.ocean_level = level.filter(|level| enabled && level.is_finite());
     }
 
     pub fn set_lens_flare(&mut self, intensity: f32) {
@@ -2524,7 +2533,10 @@ impl Sky {
                 self.lens_flare,
                 self.cirrus_mode,
             ],
-            cam_pos,
+            cam_pos: [
+                cam_pos[0], cam_pos[1], cam_pos[2],
+                self.ocean_level.map_or(0.0, |level| (cam_pos[1] - level).max(0.0)),
+            ],
             // Whatever begin_cloud_shadow_frame fixed for this frame -- NOT a fresh
             // derivation from this call's cam_pos. This is the identical number the camera
             // bind group has already published to every shader that samples the map, so

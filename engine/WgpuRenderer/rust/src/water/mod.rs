@@ -970,6 +970,11 @@ impl Water {
         }
     }
 
+    /// Global ocean plane, not the containing inland water body's surface.
+    pub fn ocean_level(&self) -> Option<f32> {
+        self.last_params.map(|p| p.sea_level)
+    }
+
     /// `(sea_level, time, eye submersion depth in metres)`. The depth lane is
     /// positive when the eye is under the local (wave-displaced) surface and zero
     /// when it is dry, so callers can ramp with it instead of switching on a flag.

@@ -558,3 +558,15 @@ build/showcase/smoke/castle-walk-blocked.png, castle-grenade.png, castle-rocket.
 manual view heading caused a diagonal path through the gate. The corrected
 fixture tests the continuous rear wall and the gate separately; not a code ablation.
 Cargo.lock remains unchanged from the owner's foreign edit.
+
+### Ocean cloud clip experiment after castle acceptance
+
+Captured the owner's exact Nogova freefly pose on 3e8ecbde:
+.tmp-bulb/nogova-horizon-before.png. Added a main-view flat-ocean ray bound to
+fs_cloud, using the renderer's actual water sea_level and a spare SkyUniform lane.
+Both cloud layers share the bound; foreground cloud and earlier opaque depth
+remain authoritative. Planar reflection uploads explicitly disable the bound;
+underwater/no-water-camera paths encode zero. No additional pass or texture fetch.
+WGR_CLOUD_OCEAN_CLIP=0 is the A/B control. 39 sky tests passed (1 ignored), including
+WGSL validation and real-device pipelines. Installed A/B still pending; no claim
+yet that this closes the reported horizon appearance or temporal cloud trails.

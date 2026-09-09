@@ -36,7 +36,7 @@ struct Sky {
     // x = linear output (1) vs self-tonemap (0), y = star intensity, z = lens-flare gain,
     // w = second cloud layer (high cirrus): 0 = off, 1 = flat sheet, 2 = volumetric shell march.
     output: vec4<f32>,
-    cam_pos: vec4<f32>,       // xyz = ABSOLUTE world camera position (froxel -> terrain-mask lookup)
+    cam_pos: vec4<f32>,       // xyz = absolute camera; w = height above ocean, 0 disables ocean clipping
     // CLD-020 cloud sun-transmittance map. xy = world-xz of the map's min corner (SNAPPED to the
     // texel grid on the CPU, so the field does not crawl as the camera moves), z = 1/span in
     // metres, w = strength (0 = the pass is skipped entirely and every surface reads fully lit).
@@ -2225,6 +2225,13 @@ fn fs_cloud(in: VsOut) -> @location(0) vec4<f32> {
     if (d > 0.0) {
         let wh = sky.inv_view_proj * vec4<f32>(ndc, 1.0 - d, 1.0);
         scene_dist = length(wh.xyz / wh.w);
+    }
+
+    // Water is depth-read-only. A ray missing the spherical ground can still hit
+    // the flat ocean. Stop both decks there, without removing foreground clouds.
+    // Mirrored and underwater views opt out via cam_pos.w = 0.
+    if (sky.cam_pos.w > 0.0 && dir.y < -0.000001) {
+        scene_dist = min(scene_dist, sky.cam_pos.w / -dir.y);
     }
 
     // Local sky colour for the cloud AMBIENT -- star-free (see sky_radiance_cloud_bg). This is the
