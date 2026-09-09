@@ -418,6 +418,8 @@ bool TerrainWgpu::UploadIfNeeded(const Landscape& land)
     // The FFI consumes/copies this slice synchronously. Borrowing the existing
     // heightfield avoids a 256 MiB temporary (plus STL alignment) on 8192 grids.
     wgr_terrain_set_heightmap(_renderer, land.HeightmapData(), &_params);
+    LOG_INFO(Graphics, "Wgpu heightfield upload: {}x{} grid={}m data={}", range, range,
+             land.GetTerrainGrid(), land.HeightmapData() != nullptr);
     _uploadedHeightRevision = land.HeightRevision();
     if (sameMap)
     {
