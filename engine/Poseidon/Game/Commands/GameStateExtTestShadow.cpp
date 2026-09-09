@@ -33,6 +33,14 @@ GameValue TriTerrainBrushMode(const GameState*, GameValuePar arg)
     return GameValue("OK");
 }
 
+GameValue TriTerrainPaint(const GameState*, GameValuePar arg)
+{
+    const GameArrayType& args = arg;
+    if (args.Size() != 4) return GameValue("REFUSED");
+    for (int i=0; i<4; ++i) if (args[i].GetType() != GameScalar) return GameValue("REFUSED");
+    return GameValue(PaintTerrain(float(args[0]),float(args[1]),float(args[2]),float(args[3])) ? "OK" : "REFUSED");
+}
+
 GameValue TriTerrainHeight(const GameState*, GameValuePar arg)
 {
     const GameArrayType& args = arg;
