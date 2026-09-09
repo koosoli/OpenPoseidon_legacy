@@ -43,20 +43,30 @@ try {
         return $r
     }
     Start-Sleep -Seconds 15
+    if ((Select-String -LiteralPath $log -Pattern 'StartAutoTest could not boot' -Quiet) -or
+        (Send @{cmd='eval';code='typeOf lightTruck'}).result.Trim('"') -ne 'Truck5t') {
+        throw 'Required truck mission did not load'
+    }
     $action=if ($LightsOff) {'LIGHT OFF'} else {'LIGHT ON'}
+    # AI drivers reapply night lights every tick unless in cautious/danger mode.
+    $behaviour=if ($LightsOff) {'COMBAT'} else {'SAFE'}
+    $null=Send @{cmd='exec';code="driver lightTruck setBehaviour `"$behaviour`""}
     $null=Send @{cmd='exec';code="lightTruck action [`"$action`",lightTruck]"}
     Start-Sleep -Seconds 3
     $null=Send @{cmd='screenshot';path=(Join-Path $output "$name-player.png")}
     foreach ($pose in @(@('near',3950,65,-25),@('far',3050,500,-25),@('distant',1000,1500,-26),@('return',3950,65,-25))) {
         $coords="5092 $($pose[1]) $($pose[2]) 0 $($pose[3])"
         $r=Send @{cmd='eval';code="triFreeFlyPose `"$coords`""}
-        if ($r.result -ne 'OK') {throw 'Zeus freefly entry refused'}
+        if ($r.result.Trim('"') -ne 'OK') {throw 'Zeus freefly entry refused'}
         Start-Sleep -Seconds 5
         $null=Send @{cmd='screenshot';path=(Join-Path $output "$name-$($pose[0]).png")}
         if ((Send @{cmd='eval';code='alive player'}).result -ne 'true') {throw 'Player must remain alive'}
     }
     $null=Send @{cmd='exit'}
     if (!$p.WaitForExit(20000) -or $p.ExitCode -ne 0) {throw 'Game exit failed'}
+    $selection=(Select-String -LiteralPath $log -Pattern 'local-light selection' | Select-Object -Last 1).Line
+    $expected=if ($LightsOff) {40} else {42}
+    if ($selection -notmatch "candidates=$expected selected=$expected ") {throw "Light control did not hold: $selection"}
     Write-Host "Inspect light pools and truck bulbs in $output; this capture does not itself prove the reported regression fixed."
 } finally {
     if ($null -ne $client) {$client.Dispose()}

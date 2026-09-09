@@ -98,6 +98,28 @@ has 1093/4096 bound layers and zero dropped layers, so the 1024 page budget is
 NOT evidence for missing classic textures (that budget is modern paged-path only).
 High-altitude capture added to Test-Fusion; blue island report not yet diagnosed.
 
+0b176556 installed Fusion acceptance exits 0; 2 satmap cases / 38 assertions pass.
+2048-square bake from 1092 tiles takes 727.3 ms once, 1094/4096 bound layers and
+zero dropped. Overview and 40km-high captures inspected: all five islands retain
+albedo. Per-island visits pass. Working set about 2.3 GiB with AND without bake;
+do not attribute the difference from older 1.8 GiB runs to the new 21 MiB image.
+Forest distribution still forms original patches; satmap is not new vegetation.
+
+eefa6161 adds triFreeFlyPose through the actual Zeus enter/coordinate path and
+Test-FreeflyLights. First fixture incorrectly used 5tTruck instead of Truck5t,
+fell back to menu and was rejected by image inspection. Fixture now verifies
+vehicle type and startup error latch. String results require trimming evaluator
+quotes. AI SAFE drivers override LIGHT OFF every tick; control uses COMBAT and
+checks 40 selected lights versus 42 with SAFE/headlights. Both valid runs exit 0,
+living player retained, near/far/3km/return captures inspected. Distant pools remain
+similar in both arms; no truck-triggered lighting disappearance proven yet.
+
+Direct A1/A2 mission plan: ARMA12-DIRECT-MISSIONS-20260910.md. Original archives
+inspected in place: A1 Armory and A2 Bootcamp/campaign content exists. External
+archive mounting already implemented; scheduled SQF, archive-backed nested mission
+selection, conversations/FSMs and mission completion are separate compatibility
+gates. No source assets copied and no original mission claimed playable.
+
 Owner authorised implementation after backup `codex/backup-asset-obs-20260909-bc766e19`.
 Worktree asset-obs only; foreign Cargo.lock excluded. Screenshots 070351, 070456,
 072225 and 073829 are reproduction evidence, not completion evidence.

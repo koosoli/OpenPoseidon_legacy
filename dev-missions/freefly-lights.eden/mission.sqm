@@ -11,9 +11,10 @@ class Mission
             side="WEST";
             class Vehicles
             {
-                items=2;
+                items=3;
                 class Item0 { position[]={5092.6,16.33,4040}; azimut=180; id=0; side="WEST"; vehicle="SoldierWB"; player="PLAYER COMMANDER"; leader=1; skill=1; };
-                class Item1 { position[]={5092.6,16.33,4022}; azimut=0; id=1; side="WEST"; vehicle="5tTruck"; skill=1; init="lightTruck=this; this setFuel 0"; };
+                class Item1 { position[]={5092.6,16.33,4022}; azimut=0; id=1; side="WEST"; vehicle="Truck5t"; skill=1; init="lightTruck=this; this setFuel 0"; };
+                class Item2 { position[]={5094.6,16.33,4020}; id=2; side="WEST"; vehicle="SoldierWB"; skill=1; init="this setBehaviour ""SAFE""; this moveInDriver lightTruck; this disableAI ""MOVE"""; };
             };
         };
     };

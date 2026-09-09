@@ -5255,6 +5255,32 @@ impl Renderer {
                 Some(i) => seg_ops.split_at(i),
                 None => (seg_ops, &seg_ops[seg_ops.len()..]),
             };
+            // Diagnose colour writes after atmospheric compositing without changing order.
+            // Sample throughout a run: its first frames can belong to the loading/menu scene.
+            if start == 0 {
+                static TRACE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+                static FRAMES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+                if *TRACE.get_or_init(|| std::env::var("WGR_LATE_OBJECT_TRACE").is_ok_and(|v| v == "1"))
+                    && FRAMES.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 300 == 0
+                {
+                    let mut opaque = 0;
+                    let mut cutout = 0;
+                    let mut alpha = 0;
+                    let mut other = 0;
+                    for op in ops_post_water {
+                        if let Plan3dOp::Draw3D { draw, .. } = op {
+                            if let Some(d) = draws3d.get(*draw as usize) {
+                                if d.blend == ffi::WgrBlend::Opaque && d.depth == ffi::WgrDepthMode::TestWrite {
+                                    if d.alpha_ref > 0.0 { cutout += 1; } else { opaque += 1; }
+                                } else if d.blend == ffi::WgrBlend::Alpha {
+                                    alpha += 1;
+                                } else { other += 1; }
+                            }
+                        }
+                    }
+                    eprintln!("[wgr] late objects: opaque={opaque} cutout={cutout} alpha={alpha} other={other}");
+                }
+            }
             // Draw2D is replayed by the dedicated 2D sub-pass further down (this
             // pass runs with want_2d = false), so a tail of nothing but 2D ops is
             // not worth a render pass of its own.
