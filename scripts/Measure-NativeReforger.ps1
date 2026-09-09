@@ -1,6 +1,6 @@
 param(
  [string]$Label='baseline',
- [int]$Repeats=2,
+ [ValidateRange(1,25)][int]$Repeats=2,
  [ValidateSet('Village','Coast')][string]$Pose='Village',
  [hashtable]$Overrides=@{},
  [string]$ReforgerAddons='C:\Program Files (x86)\Steam\steamapps\common\Arma Reforger\addons'
@@ -24,3 +24,17 @@ $camera=if ($Pose -eq 'Village') {@(5092.61,3995.64,18.3,200.9,-13.5)} else {@(3
 & "$PSScriptRoot/farfield-bench.ps1" -Label "$Pose-$Label" -Mission 'tests/perf/missions/perf_field.eden' `
  -World $ReforgerAddons -Freefly $camera -Out $out -Env $settings -Repeats $Repeats `
  -Width 1920 -Height 1080 -Windowed -WarmupSeconds 90 -TimeoutSeconds 300 -RequireAll
+for ($repeat=1; $repeat -le $Repeats; $repeat++) {
+ $stem=Join-Path (Join-Path $out "$Pose-$Label") ('run-{0:D2}' -f $repeat)
+ $metrics=Get-Content -LiteralPath "$stem.json" -Raw | ConvertFrom-Json
+ $terrain=@($metrics.gpu_timings_ms | Where-Object {$_.name -eq 'Terrain: main colour' -and $_.milliseconds -ge 0})
+ if (!$metrics.objects.valid -or $metrics.objects.registered_instances -le 0 -or $terrain.Count -ne 1) {
+  throw "Incomplete native scene in $stem; not a performance baseline"
+ }
+ if (Select-String -LiteralPath "$stem.log" -Pattern 'Landscape: skipped .*terrain rect' -Quiet) {
+  throw "Rejected terrain pass in $stem; not a performance baseline"
+ }
+ if ($metrics.streaming.preparer.queued -gt 0 -or $metrics.streaming.preparer.ready -gt 0) {
+  throw "Object preparation not settled in $stem; increase warmup before comparing"
+ }
+}
