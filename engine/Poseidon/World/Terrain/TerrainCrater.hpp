@@ -14,7 +14,10 @@ inline float TerrainBrushWheelRadius(float requested, float wheelSteps)
 
 inline float TerrainBrushRadius(float requested, float spacing)
 {
-    return std::max(std::min(requested, 250.0f), spacing * 1.5f);
+    // The furthest point from a grid vertex is a cell centre: sqrt(0.5) cells.
+    // A little support beyond that reaches a vertex everywhere without forcing
+    // a three-cell-wide bowl when the user wants a small brush.
+    return std::max(std::clamp(requested, 0.5f, 250.0f), spacing * 0.75f);
 }
 inline bool RocketCraterGroundContact(float impactY, float groundY, float seaY)
 {

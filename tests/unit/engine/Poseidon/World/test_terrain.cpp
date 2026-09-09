@@ -22,15 +22,15 @@ TEST_CASE("Terrain brush wheel supports fractional steps and bounded fine radii"
     CHECK(TerrainBrushWheelRadius(64, std::numeric_limits<float>::quiet_NaN()) == 64);
     CHECK(TerrainBrushWheelRadius(std::numeric_limits<float>::infinity(), 0) == 64);
     CHECK(TerrainBrushRadius(2, 1) == 2);
-    CHECK(TerrainBrushRadius(0.5f, 6.25f) == 9.375f);
+    CHECK(TerrainBrushRadius(0.5f, 6.25f) == 4.6875f);
 }
 
 TEST_CASE("Terrain brush preview radius matches the painted footprint", "[terrain-brush-radius]")
 {
-    CHECK(TerrainBrushRadius(8, 50) == 75);
+    CHECK(TerrainBrushRadius(8, 50) == 37.5f);
     CHECK(TerrainBrushRadius(64, 6.25f) == 64);
     CHECK(TerrainBrushRadius(1000, 6.25f) == 250);
-    CHECK(TerrainBrushRadius(250, 200) == 300);
+    CHECK(TerrainBrushRadius(250, 200) == 250);
     for (float spacing : {6.25f, 25.0f, 50.0f, 200.0f})
     {
         const float radius = TerrainBrushRadius(8, spacing);
@@ -38,6 +38,21 @@ TEST_CASE("Terrain brush preview radius matches the painted footprint", "[terrai
         CHECK(TerrainCraterDepth(radius+1, 0, radius, 4) == 0);
         CHECK(TerrainCraterDepth(radius*0.5f, 0, radius, 4) > 0);
         CHECK(TerrainBrushRadius(radius, spacing) == radius);
+    }
+}
+
+TEST_CASE("Fine terrain brush reaches a vertex even at the cell centre", "[terrain-brush-radius]")
+{
+    for (float spacing : {1.0f, 6.25f, 25.0f, 50.0f, 200.0f})
+    {
+        const float radius = TerrainBrushRadius(0.5f, spacing);
+        for (int z = 0; z <= 10; ++z)
+            for (int x = 0; x <= 10; ++x)
+            {
+                const float dx = std::min(x, 10-x)*0.1f*spacing;
+                const float dz = std::min(z, 10-z)*0.1f*spacing;
+                CHECK(TerrainCraterDepth(dx, dz, radius, 1.0f) > 0.0f);
+            }
     }
 }
 

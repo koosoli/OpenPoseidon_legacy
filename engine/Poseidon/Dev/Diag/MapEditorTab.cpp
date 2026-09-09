@@ -56,7 +56,7 @@ MapEditorAction DrawMapEditorTab()
     if (ImGui::CollapsingHeader("Limitations / future map creation"))
     {
     ImGui::TextWrapped("Single-player only. The first stroke may briefly pause while collision is prepared. "
-        "Coarse terrain uses a minimum radius of 1.5 grid cells. Water cannot be painted. "
+        "Minimum radius is 0.75 grid cells; small brushes move existing vertices, not sub-grid geometry. Water cannot be painted. "
         "Restore terrain removes all edits since the first stroke; reload also restores the mission. "
         "Buildings and AI paths are not updated.");
     ImGui::TextWrapped("Sideways caves and tunnels are not supported by height painting. "
@@ -72,7 +72,7 @@ MapEditorAction DrawMapEditorTab()
     SliderFloat("Rocket crater radius", &craters.radius, 8.0f, 100.0f, "%.1f m");
     SliderFloat("Rocket crater depth", &craters.depth, 0.1f, 8.0f, "%.1f m");
     ImGui::TextWrapped("Experimental, single-player, mission-local. Land impacts only; "
-        "minimum radius is 1.5 terrain grid cells. Buildings and AI paths are not updated. "
+        "minimum radius is 0.75 terrain grid cells. Buildings and AI paths are not updated. "
         "The first impact may pause briefly to prepare terrain collision. Turning off does not undo craters.");
     if (Button("Reset rocket crater settings")) ResetRocketCraters();
     return action;
