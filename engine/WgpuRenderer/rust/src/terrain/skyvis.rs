@@ -124,18 +124,61 @@ pub fn compute(
     terrain_grid: f32,
     opts: SkyvisOptions,
 ) -> (u32, u32, Vec<f32>) {
+    let (w, h, _, blurred) = compute_cached(heights, w, h, terrain_grid, opts, None);
+    (w, h, blurred)
+}
+
+/// Reuse raw horizon values outside the changed samples' finite influence radius.
+/// The caller must only supply previous data from identical dimensions/options.
+pub fn compute_cached(
+    heights: &[f32],
+    w: u32,
+    h: u32,
+    terrain_grid: f32,
+    opts: SkyvisOptions,
+    previous: Option<(&[f32], &[f32])>,
+) -> (u32, u32, Vec<f32>, Vec<f32>) {
     let (out_w, out_h) = skyvis_dims(w, h, opts.downsample);
     let ds = opts.downsample.max(1) as f32;
     let k = opts.k_azimuths.max(1);
     let grid = terrain_grid.max(1e-3);
     let sector = std::f32::consts::TAU / (k as f32);
 
-    let mut out = vec![0.0f32; (out_w as usize) * (out_h as usize)];
+    let count = (out_w as usize) * (out_h as usize);
+    let previous = previous.filter(|(old, raw)| old.len() == heights.len() && raw.len() == count);
+    let mut out = previous.map_or_else(|| vec![0.0f32; count], |(_, raw)| raw.to_vec());
+    let mut changed = (w, h, 0u32, 0u32);
+    if let Some((old, _)) = previous {
+        for (i, (&a, &b)) in old.iter().zip(heights).enumerate() {
+            if a != b {
+                let x = i as u32 % w;
+                let z = i as u32 / w;
+                changed.0 = changed.0.min(x);
+                changed.1 = changed.1.min(z);
+                changed.2 = changed.2.max(x);
+                changed.3 = changed.3.max(z);
+            }
+        }
+    }
+    // Include the bilinear sampling footprint as well as the ray's full radius.
+    let reach = opts.radius_m.max(0.0) / grid + 1.0;
     for oy in 0..out_h {
         for ox in 0..out_w {
             // Heightfield-texel coordinate at the centre of this output block.
             let hx = (ox as f32 + 0.5) * ds;
             let hz = (oy as f32 + 0.5) * ds;
+            if previous.is_some() {
+                let cx = hx.clamp(0.0, w.saturating_sub(1) as f32);
+                let cz = hz.clamp(0.0, h.saturating_sub(1) as f32);
+                if changed.0 == w
+                    || cx < changed.0 as f32 - reach
+                    || cx > changed.2 as f32 + reach
+                    || cz < changed.1 as f32 - reach
+                    || cz > changed.3 as f32 + reach
+                {
+                    continue;
+                }
+            }
             let h0 = sample_bilinear(heights, w, h, hx, hz);
 
             // Per-texel rotation of the whole even fan by up to one sector: decorrelates the
@@ -178,12 +221,56 @@ pub fn compute(
     // Smooth the coarse map so the shader's bilinear tap doesn't Mach-band into facets on
     // high-contrast cliffs, and to erase the per-texel jitter noise. Runs once per bake.
     let blurred = blur_separable(&out, out_w as usize, out_h as usize, opts.blur_radius);
-    (out_w, out_h, blurred)
+    (out_w, out_h, out, blurred)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cached_edits_match_full_scan_including_clamped_edges_and_blur() {
+        let (w, h) = (65, 49);
+        for ds in [1, 2, 4, 8] {
+            let opts = SkyvisOptions {
+                downsample: ds,
+                radius_m: 35.0,
+                ..Default::default()
+            };
+            let mut heights: Vec<f32> = (0..w * h).map(|i| ((i * 37) % 61) as f32).collect();
+            let (_, _, mut raw, _) = compute_cached(&heights, w, h, 10.0, opts, None);
+            for (x, z) in [(32, 24), (0, 0), (64, 48), (0, 30), (64, 2), (17, 48)] {
+                let old = heights.clone();
+                heights[(z * w + x) as usize] += 70.0;
+                let (_, _, next, filtered) =
+                    compute_cached(&heights, w, h, 10.0, opts, Some((&old, &raw)));
+                let (_, _, reference) = compute(&heights, w, h, 10.0, opts);
+                assert_eq!(filtered, reference, "edge edit ({x},{z}) ds={ds}");
+                raw = next;
+            }
+            let (_, _, unchanged, filtered) =
+                compute_cached(&heights, w, h, 10.0, opts, Some((&heights, &raw)));
+            assert_eq!(unchanged, raw);
+            assert_eq!(filtered, compute(&heights, w, h, 10.0, opts).2);
+        }
+    }
+
+    #[test]
+    fn cached_local_edit_timing() {
+        let (w, h) = (513, 513);
+        let opts = SkyvisOptions::default();
+        let mut heights = vec![0.0; (w * h) as usize];
+        let start = std::time::Instant::now();
+        let (_, _, raw, _) = compute_cached(&heights, w, h, 25.0, opts, None);
+        let full = start.elapsed();
+        let old = heights.clone();
+        heights[(256 * w + 256) as usize] = 50.0;
+        let start = std::time::Instant::now();
+        let (_, _, _, filtered) = compute_cached(&heights, w, h, 25.0, opts, Some((&old, &raw)));
+        let patch = start.elapsed();
+        assert_eq!(filtered, compute(&heights, w, h, 25.0, opts).2);
+        eprintln!("Sky visibility 513-square: full={full:?}, local={patch:?}");
+    }
 
     #[test]
     fn flat_terrain_is_fully_visible() {

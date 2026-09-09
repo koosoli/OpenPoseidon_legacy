@@ -2,7 +2,7 @@ use bytemuck::Zeroable;
 use wgpu::util::DeviceExt;
 
 use crate::ffi::{WgrTerrainMaterial, WgrTerrainNode, WgrTerrainParams};
-use crate::gfx3d::{depth_format, NORMAL_FORMAT};
+use crate::gfx3d::{NORMAL_FORMAT, depth_format};
 
 mod skyvis;
 
@@ -127,6 +127,7 @@ fn shadow_mask_dims(w: u32, h: u32, scale: u32, max_dim: u32) -> (u32, u32) {
 // change (radius/K/downsample), without waiting for a fresh heightmap upload.
 struct SkyvisSrc {
     heights: Vec<f32>,
+    raw_visibility: Vec<f32>,
     w: u32,
     h: u32,
     terrain_grid: f32,
@@ -1036,13 +1037,15 @@ impl Terrain {
         // AO grid from it. Sun-independent, so this is the only place it is produced from a new
         // heightmap. Phase A recomputes on every heightmap upload (including fractal subdivision) and
         // runs synchronously; Phase B adds the base-map-only gate + disk cache (plan §3/§4a).
+        let previous_skyvis = self.skyvis_src.take();
         self.skyvis_src = Some(SkyvisSrc {
             heights: heights[..(w as usize * h as usize)].to_vec(),
+            raw_visibility: Vec::new(),
             w,
             h,
             terrain_grid: params.terrain_grid,
         });
-        self.rebuild_skyvis(device, queue);
+        self.rebuild_skyvis(device, queue, previous_skyvis.as_ref());
         self.world_origin = params.world_origin;
         self.terrain_grid = params.terrain_grid;
         // Tallest terrain point: lets the march stop once the ray climbs above all
@@ -1210,17 +1213,26 @@ impl Terrain {
     // upload the fresh mask. No-op before any heightmap has loaded. Bumps mask_gen so the shared
     // camera bind group (gfx3d ensure()) rebinds to the NEW skyvis view — without this, a live
     // radius/downsample re-scan produces a texture nothing samples (the bind keeps the old view).
-    fn rebuild_skyvis(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
-        let Some(src) = &self.skyvis_src else {
+    fn rebuild_skyvis(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        previous: Option<&SkyvisSrc>,
+    ) {
+        let Some(src) = &mut self.skyvis_src else {
             return;
         };
-        let (sv_w, sv_h, sv) = skyvis::compute(
+        let previous = previous
+            .filter(|old| old.w == src.w && old.h == src.h && old.terrain_grid == src.terrain_grid);
+        let (sv_w, sv_h, raw, sv) = skyvis::compute_cached(
             &src.heights,
             src.w,
             src.h,
             src.terrain_grid,
             self.skyvis_opts,
+            previous.map(|old| (old.heights.as_slice(), old.raw_visibility.as_slice())),
         );
+        src.raw_visibility = raw;
         let sv_bytes: Vec<u8> = sv
             .iter()
             .map(|v| (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8)
@@ -1261,7 +1273,7 @@ impl Terrain {
             self.skyvis_opts.radius_m = radius_m;
             self.skyvis_opts.k_azimuths = k;
             self.skyvis_opts.downsample = ds;
-            self.rebuild_skyvis(device, queue);
+            self.rebuild_skyvis(device, queue, None);
         }
     }
 

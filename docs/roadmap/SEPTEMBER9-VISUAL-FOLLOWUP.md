@@ -397,3 +397,19 @@ retain the collapse deformation; adjacent buildings remain intact. This fixes
 the reproduced pose replacement, not the aesthetic of the legacy folded mesh.
 Follow-up also snapshots destroyed objects whose streamed source LOD is static;
 helicopter gating unchanged and GPU-skinned objects still excluded.
+
+0d264e13 committed build/test deployment and repeated collapse trip exit 0;
+return image inspected and remains deformed. 17 Object/shadow-caster/CDLOD cases
+with 17579 assertions pass. Broader ruin models and many simultaneous wrecks
+are still outside this fixture's acceptance.
+
+### Local terrain sky visibility
+
+Each height edit currently invokes the full CPU sky horizon scan. Preserve raw
+unblurred visibility and rescan only samples within the changed-height bounding
+rectangle plus the full horizon radius and bilinear footprint. Full blur retained
+so results are identical; changed dimensions/grid/options still use full scan.
+Additional persistent storage: one float per coarse sky-visibility texel.
+Four Rust tests pass, including exact comparisons after center/edge/corner edits,
+downsamples 1/2/4/8 and unchanged input. Unoptimized CPU 513-square fixture:
+full 281.4ms, local 14.6ms. Not release or frame timings. Installed test pending.
