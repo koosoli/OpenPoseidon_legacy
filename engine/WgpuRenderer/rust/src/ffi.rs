@@ -77,9 +77,11 @@ pub struct WgrAbiCheck {
 const WGR_ABI_FEATURE_BUILD_ID: u32 = 0x0000_0001;
 const WGR_ABI_FEATURE_SAFE_DIAGNOSTICS: u32 = 0x0000_0002;
 const WGR_ABI_FEATURE_RUNTIME_CAPABILITIES: u32 = 0x0000_0004;
+const WGR_ABI_FEATURE_ANALYTIC_GLOW: u32 = 0x0000_0008;
 const WGR_ABI_SUPPORTED_FEATURES: u32 = WGR_ABI_FEATURE_BUILD_ID
     | WGR_ABI_FEATURE_SAFE_DIAGNOSTICS
-    | WGR_ABI_FEATURE_RUNTIME_CAPABILITIES;
+    | WGR_ABI_FEATURE_RUNTIME_CAPABILITIES
+    | WGR_ABI_FEATURE_ANALYTIC_GLOW;
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -87,6 +89,7 @@ pub struct WgrVertex2D {
     // pos.x/y = window pixels, pos.z = depth.
     pub pos: WgrVec3,
     pub rhw: f32,
+    // 0..1 fog, negative HDR gain, 2 analytic halo, 3 HDR emitter core.
     pub fog: f32,
     pub uv: WgrVec2,
     pub color: u32,
@@ -2045,6 +2048,14 @@ mod abi_tests {
         let mut check = good_check();
         check.required_features = 0x8000_0000;
         assert_eq!(unsafe { super::wgr_abi_validate(&check) }, 0);
+    }
+
+    #[test]
+    fn analytic_glow_semantics_are_negotiated() {
+        let mut check = good_check();
+        check.required_features = super::WGR_ABI_SUPPORTED_FEATURES;
+        assert_eq!(unsafe { super::wgr_abi_validate(&check) }, 1);
+        assert_ne!(check.required_features & super::WGR_ABI_FEATURE_ANALYTIC_GLOW, 0);
     }
 }
 

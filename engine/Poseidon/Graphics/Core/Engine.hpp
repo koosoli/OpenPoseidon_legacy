@@ -595,6 +595,8 @@ class Engine : public IGraphicsEngine
     }
     void DrawDecal(Vector3Par pos, float rhw, float sizeX, float sizeY, PackedColor col, const MipInfo& mip,
                    int specFlags) override = 0; // 3D rectangle
+    // Optional texture-free emitter halo; caller has already checked source visibility.
+    virtual bool DrawLightGlow(Vector3Par, float, float, ColorVal, bool) { return false; }
     void Draw2D(const Draw2DPars& pars, const Rect2DAbs& rect,
                 const Rect2DAbs& clip = Rect2DClipAbs) override = 0; // 2D rectangle
     virtual void Draw2D(const Draw2DPars& pars, const Rect2DPixel& rect, const Rect2DPixel& clip = Rect2DClipPixel)

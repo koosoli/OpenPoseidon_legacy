@@ -303,7 +303,7 @@ void Scene::EndObjects()
     // sort by screen size
 }
 
-void Scene::DrawFlare(ColorVal color, Vector3Par lightPos, bool secondary, float sizeScale, bool emissiveCore)
+void Scene::DrawFlare(ColorVal color, Vector3Par lightPos, bool secondary, float sizeScale, bool emissiveCore, bool analytic)
 {
     Color lightColor = emissiveCore ? color : color * GEngine->GetAccomodateEye();
     float oldA = lightColor.A();
@@ -341,6 +341,12 @@ void Scene::DrawFlare(ColorVal color, Vector3Par lightPos, bool secondary, float
         Vector3 center(0.5f * w, 0.5f * h, 1);
         const int special = NoZBuf | IsLight | ClampU | ClampV | IsAlphaFog;
         // Flare0 is handled specially
+        lightColor.SetA(oldA * a * 2);
+        Texture* flareSizing = Preloaded(PreloadedTexture(Flare0));
+        const float analyticScale = flareSizing ? flareSizing->AWidth() * (1.0f/64) : 1.0f;
+        const bool analyticDrawn = analytic && GEngine->DrawLightGlow(
+            lightPos,sizeX*analyticScale,sizeY*analyticScale,lightColor,emissiveCore);
+        if (!analyticDrawn)
         {
             lightColor.SetA(oldA * a * 2);
             PackedColor color = PackedColor(lightColor);
@@ -631,7 +637,7 @@ void Scene::DrawFlares()
                     LGT025FlareVerdict(i, a > 0.001f ? "drawn" : "occluded", intensity, occ, a);
                 lightColor.SetA(a);
                 DrawFlare(lightColor, light->Position(), false,
-                          wgpu ? floatMin(0.030f * span, 1.0f) : 0.22f);
+                          wgpu ? floatMin(0.030f * span, 1.0f) : 0.22f, false, wgpu);
                 if (wgpu && glow.enabled && light->HasVisibleBulb() && light->AttachedOn() && occ > 0.0f)
                 {
                     const float distance = floatMax(dir.Size(), 0.1f);
@@ -646,7 +652,7 @@ void Scene::DrawFlares()
                         // Additive quads avoid the packed-colour radiance ceiling
                         // without another shader, texture or fullscreen pass.
                         DrawFlare(core, light->Position(), false,
-                                  glow.markerSize / (0.2f * distance), true);
+                                  glow.markerSize / (0.2f * distance), true, true);
                     }
                 }
             }

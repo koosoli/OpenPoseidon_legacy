@@ -1313,7 +1313,7 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
                                sizeof(WgrLogCallbacks),
                                sizeof(WgrFrame),
                                WGR_ABI_FEATURE_BUILD_ID | WGR_ABI_FEATURE_SAFE_DIAGNOSTICS |
-                                   WGR_ABI_FEATURE_RUNTIME_CAPABILITIES,
+                                   WGR_ABI_FEATURE_RUNTIME_CAPABILITIES | WGR_ABI_FEATURE_ANALYTIC_GLOW,
                                WgrLayoutHash()};
     const uint32_t runtimeAbi = wgr_abi_version();
     if (runtimeAbi != WGR_ABI_VERSION || !wgr_abi_validate(&abiCheck))
@@ -12431,6 +12431,29 @@ void EngineWgpu::DrawSection(const FaceArray& face, Offset beg, Offset end)
 // the 2D shader depth-tests it against the world in reversed-Z, and derive the fog
 // factor from IsAlphaFog exactly as GL33 packs it into TLVertex.specular. Depth is
 // TESTED and not written -- smoke is occluded by a wall and never occludes anything.
+bool EngineWgpu::DrawLightGlow(Vector3Par screen, float sizeX, float sizeY, ColorVal color, bool core)
+{
+    static const bool enabled = [] {
+        const char* value = std::getenv("POSEIDON_ANALYTIC_GLOW");
+        return !(value && value[0]=='0');
+    }();
+    if (!enabled) return false;
+    if (!(sizeX > 0) || !(sizeY > 0)) return true;
+    const auto packed = PackColor(PackedColor(color));
+    auto vertex = [&](float x,float y,float u,float v) {
+        return WgrVertex2D{{x,y,0.0f},1.0f,core ? 3.0f : 2.0f,{u,v},packed};
+    };
+    const auto a=vertex(screen.X()-sizeX,screen.Y()-sizeY,0,0);
+    const auto b=vertex(screen.X()+sizeX,screen.Y()-sizeY,1,0);
+    const auto c=vertex(screen.X()+sizeX,screen.Y()+sizeY,1,1);
+    const auto d=vertex(screen.X()-sizeX,screen.Y()+sizeY,0,1);
+    const WgrVertex2D quad[6]={a,b,c,a,c,d};
+    // Texture zero is the white fallback, not an authored glow bitmap.
+    // Clipping preserves the full quad's radial coordinates.
+    AppendTriangles(0,WGR_BLEND_ADDITIVE,SamplerForSpec(ClampU | ClampV),WGR_DEPTH_NONE,quad);
+    return true;
+}
+
 void EngineWgpu::DrawDecal(Vector3Par screen, float rhw, float sizeX, float sizeY, PackedColor color,
                            const MipInfo& mip, int specFlags)
 {

@@ -7,6 +7,16 @@ use crate::textures::SharedTextures;
 // Linear filter + clamp both axes (point<<2 | clampV<<1 | clampU).
 const OVERLAY_SAMPLER: usize = 3;
 
+#[cfg(test)]
+mod shader_tests {
+    #[test]
+    fn analytic_glow_and_legacy_sprite_shader_validate() {
+        let module = naga::front::wgsl::parse_str(include_str!("shader.wgsl")).unwrap();
+        naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
+            .validate(&module).unwrap();
+    }
+}
+
 /// SMK-037: the per-frame camera + tuning the soft-particle fragment stage needs.
 /// `active` is the only thing the shader branches on, and it is false unless the frame
 /// actually recorded a depth snapshot against this camera.

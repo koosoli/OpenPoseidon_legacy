@@ -204,6 +204,7 @@ class EngineWgpu : public EngineDummy
     // all smoke, dust, exhaust and muzzle clouds drew nothing under wgpu.
     void DrawDecal(Vector3Par screen, float rhw, float sizeX, float sizeY, PackedColor color, const MipInfo& mip,
                    int specFlags) override;
+    bool DrawLightGlow(Vector3Par screen, float sizeX, float sizeY, ColorVal color, bool core) override;
     // Same batch as DrawDecal, but the quad is stretched along an explicit
     // screen-space direction: rain streaks lean with the wind, which an
     // axis-aligned sprite cannot show. Depth-tested, non-writing, clipped --

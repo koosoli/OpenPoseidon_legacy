@@ -24,6 +24,7 @@ struct VsOut {
     @location(0) uv: vec2<f32>,
     @location(1) color: vec4<f32>,
     @location(2) fog: f32,
+    @location(3) @interpolate(flat) glow: f32,
 };
 
 @vertex
@@ -49,6 +50,7 @@ fn vs_main(
     // color is in BGRA order -> swizzle to RGBA
     out.color = color.zyxw;
     out.fog = rhw_fog.y;
+    out.glow = select(0.0, rhw_fog.y - 1.0, rhw_fog.y >= 2.0);
     if (rhw_fog.y < 0.0) {
         out.color = vec4<f32>(out.color.rgb * -rhw_fog.y, out.color.a);
         out.fog = 1.0;
@@ -59,6 +61,14 @@ fn vs_main(
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let base = textureSample(tex, samp, in.uv) * in.color;
+    if (in.glow > 0.0) {
+        let p = in.uv * 2.0 - 1.0;
+        let r2 = dot(p,p);
+        let edge = max(1.0-r2,0.0);
+        let profile = exp2(-6.0*r2) * edge * edge;
+        let gain = select(1.0,8.0,in.glow > 1.5);
+        return vec4<f32>(in.color.rgb * gain, in.color.a * profile);
+    }
     // Blend toward the scene fog colour (matches GL33's mix(fogColor, r0, vFogTC)).
     let rgb = mix(globals.fog_color.rgb, base.rgb, clamp(in.fog, 0.0, 1.0));
     return vec4<f32>(rgb, base.a);

@@ -42,6 +42,7 @@
 #define WGR_ABI_FEATURE_BUILD_ID 0x00000001u
 #define WGR_ABI_FEATURE_SAFE_DIAGNOSTICS 0x00000002u
 #define WGR_ABI_FEATURE_RUNTIME_CAPABILITIES 0x00000004u
+#define WGR_ABI_FEATURE_ANALYTIC_GLOW 0x00000008u
 
 enum WgrRuntimeCapability : uint32_t
 {
@@ -207,7 +208,7 @@ struct WgrVertex2D
 {
     WgrVec3 pos;
     float rhw;
-    float fog; /* 0..1 fog blend; negative = HDR colour gain (-fog), fog already in alpha. */
+    float fog; /* 0..1 fog; negative = HDR gain; 2 = analytic halo, 3 = HDR emitter core. */
     WgrVec2 uv;
     WgrRgba8 color;
 };

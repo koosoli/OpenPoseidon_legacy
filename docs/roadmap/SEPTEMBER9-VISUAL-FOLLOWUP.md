@@ -413,3 +413,23 @@ Additional persistent storage: one float per coarse sky-visibility texel.
 Four Rust tests pass, including exact comparisons after center/edge/corner edits,
 downsamples 1/2/4/8 and unchanged input. Unoptimized CPU 513-square fixture:
 full 281.4ms, local 14.6ms. Not release or frame timings. Installed test pending.
+
+895f39c0 committed build exits 0, both refs pushed and matched pair installed.
+Installed brush test exits 0: 29.835 -> 23.8911 -> 16.2877 while held, remains
+16.2877 after release, then rises to 22.8487. More updates now fit the same hold
+period than before; capped brush time intentionally does not catch up stalled
+frames. Image inspected (sep9-brush-skyvis-lower.png). This is improved interactive
+throughput, not a controlled whole-frame GPU speedup claim. Cargo.lock hash intact.
+
+Full installed Showcase on 895f39c0 exits 0, including crater and restoration.
+
+### Analytic local-light glow
+
+Optional graphics interface replaces local WGPU Flare0 rendering with analytic
+radial halo/HDR core in the existing 2D additive batch. Sun/secondary flares and
+GL33 remain unchanged. Existing local source occlusion and angular sizing retained;
+core uses one HDR quad rather than eight overlapping quads. No new texture or
+fullscreen target; existing white fallback bound. New ABI capability bit protects
+against an older DLL interpreting the vertex marker as ordinary fog.
+POSEIDON_ANALYTIC_GLOW=0 retains the legacy path for A/B. Native build and two Rust
+shader/ABI tests pass. Installed visual comparison pending; not yet acceptance.
