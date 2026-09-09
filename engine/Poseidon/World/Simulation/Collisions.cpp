@@ -1267,8 +1267,13 @@ void Landscape::ExplosionDammage(EntityAI* owner, Shot* shot, Object* directHit,
     ExplosionDammageEffects(owner, shot, directHit, pos, dir, type, enemyDammage);
     GetNetworkManager().ExplosionDammageEffects(owner, shot, directHit, pos, dir, type, enemyDammage);
     // Apply after damage/effects so their ground queries see the impact's original surface.
-    if (!directHit && shot && dyn_cast<Missile>(shot) && type->explosive > 0)
-        Dev::RocketTerrainImpact(pos.X(),pos.Y(),pos.Z());
+    if (Dev::RocketCraters().enabled && shot && dyn_cast<Missile>(shot))
+    {
+        const bool changed = !directHit && type->indirectHit > 0 &&
+            Dev::RocketTerrainImpact(pos.X(),pos.Y(),pos.Z());
+        LOG_INFO(World, "Rocket crater: impact=[{},{},{}] direct={} blast={} changed={}",
+                 pos.X(),pos.Y(),pos.Z(),directHit != nullptr,type->indirectHit,changed);
+    }
 }
 
 #include <Poseidon/Foundation/Containers/StaticArray.hpp>
