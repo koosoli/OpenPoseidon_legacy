@@ -21,8 +21,7 @@ namespace
 
 long long GSweepCount = 0;
 
-/// The Building containing `pos`, or null. Fire geometry first (the solid
-/// shell), view geometry as fallback (glass closes holes a fire LOD leaves).
+/// The Building containing `pos`, or null, using the fire/view shell room grid.
 /// The last answer is cached in an OLink, which clears itself if the building
 /// is deleted: smoke asks about points that barely move between frames, and a
 /// full IsInside scan per query would cost what the room lookup was meant to
@@ -70,8 +69,14 @@ Object* BuildingContaining(Vector3Par pos)
                 {
                     Object* candidate=objects[i];
                     const Building* building=dyn_cast<const Building>(candidate);
-                    const BuildingInterior* interior=building
-                        ? BuildingInterior::GetFor(building->GetBType()) : nullptr;
+                    if (!building || building->IsDestroyed() || !building->GetShape())
+                        continue;
+                    // All-LOD sphere plus room-grid padding: avoid voxelizing
+                    // nearby houses which cannot contain this point at all.
+                    const float radius=building->GetRadius()+2.0f*building->Scale();
+                    if ((pos-building->Position()).SquareSize()>Square(radius))
+                        continue;
+                    const BuildingInterior* interior=BuildingInterior::GetFor(building->GetBType());
                     if (SmokeCachedBuildingContains(interior,candidate,pos))
                     {
                         found=candidate;

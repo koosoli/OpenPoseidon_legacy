@@ -457,3 +457,11 @@ downwash, particle cap, containment cadence or collision response change.
 
 Native two-job build exits 0; 36 Smoke/BuildingInterior/Wind/Airflow cases pass
 28,591 assertions. Installed A/B remains pending.
+
+252c9cda built/pushed/deployed; same installed 30s sprite run exits 0. Late samples
+2.027-2.171ms at ~3900 particles, ~3300 correctly labelled indoor versus baseline
+11-15ms and mostly unlabelled. Ray counter ends ~4.0M versus ~25M. Both exterior
+captures inspected, no gross escape plume; this does not prove thin-wall sealing.
+Grid creation for unrelated neighbouring houses can hitch (one 85.5ms build).
+Follow-up rejects points outside the existing all-LOD bounding sphere plus 2m
+scaled grid margin before creating an interior; no change to actual room tests.
