@@ -1135,8 +1135,8 @@ void LightReflector::GetDescription(LightDescription& desc) const
     desc.startAtten = _startAtten; // ignored for directional
     desc.ambient = Ambient();
     desc.diffuse = GetDiffuse();
-    desc.phi = H_PI * 0.20;
-    desc.theta = H_PI * 0.12;
+    desc.phi = _explicitAngle ? _angle : H_PI * 0.20f;
+    desc.theta = _explicitAngle ? _angle * 0.6f : H_PI * 0.12f;
 }
 
 float LightPoint::Brightness() const

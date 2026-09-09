@@ -8,6 +8,26 @@
 
 using namespace Poseidon;
 
+TEST_CASE("Explicit reflector cone reaches renderer without changing legacy constructors", "[Graphics][LightVisibility]")
+{
+    LightReflector light(nullptr, HBlack, HBlack, 0.4f);
+    LightDescription original{}, narrow{}, wide{};
+    light.GetDescription(original);
+    CHECK(original.phi > 0.6f);
+    light.SetAngle(0.12f);
+    light.GetDescription(narrow);
+    CHECK(narrow.phi == 0.12f);
+    CHECK(narrow.theta == 0.12f * 0.6f);
+    light.SetAngle(1.1f);
+    light.GetDescription(wide);
+    CHECK(wide.phi == 1.1f);
+    CHECK(wide.phi > narrow.phi);
+    light.SetAngle(std::numeric_limits<float>::quiet_NaN());
+    light.SetAngle(-1);
+    light.GetDescription(wide);
+    CHECK(wide.phi == 1.1f);
+}
+
 TEST_CASE("Legacy glazing classification excludes terrain decals", "[Graphics][Material]")
 {
     CHECK(LegacyGlassAlphaIsGlazing(false,0,99,29)); // UH60 glazing histogram.

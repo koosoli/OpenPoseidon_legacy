@@ -30,6 +30,7 @@ struct ProceduralTexture
     bool        recognised = false; // the name parses as `#(...)generator(...)`
     bool        generated  = false; // ...and this generator is one we can build
     std::string generator;          // "color", "fresnel", ...
+    std::string encodingTag;
     int         width  = 0;
     int         height = 0;
     // RGBA8, row-major, width*height*4 bytes. Empty unless `generated`.
@@ -44,8 +45,7 @@ inline bool LooksProcedural(const char* name)
 }
 
 // The tag a `color` stage carries as its last argument -- `DT`, `NOHQ`, `SMDI`.
-// Parsed but deliberately unused: it names the ROLE the stand-in plays, and the
-// role comes from the shader family's slot, never from the texture (ShaderSchema).
+// Does not select a material slot. NOHQ also specifies the normal upload encoding.
 inline bool IsTag(const std::string& token)
 {
     if (token.empty())
@@ -122,6 +122,8 @@ inline ProceduralTexture Parse(const char* name)
     const auto args = detail::Split(text.substr(argsBegin + 1, argsEnd - argsBegin - 1), ',');
     if (args.size() < 3)
         return out;
+    if (detail::IsTag(args.back()))
+        out.encodingTag = args.back();
 
     // The arguments are R,G,B,A even though the type token says `argb`, and the
     // corpus is unambiguous about it. `color(0.5,0.5,1,1,NOHQ)` read as RGBA is a
@@ -154,6 +156,19 @@ inline ProceduralTexture Parse(const char* name)
         out.rgba[at + 3] = texel[3];
     }
     return out;
+}
+
+// color() arguments remain RGB normals; the WGPU NOHQ sampler expects X in A,
+// Y in G and reconstructs Z. R must be zero, not an accidental parallax height.
+inline void EncodeNormalUpload(ProceduralTexture& texture)
+{
+    if (texture.encodingTag != "NOHQ" && texture.encodingTag != "nohq") return;
+    for (size_t at = 0; at + 3 < texture.rgba.size(); at += 4)
+    {
+        texture.rgba[at + 3] = texture.rgba[at];
+        texture.rgba[at] = 0;
+        texture.rgba[at + 2] = 255;
+    }
 }
 
 } // namespace Poseidon::render::procedural

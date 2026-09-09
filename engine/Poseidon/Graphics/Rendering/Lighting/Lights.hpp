@@ -348,6 +348,7 @@ class LightReflector: public LightPositionedColored
 
 	protected:
 	float _angle;
+	bool _explicitAngle = false;
 	Ref<LODShapeWithShadow> _shape;
 	float _startAtten;
 	float _size;
@@ -384,7 +385,13 @@ class LightReflector: public LightPositionedColored
 
 	void SetSize( float size ){_size=size;}
 
-	void SetAngle( float angle ){_angle=angle;}
+	// Explicit dev-tool half-angle; legacy constructor-only vehicle beams retain their profile.
+	void SetAngle(float angle)
+	{
+		if (!(angle > 0.0f && angle < 1.55f)) return;
+		_angle = angle;
+		_explicitAngle = true;
+	}
 	float Angle() const {return _angle;}
 
 	bool Visible( const Object *obj ) const override;

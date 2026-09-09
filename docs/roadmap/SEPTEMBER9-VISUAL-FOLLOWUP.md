@@ -203,3 +203,49 @@ term is sun-only in `shading.wgsl`. Night GLOSS demo is not considered fixed.
   under the roof the sun-facing top is visible. Reverse visible LOD only;
   collision/fire/view winding unchanged. Three asset tests pass; installed
   visual comparison pending. No global shadow tuning changed.
+
+## Host stability pause, 12:22 local
+
+Owner reports repeated whole-Windows freezes with git.exe access-violation dialog.
+Read-only Windows event review: repeated Git 2.44.0.windows.1 crashes
+(c0000005 in msvcrt.dll and c00000fd), plus audiodg, NVIDIA container,
+webthreatdefsvc and taskkill failures around 12:05-12:07; unexpected shutdowns
+recorded for 11:22:42 and 12:07:12. Last Showcase log ends normally at 12:02:49.
+No Git/build/game processes running after reboot at inspection. Root cause NOT
+established; do not blame DLSS, hardware or RAM based on these symptoms alone.
+Builds, Git calls and runtime tests paused pending stability diagnosis. Future
+build parallelism must be reduced from 10 on this 16GB host. No settings/driver
+changes made. Root C: has about 15.4GiB free at cleanup start.
+
+Owner authorised temporary-folder cleanup. Archive old root test folders to
+D:/CWR-Archive/2026-09-09-temp-cleanup, SHA256-verify every file before removing
+the C: duplicate. Do not remove .tmp-dlss-sdk (Deploy.ps1 dependency), current
+worktree test evidence, Cargo.lock, or .tmp-perf-modernisation (large hardlink
+set, logical size overstates space reclaim). Cleanup script in .tmp-bulb.
+
+Torch cone investigation found concrete disconnected control: SetAngle changes
+_angle, but LightReflector::GetDescription hardcodes phi/theta. Fix not yet made;
+preserve existing vehicle headlight cones when connecting explicit dev overrides.
+
+Post-reboot inspection of already-written room-lit.png from the bcf02269 addon
+test REJECTS the winding experiment: panels now black/back-facing and edge leaks
+worse. Do not count it as a fix. Revert the visible-winding experiment before
+resuming Showcase acceptance; no new runtime or install during stability pause.
+Currently installed EXE/DLL remain a672c93e; addon is bcf02269 experimental.
+
+## Resumed with owner's approval after disk cleanup
+
+Six old root test folders archived with per-file SHA256 manifests on D:;
+C: free space rose from 15.4 to 23.7GiB. A read-only check found Codex itself
+launching background Git rename-detection diffs; no attribution of the historical
+crash is established. No new Application Error in the last 15-minute check.
+Resume builds at two jobs only, CARGO_BUILD_JOBS=2, runtime serially.
+
+Reverted the rejected visual winding change. Torch dev SetAngle now reaches the
+hardware description only when explicitly called; constructor-only vehicle
+cones keep legacy values. Invalid angles are ignored. Procedural color NOHQ
+normal upload now packs X into A, Y into G, clears R (no fake POM height).
+Parser RGB values and ordinary colour uploads unchanged. This corrects the
+flat normal's previous X=1 tangent tilt, a concrete additional room-lighting bug.
+Build passed; 11 procedural/light cases / 650 assertions passed. Installed room
+and torch-width comparisons pending; no full acceptance claim yet.

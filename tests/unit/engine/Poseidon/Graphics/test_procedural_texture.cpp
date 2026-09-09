@@ -49,6 +49,20 @@ TEST_CASE("The arguments are RGBA even though the type token says argb", "[graph
     REQUIRE(ambient.rgba[3] == 255);
 }
 
+TEST_CASE("Procedural normals upload in NOHQ channels without parallax height", "[graphics][texture][procedural]")
+{
+    auto normal = Parse("#(argb,8,8,3)color(0.5,0.5,1,1,NOHQ)");
+    EncodeNormalUpload(normal);
+    REQUIRE(normal.rgba[0] == 0);
+    REQUIRE(normal.rgba[1] == 128);
+    REQUIRE(normal.rgba[2] == 255);
+    REQUIRE(normal.rgba[3] == 128);
+    auto colour = Parse("#(argb,8,8,3)color(0.2,0.3,0.4,0.7,co)");
+    const auto original = colour.rgba;
+    EncodeNormalUpload(colour);
+    REQUIRE(colour.rgba == original);
+}
+
 TEST_CASE("A lookup-table generator is recognised but not invented", "[graphics][texture][procedural]")
 {
     // `fresnel` builds a table from its parameters. There is no implementation of

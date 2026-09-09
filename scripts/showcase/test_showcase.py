@@ -50,21 +50,21 @@ class ShowcaseAssets(unittest.TestCase):
         self.assertNotIn(b'ribs_nohq.paa', lab.material(False, .05))
         self.assertEqual(lab.paa()[:4], struct.pack('<HH', 0x8888, 0))
 
-    def test_visible_bottom_faces_outward_after_mlod_winding_conversion(self):
+    def test_visible_and_collision_shell_winding_match(self):
         def first_face(geometry):
             data = lab.box_lod((7, .3, 7), geometry=geometry)
             at = 28 + 8 * 16 + 6 * 12 + 4
             return [struct.unpack_from('<I', data, at + i * 16)[0] for i in range(4)]
         visible = first_face(False)
         collision = first_face(True)
-        self.assertEqual(visible, [0, 1, 2, 3])
+        self.assertEqual(visible, collision)
         self.assertEqual(collision, [1, 0, 3, 2])
-        # Loader reverses each quad; CW front faces have inward cross products.
+        # Loader reverses each quad to the outward bottom face.
         loaded = [visible[1], visible[0], visible[3], visible[2]]
         points = [(-7, 0, -7), (7, 0, -7), (7, 0, 7), (-7, 0, 7)]
         a, b, c = (points[i] for i in loaded[:3])
         cross_y = (b[2]-a[2])*(c[0]-a[0]) - (b[0]-a[0])*(c[2]-a[2])
-        self.assertGreater(cross_y, 0)
+        self.assertLess(cross_y, 0)
 
 
 if __name__ == '__main__':

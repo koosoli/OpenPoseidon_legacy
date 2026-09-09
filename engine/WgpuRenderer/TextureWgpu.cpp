@@ -1068,8 +1068,9 @@ int TextureWgpu::Init()
     // so without this every such reference fails to upload -- which is why Arma 3's
     // landing and warning lights, whose whole appearance is an authored flat
     // colour, had nothing to draw.
-    if (const auto generated = render::procedural::Parse(Name()); generated.generated)
+    if (auto generated = render::procedural::Parse(Name()); generated.generated)
     {
+        render::procedural::EncodeNormalUpload(generated);
         InitDynamic(generated.width, generated.height, generated.rgba.data(),
                     static_cast<uint32_t>(generated.rgba.size()));
         return _gpuHandle ? 0 : -1;
