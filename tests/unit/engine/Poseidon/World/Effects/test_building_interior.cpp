@@ -71,6 +71,9 @@ TEST_CASE("Smoke building cache distinguishes nearby instances and outside air",
     CHECK_FALSE(SmokeCachedBuildingContains(&interior, nullptr, inFirst));
     const BuildingInterior invalid;
     CHECK_FALSE(SmokeCachedBuildingContains(&invalid, first, inFirst));
+    first->NeverDestroy();
+    CHECK_FALSE(SmokeCachedBuildingContains(&interior, first, inFirst));
+    CHECK(SmokeCachedBuildingContains(&interior, second, inSecond));
 }
 
 TEST_CASE("Building interior segment classification cannot tunnel through a one-cell roof",

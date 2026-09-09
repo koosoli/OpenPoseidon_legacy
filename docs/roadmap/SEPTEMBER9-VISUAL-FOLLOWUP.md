@@ -433,3 +433,27 @@ fullscreen target; existing white fallback bound. New ABI capability bit protect
 against an older DLL interpreting the vertex marker as ordinary fog.
 POSEIDON_ANALYTIC_GLOW=0 retains the legacy path for A/B. Native build and two Rust
 shader/ABI tests pass. Installed visual comparison pending; not yet acceptance.
+
+ea5643e5 built/pushed/deployed, final shader/ABI tests pass. Installed matched
+1280x720 night Jeep A/B exits 0: sep9-glow-bitmap/analytic.png inspected. Bulb ROI
+x615..663/y359..378 peak goes 129 -> 255; pixels over 180 go 0 -> 14. Both lenses
+now read as lit; lamp halo is smooth and brighter. Last seven whole-GPU samples
+median 8.575/8.761ms; noisy separate launches, not an isolated halo-cost benchmark.
+Separate sep9-analytic-occlusion run exits 0; blocked sources still report occ=0,
+including house blockers. Broader subjective flare tuning remains possible.
+
+### Smoke room lookup follow-up
+
+Baseline ea5643e5 Nogova hasic_zbroj, source 7731.6/25.3/4421.4, 8x sprites,
+wind 18/250/0.2, 30s exits 0. Late simulation ~11-15ms, ~3900 particles;
+most particles have room=-1 and issue seven-ray containment sweeps every tick.
+The interior grid is not even built until late in this run. Fallback lookup uses
+Object::IsInside (solid convex components), which cannot reliably classify the
+air in a hollow building. Pending fix directly queries nearby BuildingInterior
+room grids, retaining the validated cache and original 25m search extent/order;
+skips other object classes and rejects destroyed buildings' stale intact rooms.
+POSEIDON_SMOKE_BUILDING_FILTER=0 retains old fallback for comparison. No wind,
+downwash, particle cap, containment cadence or collision response change.
+
+Native two-job build exits 0; 36 Smoke/BuildingInterior/Wind/Airflow cases pass
+28,591 assertions. Installed A/B remains pending.

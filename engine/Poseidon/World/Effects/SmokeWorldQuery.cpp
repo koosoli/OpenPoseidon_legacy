@@ -12,7 +12,7 @@ namespace Poseidon
 {
 bool SmokeCachedBuildingContains(const BuildingInterior* interior, const Object* building, Vector3Par position)
 {
-    return interior != nullptr && interior->Valid() && building != nullptr &&
+    return interior != nullptr && interior->Valid() && building != nullptr && !building->IsDestroyed() &&
            interior->RoomOfWorld(building, position) >= 0;
 }
 
@@ -50,6 +50,39 @@ Object* BuildingContaining(Vector3Par pos)
     }
 
     Object* found = nullptr;
+    // IsInside tests solid convex geometry, not the air in a hollow room.
+    // Query the room grid directly, as the validated cached path already does.
+    // Keep the old search extent/order and reject non-buildings first.
+    static const bool filterBuildings = [] {
+        const char* value = std::getenv("POSEIDON_SMOKE_BUILDING_FILTER");
+        return !(value && value[0]=='0');
+    }();
+    if (filterBuildings)
+    {
+        int xMin,xMax,zMin,zMax;
+        // Segment overload already adds the legacy 25m object-radius margin.
+        ::ObjRadiusRectangle(xMin,xMax,zMin,zMax,pos,pos,0.0f);
+        for (int x=xMin; x<=xMax && !found; ++x)
+            for (int z=zMin; z<=zMax && !found; ++z)
+            {
+                const ObjectList& objects=GLandscape->GetObjects(z,x);
+                for (int i=0; i<objects.Size(); ++i)
+                {
+                    Object* candidate=objects[i];
+                    const Building* building=dyn_cast<const Building>(candidate);
+                    const BuildingInterior* interior=building
+                        ? BuildingInterior::GetFor(building->GetBType()) : nullptr;
+                    if (SmokeCachedBuildingContains(interior,candidate,pos))
+                    {
+                        found=candidate;
+                        break;
+                    }
+                }
+            }
+        cached=found;
+        cachedPos=pos;
+        return found;
+    }
     for (int pass = 0; pass < 2 && found == nullptr; ++pass)
     {
         StaticArrayAuto<OLink<Object>> objects;
