@@ -178,10 +178,10 @@ TEST_CASE("Snow refinement partitions the parent and resolves foot depressions",
     CHECK(patches.size() < 512);
     for (size_t i = 0; i < patches.size(); ++i)
         for (size_t j = i + 1; j < patches.size(); ++j)
-            CHECK_FALSE(patches[i].originX < patches[j].originX + patches[j].size &&
+            CHECK_FALSE((patches[i].originX < patches[j].originX + patches[j].size &&
                         patches[j].originX < patches[i].originX + patches[i].size &&
                         patches[i].originZ < patches[j].originZ + patches[j].size &&
-                        patches[j].originZ < patches[i].originZ + patches[i].size);
+                        patches[j].originZ < patches[i].originZ + patches[i].size));
 }
 
 TEST_CASE("Procedural ocean selection matches a stored flat CDLOD tree", "[terrain][cdlod][ocean]")
