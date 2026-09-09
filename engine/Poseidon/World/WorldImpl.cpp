@@ -1,5 +1,6 @@
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/World/Weather/SnowField.hpp>
+#include <Poseidon/World/Terrain/TerrainSubdivision.hpp>
 #include "SimVehicleCost.hpp" // PERF-023
 #include <Poseidon/Input/CheatCode.hpp>
 #include <Poseidon/Input/ControllerUiLayout.hpp>
@@ -1389,9 +1390,14 @@ void World::AdjustSubdivisionGrid(float gridSize)
     float coefLog = log(LandGrid / gridSize) * invLog2;
     int coefLogInt = toInt(coefLog);
     saturate(coefLogInt, 0, 8);
+    const int requestedLog = coefLogInt;
+    coefLogInt = BoundedTerrainSubdivision(LandRange, coefLogInt);
     LOG_DEBUG(World, "Terrain subdivision wanted: {} ({:.3f})", coefLogInt, coefLog);
     int currentLog = TerrainRangeLog - LandRangeLog;
     int terrainChange = coefLogInt - currentLog;
+    if (requestedLog != coefLogInt && terrainChange != 0)
+        LOG_INFO(World, "Terrain refinement capped for {} land cells: requested {}m, effective {}m",
+                 LandRange, gridSize, LandGrid / static_cast<float>(1 << coefLogInt));
 
     if (terrainChange > 0)
     {

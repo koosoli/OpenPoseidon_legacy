@@ -4,6 +4,7 @@
 #include <chrono>
 
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Terrain/TerrainSubdivision.hpp>
 #include <Poseidon/Foundation/Logging/Logging.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
 #include <Poseidon/IO/FileServer.hpp>
@@ -1009,7 +1010,7 @@ void Landscape::SubdivideTerrain(int subdivStepLog)
 
     MakeObjectsTerrainRelative();
 
-    while (subdivStepLog > 0)
+    while (subdivStepLog > 0 && _terrainRange <= MaxRefinedTerrainRange / 2)
     {
         SubdivideTerrainOneStep();
         subdivStepLog--;

@@ -57,9 +57,9 @@ def translate_objects(raw, dx, dz, first_id):
     return result
 
 
-def pack_pbo(files):
+def pack_pbo(files, prefix='fusion_ofp'):
     def z(text): return text.encode('ascii')+b'\0'
-    header = b'\0'+struct.pack('<5I', 0x56657273,0,0,0,0)+z('prefix')+z('fusion_ofp')+b'\0'
+    header = b'\0'+struct.pack('<5I', 0x56657273,0,0,0,0)+z('prefix')+z(prefix)+b'\0'
     ordered = sorted(files.items())
     for name, data in ordered:
         header += z(name)+struct.pack('<5I',0,len(data),0,0,len(data))

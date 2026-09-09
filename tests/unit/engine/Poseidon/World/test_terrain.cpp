@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 #include <Poseidon/World/Terrain/LandscapeLod.hpp>
+#include <Poseidon/World/Terrain/TerrainSubdivision.hpp>
 #include <unordered_set>
 #include <vector>
 #include <stdlib.h>
@@ -8,6 +9,19 @@
 #include <utility>
 
 using namespace Poseidon;
+
+TEST_CASE("Large world refinement stays within the heightfield allocation budget", "[terrain-size]")
+{
+    CHECK(BoundedTerrainSubdivision(256, 4) == 4);
+    CHECK(BoundedTerrainSubdivision(1024, 3) == 3);
+    CHECK(BoundedTerrainSubdivision(1024, 4) == 3);
+    CHECK(BoundedTerrainSubdivision(2048, 3) == 2);
+    CHECK(BoundedTerrainSubdivision(4096, 3) == 1);
+    CHECK(BoundedTerrainSubdivision(8192, 3) == 0);
+    CHECK(BoundedTerrainSubdivision(16384, 3) == 0);
+    CHECK(BoundedTerrainSubdivision(0, 3) == 0);
+    CHECK(BoundedTerrainSubdivision(256, -1) == 0);
+}
 
 // LOD level computation
 
