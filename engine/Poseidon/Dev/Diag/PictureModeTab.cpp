@@ -10,6 +10,14 @@
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Dev/Diag/DiagPause.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
+#include <Poseidon/World/World.hpp>
+#include <Poseidon/World/Entities/Infantry/Person.hpp>
+#include <Poseidon/World/Scene/Scene.hpp>
+#include <Poseidon/World/Scene/Camera/Camera.hpp>
+#include <Poseidon/World/Scene/ObjLine.hpp>
+#include <Poseidon/World/Terrain/Landscape.hpp>
+#include <algorithm>
+#include <cmath>
 
 // Foundation/Framework/DebugLog.hpp -- reached through the engine headers above and through the
 // precompiled header, so include ORDER cannot avoid it -- defines `DebugLog` as a function-like
@@ -58,6 +66,18 @@ void DrawDepthOfFieldSection()
     }
 
     ImGui::BeginDisabled(!dof.enabled);
+
+    if (Dev::Checkbox("Keep player in focus", &dof.followPlayer))
+    {
+        if (dof.followPlayer) dof.focusOnClick = false;
+        changed = true;
+    }
+    if (Dev::Checkbox("Click to focus (free-fly)", &dof.focusOnClick))
+    {
+        if (dof.focusOnClick) dof.followPlayer = false;
+        changed = true;
+    }
+    Dev::PanelTooltip("Hide this panel and left-click a surface in free-fly. This replaces Zeus selection while enabled. Sky clicks keep the current focus.");
 
     ImGui::SetNextItemWidth(220.0f);
     changed |= Dev::SliderFloat("Focus distance (m)", &dof.focusDistance, 0.5f, 500.0f, "%.1f",
@@ -276,6 +296,64 @@ void DrawCaptureSection()
 }
 
 } // namespace
+
+void UpdatePictureModeFocus()
+{
+    if (!GEngine || !GWorld || !GScene || !GScene->GetCamera()) return;
+    auto dof = GEngine->GetDepthOfFieldSettings();
+    if (!dof.enabled || !dof.followPlayer) return;
+    const auto* player = GWorld->GetRealPlayer();
+    if (!player) return;
+    const Camera& camera = *GScene->GetCamera();
+    const float depth = (player->Position() + Vector3(0, 1, 0) - camera.Position()) * camera.Direction();
+    if (std::isfinite(depth) && depth > camera.Near())
+    {
+        dof.focusDistance = depth;
+        GEngine->SetDepthOfFieldSettings(dof);
+    }
+}
+
+bool PictureModeClickFocusEnabled()
+{
+    if (!GEngine) return false;
+    const auto dof = GEngine->GetDepthOfFieldSettings();
+    return dof.enabled && dof.focusOnClick;
+}
+
+bool FocusPictureModeAtPixel(float x, float y)
+{
+    if (!PictureModeClickFocusEnabled() || !GLandscape || !GScene || !GScene->GetCamera()) return false;
+    const Camera& camera = *GScene->GetCamera();
+    const Matrix4& projection = camera.Projection();
+    if (std::abs(projection(0, 0)) < 1e-6f || std::abs(projection(1, 1)) < 1e-6f) return false;
+    const float sx = (x - projection(0, 2)) / projection(0, 0);
+    const float sy = (y - projection(1, 2)) / projection(1, 1);
+    const Vector3 direction = (camera.Direction() + camera.DirectionAside() * sx * camera.Left() +
+                              camera.DirectionUp() * sy * camera.Top()).Normalized();
+    const Vector3 origin = camera.Position();
+    const float reach = std::min(camera.Far(), 50000.0f);
+    Vector3 hit;
+    float distance = GLandscape->IntersectWithGroundOrSea(&hit, origin, direction, 0, reach);
+    bool found = distance >= 0;
+    if (found) distance = (hit - origin).Size();
+    CollisionBuffer objects;
+    GLandscape->ObjectCollision(objects, nullptr, nullptr, origin, origin + direction * reach, 0, ObjIntersectView);
+    for (int i = 0; i < objects.Size(); ++i)
+    {
+        const float t = objects[i].under;
+        if (t >= 0 && t <= 1 && (!found || t * reach < distance))
+        {
+            distance = t * reach;
+            found = true;
+        }
+    }
+    const float depth = distance * (direction * camera.Direction());
+    if (!found || !std::isfinite(depth) || depth <= camera.Near()) return false;
+    auto dof = GEngine->GetDepthOfFieldSettings();
+    dof.focusDistance = depth;
+    GEngine->SetDepthOfFieldSettings(dof);
+    return true;
+}
 
 void ResetPictureModeSettings()
 {

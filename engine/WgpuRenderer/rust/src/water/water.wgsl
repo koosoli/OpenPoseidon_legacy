@@ -2189,14 +2189,11 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
         spray_flecks = spray_source * smoothstep(0.78, 0.93,
             foam_noise_lod(in.base_xz * 4.6 + spray_wind * wp.time * 1.8, wp.time, foam_fp * 4.6)) * 0.26;
     }
-    // "Foam intensity" used to scale ONLY the shoreline band, while persistent foam and breaker
-    // whitecaps ignored it — so there was no control anywhere that reduced total foam coverage. That
-    // matters more than it sounds: foam is composited OVER the body colour, so once coverage is high
-    // the water's colour becomes irrelevant and the sea reads as a washed-out grey no matter what
-    // the shallow/deep colours are set to (even black). Making the slider authoritative over every
-    // foam source gives an actual coverage control.
+    // Shore/river foam and wave whitecaps have independent UI controls. Do not
+    // multiply whitecaps by the shore gain: setting shore foam to zero otherwise
+    // makes the entire wave-foam slider inert.
     let foam_scale = max(wp.foam_intensity, 0.0);
-    // Wave foam gets its own multiplier ON TOP of the global one. The shoreline band and the
+    // Wave foam gets its own multiplier. The shoreline band and the
     // whitecaps are different phenomena -- one is water breaking on land, the other is a crest
     // collapsing under its own steepness -- and wanting more of one while wanting less of the
     // other is the normal case, not an exotic one.
@@ -2235,8 +2232,8 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
                                 foam_fp * 0.221);
     let raft_coverage = mix(0.18, 1.0, smoothstep(0.25, 0.75, raft_coarse * 0.65 + raft_detail * 0.35));
     let unstructured_foam = max(max(foam, river_streak),
-        max(persistent_foam, breaker_foam) * foam_scale * wave_scale * raft_coverage) +
-        spray_flecks * foam_scale * wave_scale * raft_coverage;
+        max(persistent_foam, breaker_foam) * wave_scale * raft_coverage) +
+        spray_flecks * wave_scale * raft_coverage;
     var combined_foam = 0.0;
     if (unstructured_foam > 0.001) {
         // This one multiplies EVERY foam source, so its aliasing was modulating the shoreline

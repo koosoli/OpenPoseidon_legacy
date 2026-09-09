@@ -1,4 +1,5 @@
 #include <Poseidon/Dev/Diag/LightingDiag.hpp>
+#include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <cstdlib>
 #include <cstdio>
 #include <algorithm>
@@ -167,6 +168,19 @@ LampLightSettings& GLampLightSettings()
 void LampLightSettingsChanged()
 {
     ++GLampLightSettings().generation;
+}
+
+void ResetLightingSettings()
+{
+    auto& lamp = GLampLightSettings();
+    const auto generation = lamp.generation;
+    lamp = LampLightSettings{};
+    lamp.generation = generation;
+    LampLightSettingsChanged(); // Existing lamps must rebuild even on repeated resets.
+    GLocalShadowSettings() = LocalShadowSettings{};
+    GSpotBeam() = SpotBeamSettings{};
+    GLightVolumeCone() = LightVolumeConeSettings{};
+    GBulbGlow() = BulbGlowSettings{};
 }
 
 } // namespace Poseidon::Dev

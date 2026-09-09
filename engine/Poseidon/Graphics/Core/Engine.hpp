@@ -1785,13 +1785,15 @@ class Engine : public IGraphicsEngine
     struct DepthOfFieldSettings
     {
         bool enabled = false;
+        bool followPlayer = false;
+        bool focusOnClick = false;
         /// Distance the sharp band is centred on.
         float focusDistance = 12.0f;
         /// Half-width of the fully sharp band. Everything inside it is untouched.
         float focusRange = 4.0f;
         /// Widest circle of confusion, in pixels at 1080p; scaled to the real render height so a
         /// 4K screenshot is not silently sharper than the same shot at 1080p.
-        float maxBlurPixels = 24.0f;
+        float maxBlurPixels = 4.0f;
         /// Behind and in front of the focal plane, separately. Foreground blur is much more
         /// intrusive than background blur and wants its own control rather than sharing one.
         float backgroundScale = 1.0f;

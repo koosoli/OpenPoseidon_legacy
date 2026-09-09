@@ -1578,6 +1578,8 @@ void DrawZeusTab()
     // a taste call with a real trade-off behind it, so they belong on a slider.
     if (ImGui::CollapsingHeader("Street lamps and light shadows##zeus"))
     {
+        if (Dev::Button("Reset lamps, glow and shadows"))
+            Poseidon::Dev::ResetLightingSettings();
         Poseidon::Dev::LampLightSettings& lamp = Poseidon::Dev::GLampLightSettings();
         const float beforeRadius = lamp.radiusScale;
         const float beforeSpill = lamp.spill;
@@ -7211,6 +7213,8 @@ void DrawMainWindow()
         ImGui::BulletText("Fixed step");
         ImGui::BulletText("Ballistics recorder and aim model");
         ImGui::BulletText("Picture Mode / depth of field");
+        ImGui::BulletText("Street lamps, bulb glow, local shadows and beam shape");
+        ImGui::BulletText("Sky, water and road appearance");
         ImGui::Separator();
         ImGui::TextDisabled("Everything else is untouched. A tab is reset only where it says\n"
                             "how, and most do not yet -- so this list IS the coverage, not a\n"
@@ -7620,7 +7624,16 @@ void ProcessEvent(const SDL_Event& event)
         {
             s_zeusConsumeMouseEvent = true;
             const SDL_Keymod modifiers = SDL_GetModState();
-            if ((modifiers & SDL_KMOD_SHIFT) != 0 && !s_zeusSelection.empty())
+            if (Dev::PictureModeClickFocusEnabled())
+            {
+                const ZeusPoint cursor = ZeusCursorPixel();
+                s_zeusSuppressNextMouseUp = true;
+                Defer([cursor] {
+                    s_zeusStatus = Dev::FocusPictureModeAtPixel(cursor.x, cursor.y)
+                        ? "Picture Mode: focus set." : "Picture Mode: no surface hit; focus unchanged.";
+                });
+            }
+            else if ((modifiers & SDL_KMOD_SHIFT) != 0 && !s_zeusSelection.empty())
             {
                 s_zeusRotateDrag = true;
                 s_zeusStatus = "Drag left/right to rotate the selected Zeus object(s).";
@@ -7806,6 +7819,7 @@ void NewFrame()
     // open. A light that goes out when you close the panel would be a torch you cannot use
     // while looking at anything.
     UpdateHeadlamp();
+    Dev::UpdatePictureModeFocus();
     if (!AppConfig::Instance().DevMode() && s_visible)
         SetVisible(false);
     // Toggle the software cursor with panel visibility.  When the panel is

@@ -21,6 +21,7 @@
 #include <Poseidon/Dev/Diag/PhysicsProbe.hpp>
 #include <Poseidon/Dev/Diag/PhysicsRayAudit.hpp>
 #include <Poseidon/Dev/Diag/PictureModeTab.hpp>
+#include <Poseidon/Dev/Diag/LightingDiag.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/World/Entities/Weapons/Ballistics.hpp>
 #include <Poseidon/World/Entities/Weapons/GrenadeFuse.hpp>
@@ -198,6 +199,7 @@ void ResetPanelSettings()
     ResetProbeSettings();
     // Picture Mode
     ResetPictureModeSettings();
+    ResetLightingSettings();
     // Penetration
     Penetration::SetEnabled(false);
     Penetration::SetResistanceScale(1.0f);

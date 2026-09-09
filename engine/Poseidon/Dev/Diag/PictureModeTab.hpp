@@ -12,4 +12,7 @@ void DrawPictureModeTab();
 
 /// Restores depth of field to its compiled defaults.
 void ResetPictureModeSettings();
+void UpdatePictureModeFocus();
+bool PictureModeClickFocusEnabled();
+bool FocusPictureModeAtPixel(float x, float y);
 } // namespace Poseidon::Dev

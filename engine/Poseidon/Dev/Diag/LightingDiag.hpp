@@ -213,6 +213,7 @@ LightVolumeConeSettings& GLightVolumeCone();
 
 // Call after changing any field above.
 void LampLightSettingsChanged();
+void ResetLightingSettings();
 std::array<float, 3> LampTemperatureColor(float kelvin);
 
 } // namespace Poseidon::Dev

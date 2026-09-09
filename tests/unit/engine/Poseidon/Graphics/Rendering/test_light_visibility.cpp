@@ -2,9 +2,48 @@
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/World/Scene/Object.hpp>
 #include <Poseidon/Dev/Diag/LightingDiag.hpp>
+#include <Poseidon/Graphics/Core/Engine.hpp>
 #include <limits>
 
 using namespace Poseidon;
+
+TEST_CASE("Picture mode defaults to subtle blur and manual focus", "[Graphics][PictureMode]")
+{
+    const Engine::DepthOfFieldSettings settings;
+    CHECK(settings.maxBlurPixels == 4.0f);
+    CHECK_FALSE(settings.enabled);
+    CHECK_FALSE(settings.followPlayer);
+    CHECK_FALSE(settings.focusOnClick);
+}
+
+TEST_CASE("Lighting reset restores defaults and invalidates live lamps", "[Graphics][LightVisibility]")
+{
+    const auto savedLamp = Dev::GLampLightSettings();
+    const auto savedShadow = Dev::GLocalShadowSettings();
+    const auto savedBeam = Dev::GSpotBeam();
+    const auto savedCone = Dev::GLightVolumeCone();
+    const auto savedGlow = GBulbGlow();
+    Dev::GLampLightSettings().generation = 72;
+    Dev::GLampLightSettings().brightnessScale = 7;
+    Dev::GLampLightSettings().colorOverride = true;
+    Dev::GLocalShadowSettings().enabled = false;
+    Dev::GLocalShadowSettings().forceRefresh = true;
+    GBulbGlow().strength = 7;
+    Dev::ResetLightingSettings();
+    CHECK(Dev::GLampLightSettings().generation == 73);
+    CHECK(Dev::GLampLightSettings().brightnessScale == Dev::LampLightSettings{}.brightnessScale);
+    CHECK(Dev::GLampLightSettings().colorOverride == Dev::LampLightSettings{}.colorOverride);
+    CHECK(Dev::GLocalShadowSettings().enabled == Dev::LocalShadowSettings{}.enabled);
+    CHECK_FALSE(Dev::GLocalShadowSettings().forceRefresh);
+    CHECK(GBulbGlow().strength == BulbGlowSettings{}.strength);
+    Dev::ResetLightingSettings();
+    CHECK(Dev::GLampLightSettings().generation == 74);
+    Dev::GLampLightSettings() = savedLamp;
+    Dev::GLocalShadowSettings() = savedShadow;
+    Dev::GSpotBeam() = savedBeam;
+    Dev::GLightVolumeCone() = savedCone;
+    GBulbGlow() = savedGlow;
+}
 
 TEST_CASE("Lamp temperatures are bounded and preserve the custom default", "[Graphics][LightVisibility]")
 {

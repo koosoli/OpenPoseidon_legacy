@@ -11070,6 +11070,8 @@ void EngineWgpu::SyncWaterLookProfile()
             << s.deepColor[0] << ' ' << s.deepColor[1] << ' ' << s.deepColor[2] << '\n';
         out << "coast " << s.colorExt << ' ' << s.coastFade << ' ' << s.foamWidth << ' ' << s.foamIntensity << ' '
             << s.swashAmp << ' ' << s.swashSpeed << ' ' << s.wetHeight << ' ' << s.wetDarken << '\n';
+        out << "whitecaps " << s.waveFoamIntensity << ' ' << s.waveFoamDeepFalloff << ' '
+            << (s.whitecapWindGate ? 1 : 0) << '\n';
         out << "surface " << s.glitterGain << ' ' << s.sssGain << ' ' << s.reflectionGain << '\n';
         // v2 groups. Everything below was absent from the profile, and because a map change
         // resets _waterLook to WaterSettings{} before reloading it, "absent" meant "silently
@@ -11151,6 +11153,12 @@ void EngineWgpu::SyncWaterLookProfile()
                          "default); the code default {:.2f} applies until it is edited in the Water tab",
                          version, map, _waterLook.reflectionGain);
             }
+        }
+        else if (key == "whitecaps")
+        {
+            int windGate = 1;
+            in >> _waterLook.waveFoamIntensity >> _waterLook.waveFoamDeepFalloff >> windGate;
+            _waterLook.whitecapWindGate = windGate != 0;
         }
         else if (key == "optics")
         {

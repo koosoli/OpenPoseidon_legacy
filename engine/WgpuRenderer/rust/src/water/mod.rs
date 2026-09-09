@@ -1643,6 +1643,17 @@ mod tests {
         assert!(!shader.contains("lost_variance = lost_variance"));
     }
 
+    #[test]
+    fn whitecap_gain_is_independent_of_shore_foam_gain() {
+        let shader = include_str!("water.wgsl");
+        assert!(shader.contains("max(persistent_foam, breaker_foam) * wave_scale * raft_coverage"));
+        assert!(!shader.contains("foam_scale * wave_scale"));
+        let cpp = include_str!("../../../EngineWgpu.cpp");
+        assert!(cpp.contains("out << \"whitecaps \" << s.waveFoamIntensity"));
+        assert!(cpp.contains("key == \"whitecaps\""));
+        assert!(cpp.contains("in >> _waterLook.waveFoamIntensity >> _waterLook.waveFoamDeepFalloff >> windGate"));
+    }
+
     // The shoreline foam patterned at distance because its noise is ANALYTIC — no mip chain — so
     // every octave kept full contrast at any number of cells per pixel, and each foam term then
     // thresholded that aliasing into hard speckle at a fixed world frequency. The streak term was
