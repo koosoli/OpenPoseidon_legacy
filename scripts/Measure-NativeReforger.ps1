@@ -18,7 +18,6 @@ $settings=@{
  POSEIDON_REFORGER_STREAM='1'
  WGR_PASS1_STATS='1'
 }
-if ($env:WGR_SHADOW_SOLID_DEPTH) {$settings.WGR_SHADOW_SOLID_DEPTH=$env:WGR_SHADOW_SOLID_DEPTH}
 foreach ($key in $Overrides.Keys) {$settings[$key]=$Overrides[$key]}
 $camera=if ($Pose -eq 'Village') {@(5092.61,3995.64,18.3,200.9,-13.5)} else {@(3800,7960,4,40,-5)}
 & "$PSScriptRoot/farfield-bench.ps1" -Label "$Pose-$Label" -Mission 'tests/perf/missions/perf_field.eden' `
