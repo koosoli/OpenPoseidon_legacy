@@ -4807,11 +4807,20 @@ impl Renderer {
                           sub: &[Plan3dOp],
                           display_2d: bool,
                           want_2d: bool,
-                          depth_write_off: bool| {
+                          depth_write_off: bool,
+                          prepassed_filter: Option<bool>| {
             let mut st3d = crate::gfx3d::Pass3dState::default();
             for op in sub {
                 if matches!(op, Plan3dOp::Draw2D(_)) != want_2d {
                     continue;
+                }
+                if let Some(want_prepassed) = prepassed_filter {
+                    let is_prepassed = match op {
+                        Plan3dOp::Draw3D { draw, .. } => draws3d.get(*draw as usize)
+                            .is_some_and(crate::gfx3d::draw_is_prepassed),
+                        _ => false,
+                    };
+                    if is_prepassed != want_prepassed { continue; }
                 }
                 match op {
                     Plan3dOp::Draw2D(arg) => {
@@ -5255,6 +5264,14 @@ impl Renderer {
                 Some(i) => seg_ops.split_at(i),
                 None => (seg_ops, &seg_ops[seg_ops.len()..]),
             };
+            // Classic transparent sorting can submit promoted cutouts/opaque objects
+            // after Water. Their prepass depth already occludes the atmosphere, but a
+            // late colour write would erase its scattering. Replay that exact set early;
+            // never move glass, decals, particles or post-ClearDepth cockpit segments.
+            static EARLY_OPAQUE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+            let early_opaque = start == 0 && prepassed && water_split.is_some()
+                && *EARLY_OPAQUE.get_or_init(||
+                    !std::env::var("WGR_EARLY_LATE_OPAQUE").is_ok_and(|v| v == "0"));
             // Diagnose colour writes after atmospheric compositing without changing order.
             // Sample throughout a run: its first frames can belong to the loading/menu scene.
             if start == 0 {
@@ -5394,7 +5411,10 @@ impl Renderer {
                     self.gpu_timers
                         .begin_pass(&mut pass, TimerRegion::OpsPreWater);
                 }
-                render_ops(self, &mut pass, ops_pre_water, display_2d, false, prepassed);
+                render_ops(self, &mut pass, ops_pre_water, display_2d, false, prepassed, None);
+                if early_opaque {
+                    render_ops(self, &mut pass, ops_post_water, display_2d, false, prepassed, Some(true));
+                }
                 if time_segment {
                     self.gpu_timers
                         .end_pass(&mut pass, TimerRegion::OpsPreWater);
@@ -5763,6 +5783,7 @@ impl Renderer {
                     display_2d,
                     false,
                     prepassed,
+                    early_opaque.then_some(false),
                 );
                 if time_segment {
                     self.gpu_timers
@@ -5814,7 +5835,7 @@ impl Renderer {
                 // Bracketing the whole pass keeps the region meaning "the 2D work in this
                 // frame" rather than "the last 2D sub-pass".
                 self.gpu_timers.begin_pass(&mut pass, TimerRegion::Ui2d);
-                render_ops(self, &mut pass, seg_ops, display_2d, true, false);
+                render_ops(self, &mut pass, seg_ops, display_2d, true, false, None);
                 self.gpu_timers.end_pass(&mut pass, TimerRegion::Ui2d);
                 drop(pass);
                 // The 2D sub-pass attaches depth Load/Store, so a depth-tested 2D draw can write

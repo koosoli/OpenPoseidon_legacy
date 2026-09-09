@@ -16,6 +16,32 @@ uses measurements as the gate for optional GPU features.
 
 ## Where the critical path stands, 2026-09-01
 
+### Execution overlay, 2026-09-10
+
+The dates in this roadmap matter: historical inventories are not current defect
+counts. The renewed owner scope is tracked in
+[SEPTEMBER9-VISUAL-FOLLOWUP.md](SEPTEMBER9-VISUAL-FOLLOWUP.md), including incomplete
+acceptance and failed reproduction attempts. Priority is small, testable defects
+before expensive architecture changes:
+
+1. Editor input/reset, crawling snow, breaking-wave foam, far terrain albedo.
+   Several slices are installed; remaining road snow, fine-grid editing and
+   reported Fusion blue tiles are not closed by those slices.
+2. Dawn foliage scattering, freefly lights, impact shadows and temporal artifacts.
+   Establish valid scene/camera/profile controls before shader tuning.
+3. Native Reforger forest/material quality and repeated settled-scene performance
+   comparisons. Preserve detail; no unmeasured draw-distance or density cuts.
+4. Large Fusion terrain editing and true caves: bounded tiled collision updates
+   and sparse edit history first; a height field alone cannot represent a cave.
+5. Original Arma 1/2 mission loading: the code-grounded staged plan is
+   [ARMA12-DIRECT-MISSIONS-20260910.md](ARMA12-DIRECT-MISSIONS-20260910.md).
+   External asset mounts already exist; scheduled scripts and mission semantics
+   are independent gates. Do not label map/asset loading as mission compatibility.
+
+GL33 retirement is explicitly out of this near-term scope. Preserve measured
+rejections and OFP behaviour baselines. Full parked-item/capability recensus remains
+work to do, not a completion claim implicit in editing this document.
+
 **2026-09-09 owner-request audit:** the dated historical status below is not a
 blanket completion claim for the subsequent lighting/water/smoke requests.
 [REQUEST-AUDIT-20260909.md](REQUEST-AUDIT-20260909.md) records each request,
@@ -1836,6 +1862,13 @@ This track is that place. It runs in parallel with A–C and blocks none of them
 
 ### D.0 Where each generation stands (documented, not hoped)
 
+**Historical census from 2026-09-01, not a current compatibility matrix.** In
+particular, native Reforger world/model/material loading subsequently landed;
+the original Reforger row below is retained as the starting inventory. Current
+native quality/performance limits are in `decisions/NATIVE-REFORGER-PERF-20260909.md`
+and the visual follow-up ledger. Other cells need a new corpus-backed census
+before changing their acceptance status.
+
 | gen | worlds | models | textures | configs | animations | materials |
 |---|---|---|---|---|---|---|
 | OFP | loads | loads | loads | loads | loads (739/739 RTM) | n/a |
@@ -1875,8 +1908,9 @@ A generation is *gated* when all three hold. None does today.
   material binding at runtime (31,045 RVMATs counted, none checked to bind).
 - Animation is the largest documented gap on three generations at once (BMTR v3/v5, `.anm`) and
   is already scoped in AST-016-017; it is a track-D item, not an asset-track item.
-- Reforger re-export and native load stay parked by the owner (PARKED.md); they are listed here so
-  the park is visible from the track that owns them.
+- Native Reforger loading subsequently landed and its visual/performance work is
+  active again. Converted-corpus re-export is a separate task, not a prerequisite
+  or a replacement for native-path acceptance (see the current PARKED overlay).
 
 ## Long-term continuation to the target engine
 

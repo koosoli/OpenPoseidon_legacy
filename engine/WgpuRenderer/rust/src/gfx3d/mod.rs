@@ -326,6 +326,34 @@ pub(crate) fn env_f32(name: &'static str, default: f32) -> f32 {
     })
 }
 
+/// Only this set already has depth before water/clouds/shafts are composited.
+pub(crate) fn draw_is_prepassed(d: &WgrDraw3D) -> bool {
+    PipelineKey::from_draw(d, false).prepassed()
+}
+
+#[test]
+fn atmospheric_replay_only_moves_prepassed_objects() {
+    let key = PipelineKey {
+        blend: WgrBlend::Opaque as u8,
+        depth: WgrDepthMode::TestWrite as u8,
+        offset: Offset::None,
+        alpha_ref_bits: 0.0f32.to_bits(),
+        skinned: false,
+        depth_write_off: false,
+    };
+    assert!(key.prepassed());
+    assert!(PipelineKey { alpha_ref_bits: 0.5f32.to_bits(), skinned: true, ..key }.prepassed());
+    for blend in [WgrBlend::Alpha, WgrBlend::Shadow] {
+        assert!(!PipelineKey { blend: blend as u8, ..key }.prepassed());
+    }
+    for depth in [WgrDepthMode::None, WgrDepthMode::Test, WgrDepthMode::TestSoft] {
+        assert!(!PipelineKey { depth: depth as u8, ..key }.prepassed());
+    }
+    for offset in [Offset::Decal, Offset::ZBias(1), Offset::Shadow] {
+        assert!(!PipelineKey { offset, ..key }.prepassed());
+    }
+}
+
 impl PipelineKey {
     fn from_draw(d: &WgrDraw3D, skinned: bool) -> Self {
         let zbias_level = ((d.flags & DRAW3D_ZBIAS_MASK) >> DRAW3D_ZBIAS_SHIFT) as u8;

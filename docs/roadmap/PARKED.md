@@ -6,7 +6,31 @@ would unpark it.
 
 Ordered by what it would take to pick up again, cheapest first.
 
-Last updated 2026-08-31.
+Last status reconciliation: 2026-09-10. Dated evidence below remains historical.
+
+## Current owner authorisation, 2026-09-10
+
+The owner explicitly reopened visual/performance improvements and authorised a
+review of this list, small fixes before architectural work. This is not blanket
+acceptance of previously rejected experiments. Current execution and acceptance
+are tracked in [SEPTEMBER9-VISUAL-FOLLOWUP.md](SEPTEMBER9-VISUAL-FOLLOWUP.md).
+
+- **Native Reforger load is implemented, not parked.** Native forest/material
+  quality and performance are active again. Compare settled identical scenes;
+  do not re-export the converted corpus as a substitute for repairing native load.
+- **Render/simulation overlap is implemented.** The August render-thread blockers
+  below record its development history, not the current gate. See PERF-018 and
+  the September 1 roadmap evidence (901/901 matched frames). Later ownership fixes
+  are still relevant; passing the old gate does not excuse new race regressions.
+- **Arma 1/2 original mission compatibility is planning work, not a completed
+  loader feature.** See [ARMA12-DIRECT-MISSIONS-20260910.md](ARMA12-DIRECT-MISSIONS-20260910.md).
+- **GL33 retirement remains deferred.** The owner explicitly places it in the
+  far future. Do not remove it as part of this renewed programme.
+- **Rejected visual changes remain rejected** until new evidence justifies an
+  isolated A/B. Audio listening judgements remain separate from graphics work.
+
+The remaining historical entries still require individual code/evidence review;
+this reconciliation does not claim that every parked item has been implemented.
 
 ---
 
