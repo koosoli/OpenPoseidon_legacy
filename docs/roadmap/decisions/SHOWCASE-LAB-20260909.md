@@ -4,6 +4,12 @@ Owner requested a playable physics/lighting/material test map inspired by the
 Esoterica first-person physics video. Delivered as an optional original addon
 and a Single Mission on Desert, not a new WRP or a renderer replacement.
 
+Final installed runtime: `15e8c7dd`, 2026-09-09 02:04, matched EXE/DLL.
+The addon SHA256 is
+`8E780872A8A5E309D487218B9FCF848F29352B4A1B5239EB3138E888263EA707`;
+the installed copy and generated output match. Final asserted action smoke
+exited 0; `[physics]` repeated with 1,529 assertions / 42 passing cases.
+
 Implementation: `content/showcase/README.md`, `scripts/showcase/build_showcase.py`,
 `scripts/Install-Showcase.ps1`, and mission-local `triPhysicsShowcase` actions.
 42 initial bodies; selected throws/placement, reset/clear, warm/cool moving point
@@ -57,3 +63,7 @@ translucent. That workaround was rejected. ProbeMeshes' builders supplied
 outward normals directly to Shape, although MeshBuild negates them. The direct
 correction stores inward normals, matching the authored gallery and the engine
 contract; ordinary bodies keep their original opaque lighting route.
+Final `stack-impact.png` was inspected on `15e8c7dd`: opaque, correctly shaded
+boxes and sphere, without the severe diagonal self-shading stripes of the
+earlier run. The normal fix affects only procedural diagnostic meshes, not
+retail models or global shader behavior.
