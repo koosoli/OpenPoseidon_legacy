@@ -830,7 +830,9 @@ void RainSystem::UpdateAndDraw()
     // Same hitch rule as smoke: a long frame integrated in one step teleports
     // every drop through the ground; clamp rather than substep.
     deltaT = std::clamp(deltaT, 0.0f, 0.10f);
-    if (deltaT <= 0.0f)
+    // Freefly can move while simulation time is paused. Keep drawing and
+    // replenishing its local snow volume, but integrate no fall/tumble motion.
+    if (deltaT <= 0.0f && !_params.snowflakes)
     {
         return;
     }
