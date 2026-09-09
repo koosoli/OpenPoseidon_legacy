@@ -5,6 +5,12 @@
 namespace Poseidon
 {
 
+class BuildingInterior;
+class Object;
+
+// A nearby cached building is usable only while this point belongs to its room grid.
+bool SmokeCachedBuildingContains(const BuildingInterior* interior, const Object* building, Vector3Par position);
+
 // ---------------------------------------------------------------------------
 // The only way the smoke simulation is allowed to touch the world.
 //

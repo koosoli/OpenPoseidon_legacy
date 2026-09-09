@@ -2,6 +2,8 @@
 #include <catch2/catch_approx.hpp>
 
 #include <Poseidon/World/Effects/BuildingInterior.hpp>
+#include <Poseidon/World/Effects/SmokeWorldQuery.hpp>
+#include <Poseidon/World/Scene/Object.hpp>
 #include <Poseidon/World/Weather/RainVolume.hpp>
 
 #include <utility>
@@ -49,6 +51,26 @@ struct BuildingInteriorTestAccess
 };
 
 } // namespace Poseidon
+
+TEST_CASE("Smoke building cache distinguishes nearby instances and outside air", "[BuildingInterior][Smoke]")
+{
+    const BuildingInterior interior = BuildingInteriorTestAccess::MakeRoomBox(4);
+    Ref<ObjectPlain> first = new ObjectPlain(nullptr, 100);
+    Ref<ObjectPlain> second = new ObjectPlain(nullptr, 101);
+    first->SetPosition(VZero);
+    second->SetPosition(Vector3(2, 0, 0));
+    const Vector3 inFirst(0.5f, 0.5f, 0.5f);
+    const Vector3 inSecond(2.5f, 0.5f, 0.5f);
+    CHECK(SmokeCachedBuildingContains(&interior, first, inFirst));
+    CHECK_FALSE(SmokeCachedBuildingContains(&interior, first, inSecond));
+    CHECK(SmokeCachedBuildingContains(&interior, second, inSecond));
+    CHECK_FALSE(SmokeCachedBuildingContains(&interior, second, inFirst));
+    CHECK_FALSE(SmokeCachedBuildingContains(&interior, first, Vector3(1.5f, 0.5f, 0.5f)));
+    CHECK_FALSE(SmokeCachedBuildingContains(nullptr, first, inFirst));
+    CHECK_FALSE(SmokeCachedBuildingContains(&interior, nullptr, inFirst));
+    const BuildingInterior invalid;
+    CHECK_FALSE(SmokeCachedBuildingContains(&invalid, first, inFirst));
+}
 
 TEST_CASE("Building interior segment classification cannot tunnel through a one-cell roof",
           "[BuildingInterior][Rain][Weather][World]")

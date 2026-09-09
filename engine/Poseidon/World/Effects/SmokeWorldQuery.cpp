@@ -10,6 +10,12 @@
 
 namespace Poseidon
 {
+bool SmokeCachedBuildingContains(const BuildingInterior* interior, const Object* building, Vector3Par position)
+{
+    return interior != nullptr && interior->Valid() && building != nullptr &&
+           interior->RoomOfWorld(building, position) >= 0;
+}
+
 namespace
 {
 
@@ -20,9 +26,8 @@ long long GSweepCount = 0;
 /// The last answer is cached in an OLink, which clears itself if the building
 /// is deleted: smoke asks about points that barely move between frames, and a
 /// full IsInside scan per query would cost what the room lookup was meant to
-/// save. A particle can cross into another building's volume faster than the
-/// 12 m cache radius only by moving through shared walls, which the room data
-/// does not model anyway.
+/// save. Different particles can query adjacent buildings even when neither
+/// moved: proximity alone is not evidence that the cached room owns the point.
 Object* BuildingContaining(Vector3Par pos)
 {
     static OLink<Object> cached;
@@ -31,7 +36,12 @@ Object* BuildingContaining(Vector3Par pos)
     Object* obj = cached.GetLink();
     if (obj != nullptr && (pos - cachedPos).SquareSize() < Square(12.0f))
     {
-        return obj;
+        const Building* building = dyn_cast<const Building>(obj);
+        const BuildingInterior* interior = building ? BuildingInterior::GetFor(building->GetBType()) : nullptr;
+        if (SmokeCachedBuildingContains(interior, obj, pos))
+        {
+            return obj;
+        }
     }
 
     if (GLandscape == nullptr)
