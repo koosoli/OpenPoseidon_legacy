@@ -2,6 +2,29 @@
 
 #import frame::{frame, shadow_map, shadow_samp}
 
+// Correct each texel's reference depth before bilinear filtering. A hardware
+// comparison sampler uses one reference for four depths; biasing that reference
+// for the steepest texel leaks sunlight through thin roofs and wall junctions.
+fn plane_compare(uv: vec2<f32>, layer: i32, reference: f32, gradient: vec2<f32>) -> f32 {
+    let size = vec2<i32>(textureDimensions(shadow_map));
+    let pixel = uv * vec2<f32>(size) - vec2<f32>(0.5);
+    let base = vec2<i32>(floor(pixel));
+    let fraction = fract(pixel);
+    var result = 0.0;
+    for (var y = 0; y < 2; y++) {
+        for (var x = 0; x < 2; x++) {
+            let coordinate = clamp(base + vec2<i32>(x, y), vec2<i32>(0), size - vec2<i32>(1));
+            let centre = (vec2<f32>(coordinate) + vec2<f32>(0.5)) / vec2<f32>(size);
+            let adjusted = reference + clamp(dot(centre - uv, gradient), -0.02, 0.02);
+            let depth = textureLoad(shadow_map, coordinate, layer, 0);
+            let weight = select(1.0 - fraction.x, fraction.x, x == 1)
+                       * select(1.0 - fraction.y, fraction.y, y == 1);
+            result += weight * select(0.0, 1.0, adjusted <= depth);
+        }
+    }
+    return result;
+}
+
 // Cascaded shadow strength in [0,1] for a camera-relative position (0 = lit).
 // Tier select (omni by 3D distance, frustum by eye-depth) with coverage
 // fallthrough, cross-tier blend band, HW-PCF compare, far fade, fog dimming.
@@ -104,10 +127,8 @@ fn shadow_strength(world_pos: vec3<f32>, normal_ws: vec3<f32>, fog: f32,
             // cap the depth change per texel so the taps stay sane.
             let lim = 0.02 / max(ts, 1e-6);
             dz_duv = clamp(dz_duv, vec2<f32>(-lim, -lim), vec2<f32>(lim, lim));
-            // Cover the up-to-one-texel error of the bilinear comparison footprint.
-            let plane_bias = min(2.0 * ts * (abs(dz_duv.x) + abs(dz_duv.y)), 0.01);
             let bias = frame.shadow.ctl.w * f32(c + 1) * f32(c + 1);
-            let ref_z = sc.z - bias - plane_bias;
+            let ref_z = sc.z - bias;
             var lit: f32;
             let pcf = frame.shadow.ctlb.w;
             if (pcf >= 0.5) {
@@ -120,12 +141,12 @@ fn shadow_strength(world_pos: vec3<f32>, normal_ws: vec3<f32>, fog: f32,
                         let off = vec2<f32>(f32(dx), f32(dy)) * o;
                         let wt = (2.0 - abs(f32(dx))) * (2.0 - abs(f32(dy)));
                         let adj = clamp(dot(off, dz_duv), -0.02, 0.02);
-                        sum += wt * textureSampleCompareLevel(shadow_map, shadow_samp, suv + off, c, ref_z + adj);
+                        sum += wt * plane_compare(suv + off, c, ref_z + adj, dz_duv);
                     }
                 }
                 lit = sum / 16.0;
             } else {
-                lit = textureSampleCompareLevel(shadow_map, shadow_samp, suv, c, ref_z);
+                lit = plane_compare(suv, c, ref_z, dz_duv);
             }
             lit_sum += w * lit;
             w_sum += w;

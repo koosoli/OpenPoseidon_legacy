@@ -156,6 +156,26 @@ mod tests {
     }
 
     #[test]
+    fn receiver_plane_filter_does_not_bias_through_thin_occluders() {
+        let source = include_str!("shadow.wgsl");
+        assert!(source.contains("textureLoad(shadow_map, coordinate, layer, 0)"));
+        assert!(!source.contains("let plane_bias"));
+        for slope in [0.0_f32, 0.001, 0.01] {
+            for separation in [-0.0005_f32, 0.0005] {
+                let mut lit = 0.0;
+                for x in [-0.5_f32, 0.5] {
+                    for y in [-0.5_f32, 0.5] {
+                        let reference = 0.5 + slope * (x + y);
+                        let depth = reference + separation;
+                        lit += if reference <= depth { 0.25 } else { 0.0 };
+                    }
+                }
+                assert_eq!(lit, if separation > 0.0 { 1.0 } else { 0.0 });
+            }
+        }
+    }
+
+    #[test]
     fn entry_shaders_compose() {
         compose(
             include_str!("../gfx3d/shader3d.wgsl"),
