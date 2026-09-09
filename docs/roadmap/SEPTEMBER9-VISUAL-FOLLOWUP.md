@@ -46,6 +46,31 @@ confirmed action replaces physics terrain transactionally before visible heights
 settings reset remains non-destructive. Baseline cleared on mission shutdown,
 grid changes refuse mismatched restoration. This does not yet enable Fusion editing.
 
+Installed aeaab9b2 acceptance: terrain-restore-fixed test uses triTerrainPaint
+to decouple height/collision acceptance from desktop mouse movement. Crater
+29.835 -> 23.835 -> 29.835; hill 23.535 -> 27.535 -> 23.535; repeated edit/reset
+also returns 29.835. Exit 0, restored image inspected. First hold-based run was
+invalid: screenshots show the physical cursor moved to the upper right while
+the harness kept sampling its old centre. No engine failure claimed from that run.
+Lifecycle follow-up 00b82a41 clears the backup on World::InitLandscape and cleanup,
+not merely process shutdown. UI confirmation clicking and fresh-world reset
+acceptance still need separate coverage.
+
+aeaab9b2 adds prone-body snow pressure at <=10 Hz, independent of footstep audio.
+Only grounded living prone soldiers affect ground snow; elevated roadway and sea
+checks retained. Capsule-like 0.6m-wide pressure uses the existing persistent
+SnowField, no gameplay RNG or movement changes. 12 snow/terrain cases / 9970
+assertions pass. Installed scripts/Test-SnowCrawl.ps1 exits 0: soldier crawls
+to [9700.16,3605.15,-0.00137329]. crawling.png and trail.png inspected: broad
+depression remains after moving the actor away. Existing angular snow mesh edges,
+physical snow contact and salted-road issues are not resolved by this change.
+
+Breaking-wave foam investigation: persistent red-channel coverage is smoothstepped
+every frame after physical decay/injection. It destroys thin rafts even at zero dt.
+Pending fix retains coverage linearly and makes breaker diffusion dt-based; same
+textures/passes, unchanged shoreline and wake-channel formula. Runtime A/B switch
+WGR_BREAKER_HISTORY_LEGACY=1. Numerical/shader tests and installed images pending.
+
 Owner authorised implementation after backup `codex/backup-asset-obs-20260909-bc766e19`.
 Worktree asset-obs only; foreign Cargo.lock excluded. Screenshots 070351, 070456,
 072225 and 073829 are reproduction evidence, not completion evidence.

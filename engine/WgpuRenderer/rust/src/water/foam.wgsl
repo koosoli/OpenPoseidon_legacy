@@ -1,6 +1,8 @@
 #import water_fft_sampling::fft_aperiodic_uv
 #import water_optics::whitecap_wind_factor
 
+override breaker_history_legacy: f32 = 0.0;
+
 struct InteractionParams { domain: vec4<f32>, previous_domain: vec4<f32>, grid: vec4<f32>, physics: vec4<f32>, misc: vec4<f32>, weather: vec4<f32>, };
 struct WaterParams { world_origin: vec2<f32>, terrain_grid: f32, sea_level: f32, hm_width: u32, hm_height: u32, time: f32, wave_amp: f32, wave_choppy: f32, wave_speed: f32, wave_scale: f32, fade_start: f32, fade_end: f32, warp_amp: f32, spec_power: f32, spec_intensity: f32, alpha: f32, shadow_dim: f32, color_ext: f32, coast_fade: f32, shallow_color: vec4<f32>, deep_color: vec4<f32>, foam_width: f32, foam_intensity: f32, swash_amp: f32, swash_speed: f32, fft_control: vec4<f32>, fft_wind_sea: vec4<f32>, fft_cascade_lengths: vec4<f32>, flow_direction_speed: vec4<f32>, debug_params: vec4<f32>, look_params: vec4<f32>, sea_params: vec4<f32>, underwater_params: vec4<f32>, underwater_gate: vec4<f32>, optics_params: vec4<f32>, };
 @group(0) @binding(0) var<uniform> interaction_params: InteractionParams;
@@ -133,7 +135,8 @@ fn foam_update(@builtin(global_invocation_id) id: vec3<u32>) {
     // continuously re-injected along the hull path, so smearing it destroys the shape that makes
     // it readable), and suspended air disperses fastest of all.
     let history = vec4<f32>(
-        mix(sharp_history.r, spread_history.r, 0.35),
+        mix(sharp_history.r, spread_history.r,
+            select(1.0 - exp(-25.847 * dt), 0.35, breaker_history_legacy > 0.5)),
         mix(sharp_history.g, spread_history.g, 0.22),
         mix(sharp_history.b, spread_history.b, 0.70),
         sharp_history.a);
@@ -162,7 +165,11 @@ fn foam_update(@builtin(global_invocation_id) id: vec3<u32>) {
     // extent, so the result reads as foam that has spread rather than foam that has been blurred.
     // smoothstep's own polynomial preserves 0 and 1 exactly, so downstream thresholds in the water
     // shader keep their meaning.
-    let breaker_foam = breaker_raw * breaker_raw * (3.0 - 2.0 * breaker_raw);
+    // Coverage is persistent state, not display contrast. Repeated smoothstep
+    // extinguishes every thin raft each frame, even at dt=0. Keep contrast in
+    // the surface shader; preserve the old update only for matched A/B captures.
+    let breaker_foam = select(clamp(breaker_raw, 0.0, 1.0),
+        breaker_raw * breaker_raw * (3.0 - 2.0 * breaker_raw), breaker_history_legacy > 0.5);
     let wake_foam = wake_raw * wake_raw * (3.0 - 2.0 * wake_raw);
 
     let edge = min(min(uv.x, uv.y), min(1.0 - uv.x, 1.0 - uv.y));

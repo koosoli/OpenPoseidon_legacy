@@ -24,6 +24,46 @@ mod tests {
         assert_eq!(FOAM_RESOLUTION / INTERACTION_DOMAIN_METERS, 4);
         assert_eq!(FOAM_RESOLUTION / 8, 128);
     }
+
+    #[test]
+    fn breaker_coverage_survives_pause_and_small_continuous_injection() {
+        fn advance(history: f64, dt: f64, source: f64, legacy: bool) -> f64 {
+            let decay = history * (-dt * (5.2 - 2.6 * history.clamp(0.0, 1.0))).exp();
+            let raw = 1.0 - (1.0 - decay) * (-source * dt).exp();
+            if legacy { raw * raw * (3.0 - 2.0 * raw) } else { raw.clamp(0.0, 1.0) }
+        }
+        assert!((advance(0.2, 0.0, 1.0, false) - 0.2).abs() < 1e-12);
+        assert!(advance(0.2, 0.0, 1.0, true) < 0.11);
+        let mut finals = Vec::new();
+        for hz in [60, 120, 240] {
+            let mut coverage = 0.0;
+            let mut legacy = 0.0;
+            for _ in 0..hz * 4 {
+                coverage = advance(coverage, 1.0 / hz as f64, 1.0, false);
+                legacy = advance(legacy, 1.0 / hz as f64, 1.0, true);
+            }
+            assert!(coverage > 0.15 && coverage < 0.22);
+            assert!(legacy < 0.002);
+            finals.push(coverage);
+            for _ in 0..hz * 4 { coverage = advance(coverage, 1.0 / hz as f64, 0.0, false); }
+            assert!(coverage < 1e-6);
+        }
+        assert!((finals[0] - finals[2]).abs() < 0.01);
+        let shader = include_str!("foam.wgsl");
+        assert!(shader.contains("select(clamp(breaker_raw, 0.0, 1.0)"));
+        assert!(shader.contains("select(1.0 - exp(-25.847 * dt), 0.35"));
+    }
+
+    #[test]
+    fn breaker_history_shader_composes_with_its_ab_override() {
+        let mut composer = crate::shaders::build_composer();
+        let module = composer.make_naga_module(naga_oil::compose::NagaModuleDescriptor {
+            source: include_str!("foam.wgsl"),
+            file_path: "water/foam.wgsl",
+            ..Default::default()
+        }).expect("foam shader must compose");
+        assert!(module.overrides.iter().any(|(_, value)| value.name.as_deref() == Some("breaker_history_legacy")));
+    }
 }
 
 impl Foam {
@@ -200,6 +240,8 @@ impl Foam {
             include_str!("foam.wgsl"),
             "water/foam.wgsl",
         );
+        let legacy = std::env::var("WGR_BREAKER_HISTORY_LEGACY").ok().as_deref() == Some("1");
+        let constants = [("breaker_history_legacy", if legacy { 1.0 } else { 0.0 })];
         let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("wgr_water_foam_pipeline"),
             layout: Some(
@@ -211,7 +253,10 @@ impl Foam {
             ),
             module: &shader,
             entry_point: Some("foam_update"),
-            compilation_options: Default::default(),
+            compilation_options: wgpu::PipelineCompilationOptions {
+                constants: &constants,
+                ..Default::default()
+            },
             cache: None,
         });
         Self {
