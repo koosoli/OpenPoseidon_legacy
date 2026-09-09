@@ -1,4 +1,4 @@
-param([string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault', [switch]$Menu)
+param([string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault', [switch]$Menu, [switch]$InspectRoom)
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) { throw 'Use scripts/with-game-lock.sh' }
 $root=Split-Path $PSScriptRoot -Parent
@@ -93,6 +93,12 @@ try {
  Send @{cmd='eval';code='triPhysicsShowcase "roomlight"'} '"OK"'
  Start-Sleep -Seconds 2
  Send @{cmd='screenshot';path=(Join-Path $out 'room-unlit.png')}
+ if ($InspectRoom) {
+  Send @{cmd='eval';code='[getPosASL labRoomRoof,getPosASL labRoomBack,vectorUp labRoomRoof,vectorUp labRoomBack]'}
+  Send @{cmd='exec';code='{_x setVectorUp [0,0,1]} forEach [labRoomRoof,labRoomLeft,labRoomRight,labRoomBack,labDoorLeft,labDoorRight,labRoomNormal,labRoomGloss]'}
+  Start-Sleep -Seconds 2
+  Send @{cmd='screenshot';path=(Join-Path $out 'room-upright.png')}
+ }
  Send @{cmd='exec';code='labCamera camSetPos [9700,3520,35]; labCamera camSetTarget [9700,3600,0]; labCamera camCommit 0'}
  Start-Sleep -Seconds 2
  Send @{cmd='screenshot';path=(Join-Path $out 'terrain-before.png')}

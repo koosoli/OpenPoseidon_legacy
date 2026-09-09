@@ -80,4 +80,28 @@ shadow settings are actually missing. Fixes and tests in progress, not yet deplo
   single-player unsaved prototype, no automatic grenade damage, no tunnels,
   not a general solution for navigation or objects built over excavated ground.
 
-Other queue entries remain open. Automatic satmap is not implemented yet.
+- 8a4161a8 / 9bded011: automatic legacy far albedo built from decoded source
+  tiles, 1024-square with mipmaps, wide cell-edge blending, transition 800-2400m.
+  No baked light/snow, existing authored satellite/Enfusion materials unchanged.
+  `WGR_OFP_SATMAP=0` disables it for A/B. Installed Everon: 241 source tiles,
+  111ms startup bake; Nogova: 302 tiles, 485ms, ~5.3MiB texture including mips.
+  Initial 256-tile cap excluded Nogova and was corrected to a bounded 1024;
+  missing/undecodable source tiles abort the bake rather than inserting white.
+  Installed capture exits normally and is smoother at range, but cannot invent
+  photographed terrain detail absent from OFP source art. 11 cases / 13529
+  assertions passed for satmap/crater/CDLOD before the follow-up.
+- 9bded011: Everon dirt-road sheen reproduced at owner's exact camera pose.
+  `WGR_GLASS_SHEEN=0` ablation removes it; geometry-aware glass classification
+  now excludes OnSurface decals while retaining actual glazing's alpha rule.
+  Installed default-on-glass capture confirms the road no longer has blue sheen.
+  99 cases / 1140 assertions passed for Material/satmap/crater/LightVisibility.
+- Room investigation: explicit vectorUp reads [0,0,1] for both roof and back wall;
+  common ASL elevations are correct. Uprighting makes no difference. Bright
+  edge bands therefore are not explained by slope alignment; investigate
+  shadow leakage/rendered geometry before treating the room as finished.
+- Ocean continuation axial-far vs radial-corner coverage corrected in source;
+  tests/build/runtime acceptance pending for this change.
+
+Other queue entries remain open. In particular local lights currently contribute
+only diffuse/ambient in `lighting.wgsl`; the glossy material's direct specular
+term is sun-only in `shading.wgsl`. Night GLOSS demo is not considered fixed.

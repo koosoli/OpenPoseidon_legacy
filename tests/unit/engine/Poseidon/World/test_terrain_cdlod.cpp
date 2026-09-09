@@ -11,6 +11,15 @@
 
 using namespace Poseidon;
 
+TEST_CASE("ocean continuation reach includes the far frustum corners", "[cdlod][water]")
+{
+    CHECK(CdlodFrustumReach(50000,0,0) == 50000);
+    CHECK(CdlodFrustumReach(50000,1,1) == Catch::Approx(50000*std::sqrt(3.0f)));
+    const float ultraWide = CdlodFrustumReach(50000,2,0.75f);
+    CHECK(ultraWide > 100000);
+    CHECK(ultraWide*ultraWide == Catch::Approx(50000.0f*50000.0f + 100000.0f*100000.0f + 37500.0f*37500.0f));
+}
+
 TEST_CASE("automatic satellite blend keeps constant color and world axes", "[terrain][satmap]")
 {
     const auto constant = [](int,int,float,float) { return std::array<float,3>{12,87,190}; };

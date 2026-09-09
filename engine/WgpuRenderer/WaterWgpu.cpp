@@ -1298,7 +1298,7 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
     {
         const float span = _treeMax - _treeMin;
         const Vector3 p = camera->Position();
-        const float reach = std::min(camera->Far(), _ranges.back());
+        const float reach = std::min(CdlodFrustumReach(camera->Far(),camera->Left(),camera->Top()), _ranges.back());
         if (span > 0.0f && std::isfinite(reach) && reach > 0.0f &&
             std::isfinite(p.X()) && std::isfinite(p.Y()) && std::isfinite(p.Z()))
         {

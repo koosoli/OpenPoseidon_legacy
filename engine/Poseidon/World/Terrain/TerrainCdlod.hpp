@@ -2,10 +2,17 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
 #include <vector>
 
 namespace Poseidon
 {
+// Camera far is an axial plane distance, not the radius of its visible corners.
+inline float CdlodFrustumReach(float farPlane, float tanHalfX, float tanHalfY)
+{
+    return farPlane * std::sqrt(1.0f + tanHalfX*tanHalfX + tanHalfY*tanHalfY);
+}
+
 struct CdlodNode
 {
     float originX, originZ;
