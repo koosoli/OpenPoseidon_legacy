@@ -637,8 +637,6 @@ bool PhysicsShowcaseCommand(const char* command)
         s_showcaseActive = true;
         ClearPhysicsProbes();
         ResetProbeSettings();
-        // Keep the probe tool's unlit diagnostic colour. Material/lighting
-        // comparisons belong to the authored gallery, not these debug meshes.
         s_settings.hotkeys = true;
         s_settings.mass = 2.0f;
         s_settings.radius = 0.3f;
@@ -882,7 +880,7 @@ void DrawPhysicsProbes()
     // PROBE-LIGHT: with the probe lit from inside, its own surface should read as the
     // lamp it now is rather than as a dark ball. IsLight is the engine's own unlit
     // routing (BuildRenderPassDescriptor: LightingMode::Unlit).
-    SetProbeMeshSelfIllum((s_showcaseActive || s_settings.emitLight) && s_settings.selfIllum);
+    SetProbeMeshSelfIllum(s_settings.emitLight && s_settings.selfIllum);
 
     if (s_settings.drawSolid)
     {

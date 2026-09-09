@@ -47,7 +47,9 @@ LODShapeWithShadow* Build(const std::vector<Vector3>& positions, const std::vect
     for (std::size_t i = 0; i < positions.size(); ++i)
     {
         shape->SetPos(static_cast<int>(i)) = positions[i];
-        shape->SetNorm(static_cast<int>(i)) = normals[i];
+        // Shape stores inward normals; MeshBuild negates them for lighting.
+        // The procedural builders below compute outward geometric normals.
+        shape->SetNorm(static_cast<int>(i)) = -normals[i];
         shape->SetClip(static_cast<int>(i), ClipAll);
     }
 

@@ -51,8 +51,9 @@ inspected. Single-player diagnostic bodies are not saved or replicated. General
 Physics-tab overrides can exceed the mission-action budget. No universal FPS
 claim, vehicle-physics migration or closure of the older visual backlog.
 The first lit-probe capture showed severe shading stripes on the diagnostic
-primitives. The existing selfIllum setting only affected emitting lamps, so
-merely keeping its default true did not fix that capture. The campus explicitly
-extends unlit routing to its non-emitting diagnostic probes while active, not a
-claim that lit debug meshes were repaired. Authored gallery materials remain
-lit. This does not change the normal Physics tab outside the showcase.
+primitives. The existing selfIllum setting only affected emitting lamps;
+extending it to ordinary bodies selected additive rendering and made them
+translucent. That workaround was rejected. ProbeMeshes' builders supplied
+outward normals directly to Shape, although MeshBuild negates them. The direct
+correction stores inward normals, matching the authored gallery and the engine
+contract; ordinary bodies keep their original opaque lighting route.
