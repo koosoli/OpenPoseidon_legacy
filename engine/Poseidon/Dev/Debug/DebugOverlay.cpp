@@ -7682,8 +7682,6 @@ void ProcessEvent(const SDL_Event& event)
             const ZeusPoint cursor = ZeusCursorPixel();
             if (s_terrainBrushDragging)
             {
-                const float seconds = std::min(0.25f,float(SDL_GetTicks()-s_terrainBrushTickMs)*0.001f);
-                Defer([cursor,seconds] { Dev::PaintTerrainAtPixel(cursor.x,cursor.y,seconds); });
                 s_terrainBrushDragging = false;
             }
             if (s_zeusLassoDrag)
