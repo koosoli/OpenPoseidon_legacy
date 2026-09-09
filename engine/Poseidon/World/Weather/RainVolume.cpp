@@ -106,6 +106,12 @@ float PrecipitationSpriteLength(bool snowflake, float projectedMotion, float pro
     return snowflake ? projectedWidth : projectedMotion;
 }
 
+float SnowflakeAlpha(float x, float y)
+{
+    const float core = std::clamp((1.0f - x*x - y*y) * 2.0f, 0.0f, 1.0f);
+    return core * core * (3.0f - 2.0f * core);
+}
+
 float RainSystem::EffectiveDensity() const
 {
     if (_mode != RainParticle && _mode != RainBoth)
@@ -486,7 +492,18 @@ void RainSystem::Draw()
     {
         return;
     }
-    Texture* texture = GScene->Preloaded(_params.snowflakes ? Flare0 : TextureRain);
+    if (_params.snowflakes && !_snowTexture)
+    {
+        constexpr int side = 32;
+        std::vector<uint8_t> pixels(side * side * 4, 255);
+        for (int y = 0; y < side; ++y)
+            for (int x = 0; x < side; ++x)
+                pixels[(y*side+x)*4+3] = static_cast<uint8_t>(255.0f * SnowflakeAlpha(
+                    (x+0.5f)*2.0f/side-1.0f, (y+0.5f)*2.0f/side-1.0f));
+        _snowTexture = GEngine->TextBank()->CreateDynamic(side, side, pixels.data(),
+            static_cast<uint32_t>(pixels.size()), true, AlphaStats::Blend);
+    }
+    Texture* texture = _params.snowflakes ? _snowTexture.GetRef() : GScene->Preloaded(TextureRain);
     if (texture == nullptr)
     {
         return;
@@ -579,9 +596,9 @@ void RainSystem::Draw()
         Color colour = tint;
         colour.SetA(_params.opacity * (1.0f - fog));
 
-        // Flare0 encodes its soft mask in RGB on black, unlike the alpha rain
-        // texture. Its native additive blend avoids opaque dark flake quads.
-        const int specials = kRainSpecials | (_params.snowflakes ? IsLight : 0);
+        // Snow is an occluding particle, not an additive light flare. White RGB
+        // plus a soft alpha mask stays legible without black corners or bloom.
+        const int specials = kRainSpecials;
         GEngine->DrawDecalRotated(posp, invNearPos, halfWidthPx, lengthPx * 0.5f, PackedColor(colour), mip,
                                   specials, dirX, dirY);
         ++_stats.streakDecals;

@@ -137,3 +137,12 @@ term is sun-only in `shading.wgsl`. Night GLOSS demo is not considered fixed.
   spot/cube occlusion, no duplicate shadow taps; diffuse-only callers retain
   their wrapper. Build passed before adding the source contract; committed
   build, shader contract and installed GLOSS comparison still pending.
+- 74369a27: matched EXE/DLL built, pushed and installed; local-specular source
+  contract passed, full Showcase harness exits normally. Room GLOSS panel now
+  has visible warm highlights absent in the previous image. Bright room edge
+  bands remain. Exact Everon road camera still has no blue glass sheen.
+- Snowflake legibility follow-up: diagnostic reports roughly 500 drawn flakes
+  but the captured image shows virtually none. Replace additive Flare0 sprites
+  with a 32-square mipmapped white/soft-alpha particle texture, same count and
+  geometry. Texture releases on world/particle reset. Build/test and installed
+  comparison pending; accumulation roof exclusion remains a separate open item.

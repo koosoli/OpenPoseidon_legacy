@@ -2,6 +2,7 @@
 
 #include <Poseidon/Foundation/Math/Math3D.hpp>
 #include <Poseidon/Foundation/Time/Time.hpp>
+#include <Poseidon/Graphics/Textures/TextureBank.hpp>
 
 #include <vector>
 
@@ -161,6 +162,7 @@ Vector3 RainRelaxVelocity(Vector3Par current, Vector3Par target, float responseP
 /// `lookahead` below 1 would leave a gap the probe never covers and is clamped.
 Vector3 RainProbeTarget(Vector3Par position, Vector3Par velocity, float interval, float lookahead);
 float PrecipitationSpriteLength(bool snowflake, float projectedMotion, float projectedWidth);
+float SnowflakeAlpha(float x, float y);
 
 class RainSystem
 {
@@ -211,6 +213,7 @@ public:
 		_drops.clear();
 		_splashes.clear();
 		_spawnAccumulator = 0.0f;
+		_snowTexture = nullptr;
 	}
 
 private:
@@ -229,6 +232,7 @@ private:
 	// rain indoors. RainLegacy remains one radio away for A/B comparison.
 	RainMode _mode = RainParticle;
 	RainParams _params{};
+	Ref<Texture> _snowTexture;
 	RainStats _stats{};
 	float _legacyDensityOverride = -1.0f;
 

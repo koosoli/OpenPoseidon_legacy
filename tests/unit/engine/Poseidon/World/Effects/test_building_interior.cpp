@@ -267,6 +267,11 @@ TEST_CASE("The rain shelter probe reaches at least as far as the drop will fall 
 
 TEST_CASE("Snowflakes retain projected area when looking along their motion", "[Rain][Snow][Weather]")
 {
+    CHECK(SnowflakeAlpha(0, 0) == 1.0f);
+    CHECK(SnowflakeAlpha(1, 0) == 0.0f);
+    CHECK(SnowflakeAlpha(1, 1) == 0.0f);
+    CHECK(SnowflakeAlpha(0.9f, 0) > 0.0f);
+    CHECK(SnowflakeAlpha(0.9f, 0) < 1.0f);
     CHECK(PrecipitationSpriteLength(true, 0.0f, 3.0f) == 3.0f);
     CHECK(PrecipitationSpriteLength(true, 0.2f, 3.0f) == 3.0f);
     CHECK(PrecipitationSpriteLength(true, 5.0f, 3.0f) == 3.0f);
