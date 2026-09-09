@@ -4,6 +4,7 @@
 #include <Poseidon/World/Weather/RainVolume.hpp>
 #include <Poseidon/Dev/Diag/FixedStepStats.hpp>
 #include <Poseidon/Dev/Diag/PhysicsProbe.hpp>
+#include <Poseidon/Dev/Diag/TerrainBrush.hpp>
 #include <Poseidon/UI/Locale/Stringtable/CodepageTranscode.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Foundation/Logging/Logging.hpp>
@@ -857,6 +858,7 @@ static void GetPosArray(AutoArray<Vector3>& tgt, const ParamEntry& cfg)
 
 void World::InitLandscape(Landscape* landscape)
 {
+    Dev::ClearTerrainEditBaseline();
     Dev::EndPhysicsShowcase();
     GSnow().Reset();
     GSnowFlakes.ClearParticles();
@@ -1098,6 +1100,7 @@ const float PreferredGridSizeMP = 25;
 
 void World::CleanUpDeinit()
 {
+    Dev::ClearTerrainEditBaseline();
     // Release procedural precipitation textures while the renderer bank is alive.
     GSnowFlakes.ClearParticles();
     GRain.ClearParticles();
