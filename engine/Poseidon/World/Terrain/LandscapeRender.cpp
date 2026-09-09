@@ -2,6 +2,7 @@
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Dev/Diag/FrameProfiler.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
@@ -1786,12 +1787,31 @@ void Landscape::DrawRect(Scene& scene, const LandBegEnd& bigRect)
         camera.SetAdditionalClipping(0, maxDist);
 #endif
 
+        // Shells are clipped at maxDist already. Do not generate/cache CPU terrain
+        // for the entire far plane just to discard it at that short clip distance.
+        LandBegEnd grassRect;
+        CalculBoundingRect(grassRect, camera, maxDist, _landGrid);
+        grassRect.xBeg &= ~(LandSegmentSize - 1);
+        grassRect.zBeg &= ~(LandSegmentSize - 1);
+        grassRect.xEnd = (grassRect.xEnd + LandSegmentSize - 1) & ~(LandSegmentSize - 1);
+        grassRect.zEnd = (grassRect.zEnd + LandSegmentSize - 1) & ~(LandSegmentSize - 1);
+        saturateMax(grassRect.xBeg, bigRect.xBeg);
+        saturateMax(grassRect.zBeg, bigRect.zBeg);
+        saturateMin(grassRect.xEnd, bigRect.xEnd);
+        saturateMin(grassRect.zEnd, bigRect.zEnd);
+        if (GEngine->GetTerrainRenderer() && GEngine->GetWaterRenderer())
+        {
+            const int segmentsX = std::max(0, grassRect.xEnd - grassRect.xBeg) / LandSegmentSize;
+            const int segmentsZ = std::max(0, grassRect.zEnd - grassRect.zBeg) / LandSegmentSize;
+            _segCache._cache.SetMaxN(segmentsX * segmentsZ);
+        }
+
         const GrassMode& mode = GrassModes[grassMode - 1];
         {
             LandScope scope(GLandStats.grassUs);
             for (int i = 0; i < mode.nLayers; i++)
             {
-                DrawGround(bigRect, scene, mode.layers[i]);
+                DrawGround(grassRect, scene, mode.layers[i]);
             }
             if (LandStatsEnabled())
             {
@@ -2160,6 +2180,13 @@ void Landscape::Draw(Scene& scene)
         LOG_ERROR(World, "Landscape: skipped out-of-range terrain rect {}:{}..{}:{} (camera {}, {}, {}; fog {:.1f})",
                   begEnd.xBeg, begEnd.zBeg, begEnd.xEnd, begEnd.zEnd, cameraPos.X(), cameraPos.Y(), cameraPos.Z(),
                   scene.GetFogMaxRange());
+        return;
+    }
+    // GPU CDLOD renderers bound their own node selection. The legacy segment
+    // allocation limit must not reject a valid 50 km frustum on a fine native grid.
+    if (GEngine->GetTerrainRenderer() && GEngine->GetWaterRenderer())
+    {
+        DrawRect(scene, begEnd);
         return;
     }
     if (begEnd.xEnd - begEnd.xBeg > 0x1000 || begEnd.zEnd - begEnd.zBeg > 0x1000)

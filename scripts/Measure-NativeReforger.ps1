@@ -1,0 +1,25 @@
+param(
+ [string]$Label='baseline',
+ [int]$Repeats=2,
+ [ValidateSet('Village','Coast')][string]$Pose='Village',
+ [hashtable]$Overrides=@{},
+ [string]$ReforgerAddons='C:\Program Files (x86)\Steam\steamapps\common\Arma Reforger\addons'
+)
+$ErrorActionPreference='Stop'
+if (!$env:LOCK_OWNER) {throw 'Run through scripts/with-game-lock.sh'}
+if (!(Test-Path -LiteralPath $ReforgerAddons -PathType Container)) {throw 'Native Reforger archives not found'}
+$root=Split-Path $PSScriptRoot -Parent
+$out=Join-Path $root 'build/native-reforger-perf'
+$settings=@{
+ POSEIDON_USER_DIR=(Join-Path $out 'user')
+ POSEIDON_VSYNC='0'
+ POSEIDON_REFORGER_WORLD='worlds/eden'
+ POSEIDON_REFORGER_OBJECTS='1'
+ POSEIDON_REFORGER_STREAM='1'
+ WGR_PASS1_STATS='1'
+}
+foreach ($key in $Overrides.Keys) {$settings[$key]=$Overrides[$key]}
+$camera=if ($Pose -eq 'Village') {@(5092.61,3995.64,18.3,200.9,-13.5)} else {@(3800,7960,4,40,-5)}
+& "$PSScriptRoot/farfield-bench.ps1" -Label "$Pose-$Label" -Mission 'tests/perf/missions/perf_field.eden' `
+ -World $ReforgerAddons -Freefly $camera -Out $out -Env $settings -Repeats $Repeats `
+ -Width 1920 -Height 1080 -Windowed -WarmupSeconds 90 -TimeoutSeconds 300 -RequireAll

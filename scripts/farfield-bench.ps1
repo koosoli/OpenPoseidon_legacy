@@ -445,7 +445,7 @@ try {
 
         $startedAt = Get-Date
         $process = Start-Process -FilePath $gameExe -ArgumentList $argumentString -WorkingDirectory $GameDir `
-            -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -PassThru
+            -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -WindowStyle Hidden -PassThru
         $ownedPids[[int]$process.Id] = $true
         $exited = $process.WaitForExit($timeout * 1000)
         $timedOut = $false
