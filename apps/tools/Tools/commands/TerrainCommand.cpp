@@ -16,6 +16,7 @@
 #include <Poseidon/IO/Streams/QBStream.hpp>
 #include <Poseidon/Foundation/Types/Pointers.hpp>
 #include <memory>
+#include <fstream>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -920,6 +921,83 @@ void TerrainCommand::Setup(CLI::App& app)
 {
     auto* terrain = app.add_subcommand("terrain", "Inspect and analyze WRP terrain files");
     terrain->require_subcommand(1);
+    {
+        static std::string source, destination;
+        auto* cmd = terrain->add_subcommand("export-rvw4", "Export legacy OPRW 2/3 to editable 4WVR (50 m cells)");
+        cmd->add_option("input", source)->required()->check(CLI::ExistingFile);
+        cmd->add_option("output", destination)->required();
+        cmd->callback([]()
+        {
+            try
+            {
+                WrpReader world;
+                if (!world.Load(source.c_str()) ||
+                    (world.GetFormat() != WrpReader::OPRW_V2 && world.GetFormat() != WrpReader::OPRW_V3))
+                    throw std::runtime_error("Expected legacy OPRW 2/3 world");
+                const int cells = world.GetGridX()*world.GetGridZ();
+                if (world.GetTextureCount() > 512 || world.GetTexIndices().Size() != cells*2)
+                    throw std::runtime_error("Legacy texture table does not fit RVW4");
+                std::ofstream out(destination, std::ios::binary | std::ios::trunc);
+                if (!out) throw std::runtime_error("Cannot create output");
+                auto write = [&](const auto& v) { out.write(reinterpret_cast<const char*>(&v), sizeof(v)); };
+                auto fixed = [&](const char* value, size_t length)
+                {
+                    const std::string text(value);
+                    if (text.size() >= length) throw std::runtime_error("Path exceeds RVW4 field");
+                    out.write(text.data(), text.size());
+                    const std::string padding(length-text.size(), '\0');
+                    out.write(padding.data(), padding.size());
+                };
+                out.write("4WVR",4);
+                const int32_t width=world.GetGridX(), height=world.GetGridZ();
+                write(width); write(height);
+                for (int i=0;i<cells;++i)
+                {
+                    const float h=world.GetHeightmapData()[i]/0.045f;
+                    if (!std::isfinite(h) || h < -32768 || h > 32767)
+                        throw std::runtime_error("Height outside RVW4 range");
+                    const int16_t quantized=static_cast<int16_t>(std::lround(h));
+                    write(quantized);
+                }
+                out.write(reinterpret_cast<const char*>(world.GetTexIndices().Data()),cells*2);
+                for (int i=0;i<512;++i)
+                    fixed(i<world.GetTextureCount() ? static_cast<const char*>(world.GetTextureName(i)) : "",32);
+                for (int i=0;i<world.GetObjectCount();++i)
+                {
+                    const auto& object=world.GetObject(i);
+                    if (!object.hasMatrix) throw std::runtime_error("Object lacks transform");
+                    const auto matrix=ConvertToP(object.transform);
+                    static_assert(sizeof(matrix)==48);
+                    write(matrix);
+                    const int32_t id=i;
+                    write(id);
+                    fixed(object.name,76);
+                }
+                out.close();
+                if (!out) throw std::runtime_error("Output write failed");
+                // Preserve authored terrain semantics and exact float heights for fusion.
+                std::ofstream meta(destination+".meta",std::ios::binary | std::ios::trunc);
+                meta.write("FMD1",4);
+                meta.write(reinterpret_cast<const char*>(world.GetGeography().Data()),cells*4);
+                meta.write(reinterpret_cast<const char*>(world.GetSoundMap().Data()),cells);
+                meta.write(reinterpret_cast<const char*>(world.GetRandom().Data()),cells*4);
+                meta.write(reinterpret_cast<const char*>(world.GetHeightmapData()),cells*4);
+                const int32_t peaks=world.GetMountains().Size();
+                meta.write(reinterpret_cast<const char*>(&peaks),4);
+                for (int i=0;i<peaks;++i)
+                {
+                    const auto& peak=world.GetMountains()[i];
+                    const float xyz[]={peak.X(),peak.Y(),peak.Z()};
+                    meta.write(reinterpret_cast<const char*>(xyz),12);
+                }
+                meta.close();
+                if (!meta) throw std::runtime_error("Metadata write failed");
+                std::cout << "Exported " << destination << ": " << width << "x" << height
+                          << ", " << world.GetObjectCount() << " placements\n";
+            }
+            catch (const std::exception& e) { std::cerr << e.what() << '\n'; std::exit(1); }
+        });
+    }
     {
         static std::string inputFile;
         auto* cmd = terrain->add_subcommand("inspect", "Show terrain file information");

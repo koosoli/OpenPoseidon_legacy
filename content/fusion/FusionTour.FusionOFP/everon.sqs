@@ -1,0 +1,3 @@
+vehicle player setPos [8260,11900,1200]
+vehicle player setVelocity [0,0,0]
+exit

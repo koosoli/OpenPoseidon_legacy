@@ -1,0 +1,22 @@
+version=11;
+class Mission
+{
+ addOns[]={"FusionOFP"}; randomSeed=1234;
+ class Intel {briefingName="OFP Fusion - Five Islands"; briefingDescription="Explore Everon, Malden, Kolgujev, Nogova and Desert Island in one world."; year=1985; month=6; day=21; hour=12; minute=0; startWeather=0.15; forecastWeather=0.15; startFog=0; forecastFog=0;};
+ class Groups
+ {
+  items=1;
+  class Item0
+  {
+   side="WEST";
+   class Vehicles
+   {
+    items=1;
+    class Item0 {position[]={8260,150,11900}; azimut=45; id=0; side="WEST"; vehicle="UH60"; player="PLAYER COMMANDER"; leader=1; skill=1; special="FLY";};
+   };
+  };
+ };
+};
+class Intro {randomSeed=1; class Intel {};};
+class OutroWin {randomSeed=2; class Intel {};};
+class OutroLoose {randomSeed=3; class Intel {};};

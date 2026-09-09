@@ -1,0 +1,9 @@
+; All destinations belong to the same world, not separate mission loads.
+~1
+vehicle player addAction ["Visit Everon", "everon.sqs"]
+vehicle player addAction ["Visit Malden", "malden.sqs"]
+vehicle player addAction ["Visit Kolgujev", "kolgujev.sqs"]
+vehicle player addAction ["Visit Nogova", "nogova.sqs"]
+vehicle player addAction ["Visit Desert Island", "desert.sqs"]
+hint "OFP Fusion: five islands in one world. Fly freely between them, or use the Visit actions. Open the map to see the island names. Dev Tools / Zeus provides free-fly."
+exit
