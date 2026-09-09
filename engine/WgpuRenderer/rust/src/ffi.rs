@@ -219,6 +219,7 @@ pub struct WgrDraw3D {
     pub conform0: WgrVec4, // inv_land_grid, -xf, -zf, bias(=BoundingCenter().y)
     pub conform1: WgrVec4, // y00, y10, d1000, d0100
     pub conform2: WgrVec4, // d1011, d0111, mode, _pad
+    pub mat_local_specular: WgrVec4, // raw local-light specular; appended ABI extension
 }
 
 // One frame-global point or spot light, shared by every 3D draw + terrain (bound
@@ -1569,7 +1570,7 @@ pub struct WgrFrame {
 const _: () = assert!(std::mem::size_of::<WgrVertex2D>() == 32);
 const _: () = assert!(std::mem::size_of::<WgrDraw2DBatch>() == 32);
 const _: () = assert!(std::mem::size_of::<WgrMeshVertex>() == 68);
-const _: () = assert!(std::mem::size_of::<WgrDraw3D>() == 272);
+const _: () = assert!(std::mem::size_of::<WgrDraw3D>() == 288);
 const _: () = assert!(std::mem::size_of::<WgrLight>() == 64);
 const _: () = assert!(std::mem::size_of::<WgrModelSection>() == 24);
 const _: () = assert!(std::mem::size_of::<WgrModelMaterial>() == 280);

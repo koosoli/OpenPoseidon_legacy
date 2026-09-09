@@ -132,8 +132,13 @@ fn local_shadow_lit(world_rel: vec3<f32>, normal_ws: vec3<f32>, to_light_dir: ve
     return mix(1.0, lit, frame.shadow.local_ctl.y);
 }
 
-fn lights_contrib(world_rel: vec3<f32>, normal_ws: vec3<f32>, mat_diffuse: vec3<f32>, mat_ambient: vec3<f32>, linear: f32) -> vec3<f32> {
-    var acc = vec3<f32>(0.0);
+struct LocalLighting {
+    diffuse: vec3<f32>,
+    specular: vec3<f32>,
+};
+
+fn lights_material_contrib(world_rel: vec3<f32>, normal_ws: vec3<f32>, mat_diffuse: vec3<f32>, mat_ambient: vec3<f32>, mat_specular: vec3<f32>, spec_power: f32, linear: f32) -> LocalLighting {
+    var acc: LocalLighting;
     let count = u32(max(frame.cam_pos.w, 0.0));
     for (var i = 0u; i < count; i = i + 1u) {
         let light = lights[i];
@@ -278,14 +283,27 @@ fn lights_contrib(world_rel: vec3<f32>, normal_ws: vec3<f32>, mat_diffuse: vec3<
         let cos_fi = dot(to_light, normal_ws);
         if (cos_fi > 0.0) {
             let ndotl = cos_fi * inverseSqrt(size2);
-            acc += (l_diffuse * mat_diffuse * ndotl + l_ambient * mat_ambient) * (atten * cone);
+            acc.diffuse += (l_diffuse * mat_diffuse * ndotl + l_ambient * mat_ambient) * (atten * cone);
+            if (spec_power > 0.0 && any(mat_specular > vec3<f32>(0.0))) {
+                let view_dir = -world_rel / max(length(world_rel), 1e-4);
+                let half_sum = to_light / max(sqrt(size2), 1e-4) + view_dir;
+                let half_dir = half_sum / max(length(half_sum), 1e-4);
+                let gloss = pow(max(dot(normal_ws, half_dir), 0.0), max(spec_power, 1.0));
+                // Reuse the same spot/cube visibility, no second shadow lookup.
+                acc.specular += l_diffuse * mat_specular * (gloss * atten * cone);
+            }
         } else {
             // Back-facing: ambient only, no cone gate (GL33 parity) -- except for the
             // shadow, which must apply here too. A surface facing away from the light still
             // received its ambient through a wall before this.
             let occl = select(1.0, cone, shadow_slot >= 0);
-            acc += l_ambient * mat_ambient * (atten * occl);
+            acc.diffuse += l_ambient * mat_ambient * (atten * occl);
         }
     }
     return acc;
+}
+
+fn lights_contrib(world_rel: vec3<f32>, normal_ws: vec3<f32>, mat_diffuse: vec3<f32>, mat_ambient: vec3<f32>, linear: f32) -> vec3<f32> {
+    return lights_material_contrib(world_rel, normal_ws, mat_diffuse, mat_ambient,
+                                  vec3<f32>(0.0), 0.0, linear).diffuse;
 }

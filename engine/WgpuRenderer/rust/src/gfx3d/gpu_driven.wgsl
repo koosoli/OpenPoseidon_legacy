@@ -822,6 +822,7 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
     m.light_diffuse = sm.diffuse.rgb;
     m.light_ambient = sm.ambient.rgb;
     m.specular = frame.sun_diffuse.rgb * sm.specular.rgb;
+    m.local_specular = sm.specular.rgb;
     m.spec_power = sm.specular.w;
     // Per-texel specular. SMDI's G is the specular LEVEL and B is gloss -- measured, not
     // folklore: across 40 sampled SMDI textures R and A are constant 255 while G and B vary

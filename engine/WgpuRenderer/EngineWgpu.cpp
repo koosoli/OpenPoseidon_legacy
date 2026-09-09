@@ -5990,6 +5990,8 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     const float specPow = float(_curMaterial.specularPower);
     const float specEn = (specPow > 0.0f) ? sunEn : 0.0f;
     d.mat_specular = {specCol.R() * specEn, specCol.G() * specEn, specCol.B() * specEn, specPow};
+    const Color& localSpec = _curMaterial.specular;
+    d.mat_local_specular = {localSpec.R(), localSpec.G(), localSpec.B(), 0.0f};
     // Foliage class for the direct WGPU path: only real plants get the leaf look, and the vertex
     // shader receives tree vs bush so it can use the matching radial-crown normal. This rides the
     // otherwise unused .w lane; fs_main treats any positive value as vegetation.

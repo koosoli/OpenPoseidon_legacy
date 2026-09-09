@@ -367,10 +367,9 @@ impl PipelineKey {
 // occupies this many matrices in the palette pool and in the shader UBO.
 const PALETTE_SIZE: usize = 128;
 
-// Per-draw material UBO size: six vec4 (emissive, sun_ambient, sun_diffuse,
-// light_diffuse, light_ambient, specular), matching the `Material` struct in
-// shader3d.wgsl.
-const MATERIAL_SIZE: u64 = 112;
+// Eight vec4 lanes, matching Material in shader3d.wgsl, including separate
+// sun-folded and raw local specular so sunset cannot erase lamp highlights.
+const MATERIAL_SIZE: u64 = 128;
 
 // Fixed capacity of the frame-global light storage buffer (group 0). The
 // active count per frame rides in WgrCamera::cam_pos.w; slots beyond it aren't read.
@@ -402,6 +401,23 @@ struct MaterialUbo {
     light_ambient: [f32; 4],
     specular: [f32; 4],
     normal_map: [f32; 4], // x packed texture/sampler, y debug view, z enabled
+    local_specular: [f32; 4],
+}
+
+const _: () = assert!(std::mem::size_of::<MaterialUbo>() == MATERIAL_SIZE as usize);
+
+#[cfg(test)]
+mod local_specular_tests {
+    #[test]
+    fn raw_local_specular_reaches_both_object_paths() {
+        assert!(include_str!("shader3d.wgsl").contains("m.local_specular = material.local_specular.rgb"));
+        assert!(include_str!("gpu_driven.wgsl").contains("m.local_specular = sm.specular.rgb"));
+        let lighting = include_str!("../shaders/lighting.wgsl");
+        assert!(lighting.contains("gloss * atten * cone"));
+        let shading = include_str!("../shaders/shading.wgsl");
+        assert!(shading.contains("m_local_specular = m_local_specular * mat.spec_mask"));
+        assert!(shading.contains("let raw = sun + local.diffuse"));
+    }
 }
 
 // One indexed indirect draw command, the layout every backend's
@@ -7223,12 +7239,12 @@ impl Gfx3d {
                             light_diffuse: d.mat_light_diffuse,
                             light_ambient: d.mat_light_ambient,
                             specular: d.mat_specular,
+                            local_specular: d.mat_local_specular,
                             // w is a small BITFIELD, not a bool: bit 0 = invert the normal
                             // map's Y (the material-debug toggle it already carried), bit 1 =
                             // DZ-003 reflective (the material named an EnvironmentMap), bit 2 =
                             // night emitter (a fixture whose emissive survives the night). Kept
-                            // in this lane because WgrDraw3D is ABI-frozen and MaterialUbo's
-                            // seven vec4s are otherwise fully spoken for.
+                            // in this lane to preserve the existing flag encoding.
                             normal_map: [
                                 f32::from_bits(normal_packed),
                                 (d.misc & 0xff) as f32,

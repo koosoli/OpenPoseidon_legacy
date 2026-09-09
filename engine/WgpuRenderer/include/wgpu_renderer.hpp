@@ -359,6 +359,9 @@ struct WgrDraw3D
     WgrVec4 conform0; /* inv_land_grid, -xf, -zf, bias(=BoundingCenter().y) */
     WgrVec4 conform1; /* y00, y10, d1000, d0100 */
     WgrVec4 conform2; /* d1011, d0111, mode(0=none,1=forest), _pad */
+    /* Raw local-light specular RGB, independent of sun radiance; w reserved.
+     * Appended ABI extension: 272 -> 288 bytes, covered by the layout handshake. */
+    WgrVec4 mat_local_specular;
 };
 
 /* One frame-global point or spot light, shared by every 3D draw + terrain (bound
@@ -1983,7 +1986,7 @@ static_assert(sizeof(WgrBlend) == 4, "WgrBlend must be 4 bytes to match the Rust
 static_assert(sizeof(WgrVertex2D) == 32, "WgrVertex2D layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrMeshVertex) == 68, "WgrMeshVertex must match the engine SVertex layout");
 static_assert(sizeof(WgrDraw2DBatch) == 32, "WgrDraw2DBatch layout must match the Rust #[repr(C)] struct");
-static_assert(sizeof(WgrDraw3D) == 272, "WgrDraw3D layout must match the Rust #[repr(C)] struct");
+static_assert(sizeof(WgrDraw3D) == 288, "WgrDraw3D layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrLight) == 64, "WgrLight layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrTonemap) == 64, "WgrTonemap layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrExposure) == 32, "WgrExposure layout must match the Rust #[repr(C)] struct");

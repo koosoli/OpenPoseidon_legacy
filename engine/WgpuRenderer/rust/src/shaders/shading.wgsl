@@ -10,7 +10,7 @@
 
 #import frame::{frame, gi_irradiance, terrain_sun_shadow, apply_fog, cloud_sun_shadow, sky_irradiance, sky_vis_ao, gtao_ao, gtao_debug_on, gtao_bent_normal_world, gtao_debug_colour, interior_sky_ao, interior_sky_reach, interior_sky_debug_on, interior_sky_ambient_normal, normal_map_cavity, sky_specular_split, spec_power_to_gloss}
 #import shadow::shadow_strength
-#import lighting::lights_contrib
+#import lighting::lights_material_contrib
 #import color::srgb_to_linear
 
 // The six material colour terms shade() consumes (raw gamma-space; shade srgb-decodes on
@@ -25,6 +25,7 @@ struct ShadeMaterial {
     light_diffuse: vec3<f32>,
     light_ambient: vec3<f32>,
     specular: vec3<f32>,
+    local_specular: vec3<f32>,
     spec_power: f32,
     // Per-texel specular level, 1.0 when the material has no specular map. Kept apart from
     // `specular` because it is a LINEAR mask and `specular` is a gamma-space colour: folding
@@ -148,6 +149,7 @@ fn shade(
     var m_light_diffuse = mat.light_diffuse;
     var m_light_ambient = mat.light_ambient;
     var m_specular = mat.specular;
+    var m_local_specular = mat.local_specular;
     if (linear > 0.5) {
         albedo = srgb_to_linear(albedo);
         m_emissive = srgb_to_linear(m_emissive);
@@ -156,9 +158,11 @@ fn shade(
         m_light_diffuse = srgb_to_linear(m_light_diffuse);
         m_light_ambient = srgb_to_linear(m_light_ambient);
         m_specular = srgb_to_linear(m_specular);
+        m_local_specular = srgb_to_linear(m_local_specular);
     }
     // After the decode, for the reason recorded on the field.
     m_specular = m_specular * mat.spec_mask;
+    m_local_specular = m_local_specular * mat.spec_mask;
     // Decal / overlay sections (traffic-sign text, insignia) can carry ZERO vertex normals:
     // the legacy flat ambient (m_sun_ambient) never used the normal, so nobody noticed. The
     // sky-lit path's DIRECTIONAL sky_irradiance(nrm) does — and normalize((0,0,0)) is NaN, which
@@ -489,10 +493,13 @@ fn shade(
         // be reading an SH set the legacy sun never wrote.
         sun = m_emissive + m_sun_ambient * amb_ao * cavity + m_sun_diffuse * ndotl * sun_vis;
     }
-    let local = lights_contrib(world_pos, nrm, m_light_diffuse, m_light_ambient, linear);
-    let raw = sun + local;
+    let local = lights_material_contrib(world_pos, nrm, m_light_diffuse, m_light_ambient,
+                                       m_local_specular, mat.spec_power, linear);
+    let raw = sun + local.diffuse;
     let lit = select(clamp(raw, vec3<f32>(0.0), vec3<f32>(1.0)), max(raw, vec3<f32>(0.0)), linear > 0.5);
     var rgb = albedo * lit;
+    rgb += select(clamp(local.specular, vec3<f32>(0.0), vec3<f32>(1.0)),
+                  max(local.specular, vec3<f32>(0.0)), linear > 0.5);
     // Sun-only Blinn-Phong specular (untextured, additive, before the shadow multiply). The
     // camera is at the origin in camera-relative space, so view_dir = normalize(-world_pos).
     if (mat.spec_power > 0.0) {

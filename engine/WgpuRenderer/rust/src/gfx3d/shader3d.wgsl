@@ -47,9 +47,9 @@ struct Material {
     specular: vec4<f32>,
     // x = bindless Stage1 NOHQ texture/sampler, y = MaterialDebug View,
     // z = Stage1 enabled. NOHQ is decoded strictly as X=A, Y=G, Z reconstructed.
-    // w is a small BITFIELD (see MATFLAG_* below), not a bool: WgrDraw3D is ABI-frozen
-    // and the other six vec4s here are fully spoken for.
+    // w retains the small BITFIELD (see MATFLAG_* below), not a bool.
     normal_map: vec4<f32>,
+    local_specular: vec4<f32>,
 };
 
 // Material.normal_map.w bits.
@@ -913,6 +913,7 @@ fn shade_fragment(in: VsOut) -> vec4<f32> {
     m.light_diffuse = material.light_diffuse.rgb;
     m.light_ambient = material.light_ambient.rgb;
     m.specular = material.specular.rgb;
+    m.local_specular = material.local_specular.rgb;
     m.spec_power = material.specular.w;
     // The per-draw path carries no specular map: this is the ~7 sections a frame that reach
     // DrawSectionTL, not the retained set. 1.0 leaves the flat constant exactly as before.

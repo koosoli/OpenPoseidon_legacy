@@ -123,3 +123,17 @@ shadow settings are actually missing. Fixes and tests in progress, not yet deplo
 Other queue entries remain open. In particular local lights currently contribute
 only diffuse/ambient in `lighting.wgsl`; the glossy material's direct specular
 term is sun-only in `shading.wgsl`. Night GLOSS demo is not considered fixed.
+
+- c59deee1 smoke follow-up built, pushed both safety refs and installed. Rust
+  cloud/smoke independence contract passed; final density/contact tests 3 cases /
+  43 assertions passed. Installed Desert smoke capture exits 0 and still shows
+  drifting smoke and its ground shadow. This fixture already had shadows before;
+  it does not establish acceptance for every reported missing-shadow situation
+  or zero cloud strength through the interactive settings.
+- Local-light specular implementation pending acceptance: separate raw RGB
+  appended to WgrDraw3D (272 -> 288 bytes; both size assertions and automatic
+  layout hash handshake), GPU Material 112 -> 128 bytes, retained/per-draw parity.
+  Sun highlight unchanged. Local highlight reuses existing attenuation and
+  spot/cube occlusion, no duplicate shadow taps; diffuse-only callers retain
+  their wrapper. Build passed before adding the source contract; committed
+  build, shader contract and installed GLOSS comparison still pending.
