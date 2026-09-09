@@ -99,6 +99,13 @@ Vector3 RainProbeTarget(Vector3Par position, Vector3Par velocity, float interval
     return position + velocity * (std::max(interval, 0.0f) * std::max(lookahead, 1.0f));
 }
 
+float PrecipitationSpriteLength(bool snowflake, float projectedMotion, float projectedWidth)
+{
+    // Snow is a billboard, not a velocity streak: looking along its motion must
+    // not collapse it to zero area (and discard every flake when looking down).
+    return snowflake ? projectedWidth : projectedMotion;
+}
+
 float RainSystem::EffectiveDensity() const
 {
     if (_mode != RainParticle && _mode != RainBoth)
@@ -541,9 +548,11 @@ void RainSystem::Draw()
         tailP[0] = project(0, 2) + project(0, 0) * tailP[0] * invWTail;
         tailP[1] = project(1, 2) + project(1, 1) * tailP[1] * invWTail;
 
-        const float dirX = headP[0] - tailP[0];
-        const float dirY = headP[1] - tailP[1];
-        const float lengthPx = std::sqrt(dirX * dirX + dirY * dirY);
+        const float dirX = _params.snowflakes ? 0.0f : headP[0] - tailP[0];
+        const float dirY = _params.snowflakes ? 1.0f : headP[1] - tailP[1];
+        const float flakeWidth = std::fabs(project(0, 0)) * _params.streakWidth * invWMid * invLeft;
+        const float lengthPx = PrecipitationSpriteLength(_params.snowflakes,
+            std::sqrt(dirX * dirX + dirY * dirY), flakeWidth);
         if (lengthPx < 0.5f)
         {
             continue;

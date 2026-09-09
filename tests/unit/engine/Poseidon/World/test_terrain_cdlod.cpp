@@ -158,6 +158,32 @@ TEST_CASE("CDLOD ranges form a geometric ladder", "[terrain][cdlod]")
     REQUIRE(ranges[4] == Catch::Approx(9600.0f));
 }
 
+TEST_CASE("Snow refinement partitions the parent and resolves foot depressions", "[terrain][cdlod][snow]")
+{
+    const CdlodSelection parent{-800, -800, 1600, 0, 100, 200};
+    std::vector<CdlodSelection> patches;
+    RefineCdlodSnow(parent, 0, 0, 8, [&](const auto& patch) { patches.push_back(patch); });
+    double area = 0;
+    for (const auto& patch : patches)
+    {
+        area += double(patch.size) * patch.size;
+        REQUIRE(patch.originX >= parent.originX);
+        REQUIRE(patch.originZ >= parent.originZ);
+        REQUIRE(patch.originX + patch.size <= parent.originX + parent.size);
+        REQUIRE(patch.originZ + patch.size <= parent.originZ + parent.size);
+        if (patch.originX < 8 && patch.originZ < 8 && patch.originX + patch.size > -8 && patch.originZ + patch.size > -8)
+            CHECK(patch.size / 32 <= 0.125f);
+    }
+    CHECK(area == Catch::Approx(1600.0 * 1600.0));
+    CHECK(patches.size() < 512);
+    for (size_t i = 0; i < patches.size(); ++i)
+        for (size_t j = i + 1; j < patches.size(); ++j)
+            CHECK_FALSE(patches[i].originX < patches[j].originX + patches[j].size &&
+                        patches[j].originX < patches[i].originX + patches[i].size &&
+                        patches[i].originZ < patches[j].originZ + patches[j].size &&
+                        patches[j].originZ < patches[i].originZ + patches[i].size);
+}
+
 TEST_CASE("Procedural ocean selection matches a stored flat CDLOD tree", "[terrain][cdlod][ocean]")
 {
     std::vector<CdlodNode> tree;

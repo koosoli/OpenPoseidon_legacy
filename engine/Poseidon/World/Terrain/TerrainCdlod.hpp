@@ -23,6 +23,31 @@ struct CdlodSelection
     float morphStart, morphEnd;
 };
 
+// Refine only the close-up snow window, not the entire authored heightfield.
+// Children partition the parent exactly; no overlapping overlay or depth bias.
+template <typename EmitFn>
+void RefineCdlodSnow(const CdlodSelection& node, float x, float z, float radius, EmitFn&& emit)
+{
+    if (node.size <= 4.0f || node.originX >= x + radius || node.originZ >= z + radius ||
+        node.originX + node.size <= x - radius || node.originZ + node.size <= z - radius)
+    {
+        emit(node);
+        return;
+    }
+    for (int child = 0; child < 4; ++child)
+    {
+        auto patch = node;
+        patch.size *= 0.5f;
+        patch.originX += (child & 1) * patch.size;
+        patch.originZ += (child >> 1) * patch.size;
+        // The normal LOD ladder has no levels below its authored leaf. These
+        // geometric samples must not snap back to that coarse lattice.
+        patch.morphStart = 1.0e10f;
+        patch.morphEnd = 2.0e10f;
+        RefineCdlodSnow(patch, x, z, radius, emit);
+    }
+}
+
 // ranges[L] is the distance out to which level L is the coarsest acceptable detail.
 inline void ComputeCdlodRanges(float baseRange, float ratio, int numLevels, std::vector<float>& ranges)
 {

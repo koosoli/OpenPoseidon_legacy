@@ -265,6 +265,15 @@ TEST_CASE("The rain shelter probe reaches at least as far as the drop will fall 
     REQUIRE(RainProbeTarget(position, velocity, -1.0f, 2.0f).Y() == Catch::Approx(position.Y()));
 }
 
+TEST_CASE("Snowflakes retain projected area when looking along their motion", "[Rain][Snow][Weather]")
+{
+    CHECK(PrecipitationSpriteLength(true, 0.0f, 3.0f) == 3.0f);
+    CHECK(PrecipitationSpriteLength(true, 0.2f, 3.0f) == 3.0f);
+    CHECK(PrecipitationSpriteLength(true, 5.0f, 3.0f) == 3.0f);
+    CHECK(PrecipitationSpriteLength(false, 5.0f, 3.0f) == 5.0f);
+    CHECK(PrecipitationSpriteLength(false, 0.0f, 3.0f) == 0.0f);
+}
+
 TEST_CASE("The rain density the sea is rained on is the one the drops are falling at",
           "[Rain][Weather][World]")
 {

@@ -2806,7 +2806,7 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
         rz1 = std::min(zEnd, landRange) * landGrid;
     }
 
-    auto emit = [&](const CdlodSelection& s)
+    auto emitNode = [&](const CdlodSelection& s)
     {
         WgrTerrainNode node{};
         node.origin = {s.originX, s.originZ};
@@ -2815,6 +2815,17 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
         node.morph_start = s.morphStart;
         node.morph_end = s.morphEnd;
         _selected.push_back(node);
+    };
+
+    const Vector3 snowCamera = camera->Position();
+    const bool refineSnow = snow.enabled && snow.detailedGeometry && snow.Depth() > 0.002f &&
+        std::abs(snowCamera.Y() - land.SurfaceY(snowCamera.X(), snowCamera.Z())) < 15.0f;
+    auto emit = [&](const CdlodSelection& s)
+    {
+        if (refineSnow)
+            RefineCdlodSnow(s, snowCamera.X(), snowCamera.Z(), 8.0f, emitNode);
+        else
+            emitNode(s);
     };
 
     _selected.clear();

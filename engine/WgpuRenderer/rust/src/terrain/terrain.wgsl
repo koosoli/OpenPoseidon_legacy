@@ -56,8 +56,12 @@ struct SnowData {
 @group(1) @binding(4) var<storage, read> snow: SnowData;
 
 fn snow_depth(world_xz: vec2<f32>) -> f32 {
-    let depth = snow.info.w;
-    if (depth <= 0.0) { return 0.0; }
+    if (snow.info.w <= 0.0) { return 0.0; }
+    // Fixed world-space drifts; never camera/time noise. Keep the maximum at
+    // the CPU depth so culling bounds remain conservative.
+    let drift = 0.90 + 0.05 * sin(dot(world_xz, vec2<f32>(0.37, 0.81)))
+                     + 0.05 * sin(dot(world_xz, vec2<f32>(1.73, -0.79)));
+    let depth = snow.info.w * drift;
     let t = (world_xz - snow.info.xy) / max(snow.info.z, 0.125) - vec2<f32>(0.5);
     if (any(t < vec2<f32>(0.0)) || any(t >= vec2<f32>(511.0))) { return depth; }
     let b = vec2<u32>(floor(t));
@@ -725,7 +729,7 @@ fn vs_terrain(
 
     let bare_height = sample_height(world_xz);
     let snow_height = snow_depth(world_xz) * smoothstep(tp.sea_level, tp.sea_level + 0.25, bare_height);
-    let height = bare_height + snow_height - grid_in.z * (size / GRID_N) * skirt_k;
+    let height = bare_height + snow_height - grid_in.z * max((size / GRID_N) * skirt_k, snow.info.w);
     let world_rel = vec3<f32>(world_xz.x, height, world_xz.y) - frame.cam_pos.xyz;
 
     var out: VsOut;

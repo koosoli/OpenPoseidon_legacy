@@ -20,6 +20,7 @@ public:
     static constexpr size_t MaxChunks = 32768;
     bool enabled = false;
     bool falling = true;
+    bool detailedGeometry = true;
     float metresPerMinute = 0.01f;
     float maxDepth = 0.5f;
 

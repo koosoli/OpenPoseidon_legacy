@@ -160,6 +160,7 @@ Vector3 RainRelaxVelocity(Vector3Par current, Vector3Par target, float responseP
 /// is a named function with a test rather than an expression in the loop.
 /// `lookahead` below 1 would leave a gap the probe never covers and is clamped.
 Vector3 RainProbeTarget(Vector3Par position, Vector3Par velocity, float interval, float lookahead);
+float PrecipitationSpriteLength(bool snowflake, float projectedMotion, float projectedWidth);
 
 class RainSystem
 {

@@ -932,6 +932,8 @@ void DrawWeatherTab()
         auto& snow = GSnow();
         ImGui::Checkbox("Enable snow cover (wgpu experiment)", &snow.enabled);
         ImGui::Checkbox("Accumulate new snow", &snow.falling);
+        ImGui::Checkbox("Geometric close-up tracks", &snow.detailedGeometry);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Refines terrain within 8 m of the camera to resolve real snow depressions. Extra geometry only while snow is enabled; collision remains on bare ground.");
         ImGui::SliderFloat("Snowfall (m/min)", &snow.metresPerMinute, 0.0f, 0.2f, "%.3f");
         ImGui::SliderFloat("Maximum snow depth (m)", &snow.maxDepth, 0.05f, 1.0f, "%.2f");
         if (ImGui::Button("Add 10 cm of snow")) snow.Deposit(0.1f);
