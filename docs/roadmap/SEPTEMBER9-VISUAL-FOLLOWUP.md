@@ -659,4 +659,12 @@ Init retains entries and AddSelection skips previously registered selections.
 The regression test creates a real weighted face selection, repeats setup 100
 times, and verifies an additional Skeleton::Prepare also preserves the binding.
 No added per-frame renderer work, no disabled facial animation, no AI changes.
-Runtime acceptance of the fix follows below after the installed A/B check.
+Installed bb6d606c passed the identical mixed-class spawn and seated close-up,
+exit 0. .tmp-face002/after-close.png shows the normal face, versus the visibly
+stretched mouth in before-close.png; both inspected. after.log retains one
+successful binding per model and no duplicate `groups bound=0` reset. Harness:
+.tmp-face002/repro.ps1 (-Name before/after), via scripts/with-game-lock.sh.
+The original campaign cutaway was not replayed; this is an independently
+reproduced matching defect, not a claim that every possible face bug is closed.
+13 targeted face-rig/Shape cases, 403 assertions pass on the committed build.
+Both safety branches pushed; installed stamp bb6d606c; Cargo.lock hash unchanged.
