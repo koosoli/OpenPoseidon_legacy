@@ -3858,6 +3858,7 @@ pub struct Gfx3d {
     // GPU-driven cascade shadow depth pipeline (§6 multi-view, vs_gpu_shadow / fs_gpu_shadow):
     // the retained set cast into each cascade's depth map. Group 0 = the shadow pass UBO.
     gpu_shadow_pipeline: wgpu::RenderPipeline,
+    gpu_shadow_solid_pipeline: Option<wgpu::RenderPipeline>,
     gpu_rsm_pipeline: wgpu::RenderPipeline, // REN-GI-002: the sun proxy
     sun_dir: glam::Vec3,                   // unit direction TO the sun (sky runtime)
     gpu_group1_layout: wgpu::BindGroupLayout,
@@ -4379,7 +4380,17 @@ impl Gfx3d {
             &textures.bindless_layout,
             &textures.sampler_array_layout,
             &conform.layout,
+            false,
         );
+        // Variant 0 has alpha_ref == 0: identical depth without a fragment
+        // invocation or material lookup. Keep the old path for measured A/Bs.
+        let gpu_shadow_solid_pipeline =
+            (std::env::var("WGR_SHADOW_SOLID_DEPTH").as_deref() == Ok("1")).then(|| {
+                cull::build_gpu_shadow_pipeline(
+                    device, composer, &shadow_pass_ubo.layout, &gpu_group1_layout,
+                    &textures.bindless_layout, &textures.sampler_array_layout, &conform.layout, true,
+                )
+            });
         let gpu_rsm_pipeline = cull::build_gpu_rsm_pipeline(
             device,
             composer,
@@ -4576,6 +4587,7 @@ impl Gfx3d {
             gpu_vel_bind: None,
             gpu_vel_bound_gen: u64::MAX,
             gpu_shadow_pipeline,
+            gpu_shadow_solid_pipeline,
             gpu_rsm_pipeline,
             sun_dir: glam::Vec3::Y,
             gpu_group1_layout,
@@ -8360,6 +8372,7 @@ impl Gfx3d {
         self.draw_gpu_driven_with(
             &mut rp,
             &self.gpu_rsm_pipeline,
+            None,
             textures,
             off,
             self.gpu_sky_group1.get(i).and_then(|b| b.as_ref()),
@@ -9452,7 +9465,8 @@ impl Gfx3d {
         args: Option<&wgpu::Buffer>,
         counters: Option<&wgpu::Buffer>,
     ) {
-        self.draw_gpu_driven_with(pass, &self.gpu_shadow_pipeline, textures, pass_ubo_off, group1, args, counters);
+        self.draw_gpu_driven_with(pass, &self.gpu_shadow_pipeline,
+            self.gpu_shadow_solid_pipeline.as_ref(), textures, pass_ubo_off, group1, args, counters);
     }
 
     // The depth draw over a cull view's records with the given pipeline (the shadow one, or
@@ -9462,6 +9476,7 @@ impl Gfx3d {
         &self,
         pass: &mut wgpu::RenderPass<'_>,
         pipeline: &wgpu::RenderPipeline,
+        solid_pipeline: Option<&wgpu::RenderPipeline>,
         textures: &SharedTextures,
         pass_ubo_off: u32,
         group1: Option<&wgpu::BindGroup>,
@@ -9492,11 +9507,13 @@ impl Gfx3d {
                 return;
             };
             for v in 0..cull::CULL_VARIANT_COUNT {
+                pass.set_pipeline(if v == 0 { solid_pipeline.unwrap_or(pipeline) } else { pipeline });
                 let offset = v as u64 * cap as u64 * INDIRECT_ARG_SIZE;
                 pass.multi_draw_indexed_indirect_count(args, offset, counters, v as u64 * 4, cap);
             }
         } else {
             for v in 0..cull::CULL_VARIANT_COUNT {
+                pass.set_pipeline(if v == 0 { solid_pipeline.unwrap_or(pipeline) } else { pipeline });
                 let offset = v as u64 * cap as u64 * INDIRECT_ARG_SIZE;
                 pass.multi_draw_indexed_indirect(args, offset, cap);
             }

@@ -2360,6 +2360,7 @@ pub fn build_gpu_shadow_pipeline(
     bindless_layout: &wgpu::BindGroupLayout,
     sampler_layout: &wgpu::BindGroupLayout,
     conform_layout: &wgpu::BindGroupLayout,
+    solid: bool,
 ) -> wgpu::RenderPipeline {
     let module = crate::shaders::make_module(
         device,
@@ -2414,7 +2415,7 @@ pub fn build_gpu_shadow_pipeline(
             },
         }),
         multisample: wgpu::MultisampleState::default(),
-        fragment: Some(wgpu::FragmentState {
+        fragment: (!solid).then_some(wgpu::FragmentState {
             module: &module,
             entry_point: Some("fs_gpu_shadow"),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
