@@ -1288,7 +1288,7 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
 
     _selected.clear();
     SelectVisibleCdlod(_tree, _rootIndex, _numLevels, _ranges, _morphRegion, *camera, rx0, rz0, rx1, rz1, belowSea,
-                       emit);
+                         emit, 0.0f, true);
 
     // Continue the ocean beyond the fixed map-centred root. Roots are aligned to
     // that existing lattice, never translated with the camera (FFT seams/swimming).
@@ -1298,7 +1298,15 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
     {
         const float span = _treeMax - _treeMin;
         const Vector3 p = camera->Position();
-        const float reach = std::min(CdlodFrustumReach(camera->Far(),camera->Left(),camera->Top()), _ranges.back());
+        float reach = std::min(CdlodFrustumReach(camera->Far(),camera->Left(),camera->Top()), _ranges.back());
+        for (int corner = 0; corner < 4; ++corner)
+        {
+            const Vector3 ray = camera->Direction() +
+                camera->DirectionAside() * (corner & 1 ? camera->Left() : -camera->Left()) +
+                camera->DirectionUp() * (corner & 2 ? camera->Top() : -camera->Top());
+            reach = std::max(reach, CdlodSeaRayReach(p.Y() - _params.sea_level,
+                                                   ray.X(), ray.Y(), ray.Z(), _ranges.back()));
+        }
         if (span > 0.0f && std::isfinite(reach) && reach > 0.0f &&
             std::isfinite(p.X()) && std::isfinite(p.Y()) && std::isfinite(p.Z()))
         {
@@ -1313,7 +1321,7 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
                 const Vector3 centre(n.originX + n.size * 0.5f, _params.sea_level,
                                      n.originZ + n.size * 0.5f);
                 const float radius = std::sqrt(n.size * n.size * 0.5f + padding * padding);
-                return !camera->IsClipped(centre, radius, 1);
+                return !(camera->IsClipped(centre, radius, 1) & ~ClipBack);
             };
             auto emitOcean = [&](const CdlodSelection& s)
             {

@@ -13,6 +13,14 @@ inline float CdlodFrustumReach(float farPlane, float tanHalfX, float tanHalfY)
     return farPlane * std::sqrt(1.0f + tanHalfX*tanHalfX + tanHalfY*tanHalfY);
 }
 
+// A downward camera can see sea beyond the land far plane. A horizon-crossing
+// frustum has unbounded intersections, so retain the existing ocean LOD budget.
+inline float CdlodSeaRayReach(float height, float x, float y, float z, float limit)
+{
+    if (height * y >= 0.0f || std::abs(y) < 1.0e-6f) return limit;
+    return std::min(limit, std::abs(height / y) * std::sqrt(x*x + y*y + z*z));
+}
+
 struct CdlodNode
 {
     float originX, originZ;

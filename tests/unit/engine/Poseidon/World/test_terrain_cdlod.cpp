@@ -340,6 +340,16 @@ TEST_CASE("CDLOD selection stays visible and morphs at each patch's level", "[te
     }
 }
 
+TEST_CASE("Ocean reach follows sea intersections rather than the land far plane", "[terrain][cdlod]")
+{
+    REQUIRE(CdlodSeaRayReach(40000, 0, -1, 0, 300000) == 40000);
+    REQUIRE(CdlodSeaRayReach(40000, 0, -1, 1, 300000) > 56000);
+    REQUIRE(CdlodSeaRayReach(40000, 0, -0.01f, 1, 300000) == 300000);
+    REQUIRE(CdlodSeaRayReach(40000, 0, 1, 1, 300000) == 300000);
+    REQUIRE(CdlodSeaRayReach(40000, 1, 0, 0, 300000) == 300000);
+    REQUIRE(CdlodSeaRayReach(-10, 0, 1, 0, 300000) == 10);
+}
+
 TEST_CASE("CDLOD refines near the camera and coarsens with distance", "[terrain][cdlod]")
 {
     constexpr int numLevels = 6;

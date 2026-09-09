@@ -99,8 +99,13 @@ shadow settings are actually missing. Fixes and tests in progress, not yet deplo
   common ASL elevations are correct. Uprighting makes no difference. Bright
   edge bands therefore are not explained by slope alignment; investigate
   shadow leakage/rendered geometry before treating the room as finished.
-- Ocean continuation axial-far vs radial-corner coverage corrected in source;
-  tests/build/runtime acceptance pending for this change.
+- 8d2fc2f1: ocean axial-far vs radial-corner correction built, 18 cases / 13557
+  assertions passed, pushed both safety refs and installed. Same 2048x857 camera
+  at 80000/7000/40000, heading 0, pitch -80 shows increased coverage but still
+  a stair-step ocean edge. This is partial, not acceptance. CPU water still clips
+  at the land far plane despite the GPU using infinite-far projection. Follow-up
+  removes that water-only clip and derives reach from sea/frustum intersections,
+  bounded by the existing last ocean LOD range. Build/runtime checks pending.
 
 Other queue entries remain open. In particular local lights currently contribute
 only diffuse/ambient in `lighting.wgsl`; the glossy material's direct specular
