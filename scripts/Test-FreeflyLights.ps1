@@ -1,0 +1,64 @@
+param([switch]$LightsOff,
+      [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
+$ErrorActionPreference='Stop'
+if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
+$root=Split-Path $PSScriptRoot -Parent
+$output=Join-Path $root 'build/freefly-lights/acceptance'
+$env:POSEIDON_USER_DIR=Join-Path $output 'user'
+New-Item -ItemType Directory -Force $env:POSEIDON_USER_DIR | Out-Null
+[IO.File]::WriteAllText((Join-Path $env:POSEIDON_USER_DIR 'graphics.cfg'), "qualityPreset=3;`nterrainDetail=4;`nmsaaSamples=4;`ndlssMode=-1;`nvsync=0;`nfpsCap=60;`n")
+[IO.File]::WriteAllText((Join-Path $env:POSEIDON_USER_DIR 'game.cfg'), "preferredViewDistance=50000;`n")
+$env:WGR_AUTO_EXPOSURE='0'
+$env:WGR_EXPOSURE='2'
+$env:WGR_STATIC_LIGHT_TRACE='1'
+$env:POSEIDON_BULB_GLOW_DIAG='1'
+$name=if ($LightsOff) {'truck-off'} else {'truck-on'}
+$log=Join-Path $output "$name.log"
+$listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0)
+$listener.Start(); $port=$listener.LocalEndpoint.Port; $listener.Stop()
+$mission=Join-Path $root 'dev-missions/freefly-lights.eden'
+$p=Start-Process -FilePath (Join-Path $GameDir 'OpenPoseidon.exe') -WorkingDirectory $GameDir -WindowStyle Hidden -PassThru -ArgumentList @('--render','wgpu','--window','--dev','--width','1280','--height','720','--harness',"$port",'--test-mission',('"'+$mission+'"'),'--log-file',('"'+$log+'"'))
+$null=$p.Handle
+$client=$null
+try {
+    $client=[Net.Sockets.TcpClient]::new(); $deadline=[DateTime]::UtcNow.AddSeconds(120)
+    while (!$client.Connected) {
+        try {$client.Connect('127.0.0.1',$port)} catch {
+            if ($p.HasExited -or [DateTime]::UtcNow -gt $deadline) {throw}
+            Start-Sleep -Milliseconds 250
+        }
+    }
+    $stream=$client.GetStream(); $stream.ReadTimeout=30000
+    $reader=[IO.StreamReader]::new($stream)
+    $writer=[IO.StreamWriter]::new($stream,[Text.UTF8Encoding]::new($false)); $writer.AutoFlush=$true
+    function Send($command) {
+        $writer.WriteLine(($command | ConvertTo-Json -Compress))
+        do {
+            $line=$reader.ReadLine()
+            if ($null -eq $line) {throw 'Harness closed'}
+            $r=$line | ConvertFrom-Json
+        } while ($null -eq $r.ok)
+        if (!$r.ok) {throw $line}
+        Write-Host $line
+        return $r
+    }
+    Start-Sleep -Seconds 15
+    $action=if ($LightsOff) {'LIGHT OFF'} else {'LIGHT ON'}
+    $null=Send @{cmd='exec';code="lightTruck action [`"$action`",lightTruck]"}
+    Start-Sleep -Seconds 3
+    $null=Send @{cmd='screenshot';path=(Join-Path $output "$name-player.png")}
+    foreach ($pose in @(@('near',3950,65,-25),@('far',3050,500,-25),@('distant',1000,1500,-26),@('return',3950,65,-25))) {
+        $coords="5092 $($pose[1]) $($pose[2]) 0 $($pose[3])"
+        $r=Send @{cmd='eval';code="triFreeFlyPose `"$coords`""}
+        if ($r.result -ne 'OK') {throw 'Zeus freefly entry refused'}
+        Start-Sleep -Seconds 5
+        $null=Send @{cmd='screenshot';path=(Join-Path $output "$name-$($pose[0]).png")}
+        if ((Send @{cmd='eval';code='alive player'}).result -ne 'true') {throw 'Player must remain alive'}
+    }
+    $null=Send @{cmd='exit'}
+    if (!$p.WaitForExit(20000) -or $p.ExitCode -ne 0) {throw 'Game exit failed'}
+    Write-Host "Inspect light pools and truck bulbs in $output; this capture does not itself prove the reported regression fixed."
+} finally {
+    if ($null -ne $client) {$client.Dispose()}
+    if (!$p.HasExited) {$p.Kill(); $null=$p.WaitForExit(10000)}
+}

@@ -8060,5 +8060,18 @@ void AdoptFreeFlyCamera(CameraVehicle* camera)
     AdoptFreeFlyCameraImpl(camera);
 }
 
+bool SetFreeFlyTestPose(const char* coordinates)
+{
+    const auto pose = ParseZeusGoto(coordinates);
+    if (!coordinates || std::strlen(coordinates) >= sizeof(s_zeusGotoBuf) || pose.count != 5 ||
+        !std::isfinite(pose.x) || !std::isfinite(pose.z) || !std::isfinite(pose.altitude) ||
+        !std::isfinite(pose.azimuth) || !std::isfinite(pose.elevation) ||
+        std::abs(pose.x) > 1000000 || std::abs(pose.z) > 1000000 || std::abs(pose.altitude) > 1000000)
+        return false;
+    snprintf(s_zeusGotoBuf, sizeof(s_zeusGotoBuf), "%s", coordinates);
+    GoToZeusCoordinates();
+    return s_zeusCamera != nullptr;
+}
+
 } // namespace DebugOverlay
 } // namespace Poseidon::Dev

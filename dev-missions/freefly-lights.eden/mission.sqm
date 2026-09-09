@@ -1,0 +1,23 @@
+version=11;
+class Mission
+{
+    randomSeed=42;
+    class Intel { year=1985; month=6; day=21; hour=23; minute=0; startWeather=0; startFog=0; };
+    class Groups
+    {
+        items=1;
+        class Item0
+        {
+            side="WEST";
+            class Vehicles
+            {
+                items=2;
+                class Item0 { position[]={5092.6,16.33,4040}; azimut=180; id=0; side="WEST"; vehicle="SoldierWB"; player="PLAYER COMMANDER"; leader=1; skill=1; };
+                class Item1 { position[]={5092.6,16.33,4022}; azimut=0; id=1; side="WEST"; vehicle="5tTruck"; skill=1; init="lightTruck=this; this setFuel 0"; };
+            };
+        };
+    };
+};
+class Intro { randomSeed=1; };
+class OutroWin { randomSeed=2; };
+class OutroLoose { randomSeed=3; };

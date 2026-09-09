@@ -16,6 +16,12 @@
 using namespace Poseidon::Dev;
 using namespace Poseidon;
 
+GameValue TriFreeFlyPose(const GameState*, GameValuePar arg)
+{
+    const GameStringType pose = static_cast<GameStringType>(arg);
+    return GameValue(DebugOverlay::SetFreeFlyTestPose(pose) ? "OK" : "REFUSED");
+}
+
 GameValue TriPhysicsShowcase(const GameState*, GameValuePar arg)
 {
     const GameStringType command = static_cast<GameStringType>(arg);

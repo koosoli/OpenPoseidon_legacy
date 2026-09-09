@@ -73,5 +73,7 @@ namespace DebugOverlay
     /// Takes no ownership: the camera stays owned by whoever created it, and
     /// clearing is the caller's business (pass nullptr).
     void AdoptFreeFlyCamera(CameraVehicle* camera);
+    // Harness uses the same enter/teleport path as the Zeus coordinate control.
+    bool SetFreeFlyTestPose(const char* coordinates);
 } // namespace DebugOverlay
 } // namespace Poseidon::Dev
