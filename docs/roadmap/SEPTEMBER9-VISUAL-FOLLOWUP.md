@@ -682,5 +682,15 @@ mission-local lifetime and no building/AI path relocation limitations apply.
 No claim of small high-resolution craters on coarse original OFP heightfields.
 The first impact can pause for physics terrain creation, so this remains opt-in.
 Diagnostic triRocketCraters on/off/reset uses the same settings as the panel.
-Build and 4 crater/terrain-patch cases (63 assertions) pass. Installed impact
-acceptance is pending below; .tmp-bulb/rocket-test.ps1 checks LAW off/on/reset.
+Build and 4 crater/terrain-patch cases (63 assertions) pass. Installed 6e71d593
+LAW off/on/reset test exits 0: centre height 29.835 -> 29.835 (off) -> 28.835
+(on) -> 28.835 (reset/off). The rocket is aimed down from measured terrain+15m;
+the earlier absolute 15m spawn was underground and correctly rejected, not a
+valid ground impact test. A config-query diagnostic timed out and was removed
+from the harness. Warheads are gated by indirectHit, not the explosive fraction.
+Log records ground impact [9700,29.835,3600], blast=150, changed=true.
+.tmp-bulb/rocket-test.ps1 and rocket-test.log reproduce the acceptance; screenshots
+rocket-crater.png and rocket-panel.png. The panel's new section is below the brush
+instructions and requires scrolling at the default panel height. UI activation
+uses the same settings as tested triRocketCraters; actual checkbox clicking and
+large salvos were not benchmarked. Installed 6e71d593 pushed to both safety branches.
