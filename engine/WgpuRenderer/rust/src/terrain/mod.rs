@@ -114,13 +114,23 @@ pub struct TerrainConformParams {
 // (baseMult, lodRatio, morphRegion, rasterConformMode) -- see conform_params().
 static CONFORM_CDLOD_ENV: std::sync::OnceLock<(f32, f32, f32, f32)> = std::sync::OnceLock::new();
 
-// Mask dimensions for a heightmap of the given size: `scale`x finer, but never
-// smaller than the heightmap and never past the dimension cap or the device limit.
+// Mask dimensions target `scale`x the heightmap, capped independently of source
+// resolution. Large heightfields must not turn clamp's lower bound above its cap.
 fn shadow_mask_dims(w: u32, h: u32, scale: u32, max_dim: u32) -> (u32, u32) {
     let cap = SHADOW_MASK_DIM_CAP.min(max_dim);
-    let mw = (w.saturating_mul(scale)).clamp(w, cap);
-    let mh = (h.saturating_mul(scale)).clamp(h, cap);
+    let mw = w.saturating_mul(scale.max(1)).min(cap);
+    let mh = h.saturating_mul(scale.max(1)).min(cap);
     (mw, mh)
+}
+
+#[test]
+fn shadow_mask_large_heightfields_keep_a_bounded_shadow_allocation() {
+    assert_eq!(shadow_mask_dims(2048, 2048, 2, 8192), (4096, 4096));
+    assert_eq!(shadow_mask_dims(8192, 8192, 2, 8192), (4096, 4096));
+    assert_eq!(shadow_mask_dims(16384, 8192, 1, 16384), (4096, 4096));
+    assert_eq!(shadow_mask_dims(8192, 8192, 2, 2048), (2048, 2048));
+    assert_eq!(shadow_mask_dims(1024, 512, 0, 8192), (1024, 512));
+    assert_eq!(shadow_mask_dims(8192, 8192, u32::MAX, 8192), (4096, 4096));
 }
 
 // Source heightfield retained for re-running the sky-visibility scan when its ImGui-tuned options
