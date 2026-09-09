@@ -721,11 +721,13 @@ void Scene::ObjectsDrawn()
         flakes.maxDrops = static_cast<int>(900 * GSnow().BoundedFlakeMultiplier());
         flakes.areaRadius = 12.0f;
         flakes.spawnHeight = 8.0f;
-        flakes.fallSpeed = 1.2f;
-        flakes.streakLength = 0.055f;
-        flakes.streakWidth = 0.055f;
+        flakes.fallSpeed = 0.65f;
+        flakes.speedJitter = 0.45f;
+        flakes.streakLength = 0.018f;
+        flakes.streakWidth = 0.018f;
         flakes.red = flakes.green = flakes.blue = 0.95f;
-        flakes.windResponse = 0.6f;
+        flakes.windResponse = 1.0f;
+        flakes.windAcceleration = 3.0f;
         flakes.splashes = false;
         flakes.densityOverride = GSnow().FallingIntensity();
         GSnowFlakes.SetMode(RainParticle);

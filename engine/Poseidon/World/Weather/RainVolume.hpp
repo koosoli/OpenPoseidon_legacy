@@ -163,6 +163,7 @@ Vector3 RainRelaxVelocity(Vector3Par current, Vector3Par target, float responseP
 Vector3 RainProbeTarget(Vector3Par position, Vector3Par velocity, float interval, float lookahead);
 float PrecipitationSpriteLength(bool snowflake, float projectedMotion, float projectedWidth);
 float SnowflakeAlpha(float x, float y);
+bool SnowParticleInViewVolume(Vector3Par particle, Vector3Par camera, float radius, float height);
 
 class RainSystem
 {
@@ -214,6 +215,8 @@ public:
 		_splashes.clear();
 		_spawnAccumulator = 0.0f;
 		_snowTexture = nullptr;
+        _snowVolumeReady = false;
+        _snowTarget = 0;
 	}
 
 private:
@@ -240,6 +243,8 @@ private:
 	{
 		Vector3 position{VZero};
 		float speed = 9.0f;       ///< this drop's terminal velocity, m/s
+        float phase = 0.0f;
+        float size = 1.0f;
 		float velocityX = 0.0f;   ///< retained horizontal velocity, responds to gust changes
 		float velocityZ = 0.0f;
 		float occlusionTimer = 0.0f; ///< s until its next occlusion probe (Sheltered mode)
@@ -260,6 +265,9 @@ private:
 	std::vector<Splash> _splashes;
 	Foundation::Time _lastUpdate;
 	float _spawnAccumulator = 0.0f;
+    bool _snowVolumeReady = false;
+    int _snowTarget = 0;
+    Vector3 _snowVolumeCentre{VZero};
 	Foundation::Time _nextDiagTime; ///< once-per-second stats gate for POSEIDON_TEST_RAIN
 	bool _forceWeatherRain = false; ///< POSEIDON_TEST_RAIN: drive Landscape rain density to full
 	unsigned _rand = 0x9E3779B9u; ///< private stream; do not touch GRandGen

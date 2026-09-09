@@ -276,6 +276,11 @@ TEST_CASE("Snowflakes retain projected area when looking along their motion", "[
     CHECK(SnowflakeAlpha(1, 1) == 0.0f);
     CHECK(SnowflakeAlpha(0.9f, 0) > 0.0f);
     CHECK(SnowflakeAlpha(0.9f, 0) < 1.0f);
+    CHECK(SnowflakeAlpha(0.52f, 0.30f) < SnowflakeAlpha(0.6f, 0));
+    CHECK(SnowParticleInViewVolume(Vector3(1,2,3), VZero, 12, 8));
+    CHECK_FALSE(SnowParticleInViewVolume(Vector3(1,2,3), Vector3(1000,2,3), 12, 8));
+    CHECK_FALSE(SnowParticleInViewVolume(Vector3(1,2,3), Vector3(1,100,3), 12, 8));
+    CHECK_FALSE(SnowParticleInViewVolume(Vector3(13,0,0), VZero, 12, 8));
     CHECK(PrecipitationSpriteLength(true, 0.0f, 3.0f) == 3.0f);
     CHECK(PrecipitationSpriteLength(true, 0.2f, 3.0f) == 3.0f);
     CHECK(PrecipitationSpriteLength(true, 5.0f, 3.0f) == 3.0f);

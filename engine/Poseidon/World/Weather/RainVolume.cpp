@@ -190,8 +190,22 @@ float PrecipitationSpriteLength(bool snowflake, float projectedMotion, float pro
 
 float SnowflakeAlpha(float x, float y)
 {
-    const float core = std::clamp((1.0f - x*x - y*y) * 2.0f, 0.0f, 1.0f);
-    return core * core * (3.0f - 2.0f * core);
+    const float r = std::sqrt(x*x + y*y);
+    if (r >= 1.0f) return 0;
+    // Six feathered arms, not a shaded disc. Small flakes resolve to sparse
+    // coverage; close flakes retain gaps instead of looking like snowballs.
+    const float angle = std::atan2(y, x);
+    const float arm = std::abs(std::sin(angle * 3.0f)) * r;
+    const float branch = std::abs(arm - std::max(0.0f, 0.22f - std::abs(r-0.52f)));
+    const float shape = std::max(std::clamp((0.095f-arm)/0.07f, 0.0f, 1.0f),
+                                 std::clamp((0.055f-branch)/0.045f, 0.0f, 1.0f));
+    return shape * std::clamp((1.0f-r)*5.0f, 0.0f, 1.0f);
+}
+
+bool SnowParticleInViewVolume(Vector3Par particle, Vector3Par camera, float radius, float height)
+{
+    const Vector3 offset = particle-camera;
+    return offset.X()*offset.X()+offset.Z()*offset.Z() <= radius*radius && std::abs(offset.Y()) <= height;
 }
 
 float RainSystem::EffectiveDensity() const
@@ -304,7 +318,34 @@ void RainSystem::Spawn(float deltaT)
     const float rate = static_cast<float>(_params.targetDrops) * EffectiveDensity() / meanLifetime;
     const ISmokeWorldQuery& query = GSmokeWorldQuery();
     const bool probeSpawn = _params.probeAtSpawn && _params.occlusion != RainOcclusionNone;
-    _spawnAccumulator += rate * deltaT;
+    if (_params.snowflakes)
+    {
+        // Camera-following population, but retained flakes remain world-space.
+        // No camera velocity is added to them and a teleport does not leave the
+        // pool full of invisible particles on the other side of the island.
+        const auto culled = std::erase_if(_drops, [&](const Drop& drop) {
+            return !SnowParticleInViewVolume(drop.position, camPos, _params.areaRadius, _params.spawnHeight);
+        });
+        const int target = std::clamp(static_cast<int>(_params.targetDrops * EffectiveDensity()), 0, _params.maxDrops);
+        if (static_cast<int>(_drops.size()) > target) _drops.resize(target);
+        const int missing = target - static_cast<int>(_drops.size());
+        if (!_snowVolumeReady || !SnowParticleInViewVolume(camPos, _snowVolumeCentre,
+                _params.areaRadius*0.5f, _params.spawnHeight*0.5f))
+        {
+            _spawnAccumulator = static_cast<float>(missing);
+            _snowVolumeReady = true;
+            _snowVolumeCentre = camPos;
+        }
+        else
+        {
+            // Failed shelter spawns must NOT be retried as a full pool every
+            // frame indoors. Only camera losses/density increases fill at once.
+            _spawnAccumulator += rate*deltaT + static_cast<float>(culled) + std::max(0, target-_snowTarget);
+            _spawnAccumulator = std::min(_spawnAccumulator, static_cast<float>(missing));
+        }
+        _snowTarget = target;
+    }
+    else _spawnAccumulator += rate * deltaT;
     while (_spawnAccumulator >= 1.0f)
     {
         _spawnAccumulator -= 1.0f;
@@ -319,6 +360,16 @@ void RainSystem::Spawn(float deltaT)
         Drop drop;
         drop.position = camPos + Vector3(r * std::cos(theta), _params.spawnHeight * (0.35f + 0.65f * RandUnit()),
                                          r * std::sin(theta));
+        if (_params.snowflakes)
+        {
+            // Populate the whole visible column, not only a ceiling that takes
+            // seconds to reach the eye after freefly moved somewhere else.
+            const float bottom = std::max(camPos.Y()-_params.spawnHeight,
+                query.GroundHeight(drop.position.X(), drop.position.Z()) + 0.05f);
+            drop.position[1] = bottom + RandUnit()*std::max(0.0f, camPos.Y()+_params.spawnHeight-bottom);
+            drop.phase = RandUnit()*6.2831853f;
+            drop.size = 0.6f + RandUnit()*0.9f;
+        }
         drop.speed = _params.fallSpeed * (1.0f + _params.speedJitter * RandSymmetric());
         if (GWind.IsActive())
         {
@@ -373,7 +424,12 @@ void RainSystem::Simulate(float deltaT)
         Drop& drop = _drops[i];
 
         const Vector3 currentVelocity(drop.velocityX, -drop.speed, drop.velocityZ);
-        const Vector3 targetVelocity = RainTargetVelocity(drop.speed, windX, windZ, _params.windResponse);
+        Vector3 targetVelocity = RainTargetVelocity(drop.speed, windX, windZ, _params.windResponse);
+        if (_params.snowflakes)
+        {
+            drop.phase += deltaT * (0.8f + drop.size*0.4f);
+            targetVelocity += Vector3(0.22f*std::sin(drop.phase), 0, 0.17f*std::cos(drop.phase*1.3f));
+        }
         const Vector3 velocity = RainRelaxVelocity(currentVelocity, targetVelocity, _params.windAcceleration, deltaT);
         drop.velocityX = velocity.X();
         drop.velocityZ = velocity.Z();
@@ -576,7 +632,7 @@ void RainSystem::Draw()
     }
     if (_params.snowflakes && !_snowTexture)
     {
-        constexpr int side = 32;
+        constexpr int side = 64;
         std::vector<uint8_t> pixels(side * side * 4, 255);
         for (int y = 0; y < side; ++y)
             for (int x = 0; x < side; ++x)
@@ -656,9 +712,10 @@ void RainSystem::Draw()
         tailP[0] = project(0, 2) + project(0, 0) * tailP[0] * invWTail;
         tailP[1] = project(1, 2) + project(1, 1) * tailP[1] * invWTail;
 
-        const float dirX = _params.snowflakes ? 0.0f : headP[0] - tailP[0];
-        const float dirY = _params.snowflakes ? 1.0f : headP[1] - tailP[1];
-        const float flakeWidth = std::fabs(project(0, 0)) * _params.streakWidth * invWMid * invLeft;
+        const float dirX = _params.snowflakes ? std::sin(drop.phase*0.7f) : headP[0] - tailP[0];
+        const float dirY = _params.snowflakes ? std::cos(drop.phase*0.7f) : headP[1] - tailP[1];
+        const float sizeScale = _params.snowflakes ? drop.size : 1.0f;
+        const float flakeWidth = std::fabs(project(0, 0)) * _params.streakWidth * sizeScale * invWMid * invLeft;
         const float lengthPx = PrecipitationSpriteLength(_params.snowflakes,
             std::sqrt(dirX * dirX + dirY * dirY), flakeWidth);
         if (lengthPx < 0.5f)
@@ -676,7 +733,8 @@ void RainSystem::Draw()
         posp[1] = project(1, 2) + project(1, 1) * posp[1] * invWMid;
         posp[2] = project(2, 2) + project.Position()[2] * invNearPos;
 
-        const float halfWidthPx = std::fabs(project(0, 0)) * _params.streakWidth * invWMid * invLeft * 0.5f;
+        const float tumble = _params.snowflakes ? 0.65f + 0.35f*std::abs(std::sin(drop.phase)) : 1.0f;
+        const float halfWidthPx = flakeWidth * 0.5f * tumble;
         if (halfWidthPx <= 0.0f)
         {
             continue;
