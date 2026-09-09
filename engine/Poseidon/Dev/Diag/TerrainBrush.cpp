@@ -12,6 +12,18 @@
 namespace Poseidon::Dev
 {
 namespace { TerrainBrushSettings settings; }
+namespace { RocketCraterSettings rocketSettings; }
+RocketCraterSettings& RocketCraters() { return rocketSettings; }
+void ResetRocketCraters() { rocketSettings = RocketCraterSettings{}; }
+bool RocketTerrainImpact(float x, float y, float z)
+{
+    if (!rocketSettings.enabled || !GLandscape || !GWorld || GWorld->GetMode() == GModeNetware ||
+        !std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) return false;
+    const float ground = GLandscape->SurfaceY(x,z);
+    if (!RocketCraterGroundContact(y,ground,GLandscape->GetSeaLevel())) return false;
+    return PaintTerrain(x,z,std::clamp(rocketSettings.radius,8.0f,100.0f),
+                        -std::clamp(rocketSettings.depth,0.1f,8.0f));
+}
 TerrainBrushSettings& TerrainBrush() { return settings; }
 void ResetTerrainBrush() { settings = TerrainBrushSettings{}; }
 

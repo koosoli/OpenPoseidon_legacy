@@ -161,6 +161,17 @@ TEST_CASE("terrain crater is compact smooth and finite", "[physics][crater]")
     CHECK(TerrainCraterDepth(4,7,24,8) == TerrainCraterDepth(-7,4,24,8));
 }
 
+TEST_CASE("Rocket craters reject airbursts and submerged ground", "[physics][crater]")
+{
+    using Poseidon::RocketCraterGroundContact;
+    CHECK(RocketCraterGroundContact(20.1f,20.0f,0.0f));
+    CHECK(RocketCraterGroundContact(19.5f,20.0f,0.0f));
+    CHECK_FALSE(RocketCraterGroundContact(25.0f,20.0f,0.0f));
+    CHECK_FALSE(RocketCraterGroundContact(0.0f,-1.0f,0.0f));
+    CHECK_FALSE(RocketCraterGroundContact(-5.0f,-5.0f,0.0f));
+    CHECK_FALSE(RocketCraterGroundContact(NAN,20.0f,0.0f));
+}
+
 TEST_CASE("Showcase castle leaves a gate and a bounded projectile budget", "[physics][showcase]")
 {
     const auto blocks = Poseidon::Dev::ShowcaseCastleLayout();

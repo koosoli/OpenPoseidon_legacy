@@ -3,6 +3,11 @@
 
 namespace Poseidon
 {
+inline bool RocketCraterGroundContact(float impactY, float groundY, float seaY)
+{
+    return std::isfinite(impactY) && std::isfinite(groundY) && std::isfinite(seaY) &&
+           groundY > seaY && std::abs(impactY-groundY) <= 2.0f;
+}
 // Compact smooth bowl: zero height and slope at the rim, no change outside.
 inline float TerrainCraterDepth(float dx, float dz, float radius, float depth)
 {

@@ -42,6 +42,16 @@ GameValue TriTerrainHeight(const GameState*, GameValuePar arg)
     return GameValue(GLandscape->SurfaceY(x,z));
 }
 
+GameValue TriRocketCraters(const GameState*, GameValuePar arg)
+{
+    const GameStringType mode = static_cast<GameStringType>(arg);
+    if (strcmp(mode,"reset") == 0) ResetRocketCraters();
+    else if (strcmp(mode,"on") == 0) RocketCraters().enabled = true;
+    else if (strcmp(mode,"off") == 0) RocketCraters().enabled = false;
+    else return GameValue("REFUSED");
+    return GameValue("OK");
+}
+
 namespace Poseidon
 {
 extern int gSmDepthCachedCasters;

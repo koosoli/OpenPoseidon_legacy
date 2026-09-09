@@ -1,4 +1,5 @@
 #include <Poseidon/Core/Application.hpp>
+#include <Poseidon/Dev/Diag/TerrainBrush.hpp>
 #include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
@@ -1265,6 +1266,9 @@ void Landscape::ExplosionDammage(EntityAI* owner, Shot* shot, Object* directHit,
 
     ExplosionDammageEffects(owner, shot, directHit, pos, dir, type, enemyDammage);
     GetNetworkManager().ExplosionDammageEffects(owner, shot, directHit, pos, dir, type, enemyDammage);
+    // Apply after damage/effects so their ground queries see the impact's original surface.
+    if (!directHit && shot && dyn_cast<Missile>(shot) && type->explosive > 0)
+        Dev::RocketTerrainImpact(pos.X(),pos.Y(),pos.Z());
 }
 
 #include <Poseidon/Foundation/Containers/StaticArray.hpp>

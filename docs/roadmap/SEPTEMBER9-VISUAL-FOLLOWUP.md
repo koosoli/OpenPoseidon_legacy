@@ -668,3 +668,19 @@ The original campaign cutaway was not replayed; this is an independently
 reproduced matching defect, not a claim that every possible face bug is closed.
 13 targeted face-rig/Shape cases, 403 assertions pass on the committed build.
 Both safety branches pushed; installed stamp bb6d606c; Cargo.lock hash unchanged.
+
+### Optional rocket impact terrain craters
+
+Dev Tools > Map Editor exposes Rockets create terrain craters, radius 8-100 m
+(default 12), depth 0.1-8 m (default 1), initially disabled. A separate reset and
+the master settings reset disable/reset the option without undoing terrain.
+Only explosive Missile ground impacts without a directly hit object enter the
+existing bounded PaintTerrain path, after normal damage/effects. Single-player
+only; near-ground tolerance 2 m, submerged sea terrain and airbursts rejected.
+The existing 1.5-grid-cell minimum radius, 2049-grid limit, collision patching,
+mission-local lifetime and no building/AI path relocation limitations apply.
+No claim of small high-resolution craters on coarse original OFP heightfields.
+The first impact can pause for physics terrain creation, so this remains opt-in.
+Diagnostic triRocketCraters on/off/reset uses the same settings as the panel.
+Build and 4 crater/terrain-patch cases (63 assertions) pass. Installed impact
+acceptance is pending below; .tmp-bulb/rocket-test.ps1 checks LAW off/on/reset.

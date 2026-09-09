@@ -199,6 +199,7 @@ void ResetPanelSettings()
     // Physics probes and their world
     ResetProbeSettings();
     ResetTerrainBrush(); // Settings only: never erase painted terrain from a global UI reset.
+    ResetRocketCraters();
     // Picture Mode
     ResetPictureModeSettings();
     ResetLightingSettings();

@@ -194,6 +194,7 @@ GameValue TriAssertVisibility(const GameState*, GameValuePar);
 GameValue TriDevPanelShow(const GameState*, GameValuePar);
 GameValue TriPhysicsShowcase(const GameState*, GameValuePar);
 GameValue TriTerrainBrushMode(const GameState*, GameValuePar);
+GameValue TriRocketCraters(const GameState*, GameValuePar);
 GameValue TriTerrainHeight(const GameState*, GameValuePar);
 GameValue TriDevPanelSelectShadows(const GameState*);
 GameValue TriDevPanelSelectMemory(const GameState*);
@@ -3231,6 +3232,7 @@ INIT_MODULE(GameStateExtTest, 3)
     GGameState.NewFunction(GameFunction(GameString, "triDevPanelShow", TriDevPanelShow, GameScalar));
     GGameState.NewFunction(GameFunction(GameString, "triPhysicsShowcase", TriPhysicsShowcase, GameString));
     GGameState.NewFunction(GameFunction(GameString, "triTerrainBrushMode", TriTerrainBrushMode, GameString));
+    GGameState.NewFunction(GameFunction(GameString, "triRocketCraters", TriRocketCraters, GameString));
     GGameState.NewFunction(GameFunction(GameScalar, "triTerrainHeight", TriTerrainHeight, GameArray));
     GGameState.NewFunction(GameFunction(GameString, "triRadioDeliveryProbe", TriRadioDeliveryProbe, GameArray));
     GGameState.NewNularOp(GameNular(GameString, "triDevPanelSelectShadows", TriDevPanelSelectShadows));
