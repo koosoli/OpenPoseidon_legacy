@@ -391,3 +391,9 @@ BeginMeshTL snapshots CPU-posed helicopter meshes but not destruction morphs;
 shared dynamic buffers can therefore replace queued wreck geometry with another
 draw's vertices. Extend existing per-frame pose copies to non-tree destroyed
 objects, retaining the skinned/static exclusions. Installed A/B pending.
+
+5e8b7a7e installed A/B exits 0: sep9-building-isolated-wreck/return.png now both
+retain the collapse deformation; adjacent buildings remain intact. This fixes
+the reproduced pose replacement, not the aesthetic of the legacy folded mesh.
+Follow-up also snapshots destroyed objects whose streamed source LOD is static;
+helicopter gating unchanged and GPU-skinned objects still excluded.

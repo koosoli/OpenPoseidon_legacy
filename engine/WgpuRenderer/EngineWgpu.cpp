@@ -4840,7 +4840,9 @@ void EngineWgpu::BeginMeshTL(const Shape& sMesh, int spec, bool dynamic)
     // draws (including shadow views) must not overwrite a queued wreck pose.
     const bool destructionPose = object && object->IsDestroyed() && object->GetDestructType() != DestructTree;
     const bool helicopterPose = captureHelicopterPose && object && dyn_cast<const Helicopter>(object);
-    if ((destructionPose || helicopterPose) && !buf->skinned && buf->isDynamic)
+    // A newly streamed LOD can still have a static source buffer even though
+    // this object is destroyed; the private copy must nevertheless be dynamic.
+    if ((destructionPose || (helicopterPose && buf->isDynamic)) && !buf->skinned)
     {
         AcquireProducerWindow(destructionPose ? "destruction CPU pose" : "helicopter CPU pose");
         if (buf->poseFrame != _cpuPoseFrame)
