@@ -184,6 +184,43 @@ impl RuntimeDiagnostics {
     }
 }
 
+// Hardware support alone is insufficient: wgpu validates against enabled device features.
+fn enabled_format_flags(
+    format: wgpu::TextureFormat,
+    features: wgpu::Features,
+    adapter_flags: wgpu::TextureFormatFeatureFlags,
+) -> wgpu::TextureFormatFeatureFlags {
+    if features.contains(wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES) {
+        adapter_flags
+    } else {
+        format.guaranteed_format_features(features).flags
+    }
+}
+
+#[cfg(test)]
+mod msaa_feature_tests {
+    use super::enabled_format_flags;
+    use wgpu::{Features, TextureFormat, TextureFormatFeatureFlags as Flags};
+
+    #[test]
+    fn hardware_eight_samples_requires_enabled_format_feature() {
+        let hardware = Flags::MULTISAMPLE_X4 | Flags::MULTISAMPLE_X8;
+        let portable = enabled_format_flags(TextureFormat::Rgba16Float, Features::empty(), hardware);
+        assert!(portable.sample_count_supported(4));
+        assert!(!portable.sample_count_supported(8));
+        let enabled = enabled_format_flags(TextureFormat::Rgba16Float,
+            Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES, hardware);
+        assert!(enabled.sample_count_supported(8));
+    }
+
+    #[test]
+    fn enabled_feature_does_not_invent_hardware_support() {
+        let enabled = enabled_format_flags(TextureFormat::Rgba16Float,
+            Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES, Flags::MULTISAMPLE_X4);
+        assert!(!enabled.sample_count_supported(8));
+    }
+}
+
 #[cfg(test)]
 mod planar_coverage_tests {
     use super::{PlanarConfig, screen_coverage_of_water};
@@ -1290,7 +1327,9 @@ impl Renderer {
             | vertex_writable_storage
             | ts_request
             | early_depth
-            | (adapter.features() & wgpu::Features::DEPTH32FLOAT_STENCIL8);
+            | (adapter.features()
+                & (wgpu::Features::DEPTH32FLOAT_STENCIL8
+                    | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES));
         // REN-TEMP-001M: the initialised NGX context + raw handles, present only when
         // the hal device route succeeded AND NGX reported DLSS available. Same
         // strict-fallback rule as the instance: any failure names itself and the
@@ -1529,9 +1568,7 @@ impl Renderer {
             let ok = [color_format, gfx3d::depth_format(&device), gfx3d::NORMAL_FORMAT]
                 .iter()
                 .all(|&f| {
-                    adapter
-                        .get_texture_format_features(f)
-                        .flags
+                    enabled_format_flags(f, device.features(), adapter.get_texture_format_features(f).flags)
                         .sample_count_supported(msaa_req)
                 });
             if ok {

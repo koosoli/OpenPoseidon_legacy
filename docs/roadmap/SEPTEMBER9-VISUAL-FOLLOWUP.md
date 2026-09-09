@@ -166,3 +166,25 @@ term is sun-only in `shading.wgsl`. Night GLOSS demo is not considered fixed.
   qualification correction; final tests and installed indoor A/B pending.
   Limits: valid fire/view shells required, near-window only, no roof-top snow
   geometry, and bare-ground collision remains unchanged.
+- a52b82e4 installed shelter comparison completed normally. Indoor floor is now
+  bare, versus white snow before; sampled steady mask cost 43-234us in this
+  Showcase run. 17 unit cases / 9940 assertions passed. Bright edge bands persist
+  with room lamp off; disabling CSM lights the entire room. Shadow bias/coverage
+  investigation continues. This does not diagnose the user's unspecified crash.
+
+## Additional owner requests, still open
+
+- RTX 3090 Ti black menu: supplied 8c1be95 log explicitly reports DLSS inactive
+  (missing snippet DLL), then invalid 8x Rgba16Float MSAA without enabled
+  TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES. Device feature negotiation fix and
+  enabled-feature fallback test underway; temporary workaround WGR_MSAA=4.
+- Destroyed-building glitches: investigate retained geometry/pose invalidation;
+  no reproducible scene supplied yet. Zeus torch cone not functional.
+- Continuous cursor terrain raise/lower brush; default small explosion craters
+  only if measured performance supports it, not the full-rebuild LAB prototype.
+- Strong blizzard, snowfall-linked overcast without forced thunderstorm.
+- AI: radio must not delay commands; assess overlapping radio, interrupt long
+  binocular use on movement; bounded tactical/team coordination improvements
+  without breaking campaign orders. Not implemented yet.
+- Multi-island OFP world: prefer flat neighbouring islands before a globe;
+  investigate world data/coordinate/import constraints before claiming support.
