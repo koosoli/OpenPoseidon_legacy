@@ -403,6 +403,13 @@ void SetupFaceBoneRig(Skeleton* skeleton, LODShapeWithShadow* lShape, WeightInfo
     {
         return;
     }
+    // MovesTypes with different configs can share the same cached WeightInfo. Rebinding
+    // an existing rig finds only already-claimed vertices and would disable its palette
+    // metadata while leaving those vertices bound to the synthetic bones.
+    if (weights._faceBoneBase >= 0)
+    {
+        return;
+    }
     // Reserve the bones. NewBone is a find-or-append, so this is idempotent, and because it
     // appends, any bone a later-loading RTM introduces lands ABOVE the face bones -- the
     // indices captured by the one-time SetSkinData upload never move under us.

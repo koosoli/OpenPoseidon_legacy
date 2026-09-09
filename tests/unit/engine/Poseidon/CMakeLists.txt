@@ -345,6 +345,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     World/test_terrain_gpu_interp.cpp
     World/test_terrain_cdlod.cpp
     World/test_object_animated_bounds.cpp
+    World/test_face_rig.cpp
     World/test_landscape_object_ids.cpp
     World/test_occlusion_contour.cpp
     World/test_occlusion_sphere_edge.cpp

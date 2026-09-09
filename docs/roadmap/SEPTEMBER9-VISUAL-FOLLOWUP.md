@@ -639,3 +639,24 @@ DebugOverlay outside this change). Confirmed e.g. Probe basis raw Combo already
 exists in f37fb9bb. New MapEditorTab.cpp is included in that guard and uses the
 filter wrappers; no failing controls originate there. Do not report the entire
 suite green. Installed f486ff37, pushed to both safety branches; Cargo.lock untouched.
+
+### Intermittently stretched NPC faces
+
+Reproduced the owner's September 9 07:41 face distortion on installed f486ff37.
+An existing SoldierWB looked normal initially; loading mixed infantry classes
+(including SoldierWMedic) reused the same cached (model, skeleton) WeightInfo.
+SetupFaceBoneRig ran again without a preceding Skeleton::Prepare, found every
+face vertex already claimed, reported `groups bound=0`, and set _faceBoneBase=-1.
+The vertices remained bound to synthetic bones, which were then left at identity
+instead of following the head. A seated close-up reproduces the stretched mouth:
+.tmp-face002/before-close.png, with the duplicate setup in before.log.
+The 80-unit mixed-class spawn is a trigger, not an established NPC-count limit.
+The harness's cargo commands did not reliably seat units inside the helicopter;
+the decisive close-up explicitly positions a soldier and uses the Cargo animation.
+
+Setup now preserves an already built face rig. Skeleton::Prepare is incremental:
+Init retains entries and AddSelection skips previously registered selections.
+The regression test creates a real weighted face selection, repeats setup 100
+times, and verifies an additional Skeleton::Prepare also preserves the binding.
+No added per-frame renderer work, no disabled facial animation, no AI changes.
+Runtime acceptance of the fix follows below after the installed A/B check.
