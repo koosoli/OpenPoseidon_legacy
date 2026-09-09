@@ -127,6 +127,20 @@ constexpr int MaxHullVertices = 64;
 
 class Box3DBackend final : public PhysicsBackend
 {
+    struct TerrainTile
+    {
+        b3BodyId body = b3_nullBodyId;
+        b3HeightFieldData* field = nullptr;
+        std::vector<float> heights;
+    };
+
+    static void DestroyTerrainTile(TerrainTile& tile)
+    {
+        if (b3Body_IsValid(tile.body)) b3DestroyBody(tile.body);
+        if (tile.field) b3DestroyHeightField(tile.field);
+        tile = TerrainTile{};
+    }
+
 public:
     ~Box3DBackend() override { Destroy(); }
 
@@ -177,6 +191,11 @@ public:
             b3DestroyWorld(_world);
         }
         _world = b3_nullWorldId;
+
+        // The world has already released every tile shape's reference.
+        for (auto& tile : _terrainTiles)
+            if (tile.field) b3DestroyHeightField(tile.field);
+        _terrainTiles.clear();
 
         if (_heightField)
         {
@@ -488,6 +507,8 @@ public:
             return false;
         }
         // Publish only after creation succeeded, retaining the old ground on failure.
+        for (auto& tile : _terrainTiles) DestroyTerrainTile(tile);
+        _terrainTiles.clear();
         if (_terrainBodyValid) b3DestroyBody(_terrainBody);
         if (_heightField) b3DestroyHeightField(_heightField);
         _terrainBody = replacementBody;
@@ -500,6 +521,99 @@ public:
 
         _terrainWidth = static_cast<std::uint32_t>(field.width);
         _terrainHeight = static_cast<std::uint32_t>(field.height);
+        _terrainCellSize = field.cellSize;
+        _terrainOriginX = field.originX;
+        _terrainOriginZ = field.originZ;
+        return true;
+    }
+
+    bool PatchTerrain(int x, int z, int width, int height, const float* samples) override
+    {
+        const int columns = static_cast<int>(_terrainWidth);
+        const int rows = static_cast<int>(_terrainHeight);
+        if (!b3World_IsValid(_world) || !samples || columns < 2 || rows < 2 ||
+            columns > 2049 || rows > 2049 || x < 0 || z < 0 || width < 1 || height < 1 ||
+            width > columns || height > rows || x > columns-width || z > rows-height)
+            return false;
+        for (int i = 0; i < width*height; ++i)
+            if (!std::isfinite(samples[i])) return false;
+
+        constexpr int cells = 128;
+        const int tileColumns = (columns-2)/cells+1;
+        const int tileRows = (rows-2)/cells+1;
+        const bool partition = _terrainTiles.empty();
+        std::vector<TerrainTile> staged(static_cast<size_t>(tileColumns)*tileRows);
+        for (int tz = 0; tz < tileRows; ++tz)
+        {
+            for (int tx = 0; tx < tileColumns; ++tx)
+            {
+                const int left = tx*cells, top = tz*cells;
+                const int w = std::min(cells+1, columns-left);
+                const int h = std::min(cells+1, rows-top);
+                // Shared boundary vertices must rebuild both adjacent tiles.
+                if (!partition && (left > x+width-1 || top > z+height-1 || left+w-1 < x || top+h-1 < z))
+                    continue;
+                auto& tile = staged[static_cast<size_t>(tz)*tileColumns+tx];
+                tile.heights.resize(static_cast<size_t>(w)*h);
+                for (int iz = 0; iz < h; ++iz)
+                    for (int ix = 0; ix < w; ++ix)
+                    {
+                        const int gx = left+ix, gz = top+iz;
+                        tile.heights[static_cast<size_t>(iz)*w+ix] =
+                            gx >= x && gx < x+width && gz >= z && gz < z+height
+                            ? samples[(gz-z)*width+gx-x] : _heights[static_cast<size_t>(gz)*columns+gx];
+                    }
+                const auto limits = std::minmax_element(tile.heights.begin(), tile.heights.end());
+                b3HeightFieldDef def{};
+                def.heights = tile.heights.data();
+                def.scale = b3Vec3{_terrainCellSize, 1, _terrainCellSize};
+                def.countX = w;
+                def.countZ = h;
+                def.globalMinimumHeight = *limits.first;
+                def.globalMaximumHeight = *limits.second;
+                def.clockwiseWinding = false;
+                tile.field = b3CreateHeightField(&def);
+                if (tile.field)
+                {
+                    auto body = b3DefaultBodyDef();
+                    body.type = b3_staticBody;
+                    body.position = b3Vec3{_terrainOriginX+left*_terrainCellSize, 0,
+                                           _terrainOriginZ+top*_terrainCellSize};
+                    tile.body = b3CreateBody(_world, &body);
+                    if (b3Body_IsValid(tile.body))
+                    {
+                        auto shape = b3DefaultShapeDef();
+                        shape.filter = ContactFilterFor(ColliderFlags::All);
+                        if (b3Shape_IsValid(b3CreateHeightFieldShape(tile.body, &shape, tile.field)))
+                            continue;
+                    }
+                }
+                for (auto& candidate : staged) DestroyTerrainTile(candidate);
+                return false;
+            }
+        }
+        // Publish only once every replacement exists; failed edits retain old ground.
+        if (partition)
+        {
+            if (_terrainBodyValid) b3DestroyBody(_terrainBody);
+            if (_heightField) b3DestroyHeightField(_heightField);
+            _heightField = nullptr;
+            _terrainBody = b3_nullBodyId;
+            _terrainBodyValid = false;
+            _terrainTiles = std::move(staged);
+        }
+        else
+            for (size_t i = 0; i < staged.size(); ++i)
+                if (staged[i].field)
+                {
+                    DestroyTerrainTile(_terrainTiles[i]);
+                    _terrainTiles[i] = std::move(staged[i]);
+                }
+        for (int iz = 0; iz < height; ++iz)
+            std::copy_n(samples+iz*width, width, _heights.data()+static_cast<size_t>(z+iz)*columns+x);
+        for (const Slot& slot : _slots)
+            if (b3Body_IsValid(slot.body) && b3Body_GetType(slot.body) == b3_dynamicBody)
+                b3Body_SetAwake(slot.body, true);
         return true;
     }
 
@@ -934,9 +1048,12 @@ public:
         stats.queryOnlyShapes = _queryOnlyShapes;
         stats.hullFailures = _hullFailures;
         stats.probes = static_cast<std::uint32_t>(_probes.size());
-        stats.terrainRegistered = _heightField != nullptr;
+        stats.terrainRegistered = _heightField != nullptr || !_terrainTiles.empty();
         stats.terrainWidth = _terrainWidth;
         stats.terrainHeight = _terrainHeight;
+        stats.terrainCellSize = stats.terrainRegistered ? _terrainCellSize : 0;
+        stats.terrainOriginX = stats.terrainRegistered ? _terrainOriginX : 0;
+        stats.terrainOriginZ = stats.terrainRegistered ? _terrainOriginZ : 0;
         // Asked of the LIVE world rather than of b3DefaultWorldDef, because the
         // question 8.4 cares about is what this world will actually do inside a
         // step -- and b3World_SetWorkerCount can change that after creation. A
@@ -1103,6 +1220,8 @@ private:
     b3BodyId           _terrainBody = b3_nullBodyId;
     bool               _terrainBodyValid = false;
     std::vector<float> _heights;
+    std::vector<TerrainTile> _terrainTiles;
+    float _terrainCellSize = 1, _terrainOriginX = 0, _terrainOriginZ = 0;
 
     /// PHY-020 probes, kept apart from the static world so ClearProbes cannot
     /// take a building with it and the debug draw never has to guess which body

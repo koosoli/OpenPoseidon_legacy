@@ -15,8 +15,84 @@
 #include <memory>
 #include <cmath>
 #include <vector>
+#include <limits>
+#include <chrono>
+#include <cstdio>
 
 using namespace Poseidon::Physics;
+
+TEST_CASE("regional terrain collision edits cross tile seams and survive replacement", "[physics][terrain-patch]")
+{
+    auto backend = CreatePhysicsBackend();
+    REQUIRE(backend->Create());
+    constexpr int n = 257;
+    std::vector<float> flat(n*n, 0.0f);
+    TerrainField field;
+    field.heights = flat.data();
+    field.width = field.height = n;
+    field.cellSize = 1;
+    REQUIRE(backend->SetTerrain(field));
+    std::vector<float> patch(17*17, -4.0f);
+    REQUIRE(backend->PatchTerrain(120, 120, 17, 17, patch.data()));
+    CHECK(backend->GetStats().terrainRegistered);
+    for (float x : {127.5f, 128.0f, 128.5f})
+        for (float z : {127.5f, 128.0f, 128.5f})
+        {
+            CHECK_FALSE(backend->RayHitAnything(Vector3(x,1,z), Vector3(x,-1,z), QueryFilter{}));
+            CHECK(backend->RayHitAnything(Vector3(x,1,z), Vector3(x,-6,z), QueryFilter{}));
+        }
+    CHECK(backend->RayHitAnything(Vector3(64,1,64), Vector3(64,-1,64), QueryFilter{}));
+    CHECK_FALSE(backend->PatchTerrain(250, 120, 17, 17, patch.data()));
+    patch[0] = std::numeric_limits<float>::quiet_NaN();
+    CHECK_FALSE(backend->PatchTerrain(120, 120, 17, 17, patch.data()));
+    CHECK_FALSE(backend->RayHitAnything(Vector3(128,1,128), Vector3(128,-1,128), QueryFilter{}));
+    std::fill(patch.begin(), patch.end(), 0.0f);
+    REQUIRE(backend->PatchTerrain(120, 120, 17, 17, patch.data()));
+    CHECK(backend->RayHitAnything(Vector3(128,1,128), Vector3(128,-1,128), QueryFilter{}));
+    REQUIRE(backend->SetTerrain(field));
+    REQUIRE(backend->PatchTerrain(120, 120, 17, 17, patch.data()));
+    backend->Destroy();
+    CHECK_FALSE(backend->GetStats().terrainRegistered);
+    REQUIRE(backend->Create());
+    CHECK_FALSE(backend->PatchTerrain(0, 0, 1, 1, patch.data()));
+    field.cellSize = 2;
+    field.originX = 1000;
+    field.originZ = -1000;
+    REQUIRE(backend->SetTerrain(field));
+    std::fill(patch.begin(),patch.end(),-4.0f);
+    REQUIRE(backend->PatchTerrain(120,120,17,17,patch.data()));
+    CHECK_FALSE(backend->RayHitAnything(Vector3(1256,1,-744),Vector3(1256,-1,-744),QueryFilter{}));
+    CHECK(backend->RayHitAnything(Vector3(1256,1,-744),Vector3(1256,-6,-744),QueryFilter{}));
+}
+
+TEST_CASE("regional terrain edit timing separates initial partition from repeat edits", "[physics][terrain-patch-perf]")
+{
+    auto backend = CreatePhysicsBackend();
+    REQUIRE(backend->Create());
+    constexpr int n = 1025;
+    std::vector<float> heights(n*n, 0.0f);
+    TerrainField field;
+    field.heights = heights.data();
+    field.width = field.height = n;
+    field.cellSize = 12.5f;
+    using Clock = std::chrono::steady_clock;
+    const auto start = Clock::now();
+    REQUIRE(backend->SetTerrain(field));
+    const auto full = Clock::now();
+    std::vector<float> patch(17*17, -2.0f);
+    REQUIRE(backend->PatchTerrain(504,504,17,17,patch.data()));
+    const auto partition = Clock::now();
+    for (int i=0; i<8; ++i)
+    {
+        std::fill(patch.begin(),patch.end(), -2.0f-0.1f*i);
+        REQUIRE(backend->PatchTerrain(504,504,17,17,patch.data()));
+    }
+    const auto done = Clock::now();
+    std::printf("Terrain collision 1025^2: full %.3f ms, first partition %.3f ms, four-tile patch mean %.3f ms\n",
+        std::chrono::duration<double,std::milli>(full-start).count(),
+        std::chrono::duration<double,std::milli>(partition-full).count(),
+        std::chrono::duration<double,std::milli>(done-partition).count()/8.0);
+}
 
 TEST_CASE("terrain crater is compact smooth and finite", "[physics][crater]")
 {

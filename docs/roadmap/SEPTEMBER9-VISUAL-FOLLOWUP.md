@@ -309,3 +309,38 @@ Radio queue decoupling, overlapping voices and coordinated tactics remain open.
   existing timing. RadioMessageCommand consumes its serialized transmit flag
   once, so later audio completion cannot deliver twice. Build and 4 focused
   cases / 32 assertions pass; blocked-speech installed runtime acceptance pending.
+- 3dcaf4f3 committed build exits 0; both safety refs pushed and matched binaries
+  installed. Radio probe holds a text message for 15 seconds. CtxUI unit moves
+  6.9m within one second while the channel still reports BLOCKED at second 2;
+  CtxMission control stays stationary through second 14, then moves. Both runs
+  exit 0 (sep9-radio-ui/mission). UI unit remains at destination after speech
+  drains. This accepts offline move-command decoupling only; formation/stance
+  messages, overlapping voices and network delivery are not changed here.
+- Matched CSM log phases identified using preserved screenshot LastWriteTime:
+  room colour pass 2.370-2.371ms before vs 2.389-2.398ms after (two samples each).
+  Castle colour pass 3.731-3.877ms before vs 3.713-4.029ms after (four each).
+  These small samples rule out a large regression in this fixture, not in dense
+  forests or other GPUs. Keep the remaining roof-edge PCF fringe open.
+- Terrain brush investigation: installed Box3D headers expose heightfield create/
+  destroy/query, no regional mutation API. Current SetTerrain rebuilds the entire
+  heightfield and wakes every dynamic body; Landscape::HeightChange also causes
+  full GPU height upload via revision. Do not invoke that on every mouse tick.
+  Need bounded regional collision/render updates (or an explicit paused editing
+  transaction) before accepting continuous painting or default explosion craters.
+
+### Regional collision groundwork for terrain painting
+
+Added optional PatchTerrain: normal worlds remain monolithic until first edit;
+editing partitions into 128-cell collision tiles, then replaces only intersecting
+tiles, including both sides of shared vertices. Replacements are built before
+publication and invalid/nonfinite edits rejected. Tile storage outlives shapes;
+world destroy/recreate and switching back to SetTerrain are covered by tests.
+Editor input bounded to at most 2049 samples per dimension. Existing normal
+SetTerrain callers unchanged. Currently still wakes all dynamic bodies on edit.
+
+47 physics cases / 2083 assertions pass before final origin/scale test addition.
+1025-square flat fixture: full collision build 43.3ms, initial partition 44.6ms,
+four-tile repeat edit mean 2.63ms (8 iterations). Not a whole-frame benchmark.
+Showcase crater now normalizes differing corpus/native grids once, then uses
+regional patches; render caches/GPU height upload still global. Installed test
+pending. Mouse painting and default explosion craters NOT yet enabled.

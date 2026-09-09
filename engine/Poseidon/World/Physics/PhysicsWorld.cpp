@@ -496,6 +496,11 @@ bool PhysicsWorld::SetTerrain(const float* heights, int width, int height, float
     return _backend->SetTerrain(field);
 }
 
+bool PhysicsWorld::PatchTerrain(int x, int z, int width, int height, const float* samples)
+{
+    return _backend && _backend->PatchTerrain(x, z, width, height, samples);
+}
+
 BodyId PhysicsWorld::SpawnSphereProbe(const SphereProbeDef& def)
 {
     return _backend ? _backend->SpawnSphereProbe(def) : BodyId{};

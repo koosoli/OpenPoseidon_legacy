@@ -162,6 +162,7 @@ struct PhysicsStats
     /// Terrain grid actually handed to the backend, for comparison against the
     /// landscape's own dimensions.
     std::uint32_t terrainWidth = 0;
+    float terrainCellSize = 0, terrainOriginX = 0, terrainOriginZ = 0;
     std::uint32_t terrainHeight = 0;
 };
 

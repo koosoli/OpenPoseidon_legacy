@@ -96,6 +96,7 @@ public:
 
     /// Row-major heightfield, `width * height` samples `cellSize` apart.
     bool SetTerrain(const float* heights, int width, int height, float cellSize, float originX, float originZ);
+    bool PatchTerrain(int x, int z, int width, int height, const float* samples);
 
     /// PHY-020 dev probe. See SphereProbeDef.
     BodyId SpawnSphereProbe(const SphereProbeDef& def);

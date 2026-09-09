@@ -117,6 +117,8 @@ public:
     virtual void SetBodyTransform(BodyId id, const Matrix4& transform) = 0;
 
     virtual bool SetTerrain(const TerrainField& field) = 0;
+    // Optional editor path. First patch may partition terrain; later patches are local.
+    virtual bool PatchTerrain(int x, int z, int width, int height, const float* samples) { return false; }
 
     /// PHY-020. A dynamic sphere the physics world owns outright.
     virtual BodyId SpawnSphereProbe(const SphereProbeDef& def) = 0;

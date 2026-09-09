@@ -23,6 +23,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <vector>
+#include <chrono>
 
 namespace Poseidon::Dev
 {
@@ -65,18 +66,44 @@ bool SetShowcaseCrater(bool restore)
     }
     auto& world = Physics::EnsurePhysicsWorld();
     if (!world.Create()) { if (!restore) s_craterSamples.clear(); return false; }
-    std::vector<float> heights(static_cast<size_t>(range)*range);
-    for (const auto& p : s_craterSamples) land.HeightChange(p.x,p.z,restore ? p.before : p.after);
-    for (int z = 0; z < range; ++z)
-        for (int x = 0; x < range; ++x)
-            heights[static_cast<size_t>(z)*range+x] = land.GetHeight(z,x);
-    if (!world.SetTerrain(heights.data(),range,range,spacing,0,0))
+    const auto begin = std::chrono::steady_clock::now();
+    const auto stats = world.GetStats();
+    // Corpus/loose-object collision may use a different sampling grid.
+    if (!stats.terrainRegistered || stats.terrainWidth != range || stats.terrainHeight != range ||
+        stats.terrainCellSize != spacing || stats.terrainOriginX != 0 || stats.terrainOriginZ != 0)
     {
-        for (const auto& p : s_craterSamples) land.HeightChange(p.x,p.z,restore ? p.after : p.before);
+        std::vector<float> heights(static_cast<size_t>(range)*range);
+        for (int z = 0; z < range; ++z)
+            for (int x = 0; x < range; ++x)
+                heights[static_cast<size_t>(z)*range+x] = land.GetHeight(z,x);
+        if (!world.SetTerrain(heights.data(),range,range,spacing,0,0))
+        {
+            if (!restore) s_craterSamples.clear();
+            return false;
+        }
+    }
+    int left=range, top=range, right=0, bottom=0;
+    for (const auto& p : s_craterSamples)
+    {
+        left=std::min(left,p.x); top=std::min(top,p.z);
+        right=std::max(right,p.x); bottom=std::max(bottom,p.z);
+    }
+    const int width=right-left+1, height=bottom-top+1;
+    std::vector<float> patch(static_cast<size_t>(width)*height);
+    for (int z=0; z<height; ++z)
+        for (int x=0; x<width; ++x)
+            patch[static_cast<size_t>(z)*width+x]=land.GetHeight(top+z,left+x);
+    for (const auto& p : s_craterSamples)
+        patch[static_cast<size_t>(p.z-top)*width+p.x-left]=restore ? p.before : p.after;
+    if (!world.PatchTerrain(left,top,width,height,patch.data()))
+    {
         if (!restore) s_craterSamples.clear();
         return false;
     }
+    for (const auto& p : s_craterSamples) land.HeightChange(p.x,p.z,restore ? p.before : p.after);
     land.FlushCache();
+    LOG_INFO(World, "SHOWCASE terrain edit: patch={}x{} collision/cache={:.3f}ms", width,height,
+        std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-begin).count());
     LOG_INFO(World, "SHOWCASE crater: restore={} samples={} spacing={} surface={}", restore,
              s_craterSamples.size(), spacing, land.SurfaceY(9700,3600));
     if (restore) s_craterSamples.clear();
