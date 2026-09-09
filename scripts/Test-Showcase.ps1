@@ -98,6 +98,17 @@ try {
   Send @{cmd='exec';code='{_x setVectorUp [0,0,1]} forEach [labRoomRoof,labRoomLeft,labRoomRight,labRoomBack,labDoorLeft,labDoorRight,labRoomNormal,labRoomGloss]'}
   Start-Sleep -Seconds 2
   Send @{cmd='screenshot';path=(Join-Path $out 'room-upright.png')}
+  Send @{cmd='eval';code='triShadowTuning'}
+  Send @{cmd='eval';code='triShadowSetBias 0'}
+  Start-Sleep -Seconds 2
+  Send @{cmd='screenshot';path=(Join-Path $out 'room-bias-zero.png')}
+  Send @{cmd='eval';code='triShadowSetNormalOffset 0'} '"OK"'
+  Start-Sleep -Seconds 2
+  Send @{cmd='screenshot';path=(Join-Path $out 'room-normal-offset-zero.png')}
+  Send @{cmd='eval';code='triShadowSetPcf 0'} '"OK"'
+  Start-Sleep -Seconds 2
+  Send @{cmd='screenshot';path=(Join-Path $out 'room-pcf-zero.png')}
+  Send @{cmd='exec';code='triShadowSetBias 0.00002; triShadowSetNormalOffset 1; triShadowSetPcf 1'}
  }
  Send @{cmd='exec';code='labCamera camSetPos [9700,3520,35]; labCamera camSetTarget [9700,3600,0]; labCamera camCommit 0'}
  Start-Sleep -Seconds 2

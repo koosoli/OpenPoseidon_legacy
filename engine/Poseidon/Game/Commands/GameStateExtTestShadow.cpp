@@ -62,7 +62,30 @@ GameValue TriShadowSetBias(const GameState* /*state*/, GameValuePar arg)
     return GameValue(buf);
 }
 
-/// triShadowSetCascades <1..4> — view-frustum cascade count. Returns "OK:<v>".
+// Match the dev-panel ranges for reproducible receiver/filter ablations.
+GameValue TriShadowSetNormalOffset(const GameState*, GameValuePar arg)
+{
+    if (!GEngine) return GameValue("FAIL:no engine");
+    auto t = GEngine->GetShadowMapTuning();
+    const float value = static_cast<float>(static_cast<GameScalarType>(arg));
+    if (!(value >= 0 && value <= 4)) return GameValue("FAIL:range");
+    t.normalOffset = value;
+    GEngine->SetShadowMapTuning(t);
+    return GameValue("OK");
+}
+
+GameValue TriShadowSetPcf(const GameState*, GameValuePar arg)
+{
+    if (!GEngine) return GameValue("FAIL:no engine");
+    auto t = GEngine->GetShadowMapTuning();
+    const float value = static_cast<float>(static_cast<GameScalarType>(arg));
+    if (!(value >= 0 && value <= 3)) return GameValue("FAIL:range");
+    t.pcf = value;
+    GEngine->SetShadowMapTuning(t);
+    return GameValue("OK");
+}
+
+/// triShadowSetCascades <1..4> - view-frustum cascade count. Returns "OK:<v>".
 GameValue TriShadowSetCascades(const GameState* /*state*/, GameValuePar arg)
 {
     if (!GEngine)

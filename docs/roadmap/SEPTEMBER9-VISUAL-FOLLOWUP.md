@@ -177,7 +177,11 @@ term is sun-only in `shading.wgsl`. Night GLOSS demo is not considered fixed.
 - RTX 3090 Ti black menu: supplied 8c1be95 log explicitly reports DLSS inactive
   (missing snippet DLL), then invalid 8x Rgba16Float MSAA without enabled
   TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES. Device feature negotiation fix and
-  enabled-feature fallback test underway; temporary workaround WGR_MSAA=4.
+  enabled-feature fallback tests pass (2); temporary workaround edit
+  `%APPDATA%/CWR/graphics.cfg` to `msaaSamples=4;` while game closed. Profile
+  overrides WGR_MSAA. With actual profile 8x, installed a52b82e4 reproduces the
+  exact tester validation error locally with DLSS disabled. Fix 3d662192 awaits
+  installed verification. First env-only run silently stayed 4x, not evidence.
 - Destroyed-building glitches: investigate retained geometry/pose invalidation;
   no reproducible scene supplied yet. Zeus torch cone not functional.
 - Continuous cursor terrain raise/lower brush; default small explosion craters
