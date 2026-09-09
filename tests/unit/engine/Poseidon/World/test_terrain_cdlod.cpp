@@ -86,6 +86,16 @@ TEST_CASE("automatic satellite blend keeps constant color and world axes", "[ter
     CHECK(edge[2] == 7.5f);
 }
 
+TEST_CASE("automatic satellite budgets include Fusion without unbounded allocation", "[terrain][satmap]")
+{
+    CHECK(TerrainSatmapResolution(300,256) == 1024);
+    CHECK(TerrainSatmapResolution(1024,512) == 1024);
+    CHECK(TerrainSatmapResolution(1092,1024) == 2048);
+    CHECK(TerrainSatmapResolution(4094,2048) == 2048);
+    for (int count : {-1,0,4095,1000000}) CHECK(TerrainSatmapResolution(count,1024) == 0);
+    for (int range : {-1,0,1,2049,1000000}) CHECK(TerrainSatmapResolution(1092,range) == 0);
+}
+
 TEST_CASE("Experimental snow persists until new precipitation fills tracks", "[snow][terrain]")
 {
     SnowField snow;

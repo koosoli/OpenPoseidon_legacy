@@ -1,5 +1,6 @@
 param(
     [switch]$Large,
+    [switch]$NoSatmap,
     [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault'
 )
 $ErrorActionPreference='Stop'
@@ -12,6 +13,8 @@ New-Item -ItemType Directory -Force $env:POSEIDON_USER_DIR | Out-Null
     "qualityPreset=3;`nterrainDetail=4;`nmsaaSamples=4;`ndlssMode=-1;`n")
 [IO.File]::WriteAllText((Join-Path $env:POSEIDON_USER_DIR 'game.cfg'), "preferredViewDistance=50000;`n")
 $prefix=if ($Large) {'size-probe'} else {'fusion'}
+$env:WGR_OFP_SATMAP=if ($NoSatmap) {'0'} else {'1'}
+if ($NoSatmap) { $prefix += '-no-satmap' }
 $mission=if ($Large) {'Missions\SizeProbe.FusionSizeProbe'} else {'Missions\FusionTour.FusionOFP'}
 $log=Join-Path $output "$prefix.log"
 $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0)
@@ -50,6 +53,9 @@ try {
     $null=Send @{cmd='exec';code='hint ""; showCinemaBorder false; fusionCam="camera" camCreate [25600,13000,29000]; fusionCam cameraEffect ["internal","back"]; fusionCam camSetTarget [25600,22000,0]; fusionCam camCommit 0'}
     Start-Sleep -Seconds 4
     $null=Send @{cmd='screenshot';path=(Join-Path $output "$prefix-overview.png")}
+    $null=Send @{cmd='exec';code='fusionCam camSetPos [25600,22000,40000]; fusionCam camSetTarget [25600,22100,0]; fusionCam camCommit 0'}
+    Start-Sleep -Seconds 4
+    $null=Send @{cmd='screenshot';path=(Join-Path $output "$prefix-high.png")}
     $sites=if ($Large) {@(@('south',10000,10000),@('centre',51200,51200),@('north',92000,92000))} else {@(@('everon',8260,11900),@('malden',25600,14400),@('kolgujev',41600,14400),@('nogova',18964,28408),@('desert',36700,27600))}
     foreach ($site in $sites) {
         $name=$site[0]; $x=$site[1]; $z=$site[2]

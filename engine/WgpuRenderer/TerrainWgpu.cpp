@@ -789,10 +789,11 @@ Ref<Texture> TerrainWgpu::BuildAutomaticSatmap(const Landscape& land)
 {
     const char* enabled = std::getenv("WGR_OFP_SATMAP");
     const int count = land.GetNTextures(), range = land.GetLandRange();
-    if ((enabled && std::strcmp(enabled,"0") == 0) || count <= 0 || count > 1024 || range < 2 || range > 512)
+    const int size = TerrainSatmapResolution(count, range);
+    if ((enabled && std::strcmp(enabled,"0") == 0) || size == 0)
         return nullptr;
     const auto started = std::chrono::steady_clock::now();
-    constexpr int tileSize = 16, size = 1024;
+    constexpr int tileSize = 16;
     using Tile = std::array<uint8_t,tileSize*tileSize*4>;
     std::vector<Tile> tiles(static_cast<size_t>(count));
     int decoded = 0;
@@ -844,8 +845,9 @@ Ref<Texture> TerrainWgpu::BuildAutomaticSatmap(const Landscape& land)
     }
     EngineWgpu::AcquireProducerWindow("automatic satellite albedo");
     Ref<Texture> result = _engine.TextBank()->CreateDynamic(size,size,pixels.data(),static_cast<uint32_t>(pixels.size()),true);
-    LOG_INFO(Graphics,"OFP automatic satmap: {}x{} from {} tiles, {:.1f} ms, mipmapped ~5.3 MiB",size,size,decoded,
-             std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count());
+    LOG_INFO(Graphics,"OFP automatic satmap: {}x{} from {} tiles, {:.1f} ms, mipmapped ~{:.1f} MiB",size,size,decoded,
+             std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count(),
+             double(size)*size*4*4/3/(1024*1024));
     return result;
 }
 

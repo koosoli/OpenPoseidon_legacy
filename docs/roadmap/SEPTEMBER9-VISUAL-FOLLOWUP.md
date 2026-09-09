@@ -85,6 +85,19 @@ breaking signal rises; retain calm-wind gating and unchanged shoreline readiness
 One numerical regression test passes. WGR_DEEP_BREAKER_RECOVERY=0 preserves the
 previous direct-crest path for same-binary A/B. Installed validation pending.
 
+a2f9a519 installed A/B completes: direct crest recovery visibly strengthens bright
+breaking caps at wind 18 without increasing shore gain; calm wind 0 remains free
+of whitecap patches. Median foam pass ~0.171 ms, surface draw ~2.33 ms versus
+~2.33 ms with legacy crest readiness in these short captures. This is not an
+overturning fluid simulation and the blocky reflection remains a separate defect.
+
+Fusion automatic far albedo in progress: eligibility now budgeted through 2048
+land cells and 4094 source textures; composite uses one 2048-square mipmapped image
+(~21.3 MiB). Single-island <=512-cell output remains 1024. Existing Fusion log
+has 1093/4096 bound layers and zero dropped layers, so the 1024 page budget is
+NOT evidence for missing classic textures (that budget is modern paged-path only).
+High-altitude capture added to Test-Fusion; blue island report not yet diagnosed.
+
 Owner authorised implementation after backup `codex/backup-asset-obs-20260909-bc766e19`.
 Worktree asset-obs only; foreign Cargo.lock excluded. Screenshots 070351, 070456,
 072225 and 073829 are reproduction evidence, not completion evidence.

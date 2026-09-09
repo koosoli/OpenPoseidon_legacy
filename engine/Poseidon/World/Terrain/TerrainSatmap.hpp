@@ -4,6 +4,15 @@
 
 namespace Poseidon
 {
+// Reserve the fallback and generated-image slots in the 4096-layer renderer.
+// Large classic composites get a bounded 21.3 MiB mip chain, not a map-sized image.
+inline int TerrainSatmapResolution(int textureCount, int landRange)
+{
+    if (textureCount <= 0 || textureCount > 4094 || landRange < 2 || landRange > 2048)
+        return 0;
+    return landRange <= 512 ? 1024 : 2048;
+}
+
 // World-anchored wide cell blend for the far albedo bake. The callback retains
 // the source transition tile's own edge policy; this adds no baked lighting.
 template<class Sample>
