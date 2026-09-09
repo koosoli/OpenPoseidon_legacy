@@ -2747,13 +2747,20 @@ pub unsafe extern "C" fn wgr_terrain_set_heightmap(
     if renderer.is_null() || heights.is_null() || params.is_null() {
         return;
     }
-    let _ = catch_unwind(AssertUnwindSafe(|| {
+    let result = catch_unwind(AssertUnwindSafe(|| {
         let renderer = unsafe { &mut *renderer };
         let params = unsafe { *params };
         let count = params.hm_width as usize * params.hm_height as usize;
         let heights = unsafe { std::slice::from_raw_parts(heights, count) };
         renderer.terrain_set_heightmap(heights, params);
     }));
+    if let Err(payload) = result {
+        let message = payload.downcast_ref::<String>().map(String::as_str)
+            .or_else(|| payload.downcast_ref::<&str>().copied())
+            .unwrap_or("unknown panic");
+        unsafe { &*renderer }.log.log(crate::log::log_level::ERROR,
+            &format!("Terrain heightfield upload failed: {message}"));
+    }
 }
 
 /// Set/refresh the water placement params (incl. the animated sea level). See
