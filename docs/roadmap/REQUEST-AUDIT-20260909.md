@@ -1,5 +1,11 @@
 # Bericht zu allen Auftraegen vom 8./9. September 2026
 
+> Historischer Stand: Runtime a4d09dbe. Der
+> [Folgebericht mit Umsetzung, Nachweisen und offenen Arbeiten](REQUEST-AUDIT-FOLLOWUP-20260909.md)
+> aktualisiert die seit diesem Bericht angefragten Punkte. Insbesondere Satmap,
+> Terrainbearbeitung, Schnee-Dachmaskierung und Fusion sind inzwischen umgesetzt;
+> die damaligen Aussagen unten sind keine aktuelle Statusbeschreibung.
+
 ## Ergebnis und Verbindlichkeit
 
 **Nicht alles ist vollstaendig erledigt.** Dieser Bericht korrigiert insbesondere
