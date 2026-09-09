@@ -4836,9 +4836,13 @@ void EngineWgpu::BeginMeshTL(const Shape& sMesh, int spec, bool dynamic)
         const char* v = std::getenv("WGR_HELI_POSE_SNAPSHOTS");
         return !(v && v[0] == '0');
     }();
-    if (captureHelicopterPose && object && dyn_cast<const Helicopter>(object) && !buf->skinned && buf->isDynamic)
+    // Destruction morphs share their source shape with intact copies. Later
+    // draws (including shadow views) must not overwrite a queued wreck pose.
+    const bool destructionPose = object && object->IsDestroyed() && object->GetDestructType() != DestructTree;
+    const bool helicopterPose = captureHelicopterPose && object && dyn_cast<const Helicopter>(object);
+    if ((destructionPose || helicopterPose) && !buf->skinned && buf->isDynamic)
     {
-        AcquireProducerWindow("helicopter CPU pose");
+        AcquireProducerWindow(destructionPose ? "destruction CPU pose" : "helicopter CPU pose");
         if (buf->poseFrame != _cpuPoseFrame)
         {
             buf->poseFrame = _cpuPoseFrame;

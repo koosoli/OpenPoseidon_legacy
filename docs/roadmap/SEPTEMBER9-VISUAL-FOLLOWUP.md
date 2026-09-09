@@ -364,3 +364,30 @@ release, then rises to 27.8344. Images/log: .tmp-bulb/sep9-brush-release-*.
 Top-down images show only subtle relief; numerical acceptance is not a full
 interactive usability/performance acceptance. Terrain/water global rebuild stalls
 remain. Default explosion craters remain disabled pending renderer improvements.
+
+160311da clips CDLOD bound scans to distinct native samples rather than repeatedly
+walking clamped border/ocean texels. Exhaustive reference comparisons cover inside,
+outside, crossing-edge and single-sample leaves, both land and ocean semantics.
+62 selected cases / 19668 assertions pass; committed build exits 0, both refs
+pushed, deployed. Installed brush repeat exits 0 with identical height sequence.
+Offshore Nogova capture at 32km east / 8km altitude exits 0 and has continuous
+water, no brown replacement tiles (sep9-clipped-ocean.png). No measured whole-frame
+speedup claimed; global rebuild/upload and input latency remain performance work.
+
+Freefly lighting follow-up on installed 160311da: Everon night fixture with live
+player, two static near/far launches and one continuous scripted camera trip
+(near -> ~1km -> >3km -> return) all exit 0. All 40 light candidates remain
+selected; distant village pools remain visible and return view stays lit.
+Evidence .tmp-bulb/sep9-village-{near,far}.png and sep9-village-travel-*.png/log.
+Static comparisons used exposure 0.3 (too dark for subtle diagnosis); travel uses
+fixed 2.0. This does NOT reproduce the reported cutoff, so no speculative radius
+or selection change made. Other locations/settings remain unverified.
+
+Destroyed building reproduction on 160311da: nearestBuilding player resolves to
+Househospoda_mesto at [5097.49,3990.6,21.676]. setDammage 1 visibly deforms it,
+but after the same camera's far trip and return it renders intact again. Saved
+sep9-building-collapse-{intact,collapse,wreck,return}.png; harness exits 0.
+BeginMeshTL snapshots CPU-posed helicopter meshes but not destruction morphs;
+shared dynamic buffers can therefore replace queued wreck geometry with another
+draw's vertices. Extend existing per-frame pose copies to non-tree destroyed
+objects, retaining the skinned/static exclusions. Installed A/B pending.
