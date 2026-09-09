@@ -12540,7 +12540,7 @@ void EngineWgpu::DrawDecal(Vector3Par screen, float rhw, float sizeX, float size
 // off-screen streak loses nothing by being dropped whole, unlike a puff whose
 // visible half must keep its texture scale.
 void EngineWgpu::DrawDecalRotated(Vector3Par screen, float rhw, float sizeX, float sizeY, PackedColor color,
-                                  const MipInfo& mip, int specFlags, float dirX, float dirY)
+                                  const MipInfo& mip, int specFlags, float dirX, float dirY, float radianceScale)
 {
     if (!mip.IsOK() || sizeX <= 0.0f || sizeY <= 0.0f)
     {
@@ -12590,7 +12590,12 @@ void EngineWgpu::DrawDecalRotated(Vector3Par screen, float rhw, float sizeX, flo
         tl.pos[1] = screen.Y() + ay * along + py * across;
         tl.t0.u = u;
         tl.t0.v = v;
-        return MakeScreenVertex(tl);
+        auto vertex = MakeScreenVertex(tl);
+        // Alpha-fogged precipitation already carries its distance fade in alpha.
+        // A negative fog lane transports HDR gain without quantising it to RGBA8.
+        if ((specFlags & IsAlphaFog) && radianceScale != 1.0f)
+            vertex.fog = -std::max(radianceScale, 1e-4f);
+        return vertex;
     };
 
     const WgrVertex2D v0 = corner(-sizeY, -sizeX, 0.0f, 0.0f);

@@ -34,7 +34,7 @@
 // and the handshake refuses the pair — so this number only has to move for
 // changes the hash cannot see (an added/removed entry point, a semantic change
 // to an existing one).
-#define WGR_ABI_VERSION 9u
+#define WGR_ABI_VERSION 10u
 
 // Required capabilities are negotiated as a bit set inside WgrAbiCheck. A
 // newer engine can reject an older renderer DLL even if the shared layouts
@@ -207,7 +207,7 @@ struct WgrVertex2D
 {
     WgrVec3 pos;
     float rhw;
-    float fog;
+    float fog; /* 0..1 fog blend; negative = HDR colour gain (-fog), fog already in alpha. */
     WgrVec2 uv;
     WgrRgba8 color;
 };

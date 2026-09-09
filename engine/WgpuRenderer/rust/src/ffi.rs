@@ -1730,9 +1730,9 @@ pub extern "C" fn wgr_abi_version() -> u32 {
     if cfg!(debug_assertions) {
         option_env!("WGR_TEST_ABI_VERSION")
             .and_then(|value| value.parse::<u32>().ok())
-            .unwrap_or(9)
+            .unwrap_or(10)
     } else {
-        9
+        10
     }
 }
 
@@ -2013,7 +2013,7 @@ mod abi_tests {
 
     #[test]
     fn exported_abi_version_matches_the_public_contract() {
-        assert_eq!(super::wgr_abi_version(), 9); // REN-GI-001 appended WgrGi to WgrRenderParams
+        assert_eq!(super::wgr_abi_version(), 10); // negative 2D fog lane carries HDR particle gain
     }
 
     #[test]

@@ -100,7 +100,8 @@ class IGraphicsEngine
     /// an inherited-empty body is exactly how the wgpu decal gap of WTR-002
     /// hid for months behind healthy submission counters.
     virtual void DrawDecalRotated(Vector3Par pos, float rhw, float sizeX, float sizeY, PackedColor col,
-                                  const MipInfo& mip, int specFlags, float /*dirX*/, float /*dirY*/)
+                                  const MipInfo& mip, int specFlags, float /*dirX*/, float /*dirY*/,
+                                  float /*radianceScale*/ = 1.0f)
     {
         const float m = sizeX > sizeY ? sizeX : sizeY;
         DrawDecal(pos, rhw, m, m, col, mip, specFlags);

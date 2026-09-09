@@ -49,6 +49,10 @@ fn vs_main(
     // color is in BGRA order -> swizzle to RGBA
     out.color = color.zyxw;
     out.fog = rhw_fog.y;
+    if (rhw_fog.y < 0.0) {
+        out.color = vec4<f32>(out.color.rgb * -rhw_fog.y, out.color.a);
+        out.fog = 1.0;
+    }
     return out;
 }
 

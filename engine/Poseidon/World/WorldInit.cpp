@@ -1096,6 +1096,9 @@ const float PreferredGridSizeMP = 25;
 
 void World::CleanUpDeinit()
 {
+    // Release procedural precipitation textures while the renderer bank is alive.
+    GSnowFlakes.ClearParticles();
+    GRain.ClearParticles();
     _timeToSkip = 0;
 
     _cameraEffect.Free();

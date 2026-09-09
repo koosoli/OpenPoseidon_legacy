@@ -146,3 +146,11 @@ term is sun-only in `shading.wgsl`. Night GLOSS demo is not considered fixed.
   with a 32-square mipmapped white/soft-alpha particle texture, same count and
   geometry. Texture releases on world/particle reset. Build/test and installed
   comparison pending; accumulation roof exclusion remains a separate open item.
+- 173733a4: built, 32 Rain/Snow/Weather cases / 38063 assertions passed,
+  pushed and installed. Flock visibility now confirmed, but the fixed-exposure
+  scene shows dark particles: legacy RGBA8 sprites cannot carry the HDR sky's
+  higher radiance. Follow-up adds an explicit precipitation radiance gain
+  (negative 2D fog lane, ABI version 10 on both sides; normal sprites unchanged)
+  and hemisphere-averaged daylight gain, plus texture release at world cleanup.
+  Build and installed image acceptance pending. This is approximate flake
+  illumination, not per-particle shadow/local-light evaluation.

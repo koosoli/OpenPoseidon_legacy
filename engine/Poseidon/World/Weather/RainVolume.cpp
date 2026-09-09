@@ -12,6 +12,7 @@
 #include <Poseidon/World/Weather/WindModel.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
+#include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -521,6 +522,15 @@ void RainSystem::Draw()
     const float invLeft = camera.InvLeft();
     const float invTop = camera.InvTop();
     const Color tint(_params.red, _params.green, _params.blue, 1.0f);
+    float radianceScale = 1.0f;
+    if (_params.snowflakes && GScene->MainLight())
+    {
+        const auto sky = GEngine->GetSkySettings();
+        const float daylight = 1.0f - std::clamp(GScene->MainLight()->NightEffect(), 0.0f, 1.0f);
+        // Small tumbling flakes see an averaged hemisphere, not a fixed normal.
+        // Keep scene radiance separate from exposure so photo mode cannot erase them.
+        radianceScale = std::max(0.02f, sky.sunIntensity * sky.exposure * 0.35f * daylight);
+    }
 
     // Drops: one rotated textured quad per drop, stretched along the drop's
     // true on-screen velocity. DrawDecal is axis-aligned -- the original
@@ -600,7 +610,7 @@ void RainSystem::Draw()
         // plus a soft alpha mask stays legible without black corners or bloom.
         const int specials = kRainSpecials;
         GEngine->DrawDecalRotated(posp, invNearPos, halfWidthPx, lengthPx * 0.5f, PackedColor(colour), mip,
-                                  specials, dirX, dirY);
+                                  specials, dirX, dirY, radianceScale);
         ++_stats.streakDecals;
         ++_stats.drawnDrops;
     }
