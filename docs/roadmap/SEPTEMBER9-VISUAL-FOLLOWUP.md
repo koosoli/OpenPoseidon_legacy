@@ -720,3 +720,48 @@ to GPU staging/owned Rust storage synchronously, so no borrowed pointer escapes.
 The allocator safety cap remains unchanged. Row-major view test covers subdivision,
 negative heights and a subsequent height edit. Runtime acceptance is pending the
 new binary build/deployment; .tmp-bulb/fusion-test.ps1 visits all five islands.
+
+Follow-up acceptance on installed 4f1bd59c closes that pending runtime check.
+8d96c726 avoided the allocator crash, but screenshots still had no terrain.
+8182acae/521b597d made the previously swallowed Rust panic visible: shadow_mask_dims
+called clamp(8192,4096), which panicked with "min > max" after heightmap staging.
+0fe5ec87 caps shadow dimensions independently of source size; the shadow texture
+stays <=4096 while the 8192 source retains full detail. Added regression test
+covers 2048/8192/16384 sources, device caps, zero scale and saturated scale.
+4f1bd59c also bounds automatic subdivision by an 8192-side float-array budget;
+102.4 km at preferred 6.25 m safely uses 12.5 m, logged explicitly. Original
+256-cell worlds retain their requested 6.25/3.125 m settings. The low-level
+subdivision loop also refuses growth beyond that ceiling, including cheat calls.
+This does not make >8192-side authored data or arbitrary land-cell grids safe.
+
+The installed five-island test now renders terrain, water and original placements.
+All five local captures plus the common overview were inspected; helicopter visits
+were confirmed with getPos. Heights: Everon 16.335, Malden 269.55, Kolgujev 449.28,
+Nogova 22.4874, Desert 29.835. Sampled working set 2201-2300 MiB; clean exit 0.
+The built-in Visit actions appear on the start screen; UI-clicking them and a
+complete continuous flight between every pair were not separately automated.
+Original tile-like forests and visible underwater source-boundary lines remain
+visual limitations, not claims of a redesigned ocean/vegetation system here.
+
+Owner's additional >50 km size question: build_size_probe.py/Install-SizeProbe.ps1
+generate/install an independent 102.4 km, 2048-cell, zero-object diagnostic world.
+Installed 4f1bd59c started its mission (not just editor), uploaded the full 8192
+heightfield at effective 12.5 m, and visited [10000,10000], [51200,51200] and
+[92000,92000] with camera and player helicopter. All three centre heights are
+250 m; sampled working set 1708-1724 MiB, terrain ready=true, exit 0. The far
+island capture was inspected. Height upload/sky visibility took about 25 seconds
+on this host, so this is a feasibility test, not a claim of instantaneous loads.
+No dense 100 km world, large AI battle, MP, save/load or exhaustive collision test;
+no measured absolute maximum. A densely populated larger world still calls for
+streaming/budget work rather than raising all limits. The separate 50 km visibility
+preference is not the terrain-area limit. Original Desert crater off/on/reset
+regression also passes on this binary: 29.835 -> 29.835 -> 28.835 -> 28.835, exit 0.
+16 native heightfield/subdivision/CDLOD/ID cases (18606 assertions), the new Rust
+shadow-mask case, and 3 fusion-builder Python cases pass. Cargo.lock unchanged.
+scripts/Test-Fusion.ps1 provides a durable private-profile version of the runtime
+harness; screenshots/logs go to build/fusion/acceptance, with -Large for size probe.
+Both durable harness modes were re-run with a freshly generated private graphics
+profile on installed 4f1bd59c: exit 0, all expected heights and vehicle positions,
+heightfield ready=true. Fusion working set 2193-2261 MiB; sparse probe 1772-1820
+MiB. Fusion overview and 92 km probe capture inspected again. No claim that the
+whole native/Rust suite or older unrelated visual roadmap requests are complete.
