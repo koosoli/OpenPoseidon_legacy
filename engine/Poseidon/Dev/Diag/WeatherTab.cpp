@@ -935,6 +935,15 @@ void DrawWeatherTab()
         ImGui::Checkbox("Geometric close-up tracks", &snow.detailedGeometry);
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Refines terrain within 8 m of the camera to resolve real snow depressions. Extra geometry only while snow is enabled; collision remains on bare ground.");
         ImGui::SliderFloat("Snowfall (m/min)", &snow.metresPerMinute, 0.0f, 0.2f, "%.3f");
+        ImGui::SliderFloat("Snowflake density", &snow.flakeMultiplier, 0.25f, 8.0f, "%.2fx");
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Up to 8x the normal particle budget. Dense storms cost more; roof occlusion and wind remain active.");
+        if (ImGui::Button("Snowstorm"))
+        {
+            snow.enabled = snow.falling = true;
+            snow.flakeMultiplier = 8.0f;
+            snow.metresPerMinute = 0.1f;
+        }
+        ImGui::TextWrapped("Falling snow adds overcast without forcing rain or thunderstorms; stopping snowfall restores the mission's cloud cover.");
         ImGui::SliderFloat("Maximum snow depth (m)", &snow.maxDepth, 0.05f, 1.0f, "%.2f");
         if (ImGui::Button("Add 10 cm of snow")) snow.Deposit(0.1f);
         ImGui::SameLine();

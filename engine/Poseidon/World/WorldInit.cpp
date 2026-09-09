@@ -866,6 +866,8 @@ void World::InitLandscape(Landscape* landscape)
         GSnow().enabled = true;
         GSnow().falling = false;
         GSnow().Deposit(std::strtof(depth, nullptr));
+        if (const char* density = std::getenv("POSEIDON_SNOW_TEST_FLAKES"))
+            GSnow().flakeMultiplier = std::strtof(density, nullptr);
         if (const char* rate = std::getenv("POSEIDON_SNOW_TEST_RATE"))
         {
             GSnow().falling = true;

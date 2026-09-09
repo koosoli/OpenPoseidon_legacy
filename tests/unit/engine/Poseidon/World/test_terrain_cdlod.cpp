@@ -11,6 +11,27 @@
 
 using namespace Poseidon;
 
+TEST_CASE("Snowstorm budget is bounded and only falling snow adds cloud cover", "[Snow][Weather]")
+{
+    SnowField snow;
+    CHECK(snow.RenderOvercast(0.2f) == 0.2f);
+    snow.enabled = true;
+    CHECK(snow.RenderOvercast(0.2f) >= 0.75f);
+    CHECK(snow.RenderOvercast(1.0f) == 1.0f);
+    snow.metresPerMinute = 0.1f;
+    CHECK(snow.FallingIntensity() == 1.0f);
+    CHECK(snow.RenderOvercast(0.0f) == Catch::Approx(0.95f));
+    snow.flakeMultiplier = 100;
+    CHECK(snow.BoundedFlakeMultiplier() == 8.0f);
+    snow.flakeMultiplier = std::numeric_limits<float>::quiet_NaN();
+    CHECK(snow.BoundedFlakeMultiplier() == 1.0f);
+    snow.falling = false;
+    CHECK(snow.RenderOvercast(0.2f) == 0.2f);
+    snow.falling = true;
+    snow.metresPerMinute = 0;
+    CHECK(snow.RenderOvercast(0.2f) == 0.2f);
+}
+
 TEST_CASE("ocean continuation reach includes the far frustum corners", "[cdlod][water]")
 {
     CHECK(CdlodFrustumReach(50000,0,0) == 50000);

@@ -23,6 +23,23 @@ public:
     bool detailedGeometry = true;
     float metresPerMinute = 0.01f;
     float maxDepth = 0.5f;
+    float flakeMultiplier = 1.0f;
+
+    float FallingIntensity() const
+    {
+        return enabled && falling && std::isfinite(metresPerMinute)
+            ? std::clamp(metresPerMinute * 30.0f, 0.0f, 1.0f) : 0.0f;
+    }
+    float BoundedFlakeMultiplier() const
+    {
+        return std::isfinite(flakeMultiplier) ? std::clamp(flakeMultiplier, 0.25f, 8.0f) : 1.0f;
+    }
+    float RenderOvercast(float authored) const
+    {
+        const float intensity = FallingIntensity();
+        // Render-only cover: no mutation of the mission's rain/thunder state.
+        return intensity > 0.0f ? std::max(authored, 0.75f + 0.2f * intensity) : authored;
+    }
 
     void Reset()
     {

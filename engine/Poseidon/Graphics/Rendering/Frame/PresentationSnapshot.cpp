@@ -22,6 +22,7 @@
 #include <vector>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Weather/RainVolume.hpp>
+#include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/World/Weather/WindModel.hpp>
 
 namespace Poseidon::render::frame
@@ -194,7 +195,7 @@ static void FillPresentationSnapshot(PresentationSnapshot& snap)
     if (GLandscape)
     {
         snap.hasLandscape = true;
-        snap.overcast = GLandscape->GetOvercast();
+        snap.overcast = GSnow().RenderOvercast(GLandscape->GetOvercast());
         snap.weatherFog = GLandscape->GetFog();
         snap.seaLevel = GLandscape->GetSeaLevel();
         snap.landscapeRainDensity = GLandscape->GetRainDensity();

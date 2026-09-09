@@ -711,8 +711,8 @@ void Scene::ObjectsDrawn()
     {
         RainParams flakes;
         flakes.snowflakes = true;
-        flakes.targetDrops = 700;
-        flakes.maxDrops = 900;
+        flakes.targetDrops = static_cast<int>(700 * GSnow().BoundedFlakeMultiplier());
+        flakes.maxDrops = static_cast<int>(900 * GSnow().BoundedFlakeMultiplier());
         flakes.areaRadius = 12.0f;
         flakes.spawnHeight = 8.0f;
         flakes.fallSpeed = 1.2f;
@@ -721,7 +721,7 @@ void Scene::ObjectsDrawn()
         flakes.red = flakes.green = flakes.blue = 0.95f;
         flakes.windResponse = 0.6f;
         flakes.splashes = false;
-        flakes.densityOverride = GSnow().falling ? std::clamp(GSnow().metresPerMinute * 30.0f, 0.0f, 1.0f) : 0.0f;
+        flakes.densityOverride = GSnow().FallingIntensity();
         GSnowFlakes.SetMode(RainParticle);
         GSnowFlakes.SetForceWeatherRain(false);
         GSnowFlakes.SetParams(flakes);

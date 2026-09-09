@@ -249,3 +249,19 @@ Parser RGB values and ordinary colour uploads unchanged. This corrects the
 flat normal's previous X=1 tangent tilt, a concrete additional room-lighting bug.
 Build passed; 11 procedural/light cases / 650 assertions passed. Installed room
 and torch-width comparisons pending; no full acceptance claim yet.
+
+- f0cb045f installed: original Showcase winding restored, normal upload fixed.
+  Full harness exits 0; room point light illuminates surfaces but sunlight edge
+  strips persist. Torch narrow 0.12 vs wide 1.1 captures at identical camera,
+  strength/exposure clearly change footprint; both exit 0. Explicit cone path
+  accepted, ordinary vehicle constructor profile deliberately unchanged.
+- CSM experiment: replace one-reference hardware bilinear comparison with four
+  texel depth loads and receiver-plane-corrected references before interpolation.
+  Removes blanket slope-depth subtraction that can skip thin blockers. Same tent
+  footprint, more shader instructions; performance NOT yet accepted. Shader
+  composition and two other shader tests pass; build passed. Installed A/B next.
+- Snowstorm: separate 0.25-8x flake budget (default 1), capped at 7200 particles;
+  button chooses 8x / 0.1m per minute. Snow-induced minimum rendered overcast
+  0.75-0.95 does not modify mission rain/thunder state; no new thunder forcing.
+  POSEIDON_SNOW_TEST_FLAKES seeds repeatable dense checks. Combined snow/weather/
+  light/procedural tests: 45 cases / 38727 assertions. Runtime/performance pending.
