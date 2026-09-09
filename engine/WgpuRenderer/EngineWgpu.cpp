@@ -17,6 +17,7 @@
 #include <Poseidon/Graphics/Core/FoliageDusk.hpp>
 #include <Poseidon/Graphics/Core/MeshVertex.hpp>
 #include <Poseidon/Graphics/Core/ZBiasMath.hpp>
+#include <Poseidon/Graphics/Rendering/Lighting/LegacyGlass.hpp>
 #include <Poseidon/Graphics/Shared/SdlWindow.hpp>
 #include <Poseidon/Graphics/Core/TLVertex.hpp>
 #include <Poseidon/Graphics/Rendering/Effects/SmokeVolumetric.hpp> // SMK-037 soft particles
@@ -5887,7 +5888,8 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
             MaterialIsFullyOpaque(_curMaterial))
         {
             const Poseidon::AlphaStats& st = texture->AlphaStatsView();
-            glassSheen = st.pctClear < 5.0 && st.pctPartial > 80.0 && st.aMean < 128;
+            glassSheen = Poseidon::LegacyGlassAlphaIsGlazing(desc.surface == render::SurfaceMode::OnSurface,
+                                                            st.pctClear, st.pctPartial, st.aMean);
         }
     }
     // DZ-003, resolved above (see reflectiveMaterial).

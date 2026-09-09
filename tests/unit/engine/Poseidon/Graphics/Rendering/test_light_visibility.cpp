@@ -1,11 +1,21 @@
 #include <catch2/catch_test_macros.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
+#include <Poseidon/Graphics/Rendering/Lighting/LegacyGlass.hpp>
 #include <Poseidon/World/Scene/Object.hpp>
 #include <Poseidon/Dev/Diag/LightingDiag.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <limits>
 
 using namespace Poseidon;
+
+TEST_CASE("Legacy glazing classification excludes terrain decals", "[Graphics][Material]")
+{
+    CHECK(LegacyGlassAlphaIsGlazing(false,0,99,29)); // UH60 glazing histogram.
+    CHECK_FALSE(LegacyGlassAlphaIsGlazing(true,0,99,29)); // Same alpha cannot turn a road into glass.
+    CHECK_FALSE(LegacyGlassAlphaIsGlazing(false,11.5,10.4,212));
+    CHECK_FALSE(LegacyGlassAlphaIsGlazing(false,50,45,60));
+    CHECK_FALSE(LegacyGlassAlphaIsGlazing(false,0,100,255));
+}
 
 TEST_CASE("Picture mode defaults to subtle blur and manual focus", "[Graphics][PictureMode]")
 {

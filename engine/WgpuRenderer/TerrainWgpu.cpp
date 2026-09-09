@@ -800,7 +800,7 @@ Ref<Texture> TerrainWgpu::BuildAutomaticSatmap(const Landscape& land)
 {
     const char* enabled = std::getenv("WGR_OFP_SATMAP");
     const int count = land.GetNTextures(), range = land.GetLandRange();
-    if ((enabled && std::strcmp(enabled,"0") == 0) || count <= 0 || count > 256 || range < 2 || range > 512)
+    if ((enabled && std::strcmp(enabled,"0") == 0) || count <= 0 || count > 1024 || range < 2 || range > 512)
         return nullptr;
     const auto started = std::chrono::steady_clock::now();
     constexpr int tileSize = 16, size = 1024;
@@ -812,9 +812,17 @@ Ref<Texture> TerrainWgpu::BuildAutomaticSatmap(const Landscape& land)
         Texture* texture = land.GetTexture(i);
         if (!texture) return nullptr;
         const auto bytes = ReadVfsFile(texture->Name());
-        if (bytes.empty()) return nullptr;
+        if (bytes.empty())
+        {
+            LOG_WARN(Graphics,"OFP automatic satmap skipped: missing source {}",texture->Name());
+            return nullptr;
+        }
         const auto image = DecodePAABuffer(bytes.data(),bytes.size(),!ContainsNoCase(texture->Name(),".pac"));
-        if (!image.valid()) return nullptr; // Never bake white missing tiles into a whole island.
+        if (!image.valid())
+        {
+            LOG_WARN(Graphics,"OFP automatic satmap skipped: decode failed {}",texture->Name());
+            return nullptr; // Never bake white missing tiles into a whole island.
+        }
         if (!stbir_resize_uint8_linear(image.rgba.data(),image.width,image.height,image.width*4,
                                       tiles[i].data(),tileSize,tileSize,tileSize*4,STBIR_RGBA)) return nullptr;
         ++decoded;
