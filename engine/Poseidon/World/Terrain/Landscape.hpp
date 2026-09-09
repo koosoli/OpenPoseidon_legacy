@@ -1040,6 +1040,8 @@ class Landscape : public SerializeClass
     // data access
     GeographyInfo GetGeography(int x, int z) const;
     float GetHeight(int z, int x) const; // note: x,z order differs from ClippedData
+    // Row-major [z][x] float heights; valid until terrain data is rebuilt.
+    const float* HeightmapData() const { return static_cast<const RawType*>(_data.RawData()); }
     int GetTexture(int z, int x) const;
     const ObjectList& GetObjects(int z, int x) const { return _objects(x, z); }
     PackedColor GetRandomColor(int x, int z, float& u, float& v) const

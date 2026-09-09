@@ -406,15 +406,6 @@ bool TerrainWgpu::UploadIfNeeded(const Landscape& land)
         return false;
     }
 
-    std::vector<float> heights(static_cast<size_t>(range) * range);
-    for (int z = 0; z < range; z++)
-    {
-        for (int x = 0; x < range; x++)
-        {
-            heights[static_cast<size_t>(z) * range + x] = land.GetHeight(z, x);
-        }
-    }
-
     // Fill the static params (the coast wet-band fields are refreshed per frame in DrawTerrain).
     _params.world_origin = {0.0f, 0.0f};
     _params.land_grid = land.GetLandGrid();
@@ -424,7 +415,9 @@ bool TerrainWgpu::UploadIfNeeded(const Landscape& land)
     _params.land_range = static_cast<uint32_t>(land.GetLandRange());
     _params.data_scale = 1.0f;
     EngineWgpu::AcquireProducerWindow("terrain heightmap");
-    wgr_terrain_set_heightmap(_renderer, heights.data(), &_params);
+    // The FFI consumes/copies this slice synchronously. Borrowing the existing
+    // heightfield avoids a 256 MiB temporary (plus STL alignment) on 8192 grids.
+    wgr_terrain_set_heightmap(_renderer, land.HeightmapData(), &_params);
     _uploadedHeightRevision = land.HeightRevision();
     if (sameMap)
     {

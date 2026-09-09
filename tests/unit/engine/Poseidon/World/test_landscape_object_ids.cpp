@@ -31,6 +31,31 @@ Ref<ObjectPlain> AddLandscapeObject(Landscape& landscape, int id)
 }
 } // namespace
 
+TEST_CASE("Landscape upload view preserves row-major float heights", "[World][Terrain][heightmap-view]")
+{
+    class Heightfield : public Landscape
+    {
+      public:
+        Heightfield() : Landscape(nullptr, nullptr) {}
+        using Landscape::Dim;
+        using Landscape::SetData;
+    };
+    Heightfield landscape;
+    GlobalLandscapeScope globalLandscape(&landscape);
+    landscape.Dim(16, 16, 32, 32, 50.0f);
+    const int range = landscape.GetTerrainRange();
+    for (int z = 0; z < range; ++z)
+        for (int x = 0; x < range; ++x)
+            landscape.SetData(x, z, x * 0.25f - z * 1.5f);
+    const float* heights = landscape.HeightmapData();
+    REQUIRE(heights != nullptr);
+    for (int z = 0; z < range; ++z)
+        for (int x = 0; x < range; ++x)
+            CHECK(heights[z * range + x] == landscape.GetHeight(z, x));
+    landscape.SetData(5, 7, -123.5f);
+    CHECK(heights[7 * range + 5] == -123.5f);
+}
+
 TEST_CASE("Landscape ID cache uses the highest sparse object ID", "[World][Terrain][ObjectID]")
 {
     WrpReader reader;

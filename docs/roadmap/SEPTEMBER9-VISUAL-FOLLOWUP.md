@@ -190,8 +190,8 @@ term is sun-only in `shading.wgsl`. Night GLOSS demo is not considered fixed.
 - AI: radio must not delay commands; assess overlapping radio, interrupt long
   binocular use on movement; bounded tactical/team coordination improvements
   without breaking campaign orders. Not implemented yet.
-- Multi-island OFP world: prefer flat neighbouring islands before a globe;
-  investigate world data/coordinate/import constraints before claiming support.
+- Multi-island OFP world: implemented as a separate flat five-island composite;
+  see the Fusion entry below for the installed-test status and limitations.
 
 - a672c93e: installed 8x MSAA/DLSS-off A/B now renders the same Everon scene
   instead of black; no sample-count validation errors, exit 0. Tester hardware
@@ -694,3 +694,29 @@ rocket-crater.png and rocket-panel.png. The panel's new section is below the bru
 instructions and requires scrolling at the default panel height. UI activation
 uses the same settings as tested triRocketCraters; actual checkbox clicking and
 large salvos were not benchmarked. Installed 6e71d593 pushed to both safety branches.
+
+### OFP Fusion: five neighbouring original islands
+
+713d1378 adds a local-data exporter/builder/installer and FusionTour.FusionOFP.
+Everon, Malden, Kolgujev, Nogova and Desert Island share a 51.2 km square OPRW3
+world, without scaling or rotating their terrain and 407848 original placements.
+Source tiles have at least 3.2 km additional ocean separation. Exact float height
+samples, geography/sound/random fields, mountains and 1092 ground textures are
+retained; object IDs are reassigned uniquely. Generated retail data stays ignored
+in build/fusion and is installed only to AddOns/fusion_ofp.pbo, not redistributed.
+Original worlds are untouched. Mission coordinates and IDs from original campaigns
+are not automatically migrated; only island labels and a translated Everon ILS
+are configured, not all town/airport metadata. README has build/start instructions.
+
+Initial installed tests loaded all five islands' world data, but did NOT produce
+a playable frame: first config class/WRP basename mismatch (fusion vs FusionOFP)
+prevented mission init. Fixed by matching the WRP basename and inheriting Eden's
+world config; the second run reached InitVehicles ok=1 and DisplayMission, then
+crashed in std::_Allocate_manually_vector_aligned at TerrainWgpu::UploadIfNeeded.
+At terrainGrid=6.25 this world has 8192 squared samples: the redundant float vector
+needs 256 MiB plus STL alignment, exceeding Jimbo's 256 MiB single-allocation cap.
+The upload now borrows Landscape's existing contiguous float array. The FFI copies
+to GPU staging/owned Rust storage synchronously, so no borrowed pointer escapes.
+The allocator safety cap remains unchanged. Row-major view test covers subdivision,
+negative heights and a subsequent height edit. Runtime acceptance is pending the
+new binary build/deployment; .tmp-bulb/fusion-test.ps1 visits all five islands.

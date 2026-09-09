@@ -148,17 +148,18 @@ def build(source, output):
     manifest['world_sha256'] = hashlib.sha256(data).hexdigest()
     labels = ''.join(f'class Island{i} {{name="{v[1]}"; position[]={{{(v[2]+128)*CELL},{(v[3]+128)*CELL}}}; type="NameLocal"; radiusA=4000; radiusB=4000;}};' for i,v in enumerate(ISLANDS))
     config = '''class CfgPatches {class FusionOFP {units[]={}; weapons[]={}; requiredVersion=1.96; requiredAddons[]={"Noe"};};};
-class CfgWorlds {class DefaultWorld; class FusionOFP: DefaultWorld {
- access=2; description="OFP Fusion - Five Islands"; worldName="\\fusion_ofp\\fusion.wrp";
+class CfgWorlds {class Eden; class FusionOFP: Eden {
+ access=2; description="OFP Fusion - Five Islands"; worldName="\\fusion_ofp\\FusionOFP.wrp";
  worldSize=51200; landGrid=50; centerPosition[]={25600,25600,0};
  startTime="12:00"; startDate="21/6/1985"; startWeather=0.2; forecastWeather=0.2;
  startFog=0; forecastFog=0; seagullPos[]={9600,14400,150};
+ ilsPosition[]={7972,18923}; ilsDirection[]={0,0.08,-1}; ilsTaxiIn[]={}; ilsTaxiOff[]={};
  class Names {'''+labels+'''};
 };}; class CfgWorldList {class FusionOFP {};};
 '''
     output.mkdir(parents=True, exist_ok=True)
     (output/'fusion.wrp').write_bytes(data)
-    (output/'fusion_ofp.pbo').write_bytes(pack_pbo({'config.cpp':config.encode('ascii'),'fusion.wrp':data}))
+    (output/'fusion_ofp.pbo').write_bytes(pack_pbo({'config.cpp':config.encode('ascii'),'FusionOFP.wrp':data}))
     (output/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n',encoding='ascii')
     print(json.dumps(manifest,indent=2))
 
