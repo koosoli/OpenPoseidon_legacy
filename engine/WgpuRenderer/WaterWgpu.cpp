@@ -458,7 +458,6 @@ void WaterWgpu::BuildQuadtree(const Landscape& land)
     // (1.2f * wave_amp)
     // 3. Interaction & particle impulse padding: maximum vessel/interaction splash impulse height (+/- 1.5m)
     // 4. Safety margin (1.25x): guarantees bounding spheres never cull crests near frustum edges.
-    constexpr float OffMapSurface = 0.0f;
     // 5. Shore breakers: the shoaling train adds up to ~0.62 * wave_amp * shoreGain * 3.2 (its
     //    Green's-law gain) on top of the offshore FFT crest, so the coastal band needs its own
     //    term or near-beach nodes get culled at exactly the moment their waves are tallest.
@@ -471,15 +470,10 @@ void WaterWgpu::BuildQuadtree(const Landscape& land)
     const float crestPadding = std::max(conservativeBound, 3.5f);
     auto leafBounds = [&](int ox, int oz, int span, float& mn, float& mx)
     {
-        for (int z = oz; z <= oz + span; z++)
-        {
-            for (int x = ox; x <= ox + span; x++)
-            {
-                const float h = (x < 0 || z < 0 || x >= range || z >= range) ? OffMapSurface : land.GetHeight(z, x);
-                mn = std::min(mn, h - crestPadding);
-                mx = std::max(mx, h + crestPadding);
-            }
-        }
+        CdlodHeightBounds(ox,oz,span,range,true,
+            [&](int z,int x) { return land.GetHeight(z,x); },mn,mx);
+        mn -= crestPadding;
+        mx += crestPadding;
     };
     BuildCdlodTree(rootTexels, originTexel, originTexel, grid, WaterGridN, leafBounds, _tree, _rootIndex, _numLevels,
                    _leafSize);

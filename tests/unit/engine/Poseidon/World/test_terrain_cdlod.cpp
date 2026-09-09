@@ -11,6 +11,32 @@
 
 using namespace Poseidon;
 
+TEST_CASE("Clipped CDLOD bounds match exhaustive edge and ocean scans", "[cdlod][water]")
+{
+    auto height = [](int z,int x) { return float((z*7+x*13)%23-11); };
+    for (bool ocean : {false,true})
+        for (int oz=-24; oz<=24; oz+=4)
+            for (int ox=-24; ox<=24; ox+=4)
+                for (int span : {0,4,16,32})
+                {
+                    float mn=INFINITY,mx=-INFINITY,refMn=INFINITY,refMx=-INFINITY;
+                    int calls=0;
+                    CdlodHeightBounds(ox,oz,span,17,ocean,[&](int z,int x) {
+                        ++calls; return height(z,x);
+                    },mn,mx);
+                    for (int z=oz; z<=oz+span; ++z)
+                        for (int x=ox; x<=ox+span; ++x)
+                        {
+                            const float h=ocean && (x<0 || z<0 || x>=17 || z>=17)
+                                ? 0 : height(std::clamp(z,0,16),std::clamp(x,0,16));
+                            refMn=std::min(refMn,h); refMx=std::max(refMx,h);
+                        }
+                    CHECK(mn==refMn);
+                    CHECK(mx==refMx);
+                    CHECK(calls<=17*17);
+                }
+}
+
 TEST_CASE("Snowstorm budget is bounded and only falling snow adds cloud cover", "[Snow][Weather]")
 {
     SnowField snow;

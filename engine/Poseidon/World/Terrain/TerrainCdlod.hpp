@@ -7,6 +7,32 @@
 
 namespace Poseidon
 {
+// Scan each distinct map sample once; extended leaves otherwise repeatedly
+// sample a clamped edge or walk thousands of constant ocean texels.
+template <typename HeightFn>
+void CdlodHeightBounds(int ox, int oz, int span, int range, bool ocean,
+                      HeightFn&& height, float& mn, float& mx)
+{
+    if (range <= 0 || span < 0) return;
+    const int endX = ox + span, endZ = oz + span;
+    if (ocean && (ox < 0 || oz < 0 || endX >= range || endZ >= range))
+    {
+        mn = std::min(mn, 0.0f);
+        mx = std::max(mx, 0.0f);
+    }
+    const int x0 = ocean ? std::max(ox, 0) : std::clamp(ox, 0, range-1);
+    const int z0 = ocean ? std::max(oz, 0) : std::clamp(oz, 0, range-1);
+    const int x1 = ocean ? std::min(endX, range-1) : std::clamp(endX, 0, range-1);
+    const int z1 = ocean ? std::min(endZ, range-1) : std::clamp(endZ, 0, range-1);
+    for (int z=z0; z<=z1; ++z)
+        for (int x=x0; x<=x1; ++x)
+        {
+            const float h = height(z,x);
+            mn = std::min(mn,h);
+            mx = std::max(mx,h);
+        }
+}
+
 // Camera far is an axial plane distance, not the radius of its visible corners.
 inline float CdlodFrustumReach(float farPlane, float tanHalfX, float tanHalfY)
 {

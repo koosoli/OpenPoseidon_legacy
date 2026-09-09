@@ -382,15 +382,8 @@ void TerrainWgpu::BuildQuadtree(const Landscape& land)
     // way, so the extended border is a flat continuation of the boundary terrain.
     auto leafBounds = [&](int ox, int oz, int span, float& mn, float& mx)
     {
-        for (int z = oz; z <= oz + span; z++)
-        {
-            for (int x = ox; x <= ox + span; x++)
-            {
-                const float h = land.GetHeight(std::clamp(z, 0, range - 1), std::clamp(x, 0, range - 1));
-                mn = std::min(mn, h);
-                mx = std::max(mx, h);
-            }
-        }
+        CdlodHeightBounds(ox,oz,span,range,false,
+            [&](int z,int x) { return land.GetHeight(z,x); },mn,mx);
     };
     BuildCdlodTree(rootTexels, originTexel, originTexel, grid, TerrainGridN, leafBounds, _tree, _rootIndex, _numLevels,
                    _leafSize);

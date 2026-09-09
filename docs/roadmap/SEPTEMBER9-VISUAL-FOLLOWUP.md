@@ -351,3 +351,16 @@ crater and restoration images inspected (sep9-local-terrain-*). First 7x7 patch
 includes grid normalization/partition: 383.3ms. Restore uses local patch: 1.52ms
 collision/cache initiation. Subsequent renderer height/quadtree work is outside
 that timer; do not quote it as whole-frame cost or enable default craters yet.
+
+### Continuous terrain brush
+
+bc3ae8a8 adds experimental Physics-tab raise/lower painting in Zeus freefly,
+left-button hold, capped at four updates/second, single-player and mission-local.
+Radius is at least 1.5 native cells; no tunnels/save/undo/navmesh relocation.
+b4769ede removes a delayed partial release stroke found by installed testing.
+Both commits built, pushed to both safety refs and deployed. Installed SDL input
+test exits 0: height 29.835 -> 27.8448 -> 24.8738 while held, remains 24.8738 after
+release, then rises to 27.8344. Images/log: .tmp-bulb/sep9-brush-release-*.
+Top-down images show only subtle relief; numerical acceptance is not a full
+interactive usability/performance acceptance. Terrain/water global rebuild stalls
+remain. Default explosion craters remain disabled pending renderer improvements.
