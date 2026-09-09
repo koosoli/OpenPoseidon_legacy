@@ -18,7 +18,7 @@ bool DrawMapEditorTab()
     if (RadioButton("Raise / build hills", brush.raise)) brush.raise = true;
     PanelSameLine();
     if (RadioButton("Lower / dig craters", !brush.raise)) brush.raise = false;
-    SliderFloat("Brush radius", &brush.radius, 8.0f, 250.0f, "%.1f m");
+    SliderFloat("Brush radius", &brush.radius, 0.5f, 250.0f, "%.1f m");
     SliderFloat("Height change per second", &brush.metresPerSecond, 0.1f, 32.0f, "%.1f m/s");
     if (GLandscape)
     {
@@ -32,8 +32,9 @@ bool DrawMapEditorTab()
     ImGui::TextWrapped("1. Choose Raise or Lower, radius and speed.\n"
         "2. Click Start painting to enter free-fly and close this panel.\n"
         "3. Point the cursor at land and HOLD LEFT MOUSE. Longer holds change more height.\n"
-        "4. Release LEFT MOUSE to stop. Hold RIGHT MOUSE to look; WASD moves, Q/Z moves up/down.\n"
-        "5. Ctrl+` / Ctrl+; reopens Dev Tools to change the brush or disable it.");
+        "4. WHEEL changes radius. Hold LEFT ALT while painting to reverse Raise/Lower temporarily.\n"
+        "5. Release LEFT MOUSE to stop. Hold RIGHT MOUSE to look; WASD moves, Q/Z moves up/down.\n"
+        "6. Ctrl+` / Ctrl+; reopens Dev Tools to change the brush or disable it.");
     ImGui::TextColored(ImVec4(1.0f,0.8f,0.3f,1.0f), "Mission-local only. No save/export yet.");
     if (ImGui::CollapsingHeader("Limitations / future map creation"))
     {

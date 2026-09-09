@@ -4,6 +4,14 @@
 
 namespace Poseidon
 {
+inline float TerrainBrushWheelRadius(float requested, float wheelSteps)
+{
+    if (!std::isfinite(requested)) requested = 64.0f;
+    requested = std::clamp(requested, 0.5f, 250.0f);
+    if (!std::isfinite(wheelSteps)) return requested;
+    return std::clamp(requested * std::pow(1.15f, std::clamp(wheelSteps, -64.0f, 64.0f)), 0.5f, 250.0f);
+}
+
 inline float TerrainBrushRadius(float requested, float spacing)
 {
     return std::max(std::min(requested, 250.0f), spacing * 1.5f);

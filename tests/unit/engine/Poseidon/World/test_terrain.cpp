@@ -8,8 +8,22 @@
 #include <stdlib.h>
 #include <cmath>
 #include <utility>
+#include <limits>
 
 using namespace Poseidon;
+
+TEST_CASE("Terrain brush wheel supports fractional steps and bounded fine radii", "[terrain-brush-radius]")
+{
+    CHECK(TerrainBrushWheelRadius(8, -1) < 8);
+    CHECK(TerrainBrushWheelRadius(64, 0) == 64);
+    CHECK(TerrainBrushWheelRadius(TerrainBrushWheelRadius(64, 0.5f), -0.5f) == Catch::Approx(64));
+    CHECK(TerrainBrushWheelRadius(250, 10) == 250);
+    CHECK(TerrainBrushWheelRadius(0.5f, -10) == 0.5f);
+    CHECK(TerrainBrushWheelRadius(64, std::numeric_limits<float>::quiet_NaN()) == 64);
+    CHECK(TerrainBrushWheelRadius(std::numeric_limits<float>::infinity(), 0) == 64);
+    CHECK(TerrainBrushRadius(2, 1) == 2);
+    CHECK(TerrainBrushRadius(0.5f, 6.25f) == 9.375f);
+}
 
 TEST_CASE("Terrain brush preview radius matches the painted footprint", "[terrain-brush-radius]")
 {

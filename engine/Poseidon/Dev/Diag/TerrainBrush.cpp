@@ -117,12 +117,12 @@ bool TerrainBrushTargetAtPixel(float x, float y, TerrainBrushTarget& target)
     return true;
 }
 
-bool PaintTerrainAtPixel(float x, float y, float seconds)
+bool PaintTerrainAtPixel(float x, float y, float seconds, bool invert)
 {
     if (!std::isfinite(seconds) || seconds <= 0) return false;
     TerrainBrushTarget target;
     if (!TerrainBrushTargetAtPixel(x,y,target) || !target.editable) return false;
     const float delta = std::clamp(seconds,0.0f,0.25f)*std::clamp(settings.metresPerSecond,0.1f,32.0f);
-    return PaintTerrain(target.x,target.z,target.radius,settings.raise ? delta : -delta);
+    return PaintTerrain(target.x,target.z,target.radius,(settings.raise != invert) ? delta : -delta);
 }
 }

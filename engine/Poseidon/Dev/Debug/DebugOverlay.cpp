@@ -52,6 +52,7 @@
 #include <Poseidon/Dev/Diag/FixedStepTab.hpp>
 #include <Poseidon/Dev/Diag/PhysicsTab.hpp>
 #include <Poseidon/Dev/Diag/TerrainBrush.hpp>
+#include <Poseidon/World/Terrain/TerrainCrater.hpp>
 #include <Poseidon/Dev/Diag/MapEditorTab.hpp>
 #include <Poseidon/Dev/Diag/PictureModeTab.hpp>
 #include <Poseidon/Dev/Diag/WeatherTab.hpp>
@@ -1039,8 +1040,9 @@ void DrawZeusInteractionOverlay()
     {
         char text[192];
         const auto& brush = Dev::TerrainBrush();
-        std::snprintf(text, sizeof(text), "MAP EDITOR | %s | requested radius %.0f m | %.1f m/s | Hold LMB to paint | Ctrl+` settings",
-                      brush.raise ? "RAISE" : "LOWER", brush.radius, brush.metresPerSecond);
+        const bool raise = brush.raise != ((SDL_GetModState() & SDL_KMOD_LALT) != 0);
+        std::snprintf(text, sizeof(text), "MAP EDITOR | %s | radius %.1f m | %.1f m/s | LMB paint | Wheel radius | Left Alt reverse",
+                      raise ? "RAISE" : "LOWER", brush.radius, brush.metresPerSecond);
         draw->AddRectFilled(ImVec2(12, 64), ImVec2(12 + ImGui::CalcTextSize(text).x + 16, 92), IM_COL32(0,0,0,190));
         draw->AddText(ImVec2(20, 70), IM_COL32(255,230,150,255), text);
         if (brush.showRadius)
@@ -1050,7 +1052,7 @@ void DrawZeusInteractionOverlay()
             if (Dev::TerrainBrushTargetAtPixel(cursor.x, cursor.y, target))
             {
                 const ImU32 colour = !target.editable ? IM_COL32(255,85,85,255) :
-                    brush.raise ? IM_COL32(100,255,150,255) : IM_COL32(255,195,65,255);
+                    raise ? IM_COL32(100,255,150,255) : IM_COL32(255,195,65,255);
                 const float edge = (GLandscape->GetTerrainRange()-1)*GLandscape->GetTerrainGrid();
                 ZeusPoint previous;
                 bool previousValid = false;
@@ -7778,6 +7780,13 @@ void ProcessEvent(const SDL_Event& event)
         // the free-fly camera vertically and a Zeus binding would fight it.
         // The wheel is only claimed while something is selected, leaving it to
         // the game otherwise.
+        else if (event.type == SDL_EVENT_MOUSE_WHEEL && Dev::TerrainBrush().enabled && event.wheel.y != 0.0f)
+        {
+            s_zeusConsumeMouseEvent = true;
+            const float steps = event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -event.wheel.y : event.wheel.y;
+            auto& brush = Dev::TerrainBrush();
+            brush.radius = TerrainBrushWheelRadius(brush.radius, steps);
+        }
         else if (event.type == SDL_EVENT_MOUSE_WHEEL && !s_zeusSelection.empty() && event.wheel.y != 0.0f)
         {
             s_zeusConsumeMouseEvent = true;
@@ -7907,8 +7916,9 @@ void NewFrame()
         const float seconds = std::min(0.25f,float(SDL_GetTicks()-s_terrainBrushTickMs)*0.001f);
         s_terrainBrushTickMs = SDL_GetTicks();
         const ZeusPoint cursor = ZeusCursorPixel();
-        Defer([cursor,seconds] {
-            s_zeusStatus = Dev::PaintTerrainAtPixel(cursor.x,cursor.y,seconds)
+        const bool invert = (SDL_GetModState() & SDL_KMOD_LALT) != 0;
+        Defer([cursor,seconds,invert] {
+            s_zeusStatus = Dev::PaintTerrainAtPixel(cursor.x,cursor.y,seconds,invert)
                 ? "Terrain brush: applied (mission-local)." : "Terrain brush: no editable land hit.";
         });
     }

@@ -18,7 +18,7 @@ struct TerrainBrushTarget
 };
 bool TerrainBrushTargetAtPixel(float x, float y, TerrainBrushTarget& target);
 bool PaintTerrain(float x, float z, float radius, float delta);
-bool PaintTerrainAtPixel(float x, float y, float seconds);
+bool PaintTerrainAtPixel(float x, float y, float seconds, bool invert = false);
 void ResetTerrainBrush();
 struct RocketCraterSettings
 {

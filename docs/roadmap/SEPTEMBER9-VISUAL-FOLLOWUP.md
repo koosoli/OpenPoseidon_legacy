@@ -1,5 +1,39 @@
 # September 9 visual follow-up
 
+## Renewed owner scope after the follow-up audit
+
+All remaining measures proposed in REQUEST-AUDIT-FOLLOWUP-20260909.md are now
+authorised work, not completed work. Execute small fixes before architectural
+changes; preserve measured baselines and installed-game acceptance. New requests:
+
+- Editor first: wheel radius, Left Alt temporary opposite operation, requested
+  radii below 8 m with truthful grid limits, reset all terrain craters, safe
+  Fusion editing. True sideways roofed caves remain a separate 3D collision task.
+- Snow: reduced road accumulation, crawling displaces snow, fix distant road
+  visibility changing through snow with approach. Preserve shelter protection.
+- Breaking-wave/whitecap foam, NOT more shoreline foam; measure quality/cost.
+- Fusion: high-altitude blue/untextured island sections, far albedo and actual
+  inter-island visibility. Do not hide defects with fog or lower geometry detail.
+- Freefly night lighting: repeat with live player and truck headlights before
+  entering freefly, not only static village lamps.
+- Arma 3 at player [1747.27,5038.25,4.49], camera [1747.43,5037.95,5.85], az81.9
+  el1.2, 06:00: distant foliage too dark under rays and ground-impact shadows.
+  Exact world still to be identified from installed worlds/fixtures.
+- Native Reforger: contrast/normal/material/forest quality versus converted
+  reference, plus performance without concealing missing content.
+- OFP forests from the air: tile-like distribution and appearance; compare
+  candidate impostors/variation from ground AND air before adopting.
+- Review PARKED.md and POST-DLSS-MODERNISATION-ROADMAP.md after the small items,
+  revise priorities against actual shipped work and retain rejected experiments.
+- Plan direct Arma 1/2 mission loading from original game directories, without
+  copying assets into our engine directory. Inspect inspiration/officialarma;
+  owner can install missing games tomorrow. Do not block unrelated work on this.
+
+First editor input change is in progress: wheel consumes input only with the
+hidden-panel active Zeus brush, Left Alt reverses each held stroke and preview,
+requested slider minimum 0.5 m. Effective 1.5-cell support is deliberately not
+misrepresented as sub-grid geometry. Build and installed acceptance pending.
+
 Owner authorised implementation after backup `codex/backup-asset-obs-20260909-bc766e19`.
 Worktree asset-obs only; foreign Cargo.lock excluded. Screenshots 070351, 070456,
 072225 and 073829 are reproduction evidence, not completion evidence.
