@@ -296,7 +296,9 @@ fn lights_material_contrib(world_rel: vec3<f32>, normal_ws: vec3<f32>, mat_diffu
             // Back-facing: ambient only, no cone gate (GL33 parity) -- except for the
             // shadow, which must apply here too. A surface facing away from the light still
             // received its ambient through a wall before this.
-            let occl = select(1.0, cone, shadow_slot >= 0);
+            // A cube-shadow penumbra must attenuate back-face ambient as well.
+            // point_occl is 1 for lights without a cube; reuse the existing lookup.
+            let occl = select(point_occl, cone, shadow_slot >= 0);
             acc.diffuse += l_ambient * mat_ambient * (atten * occl);
         }
     }

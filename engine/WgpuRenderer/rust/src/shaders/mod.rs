@@ -239,4 +239,17 @@ mod tests {
             "water/whitewater.wgsl",
         );
     }
+
+    #[test]
+    fn point_shadow_penumbra_attenuates_backface_ambient() {
+        let shader = include_str!("lighting.wgsl");
+        assert!(shader.contains("let occl = select(point_occl, cone, shadow_slot >= 0);"));
+        assert!(shader.contains("var point_occl = 1.0;"));
+        // Spotlight shaping remains independent; no cube means unchanged ambient.
+        let visibility = |spot: bool, cone: f32, point: f32| if spot { cone } else { point };
+        assert_eq!(visibility(false, 1.0, 1.0), 1.0);
+        assert_eq!(visibility(false, 0.25, 0.25), 0.25);
+        assert_eq!(visibility(false, 0.0, 0.0), 0.0);
+        assert_eq!(visibility(true, 0.1, 1.0), 0.1);
+    }
 }

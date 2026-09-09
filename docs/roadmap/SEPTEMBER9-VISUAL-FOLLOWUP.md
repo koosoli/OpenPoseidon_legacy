@@ -120,6 +120,33 @@ archive mounting already implemented; scheduled SQF, archive-backed nested missi
 selection, conversations/FSMs and mission completion are separate compatibility
 gates. No source assets copied and no original mission claimed playable.
 
+Stratis dawn follow-up (75aceb93): WGR_LATE_OBJECT_TRACE confirms late opaque and
+cutout colour writes after volumetrics (9 solid / 19 cutout in the Zeus fixture).
+Test-FoliageRays uses the reported pose, June 21 06:00, actual Stratis WRP override,
+fixed manual exposure, native MSAA4; -Zeus retains a living player away from camera.
+Initial missing-world run loaded Intro and was rejected. The WRP override log still
+names Intro in SwitchLandscape; validate the actual terrain-material load instead.
+dlssMode=-1 means automatic, NOT disabled; this fixture now explicitly writes 0.
+An initial pre-water replay produced bright triangles without rays. After-water
+replay removes those (hillside no-rays mean absolute RGB delta 0.142/255), but both
+after-water and after-cloud replay unexpectedly reduce broad hillside scattering
+with rays. Same result with real Zeus rather than the CLI camera, which also shows
+player foreground/occasional underwater-state transitions. Therefore the ordering
+experiment is NOT accepted: WGR_EARLY_LATE_OPAQUE is default OFF at 75aceb93.
+Images/logs: build/foliage-rays/acceptance, zeus-legacy/zeus-after-water/zeus-shafts.
+One classifier test passes; that is not visual acceptance or a fix claim.
+
+PARKED and POST-DLSS roadmaps now have dated current-authorisation overlays:
+native load and render overlap no longer incorrectly treated as unimplemented;
+historical capability census retained as historical, GL33 retirement deferred.
+Full remaining-item recensus is not claimed complete.
+
+Next small lighting correction: partial cube-shadow visibility was ignored by
+back-facing ambient (fully shadowed points already skipped). Reuse point_occl
+instead of 1, preserving unshadowed and spotlight behaviour, no additional samples.
+Shader/numerical guards and installed acceptance pending. This is separate from
+the still-unreproduced whole-town light disappearance.
+
 Owner authorised implementation after backup `codex/backup-asset-obs-20260909-bc766e19`.
 Worktree asset-obs only; foreign Cargo.lock excluded. Screenshots 070351, 070456,
 072225 and 073829 are reproduction evidence, not completion evidence.
