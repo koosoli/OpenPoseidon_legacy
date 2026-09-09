@@ -93,6 +93,16 @@ try {
  Send @{cmd='eval';code='triPhysicsShowcase "roomlight"'} '"OK"'
  Start-Sleep -Seconds 2
  Send @{cmd='screenshot';path=(Join-Path $out 'room-unlit.png')}
+ Send @{cmd='exec';code='labCamera camSetPos [9700,3520,35]; labCamera camSetTarget [9700,3600,0]; labCamera camCommit 0'}
+ Start-Sleep -Seconds 2
+ Send @{cmd='screenshot';path=(Join-Path $out 'terrain-before.png')}
+ Send @{cmd='eval';code='triPhysicsShowcase "crater"'} '"OK"'
+ Send @{cmd='eval';code='triPhysicsShowcase "crater"'} '"REFUSED"'
+ Start-Sleep -Seconds 4
+ Send @{cmd='screenshot';path=(Join-Path $out 'terrain-crater.png')}
+ Send @{cmd='eval';code='triPhysicsShowcase "craterreset"'} '"OK"'
+ Start-Sleep -Seconds 3
+ Send @{cmd='screenshot';path=(Join-Path $out 'terrain-restored.png')}
  Send @{cmd='exit'}
  if (!$p.WaitForExit(30000)) {throw 'Exit timed out'}
  if ($p.ExitCode -ne 0) {throw "Game exit $($p.ExitCode)"}

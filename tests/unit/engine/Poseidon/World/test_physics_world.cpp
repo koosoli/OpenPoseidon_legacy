@@ -10,12 +10,25 @@
 #include <Poseidon/World/Physics/PhysicsBackend.hpp>
 #include <Poseidon/World/Physics/PhysicsWorld.hpp>
 #include <Poseidon/Dev/Diag/ShowcaseCastle.hpp>
+#include <Poseidon/World/Terrain/TerrainCrater.hpp>
 
 #include <memory>
 #include <cmath>
 #include <vector>
 
 using namespace Poseidon::Physics;
+
+TEST_CASE("terrain crater is compact smooth and finite", "[physics][crater]")
+{
+    using Poseidon::TerrainCraterDepth;
+    CHECK(TerrainCraterDepth(0,0,24,8) == 8);
+    CHECK(TerrainCraterDepth(24,0,24,8) == 0);
+    CHECK(TerrainCraterDepth(25,0,24,8) == 0);
+    CHECK(TerrainCraterDepth(0,0,0,8) == 0);
+    CHECK(TerrainCraterDepth(0,0,24,-1) == 0);
+    CHECK(TerrainCraterDepth(23.99f,0,24,8) < 0.00001f);
+    CHECK(TerrainCraterDepth(4,7,24,8) == TerrainCraterDepth(-7,4,24,8));
+}
 
 TEST_CASE("Showcase castle leaves a gate and a bounded projectile budget", "[physics][showcase]")
 {
@@ -363,6 +376,40 @@ TEST_CASE("terrain survives a replacement and a destroy", "[physics]")
 
     backend->Destroy();
     CHECK_FALSE(backend->GetStats().terrainRegistered);
+}
+
+TEST_CASE("replacing excavated terrain wakes a resting body and preserves its handle", "[physics][crater]")
+{
+    auto backend = CreatePhysicsBackend();
+    REQUIRE(backend->Create());
+    constexpr int n = 33;
+    std::vector<float> heights(n*n, 0.0f);
+    TerrainField field;
+    field.heights = heights.data();
+    field.width = field.height = n;
+    field.cellSize = 1;
+    field.originX = field.originZ = 0;
+    REQUIRE(backend->SetTerrain(field));
+    SphereProbeDef def;
+    def.position = Vector3(16,1,16);
+    def.radius = 0.25f;
+    const auto id = backend->SpawnSphereProbe(def);
+    REQUIRE(id.IsValid());
+    for (int i=0; i<900; ++i) backend->Step(1.0f/60);
+    BodyMotion motion;
+    REQUIRE(backend->GetBodyMotion(id,motion));
+    REQUIRE(motion.position.Y() > 0.1f);
+    REQUIRE(motion.position.Y() < 0.5f);
+    CHECK_FALSE(motion.awake);
+    for (int z=0; z<n; ++z) for (int x=0; x<n; ++x)
+        heights[z*n+x] = -Poseidon::TerrainCraterDepth(float(x-16),float(z-16),8,4);
+    REQUIRE(backend->SetTerrain(field));
+    REQUIRE(backend->GetBodyMotion(id,motion));
+    CHECK(motion.awake);
+    for (int i=0; i<600; ++i) backend->Step(1.0f/60);
+    REQUIRE(backend->GetBodyMotion(id,motion));
+    CHECK(motion.position.Y() < -3.0f);
+    CHECK(motion.position.Y() > -4.1f);
 }
 
 TEST_CASE("a world with no backend answers safely", "[physics]")

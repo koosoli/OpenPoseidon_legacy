@@ -13,6 +13,7 @@
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Terrain/TerrainCrater.hpp>
 #include <Poseidon/World/Terrain/WaterBodies.hpp>
 #include <cstring>
 #include <Poseidon/World/World.hpp>
@@ -34,6 +35,53 @@ bool s_showcaseActive = false;
 bool s_showcaseCastle = false;
 Ref<LightPoint> s_showcaseRoomLight;
 bool s_showcaseRoomLit = true;
+struct CraterSample { int x, z; float before, after; };
+std::vector<CraterSample> s_craterSamples;
+
+bool SetShowcaseCrater(bool restore)
+{
+    if (!s_showcaseActive || !GLandscape || restore == s_craterSamples.empty()) return false;
+    auto& land = *GLandscape;
+    const int range = land.GetTerrainRange();
+    const float spacing = land.GetTerrainGrid();
+    // One explicitly invoked prototype, bounded memory; never an explosion hot path.
+    if (range < 2 || range > 2049 || !(spacing > 0) || spacing > 50) return false;
+    if (!restore)
+    {
+        const float radius = std::max(24.0f, spacing * 3.0f);
+        for (int z = std::max(0, static_cast<int>((3600-radius)/spacing));
+             z < range && z*spacing <= 3600+radius; ++z)
+            for (int x = std::max(0, static_cast<int>((9700-radius)/spacing));
+                 x < range && x*spacing <= 9700+radius; ++x)
+            {
+                const float depth = TerrainCraterDepth(x*spacing-9700, z*spacing-3600, radius, 8.0f);
+                if (depth > 0)
+                {
+                    const float old = land.GetHeight(z, x);
+                    s_craterSamples.push_back({x,z,old,old-depth});
+                }
+            }
+        if (s_craterSamples.empty()) return false;
+    }
+    auto& world = Physics::EnsurePhysicsWorld();
+    if (!world.Create()) { if (!restore) s_craterSamples.clear(); return false; }
+    std::vector<float> heights(static_cast<size_t>(range)*range);
+    for (const auto& p : s_craterSamples) land.HeightChange(p.x,p.z,restore ? p.before : p.after);
+    for (int z = 0; z < range; ++z)
+        for (int x = 0; x < range; ++x)
+            heights[static_cast<size_t>(z)*range+x] = land.GetHeight(z,x);
+    if (!world.SetTerrain(heights.data(),range,range,spacing,0,0))
+    {
+        for (const auto& p : s_craterSamples) land.HeightChange(p.x,p.z,restore ? p.after : p.before);
+        if (!restore) s_craterSamples.clear();
+        return false;
+    }
+    land.FlushCache();
+    LOG_INFO(World, "SHOWCASE crater: restore={} samples={} spacing={} surface={}", restore,
+             s_craterSamples.size(), spacing, land.SurfaceY(9700,3600));
+    if (restore) s_craterSamples.clear();
+    return true;
+}
 
 // Harness seeds. The probe settings live behind a panel that holds the mouse, so an
 // automated capture cannot tick a box -- these are the only way to A/B the probe light
@@ -613,6 +661,7 @@ void ShutdownPhysicsProbes()
 
 void EndPhysicsShowcase()
 {
+    s_craterSamples.clear();
     if (s_showcaseRoomLight)
         s_showcaseRoomLight->SetDiffuse(HBlack);
     s_showcaseRoomLight = nullptr;
@@ -687,6 +736,8 @@ bool PhysicsShowcaseCommand(const char* command)
         s_showcaseRoomLit = !s_showcaseRoomLit;
         return true;
     }
+    if (!strcmp(command, "crater")) return SetShowcaseCrater(false);
+    if (!strcmp(command, "craterreset")) return SetShowcaseCrater(true);
     if (!strcmp(command, "castle"))
     {
         ClearPhysicsProbes();

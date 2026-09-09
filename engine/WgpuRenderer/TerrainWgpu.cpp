@@ -405,7 +405,8 @@ bool TerrainWgpu::UploadIfNeeded(const Landscape& land)
 {
     const int range = land.GetTerrainRange();
     const char* name = land.GetName();
-    if (_uploaded == &land && _uploadedRange == range && _uploadedName == name)
+    const bool sameMap = _uploaded == &land && _uploadedRange == range && _uploadedName == name;
+    if (sameMap && _uploadedHeightRevision == land.HeightRevision())
     {
         return false;
     }
@@ -429,6 +430,13 @@ bool TerrainWgpu::UploadIfNeeded(const Landscape& land)
     _params.data_scale = 1.0f;
     EngineWgpu::AcquireProducerWindow("terrain heightmap");
     wgr_terrain_set_heightmap(_renderer, heights.data(), &_params);
+    _uploadedHeightRevision = land.HeightRevision();
+    if (sameMap)
+    {
+        // Experimental deformation changes geometry, not the material/grass atlas.
+        BuildQuadtree(land);
+        return false;
+    }
 
     // Legacy worlds have small, reusable tile sets and keep the eager path.
     // Modern worlds name thousands of per-region LCA/LCO pages; their first

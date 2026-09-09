@@ -1070,6 +1070,12 @@ class Landscape : public SerializeClass
     void Quit(); // before quit
 
     void HeightChange(int x, int z, float y);
+    uint64_t HeightRevision() const { return _heightRevision; }
+
+  private:
+    uint64_t _heightRevision = 0;
+
+  public:
     void TextureChange(int x, int z, int id);
 
     Object* ObjectCreate(int id, const char* shape, const Matrix4& transform, int* x = nullptr, int* z = nullptr,

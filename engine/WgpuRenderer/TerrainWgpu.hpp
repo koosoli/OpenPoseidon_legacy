@@ -174,6 +174,7 @@ class TerrainWgpu : public ITerrainRenderer
     // that a re-upload is needed.
     const Landscape* _uploaded = nullptr;
     int _uploadedRange = 0;
+    uint64_t _uploadedHeightRevision = 0;
     std::string _uploadedName;
     bool _detailNoiseTried = false;
     // Keeps the detail texture's GPU handle registered for the renderer's

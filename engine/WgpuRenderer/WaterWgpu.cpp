@@ -498,6 +498,10 @@ void WaterWgpu::BuildQuadtree(const Landscape& land)
     // meshed, so precision here does not matter (§3 of the plan).
     _seaThreshold = maxTide + maxWave + 1.0f;
 
+    // A crater only invalidates shoreline bounds. Keep live FFT/interaction state.
+    if (_built == &land && _builtRange == range && _builtName == land.GetName())
+        return;
+
     _params = WgrWaterParams{};
     _params.world_origin = {0.0f, 0.0f};
     _params.terrain_grid = grid;
@@ -701,6 +705,11 @@ bool WaterWgpu::RebuildIfNeeded(const Landscape& land)
     const char* name = land.GetName();
     if (_built == &land && _builtRange == range && _builtName == name)
     {
+        if (_builtHeightRevision != land.HeightRevision())
+        {
+            BuildQuadtree(land);
+            _builtHeightRevision = land.HeightRevision();
+        }
         return false;
     }
     BuildQuadtree(land);
@@ -708,6 +717,7 @@ bool WaterWgpu::RebuildIfNeeded(const Landscape& land)
     _built = &land;
     _builtRange = range;
     _builtName = name;
+    _builtHeightRevision = land.HeightRevision();
     return true;
 }
 

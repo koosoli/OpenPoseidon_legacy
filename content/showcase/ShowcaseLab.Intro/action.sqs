@@ -3,6 +3,8 @@ _id = _this select 2
 ? _id == labCastle : goto "castle"
 ? _id == labRoom : goto "room"
 ? _id == labRoomLight : goto "roomlight"
+? _id == labCrater : goto "crater"
+? _id == labCraterReset : goto "craterreset"
 ? _id == labThrow : goto "throw"
 ? _id == labDrop : goto "drop"
 ? _id == labBall : goto "ball"
@@ -29,6 +31,15 @@ hint "ROTATING LIGHT ROOM\nEnter through the central doorway. The warm point lig
 exit
 #roomlight
 hint (triPhysicsShowcase "roomlight")
+exit
+#crater
+hint (triPhysicsShowcase "crater")
+player setPos [9700,3430,0]
+player setDir 0
+hint "EXPERIMENTAL TERRAIN\nCrater ahead at 9700 / 3600. Real heightfield and collision change; coarse source-grid resolution. Walk in or drop a physics body. Restore with LAB: restore crater terrain.\nNot saved, not networked, no tunnels. One rebuild can briefly pause."
+exit
+#craterreset
+hint (triPhysicsShowcase "craterreset")
 exit
 #throw
 hint (triPhysicsShowcase "throw")

@@ -439,26 +439,14 @@ public:
         {
             return false;
         }
-        if (_heightField)
-        {
-            // One terrain per world. Replacing it means the old body goes too.
-            if (_terrainBodyValid)
-            {
-                b3DestroyBody(_terrainBody);
-                _terrainBodyValid = false;
-            }
-            b3DestroyHeightField(_heightField);
-            _heightField = nullptr;
-        }
-
         // Copied because b3HeightFieldDef takes a non-const pointer and we must
         // not hand the landscape's own storage to a library that may hold it.
-        _heights.assign(field.heights, field.heights + static_cast<std::size_t>(field.width) * field.height);
+        std::vector<float> heights(field.heights, field.heights + static_cast<std::size_t>(field.width) * field.height);
 
-        const auto minMax = std::minmax_element(_heights.begin(), _heights.end());
+        const auto minMax = std::minmax_element(heights.begin(), heights.end());
 
         b3HeightFieldDef def{};
-        def.heights = _heights.data();
+        def.heights = heights.data();
         def.materialIndices = nullptr;
         // Heights are unscaled and quantised against the global range below, so
         // the y scale stays 1 and the grid spacing goes in x and z.
@@ -469,8 +457,8 @@ public:
         def.globalMaximumHeight = *minMax.second;
         def.clockwiseWinding = false;
 
-        _heightField = b3CreateHeightField(&def);
-        if (!_heightField)
+        auto* replacement = b3CreateHeightField(&def);
+        if (!replacement)
         {
             return false;
         }
@@ -478,8 +466,12 @@ public:
         b3BodyDef bodyDef = b3DefaultBodyDef();
         bodyDef.type = b3_staticBody;
         bodyDef.position = b3Vec3{field.originX, 0.0f, field.originZ};
-        _terrainBody = b3CreateBody(_world, &bodyDef);
-        _terrainBodyValid = true;
+        const auto replacementBody = b3CreateBody(_world, &bodyDef);
+        if (!b3Body_IsValid(replacementBody))
+        {
+            b3DestroyHeightField(replacement);
+            return false;
+        }
 
         b3ShapeDef shapeDef = b3DefaultShapeDef();
         // The ground answers EVERY question: a shot is stopped by it, sight is
@@ -488,7 +480,23 @@ public:
         // hillside it is aimed at, which reads as "no collider there" rather than
         // as a filter mistake.
         shapeDef.filter = ContactFilterFor(ColliderFlags::All);
-        b3CreateHeightFieldShape(_terrainBody, &shapeDef, _heightField);
+        const auto replacementShape = b3CreateHeightFieldShape(replacementBody, &shapeDef, replacement);
+        if (!b3Shape_IsValid(replacementShape))
+        {
+            b3DestroyBody(replacementBody);
+            b3DestroyHeightField(replacement);
+            return false;
+        }
+        // Publish only after creation succeeded, retaining the old ground on failure.
+        if (_terrainBodyValid) b3DestroyBody(_terrainBody);
+        if (_heightField) b3DestroyHeightField(_heightField);
+        _terrainBody = replacementBody;
+        _terrainBodyValid = true;
+        _heightField = replacement;
+        _heights.swap(heights);
+        for (const Slot& slot : _slots)
+            if (b3Body_IsValid(slot.body) && b3Body_GetType(slot.body) == b3_dynamicBody)
+                b3Body_SetAwake(slot.body, true);
 
         _terrainWidth = static_cast<std::uint32_t>(field.width);
         _terrainHeight = static_cast<std::uint32_t>(field.height);

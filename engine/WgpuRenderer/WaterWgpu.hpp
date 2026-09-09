@@ -38,6 +38,7 @@ class WaterWgpu : public IWaterRenderer
     // a rebuild is needed (mirrors TerrainWgpu).
     const Landscape* _built = nullptr;
     int _builtRange = 0;
+    uint64_t _builtHeightRevision = 0;
     std::string _builtName;
 
     std::vector<CdlodNode> _tree;
