@@ -582,3 +582,35 @@ benchmark. DLSS Quality was active (858x482 -> 1280x720). Cloud grain/history an
 low-resolution shapes near the horizon remain separate, unclosed quality issues.
 Latest installed game is abd8c50f, including the accepted castle contacts and
 the tested depth-jitter motion correction. No user settings or Cargo.lock edited.
+
+### Falling snow: flake shape, wind and fast-camera population
+
+Owner reports round balls and outrunning precipitation in freefly. ae59e548
+replaces the radial disc with a feathered six-arm 64x64 alpha mask, variable
+1.1-2.7 cm sprites, rotation and tumbling aspect. Calm terminal fall is now
+0.36-0.94 m/s with gentle horizontal flutter; wind response is 1.0 (previously
+0.6), with retained velocity relaxed at 3/s. No gameplay RNG consumption.
+
+Root cause of the missing field: only spawning above the camera, while old
+off-camera particles survive until ground contact and occupy the capped pool.
+Snow now removes particles outside the camera-local cylinder and replenishes
+camera losses throughout its visible vertical column. Retained particles stay
+world-space; camera velocity is not added to them. Failed shelter spawns retry
+at the normal rate, not a full pool per frame. Existing spawn shelter and
+room/roof/wall sweeps remain enabled. Rain behaviour is unchanged.
+
+Installed ae59e548: calm and 18 m/s wind/8x density runs exited 0, including
+a ~5.8 km camera move in four seconds and an altitude change to 900 m.
+Calm pool remained 700, storm 5600, including during flight; hundreds/thousands
+of visible quads persisted. Fast-flight CPU spawn+simulation+draw samples were
+roughly 0.14-0.30 ms calm and 1.1-1.8 ms at maximum storm density, not a complete
+GPU benchmark. Captures/logs: .tmp-bulb/snow-calm-* and snow-storm-*;
+reproduction harness .tmp-bulb/snowflakes.ps1. Near flakes show arms/variation;
+distant subpixel flakes can still appear as points, especially with DLSS.
+
+e0683049 additionally draws/replenishes snow at zero simulation delta, without
+advancing fall/tumble. Installed pause run exited 0: time stayed 22.865 for two
+wall-clock seconds and flakes remained visible (.tmp-bulb/snow-pause-paused.png).
+14 Rain/Snow test cases / 9932 assertions pass on the final build. Installed
+e0683049, both safety branches pushed; foreign Cargo.lock hash unchanged.
+Ground snow appearance/geometry was not changed by this precipitation fix.
