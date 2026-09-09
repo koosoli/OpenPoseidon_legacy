@@ -5266,12 +5266,17 @@ impl Renderer {
             };
             // Classic transparent sorting can submit promoted cutouts/opaque objects
             // after Water. Their prepass depth already occludes the atmosphere, but a
-            // late colour write would erase its scattering. Replay that exact set after water;
+            // late colour write would erase its scattering. Replay that exact set before shafts;
             // never move glass, decals, particles or post-ClearDepth cockpit segments.
             static EARLY_OPAQUE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
             let early_opaque = start == 0 && prepassed && water_split.is_some()
                 && *EARLY_OPAQUE.get_or_init(||
-                    !std::env::var("WGR_EARLY_LATE_OPAQUE").is_ok_and(|v| v == "0"));
+                    std::env::var("WGR_EARLY_LATE_OPAQUE").is_ok_and(|v| v == "1"))
+                && ops_post_water.iter().any(|op| match op {
+                    Plan3dOp::Draw3D { draw, .. } => draws3d.get(*draw as usize)
+                        .is_some_and(crate::gfx3d::draw_is_prepassed),
+                    _ => false,
+                });
             // Diagnose colour writes after atmospheric compositing without changing order.
             // Sample throughout a run: its first frames can belong to the loading/menu scene.
             if start == 0 {
@@ -5561,18 +5566,9 @@ impl Renderer {
                     if visibility_query {
                         wpass.end_occlusion_query();
                     }
-                    if early_opaque {
-                        self.gpu_timers.end_pass(&mut wpass, TimerRegion::WaterDraw);
-                        // Preserve water ordering (including refraction snapshot contents).
-                        // Prepassed colour pipelines write neither depth nor stencil, so
-                        // they can share this read-only attachment without another pass.
-                        render_ops(self, &mut wpass, ops_post_water, display_2d, false, true, Some(true));
-                    }
                     drop(wpass);
                     encoder.pop_debug_group();
-                    if !early_opaque {
-                        self.gpu_timers.end(&mut encoder, TimerRegion::WaterDraw);
-                    }
+                    self.gpu_timers.end(&mut encoder, TimerRegion::WaterDraw);
                 }
             }
 
@@ -5647,6 +5643,29 @@ impl Renderer {
                     self.gpu_timers
                         .end(&mut encoder, TimerRegion::CloudComposite);
                 }
+            }
+
+            if early_opaque {
+                // Keep both water/refraction and cloud ordering unchanged. A short separate
+                // pass is necessary: neither composite's framebuffer state belongs to objects.
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("wgr_late_opaque_before_shafts"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &target,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+                    })],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: seg_depth,
+                        depth_ops: None,
+                        stencil_ops: None,
+                    }),
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                render_ops(self, &mut pass, ops_post_water, display_2d, false, true, Some(true));
             }
 
             // VOLUMETRIC SHAFTS, composited HERE -- after the opaque world, after water and
