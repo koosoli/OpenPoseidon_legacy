@@ -8,7 +8,7 @@
 
 namespace Poseidon::Dev
 {
-void DrawMapEditorTab()
+bool DrawMapEditorTab()
 {
     ImGui::SeparatorText("Terrain height painting");
     auto& brush = TerrainBrush();
@@ -23,18 +23,23 @@ void DrawMapEditorTab()
         const float grid = GLandscape->GetTerrainGrid();
         ImGui::Text("Terrain grid: %.1f m | Effective radius: %.1f m", grid, std::max(brush.radius, grid*1.5f));
     }
+    const bool start = Button("Start painting (free-fly)");
     ImGui::SeparatorText("How to paint");
     ImGui::TextWrapped("1. Choose Raise or Lower, radius and speed.\n"
-        "2. Click Start painting below to enter free-fly and close this panel.\n"
+        "2. Click Start painting to enter free-fly and close this panel.\n"
         "3. Point the cursor at land and HOLD LEFT MOUSE. Longer holds change more height.\n"
         "4. Release LEFT MOUSE to stop. Hold RIGHT MOUSE to look; WASD moves, Q/Z moves up/down.\n"
         "5. Ctrl+` / Ctrl+; reopens Dev Tools to change the brush or disable it.");
-    ImGui::SeparatorText("Experimental / mission-local");
+    ImGui::TextColored(ImVec4(1.0f,0.8f,0.3f,1.0f), "Mission-local only. No save/export yet.");
+    if (ImGui::CollapsingHeader("Limitations / future map creation"))
+    {
     ImGui::TextWrapped("Single-player only. The first stroke may briefly pause while collision is prepared. "
         "Coarse terrain uses a minimum radius of 1.5 grid cells. Water cannot be painted. "
         "Reload the mission to restore its original terrain. Buildings and AI paths are not updated.");
     ImGui::TextWrapped("New maps from scratch, save/export and undo history are not implemented yet. "
         "This tab is the home for those future editor tools, not a finished map authoring pipeline.");
+    }
     if (Button("Reset brush settings (not terrain)")) ResetTerrainBrush();
+    return start;
 }
 }

@@ -7300,8 +7300,7 @@ void DrawMainWindow()
         {
             const bool available = GWorld && GLandscape && GWorld->GetMode() != GModeNetware;
             ImGui::BeginDisabled(!available);
-            Dev::DrawMapEditorTab();
-            if (Dev::Button("Start painting (free-fly)"))
+            if (Dev::DrawMapEditorTab())
             {
                 EnableZeusCamera();
                 if (s_zeusCamera)
