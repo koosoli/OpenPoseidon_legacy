@@ -281,6 +281,7 @@ struct SmokeParticle
 };
 
 class ISmokeWorldQuery;
+float SmokeParticleOpacity(const SmokeParticle& particle, const SmokeParams& params);
 float SmokeParticleRenderRadius(const SmokeParticle& particle, const SmokeParams& params,
                                const ISmokeWorldQuery& query);
 void BuildSmokeDrawOrder(const std::vector<SmokeParticle>& particles, const Matrix4& toView,
@@ -328,22 +329,12 @@ class SmokeVolume : public Entity
     /// weight; height above ground is what the shadow pass slides along the
     /// sun ray. Forward-declared struct to keep the renderer type out of here.
     template <typename Blob>
-    void AppendShadowBlobs(std::vector<Blob>& out) const
+    void AppendShadowBlobs(std::vector<Blob>& out, bool forShadow = true) const
     {
         for (const SmokeParticle& p : _particles)
         {
-            const float lf = std::clamp(p.age / std::max(p.lifetime, 1e-3f), 0.0f, 1.0f);
-            float fade = 1.0f;
-            if (lf < _params.fadeIn && _params.fadeIn > 0.0f)
-            {
-                fade = lf / _params.fadeIn;
-            }
-            else if (lf > 1.0f - _params.fadeOut && _params.fadeOut > 0.0f)
-            {
-                fade = (1.0f - lf) / _params.fadeOut;
-            }
-            const float density = _params.opacity * p.alphaJitter * fade * _params.groundShadow;
-            if (density <= 0.01f)
+            const float density = SmokeParticleOpacity(p, _params) * (forShadow ? _params.groundShadow : 1.0f);
+            if (density <= 0.004f)
             {
                 continue;
             }

@@ -298,7 +298,7 @@ void SmokeSystem::CollectShadowBlobs(std::vector<ShadowBlob>& out, std::size_t m
         {
             continue;
         }
-        volume->AppendShadowBlobs(out);
+        volume->AppendShadowBlobs(out, !force);
     }
     // SMK-036: and the game's OWN smoke. Every grenade, wreck and shell burst is a legacy
     // cloudlet, none of which was ever in this pass -- which is why the dev smoke darkened

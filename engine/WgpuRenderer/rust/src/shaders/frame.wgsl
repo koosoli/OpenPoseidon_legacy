@@ -622,9 +622,8 @@ fn apply_fog(rgb: vec3<f32>, world_pos_rel: vec3<f32>) -> vec3<f32> {
 const CLOUD_SHADOW_EDGE_FADE: f32 = 0.85;
 
 fn cloud_sun_shadow(world_xz: vec2<f32>) -> f32 {
-    if (terrain_shadow_map.cloud_shadow.w <= 0.0) {
-        return 1.0;
-    }
+    // Cloud strength is baked into red by cs_cloud_shadow. Green is independent
+    // smoke extinction and must still be sampled when cloud shadows are off.
     let uv = (world_xz - terrain_shadow_map.cloud_shadow.xy) * terrain_shadow_map.cloud_shadow.z;
     if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
         return 1.0;

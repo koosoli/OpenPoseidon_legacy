@@ -3435,6 +3435,17 @@ mod cloud_shadow_range_tests {
         CLOUD_SHADOW_DIM, CLOUD_SHADOW_SPAN_MAX, CLOUD_SHADOW_SPAN_MIN, cloud_shadow_span_for,
     };
 
+    #[test]
+    fn disabling_cloud_shadows_does_not_disable_smoke_on_surfaces() {
+        let src = include_str!("../shaders/frame.wgsl");
+        let body = src.split("fn cloud_sun_shadow(").nth(1).unwrap()
+            .split("fn terrain_sun_shadow(").next().unwrap();
+        assert!(!body.contains("cloud_shadow.w <="));
+        assert!(body.contains("t.r * t.g"));
+        let producer = include_str!("sky.wgsl");
+        assert!(producer.contains("vec4<f32>(1.0, smoke0, 0.0, 1.0)"));
+    }
+
     // The reported fault: the map spanned a fixed 4096 m centred on the camera, so it reached
     // 2048 m, and `cloud_sun_shadow` returns fully lit outside it. With the view distance wound
     // out for flying, the ground past 2048 m was in full sun and the boundary drew a straight

@@ -105,7 +105,20 @@ shadow settings are actually missing. Fixes and tests in progress, not yet deplo
   a stair-step ocean edge. This is partial, not acceptance. CPU water still clips
   at the land far plane despite the GPU using infinite-far projection. Follow-up
   removes that water-only clip and derives reach from sea/frustum intersections,
-  bounded by the existing last ocean LOD range. Build/runtime checks pending.
+  bounded by the existing last ocean LOD range.
+- afee9c8f: follow-up built, 10 CDLOD cases / 13494 assertions passed, pushed
+  both safety refs and installed. Same camera now has ocean over the entire
+  image, no stair-step edge. Draw timings in this view increase from roughly
+  2.8-3.9ms to 4.1-4.9ms because formerly missing pixels are now shaded; FFT
+  allocations/resolution unchanged. Not an infinite-orbital-space solution.
+- Smoke follow-up in progress: surface shadow sampling incorrectly returned
+  fully lit when cloud strength was zero, ignoring the independent smoke channel.
+  Removed that gate. Growing-puff opacity is shared by sprites, self-shadow,
+  ground shadows and volume injection; previously injection omitted expansion
+  dilution and was multiplied by the ground-shadow control. Wall clipping no
+  longer increases density. Initial 11 smoke cases / 409 assertions passed;
+  final build, shader contract and installed comparison pending. No wind,
+  downwash, collision or emission-lifetime changes in this patch.
 
 Other queue entries remain open. In particular local lights currently contribute
 only diffuse/ambient in `lighting.wgsl`; the glossy material's direct specular

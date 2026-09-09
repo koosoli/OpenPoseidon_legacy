@@ -1052,6 +1052,25 @@ void SmokeVolume::Simulate(float deltaT, SimulationImportance prec)
     _lastSimulateUs = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - begin).count();
 }
 
+float SmokeParticleOpacity(const SmokeParticle& particle, const SmokeParams& params)
+{
+    const float life = std::clamp(particle.age / std::max(particle.lifetime, 1e-3f), 0.0f, 1.0f);
+    if (life >= 1.0f) return 0.0f;
+    float fade = 1.0f;
+    if (params.fadeIn > 0.0f && life < params.fadeIn)
+        fade = life / params.fadeIn;
+    else if (params.fadeOut > 0.0f && life > 1.0f - params.fadeOut)
+        fade = (1.0f - life) / params.fadeOut;
+    // Dilution follows expansion, not wall clipping. Clipping a puff must not
+    // concentrate its optical density or make the volume path opaque again.
+    const float radius = std::max(Lerp(params.startRadius, params.endRadius, life) * particle.sizeJitter, 1e-3f);
+    const float density = params.balloons ? 1.0f :
+        std::pow(std::clamp(params.startRadius / radius, 0.0f, 1.0f), std::max(params.densityFalloff, 0.0f));
+    const float opacity = params.balloons ? params.balloonOpacity : params.opacity;
+    const float jitter = params.balloons ? Lerp(1.0f, particle.alphaJitter, 0.2f) : particle.alphaJitter;
+    return std::clamp(opacity * jitter * fade * density, 0.0f, 1.0f);
+}
+
 float SmokeParticleRenderRadius(const SmokeParticle& particle, const SmokeParams& params,
                                const ISmokeWorldQuery& query)
 {
@@ -1214,9 +1233,7 @@ void SmokeVolume::Draw(int level, ClipFlags clipFlags, const FrameBase& frame)
         };
         const auto particleDensity = [&](const SmokeParticle& p)
         {
-            const float lf = std::clamp(p.age / std::max(p.lifetime, 1e-3f), 0.0f, 1.0f);
-            const float alive = lf < 1.0f - _params.fadeOut ? 1.0f : (1.0f - lf) / std::max(_params.fadeOut, 1e-3f);
-            return _params.opacity * p.alphaJitter * alive;
+            return SmokeParticleOpacity(p, _params);
         };
         // Each ray samples a cell total, not individual neighbours. Accumulate
         // once so a dense/downwash-compressed plume cannot turn this quadratic.
@@ -1270,49 +1287,11 @@ void SmokeVolume::Draw(int level, ClipFlags clipFlags, const FrameBase& frame)
     {
         const SmokeParticle& particle = _particles[index];
 
-        const float lifeFraction = std::clamp(particle.age / std::max(particle.lifetime, 1e-3f), 0.0f, 1.0f);
-
-        // Fade up out of the nozzle, hold, fade out. Without the fade-in a
-        // particle appears at full opacity the instant it is born, which reads
-        // as flicker at the source.
-        float fade = 1.0f;
-        if (lifeFraction < _params.fadeIn && _params.fadeIn > 0.0f)
-        {
-            fade = lifeFraction / _params.fadeIn;
-        }
-        else if (lifeFraction > 1.0f - _params.fadeOut && _params.fadeOut > 0.0f)
-        {
-            fade = (1.0f - lifeFraction) / _params.fadeOut;
-        }
-
         const float size = RenderRadius(particle);
         if (size < 0.05f)
             continue;
 
-        // A fixed amount of soot spread over a growing puff gets thinner. Without
-        // this the plume keeps its birth opacity at every size and reads as a
-        // solid object; with it, the column is dense at the source and the old
-        // smoke overhead is a faint drifting cloud -- which is the whole
-        // difference between "smoke" and "a grey shape". Computed here, after
-        // the wall clamp, so a puff squeezed against a wall does not also get
-        // spuriously denser for it.
-        float density = 1.0f;
-        if (_params.balloons)
-        {
-            // A balloon is opaque and stays opaque; it does not thin as it rises.
-            density = 1.0f;
-        }
-        else if (_params.densityFalloff > 0.0f && size > 1e-3f)
-        {
-            const float ratio = std::clamp(_params.startRadius / size, 0.0f, 1.0f);
-            density = std::pow(ratio, _params.densityFalloff);
-        }
-        // Balloons swap the smoke thickness dial for their own opacity; the
-        // jitter is softened to a hint of variation so a batch stays uniformly
-        // vivid rather than translucent.
-        const float baseOpacity = _params.balloons ? _params.balloonOpacity : _params.opacity;
-        const float jitter = _params.balloons ? Lerp(1.0f, particle.alphaJitter, 0.2f) : particle.alphaJitter;
-        const float alpha = std::clamp(baseOpacity * jitter * fade * density, 0.0f, 1.0f);
+        const float alpha = SmokeParticleOpacity(particle, _params);
         if (alpha <= 0.004f)
         {
             continue;

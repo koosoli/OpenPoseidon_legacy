@@ -57,6 +57,34 @@ TEST_CASE("Smoke rendering respects walls and roofs without more collision sweep
     CHECK(query.sweeps == 0);
 }
 
+TEST_CASE("Smoke optical density dilutes through expansion independently of shadow controls", "[smoke][density]")
+{
+    Poseidon::SmokeParams params;
+    params.fadeIn = 0;
+    params.fadeOut = 0.2f;
+    params.startRadius = 1;
+    params.endRadius = 5;
+    params.opacity = 1;
+    params.densityFalloff = 2;
+    Poseidon::SmokeParticle p;
+    p.lifetime = 10;
+    p.age = 0;
+    p.sizeJitter = p.alphaJitter = 1;
+    CHECK(Poseidon::SmokeParticleOpacity(p, params) == 1);
+    p.age = 5;
+    CHECK(Poseidon::SmokeParticleOpacity(p, params) == Catch::Approx(1.0f/9.0f));
+    params.groundShadow = 0;
+    p.roomId = 1;
+    CHECK(Poseidon::SmokeParticleOpacity(p, params) == Catch::Approx(1.0f/9.0f));
+    p.age = 9;
+    CHECK(Poseidon::SmokeParticleOpacity(p, params) < 0.03f);
+    p.age = 10;
+    CHECK(Poseidon::SmokeParticleOpacity(p, params) == 0);
+    params.balloons = true;
+    p.age = 5;
+    CHECK(Poseidon::SmokeParticleOpacity(p, params) == params.balloonOpacity);
+}
+
 TEST_CASE("Smoke cell totals match the neighbour walk including self exclusion", "[smoke][density]")
 {
     Poseidon::SmokeDensityGrid grid;
