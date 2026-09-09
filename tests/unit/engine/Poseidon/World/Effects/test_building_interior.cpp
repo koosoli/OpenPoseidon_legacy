@@ -27,6 +27,7 @@ struct BuildingInteriorTestAccess
         interior._dim[1] = static_cast<int>(labels.size());
         interior._dim[2] = 1;
         interior._labels = std::move(labels);
+        interior.BuildRoofColumns();
         return interior;
     }
 
@@ -277,6 +278,17 @@ TEST_CASE("Snowflakes retain projected area when looking along their motion", "[
     CHECK(PrecipitationSpriteLength(true, 5.0f, 3.0f) == 3.0f);
     CHECK(PrecipitationSpriteLength(false, 5.0f, 3.0f) == 5.0f);
     CHECK(PrecipitationSpriteLength(false, 0.0f, 3.0f) == 0.0f);
+}
+
+TEST_CASE("Snow shelter columns include roofs without requiring path-defined rooms", "[Snow][BuildingInterior]")
+{
+    const auto roof = BuildingInteriorTestAccess::MakeColumn({0xff, 0xff, 0xfe, 0xff});
+    CHECK(roof.CoveredFromAboveModel(Vector3(0.125f, -3, 0.125f)));
+    CHECK(roof.CoveredFromAboveModel(Vector3(0.125f, 0.25f, 0.125f)));
+    CHECK_FALSE(roof.CoveredFromAboveModel(Vector3(0.125f, 0.9f, 0.125f)));
+    CHECK_FALSE(roof.CoveredFromAboveModel(Vector3(0.3f, 0.25f, 0.125f)));
+    const auto air = BuildingInteriorTestAccess::MakeColumn({0xff, 0xff, 0xff});
+    CHECK_FALSE(air.CoveredFromAboveModel(Vector3(0.125f, 0.25f, 0.125f)));
 }
 
 TEST_CASE("The rain density the sea is rained on is the one the drops are falling at",

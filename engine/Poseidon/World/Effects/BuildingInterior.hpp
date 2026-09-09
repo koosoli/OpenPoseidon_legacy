@@ -112,6 +112,8 @@ public:
 	/// a roof), otherwise the room id. Rain uses this to die at the roofline
 	/// instead of falling through the shell to the room beneath.
 	int ClassifyModel(Vector3Par pos) const;
+	/// Cached topmost shell voxel in this vertical model-space column.
+	bool CoveredFromAboveModel(Vector3Par pos) const;
 
 	/// First non-outside classification touched by a model-space segment. This
 	/// samples at half-cell intervals, so a fast rain drop cannot step from air
@@ -167,6 +169,8 @@ private:
 	float _cell = 0.5f;
 	int _dim[3] = {0, 0, 0};
 	std::vector<unsigned char> _labels;
+	std::vector<int> _roofTop;
+	void BuildRoofColumns();
 
 	int CellIndex(int x, int y, int z) const { return (x * _dim[1] + y) * _dim[2] + z; }
 	bool CellSolid(int x, int y, int z) const

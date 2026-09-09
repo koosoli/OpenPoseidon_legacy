@@ -10,6 +10,8 @@
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Weather/WindModel.hpp>
+#include <Poseidon/World/Weather/SnowField.hpp>
+#include <Poseidon/World/Weather/SnowShelter.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
@@ -24,6 +26,85 @@ namespace Poseidon
 {
 RainSystem GRain;
 RainSystem GSnowFlakes;
+
+void MaskSnowShelters(const Landscape& land, std::vector<float>& data)
+{
+    constexpr int n = SnowField::WindowSize;
+    constexpr int step = 4; // 0.5m, matching the cached building shell voxels.
+    if (data.size() != 4 + n*n || data[3] <= 0.0f) return;
+    static const bool disabled = [] {
+        const char* value = std::getenv("POSEIDON_SNOW_SHELTER");
+        return value && value[0] == '0';
+    }();
+    if (disabled) return;
+    const auto begin = std::chrono::steady_clock::now();
+    size_t probes = 0, masked = 0;
+    const float span = n * data[2];
+    const Vector3 centre(data[0] + span*0.5f, 0, data[1] + span*0.5f);
+    std::vector<Building*> buildings;
+    auto add = [&](Object* object)
+    {
+        Building* building = dyn_cast<Building>(object);
+        if (!building || std::find(buildings.begin(), buildings.end(), building) != buildings.end()) return;
+        const auto p = building->Position();
+        const float radius = building->GetRadius();
+        if (std::abs(p.X()-centre.X()) > span*0.5f+radius ||
+            std::abs(p.Z()-centre.Z()) > span*0.5f+radius) return;
+        buildings.push_back(building);
+    };
+    int xMin, xMax, zMin, zMax;
+    ObjRadiusRectangle(xMin, xMax, zMin, zMax, centre, centre, span);
+    for (int x = xMin; x <= xMax; ++x)
+        for (int z = zMin; z <= zMax; ++z)
+        {
+            const auto& objects = land.GetObjects(z, x);
+            for (int i = 0; i < objects.Size(); ++i) add(objects[i]);
+        }
+    if (GWorld)
+    {
+        for (int i = 0; i < GWorld->NVehicles(); ++i) add(GWorld->GetVehicle(i));
+        for (int i = 0; i < GWorld->NFastVehicles(); ++i) add(GWorld->GetFastVehicle(i));
+        for (int i = 0; i < GWorld->NOutVehicles(); ++i) add(GWorld->GetOutVehicle(i));
+    }
+    for (const Building* building : buildings)
+    {
+        const auto* interior = BuildingInterior::GetFor(building->GetBType());
+        if (!interior || !interior->Valid()) continue;
+        const auto p = building->Position();
+        const float radius = building->GetRadius();
+        const auto inv = building->GetInvTransform();
+        const int x0 = std::max(0, static_cast<int>(std::floor((p.X()-radius-data[0]) / (data[2]*step))) * step);
+        const int z0 = std::max(0, static_cast<int>(std::floor((p.Z()-radius-data[1]) / (data[2]*step))) * step);
+        const int x1 = std::min(n, static_cast<int>(std::ceil((p.X()+radius-data[0]) / data[2])));
+        const int z1 = std::min(n, static_cast<int>(std::ceil((p.Z()+radius-data[1]) / data[2])));
+        for (int z = z0; z < z1; z += step)
+            for (int x = x0; x < x1; x += step)
+            {
+                const float wx = data[0] + (x+step*0.5f)*data[2];
+                const float wz = data[1] + (z+step*0.5f)*data[2];
+                const Vector3 point(wx, land.SurfaceY(wx, wz)+0.05f, wz);
+                ++probes;
+                bool covered = interior->CoveredFromAboveModel(inv * point);
+                if (building->DirectionUp().Y() < 0.999f)
+                    covered = interior->ClassifySegmentModel(inv*point, inv*(point+Vector3(0, radius*2, 0))) != -1;
+                if (!covered) continue;
+                for (int dz = 0; dz < step && z+dz < n; ++dz)
+                    for (int dx = 0; dx < step && x+dx < n; ++dx)
+                    {
+                        data[4+(z+dz)*n+x+dx] = data[3];
+                        ++masked;
+                    }
+            }
+    }
+    static const bool trace = std::getenv("POSEIDON_SNOW_TRACE") != nullptr;
+    static float nextTrace = 0;
+    if (trace && Glob.time.toFloat() >= nextTrace)
+    {
+        nextTrace = Glob.time.toFloat() + 2.0f;
+        const double us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now()-begin).count();
+        LOG_INFO(World, "Snow shelter: buildings={} probes={} masked={} time={:.0f}us", buildings.size(), probes, masked, us);
+    }
+}
 
 namespace
 {

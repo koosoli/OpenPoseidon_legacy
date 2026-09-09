@@ -73,12 +73,36 @@ struct BoundaryFace
 // Build
 // ---------------------------------------------------------------------------
 
+void BuildingInterior::BuildRoofColumns()
+{
+    _roofTop.assign(static_cast<size_t>(_dim[0]) * _dim[2], -1);
+    for (int x = 0; x < _dim[0]; ++x)
+        for (int z = 0; z < _dim[2]; ++z)
+            for (int y = _dim[1] - 1; y >= 0; --y)
+                if (_labels[CellIndex(x, y, z)] == LabelSolid)
+                {
+                    _roofTop[x * _dim[2] + z] = y;
+                    break;
+                }
+}
+
+bool BuildingInterior::CoveredFromAboveModel(Vector3Par pos) const
+{
+    if (!_valid || _roofTop.empty()) return false;
+    const int x = static_cast<int>(std::floor((pos.X() - _gridMin.X()) / _cell));
+    const int z = static_cast<int>(std::floor((pos.Z() - _gridMin.Z()) / _cell));
+    if (x < 0 || z < 0 || x >= _dim[0] || z >= _dim[2]) return false;
+    const int top = _roofTop[x * _dim[2] + z];
+    return top >= 0 && pos.Y() < _gridMin.Y() + (top + 1) * _cell;
+}
+
 void BuildingInterior::Build(BuildingType const* type)
 {
     _valid = false;
     _roomCount = 0;
     _portals.Clear();
     _labels.clear();
+    _roofTop.clear();
     _dim[0] = _dim[1] = _dim[2] = 0;
     _cell = DefaultCell;
 
@@ -387,6 +411,7 @@ void BuildingInterior::Build(BuildingType const* type)
     // the grid is now a valid (if portal-less) room lookup; RoomOfModel is used
     // below while clustering portals, so validity starts here
     _valid = true;
+    BuildRoofColumns();
 
     // -- portals from room/open-air boundaries --------------------------------
     std::vector<std::vector<BoundaryFace>> faces(_roomCount);

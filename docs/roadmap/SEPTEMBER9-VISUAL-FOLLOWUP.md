@@ -154,3 +154,15 @@ term is sun-only in `shading.wgsl`. Night GLOSS demo is not considered fixed.
   and hemisphere-averaged daylight gain, plus texture release at world cleanup.
   Build and installed image acceptance pending. This is approximate flake
   illumination, not per-particle shadow/local-light evaluation.
+- 29237c7d: committed build, 12 Rust ABI tests and installed snowy mission
+  passed. White flakes are now visible at the same fixed exposure where the
+  additive baseline showed none. Clean exit after texture lifecycle change.
+- Snow accumulation shelter mask in progress: cached topmost shell voxel per
+  building model, 0.5m block queries in the existing 64m snow upload window.
+  Includes static and mission-spawned buildings; tilted instances use cached
+  voxel segment queries. No new collision rays or GPU allocations. Tracks are
+  not erased from persistent storage. `POSEIDON_SNOW_SHELTER=0` ablates the mask;
+  `POSEIDON_SNOW_TRACE=1` logs its CPU cost. Initial build passed after const
+  qualification correction; final tests and installed indoor A/B pending.
+  Limits: valid fire/view shells required, near-window only, no roof-top snow
+  geometry, and bare-ground collision remains unchanged.

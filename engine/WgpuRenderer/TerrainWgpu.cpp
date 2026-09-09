@@ -1,5 +1,6 @@
 #include "TerrainWgpu.hpp"
 #include <Poseidon/World/Weather/SnowField.hpp>
+#include <Poseidon/World/Weather/SnowShelter.hpp>
 #include <Poseidon/World/Terrain/TerrainSatmap.hpp>
 
 #include "CdlodDriver.hpp"
@@ -2865,7 +2866,9 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     if (camera && (snow.enabled || _snowWasEnabled || uploaded) &&
         (snow.enabled != _snowWasEnabled || uploaded || _params.time < _snowUploadTime || _params.time - _snowUploadTime >= 0.1f))
     {
-        _engine.QueueSnow(snow.Snapshot(camera->Position().X(), camera->Position().Z()));
+        auto snapshot = snow.Snapshot(camera->Position().X(), camera->Position().Z());
+        MaskSnowShelters(land, snapshot);
+        _engine.QueueSnow(snapshot);
         _snowUploadTime = _params.time;
         _snowWasEnabled = snow.enabled;
     }
