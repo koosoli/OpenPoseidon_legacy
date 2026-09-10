@@ -680,7 +680,11 @@ impl Water {
         let fs_constants = [("linear", linear)];
         let water_fs_constants = [
             ("linear", linear),
-            ("breaker_cells", if std::env::var("WGR_BREAKER_CELLS").is_ok_and(|v| v == "1") {1.0} else {0.0}),
+            ("breaker_cells", match std::env::var("WGR_BREAKER_CELLS").as_deref() {
+                Ok("1") => 1.0,
+                Ok("2") => 2.0,
+                _ => 0.0,
+            }),
             ("deep_breaker_recovery", std::env::var("WGR_DEEP_BREAKER_RECOVERY")
                 .ok().and_then(|v| v.parse::<f64>().ok())
                 .filter(|v| v.is_finite()).unwrap_or(1.0).clamp(0.0, 1.0)),
@@ -1716,6 +1720,29 @@ mod tests {
         assert!(shader.contains("var breaker_material_weight = 0.0;"));
         let helper = shader.split("fn resolved_breaker_coverage(").nth(1).unwrap().split("\n}").next().unwrap();
         assert!(!helper.contains("texture") && !helper.contains("vnoise"));
+    }
+
+    #[test]
+    fn bubble_detail_cannot_create_foam_and_skips_unresolved_cells() {
+        for r in 0..=100 {
+            let rim = r as f32 / 100.0;
+            for f in 0..=100 {
+                let fresh = f as f32 / 100.0;
+                let thin = 0.38 + 0.62 * rim;
+                let thick = 0.78 + 0.22 * rim;
+                let gain = thin + (thick - thin) * fresh;
+                assert!((0.38..=1.0).contains(&gain));
+                assert_eq!(0.0 * gain, 0.0);
+                assert!((0.82..=1.0).contains(&(0.82 + 0.18 * rim)));
+            }
+        }
+        let shader = include_str!("water.wgsl");
+        let helper = shader.split("fn breaker_bubble_rim(").nth(1).unwrap()
+            .split("\n}\n").next().unwrap();
+        assert!(!helper.contains("texture"));
+        assert!(helper.find("if (detail <= 0.001)").unwrap() < helper.find("hash2(").unwrap());
+        assert!(helper.contains("footprint * frequency"));
+        assert!(shader.contains("if (breaker_cells > 1.5)"));
     }
 
     // The shoreline foam patterned at distance because its noise is ANALYTIC — no mip chain — so

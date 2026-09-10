@@ -884,6 +884,30 @@ fn resolved_breaker_coverage(amount: f32, structure: f32, footprint: f32) -> f32
                       clamp(amount, 0.0, 1.0));
 }
 
+// Resolved bubble clusters, not a repeated image or another simulation grid.
+// Fade to the average before the cells become subpixel; distant water does no hash work.
+fn breaker_bubble_rim(world: vec2<f32>, footprint: f32) -> f32 {
+    let frequency = 17.23;
+    let detail = 1.0 - smoothstep(0.18, 0.65, footprint * frequency);
+    if (detail <= 0.001) { return 0.65; }
+    let p = world * frequency;
+    let cell = floor(p);
+    let within = fract(p);
+    var nearest = 4.0;
+    for (var y: i32 = -1; y <= 1; y = y + 1) {
+        for (var x: i32 = -1; x <= 1; x = x + 1) {
+            let offset = vec2<f32>(f32(x), f32(y));
+            let seed = hash2(cell + offset) * 4096.0;
+            let jitter = vec2<f32>(fract(seed), floor(seed) / 4096.0);
+            let delta = offset + vec2<f32>(0.2) + 0.6 * jitter - within;
+            let radius = 0.18 + 0.26 * fract(seed * 0.6180339);
+            nearest = min(nearest, dot(delta, delta) / (radius * radius));
+        }
+    }
+    let rim = smoothstep(0.45, 1.0, sqrt(nearest));
+    return mix(0.65, rim, detail);
+}
+
 // Band-limited twin of `foam_noise`. `w_world` is how far `p_world` moves across one pixel, in the
 // same units as `p_world` — a caller that pre-scales its position by k must pass k * footprint.
 //
@@ -2277,6 +2301,13 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
                 resolved = resolved * mix(0.55, 1.0, smoothstep(0.20, 0.65, bubbles));
                 breaker_material_detail = 0.80 + 0.20 * bubbles;
                 breaker_material_weight = detail * resolved / max(resolved + shore, 1e-4);
+                if (breaker_cells > 1.5) {
+                    let rim = breaker_bubble_rim(foam_drift, foam_fp);
+                    let fresh = smoothstep(0.25, 0.80, wave_amount);
+                    resolved = resolved * mix(0.38 + 0.62 * rim, 0.78 + 0.22 * rim, fresh);
+                    breaker_material_detail = 0.82 + 0.18 * rim;
+                    breaker_material_weight = detail * resolved / max(resolved + shore, 1e-4);
+                }
             }
             combined_foam = mix(combined_foam, max(shore, resolved), detail);
         }

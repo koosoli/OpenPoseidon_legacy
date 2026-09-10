@@ -170,6 +170,25 @@ water reflection must not be mistaken for foam. Near white patches are still too
 flat/paint-like for default acceptance. Keep the refinement opt-in and retain
 the already accepted foam-history and dynamics-filter corrections independently.
 
+Further bounded experiment: WGR_BREAKER_CELLS=2 adds world-hashed variable-size
+microbubbles only to resolved wave foam; 1 retains the previous control, unset
+remains 0. No texture/pass/FFT increase, nine nearby-cell hashes when resolved,
+early average return before hashing at subpixel distance. The first 16cm-cell
+version looked polka-dotted and was rejected. The refined 5.8cm-cell version with
+variable bubble radii removes the large dots but still looks too surface-painted
+for a default quality claim. It remains opt-in, not a completed whitewater system.
+
+Installed 6f10fc95+dirty 08:39: native fine-bubble draw samples 3.018-3.445ms;
+same-binary previous-cell control 3.006-3.436ms. Overlapping single-run ranges
+are not proof of zero cost. DLSS Quality 858x482 -> 1280x720 also runs normally
+(draw 2.145-2.374ms, not directly comparable to native). Native/DLSS, zero-gain
+and calm captures inspected; all exit 0 without renderer errors. Zero gain and
+calm remove whitecap patches; bright water reflection remains, correctly.
+Evidence: build/breaker-foam/acceptance/*bubbles*-fine.*; old coarse pictures are
+kept under the same names without -fine. Synthetic coverage guards and entry
+shader composition pass. The quality gap now needs better breaking-sheet/raft
+structure, not progressively finer white noise or a global foam brightness boost.
+
 ## Late surface-rays experiment rejected, September 10
 
 0b684058 tests per-instance fragment-distance scattering on prepassed opaque
