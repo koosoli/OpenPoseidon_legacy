@@ -1753,6 +1753,18 @@ void World::Simulate(float deltaT, bool& enableDraw)
         enableDraw = GEngine->IsAbleToDraw();
     }
     perf.Mark(Dev::FrameProfiler::PhaseSetup);
+    static const bool slowFrameTrace = [] {
+        const char* value = std::getenv("POSEIDON_SLOW_FRAME_TRACE");
+        return value && std::strcmp(value, "0") != 0;
+    }();
+    double residencyMs = 0, snapshotMs = 0, rendererInitMs = 0, beginObjectsMs = 0, activeLightsMs = 0;
+    auto initProbe = slowFrameTrace ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+    const auto markInitProbe = [&](double& elapsed) {
+        if (!slowFrameTrace) return;
+        const auto now = std::chrono::steady_clock::now();
+        elapsed = std::chrono::duration<double, std::milli>(now - initProbe).count();
+        initProbe = now;
+    };
     // States where the 3D world must NOT be shown even though its resources stay resident:
     // the mission editor (DisplayArcadeMap; its display gate is lost because the editor world
     // has no _options, so IsDisplayEnabled() wrongly returns true), any covering full-screen UI
@@ -1793,8 +1805,11 @@ void World::Simulate(float deltaT, bool& enableDraw)
         // RenderSnapshot Phase 5 step 1: simulation publishes the frame's presentation
         // snapshot at its own draw boundary; the renderer only consumes it. InitDraw
         // keeps a capture-if-stale fallback for frames no world drives (menu, tools).
+        markInitProbe(residencyMs);
         render::frame::CapturePresentationSnapshot();
+        markInitProbe(snapshotMs);
         GEngine->InitDraw(clear, color);
+        markInitProbe(rendererInitMs);
     }
 
 #if BACKGROUND_AI
@@ -1818,6 +1833,7 @@ void World::Simulate(float deltaT, bool& enableDraw)
         Dev::DrawPhysicsProbes();
     }
 
+    markInitProbe(beginObjectsMs);
     if (camInsideVehicle)
     {
         _scene.SelectActiveLights(camInsideVehicle);
@@ -1826,6 +1842,7 @@ void World::Simulate(float deltaT, bool& enableDraw)
     {
         _scene.SelectActiveLights(nullptr);
     }
+    markInitProbe(activeLightsMs);
     perf.Mark(Dev::FrameProfiler::PhaseDrawInit);
 
     if (_scene.GetLandscape())
@@ -2154,10 +2171,6 @@ void World::Simulate(float deltaT, bool& enableDraw)
 
     perf.Mark(Dev::FrameProfiler::PhaseSwap);
     perf.EndFrame(Poseidon::gPerfDrawCalls);
-    static const bool slowFrameTrace = [] {
-        const char* value = std::getenv("POSEIDON_SLOW_FRAME_TRACE");
-        return value && std::strcmp(value, "0") != 0;
-    }();
     if (slowFrameTrace && perf.Frame(0).totalMs >= 100.0f)
     {
         // Individual records, not independent maxima from a rolling window.
@@ -2171,6 +2184,10 @@ void World::Simulate(float deltaT, bool& enableDraw)
                  r.ms[Phase::PhaseDrawInit], r.ms[Phase::PhaseDrawObjPrep], r.ms[Phase::PhaseDrawLandGround],
                  r.ms[Phase::PhaseDrawLandObjects], r.ms[Phase::PhaseDrawLandscape], r.ms[Phase::PhaseDrawObjects],
                  r.ms[Phase::PhaseDrawPost], r.ms[Phase::PhaseHud], r.ms[Phase::PhaseSound], r.ms[Phase::PhaseSwap]);
+        LOG_INFO(Core, "Slow frame init split: frame={} residency={:.3f} snapshot={:.3f} "
+                      "renderer={:.3f} objects={:.3f} lights={:.3f}",
+                 GEngine ? GEngine->GetFrameCounter() : 0, residencyMs, snapshotMs, rendererInitMs,
+                 beginObjectsMs, activeLightsMs);
     }
     Poseidon::gPerfDrawCalls = 0;
     // Per-frame streaming upload figures roll here; also emits Perfetto counter tracks
