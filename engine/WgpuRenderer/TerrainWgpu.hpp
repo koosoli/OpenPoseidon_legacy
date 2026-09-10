@@ -124,7 +124,7 @@ class TerrainWgpu : public ITerrainRenderer
     Ref<Texture> _automaticSatmap;
     void UpdateGroundTexturePages(const Landscape& land, const Camera& camera, bool force);
     void UploadIndexMap(const Landscape& land);
-    void UploadGeography(const Landscape& land);
+    void UploadGeography(const Landscape& land, bool reuseClutterDefinitions = false);
     // RFG-101: re-upload the geography when the landscape folded streamed objects into it
     // (Landscape::GeographyRevision), at most every couple of seconds.
     void RefreshGeographyIfChanged(const Landscape& land);
@@ -152,7 +152,8 @@ class TerrainWgpu : public ITerrainRenderer
     // and builds the same contiguous-run atlas the Arma path builds. Returns false
     // -- and leaves `geography` untouched -- on every other world. Implemented in
     // TerrainWgpuEnfusionClutter.cpp.
-    bool BakeEnfusionClutter(const Landscape& land, std::vector<uint32_t>& geography, bool refreshSelection);
+    bool BakeEnfusionClutter(const Landscape& land, std::vector<uint32_t>& geography, bool refreshSelection,
+                            bool reuseDefinitions);
     // RFG-065: reads each palette entry's `.emat` and builds the mipped detail/middle
     // ground textures it names. Cached per world; returns false and leaves the table
     // empty on every world that is not a natively loaded Reforger one. Implemented in
@@ -241,6 +242,15 @@ class TerrainWgpu : public ITerrainRenderer
     // switch that does nothing. Default ON where the world IS Enfusion.
     bool _hasEnfusionSurfaces = false;
     bool _enfusionClutterEnabled = true;
+    struct EnfusionClutterRun
+    {
+        float weight = 0.0f;
+        uint8_t layerFirst = 0;
+        uint8_t layerCount = 0;
+    };
+    // Only geography-only refreshes reuse these; world/material/UI uploads rebuild.
+    std::vector<EnfusionClutterRun> _enfusionClutterRuns;
+    float _enfusionClutterMaxWeight = 0.0f;
     bool _enfusionBladesEnabled = true; // RFG-089
     float _enfusionBladeHeight = 0.0f;  // RFG-090
     float _enfusionBladeTint[3] = {0.0f, 0.0f, 0.0f}; // RFG-091: mean linear albedo of the surface

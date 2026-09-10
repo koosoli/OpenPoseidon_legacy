@@ -84,6 +84,7 @@ PERF_SERIES = re.compile(r"triPerfSeries n=(\d+) ms=([0-9.,]+)")
 
 RESIDENCY = re.compile(
     r"Modern object residency: centre=\((-?\d+), (-?\d+)\) window=(\d+) cells "
+    r"(?:desired=\d+ cells lead=[-0-9.]+ m )?"
     r"requested=(\d+) resident=(\d+) created=(\d+) released=(\d+)(?: refused=(\d+))?")
 
 PHASE_NAMES = {"W": "settle (discarded)", "S": "static", "M": "moving"}
@@ -196,7 +197,19 @@ def build_intervals(run: Run, drop_first: int, drop_settle: bool) -> None:
     for phase, points in groups:
         if drop_settle and phase == "W":
             continue
-        usable = points[drop_first:] if len(points) > drop_first else []
+        # Scheduled scripts may run several times during one rendered frame.
+        # Keep the first stamp for each counter, so the next span includes all
+        # of that frame's wall time instead of manufacturing sub-frames.
+        unique = []
+        duplicates = 0
+        for point in points:
+            if unique and math.isfinite(point[2]) and point[2] == unique[-1][2]:
+                duplicates += 1
+                continue
+            unique.append(point)
+        if duplicates:
+            run.notes.append(f"phase {phase}: discarded {duplicates} duplicate renderer-frame samples.")
+        usable = unique[drop_first:] if len(unique) > drop_first else []
         if len(usable) < 2:
             continue
 
@@ -207,9 +220,11 @@ def build_intervals(run: Run, drop_first: int, drop_settle: bool) -> None:
         for i in range(1, len(usable)):
             wall_delta = usable[i][0] - usable[i - 1][0]
             frame_span = usable[i][2] - usable[i - 1][2]
-            if not math.isfinite(frame_span) or frame_span < 1:
-                # No counter, or the counter did not advance: treat the sample as one
-                # frame and count it as non-exact so the coverage figure stays honest.
+            if math.isfinite(frame_span) and frame_span < 1:
+                run.notes.append(f"phase {phase}: renderer counter reset; excluded its boundary interval.")
+                continue
+            if not math.isfinite(frame_span):
+                # Legacy traces without a counter cannot establish frame identity.
                 frame_span = 1.0
             else:
                 counted += 1

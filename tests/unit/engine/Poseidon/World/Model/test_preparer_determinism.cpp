@@ -1030,6 +1030,79 @@ TEST_CASE("Native preparer ignores loose material decoys but keeps IR texture pr
     CHECK(prep.SnapshotStats().texUnreadable == 1);
 }
 
+TEST_CASE("Preparer camera cancellation discards active parses and queued conversions", "[preparer][cancellation]")
+{
+    if (!ObjectStreamPreparer::AsyncEnabled())
+        SKIP("Requires asynchronous preparation");
+    static std::atomic<uint32_t> entered{0};
+    static std::atomic<bool> release{false};
+    entered = 0;
+    release = false;
+    struct RestoreLoader
+    {
+        Poseidon::ModelCache::ExternalLoader previous = Poseidon::ModelCache::GetExternalLoader();
+        ~RestoreLoader() { Poseidon::ModelCache::SetExternalLoader(previous); }
+    } restore;
+    Poseidon::ModelCache::SetExternalLoader(+[](const std::string&, std::string&) {
+        ++entered;
+        // Bounded even on test failure; the release guard normally wakes us first.
+        WaitFor([] { return release.load(); });
+        return std::make_shared<ModelIR::Model>();
+    });
+    ObjectStreamPreparer prep;
+    struct ReleaseBeforeJoin
+    {
+        ~ReleaseBeforeJoin() { release = true; }
+    } releaseBeforeJoin;
+    const uint32_t workers = ObjectStreamPreparer::WorkerCount();
+    std::vector<std::string> paths(workers + 1, "camera_cancel_synthetic.xob");
+    prep.Reset(paths.data(), paths.size());
+    for (uint32_t i = 0; i < workers; ++i)
+        REQUIRE(prep.Request(i));
+    REQUIRE(WaitFor([&] { return entered.load() == workers; }));
+    std::vector<uint32_t> epochs(paths.size(), 0);
+    bool revive = false;
+    SECTION("stale parse results cannot refill the ready set") {}
+    SECTION("a returning camera can reuse the active parse") { revive = true; }
+    SECTION("queued conversion releases its model without executing")
+    {
+        auto model = BuildFixtureModel();
+        auto tables = std::make_shared<Adapter::AdapterBankTables>();
+        Adapter::BuildAdapterBankTables(*model, *tables);
+        std::weak_ptr<ModelIR::Model> weak = model;
+        REQUIRE(prep.SubmitConvert(workers, std::move(model), tables));
+        CHECK(prep.DropStale(epochs.data(), epochs.size(), 1) == 1);
+        CHECK(prep.Query(workers) == ObjectStreamPreparer::State::Unknown);
+        CHECK(weak.expired());
+        CHECK(prep.SnapshotStats().converted == 0);
+    }
+    prep.DropStale(epochs.data(), epochs.size(), 1);
+    if (revive)
+    {
+        epochs[0] = 2;
+        prep.DropStale(epochs.data(), epochs.size(), 2);
+    }
+    release = true;
+    REQUIRE(WaitFor([&] {
+        for (uint32_t i = 0; i < workers; ++i)
+            if (prep.Query(i) == ObjectStreamPreparer::State::Parsing)
+                return false;
+        return true;
+    }));
+    CHECK(prep.SnapshotStats().ready == (revive ? 1 : 0));
+    for (uint32_t i = 0; i < workers; ++i)
+        CHECK(prep.Query(i) == (revive && i == 0 ? ObjectStreamPreparer::State::Ready
+                                               : ObjectStreamPreparer::State::Unknown));
+    if (revive)
+        CHECK(prep.Take(0) != nullptr);
+    else
+    {
+        REQUIRE(prep.Request(0));
+        REQUIRE(WaitFor([&] { return prep.Query(0) == ObjectStreamPreparer::State::Ready; }));
+        CHECK(prep.Take(0) != nullptr);
+    }
+}
+
 TEST_CASE("SIM-807 preparer classifies a parse that cannot happen", "[determinism][preparer]")
 {
     if (!ObjectStreamPreparer::AsyncEnabled())

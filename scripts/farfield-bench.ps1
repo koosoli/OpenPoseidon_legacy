@@ -135,6 +135,9 @@ param(
     # Per-repeat watchdog.  0 = auto.
     [int]$TimeoutSeconds = 0,
 
+    # Process RAM only, sampled off the game thread. Not total system RAM or VRAM.
+    [switch]$SampleMemory,
+
     # Run windowed. MISSION MODE ONLY MATTERS HERE: without it the run goes FULLSCREEN at the
     # display's native resolution and --width/--height are ignored, so -Width/-Height are a
     # request the run silently declines. Off by default so the proven fullscreen invocation
@@ -447,7 +450,28 @@ try {
         $process = Start-Process -FilePath $gameExe -ArgumentList $argumentString -WorkingDirectory $GameDir `
             -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -WindowStyle Hidden -PassThru
         $ownedPids[[int]$process.Id] = $true
-        $exited = $process.WaitForExit($timeout * 1000)
+        if ($SampleMemory) {
+            $memoryClock = [Diagnostics.Stopwatch]::StartNew()
+            $memoryRows = [Collections.Generic.List[object]]::new()
+            $exited = $false
+            while ($memoryClock.Elapsed.TotalSeconds -lt $timeout) {
+                if ($process.HasExited) {$exited=$true; break}
+                $process.Refresh()
+                $memoryRows.Add([pscustomobject]@{
+                    utc=(Get-Date).ToUniversalTime().ToString('o')
+                    elapsed_ms=$memoryClock.ElapsedMilliseconds
+                    pid=$process.Id
+                    working_set_bytes=$process.WorkingSet64
+                    private_bytes=$process.PrivateMemorySize64
+                })
+                $remaining = [Math]::Max(1, [Math]::Min(1000, $timeout*1000-$memoryClock.ElapsedMilliseconds))
+                if ($process.WaitForExit([int]$remaining)) {$exited=$true; break}
+            }
+            $memoryRows | Export-Csv -LiteralPath ([IO.Path]::ChangeExtension($jsonPath, 'memory.csv')) -NoTypeInformation
+        }
+        else {
+            $exited = $process.WaitForExit($timeout * 1000)
+        }
         $timedOut = $false
         if (-not $exited) {
             $timedOut = $true

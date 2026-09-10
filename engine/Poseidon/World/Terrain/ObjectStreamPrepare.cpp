@@ -115,6 +115,8 @@ struct ObjectStreamPreparer::Impl
     std::vector<std::string> paths;
     std::unique_ptr<std::atomic<uint8_t>[]> states;
     std::vector<ModelPtr> models;
+    // Protected by mutex. In-flight slots stay occupied until their worker exits.
+    std::vector<bool> stale;
     std::deque<uint32_t> queue;
     // Stage 3: conversion jobs and their results. `convertedShapes[i]` is owned here
     // between the worker finishing and TakeConverted; Reset/DropStale delete stale
@@ -213,8 +215,10 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                 std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - convStart).count();
 
             lock.lock();
-            if (jobGen != generation.load(std::memory_order_relaxed))
+            if (jobGen != generation.load(std::memory_order_relaxed) || stale[job.index])
             {
+                if (jobGen == generation.load(std::memory_order_relaxed))
+                    Set(job.index, State::Unknown);
                 ++stats.dropped;
                 lock.unlock();
                 delete shape;
@@ -456,9 +460,11 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
         stats.texSkipped += texSkipped;
         stats.texUnreadable += texUnreadable;
         stats.texMs += texMs;
-        if (gen != generation.load(std::memory_order_relaxed))
+        if (gen != generation.load(std::memory_order_relaxed) || stale[index])
         {
-            // Reset ran while we were parsing: the slot is another world's now.
+            // Do not republish work discarded by a world or camera-window change.
+            if (gen == generation.load(std::memory_order_relaxed))
+                Set(index, State::Unknown);
             ++stats.dropped;
             lock.unlock();
             model.reset();
@@ -575,6 +581,7 @@ void ObjectStreamPreparer::Reset(const std::string* paths, size_t modelCount)
         _impl->convertedShapes.assign(modelCount, nullptr);
         _impl->convertedModels.assign(modelCount, nullptr);
         _impl->models.assign(modelCount, nullptr);
+        _impl->stale.assign(modelCount, false);
         _impl->requestedAtUs.assign(modelCount, 0);
         _impl->paths.assign(paths, paths + modelCount);
         _impl->count = modelCount;
@@ -602,6 +609,7 @@ bool ObjectStreamPreparer::Request(uint32_t index)
     std::lock_guard<std::mutex> lock(_impl->mutex);
     if (index >= _impl->count || _impl->workers.empty())
         return false;
+    _impl->stale[index] = false;
     const State current = _impl->Get(index);
     if (current != State::Unknown)
     {
@@ -661,6 +669,7 @@ size_t ObjectStreamPreparer::DropStale(const uint32_t* epochs, size_t count, uin
 {
     std::vector<Impl::ModelPtr> freeLater;
     std::vector<LODShapeWithShadow*> freeShapes;
+    std::deque<Impl::ConvertJob> freeConversions;
     size_t dropped = 0;
     {
         std::lock_guard<std::mutex> lock(_impl->mutex);
@@ -668,6 +677,7 @@ size_t ObjectStreamPreparer::DropStale(const uint32_t* epochs, size_t count, uin
         bool queueTouched = false;
         for (size_t i = 0; i < n; ++i)
         {
+            _impl->stale[i] = epochs[i] != currentEpoch;
             if (epochs[i] == currentEpoch)
                 continue;
             const State state = _impl->Get(static_cast<uint32_t>(i));
@@ -709,6 +719,21 @@ size_t ObjectStreamPreparer::DropStale(const uint32_t* epochs, size_t count, uin
             _impl->queue.swap(kept);
             _impl->stats.queued = _impl->queue.size();
         }
+        // Queued conversions own IR and bank tables too. Release them outside the
+        // mutex; active conversions observe stale on completion instead.
+        std::deque<Impl::ConvertJob> keptConversions;
+        for (auto& job : _impl->convertQueue)
+        {
+            if (_impl->stale[job.index])
+            {
+                _impl->Set(job.index, State::Unknown);
+                freeConversions.push_back(std::move(job));
+                ++dropped;
+            }
+            else
+                keptConversions.push_back(std::move(job));
+        }
+        _impl->convertQueue.swap(keptConversions);
         _impl->stats.dropped += dropped;
     }
     if (dropped > 0)
@@ -729,6 +754,7 @@ bool ObjectStreamPreparer::SubmitConvert(uint32_t index, std::shared_ptr<Model::
         return false;
     if (_impl->Get(index) != State::Unknown)
         return false;
+    _impl->stale[index] = false;
     _impl->Set(index, State::Converting);
     Impl::ConvertJob job;
     job.index = index;

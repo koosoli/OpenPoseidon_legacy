@@ -1,5 +1,55 @@
 # September 9 visual follow-up
 
+## Three-track audit and streaming lifecycle, September 10
+
+See decisions/MODERNISATION-THREE-TRACKS-20260910.md for the requested code-based
+assessment. Baseline is safety/consolidated-v2 at 2ad0a9be, not old chat claims.
+Implementation was subsequently authorised. Priority is existing loading-path
+completion, a bounded far-LOD experiment, then measured CPU candidates; no new
+scheduler, wholesale AI rewrite, or duplicate streaming manager.
+
+ObjectStreamPreparer now drops same-world stale active parse/conversion results
+on completion and removes stale queued conversions. A returning desired set can
+revive active work; in-flight slots are not reused early. Synthetic blocked-worker
+tests exercise stale completion, queued conversion ownership and return-to-window.
+PoseidonTests [preparer],[physics]: 66 cases / 2436 assertions pass; the shared
+test build also includes the previously unfinished sparse terrain journal, with
+its missing test include supplied. This does not lift the Fusion editing limit.
+Cargo.lock is unchanged. Installation 2ad0a9be+dirty at 13:44 includes those local
+terrain changes too; it must not be attributed to a clean remote commit.
+
+Installed native Everon 4 km / 100 m/s camera route:
+build/native-stream-cancellation/cancel-20260910-134449. Exit 0, no renderer errors,
+40 waypoints completed, stale counter reaches 4. Final image inspected: camera
+has reached the ocean, so its 18.57 ms GPU sample says nothing about village FPS.
+This is lifecycle coverage, not an A/B performance win or full cancellation proof
+for all active conversion races / multiplayer.
+
+The route exposed two measurement bugs: farfield-frametimes.py missed the newer
+desired/lead residency fields and counted duplicate renderer-frame IDs as extra
+frames. Both corrected, four Python regression tests pass. Corrected moving trace:
+1335 frames / 55.0 s, median 28 ms, p95 41 ms, p99 692 ms, 35 frames over 100 ms;
+93.7% counter coverage, so multi-frame averaging limits tail precision. Actual
+FrameProfiler final ring: p99 662.75 ms. The prior uncorrected 43.6 FPS throughput
+was false; corrected trace is 24.3. This is one diagnostic run, not a controlled
+performance improvement. Recurring native clutter rebuilds cost 319-359 ms even
+though the same 340109 grass cells / 37726 road exclusions recur. An existing-path
+definition-reuse experiment was subsequently accepted, within the limits below.
+
+Native clutter follow-up, installed 2ad0a9be+dirty at 14:00: geography-only refreshes
+reuse existing surface runs/atlas, retaining dynamic road/building geography work.
+World/material/UI uploads rebuild. No additional atlas allocation or GPU memory.
+39 byte-identical reference comparisons passed in the installed verifier. Three
+alternating same-binary native route pairs reduced moving p99 from 356/370/381 ms
+to 86/101/187 ms; periodic clutter bake now 7-10 ms instead of roughly 320-360 ms.
+All six routes completed with the same 22370 registered instances and 1923.552 MiB
+tracked GPU residency. RAM peaks are essentially unchanged. The third reuse run
+still contains a 988 ms moving outlier, so not all streaming hitches are fixed.
+Full run IDs, controls, memory values, trace caveats and remaining gates are in
+the three-track decision. An optional one-second process-memory sampler was added
+to the existing benchmark harness, not to the game loop. Four Python trace tests
+and PowerShell syntax checks pass. No AI parallelism or HLOD was implemented here.
+
 ## Bounded crown flutter and spray motion, September 10, 13:10
 
 The additional cutout-only flutter previously scaled with wind, height response

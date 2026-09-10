@@ -321,11 +321,18 @@ static size_t ExcludeModernRoadPlacementsFromGrass(const Landscape& land, std::v
 
     const auto& models = land.ModernObjectModels();
     const auto& placements = land.ModernObjectPlacements();
+    // Classify each model once, not the same path for every placement (over a
+    // million on native Everon). Local to this upload, so no invalidation state.
+    std::vector<bool> roadModels(models.size());
+    for (size_t i = 0; i < models.size(); ++i)
+        roadModels[i] = ContainsNoCase(models[i].Data(), "ca\\roads\\");
+    if (std::none_of(roadModels.begin(), roadModels.end(), [](bool road) { return road; }))
+        return 0;
     size_t excluded = 0;
     const float invGrid = land.GetInvLandGrid();
     for (const auto& placement : placements)
     {
-        if (placement.modelIndex >= models.size() || !ContainsNoCase(models[placement.modelIndex].Data(), "ca\\roads\\"))
+        if (placement.modelIndex >= roadModels.size() || !roadModels[placement.modelIndex])
             continue;
         ++roadPlacements;
         const int x = std::clamp(static_cast<int>(std::floor(placement.rows[9] * invGrid)), 0, width - 1);
@@ -1917,10 +1924,10 @@ void TerrainWgpu::RefreshGeographyIfChanged(const Landscape& land)
         return;
     _geographyRefreshLastMs = nowMs;
     LOG_INFO(Graphics, "RFG-101 geography re-upload: revision {} -> {}", _geographyRevisionUploaded, land.GeographyRevision());
-    UploadGeography(land);
+    UploadGeography(land, true);
 }
 
-void TerrainWgpu::UploadGeography(const Landscape& land)
+void TerrainWgpu::UploadGeography(const Landscape& land, bool reuseClutterDefinitions)
 {
     const int n = land.GetLandRange();
     if (n <= 0)
@@ -2106,7 +2113,8 @@ void TerrainWgpu::UploadGeography(const Landscape& land)
     // RFG-062: the native Enfusion answer first, because a natively loaded world has
     // no authored A3 materials at all and BakeAuthoredGrassMask would return false
     // for it -- which is exactly the state that left Everon bare.
-    const bool nativeClutter = BakeEnfusionClutter(land, geography, layersChanged);
+    const bool nativeClutter = BakeEnfusionClutter(land, geography, layersChanged,
+                                                  reuseClutterDefinitions && !layersChanged);
     const bool authored = nativeClutter || BakeAuthoredGrassMask(land, geography, layersChanged);
     if (!authored)
     {

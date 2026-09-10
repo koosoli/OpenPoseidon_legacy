@@ -554,7 +554,8 @@ bool ComposeCard(const EnfusionMount& mount, const std::string& colourPath, cons
 // ---------------------------------------------------------------------------
 // The bake
 // ---------------------------------------------------------------------------
-bool TerrainWgpu::BakeEnfusionClutter(const Landscape& land, std::vector<uint32_t>& geography, bool refreshSelection)
+bool TerrainWgpu::BakeEnfusionClutter(const Landscape& land, std::vector<uint32_t>& geography, bool refreshSelection,
+                                    bool reuseDefinitions)
 {
     const int paletteSize = land.GetEnfusionSurfaceCount();
     if (paletteSize <= 0)
@@ -584,150 +585,159 @@ bool TerrainWgpu::BakeEnfusionClutter(const Landscape& land, std::vector<uint32_
     const auto started = std::chrono::steady_clock::now();
 
     // ---- Phase 1: surface -> plants, per palette entry -----------------------
-    struct SurfaceRun
+    using SurfaceRun = EnfusionClutterRun;
+    auto& runs = _enfusionClutterRuns;
+    float maxWeight = _enfusionClutterMaxWeight;
+    uint32_t layerCount = _clutterAtlasLayers;
+    const char* cacheEnv = std::getenv("WGR_NATIVE_CLUTTER_REUSE");
+    const bool reused = reuseDefinitions && !(cacheEnv && cacheEnv[0] == '0') &&
+                        runs.size() == static_cast<size_t>(paletteSize) &&
+                        !_clutterAtlas.empty() && layerCount > 1 && maxWeight > 0.0f;
+    const char* verifyEnv = std::getenv("WGR_NATIVE_CLUTTER_VERIFY");
+    const bool verify = reused && verifyEnv && verifyEnv[0] == '1';
+    std::vector<uint32_t> verifyInput;
+    if (verify) verifyInput = geography;
+    if (!reused)
     {
-        float weight = 0.0f; // summed occurrence-weighted density, unnormalised
-        uint8_t layerFirst = 0;
-        uint8_t layerCount = 0;
-    };
-    std::vector<SurfaceRun> runs(static_cast<size_t>(paletteSize));
-    constexpr size_t LayerBytes = static_cast<size_t>(GrassGeo::AtlasSize) * GrassGeo::AtlasSize * 4u;
-    std::vector<uint8_t> atlas(LayerBytes * GrassGeo::AtlasLayers, 0u);
-    uint32_t layerCount = 1; // layer 0 stays the loose primary card, filled by UploadGrassTuft
+        runs.assign(static_cast<size_t>(paletteSize), {});
+        maxWeight = 0.0f;
+        constexpr size_t LayerBytes = static_cast<size_t>(GrassGeo::AtlasSize) * GrassGeo::AtlasSize * 4u;
+        std::vector<uint8_t> atlas(LayerBytes * GrassGeo::AtlasLayers, 0u);
+        layerCount = 1; // layer 0 stays the loose primary card, filled by UploadGrassTuft
 
-    // One decode per MODEL, not per surface: `c_Arrhenatherum_elatius_01` is named
-    // by five of Everon's collections and is 2048 square before the crop.
-    std::unordered_map<std::string, uint32_t> layerOfModel;
-    std::string report;
-    int surfacesWithClutter = 0, surfacesWithSet = 0, plantsMissingTexture = 0, plantsDropped = 0;
-    float maxWeight = 0.0f;
+        // One decode per MODEL, not per surface: `c_Arrhenatherum_elatius_01` is named
+        // by five of Everon's collections and is 2048 square before the crop.
+        std::unordered_map<std::string, uint32_t> layerOfModel;
+        std::string report;
+        int surfacesWithClutter = 0, surfacesWithSet = 0, plantsMissingTexture = 0, plantsDropped = 0;
 
-    // RFG-064: hand out atlas layers by how much GROUND a surface covers, not by its
-    // index in the palette.
-    //
-    // There are 32 layers and Everon's palette is 22 surfaces deep. Walked in palette
-    // order, the four forest floors (indices 6-9) take all 32 between them and the
-    // island's two commonest grass surfaces reach the loop with nothing left -- so the
-    // measured result was "6 surfaces grew a run" and a player standing in a meadow saw
-    // bare ground. The forests were not more deserving; they were earlier.
-    //
-    // Coverage is counted from the same `GetTexture` lookup phase 2 uses, so the order
-    // is derived from the world actually being drawn rather than from a guess about
-    // which surfaces matter.
-    std::vector<size_t> cellsPerSurface(static_cast<size_t>(paletteSize), 0);
-    for (int z = 0; z < n; ++z)
-        for (int x = 0; x < n; ++x)
-        {
-            const int material = land.GetTexture(z, x);
-            if (material >= 0 && material < paletteSize)
-                ++cellsPerSurface[static_cast<size_t>(material)];
-        }
-    std::vector<int> surfaceOrder(static_cast<size_t>(paletteSize));
-    for (int i = 0; i < paletteSize; ++i)
-        surfaceOrder[static_cast<size_t>(i)] = i;
-    std::stable_sort(surfaceOrder.begin(), surfaceOrder.end(), [&cellsPerSurface](int a, int b)
-                     { return cellsPerSurface[static_cast<size_t>(a)] > cellsPerSurface[static_cast<size_t>(b)]; });
-
-    for (const int i : surfaceOrder)
-    {
-        const std::string surface = land.GetEnfusionSurface(i);
-        if (surface.empty())
-            continue;
-        ConfNode material;
-        if (!ReadConf(mount, surface, material))
-            continue;
-        const std::string* setPath = material.Key("ClutterConfig");
-        if (setPath == nullptr || setPath->empty())
-            continue; // a surface the map says grows nothing -- rock, seabed, asphalt
-        ++surfacesWithSet;
-
-        std::vector<NativePlant> plants;
-        std::unordered_set<std::string> seenSets;
-        CollectPlants(mount, *setPath, plants, seenSets);
-        if (plants.empty())
-            continue;
-        // Commonest first, so a run truncated by the cap keeps the plants that
-        // actually cover the ground rather than whichever collection parsed first.
-        std::stable_sort(plants.begin(), plants.end(),
-                         [](const NativePlant& a, const NativePlant& b)
-                         { return a.occurrence * a.density > b.occurrence * b.density; });
-
-        const uint32_t first = layerCount;
-        uint32_t count = 0;
-        float weight = 0.0f;
-        for (const NativePlant& plant : plants)
-        {
-            if (count >= MaxPlantsPerSurface || layerCount >= GrassGeo::AtlasLayers)
+        // RFG-064: hand out atlas layers by how much GROUND a surface covers, not by its
+        // index in the palette.
+        //
+        // There are 32 layers and Everon's palette is 22 surfaces deep. Walked in palette
+        // order, the four forest floors (indices 6-9) take all 32 between them and the
+        // island's two commonest grass surfaces reach the loop with nothing left -- so the
+        // measured result was "6 surfaces grew a run" and a player standing in a meadow saw
+        // bare ground. The forests were not more deserving; they were earlier.
+        //
+        // Coverage is counted from the same `GetTexture` lookup phase 2 uses, so the order
+        // is derived from the world actually being drawn rather than from a guess about
+        // which surfaces matter.
+        std::vector<size_t> cellsPerSurface(static_cast<size_t>(paletteSize), 0);
+        for (int z = 0; z < n; ++z)
+            for (int x = 0; x < n; ++x)
             {
-                ++plantsDropped;
+                const int material = land.GetTexture(z, x);
+                if (material >= 0 && material < paletteSize)
+                    ++cellsPerSurface[static_cast<size_t>(material)];
+            }
+        std::vector<int> surfaceOrder(static_cast<size_t>(paletteSize));
+        for (int i = 0; i < paletteSize; ++i)
+            surfaceOrder[static_cast<size_t>(i)] = i;
+        std::stable_sort(surfaceOrder.begin(), surfaceOrder.end(), [&cellsPerSurface](int a, int b)
+                         { return cellsPerSurface[static_cast<size_t>(a)] > cellsPerSurface[static_cast<size_t>(b)]; });
+
+        for (const int i : surfaceOrder)
+        {
+            const std::string surface = land.GetEnfusionSurface(i);
+            if (surface.empty())
                 continue;
-            }
-            const std::string modelKey = LowerCopy(plant.model);
-            const auto cached = layerOfModel.find(modelKey);
-            if (cached != layerOfModel.end())
+            ConfNode material;
+            if (!ReadConf(mount, surface, material))
+                continue;
+            const std::string* setPath = material.Key("ClutterConfig");
+            if (setPath == nullptr || setPath->empty())
+                continue; // a surface the map says grows nothing -- rock, seabed, asphalt
+            ++surfacesWithSet;
+
+            std::vector<NativePlant> plants;
+            std::unordered_set<std::string> seenSets;
+            CollectPlants(mount, *setPath, plants, seenSets);
+            if (plants.empty())
+                continue;
+            // Commonest first, so a run truncated by the cap keeps the plants that
+            // actually cover the ground rather than whichever collection parsed first.
+            std::stable_sort(plants.begin(), plants.end(), [](const NativePlant& a, const NativePlant& b)
+                             { return a.occurrence * a.density > b.occurrence * b.density; });
+
+            const uint32_t first = layerCount;
+            uint32_t count = 0;
+            float weight = 0.0f;
+            for (const NativePlant& plant : plants)
             {
-                // Already resident, but a run must be CONTIGUOUS, so the card is
-                // copied into this surface's run rather than pointed at.
-                std::memcpy(atlas.data() + static_cast<size_t>(layerCount) * LayerBytes,
-                            atlas.data() + static_cast<size_t>(cached->second) * LayerBytes, LayerBytes);
-            }
-            else
-            {
-                std::string colourPath, opacityPath;
-                if (!PlantTextures(mount, plant.model, colourPath, opacityPath))
+                if (count >= MaxPlantsPerSurface || layerCount >= GrassGeo::AtlasLayers)
                 {
-                    ++plantsMissingTexture;
+                    ++plantsDropped;
                     continue;
                 }
-                if (!ComposeCard(mount, colourPath, opacityPath,
-                                 atlas.data() + static_cast<size_t>(layerCount) * LayerBytes))
+                const std::string modelKey = LowerCopy(plant.model);
+                const auto cached = layerOfModel.find(modelKey);
+                if (cached != layerOfModel.end())
                 {
-                    ++plantsMissingTexture;
-                    continue;
+                    // Already resident, but a run must be CONTIGUOUS, so the card is
+                    // copied into this surface's run rather than pointed at.
+                    std::memcpy(atlas.data() + static_cast<size_t>(layerCount) * LayerBytes,
+                                atlas.data() + static_cast<size_t>(cached->second) * LayerBytes, LayerBytes);
                 }
-                layerOfModel.emplace(modelKey, layerCount);
+                else
+                {
+                    std::string colourPath, opacityPath;
+                    if (!PlantTextures(mount, plant.model, colourPath, opacityPath))
+                    {
+                        ++plantsMissingTexture;
+                        continue;
+                    }
+                    if (!ComposeCard(mount, colourPath, opacityPath,
+                                     atlas.data() + static_cast<size_t>(layerCount) * LayerBytes))
+                    {
+                        ++plantsMissingTexture;
+                        continue;
+                    }
+                    layerOfModel.emplace(modelKey, layerCount);
+                }
+                weight += plant.occurrence * 0.01f * std::max(plant.density, 0.01f);
+                ++layerCount;
+                ++count;
             }
-            weight += plant.occurrence * 0.01f * std::max(plant.density, 0.01f);
-            ++layerCount;
-            ++count;
+            if (count == 0)
+                continue;
+            runs[static_cast<size_t>(i)].layerFirst = static_cast<uint8_t>(first);
+            runs[static_cast<size_t>(i)].layerCount = static_cast<uint8_t>(count);
+            runs[static_cast<size_t>(i)].weight = weight;
+            maxWeight = std::max(maxWeight, weight);
+            ++surfacesWithClutter;
+            if (report.size() < 700)
+            {
+                char line[224];
+                std::snprintf(line, sizeof(line), "%s%d=%s %u plant(s) @%u w%.2f", report.empty() ? "" : ", ", i,
+                              surface.c_str(), count, first, weight);
+                report += line;
+            }
         }
-        if (count == 0)
-            continue;
-        runs[static_cast<size_t>(i)].layerFirst = static_cast<uint8_t>(first);
-        runs[static_cast<size_t>(i)].layerCount = static_cast<uint8_t>(count);
-        runs[static_cast<size_t>(i)].weight = weight;
-        maxWeight = std::max(maxWeight, weight);
-        ++surfacesWithClutter;
-        if (report.size() < 700)
+
+        LOG_INFO(
+            Graphics,
+            "Wgpu grass Enfusion clutter: {} of {} palette surfaces name a ClutterConfig, {} grew a run over {} of {} "
+            "atlas layers ({} plants had no colour+coverage pair, {} dropped at the {}-per-surface / {}-layer caps) "
+            "[{}]",
+            surfacesWithSet, paletteSize, surfacesWithClutter, layerCount, GrassGeo::AtlasLayers, plantsMissingTexture,
+            plantsDropped, MaxPlantsPerSurface, GrassGeo::AtlasLayers, report.empty() ? "none" : report);
+
+        if (surfacesWithClutter == 0 || layerCount <= 1 || maxWeight <= 0.0f)
         {
-            char line[224];
-            std::snprintf(line, sizeof(line), "%s%d=%s %u plant(s) @%u w%.2f", report.empty() ? "" : ", ", i,
-                          surface.c_str(), count, first, weight);
-            report += line;
+            // Nothing usable. Drop the buffer so UploadGrassTuft keeps the loose photo
+            // cards rather than uploading 32 blank layers.
+            _clutterAtlas.clear();
+            _clutterAtlasLayers = 0;
+            return false;
         }
+
+        // Unused slots are left at zero here; UploadGrassTuft repeats layer 0 into them
+        // once it has filled layer 0, so nothing samples uninitialised memory.
+        _clutterAtlas = std::move(atlas);
+        _clutterAtlasLayers = layerCount;
+        _enfusionClutterMaxWeight = maxWeight;
     }
-
-    LOG_INFO(Graphics,
-             "Wgpu grass Enfusion clutter: {} of {} palette surfaces name a ClutterConfig, {} grew a run over {} of {} "
-             "atlas layers ({} plants had no colour+coverage pair, {} dropped at the {}-per-surface / {}-layer caps) "
-             "[{}]",
-             surfacesWithSet, paletteSize, surfacesWithClutter, layerCount, GrassGeo::AtlasLayers,
-             plantsMissingTexture, plantsDropped, MaxPlantsPerSurface, GrassGeo::AtlasLayers,
-             report.empty() ? "none" : report);
-
-    if (surfacesWithClutter == 0 || layerCount <= 1 || maxWeight <= 0.0f)
-    {
-        // Nothing usable. Drop the buffer so UploadGrassTuft keeps the loose photo
-        // cards rather than uploading 32 blank layers.
-        _clutterAtlas.clear();
-        _clutterAtlasLayers = 0;
-        return false;
-    }
-
-    // Unused slots are left at zero here; UploadGrassTuft repeats layer 0 into them
-    // once it has filled layer 0, so nothing samples uninitialised memory.
-    _clutterAtlas = std::move(atlas);
-    _clutterAtlasLayers = layerCount;
 
     // ---- Phase 2: the per-cell answer ---------------------------------------
     //
@@ -831,11 +841,27 @@ bool TerrainWgpu::BakeEnfusionClutter(const Landscape& land, std::vector<uint32_
     const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
     LOG_INFO(Graphics,
              "Wgpu grass Enfusion clutter: {} of {} land cells grow clutter ({:.1f}%), {} cells cleared under roads "
-             "({}), peak surface weight {:.2f}, {} atlas layers, {:.0f} ms",
+             "({}), peak surface weight {:.2f}, {} atlas layers, {:.0f} ms, definitions={}",
              grownCells, static_cast<size_t>(n) * static_cast<size_t>(n),
              100.0 * static_cast<double>(grownCells) / static_cast<double>(static_cast<size_t>(n) * n), roadCleared,
              clearRoads ? "road clearing ON" : (land.HasEnfusionRoadCells() ? "road clearing OFF" : "no road mask"),
-             maxWeight, layerCount, ms);
+             maxWeight, layerCount, ms, reused ? "reused" : "rebuilt");
+    if (verify)
+    {
+        auto expectedGeography = geography;
+        auto expectedAtlas = _clutterAtlas;
+        geography = std::move(verifyInput);
+        const bool full = BakeEnfusionClutter(land, geography, refreshSelection, false);
+        // Layer 0 and unused slots are filled later by UploadGrassTuft, not by this bake.
+        constexpr size_t bytesPerLayer = static_cast<size_t>(GrassGeo::AtlasSize) * GrassGeo::AtlasSize * 4u;
+        const bool equal = full == (grownCells > 0) && geography == expectedGeography &&
+            _clutterAtlasLayers == layerCount && _clutterAtlas.size() == expectedAtlas.size() &&
+            std::equal(expectedAtlas.begin() + bytesPerLayer, expectedAtlas.begin() + layerCount * bytesPerLayer,
+                       _clutterAtlas.begin() + bytesPerLayer);
+        if (equal) LOG_INFO(Graphics, "Native clutter reuse verification: identical geography and authored atlas");
+        else LOG_ERROR(Graphics, "Native clutter reuse verification: MISMATCH");
+        return full;
+    }
     return grownCells > 0;
 }
 

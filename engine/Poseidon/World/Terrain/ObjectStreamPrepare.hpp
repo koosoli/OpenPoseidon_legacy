@@ -198,8 +198,10 @@ class ObjectStreamPreparer
     // Main thread. If Ready, returns the IR and returns the slot to Unknown; else null.
     std::shared_ptr<Model::Model> Take(uint32_t index);
     // Main thread. For every model whose `epochs[index] != currentEpoch`: a Queued request is
-    // removed from the queue and a Ready IR is freed, both back to Unknown (Parsing ones finish
-    // and are dropped at the next call). Called once per recentre with the desired set's
+    // removed from the queue and a Ready IR is freed, both back to Unknown. Queued
+    // conversions are removed too; active parses/conversions discard their result on
+    // completion unless a newer desired set or Request needs the slot again.
+    // Called once per recentre with the desired set's
     // stamps, so the bounded ready set never fills with models nobody will Take. Returns how
     // many were dropped. Sticky NotLoose / Failed are left alone.
     size_t DropStale(const uint32_t* epochs, size_t count, uint32_t currentEpoch);

@@ -171,7 +171,8 @@ param(
     # to place -CaptureAt.  Read "Mission time zero" out of a previous run's log.
     [double]$LoadSeconds = 75,
 
-    [switch]$AllowConcurrent
+    [switch]$AllowConcurrent,
+    [switch]$SampleMemory
 )
 
 $ErrorActionPreference = 'Stop'
@@ -382,6 +383,7 @@ if ($WorldHour -ge 0) { $benchArgs['WorldHour'] = $WorldHour }
 if (-not [string]::IsNullOrWhiteSpace($AddonRoot)) { $benchArgs['AddonRoot'] = $AddonRoot }
 if ($Mod.Count -gt 0) { $benchArgs['Mod'] = $Mod }
 if ($AllowConcurrent) { $benchArgs['AllowConcurrent'] = $true }
+if ($SampleMemory) { $benchArgs['SampleMemory'] = $true }
 
 & $bench @benchArgs
 exit $LASTEXITCODE
