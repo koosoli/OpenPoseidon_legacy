@@ -4,6 +4,15 @@ Implementation baseline: bfcba639 on asset-obs-001, equal to the fetched
 safety/consolidated-v2 before edits. This is an implementation ledger, not a
 completion report. The owner's prior outstanding work remains authorized.
 
+## Current status, September 11
+
+Installed c4bbb2b3, own material pack 0.1.4. Default mounting, three exact albedo
+replacements, shared road/terrain macro normals and sand near-detail normals
+are implemented. Generator, shader composition and installed static checks pass.
+Full artistic/performance acceptance, roughness binding, fresh-release/user-mod
+runtime priority, weather/DLSS/moving-camera checks and Jeep FFV remain open.
+Earlier sections below are chronological evidence, not the current completion list.
+
 ## First increment: mount contract (in progress)
 
 - Reuse ModCollection/ModSystem, AppConfig and the existing addon loader.
@@ -205,3 +214,17 @@ including catalog/physical-scale agreement. Client build passes. Installed A/B
 and cost acceptance are pending at this entry; neither photorealism nor complete
 roughness binding is claimed. The package adds one compressed mip chain, not a
 whole 50 m tile at fine-grain resolution.
+
+Installed c4bbb2b3 checks, 1280x720 native/MSAA4, fixed LOD governor, 17.5 h:
+Sand normal view 002037 detail-on and 002134 detail-off both complete shutdown,
+52507 registered / 15208 main / 730061 triangles. Sand ROI x250:1100/y350:700
+mean absolute RGB difference 0.290/255 (max 7); far hill control 0.051/255.
+Closeup 002313 on / 002408 off both complete shutdown, 52507 registered / 0 main
+object draws. Camera 5800/3400/Y11.1, az90/el-60; the player boot is visible in
+the upper left, so comparison excludes it. Sand ROI x650:1200/y350:700 mean
+9.530/255 (max103). Images inspected: fine relief is visible close up, while
+macro ripples remain. These demonstrate binding and visible effect, not temporal
+stability or photorealism. Sampled single steady frames 4.387/4.352 ms are NOT a
+reliable measurement of additional GPU cost. New PAA size 1,398,160 bytes, full
+PBO 9,788,375 bytes; these file sizes are not RAM/VRAM measurements. Eight
+generator tests, four terrain contract tests and entry shader composition pass.

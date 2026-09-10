@@ -1,12 +1,15 @@
 param([ValidateSet('Original','Albedo','Full')][string]$Arm = 'Full',
       [ValidateSet('Road','Sand','Gravel')][string]$Surface = 'Road',
       [ValidateRange(0,23.999)][double]$Hour = 14,
-      [ValidateSet(0,1)][int]$DetailNormals = 1)
+      [ValidateSet(0,1)][int]$DetailNormals = 1,
+      [switch]$Closeup)
 $ErrorActionPreference = 'Stop'
 if (!$env:LOCK_OWNER) { throw 'Use scripts/with-game-lock.sh' }
+if ($Closeup -and $Surface -ne 'Sand') { throw 'Closeup currently has a verified camera only for Sand' }
 $root = Split-Path $PSScriptRoot -Parent
 $hourText = $Hour.ToString('0.###', [Globalization.CultureInfo]::InvariantCulture)
 $label = 'material-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + $Surface + '-' + $Arm + '-h' + $hourText + '-d' + $DetailNormals
+if ($Closeup) { $label += '-close' }
 $out = Join-Path $root 'build/default-content/acceptance'
 $user = Join-Path $out ('user-' + $label)
 New-Item -ItemType Directory -Force $user | Out-Null
@@ -17,6 +20,7 @@ $settings = @{POSEIDON_USER_DIR=$user; POSEIDON_VSYNC='0'; WGR_LOD_GOVERNOR_RANG
 $extra = @('--test-world-freefly','6378.7','5672.5','74.4','120','-12')
 if ($Surface -eq 'Sand') {
     $extra = @('--test-world-freefly','5800','3400','13.0','90','-20')
+    if ($Closeup) { $extra = @('--test-world-freefly','5800','3400','11.1','90','-60') }
 }
 if ($Surface -eq 'Gravel') {
     $extra = @('--test-world-freefly','2221.7','4788.8','40.2','230','-16')

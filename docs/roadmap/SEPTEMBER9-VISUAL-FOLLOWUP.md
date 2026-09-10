@@ -1,5 +1,23 @@
 # September 9 visual follow-up
 
+## September 11: default sand detail, acceptance still incomplete
+
+c4bbb2b3 is installed with own material pack 0.1.4. One optional world-space
+detail NOHQ layer gives the mapped Everon sand a 0.5 m fine-relief period in
+addition to its 50 m macro map. The existing terrain/bank pipeline is extended;
+original, authored A3 and native Enfusion materials get no detail layer. Sampling
+fades at 15..35 m and the far Satmap early-out remains intact. Normal and close
+installed A/B captures complete shutdown and show a close-range detail effect.
+Eight generator tests, four terrain contract tests and shader composition pass.
+Photorealism, roughness binding, motion/DLSS/snow and full package acceptance
+remain open. See DEFAULT-CONTENT-PACKS-20260910.md for exact captures and limits.
+The hardened capture validator has 11 fixture tests; missing lifecycle flags no
+longer silently pass. This is not a fix claim for the intermittent native hang.
+Native regression capture cancel-20260911-002533-slow-trace-bc7-default-driver-memory-tint-reuse-0
+on c4bbb2b3 also completes shutdown: 134.7 s wall, 22370 final registered instances,
+134 whole-GPU driver-memory samples. It ends over the ocean (0 main objects),
+so this is loading/lifecycle evidence, not native village visual acceptance.
+
 ## Texture precision and measured DDS preparation, September 10 afternoon
 
 AI88 precision defect fixed in 9eccd411: PAADecoder used PacARGB4444 as an
