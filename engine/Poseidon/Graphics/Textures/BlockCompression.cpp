@@ -1,4 +1,6 @@
 #include <Poseidon/Graphics/Textures/BlockCompression.hpp>
+#include <Poseidon/Core/TaskPool.hpp>
+#include <vector>
 
 #include <algorithm>
 #include <cstring>
@@ -412,6 +414,25 @@ void DecodeBc5Image(const uint8_t* src, uint8_t* dst, int width, int height)
     }
     for (size_t i = 0; i < rowPitch * static_cast<size_t>(height); i += 4)
         dst[i + 3] = 255;
+}
+
+bool DecodeBc7ImageBatched(const uint8_t* src, uint8_t* dst, int width, int height, TaskPool& pool)
+{
+    constexpr int rowsPerBatch = 64; // Sixteen BC rows; no job per tiny 4x4 block.
+    if (height <= rowsPerBatch || width <= 0 || pool.ThreadCount() <= 1)
+        return DecodeBc7Image(src, dst, width, height);
+    const uint32_t count = static_cast<uint32_t>((height + rowsPerBatch - 1) / rowsPerBatch);
+    const size_t blockRowBytes = static_cast<size_t>((width + 3) / 4) * 16;
+    std::vector<uint8_t> valid(count, 0);
+    pool.ParallelFor(count, [&](uint32_t first, uint32_t last) {
+        for (uint32_t batch = first; batch < last; ++batch)
+        {
+            const int row = static_cast<int>(batch) * rowsPerBatch;
+            valid[batch] = DecodeBc7Image(src + (row / 4) * blockRowBytes,
+                dst + static_cast<size_t>(row) * width * 4, width, std::min(rowsPerBatch, height - row));
+        }
+    });
+    return std::all_of(valid.begin(), valid.end(), [](uint8_t value) { return value != 0; });
 }
 
 bool DecodeBc7Image(const uint8_t* src, uint8_t* dst, int width, int height)

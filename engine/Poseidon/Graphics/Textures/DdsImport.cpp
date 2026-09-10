@@ -1,4 +1,7 @@
 #include <Poseidon/Graphics/Textures/Image.hpp>
+#include <Poseidon/Graphics/Textures/BlockCompression.hpp>
+#include <Poseidon/Core/TaskPool.hpp>
+#include <Poseidon/Foundation/Threads/ThreadAffinity.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/EnfusionMount.hpp>
 #include <Poseidon/Graphics/Textures/DdsImport.hpp>
 
@@ -572,8 +575,27 @@ bool TextureSourceDDS::InitFromMemory(const void* data, size_t size, const char*
             if (level.width <= 0 || level.height <= 0 || level.data.empty())
                 continue;
             std::vector<uint8_t> rgba(static_cast<size_t>(level.width) * static_cast<size_t>(level.height) * 4);
-            if (!ConvertPixels(level.data.data(), rgba.data(), level.width, level.height, _format,
-                               PixelFormat::RGBA8888))
+            static const int batchMode = [] {
+                const char* value = std::getenv("POSEIDON_DDS_BC7_BATCH");
+                return value && value[0] == '2' ? 2 : value && value[0] == '1' ? 1 : 0;
+            }();
+            TaskPool* pool = GetGlobalTaskPool();
+            const bool batched = batchMode != 0 && _format == PixelFormat::BC7 &&
+                level.width >= 256 && level.height >= 256 && Foundation::IsMainThread() && pool;
+            const bool ok = batched ? DecodeBc7ImageBatched(level.data.data(), rgba.data(), level.width, level.height, *pool) :
+                ConvertPixels(level.data.data(), rgba.data(), level.width, level.height, _format, PixelFormat::RGBA8888);
+            if (batched && batchMode == 2)
+            {
+                std::vector<uint8_t> reference(rgba.size());
+                const bool serialOk = DecodeBc7Image(level.data.data(), reference.data(), level.width, level.height);
+                if (serialOk != ok || reference != rgba)
+                {
+                    LOG_ERROR(Graphics, "DDS BC7 batch verification: MISMATCH '{}' {}x{}", who, level.width, level.height);
+                    return false;
+                }
+                LOG_INFO(Graphics, "DDS BC7 batch verification: identical '{}' {}x{}", who, level.width, level.height);
+            }
+            if (!ok)
             {
                 decoded = false;
                 break;

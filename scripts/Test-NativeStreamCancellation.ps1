@@ -1,4 +1,5 @@
 param([switch]$LegacyClutter, [switch]$VerifyClutter, [switch]$TraceSlowFrames, [switch]$LegacyTableBudget, [switch]$TraceDdsPreparation,
+      [ValidateRange(0,2)][int]$Bc7Batch=0,
       [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',
       [string]$Archives='C:\Program Files (x86)\Steam\steamapps\common\Arma Reforger\addons')
 $ErrorActionPreference='Stop'
@@ -12,6 +13,7 @@ if ($VerifyClutter) {$label+='-verify-clutter'}
 if ($TraceSlowFrames) {$label+='-slow-trace'}
 if ($LegacyTableBudget) {$label+='-legacy-tables'}
 if ($TraceDdsPreparation) {$label+='-dds-prep'}
+if ($Bc7Batch -gt 0) {$label+='-bc7-'+$Bc7Batch}
 $out=Join-Path $root 'build/native-stream-cancellation'
 $user=Join-Path $out ('user-'+$label)
 New-Item -ItemType Directory -Force $user | Out-Null
@@ -28,6 +30,7 @@ if ($VerifyClutter) {$settings.WGR_NATIVE_CLUTTER_VERIFY='1'}
 if ($TraceSlowFrames) {$settings.POSEIDON_SLOW_FRAME_TRACE='1'}
 if ($LegacyTableBudget) {$settings.WGR_OBJECT_STREAM_TABLE_BATCH='0'}
 if ($TraceDdsPreparation) {$settings.POSEIDON_DDS_PREP_TRACE='1'}
+$settings.POSEIDON_DDS_BC7_BATCH=[string]$Bc7Batch
 # Short settle intentionally leaves cold work outstanding when movement starts.
 # This is a lifecycle smoke test, NOT a settled-pose FPS comparison.
 & "$PSScriptRoot/farfield-movecam.ps1" -Label $label -Mission 'tests/perf/missions/perf_field.eden' -World $Archives -Start 5092.61,3995.64 -StartY 220 -Azimuth 270 -Elevation -15 -Speed 100 -SettleSeconds 20 -StaticSeconds 10 -MoveSeconds 40 -LoadSeconds 20 -CaptureAt 110 -Width 1280 -Height 720 -GameDir $GameDir -Out $out -Env $settings -SampleMemory

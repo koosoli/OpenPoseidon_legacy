@@ -12,6 +12,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <Poseidon/Graphics/Textures/BlockCompression.hpp>
+#include <Poseidon/Core/TaskPool.hpp>
 
 #include <cstdint>
 #include <cstring>
@@ -21,6 +22,44 @@ using Poseidon::DecodeBc4Image;
 using Poseidon::DecodeBc5Image;
 using Poseidon::DecodeBc7Block;
 using Poseidon::DecodeBc7Image;
+
+TEST_CASE("BC7 row batches match serial output including edge blocks and invalid modes", "[graphics][texture][bc][batch]")
+{
+    for (uint32_t threads : {1u, 2u, 4u})
+    {
+        Poseidon::TaskPool pool(threads);
+        for (int width : {1, 7, 256, 259})
+            for (int height : {1, 63, 64, 65, 257})
+            {
+                const size_t blocks = static_cast<size_t>((width + 3) / 4) * ((height + 3) / 4);
+                std::vector<uint8_t> source(blocks * 16);
+                uint32_t state = 0x91832u;
+                for (auto& value : source)
+                {
+                    state = state * 1664525u + 1013904223u;
+                    value = static_cast<uint8_t>(state >> 24);
+                }
+                for (size_t b = 0; b < blocks; ++b)
+                    source[b * 16] = static_cast<uint8_t>(1u << (b % 8));
+                for (bool invalid : {false, true})
+                {
+                    if (invalid) source[(blocks - 1) * 16] = 0;
+                    const size_t bytes = static_cast<size_t>(width) * height * 4;
+                    std::vector<uint8_t> serial(bytes + 32, 0xcd), parallel = serial;
+                    const bool expected = DecodeBc7Image(source.data(), serial.data() + 16, width, height);
+                    const bool actual = Poseidon::DecodeBc7ImageBatched(source.data(), parallel.data() + 16, width, height, pool);
+                    REQUIRE(actual == expected);
+                    REQUIRE(actual == !invalid);
+                    REQUIRE(parallel == serial);
+                    for (int i = 0; i < 16; ++i)
+                    {
+                        REQUIRE(parallel[i] == 0xcd);
+                        REQUIRE(parallel[bytes + 16 + i] == 0xcd);
+                    }
+                }
+            }
+    }
+}
 
 namespace
 {

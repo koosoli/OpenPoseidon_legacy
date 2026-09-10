@@ -47,4 +47,9 @@ void DecodeBc4Image(const uint8_t* src, uint8_t* dst, int width, int height);
 void DecodeBc5Image(const uint8_t* src, uint8_t* dst, int width, int height);
 bool DecodeBc7Image(const uint8_t* src, uint8_t* dst, int width, int height);
 
+class TaskPool;
+// Synchronous, disjoint block-row batches. Call only from the pool's owner thread.
+// Input/output storage remains owned by the caller until all batches finish.
+bool DecodeBc7ImageBatched(const uint8_t* src, uint8_t* dst, int width, int height, TaskPool& pool);
+
 } // namespace Poseidon
