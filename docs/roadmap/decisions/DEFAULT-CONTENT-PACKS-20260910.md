@@ -170,3 +170,18 @@ machinery rather than blindly increasing whole-tile resolution. No extra detail
 layer or roughness binding is implemented by this note. Measure-DefaultMaterial
 now propagates failed child captures and requires successful lifecycle metadata
 plus completed shutdown, matching the hardened native streaming smoke.
+
+2026-09-11 acceptance harness follow-up: `Measure-DefaultMaterial.ps1 -Hour`
+accepts an explicit solar time, serialises it with invariant culture and includes
+it in the capture directory. Installed ee43ac8a / pack 0.1.3 Sand Full 000552 and
+Albedo 000700 at 17.5 h both completed shutdown, 26.1 s wall, identical 52507
+registered / 15208 main / 730061 triangles. Images inspected: side illumination
+makes the macro normal relief visible, but does not solve fine sand grain detail.
+These are single visual captures, not performance comparisons or photorealistic
+acceptance. No game binary or pack changed in this follow-up.
+
+The shared lifecycle validator now rejects absent/null timeout or contention
+flags and incorrectly typed flags/exit codes rather than treating missing flags
+as false. `Test-CaptureLifecycle.ps1`: 11 success/failure fixtures pass using
+Windows PowerShell. This protects the measurement evidence, not engine shutdown
+itself; the earlier intermittent native shutdown failure remains unproven.
