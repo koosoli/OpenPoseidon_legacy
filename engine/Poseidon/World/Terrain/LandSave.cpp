@@ -2807,9 +2807,12 @@ static bool ObjectStreamAdmitCounted()
 
 static uint32_t ObjectStreamBankTablesPerUpdate()
 {
+    // Opt-in: three native pairs reduced maxima but moved work into the settled
+    // phase and delayed initial coverage. Keep the baseline until individual
+    // material preparation is cheaper, not merely spread across more frames.
     static const uint32_t limit = [] {
         const char* value = std::getenv("WGR_OBJECT_STREAM_TABLE_BATCH");
-        return static_cast<uint32_t>(std::clamp<long>(value ? std::strtol(value, nullptr, 10) : 2, 0, 128));
+        return static_cast<uint32_t>(std::clamp<long>(value ? std::strtol(value, nullptr, 10) : 0, 0, 128));
     }();
     return limit;
 }

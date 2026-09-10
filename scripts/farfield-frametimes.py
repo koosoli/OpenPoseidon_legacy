@@ -43,8 +43,8 @@ frame rate twice the real one.  `triFrameCount` is the RENDERER's own counter
 (GEngine->GetFrameCounter()), so every delta carries the number of frames it actually
 spans.  Deltas are divided by that span, and the share of samples with span == 1 is
 reported as `1:1` coverage.  Anything below 100% means the trace is coarser than
-per-frame there, and a p99 computed over averaged multi-frame spans UNDERSTATES the
-worst frame — so the coverage figure has to be read before the percentiles are quoted.
+per-frame there. Averaging can conceal a worst frame and distort p99 in either
+direction, so the coverage figure must accompany the reported percentiles.
 
 RESIDENCY CORRELATION (--residency)
 -----------------------------------
@@ -445,8 +445,8 @@ def report(path: Path, args) -> int:
             run.notes.append(
                 f"phase {phase}: only {exact / counted * 100:.1f}% of trace samples advanced "
                 f"the renderer's frame counter by exactly 1. The rest were averaged across "
-                f"the frames they spanned, which SMOOTHS the tail — the true p99 and worst "
-                f"frame are at least as bad as reported, not better.")
+                f"the frames they spanned. Gap averaging can conceal individual spikes "
+                f"and distort p99 in either direction; these are not exact per-frame tails.")
 
     if args.residency:
         print()

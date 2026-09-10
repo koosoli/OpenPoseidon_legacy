@@ -42,4 +42,12 @@ if ($metrics.build.render_width -ne 1280 -or $metrics.build.render_height -ne 72
 }
 if (Select-String -LiteralPath $log -Pattern 'Validation Error|panicked at|DeviceLost|StartAutoTest could not boot|verification: MISMATCH' -Quiet) {throw 'Runtime failure'}
 if ($VerifyClutter -and !(Select-String -LiteralPath $log -Pattern 'verification: identical geography' -Quiet)) {throw 'No positive clutter verification'}
+$tableRows=Select-String -LiteralPath $log -Pattern 'Object stream bank tables: prepared=(\d+) deferredPlacements=(\d+) limit=(\d+) ms=([\d.]+)'
+if (!$tableRows) {throw 'No bank-table preparation evidence'}
+foreach ($row in $tableRows) {
+    $match=$row.Matches[0]
+    $count=[int]$match.Groups[1].Value
+    $limit=[int]$match.Groups[3].Value
+    if ($limit -gt 0 -and $count -gt $limit) {throw 'Bank-table preparation exceeded its count budget'}
+}
 Write-Output "Native moving-camera lifecycle evidence: $log"

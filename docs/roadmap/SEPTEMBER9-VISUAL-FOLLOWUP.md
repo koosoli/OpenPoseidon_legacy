@@ -71,6 +71,7 @@ of the 66-case run above. Harness outputs are now timestamped to preserve eviden
 ## Bounded crown flutter and spray motion, September 10, 13:10
 
 
+
 The additional cutout-only flutter previously scaled with wind, height response
 and gust, independently of the solid trunk. At amp=1.05, hs=5, gust=1.65 its
 per-axis amplitude was 1.906 m before the leaf slider. It is now capped at

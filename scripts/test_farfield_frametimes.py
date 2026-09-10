@@ -9,6 +9,15 @@ spec.loader.exec_module(bench)
 
 
 class FrameTraceTests(unittest.TestCase):
+    def test_gap_average_is_not_a_lower_bound_on_p99(self):
+        exact = [0.001] * 99 + [1.0]
+        averaged = [sum(exact) / len(exact)] * len(exact)
+        original = bench.stats(exact)
+        estimate = bench.stats(averaged)
+        self.assertAlmostEqual(original['mean_ms'], estimate['mean_ms'])
+        self.assertGreater(estimate['p99_ms'], original['p99_ms'])
+        self.assertLess(estimate['worst_ms'], original['worst_ms'])
+
     def test_duplicate_ticks_do_not_create_frames_or_lose_wall_time(self):
         run = bench.Run()
         run.samples = [("M", 0.0, 0.0, 10), ("M", 0.01, 0.01, 10),

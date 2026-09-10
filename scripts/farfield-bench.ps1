@@ -237,7 +237,7 @@ function Stop-OwnedProcess {
 function Get-ForeignGameProcessIds {
     param([hashtable]$Owned)
     $ids = @()
-    $running = @(Get-Process -Name 'ColdWarAssault', 'PoseidonGame' -ErrorAction SilentlyContinue)
+    $running = @(Get-Process -Name 'OpenPoseidon', 'ColdWarAssault', 'PoseidonGame' -ErrorAction SilentlyContinue)
     foreach ($process in $running) {
         if (-not $Owned.ContainsKey([int]$process.Id)) { $ids += [int]$process.Id }
     }
@@ -449,7 +449,7 @@ try {
         $startedAt = Get-Date
         $process = Start-Process -FilePath $gameExe -ArgumentList $argumentString -WorkingDirectory $GameDir `
             -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -WindowStyle Hidden -PassThru
-        $ownedPids[[int]$process.Id] = $true
+        $ownedPids[[int]$process.Id] = $process
         if ($SampleMemory) {
             $memoryClock = [Diagnostics.Stopwatch]::StartNew()
             $memoryRows = [Collections.Generic.List[object]]::new()
@@ -662,10 +662,17 @@ finally {
         [Environment]::SetEnvironmentVariable($key, $savedEnv[$key], 'Process')
     }
     foreach ($ownedPid in @($ownedPids.Keys)) {
-        $leftover = Get-Process -Id $ownedPid -ErrorAction SilentlyContinue
-        if ($leftover) {
-            Write-Warning "Cleaning up leftover benchmark process PID $ownedPid."
-            Stop-OwnedProcess -RootProcessId ([int]$ownedPid) -Protected $protectedPids
+        # Retain the original process handle rather than rediscovering a PID:
+        # exited processes may still be enumerable, and PIDs can be recycled.
+        $ownedProcess = $ownedPids[$ownedPid]
+        try {
+            if (!$ownedProcess.HasExited) {
+                Write-Warning "Cleaning up leftover benchmark process PID $ownedPid."
+                Stop-OwnedProcess -RootProcessId ([int]$ownedPid) -Protected $protectedPids
+                $ownedProcess.WaitForExit(10000) | Out-Null
+            }
+        } finally {
+            $ownedProcess.Dispose()
         }
     }
 }

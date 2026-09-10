@@ -286,3 +286,79 @@ submit waits from encoding before selecting a pure batch. Complete campaign,
 Fusion traversal, exclusive animation timings, full-run tails, driver VRAM and
 cross-core tests before calling the requested census complete. Existing native
 traversal pairs cover the streaming workload, not those missing cases.
+
+## Follow-up: main-thread bank-table admission gap
+
+POSEIDON_SLOW_FRAME_TRACE=1 now logs individual >100 ms frame phase records and
+splits draw initialization at residency/snapshot/renderer/objects/lights boundaries.
+Off by default, no scheduler changes; timings include waits. Initialization's
+residency bucket includes the small suppression/clear setup preceding the call.
+This is attribution, not an optimisation. Native route 150738-slow-trace on
+8c5f7f9c and 151412-slow-trace on 2ef66ea8 completed all 40 waypoints. The latter
+harness reports exit 0 but also cleaned up a leftover owned process; do not use
+it as proof of clean shutdown. No renderer validation errors were detected.
+
+In the latter route frame 1169 took 164.170 ms, including 153.093 ms residency;
+snapshot/renderer/object/light setup together were 0.021 ms. Yet logged cold+warm
+installation was only 28.4 ms. Source inspection identifies an uncharged stage:
+LandSave.cpp builds AdapterBankTables BEFORE incrementing coldAttempted and
+starting the ObjectCreate timer, then continues to the next ready IR. Many
+main-thread header/material resolutions can therefore run despite the two-cold-
+installs limit. Moving all AI to workers cannot fix this.
+
+The bounded experiment adds a SEPARATE two-table-preparations/update allowance
+inside the existing native residency loop. Deferred IRs stay in the preparer's
+existing Ready ownership; warm objects and completed conversions can still be
+installed. Non-native worlds and explicit preloading retain prior behaviour.
+WGR_OBJECT_STREAM_TABLE_BATCH=0 is the unbounded same-binary control. Bank-table
+count/time are now logged separately from installation; byte budgets and splitting
+one oversized material remain unresolved. A count cap is not a hard ms guarantee.
+Acceptance requires same-route tail improvement AND comparable residency progress,
+not just a nicer ending ocean screenshot. Paired acceptance is recorded below.
+
+Three alternating same-binary pairs on cd74a58a (installed 15:23), with the same
+native route/profile as above, clutter reuse ON in both arms, slow trace ON in
+both arms. Run names share build/native-stream-cancellation/cancel-20260910- and
+the suffix -slow-trace; unbounded arms also append -legacy-tables.
+
+| Unbounded / two-table run | Moving trace p99 ms | Logged moving maximum ms | Static trace p99 ms | Logged moving frames >100 ms |
+|---|---:|---:|---:|---:|
+| 152310 / 152528 | 97 / 81 | 265.408 / 162.550 | 38 / 91.5 | 11 / 7 |
+| 152745 / 153003 | 86 / 93 | 294.240 / 153.451 | 40 / 131 | 11 / 9 |
+| 153221 / 153438 | 87 / 90 | 296.622 / 167.178 | 39 / 101.5 | 11 / 10 |
+
+Trace percentiles average gaps (moving coverage about 96%); slow-frame count/max
+above are the separate exact main-loop records, not averaged gaps. These do not
+cover work outside FrameProfiler. Moving median stays 29 ms in all six runs;
+throughput FPS is 34.6/34.0, 33.6/33.9, 33.6/33.9: no convincing FPS gain.
+Max table count/update 24 -> 2 in every pair, no bound violations. Max bank-table
+time/update ms: 853.457/362.213, 714.206/460.034, 905.720/388.810. A single
+material can still be expensive; counting is not equivalent to doing less work.
+
+At the static-phase marker, last logged native residency is 19999 in controls
+versus 19689/19596/19655 with the cap. Both arms reach 19999 by movement start
+and 19977 at movement end; these are rate-limited log observations, not exact
+per-frame visibility counts. All six final captures have 22370 registered
+instances and 1923.552 MiB tracked GPU residency, but show ocean, not a visual
+proof that the initial missing 310-403 placements were harmless.
+
+Private-memory peak GiB pairs: 11.060/11.054, 11.017/11.063, 11.055/11.109.
+Working-set peaks: 6.861/7.152, 7.101/7.120, 7.123/7.180. No memory win claimed.
+All routes/captures completed; the old harness sometimes emitted a leftover-PID
+cleanup warning despite recorded exit 0. Cleanup now retains the original Process
+handle and checks HasExited, instead of rediscovering a potentially recycled PID.
+The standalone contention check also now includes the actual OpenPoseidon name;
+the outer game lock already checked it. Older warnings are not shutdown proof.
+
+**Decision: do NOT enable the table cap by default.** It reliably bounds a real
+uncharged stage but shifts stalls into the static phase, slightly delays initial
+coverage, and has no consistent p99/FPS improvement. Default returns to 0;
+WGR_OBJECT_STREAM_TABLE_BATCH=2 remains an explicit experiment. Keep diagnostics,
+cancellation hardening and the separately accepted clutter reuse. The next loading
+experiment must reduce/prepare individual native bank/material work within the
+existing ownership pipeline, with a serial reference, instead of relabelling
+delayed work as a speedup. This is not a completed end-to-end byte-budget pipeline.
+
+The frame analyzer's gap warning was corrected too: averaged gaps can distort
+p99 in EITHER direction, even while concealing the worst individual frame. A fifth
+regression test demonstrates this; no blanket lower-bound claim on p99 remains.
