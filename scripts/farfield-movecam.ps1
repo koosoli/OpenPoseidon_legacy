@@ -218,9 +218,10 @@ if (-not (Test-Path -LiteralPath $sourceMission -PathType Container)) {
 $stageRoot = Join-Path $repoRoot '.tmp-movecam\missions'
 $missionName = Split-Path -Leaf $sourceMission
 # Keep the .abel/.eden suffix: ResolveMissionFile and the world name both come off it.
-$stagedName = ($Label -replace '[^A-Za-z0-9_-]', '_') + '_' + $missionName
+# Verbose capture labels must not exceed the legacy mission identifier's 79-byte limit.
+$stagedName = 'mc_' + [guid]::NewGuid().ToString('N').Substring(0,12) + [IO.Path]::GetExtension($missionName)
 $stagedMission = Join-Path $stageRoot $stagedName
-if (Test-Path -LiteralPath $stagedMission) { Remove-Item -LiteralPath $stagedMission -Recurse -Force }
+if (Test-Path -LiteralPath $stagedMission) { throw "Unique staging directory already exists: $stagedMission" }
 New-Item -ItemType Directory -Force -Path $stagedMission | Out-Null
 Copy-Item -Path (Join-Path $sourceMission '*') -Destination $stagedMission -Recurse -Force
 

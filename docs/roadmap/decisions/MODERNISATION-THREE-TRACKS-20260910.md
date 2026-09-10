@@ -482,3 +482,14 @@ applications. This is not renderer tracked residency or process-private VRAM.
 Use the same sampler on both arms; its overhead is not subtracted. Missing tool
 or missing samples fails a specifically requested telemetry run instead of
 silently reporting zero. PowerShell syntax check passes; end-to-end run pending.
+
+The first driver-memory run (cancel-20260910-221905) is INVALID: its verbose
+93-character staged mission identifier exceeded GlobalHeader's filename[80].
+SetMission's strcpy overwrote the adjacent world name, so StartAutoTest could
+not boot the scene. The 117 driver samples only cover an empty world and must
+not enter performance comparisons. The owned sampler did terminate correctly.
+Mission copies are now bounded, unsupported identifiers rejected without
+changing the save/network header layout, and the harness stages short unique
+identifiers independently of descriptive capture labels. Mission-loader tests:
+17 cases / 84 assertions pass, including 79/80-byte boundary and adjacent-field
+integrity checks. Installed runtime repeat remains pending.

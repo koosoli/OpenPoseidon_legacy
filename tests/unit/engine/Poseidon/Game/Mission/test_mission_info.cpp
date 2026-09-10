@@ -115,6 +115,30 @@ TEST_CASE("MissionInfo::EndingsFromSensorFlags does not produce names like win/l
     REQUIRE_FALSE(Contains(r, "killed"));
 }
 
+TEST_CASE("Legacy mission identifiers cannot overwrite the adjacent world name", "[mission][loader]")
+{
+    struct Fields { char mission[80]; char world[80]; } fields{};
+    REQUIRE(MissionPathLoader::CopyLegacyIdentifier(fields.world, "eden"));
+    for (const size_t size : {size_t(0), size_t(78), size_t(79), size_t(80), size_t(160)})
+    {
+        const std::string name(size, 'm');
+        CHECK(MissionPathLoader::CopyLegacyIdentifier(fields.mission, name) == (size < 80));
+        CHECK(std::string(fields.mission) == name.substr(0, 79));
+        CHECK(fields.mission[79] == '\0');
+        CHECK(std::string(fields.world) == "eden");
+    }
+}
+
+TEST_CASE("MissionPathLoader rejects identifiers beyond the legacy header capacity", "[mission][loader]")
+{
+    for (const size_t size : {size_t(79), size_t(80), size_t(160)})
+    {
+        const std::string name(size, 'm');
+        CHECK(MissionPathLoader::Loader::DescribeMissionFile("missions/" + name + ".eden/mission.sqm").has_value() == (size < 80));
+        CHECK(MissionPathLoader::Loader::DescribeMissionFile("missions/test." + name + "/mission.sqm").has_value() == (size < 80));
+    }
+}
+
 TEST_CASE("MissionPathLoader::DescribeMissionFile parses stock mission paths", "[mission][loader]")
 {
     const auto selection = MissionPathLoader::Loader::DescribeMissionFile("missions/Benchmark.Abel/mission.sqm");

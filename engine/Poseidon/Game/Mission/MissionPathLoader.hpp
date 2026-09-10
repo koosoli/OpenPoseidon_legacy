@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cctype>
+#include <algorithm>
+#include <cstring>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -13,6 +15,19 @@ namespace Poseidon
 
 namespace MissionPathLoader
 {
+
+// The legacy save/network header has fixed arrays. Keep their layout, terminate
+// within the array, and let callers diagnose unsupported identifiers explicitly.
+template<size_t N>
+bool CopyLegacyIdentifier(char (&destination)[N], std::string_view source)
+{
+    static_assert(N > 0);
+    const size_t count = std::min(source.size(), N - 1);
+    if (count != 0)
+        std::memmove(destination, source.data(), count);
+    std::memset(destination + count, 0, N - count);
+    return source.size() < N;
+}
 
 struct Selection
 {
@@ -84,6 +99,8 @@ public:
             missionDirectorySlash == std::string::npos ? "" : missionDirectory.substr(0, missionDirectorySlash + 1);
         selection.missionName = folder.substr(0, dot);
         selection.worldName = folder.substr(dot + 1);
+        if (selection.missionName.size() >= 80 || selection.worldName.size() >= 80)
+            return std::nullopt; // Do not load a different, truncated identifier.
         return selection;
     }
 

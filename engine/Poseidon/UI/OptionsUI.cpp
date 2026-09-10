@@ -1,5 +1,7 @@
 
 #include <Poseidon/UI/Options/OptionsShell.hpp>
+#include <Poseidon/Game/Mission/MissionPathLoader.hpp>
+#include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Core/Config/UserConfig.hpp>
 #include <Poseidon/UI/Map/UIMap.hpp>
@@ -860,8 +862,21 @@ RString& GetMissionsDir()
 
 void SetMission(RString world, RString mission, RString subdir)
 {
-    strcpy(Glob.header.worldname, world);
-    strcpy(Glob.header.filename, mission);
+    const bool worldFits = MissionPathLoader::CopyLegacyIdentifier(Glob.header.worldname, (const char*)world);
+    const bool missionFits = MissionPathLoader::CopyLegacyIdentifier(Glob.header.filename, (const char*)mission);
+    if (!worldFits)
+        LOG_ERROR(Mission, "World identifier exceeds the legacy {}-character limit: {}",
+                  sizeof(Glob.header.worldname) - 1, (const char*)world);
+    if (!missionFits)
+        LOG_ERROR(Mission, "Mission identifier exceeds the legacy {}-character limit: {}",
+                  sizeof(Glob.header.filename) - 1, (const char*)mission);
+    if (!worldFits || !missionFits)
+    {
+        Glob.header.filename[0] = '\0';
+        Glob.header.worldname[0] = '\0';
+        Glob.header.filenameReal = "";
+        return; // Never interpret the truncated prefix as a different mission.
+    }
     Glob.header.filenameReal = mission;
 
     BaseSubdirectory = subdir;
