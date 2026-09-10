@@ -26,7 +26,7 @@ bool RestoreEditedTerrain();
 void ClearTerrainEditBaseline();
 struct RocketCraterSettings
 {
-    bool enabled = false;
+    bool enabled = true;
     float radius = 12.0f;
     float depth = 1.0f;
 };

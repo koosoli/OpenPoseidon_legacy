@@ -25,6 +25,13 @@ public:
     float maxDepth = 0.5f;
     float flakeMultiplier = 1.0f;
 
+    void ApplySnowstormPreset()
+    {
+        enabled = falling = true;
+        flakeMultiplier = 8.0f;
+        metresPerMinute = 0.1f;
+    }
+
     void ResetSettings()
     {
         // A settings reset must not erase mission-local surface edits.

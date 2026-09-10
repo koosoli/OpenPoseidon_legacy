@@ -1,4 +1,4 @@
-param([switch]$ResetSettings, [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
+param([switch]$ResetSettings, [switch]$Storm, [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
 $root=Split-Path $PSScriptRoot -Parent
@@ -9,7 +9,7 @@ New-Item -ItemType Directory -Force $env:POSEIDON_USER_DIR | Out-Null
 $env:POSEIDON_SNOW_TEST_DEPTH='0.18'
 Remove-Item Env:POSEIDON_SNOW_TEST_RATE -ErrorAction SilentlyContinue
 $env:WGR_AUTO_EXPOSURE='0'
-$env:WGR_EXPOSURE='0.15'
+$env:WGR_EXPOSURE=if ($Storm) {'1.0'} else {'0.15'}
 if ($ResetSettings) { $env:WGR_SETTINGS_QUEUE_TRACE='1' }
 $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0)
 $listener.Start(); $port=$listener.LocalEndpoint.Port; $listener.Stop()
@@ -68,6 +68,20 @@ try {
         if ($again.depth -ne $before.depth -or $again.chunks -ne $before.chunks) {throw 'Disabled interval erased snow'}
         Start-Sleep -Seconds 2
         $null=Send @{cmd='screenshot';path=(Join-Path $output 'reset-restored.png')}
+    }
+    if ($Storm) {
+        $null=Send @{cmd='dev_snow';action='reset-settings'}
+        $null=Send @{cmd='dev_snow';action='enable'}
+        Start-Sleep -Seconds 3
+        $normal=Send @{cmd='dev_snow';action='state'}
+        $null=Send @{cmd='screenshot';path=(Join-Path $output 'snow-normal.png')}
+        $null=Send @{cmd='dev_snow';action='storm'}
+        Start-Sleep -Seconds 3
+        $stormState=Send @{cmd='dev_snow';action='state'}
+        if (!$stormState.enabled -or !$stormState.falling -or $stormState.flakes -ne 8 -or
+            $stormState.liveFlakes -lt 1000 -or $stormState.drawnFlakes -le $normal.drawnFlakes -or
+            $stormState.depth -le $normal.depth) {throw 'Snowstorm did not increase rendered precipitation and cover'}
+        $null=Send @{cmd='screenshot';path=(Join-Path $output 'snow-storm.png')}
     }
     $null=Send @{cmd='exit'}
     if (!$p.WaitForExit(20000) -or $p.ExitCode -ne 0) {throw 'Game exit failed'}

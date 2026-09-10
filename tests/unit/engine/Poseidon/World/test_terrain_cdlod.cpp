@@ -44,7 +44,12 @@ TEST_CASE("Snowstorm budget is bounded and only falling snow adds cloud cover", 
     snow.enabled = true;
     CHECK(snow.RenderOvercast(0.2f) >= 0.75f);
     CHECK(snow.RenderOvercast(1.0f) == 1.0f);
-    snow.metresPerMinute = 0.1f;
+    snow.falling = false;
+    snow.ApplySnowstormPreset();
+    CHECK(snow.enabled);
+    CHECK(snow.falling);
+    CHECK(snow.BoundedFlakeMultiplier() == 8.0f);
+    CHECK(snow.Depth() == 0.0f);
     CHECK(snow.FallingIntensity() == 1.0f);
     CHECK(snow.RenderOvercast(0.0f) == Catch::Approx(0.95f));
     snow.flakeMultiplier = 100;

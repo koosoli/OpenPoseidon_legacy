@@ -927,10 +927,10 @@ void DrawWeatherStateSection()
 
 void DrawWeatherTab()
 {
-    if (ImGui::CollapsingHeader("Experimental snow"))
+    if (ImGui::CollapsingHeader("Snow", ImGuiTreeNodeFlags_DefaultOpen))
     {
         auto& snow = GSnow();
-        ImGui::Checkbox("Enable snow cover (wgpu experiment)", &snow.enabled);
+        ImGui::Checkbox("Enable snow", &snow.enabled);
         ImGui::Checkbox("Accumulate new snow", &snow.falling);
         ImGui::Checkbox("Geometric close-up tracks", &snow.detailedGeometry);
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Refines terrain within 8 m of the camera to resolve real snow depressions. Extra geometry only while snow is enabled; collision remains on bare ground.");
@@ -939,10 +939,10 @@ void DrawWeatherTab()
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Up to 8x the normal particle budget. Dense storms cost more; roof occlusion and wind remain active.");
         if (ImGui::Button("Snowstorm"))
         {
-            snow.enabled = snow.falling = true;
-            snow.flakeMultiplier = 8.0f;
-            snow.metresPerMinute = 0.1f;
+            snow.ApplySnowstormPreset();
         }
+        ImGui::TextWrapped("Snowstorm: dense snowfall and 10 cm/min accumulation. Wind is controlled separately below; this does not instantly cover the ground.");
+        ImGui::Text("Flakes: %d active, %d visible", GSnowFlakes.Stats().liveDrops, GSnowFlakes.Stats().drawnDrops);
         ImGui::TextWrapped("Falling snow adds overcast without forcing rain or thunderstorms; stopping snowfall restores the mission's cloud cover.");
         ImGui::SliderFloat("Maximum snow depth (m)", &snow.maxDepth, 0.05f, 1.0f, "%.2f");
         if (ImGui::Button("Add 10 cm of snow")) snow.Deposit(0.1f);
@@ -954,15 +954,15 @@ void DrawWeatherTab()
         if (snow.Rejected()) ImGui::TextWrapped("Track storage full: existing tracks retained; new stamps skipped.");
         ImGui::TextWrapped("Mission-local terrain experiment. Tracks do not expire with time or camera movement; only new snowfall fills them. No savegame/network replication or changed ground collision yet.");
     }
-    DrawReadout();
-    ImGui::Spacing();
-    DrawOverrideSection();
-    ImGui::Spacing();
-    DrawConsumerSection();
-    ImGui::Spacing();
-    DrawRainSection();
-    ImGui::Spacing();
-    DrawWeatherStateSection();
+    if (ImGui::CollapsingHeader("Cloud cover and fog", ImGuiTreeNodeFlags_DefaultOpen))
+        DrawWeatherStateSection();
+    if (ImGui::CollapsingHeader("Wind"))
+    {
+        DrawReadout();
+        DrawOverrideSection();
+    }
+    if (ImGui::CollapsingHeader("Rain settings")) DrawRainSection();
+    if (ImGui::CollapsingHeader("Wind consumers and diagnostics")) DrawConsumerSection();
 }
 
 } // namespace Poseidon::Dev

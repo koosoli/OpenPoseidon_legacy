@@ -1,5 +1,31 @@
 # September 9 visual follow-up
 
+## Weather access and rocket defaults, September 10, 10:55
+
+Snow is now a default-open Weather section, without the experimental-only header;
+cloud/fog, wind, rain and wind diagnostics have separate collapsible sections.
+The snow section retains the actual limitations (mission-local, no save/network
+or altered ground collision), exposes live/drawn flake counts, and explains that
+Snowstorm deposits 10 cm/min rather than instantly covering the terrain. Its
+preset is shared with the installed test harness; it does not force wind or rain.
+
+Installed 21a6570f+dirty at 10:50: Snowstorm increased active flakes from 209 to
+5585 and submitted flakes from 83 to 2270 within three seconds; cover grew from
+0.18050 to 0.18570 m. Normal/storm captures inspected at fixed exposure 1.0.
+An earlier exposure-0.15/reset run was visibly too dark for visual acceptance,
+although particle counters passed. This verifies the preset, not a fully accepted
+blizzard look or the owner's roof/moving-camera defects. Snow crawl and master
+reset regressions pass; 10 native Snow cases / 9923 assertions pass.
+
+Rocket craters now default ON, explicitly requested by owner. SP/land/contact
+and supported-grid guards remain. Installed scripts/Test-RocketCraters.ps1
+confirms default-on, off, settings-reset-on and original-terrain restoration:
+29.835 -> 28.835 -> 28.835 -> 27.835 -> 29.835 m, exit 0, no renderer errors.
+This is not acceptance of large-grid Fusion editing or a measured salvo-cost
+claim; first-contact collision preparation can still pause on supported grids.
+Cargo.lock remains untouched. New immutable backup before this work:
+codex/backup-asset-obs-20260910-101222 at 21a6570fc8b9085671b77c695cead9881f18b05a.
+
 ## Owner follow-up and backup checkpoint, September 10, 10:12
 
 New reports below are OPEN, not covered by earlier passing captures. Work order

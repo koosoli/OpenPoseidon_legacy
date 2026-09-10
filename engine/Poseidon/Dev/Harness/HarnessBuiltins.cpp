@@ -6,6 +6,7 @@ using namespace Poseidon;
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/Weather/SnowField.hpp>
+#include <Poseidon/World/Weather/RainVolume.hpp>
 #include <Poseidon/Dev/Debug/DevPanelWidgets.hpp>
 #include <SDL3/SDL_events.h>
 #include <SDL3/SDL_keyboard.h>
@@ -139,6 +140,7 @@ void RegisterSnowProbe(HarnessServer& hs)
             else if (std::strcmp(action, "reset-settings") == 0) snow.ResetSettings();
             else if (std::strcmp(action, "enable") == 0) snow.enabled = true;
             else if (std::strcmp(action, "disable") == 0) snow.enabled = false;
+            else if (std::strcmp(action, "storm") == 0) snow.ApplySnowstormPreset();
             else if (std::strcmp(action, "state") != 0) return HarnessProtocol::ErrorResponse("unknown snow action");
             cJSON* out = cJSON_CreateObject();
             cJSON_AddBoolToObject(out, "enabled", snow.enabled);
@@ -149,6 +151,8 @@ void RegisterSnowProbe(HarnessServer& hs)
             cJSON_AddNumberToObject(out, "flakes", snow.flakeMultiplier);
             cJSON_AddNumberToObject(out, "depth", snow.Depth());
             cJSON_AddNumberToObject(out, "chunks", static_cast<double>(snow.Chunks()));
+            cJSON_AddNumberToObject(out, "liveFlakes", GSnowFlakes.Stats().liveDrops);
+            cJSON_AddNumberToObject(out, "drawnFlakes", GSnowFlakes.Stats().drawnDrops);
             return HarnessProtocol::JsonResponse(out);
         });
 }
