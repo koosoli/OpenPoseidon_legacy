@@ -1,10 +1,17 @@
-param([string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault', [switch]$Menu, [switch]$InspectRoom, [switch]$CastleOnly)
+param([string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault', [switch]$Menu, [switch]$InspectRoom, [switch]$CastleOnly, [switch]$GlassOnly)
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) { throw 'Use scripts/with-game-lock.sh' }
 $root=Split-Path $PSScriptRoot -Parent
 $out=Join-Path $root 'build/showcase/smoke'
 New-Item -ItemType Directory -Force $out | Out-Null
 $env:POSEIDON_USER_DIR=Join-Path $out 'user'
+if ($GlassOnly) {
+ $out=Join-Path $root 'build/showcase/glass'
+ $env:POSEIDON_USER_DIR=Join-Path $out 'user'
+ New-Item -ItemType Directory -Force $env:POSEIDON_USER_DIR | Out-Null
+ [IO.File]::WriteAllText((Join-Path $env:POSEIDON_USER_DIR 'graphics.cfg'), "qualityPreset=3;`nmsaaSamples=4;`ndlssMode=0;`nvsync=0;`nfpsCap=60;`n")
+ $env:WGR_AUTO_EXPOSURE='0'; $env:WGR_EXPOSURE='0.15'
+}
 $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0)
 $listener.Start()
 $port=$listener.LocalEndpoint.Port
@@ -43,6 +50,36 @@ try {
   Write-Output $line
  }
  Start-Sleep -Seconds 18
+ if ($GlassOnly) {
+  Send @{cmd='eval';code='typeOf labGlass'} '"LabPanelGlass"'
+  Send @{cmd='exec';code='hint ""; [player,player,labGlassVisit] exec "action.sqs"'}
+  Start-Sleep -Seconds 3
+  Send @{cmd='exec';code='hint ""; player setPos [9575,3501,0]; player setDir 0; player switchCamera "INTERNAL"'}
+  Start-Sleep -Seconds 3
+  Send @{cmd='screenshot';path=(Join-Path $out 'glass-front.png')}
+  Send @{cmd='key';sc=26;hold=$true}
+  Start-Sleep -Seconds 3
+  Send @{cmd='key_up';sc=26}
+  Send @{cmd='eval';code='getPos player'}
+  Send @{cmd='eval';code='((getPos player) select 1) < 3504'} 'true'
+  Send @{cmd='exec';code='player setPos [9571,3501,0]; player setDir 53'}
+  Start-Sleep -Seconds 3
+  Send @{cmd='screenshot';path=(Join-Path $out 'glass-oblique.png')}
+  Send @{cmd='exec';code='player setPos [9575,3501,0]; player setDir 0; deleteVehicle labGlass'}
+  Start-Sleep -Seconds 3
+  Send @{cmd='screenshot';path=(Join-Path $out 'glass-removed-control.png')}
+  Send @{cmd='key';sc=26;hold=$true}
+  Start-Sleep -Seconds 2
+  Send @{cmd='key_up';sc=26}
+  Send @{cmd='eval';code='((getPos player) select 1) > 3504'} 'true'
+  Send @{cmd='eval';code='alive player'} 'true'
+  Send @{cmd='exit'}
+  if (!$p.WaitForExit(30000)) {throw 'Exit timed out'}
+  if ($p.ExitCode -ne 0) {throw "Game exit $($p.ExitCode)"}
+  if (Select-String -LiteralPath $log -Pattern 'Validation Error|panicked at|UNHANDLED EXCEPTION|upload failed showcase_lab') {throw 'Glass runtime error'}
+  Write-Output "Glass captures: $out"
+  return
+ }
  if ($CastleOnly) {
   Send @{cmd='exec';code='hint ""; player setPos [9490,3559,0]; player setDir 0; player switchCamera "INTERNAL"'}
   Send @{cmd='eval';code='triPhysicsShowcase "castle"'} '"OK"'

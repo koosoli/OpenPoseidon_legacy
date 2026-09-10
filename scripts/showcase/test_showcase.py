@@ -33,7 +33,9 @@ class ShowcaseAssets(unittest.TestCase):
             files.append((name, size))
         content = {name: stream.read(size) for name, size in files}
         self.assertEqual(stream.read(), b'')
-        self.assertEqual(len(content), 22)
+        self.assertEqual(len(content), 29)
+        self.assertIn(b'class LabPanelGlass', content['config.cpp'])
+        self.assertIn(b'PanelGlass_ca.paa', content['PanelGlass.p3d'])
         self.assertIn(b'class LabDoorSide', content['config.cpp'])
         self.assertIn(b'class LabPanelNormal', content['config.cpp'])
         for name, data in content.items():
@@ -49,6 +51,20 @@ class ShowcaseAssets(unittest.TestCase):
         self.assertIn(b'ribs_nohq.paa', lab.material(True, .05))
         self.assertNotIn(b'ribs_nohq.paa', lab.material(False, .05))
         self.assertEqual(lab.paa()[:4], struct.pack('<HH', 0x8888, 0))
+
+    def test_glass_has_continuous_partial_alpha_through_all_mips(self):
+        data = lab.paa(colour=(220, 235, 200, 56))
+        offset, levels = 4, 0
+        while data[offset:offset+4] != bytes(4):
+            width, height = struct.unpack_from('<HH', data, offset)
+            size = int.from_bytes(data[offset+4:offset+7], 'little')
+            pixels = data[offset+7:offset+7+size]
+            self.assertEqual(size, width * height * 4)
+            self.assertEqual(set(pixels[3::4]), {56})
+            self.assertEqual(pixels[:4], bytes((220, 235, 200, 56)))
+            offset += 7 + size
+            levels += 1
+        self.assertEqual(levels, 8)
 
     def test_visible_and_collision_shell_winding_match(self):
         def first_face(geometry):

@@ -3,6 +3,7 @@ _id = _this select 2
 ? _id == labCastle : goto "castle"
 ? _id == labRoom : goto "room"
 ? _id == labRoomLight : goto "roomlight"
+? _id == labGlassVisit : goto "glass"
 ? _id == labCrater : goto "crater"
 ? _id == labCraterReset : goto "craterreset"
 ? _id == labThrow : goto "throw"
@@ -31,6 +32,11 @@ hint "ROTATING LIGHT ROOM\nEnter through the central doorway. The warm point lig
 exit
 #roomlight
 hint (triPhysicsShowcase "roomlight")
+exit
+#glass
+player setPos [9575,3499,0]
+player setDir 0
+hint "GLASS\nA thin tinted pane in a solid frame. The NORMAL panel behind it must remain visible. Walk to the side to compare its reflection and tint.\nThis is separate from the opaque GLOSS material demo. The pane is solid, not yet shatterable."
 exit
 #crater
 hint (triPhysicsShowcase "crater")

@@ -92,8 +92,8 @@ class Stage2 {{texture="#(argb,8,8,3)color(0,{specular},0.7,1,SMDI)"; uvSource="
 '''.encode('ascii')
 
 
-def paa(normal=False, label=''):
-    pixels = bytearray(tga(normal)[18:])
+def paa(normal=False, label='', colour=None):
+    pixels = bytearray(tga(normal)[18:] if colour is None else bytes(colour) * (128 * 128))
     if label:
         font = {
             'F': ['11111','10000','10000','11110','10000','10000','10000'],
@@ -142,6 +142,9 @@ def build():
         ('PanelFlat', (2, 3, .15), False, .05),
         ('PanelNormal', (2, 3, .15), True, .05),
         ('PanelGloss', (2, 3, .15), True, .8),
+        ('PanelGlass', (2, 3, .025), False, .8),
+        ('GlassFrame', (2.16, .12, .10), False, .2),
+        ('GlassPost', (.08, 3, .10), False, .2),
         ('Wall', (.25, 4.5, 7), False, .05),
         ('Roof', (7, .3, 7), False, .05),
         ('Plinth', (1, .4, 1), False, .05),
@@ -151,11 +154,12 @@ def build():
         files[name + '.rvmat'] = material(normal, specular)
         texture = 'grid_co.paa'
         if name.startswith('Panel'):
-            texture = name + '_co.paa'
-            files[texture] = paa(label=name[5:].upper())
+            texture = name + ('_ca.paa' if name == 'PanelGlass' else '_co.paa')
+            files[texture] = (paa(colour=(220, 235, 200, 56)) if name == 'PanelGlass'
+                              else paa(label=name[5:].upper()))
         files[name + '.p3d'] = model(size, 'showcase_lab\\' + texture, 'showcase_lab\\' + name + '.rvmat')
         classes.append(f'class Lab{name}: House {{scope=2; displayName="Lab {name}"; model="\\showcase_lab\\{name}.p3d"; armor=10000;}};')
-    files['config.cpp'] = ('''class CfgPatches {class ShowcaseLab {units[]={"LabPanelFlat","LabPanelNormal","LabPanelGloss","LabWall","LabRoof","LabPlinth","LabRoomBack","LabDoorSide"}; weapons[]={}; requiredVersion=1.96; requiredAddons[]={};};};
+    files['config.cpp'] = ('''class CfgPatches {class ShowcaseLab {units[]={"LabPanelFlat","LabPanelNormal","LabPanelGloss","LabPanelGlass","LabGlassFrame","LabGlassPost","LabWall","LabRoof","LabPlinth","LabRoomBack","LabDoorSide"}; weapons[]={}; requiredVersion=1.96; requiredAddons[]={};};};
 class CfgVehicles {class House;
 ''' + '\n'.join(classes) + '\n};\n').encode('ascii')
     header = z('') + struct.pack('<5I', 0x56657273, 0, 0, 0, 0) + z('prefix') + z('showcase_lab') + b'\0'
