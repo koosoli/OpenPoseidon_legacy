@@ -2183,10 +2183,18 @@ mod tests {
     #[test]
     fn bicubic_dynamics_matches_sixteen_tap_reference() {
         let shader = include_str!("water.wgsl");
-        assert!(shader.contains("wx.x + wx.y, wx.z + wx.w, wy.x + wy.y, wy.z + wy.w"));
-        assert!(shader.contains("wx.y / g.x"));
-        assert!(shader.contains("wx.w / g.y"));
-        assert!(shader.contains("let w = g.yw / (g.xz + g.yw)"));
+        // A whole-file search used to pass when only displacement was fixed,
+        // while dynamics (normal/glitter) retained the broken reconstruction.
+        for name in ["texture_bicubic_displacement_at", "texture_bicubic_dynamics"] {
+            let body = shader.split(&format!("fn {name}("))
+                .nth(1).expect("bicubic function").split("\nfn ").next().unwrap();
+            for term in ["wx.x + wx.y, wx.z + wx.w, wy.x + wy.y, wy.z + wy.w",
+                         "wx.y / g.x", "wx.w / g.y", "wy.y / g.z", "wy.w / g.w",
+                         "let w = g.yw / (g.xz + g.yw)"] {
+                assert!(body.contains(term), "{name}: missing {term}");
+            }
+            assert!(!body.contains("wx.x + wx.z"), "{name}: non-adjacent taps");
+        }
         fn weights(t: f64) -> [f64; 4] {
             [ (1.0-t).powi(3)/6.0, (3.0*t.powi(3)-6.0*t*t+4.0)/6.0,
               (-3.0*t.powi(3)+3.0*t*t+3.0*t+1.0)/6.0, t.powi(3)/6.0 ]

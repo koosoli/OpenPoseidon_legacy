@@ -378,15 +378,17 @@ fn texture_bicubic_dynamics(uv: vec2<f32>, layer: i32) -> vec4<f32> {
     let wx = cubic_weights(fuv.x);
     let wy = cubic_weights(fuv.y);
 
-    let g = vec4<f32>(wx.x + wx.z, wx.y + wx.w, wy.x + wy.z, wy.y + wy.w);
+    // Match displacement's adjacent B-spline pairs. Mixing non-adjacent taps
+    // or the other axis's weights makes specular normals jump at texel edges.
+    let g = vec4<f32>(wx.x + wx.y, wx.z + wx.w, wy.x + wy.y, wy.z + wy.w);
     let floor_uv = floor(uv_grid);
     // Offset x coords
-    let hx0 = (wx.y / g.y + (-1.5 + floor_uv.x)) * inv_x;
-    let hx1 = (wx.w / g.w + ( 0.5 + floor_uv.x)) * inv_x;
+    let hx0 = (wx.y / g.x + (-1.5 + floor_uv.x)) * inv_x;
+    let hx1 = (wx.w / g.y + ( 0.5 + floor_uv.x)) * inv_x;
     // Offset y coords
     let hy0 = (wy.y / g.z + (-1.5 + floor_uv.y)) * inv_y;
     let hy1 = (wy.w / g.w + ( 0.5 + floor_uv.y)) * inv_y;
-    let w = g.xz / (g.xz + g.yw);
+    let w = g.yw / (g.xz + g.yw);
 
     let s00 = textureSampleLevel(fft_dynamics, fft_samp, vec2<f32>(hx0, hy0), layer, 0.0);
     let s10 = textureSampleLevel(fft_dynamics, fft_samp, vec2<f32>(hx1, hy0), layer, 0.0);
