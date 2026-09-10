@@ -1,5 +1,19 @@
 # September 9 visual follow-up
 
+## September 11: benchmark migration correction and static DLSS check
+
+The unversioned generated graphics profiles migrated fpsCap=0 to 144 on this
+machine. Earlier captures must NOT be described as uncapped. Their low native
+Reforger FPS does not prove the cap had no effect. The material, AI-scale,
+modernisation-CPU and native cancellation harnesses now share an explicit
+version-3 Ultra profile, refusing to overwrite existing profiles. PS5.1 fixture
+checks cover four upscaler modes, overwrite refusal and missing directories.
+Installed 872bf0ee sand closeups with pack 0.1.4 passed strict lifecycle checks:
+material-20260911-010400-Sand-Full-h17.5-d1-close-dlss (28.1 s), and
+material-20260911-010912-Sand-Full-h17.5-d1-close (26.3 s). Fine relief is visible
+in both inspected images. This is static visual evidence, not moving-camera
+ghosting acceptance or a measured performance improvement.
+
 ## September 11: streaming cancellation and DDS reader boundary
 
 Installed 872bf0ee contains e200c818's unlocked queued-job retirement during Reset

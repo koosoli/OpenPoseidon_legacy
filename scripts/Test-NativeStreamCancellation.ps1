@@ -27,7 +27,7 @@ if ($VerifyTintReuse) {$label+='-verify-tint'}
 $out=Join-Path $root 'build/native-stream-cancellation'
 $user=Join-Path $out ('user-'+$label)
 New-Item -ItemType Directory -Force $user | Out-Null
-[IO.File]::WriteAllText((Join-Path $user 'graphics.cfg'), "qualityPreset=3;`nmsaaSamples=4;`ndlssMode=0;`nvsync=0;`nfpsCap=0;`n")
+& "$PSScriptRoot/Write-BenchmarkGraphics.ps1" -UserDir $user
 $settings=@{
  POSEIDON_USER_DIR=$user; POSEIDON_VSYNC='0'; POSEIDON_LOCKSTEP_HZ='0'
  POSEIDON_REFORGER_WORLD='worlds/eden'; POSEIDON_REFORGER_OBJECTS='1'; POSEIDON_REFORGER_STREAM='1'

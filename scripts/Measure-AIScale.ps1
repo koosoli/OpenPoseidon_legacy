@@ -28,7 +28,7 @@ $null=$text.AppendLine('};};')
 [IO.File]::WriteAllText((Join-Path $mission 'mission.sqm'),$text.ToString())
 $user=Join-Path $out "user-$Label-$Units-$Pose"
 New-Item -ItemType Directory -Force $user | Out-Null
-[IO.File]::WriteAllText((Join-Path $user 'graphics.cfg'), "qualityPreset=3;`nmsaaSamples=4;`ndlssMode=0;`nvsync=0;`nfpsCap=0;`n")
+& "$PSScriptRoot/Write-BenchmarkGraphics.ps1" -UserDir $user
 # Rotate in place so the counterfactual does not move the live player or alter
 # AI distance-based scheduling. A true distant-camera test is a separate arm.
 $camera=if ($Pose -eq 'Near') {@(9700,3545,45,0,-12)} else {@(9700,3545,45,180,-12)}

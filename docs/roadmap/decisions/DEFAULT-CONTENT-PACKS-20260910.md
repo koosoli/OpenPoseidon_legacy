@@ -6,6 +6,14 @@ completion report. The owner's prior outstanding work remains authorized.
 
 ## Current status, September 11
 
+Additional static acceptance on installed 872bf0ee: material-20260911-010400-Sand-Full-h17.5-d1-close-dlss
+and material-20260911-010912-Sand-Full-h17.5-d1-close both complete shutdown and
+their images show the fine sand relief. The DLSS profile remains version=3,
+fpsCap=0 after execution; requested upscaler activation is checked by the harness.
+The previous unversioned profiles migrated to a 144 FPS cap. Do not label their
+timing results uncapped. These matching static views do not establish temporal
+stability, full photorealism, snow compatibility or frame-time savings.
+
 Installed c4bbb2b3, own material pack 0.1.4. Default mounting, three exact albedo
 replacements, shared road/terrain macro normals and sand near-detail normals
 are implemented. Generator, shader composition and installed static checks pass.

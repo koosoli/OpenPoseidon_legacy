@@ -14,7 +14,7 @@ if ($Scene -eq 'Idle80' -or $Scene -eq 'Idle320') {
 $out=Join-Path $root 'build/modernisation-cpu'
 $user=Join-Path $out ('user-'+$label)
 New-Item -ItemType Directory -Force $user | Out-Null
-[IO.File]::WriteAllText((Join-Path $user 'graphics.cfg'), "qualityPreset=3;`nmsaaSamples=4;`ndlssMode=0;`nvsync=0;`nfpsCap=0;`n")
+& "$PSScriptRoot/Write-BenchmarkGraphics.ps1" -UserDir $user
 $settings=@{POSEIDON_USER_DIR=$user; POSEIDON_VSYNC='0'; POSEIDON_LOCKSTEP_HZ='0';
  WGR_PASS1_STATS='1'; WGR_LOD_GOVERNOR_RANGE='1'; POSEIDON_SIM_VEHICLE_COST='1'}
 $mission=if ($Scene -eq 'Combat') {'tests/perf/missions/perf_combat.eden'} else {'tests/perf/missions/perf_field.eden'}

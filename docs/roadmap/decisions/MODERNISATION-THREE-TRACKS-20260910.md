@@ -11,6 +11,15 @@ that baseline. Analysis requested first; implementation subsequently authorised.
 
 ## Evidence limits
 
+September 11 correction: generated unversioned graphics.cfg files underwent
+GraphicsConfig migration, replacing fpsCap=0 with 144 on this machine. Earlier
+material/native/CPU harness captures are not demonstrated uncapped runs, even
+where recorded FPS is below 144. Preserve their raw evidence, but repeat timed
+comparisons with the shared Write-BenchmarkGraphics.ps1 version-3 profile before
+using them to approve a performance change. The four active harnesses now write
+explicit Ultra quality, exposure, MSAA, native/DLSS mode, vsync=0 and fpsCap=0.
+No user graphics profile is overwritten.
+
 This audit reads the implementation, September handover, PARKED, the post-DLSS
 roadmap, PERF-021/024/029 and the native Reforger decision and raw captures.
 Historical measurements below are not new four-scene measurements of HEAD.
