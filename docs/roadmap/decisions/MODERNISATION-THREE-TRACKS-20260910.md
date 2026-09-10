@@ -621,3 +621,22 @@ evidence that the earlier intermittent hang is diagnosed or that FPS improved.
 The expensive native DDS read/decode/tint/coverage and bank-table path remains
 main-thread work; its SlurpFile fallback reaches GFileServer and cannot simply
 be called from the existing worker without isolating that read interface first.
+
+Installed e200c818 capture cancel-20260911-004344-slow-trace-bc7-default-driver-
+memory-tint-reuse-0 completes route and shutdown: 134.7 s wall, 22370 registered
+instances, 134 driver samples. Reset/late-publication ordering is covered by the
+unit interleavings, not by claiming this single traverse exercises a world swap.
+
+Next isolated prerequisite: TextureSourceDDS::InitFromReader accepts a caller-owned
+read callback for colour AND coverage, while ordinary Init still supplies the
+same SlurpFile function. A failed supplied read cannot fall back to GFileServer.
+No queue, worker call site or GPU path changes yet. Synthetic tests cover exact
+plain-buffer pixels, both composite reads/coverage alpha, no-I/O solid colours,
+read failure and invalid arguments. Combined EDDS/PAA/preparer tests: 44 cases /
+827 assertions pass. Installed validation of this refactor is pending.
+
+Before actual native background composition, preserve configuration identity
+(layer-tint interpretation can change in the dev UI), mount/request lifetime,
+generation-checked publication and the existing store's memory budget. Do not
+call the default SlurpFile fallback on a worker. The current readiness store
+must carry the completed source rather than introducing a second texture queue.

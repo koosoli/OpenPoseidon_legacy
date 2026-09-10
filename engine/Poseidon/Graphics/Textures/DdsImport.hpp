@@ -6,6 +6,7 @@
 #include <Poseidon/Graphics/Textures/PixelFormat.hpp>
 
 #include <vector>
+#include <functional>
 
 namespace Poseidon
 {
@@ -78,6 +79,11 @@ class TextureSourceDDS : public ITextureSource
     ~TextureSourceDDS() override;
 
     bool Init(const char* name, PacLevelMem* mips, int maxMips) override;
+    // Isolate I/O from composition: the caller owns the reader and its data for
+    // this synchronous call. A failed read never falls through to GFileServer.
+    // This does not itself enqueue work or make a supplied reader thread-safe.
+    using Reader = std::function<bool(const char*, std::vector<uint8_t>&)>;
+    bool InitFromReader(const char* name, PacLevelMem* mips, int maxMips, const Reader& reader);
 
     int GetMipmapCount() const override { return _mipmaps; }
     PacFormat GetFormat() const override { return _pacFormat; }

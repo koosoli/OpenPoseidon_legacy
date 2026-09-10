@@ -721,6 +721,13 @@ bool TextureSourceDDS::InitFromMemory(const void* data, size_t size, const char*
 
 bool TextureSourceDDS::Init(const char* name, PacLevelMem* mips, int maxMips)
 {
+    return InitFromReader(name, mips, maxMips, SlurpFile);
+}
+
+bool TextureSourceDDS::InitFromReader(const char* name, PacLevelMem* mips, int maxMips, const Reader& reader)
+{
+    if (!name || maxMips < 0 || (!mips && maxMips > 0) || !reader)
+        return false;
     DdsPreparationTrace trace(name);
     _name = name;
 
@@ -788,7 +795,7 @@ bool TextureSourceDDS::Init(const char* name, PacLevelMem* mips, int maxMips)
     const bool composite = SplitEnfusionAlphaName(name, compositeColour, compositeCoverage);
 
     std::vector<uint8_t> buffer;
-    if (!SlurpFile(composite ? compositeColour.c_str() : name, buffer) || buffer.empty())
+    if (!reader(composite ? compositeColour.c_str() : name, buffer) || buffer.empty())
         return false;
     trace.inputBytes = buffer.size();
     trace.Mark(trace.read);
@@ -841,7 +848,7 @@ bool TextureSourceDDS::Init(const char* name, PacLevelMem* mips, int maxMips)
     {
         std::vector<uint8_t> coverageBytes;
         TextureSourceDDS coverage;
-        const bool coverageRead = SlurpFile(compositeCoverage.c_str(), coverageBytes) && !coverageBytes.empty();
+        const bool coverageRead = reader(compositeCoverage.c_str(), coverageBytes) && !coverageBytes.empty();
         trace.inputBytes += coverageBytes.size();
         trace.Mark(trace.coverageRead);
         const bool coverageDecoded = coverageRead &&

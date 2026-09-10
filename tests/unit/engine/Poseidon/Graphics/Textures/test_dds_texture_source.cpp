@@ -157,6 +157,66 @@ TEST_CASE("Enfusion RG normals use red rather than cavity or occlusion for X", "
     }
 }
 
+TEST_CASE("DDS composition uses only its supplied reader", "[graphics][edds][streaming]")
+{
+    const auto file = Bgra2x2();
+    std::vector<std::string> reads;
+    const TextureSourceDDS::Reader reader = [&](const char* name, std::vector<uint8_t>& out) {
+        reads.emplace_back(name);
+        if (reads.back() != "colour.edds" && reads.back() != "coverage.edds")
+            return false;
+        out = file;
+        return true;
+    };
+    TextureSourceDDS source;
+    PacLevelMem mips[16];
+    SECTION("plain data matches the buffer decoder")
+    {
+        REQUIRE(source.InitFromReader("colour.edds", mips, 16, reader));
+        REQUIRE(reads == std::vector<std::string>{"colour.edds"});
+        TextureSourceDDS reference;
+        REQUIRE(reference.InitFromMemory(file.data(), file.size(), "colour.edds"));
+        CHECK(source.GetFormat() == reference.GetFormat());
+        CHECK(source.GetAverageColor() == reference.GetAverageColor());
+        mips[0]._dFormat = PacARGB8888;
+        mips[0]._pitch = 8;
+        uint8_t actual[16]{}, expected[16]{};
+        REQUIRE(source.GetMipmapData(actual, mips[0], 0));
+        REQUIRE(reference.GetMipmapData(expected, mips[0], 0));
+        CHECK(std::memcmp(actual, expected, sizeof(actual)) == 0);
+    }
+    SECTION("both halves of a composite use the reader")
+    {
+        REQUIRE(source.InitFromReader("enfa|coverage.edds|colour.edds", mips, 16, reader));
+        const std::vector<std::string> expectedReads{"colour.edds", "coverage.edds"};
+        CHECK(reads == expectedReads);
+        mips[0]._dFormat = PacARGB8888;
+        mips[0]._pitch = 8;
+        uint8_t pixels[16]{};
+        REQUIRE(source.GetMipmapData(pixels, mips[0], 0));
+        for (int i = 0; i < 4; ++i)
+            CHECK(pixels[i * 4 + 3] == 0x30 + i);
+    }
+    SECTION("failed read has no implicit file-server fallback")
+    {
+        CHECK_FALSE(source.InitFromReader("missing.edds", mips, 16, reader));
+        CHECK(reads.size() == 1);
+    }
+    SECTION("solid colours require no read")
+    {
+        REQUIRE(source.InitFromReader("enfc|0.2,0.3,0.4", mips, 16, reader));
+        CHECK(reads.empty());
+    }
+    SECTION("invalid arguments are refused")
+    {
+        CHECK_FALSE(source.InitFromReader(nullptr, mips, 16, reader));
+        CHECK_FALSE(source.InitFromReader("colour.edds", nullptr, 16, reader));
+        CHECK_FALSE(source.InitFromReader("colour.edds", mips, -1, reader));
+        CHECK_FALSE(source.InitFromReader("colour.edds", mips, 16, {}));
+        CHECK(reads.empty());
+    }
+}
+
 TEST_CASE("Reusable DDS payloads preserve source identity and independent pixels", "[graphics][edds][streaming]")
 {
     auto& store = Poseidon::render::PreparedTextureStore::Instance();
