@@ -1,5 +1,47 @@
 # September 9 visual follow-up
 
+## Owner follow-up and backup checkpoint, September 10, 10:12
+
+New reports below are OPEN, not covered by earlier passing captures. Work order
+remains small verifiable corrections before structural changes. Owner requests
+a new immutable GitHub backup first, then continued implementation.
+
+| Area | New acceptance target / reproduction |
+|---|---|
+| Native Reforger wind | Trunks and crowns must not move independently at their attachment. |
+| Native forest/ground | Remaining flat material appearance; repair authored channels, not global contrast. |
+| Native streaming | Profile fast flight and model admission spikes, not only settled-camera FPS. |
+| Native interiors | Odd textures at freefly [5095.96,3948.33,16.36] az139.4 el0.3 and [4974.90,4002.87,17.71] az143.2 el-8.6. Windowless rooms receive excessive light. |
+| OFP aerial forest | Remove grid/patchwork appearance while retaining original ground-level compatibility. |
+| Fusion distance | Distant islands remain shadow-like, source-map boundaries visible, far forests absent. Satmap implementation alone has not closed this. |
+| DLSS terrain | Vertical freefly movement smears ground textures. |
+| Fusion editor | No editable locations; replace the 2049-sample/full-copy gate with bounded editing, rather than merely raising limits. |
+| Fine brush | Support actual terrain detail below the 4.7m effective radius, not a smaller misleading slider. |
+| Fusion coast | Vibrating water at [36392.88,27289.82,28.18] az235.6 el-39.9. |
+| Showcase glass | Visible from both sides and breakable; earlier walk-block/clear-pane checks did not prove either. |
+| Rocket craters | Owner now explicitly requests enabled by default. Verify first-hit/salvo cost and reset. |
+| Smoke | Roof penetration remains even where walls contain it. |
+| Foliage rays | OFP Everon [4320.38,4270.16,109.82] az306.4 el-0.1 at 17.62h; not all trees affected. |
+| Water impacts | Rockets must produce larger splashes than rifle impacts. |
+| Weather panel | Snow readily accessible, no collapsed experimental-only presentation; organise collapsible sections. Snowstorm currently appears ineffective. |
+| Local lights | Intermittent village AND vehicle light loss after player spawn/freefly; variable still unknown. Do not close from one non-reproduction. |
+| Box3D interiors | Everon bar [5092.16,3994.46,18.34] az195.6 el-14.9: shot props pass through walls. |
+| Physics expansion | Enable appropriate original furniture/radio props, preserve mission interactions; investigate soldier ragdolls separately, with compatibility/performance gates. |
+| Arma 1/2 | Investigate generation-specific base-config mounts instead of blindly mixing CWA/A1/A2; command semantics and scheduled execution need real tests. No leaked source. |
+
+The developer quotation is input to investigate, not proof of implemented
+compatibility. Existing ARMA12-DIRECT-MISSIONS plan remains authoritative until
+updated against code. Returning dummy values for unknown SQF commands is not
+accepted as compatibility; report unsupported commands explicitly.
+
+At this backup checkpoint, the latest spray change is source/test verified but
+NOT yet installed/runtime accepted: world-cell identity now drives jitter and
+lifetime instead of camera-window instance index. A 0.9375m anchor crossing
+previously re-randomised all candidates. Unit reference covers positive/negative
+anchors and 17x17 window shifts; shared shader composition passes. The candidate
+defaults on with WGR_SPRAY_WORLD_ANCHOR=0 as control; build/deploy/moving-camera
+verification is next before treating it as accepted. No extra particles/bindings.
+
 ## NHO normal convention and tint regression tests, September 10
 
 Native beach_naturedebris_01_nho.edds is present in the Forest material log.

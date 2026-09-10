@@ -20,6 +20,7 @@ const EMITTER_SPAN: f32 = 120.0;
 // launch velocity and approaches the wind within a fraction of a second — which is why real
 // spindrift tears downwind off a crest instead of arcing back into the water it came from.
 const DRAG_TAU: f32 = 0.55;
+override spray_world_anchor: f32 = 1.0;
 
 struct WaterParams {
     world_origin: vec2<f32>, terrain_grid: f32, sea_level: f32,
@@ -64,6 +65,11 @@ fn hash11(x: u32) -> f32 {
 
 fn hash21(x: u32) -> vec2<f32> {
     return vec2<f32>(hash11(x * 1597334677u + 17u), hash11(x * 3812015801u + 53u));
+}
+
+fn spray_cell_seed(cell: vec2<i32>) -> u32 {
+    let bits = bitcast<vec2<u32>>(cell);
+    return bits.x * 1597334677u + bits.y * 3812015801u;
 }
 
 fn quad_corner(vertex: u32) -> vec2<f32> {
@@ -155,14 +161,19 @@ fn vs_whitewater(
     @builtin(vertex_index) vertex_index: u32,
     @builtin(instance_index) instance_index: u32,
 ) -> SprayOut {
-    let random = hash21(instance_index);
     let cell = vec2<f32>(
         f32(instance_index % EMITTER_SIDE), f32(instance_index / EMITTER_SIDE));
     // Snap the anchor to the CELL size, not the whole span: a camera move then slides the field
     // by at most one 0.94 m cell instead of teleporting it a full tile, so a droplet stays
     // attached to the crest that threw it.
     let cell_size = EMITTER_SPAN / f32(EMITTER_SIDE);
-    let anchor = floor(frame.cam_pos.xz / cell_size) * cell_size;
+    let anchor_cell = floor(frame.cam_pos.xz / cell_size);
+    let anchor = anchor_cell * cell_size;
+    // Moving the window reassigns instance indices. Jitter AND lifetime must
+    // follow the absolute cell, or every spray particle changes at a cell crossing.
+    let world_cell = vec2<i32>(anchor_cell) + vec2<i32>(cell) - vec2<i32>(i32(EMITTER_SIDE / 2u));
+    let seed = select(instance_index, spray_cell_seed(world_cell), spray_world_anchor > 0.5);
+    let random = hash21(seed);
     let local = ((cell + random) / f32(EMITTER_SIDE) - vec2<f32>(0.5)) * EMITTER_SPAN;
     let source_xz = anchor + local;
     // Fade the field out before its own boundary so the wrap is never a visible edge.
@@ -171,8 +182,8 @@ fn vs_whitewater(
     // Shorter than the reference's 3 s: a wind wave breaks over about a second, and a droplet
     // that outlives its own breaking event is what made spray blink out mid-flight when the
     // crest moved on.
-    let lifetime = mix(1.25, 2.10, hash11(instance_index * 747796405u + 2891336453u));
-    let age = fract(wp.time / lifetime + hash11(instance_index * 277803737u + 1u));
+    let lifetime = mix(1.25, 2.10, hash11(seed * 747796405u + 2891336453u));
+    let age = fract(wp.time / lifetime + hash11(seed * 277803737u + 1u));
     let t = age * lifetime; // seconds since this droplet left the surface
     let crest = crest_source(source_xz);
     let interaction = interaction_source(source_xz);

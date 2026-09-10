@@ -785,7 +785,11 @@ impl Water {
             vertex: wgpu::VertexState {
                 module: &whitewater_shader,
                 entry_point: Some("vs_whitewater"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                compilation_options: wgpu::PipelineCompilationOptions {
+                    constants: &[("spray_world_anchor", if std::env::var("WGR_SPRAY_WORLD_ANCHOR")
+                        .is_ok_and(|v| v == "0") { 0.0 } else { 1.0 })],
+                    ..Default::default()
+                },
                 buffers: &[],
             },
             primitive: wgpu::PrimitiveState {
@@ -1743,6 +1747,33 @@ mod tests {
         assert!(helper.find("if (detail <= 0.001)").unwrap() < helper.find("hash2(").unwrap());
         assert!(helper.contains("footprint * frequency"));
         assert!(shader.contains("if (breaker_cells > 1.5)"));
+    }
+
+    #[test]
+    fn spray_seed_follows_world_cells_when_the_camera_window_moves() {
+        fn seed(anchor: [i32; 2], slot: [i32; 2]) -> u32 {
+            let x = (anchor[0] + slot[0] - 64) as u32;
+            let z = (anchor[1] + slot[1] - 64) as u32;
+            x.wrapping_mul(1597334677).wrapping_add(z.wrapping_mul(3812015801))
+        }
+        for anchor in [[0, 0], [-1, -1], [13866, 3200], [106666, -106666]] {
+            for dx in -8..=8 {
+                for dz in -8..=8 {
+                    let moved = [anchor[0] + dx, anchor[1] + dz];
+                    let moved_slot = [64 - dx, 64 - dz];
+                    assert_eq!(seed(anchor, [64, 64]), seed(moved, moved_slot));
+                    if dx != 0 || dz != 0 {
+                        assert_ne!(64 * 128 + 64, moved_slot[1] * 128 + moved_slot[0]);
+                    }
+                }
+            }
+        }
+        let shader = include_str!("whitewater_render.wgsl");
+        assert!(shader.contains("spray_cell_seed(world_cell)"));
+        assert!(shader.contains("let random = hash21(seed);"));
+        assert!(shader.contains("hash11(seed * 747796405u"));
+        assert!(shader.contains("hash11(seed * 277803737u"));
+        assert!(!shader.contains("hash11(instance_index *"));
     }
 
     // The shoreline foam patterned at distance because its noise is ANALYTIC — no mip chain — so
