@@ -1112,7 +1112,7 @@ pub struct WgrTerrainMaterial {
     pub surface_count: u32,
     pub uv_source_mask: u32,
     pub _pad0: u32,
-    pub _pad1: u32,
+    pub legacy_detail_normal: u32,
     pub satellite_uv: WgrTerrainUv,
     pub mask_uv: WgrTerrainUv,
     pub surface_uvs: [WgrTerrainUv; WGR_TERRAIN_SURFACE_SLOTS],
@@ -1127,7 +1127,7 @@ pub struct WgrTerrainMaterial {
     pub middle_blend: f32,
     pub detail_max: f32,
     pub detail_fade: f32,
-    pub _pad2: u32,
+    pub legacy_detail_scale: f32,
     // MiddleColor, a LINEAR multiplier on the middle map's texel; 1,1,1 when absent.
     // Own 16-byte row because the WGSL side is a vec3.
     pub middle_color: [f32; 3],

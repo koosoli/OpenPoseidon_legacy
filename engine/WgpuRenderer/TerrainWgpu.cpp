@@ -583,6 +583,17 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<
                         _a3TerrainTextures.push_back(normal);
                         LOG_INFO(Graphics, "Wgpu legacy terrain: {} enhanced by {}", (const char*)colour->Name(),
                                  (const char*)normal->Name());
+                        Ref<Texture> detail = bank->LoadLegacyTerrainDetailNormal(colour->Name(), material.legacy_detail_scale);
+                        if (detail.GetRef() != nullptr)
+                        {
+                            material.legacy_detail_normal = bindLayer(detail.GetRef(), false);
+                            if (material.legacy_detail_normal != 0)
+                            {
+                                _a3TerrainTextures.push_back(detail);
+                                LOG_INFO(Graphics, "Wgpu legacy terrain detail: {} -> {} repeats/metre={}",
+                                         (const char*)colour->Name(), (const char*)detail->Name(), material.legacy_detail_scale);
+                            }
+                        }
                     }
                 }
             }

@@ -379,6 +379,19 @@ const TextureBankWgpu::LegacyMaterial* TextureBankWgpu::ResolveLegacyMaterial(co
                 };
                 const std::string source = field("source");
                 LegacyMaterial material{field("albedo"), field("normal"), field("sourceArchive")};
+                const cJSON* detailMetres = cJSON_GetObjectItemCaseSensitive(entry, "detailNormalMetres");
+                material.detailNormal = field("detailNormal");
+                if (!material.detailNormal.empty())
+                {
+                    if (!SafeMaterialPath(material.detailNormal) || !material.detailNormal.ends_with("_nohq.paa") ||
+                        !cJSON_IsNumber(detailMetres) || !(detailMetres->valuedouble >= 0.1 && detailMetres->valuedouble <= 100.0))
+                    {
+                        LOG_WARN(Graphics, "Default material: invalid terrain detail ignored for {}", source);
+                        material.detailNormal.clear();
+                    }
+                    else
+                        material.detailNormalMetres = static_cast<float>(detailMetres->valuedouble);
+                }
                 if (!SafeMaterialPath(source) || !SafeMaterialPath(material.albedo) ||
                     !SafeMaterialPath(material.normal) || !SafeMaterialPath(material.sourceArchive) ||
                     !(source.ends_with(".paa") || source.ends_with(".pac")) ||
@@ -443,6 +456,28 @@ Ref<Texture> TextureBankWgpu::LoadLegacyEnhancementNormal(const char* name)
     if (!inBank && !QIFStream::FileExists(candidate.c_str()))
         return {}; // Never bind a missing-file placeholder as a surface normal.
     return Load(candidate.c_str());
+}
+
+Ref<Texture> TextureBankWgpu::LoadLegacyTerrainDetailNormal(const char* name, float& repeatsPerMetre)
+{
+    repeatsPerMetre = 0.0f;
+    if (LegacyNormalPath(name).empty())
+        return {};
+    const char* normalMode = std::getenv("POSEIDON_VISUAL_UPGRADE_NORMALS");
+    const char* detailMode = std::getenv("POSEIDON_VISUAL_UPGRADE_DETAIL_NORMALS");
+    if ((normalMode && std::strcmp(normalMode, "0") == 0) ||
+        (detailMode && std::strcmp(detailMode, "0") == 0))
+        return {};
+    const auto* material = ResolveLegacyMaterial(name);
+    if (!material || material->detailNormal.empty() || material->detailNormalMetres <= 0.0f)
+        return {};
+    const auto& path = material->detailNormal;
+    QFBank* bank = QIFStreamB::AutoBank(path.c_str());
+    if (!(bank && bank->FileExists(path.c_str() + bank->GetPrefix().GetLength())) &&
+        !QIFStream::FileExists(path.c_str()))
+        return {};
+    repeatsPerMetre = 1.0f / material->detailNormalMetres;
+    return Load(path.c_str());
 }
 
 Ref<Texture> TextureBankWgpu::Load(RStringB name)

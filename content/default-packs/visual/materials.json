@@ -32,6 +32,15 @@
       "roughness": 0.97,
       "road": false
     },
+    "sand_detail": {
+      "seed": 92111,
+      "tileMetres": [0.5, 0.5],
+      "aggregateMetres": 0.002,
+      "heightMetres": 0.0005,
+      "baseSrgb": [195, 180, 145],
+      "roughness": 0.97,
+      "road": false
+    },
     "soil": {
       "seed": 33251,
       "tileMetres": [4.0, 4.0],

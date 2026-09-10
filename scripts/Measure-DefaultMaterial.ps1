@@ -1,16 +1,18 @@
 param([ValidateSet('Original','Albedo','Full')][string]$Arm = 'Full',
       [ValidateSet('Road','Sand','Gravel')][string]$Surface = 'Road',
-      [ValidateRange(0,23.999)][double]$Hour = 14)
+      [ValidateRange(0,23.999)][double]$Hour = 14,
+      [ValidateSet(0,1)][int]$DetailNormals = 1)
 $ErrorActionPreference = 'Stop'
 if (!$env:LOCK_OWNER) { throw 'Use scripts/with-game-lock.sh' }
 $root = Split-Path $PSScriptRoot -Parent
 $hourText = $Hour.ToString('0.###', [Globalization.CultureInfo]::InvariantCulture)
-$label = 'material-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + $Surface + '-' + $Arm + '-h' + $hourText
+$label = 'material-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + $Surface + '-' + $Arm + '-h' + $hourText + '-d' + $DetailNormals
 $out = Join-Path $root 'build/default-content/acceptance'
 $user = Join-Path $out ('user-' + $label)
 New-Item -ItemType Directory -Force $user | Out-Null
 [IO.File]::WriteAllText((Join-Path $user 'graphics.cfg'), "qualityPreset=3;`nmsaaSamples=4;`ndlssMode=0;`nvsync=0;`nfpsCap=0;`n")
 $settings = @{POSEIDON_USER_DIR=$user; POSEIDON_VSYNC='0'; WGR_LOD_GOVERNOR_RANGE='1';
+    POSEIDON_VISUAL_UPGRADE_DETAIL_NORMALS="$DetailNormals";
     POSEIDON_VISUAL_UPGRADE_NORMALS=$(if ($Arm -eq 'Albedo') {'0'} else {'1'})}
 $extra = @('--test-world-freefly','6378.7','5672.5','74.4','120','-12')
 if ($Surface -eq 'Sand') {

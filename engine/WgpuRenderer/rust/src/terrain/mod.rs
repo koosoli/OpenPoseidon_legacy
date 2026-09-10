@@ -1924,6 +1924,10 @@ mod enfusion_ground_tests {
         assert!(helper.contains("vec2<f32>(texel.a, texel.g)"));
         assert!(helper.contains("material.surface_count != 0u"));
         assert!(helper.contains("tile_uv - cell"));
+        assert!(helper.contains("material.legacy_detail_normal == 0u"));
+        assert!(helper.contains("world_pos.xz * scale, world_ddx.xz * scale, world_ddy.xz * scale"));
+        assert!(helper.contains("smoothstep(15.0, 35.0, length(view_pos))"));
+        assert!(helper.contains("vec2<f32>(detail.a, detail.g)"));
         assert!(src.contains("material.legacy |= entry & CELL_CLAMPED;"));
         let far = src.split("if (far >= 0.999) {").nth(1).unwrap();
         let exit = far.find("return AuthoredCell(satellite,").unwrap();

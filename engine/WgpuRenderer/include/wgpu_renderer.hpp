@@ -2331,7 +2331,7 @@ extern "C"
         // local `tex` coordinates. Slots: satellite, mask, then surfaces 0..5.
         uint32_t uv_source_mask;
         uint32_t _pad0; // 1 = generated legacy far satellite; 0 = authored/ordinary.
-        uint32_t _pad1;
+        uint32_t legacy_detail_normal; // Optional legacy terrain NOHQ layer, 0 = absent.
         WgrTerrainUv satellite_uv;
         WgrTerrainUv mask_uv;
         WgrTerrainUv surface_uvs[WGR_TERRAIN_SURFACE_SLOTS];
@@ -2366,7 +2366,7 @@ extern "C"
         float middle_blend;
         float detail_max;
         float detail_fade;
-        uint32_t _pad2;
+        float legacy_detail_scale; // Repeats/metre for legacy_detail_normal; 0 = absent.
         float middle_color[3];
         uint32_t _pad3;
     };

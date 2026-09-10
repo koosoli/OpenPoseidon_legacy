@@ -23,6 +23,9 @@ foreach ($material in @('road_asphalt','sand','gravel')) {
         $expected += "$name.paa"
     }
 }
+& $tools image convert "$generated/sand_detail_nohq.png" "$stage/sand_detail_nohq.paa" --format DXT5
+if ($LASTEXITCODE -ne 0) { throw 'Sand detail normal encoding failed' }
+$expected += 'sand_detail_nohq.paa'
 Copy-Item -LiteralPath "$source/config.cpp" -Destination "$stage/config.cpp" -Force
 Copy-Item -LiteralPath "$source/material-overrides.json" -Destination "$stage/materials.json" -Force
 foreach ($file in Get-ChildItem -LiteralPath $stage -Force) {

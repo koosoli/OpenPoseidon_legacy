@@ -55,6 +55,8 @@ class TextureBankWgpu : public AbstractTextBank
         std::string albedo;
         std::string normal;
         std::string sourceArchive;
+        std::string detailNormal;
+        float detailNormalMetres = 0.0f;
     };
     std::unordered_map<std::string, LegacyMaterial> _legacyMaterials;
     bool _legacyMaterialsLoaded = false;
@@ -118,6 +120,7 @@ class TextureBankWgpu : public AbstractTextBank
     Ref<Texture> Load(RStringB name) override;
     std::string LegacyNormalPath(const char* name);
     Ref<Texture> LoadLegacyEnhancementNormal(const char* name);
+    Ref<Texture> LoadLegacyTerrainDetailNormal(const char* name, float& repeatsPerMetre);
     // TODO: real two-texture blend; for now load whichever source dominates.
     Ref<Texture> LoadInterpolated(RStringB n1, RStringB n2, float factor) override
     {

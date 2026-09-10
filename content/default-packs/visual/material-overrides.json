@@ -11,7 +11,9 @@
       "source": "eden\\ps.paa",
       "sourceArchive": "Dta\\Eden.pbo",
       "albedo": "op_ground_materials\\sand_co.paa",
-      "normal": "op_ground_materials\\sand_nohq.paa"
+      "normal": "op_ground_materials\\sand_nohq.paa",
+      "detailNormal": "op_ground_materials\\sand_detail_nohq.paa",
+      "detailNormalMetres": 0.5
     },
     {
       "source": "data\\cesta.paa",

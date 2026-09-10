@@ -64,6 +64,18 @@ class MaterialTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             generate(dict(self.specs["soil"], tileMetres=[0, 4]), 64)
 
+    def test_detail_normal_has_physical_scale_and_matching_catalog(self):
+        root = Path(__file__).resolve().parents[2]
+        catalog = json.loads((root / "content/default-packs/visual/material-overrides.json").read_text())
+        entry = next(m for m in catalog["materials"] if m["source"] == "eden\\ps.paa")
+        spec = self.specs["sand_detail"]
+        self.assertEqual(spec["tileMetres"], [entry["detailNormalMetres"]] * 2)
+        self.assertEqual(entry["detailNormal"], "op_ground_materials\\sand_detail_nohq.paa")
+        self.assertLess(spec["heightMetres"], 0.001)
+        maps = generate(spec, 128)
+        self.assertGreater(maps["nohq"][:, :, 3].std(), 1.0)
+        self.assertEqual(maps["nohq"][:, :, 0].max(), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

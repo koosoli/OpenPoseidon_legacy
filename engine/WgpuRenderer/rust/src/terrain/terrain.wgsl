@@ -111,7 +111,7 @@ struct TerrainMaterial {
     surface_count: u32,
     uv_source_mask: u32,
     pad0: u32,
-    pad1: u32,
+    legacy_detail_normal: u32,
     satellite_uv: TerrainUv,
     mask_uv: TerrainUv,
     surface_uvs: array<TerrainUv, 6>,
@@ -125,7 +125,7 @@ struct TerrainMaterial {
     middle_blend: f32,
     detail_max: f32,
     detail_fade: f32,
-    _pad2: u32,
+    legacy_detail_scale: f32,
     // MiddleColor: a LINEAR multiplier on the middle map's texel (1,1,1 when the
     // material names none). Own 16-byte row; `_pad3` closes it to 384 bytes.
     middle_color: vec3<f32>,
@@ -229,7 +229,8 @@ fn terrain_uv(transform: TerrainUv, source_bit: u32, source_mask: u32,
 // OFP enhancement NOHQ uses X in alpha and Y in green, unlike the authored
 // RGB whole-tile normal below. Reuse the slot, not its different decode/texgen.
 fn sample_legacy_normal(material: TerrainMaterial, cell: vec2<f32>, tile_uv: vec2<f32>,
-                        ddx: vec2<f32>, ddy: vec2<f32>) -> vec3<f32> {
+                        ddx: vec2<f32>, ddy: vec2<f32>, world_pos: vec3<f32>,
+                        world_ddx: vec3<f32>, world_ddy: vec3<f32>, view_pos: vec3<f32>) -> vec3<f32> {
     if (material.surface_count != 0u || material.tile_normal == 0u || tile_normal_strength <= 0.0) {
         return vec3<f32>(0.0, 0.0, 1.0);
     }
@@ -242,7 +243,23 @@ fn sample_legacy_normal(material: TerrainMaterial, cell: vec2<f32>, tile_uv: vec
     }
     let xy = vec2<f32>(texel.a, texel.g) * 2.0 - vec2<f32>(1.0);
     let z = sqrt(max(1.0 - dot(xy, xy), 1e-6));
-    return normalize(vec3<f32>(xy * tile_normal_strength, z));
+    let original = normalize(vec3<f32>(xy * tile_normal_strength, z));
+    if (material.enfusion != 0u || material.legacy_detail_normal == 0u || material.legacy_detail_scale <= 0.0) {
+        return original;
+    }
+    let detail_weight = 1.0 - smoothstep(15.0, 35.0, length(view_pos));
+    if (detail_weight > 0.0) {
+        // Absolute world UVs avoid cell-edge or moving-camera phase discontinuities.
+        // Mip gradients remove subpixel grains; the distant path pays no extra fetch.
+        let scale = material.legacy_detail_scale;
+        let detail = textureSampleGrad(ground[material.legacy_detail_normal], ground_samp,
+            world_pos.xz * scale, world_ddx.xz * scale, world_ddy.xz * scale);
+        let detail_xy = vec2<f32>(detail.a, detail.g) * 2.0 - vec2<f32>(1.0);
+        let detail_z = sqrt(max(1.0 - dot(detail_xy, detail_xy), 1e-6));
+        let slopes = xy / max(z, 0.01) + detail_weight * detail_xy / max(detail_z, 0.01);
+        return normalize(vec3<f32>(slopes * tile_normal_strength, 1.0));
+    }
+    return original;
 }
 
 fn terrain_uv_gradient(transform: TerrainUv, source_bit: u32, source_mask: u32,
@@ -547,7 +564,7 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
             let far = smoothstep(800.0, 2400.0, length(view_pos));
             if (far <= 0.0) {
                 return AuthoredCell(sample_cell(material.legacy,cell,tile_uv,ddx,ddy),
-                                    sample_legacy_normal(material,cell,tile_uv,ddx,ddy));
+                                    sample_legacy_normal(material,cell,tile_uv,ddx,ddy,world_pos,world_dwx,world_dwy,view_pos));
             }
             let inv_span = 1.0 / (tp.land_grid * f32(tp.land_range));
             let uv = (world_pos.xz - tp.world_origin) * inv_span;
@@ -557,12 +574,12 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
                 return AuthoredCell(satellite, vec3<f32>(0.0,0.0,1.0));
             }
             let near = sample_cell(material.legacy,cell,tile_uv,ddx,ddy);
-            let normal = sample_legacy_normal(material,cell,tile_uv,ddx,ddy);
+            let normal = sample_legacy_normal(material,cell,tile_uv,ddx,ddy,world_pos,world_dwx,world_dwy,view_pos);
             return AuthoredCell(mix(near,satellite,far),
                                 normalize(mix(normal,vec3<f32>(0.0,0.0,1.0),far)));
         }
         return AuthoredCell(sample_cell(material.legacy, cell, tile_uv, ddx, ddy),
-                            sample_legacy_normal(material,cell,tile_uv,ddx,ddy));
+                            sample_legacy_normal(material,cell,tile_uv,ddx,ddy,world_pos,world_dwx,world_dwy,view_pos));
     }
     // RVMAT `worldPos` is the engine's own world vector, Y up -- the same axes
     // the renderer already carries. The swizzle that used to sit here was

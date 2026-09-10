@@ -185,3 +185,23 @@ flags and incorrectly typed flags/exit codes rather than treating missing flags
 as false. `Test-CaptureLifecycle.ps1`: 11 success/failure fixtures pass using
 Windows PowerShell. This protects the measurement evidence, not engine shutdown
 itself; the earlier intermittent native shutdown failure remains unproven.
+
+Pack 0.1.4 candidate: optional `detailNormal`/`detailNormalMetres` catalog fields
+bind one additional NOHQ image for legacy terrain only. The own sand detail uses
+a 0.5 m period, 2 mm aggregate and 0.5 mm height range at 1024 square, independent
+of the 50 m macro ripples. The existing texture bank, terrain bindless layers and
+world-space frame are reused. Two previously unused descriptor words now carry
+the layer and repeats/metre; C++, Rust and WGSL remain 384 bytes. Original/A3/
+native Enfusion materials do not receive this layer. Roads remain unchanged.
+Detail slopes combine with the macro normal, fade at 15..35 m and use world-space
+derivatives for mip filtering. No extra sample beyond 35 m or in the far Satmap
+early-out. No geometry, collision or cosmetic gameplay RNG changes. This is an
+additional sample per covered near terrain blend, not a free FPS improvement.
+
+`POSEIDON_VISUAL_UPGRADE_DETAIL_NORMALS=0` or the test harness's `-DetailNormals 0`
+selects macro-only; the Albedo arm disables both normal layers. Missing/invalid
+detail metadata retains the existing macro material. Eight generator tests pass
+including catalog/physical-scale agreement. Client build passes. Installed A/B
+and cost acceptance are pending at this entry; neither photorealism nor complete
+roughness binding is claimed. The package adds one compressed mip chain, not a
+whole 50 m tile at fine-grain resolution.
