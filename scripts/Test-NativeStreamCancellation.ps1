@@ -103,6 +103,11 @@ if ($metrics.build.render_width -ne 1280 -or $metrics.build.render_height -ne 72
 if (Select-String -LiteralPath $log -Pattern 'Validation Error|panicked at|DeviceLost|StartAutoTest could not boot|verification: MISMATCH' -Quiet) {throw 'Runtime failure'}
 if ($VerifyClutter -and !(Select-String -LiteralPath $log -Pattern 'verification: identical geography' -Quiet)) {throw 'No positive clutter verification'}
 if ($VerifyTintReuse -and !(Select-String -LiteralPath $log -Pattern 'DDS tint reuse verification: identical' -Quiet)) {throw 'No positive tint reuse verification'}
+if ($VerifyDdsPrepare) {
+    $verified = @(Select-String -LiteralPath $log -Pattern 'DDS prepared verification: identical')
+    if ($verified.Count -eq 0) {throw 'No prepared DDS source was consumed and verified'}
+    Write-Output "Byte-identical prepared DDS sources: $($verified.Count)"
+}
 $tableRows=Select-String -LiteralPath $log -Pattern 'Object stream bank tables: prepared=(\d+) deferredPlacements=(\d+) limit=(\d+) ms=([\d.]+)'
 if (!$tableRows) {throw 'No bank-table preparation evidence'}
 foreach ($row in $tableRows) {
