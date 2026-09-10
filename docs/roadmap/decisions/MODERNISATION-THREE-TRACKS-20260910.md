@@ -589,3 +589,9 @@ only parse/texture preparation was watched. Nine preparer/ShapeAdapter cases
 pass: 189 assertions with normal settings; 992 assertions with concurrent
 adaptation enabled and eight workers. Runtime verification of this follow-up
 is still pending; no proof yet that it caused the observed shutdown hang.
+
+Installed ee43ac8a follow-up: cancel-20260910-234708-slow-trace-bc7-default-
+driver-memory-tint-reuse-0 passes the full route and strict shutdown checks,
+22370 registered instances, 134 driver samples, 134.7 s wall. Endpoint ocean
+image inspected. The intermittent shutdown cause remains unproven; this run is
+lifecycle evidence, not proof of a performance gain or all-world coverage.

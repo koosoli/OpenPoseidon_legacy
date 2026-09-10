@@ -1718,3 +1718,14 @@ passes 17 loader cases/84 checks. The installed native 4 km lifecycle run now
 passes with 138 driver-memory samples. Details and invalid-run exclusion are in
 the three-track decision. This is neither a completed loading pipeline nor
 forest/building HLOD, which remain separate open tasks.
+
+Further September 10 measurements: bounded native tint-decode reuse is implemented
+only as an OFF-by-default experiment. 144 runtime hits were byte-identical, but
+five valid measured runs do not show a stable tail/FPS/memory improvement; one
+additional reuse-OFF run hung at shutdown and is explicitly excluded, not hidden.
+The native harness now rejects timeouts and incomplete shutdowns even if a
+screenshot/metrics file exists. Native PAK reads no longer write a shared archive
+error from worker threads; active conversion resources are retired outside the
+queue lock. Installed ee43ac8a passes the native route and strict shutdown checks.
+The intermittent hang remains an open diagnosis, and material/FFV/far-field
+completion is not implied by these safety increments.
