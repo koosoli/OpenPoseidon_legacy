@@ -948,6 +948,8 @@ void DrawWeatherTab()
         if (ImGui::Button("Add 10 cm of snow")) snow.Deposit(0.1f);
         ImGui::SameLine();
         if (ImGui::Button("Clear snow and tracks")) snow.Reset();
+        if (ImGui::Button("Reset snow settings (keep tracks)")) snow.ResetSettings();
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Restores the default settings and disables snow. Re-enabling reveals the preserved cover and tracks. Use Clear snow and tracks to erase them.");
         ImGui::Text("Depth %.1f cm; persistent chunks %zu / %zu", snow.Depth() * 100.0f, snow.Chunks(), SnowField::MaxChunks);
         if (snow.Rejected()) ImGui::TextWrapped("Track storage full: existing tracks retained; new stamps skipped.");
         ImGui::TextWrapped("Mission-local terrain experiment. Tracks do not expire with time or camera movement; only new snowfall fills them. No savegame/network replication or changed ground collision yet.");

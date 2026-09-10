@@ -58,6 +58,43 @@ TEST_CASE("Snowstorm budget is bounded and only falling snow adds cloud cover", 
     CHECK(snow.RenderOvercast(0.2f) == 0.2f);
 }
 
+TEST_CASE("Snow settings reset preserves accumulated cover and persistent tracks", "[Snow][Weather][reset]")
+{
+    SnowField snow;
+    snow.enabled = true;
+    snow.maxDepth = 0.9f;
+    snow.Deposit(0.3f);
+    snow.Stamp(10.0f, 20.0f, 0.5f);
+    const auto before = snow.Snapshot(10.0f, 20.0f);
+    const auto chunks = snow.Chunks();
+    REQUIRE(chunks > 0);
+    snow.falling = false;
+    snow.detailedGeometry = false;
+    snow.metresPerMinute = 0.2f;
+    snow.flakeMultiplier = 8.0f;
+    snow.ResetSettings();
+    const SnowField defaults;
+    CHECK(snow.enabled == defaults.enabled);
+    CHECK(snow.falling == defaults.falling);
+    CHECK(snow.detailedGeometry == defaults.detailedGeometry);
+    CHECK(snow.metresPerMinute == defaults.metresPerMinute);
+    CHECK(snow.maxDepth == defaults.maxDepth);
+    CHECK(snow.flakeMultiplier == defaults.flakeMultiplier);
+    CHECK(snow.Depth() == Catch::Approx(0.3f));
+    CHECK(snow.Chunks() == chunks);
+    CHECK(snow.RenderOvercast(0.2f) == 0.2f);
+    CHECK(snow.FallingIntensity() == 0.0f);
+    snow.Advance(1.0f);
+    snow.enabled = true;
+    CHECK(snow.Snapshot(10.0f, 20.0f) == before);
+    snow.ResetSettings();
+    snow.enabled = true;
+    CHECK(snow.Snapshot(10.0f, 20.0f) == before);
+    snow.Reset();
+    CHECK(snow.Depth() == 0.0f);
+    CHECK(snow.Chunks() == 0);
+}
+
 TEST_CASE("ocean continuation reach includes the far frustum corners", "[cdlod][water]")
 {
     CHECK(CdlodFrustumReach(50000,0,0) == 50000);

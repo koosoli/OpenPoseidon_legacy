@@ -6262,29 +6262,6 @@ void DrawSkyTab()
     if (changed)
     {
         GEngine->SetSkySettings(s);
-        // The two cirrus flags do NOT ride the sky look block (its size is part of the renderer's
-        // ABI handshake), so they need their own push. Unconditional inside `changed` rather than
-        // gated on the checkboxes, so "Reset to defaults" restores them too.
-        GEngine->SetSkyCirrus(s.cirrusEnabled, s.cirrusVolumetric);
-        // Same story for the second layer's shape: not a sky-look lane, so it needs its own push,
-        // unconditional inside `changed` so "Reset to defaults" restores it too.
-        GEngine->SetSkyCirrusPuffiness(s.cirrusPuffiness, s.cirrusPuffVariation);
-        // Amount + match-the-deck + edge softness, and where the distance fog finishes. Own
-        // entry points for the same reason as the two above: the sky look block's size is
-        // part of the renderer's ABI handshake and must not grow.
-        GEngine->SetSkyCirrusLook(s.cirrusAmount, s.cirrusMatchDeck);
-        GEngine->SetSkyCirrusSoftness(s.cirrusSoftness);
-        GEngine->SetFogFarClose(s.fogFarClose);
-        // Amount + match-the-deck. Own entry point for the same reason as the two above: the sky
-        // look block's size is part of the renderer's ABI handshake and must not grow.
-        GEngine->SetSkyCirrusLook(s.cirrusAmount, s.cirrusMatchDeck);
-        GEngine->SetSkyCirrusSoftness(s.cirrusSoftness);
-        // Where the fog finishes. Own entry point for the same reason as the cirrus pushes above.
-        GEngine->SetFogFarClose(s.fogFarClose);
-        // God rays: same story again, not a sky-look lane, so its own push. Unconditional inside
-        // `changed` so "Reset to defaults" restores it too.
-        GEngine->SetGodRays(s.godRays, s.godRayIntensity, s.godRayDensity, s.godRayDistance, s.godRayG,
-                            s.godRayCloudInfluence, s.godRaySteps, s.godRayResDiv);
     }
 
     // Copy the full authored sky state so it can be pasted into per-ToD keyframes
@@ -7268,6 +7245,7 @@ void DrawMainWindow()
         ImGui::BulletText("Picture Mode / depth of field");
         ImGui::BulletText("Street lamps, bulb glow, local shadows and beam shape");
         ImGui::BulletText("Sky, water and road appearance");
+        ImGui::BulletText("Snow settings (existing cover and tracks are retained)");
         ImGui::Separator();
         ImGui::TextDisabled("Everything else is untouched. A tab is reset only where it says\n"
                             "how, and most do not yet -- so this list IS the coverage, not a\n"

@@ -2431,6 +2431,32 @@ void EngineWgpu::ApplyPendingRendererSettings(PendingRendererSettings& p)
         wgr_set_render_params(_renderer, &p.renderParams);
         p.renderParamsDirty = false;
     }
+    if (p.skyExtrasDirty)
+    {
+        // Frame-owned copy: the producer may already be editing the next frame.
+        const SkySettings& s = p.skyExtras;
+        wgr_set_cirrus_mode(_renderer, s.cirrusEnabled ? (s.cirrusVolumetric ? 2u : 1u) : 0u);
+        wgr_set_cirrus_puffiness(_renderer, s.cirrusPuffiness, s.cirrusPuffVariation);
+        wgr_set_cirrus_look(_renderer, s.cirrusAmount, s.cirrusMatchDeck);
+        wgr_set_cirrus_softness(_renderer, s.cirrusSoftness);
+        wgr_set_fog_far_close(_renderer, s.fogFarClose);
+        wgr_set_god_rays(_renderer, s.godRays ? 1u : 0u, s.godRayIntensity, s.godRayDensity,
+                         s.godRayDistance, s.godRayG, s.godRayCloudInfluence,
+                         static_cast<uint32_t>(std::max(s.godRaySteps, 0)),
+                         static_cast<uint32_t>(std::max(s.godRayResDiv, 0)));
+        p.skyExtrasDirty = false;
+        if (std::getenv("WGR_SETTINGS_QUEUE_TRACE"))
+            LOG_INFO(Graphics, "Settings queue applied: sky cirrus={} rays={} intensity={} fogClose={} softness={}",
+                     s.cirrusEnabled, s.godRays, s.godRayIntensity, s.fogFarClose, s.cirrusSoftness);
+    }
+    if (p.roadConformDirty)
+    {
+        wgr_set_road_conform(_renderer, p.roadConform.liftFlat, p.roadConform.liftPerMetre,
+                             p.roadConform.liftMaxFrac);
+        p.roadConformDirty = false;
+        if (std::getenv("WGR_SETTINGS_QUEUE_TRACE"))
+            LOG_INFO(Graphics, "Settings queue applied: road lift={}", p.roadConform.liftFlat);
+    }
     if (p.skyRuntimeDirty)
     {
         wgr_set_sky_runtime(_renderer, &p.skyRuntime);
@@ -11706,6 +11732,7 @@ void EngineWgpu::UpdateAutoSky()
 void EngineWgpu::SetSkySettings(const SkySettings& s)
 {
     _sky = s;
+    QueueSkyExtras();
     PushRenderParams();
 }
 

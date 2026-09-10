@@ -28,6 +28,7 @@
 #include <Poseidon/World/Entities/Weapons/GrenadeFuse.hpp>
 #include <Poseidon/World/Physics/LooseObjects.hpp>
 #include <Poseidon/World/Entities/Weapons/Penetration.hpp>
+#include <Poseidon/World/Weather/SnowField.hpp>
 
 #include <map>
 
@@ -200,6 +201,7 @@ void ResetPanelSettings()
     ResetProbeSettings();
     ResetTerrainBrush(); // Settings only: never erase painted terrain from a global UI reset.
     ResetRocketCraters();
+    GSnow().ResetSettings();
     // Picture Mode
     ResetPictureModeSettings();
     ResetLightingSettings();

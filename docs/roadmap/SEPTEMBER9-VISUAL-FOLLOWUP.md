@@ -1,5 +1,34 @@
 # September 9 visual follow-up
 
+## Snow settings reset gap, September 10
+
+The master reset omitted all six snow settings. ResetSettings now copies their
+declared defaults without clearing accumulated depth, precipitation history or
+stored track chunks. Master reset and a separate Weather-tab button use it;
+Clear snow and tracks remains the explicit destructive action. Snow is disabled
+after the settings reset and becomes visible again when re-enabled.
+Native exact snapshot preservation test passes (15 assertions); the complete
+[Snow] filter passes 10 cases / 9919 assertions. Build and installed
+Test-SnowCrawl -ResetSettings pass on b771c8e8+dirty with these changes. The
+harness-only dev_snow command exercises the same reset entry points and reports
+settings/depth/chunks; it does not add a savegame format or alter mission scripting
+commands. Stored depth 0.18m and eight chunks survive disabling/re-enabling.
+Inspected trail, disabled and restored captures confirm the persistent groove.
+Restored falling=true also reinstates overcast, so the restored picture is much
+darker: these images are track-preservation evidence, not equal-lighting material
+acceptance. Evidence: build/snow-crawl/acceptance.
+
+Sky extras and road conform previously called Rust directly from producer-side
+setters. They now travel in the existing frame-owned settings queue and are
+consumed from that copy. SetSkySettings also includes the separate cirrus, fog
+close and godray parameters, fixing the master reset gap and removing duplicate
+Sky-tab calls. No FFI layout change. The installed harness deliberately changes
+the settings before master reset; consumer-side WGR_SETTINGS_QUEUE_TRACE proves
+cirrus/rays false -> true, intensity 1 -> 4, fog close .4 -> .85, softness .9 ->
+.45 and road lift .03 -> .02 with thread=1 overlap=1. Exit 0, no renderer errors.
+This removes specific unsafe calls; it does not prove all renderer ownership is
+correct or attribute the owner's earlier Windows freeze to these calls.
+
 ## Rifle-impact shadow regression controls, September 10
 
 Test-ImpactShadows.ps1 makes the earlier Desert fixture durable and adds Stratis
@@ -35,6 +64,14 @@ default. Follow-up adds one band-limited value-noise octave only inside resolved
 near wave-foam patches, and lets their rough diffuse normal follow more of the
 wave slope. This changes the earlier zero-extra-noise claim: still no texture
 fetch/pass/FFT increase, but bounded extra ALU needs measurement. Default OFF.
+
+b771c8e8 refinement: 21 water tests/build pass. Same-binary native candidate
+draw samples 3.01-3.41ms versus control 2.99-3.40ms, one pair only; no headline
+performance claim. Native, AUTO/DLSS, calm and zero-wave-gain launches exit 0
+without renderer errors. Calm/zero-gain captures inspected; the bright diffuse
+water reflection must not be mistaken for foam. Near white patches are still too
+flat/paint-like for default acceptance. Keep the refinement opt-in and retain
+the already accepted foam-history and dynamics-filter corrections independently.
 
 ## Late surface-rays experiment rejected, September 10
 

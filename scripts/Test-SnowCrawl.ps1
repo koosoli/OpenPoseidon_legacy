@@ -1,4 +1,4 @@
-param([string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
+param([switch]$ResetSettings, [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
 $root=Split-Path $PSScriptRoot -Parent
@@ -10,6 +10,7 @@ $env:POSEIDON_SNOW_TEST_DEPTH='0.18'
 Remove-Item Env:POSEIDON_SNOW_TEST_RATE -ErrorAction SilentlyContinue
 $env:WGR_AUTO_EXPOSURE='0'
 $env:WGR_EXPOSURE='0.15'
+if ($ResetSettings) { $env:WGR_SETTINGS_QUEUE_TRACE='1' }
 $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0)
 $listener.Start(); $port=$listener.LocalEndpoint.Port; $listener.Stop()
 $mission=Join-Path $root 'dev-missions/snow-crawl.Intro'
@@ -52,8 +53,33 @@ try {
     $null=Send @{cmd='exec';code='doStop crawlWalker; crawlWalker setPos [9660,3600,0]'}
     Start-Sleep -Seconds 2
     $null=Send @{cmd='screenshot';path=(Join-Path $output 'trail.png')}
+    if ($ResetSettings) {
+        $null=Send @{cmd='dev_reset_probe'}
+        Start-Sleep -Seconds 2
+        $before=Send @{cmd='dev_snow';action='state'}
+        if (!$before.enabled -or $before.chunks -le 0 -or $before.depth -le 0) {throw 'No stored snow trail to reset'}
+        $reset=Send @{cmd='dev_snow';action='reset-panel'}
+        if ($reset.enabled -or !$reset.falling -or !$reset.geometry -or
+            [Math]::Abs($reset.rate-0.01) -gt 0.00001 -or $reset.maxDepth -ne 0.5 -or $reset.flakes -ne 1 -or
+            $reset.depth -ne $before.depth -or $reset.chunks -ne $before.chunks) {throw 'Master reset changed surface state or missed a snow setting'}
+        Start-Sleep -Seconds 2
+        $null=Send @{cmd='screenshot';path=(Join-Path $output 'reset-disabled.png')}
+        $again=Send @{cmd='dev_snow';action='enable'}
+        if ($again.depth -ne $before.depth -or $again.chunks -ne $before.chunks) {throw 'Disabled interval erased snow'}
+        Start-Sleep -Seconds 2
+        $null=Send @{cmd='screenshot';path=(Join-Path $output 'reset-restored.png')}
+    }
     $null=Send @{cmd='exit'}
     if (!$p.WaitForExit(20000) -or $p.ExitCode -ne 0) {throw 'Game exit failed'}
+    if (Select-String -LiteralPath $log -Pattern 'Validation Error|panicked at|DeviceLost' -Quiet) {throw 'Snow renderer error'}
+    if ($ResetSettings) {
+        foreach ($pattern in @('Settings queue applied: sky cirrus=false rays=false intensity=1 fogClose=0.4 softness=0.9',
+                              'Settings queue applied: sky cirrus=true rays=true intensity=4 fogClose=0.85 softness=0.45',
+                              'Settings queue applied: road lift=0.03',
+                              'Settings queue applied: road lift=0.02')) {
+            if (!(Select-String -LiteralPath $log -SimpleMatch $pattern -Quiet)) {throw "Renderer did not consume settings: $pattern"}
+        }
+    }
     Write-Host 'Inspect crawling.png and trail.png; position alone does not prove visible snow displacement.'
 } finally {
     if ($client) {$client.Dispose()}

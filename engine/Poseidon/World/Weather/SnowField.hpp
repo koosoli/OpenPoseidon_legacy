@@ -25,6 +25,18 @@ public:
     float maxDepth = 0.5f;
     float flakeMultiplier = 1.0f;
 
+    void ResetSettings()
+    {
+        // A settings reset must not erase mission-local surface edits.
+        const SnowField defaults;
+        enabled = defaults.enabled;
+        falling = defaults.falling;
+        detailedGeometry = defaults.detailedGeometry;
+        metresPerMinute = defaults.metresPerMinute;
+        maxDepth = defaults.maxDepth;
+        flakeMultiplier = defaults.flakeMultiplier;
+    }
+
     float FallingIntensity() const
     {
         return enabled && falling && std::isfinite(metresPerMinute)

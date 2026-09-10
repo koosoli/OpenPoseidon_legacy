@@ -5,6 +5,8 @@ using namespace Poseidon;
 
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/World/World.hpp>
+#include <Poseidon/World/Weather/SnowField.hpp>
+#include <Poseidon/Dev/Debug/DevPanelWidgets.hpp>
 #include <SDL3/SDL_events.h>
 #include <SDL3/SDL_keyboard.h>
 #include <SDL3/SDL_keycode.h>
@@ -109,6 +111,46 @@ void RegisterSqf(HarnessServer& hs)
                            gs->EndContext();
                            return HarnessProtocol::OkResponse();
                        });
+}
+
+void RegisterSnowProbe(HarnessServer& hs)
+{
+    hs.RegisterCommand({"dev_reset_probe", "Exercise renderer settings before a master reset", {}},
+        [](const std::string&, cJSON*) -> std::string {
+            if (!GEngine || !GEngine->SupportsSky()) return HarnessProtocol::ErrorResponse("requires procedural sky");
+            GEngine->SetSkyCirrus(false, false);
+            GEngine->SetSkyCirrusPuffiness(0.2f, 0.3f);
+            GEngine->SetSkyCirrusLook(0.1f, 0.2f);
+            GEngine->SetSkyCirrusSoftness(0.9f);
+            GEngine->SetFogFarClose(0.4f);
+            GEngine->SetGodRays(false, 1.0f, 0.00001f, 1000.0f, 0.3f, 0.2f, 8, 4);
+            auto road = GEngine->GetRoadSettings();
+            road.liftFlat = 0.03f;
+            GEngine->SetRoadSettings(road);
+            return HarnessProtocol::OkResponse();
+        });
+    hs.RegisterCommand({"dev_snow", "Inspect snow or exercise settings resets (never clears tracks)",
+                        {{"action", "string", true}}},
+        [](const std::string&, cJSON* root) -> std::string {
+            const char* action = HarnessProtocol::GetString(root, "action");
+            if (!GWorld || !action) return HarnessProtocol::ErrorResponse("snow probe requires world and action");
+            auto& snow = GSnow();
+            if (std::strcmp(action, "reset-panel") == 0) ResetPanelSettings();
+            else if (std::strcmp(action, "reset-settings") == 0) snow.ResetSettings();
+            else if (std::strcmp(action, "enable") == 0) snow.enabled = true;
+            else if (std::strcmp(action, "disable") == 0) snow.enabled = false;
+            else if (std::strcmp(action, "state") != 0) return HarnessProtocol::ErrorResponse("unknown snow action");
+            cJSON* out = cJSON_CreateObject();
+            cJSON_AddBoolToObject(out, "enabled", snow.enabled);
+            cJSON_AddBoolToObject(out, "falling", snow.falling);
+            cJSON_AddBoolToObject(out, "geometry", snow.detailedGeometry);
+            cJSON_AddNumberToObject(out, "rate", snow.metresPerMinute);
+            cJSON_AddNumberToObject(out, "maxDepth", snow.maxDepth);
+            cJSON_AddNumberToObject(out, "flakes", snow.flakeMultiplier);
+            cJSON_AddNumberToObject(out, "depth", snow.Depth());
+            cJSON_AddNumberToObject(out, "chunks", static_cast<double>(snow.Chunks()));
+            return HarnessProtocol::JsonResponse(out);
+        });
 }
 
 void RegisterHttpFixtures(HarnessServer& hs)

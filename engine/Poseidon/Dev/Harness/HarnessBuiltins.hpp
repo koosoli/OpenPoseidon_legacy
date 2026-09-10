@@ -25,6 +25,9 @@ void RegisterScreenshot(HarnessServer& hs);
 /// `eval` + `exec` — SQF via GWorld->GetGameState(). Any app with a world.
 void RegisterSqf(HarnessServer& hs);
 
+/// Client-only snow/settings probe for installed reset/track regression tests.
+void RegisterSnowProbe(HarnessServer& hs);
+
 void RegisterHttpFixtures(HarnessServer& hs);
 
 /// `key` + `key_up` — inject SDL scancodes into the event queue. Any SDL app.

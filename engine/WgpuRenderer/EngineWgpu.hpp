@@ -273,8 +273,7 @@ class EngineWgpu : public EngineDummy
     {
         _sky.cirrusEnabled = enabled;
         _sky.cirrusVolumetric = volumetric;
-        if (_renderer != nullptr)
-            wgr_set_cirrus_mode(_renderer, enabled ? (volumetric ? 2u : 1u) : 0u);
+        QueueSkyExtras();
     }
     // Second-layer shape: puffiness + how much it varies from that on its own. Same shape as
     // SetSkyCirrus above (own FFI entry point, _sky updated so GetSkySettings round-trips).
@@ -282,8 +281,7 @@ class EngineWgpu : public EngineDummy
     {
         _sky.cirrusPuffiness = puffiness;
         _sky.cirrusPuffVariation = variation;
-        if (_renderer != nullptr)
-            wgr_set_cirrus_puffiness(_renderer, puffiness, variation);
+        QueueSkyExtras();
     }
     // Second-layer AMOUNT + how far it matches the deck below. Same shape again (own FFI entry
     // point, _sky updated so GetSkySettings round-trips and "Reset to defaults" restores it).
@@ -291,22 +289,19 @@ class EngineWgpu : public EngineDummy
     {
         _sky.cirrusAmount = amount;
         _sky.cirrusMatchDeck = matchDeck;
-        if (_renderer != nullptr)
-            wgr_set_cirrus_look(_renderer, amount, matchDeck);
+        QueueSkyExtras();
     }
     // How soft the SECOND layer's cloud edges are. Same shape again.
     void SetSkyCirrusSoftness(float softness) override
     {
         _sky.cirrusSoftness = softness;
-        if (_renderer != nullptr)
-            wgr_set_cirrus_softness(_renderer, softness);
+        QueueSkyExtras();
     }
     // Where the distance fog finishes, as a fraction of the draw distance. Same shape again.
     void SetFogFarClose(float close) override
     {
         _sky.fogFarClose = close;
-        if (_renderer != nullptr)
-            wgr_set_fog_far_close(_renderer, close);
+        QueueSkyExtras();
     }
     // Road / decal per-pixel ground conform: the three knobs that decide whether a road wins
     // its depth test against the terrain it lies on. Its own struct and its own FFI entry
@@ -315,8 +310,8 @@ class EngineWgpu : public EngineDummy
     void SetRoadSettings(const RoadSettings& road) override
     {
         _road = road;
-        if (_renderer != nullptr)
-            wgr_set_road_conform(_renderer, _road.liftFlat, _road.liftPerMetre, _road.liftMaxFrac);
+        _pendingSet.roadConform = _road;
+        _pendingSet.roadConformDirty = true;
     }
     // God rays. Same shape again (own FFI entry point, _sky updated so GetSkySettings round-trips
     // and "Reset to defaults" restores it). The renderer clamps every value, so a garbage push
@@ -332,10 +327,7 @@ class EngineWgpu : public EngineDummy
         _sky.godRayCloudInfluence = cloudInfluence;
         _sky.godRaySteps = steps;
         _sky.godRayResDiv = resDiv;
-        if (_renderer != nullptr)
-            wgr_set_god_rays(_renderer, enabled ? 1u : 0u, intensity, density, distance, g, cloudInfluence,
-                             static_cast<uint32_t>(steps < 0 ? 0 : steps),
-                             static_cast<uint32_t>(resDiv < 0 ? 0 : resDiv));
+        QueueSkyExtras();
     }
     // Suppress the legacy skydome on wgpu while the procedural sky is drawing.
     bool ProceduralSkyActive() const override { return _renderer != nullptr && _sky.enabled; }
@@ -1141,6 +1133,10 @@ class EngineWgpu : public EngineDummy
         // on a frame that admits nothing.
         WgrRenderParams renderParams{};
         bool renderParamsDirty = false;
+        SkySettings skyExtras{};
+        bool skyExtrasDirty = false;
+        RoadSettings roadConform{};
+        bool roadConformDirty = false;
         WgrSkyRuntime skyRuntime{};
         bool skyRuntimeDirty = false;
         WgrTerrainParams terrainParams{};
@@ -1168,6 +1164,11 @@ class EngineWgpu : public EngineDummy
         std::vector<WgrWaterInteractionEvent> waterEvents;
     };
     PendingRendererSettings _pendingSet;
+    void QueueSkyExtras()
+    {
+        _pendingSet.skyExtras = _sky;
+        _pendingSet.skyExtrasDirty = true;
+    }
     // The drain. Called once at the top of NextFrame; must tolerate a null _renderer.
     void ApplyPendingRendererSettings(PendingRendererSettings& p);
 
