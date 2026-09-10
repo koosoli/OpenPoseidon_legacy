@@ -295,12 +295,16 @@ bool DdsCompressedPassthrough()
 
 bool IsEnfusionRgNormalName(const char* name)
 {
-    // The same predicate RFG-045 used for its channel copy, and for the same reason: every
-    // Reforger normal map measured is `*_NMO`, and every one of them is BC7 (format 13),
-    // packing Normal.x / Normal.y / roughness / metalness. A BC5 file is a two-channel
-    // format by definition and can carry nothing else, so it qualifies on format alone --
-    // but the format is not visible from a name, so the caller ORs that in itself.
-    return name != nullptr && LowerCopy(name).find("_nmo") != std::string::npos;
+    // NMO = normal RG, metalness B, occlusion A; NTC = normal RG,
+    // transmittance B, cavity A. Neither stores normal X in alpha.
+    if (!name) return false;
+    const std::string lower = LowerCopy(name);
+    if (lower.find("_nmo") != std::string::npos) return true;
+    static const bool legacyNtc = [] {
+        const char* value = std::getenv("POSEIDON_LEGACY_NTC_NORMALS");
+        return value && value[0] == '1';
+    }();
+    return !legacyNtc && lower.find("_ntc") != std::string::npos;
 }
 
 TextureSourceDDS::TextureSourceDDS() = default;
@@ -557,10 +561,10 @@ bool TextureSourceDDS::InitFromMemory(const void* data, size_t size, const char*
         //
         // Gated on the NAME as well as on BC5, and the name is the one that matters here:
         // measured, every Reforger `_NMO` is BC7 (format 13), not BC5. BC7 keeps all four
-        // channels, and Enfusion's packing is Normal.x / Normal.y / roughness / metalness --
-        // so reading X out of alpha reads METALNESS. BC5 is covered too because it is a
+        // channels; NMO alpha is occlusion and NTC alpha is cavity, not normal X.
+        // BC5 is covered too because it is a
         // two-channel format by definition and can carry nothing else.
-        if (_format == PixelFormat::BC5 || LowerCopy(who).find("_nmo") != std::string::npos)
+        if (_format == PixelFormat::BC5 || IsEnfusionRgNormalName(who))
         {
             for (DDSMipLevel& level : _levels)
                 for (size_t i = 0; i + 3 < level.data.size(); i += 4)
@@ -568,7 +572,7 @@ bool TextureSourceDDS::InitFromMemory(const void* data, size_t size, const char*
         }
         {
             static int reportedNormal = 0;
-            if (reportedNormal < 4 && LowerCopy(who).find("_nmo") != std::string::npos)
+            if (reportedNormal < 4 && IsEnfusionRgNormalName(who))
             {
                 ++reportedNormal;
                 LOG_INFO(Graphics, "EDDS normal map {}: source format {} decoded to 32-bit", who,

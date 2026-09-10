@@ -92,6 +92,48 @@ std::vector<uint8_t> Bgra2x2()
 
 } // namespace
 
+TEST_CASE("Enfusion NTC normals use red rather than cavity for X", "[graphics][edds][ntc]")
+{
+    REQUIRE(Poseidon::IsEnfusionRgNormalName("assets/polyplane_picea_NTC.edds"));
+    REQUIRE(Poseidon::IsEnfusionRgNormalName("assets/bark_picea_ntc.edds"));
+    REQUIRE(Poseidon::IsEnfusionRgNormalName("assets/wall_nmo.edds"));
+    REQUIRE_FALSE(Poseidon::IsEnfusionRgNormalName("assets/wall_nohq.paa"));
+    REQUIRE_FALSE(Poseidon::IsEnfusionRgNormalName("assets/leaf_bcr.edds"));
+    REQUIRE_FALSE(Poseidon::IsEnfusionRgNormalName("assets/leaf_a.edds"));
+    REQUIRE_FALSE(Poseidon::IsEnfusionRgNormalName(nullptr));
+
+    // Synthetic BC7 mode 6, uniform RGBA=(128,128,40,200). No game assets.
+    uint8_t block[16] = {};
+    unsigned bit = 0;
+    auto write = [&](unsigned value, unsigned bits) {
+        for (unsigned i = 0; i < bits; ++i, ++bit)
+            block[bit / 8] |= ((value >> i) & 1u) << (bit % 8);
+    };
+    write(1u << 6, 7);
+    for (unsigned value : {64u, 64u, 20u, 100u}) { write(value, 7); write(value, 7); }
+    write(0, 1); write(0, 1); write(0, 3);
+    for (int i = 1; i < 16; ++i) write(0, 4);
+    REQUIRE(bit == 128);
+    auto file = Header(4, 4, 1, "DX10");
+    for (uint32_t word : {98u, 3u, 0u, 1u, 0u, 0x59504F43u, 16u}) AppendU32(file, word);
+    file.insert(file.end(), block, block + 16);
+    for (const char* name : {"test_ntc.edds", "test_nmo.edds", "test_bcr.edds"})
+    {
+        TextureSourceDDS source;
+        REQUIRE(source.InitFromMemory(file.data(), file.size(), name, true));
+        PacLevelMem mip;
+        mip._w = mip._h = 4; mip._pitch = 16; mip._dFormat = PacARGB8888;
+        uint8_t pixels[64] = {};
+        REQUIRE(source.GetMipmapData(pixels, mip, 0));
+        for (int i = 0; i < 64; i += 4)
+        {
+            REQUIRE(pixels[i + 2] == 128);
+            REQUIRE(pixels[i + 1] == 128);
+            REQUIRE(pixels[i + 3] == (Poseidon::IsEnfusionRgNormalName(name) ? 128 : 200));
+        }
+    }
+}
+
 TEST_CASE("DDS source: a 32-bit level is delivered as BGRA, honouring pitch", "[graphics][edds][dz-002]")
 {
     const std::vector<uint8_t> file = Bgra2x2();

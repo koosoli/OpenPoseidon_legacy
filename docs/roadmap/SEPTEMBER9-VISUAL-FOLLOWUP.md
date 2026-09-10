@@ -189,6 +189,22 @@ Correction keeps the original two-binding conform layout for retained/velocity/
 GPU-shadow pipelines and lends snow only to direct-draw pipelines. Device limits
 are not raised. Fixture now rejects validation errors before continuing captures.
 
+1ed79e6f corrected installed snow/dry runs both exit 0, living player checked
+at every pose and no validation errors. Far road remains buried at 0.3m snow;
+dry far road is visible. Images inspected. An intermediate run moved the player
+to an unverified coastal position and ended early; removing that fixture change
+restores completion. Do not infer a renderer crash from that disconnected harness.
+A real-device layout-budget test also passes, using the actual conform layouts
+alongside a saturated fragment-storage budget, complementing six shader tests.
+
+Native forest next finding: live Forest log binds picea/betula/corylus NTC normal
+maps, but IsEnfusionRgNormalName only recognised NMO. NTC alpha is cavity, not
+normal X (Bohemia's official Textures channel table). Pending correction recognises
+NTC in both compressed flags and decoded R-to-A repacking. This is an input decode
+fix, not a contrast/SSS tuning change; no new GPU sample or geometry. Same-binary
+control POSEIDON_LEGACY_NTC_NORMALS=1. Synthetic channel tests and installed Forest
+comparison pending. Source: https://community.bistudio.com/wiki/Arma_Reforger%3ATextures
+
 Owner authorised implementation after backup `codex/backup-asset-obs-20260909-bc766e19`.
 Worktree asset-obs only; foreign Cargo.lock excluded. Screenshots 070351, 070456,
 072225 and 073829 are reproduction evidence, not completion evidence.

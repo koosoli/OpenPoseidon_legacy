@@ -47,12 +47,12 @@ try {
     }
     Start-Sleep -Seconds 15
     if (Select-String -LiteralPath $log -Pattern 'StartAutoTest could not boot' -Quiet) {throw 'Mission did not load'}
-    $null=Send @{cmd='exec';code='player setPos [4900,3900,0]'}
     foreach ($pose in @(@('near','5083.67 3988.25 17.63 145.4 -18.5'),
                         @('far','5020 4080 55 145.4 -18.5'),
                         @('return','5083.67 3988.25 17.63 145.4 -18.5'))) {
         if ((Send @{cmd='eval';code="triFreeFlyPose `"$($pose[1])`""}).result.Trim('"') -ne 'OK') {throw 'Zeus entry failed'}
         Start-Sleep -Seconds 5
+        if ((Send @{cmd='eval';code='alive player'}).result -ne 'true') {throw 'Player died; camera comparison invalid'}
         $null=Send @{cmd='screenshot';path=(Join-Path $output "$($pose[0]).png")}
     }
     $null=Send @{cmd='exit'}

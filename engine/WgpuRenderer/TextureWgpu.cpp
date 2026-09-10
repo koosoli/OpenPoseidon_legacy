@@ -1397,8 +1397,8 @@ bool TextureWgpu::NormalIsRgPacked() const
         return true;
     }
     // BC7 keeps four channels and is also what every ordinary Enfusion ALBEDO is, so the
-    // name has to decide. Measured, every Reforger normal map is `*_NMO` and BC7, packing
-    // Normal.x / Normal.y / roughness / metalness -- reading X from alpha reads metalness.
+    // name has to decide. NMO and NTC store normal XY in RG; their alpha is
+    // occlusion or cavity, respectively. Reading X from alpha flattens tree lighting.
     return dst == PacBC7 && IsEnfusionRgNormalName(Name());
 }
 

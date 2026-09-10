@@ -10883,6 +10883,40 @@ pub(crate) fn camera_layout_for_tests(device: &wgpu::Device) -> wgpu::BindGroupL
 mod staging_tests {
     use super::{StorageArray, is_power_of_ten};
 
+    #[test]
+    fn conform_layouts_fit_the_fragment_storage_limit_on_device() {
+        let Some((device, _queue)) = crate::gfx3d::cull::tests::headless() else {
+            eprintln!("SKIP: no headless GPU for conform layout validation");
+            return;
+        };
+        let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let conform = super::ConformGroup::new(&device);
+        let limit = device.limits().max_storage_buffers_per_shader_stage;
+        for (count, layout) in [(limit, &conform.gpu_layout), (limit - 1, &conform.layout)] {
+            let entries: Vec<_> = (0..count).map(|binding| wgpu::BindGroupLayoutEntry {
+                binding,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }).collect();
+            let budget = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("snow_test_other_fragment_storage"),
+                entries: &entries,
+            });
+            let _pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("snow_test_total_fragment_budget"),
+                bind_group_layouts: &[Some(&budget), Some(layout)],
+                immediate_size: 0,
+            });
+        }
+        let error = pollster::block_on(scope.pop());
+        assert!(error.is_none(), "conform layout exceeded device limits: {error:?}");
+    }
+
     // The bug this guards: `ensure` caches the size it ASKED for, so once a `create_buffer`
     // comes back invalid (which is how wgpu reports out of memory) the same poisoned handle is
     // handed out for the rest of the process and every upload into it is refused. `invalidate`
