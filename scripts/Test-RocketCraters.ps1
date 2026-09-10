@@ -1,8 +1,11 @@
-param([string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
+param([string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',
+      [string]$OutputDir='')
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
 $root=Split-Path $PSScriptRoot -Parent
-$output=Join-Path $root 'build/rocket-craters/acceptance'
+$output=if ($OutputDir) {[IO.Path]::GetFullPath($OutputDir)} else {
+    Join-Path $root ('build/rocket-craters/acceptance-'+(Get-Date -Format 'yyyyMMdd-HHmmss'))
+}
 $env:POSEIDON_USER_DIR=Join-Path $output 'user'
 New-Item -ItemType Directory -Force $env:POSEIDON_USER_DIR | Out-Null
 [IO.File]::WriteAllText((Join-Path $env:POSEIDON_USER_DIR 'graphics.cfg'), "qualityPreset=3;`nterrainDetail=4;`nmsaaSamples=4;`ndlssMode=-1;`n")

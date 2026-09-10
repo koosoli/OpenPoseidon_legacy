@@ -2154,6 +2154,24 @@ void World::Simulate(float deltaT, bool& enableDraw)
 
     perf.Mark(Dev::FrameProfiler::PhaseSwap);
     perf.EndFrame(Poseidon::gPerfDrawCalls);
+    static const bool slowFrameTrace = [] {
+        const char* value = std::getenv("POSEIDON_SLOW_FRAME_TRACE");
+        return value && std::strcmp(value, "0") != 0;
+    }();
+    if (slowFrameTrace && perf.Frame(0).totalMs >= 100.0f)
+    {
+        // Individual records, not independent maxima from a rolling window.
+        // These are elapsed phases including waits, not exclusive CPU work.
+        using Phase = Dev::FrameProfiler;
+        const auto& r = perf.Frame(0);
+        LOG_INFO(Core, "Slow frame: frame={} total={:.3f} setup={:.3f} sim={:.3f} "
+                      "init={:.3f} prep={:.3f} ground={:.3f} objects={:.3f} "
+                      "landscape={:.3f} draw={:.3f} post={:.3f} hud={:.3f} sound={:.3f} swap={:.3f}",
+                 GEngine ? GEngine->GetFrameCounter() : 0, r.totalMs, r.ms[Phase::PhaseSetup], r.ms[Phase::PhaseSimStep],
+                 r.ms[Phase::PhaseDrawInit], r.ms[Phase::PhaseDrawObjPrep], r.ms[Phase::PhaseDrawLandGround],
+                 r.ms[Phase::PhaseDrawLandObjects], r.ms[Phase::PhaseDrawLandscape], r.ms[Phase::PhaseDrawObjects],
+                 r.ms[Phase::PhaseDrawPost], r.ms[Phase::PhaseHud], r.ms[Phase::PhaseSound], r.ms[Phase::PhaseSwap]);
+    }
     Poseidon::gPerfDrawCalls = 0;
     // Per-frame streaming upload figures roll here; also emits Perfetto counter tracks
     // when --perf-trace is active.

@@ -1,4 +1,4 @@
-param([switch]$LegacyClutter, [switch]$VerifyClutter,
+param([switch]$LegacyClutter, [switch]$VerifyClutter, [switch]$TraceSlowFrames,
       [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',
       [string]$Archives='C:\Program Files (x86)\Steam\steamapps\common\Arma Reforger\addons')
 $ErrorActionPreference='Stop'
@@ -9,6 +9,7 @@ $root=Split-Path $PSScriptRoot -Parent
 $label='cancel-'+(Get-Date -Format 'yyyyMMdd-HHmmss')
 if ($LegacyClutter) {$label+='-legacy-clutter'}
 if ($VerifyClutter) {$label+='-verify-clutter'}
+if ($TraceSlowFrames) {$label+='-slow-trace'}
 $out=Join-Path $root 'build/native-stream-cancellation'
 $user=Join-Path $out ('user-'+$label)
 New-Item -ItemType Directory -Force $user | Out-Null
@@ -21,6 +22,7 @@ $settings=@{
 }
 if ($LegacyClutter) {$settings.WGR_NATIVE_CLUTTER_REUSE='0'}
 if ($VerifyClutter) {$settings.WGR_NATIVE_CLUTTER_VERIFY='1'}
+if ($TraceSlowFrames) {$settings.POSEIDON_SLOW_FRAME_TRACE='1'}
 # Short settle intentionally leaves cold work outstanding when movement starts.
 # This is a lifecycle smoke test, NOT a settled-pose FPS comparison.
 & "$PSScriptRoot/farfield-movecam.ps1" -Label $label -Mission 'tests/perf/missions/perf_field.eden' -World $Archives -Start 5092.61,3995.64 -StartY 220 -Azimuth 270 -Elevation -15 -Speed 100 -SettleSeconds 20 -StaticSeconds 10 -MoveSeconds 40 -LoadSeconds 20 -CaptureAt 110 -Width 1280 -Height 720 -GameDir $GameDir -Out $out -Env $settings -SampleMemory

@@ -2,6 +2,7 @@ param([ValidateSet(80,160,320)][int]$Units=80,
       [ValidateSet('Near','Away')][string]$Pose='Near',
       [ValidateRange(1,5)][int]$Repeats=2,
       [string]$Label='baseline',
+      [switch]$SampleMemory,
       [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
@@ -33,7 +34,7 @@ New-Item -ItemType Directory -Force $user | Out-Null
 $camera=if ($Pose -eq 'Near') {@(9700,3545,45,0,-12)} else {@(9700,3545,45,180,-12)}
 # Real-time pacing, not lockstep: lockstep FPS is not playable performance.
 $settings=@{POSEIDON_USER_DIR=$user;POSEIDON_VSYNC='0';POSEIDON_LOCKSTEP_HZ='0';WGR_PASS1_STATS='1'}
-foreach ($key in @('WGR_RENDER_THREAD','WGR_RENDER_OVERLAP','WGR_SKIN_BAKE','WGR_PALETTE_UPLOAD_BATCH','WGR_PALETTE_UPLOAD_TRACE')) {
+foreach ($key in @('WGR_RENDER_THREAD','WGR_RENDER_OVERLAP','WGR_SKIN_BAKE','WGR_PALETTE_UPLOAD_BATCH','WGR_PALETTE_UPLOAD_TRACE','WGR_LOD_GOVERNOR_RANGE','POSEIDON_SIM_VEHICLE_COST')) {
     $value=[Environment]::GetEnvironmentVariable($key)
     if ($null -ne $value) {$settings[$key]=$value}
 }
@@ -43,7 +44,7 @@ $cameraArgs=@('--test-world-freefly') + @($camera | ForEach-Object {$_.ToString(
 & "$PSScriptRoot/farfield-bench.ps1" -Label "$Label-idle-$Units-$Pose" -Mission $mission `
  -GameDir $GameDir -ExtraArgs $cameraArgs `
  -Out $out -Env $settings -Repeats $Repeats -Width 1280 -Height 720 `
- -Windowed -WarmupSeconds 60 -TimeoutSeconds 180 -RequireAll
+ -Windowed -WarmupSeconds 60 -TimeoutSeconds 180 -RequireAll -SampleMemory:$SampleMemory
 for ($r=1; $r -le $Repeats; $r++) {
     $log=Join-Path (Join-Path $out "$Label-idle-$Units-$Pose") ('run-{0:D2}.log' -f $r)
     if (Select-String -LiteralPath $log -Pattern 'Validation Error|panicked at|StartAutoTest could not boot|Cannot load --test-world' -Quiet) {throw 'Invalid run'}

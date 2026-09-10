@@ -12,6 +12,7 @@
 #include <Poseidon/Dev/Diag/ShowcaseCastle.hpp>
 #include <Poseidon/Dev/Diag/ShowcaseContact.hpp>
 #include <Poseidon/World/Terrain/TerrainCrater.hpp>
+#include <Poseidon/World/Terrain/TerrainEditJournal.hpp>
 
 #include <memory>
 #include <cmath>
@@ -147,6 +148,50 @@ TEST_CASE("regional terrain edit timing separates initial partition from repeat 
         std::chrono::duration<double,std::milli>(full-start).count(),
         std::chrono::duration<double,std::milli>(partition-full).count(),
         std::chrono::duration<double,std::milli>(done-partition).count()/8.0);
+}
+
+TEST_CASE("sparse terrain history keeps first heights across overlapping strokes", "[physics][terrain-journal]")
+{
+    Poseidon::TerrainEditJournal journal;
+    REQUIRE(journal.Empty());
+    int reads = 0;
+    REQUIRE(journal.Remember(8193,15,15,3,3,[&](int x,int z) { ++reads; return float(x+z*100); }));
+    CHECK(journal.Tiles() == 4);
+    CHECK(journal.Samples() == 9);
+    CHECK(reads == 9);
+    REQUIRE(journal.Remember(8193,16,16,3,3,[&](int,int) { ++reads; return -99.0f; }));
+    CHECK(journal.Samples() == 14);
+    CHECK(reads == 14);
+    int restored = 0;
+    journal.ForEach([&](int x,int z,float before) {
+        ++restored;
+        CHECK(before == (x <= 17 && z <= 17 ? float(x+z*100) : -99.0f));
+    });
+    CHECK(restored == 14);
+    journal.Clear();
+    CHECK(journal.Empty());
+    CHECK(journal.Tiles() == 0);
+    CHECK(journal.Samples() == 0);
+}
+
+TEST_CASE("terrain journal refuses invalid or over-budget regions before reading", "[physics][terrain-journal]")
+{
+    Poseidon::TerrainEditJournal journal;
+    const auto read = [](int,int) { return 7.0f; };
+    REQUIRE(journal.Remember(8193,8192,8192,1,1,read));
+    int reads = 0;
+    const auto unexpected = [&](int,int) { ++reads; return 0.0f; };
+    CHECK_FALSE(journal.Remember(8193,0,0,8193,8193,unexpected));
+    CHECK_FALSE(journal.Remember(8193,-1,0,2,2,unexpected));
+    CHECK_FALSE(journal.Remember(8193,8192,0,2,2,unexpected));
+    CHECK_FALSE(journal.Remember(8193,0,8192,2,2,unexpected));
+    CHECK_FALSE(journal.Remember(8193,0,0,0,2,unexpected));
+    CHECK(reads == 0);
+    CHECK(journal.Tiles() == 1);
+    CHECK(journal.Samples() == 1);
+    journal.ForEach([](int x,int z,float before) {
+        CHECK(x == 8192); CHECK(z == 8192); CHECK(before == 7.0f);
+    });
 }
 
 TEST_CASE("terrain crater is compact smooth and finite", "[physics][crater]")

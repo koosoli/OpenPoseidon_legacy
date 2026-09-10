@@ -50,7 +50,26 @@ the three-track decision. An optional one-second process-memory sampler was adde
 to the existing benchmark harness, not to the game loop. Four Python trace tests
 and PowerShell syntax checks pass. No AI parallelism or HLOD was implemented here.
 
+CPU follow-up: two current repeats each of sparse Field, idle 80/320 and combat
+are now recorded in the decision. Idle320 AI averages 0.582/0.575 ms/tick over
+the last ten samples; combat 1.882/2.162 ms/tick, with vehicle/man simulation
+3.573/3.729 ms/tick. Do not confuse those with per-frame render waits. Campaign,
+Fusion traversal, exclusive animation and driver-VRAM timelines remain open.
+No additional AI workers are justified by the current evidence alone.
+
+Sparse terrain undo follow-up: first-write 16x16 sample tiles replace the initial
+whole-world backup. Overlapping edits retain original heights; bounded admission
+refuses over-budget regions before reading them. Reset still constructs/publishes
+a whole collision grid, and the 2049-range guard remains: this is NOT the Fusion
+editor fix or a large-map editing claim. Installed rocket/reset acceptance
+build/rocket-craters/acceptance-20260910-144704 passes: height 29.835 -> 28.835,
+disabled stays 28.835, defaults restored -> 27.835, terrain restore -> 29.835.
+Game exits normally, no renderer errors. Local-edit memory/work reduction is
+structural; no FPS improvement claimed. Existing journal unit tests pass as part
+of the 66-case run above. Harness outputs are now timestamped to preserve evidence.
+
 ## Bounded crown flutter and spray motion, September 10, 13:10
+
 
 The additional cutout-only flutter previously scaled with wind, height response
 and gust, independently of the solid trunk. At amp=1.05, hs=5, gust=1.65 its

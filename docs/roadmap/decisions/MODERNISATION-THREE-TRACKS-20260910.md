@@ -225,3 +225,64 @@ Acceptance: keep the reuse optimisation and lifecycle correction. Next measure
 the remaining individual stalls; do not compensate by enabling the previously
 ineffective upload-byte cap or by adding AI threads. HLOD, far-only OFP texture
 residency and byte budgets across every preparation stage remain open.
+
+## Current CPU workload census (same installed 14:00 build)
+
+Measure-ModernisationCpu.ps1 reuses farfield-bench and Measure-AIScale; no new
+scheduler or game-side measurement system. Two sequential repeats each, native
+1280x720, MSAA4, private preset-3 profile, DLSS/VSync/frame cap off, fixed LOD
+governor range 1, real-time simulation, capture at 60 s. SimVehicleCost enabled.
+Idle forwarding now also records those inherited diagnostic/LOD flags in metadata.
+These are baseline runs, NOT serial/parallel A/B comparisons.
+
+| Scene / repeat | CPU ring mean / p95 ms | sim:step ms/frame | AI ms/tick | vehicles ms/tick | visibility ms/tick |
+|---|---:|---:|---:|---:|---:|
+| Sparse Field 1 | 15.01 / 16.25 | 0.252 | 0.020 | 0.174 | 0.004 |
+| Sparse Field 2 | 14.66 / 15.59 | 0.226 | 0.019 | 0.169 | 0.004 |
+| Idle 80 1 | 9.75 / 11.36 | 0.324 | 0.125 | 0.396 | 0.026 |
+| Idle 80 2 | 9.92 / 11.07 | 0.319 | 0.120 | 0.387 | 0.027 |
+| Idle 320 1 | 18.19 / 18.83 | 1.775 | 0.582 | 0.884 | 0.136 |
+| Idle 320 2 | 18.85 / 21.73 | 1.806 | 0.575 | 0.874 | 0.134 |
+| Combat 1 | 19.06 / 20.70 | 6.566 | 1.882 | 3.573 | 0.503 |
+| Combat 2 | 22.48 / 24.47 | 7.605 | 2.162 | 3.729 | 0.418 |
+
+Ring = final 256 frames. Tick columns = average of the last ten per-second
+simulation reports; they have DIFFERENT denominators/windows and must not be
+added to per-frame phases. Dedicated physics scope rounded to 0.000 in these
+fixtures, not proof collision/locomotion is free (inside vehicle/man stages).
+Combat run 2 last report: man 3.085 ms/tick, 193 calls/tick, including nested
+man.pilot 1.726 and man.base 1.341 ms. Animation is not separately attributed yet.
+Script time rounds to zero; Field is a one-player sparse control, NOT a normal
+campaign-script baseline. Combat contains both factions/move orders; the inspected
+capture shows battle smoke and logs show active strategic planning and 193 man
+updates, but battle state diverges between real-time repeats. Do not use this
+variation as a claimed optimisation or deterministic replay acceptance.
+
+For Idle320, land:obj is 2.48/2.51 ms/frame while producer-window waits are
+9.14/8.90 ms. Worker queue-submit snapshots are 13.51/13.76 ms and encode costs
+are much smaller. Submit may contain driver/GPU waits; moving it to more CPU
+workers is not a demonstrated remedy. GPU totals are single asynchronous samples,
+not the CPU ring's mean; combat GPU 28.74/19.50 ms must not be called its average
+FPS. Screenshot-contaminated ring maxima are excluded from workload-spike claims.
+
+Process private / working-set peaks in GiB, run 1 then 2:
+Field 2.295/0.919, 2.286/0.907; Idle80 2.219/0.841, 2.194/0.817;
+Idle320 1.968/0.588, 1.960/0.586; Combat 2.193/0.832, 2.170/0.811.
+Tracked object GPU residency MiB: Field 52.799 both, Idle80 33.938 both,
+Idle320 34.022 both, Combat 58.762/62.846. These counters omit other allocations;
+lower Idle320 process memory does not mean adding soldiers saves memory. Different
+world visibility/caches and OS working-set decisions prohibit that interpretation.
+One-second process samples and raw JSON/logs accompany every capture.
+
+Evidence paths (each run-01 and run-02):
+- build/modernisation-cpu/cpu-20260910-143144-Field
+- build/ai-scale/cpu-20260910-143356-Idle80-idle-80-Near
+- build/ai-scale/cpu-20260910-143606-Idle320-idle-320-Near
+- build/modernisation-cpu/cpu-20260910-143818-Combat
+
+Decision: keep pipeline-first priority. No blanket AI threading. Next isolate
+combat man.pilot/man.base and strategic-query dependencies, and distinguish GPU
+submit waits from encoding before selecting a pure batch. Complete campaign,
+Fusion traversal, exclusive animation timings, full-run tails, driver VRAM and
+cross-core tests before calling the requested census complete. Existing native
+traversal pairs cover the streaming workload, not those missing cases.

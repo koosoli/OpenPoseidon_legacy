@@ -49,7 +49,6 @@ bool SetShowcaseCrater(bool restore)
     const float spacing = land.GetTerrainGrid();
     // One explicitly invoked prototype, bounded memory; never an explosion hot path.
     if (range < 2 || range > 2049 || !(spacing > 0) || spacing > 50) return false;
-    if (!CaptureTerrainEditBaseline()) return false;
     if (!restore)
     {
         const float radius = std::max(24.0f, spacing * 3.0f);
@@ -92,6 +91,11 @@ bool SetShowcaseCrater(bool restore)
         right=std::max(right,p.x); bottom=std::max(bottom,p.z);
     }
     const int width=right-left+1, height=bottom-top+1;
+    if (!CaptureTerrainEditBaseline(left,top,width,height))
+    {
+        if (!restore) s_craterSamples.clear();
+        return false;
+    }
     std::vector<float> patch(static_cast<size_t>(width)*height);
     for (int z=0; z<height; ++z)
         for (int x=0; x<width; ++x)

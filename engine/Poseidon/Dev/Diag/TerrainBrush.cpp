@@ -2,6 +2,7 @@
 #include <Poseidon/Dev/Diag/PhysicsProbe.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Terrain/TerrainCrater.hpp>
+#include <Poseidon/World/Terrain/TerrainEditJournal.hpp>
 #include <Poseidon/World/Physics/PhysicsWorld.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
@@ -15,36 +16,32 @@ namespace Poseidon::Dev
 namespace { TerrainBrushSettings settings; }
 namespace
 {
-    std::vector<float> terrainBaseline;
+    TerrainEditJournal terrainBaseline;
     Landscape* baselineOwner = nullptr;
     int baselineRange = 0;
     float baselineSpacing = 0;
 }
 void ClearTerrainEditBaseline()
 {
-    std::vector<float>().swap(terrainBaseline);
+    terrainBaseline.Clear();
     baselineOwner = nullptr;
     baselineRange = 0;
     baselineSpacing = 0;
 }
 bool HasTerrainEditBaseline()
 {
-    return GLandscape && baselineOwner == GLandscape && !terrainBaseline.empty() &&
+    return GLandscape && baselineOwner == GLandscape && !terrainBaseline.Empty() &&
         baselineRange == GLandscape->GetTerrainRange() && baselineSpacing == GLandscape->GetTerrainGrid();
 }
-bool CaptureTerrainEditBaseline()
+bool CaptureTerrainEditBaseline(int x, int z, int width, int height)
 {
     if (!GLandscape) return false;
-    if (HasTerrainEditBaseline()) return true;
     // Never apply an old grid's sample indices to a newly subdivided landscape.
-    if (!terrainBaseline.empty()) return false;
+    if (!terrainBaseline.Empty() && !HasTerrainEditBaseline()) return false;
     const int range = GLandscape->GetTerrainRange();
     if (range < 2 || range > 2049) return false;
-    std::vector<float> snapshot(static_cast<size_t>(range)*range);
-    for (int z=0; z<range; ++z)
-        for (int x=0; x<range; ++x)
-            snapshot[static_cast<size_t>(z)*range+x] = GLandscape->GetHeight(z,x);
-    terrainBaseline.swap(snapshot);
+    if (!terrainBaseline.Remember(range,x,z,width,height,
+            [](int ix,int iz) { return GLandscape->GetHeight(iz,ix); })) return false;
     baselineOwner = GLandscape;
     baselineRange = range;
     baselineSpacing = GLandscape->GetTerrainGrid();
@@ -54,15 +51,21 @@ bool RestoreEditedTerrain()
 {
     if (!HasTerrainEditBaseline() || !GWorld || GWorld->GetMode() == GModeNetware) return false;
     auto& world = Physics::EnsurePhysicsWorld();
-    // SetTerrain publishes transactionally. Keep both the visible edit and its backup on failure.
-    if (!world.Create() || !world.SetTerrain(terrainBaseline.data(),baselineRange,baselineRange,
-                                           baselineSpacing,0,0)) return false;
+    // Collision replacement remains whole-grid until its regional publication
+    // gate is implemented. The persistent undo state itself is now sparse.
+    std::vector<float> restored(static_cast<size_t>(baselineRange)*baselineRange);
     for (int z=0; z<baselineRange; ++z)
         for (int x=0; x<baselineRange; ++x)
-        {
-            const float before = terrainBaseline[static_cast<size_t>(z)*baselineRange+x];
-            if (before != GLandscape->GetHeight(z,x)) GLandscape->HeightChange(x,z,before);
-        }
+            restored[static_cast<size_t>(z)*baselineRange+x] = GLandscape->GetHeight(z,x);
+    terrainBaseline.ForEach([&](int x,int z,float before) {
+        restored[static_cast<size_t>(z)*baselineRange+x] = before;
+    });
+    // SetTerrain publishes transactionally. Keep both the visible edit and its backup on failure.
+    if (!world.Create() || !world.SetTerrain(restored.data(),baselineRange,baselineRange,
+                                           baselineSpacing,0,0)) return false;
+    terrainBaseline.ForEach([](int x,int z,float before) {
+        if (before != GLandscape->GetHeight(z,x)) GLandscape->HeightChange(x,z,before);
+    });
     GLandscape->FlushCache();
     ForgetShowcaseTerrainCrater();
     ClearTerrainEditBaseline();
@@ -114,7 +117,7 @@ bool PaintTerrain(float cx, float cz, float radius, float delta)
             changed |= next != old;
         }
     if (!changed) return false;
-    if (!CaptureTerrainEditBaseline()) return false;
+    if (!CaptureTerrainEditBaseline(left,top,width,height)) return false;
     auto& world = Physics::EnsurePhysicsWorld();
     if (!world.Create()) return false;
     const auto stats = world.GetStats();
