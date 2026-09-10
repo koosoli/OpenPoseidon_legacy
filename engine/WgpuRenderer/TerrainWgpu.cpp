@@ -6,6 +6,7 @@
 #include "CdlodDriver.hpp"
 #include "EngineWgpu.hpp"
 #include "TextureWgpu.hpp"
+#include "TextureBankWgpu.hpp"
 
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Graphics/Rendering/Frame/PresentationSnapshot.hpp> // RenderSnapshot S1: the frame clock
@@ -570,6 +571,21 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<
             Texture* colour = enf != nullptr && enf->detail != nullptr ? enf->detail : land.GetTexture(i);
             material.legacy = bindLayer(colour, false);
             material.satellite = material.legacy;
+            if (colour != nullptr && enf == nullptr && land.GetA3TerrainMaterial(i) == nullptr)
+            {
+                auto* bank = static_cast<TextureBankWgpu*>(_engine.TextBank());
+                Ref<Texture> normal = bank->LoadLegacyEnhancementNormal(colour->Name());
+                if (normal.GetRef() != nullptr)
+                {
+                    material.tile_normal = bindLayer(normal.GetRef(), false);
+                    if (material.tile_normal != 0)
+                    {
+                        _a3TerrainTextures.push_back(normal);
+                        LOG_INFO(Graphics, "Wgpu legacy terrain: {} enhanced by {}", (const char*)colour->Name(),
+                                 (const char*)normal->Name());
+                    }
+                }
+            }
             if (enf != nullptr && enf->detail != nullptr)
             {
                 material.enfusion = 1;

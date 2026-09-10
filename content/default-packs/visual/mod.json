@@ -1,6 +1,6 @@
 {
   "name": "OpenPoseidon Ground Materials",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "defaultContentApi": "1",
-  "description": "Own procedural ground materials. Initial road integration under development."
+  "description": "Own procedural ground materials. Road and terrain integration under development."
 }

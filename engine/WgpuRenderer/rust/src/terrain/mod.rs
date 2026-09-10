@@ -1916,6 +1916,21 @@ mod enfusion_ground_tests {
         );
     }
 
+    #[test]
+    fn legacy_normals_keep_ag_decode_cell_clamping_and_far_early_out() {
+        let src = include_str!("terrain.wgsl");
+        let helper = src.split("fn sample_legacy_normal(").nth(1).unwrap()
+            .split("fn terrain_uv_gradient(").next().unwrap();
+        assert!(helper.contains("vec2<f32>(texel.a, texel.g)"));
+        assert!(helper.contains("material.surface_count != 0u"));
+        assert!(helper.contains("tile_uv - cell"));
+        assert!(src.contains("material.legacy |= entry & CELL_CLAMPED;"));
+        let far = src.split("if (far >= 0.999) {").nth(1).unwrap();
+        let exit = far.find("return AuthoredCell(satellite,").unwrap();
+        let normal = far.find("sample_legacy_normal(").unwrap();
+        assert!(exit < normal, "far satmap must not sample detail normals");
+    }
+
     // The master weight sits in the terrain params, not in a pipeline override, so the
     // dev panel can A/B it live. If it stops being read the switch becomes a no-op that
     // still moves in the UI.

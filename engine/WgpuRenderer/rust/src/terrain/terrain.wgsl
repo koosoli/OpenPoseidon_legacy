@@ -226,6 +226,25 @@ fn terrain_uv(transform: TerrainUv, source_bit: u32, source_mask: u32,
                      dot(source, transform.v.xyz) + transform.v.w);
 }
 
+// OFP enhancement NOHQ uses X in alpha and Y in green, unlike the authored
+// RGB whole-tile normal below. Reuse the slot, not its different decode/texgen.
+fn sample_legacy_normal(material: TerrainMaterial, cell: vec2<f32>, tile_uv: vec2<f32>,
+                        ddx: vec2<f32>, ddy: vec2<f32>) -> vec3<f32> {
+    if (material.surface_count != 0u || material.tile_normal == 0u || tile_normal_strength <= 0.0) {
+        return vec3<f32>(0.0, 0.0, 1.0);
+    }
+    var texel: vec4<f32>;
+    if ((material.legacy & CELL_CLAMPED) != 0u) {
+        texel = textureSampleGrad(ground[material.tile_normal], ground_clamp_samp,
+                                  tile_uv - cell, ddx, ddy);
+    } else {
+        texel = textureSampleGrad(ground[material.tile_normal], ground_samp, tile_uv, ddx, ddy);
+    }
+    let xy = vec2<f32>(texel.a, texel.g) * 2.0 - vec2<f32>(1.0);
+    let z = sqrt(max(1.0 - dot(xy, xy), 1e-6));
+    return normalize(vec3<f32>(xy * tile_normal_strength, z));
+}
+
 fn terrain_uv_gradient(transform: TerrainUv, source_bit: u32, source_mask: u32,
                        world_gradient: vec3<f32>, tile_gradient: vec2<f32>) -> vec2<f32> {
     let source = select(vec3<f32>(tile_gradient, 0.0), world_gradient, (source_mask & (1u << source_bit)) != 0u);
@@ -445,7 +464,9 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
                         ddx: vec2<f32>, ddy: vec2<f32>, world_pos: vec3<f32>,
                         view_pos: vec3<f32>,
                         world_dwx: vec3<f32>, world_dwy: vec3<f32>) -> AuthoredCell {
-    let material = terrain_materials[entry & CELL_LAYER_MASK];
+    var material = terrain_materials[entry & CELL_LAYER_MASK];
+    // The layer is a material-table lookup, but clamping belongs to the cell.
+    material.legacy |= entry & CELL_CLAMPED;
     let authored_weight = clamp(a3_surface_blend, 0.0, 1.0);
     // --- RFG-065: the NATIVE Enfusion surface ----------------------------------------
     //
@@ -525,7 +546,8 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
         if (material.pad0 == 1u && material.satellite != 0u) {
             let far = smoothstep(800.0, 2400.0, length(view_pos));
             if (far <= 0.0) {
-                return AuthoredCell(sample_cell(material.legacy,cell,tile_uv,ddx,ddy), vec3<f32>(0.0,0.0,1.0));
+                return AuthoredCell(sample_cell(material.legacy,cell,tile_uv,ddx,ddy),
+                                    sample_legacy_normal(material,cell,tile_uv,ddx,ddy));
             }
             let inv_span = 1.0 / (tp.land_grid * f32(tp.land_range));
             let uv = (world_pos.xz - tp.world_origin) * inv_span;
@@ -535,10 +557,12 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
                 return AuthoredCell(satellite, vec3<f32>(0.0,0.0,1.0));
             }
             let near = sample_cell(material.legacy,cell,tile_uv,ddx,ddy);
-            return AuthoredCell(mix(near,satellite,far), vec3<f32>(0.0,0.0,1.0));
+            let normal = sample_legacy_normal(material,cell,tile_uv,ddx,ddy);
+            return AuthoredCell(mix(near,satellite,far),
+                                normalize(mix(normal,vec3<f32>(0.0,0.0,1.0),far)));
         }
         return AuthoredCell(sample_cell(material.legacy, cell, tile_uv, ddx, ddy),
-                            vec3<f32>(0.0, 0.0, 1.0));
+                            sample_legacy_normal(material,cell,tile_uv,ddx,ddy));
     }
     // RVMAT `worldPos` is the engine's own world vector, Y up -- the same axes
     // the renderer already carries. The swizzle that used to sit here was

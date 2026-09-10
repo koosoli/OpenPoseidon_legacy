@@ -427,6 +427,24 @@ std::string TextureBankWgpu::LegacyNormalPath(const char* name)
     return {};
 }
 
+Ref<Texture> TextureBankWgpu::LoadLegacyEnhancementNormal(const char* name)
+{
+    const std::string key(name);
+    const size_t dot = key.find_last_of('.');
+    if (dot == std::string::npos || dot == 0)
+        return {};
+    const std::string mapped = LegacyNormalPath(name);
+    const char* normalMode = std::getenv("POSEIDON_VISUAL_UPGRADE_NORMALS");
+    if (!mapped.empty() && normalMode && std::strcmp(normalMode, "0") == 0)
+        return {}; // Albedo-only arm, without disabling unrelated authored normals.
+    const std::string candidate = mapped.empty() ? key.substr(0, dot) + "_nohq.paa" : mapped;
+    QFBank* bank = QIFStreamB::AutoBank(candidate.c_str());
+    const bool inBank = bank && bank->FileExists(candidate.c_str() + bank->GetPrefix().GetLength());
+    if (!inBank && !QIFStream::FileExists(candidate.c_str()))
+        return {}; // Never bind a missing-file placeholder as a surface normal.
+    return Load(candidate.c_str());
+}
+
 Ref<Texture> TextureBankWgpu::Load(RStringB name)
 {
     int index = Find(name);

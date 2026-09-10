@@ -109,3 +109,23 @@ PoseidonGame build with --parallel 2 passed and staged the 2 MB road archive.
 Targeted unit builds do not regenerate assets. Python/numpy/Pillow are build-time
 dependencies only. Fresh-release startup and the other two surfaces remain open;
 no empty Jeep package is produced to disguise the missing FFV implementation.
+
+## Legacy landscape normal integration candidate
+
+Shared TextureBankWgpu::LoadLegacyEnhancementNormal now provides the same PBO,
+sibling and albedo-only rules to direct/retained objects and legacy terrain.
+TerrainWgpu binds the existing tile_normal slot on legacy descriptors only;
+the shader decodes this path as AG NOHQ, not the authored RGB tile-normal path.
+The normal is faded to flat with the Satmap and not sampled past its far exit.
+Cell clamp flags were previously lost between index lookup and material sampling;
+sample_authored_cell now passes them into the legacy colour and normal sampling.
+Modern authored and Enfusion material selection is not replaced.
+
+First real landscape candidate: exact eden\\ps.paa in Dta/Eden.pbo, palette index
+2 of installed Worlds/eden.wrp. A read-only RVW4 export shows a 3x3 sand area at
+5800/3400, about 10.6 m high. LandSave::LoadOptimized sets 50 m cells. The own sand
+recipe therefore uses a 50 m physical period, not the generic 4 m gravel recipe.
+Pack 0.1.1 adds this candidate, with no copied source-game pixels. Terrain normals
+and clamp propagation have a Rust contract test; 5 generator tests pass and the
+client build passes. Installed Sand Original/Albedo/Full acceptance is next.
+These facts do not establish photorealism, roughness integration or all surfaces.

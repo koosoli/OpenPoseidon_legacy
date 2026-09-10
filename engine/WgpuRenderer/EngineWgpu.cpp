@@ -10174,36 +10174,13 @@ uint64_t EngineWgpu::LegacyEnhancementNormal(const char* textureName)
         return found->second;
 
     uint64_t handle = 0;
-    // Strip the extension, append the suffix. `.pac` and `.paa` both appear in CWA data; the
-    // enhancement is always a .paa because that is what the texture bank loads.
-    const size_t dot = key.find_last_of('.');
-    if (dot != std::string::npos && dot > 0)
+    // Shared with legacy terrain: identical mounted-PBO lookup and albedo-only rules.
+    Ref<Texture> tex = _wbank->LoadLegacyEnhancementNormal(textureName);
+    if (auto* wgpuTex = static_cast<TextureWgpu*>(tex.GetRef()))
     {
-        const std::string mappedNormal = _wbank->LegacyNormalPath(textureName);
-        if (!mappedNormal.empty())
-        {
-            const char* normalMode = std::getenv("POSEIDON_VISUAL_UPGRADE_NORMALS");
-            if (normalMode && std::strcmp(normalMode, "0") == 0)
-            {
-                _legacyEnhancementCache.emplace(key, 0);
-                return 0; // Albedo-only acceptance arm; unrelated normal maps stay enabled.
-            }
-        }
-        const std::string candidate = mappedNormal.empty() ? key.substr(0, dot) + "_nohq.paa" : mappedNormal;
-        // Probe before loading: TextureBank::Load on a missing path yields a placeholder rather
-        // than nothing, and binding a placeholder as a normal map would flatten the surface
-        // instead of leaving it alone.
-        QFBank* candidateBank = QIFStreamB::AutoBank(candidate.c_str());
-        const bool inBank = candidateBank &&
-            candidateBank->FileExists(candidate.c_str() + candidateBank->GetPrefix().GetLength());
-        if (inBank || QIFStream::FileExists(candidate.c_str()))
-        {
-            Ref<Texture> tex = _wbank->Load(candidate.c_str());
-            if (auto* wgpuTex = static_cast<TextureWgpu*>(tex.GetRef()))
-                handle = wgpuTex->EnsureUploaded();
-            if (handle != 0)
-                LOG_INFO(Graphics, "Wgpu legacy material: {} enhanced by {}", key, candidate);
-        }
+        handle = wgpuTex->EnsureUploaded();
+        if (handle != 0)
+            LOG_INFO(Graphics, "Wgpu legacy material: {} enhanced by {}", key, (const char*)tex->Name());
     }
     _legacyEnhancementCache.emplace(key, handle);
     return handle;

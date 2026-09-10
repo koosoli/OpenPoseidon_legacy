@@ -1,8 +1,9 @@
-param([ValidateSet('Original','Albedo','Full')][string]$Arm = 'Full')
+param([ValidateSet('Original','Albedo','Full')][string]$Arm = 'Full',
+      [ValidateSet('Road','Sand')][string]$Surface = 'Road')
 $ErrorActionPreference = 'Stop'
 if (!$env:LOCK_OWNER) { throw 'Use scripts/with-game-lock.sh' }
 $root = Split-Path $PSScriptRoot -Parent
-$label = 'material-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + $Arm
+$label = 'material-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + $Surface + '-' + $Arm
 $out = Join-Path $root 'build/default-content/acceptance'
 $user = Join-Path $out ('user-' + $label)
 New-Item -ItemType Directory -Force $user | Out-Null
@@ -10,6 +11,9 @@ New-Item -ItemType Directory -Force $user | Out-Null
 $settings = @{POSEIDON_USER_DIR=$user; POSEIDON_VSYNC='0'; WGR_LOD_GOVERNOR_RANGE='1';
     POSEIDON_VISUAL_UPGRADE_NORMALS=$(if ($Arm -eq 'Albedo') {'0'} else {'1'})}
 $extra = @('--test-world-freefly','6378.7','5672.5','74.4','120','-12','--test-world-hour','14')
+if ($Surface -eq 'Sand') {
+    $extra = @('--test-world-freefly','5800','3400','13.0','90','-20','--test-world-hour','14')
+}
 if ($Arm -eq 'Original') { $extra += '--no-visual-upgrade' }
 & "$PSScriptRoot/farfield-bench.ps1" -Label $label -Mission 'tests/perf/missions/perf_field.eden' `
     -Out $out -Env $settings -Repeats 1 -Width 1280 -Height 720 -Windowed -WarmupSeconds 20 `

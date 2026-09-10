@@ -117,6 +117,7 @@ class TextureBankWgpu : public AbstractTextBank
     int Find(RStringB name) const;
     Ref<Texture> Load(RStringB name) override;
     std::string LegacyNormalPath(const char* name);
+    Ref<Texture> LoadLegacyEnhancementNormal(const char* name);
     // TODO: real two-texture blend; for now load whichever source dominates.
     Ref<Texture> LoadInterpolated(RStringB n1, RStringB n2, float factor) override
     {
