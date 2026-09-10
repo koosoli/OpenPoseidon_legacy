@@ -161,6 +161,13 @@ with a **Rule** column saying whether each is *stated*, *implicit* (obeyed by ac
 to watch.**
 
 ### The savegame version is written and never compared
+**Closed for future-version rejection, 2026-09-10, a23c43de/883f174a.**
+World::Serialize checks the maximum supported archive version before any world
+mutation. Old/current versions retain existing per-field defaults. Native
+old/current/future two-pass tests and an installed current-version save/load
+round-trip pass; see SEPTEMBER9-VISUAL-FOLLOWUP.md. This does not establish a
+complete migration/identity contract for every historical save. Original finding:
+
 `WorldSerializeVersion = 13` appears in exactly three places and **all three are writes**.
 The reader's only failure mode is the field being absent; any value that parses is accepted,
 including one from the future. Its per-field gating (`if (_version < minVersion) return

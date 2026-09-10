@@ -29,6 +29,13 @@ Native tests cover old/current/future versions on both passes; build and install
 current-version round-trip acceptance pending. This does not solve the separately
 parked static-object identity or network-authority problems.
 
+883f174a acceptance: build passes; [save],[ntc] passes 14 cases / 327 assertions.
+First new fixture reset a primitive between loading passes, contrary to the
+existing first-pass-only primitive reader; corrected without changing production
+deserialization. Installed Test-SaveVersion current-883f174a exits 0: save returns
+OK, load returns OK, player alive and damage restores 0.5 -> 0.25. Future-version
+rejection is a native test, not an installed corrupt-save UI acceptance claim.
+
 ## Renewed owner scope after the follow-up audit
 
 All remaining measures proposed in REQUEST-AUDIT-FOLLOWUP-20260909.md are now
