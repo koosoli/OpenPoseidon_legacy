@@ -1,5 +1,41 @@
 # September 9 visual follow-up
 
+## Texture precision and measured DDS preparation, September 10 afternoon
+
+AI88 precision defect fixed in 9eccd411: PAADecoder used PacARGB4444 as an
+intermediate for AI88, discarding four bits of both intensity and alpha. Both
+buffer and selected-file-mip paths now preserve the original AI88 bytes before
+expanding to RGBA8. No change to GPU format, texture dimensions or DXT upload.
+Synthetic all-256-level test failed on the original code (1 decoded as 0), then
+passed; decoder/streaming suite: 21 cases / 5249 assertions. Installed-game Field
+smoke build/modernisation-cpu/cpu-20260910-160814-Field exited 0, no renderer errors,
+image inspected. This is NOT a matched screenshot proof for the user's road/RPG
+sight: their asset identity and original capture settings remain unconfirmed.
+
+a39dd881 adds opt-in POSEIDON_DDS_PREP_TRACE=1 to distinguish DDS read, decode,
+coverage read/decode/merge, tint and finalisation. Timings include CPU preparation
+and waits, not GPU upload; only calls >=2 ms are logged. inputBytes is file data,
+outputBytes the retained mip payload, neither is peak process RAM/driver VRAM.
+Native route cancel-20260910-161933-slow-trace-legacy-tables-dds-prep completed,
+exit 0, 22370 final registered instances. 1353 logged calls: total 22126.661 ms,
+read 4752.597, decode 15344.360, merge 393.131, tint 1192.078. Cumulative, not a
+22-second frame; thresholds exclude short calls. The ending image is ocean.
+
+f79ac2a9 adds an OFF-by-default BC7 block-row batching experiment on the existing
+TaskPool, not a scheduler/AI rewrite. POSEIDON_DDS_BC7_BATCH=1 selects it; 2 also
+compares every eligible mip against serial output in the running game. Only
+main-thread, BC7, >=256x256 decode calls qualify; external preparer threads and
+small mips remain serial. Owned output ranges join before tint/bank/GPU use.
+Unit checks include all eight modes, invalid blocks, odd edges, canaries, and
+1/2/4 pool threads: combined BC/EDDS/PAA suite 46 cases / 9829 assertions passed.
+Runtime oracle: cancel-20260910-163111-slow-trace-legacy-tables-dds-prep-bc7-2,
+1882 eligible mips byte-identical, exit 0, no mismatches. Three subsequent pairs
+on f79ac2a9 reduced exact logged moving maxima 277.286/254.484/275.880 ms to
+162.390/165.841/183.793 ms. No consistent FPS/p99 improvement or memory saving;
+the accepted benefit is shorter loading spikes without reducing texture data.
+BC7 batching now defaults ON; explicit 0 is the serial control, 2 the oracle.
+The complete run table and remaining gates are in the three-track assessment.
+
 ## Three-track audit and streaming lifecycle, September 10
 
 See decisions/MODERNISATION-THREE-TRACKS-20260910.md for the requested code-based

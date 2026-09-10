@@ -577,7 +577,9 @@ bool TextureSourceDDS::InitFromMemory(const void* data, size_t size, const char*
             std::vector<uint8_t> rgba(static_cast<size_t>(level.width) * static_cast<size_t>(level.height) * 4);
             static const int batchMode = [] {
                 const char* value = std::getenv("POSEIDON_DDS_BC7_BATCH");
-                return value && value[0] == '2' ? 2 : value && value[0] == '1' ? 1 : 0;
+                // Three same-route pairs reduced loading spikes with byte-identical output.
+                // Keep 0 as the serial control, 2 as the expensive in-game oracle.
+                return value && value[0] == '2' ? 2 : value && value[0] == '0' ? 0 : 1;
             }();
             TaskPool* pool = GetGlobalTaskPool();
             const bool batched = batchMode != 0 && _format == PixelFormat::BC7 &&

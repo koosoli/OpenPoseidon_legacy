@@ -1,5 +1,10 @@
 # Three modernisation tracks: code audit and bounded experiments
 
+September 10 afternoon continuation: remote consolidated-v2 was rechecked at
+0038ac20, then advanced with the changes below. Initial baseline and historical
+measurements remain explicitly dated. Do not interpret this document as completion
+of all three tracks.
+
 Baseline: safety/consolidated-v2 = 2ad0a9becb3b46e45ec42774d025f8e9fff23f41.
 Worktree: asset-obs. The unfinished local TerrainEditJournal is NOT part of
 that baseline. Analysis requested first; implementation subsequently authorised.
@@ -362,3 +367,82 @@ delayed work as a speedup. This is not a completed end-to-end byte-budget pipeli
 The frame analyzer's gap warning was corrected too: averaged gaps can distort
 p99 in EITHER direction, even while concealing the worst individual frame. A fifth
 regression test demonstrates this; no blanket lower-bound claim on p99 remains.
+
+## Accepted follow-up: bounded BC7 preparation on the existing TaskPool
+
+Instead of a new scheduler or wholesale AI threading, isolate the actual native
+texture cost. a39dd881 adds opt-in POSEIDON_DDS_PREP_TRACE=1 in DdsImport.cpp,
+TextureSourceDDS::Init. Read includes mount access/decompression and name setup;
+decode includes EDDS parsing, block decoding and channel preparation. Coverage
+read/decode, merge, tint and finalisation are separate. GPU upload is NOT included.
+Only calls >=2 ms are logged, so summing these records excludes short calls.
+Failed calls keep success=false and unfinished stage time in finish. Byte counts
+are input files and retained output mips, not a complete RAM/VRAM peak metric.
+
+Native route cancel-20260910-161933-slow-trace-legacy-tables-dds-prep on a39dd881:
+1353 logged calls total 22126.661 ms, read 4752.597, decode 15344.360, merge 393.131,
+tint 1192.078. These are cumulative overlapping-with-other-thread elapsed scopes,
+not a 22-second frame. A shared tinted metal tile alone repeatedly spends about
+25 ms decoding before its 2 ms tint. This justifies targeting decode first, not
+assuming tint or AI is the dominant remaining cost.
+
+f79ac2a9 adds DecodeBc7ImageBatched in Graphics/Textures/BlockCompression.cpp:
+64-pixel-row batches on Core/TaskPool, immutable input and disjoint output,
+joined before existing tint/material/GPU code resumes. DdsImport uses it only
+for BC7 mips >=256x256 when Foundation::IsMainThread and a global pool exist.
+External preparer threads remain serial (they are NOT registered enki threads).
+No new lifetime, bank mutation, RNG, simulation ordering, cache or GPU ownership.
+The serial decoder remains the reference; 1-thread pools fall back to it.
+
+Unit tests compare all eight modes, invalid blocks, odd edges, guard bytes and
+1/2/4 pool threads. BC/EDDS/PAA suite: 46 cases / 9829 assertions pass. In-game
+mode 2 additionally checks every eligible real mip against serial output:
+cancel-20260910-163111-slow-trace-legacy-tables-dds-prep-bc7-2 gives 1882 identical
+checks, no mismatches, exit 0. Its doubled decode work is NOT a performance arm.
+
+Three alternating pairs on the SAME installed f79ac2a9. Same 4 km route,
+1280x720 native, DLSS off, MSAA4, preset3, fixed AutoLOD1, clutter reuse on,
+bank-table cap OFF in both, slow/DDS traces on in both. Host: RTX3070 Vulkan,
+8 existing task threads / 16 logical cores. Fresh process per arm; OS caches
+not flushed, so these are repeat-process tests, not cold-disk claims.
+Run IDs under build/native-stream-cancellation/cancel-20260910-, suffix
+-slow-trace-legacy-tables-dds-prep; parallel arms additionally append -bc7-1.
+
+| Serial / batch run | Moving FPS | Moving p95 ms | Moving p99 ms | Exact logged moving maximum ms | Logged moving >100 ms | Static p99 ms |
+|---|---|---|---|---|---|---|
+| 163419 / 163636 | 33.8 / 33.7 | 42 / 44 | 90 / 87 | 277.286 / 162.390 | 10 / 6 | 38 / 39 |
+| 163852 / 164111 | 33.9 / 33.6 | 42.5 / 43 | 91 / 84 | 254.484 / 165.841 | 9 / 6 | 40 / 38 |
+| 164327 / 164546 | 33.3 / 34.0 | 42 / 41 | 87 / 88 | 275.880 / 183.793 | 10 / 7 | 38 / 40 |
+
+FPS is trace throughput, not reciprocal median. Percentiles have ~96% one-frame
+counter coverage; gap averaging can distort p99 either way. Exact maxima/counts
+use separate main-loop records between FFCAM move/done. Static/moving transitions
+and final auto-screenshot are not treated as traversal spikes.
+Max bank-table burst ms pairs: 860.729/404.445, 832.960/391.523, 924.699/420.486.
+For the SAME tinted st_metalpaint_mate_1m_bcr material, decode ms pairs are
+23.184/7.699, 27.904/7.906, 24.579/6.425. This illustrates attribution, not an
+aggregate speedup for every material. The >=2 ms log threshold forbids comparing
+raw cumulative sums as though both arms logged every identical call.
+
+All six runs exit 0, complete the route, retain 22370 final registered instances
+and 1923.552 MiB tracked GPU residency. Last logged residency at move start is
+19999 in every arm; move end is 19977 or 19996 as a rate-limited recentre log,
+not exact per-frame visibility. Private-memory peak GiB pairs:
+11.017/11.065, 11.031/11.070, 11.049/11.022. Working-set peak pairs:
+7.109/7.273, 7.094/7.284, 7.140/7.105. No memory-saving claim. Driver-total VRAM
+was not sampled in these pairs; tracked residency is not a substitute for it.
+
+Decision: enable this bounded path by default for shorter loading spikes. Keep
+POSEIDON_DDS_BC7_BATCH=0 for serial A/B and 2 for the byte oracle. Diagnostics
+remain OFF by default. No consistent average-FPS or p99 gain is claimed; the
+repeatable benefit is lower worst loading bursts, with identical decoded bytes.
+The original table-count cap remains OFF: delaying work and reducing its cost
+are different changes with different acceptance results.
+
+Still open: full campaign/Fusion workload census, driver VRAM timelines, native
+multiple-view/teleport/world-change stress, and cross-core runtime performance.
+This synchronous join is NOT complete async preparation or a global byte budget.
+Next reuse already decoded shared native tiles within existing ownership/budgets,
+or prepare one owned DDS payload ahead of bank registration; never call the
+file server/texture bank from arbitrary worker threads. Far cluster HLOD remains
+a separate, visually gated experiment, not something the Satmap already does.
