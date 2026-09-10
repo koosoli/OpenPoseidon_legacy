@@ -1228,6 +1228,34 @@ TEST_CASE("SIM-807 SubmitConvert refuses what it must", "[determinism][preparer]
     delete again.shape;
 }
 
+TEST_CASE("Preparer releases conversion bank tables outside its queue mutex", "[determinism][preparer][ShapeAdapter]")
+{
+    if (!ObjectStreamPreparer::AsyncEnabled())
+    {
+        SUCCEED("WGR_OBJECT_STREAM_ASYNC=0 in this environment");
+        return;
+    }
+    std::atomic<bool> released{false};
+    ObjectStreamPreparer prep;
+    const std::string path = "sim807__release.p3d";
+    prep.Reset(&path, 1);
+    auto model = BuildFixtureModel();
+    auto tables = std::shared_ptr<Adapter::AdapterBankTables>(new Adapter::AdapterBankTables,
+        [&](Adapter::AdapterBankTables* value) {
+            // This locks the preparer again: a last-reference release under its
+            // queue lock would deadlock, even if conversion itself succeeded.
+            (void)prep.SnapshotStats();
+            delete value;
+            released.store(true, std::memory_order_release);
+        });
+    Adapter::BuildAdapterBankTables(*model, *tables);
+    REQUIRE(prep.SubmitConvert(0, model, std::move(tables)));
+    REQUIRE(WaitFor([&] { return released.load(std::memory_order_acquire); }));
+    auto result = prep.TakeConverted(0);
+    REQUIRE(result.shape != nullptr);
+    delete result.shape;
+}
+
 TEST_CASE("SIM-807 cancellation mid-flight leaves no slot behind", "[determinism][preparer][ShapeAdapter]")
 {
     if (!ObjectStreamPreparer::AsyncEnabled())

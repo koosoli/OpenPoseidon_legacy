@@ -573,3 +573,19 @@ against external editing. PAK/EDDS/PAA suite: 28 cases / 502 assertions pass,
 including eight workers doing 16 success/failure read pairs with independent
 errors, compressed/plain payloads, and short/missing-input rejection.
 Installed smoke after this archive change remains pending.
+
+Installed 4dd6a906 smoke 233954-slow-trace-bc7-default-driver-memory-tint-reuse-0
+passes route, strict lifecycle checks and shutdown, with 22370 registered
+instances / 134 driver samples. This does not establish that the earlier
+intermittent hang is fixed.
+
+Follow-up audit found active conversion jobs releasing their final bank-table
+references under ObjectStreamPreparer's queue mutex (and failed-job models in
+the same scope). Retirement now explicitly drops tables/models/shapes outside
+that mutex, including stale results. A destructor callback that re-enters
+SnapshotStats verifies the lock boundary, rather than merely testing conversion
+success. Conversion also has its own `objconvert` watchdog scope; previously
+only parse/texture preparation was watched. Nine preparer/ShapeAdapter cases
+pass: 189 assertions with normal settings; 992 assertions with concurrent
+adaptation enabled and eight workers. Runtime verification of this follow-up
+is still pending; no proof yet that it caused the observed shutdown hang.

@@ -198,8 +198,10 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
             ConvertJob job = std::move(convertQueue.front());
             convertQueue.pop_front();
             const uint64_t jobGen = generation.load(std::memory_order_relaxed);
+            const std::string conversionPath = paths[job.index];
             lock.unlock();
 
+            Poseidon::WatchDogItem watch = Poseidon::WatchScopeFor("objconvert", conversionPath);
             const auto convStart = std::chrono::steady_clock::now();
             LODShapeWithShadow* shape = nullptr;
             try
@@ -223,6 +225,7 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                 lock.unlock();
                 delete shape;
                 job.model.reset();
+                job.tables.reset();
                 lock.lock();
                 continue;
             }
@@ -231,6 +234,7 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
             if (shape && job.index < count)
             {
                 convertedShapes[job.index] = shape;
+                shape = nullptr; // Ownership is now in the published slot.
                 convertedModels[job.index] = std::move(job.model);
                 Set(job.index, State::Converted);
                 ++stats.converted;
@@ -239,11 +243,17 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
             {
                 // Conversion failed: sticky Failed, the admit loop falls back to the
                 // synchronous path for this model exactly like a parse failure.
-                delete shape;
                 if (job.index < count)
                     Set(job.index, State::Failed);
                 ++stats.failed;
             }
+            // Last references can release bank resources or large model storage.
+            // Their destructors must never run under the preparer's queue mutex.
+            lock.unlock();
+            delete shape;
+            job.model.reset();
+            job.tables.reset();
+            lock.lock();
             continue;
         }
         const uint32_t index = queue.front();
