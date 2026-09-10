@@ -27,6 +27,7 @@ void RegisterSqf(HarnessServer& hs);
 
 /// Client-only snow/settings probe for installed reset/track regression tests.
 void RegisterSnowProbe(HarnessServer& hs);
+void RegisterPhysicsProbe(HarnessServer& hs);
 
 void RegisterHttpFixtures(HarnessServer& hs);
 

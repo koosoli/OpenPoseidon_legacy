@@ -7,6 +7,9 @@ using namespace Poseidon;
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/World/Weather/RainVolume.hpp>
+#include <Poseidon/World/Physics/PhysicsWorld.hpp>
+#include <Poseidon/Dev/Diag/PhysicsCorpus.hpp>
+#include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/Dev/Debug/DevPanelWidgets.hpp>
 #include <SDL3/SDL_events.h>
 #include <SDL3/SDL_keyboard.h>
@@ -47,6 +50,7 @@ using namespace Poseidon;
 #include <SDL3/SDL.h>
 
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <string>
 #include <thread>
@@ -153,6 +157,73 @@ void RegisterSnowProbe(HarnessServer& hs)
             cJSON_AddNumberToObject(out, "chunks", static_cast<double>(snow.Chunks()));
             cJSON_AddNumberToObject(out, "liveFlakes", GSnowFlakes.Stats().liveDrops);
             cJSON_AddNumberToObject(out, "drawnFlakes", GSnowFlakes.Stats().drawnDrops);
+            return HarnessProtocol::JsonResponse(out);
+        });
+}
+
+void RegisterPhysicsProbe(HarnessServer& hs)
+{
+    hs.RegisterCommand({"dev_physics_probe", "Inspect or launch bounded collision probes (engine XYZ metres)",
+                        {{"action", "string", true}}},
+        [](const std::string&, cJSON* root) -> std::string {
+            const char* action = HarnessProtocol::GetString(root, "action");
+            if (!GWorld || !GLandscape || !action)
+                return HarnessProtocol::ErrorResponse("requires world and action");
+            if (std::strcmp(action, "init") == 0)
+            {
+                if (!PhysicsCorpusHasRun()) RunPhysicsCorpus();
+                return HarnessProtocol::OkResponse();
+            }
+            auto* world = Physics::GetPhysicsWorld();
+            if (!world || !world->IsCreated()) return HarnessProtocol::ErrorResponse("init physics first");
+            if (std::strcmp(action, "state") == 0)
+            {
+                std::vector<Physics::ProbeSample> samples;
+                world->GetProbeSamples(samples);
+                cJSON* out = cJSON_CreateObject();
+                auto* list = cJSON_AddArrayToObject(out, "positions");
+                for (const auto& sample : samples)
+                {
+                    const float position[] = {sample.position.X(), sample.position.Y(), sample.position.Z()};
+                    cJSON_AddItemToArray(list, cJSON_CreateFloatArray(position, 3));
+                }
+                cJSON_AddNumberToObject(out, "bodies", world->GetStats().bodies);
+                return HarnessProtocol::JsonResponse(out);
+            }
+            auto readVector = [&](const char* name, Vector3& value) {
+                auto* array = cJSON_GetObjectItemCaseSensitive(root, name);
+                if (!cJSON_IsArray(array) || cJSON_GetArraySize(array) != 3) return false;
+                for (int i = 0; i < 3; ++i)
+                {
+                    auto* item = cJSON_GetArrayItem(array, i);
+                    if (!cJSON_IsNumber(item) || !std::isfinite(item->valuedouble) ||
+                        std::abs(item->valuedouble) > 1000000.0) return false;
+                    value[i] = static_cast<float>(item->valuedouble);
+                }
+                return true;
+            };
+            Vector3 from, to;
+            if (!readVector("from", from) || !readVector("to", to) ||
+                (to-from).Size() < 0.01f || (to-from).Size() > 100.0f)
+                return HarnessProtocol::ErrorResponse("requires finite from/to, segment 0.01..100 m");
+            if (std::strcmp(action, "spawn") == 0)
+            {
+                std::vector<Physics::ProbeSample> samples;
+                world->GetProbeSamples(samples);
+                if (samples.size() >= 32) return HarnessProtocol::ErrorResponse("probe test limit reached");
+                Physics::SphereProbeDef def;
+                def.position = from;
+                def.velocity = (to-from).Normalized() * 20.0f;
+                def.restitution = 0;
+                if (!world->SpawnSphereProbe(def).IsValid()) return HarnessProtocol::ErrorResponse("spawn failed");
+                return HarnessProtocol::OkResponse();
+            }
+            if (std::strcmp(action, "ray") != 0) return HarnessProtocol::ErrorResponse("unknown physics action");
+            Vector3 hit(VZero);
+            const bool solid = world->CastRay(from, to, hit, {Physics::ColliderFlags::Solid}).IsValid();
+            cJSON* out = cJSON_CreateObject();
+            cJSON_AddBoolToObject(out, "solid", solid);
+            cJSON_AddNumberToObject(out, "distance", solid ? (hit-from).Size() : -1.0f);
             return HarnessProtocol::JsonResponse(out);
         });
 }

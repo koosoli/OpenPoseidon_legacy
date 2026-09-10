@@ -14,6 +14,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <iterator>
 #include <cstdint>
 #include <memory>
@@ -333,6 +334,27 @@ bool PhysicsWorld::ExtractPieces(LODShape* shape, ColliderFlags wanted, std::vec
     return !pieces.empty();
 }
 
+static void TracePhysicsPieces(LODShape* shape, const Matrix4& transform,
+                               const std::vector<ConvexPiece>& pieces, bool dynamic)
+{
+    const char* filter = std::getenv("POSEIDON_PHYSICS_COMPONENT_TRACE");
+    if (!filter || !*filter || !shape || !std::strstr(shape->Name(), filter)) return;
+    for (std::size_t i = 0; i < pieces.size(); ++i)
+    {
+        const auto& piece = pieces[i];
+        if (!HasAny(piece.flags, ColliderFlags::Solid) || piece.count < 1) continue;
+        Vector3 lo = transform.FastTransform(piece.points[0]), hi = lo;
+        for (int j = 1; j < piece.count; ++j)
+        {
+            const Vector3 p = transform.FastTransform(piece.points[j]);
+            for (int a = 0; a < 3; ++a) { lo[a] = std::min(lo[a],p[a]); hi[a] = std::max(hi[a],p[a]); }
+        }
+        LOG_INFO(World, "PHYSCOMP: {} {} piece {} scale {} bounds [{:.3f} {:.3f} {:.3f}] [{:.3f} {:.3f} {:.3f}]",
+                 dynamic ? "dynamic" : "static", shape->Name(), i, transform.Scale(),
+                 lo.X(),lo.Y(),lo.Z(),hi.X(),hi.Y(),hi.Z());
+    }
+}
+
 BodyId PhysicsWorld::SpawnModelProbe(LODShape* shape, const Matrix4& transform, float mass, float friction,
                                      float restitution, Vector3Par velocity)
 {
@@ -352,6 +374,7 @@ BodyId PhysicsWorld::SpawnModelProbe(LODShape* shape, const Matrix4& transform, 
     {
         return {};
     }
+    TracePhysicsPieces(shape, transform, pieces, true);
     return _backend->SpawnDynamicPieces(pieces.data(), static_cast<int>(pieces.size()), transform, mass, friction,
                                         restitution, velocity);
 }
@@ -450,6 +473,7 @@ RegisterResult PhysicsWorld::RegisterStaticDetailed(LODShape* shape, const Matri
         return result;
     }
 
+    TracePhysicsPieces(shape, transform, pieces, false);
     result.id = _backend->AddStaticBody(pieces.data(), static_cast<int>(pieces.size()), transform);
     if (result.id.IsValid())
     {

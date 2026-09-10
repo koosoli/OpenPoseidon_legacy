@@ -1,5 +1,41 @@
 # September 9 visual follow-up
 
+## Pub physics diagnosis, September 10, 12:50 (not a collision-fix acceptance)
+
+Added scripts/Test-PubPhysics.ps1, a bounded dev_physics_probe harness command,
+and opt-in POSEIDON_PHYSICS_COMPONENT_TRACE=<model-name-fragment>. The command
+uses engine XYZ metres, caps test probes at 32 and launches at 20 m/s; it does
+not change normal gameplay. Component tracing runs only when explicitly enabled.
+
+The first hypothesis, missing world-list houses in PhysicsCorpus, was falsified
+on current Everon. A temporary extra-building walk registered ZERO extra bodies:
+all 49689 registered scenery bodies already included the pub. Both paths returned
+the same four horizontal hit distances (2.422, 4.135, 7.424, 2.370 m). A sphere
+launched west from engine [5092.16,18.34,3994.46] stopped inside at x5090.119.
+The redundant production change was removed; do not reintroduce it as a fix.
+The first control used a nonexistent shutdown harness command; cleanup killed
+only its own process. The subsequent run used exit, returned 0, no renderer errors.
+
+The separate -Furniture diagnostic enables LooseObjects and disturbs the actual
+nearest TableHospoda, without first populating the whole-world corpus. It adds
+24 nearby static bodies in 2.5 ms, so the 4000-body cap was NOT reached here.
+The table is caught horizontally but its origin drops from y16.4975 to about
+y15.75 while tipping; this is a reproduced unresolved furniture/floor defect.
+Do not read the script completing its diagnostic capture as a passing furniture
+containment assertion. Installed 58f8f9df+dirty at 12:43, evidence under
+build/pub-physics/furniture-20260910-124344; the sphere run is
+build/pub-physics/buildings-20260910-122554 (temporary diagnostic naming).
+
+The authored solid house component 42 spans [5089.130,16.358,3986.706] to
+[5091.810,18.223,3994.074], overlapping the initial table region
+[5089.176,16.496,3992.493] to [5090.515,17.505,3993.810]. This coarse furniture
+region remains in the static house when the visible proxy becomes a Thing.
+Roadway LOD floor surfaces have no convex components and are not yet registered
+as physical triangle surfaces. Full fix needs faithful static surface collision
+and a reliable ownership split for promoted furniture, not globally disabling
+house hulls, inflating CCD flags, or enabling every prop by default. Preserve
+original mission/MP/save behaviour until those ownership gates are exercised.
+
 ## Smoke contact retention and shared sweep candidates, September 10, 12:15
 
 A tangential particle sweep no longer discards a nearby roof/wall clipping plane
