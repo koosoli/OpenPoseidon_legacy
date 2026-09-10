@@ -1,5 +1,22 @@
 # September 9 visual follow-up
 
+## Native NTC comparison, September 10
+
+Installed b4d118ce Forest same-binary A/B completed: fixed 22.726 ms GPU,
+legacy 24.244 ms, both 22360 registered / 6452 main instances. Single samples
+with slightly different triangle counts are not evidence of a speedup. Captures
+in build/native-reforger-perf/Forest-ntc-{fixed,legacy}-b4d118ce show stronger
+directional relief in pine crowns with the corrected RG normal input; flat
+branch cards remain. No additional texture samples or rendering passes added.
+The deployment's +dirty marker was an AI-assessment documentation edit only.
+
+Initial synthetic NTC/NMO decode assertions passed; its BCR control incorrectly
+expected coverage alpha 200 instead of this importer's intentional opaque 255.
+Corrected test also covers ordinary coverage and basename-only NTC recognition.
+The broader EDDS suite additionally reports two pre-existing layer-tint
+expectations incompatible with the existing linear tint path; no all-suite-pass
+claim. Final corrected targeted test/build acceptance follows separately.
+
 ## Renewed owner scope after the follow-up audit
 
 All remaining measures proposed in REQUEST-AUDIT-FOLLOWUP-20260909.md are now

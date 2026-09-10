@@ -100,6 +100,8 @@ TEST_CASE("Enfusion NTC normals use red rather than cavity for X", "[graphics][e
     REQUIRE_FALSE(Poseidon::IsEnfusionRgNormalName("assets/wall_nohq.paa"));
     REQUIRE_FALSE(Poseidon::IsEnfusionRgNormalName("assets/leaf_bcr.edds"));
     REQUIRE_FALSE(Poseidon::IsEnfusionRgNormalName("assets/leaf_a.edds"));
+    REQUIRE_FALSE(Poseidon::IsEnfusionRgNormalName("assets/old_ntc/leaf_bcr.edds"));
+    REQUIRE_FALSE(Poseidon::IsEnfusionRgNormalName("assets/leaf_ntc_bcr.edds"));
     REQUIRE_FALSE(Poseidon::IsEnfusionRgNormalName(nullptr));
 
     // Synthetic BC7 mode 6, uniform RGBA=(128,128,40,200). No game assets.
@@ -117,8 +119,9 @@ TEST_CASE("Enfusion NTC normals use red rather than cavity for X", "[graphics][e
     auto file = Header(4, 4, 1, "DX10");
     for (uint32_t word : {98u, 3u, 0u, 1u, 0u, 0x59504F43u, 16u}) AppendU32(file, word);
     file.insert(file.end(), block, block + 16);
-    for (const char* name : {"test_ntc.edds", "test_nmo.edds", "test_bcr.edds"})
+    for (const char* name : {"test_ntc.edds", "test_nmo.edds", "test_bcr.edds", "test_coverage.edds"})
     {
+        INFO(name);
         TextureSourceDDS source;
         REQUIRE(source.InitFromMemory(file.data(), file.size(), name, true));
         PacLevelMem mip;
@@ -129,7 +132,11 @@ TEST_CASE("Enfusion NTC normals use red rather than cavity for X", "[graphics][e
         {
             REQUIRE(pixels[i + 2] == 128);
             REQUIRE(pixels[i + 1] == 128);
-            REQUIRE(pixels[i + 3] == (Poseidon::IsEnfusionRgNormalName(name) ? 128 : 200));
+            // BCR roughness is deliberately not forwarded as coverage by this
+            // existing source path. An ordinary RGBA image retains its alpha.
+            const unsigned alpha = Poseidon::IsEnfusionRgNormalName(name) ? 128 :
+                                   (std::strcmp(name, "test_bcr.edds") == 0 ? 255 : 200);
+            REQUIRE(static_cast<unsigned>(pixels[i + 3]) == alpha);
         }
     }
 }

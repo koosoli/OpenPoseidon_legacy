@@ -43,6 +43,15 @@ planner for suppress-and-flank. That is a narrower gap than "replace all AI".
   random tactical changes. Modern Arma/milsim behaviour is a reference for test
   scenarios, not evidence that those engines use a particular BT/HTN design.
 
+Specific modern reference: Bohemia documents Reforger's behaviour-tree editor and
+its live soldier-tree inspection, plus selector/sequence nodes with explicit
+Running/Success/Fail results. The transferable ideas are observable execution and
+clear completion contracts, not a presumption that migrating to BTs improves OFP
+tactics or CPU time. This does not establish HTN usage in Reforger or the internal
+architecture of every Arma release. Sources:
+[Behavior Editor](https://community.bohemia.net/wiki/Arma_Reforger%3ABehavior_Editor),
+[Nodes](https://community.bohemia.net/wiki/Arma_Reforger%3ABehavior_Editor%3A_Nodes).
+
 ## Integration and compatibility gates
 
 Use AIGroup's update boundary to propose a plan from a completed target-list

@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 
@@ -304,7 +305,11 @@ bool IsEnfusionRgNormalName(const char* name)
         const char* value = std::getenv("POSEIDON_LEGACY_NTC_NORMALS");
         return value && value[0] == '1';
     }();
-    return !legacyNtc && lower.find("_ntc") != std::string::npos;
+    const size_t slash = lower.find_last_of("/\\");
+    const size_t start = slash == std::string::npos ? 0 : slash + 1;
+    const size_t dot = lower.find_last_of('.');
+    const size_t end = dot == std::string::npos || dot < start ? lower.size() : dot;
+    return !legacyNtc && end >= start + 4 && lower.compare(end - 4, 4, "_ntc") == 0;
 }
 
 TextureSourceDDS::TextureSourceDDS() = default;
