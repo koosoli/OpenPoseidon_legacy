@@ -1399,7 +1399,11 @@ bool TextureWgpu::NormalIsRgPacked() const
     // BC7 keeps four channels and is also what every ordinary Enfusion ALBEDO is, so the
     // name has to decide. NMO and NTC store normal XY in RG; their alpha is
     // occlusion or cavity, respectively. Reading X from alpha flattens tree lighting.
-    return dst == PacBC7 && IsEnfusionRgNormalName(Name());
+    // Decoded DDS normals retain R as well as copying it to A. Keeping the RG
+    // declaration also prevents the direct shader from treating R as POM height.
+    const bool decodedDds =
+        dst == PacARGB8888 && dynamic_cast<TextureSourceDDS*>(static_cast<ITextureSource*>(_src)) != nullptr;
+    return (dst == PacBC7 || decodedDds) && IsEnfusionRgNormalName(Name());
 }
 
 void TextureWgpu::InitDynamic(int w, int h, const void* rgba, uint32_t size, bool genMips)

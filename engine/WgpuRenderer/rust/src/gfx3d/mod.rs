@@ -31,6 +31,38 @@ use crate::ffi::{
 use crate::grass::Grass;
 use crate::textures::SharedTextures;
 
+fn direct_material_flags(flags: u32, misc: u32, late_surface: bool) -> u32 {
+    let material_bits = crate::ffi::WGR_DRAW3D_REFLECTIVE
+        | crate::ffi::WGR_DRAW3D_NIGHT_EMITTER
+        | crate::ffi::WGR_DRAW3D_GLASS
+        | crate::ffi::WGR_DRAW3D_COCKPIT
+        | crate::ffi::WGR_DRAW3D_MONITOR
+        | crate::ffi::WGR_DRAW3D_NORMAL_RG;
+    ((misc >> 8) & 1) | (flags & material_bits) | (u32::from(late_surface) << 6)
+}
+
+#[test]
+fn direct_normal_channels_keep_flags_and_exclude_red_from_parallax() {
+    assert_eq!(
+        direct_material_flags(crate::ffi::WGR_DRAW3D_NORMAL_RG, 0, false),
+        128
+    );
+    assert_eq!(
+        direct_material_flags(DRAW3D_ON_SURFACE | DRAW3D_ZBIAS_MASK, 0, false),
+        0
+    );
+    assert_eq!(direct_material_flags(u32::MAX, 0, true), 254);
+    assert_eq!(direct_material_flags(u32::MAX, 0xffff_0100, true), 255);
+    let src = include_str!("shader3d.wgsl");
+    assert!(src.contains("const MATFLAG_NORMAL_RG: u32 = 128u;"));
+    assert!(src.contains("alpha_ref <= 0.0 && !normal_rg"));
+    assert!(src.contains("select(normal_sample.a, normal_sample.r, normal_rg)"));
+    // A neutral RG map can have dark cavity in alpha; AG would tilt it sideways.
+    let texel = [0.5_f32, 0.5, 0.2, 0.1];
+    assert_eq!(texel[0] * 2.0 - 1.0, 0.0);
+    assert!((texel[3] * 2.0 - 1.0).abs() > 0.7);
+}
+
 // Depth + stencil: the stencil aspect gives per-poly shadow exclusion (a pixel is
 // darkened by at most one shadow polygon, so overlapping shadow casters don't
 // compound — mirrors GL33's stencil EQUAL 0 / INCR shadow path).
@@ -7389,20 +7421,11 @@ impl Gfx3d {
                                 f32::from_bits(normal_packed),
                                 (d.misc & 0xff) as f32,
                                 if d.normal_texture_id != 0 { 1.0 } else { 0.0 },
-                                (u32::from(d.misc & 0x100 != 0)
-                                    | (u32::from(d.flags & crate::ffi::WGR_DRAW3D_REFLECTIVE != 0)
-                                        << 1)
-                                    | (u32::from(
-                                        d.flags & crate::ffi::WGR_DRAW3D_NIGHT_EMITTER != 0,
-                                    ) << 2)
-                                    | (u32::from(d.flags & crate::ffi::WGR_DRAW3D_GLASS != 0)
-                                        << 3)
-                                    | (u32::from(d.flags & crate::ffi::WGR_DRAW3D_COCKPIT != 0)
-                                        << 4)
-                                    | (u32::from(d.flags & crate::ffi::WGR_DRAW3D_MONITOR != 0)
-                                        << 5)
-                                    | (u32::from(late_surface_slots.get(material_slot).copied().unwrap_or(false))
-                                        << 6)) as f32,
+                                direct_material_flags(
+                                    d.flags,
+                                    d.misc,
+                                    late_surface_slots.get(material_slot).copied().unwrap_or(false),
+                                ) as f32,
                             ],
                         })
                     }));

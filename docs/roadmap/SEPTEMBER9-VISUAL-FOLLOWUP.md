@@ -1,5 +1,32 @@
 # September 9 visual follow-up
 
+## Direct RG normal parity, September 10
+
+The earlier NTC correction covered retained draws only. Direct draws still read
+normal X from alpha and treated red as parallax height. A per-draw RG bit now
+reaches the existing material uniform through all three normal-binding routes;
+RG textures skip the NOHQ red-height parallax path. Decoded DDS keeps the same
+declaration because it retains red while copying normal X to alpha. No added
+texture fetch, render pass, binding or FFI structure size. Ordinary AG/NOHQ maps
+keep their channel convention. WGR_LEGACY_DIRECT_NORMALS=1 is the control.
+
+Installed 7805be95+dirty, 08:04 build: Test-DirectRgNormals uses a generated 4x4
+BC7 fixture and the installed original ammo crate. First images were rejected:
+the initial camera missed the crate. Correcting the camera exposed a second bug,
+a later d.flags=0 erasing the RG bit; that reset was removed before acceptance.
+The durable NormalViz test checks the visible crate pixel, not merely a binding
+log. Final compressed RG and decoded RG both give RGB(51,51,69); old compressed
+AG interpretation gives (30,50,64). The separate AG fixture gives (51,51,69) and
+must not bind the RG bit. All four runs exit 0 with no renderer errors.
+81 gfx3d tests and six shared shader tests pass, including real-device pipeline
+creation. Single-frame timings are not a performance claim. NTC cavity and
+transmittance shading remain separate work, not implemented by a normal fix.
+Native Forest production regression also passes after a 90-second warmup:
+22360 registered / 6443 main instances, 8,058,216 main triangles, 22.016ms GPU
+single capture, exit 0, no renderer errors. Image inspected; the remaining pale
+branch-card appearance is not declared fixed. Evidence: build/direct-rg-normal
+and build/native-reforger-perf/Forest-direct-rg. Cargo.lock hash unchanged.
+
 ## Parked DDS test resolved, September 10
 
 The previous order-dependence diagnosis was not supported by reproduction.

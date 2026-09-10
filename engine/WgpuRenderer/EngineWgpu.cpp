@@ -5223,6 +5223,7 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     const bool productionMaterialTarget = !diagnosticSelector && debugSection.surfMat;
     const bool materialBindingTarget = materialDebugTarget || productionMaterialTarget;
     d.normal_texture_id = 0;
+    d.flags &= ~WGR_DRAW3D_NORMAL_RG;
     // Shared lane: material-debug bits 0-8, REN-TEMP-001H object id bits 16-31.
     d.misc = (materialDebugTarget
                   ? static_cast<uint32_t>(_materialDebug.view) | (_materialDebug.invertNormalY ? 0x100u : 0u)
@@ -5260,6 +5261,8 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
             if (const uint64_t handle = wgpuNormalTexture ? wgpuNormalTexture->EnsureUploaded() : 0)
             {
                 d.normal_texture_id = handle;
+                if (wgpuNormalTexture->NormalIsRgPacked())
+                    d.flags |= WGR_DRAW3D_NORMAL_RG;
                 static std::unordered_set<std::string> loggedUnassignedNormalFixtures;
                 if (loggedUnassignedNormalFixtures.insert(normalPath).second)
                     LOG_INFO(Graphics, "Wgpu material debug: unassigned Stage1 fixture resolved path={}", normalPath);
@@ -5317,6 +5320,8 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                     if (enableNormal && normalHandle)
                     {
                         d.normal_texture_id = normalHandle;
+                        if (wgpuNormalTexture->NormalIsRgPacked())
+                            d.flags |= WGR_DRAW3D_NORMAL_RG;
                     }
                 }
             }
@@ -5515,9 +5520,11 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                         auto* wgpuTexture = static_cast<TextureWgpu*>(texture.GetRef());
                         const uint64_t normalHandle = wgpuTexture ? wgpuTexture->EnsureUploaded() : 0;
                         _materialDebugInfo.normalResolved = normalHandle != 0;
-                        _materialDebugInfo.normalStatus = normalHandle
-                                                              ? "resolved and bound (NOHQ: X=A, Y=G, Z=reconstructed)"
-                                                              : "texture failed to resolve/upload";
+                        _materialDebugInfo.normalStatus =
+                            normalHandle ? (wgpuTexture->NormalIsRgPacked()
+                                                ? "resolved and bound (RG normal)"
+                                                : "resolved and bound (NOHQ: X=A, Y=G, Z=reconstructed)")
+                                         : "texture failed to resolve/upload";
                         if (normalHandle)
                         {
                             static std::unordered_set<const void*> loggedNormalBindings;
@@ -5525,11 +5532,16 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                             if (logOnceForMaterial(loggedNormalBindings, loggedNormalBindingsByPath))
                                 LOG_INFO(Graphics,
                                          "Wgpu material debug: Stage1 NormalMap resolved path={} uv={} "
-                                         "decode=X=A,Y=G,Z=reconstructed",
-                                         normal->texture.path.canonical(), normal->uvSource);
+                                         "decode={}",
+                                         normal->texture.path.canonical(), normal->uvSource,
+                                         wgpuTexture->NormalIsRgPacked() ? "X=R,Y=G" : "X=A,Y=G");
                         }
                         if (enableNormal)
+                        {
                             d.normal_texture_id = normalHandle;
+                            if (normalHandle && wgpuTexture->NormalIsRgPacked())
+                                d.flags |= WGR_DRAW3D_NORMAL_RG;
+                        }
                     }
                 }
                 else
@@ -5606,10 +5618,23 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
             }
         }
     }
+    static const bool traceDirectNormals = std::getenv("WGR_DIRECT_NORMAL_TRACE") != nullptr;
+    if ((d.flags & WGR_DRAW3D_NORMAL_RG) != 0 && traceDirectNormals)
+    {
+        static unsigned int samples = 0;
+        if (samples++ < 16)
+            LOG_INFO(Graphics, "Direct RG normal bound: handle={} section={}", d.normal_texture_id, beg);
+    }
+    static const bool legacyDirectNormals = []
+    {
+        const char* value = std::getenv("WGR_LEGACY_DIRECT_NORMALS");
+        return value && value[0] == '1';
+    }();
+    if (legacyDirectNormals)
+        d.flags &= ~WGR_DRAW3D_NORMAL_RG;
     // DZ-003: the per-draw twin of the retained set's WGR_MODEL_SECTION_REFLECTIVE. A
     // material naming an EnvironmentMap gets a Fresnel-weighted sky reflection; every
-    // other material is untouched. Folded into d.flags below, where the flags word is
-    // initialised -- setting it here would be clobbered by that `d.flags = 0`.
+    // other material is untouched. Folded into d.flags below alongside surface flags.
     //
     // DZ-006 gate, and it is a SAFETY property rather than a tweak: never add a reflection to a
     // surface whose albedo did not bind. `d.texture_id == 0` puts the section on the white
@@ -5898,7 +5923,7 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     //    SetBias(level*5): a stronger, level-scaled offset. GL33 leaves these to a
     //    biased projection it never actually applies for HW-T&L, so they z-fight in
     //    wgpu; the level-scaled offset resolves them without over-biasing roads.
-    d.flags = 0;
+    // d was zero-initialised; preserve the normal-channel bit from material binding.
     // The LLDR's authored translucent screen is a display, not an open hole.
     if (texture && texture->Name() &&
         std::strstr(texture->Name(), "lldr_monitor.paa") != nullptr)

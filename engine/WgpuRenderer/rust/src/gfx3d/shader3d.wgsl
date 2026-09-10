@@ -70,6 +70,7 @@ const GLASS_MIN_ALPHA: f32 = 0.18;
 // against the sky (fine against dark terrain), which is exactly the owner's report on the
 // stock T72 and UH-60 alike.
 const MATFLAG_COCKPIT: u32 = 16u;
+const MATFLAG_NORMAL_RG: u32 = 128u;
 
 fn material_flags(m: Material) -> u32 {
     return u32(m.normal_map.w + 0.5);
@@ -754,7 +755,9 @@ fn shade_fragment(in: VsOut) -> vec4<f32> {
     // holes in vehicles and foliage. Displacing a surface whose silhouette is defined by its alpha
     // is wrong in any case: the hole would move with the view while its edge stayed put.
     // alpha_ref is the existing cutout threshold, so this costs nothing to ask.
-    if (material.normal_map.z > 0.5 && alpha_ref <= 0.0) {
+    // RG normals spend red on normal X, never on parallax height.
+    let normal_rg = (material_flags(material) & MATFLAG_NORMAL_RG) != 0u;
+    if (material.normal_map.z > 0.5 && alpha_ref <= 0.0 && !normal_rg) {
         // Tangent frame for the view vector, derived the same way the shading frame below is, so
         // the displacement runs along the surface's real UV directions.
         let duv_dx = dpdx(in.uv);
@@ -834,7 +837,7 @@ fn shade_fragment(in: VsOut) -> vec4<f32> {
         return vec4<f32>(phosphor * signal * aperture, 1.0);
     }
     let normal_sample = textureSampleBias(textures[normal_packed >> 3u], samplers[normal_packed & 7u], uv, frame.renscale.x);
-    var normal_ts_xy = vec2<f32>(normal_sample.a, normal_sample.g) * 2.0 - vec2<f32>(1.0);
+    var normal_ts_xy = vec2<f32>(select(normal_sample.a, normal_sample.r, normal_rg), normal_sample.g) * 2.0 - vec2<f32>(1.0);
     if ((material_flags(material) & MATFLAG_INVERT_NORMAL_Y) != 0u) {
         normal_ts_xy.y = -normal_ts_xy.y;
     }
@@ -892,7 +895,7 @@ fn shade_fragment(in: VsOut) -> vec4<f32> {
         return vec4<f32>(0.0, 0.0, 0.0, frame.params.shadow_strength * base.a);
     }
     // Material Debug View: Base Color Only is the controlled reference; Normal Map
-    // displays decoded tangent-space X=A, Y=G, reconstructed Z, independent of lighting.
+    // displays decoded tangent-space X=A (NOHQ) or R (RG), Y=G, reconstructed Z.
     let material_view = u32(material.normal_map.y + 0.5);
     if (material_view == 1u) {
         return vec4<f32>(base.rgb, out_a);

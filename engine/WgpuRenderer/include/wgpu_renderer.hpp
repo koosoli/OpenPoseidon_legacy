@@ -297,7 +297,8 @@ enum WgrDraw3DFlags : uint32_t
      * "transparent" against sky; UH-60 canopy beams likewise). GL33's fixed-function look
      * for the same surfaces IS the flat scene ambient, so this matches it. */
     WGR_DRAW3D_COCKPIT = 16,
-    WGR_DRAW3D_MONITOR = 32
+    WGR_DRAW3D_MONITOR = 32,
+    WGR_DRAW3D_NORMAL_RG = 128 // BC5 / compressed Enfusion normal XY, not NOHQ alpha/green
 };
 
 /* Matrices per palette block (the engine's own bone-palette cap). Each skinned
