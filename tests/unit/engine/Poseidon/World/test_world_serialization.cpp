@@ -87,10 +87,10 @@ TEST_CASE("world archive rejects newer versions before field mutation", "[world]
         }
         ParamArchiveLoad reader;
         REQUIRE(reader.LoadBin(path.string().c_str()));
+        int value = 19;
         for (int pass = 0; pass < 2; ++pass)
         {
             if (pass == 0) reader.FirstPass(); else reader.SecondPass();
-            int value = 19;
             const auto result = reader.CheckMaxVersion(WorldSerializeVersion);
             if (result == LSOK)
                 REQUIRE(reader.Serialize("value", value, 1) == LSOK);
