@@ -1,4 +1,4 @@
-param([string]$Label='baseline', [switch]$LegacyRaster,
+param([string]$Label='baseline', [switch]$LegacyRaster, [switch]$LegacyFaces,
       [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
@@ -9,8 +9,9 @@ New-Item -ItemType Directory -Force $user | Out-Null
 [IO.File]::WriteAllText((Join-Path $user 'graphics.cfg'), "qualityPreset=3;`nmsaaSamples=4;`ndlssMode=0;`nvsync=0;`nfpsCap=60;`n")
 $settings=@{POSEIDON_USER_DIR=$user;POSEIDON_TEST_SMOKE='1';POSEIDON_TEST_SMOKE_AT='7731.6 25.3 4421.4';
  POSEIDON_SMOKE_SYSTEM='2';POSEIDON_SMOKE_THICKNESS='8';POSEIDON_WIND_OVERRIDE='18 250 0.2';
- WGR_AUTO_EXPOSURE='0';WGR_EXPOSURE='0.25';POSEIDON_INTERIOR_COMPONENT_RASTER='1';POSEIDON_INTERIOR_RASTER_TRACE='1'}
+ WGR_AUTO_EXPOSURE='0';WGR_EXPOSURE='0.25';POSEIDON_INTERIOR_COMPONENT_RASTER='1';POSEIDON_INTERIOR_RASTER_TRACE='1';POSEIDON_INTERIOR_FACE_INDEX='1'}
 if ($LegacyRaster) {$settings.POSEIDON_INTERIOR_COMPONENT_RASTER='0'}
+if ($LegacyFaces) {$settings.POSEIDON_INTERIOR_FACE_INDEX='0'}
 & "$PSScriptRoot/farfield-bench.ps1" -Label $Label -Mission (Join-Path $root 'dev-missions/smoke-room.noe') `
  -GameDir $GameDir -Out $out -Env $settings -Repeats 1 -Width 1280 -Height 720 -Windowed `
  -ExtraArgs @('--test-world-freefly','7755','4405','29','310','-8') `

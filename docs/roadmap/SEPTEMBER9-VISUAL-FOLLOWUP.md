@@ -1,5 +1,25 @@
 # September 9 visual follow-up
 
+## Cold indoor-smoke build work, September 10
+
+4985db47 bounds the same seven shell samples to each component's conservative
+cell box. Fire/View union, .25m resolution, room flood and portals are unchanged.
+37 Smoke/BuildingInterior/Wind/Airflow cases pass 28,611 assertions, including
+full-cell reference parity for thin/slanted/overlapping/outside components.
+Installed same-binary POSEIDON_INTERIOR_COMPONENT_RASTER=0 control: hasic_zbroj
+raster 6.611 -> 2.201 ms, whole build 31.1 -> 24.8 ms. Exact shell hashes match
+for all four reached building types (fire station: 8460896540168774620). Both
+30-second runs exit 0, around 3900 smoke particles and 3300 labelled indoors;
+late simulation stays around 2ms. No particle, wind, downwash or containment cut.
+First pre-change fixture's final check mistakenly omitted the ResHouse name
+prefix; log confirms a valid 31.0ms build, not a failed load.
+
+The remaining cold hitch is not declared solved. Follow-up indexes the four
+coplanar face neighbours rather than scanning every face for every BFS entry.
+Sorted neighbour indices preserve exact original visit and float summation order;
+synthetic reordered multi-plane tests pass. Final room/portal checksum and installed
+same-binary acceptance remain pending for that follow-up.
+
 ## Water normal-filter completion, September 10
 
 2601365f fixes the remaining wrong bicubic weights in texture_bicubic_dynamics.

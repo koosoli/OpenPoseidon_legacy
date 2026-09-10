@@ -1,5 +1,6 @@
 #include <Poseidon/World/Effects/BuildingInterior.hpp>
 #include <Poseidon/World/Effects/InteriorShellRaster.hpp>
+#include <Poseidon/World/Effects/InteriorFaceIndex.hpp>
 
 #include <Poseidon/World/Entities/Vehicles/House.hpp>
 #include <Poseidon/World/Scene/Object.hpp>
@@ -494,10 +495,18 @@ void BuildingInterior::Build(BuildingType const* type)
     }
 
     std::vector<char> exitCovered(type->_exits.Size(), 0);
+    static const bool indexedFaces = []
+    {
+        const char* value = std::getenv("POSEIDON_INTERIOR_FACE_INDEX");
+        return !(value && value[0] == '0');
+    }();
     for (int r = 0; r < _roomCount; r++)
     {
         // cluster coplanar edge-adjacent faces (BFS over face adjacency)
         const int n = static_cast<int>(faces[r].size());
+        std::unique_ptr<InteriorFaceIndex> faceIndex;
+        if (indexedFaces)
+            faceIndex = std::make_unique<InteriorFaceIndex>(faces[r], _dim);
         std::vector<char> visited(n, 0);
         for (int start = 0; start < n; start++)
         {
@@ -511,6 +520,16 @@ void BuildingInterior::Build(BuildingType const* type)
             for (size_t head = 0; head < cluster.size(); head++)
             {
                 const BoundaryFace& a = faces[r][cluster[head]];
+                if (indexedFaces)
+                {
+                    for (int i : faceIndex->Neighbours(a))
+                        if (i >= 0 && !visited[i])
+                        {
+                            visited[i] = 1;
+                            cluster.push_back(i);
+                        }
+                    continue;
+                }
                 for (int i = 0; i < n; i++)
                 {
                     if (visited[i])
@@ -518,8 +537,7 @@ void BuildingInterior::Build(BuildingType const* type)
                         continue;
                     }
                     const BoundaryFace& b = faces[r][i];
-                    if (b.axis != a.axis || b.side != a.side ||
-                        b.c[b.axis] != a.c[a.axis])
+                    if (b.axis != a.axis || b.side != a.side || b.c[b.axis] != a.c[a.axis])
                     {
                         continue;
                     }
@@ -698,6 +716,36 @@ void BuildingInterior::Build(BuildingType const* type)
         }
     }
 
+    if (const char* trace = std::getenv("POSEIDON_INTERIOR_RASTER_TRACE"); trace && trace[0] == '1')
+    {
+        uint64_t hash = 14695981039346656037ull;
+        const auto fold = [&](auto value)
+        {
+            const auto* bytes = reinterpret_cast<const unsigned char*>(&value);
+            for (size_t i = 0; i < sizeof(value); ++i)
+            {
+                hash ^= bytes[i];
+                hash *= 1099511628211ull;
+            }
+        };
+        for (unsigned char label : _labels)
+            fold(label);
+        fold(_roomCount);
+        for (int i = 0; i < _portals.Size(); ++i)
+        {
+            const auto& portal = _portals[i];
+            for (int a = 0; a < 3; ++a)
+            {
+                fold(portal.centre[a]);
+                fold(portal.normal[a]);
+            }
+            fold(portal.radius);
+            fold(portal.room);
+            fold(portal.otherRoom);
+            fold(static_cast<int>(portal.kind));
+        }
+        LOG_INFO(World, "Interior topology '{}': indexed={} hash={}", (const char*)type->GetName(), indexedFaces, hash);
+    }
     const float buildMs =
         std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - buildStart).count();
     LOG_INFO(World,

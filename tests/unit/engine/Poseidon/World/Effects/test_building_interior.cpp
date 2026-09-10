@@ -3,6 +3,7 @@
 
 #include <Poseidon/World/Effects/BuildingInterior.hpp>
 #include <Poseidon/World/Effects/InteriorShellRaster.hpp>
+#include <Poseidon/World/Effects/InteriorFaceIndex.hpp>
 #include <Poseidon/World/Effects/SmokeWorldQuery.hpp>
 #include <Poseidon/World/Scene/Object.hpp>
 #include <Poseidon/World/Weather/RainVolume.hpp>
@@ -11,6 +12,71 @@
 #include <vector>
 
 using namespace Poseidon;
+
+TEST_CASE("Indexed portal neighbours preserve exact legacy breadth-first order", "[BuildingInterior][Smoke][Raster]")
+{
+    struct Face
+    {
+        int c[3];
+        int axis, side;
+    };
+    const int dim[3] = {7, 5, 8};
+    std::vector<Face> faces;
+    for (int x = 0; x < dim[0]; ++x)
+        for (int y = 0; y < dim[1]; ++y)
+            for (int z = 0; z < dim[2]; ++z)
+                for (int axis = 0; axis < 3; ++axis)
+                    for (int side : {-1, 1})
+                        if ((x * 7 + y * 11 + z * 3 + axis) % 5 != 0)
+                            faces.push_back({{x, y, z}, axis, side});
+    for (int permutation = 0; permutation < 3; ++permutation)
+    {
+        const InteriorFaceIndex index(faces, dim);
+        auto clusters = [&](bool indexed)
+        {
+            std::vector<std::vector<int>> all;
+            std::vector<char> visited(faces.size(), 0);
+            for (int start = 0; start < static_cast<int>(faces.size()); ++start)
+            {
+                if (visited[start])
+                    continue;
+                std::vector<int> cluster{start};
+                visited[start] = 1;
+                for (size_t head = 0; head < cluster.size(); ++head)
+                {
+                    const auto& a = faces[cluster[head]];
+                    auto visit = [&](int i)
+                    {
+                        if (i >= 0 && !visited[i])
+                        {
+                            visited[i] = 1;
+                            cluster.push_back(i);
+                        }
+                    };
+                    if (indexed)
+                    {
+                        for (int i : index.Neighbours(a))
+                            visit(i);
+                    }
+                    else
+                        for (int i = 0; i < static_cast<int>(faces.size()); ++i)
+                        {
+                            const auto& b = faces[i];
+                            const int t1 = (a.axis + 1) % 3, t2 = (a.axis + 2) % 3;
+                            if (a.axis == b.axis && a.side == b.side && a.c[a.axis] == b.c[b.axis] &&
+                                std::abs(a.c[t1] - b.c[t1]) + std::abs(a.c[t2] - b.c[t2]) == 1)
+                                visit(i);
+                        }
+                }
+                all.push_back(std::move(cluster));
+            }
+            return all;
+        };
+        CHECK(clusters(true) == clusters(false));
+        std::reverse(faces.begin(), faces.end());
+        std::rotate(faces.begin(), faces.begin() + faces.size() / 3, faces.end());
+    }
+}
 
 TEST_CASE("Component-local interior raster preserves every seven-sample shell cell",
           "[BuildingInterior][Smoke][Raster]")
