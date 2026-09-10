@@ -767,6 +767,7 @@ override foam_patch_gain: f32 = 1.0;
 // in fs_water for why this is a stronger anti-repetition lever than another noise octave.
 override foam_band_meander: f32 = 0.34;
 override deep_breaker_recovery: f32 = 1.0;
+override breaker_cells: f32 = 0.0;
 
 // Water column depth (m) at this fragment: reconstruct the seabed's camera-relative position
 // from the opaque prepass depth and take the vertical gap to the water surface. In the fragment
@@ -872,6 +873,15 @@ fn vnoise_lod(p: vec2<f32>, w: f32) -> f32 {
         return vnoise(p);
     }
     return mix(0.5, vnoise(p), detail);
+}
+
+// A resolved foam patch covers water; it is not a translucent metallic film.
+// Reuse the already-filtered structure rather than adding bubble texture fetches.
+fn resolved_breaker_coverage(amount: f32, structure: f32, footprint: f32) -> f32 {
+    let threshold = mix(0.15, 0.85, clamp(structure, 0.0, 1.0));
+    let edge = 0.08 + 0.25 * clamp(footprint, 0.0, 1.0);
+    return smoothstep(max(0.001, threshold - edge), min(0.999, threshold + edge),
+                      clamp(amount, 0.0, 1.0));
 }
 
 // Band-limited twin of `foam_noise`. `w_world` is how far `p_world` moves across one pixel, in the
@@ -2250,6 +2260,16 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
         let foam_structure = foam_noise_lod(in.base_xz * 2.7 + spray_wind * wp.time * 0.45,
             wp.time, foam_fp * 2.7);
         combined_foam = clamp(unstructured_foam * mix(0.46, 1.0, foam_structure), 0.0, 1.0);
+        if (breaker_cells > 0.5) {
+            let wave_amount = (max(persistent_foam, breaker_foam) + spray_flecks) * wave_scale * raft_coverage;
+            let cell_footprint = foam_fp * 2.7 * FOAM_FREQ;
+            let resolved = resolved_breaker_coverage(wave_amount, foam_structure, cell_footprint);
+            let shore = clamp(max(foam, river_streak) * mix(0.46, 1.0, foam_structure), 0.0, 1.0);
+            // Never re-threshold subpixel noise: converge to the original filtered
+            // coverage, not all-white/all-clear distant water.
+            let detail = 1.0 - smoothstep(0.15, 0.55, cell_footprint);
+            combined_foam = mix(combined_foam, max(shore, resolved), detail);
+        }
     }
     // Bubbles form a broad, rough dielectric layer: mostly sky/sun-lit diffuse scattering with
     // only a subdued dielectric highlight. This is material response, never an emissive overlay.

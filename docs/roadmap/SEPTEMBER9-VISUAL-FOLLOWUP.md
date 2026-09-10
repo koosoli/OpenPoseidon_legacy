@@ -1,5 +1,34 @@
 # September 9 visual follow-up
 
+## Rifle-impact shadow regression controls, September 10
+
+Test-ImpactShadows.ps1 makes the earlier Desert fixture durable and adds Stratis
+using the installed original-world override. Same 0b684058 runtime: repeated
+BulletSingleW impacts on dry terrain, legacy smoke shadows enabled at strength
+2.50. Last three noon samples: Stratis 57/54/45 cloudlets and Desert 51/42/51;
+all have zero legacy and total shadow blobs. Both exit 0, renderer error checks
+pass, noon captures inspected. Earlier 06:00 controls also count zero blobs, but
+Stratis is too dark for useful visual acceptance. Small dark dust sprites and
+the authored impact decal still exist; this is not a claim that every dark
+impact-shaped mark reported by the owner was a shadow or has been removed.
+
+The first Stratis fixture was rejected correctly: unknown .Stratis mission
+suffix resolves to Intro in the installed configuration, so its init.sqs was
+not found through the legacy mission directory. Retaining .Intro for the test
+mission and using --test-world for the actual Stratis terrain fixes the fixture;
+it is not a new engine fix. Accepted captures: build/impact-shadows/Intro-hour12
+and Stratis-hour12. No global disabling of smoke, shadows, wind or dust.
+
+## Resolved breaker-foam experiment, September 10
+
+WGR_BREAKER_CELLS=1 tests opaque near-field foam patches rather than uniformly
+translucent wave foam over glossy water. Uses the existing filtered structure,
+no extra noise/hash/texture sample or simulation pass. Only wave-generated foam
+is reshaped; zero wave gain remains zero and distant/subpixel coverage returns
+to the previous filtered result. Default OFF until same-binary native/DLSS and
+calm/zero-gain comparisons establish the effect and cost. Tests/build/runtime
+acceptance pending; not a finished quality improvement.
+
 ## Late surface-rays experiment rejected, September 10
 
 0b684058 tests per-instance fragment-distance scattering on prepassed opaque

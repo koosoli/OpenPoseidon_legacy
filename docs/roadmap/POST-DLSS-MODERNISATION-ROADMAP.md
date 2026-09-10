@@ -42,6 +42,31 @@ GL33 retirement is explicitly out of this near-term scope. Preserve measured
 rejections and OFP behaviour baselines. Full parked-item/capability recensus remains
 work to do, not a completion claim implicit in editing this document.
 
+September 10 measured follow-through (supersedes only the named older pending
+entries, not whole phases):
+
+- Near-water highlight lattice: the dynamics bicubic filter was still wrong
+  after the displacement fix. 2601365f corrects it with the same four fetches;
+  installed native before/after plus DLSS follow-up accepted. Far facets and
+  moving temporal history remain separate gates.
+- Smoke cold-room work: 4985db47/8c9c4a87 replace full-grid/component and all-face
+  scans with bounded raster boxes and indexed face adjacency. Same-binary fire
+  station build 31.5 -> 4.3ms, exact final topology checksums on four buildings.
+  Do not reduce particles/containment to claim this gain, or extrapolate it to
+  every building or settled-frame FPS.
+- Large-unit scene: 901 contiguous palette blocks at 320 soldiers now upload
+  in one call; worker setup approximately 2.9 -> 1.6ms. Repeated idle checks
+  support this bounded rendering gain, not a general AI or combat speedup.
+- Genuine GLASS station is installed and checked separately from GLOSS.
+- Late foliage order and 0b684058 per-surface scattering experiments remain
+  disabled: installed comparisons failed visual acceptance. A passing shader
+  test is not evidence to enable either path.
+
+Next architectural gates remain sparse Fusion edit history/tiled collision and
+world-stable snow-road coverage. A camera-local road mask would reintroduce the
+reported near/far road popping; a full-resolution dense Fusion mask would waste
+memory. Neither shortcut qualifies as completing those requests.
+
 **2026-09-09 owner-request audit:** the dated historical status below is not a
 blanket completion claim for the subsequent lighting/water/smoke requests.
 [REQUEST-AUDIT-20260909.md](REQUEST-AUDIT-20260909.md) records each request,

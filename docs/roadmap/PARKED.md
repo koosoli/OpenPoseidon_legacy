@@ -32,6 +32,20 @@ are tracked in [SEPTEMBER9-VISUAL-FOLLOWUP.md](SEPTEMBER9-VISUAL-FOLLOWUP.md).
 The remaining historical entries still require individual code/evidence review;
 this reconciliation does not claim that every parked item has been implemented.
 
+Current evidence gates added September 10:
+
+- **Late foliage atmospheric replay/surface-rays:** keep both experiments off.
+  0b684058's extra per-surface integration failed the installed repeated hillside
+  comparison and adds colour-pass cost. Reopen with a diagnosed discrepancy and
+  equal-scene controls, not a global vegetation brightness boost.
+- **Smoke cold-room generation is active and improved**, not an argument to
+  lower smoke count: 8c9c4a87 reduces the tested fire-station cold build from
+  31.5 to 4.3ms while preserving exact room/portal hashes. Other building shapes
+  and full smoke-containment quality remain independent coverage.
+- **Army performance:** the counted palette upload batching is accepted for
+  its bounded setup saving. General BT/HTN replacement, broad AI multithreading
+  and density/visibility cuts are not justified by this result.
+
 ---
 
 ## Waiting on the owner, five minutes each

@@ -680,6 +680,7 @@ impl Water {
         let fs_constants = [("linear", linear)];
         let water_fs_constants = [
             ("linear", linear),
+            ("breaker_cells", if std::env::var("WGR_BREAKER_CELLS").is_ok_and(|v| v == "1") {1.0} else {0.0}),
             ("deep_breaker_recovery", std::env::var("WGR_DEEP_BREAKER_RECOVERY")
                 .ok().and_then(|v| v.parse::<f64>().ok())
                 .filter(|v| v.is_finite()).unwrap_or(1.0).clamp(0.0, 1.0)),
@@ -1678,6 +1679,40 @@ mod tests {
         }
         let shader = include_str!("water.wgsl");
         assert!(shader.contains("jacobian_break * clamp(deep_breaker_recovery, 0.0, 1.0)) * wind_gate"));
+    }
+
+    #[test]
+    fn resolved_breaker_cells_are_bounded_monotone_and_keep_filtered_distance() {
+        let coverage = |amount: f32, structure: f32, footprint: f32| {
+            let threshold = 0.15 + 0.70 * structure.clamp(0.0, 1.0);
+            let edge = 0.08 + 0.25 * footprint.clamp(0.0, 1.0);
+            let lo = (threshold - edge).max(0.001);
+            let hi = (threshold + edge).min(0.999);
+            let t = ((amount.clamp(0.0, 1.0) - lo) / (hi - lo)).clamp(0.0, 1.0);
+            t * t * (3.0 - 2.0 * t)
+        };
+        for s in 0..=20 {
+            for f in 0..=20 {
+                let structure = s as f32 / 20.0;
+                let footprint = f as f32 / 20.0;
+                assert_eq!(coverage(0.0, structure, footprint), 0.0);
+                assert_eq!(coverage(1.0, structure, footprint), 1.0);
+                let mut previous = 0.0;
+                for a in 0..=100 {
+                    let c = coverage(a as f32 / 100.0, structure, footprint);
+                    assert!(c >= previous && (0.0..=1.0).contains(&c));
+                    previous = c;
+                }
+            }
+        }
+        assert_eq!(coverage(0.65, 0.5, 0.0), 1.0);
+        let shader = include_str!("water.wgsl");
+        assert!(shader.contains("override breaker_cells: f32 = 0.0;"));
+        assert!(shader.contains("let cell_footprint = foam_fp * 2.7 * FOAM_FREQ;"));
+        assert!(shader.contains("let detail = 1.0 - smoothstep(0.15, 0.55, cell_footprint);"));
+        assert!(shader.contains("combined_foam = mix(combined_foam, max(shore, resolved), detail);"));
+        let helper = shader.split("fn resolved_breaker_coverage(").nth(1).unwrap().split("\n}").next().unwrap();
+        assert!(!helper.contains("texture") && !helper.contains("vnoise"));
     }
 
     // The shoreline foam patterned at distance because its noise is ANALYTIC — no mip chain — so
