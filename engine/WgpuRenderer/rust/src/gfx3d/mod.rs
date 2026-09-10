@@ -7411,6 +7411,17 @@ impl Gfx3d {
         // compute bake, retaining the VS-skinning fallback. Contiguous slots can
         // share one copy command without changing offsets or matrix bits.
         let slots = palette.len() / PALETTE_SIZE;
+        static TRACE_UPLOAD: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if *TRACE_UPLOAD.get_or_init(|| std::env::var("WGR_PALETTE_UPLOAD_TRACE").map(|v| v == "1").unwrap_or(false)) {
+            static TRACE_FRAME: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            if TRACE_FRAME.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 120 == 0 {
+                self.queued_log.push(format!(
+                    "palette upload: slots={} stride={} cameras={} batched={}", slots,
+                    self.palette.stride, cameras.len(), palette_upload_batch_enabled()
+                        && contiguous_palette_bytes(palette, self.palette.stride).is_some()
+                ));
+            }
+        }
         if slots > 0 {
             palette_grew = self.palette.ensure(device, slots);
             let buf = self.palette.buf.as_ref().unwrap();

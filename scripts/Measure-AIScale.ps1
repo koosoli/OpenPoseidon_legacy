@@ -33,7 +33,7 @@ New-Item -ItemType Directory -Force $user | Out-Null
 $camera=if ($Pose -eq 'Near') {@(9700,3545,45,0,-12)} else {@(9700,3545,45,180,-12)}
 # Real-time pacing, not lockstep: lockstep FPS is not playable performance.
 $settings=@{POSEIDON_USER_DIR=$user;POSEIDON_VSYNC='0';POSEIDON_LOCKSTEP_HZ='0';WGR_PASS1_STATS='1'}
-foreach ($key in @('WGR_RENDER_THREAD','WGR_RENDER_OVERLAP','WGR_SKIN_BAKE','WGR_PALETTE_UPLOAD_BATCH')) {
+foreach ($key in @('WGR_RENDER_THREAD','WGR_RENDER_OVERLAP','WGR_SKIN_BAKE','WGR_PALETTE_UPLOAD_BATCH','WGR_PALETTE_UPLOAD_TRACE')) {
     $value=[Environment]::GetEnvironmentVariable($key)
     if ($null -ne $value) {$settings[$key]=$value}
 }
