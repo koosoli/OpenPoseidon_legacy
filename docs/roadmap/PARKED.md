@@ -320,6 +320,15 @@ is worse than no page.
 
 ## Native Everon: forest contrast and the church doors (parked 2026-09-06)
 
+**Forest reopened by the owner, 2026-09-10.** The historical lighting-only
+diagnosis below was incomplete: native `_ntc` textures were not classified as
+RG normals, so the retained shader read cavity alpha as normal X. b4d118ce /
+3f736b26 repair compressed flags and decoded normal repacking, with 210 targeted
+assertions and installed same-binary Forest A/B. Crown directional relief improves
+without extra samples; branch-card geometry, self-shadow/AO and exact Reforger
+reference matching remain open. See SEPTEMBER9-VISUAL-FOLLOWUP.md for captures.
+Do not apply a global contrast adjustment as a substitute for material fidelity.
+
 - **Forest looks flat.** The owner's forest pose (4697.60 3998.02 50.23 az 220.6 el -5.0)
   shows pines with little tonal range. Ruled out so far: the layer tint (a LINEAR
   multiplier, applied correctly), the canopy flags (native trees carry `map=tree/bush`, so

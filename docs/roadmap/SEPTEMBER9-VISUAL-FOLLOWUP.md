@@ -17,6 +17,18 @@ The broader EDDS suite additionally reports two pre-existing layer-tint
 expectations incompatible with the existing linear tint path; no all-suite-pass
 claim. Final corrected targeted test/build acceptance follows separately.
 
+3f736b26 final acceptance: native [ntc] test passes 210 assertions, build passes,
+clean-stamped deployment and Forest installed capture exit 0. Final capture
+23.242 ms GPU / 22360 registered / 6451 main instances, visually consistent with
+the earlier fixed arm. No claim that all remaining native material issues close.
+
+Roadmap safety follow-up a23c43de adds an opt-in archive maximum-version check
+at the first line of World::Serialize, before campaign/global/entity mutation.
+Existing old-version per-field defaults and other archive types are untouched.
+Native tests cover old/current/future versions on both passes; build and installed
+current-version round-trip acceptance pending. This does not solve the separately
+parked static-object identity or network-authority problems.
+
 ## Renewed owner scope after the follow-up audit
 
 All remaining measures proposed in REQUEST-AUDIT-FOLLOWUP-20260909.md are now
