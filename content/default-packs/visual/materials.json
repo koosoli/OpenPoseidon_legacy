@@ -18,7 +18,8 @@
       "baseSrgb": [125, 115, 99],
       "roughness": 0.95,
       "road": true,
-      "wheelTracks": [0.27, 0.73]
+      "wheelTracks": [0.27, 0.73],
+      "trackOnly": true
     },
     "sand": {
       "seed": 84217,

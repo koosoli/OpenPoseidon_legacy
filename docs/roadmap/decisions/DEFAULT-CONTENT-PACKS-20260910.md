@@ -146,3 +146,11 @@ two wheel tracks. Original placement 7489: 2221.7/4788.8, Y38.2. Packaging inclu
 three mapped surfaces, but that count is NOT three-surface acceptance. Roughness
 still needs real binding: the terrain currently has diffuse lighting only and a
 source roughness PNG alone cannot change it. No specular benefit is claimed.
+
+6f7df368 installed Gravel Full 214540 / Original 214920 both exit 0, same 52507
+registered / 16 main instances and 978 main triangles. Visual comparison rejects
+the first gravel alpha: the original field track has two ruts and an open grass
+centre, whereas the candidate painted the entire road width. 0.1.3 corrects its
+own analytic coverage to two tracks with a transparent centre/shoulders and small
+periodic edge variation; no original alpha pixels copied. Seven generator tests
+now include track/centre coverage. Recheck installed before visual acceptance.

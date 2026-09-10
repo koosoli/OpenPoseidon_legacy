@@ -49,6 +49,15 @@ class MaterialTests(unittest.TestCase):
         self.assertFalse(np.array_equal(rippled["height"], flat["height"]))
         self.assertFalse(np.array_equal(rippled["nohq"], flat["nohq"]))
 
+    def test_field_track_retains_open_centre_and_shoulders(self):
+        maps = generate(self.specs["gravel"], 128)
+        alpha = maps["co"][:, :, 3]
+        self.assertLess(alpha[:, 64].max(), 2)
+        self.assertLess(alpha[:, 0].max(), 2)
+        self.assertLess(alpha[:, -1].max(), 2)
+        self.assertGreater(alpha[:, 34].min(), 240)
+        self.assertGreater(alpha[:, 93].min(), 240)
+
     def test_reject_invalid_dimensions(self):
         with self.assertRaises(ValueError):
             generate(self.specs["soil"], 100)

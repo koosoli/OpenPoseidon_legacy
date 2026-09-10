@@ -70,6 +70,13 @@ def generate(spec, size):
         dust = np.exp(-((edge_distance / 0.11) ** 2))
         tracks = spec.get("wheelTracks", [0.22, 0.40, 0.60, 0.78])
         wear = sum(np.exp(-(((u - centre) / 0.055) ** 2)) for centre in tracks)
+        if spec.get("trackOnly", False):
+            # Open centre and shoulders reveal the actual underlying landscape,
+            # not a painted grass strip. Small periodic edge variation avoids a stencil.
+            shifted_u = u[None, :] + 0.008 * np.tanh(broad)
+            coverage = np.maximum.reduce([
+                np.exp(-((shifted_u - centre) / 0.105) ** 4) for centre in tracks])
+            alpha = alpha * coverage
         rgb = rgb + dust[None, :, None] * np.array([22, 18, 10])[None, None, :]
         rgb = rgb - wear[None, :, None] * 7.0
     albedo[:, :, :3] = np.rint(np.clip(rgb, 0, 255)).astype(np.uint8)
