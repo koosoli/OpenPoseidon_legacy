@@ -1,5 +1,19 @@
 # September 9 visual follow-up
 
+## September 11: DDS hand-off contract, integration pending
+
+61b18e73 is installed and its native moving-camera regression completed cleanly
+with the corrected uncapped graphics profile. The DDS options are frozen per
+composition and tested across a live tint switch. The next increment adds an
+owned completed-DDS payload to the existing PreparedTextureStore, sharing byte
+budget, TTL, upload marks and Clear generation. It is not yet called by the
+worker or texture factory: no asynchronous DDS performance claim. Unit cases
+cover identity/pixels, stale publication, configuration changes, duplicates,
+upload/eviction, 1 MiB rejection, short TTL and disabled preparation. Full
+EDDS/PAA/preparer suite: 48 cases / 903 assertions. Next: connect the existing
+worker and factory behind a measured A/B, respecting archive lifetime and
+containing preparation failures; do not add a competing streaming manager.
+
 ## September 11: benchmark migration correction and static DLSS check
 
 The unversioned generated graphics profiles migrated fpsCap=0 to 144 on this

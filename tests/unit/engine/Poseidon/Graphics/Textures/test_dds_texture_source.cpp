@@ -21,6 +21,8 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <chrono>
+#include <thread>
 #include <string>
 #include <vector>
 
@@ -268,6 +270,113 @@ TEST_CASE("DDS composition uses supplied compression settings and rejects invali
             CHECK(reads == previousReads);
         }
     }
+}
+
+TEST_CASE("Prepared DDS ownership uses the existing store lifecycle", "[graphics][edds][streaming][dds-handoff]")
+{
+    if (!Poseidon::render::PreparedTextureStore::Enabled()) SKIP("Requires texture preparation");
+    auto& store = Poseidon::render::PreparedTextureStore::Instance();
+    store.Clear();
+    const auto options = Poseidon::CaptureDdsPreparationOptions();
+    const auto file = Bgra2x2();
+    const auto make = [&] {
+        auto source = std::make_unique<TextureSourceDDS>();
+        PacLevelMem mips[16];
+        REQUIRE(source->InitFromReader("colour.edds", mips, 16,
+            [&](const char*, std::vector<uint8_t>& out) { out = file; return true; }, options));
+        return source;
+    };
+    SECTION("ownership moves without copying pixels") {
+        auto source = make();
+        auto* identity = source.get();
+        REQUIRE(store.PutDdsPrepared("colour.edds", std::move(source), options, store.Generation()));
+        CHECK(store.SnapshotStats().bytes >= 16);
+        CHECK_FALSE(store.ShouldPrepare("colour.edds"));
+        auto result = store.TakeDdsPrepared("colour.edds", options);
+        REQUIRE(result.get() == identity);
+        PacLevelMem mip;
+        mip._w = mip._h = 2; mip._pitch = 8; mip._dFormat = PacARGB8888;
+        std::vector<uint8_t> actual(16);
+        REQUIRE(result->GetMipmapData(actual.data(), mip, 0));
+        CHECK(actual == std::vector<uint8_t>(file.end() - 16, file.end()));
+        CHECK(store.SnapshotStats().bytes == 0);
+        CHECK_FALSE(store.TakeDdsPrepared("colour.edds", options));
+    }
+    SECTION("clear invalidates publication without replacing a fresh entry") {
+        const auto oldGeneration = store.Generation();
+        auto stale = make();
+        store.Clear();
+        auto fresh = make();
+        auto* identity = fresh.get();
+        REQUIRE(store.PutDdsPrepared("colour.edds", std::move(fresh), options, store.Generation()));
+        CHECK_FALSE(store.PutDdsPrepared("colour.edds", std::move(stale), options, oldGeneration));
+        CHECK(store.TakeDdsPrepared("colour.edds", options).get() == identity);
+    }
+    SECTION("each configuration mismatch retires the old result") {
+        for (int field = 0; field < 3; ++field) {
+            REQUIRE(store.PutDdsPrepared("colour.edds", make(), options, store.Generation()));
+            auto changed = options;
+            if (field == 0) changed.compressedPassthrough = !changed.compressedPassthrough;
+            if (field == 1) changed.linearTintMultiply = !changed.linearTintMultiply;
+            if (field == 2) changed.decodedMaxEdge = options.decodedMaxEdge == 64 ? 128 : 64;
+            const auto misses = store.SnapshotStats().ddsConfigurationMisses;
+            CHECK_FALSE(store.TakeDdsPrepared("colour.edds", changed));
+            CHECK(store.SnapshotStats().ddsConfigurationMisses == misses + 1);
+            CHECK(store.SnapshotStats().bytes == 0);
+            CHECK(store.ShouldPrepare("colour.edds"));
+        }
+    }
+    SECTION("upload attempt and eviction share the existing marks") {
+        REQUIRE(store.PutDdsPrepared("colour.edds", make(), options, store.Generation()));
+        store.MarkUploaded("colour.edds");
+        CHECK(store.SnapshotStats().bytes == 0);
+        CHECK_FALSE(store.TakeDdsPrepared("colour.edds", options));
+        CHECK_FALSE(store.PutDdsPrepared("colour.edds", make(), options, store.Generation()));
+        store.MarkEvicted("colour.edds");
+        REQUIRE(store.PutDdsPrepared("colour.edds", make(), options, store.Generation()));
+    }
+    SECTION("invalid payload and duplicate cannot overwrite a valid result") {
+        CHECK_FALSE(store.PutDdsPrepared("colour.edds", nullptr, options, store.Generation()));
+        CHECK_FALSE(store.PutDdsPrepared("wrong.edds", make(), options, store.Generation()));
+        CHECK_FALSE(store.PutDdsPrepared("colour.edds", std::make_unique<TextureSourceDDS>(), options, store.Generation()));
+        auto first = make();
+        auto* identity = first.get();
+        REQUIRE(store.PutDdsPrepared("colour.edds", std::move(first), options, store.Generation()));
+        CHECK_FALSE(store.PutDdsPrepared("colour.edds", make(), options, store.Generation()));
+        CHECK(store.TakeDdsPrepared("colour.edds", options).get() == identity);
+    }
+    store.Clear();
+}
+
+TEST_CASE("Prepared DDS respects shared byte limits and expiry", "[graphics][edds][streaming][dds-handoff]")
+{
+    auto& store = Poseidon::render::PreparedTextureStore::Instance();
+    store.Clear();
+    auto options = Poseidon::CaptureDdsPreparationOptions();
+    options.decodedMaxEdge = 1024;
+    auto file = Header(1024, 1024, 1);
+    AppendU32(file, 0x59504F43);
+    AppendU32(file, 4 * 1024 * 1024);
+    file.insert(file.end(), 4 * 1024 * 1024, 128);
+    auto source = std::make_unique<TextureSourceDDS>();
+    PacLevelMem mips[16];
+    REQUIRE(source->InitFromReader("large.edds", mips, 16,
+        [&](const char*, std::vector<uint8_t>& out) { out = file; return true; }, options));
+    const bool fits = store.Enabled() && store.ByteBudget() > 4 * 1024 * 1024 + 4096;
+    REQUIRE(store.PutDdsPrepared("large.edds", std::move(source), options, store.Generation()) == fits);
+    CHECK(store.SnapshotStats().bytes <= store.ByteBudget());
+    if (!fits) {
+        CHECK(store.SnapshotStats().entries == 0);
+    } else if (store.TtlSeconds() > 0 && store.TtlSeconds() < 0.1) {
+        // Dedicated short-TTL test process, never wait for the production 30 s TTL.
+        std::this_thread::sleep_for(std::chrono::milliseconds(150));
+        CHECK_FALSE(store.TakeDdsPrepared("large.edds", options));
+        CHECK(store.SnapshotStats().bytes == 0);
+    } else {
+        REQUIRE(store.TakeDdsPrepared("large.edds", options));
+        CHECK(store.SnapshotStats().bytes == 0);
+    }
+    store.Clear();
 }
 
 TEST_CASE("Reusable DDS payloads preserve source identity and independent pixels", "[graphics][edds][streaming]")

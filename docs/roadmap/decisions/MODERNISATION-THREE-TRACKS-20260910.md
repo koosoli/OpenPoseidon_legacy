@@ -11,6 +11,18 @@ that baseline. Analysis requested first; implementation subsequently authorised.
 
 ## Evidence limits
 
+Completed-DDS hand-off increment (after 61b18e73, not connected to worker/factory
+yet): PutDdsPrepared/TakeDdsPrepared move a unique CPU source through the existing
+store. Capacity-based mip payload accounting shares its budget with PAA/RGBA and
+the optional decode-reuse experiment. This is a resident payload budget, not a
+claim to bound temporary decode allocations or total process RAM. Mandatory
+generation rejects old-world publication; all three interpretation options must
+match at take. A mismatch retires the old result and allows normal fallback.
+TTL/marks/Clear retire payloads outside the store mutex. Index allocation happens
+before a noexcept list splice so insertion failure leaves no orphan entry.
+48 combined cases / 903 assertions pass; dedicated 1 MiB budget (53 assertions),
+50 ms TTL (54) and disabled-store (4) processes pass. No GPU work or new queue.
+
 September 11 DDS prerequisite after 55f9b87f: InitFromReader takes an owned
 DdsPreparationOptions snapshot (compression, tint mode, decoded edge). Colour,
 coverage and tint all use that snapshot; invalid edge limits fail before I/O.
@@ -20,7 +32,13 @@ pixels for both modes; supplied compression and invalid limits are also covered.
 This is NOT worker activation, a new scheduler, a full thread-safety audit, or
 evidence of reduced loading stalls. Prepared-result ownership/config matching,
 worker exception handling and native archive lifetime remain integration gates.
-Installed runtime verification of this increment is pending.
+Installed 61b18e73 capture cancel-20260911-012222-slow-trace-bc7-default-driver-memory-tint-reuse-0
+passes strict shutdown validation: 134.7 s, 22370 registered instances, 134
+whole-GPU driver-memory samples. Version-3 profile retains fpsCap=0. Moving
+trace median/p95/p99/worst 31/44/95/177 ms, 32.0 throughput FPS, 11 frames over
+100 ms, 96.7% one-to-one trace coverage (gap averaging limits tail accuracy).
+This is lifecycle evidence, NOT a demonstrated speedup or village visual check;
+the final view is over the ocean with zero main object draws.
 
 September 11 correction: generated unversioned graphics.cfg files underwent
 GraphicsConfig migration, replacing fpsCap=0 with 144 on this machine. Earlier

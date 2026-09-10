@@ -39,10 +39,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <memory>
 #include <string>
 #include <vector>
 
-namespace Poseidon { class TextureSourceDDS; }
+namespace Poseidon { class TextureSourceDDS; struct DdsPreparationOptions; }
 
 namespace Poseidon::render
 {
@@ -71,6 +72,9 @@ class PreparedTextureStore
         uint64_t ddsReusePuts = 0;
         uint64_t ddsReuseHits = 0;
         size_t ddsReuseBytes = 0;
+        uint64_t ddsPreparedPuts = 0;
+        uint64_t ddsPreparedTakes = 0;
+        uint64_t ddsConfigurationMisses = 0;
         size_t entries = 0;         // current
         size_t bytes = 0;           // current
     };
@@ -109,6 +113,14 @@ class PreparedTextureStore
     bool PutDecoded(const std::string& key, DecodedImage&& image,
                     std::optional<uint64_t> generation = std::nullopt);
     bool TakeDecoded(const std::string& key, DecodedImage& out);
+
+    // Completed CPU DDS composition; same store/budget/TTL/marks, not a second
+    // queue. Caller must use these options for preparation. Generation is mandatory.
+    // No pixel copy at hand-off. Publication refusal destroys the owned source.
+    bool PutDdsPrepared(const std::string& key, std::unique_ptr<TextureSourceDDS> source,
+                        const DdsPreparationOptions& options, uint64_t generation);
+    std::unique_ptr<TextureSourceDDS> TakeDdsPrepared(const std::string& key,
+                                                     const DdsPreparationOptions& options);
 
     // Main-thread native tint experiment: immutable, unmodified source decodes,
     // sharing this store's TTL/Clear and byte budget (also capped at 64 MiB).

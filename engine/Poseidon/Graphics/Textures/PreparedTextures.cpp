@@ -32,9 +32,12 @@ struct PreparedTextureStore::Impl
         DecodedImage image;     // ...OR a whole-file RGBA8 decode (image.valid() discriminates)
         Clock::time_point stored;
         std::shared_ptr<const DdsDecode> dds;
+        std::unique_ptr<TextureSourceDDS> preparedDds;
+        DdsPreparationOptions ddsOptions{};
+        size_t preparedDdsBytes = 0;
     };
     static size_t EntryBytes(const Entry& entry)
-    { return entry.chain.blocks.size() + entry.image.rgba.size() + (entry.dds ? entry.dds->bytes : 0); }
+    { return entry.chain.blocks.size() + entry.image.rgba.size() + (entry.dds ? entry.dds->bytes : 0) + entry.preparedDdsBytes; }
     mutable std::mutex mutex;
     // Insertion order = production order = (through the preparer's queue) distance order, so
     // the front is the oldest and the TTL sweep walks from there and stops early.
@@ -304,6 +307,73 @@ bool PreparedTextureStore::Take(const std::string& key, PAABlockChain& out)
     ++_impl->stats.takes;
     _impl->stats.takeBytes += out.blocks.size();
     return true;
+}
+
+bool PreparedTextureStore::PutDdsPrepared(const std::string& key, std::unique_ptr<TextureSourceDDS> source,
+                                         const DdsPreparationOptions& options, uint64_t generation)
+{
+    if (!Enabled() || key.empty() || !source || source->_levels.empty() ||
+        source->_mipmaps != static_cast<int>(source->_levels.size()) ||
+        Key(static_cast<const char*>(source->_name)) != key ||
+        options.decodedMaxEdge < 64 || options.decodedMaxEdge > 8192)
+        return false;
+    size_t bytes = sizeof(TextureSourceDDS) + source->_levels.capacity() * sizeof(DDSMipLevel);
+    for (const auto& level : source->_levels)
+        bytes += level.data.capacity();
+    std::list<Impl::Entry> pending;
+    pending.emplace_back(Impl::Entry{key, {}, {}, Impl::Clock::now()});
+    pending.back().preparedDds = std::move(source);
+    pending.back().ddsOptions = options;
+    pending.back().preparedDdsBytes = bytes;
+    std::list<Impl::Entry> retired;
+    std::lock_guard<std::mutex> lock(_impl->mutex);
+    _impl->SweepLocked(retired);
+    if (generation != _impl->generation) { ++_impl->stats.rejectedStale; return false; }
+    if (_impl->uploaded.count(key)) { ++_impl->stats.skippedUploaded; return false; }
+    if (_impl->byKey.count(key)) { ++_impl->stats.rejectedDup; return false; }
+    if (bytes > ByteBudget() - std::min(ByteBudget(), _impl->bytes)) {
+        ++_impl->stats.rejectedFull;
+        return false;
+    }
+    // Allocate the index before the noexcept splice: an allocation failure must
+    // not leave an unindexed payload resident or destroy it under this mutex.
+    _impl->byKey.emplace(key, pending.begin());
+    pending.back().stored = Impl::Clock::now();
+    _impl->order.splice(_impl->order.end(), pending);
+    _impl->bytes += bytes;
+    ++_impl->stats.ddsPreparedPuts;
+    _impl->stats.putBytes += bytes;
+    _impl->stats.bytes = _impl->bytes;
+    _impl->stats.entries = _impl->byKey.size();
+    return true;
+}
+
+std::unique_ptr<TextureSourceDDS> PreparedTextureStore::TakeDdsPrepared(
+    const std::string& key, const DdsPreparationOptions& options)
+{
+    if (!Enabled() || key.empty()) return nullptr;
+    std::list<Impl::Entry> retired;
+    std::unique_ptr<TextureSourceDDS> result;
+    {
+        std::lock_guard<std::mutex> lock(_impl->mutex);
+        _impl->SweepLocked(retired);
+        const auto it = _impl->byKey.find(key);
+        if (it == _impl->byKey.end() || !it->second->preparedDds) return nullptr;
+        const auto& stored = it->second->ddsOptions;
+        if (stored.compressedPassthrough == options.compressedPassthrough &&
+            stored.linearTintMultiply == options.linearTintMultiply &&
+            stored.decodedMaxEdge == options.decodedMaxEdge) {
+            result = std::move(it->second->preparedDds);
+            ++_impl->stats.ddsPreparedTakes;
+            _impl->stats.takeBytes += it->second->preparedDdsBytes;
+        } else {
+            ++_impl->stats.ddsConfigurationMisses;
+        }
+        // Even a mismatched result retires outside the lock. Future requests may
+        // prepare under the new settings; the current consumer uses its fallback.
+        _impl->EraseLocked(it, nullptr, nullptr, &retired);
+    }
+    return result;
 }
 
 bool PreparedTextureStore::CopyDdsDecode(const std::string& key, const std::vector<uint8_t>& source,
