@@ -6983,6 +6983,7 @@ impl Gfx3d {
         // The per-draw storage arrays (world, material) are packed in this order and
         // read in-shader by @builtin(instance_index) == base_instance == slot.
         order: &[u32],
+        late_surface_slots: &[bool],
         palette: &[WgrMat4],
         lights: &[WgrLight],
         shadow_mask_view: &wgpu::TextureView,
@@ -7358,7 +7359,7 @@ impl Gfx3d {
                 }
                 if let Some(mut view) = staged {
                     let (chunks, _rem) = view.slice(..).into_chunks::<MAT_SZ>();
-                    chunks.write_iter(order.iter().map(|&i| {
+                    chunks.write_iter(order.iter().enumerate().map(|(material_slot, &i)| {
                         let d = &draws[i as usize];
                         // Pack the bindless indices into the material's spare emissive.w
                         // (only emissive.rgb is read for shading): (tex_slot << 3) | sampler.
@@ -7399,7 +7400,9 @@ impl Gfx3d {
                                     | (u32::from(d.flags & crate::ffi::WGR_DRAW3D_COCKPIT != 0)
                                         << 4)
                                     | (u32::from(d.flags & crate::ffi::WGR_DRAW3D_MONITOR != 0)
-                                        << 5)) as f32,
+                                        << 5)
+                                    | (u32::from(late_surface_slots.get(material_slot).copied().unwrap_or(false))
+                                        << 6)) as f32,
                             ],
                         })
                     }));
@@ -10008,6 +10011,62 @@ pub enum Plan3dOp {
 pub struct Plan3d {
     pub order: Vec<u32>,
     pub ops: Vec<Plan3dOp>,
+}
+
+// Colour-only flag in the existing per-instance material: no replay/order/depth
+// changes. Glass already has fragment-distance scattering through its alpha path.
+pub(crate) fn late_surface_scattering_slots(plan: &Plan3d, draws: &[WgrDraw3D], enabled: bool) -> Vec<bool> {
+    if !enabled { return Vec::new(); }
+    let end = plan.ops.iter().position(|op| matches!(op, Plan3dOp::ClearDepth | Plan3dOp::Resolve))
+        .unwrap_or(plan.ops.len());
+    let Some(water) = plan.ops[..end].iter().rposition(|op| matches!(op, Plan3dOp::Water(_))) else {
+        return Vec::new();
+    };
+    let mut slots = vec![false; plan.order.len()];
+    for op in &plan.ops[water+1..end] {
+        if let Plan3dOp::Draw3D { base, count, .. } = op {
+            for slot in *base as usize..(*base as usize).saturating_add(*count as usize).min(slots.len()) {
+                if let Some(d) = draws.get(plan.order[slot] as usize) {
+                    slots[slot] = draw_is_prepassed(d)
+                        && d.flags & (crate::ffi::WGR_DRAW3D_COCKPIT | crate::ffi::WGR_DRAW3D_MONITOR) == 0;
+                }
+            }
+        }
+    }
+    slots
+}
+
+#[test]
+fn late_surface_scattering_is_per_instance_and_excludes_other_segments() {
+    fn opaque() -> WgrDraw3D {
+        let mut d: WgrDraw3D = unsafe { std::mem::zeroed() };
+        d.blend = WgrBlend::Opaque;
+        d.depth = WgrDepthMode::TestWrite;
+        d.palette_slot = NO_PALETTE;
+        d
+    }
+    fn op(base: u32, count: u32) -> Plan3dOp {
+        Plan3dOp::Draw3D { draw: 0, base, count, kind: DrawKind::Direct }
+    }
+    let mut draws = vec![opaque(); 6];
+    draws[1].alpha_ref = 0.5;
+    draws[2].blend = WgrBlend::Alpha;
+    draws[3].flags |= DRAW3D_ON_SURFACE;
+    draws[4].flags |= crate::ffi::WGR_DRAW3D_COCKPIT;
+    draws[5].flags |= crate::ffi::WGR_DRAW3D_MONITOR;
+    let mut plan = Plan3d { order: vec![0, 0, 1, 2, 3, 4, 5, 0],
+        ops: vec![op(0, 1), Plan3dOp::Water(0), op(1, 6), Plan3dOp::ClearDepth, op(7, 1)] };
+    assert_eq!(late_surface_scattering_slots(&plan, &draws, true),
+        vec![false, true, true, false, false, false, false, false]);
+    assert!(late_surface_scattering_slots(&plan, &draws, false).is_empty());
+    plan.ops[1] = Plan3dOp::Terrain(0);
+    assert!(late_surface_scattering_slots(&plan, &draws, true).is_empty());
+    plan.ops[1] = Plan3dOp::Water(0);
+    plan.ops[3] = Plan3dOp::Resolve;
+    assert!(!late_surface_scattering_slots(&plan, &draws, true)[7]);
+    // Several water batches still establish one final atmosphere boundary.
+    plan.ops.insert(3, Plan3dOp::Water(1));
+    assert!(late_surface_scattering_slots(&plan, &draws, true).iter().all(|v| !v));
 }
 
 // Which pass draw_one records into (docs/depth-prepass-plan.md). Prepass = the

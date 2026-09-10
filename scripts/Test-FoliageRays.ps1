@@ -1,4 +1,4 @@
-param([switch]$RaysOff, [switch]$LegacyOrder, [switch]$Zeus, [string]$Label='baseline', [string]$World='',
+param([switch]$RaysOff, [switch]$LegacyOrder, [switch]$LateSurface, [switch]$Zeus, [string]$Label='baseline', [string]$World='',
       [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
@@ -11,6 +11,8 @@ $env:POSEIDON_USER_DIR=Join-Path $output 'user'
 New-Item -ItemType Directory -Force $env:POSEIDON_USER_DIR | Out-Null
 [IO.File]::WriteAllText((Join-Path $env:POSEIDON_USER_DIR 'graphics.cfg'), "qualityPreset=3;`nterrainDetail=4;`nmsaaSamples=4;`ndlssMode=0;`nvsync=0;`nfpsCap=60;`n")
 $env:WGR_EARLY_LATE_OPAQUE=if ($LegacyOrder) {'0'} else {'1'}
+if ($LateSurface) {$env:WGR_EARLY_LATE_OPAQUE='0'}
+$env:WGR_LATE_SURFACE_RAYS=if ($LateSurface) {'1'} else {'0'}
 $env:WGR_LATE_OBJECT_TRACE='1'
 $env:WGR_AUTO_EXPOSURE='0'
 $env:WGR_EXPOSURE='1'

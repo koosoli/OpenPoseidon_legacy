@@ -3783,6 +3783,18 @@ impl Renderer {
             .map(|rays| rays.surface_params(&self.sky_params))
             .unwrap_or([[0.0; 4]; 4]);
         self.gfx3d.set_surface_rays(&self.queue, &surface_rays);
+        static LATE_SURFACE_RAYS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        let late_surface_slots = gfx3d::late_surface_scattering_slots(&plan, draws3d,
+            *LATE_SURFACE_RAYS.get_or_init(||
+                std::env::var("WGR_LATE_SURFACE_RAYS").is_ok_and(|v| v == "1")
+                && !std::env::var("WGR_EARLY_LATE_OPAQUE").is_ok_and(|v| v == "1")));
+        if !late_surface_slots.is_empty() {
+            static TRACE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            if TRACE.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 300 == 0 {
+                self.log.log(log_level::INFO, &format!("late surface rays: {} material slots, intensity={}",
+                    late_surface_slots.iter().filter(|v| **v).count(), surface_rays[2][0]));
+            }
+        }
         self.gfx3d.prepare(
             &self.device,
             &self.queue,
@@ -3790,6 +3802,7 @@ impl Renderer {
             &prepared_cameras,
             draws3d,
             &plan.order,
+            &late_surface_slots,
             palette,
             lights,
             &shadow_mask_view,

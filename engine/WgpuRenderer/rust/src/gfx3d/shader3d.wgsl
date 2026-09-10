@@ -1045,7 +1045,9 @@ fn shade_fragment(in: VsOut) -> vec4<f32> {
     if ((material_flags(material) & MATFLAG_GLASS) != 0u) {
         out_a2 = max(out_a2, GLASS_MIN_ALPHA);
     }
-    if (translucent > 0.5 && linear > 0.5) {
+    // Bit 6 marks only prepassed world draws whose colour is replayed after
+    // atmospheric compositing. It does not turn them into alpha/glass materials.
+    if ((translucent > 0.5 || (material_flags(material) & 64u) != 0u) && linear > 0.5) {
         out_rgb = out_rgb + surface_scattering(in.world_pos);
     }
     return vec4<f32>(out_rgb, out_a2);
