@@ -2805,6 +2805,15 @@ static bool ObjectStreamAdmitCounted()
     return counted;
 }
 
+static uint32_t ObjectStreamBankTablesPerUpdate()
+{
+    static const uint32_t limit = [] {
+        const char* value = std::getenv("WGR_OBJECT_STREAM_TABLE_BATCH");
+        return static_cast<uint32_t>(std::clamp<long>(value ? std::strtol(value, nullptr, 10) : 2, 0, 128));
+    }();
+    return limit;
+}
+
 static uint32_t ObjectStreamColdPerUpdate()
 {
     static const uint32_t count = []
@@ -3686,6 +3695,14 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
     const uint32_t admitColdBudget =
         preloading ? std::numeric_limits<uint32_t>::max() : ObjectStreamColdPerUpdate();
     uint32_t coldAttempted = 0; // cold models this update paid for, admitted or not
+    // Native bank-table resolution loads texture headers on the main thread,
+    // BEFORE coldAttempted is charged. Bound that stage without blocking warm
+    // placement or installation of conversions already completed by workers.
+    // Preload and non-native worlds retain their existing behaviour; 0 is the A/B.
+    const uint32_t tableLimit = (!preloading && GetEnfusionSurfaceCount() > 0)
+                                   ? ObjectStreamBankTablesPerUpdate() : 0;
+    uint32_t tablesPrepared = 0, tableDeferred = 0;
+    double tablePrepareMs = 0;
     // (c2) The upload byte ceiling, same standing as the wall-clock ceiling: it may cut the
     // floor short, and `attempted > 0` keeps the one-object-per-update termination guarantee.
     // Reads the FRAME's cumulative upload bytes, so uploads outside this loop (terrain, UI
@@ -3832,6 +3849,15 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                 const ObjectStreamPreparer::State state = _modernObjectPreparer->Query(placement.modelIndex);
                 if (state == ObjectStreamPreparer::State::Ready)
                 {
+                    if (tableLimit > 0 && tablesPrepared >= tableLimit)
+                    {
+                        // Leave the IR owned by the existing ready queue. Taking
+                        // then re-requesting would throw away completed parsing.
+                        ++tableDeferred;
+                        ++waited;
+                        ++scan;
+                        continue;
+                    }
                     preparsed = _modernObjectPreparer->Take(placement.modelIndex);
                     if (!preparsed)
                     {
@@ -3920,7 +3946,11 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                                 c = static_cast<char>(c - 'A' + 'a');
                         preparsed->sourcePath = low;
                         auto tables = std::make_shared<Model::ShapeAdapter::AdapterBankTables>();
+                        const auto tableStart = std::chrono::steady_clock::now();
                         Model::ShapeAdapter::BuildAdapterBankTables(*preparsed, *tables);
+                        tablePrepareMs += std::chrono::duration<double, std::milli>(
+                            std::chrono::steady_clock::now() - tableStart).count();
+                        ++tablesPrepared;
                         if (_modernObjectPreparer->SubmitConvert(placement.modelIndex, std::move(preparsed),
                                                                 std::move(tables)))
                         {
@@ -4177,9 +4207,12 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
     // (d) A row is also due on any update that admitted a cold model, else the interesting
     // frames -- the ones this change exists for -- would be exactly the silent ones. Bounded by
     // the number of distinct cold models a run touches (hundreds), not by frames.
-    const bool asyncRow = (installed + syncCold) > 0;
+    const bool asyncRow = (installed + syncCold + tablesPrepared) > 0;
     if (centerChanged || !_modernObjectResidencyPending || progressRow || asyncRow)
     {
+        if (tablesPrepared > 0 || tableDeferred > 0)
+            LOG_INFO(World, "Object stream bank tables: prepared={} deferredPlacements={} limit={} ms={:.3f}",
+                     tablesPrepared, tableDeferred, tableLimit, tablePrepareMs);
         // The three new fields exist so the fix can be judged from the log alone. `desired` is
         // the effective window radius (the candidate `window` is the grown one and has always
         // been much larger); `lead` is the prefetch bias in metres, and is 0 whenever the camera
