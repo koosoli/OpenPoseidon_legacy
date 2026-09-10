@@ -1702,3 +1702,19 @@ logs and a controlled Albedo/Full image difference. The supported client build
 now generates the first archive automatically. Three-surface acceptance,
 roughness/terrain-normal integration and Jeep FFV remain open; this is not a
 completed default-content release. See the decision's run IDs and limitations.
+
+Later verified increments: exact asphalt, Eden sand and field-track mappings
+are packaged in 0.1.3, and the existing terrain normal slot now accepts legacy
+AG normals with matching cell clamping and a flat far-Satmap early-out. Field
+tracks preserve the original transparent grass centre. These are three
+candidates, not photorealistic/material acceptance: roughness binding and the
+full lighting/weather/LOD comparison matrix still remain open, as does Jeep FFV.
+
+Streaming safety follow-up: typed prepared payloads no longer consume the wrong
+kind and RGBA retirement releases outside the store mutex (6 cases/68 checks).
+A native measurement exposed an independent long-mission-name buffer overwrite;
+d8db97c5 bounds/rejects these identifiers without changing the header ABI and
+passes 17 loader cases/84 checks. The installed native 4 km lifecycle run now
+passes with 138 driver-memory samples. Details and invalid-run exclusion are in
+the three-track decision. This is neither a completed loading pipeline nor
+forest/building HLOD, which remain separate open tasks.

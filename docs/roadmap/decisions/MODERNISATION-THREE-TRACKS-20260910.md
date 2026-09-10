@@ -493,3 +493,12 @@ changing the save/network header layout, and the harness stages short unique
 identifiers independently of descriptive capture labels. Mission-loader tests:
 17 cases / 84 assertions pass, including 79/80-byte boundary and adjacent-field
 integrity checks. Installed runtime repeat remains pending.
+
+Installed d8db97c5 repeat: cancel-20260910-225129-slow-trace-legacy-tables-
+dds-prep-bc7-default-driver-memory passes the full route, 22370 registered
+instances, exit 0, 138.8 s wall time. 138 whole-device driver samples span
+1538..5259 MiB; the ocean endpoint image was inspected. No FPS improvement is
+inferred from the cheapest endpoint frame or compared against the invalid run.
+The harness now defaults to table cap 0, matching production; the rejected cap
+requires explicit -ExperimentalTableBudget N. -LegacyTableBudget remains an
+accepted compatibility alias for the production path.

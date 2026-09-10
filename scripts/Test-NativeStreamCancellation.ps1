@@ -1,11 +1,13 @@
 param([switch]$LegacyClutter, [switch]$VerifyClutter, [switch]$TraceSlowFrames, [switch]$LegacyTableBudget, [switch]$TraceDdsPreparation,
       [switch]$SampleDriverMemory,
+      [ValidateRange(0,64)][int]$ExperimentalTableBudget=0,
       [ValidateRange(-1,2)][int]$Bc7Batch=-1,
       [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',
       [string]$Archives='C:\Program Files (x86)\Steam\steamapps\common\Arma Reforger\addons')
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
 if ($LegacyClutter -and $VerifyClutter) {throw 'Verification needs the reuse path enabled'}
+if ($LegacyTableBudget -and $ExperimentalTableBudget -gt 0) {throw 'Choose the production table path or the experimental cap, not both'}
 if (!(Test-Path -LiteralPath $Archives -PathType Container)) {throw 'Native archives missing'}
 $root=Split-Path $PSScriptRoot -Parent
 $label='cancel-'+(Get-Date -Format 'yyyyMMdd-HHmmss')
@@ -13,6 +15,7 @@ if ($LegacyClutter) {$label+='-legacy-clutter'}
 if ($VerifyClutter) {$label+='-verify-clutter'}
 if ($TraceSlowFrames) {$label+='-slow-trace'}
 if ($LegacyTableBudget) {$label+='-legacy-tables'}
+if ($ExperimentalTableBudget -gt 0) {$label+='-experimental-tables-'+$ExperimentalTableBudget}
 if ($TraceDdsPreparation) {$label+='-dds-prep'}
 if ($Bc7Batch -gt 0) {$label+='-bc7-'+$Bc7Batch}
 if ($Bc7Batch -lt 0) {$label+='-bc7-default'}
@@ -26,12 +29,14 @@ $settings=@{
  POSEIDON_REFORGER_WORLD='worlds/eden'; POSEIDON_REFORGER_OBJECTS='1'; POSEIDON_REFORGER_STREAM='1'
  WGR_PASS1_STATS='1'; WGR_LOD_GOVERNOR_RANGE='1'; POSEIDON_LOD_TRACE='1'
  WGR_NATIVE_CLUTTER_REUSE='1'; WGR_NATIVE_CLUTTER_VERIFY='0'
- WGR_OBJECT_STREAM_TABLE_BATCH='2'
+ # The count cap delayed coverage in acceptance and is not the shipped default.
+ WGR_OBJECT_STREAM_TABLE_BATCH='0'
 }
 if ($LegacyClutter) {$settings.WGR_NATIVE_CLUTTER_REUSE='0'}
 if ($VerifyClutter) {$settings.WGR_NATIVE_CLUTTER_VERIFY='1'}
 if ($TraceSlowFrames) {$settings.POSEIDON_SLOW_FRAME_TRACE='1'}
 if ($LegacyTableBudget) {$settings.WGR_OBJECT_STREAM_TABLE_BATCH='0'}
+if ($ExperimentalTableBudget -gt 0) {$settings.WGR_OBJECT_STREAM_TABLE_BATCH=[string]$ExperimentalTableBudget}
 if ($TraceDdsPreparation) {$settings.POSEIDON_DDS_PREP_TRACE='1'}
 if ($Bc7Batch -ge 0) {$settings.POSEIDON_DDS_BC7_BATCH=[string]$Bc7Batch}
 # Short settle intentionally leaves cold work outstanding when movement starts.
