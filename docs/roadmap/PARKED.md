@@ -281,12 +281,6 @@ gates the machinery, not any archived scene; and `changed_pixel_ratio` cannot ra
 — a blacked-out object scores 0.027 while a signed-off, non-blocking backend difference on
 the same scene scores 0.55. **Unparks when bullet 6 covers a non-CWA family.**
 
-### Order-dependent `DDSConverter` test
-Passes in the full suite, fails when run alone (`32 == 64`). Relies on state an earlier test
-leaves behind. Chip `task_cc1f2932`. Do not "fix" it by accepting 32 — work out which value
-is correct first, because a converter silently producing a half-size level is the more
-interesting possibility.
-
 ### Loose objects read a solver that has not stepped yet
 **Parked 2026-08-31 by SIM-814**, which found it while auditing the stage graph's resource
 declarations and is deliberately not fixing it in the same change. The Vehicles stage reads

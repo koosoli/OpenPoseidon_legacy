@@ -333,10 +333,19 @@ TEST_CASE("DDSConverter: generate DDS fixture from synthetic DXT1", "[Graphics][
     REQUIRE(dds2.mipmaps[0].data == dds.mipmaps[0].data);
 }
 
-TEST_CASE("DDSConverter: generate DDS fixture from synthetic_dxt5 DXT5", "[Graphics][DDS][.fixture]")
+TEST_CASE("DDSConverter: synthetic DXT5 dimensions and blocks survive roundtrip", "[Graphics][DDS]")
 {
+    // The source is 32x32 DXT5, not the 64x64 DXT1 fixture above. This writes only
+    // a temporary file, so it belongs in normal tests, not the hidden generators.
+    PAAInfo info;
+    REQUIRE(ReadPAAInfo(GET_FIXTURE("paa/synthetic_dxt5.paa"), info));
+    REQUIRE(info.width == 32);
+    REQUIRE(info.height == 32);
     auto dds = DDSConverter::PAAFileToDDS(GET_FIXTURE("paa/synthetic_dxt5.paa"));
     REQUIRE(dds.valid());
+    REQUIRE(dds.width == info.width);
+    REQUIRE(dds.height == info.height);
+    REQUIRE(dds.mipmaps[0].data.size() == 1024);
 
     TmpFile tmp("synthetic_dxt5.dds");
     REQUIRE(DDSConverter::WriteDDS(tmp.path, dds));
@@ -344,7 +353,13 @@ TEST_CASE("DDSConverter: generate DDS fixture from synthetic_dxt5 DXT5", "[Graph
     auto dds2 = DDSConverter::ReadDDS(tmp.path);
     REQUIRE(dds2.valid());
     REQUIRE(dds2.format == PixelFormat::DXT5);
-    REQUIRE(dds2.width == 64);
-    REQUIRE(dds2.height == 64);
+    REQUIRE(dds2.width == info.width);
+    REQUIRE(dds2.height == info.height);
     REQUIRE(dds2.mipmaps.size() == dds.mipmaps.size());
+    for (size_t i = 0; i < dds.mipmaps.size(); ++i)
+    {
+        REQUIRE(dds2.mipmaps[i].width == dds.mipmaps[i].width);
+        REQUIRE(dds2.mipmaps[i].height == dds.mipmaps[i].height);
+        REQUIRE(dds2.mipmaps[i].data == dds.mipmaps[i].data);
+    }
 }
