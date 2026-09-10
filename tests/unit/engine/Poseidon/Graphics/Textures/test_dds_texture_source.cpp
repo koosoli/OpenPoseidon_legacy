@@ -13,6 +13,7 @@
 // may be committed.
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 #include <Poseidon/Graphics/Textures/DdsImport.hpp>
 #include <Poseidon/Graphics/Textures/EnfusionTextureName.hpp>
 
@@ -90,13 +91,27 @@ std::vector<uint8_t> Bgra2x2()
     return file;
 }
 
+struct ScopedLayerTintMode
+{
+    int previous;
+    explicit ScopedLayerTintMode(bool multiply)
+        : previous(Poseidon::Enfusion::GLayerTintLinearMultiply.exchange(multiply ? 1 : 0)) {}
+    ~ScopedLayerTintMode() { Poseidon::Enfusion::GLayerTintLinearMultiply.store(previous); }
+};
 } // namespace
 
-TEST_CASE("Enfusion NTC normals use red rather than cavity for X", "[graphics][edds][ntc]")
+TEST_CASE("Enfusion RG normals use red rather than cavity or occlusion for X", "[graphics][edds][ntc][nho]")
 {
     REQUIRE(Poseidon::IsEnfusionRgNormalName("assets/polyplane_picea_NTC.edds"));
     REQUIRE(Poseidon::IsEnfusionRgNormalName("assets/bark_picea_ntc.edds"));
     REQUIRE(Poseidon::IsEnfusionRgNormalName("assets/wall_nmo.edds"));
+    REQUIRE(Poseidon::IsEnfusionRgNormalName("assets/decals/beach_naturedebris_01_nho.edds"));
+    REQUIRE(Poseidon::IsEnfusionRgNormalName("assets\\decals\\BEACH_NHO.EDDS"));
+    REQUIRE(Poseidon::IsEnfusionRgNormalName("assets.v2/beach_nho"));
+    REQUIRE_FALSE(Poseidon::IsEnfusionRgNormalName("assets/old_nho/beach_bcr.edds"));
+    REQUIRE_FALSE(Poseidon::IsEnfusionRgNormalName("assets/beach_nho_bcr.edds"));
+    REQUIRE_FALSE(Poseidon::IsEnfusionRgNormalName("assets/beach_nh.edds"));
+    REQUIRE_FALSE(Poseidon::IsEnfusionRgNormalName(""));
     REQUIRE_FALSE(Poseidon::IsEnfusionRgNormalName("assets/wall_nohq.paa"));
     REQUIRE_FALSE(Poseidon::IsEnfusionRgNormalName("assets/leaf_bcr.edds"));
     REQUIRE_FALSE(Poseidon::IsEnfusionRgNormalName("assets/leaf_a.edds"));
@@ -119,7 +134,7 @@ TEST_CASE("Enfusion NTC normals use red rather than cavity for X", "[graphics][e
     auto file = Header(4, 4, 1, "DX10");
     for (uint32_t word : {98u, 3u, 0u, 1u, 0u, 0x59504F43u, 16u}) AppendU32(file, word);
     file.insert(file.end(), block, block + 16);
-    for (const char* name : {"test_ntc.edds", "test_nmo.edds", "test_bcr.edds", "test_coverage.edds"})
+    for (const char* name : {"test_ntc.edds", "test_nmo.edds", "test_nho.edds", "test_bcr.edds", "test_coverage.edds"})
     {
         INFO(name);
         TextureSourceDDS source;
@@ -310,6 +325,8 @@ TEST_CASE("DDS source: mip 0 is the largest level", "[graphics][edds][dz-002]")
 
 TEST_CASE("Enfusion layer tint: r,g,b lands in R,G,B and not in B,G,R", "[graphics][edds][rfg-070]")
 {
+    const bool multiply = GENERATE(false, true);
+    const ScopedLayerTintMode mode(multiply);
     // The trap: decoded levels are ARGB8888, which in this engine means B,G,R,A in memory.
     // A tint applied in index order paints a beige wall blue -- and it still LOOKS like a
     // working tint, because the image does change colour. Only a per-channel assertion
@@ -333,16 +350,19 @@ TEST_CASE("Enfusion layer tint: r,g,b lands in R,G,B and not in B,G,R", "[graphi
     const uint8_t r = levels[0].data[2];
     REQUIRE(r > g);
     REQUIRE(g > b);
-    // sRGB(0.9) ~ 0.955 -> ~244; sRGB(0.05) ~ 0.2416 -> ~62. Loose bounds: what is being
-    // pinned is which byte moved where, not the encoder's last digit.
-    REQUIRE(r > 230);
-    REQUIRE(b < 90);
+    // Independent sRGB reference values: multiply the decoded 128/255 texel,
+    // or, only in the legacy arm, rescale its mean to the authored colour.
+    REQUIRE(static_cast<int>(r) == (multiply ? 122 : 243));
+    REQUIRE(static_cast<int>(g) == (multiply ? 92 : 188));
+    REQUIRE(static_cast<int>(b) == (multiply ? 27 : 63));
     // Alpha is coverage or roughness and is never the tint's business.
     REQUIRE(levels[0].data[3] == 200);
 }
 
 TEST_CASE("Enfusion layer tint: one gain for the whole mip chain", "[graphics][edds][rfg-070]")
 {
+    const bool multiply = GENERATE(false, true);
+    const ScopedLayerTintMode mode(multiply);
     // A per-level mean would give each mip its own gain, and the same wall would change
     // colour as you walked away from it. The gain comes from level 0 and is applied to all.
     std::vector<Poseidon::DDSMipLevel> levels(2);
@@ -360,7 +380,9 @@ TEST_CASE("Enfusion layer tint: one gain for the whole mip chain", "[graphics][e
 
 TEST_CASE("Enfusion layer tint: a zero channel is left alone", "[graphics][edds][rfg-070]")
 {
-    // gain = target / mean, and a tile with a dead channel would be multiplied by infinity.
+    const bool multiply = GENERATE(false, true);
+    const ScopedLayerTintMode mode(multiply);
+    // Zero remains zero in both modes, including the legacy target/mean path.
     std::vector<Poseidon::DDSMipLevel> levels(1);
     levels[0].width = 1;
     levels[0].height = 1;
@@ -368,7 +390,9 @@ TEST_CASE("Enfusion layer tint: a zero channel is left alone", "[graphics][edds]
     const float rgb[3] = {0.5f, 0.5f, 0.5f};
     Poseidon::ApplyEnfusionLayerTint(levels, rgb);
     REQUIRE(levels[0].data[0] == 0);
-    REQUIRE(levels[0].data[2] > 60);
+    REQUIRE(static_cast<int>(levels[0].data[1]) == (multiply ? 41 : 188));
+    REQUIRE(static_cast<int>(levels[0].data[2]) == (multiply ? 41 : 188));
+    REQUIRE(levels[0].data[3] == 255);
 }
 
 TEST_CASE("Enfusion composite names nest: tint outside coverage", "[graphics][edds][rfg-070]")

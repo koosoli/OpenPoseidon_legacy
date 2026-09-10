@@ -1,5 +1,24 @@
 # September 9 visual follow-up
 
+## NHO normal convention and tint regression tests, September 10
+
+Native beach_naturedebris_01_nho.edds is present in the Forest material log.
+NHO also stores normal XY in RG, with height in blue and occlusion in alpha;
+its missing filename classification is now included for exact basename suffixes,
+case-insensitively. Directory names and albedo suffixes do not match. Existing
+NTC legacy control is unchanged. This fixes normals, not NHO height/AO shading.
+267 channel/decode assertions pass. Installed d224e0ae+dirty at 08:21 passes both
+compressed and decoded NHO visible-crate tests with identical RGB(51,51,69),
+normal binding verified, no renderer errors, exit 0.
+
+Broader [edds] initially exposed two stale RFG-070 tint tests. They expected the
+retired target-mean rescaling while production defaults to RFG-071 linear
+multiplication. No tint renderer change: the tests now run both explicit modes,
+restore the previous atomic setting with RAII, and check independently calculated
+RGB values and alpha preservation. Shuffled [edds] seed 10910 passes all 20
+cases / 384 assertions. No claim that these pre-existing test failures caused
+the owner's visual report, or that every texture family is now fully shaded.
+
 ## Direct RG normal parity, September 10
 
 The earlier NTC correction covered retained draws only. Direct draws still read

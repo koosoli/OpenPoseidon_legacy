@@ -1,6 +1,7 @@
-param([switch]$Legacy, [switch]$Decoded, [switch]$NormalViz, [switch]$Ag)
+param([switch]$Legacy, [switch]$Decoded, [switch]$NormalViz, [switch]$Ag, [switch]$Nho)
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
+if ($Ag -and $Nho) {throw 'Select AG or NHO, not both'}
 $root=Split-Path $PSScriptRoot -Parent
 $out=Join-Path $root 'build/direct-rg-normal'
 $user=Join-Path $out 'user'
@@ -30,11 +31,12 @@ foreach ($v in $channels) {Bits $v 7; Bits $v 7}
 Bits 0 1; Bits 0 1; Bits 0 3
 for ($i=1; $i -lt 16; ++$i) {Bits 0 4}
 if ($script:bit -ne 128) {throw 'Malformed BC7 fixture'}
-$normal=Join-Path $out $(if ($Ag) {'flat_nohq.edds'} else {'flat_ntc.edds'})
+$normal=Join-Path $out $(if ($Ag) {'flat_nohq.edds'} elseif ($Nho) {'flat_nho.edds'} else {'flat_ntc.edds'})
 [IO.File]::WriteAllBytes($normal,$data)
 $arm=if ($Legacy) {'legacy'} else {'fixed'}
 if ($Decoded) {$arm+='-decoded'}
 if ($Ag) {$arm+='-ag'}
+if ($Nho) {$arm+='-nho'}
 if ($NormalViz) {$arm+='-normalviz'}
 $settings=@{POSEIDON_USER_DIR=$user; WGR_GPU_DRIVEN='0'; WGR_AUTO_EXPOSURE='0'; WGR_EXPOSURE='0.15';
     WGR_MATERIAL_DEBUG_RVMAT='__unassigned__'; WGR_MATERIAL_DEBUG_VIEW='normal';

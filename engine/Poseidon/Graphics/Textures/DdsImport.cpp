@@ -297,7 +297,8 @@ bool DdsCompressedPassthrough()
 bool IsEnfusionRgNormalName(const char* name)
 {
     // NMO = normal RG, metalness B, occlusion A; NTC = normal RG,
-    // transmittance B, cavity A. Neither stores normal X in alpha.
+    // transmittance B, cavity A; NHO = normal RG, height B, occlusion A.
+    // None stores normal X in alpha.
     if (!name) return false;
     const std::string lower = LowerCopy(name);
     if (lower.find("_nmo") != std::string::npos) return true;
@@ -309,6 +310,7 @@ bool IsEnfusionRgNormalName(const char* name)
     const size_t start = slash == std::string::npos ? 0 : slash + 1;
     const size_t dot = lower.find_last_of('.');
     const size_t end = dot == std::string::npos || dot < start ? lower.size() : dot;
+    if (end >= start + 4 && lower.compare(end - 4, 4, "_nho") == 0) return true;
     return !legacyNtc && end >= start + 4 && lower.compare(end - 4, 4, "_ntc") == 0;
 }
 
