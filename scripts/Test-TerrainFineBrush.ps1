@@ -6,7 +6,7 @@ $output=Join-Path $root 'build/terrain-brush/acceptance'
 $env:POSEIDON_USER_DIR=Join-Path $output 'user'
 New-Item -ItemType Directory -Force $env:POSEIDON_USER_DIR | Out-Null
 [IO.File]::WriteAllText((Join-Path $env:POSEIDON_USER_DIR 'graphics.cfg'), "qualityPreset=3;`nterrainDetail=4;`nmsaaSamples=4;`ndlssMode=0;`nvsync=0;`nfpsCap=60;`n")
-$env:WGR_AUTO_EXPOSURE='0'; $env:WGR_EXPOSURE='1'
+$env:WGR_AUTO_EXPOSURE='0'; $env:WGR_EXPOSURE='0.15'
 $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0)
 $listener.Start(); $port=$listener.LocalEndpoint.Port; $listener.Stop()
 $mission=Join-Path $root 'dev-missions/terrain-brush.Intro'

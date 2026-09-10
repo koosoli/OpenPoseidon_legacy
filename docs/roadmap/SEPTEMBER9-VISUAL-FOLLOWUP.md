@@ -147,6 +147,26 @@ instead of 1, preserving unshadowed and spotlight behaviour, no additional sampl
 Shader/numerical guards and installed acceptance pending. This is separate from
 the still-unreproduced whole-town light disappearance.
 
+12f6ada6 installed acceptance: the point-shadow ambient change passes four Rust
+shader tests. Test-FreeflyLights exits 0 with a living player, truck headlights,
+42 selected lights and near/far/3km/return captures. The distant image retains
+light pools. This is an integration smoke test, not a controlled partial-penumbra
+visual comparison or resolution of the owner's intermittent town disappearance.
+
+Fine brush support is now 0.75 grid cells instead of 1.5 (4.6875 m at 6.25 m
+spacing), not invented sub-grid geometry. Three cases / 634 assertions include
+off-vertex positions. Installed Test-TerrainFineBrush: centre 29.835 -> 26.835,
+next vertex outside radius unchanged at 29.835; cell-centred stroke still affects
+the grid, and reset returns 29.835. Capture with exposure 0.15 inspected; shape
+contrast is subtle, so numerical checks establish radius/reset, not rounded detail.
+The first exposure-1 capture was washed out and is not visual acceptance.
+
+AI architecture assessment completed without implementation:
+AI-ARCHITECTURE-ASSESSMENT-20260910.md recommends incremental augmentation of
+the existing mission/task/FSM hierarchy, optional bounded group planning over
+existing commands, and matched many-unit CPU/GPU measurements before threading.
+It explicitly preserves baseline scripting, saves and authority semantics.
+
 Owner authorised implementation after backup `codex/backup-asset-obs-20260909-bc766e19`.
 Worktree asset-obs only; foreign Cargo.lock excluded. Screenshots 070351, 070456,
 072225 and 073829 are reproduction evidence, not completion evidence.
