@@ -228,11 +228,17 @@ foreach ($name in $payload)
     Write-Host ("  + {0,-22} {1,10:N0} bytes  built {2}" -f $name, (Get-Item -LiteralPath $dst).Length, $stamp)
 }
 
+function Get-ContentPayloadHash([string]$Path) {
+    $stream = [IO.File]::OpenRead($Path)
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { return [BitConverter]::ToString($sha.ComputeHash($stream)) }
+    finally { $sha.Dispose(); $stream.Dispose() }
+}
 foreach ($item in $contentPayload) {
     $destination = Join-Path $GameDir $item.Relative
     New-Item -ItemType Directory -Force (Split-Path $destination -Parent) | Out-Null
     Copy-Item -LiteralPath $item.Source -Destination $destination -Force
-    if ((Get-FileHash -LiteralPath $item.Source).Hash -ne (Get-FileHash -LiteralPath $destination).Hash) {
+    if ((Get-ContentPayloadHash $item.Source) -ne (Get-ContentPayloadHash $destination)) {
         throw "Default content verification failed: $destination"
     }
     Write-Host "  + $($item.Relative)"
