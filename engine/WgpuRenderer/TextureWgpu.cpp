@@ -1078,15 +1078,22 @@ int TextureWgpu::Init()
 
     PacFormat format = BasicFormat(Name());
 
-    ITextureSourceFactory* factory = SelectTextureSourceFactory(Name());
-    if (!factory || !factory->Check(Name()))
+    const auto loadSource = [&]()
     {
-        _nMipmaps = 0;
-        return -1;
+        ITextureSourceFactory* factory = SelectTextureSourceFactory(SourceName());
+        if (factory && factory->Check(SourceName()))
+            _src = factory->Create(SourceName(), _mipmaps, MAX_MIPMAPS);
+    };
+    loadSource();
+    if (!_src && _sourceName.GetLength())
+    {
+        LOG_WARN(Graphics, "Default material: cannot load {}; falling back to {}", SourceName(), Name());
+        _sourceName = "";
+        loadSource();
     }
-    _src = factory->Create(Name(), _mipmaps, MAX_MIPMAPS);
     if (!_src)
     {
+        _nMipmaps = 0;
         return -1;
     }
 
@@ -1166,7 +1173,7 @@ bool TextureWgpu::ScanTopMipAlphaBlocks(AlphaScanPath& path)
     }
 
     TopMipHandoff& handoff = GTopMipHandoff;
-    if (handoff.Matches(Name(), w, h, fmt) &&
+    if (handoff.Matches(SourceName(), w, h, fmt) &&
         ClassifyAlphaFromBlocks(handoff.blocks.data(), handoff.topSize, w, h, fmt, _alphaStats, Name()))
     {
         handoff.Release();
@@ -1297,7 +1304,7 @@ AlphaStats::Kind TextureWgpu::GetAlphaClass()
                         }
                     }
                     if (!scannedFromSource)
-                        _alphaStats = ScanTopMipAlphaStats(Name());
+                        _alphaStats = ScanTopMipAlphaStats(SourceName());
                 }
                 if (profiled)
                 {
@@ -1367,7 +1374,7 @@ void TextureWgpu::EvictGpu()
     _uploadTried = false;
     if (render::PreparedTextureStore::Enabled())
     {
-        render::PreparedTextureStore::Instance().MarkEvicted(render::PreparedTextureStore::Key(Name()));
+        render::PreparedTextureStore::Instance().MarkEvicted(render::PreparedTextureStore::Key(SourceName()));
     }
 }
 
@@ -1675,7 +1682,7 @@ uint64_t TextureWgpu::EnsureUploaded()
         if (render::PreparedTextureStore::Enabled())
         {
             PAABlockChain prepared;
-            const std::string key = render::PreparedTextureStore::Key(Name());
+            const std::string key = render::PreparedTextureStore::Key(SourceName());
             if (render::PreparedTextureStore::Instance().Take(key, prepared))
             {
                 const PacFormat preparedFormat = PacFormatFromMagic(prepared.magic);
@@ -1790,7 +1797,7 @@ uint64_t TextureWgpu::EnsureUploaded()
             // GetAlphaClass's: a texture that will never reach a scan -- no alpha, a 1-bit
             // format, or a class already decided -- is not worth parking, and one that is
             // costs only a vector move, never a decode.
-            const char* name = Name();
+            const char* name = SourceName();
             // `firstLevel == 0` is load-bearing, not belt-and-braces.  Under
             // WGR_TEXTURE_MIP_BIAS the chain STARTS lower, so `blocks` does not contain the
             // top mip at all — and the classification needs precisely the top mip, because a
@@ -1825,7 +1832,7 @@ uint64_t TextureWgpu::EnsureUploaded()
         const uint64_t began = (timed || profiled) ? NowUs() : 0;
         DecodedImage prepared;
         if (render::PreparedTextureStore::Enabled() &&
-            render::PreparedTextureStore::Instance().TakeDecoded(render::PreparedTextureStore::Key(Name()), prepared))
+            render::PreparedTextureStore::Instance().TakeDecoded(render::PreparedTextureStore::Key(SourceName()), prepared))
         {
             CheckProducerMayTouchRenderer("texture create");
             std::vector<uint8_t>  bc3;
@@ -1912,11 +1919,11 @@ uint64_t TextureWgpu::EnsureUploaded()
         }
         QIFStreamB stream;
         if (!_gpuHandle)
-            stream.AutoOpen(Name());
+            stream.AutoOpen(SourceName());
         const IFileBuffer* fb = _gpuHandle ? nullptr : stream.GetBuffer();
         if (fb && !fb->GetError() && fb->GetSize() > 0)
         {
-            DecodedImage img = DecodePAABuffer(fb->GetData(), static_cast<size_t>(fb->GetSize()), IsPaaName(Name()));
+            DecodedImage img = DecodePAABuffer(fb->GetData(), static_cast<size_t>(fb->GetSize()), IsPaaName(SourceName()));
             if (img.valid())
             {
                 CheckProducerMayTouchRenderer("texture create");
@@ -1970,7 +1977,7 @@ uint64_t TextureWgpu::EnsureUploaded()
     // by EvictGpu, which is the one way this texture can want bytes again.)
     if (render::PreparedTextureStore::Enabled())
     {
-        render::PreparedTextureStore::Instance().MarkUploaded(render::PreparedTextureStore::Key(Name()));
+        render::PreparedTextureStore::Instance().MarkUploaded(render::PreparedTextureStore::Key(SourceName()));
     }
     return _gpuHandle;
 }

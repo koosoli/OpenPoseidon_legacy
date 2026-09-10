@@ -21,6 +21,7 @@ class TextureWgpu : public Texture
 
   private:
     SRef<ITextureSource> _src;
+    RString _sourceName; // Optional visual replacement; Name() remains the simulation-facing identity.
     TextureBankWgpu* _bank = nullptr;
 
     int _aRatio = 0;
@@ -89,6 +90,7 @@ class TextureWgpu : public Texture
     ~TextureWgpu() override;
 
     uint64_t EnsureUploaded();
+    const char* SourceName() const { return _sourceName.GetLength() ? (const char*)_sourceName : Name(); }
     // Drop only the GPU allocation while preserving the decoded file source and
     // Texture object.  Terrain page residency uses this to reload the same
     // authored page when the camera returns to it.

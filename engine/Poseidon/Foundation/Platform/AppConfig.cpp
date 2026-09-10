@@ -1185,8 +1185,7 @@ void AppConfig::ParseCommandLine(int argc, char** argv)
         disabledContent.emplace_back("@OP_VehicleActions");
     const auto defaultContent = ResolveDefaultContentPacks(
         _workingDirectory.empty() ? "." : _workingDirectory, disabledContent, (const char*)_modPaths);
-    for (const auto& diagnostic : defaultContent.diagnostics)
-        LOG_INFO(Core, "Default content: {}", diagnostic);
+    _defaultContentDiagnostics = defaultContent.diagnostics;
     Poseidon::ModSystem::ConfigureDefaultContent(defaultContent.mountPath.c_str());
     Poseidon::ModSystem::SetModPath(effectiveMods);
 }

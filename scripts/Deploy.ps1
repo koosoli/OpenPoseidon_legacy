@@ -2,12 +2,13 @@
 .SYNOPSIS
     Copy the built game binaries into the retail Arma: Cold War Assault install.
 .DESCRIPTION
-    Deploys exactly two files: OpenPoseidon.exe and wgpu_renderer.dll. Both, always
+    Deploys both binaries: OpenPoseidon.exe and wgpu_renderer.dll. Both, always
     - copying only one of them gives an instant "Entry Point Not Found" on launch,
     because the exe and the cdylib share a hand-written C ABI that changes between
     builds. That failure mode is why this is a script and not a Copy-Item you type.
 
-    Nothing else is written, and no ColdWarAssault.exe is produced or touched:
+    Staged default content packs and the available DLSS runtime are also copied.
+    No original game archive or ColdWarAssault.exe is produced or touched:
     OpenPoseidon.exe is the only binary this project ships. There is deliberately ONE
     name. The folder is shared by several worktrees, and every mismatched-pair incident
     so far started with a second exe in it wearing a name someone recognised.
@@ -189,6 +190,32 @@ if (Test-Path -LiteralPath $stampPath)
     }
 }
 
+$contentPayload = @()
+foreach ($pack in @(
+    @{Folder='@OP_VisualUpgrade'; Archive='op_ground_materials.pbo'},
+    @{Folder='@OP_VehicleActions'; Archive='op_jeep_actions.pbo'})) {
+    $sourcePack = Join-Path $distDir $pack.Folder
+    if (!(Test-Path -LiteralPath $sourcePack)) { continue }
+    $metadata = Join-Path $sourcePack 'mod.json'
+    $archive = Join-Path $sourcePack ('AddOns/' + $pack.Archive)
+    if (!(Test-Path -LiteralPath $metadata) -or !(Test-Path -LiteralPath $archive)) {
+        throw "Incomplete default content staging: $sourcePack"
+    }
+    $manifest = Get-Content -LiteralPath $metadata -Raw | ConvertFrom-Json
+    if ($manifest.defaultContentApi -cne '1' -or !$manifest.version -or (Get-Item -LiteralPath $archive).Length -eq 0) {
+        throw "Invalid default content staging: $sourcePack"
+    }
+    $existingManifest = Join-Path $GameDir ($pack.Folder + '/mod.json')
+    $existingFolder = Join-Path $GameDir $pack.Folder
+    if (Test-Path -LiteralPath $existingFolder) {
+        if (!(Test-Path -LiteralPath $existingManifest)) { throw "Refusing to overwrite unmanaged folder: $existingFolder" }
+        $existing = Get-Content -LiteralPath $existingManifest -Raw | ConvertFrom-Json
+        if ($existing.defaultContentApi -cne '1') { throw "Refusing to overwrite unmanaged pack: $existingFolder" }
+    }
+    $contentPayload += @{Source=$metadata; Relative=($pack.Folder + '/mod.json')}
+    $contentPayload += @{Source=$archive; Relative=($pack.Folder + '/AddOns/' + $pack.Archive)}
+}
+
 Write-Host "From: $distDir"
 Write-Host "To:   $GameDir`n"
 
@@ -199,6 +226,16 @@ foreach ($name in $payload)
     Copy-Item -LiteralPath $src -Destination $dst -Force
     $stamp = (Get-Item -LiteralPath $src).LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss')
     Write-Host ("  + {0,-22} {1,10:N0} bytes  built {2}" -f $name, (Get-Item -LiteralPath $dst).Length, $stamp)
+}
+
+foreach ($item in $contentPayload) {
+    $destination = Join-Path $GameDir $item.Relative
+    New-Item -ItemType Directory -Force (Split-Path $destination -Parent) | Out-Null
+    Copy-Item -LiteralPath $item.Source -Destination $destination -Force
+    if ((Get-FileHash -LiteralPath $item.Source).Hash -ne (Get-FileHash -LiteralPath $destination).Hash) {
+        throw "Default content verification failed: $destination"
+    }
+    Write-Host "  + $($item.Relative)"
 }
 
 if ($PruneStale)

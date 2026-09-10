@@ -7,6 +7,7 @@
 
 #include <cstddef>
 #include <functional>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -49,6 +50,15 @@ class TextureBankWgpu : public AbstractTextBank
         bool operator()(const RStringB& a, const RStringB& b) const noexcept { return a == b; }
     };
     std::unordered_map<RStringB, int, NameHash, NameEqual> _textureByName;
+    struct LegacyMaterial
+    {
+        std::string albedo;
+        std::string normal;
+        std::string sourceArchive;
+    };
+    std::unordered_map<std::string, LegacyMaterial> _legacyMaterials;
+    bool _legacyMaterialsLoaded = false;
+    const LegacyMaterial* ResolveLegacyMaterial(const char* name);
 
     WgrRenderer* _renderer;
     uint64_t _residencyFrame = 0;
@@ -106,6 +116,7 @@ class TextureBankWgpu : public AbstractTextBank
 
     int Find(RStringB name) const;
     Ref<Texture> Load(RStringB name) override;
+    std::string LegacyNormalPath(const char* name);
     // TODO: real two-texture blend; for now load whichever source dominates.
     Ref<Texture> LoadInterpolated(RStringB n1, RStringB n2, float factor) override
     {
@@ -125,6 +136,8 @@ class TextureBankWgpu : public AbstractTextBank
     {
         _texture.Clear();
         _textureByName.clear();
+        _legacyMaterials.clear();
+        _legacyMaterialsLoaded = false;
     }
     void FlushBank(QFBank*) override {}
 

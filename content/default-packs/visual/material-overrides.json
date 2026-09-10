@@ -1,0 +1,11 @@
+{
+  "api": 1,
+  "materials": [
+    {
+      "source": "data\\silnice.paa",
+      "sourceArchive": "Dta\\Data.pbo",
+      "albedo": "op_ground_materials\\road_asphalt_co.paa",
+      "normal": "op_ground_materials\\road_asphalt_nohq.paa"
+    }
+  ]
+}

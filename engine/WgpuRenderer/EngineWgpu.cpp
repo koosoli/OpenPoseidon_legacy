@@ -10181,7 +10181,17 @@ uint64_t EngineWgpu::LegacyEnhancementNormal(const char* textureName)
     const size_t dot = key.find_last_of('.');
     if (dot != std::string::npos && dot > 0)
     {
-        const std::string candidate = key.substr(0, dot) + "_nohq.paa";
+        const std::string mappedNormal = _wbank->LegacyNormalPath(textureName);
+        if (!mappedNormal.empty())
+        {
+            const char* normalMode = std::getenv("POSEIDON_VISUAL_UPGRADE_NORMALS");
+            if (normalMode && std::strcmp(normalMode, "0") == 0)
+            {
+                _legacyEnhancementCache.emplace(key, 0);
+                return 0; // Albedo-only acceptance arm; unrelated normal maps stay enabled.
+            }
+        }
+        const std::string candidate = mappedNormal.empty() ? key.substr(0, dot) + "_nohq.paa" : mappedNormal;
         // Probe before loading: TextureBank::Load on a missing path yields a placeholder rather
         // than nothing, and binding a placeholder as a normal map would flatten the surface
         // instead of leaving it alone.

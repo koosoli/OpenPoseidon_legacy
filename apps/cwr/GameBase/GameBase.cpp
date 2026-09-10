@@ -106,6 +106,8 @@ bool GameBase::ParseCommandLine(const char* commandLine)
 
     // Logging early (after CLI parsing).
     GetLoggingSystem().InitializeFromConfig(LogDomain());
+    for (const auto& diagnostic : AppConfig::Instance().GetDefaultContentDiagnostics())
+        LOG_INFO(Core, "Default content: {}", diagnostic);
 
     if (AppConfig::Instance().HasParseFatalError())
     {

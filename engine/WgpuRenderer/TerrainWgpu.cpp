@@ -808,13 +808,15 @@ Ref<Texture> TerrainWgpu::BuildAutomaticSatmap(const Landscape& land)
     {
         Texture* texture = land.GetTexture(i);
         if (!texture) return nullptr;
-        const auto bytes = ReadVfsFile(texture->Name());
+        const auto* wgpuTexture = static_cast<const TextureWgpu*>(texture);
+        const char* sourceName = wgpuTexture->SourceName();
+        const auto bytes = ReadVfsFile(sourceName);
         if (bytes.empty())
         {
             LOG_WARN(Graphics,"OFP automatic satmap skipped: missing source {}",texture->Name());
             return nullptr;
         }
-        const auto image = DecodePAABuffer(bytes.data(),bytes.size(),!ContainsNoCase(texture->Name(),".pac"));
+        const auto image = DecodePAABuffer(bytes.data(),bytes.size(),!ContainsNoCase(sourceName,".pac"));
         if (!image.valid())
         {
             LOG_WARN(Graphics,"OFP automatic satmap skipped: decode failed {}",texture->Name());

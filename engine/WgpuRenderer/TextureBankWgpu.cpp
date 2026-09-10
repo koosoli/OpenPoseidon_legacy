@@ -5,6 +5,10 @@
 #include <chrono>
 #include <cstring>
 #include <cstdlib>
+#include <filesystem>
+#include <cctype>
+#include <cjson/cJSON.h>
+#include <Poseidon/IO/Streams/QBStream.hpp>
 
 #include <Poseidon/Graphics/Rendering/Shape/ObjectAdmitProfile.hpp>
 
@@ -325,6 +329,104 @@ int TextureBankWgpu::Find(RStringB name) const
     return it == _textureByName.end() ? -1 : it->second;
 }
 
+namespace
+{
+std::string MaterialPathKey(const char* name)
+{
+    std::string result = name ? name : "";
+    for (char& c : result)
+        c = c == '/' ? '\\' : static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return result;
+}
+
+bool SafeMaterialPath(const std::string& path)
+{
+    return !path.empty() && path.front() != '\\' && path.find(':') == std::string::npos &&
+           path.find("..") == std::string::npos;
+}
+}
+
+const TextureBankWgpu::LegacyMaterial* TextureBankWgpu::ResolveLegacyMaterial(const char* name)
+{
+    constexpr const char* manifest = "op_ground_materials\\materials.json";
+    if (!_legacyMaterialsLoaded)
+    {
+        // The first UI textures may load before addon mounting is complete.
+        if (!QIFStreamB::AutoBank(manifest))
+            return nullptr;
+        _legacyMaterialsLoaded = true;
+        QIFStreamB file;
+        file.AutoOpen(manifest);
+        const int length = file.rest();
+        if (length <= 0 || length > 65536)
+            return nullptr;
+        std::string text(static_cast<size_t>(length), '\0');
+        file.read(text.data(), length);
+        cJSON* root = cJSON_Parse(text.c_str());
+        if (!root)
+            return nullptr;
+        const cJSON* api = cJSON_GetObjectItemCaseSensitive(root, "api");
+        const cJSON* entries = cJSON_GetObjectItemCaseSensitive(root, "materials");
+        if (cJSON_IsNumber(api) && api->valuedouble == 1 && cJSON_IsArray(entries))
+        {
+            const cJSON* entry;
+            cJSON_ArrayForEach(entry, entries)
+            {
+                const auto field = [&](const char* key)
+                {
+                    const cJSON* value = cJSON_GetObjectItemCaseSensitive(entry, key);
+                    return MaterialPathKey(cJSON_IsString(value) ? value->valuestring : "");
+                };
+                const std::string source = field("source");
+                LegacyMaterial material{field("albedo"), field("normal"), field("sourceArchive")};
+                if (!SafeMaterialPath(source) || !SafeMaterialPath(material.albedo) ||
+                    !SafeMaterialPath(material.normal) || !SafeMaterialPath(material.sourceArchive) ||
+                    !(source.ends_with(".paa") || source.ends_with(".pac")) ||
+                    !material.albedo.ends_with(".paa") || !material.normal.ends_with("_nohq.paa") ||
+                    !material.sourceArchive.ends_with(".pbo"))
+                {
+                    LOG_WARN(Graphics, "Default material: rejected invalid entry {}", source);
+                    continue;
+                }
+                if (!_legacyMaterials.emplace(source, std::move(material)).second)
+                    LOG_WARN(Graphics, "Default material: duplicate source {} ignored", source);
+            }
+        }
+        else
+            LOG_WARN(Graphics, "Default material: incompatible catalog; original materials retained");
+        cJSON_Delete(root);
+    }
+    const auto found = _legacyMaterials.find(MaterialPathKey(name));
+    if (found == _legacyMaterials.end())
+        return nullptr;
+    const auto& material = found->second;
+    // A texture supplied by a user mod must win even if it retains the stock name.
+    // Bind only when the existing loader selected the exact original archive.
+    const QFBank* original = QIFStreamB::AutoBank(name);
+    if (!original)
+        return nullptr;
+    std::error_code ec;
+    const auto actual = std::filesystem::weakly_canonical((const char*)original->GetOpenName(), ec);
+    if (ec)
+        return nullptr;
+    std::string expectedPath = material.sourceArchive;
+    std::replace(expectedPath.begin(), expectedPath.end(), '\\', '/');
+    const auto expected = std::filesystem::weakly_canonical(expectedPath, ec);
+    if (ec || MaterialPathKey(actual.generic_string().c_str()) != MaterialPathKey(expected.generic_string().c_str()))
+        return nullptr;
+    return &material;
+}
+
+std::string TextureBankWgpu::LegacyNormalPath(const char* name)
+{
+    const int loaded = Find(name);
+    if (loaded >= 0 && !_texture[loaded]->_sourceName.GetLength())
+        return {}; // Failed albedo replacement must not leave half a material active.
+    if (const auto* material = ResolveLegacyMaterial(name))
+        return material->normal;
+    return {};
+}
+
 Ref<Texture> TextureBankWgpu::Load(RStringB name)
 {
     int index = Find(name);
@@ -336,6 +438,12 @@ Ref<Texture> TextureBankWgpu::Load(RStringB name)
     int iFree = _texture.Add();
     TextureWgpu* texture = new TextureWgpu(this);
     texture->SetName(name);
+    if (const auto* material = ResolveLegacyMaterial(name))
+    {
+        texture->_sourceName = material->albedo.c_str();
+        LOG_INFO(Graphics, "Default material: {} -> {} (original texture identity preserved)",
+                 (const char*)name, material->albedo);
+    }
     _texture[iFree] = texture;
     // Key off the stored name rather than the argument: SetName copies the RStringB
     // verbatim, so the two share one interned buffer, and this cannot drift if that

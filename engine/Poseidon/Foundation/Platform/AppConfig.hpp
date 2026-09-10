@@ -158,6 +158,7 @@ class AppConfig
 
     /// Mod directory paths (semicolon-separated)
     const RString& GetModPaths() const { return _modPaths; }
+    const std::vector<std::string>& GetDefaultContentDiagnostics() const { return _defaultContentDiagnostics; }
 
     /// PBO archive directories from --addon-root, mounted ahead of conventional mods.
     const RString& GetAddonArchivePaths() const { return _addonArchivePaths; }
@@ -461,6 +462,7 @@ class AppConfig
 
     // Configuration files (parsed in Pass 1 - early init)
     RString _modPaths;
+    std::vector<std::string> _defaultContentDiagnostics;
     RString _addonArchivePaths;
     RString _modsDir;     // resolved --mods-dir base ("" if unset)
     RString _workshopDir; // resolved --workshop-dir base ("" if unset)

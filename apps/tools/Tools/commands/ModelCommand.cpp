@@ -11,6 +11,7 @@
 #include <Poseidon/Asset/Formats/Material/EmatSource.hpp>
 #include <Poseidon/IO/Streams/QStream.hpp>
 #include <map>
+#include <memory>
 #include <Poseidon/Graphics/Textures/PAADecoder.hpp>
 #include <iostream>
 #include <iomanip>
@@ -753,6 +754,37 @@ static void setupModelEmat(CLI::App& model)
 // addresses that texture is the last input a flow shader needs (DZ-002). Over a
 // directory it prints one row per model, which is what makes a per-segment pattern
 // visible at all.
+// Original OFP ODOL7 uses the engine reader, not the later-game static reader.
+// This path is diagnostic only and never rewrites the source model.
+static bool DumpLegacyModelUv(const std::filesystem::path& path, int lodIndex, bool perVertex)
+{
+    auto shape = std::make_unique<LODShapeWithShadow>();
+    if (!shape->LoadOptimized(path.string().c_str()) || lodIndex < 0 || lodIndex >= shape->NLevels())
+        return false;
+    const Shape* lod = shape->Level(lodIndex);
+    if (!lod || lod->NPoints() == 0)
+        return false;
+    float minU = lod->UV(0).u, maxU = minU, minV = lod->UV(0).v, maxV = minV;
+    for (int i = 1; i < lod->NPoints(); ++i)
+    {
+        minU = std::min(minU, lod->UV(i).u);
+        maxU = std::max(maxU, lod->UV(i).u);
+        minV = std::min(minV, lod->UV(i).v);
+        maxV = std::max(maxV, lod->UV(i).v);
+    }
+    std::cout << "Model: " << path.string() << "\nRevision: 7 (engine reader)\nLOD: " << lodIndex
+              << "\nVertices: " << lod->NPoints() << "\nUV sets: 1\n  set 0: " << minU << ".." << maxU
+              << " " << minV << ".." << maxV << "\n";
+    if (perVertex)
+    {
+        std::cout << "vtx position (x, y, z) uv0\n";
+        for (int i = 0; i < lod->NPoints(); ++i)
+            std::cout << i << " " << lod->Pos(i).X() << " " << lod->Pos(i).Y() << " " << lod->Pos(i).Z()
+                      << " " << lod->UV(i).u << " " << lod->UV(i).v << "\n";
+    }
+    return true;
+}
+
 static void setupModelUv(CLI::App& model)
 {
     auto* cmd = model.add_subcommand("uv", "Dump a LOD's UV sets, or tabulate their extents over a directory");
@@ -804,6 +836,11 @@ static void setupModelUv(CLI::App& model)
                 std::string error;
                 if (!LoadOdolStatic(path.string(), odol, revision, error))
                 {
+                    if (revision.version == 7 && DumpLegacyModelUv(path, lodIndex, perVertex))
+                    {
+                        ++read;
+                        continue;
+                    }
                     failures.emplace_back(path.filename().string(), error);
                     continue;
                 }
