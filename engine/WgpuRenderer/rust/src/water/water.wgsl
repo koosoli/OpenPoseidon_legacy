@@ -2254,6 +2254,8 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
         max(persistent_foam, breaker_foam) * wave_scale * raft_coverage) +
         spray_flecks * wave_scale * raft_coverage;
     var combined_foam = 0.0;
+    var breaker_material_weight = 0.0;
+    var breaker_material_detail = 1.0;
     if (unstructured_foam > 0.001) {
         // This one multiplies EVERY foam source, so its aliasing was modulating the shoreline
         // band as well as the whitecaps — a second, finer pattern laid over the first.
@@ -2263,11 +2265,19 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
         if (breaker_cells > 0.5) {
             let wave_amount = (max(persistent_foam, breaker_foam) + spray_flecks) * wave_scale * raft_coverage;
             let cell_footprint = foam_fp * 2.7 * FOAM_FREQ;
-            let resolved = resolved_breaker_coverage(wave_amount, foam_structure, cell_footprint);
+            var resolved = resolved_breaker_coverage(wave_amount, foam_structure, cell_footprint);
             let shore = clamp(max(foam, river_streak) * mix(0.46, 1.0, foam_structure), 0.0, 1.0);
             // Never re-threshold subpixel noise: converge to the original filtered
             // coverage, not all-white/all-clear distant water.
             let detail = 1.0 - smoothstep(0.15, 0.55, cell_footprint);
+            if (detail > 0.001 && resolved > 0.02) {
+                // One additional band-limited octave only on resolved near foam,
+                // not another full fractal field over every water pixel.
+                let bubbles = vnoise_lod(foam_drift * 7.31, foam_fp * 7.31);
+                resolved = resolved * mix(0.55, 1.0, smoothstep(0.20, 0.65, bubbles));
+                breaker_material_detail = 0.80 + 0.20 * bubbles;
+                breaker_material_weight = detail * resolved / max(resolved + shore, 1e-4);
+            }
             combined_foam = mix(combined_foam, max(shore, resolved), detail);
         }
     }
@@ -2275,7 +2285,7 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
     // only a subdued dielectric highlight. This is material response, never an emissive overlay.
     var foam_color = vec3<f32>(0.0);
     if (combined_foam > 0.0) {
-        let foam_normal = normalize(mix(n, vec3<f32>(0.0, 1.0, 0.0), 0.72));
+        let foam_normal = normalize(mix(n, vec3<f32>(0.0, 1.0, 0.0), mix(0.72, 0.35, breaker_material_weight)));
         let foam_ndl = max(dot(foam_normal, l), 0.0);
         let foam_ndv = max(dot(foam_normal, v), 0.0);
         let foam_h = safe_normalize3(l + v, foam_normal);
@@ -2288,7 +2298,7 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
         let foam_visibility = smith_schlick_g1(foam_ndl, foam_roughness) * smith_schlick_g1(foam_ndv, foam_roughness);
         let foam_specular = foam_distribution * foam_visibility * schlick_fresnel(0.02, foam_vdh) /
             max(4.0 * foam_ndl * foam_ndv, 1e-4) * foam_ndl * sun_vis;
-        let foam_albedo = vec3<f32>(0.88, 0.92, 0.94);
+        let foam_albedo = vec3<f32>(0.88, 0.92, 0.94) * mix(1.0, breaker_material_detail, breaker_material_weight);
         let foam_diffuse = (sun_ambient * amb_ao + sun_diffuse * foam_ndl * sun_vis) * (foam_albedo / PI);
         foam_color = foam_diffuse + sun_diffuse * foam_specular * 0.08;
     }

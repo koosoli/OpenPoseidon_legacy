@@ -29,6 +29,13 @@ to the previous filtered result. Default OFF until same-binary native/DLSS and
 calm/zero-gain comparisons establish the effect and cost. Tests/build/runtime
 acceptance pending; not a finished quality improvement.
 
+6c70c6a5 first installed candidate: 21 water tests and build pass, native exit 0.
+Near patches become white but look too uniformly painted; not accepted as the
+default. Follow-up adds one band-limited value-noise octave only inside resolved
+near wave-foam patches, and lets their rough diffuse normal follow more of the
+wave slope. This changes the earlier zero-extra-noise claim: still no texture
+fetch/pass/FFT increase, but bounded extra ALU needs measurement. Default OFF.
+
 ## Late surface-rays experiment rejected, September 10
 
 0b684058 tests per-instance fragment-distance scattering on prepassed opaque

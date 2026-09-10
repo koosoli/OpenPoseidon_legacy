@@ -1711,6 +1711,9 @@ mod tests {
         assert!(shader.contains("let cell_footprint = foam_fp * 2.7 * FOAM_FREQ;"));
         assert!(shader.contains("let detail = 1.0 - smoothstep(0.15, 0.55, cell_footprint);"));
         assert!(shader.contains("combined_foam = mix(combined_foam, max(shore, resolved), detail);"));
+        assert!(shader.contains("if (detail > 0.001 && resolved > 0.02)"));
+        assert!(shader.contains("vnoise_lod(foam_drift * 7.31, foam_fp * 7.31)"));
+        assert!(shader.contains("var breaker_material_weight = 0.0;"));
         let helper = shader.split("fn resolved_breaker_coverage(").nth(1).unwrap().split("\n}").next().unwrap();
         assert!(!helper.contains("texture") && !helper.contains("vnoise"));
     }
