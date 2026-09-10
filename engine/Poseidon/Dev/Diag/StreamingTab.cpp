@@ -148,7 +148,10 @@ void DrawStreamingTab()
         Row("expired (TTL) / skipped", "%llu / %llu", (unsigned long long)s.store.expired,
             (unsigned long long)s.store.skippedUploaded);
         Row("decoded (RGBA8) puts / takes", "%llu / %llu", (unsigned long long)s.store.decodedPuts,
-            (unsigned long long)s.store.decodedTakes);
+              (unsigned long long)s.store.decodedTakes);
+        Row("native DDS puts / takes", "%llu / %llu", (unsigned long long)s.store.ddsPreparedPuts,
+            (unsigned long long)s.store.ddsPreparedTakes);
+        Row("DDS option mismatches", "%llu", (unsigned long long)s.store.ddsConfigurationMisses);
         ImGui::EndTable();
     }
 

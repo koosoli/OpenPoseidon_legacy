@@ -12,6 +12,8 @@
 #include <Poseidon/Foundation/Platform/FpEnvironment.hpp>
 #include <Poseidon/Graphics/Textures/PAADecoder.hpp>      // ReadPAABlockChain (pure, worker-safe)
 #include <Poseidon/Graphics/Textures/PreparedTextures.hpp> // the worker->main-thread mip-chain store
+#include <Poseidon/Graphics/Textures/DdsImport.hpp>
+#include <Poseidon/Asset/Formats/Enfusion/EnfusionMount.hpp>
 #include <Poseidon/World/Model/Model.hpp>
 #include <Poseidon/World/Model/ModelCache.hpp>
 
@@ -30,6 +32,38 @@
 
 namespace Poseidon
 {
+
+namespace
+{
+bool PrepareNativeDds(const std::string& key, uint64_t generation, size_t& bytes)
+{
+    try
+    {
+        const auto& mount = Asset::Formats::Enfusion::EnfusionMount::Instance();
+        const auto mountGeneration = mount.Generation();
+        auto source = std::make_unique<TextureSourceDDS>();
+        PacLevelMem mips[16];
+        const auto options = CaptureDdsPreparationOptions();
+        const bool loaded = source->InitFromReader(key.c_str(), mips, 16,
+            [&](const char* name, std::vector<uint8_t>& out) {
+                if (mount.Generation() != mountGeneration) return false;
+                const auto request = mount.MakeReadRequest(name);
+                if (!request || mount.Generation() != mountGeneration) return false;
+                std::string error;
+                return request->Read(out, error);
+            }, options);
+        if (!loaded || mount.Generation() != mountGeneration) return false;
+        bytes = source->PreparedByteSize();
+        return render::PreparedTextureStore::Instance().PutDdsPrepared(key, std::move(source), options, generation);
+    }
+    catch (...)
+    {
+        // Optional preparation may fail; keep the parsed model and let its
+        // ordinary main-thread material path report/retry. Never lose a worker.
+        return false;
+    }
+}
+}
 
 // ------------------------------------------------------------------------------------------
 // Levers. All read once; the admit path logs which arm it is running.
@@ -346,120 +380,146 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
         if (model && render::PreparedTextureStore::Enabled())
         {
             const auto texStart = std::chrono::steady_clock::now();
-            render::PreparedTextureStore& store = render::PreparedTextureStore::Instance();
-            const uint64_t textureGeneration = store.Generation();
-            std::vector<std::string> names;
-            auto noteName = [&](const std::string& raw)
+            try
             {
-                if (raw.empty())
-                    return;
-                // Same extension gate as the main thread's block path (BcFormatFor): only
-                // .paa/.pac can carry a DXT chain this reader understands.
-                const size_t dot = raw.find_last_of('.');
-                if (dot == std::string::npos)
-                    return;
-                std::string ext = raw.substr(dot);
-                for (char& c : ext)
-                    if (c >= 'A' && c <= 'Z')
-                        c = static_cast<char>(c - 'A' + 'a');
-                if (ext != ".paa" && ext != ".pac")
-                    return;
-                std::string key = render::PreparedTextureStore::Key(raw);
-                if (std::find(names.begin(), names.end(), key) == names.end())
-                    names.push_back(std::move(key));
-            };
-            // Materials the IR names by PATH (.emat) get their stage textures included.
-            // Measured before this existed (asset-obs-vehicle30-r2): 1,797 of the store's
-            // takes MISSED because registration-time stage textures (normal/detail maps)
-            // are not in the IR's texturePath fields -- two thirds of the uploads paid the
-            // main-thread file read anyway. The worker parses the .emat itself, but ONLY
-            // as a loose file (ReadEmatFileLoose: plain ifstream + the deploy roots); the
-            // resolver route is main-thread-only, and a bank-resident material simply
-            // misses here and behaves exactly as before. RVMATs are not attempted: their
-            // parser runs through ParamFile + QIFStreamB, neither of which a worker may
-            // touch. Every collected value still passes noteName's .paa/.pac gate, so an
-            // Enfusion-native reference that never became a PAA costs nothing.
-            auto noteEmatTextures = [&](const std::string& materialPath)
-            {
-                // Native XOBs resolve these names in the mounted pak, not the
-                // converter's loose deploy roots. Those may contain same-named
-                // EMATs pointing at unused PAAs (hundreds of MB with zero takes).
-                if (nativeArchiveModel)
-                    return;
-                if (materialPath.empty() || !Asset::Material::IsEmatMaterialPath(materialPath))
-                    return;
-                Asset::Material::EmatMaterial emat;
-                if (!Asset::Material::ReadEmatFileLoose(materialPath, emat))
-                    return;
-                for (const Asset::Material::EmatProperty& property : emat.properties)
-                    for (const Asset::Material::EmatValue& value : property.values)
-                        if (value.isTexture())
-                            noteName(value.text);
-            };
-            for (const Model::LODLevel& level : model->lodLevels)
-            {
-                for (const Model::Material& material : level.mesh.materials)
+                render::PreparedTextureStore& store = render::PreparedTextureStore::Instance();
+                const uint64_t textureGeneration = store.Generation();
+                std::vector<std::string> names;
+                auto noteName = [&](const std::string& raw)
                 {
-                    noteName(material.texturePath);
-                    for (const Model::MaterialStage& stage : material.embeddedStages)
-                        noteName(stage.texturePath);
-                    noteEmatTextures(material.materialPath);
-                }
-            }
-            for (const std::string& key : names)
-            {
-                if (gen != generation.load(std::memory_order_relaxed)) // Reset ran: dead world, stop reading
-                    break;
-                if (!store.ShouldPrepare(key))
+                    if (raw.empty())
+                        return;
+                    // Same extension gate as the main thread's block path (BcFormatFor): only
+                    // .paa/.pac can carry a DXT chain this reader understands.
+                    const size_t dot = raw.find_last_of('.');
+                    if (dot == std::string::npos)
+                        return;
+                    std::string ext = raw.substr(dot);
+                    for (char& c : ext)
+                        if (c >= 'A' && c <= 'Z')
+                            c = static_cast<char>(c - 'A' + 'a');
+                    const bool nativeDds = nativeArchiveModel && render::PreparedTextureStore::NativeDdsEnabled() &&
+                                           (ext == ".edds" || ext == ".dds");
+                    if (ext != ".paa" && ext != ".pac" && !nativeDds)
+                        return;
+                    std::string key = render::PreparedTextureStore::Key(raw);
+                    if (std::find(names.begin(), names.end(), key) == names.end())
+                        names.push_back(std::move(key));
+                };
+                // Materials the IR names by PATH (.emat) get their stage textures included.
+                // Measured before this existed (asset-obs-vehicle30-r2): 1,797 of the store's
+                // takes MISSED because registration-time stage textures (normal/detail maps)
+                // are not in the IR's texturePath fields -- two thirds of the uploads paid the
+                // main-thread file read anyway. The worker parses the .emat itself, but ONLY
+                // as a loose file (ReadEmatFileLoose: plain ifstream + the deploy roots); the
+                // resolver route is main-thread-only, and a bank-resident material simply
+                // misses here and behaves exactly as before. RVMATs are not attempted: their
+                // parser runs through ParamFile + QIFStreamB, neither of which a worker may
+                // touch. Every collected value still passes noteName's .paa/.pac gate, so an
+                // Enfusion-native reference that never became a PAA costs nothing.
+                auto noteEmatTextures = [&](const std::string& materialPath)
                 {
-                    ++texSkipped;
-                    continue;
-                }
-                PAABlockChain chain;
-                if (!ReadPAABlockChain(key, chain))
+                    // Native XOBs resolve these names in the mounted pak, not the
+                    // converter's loose deploy roots. Those may contain same-named
+                    // EMATs pointing at unused PAAs (hundreds of MB with zero takes).
+                    if (nativeArchiveModel)
+                        return;
+                    if (materialPath.empty() || !Asset::Material::IsEmatMaterialPath(materialPath))
+                        return;
+                    Asset::Material::EmatMaterial emat;
+                    if (!Asset::Material::ReadEmatFileLoose(materialPath, emat))
+                        return;
+                    for (const Asset::Material::EmatProperty& property : emat.properties)
+                        for (const Asset::Material::EmatValue& value : property.values)
+                            if (value.isTexture())
+                                noteName(value.text);
+                };
+                for (const Model::LODLevel& level : model->lodLevels)
                 {
-                    // Not a DXT chain. If it is still a READABLE loose PAA (the Reforger
-                    // corpus's PacARGB8888 *_mask.paa population -- 390 whole-file decodes
-                    // costing ~1.1 s of admission time on the Everon traverse), decode it
-                    // HERE with the pure buffer decoder and store the RGBA image, so the
-                    // main thread's fallback path uploads instead of decoding.
-                    std::ifstream file(key, std::ios::binary);
-                    if (!file)
+                    for (const Model::Material& material : level.mesh.materials)
                     {
-                        ++texUnreadable; // not loose at all: main thread's problem
+                        noteName(material.texturePath);
+                        for (const Model::MaterialStage& stage : material.embeddedStages)
+                            noteName(stage.texturePath);
+                        noteEmatTextures(material.materialPath);
+                    }
+                }
+                for (const std::string& key : names)
+                {
+                    if (gen != generation.load(std::memory_order_relaxed)) // Reset ran: dead world, stop reading
+                        break;
+                    if (!store.ShouldPrepare(key))
+                    {
+                        ++texSkipped;
                         continue;
                     }
-                    std::vector<char> bytesIn((std::istreambuf_iterator<char>(file)),
-                                              std::istreambuf_iterator<char>());
-                    const bool isPaa = key.size() >= 4 && key.compare(key.size() - 4, 4, ".paa") == 0;
-                    DecodedImage image = DecodePAABuffer(bytesIn.data(), bytesIn.size(), isPaa);
-                    if (!image.valid())
+                    if (nativeArchiveModel && render::PreparedTextureStore::NativeDdsEnabled() && key.size() >= 4 &&
+                        (key.ends_with(".edds") || key.ends_with(".dds")))
                     {
-                        ++texUnreadable; // malformed: main thread repeats and reports
+                        size_t bytes = 0;
+                        if (PrepareNativeDds(key, textureGeneration, bytes))
+                        {
+                            ++texPrepared;
+                            texPreparedBytes += bytes;
+                        }
+                        else
+                        {
+                            ++texUnreadable;
+                        }
                         continue;
                     }
-                    const size_t imageBytes = image.rgba.size();
-                    if (store.PutDecoded(key, std::move(image), textureGeneration))
+                    PAABlockChain chain;
+                    if (!ReadPAABlockChain(key, chain))
+                    {
+                        // Not a DXT chain. If it is still a READABLE loose PAA (the Reforger
+                        // corpus's PacARGB8888 *_mask.paa population -- 390 whole-file decodes
+                        // costing ~1.1 s of admission time on the Everon traverse), decode it
+                        // HERE with the pure buffer decoder and store the RGBA image, so the
+                        // main thread's fallback path uploads instead of decoding.
+                        std::ifstream file(key, std::ios::binary);
+                        if (!file)
+                        {
+                            ++texUnreadable; // not loose at all: main thread's problem
+                            continue;
+                        }
+                        std::vector<char> bytesIn((std::istreambuf_iterator<char>(file)),
+                                                  std::istreambuf_iterator<char>());
+                        const bool isPaa = key.size() >= 4 && key.compare(key.size() - 4, 4, ".paa") == 0;
+                        DecodedImage image = DecodePAABuffer(bytesIn.data(), bytesIn.size(), isPaa);
+                        if (!image.valid())
+                        {
+                            ++texUnreadable; // malformed: main thread repeats and reports
+                            continue;
+                        }
+                        const size_t imageBytes = image.rgba.size();
+                        if (store.PutDecoded(key, std::move(image), textureGeneration))
+                        {
+                            ++texPrepared;
+                            texPreparedBytes += imageBytes;
+                        }
+                        else
+                        {
+                            ++texSkipped;
+                        }
+                        continue;
+                    }
+                    const size_t bytes = chain.blocks.size();
+                    if (store.Put(key, std::move(chain), textureGeneration))
                     {
                         ++texPrepared;
-                        texPreparedBytes += imageBytes;
+                        texPreparedBytes += bytes;
                     }
                     else
                     {
-                        ++texSkipped;
+                        ++texSkipped; // raced with another worker or the budget: fine
                     }
-                    continue;
                 }
-                const size_t bytes = chain.blocks.size();
-                if (store.Put(key, std::move(chain), textureGeneration))
-                {
-                    ++texPrepared;
-                    texPreparedBytes += bytes;
-                }
-                else
-                {
-                    ++texSkipped; // raced with another worker or the budget: fine
-                }
+            }
+            catch (...)
+            {
+                // Texture-name collection and loose decodes can allocate too.
+                // Keep this optional stage from unwinding out of the worker loop.
+                ++texUnreadable;
             }
             texMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - texStart).count();
         }

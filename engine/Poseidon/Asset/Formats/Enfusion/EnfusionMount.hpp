@@ -23,6 +23,9 @@
 
 #include <cstdint>
 #include <memory>
+#include <mutex>
+#include <shared_mutex>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -37,13 +40,17 @@ class EnfusionMount
     bool Open(const std::string& addonsDir);
     void Close();
 
-    bool IsOpen() const { return !_archives.empty(); }
-    const std::string& Root() const { return _root; }
-    size_t ArchiveCount() const { return _archives.size(); }
-    size_t EntryCount() const { return _index.size(); }
+    bool IsOpen() const { std::shared_lock lock(_mutex); return !_archives.empty(); }
+    std::string Root() const { std::shared_lock lock(_mutex); return _root; }
+    size_t ArchiveCount() const { std::shared_lock lock(_mutex); return _archives.size(); }
+    size_t EntryCount() const { std::shared_lock lock(_mutex); return _index.size(); }
+    uint64_t Generation() const { std::shared_lock lock(_mutex); return _generation; }
 
     //! Case-insensitive, '/'-separated, as stored in the archives.
     bool Read(const std::string& virtualPath, std::vector<uint8_t>& out) const;
+    // The returned request owns its metadata after Close/remount. File reads and
+    // decompression never hold the mount lock. Does not pin externally edited files.
+    std::optional<PakReadRequest> MakeReadRequest(const std::string& virtualPath) const;
     bool Has(const std::string& virtualPath) const;
 
     //! Every entry whose path contains `needle` (already lower-cased by the caller
@@ -56,6 +63,9 @@ class EnfusionMount
     static EnfusionMount& Instance();
 
   private:
+    void CloseLocked();
+    mutable std::shared_mutex _mutex;
+    uint64_t _generation = 0;
     std::string _root;
     // `deque`-like stability is not needed: the archives are opened once and never
     // added to afterwards, and the index stores an archive INDEX rather than a

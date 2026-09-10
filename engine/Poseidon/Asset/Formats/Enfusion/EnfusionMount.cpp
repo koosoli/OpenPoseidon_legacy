@@ -36,6 +36,13 @@ EnfusionMount& EnfusionMount::Instance()
 
 void EnfusionMount::Close()
 {
+    std::unique_lock lock(_mutex);
+    CloseLocked();
+}
+
+void EnfusionMount::CloseLocked()
+{
+    ++_generation;
     _archives.clear();
     _index.clear();
     _root.clear();
@@ -43,7 +50,8 @@ void EnfusionMount::Close()
 
 bool EnfusionMount::Open(const std::string& addonsDir)
 {
-    Close();
+    std::unique_lock lock(_mutex);
+    CloseLocked();
 
     std::vector<std::string> paks;
     std::error_code ec;
@@ -86,7 +94,7 @@ bool EnfusionMount::Open(const std::string& addonsDir)
     }
     if (opened == 0)
     {
-        Close();
+        CloseLocked();
         return false;
     }
     _root = addonsDir;
@@ -97,29 +105,40 @@ bool EnfusionMount::Open(const std::string& addonsDir)
 
 bool EnfusionMount::Has(const std::string& virtualPath) const
 {
+    std::shared_lock lock(_mutex);
     return _index.find(Lower(virtualPath)) != _index.end();
 }
 
 bool EnfusionMount::Read(const std::string& virtualPath, std::vector<uint8_t>& out) const
 {
+    const auto request = MakeReadRequest(virtualPath);
+    if (!request) { out.clear(); return false; }
+    std::string error;
+    return request->Read(out, error);
+}
+
+std::optional<PakReadRequest> EnfusionMount::MakeReadRequest(const std::string& virtualPath) const
+{
+    std::shared_lock lock(_mutex);
     const auto hit = _index.find(Lower(virtualPath));
     if (hit == _index.end())
-        return false;
+        return std::nullopt;
     const PakArchive& archive = _archives[hit->second.first];
     // Native XOB workers share this mount. In particular, read failures must not
     // race on PakArchive::_error even though each read has its own file handle.
-    const PakReadRequest request{archive.Path(), archive.Entries()[hit->second.second]};
-    std::string error;
-    return request.Read(out, error);
+    return PakReadRequest{archive.Path(), archive.Entries()[hit->second.second]};
 }
 
 std::vector<std::string> EnfusionMount::FindAll(const std::string& needle) const
 {
     const std::string want = Lower(needle);
     std::vector<std::string> out;
-    for (const auto& [path, where] : _index)
-        if (path.find(want) != std::string::npos)
-            out.push_back(path);
+    {
+        std::shared_lock lock(_mutex);
+        for (const auto& [path, where] : _index)
+            if (path.find(want) != std::string::npos)
+                out.push_back(path);
+    }
     // The map's order is a hash order, which would make "the first tile" mean
     // something different on every run.
     std::sort(out.begin(), out.end());

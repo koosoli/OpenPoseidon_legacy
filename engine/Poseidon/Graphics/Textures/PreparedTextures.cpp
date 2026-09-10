@@ -125,6 +125,15 @@ bool PreparedTextureStore::Enabled()
     return on;
 }
 
+bool PreparedTextureStore::NativeDdsEnabled()
+{
+    static const bool on = [] {
+        const char* value = std::getenv("WGR_NATIVE_DDS_PREPARE");
+        return value && std::strcmp(value, "1") == 0;
+    }();
+    return Enabled() && on; // A/B experiment until native lifecycle/performance acceptance.
+}
+
 size_t PreparedTextureStore::ByteBudget()
 {
     static const size_t bytes = []
@@ -317,9 +326,7 @@ bool PreparedTextureStore::PutDdsPrepared(const std::string& key, std::unique_pt
         Key(static_cast<const char*>(source->_name)) != key ||
         options.decodedMaxEdge < 64 || options.decodedMaxEdge > 8192)
         return false;
-    size_t bytes = sizeof(TextureSourceDDS) + source->_levels.capacity() * sizeof(DDSMipLevel);
-    for (const auto& level : source->_levels)
-        bytes += level.data.capacity();
+    const size_t bytes = source->PreparedByteSize();
     std::list<Impl::Entry> pending;
     pending.emplace_back(Impl::Entry{key, {}, {}, Impl::Clock::now()});
     pending.back().preparedDds = std::move(source);

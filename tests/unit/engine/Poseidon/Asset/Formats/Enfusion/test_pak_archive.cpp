@@ -14,6 +14,7 @@
 #include <Poseidon/Asset/Formats/Enfusion/EnfusionIff.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/TerrainTile.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/PakArchive.hpp>
+#include <Poseidon/Asset/Formats/Enfusion/EnfusionMount.hpp>
 
 #include <cstdint>
 #include <cstring>
@@ -149,6 +150,74 @@ TEST_CASE("PAK read requests own metadata and isolate concurrent failures", "[as
             return true;
         }));
     for (auto& worker : workers) CHECK(worker.get());
+}
+
+TEST_CASE("Enfusion mount snapshots survive close and concurrent remount", "[asset][enfusion][pak][streaming][mount-lifetime]")
+{
+    namespace fs = std::filesystem;
+    namespace enf = Poseidon::Asset::Formats::Enfusion;
+    const auto directory = fs::temp_directory_path() / ("poseidon-mount-" +
+        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    REQUIRE(fs::create_directory(directory));
+    struct Cleanup {
+        fs::path directory;
+        ~Cleanup() { std::error_code error; fs::remove(directory / "test.pak", error); fs::remove(directory, error); }
+    } cleanup{directory};
+    const std::vector<uint8_t> expected{1, 2, 3, 4};
+    std::vector<uint8_t> index{0, 0}; // nameless directory root
+    AppendLe32(index, 1);
+    const std::string name = "pixels.edds";
+    index.push_back(1); index.push_back(static_cast<uint8_t>(name.size()));
+    index.insert(index.end(), name.begin(), name.end());
+    // Absolute offset: FORM header (12) plus DATA chunk header (8).
+    for (uint32_t value : {20u, 4u, 4u, 0u, 0u, 0u}) AppendLe32(index, value);
+    std::vector<uint8_t> chunks;
+    AppendChunk(chunks, "DATA", expected);
+    AppendChunk(chunks, "FILE", index);
+    const auto bytes = Form("PAC1", chunks);
+    {
+        std::ofstream file(directory / "test.pak", std::ios::binary);
+        file.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        REQUIRE(file.good());
+    }
+    enf::EnfusionMount mount;
+    REQUIRE(mount.Open(directory.string()));
+    REQUIRE(mount.EntryCount() == 1);
+    const auto oldRoot = mount.Root();
+    const auto generation = mount.Generation();
+    const auto request = mount.MakeReadRequest("PIXELS.EDDS");
+    REQUIRE(request);
+    mount.Close();
+    CHECK(mount.Generation() != generation);
+    CHECK(mount.Root().empty());
+    CHECK(oldRoot == directory.string());
+    CHECK_FALSE(mount.MakeReadRequest(name));
+    std::vector<uint8_t> pixels;
+    std::string error;
+    REQUIRE(request->Read(pixels, error));
+    CHECK(pixels == expected);
+    std::vector<std::future<bool>> workers;
+    for (int w = 0; w < 4; ++w) {
+        workers.push_back(std::async(std::launch::async, [&] {
+            for (int i = 0; i < 128; ++i) {
+                std::vector<uint8_t> out{99};
+                if (mount.Read(name, out)) { if (out != expected) return false; }
+                else if (!out.empty()) return false;
+                if (mount.FindAll("pixels").size() > 1 || mount.EntryCount() > 1 || mount.ArchiveCount() > 1)
+                    return false;
+                const auto root = mount.Root();
+                if (!root.empty() && root != directory.string()) return false;
+            }
+            return true;
+        }));
+    }
+    for (int i = 0; i < 16; ++i) {
+        REQUIRE(mount.Open(directory.string()));
+        mount.Close();
+    }
+    for (auto& worker : workers) CHECK(worker.get());
+    REQUIRE(request->Read(pixels, error));
+    CHECK(pixels == expected);
 }
 
 TEST_CASE("IFF: a well-formed FORM walks to its chunks", "[asset][enfusion][arf-001]")

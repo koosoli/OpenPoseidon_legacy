@@ -67,9 +67,9 @@ struct DdsPreparationTrace
         const double total = read + decode + coverageRead + coverageDecode + merge + tint + finish;
         if (total >= 2.0)
             LOG_INFO(Graphics,
-                "DDS prepare: total={:.3f} read={:.3f} decode={:.3f} coverageRead={:.3f} coverageDecode={:.3f} merge={:.3f} tint={:.3f} finish={:.3f} inputBytes={} outputBytes={} success={} reusedDecode={} name='{}'",
+                "DDS prepare: total={:.3f} read={:.3f} decode={:.3f} coverageRead={:.3f} coverageDecode={:.3f} merge={:.3f} tint={:.3f} finish={:.3f} inputBytes={} outputBytes={} success={} reusedDecode={} mainThread={} name='{}'",
                 total, read, decode, coverageRead, coverageDecode, merge, tint, finish,
-                inputBytes, outputBytes, success, reusedDecode, name);
+                inputBytes, outputBytes, success, reusedDecode, Foundation::IsMainThread(), name);
     }
 };
 
@@ -976,6 +976,24 @@ bool TextureSourceDDS::InitFromReader(const char* name, PacLevelMem* mips, int m
     }
     trace.Mark(trace.tint);
 
+    trace.success = BindPreparedMips(mips, maxMips);
+    if (trace.enabled)
+        for (const auto& level : _levels)
+            trace.outputBytes += level.data.size();
+    return trace.success;
+}
+
+size_t TextureSourceDDS::PreparedByteSize() const
+{
+    size_t bytes = sizeof(TextureSourceDDS) + _levels.capacity() * sizeof(DDSMipLevel);
+    for (const auto& level : _levels) bytes += level.data.capacity();
+    return bytes;
+}
+
+bool TextureSourceDDS::BindPreparedMips(PacLevelMem* mips, int maxMips)
+{
+    if (!mips || maxMips <= 0 || _mipmaps <= 0 || _levels.size() != static_cast<size_t>(_mipmaps))
+        return false;
     const int count = std::min(_mipmaps, maxMips);
     for (int i = 0; i < count; ++i)
     {
@@ -988,10 +1006,6 @@ bool TextureSourceDDS::InitFromReader(const char* name, PacLevelMem* mips, int m
     if (count < _mipmaps)
         _levels.resize(static_cast<size_t>(count));
     _mipmaps = count;
-    trace.success = _mipmaps > 0;
-    if (trace.enabled)
-        for (const auto& level : _levels)
-            trace.outputBytes += level.data.size();
     return _mipmaps > 0;
 }
 
@@ -1095,6 +1109,37 @@ void TextureSourceDDSFactory::PreInit(const char* name)
 
 ITextureSource* TextureSourceDDSFactory::Create(const char* name, PacLevelMem* mips, int maxMips)
 {
+    if (render::PreparedTextureStore::NativeDdsEnabled())
+    {
+        auto prepared = render::PreparedTextureStore::Instance().TakeDdsPrepared(
+            render::PreparedTextureStore::Key(name), CaptureDdsPreparationOptions());
+        if (prepared && prepared->BindPreparedMips(mips, maxMips))
+        {
+            static const bool verify = [] {
+                const char* value = std::getenv("WGR_NATIVE_DDS_PREPARE_VERIFY");
+                return value && std::strcmp(value, "1") == 0;
+            }();
+            if (verify)
+            {
+                auto reference = std::make_unique<TextureSourceDDS>();
+                const bool valid = reference->Init(name, mips, maxMips);
+                bool same = valid && reference->_format == prepared->_format &&
+                    reference->_pacFormat == prepared->_pacFormat && reference->_mipmaps == prepared->_mipmaps &&
+                    reference->_w == prepared->_w && reference->_h == prepared->_h &&
+                    reference->_hasAlpha == prepared->_hasAlpha && reference->_isTransparent == prepared->_isTransparent &&
+                    reference->_avgColor == prepared->_avgColor && reference->_levels.size() == prepared->_levels.size();
+                if (same) for (size_t i = 0; i < reference->_levels.size(); ++i)
+                    same = same && reference->_levels[i].width == prepared->_levels[i].width &&
+                        reference->_levels[i].height == prepared->_levels[i].height &&
+                        reference->_levels[i].data == prepared->_levels[i].data;
+                LOG_INFO(Graphics, "DDS prepared verification: {} name='{}'", same ? "identical" : "MISMATCH", name);
+                if (!same) return valid ? reference.release() : nullptr;
+            }
+            if (DdsPreparationTrace::Enabled())
+                LOG_INFO(Graphics, "DDS prepared take: bytes={} name='{}'", prepared->PreparedByteSize(), name);
+            return prepared.release();
+        }
+    }
     auto* source = new TextureSourceDDS;
     if (!source->Init(name, mips, maxMips))
     {

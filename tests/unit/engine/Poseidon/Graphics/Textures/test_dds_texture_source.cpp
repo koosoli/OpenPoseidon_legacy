@@ -379,6 +379,30 @@ TEST_CASE("Prepared DDS respects shared byte limits and expiry", "[graphics][edd
     store.Clear();
 }
 
+TEST_CASE("DDS factory consumes a prepared source without reopening its file", "[graphics][edds][streaming][dds-factory]")
+{
+    auto& store = Poseidon::render::PreparedTextureStore::Instance();
+    if (!store.NativeDdsEnabled()) SKIP("Run with WGR_NATIVE_DDS_PREPARE=1");
+    store.Clear();
+    const auto options = Poseidon::CaptureDdsPreparationOptions();
+    const auto bytes = Bgra2x2();
+    auto source = std::make_unique<TextureSourceDDS>();
+    PacLevelMem preparedMips[16], usedMips[1];
+    const char* name = "nonexistent-prepared-fixture.edds";
+    REQUIRE(source->InitFromReader(name, preparedMips, 16,
+        [&](const char*, std::vector<uint8_t>& out) { out = bytes; return true; }, options));
+    auto* identity = source.get();
+    REQUIRE(store.PutDdsPrepared(name, std::move(source), options, store.Generation()));
+    Poseidon::TextureSourceDDSFactory factory;
+    std::unique_ptr<Poseidon::ITextureSource> result(factory.Create(name, usedMips, 1));
+    REQUIRE(result.get() == identity);
+    CHECK(result->GetMipmapCount() == 1);
+    CHECK(usedMips[0]._w == 2);
+    CHECK(usedMips[0]._h == 2);
+    CHECK(store.SnapshotStats().bytes == 0);
+    store.Clear();
+}
+
 TEST_CASE("Reusable DDS payloads preserve source identity and independent pixels", "[graphics][edds][streaming]")
 {
     auto& store = Poseidon::render::PreparedTextureStore::Instance();

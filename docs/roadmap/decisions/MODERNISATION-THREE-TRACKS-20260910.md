@@ -11,6 +11,25 @@ that baseline. Analysis requested first; implementation subsequently authorised.
 
 ## Evidence limits
 
+Native DDS integration experiment after 185a9c4a: WGR_NATIVE_DDS_PREPARE=1
+extends the existing model worker's texture stage to native DDS/EDDS IR names,
+including tint/coverage wrappers. TextureSourceDDSFactory takes the completed
+CPU source and binds the caller's mip limit; uploads remain unchanged. Shared
+EnfusionMount lookup/remount locking protects owned request creation, and a
+mount-generation check rejects compositions spanning a remount. The existing
+store generation rejects old-world publication. Optional preparation failures
+fall back instead of unwinding out of a worker. This still serially occupies a
+model worker while it decodes: geometry delivery latency and transient CPU
+memory are risks to measure, not presumed improvements. No worker/factory call
+occurs by default yet. WGR_NATIVE_DDS_PREPARE_VERIFY=1 compares each taken source
+against fresh synchronous pixels/metadata (expensive oracle, not a timing arm).
+DDS preparation trace now identifies main-thread vs worker work; take trace and
+Streaming tab expose consumption instead of equating puts with saved work.
+51 enabled PAK/DDS/PAA/preparer cases / 965 assertions pass. Installed byte and
+performance acceptance pending. Run Test-NativeStreamCancellation.ps1 with
+-DdsPrepare 1 -VerifyDdsPrepare -TraceDdsPreparation for the oracle, then the
+same-build 0/1 arms without verification or detailed DDS logging for timing.
+
 Completed-DDS hand-off increment (after 61b18e73, not connected to worker/factory
 yet): PutDdsPrepared/TakeDdsPrepared move a unique CPU source through the existing
 store. Capacity-based mip payload accounting shares its budget with PAA/RGBA and

@@ -73,6 +73,7 @@ DdsPreparationOptions CaptureDdsPreparationOptions();
 class TextureSourceDDS : public ITextureSource
 {
     friend class render::PreparedTextureStore;
+    friend class TextureSourceDDSFactory;
     RStringB _name;
     std::vector<DDSMipLevel> _levels; //!< [0] is the largest
     PixelFormat _format = PixelFormat::Unknown;
@@ -85,10 +86,12 @@ class TextureSourceDDS : public ITextureSource
     PackedColor _avgColor{};
     bool InitFromMemoryWithOptions(const void* data, size_t size, const char* nameForErrors,
                                   bool forceDecode, const DdsPreparationOptions& options);
+    bool BindPreparedMips(PacLevelMem* mips, int maxMips);
 
   public:
     TextureSourceDDS();
     ~TextureSourceDDS() override;
+    size_t PreparedByteSize() const;
 
     bool Init(const char* name, PacLevelMem* mips, int maxMips) override;
     // Isolate I/O from composition: the caller owns the reader and its data for

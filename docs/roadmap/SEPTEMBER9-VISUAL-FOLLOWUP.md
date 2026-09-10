@@ -1,5 +1,17 @@
 # September 9 visual follow-up
 
+## September 11: native DDS worker experiment awaiting runtime acceptance
+
+After 185a9c4a, the existing native model workers and DDS factory are connected
+through the completed-source hand-off, gated by WGR_NATIVE_DDS_PREPARE=1 (OFF
+until acceptance). No new queue or upload thread. CPU composition uses owned
+archive requests, mount/store generations and one options snapshot. Exceptions
+in optional texture preparation preserve the parsed model and fallback path.
+Mount lookup/remount now use a shared mutex; I/O/decompression happen after
+releasing it. Root returns an owned string. Synthetic remount/read tests and
+the enabled factory hand-off pass: 51 combined cases / 965 assertions.
+Runtime byte verification and same-build A/B are pending, not claimed passed.
+
 ## September 11: DDS hand-off contract, integration pending
 
 61b18e73 is installed and its native moving-camera regression completed cleanly

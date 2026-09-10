@@ -84,6 +84,7 @@ class PreparedTextureStore
     // Read once from the environment. Enabled() is the master switch
     // (WGR_OBJECT_STREAM_TEXTURE_PREPARE, default 1); the others are the bounds above.
     static bool Enabled();
+    static bool NativeDdsEnabled();
     static size_t ByteBudget();
     static double TtlSeconds();
 

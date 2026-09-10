@@ -2,6 +2,7 @@ param([switch]$LegacyClutter, [switch]$VerifyClutter, [switch]$TraceSlowFrames, 
       [switch]$SampleDriverMemory,
       [ValidateRange(0,64)][int]$ExperimentalTableBudget=0,
       [ValidateRange(-1,1)][int]$TintReuse=-1, [switch]$VerifyTintReuse,
+      [ValidateRange(0,1)][int]$DdsPrepare=0, [switch]$VerifyDdsPrepare,
       [ValidateRange(-1,2)][int]$Bc7Batch=-1,
       [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',
       [string]$Archives='C:\Program Files (x86)\Steam\steamapps\common\Arma Reforger\addons')
@@ -10,6 +11,7 @@ if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
 if ($LegacyClutter -and $VerifyClutter) {throw 'Verification needs the reuse path enabled'}
 if ($LegacyTableBudget -and $ExperimentalTableBudget -gt 0) {throw 'Choose the production table path or the experimental cap, not both'}
 if ($VerifyTintReuse -and $TintReuse -eq 0) {throw 'Tint verification needs reuse enabled'}
+if ($VerifyDdsPrepare -and $DdsPrepare -ne 1) {throw 'DDS preparation verification needs preparation enabled'}
 if (!(Test-Path -LiteralPath $Archives -PathType Container)) {throw 'Native archives missing'}
 $root=Split-Path $PSScriptRoot -Parent
 $label='cancel-'+(Get-Date -Format 'yyyyMMdd-HHmmss')
@@ -24,11 +26,14 @@ if ($Bc7Batch -lt 0) {$label+='-bc7-default'}
 if ($SampleDriverMemory) {$label+='-driver-memory'}
 if ($TintReuse -ge 0) {$label+='-tint-reuse-'+$TintReuse}
 if ($VerifyTintReuse) {$label+='-verify-tint'}
+if ($DdsPrepare -eq 1) {$label+='-async-dds'}
+if ($VerifyDdsPrepare) {$label+='-verify-dds'}
 $out=Join-Path $root 'build/native-stream-cancellation'
 $user=Join-Path $out ('user-'+$label)
 New-Item -ItemType Directory -Force $user | Out-Null
 & "$PSScriptRoot/Write-BenchmarkGraphics.ps1" -UserDir $user
 $settings=@{
+ WGR_NATIVE_DDS_PREPARE=[string]$DdsPrepare; WGR_NATIVE_DDS_PREPARE_VERIFY=$(if ($VerifyDdsPrepare) {'1'} else {'0'})
  POSEIDON_USER_DIR=$user; POSEIDON_VSYNC='0'; POSEIDON_LOCKSTEP_HZ='0'
  POSEIDON_REFORGER_WORLD='worlds/eden'; POSEIDON_REFORGER_OBJECTS='1'; POSEIDON_REFORGER_STREAM='1'
  WGR_PASS1_STATS='1'; WGR_LOD_GOVERNOR_RANGE='1'; POSEIDON_LOD_TRACE='1'
