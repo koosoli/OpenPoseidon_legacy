@@ -286,6 +286,8 @@ float SmokeParticleRenderRadius(const SmokeParticle& particle, const SmokeParams
                                const ISmokeWorldQuery& query);
 void BuildSmokeDrawOrder(const std::vector<SmokeParticle>& particles, const Matrix4& toView,
                          std::vector<float>& depths, std::vector<int>& order);
+bool SmokeContactPlaneStillPresent(const SmokeParticle& particle, float radius,
+                                   const ISmokeWorldQuery& query);
 
 class SmokeVolume : public Entity
 {

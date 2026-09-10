@@ -466,6 +466,23 @@ void SmokeVolume::ApplyDisturbance(float deltaT)
     }
 }
 
+bool SmokeContactPlaneStillPresent(const SmokeParticle& particle, float radius,
+                                   const ISmokeWorldQuery& query)
+{
+    if (!particle.planeValid) return false;
+    const float clearance = particle.planeNormal.DotProduct(particle.position) -
+        particle.planeOffset + particle.planePadding;
+    if (!std::isfinite(clearance) || clearance < 0.0f || clearance > radius + 0.1f)
+        return false;
+    Vector3 hit;
+    // A tangential sweep can miss a roof after the particle stops rising.
+    // Offset sweep rays report their hit on the centre line, up to one sphere
+    // radius away from the real surface. Include that offset when confirming.
+    // Do not retain an infinite cached plane after leaving the edge of a roof.
+    return query.ProbeSegment(particle.position,
+        particle.position - particle.planeNormal * (clearance + radius + 0.05f), hit);
+}
+
 void SmokeVolume::Collide(SmokeParticle& particle, Vector3Par previousPosition, float deltaT)
 {
     const ISmokeWorldQuery& query = GSmokeWorldQuery();
@@ -595,7 +612,7 @@ void SmokeVolume::Collide(SmokeParticle& particle, Vector3Par previousPosition, 
 
     if (!hit.hit)
     {
-        particle.planeValid = false;
+        particle.planeValid = _params.contain && SmokeContactPlaneStillPresent(particle, sphereRadius, query);
         return;
     }
 

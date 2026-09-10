@@ -12,6 +12,16 @@ class SmokeRoomQuery final : public Poseidon::ISmokeWorldQuery
   public:
     float clearance = 0.4f;
     mutable int sweeps = 0;
+    mutable int probes = 0;
+    bool roofPresent = true;
+    bool ProbeSegment(Vector3Par from, Vector3Par to, Vector3& hit) const override
+    {
+        ++probes;
+        if (!roofPresent || from.Y() >= 3.0f || to.Y() <= 3.0f || std::abs(from.X()) > 2.0f)
+            return false;
+        hit = Vector3(from.X(), 3.0f, from.Z());
+        return true;
+    }
     Poseidon::SmokeSurfaceHit SweepSphere(Vector3Par, Vector3Par, float) const override
     {
         ++sweeps;
@@ -23,6 +33,31 @@ class SmokeRoomQuery final : public Poseidon::ISmokeWorldQuery
     bool IsSheltered(Vector3Par, float) const override { return true; }
     float IndoorClearanceAt(Vector3Par, int, float limit) const override { return std::min(clearance, limit); }
 };
+}
+
+TEST_CASE("Smoke keeps a real roof contact after a tangential sweep misses", "[smoke][render-bounds]")
+{
+    SmokeRoomQuery query;
+    Poseidon::SmokeParticle particle;
+    particle.position = Vector3(0, 2.4f, 0);
+    particle.planeNormal = Vector3(0, -1, 0);
+    particle.planePadding = 0.2f;
+    particle.planeOffset = -2.4f;
+    CHECK_FALSE(Poseidon::SmokeContactPlaneStillPresent(particle, 0.4f, query));
+    CHECK(query.probes == 0);
+    particle.planeValid = true;
+    CHECK(Poseidon::SmokeContactPlaneStillPresent(particle, 0.4f, query));
+    CHECK(query.probes == 1);
+    particle.position[0] = 3;
+    CHECK_FALSE(Poseidon::SmokeContactPlaneStillPresent(particle, 0.4f, query));
+    particle.position[0] = 0;
+    query.roofPresent = false;
+    CHECK_FALSE(Poseidon::SmokeContactPlaneStillPresent(particle, 0.4f, query));
+    query.roofPresent = true;
+    particle.position[1] = 1;
+    const int before = query.probes;
+    CHECK_FALSE(Poseidon::SmokeContactPlaneStillPresent(particle, 0.4f, query));
+    CHECK(query.probes == before);
 }
 
 TEST_CASE("Smoke rendering respects walls and roofs without more collision sweeps", "[smoke][render-bounds]")

@@ -7,6 +7,7 @@
 
 #include <cmath>
 #include <cstdlib>
+#include <array>
 
 namespace Poseidon
 {
@@ -122,6 +123,7 @@ class NullSmokeWorldQuery final : public ISmokeWorldQuery
 
 class PoseidonSmokeWorldQuery final : public ISmokeWorldQuery
 {
+    struct SweepCandidate { Object* object; int x, z; };
   public:
     /// One zero-width ray through the world, returning the deepest hit converted
     /// to world space with a real outward normal. Factored out because
@@ -130,7 +132,8 @@ class PoseidonSmokeWorldQuery final : public ISmokeWorldQuery
     /// line's distance and the clip loop clips the segment; `radius` is never
     /// read. So the "sphere sweep" the interface promises has to be built here
     /// from rays, or a puff's centre has to cross a wall before anything hits.
-    bool CastRay(Vector3Par from, Vector3Par to, SmokeSurfaceHit& out) const
+    bool CastRay(Vector3Par from, Vector3Par to, SmokeSurfaceHit& out,
+                 const SweepCandidate* candidates = nullptr, int candidateCount = 0) const
     {
         ++GSweepCount;
 
@@ -144,7 +147,39 @@ class PoseidonSmokeWorldQuery final : public ISmokeWorldQuery
         // ObjIntersectFire, not ObjIntersectView: fire geometry is the solid
         // shell of a building. View geometry includes glass and foliage, which
         // smoke should drift through.
-        GLandscape->ObjectCollision(buffer, nullptr, nullptr, from, to, 0.0f, ObjIntersectFire);
+        if (!candidates)
+            GLandscape->ObjectCollision(buffer, nullptr, nullptr, from, to, 0.0f, ObjIntersectFire);
+        else
+        {
+            int xMin, xMax, zMin, zMax;
+            ::ObjRadiusRectangle(xMin, xMax, zMin, zMax, from, to, 0.0f);
+            const Vector3 centre = (to + from) * 0.5f;
+            const float reach = to.Distance(from) * 0.5f;
+            for (int i = 0; i < candidateCount; ++i)
+            {
+                const auto& candidate = candidates[i];
+                if (candidate.x < xMin || candidate.x > xMax || candidate.z < zMin || candidate.z > zMax)
+                    continue;
+                Object* object = candidate.object;
+                if (object->Position().Distance2Inline(centre) > Square(reach + object->GetRadius()))
+                    continue;
+                object->Intersect(buffer, from, to, 0.0f, ObjIntersectFire);
+            }
+            static const bool verify = std::getenv("POSEIDON_SMOKE_BATCH_VERIFY") != nullptr;
+            if (verify)
+            {
+                CollisionBuffer reference;
+                GLandscape->ObjectCollision(reference, nullptr, nullptr, from, to, 0.0f, ObjIntersectFire);
+                bool equal = reference.Size() == buffer.Size();
+                for (int i = 0; equal && i < buffer.Size(); ++i)
+                    equal = reference[i].object == buffer[i].object &&
+                        reference[i].under == buffer[i].under && reference[i].pos == buffer[i].pos &&
+                        reference[i].surfaceNormal == buffer[i].surfaceNormal;
+                if (!equal) LOG_ERROR(World, "Smoke batch parity mismatch: {} vs {}", buffer.Size(), reference.Size());
+                static unsigned checked = 0;
+                if (++checked == 1000) LOG_INFO(World, "Smoke batch parity: 1000 exact ray comparisons completed");
+            }
+        }
 
         if (buffer.Size() <= 0)
         {
@@ -214,41 +249,50 @@ class PoseidonSmokeWorldQuery final : public ISmokeWorldQuery
             const char* v = std::getenv("POSEIDON_SMOKE_BROADPHASE");
             return !(v && v[0] == '0');
         }();
+        std::array<SweepCandidate, 32> candidates;
+        int candidateCount = 0;
+        bool overflow = false;
         if (broadPhase)
         {
             int xMin, xMax, zMin, zMax;
             ::ObjRadiusRectangle(xMin, xMax, zMin, zMax, from, to, radius);
             const Vector3 centre = (from + to) * 0.5f;
             const float reach = (to - from).Size() * 0.5f + std::max(radius, 0.0f);
-            bool candidate = false;
-            for (int z = zMin; z <= zMax && !candidate; ++z)
+            // Preserve ObjectCollision's cell/list order, including equal-distance hits.
+            for (int x = xMin; x <= xMax && !overflow; ++x)
             {
-                for (int x = xMin; x <= xMax && !candidate; ++x)
+                for (int z = zMin; z <= zMax && !overflow; ++z)
                 {
                     const ObjectList& objects = GLandscape->GetObjects(z, x);
                     for (int i = 0; i < objects.Size(); ++i)
                     {
-                        const Object* object = objects[i];
+                        Object* object = objects[i];
                         if (object->GetType() == Temporary || object->GetType() == TypeTempVehicle)
                             continue;
                         if (object->GetType() == Network && object->GetShape()->FindGeometryLevel() < 0)
                             continue;
                         if ((object->Position() - centre).SquareSize() <= Square(reach + object->GetRadius()))
                         {
-                            candidate = true;
-                            break;
+                            if (candidateCount == static_cast<int>(candidates.size()))
+                            {
+                                overflow = true;
+                                break;
+                            }
+                            candidates[candidateCount++] = {object, x, z};
                         }
                     }
                 }
             }
-            if (!candidate)
+            if (candidateCount == 0)
                 return result;
         }
+        // No per-particle heap allocation. Dense overlap falls back without dropping hits.
+        const SweepCandidate* batch = broadPhase && !overflow ? candidates.data() : nullptr;
 
         // Centre ray first: it is the cheapest and, for a particle heading
         // straight at a wall, the one that hits.
         SmokeSurfaceHit best;
-        bool haveBest = CastRay(from, to, best);
+        bool haveBest = CastRay(from, to, best, batch, candidateCount);
 
         // Then a ring of rays offset by `radius` around the axis of travel, plus
         // one straight up and one straight down. The ring catches a wall the
@@ -280,7 +324,7 @@ class PoseidonSmokeWorldQuery final : public ISmokeWorldQuery
             for (const Vector3& offset : offsets)
             {
                 SmokeSurfaceHit hit;
-                if (!CastRay(from + offset, to + offset, hit))
+                if (!CastRay(from + offset, to + offset, hit, batch, candidateCount))
                 {
                     continue;
                 }

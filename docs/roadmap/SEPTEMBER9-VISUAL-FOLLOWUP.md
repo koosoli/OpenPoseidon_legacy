@@ -1,5 +1,38 @@
 # September 9 visual follow-up
 
+## Smoke contact retention and shared sweep candidates, September 10, 12:15
+
+A tangential particle sweep no longer discards a nearby roof/wall clipping plane
+unconditionally. A short surface probe confirms that geometry still exists;
+leaving its edge or removing the roof releases the plane. Offset sweep rays
+report centre-line hits, so confirmation includes the particle radius. The new
+unit case covers contact retention, roof edges, removal and distant particles.
+All 14 [smoke] cases / 442 assertions pass after the final build.
+
+The seven rays of a sweep now reuse one bounded, stack-allocated candidate list.
+Per-ray bounds and original cell/list order remain unchanged; over 32 overlapping
+candidates falls back to the original full queries, never truncating collisions.
+POSEIDON_SMOKE_BATCH_VERIFY compares exact hit buffers with the original path.
+Both Showcase and Nogova installed 30-second runs complete more than 1000 exact
+comparisons with no mismatch, no renderer errors and exit 0.
+
+Installed 5d3ba993+dirty at 11:59: build/smoke-cold-grid/roof-batch-cost and
+roof-batch-control use the same executable with batching on / broadphase off.
+At about 3900 particles the Showcase late simulation samples are commonly
+7.25-7.43 ms (outliers up to 10.95), versus 8.67-9.29 ms in the control.
+The extra contact confirmation alone cost roughly 2 ms before batching;
+this is not a claim of a whole-frame FPS improvement. Whole-frame measurements
+actually vary 18.35 vs 17.33 ms and are unsuitable for that conclusion.
+Nogova production roof-batch-nogova-cost has late samples 1.18-1.49 ms,
+about 3760 particles tracked indoors, and the same roughly 3900 total particles.
+No particle budget, wind coupling or downwash response was reduced.
+
+Inspected both final exterior captures: no plume appears above the closed roofs.
+The original owner-reported roof leak was not reproduced in either baseline,
+so these checks do not close every thin-roof smoke defect. The contact lifecycle
+fix is independently demonstrated by its regression test; performance evidence
+is scene-specific, not a promise for all smoke loads or GPU costs.
+
 ## Breakable standalone glass, September 10, 11:25
 
 LabPanelGlass now has armor=1 and the opt-in Building config property
