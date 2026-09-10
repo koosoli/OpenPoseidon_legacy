@@ -14,10 +14,34 @@ Poseidon::Foundation::RString& GetModPathInternal();
 namespace Poseidon
 {
 ModCollection ModSystem::s_active;
+ModCollection ModSystem::s_defaultContent;
+
+void ModSystem::ConfigureDefaultContent(const RStringB& mountPath)
+{
+    s_defaultContent = ActiveModsFromMountPath((const char*)mountPath);
+}
 
 void ModSystem::SetModPath(const RStringB& modPath)
 {
-    s_active = ActiveModsFromMountPath((const char*)modPath);
+    const ModCollection requested = ActiveModsFromMountPath((const char*)modPath);
+    s_active = {};
+    // RES is original expansion content, below our shipped additions. All
+    // explicitly requested non-RES mods remain above the default packs.
+    if (!s_defaultContent.Empty())
+    {
+        if (const Mod* res = requested.Find("res"))
+            s_active.Add(*res);
+    }
+    for (const Mod& mod : s_defaultContent.All())
+    {
+        if (!requested.Contains(mod.id))
+            s_active.Add(mod);
+    }
+    for (const Mod& mod : requested.All())
+    {
+        if (s_defaultContent.Empty() || !s_active.Contains(mod.id))
+            s_active.Add(mod);
+    }
     // Keep the addon-bank loader's mod path in sync with the (normalized) mount paths.
     const std::string mountPath = s_active.FormatMountPath();
     ::GetModPathInternal() = mountPath.c_str();

@@ -37,6 +37,81 @@ Mod MakeMod(const std::string& id, const std::string& path, ModSource src = ModS
 }
 } // namespace
 
+TEST_CASE("Default content packs require an explicit compatible contract", "[mods][default-content]")
+{
+    const auto root = MakeTempDir();
+    struct Cleanup
+    {
+        std::filesystem::path path;
+        ~Cleanup() { std::error_code ec; std::filesystem::remove_all(path, ec); }
+    } cleanup{root};
+    const auto visual = root / "@OP_VisualUpgrade";
+    const auto vehicle = root / "@OP_VehicleActions";
+    auto resolve = [&] { return ResolveDefaultContentPacks(root.string(), {}, ""); };
+    CHECK(resolve().mountPath.empty());
+    REQUIRE(resolve().diagnostics.size() == 2);
+    std::filesystem::create_directories(visual / "AddOns");
+    std::ofstream(visual / "AddOns" / "op_ground_materials.pbo") << "fixture";
+    CHECK(resolve().mountPath.empty());
+    std::ofstream(visual / "mod.json") << R"({"defaultContentApi":"2","version":"1.0.0"})";
+    CHECK(resolve().mountPath.empty());
+    std::ofstream(visual / "mod.json") << R"({"defaultContentApi":1,"version":"1.0.0"})";
+    CHECK(resolve().mountPath.empty());
+    std::ofstream(visual / "mod.json") << R"({"defaultContentApi":"1"})";
+    CHECK(resolve().mountPath.empty());
+    std::ofstream(visual / "mod.json") << R"({"defaultContentApi":"1","version":"1.0.0"})";
+    REQUIRE(ActiveModsFromMountPath(resolve().mountPath).Contains("@OP_VisualUpgrade"));
+    CHECK(ResolveDefaultContentPacks(root.string(), {"@op_visualupgrade"}, "").mountPath.empty());
+    CHECK(ResolveDefaultContentPacks(root.string(), {}, visual.string()).mountPath.empty());
+
+    std::filesystem::create_directories(vehicle / "AddOns");
+    std::ofstream(vehicle / "mod.json") << R"({"defaultContentApi":"1","version":"1.0.0"})";
+    CHECK(ActiveModsFromMountPath(resolve().mountPath).Size() == 1);
+    std::ofstream(vehicle / "AddOns" / "op_jeep_actions.pbo");
+    CHECK(ActiveModsFromMountPath(resolve().mountPath).Size() == 1);
+    std::ofstream(vehicle / "AddOns" / "op_jeep_actions.pbo") << "fixture";
+    const auto both = ActiveModsFromMountPath(resolve().mountPath);
+    REQUIRE(both.Size() == 2);
+    CHECK(both.All()[0].id == "@OP_VisualUpgrade");
+    CHECK(both.All()[1].id == "@OP_VehicleActions");
+    const auto user = root / "@user";
+    MakeModFolder(root, "@user", "AddOns");
+    const auto combined = ActiveModsFromMountPath(resolve().mountPath + ";" + user.string());
+    REQUIRE(combined.Size() == 3);
+    CHECK(combined.All().back().id == "@user");
+    CHECK(ActiveModsFromMountPath(ResolveDefaultContentPacks(root.string(), {"@OP_VehicleActions"}, "").mountPath)
+              .Size() == 1);
+}
+
+TEST_CASE("Default content persists across remounts below explicit user mods", "[mods][default-content]")
+{
+    const std::string previous = (const char*)ModSystem::GetModList();
+    struct Restore
+    {
+        std::string previous;
+        ~Restore()
+        {
+            ModSystem::ConfigureDefaultContent("");
+            ModSystem::SetModPath(previous.c_str());
+        }
+    } restore{previous};
+    ModSystem::ConfigureDefaultContent("/game/@OP_VisualUpgrade;/game/@OP_VehicleActions");
+    ModSystem::SetModPath("/game/res;/mods/@user");
+    CHECK(std::string(ModSystem::GetModList()) ==
+          "/game/res;/game/@OP_VisualUpgrade;/game/@OP_VehicleActions;/mods/@user");
+    const std::string mounted = (const char*)ModSystem::GetModList();
+    ModSystem::SetModPath(mounted.c_str());
+    CHECK(std::string(ModSystem::GetModList()) == mounted);
+    ModSystem::SetModPath("");
+    CHECK(std::string(ModSystem::GetModList()) == "/game/@OP_VisualUpgrade;/game/@OP_VehicleActions");
+    ModSystem::SetModPath("/mods/@OP_VisualUpgrade;/mods/@user");
+    CHECK(std::string(ModSystem::GetModList()) ==
+          "/game/@OP_VehicleActions;/mods/@OP_VisualUpgrade;/mods/@user");
+    ModSystem::ConfigureDefaultContent("");
+    ModSystem::SetModPath("");
+    CHECK(std::string(ModSystem::GetModList()).empty());
+}
+
 TEST_CASE("LooksLikeMod recognizes mod markers, ignores bare folders", "[mods][collection]")
 {
     const auto root = MakeTempDir();

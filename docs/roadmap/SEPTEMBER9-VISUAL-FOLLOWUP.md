@@ -1686,3 +1686,12 @@ heightfield, infantry movement, projectile and PhysicsWorld integration points,
 plus a staged local 3D mesh/collision experiment, are documented in
 decisions/TERRAIN-CAVES-AND-BRUSH-20260909.md. Rendering a hole without replacing
 its solid hill collision is explicitly rejected as an incomplete implementation.
+
+## Default content packages (2026-09-10, started)
+
+The owner authorized continued implementation, with the next overall report
+only after the outstanding scope is handled. Incremental evidence lives in
+[DEFAULT-CONTENT-PACKS-20260910.md](decisions/DEFAULT-CONTENT-PACKS-20260910.md).
+The first increment is compatible-package discovery and existing-loader mount
+ordering, not delivered replacement materials or Jeep FFV. Earlier outstanding
+terrain caves, far-view and streaming work is not closed by this increment.

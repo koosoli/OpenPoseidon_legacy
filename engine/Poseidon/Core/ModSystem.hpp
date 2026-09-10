@@ -16,6 +16,9 @@ typedef bool ModDirectoryCallback(RStringB dir, void* context);
 class ModSystem
 {
 public:
+	// Startup-only validated default packs. Kept across ordinary in-process mod
+	// changes; explicit mods with the same identity take precedence.
+	static void ConfigureDefaultContent(const RStringB& mountPath);
 	// Replace the active set, parsed from a ';'-separated absolute mount-path string
 	// (what AppConfig resolves --mod into, or "" for the base game).
 	static void SetModPath(const RStringB& modPath);
@@ -34,5 +37,6 @@ public:
 
 private:
 	static ModCollection s_active;
+	static ModCollection s_defaultContent;
 };
 } // namespace Poseidon

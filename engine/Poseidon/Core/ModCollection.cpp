@@ -380,6 +380,70 @@ ModCollection ActiveModsFromMountPath(const std::string& mountPath)
     return col;
 }
 
+DefaultContentResolveResult ResolveDefaultContentPacks(const std::string& gameDir,
+                                                       const std::vector<std::string>& disabledIds,
+                                                       const std::string& userMountPath)
+{
+    DefaultContentResolveResult result;
+    struct Pack
+    {
+        const char* folder;
+        const char* archive;
+    };
+    static constexpr Pack packs[] = {{"@OP_VisualUpgrade", "op_ground_materials.pbo"},
+                                     {"@OP_VehicleActions", "op_jeep_actions.pbo"}};
+    const ModCollection users = ActiveModsFromMountPath(userMountPath);
+    for (const Pack& pack : packs)
+    {
+        const std::string id = pack.folder;
+        const auto report = [&](const char* reason) { result.diagnostics.push_back(id + ": " + reason); };
+        if (std::any_of(disabledIds.begin(), disabledIds.end(),
+                        [&](const std::string& disabled) { return LowerAscii(disabled) == LowerAscii(id); }))
+        {
+            report("disabled; using original content");
+            continue;
+        }
+        // Do not silently shadow an explicitly selected mod with the same identity.
+        if (users.Contains(id))
+        {
+            report("explicit user mod owns this identity; automatic mount skipped");
+            continue;
+        }
+        const std::string path = AbsoluteResolvedModPath(std::filesystem::path(gameDir) / pack.folder);
+        if (path.empty())
+        {
+            report("not installed; using original content");
+            continue;
+        }
+        if (ReadModJsonString(path, "defaultContentApi") != "1")
+        {
+            report("missing or incompatible defaultContentApi (expected string 1); using original content");
+            continue;
+        }
+        if (ReadModJsonString(path, "version").empty())
+        {
+            report("missing package version; using original content");
+            continue;
+        }
+        const auto candidate = std::filesystem::path(path) / "AddOns" / pack.archive;
+        std::error_code ec;
+        const std::string absolute = std::filesystem::absolute(candidate, ec).string();
+        char resolved[4096];
+        if (ec || !ResolveFilePath(absolute.c_str(), resolved, sizeof(resolved)) ||
+            !std::filesystem::is_regular_file(resolved, ec) || ec ||
+            std::filesystem::file_size(resolved, ec) == 0 || ec)
+        {
+            report("required archive missing or empty; using original content");
+            continue;
+        }
+        if (!result.mountPath.empty())
+            result.mountPath += ';';
+        result.mountPath += path;
+        report("compatible package found (archive contents still validated by the existing loader)");
+    }
+    return result;
+}
+
 ModPathResolveResult ResolveModPathList(const ModPathResolveRequest& request)
 {
     ModPathResolveResult result;

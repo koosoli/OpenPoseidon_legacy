@@ -277,6 +277,8 @@ void AppConfig::ParseCommandLine(int argc, char** argv)
         return;
     }
     _parsed = true;
+    bool disableVisualUpgrade = false;
+    bool disableVehicleActions = false;
 
     // Console attachment is handled by entry points (WinMain / main)
     // via attachParentConsole() before Application::Run()
@@ -487,6 +489,10 @@ void AppConfig::ParseCommandLine(int argc, char** argv)
 
         std::string modPathsStr;
         configGroup->add_option("--mod", modPathsStr, "Mod directory paths (semicolon-separated; legacy alias: -mod)");
+        configGroup->add_flag("--no-visual-upgrade", disableVisualUpgrade,
+                              "Disable the shipped ground/road material pack (restart required)");
+        configGroup->add_flag("--no-vehicle-actions", disableVehicleActions,
+                              "Disable the shipped Jeep passenger actions pack (restart required)");
 
         std::string addonArchiveRootsStr;
         showOption(configGroup->add_option("--addon-root", addonArchiveRootsStr,
@@ -1172,10 +1178,17 @@ void AppConfig::ParseCommandLine(int argc, char** argv)
             effectiveMods = effectiveMods.GetLength() > 0 ? resMod + RString(";") + effectiveMods : resMod;
         }
     }
-    if (effectiveMods.GetLength() > 0)
-    {
-        Poseidon::ModSystem::SetModPath(effectiveMods);
-    }
+    std::vector<std::string> disabledContent;
+    if (disableVisualUpgrade)
+        disabledContent.emplace_back("@OP_VisualUpgrade");
+    if (disableVehicleActions)
+        disabledContent.emplace_back("@OP_VehicleActions");
+    const auto defaultContent = ResolveDefaultContentPacks(
+        _workingDirectory.empty() ? "." : _workingDirectory, disabledContent, (const char*)_modPaths);
+    for (const auto& diagnostic : defaultContent.diagnostics)
+        LOG_INFO(Core, "Default content: {}", diagnostic);
+    Poseidon::ModSystem::ConfigureDefaultContent(defaultContent.mountPath.c_str());
+    Poseidon::ModSystem::SetModPath(effectiveMods);
 }
 
 void AppConfig::ApplyToLegacyGlobals()

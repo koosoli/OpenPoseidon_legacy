@@ -115,6 +115,20 @@ struct ModPathResolveResult
 /// reported as errors instead of silently mounting dead paths.
 ModPathResolveResult ResolveModPathList(const ModPathResolveRequest& request);
 
+struct DefaultContentResolveResult
+{
+    std::string mountPath;
+    std::vector<std::string> diagnostics;
+};
+
+/// Resolve only the two shipped content packs, never arbitrary folders. Call at
+/// mount time, not per frame. Append explicit user mods AFTER this result (and
+/// original RES data before it). Disabled ids use the exact folder identity,
+/// case-insensitively. A restart is required after changing pack installation.
+DefaultContentResolveResult ResolveDefaultContentPacks(const std::string& gameDir,
+                                                       const std::vector<std::string>& disabledIds,
+                                                       const std::string& userMountPath);
+
 /// Result of resolving a semicolon-separated set of archive directories passed
 /// through --addon-root. Each directory must contain at least one PBO directly;
 /// the option is for legal archive bundles that are intentionally distributed
