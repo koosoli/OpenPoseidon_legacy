@@ -15,7 +15,7 @@ New-Item -ItemType Directory -Force $stage, (Join-Path $pack 'AddOns') | Out-Nul
 if ($LASTEXITCODE -ne 0) { throw 'Material generation failed' }
 # Explicitly verified source identities only; no filename heuristic.
 $expected = @('config.cpp','materials.json')
-foreach ($material in @('road_asphalt','sand')) {
+foreach ($material in @('road_asphalt','sand','gravel')) {
     foreach ($kind in @('co','nohq')) {
         $name = "${material}_$kind"
         & $tools image convert "$generated/$name.png" "$stage/$name.paa" --format DXT5

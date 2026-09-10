@@ -12,18 +12,21 @@
     },
     "gravel": {
       "seed": 92032,
-      "tileMetres": [4.0, 4.0],
+      "tileMetres": [3.5, 6.25],
       "aggregateMetres": 0.065,
       "heightMetres": 0.014,
       "baseSrgb": [125, 115, 99],
       "roughness": 0.95,
-      "road": false
+      "road": true,
+      "wheelTracks": [0.27, 0.73]
     },
     "sand": {
       "seed": 84217,
       "tileMetres": [50.0, 50.0],
       "aggregateMetres": 0.12,
       "heightMetres": 0.02,
+      "rippleMetres": 0.55,
+      "rippleHeightMetres": 0.008,
       "baseSrgb": [195, 180, 145],
       "roughness": 0.97,
       "road": false

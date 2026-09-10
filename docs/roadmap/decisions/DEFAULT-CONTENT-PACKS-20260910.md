@@ -129,3 +129,20 @@ Pack 0.1.1 adds this candidate, with no copied source-game pixels. Terrain norma
 and clamp propagation have a Rust contract test; 5 generator tests pass and the
 client build passes. Installed Sand Original/Albedo/Full acceptance is next.
 These facts do not establish photorealism, roughness integration or all surfaces.
+
+Installed a25309aa Sand runs: 212632 Original, 212805 Full, 213055 Albedo. All exit
+0 with 52507 registered / 15208 main instances and 730061 main triangles. Log
+confirms eden/ps replacement and PBO terrain normal binding. Images inspected:
+the candidate removes much broad blotching but is still too uniform to declare
+photorealistic. Sand ROI x250:1100/y350:700 Full-vs-Albedo absolute RGB mean 1.458,
+max 10; distant hill control x100:900/y30:95 mean 0.162. This is local normal-effect
+evidence, not identical sky/vegetation or FPS proof. Three single captures do not
+establish a tail-latency or memory improvement.
+
+Next candidate 0.1.2 adds an own periodic sand ripple height field (albedo unchanged,
+6 generator tests pass) and the verified data/cesta.paa road. cesta25.p3d has 3.5 m
+width, V=-2..2 over 25 m, OnSurface/IsAlpha/ClampU; the recipe uses 3.5/6.25 m and
+two wheel tracks. Original placement 7489: 2221.7/4788.8, Y38.2. Packaging includes
+three mapped surfaces, but that count is NOT three-surface acceptance. Roughness
+still needs real binding: the terrain currently has diffuse lighting only and a
+source roughness PNG alone cannot change it. No specular benefit is claimed.

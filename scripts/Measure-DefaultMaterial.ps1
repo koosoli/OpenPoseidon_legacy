@@ -1,5 +1,5 @@
 param([ValidateSet('Original','Albedo','Full')][string]$Arm = 'Full',
-      [ValidateSet('Road','Sand')][string]$Surface = 'Road')
+      [ValidateSet('Road','Sand','Gravel')][string]$Surface = 'Road')
 $ErrorActionPreference = 'Stop'
 if (!$env:LOCK_OWNER) { throw 'Use scripts/with-game-lock.sh' }
 $root = Split-Path $PSScriptRoot -Parent
@@ -13,6 +13,9 @@ $settings = @{POSEIDON_USER_DIR=$user; POSEIDON_VSYNC='0'; WGR_LOD_GOVERNOR_RANG
 $extra = @('--test-world-freefly','6378.7','5672.5','74.4','120','-12','--test-world-hour','14')
 if ($Surface -eq 'Sand') {
     $extra = @('--test-world-freefly','5800','3400','13.0','90','-20','--test-world-hour','14')
+}
+if ($Surface -eq 'Gravel') {
+    $extra = @('--test-world-freefly','2221.7','4788.8','40.2','230','-16','--test-world-hour','14')
 }
 if ($Arm -eq 'Original') { $extra += '--no-visual-upgrade' }
 & "$PSScriptRoot/farfield-bench.ps1" -Label $label -Mission 'tests/perf/missions/perf_field.eden' `

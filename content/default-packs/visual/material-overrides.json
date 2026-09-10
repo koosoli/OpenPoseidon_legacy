@@ -12,6 +12,12 @@
       "sourceArchive": "Dta\\Eden.pbo",
       "albedo": "op_ground_materials\\sand_co.paa",
       "normal": "op_ground_materials\\sand_nohq.paa"
+    },
+    {
+      "source": "data\\cesta.paa",
+      "sourceArchive": "Dta\\Data.pbo",
+      "albedo": "op_ground_materials\\gravel_co.paa",
+      "normal": "op_ground_materials\\gravel_nohq.paa"
     }
   ]
 }

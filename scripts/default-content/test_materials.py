@@ -40,6 +40,15 @@ class MaterialTests(unittest.TestCase):
         self.assertLess(result[0, 0, 3], 128)
         np.testing.assert_array_equal(encode_nohq(np.roll(height, 7, 1), [1, 1]), np.roll(result, 7, 1))
 
+    def test_sand_ripples_are_relief_not_baked_light(self):
+        spec = self.specs["sand"]
+        rippled = generate(spec, 128)
+        flat = generate(dict(spec, rippleMetres=0.0), 128)
+        np.testing.assert_array_equal(rippled["co"], flat["co"])
+        np.testing.assert_array_equal(rippled["roughness"], flat["roughness"])
+        self.assertFalse(np.array_equal(rippled["height"], flat["height"]))
+        self.assertFalse(np.array_equal(rippled["nohq"], flat["nohq"]))
+
     def test_reject_invalid_dimensions(self):
         with self.assertRaises(ValueError):
             generate(self.specs["soil"], 100)

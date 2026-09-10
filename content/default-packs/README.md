@@ -1,6 +1,6 @@
 # Shipped content sources (work in progress)
 
-The first road integration is implemented. Three-surface acceptance and the
+Road and terrain normal integration is implemented. Three-surface acceptance and the
 Jeep actions package are NOT finished. See the decision ledger for exact status.
 
 ## Build and installation
@@ -17,7 +17,7 @@ Python requirement. For an already built tool:
 Output is `dist/x64-win-<configuration>/@OP_VisualUpgrade`, containing mod.json
 and AddOns/op_ground_materials.pbo. Deploy.ps1 copies these own files and verifies
 their SHA256; it does not modify Dta/Data.pbo, LandText.pbo, original models or WRP.
-Source-only roughness/height/gravel/soil artifacts are not claimed as bound maps.
+Source-only roughness/height/soil artifacts are not claimed as bound maps.
 No empty Jeep package is manufactured to suggest the feature is complete.
 
 At normal startup the engine discovers compatible installed packs without a mod
@@ -56,3 +56,11 @@ The first original mapping is `data/silnice.paa` in `Dta/Data.pbo`, confirmed in
 the `data3d/silnice25.p3d` OnSurface section. Its U=0..1 spans 9.1 m and its
 V=-2..2 spans 25 m; the authored tile is consequently 9.1 by 6.25 m. Curve and
 junction mappings still need their own inspection rather than name guesses.
+
+The sand candidate maps `eden/ps.paa` from `Dta/Eden.pbo`, with a 50 m tile matching
+the actual legacy landscape grid. Test centre: Everon 5800/3400, height 10.6 m.
+Its optional periodic, warped ripples affect height/normals, never albedo lighting.
+The gravel candidate maps `data/cesta.paa` from `Dta/Data.pbo`; inspected
+`cesta25.p3d` has width 3.5 m and V=-2..2 over 25 m, giving a 3.5 by 6.25 m tile.
+Test placement: 2221.7/4788.8, height 38.2 m. These are authored candidates, not a
+claim that photorealism or the complete visual/roughness test matrix is accepted.

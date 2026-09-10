@@ -48,6 +48,16 @@ def generate(spec, size):
     broad = periodic_noise(rng, size, metres, 0.35)
     mineral = 0.5 + 0.5 * np.tanh(aggregate)
     height = spec["heightMetres"] * (0.8 * mineral + 0.2 * np.tanh(fine))
+    ripple = spec.get("rippleMetres", 0.0)
+    if ripple > 0.0:
+        # Integral cycles and periodic distortion preserve both tile boundaries.
+        # Relief is independent of albedo: no painted-in highlight/shadow pair.
+        cycles = max(1, round(metres[1] / ripple))
+        v = np.arange(size)[:, None] / size
+        warp = periodic_noise(rng, size, metres, ripple * 3.0)
+        envelope = 0.35 + 0.65 * (0.5 + 0.5 * np.tanh(broad))
+        height += spec.get("rippleHeightMetres", 0.006) * envelope * (
+            0.5 + 0.5 * np.cos(2.0 * np.pi * cycles * v + 0.7 * warp)) ** 2
     variation = 14.0 * (mineral - 0.5) + 3.0 * np.tanh(fine) + 5.0 * np.tanh(broad)
     albedo = np.empty((size, size, 4), dtype=np.uint8)
     rgb = np.asarray(spec["baseSrgb"], dtype=float)[None, None, :] + variation[:, :, None]
@@ -58,7 +68,8 @@ def generate(spec, size):
         # Authored shoulder fade and tyre wear, not copied from original pixels.
         alpha = np.broadcast_to(np.clip(edge_distance / 0.035, 0, 1), height.shape)
         dust = np.exp(-((edge_distance / 0.11) ** 2))
-        wear = sum(np.exp(-(((u - centre) / 0.055) ** 2)) for centre in (0.22, 0.40, 0.60, 0.78))
+        tracks = spec.get("wheelTracks", [0.22, 0.40, 0.60, 0.78])
+        wear = sum(np.exp(-(((u - centre) / 0.055) ** 2)) for centre in tracks)
         rgb = rgb + dust[None, :, None] * np.array([22, 18, 10])[None, None, :]
         rgb = rgb - wear[None, :, None] * 7.0
     albedo[:, :, :3] = np.rint(np.clip(rgb, 0, 255)).astype(np.uint8)
