@@ -38,6 +38,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -58,6 +59,7 @@ class PreparedTextureStore
         uint64_t misses = 0;        // Take found nothing (texture not prepared, or already consumed)
         uint64_t rejectedFull = 0;  // Put refused: byte budget
         uint64_t rejectedDup = 0;   // Put refused: already present
+        uint64_t rejectedStale = 0; // Worker finished after the world's Clear.
         uint64_t expired = 0;       // entries dropped by the TTL sweep
         uint64_t skippedUploaded = 0; // ShouldPrepare said no: main thread already uploaded it
         uint64_t uploadedMarks = 0; // names currently marked Uploaded
@@ -91,8 +93,12 @@ class PreparedTextureStore
     // store is over budget: the worker should not spend a file read on it. Advisory (a
     // concurrent Put may still be refused as a duplicate).
     bool ShouldPrepare(const std::string& key);
+    // Capture before checking the preparer's job generation. Clear invalidates
+    // this token; publication checks it under the same mutex as Clear.
+    uint64_t Generation() const;
     // Worker. Stores a chain; false if refused (full / duplicate / disabled).
-    bool Put(const std::string& key, PAABlockChain&& chain);
+    bool Put(const std::string& key, PAABlockChain&& chain,
+             std::optional<uint64_t> generation = std::nullopt);
     // Main thread. Moves the entry out if present.
     bool Take(const std::string& key, PAABlockChain& out);
 
@@ -100,7 +106,8 @@ class PreparedTextureStore
     // decode population): a worker decodes the whole file with the pure DecodePAABuffer
     // and stores the image; the main thread's fallback path takes it and only uploads.
     // Same budget, TTL, dedup and Uploaded-mark rules as the chain entries.
-    bool PutDecoded(const std::string& key, DecodedImage&& image);
+    bool PutDecoded(const std::string& key, DecodedImage&& image,
+                    std::optional<uint64_t> generation = std::nullopt);
     bool TakeDecoded(const std::string& key, DecodedImage& out);
 
     // Main-thread native tint experiment: immutable, unmodified source decodes,

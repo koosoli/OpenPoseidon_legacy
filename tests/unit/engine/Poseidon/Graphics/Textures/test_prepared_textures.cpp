@@ -200,6 +200,43 @@ TEST_CASE("Uploaded decoded textures release their budget and block reprepare", 
     store.Clear();
 }
 
+TEST_CASE("PreparedTextureStore rejects publication from a cleared world", "[Graphics][PAA][streaming][cancellation]")
+{
+    if (!render::PreparedTextureStore::Enabled())
+        SKIP("Requires texture preparation");
+    auto& store = render::PreparedTextureStore::Instance();
+    store.Clear();
+    const uint64_t oldGeneration = store.Generation();
+    const uint64_t rejectedBefore = store.SnapshotStats().rejectedStale;
+    const auto bytes = TinyDxt1Paa();
+    PAABlockChain chain;
+    REQUIRE(ReadPAABlockChainBuffer(bytes.data(), bytes.size(), chain));
+    DecodedImage image = DecodePAABuffer(bytes.data(), bytes.size(), true);
+    REQUIRE(image.valid());
+    // A worker has already read/decoded here, but has not published yet.
+    store.Clear();
+    const uint64_t currentGeneration = store.Generation();
+    CHECK(currentGeneration != oldGeneration);
+    CHECK_FALSE(store.Put("stale-chain", std::move(chain), oldGeneration));
+    CHECK_FALSE(store.PutDecoded("stale-image", std::move(image), oldGeneration));
+    CHECK(store.SnapshotStats().entries == 0);
+    CHECK(store.SnapshotStats().bytes == 0);
+    CHECK(store.SnapshotStats().rejectedStale == rejectedBefore + 2);
+
+    REQUIRE(ReadPAABlockChainBuffer(bytes.data(), bytes.size(), chain));
+    REQUIRE(store.Put("same-name", std::move(chain), currentGeneration));
+    image = DecodePAABuffer(bytes.data(), bytes.size(), true);
+    CHECK_FALSE(store.PutDecoded("same-name", std::move(image), oldGeneration));
+    PAABlockChain out;
+    REQUIRE(store.Take("same-name", out));
+    CHECK(out.valid()); // An obsolete result cannot replace or erase a current entry.
+    image = DecodePAABuffer(bytes.data(), bytes.size(), true);
+    REQUIRE(store.PutDecoded("current-image", std::move(image), currentGeneration));
+    REQUIRE(store.TakeDecoded("current-image", image));
+    CHECK(image.valid());
+    store.Clear();
+}
+
 TEST_CASE("PreparedTextureStore key normalisation and round trip", "[Graphics][PAA][streaming]")
 {
     CHECK(render::PreparedTextureStore::Key("Reforger/Everon\\Textures\\Bark_CO.PAA") ==

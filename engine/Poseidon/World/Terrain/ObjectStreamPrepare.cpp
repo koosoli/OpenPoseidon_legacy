@@ -347,6 +347,7 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
         {
             const auto texStart = std::chrono::steady_clock::now();
             render::PreparedTextureStore& store = render::PreparedTextureStore::Instance();
+            const uint64_t textureGeneration = store.Generation();
             std::vector<std::string> names;
             auto noteName = [&](const std::string& raw)
             {
@@ -438,7 +439,7 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                         continue;
                     }
                     const size_t imageBytes = image.rgba.size();
-                    if (store.PutDecoded(key, std::move(image)))
+                    if (store.PutDecoded(key, std::move(image), textureGeneration))
                     {
                         ++texPrepared;
                         texPreparedBytes += imageBytes;
@@ -450,7 +451,7 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                     continue;
                 }
                 const size_t bytes = chain.blocks.size();
-                if (store.Put(key, std::move(chain)))
+                if (store.Put(key, std::move(chain), textureGeneration))
                 {
                     ++texPrepared;
                     texPreparedBytes += bytes;
@@ -568,6 +569,7 @@ void ObjectStreamPreparer::Reset(const std::string* paths, size_t modelCount)
 {
     std::vector<Impl::ModelPtr> freeLater;
     std::vector<LODShapeWithShadow*> freeShapes;
+    std::deque<Impl::ConvertJob> freeConversions;
     {
         std::lock_guard<std::mutex> lock(_impl->mutex);
         ++_impl->generation;
@@ -575,7 +577,9 @@ void ObjectStreamPreparer::Reset(const std::string* paths, size_t modelCount)
         _impl->stats.queued = 0;
         _impl->stats.ready = 0;
         _impl->queue.clear();
-        _impl->convertQueue.clear();
+        // Jobs own model IR and bank-table references, not just queue indices.
+        // Their last-reference destructors must not run under the queue mutex.
+        freeConversions.swap(_impl->convertQueue);
         for (Impl::ModelPtr& m : _impl->models)
             if (m)
                 freeLater.push_back(std::move(m));

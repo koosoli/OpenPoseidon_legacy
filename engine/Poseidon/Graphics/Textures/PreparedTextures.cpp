@@ -42,6 +42,7 @@ struct PreparedTextureStore::Impl
     std::unordered_map<std::string, std::list<Entry>::iterator> byKey;
     std::unordered_set<std::string> uploaded;
     size_t bytes = 0;
+    uint64_t generation = 0;
     Stats stats;
 
     void EraseLocked(std::unordered_map<std::string, std::list<Entry>::iterator>::iterator it, PAABlockChain* takeInto,
@@ -176,7 +177,14 @@ bool PreparedTextureStore::ShouldPrepare(const std::string& key)
     return _impl->bytes < ByteBudget();
 }
 
-bool PreparedTextureStore::Put(const std::string& key, PAABlockChain&& chain)
+uint64_t PreparedTextureStore::Generation() const
+{
+    std::lock_guard<std::mutex> lock(_impl->mutex);
+    return _impl->generation;
+}
+
+bool PreparedTextureStore::Put(const std::string& key, PAABlockChain&& chain,
+                               std::optional<uint64_t> generation)
 {
     if (!Enabled() || key.empty() || !chain.valid())
         return false;
@@ -185,7 +193,11 @@ bool PreparedTextureStore::Put(const std::string& key, PAABlockChain&& chain)
     {
         std::lock_guard<std::mutex> lock(_impl->mutex);
         _impl->SweepLocked(freeLater);
-        if (_impl->uploaded.count(key))
+        if (generation && *generation != _impl->generation)
+        {
+            ++_impl->stats.rejectedStale;
+        }
+        else if (_impl->uploaded.count(key))
         {
             ++_impl->stats.skippedUploaded;
         }
@@ -216,7 +228,8 @@ bool PreparedTextureStore::Put(const std::string& key, PAABlockChain&& chain)
     return stored;
 }
 
-bool PreparedTextureStore::PutDecoded(const std::string& key, DecodedImage&& image)
+bool PreparedTextureStore::PutDecoded(const std::string& key, DecodedImage&& image,
+                                      std::optional<uint64_t> generation)
 {
     if (!Enabled() || key.empty() || !image.valid())
         return false;
@@ -225,7 +238,11 @@ bool PreparedTextureStore::PutDecoded(const std::string& key, DecodedImage&& ima
     {
         std::lock_guard<std::mutex> lock(_impl->mutex);
         _impl->SweepLocked(freeLater);
-        if (_impl->uploaded.count(key))
+        if (generation && *generation != _impl->generation)
+        {
+            ++_impl->stats.rejectedStale;
+        }
+        else if (_impl->uploaded.count(key))
         {
             ++_impl->stats.skippedUploaded;
         }
@@ -382,6 +399,7 @@ void PreparedTextureStore::Clear()
     std::list<Impl::Entry> freeLater;
     {
         std::lock_guard<std::mutex> lock(_impl->mutex);
+        ++_impl->generation;
         freeLater.swap(_impl->order);
         _impl->byKey.clear();
         _impl->uploaded.clear();

@@ -1076,6 +1076,26 @@ TEST_CASE("Preparer camera cancellation discards active parses and queued conver
         CHECK(weak.expired());
         CHECK(prep.SnapshotStats().converted == 0);
     }
+    SECTION("reset retires queued bank tables outside the mutex")
+    {
+        bool retired = false;
+        auto model = BuildFixtureModel();
+        std::weak_ptr<ModelIR::Model> weak = model;
+        auto tables = std::shared_ptr<Adapter::AdapterBankTables>(new Adapter::AdapterBankTables,
+            [&](Adapter::AdapterBankTables* value) {
+                // Re-entry would deadlock if Reset cleared the queue under its mutex.
+                (void)prep.SnapshotStats();
+                delete value;
+                retired = true;
+            });
+        Adapter::BuildAdapterBankTables(*model, *tables);
+        REQUIRE(prep.SubmitConvert(workers, std::move(model), std::move(tables)));
+        prep.Reset(paths.data(), paths.size());
+        CHECK(retired);
+        CHECK(weak.expired());
+        CHECK(prep.Query(workers) == ObjectStreamPreparer::State::Unknown);
+        CHECK(prep.SnapshotStats().converted == 0);
+    }
     prep.DropStale(epochs.data(), epochs.size(), 1);
     if (revive)
     {

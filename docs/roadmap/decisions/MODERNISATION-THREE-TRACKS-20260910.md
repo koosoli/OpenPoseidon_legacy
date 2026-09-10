@@ -595,3 +595,29 @@ driver-memory-tint-reuse-0 passes the full route and strict shutdown checks,
 22370 registered instances, 134 driver samples, 134.7 s wall. Endpoint ocean
 image inspected. The intermittent shutdown cause remains unproven; this run is
 lifecycle evidence, not proof of a performance gain or all-world coverage.
+
+September 11 cancellation audit, baseline c1a23f67: Reset still cleared queued
+ConvertJobs while holding the preparer's mutex, although active-job retirement
+and DropStale had been fixed. Reset now swaps the queue into an owned local deque
+and destroys its model/table references after unlocking. The test parks all
+workers in parsing, queues a conversion, resets, then re-enters SnapshotStats
+from the last bank-table deleter. It verifies immediate release without running
+the queued conversion.
+
+A second lifetime gap was found at the existing PAA texture handoff: a worker
+could pass the job-generation check, finish I/O after PreparedTextureStore::Clear
+and repopulate the cleared store. The store now exposes a generation token, bumps
+it in Clear, and checks the worker's token atomically with publication under its
+own mutex. Workers capture it BEFORE checking their job generation. Both DXT
+chains and decoded RGBA payloads are covered. No extra manager, thread, GPU work
+or scheduler; existing budgets/TTL remain. Main-thread callers can retain the
+existing untokened API. Tests simulate obsolete publication after Clear, including
+a colliding fresh key, and verify that neither entries nor bytes are resurrected.
+
+22 preparer/PAA-streaming cases pass: 391 assertions under normal settings,
+1242 with SIM807_CONCURRENT_ADAPT=1 and eight workers. Installed verification is
+pending at this entry. These are concrete cancellation/lock-safety repairs, NOT
+evidence that the earlier intermittent hang is diagnosed or that FPS improved.
+The expensive native DDS read/decode/tint/coverage and bank-table path remains
+main-thread work; its SlurpFile fallback reaches GFileServer and cannot simply
+be called from the existing worker without isolating that read interface first.
