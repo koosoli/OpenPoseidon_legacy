@@ -1695,3 +1695,10 @@ only after the outstanding scope is handled. Incremental evidence lives in
 The first increment is compatible-package discovery and existing-loader mount
 ordering, not delivered replacement materials or Jeep FFV. Earlier outstanding
 terrain caves, far-view and streaming work is not closed by this increment.
+
+Follow-up: an own procedural road is packaged and automatically mounted on the
+installed 24ac4dfe build. Corrected PBO normal resolution is verified by binding
+logs and a controlled Albedo/Full image difference. The supported client build
+now generates the first archive automatically. Three-surface acceptance,
+roughness/terrain-normal integration and Jeep FFV remain open; this is not a
+completed default-content release. See the decision's run IDs and limitations.

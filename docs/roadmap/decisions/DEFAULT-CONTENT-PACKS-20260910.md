@@ -95,3 +95,17 @@ Deployment first failed because Get-FileHash was unavailable in the lock wrapper
 PowerShell environment, after binary copying and before the final stamp. No run
 was measured in that state. 684d02bc replaces the cmdlet with streaming .NET SHA256;
 the full repeated deployment succeeded and restamped before all three runs.
+
+Corrected installed 24ac4dfe: Full 202639 and Albedo 202901 both exit 0, with
+the same instance/triangle counts above. Full now logs the PBO road NOHQ binding.
+The road ROI (x400:850, y470:700) has mean absolute RGB difference 0.580/255,
+maximum 4; the grass control (x50:170, y290:360) differs by 0.000159/255.
+This proves a subtle local normal effect, not performance or complete visual
+acceptance. No equivalent repeat of Original on this commit has been made yet.
+
+The supported scripts/Build.ps1 Windows clang client/default build now builds
+PoseidonTools and calls Build-DefaultContent.ps1 automatically. A full supported
+PoseidonGame build with --parallel 2 passed and staged the 2 MB road archive.
+Targeted unit builds do not regenerate assets. Python/numpy/Pillow are build-time
+dependencies only. Fresh-release startup and the other two surfaces remain open;
+no empty Jeep package is produced to disguise the missing FFV implementation.

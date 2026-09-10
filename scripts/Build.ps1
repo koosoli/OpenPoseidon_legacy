@@ -119,6 +119,17 @@ try
     cmake @cmakeBuild
     if ($LASTEXITCODE -ne 0) { throw "Build failed (exit $LASTEXITCODE)." }
 
+    if ((-not $Target -or 'PoseidonGame' -in $Target) -and $Preset -match '^win-x64-clang-(rwdi|rel|dbg)$')
+    {
+        # Package owned content into dist, never into original game archives.
+        # A targeted client build may not have built the existing asset CLI yet.
+        $toolBuild = @('--build', $buildDir, '--target', 'PoseidonTools')
+        if ($BuildArgs) { $toolBuild += $BuildArgs }
+        cmake @toolBuild
+        if ($LASTEXITCODE -ne 0) { throw 'Asset tool build failed.' }
+        & "$PSScriptRoot/Build-DefaultContent.ps1" -Preset $Preset
+    }
+
     Write-Host ""
     Write-Host "Build succeeded: $buildDir" -ForegroundColor Green
     Write-Host "Run with: .\scripts\Start.ps1"
