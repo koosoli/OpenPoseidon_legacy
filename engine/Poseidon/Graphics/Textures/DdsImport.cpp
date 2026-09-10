@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -20,6 +21,45 @@ namespace Poseidon
 
 namespace
 {
+
+// Diagnostic only: separate CPU preparation from later GPU upload. No scheduling changes.
+struct DdsPreparationTrace
+{
+    using Clock = std::chrono::steady_clock;
+    static bool Enabled()
+    {
+        static const bool enabled = [] {
+            const char* value = std::getenv("POSEIDON_DDS_PREP_TRACE");
+            return value && value[0] == '1';
+        }();
+        return enabled;
+    }
+    bool enabled = Enabled();
+    const char* name;
+    Clock::time_point last = enabled ? Clock::now() : Clock::time_point{};
+    double read = 0, decode = 0, coverageRead = 0, coverageDecode = 0, merge = 0, tint = 0;
+    size_t inputBytes = 0, outputBytes = 0;
+    bool success = false;
+    explicit DdsPreparationTrace(const char* path) : name(path) {}
+    void Mark(double& phase)
+    {
+        if (!enabled) return;
+        const auto now = Clock::now();
+        phase += std::chrono::duration<double, std::milli>(now - last).count();
+        last = now;
+    }
+    ~DdsPreparationTrace()
+    {
+        if (!enabled) return;
+        const double finish = std::chrono::duration<double, std::milli>(Clock::now() - last).count();
+        const double total = read + decode + coverageRead + coverageDecode + merge + tint + finish;
+        if (total >= 2.0)
+            LOG_INFO(Graphics,
+                "DDS prepare: total={:.3f} read={:.3f} decode={:.3f} coverageRead={:.3f} coverageDecode={:.3f} merge={:.3f} tint={:.3f} finish={:.3f} inputBytes={} outputBytes={} success={} name='{}'",
+                total, read, decode, coverageRead, coverageDecode, merge, tint, finish,
+                inputBytes, outputBytes, success, name);
+    }
+};
 
 // RFG-023: a composite name, `enfa|<coverage path>|<colour path>`.
 //
@@ -653,6 +693,7 @@ bool TextureSourceDDS::InitFromMemory(const void* data, size_t size, const char*
 
 bool TextureSourceDDS::Init(const char* name, PacLevelMem* mips, int maxMips)
 {
+    DdsPreparationTrace trace(name);
     _name = name;
 
     // RFG-070: `enft|r,g,b|<inner>` -- strip the tint FIRST and let everything below see
@@ -705,6 +746,8 @@ bool TextureSourceDDS::Init(const char* name, PacLevelMem* mips, int maxMips)
             mips[0]._h = 4;
             mips[0]._sFormat = _pacFormat;
         }
+        trace.success = true;
+        trace.outputBytes = _levels.front().data.size();
         return true;
     }
 
@@ -719,21 +762,29 @@ bool TextureSourceDDS::Init(const char* name, PacLevelMem* mips, int maxMips)
     std::vector<uint8_t> buffer;
     if (!SlurpFile(composite ? compositeColour.c_str() : name, buffer) || buffer.empty())
         return false;
+    trace.inputBytes = buffer.size();
+    trace.Mark(trace.read);
 
     // A tint needs PIXELS, the same way the coverage merge does -- there is no way to
     // rescale a BC7 block in place. So a tinted tile is uploaded 32-bit rather than
     // compressed, which is the RFG-047 cost, paid only by the materials that ask for it.
     if (!InitFromMemory(buffer.data(), buffer.size(), name, /*forceDecode=*/composite || tinted))
         return false;
+    trace.Mark(trace.decode);
 
     if (composite)
     {
         std::vector<uint8_t> coverageBytes;
         TextureSourceDDS coverage;
-        if (SlurpFile(compositeCoverage.c_str(), coverageBytes) && !coverageBytes.empty() &&
+        const bool coverageRead = SlurpFile(compositeCoverage.c_str(), coverageBytes) && !coverageBytes.empty();
+        trace.inputBytes += coverageBytes.size();
+        trace.Mark(trace.coverageRead);
+        const bool coverageDecoded = coverageRead &&
             coverage.InitFromMemory(coverageBytes.data(), coverageBytes.size(), compositeCoverage.c_str(),
                                     /*forceDecode=*/true) &&
-            !coverage._levels.empty())
+            !coverage._levels.empty();
+        trace.Mark(trace.coverageDecode);
+        if (coverageDecoded)
         {
             // Both are 32-bit here: InitFromMemory decodes BC4/BC5/BC7 and leaves raw
             // formats alone, and a coverage map is one of those. Nearest-sample rather
@@ -814,6 +865,7 @@ bool TextureSourceDDS::Init(const char* name, PacLevelMem* mips, int maxMips)
                      compositeCoverage);
         }
     }
+    trace.Mark(trace.merge);
 
     // RFG-070: and now the colour. AFTER the coverage merge, so the two orders cannot
     // interact -- the merge only writes alpha and the tint only reads and writes RGB, but
@@ -832,6 +884,7 @@ bool TextureSourceDDS::Init(const char* name, PacLevelMem* mips, int maxMips)
                      layerTint[0], layerTint[1], layerTint[2], name, _levels.size(), _avgColor.R8(), _avgColor.G8(),
                      _avgColor.B8());
     }
+    trace.Mark(trace.tint);
 
     const int count = std::min(_mipmaps, maxMips);
     for (int i = 0; i < count; ++i)
@@ -845,6 +898,10 @@ bool TextureSourceDDS::Init(const char* name, PacLevelMem* mips, int maxMips)
     if (count < _mipmaps)
         _levels.resize(static_cast<size_t>(count));
     _mipmaps = count;
+    trace.success = _mipmaps > 0;
+    if (trace.enabled)
+        for (const auto& level : _levels)
+            trace.outputBytes += level.data.size();
     return _mipmaps > 0;
 }
 
