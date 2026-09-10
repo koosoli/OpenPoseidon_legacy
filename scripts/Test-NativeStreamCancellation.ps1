@@ -68,6 +68,7 @@ if ($SampleDriverMemory) {
     } | ConvertTo-Json -Depth 3))
 }
     & "$PSScriptRoot/farfield-movecam.ps1" -Label $label -Mission 'tests/perf/missions/perf_field.eden' -World $Archives -Start 5092.61,3995.64 -StartY 220 -Azimuth 270 -Elevation -15 -Speed 100 -SettleSeconds 20 -StaticSeconds 10 -MoveSeconds 40 -LoadSeconds 20 -CaptureAt 110 -Width 1280 -Height 720 -GameDir $GameDir -Out $out -Env $settings -SampleMemory
+    if ($LASTEXITCODE -ne 0) { throw "Moving-camera capture failed with exit code $LASTEXITCODE" }
 }
 finally {
     if ($gpuSampler) {
@@ -83,6 +84,7 @@ if ($SampleDriverMemory) {
     Write-Output "Driver GPU-total memory samples: $($rows.Count), $gpuCsv"
 }
 $log=Join-Path (Join-Path $out $label) 'run-01.log'
+& "$PSScriptRoot/Assert-CaptureLifecycle.ps1" -MetadataPath (Join-Path (Split-Path $log -Parent) 'run-01.meta.json') -LogPath $log
 if (!(Select-String -LiteralPath $log -Pattern 'FT M' -Quiet)) {throw 'No moving-phase evidence'}
 if (!(Select-String -LiteralPath $log -Pattern 'FFCAM done' -Quiet)) {throw 'Camera route incomplete'}
 if (!(Select-String -LiteralPath $log -Pattern 'Object stream prepare:' -Quiet)) {throw 'No preparer evidence'}

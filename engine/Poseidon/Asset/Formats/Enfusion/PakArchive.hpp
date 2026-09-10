@@ -51,6 +51,16 @@ struct PakEntry
     bool compressed() const { return flags != 0; }
 };
 
+// Owns its directory metadata; reading never mutates a mount/archive or a shared
+// error string. The caller owns output/error, and must handle stale/cancelled
+// requests before publishing results. This does not pin a file against edits.
+struct PakReadRequest
+{
+    std::string archivePath;
+    PakEntry entry;
+    bool Read(std::vector<uint8_t>& out, std::string& error) const;
+};
+
 //! How completely a `.pak` accounts for its own bytes. Every field must hold; they
 //! are reported separately because each catches a different class of mistake.
 struct PakClosure
@@ -87,6 +97,7 @@ class PakArchive
     //! decode fails or produces a size other than the declared realSize -- a short
     //! decode that is silently accepted is how a corrupt archive becomes a corrupt
     //! render.
+    //! Legacy single-caller diagnostics: workers should use PakReadRequest instead.
     bool Read(const PakEntry& entry, std::vector<uint8_t>& out) const;
     bool Read(const std::string& path, std::vector<uint8_t>& out) const;
 

@@ -278,11 +278,20 @@ const PakEntry* PakArchive::Find(const std::string& path) const
 
 bool PakArchive::Read(const PakEntry& entry, std::vector<uint8_t>& out) const
 {
+    std::string error;
+    const bool ok = PakReadRequest{_path, entry}.Read(out, error);
+    if (!ok) const_cast<PakArchive*>(this)->_error = std::move(error);
+    return ok;
+}
+
+bool PakReadRequest::Read(std::vector<uint8_t>& out, std::string& error) const
+{
     out.clear();
-    std::ifstream file(_path, std::ios::binary);
+    error.clear();
+    std::ifstream file(archivePath, std::ios::binary);
     if (!file)
     {
-        const_cast<PakArchive*>(this)->_error = "cannot reopen " + _path;
+        error = "cannot reopen " + archivePath;
         return false;
     }
     std::vector<uint8_t> stored(entry.storedSize);
@@ -290,7 +299,7 @@ bool PakArchive::Read(const PakEntry& entry, std::vector<uint8_t>& out) const
     file.read(reinterpret_cast<char*>(stored.data()), static_cast<std::streamsize>(entry.storedSize));
     if (!file)
     {
-        const_cast<PakArchive*>(this)->_error = entry.path + ": could not read " +
+        error = entry.path + ": could not read " +
                                                 std::to_string(entry.storedSize) + " stored bytes";
         return false;
     }
@@ -299,7 +308,7 @@ bool PakArchive::Read(const PakEntry& entry, std::vector<uint8_t>& out) const
     {
         if (entry.storedSize != entry.realSize)
         {
-            const_cast<PakArchive*>(this)->_error = entry.path + ": stored uncompressed but sizes differ";
+            error = entry.path + ": stored uncompressed but sizes differ";
             return false;
         }
         out = std::move(stored);
@@ -307,7 +316,7 @@ bool PakArchive::Read(const PakEntry& entry, std::vector<uint8_t>& out) const
     }
     if (entry.method != 6)
     {
-        const_cast<PakArchive*>(this)->_error =
+        error =
             entry.path + ": unknown compression method " + std::to_string(entry.method);
         return false;
     }
@@ -318,7 +327,7 @@ bool PakArchive::Read(const PakEntry& entry, std::vector<uint8_t>& out) const
     if (status != Z_OK)
     {
         out.clear();
-        const_cast<PakArchive*>(this)->_error = entry.path + ": zlib failed with " + std::to_string(status);
+        error = entry.path + ": zlib failed with " + std::to_string(status);
         return false;
     }
     // A short decode that is accepted becomes a corrupt render much later, at a
@@ -326,7 +335,7 @@ bool PakArchive::Read(const PakEntry& entry, std::vector<uint8_t>& out) const
     if (produced != entry.realSize)
     {
         out.clear();
-        const_cast<PakArchive*>(this)->_error = entry.path + ": decoded " + std::to_string(produced) + " of " +
+        error = entry.path + ": decoded " + std::to_string(produced) + " of " +
                                                 std::to_string(entry.realSize) + " declared bytes";
         return false;
     }

@@ -525,3 +525,51 @@ Verification runs are not timing comparisons. Harness flags -TintReuse 0/1 and
 -VerifyTintReuse select the arms. 27 EDDS/PAA/streaming cases / 480 assertions
 pass including the final resolution-key hardening; installed A/B remains
 pending. No default activation or performance gain is claimed yet.
+
+Installed d9e6623b verification 230952: 144 hits redecoded byte-identically,
+complete route/shutdown, 22370 registered instances. No verification timings
+are used below. Measured runs share 1280x720 native/MSAA4, governor range 1
+(min/max LOD width equal), table cap 0 and the driver sampler:
+
+| Run suffix | Reuse | Moving median/p95/p99/worst ms | Throughput FPS | Private peak MiB | Device peak MiB |
+| --- | --- | --- | --- | --- | --- |
+| 231252 | 0 | 30/46/94/211 | 32.3 | 11269.7 | 4915 |
+| 231509 | 1 | 29/44/100/271 | 33.1 | 11390.3 | 4915 |
+| 231915 | 1 | 29/48/96/150 | 33.4 | 11425.2 | 4916 |
+| 232626 | 0 | 30/47/103/350 | 32.7 | 11348.2 | 4879 |
+| 232843 | 1 | 30/49/98/280 | 32.4 | 11328.8 | 4878 |
+
+These are `cancel-20260910-<suffix>-slow-trace-dds-prep-bc7-default-driver-memory-
+tint-reuse-<arm>`. FT deltas have 95.4..97.0% one-render-frame coverage, so tails
+are approximate, not exact full-frame percentiles. All five finish with 22370
+registered instances. Logged tinted-source decode totals fall from 4420..4443 ms
+(548 calls) to 3531..3571 ms (546 calls, 141 logged hits); only calls >=2 ms are
+logged, and this is cumulative CPU-stage time, NOT frame-time savings.
+No stable tail-latency, FPS or memory advantage is established. Keep reuse OFF;
+avoid more cache complexity before the still-synchronous bank/material stage
+is addressed. The 271 ms candidate frame spent 265.7 ms in residency, including
+188.2 ms preparing seven bank tables and multiple previously unseen sources.
+
+Run 232131 (reuse OFF) is excluded: a shutdown watchdog fired after 290 s,
+following a completed screenshot but no `Shutdown complete`; metadata says
+status=failed/timed_out=true. This is not evidence that reuse caused the hang.
+The native wrapper previously ignored the child's exit code and accepted the
+remaining metrics. It now propagates the exit failure and independently requires
+successful, uncontended, non-timeout metadata and a completed shutdown marker.
+Assert-CaptureLifecycle accepts the good 231252 artifact and rejects 232131.
+Root cause of that shutdown hang remains open; do not silently discard failures.
+
+## Native archive failure ownership
+
+Inspection of the existing native model worker route found a concrete race:
+EnfusionMount::Read called PakArchive::Read, whose failure path const_cast-wrote
+the shared `_error` string. Independent file streams did not make that error
+mutation safe. PakReadRequest now owns a copy of archive path/entry metadata and
+writes only caller-owned output/error. Mounted reads use this path; the legacy
+single-caller archive diagnostic API is retained. This is not a new scheduler,
+async DDS pipeline or a proven fix for the shutdown hang above. Mount Open/Close
+still require existing worker quiescence; a request does not pin an on-disk file
+against external editing. PAK/EDDS/PAA suite: 28 cases / 502 assertions pass,
+including eight workers doing 16 success/failure read pairs with independent
+errors, compressed/plain payloads, and short/missing-input rejection.
+Installed smoke after this archive change remains pending.

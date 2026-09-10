@@ -106,7 +106,11 @@ bool EnfusionMount::Read(const std::string& virtualPath, std::vector<uint8_t>& o
     if (hit == _index.end())
         return false;
     const PakArchive& archive = _archives[hit->second.first];
-    return archive.Read(archive.Entries()[hit->second.second], out);
+    // Native XOB workers share this mount. In particular, read failures must not
+    // race on PakArchive::_error even though each read has its own file handle.
+    const PakReadRequest request{archive.Path(), archive.Entries()[hit->second.second]};
+    std::string error;
+    return request.Read(out, error);
 }
 
 std::vector<std::string> EnfusionMount::FindAll(const std::string& needle) const

@@ -13,11 +13,17 @@
 #include <catch2/catch_test_macros.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/EnfusionIff.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/TerrainTile.hpp>
+#include <Poseidon/Asset/Formats/Enfusion/PakArchive.hpp>
 
 #include <cstdint>
 #include <cstring>
 #include <string>
 #include <vector>
+#include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <future>
+#include <zlib.h>
 
 using Poseidon::Asset::Formats::Enfusion::FourCC;
 using Poseidon::Asset::Formats::Enfusion::ReadIff;
@@ -78,6 +84,72 @@ void AppendChunk(std::vector<uint8_t>& out, const char* tag, const std::vector<u
 }
 
 } // namespace
+
+TEST_CASE("PAK read requests own metadata and isolate concurrent failures", "[asset][enfusion][pak][streaming]")
+{
+    namespace fs = std::filesystem;
+    namespace enf = Poseidon::Asset::Formats::Enfusion;
+    const auto directory = fs::temp_directory_path() / ("poseidon-pak-request-" +
+        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    REQUIRE(fs::create_directory(directory));
+    struct Cleanup
+    {
+        fs::path directory;
+        ~Cleanup() { std::error_code error; fs::remove(directory / "payload.bin", error); fs::remove(directory, error); }
+    } cleanup{directory};
+    const auto path = directory / "payload.bin";
+    const std::vector<uint8_t> expected{1, 2, 3, 4};
+    uLongf size = compressBound(expected.size());
+    std::vector<uint8_t> compressed(size);
+    REQUIRE(compress2(compressed.data(), &size, expected.data(), expected.size(), Z_BEST_SPEED) == Z_OK);
+    compressed.resize(size);
+    {
+        std::ofstream file(path, std::ios::binary);
+        file.write(reinterpret_cast<const char*>(expected.data()), expected.size());
+        file.write(reinterpret_cast<const char*>(compressed.data()), compressed.size());
+        REQUIRE(file.good());
+    }
+    enf::PakEntry metadata{"pixels", 0, 4, 4, 0, 0, 0};
+    const enf::PakReadRequest plain{path.string(), metadata};
+    metadata.path = "changed after snapshot";
+    metadata.realSize = 99;
+    CHECK(plain.entry.path == "pixels");
+    std::vector<uint8_t> out;
+    std::string error = "previous error";
+    REQUIRE(plain.Read(out, error));
+    CHECK(out == expected);
+    CHECK(error.empty());
+    const enf::PakReadRequest zipped{path.string(), enf::PakEntry{"compressed", 4,
+        static_cast<uint32_t>(compressed.size()), 4, 1, 6, 0}};
+    REQUIRE(zipped.Read(out, error));
+    CHECK(out == expected);
+    auto shortDecode = zipped;
+    shortDecode.entry.realSize = 8;
+    CHECK_FALSE(shortDecode.Read(out, error));
+    CHECK(out.empty());
+    CHECK(error.find("decoded 4 of 8") != std::string::npos);
+    auto missing = plain;
+    missing.archivePath = (directory / "missing").string();
+    CHECK_FALSE(missing.Read(out, error));
+    CHECK(out.empty());
+    std::vector<std::future<bool>> workers;
+    for (int worker = 0; worker < 8; ++worker)
+        workers.push_back(std::async(std::launch::async, [&, worker] {
+            auto bad = zipped;
+            bad.entry.method = 9;
+            bad.entry.path = "worker-" + std::to_string(worker);
+            for (int i = 0; i < 16; ++i)
+            {
+                std::vector<uint8_t> pixels;
+                std::string why;
+                if (!zipped.Read(pixels, why) || pixels != expected || !why.empty()) return false;
+                if (bad.Read(pixels, why) || !pixels.empty() ||
+                    why != bad.entry.path + ": unknown compression method 9") return false;
+            }
+            return true;
+        }));
+    for (auto& worker : workers) CHECK(worker.get());
+}
 
 TEST_CASE("IFF: a well-formed FORM walks to its chunks", "[asset][enfusion][arf-001]")
 {
