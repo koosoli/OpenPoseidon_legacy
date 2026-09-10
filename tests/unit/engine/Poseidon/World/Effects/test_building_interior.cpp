@@ -2,6 +2,7 @@
 #include <catch2/catch_approx.hpp>
 
 #include <Poseidon/World/Effects/BuildingInterior.hpp>
+#include <Poseidon/World/Effects/InteriorShellRaster.hpp>
 #include <Poseidon/World/Effects/SmokeWorldQuery.hpp>
 #include <Poseidon/World/Scene/Object.hpp>
 #include <Poseidon/World/Weather/RainVolume.hpp>
@@ -10,6 +11,63 @@
 #include <vector>
 
 using namespace Poseidon;
+
+TEST_CASE("Component-local interior raster preserves every seven-sample shell cell",
+          "[BuildingInterior][Smoke][Raster]")
+{
+    const int dim[3] = {17, 13, 19};
+    const Vector3 gridMin(-2.3f, -1.1f, 0.7f);
+    struct Shell
+    {
+        Vector3 lo, hi;
+        bool slope;
+    };
+    for (float cell : {0.25f, 0.7f})
+        for (float offset : {-0.125f, 0.0f, 0.00001f, 0.124999f, 0.25f})
+        {
+            const Vector3 shift = gridMin + Vector3(offset, offset, offset);
+            const Shell shells[] = {{shift + Vector3(0, 0, 0), shift + Vector3(0.3f, 3, 4), false},
+                                    {shift + Vector3(0, 2, 0), shift + Vector3(4, 2.001f, 4), false},
+                                    {shift + Vector3(1, 0, 1), shift + Vector3(3, 3, 3), true},
+                                    {shift + Vector3(-10, -10, -10), shift + Vector3(-9, -9, -9), false},
+                                    {shift + Vector3(50, 50, 50), shift + Vector3(51, 51, 51), false}};
+            auto inside = [](const Shell& shell, Vector3Par p)
+            {
+                return p.X() >= shell.lo.X() && p.X() <= shell.hi.X() && p.Y() >= shell.lo.Y() &&
+                       p.Y() <= shell.hi.Y() && p.Z() >= shell.lo.Z() && p.Z() <= shell.hi.Z() &&
+                       (!shell.slope || (p - shell.lo).DotProduct(Vector3(1, 0.7f, 0.3f)) < 1.3f);
+            };
+            std::vector<unsigned char> reference(dim[0] * dim[1] * dim[2], 0xFF), actual = reference;
+            const float h = cell * 0.5f;
+            for (int x = 0; x < dim[0]; ++x)
+                for (int y = 0; y < dim[1]; ++y)
+                    for (int z = 0; z < dim[2]; ++z)
+                    {
+                        const Vector3 p = gridMin + Vector3((x + 0.5f) * cell, (y + 0.5f) * cell, (z + 0.5f) * cell);
+                        const Vector3 samples[] = {p,
+                                                   p + Vector3(h, 0, 0),
+                                                   p - Vector3(h, 0, 0),
+                                                   p + Vector3(0, h, 0),
+                                                   p - Vector3(0, h, 0),
+                                                   p + Vector3(0, 0, h),
+                                                   p - Vector3(0, 0, h)};
+                        for (const auto& sample : samples)
+                            for (const auto& shell : shells)
+                                if (inside(shell, sample))
+                                    reference[(x * dim[1] + y) * dim[2] + z] = 0xFE;
+                    }
+            for (const auto& shell : shells)
+                RasterizeInteriorShellComponent(actual, dim, gridMin, cell, shell.lo, shell.hi,
+                                                [&](Vector3Par p) { return inside(shell, p); });
+            INFO("cell=" << cell << " offset=" << offset);
+            CHECK(actual == reference);
+            // Overlapping Fire/View components must be an idempotent union.
+            for (const auto& shell : shells)
+                RasterizeInteriorShellComponent(actual, dim, gridMin, cell, shell.lo, shell.hi,
+                                                [&](Vector3Par p) { return inside(shell, p); });
+            CHECK(actual == reference);
+        }
+}
 
 namespace Poseidon
 {

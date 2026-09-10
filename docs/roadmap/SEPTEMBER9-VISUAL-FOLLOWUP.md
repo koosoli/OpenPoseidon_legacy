@@ -1,5 +1,29 @@
 # September 9 visual follow-up
 
+## Water normal-filter completion, September 10
+
+2601365f fixes the remaining wrong bicubic weights in texture_bicubic_dynamics.
+fa7a7af2 had only corrected displacement; the old whole-file substring test passed
+because that other function contained the correct formula. The tightened test
+first fails on the unchanged dynamics function, then all 20 water tests pass.
+Both axes now combine adjacent taps with their own denominators and the correct
+high-pair interpolation weight. Four texture fetches remain four; no new pass,
+texture, FFT resolution, global blur or reduction in wave geometry.
+
+Installed 89809008 before versus 2601365f after: Nogova offshore at 13000/3000/8,
+az 90/el -30, wind 18, wave amplitude 2.2, exposure .25, native 1280x720/MSAA4,
+shore foam 0 and wave foam 0. The strong rectangular specular texel lattice is
+visible before and absent from the near-water after capture. Raw before files:
+build/breaker-foam/normal-filter-before-89809008; after: acceptance/*gain0*native.
+Water draw samples remain approximately 3.0-3.2 ms in both runs. Wave phase varies
+slightly, so this is visual artifact acceptance, not pixel-exact image parity or
+a headline FPS comparison. Both runs exit 0 without renderer validation errors.
+
+Additional wave-foam .62 captures exit 0 in native and DLSS Quality (log confirms
+858x482 -> 1280x720). Foam and highlights remain visible without the near-field
+rectangular lattice. These do not certify all distant mesh facets or moving-DLSS
+ghosting, which remain separate issues.
+
 ## Glass station and counted palette acceptance, September 10
 
 89809008 adds a genuine tinted, transmissive GLASS station separate from GLOSS.

@@ -1,0 +1,14 @@
+version=11;
+class Mission {
+ randomSeed=42;
+ class Intel {year=1985;month=6;day=21;hour=12;minute=0;startFog=0;forecastFog=0;startWeather=0;forecastWeather=0;};
+ class Groups {
+  items=1;
+  class Item0 {side="WEST";class Vehicles {items=1;
+   class Item0 {position[]={7760,22,4405};azimut=310;id=0;side="WEST";vehicle="SoldierWB";player="PLAYER COMMANDER";leader=1;skill=1;};
+  };};
+ };
+};
+class Intro {randomSeed=1;};
+class OutroWin {randomSeed=2;};
+class OutroLoose {randomSeed=3;};

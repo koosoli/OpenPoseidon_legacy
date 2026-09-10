@@ -1,4 +1,5 @@
 #include <Poseidon/World/Effects/BuildingInterior.hpp>
+#include <Poseidon/World/Effects/InteriorShellRaster.hpp>
 
 #include <Poseidon/World/Entities/Vehicles/House.hpp>
 #include <Poseidon/World/Scene/Object.hpp>
@@ -178,71 +179,106 @@ void BuildingInterior::Build(BuildingType const* type)
     // -- voxelize ------------------------------------------------------------
     const long long totalCells = static_cast<long long>(_dim[0]) * _dim[1] * _dim[2];
     _labels.assign(static_cast<size_t>(totalCells), LabelFree);
+    const auto rasterStart = std::chrono::steady_clock::now();
 
-    // A cell is solid if ANY of seven samples (centre + the six face centres)
-    // lands inside shell geometry. Centre-only sampling is what let thin walls
-    // slip between cells; face-centre sampling catches anything thicker than
-    // about half a cell even when it straddles a boundary.
-    const Vector3 half(_cell * 0.5f, _cell * 0.5f, _cell * 0.5f);
-    auto pointSolid = [&](Vector3Par p) -> bool
+    static const bool componentRaster = []
     {
-        for (int pass = 0; pass < 2; pass++)
+        const char* value = std::getenv("POSEIDON_INTERIOR_COMPONENT_RASTER");
+        return !(value && value[0] == '0');
+    }();
+    if (componentRaster)
+    {
+        for (ConvexComponents* cc : {fireCC, viewCC})
         {
-            ConvexComponents* cc = pass == 0 ? fireCC : viewCC;
-            if (cc == nullptr)
-            {
+            if (!cc)
                 continue;
-            }
-            for (int i = 0; i < cc->Size(); i++)
+            for (int i = 0; i < cc->Size(); ++i)
             {
                 const ConvexComponent* comp = cc->Get(i);
-                // cheap bbox pre-check before the plane test
-                if (p.X() < comp->Min().X() || p.X() > comp->Max().X() || p.Y() < comp->Min().Y() ||
-                    p.Y() > comp->Max().Y() || p.Z() < comp->Min().Z() || p.Z() > comp->Max().Z())
+                RasterizeInteriorShellComponent(_labels, _dim, _gridMin, _cell, comp->Min(), comp->Max(),
+                                                [comp](Vector3Par p) { return comp->IsInside(p); });
+            }
+        }
+    }
+    else
+    {
+        // A cell is solid if ANY of seven samples (centre + the six face centres)
+        // lands inside shell geometry. Centre-only sampling is what let thin walls
+        // slip between cells; face-centre sampling catches anything thicker than
+        // about half a cell even when it straddles a boundary.
+        const Vector3 half(_cell * 0.5f, _cell * 0.5f, _cell * 0.5f);
+        auto pointSolid = [&](Vector3Par p) -> bool
+        {
+            for (int pass = 0; pass < 2; pass++)
+            {
+                ConvexComponents* cc = pass == 0 ? fireCC : viewCC;
+                if (cc == nullptr)
                 {
                     continue;
                 }
-                if (comp->IsInside(p))
+                for (int i = 0; i < cc->Size(); i++)
                 {
-                    return true;
-                }
-            }
-        }
-        return false;
-    };
-    for (int x = 0; x < _dim[0]; x++)
-    {
-        for (int y = 0; y < _dim[1]; y++)
-        {
-            for (int z = 0; z < _dim[2]; z++)
-            {
-                const Vector3 p =
-                    _gridMin + Vector3((x + 0.5f) * _cell, (y + 0.5f) * _cell, (z + 0.5f) * _cell);
-                const Vector3 samples[7] = {p,
-                                            p + Vector3(half.X(), 0, 0),
-                                            p - Vector3(half.X(), 0, 0),
-                                            p + Vector3(0, half.Y(), 0),
-                                            p - Vector3(0, half.Y(), 0),
-                                            p + Vector3(0, 0, half.Z()),
-                                            p - Vector3(0, 0, half.Z())};
-                bool solid = false;
-                for (const Vector3& s : samples)
-                {
-                    if (pointSolid(s))
+                    const ConvexComponent* comp = cc->Get(i);
+                    // cheap bbox pre-check before the plane test
+                    if (p.X() < comp->Min().X() || p.X() > comp->Max().X() || p.Y() < comp->Min().Y() ||
+                        p.Y() > comp->Max().Y() || p.Z() < comp->Min().Z() || p.Z() > comp->Max().Z())
                     {
-                        solid = true;
-                        break;
+                        continue;
+                    }
+                    if (comp->IsInside(p))
+                    {
+                        return true;
                     }
                 }
-                if (solid)
+            }
+            return false;
+        };
+        for (int x = 0; x < _dim[0]; x++)
+        {
+            for (int y = 0; y < _dim[1]; y++)
+            {
+                for (int z = 0; z < _dim[2]; z++)
                 {
-                    _labels[CellIndex(x, y, z)] = LabelSolid;
+                    const Vector3 p = _gridMin + Vector3((x + 0.5f) * _cell, (y + 0.5f) * _cell, (z + 0.5f) * _cell);
+                    const Vector3 samples[7] = {p,
+                                                p + Vector3(half.X(), 0, 0),
+                                                p - Vector3(half.X(), 0, 0),
+                                                p + Vector3(0, half.Y(), 0),
+                                                p - Vector3(0, half.Y(), 0),
+                                                p + Vector3(0, 0, half.Z()),
+                                                p - Vector3(0, 0, half.Z())};
+                    bool solid = false;
+                    for (const Vector3& s : samples)
+                    {
+                        if (pointSolid(s))
+                        {
+                            solid = true;
+                            break;
+                        }
+                    }
+                    if (solid)
+                    {
+                        _labels[CellIndex(x, y, z)] = LabelSolid;
+                    }
                 }
             }
         }
     }
 
     // -- flood clamp ---------------------------------------------------------
+    if (const char* trace = std::getenv("POSEIDON_INTERIOR_RASTER_TRACE"); trace && trace[0] == '1')
+    {
+        const float ms =
+            std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - rasterStart).count();
+        uint64_t hash = 14695981039346656037ull;
+        for (unsigned char label : _labels)
+        {
+            hash ^= label;
+            hash *= 1099511628211ull;
+        }
+        LOG_INFO(World, "Interior raster '{}': component={} ms={:.3f} shellHash={}", (const char*)type->GetName(),
+                 componentRaster, ms, hash);
+    }
     // Room labels may never escape the FIRE geometry's own bounding box: outside
     // it is definitionally outdoors, and a residual sampling gap in an exterior
     // wall must not turn the street into part of the living room.
