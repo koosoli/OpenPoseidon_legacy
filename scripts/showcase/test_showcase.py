@@ -35,6 +35,12 @@ class ShowcaseAssets(unittest.TestCase):
         self.assertEqual(stream.read(), b'')
         self.assertEqual(len(content), 29)
         self.assertIn(b'class LabPanelGlass', content['config.cpp'])
+        config = content['config.cpp'].decode('ascii')
+        glass = config.split('class LabPanelGlass:', 1)[1].split('};', 1)[0]
+        self.assertIn('armor=1;', glass)
+        self.assertIn('removeOnDestruction=1;', glass)
+        self.assertEqual(config.count('removeOnDestruction=1;'), 1)
+        self.assertEqual(config.count('armor=10000;'), 10)
         self.assertIn(b'PanelGlass_ca.paa', content['PanelGlass.p3d'])
         self.assertIn(b'class LabDoorSide', content['config.cpp'])
         self.assertIn(b'class LabPanelNormal', content['config.cpp'])

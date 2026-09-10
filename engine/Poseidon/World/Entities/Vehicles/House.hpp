@@ -50,6 +50,7 @@ class BuildingType: public TransportType
 
 	float _coefInside;
 	float _coefInsideHeur;
+	bool _removeOnDestruction = false;
 
 	WeaponProxy _proxies[MAX_LOD_LEVELS];
 
@@ -153,6 +154,7 @@ class Building: public VehicleSupply, public IPaths
 	typedef VehicleSupply base;
 
 public:
+	void Destroy(EntityAI* owner, float overkill, float minExp, float maxExp) override;
 	Building( VehicleType *name, int id, LODShapeWithShadow *shape );
 
 	const IPaths *GetIPaths() const override {return this;}

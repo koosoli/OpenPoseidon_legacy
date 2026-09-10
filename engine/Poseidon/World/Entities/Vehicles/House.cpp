@@ -45,6 +45,8 @@ void BuildingType::Load(const ParamEntry& par)
     base::Load(par);
     _coefInside = par >> "coefInside";
     _coefInsideHeur = par >> "coefInsideHeur";
+    const ParamEntry* remove = par.FindEntry("removeOnDestruction");
+    _removeOnDestruction = remove && int(*remove) != 0;
 }
 
 void BuildingType::InitShape()
@@ -623,6 +625,18 @@ Matrix4 Building::InsideCamera(CameraType camType) const
 int Building::InsideLOD(CameraType camType) const
 {
     return 0;
+}
+
+void Building::Destroy(EntityAI* owner, float overkill, float minExp, float maxExp)
+{
+    // Opt-in standalone fragile panels must not run a house-collapse morph.
+    // The normal entity-removal path retires both rendering and collision.
+    if (Type()->_removeOnDestruction)
+    {
+        if (IsLocal()) SetDelete();
+        return;
+    }
+    base::Destroy(owner, overkill, minExp, maxExp);
 }
 
 void Building::Simulate(float deltaT, SimulationImportance prec)

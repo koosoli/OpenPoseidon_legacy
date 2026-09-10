@@ -158,7 +158,8 @@ def build():
             files[texture] = (paa(colour=(220, 235, 200, 56)) if name == 'PanelGlass'
                               else paa(label=name[5:].upper()))
         files[name + '.p3d'] = model(size, 'showcase_lab\\' + texture, 'showcase_lab\\' + name + '.rvmat')
-        classes.append(f'class Lab{name}: House {{scope=2; displayName="Lab {name}"; model="\\showcase_lab\\{name}.p3d"; armor=10000;}};')
+        damage = 'armor=1; removeOnDestruction=1;' if name == 'PanelGlass' else 'armor=10000;'
+        classes.append(f'class Lab{name}: House {{scope=2; displayName="Lab {name}"; model="\\showcase_lab\\{name}.p3d"; {damage}}};')
     files['config.cpp'] = ('''class CfgPatches {class ShowcaseLab {units[]={"LabPanelFlat","LabPanelNormal","LabPanelGloss","LabPanelGlass","LabGlassFrame","LabGlassPost","LabWall","LabRoof","LabPlinth","LabRoomBack","LabDoorSide"}; weapons[]={}; requiredVersion=1.96; requiredAddons[]={};};};
 class CfgVehicles {class House;
 ''' + '\n'.join(classes) + '\n};\n').encode('ascii')

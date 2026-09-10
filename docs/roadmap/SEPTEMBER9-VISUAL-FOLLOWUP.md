@@ -1,5 +1,28 @@
 # September 9 visual follow-up
 
+## Breakable standalone glass, September 10, 11:25
+
+LabPanelGlass now has armor=1 and the opt-in Building config property
+removeOnDestruction=1. At destruction, the local owner queues normal entity
+removal instead of the house-collapse morph; renderer and collision retire
+together. Other classes default false and use the original Destroy method.
+This is whole-pane breakage, not a glass-shard simulation or automatic conversion
+of every window embedded in an existing building. Multiplayer/save reload after
+breakage has not been exercised, so no compatibility acceptance claim there.
+
+Installed c195a2d5+dirty at 11:19 and regenerated Showcase addon: real
+BulletSingleW projectiles remove labGlass; frame posts and the normal-map control
+survive. Before impact, walking stops below z3504; afterwards the player passes
+z3504 alive. scripts/Test-Showcase.ps1 -GlassOnly passes twice, exit 0, no renderer
+errors. Four deterministic asset tests and five Object cases / 22 assertions pass.
+
+Rear-side control is now explicit. The first 2m camera clipped even the frame and
+was rejected; an 8m reverse view with the opaque control panel moved aside shows
+the pane's tint. Same-run intact/broken RGB at (640,450): (96,92,65) -> (107,103,74);
+outside controls (900,450) and (400,450) remain exactly unchanged. The pane is
+drawn on both sides in this setup, but weak rear sheen remains a material-quality
+limitation, not a fixed global backface-culling defect. No culling flag changed.
+
 ## Weather access and rocket defaults, September 10, 10:55
 
 Snow is now a default-open Weather section, without the experimental-only header;

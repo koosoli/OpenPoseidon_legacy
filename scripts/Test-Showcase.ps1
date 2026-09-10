@@ -59,7 +59,8 @@ try {
   Send @{cmd='exec';code='hint ""; player setPos [9573.84,3502,0]; player switchCamera "INTERNAL"'}
   Start-Sleep -Seconds 3
   Send @{cmd='eval';code='[getPos player,getDir player,getPos labGlass]'}
-  Send @{cmd='eval';code='getDir player > 28 && getDir player < 32'} 'true'
+  Send @{cmd='eval';code='getDir player < 50'} 'true'
+  Send @{cmd='exec';code='player setPos [9575 - 2 * sin (getDir player) / cos (getDir player),3502,0]'}
   Send @{cmd='key';sc=26;hold=$true}
   Start-Sleep -Seconds 1
   Send @{cmd='key_up';sc=26}
@@ -72,10 +73,24 @@ try {
   Send @{cmd='exec';code='labCamera camSetPos [9571,3501,1.7]; labCamera camSetTarget [9575,3504,1.7]; labCamera camCommit 0'}
   Start-Sleep -Seconds 3
   Send @{cmd='screenshot';path=(Join-Path $out 'glass-oblique.png')}
-  Send @{cmd='exec';code='labCamera camSetPos [9575,3499,1.7]; labCamera camSetTarget [9575,3507,1.7]; labCamera camCommit 0; deleteVehicle labGlass'}
+  Send @{cmd='exec';code='labGlassTarget setPos [9583,3507,1.5]; labCamera camSetPos [9575,3512,1.7]; labCamera camSetTarget [9575,3499,1.7]; labCamera camCommit 0'}
   Start-Sleep -Seconds 3
+  Send @{cmd='screenshot';path=(Join-Path $out 'glass-back.png')}
+  Send @{cmd='exec';code='labCamera camSetPos [9575,3499,1.7]; labCamera camSetTarget [9575,3507,1.7]; labCamera camCommit 0'}
+  foreach ($shot in 1..3) {
+   Send @{cmd='exec';code='labBullet="BulletSingleW" createVehicle [9575,3501,1.5]; labBullet setPosASL [9575,3501,labGlassBase+1.5]; labBullet setVelocity [0,100,0]'}
+   Start-Sleep -Milliseconds 350
+  }
+  Start-Sleep -Seconds 3
+  Send @{cmd='eval';code='isNull labGlass'} 'true'
+  Send @{cmd='eval';code='alive labGlassLeft && alive labGlassRight && alive labGlassTarget'} 'true'
+  Send @{cmd='exec';code='labCamera camSetPos [9575,3512,1.7]; labCamera camSetTarget [9575,3499,1.7]; labCamera camCommit 0'}
+  Start-Sleep -Seconds 2
+  Send @{cmd='screenshot';path=(Join-Path $out 'glass-back-broken.png')}
+  Send @{cmd='exec';code='labCamera camSetPos [9575,3499,1.7]; labCamera camSetTarget [9575,3507,1.7]; labCamera camCommit 0'}
+  Start-Sleep -Seconds 2
   Send @{cmd='screenshot';path=(Join-Path $out 'glass-removed-control.png')}
-  Send @{cmd='exec';code='labCamera cameraEffect ["terminate","back"]; camDestroy labCamera; player switchCamera "INTERNAL"; player setPos [9573.84,3502,0]'}
+  Send @{cmd='exec';code='labCamera cameraEffect ["terminate","back"]; camDestroy labCamera; player switchCamera "INTERNAL"; player setPos [9575 - 2 * sin (getDir player) / cos (getDir player),3502,0]'}
   Send @{cmd='key';sc=26;hold=$true}
   Start-Sleep -Seconds 1
   Send @{cmd='key_up';sc=26}

@@ -36,7 +36,7 @@ exit
 #glass
 player setPos [9575,3499,0]
 player setDir 0
-hint "GLASS\nA thin tinted pane in a solid frame. The NORMAL panel behind it must remain visible. Walk to the side to compare its reflection and tint.\nThis is separate from the opaque GLOSS material demo. The pane is solid, not yet shatterable."
+hint "GLASS\nA thin tinted pane in a solid frame. The NORMAL panel behind it must remain visible. Walk to the side to compare its reflection and tint.\nShoot the pane to break it and open the passage. This is separate from the opaque GLOSS material demo."
 exit
 #crater
 hint (triPhysicsShowcase "crater")
