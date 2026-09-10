@@ -20,6 +20,18 @@ Sorted neighbour indices preserve exact original visit and float summation order
 synthetic reordered multi-plane tests pass. Final room/portal checksum and installed
 same-binary acceptance remain pending for that follow-up.
 
+8c9c4a87 acceptance: 38 targeted cases / 28,614 assertions pass, build passes,
+clean installed same-binary indexed versus full legacy control both exit 0.
+Fire-station total build 4.3 versus 31.5 ms. Final labelled-grid AND ordered
+portal scalar checksum matches for all four reached types; fire station
+11083875832578533832. Room count 1, six portals and 1581 uncovered leak faces
+remain unchanged. This is faster generation of the same existing containment,
+not proof that its pre-existing inferred breaches are physically perfect.
+Exterior capture inspected without a new escape plume. Late smoke still roughly
+3900 particles / 3300 indoor; no settled-frame FPS or all-building hitch claim.
+The earlier component-only step's remaining 25ms hitch is superseded by this
+indexed-face result, while larger unseen building types still need coverage.
+
 ## Water normal-filter completion, September 10
 
 2601365f fixes the remaining wrong bicubic weights in texture_bicubic_dynamics.
