@@ -11312,3 +11312,32 @@ mod baked_world_packing {
         assert_eq!(object_gpu_for_draw(&head, true, &map).world, head.world);
     }
 }
+
+#[cfg(test)]
+mod vegetation_flutter_tests {
+    #[test]
+    fn colour_and_both_motion_paths_bound_the_same_leaf_only_term() {
+        for source in [
+            include_str!("../shaders/frame.wgsl"),
+            include_str!("gpu_driven.wgsl"),
+            include_str!("velocity_obj.wgsl"),
+        ] {
+            assert!(source.contains("(min(amp * hs * 0.22 * gust, 0.025) * f)"));
+            assert!(!source.contains("(amp * hs * 0.22 * f * gust)"));
+            assert!(source.contains("var bend = dir * (amp * hs * s * gust);"));
+        }
+    }
+
+    #[test]
+    fn leaf_flutter_stays_small_without_suppressing_calm_wind_response() {
+        let amplitude = |amp: f32, height: f32, gust: f32, flutter: f32| {
+            (amp * height * 0.22 * gust).min(0.025) * flutter
+        };
+        assert_eq!(amplitude(0.0, 1.0, 1.0, 1.0), 0.0);
+        assert_eq!(amplitude(1.0, 0.0, 1.0, 1.0), 0.0);
+        assert_eq!(amplitude(1.0, 1.0, 1.0, 0.0), 0.0);
+        assert_eq!(amplitude(0.01, 0.1, 1.0, 1.0), 0.01 * 0.1 * 0.22);
+        assert_eq!(amplitude(1.05, 5.0, 1.65, 1.0), 0.025);
+        assert_eq!(amplitude(1.05, 5.0, 1.65, 2.0), 0.05);
+    }
+}

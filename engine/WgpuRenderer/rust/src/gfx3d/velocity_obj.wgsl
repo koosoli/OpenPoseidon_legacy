@@ -134,7 +134,7 @@ fn veg_sway_at(model_y: f32, phase_xz: vec2<f32>, leaf: f32, p: vec4<f32>, p2: v
         let f = p2.y * leaf;
         let perp = vec2<f32>(-dir.y, dir.x);
         bend = bend + (dir * sin(t * 5.7 + ph * 3.1) + perp * sin(t * 4.3 + ph * 2.3)) *
-                          (amp * hs * 0.22 * f * gust);
+                          (min(amp * hs * 0.22 * gust, 0.025) * f);
     }
     return vec3<f32>(bend.x, 0.0, bend.y);
 }

@@ -1,5 +1,34 @@
 # September 9 visual follow-up
 
+## Bounded crown flutter and spray motion, September 10, 13:10
+
+The additional cutout-only flutter previously scaled with wind, height response
+and gust, independently of the solid trunk. At amp=1.05, hs=5, gust=1.65 its
+per-axis amplitude was 1.906 m before the leaf slider. It is now capped at
+0.025 m times that slider (default 1), while common trunk/crown bending is
+unchanged. Both direct and retained motion-vector formulas use the identical
+cap, including previous-frame evaluation. No texture, extra draw or resource
+allocation; two contract/numeric tests and six shader/composition tests pass.
+
+Installed 5e25c3ad+dirty at 13:04, native Reforger Forest pose with 18m/s wind:
+Forest-wind-uncapped-1257 / Forest-wind-bounded-1303 under build/native-reforger-perf.
+Both loaded 22360 instances, completed normally, no renderer errors. Inspected
+both forest images: trees remain present and retain their normal common sway;
+this bounds the section separation, not a claim of authored skeletal wind or
+complete attachment continuity for every tree. Whole-frame samples 23.34 / 22.76ms
+are not a demonstrated performance gain (triangles differ slightly with culling).
+Native material flatness, model-space pivot restoration and imported branch
+weights are separate work, not closed by this small deformation correction.
+
+The existing world-anchored spray seed (21a6570f) now has an installed moving
+camera smoke test: scripts/Test-WaterSprayMotion.ps1, native, 2m/s across the
+0.9375m spawn lattice, wave profile 2.2 / wind18 confirmed. Run
+build/water-spray-motion/spray-20260910-125301 exits 0 with moving-phase traces
+and no renderer errors. Screenshot inspected, ocean and whitecaps present.
+This is runtime/motion coverage, not proof that all foam grain or temporal
+coastline vibration is visually fixed. The coarse painted appearance of strong
+whitecap coverage remains open; the rejected bubble-cell experiment stays off.
+
 ## Pub physics diagnosis, September 10, 12:50 (not a collision-fix acceptance)
 
 Added scripts/Test-PubPhysics.ps1, a bounded dev_physics_probe harness command,

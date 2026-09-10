@@ -226,8 +226,12 @@ fn veg_sway_offset(model_y: f32, phase_xz: vec2<f32>, leaf: f32) -> vec3<f32> {
         // flutter reads as the whole tree shaking; the cross term is what reads as leaves.
         let f = frame.foliagee.z * leaf;
         let perp = vec2<f32>(-dir.y, dir.x);
+        // Cutout sections also contain branch attachments, not just leaf tips.
+        // Keep their extra motion centimetre-sized rather than scaling an entire
+        // crown away from its solid trunk in tall trees / strong wind. Shared
+        // trunk bending above remains unchanged; velocity paths use the same cap.
         bend = bend + (dir * sin(t * 5.7 + ph * 3.1) + perp * sin(t * 4.3 + ph * 2.3)) *
-                          (amp * hs * 0.22 * f * gust);
+                          (min(amp * hs * 0.22 * gust, 0.025) * f);
     }
     return vec3<f32>(bend.x, 0.0, bend.y);
 }
