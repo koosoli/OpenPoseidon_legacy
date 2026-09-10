@@ -1,5 +1,17 @@
 # September 9 visual follow-up
 
+## September 11: streaming cancellation and DDS reader boundary
+
+Installed 872bf0ee contains e200c818's unlocked queued-job retirement during Reset
+and generation-checked PAA publication after Clear. Synthetic tests cover both
+interleavings; 22 preparer/PAA cases pass normally (391 assertions) and with eight
+workers plus concurrent adaptation (1242). DDS composition now accepts an owned
+read callback; normal callers retain the existing reader. The combined EDDS/PAA/
+preparer suite passes 44 cases / 827 assertions. This is a prerequisite, NOT a
+completed native asynchronous material pipeline. Native installed captures on
+both commits complete shutdown with 22370 registered instances. Details and
+remaining configuration/lifetime requirements are in the three-track decision.
+
 ## September 11: default sand detail, acceptance still incomplete
 
 c4bbb2b3 is installed with own material pack 0.1.4. One optional world-space

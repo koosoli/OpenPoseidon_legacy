@@ -640,3 +640,11 @@ Before actual native background composition, preserve configuration identity
 generation-checked publication and the existing store's memory budget. Do not
 call the default SlurpFile fallback on a worker. The current readiness store
 must carry the completed source rather than introducing a second texture queue.
+
+Installed 872bf0ee reader-boundary smoke: cancel-20260911-005452-slow-trace-bc7-
+default-driver-memory-tint-reuse-0 completes shutdown, 134.8 s wall, 22370
+registered instances and 134 driver samples. Moving trace: median/p95/p99/worst
+29/44/93/162 ms, throughput 33.1 FPS, nine frames over 100 ms. Only 96.5% of trace
+samples span exactly one renderer frame, so tails are approximate. These remain
+in the prior native trace range; no performance improvement is attributed to
+the read-interface refactor. Endpoint remains ocean, not village acceptance.
