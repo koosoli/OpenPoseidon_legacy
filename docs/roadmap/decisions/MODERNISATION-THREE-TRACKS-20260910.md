@@ -452,3 +452,18 @@ cancel-20260910-165344-legacy-tables-dds-prep-bc7-default with no BC7 override,
 exit 0, complete camera route, no validation failures/timeout/contention,
 22370 registered instances. Ocean endpoint image inspected; not village quality
 proof. Combined BC/EDDS/DDS/PAA/preparer unit suite: 81 cases / 10314 assertions.
+
+## Prepared payload ownership hardening
+
+Code audit found two smaller correctness/locking gaps in the EXISTING shared
+PreparedTextureStore (not a new cache/scheduler): Take accepted a decoded-image
+entry as an empty block chain and destroyed its RGBA payload; SweepLocked and
+MarkUploaded moved block bytes outside the mutex but freed image bytes inside.
+Take now requires the requested payload kind without consuming the other kind.
+Expiry/upload retirement move both payload types out before their storage is freed.
+Budget, TTL, upload marks, world Clear and GPU-thread ownership remain unchanged.
+
+Six targeted PAA/streaming cases (68 assertions) pass, including new symmetric
+wrong-kind probes and decoded upload/budget/eviction checks. The client runtime
+smoke is still pending. No observed frame stall is attributed to this gap yet;
+this is ownership hardening, not a measured FPS gain or completed native-DDS cache.

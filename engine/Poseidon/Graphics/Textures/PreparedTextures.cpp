@@ -52,7 +52,7 @@ struct PreparedTextureStore::Impl
     // Drop entries past their TTL. Called under the lock at Put time only, so an idle store
     // costs nothing; a busy one sweeps a handful of stale heads per insert. Freed chains are
     // returned to the caller to release outside the lock.
-    void SweepLocked(std::vector<PAABlockChain>& freeLater)
+    void SweepLocked(std::vector<PAABlockChain>& freeLater, std::vector<DecodedImage>& freeImagesLater)
     {
         const double ttl = TtlSeconds();
         if (ttl <= 0.0)
@@ -66,15 +66,18 @@ struct PreparedTextureStore::Impl
                 break;
             auto it = byKey.find(head.key);
             PAABlockChain gone;
+            DecodedImage goneImage;
             if (it != byKey.end())
-                EraseLocked(it, &gone);
+                EraseLocked(it, &gone, &goneImage);
             else
             {
                 bytes -= EntryBytes(head);
                 gone = std::move(order.front().chain);
+                goneImage = std::move(order.front().image);
                 order.pop_front();
             }
             freeLater.push_back(std::move(gone));
+            freeImagesLater.push_back(std::move(goneImage));
             ++stats.expired;
         }
         stats.entries = byKey.size();
@@ -168,10 +171,11 @@ bool PreparedTextureStore::Put(const std::string& key, PAABlockChain&& chain)
     if (!Enabled() || key.empty() || !chain.valid())
         return false;
     std::vector<PAABlockChain> freeLater;
+    std::vector<DecodedImage> freeImagesLater;
     bool stored = false;
     {
         std::lock_guard<std::mutex> lock(_impl->mutex);
-        _impl->SweepLocked(freeLater);
+        _impl->SweepLocked(freeLater, freeImagesLater);
         if (_impl->uploaded.count(key))
         {
             ++_impl->stats.skippedUploaded;
@@ -208,10 +212,11 @@ bool PreparedTextureStore::PutDecoded(const std::string& key, DecodedImage&& ima
     if (!Enabled() || key.empty() || !image.valid())
         return false;
     std::vector<PAABlockChain> freeLater;
+    std::vector<DecodedImage> freeImagesLater;
     bool stored = false;
     {
         std::lock_guard<std::mutex> lock(_impl->mutex);
-        _impl->SweepLocked(freeLater);
+        _impl->SweepLocked(freeLater, freeImagesLater);
         if (_impl->uploaded.count(key))
         {
             ++_impl->stats.skippedUploaded;
@@ -265,7 +270,7 @@ bool PreparedTextureStore::Take(const std::string& key, PAABlockChain& out)
         return false;
     std::lock_guard<std::mutex> lock(_impl->mutex);
     auto it = _impl->byKey.find(key);
-    if (it == _impl->byKey.end())
+    if (it == _impl->byKey.end() || !it->second->chain.valid())
     {
         ++_impl->stats.misses;
         return false;
@@ -281,15 +286,16 @@ void PreparedTextureStore::MarkUploaded(const std::string& key)
     if (!Enabled() || key.empty())
         return;
     PAABlockChain gone;
+    DecodedImage goneImage;
     {
         std::lock_guard<std::mutex> lock(_impl->mutex);
         _impl->uploaded.insert(key);
         _impl->stats.uploadedMarks = _impl->uploaded.size();
         auto it = _impl->byKey.find(key);
         if (it != _impl->byKey.end())
-            _impl->EraseLocked(it, &gone);
+            _impl->EraseLocked(it, &gone, &goneImage);
     }
-    // `gone` frees here, outside the lock.
+    // Both payload kinds free here, outside the lock.
 }
 
 void PreparedTextureStore::MarkEvicted(const std::string& key)

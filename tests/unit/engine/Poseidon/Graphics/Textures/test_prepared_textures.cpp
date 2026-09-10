@@ -145,6 +145,61 @@ TEST_CASE("ReadPAABlockChainBuffer agrees with DecodePAABuffer on a real fixture
     }
 }
 
+TEST_CASE("Prepared texture probes preserve payloads of the other kind", "[Graphics][PAA][streaming]")
+{
+    auto& store = render::PreparedTextureStore::Instance();
+    if (!store.Enabled())
+    {
+        SUCCEED("preparation disabled by environment");
+        return;
+    }
+    store.Clear();
+    const auto bytes = TinyDxt1Paa();
+    DecodedImage image = DecodePAABuffer(bytes.data(), bytes.size(), true);
+    REQUIRE(image.valid());
+    const auto expected = image.rgba;
+    REQUIRE(store.PutDecoded("typed-image", std::move(image)));
+    PAABlockChain chain;
+    CHECK_FALSE(store.Take("typed-image", chain));
+    CHECK_FALSE(chain.valid());
+    CHECK(store.SnapshotStats().bytes == expected.size());
+    REQUIRE(store.TakeDecoded("typed-image", image));
+    CHECK(image.rgba == expected);
+    CHECK(store.SnapshotStats().bytes == 0);
+
+    REQUIRE(ReadPAABlockChainBuffer(bytes.data(), bytes.size(), chain));
+    const auto blocks = chain.blocks;
+    REQUIRE(store.Put("typed-chain", std::move(chain)));
+    CHECK_FALSE(store.TakeDecoded("typed-chain", image));
+    CHECK(store.SnapshotStats().bytes == blocks.size());
+    REQUIRE(store.Take("typed-chain", chain));
+    CHECK(chain.blocks == blocks);
+    CHECK(store.SnapshotStats().bytes == 0);
+    store.Clear();
+}
+
+TEST_CASE("Uploaded decoded textures release their budget and block reprepare", "[Graphics][PAA][streaming]")
+{
+    auto& store = render::PreparedTextureStore::Instance();
+    if (!store.Enabled())
+    {
+        SUCCEED("preparation disabled by environment");
+        return;
+    }
+    store.Clear();
+    const auto bytes = TinyDxt1Paa();
+    auto image = DecodePAABuffer(bytes.data(), bytes.size(), true);
+    REQUIRE(store.PutDecoded("uploaded-image", std::move(image)));
+    store.MarkUploaded("uploaded-image");
+    CHECK(store.SnapshotStats().bytes == 0);
+    CHECK(store.SnapshotStats().entries == 0);
+    CHECK_FALSE(store.TakeDecoded("uploaded-image", image));
+    CHECK_FALSE(store.ShouldPrepare("uploaded-image"));
+    store.MarkEvicted("uploaded-image");
+    CHECK(store.ShouldPrepare("uploaded-image"));
+    store.Clear();
+}
+
 TEST_CASE("PreparedTextureStore key normalisation and round trip", "[Graphics][PAA][streaming]")
 {
     CHECK(render::PreparedTextureStore::Key("Reforger/Everon\\Textures\\Bark_CO.PAA") ==

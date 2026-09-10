@@ -154,3 +154,8 @@ centre, whereas the candidate painted the entire road width. 0.1.3 corrects its
 own analytic coverage to two tracks with a transparent centre/shoulders and small
 periodic edge variation; no original alpha pixels copied. Seven generator tests
 now include track/centre coverage. Recheck installed before visual acceptance.
+
+43cad946 / pack 0.1.3 installed corrected Gravel Full 215822: exit 0, screenshot
+inspected, open grass centre restored and same 52507 registered / 16 main / 978
+triangles. This closes the candidate's accidental full-width coverage, not the
+remaining artistic, roughness, junction, night/snow, DLSS and fresh-release matrix.
