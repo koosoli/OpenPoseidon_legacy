@@ -39,6 +39,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <vector>
+
+namespace Poseidon { class TextureSourceDDS; }
 
 namespace Poseidon::render
 {
@@ -63,6 +66,9 @@ class PreparedTextureStore
         // of decoding. Counted separately because the byte shapes differ wildly.
         uint64_t decodedPuts = 0;
         uint64_t decodedTakes = 0;
+        uint64_t ddsReusePuts = 0;
+        uint64_t ddsReuseHits = 0;
+        size_t ddsReuseBytes = 0;
         size_t entries = 0;         // current
         size_t bytes = 0;           // current
     };
@@ -96,6 +102,13 @@ class PreparedTextureStore
     // Same budget, TTL, dedup and Uploaded-mark rules as the chain entries.
     bool PutDecoded(const std::string& key, DecodedImage&& image);
     bool TakeDecoded(const std::string& key, DecodedImage& out);
+
+    // Main-thread native tint experiment: immutable, unmodified source decodes,
+    // sharing this store's TTL/Clear and byte budget (also capped at 64 MiB).
+    // Exact input bytes are checked outside the mutex before copying pixels.
+    // The brief copied working payload is not part of the retained-store budget.
+    bool CopyDdsDecode(const std::string& key, const std::vector<uint8_t>& source, TextureSourceDDS& out);
+    bool PutDdsDecode(const std::string& key, const std::vector<uint8_t>& source, const TextureSourceDDS& decoded);
 
     // Main thread. A texture reached a real upload attempt (success or failure): its bytes are
     // no longer wanted from a worker; also drops any pending entry for it.

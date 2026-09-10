@@ -502,3 +502,26 @@ inferred from the cheapest endpoint frame or compared against the invalid run.
 The harness now defaults to table cap 0, matching production; the rejected cap
 requires explicit -ExperimentalTableBudget N. -LegacyTableBudget remains an
 accepted compatibility alias for the production path.
+
+## Narrow native tint-decode reuse experiment
+
+The valid 22:11 trace contains repeated colour-tile decodes: woodplanks01 42
+calls / 307.19 ms cumulative decode, metalpaintcoated 32 / 289.31 ms and
+metalpaintmate 32 / 269.06 ms (only logged calls >=2 ms; NOT frame-time savings).
+An opt-in POSEIDON_DDS_TINT_REUSE=1 experiment reuses pre-tint decodes only for
+non-composite tinted colour sources. Existing PreparedTextureStore owns them,
+sharing TTL, world Clear and its byte budget, with a subset cap of the smaller
+of 64 MiB or one quarter of the configured store budget. No other preparation
+entry is evicted to admit these snapshots. Pixel/source copying and retirement
+happen outside the mutex. Exact source-byte comparison and the decode-resolution
+key prevent reuse across changed input or cap; the actual VFS read still runs.
+Active local input/output copies and map overhead are not a total-RAM guarantee.
+
+Source pixels are copied before each material's tint; no coverage-composition,
+bank registration, GPU ownership or simulation path changes. Optional
+POSEIDON_DDS_TINT_REUSE_VERIFY=1 redecodes every hit and compares all mip pixels
+and metadata before allowing it, falling back and logging MISMATCH on failure.
+Verification runs are not timing comparisons. Harness flags -TintReuse 0/1 and
+-VerifyTintReuse select the arms. 27 EDDS/PAA/streaming cases / 480 assertions
+pass including the final resolution-key hardening; installed A/B remains
+pending. No default activation or performance gain is claimed yet.

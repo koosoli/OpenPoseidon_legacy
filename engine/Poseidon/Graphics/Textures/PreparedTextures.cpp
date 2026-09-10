@@ -1,4 +1,5 @@
 #include <Poseidon/Graphics/Textures/PreparedTextures.hpp>
+#include <Poseidon/Graphics/Textures/DdsImport.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -7,6 +8,7 @@
 #include <iterator>
 #include <list>
 #include <mutex>
+#include <memory>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -17,14 +19,22 @@ namespace Poseidon::render
 struct PreparedTextureStore::Impl
 {
     using Clock = std::chrono::steady_clock;
+    struct DdsDecode
+    {
+        std::vector<uint8_t> input;
+        TextureSourceDDS decoded;
+        size_t bytes = 0;
+    };
     struct Entry
     {
         std::string key;
         PAABlockChain chain;    // DXT mip chain...
         DecodedImage image;     // ...OR a whole-file RGBA8 decode (image.valid() discriminates)
         Clock::time_point stored;
+        std::shared_ptr<const DdsDecode> dds;
     };
-    static size_t EntryBytes(const Entry& entry) { return entry.chain.blocks.size() + entry.image.rgba.size(); }
+    static size_t EntryBytes(const Entry& entry)
+    { return entry.chain.blocks.size() + entry.image.rgba.size() + (entry.dds ? entry.dds->bytes : 0); }
     mutable std::mutex mutex;
     // Insertion order = production order = (through the preparer's queue) distance order, so
     // the front is the oldest and the TTL sweep walks from there and stops early.
@@ -35,15 +45,20 @@ struct PreparedTextureStore::Impl
     Stats stats;
 
     void EraseLocked(std::unordered_map<std::string, std::list<Entry>::iterator>::iterator it, PAABlockChain* takeInto,
-                     DecodedImage* takeImageInto = nullptr)
+                     DecodedImage* takeImageInto = nullptr, std::list<Entry>* retired = nullptr)
     {
         std::list<Entry>::iterator node = it->second;
         bytes -= EntryBytes(*node);
+        if (node->dds)
+            stats.ddsReuseBytes -= node->dds->bytes;
         if (takeInto)
             *takeInto = std::move(node->chain);
         if (takeImageInto)
             *takeImageInto = std::move(node->image);
-        order.erase(node);
+        if (retired)
+            retired->splice(retired->end(), order, node);
+        else
+            order.erase(node);
         byKey.erase(it);
         stats.entries = byKey.size();
         stats.bytes = bytes;
@@ -52,7 +67,7 @@ struct PreparedTextureStore::Impl
     // Drop entries past their TTL. Called under the lock at Put time only, so an idle store
     // costs nothing; a busy one sweeps a handful of stale heads per insert. Freed chains are
     // returned to the caller to release outside the lock.
-    void SweepLocked(std::vector<PAABlockChain>& freeLater, std::vector<DecodedImage>& freeImagesLater)
+    void SweepLocked(std::list<Entry>& retired)
     {
         const double ttl = TtlSeconds();
         if (ttl <= 0.0)
@@ -65,19 +80,14 @@ struct PreparedTextureStore::Impl
             if (age < ttl)
                 break;
             auto it = byKey.find(head.key);
-            PAABlockChain gone;
-            DecodedImage goneImage;
             if (it != byKey.end())
-                EraseLocked(it, &gone, &goneImage);
+                EraseLocked(it, nullptr, nullptr, &retired);
             else
             {
                 bytes -= EntryBytes(head);
-                gone = std::move(order.front().chain);
-                goneImage = std::move(order.front().image);
-                order.pop_front();
+                if (head.dds) stats.ddsReuseBytes -= head.dds->bytes;
+                retired.splice(retired.end(), order, order.begin());
             }
-            freeLater.push_back(std::move(gone));
-            freeImagesLater.push_back(std::move(goneImage));
             ++stats.expired;
         }
         stats.entries = byKey.size();
@@ -170,12 +180,11 @@ bool PreparedTextureStore::Put(const std::string& key, PAABlockChain&& chain)
 {
     if (!Enabled() || key.empty() || !chain.valid())
         return false;
-    std::vector<PAABlockChain> freeLater;
-    std::vector<DecodedImage> freeImagesLater;
+    std::list<Impl::Entry> freeLater;
     bool stored = false;
     {
         std::lock_guard<std::mutex> lock(_impl->mutex);
-        _impl->SweepLocked(freeLater, freeImagesLater);
+        _impl->SweepLocked(freeLater);
         if (_impl->uploaded.count(key))
         {
             ++_impl->stats.skippedUploaded;
@@ -211,12 +220,11 @@ bool PreparedTextureStore::PutDecoded(const std::string& key, DecodedImage&& ima
 {
     if (!Enabled() || key.empty() || !image.valid())
         return false;
-    std::vector<PAABlockChain> freeLater;
-    std::vector<DecodedImage> freeImagesLater;
+    std::list<Impl::Entry> freeLater;
     bool stored = false;
     {
         std::lock_guard<std::mutex> lock(_impl->mutex);
-        _impl->SweepLocked(freeLater, freeImagesLater);
+        _impl->SweepLocked(freeLater);
         if (_impl->uploaded.count(key))
         {
             ++_impl->stats.skippedUploaded;
@@ -281,19 +289,81 @@ bool PreparedTextureStore::Take(const std::string& key, PAABlockChain& out)
     return true;
 }
 
+bool PreparedTextureStore::CopyDdsDecode(const std::string& key, const std::vector<uint8_t>& source,
+                                        TextureSourceDDS& out)
+{
+    if (!Enabled() || key.empty() || source.empty()) return false;
+    std::shared_ptr<const Impl::DdsDecode> snapshot;
+    {
+        std::lock_guard<std::mutex> lock(_impl->mutex);
+        const auto it = _impl->byKey.find(key);
+        if (it == _impl->byKey.end() || !it->second->dds) return false;
+        const double ttl = TtlSeconds();
+        if (ttl > 0 && std::chrono::duration<double>(Impl::Clock::now() - it->second->stored).count() >= ttl)
+            return false;
+        snapshot = it->second->dds;
+    }
+    // A remount or an edited loose file must never reuse another source's pixels.
+    if (snapshot->input != source) return false;
+    const RStringB requestedName = out._name;
+    out = snapshot->decoded;
+    out._name = requestedName;
+    {
+        std::lock_guard<std::mutex> lock(_impl->mutex);
+        ++_impl->stats.ddsReuseHits;
+    }
+    return true;
+}
+
+bool PreparedTextureStore::PutDdsDecode(const std::string& key, const std::vector<uint8_t>& source,
+                                       const TextureSourceDDS& decoded)
+{
+    if (!Enabled() || key.empty() || source.empty() || decoded._levels.empty()) return false;
+    const size_t cap = std::min<size_t>(64u * 1024u * 1024u, ByteBudget() / 4);
+    size_t estimate = sizeof(Impl::DdsDecode) + source.size() + decoded._levels.size() * sizeof(DDSMipLevel);
+    for (const auto& level : decoded._levels) estimate += level.data.size();
+    std::list<Impl::Entry> retired;
+    {
+        std::lock_guard<std::mutex> lock(_impl->mutex);
+        _impl->SweepLocked(retired);
+        if (_impl->byKey.count(key) || estimate > cap - std::min(cap, _impl->stats.ddsReuseBytes) ||
+            estimate > ByteBudget() - std::min(ByteBudget(), _impl->bytes)) return false;
+    }
+    retired.clear();
+    auto snapshot = std::make_shared<Impl::DdsDecode>();
+    snapshot->input = source;
+    snapshot->decoded = decoded;
+    snapshot->bytes = sizeof(Impl::DdsDecode) + snapshot->input.capacity() +
+                      snapshot->decoded._levels.capacity() * sizeof(DDSMipLevel);
+    for (const auto& level : snapshot->decoded._levels) snapshot->bytes += level.data.capacity();
+    // Preparation and large copies never hold the worker hand-off mutex. Recheck
+    // the shared budget because a worker may have inserted a payload meanwhile.
+    std::lock_guard<std::mutex> lock(_impl->mutex);
+    if (_impl->byKey.count(key) || snapshot->bytes > cap - std::min(cap, _impl->stats.ddsReuseBytes) ||
+        snapshot->bytes > ByteBudget() - std::min(ByteBudget(), _impl->bytes)) return false;
+    const size_t bytes = snapshot->bytes;
+    _impl->order.push_back(Impl::Entry{key, {}, {}, Impl::Clock::now(), std::move(snapshot)});
+    _impl->byKey.emplace(key, std::prev(_impl->order.end()));
+    _impl->bytes += bytes;
+    _impl->stats.ddsReuseBytes += bytes;
+    ++_impl->stats.ddsReusePuts;
+    _impl->stats.entries = _impl->byKey.size();
+    _impl->stats.bytes = _impl->bytes;
+    return true;
+}
+
 void PreparedTextureStore::MarkUploaded(const std::string& key)
 {
     if (!Enabled() || key.empty())
         return;
-    PAABlockChain gone;
-    DecodedImage goneImage;
+    std::list<Impl::Entry> retired;
     {
         std::lock_guard<std::mutex> lock(_impl->mutex);
         _impl->uploaded.insert(key);
         _impl->stats.uploadedMarks = _impl->uploaded.size();
         auto it = _impl->byKey.find(key);
         if (it != _impl->byKey.end())
-            _impl->EraseLocked(it, &gone, &goneImage);
+            _impl->EraseLocked(it, nullptr, nullptr, &retired);
     }
     // Both payload kinds free here, outside the lock.
 }
@@ -318,6 +388,7 @@ void PreparedTextureStore::Clear()
         _impl->bytes = 0;
         _impl->stats.entries = 0;
         _impl->stats.bytes = 0;
+        _impl->stats.ddsReuseBytes = 0;
         _impl->stats.uploadedMarks = 0;
     }
     freeLater.clear();

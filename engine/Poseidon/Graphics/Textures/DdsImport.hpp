@@ -9,6 +9,7 @@
 
 namespace Poseidon
 {
+namespace render { class PreparedTextureStore; }
 
 // DDS / Enfusion .edds texture source (DZ-002).
 //
@@ -60,6 +61,7 @@ void ApplyEnfusionLayerTint(std::vector<DDSMipLevel>& levels, const float rgb[3]
 
 class TextureSourceDDS : public ITextureSource
 {
+    friend class render::PreparedTextureStore;
     RStringB _name;
     std::vector<DDSMipLevel> _levels; //!< [0] is the largest
     PixelFormat _format = PixelFormat::Unknown;

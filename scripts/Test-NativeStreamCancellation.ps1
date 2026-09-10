@@ -1,6 +1,7 @@
 param([switch]$LegacyClutter, [switch]$VerifyClutter, [switch]$TraceSlowFrames, [switch]$LegacyTableBudget, [switch]$TraceDdsPreparation,
       [switch]$SampleDriverMemory,
       [ValidateRange(0,64)][int]$ExperimentalTableBudget=0,
+      [ValidateRange(-1,1)][int]$TintReuse=-1, [switch]$VerifyTintReuse,
       [ValidateRange(-1,2)][int]$Bc7Batch=-1,
       [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',
       [string]$Archives='C:\Program Files (x86)\Steam\steamapps\common\Arma Reforger\addons')
@@ -8,6 +9,7 @@ $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
 if ($LegacyClutter -and $VerifyClutter) {throw 'Verification needs the reuse path enabled'}
 if ($LegacyTableBudget -and $ExperimentalTableBudget -gt 0) {throw 'Choose the production table path or the experimental cap, not both'}
+if ($VerifyTintReuse -and $TintReuse -eq 0) {throw 'Tint verification needs reuse enabled'}
 if (!(Test-Path -LiteralPath $Archives -PathType Container)) {throw 'Native archives missing'}
 $root=Split-Path $PSScriptRoot -Parent
 $label='cancel-'+(Get-Date -Format 'yyyyMMdd-HHmmss')
@@ -20,6 +22,8 @@ if ($TraceDdsPreparation) {$label+='-dds-prep'}
 if ($Bc7Batch -gt 0) {$label+='-bc7-'+$Bc7Batch}
 if ($Bc7Batch -lt 0) {$label+='-bc7-default'}
 if ($SampleDriverMemory) {$label+='-driver-memory'}
+if ($TintReuse -ge 0) {$label+='-tint-reuse-'+$TintReuse}
+if ($VerifyTintReuse) {$label+='-verify-tint'}
 $out=Join-Path $root 'build/native-stream-cancellation'
 $user=Join-Path $out ('user-'+$label)
 New-Item -ItemType Directory -Force $user | Out-Null
@@ -39,6 +43,8 @@ if ($LegacyTableBudget) {$settings.WGR_OBJECT_STREAM_TABLE_BATCH='0'}
 if ($ExperimentalTableBudget -gt 0) {$settings.WGR_OBJECT_STREAM_TABLE_BATCH=[string]$ExperimentalTableBudget}
 if ($TraceDdsPreparation) {$settings.POSEIDON_DDS_PREP_TRACE='1'}
 if ($Bc7Batch -ge 0) {$settings.POSEIDON_DDS_BC7_BATCH=[string]$Bc7Batch}
+if ($TintReuse -ge 0) {$settings.POSEIDON_DDS_TINT_REUSE=[string]$TintReuse}
+if ($VerifyTintReuse) {$settings.POSEIDON_DDS_TINT_REUSE='1'; $settings.POSEIDON_DDS_TINT_REUSE_VERIFY='1'}
 # Short settle intentionally leaves cold work outstanding when movement starts.
 # This is a lifecycle smoke test, NOT a settled-pose FPS comparison.
 $gpuSampler = $null
@@ -89,6 +95,7 @@ if ($metrics.build.render_width -ne 1280 -or $metrics.build.render_height -ne 72
 }
 if (Select-String -LiteralPath $log -Pattern 'Validation Error|panicked at|DeviceLost|StartAutoTest could not boot|verification: MISMATCH' -Quiet) {throw 'Runtime failure'}
 if ($VerifyClutter -and !(Select-String -LiteralPath $log -Pattern 'verification: identical geography' -Quiet)) {throw 'No positive clutter verification'}
+if ($VerifyTintReuse -and !(Select-String -LiteralPath $log -Pattern 'DDS tint reuse verification: identical' -Quiet)) {throw 'No positive tint reuse verification'}
 $tableRows=Select-String -LiteralPath $log -Pattern 'Object stream bank tables: prepared=(\d+) deferredPlacements=(\d+) limit=(\d+) ms=([\d.]+)'
 if (!$tableRows) {throw 'No bank-table preparation evidence'}
 foreach ($row in $tableRows) {

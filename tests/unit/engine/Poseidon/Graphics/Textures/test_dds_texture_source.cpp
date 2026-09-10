@@ -15,6 +15,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <Poseidon/Graphics/Textures/DdsImport.hpp>
+#include <Poseidon/Graphics/Textures/PreparedTextures.hpp>
 #include <Poseidon/Graphics/Textures/EnfusionTextureName.hpp>
 
 #include <cmath>
@@ -154,6 +155,55 @@ TEST_CASE("Enfusion RG normals use red rather than cavity or occlusion for X", "
             REQUIRE(static_cast<unsigned>(pixels[i + 3]) == alpha);
         }
     }
+}
+
+TEST_CASE("Reusable DDS payloads preserve source identity and independent pixels", "[graphics][edds][streaming]")
+{
+    auto& store = Poseidon::render::PreparedTextureStore::Instance();
+    store.Clear();
+    const auto file = Bgra2x2();
+    TextureSourceDDS source;
+    REQUIRE(source.InitFromMemory(file.data(), file.size(), "test.edds", true));
+    REQUIRE(store.PutDdsDecode("dds-decode|test.edds", file, source));
+    CHECK_FALSE(store.PutDdsDecode("dds-decode|test.edds", file, source));
+    CHECK(store.SnapshotStats().ddsReuseBytes > file.size());
+    TextureSourceDDS copy;
+    REQUIRE(store.CopyDdsDecode("dds-decode|test.edds", file, copy));
+    CHECK(copy.GetFormat() == source.GetFormat());
+    CHECK(copy.GetMipmapCount() == source.GetMipmapCount());
+    CHECK(copy.IsAlpha() == source.IsAlpha());
+    CHECK(copy.IsTransparent() == source.IsTransparent());
+    PacLevelMem mip;
+    mip._w = mip._h = 2; mip._pitch = 8; mip._dFormat = PacARGB8888;
+    std::vector<uint8_t> expected(16), actual(16);
+    REQUIRE(source.GetMipmapData(expected.data(), mip, 0));
+    REQUIRE(copy.GetMipmapData(actual.data(), mip, 0));
+    CHECK(actual == expected);
+    auto changed = file;
+    changed.back() ^= 0x40;
+    CHECK_FALSE(store.CopyDdsDecode("dds-decode|test.edds", changed, copy));
+    REQUIRE(copy.InitFromMemory(changed.data(), changed.size(), "changed.edds", true));
+    Poseidon::PAABlockChain chain;
+    CHECK_FALSE(store.Take("dds-decode|test.edds", chain));
+    store.MarkUploaded("test.edds"); // A derived GPU texture is not its shared source.
+    REQUIRE(store.CopyDdsDecode("dds-decode|test.edds", file, copy));
+    REQUIRE(copy.GetMipmapData(actual.data(), mip, 0));
+    CHECK(actual == expected);
+    store.Clear();
+    CHECK(store.SnapshotStats().ddsReuseBytes == 0);
+    CHECK(store.SnapshotStats().bytes == 0);
+    CHECK_FALSE(store.CopyDdsDecode("dds-decode|test.edds", file, source));
+    REQUIRE(copy.GetMipmapData(actual.data(), mip, 0));
+    CHECK(actual == expected); // Clearing the store cannot invalidate a consumer.
+    const size_t cap = std::min<size_t>(64u * 1024u * 1024u, store.ByteBudget() / 4);
+    const std::vector<uint8_t> oversized(cap, 0);
+    CHECK_FALSE(store.PutDdsDecode("dds-decode|oversized.edds", oversized, copy));
+    CHECK(store.SnapshotStats().bytes == 0);
+    REQUIRE(store.PutDdsDecode("dds-decode|test.edds", file, copy));
+    store.MarkUploaded("dds-decode|test.edds");
+    CHECK(store.SnapshotStats().ddsReuseBytes == 0);
+    CHECK(store.SnapshotStats().bytes == 0);
+    store.Clear();
 }
 
 TEST_CASE("DDS source: a 32-bit level is delivered as BGRA, honouring pitch", "[graphics][edds][dz-002]")

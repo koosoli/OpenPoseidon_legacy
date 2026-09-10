@@ -4,6 +4,7 @@
 #include <Poseidon/Foundation/Threads/ThreadAffinity.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/EnfusionMount.hpp>
 #include <Poseidon/Graphics/Textures/DdsImport.hpp>
+#include <Poseidon/Graphics/Textures/PreparedTextures.hpp>
 
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Graphics/Textures/EddsReader.hpp>
@@ -25,6 +26,13 @@ namespace Poseidon
 namespace
 {
 
+int DecodedMaxEdge()
+{
+    const char* value = std::getenv("POSEIDON_DECODED_MAX_EDGE");
+    const int parsed = value && *value ? std::atoi(value) : 0;
+    return parsed >= 64 && parsed <= 8192 ? parsed : 1024;
+}
+
 // Diagnostic only: separate CPU preparation from later GPU upload. No scheduling changes.
 struct DdsPreparationTrace
 {
@@ -43,6 +51,7 @@ struct DdsPreparationTrace
     double read = 0, decode = 0, coverageRead = 0, coverageDecode = 0, merge = 0, tint = 0;
     size_t inputBytes = 0, outputBytes = 0;
     bool success = false;
+    bool reusedDecode = false;
     explicit DdsPreparationTrace(const char* path) : name(path) {}
     void Mark(double& phase)
     {
@@ -58,9 +67,9 @@ struct DdsPreparationTrace
         const double total = read + decode + coverageRead + coverageDecode + merge + tint + finish;
         if (total >= 2.0)
             LOG_INFO(Graphics,
-                "DDS prepare: total={:.3f} read={:.3f} decode={:.3f} coverageRead={:.3f} coverageDecode={:.3f} merge={:.3f} tint={:.3f} finish={:.3f} inputBytes={} outputBytes={} success={} name='{}'",
+                "DDS prepare: total={:.3f} read={:.3f} decode={:.3f} coverageRead={:.3f} coverageDecode={:.3f} merge={:.3f} tint={:.3f} finish={:.3f} inputBytes={} outputBytes={} success={} reusedDecode={} name='{}'",
                 total, read, decode, coverageRead, coverageDecode, merge, tint, finish,
-                inputBytes, outputBytes, success, name);
+                inputBytes, outputBytes, success, reusedDecode, name);
     }
 };
 
@@ -408,12 +417,7 @@ bool TextureSourceDDS::InitFromMemory(const void* data, size_t size, const char*
     // saving can be quoted as a number rather than as a trade.
     const auto capLevels = [this]
     {
-        const int maxEdge = []
-        {
-            const char* v = std::getenv("POSEIDON_DECODED_MAX_EDGE");
-            const int parsed = (v != nullptr && *v != 0) ? std::atoi(v) : 0;
-            return (parsed >= 64 && parsed <= 8192) ? parsed : 1024;
-        }();
+        const int maxEdge = DecodedMaxEdge();
         size_t firstLevel = 0;
         while (firstLevel + 1 < _levels.size() &&
                (_levels[firstLevel].width > maxEdge || _levels[firstLevel].height > maxEdge))
@@ -792,8 +796,45 @@ bool TextureSourceDDS::Init(const char* name, PacLevelMem* mips, int maxMips)
     // A tint needs PIXELS, the same way the coverage merge does -- there is no way to
     // rescale a BC7 block in place. So a tinted tile is uploaded 32-bit rather than
     // compressed, which is the RFG-047 cost, paid only by the materials that ask for it.
-    if (!InitFromMemory(buffer.data(), buffer.size(), name, /*forceDecode=*/composite || tinted))
-        return false;
+    static const bool reuseTintDecode = [] {
+        const char* value = std::getenv("POSEIDON_DDS_TINT_REUSE");
+        return value && std::strcmp(value, "1") == 0; // Experimental until byte/performance A/B acceptance.
+    }();
+    const bool reusable = reuseTintDecode && tinted && !composite && !IsEnfusionRgNormalName(name);
+    const std::string reuseKey = reusable ? "dds-decode|" + std::to_string(DecodedMaxEdge()) + "|" +
+                                           render::PreparedTextureStore::Key(name) : "";
+    auto& prepared = render::PreparedTextureStore::Instance();
+    trace.reusedDecode = reusable && prepared.CopyDdsDecode(reuseKey, buffer, *this);
+    static const bool verifyReuse = [] {
+        const char* value = std::getenv("POSEIDON_DDS_TINT_REUSE_VERIFY");
+        return value && std::strcmp(value, "1") == 0;
+    }();
+    if (trace.reusedDecode && verifyReuse)
+    {
+        TextureSourceDDS reference;
+        bool same = reference.InitFromMemory(buffer.data(), buffer.size(), name, true) &&
+                    reference._format == _format && reference._pacFormat == _pacFormat &&
+                    reference._w == _w && reference._h == _h && reference._mipmaps == _mipmaps &&
+                    reference._hasAlpha == _hasAlpha && reference._isTransparent == _isTransparent &&
+                    static_cast<DWORD>(reference._avgColor) == static_cast<DWORD>(_avgColor) &&
+                    reference._levels.size() == _levels.size();
+        if (same)
+            for (size_t i = 0; i < _levels.size(); ++i)
+                same = same && reference._levels[i].width == _levels[i].width &&
+                       reference._levels[i].height == _levels[i].height && reference._levels[i].data == _levels[i].data;
+        LOG_INFO(Graphics, "DDS tint reuse verification: {} name='{}'", same ? "identical" : "MISMATCH", name);
+        if (!same)
+        {
+            if (!InitFromMemory(buffer.data(), buffer.size(), name, true)) return false;
+            trace.reusedDecode = false;
+        }
+    }
+    if (!trace.reusedDecode)
+    {
+        if (!InitFromMemory(buffer.data(), buffer.size(), name, /*forceDecode=*/composite || tinted))
+            return false;
+        if (reusable) prepared.PutDdsDecode(reuseKey, buffer, *this);
+    }
     trace.Mark(trace.decode);
 
     if (composite)
