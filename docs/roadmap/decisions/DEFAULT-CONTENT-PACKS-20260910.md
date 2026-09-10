@@ -80,3 +80,18 @@ The current road is a development integration, NOT the complete default upgrade.
 Measure-DefaultMaterial.ps1 fixes the selected original Everon road position and
 graphics settings. POSEIDON_VISUAL_UPGRADE_NORMALS=0 is the albedo-only arm;
 --no-visual-upgrade is the original arm. No FPS or resource improvement claimed.
+
+First installed ABC on 684d02bc: Original 201148, Albedo 201321, Full 201520
+under build/default-content/acceptance/material-20260910-*. All exit 0 and
+screenshots inspected; same 52507 registered / 15992 main instances and 886666
+main triangles. Logs prove automatic package discovery and the road replacement.
+These runs do NOT accept normal mapping: the Full log had no road normal binding.
+Root cause is LegacyEnhancementNormal's QIFStream::FileExists probe, which checks
+loose disk files only, not PBO members. The follow-up checks the already mounted
+bank member as well. Repeat B/C on the corrected installed binary before claiming
+the normal effect. Single-run frame figures are not a performance acceptance.
+
+Deployment first failed because Get-FileHash was unavailable in the lock wrapper's
+PowerShell environment, after binary copying and before the final stamp. No run
+was measured in that state. 684d02bc replaces the cmdlet with streaming .NET SHA256;
+the full repeated deployment succeeded and restamped before all three runs.

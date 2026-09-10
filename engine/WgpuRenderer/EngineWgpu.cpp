@@ -5601,10 +5601,8 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
         // a sibling `X_nohq.paa` exists it is bound as that section's normal map, through the very
         // same slot and the same NOHQ decode (X in A, Y in G, Z reconstructed) the RVMAT path uses.
         //
-        // Deliberately a naming convention rather than a sidecar registry: it needs no index to
-        // load or keep in sync, an enhancement pack is just files dropped next to the originals (or
-        // ahead of them in the PBO search order), and an untouched installation has none of them so
-        // every lookup misses and rendering is bit-identical to before.
+        // The sibling naming convention remains the fallback. The shipped material catalog can
+        // also supply an explicit normal path from its own PBO without replacing an original bank.
         //
         // Both answers are cached, because the miss is the common case on stock content and a
         // filesystem probe per section per frame would be absurd.
@@ -10195,7 +10193,10 @@ uint64_t EngineWgpu::LegacyEnhancementNormal(const char* textureName)
         // Probe before loading: TextureBank::Load on a missing path yields a placeholder rather
         // than nothing, and binding a placeholder as a normal map would flatten the surface
         // instead of leaving it alone.
-        if (QIFStream::FileExists(candidate.c_str()))
+        QFBank* candidateBank = QIFStreamB::AutoBank(candidate.c_str());
+        const bool inBank = candidateBank &&
+            candidateBank->FileExists(candidate.c_str() + candidateBank->GetPrefix().GetLength());
+        if (inBank || QIFStream::FileExists(candidate.c_str()))
         {
             Ref<Texture> tex = _wbank->Load(candidate.c_str());
             if (auto* wgpuTex = static_cast<TextureWgpu*>(tex.GetRef()))
