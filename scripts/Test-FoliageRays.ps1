@@ -1,7 +1,10 @@
-param([switch]$RaysOff, [switch]$LegacyOrder, [switch]$LateSurface, [switch]$Zeus, [string]$Label='baseline', [string]$World='',
+param([switch]$RaysOff, [switch]$LegacyOrder, [switch]$LateSurface, [switch]$EarlyOpaque, [switch]$Zeus, [string]$Label='baseline', [string]$World='',
       [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
+if (($EarlyOpaque -and ($LegacyOrder -or $LateSurface)) -or ($LegacyOrder -and $LateSurface)) {
+    throw 'Select only one comparison path'
+}
 $root=Split-Path $PSScriptRoot -Parent
 if (!$World) {$World=Join-Path $root '../../../packages/a3-compat/world/stratis/stratis.wrp'}
 if (!(Test-Path -LiteralPath $World)) {throw 'Specify the original Stratis WRP with -World'}
@@ -10,8 +13,7 @@ $output=Join-Path $root 'build/foliage-rays/acceptance'
 $env:POSEIDON_USER_DIR=Join-Path $output 'user'
 New-Item -ItemType Directory -Force $env:POSEIDON_USER_DIR | Out-Null
 [IO.File]::WriteAllText((Join-Path $env:POSEIDON_USER_DIR 'graphics.cfg'), "qualityPreset=3;`nterrainDetail=4;`nmsaaSamples=4;`ndlssMode=0;`nvsync=0;`nfpsCap=60;`n")
-$env:WGR_EARLY_LATE_OPAQUE=if ($LegacyOrder) {'0'} else {'1'}
-if ($LateSurface) {$env:WGR_EARLY_LATE_OPAQUE='0'}
+$env:WGR_EARLY_LATE_OPAQUE=if ($EarlyOpaque) {'1'} else {'0'}
 $env:WGR_LATE_SURFACE_RAYS=if ($LateSurface) {'1'} else {'0'}
 $env:WGR_LATE_OBJECT_TRACE='1'
 $env:WGR_AUTO_EXPOSURE='0'
@@ -62,6 +64,14 @@ try {
     if (!$p.WaitForExit(180000) -or $p.ExitCode -ne 0) {throw 'Foliage capture failed'}
     if (!(Test-Path -LiteralPath $capture)) {throw 'Missing foliage capture'}
     if (Select-String -LiteralPath $log -Pattern 'StartAutoTest could not boot' -Quiet) {throw 'Mission did not load'}
+    if (Select-String -LiteralPath $log -Pattern 'Validation Error|panicked at|DeviceLost' -Quiet) {throw 'Renderer error; reject foliage capture'}
+    if ($LateSurface -and !$RaysOff) {
+        $trace=Select-String -LiteralPath $log -Pattern 'late surface rays: ([0-9]+) material slots, intensity=([0-9.eE+-]+)' | Select-Object -Last 1
+        if (!$trace -or [int]$trace.Matches[0].Groups[1].Value -le 0 -or
+            [double]::Parse($trace.Matches[0].Groups[2].Value,[Globalization.CultureInfo]::InvariantCulture) -le 0) {
+            throw 'Late surface scattering not exercised; reject comparison'
+        }
+    }
     if (!(Select-String -LiteralPath $log -Pattern 'Terrain materials .*stratis.wrp:.*satellite' -Quiet)) {throw 'Stratis was not loaded'}
     Write-Host $capture
     Select-String -LiteralPath $log -Pattern 'late objects:|sun:|god.ray' | Select-Object -Last 12 | ForEach-Object {$_.Line}

@@ -1,5 +1,26 @@
 # September 9 visual follow-up
 
+## Late surface-rays experiment rejected, September 10
+
+0b684058 tests per-instance fragment-distance scattering on prepassed opaque
+world draws after water, without changing replay order. It reuses the existing
+alpha-surface integration and bindings; glass/cockpit/monitor/decals are excluded.
+The slot-selection test and build pass. WGR_LATE_SURFACE_RAYS remains OFF by
+default, independently of the earlier rejected WGR_EARLY_LATE_OPAQUE experiment.
+
+Installed same-binary native Stratis Zeus comparisons exit 0 and exercise
+479-493 marked slots at intensity 4. Both surface and surface-repeat captures
+show an unacceptable change to the hillside haze, not an accepted foliage fix.
+Control retains the lighter hillside; the candidate colour-pass samples are
+around 11.0ms versus 9.5-10.3ms control. This is not a measured speedup, nor
+proof that a globally darker image fixes black tree silhouettes. Shadow helpers
+both return occlusion (zero lit); their convention is not inverted here.
+Root cause of the wider image difference remains open. Do not enable by default.
+Evidence: build/foliage-rays/acceptance/{surface,surface-repeat,surface-control}-
+0b684058-rays1.{png,log}. Test-FoliageRays now defaults to the unchanged path;
+the old rejected order requires explicit -EarlyOpaque. Renderer errors and an
+unexercised candidate reject the test instead of accepting a screenshot alone.
+
 ## Cold indoor-smoke build work, September 10
 
 4985db47 bounds the same seven shell samples to each component's conservative
