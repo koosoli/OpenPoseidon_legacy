@@ -252,4 +252,20 @@ mod tests {
         assert_eq!(visibility(false, 0.0, 0.0), 0.0);
         assert_eq!(visibility(true, 0.1, 1.0), 0.1);
     }
+
+    #[test]
+    fn road_and_terrain_share_snow_depth_evaluation() {
+        fn body(source: &str) -> String {
+            let start = source.find("fn snow_depth(").unwrap();
+            source[start..].split("\n}").next().unwrap().replace('\r', "")
+        }
+        assert_eq!(body(include_str!("conform.wgsl")),
+                   body(include_str!("../terrain/terrain.wgsl")));
+        let shader = include_str!("../gfx3d/shader3d.wgsl");
+        assert!(shader.contains("in.conform_w > 0.99 && snow_depth(in.world_pos.xz + frame.cam_pos.xz) >= 0.04"));
+        // Shading computes derivatives before the conditional discard.
+        let start = shader.find("fn fs_surface(").unwrap();
+        let surface = &shader[start..shader[start..].find("fn surface_pixel_depth(").unwrap() + start];
+        assert!(surface.find("out.color = shade_fragment(in);").unwrap() < surface.find("snow_depth(").unwrap());
+    }
 }

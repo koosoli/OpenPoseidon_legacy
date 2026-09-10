@@ -1839,6 +1839,16 @@ impl ConformGroup {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         });
         let params_buf = device.create_buffer(&wgpu::BufferDescriptor {
@@ -1865,6 +1875,13 @@ impl ConformGroup {
             view_formats: &[],
         });
         let dummy_view = dummy.create_view(&wgpu::TextureViewDescriptor::default());
+        // Zero depth exits before the variable-length deficit array is sampled.
+        let dummy_snow = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("wgr_3d_conform_dummy_snow"),
+            size: 32,
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("wgr_3d_conform_bind_dummy"),
             layout: &layout,
@@ -1876,6 +1893,10 @@ impl ConformGroup {
                 wgpu::BindGroupEntry {
                     binding: 1,
                     resource: params_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: dummy_snow.as_entire_binding(),
                 },
             ],
         });
@@ -1896,6 +1917,7 @@ impl ConformGroup {
         heightmap_view: &wgpu::TextureView,
         generation: u64,
         params: &crate::terrain::TerrainConformParams,
+        snow: &wgpu::Buffer,
     ) {
         queue.write_buffer(&self.params_buf, 0, bytemuck::bytes_of(params));
         if self.bind.is_none() || self.bound_gen != generation {
@@ -1910,6 +1932,10 @@ impl ConformGroup {
                     wgpu::BindGroupEntry {
                         binding: 1,
                         resource: self.params_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: snow.as_entire_binding(),
                     },
                 ],
             }));
@@ -6881,6 +6907,7 @@ impl Gfx3d {
         heightmap_view: &wgpu::TextureView,
         heightmap_gen: u64,
         conform_params: &crate::terrain::TerrainConformParams,
+        snow: &wgpu::Buffer,
         froxel_view: &wgpu::TextureView,
         sky_sh_buf: &wgpu::Buffer,
         skyvis_view: &wgpu::TextureView,
@@ -6900,7 +6927,7 @@ impl Gfx3d {
         // Lend the terrain heightmap + its sampling params to the mesh conform group
         // (group 4) so vs_main can conform ClipLand vegetation to SurfaceY per vertex.
         self.conform
-            .ensure(device, queue, heightmap_view, heightmap_gen, conform_params);
+            .ensure(device, queue, heightmap_view, heightmap_gen, conform_params, snow);
         // DZ-003: take Sky's reflection env map. The env texture is created once and never
         // resized, so gen 0 binds it exactly once and this is a no-op every frame after.
         // Both the per-draw group-1 binds (below) and the GPU-driven group-1 binds

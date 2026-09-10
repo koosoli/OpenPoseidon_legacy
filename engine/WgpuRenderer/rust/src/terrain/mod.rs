@@ -983,6 +983,10 @@ impl Terrain {
         }
     }
 
+    pub fn snow_buffer(&self) -> &wgpu::Buffer {
+        &self.snow_buffer
+    }
+
     pub fn set_heightmap(
         &mut self,
         device: &wgpu::Device,

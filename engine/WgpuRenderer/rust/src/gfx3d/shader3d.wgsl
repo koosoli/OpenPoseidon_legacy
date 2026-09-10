@@ -17,7 +17,7 @@
 #import shading::{shade, ShadeMaterial, surface_normal}
 // Group(4) terrain heightmap + surface_y, shared with the shadow depth pass.
 // surface_grad tilts conformed veg normals to follow the ground slope (color pass only).
-#import conform::{surface_y, surface_grad, surface_y_raster, hm_params}
+#import conform::{surface_y, surface_grad, surface_y_raster, hm_params, snow_depth}
 
 struct Object {
     world: mat4x4<f32>,
@@ -564,6 +564,12 @@ fn fs_surface(in: VsOut) -> SurfaceOut {
         return out;
     }
     out.color = shade_fragment(in);
+    // The road's distance-scaled depth lift is not physical elevation. Do not let
+    // it pull a ground-pinned road/decal through an opaque snow cover. Tracks and
+    // roof shelter use the same deficit buffer as the terrain; rigid bridges stay.
+    if (in.conform_w > 0.99 && snow_depth(in.world_pos.xz + frame.cam_pos.xz) >= 0.04) {
+        discard;
+    }
     out.depth = surface_pixel_depth(in);
     return out;
 }

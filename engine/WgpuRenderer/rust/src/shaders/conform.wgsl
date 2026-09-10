@@ -23,6 +23,33 @@ struct HmParams {
 @group(4) @binding(0) var hm: texture_2d<f32>;
 @group(4) @binding(1) var<uniform> hm_params: HmParams;
 
+struct SnowData {
+    info: vec4<f32>,
+    deficits: array<f32>,
+};
+@group(4) @binding(2) var<storage, read> snow: SnowData;
+
+// Same buffer and evaluation as terrain.wgsl. The source parity test keeps this
+// sampling identical despite the different bind-group locations of both pipelines.
+fn snow_depth(world_xz: vec2<f32>) -> f32 {
+    if (snow.info.w <= 0.0) { return 0.0; }
+    // Fixed world-space drifts; never camera/time noise. Keep the maximum at
+    // the CPU depth so culling bounds remain conservative.
+    let drift = 0.90 + 0.05 * sin(dot(world_xz, vec2<f32>(0.37, 0.81)))
+                     + 0.05 * sin(dot(world_xz, vec2<f32>(1.73, -0.79)));
+    let depth = snow.info.w * drift;
+    let t = (world_xz - snow.info.xy) / max(snow.info.z, 0.125) - vec2<f32>(0.5);
+    if (any(t < vec2<f32>(0.0)) || any(t >= vec2<f32>(511.0))) { return depth; }
+    let b = vec2<u32>(floor(t));
+    let f = fract(t);
+    let i = b.y * 512u + b.x;
+    let deficit = mix(mix(snow.deficits[i], snow.deficits[i + 1u], f.x),
+                      mix(snow.deficits[i + 512u], snow.deficits[i + 513u], f.x), f.y);
+    // Detail LOD only: leaving this window never deletes the persistent CPU track.
+    let edge = min(min(t.x, t.y), min(511.0 - t.x, 511.0 - t.y));
+    return max(0.0, depth - deficit * smoothstep(0.0, 24.0, edge));
+}
+
 fn hm_load(ix: i32, iz: i32) -> f32 {
     let cx = clamp(ix, 0, i32(hm_params.hm_width) - 1);
     let cz = clamp(iz, 0, i32(hm_params.hm_height) - 1);

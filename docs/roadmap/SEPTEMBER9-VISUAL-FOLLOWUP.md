@@ -167,6 +167,21 @@ the existing mission/task/FSM hierarchy, optional bounded group planning over
 existing commands, and matched many-unit CPU/GPU measurements before threading.
 It explicitly preserves baseline scripting, saves and authority semantics.
 
+Native Reforger current 12f6ada6 captures: Village 22.731 ms GPU, 22,360 registered
+instances, 7.907M main triangles; new fixed Forest pose (from PARKED) 23.381 ms,
+22,360 instances, 8.470M main triangles. Both complete/settled, DLSS Quality/MSAA4.
+Images inspected, flat native canopy reproduced. These are one-run baselines,
+not an optimization or a fixed-geometry comparison with historical runs.
+
+Snow-road reproduction at the reported Everon village: 0.3m accumulated snow
+hides the near road but the far view exposes it. Same binary with tiny road depth
+lift hides it at both ranges. Pending fix lends the existing terrain snow buffer
+to OnSurface fragment shading and rejects fully buried, ground-pinned fragments;
+no new texture/upload/pass. The dry path and rigid bridges retain their depth
+behaviour; roof/track deficits use identical depth evaluation, guarded by a parity
+test. This fixes artificial exposure, not salted-road accumulation. Installed
+snow/dry verification remains pending before acceptance.
+
 Owner authorised implementation after backup `codex/backup-asset-obs-20260909-bc766e19`.
 Worktree asset-obs only; foreign Cargo.lock excluded. Screenshots 070351, 070456,
 072225 and 073829 are reproduction evidence, not completion evidence.

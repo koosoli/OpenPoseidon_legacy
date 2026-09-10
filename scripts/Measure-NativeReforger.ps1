@@ -1,7 +1,7 @@
 param(
  [string]$Label='baseline',
  [ValidateRange(1,25)][int]$Repeats=2,
- [ValidateSet('Village','Coast')][string]$Pose='Village',
+ [ValidateSet('Village','Coast','Forest')][string]$Pose='Village',
  [hashtable]$Overrides=@{},
  [string]$ReforgerAddons='C:\Program Files (x86)\Steam\steamapps\common\Arma Reforger\addons'
 )
@@ -19,7 +19,11 @@ $settings=@{
  WGR_PASS1_STATS='1'
 }
 foreach ($key in $Overrides.Keys) {$settings[$key]=$Overrides[$key]}
-$camera=if ($Pose -eq 'Village') {@(5092.61,3995.64,18.3,200.9,-13.5)} else {@(3800,7960,4,40,-5)}
+$camera=switch ($Pose) {
+ 'Village' {@(5092.61,3995.64,18.3,200.9,-13.5)}
+ 'Coast' {@(3800,7960,4,40,-5)}
+ 'Forest' {@(4697.60,3998.02,50.23,220.6,-5.0)}
+}
 & "$PSScriptRoot/farfield-bench.ps1" -Label "$Pose-$Label" -Mission 'tests/perf/missions/perf_field.eden' `
  -World $ReforgerAddons -Freefly $camera -Out $out -Env $settings -Repeats $Repeats `
  -Width 1920 -Height 1080 -Windowed -WarmupSeconds 90 -TimeoutSeconds 300 -RequireAll
