@@ -217,6 +217,59 @@ TEST_CASE("DDS composition uses only its supplied reader", "[graphics][edds][str
     }
 }
 
+TEST_CASE("DDS composition freezes tint settings before its reader runs", "[graphics][edds][streaming]")
+{
+    const bool multiply = GENERATE(false, true);
+    const ScopedLayerTintMode mode(multiply);
+    const auto file = Bgra2x2();
+    std::vector<Poseidon::DDSMipLevel> expected(1);
+    expected[0].width = expected[0].height = 2;
+    expected[0].data.assign(file.end() - 16, file.end());
+    const float tint[3] = {0.5f, 0.25f, 0.125f};
+    Poseidon::ApplyEnfusionLayerTint(expected, tint);
+    const auto name = Poseidon::Enfusion::MakeLayerTintName(tint, "colour.edds");
+    TextureSourceDDS source;
+    PacLevelMem mips[16];
+    REQUIRE(source.InitFromReader(name.c_str(), mips, 16,
+        [&](const char*, std::vector<uint8_t>& out) {
+            Poseidon::Enfusion::GLayerTintLinearMultiply.store(multiply ? 0 : 1);
+            out = file;
+            return true;
+        }));
+    mips[0]._dFormat = PacARGB8888;
+    mips[0]._pitch = 8;
+    std::vector<uint8_t> pixels(16);
+    REQUIRE(source.GetMipmapData(pixels.data(), mips[0], 0));
+    CHECK(pixels == expected[0].data);
+}
+
+TEST_CASE("DDS composition uses supplied compression settings and rejects invalid limits", "[graphics][edds][streaming]")
+{
+    auto file = Header(4, 4, 1, "DX10");
+    for (uint32_t word : {80u, 3u, 0u, 1u, 0u, 0x59504F43u, 8u}) AppendU32(file, word);
+    file.insert(file.end(), 8, 0); // BC4 zero block
+    int reads = 0;
+    const TextureSourceDDS::Reader reader = [&](const char*, std::vector<uint8_t>& out) {
+        ++reads;
+        out = file;
+        return true;
+    };
+    for (bool compressed : {false, true}) {
+        auto options = Poseidon::CaptureDdsPreparationOptions();
+        options.compressedPassthrough = compressed;
+        TextureSourceDDS source;
+        PacLevelMem mips[16];
+        REQUIRE(source.InitFromReader("mask.edds", mips, 16, reader, options));
+        CHECK((source.GetFormat() == PacARGB8888) == !compressed);
+        for (int invalid : {0, 63, 8193}) {
+            options.decodedMaxEdge = invalid;
+            const int previousReads = reads;
+            CHECK_FALSE(source.InitFromReader("mask.edds", mips, 16, reader, options));
+            CHECK(reads == previousReads);
+        }
+    }
+}
+
 TEST_CASE("Reusable DDS payloads preserve source identity and independent pixels", "[graphics][edds][streaming]")
 {
     auto& store = Poseidon::render::PreparedTextureStore::Instance();
@@ -530,7 +583,7 @@ TEST_CASE("Enfusion composite names nest: tint outside coverage", "[graphics][ed
 
     // An untinted name passes through untouched, which is what keeps every non-Enfusion
     // world inert: nothing else in the engine ever builds one of these.
-    const char* plain = "data\wall.paa";
+    const char* plain = "data\\wall.paa";
     REQUIRE(Poseidon::Enfusion::SkipLayerTint(plain) == plain);
     REQUIRE(!Poseidon::Enfusion::SplitLayerTintName(plain, back, &rest));
     REQUIRE(!Poseidon::Enfusion::SplitLayerTintName("enft|0.5,0.5,0.5", back, &rest)); // no inner

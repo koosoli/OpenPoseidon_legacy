@@ -60,6 +60,16 @@ bool IsEnfusionRgNormalName(const char* name);
 // B,G,R buffer turns beige walls blue -- which looks like a working tint until you look.
 void ApplyEnfusionLayerTint(std::vector<DDSMipLevel>& levels, const float rgb[3]);
 
+// Capture once at admission; retain with any future prepared result so consumers
+// can reject a result made for another material interpretation.
+struct DdsPreparationOptions
+{
+    bool compressedPassthrough;
+    bool linearTintMultiply;
+    int decodedMaxEdge;
+};
+DdsPreparationOptions CaptureDdsPreparationOptions();
+
 class TextureSourceDDS : public ITextureSource
 {
     friend class render::PreparedTextureStore;
@@ -73,6 +83,8 @@ class TextureSourceDDS : public ITextureSource
     bool _hasAlpha = false;
     bool _isTransparent = false;
     PackedColor _avgColor{};
+    bool InitFromMemoryWithOptions(const void* data, size_t size, const char* nameForErrors,
+                                  bool forceDecode, const DdsPreparationOptions& options);
 
   public:
     TextureSourceDDS();
@@ -83,7 +95,8 @@ class TextureSourceDDS : public ITextureSource
     // this synchronous call. A failed read never falls through to GFileServer.
     // This does not itself enqueue work or make a supplied reader thread-safe.
     using Reader = std::function<bool(const char*, std::vector<uint8_t>&)>;
-    bool InitFromReader(const char* name, PacLevelMem* mips, int maxMips, const Reader& reader);
+    bool InitFromReader(const char* name, PacLevelMem* mips, int maxMips, const Reader& reader,
+                        DdsPreparationOptions options = CaptureDdsPreparationOptions());
 
     int GetMipmapCount() const override { return _mipmaps; }
     PacFormat GetFormat() const override { return _pacFormat; }

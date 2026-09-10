@@ -11,6 +11,17 @@ that baseline. Analysis requested first; implementation subsequently authorised.
 
 ## Evidence limits
 
+September 11 DDS prerequisite after 55f9b87f: InitFromReader takes an owned
+DdsPreparationOptions snapshot (compression, tint mode, decoded edge). Colour,
+coverage and tint all use that snapshot; invalid edge limits fail before I/O.
+Three formerly non-atomic diagnostic counters now allow concurrent callers.
+Synthetic tests change the live tint mode inside the reader and check exact
+pixels for both modes; supplied compression and invalid limits are also covered.
+This is NOT worker activation, a new scheduler, a full thread-safety audit, or
+evidence of reduced loading stalls. Prepared-result ownership/config matching,
+worker exception handling and native archive lifetime remain integration gates.
+Installed runtime verification of this increment is pending.
+
 September 11 correction: generated unversioned graphics.cfg files underwent
 GraphicsConfig migration, replacing fpsCap=0 with 144 on this machine. Earlier
 material/native/CPU harness captures are not demonstrated uncapped runs, even

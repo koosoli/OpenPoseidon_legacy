@@ -255,7 +255,7 @@ std::atomic<bool> GDdsCompressedPassthrough{false};
 //!     changing colour as you walk away from it.
 //!   * alpha is not touched. Coverage arrives through `enfa|` (already merged by the time
 //!     this runs) or not at all, and the fourth channel of a `_BCR` is roughness.
-void ApplyEnfusionLayerTint(std::vector<DDSMipLevel>& levels, const float rgb[3])
+static void ApplyEnfusionLayerTintWithMode(std::vector<DDSMipLevel>& levels, const float rgb[3], bool linearMultiply)
 {
     if (levels.empty())
         return;
@@ -297,7 +297,7 @@ void ApplyEnfusionLayerTint(std::vector<DDSMipLevel>& levels, const float rgb[3]
     //
     // Per-texel through a 256-entry LUT, so the tile keeps its grain in LINEAR terms rather
     // than having its gamma-space grain scaled; that is what a tint physically is.
-    if (Poseidon::Enfusion::LayerTintLinearMultiply())
+    if (linearMultiply)
     {
         for (int c = 0; c < 3; ++c)
         {
@@ -329,6 +329,16 @@ void ApplyEnfusionLayerTint(std::vector<DDSMipLevel>& levels, const float rgb[3]
             for (size_t at = byte; at < level.data.size(); at += 4)
                 level.data[at] = static_cast<uint8_t>(std::clamp(level.data[at] * gain + 0.5, 0.0, 255.0));
     }
+}
+
+void ApplyEnfusionLayerTint(std::vector<DDSMipLevel>& levels, const float rgb[3])
+{
+    ApplyEnfusionLayerTintWithMode(levels, rgb, Enfusion::LayerTintLinearMultiply());
+}
+
+DdsPreparationOptions CaptureDdsPreparationOptions()
+{
+    return {DdsCompressedPassthrough(), Enfusion::LayerTintLinearMultiply(), DecodedMaxEdge()};
 }
 
 void SetDdsCompressedPassthrough(bool on)
@@ -370,6 +380,12 @@ TextureSourceDDS::TextureSourceDDS() = default;
 TextureSourceDDS::~TextureSourceDDS() = default;
 
 bool TextureSourceDDS::InitFromMemory(const void* data, size_t size, const char* nameForErrors, bool forceDecode)
+{
+    return InitFromMemoryWithOptions(data, size, nameForErrors, forceDecode, CaptureDdsPreparationOptions());
+}
+
+bool TextureSourceDDS::InitFromMemoryWithOptions(const void* data, size_t size, const char* nameForErrors,
+                                               bool forceDecode, const DdsPreparationOptions& options)
 {
     const char* who = nameForErrors ? nameForErrors : "?";
 
@@ -415,9 +431,9 @@ bool TextureSourceDDS::InitFromMemory(const void* data, size_t size, const char*
     // decoded upload of the same file describe the SAME image at the SAME resolution, so
     // the difference between them is bytes and nothing else -- which is the only way the
     // saving can be quoted as a number rather than as a trade.
-    const auto capLevels = [this]
+    const auto capLevels = [this, &options]
     {
-        const int maxEdge = DecodedMaxEdge();
+        const int maxEdge = options.decodedMaxEdge;
         size_t firstLevel = 0;
         while (firstLevel + 1 < _levels.size() &&
                (_levels[firstLevel].width > maxEdge || _levels[firstLevel].height > maxEdge))
@@ -457,7 +473,7 @@ bool TextureSourceDDS::InitFromMemory(const void* data, size_t size, const char*
     // IsEnfusionRgNormalName and the section flag it feeds.
     const bool dxgiBlock =
         _format == PixelFormat::BC4 || _format == PixelFormat::BC5 || _format == PixelFormat::BC7;
-    if (dxgiBlock && !forceDecode && DdsCompressedPassthrough())
+    if (dxgiBlock && !forceDecode && options.compressedPassthrough)
     {
         capLevels();
         // RFG-094: alpha that is DATA, not coverage, by the name's packing suffix. `_bcr`
@@ -522,10 +538,10 @@ bool TextureSourceDDS::InitFromMemory(const void* data, size_t size, const char*
             _mipmaps = static_cast<int>(_levels.size());
             _isTransparent = false;
             {
-                static int reportedPassthrough = 0;
-                if (reportedPassthrough < 8)
+                static std::atomic<unsigned> reportedPassthrough{0};
+                if (reportedPassthrough.load(std::memory_order_relaxed) < 8 &&
+                    reportedPassthrough.fetch_add(1, std::memory_order_relaxed) < 8)
                 {
-                    ++reportedPassthrough;
                     LOG_INFO(Graphics, "EDDS {}: {}x{} format {} uploaded COMPRESSED ({} levels, {} bytes)", who, _w,
                              _h, static_cast<int>(_format), _mipmaps, [&]
                              {
@@ -538,10 +554,10 @@ bool TextureSourceDDS::InitFromMemory(const void* data, size_t size, const char*
             }
             return true;
         }
-        static int reportedDecline = 0;
-        if (reportedDecline < 8)
+        static std::atomic<unsigned> reportedDecline{0};
+        if (reportedDecline.load(std::memory_order_relaxed) < 8 &&
+            reportedDecline.fetch_add(1, std::memory_order_relaxed) < 8)
         {
-            ++reportedDecline;
             LOG_INFO(Graphics, "EDDS {}: format {} has live alpha -- decoding rather than passing blocks through", who,
                      static_cast<int>(_format));
         }
@@ -646,10 +662,10 @@ bool TextureSourceDDS::InitFromMemory(const void* data, size_t size, const char*
                     level.data[i + 3] = level.data[i + 2]; // ARGB8888 in memory is B,G,R,A
         }
         {
-            static int reportedNormal = 0;
-            if (reportedNormal < 4 && IsEnfusionRgNormalName(who))
+            static std::atomic<unsigned> reportedNormal{0};
+            if (IsEnfusionRgNormalName(who) && reportedNormal.load(std::memory_order_relaxed) < 4 &&
+                reportedNormal.fetch_add(1, std::memory_order_relaxed) < 4)
             {
-                ++reportedNormal;
                 LOG_INFO(Graphics, "EDDS normal map {}: source format {} decoded to 32-bit", who,
                          static_cast<int>(_format));
             }
@@ -724,9 +740,11 @@ bool TextureSourceDDS::Init(const char* name, PacLevelMem* mips, int maxMips)
     return InitFromReader(name, mips, maxMips, SlurpFile);
 }
 
-bool TextureSourceDDS::InitFromReader(const char* name, PacLevelMem* mips, int maxMips, const Reader& reader)
+bool TextureSourceDDS::InitFromReader(const char* name, PacLevelMem* mips, int maxMips, const Reader& reader,
+                                    DdsPreparationOptions options)
 {
-    if (!name || maxMips < 0 || (!mips && maxMips > 0) || !reader)
+    if (!name || maxMips < 0 || (!mips && maxMips > 0) || !reader ||
+        options.decodedMaxEdge < 64 || options.decodedMaxEdge > 8192)
         return false;
     DdsPreparationTrace trace(name);
     _name = name;
@@ -808,7 +826,7 @@ bool TextureSourceDDS::InitFromReader(const char* name, PacLevelMem* mips, int m
         return value && std::strcmp(value, "1") == 0; // Experimental until byte/performance A/B acceptance.
     }();
     const bool reusable = reuseTintDecode && tinted && !composite && !IsEnfusionRgNormalName(name);
-    const std::string reuseKey = reusable ? "dds-decode|" + std::to_string(DecodedMaxEdge()) + "|" +
+    const std::string reuseKey = reusable ? "dds-decode|" + std::to_string(options.decodedMaxEdge) + "|" +
                                            render::PreparedTextureStore::Key(name) : "";
     auto& prepared = render::PreparedTextureStore::Instance();
     trace.reusedDecode = reusable && prepared.CopyDdsDecode(reuseKey, buffer, *this);
@@ -819,7 +837,7 @@ bool TextureSourceDDS::InitFromReader(const char* name, PacLevelMem* mips, int m
     if (trace.reusedDecode && verifyReuse)
     {
         TextureSourceDDS reference;
-        bool same = reference.InitFromMemory(buffer.data(), buffer.size(), name, true) &&
+        bool same = reference.InitFromMemoryWithOptions(buffer.data(), buffer.size(), name, true, options) &&
                     reference._format == _format && reference._pacFormat == _pacFormat &&
                     reference._w == _w && reference._h == _h && reference._mipmaps == _mipmaps &&
                     reference._hasAlpha == _hasAlpha && reference._isTransparent == _isTransparent &&
@@ -832,13 +850,13 @@ bool TextureSourceDDS::InitFromReader(const char* name, PacLevelMem* mips, int m
         LOG_INFO(Graphics, "DDS tint reuse verification: {} name='{}'", same ? "identical" : "MISMATCH", name);
         if (!same)
         {
-            if (!InitFromMemory(buffer.data(), buffer.size(), name, true)) return false;
+            if (!InitFromMemoryWithOptions(buffer.data(), buffer.size(), name, true, options)) return false;
             trace.reusedDecode = false;
         }
     }
     if (!trace.reusedDecode)
     {
-        if (!InitFromMemory(buffer.data(), buffer.size(), name, /*forceDecode=*/composite || tinted))
+        if (!InitFromMemoryWithOptions(buffer.data(), buffer.size(), name, /*forceDecode=*/composite || tinted, options))
             return false;
         if (reusable) prepared.PutDdsDecode(reuseKey, buffer, *this);
     }
@@ -852,8 +870,8 @@ bool TextureSourceDDS::InitFromReader(const char* name, PacLevelMem* mips, int m
         trace.inputBytes += coverageBytes.size();
         trace.Mark(trace.coverageRead);
         const bool coverageDecoded = coverageRead &&
-            coverage.InitFromMemory(coverageBytes.data(), coverageBytes.size(), compositeCoverage.c_str(),
-                                    /*forceDecode=*/true) &&
+            coverage.InitFromMemoryWithOptions(coverageBytes.data(), coverageBytes.size(), compositeCoverage.c_str(),
+                                               /*forceDecode=*/true, options) &&
             !coverage._levels.empty();
         trace.Mark(trace.coverageDecode);
         if (coverageDecoded)
@@ -945,7 +963,7 @@ bool TextureSourceDDS::InitFromReader(const char* name, PacLevelMem* mips, int m
     // change, and the next person to read this would have to prove that does not matter.
     if (tinted)
     {
-        ApplyEnfusionLayerTint(_levels, layerTint);
+        ApplyEnfusionLayerTintWithMode(_levels, layerTint, options.linearTintMultiply);
         // The distant-LOD stand-in is derived from the pixels, so it has to be re-derived
         // from the tinted ones. Left alone it hands the far tier the SHARED tile's colour,
         // which is the whole defect this exists to fix, just at a distance.
