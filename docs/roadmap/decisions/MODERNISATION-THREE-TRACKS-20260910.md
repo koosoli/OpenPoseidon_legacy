@@ -446,3 +446,9 @@ Next reuse already decoded shared native tiles within existing ownership/budgets
 or prepare one owned DDS payload ahead of bank registration; never call the
 file server/texture bank from arbitrary worker threads. Far cluster HLOD remains
 a separate, visually gated experiment, not something the Satmap already does.
+
+Final default acceptance: ae8c90fa installed 16:53, native route
+cancel-20260910-165344-legacy-tables-dds-prep-bc7-default with no BC7 override,
+exit 0, complete camera route, no validation failures/timeout/contention,
+22370 registered instances. Ocean endpoint image inspected; not village quality
+proof. Combined BC/EDDS/DDS/PAA/preparer unit suite: 81 cases / 10314 assertions.

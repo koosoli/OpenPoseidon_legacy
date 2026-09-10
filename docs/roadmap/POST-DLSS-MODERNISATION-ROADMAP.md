@@ -45,6 +45,17 @@ work to do, not a completion claim implicit in editing this document.
 September 10 measured follow-through (supersedes only the named older pending
 entries, not whole phases):
 
+- Native BC7 preparation now uses bounded row batches on the existing TaskPool
+  for large main-thread decodes. Three matched route pairs reduce exact logged
+  moving maxima 277/254/276 -> 162/166/184 ms, with 1882 real-mip byte comparisons
+  against serial. No consistent FPS/p99 or memory win is claimed. See
+  [the three-track assessment](decisions/MODERNISATION-THREE-TRACKS-20260910.md).
+  This does not complete asynchronous DDS preparation, global byte budgets or
+  the full campaign/Fusion workload census, and does not parallelise AI.
+- AI88 decode precision is restored: the accidental ARGB4444 intermediate
+  discarded four intensity/alpha bits. Buffer and selected mip now retain all
+  256 levels. The reported road/RPG screenshots still need asset attribution;
+  fixing this format-specific defect is not proof that every texture issue is gone.
 - Near-water highlight lattice: the dynamics bicubic filter was still wrong
   after the displacement fix. 2601365f corrects it with the same four fetches;
   installed native before/after plus DLSS follow-up accepted. Far facets and

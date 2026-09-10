@@ -35,6 +35,13 @@ on f79ac2a9 reduced exact logged moving maxima 277.286/254.484/275.880 ms to
 the accepted benefit is shorter loading spikes without reducing texture data.
 BC7 batching now defaults ON; explicit 0 is the serial control, 2 the oracle.
 The complete run table and remaining gates are in the three-track assessment.
+Final default installed as ae8c90fa at 16:53. Native route
+cancel-20260910-165344-legacy-tables-dds-prep-bc7-default (no BC7 override) completed,
+exit 0, no contention/timeout/renderer failures; 22370 registered instances.
+Image inspected: ocean endpoint, not a distant-settlement quality acceptance.
+Final combined BC/EDDS/DDS/PAA/preparer suite: 81 cases / 10314 assertions;
+additional alpha tag: 3 cases / 6 assertions. Cargo.lock SHA256 remains
+9A4E74D791B26A4303E064867DA67B862C1439D0635DF3E19ED5A97AADF31A2E.
 
 ## Three-track audit and streaming lifecycle, September 10
 
