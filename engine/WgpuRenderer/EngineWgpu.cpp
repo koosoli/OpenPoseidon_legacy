@@ -39,6 +39,7 @@
 #include <Poseidon/Dev/Diag/LightingDiag.hpp>
 #include <Poseidon/Graphics/Shadow/ShadowMath.hpp> // per-frame local-light gauges (Forward+ gate evidence)
 #include <Poseidon/Graphics/Shadow/ShadowBasis.hpp>
+#include <Poseidon/Graphics/Shadow/LocalShadowReach.hpp>
 #include <Poseidon/Graphics/Rendering/Frame/PresentationSnapshot.hpp> // RenderSnapshot S1: the frame's environment block
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
 #include <Poseidon/World/MapTypes.hpp>                         // MapBush (spherical/canopy-normal flagging)
@@ -1888,13 +1889,25 @@ bool EngineWgpu::SetSwapInterval(int interval)
 // each shadowing light's reach -- deliberately generous (it ignores the cone, so a caster
 // beside the beam is still submitted) because the cost of a false positive is one clipped
 // draw and the cost of a false negative is a missing shadow, which is a visible bug.
+float EngineWgpu::LocalShadowReachFor(int k) const
+{
+    static const bool matchLight = [] {
+        const char* value = std::getenv("WGR_MATCH_LOCAL_SHADOW_REACH");
+        return !value || std::atoi(value) != 0;
+    }();
+    const auto& settings = Poseidon::Dev::GLocalShadowSettings();
+    const auto& light = _localShadowLights[k];
+    return Poseidon::shadow::LocalShadowReach(light.startAtten, light.endAttenScale,
+                                            settings.rangeScale, settings.rangeMax, matchLight);
+}
+
 Poseidon::shadow::Mat4 EngineWgpu::LocalShadowVP(int k, const float camPos[3]) const
 {
     const Poseidon::Dev::LocalShadowSettings& ls = Poseidon::Dev::GLocalShadowSettings();
     const LocalShadowLight& L = _localShadowLights[k];
     // The light's own reach. Past it the light contributes nothing, so rendering casters
     // further away spends depth on invisible geometry.
-    const float reach = std::clamp(L.startAtten * ls.rangeScale, 2.0f, ls.rangeMax);
+    const float reach = LocalShadowReachFor(k);
     const Poseidon::shadow::Vec3 pos{L.pos[0], L.pos[1], L.pos[2]};
     const Poseidon::shadow::Vec3 cam{camPos[0], camPos[1], camPos[2]};
     if (L.cubeFace >= 0)
@@ -1930,6 +1943,7 @@ uint64_t EngineWgpu::LocalShadowLightKey(int k) const
     h = mix(h, q(L.dir[2], 1000.0f));
     h = mix(h, q(L.coneOuter, 1000.0f));
     h = mix(h, q(L.startAtten, 100.0f));
+    h = mix(h, q(LocalShadowReachFor(k), 100.0f));
     h = mix(h, static_cast<uint64_t>(L.cubeFace + 1));
     // The settings the matrix is BUILT from. Change the range or the near plane in the Lighting
     // tab and every cached tile is wrong; without this the sliders would appear to do nothing.
@@ -1964,7 +1978,7 @@ uint32_t EngineWgpu::LocalShadowCasterMask(float relX, float relY, float relZ) c
     for (int k = 0; k < _localShadowCount && k < kMaxLocalShadows; k++)
     {
         const LocalShadowLight& L = _localShadowLights[k];
-        const float reach = std::clamp(L.startAtten * ls.rangeScale, 2.0f, ls.rangeMax);
+        const float reach = LocalShadowReachFor(k);
         const float dx = (relX + _smCamPos[0]) - L.pos[0];
         const float dy = (relY + _smCamPos[1]) - L.pos[1];
         const float dz = (relZ + _smCamPos[2]) - L.pos[2];
@@ -3536,6 +3550,7 @@ void EngineWgpu::NextFrame()
                         L.dir[0] = src.dir.X(), L.dir[1] = src.dir.Y(), L.dir[2] = src.dir.Z();
                         L.coneOuter = src.coneOuter;
                         L.startAtten = src.startAtten;
+                        L.endAttenScale = src.spot ? 10.0f : src.endAttenScale;
                         L.cubeFace = src.spot ? -1 : f;
                     }
                 }
@@ -3547,6 +3562,17 @@ void EngineWgpu::NextFrame()
                 _lights.push_back(pl);
             }
             _localShadowCount = localShadowSlots;
+            if (std::getenv("WGR_LOCAL_REACH_TRACE"))
+            {
+                static unsigned int traceFrame = 0;
+                if ((traceFrame++ % 120) == 0)
+                    for (int k = 0; k < _localShadowCount; ++k)
+                        if (_localShadowLights[k].cubeFace <= 0)
+                            LOG_INFO(Graphics, "Local reach: slot={} start={} endScale={} shadow={} pos=({},{},{})",
+                                     k, _localShadowLights[k].startAtten, _localShadowLights[k].endAttenScale,
+                                     LocalShadowReachFor(k), _localShadowLights[k].pos[0],
+                                     _localShadowLights[k].pos[1], _localShadowLights[k].pos[2]);
+            }
             localShadow.candidatesSeen += static_cast<long long>(snap.lightCandidates);
             localShadow.lightsShadowed += localShadowSlots;
             if (localShadowSlots > 0)

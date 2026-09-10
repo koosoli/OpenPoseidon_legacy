@@ -1,7 +1,8 @@
-param([switch]$LightsOff,
+param([switch]$LightsOff, [switch]$LocalReachControl, [switch]$LocalReachMatched,
       [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
+if ($LocalReachControl -and $LocalReachMatched) {throw 'Select one reach comparison arm'}
 $root=Split-Path $PSScriptRoot -Parent
 $output=Join-Path $root 'build/freefly-lights/acceptance'
 $env:POSEIDON_USER_DIR=Join-Path $output 'user'
@@ -13,6 +14,12 @@ $env:WGR_EXPOSURE='2'
 $env:WGR_STATIC_LIGHT_TRACE='1'
 $env:POSEIDON_BULB_GLOW_DIAG='1'
 $name=if ($LightsOff) {'truck-off'} else {'truck-on'}
+if ($LocalReachControl -or $LocalReachMatched) {
+    $env:WGR_LOCAL_REACH_TRACE='1'
+    $env:WGR_MATCH_LOCAL_SHADOW_REACH=if ($LocalReachMatched) {'1'} else {'0'}
+    $prefix=if ($LocalReachMatched) {'reach-matched-'} else {'reach-control-'}
+    $name=$prefix+$name
+}
 $log=Join-Path $output "$name.log"
 $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0)
 $listener.Start(); $port=$listener.LocalEndpoint.Port; $listener.Stop()
@@ -64,6 +71,9 @@ try {
     }
     $null=Send @{cmd='exit'}
     if (!$p.WaitForExit(20000) -or $p.ExitCode -ne 0) {throw 'Game exit failed'}
+    if (Select-String -LiteralPath $log -Pattern 'Validation Error|panicked at|DeviceLost' -Quiet) {throw 'Light renderer error'}
+    if (($LocalReachControl -or $LocalReachMatched) -and
+        !(Select-String -LiteralPath $log -SimpleMatch 'Local reach: slot=' -Quiet)) {throw 'No shadow light exercised'}
     $selection=(Select-String -LiteralPath $log -Pattern 'local-light selection' | Select-Object -Last 1).Line
     $expected=if ($LightsOff) {40} else {42}
     if ($selection -notmatch "candidates=$expected selected=$expected ") {throw "Light control did not hold: $selection"}

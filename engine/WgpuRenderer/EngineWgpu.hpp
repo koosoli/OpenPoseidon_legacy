@@ -1545,6 +1545,7 @@ class EngineWgpu : public EngineDummy
         float dir[3] = {0.0f, -1.0f, 0.0f};
         float coneOuter = 0.0f;  // outer half angle, radians
         float startAtten = 0.0f; // the light's own reach, before the range multiplier
+        float endAttenScale = 10.0f;
         //! LGT-015: -1 = this view is a spot's cone; 0..5 = this view is one cube face of a
         //! point light, in PointFaceVP's order.
         int cubeFace = -1;
@@ -1552,6 +1553,7 @@ class EngineWgpu : public EngineDummy
     LocalShadowLight _localShadowLights[kMaxLocalShadows] = {};
     //! LGT-010: the shadow-view bits a caster at this position belongs in.
     uint32_t LocalShadowCasterMask(float relX, float relY, float relZ) const;
+    float LocalShadowReachFor(int k) const;
     //! NV-001: POSEIDON_NV_FORCE=1, so the goggles can be captured without a player.
     static bool NightVisionForced();
     //! LGT-025: view-projection for local view `k`, cone or cube face, expressed relative to

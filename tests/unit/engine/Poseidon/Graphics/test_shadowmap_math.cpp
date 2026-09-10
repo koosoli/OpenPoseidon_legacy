@@ -3,6 +3,7 @@
 
 #include <Poseidon/Graphics/Shadow/ShadowMath.hpp>
 #include <Poseidon/Graphics/Shadow/ShadowBasis.hpp>
+#include <Poseidon/Graphics/Shadow/LocalShadowReach.hpp>
 #include <limits>
 
 #include <cmath>
@@ -18,6 +19,30 @@
 // "correct occlusion" objectively.
 
 using namespace Poseidon::shadow;
+
+TEST_CASE("Local shadow reach can follow light attenuation within its budget", "[Graphics][ShadowMath][LocalReach]")
+{
+    CHECK(LocalShadowReach(5, 10, 6, 180, false) == 30);
+    CHECK(LocalShadowReach(5, 10, 6, 180, true) == 50);
+    CHECK(LocalShadowReach(2, 50, 6, 180, true) == 100);
+    CHECK(LocalShadowReach(368, 10, 6, 180, true) == 180);
+    CHECK(LocalShadowReach(5, 10, 12, 180, true) == 60);
+    CHECK(LocalShadowReach(5, 0, 6, 180, true) == 50);
+    CHECK(LocalShadowReach(0, 10, 6, 180, true) == 2);
+    CHECK(LocalShadowReach(5, 10, 6, 1, true) == 2);
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    CHECK(LocalShadowReach(nan, 10, 6, 180, true) == 2);
+    CHECK(LocalShadowReach(5, nan, nan, nan, true) == 50);
+    // Every bounded source stays in budget; the legacy arm is unchanged.
+    for (int start = 0; start < 400; ++start)
+    {
+        const float legacy = LocalShadowReach(static_cast<float>(start), 10, 6, 180, false);
+        const float matched = LocalShadowReach(static_cast<float>(start), 10, 6, 180, true);
+        CHECK(legacy == std::clamp(start * 6.0f, 2.0f, 180.0f));
+        CHECK(matched >= legacy);
+        CHECK(matched <= 180);
+    }
+}
 
 TEST_CASE("Local shadow basis guard detects receiver origin errors", "[Graphics][ShadowMath][ShadowBasis]")
 {

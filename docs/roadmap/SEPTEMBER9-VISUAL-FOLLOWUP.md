@@ -1,5 +1,56 @@
 # September 9 visual follow-up
 
+## Parked DDS test resolved, September 10
+
+The previous order-dependence diagnosis was not supported by reproduction.
+The failing synthetic_dxt5 roundtrip carried [.fixture], excluding it from the
+unfiltered suite, while an explicit [DDS] selection includes hidden cases.
+It expected 64x64 from the 32x32 DXT5 source (the neighbouring DXT1 fixture is
+64x64). The other DXT5 decoder/format tests already explicitly require 32x32.
+No texture converter or source fixture was changed.
+
+The regression now checks independent PAA metadata for 32x32, the 1024-byte
+top-level block payload, exact dimensions and raw bytes of every DDS mip. Removed
+the hidden tag because this test writes only an RAII temporary file, not a
+repository fixture. Before: [DDS] 16/17 cases pass, 32==64 failure reproduced.
+After: shuffled [DDS] seed 10910 passes 17 cases / 151 assertions; isolated
+regression passes 31 assertions. The obsolete parked entry is removed rather
+than leaving a completed defect presented as open.
+
+## Bounded local-light shadow reach, September 10
+
+Lighting uses a per-point endAttenScale (spots use 10), but local shadows used
+only the unrelated rangeScale=6. A counted Everon lamp has start=9 and scale
+55.555553: lighting reaches 500m while shadow projection/caster admission ended
+at 54m. LocalShadowReach now uses at least the light multiplier, with the existing
+180m cap retained. Projection, direct caster admission and cache key share the
+same result. WGR_MATCH_LOCAL_SHADOW_REACH=0 retains the old comparison arm.
+1210 native assertions pass, including legacy parity, malformed inputs and caps.
+
+Same installed 5a303ce5+dirty binary: truck-on actual Zeus near/far/return A/B
+retains all 42 candidates/selected lights and the live player; all exits 0,
+no renderer errors. Inspected near captures show the shadow continuing onto the
+hillside rather than stopping at the smaller projection. The lamp trace confirms
+54 -> 180m, while capped truck lights remain 180m. This does not reproduce or
+close the owner's intermittent missing-village-light report.
+
+Measure-LocalShadowReach.ps1: two 60-second settled native captures per arm,
+1280x720 MSAA4, same camera/profile. Cached arms have 52507 registered / 16806
+main instances each. Local-shadow timer -1 is skipped/unavailable, not a zero-cost
+claim; whole GPU frame control 9.830/8.953ms, matched 10.164/9.779ms.
+Forced-refresh arms have 52507 registered / 16245 main each: local-shadow GPU
+control .76/.74ms, matched .76/.78ms; CPU .09/.08 versus .09/.10ms. Whole frames
+11.027/11.164 versus 11.305/11.741ms. Do not compare the changed main-instance set
+across cache modes or claim a speedup. Bounded reach matching is accepted as the
+default correction. Final default build and installed truck-on Zeus smoke pass
+(74625b20+dirty): no opt-in environment value, trace confirms 180m, all 42 lights
+remain selected, live player preserved, far/return images inspected, exit 0.
+Full ShadowMath filter passes 48 cases / 1891 assertions. Beyond 180m and shadow
+light-budget selection remain limitations, not fixed by increasing this multiplier.
+
+Evidence: build/freefly-lights/acceptance/reach-{control,matched}-truck-on-* and
+build/local-shadow-reach/{control,matched,control-refresh,matched-refresh}.
+
 ## Snow settings reset gap, September 10
 
 The master reset omitted all six snow settings. ResetSettings now copies their

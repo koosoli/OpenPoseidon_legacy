@@ -159,18 +159,19 @@ struct LocalShadowSettings
     // spent between the near plane and a few times its distance, so this is NOT "as small as
     // possible": 1 cm on a 40 m beam is shadow acne.
     float nearD = 0.35f;    //!< POSEIDON_LOCAL_SHADOW_NEAR
-    // How far the shadow reaches, as a multiple of the light's own attenuation start. Past
-    // its own reach a light contributes nothing, so rendering casters there is wasted depth.
+    // Shadow distance multiplier, not necessarily the lighting shader's actual cutoff.
+    // The matched-reach path takes at least the light's own multiplier, still capped.
+    // WGR_MATCH_LOCAL_SHADOW_REACH=0 restores the legacy multiplier-only control.
     float rangeScale = 6.0f;//!< POSEIDON_LOCAL_SHADOW_RANGE
     // ...but never past this, whatever the light claims. `startAtten` means different things
     // to different light kinds -- LightPoint makes it 50 x brightness while LightReflector
     // makes it 200 / sqrt(brightness), which measured 368 m for a hand-held torch. A shadow
-    // map stretched over two kilometres has metre-wide texels and resolves nothing; the cap
-    // is what keeps the depth precision where the light actually falls.
+    // map that admits geometry over kilometres also increases caster workload. The cap
+    // bounds that work and the depth interval, but can truncate still-visible shadows.
     // The owner's report: "die schatten von fahrzeugen gehen nicht weit genug". 90 m was
     // chosen to keep the depth precision usable, not from anything a headlight needs; a beam
     // reaches further than that down a road. Raised, and still a lever, because the trade is
-    // real: doubling the range halves the effective texel density.
+    // real. Perspective angular texel density does not simply halve with the far plane.
     float rangeMax = 180.0f; //!< POSEIDON_LOCAL_SHADOW_RANGE_MAX, metres
     float darkness = 1.0f;  //!< POSEIDON_LOCAL_SHADOW_DARKNESS: 0 = no occlusion, 1 = full
     // LGT-026 -- a street lamp does not move, and neither does the house beside it, so its six
