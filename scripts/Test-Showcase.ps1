@@ -54,22 +54,30 @@ try {
   Send @{cmd='eval';code='typeOf labGlass'} '"LabPanelGlass"'
   Send @{cmd='exec';code='hint ""; [player,player,labGlassVisit] exec "action.sqs"'}
   Start-Sleep -Seconds 3
-  Send @{cmd='exec';code='hint ""; player setPos [9575,3501,0]; player setDir 0; player switchCamera "INTERNAL"'}
+  # The live player's input heading restores the mission's 30 degrees after
+  # setDir. Aim this short approach through the pane at that actual heading.
+  Send @{cmd='exec';code='hint ""; player setPos [9573.84,3502,0]; player switchCamera "INTERNAL"'}
   Start-Sleep -Seconds 3
-  Send @{cmd='screenshot';path=(Join-Path $out 'glass-front.png')}
+  Send @{cmd='eval';code='[getPos player,getDir player,getPos labGlass]'}
+  Send @{cmd='eval';code='getDir player > 28 && getDir player < 32'} 'true'
   Send @{cmd='key';sc=26;hold=$true}
-  Start-Sleep -Seconds 3
+  Start-Sleep -Seconds 1
   Send @{cmd='key_up';sc=26}
   Send @{cmd='eval';code='getPos player'}
   Send @{cmd='eval';code='((getPos player) select 1) < 3504'} 'true'
-  Send @{cmd='exec';code='player setPos [9571,3501,0]; player setDir 53'}
+  Send @{cmd='exec';code='player setPos [9582,3512,0]'}
+  Send @{cmd='exec';code='labCamera = "camera" camCreate [9575,3499,1.7]; labCamera cameraEffect ["internal","back"]; labCamera camSetTarget [9575,3507,1.7]; labCamera camCommit 0; showCinemaBorder false'}
+  Start-Sleep -Seconds 3
+  Send @{cmd='screenshot';path=(Join-Path $out 'glass-front.png')}
+  Send @{cmd='exec';code='labCamera camSetPos [9571,3501,1.7]; labCamera camSetTarget [9575,3504,1.7]; labCamera camCommit 0'}
   Start-Sleep -Seconds 3
   Send @{cmd='screenshot';path=(Join-Path $out 'glass-oblique.png')}
-  Send @{cmd='exec';code='player setPos [9575,3501,0]; player setDir 0; deleteVehicle labGlass'}
+  Send @{cmd='exec';code='labCamera camSetPos [9575,3499,1.7]; labCamera camSetTarget [9575,3507,1.7]; labCamera camCommit 0; deleteVehicle labGlass'}
   Start-Sleep -Seconds 3
   Send @{cmd='screenshot';path=(Join-Path $out 'glass-removed-control.png')}
+  Send @{cmd='exec';code='labCamera cameraEffect ["terminate","back"]; camDestroy labCamera; player switchCamera "INTERNAL"; player setPos [9573.84,3502,0]'}
   Send @{cmd='key';sc=26;hold=$true}
-  Start-Sleep -Seconds 2
+  Start-Sleep -Seconds 1
   Send @{cmd='key_up';sc=26}
   Send @{cmd='eval';code='((getPos player) select 1) > 3504'} 'true'
   Send @{cmd='eval';code='alive player'} 'true'

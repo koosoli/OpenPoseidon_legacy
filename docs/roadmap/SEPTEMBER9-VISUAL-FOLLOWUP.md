@@ -1,5 +1,31 @@
 # September 9 visual follow-up
 
+## Glass station and counted palette acceptance, September 10
+
+89809008 adds a genuine tinted, transmissive GLASS station separate from GLOSS.
+Generated original P3DM/PAA assets include a thin collision pane, frame and NORMAL
+reference behind it; 4 generator tests pass, including partial alpha through all
+eight mip levels. Installed Test-Showcase -GlassOnly exits 0. Front/oblique/removed
+captures in build/showcase/glass show transmission and surface reflection/tint.
+The directed walk stops at z=3503.62 before the pane at 3504; after removal the same
+approach crosses 3504. The pane is deliberately not shatterable.
+
+Fixture correction: live input restores the mission's 30-degree heading after
+setDir 0. The first long walk went around the pane, not through it. The final short
+approach checks the actual heading; fixed scripted cameras handle visual A/Bs.
+
+dcf2ae88 opt-in upload trace, installed in 89809008, confirms 901 palette slots,
+8192-byte stride and 3 cameras for 320 soldiers. Batching is actually used: one
+upload replaces 901 calls with byte-identical data (two Rust parity/fallback tests
+pass). Same-binary legacy control WGR_PALETTE_UPLOAD_BATCH=0 is exercised twice.
+Worker frame setup: batched 1.595 ms, legacy 2.844/2.946 ms. CPU frame mean:
+16.409 vs 17.771/18.000 ms, p95 17.992 vs 18.140/18.288 ms. Prior batched b71ac83f
+setup samples about 1.60/1.57 ms agree. Both arm captures inspected; 321 unit thinks
+remain active, no renderer validation error. Keep this bounded upload reduction;
+do not describe it as a general AI scalability fix. GPU timestamp span varies
+15.052 vs 22.193/16.986 ms, and queue submit remains about 12 ms. Combat, DLSS,
+vanilla comparison and longer frame-time sampling still need separate acceptance.
+
 ## Large-unit rendering investigation, September 10
 
 Measure-AIScale.ps1 generates 80/160/320 idle soldiers plus a live player in
