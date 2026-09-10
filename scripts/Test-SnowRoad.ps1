@@ -34,6 +34,7 @@ try {
     $reader=[IO.StreamReader]::new($stream)
     $writer=[IO.StreamWriter]::new($stream,[Text.UTF8Encoding]::new($false)); $writer.AutoFlush=$true
     function Send($command) {
+        if (Select-String -LiteralPath $log -Pattern 'Validation Error|panicked at|DeviceLost' -Quiet) {throw 'Renderer error; reject this run'}
         $writer.WriteLine(($command | ConvertTo-Json -Compress))
         do {
             $line=$reader.ReadLine()

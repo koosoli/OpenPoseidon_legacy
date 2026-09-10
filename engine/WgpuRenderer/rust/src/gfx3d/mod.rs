@@ -1803,8 +1803,10 @@ fn build_group1_bind(
 // exactly like the terrain shader's sample_height (== Landscape::SurfaceY).
 struct ConformGroup {
     layout: wgpu::BindGroupLayout,
+    gpu_layout: wgpu::BindGroupLayout,
     params_buf: wgpu::Buffer,
     bind: Option<wgpu::BindGroup>,
+    gpu_bind: Option<wgpu::BindGroup>,
     bound_gen: u64,
 }
 
@@ -1875,6 +1877,34 @@ impl ConformGroup {
             view_formats: &[],
         });
         let dummy_view = dummy.create_view(&wgpu::TextureViewDescriptor::default());
+        // GPU-driven draws never draw roads and already use eight fragment
+        // storage slots. Preserve their original layout and device requirement.
+        let gpu_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("wgr_gpu_conform_layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT | wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT | wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(std::mem::size_of::<crate::terrain::TerrainConformParams>() as u64),
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let gpu_bind = Self::make_gpu_bind(device, &gpu_layout, &dummy_view, &params_buf);
         // Zero depth exits before the variable-length deficit array is sampled.
         let dummy_snow = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("wgr_3d_conform_dummy_snow"),
@@ -1902,10 +1932,24 @@ impl ConformGroup {
         });
         ConformGroup {
             layout,
+            gpu_layout,
             params_buf,
             bind: Some(bind),
+            gpu_bind: Some(gpu_bind),
             bound_gen: u64::MAX,
         }
+    }
+
+    fn make_gpu_bind(device: &wgpu::Device, layout: &wgpu::BindGroupLayout,
+                     heightmap: &wgpu::TextureView, params: &wgpu::Buffer) -> wgpu::BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("wgr_gpu_conform_bind"),
+            layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(heightmap) },
+                wgpu::BindGroupEntry { binding: 1, resource: params.as_entire_binding() },
+            ],
+        })
     }
 
     // Upload the current params and (re)build the bind group when the heightmap moved
@@ -1921,6 +1965,7 @@ impl ConformGroup {
     ) {
         queue.write_buffer(&self.params_buf, 0, bytemuck::bytes_of(params));
         if self.bind.is_none() || self.bound_gen != generation {
+            self.gpu_bind = Some(Self::make_gpu_bind(device, &self.gpu_layout, heightmap_view, &self.params_buf));
             self.bind = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("wgr_3d_conform_bind"),
                 layout: &self.layout,
@@ -4384,7 +4429,7 @@ impl Gfx3d {
             &gpu_group1_layout,
             &textures.bindless_layout,
             &gpu_vel_layout,
-            &conform.layout,
+            &conform.gpu_layout,
         );
         let (gpu_pipeline, gpu_prepass_pipeline) = cull::build_gpu_pipeline(
             device,
@@ -4393,7 +4438,7 @@ impl Gfx3d {
             &gpu_group1_layout,
             &textures.bindless_layout,
             &textures.sampler_array_layout,
-            &conform.layout,
+            &conform.gpu_layout,
             surface_format,
             sample_count,
             foliage_a2c,
@@ -4409,7 +4454,7 @@ impl Gfx3d {
                     &gpu_group1_layout,
                     &textures.bindless_layout,
                     &textures.sampler_array_layout,
-                    &conform.layout,
+                    &conform.gpu_layout,
                     surface_format,
                     sample_count,
                     foliage_a2c,
@@ -4428,7 +4473,7 @@ impl Gfx3d {
             &gpu_group1_layout,
             &textures.bindless_layout,
             &textures.sampler_array_layout,
-            &conform.layout,
+            &conform.gpu_layout,
             surface_format,
             // The planar target is resolution-scaled and mip-filtered before water samples
             // it. Main-scene 4x MSAA here multiplied the complete retained reflection pass for
@@ -4448,7 +4493,7 @@ impl Gfx3d {
             &gpu_group1_layout,
             &textures.bindless_layout,
             &textures.sampler_array_layout,
-            &conform.layout,
+            &conform.gpu_layout,
         );
         let gpu_rsm_pipeline = cull::build_gpu_rsm_pipeline(
             device,
@@ -4457,7 +4502,7 @@ impl Gfx3d {
             &gpu_group1_layout,
             &textures.bindless_layout,
             &textures.sampler_array_layout,
-            &conform.layout,
+            &conform.gpu_layout,
         );
         let cull_debug_layout = cull::cull_debug_layout(device);
         let cull_debug_pipeline = cull::build_cull_debug_pipeline(
@@ -9552,7 +9597,7 @@ impl Gfx3d {
         pass.set_bind_group(1, group1, &[]);
         pass.set_bind_group(2, textures.bindless_bind(), &[]);
         pass.set_bind_group(3, textures.sampler_array_bind(), &[]);
-        if let Some(conform_bind) = self.conform.bind.as_ref() {
+        if let Some(conform_bind) = self.conform.gpu_bind.as_ref() {
             pass.set_bind_group(4, conform_bind, &[]);
         }
         pass.set_vertex_buffer(0, self.pool.vbuf().slice(..));
@@ -9698,7 +9743,7 @@ impl Gfx3d {
         ) else {
             return;
         };
-        let Some(conform_bind) = self.conform.bind.as_ref() else {
+        let Some(conform_bind) = self.conform.gpu_bind.as_ref() else {
             return;
         };
         queue.write_buffer(&self.gpu_vel_uniform, 0, bytemuck::bytes_of(params));
@@ -9792,7 +9837,7 @@ impl Gfx3d {
         pass.set_bind_group(2, textures.bindless_bind(), &[]);
         pass.set_bind_group(3, textures.sampler_array_bind(), &[]);
         // Group 4: terrain-conform heightmap — vs_gpu conforms ClipLand instances to SurfaceY.
-        if let Some(conform_bind) = self.conform.bind.as_ref() {
+        if let Some(conform_bind) = self.conform.gpu_bind.as_ref() {
             pass.set_bind_group(4, conform_bind, &[]);
         }
         pass.set_vertex_buffer(0, self.pool.vbuf().slice(..));

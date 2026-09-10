@@ -2087,11 +2087,18 @@ so two runs cannot agree on what the world contains before the AI ever runs.
        (PERF-012), and `perf_abel` — the scene most historical figures were taken on — would
        show none of it.  
 13S. Evaluate subsystem-specific AI simulation LOD where large-battle measurements justify it.
-     **The first one shipped as the tracking ration (PERF-017); the next candidate is `unitThink`
-     (PERF-019), on the same oracle.**
-14S. *(new)* Make the object-stream admission budget counted rather than timed, so replay and the
-     frame equivalence oracle see the same resident set on two machines. Proposed, not decided —
-     see AUD-001 §B; it changes what a slow machine shows.
+     **Tracking (PERF-017) and idle-watch selection (PERF-020) have shipped.**
+     The 2026-09-10 many-soldier report needs fresh matched 80/160/320-unit
+     measurements, not extrapolation from the historical unitThink percentages.
+     See [AI-ARCHITECTURE-ASSESSMENT-20260910.md](AI-ARCHITECTURE-ASSESSMENT-20260910.md)
+     for the code-grounded, baseline-preserving experiment; no BT/HTN migration
+     has been implemented by that assessment.
+14S. **Implemented 2026-09-02; rechecked in code 2026-09-10.**
+     LandSave.cpp ObjectStreamAdmitCounted defaults to counted admission, with
+     ObjectStreamColdPerUpdate default 2 and the existing upload/attempt bounds.
+     WGR_OBJECT_STREAM_ADMIT=timed is the control. This row previously contradicted
+     the dated audit addendum above. It does not mean individual cold admissions
+     are asynchronous or that all replay/LOD-governor decisions are deterministic.
 
 ### Asset/streaming track
 

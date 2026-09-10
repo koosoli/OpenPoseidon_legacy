@@ -182,6 +182,13 @@ behaviour; roof/track deficits use identical depth evaluation, guarded by a pari
 test. This fixes artificial exposure, not salted-road accumulation. Installed
 snow/dry verification remains pending before acceptance.
 
+43fce26b first installed run REJECTED: shared conform layout exposed nine fragment
+storage bindings to GPU-driven pipelines against the device limit of eight.
+Game shut down; this was a pipeline validation failure, not a Windows freeze.
+Correction keeps the original two-binding conform layout for retained/velocity/
+GPU-shadow pipelines and lends snow only to direct-draw pipelines. Device limits
+are not raised. Fixture now rejects validation errors before continuing captures.
+
 Owner authorised implementation after backup `codex/backup-asset-obs-20260909-bc766e19`.
 Worktree asset-obs only; foreign Cargo.lock excluded. Screenshots 070351, 070456,
 072225 and 073829 are reproduction evidence, not completion evidence.
