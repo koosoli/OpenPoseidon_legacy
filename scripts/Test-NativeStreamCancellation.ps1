@@ -1,4 +1,5 @@
 param([switch]$LegacyClutter, [switch]$VerifyClutter, [switch]$TraceSlowFrames, [switch]$LegacyTableBudget, [switch]$TraceDdsPreparation,
+      [switch]$SampleDriverMemory,
       [ValidateRange(-1,2)][int]$Bc7Batch=-1,
       [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',
       [string]$Archives='C:\Program Files (x86)\Steam\steamapps\common\Arma Reforger\addons')
@@ -15,6 +16,7 @@ if ($LegacyTableBudget) {$label+='-legacy-tables'}
 if ($TraceDdsPreparation) {$label+='-dds-prep'}
 if ($Bc7Batch -gt 0) {$label+='-bc7-'+$Bc7Batch}
 if ($Bc7Batch -lt 0) {$label+='-bc7-default'}
+if ($SampleDriverMemory) {$label+='-driver-memory'}
 $out=Join-Path $root 'build/native-stream-cancellation'
 $user=Join-Path $out ('user-'+$label)
 New-Item -ItemType Directory -Force $user | Out-Null
@@ -34,7 +36,41 @@ if ($TraceDdsPreparation) {$settings.POSEIDON_DDS_PREP_TRACE='1'}
 if ($Bc7Batch -ge 0) {$settings.POSEIDON_DDS_BC7_BATCH=[string]$Bc7Batch}
 # Short settle intentionally leaves cold work outstanding when movement starts.
 # This is a lifecycle smoke test, NOT a settled-pose FPS comparison.
-& "$PSScriptRoot/farfield-movecam.ps1" -Label $label -Mission 'tests/perf/missions/perf_field.eden' -World $Archives -Start 5092.61,3995.64 -StartY 220 -Azimuth 270 -Elevation -15 -Speed 100 -SettleSeconds 20 -StaticSeconds 10 -MoveSeconds 40 -LoadSeconds 20 -CaptureAt 110 -Width 1280 -Height 720 -GameDir $GameDir -Out $out -Env $settings -SampleMemory
+$gpuSampler = $null
+try {
+if ($SampleDriverMemory) {
+    $smi = Get-Command nvidia-smi -ErrorAction SilentlyContinue
+    if (!$smi) { throw 'Requested NVIDIA driver-memory timeline, but nvidia-smi is unavailable' }
+    $captureDir = Join-Path $out $label
+    New-Item -ItemType Directory -Force $captureDir | Out-Null
+    $gpuCsv = Join-Path $captureDir 'driver-gpu-memory.csv'
+    $gpuError = Join-Path $captureDir 'driver-gpu-memory.stderr.txt'
+    $gpuSampler = Start-Process -FilePath $smi.Source -ArgumentList @(
+        '--query-gpu=timestamp,index,uuid,memory.total,memory.used,utilization.gpu',
+        '--format=csv,noheader,nounits','--loop-ms=1000'
+    ) -WindowStyle Hidden -PassThru -RedirectStandardOutput $gpuCsv -RedirectStandardError $gpuError
+    [IO.File]::WriteAllText((Join-Path $captureDir 'driver-gpu-memory.json'), (@{
+        source='nvidia-smi'; scope='whole GPU, includes other applications; not process residency'
+        columns=@('timestamp_local','index','uuid','total_MiB','used_MiB','gpu_percent')
+        interval_ms=1000; process_id=$gpuSampler.Id
+        requirement='Use the same sampler in both comparison arms; no sampling-overhead correction'
+    } | ConvertTo-Json -Depth 3))
+}
+    & "$PSScriptRoot/farfield-movecam.ps1" -Label $label -Mission 'tests/perf/missions/perf_field.eden' -World $Archives -Start 5092.61,3995.64 -StartY 220 -Azimuth 270 -Elevation -15 -Speed 100 -SettleSeconds 20 -StaticSeconds 10 -MoveSeconds 40 -LoadSeconds 20 -CaptureAt 110 -Width 1280 -Height 720 -GameDir $GameDir -Out $out -Env $settings -SampleMemory
+}
+finally {
+    if ($gpuSampler) {
+        # Only the monitor created above, never another game or profiling process.
+        if (!$gpuSampler.HasExited) { $gpuSampler.Kill() }
+        $gpuSampler.WaitForExit()
+        $gpuSampler.Dispose()
+    }
+}
+if ($SampleDriverMemory) {
+    $rows = @(Get-Content -LiteralPath $gpuCsv | Where-Object { $_ -match '^\d{4}/\d{2}/\d{2}' })
+    if ($rows.Count -lt 2) { throw "No usable driver-memory timeline; inspect $gpuError" }
+    Write-Output "Driver GPU-total memory samples: $($rows.Count), $gpuCsv"
+}
 $log=Join-Path (Join-Path $out $label) 'run-01.log'
 if (!(Select-String -LiteralPath $log -Pattern 'FT M' -Quiet)) {throw 'No moving-phase evidence'}
 if (!(Select-String -LiteralPath $log -Pattern 'FFCAM done' -Quiet)) {throw 'Camera route incomplete'}

@@ -467,3 +467,18 @@ Six targeted PAA/streaming cases (68 assertions) pass, including new symmetric
 wrong-kind probes and decoded upload/budget/eviction checks. The client runtime
 smoke is still pending. No observed frame stall is attributed to this gap yet;
 this is ownership hardening, not a measured FPS gain or completed native-DDS cache.
+
+Installed 0a19a9cb native smoke: cancel-20260910-221113-slow-trace-legacy-tables-
+dds-prep-bc7-default. Exit 0, 4 km route completes, 22370 registered instances,
+1280x720 native/MSAA4/AutoLOD1, table cap off. Final ocean image inspected, not a
+village-quality acceptance. This verifies lifecycle after the payload change;
+one run does not establish a performance improvement.
+
+Test-NativeStreamCancellation.ps1 adds optional -SampleDriverMemory. One owned
+nvidia-smi process samples at 1 Hz across load/traversal/shutdown and is terminated
+in finally. CSV reports local timestamp, GPU index/UUID, total/used MiB and GPU
+utilisation; metadata explicitly labels whole-device occupancy including other
+applications. This is not renderer tracked residency or process-private VRAM.
+Use the same sampler on both arms; its overhead is not subtracted. Missing tool
+or missing samples fails a specifically requested telemetry run instead of
+silently reporting zero. PowerShell syntax check passes; end-to-end run pending.
