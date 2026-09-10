@@ -2001,6 +2001,8 @@ namespace Poseidon
 {
 LSError World::Serialize(ParamArchive& ar, int message)
 {
+    // Refuse unknown layouts before changing campaign, globals or live entities.
+    PARAM_CHECK(ar.CheckMaxVersion(WorldSerializeVersion))
     if (ar.IsSaving())
     {
         ProgressReset();

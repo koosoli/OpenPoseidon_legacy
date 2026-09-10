@@ -38,6 +38,16 @@ ParamArchive::ParamArchive()
 
 RString ParamArchive::_errorContext;
 
+LSError ParamArchive::CheckMaxVersion(int maxVersion)
+{
+    if (IsLoading() && GetArVersion() > maxVersion)
+    {
+        OnError(LSVersionTooNew, "version");
+        return LSVersionTooNew;
+    }
+    return LSOK;
+}
+
 void ParamArchive::OnError(LSError err, RString context)
 {
     PoseidonAssert(_entry);

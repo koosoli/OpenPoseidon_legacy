@@ -70,6 +70,47 @@ TEST_CASE("world save serialization preserves simulation time", "[world][save][l
     std::filesystem::remove(archivePath);
 }
 
+TEST_CASE("world archive rejects newer versions before field mutation", "[world][save][load][save-version]")
+{
+    const auto dir = std::filesystem::current_path() / "tmp";
+    std::filesystem::create_directories(dir);
+    const auto path = dir / "world-version-gate.bin";
+    for (const int version : {1, WorldSerializeVersion - 1, WorldSerializeVersion, WorldSerializeVersion + 1})
+    {
+        INFO(version);
+        {
+            ParamArchiveSave writer(version);
+            REQUIRE(writer.CheckMaxVersion(WorldSerializeVersion) == LSOK);
+            int value = 77;
+            REQUIRE(writer.Serialize("value", value, 1) == LSOK);
+            REQUIRE(writer.SaveBin(path.string().c_str()));
+        }
+        ParamArchiveLoad reader;
+        REQUIRE(reader.LoadBin(path.string().c_str()));
+        for (int pass = 0; pass < 2; ++pass)
+        {
+            if (pass == 0) reader.FirstPass(); else reader.SecondPass();
+            int value = 19;
+            const auto result = reader.CheckMaxVersion(WorldSerializeVersion);
+            if (result == LSOK)
+                REQUIRE(reader.Serialize("value", value, 1) == LSOK);
+            if (version > WorldSerializeVersion)
+            {
+                REQUIRE(result == LSVersionTooNew);
+                REQUIRE(value == 19);
+                REQUIRE(std::string(ParamArchive::GetErrorContext()).find("version") != std::string::npos);
+            }
+            else
+            {
+                REQUIRE(result == LSOK);
+                REQUIRE(value == 77);
+            }
+        }
+    }
+    std::filesystem::remove(path);
+    ParamArchive::CancelError();
+}
+
 namespace
 {
 // Save-file quirk: `enableRadio false` set by a mission (e.g. the

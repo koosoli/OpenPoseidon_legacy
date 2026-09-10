@@ -103,6 +103,7 @@ public:
 	bool IsLoading() const {return !_saving;}
 	bool IsValid() const {return _entry != nullptr;}
 	int GetArVersion() const {return _version;}
+	LSError CheckMaxVersion(int maxVersion);
 	Pass GetPass() const {return _pass;}
 	void FirstPass() {_pass = PassFirst;}
 	void SecondPass() {_pass = PassSecond;}
@@ -783,4 +784,3 @@ public:
 	bool ParseBin(const char *name);
 	bool SaveBin(const char *name);
 };
-
