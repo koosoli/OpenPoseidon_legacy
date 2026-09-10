@@ -159,3 +159,14 @@ now include track/centre coverage. Recheck installed before visual acceptance.
 inspected, open grass centre restored and same 52507 registered / 16 main / 978
 triangles. This closes the candidate's accidental full-width coverage, not the
 remaining artistic, roughness, junction, night/snow, DLSS and fresh-release matrix.
+
+Current installed ee43ac8a / pack 0.1.3 checks: Sand Full 235104 (27.3 s wall),
+Sand Albedo 235307 (26.1 s), Road Full 235334 (26.3 s); all exit 0. Sand has
+52507 registered / 15208 main / 730061 triangles; Road 52507 / 15992 / 886666.
+Full sand and road images inspected. Sand remains too uniform for a photorealistic
+claim; the macro tile is 50 m, so a 1024-pixel map alone cannot resolve fine sand
+grains at close range. Investigate reuse of existing detail-layer/material
+machinery rather than blindly increasing whole-tile resolution. No extra detail
+layer or roughness binding is implemented by this note. Measure-DefaultMaterial
+now propagates failed child captures and requires successful lifecycle metadata
+plus completed shutdown, matching the hardened native streaming smoke.

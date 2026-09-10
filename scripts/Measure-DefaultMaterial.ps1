@@ -21,3 +21,6 @@ if ($Arm -eq 'Original') { $extra += '--no-visual-upgrade' }
 & "$PSScriptRoot/farfield-bench.ps1" -Label $label -Mission 'tests/perf/missions/perf_field.eden' `
     -Out $out -Env $settings -Repeats 1 -Width 1280 -Height 720 -Windowed -WarmupSeconds 20 `
     -TimeoutSeconds 120 -RequireAll -SampleMemory -ExtraArgs $extra
+if ($LASTEXITCODE -ne 0) { throw "Material capture failed with exit code $LASTEXITCODE" }
+$captureDir = Join-Path $out $label
+& "$PSScriptRoot/Assert-CaptureLifecycle.ps1" -MetadataPath (Join-Path $captureDir 'run-01.meta.json') -LogPath (Join-Path $captureDir 'run-01.log')
