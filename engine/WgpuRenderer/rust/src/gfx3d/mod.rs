@@ -395,6 +395,45 @@ impl PipelineKey {
 // occupies this many matrices in the palette pool and in the shader UBO.
 const PALETTE_SIZE: usize = 128;
 
+pub(crate) fn palette_upload_batch_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var("WGR_PALETTE_UPLOAD_BATCH").map(|v| v != "0").unwrap_or(true))
+}
+
+fn contiguous_palette_bytes(palette: &[WgrMat4], stride: u64) -> Option<&[u8]> {
+    let slots = palette.len() / PALETTE_SIZE;
+    let block_bytes = (PALETTE_SIZE * std::mem::size_of::<WgrMat4>()) as u64;
+    if slots == 0 || stride != block_bytes {
+        return None;
+    }
+    Some(bytemuck::cast_slice(&palette[..slots * PALETTE_SIZE]))
+}
+
+#[test]
+fn palette_batch_matches_every_legacy_slot_byte() {
+    let stride = (PALETTE_SIZE * std::mem::size_of::<WgrMat4>()) as u64;
+    for slots in [1, 2, 320] {
+        let matrices: Vec<WgrMat4> = (0..slots * PALETTE_SIZE + 3)
+            .map(|i| std::array::from_fn(|j| f32::from_bits(0x7fc00000 | (i * 16 + j) as u32)))
+            .collect();
+        let mut legacy = Vec::new();
+        for s in 0..slots {
+            legacy.extend_from_slice(bytemuck::cast_slice(&matrices[s * PALETTE_SIZE..(s + 1) * PALETTE_SIZE]));
+        }
+        assert_eq!(contiguous_palette_bytes(&matrices, stride).unwrap(), legacy);
+    }
+}
+
+#[test]
+fn palette_batch_keeps_padded_or_incomplete_layouts_on_legacy_path() {
+    let stride = (PALETTE_SIZE * std::mem::size_of::<WgrMat4>()) as u64;
+    let matrices = vec![[0.0; 16]; PALETTE_SIZE];
+    assert!(contiguous_palette_bytes(&matrices, stride + 256).is_none());
+    assert!(contiguous_palette_bytes(&matrices, stride - 256).is_none());
+    assert!(contiguous_palette_bytes(&matrices[..PALETTE_SIZE - 1], stride).is_none());
+    assert!(contiguous_palette_bytes(&[], stride).is_none());
+}
+
 // Eight vec4 lanes, matching Material in shader3d.wgsl, including separate
 // sun-folded and raw local specular so sunset cannot erase lamp highlights.
 const MATERIAL_SIZE: u64 = 128;
@@ -7369,19 +7408,26 @@ impl Gfx3d {
         }
         // One dynamic-UBO slot per PALETTE_SIZE-matrix block. A block is exactly
         // the UBO bind size, so slot s lives at s * stride. Uploaded regardless of the
-        // compute bake: since 2026-08-30 the draws ALWAYS VS-skin (the bake feeds only
-        // the velocity pass), so this UBO is live whenever skinned draws exist.
+        // compute bake, retaining the VS-skinning fallback. Contiguous slots can
+        // share one copy command without changing offsets or matrix bits.
         let slots = palette.len() / PALETTE_SIZE;
         if slots > 0 {
             palette_grew = self.palette.ensure(device, slots);
             let buf = self.palette.buf.as_ref().unwrap();
-            for s in 0..slots {
-                let block = &palette[s * PALETTE_SIZE..(s + 1) * PALETTE_SIZE];
-                queue.write_buffer(
-                    buf,
-                    s as u64 * self.palette.stride,
-                    bytemuck::cast_slice(block),
-                );
+            let contiguous = palette_upload_batch_enabled()
+                .then(|| contiguous_palette_bytes(palette, self.palette.stride))
+                .flatten();
+            if let Some(bytes) = contiguous {
+                queue.write_buffer(buf, 0, bytes);
+            } else {
+                for s in 0..slots {
+                    let block = &palette[s * PALETTE_SIZE..(s + 1) * PALETTE_SIZE];
+                    queue.write_buffer(
+                        buf,
+                        s as u64 * self.palette.stride,
+                        bytemuck::cast_slice(block),
+                    );
+                }
             }
         }
 

@@ -1729,6 +1729,10 @@ impl Renderer {
         // reasoning, same destination: the two terms that answer "the normals do not read at
         // dawn", announced where a captured run can prove which arm produced it.
         log.log(log_level::INFO, &crate::gfx3d::normal_relief_log_line());
+        log.log(log_level::INFO, &format!(
+            "wgpu palette upload batch: {} (WGR_PALETTE_UPLOAD_BATCH; padded strides retain per-slot uploads)",
+            crate::gfx3d::palette_upload_batch_enabled()
+        ));
         if let Some(line) = crate::gfx3d::skin_bake_over_limit_log_line() {
             log.log(log_level::WARN, &line);
         }
