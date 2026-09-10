@@ -68,9 +68,34 @@ Game exits normally, no renderer errors. Local-edit memory/work reduction is
 structural; no FPS improvement claimed. Existing journal unit tests pass as part
 of the 66-case run above. Harness outputs are now timestamped to preserve evidence.
 
+Native bank-table follow-up: individual slow-frame traces isolate the uncharged
+main-thread BuildAdapterBankTables stage before the existing cold-install counter.
+An independent two-table budget is implemented but DEFAULT OFF after three pairs:
+moving maxima improve from 265/294/297 to 163/153/167 ms, while static-phase p99
+worsens and initial residency is 310-403 objects behind. By movement start/end
+coverage is equal; this does not excuse a changed initial view or prove higher FPS.
+See the decision for all six run IDs, memory, tails and the opt-in control
+WGR_OBJECT_STREAM_TABLE_BATCH=2. Default remains 0. Individual native material
+preparation, byte budgets, cluster HLOD and complete workload coverage remain open.
+
+Measurement safety: the trace analyzer now has five passing regression tests,
+including why gap-averaged p99 is not a formal lower bound. Benchmark cleanup
+retains original Process handles and tests HasExited rather than looking up old
+PIDs, and its standalone foreign-process check includes OpenPoseidon. The outer
+game-folder lock remains mandatory. No foreign Cargo.lock or temporary directories
+were changed or removed.
+
+Final installed regression check: 058cc4d4, matching EXE/DLL deployed at 15:42.
+PoseidonGame and PoseidonTests build; 66 preparer/physics cases, 2436 assertions,
+pass. Field smoke cpu-20260910-154258-Field exits 0, no contention/watchdog, 52507
+registered / 10576 main instances and 650835 main triangles; the repaired harness
+emits no leftover cleanup warning. Rocket/reset acceptance-20260910-154404 again
+restores 29.835 exactly after two 1m craters; screenshot inspected, exit 0, no
+renderer errors. No additional FPS or visual-quality claim from these smoke tests.
+The five Python trace tests pass. All runtime changes are committed/pushed; only
+the foreign Cargo.lock and existing untracked temporary directories remain dirty.
+
 ## Bounded crown flutter and spray motion, September 10, 13:10
-
-
 
 The additional cutout-only flutter previously scaled with wind, height response
 and gust, independently of the solid trunk. At amp=1.05, hs=5, gust=1.65 its

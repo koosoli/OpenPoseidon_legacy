@@ -45,6 +45,11 @@ Current evidence gates added September 10:
 - **Army performance:** the counted palette upload batching is accepted for
   its bounded setup saving. General BT/HTN replacement, broad AI multithreading
   and density/visibility cuts are not justified by this result.
+- **Native bank-table count cap stays opt-in.** Three September 10 pairs bound
+  preparation bursts but worsen static-phase tails and briefly delay coverage.
+  This is not a default performance win. Clutter-definition reuse is separately
+  accepted; the next pipeline experiment must reduce individual material work.
+  See [the three-track assessment](decisions/MODERNISATION-THREE-TRACKS-20260910.md).
 
 ---
 
