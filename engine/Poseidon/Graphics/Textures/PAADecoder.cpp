@@ -217,6 +217,20 @@ static void argb1555ToRGBA(const uint16_t* src, uint8_t* dst, int w, int h, int 
     }
 }
 
+static void ai88ToRGBA(const uint8_t* src, uint8_t* dst, int w, int h, int pitchBytes)
+{
+    for (int y = 0; y < h; ++y)
+    {
+        const uint8_t* row = src + y * pitchBytes;
+        uint8_t* out = dst + y * w * 4;
+        for (int x = 0; x < w; ++x)
+        {
+            out[x * 4] = out[x * 4 + 1] = out[x * 4 + 2] = row[x * 2];
+            out[x * 4 + 3] = row[x * 2 + 1];
+        }
+    }
+}
+
 static void argb4444ToRGBA(const uint16_t* src, uint8_t* dst, int w, int h, int pitchBytes)
 {
     for (int y = 0; y < h; y++)
@@ -623,7 +637,8 @@ DecodedImage DecodePAABuffer(const void* data, size_t size, bool isPaa)
     }
     else if (format == PacARGB4444 || format == PacAI88)
     {
-        mip.SetDestFormat(PacARGB4444, 4);
+        // Keep AI88's eight-bit channels; the legacy 4444 conversion discards half their bits.
+        mip.SetDestFormat(format, 4);
         std::vector<uint8_t> mipData(mip.Size(), 0);
         mip.SeekLevel(in);
         int ret = isPaa ? mip.LoadPaa(in, mipData.data(), &pal) : mip.LoadPac(in, mipData.data(), &pal);
@@ -632,8 +647,11 @@ DecodedImage DecodePAABuffer(const void* data, size_t size, bool isPaa)
             img.rgba.clear();
             return img;
         }
-        argb4444ToRGBA(reinterpret_cast<const uint16_t*>(mipData.data()), img.rgba.data(), img.width, img.height,
-                       mip.Pitch());
+        if (format == PacAI88)
+            ai88ToRGBA(mipData.data(), img.rgba.data(), img.width, img.height, mip.Pitch());
+        else
+            argb4444ToRGBA(reinterpret_cast<const uint16_t*>(mipData.data()), img.rgba.data(), img.width, img.height,
+                           mip.Pitch());
     }
     else
     {
@@ -761,7 +779,7 @@ DecodedImage DecodePAAFileMip(const std::string& path, int mipLevel)
     }
     else if (format == PacARGB4444 || format == PacAI88)
     {
-        mip.SetDestFormat(PacARGB4444, 4);
+        mip.SetDestFormat(format, 4);
         std::vector<uint8_t> mipData(mip.Size(), 0);
         mip.SeekLevel(in);
         int ret = isPaa ? mip.LoadPaa(in, mipData.data(), &pal) : mip.LoadPac(in, mipData.data(), &pal);
@@ -770,8 +788,11 @@ DecodedImage DecodePAAFileMip(const std::string& path, int mipLevel)
             img.rgba.clear();
             return img;
         }
-        argb4444ToRGBA(reinterpret_cast<const uint16_t*>(mipData.data()), img.rgba.data(), img.width, img.height,
-                       mip.Pitch());
+        if (format == PacAI88)
+            ai88ToRGBA(mipData.data(), img.rgba.data(), img.width, img.height, mip.Pitch());
+        else
+            argb4444ToRGBA(reinterpret_cast<const uint16_t*>(mipData.data()), img.rgba.data(), img.width, img.height,
+                           mip.Pitch());
     }
     else
     {

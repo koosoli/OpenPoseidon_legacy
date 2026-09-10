@@ -2,6 +2,8 @@
 #include <catch2/catch_approx.hpp>
 #include <fstream>
 #include <iterator>
+#include <filesystem>
+#include <chrono>
 #include <vector>
 #include "test_fixtures.hpp"
 #include <Poseidon/Graphics/Textures/PAADecoder.hpp>
@@ -10,6 +12,75 @@
 #include <vector>
 
 using namespace Poseidon;
+
+TEST_CASE("PAADecoder: AI88 preserves every intensity and alpha level", "[Graphics][PAADecoder][AI88]")
+{
+    std::vector<uint8_t> bytes;
+    auto put = [&](uint32_t value, int count)
+    {
+        for (int i = 0; i < count; ++i)
+            bytes.push_back(static_cast<uint8_t>(value >> (8 * i)));
+    };
+    put(0x8080, 2);
+    put(0, 2); // No palette or tags.
+    for (int width : {32, 16})
+    {
+        std::vector<uint8_t> payload;
+        int32_t checksum = 0;
+        for (int i = 0; i < width * 16 * 2; ++i)
+        {
+            if (i % 8 == 0)
+                payload.push_back(0xff); // Eight literal bytes in the legacy LZSS stream.
+            const uint8_t value = static_cast<uint8_t>(i % 2 == 0 ? i / 2 : 255 - i / 2);
+            payload.push_back(value);
+            checksum += value < 128 ? value : static_cast<int>(value) - 256;
+        }
+        put(width, 2);
+        put(16, 2);
+        put(static_cast<uint32_t>(payload.size() + 4), 3);
+        bytes.insert(bytes.end(), payload.begin(), payload.end());
+        put(static_cast<uint32_t>(checksum), 4);
+    }
+    put(0, 4);
+
+    auto check = [](const DecodedImage& image, int width)
+    {
+        REQUIRE(image.valid());
+        REQUIRE(image.width == width);
+        REQUIRE(image.height == 16);
+        REQUIRE(image.rgba.size() == static_cast<size_t>(width * 16 * 4));
+        for (int i = 0; i < width * 16; ++i)
+        {
+            REQUIRE(image.rgba[i * 4] == static_cast<uint8_t>(i));
+            REQUIRE(image.rgba[i * 4 + 1] == static_cast<uint8_t>(i));
+            REQUIRE(image.rgba[i * 4 + 2] == static_cast<uint8_t>(i));
+            REQUIRE(image.rgba[i * 4 + 3] == static_cast<uint8_t>(255 - i));
+        }
+    };
+    SECTION("buffer")
+    {
+        check(DecodePAABuffer(bytes.data(), bytes.size(), true), 32);
+    }
+    SECTION("file and selected mip")
+    {
+        struct TemporaryPaa
+        {
+            std::filesystem::path path = std::filesystem::temp_directory_path() /
+                ("poseidon-ai88-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".paa");
+            ~TemporaryPaa()
+            {
+                std::error_code ignored;
+                std::filesystem::remove(path, ignored);
+            }
+        } file;
+        std::ofstream out(file.path, std::ios::binary);
+        out.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        out.close();
+        REQUIRE(out.good());
+        check(DecodePAAFile(file.path.string()), 32);
+        check(DecodePAAFileMip(file.path.string(), 1), 16);
+    }
+}
 
 // Reproducers the fuzz_paa libFuzzer harness found. Pre-fix
 // each was a heap-buffer-overflow in DecodePAABuffer; the dimension/payload guards
