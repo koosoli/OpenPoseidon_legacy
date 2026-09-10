@@ -1,5 +1,39 @@
 # September 9 visual follow-up
 
+## Large-unit rendering investigation, September 10
+
+Measure-AIScale.ps1 generates 80/160/320 idle soldiers plus a live player in
+8-man groups on stock Desert, seed 1234, 1280x720 native/MSAA4, 60 s warmup,
+real-time simulation. It checks the final active think count and applied camera.
+The Away arm turns 180 degrees in place, not a player teleport or simulation LOD
+change. No AI behavior was changed for this measurement. Combat, vanilla and
+larger populated worlds remain separate outstanding comparisons.
+
+Installed 883f174a first near samples: CPU frame mean 9.689 ms (80) and 17.711 ms
+(320), with AI about 0.11 and 0.42-0.49 ms/tick respectively. The 320-away arm is
+9.305 ms/frame with comparable AI cost. `land:obj` + `drw:land` falls from about
+4.45 to 0.074 ms/frame on turning away. The sparse scene has zero RETAINED instances;
+that metric does not count these direct animated soldier draws. Captures inspected.
+
+The 320 near repeats are NOT stable enough for a headline speedup: timestamp frame
+span is 16.34 / 22.55 / 23.41 ms while attributed GPU regions stay around 9.7-9.9 ms.
+Worker queue submit is a major CPU cost (12 ms in the first sample). Serial-renderer
+and compute-skin controls improve one sample but do not justify changing defaults;
+the serial arm has worse p95. Do not sum CPU and GPU time or call the timestamp
+residual shader cost. Render/governor and upload costs need isolated controls.
+
+Concrete no-detail-loss candidate d97b1b99: the already contiguous 128-matrix
+palette blocks were submitted individually. Batch only when dynamic UBO stride
+equals packed block size; preserve per-slot fallback for padding and the
+WGR_PALETTE_UPLOAD_BATCH=0 control. Byte-parity tests include multiple palettes,
+NaN payloads and trailing incomplete data. Installed A/B/build acceptance pending.
+
+Rejected fixture arms: `current-883f174a` omitted the camera (helper warned);
+`pose-883f174a` tried absolute stock Intro as a world replacement, failed to load
+that terrain and hit the bounded process watchdog. Neither is a valid performance
+baseline. Camera-only CLI positioning on the normal mission path works and is the
+current harness route. No user process was stopped and no Windows crash inferred.
+
 ## Native NTC comparison, September 10
 
 Installed b4d118ce Forest same-binary A/B completed: fixed 22.726 ms GPU,
