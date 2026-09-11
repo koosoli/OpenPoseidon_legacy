@@ -1,5 +1,14 @@
 # September 9 visual follow-up
 
+## September 11 native texture identity optimization
+
+[Measured native bank costs and canonical texture reuse](decisions/NATIVE-TEXTURE-IDENTITY-20260911.md):
+e1738ab4 installed. Same-binary route A/B passes lifecycle and identical endpoint
+instance/geometry counts. Native archive path aliases now reuse the existing
+texture object rather than allocating duplicate sources/uploads. Process peak
+falls ~0.56 GiB, tracked object textures ~248.5 MiB in this pair. No stable FPS
+or stutter-elimination claim; unique texture preparation remains expensive.
+
 ## September 11 upstream recheck
 
 [Fresh upstream comparison](decisions/UPSTREAM-REVIEW-20260911.md): remote main
