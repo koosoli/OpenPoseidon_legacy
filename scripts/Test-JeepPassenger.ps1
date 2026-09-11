@@ -74,7 +74,12 @@ try {
         $null=Send @{cmd='exec';code=('ffvJeep setDir {0}; ffvTarget setPos [{1},{2},0]' -f $NpcHeading,(9700+60*$rightX),(3600+60*$rightZ))}
         if ($NpcDriver) {
             $driverInit=if ($NpcMoving) {'ffvDriver=this; removeAllWeapons this'} else {'ffvDriver=this; this disableAI ""MOVE""; removeAllWeapons this'}
-            $null=Send @{cmd='exec';code=('"SoldierWB" createUnit [[9690,3590,0],group player,"'+$driverInit+'"]; ffvDriver moveInDriver ffvJeep')}
+            $driverGroup='group player'
+            if ($NpcMoving) {
+                $null=Send @{cmd='exec';code='ffvJeep setFuel 0; ffvDriverGroup=createGroup west'}
+                $driverGroup='ffvDriverGroup'
+            }
+            $null=Send @{cmd='exec';code=('"SoldierWB" createUnit [[9690,3590,0],'+$driverGroup+',"'+$driverInit+'"]; ffvDriver moveInDriver ffvJeep')}
         }
     }
     $null=Send @{cmd='exec';code='removeAllWeapons player; ffvShots=0; ffvPassenger addEventHandler ["Fired",{ffvShots=ffvShots+1}]; ffvPassenger setCombatMode "BLUE"; ffvPassenger assignAsCargo ffvJeep; ffvPassenger moveInCargo ffvJeep; ffvView="camera" camCreate [9704,3604,2.2]; ffvView cameraEffect ["internal","back"]; ffvView camSetTarget [9700,3600,1]; ffvView camCommit 0; showCinemaBorder false'}
@@ -151,7 +156,7 @@ try {
         return
     }
     if ($NpcMoving) {
-        $null=Send @{cmd='exec';code='ffvMovingShots=0; ffvPassenger addEventHandler ["Fired",{if (abs(speed ffvJeep)>5) then {ffvMovingShots=ffvMovingShots+1}}]; ffvTarget setPos [9760,3610,0]; ffvDriver setSpeedMode "LIMITED"; ffvDriver doMove [9700,3680,0]; ffvView camSetPos [9706,3615,3]; ffvView camSetTarget ffvJeep; ffvView camCommit 0'}
+        $null=Send @{cmd='exec';code='ffvMovingShots=0; ffvPassenger addEventHandler ["Fired",{if (abs(speed ffvJeep)>5) then {ffvMovingShots=ffvMovingShots+1}}]; ffvTarget setPos [9760,3610,0]; ffvJeep setFuel 1; ffvDriver setBehaviour "CARELESS"; ffvDriver setSpeedMode "LIMITED"; ffvDriver doMove [9700,3680,0]; ffvView camSetPos [9706,3615,3]; ffvView camSetTarget ffvJeep; ffvView camCommit 0'}
         $driveDeadline=[DateTime]::UtcNow.AddSeconds(20)
         do {
             Start-Sleep -Milliseconds 250
@@ -172,6 +177,7 @@ try {
     if ($NpcMoving) {
         $movingShots=Send @{cmd='eval';code='ffvMovingShots'}
         $driveEnd=Send @{cmd='eval';code='getPos ffvJeep'}
+        $null=Send @{cmd='crew_pose_probe'}
         if ([int]$movingShots.result -le 0) {throw 'No actual passenger shot during AI-driven movement'}
     }
     $null=Send @{cmd='screenshot';path=(Join-Path $output 'ordered-fire.png')}
