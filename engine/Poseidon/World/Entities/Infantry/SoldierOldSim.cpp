@@ -223,7 +223,11 @@ void Man::BasicSimulation(float deltaT, SimulationImportance prec, float speedFa
     SimulateAnimations(turn, moveX, moveZ, deltaT * speedFactor, prec);
 
     if (cargoWeapon)
-        RecalcPositions(WorldTransform());
+    {
+        const Matrix4 seatFrame = WorldTransform();
+        _aimingPositionWorld = CalculateAimingPosition(seatFrame);
+        _cameraPositionWorld = CalculateCameraPosition(seatFrame);
+    }
 
     BasicSimulationCore(deltaT, prec);
 }
