@@ -1,7 +1,8 @@
 ~0.5
+ffvPassenger setDir 270
 ffvDriver assignAsDriver ffvJeep
 ffvDriver moveInDriver ffvJeep
-ffvJeep setFuel 0
+doStop ffvDriver
 ffvPassenger assignAsCargo ffvJeep
 ffvShots=0
 ffvPassenger addEventHandler ["Fired",{ffvShots=ffvShots+1}]
@@ -17,9 +18,9 @@ ffvDriver doMove [9700,3840,0]
 ? ((getPos ffvJeep) select 1) > 3828: goto "finish"
 goto "ride"
 #stop
-ffvJeep setFuel 0
+doStop ffvDriver
 goto "wait"
 #finish
-ffvJeep setFuel 0
+doStop ffvDriver
 hint "End of firing lane. You can get out and board again."
 exit
