@@ -3,7 +3,7 @@ param(
     [switch]$NoSatmap,
     [switch]$DumpSatmap,
     [string]$Pose='',
-    [ValidateSet(0,1)][int]$SatmapObjects=0,
+    [ValidateSet(-1,0,1)][int]$SatmapObjects=-1,
     [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault'
 )
 $ErrorActionPreference='Stop'
@@ -16,9 +16,9 @@ New-Item -ItemType Directory -Force $env:POSEIDON_USER_DIR | Out-Null
 [IO.File]::WriteAllText((Join-Path $env:POSEIDON_USER_DIR 'game.cfg'), "preferredViewDistance=50000;`n")
 $prefix=if ($Large) {'size-probe'} else {'fusion'}
 $env:WGR_OFP_SATMAP=if ($NoSatmap) {'0'} else {'1'}
-$env:WGR_OFP_SATMAP_OBJECTS="$SatmapObjects"
+$env:WGR_OFP_SATMAP_OBJECTS=if ($SatmapObjects -lt 0) {$null} else {"$SatmapObjects"}
 $env:WGR_OFP_SATMAP_DUMP=if ($DumpSatmap) {Join-Path $output 'satmap-albedo.png'} else {$null}
-if ($SatmapObjects) {$prefix += '-objects'}
+if ($SatmapObjects -ne 0) {$prefix += '-objects'}
 if ($NoSatmap) { $prefix += '-no-satmap' }
 if ($Pose) { $prefix += '-reported-high'; if (($Pose -split '\s+').Count -ne 5) {throw 'Pose requires x y z azimuth elevation'} }
 Get-Content -LiteralPath "$GameDir/DEPLOYED-FROM.txt" | Set-Content -LiteralPath (Join-Path $output "$prefix.DEPLOYED-FROM.txt")
@@ -85,7 +85,7 @@ try {
     $null=Send @{cmd='exit'}
     if (!$p.WaitForExit(20000) -or $p.ExitCode -ne 0) {throw 'Game exit failed'}
     $text=Get-Content -LiteralPath $log -Raw
-    if ($SatmapObjects -and !$NoSatmap -and $text -notmatch 'OFP satmap objects: [1-9][0-9]* models, [1-9][0-9]* textures, [1-9][0-9]* instances') {throw 'Object satellite bake was not exercised'}
+    if ($SatmapObjects -ne 0 -and !$NoSatmap -and $text -notmatch 'OFP satmap objects: [1-9][0-9]* models, [1-9][0-9]* textures, [1-9][0-9]* instances') {throw 'Object satellite bake was not exercised'}
     if ($text -match 'heightfield upload failed|UNHANDLED EXCEPTION' -or $text -notmatch 'heightfield ready=true') {throw 'Terrain upload acceptance failed'}
     Write-Host "Runtime checks passed; visually inspect $output/$prefix-*.png."
 } finally {

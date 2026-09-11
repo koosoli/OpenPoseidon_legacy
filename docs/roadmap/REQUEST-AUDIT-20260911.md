@@ -10,11 +10,21 @@ Statische Primary/Network-Modelle, erste zeichnbare LOD, UV/Alpha aus echten
 Texturen, 64x64 CPU-Draufsichten pro Modell, Platzierung im vorhandenen Boden-
 Satmapbild. Keine neue GPU-Texturverwaltung, kein eingebranntes dynamisches Licht,
 keine beweglichen Einheiten. Kleine Projektionen werden flaechengewichtet.
-Temporaere Caches auf je 2048 Modelle/Texturen begrenzt; reale Ladezeit,
-Deckung von Waldmodellen und Bildqualitaet sind noch zu messen. Zerstoerung
+Temporaere Caches auf je 2048 Modelle/Texturen begrenzt; vollstaendige
+Deckung von Waldmodellen und Bildqualitaet sind noch zu pruefen. Zerstoerung
 nach dem Bake wird noch nicht in die statische Ferntextur nachgefuehrt.
-Installation/Test von 5ce3f450 durch laufende fremde Spielinstanz verweigert.
-Installiert bleibt 627317e8. Rueckfrage zum Schliessen gestellt.
+Nach Freigabe installiert 050c8ffb (quellgleich zu 5ce3f450), vier Fusion-
+Laeufe mit/ohne Objektbake bei 38 km und 4 km Hoehe sauber beendet. Objektbake:
+721 Modelle, 1289 Texturen, 405047 Instanzen, 667638 Samples, 2773 ausgelassen.
+Zwei ON-Laeufe: 737.5 / 624.0 ms zusaetzlicher CPU-Bake beim Weltladen;
+erster gesamter Satmap-Bake 1535.3 ms. Keine FPS- oder Peak-RAM-Aussage.
+Native 1280x720, MSAA4, DLSS aus, gleiches frisches Grafikprofil.
+Belege: build/fusion/acceptance-20260912-000824 (38 km ON),
+acceptance-20260912-001116 (4 km ON), acceptance-20260912-001246 (4 km OFF).
+3D-Waldkacheln ueberlagern die Draufsicht weiter: das ist kein Beweis fuer
+vollstaendige Baumkronen in der Textur. 49238fe2 ergaenzt deshalb optionalen
+PNG-Export WGR_OFP_SATMAP_DUMP / Test-Fusion -DumpSatmap, installiert und
+650 Assertions / 5 Tests bestanden. Der Export veraendert den Renderpfad nicht.
 
 Godrays wieder offen: Stratis [1949.76,5046.07,32.37], az74.4/el-1.3, 06:03,
 Besitzer-Screenshot 2026-09-11 233844 und Startkommando bestaetigen den Fall.

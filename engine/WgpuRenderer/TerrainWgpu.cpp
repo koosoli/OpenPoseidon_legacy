@@ -837,7 +837,7 @@ struct ObjectSatView
 void BakeSatmapObjects(const Landscape& land, int size, std::vector<uint8_t>& pixels)
 {
     const char* setting = std::getenv("WGR_OFP_SATMAP_OBJECTS");
-    if (!setting || std::strcmp(setting,"1") != 0) return; // Acceptance gate.
+    if (setting && std::strcmp(setting,"0") == 0) return;
     const auto started = std::chrono::steady_clock::now();
     std::unordered_map<const LODShapeWithShadow*,ObjectSatView> views;
     std::unordered_map<const Texture*,DecodedImage> textures;
