@@ -3,7 +3,8 @@ param([switch]$ProjectileFrame, [switch]$AnimationPreview, [switch]$AnimationVid
       [ValidateSet(0,90,180)][int]$NpcHeading=0, [switch]$NpcDriver,
       [switch]$NpcTransitions, [switch]$NpcMoving, [switch]$NpcTurning, [switch]$SecondJeep,
       [ValidateSet('near','far')][string]$TurnTarget='near',
-      [ValidateSet('individual','group')][string]$DriverCommand='individual',
+      [ValidateSet('individual','group','waypoint')][string]$DriverCommand='individual',
+      [switch]$LimitedDriver,
       [switch]$PlayerFire, [switch]$Lifecycle, [switch]$SaveLoad,
       [switch]$DefaultPackage, [string]$UserMod='',
       [ValidateSet('','missing','incompatible')][string]$AutomaticOriginal='', [string]$MissionPath='',
@@ -12,7 +13,8 @@ param([switch]$ProjectileFrame, [switch]$AnimationPreview, [switch]$AnimationVid
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
 if ($NpcTurning) {$NpcMoving=$true}
-if ($DriverCommand -eq 'group' -and !$NpcMoving) {throw 'Group-driver command requires a moving test'}
+if ($DriverCommand -ne 'individual' -and !$NpcMoving) {throw 'Driver command requires a moving test'}
+if ($LimitedDriver -and (!$NpcMoving -or $DriverCommand -ne 'individual')) {throw 'Limited subgroup hint requires the individual moving fixture'}
 if ($PlayerFire) {
     if ($NpcFire -or $NpcMoving -or $NpcTransitions -or $NpcScenario -ne 'clear') {throw 'Player fire is a separate case'}
     $NpcFire=$true
@@ -70,7 +72,7 @@ if ($packArchive) {
     try {$packHash=[BitConverter]::ToString($sha.ComputeHash($packStream)).Replace('-','')}
     finally {$packStream.Dispose(); $sha.Dispose()}
 }
-[pscustomobject]@{installed=$stamp.Trim();args=$gameArgs;source=(& git -C $root rev-parse HEAD);pack=$packArchive;packSha256=$packHash;driverCommand=$DriverCommand;turning=[bool]$NpcTurning;turnTarget=$TurnTarget} |
+[pscustomobject]@{installed=$stamp.Trim();args=$gameArgs;source=(& git -C $root rev-parse HEAD);pack=$packArchive;packSha256=$packHash;driverCommand=$DriverCommand;limitedDriver=[bool]$LimitedDriver;turning=[bool]$NpcTurning;turnTarget=$TurnTarget} |
     ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $output 'test-context.json')
 $p=Start-Process -FilePath (Join-Path $GameDir 'OpenPoseidon.exe') -WorkingDirectory $GameDir -WindowStyle Hidden -PassThru -ArgumentList $gameArgs
 $null=$p.Handle
@@ -292,14 +294,22 @@ try {
         # doMove creates a separate subgroup with SpeedNormal. Use the existing
         # group move for an actual LIMITED run; retain individual as the stress case.
         $driverMove=if ($DriverCommand -eq 'group') {'ffvDriverGroup move'} else {'ffvDriver doMove'}
-        if ($DriverCommand -eq 'group') {
+        if ($DriverCommand -ne 'individual') {
             # The fuel-zero setup can make group AI unassign an immobile vehicle.
             $null=Send @{cmd='exec';code='ffvJeep setFuel 1; ffvDriver assignAsDriver ffvJeep; [ffvDriver] orderGetIn true; ffvDriver moveInDriver ffvJeep'}
             $null=Send @{cmd='eval';code='driver ffvJeep == ffvDriver'} 'true'
         }
-        $null=Send @{cmd='exec';code=('ffvMovingShots=0; ffvPassenger addEventHandler ["Fired",{if (abs(speed ffvJeep)>5) then {ffvMovingShots=ffvMovingShots+1}}]; ffvJeep setFuel 1; ffvDriver setBehaviour "CARELESS"; ffvDriver setSpeedMode "LIMITED"; '+$driverMove+' [9700,3680,0]; ffvView camSetPos [9706,3615,3]; ffvView camSetTarget ffvJeep; ffvView camCommit 0')}
+        $initialMove=if ($DriverCommand -eq 'waypoint') {
+            'ffvDriverWaypoint=ffvDriverGroup addWaypoint [[9700,3680,0],0]; ffvDriverWaypoint setWaypointType "MOVE"; ffvDriverWaypoint setWaypointSpeed "LIMITED"; ffvDriverWaypoint setWaypointBehaviour "CARELESS"'
+        } else {$driverMove+' [9700,3680,0]'}
+        $null=Send @{cmd='exec';code=('ffvMovingShots=0; ffvPassenger addEventHandler ["Fired",{if (abs(speed ffvJeep)>5) then {ffvMovingShots=ffvMovingShots+1}}]; ffvJeep setFuel 1; ffvDriver setBehaviour "CARELESS"; ffvDriver setSpeedMode "LIMITED"; '+$initialMove+'; ffvView camSetPos [9706,3615,3]; ffvView camSetTarget ffvJeep; ffvView camCommit 0')}
         if ($NpcTurning) {
-            $null=Send @{cmd='exec';code=('ffvTurnShots=0; ffvShotHeadings=[]; ffvPassenger addEventHandler ["Fired",{ffvShotHeadings=ffvShotHeadings+[getDir ffvJeep]; if ((abs(speed ffvJeep)>5) && (abs(sin(getDir ffvJeep))>0.087)) then {ffvTurnShots=ffvTurnShots+1}}]; '+$driverMove+' [9660,3680,0]')}
+            $turnMove=if ($DriverCommand -eq 'waypoint') {'ffvDriverWaypoint setWaypointPosition [[9660,3680,0],0]'} else {$driverMove+' [9660,3680,0]'}
+            $null=Send @{cmd='exec';code=('ffvTurnShots=0; ffvShotHeadings=[]; ffvPassenger addEventHandler ["Fired",{ffvShotHeadings=ffvShotHeadings+[getDir ffvJeep]; if ((abs(speed ffvJeep)>5) && (abs(sin(getDir ffvJeep))>0.087)) then {ffvTurnShots=ffvTurnShots+1}}]; '+$turnMove)}
+        }
+        if ($LimitedDriver) {
+            $hint=Send @{cmd='crew_driver_limited'}
+            if (!$hint.limited) {throw 'Actual driver subgroup did not accept LIMITED'}
         }
         $driveDeadline=[DateTime]::UtcNow.AddSeconds(20)
         do {

@@ -162,6 +162,24 @@ void RegisterSqf(HarnessServer& hs)
                            cJSON_AddBoolToObject(resp, "reloadRequested", true);
                            return HarnessProtocol::JsonResponse(resp);
                        });
+    hs.RegisterCommand({"crew_driver_limited", "Set the fixture driver's actual subgroup to LIMITED, not vehicle velocity", {}},
+                       [](const std::string&, cJSON*) -> std::string
+                       {
+                           if (!GWorld || GWorld->GetMode() == GModeNetware)
+                               return HarnessProtocol::ErrorResponse("singleplayer world required");
+                           AIUnit* focus = GWorld->FocusOn();
+                           AIGroup* group = focus ? focus->GetGroup() : nullptr;
+                           AIUnit* passenger = group ? group->UnitWithID(2) : nullptr;
+                           Transport* vehicle = passenger && passenger->IsInCargo() ? passenger->GetVehicleIn() : nullptr;
+                           AIUnit* driver = vehicle ? vehicle->DriverBrain() : nullptr;
+                           AISubgroup* subgroup = driver ? driver->GetSubgroup() : nullptr;
+                           if (!subgroup || driver->IsPlayer() || !driver->GetPerson() || !driver->GetPerson()->IsLocal())
+                               return HarnessProtocol::ErrorResponse("local AI driver subgroup required");
+                           subgroup->SetSpeedMode(SpeedLimited);
+                           cJSON* resp = cJSON_CreateObject();
+                           cJSON_AddBoolToObject(resp, "limited", subgroup->GetSpeedMode() == SpeedLimited);
+                           return HarnessProtocol::JsonResponse(resp);
+                       });
     hs.RegisterCommand({"crew_pose_probe", "Read-only SP passenger pose/muzzle diagnostics", {}},
                        [](const std::string&, cJSON*) -> std::string
                        {
@@ -185,6 +203,13 @@ void RegisterSqf(HarnessServer& hs)
                            }
                            if (weapon < 0)
                                return HarnessProtocol::ErrorResponse("bullet weapon required");
+                           const int selected = man->SelectedWeapon();
+                           if (selected >= 0 && selected < man->NMagazineSlots())
+                           {
+                               const auto* mode = man->GetWeaponMode(selected);
+                               if (mode && mode->_ammo && mode->_ammo->_simulation == AmmoShotBullet)
+                                   weapon = selected;
+                           }
                            const Matrix4 seat = man->WorldTransform();
                            const Vector3 muzzle = seat.FastTransform(man->GetWeaponPoint(weapon));
                            const Vector3 direction = man->GetWeaponDirection(weapon);
