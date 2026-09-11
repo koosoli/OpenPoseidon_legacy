@@ -635,11 +635,11 @@ static Vector3 GetWeaponSoundPos(EntityAI* veh, int weapon)
                                    : veh->PositionModelToWorld(veh->GetWeaponPoint(weapon));
 }
 
-static Vector3 AttachedPointSpeed(const EntityAI* entity, Vector3Par point)
+Vector3 EntityAI::AttachedPointSpeed(Vector3Par point) const
 {
-    const auto* parent = dyn_cast<Entity>(entity->GetHierachyParent());
+    const auto* parent = dyn_cast<Entity>(GetHierachyParent());
     if (!parent)
-        return entity->WorldSpeed();
+        return WorldSpeed();
     const Vector3 centre = parent->WorldTransform().FastTransform(parent->GetCenterOfMass());
     return Ballistics::CarrierPointVelocity(parent->WorldSpeed(), parent->AngVelocity(), point - centre);
 }
@@ -2086,7 +2086,7 @@ bool EntityAI::FireMGun(int weapon, Vector3Par offset, Vector3Par direction, Tar
     shell->SetOrient(dir, shell->DirectionUp());
     // final speed and position
     const Vector3 shotPosition = attached ? shotFrame.FastTransform(offset) : PositionModelToWorld(offset);
-    shell->SetSpeed((attached ? AttachedPointSpeed(this, shotPosition) : _speed) + dir * aInfo->_initSpeed);
+    shell->SetSpeed((attached ? AttachedPointSpeed(shotPosition) : _speed) + dir * aInfo->_initSpeed);
     shell->SetPosition(shotPosition);
     GLOB_WORLD->AddFastVehicle(shell);
 
@@ -2403,7 +2403,7 @@ void EntityAI::FireWeaponEffects(int weapon, const Magazine* magazine, EntityAI*
                     {
                         const Matrix4 frame = WorldTransform();
                         pos = frame * pos;
-                        vel = frame.Rotate(vel) + AttachedPointSpeed(this, pos.Position());
+                        vel = frame.Rotate(vel) + AttachedPointSpeed(pos.Position());
                     }
                     else
                     {

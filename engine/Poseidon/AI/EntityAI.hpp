@@ -1065,6 +1065,7 @@ public:
 
 	//! Get weapon position (where the projectiles leave the weapon)
 	virtual Vector3 GetWeaponPoint( int weapon ) const;
+	Vector3 AttachedPointSpeed(Vector3Par worldPoint) const;
 	//! Get weapon dumped cartridge position
 	virtual bool GetWeaponCartridgePos
 	(

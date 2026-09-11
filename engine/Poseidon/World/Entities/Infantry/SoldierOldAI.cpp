@@ -521,12 +521,13 @@ bool Man::CalculateAimWeapon(int weapon, Vector3& dir, Target* target)
 
     tgtPos[1] += fall;
 
-    const float predTime = 0.2f;
-    myPos += (attached ? WorldSpeed() : Speed()) * predTime;
-    // The bullet inherits the carrier's linear speed; compensate its travel
-    // as well as the short prediction delay. Preserve the on-foot baseline.
+    // Cargo fires from the current attached muzzle, not a walking position
+    // predicted 0.2 seconds ahead. Match translation AND rotation inherited by
+    // FireMGun, or fast vehicles introduce metres of systematic aim error.
     if (attached)
-        myPos += WorldSpeed() * time;
+        myPos += AttachedPointSpeed(myPos) * time;
+    else
+        myPos += Speed() * 0.2f;
 
     Vector3 speedEst = target->speed;
     if (aInfo)
@@ -1482,7 +1483,7 @@ float Man::GetAimed(int weapon, Target* target) const
 
         Vector3 hit = wPos + wDir * eDist;
         if (attached)
-            hit += WorldSpeed() * time;
+            hit += AttachedPointSpeed(wPos) * time;
         hit[1] -= 0.5f * G_CONST * balFactor * time * time;
 
         Vector3 norm = (hit - wPos);

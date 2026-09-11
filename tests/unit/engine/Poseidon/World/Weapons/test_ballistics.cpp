@@ -42,6 +42,25 @@ TEST_CASE("Carrier velocity includes rotation at the muzzle", "[ballistics][carg
            turn * velocity).Size() < .00001f);
 }
 
+TEST_CASE("Cargo aiming compensates actual launch velocity without a walking delay", "[ballistics][cargo-weapons]")
+{
+    const Vector3 muzzle(100, 2, 200);
+    const Vector3 linear(0, 0, 14);
+    const Vector3 angular(0, .4f, 0);
+    const Vector3 offset(1.3f, 1, .6f);
+    const Vector3 inherited = B::CarrierPointVelocity(linear, angular, offset);
+    const float flightTime = .1f;
+    const Vector3 target(180, 2, 200);
+    const Vector3 aimedDisplacement = target - muzzle - inherited * flightTime;
+    // Independent rigid-body component calculation, then the actual flight.
+    const Vector3 launchVelocity(angular.Y() * offset.Z(), 0,
+                                 linear.Z() - angular.Y() * offset.X());
+    const Vector3 hit = muzzle + aimedDisplacement + launchVelocity * flightTime;
+    CHECK((hit - target).Size() < .0001f);
+    CHECK((hit - inherited * .2f - target).Size() > 2.5f);
+    CHECK((muzzle + (target - muzzle) + launchVelocity * flightTime - target).Size() > 1.3f);
+}
+
 namespace
 {
 
