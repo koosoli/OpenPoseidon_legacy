@@ -1,4 +1,6 @@
 import unittest
+import runpy
+from pathlib import Path
 from frame_capture import parse_windows
 
 
@@ -12,6 +14,14 @@ def fixture():
 
 
 class CaptureTests(unittest.TestCase):
+    def test_report_keeps_millisecond_units(self):
+        report = runpy.run_path(str(Path(__file__).with_name("farfield-frametimes.py")))
+        row = report["capture_stats"]([1.25, 280.5, 30])
+        self.assertEqual(row["median_ms"], 30)
+        self.assertEqual(row["worst_ms"], 280.5)
+        self.assertEqual(row["frames_over_100ms"], 1)
+        self.assertEqual(row["frames_over_250ms"], 1)
+
     def test_complete(self):
         self.assertEqual(parse_windows(fixture()), {"S": [1.25, 280.5, 30], "M": [1.25, 280.5, 30]})
 

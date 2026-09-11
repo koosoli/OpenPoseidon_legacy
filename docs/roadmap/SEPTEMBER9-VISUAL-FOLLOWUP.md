@@ -1,5 +1,23 @@
 # September 9 visual follow-up
 
+## September 11: complete-window installed acceptance
+
+Installed c22aa78b, native run cancel-20260911-024613-slow-trace-bc7-default-driver-memory-tint-reuse-0
+completes cleanly in 135.7 s. Strict parser accepts 288 static and 1296 moving
+records, zero dropped frames. Moving median/p95/p99/max are
+30.511/43.418/91.965/220.947 ms; seven frames exceed 100 ms. The old log-delta
+analysis counts six, demonstrating why the separate full-window data matters.
+A units error in the first REPORT (milliseconds passed to a seconds API) is
+corrected and pinned by a Python test; original engine log values are valid.
+Six parser/report tests and 52 native unit cases / 1583 assertions pass.
+
+The worst frame (838) attributes 216.244 ms to residency. Immediately preceding
+bank-table preparation is 189.144 ms for five models, plus 26.0 ms cold-model
+installation. Whole-route sim:step max is 9.573 ms. This route's largest stall is
+not an argument for broad AI threading. The earlier count cap still failed its
+coverage gate, and full DDS preparation still has no stable timing win; inspect
+individual table work rather than silently enabling either rejected experiment.
+
 ## September 11: installed cancellation check and complete profiler windows
 
 124b6ee3 is installed; cancel-20260911-023206-slow-trace-bc7-default-driver-memory-tint-reuse-0-async-dds

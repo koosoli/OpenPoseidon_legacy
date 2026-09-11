@@ -133,6 +133,11 @@ def stats(deltas: list[float]) -> dict:
     }
 
 
+def capture_stats(milliseconds: list[float]) -> dict:
+    # The existing log-delta statistics API takes seconds, unlike profiler records.
+    return stats([value / 1000.0 for value in milliseconds])
+
+
 class Run:
     def __init__(self) -> None:
         self.samples: list[tuple[str, float, float, float]] = []
@@ -340,7 +345,7 @@ def report(path: Path, args) -> int:
         print("  Bounded FrameProfiler windows: completed main-loop frames, no gap averaging.")
         print("  Excludes partial boundary frames and time outside BeginFrame/EndFrame; not GPU timings.")
         for phase, values in windows.items():
-            row = stats(values)
+            row = capture_stats(values)
             print(f"  {PHASE_NAMES[phase]} n={len(values)} median={row['median_ms']:.3f} "
                   f"p95={row['p95_ms']:.3f} p99={row['p99_ms']:.3f} worst={row['worst_ms']:.3f} ms "
                   f">100ms={row['frames_over_100ms']} >250ms={row['frames_over_250ms']}")
