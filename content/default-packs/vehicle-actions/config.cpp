@@ -68,6 +68,7 @@ class CfgOPVehicleActions
                     halfAngle = 25;
                     minElevation = -15;
                     maxElevation = 20;
+                    aiAimSpeed = 45;
                 };
             };
         };

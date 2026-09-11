@@ -208,7 +208,11 @@ void Man::AimWeaponAI(int weapon, Vector3Par direction, float deltaT)
         }
     }
 
-    float maxSpeed = ability * 0.2f * deltaT * weaponDexterity;
+    const auto* cargoSeat = GetActiveCargoWeaponSeat();
+    // A fixed passenger cannot turn the whole body like an on-foot soldier.
+    // Content can permit faster aim tracking, not stabilisation or less dispersion.
+    const float trackingRate = cargoSeat ? cargoSeat->AITrackingRate() : 0.2f;
+    float maxSpeed = ability * trackingRate * deltaT * weaponDexterity;
     float delta;
 
     float coef = 0.5f;

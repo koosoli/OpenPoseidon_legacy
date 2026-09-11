@@ -24,6 +24,12 @@ struct CargoWeaponSeat
     float halfAngle = 0;
     float minElevation = 0;
     float maxElevation = 0;
+    float aiAimSpeed = 0; // Degrees/second at full skill/dexterity; 0 preserves legacy tracking.
+
+    float AITrackingRate() const
+    {
+        return aiAimSpeed > 0 ? aiAimSpeed * (H_PI / 180.0f) : 0.2f;
+    }
 
     bool HasTransitions() const { return idleAction.GetLength() > 0; }
     bool OwnsAction(const char* name) const
@@ -153,6 +159,13 @@ public:
             if (std::abs(seat.azimuth) > 180 || seat.halfAngle <= 0 || seat.halfAngle > 90 ||
                 seat.minElevation < -85 || seat.maxElevation > 85 || seat.minElevation >= seat.maxElevation)
                 return fail("invalid seat arc or elevation limits");
+            if (const auto* speed = entry.FindEntry("aiAimSpeed"))
+            {
+                if ((!speed->IsFloatValue() && !speed->IsIntValue()) || !std::isfinite(float(*speed)) ||
+                    float(*speed) < 0 || float(*speed) > 90)
+                    return fail("aiAimSpeed must be finite and in 0..90 degrees/second");
+                seat.aiAimSpeed = float(*speed);
+            }
             _seats.push_back(seat);
         }
         return true;

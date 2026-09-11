@@ -206,7 +206,11 @@ void RegisterSqf(HarnessServer& hs)
                                    cJSON_AddNumberToObject(resp, "cargoIndex", i);
                                    const auto* spec = vehicle->Type()->GetCargoWeaponSeat(i);
                                    cJSON_AddBoolToObject(resp, "seatConfigured", spec != nullptr);
-                                   if (spec) cJSON_AddStringToObject(resp, "seatAction", spec->action);
+                                   if (spec)
+                                   {
+                                       cJSON_AddStringToObject(resp, "seatAction", spec->action);
+                                       cJSON_AddNumberToObject(resp, "aiTrackingRadiansPerSecond", spec->AITrackingRate());
+                                   }
                                }
                            }
                            cJSON_AddBoolToObject(resp, "cargoWeaponLineClear", man->CargoWeaponLineClear(weapon));

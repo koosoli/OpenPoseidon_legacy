@@ -41,6 +41,7 @@ TEST_CASE("Cargo personal weapon contract rejects invalid tables atomically", "[
     REQUIRE(table.Load(vehicle, 3));
     REQUIRE(table.Find(0) != nullptr);
     REQUIRE(table.Find(1) == nullptr);
+    REQUIRE(table.Find(0)->AITrackingRate() == 0.2f);
 
     SECTION("unknown version") { config->Add("version", 99); }
     SECTION("invalid index") { seat->Add("cargoIndex", 3); }
@@ -51,9 +52,32 @@ TEST_CASE("Cargo personal weapon contract rejects invalid tables atomically", "[
     SECTION("too wide") { seat->Add("halfAngle", 180); }
     SECTION("nonfinite") { seat->Delete("azimuth"); seat->Add("azimuth", std::numeric_limits<float>::quiet_NaN()); }
     SECTION("reversed elevation") { seat->Add("minElevation", 40); }
+    SECTION("negative tracking speed") { seat->Add("aiAimSpeed", -1); }
+    SECTION("excessive tracking speed") { seat->Add("aiAimSpeed", 91); }
+    SECTION("nonfinite tracking speed") { seat->Add("aiAimSpeed", std::numeric_limits<float>::infinity()); }
+    SECTION("text tracking speed") { seat->Add("aiAimSpeed", "fast"); }
     REQUIRE_FALSE(table.Load(vehicle, 3));
     REQUIRE_FALSE(table.Error().empty());
     REQUIRE(table.Find(0) == nullptr);
+}
+
+TEST_CASE("Cargo tracking speed is explicit content, not a global infantry change", "[cargo-weapons]")
+{
+    ParamFile vehicle;
+    auto* config = vehicle.AddClass("OPCargoWeapons");
+    config->Add("version", 1);
+    auto* entry = AddSeat(*config->AddClass("Seats"), "Passenger", 0);
+    CargoWeaponSeats table;
+    REQUIRE(table.Load(vehicle, 3));
+    REQUIRE(table.Find(0)->AITrackingRate() == 0.2f);
+    entry->Add("aiAimSpeed", 45);
+    REQUIRE(table.Load(vehicle, 3));
+    REQUIRE(std::abs(table.Find(0)->AITrackingRate() - H_PI / 4) < 1e-6f);
+    REQUIRE(table.Find(0)->halfAngle == 30);
+    REQUIRE(table.Find(1) == nullptr);
+    entry->Add("aiAimSpeed", 0);
+    REQUIRE(table.Load(vehicle, 3));
+    REQUIRE(table.Find(0)->AITrackingRate() == 0.2f);
 }
 
 TEST_CASE("Cargo transition contract requires complete distinct authored states", "[cargo-weapons]")
