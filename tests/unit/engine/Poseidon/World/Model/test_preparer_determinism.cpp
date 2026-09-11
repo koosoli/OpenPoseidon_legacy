@@ -1043,12 +1043,19 @@ TEST_CASE("Preparer camera cancellation discards active parses and queued conver
         Poseidon::ModelCache::ExternalLoader previous = Poseidon::ModelCache::GetExternalLoader();
         ~RestoreLoader() { Poseidon::ModelCache::SetExternalLoader(previous); }
     } restore;
-    Poseidon::ModelCache::SetExternalLoader(+[](const std::string&, std::string&) {
-        ++entered;
-        // Bounded even on test failure; the release guard normally wakes us first.
-        WaitFor([] { return release.load(); });
-        return std::make_shared<ModelIR::Model>();
-    });
+    Poseidon::ModelCache::SetExternalLoader(+[](const std::string&, std::string&)
+                                            {
+                                                ++entered;
+                                                // Bounded even on test failure; the release guard normally wakes us
+                                                // first.
+                                                WaitFor([] { return release.load(); });
+                                                auto model = std::make_shared<ModelIR::Model>();
+                                                model->lodLevels.emplace_back();
+                                                ModelIR::Material material;
+                                                material.texturePath = "camera_cancel_unreadable_texture.paa";
+                                                model->lodLevels[0].mesh.materials.push_back(std::move(material));
+                                                return model;
+                                            });
     ObjectStreamPreparer prep;
     struct ReleaseBeforeJoin
     {
@@ -1103,16 +1110,23 @@ TEST_CASE("Preparer camera cancellation discards active parses and queued conver
         prep.DropStale(epochs.data(), epochs.size(), 2);
     }
     release = true;
-    REQUIRE(WaitFor([&] {
-        for (uint32_t i = 0; i < workers; ++i)
-            if (prep.Query(i) == ObjectStreamPreparer::State::Parsing)
-                return false;
-        return true;
-    }));
+    REQUIRE(WaitFor(
+        [&]
+        {
+            for (uint32_t i = 0; i < workers; ++i)
+                if (prep.Query(i) == ObjectStreamPreparer::State::Parsing)
+                    return false;
+            return true;
+        }));
     CHECK(prep.SnapshotStats().ready == (revive ? 1 : 0));
+    if (Poseidon::render::PreparedTextureStore::Enabled())
+    {
+        // Cancelled parses must not start optional texture I/O; a revived one must.
+        CHECK(prep.SnapshotStats().texUnreadable == (revive ? 1 : 0));
+    }
     for (uint32_t i = 0; i < workers; ++i)
-        CHECK(prep.Query(i) == (revive && i == 0 ? ObjectStreamPreparer::State::Ready
-                                               : ObjectStreamPreparer::State::Unknown));
+        CHECK(prep.Query(i) ==
+              (revive && i == 0 ? ObjectStreamPreparer::State::Ready : ObjectStreamPreparer::State::Unknown));
     if (revive)
         CHECK(prep.Take(0) != nullptr);
     else

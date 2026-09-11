@@ -1,5 +1,24 @@
 # September 9 visual follow-up
 
+## September 11: DDS timing repeats do not justify default activation
+
+Same installed d8c931d5, corrected version-3 native/MSAA4 profile and identical
+4 km route: valid OFF runs 015814/022352 yielded 32.3/32.3 moving throughput FPS,
+p99 94/92 ms; valid ON runs 021208/022033 yielded 33.1/32.0 FPS, p99 98/96 ms.
+Peak private bytes rose from about 10.98/11.01 GiB to 11.64/11.60 GiB. Sampling
+is 1 Hz; trace tails have 95.6-96.2% one-to-one coverage, not exact frame tails.
+No sustained improvement established. The earlier ON shutdown timeout remains
+unresolved; two clean repeats do not prove it fixed. Keep DDS preparation OFF.
+
+Next bounded improvement stops optional texture work between files when the
+active model request is camera-stale, stopped or from an earlier world. The queue
+mutex is only held for the check, never I/O, decoding or store calls. The existing
+cancellation fixture now carries a real texture reference and verifies zero
+attempts for discarded requests versus one for a camera-revived request. Combined
+PAK/DDS/PAA/preparer suite passes 51 cases / 969 assertions. Capture JSON now
+includes DDS-specific puts/takes/configuration misses; old puts/takes count only
+the original payload path. Installed regression for this increment is pending.
+
 ## September 11: native DDS byte oracle passes, shutdown gate failed
 
 Installed d8c931d5, pack 0.1.4. Clean oracle capture

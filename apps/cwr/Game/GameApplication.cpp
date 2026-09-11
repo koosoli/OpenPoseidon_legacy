@@ -400,6 +400,9 @@ bool WriteCaptureMetrics(const std::string& path)
         cJSON_AddNumberToObject(store, "expired", (double)s.store.expired);
         cJSON_AddNumberToObject(store, "decoded_puts", (double)s.store.decodedPuts);
         cJSON_AddNumberToObject(store, "decoded_takes", (double)s.store.decodedTakes);
+        cJSON_AddNumberToObject(store, "dds_prepared_puts", (double)s.store.ddsPreparedPuts);
+        cJSON_AddNumberToObject(store, "dds_prepared_takes", (double)s.store.ddsPreparedTakes);
+        cJSON_AddNumberToObject(store, "dds_configuration_misses", (double)s.store.ddsConfigurationMisses);
         cJSON_AddNumberToObject(store, "entries", (double)s.store.entries);
         cJSON_AddNumberToObject(store, "mb", s.store.bytes / (1024.0 * 1024.0));
         cJSON* prep = cJSON_AddObjectToObject(streaming, "preparer");

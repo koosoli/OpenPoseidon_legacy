@@ -141,8 +141,8 @@ struct ObjectStreamPreparer::Impl
     bool stop = false;
     // Bumped by Reset. A worker that finishes a parse started under an older generation
     // discards its result: the slot it would write belongs to a different world now.
-    // Atomic because the texture-prepare loop polls it OUTSIDE the mutex (to stop reading
-    // files for a world that is gone); every WRITE still happens under the mutex.
+    // Generation tokens distinguish workers from an earlier world after Reset;
+    // all writes and cancellation checks also hold the queue mutex.
     std::atomic<uint64_t> generation{0};
 
     size_t count = 0;
@@ -446,8 +446,13 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                 }
                 for (const std::string& key : names)
                 {
-                    if (gen != generation.load(std::memory_order_relaxed)) // Reset ran: dead world, stop reading
-                        break;
+                    {
+                        // Poll between textures, never hold the queue mutex during I/O.
+                        // Check generation first: Reset may have replaced/shrunk stale.
+                        std::lock_guard<std::mutex> pendingLock(mutex);
+                        if (stop || gen != generation.load(std::memory_order_relaxed) || stale[index])
+                            break;
+                    }
                     if (!store.ShouldPrepare(key))
                     {
                         ++texSkipped;

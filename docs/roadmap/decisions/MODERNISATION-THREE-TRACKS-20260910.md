@@ -11,6 +11,32 @@ that baseline. Analysis requested first; implementation subsequently authorised.
 
 ## Evidence limits
 
+September 11 native DDS acceptance decision (installed d8c931d5): leave OFF.
+The clean byte oracle run 015523 verified 671 consumed sources exactly, including
+375 tinted and 95 coverage composites (overlapping categories). Timing runs below
+disable the oracle and detailed DDS logging, use the same 4 km camera route,
+1280x720 native/MSAA4/Ultra, fixed LOD governor, fpsCap=0/vsync=0, and 1 Hz RAM
+plus whole-GPU driver sampling. All live below build/native-stream-cancellation/
+with prefix cancel-20260911- and suffix
+-slow-trace-bc7-default-driver-memory-tint-reuse-0 (ON appends -async-dds).
+
+| Start | DDS | Moving FPS | p95 / p99 / worst ms | Private peak GiB |
+| --- | --- | --- | --- | --- |
+| 015814 | OFF | 32.3 | 45 / 94 / 286 | 10.984 |
+| 021208 | ON | 33.1 | 45 / 98 / 257 | 11.64 |
+| 022033 | ON | 32.0 | 45 / 96 / 275 | 11.597 |
+| 022352 | OFF | 32.3 | 45 / 92 / 280 | 11.011 |
+
+All four complete shutdown, 22370 registered instances, ~134.7 s wall. No stable
+speed/tail gain, ~0.6 GiB more private memory. Trace gap averaging (95.6-96.2%
+one-to-one samples) limits tail precision. Final ocean view draws no main objects;
+this is route/lifecycle evidence, not village visual acceptance. ON run 020051
+timed out in DDTerm and is INVALID, not omitted as a successful outlier. Similar
+hangs predate DDS preparation; cause remains unknown. Watchdog now automatically
+captures a small owned-process minidump before termination; no actual hang dump
+obtained yet. Successful repeats do not close that gate. Prefer eliminating stale
+texture preparation over enabling extra worker work with no measured benefit.
+
 Native DDS integration experiment after 185a9c4a: WGR_NATIVE_DDS_PREPARE=1
 extends the existing model worker's texture stage to native DDS/EDDS IR names,
 including tint/coverage wrappers. TextureSourceDDSFactory takes the completed
