@@ -715,6 +715,15 @@ Matrix4 Man::GetWeaponRelTransform(int weapon) const
 
 Vector3 Man::GetEyeDirection() const
 {
+    if (GetActiveCargoWeaponSeat())
+    {
+        // The authored seat turns the torso/head away from model-forward.
+        // Match the head bone's RTM -> head -> aiming -> world composition,
+        // rather than making a side-facing passenger observe through his back.
+        Matrix4 head(MDirection, -VAside, VUp);
+        AnimateMatrix(head, Type()->_headOnlyWeight);
+        return WorldTransform().Rotate(GunTransform().Rotate(_headTrans.Rotate(head.Direction()))).Normalized();
+    }
     Vector3 dir = _headTrans.Direction();
     dir = GunTransform().Rotate(dir);
     if (GetHierachyParent())
