@@ -2,12 +2,15 @@
 
 ## September 11 Jeep implementation continuation
 
-Latest installed release at this checkpoint: a11b8650, both real default packages, no mod parameter
+Latest installed release at this checkpoint: a22ce887, both real default packages, no mod parameter
 needed. Fresh release 125134 passes NPC, player, disabled, missing archive,
 incompatible manifest and explicit user-mod precedence. Own six-RTM source,
 generator and SP Jeep cargo-0/M16 path are delivered. Save/reload and player
 lifecycle pass again in 141650/141753; two stationary Jeeps operate independently.
 The package 0.1.1 head pose and animated-eye direction restore cargo observation.
+Package 0.1.2 adds seat-scoped AI tracking speed; unit/generator checks pass,
+but installed fast-turn and regression acceptance is in progress. The optional
+group-command slow-drive fixture fails to move, so it is not a passing FFV test.
 Saved missing-package poses correctly return to the retail co-driver state.
 Hold/outside/obstacle/friendly and disabled-package regressions pass. Current
 fast turning and straight-drive runs do NOT pass hit acceptance; do not substitute
@@ -19,8 +22,12 @@ linear-tint variants, with exact lazy CPU pixels/averages and the existing GPU
 delegate. Corrected capped-mip and real-corpus equality tests pass. Two native
 route pairs save about 2.99 / 3.15 GiB process peak memory with unchanged GPU
 textures/geometry; modest frame-time differences, fewer >100 ms spikes. Village
-images agree. Default enablement is being deployed/verified; the A/B fallback is
-WGR_LAZY_BCR_TINT=0. See NATIVE-TEXTURE-IDENTITY-20260911.md; not a new streaming
+images agree. Enabled by default in f6516c52; the no-override village run 152834
+produced the expected image but hung during shutdown and failed its watchdog.
+The harness now rejects that failure instead of reporting a pass. Same-binary
+explicit OFF 154000 and ON 154151 both shut down cleanly. The intermittent hang
+is not diagnosed or closed; default no-override lifecycle acceptance remains open.
+The A/B fallback is WGR_LAZY_BCR_TINT=0. See NATIVE-TEXTURE-IDENTITY-20260911.md; not a new streaming
 manager, a large FPS claim, or completion of native Reforger quality/streaming.
 
 Historical implementation checkpoints follow. Installed 7f6d3fa0: NPC 121507 and player 121641 pass

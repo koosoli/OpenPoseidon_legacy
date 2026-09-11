@@ -160,3 +160,26 @@ path for A/B. Unsupported materials still fall back. No claim that native
 streaming, forest quality, world-switch acceptance or the full backlog is done.
 Run an installed default (no override) village/route smoke after deployment;
 the harness now distinguishes default from explicit on/off in its metadata.
+
+### Default smoke lifecycle failure, not a performance result
+
+Installed f6516c52, Village-lazy-default-20260911-152834: native 1920x1080,
+MSAA4, no lazy-view override, positive lazy-source diagnostics and the expected
+5362 main objects / 13499377 triangles. Screenshot appearance agrees. However,
+shutdown stopped after DDTerm / sun / moon messages, without Shutdown complete;
+the 300-second watchdog killed its own PID 43884. This is a FAILED smoke test.
+The village wrapper incorrectly printed success despite failed capture metadata;
+5782c318 now checks the subprocess exit and strict lifecycle metadata. Direct
+helper checks reject this failed run and accept the earlier valid 145427 run.
+
+Same installed f6516c52, same village: explicit OFF 154000 and ON 154151 both
+pass the repaired lifecycle gate (including audio cleanup and Shutdown complete).
+Both show 22360 instances / 5362 main objects / 13499377 triangles. Single GPU
+samples 29.676 / 29.672 ms are not an FPS comparison. The prior hang is intermittent,
+not root-caused by this ablation; do not claim the lazy view caused or fixed it.
+
+Source inspection finds Engine::StopAll is a no-op for WGPU; StopRenderThread
+currently runs in the renderer destructor after world teardown. That is an
+ownership/lifecycle hypothesis, not a proven deadlock. No speculative shutdown
+change has been made. Capture a stack from an owned hung test if it recurs;
+keep default no-override lifecycle and world-switch acceptance open.

@@ -15,6 +15,16 @@ autorisiert; weder Aufwand noch ein erfolgloses Experiment streichen den Wunsch.
 
 ## Zwei ausdruecklich nachgepruefte Luecken
 
+Erneut bestaetigter Auftrag am Nachmittag: Tiefschnee-Verdraengung von
+Koerpern/Fahrzeugen, Prone-Untergrundblick, Rotorwash-Abtrag und unsichtbarer
+Spieler beim Freefly-/Editor-Wechsel bleiben offen. Ebenso echte Hoehlen,
+Fusion-Bearbeitung, Licht/DLSS/Waldfehler und vollstaendige Materialabnahme.
+Native Reforger-Optik ist gleichrangig mit Performance: Wald-/Bodenkontrast,
+Materialtiefe, Baumqualitaet gegen die konvertierte Karte und zusammenhaengende
+Stamm-/Kronenbewegung. Zusaetzlich die sichtbare Objekt-Ladegrenze pruefen und
+entfernte Objekte in geeigneten niedrigen LODs bereitstellen. Kein Nebel oder
+reduzierte Sichtweite als Ersatz; vorhandene Distanzpfade zuerst messen.
+
 ### Satmaps mit Doerfern und Waeldern: fehlen
 
 `engine/WgpuRenderer/TerrainWgpu.cpp`, `TerrainWgpu::BuildAutomaticSatmap`,
@@ -50,10 +60,17 @@ Frisches Release-Verzeichnis 125134 besteht zusaetzlich automatisches Laden,
 beide SP-Pfade, Abschalten, fehlendes/inkompatibles Paket und Benutzer-Mod-Vorrang.
 Originalinstallation und deren PBOs wurden nicht veraendert.
 
-Offen: Kurven/Unebenheiten/mehrere Jeeps, feinere Animationsabnahme,
+Aktueller Fahrtest a22ce887 / 155706: schnellere sitzspezifische Nachfuehrung
+reduziert seitlichen Fehler auf etwa ein Grad, aber keine Schuesse; damit keine
+neue Fahrabnahme. Historische gerade Fahrt oben ersetzt diesen aktuellen Test
+nicht. Zwei stehende Jeeps und gespeicherter Originalpose-Fallback nach
+Paketabschaltung wurden inzwischen erfolgreich geprueft (141650/133911).
+
+Offen: Kurven/Unebenheiten/mehrere fahrende Jeeps, feinere Animationsabnahme,
 kontrollierte Zusatzkosten und echter Multiplayer-Fallbacktest. MP ist im Code
 weiter auf Originalverhalten begrenzt, nicht als FFV freigegeben. Laden alter
-Spielstaende nach Abschalten des Animationspakets ist noch nicht abgenommen.
+Spielstaende nach Abschalten des Animationspakets wurde im isolierten Fall
+133911 geprueft; weitere Missionsvarianten bleiben ungetestet.
 Siehe [chronologische Implementierung und Tests](decisions/JEEP-FFV-20260911.md).
 
 ## Uebrige Anforderungen und offene Abnahme
