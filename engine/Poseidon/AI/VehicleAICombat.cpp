@@ -1470,13 +1470,12 @@ float EntityAI::GetAimed(int weapon, Target* target) const
 typedef StaticArrayAuto<OLink<EntityAI>> EntityAIList;
 
 static void CheckNearFriendlies(EntityAIList& res, const EntityAI* from, const EntityAI* target, Vector3Par dir,
-                                float maxDistance, float maxAside)
+                                Vector3Par fromPos, float maxDistance, float maxAside)
 {
     // check all near friendly troops
     // do not check myself and target
     // collect information about near troops
     int xMin, xMax, zMin, zMax;
-    const Vector3 fromPos = from->GetHierachyParent() ? from->WorldTransform().Position() : from->Position();
     ObjRadiusRectangle(xMin, xMax, zMin, zMax, fromPos, fromPos, maxDistance);
     AIGroup* grp = from->GetGroup();
     if (!grp)
@@ -1564,7 +1563,9 @@ bool EntityAI::CheckFriendlyFire(int weapon, Target* target) const
             AUTO_STATIC_ARRAY(OLink<EntityAI>, nearFriendlies, 32);
             // check near part of bullet trajectory
             Vector3Par dir = GetWeaponDirection(weapon);
-            const Vector3 origin = GetHierachyParent() ? WorldTransform().Position() : Position();
+            // A passenger fires from the rifle, not the seat centre inside the
+            // carrier. The separate cargo gate still checks barrel/body contacts.
+            const Vector3 origin = GetHierachyParent() ? WorldTransform().FastTransform(GetWeaponPoint(weapon)) : Position();
             float distToTarget = target->AimingPosition().Distance(origin);
             // if target is very near, be less carefull about friendly fire
             float radius = 2.0f;
@@ -1578,7 +1579,7 @@ bool EntityAI::CheckFriendlyFire(int weapon, Target* target) const
                     radius = 0.5f;
                 }
             }
-            CheckNearFriendlies(nearFriendlies, this, target->idExact, dir, maxDist, radius);
+            CheckNearFriendlies(nearFriendlies, this, target->idExact, dir, origin, maxDist, radius);
             if (nearFriendlies.Size() > 0)
             {
                 // some friendly unit blocks fire - we have to wait

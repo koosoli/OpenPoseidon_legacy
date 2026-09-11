@@ -169,6 +169,7 @@ void RegisterSqf(HarnessServer& hs)
                            }
                            if (Target* target = man->GetFireTarget())
                            {
+                               cJSON_AddBoolToObject(resp, "friendlyLineClear", man->CheckFriendlyFire(weapon, target));
                                cJSON_AddNumberToObject(resp, "targetX", target->position.X());
                                cJSON_AddNumberToObject(resp, "targetY", target->position.Y());
                                cJSON_AddNumberToObject(resp, "targetZ", target->position.Z());
