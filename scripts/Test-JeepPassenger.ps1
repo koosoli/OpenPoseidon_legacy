@@ -1,4 +1,4 @@
-param([switch]$ProjectileFrame, [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
+param([switch]$ProjectileFrame, [switch]$AnimationPreview, [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
 $root=Split-Path $PSScriptRoot -Parent
@@ -14,7 +14,13 @@ $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0)
 $listener.Start(); $port=$listener.LocalEndpoint.Port; $listener.Stop()
 $mission=Join-Path $root 'dev-missions/jeep-ffv.Intro'
 $log=Join-Path $output 'jeep.log'
-$p=Start-Process -FilePath (Join-Path $GameDir 'OpenPoseidon.exe') -WorkingDirectory $GameDir -WindowStyle Hidden -PassThru -ArgumentList @('--render','wgpu','--window','--no-dev','--width','1280','--height','720','--harness',"$port",'--test-mission',('"'+$mission+'"'),'--log-file',('"'+$log+'"'))
+$gameArgs=@('--render','wgpu','--window','--no-dev','--width','1280','--height','720','--harness',"$port",'--test-mission',('"'+$mission+'"'),'--log-file',('"'+$log+'"'))
+if ($AnimationPreview) {
+    $preview=Join-Path $root 'build/jeep-ffv/animation-preview'
+    if (!(Test-Path -LiteralPath "$preview/AddOns/op_jeep_animation_preview.pbo")) {throw 'Build animation preview first'}
+    $gameArgs+=@('--mod',('"'+$preview+'"'))
+}
+$p=Start-Process -FilePath (Join-Path $GameDir 'OpenPoseidon.exe') -WorkingDirectory $GameDir -WindowStyle Hidden -PassThru -ArgumentList $gameArgs
 $null=$p.Handle
 $client=$null
 try {
@@ -51,6 +57,20 @@ try {
     $null=Send @{cmd='eval';code='alive ffvTarget && getDammage ffvTarget == 0'} 'true'
     if ($before.result -ne '30') {throw 'Passenger fired before baseline capture'}
     $null=Send @{cmd='screenshot';path=(Join-Path $output 'seated.png')}
+    if ($AnimationPreview) {
+        $null=Send @{cmd='exec';code='deleteVehicle ffvTarget; ffvPassenger setBehaviour "SAFE"; ffvView camSetPos [9703,3602,1.8]; ffvView camSetTarget [9700.4,3600,1.0]; ffvView camCommit 0'}
+        foreach ($pose in @('Idle','Raise','Aim','Recoil','Reload','Lower')) {
+            $null=Send @{cmd='exec';code=('ffvPassenger switchMove "OPJeep'+$pose+'"')}
+            Start-Sleep -Milliseconds 250
+            $null=Send @{cmd='eval';code='vehicle ffvPassenger == ffvJeep'} 'true'
+            $null=Send @{cmd='screenshot';path=(Join-Path $output ("pose-$pose.png"))}
+        }
+        $null=Send @{cmd='exit'}
+        if (!$p.WaitForExit(30000) -or $p.ExitCode -ne 0) {throw 'Animation preview exit failed'}
+        if (Select-String -LiteralPath $log -Pattern 'Bad animation|Broken animation|Animation .*not found|Validation Error|panicked at|DeviceLost' -Quiet) {throw 'Animation preview load/render error'}
+        Write-Host "Animation frames require visual inspection: $output"
+        return
+    }
     $null=Send @{cmd='exec';code='ffvPassenger reveal ffvTarget; ffvPassenger doTarget ffvTarget; ffvPassenger setCombatMode "YELLOW"; ffvPassenger doFire ffvTarget'}
     Start-Sleep -Seconds 10
     $after=Send @{cmd='eval';code='ffvPassenger ammo "M16"'}
