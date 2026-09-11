@@ -1,9 +1,10 @@
 param([switch]$ResetSettings, [switch]$Storm, [switch]$Refill,
-      [ValidateRange(0.01,1.0)][double]$Depth=0.18, [switch]$ProneView, [switch]$Walking, [switch]$Rotor, [switch]$Vehicle,
+      [ValidateRange(0.01,1.0)][double]$Depth=0.18, [switch]$ProneView, [switch]$Walking, [switch]$Rotor, [switch]$Vehicle, [switch]$PlayerProne,
       [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
 if ($Walking -and $ProneView) {throw 'Walking and ProneView are different fixtures'}
 if ($Vehicle -and ($Rotor -or $Walking -or $ProneView)) {throw 'Vehicle is a separate fixture'}
+if ($PlayerProne -and ($Vehicle -or $Rotor -or $Walking -or $ProneView)) {throw 'PlayerProne is a separate fixture'}
 $posture=if ($Walking) {'UP'} else {'DOWN'}
 if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
 $root=Split-Path $PSScriptRoot -Parent
@@ -12,7 +13,7 @@ $output=Join-Path $root ('build/snow-crawl/acceptance/crawl-'+(Get-Date -Format 
 $env:POSEIDON_USER_DIR=Join-Path $output 'user'
 New-Item -ItemType Directory -Force $env:POSEIDON_USER_DIR | Out-Null
 $stamp | Set-Content -LiteralPath (Join-Path $output 'DEPLOYED-FROM.txt')
-[pscustomobject]@{installed=$stamp.Trim();depth=$Depth;vehicle=[bool]$Vehicle;rotor=[bool]$Rotor;walking=[bool]$Walking;proneView=[bool]$ProneView;refill=[bool]$Refill;storm=[bool]$Storm;resetSettings=[bool]$ResetSettings} |
+[pscustomobject]@{installed=$stamp.Trim();depth=$Depth;playerProne=[bool]$PlayerProne;vehicle=[bool]$Vehicle;rotor=[bool]$Rotor;walking=[bool]$Walking;proneView=[bool]$ProneView;refill=[bool]$Refill;storm=[bool]$Storm;resetSettings=[bool]$ResetSettings} |
     ConvertTo-Json | Set-Content -LiteralPath (Join-Path $output 'test-context.json')
 & "$PSScriptRoot/Write-BenchmarkGraphics.ps1" -UserDir $env:POSEIDON_USER_DIR -DlssMode 0
 $env:POSEIDON_SNOW_TEST_DEPTH=$Depth.ToString([Globalization.CultureInfo]::InvariantCulture)
@@ -57,6 +58,29 @@ try {
     }
     $cover=Send @{cmd='dev_snow';action='state'}
     if ([Math]::Abs($cover.depth-$Depth) -gt 0.00001) {throw 'Actual snow depth differs from requested fixture'}
+    if ($PlayerProne) {
+        $null=Send @{cmd='exec';code='player setPos [9700,3630,0]; player setDir 0; player switchCamera "INTERNAL"'}
+        # Down/up in one event batch is not a held action; two presses toggle back up.
+        $null=Send @{cmd='key';sc=29;hold=$true}
+        Start-Sleep -Milliseconds 150
+        $null=Send @{cmd='key_up';sc=29}
+        Start-Sleep -Seconds 2
+        $null=Send @{cmd='screenshot';path=(Join-Path $output 'player-lower-1.png')}
+        $null=Send @{cmd='exec';code='player switchCamera "EXTERNAL"'}
+        Start-Sleep -Seconds 2
+        $null=Send @{cmd='screenshot';path=(Join-Path $output 'player-posture.png')}
+        $null=Send @{cmd='exec';code='player switchCamera "INTERNAL"'}
+        foreach ($step in 1..4) {
+            $null=Send @{cmd='mouse_motion';dx=0;dy=100}
+            Start-Sleep -Seconds 1
+            $null=Send @{cmd='screenshot';path=(Join-Path $output "player-lookdown-$step.png")}
+        }
+        $null=Send @{cmd='exit'}
+        if (!$p.WaitForExit(20000) -or $p.ExitCode -ne 0) {throw 'Player view test exit failed'}
+        if (Select-String -LiteralPath $log -Pattern 'Validation Error|panicked at|DeviceLost' -Quiet) {throw 'Player view renderer error'}
+        Write-Host "Player view sequence captured; posture and look direction need visual verification: $output"
+        return
+    }
     if ($Vehicle) {
         if ($Depth -lt 0.8) {throw 'Vehicle hull fixture requires deep snow'}
         $null=Send @{cmd='exec';code='doStop crawlWalker; snowCar="UAZ" createVehicle [9700,3630,0]; snowCar setDir 0; crawlWalker moveInDriver snowCar; doStop crawlWalker; crawlView="camera" camCreate [9704,3626,2.5]; crawlView cameraEffect ["internal","back"]; crawlView camSetTarget [9700,3630,0]; crawlView camCommit 0'}

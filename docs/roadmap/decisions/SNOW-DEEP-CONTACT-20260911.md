@@ -78,3 +78,25 @@ for the reported underground view. This horizontal NPC-camera fixture does not
 yet distinguish legitimate occlusion below 1 m cover from seeing through terrain
 when looking down. Next diagnosis must record the actual view position/angle and
 snow mesh at the eye; do not keep increasing the clearance radius blindly.
+
+## Real player look-down checkpoint
+
+Installed 142b6d6a, Test-SnowCrawl -PlayerProne: native 1280x720, DLSS off,
+actual player, one held Z action and four downward mouse motions. Deep run
+crawl-20260911-215109 (1 m) and shallow control crawl-20260911-215314 (0.18 m)
+exit cleanly. Inspected external posture and final internal views: the camera
+looks at exposed ground in the contact depression, with snow walls at 1 m.
+No clear through-terrain view reproduced here. This does NOT close the tester
+report; requested a reference image/video asynchronously, other work continues.
+
+Fixture corrections matter: instantaneous down/up did not establish a held
+stance action, and two held Z presses toggle prone back to standing. Those
+earlier player sequences (214711/214921) are not prone acceptance evidence.
+The fixture now records playerProne in test-context and warns that visual
+posture/direction verification is still required, rather than auto-passing it.
+
+Car contact: installed 142b6d6a, UAZ fixture 214031 passes stationary/departure,
+bounded centre deficit (0.65 m at 1 m cover), untouched outside sample and refill.
+Near view confirms a broad geometric channel, still visibly faceted. Approximate
+0.35 m underside clearance, 10 Hz; no suspension/traction/physical snow change.
+Tracked vehicles and multi-vehicle cost measurements remain open.
