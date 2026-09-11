@@ -62,15 +62,18 @@ try {
         $initial=Send @{cmd='dev_snow';action='sample';x=9700;z=3630}
         if ($initial.deficit -ne 0) {throw 'Stopped rotor changed snow'}
         $null=Send @{cmd='screenshot';path=(Join-Path $output 'rotor-before.png')}
-        $null=Send @{cmd='exec';code='snowHeli engineOn true'}
+        $null=Send @{cmd='exec';code='player moveInDriver snowHeli; snowHeli engineOn true'}
         Start-Sleep -Seconds 30
         $null=Send @{cmd='eval';code='[getPos snowHeli,isEngineOn snowHeli]'}
+        if ((Send @{cmd='eval';code='isEngineOn snowHeli'}).result -ne 'true') {throw 'Rotor fixture engine stopped; not a valid erosion test'}
         $eroded=Send @{cmd='dev_snow';action='sample';x=9700;z=3630}
         if ($eroded.deficit -le 0.02) {throw 'Running rotor did not erode snow'}
         $outside=Send @{cmd='dev_snow';action='sample';x=9720;z=3630}
         if ($outside.deficit -ne 0) {throw 'Rotor erosion escaped its bounded footprint'}
         $null=Send @{cmd='screenshot';path=(Join-Path $output 'rotor-after.png')}
-        $null=Send @{cmd='exec';code='deleteVehicle snowHeli'}
+        $null=Send @{cmd='exec';code='player action ["EJECT",snowHeli]'}
+        Start-Sleep -Seconds 1
+        $null=Send @{cmd='exec';code='player setPos [9680,3590,0]; deleteVehicle snowHeli'}
         Start-Sleep -Seconds 2
         $null=Send @{cmd='screenshot';path=(Join-Path $output 'rotor-ground.png')}
         $null=Send @{cmd='dev_snow';action='deposit';metres=1}

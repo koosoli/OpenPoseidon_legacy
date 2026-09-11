@@ -2,6 +2,11 @@
 
 ## Aktueller Nachtrag 20:32 (kein Gesamtabschluss)
 
+20:49: Installiert 000aa2fe. Rotorabtrag am Boden ist jetzt implementiert und
+mit besetzter UH60 geprueft: Motor aus unveraendert, Motor an schrittweise frei,
+Umgebung bleibt stehen, Niederschlag fuellt wieder auf. Kein separater
+aufgewirbelter Schneepartikel-Effekt; Mehrhelikopter-/Hangabnahme noch offen.
+
 - Installiert bd1f889c: tiefer Schnee beim aufrechten Gehen erzeugt jetzt eine
   durchgehende Rinne statt einzelner Abdruecke. Ein-Meter-Test, Wiederauffuellen
   und neue Spur sichtbar geprueft; Rander noch kantig. Fahrzeug, Rotorwind und

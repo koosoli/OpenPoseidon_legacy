@@ -55,4 +55,9 @@ dynamics. It does not yet emit a separate plume. It does not depend on the
 camera-ranked four-rotor airflow list. Existing roof masking still applies.
 Tests cover stopped/high rotor, gradual removal, bounded extent, saturation
 and refill: combined suite 10006 assertions in 16 cases. Installed -Rotor
-fixture and incremental runtime cost are pending; do not mark accepted yet.
+fixture initially stopped its empty helicopter automatically; not valid evidence.
+Piloted run 20260911-204801 on installed 000aa2fe passes: stopped rotor deficit
+zero, running rotor clears 0.5 m at centre, 20 m-away sample untouched, new snow
+refills it, clean exit. Inspected rotor-after and rotor-ground images confirm
+the surface removal. Separate airborne snow plume remains absent. Runtime-cost
+trace is being added; multiple helicopters and sloping terrain not yet accepted.

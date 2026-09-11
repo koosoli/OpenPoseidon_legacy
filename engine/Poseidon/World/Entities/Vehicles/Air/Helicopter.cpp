@@ -33,6 +33,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <cmath>
+#include <chrono>
 #include <cstdlib>
 #include <unordered_map>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
@@ -369,12 +370,17 @@ void Helicopter::Simulate(float deltaT, SimulationImportance prec)
         _snowRotorTime += std::min(deltaT, 0.25f);
         if (_snowRotorTime >= 0.25f)
         {
+            static const bool traceSnow = std::getenv("POSEIDON_SNOW_TRACE") != nullptr;
+            const auto start = traceSnow ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
             const Vector3 p = Position();
             const float ground = GLandscape->SurfaceY(p.X(), p.Z());
             if (ground > GLandscape->GetSeaLevel() && GLandscape->RoadSurfaceY(p.X(), p.Z()) <= ground + 0.3f)
                 GSnow().ErodeRotor(p.X(), p.Z(), std::max(GetRadius() * 0.8f, 3.0f),
                                    _rotorSpeed, p.Y() - ground, 0.25f);
             _snowRotorTime -= 0.25f;
+            if (traceSnow)
+                LOG_INFO(World, "Snow rotor update: speed={:.3f} height={:.2f} us={:.1f}", _rotorSpeed,
+                         p.Y()-ground, std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now()-start).count());
         }
     }
     else _snowRotorTime = 0;
