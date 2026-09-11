@@ -3,7 +3,7 @@ param(
  [ValidateRange(1,25)][int]$Repeats=2,
  [ValidateSet('Village','Coast','Forest')][string]$Pose='Village',
  [ValidateRange(0,1)][int]$NativeTextureKeys=1,
- [ValidateRange(0,1)][int]$LazyBcrTint=0,
+ [ValidateRange(-1,1)][int]$LazyBcrTint=-1,
  [hashtable]$Overrides=@{},
  [string]$ReforgerAddons='C:\Program Files (x86)\Steam\steamapps\common\Arma Reforger\addons'
 )
@@ -18,7 +18,6 @@ New-Item -ItemType Directory -Force $user | Out-Null
 $settings=@{
  POSEIDON_USER_DIR=$user
  WGR_NATIVE_TEXTURE_KEYS=[string]$NativeTextureKeys
- WGR_LAZY_BCR_TINT=[string]$LazyBcrTint
  WGR_LOD_GOVERNOR_RANGE='1'
  POSEIDON_VSYNC='0'
  POSEIDON_REFORGER_WORLD='worlds/eden'
@@ -26,6 +25,7 @@ $settings=@{
  POSEIDON_REFORGER_STREAM='1'
  WGR_PASS1_STATS='1'
 }
+if ($LazyBcrTint -ge 0) {$settings.WGR_LAZY_BCR_TINT=[string]$LazyBcrTint}
 foreach ($key in $Overrides.Keys) {$settings[$key]=$Overrides[$key]}
 $camera=switch ($Pose) {
  'Village' {@(5092.61,3995.64,18.3,200.9,-13.5)}
@@ -38,6 +38,10 @@ $camera=switch ($Pose) {
 for ($repeat=1; $repeat -le $Repeats; $repeat++) {
  $stem=Join-Path (Join-Path $out "$Pose-$Label") ('run-{0:D2}' -f $repeat)
  $metrics=Get-Content -LiteralPath "$stem.json" -Raw | ConvertFrom-Json
+ if ($LazyBcrTint -ne 0 -and !$Overrides.ContainsKey('WGR_LAZY_BCR_TINT') -and
+     !(Select-String -LiteralPath "$stem.log" -Pattern 'Wgpu lazy BCR tint:' -Quiet)) {
+  throw "No actual lazy BCR source used in $stem"
+ }
  if ($metrics.build.render_width -ne 1920 -or $metrics.build.render_height -ne 1080 -or
      $metrics.build.msaa_samples -ne 4 -or $metrics.build.dlss_active) {
   throw "Unexpected rendering profile in $stem; not a native-resolution comparison"

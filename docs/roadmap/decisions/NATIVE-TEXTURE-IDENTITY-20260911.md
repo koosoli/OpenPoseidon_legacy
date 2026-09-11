@@ -138,3 +138,25 @@ comparisons before default activation.
 Reproduce the read-only corpus check with POSEIDON_TEST_REFORGER_ADDONS set to the
 local addons directory and PoseidonTests '[lazy-tint-corpus]'. No proprietary
 texture data is copied into the repository or package.
+
+### Corrected repeat and default decision
+
+Installed 8e495715, same native route in reverse order: OFF 151511, ON 151721.
+Both pass lifecycle/coverage gates. Full moving windows: OFF n=1289, median
+30.660, p95 43.465, p99 88.430, max 173.359 ms, 8 frames >100 ms; ON n=1286,
+median 30.412, p95 43.342, p99 87.332, max 144.192 ms, 3 frames >100 ms.
+Private peaks 11232161792 -> 7855013888 bytes (~3.15 GiB saved). Whole-GPU
+peaks 4391 -> 4370 MiB fluctuate, not an attributable VRAM win. Both still
+register 22370 instances and retain 1417 / 1003.057 MiB object textures and
+272.790 MiB geometry. Alpha-scan time falls 864.726 -> 1.314 ms, but texture
+create timing increases 3082.907 -> 5104.178 ms; do not add these overlapping
+admission/upload counters into an invented total speedup.
+
+Decision: enable the narrowly eligible view by default. The repeatable benefit
+is avoiding ~3 GiB of CPU payload, with modest/variable frame-time benefit and
+fewer >100 ms spikes on this route. No shader, resolution, sight distance, GPU
+texture data or geometry reduction. WGR_LAZY_BCR_TINT=0 remains the old CPU
+path for A/B. Unsupported materials still fall back. No claim that native
+streaming, forest quality, world-switch acceptance or the full backlog is done.
+Run an installed default (no override) village/route smoke after deployment;
+the harness now distinguishes default from explicit on/off in its metadata.

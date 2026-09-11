@@ -1082,7 +1082,9 @@ int TextureWgpu::Init()
     {
         static const bool lazyTint = [] {
             const char* v = std::getenv("WGR_LAZY_BCR_TINT");
-            return v && v[0] == '1'; // A/B candidate until route and pixel acceptance.
+            // Exact mip/corpus tests and paired native routes preserve the GPU
+            // image while avoiding duplicate decoded CPU chains. 0 is the A/B control.
+            return !v || v[0] != '0';
         }();
         float rgb[3];
         const char* innerName = nullptr;

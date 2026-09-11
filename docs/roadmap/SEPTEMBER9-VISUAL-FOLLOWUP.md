@@ -14,14 +14,14 @@ fast turning and straight-drive runs do NOT pass hit acceptance; do not substitu
 older moving results for those current failures. Full turning/rough-ground motion, fine hand quality,
 MP fallback runtime and controlled resource-cost acceptance remain open.
 
-Next native loading candidate: narrowly borrow compressed BCR source pixels for
+Native loading increment: narrowly borrow compressed BCR source pixels for
 linear-tint variants, with exact lazy CPU pixels/averages and the existing GPU
-delegate. `WGR_LAZY_BCR_TINT` remains off pending unit, installed route and visual
-A/B acceptance. The first native-resolution route pair saves about 2.99 GiB of
-process peak memory with unchanged GPU texture/geometry residency. Village images
-agree, but stronger capped-mip/corpus tests caught an average-colour error; it is
-corrected and awaiting repeated installed acceptance. See
-NATIVE-TEXTURE-IDENTITY-20260911.md; not a new streaming manager or a claimed FPS win.
+delegate. Corrected capped-mip and real-corpus equality tests pass. Two native
+route pairs save about 2.99 / 3.15 GiB process peak memory with unchanged GPU
+textures/geometry; modest frame-time differences, fewer >100 ms spikes. Village
+images agree. Default enablement is being deployed/verified; the A/B fallback is
+WGR_LAZY_BCR_TINT=0. See NATIVE-TEXTURE-IDENTITY-20260911.md; not a new streaming
+manager, a large FPS claim, or completion of native Reforger quality/streaming.
 
 Historical implementation checkpoints follow. Installed 7f6d3fa0: NPC 121507 and player 121641 pass
 seated and mid-reload save/load, ammo conservation and no duplicate shots.
