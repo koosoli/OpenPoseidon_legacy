@@ -6,6 +6,7 @@
   "root_offset": [0, -0.22, 0],
   "waist": [0.42, -0.24, -0.34],
   "torso_yaw": 60,
+  "head_yaw": 30,
   "thigh_bend": 78,
   "knee_bend": -88,
   "legs": {

@@ -89,6 +89,17 @@ class JeepAnimations(unittest.TestCase):
         self.assertLess(direction[1], -.4)
         self.assertGreater(direction[0], .9)
 
+    def test_raised_head_faces_the_rifle_without_moving_neck_axis(self):
+        matrices = pose(self.spec, 1)
+        rifle = matrices['zbran'] @ rest_proxy(self.spec)
+        # Both the face and original rifle face -X in their bind frames.
+        np.testing.assert_allclose(matrices['hlava'][:3, :3] @ [-1, 0, 0],
+                                   rifle[:3, :3] @ [-1, 0, 0], atol=1e-9)
+        neck = rest_point(self.spec, self.spec['waist']) + [0, .55, 0]
+        for _, matrices in clip(self.spec, 'raise'):
+            np.testing.assert_allclose(point(matrices['hlava'], neck),
+                                       point(matrices['hrudnik'], neck), atol=1e-9)
+
     def test_reflections_are_not_valid_bone_rotations(self):
         matrices = pose(self.spec, 1)
         matrices['hlava'][:3, 0] *= -1

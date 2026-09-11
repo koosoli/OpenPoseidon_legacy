@@ -100,6 +100,11 @@ def pose(spec, raised, recoil=0.0, reload=0.0):
     result = {name: root.copy() for name in spec['bones']}
     for name in ('bricho', 'zebra', 'hrudnik', 'krk', 'hlava', 'prameno', 'lrameno', 'roura'):
         result[name] = torso.copy()
+    # The neck lies on the torso's vertical pivot axis. Turn the head the
+    # remaining angle toward the sights without twisting the shoulders further.
+    head = torso @ pivot([0, 1, 0], spec['head_yaw'] * raised, rest_point(spec, spec['waist']))
+    result['krk'] = head.copy()
+    result['hlava'] = head
     for side, leg in spec['legs'].items():
         thigh = root @ pivot([0, 0, 1], spec['thigh_bend'], rest_point(spec, leg['hip']))
         shin = thigh @ pivot([0, 0, 1], spec['knee_bend'], rest_point(spec, leg['knee']))
