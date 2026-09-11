@@ -2,6 +2,7 @@ param([switch]$ProjectileFrame, [switch]$AnimationPreview, [switch]$AnimationVid
       [ValidateSet('clear','hold','outside','blocked','friendly')][string]$NpcScenario='clear',
       [ValidateSet(0,90,180)][int]$NpcHeading=0, [switch]$NpcDriver,
       [switch]$NpcTransitions, [switch]$NpcMoving, [switch]$NpcTurning, [switch]$SecondJeep,
+      [ValidateSet('near','far')][string]$TurnTarget='near',
       [switch]$PlayerFire, [switch]$Lifecycle, [switch]$SaveLoad,
       [switch]$DefaultPackage, [string]$UserMod='',
       [ValidateSet('','missing','incompatible')][string]$AutomaticOriginal='', [string]$MissionPath='',
@@ -151,7 +152,10 @@ try {
         $null=Send @{cmd='exec';code=('ffvJeep setDir {0}; ffvTarget setPos [{1},{2},0]' -f $NpcHeading,(9700+60*$rightX),(3600+60*$rightZ))}
         # Place moving-test targets before reveal; moving a known target later
         # tests stale perception rather than the intended seat/steering case.
-        if ($NpcTurning) {$null=Send @{cmd='exec';code='ffvTarget setPos [9780,3640,0]'}}
+        if ($NpcTurning) {
+            $position=if ($TurnTarget -eq 'far') {'[9780,3640,0]'} else {'[9730,3620,0]'}
+            $null=Send @{cmd='exec';code=('ffvTarget setPos '+$position)}
+        }
         elseif ($NpcMoving) {$null=Send @{cmd='exec';code='ffvTarget setPos [9760,3610,0]'}}
         if ($NpcDriver) {
             $driverInit=if ($NpcMoving) {'ffvDriver=this; removeAllWeapons this'} else {'ffvDriver=this; this disableAI ""MOVE""; removeAllWeapons this'}
