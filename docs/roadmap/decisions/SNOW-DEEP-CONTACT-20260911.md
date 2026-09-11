@@ -61,3 +61,13 @@ zero, running rotor clears 0.5 m at centre, 20 m-away sample untouched, new snow
 refills it, clean exit. Inspected rotor-after and rotor-ground images confirm
 the surface removal. Separate airborne snow plume remains absent. Runtime-cost
 trace is being added; multiple helicopters and sloping terrain not yet accepted.
+
+Measured repeat on installed c529af69, 20260911-205301, passed again: 117 rotor
+updates, mean 199.68 us, P95 401.8 us, max 561.6 us, 4 Hz. Timer covers terrain
+queries and the CPU disc update, excludes log writing and GPU snow rendering.
+This is one helicopter, not a general FPS/many-helicopter performance claim.
+
+Prone-eye follow-up prepared: preserve the head-axis clearance and additionally
+clear to CalculateCameraPosition(moveTrans), the animated pilot point actually
+used by InsideCamera. No camera movement, per-view snow hiding, or larger global
+brush. Installed internal-camera acceptance remains pending.

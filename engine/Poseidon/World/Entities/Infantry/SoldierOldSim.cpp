@@ -1006,6 +1006,9 @@ void Man::Simulate(float deltaT, SimulationImportance prec)
                         GSnow().PressBody(p.X(),p.Z(),moveTrans.Direction().X(),moveTrans.Direction().Z());
                         const Vector3 head = moveTrans.FastTransform(GetHeadCenter());
                         GSnow().PressHead(p.X(), p.Z(), head.X(), head.Z());
+                        // The neck pivot is not the animated first-person eye point.
+                        const Vector3 eye = CalculateCameraPosition(moveTrans);
+                        GSnow().PressHead(p.X(), p.Z(), eye.X(), eye.Z());
                         _snowWalkingValid = false;
                     }
                     else
