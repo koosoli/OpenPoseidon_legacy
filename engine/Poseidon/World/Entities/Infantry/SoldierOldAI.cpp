@@ -2470,6 +2470,74 @@ LSError Man::Serialize(ParamArchive& ar)
         PARAM_CHECK(ar.Serialize("moveTime", _primaryTime, 1, 1))
         PARAM_CHECK(ar.Serialize("secMoveTime", _secondaryTime, 1, 1))
 
+        // Legacy saves retain pose/time but not action contexts. Preserve only
+        // this explicitly supported cargo reload; do not replay other actions.
+        RString cargoReloadMove, cargoReloadMuzzle;
+        int cargoReloadCreator = -1, cargoReloadId = -1;
+        if (ar.IsSaving())
+        {
+            const auto* seat = GetActiveCargoWeaponSeat();
+            if (seat && seat->HasTransitions())
+            {
+                const MotionPathItem* pending = nullptr;
+                const auto isReload = [&](const MotionPathItem& item) {
+                    return item.id != MoveIdNone && item.context && item.context->function == MFReload &&
+                           strcmpi(Type()->GetMoveName(item.id), seat->reloadAction) == 0;
+                };
+                if (isReload(_primaryMove)) pending = &_primaryMove;
+                else if (isReload(_externalMove)) pending = &_externalMove;
+                else for (int i = 0; i < _externalQueue.Size(); ++i)
+                    if (isReload(_externalQueue[i])) { pending = &_externalQueue[i]; break; }
+                if (pending)
+                {
+                    const auto* context = static_cast<const ActionContextDefault*>(pending->context.GetRef());
+                    cargoReloadMove = seat->reloadAction;
+                    cargoReloadCreator = context->param;
+                    cargoReloadId = context->param2;
+                    cargoReloadMuzzle = context->param3;
+                }
+            }
+        }
+        PARAM_CHECK(ar.Serialize("opCargoReloadMove", cargoReloadMove, 1, ""))
+        PARAM_CHECK(ar.Serialize("opCargoReloadCreator", cargoReloadCreator, 1, -1))
+        PARAM_CHECK(ar.Serialize("opCargoReloadId", cargoReloadId, 1, -1))
+        PARAM_CHECK(ar.Serialize("opCargoReloadMuzzle", cargoReloadMuzzle, 1, ""))
+        if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassSecond && cargoReloadMove.GetLength() > 0)
+        {
+            const auto* seat = GetConfiguredCargoWeaponSeat();
+            bool validMuzzle = false;
+            if (seat && seat->HasTransitions() && strcmpi(cargoReloadMove, seat->reloadAction) == 0 &&
+                FindMagazine(cargoReloadCreator, cargoReloadId))
+            {
+                for (int i = 0; i < NMagazineSlots(); ++i)
+                {
+                    const auto& slot = GetMagazineSlot(i);
+                    if (slot._weapon && slot._muzzle && strcmpi(slot._weapon->GetName(), seat->weapon) == 0 &&
+                        slot._weapon->GetName() + RString("|") + slot._muzzle->GetName() == cargoReloadMuzzle)
+                        validMuzzle = true;
+                }
+            }
+            const MoveId reloadMove = Type()->GetMoveId(cargoReloadMove);
+            if (validMuzzle && reloadMove != MoveIdNone)
+            {
+                Ref<ActionContextDefault> context = new ActionContextDefault;
+                context->function = MFReload;
+                context->param = cargoReloadCreator;
+                context->param2 = cargoReloadId;
+                context->param3 = cargoReloadMuzzle;
+                if (_primaryMove.id == reloadMove)
+                {
+                    _primaryMove.context = context;
+                    _externalMove = MotionPathItem(reloadMove, context);
+                    _externalMoveFinished = false;
+                }
+                else
+                    _externalQueue.Add(MotionPathItem(reloadMove, context));
+            }
+            else
+                LOG_WARN(AI, "Cargo reload save no longer matches a supported seat/magazine; ignoring action");
+        }
+
         PARAM_CHECK(ar.Serialize("walkSpeedWanted", _walkSpeedWanted, 1, 0))
 
         PARAM_CHECK(ar.Serialize("whenScreamed", _whenScreamed, 1, TIME_MAX))
