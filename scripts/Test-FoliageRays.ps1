@@ -1,7 +1,7 @@
 param([switch]$RaysOff, [switch]$LegacyOrder, [switch]$LateSurface, [switch]$EarlyOpaque, [switch]$Zeus, [switch]$Everon, [string]$Label='baseline', [string]$World='',
       [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',
       [string]$Pose='', [ValidateRange(-1,23.999)][double]$Hour=-1,
-      [switch]$EarlyCutout)
+      [switch]$EarlyCutout, [ValidateRange(0.01,64)][double]$Exposure=1)
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
 if ($EarlyCutout -and ($EarlyOpaque -or $LegacyOrder -or $LateSurface)) {throw 'Select only one comparison path'}
@@ -23,7 +23,7 @@ $env:WGR_EARLY_LATE_OPAQUE=if ($EarlyCutout) {'2'} elseif ($EarlyOpaque) {'1'} e
 $env:WGR_LATE_SURFACE_RAYS=if ($LateSurface) {'1'} else {'0'}
 $env:WGR_LATE_OBJECT_TRACE='1'
 $env:WGR_AUTO_EXPOSURE='0'
-$env:WGR_EXPOSURE='1'
+$env:WGR_EXPOSURE=$Exposure.ToString([Globalization.CultureInfo]::InvariantCulture)
 $env:WGR_LOD_GOVERNOR_RANGE='1'
 $env:WGR_GODRAYS=if ($RaysOff) {'0'} else {'1'}
 $name="$Label-rays$env:WGR_GODRAYS"

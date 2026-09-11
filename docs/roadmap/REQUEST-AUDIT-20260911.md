@@ -5,7 +5,8 @@
 2026-09-12: Besitzer gibt feste Reihenfolge vor: Satmaps mit Wald/Doerfern,
 danach Stratis-Godrays, danach aktualisierter Bericht. Kein Aufgabenwechsel.
 Satmap-Objektbaker in 5ce3f450 gebaut (650 Assertions / 5 Tests bestanden),
-noch NICHT visuell abgenommen und NICHT standardaktiv: WGR_OFP_SATMAP_OBJECTS=1.
+in c00bf1eb nach Bildvergleich standardaktiviert und installiert (00:30).
+Abschalter WGR_OFP_SATMAP_OBJECTS=0 behaelt den Boden-only-Pfad.
 Statische Primary/Network-Modelle, erste zeichnbare LOD, UV/Alpha aus echten
 Texturen, 64x64 CPU-Draufsichten pro Modell, Platzierung im vorhandenen Boden-
 Satmapbild. Keine neue GPU-Texturverwaltung, kein eingebranntes dynamisches Licht,
@@ -25,12 +26,22 @@ acceptance-20260912-001116 (4 km ON), acceptance-20260912-001246 (4 km OFF).
 vollstaendige Baumkronen in der Textur. 49238fe2 ergaenzt deshalb optionalen
 PNG-Export WGR_OFP_SATMAP_DUMP / Test-Fusion -DumpSatmap, installiert und
 650 Assertions / 5 Tests bestanden. Der Export veraendert den Renderpfad nicht.
+Standardlauf OHNE Opt-in: build/fusion/acceptance-20260912-003021,
+alle fuenf Inselbereiche und 40-km-Uebersicht, sauber beendet. Punktuelle
+Working Sets bis 2200 MiB, kein Peak-RAM/VRAM-Nachweis. Reine Albedo-Exporte
+von Fusion ON/OFF und Everon visuell kontrolliert: Objekt-/Dach-/Waldstrukturen
+vorhanden. Regelmaessige OFP-Waldgeometrie bleibt; keine HLOD-Einsparung.
+Grenzen und Belege: decisions/OFP-OBJECT-SATMAP-20260912.md.
 
 Godrays wieder offen: Stratis [1949.76,5046.07,32.37], az74.4/el-1.3, 06:03,
 Besitzer-Screenshot 2026-09-11 233844 und Startkommando bestaetigen den Fall.
-627317e8 enthaelt nur eine AUSGESCHALTETE Cutout-only-Replay-Variante
-(WGR_EARLY_LATE_OPAQUE=2), noch nicht runtimevalidiert. Alter Late-Surface-
-Versuch reproduziert erneut unerwuenschte Hangabdunklung und bleibt aus.
+627317e8 enthaelt eine AUSGESCHALTETE Cutout-only-Replay-Variante
+(WGR_EARLY_LATE_OPAQUE=2), jetzt auf installiertem c00bf1eb runtimegeprueft.
+Siehe decisions/STRATIS-CUTOUT-RAYS-20260912.md: der erste Eindruck einer
+grossflaechigen Hangabdunklung wurde durch Pixelkontrollen widerlegt. Die
+Baumkronen verlieren jedoch sehr stark Kontrast; visuelle Besitzerentscheidung
+angefragt, noch KEINE Standardaktivierung. Alter Late-Surface-Versuch bleibt
+aus; dessen fruehere visuelle Bewertung nicht ungeprueft als Messung behandeln.
 Fusion-Pose [36154.60,23965.44,38053.39], az262.5/el-60.7: frische Testprofile
 mit/ohne Boden-Satmap zeigten bei 38 km Hoehe keine komplett blauen Inseln.
 Das widerlegt den Besitzerbericht nicht; Profil-/Laufzeitabhaengigkeit offen.
