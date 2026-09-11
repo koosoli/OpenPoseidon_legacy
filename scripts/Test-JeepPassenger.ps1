@@ -5,6 +5,7 @@ param([switch]$ProjectileFrame, [switch]$AnimationPreview, [switch]$AnimationVid
       [switch]$PlayerFire, [switch]$Lifecycle, [switch]$SaveLoad,
       [switch]$DefaultPackage, [string]$UserMod='',
       [ValidateSet('','missing','incompatible')][string]$AutomaticOriginal='', [string]$MissionPath='',
+      [string]$LoadOriginalSave='',
       [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
@@ -25,6 +26,7 @@ if ($Lifecycle -and (!$NpcFire -or $NpcScenario -ne 'clear' -or $NpcMoving)) {th
 if ($SaveLoad -and (!$NpcTransitions -and !$PlayerFire)) {throw 'Save/load requires a reload test'}
 if ($DefaultPackage -and ($AnimationPreview -or $ProjectileFrame)) {throw 'Default package is separate from preview/constructor tests'}
 if ($AutomaticOriginal -and (!$DefaultPackage -or $NpcFire -or $UserMod)) {throw 'Automatic fallback requires the original baseline and automatic package mode'}
+if ($LoadOriginalSave -and ($DefaultPackage -or $NpcFire -or $AnimationPreview -or $ProjectileFrame -or $UserMod -or !(Test-Path -LiteralPath $LoadOriginalSave -PathType Leaf))) {throw 'Saved-pose fallback requires a real fixture save and disabled VehicleActions'}
 $root=Split-Path $PSScriptRoot -Parent
 $stamp=Get-Content -LiteralPath (Join-Path $GameDir 'DEPLOYED-FROM.txt') -Raw
 $output=Join-Path $root ('build/jeep-ffv/baseline-'+(Get-Date -Format 'yyyyMMdd-HHmmss'))
@@ -107,6 +109,30 @@ try {
         }
     }
     Start-Sleep -Seconds 12
+    if ($LoadOriginalSave) {
+        # Discover this launch's test-save directory without assuming a profile name.
+        $null=Send @{cmd='eval';code='triSaveGame "path-probe"'} '"OK"'
+        $marker=@(Get-ChildItem -LiteralPath $env:POSEIDON_USER_DIR -Recurse -Filter 'path-probe.fps' -File)
+        if ($marker.Count -ne 1) {throw 'Test save directory is ambiguous'}
+        Copy-Item -LiteralPath $LoadOriginalSave -Destination (Join-Path $marker[0].DirectoryName 'original-cargo.fps')
+        $null=Send @{cmd='eval';code='triLoadGame "original-cargo"'} '"OK"'
+        Start-Sleep -Seconds 2
+        $loadedAmmo=Send @{cmd='eval';code='magazinesArray ffvPassenger'}
+        $loadedShots=Send @{cmd='eval';code='ffvShots'}
+        ResumeReviewCamera
+        Start-Sleep -Seconds 5
+        $pose=Send @{cmd='crew_pose_probe'}
+        $state=Send @{cmd='crew_seat_status'}
+        $null=Send @{cmd='screenshot';path=(Join-Path $output 'saved-pose-original.png')}
+        $null=Send @{cmd='eval';code='magazinesArray ffvPassenger'} $loadedAmmo.result
+        $null=Send @{cmd='eval';code='ffvShots'} $loadedShots.result
+        if (!$state.alive -or !$state.inCargo -or $state.active -or !$pose.primaryMove -or $pose.primaryMove -like 'opjeep*' -or $pose.reloadInProgress) {throw 'Disabling package did not restore a valid original saved cargo pose'}
+        $null=Send @{cmd='exit'}
+        if (!$p.WaitForExit(30000) -or $p.ExitCode -ne 0) {throw 'Saved-pose original fallback exit failed'}
+        if (Select-String -LiteralPath $log -Pattern 'Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION' -Quiet) {throw 'Saved-pose fallback runtime error'}
+        Write-Host "Saved cargo pose with package disabled passed: $output"
+        return
+    }
     if ($DefaultPackage) {
         $diagnostic=switch ($AutomaticOriginal) {
             'missing' {'required archive missing or empty'}
