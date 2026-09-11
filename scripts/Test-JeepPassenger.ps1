@@ -1,7 +1,7 @@
 param([switch]$ProjectileFrame, [switch]$AnimationPreview, [switch]$AnimationVideo, [switch]$NpcFire,
       [ValidateSet('clear','hold','outside','blocked','friendly')][string]$NpcScenario='clear',
       [ValidateSet(0,90,180)][int]$NpcHeading=0, [switch]$NpcDriver,
-      [switch]$NpcTransitions, [switch]$NpcMoving, [switch]$PlayerFire,
+      [switch]$NpcTransitions, [switch]$NpcMoving, [switch]$PlayerFire, [switch]$Lifecycle,
       [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
@@ -16,6 +16,7 @@ if (!$NpcFire -and ($NpcHeading -ne 0 -or $NpcDriver)) {throw 'NPC heading/drive
 if ($NpcTransitions -and (!$NpcFire -or $NpcScenario -ne 'clear')) {throw 'Transition/reload requires the clear NPC case'}
 if ($NpcMoving -and (!$NpcFire -or $NpcScenario -ne 'clear' -or $NpcHeading -ne 0 -or $NpcTransitions)) {throw 'Moving test requires clear heading-zero NPC case without reload'}
 if ($NpcMoving) {$NpcDriver=$true}
+if ($Lifecycle -and (!$NpcFire -or $NpcScenario -ne 'clear' -or $NpcMoving)) {throw 'Lifecycle requires stationary clear cargo test'}
 $root=Split-Path $PSScriptRoot -Parent
 $stamp=Get-Content -LiteralPath (Join-Path $GameDir 'DEPLOYED-FROM.txt') -Raw
 $output=Join-Path $root ('build/jeep-ffv/baseline-'+(Get-Date -Format 'yyyyMMdd-HHmmss'))
@@ -217,12 +218,15 @@ try {
             throw "Unsafe NPC shot in negative case: $NpcScenario"
         }
         [pscustomobject]@{kind='cargo-integration';player=[bool]$PlayerFire;moving=[bool]$NpcMoving;movingShots=$movingShots.result;scenario=$NpcScenario;heading=$NpcHeading;driver=[bool]$NpcDriver;installed=$stamp.Trim();ammo=$after.result;magazines=$remaining.result;shots=$cargoShots.result;targetDamage=$damage.result;probe=$probe} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $output 'npc-observation.json')
-        if ($NpcTransitions) {
-            $null=Send @{cmd='exec';code='ffvPassenger setCombatMode "BLUE"; ffvView camSetPos [9701.8,3599.6,1.6]; ffvView camSetTarget [9700.4,3600,1.35]; ffvView camCommit 0'}
+        if ($NpcTransitions -or $PlayerFire) {
+            $null=Send @{cmd='exec';code='ffvPassenger setCombatMode "BLUE"'}
+            if (!$PlayerFire) {
+                $null=Send @{cmd='exec';code='ffvView camSetPos [9701.8,3599.6,1.6]; ffvView camSetTarget [9700.4,3600,1.35]; ffvView camCommit 0'}
+            }
             Start-Sleep -Seconds 1
             $reloadBefore=Send @{cmd='eval';code='magazinesArray ffvPassenger'}
             $shotsBeforeReload=Send @{cmd='eval';code='ffvShots'}
-            $null=Send @{cmd='crew_request_reload'}
+            if ($PlayerFire) {$null=Send @{cmd='key';sc=21}} else {$null=Send @{cmd='crew_request_reload'}}
             $samples=@(); $seenReload=$false; $clock=[Diagnostics.Stopwatch]::StartNew()
             do {
                 $motion=Send @{cmd='crew_pose_probe'}
@@ -244,14 +248,41 @@ try {
             if (!$seenReload -or $reloadEnd.reloadInProgress -or !$reloadEnd.cargoWeaponActive -or !$reloadEnd.loaded -or
                 (RifleRounds $reloadBefore) -ne (RifleRounds $reloadAfter)) {throw 'Real cargo reload/animation/magazine conservation failed'}
         }
+        if ($Lifecycle) {
+            $null=Send @{cmd='exec';code='ffvPassenger setCombatMode "BLUE"; unassignVehicle ffvPassenger; ffvPassenger action ["EJECT",ffvJeep]'}
+            Start-Sleep -Seconds 2
+            $null=Send @{cmd='eval';code='vehicle ffvPassenger == ffvPassenger'} 'true'
+            $exitState=Send @{cmd='crew_seat_status'}
+            if (!$exitState.present -or $exitState.active -or $exitState.inCargo) {throw 'Cargo mode survived exit'}
+            $null=Send @{cmd='exec';code='ffvPassenger assignAsCargo ffvJeep; ffvPassenger moveInCargo ffvJeep'}
+            Start-Sleep -Seconds 2
+            $reentry=Send @{cmd='crew_seat_status'}
+            if (!$reentry.active -or !$reentry.inCargo) {throw 'Supported reentry did not restore cargo mode'}
+            $null=Send @{cmd='exec';code='unassignVehicle ffvPassenger; ffvPassenger action ["EJECT",ffvJeep]'}
+            Start-Sleep -Seconds 1
+            $null=Send @{cmd='exec';code='"SoldierWB" createUnit [[9690,3590,0],group player,"ffvSeatBlocker=this; removeAllWeapons this; this disableAI ""MOVE"""]; ffvSeatBlocker moveInCargo ffvJeep; ffvPassenger assignAsCargo ffvJeep; ffvPassenger moveInCargo ffvJeep'}
+            Start-Sleep -Seconds 2
+            $ordinary=Send @{cmd='crew_pose_probe'}
+            if ($ordinary.cargoWeaponActive -or $ordinary.cargoIndex -eq 0) {throw 'Unsupported cargo seat entered weapon mode'}
+            $null=Send @{cmd='exec';code='unassignVehicle ffvPassenger; ffvPassenger action ["EJECT",ffvJeep]; unassignVehicle ffvSeatBlocker; ffvSeatBlocker action ["EJECT",ffvJeep]'}
+            Start-Sleep -Seconds 1
+            $null=Send @{cmd='exec';code='deleteVehicle ffvSeatBlocker; ffvPassenger assignAsCargo ffvJeep; ffvPassenger moveInCargo ffvJeep'}
+            Start-Sleep -Seconds 2
+            $reentry=Send @{cmd='crew_seat_status'}
+            if (!$reentry.active) {throw 'Return from ordinary seat failed'}
+            $null=Send @{cmd='exec';code='ffvJeep setDammage 1'}
+            Start-Sleep -Seconds 1
+            $destroyed=Send @{cmd='crew_seat_status'}
+            if ($destroyed.active) {throw 'Destroyed carrier retained cargo weapon mode'}
+        }
         $null=Send @{cmd='exit'}
         if (!$p.WaitForExit(30000) -or $p.ExitCode -ne 0) {throw 'NPC fire exit failed'}
         if (Select-String -LiteralPath $log -Pattern 'Bad animation|Broken animation|Animation .*not found|Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION' -Quiet) {throw 'NPC integration load/runtime error'}
-        if ($NpcTransitions) {
+        if ($NpcTransitions -or $PlayerFire) {
             & python "$PSScriptRoot/default-content/make_jeep_pose_video.py" $output
             if ($LASTEXITCODE -ne 0) {throw 'Reload video encoding failed'}
         }
-        Write-Host "NPC $NpcScenario passed (moving=$NpcMoving, reload=$NpcTransitions); NOT player/visual/default-release acceptance: $output"
+        Write-Host "Cargo $NpcScenario passed (player=$PlayerFire, moving=$NpcMoving, reload=$($NpcTransitions -or $PlayerFire), lifecycle=$Lifecycle); NOT visual/default-release acceptance: $output"
         return
     }
     $null=Send @{cmd='exec';code='ffvPassenger setCombatMode "BLUE"; unassignVehicle ffvPassenger; ffvPassenger action ["EJECT",ffvJeep]'}

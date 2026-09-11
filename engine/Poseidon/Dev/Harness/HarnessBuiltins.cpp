@@ -90,6 +90,21 @@ static GameVarSpace s_evalScope;
 
 void RegisterSqf(HarnessServer& hs)
 {
+    hs.RegisterCommand({"crew_seat_status", "Read-only SP fixture seat lifecycle status", {}},
+        [](const std::string&, cJSON*) -> std::string {
+            if (!GWorld || GWorld->GetMode() == GModeNetware)
+                return HarnessProtocol::ErrorResponse("singleplayer required");
+            AIUnit* focus = GWorld->FocusOn();
+            AIGroup* group = focus ? focus->GetGroup() : nullptr;
+            AIUnit* unit = group ? group->UnitWithID(2) : nullptr;
+            const Man* man = unit ? dyn_cast<Man>(unit->GetPerson()) : nullptr;
+            cJSON* resp = cJSON_CreateObject();
+            cJSON_AddBoolToObject(resp,"present",man != nullptr);
+            cJSON_AddBoolToObject(resp,"active",man && man->GetActiveCargoWeaponSeat());
+            cJSON_AddBoolToObject(resp,"inCargo",unit && unit->IsInCargo());
+            cJSON_AddBoolToObject(resp,"alive",man && !man->IsDammageDestroyed());
+            return HarnessProtocol::JsonResponse(resp);
+        });
     hs.RegisterCommand({"crew_take_control", "SP harness: take player control of the actual fixture passenger", {}},
         [](const std::string&, cJSON*) -> std::string {
             if (!GWorld || GWorld->GetMode() == GModeNetware || GWorld->GetCameraEffect())
