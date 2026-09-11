@@ -78,3 +78,26 @@ fallback/direct path, live tint-mode changes) before trying lazy composition.
 Do not simply drop sources or reuse another tint's pixels. The earlier blanket
 DDS worker and tint-decode-cache experiments had no stable measured gain and
 remain off. This increment does not declare native Reforger stutter solved.
+
+## Lazy BCR tint experiment (September 11, afternoon)
+
+Candidate `WGR_LAZY_BCR_TINT=1`, off by default pending acceptance. With the
+existing shader-tint mode and linear multiplier, a strictly BC7 `_bcr.edds` /
+`_bcr.dds` source lends an immutable CPU view to its tinted variants. The same
+TextureBank-owned inner texture already supplies their GPU image. The view
+decodes/tints only the smallest mip for the exact average; requested CPU mip
+pixels are still computed with the existing linear LUT, BGR order, BCR opaque
+alpha rule and destination-format conversion. No decoded chain is retained.
+
+The wrapper retains the inner Texture before the view is installed, and member
+destruction releases the view before that owner. No extra cache/manager/worker,
+mount read, GPU allocation or renderer-thread change. Unsupported formats,
+composites and legacy mean-rescale use the old source factory. Changing to baked
+GPU tint can still upload the view's pixels; it must not drop the borrowed owner.
+Alpha classification uses the same inner image as the existing GPU delegate.
+
+Unit comparisons cover all mips, exact bytes/averages, padded ARGB rows, packed
+destinations, independent alpha flags, mip caps and refused inputs. Run the same
+native route with `Test-NativeStreamCancellation -LazyBcrTint 0/1`, identical
+profiling and driver-memory sampling. Tests and installed A/B are pending at
+this entry. Saving CPU payloads is not itself evidence of improved frame times.

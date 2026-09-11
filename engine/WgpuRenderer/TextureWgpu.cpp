@@ -1080,6 +1080,34 @@ int TextureWgpu::Init()
 
     const auto loadSource = [&]()
     {
+        static const bool lazyTint = [] {
+            const char* v = std::getenv("WGR_LAZY_BCR_TINT");
+            return v && v[0] == '1'; // A/B candidate until route and pixel acceptance.
+        }();
+        float rgb[3];
+        const char* innerName = nullptr;
+        if (lazyTint && _bank && Poseidon::Dev::GResidencyLevers().layerTintInShader &&
+            Enfusion::LayerTintLinearMultiply() && Enfusion::SplitLayerTintName(SourceName(), rgb, &innerName) &&
+            innerName && *innerName)
+        {
+            Ref<Texture> inner = _bank->Load(innerName);
+            auto* texture = inner ? static_cast<TextureWgpu*>(inner.GetRef()) : nullptr;
+            auto* source = texture ? dynamic_cast<TextureSourceDDS*>(static_cast<ITextureSource*>(texture->_src)) : nullptr;
+            if (source)
+            {
+                auto view = source->CreateLinearTintView(rgb, _mipmaps, MAX_MIPMAPS);
+                if (view)
+                {
+                    _tintDelegate = inner;
+                    _src = view.release();
+                    _cpuTintView = true;
+                    static std::atomic<unsigned> reported{0};
+                    if (reported.fetch_add(1, std::memory_order_relaxed) < 8)
+                        LOG_INFO(Graphics, "Wgpu lazy BCR tint: '{}' borrows '{}' (no decoded CPU chain)", Name(), innerName);
+                    return;
+                }
+            }
+        }
         ITextureSourceFactory* factory = SelectTextureSourceFactory(SourceName());
         if (factory && factory->Check(SourceName()))
             _src = factory->Create(SourceName(), _mipmaps, MAX_MIPMAPS);
@@ -1208,6 +1236,17 @@ bool TextureWgpu::ScanTopMipAlphaBlocks(AlphaScanPath& path)
 // to tell cutout from blend. Cached in _alphaClass. Dynamic textures keep the base Opaque.
 AlphaStats::Kind TextureWgpu::GetAlphaClass()
 {
+    if (_cpuTintView)
+    {
+        // Linear tint changes RGB only. Ask the same inner image used by the
+        // GPU, not a newly decoded top mip of each colour variant.
+        auto* inner = static_cast<TextureWgpu*>(_tintDelegate.GetRef());
+        const auto kind = inner->GetAlphaClass();
+        _alphaStats = inner->_alphaStats;
+        _alphaStatsScanned = inner->_alphaStatsScanned;
+        _alphaClass = static_cast<signed char>(kind);
+        return kind;
+    }
     if (_alphaClass >= 0)
     {
         return static_cast<AlphaStats::Kind>(_alphaClass);
@@ -1572,7 +1611,7 @@ uint64_t TextureWgpu::EnsureUploaded()
     // direct (per-draw) path has no layer colour and draws these untinted now; RFG-075
     // leaves it almost nothing of this family, and POSEIDON_LAYER_TINT_BAKED=1 (or the
     // Streaming tab) restores the bake for an A/B.
-    if (_tintDelegate)
+    if (_tintDelegate && (!_cpuTintView || Poseidon::Dev::GResidencyLevers().layerTintInShader))
     {
         auto* inner = static_cast<TextureWgpu*>(_tintDelegate.GetRef());
         return inner ? inner->EnsureUploaded() : 0;

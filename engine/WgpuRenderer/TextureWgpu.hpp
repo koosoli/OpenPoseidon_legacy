@@ -20,7 +20,11 @@ class TextureWgpu : public Texture
     friend class TextureBankWgpu;
 
   private:
+    // Declared before _src so a borrowed CPU tint view dies BEFORE its owner.
+    // RFG-086: the inner image also supplies the existing GPU tint delegate.
+    Ref<Texture> _tintDelegate;
     SRef<ITextureSource> _src;
+    bool _cpuTintView = false;
     RString _sourceName; // Optional visual replacement; Name() remains the simulation-facing identity.
     TextureBankWgpu* _bank = nullptr;
 
@@ -30,9 +34,6 @@ class TextureWgpu : public Texture
     PacLevelMem _mipmaps[MAX_MIPMAPS];
 
     uint64_t _gpuHandle = 0;
-    /// RFG-086: for an `enft|r,g,b|inner` name, the INNER texture this one draws through
-    /// instead of uploading a tinted RGBA8 copy of it. See EnsureUploaded.
-    Ref<Texture> _tintDelegate;
     uint64_t _lastUsedFrame = 0;
     uint32_t _residentPins = 0;
     // REN-RES-001: the bindless slot this texture's uploads occupy, reserved for the

@@ -21,6 +21,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <chrono>
 #include <thread>
 #include <string>
@@ -101,7 +102,115 @@ struct ScopedLayerTintMode
         : previous(Poseidon::Enfusion::GLayerTintLinearMultiply.exchange(multiply ? 1 : 0)) {}
     ~ScopedLayerTintMode() { Poseidon::Enfusion::GLayerTintLinearMultiply.store(previous); }
 };
+
+std::vector<uint8_t> BcrBc7Chain()
+{
+    auto file = Header(32, 32, 5, "DX10");
+    for (uint32_t word : {98u, 3u, 0u, 1u, 0u}) AppendU32(file, word);
+    // EDDS has one complete chunk table, followed by smallest-first payloads.
+    std::vector<uint8_t> payload;
+    for (int edge = 2; edge <= 32; edge *= 2)
+    {
+        const int blocks = ((edge + 3) / 4) * ((edge + 3) / 4);
+        AppendU32(file, 0x59504F43);
+        AppendU32(file, 16 * blocks);
+        for (int b = 0; b < blocks; ++b)
+        {
+            uint8_t block[16]{};
+            unsigned bit = 0;
+            auto write = [&](unsigned value, unsigned bits) {
+                for (unsigned i = 0; i < bits; ++i, ++bit)
+                    block[bit / 8] |= ((value >> i) & 1u) << (bit % 8);
+            };
+            write(1u << 6, 7);
+            for (unsigned value : {20u + unsigned(b % 20), 40u, 60u, 80u})
+            { write(value, 7); write(value + 30, 7); }
+            write(0, 1); write(1, 1); write(b % 8, 3);
+            for (int i = 1; i < 16; ++i) write((i + b) % 16, 4);
+            payload.insert(payload.end(), block, block + 16);
+        }
+    }
+    file.insert(file.end(), payload.begin(), payload.end());
+    return file;
+}
 } // namespace
+
+TEST_CASE("Borrowed BC7 BCR tint matches baked pixels and averages without a decoded chain", "[graphics][edds][lazy-tint]")
+{
+    const auto bytes = BcrBc7Chain();
+    int reads = 0;
+    const auto reader = [&](const char*, std::vector<uint8_t>& out) { ++reads; out = bytes; return true; };
+    TextureSourceDDS base;
+    PacLevelMem baseMips[16];
+    const Poseidon::DdsPreparationOptions options{true, true, 1024};
+    REQUIRE(base.InitFromReader("fixture_bcr.edds", baseMips, 16, reader, options));
+    REQUIRE(base.GetFormat() == Poseidon::PacBC7);
+    const size_t baseBytes = base.PreparedByteSize();
+    const float tint[3] = {GENERATE(0.0f, 0.25f, 1.0f), 0.7f, 0.15f};
+    const auto name = Poseidon::Enfusion::MakeLayerTintName(tint, "fixture_bcr.edds");
+    TextureSourceDDS baked;
+    PacLevelMem expectedMips[16], viewMips[16];
+    REQUIRE(baked.InitFromReader(name.c_str(), expectedMips, 16, reader, options));
+    const int beforeView = reads;
+    auto view = base.CreateLinearTintView(tint, viewMips, 16);
+    REQUIRE(view);
+    CHECK(reads == beforeView);
+    CHECK(view->GetAverageColor() == baked.GetAverageColor());
+    CHECK(view->GetFormat() == baked.GetFormat());
+    CHECK(view->IsAlpha() == baked.IsAlpha());
+    CHECK(view->IsTransparent() == baked.IsTransparent());
+    CHECK(view->GetMipmapCount() == baked.GetMipmapCount());
+    view->ForceAlpha();
+    CHECK(view->IsAlpha());
+    CHECK_FALSE(base.IsAlpha());
+    for (int i = 0; i < view->GetMipmapCount(); ++i)
+    {
+        REQUIRE(viewMips[i]._w == expectedMips[i]._w);
+        REQUIRE(viewMips[i]._h == expectedMips[i]._h);
+        for (const auto format : {PacARGB8888, PacARGB1555, PacRGB565})
+        {
+            PacLevelMem mip = viewMips[i];
+            mip.SetDestFormat(format, 8);
+            std::vector<uint8_t> actual(mip._pitch * mip._h, 0x77), expected(actual);
+            REQUIRE(view->GetMipmapData(actual.data(), mip, i));
+            REQUIRE(baked.GetMipmapData(expected.data(), mip, i));
+            CHECK(actual == expected);
+        }
+    }
+    CHECK(base.PreparedByteSize() == baseBytes);
+    CHECK(base.GetFormat() == Poseidon::PacBC7);
+    CHECK_FALSE(view->GetMipmapData(nullptr, viewMips[0], 0));
+    uint8_t unused[4]{};
+    CHECK_FALSE(view->GetMipmapData(unused, viewMips[0], -1));
+    CHECK_FALSE(view->GetMipmapData(unused, viewMips[0], view->GetMipmapCount()));
+    auto capped = base.CreateLinearTintView(tint, viewMips, 1);
+    REQUIRE(capped);
+    CHECK(capped->GetMipmapCount() == 1);
+    CHECK(capped->GetAverageColor() == baked.GetAverageColor());
+}
+
+TEST_CASE("Lazy tint declines unsupported data and invalid inputs", "[graphics][edds][lazy-tint]")
+{
+    TextureSourceDDS base;
+    PacLevelMem mips[16];
+    const float tint[3] = {.2f, .3f, .4f};
+    const auto bytes = BcrBc7Chain();
+    const auto reader = [&](const char*, std::vector<uint8_t>& out) { out = bytes; return true; };
+    const char* name = GENERATE("fixture_bcr.edds", "fixture_ntc.edds", "fixture.edds");
+    REQUIRE(base.InitFromReader(name, mips, 16, reader, {true, true, 1024}));
+    CHECK_FALSE(base.CreateLinearTintView(nullptr, mips, 16));
+    CHECK_FALSE(base.CreateLinearTintView(tint, nullptr, 16));
+    CHECK_FALSE(base.CreateLinearTintView(tint, mips, 0));
+    if (std::strcmp(name, "fixture_bcr.edds") != 0)
+        CHECK_FALSE(base.CreateLinearTintView(tint, mips, 16));
+    const float invalid[3] = {std::numeric_limits<float>::quiet_NaN(), .2f, .3f};
+    CHECK_FALSE(base.CreateLinearTintView(invalid, mips, 16));
+    const float negative[3] = {-.2f, .2f, .3f};
+    CHECK_FALSE(base.CreateLinearTintView(negative, mips, 16));
+    TextureSourceDDS decoded;
+    REQUIRE(decoded.InitFromReader("enft|0.2,0.3,0.4|fixture_bcr.edds", mips, 16, reader, {true, true, 1024}));
+    CHECK_FALSE(decoded.CreateLinearTintView(tint, mips, 16));
+}
 
 TEST_CASE("Enfusion RG normals use red rather than cavity or occlusion for X", "[graphics][edds][ntc][nho]")
 {

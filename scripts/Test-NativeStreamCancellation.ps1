@@ -1,6 +1,7 @@
 param([switch]$LegacyClutter, [switch]$VerifyClutter, [switch]$TraceSlowFrames, [switch]$LegacyTableBudget, [switch]$TraceDdsPreparation,
       [switch]$SampleDriverMemory, [switch]$TraceBankTables,
       [ValidateRange(0,1)][int]$NativeTextureKeys=1,
+      [ValidateRange(0,1)][int]$LazyBcrTint=0,
       [ValidateRange(0,64)][int]$ExperimentalTableBudget=0,
       [ValidateRange(-1,1)][int]$TintReuse=-1, [switch]$VerifyTintReuse,
       [ValidateRange(0,1)][int]$DdsPrepare=0, [switch]$VerifyDdsPrepare,
@@ -24,6 +25,7 @@ if ($ExperimentalTableBudget -gt 0) {$label+='-experimental-tables-'+$Experiment
 if ($TraceDdsPreparation) {$label+='-dds-prep'}
 if ($TraceBankTables) {$label+='-bank-trace'}
 $label+='-texture-keys-'+$NativeTextureKeys
+$label+='-lazy-bcr-'+$LazyBcrTint
 if ($Bc7Batch -gt 0) {$label+='-bc7-'+$Bc7Batch}
 if ($Bc7Batch -lt 0) {$label+='-bc7-default'}
 if ($SampleDriverMemory) {$label+='-driver-memory'}
@@ -37,6 +39,7 @@ New-Item -ItemType Directory -Force $user | Out-Null
 & "$PSScriptRoot/Write-BenchmarkGraphics.ps1" -UserDir $user
 $settings=@{
  WGR_NATIVE_TEXTURE_KEYS=[string]$NativeTextureKeys
+ WGR_LAZY_BCR_TINT=[string]$LazyBcrTint
  WGR_NATIVE_DDS_PREPARE=[string]$DdsPrepare; WGR_NATIVE_DDS_PREPARE_VERIFY=$(if ($VerifyDdsPrepare) {'1'} else {'0'})
  POSEIDON_USER_DIR=$user; POSEIDON_VSYNC='0'; POSEIDON_LOCKSTEP_HZ='0'
  POSEIDON_REFORGER_WORLD='worlds/eden'; POSEIDON_REFORGER_OBJECTS='1'; POSEIDON_REFORGER_STREAM='1'

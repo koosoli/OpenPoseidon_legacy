@@ -2,12 +2,22 @@
 
 ## September 11 Jeep implementation continuation
 
-Latest installed release: 65dc2a63, both real default packages, no mod parameter
+Latest installed release: 67422367, both real default packages, no mod parameter
 needed. Fresh release 125134 passes NPC, player, disabled, missing archive,
 incompatible manifest and explicit user-mod precedence. Own six-RTM source,
 generator and SP Jeep cargo-0/M16 path are delivered. Save/reload and player
-lifecycle pass. Full turning/rough-ground/multi-Jeep motion, fine hand quality,
+lifecycle pass again in 141650/141753; two stationary Jeeps operate independently.
+The package 0.1.1 head pose and animated-eye direction restore cargo observation.
+Saved missing-package poses correctly return to the retail co-driver state.
+Hold/outside/obstacle/friendly and disabled-package regressions pass. Current
+fast turning and straight-drive runs do NOT pass hit acceptance; do not substitute
+older moving results for those current failures. Full turning/rough-ground motion, fine hand quality,
 MP fallback runtime and controlled resource-cost acceptance remain open.
+
+Next native loading candidate: narrowly borrow compressed BCR source pixels for
+linear-tint variants, with exact lazy CPU pixels/averages and the existing GPU
+delegate. `WGR_LAZY_BCR_TINT` remains off pending unit, installed route and visual
+A/B acceptance. See NATIVE-TEXTURE-IDENTITY-20260911.md; not a new streaming manager.
 
 Historical implementation checkpoints follow. Installed 7f6d3fa0: NPC 121507 and player 121641 pass
 seated and mid-reload save/load, ammo conservation and no duplicate shots.

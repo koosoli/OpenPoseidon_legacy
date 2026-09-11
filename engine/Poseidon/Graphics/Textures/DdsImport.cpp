@@ -990,6 +990,85 @@ size_t TextureSourceDDS::PreparedByteSize() const
     return bytes;
 }
 
+class TextureSourceDDSLinearTint final : public ITextureSource
+{
+    const TextureSourceDDS& _base;
+    float _rgb[3];
+    int _count;
+    PackedColor _average;
+    bool _alpha = false;
+
+    bool Decode(int level, TextureSourceDDS& output) const
+    {
+        const auto& source = _base._levels[static_cast<size_t>(level)];
+        DDSMipLevel decoded;
+        decoded.width = source.width;
+        decoded.height = source.height;
+        decoded.data.resize(static_cast<size_t>(source.width) * source.height * 4);
+        if (!ConvertPixels(source.data.data(), decoded.data.data(), source.width, source.height,
+                           PixelFormat::BC7, PixelFormat::RGBA8888))
+            return false;
+        for (size_t i = 0; i < decoded.data.size(); i += 4)
+        {
+            std::swap(decoded.data[i], decoded.data[i + 2]);
+            decoded.data[i + 3] = 255; // Same BCR roughness-not-coverage rule as forced decode.
+        }
+        output._levels.push_back(std::move(decoded));
+        ApplyEnfusionLayerTintWithMode(output._levels, _rgb, true);
+        output._format = PixelFormat::ARGB8888;
+        output._pacFormat = PacARGB8888;
+        output._mipmaps = 1;
+        return true;
+    }
+
+  public:
+    TextureSourceDDSLinearTint(const TextureSourceDDS& base, const float rgb[3], int count)
+        : _base(base), _rgb{rgb[0], rgb[1], rgb[2]}, _count(count) {}
+    bool Bind(PacLevelMem* mips)
+    {
+        TextureSourceDDS smallest;
+        if (!Decode(static_cast<int>(_base._levels.size()) - 1, smallest)) return false;
+        _average = AverageOfSmallest(smallest._levels, PixelFormat::ARGB8888);
+        for (int i = 0; i < _count; ++i)
+        {
+            mips[i]._w = static_cast<short>(_base._levels[i].width);
+            mips[i]._h = static_cast<short>(_base._levels[i].height);
+            mips[i]._sFormat = PacARGB8888;
+        }
+        return true;
+    }
+    bool Init(const char*, PacLevelMem*, int) override { return false; }
+    int GetMipmapCount() const override { return _count; }
+    PacFormat GetFormat() const override { return PacARGB8888; }
+    PackedColor GetAverageColor() const override { return _average; }
+    bool IsAlpha() const override { return _alpha; }
+    bool IsTransparent() const override { return false; }
+    void ForceAlpha() override { _alpha = true; }
+    bool GetMipmapData(void* mem, const PacLevelMem& mip, int level) const override
+    {
+        if (!mem || level < 0 || level >= _count ||
+            mip._w != _base._levels[level].width || mip._h != _base._levels[level].height)
+            return false;
+        TextureSourceDDS decoded;
+        return Decode(level, decoded) && decoded.GetMipmapData(mem, mip, 0);
+    }
+};
+
+std::unique_ptr<ITextureSource> TextureSourceDDS::CreateLinearTintView(const float rgb[3], PacLevelMem* mips,
+                                                                     int maxMips) const
+{
+    const std::string name = LowerCopy(static_cast<const char*>(_name));
+    if (!rgb || !mips || maxMips <= 0 || _mipmaps <= 0 ||
+        _format != PixelFormat::BC7 || _hasAlpha || _levels.size() != static_cast<size_t>(_mipmaps) ||
+        !(name.ends_with("_bcr.edds") || name.ends_with("_bcr.dds")))
+        return nullptr;
+    for (int c = 0; c < 3; ++c)
+        if (!std::isfinite(rgb[c]) || rgb[c] < 0 || rgb[c] > 1) return nullptr;
+    auto view = std::make_unique<TextureSourceDDSLinearTint>(*this, rgb, std::min(_mipmaps, maxMips));
+    if (!view->Bind(mips)) return nullptr;
+    return view;
+}
+
 bool TextureSourceDDS::BindPreparedMips(PacLevelMem* mips, int maxMips)
 {
     if (!mips || maxMips <= 0 || _mipmaps <= 0 || _levels.size() != static_cast<size_t>(_mipmaps))

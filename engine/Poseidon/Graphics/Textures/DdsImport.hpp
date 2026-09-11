@@ -7,6 +7,7 @@
 
 #include <vector>
 #include <functional>
+#include <memory>
 
 namespace Poseidon
 {
@@ -72,6 +73,7 @@ DdsPreparationOptions CaptureDdsPreparationOptions();
 
 class TextureSourceDDS : public ITextureSource
 {
+    friend class TextureSourceDDSLinearTint;
     friend class render::PreparedTextureStore;
     friend class TextureSourceDDSFactory;
     RStringB _name;
@@ -92,6 +94,10 @@ class TextureSourceDDS : public ITextureSource
     TextureSourceDDS();
     ~TextureSourceDDS() override;
     size_t PreparedByteSize() const;
+    // Borrow immutable BC7 BCR pixels. The owner MUST retain this source until
+    // after the view dies. No I/O, GPU work, cached decoded chain or workers.
+    // Declines other formats/materials; the ordinary factory remains fallback.
+    std::unique_ptr<ITextureSource> CreateLinearTintView(const float rgb[3], PacLevelMem* mips, int maxMips) const;
 
     bool Init(const char* name, PacLevelMem* mips, int maxMips) override;
     // Isolate I/O from composition: the caller owns the reader and its data for
