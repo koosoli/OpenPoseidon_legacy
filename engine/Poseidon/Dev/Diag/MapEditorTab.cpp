@@ -69,8 +69,10 @@ MapEditorAction DrawMapEditorTab()
     ImGui::SeparatorText("Ballistic impact craters");
     auto& craters = RocketCraters();
     Checkbox("Rockets / tank shells create terrain craters", &craters.enabled);
-    SliderFloat("Impact crater radius", &craters.radius, 8.0f, 100.0f, "%.1f m");
-    SliderFloat("Impact crater depth", &craters.depth, 0.1f, 8.0f, "%.1f m");
+    SliderFloat("Reference crater radius (LAW)", &craters.radius, 8.0f, 100.0f, "%.1f m");
+    SliderFloat("Reference crater depth (LAW)", &craters.depth, 0.1f, 8.0f, "%.1f m");
+    ImGui::TextWrapped("Radius and depth scale with ammo blast damage (cube root, 0.25x to 2x). "
+        "Defaults: LAW reference 12 m radius / 1 m depth; terrain grid can widen small craters.");
     ImGui::TextWrapped("Experimental, single-player, mission-local. Land impacts only; "
         "minimum radius is 0.75 terrain grid cells. Buildings and AI paths are not updated. "
         "The first impact may pause briefly to prepare terrain collision. Turning off does not undo craters.");

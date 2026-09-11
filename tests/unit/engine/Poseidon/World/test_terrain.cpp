@@ -26,15 +26,22 @@ TEST_CASE("Satellite top-view raster handles winding and rejects vertical faces"
     CHECK_FALSE(SatmapTriangleWeights({0,0},{0,0},{0,2},0,0,w));
 }
 
-TEST_CASE("Rocket crater default increases depth eightfold without widening the footprint", "[terrain-crater]")
+TEST_CASE("Ballistic craters restore normal depth and scale by ammo blast", "[terrain-crater]")
 {
     const Dev::RocketCraterSettings defaults;
     CHECK(defaults.enabled);
     CHECK(defaults.radius == 12.0f);
-    CHECK(defaults.depth == 8.0f);
-    for (float offset : {0.0f, 3.0f, 6.0f, 11.0f, 12.0f, 15.0f})
-        CHECK(TerrainCraterDepth(offset, 0, defaults.radius, defaults.depth) ==
-              Catch::Approx(8.0f * TerrainCraterDepth(offset, 0, 12.0f, 1.0f)));
+    CHECK(defaults.depth == 1.0f);
+    CHECK(BallisticCraterScale(150) == Catch::Approx(1));
+    CHECK(BallisticCraterScale(1200) == Catch::Approx(2));
+    CHECK(BallisticCraterScale(18.75f) == Catch::Approx(0.5));
+    CHECK(BallisticCraterScale(300) > BallisticCraterScale(150));
+    CHECK(BallisticCraterScale(1e30f) == 2);
+    CHECK(BallisticCraterScale(0.001f) == 0.25f);
+    CHECK(BallisticCraterScale(0) == 0);
+    CHECK(BallisticCraterScale(-150) == 0);
+    CHECK(BallisticCraterScale(std::numeric_limits<float>::infinity()) == 0);
+    CHECK(BallisticCraterScale(std::numeric_limits<float>::quiet_NaN()) == 0);
 }
 
 TEST_CASE("Terrain brush wheel supports fractional steps and bounded fine radii", "[terrain-brush-radius]")

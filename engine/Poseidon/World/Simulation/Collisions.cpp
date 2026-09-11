@@ -1273,7 +1273,7 @@ void Landscape::ExplosionDammage(EntityAI* owner, Shot* shot, Object* directHit,
     if (Dev::RocketCraters().enabled && shot && (dyn_cast<Missile>(shot) || impactShell))
     {
         const bool changed = !directHit && type->indirectHit > 0 &&
-            Dev::RocketTerrainImpact(pos.X(),pos.Y(),pos.Z());
+            Dev::RocketTerrainImpact(pos.X(),pos.Y(),pos.Z(),type->indirectHit);
         LOG_INFO(World, "Rocket crater: impact=[{},{},{}] direct={} blast={} changed={}",
                  pos.X(),pos.Y(),pos.Z(),directHit != nullptr,type->indirectHit,changed);
     }

@@ -45,11 +45,14 @@ try {
         Start-Sleep -Seconds 5
     }
     Start-Sleep -Seconds 15
+    $blast=[double](Send @{cmd='eval';code=('getNumber (configFile >> "CfgAmmo" >> "'+$Ammo+'" >> "indirectHit")')}).result
+    if ($blast -le 0) {throw 'Missing explosive ammo config'}
+    $expected=[Math]::Min(2.0,[Math]::Max(0.25,[Math]::Pow($blast/150.0,1.0/3.0)))
     $before=Height
     Fire
     $default=Height
     if ($default -ge $before-0.1) {throw 'Default did not crater'}
-    if ([Math]::Abs(($before-$default)-8.0) -gt 0.1) {throw 'Expected eight-metre default crater at the grid vertex'}
+    if ([Math]::Abs(($before-$default)-$expected) -gt 0.05) {throw "Expected ammo-scaled depth $expected at the grid vertex"}
     $null=Send @{cmd='eval';code='triRocketCraters "off"'}
     Fire
     $off=Height
@@ -62,7 +65,7 @@ try {
     if ([Math]::Abs((Height)-$before) -gt 0.001) {throw 'Restore before reset impact failed'}
     Fire
     $reset=Height
-    if ([Math]::Abs(($before-$reset)-8.0) -gt 0.1) {throw 'Reset did not restore eight-metre default'}
+    if ([Math]::Abs(($before-$reset)-$expected) -gt 0.05) {throw 'Reset did not restore ammo-scaled default'}
     $null=Send @{cmd='screenshot';path=(Join-Path $output 'craters.png')}
     $null=Send @{cmd='eval';code='triTerrainBrushMode "restore"'}
     $restored=Height

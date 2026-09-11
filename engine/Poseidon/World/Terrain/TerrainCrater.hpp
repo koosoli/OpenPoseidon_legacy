@@ -4,6 +4,13 @@
 
 namespace Poseidon
 {
+// Config blast damage is a gameplay proxy, not TNT mass. Anchor to classic LAW
+// (indirectHit=150), with bounded cube-root scaling for crater dimensions.
+inline float BallisticCraterScale(float indirectHit)
+{
+    if (!std::isfinite(indirectHit) || indirectHit <= 0) return 0;
+    return std::clamp(std::cbrt(indirectHit / 150.0f), 0.25f, 2.0f);
+}
 inline float TerrainBrushWheelRadius(float requested, float wheelSteps)
 {
     if (!std::isfinite(requested)) requested = 64.0f;
