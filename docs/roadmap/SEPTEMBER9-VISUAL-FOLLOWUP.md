@@ -2,7 +2,12 @@
 
 ## September 11 Jeep implementation continuation
 
-Latest continuation: installed 36bcea5f, automatic entry and real reload passed.
+Latest continuation: installed 079753d9. Player mouse fire/hit, R-key reload,
+exit/reentry, ordinary-seat fallback and carrier destruction pass run 113951.
+The real AI-driven NPC case also passed (five shots while moving, actual hits).
+Detailed animation quality, save/load, full movement and default packaging
+remain open; no claim that the whole request is complete.
+36bcea5f automatic entry and real NPC reload passed.
 57da8b28 stationary NPC hits at 0/90/180 also passed.
 The bounded SP loop, seat-frame visibility and collision gate are implemented;
 installed probes found that protected retail Jeep config rejected the seat

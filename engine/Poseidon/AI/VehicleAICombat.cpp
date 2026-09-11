@@ -631,7 +631,17 @@ int EntityAI::FindMagazineByType(const MuzzleType* muzzle, const MagazineType* o
 
 static Vector3 GetWeaponSoundPos(EntityAI* veh, int weapon)
 {
-    return veh->PositionModelToWorld(veh->GetWeaponPoint(weapon));
+    return veh->GetHierachyParent() ? veh->WorldTransform().FastTransform(veh->GetWeaponPoint(weapon))
+                                   : veh->PositionModelToWorld(veh->GetWeaponPoint(weapon));
+}
+
+static Vector3 AttachedPointSpeed(const EntityAI* entity, Vector3Par point)
+{
+    const auto* parent = dyn_cast<Entity>(entity->GetHierachyParent());
+    if (!parent)
+        return entity->WorldSpeed();
+    const Vector3 centre = parent->WorldTransform().FastTransform(parent->GetCenterOfMass());
+    return Ballistics::CarrierPointVelocity(parent->WorldSpeed(), parent->AngVelocity(), point - centre);
 }
 
 /*!
@@ -675,7 +685,7 @@ void EntityAI::PlayReloadMagazineSound(int weapon, const MuzzleType* muzzle)
     if (pars.name.GetLength() > 0)
     {
         float rndFreq = GRandGen.RandomValue() * 0.1 + 0.95;
-        IWave* wave = GSoundScene->OpenAndPlayOnce(pars.name, GetWeaponSoundPos(this, weapon), Speed(), pars.vol,
+        IWave* wave = GSoundScene->OpenAndPlayOnce(pars.name, GetWeaponSoundPos(this, weapon), GetHierachyParent() ? WorldSpeed() : Speed(), pars.vol,
                                                    pars.freq * rndFreq);
         if (wave)
         {
@@ -721,7 +731,7 @@ void EntityAI::PlayEmptyMagazineSound(int weapon)
         _weaponFiredTime.Access(weapon);
         _weaponFiredTime[weapon] = Glob.time;
         IWave* newWave =
-            GSoundScene->OpenAndPlayOnce(sound.name, GetWeaponSoundPos(this, weapon), Speed(), volume, freq);
+            GSoundScene->OpenAndPlayOnce(sound.name, GetWeaponSoundPos(this, weapon), GetHierachyParent() ? WorldSpeed() : Speed(), volume, freq);
         if (newWave)
         {
             GSoundScene->SimulateSpeedOfSound(newWave);
@@ -989,7 +999,7 @@ void EntityAI::Sound(bool inside, float deltaT)
             _weaponFired[i] = nullptr;
             continue;
         }
-        wave->SetPosition(GetWeaponSoundPos(this, i), Speed());
+        wave->SetPosition(GetWeaponSoundPos(this, i), GetHierachyParent() ? WorldSpeed() : Speed());
     }
 }
 
@@ -2075,8 +2085,9 @@ bool EntityAI::FireMGun(int weapon, Vector3Par offset, Vector3Par direction, Tar
     shell->DirectionModelToWorld(dir, dir);
     shell->SetOrient(dir, shell->DirectionUp());
     // final speed and position
-    shell->SetSpeed((attached ? WorldSpeed() : _speed) + dir * aInfo->_initSpeed);
-    shell->SetPosition(attached ? shotFrame.FastTransform(offset) : PositionModelToWorld(offset));
+    const Vector3 shotPosition = attached ? shotFrame.FastTransform(offset) : PositionModelToWorld(offset);
+    shell->SetSpeed((attached ? AttachedPointSpeed(this, shotPosition) : _speed) + dir * aInfo->_initSpeed);
+    shell->SetPosition(shotPosition);
     GLOB_WORLD->AddFastVehicle(shell);
 
     if (GWorld->GetMode() == GModeNetware)
@@ -2333,7 +2344,7 @@ void EntityAI::FireWeaponEffects(int weapon, const Magazine* magazine, EntityAI*
         if (!wave)
         {
             IWave* newWave =
-                GSoundScene->OpenAndPlayOnce(sound->name, GetWeaponSoundPos(this, weapon), Speed(), volume, freq);
+                GSoundScene->OpenAndPlayOnce(sound->name, GetWeaponSoundPos(this, weapon), GetHierachyParent() ? WorldSpeed() : Speed(), volume, freq);
             if (newWave)
             {
                 if (!continuous)
@@ -2388,8 +2399,17 @@ void EntityAI::FireWeaponEffects(int weapon, const Magazine* magazine, EntityAI*
                 Vector3 vel;
                 if (GetWeaponCartridgePos(weapon, pos, vel))
                 {
-                    pos = Transform() * pos;
-                    vel = Transform().Rotate(vel);
+                    if (GetHierachyParent())
+                    {
+                        const Matrix4 frame = WorldTransform();
+                        pos = frame * pos;
+                        vel = frame.Rotate(vel) + AttachedPointSpeed(this, pos.Position());
+                    }
+                    else
+                    {
+                        pos = Transform() * pos;
+                        vel = Transform().Rotate(vel);
+                    }
 
                     Entity* fx = CreateThing(type->_cartridgeType, pos, vel);
                     if (fx)

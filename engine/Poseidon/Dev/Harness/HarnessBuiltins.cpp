@@ -308,7 +308,10 @@ void RegisterSqf(HarnessServer& hs)
                            const Vector3 offset = person->GetWeaponPoint(weapon);
                            const Matrix4 frame = person->WorldTransform();
                            const Vector3 expectedPos = frame.FastTransform(offset);
-                           const Vector3 inheritedSpeed = person->WorldSpeed();
+                           const auto* carrier = unit->GetVehicleIn();
+                           const Vector3 centre = carrier->WorldTransform().FastTransform(carrier->GetCenterOfMass());
+                           const Vector3 inheritedSpeed = carrier->WorldSpeed() +
+                               carrier->AngVelocity().CrossProduct(expectedPos - centre);
                            const Vector3 expectedWeaponDir = frame.Rotate(man->GetWeaponRelDirection(weapon));
                            const float weaponDirectionError =
                                (person->GetWeaponDirection(weapon) - expectedWeaponDir).Size();

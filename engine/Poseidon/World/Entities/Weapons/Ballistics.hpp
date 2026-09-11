@@ -50,6 +50,12 @@ namespace Poseidon
 namespace Ballistics
 {
 
+/// Rigid carrier velocity at a world-space offset from its centre of mass.
+inline Vector3 CarrierPointVelocity(Vector3Par linear, Vector3Par angular, Vector3Par offset)
+{
+    return linear + angular.CrossProduct(offset);
+}
+
 /// Which drag law a projectile obeys.
 ///
 /// BAL-010 asks for a "verified drag / ballistic coefficient model". The honest position is that

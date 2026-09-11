@@ -26,6 +26,22 @@ using Catch::Approx;
 // members of namespace Poseidon.
 namespace B = Poseidon::Ballistics;
 
+TEST_CASE("Carrier velocity includes rotation at the muzzle", "[ballistics][cargo-weapons]")
+{
+    const Vector3 linear(8, 0, 3);
+    const Vector3 angular(0, .5f, 0);
+    const Vector3 offset(2, 0, 1);
+    const Vector3 velocity = B::CarrierPointVelocity(linear, angular, offset);
+    CHECK(velocity.X() == Approx(8.5f));
+    CHECK(velocity.Y() == Approx(0));
+    CHECK(velocity.Z() == Approx(2));
+    CHECK((B::CarrierPointVelocity(linear, VZero, offset) - linear).Size() == Approx(0));
+    CHECK((B::CarrierPointVelocity(linear, angular, VZero) - linear).Size() == Approx(0));
+    const Matrix3 turn(MRotationZ, .7f);
+    CHECK((B::CarrierPointVelocity(turn.Rotate(linear), turn.Rotate(angular), turn.Rotate(offset)) -
+           turn.Rotate(velocity)).Size() < .00001f);
+}
+
 namespace
 {
 
