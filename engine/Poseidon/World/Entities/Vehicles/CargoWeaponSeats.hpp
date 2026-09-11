@@ -53,18 +53,37 @@ public:
         return nullptr;
     }
 
-    bool Load(const ParamEntry& vehicle, int cargoCount)
+    bool Load(const ParamEntry& vehicle, int cargoCount, const ParamEntry* configRoot = nullptr)
     {
         _seats.clear();
         _error.clear();
         const auto* table = vehicle.FindEntry("OPCargoWeapons");
-        if (!table)
-            return true; // Original and ordinary cargo remain unsupported.
         const auto fail = [&](const char* message) {
             _seats.clear(); // Never publish a partially valid permission table.
             _error = message;
             return false;
         };
+        // Retail vehicle classes inherit access=3. Do not weaken that protection
+        // to install content metadata. The same config tree can name an exact
+        // vehicle outside CfgVehicles; a vehicle's own table always takes priority.
+        if (!table && configRoot)
+        {
+            const auto* mappings = configRoot->FindEntry("CfgOPVehicleActions");
+            if (mappings)
+            {
+                if (!mappings->IsClass())
+                    return fail("CfgOPVehicleActions must be a class");
+                const auto* mapping = mappings->FindEntry(vehicle.GetName());
+                if (mapping)
+                {
+                    if (!mapping->IsClass())
+                        return fail("vehicle action mapping must be a class");
+                    table = mapping->FindEntry("OPCargoWeapons");
+                }
+            }
+        }
+        if (!table)
+            return true; // Original and ordinary cargo remain unsupported.
         if (!table->IsClass())
             return fail("OPCargoWeapons must be a class");
         const auto* version = table->FindEntry("version");

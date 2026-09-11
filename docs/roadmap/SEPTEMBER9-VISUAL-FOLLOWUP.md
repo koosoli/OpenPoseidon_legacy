@@ -2,6 +2,14 @@
 
 ## September 11 Jeep implementation continuation
 
+Latest continuation: installed 20eea79f, actual NPC fire still NOT accepted.
+The bounded SP loop, seat-frame visibility and collision gate are implemented;
+installed probes found that protected retail Jeep config rejected the seat
+metadata. The external exact-class mapping in the same addon config tree is
+being verified, without weakening original access protection. The owner backlog
+is still open. Default activation, transitions, reload, player and moving fire
+must not be inferred from these prerequisites.
+
 [Jeep baseline and integration](decisions/JEEP-FFV-20260911.md): real cargo vs
 on-foot M16 control now exists, including ammunition and Fired-event checks.
 First engine increment corrects attached bullet launch coordinates to the
@@ -12,7 +20,8 @@ seat frames at 0/90/180 degrees; this deliberately is not gameplay firing
 acceptance. Versioned cargo-seat metadata and angular-envelope parsing are
 implemented, with 30 combined cargo/ballistics cases / 454 assertions passing.
 Six reproducibly authored RTM drafts and an isolated animation-preview PBO now
-exist; no seats are opted in and the release VehicleActions pack is not shipped.
+exist; the development-only PBO now specifies cargo 0/M16, but the release
+VehicleActions pack is not shipped and the ordinary Jeep remains unchanged.
 The first preview exposed centered-ODOL vs uncentered-RTM anchor coordinates;
 2b3141d3 corrects that, with six generator tests passing. The second installed
 preview (083544, engine 6e82120a) removes the gross limb stretching. Hand/gun

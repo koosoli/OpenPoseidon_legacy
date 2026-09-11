@@ -36,10 +36,9 @@ class CfgMovesMC
 };
 // Development-only explicit integration seat. No other Jeep cargo or vehicle
 // is changed, and the runtime currently requires the authored aim state.
-class CfgVehicles
+class CfgOPVehicleActions
 {
-    class Car;
-    class Jeep: Car
+    class Jeep
     {
         class OPCargoWeapons
         {

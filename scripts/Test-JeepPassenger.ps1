@@ -73,7 +73,8 @@ try {
         $null=Send @{cmd='exec';code='ffvPassenger switchMove "OPJeepAim"; ffvPassenger reveal ffvTarget; ffvPassenger doTarget ffvTarget'}
         Start-Sleep -Seconds 2
         $null=Send @{cmd='eval';code='ffvShots'} '0'
-        $null=Send @{cmd='crew_pose_probe'}
+        $activation=Send @{cmd='crew_pose_probe'}
+        if (!$activation.cargoWeaponActive) {throw 'NPC fixture did not activate the explicitly configured seat'}
     }
     if ($AnimationPreview) {
         $null=Send @{cmd='crew_pose_probe'}

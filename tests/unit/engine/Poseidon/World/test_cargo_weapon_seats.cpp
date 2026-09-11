@@ -81,3 +81,52 @@ TEST_CASE("Cargo seat arc excludes windshield roof and opposite side", "[cargo-w
     REQUIRE(table.Load(vehicle, 3));
     REQUIRE(table.Find(0) == nullptr);
 }
+
+TEST_CASE("Protected original vehicle uses exact external content mapping", "[cargo-weapons]")
+{
+    ParamFile root;
+    auto* vehicles = root.AddClass("CfgVehicles");
+    auto* jeep = vehicles->AddClass("Jeep");
+    auto* variant = vehicles->AddClass("JeepMG");
+    auto* mappings = root.AddClass("CfgOPVehicleActions");
+    auto* mappedJeep = mappings->AddClass("Jeep");
+    auto* config = mappedJeep->AddClass("OPCargoWeapons");
+    config->Add("version", 1);
+    auto* seats = config->AddClass("Seats");
+    AddSeat(*seats, "Passenger", 0);
+    jeep->SetAccessMode(PAReadOnlyVerified);
+    CargoWeaponSeats table;
+    REQUIRE(table.Load(*jeep, 3, &root));
+    REQUIRE(table.Find(0));
+    REQUIRE(jeep->GetAccessMode() == PAReadOnlyVerified);
+    REQUIRE(jeep->FindEntry("OPCargoWeapons") == nullptr);
+    REQUIRE(table.Load(*variant, 3, &root));
+    REQUIRE_FALSE(table.Find(0));
+    REQUIRE(table.Load(*jeep, 3));
+    REQUIRE_FALSE(table.Find(0));
+    config->Add("version", 99);
+    REQUIRE_FALSE(table.Load(*jeep, 3, &root));
+    REQUIRE_FALSE(table.Find(0));
+}
+
+TEST_CASE("Vehicle-owned cargo table overrides external default mapping without fallback", "[cargo-weapons]")
+{
+    ParamFile root;
+    auto* vehicle = root.AddClass("Jeep");
+    auto* mappings = root.AddClass("CfgOPVehicleActions");
+    auto* mapped = mappings->AddClass("Jeep")->AddClass("OPCargoWeapons");
+    mapped->Add("version", 1);
+    AddSeat(*mapped->AddClass("Seats"), "Passenger", 0);
+    auto* direct = vehicle->AddClass("OPCargoWeapons");
+    direct->Add("version", 1);
+    direct->AddClass("Seats"); // Explicit empty override disables the default.
+    CargoWeaponSeats table;
+    REQUIRE(table.Load(*vehicle, 3, &root));
+    REQUIRE_FALSE(table.Find(0));
+    direct->Add("version", 99);
+    REQUIRE_FALSE(table.Load(*vehicle, 3, &root));
+    REQUIRE_FALSE(table.Find(0));
+    vehicle->Delete("OPCargoWeapons");
+    REQUIRE(table.Load(*vehicle, 3, &root));
+    REQUIRE(table.Find(0));
+}

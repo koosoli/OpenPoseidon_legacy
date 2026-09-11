@@ -1935,7 +1935,7 @@ void TransportType::Load(const ParamEntry& par)
     _commanderInAction = GetActionVehName(par >> "commanderInAction");
 
     _maxManCargo = par >> "transportSoldier";
-    if (!_cargoWeaponSeats.Load(par, _maxManCargo))
+    if (!_cargoWeaponSeats.Load(par, _maxManCargo, &Pars))
         LOG_WARN(Physics, "{}: cargo personal weapons disabled: {}", (const char*)par.GetName(), _cargoWeaponSeats.Error());
     _typicalCargo.Resize(0);
     const ParamEntry& typCargo = par >> "typicalCargo";
