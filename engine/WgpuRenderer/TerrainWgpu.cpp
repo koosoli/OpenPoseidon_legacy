@@ -22,6 +22,8 @@
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Scene/Object.hpp>
+#include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
 
 #include <algorithm>
 #include <array>
@@ -819,6 +821,165 @@ static std::vector<uint8_t> ReadVfsFile(const char* path)
     return bytes;
 }
 
+namespace
+{
+constexpr int ObjectSatSize = 64;
+struct ObjectSatView
+{
+    Vector3 lo = VZero, hi = VZero;
+    std::vector<uint8_t> rgba;
+    std::vector<float> height;
+    std::array<float,4> average{};
+};
+
+// Temporary per-bake caches only. No extra GPU resources or per-frame object scan.
+void BakeSatmapObjects(const Landscape& land, int size, std::vector<uint8_t>& pixels)
+{
+    const char* setting = std::getenv("WGR_OFP_SATMAP_OBJECTS");
+    if (!setting || std::strcmp(setting,"1") != 0) return; // Acceptance gate.
+    const auto started = std::chrono::steady_clock::now();
+    std::unordered_map<const LODShapeWithShadow*,ObjectSatView> views;
+    std::unordered_map<const Texture*,DecodedImage> textures;
+    std::vector<float> top(size*size, -1e30f);
+    constexpr size_t MaxModels = 2048, MaxTextures = 2048;
+    const float metresPerPixel = land.GetLandGrid()*land.GetLandRange()/size;
+    size_t stamped = 0, missing = 0, samples = 0;
+    const auto textureImage = [&](Texture* texture) -> const DecodedImage* {
+        if (!texture) return nullptr;
+        if (const auto it = textures.find(texture); it != textures.end()) return &it->second;
+        if (textures.size() >= MaxTextures) return nullptr;
+        auto& dst = textures[texture];
+        const char* source = static_cast<TextureWgpu*>(texture)->SourceName();
+        const auto bytes = ReadVfsFile(source);
+        if (bytes.empty()) return &dst;
+        const auto src = DecodePAABuffer(bytes.data(),bytes.size(),!ContainsNoCase(source,".pac"));
+        if (!src.valid()) return &dst;
+        dst.width = dst.height = 64;
+        dst.rgba.resize(64*64*4);
+        if (!stbir_resize_uint8_linear(src.rgba.data(),src.width,src.height,src.width*4,
+                                      dst.rgba.data(),64,64,64*4,STBIR_RGBA)) dst = {};
+        return &dst;
+    };
+    for (int z=0; z<land.GetLandRange(); ++z) for (int x=0; x<land.GetLandRange(); ++x)
+    {
+        const auto& objects = land.GetObjects(z,x);
+        for (int i=0; i<objects.Size(); ++i)
+        {
+            Object* object = objects[i];
+            if (!object || (object->GetType() != Primary && object->GetType() != Network)) continue;
+            auto* lod = object->GetShape();
+            if (!lod) continue;
+            auto found = views.find(lod);
+            if (found == views.end())
+            {
+                if (views.size() >= MaxModels) {++missing; continue;}
+                auto& view = views[lod];
+                Shape* shape = nullptr;
+                for (int l=0; l<lod->NLevels(); ++l)
+                    if (lod->IsNormalLevel(l)) {shape=lod->Level(l); break;}
+                if (shape)
+                {
+                    view.lo=shape->Min(); view.hi=shape->Max();
+                    const float sx=view.hi.X()-view.lo.X(), sz=view.hi.Z()-view.lo.Z();
+                    if (sx>0.05f && sz>0.05f && sx<1000 && sz<1000 && shape->NFaces()<100000)
+                    {
+                        view.rgba.assign(ObjectSatSize*ObjectSatSize*4,0);
+                        view.height.assign(ObjectSatSize*ObjectSatSize,-1e30f);
+                        for (Offset f=shape->BeginFaces(); f<shape->EndFaces(); shape->NextFace(f))
+                        {
+                            const Poly& face=shape->Face(f);
+                            const auto* image=textureImage(face.GetTexture());
+                            if (!image || !image->valid()) continue;
+                            for (int t=1; t+1<face.N(); ++t)
+                            {
+                                const int ids[3]={face.GetVertex(0),face.GetVertex(t),face.GetVertex(t+1)};
+                                std::array<float,2> p[3]; float h[3]; UVPair uv[3];
+                                for (int k=0;k<3;++k) {
+                                    const auto& pos=shape->Pos(ids[k]);
+                                    p[k]={(pos.X()-view.lo.X())/sx*ObjectSatSize,(pos.Z()-view.lo.Z())/sz*ObjectSatSize};
+                                    h[k]=pos.Y(); uv[k]=shape->UV(ids[k]);
+                                }
+                                const int left=std::clamp(int(std::floor(std::min({p[0][0],p[1][0],p[2][0]}))),0,ObjectSatSize-1);
+                                const int right=std::clamp(int(std::ceil(std::max({p[0][0],p[1][0],p[2][0]}))),0,ObjectSatSize-1);
+                                const int low=std::clamp(int(std::floor(std::min({p[0][1],p[1][1],p[2][1]}))),0,ObjectSatSize-1);
+                                const int high=std::clamp(int(std::ceil(std::max({p[0][1],p[1][1],p[2][1]}))),0,ObjectSatSize-1);
+                                for(int v=low;v<=high;++v) for(int u=left;u<=right;++u) {
+                                    std::array<float,3> w;
+                                    if(!SatmapTriangleWeights(p[0],p[1],p[2],u+0.5f,v+0.5f,w)) continue;
+                                    const int at=v*ObjectSatSize+u;
+                                    const float height=w[0]*h[0]+w[1]*h[1]+w[2]*h[2];
+                                    if(height<=view.height[at]) continue;
+                                    float tu=0,tv=0;
+                                    for(int k=0;k<3;++k){tu+=w[k]*uv[k].u;tv+=w[k]*uv[k].v;}
+                                    if(!std::isfinite(tu)||!std::isfinite(tv)) continue;
+                                    const int tx=std::clamp(int((tu-std::floor(tu))*64),0,63);
+                                    const int ty=std::clamp(int((tv-std::floor(tv))*64),0,63);
+                                    const auto* texel=&image->rgba[(ty*64+tx)*4];
+                                    if(texel[3]<128) continue;
+                                    std::copy_n(texel,3,&view.rgba[at*4]);
+                                    view.rgba[at*4+3]=255; view.height[at]=height;
+                                }
+                            }
+                        }
+                        float covered=0;
+                        for(size_t p=0;p<view.height.size();++p) if(view.rgba[p*4+3]) {
+                            ++covered;
+                            for(int c=0;c<3;++c)view.average[c]+=view.rgba[p*4+c];
+                        }
+                        if(covered>0)for(int c=0;c<3;++c)view.average[c]/=covered;
+                        view.average[3]=covered/(ObjectSatSize*ObjectSatSize);
+                    }
+                }
+                found=views.find(lod);
+            }
+            const auto& view=found->second;
+            if(view.rgba.empty() || view.average[3]<=0){++missing;continue;}
+            const Vector3 origin=object->PositionModelToWorld(VZero);
+            const Vector3 ax=object->PositionModelToWorld(Vector3(1,0,0))-origin;
+            const Vector3 az=object->PositionModelToWorld(Vector3(0,0,1))-origin;
+            const float det=ax.X()*az.Z()-az.X()*ax.Z();
+            if(std::abs(det)<0.01f)continue;
+            float lx=1e30f,lz=1e30f,hx=-1e30f,hz=-1e30f;
+            for(int c=0;c<4;++c){
+                const auto p=object->PositionModelToWorld(Vector3(c&1?view.hi.X():view.lo.X(),0,c&2?view.hi.Z():view.lo.Z()));
+                lx=std::min(lx,p.X()/metresPerPixel);hx=std::max(hx,p.X()/metresPerPixel);
+                lz=std::min(lz,p.Z()/metresPerPixel);hz=std::max(hz,p.Z()/metresPerPixel);
+            }
+            if(hx<0||hz<0||lx>=size||lz>=size)continue;
+            const bool tiny=(hx-lx<1.0f || hz-lz<1.0f);
+            const int left=std::clamp(int(std::floor(lx)),0,size-1),right=std::clamp(int(std::floor(hx)),0,size-1);
+            const int low=std::clamp(int(std::floor(lz)),0,size-1),high=std::clamp(int(std::floor(hz)),0,size-1);
+            ++stamped;
+            for(int py=low;py<=high;++py)for(int px=left;px<=right;++px){
+                float alpha=1; std::array<float,3> rgb; float height=origin.Y()+view.hi.Y();
+                if(tiny){
+                    alpha=std::max(0.0f,std::min(float(px+1),hx)-std::max(float(px),lx))
+                        *std::max(0.0f,std::min(float(py+1),hz)-std::max(float(py),lz))*view.average[3];
+                    std::copy_n(view.average.begin(),3,rgb.begin());
+                }else{
+                    const float dx=(px+0.5f)*metresPerPixel-origin.X(),dz=(py+0.5f)*metresPerPixel-origin.Z();
+                    const float u=((dx*az.Z()-dz*az.X())/det-view.lo.X())/(view.hi.X()-view.lo.X());
+                    const float v=((dz*ax.X()-dx*ax.Z())/det-view.lo.Z())/(view.hi.Z()-view.lo.Z());
+                    if(u<0||u>=1||v<0||v>=1)continue;
+                    const int at=int(v*ObjectSatSize)*ObjectSatSize+int(u*ObjectSatSize);
+                    if(!view.rgba[at*4+3])continue;
+                    for(int c=0;c<3;++c)rgb[c]=view.rgba[at*4+c];
+                    height=origin.Y()+view.height[at];
+                }
+                const int at=py*size+px;
+                if(alpha<=0 || (!tiny && height<top[at]))continue;
+                if(!tiny)top[at]=height;
+                for(int c=0;c<3;++c)pixels[at*4+c]=uint8_t(std::clamp(pixels[at*4+c]*(1-alpha)+rgb[c]*alpha,0.0f,255.0f));
+                ++samples;
+            }
+        }
+    }
+    LOG_INFO(Graphics,"OFP satmap objects: {} models, {} textures, {} instances, {} samples, {} skipped; {:.1f} ms",
+             views.size(),textures.size(),stamped,samples,missing,
+             std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count());
+}
+}
+
 Ref<Texture> TerrainWgpu::BuildAutomaticSatmap(const Landscape& land)
 {
     const char* enabled = std::getenv("WGR_OFP_SATMAP");
@@ -879,6 +1040,7 @@ Ref<Texture> TerrainWgpu::BuildAutomaticSatmap(const Landscape& land)
         for (int c=0; c<3; ++c) pixels[(z*size+x)*4+c] = static_cast<uint8_t>(std::clamp(color[c]+0.5f,0.0f,255.0f));
         pixels[(z*size+x)*4+3] = 255;
     }
+    BakeSatmapObjects(land,size,pixels);
     EngineWgpu::AcquireProducerWindow("automatic satellite albedo");
     Ref<Texture> result = _engine.TextBank()->CreateDynamic(size,size,pixels.data(),static_cast<uint32_t>(pixels.size()),true);
     LOG_INFO(Graphics,"OFP automatic satmap: {}x{} from {} tiles, {:.1f} ms, mipmapped ~{:.1f} MiB",size,size,decoded,

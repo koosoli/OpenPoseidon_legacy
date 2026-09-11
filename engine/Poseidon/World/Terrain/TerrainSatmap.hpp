@@ -1,9 +1,22 @@
 #pragma once
 #include <array>
 #include <cmath>
+#include <algorithm>
 
 namespace Poseidon
 {
+// Screen-space barycentrics shared by the CPU top-view baker and its tests.
+inline bool SatmapTriangleWeights(const std::array<float,2>& a, const std::array<float,2>& b,
+                                 const std::array<float,2>& c, float x, float y,
+                                 std::array<float,3>& w)
+{
+    const float d = (b[1]-c[1])*(a[0]-c[0]) + (c[0]-b[0])*(a[1]-c[1]);
+    if (!std::isfinite(d) || std::abs(d) < 1e-8f) return false;
+    w[0] = ((b[1]-c[1])*(x-c[0]) + (c[0]-b[0])*(y-c[1]))/d;
+    w[1] = ((c[1]-a[1])*(x-c[0]) + (a[0]-c[0])*(y-c[1]))/d;
+    w[2] = 1-w[0]-w[1];
+    return w[0] >= -1e-5f && w[1] >= -1e-5f && w[2] >= -1e-5f;
+}
 // Reserve the fallback and generated-image slots in the 4096-layer renderer.
 // Large classic composites get a bounded 21.3 MiB mip chain, not a map-sized image.
 inline int TerrainSatmapResolution(int textureCount, int landRange)

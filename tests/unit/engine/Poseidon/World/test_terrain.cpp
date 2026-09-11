@@ -3,6 +3,7 @@
 #include <Poseidon/World/Terrain/LandscapeLod.hpp>
 #include <Poseidon/World/Terrain/TerrainSubdivision.hpp>
 #include <Poseidon/World/Terrain/TerrainCrater.hpp>
+#include <Poseidon/World/Terrain/TerrainSatmap.hpp>
 #include <Poseidon/Dev/Diag/TerrainBrush.hpp>
 #include <unordered_set>
 #include <vector>
@@ -12,6 +13,18 @@
 #include <limits>
 
 using namespace Poseidon;
+
+TEST_CASE("Satellite top-view raster handles winding and rejects vertical faces", "[terrain-satmap]")
+{
+    std::array<float,3> w{};
+    REQUIRE(SatmapTriangleWeights({0,0},{2,0},{0,2},0.5f,0.5f,w));
+    CHECK(w[0] == Catch::Approx(0.5f));
+    CHECK(w[1] == Catch::Approx(0.25f));
+    CHECK(w[2] == Catch::Approx(0.25f));
+    REQUIRE(SatmapTriangleWeights({0,0},{0,2},{2,0},0.5f,0.5f,w));
+    CHECK_FALSE(SatmapTriangleWeights({0,0},{2,0},{0,2},1.5f,1.5f,w));
+    CHECK_FALSE(SatmapTriangleWeights({0,0},{0,0},{0,2},0,0,w));
+}
 
 TEST_CASE("Rocket crater default increases depth eightfold without widening the footprint", "[terrain-crater]")
 {

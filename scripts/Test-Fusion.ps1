@@ -1,20 +1,25 @@
 param(
     [switch]$Large,
     [switch]$NoSatmap,
+    [string]$Pose='',
+    [ValidateSet(0,1)][int]$SatmapObjects=0,
     [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault'
 )
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
 $root=Split-Path $PSScriptRoot -Parent
-$output=Join-Path $root 'build/fusion/acceptance'
+$output=Join-Path $root ('build/fusion/acceptance-'+(Get-Date -Format 'yyyyMMdd-HHmmss'))
 $env:POSEIDON_USER_DIR=Join-Path $output 'user'
 New-Item -ItemType Directory -Force $env:POSEIDON_USER_DIR | Out-Null
-[IO.File]::WriteAllText((Join-Path $env:POSEIDON_USER_DIR 'graphics.cfg'),
-    "qualityPreset=3;`nterrainDetail=4;`nmsaaSamples=4;`ndlssMode=-1;`n")
+& "$PSScriptRoot/Write-BenchmarkGraphics.ps1" -UserDir $env:POSEIDON_USER_DIR -DlssMode 0
 [IO.File]::WriteAllText((Join-Path $env:POSEIDON_USER_DIR 'game.cfg'), "preferredViewDistance=50000;`n")
 $prefix=if ($Large) {'size-probe'} else {'fusion'}
 $env:WGR_OFP_SATMAP=if ($NoSatmap) {'0'} else {'1'}
+$env:WGR_OFP_SATMAP_OBJECTS="$SatmapObjects"
+if ($SatmapObjects) {$prefix += '-objects'}
 if ($NoSatmap) { $prefix += '-no-satmap' }
+if ($Pose) { $prefix += '-reported-high'; if (($Pose -split '\s+').Count -ne 5) {throw 'Pose requires x y z azimuth elevation'} }
+Get-Content -LiteralPath "$GameDir/DEPLOYED-FROM.txt" | Set-Content -LiteralPath (Join-Path $output "$prefix.DEPLOYED-FROM.txt")
 $mission=if ($Large) {'Mods\@OP_SizeProbe\Missions\SizeProbe.FusionSizeProbe'} else {'Mods\@OP_Fusion\Missions\FusionTour.FusionOFP'}
 $log=Join-Path $output "$prefix.log"
 $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0)
@@ -49,6 +54,13 @@ try {
         return $r
     }
     Start-Sleep -Seconds 15
+    if ($Pose) {
+        $r=Send @{cmd='eval';code=('triFreeFlyPose "'+$Pose+'"')}
+        if ($r.result.Trim('"') -ne 'OK') {throw 'Freefly pose refused'}
+        Start-Sleep -Seconds 15
+        $null=Send @{cmd='screenshot';path=(Join-Path $output "$prefix.png")}
+        Start-Sleep -Seconds 2
+    } else {
     $null=Send @{cmd='screenshot';path=(Join-Path $output "$prefix-start.png")}
     $null=Send @{cmd='exec';code='hint ""; showCinemaBorder false; fusionCam="camera" camCreate [25600,13000,29000]; fusionCam cameraEffect ["internal","back"]; fusionCam camSetTarget [25600,22000,0]; fusionCam camCommit 0'}
     Start-Sleep -Seconds 4
@@ -67,9 +79,11 @@ try {
         $null=Send @{cmd='eval';code='getPos vehicle player'}
         $p.Refresh(); Write-Host "$name height=$height workingSetMB=$([int]($p.WorkingSet64/1MB))"
     }
+    }
     $null=Send @{cmd='exit'}
     if (!$p.WaitForExit(20000) -or $p.ExitCode -ne 0) {throw 'Game exit failed'}
     $text=Get-Content -LiteralPath $log -Raw
+    if ($SatmapObjects -and !$NoSatmap -and $text -notmatch 'OFP satmap objects: [1-9][0-9]* models, [1-9][0-9]* textures, [1-9][0-9]* instances') {throw 'Object satellite bake was not exercised'}
     if ($text -match 'heightfield upload failed|UNHANDLED EXCEPTION' -or $text -notmatch 'heightfield ready=true') {throw 'Terrain upload acceptance failed'}
     Write-Host "Runtime checks passed; visually inspect $output/$prefix-*.png."
 } finally {
