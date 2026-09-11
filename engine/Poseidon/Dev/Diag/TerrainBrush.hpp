@@ -28,7 +28,7 @@ struct RocketCraterSettings
 {
     bool enabled = true;
     float radius = 12.0f;
-    float depth = 1.0f;
+    float depth = 8.0f;
 };
 RocketCraterSettings& RocketCraters();
 void ResetRocketCraters();

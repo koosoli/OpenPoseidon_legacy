@@ -49,15 +49,20 @@ try {
     Fire
     $default=Height
     if ($default -ge $before-0.1) {throw 'Default did not crater'}
+    if ([Math]::Abs(($before-$default)-8.0) -gt 0.1) {throw 'Expected eight-metre default crater at the grid vertex'}
     $null=Send @{cmd='eval';code='triRocketCraters "off"'}
     Fire
     $off=Height
     if ([Math]::Abs($default-$off) -gt 0.001) {throw 'Disabled changed terrain'}
     $null=Send @{cmd='eval';code='triRocketCraters "reset"'}
     if ([Math]::Abs((Height)-$off) -gt 0.001) {throw 'Settings reset undid crater'}
+    $null=Send @{cmd='screenshot';path=(Join-Path $output 'default-crater.png')}
+    Start-Sleep -Seconds 1
+    $null=Send @{cmd='eval';code='triTerrainBrushMode "restore"'}
+    if ([Math]::Abs((Height)-$before) -gt 0.001) {throw 'Restore before reset impact failed'}
     Fire
     $reset=Height
-    if ($reset -ge $off-0.1) {throw 'Reset did not restore enabled default'}
+    if ([Math]::Abs(($before-$reset)-8.0) -gt 0.1) {throw 'Reset did not restore eight-metre default'}
     $null=Send @{cmd='screenshot';path=(Join-Path $output 'craters.png')}
     $null=Send @{cmd='eval';code='triTerrainBrushMode "restore"'}
     $restored=Height

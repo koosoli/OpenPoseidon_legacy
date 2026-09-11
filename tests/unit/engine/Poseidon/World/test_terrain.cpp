@@ -3,6 +3,7 @@
 #include <Poseidon/World/Terrain/LandscapeLod.hpp>
 #include <Poseidon/World/Terrain/TerrainSubdivision.hpp>
 #include <Poseidon/World/Terrain/TerrainCrater.hpp>
+#include <Poseidon/Dev/Diag/TerrainBrush.hpp>
 #include <unordered_set>
 #include <vector>
 #include <stdlib.h>
@@ -11,6 +12,17 @@
 #include <limits>
 
 using namespace Poseidon;
+
+TEST_CASE("Rocket crater default increases depth eightfold without widening the footprint", "[terrain-crater]")
+{
+    const Dev::RocketCraterSettings defaults;
+    CHECK(defaults.enabled);
+    CHECK(defaults.radius == 12.0f);
+    CHECK(defaults.depth == 8.0f);
+    for (float offset : {0.0f, 3.0f, 6.0f, 11.0f, 12.0f, 15.0f})
+        CHECK(TerrainCraterDepth(offset, 0, defaults.radius, defaults.depth) ==
+              Catch::Approx(8.0f * TerrainCraterDepth(offset, 0, 12.0f, 1.0f)));
+}
 
 TEST_CASE("Terrain brush wheel supports fractional steps and bounded fine radii", "[terrain-brush-radius]")
 {
