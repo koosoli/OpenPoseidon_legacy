@@ -30,11 +30,13 @@ const CargoWeaponSeat* Man::GetConfiguredCargoWeaponSeat() const
     // never enter the passenger weapon loop; player/MP need separate acceptance.
     AIUnit* unit = Brain();
     if (!GWorld || GWorld->GetMode() == GModeNetware || !IsLocal() || _isDead ||
-        !unit || unit->IsPlayer() || !unit->IsInCargo() || !GetHierachyParent())
+        !unit || unit->IsPlayer() || !GetHierachyParent())
         return nullptr;
     Transport* vehicle = unit->GetVehicleIn();
-    if (!vehicle || vehicle->IsDammageDestroyed())
+    if (!vehicle || GetHierachyParent() != vehicle || vehicle->IsDammageDestroyed())
         return nullptr;
+    // GetInCargo binds the seat before its caller sets the AI InCargo state.
+    // Actual membership permits entry animation selection at that boundary.
     for (int i = 0; i < vehicle->GetManCargo().Size(); ++i)
     {
         if (vehicle->GetManCargo()[i] != this)
@@ -47,7 +49,7 @@ const CargoWeaponSeat* Man::GetConfiguredCargoWeaponSeat() const
 const CargoWeaponSeat* Man::GetActiveCargoWeaponSeat() const
 {
     const auto* seat = GetConfiguredCargoWeaponSeat();
-    if (!seat || !seat->OwnsAction(GetCurrentMove()) ||
+    if (!seat || !Brain()->IsInCargo() || !seat->OwnsAction(GetCurrentMove()) ||
         (!seat->HasTransitions() && WeaponsDisabled()))
         return nullptr;
     if (_primaryMove.id < 0 || !seat->OwnsAction(Type()->GetMoveName(_primaryMove.id)))
