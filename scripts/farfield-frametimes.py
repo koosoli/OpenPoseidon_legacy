@@ -69,6 +69,7 @@ import re
 import sys
 from datetime import datetime
 from pathlib import Path
+from frame_capture import parse_windows
 
 # [2026-08-15 23:56:59.655] [app-c604] [INFO] [SCRIPT]  "FT M 1.389 8213"
 # The level/channel fields carry ANSI colour, so anchor on the stamp and the payload only.
@@ -330,6 +331,20 @@ def report(path: Path, args) -> int:
         return 1
 
     run = read_log(path)
+    try:
+        windows = parse_windows(path.read_text(encoding="utf-8", errors="replace").splitlines())
+    except ValueError as error:
+        print(f"  INVALID bounded capture: {error}")
+        return 1
+    if windows:
+        print("  Bounded FrameProfiler windows: completed main-loop frames, no gap averaging.")
+        print("  Excludes partial boundary frames and time outside BeginFrame/EndFrame; not GPU timings.")
+        for phase, values in windows.items():
+            row = stats(values)
+            print(f"  {PHASE_NAMES[phase]} n={len(values)} median={row['median_ms']:.3f} "
+                  f"p95={row['p95_ms']:.3f} p99={row['p99_ms']:.3f} worst={row['worst_ms']:.3f} ms "
+                  f">100ms={row['frames_over_100ms']} >250ms={row['frames_over_250ms']}")
+        print("  Log-clock comparison follows (separate, potentially gap-averaged evidence):")
     if not run.samples:
         print(f"  !! NO `FT` LINES in {path}. The staged init.sqs did not run, or the run "
               f"died before gameplay. This is not a zero — it is no measurement.")

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <vector>
 
 namespace Poseidon
 {
@@ -72,9 +73,32 @@ class FrameProfiler
     };
 
     static constexpr int kRingSize = 256;
+    static constexpr size_t kMaxCaptureFrames = 16384;
+
+    // Main-loop diagnostics only. Reserve once; recording never allocates or logs.
+    bool StartCapture(size_t limit)
+    {
+        if (limit == 0 || limit > kMaxCaptureFrames)
+            return false;
+        _capture.reserve(limit);
+        _capture.clear();
+        _captureLimit = limit;
+        _captureDropped = 0;
+        _captureActive = false;
+        _capturePending = true; // Exclude the frame already in progress.
+        return true;
+    }
+    void StopCapture() { _captureActive = _capturePending = false; }
+    const std::vector<FrameRecord>& CapturedFrames() const { return _capture; }
+    size_t CaptureDropped() const { return _captureDropped; }
 
     void BeginFrame()
     {
+        if (_capturePending)
+        {
+            _capturePending = false;
+            _captureActive = true;
+        }
         _frameStart = Clock::now();
         _lastMark = _frameStart;
         _current = FrameRecord{};
@@ -96,6 +120,13 @@ class FrameProfiler
         _head = (_head + 1) % kRingSize;
         if (_count < kRingSize)
             ++_count;
+        if (_captureActive)
+        {
+            if (_capture.size() < _captureLimit)
+                _capture.push_back(_current);
+            else
+                ++_captureDropped;
+        }
     }
 
     int FrameCount() const { return _count; }
@@ -141,6 +172,9 @@ class FrameProfiler
     {
         _head = 0;
         _count = 0;
+        StopCapture();
+        _capture.clear();
+        _captureDropped = 0;
     }
 
   private:
@@ -182,6 +216,11 @@ class FrameProfiler
     TimePoint _lastMark{};
     int _head = 0;
     int _count = 0;
+    std::vector<FrameRecord> _capture;
+    size_t _captureLimit = 0;
+    size_t _captureDropped = 0;
+    bool _captureActive = false;
+    bool _capturePending = false;
 };
 
 FrameProfiler& GFrameProfiler();

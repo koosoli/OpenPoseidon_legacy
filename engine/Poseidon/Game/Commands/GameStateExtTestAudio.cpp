@@ -170,6 +170,7 @@ GameValue TriSetFlatShading(const GameState*, GameValuePar);
 GameValue TriSetRenderScale(const GameState*, GameValuePar);
 GameValue TriSetMsaa(const GameState*, GameValuePar);
 GameValue TriPerfSeries(const GameState*, GameValuePar);
+GameValue TriPerfCapture(const GameState*, GameValuePar);
 GameValue TriPerfStats(const GameState*, GameValuePar);
 GameValue TriSetVsync(const GameState*, GameValuePar);
 GameValue TriTextInputActive(const GameState*);
@@ -3211,6 +3212,7 @@ INIT_MODULE(GameStateExtTest, 3)
     GGameState.NewFunction(GameFunction(GameString, "triSetMsaa", TriSetMsaa, GameScalar));
     GGameState.NewFunction(GameFunction(GameString, "triPerfStats", TriPerfStats, GameScalar));
     GGameState.NewFunction(GameFunction(GameString, "triPerfSeries", TriPerfSeries, GameScalar));
+    GGameState.NewFunction(GameFunction(GameString, "triPerfCapture", TriPerfCapture, GameScalar));
     GGameState.NewFunction(GameFunction(GameString, "triSetVsync", TriSetVsync, GameScalar));
     GGameState.NewFunction(GameFunction(GameString, "triPerfDumpShapes", TriPerfDumpShapes, GameScalar));
     GGameState.NewFunction(GameFunction(GameString, "triPerfReset", TriPerfReset, GameScalar));

@@ -283,6 +283,7 @@ logInfo format ["FT W %1 %2", _time, triFrameCount]
 ? _time < _settle : goto "settle"
 _r = triPerfReset 0
 logInfo format ["FFCAM phase=static t=%1 pos=%2", _time, getPos _cam]
+_c = triPerfCapture 16384
 _statend = _time + _statdur
 
 ; ------------------------------------------------------------------- static (measured) -
@@ -290,6 +291,7 @@ _statend = _time + _statdur
 logInfo format ["FT S %1 %2", _time, triFrameCount]
 ~0.001
 ? _time < _statend : goto "stat"
+_c = triPerfCapture 0
 _s = triPerfStats 0
 _q = triPerfSeries 0
 logInfo format ["FFCAM staticend t=%1 pos=%2", _time, getPos _cam]
@@ -301,6 +303,7 @@ _moveend = _time + _movedur
 _nextwp = 0
 _wpn = 0
 logInfo format ["FFCAM phase=move t=%1", _time]
+_c = triPerfCapture 16384
 
 #mov
 logInfo format ["FT M %1 %2", _time, triFrameCount]
@@ -308,6 +311,7 @@ logInfo format ["FT M %1 %2", _time, triFrameCount]
 #resume
 ~0.001
 ? _time < _moveend : goto "mov"
+_c = triPerfCapture 0
 _s = triPerfStats 0
 _q = triPerfSeries 0
 logInfo format ["FFCAM moveend t=%1 pos=%2 waypoints=%3", _time, getPos _cam, _wpn]

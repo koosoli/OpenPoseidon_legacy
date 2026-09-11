@@ -46,6 +46,7 @@ extern bool gPerfDumpShapesOnce;
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cmath>
 #include <functional>
 #include <string>
 #include <utility>
@@ -472,6 +473,67 @@ GameValue TriPerfSeries(const GameState* /*state*/, GameValuePar /*arg*/)
     }
     LOG_INFO(Core, "[tri] triPerfSeries n={} ms={}", n, out);
     return GameValue(out.c_str());
+}
+
+// Positive capacity starts a bounded window at the next BeginFrame; zero stops
+// before logging. No logging/I/O is charged to the captured interval itself.
+GameValue TriPerfCapture(const GameState* /*state*/, GameValuePar arg)
+{
+    Dev::FrameProfiler& perf = Dev::GFrameProfiler();
+    const float requested = static_cast<float>(arg);
+    if (!(requested >= 0 && requested <= Dev::FrameProfiler::kMaxCaptureFrames) ||
+        requested != std::floor(requested))
+        return GameValue("FAIL:capacity");
+    if (requested > 0)
+    {
+        try
+        {
+            perf.StartCapture(static_cast<size_t>(requested));
+        }
+        catch (...)
+        {
+            perf.StopCapture();
+            LOG_WARN(Core, "[tri] triPerfCapture failed allocation");
+            return GameValue("FAIL:allocation");
+        }
+        LOG_INFO(Core, "[tri] triPerfCapture armed limit={}", static_cast<size_t>(requested));
+        return GameValue("OK");
+    }
+    perf.StopCapture();
+    const auto& frames = perf.CapturedFrames();
+    LOG_INFO(Core, "[tri] triPerfCapture begin n={} dropped={}", frames.size(), perf.CaptureDropped());
+    for (size_t start = 0; start < frames.size(); start += 128)
+    {
+        std::string out;
+        char number[32];
+        for (size_t i = start; i < std::min(start + 128, frames.size()); ++i)
+        {
+            snprintf(number, sizeof(number), "%s%.3f", i == start ? "" : ",", frames[i].totalMs);
+            out += number;
+        }
+        LOG_INFO(Core, "[tri] triPerfCapture offset={} ms={}", start, out);
+    }
+    if (!frames.empty())
+    {
+        std::vector<float> times;
+        times.reserve(frames.size());
+        for (int phase = 0; phase < Dev::FrameProfiler::PhaseCount; ++phase)
+        {
+            times.clear();
+            double sum = 0;
+            for (const auto& frame : frames)
+            {
+                times.push_back(frame.ms[phase]);
+                sum += frame.ms[phase];
+            }
+            std::sort(times.begin(), times.end());
+            const size_t p95 = (times.size() * 95 + 99) / 100 - 1;
+            LOG_INFO(Core, "[tri] triPerfCapture phase={} avg_ms={:.3f} p95_ms={:.3f} max_ms={:.3f}",
+                     Dev::FrameProfiler::PhaseName(phase), sum / times.size(), times[p95], times.back());
+        }
+    }
+    LOG_INFO(Core, "[tri] triPerfCapture end");
+    return GameValue(perf.CaptureDropped() == 0 && !frames.empty() ? "OK" : "FAIL:incomplete");
 }
 
 /// triPerfReset — clear the frame-profiler ring (start a fresh measurement window).

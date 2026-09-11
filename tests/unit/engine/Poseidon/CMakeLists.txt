@@ -404,6 +404,7 @@ list(APPEND POSEIDON_TEST_SOURCES
 
     # Streaming observability: counter snapshot + preparer request->residency latency
     Dev/Diag/test_streaming_diag.cpp
+    Dev/Diag/test_frame_capture.cpp
 
     # Mission introspection
     Game/Mission/test_mission_info.cpp

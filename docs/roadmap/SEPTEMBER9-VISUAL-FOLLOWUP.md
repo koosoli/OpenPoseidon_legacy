@@ -1,5 +1,23 @@
 # September 9 visual follow-up
 
+## September 11: installed cancellation check and complete profiler windows
+
+124b6ee3 is installed; cancel-20260911-023206-slow-trace-bc7-default-driver-memory-tint-reuse-0-async-dds
+passes strict lifecycle checks in 135.5 s, 22370 instances. New JSON fields show
+905 DDS puts / 681 takes / 0 configuration misses; the 3396.6 MiB put counter is
+cumulative traffic, NOT residency (471.4 MiB at capture). This verifies the
+increment, not a sustained FPS win or a fix of the intermittent DDTerm hang.
+
+Next measurement increment extends the EXISTING FrameProfiler with an optional
+16384-frame bounded window (<1 MiB records), allocated only on explicit start.
+No per-frame I/O/allocation, no replacement scheduler/profiler, rolling 256-frame
+UI stats unchanged. triPerfCapture starts at the next BeginFrame and stops before
+printing chunks/phase summaries; partial boundary frames are excluded. Overflow
+and truncated/duplicate/missing chunks are failures, never silently averaged.
+The camera harness records static and moving windows. These measure completed
+World main-loop frames, NOT GPU duration or time outside BeginFrame/EndFrame.
+Installed acceptance is pending; older timestamp traces retain their limitations.
+
 ## September 11: DDS timing repeats do not justify default activation
 
 Same installed d8c931d5, corrected version-3 native/MSAA4 profile and identical
