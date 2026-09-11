@@ -17,6 +17,7 @@
 #include <stb_image_resize2.h>
 #include <Poseidon/Graphics/Textures/PAADecoder.hpp>
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
+#include <Poseidon/Graphics/Shared/PNGWriter.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
@@ -1041,6 +1042,12 @@ Ref<Texture> TerrainWgpu::BuildAutomaticSatmap(const Landscape& land)
         pixels[(z*size+x)*4+3] = 255;
     }
     BakeSatmapObjects(land,size,pixels);
+    // Explicit diagnostic only: inspect the baked albedo without live 3D objects.
+    if (const char* dump = std::getenv("WGR_OFP_SATMAP_DUMP"); dump && *dump)
+    {
+        const bool written = PNGWriter::WriteRGBA(dump,size,size,pixels.data());
+        LOG_INFO(Graphics,"OFP satmap diagnostic {}: {}",written ? "written" : "failed",dump);
+    }
     EngineWgpu::AcquireProducerWindow("automatic satellite albedo");
     Ref<Texture> result = _engine.TextBank()->CreateDynamic(size,size,pixels.data(),static_cast<uint32_t>(pixels.size()),true);
     LOG_INFO(Graphics,"OFP automatic satmap: {}x{} from {} tiles, {:.1f} ms, mipmapped ~{:.1f} MiB",size,size,decoded,

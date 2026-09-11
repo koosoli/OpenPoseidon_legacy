@@ -1,6 +1,7 @@
 param(
     [switch]$Large,
     [switch]$NoSatmap,
+    [switch]$DumpSatmap,
     [string]$Pose='',
     [ValidateSet(0,1)][int]$SatmapObjects=0,
     [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault'
@@ -16,6 +17,7 @@ New-Item -ItemType Directory -Force $env:POSEIDON_USER_DIR | Out-Null
 $prefix=if ($Large) {'size-probe'} else {'fusion'}
 $env:WGR_OFP_SATMAP=if ($NoSatmap) {'0'} else {'1'}
 $env:WGR_OFP_SATMAP_OBJECTS="$SatmapObjects"
+$env:WGR_OFP_SATMAP_DUMP=if ($DumpSatmap) {Join-Path $output 'satmap-albedo.png'} else {$null}
 if ($SatmapObjects) {$prefix += '-objects'}
 if ($NoSatmap) { $prefix += '-no-satmap' }
 if ($Pose) { $prefix += '-reported-high'; if (($Pose -split '\s+').Count -ne 5) {throw 'Pose requires x y z azimuth elevation'} }
