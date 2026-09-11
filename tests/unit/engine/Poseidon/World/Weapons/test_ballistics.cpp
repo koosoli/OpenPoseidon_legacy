@@ -38,8 +38,8 @@ TEST_CASE("Carrier velocity includes rotation at the muzzle", "[ballistics][carg
     CHECK((B::CarrierPointVelocity(linear, VZero, offset) - linear).Size() == Approx(0));
     CHECK((B::CarrierPointVelocity(linear, angular, VZero) - linear).Size() == Approx(0));
     const Matrix3 turn(MRotationZ, .7f);
-    CHECK((B::CarrierPointVelocity(turn.Rotate(linear), turn.Rotate(angular), turn.Rotate(offset)) -
-           turn.Rotate(velocity)).Size() < .00001f);
+    CHECK((B::CarrierPointVelocity(turn * linear, turn * angular, turn * offset) -
+           turn * velocity).Size() < .00001f);
 }
 
 namespace
