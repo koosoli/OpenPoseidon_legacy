@@ -1,10 +1,14 @@
 param([switch]$ProjectileFrame, [switch]$AnimationPreview, [switch]$AnimationVideo, [switch]$NpcFire,
       [ValidateSet('clear','hold','outside','blocked','friendly')][string]$NpcScenario='clear',
       [ValidateSet(0,90,180)][int]$NpcHeading=0, [switch]$NpcDriver,
-      [switch]$NpcTransitions, [switch]$NpcMoving,
+      [switch]$NpcTransitions, [switch]$NpcMoving, [switch]$PlayerFire,
       [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
+if ($PlayerFire) {
+    if ($NpcFire -or $NpcMoving -or $NpcTransitions -or $NpcScenario -ne 'clear') {throw 'Player fire is a separate case'}
+    $NpcFire=$true
+}
 if ($AnimationVideo -and !$AnimationPreview) {throw '-AnimationVideo requires -AnimationPreview'}
 if ($NpcFire -and ($AnimationPreview -or $ProjectileFrame)) {throw 'Select one integration mode per launch'}
 if (!$NpcFire -and $NpcScenario -ne 'clear') {throw '-NpcScenario requires -NpcFire'}
@@ -155,6 +159,25 @@ try {
         Write-Host "Animation frames require visual inspection: $output"
         return
     }
+    if ($PlayerFire) {
+        $null=Send @{cmd='exec';code='ffvView cameraEffect ["terminate","back"]'}
+        $null=Send @{cmd='crew_take_control'}
+        $null=Send @{cmd='eval';code='player == ffvPassenger'} 'true'
+        $null=Send @{cmd='crew_cursor';x=60;y=0.01;z=-0.07}
+        Start-Sleep -Seconds 3
+        $null=Send @{cmd='crew_pose_probe'}
+        $null=Send @{cmd='eval';code='ffvShots'} '0'
+        $null=Send @{cmd='screenshot';path=(Join-Path $output 'player-before-fire.png')}
+        for ($attempt=0; $attempt -lt 12; $attempt++) {
+            $null=Send @{cmd='crew_cursor';x=60;y=0.01;z=-0.07}
+            $null=Send @{cmd='mouse_button';button=1;down=$true}
+            Start-Sleep -Milliseconds 180
+            $null=Send @{cmd='mouse_button';button=1;down=$false}
+            Start-Sleep -Milliseconds 180
+            $hit=Send @{cmd='eval';code='getDammage ffvTarget'}
+            if ([double]$hit.result -gt 0) {break}
+        }
+    }
     if ($NpcMoving) {
         $null=Send @{cmd='exec';code='ffvMovingShots=0; ffvPassenger addEventHandler ["Fired",{if (abs(speed ffvJeep)>5) then {ffvMovingShots=ffvMovingShots+1}}]; ffvTarget setPos [9760,3610,0]; ffvJeep setFuel 1; ffvDriver setBehaviour "CARELESS"; ffvDriver setSpeedMode "LIMITED"; ffvDriver doMove [9700,3680,0]; ffvView camSetPos [9706,3615,3]; ffvView camSetTarget ffvJeep; ffvView camCommit 0'}
         $driveDeadline=[DateTime]::UtcNow.AddSeconds(20)
@@ -166,7 +189,7 @@ try {
         $null=Send @{cmd='eval';code='ffvShots'} '0'
         $null=Send @{cmd='screenshot';path=(Join-Path $output 'moving-before-fire.png')}
     }
-    if (!$NpcFire -or $NpcScenario -ne 'hold') {
+    if (!$PlayerFire -and (!$NpcFire -or $NpcScenario -ne 'hold')) {
         $null=Send @{cmd='exec';code='ffvPassenger reveal ffvTarget; ffvPassenger doTarget ffvTarget; ffvPassenger setCombatMode "YELLOW"; ffvPassenger doFire ffvTarget'}
     }
     Start-Sleep -Seconds 10
@@ -193,7 +216,7 @@ try {
         } elseif ($after.result -ne '30' -or $damage.result -ne '0' -or $cargoShots.result -ne '0') {
             throw "Unsafe NPC shot in negative case: $NpcScenario"
         }
-        [pscustomobject]@{kind='npc-integration';moving=[bool]$NpcMoving;movingShots=$movingShots.result;scenario=$NpcScenario;heading=$NpcHeading;driver=[bool]$NpcDriver;installed=$stamp.Trim();ammo=$after.result;magazines=$remaining.result;shots=$cargoShots.result;targetDamage=$damage.result;probe=$probe} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $output 'npc-observation.json')
+        [pscustomobject]@{kind='cargo-integration';player=[bool]$PlayerFire;moving=[bool]$NpcMoving;movingShots=$movingShots.result;scenario=$NpcScenario;heading=$NpcHeading;driver=[bool]$NpcDriver;installed=$stamp.Trim();ammo=$after.result;magazines=$remaining.result;shots=$cargoShots.result;targetDamage=$damage.result;probe=$probe} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $output 'npc-observation.json')
         if ($NpcTransitions) {
             $null=Send @{cmd='exec';code='ffvPassenger setCombatMode "BLUE"; ffvView camSetPos [9701.8,3599.6,1.6]; ffvView camSetTarget [9700.4,3600,1.35]; ffvView camCommit 0'}
             Start-Sleep -Seconds 1

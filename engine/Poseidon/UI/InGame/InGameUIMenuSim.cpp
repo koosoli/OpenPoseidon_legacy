@@ -3,6 +3,7 @@
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
+#include <Poseidon/World/Entities/Infantry/SoldierOld.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <Poseidon/UI/InGame/InGameUIImpl.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
@@ -452,14 +453,18 @@ void InGameUI::SimulateHUD(const Camera& camera, EntityAI* vehicle, CameraType c
         return;
     }
 
-    bool isCommander = unit == vehicle->CommanderUnit();
-    bool isPilot = unit == vehicle->PilotUnit();
+    Man* cargoMan = dyn_cast<Man>(unit->GetPerson());
+    const bool cargoWeapon = cargoMan && cargoMan->GetActiveCargoWeaponSeat();
+    if (cargoWeapon)
+        vehicle = cargoMan; // Same manual gunner path, but the passenger's personal rifle.
+    bool isCommander = !cargoWeapon && unit == vehicle->CommanderUnit();
+    bool isPilot = !cargoWeapon && unit == vehicle->PilotUnit();
     bool isGunner = unit == vehicle->GunnerUnit() && vehicle->IsGunner(cam);
-    bool isObserver = unit == vehicle->ObserverUnit() && vehicle->IsGunner(cam);
+    bool isObserver = !cargoWeapon && unit == vehicle->ObserverUnit() && vehicle->IsGunner(cam);
 
     bool isGunnerFire = unit == vehicle->GunnerUnit();
 
-    Transport* transport = unit->GetVehicleIn();
+    Transport* transport = cargoWeapon ? nullptr : unit->GetVehicleIn();
     bool vehicleCommander = (transport && transport->Commander() == unit->GetPerson());
 
     // bool commandsToGunner = transport->GunnerUnit()!=unit;
@@ -545,7 +550,10 @@ void InGameUI::SimulateHUD(const Camera& camera, EntityAI* vehicle, CameraType c
         if (weaponChanged)
         {
             weapon = ValidateWeapon(vehicle, weapon);
-            SelectWeapon(unit, weapon);
+            if (cargoWeapon)
+                vehicle->SelectWeapon(weapon);
+            else
+                SelectWeapon(unit, weapon);
         }
     }
 
@@ -1449,6 +1457,8 @@ void InGameUI::SimulateHUD(const Camera& camera, EntityAI* vehicle, CameraType c
             weapon = ValidateWeapon(vehicle, weapon);
 
             Vector3 weaponDir = GetCursorDirection();
+            if (cargoWeapon)
+                vehicle->LimitCursor(cam, weaponDir);
             if (weaponDir.Distance2(vehicle->GetWeaponDirectionWanted(weapon)) > threshold2)
             {
                 if (vehicle->IsLocal())

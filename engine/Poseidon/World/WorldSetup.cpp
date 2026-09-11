@@ -56,6 +56,7 @@ extern void SDLGamepad_PlayRamp(float beg, float end, float dur);
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
 
 #include <Poseidon/AI/AI.hpp>
+#include <Poseidon/World/Entities/Infantry/SoldierOld.hpp>
 
 #include <Poseidon/Game/Chat.hpp>
 
@@ -1034,6 +1035,9 @@ bool World::LookAroundEnabled() const
         return true;
     }
     AIUnit* unit = FocusOn();
+    const Man* man = unit ? dyn_cast<Man>(unit->GetPerson()) : nullptr;
+    if (man && man->GetActiveCargoWeaponSeat())
+        return false;
     return !unit || unit->IsInCargo();
 }
 

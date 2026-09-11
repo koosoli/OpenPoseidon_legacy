@@ -26,11 +26,10 @@ using namespace Foundation;
 
 const CargoWeaponSeat* Man::GetConfiguredCargoWeaponSeat() const
 {
-    // First integration is SP NPC-only. Unconfigured seats and original animations
-    // never enter the passenger weapon loop; player/MP need separate acceptance.
+    // Unsupported seats and multiplayer retain the original cargo path.
     AIUnit* unit = Brain();
     if (!GWorld || GWorld->GetMode() == GModeNetware || !IsLocal() || _isDead ||
-        !unit || unit->IsPlayer() || !GetHierachyParent())
+        !unit || !GetHierachyParent())
         return nullptr;
     Transport* vehicle = unit->GetVehicleIn();
     if (!vehicle || GetHierachyParent() != vehicle || vehicle->IsDammageDestroyed())
@@ -41,7 +40,8 @@ const CargoWeaponSeat* Man::GetConfiguredCargoWeaponSeat() const
     {
         if (vehicle->GetManCargo()[i] != this)
             continue;
-        return vehicle->Type()->GetCargoWeaponSeat(i);
+        const auto* seat = vehicle->Type()->GetCargoWeaponSeat(i);
+        return seat && (!unit->IsPlayer() || seat->HasTransitions()) ? seat : nullptr;
     }
     return nullptr;
 }
@@ -317,6 +317,12 @@ bool Man::AimWeapon(int weapon, Vector3Par direction)
     float sizeXZ = sqrt(Square(relDir.X()) + Square(relDir.Z()));
     float xRotWanted = atan2(relDir.Y(), sizeXZ);
 
+    const auto* cargoSeat = GetActiveCargoWeaponSeat();
+    if (cargoSeat)
+    {
+        yRotWanted = std::remainder(yRotWanted + cargoSeat->azimuth * (H_PI / 180.0f), 2 * H_PI);
+    }
+
     const float coef = 0.25f;
     const float invCoef = 1 / coef;
 
@@ -330,6 +336,12 @@ bool Man::AimWeapon(int weapon, Vector3Par direction)
 
     _gunXRotWanted = xRotWanted + inaccX;
     _gunYRotWanted = yRotWanted + inaccY;
+    if (cargoSeat)
+    {
+        constexpr float radians = H_PI / 180.0f;
+        Limit(_gunYRotWanted, -cargoSeat->halfAngle * radians, cargoSeat->halfAngle * radians);
+        Limit(_gunXRotWanted, cargoSeat->minElevation * radians, cargoSeat->maxElevation * radians);
+    }
 
     float iTime = Glob.time - _lastInaccuracyTime;
     while ((iTime -= 0.2f) >= 0)

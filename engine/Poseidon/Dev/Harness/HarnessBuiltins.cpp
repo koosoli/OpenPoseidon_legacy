@@ -45,6 +45,7 @@ using namespace Poseidon;
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/UI/UITestEngine.hpp>
 #include <Poseidon/UI/Controls/UIControls.hpp>
+#include <Poseidon/UI/InGame/InGameUI.hpp>
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
 #include <Poseidon/World/Entities/Infantry/SoldierOld.hpp>
 #include <Poseidon/World/Entities/Infantry/MoveActions.hpp>
@@ -89,6 +90,37 @@ static GameVarSpace s_evalScope;
 
 void RegisterSqf(HarnessServer& hs)
 {
+    hs.RegisterCommand({"crew_take_control", "SP harness: take player control of the actual fixture passenger", {}},
+        [](const std::string&, cJSON*) -> std::string {
+            if (!GWorld || GWorld->GetMode() == GModeNetware || GWorld->GetCameraEffect())
+                return HarnessProtocol::ErrorResponse("singleplayer without scripted camera required");
+            AIUnit* focus = GWorld->FocusOn();
+            AIGroup* group = focus ? focus->GetGroup() : nullptr;
+            AIUnit* unit = group ? group->UnitWithID(2) : nullptr;
+            Man* man = unit ? dyn_cast<Man>(unit->GetPerson()) : nullptr;
+            if (!man || !man->GetActiveCargoWeaponSeat())
+                return HarnessProtocol::ErrorResponse("active fixture passenger required");
+            GWorld->SwitchPlayerTo(man);
+            GWorld->SetPlayerManual(true);
+            GWorld->SwitchCameraTo(man, CamInternal);
+            return HarnessProtocol::OkResponse();
+        });
+    hs.RegisterCommand({"crew_cursor", "SP harness: aim the normal UI cursor, without firing or changing weapon state",
+                        {{"x","float",true},{"y","float",true},{"z","float",true}}},
+        [](const std::string&, cJSON* root) -> std::string {
+            if (!GWorld || GWorld->GetMode() == GModeNetware || !GWorld->UI())
+                return HarnessProtocol::ErrorResponse("singleplayer UI required");
+            const auto* man = dyn_cast<Man>(GWorld->PlayerOn());
+            if (!man || !man->GetActiveCargoWeaponSeat())
+                return HarnessProtocol::ErrorResponse("active player passenger required");
+            const Vector3 dir(cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(root,"x")),
+                              cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(root,"y")),
+                              cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(root,"z")));
+            if (!std::isfinite(dir.SquareSize()) || dir.SquareSize() < .001f)
+                return HarnessProtocol::ErrorResponse("finite nonzero direction required");
+            GWorld->UI()->SetCursorDirection(dir.Normalized());
+            return HarnessProtocol::OkResponse();
+        });
     hs.RegisterCommand({"crew_request_reload", "SP harness: request the existing cargo magazine reload action", {}},
                        [](const std::string&, cJSON*) -> std::string
                        {

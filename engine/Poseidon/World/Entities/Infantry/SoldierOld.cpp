@@ -958,6 +958,19 @@ void Man::LimitCursor(CameraType camType, Vector3& dir) const
     {
         return;
     }
+    if (const auto* seat = GetActiveCargoWeaponSeat(); seat && !InputSubsystem::Instance().IsLookAroundEnabled())
+    {
+        constexpr float radians = H_PI / 180.0f;
+        const Matrix4 frame = WorldTransform();
+        const Vector3 local = frame.InverseRotation().Rotate(dir);
+        float azimuth = std::remainder(atan2(local.X(), local.Z()) - seat->azimuth * radians, 2 * H_PI);
+        float elevation = atan2(local.Y(), sqrt(Square(local.X()) + Square(local.Z())));
+        Limit(azimuth, -seat->halfAngle * radians, seat->halfAngle * radians);
+        Limit(elevation, seat->minElevation * radians, seat->maxElevation * radians);
+        azimuth += seat->azimuth * radians;
+        dir = frame.Rotate(Vector3(sin(azimuth) * cos(elevation), sin(elevation), cos(azimuth) * cos(elevation)));
+        return;
+    }
     if (GetCursorRelMode(camType) != CKeyboard)
     {
         return;
