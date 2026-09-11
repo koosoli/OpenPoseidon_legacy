@@ -228,6 +228,22 @@ void Man::BasicSimulation(float deltaT, SimulationImportance prec, float speedFa
         SimulateWeaponActivity(deltaT, prec);
         if (Soldier* soldier = dyn_cast<Soldier>(this))
             soldier->AIFire(deltaT);
+        if (cargoSeat->HasTransitions())
+        {
+            // Use the existing external-action context for reloads and mission
+            // commands. ConnectTo edges perform raise/lower, without root motion.
+            AdvanceExternalQueue();
+            if (_externalMove.id != MoveIdNone)
+                SetMoveQueue(_externalMove, false);
+            else
+            {
+                Target* target = GetFireTarget();
+                float timeToAim = 0;
+                const bool wantsAim = target && target->idExact && !target->destroyed &&
+                    target->IsKnownBy(Brain()) && FireInRange(SelectedWeapon(), timeToAim, *target) > 0;
+                SetMoveQueue(MotionPathItem(Type()->GetMoveId(wantsAim ? cargoSeat->action : cargoSeat->idleAction)), false);
+            }
+        }
     }
     if (cargoWeapon)
         MoveWeapons(deltaT, false); // Includes the single head update for this step.

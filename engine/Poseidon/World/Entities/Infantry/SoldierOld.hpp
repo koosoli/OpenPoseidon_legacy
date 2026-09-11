@@ -739,7 +739,8 @@ class Man: public Person
 	float LandSlope(bool &forceStand) const;
 	bool IsAbleToStand() const;
 	bool IsAbleToFire() const override;
-	const CargoWeaponSeat* GetActiveCargoWeaponSeat() const;
+    const CargoWeaponSeat* GetConfiguredCargoWeaponSeat() const;
+    const CargoWeaponSeat* GetActiveCargoWeaponSeat() const;
 	bool CargoWeaponLineClear(int weapon) const;
 
 	float GetHandsHit() const {return GetHit(Type()->_handsHit);}
@@ -759,6 +760,7 @@ class Man: public Person
 	public:
 
 	RString GetCurrentMove() const override;
+    RString GetPrimaryMoveName() const;
 	void PlayMove(RStringB move, ActionContextBase *context=nullptr) override;
 	void SwitchMove(RStringB move, ActionContextBase *context=nullptr) override;
 

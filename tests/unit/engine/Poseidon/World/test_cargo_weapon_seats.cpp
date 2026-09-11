@@ -42,7 +42,7 @@ TEST_CASE("Cargo personal weapon contract rejects invalid tables atomically", "[
     REQUIRE(table.Find(0) != nullptr);
     REQUIRE(table.Find(1) == nullptr);
 
-    SECTION("unknown version") { config->Add("version", 2); }
+    SECTION("unknown version") { config->Add("version", 99); }
     SECTION("invalid index") { seat->Add("cargoIndex", 3); }
     SECTION("fractional index") { seat->Delete("cargoIndex"); seat->Add("cargoIndex", 0.5f); }
     SECTION("duplicate") { AddSeat(*seats, "Duplicate", 0); }
@@ -54,6 +54,48 @@ TEST_CASE("Cargo personal weapon contract rejects invalid tables atomically", "[
     REQUIRE_FALSE(table.Load(vehicle, 3));
     REQUIRE_FALSE(table.Error().empty());
     REQUIRE(table.Find(0) == nullptr);
+}
+
+TEST_CASE("Cargo transition contract requires complete distinct authored states", "[cargo-weapons]")
+{
+    ParamFile vehicle;
+    auto* config = vehicle.AddClass("OPCargoWeapons");
+    config->Add("version", 2);
+    auto* seat = AddSeat(*config->AddClass("Seats"), "Passenger", 0);
+    seat->Add("idleAction", "OP_JeepIdle");
+    seat->Add("raiseAction", "OP_JeepRaise");
+    seat->Add("reloadAction", "OP_JeepReload");
+    seat->Add("lowerAction", "OP_JeepLower");
+    CargoWeaponSeats table;
+    REQUIRE(table.Load(vehicle, 3));
+    REQUIRE(table.Find(0)->HasTransitions());
+    REQUIRE(table.Find(0)->OwnsAction("op_jeeprifle"));
+    REQUIRE(table.Find(0)->OwnsAction("OP_JeepReload"));
+    REQUIRE_FALSE(table.Find(0)->OwnsAction("JeepCoDriver"));
+    REQUIRE_FALSE(table.Find(0)->OwnsAction(""));
+    REQUIRE_FALSE(table.Find(0)->OwnsAction(nullptr));
+
+    SECTION("missing reload") { seat->Delete("reloadAction"); }
+    SECTION("empty idle") { seat->Add("idleAction", ""); }
+    SECTION("numeric transition") { seat->Delete("raiseAction"); seat->Add("raiseAction", 2); }
+    SECTION("duplicate ignoring case") { seat->Add("lowerAction", "op_jeepraise"); }
+    SECTION("same as aim") { seat->Add("reloadAction", "OP_JeepRifle"); }
+    REQUIRE_FALSE(table.Load(vehicle, 3));
+    REQUIRE_FALSE(table.Find(0));
+}
+
+TEST_CASE("Version one cargo contract does not enable transition or automatic entry", "[cargo-weapons]")
+{
+    ParamFile vehicle;
+    auto* config = vehicle.AddClass("OPCargoWeapons");
+    config->Add("version", 1);
+    auto* seat = AddSeat(*config->AddClass("Seats"), "Passenger", 0);
+    seat->Add("idleAction", "Unused");
+    CargoWeaponSeats table;
+    REQUIRE(table.Load(vehicle, 3));
+    REQUIRE_FALSE(table.Find(0)->HasTransitions());
+    REQUIRE(table.Find(0)->OwnsAction("OP_JeepRifle"));
+    REQUIRE_FALSE(table.Find(0)->OwnsAction("Unused"));
 }
 
 TEST_CASE("Cargo seat arc excludes windshield roof and opposite side", "[cargo-weapons]")

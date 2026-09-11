@@ -47,6 +47,7 @@ using namespace Poseidon;
 #include <Poseidon/UI/Controls/UIControls.hpp>
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
 #include <Poseidon/World/Entities/Infantry/SoldierOld.hpp>
+#include <Poseidon/World/Entities/Infantry/MoveActions.hpp>
 #include <Poseidon/AI/EntityAI.hpp>
 #include <Evaluator/express.hpp>
 
@@ -88,6 +89,31 @@ static GameVarSpace s_evalScope;
 
 void RegisterSqf(HarnessServer& hs)
 {
+    hs.RegisterCommand({"crew_request_reload", "SP harness: request the existing cargo magazine reload action", {}},
+                       [](const std::string&, cJSON*) -> std::string
+                       {
+                           if (!GWorld || GWorld->GetMode() == GModeNetware)
+                               return HarnessProtocol::ErrorResponse("singleplayer world required");
+                           AIUnit* focus = GWorld->FocusOn();
+                           AIGroup* group = focus ? focus->GetGroup() : nullptr;
+                           AIUnit* unit = group ? group->UnitWithID(2) : nullptr;
+                           Man* man = unit ? dyn_cast<Man>(unit->GetPerson()) : nullptr;
+                           const auto* seat = man ? man->GetActiveCargoWeaponSeat() : nullptr;
+                           if (!seat || !seat->HasTransitions())
+                               return HarnessProtocol::ErrorResponse("active transition-enabled cargo seat required");
+                           const int weapon = man->SelectedWeapon();
+                           if (weapon < 0 || weapon >= man->NMagazineSlots())
+                               return HarnessProtocol::ErrorResponse("selected rifle required");
+                           const auto& slot = man->GetMagazineSlot(weapon);
+                           if (!slot._weapon || strcmpi(slot._weapon->GetName(), seat->weapon) != 0 || !slot._magazine)
+                               return HarnessProtocol::ErrorResponse("configured rifle magazine required");
+                           const int spare = man->FindMagazineByType(slot._muzzle, slot._magazine->_type);
+                           if (spare < 0 || man->GetMagazine(spare) == slot._magazine || !man->ReloadMagazine(weapon, spare))
+                               return HarnessProtocol::ErrorResponse("no spare magazine or reload refused");
+                           cJSON* resp = cJSON_CreateObject();
+                           cJSON_AddBoolToObject(resp, "reloadRequested", true);
+                           return HarnessProtocol::JsonResponse(resp);
+                       });
     hs.RegisterCommand({"crew_pose_probe", "Read-only SP passenger pose/muzzle diagnostics", {}},
                        [](const std::string&, cJSON*) -> std::string
                        {
@@ -116,6 +142,8 @@ void RegisterSqf(HarnessServer& hs)
                            const Vector3 direction = man->GetWeaponDirection(weapon);
                            cJSON* resp = cJSON_CreateObject();
                            cJSON_AddStringToObject(resp, "move", man->GetCurrentMove());
+                           cJSON_AddStringToObject(resp, "primaryMove", man->GetPrimaryMoveName());
+                           cJSON_AddNumberToObject(resp, "phase", man->GetLegPhase());
                            cJSON_AddBoolToObject(resp, "cargoWeaponActive", man->GetActiveCargoWeaponSeat() != nullptr);
                            cJSON_AddBoolToObject(resp, "weaponsDisabled", man->WeaponsDisabled());
                            cJSON_AddBoolToObject(resp, "local", man->IsLocal());
@@ -140,6 +168,7 @@ void RegisterSqf(HarnessServer& hs)
                            cJSON_AddBoolToObject(resp, "ready", man->GetWeaponReady(weapon, man->GetFireTarget()));
                            cJSON_AddBoolToObject(resp, "prepareOnly", man->IsFirePrepare());
                            cJSON_AddNumberToObject(resp, "selectedWeapon", man->SelectedWeapon());
+                           cJSON_AddBoolToObject(resp, "reloadInProgress", man->IsActionInProgress(MFReload));
                            const Vector3 pivot = seat.FastTransform(man->GetWeaponCenter(weapon));
                            cJSON_AddNumberToObject(resp, "pivotX", pivot.X());
                            cJSON_AddNumberToObject(resp, "pivotY", pivot.Y());

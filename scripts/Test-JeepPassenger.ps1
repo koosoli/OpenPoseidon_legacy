@@ -1,6 +1,7 @@
 param([switch]$ProjectileFrame, [switch]$AnimationPreview, [switch]$AnimationVideo, [switch]$NpcFire,
       [ValidateSet('clear','hold','outside','blocked','friendly')][string]$NpcScenario='clear',
       [ValidateSet(0,90,180)][int]$NpcHeading=0, [switch]$NpcDriver,
+      [switch]$NpcTransitions,
       [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
@@ -8,6 +9,7 @@ if ($AnimationVideo -and !$AnimationPreview) {throw '-AnimationVideo requires -A
 if ($NpcFire -and ($AnimationPreview -or $ProjectileFrame)) {throw 'Select one integration mode per launch'}
 if (!$NpcFire -and $NpcScenario -ne 'clear') {throw '-NpcScenario requires -NpcFire'}
 if (!$NpcFire -and ($NpcHeading -ne 0 -or $NpcDriver)) {throw 'NPC heading/driver requires -NpcFire'}
+if ($NpcTransitions -and (!$NpcFire -or $NpcScenario -ne 'clear')) {throw 'Transition/reload requires the clear NPC case'}
 $root=Split-Path $PSScriptRoot -Parent
 $stamp=Get-Content -LiteralPath (Join-Path $GameDir 'DEPLOYED-FROM.txt') -Raw
 $output=Join-Path $root ('build/jeep-ffv/baseline-'+(Get-Date -Format 'yyyyMMdd-HHmmss'))
@@ -30,6 +32,14 @@ if ($AnimationPreview -or $NpcFire) {
 $p=Start-Process -FilePath (Join-Path $GameDir 'OpenPoseidon.exe') -WorkingDirectory $GameDir -WindowStyle Hidden -PassThru -ArgumentList $gameArgs
 $null=$p.Handle
 $client=$null
+function RifleRounds($response) {
+    $items=ConvertFrom-Json -InputObject $response.result
+    $rounds=0
+    for ($i=0; $i -lt $items.Count; $i+=2) {
+        if ($items[$i] -ceq 'M16') {$rounds += [int]$items[$i+1]}
+    }
+    return $rounds
+}
 try {
     $client=[Net.Sockets.TcpClient]::new(); $deadline=[DateTime]::UtcNow.AddSeconds(90)
     while (!$client.Connected) {
@@ -85,7 +95,13 @@ try {
         if ($NpcScenario -eq 'friendly') {
             $null=Send @{cmd='exec';code=('"SoldierWB" createUnit [[{0},{1},0],group player,"ffvFriendly=this; this disableAI ""MOVE""; removeAllWeapons this; this setUnitPos ""UP"""]' -f (9700+4*$rightX),(3600+4*$rightZ))}
         }
-        $null=Send @{cmd='exec';code='ffvPassenger switchMove "OPJeepAim"; ffvPassenger reveal ffvTarget; ffvPassenger doTarget ffvTarget'}
+        if ($NpcTransitions) {
+            $entry=Send @{cmd='crew_pose_probe'}
+            if (!$entry.cargoWeaponActive) {throw 'Automatic cargo animation entry failed'}
+        } else {
+            $null=Send @{cmd='exec';code='ffvPassenger switchMove "OPJeepAim"'}
+        }
+        $null=Send @{cmd='exec';code='ffvPassenger reveal ffvTarget; ffvPassenger doTarget ffvTarget'}
         Start-Sleep -Seconds 2
         $null=Send @{cmd='eval';code='ffvShots'} '0'
         $activation=Send @{cmd='crew_pose_probe'}
@@ -157,9 +173,40 @@ try {
             throw "Unsafe NPC shot in negative case: $NpcScenario"
         }
         [pscustomobject]@{kind='stationary-npc-integration';scenario=$NpcScenario;heading=$NpcHeading;driver=[bool]$NpcDriver;installed=$stamp.Trim();ammo=$after.result;magazines=$remaining.result;shots=$cargoShots.result;targetDamage=$damage.result;probe=$probe} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $output 'npc-observation.json')
+        if ($NpcTransitions) {
+            $null=Send @{cmd='exec';code='ffvPassenger setCombatMode "BLUE"; ffvView camSetPos [9701.8,3599.6,1.6]; ffvView camSetTarget [9700.4,3600,1.35]; ffvView camCommit 0'}
+            Start-Sleep -Seconds 1
+            $reloadBefore=Send @{cmd='eval';code='magazinesArray ffvPassenger'}
+            $shotsBeforeReload=Send @{cmd='eval';code='ffvShots'}
+            $null=Send @{cmd='crew_request_reload'}
+            $samples=@(); $seenReload=$false; $clock=[Diagnostics.Stopwatch]::StartNew()
+            do {
+                $motion=Send @{cmd='crew_pose_probe'}
+                $seenReload=$seenReload -or ($motion.primaryMove -ieq 'OPJeepReload')
+                if ($motion.primaryMove -ieq 'OPJeepReload' -and !$motion.weaponsDisabled) {throw 'Reload did not disable firing'}
+                $name='motion-{0:D4}.png' -f $samples.Count
+                $beforeCapture=$clock.Elapsed.TotalSeconds
+                $null=Send @{cmd='screenshot';path=(Join-Path $output $name)}
+                $afterCapture=$clock.Elapsed.TotalSeconds
+                $samples += [pscustomobject]@{file=$name;pose=$motion.primaryMove;phase=$motion.phase;time=($beforeCapture+$afterCapture)*0.5;captureSeconds=$afterCapture-$beforeCapture}
+                Start-Sleep -Milliseconds 80
+            } while ($clock.Elapsed.TotalSeconds -lt 8)
+            $samples | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $output 'motion-samples.json')
+            $reloadAfter=Send @{cmd='eval';code='magazinesArray ffvPassenger'}
+            $null=Send @{cmd='eval';code='ffvPassenger ammo "M16"'} '30'
+            $null=Send @{cmd='eval';code='ffvShots'} $shotsBeforeReload.result
+            $null=Send @{cmd='eval';code='vehicle ffvPassenger == ffvJeep'} 'true'
+            $reloadEnd=Send @{cmd='crew_pose_probe'}
+            if (!$seenReload -or $reloadEnd.reloadInProgress -or !$reloadEnd.cargoWeaponActive -or !$reloadEnd.loaded -or
+                (RifleRounds $reloadBefore) -ne (RifleRounds $reloadAfter)) {throw 'Real cargo reload/animation/magazine conservation failed'}
+        }
         $null=Send @{cmd='exit'}
         if (!$p.WaitForExit(30000) -or $p.ExitCode -ne 0) {throw 'NPC fire exit failed'}
         if (Select-String -LiteralPath $log -Pattern 'Bad animation|Broken animation|Animation .*not found|Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION' -Quiet) {throw 'NPC integration load/runtime error'}
+        if ($NpcTransitions) {
+            & python "$PSScriptRoot/default-content/make_jeep_pose_video.py" $output
+            if ($LASTEXITCODE -ne 0) {throw 'Reload video encoding failed'}
+        }
         Write-Host "Stationary NPC $NpcScenario integration passed, NOT moving/player/reload acceptance: $output"
         return
     }
@@ -172,14 +219,6 @@ try {
     $footDamage=Send @{cmd='eval';code='getDammage ffvTarget'}
     $footShots=Send @{cmd='eval';code='ffvShots'}
     $magazinesAfter=Send @{cmd='eval';code='magazinesArray ffvPassenger'}
-    function RifleRounds($response) {
-        $items=ConvertFrom-Json -InputObject $response.result
-        $rounds=0
-        for ($i=0; $i -lt $items.Count; $i+=2) {
-            if ($items[$i] -ceq 'M16') {$rounds += [int]$items[$i+1]}
-        }
-        return $rounds
-    }
     $roundsBefore=RifleRounds $magazinesBefore
     $roundsAfter=RifleRounds $magazinesAfter
     if ([int]$footShots.result -le [int]$cargoShots.result -or [double]::Parse($footDamage.result,[Globalization.CultureInfo]::InvariantCulture) -le 0) {throw 'On-foot firing control failed'}

@@ -24,7 +24,7 @@ namespace Poseidon
 {
 using namespace Foundation;
 
-const CargoWeaponSeat* Man::GetActiveCargoWeaponSeat() const
+const CargoWeaponSeat* Man::GetConfiguredCargoWeaponSeat() const
 {
     // First integration is SP NPC-only. Unconfigured seats and original animations
     // never enter the passenger weapon loop; player/MP need separate acceptance.
@@ -39,18 +39,27 @@ const CargoWeaponSeat* Man::GetActiveCargoWeaponSeat() const
     {
         if (vehicle->GetManCargo()[i] != this)
             continue;
-        const auto* seat = vehicle->Type()->GetCargoWeaponSeat(i);
-        if (!seat || strcmpi(GetCurrentMove(), seat->action) != 0 || WeaponsDisabled())
-            return nullptr;
-        return seat;
+        return vehicle->Type()->GetCargoWeaponSeat(i);
     }
     return nullptr;
+}
+
+const CargoWeaponSeat* Man::GetActiveCargoWeaponSeat() const
+{
+    const auto* seat = GetConfiguredCargoWeaponSeat();
+    if (!seat || !seat->OwnsAction(GetCurrentMove()) ||
+        (!seat->HasTransitions() && WeaponsDisabled()))
+        return nullptr;
+    if (_primaryMove.id < 0 || !seat->OwnsAction(Type()->GetMoveName(_primaryMove.id)))
+        return nullptr;
+    return seat;
 }
 
 bool Man::CargoWeaponLineClear(int weapon) const
 {
     const auto* seat = GetActiveCargoWeaponSeat();
-    if (!seat || !GLandscape || weapon < 0 || weapon >= NMagazineSlots())
+    if (!seat || WeaponsDisabled() || _primaryFactor < .99f || strcmpi(Type()->GetMoveName(_primaryMove.id), seat->action) != 0 ||
+        strcmpi(GetCurrentMove(), seat->action) != 0 || !GLandscape || weapon < 0 || weapon >= NMagazineSlots())
         return false;
     const auto& slot = GetMagazineSlot(weapon);
     const auto* mode = GetWeaponMode(weapon);

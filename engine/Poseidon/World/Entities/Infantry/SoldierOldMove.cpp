@@ -438,6 +438,11 @@ void Man::SwitchMove(RStringB move, ActionContextBase* context)
     SwitchMove(id, context);
 }
 
+RString Man::GetPrimaryMoveName() const
+{
+    return _primaryMove.id < 0 ? RString() : Type()->GetMoveName(_primaryMove.id);
+}
+
 bool Man::PlayAction(ManAction action, ActionContextBase* context)
 {
     MoveId id = GetMove((ManAction)action);
@@ -475,7 +480,22 @@ void Man::SwitchVehicleAction(ManVehAction action)
     {
         return;
     }
+    bool cargoTransitions = false;
+    if (const auto* seat = GetConfiguredCargoWeaponSeat(); seat && seat->HasTransitions())
+    {
+        const RString* moves[] = {&seat->action, &seat->idleAction, &seat->raiseAction, &seat->reloadAction, &seat->lowerAction};
+        cargoTransitions = true;
+        for (const auto* move : moves)
+            if (Type()->GetMoveId(*move) == MoveIdNone)
+                cargoTransitions = false;
+        if (cargoTransitions)
+            id = Type()->GetMoveId(seat->idleAction);
+        else
+            LOG_WARN(AI, "Cargo weapon animations incomplete for {}; preserving original seat", (const char*)GetDebugName());
+    }
     SwitchMove(id, nullptr);
+    if (cargoTransitions)
+        _externalMove = MotionPathItem((MoveId)MoveIdNone); // Internal seat idle, not a forced mission animation.
     _legTrans = MIdentity;
 }
 

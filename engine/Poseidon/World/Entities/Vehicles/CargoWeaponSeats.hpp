@@ -16,10 +16,24 @@ struct CargoWeaponSeat
     int cargoIndex = -1;
     RString weapon;
     RString action;
+    RString idleAction;
+    RString raiseAction;
+    RString reloadAction;
+    RString lowerAction;
     float azimuth = 0;
     float halfAngle = 0;
     float minElevation = 0;
     float maxElevation = 0;
+
+    bool HasTransitions() const { return idleAction.GetLength() > 0; }
+    bool OwnsAction(const char* name) const
+    {
+        if (!name || !name[0])
+            return false;
+        return strcmpi(name, action) == 0 || (HasTransitions() &&
+            (strcmpi(name, idleAction) == 0 || strcmpi(name, raiseAction) == 0 ||
+             strcmpi(name, reloadAction) == 0 || strcmpi(name, lowerAction) == 0));
+    }
 
     bool ContainsDirection(Vector3Par direction) const
     {
@@ -88,8 +102,8 @@ public:
             return fail("OPCargoWeapons must be a class");
         const auto* version = table->FindEntry("version");
         const auto* seats = table->FindEntry("Seats");
-        if (!version || !version->IsIntValue() || int(*version) != 1 || !seats || !seats->IsClass())
-            return fail("expected OPCargoWeapons version=1 and class Seats");
+        if (!version || !version->IsIntValue() || (int(*version) != 1 && int(*version) != 2) || !seats || !seats->IsClass())
+            return fail("expected OPCargoWeapons version=1 or 2 and class Seats");
         if (cargoCount < 0 || seats->GetEntryCount() > cargoCount || seats->GetEntryCount() > 32)
             return fail("seat count exceeds cargo capacity or contract limit");
         for (int i = 0; i < seats->GetEntryCount(); ++i)
@@ -110,6 +124,23 @@ public:
             if (seat.cargoIndex < 0 || seat.cargoIndex >= cargoCount || Find(seat.cargoIndex) ||
                 !seat.weapon.GetLength() || !seat.action.GetLength())
                 return fail("invalid or duplicate cargo index, or empty weapon/action");
+            if (int(*version) == 2)
+            {
+                const char* keys[] = {"idleAction", "raiseAction", "reloadAction", "lowerAction"};
+                RString* names[] = {&seat.idleAction, &seat.raiseAction, &seat.reloadAction, &seat.lowerAction};
+                for (int j = 0; j < 4; ++j)
+                {
+                    const auto* value = entry.FindEntry(keys[j]);
+                    if (!value || !value->IsTextValue())
+                        return fail("version 2 requires four explicit transition action names");
+                    *names[j] = RStringB(*value);
+                    if (!names[j]->GetLength() || strcmpi(*names[j], seat.action) == 0)
+                        return fail("cargo animation states must be distinct and nonempty");
+                    for (int k = 0; k < j; ++k)
+                        if (strcmpi(*names[j], *names[k]) == 0)
+                            return fail("cargo animation states must be distinct and nonempty");
+                }
+            }
             const char* keys[] = {"azimuth", "halfAngle", "minElevation", "maxElevation"};
             float* values[] = {&seat.azimuth, &seat.halfAngle, &seat.minElevation, &seat.maxElevation};
             for (int j = 0; j < 4; ++j)
