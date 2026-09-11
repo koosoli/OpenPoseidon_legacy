@@ -1,5 +1,28 @@
 # Anforderungspruefung, 11. September 2026
 
+## Nachtrag 12. September: munitionsabhaengige Einschlagkrater
+
+Besitzer nimmt den pauschalen Faktor acht zurueck. Installiert 61bbb0c6:
+Referenztiefe wieder 1 m statt 8 m, Referenzradius weiterhin 12 m. Beide
+Dimensionen skalieren mit clamp(cbrt(indirectHit / 150), 0.25, 2).
+150 entspricht der tatsaechlich geladenen klassischen LAW. Verwendet die
+geladene Munitionskonfiguration, keine Namensliste; Schadenswerte sind hier
+eine Gameplay-Naeherung, kein TNT-/Bodenmaterialmodell. Gewehrkugeln,
+Wasser-/Objekttreffer und Mehrspielerregeln unveraendert. Grobes Terrainraster
+kann kleine Radien weiterhin verbreitern. Dev-Regler nennen die LAW-Referenz;
+Settings- und Master-Reset benutzen wieder die normale Basistiefe.
+Build und 647 Assertions / 4 Tests bestanden. Installierter LAW-Test:
+29.835 -> 28.835 m, ausgeschaltet unveraendert, Settings-Reset/Restore und
+erneuter Treffer wieder 1 m, abschliessend Originalhoehe hergestellt.
+Beleg: build/rocket-craters/acceptance-20260912-005648.
+Shell105 mit indirectHit=110: 29.835 -> 28.9332 m (0.9018 m Tiefe),
+derselbe Aus/Reset/Restore-Zyklus bestanden, sauber beendet. Beleg:
+build/rocket-craters/acceptance-20260912-005750. Niedrigerer Blast als LAW
+bedeutet hier einen kleineren Krater, unabhaengig vom hohen direkten Panzerschaden.
+Erster Testversuch verwarf einen nicht unterstuetzten getNumber/configFile-
+Diagnosebefehl; korrigierter Test berechnet die erwartete Tiefe aus der
+Explosionswirkung im echten Einschlaglog. Kein neuer Skriptbefehl noetig.
+
 ## Aktueller Nachtrag 20:32 (kein Gesamtabschluss)
 
 2026-09-12: Besitzer gibt feste Reihenfolge vor: Satmaps mit Wald/Doerfern,

@@ -45,12 +45,15 @@ try {
         Start-Sleep -Seconds 5
     }
     Start-Sleep -Seconds 15
-    $blast=[double](Send @{cmd='eval';code=('getNumber (configFile >> "CfgAmmo" >> "'+$Ammo+'" >> "indirectHit")')}).result
-    if ($blast -le 0) {throw 'Missing explosive ammo config'}
-    $expected=[Math]::Min(2.0,[Math]::Max(0.25,[Math]::Pow($blast/150.0,1.0/3.0)))
     $before=Height
     Fire
     $default=Height
+    # Classic script runtime has no getNumber/configFile command. Use the actual
+    # impact's logged ammo property, then independently calculate expected depth.
+    $impact=Select-String -LiteralPath $log -Pattern 'Rocket crater:.*blast=([0-9.eE+-]+) changed=true' | Select-Object -Last 1
+    if (!$impact) {throw 'Missing successful explosive impact'}
+    $blast=[double]::Parse($impact.Matches[0].Groups[1].Value,[Globalization.CultureInfo]::InvariantCulture)
+    $expected=[Math]::Min(2.0,[Math]::Max(0.25,[Math]::Pow($blast/150.0,1.0/3.0)))
     if ($default -ge $before-0.1) {throw 'Default did not crater'}
     if ([Math]::Abs(($before-$default)-$expected) -gt 0.05) {throw "Expected ammo-scaled depth $expected at the grid vertex"}
     $null=Send @{cmd='eval';code='triRocketCraters "off"'}
