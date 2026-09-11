@@ -118,6 +118,7 @@ void RegisterSqf(HarnessServer& hs)
                               cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(root,"z")));
             if (!std::isfinite(dir.SquareSize()) || dir.SquareSize() < .001f)
                 return HarnessProtocol::ErrorResponse("finite nonzero direction required");
+            GWorld->UI()->SetCursorMode(true);
             GWorld->UI()->SetCursorDirection(dir.Normalized());
             return HarnessProtocol::OkResponse();
         });

@@ -413,7 +413,7 @@ void World::InitCameraPars()
         }
         Matrix4 transform;
 
-        transform = _cameraOn->Transform() * _cameraOn->InsideCamera(_camType);
+        transform = _cameraOn->WorldTransform() * _cameraOn->InsideCamera(_camType);
         transform.SetOrientation(transform.Orientation());
 
         camera.SetTransform(transform);

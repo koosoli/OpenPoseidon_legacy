@@ -906,6 +906,12 @@ Matrix4 Man::InsideCamera(CameraType camType) const
     Vector3 relUp = WorldToModel().DirectionUp();
 
     transform.SetDirectionAndUp(VForward, relUp);
+    if (const auto* seat = GetActiveCargoWeaponSeat())
+    {
+        const float azimuth = seat->azimuth * (H_PI / 180.0f);
+        transform.SetDirectionAndUp(Vector3(sin(azimuth), 0, cos(azimuth)),
+                                    WorldTransform().InverseRotation().Rotate(VUp));
+    }
     transform.SetPosition(pilotPos);
     // calculate recoil camera angle
     if (_recoil)
@@ -919,6 +925,11 @@ Matrix4 Man::InsideCamera(CameraType camType) const
 
 Vector3 Man::GetCameraDirection(CameraType cam) const
 {
+    if (const auto* seat = GetActiveCargoWeaponSeat())
+    {
+        const float azimuth = seat->azimuth * (H_PI / 180.0f);
+        return WorldTransform().Rotate(Vector3(sin(azimuth), 0, cos(azimuth)));
+    }
     return Direction();
 }
 

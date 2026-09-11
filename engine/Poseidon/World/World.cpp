@@ -1552,13 +1552,13 @@ void World::Simulate(float deltaT, bool& enableDraw)
                 {
                     case CamGunner:
                     {
-                        transform = cameraVehicle->Transform() * cameraVehicle->InsideCamera(_camType);
+                        transform = cameraVehicle->WorldTransform() * cameraVehicle->InsideCamera(_camType);
                         camInsideVehicle = dyn_cast<Entity, Object>(cameraVehicle);
                     }
                     break;
                     default: // case CamInternal:
                     {
-                        transform = cameraVehicle->Transform() * cameraVehicle->InsideCamera(_camType);
+                        transform = cameraVehicle->WorldTransform() * cameraVehicle->InsideCamera(_camType);
                         camInsideVehicle = dyn_cast<Entity, Object>(cameraVehicle);
                         transform.SetOrientation(transform.Orientation() * camChange);
                     }
