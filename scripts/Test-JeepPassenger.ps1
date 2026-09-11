@@ -123,6 +123,10 @@ try {
         $rightX=[int][math]::Round([math]::Cos($angle)); $rightZ=-[int][math]::Round([math]::Sin($angle))
         $frontX=-$rightZ; $frontZ=$rightX
         $null=Send @{cmd='exec';code=('ffvJeep setDir {0}; ffvTarget setPos [{1},{2},0]' -f $NpcHeading,(9700+60*$rightX),(3600+60*$rightZ))}
+        # Place moving-test targets before reveal; moving a known target later
+        # tests stale perception rather than the intended seat/steering case.
+        if ($NpcTurning) {$null=Send @{cmd='exec';code='ffvTarget setPos [9780,3640,0]'}}
+        elseif ($NpcMoving) {$null=Send @{cmd='exec';code='ffvTarget setPos [9760,3610,0]'}}
         if ($NpcDriver) {
             $driverInit=if ($NpcMoving) {'ffvDriver=this; removeAllWeapons this'} else {'ffvDriver=this; this disableAI ""MOVE""; removeAllWeapons this'}
             $driverGroup='group player'
@@ -252,7 +256,7 @@ try {
         }
     }
     if ($NpcMoving) {
-        $null=Send @{cmd='exec';code='ffvMovingShots=0; ffvPassenger addEventHandler ["Fired",{if (abs(speed ffvJeep)>5) then {ffvMovingShots=ffvMovingShots+1}}]; ffvTarget setPos [9760,3610,0]; ffvJeep setFuel 1; ffvDriver setBehaviour "CARELESS"; ffvDriver setSpeedMode "LIMITED"; ffvDriver doMove [9700,3680,0]; ffvView camSetPos [9706,3615,3]; ffvView camSetTarget ffvJeep; ffvView camCommit 0'}
+        $null=Send @{cmd='exec';code='ffvMovingShots=0; ffvPassenger addEventHandler ["Fired",{if (abs(speed ffvJeep)>5) then {ffvMovingShots=ffvMovingShots+1}}]; ffvJeep setFuel 1; ffvDriver setBehaviour "CARELESS"; ffvDriver setSpeedMode "LIMITED"; ffvDriver doMove [9700,3680,0]; ffvView camSetPos [9706,3615,3]; ffvView camSetTarget ffvJeep; ffvView camCommit 0'}
         if ($NpcTurning) {
             $null=Send @{cmd='exec';code='ffvTurnShots=0; ffvShotHeadings=[]; ffvPassenger addEventHandler ["Fired",{ffvShotHeadings=ffvShotHeadings+[getDir ffvJeep]; if ((abs(speed ffvJeep)>5) && (abs(sin(getDir ffvJeep))>0.087)) then {ffvTurnShots=ffvTurnShots+1}}]; ffvDriver doMove [9660,3680,0]'}
         }
