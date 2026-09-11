@@ -8,7 +8,7 @@ if (Test-Path -LiteralPath $stage) {throw 'Fresh release destination must not ex
 New-Item -ItemType Directory -Path $stage -Force | Out-Null
 # Stock data are still required. Only these installed data directories are linked;
 # own packs, executable, DLL and mission are independent copies in the fresh folder.
-foreach ($dir in @('BIN','DTA','AddOns','dtaExt','fonts')) {
+foreach ($dir in @('BIN','DTA','AddOns','dtaExt','fonts','Worlds')) {
     $stock=Join-Path $GameDir $dir
     if (!(Test-Path -LiteralPath $stock -PathType Container)) {throw "Required installed data missing: $stock"}
     New-Item -ItemType Junction -Path (Join-Path $stage $dir) -Target $stock | Out-Null
