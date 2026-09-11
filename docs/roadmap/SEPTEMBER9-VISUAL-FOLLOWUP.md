@@ -1,5 +1,14 @@
 # September 9 visual follow-up
 
+## September 11 upstream recheck
+
+[Fresh upstream comparison](decisions/UPSTREAM-REVIEW-20260911.md): remote main
+remains 3541affa, no new commits since September 8. Cursor geometry/hotspot
+adaptation is the clearest missing correctness candidate. Opaque bucketing needs
+a fork-specific benchmark; existing sort/filter optimizations are not absent.
+Preloader reset and destruction-instancing guards already exist. No blind merge
+or GL33-only changes were made during this review.
+
 ## September 11 tester snow/terrain report
 
 [Snow tester follow-up](decisions/SNOW-TESTER-FOLLOWUP-20260911.md) separates the
