@@ -50,7 +50,14 @@ if ($DefaultPackage) {
 } elseif ($AnimationPreview -or $NpcFire) {
     $packArchive=Join-Path $preview 'AddOns/op_jeep_animation_preview.pbo'
 } else {$packArchive=$null}
-[pscustomobject]@{installed=$stamp.Trim();args=$gameArgs;source=(& git -C $root rev-parse HEAD);pack=$packArchive;packSha256=$(if ($packArchive) {(Get-FileHash -LiteralPath $packArchive -Algorithm SHA256).Hash})} |
+$packHash=$null
+if ($packArchive) {
+    $packStream=[IO.File]::OpenRead($packArchive)
+    $sha=[Security.Cryptography.SHA256]::Create()
+    try {$packHash=[BitConverter]::ToString($sha.ComputeHash($packStream)).Replace('-','')}
+    finally {$packStream.Dispose(); $sha.Dispose()}
+}
+[pscustomobject]@{installed=$stamp.Trim();args=$gameArgs;source=(& git -C $root rev-parse HEAD);pack=$packArchive;packSha256=$packHash} |
     ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $output 'test-context.json')
 $p=Start-Process -FilePath (Join-Path $GameDir 'OpenPoseidon.exe') -WorkingDirectory $GameDir -WindowStyle Hidden -PassThru -ArgumentList $gameArgs
 $null=$p.Handle
