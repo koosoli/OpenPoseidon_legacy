@@ -1281,7 +1281,7 @@ float Soldier::FireInRange(int weapon, float& timeToAim, const Target& target) c
     {
         if (weapon < 0 || weapon >= NMagazineSlots())
             return 0;
-        const auto* type = GetMagazineSlot(weapon)._weapon;
+        const WeaponType* type = GetMagazineSlot(weapon)._weapon;
         if (!type || strcmpi(type->GetName(), seat->weapon) != 0)
             return 0;
         const auto* vehicle = Brain()->GetVehicleIn();
