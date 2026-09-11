@@ -118,20 +118,22 @@ def pose(spec, raised, recoil=0.0, reload=0.0):
     # in a barrel-forward frame, then map the actual model into that frame.
     result['zbran'] = gun @ frame(rotation([0, 1, 0], 90)) @ np.linalg.inv(proxy)
     for side, arm in spec['arms'].items():
-        shoulder_rest, elbow_rest, wrist_rest = (rest_point(spec, arm[j]) for j in ('shoulder', 'elbow', 'wrist'))
+        shoulder_rest, elbow_rest, palm_rest = (rest_point(spec, arm[j]) for j in ('shoulder', 'elbow', 'palm'))
         shoulder = point(torso, shoulder_rest)
-        wrist = point(gun, spec['grips'][side])
+        palm = point(gun, spec['grips'][side])
         # Left support hand travels to the magazine, then returns to its grip.
         if side == 'l':
-            wrist += reload * (point(gun, spec['magazine_grip']) - wrist)
-        mid = elbow(shoulder, wrist,
+            palm += reload * (point(gun, spec['magazine_grip']) - palm)
+        # The contact is the palm, not the wrist. Solve the straight wrist/hand
+        # extension with the forearm so both keep a rigid, continuous transform.
+        mid = elbow(shoulder, palm,
                     np.linalg.norm(np.subtract(arm['elbow'], arm['shoulder'])),
-                    np.linalg.norm(np.subtract(arm['wrist'], arm['elbow'])),
+                    np.linalg.norm(np.subtract(arm['palm'], arm['elbow'])),
                     arm['pole'])
         result[side+'biceps'] = segment(shoulder_rest, elbow_rest, shoulder, mid)
-        result[side+'loket'] = segment(elbow_rest, wrist_rest, mid, wrist)
-        hand_r = rotation(wrist-mid, arm['hand_degrees']) @ result[side+'loket'][:3, :3]
-        result[side+'ruka'] = frame(hand_r, wrist - hand_r @ wrist_rest)
+        result[side+'loket'] = segment(elbow_rest, palm_rest, mid, palm)
+        hand_r = rotation(palm-mid, arm['hand_degrees']) @ result[side+'loket'][:3, :3]
+        result[side+'ruka'] = frame(hand_r, palm - hand_r @ palm_rest)
     return result
 
 

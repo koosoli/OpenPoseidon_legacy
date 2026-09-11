@@ -71,6 +71,11 @@ try {
         Write-Host $line
         return $r
     }
+    function ResumeReviewCamera {
+        if (!$PlayerFire) {
+            $null=Send @{cmd='exec';code='deleteVehicle ffvView; ffvView="camera" camCreate [9701.8,3599.6,1.6]; ffvView cameraEffect ["internal","back"]; ffvView camSetTarget [9700.4,3600,1.35]; ffvView camCommit 0; showCinemaBorder false'}
+        }
+    }
     Start-Sleep -Seconds 12
     $null=Send @{cmd='eval';code='typeOf ffvJeep'} '"Jeep"'
     if ($NpcFire) {
@@ -232,6 +237,7 @@ try {
             $restored=Send @{cmd='crew_seat_status'}
             if (!$restored.active -or !$restored.inCargo) {throw 'Seated save/load lost active passenger'}
             if ($PlayerFire) {$null=Send @{cmd='eval';code='player == ffvPassenger'} 'true'}
+            ResumeReviewCamera
         }
         if ($NpcTransitions -or $PlayerFire) {
             $null=Send @{cmd='exec';code='ffvPassenger setCombatMode "BLUE"'}
@@ -248,8 +254,11 @@ try {
                 $seenReload=$seenReload -or ($motion.primaryMove -ieq 'OPJeepReload')
                 if ($motion.primaryMove -ieq 'OPJeepReload' -and !$motion.weaponsDisabled) {throw 'Reload did not disable firing'}
                 if ($SaveLoad -and !$reloadSaved -and $motion.primaryMove -ieq 'OPJeepReload' -and $motion.phase -gt .2) {
+                    $clock.Stop()
                     $null=Send @{cmd='eval';code='triSaveGame "jeep-reloading"'} '"OK"'
                     $null=Send @{cmd='eval';code='triLoadGame "jeep-reloading"'} '"OK"'
+                    ResumeReviewCamera
+                    $clock.Start()
                     $reloadSaved=$true
                 }
                 $name='motion-{0:D4}.png' -f $samples.Count

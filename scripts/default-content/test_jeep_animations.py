@@ -48,8 +48,16 @@ class JeepAnimations(unittest.TestCase):
         for _, matrices in clip(self.spec, 'raise'):
             gun = matrices['zbran'] @ rest_proxy(self.spec) @ frame(rotation([0, 1, 0], -90))
             for side in ('p', 'l'):
-                wrist = point(matrices[side+'ruka'], rest_point(self.spec, self.spec['arms'][side]['wrist']))
-                np.testing.assert_allclose(wrist, point(gun, self.spec['grips'][side]), atol=1e-9)
+                palm = point(matrices[side+'ruka'], rest_point(self.spec, self.spec['arms'][side]['palm']))
+                np.testing.assert_allclose(palm, point(gun, self.spec['grips'][side]), atol=1e-9)
+
+    def test_wrists_join_forearms_without_gaps(self):
+        for kind in ('idle', 'raise', 'reload', 'lower'):
+            for _, matrices in clip(self.spec, kind):
+                for side in ('p', 'l'):
+                    wrist = rest_point(self.spec, self.spec['arms'][side]['wrist'])
+                    np.testing.assert_allclose(point(matrices[side+'ruka'], wrist),
+                                               point(matrices[side+'loket'], wrist), atol=1e-9)
 
     def test_rtm_pivots_are_not_centered_mesh_coordinates(self):
         hip = rest_point(self.spec, self.spec['legs']['p']['hip'])
