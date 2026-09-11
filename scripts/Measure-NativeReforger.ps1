@@ -1,6 +1,8 @@
 param(
  [string]$Label='baseline',
  [ValidateRange(1,25)][int]$Repeats=2,
+ [ValidateRange(1,16)][int]$MotionSamples=1,
+ [ValidateRange(0.25,5)][double]$MotionInterval=0.5,
  [ValidateSet('Village','Coast','Forest')][string]$Pose='Village',
  [ValidateRange(0,1)][int]$NativeTextureKeys=1,
  [ValidateRange(-1,1)][int]$LazyBcrTint=-1,
@@ -34,7 +36,8 @@ $camera=switch ($Pose) {
 }
 & "$PSScriptRoot/farfield-bench.ps1" -Label "$Pose-$Label" -Mission 'tests/perf/missions/perf_field.eden' `
  -World $ReforgerAddons -Freefly $camera -Out $out -Env $settings -Repeats $Repeats `
- -Width 1920 -Height 1080 -Windowed -WarmupSeconds 90 -TimeoutSeconds 300 -RequireAll
+ -Width 1920 -Height 1080 -Windowed -WarmupSeconds 90 -TimeoutSeconds 300 -RequireAll `
+ -MotionSamples $MotionSamples -MotionInterval $MotionInterval
 if ($LASTEXITCODE -ne 0) {throw 'Native capture failed; inspect per-run lifecycle metadata'}
 for ($repeat=1; $repeat -le $Repeats; $repeat++) {
  $stem=Join-Path (Join-Path $out "$Pose-$Label") ('run-{0:D2}' -f $repeat)

@@ -330,6 +330,9 @@ def load_arm(label: str, spec: str) -> Arm:
             arm.rejected.append(str(error))
             continue
         meta = load_meta(path)
+        if meta.get("performance_comparable") is False:
+            arm.rejected.append(f"{os.path.basename(path)}: visual motion sequence, not a performance sample")
+            continue
         capture.contended = bool(meta.get("contended", False))
         arm.captures.append(capture)
     if not arm.captures:

@@ -24,3 +24,17 @@ wind shaders already share root phase and trunk bending, with leaf-only flutter
 capped at 2.5 cm times the flutter setting; matching velocity formulas exist.
 A still image cannot accept trunk/crown synchronisation. Do not repeat that cap
 as a new fix; obtain a matched motion sequence before changing the formula.
+
+## Motion checkpoint on installed 7329e2c4
+
+Eight fixed-camera captures, 0.5 seconds apart after the same 90-second warmup:
+build/native-reforger-perf/Forest-7329-motion. All eight PNGs exist; lifecycle,
+native-resolution profile and settled-preparation checks pass. First and last
+frames inspected: no obvious detached crown at this camera, but this is not
+acceptance for other tree species, LODs or strong wind. Pale foliage persists.
+No wind shader change justified by this sequence alone.
+
+farfield-bench and Measure-NativeReforger now support bounded motion sequences.
+Metadata marks them performance_comparable=false; farfield-compare rejects them
+and three regression tests cover rejection and legacy/single-frame acceptance.
+Readback-contaminated frame timings are not an optimisation result.

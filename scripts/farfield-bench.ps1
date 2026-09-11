@@ -132,6 +132,10 @@ param(
     # mission, 25 for a substituted world, which is past the 10-20 s streaming window).
     [double]$WarmupSeconds = -1,
 
+    # Visual motion inspection only. Multiple readbacks invalidate FPS comparisons.
+    [ValidateRange(1,16)][int]$MotionSamples = 1,
+    [ValidateRange(0.25,5)][double]$MotionInterval = 0.5,
+
     # Per-repeat watchdog.  0 = auto.
     [int]$TimeoutSeconds = 0,
 
@@ -314,6 +318,7 @@ if ($warmup -lt 0) {
     if ($worldMode) { $warmup = 25 } else { $warmup = 0 }
 }
 $timedMode = ($warmup -gt 0)
+if ($MotionSamples -gt 1 -and !$timedMode) {throw 'Motion sequence requires timed world capture'}
 
 if ([string]::IsNullOrWhiteSpace($Out)) { $Out = Join-Path $repoRoot '.tmp-farfield-bench' }
 if (-not [IO.Path]::IsPathRooted($Out)) { $Out = Join-Path $repoRoot $Out }
@@ -322,7 +327,7 @@ New-Item -ItemType Directory -Force -Path $armDir | Out-Null
 
 $timeout = $TimeoutSeconds
 if ($timeout -le 0) {
-    if ($timedMode) { $timeout = [int]($warmup + 180) } else { $timeout = 150 }
+    if ($timedMode) { $timeout = [int]($warmup + ($MotionSamples-1)*$MotionInterval + 180) } else { $timeout = 150 }
 }
 
 # Width/Height: default 800x600 in world mode (the resolution every RND-033 figure was
@@ -388,6 +393,12 @@ try {
         $stdoutPath = "$stem.stdout.txt"
         $stderrPath = "$stem.stderr.txt"
         $metaPath = "$stem.meta.json"
+        $motionPaths = @(for ($sample=0; $sample -lt $MotionSamples-1; $sample++) {
+            [IO.Path]::ChangeExtension($pngPath, ('motion-{0:D2}.png' -f $sample))
+        })
+        foreach ($path in $motionPaths) {
+            Remove-Item -LiteralPath $path -ErrorAction SilentlyContinue
+        }
         Remove-Item -LiteralPath $jsonPath, $pngPath, $logPath, $stdoutPath, $stderrPath, $metaPath -ErrorAction SilentlyContinue
 
         $argumentParts = @()
@@ -421,9 +432,16 @@ try {
             }
         }
         if ($timedMode) {
-            $trigger = [string]::Format([Globalization.CultureInfo]::InvariantCulture, '{0}s', $warmup)
+            $captures=@()
+            for ($sample=0; $sample -lt $MotionSamples; $sample++) {
+                $trigger = [string]::Format([Globalization.CultureInfo]::InvariantCulture, '{0}s', ($warmup+$sample*$MotionInterval))
+                $capturePath=if ($sample -eq $MotionSamples-1) {$pngPath} else {
+                    [IO.Path]::ChangeExtension($pngPath, ('motion-{0:D2}.png' -f $sample))
+                }
+                $captures += "$trigger" + ':' + $capturePath
+            }
             $argumentParts += '--auto-screenshot'
-            $argumentParts += Quote-Arg ("$trigger" + ':' + $pngPath)
+            $argumentParts += Quote-Arg ($captures -join ',')
         }
         else {
             $argumentParts += '--test-type'
@@ -502,6 +520,12 @@ try {
             $problems += "no metrics JSON at $jsonPath (--capture-metrics is written ONLY by a screenshot event; check the log for 'Capture metrics saved')"
         }
         if (-not (Test-Path -LiteralPath $pngPath)) { $problems += "no screenshot at $pngPath" }
+        foreach ($path in $motionPaths) {
+            if (!(Test-Path -LiteralPath $path -PathType Leaf) -or
+                (Get-Item -LiteralPath $path).Length -lt 24) {
+                $problems += "missing or empty motion frame at $path"
+            }
+        }
 
         # WHAT RESOLUTION DID THIS ACTUALLY RENDER AT? A GPU millisecond means nothing without
         # it, and -Width/-Height are a REQUEST that mission mode does not honour: `--window` is
@@ -615,6 +639,8 @@ try {
             capture_width    = $captureWidth
             capture_height   = $captureHeight
             status           = $status
+            performance_comparable = ($MotionSamples -eq 1)
+            motion_samples   = $MotionSamples
             contended        = $contended
             timed_out        = $timedOut
             exit_code        = $exitCode
@@ -647,8 +673,12 @@ try {
             if ($frameTotal -gt 0) { $residualPercent = ($residual / $frameTotal) * 100.0 }
             $contendedNote = ''
             if ($contended) { $contendedNote = '  [CONTENDED]' }
-            Write-Output ("  frame {0:F3} ms | attributed {1:F3} | residual {2:F3} ({3:F1}%) | {4:F1}s wall{5}" -f `
+            if ($MotionSamples -gt 1) {
+                Write-Output "  $MotionSamples visual motion frames; readbacks invalidate performance comparison"
+            } else {
+                Write-Output ("  frame {0:F3} ms | attributed {1:F3} | residual {2:F3} ({3:F1}%) | {4:F1}s wall{5}" -f `
                     $frameTotal, $attributed, $residual, $residualPercent, $elapsed, $contendedNote)
+            }
             # Print the instance count every repeat.  A world whose models did not mount
             # (wrong --mod / --addon-root) still streams every placement in and still
             # produces a perfectly valid, perfectly meaningless capture; the ONLY cheap
@@ -695,6 +725,9 @@ $manifest = [PSCustomObject][ordered]@{
     freefly      = @($Freefly)
     world_hour   = $WorldHour
     backend      = $Backend
+    motion_samples = $MotionSamples
+    motion_interval_seconds = $MotionInterval
+    performance_comparable = ($MotionSamples -eq 1)
     mode         = $modeName
     width        = $width
     height       = $height
@@ -708,7 +741,7 @@ $manifestPath = Join-Path $armDir 'arm.json'
 
 Write-Output ""
 Write-Output "=== arm '$Label': $($valid.Count)/$Repeats valid captures -> $armDir ==="
-if ($valid.Count -gt 0) {
+if ($valid.Count -gt 0 -and $MotionSamples -eq 1) {
     $cheapest = ($valid | Sort-Object -Property gpu_frame_ms)[0]
     Write-Output ("  cheapest steady frame: {0:F3} ms (repeat {1})" -f $cheapest.gpu_frame_ms, $cheapest.repeat)
 }
