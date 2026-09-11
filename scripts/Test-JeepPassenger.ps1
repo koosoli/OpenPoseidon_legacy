@@ -86,7 +86,8 @@ try {
         foreach ($heading in @(0,90,180)) {
             $null=Send @{cmd='exec';code=("ffvJeep setDir $heading; ffvJeep setVelocity [8,0,3]")}
             $probe=Send @{cmd='crew_projectile_probe'}
-            if ($probe.positionError -gt 0.001 -or $probe.velocityError -gt 0.001 -or $probe.directionDot -lt 0.99 -or
+            if ($null -eq $probe.weaponDirectionError -or $probe.weaponDirectionError -gt 0.001 -or
+                $probe.positionError -gt 0.001 -or $probe.velocityError -gt 0.001 -or $probe.directionDot -lt 0.99 -or
                 $probe.worldX -lt 9700 -or $probe.worldZ -lt 3650 -or $probe.inheritedSpeed -lt 1) {
                 throw 'Attached projectile frame/translation inheritance mismatch'
             }

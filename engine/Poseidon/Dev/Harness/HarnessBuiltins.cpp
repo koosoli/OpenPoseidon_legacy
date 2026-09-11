@@ -46,6 +46,7 @@ using namespace Poseidon;
 #include <Poseidon/UI/UITestEngine.hpp>
 #include <Poseidon/UI/Controls/UIControls.hpp>
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
+#include <Poseidon/World/Entities/Infantry/SoldierOld.hpp>
 #include <Poseidon/AI/EntityAI.hpp>
 #include <Evaluator/express.hpp>
 
@@ -96,7 +97,8 @@ void RegisterSqf(HarnessServer& hs)
                            AIGroup* group = focus ? focus->GetGroup() : nullptr;
                            AIUnit* unit = group ? group->UnitWithID(2) : nullptr;
                            Person* person = unit ? unit->GetPerson() : nullptr;
-                           if (!person || !person->IsLocal() || !unit->IsInCargo() ||
+                           Man* man = dyn_cast<Man>(person);
+                           if (!man || !person->IsLocal() || !unit->IsInCargo() ||
                                !person->GetHierachyParent() || person->IsDammageDestroyed())
                                return HarnessProtocol::ErrorResponse("local living cargo unit in group slot 1 required");
                            int weapon = -1;
@@ -119,6 +121,9 @@ void RegisterSqf(HarnessServer& hs)
                            const Matrix4 frame = person->WorldTransform();
                            const Vector3 expectedPos = frame.FastTransform(offset);
                            const Vector3 inheritedSpeed = person->WorldSpeed();
+                           const Vector3 expectedWeaponDir = frame.Rotate(man->GetWeaponRelDirection(weapon));
+                           const float weaponDirectionError =
+                               (person->GetWeaponDirection(weapon) - expectedWeaponDir).Size();
                            // Deliberately bypasses animation/readiness/ammo logic to test only
                            // the shared projectile constructor. Never an FFV gameplay success.
                            if (!person->FireMGun(weapon, offset, VForward, nullptr))
@@ -130,6 +135,7 @@ void RegisterSqf(HarnessServer& hs)
                            cJSON* resp = cJSON_CreateObject();
                            cJSON_AddNumberToObject(resp, "positionError", (shot->Position() - expectedPos).Size());
                            cJSON_AddNumberToObject(resp, "velocityError", (shot->Speed() - expectedSpeed).Size());
+                           cJSON_AddNumberToObject(resp, "weaponDirectionError", weaponDirectionError);
                            cJSON_AddNumberToObject(resp, "directionDot", shot->Direction() * frame.Direction());
                            cJSON_AddNumberToObject(resp, "worldX", shot->Position().X());
                            cJSON_AddNumberToObject(resp, "worldZ", shot->Position().Z());

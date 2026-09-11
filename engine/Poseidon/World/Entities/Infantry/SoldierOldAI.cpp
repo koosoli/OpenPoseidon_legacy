@@ -39,6 +39,8 @@ bool Man::AimObserver(Vector3Par direction)
 void Man::AimHead(Vector3Par direction)
 {
     Vector3 relDir(VMultiply, DirWorldToModel(), direction);
+    if (GetHierachyParent())
+        relDir = WorldTransform().InverseRotation().Rotate(direction);
     // compensate for aiming (is applied before head)
     relDir = GunTransform().InverseRotation().Rotate(relDir);
 
@@ -88,6 +90,10 @@ void Man::AimWeaponAI(int weapon, Vector3Par direction, float deltaT)
 
     SelectWeapon(weapon);
     Vector3 relDir(VMultiply, DirWorldToModel(), direction);
+
+    // Cargo's own transform is not its animated vehicle-seat frame.
+    if (GetHierachyParent())
+        relDir = WorldTransform().InverseRotation().Rotate(direction);
 
     const Magazine* magazine = GetMagazineSlot(weapon)._magazine;
     if (!magazine)
@@ -224,6 +230,8 @@ bool Man::AimWeapon(int weapon, Vector3Par direction)
     }
     SelectWeapon(weapon);
     Vector3 relDir(VMultiply, DirWorldToModel(), direction);
+    if (GetHierachyParent())
+        relDir = WorldTransform().InverseRotation().Rotate(direction);
 
     const WeaponModeType* mode = weapon >= 0 ? GetWeaponMode(weapon) : nullptr;
     const AmmoType* aType = mode ? mode->_ammo : nullptr;
@@ -329,7 +337,7 @@ bool Man::AimWeaponForceFire(int weapon)
 
 bool Man::CalculateAimWeapon(int weapon, Vector3& dir, Target* target)
 {
-    if (weapon < 0)
+    if (weapon < 0 || weapon >= NMagazineSlots() || !target)
     {
         return false;
     }
@@ -352,7 +360,9 @@ bool Man::CalculateAimWeapon(int weapon, Vector3& dir, Target* target)
         return false;
     }
     Vector3 tgtPos = target->LandAimingPosition();
-    float dist = tgtPos.Distance(Position());
+    const bool attached = GetHierachyParent() != nullptr;
+    const Matrix4 aimFrame = attached ? WorldTransform() : Transform();
+    float dist = tgtPos.Distance(attached ? aimFrame.Position() : Position());
     float distFactor = dist < 40 ? 0 : dist - 40;
 
     dist += _aimInaccuracyDist * distFactor;
@@ -391,7 +401,8 @@ bool Man::CalculateAimWeapon(int weapon, Vector3& dir, Target* target)
         time = 0;
     }
     saturateMin(time, 4);
-    Vector3 myPos = PositionModelToWorld(GetWeaponPoint(weapon));
+    Vector3 myPos = attached ? aimFrame.FastTransform(GetWeaponPoint(weapon))
+                            : PositionModelToWorld(GetWeaponPoint(weapon));
 
     float fall = Square(time) * balFactor;
 
@@ -424,7 +435,11 @@ bool Man::CalculateAimWeapon(int weapon, Vector3& dir, Target* target)
     tgtPos[1] += fall;
 
     const float predTime = 0.2f;
-    myPos += Speed() * predTime;
+    myPos += (attached ? WorldSpeed() : Speed()) * predTime;
+    // The bullet inherits the carrier's linear speed; compensate its travel
+    // as well as the short prediction delay. Preserve the on-foot baseline.
+    if (attached)
+        myPos += WorldSpeed() * time;
 
     Vector3 speedEst = target->speed;
     if (aInfo)
@@ -626,6 +641,8 @@ Matrix3 Man::GetHeadRelOrientation() const
 Vector3 Man::GetWeaponDirection(int weapon) const
 {
     Vector3 dir = GetWeaponRelDirection(weapon);
+    if (GetHierachyParent())
+        return WorldTransform().Rotate(dir);
     DirectionModelToWorld(dir, dir);
     return dir;
 }
@@ -1323,7 +1340,9 @@ float Man::GetAimed(int weapon, Target* target) const
         visible = 1 - (1 - visible) * 0.5f;
 
         // predict shot result
-        Vector3 wPos = PositionModelToWorld(GetWeaponPoint(weapon));
+        const bool attached = GetHierachyParent() != nullptr;
+        Vector3 wPos = attached ? WorldTransform().FastTransform(GetWeaponPoint(weapon))
+                               : PositionModelToWorld(GetWeaponPoint(weapon));
 
         float dist = ap.Distance(wPos);
         float distFactor = dist < 40 ? 0 : dist - 40;
@@ -1359,6 +1378,8 @@ float Man::GetAimed(int weapon, Target* target) const
         float eDist = estPos.Distance(wPos);
 
         Vector3 hit = wPos + wDir * eDist;
+        if (attached)
+            hit += WorldSpeed() * time;
         hit[1] -= 0.5f * G_CONST * balFactor * time * time;
 
         Vector3 norm = (hit - wPos);
