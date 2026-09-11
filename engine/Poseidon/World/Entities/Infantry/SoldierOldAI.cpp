@@ -69,6 +69,9 @@ bool Man::CargoWeaponLineClear(int weapon) const
         !mode || !mode->_ammo || mode->_ammo->_simulation != AmmoShotBullet)
         return false;
     const auto* vehicle = Brain()->GetVehicleIn();
+    if (Brain()->IsPlayer() && (!GWorld->UI() || InputSubsystem::Instance().IsLookAroundEnabled() ||
+        !seat->ContainsDirection(vehicle->DirWorldToModel() * GWorld->UI()->GetCursorDirection())))
+        return false;
     const Vector3 direction = GetWeaponDirection(weapon).Normalized();
     if (!seat->ContainsDirection(vehicle->DirWorldToModel() * direction))
         return false;
@@ -83,6 +86,10 @@ bool Man::CargoWeaponLineClear(int weapon) const
     for (int i = 0; i < hits.Size(); ++i)
         if (hits[i].object != this) // Carrier intersection recurses into this seated shooter too.
             return false;
+    // Manual shots must be allowed to hit nearby objects. Keep the insertion
+    // check above; let the existing projectile collision handle what is ahead.
+    if (Brain()->IsPlayer())
+        return true;
     hits.Clear();
     GLandscape->ObjectCollision(hits, const_cast<Man*>(this), nullptr, muzzle, end, .02f, ObjIntersectFire);
     for (int i = 0; i < hits.Size(); ++i)

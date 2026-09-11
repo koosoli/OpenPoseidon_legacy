@@ -949,6 +949,8 @@ bool Man::IsVirtual(CameraType camType) const
 }
 bool Man::IsVirtualX(CameraType camType) const
 {
+    if (GetActiveCargoWeaponSeat() && camType != CamGunner)
+        return true; // A seated soldier cannot turn the carrier to follow the mouse.
     auto& input = InputSubsystem::Instance();
     if (input.IsLookAroundEnabled())
     {
@@ -969,17 +971,10 @@ void Man::LimitCursor(CameraType camType, Vector3& dir) const
     {
         return;
     }
-    if (const auto* seat = GetActiveCargoWeaponSeat(); seat && !InputSubsystem::Instance().IsLookAroundEnabled())
+    if (GetActiveCargoWeaponSeat())
     {
-        constexpr float radians = H_PI / 180.0f;
-        const Matrix4 frame = WorldTransform();
-        const Vector3 local = frame.InverseRotation().Rotate(dir);
-        float azimuth = std::remainder(atan2(local.X(), local.Z()) - seat->azimuth * radians, 2 * H_PI);
-        float elevation = atan2(local.Y(), sqrt(Square(local.X()) + Square(local.Z())));
-        Limit(azimuth, -seat->halfAngle * radians, seat->halfAngle * radians);
-        Limit(elevation, seat->minElevation * radians, seat->maxElevation * radians);
-        azimuth += seat->azimuth * radians;
-        dir = frame.Rotate(Vector3(sin(azimuth) * cos(elevation), sin(elevation), cos(azimuth) * cos(elevation)));
+        // AimWeapon clamps the rifle, not the view. Looking outside the seat arc
+        // lowers the rifle rather than dragging the player's camera sideways.
         return;
     }
     if (GetCursorRelMode(camType) != CKeyboard)
