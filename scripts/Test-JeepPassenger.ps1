@@ -3,6 +3,7 @@ param([switch]$ProjectileFrame, [switch]$AnimationPreview, [switch]$AnimationVid
       [ValidateSet(0,90,180)][int]$NpcHeading=0, [switch]$NpcDriver,
       [switch]$NpcTransitions, [switch]$NpcMoving, [switch]$NpcTurning, [switch]$SecondJeep,
       [ValidateSet('near','far')][string]$TurnTarget='near',
+      [ValidateSet('individual','group')][string]$DriverCommand='individual',
       [switch]$PlayerFire, [switch]$Lifecycle, [switch]$SaveLoad,
       [switch]$DefaultPackage, [string]$UserMod='',
       [ValidateSet('','missing','incompatible')][string]$AutomaticOriginal='', [string]$MissionPath='',
@@ -11,6 +12,7 @@ param([switch]$ProjectileFrame, [switch]$AnimationPreview, [switch]$AnimationVid
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
 if ($NpcTurning) {$NpcMoving=$true}
+if ($DriverCommand -eq 'group' -and !$NpcMoving) {throw 'Group-driver command requires a moving test'}
 if ($PlayerFire) {
     if ($NpcFire -or $NpcMoving -or $NpcTransitions -or $NpcScenario -ne 'clear') {throw 'Player fire is a separate case'}
     $NpcFire=$true
@@ -68,7 +70,7 @@ if ($packArchive) {
     try {$packHash=[BitConverter]::ToString($sha.ComputeHash($packStream)).Replace('-','')}
     finally {$packStream.Dispose(); $sha.Dispose()}
 }
-[pscustomobject]@{installed=$stamp.Trim();args=$gameArgs;source=(& git -C $root rev-parse HEAD);pack=$packArchive;packSha256=$packHash} |
+[pscustomobject]@{installed=$stamp.Trim();args=$gameArgs;source=(& git -C $root rev-parse HEAD);pack=$packArchive;packSha256=$packHash;driverCommand=$DriverCommand;turning=[bool]$NpcTurning;turnTarget=$TurnTarget} |
     ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $output 'test-context.json')
 $p=Start-Process -FilePath (Join-Path $GameDir 'OpenPoseidon.exe') -WorkingDirectory $GameDir -WindowStyle Hidden -PassThru -ArgumentList $gameArgs
 $null=$p.Handle
@@ -287,9 +289,12 @@ try {
         }
     }
     if ($NpcMoving) {
-        $null=Send @{cmd='exec';code='ffvMovingShots=0; ffvPassenger addEventHandler ["Fired",{if (abs(speed ffvJeep)>5) then {ffvMovingShots=ffvMovingShots+1}}]; ffvJeep setFuel 1; ffvDriver setBehaviour "CARELESS"; ffvDriver setSpeedMode "LIMITED"; ffvDriver doMove [9700,3680,0]; ffvView camSetPos [9706,3615,3]; ffvView camSetTarget ffvJeep; ffvView camCommit 0'}
+        # doMove creates a separate subgroup with SpeedNormal. Use the existing
+        # group move for an actual LIMITED run; retain individual as the stress case.
+        $driverMove=if ($DriverCommand -eq 'group') {'ffvDriverGroup move'} else {'ffvDriver doMove'}
+        $null=Send @{cmd='exec';code=('ffvMovingShots=0; ffvPassenger addEventHandler ["Fired",{if (abs(speed ffvJeep)>5) then {ffvMovingShots=ffvMovingShots+1}}]; ffvJeep setFuel 1; ffvDriver setBehaviour "CARELESS"; ffvDriver setSpeedMode "LIMITED"; '+$driverMove+' [9700,3680,0]; ffvView camSetPos [9706,3615,3]; ffvView camSetTarget ffvJeep; ffvView camCommit 0')}
         if ($NpcTurning) {
-            $null=Send @{cmd='exec';code='ffvTurnShots=0; ffvShotHeadings=[]; ffvPassenger addEventHandler ["Fired",{ffvShotHeadings=ffvShotHeadings+[getDir ffvJeep]; if ((abs(speed ffvJeep)>5) && (abs(sin(getDir ffvJeep))>0.087)) then {ffvTurnShots=ffvTurnShots+1}}]; ffvDriver doMove [9660,3680,0]'}
+            $null=Send @{cmd='exec';code=('ffvTurnShots=0; ffvShotHeadings=[]; ffvPassenger addEventHandler ["Fired",{ffvShotHeadings=ffvShotHeadings+[getDir ffvJeep]; if ((abs(speed ffvJeep)>5) && (abs(sin(getDir ffvJeep))>0.087)) then {ffvTurnShots=ffvTurnShots+1}}]; '+$driverMove+' [9660,3680,0]')}
         }
         $driveDeadline=[DateTime]::UtcNow.AddSeconds(20)
         do {
