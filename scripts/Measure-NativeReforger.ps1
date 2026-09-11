@@ -2,6 +2,7 @@ param(
  [string]$Label='baseline',
  [ValidateRange(1,25)][int]$Repeats=2,
  [ValidateSet('Village','Coast','Forest')][string]$Pose='Village',
+ [ValidateRange(0,1)][int]$NativeTextureKeys=1,
  [hashtable]$Overrides=@{},
  [string]$ReforgerAddons='C:\Program Files (x86)\Steam\steamapps\common\Arma Reforger\addons'
 )
@@ -10,8 +11,13 @@ if (!$env:LOCK_OWNER) {throw 'Run through scripts/with-game-lock.sh'}
 if (!(Test-Path -LiteralPath $ReforgerAddons -PathType Container)) {throw 'Native Reforger archives not found'}
 $root=Split-Path $PSScriptRoot -Parent
 $out=Join-Path $root 'build/native-reforger-perf'
+$user=Join-Path $out ('user-'+$Pose+'-'+$Label)
+New-Item -ItemType Directory -Force $user | Out-Null
+& "$PSScriptRoot/Write-BenchmarkGraphics.ps1" -UserDir $user -DlssMode 0
 $settings=@{
- POSEIDON_USER_DIR=(Join-Path $out 'user')
+ POSEIDON_USER_DIR=$user
+ WGR_NATIVE_TEXTURE_KEYS=[string]$NativeTextureKeys
+ WGR_LOD_GOVERNOR_RANGE='1'
  POSEIDON_VSYNC='0'
  POSEIDON_REFORGER_WORLD='worlds/eden'
  POSEIDON_REFORGER_OBJECTS='1'
