@@ -522,6 +522,17 @@ bool AIGroup::CreateTargetList(bool initialize, bool report, int budget)
                 // check unit for nearestEnemyDist2
                 saturateMin(_targetListNearest2, unit->GetNearestEnemyDist2());
             }
+            // An explicitly enabled passenger observes with his own senses, not
+            // the driver's turret. Keep this in the existing ordered/budgeted scan.
+            if (unit && unit->IsInCargo() && unit->GetLifeState() == AIUnit::LSAlive)
+            {
+                Man* passenger = dyn_cast<Man>(unit->GetPerson());
+                if (passenger && passenger->GetActiveCargoWeaponSeat())
+                {
+                    passenger->WhatIsVisible(_targetList, initialize);
+                    saturateMin(_targetListNearest2, unit->GetNearestEnemyDist2());
+                }
+            }
             // Charged after the slot, not before: a budget too small to pay for one item
             // must still buy one, or a pass suspended here never advances.
             if (work.Spend(1))

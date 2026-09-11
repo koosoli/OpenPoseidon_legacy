@@ -488,6 +488,7 @@ void TargetList::SortBySubjectiveCost()
 void EntityAI::AddNewTargets(TargetList& res, bool initialize)
 {
     float nearestEnemyDist2 = 1e10;
+    const Vector3 sensorPosition = GetHierachyParent() ? WorldTransform().Position() : Position();
 
     _newTargetsTime = Glob.time;
 
@@ -515,7 +516,7 @@ void EntityAI::AddNewTargets(TargetList& res, bool initialize)
     for (int i = 0; i < nv + nb; i++)
     {
         Vehicle* vehicle = i < nv ? GLOB_WORLD->GetVehicle(i) : GLOB_WORLD->GetBuilding(i - nv);
-        float dist2 = vehicle->Position().Distance2Inline(Position());
+        float dist2 = vehicle->Position().Distance2Inline(sensorPosition);
         if (dist2 > maxVisibility2)
         {
             continue;
@@ -697,6 +698,7 @@ float EntityAI::CalcVisibility(EntityAI* ai, float dist2, float* audibility, boo
 void EntityAI::TrackTargets(TargetList& res, AIUnit* unit, int canSee, bool initialize, float maxDist,
                             float trackTargetsPeriod)
 {
+    const Vector3 sensorPosition = GetHierachyParent() ? WorldTransform().Position() : Position();
     if (!canSee)
     {
         return;
@@ -807,7 +809,7 @@ void EntityAI::TrackTargets(TargetList& res, AIUnit* unit, int canSee, bool init
             continue;
         }
 
-        float dist2 = ai->Position().Distance2Inline(Position());
+        float dist2 = ai->Position().Distance2Inline(sensorPosition);
         if (dist2 > Square(maxDist))
         {
             continue;
@@ -873,12 +875,12 @@ void EntityAI::TrackTargets(TargetList& res, AIUnit* unit, int canSee, bool init
         float audibleAccuracy = audibility * 3;
 
         Vector3Val eDir = GetEyeDirection();
-        float cosFiEye = eDir.CosAngle(ai->Position() - Position());
+        float cosFiEye = eDir.CosAngle(ai->Position() - sensorPosition);
         float cosFiWep = cosFiEye;
 
         if (_currentWeapon >= 0)
         {
-            cosFiWep = wepDir.CosAngle(ai->Position() - Position());
+            cosFiWep = wepDir.CosAngle(ai->Position() - sensorPosition);
         }
 
         float cosEyeAdjusted = cosEye;
@@ -1034,7 +1036,7 @@ void EntityAI::TrackTargets(TargetList& res, AIUnit* unit, int canSee, bool init
         float actSpotability = actSpotabilityEye;
         if (actSpotability < 1 && actSpotability < actSpotabilityEar)
         {
-            spotError = ai->Position().Distance(Position()) * 0.8;
+            spotError = ai->Position().Distance(sensorPosition) * 0.8;
             delayCoef = 2.5f;
             actSpotability = actSpotabilityEar;
             hidden = 1;
@@ -1119,7 +1121,7 @@ void EntityAI::TrackTargets(TargetList& res, AIUnit* unit, int canSee, bool init
         if (center->IsEnemy(target->side) && target->isKnown && target->delay < Glob.time && !target->destroyed &&
             !target->vanished)
         {
-            if (Position().Distance2(target->position) < Square(20 * VisibleSize()) && ai->CommanderUnit() &&
+            if (sensorPosition.Distance2(target->position) < Square(20 * VisibleSize()) && ai->CommanderUnit() &&
                 center->IsEnemy(ai->GetTargetSide()))
             {
                 if (unit->IsLocal() && !unit->IsPlayer())
@@ -1280,7 +1282,7 @@ void EntityAI::TrackTargets(TargetList& res, AIUnit* unit, int canSee, bool init
         if (center->IsEnemy(target->side) && target->isKnown &&
             (ai->GetType()->GetIRTarget() || !ai->GetType()->GetLaserTarget()))
         {
-            float dist2 = target->position.Distance2(Position());
+            float dist2 = target->position.Distance2(sensorPosition);
             saturateMin(nearestEnemy2, dist2);
         }
     }
@@ -1293,7 +1295,7 @@ void EntityAI::TrackTargets(TargetList& res, AIUnit* unit, int canSee, bool init
             EntityAI* ai = target._idExact;
             if (ai && (ai->GetType()->GetIRTarget() || !ai->GetType()->GetLaserTarget()))
             {
-                float dist2 = target._realPos.Distance2Inline(Position());
+                float dist2 = target._realPos.Distance2Inline(sensorPosition);
                 saturateMin(nearestEnemy2, dist2);
             }
         }

@@ -154,6 +154,7 @@ void RegisterSqf(HarnessServer& hs)
                                        const auto& hit = hits[i];
                                        cJSON* item = cJSON_CreateObject();
                                        cJSON_AddBoolToObject(item, "carrier", hit.object == vehicle);
+                                       cJSON_AddBoolToObject(item, "shooter", hit.object == man);
                                        cJSON_AddNumberToObject(item, "component", hit.component);
                                        cJSON_AddNumberToObject(item, "hierarchy", hit.hierLevel);
                                        cJSON_AddNumberToObject(item, "under", hit.under);

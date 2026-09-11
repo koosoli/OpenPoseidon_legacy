@@ -69,10 +69,15 @@ bool Man::CargoWeaponLineClear(int weapon) const
     // Do not ignore the carrier: a muzzle outside a windscreen is not permission
     // to push the rifle through it. Check the pivot-to-muzzle segment as well.
     GLandscape->ObjectCollision(hits, const_cast<Man*>(this), nullptr, pivot, muzzle, .02f, ObjIntersectFire);
-    if (hits.Size() > 0)
-        return false;
+    for (int i = 0; i < hits.Size(); ++i)
+        if (hits[i].object != this) // Carrier intersection recurses into this seated shooter too.
+            return false;
+    hits.Clear();
     GLandscape->ObjectCollision(hits, const_cast<Man*>(this), nullptr, muzzle, end, .02f, ObjIntersectFire);
-    return hits.Size() == 0 && GLandscape->IntersectWithGround(nullptr, muzzle, direction, 0, 2.0f) >= 2.0f;
+    for (int i = 0; i < hits.Size(); ++i)
+        if (hits[i].object != this)
+            return false;
+    return GLandscape->IntersectWithGround(nullptr, muzzle, direction, 0, 2.0f) >= 2.0f;
 }
 
 void Man::AimHeadForward()

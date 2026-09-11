@@ -1857,7 +1857,7 @@ bool EntityAI::GetWeaponReady(int weapon, Target* target) const
     {
         return true;
     }
-    float dist2 = target->AimingPosition().Distance2(Position());
+    float dist2 = target->AimingPosition().Distance2(GetHierachyParent() ? WorldTransform().Position() : Position());
     float maxDist2 = Square(mode->_aiRateOfFireDistance);
     if (dist2 < maxDist2)
     {

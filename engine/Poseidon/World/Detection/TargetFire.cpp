@@ -1251,7 +1251,7 @@ bool EntityAI::WhatFireResult(FireResult& result, const Target& target, float ti
 
         float timeToReload = magazine->_reload + magazine->_reloadMagazine;
         timeToAim = floatMax(timeToReload, timeToAim);
-        float distance = target.position.Distance(Position());
+        float distance = target.position.Distance(GetHierachyParent() ? WorldTransform().Position() : Position());
         FireResult tResult;
 #if DIAG_RESULT
         LOG_DEBUG(AI, " times: live {:.3f}, aim {:.3f}", timeToShoot, timeToAim);
@@ -1365,7 +1365,7 @@ bool EntityAI::WhatFireResult(FireResult& result, const Target& target, int weap
 
     float timeToReload = magazine->_reload + magazine->_reloadMagazine;
     timeToAim = floatMax(timeToReload, timeToAim);
-    float distance = target.position.Distance(Position());
+    float distance = target.position.Distance(GetHierachyParent() ? WorldTransform().Position() : Position());
     FireResult tResult;
 #if DIAG_RESULT
     LOG_DEBUG(AI, " times: live {:.3f}, aim {:.3f}", timeToShoot, timeToAim);
