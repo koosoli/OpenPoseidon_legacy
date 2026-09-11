@@ -88,6 +88,22 @@ public:
 
     void Stamp(float x, float z, float radius, float strength = 0.9f)
     {
+        ModifyDisc(x, z, radius, strength, false);
+    }
+    // Rate-integrated removal, unlike a footprint's absolute compression depth.
+    void ErodeRotor(float x, float z, float radius, float rotorSpeed, float height, float seconds)
+    {
+        if (!std::isfinite(rotorSpeed) || !std::isfinite(height) ||
+            !std::isfinite(seconds) || seconds <= 0 || height < 0 || height >= 30) return;
+        const float speed = std::clamp(rotorSpeed, 0.0f, 1.0f);
+        const float groundEffect = 1.0f - height / 30.0f;
+        const float metres = 0.08f * speed * speed * groundEffect * groundEffect * std::min(seconds, 0.25f);
+        ModifyDisc(x, z, std::min(radius, 8.0f), metres, true);
+    }
+
+private:
+    void ModifyDisc(float x, float z, float radius, float strength, bool additive)
+    {
         if (!enabled || _depth <= 0.0f || !std::isfinite(x) || !std::isfinite(z) ||
             std::abs(x) > 1000000.0f || std::abs(z) > 1000000.0f ||
             !std::isfinite(radius) || radius <= 0.0f || !std::isfinite(strength) || strength <= 0.0f) return;
@@ -125,11 +141,14 @@ public:
                 }
                 Cell& cell = it->second.cells[(iz - cz * ChunkSize) * ChunkSize + ix - cx * ChunkSize];
                 const float edge = std::clamp((1.0f - r) * 4.0f, 0.0f, 1.0f);
-                cell.deficit = std::max(Remaining(cell), _depth * std::clamp(strength, 0.0f, 1.0f) * edge);
+                const float remaining = Remaining(cell);
+                cell.deficit = additive ? std::min(_depth, remaining + strength * edge)
+                    : std::max(remaining, _depth * std::clamp(strength, 0.0f, 1.0f) * edge);
                 cell.precipitation = _precipitation;
                 it->second.filledAt = std::max(it->second.filledAt, _precipitation + cell.deficit);
             }
     }
+public:
     void Trail(float ax, float az, float bx, float bz, float radius, float strength = 0.8f)
     {
         if (!enabled || !std::isfinite(radius) || radius <= 0.0f) return;

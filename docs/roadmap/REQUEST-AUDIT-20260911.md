@@ -1,5 +1,21 @@
 # Anforderungspruefung, 11. September 2026
 
+## Aktueller Nachtrag 20:32 (kein Gesamtabschluss)
+
+- Installiert bd1f889c: tiefer Schnee beim aufrechten Gehen erzeugt jetzt eine
+  durchgehende Rinne statt einzelner Abdruecke. Ein-Meter-Test, Wiederauffuellen
+  und neue Spur sichtbar geprueft; Rander noch kantig. Fahrzeug, Rotorwind und
+  interner Untergrundblick bleiben offen.
+- Genannte Default-Pakete und Fusion/Showcase/SizeProbe liegen unter Mods/@OP_*.
+  Sandbox-Menue, volle Sandbox-Pruefung und Fusion-Inseln bestehen mit sauberem
+  Beenden. Vorbereitete Sandbox-Mitfahrstation ist installiert; dies beweist
+  keine FFV-Bedienbarkeit. Restliche lose Rendererassets separat auditieren.
+- Jeep-FFV ist auf ausdrueckliche Besitzeranweisung geparkt. Keine weiteren
+  langwierigen Animations-/Waffenarbeiten; historische Harness-Erfolge widerlegen
+  den gemeldeten Bedienfehler nicht. Siehe PARKED.md.
+- Die folgenden aelteren Abschnitte sind historische Nachweise. Satmaps mit
+  Objekten, Reforger-Optik/Streaming und sonstige offene Ziele bleiben offen.
+
 **Nicht alles fertig. Dies ist eine Zwischenpruefung, kein Abschlussbericht.**
 Quellstand: `8152607f`, asset-obs-001, nach Fetch identisch mit
 `safety/consolidated-v2`. Installierter Stempel: `e1738ab4`, 03:39, Deploy.ps1.

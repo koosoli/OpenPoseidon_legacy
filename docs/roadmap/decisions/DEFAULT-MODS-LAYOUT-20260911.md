@@ -3,7 +3,7 @@
 Owner request: place our gameplay content under the game's Mods directory,
 not beside the executable or mixed into original AddOns/Missions.
 
-Prepared, NOT installed or runtime accepted yet. Migration fixtures passed
+Installed bd1f889c at 20:25 via Deploy.ps1. Migration fixtures passed
 20260911-201913: idempotence, user file preservation, conflicts and junctions.
 The combined snow/default-content suite passed 9998 assertions in 15 cases.
 
@@ -36,8 +36,13 @@ deletion, no stock cwr_logo.pbo, Resistance missions or third-party mods touched
 Executable, DLLs, runtime configuration, saves, caches and diagnostics are not
 gameplay asset packages and are not swept into Mods indiscriminately.
 
-Pending acceptance: installed mission discovery; Fusion/Showcase loading;
-missing/disabled/user-priority tests; root residue audit and clean shutdown.
+Installed acceptance: all five compatible packages found in the normal-start
+log; Showcase menu discovery and full harness pass with clean exit; Fusion
+loads all five island sites and exits cleanly. No root @OP_* directories remain.
+Runs: build/jeep-ffv/mods-showcase-runtime.log and mods-fusion-runtime.log.
+Missing/disabled/user-priority resolver unit tests pass; a new clean-release
+runtime priority matrix has not been repeated after this path-only change.
+This moves the enumerated packs, not every remaining loose renderer asset.
 Jeep firing acceptance is parked by the owner, not required to relocate its files.
 Old instructions naming Missions/FusionTour or Missions/ShowcaseLab refer to
 the pre-migration installation, not the new physical paths.

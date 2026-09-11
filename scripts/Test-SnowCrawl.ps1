@@ -1,5 +1,5 @@
 param([switch]$ResetSettings, [switch]$Storm, [switch]$Refill,
-      [ValidateRange(0.01,1.0)][double]$Depth=0.18, [switch]$ProneView, [switch]$Walking,
+      [ValidateRange(0.01,1.0)][double]$Depth=0.18, [switch]$ProneView, [switch]$Walking, [switch]$Rotor,
       [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
 if ($Walking -and $ProneView) {throw 'Walking and ProneView are different fixtures'}
@@ -11,7 +11,7 @@ $output=Join-Path $root ('build/snow-crawl/acceptance/crawl-'+(Get-Date -Format 
 $env:POSEIDON_USER_DIR=Join-Path $output 'user'
 New-Item -ItemType Directory -Force $env:POSEIDON_USER_DIR | Out-Null
 $stamp | Set-Content -LiteralPath (Join-Path $output 'DEPLOYED-FROM.txt')
-[pscustomobject]@{installed=$stamp.Trim();depth=$Depth;walking=[bool]$Walking;proneView=[bool]$ProneView;refill=[bool]$Refill;storm=[bool]$Storm;resetSettings=[bool]$ResetSettings} |
+[pscustomobject]@{installed=$stamp.Trim();depth=$Depth;rotor=[bool]$Rotor;walking=[bool]$Walking;proneView=[bool]$ProneView;refill=[bool]$Refill;storm=[bool]$Storm;resetSettings=[bool]$ResetSettings} |
     ConvertTo-Json | Set-Content -LiteralPath (Join-Path $output 'test-context.json')
 & "$PSScriptRoot/Write-BenchmarkGraphics.ps1" -UserDir $env:POSEIDON_USER_DIR -DlssMode 0
 $env:POSEIDON_SNOW_TEST_DEPTH=$Depth.ToString([Globalization.CultureInfo]::InvariantCulture)
@@ -56,10 +56,38 @@ try {
     }
     $cover=Send @{cmd='dev_snow';action='state'}
     if ([Math]::Abs($cover.depth-$Depth) -gt 0.00001) {throw 'Actual snow depth differs from requested fixture'}
+    if ($Rotor) {
+        $null=Send @{cmd='exec';code='snowHeli="UH60" createVehicle [9700,3630,0]; snowHeli engineOn false; crawlView="camera" camCreate [9720,3605,15]; crawlView cameraEffect ["internal","back"]; crawlView camSetTarget [9700,3630,0]; crawlView camCommit 0'}
+        Start-Sleep -Seconds 5
+        $initial=Send @{cmd='dev_snow';action='sample';x=9700;z=3630}
+        if ($initial.deficit -ne 0) {throw 'Stopped rotor changed snow'}
+        $null=Send @{cmd='screenshot';path=(Join-Path $output 'rotor-before.png')}
+        $null=Send @{cmd='exec';code='snowHeli engineOn true'}
+        Start-Sleep -Seconds 30
+        $null=Send @{cmd='eval';code='[getPos snowHeli,isEngineOn snowHeli]'}
+        $eroded=Send @{cmd='dev_snow';action='sample';x=9700;z=3630}
+        if ($eroded.deficit -le 0.02) {throw 'Running rotor did not erode snow'}
+        $outside=Send @{cmd='dev_snow';action='sample';x=9720;z=3630}
+        if ($outside.deficit -ne 0) {throw 'Rotor erosion escaped its bounded footprint'}
+        $null=Send @{cmd='screenshot';path=(Join-Path $output 'rotor-after.png')}
+        $null=Send @{cmd='exec';code='deleteVehicle snowHeli'}
+        Start-Sleep -Seconds 2
+        $null=Send @{cmd='screenshot';path=(Join-Path $output 'rotor-ground.png')}
+        $null=Send @{cmd='dev_snow';action='deposit';metres=1}
+        Start-Sleep -Seconds 2
+        $filled=Send @{cmd='dev_snow';action='sample';x=9700;z=3630}
+        if ($filled.deficit -ne 0) {throw 'Snowfall failed to refill rotor depression'}
+        $null=Send @{cmd='screenshot';path=(Join-Path $output 'rotor-refilled.png')}
+        $null=Send @{cmd='exit'}
+        if (!$p.WaitForExit(20000) -or $p.ExitCode -ne 0) {throw 'Rotor test exit failed'}
+        if (Select-String -LiteralPath $log -Pattern 'Validation Error|panicked at|DeviceLost' -Quiet) {throw 'Rotor renderer error'}
+        Write-Host "Rotor contact passed; inspect captures in $output"
+        return
+    }
     $null=Send @{cmd='exec';code='crawlWalker setPos [9700,3600,0]; doStop crawlWalker; crawlView="camera" camCreate [9703,3598,3]; crawlView cameraEffect ["internal","back"]; crawlView camSetTarget [9700,3604,0]; crawlView camCommit 0'}
     Start-Sleep -Seconds 2
     $null=Send @{cmd='screenshot';path=(Join-Path $output 'before.png')}
-    $null=Send @{cmd='exec';code=('crawlWalker setUnitPos "'+$posture+'"; crawlWalker setBehaviour "COMBAT"; crawlWalker forceSpeed 1; crawlWalker doMove [9700,3606,0]')}
+    $null=Send @{cmd='exec';code=('crawlWalker setUnitPos "'+$posture+'"; crawlWalker setBehaviour "COMBAT"; crawlWalker doMove [9700,3606,0]')}
     Start-Sleep -Seconds 10
     $position=Send @{cmd='eval';code='getPos crawlWalker'}
     $null=Send @{cmd='screenshot';path=(Join-Path $output 'crawling.png')}

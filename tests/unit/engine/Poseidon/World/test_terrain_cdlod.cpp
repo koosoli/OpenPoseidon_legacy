@@ -215,6 +215,31 @@ TEST_CASE("Deep walking snow forms a continuous channel instead of footprints", 
     CHECK(snow.DeficitAt(80, 0) == 0.0f);
 }
 
+TEST_CASE("Rotor snow erosion is progressive bounded and refills", "[snow][terrain]")
+{
+    SnowField snow;
+    snow.enabled = true;
+    snow.Deposit(0.5f);
+    snow.ErodeRotor(0.0625f, 0.0625f, 3, 0, 0, 0.25f);
+    snow.ErodeRotor(0.0625f, 0.0625f, 3, 1, 30, 0.25f);
+    snow.ErodeRotor(0.0625f, 0.0625f, 3, 1, -1, 0.25f);
+    CHECK(snow.Chunks() == 0);
+    snow.ErodeRotor(0.0625f, 0.0625f, 3, 1, 0, 0.25f);
+    CHECK(snow.DeficitAt(0, 0) == Catch::Approx(0.02f));
+    CHECK(snow.DeficitAt(40, 0) == 0);
+    for (int i = 0; i < 3; ++i)
+        snow.ErodeRotor(0.0625f, 0.0625f, 3, 1, 0, 0.25f);
+    CHECK(snow.DeficitAt(0, 0) == Catch::Approx(0.08f));
+    snow.Deposit(0.03f);
+    CHECK(snow.DeficitAt(0, 0) == Catch::Approx(0.05f));
+    for (int i = 0; i < 40; ++i)
+        snow.ErodeRotor(0.0625f, 0.0625f, 3, 1, 0, 0.25f);
+    CHECK(snow.DeficitAt(0, 0) == Catch::Approx(0.5f));
+    snow.ErodeRotor(20.0625f, 0.0625f, 1000, 1, 15, 1000);
+    CHECK(snow.DeficitAt(160, 0) == Catch::Approx(0.005f));
+    CHECK(snow.DeficitAt(240, 0) == 0);
+}
+
 TEST_CASE("Snow tracks interpolate travel and ignore teleports", "[snow][terrain]")
 {
     SnowField snow;

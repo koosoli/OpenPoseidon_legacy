@@ -9,6 +9,8 @@
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Weather/SnowField.hpp>
+#include <Poseidon/World/Weather/AirflowField.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/UI/Locale/StringtableExt.hpp>
 #include <Poseidon/Graphics/Textures/TexturePreload.hpp>
@@ -358,6 +360,24 @@ static Vector3 RotorUpForce(Vector3Val speed, float coef, float alt)
 void Helicopter::Simulate(float deltaT, SimulationImportance prec)
 {
     _isDead = IsDammageDestroyed();
+
+    // Persistent ground edits belong to each helicopter, not the camera's four
+    // nearest airflow emitters. Keep the fine snow-field work at 4 Hz.
+    if (GSnow().enabled && GSnow().Depth() > 0 && GAirflow.LocalEnabled() &&
+        _rotorSpeed > 0.1f && std::isfinite(deltaT) && deltaT > 0 && DirectionUp().Y() > 0.5f)
+    {
+        _snowRotorTime += std::min(deltaT, 0.25f);
+        if (_snowRotorTime >= 0.25f)
+        {
+            const Vector3 p = Position();
+            const float ground = GLandscape->SurfaceY(p.X(), p.Z());
+            if (ground > GLandscape->GetSeaLevel() && GLandscape->RoadSurfaceY(p.X(), p.Z()) <= ground + 0.3f)
+                GSnow().ErodeRotor(p.X(), p.Z(), std::max(GetRadius() * 0.8f, 3.0f),
+                                   _rotorSpeed, p.Y() - ground, 0.25f);
+            _snowRotorTime -= 0.25f;
+        }
+    }
+    else _snowRotorTime = 0;
 
     if (_rotorSpeed > 0)
     {

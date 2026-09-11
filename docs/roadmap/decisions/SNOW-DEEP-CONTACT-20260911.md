@@ -22,7 +22,7 @@ head corridor, outside footprint, invalid offsets and refill by precipitation.
 Installed A/B acceptance is pending. This does not close standing body or vehicle
 displacement, rotor erosion, general buried-camera cases, or the whole snow task.
 
-## Walking follow-up (not yet runtime accepted)
+## Walking follow-up (installed narrow acceptance)
 
 The owner clarified that deep walking must produce a continuous channel, not
 individual footsteps. Above 0.25 m cover, the existing 10 Hz body-contact path
@@ -36,3 +36,23 @@ Unit coverage verifies continuity, untouched surrounding snow, shallow/disabled
 no-op, teleport rejection and refill. Combined snow/default-content tests:
 9998 assertions, 15 cases passed. Test-SnowCrawl -Walking selects an upright
 actor for installed acceptance. Vehicle and rotor displacement remain open.
+
+Installed bd1f889c, crawl-20260911-202646: actual depth 1.0 m, upright soldier
+travels to [9700.16,3605.26,-0.00137329]. Inspected crawling.png and trail.png:
+continuous channel, no separated footprints. Refilled.png is smooth again;
+new passage creates a channel again. Shutdown passed. The metre-deep channel
+edges are still visibly faceted, not a claim of final snow quality or a fix for
+the internal prone camera. The first attempt 202527 failed because the test
+used unsupported forceSpeed; removed that test command, not an engine defect.
+
+## Rotor follow-up (prepared, runtime pending)
+
+Each helicopter now incrementally erodes the same persistent surface field at
+4 Hz, only upright, above dry terrain, below 30 m and with rotating blades.
+Radius is capped at 8 m; removal scales with squared rotor speed and fades with
+height. This is a bounded visual ground-effect approximation, not snow fluid
+dynamics. It does not yet emit a separate plume. It does not depend on the
+camera-ranked four-rotor airflow list. Existing roof masking still applies.
+Tests cover stopped/high rotor, gradual removal, bounded extent, saturation
+and refill: combined suite 10006 assertions in 16 cases. Installed -Rotor
+fixture and incremental runtime cost are pending; do not mark accepted yet.

@@ -451,6 +451,20 @@ void RegisterSnowProbe(HarnessServer& hs)
                     return HarnessProtocol::ErrorResponse("deposit requires metres in (0, 1]");
                 snow.Deposit(static_cast<float>(metres->valuedouble));
             }
+            else if (std::strcmp(action, "sample") == 0)
+            {
+                const auto* x = cJSON_GetObjectItemCaseSensitive(root, "x");
+                const auto* z = cJSON_GetObjectItemCaseSensitive(root, "z");
+                if (!cJSON_IsNumber(x) || !cJSON_IsNumber(z) ||
+                    !std::isfinite(x->valuedouble) || !std::isfinite(z->valuedouble) ||
+                    std::abs(x->valuedouble) > 1000000 || std::abs(z->valuedouble) > 1000000)
+                    return HarnessProtocol::ErrorResponse("sample needs bounded world x/z");
+                auto* out = cJSON_CreateObject();
+                cJSON_AddNumberToObject(out, "deficit", snow.DeficitAt(
+                    static_cast<int>(std::floor(x->valuedouble / SnowField::CellSize)),
+                    static_cast<int>(std::floor(z->valuedouble / SnowField::CellSize))));
+                return HarnessProtocol::JsonResponse(out);
+            }
             else if (std::strcmp(action, "state") != 0) return HarnessProtocol::ErrorResponse("unknown snow action");
             cJSON* out = cJSON_CreateObject();
             cJSON_AddBoolToObject(out, "enabled", snow.enabled);
