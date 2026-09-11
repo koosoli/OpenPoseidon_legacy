@@ -66,15 +66,15 @@ MapEditorAction DrawMapEditorTab()
         "This tab is the home for those future editor tools, not a finished map authoring pipeline.");
     }
     if (Button("Reset brush settings (not terrain)")) ResetTerrainBrush();
-    ImGui::SeparatorText("Rocket impact craters");
+    ImGui::SeparatorText("Ballistic impact craters");
     auto& craters = RocketCraters();
-    Checkbox("Rockets create terrain craters", &craters.enabled);
-    SliderFloat("Rocket crater radius", &craters.radius, 8.0f, 100.0f, "%.1f m");
-    SliderFloat("Rocket crater depth", &craters.depth, 0.1f, 8.0f, "%.1f m");
+    Checkbox("Rockets / tank shells create terrain craters", &craters.enabled);
+    SliderFloat("Impact crater radius", &craters.radius, 8.0f, 100.0f, "%.1f m");
+    SliderFloat("Impact crater depth", &craters.depth, 0.1f, 8.0f, "%.1f m");
     ImGui::TextWrapped("Experimental, single-player, mission-local. Land impacts only; "
         "minimum radius is 0.75 terrain grid cells. Buildings and AI paths are not updated. "
         "The first impact may pause briefly to prepare terrain collision. Turning off does not undo craters.");
-    if (Button("Reset rocket crater settings")) ResetRocketCraters();
+    if (Button("Reset impact crater settings")) ResetRocketCraters();
     return action;
 }
 }

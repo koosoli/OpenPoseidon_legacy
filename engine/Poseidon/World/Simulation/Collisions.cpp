@@ -1267,7 +1267,10 @@ void Landscape::ExplosionDammage(EntityAI* owner, Shot* shot, Object* directHit,
     ExplosionDammageEffects(owner, shot, directHit, pos, dir, type, enemyDammage);
     GetNetworkManager().ExplosionDammageEffects(owner, shot, directHit, pos, dir, type, enemyDammage);
     // Apply after damage/effects so their ground queries see the impact's original surface.
-    if (Dev::RocketCraters().enabled && shot && dyn_cast<Missile>(shot))
+    // ShotBullet inherits ShotShell: classify by ammo simulation, not that base class.
+    // Timed hand grenades retain their existing behaviour.
+    const bool impactShell = type->_simulation == AmmoShotShell && type->explosionTime <= 0.0f;
+    if (Dev::RocketCraters().enabled && shot && (dyn_cast<Missile>(shot) || impactShell))
     {
         const bool changed = !directHit && type->indirectHit > 0 &&
             Dev::RocketTerrainImpact(pos.X(),pos.Y(),pos.Z());

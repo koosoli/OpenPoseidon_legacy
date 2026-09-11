@@ -1,5 +1,5 @@
 param([string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',
-      [string]$OutputDir='')
+      [string]$OutputDir='', [ValidateSet('LAW','Shell105','Shell125','Heat')][string]$Ammo='LAW')
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
 $root=Split-Path $PSScriptRoot -Parent
@@ -41,7 +41,7 @@ try {
     function Height {return [double](Send @{cmd='eval';code='triTerrainHeight [9700,3600]'}).result}
     function Fire {
         $height=((Height)+15).ToString([Globalization.CultureInfo]::InvariantCulture)
-        $null=Send @{cmd='exec';code=('craterRocket="LAW" createVehicle [9700,3600,'+$height+']; craterRocket setPos [9700,3600,'+$height+']; craterRocket setVectorDirAndUp [[0,0,-1],[0,1,0]]; craterRocket setVelocity [0,0,-100]')}
+        $null=Send @{cmd='exec';code=('craterRocket="'+$Ammo+'" createVehicle [9700,3600,'+$height+']; craterRocket setPos [9700,3600,'+$height+']; craterRocket setVectorDirAndUp [[0,0,-1],[0,1,0]]; craterRocket setVelocity [0,0,-100]')}
         Start-Sleep -Seconds 5
     }
     Start-Sleep -Seconds 15
@@ -67,7 +67,7 @@ try {
     $null=Send @{cmd='eval';code='triTerrainBrushMode "restore"'}
     $restored=Height
     if ([Math]::Abs($restored-$before) -gt 0.001) {throw 'Terrain reset did not restore original height'}
-    Write-Host "HEIGHTS $before -> $default -> $off -> $reset -> $restored"
+    Write-Host "$Ammo HEIGHTS $before -> $default -> $off -> $reset -> $restored"
     $null=Send @{cmd='exit'}
     if (!$p.WaitForExit(20000) -or $p.ExitCode -ne 0) {throw 'Game exit failed'}
     if (Select-String -LiteralPath $log -Pattern 'Validation Error|panicked at|DeviceLost' -Quiet) {throw 'Renderer error'}
