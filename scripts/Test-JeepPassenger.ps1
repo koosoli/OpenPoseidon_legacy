@@ -1,7 +1,7 @@
 param([switch]$ProjectileFrame, [switch]$AnimationPreview, [switch]$AnimationVideo, [switch]$NpcFire,
       [ValidateSet('clear','hold','outside','blocked','friendly')][string]$NpcScenario='clear',
       [ValidateSet(0,90,180)][int]$NpcHeading=0, [switch]$NpcDriver,
-      [switch]$NpcTransitions, [switch]$NpcMoving, [switch]$PlayerFire, [switch]$Lifecycle,
+      [switch]$NpcTransitions, [switch]$NpcMoving, [switch]$PlayerFire, [switch]$Lifecycle, [switch]$SaveLoad,
       [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
@@ -17,6 +17,7 @@ if ($NpcTransitions -and (!$NpcFire -or $NpcScenario -ne 'clear')) {throw 'Trans
 if ($NpcMoving -and (!$NpcFire -or $NpcScenario -ne 'clear' -or $NpcHeading -ne 0 -or $NpcTransitions)) {throw 'Moving test requires clear heading-zero NPC case without reload'}
 if ($NpcMoving) {$NpcDriver=$true}
 if ($Lifecycle -and (!$NpcFire -or $NpcScenario -ne 'clear' -or $NpcMoving)) {throw 'Lifecycle requires stationary clear cargo test'}
+if ($SaveLoad -and (!$NpcTransitions -and !$PlayerFire)) {throw 'Save/load requires a reload test'}
 $root=Split-Path $PSScriptRoot -Parent
 $stamp=Get-Content -LiteralPath (Join-Path $GameDir 'DEPLOYED-FROM.txt') -Raw
 $output=Join-Path $root ('build/jeep-ffv/baseline-'+(Get-Date -Format 'yyyyMMdd-HHmmss'))
@@ -218,6 +219,20 @@ try {
             throw "Unsafe NPC shot in negative case: $NpcScenario"
         }
         [pscustomobject]@{kind='cargo-integration';player=[bool]$PlayerFire;moving=[bool]$NpcMoving;movingShots=$movingShots.result;scenario=$NpcScenario;heading=$NpcHeading;driver=[bool]$NpcDriver;installed=$stamp.Trim();ammo=$after.result;magazines=$remaining.result;shots=$cargoShots.result;targetDamage=$damage.result;probe=$probe} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $output 'npc-observation.json')
+        if ($SaveLoad) {
+            $null=Send @{cmd='exec';code='ffvPassenger setCombatMode "BLUE"'}
+            $savedDamage=Send @{cmd='eval';code='getDammage ffvPassenger'}
+            $savedMagazines=Send @{cmd='eval';code='magazinesArray ffvPassenger'}
+            $null=Send @{cmd='eval';code='triSaveGame "jeep-seated"'} '"OK"'
+            $null=Send @{cmd='exec';code='ffvPassenger setDammage 0.4'}
+            $null=Send @{cmd='eval';code='triLoadGame "jeep-seated"'} '"OK"'
+            Start-Sleep -Seconds 2
+            $null=Send @{cmd='eval';code='getDammage ffvPassenger'} $savedDamage.result
+            $null=Send @{cmd='eval';code='magazinesArray ffvPassenger'} $savedMagazines.result
+            $restored=Send @{cmd='crew_seat_status'}
+            if (!$restored.active -or !$restored.inCargo) {throw 'Seated save/load lost active passenger'}
+            if ($PlayerFire) {$null=Send @{cmd='eval';code='player == ffvPassenger'} 'true'}
+        }
         if ($NpcTransitions -or $PlayerFire) {
             $null=Send @{cmd='exec';code='ffvPassenger setCombatMode "BLUE"'}
             if (!$PlayerFire) {
@@ -227,11 +242,16 @@ try {
             $reloadBefore=Send @{cmd='eval';code='magazinesArray ffvPassenger'}
             $shotsBeforeReload=Send @{cmd='eval';code='ffvShots'}
             if ($PlayerFire) {$null=Send @{cmd='key';sc=21}} else {$null=Send @{cmd='crew_request_reload'}}
-            $samples=@(); $seenReload=$false; $clock=[Diagnostics.Stopwatch]::StartNew()
+            $samples=@(); $seenReload=$false; $reloadSaved=$false; $clock=[Diagnostics.Stopwatch]::StartNew()
             do {
                 $motion=Send @{cmd='crew_pose_probe'}
                 $seenReload=$seenReload -or ($motion.primaryMove -ieq 'OPJeepReload')
                 if ($motion.primaryMove -ieq 'OPJeepReload' -and !$motion.weaponsDisabled) {throw 'Reload did not disable firing'}
+                if ($SaveLoad -and !$reloadSaved -and $motion.primaryMove -ieq 'OPJeepReload' -and $motion.phase -gt .2) {
+                    $null=Send @{cmd='eval';code='triSaveGame "jeep-reloading"'} '"OK"'
+                    $null=Send @{cmd='eval';code='triLoadGame "jeep-reloading"'} '"OK"'
+                    $reloadSaved=$true
+                }
                 $name='motion-{0:D4}.png' -f $samples.Count
                 $beforeCapture=$clock.Elapsed.TotalSeconds
                 $null=Send @{cmd='screenshot';path=(Join-Path $output $name)}
@@ -245,7 +265,7 @@ try {
             $null=Send @{cmd='eval';code='ffvShots'} $shotsBeforeReload.result
             $null=Send @{cmd='eval';code='vehicle ffvPassenger == ffvJeep'} 'true'
             $reloadEnd=Send @{cmd='crew_pose_probe'}
-            if (!$seenReload -or $reloadEnd.reloadInProgress -or !$reloadEnd.cargoWeaponActive -or !$reloadEnd.loaded -or
+            if (!$seenReload -or ($SaveLoad -and !$reloadSaved) -or $reloadEnd.reloadInProgress -or !$reloadEnd.cargoWeaponActive -or !$reloadEnd.loaded -or
                 (RifleRounds $reloadBefore) -ne (RifleRounds $reloadAfter)) {throw 'Real cargo reload/animation/magazine conservation failed'}
         }
         if ($Lifecycle) {
@@ -282,7 +302,7 @@ try {
             & python "$PSScriptRoot/default-content/make_jeep_pose_video.py" $output
             if ($LASTEXITCODE -ne 0) {throw 'Reload video encoding failed'}
         }
-        Write-Host "Cargo $NpcScenario passed (player=$PlayerFire, moving=$NpcMoving, reload=$($NpcTransitions -or $PlayerFire), lifecycle=$Lifecycle); NOT visual/default-release acceptance: $output"
+        Write-Host "Cargo $NpcScenario passed (player=$PlayerFire, moving=$NpcMoving, reload=$($NpcTransitions -or $PlayerFire), lifecycle=$Lifecycle, save=$SaveLoad); NOT visual/default-release acceptance: $output"
         return
     }
     $null=Send @{cmd='exec';code='ffvPassenger setCombatMode "BLUE"; unassignVehicle ffvPassenger; ffvPassenger action ["EJECT",ffvJeep]'}
