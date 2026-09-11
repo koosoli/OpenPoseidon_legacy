@@ -5,7 +5,7 @@ import unittest
 
 import numpy as np
 
-from generate_jeep_animations import clip, elbow, encode, point, pose, rest_point, rest_proxy
+from generate_jeep_animations import clip, elbow, encode, frame, point, pose, rest_point, rest_proxy, rotation
 
 
 class JeepAnimations(unittest.TestCase):
@@ -46,7 +46,7 @@ class JeepAnimations(unittest.TestCase):
 
     def test_hands_remain_on_authored_grips(self):
         for _, matrices in clip(self.spec, 'raise'):
-            gun = matrices['zbran'] @ rest_proxy(self.spec)
+            gun = matrices['zbran'] @ rest_proxy(self.spec) @ frame(rotation([0, 1, 0], -90))
             for side in ('p', 'l'):
                 wrist = point(matrices[side+'ruka'], rest_point(self.spec, self.spec['arms'][side]['wrist']))
                 np.testing.assert_allclose(wrist, point(gun, self.spec['grips'][side]), atol=1e-9)
@@ -55,6 +55,12 @@ class JeepAnimations(unittest.TestCase):
         hip = rest_point(self.spec, self.spec['legs']['p']['hip'])
         self.assertLess(np.linalg.norm(hip), .2)
         self.assertGreater(np.linalg.norm(self.spec['legs']['p']['hip']), .6)
+
+    def test_actual_m16_barrel_points_out_the_right_side(self):
+        rifle = pose(self.spec, 1)['zbran'] @ rest_proxy(self.spec)
+        direction = rifle[:3, :3] @ [-1, 0, 0]
+        # AnimationRT applies the OFP X/Z reversal during loading.
+        np.testing.assert_allclose(direction * [-1, 1, -1], [1, 0, 0], atol=1e-9)
 
 
 if __name__ == '__main__':

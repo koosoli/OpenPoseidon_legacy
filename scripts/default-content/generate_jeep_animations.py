@@ -114,7 +114,9 @@ def pose(spec, raised, recoil=0.0, reload=0.0):
     gun_pos -= gun_r[:, 2] * recoil
     gun = frame(gun_r, gun_pos)
     proxy = rest_proxy(spec)
-    result['zbran'] = gun @ np.linalg.inv(proxy)
+    # Original M16 points down model -X, not +Z. Author grip/recoil coordinates
+    # in a barrel-forward frame, then map the actual model into that frame.
+    result['zbran'] = gun @ frame(rotation([0, 1, 0], 90)) @ np.linalg.inv(proxy)
     for side, arm in spec['arms'].items():
         shoulder_rest, elbow_rest, wrist_rest = (rest_point(spec, arm[j]) for j in ('shoulder', 'elbow', 'wrist'))
         shoulder = point(torso, shoulder_rest)
