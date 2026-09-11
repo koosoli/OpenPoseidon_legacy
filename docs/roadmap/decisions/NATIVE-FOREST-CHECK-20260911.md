@@ -68,3 +68,22 @@ Endpoint tracked GPU allocation 1675.057 MiB; object textures 1003.057 MiB /
 1417 entries, live geometry 272.790 MiB (pool capacity 672 MiB).
 Prepared queue drains; DDS preparation remains deliberately off after prior
 unsuccessful experiments. No FPS/memory improvement inferred from this trace.
+
+### Producer-window split and narrow experiment
+
+Installed 4746f6b9, same route/options, cancel-20260911-222708-...-driver-memory:
+lifecycle/coverage pass; moving n=1255 median 31.793, P95 43.589, P99 88.579,
+max 153.309 ms (four >100 ms). M923A1 wreck admission 145.4 ms, normal/material
+headers 67.5 ms, create bucket 55.9 ms. New subset texWindowWait=54.047 ms:
+most of that create bucket is producer ownership waiting, not GPU staging CPU
+cost. The subset is already included in existing buckets, not additive.
+
+Try WGR_NATIVE_NORMAL_PREFETCH=1 (default OFF while under evaluation): before
+a cold native model's first renderer operation, resolve its normal-map sources
+on the main thread using the SAME material-binding and texture-bank caches.
+No uploads, second store, scheduler, worker mutation or material substitution.
+Only authored non-procedural NormalMap stages from native EMATs are eligible;
+OFP/P3D paths, warm/parked models and procedural stages stay unchanged.
+This reorders work to overlap the prior render frame; it does not eliminate
+decoding or make a single model admission fully budgeted. Compare paired routes,
+coverage, texture counts/bytes, memory and appearance before any default change.

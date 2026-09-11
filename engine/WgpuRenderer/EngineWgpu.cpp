@@ -7696,6 +7696,52 @@ void EngineWgpu::LogAdmissionCensus() const
     }
 }
 
+void EngineWgpu::PrepareNativeNormalSources(LODShapeWithShadow* shape)
+{
+    static const bool enabled = [] {
+        const char* value = std::getenv("WGR_NATIVE_NORMAL_PREFETCH");
+        return value && std::strcmp(value, "1") == 0;
+    }();
+    if (!enabled || !_wbank || !shape || !ContainsNoCase(shape->Name(), ".xob")) return;
+    // Main-thread source preparation only. No EnsureUploaded/slot allocation:
+    // the existing bank owns the source and the normal binding below consumes it.
+    const auto began = std::chrono::steady_clock::now();
+    std::unordered_set<std::string> seen;
+    uint32_t loaded = 0;
+    for (int level = 0; level < shape->NLevels(); ++level)
+    {
+        if (!shape->IsNormalLevel(level)) continue;
+        Shape* s = shape->LevelOpaque(level);
+        if (!s) continue;
+        for (int i = 0; i < s->NSections(); ++i)
+        {
+            const auto& section = s->GetSection(i);
+            if ((section.properties.Special() & (IsHidden | IsHiddenProxy)) || !section.surfMat) continue;
+            const char* path = section.surfMat->GetName().Data();
+            if (!path || !ContainsNoCase(path, ".emat") || !seen.insert(path).second) continue;
+            auto cached = _materialBindings.find(path);
+            if (cached == _materialBindings.end())
+            {
+                try {
+                    cached = _materialBindings.emplace(path, Asset::Material::LoadTranslatedMaterial(path)).first;
+                } catch (...) {
+                    _materialBindings.emplace(path, Asset::Material::TranslatedMaterial{});
+                    continue;
+                }
+            }
+            const auto* normal = cached->second.Find(Asset::Material::MaterialSlot::NormalMap);
+            if (!normal || normal->texture.isProcedural || normal->texture.path.empty()) continue;
+            const auto name = normal->texture.path.canonical();
+            if (_wbank->Find(name.c_str()) >= 0) continue;
+            _wbank->Load(name.c_str());
+            ++loaded;
+        }
+    }
+    if (loaded)
+        LOG_INFO(Graphics, "Native normal prefetch: model={} sources={} ms={:.3f}", shape->Name(), loaded,
+                 std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count());
+}
+
 uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
 {
     if (auto found = _gpuModels.find(shape); found != _gpuModels.end())
@@ -7744,6 +7790,7 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
         }
     }
 
+    PrepareNativeNormalSources(shape);
     std::vector<TextureWgpu*> modelTextures;
     std::vector<uint64_t> modelMeshes;
     if (_wbank)

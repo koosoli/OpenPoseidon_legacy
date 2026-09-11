@@ -6,6 +6,7 @@ param([switch]$LegacyClutter, [switch]$VerifyClutter, [switch]$TraceSlowFrames, 
       [ValidateRange(-1,1)][int]$TintReuse=-1, [switch]$VerifyTintReuse,
       [ValidateRange(0,1)][int]$DdsPrepare=0, [switch]$VerifyDdsPrepare,
       [ValidateRange(-1,2)][int]$Bc7Batch=-1,
+      [ValidateRange(0,1)][int]$NormalPrefetch=0,
       [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',
       [string]$Archives='C:\Program Files (x86)\Steam\steamapps\common\Arma Reforger\addons')
 $ErrorActionPreference='Stop'
@@ -33,6 +34,7 @@ if ($SampleDriverMemory) {$label+='-driver-memory'}
 if ($TintReuse -ge 0) {$label+='-tint-reuse-'+$TintReuse}
 if ($VerifyTintReuse) {$label+='-verify-tint'}
 if ($DdsPrepare -eq 1) {$label+='-async-dds'}
+if ($NormalPrefetch -eq 1) {$label+='-normal-prefetch'}
 if ($VerifyDdsPrepare) {$label+='-verify-dds'}
 $out=Join-Path $root 'build/native-stream-cancellation'
 # The engine's legacy file reader cannot open a graphics.cfg beyond MAX_PATH.
@@ -58,6 +60,7 @@ if ($LegacyTableBudget) {$settings.WGR_OBJECT_STREAM_TABLE_BATCH='0'}
 if ($ExperimentalTableBudget -gt 0) {$settings.WGR_OBJECT_STREAM_TABLE_BATCH=[string]$ExperimentalTableBudget}
 if ($TraceDdsPreparation) {$settings.POSEIDON_DDS_PREP_TRACE='1'}
 if ($TraceBankTables) {$settings.POSEIDON_BANK_TABLE_TRACE='1'}
+$settings.WGR_NATIVE_NORMAL_PREFETCH=[string]$NormalPrefetch
 if ($Bc7Batch -ge 0) {$settings.POSEIDON_DDS_BC7_BATCH=[string]$Bc7Batch}
 if ($TintReuse -ge 0) {$settings.POSEIDON_DDS_TINT_REUSE=[string]$TintReuse}
 if ($VerifyTintReuse) {$settings.POSEIDON_DDS_TINT_REUSE='1'; $settings.POSEIDON_DDS_TINT_REUSE_VERIFY='1'}

@@ -963,6 +963,7 @@ class EngineWgpu : public EngineDummy
     // CONSTANT stage rather than a real image. The caller needs that to decide precedence
     // against the section's own face texture -- see MAT-045 at the call site.
     uint64_t ResolveMaterialBaseColour(const ShapeSection& section, bool* fromConstant = nullptr);
+    void PrepareNativeNormalSources(LODShapeWithShadow* shape);
     // MAT-050. The handle of the 1x1 neutral stand-in described at `_untexturedAlbedo`,
     // creating it on first call, or 0 to leave the section on the white bindless slot 0.
     //
