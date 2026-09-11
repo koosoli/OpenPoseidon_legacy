@@ -35,8 +35,10 @@ $camera=switch ($Pose) {
 & "$PSScriptRoot/farfield-bench.ps1" -Label "$Pose-$Label" -Mission 'tests/perf/missions/perf_field.eden' `
  -World $ReforgerAddons -Freefly $camera -Out $out -Env $settings -Repeats $Repeats `
  -Width 1920 -Height 1080 -Windowed -WarmupSeconds 90 -TimeoutSeconds 300 -RequireAll
+if ($LASTEXITCODE -ne 0) {throw 'Native capture failed; inspect per-run lifecycle metadata'}
 for ($repeat=1; $repeat -le $Repeats; $repeat++) {
  $stem=Join-Path (Join-Path $out "$Pose-$Label") ('run-{0:D2}' -f $repeat)
+ & "$PSScriptRoot/Assert-CaptureLifecycle.ps1" -MetadataPath "$stem.meta.json" -LogPath "$stem.log"
  $metrics=Get-Content -LiteralPath "$stem.json" -Raw | ConvertFrom-Json
  if ($LazyBcrTint -ne 0 -and !$Overrides.ContainsKey('WGR_LAZY_BCR_TINT') -and
      !(Select-String -LiteralPath "$stem.log" -Pattern 'Wgpu lazy BCR tint:' -Quiet)) {
