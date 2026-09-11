@@ -2,6 +2,24 @@
 
 ## Aktueller Nachtrag 20:32 (kein Gesamtabschluss)
 
+23:35: Auf Besitzerwunsch ballistische Krater standardmaessig achtfach tief:
+8 statt 1 m, Radius weiterhin 12 m (Terrainraster-Mindestabdeckung unveraendert).
+Panzer-/Aufschlaggranaten mit AmmoShotShell ohne Zeitzunder verwenden jetzt
+denselben Pfad wie Raketen. ShotBullet erbt von ShotShell; deshalb ausdruecklich
+Munitionssimulation statt Basisklassen-Cast pruefen. Gewehrkugeln und zeit-
+gezuendete Handgranaten unveraendert. Bestehende Bedingungen bleiben: explosive
+Munition, Bodentreffer ohne direkt getroffenes Objekt, trockenes Land, SP.
+Dev-Tab bezeichnet Schalter und Regler jetzt als ballistische Einschlagkrater;
+Reset benutzt den neuen Standard. Kein Mehrspielernachweis und keine Aenderung
+von Schaden, Schussphysik oder Radius. Hoehenfeld bleibt rasterabhaengig.
+Installiert d6f60ff0, 23:32. Build und 643 Assertions / 4 Tests bestanden.
+Installierte LAW- und Shell105-Geschosse: 29.835 -> 21.835 m; ausgeschaltet
+unveraendert, nach Einstellungsreset und Terrainrestore erneut 8 m tief,
+abschliessendes Terrainrestore auf 29.835 m; sauberes Beenden.
+Belege: build/rocket-craters/acceptance-20260911-233301 (Shell105) und
+acceptance-20260911-233405 (LAW). Bild des echten Kraters geprueft.
+Andere Panzer-Munitionsvarianten und grosse Einschlagserien noch nicht vermessen.
+
 23:26: Everon-Godrays/Baumfall nach Ansicht der aktuellen Bilder vom Besitzer
 visuell akzeptiert ("ich sehe kein problem mehr"). Keine neue Shaderkorrektur
 hierfuer vorgenommen. CLI-A/B auf installiertem 88542064, native 1280x720,
