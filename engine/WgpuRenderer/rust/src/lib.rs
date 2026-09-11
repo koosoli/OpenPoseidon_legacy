@@ -3787,7 +3787,7 @@ impl Renderer {
         let late_surface_slots = gfx3d::late_surface_scattering_slots(&plan, draws3d,
             *LATE_SURFACE_RAYS.get_or_init(||
                 std::env::var("WGR_LATE_SURFACE_RAYS").is_ok_and(|v| v == "1")
-                && !std::env::var("WGR_EARLY_LATE_OPAQUE").is_ok_and(|v| v == "1")));
+                && !std::env::var("WGR_EARLY_LATE_OPAQUE").is_ok_and(|v| v == "1" || v == "2")));
         if !late_surface_slots.is_empty() {
             static TRACE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
             if TRACE.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 300 == 0 {
@@ -4820,6 +4820,9 @@ impl Renderer {
         // `depth_write_off` = this is the prepassed segment's colour pass, so its opaque
         // set (objects + terrain) draws over the already-complete depth GreaterEqual/
         // write-off. False for post-ClearDepth segments (no prepass) and the 2D sub-pass.
+        static CUTOUT_REPLAY: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        let cutout_replay = *CUTOUT_REPLAY.get_or_init(||
+            std::env::var("WGR_EARLY_LATE_OPAQUE").is_ok_and(|v| v == "2"));
         let render_ops = |renderer: &Renderer,
                           pass: &mut wgpu::RenderPass<'_>,
                           sub: &[Plan3dOp],
@@ -4835,7 +4838,7 @@ impl Renderer {
                 if let Some(want_prepassed) = prepassed_filter {
                     let is_prepassed = match op {
                         Plan3dOp::Draw3D { draw, .. } => draws3d.get(*draw as usize)
-                            .is_some_and(crate::gfx3d::draw_is_prepassed),
+                            .is_some_and(|d| crate::gfx3d::draw_replays_before_rays(d, cutout_replay)),
                         _ => false,
                     };
                     if is_prepassed != want_prepassed { continue; }
@@ -5289,10 +5292,10 @@ impl Renderer {
             static EARLY_OPAQUE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
             let early_opaque = start == 0 && prepassed && water_split.is_some()
                 && *EARLY_OPAQUE.get_or_init(||
-                    std::env::var("WGR_EARLY_LATE_OPAQUE").is_ok_and(|v| v == "1"))
+                    std::env::var("WGR_EARLY_LATE_OPAQUE").is_ok_and(|v| v == "1" || v == "2"))
                 && ops_post_water.iter().any(|op| match op {
                     Plan3dOp::Draw3D { draw, .. } => draws3d.get(*draw as usize)
-                        .is_some_and(crate::gfx3d::draw_is_prepassed),
+                        .is_some_and(|d| crate::gfx3d::draw_replays_before_rays(d, cutout_replay)),
                     _ => false,
                 });
             // Diagnose colour writes after atmospheric compositing without changing order.

@@ -363,6 +363,30 @@ pub(crate) fn draw_is_prepassed(d: &WgrDraw3D) -> bool {
     PipelineKey::from_draw(d, false).prepassed()
 }
 
+pub(crate) fn draw_replays_before_rays(d: &WgrDraw3D, cutout_only: bool) -> bool {
+    draw_is_prepassed(d) && (!cutout_only || d.alpha_ref > 0.0)
+        && d.flags & (crate::ffi::WGR_DRAW3D_COCKPIT | crate::ffi::WGR_DRAW3D_MONITOR) == 0
+}
+
+#[test]
+fn cutout_ray_replay_preserves_solids_blends_and_cockpits() {
+    let mut d: WgrDraw3D = unsafe { std::mem::zeroed() };
+    d.blend = WgrBlend::Opaque;
+    d.depth = WgrDepthMode::TestWrite;
+    d.palette_slot = NO_PALETTE;
+    assert!(!draw_replays_before_rays(&d, true));
+    assert!(draw_replays_before_rays(&d, false));
+    d.alpha_ref = 0.5;
+    assert!(draw_replays_before_rays(&d, true));
+    d.blend = WgrBlend::Alpha;
+    assert!(!draw_replays_before_rays(&d, true));
+    d.blend = WgrBlend::Opaque;
+    d.flags |= crate::ffi::WGR_DRAW3D_COCKPIT;
+    assert!(!draw_replays_before_rays(&d, true));
+    d.flags = crate::ffi::WGR_DRAW3D_MONITOR;
+    assert!(!draw_replays_before_rays(&d, true));
+}
+
 #[test]
 fn atmospheric_replay_only_moves_prepassed_objects() {
     let key = PipelineKey {
