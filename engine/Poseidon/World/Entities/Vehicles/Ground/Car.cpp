@@ -1467,8 +1467,6 @@ void Car::Simulate(float deltaT, SimulationImportance prec)
             _head.Move(deltaT, moveTrans, *this);
         }
 
-        _track.UpdateSnow(*this, !_landContact || DirectionUp().Y() < 0.3f, deltaT);
-
         if (EnableVisualEffects(prec))
         {
             if (DirectionUp().Y() >= 0.3f)
@@ -1505,6 +1503,9 @@ void Car::Simulate(float deltaT, SimulationImportance prec)
         Move(moveTrans);
         DirectionWorldToModel(_modelSpeed, _speed);
     }
+
+    // Resting vehicles must still keep newly deposited snow below their chassis.
+    _track.UpdateSnow(*this, !_landContact || DirectionUp().Y() < 0.3f, deltaT);
 
     if (!CommanderUnit() || CommanderUnit()->IsInCargo())
     {

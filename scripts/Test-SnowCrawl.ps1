@@ -59,9 +59,12 @@ try {
     if ([Math]::Abs($cover.depth-$Depth) -gt 0.00001) {throw 'Actual snow depth differs from requested fixture'}
     if ($Vehicle) {
         if ($Depth -lt 0.8) {throw 'Vehicle hull fixture requires deep snow'}
-        $null=Send @{cmd='exec';code='snowCar="UAZ" createVehicle [9700,3630,0]; snowCar setDir 0; crawlWalker moveInDriver snowCar; crawlView="camera" camCreate [9710,3618,7]; crawlView cameraEffect ["internal","back"]; crawlView camSetTarget [9700,3635,0]; crawlView camCommit 0'}
+        $null=Send @{cmd='exec';code='doStop crawlWalker; snowCar="UAZ" createVehicle [9700,3630,0]; snowCar setDir 0; crawlWalker moveInDriver snowCar; doStop crawlWalker; crawlView="camera" camCreate [9704,3626,2.5]; crawlView cameraEffect ["internal","back"]; crawlView camSetTarget [9700,3630,0]; crawlView camCommit 0'}
         Start-Sleep -Seconds 5
-        $body=Send @{cmd='dev_snow';action='sample';x=9700;z=3630}
+        $initialPosition=Send @{cmd='eval';code='getPos snowCar'}
+        $initialCoords=($initialPosition.result.Trim('[',']') -split ',') | ForEach-Object { [double]::Parse($_,[Globalization.CultureInfo]::InvariantCulture) }
+        if ($initialCoords.Count -ne 3) {throw 'Missing initial vehicle position'}
+        $body=Send @{cmd='dev_snow';action='sample';x=$initialCoords[0];z=$initialCoords[1]}
         if ($body.deficit -lt 0.4 -or $body.deficit -gt 0.8) {throw 'No bounded underbody channel between wheel tracks'}
         $null=Send @{cmd='screenshot';path=(Join-Path $output 'vehicle-stationary.png')}
         $null=Send @{cmd='exec';code='crawlWalker setBehaviour "CARELESS"; crawlWalker doMove [9700,3670,0]'}
@@ -73,13 +76,18 @@ try {
         $null=Send @{cmd='exec';code='crawlWalker action ["EJECT",snowCar]'}
         Start-Sleep -Seconds 1
         $null=Send @{cmd='exec';code='crawlWalker setPos [9660,3600,0]; deleteVehicle snowCar'}
+        $cx=($coords[0]+4).ToString([Globalization.CultureInfo]::InvariantCulture)
+        $cz=($coords[1]-4).ToString([Globalization.CultureInfo]::InvariantCulture)
+        $tx=$coords[0].ToString([Globalization.CultureInfo]::InvariantCulture)
+        $tz=$coords[1].ToString([Globalization.CultureInfo]::InvariantCulture)
+        $null=Send @{cmd='exec';code="crawlView camSetPos [$cx,$cz,2.5]; crawlView camSetTarget [$tx,$tz,0]; crawlView camCommit 0"}
         Start-Sleep -Seconds 2
         $null=Send @{cmd='screenshot';path=(Join-Path $output 'vehicle-trail.png')}
-        $outside=Send @{cmd='dev_snow';action='sample';x=9705;z=3630}
+        $outside=Send @{cmd='dev_snow';action='sample';x=($initialCoords[0]+5);z=$initialCoords[1]}
         if ($outside.deficit -ne 0) {throw 'Vehicle cleared snow outside its footprint'}
         $null=Send @{cmd='dev_snow';action='deposit';metres=1}
         Start-Sleep -Seconds 2
-        $filled=Send @{cmd='dev_snow';action='sample';x=9700;z=3630}
+        $filled=Send @{cmd='dev_snow';action='sample';x=$initialCoords[0];z=$initialCoords[1]}
         if ($filled.deficit -ne 0) {throw 'Snowfall failed to refill vehicle depression'}
         $null=Send @{cmd='screenshot';path=(Join-Path $output 'vehicle-refilled.png')}
         $null=Send @{cmd='exit'}
