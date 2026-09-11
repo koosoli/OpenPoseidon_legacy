@@ -139,6 +139,7 @@ void RegisterSqf(HarnessServer& hs)
                            cJSON_AddBoolToObject(resp, "loaded", man->GetWeaponLoaded(weapon));
                            cJSON_AddBoolToObject(resp, "ready", man->GetWeaponReady(weapon, man->GetFireTarget()));
                            cJSON_AddBoolToObject(resp, "prepareOnly", man->IsFirePrepare());
+                           cJSON_AddNumberToObject(resp, "selectedWeapon", man->SelectedWeapon());
                            const Vector3 pivot = seat.FastTransform(man->GetWeaponCenter(weapon));
                            cJSON_AddNumberToObject(resp, "pivotX", pivot.X());
                            cJSON_AddNumberToObject(resp, "pivotY", pivot.Y());
@@ -177,6 +178,13 @@ void RegisterSqf(HarnessServer& hs)
                                cJSON_AddNumberToObject(resp, "lastSeenAge", Glob.time - target->lastSeen);
                                cJSON_AddNumberToObject(resp, "visibilityAge", Glob.time - GWorld->VisibilityTime(unit, target->idExact));
                                cJSON_AddNumberToObject(resp, "sensorVisibility", GWorld->Visibility(unit, target->idExact));
+                               if (target->idExact)
+                               {
+                                   cJSON_AddNumberToObject(resp, "exactX", target->idExact->Position().X());
+                                   cJSON_AddNumberToObject(resp, "exactZ", target->idExact->Position().Z());
+                                   cJSON_AddNumberToObject(resp, "aimX", target->idExact->AimingPosition().X());
+                                   cJSON_AddNumberToObject(resp, "aimZ", target->idExact->AimingPosition().Z());
+                               }
                                if (GLandscape && target->idExact)
                                    cJSON_AddNumberToObject(resp, "muzzleVisibility",
                                        GLandscape->Visible(muzzle, man, target->idExact, .9f, ObjIntersectFire));

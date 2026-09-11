@@ -1,11 +1,13 @@
 param([switch]$ProjectileFrame, [switch]$AnimationPreview, [switch]$AnimationVideo, [switch]$NpcFire,
-      [ValidateSet('clear','hold','outside','blocked')][string]$NpcScenario='clear',
+      [ValidateSet('clear','hold','outside','blocked','friendly')][string]$NpcScenario='clear',
+      [ValidateSet(0,90,180)][int]$NpcHeading=0, [switch]$NpcDriver,
       [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
 if ($AnimationVideo -and !$AnimationPreview) {throw '-AnimationVideo requires -AnimationPreview'}
 if ($NpcFire -and ($AnimationPreview -or $ProjectileFrame)) {throw 'Select one integration mode per launch'}
 if (!$NpcFire -and $NpcScenario -ne 'clear') {throw '-NpcScenario requires -NpcFire'}
+if (!$NpcFire -and ($NpcHeading -ne 0 -or $NpcDriver)) {throw 'NPC heading/driver requires -NpcFire'}
 $root=Split-Path $PSScriptRoot -Parent
 $stamp=Get-Content -LiteralPath (Join-Path $GameDir 'DEPLOYED-FROM.txt') -Raw
 $output=Join-Path $root ('build/jeep-ffv/baseline-'+(Get-Date -Format 'yyyyMMdd-HHmmss'))
@@ -53,6 +55,15 @@ try {
     }
     Start-Sleep -Seconds 12
     $null=Send @{cmd='eval';code='typeOf ffvJeep'} '"Jeep"'
+    if ($NpcFire) {
+        $angle=$NpcHeading * [math]::PI / 180
+        $rightX=[int][math]::Round([math]::Cos($angle)); $rightZ=-[int][math]::Round([math]::Sin($angle))
+        $frontX=-$rightZ; $frontZ=$rightX
+        $null=Send @{cmd='exec';code=('ffvJeep setDir {0}; ffvTarget setPos [{1},{2},0]' -f $NpcHeading,(9700+60*$rightX),(3600+60*$rightZ))}
+        if ($NpcDriver) {
+            $null=Send @{cmd='exec';code='"SoldierWB" createUnit [[9690,3590,0],group player,"ffvDriver=this; this disableAI ""MOVE""; removeAllWeapons this"]; ffvDriver moveInDriver ffvJeep'}
+        }
+    }
     $null=Send @{cmd='exec';code='removeAllWeapons player; ffvShots=0; ffvPassenger addEventHandler ["Fired",{ffvShots=ffvShots+1}]; ffvPassenger setCombatMode "BLUE"; ffvPassenger assignAsCargo ffvJeep; ffvPassenger moveInCargo ffvJeep; ffvView="camera" camCreate [9704,3604,2.2]; ffvView cameraEffect ["internal","back"]; ffvView camSetTarget [9700,3600,1]; ffvView camCommit 0; showCinemaBorder false'}
     Start-Sleep -Seconds 2
     $null=Send @{cmd='eval';code='vehicle ffvPassenger == ffvJeep'} 'true'
@@ -64,11 +75,15 @@ try {
     $null=Send @{cmd='screenshot';path=(Join-Path $output 'seated.png')}
     if ($NpcFire) {
         $null=Send @{cmd='eval';code='local ffvPassenger'}
+        $null=Send @{cmd='eval';code='getPos ffvTarget'}
         if ($NpcScenario -eq 'outside') {
-            $null=Send @{cmd='exec';code='ffvTarget setPos [9700,3660,0]'}
+            $null=Send @{cmd='exec';code=('ffvTarget setPos [{0},{1},0]' -f (9700+60*$frontX),(3600+60*$frontZ))}
         }
         if ($NpcScenario -eq 'blocked') {
-            $null=Send @{cmd='exec';code='ffvBlock="Ural" createVehicle [9704,3600,0]; ffvBlock setDir 0'}
+            $null=Send @{cmd='exec';code=('ffvBlock="Ural" createVehicle [{0},{1},0]; ffvBlock setDir {2}' -f (9700+4*$rightX),(3600+4*$rightZ),$NpcHeading)}
+        }
+        if ($NpcScenario -eq 'friendly') {
+            $null=Send @{cmd='exec';code=('"SoldierWB" createUnit [[{0},{1},0],group player,"ffvFriendly=this; this disableAI ""MOVE""; removeAllWeapons this; this setUnitPos ""UP"""]' -f (9700+4*$rightX),(3600+4*$rightZ))}
         }
         $null=Send @{cmd='exec';code='ffvPassenger switchMove "OPJeepAim"; ffvPassenger reveal ffvTarget; ffvPassenger doTarget ffvTarget'}
         Start-Sleep -Seconds 2
@@ -130,6 +145,7 @@ try {
     $cargoShots=Send @{cmd='eval';code='ffvShots'}
     $null=Send @{cmd='screenshot';path=(Join-Path $output 'ordered-fire.png')}
     if ($NpcFire) {
+        $null=Send @{cmd='eval';code='getPos ffvTarget'}
         $probe=Send @{cmd='crew_pose_probe'}
         $remaining=Send @{cmd='eval';code='magazinesArray ffvPassenger'}
         if ($seated.result -ne 'true') {throw 'NPC no longer occupies the real cargo seat'}
@@ -140,7 +156,7 @@ try {
         } elseif ($after.result -ne '30' -or $damage.result -ne '0' -or $cargoShots.result -ne '0') {
             throw "Unsafe NPC shot in negative case: $NpcScenario"
         }
-        [pscustomobject]@{kind='stationary-npc-integration';scenario=$NpcScenario;installed=$stamp.Trim();ammo=$after.result;magazines=$remaining.result;shots=$cargoShots.result;targetDamage=$damage.result;probe=$probe} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $output 'npc-observation.json')
+        [pscustomobject]@{kind='stationary-npc-integration';scenario=$NpcScenario;heading=$NpcHeading;driver=[bool]$NpcDriver;installed=$stamp.Trim();ammo=$after.result;magazines=$remaining.result;shots=$cargoShots.result;targetDamage=$damage.result;probe=$probe} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $output 'npc-observation.json')
         $null=Send @{cmd='exit'}
         if (!$p.WaitForExit(30000) -or $p.ExitCode -ne 0) {throw 'NPC fire exit failed'}
         if (Select-String -LiteralPath $log -Pattern 'Bad animation|Broken animation|Animation .*not found|Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION' -Quiet) {throw 'NPC integration load/runtime error'}

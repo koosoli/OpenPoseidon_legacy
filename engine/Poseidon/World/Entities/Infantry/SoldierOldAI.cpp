@@ -693,6 +693,8 @@ Vector3 Man::GetEyeDirection() const
 {
     Vector3 dir = _headTrans.Direction();
     dir = GunTransform().Rotate(dir);
+    if (GetHierachyParent())
+        return WorldTransform().Rotate(dir);
     DirectionModelToWorld(dir, dir);
     return dir;
 }
