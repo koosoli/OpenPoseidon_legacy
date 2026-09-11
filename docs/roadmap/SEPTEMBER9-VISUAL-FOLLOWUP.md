@@ -2,11 +2,14 @@
 
 ## September 11 Jeep implementation continuation
 
-Latest continuation: installed 079753d9. Player mouse fire/hit, R-key reload,
-exit/reentry, ordinary-seat fallback and carrier destruction pass run 113951.
-The real AI-driven NPC case also passed (five shots while moving, actual hits).
-Detailed animation quality, save/load, full movement and default packaging
-remain open; no claim that the whole request is complete.
+Latest verified engine: installed 7f6d3fa0. NPC 121507 and player 121641 pass
+seated and mid-reload save/load, ammo conservation and no duplicate shots.
+Player lifecycle passes after load. Constructor/on-foot baseline 121826 and
+real moving NPC 121913 pass. Authored palm-anchor correction 0877101f passes
+ten generator tests and installed NPC/reload/save run 122313. Review camera is
+restored after load, so video now actually shows the soldier. Default package
+integration is next; full movement, visual polish and compatibility acceptance
+remain open. Older prerequisite notes below are historical, not current status.
 36bcea5f automatic entry and real NPC reload passed.
 57da8b28 stationary NPC hits at 0/90/180 also passed.
 The bounded SP loop, seat-frame visibility and collision gate are implemented;

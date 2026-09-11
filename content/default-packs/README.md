@@ -1,7 +1,9 @@
 # Shipped content sources (work in progress)
 
-Road and terrain normal integration is implemented. Three-surface acceptance and the
-Jeep actions package are NOT finished. See the decision ledger for exact status.
+Road and terrain normal integration is implemented. Three-surface visual acceptance
+remains open. Jeep NPC/player firing, reload, save/load and lifecycle are implemented
+for one SP seat; automatic package integration is under acceptance, not yet a claim
+that the complete movement/visual/compatibility test matrix is finished.
 
 ## Build and installation
 
@@ -15,10 +17,18 @@ Python requirement. For an already built tool:
 ```
 
 Output is `dist/x64-win-<configuration>/@OP_VisualUpgrade`, containing mod.json
-and AddOns/op_ground_materials.pbo. Deploy.ps1 copies these own files and verifies
+and AddOns/op_ground_materials.pbo, plus `@OP_VehicleActions` with mod.json and
+AddOns/op_jeep_actions.pbo. Deploy.ps1 copies these own files and verifies
 their SHA256; it does not modify Dta/Data.pbo, LandText.pbo, original models or WRP.
 Source-only roughness/height/soil artifacts are not claimed as bound maps.
-No empty Jeep package is manufactured to suggest the feature is complete.
+VehicleActions includes six reproducible own RTMs and an exact Jeep cargo-0/M16
+mapping, not a mounted gun or an attached outside soldier. It is SP-only; MP,
+drivers, other vehicles and ordinary cargo retain the original behaviour.
+The authored MC-skeleton calibration/IK source is under `vehicle-actions` and
+`scripts/default-content/generate_jeep_animations.py`. Runtime uses the existing
+RTM/move graph, magazine and bullet implementation. Recoil uses the engine's
+existing procedural weapon recoil; the separate source recoil clip is available
+for authoring comparison, not a second source of firing events.
 
 At normal startup the engine discovers compatible installed packs without a mod
 parameter. Original/RES data precede default packs; explicit user mods follow.

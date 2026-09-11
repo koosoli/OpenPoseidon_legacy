@@ -2,6 +2,7 @@ param([switch]$ProjectileFrame, [switch]$AnimationPreview, [switch]$AnimationVid
       [ValidateSet('clear','hold','outside','blocked','friendly')][string]$NpcScenario='clear',
       [ValidateSet(0,90,180)][int]$NpcHeading=0, [switch]$NpcDriver,
       [switch]$NpcTransitions, [switch]$NpcMoving, [switch]$PlayerFire, [switch]$Lifecycle, [switch]$SaveLoad,
+      [switch]$DefaultPackage, [string]$UserMod='',
       [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
@@ -18,6 +19,7 @@ if ($NpcMoving -and (!$NpcFire -or $NpcScenario -ne 'clear' -or $NpcHeading -ne 
 if ($NpcMoving) {$NpcDriver=$true}
 if ($Lifecycle -and (!$NpcFire -or $NpcScenario -ne 'clear' -or $NpcMoving)) {throw 'Lifecycle requires stationary clear cargo test'}
 if ($SaveLoad -and (!$NpcTransitions -and !$PlayerFire)) {throw 'Save/load requires a reload test'}
+if ($DefaultPackage -and ($AnimationPreview -or $ProjectileFrame)) {throw 'Default package is separate from preview/constructor tests'}
 $root=Split-Path $PSScriptRoot -Parent
 $stamp=Get-Content -LiteralPath (Join-Path $GameDir 'DEPLOYED-FROM.txt') -Raw
 $output=Join-Path $root ('build/jeep-ffv/baseline-'+(Get-Date -Format 'yyyyMMdd-HHmmss'))
@@ -32,11 +34,24 @@ $listener.Start(); $port=$listener.LocalEndpoint.Port; $listener.Stop()
 $mission=Join-Path $root 'dev-missions/jeep-ffv.Intro'
 $log=Join-Path $output 'jeep.log'
 $gameArgs=@('--render','wgpu','--window','--no-dev','--width','1280','--height','720','--harness',"$port",'--test-mission',('"'+$mission+'"'),'--log-file',('"'+$log+'"'))
-if ($AnimationPreview -or $NpcFire) {
+if (!$DefaultPackage) {$gameArgs+='--no-vehicle-actions'}
+if (!$DefaultPackage -and ($AnimationPreview -or $NpcFire)) {
     $preview=Join-Path $root 'build/jeep-ffv/animation-preview'
     if (!(Test-Path -LiteralPath "$preview/AddOns/op_jeep_animation_preview.pbo")) {throw 'Build animation preview first'}
     $gameArgs+=@('--mod',('"'+$preview+'"'))
 }
+if ($UserMod) {
+    if (!$DefaultPackage -or !(Test-Path -LiteralPath $UserMod -PathType Container)) {throw 'User override needs default-package mode and an existing mod folder'}
+    $gameArgs+=@('--mod',('"'+$UserMod+'"'))
+}
+if ($DefaultPackage) {
+    $packArchive=Join-Path $GameDir '@OP_VehicleActions/AddOns/op_jeep_actions.pbo'
+    if (!(Test-Path -LiteralPath $packArchive)) {throw 'Default VehicleActions is not installed'}
+} elseif ($AnimationPreview -or $NpcFire) {
+    $packArchive=Join-Path $preview 'AddOns/op_jeep_animation_preview.pbo'
+} else {$packArchive=$null}
+[pscustomobject]@{installed=$stamp.Trim();args=$gameArgs;source=(& git -C $root rev-parse HEAD);pack=$packArchive;packSha256=$(if ($packArchive) {(Get-FileHash -LiteralPath $packArchive -Algorithm SHA256).Hash})} |
+    ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $output 'test-context.json')
 $p=Start-Process -FilePath (Join-Path $GameDir 'OpenPoseidon.exe') -WorkingDirectory $GameDir -WindowStyle Hidden -PassThru -ArgumentList $gameArgs
 $null=$p.Handle
 $client=$null
@@ -311,7 +326,7 @@ try {
             & python "$PSScriptRoot/default-content/make_jeep_pose_video.py" $output
             if ($LASTEXITCODE -ne 0) {throw 'Reload video encoding failed'}
         }
-        Write-Host "Cargo $NpcScenario passed (player=$PlayerFire, moving=$NpcMoving, reload=$($NpcTransitions -or $PlayerFire), lifecycle=$Lifecycle, save=$SaveLoad); NOT visual/default-release acceptance: $output"
+        Write-Host "Cargo $NpcScenario passed (player=$PlayerFire, moving=$NpcMoving, reload=$($NpcTransitions -or $PlayerFire), lifecycle=$Lifecycle, save=$SaveLoad, default=$DefaultPackage); NOT full visual/movement acceptance: $output"
         return
     }
     $null=Send @{cmd='exec';code='ffvPassenger setCombatMode "BLUE"; unassignVehicle ffvPassenger; ffvPassenger action ["EJECT",ffvJeep]'}

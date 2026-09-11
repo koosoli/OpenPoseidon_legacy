@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 import struct
 import unittest
+import re
 
 import numpy as np
 
@@ -13,6 +14,18 @@ class JeepAnimations(unittest.TestCase):
     def setUpClass(cls):
         root = Path(__file__).resolve().parents[2]
         cls.spec = json.loads((root / 'content/default-packs/vehicle-actions/jeep-pose.json').read_text())
+        cls.source = root / 'content/default-packs/vehicle-actions'
+
+    def test_default_package_references_only_generated_clips(self):
+        config = (self.source / 'config.cpp').read_text()
+        files = re.findall(r'file\s*=\s*"([^";]+)"', config)
+        kinds = ('idle', 'raise', 'aim', 'recoil', 'reload', 'lower')
+        self.assertEqual(set(files), {f'\\op_jeep_actions\\jeep_{kind}.rtm' for kind in kinds})
+        self.assertEqual(len(files), len(kinds))
+        manifest = json.loads((self.source / 'mod.json').read_text())
+        self.assertEqual(manifest['defaultContentApi'], '1')
+        self.assertTrue(manifest['version'])
+        self.assertNotIn('op_jeep_animation_preview', config)
 
     def test_all_clips_are_rigid_and_zero_root_motion(self):
         for kind in ('idle', 'raise', 'aim', 'recoil', 'reload', 'lower'):

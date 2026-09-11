@@ -35,4 +35,5 @@ foreach ($file in Get-ChildItem -LiteralPath $stage -Force) {
 if ($LASTEXITCODE -ne 0) { throw 'Ground material PBO packaging failed' }
 Copy-Item -LiteralPath "$source/mod.json" -Destination "$pack/mod.json" -Force
 Write-Host "Staged road and terrain integration package: $pack"
-Write-Host 'Not a three-surface or Jeep acceptance. No original game archive was modified.'
+& "$PSScriptRoot/Build-VehicleActions.ps1" -Preset $Preset -Python $Python
+Write-Host 'Staging alone is not visual/runtime acceptance. No original game archive was modified.'
