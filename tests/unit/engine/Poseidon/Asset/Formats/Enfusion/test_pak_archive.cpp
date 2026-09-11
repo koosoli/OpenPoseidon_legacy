@@ -166,7 +166,7 @@ TEST_CASE("Enfusion mount snapshots survive close and concurrent remount", "[ass
     const std::vector<uint8_t> expected{1, 2, 3, 4};
     std::vector<uint8_t> index{0, 0}; // nameless directory root
     AppendLe32(index, 1);
-    const std::string name = "pixels.edds";
+    const std::string name = "textures/pixels.edds";
     index.push_back(1); index.push_back(static_cast<uint8_t>(name.size()));
     index.insert(index.end(), name.begin(), name.end());
     // Absolute offset: FORM header (12) plus DATA chunk header (8).
@@ -185,13 +185,18 @@ TEST_CASE("Enfusion mount snapshots survive close and concurrent remount", "[ass
     REQUIRE(mount.EntryCount() == 1);
     const auto oldRoot = mount.Root();
     const auto generation = mount.Generation();
-    const auto request = mount.MakeReadRequest("PIXELS.EDDS");
+    const auto request = mount.MakeReadRequest("TEXTURES\\PIXELS.EDDS");
     REQUIRE(request);
+    CHECK(mount.CanonicalPath("TEXTURES\\PIXELS.EDDS") == name);
+    CHECK(mount.CanonicalPath(name) == name);
+    CHECK_FALSE(mount.CanonicalPath("missing.edds"));
+    CHECK_FALSE(mount.CanonicalPath("enft|1,1,1|textures/pixels.edds"));
     mount.Close();
     CHECK(mount.Generation() != generation);
     CHECK(mount.Root().empty());
     CHECK(oldRoot == directory.string());
     CHECK_FALSE(mount.MakeReadRequest(name));
+    CHECK_FALSE(mount.CanonicalPath(name));
     std::vector<uint8_t> pixels;
     std::string error;
     REQUIRE(request->Read(pixels, error));

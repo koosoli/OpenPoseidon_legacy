@@ -9,6 +9,7 @@
 #include <cctype>
 #include <cjson/cJSON.h>
 #include <Poseidon/IO/Streams/QBStream.hpp>
+#include <Poseidon/Asset/Formats/Enfusion/EnfusionMount.hpp>
 
 #include <Poseidon/Graphics/Rendering/Shape/ObjectAdmitProfile.hpp>
 
@@ -320,13 +321,32 @@ void TextureBankWgpu::TrimResidency()
                  stats.budget_bytes, candidates.size(), _retainedLivenessActive ? 1 : 0);
 }
 
+namespace
+{
+std::optional<std::string> NativeTextureIdentity(RStringB name)
+{
+    static const bool enabled = [] {
+        const char* value = std::getenv("WGR_NATIVE_TEXTURE_KEYS");
+        return !value || value[0] != '0';
+    }();
+    if (!enabled) return std::nullopt;
+    return Asset::Formats::Enfusion::EnfusionMount::Instance().CanonicalPath(static_cast<const char*>(name));
+}
+}
+
 int TextureBankWgpu::Find(RStringB name) const
 {
     // Was a linear scan of _texture comparing `texture->GetName() == name`.
     // _textureByName uses that same operator== as its equality predicate, so the
     // result is identical - see the NameHash/NameEqual comment in the header.
     const auto it = _textureByName.find(name);
-    return it == _textureByName.end() ? -1 : it->second;
+    if (it != _textureByName.end()) return it->second;
+    if (const auto canonical = NativeTextureIdentity(name))
+    {
+        const auto native = _textureByName.find(RStringB(canonical->c_str()));
+        if (native != _textureByName.end()) return native->second;
+    }
+    return -1;
 }
 
 namespace
@@ -502,6 +522,10 @@ Ref<Texture> TextureBankWgpu::Load(RStringB name)
     // verbatim, so the two share one interned buffer, and this cannot drift if that
     // ever stops being true.
     _textureByName.emplace(texture->GetName(), iFree);
+    // Same bank/lease/source, not a duplicate decoded source or GPU upload.
+    // Keep the original texture name for material attribution and diagnostics.
+    if (const auto canonical = NativeTextureIdentity(name))
+        _textureByName.emplace(RStringB(canonical->c_str()), iFree);
     // Admission attribution: Init() opens the file through GFileServer to parse the PAA
     // header. Timed only while an admit scope is open (one bool load otherwise), because
     // whether a cold model's `adapt` milliseconds are these opens or geometry work is the

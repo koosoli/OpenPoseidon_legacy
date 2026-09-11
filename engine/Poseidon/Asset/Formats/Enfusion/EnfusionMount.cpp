@@ -109,6 +109,14 @@ bool EnfusionMount::Has(const std::string& virtualPath) const
     return _index.find(Lower(virtualPath)) != _index.end();
 }
 
+std::optional<std::string> EnfusionMount::CanonicalPath(const std::string& virtualPath) const
+{
+    std::shared_lock lock(_mutex);
+    if (_index.empty()) return std::nullopt;
+    const auto found = _index.find(Lower(virtualPath));
+    return found == _index.end() ? std::nullopt : std::optional<std::string>(found->first);
+}
+
 bool EnfusionMount::Read(const std::string& virtualPath, std::vector<uint8_t>& out) const
 {
     const auto request = MakeReadRequest(virtualPath);

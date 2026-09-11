@@ -34,8 +34,9 @@ class TextureBankWgpu : public AbstractTextBank
     // as the equality predicate. That operator is interned-pointer identity
     // (RString.hpp: `_ref == with._ref`), and RStringB's bank interns byte-exactly
     // (MapClassTraits::CmpKey is strcmp), so equality here is case-SENSITIVE and
-    // no normalisation happens anywhere - Texture::SetName stores the RStringB
-    // verbatim. The hash must therefore agree with pointer identity, not with the
+    // Texture::SetName stores the RStringB verbatim. Mounted native entries also
+    // register their archive-canonical alias in this same map; loose files and
+    // synthetic material names retain exact matching. The hash agrees with pointer identity, not with the
     // characters: equal names always share one interned buffer, so hashing the
     // address of that buffer is consistent with the predicate.
     struct NameHash

@@ -52,6 +52,9 @@ class EnfusionMount
     // decompression never hold the mount lock. Does not pin externally edited files.
     std::optional<PakReadRequest> MakeReadRequest(const std::string& virtualPath) const;
     bool Has(const std::string& virtualPath) const;
+    // Canonical identity only for an actual mounted entry. No filesystem fallback
+    // or interpretation of synthetic tint/coverage names.
+    std::optional<std::string> CanonicalPath(const std::string& virtualPath) const;
 
     //! Every entry whose path contains `needle` (already lower-cased by the caller
     //! or not — the compare is case-insensitive). Used to find a world's tiles
