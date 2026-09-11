@@ -569,7 +569,8 @@ class Man: public Person
 	MotionPathItem _primaryMove;
 	MotionPathItem _secondaryMove;
     MotionPathItem _cargoReloadAfterLoad{MoveId(MoveIdNone)};
-    void RestoreCargoReloadAfterLoad();
+    bool _restoreMissingCargoPose = false;
+    void RestoreCargoStateAfterLoad();
 
 	MotionPathItem _forceMove; // do not do anything else until this move is completed
 

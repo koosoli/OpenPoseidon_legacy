@@ -127,7 +127,7 @@ try {
         $null=Send @{cmd='screenshot';path=(Join-Path $output 'saved-pose-original.png')}
         $null=Send @{cmd='eval';code='magazinesArray ffvPassenger'} $loadedAmmo.result
         $null=Send @{cmd='eval';code='ffvShots'} $loadedShots.result
-        if (!$state.alive -or !$state.inCargo -or $state.active -or !$pose.primaryMove -or $pose.primaryMove -like 'opjeep*' -or $pose.reloadInProgress) {throw 'Disabling package did not restore a valid original saved cargo pose'}
+        if (!$state.alive -or !$state.inCargo -or $state.active -or $pose.primaryMove -notlike 'jeepcodriver*' -or $pose.reloadInProgress) {throw 'Disabling package did not restore the original Jeep co-driver pose'}
         $null=Send @{cmd='exit'}
         if (!$p.WaitForExit(30000) -or $p.ExitCode -ne 0) {throw 'Saved-pose original fallback exit failed'}
         if (Select-String -LiteralPath $log -Pattern 'Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION' -Quiet) {throw 'Saved-pose fallback runtime error'}

@@ -2431,8 +2431,29 @@ void Soldier::AIPilot(float deltaT, SimulationImportance prec)
     _walkSpeedWanted = speedWanted;
 }
 
-void Man::RestoreCargoReloadAfterLoad()
+void Man::RestoreCargoStateAfterLoad()
 {
+    if (_restoreMissingCargoPose)
+    {
+        _restoreMissingCargoPose = false;
+        AIUnit* unit = Brain();
+        Transport* vehicle = unit ? unit->GetVehicleIn() : nullptr;
+        if (IsLocal() && !_isDead && unit && unit->IsInCargo() && vehicle &&
+            GetHierachyParent() == vehicle && !vehicle->IsDammageDestroyed())
+        {
+            for (int i = 0; i < vehicle->GetManCargo().Size(); ++i)
+            {
+                if (vehicle->GetManCargo()[i] != this)
+                    continue;
+                // Missing addon animation must not turn a seated passenger into
+                // standing infantry. Resolve the actual seat after all load passes.
+                SwitchVehicleAction(vehicle->CargoAction(i));
+                _cargoReloadAfterLoad = MotionPathItem(MoveId(MoveIdNone));
+                LOG_WARN(AI, "Saved cargo animation absent; restored the current vehicle seat pose");
+                break;
+            }
+        }
+    }
     if (_cargoReloadAfterLoad.id == MoveIdNone)
         return;
     const MotionPathItem pending = _cargoReloadAfterLoad;
@@ -2484,6 +2505,7 @@ LSError Man::Serialize(ParamArchive& ar)
         else if (ar.GetPass() == ParamArchive::PassFirst)
         {
             _cargoReloadAfterLoad = MotionPathItem(MoveId(MoveIdNone));
+            _restoreMissingCargoPose = false;
             RString name;
             PARAM_CHECK(ar.Serialize("primaryMove", name, 1, ""))
             if (name.GetLength() == 0)
@@ -2493,6 +2515,7 @@ LSError Man::Serialize(ParamArchive& ar)
             else
             {
                 _primaryMove = MotionPathItem(Type()->GetMoveId(name));
+                _restoreMissingCargoPose = _primaryMove.id == MoveIdNone;
             }
             PARAM_CHECK(ar.Serialize("secondaryMove", name, 1, ""))
             if (name.GetLength() == 0)
@@ -2508,6 +2531,11 @@ LSError Man::Serialize(ParamArchive& ar)
         PARAM_CHECK(ar.Serialize("primaryFactor", _primaryFactor, 1, 1))
         PARAM_CHECK(ar.Serialize("moveTime", _primaryTime, 1, 1))
         PARAM_CHECK(ar.Serialize("secMoveTime", _secondaryTime, 1, 1))
+        // Preserve the pending fix if a script saves again before simulation.
+        bool missingCargoPose = ar.IsSaving() && _restoreMissingCargoPose;
+        PARAM_CHECK(ar.Serialize("opRestoreCargoPose", missingCargoPose, 1, false))
+        if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassFirst)
+            _restoreMissingCargoPose = _restoreMissingCargoPose || missingCargoPose;
 
         // Legacy saves retain pose/time but not action contexts. Preserve only
         // this explicitly supported cargo reload; do not replay other actions.
