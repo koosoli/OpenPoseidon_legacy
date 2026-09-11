@@ -136,6 +136,46 @@ void RegisterSqf(HarnessServer& hs)
                            cJSON_AddBoolToObject(resp, "cargoWeaponLineClear", man->CargoWeaponLineClear(weapon));
                            cJSON_AddBoolToObject(resp, "fireTarget", man->GetFireTarget() != nullptr);
                            cJSON_AddNumberToObject(resp, "aimed", man->GetAimed(weapon, man->GetFireTarget()));
+                           cJSON_AddBoolToObject(resp, "loaded", man->GetWeaponLoaded(weapon));
+                           cJSON_AddBoolToObject(resp, "ready", man->GetWeaponReady(weapon, man->GetFireTarget()));
+                           const Vector3 pivot = seat.FastTransform(man->GetWeaponCenter(weapon));
+                           cJSON_AddNumberToObject(resp, "pivotX", pivot.X());
+                           cJSON_AddNumberToObject(resp, "pivotY", pivot.Y());
+                           cJSON_AddNumberToObject(resp, "pivotZ", pivot.Z());
+                           if (GLandscape)
+                           {
+                               auto contacts = [&](const char* name, Vector3Par start, Vector3Par end)
+                               {
+                                   CollisionBuffer hits;
+                                   GLandscape->ObjectCollision(hits, man, nullptr, start, end, .02f, ObjIntersectFire);
+                                   cJSON* list = cJSON_AddArrayToObject(resp, name);
+                                   for (const auto& hit : hits)
+                                   {
+                                       cJSON* item = cJSON_CreateObject();
+                                       cJSON_AddBoolToObject(item, "carrier", hit.object == vehicle);
+                                       cJSON_AddNumberToObject(item, "component", hit.component);
+                                       cJSON_AddNumberToObject(item, "hierarchy", hit.hierLevel);
+                                       cJSON_AddNumberToObject(item, "under", hit.under);
+                                       cJSON_AddItemToArray(list, item);
+                                   }
+                               };
+                               contacts("pivotContacts", pivot, muzzle);
+                               contacts("muzzleContacts", muzzle, muzzle + direction.Normalized() * 2.0f);
+                               cJSON_AddNumberToObject(resp, "groundClearance",
+                                   GLandscape->IntersectWithGround(nullptr, muzzle, direction.Normalized(), 0, 2.0f));
+                           }
+                           if (Target* target = man->GetFireTarget())
+                           {
+                               cJSON_AddNumberToObject(resp, "targetX", target->position.X());
+                               cJSON_AddNumberToObject(resp, "targetY", target->position.Y());
+                               cJSON_AddNumberToObject(resp, "targetZ", target->position.Z());
+                               cJSON_AddNumberToObject(resp, "targetError", target->posError.Size());
+                               cJSON_AddNumberToObject(resp, "lastSeenAge", Glob.time - target->lastSeen);
+                               cJSON_AddNumberToObject(resp, "visibilityAge", Glob.time - GWorld->VisibilityTime(unit, target->idExact));
+                               if (GLandscape && target->idExact)
+                                   cJSON_AddNumberToObject(resp, "muzzleVisibility",
+                                       GLandscape->Visible(muzzle, man, target->idExact, .9f, ObjIntersectFire));
+                           }
                            cJSON_AddNumberToObject(resp, "muzzleX", muzzle.X());
                            cJSON_AddNumberToObject(resp, "muzzleY", muzzle.Y());
                            cJSON_AddNumberToObject(resp, "muzzleZ", muzzle.Z());
