@@ -30,10 +30,10 @@ namespace ShapeAdapter
     ProxyModelName normalizeProxyModelName(const std::string& selectionName);
 
     // Everything convertToLODShape needs from the MAIN-THREAD-ONLY banks, resolved
-    // ahead of the conversion. This is the Phase-6 split: resolving these tables is
-    // <100 ms across a whole traverse (measured), while the conversion they feed is
-    // 3+ s -- so the tables are built on the main thread and the conversion can move
-    // to a worker. Indices are parallel to the IR: textures[lod][materialIndex],
+    // ahead of the conversion. Tables retain main-thread bank ownership while
+    // geometry conversion can move to a worker. Native Reforger texture composition
+    // can make this step expensive; the original converted-world timing is not a
+    // bound on this path. Indices are parallel to the IR: textures[lod][materialIndex],
     // surfMats[lod][sectionIndex].
     struct AdapterBankTables
     {

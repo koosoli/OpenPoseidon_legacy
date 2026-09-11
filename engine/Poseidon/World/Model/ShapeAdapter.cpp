@@ -422,6 +422,12 @@ static void SynthesizeBoxGeometryMass(LODShapeWithShadow* shape, Shape* geom, Au
 // Both paths are identical here — always cast vertex.flags to ClipFlags directly.
 void BuildAdapterBankTables(const Poseidon::Model::Model& model, AdapterBankTables& tables)
 {
+    static const bool trace = [] {
+        const char* value = std::getenv("POSEIDON_BANK_TABLE_TRACE");
+        return value && std::strcmp(value, "1") == 0;
+    }();
+    double loadMs = 0, headerMs = 0, materialMs = 0;
+    size_t textureCalls = 0, materialCalls = 0;
     const bool isODOL = (model.sourceFormat == "ODOL");
     const int lodCount = static_cast<int>(model.lodLevels.size());
     tables.textures.resize(lodCount);
@@ -442,16 +448,20 @@ void BuildAdapterBankTables(const Poseidon::Model::Model& model, AdapterBankTabl
                 if (c >= 'A' && c <= 'Z')
                     c = c - 'A' + 'a';
             }
+            auto started = trace ? Dev::Perf::Now() : Dev::Perf::Point{};
             texRow[matIdx] = GlobLoadTexture(texPath.c_str());
+            if (trace) { loadMs += Dev::Perf::ElapsedMs(started); started = Dev::Perf::Now(); }
             // The MLOD specials scans read IsAlpha/IsTransparent/IsAnimated, which
             // need the headers; load them here so the conversion never has to.
             if (!isODOL && texRow[matIdx])
                 texRow[matIdx]->LoadHeaders();
+            if (trace) { headerMs += Dev::Perf::ElapsedMs(started); ++textureCalls; }
         }
         auto& matRow = tables.surfMats[i];
         matRow.resize(mesh.sections.size());
         for (size_t s = 0; s < mesh.sections.size(); ++s)
         {
+            const auto started = trace ? Dev::Perf::Now() : Dev::Perf::Point{};
             const auto& sec = mesh.sections[s];
             Texture* tex = nullptr;
             if (sec.materialIndex != UINT32_MAX && sec.materialIndex < texRow.size())
@@ -461,8 +471,12 @@ void BuildAdapterBankTables(const Poseidon::Model::Model& model, AdapterBankTabl
                 matRow[s] = GTexMaterialBank.New(mesh.materials[sec.materialIndex].materialPath.c_str());
             else
                 matRow[s] = GTexMaterialBank.TextureToMaterial(tex);
+            if (trace) { materialMs += Dev::Perf::ElapsedMs(started); ++materialCalls; }
         }
     }
+    if (trace && loadMs + headerMs + materialMs >= 1.0)
+        LOG_INFO(Graphics, "Adapter bank split: format={} lods={} textures={} sections={} load={:.3f} headers={:.3f} materials={:.3f} ms",
+                 model.sourceFormat, lodCount, textureCalls, materialCalls, loadMs, headerMs, materialMs);
 }
 
 // Proxy objects for a converted shape. MAIN THREAD ONLY: the probe reads the
