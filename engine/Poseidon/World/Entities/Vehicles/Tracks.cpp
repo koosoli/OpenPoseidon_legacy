@@ -475,6 +475,46 @@ TrackOptimizedFour::TrackOptimizedFour(const LODShape* lShape)
     }
 }
 
+void TrackOptimizedFour::UpdateSnow(const Frame& pos, bool terminate, float deltaT)
+{
+    _fLeft.UpdateSnow(pos, terminate);
+    _fRight.UpdateSnow(pos, terminate);
+    _bLeft.UpdateSnow(pos, terminate);
+    _bRight.UpdateSnow(pos, terminate);
+    // Classic wheel memory points do not specify the chassis underside. Use a
+    // conservative visual clearance; this does not change suspension or traction.
+    constexpr float clearance = 0.35f;
+    if (terminate || !GSnow().enabled || GSnow().Depth() <= clearance ||
+        !_fLeft.HasOffsets() || !_fRight.HasOffsets() ||
+        !_bLeft.HasOffsets() || !_bRight.HasOffsets())
+    {
+        _snowHullValid = false;
+        _snowHullTime = 0;
+        return;
+    }
+    if (!std::isfinite(deltaT) || deltaT <= 0) return;
+    _snowHullTime += std::min(deltaT, 0.1f);
+    if (_snowHullTime < 0.1f) return;
+    _snowHullTime -= 0.1f;
+    const Vector3 front = pos.PositionModelToWorld((FrontLeftPos() + FrontRightPos()) * 0.5f);
+    const Vector3 back = pos.PositionModelToWorld((BackLeftPos() + BackRightPos()) * 0.5f);
+    const Vector3 centre = (front + back) * 0.5f;
+    const float ground = GLandscape->SurfaceY(centre.X(), centre.Z());
+    if (ground <= GLandscape->GetSeaLevel() || GLandscape->RoadSurfaceY(centre.X(), centre.Z()) > ground + 0.3f)
+    {
+        _snowHullValid = false;
+        return;
+    }
+    const float radius = std::min(FrontLeftPos().Distance(FrontRightPos()),
+                                  BackLeftPos().Distance(BackRightPos())) * 0.5f;
+    if (!std::isfinite(radius) || radius < 0.25f || radius > 4.0f) return;
+    GSnow().PressVehicle(back.X(), back.Z(), front.X(), front.Z(), radius, clearance);
+    if (_snowHullValid)
+        GSnow().PressVehicle(_snowHullLast.X(), _snowHullLast.Z(), centre.X(), centre.Z(), radius, clearance);
+    _snowHullLast = centre;
+    _snowHullValid = true;
+}
+
 void TrackOptimizedFour::Update(const Frame& pos, float deltaT, bool terminate)
 {
     if (!terminate)

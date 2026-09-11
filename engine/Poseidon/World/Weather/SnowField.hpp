@@ -162,6 +162,12 @@ public:
         }
     }
     bool NeedsWalkingChannel() const { return enabled && Depth() > 0.25f; }
+    void PressVehicle(float ax, float az, float bx, float bz, float radius, float clearance)
+    {
+        if (!std::isfinite(clearance) || clearance < 0.0f || Depth() <= clearance) return;
+        // Leave snow below the underbody rather than scraping the whole lane to soil.
+        Trail(ax, az, bx, bz, radius, (Depth() - clearance) / Depth());
+    }
     void PressWalking(float ax, float az, float bx, float bz)
     {
         if (!NeedsWalkingChannel()) return;

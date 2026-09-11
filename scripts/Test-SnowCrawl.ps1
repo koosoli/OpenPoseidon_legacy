@@ -1,8 +1,9 @@
 param([switch]$ResetSettings, [switch]$Storm, [switch]$Refill,
-      [ValidateRange(0.01,1.0)][double]$Depth=0.18, [switch]$ProneView, [switch]$Walking, [switch]$Rotor,
+      [ValidateRange(0.01,1.0)][double]$Depth=0.18, [switch]$ProneView, [switch]$Walking, [switch]$Rotor, [switch]$Vehicle,
       [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
 if ($Walking -and $ProneView) {throw 'Walking and ProneView are different fixtures'}
+if ($Vehicle -and ($Rotor -or $Walking -or $ProneView)) {throw 'Vehicle is a separate fixture'}
 $posture=if ($Walking) {'UP'} else {'DOWN'}
 if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
 $root=Split-Path $PSScriptRoot -Parent
@@ -11,7 +12,7 @@ $output=Join-Path $root ('build/snow-crawl/acceptance/crawl-'+(Get-Date -Format 
 $env:POSEIDON_USER_DIR=Join-Path $output 'user'
 New-Item -ItemType Directory -Force $env:POSEIDON_USER_DIR | Out-Null
 $stamp | Set-Content -LiteralPath (Join-Path $output 'DEPLOYED-FROM.txt')
-[pscustomobject]@{installed=$stamp.Trim();depth=$Depth;rotor=[bool]$Rotor;walking=[bool]$Walking;proneView=[bool]$ProneView;refill=[bool]$Refill;storm=[bool]$Storm;resetSettings=[bool]$ResetSettings} |
+[pscustomobject]@{installed=$stamp.Trim();depth=$Depth;vehicle=[bool]$Vehicle;rotor=[bool]$Rotor;walking=[bool]$Walking;proneView=[bool]$ProneView;refill=[bool]$Refill;storm=[bool]$Storm;resetSettings=[bool]$ResetSettings} |
     ConvertTo-Json | Set-Content -LiteralPath (Join-Path $output 'test-context.json')
 & "$PSScriptRoot/Write-BenchmarkGraphics.ps1" -UserDir $env:POSEIDON_USER_DIR -DlssMode 0
 $env:POSEIDON_SNOW_TEST_DEPTH=$Depth.ToString([Globalization.CultureInfo]::InvariantCulture)
@@ -56,6 +57,37 @@ try {
     }
     $cover=Send @{cmd='dev_snow';action='state'}
     if ([Math]::Abs($cover.depth-$Depth) -gt 0.00001) {throw 'Actual snow depth differs from requested fixture'}
+    if ($Vehicle) {
+        if ($Depth -lt 0.8) {throw 'Vehicle hull fixture requires deep snow'}
+        $null=Send @{cmd='exec';code='snowCar="UAZ" createVehicle [9700,3630,0]; snowCar setDir 0; crawlWalker moveInDriver snowCar; crawlView="camera" camCreate [9710,3618,7]; crawlView cameraEffect ["internal","back"]; crawlView camSetTarget [9700,3635,0]; crawlView camCommit 0'}
+        Start-Sleep -Seconds 5
+        $body=Send @{cmd='dev_snow';action='sample';x=9700;z=3630}
+        if ($body.deficit -lt 0.4 -or $body.deficit -gt 0.8) {throw 'No bounded underbody channel between wheel tracks'}
+        $null=Send @{cmd='screenshot';path=(Join-Path $output 'vehicle-stationary.png')}
+        $null=Send @{cmd='exec';code='crawlWalker setBehaviour "CARELESS"; crawlWalker doMove [9700,3670,0]'}
+        Start-Sleep -Seconds 12
+        $position=Send @{cmd='eval';code='getPos snowCar'}
+        $coords=($position.result.Trim('[',']') -split ',') | ForEach-Object { [double]::Parse($_,[Globalization.CultureInfo]::InvariantCulture) }
+        if ($coords.Count -ne 3 -or $coords[1] -lt 3635) {throw 'Vehicle did not drive along the test path'}
+        $null=Send @{cmd='screenshot';path=(Join-Path $output 'vehicle-driving.png')}
+        $null=Send @{cmd='exec';code='crawlWalker action ["EJECT",snowCar]'}
+        Start-Sleep -Seconds 1
+        $null=Send @{cmd='exec';code='crawlWalker setPos [9660,3600,0]; deleteVehicle snowCar'}
+        Start-Sleep -Seconds 2
+        $null=Send @{cmd='screenshot';path=(Join-Path $output 'vehicle-trail.png')}
+        $outside=Send @{cmd='dev_snow';action='sample';x=9705;z=3630}
+        if ($outside.deficit -ne 0) {throw 'Vehicle cleared snow outside its footprint'}
+        $null=Send @{cmd='dev_snow';action='deposit';metres=1}
+        Start-Sleep -Seconds 2
+        $filled=Send @{cmd='dev_snow';action='sample';x=9700;z=3630}
+        if ($filled.deficit -ne 0) {throw 'Snowfall failed to refill vehicle depression'}
+        $null=Send @{cmd='screenshot';path=(Join-Path $output 'vehicle-refilled.png')}
+        $null=Send @{cmd='exit'}
+        if (!$p.WaitForExit(20000) -or $p.ExitCode -ne 0) {throw 'Vehicle test exit failed'}
+        if (Select-String -LiteralPath $log -Pattern 'Validation Error|panicked at|DeviceLost' -Quiet) {throw 'Vehicle renderer error'}
+        Write-Host "Vehicle contact passed; inspect captures in $output"
+        return
+    }
     if ($Rotor) {
         $null=Send @{cmd='exec';code='snowHeli="UH60" createVehicle [9700,3630,0]; snowHeli engineOn false; crawlView="camera" camCreate [9720,3605,15]; crawlView cameraEffect ["internal","back"]; crawlView camSetTarget [9700,3630,0]; crawlView camCommit 0'}
         Start-Sleep -Seconds 5

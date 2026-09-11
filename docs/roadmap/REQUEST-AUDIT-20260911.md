@@ -2,6 +2,12 @@
 
 ## Aktueller Nachtrag 20:32 (kein Gesamtabschluss)
 
+Naechster Durchstich: TrackOptimizedFour verbreitert tiefen Schnee zwischen den
+vier Radkontakten, 10 Hz, 0.35 m visuelle Unterboden-Naeherung. Flacher Schnee,
+Motorrad-/Panzerpfad und Fahrphysik unveraendert. Build und 10012 Pruefungen
+bestanden; installierter UAZ-Fahr-/Wiederauffuelltest noch ausstehend. Nicht als
+vollstaendige physikalische Fahrzeugverdraengung abgenommen.
+
 21:02: Installiert 7329e2c4, kompletter Build und 10006 Unit-Pruefungen gruen.
 Zusatzfreilegung am animierten Augenpunkt ist kein nachgewiesener Fix fuer den
 Untergrundblick; dieser bleibt offen. Rotor-Wiederholung auf c529af69 bestanden:

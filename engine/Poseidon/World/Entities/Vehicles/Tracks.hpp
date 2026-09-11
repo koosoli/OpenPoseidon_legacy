@@ -76,6 +76,7 @@ class TrackDraw: public RefCount
 	void UpdateSnow(const Frame& pos, bool terminate);
 
 	Vector3Val LeftPos() const {return _lOffset;}
+	bool HasOffsets() const {return _offsets;}
 	Vector3Val RightPos() const {return _rOffset;}
 	const Vector3 CenterPos() const
 	{
@@ -135,11 +136,14 @@ class TrackOptimizedFour: public TrackAccumulator
 	Ref<TrackStep> _accumulate;
 	TrackDraw _fLeft,_fRight;
 	TrackDraw _bLeft,_bRight;
+	Vector3 _snowHullLast = VZero;
+	float _snowHullTime = 0;
+	bool _snowHullValid = false;
 	
 	public:
 	TrackOptimizedFour( const LODShape *lShape );
 	void Update( const Frame &pos, float deltaT, bool terminate );
-	void UpdateSnow(const Frame& pos, bool terminate) { _fLeft.UpdateSnow(pos, terminate); _fRight.UpdateSnow(pos, terminate); _bLeft.UpdateSnow(pos, terminate); _bRight.UpdateSnow(pos, terminate); }
+	void UpdateSnow(const Frame& pos, bool terminate, float deltaT);
 
 	Vector3 BackLeftPos() const {return _bLeft.CenterPos();}
 	Vector3 BackRightPos() const {return _bRight.CenterPos();}

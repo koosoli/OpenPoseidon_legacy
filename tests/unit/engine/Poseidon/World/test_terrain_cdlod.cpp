@@ -545,6 +545,26 @@ TEST_CASE("CDLOD selection stays visible and morphs at each patch's level", "[te
     }
 }
 
+TEST_CASE("Vehicle body clears deep snow between wheel tracks without scraping soil", "[snow]")
+{
+    Poseidon::SnowField snow;
+    snow.enabled = true;
+    snow.maxDepth = 1.0f;
+    snow.Deposit(1.0f);
+    snow.PressVehicle(0, -2, 0, 2, 1.0f, 0.35f);
+    CHECK(snow.DeficitAt(0, 0) == Catch::Approx(0.65f));
+    CHECK(snow.DeficitAt(3, 0) > 0.5f);
+    CHECK(snow.DeficitAt(12, 0) == 0);
+    snow.PressVehicle(0, 0, 100, 0, 1.0f, 0.35f);
+    CHECK(snow.DeficitAt(400, 0) == 0);
+    snow.Deposit(1.0f);
+    CHECK(snow.DeficitAt(0, 0) == 0);
+    snow.Reset();
+    snow.Deposit(0.2f);
+    snow.PressVehicle(0, -2, 0, 2, 1.0f, 0.35f);
+    CHECK(snow.Chunks() == 0);
+}
+
 TEST_CASE("Prone body contact leaves a wide persistent snow depression", "[snow]")
 {
     Poseidon::SnowField snow;
