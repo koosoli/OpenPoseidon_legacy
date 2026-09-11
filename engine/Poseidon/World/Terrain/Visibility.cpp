@@ -9,6 +9,7 @@
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Entities/Infantry/SoldierOld.hpp>
 #include <stdio.h>
 #include <string.h>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
@@ -193,7 +194,7 @@ float SensorList::Unimportance(EntityAI* from, EntityAI* to, float& defValue)
     // calculate max. allowed dirty
     float unimportance = to->VisibleSize();
     saturateMax(unimportance, 2);
-    float dist2 = from->Position().Distance2(to->Position());
+    float dist2 = (from->GetHierachyParent() ? from->WorldTransform().Position() : from->Position()).Distance2(to->Position());
     if (dist2 > Square(200))
     {
         unimportance *= 2;
@@ -352,7 +353,9 @@ int SensorList::UpdateCell(SensorRowID r, SensorColID c)
         return 0;
     }
 
-    EntityAI* from = fromUnit->GetVehicle();
+    Man* passenger = fromUnit->IsInCargo() ? dyn_cast<Man>(fromDriver) : nullptr;
+    EntityAI* from = passenger && passenger->GetActiveCargoWeaponSeat() ? fromDriver : fromUnit->GetVehicle();
+    const Vector3 fromPosition = from->GetHierachyParent() ? from->WorldTransform().Position() : from->Position();
 
     // update single
     SensorUpdate& info = row._info[c];
@@ -360,12 +363,12 @@ int SensorList::UpdateCell(SensorRowID r, SensorColID c)
     {
         info.SetVisibility1();
         info.SetLastVisible(Glob.time);
-        info.rowPos = from->Position();
+        info.rowPos = fromPosition;
         info.colPos = to->Position();
         info.time = Glob.time;
         return 0;
     }
-    float dist2 = from->Position().Distance2(to->Position());
+    float dist2 = fromPosition.Distance2(to->Position());
     float irRange = from->GetType()->GetIRScanRange();
     if (!to->GetType()->GetIRTarget())
     {
@@ -381,7 +384,7 @@ int SensorList::UpdateCell(SensorRowID r, SensorColID c)
         if (unimportance > 1e5)
         {
             info.SetVisibility(defValue);
-            info.rowPos = from->Position();
+            info.rowPos = fromPosition;
             info.colPos = to->Position();
             info.time = Glob.time - 30;
             if (defValue >= 0.02f)
@@ -395,7 +398,7 @@ int SensorList::UpdateCell(SensorRowID r, SensorColID c)
         }
         // calculate dirty value
         float toMoved = to->Position().Distance(info.colPos);
-        float fromMoved = from->Position().Distance(info.rowPos);
+        float fromMoved = fromPosition.Distance(info.rowPos);
         float timeMoved = timeMoved = Glob.time.Diff(info.time);
 
         // sophisticated check (4D: 3D + time)
@@ -409,7 +412,7 @@ int SensorList::UpdateCell(SensorRowID r, SensorColID c)
         float visibility = GLOB_LAND->Visible(from, to);
 
         info.SetVisibility(visibility);
-        info.rowPos = from->Position();
+        info.rowPos = fromPosition;
         info.colPos = to->Position();
         info.time = Glob.time;
         if (visibility > 0.02f)
@@ -426,7 +429,7 @@ int SensorList::UpdateCell(SensorRowID r, SensorColID c)
     else
     {
         info.SetVisibility0();
-        info.rowPos = from->Position();
+        info.rowPos = fromPosition;
         info.colPos = to->Position();
         info.time = Glob.time;
         return 0;
@@ -448,7 +451,8 @@ int SensorList::UpdateRow(SensorRowID id)
         fromDriver->SetSensorRowID(SensorRowID(-1));
         return 0;
     }
-    if (fromUnit->IsInCargo())
+    Man* passenger = fromUnit->IsInCargo() ? dyn_cast<Man>(fromDriver) : nullptr;
+    if (fromUnit->IsInCargo() && !(passenger && passenger->GetActiveCargoWeaponSeat()))
     {
 // Fail("Cargo unit sensor present");
 // unit loaded in cargo

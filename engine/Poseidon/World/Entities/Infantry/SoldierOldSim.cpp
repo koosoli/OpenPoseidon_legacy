@@ -222,6 +222,9 @@ void Man::BasicSimulation(float deltaT, SimulationImportance prec, float speedFa
     }
     SimulateAnimations(turn, moveX, moveZ, deltaT * speedFactor, prec);
 
+    if (cargoWeapon)
+        RecalcPositions(WorldTransform());
+
     BasicSimulationCore(deltaT, prec);
 }
 
