@@ -2,6 +2,21 @@
 
 ## Aktueller Nachtrag 20:32 (kein Gesamtabschluss)
 
+23:26: Everon-Godrays/Baumfall nach Ansicht der aktuellen Bilder vom Besitzer
+visuell akzeptiert ("ich sehe kein problem mehr"). Keine neue Shaderkorrektur
+hierfuer vorgenommen. CLI-A/B auf installiertem 88542064, native 1280x720,
+MSAA4, DLSS aus, feste Belichtung und festgesetzter LOD-Regelbereich:
+beide 7157 sichtbare Instanzen und identische LOD-Verteilung
+2231/3687/1156/63/18/2/0/0. Entfernte Waelder reagieren sichtbar auf Godrays.
+Belege: build/foliage-rays/acceptance/everon-fixed-{control,rays}-88542064-*.
+Der zusaetzliche Player-Freefly-Lauf zeigt eine andere Sonnenstellung und ist
+deshalb kein zeitgleicher A/B-Nachweis; ebenfalls keine FPS-Aussage ableiten.
+Die zwei ersten --test-world-Versuche wurden wegen Ladefehler verworfen:
+klassisches Everon muss ueber die Mission geladen werden, der Override
+unterstuetzt hier nur moderne WRP/native Daten. Test-FoliageRays erweitert
+statt eines zweiten Testsystems. Keine pauschale Abnahme aller Lichtfehler,
+keine Aktivierung der zuvor verworfenen Late-Surface-/Early-Opaque-Versuche.
+
 23:00: Installiert 88542064. M113-Tiefschneekontakt im Stand und bei Fahrt
 geprueft: 0.65 m Freilegung in 1 m Schnee, breite Rinne, ausserhalb unveraendert,
 erneutes Zuschneien bestanden. UAZ-Regressionslauf ebenfalls bestanden. Kein
