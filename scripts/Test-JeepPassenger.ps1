@@ -1,12 +1,14 @@
 param([switch]$ProjectileFrame, [switch]$AnimationPreview, [switch]$AnimationVideo, [switch]$NpcFire,
       [ValidateSet('clear','hold','outside','blocked','friendly')][string]$NpcScenario='clear',
       [ValidateSet(0,90,180)][int]$NpcHeading=0, [switch]$NpcDriver,
-      [switch]$NpcTransitions, [switch]$NpcMoving, [switch]$PlayerFire, [switch]$Lifecycle, [switch]$SaveLoad,
+      [switch]$NpcTransitions, [switch]$NpcMoving, [switch]$NpcTurning, [switch]$SecondJeep,
+      [switch]$PlayerFire, [switch]$Lifecycle, [switch]$SaveLoad,
       [switch]$DefaultPackage, [string]$UserMod='',
       [ValidateSet('','missing','incompatible')][string]$AutomaticOriginal='', [string]$MissionPath='',
       [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
+if ($NpcTurning) {$NpcMoving=$true}
 if ($PlayerFire) {
     if ($NpcFire -or $NpcMoving -or $NpcTransitions -or $NpcScenario -ne 'clear') {throw 'Player fire is a separate case'}
     $NpcFire=$true
@@ -18,6 +20,7 @@ if (!$NpcFire -and ($NpcHeading -ne 0 -or $NpcDriver)) {throw 'NPC heading/drive
 if ($NpcTransitions -and (!$NpcFire -or $NpcScenario -ne 'clear')) {throw 'Transition/reload requires the clear NPC case'}
 if ($NpcMoving -and (!$NpcFire -or $NpcScenario -ne 'clear' -or $NpcHeading -ne 0 -or $NpcTransitions)) {throw 'Moving test requires clear heading-zero NPC case without reload'}
 if ($NpcMoving) {$NpcDriver=$true}
+if ($SecondJeep -and (!$NpcFire -or $NpcScenario -ne 'clear' -or $NpcMoving -or $PlayerFire)) {throw 'Second Jeep requires stationary clear NPC case'}
 if ($Lifecycle -and (!$NpcFire -or $NpcScenario -ne 'clear' -or $NpcMoving)) {throw 'Lifecycle requires stationary clear cargo test'}
 if ($SaveLoad -and (!$NpcTransitions -and !$PlayerFire)) {throw 'Save/load requires a reload test'}
 if ($DefaultPackage -and ($AnimationPreview -or $ProjectileFrame)) {throw 'Default package is separate from preview/constructor tests'}
@@ -165,6 +168,26 @@ try {
         $activation=Send @{cmd='crew_pose_probe'}
         if (!$activation.cargoWeaponActive) {throw 'NPC fixture did not activate the explicitly configured seat'}
     }
+    if ($SecondJeep) {
+        $null=Send @{cmd='exec';code='ffvSecondJeep="Jeep" createVehicle [9700,3700,0]; ffvSecondJeep setDir 0; ffvSecondGroup=createGroup west; ffvSecondShots=0; "SoldierWB" createUnit [[9700,3700,0],ffvSecondGroup,"ffvSecond=this; this setCombatMode ""BLUE""; removeAllWeapons this"]; {ffvSecond removeMagazine _x} forEach magazines ffvSecond; ffvSecond addMagazine "M16"; ffvSecond addWeapon "M16"; ffvSecond moveInCargo ffvSecondJeep; "SoldierEB" createUnit [[9760,3700,0],group ffvTarget,"ffvSecondTarget=this; removeAllWeapons this; this disableAI ""MOVE"""]; ffvSecond addEventHandler ["Fired",{ffvSecondShots=ffvSecondShots+1}]; ffvSecond reveal ffvSecondTarget; ffvSecond doTarget ffvSecondTarget'}
+        Start-Sleep -Seconds 2
+        $null=Send @{cmd='eval';code='alive ffvSecondTarget && getDammage ffvSecondTarget == 0'} 'true'
+        $null=Send @{cmd='exec';code='ffvSecond setCombatMode "YELLOW"; ffvSecond doFire ffvSecondTarget'}
+        Start-Sleep -Seconds 12
+        $secondAmmo=Send @{cmd='eval';code='ffvSecond ammo "M16"'}
+        $secondShots=Send @{cmd='eval';code='ffvSecondShots'}
+        $secondDamage=Send @{cmd='eval';code='getDammage ffvSecondTarget'}
+        $null=Send @{cmd='eval';code='vehicle ffvSecond == ffvSecondJeep'} 'true'
+        if ([int]$secondShots.result -le 0 -or [int]$secondAmmo.result -ge 30 -or [double]$secondDamage.result -le 0) {throw 'Second independent cargo passenger did not hit'}
+        $null=Send @{cmd='eval';code='ffvShots'} '0'
+        $null=Send @{cmd='eval';code='ffvPassenger ammo "M16"'} '30'
+        $null=Send @{cmd='exec';code='ffvSecond setCombatMode "BLUE"; deleteVehicle ffvSecondTarget; ffvSecondJeep setDammage 1'}
+        Start-Sleep -Seconds 2
+        $primary=Send @{cmd='crew_seat_status'}
+        if (!$primary.active -or !$primary.alive) {throw 'Second carrier destruction affected primary cargo state'}
+        [pscustomobject]@{ammo=$secondAmmo.result;shots=$secondShots.result;damage=$secondDamage.result;primary=$primary} |
+            ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $output 'second-jeep.json')
+    }
     if ($AnimationPreview) {
         $null=Send @{cmd='crew_pose_probe'}
         $null=Send @{cmd='exec';code='ffvView camSetPos [9701.8,3599.6,1.6]; ffvView camSetTarget [9700.4,3600,1.35]; ffvView camCommit 0'}
@@ -230,19 +253,37 @@ try {
     }
     if ($NpcMoving) {
         $null=Send @{cmd='exec';code='ffvMovingShots=0; ffvPassenger addEventHandler ["Fired",{if (abs(speed ffvJeep)>5) then {ffvMovingShots=ffvMovingShots+1}}]; ffvTarget setPos [9760,3610,0]; ffvJeep setFuel 1; ffvDriver setBehaviour "CARELESS"; ffvDriver setSpeedMode "LIMITED"; ffvDriver doMove [9700,3680,0]; ffvView camSetPos [9706,3615,3]; ffvView camSetTarget ffvJeep; ffvView camCommit 0'}
+        if ($NpcTurning) {
+            $null=Send @{cmd='exec';code='ffvTurnShots=0; ffvShotHeadings=[]; ffvPassenger addEventHandler ["Fired",{ffvShotHeadings=ffvShotHeadings+[getDir ffvJeep]; if ((abs(speed ffvJeep)>5) && (abs(sin(getDir ffvJeep))>0.087)) then {ffvTurnShots=ffvTurnShots+1}}]; ffvDriver doMove [9660,3680,0]'}
+        }
         $driveDeadline=[DateTime]::UtcNow.AddSeconds(20)
         do {
             Start-Sleep -Milliseconds 250
             $driveSpeed=Send @{cmd='eval';code='abs(speed ffvJeep)'}
-        } while ([double]$driveSpeed.result -le 5 -and [DateTime]::UtcNow -lt $driveDeadline)
-        if ([double]$driveSpeed.result -le 5) {throw 'AI driver never started moving'}
+            $turnReady=$true
+            if ($NpcTurning) {$turnReady=(Send @{cmd='eval';code='abs(sin(getDir ffvJeep))>0.087'}).result -ceq 'true'}
+        } while (([double]$driveSpeed.result -le 5 -or !$turnReady) -and [DateTime]::UtcNow -lt $driveDeadline)
+        if ([double]$driveSpeed.result -le 5 -or !$turnReady) {throw 'AI driver never reached the required motion/heading'}
         $null=Send @{cmd='eval';code='ffvShots'} '0'
         $null=Send @{cmd='screenshot';path=(Join-Path $output 'moving-before-fire.png')}
     }
     if (!$PlayerFire -and (!$NpcFire -or $NpcScenario -ne 'hold')) {
         $null=Send @{cmd='exec';code='ffvPassenger reveal ffvTarget; ffvPassenger doTarget ffvTarget; ffvPassenger setCombatMode "YELLOW"; ffvPassenger doFire ffvTarget'}
     }
-    Start-Sleep -Seconds 10
+    if ($NpcMoving) {
+        $samples=@(); $clock=[Diagnostics.Stopwatch]::StartNew()
+        do {
+            $motion=Send @{cmd='crew_pose_probe'}
+            $drive=Send @{cmd='eval';code='[getPos ffvJeep,getDir ffvJeep,speed ffvJeep]'}
+            $name='motion-{0:D4}.png' -f $samples.Count
+            $beforeCapture=$clock.Elapsed.TotalSeconds
+            $null=Send @{cmd='screenshot';path=(Join-Path $output $name)}
+            $afterCapture=$clock.Elapsed.TotalSeconds
+            $samples += [pscustomobject]@{file=$name;pose=$motion.primaryMove;phase=$motion.phase;time=($beforeCapture+$afterCapture)*.5;captureSeconds=$afterCapture-$beforeCapture;vehicle=$drive.result;probe=$motion}
+            Start-Sleep -Milliseconds 100
+        } while ($clock.Elapsed.TotalSeconds -lt 10)
+        $samples | ConvertTo-Json -Depth 7 | Set-Content -LiteralPath (Join-Path $output 'motion-samples.json')
+    } else {Start-Sleep -Seconds 10}
     $after=Send @{cmd='eval';code='ffvPassenger ammo "M16"'}
     $seated=Send @{cmd='eval';code='vehicle ffvPassenger == ffvJeep'}
     $damage=Send @{cmd='eval';code='getDammage ffvTarget'}
@@ -252,6 +293,11 @@ try {
         $driveEnd=Send @{cmd='eval';code='getPos ffvJeep'}
         $null=Send @{cmd='crew_pose_probe'}
         if ([int]$movingShots.result -le 0) {throw 'No actual passenger shot during AI-driven movement'}
+        if ($NpcTurning) {
+            $turnShots=Send @{cmd='eval';code='ffvTurnShots'}
+            $null=Send @{cmd='eval';code='ffvShotHeadings'}
+            if ([int]$turnShots.result -le 0) {throw 'No actual passenger shot after AI steering changed heading by five degrees'}
+        }
     }
     $null=Send @{cmd='screenshot';path=(Join-Path $output 'ordered-fire.png')}
     if ($NpcFire) {
@@ -354,7 +400,7 @@ try {
         $null=Send @{cmd='exit'}
         if (!$p.WaitForExit(30000) -or $p.ExitCode -ne 0) {throw 'NPC fire exit failed'}
         if (Select-String -LiteralPath $log -Pattern 'Bad animation|Broken animation|Animation .*not found|Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION' -Quiet) {throw 'NPC integration load/runtime error'}
-        if ($NpcTransitions -or $PlayerFire) {
+        if ($NpcTransitions -or $PlayerFire -or $NpcMoving) {
             & python "$PSScriptRoot/default-content/make_jeep_pose_video.py" $output
             if ($LASTEXITCODE -ne 0) {throw 'Reload video encoding failed'}
         }

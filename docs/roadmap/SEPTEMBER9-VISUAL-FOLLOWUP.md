@@ -2,7 +2,14 @@
 
 ## September 11 Jeep implementation continuation
 
-Latest verified engine: installed 7f6d3fa0. NPC 121507 and player 121641 pass
+Latest installed release: 65dc2a63, both real default packages, no mod parameter
+needed. Fresh release 125134 passes NPC, player, disabled, missing archive,
+incompatible manifest and explicit user-mod precedence. Own six-RTM source,
+generator and SP Jeep cargo-0/M16 path are delivered. Save/reload and player
+lifecycle pass. Full turning/rough-ground/multi-Jeep motion, fine hand quality,
+MP fallback runtime and controlled resource-cost acceptance remain open.
+
+Historical implementation checkpoints follow. Installed 7f6d3fa0: NPC 121507 and player 121641 pass
 seated and mid-reload save/load, ammo conservation and no duplicate shots.
 Player lifecycle passes after load. Constructor/on-foot baseline 121826 and
 real moving NPC 121913 pass. Authored palm-anchor correction 0877101f passes
@@ -71,6 +78,11 @@ actual native bark/leaf draw paths and transforms before changing this; if they
 straddle paths or use distinct centres, shared main bending can disagree even
 with bounded flutter. Any correction must also cover both velocity paths and
 shadow rendering. Verify with motion captures, not a still image.
+
+Follow-up source check at 65dc2a63: BuildGpuInstance explicitly sets inst.center
+to the object transform origin, not its bounding centre. Ordinary native-tree
+direct and retained seeds therefore agree here. Do not implement the phase
+hypothesis above without evidence of a distinct bark/leaf transform or path.
 
 Material acceptance must compare the same tree/terrain location, sun, exposure,
 LOD, resolution and upscaler. Check authored normals, alpha coverage, material

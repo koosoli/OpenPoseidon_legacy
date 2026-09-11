@@ -34,24 +34,27 @@ keine sichtbaren Baum- oder Hauskonturen. Nahgeometrie nicht voreilig ausblenden
 Speicher, Erzeugung und tatsaechlich entfallende Draw-/Materialarbeit getrennt
 messen. Solange der teure Objektpfad weiterlaeuft, keine FPS-Ersparnis behaupten.
 
-### Jeep-Passagierschiessen: fehlt
+### Jeep-Passagierschiessen: SP-Durchstich geliefert, Restabnahme offen
 
-`engine/Poseidon/Core/ModCollection.cpp` kennt das automatische Paket
-`@OP_VehicleActions/AddOns/op_jeep_actions.pbo`; AppConfig hat den separaten
-Deaktivierungsschalter, Deploy.ps1 den Paketkandidaten. Das ist Ladeinfrastruktur.
-`content/default-packs` enthaelt nur das visuelle Paket und README, keine
-Jeep-Animationsquellen oder fertiges VehicleActions-Paket. Die Suche nach FFV
-findet keine gelieferte Cargo-Personalwaffenfunktion; das gleichnamige Makro in
-Airplane.cpp ist lediglich ein Ausgabeformat.
+Aktualisierung nach installiertem 65dc2a63: Das eigene Paket
+`@OP_VehicleActions/AddOns/op_jeep_actions.pbo` wird normal automatisch geladen.
+`content/default-packs/vehicle-actions` und `scripts/default-content` enthalten
+eigene bearbeitbare Posequellen und Generatoren. Original-Jeep, Cargositz 0,
+persoenliche M16: NPC und Spieler nutzen denselben vorhandenen Waffenpfad.
+Keine montierte MG-Ersatzfunktion, kein angehefteter externer Soldat.
 
-Naechster Durchstich bleibt ein echter offener Jeep-Cargositz mit einem Gewehr,
-NPC im Stand, vorhandener Wahrnehmung/Feuerfreigabe und echter Munition. Dann
-Sitzanimationen, Hindernisse, Fahrt, Uebergaenge und Spieler auf demselben Pfad.
-Kein Fahrzeug-MG und kein ausserhalb angehefteter Soldat als Ersatz. Default-
-Paket nach Abnahme aktiv; unvalidiertes Multiplayer-FFV bleibt kontrolliert aus.
-Save/Load, Tod, Ausstieg und Fahrzeugzerstoerung gehoeren zur Abnahme, nicht
-erst zu einer beliebigen spaeteren Erweiterung. Siehe
-[Paketvertrag und bisherige Nachweise](decisions/DEFAULT-CONTENT-PACKS-20260910.md).
+Installiert bestanden: echte Treffer/Munition, Hindernis/Feuerverbot,
+automatische Sitzanimation, Nachladen, Speichern auch mitten im Nachladen,
+Spielersteuerung, Ausstieg/Sitzwechsel/Tod/Fahrzeugzerstoerung und gerade Fahrt.
+Frisches Release-Verzeichnis 125134 besteht zusaetzlich automatisches Laden,
+beide SP-Pfade, Abschalten, fehlendes/inkompatibles Paket und Benutzer-Mod-Vorrang.
+Originalinstallation und deren PBOs wurden nicht veraendert.
+
+Offen: Kurven/Unebenheiten/mehrere Jeeps, feinere Animationsabnahme,
+kontrollierte Zusatzkosten und echter Multiplayer-Fallbacktest. MP ist im Code
+weiter auf Originalverhalten begrenzt, nicht als FFV freigegeben. Laden alter
+Spielstaende nach Abschalten des Animationspakets ist noch nicht abgenommen.
+Siehe [chronologische Implementierung und Tests](decisions/JEEP-FFV-20260911.md).
 
 ## Uebrige Anforderungen und offene Abnahme
 
