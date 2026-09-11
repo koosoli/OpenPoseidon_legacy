@@ -1,12 +1,18 @@
-param([switch]$ResetSettings, [switch]$Storm, [switch]$Refill, [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
+param([switch]$ResetSettings, [switch]$Storm, [switch]$Refill,
+      [ValidateRange(0.01,1.0)][double]$Depth=0.18, [switch]$ProneView,
+      [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
 $root=Split-Path $PSScriptRoot -Parent
+$stamp=Get-Content -LiteralPath (Join-Path $GameDir 'DEPLOYED-FROM.txt') -Raw
 $output=Join-Path $root ('build/snow-crawl/acceptance/crawl-'+(Get-Date -Format 'yyyyMMdd-HHmmss'))
 $env:POSEIDON_USER_DIR=Join-Path $output 'user'
 New-Item -ItemType Directory -Force $env:POSEIDON_USER_DIR | Out-Null
+$stamp | Set-Content -LiteralPath (Join-Path $output 'DEPLOYED-FROM.txt')
+[pscustomobject]@{installed=$stamp.Trim();depth=$Depth;proneView=[bool]$ProneView;refill=[bool]$Refill;storm=[bool]$Storm;resetSettings=[bool]$ResetSettings} |
+    ConvertTo-Json | Set-Content -LiteralPath (Join-Path $output 'test-context.json')
 & "$PSScriptRoot/Write-BenchmarkGraphics.ps1" -UserDir $env:POSEIDON_USER_DIR -DlssMode 0
-$env:POSEIDON_SNOW_TEST_DEPTH='0.18'
+$env:POSEIDON_SNOW_TEST_DEPTH=$Depth.ToString([Globalization.CultureInfo]::InvariantCulture)
 Remove-Item Env:POSEIDON_SNOW_TEST_RATE -ErrorAction SilentlyContinue
 $env:WGR_AUTO_EXPOSURE='0'
 $env:WGR_EXPOSURE=if ($Storm) {'1.0'} else {'0.15'}
@@ -36,11 +42,18 @@ try {
             if ($null -eq $line) {throw 'Harness closed'}
             $r=$line | ConvertFrom-Json
         } while ($null -eq $r.ok)
+        $line | Add-Content -LiteralPath (Join-Path $output 'responses.jsonl')
         if (!$r.ok) {throw $line}
         Write-Host $line
         return $r
     }
     Start-Sleep -Seconds 12
+    if ($Depth -gt 0.5) {
+        $null=Send @{cmd='dev_snow';action='depth-limit';metres=$Depth}
+        $null=Send @{cmd='dev_snow';action='deposit';metres=$Depth}
+    }
+    $cover=Send @{cmd='dev_snow';action='state'}
+    if ([Math]::Abs($cover.depth-$Depth) -gt 0.00001) {throw 'Actual snow depth differs from requested fixture'}
     $null=Send @{cmd='exec';code='crawlWalker setPos [9700,3600,0]; doStop crawlWalker; crawlView="camera" camCreate [9703,3598,3]; crawlView cameraEffect ["internal","back"]; crawlView camSetTarget [9700,3604,0]; crawlView camCommit 0'}
     Start-Sleep -Seconds 2
     $null=Send @{cmd='screenshot';path=(Join-Path $output 'before.png')}
@@ -50,6 +63,15 @@ try {
     $null=Send @{cmd='screenshot';path=(Join-Path $output 'crawling.png')}
     $coords=($position.result.Trim('[',']') -split ',') | ForEach-Object { [double]::Parse($_,[Globalization.CultureInfo]::InvariantCulture) }
     if ($coords.Count -ne 3 -or $coords[1] -lt 3601) {throw 'Actor did not crawl along the test path'}
+    if ($ProneView) {
+        $null=Send @{cmd='exec';code='doStop crawlWalker; crawlView cameraEffect ["terminate","back"]; crawlWalker switchCamera "INTERNAL"'}
+        Start-Sleep -Seconds 2
+        $null=Send @{cmd='screenshot';path=(Join-Path $output 'prone-internal.png')}
+        $null=Send @{cmd='exec';code='crawlWalker switchCamera "EXTERNAL"'}
+        Start-Sleep -Seconds 1
+        $null=Send @{cmd='screenshot';path=(Join-Path $output 'prone-external.png')}
+        $null=Send @{cmd='exec';code='player switchCamera "INTERNAL"; crawlView cameraEffect ["internal","back"]'}
+    }
     $null=Send @{cmd='exec';code='doStop crawlWalker; crawlWalker setPos [9660,3600,0]'}
     Start-Sleep -Seconds 2
     $null=Send @{cmd='screenshot';path=(Join-Path $output 'trail.png')}

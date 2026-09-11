@@ -437,6 +437,13 @@ void RegisterSnowProbe(HarnessServer& hs)
             else if (std::strcmp(action, "enable") == 0) snow.enabled = true;
             else if (std::strcmp(action, "disable") == 0) snow.enabled = false;
             else if (std::strcmp(action, "storm") == 0) snow.ApplySnowstormPreset();
+            else if (std::strcmp(action, "depth-limit") == 0)
+            {
+                const cJSON* metres = cJSON_GetObjectItemCaseSensitive(root, "metres");
+                if (!cJSON_IsNumber(metres) || !(metres->valuedouble >= 0.01 && metres->valuedouble <= 1))
+                    return HarnessProtocol::ErrorResponse("depth limit requires metres in [0.01, 1]");
+                snow.maxDepth = static_cast<float>(metres->valuedouble);
+            }
             else if (std::strcmp(action, "deposit") == 0)
             {
                 const cJSON* metres = cJSON_GetObjectItemCaseSensitive(root, "metres");

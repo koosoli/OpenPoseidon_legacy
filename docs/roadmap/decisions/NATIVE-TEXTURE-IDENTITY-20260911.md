@@ -183,3 +183,11 @@ currently runs in the renderer destructor after world teardown. That is an
 ownership/lifecycle hypothesis, not a proven deadlock. No speculative shutdown
 change has been made. Capture a stack from an owned hung test if it recurs;
 keep default no-override lifecycle and world-switch acceptance open.
+
+Follow-up installed 89030aee, Village-default-retry-1810: no override, positive
+lazy-source diagnostics, strict native 1920x1080 MSAA4 and clean exit. The repaired
+wrapper accepts lifecycle and 22360 / 5362 / 13499377 coverage. GPU endpoint
+32.439 ms is not a new paired performance result. This closes the pending default
+smoke, not the isolated prior hang or world-switch acceptance. Selected main LOD
+histogram is all LOD0 in this pose; inspect thresholds/quality before inferring
+that authored native LODs are absent or changing the sight distance.

@@ -2,14 +2,16 @@
 
 ## September 11 Jeep implementation continuation
 
-Latest installed release at this checkpoint: a22ce887, both real default packages, no mod parameter
+Latest installed release at this checkpoint: 89030aee, both real default packages, no mod parameter
 needed. Fresh release 125134 passes NPC, player, disabled, missing archive,
 incompatible manifest and explicit user-mod precedence. Own six-RTM source,
 generator and SP Jeep cargo-0/M16 path are delivered. Save/reload and player
 lifecycle pass again in 141650/141753; two stationary Jeeps operate independently.
 The package 0.1.1 head pose and animated-eye direction restore cargo observation.
 Package 0.1.2 adds seat-scoped AI tracking speed; unit/generator checks pass,
-but installed fast-turn and regression acceptance is in progress. The optional
+and installed safeguards/NPC/player save/reload/lifecycle regressions pass again
+(180337..180801). Limited-subgroup far turning fires two shots but no hit;
+near turning also fails. This remains incomplete movement acceptance. The optional
 group-command slow-drive fixture fails to move, so it is not a passing FFV test.
 Saved missing-package poses correctly return to the retail co-driver state.
 Hold/outside/obstacle/friendly and disabled-package regressions pass. Current
@@ -26,7 +28,9 @@ images agree. Enabled by default in f6516c52; the no-override village run 152834
 produced the expected image but hung during shutdown and failed its watchdog.
 The harness now rejects that failure instead of reporting a pass. Same-binary
 explicit OFF 154000 and ON 154151 both shut down cleanly. The intermittent hang
-is not diagnosed or closed; default no-override lifecycle acceptance remains open.
+is not diagnosed or closed. A new no-override village run on 89030aee
+(Village-default-retry-1810) passes the repaired lifecycle and coverage gates.
+This is a clean default smoke, not proof that the intermittent hang is fixed.
 The A/B fallback is WGR_LAZY_BCR_TINT=0. See NATIVE-TEXTURE-IDENTITY-20260911.md; not a new streaming
 manager, a large FPS claim, or completion of native Reforger quality/streaming.
 
