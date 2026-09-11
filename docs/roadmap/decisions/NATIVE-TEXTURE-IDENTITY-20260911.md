@@ -101,3 +101,40 @@ destinations, independent alpha flags, mip caps and refused inputs. Run the same
 native route with `Test-NativeStreamCancellation -LazyBcrTint 0/1`, identical
 profiling and driver-memory sampling. Tests and installed A/B are pending at
 this entry. Saving CPU payloads is not itself evidence of improved frame times.
+
+### Initial A/B and exact-average correction
+
+Installed a11b8650, native 1280x720 MSAA4, identical 4 km route/settings/samplers:
+ON `cancel-20260911-144633-...-lazy-bcr-1-...`, OFF `cancel-20260911-144841-...-lazy-bcr-0-...`.
+Both strict lifecycle checks pass and register 22370 instances. Full-window moving
+FrameProfiler: ON n=1316, median 29.729, p95 42.317, p99 83.792, max 142.632 ms,
+4 frames >100 ms; OFF n=1283, median 30.342, p95 43.551, p99 91.549, max 218.512 ms,
+6 frames >100 ms. Process private peak 7942717440 vs 11150643200 bytes (~2.99 GiB
+saved). Both retain exactly 1417 object textures / 1003.057 MiB and 272.790 MiB
+live geometry. Whole-GPU driver peaks 4372 vs 4354 MiB: not a VRAM saving.
+One pair does not establish a repeatable FPS/tail improvement.
+
+Village OFF 145233 / ON 145427, native 1920x1080 MSAA4, 90 s warmup: both pass,
+22360 instances, 5362 main objects, 13499377 main triangles. Inspected wall/roof/
+road/fence/sign colours and coverage agree; foliage/cloud positions vary.
+Single GPU samples 29.999 / 30.087 ms are not evidence of a steady FPS gain.
+
+Exclude the preceding 143510 run: the graphics.cfg path reached 262 characters;
+the legacy reader missed it and activated auto DLSS. The harness now uses a short
+profile path, rejects overlong profile paths, and asserts native dimensions in
+both route and village captures. Merely specifying DlssMode 0 was not the fix:
+it was already the helper default.
+
+Expanded tests revealed that truncating the bank source to MAX_MIPMAPS=7 loses
+the original smallest mip used for the average. The candidate then used a
+different mip for its tinted average. Synthetic capped-source tests failed six
+assertions; five real native BCR variants at caps 256/1024 failed nine average
+assertions (mip pixel comparisons passed). Preserve that one compressed smallest
+level when truncating; include its bytes in prepared-source/cache accounting.
+No whole decoded chain is restored. Corrected suite: 1664 assertions, 66 passed
+cases / one optional worker case skipped; real-corpus oracle: 449 assertions pass.
+Worker-enabled suite also passes: 1671 assertions in 67 cases. Repeat installed
+comparisons before default activation.
+Reproduce the read-only corpus check with POSEIDON_TEST_REFORGER_ADDONS set to the
+local addons directory and PoseidonTests '[lazy-tint-corpus]'. No proprietary
+texture data is copied into the repository or package.

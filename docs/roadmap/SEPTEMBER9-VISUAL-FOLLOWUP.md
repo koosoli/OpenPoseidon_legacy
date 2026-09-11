@@ -2,7 +2,7 @@
 
 ## September 11 Jeep implementation continuation
 
-Latest installed release: 67422367, both real default packages, no mod parameter
+Latest installed release at this checkpoint: a11b8650, both real default packages, no mod parameter
 needed. Fresh release 125134 passes NPC, player, disabled, missing archive,
 incompatible manifest and explicit user-mod precedence. Own six-RTM source,
 generator and SP Jeep cargo-0/M16 path are delivered. Save/reload and player
@@ -17,7 +17,11 @@ MP fallback runtime and controlled resource-cost acceptance remain open.
 Next native loading candidate: narrowly borrow compressed BCR source pixels for
 linear-tint variants, with exact lazy CPU pixels/averages and the existing GPU
 delegate. `WGR_LAZY_BCR_TINT` remains off pending unit, installed route and visual
-A/B acceptance. See NATIVE-TEXTURE-IDENTITY-20260911.md; not a new streaming manager.
+A/B acceptance. The first native-resolution route pair saves about 2.99 GiB of
+process peak memory with unchanged GPU texture/geometry residency. Village images
+agree, but stronger capped-mip/corpus tests caught an average-colour error; it is
+corrected and awaiting repeated installed acceptance. See
+NATIVE-TEXTURE-IDENTITY-20260911.md; not a new streaming manager or a claimed FPS win.
 
 Historical implementation checkpoints follow. Installed 7f6d3fa0: NPC 121507 and player 121641 pass
 seated and mid-reload save/load, ammo conservation and no duplicate shots.

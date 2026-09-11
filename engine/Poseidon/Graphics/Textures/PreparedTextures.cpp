@@ -414,7 +414,8 @@ bool PreparedTextureStore::PutDdsDecode(const std::string& key, const std::vecto
 {
     if (!Enabled() || key.empty() || source.empty() || decoded._levels.empty()) return false;
     const size_t cap = std::min<size_t>(64u * 1024u * 1024u, ByteBudget() / 4);
-    size_t estimate = sizeof(Impl::DdsDecode) + source.size() + decoded._levels.size() * sizeof(DDSMipLevel);
+    size_t estimate = sizeof(Impl::DdsDecode) + source.size() + decoded._levels.size() * sizeof(DDSMipLevel) +
+                      decoded._tintAverageLevel.data.size();
     for (const auto& level : decoded._levels) estimate += level.data.size();
     std::list<Impl::Entry> retired;
     {
@@ -428,7 +429,8 @@ bool PreparedTextureStore::PutDdsDecode(const std::string& key, const std::vecto
     snapshot->input = source;
     snapshot->decoded = decoded;
     snapshot->bytes = sizeof(Impl::DdsDecode) + snapshot->input.capacity() +
-                      snapshot->decoded._levels.capacity() * sizeof(DDSMipLevel);
+                      snapshot->decoded._levels.capacity() * sizeof(DDSMipLevel) +
+                      snapshot->decoded._tintAverageLevel.data.capacity();
     for (const auto& level : snapshot->decoded._levels) snapshot->bytes += level.data.capacity();
     // Preparation and large copies never hold the worker hand-off mutex. Recheck
     // the shared budget because a worker may have inserted a payload meanwhile.

@@ -387,6 +387,7 @@ bool TextureSourceDDS::InitFromMemory(const void* data, size_t size, const char*
 bool TextureSourceDDS::InitFromMemoryWithOptions(const void* data, size_t size, const char* nameForErrors,
                                                bool forceDecode, const DdsPreparationOptions& options)
 {
+    _tintAverageLevel = {};
     const char* who = nameForErrors ? nameForErrors : "?";
 
     if (IsEddsBuffer(data, size))
@@ -748,6 +749,7 @@ bool TextureSourceDDS::InitFromReader(const char* name, PacLevelMem* mips, int m
         return false;
     DdsPreparationTrace trace(name);
     _name = name;
+    _tintAverageLevel = {};
 
     // RFG-070: `enft|r,g,b|<inner>` -- strip the tint FIRST and let everything below see
     // the name it would have seen anyway. That is what makes the two composite forms
@@ -985,7 +987,8 @@ bool TextureSourceDDS::InitFromReader(const char* name, PacLevelMem* mips, int m
 
 size_t TextureSourceDDS::PreparedByteSize() const
 {
-    size_t bytes = sizeof(TextureSourceDDS) + _levels.capacity() * sizeof(DDSMipLevel);
+    size_t bytes = sizeof(TextureSourceDDS) + _levels.capacity() * sizeof(DDSMipLevel) +
+                   _tintAverageLevel.data.capacity();
     for (const auto& level : _levels) bytes += level.data.capacity();
     return bytes;
 }
@@ -998,9 +1001,8 @@ class TextureSourceDDSLinearTint final : public ITextureSource
     PackedColor _average;
     bool _alpha = false;
 
-    bool Decode(int level, TextureSourceDDS& output) const
+    bool Decode(const DDSMipLevel& source, TextureSourceDDS& output) const
     {
-        const auto& source = _base._levels[static_cast<size_t>(level)];
         DDSMipLevel decoded;
         decoded.width = source.width;
         decoded.height = source.height;
@@ -1027,7 +1029,9 @@ class TextureSourceDDSLinearTint final : public ITextureSource
     bool Bind(PacLevelMem* mips)
     {
         TextureSourceDDS smallest;
-        if (!Decode(static_cast<int>(_base._levels.size()) - 1, smallest)) return false;
+        const auto& averageLevel = _base._tintAverageLevel.data.empty() ?
+            _base._levels.back() : _base._tintAverageLevel;
+        if (!Decode(averageLevel, smallest)) return false;
         _average = AverageOfSmallest(smallest._levels, PixelFormat::ARGB8888);
         for (int i = 0; i < _count; ++i)
         {
@@ -1050,7 +1054,7 @@ class TextureSourceDDSLinearTint final : public ITextureSource
             mip._w != _base._levels[level].width || mip._h != _base._levels[level].height)
             return false;
         TextureSourceDDS decoded;
-        return Decode(level, decoded) && decoded.GetMipmapData(mem, mip, 0);
+        return Decode(_base._levels[level], decoded) && decoded.GetMipmapData(mem, mip, 0);
     }
 };
 
@@ -1083,7 +1087,11 @@ bool TextureSourceDDS::BindPreparedMips(PacLevelMem* mips, int maxMips)
     // Drop the levels past the cap so GetMipmapData can never be asked for one the
     // caller was not told about.
     if (count < _mipmaps)
+    {
+        if (_format == PixelFormat::BC7 && _tintAverageLevel.data.empty())
+            _tintAverageLevel = std::move(_levels.back());
         _levels.resize(static_cast<size_t>(count));
+    }
     _mipmaps = count;
     return _mipmaps > 0;
 }

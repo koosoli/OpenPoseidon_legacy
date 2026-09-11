@@ -78,6 +78,8 @@ class TextureSourceDDS : public ITextureSource
     friend class TextureSourceDDSFactory;
     RStringB _name;
     std::vector<DDSMipLevel> _levels; //!< [0] is the largest
+    // Preserve the original average-colour input if the public mip cap drops it.
+    DDSMipLevel _tintAverageLevel;
     PixelFormat _format = PixelFormat::Unknown;
     PacFormat _pacFormat = PacARGB8888;
     int _w = 0;

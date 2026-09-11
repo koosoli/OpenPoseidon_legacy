@@ -17,7 +17,11 @@
 #include <Poseidon/Graphics/Textures/DdsImport.hpp>
 #include <Poseidon/Graphics/Textures/PreparedTextures.hpp>
 #include <Poseidon/Graphics/Textures/EnfusionTextureName.hpp>
+#include <Poseidon/Asset/Formats/Enfusion/PakArchive.hpp>
 
+#include <algorithm>
+#include <cstdlib>
+#include <filesystem>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -137,20 +141,21 @@ std::vector<uint8_t> BcrBc7Chain()
 
 TEST_CASE("Borrowed BC7 BCR tint matches baked pixels and averages without a decoded chain", "[graphics][edds][lazy-tint]")
 {
+    const int maxMips = GENERATE(2, 7, 16);
     const auto bytes = BcrBc7Chain();
     int reads = 0;
     const auto reader = [&](const char*, std::vector<uint8_t>& out) { ++reads; out = bytes; return true; };
     TextureSourceDDS base;
     PacLevelMem baseMips[16];
     const Poseidon::DdsPreparationOptions options{true, true, 1024};
-    REQUIRE(base.InitFromReader("fixture_bcr.edds", baseMips, 16, reader, options));
+    REQUIRE(base.InitFromReader("fixture_bcr.edds", baseMips, maxMips, reader, options));
     REQUIRE(base.GetFormat() == Poseidon::PacBC7);
     const size_t baseBytes = base.PreparedByteSize();
     const float tint[3] = {GENERATE(0.0f, 0.25f, 1.0f), 0.7f, 0.15f};
     const auto name = Poseidon::Enfusion::MakeLayerTintName(tint, "fixture_bcr.edds");
     TextureSourceDDS baked;
     PacLevelMem expectedMips[16], viewMips[16];
-    REQUIRE(baked.InitFromReader(name.c_str(), expectedMips, 16, reader, options));
+    REQUIRE(baked.InitFromReader(name.c_str(), expectedMips, maxMips, reader, options));
     const int beforeView = reads;
     auto view = base.CreateLinearTintView(tint, viewMips, 16);
     REQUIRE(view);
@@ -187,6 +192,65 @@ TEST_CASE("Borrowed BC7 BCR tint matches baked pixels and averages without a dec
     REQUIRE(capped);
     CHECK(capped->GetMipmapCount() == 1);
     CHECK(capped->GetAverageColor() == baked.GetAverageColor());
+}
+
+TEST_CASE("Installed Reforger BCR tint views match the original CPU chain", "[.][lazy-tint-corpus]")
+{
+    namespace fs = std::filesystem;
+    using Poseidon::Asset::Formats::Enfusion::PakArchive;
+    const char* corpus = std::getenv("POSEIDON_TEST_REFORGER_ADDONS");
+    REQUIRE(corpus);
+    REQUIRE(fs::is_directory(corpus));
+    std::vector<fs::path> paths;
+    for (const auto& entry : fs::recursive_directory_iterator(corpus))
+        if (entry.is_regular_file() && entry.path().extension() == ".pak") paths.push_back(entry.path());
+    std::sort(paths.begin(), paths.end());
+    REQUIRE_FALSE(paths.empty());
+    std::vector<PakArchive> archives(paths.size());
+    for (size_t i = 0; i < paths.size(); ++i) REQUIRE(archives[i].Open(paths[i].string()));
+    const auto reader = [&](const char* name, std::vector<uint8_t>& bytes) {
+        for (const auto& archive : archives)
+            if (const auto* entry = archive.Find(name)) return archive.Read(*entry, bytes);
+        return false;
+    };
+    // Actual synthetic names observed in the native Everon route; no asset copies.
+    const char* samples[] = {
+        "enft|0.1723,0.1038,0.0944|assets/_shareddata/metal/st_metalpaint_mate_1m_bcr.edds",
+        "enft|0.4770,0.4570,0.4238|assets/_shareddata/metal/st_metalpaint_mate_1m_bcr.edds",
+        "enft|0.2196,0.1938,0.1509|assets/_shareddata/plaster/st_plaster_bare_03_bcr.edds",
+        "enft|0.2993,0.2694,0.2402|assets/_shareddata/wood/st_woodplanks_01_bcr.edds",
+        "enft|0.3432,0.4112,0.4612|assets/structures/signs/directions/data/sign_direction_15_2_bcr.edds"
+    };
+    for (const int cap : {256, 1024})
+        for (const char* name : samples)
+        {
+            CAPTURE(name, cap);
+            float rgb[3];
+            const char* inner = nullptr;
+            REQUIRE(Poseidon::Enfusion::SplitLayerTintName(name, rgb, &inner));
+            TextureSourceDDS base, baked;
+            PacLevelMem baseMips[7], expectedMips[7], viewMips[7];
+            const Poseidon::DdsPreparationOptions options{true, true, cap};
+            REQUIRE(base.InitFromReader(inner, baseMips, 7, reader, options));
+            REQUIRE(baked.InitFromReader(name, expectedMips, 7, reader, options));
+            auto view = base.CreateLinearTintView(rgb, viewMips, 7);
+            REQUIRE(view);
+            CHECK(view->GetAverageColor() == baked.GetAverageColor());
+            REQUIRE(view->GetMipmapCount() == baked.GetMipmapCount());
+            CHECK(view->IsAlpha() == baked.IsAlpha());
+            CHECK(view->IsTransparent() == baked.IsTransparent());
+            for (int level = 0; level < view->GetMipmapCount(); ++level)
+            {
+                REQUIRE(viewMips[level]._w == expectedMips[level]._w);
+                REQUIRE(viewMips[level]._h == expectedMips[level]._h);
+                auto mip = viewMips[level];
+                mip.SetDestFormat(PacARGB8888, 8);
+                std::vector<uint8_t> actual(mip._pitch * mip._h, 0x77), expected(actual);
+                REQUIRE(view->GetMipmapData(actual.data(), mip, level));
+                REQUIRE(baked.GetMipmapData(expected.data(), mip, level));
+                CHECK(actual == expected);
+            }
+        }
 }
 
 TEST_CASE("Lazy tint declines unsupported data and invalid inputs", "[graphics][edds][lazy-tint]")
