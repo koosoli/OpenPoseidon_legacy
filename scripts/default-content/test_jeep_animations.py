@@ -62,6 +62,18 @@ class JeepAnimations(unittest.TestCase):
         # AnimationRT applies the OFP X/Z reversal during loading.
         np.testing.assert_allclose(direction * [-1, 1, -1], [1, 0, 0], atol=1e-9)
 
+    def test_relaxed_muzzle_points_down_not_into_roof(self):
+        rifle = pose(self.spec, 0)['zbran'] @ rest_proxy(self.spec)
+        direction = (rifle[:3, :3] @ [-1, 0, 0]) * [-1, 1, -1]
+        self.assertLess(direction[1], -.4)
+        self.assertGreater(direction[0], .9)
+
+    def test_reflections_are_not_valid_bone_rotations(self):
+        matrices = pose(self.spec, 1)
+        matrices['hlava'][:3, 0] *= -1
+        with self.assertRaises(ValueError):
+            encode(self.spec, [(0, matrices)])
+
 
 if __name__ == '__main__':
     unittest.main()

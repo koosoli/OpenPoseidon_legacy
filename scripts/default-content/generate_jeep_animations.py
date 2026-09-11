@@ -110,7 +110,7 @@ def pose(spec, raised, recoil=0.0, reload=0.0):
         result[side+'prsty'] = foot.copy()
 
     gun_pos = (1-raised)*np.array(spec['gun_lowered']) + raised*np.array(spec['gun_raised'])
-    gun_r = rotation([0, 1, 0], spec['gun_yaw']) @ rotation([1, 0, 0], -25*(1-raised))
+    gun_r = rotation([0, 1, 0], spec['gun_yaw']) @ rotation([1, 0, 0], 25*(1-raised))
     gun_pos -= gun_r[:, 2] * recoil
     gun = frame(gun_r, gun_pos)
     proxy = rest_proxy(spec)
@@ -175,7 +175,9 @@ def encode(spec, phases):
         data += struct.pack('<f', time)
         for name in names:
             m = matrices[name]
-            if not np.isfinite(m).all() or not np.allclose(m[:3, :3].T @ m[:3, :3], np.eye(3), atol=1e-4):
+            if (not np.isfinite(m).all()
+                    or not np.allclose(m[:3, :3].T @ m[:3, :3], np.eye(3), atol=1e-4)
+                    or not np.isclose(np.linalg.det(m[:3, :3]), 1, atol=1e-4)):
                 raise ValueError(f'Non-rigid matrix: {name}')
             data += name_bytes(name) + struct.pack('<12f', *m[:3, :].T.flatten())
     return bytes(data)
