@@ -81,7 +81,7 @@ try {
     if ($roundsBefore -le 0 -or $roundsAfter -ge $roundsBefore) {throw 'No verified rifle ammunition consumption'}
     $null=Send @{cmd='screenshot';path=(Join-Path $output 'on-foot-control.png')}
     if ($ProjectileFrame) {
-        $null=Send @{cmd='exec';code='ffvPassenger setCombatMode "BLUE"; ffvPassenger assignAsCargo ffvJeep; ffvPassenger moveInCargo ffvJeep; ffvJeep setPos [9740,3670,0]'}
+        $null=Send @{cmd='exec';code='deleteVehicle ffvTarget; ffvPassenger setCombatMode "BLUE"; ffvPassenger setBehaviour "SAFE"; ffvPassenger assignAsCargo ffvJeep; ffvPassenger moveInCargo ffvJeep; ffvJeep setPos [9740,3670,0]'}
         Start-Sleep -Seconds 1
         foreach ($heading in @(0,90,180)) {
             $null=Send @{cmd='exec';code=("ffvJeep setDir $heading; ffvJeep setVelocity [8,0,3]")}

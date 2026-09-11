@@ -134,6 +134,9 @@ void RegisterSqf(HarnessServer& hs)
                            cJSON_AddNumberToObject(resp, "worldX", shot->Position().X());
                            cJSON_AddNumberToObject(resp, "worldZ", shot->Position().Z());
                            cJSON_AddNumberToObject(resp, "inheritedSpeed", inheritedSpeed.Size());
+                           // This measures construction only. Retire before simulation so
+                           // the neutral seated pose cannot shoot the Jeep or its occupants.
+                           GWorld->RemoveFastVehicle(shot);
                            return HarnessProtocol::JsonResponse(resp);
                        });
     hs.RegisterCommand({"eval", "Evaluate SQF expression and return result as string", {{"code", "string", true}}},
