@@ -7,6 +7,10 @@ on-foot M16 control now exists, including ammunition and Fired-event checks.
 First engine increment corrects attached bullet launch coordinates to the
 existing seat hierarchy. It does not yet enable FFV or provide the animation
 package. The entire owner backlog remains authorized, not closed by this step.
+Installed 3dc399de constructor test now passes translated/moving seat frames at
+0/90/180 degrees; this deliberately is not gameplay firing acceptance. Optional
+versioned cargo-seat metadata and angular-envelope parsing are the next engine
+increment, with 30 combined cargo/ballistics cases / 454 assertions passing.
 
 ## September 11 owner completion audit
 

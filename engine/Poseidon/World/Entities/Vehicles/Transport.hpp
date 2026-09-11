@@ -6,6 +6,7 @@
 #include <Poseidon/Audio/Speaker.hpp>
 
 #include <Poseidon/AI/Path/PathPlanner.hpp>
+#include <Poseidon/World/Entities/Vehicles/CargoWeaponSeats.hpp>
 
 namespace Poseidon
 {
@@ -535,6 +536,7 @@ class TransportType: public VehicleType
 	bool _hideWeaponsCargo;
 
 	AutoArray<ManVehAction> _cargoAction;
+	CargoWeaponSeats _cargoWeaponSeats;
 	AutoArray<bool> _cargoCoDriver;
 
 	AutoArray<Vector3> _commanderGetInPos;
@@ -602,6 +604,7 @@ public:
 	ManVehAction GetCommanderAction() const {return _commanderAction;}
 
 	ManVehAction GetCargoAction(int pos) const {return _cargoAction[pos];}
+	const CargoWeaponSeat* GetCargoWeaponSeat(int pos) const {return _cargoWeaponSeats.Find(pos);}
 	bool GetCargoIsCoDriver(int pos) const {return _cargoCoDriver[pos];}
 
 	ManVehAction GetDriverInAction() const {return _driverInAction;}
