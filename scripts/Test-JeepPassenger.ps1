@@ -3,6 +3,7 @@ param([switch]$ProjectileFrame, [switch]$AnimationPreview, [switch]$AnimationVid
       [ValidateSet(0,90,180)][int]$NpcHeading=0, [switch]$NpcDriver,
       [switch]$NpcTransitions, [switch]$NpcMoving, [switch]$PlayerFire, [switch]$Lifecycle, [switch]$SaveLoad,
       [switch]$DefaultPackage, [string]$UserMod='',
+      [ValidateSet('','missing','incompatible')][string]$AutomaticOriginal='', [string]$MissionPath='',
       [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
@@ -20,6 +21,7 @@ if ($NpcMoving) {$NpcDriver=$true}
 if ($Lifecycle -and (!$NpcFire -or $NpcScenario -ne 'clear' -or $NpcMoving)) {throw 'Lifecycle requires stationary clear cargo test'}
 if ($SaveLoad -and (!$NpcTransitions -and !$PlayerFire)) {throw 'Save/load requires a reload test'}
 if ($DefaultPackage -and ($AnimationPreview -or $ProjectileFrame)) {throw 'Default package is separate from preview/constructor tests'}
+if ($AutomaticOriginal -and (!$DefaultPackage -or $NpcFire -or $UserMod)) {throw 'Automatic fallback requires the original baseline and automatic package mode'}
 $root=Split-Path $PSScriptRoot -Parent
 $stamp=Get-Content -LiteralPath (Join-Path $GameDir 'DEPLOYED-FROM.txt') -Raw
 $output=Join-Path $root ('build/jeep-ffv/baseline-'+(Get-Date -Format 'yyyyMMdd-HHmmss'))
@@ -31,7 +33,7 @@ $env:WGR_EXPOSURE='0.15'
 $stamp | Set-Content -LiteralPath (Join-Path $output 'DEPLOYED-FROM.txt')
 $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0)
 $listener.Start(); $port=$listener.LocalEndpoint.Port; $listener.Stop()
-$mission=Join-Path $root 'dev-missions/jeep-ffv.Intro'
+$mission=if ($MissionPath) {$MissionPath} else {Join-Path $root 'dev-missions/jeep-ffv.Intro'}
 $log=Join-Path $output 'jeep.log'
 $gameArgs=@('--render','wgpu','--window','--no-dev','--width','1280','--height','720','--harness',"$port",'--test-mission',('"'+$mission+'"'),'--log-file',('"'+$log+'"'))
 if (!$DefaultPackage) {$gameArgs+='--no-vehicle-actions'}
@@ -46,7 +48,10 @@ if ($UserMod) {
 }
 if ($DefaultPackage) {
     $packArchive=Join-Path $GameDir '@OP_VehicleActions/AddOns/op_jeep_actions.pbo'
-    if (!(Test-Path -LiteralPath $packArchive)) {throw 'Default VehicleActions is not installed'}
+    if (!(Test-Path -LiteralPath $packArchive)) {
+        if (!$AutomaticOriginal) {throw 'Default VehicleActions is not installed'}
+        $packArchive=$null
+    }
 } elseif ($AnimationPreview -or $NpcFire) {
     $packArchive=Join-Path $preview 'AddOns/op_jeep_animation_preview.pbo'
 } else {$packArchive=$null}
@@ -99,6 +104,16 @@ try {
         }
     }
     Start-Sleep -Seconds 12
+    if ($DefaultPackage) {
+        $diagnostic=switch ($AutomaticOriginal) {
+            'missing' {'required archive missing or empty'}
+            'incompatible' {'missing or incompatible defaultContentApi'}
+            default {'compatible package found'}
+        }
+        if (!(Select-String -LiteralPath $log -SimpleMatch -Pattern "Default content: @OP_VehicleActions: $diagnostic" -Quiet)) {
+            throw "Expected automatic-package diagnostic: $diagnostic"
+        }
+    }
     $null=Send @{cmd='eval';code='typeOf ffvJeep'} '"Jeep"'
     if ($NpcFire) {
         $angle=$NpcHeading * [math]::PI / 180
@@ -124,6 +139,12 @@ try {
     $null=Send @{cmd='eval';code='alive ffvTarget && getDammage ffvTarget == 0'} 'true'
     if ($before.result -ne '30') {throw 'Passenger fired before baseline capture'}
     $null=Send @{cmd='screenshot';path=(Join-Path $output 'seated.png')}
+    if (!$NpcFire -and !$AnimationPreview) {
+        $originalSeat=Send @{cmd='crew_pose_probe'}
+        if ($originalSeat.cargoWeaponActive -or $originalSeat.primaryMove -like 'opjeep*') {
+            throw 'Original cargo fallback retained the upgraded seat/animation'
+        }
+    }
     if ($NpcFire) {
         $null=Send @{cmd='eval';code='local ffvPassenger'}
         $null=Send @{cmd='eval';code='getPos ffvTarget'}
