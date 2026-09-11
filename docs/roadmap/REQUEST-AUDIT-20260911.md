@@ -2,6 +2,29 @@
 
 ## Aktueller Nachtrag 20:32 (kein Gesamtabschluss)
 
+2026-09-12: Besitzer gibt feste Reihenfolge vor: Satmaps mit Wald/Doerfern,
+danach Stratis-Godrays, danach aktualisierter Bericht. Kein Aufgabenwechsel.
+Satmap-Objektbaker in 5ce3f450 gebaut (650 Assertions / 5 Tests bestanden),
+noch NICHT visuell abgenommen und NICHT standardaktiv: WGR_OFP_SATMAP_OBJECTS=1.
+Statische Primary/Network-Modelle, erste zeichnbare LOD, UV/Alpha aus echten
+Texturen, 64x64 CPU-Draufsichten pro Modell, Platzierung im vorhandenen Boden-
+Satmapbild. Keine neue GPU-Texturverwaltung, kein eingebranntes dynamisches Licht,
+keine beweglichen Einheiten. Kleine Projektionen werden flaechengewichtet.
+Temporaere Caches auf je 2048 Modelle/Texturen begrenzt; reale Ladezeit,
+Deckung von Waldmodellen und Bildqualitaet sind noch zu messen. Zerstoerung
+nach dem Bake wird noch nicht in die statische Ferntextur nachgefuehrt.
+Installation/Test von 5ce3f450 durch laufende fremde Spielinstanz verweigert.
+Installiert bleibt 627317e8. Rueckfrage zum Schliessen gestellt.
+
+Godrays wieder offen: Stratis [1949.76,5046.07,32.37], az74.4/el-1.3, 06:03,
+Besitzer-Screenshot 2026-09-11 233844 und Startkommando bestaetigen den Fall.
+627317e8 enthaelt nur eine AUSGESCHALTETE Cutout-only-Replay-Variante
+(WGR_EARLY_LATE_OPAQUE=2), noch nicht runtimevalidiert. Alter Late-Surface-
+Versuch reproduziert erneut unerwuenschte Hangabdunklung und bleibt aus.
+Fusion-Pose [36154.60,23965.44,38053.39], az262.5/el-60.7: frische Testprofile
+mit/ohne Boden-Satmap zeigten bei 38 km Hoehe keine komplett blauen Inseln.
+Das widerlegt den Besitzerbericht nicht; Profil-/Laufzeitabhaengigkeit offen.
+
 23:35: Auf Besitzerwunsch ballistische Krater standardmaessig achtfach tief:
 8 statt 1 m, Radius weiterhin 12 m (Terrainraster-Mindestabdeckung unveraendert).
 Panzer-/Aufschlaggranaten mit AmmoShotShell ohne Zeitzunder verwenden jetzt
