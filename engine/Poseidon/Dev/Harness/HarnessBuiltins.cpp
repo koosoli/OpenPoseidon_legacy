@@ -117,6 +117,22 @@ void RegisterSqf(HarnessServer& hs)
                            cJSON* resp = cJSON_CreateObject();
                            cJSON_AddStringToObject(resp, "move", man->GetCurrentMove());
                            cJSON_AddBoolToObject(resp, "cargoWeaponActive", man->GetActiveCargoWeaponSeat() != nullptr);
+                           cJSON_AddBoolToObject(resp, "weaponsDisabled", man->WeaponsDisabled());
+                           cJSON_AddBoolToObject(resp, "local", man->IsLocal());
+                           cJSON_AddBoolToObject(resp, "player", unit->IsPlayer());
+                           Transport* vehicle = unit->GetVehicleIn();
+                           cJSON_AddBoolToObject(resp, "vehicleDestroyed", !vehicle || vehicle->IsDammageDestroyed());
+                           if (vehicle)
+                           {
+                               for (int i = 0; i < vehicle->GetManCargo().Size(); ++i)
+                               {
+                                   if (vehicle->GetManCargo()[i] != man) continue;
+                                   cJSON_AddNumberToObject(resp, "cargoIndex", i);
+                                   const auto* spec = vehicle->Type()->GetCargoWeaponSeat(i);
+                                   cJSON_AddBoolToObject(resp, "seatConfigured", spec != nullptr);
+                                   if (spec) cJSON_AddStringToObject(resp, "seatAction", spec->action);
+                               }
+                           }
                            cJSON_AddBoolToObject(resp, "cargoWeaponLineClear", man->CargoWeaponLineClear(weapon));
                            cJSON_AddBoolToObject(resp, "fireTarget", man->GetFireTarget() != nullptr);
                            cJSON_AddNumberToObject(resp, "aimed", man->GetAimed(weapon, man->GetFireTarget()));

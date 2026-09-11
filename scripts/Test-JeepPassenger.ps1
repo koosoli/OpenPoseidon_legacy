@@ -1,7 +1,11 @@
-param([switch]$ProjectileFrame, [switch]$AnimationPreview, [switch]$AnimationVideo, [switch]$NpcFire, [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
+param([switch]$ProjectileFrame, [switch]$AnimationPreview, [switch]$AnimationVideo, [switch]$NpcFire,
+      [ValidateSet('clear','hold','outside','blocked')][string]$NpcScenario='clear',
+      [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
 if ($AnimationVideo -and !$AnimationPreview) {throw '-AnimationVideo requires -AnimationPreview'}
+if ($NpcFire -and ($AnimationPreview -or $ProjectileFrame)) {throw 'Select one integration mode per launch'}
+if (!$NpcFire -and $NpcScenario -ne 'clear') {throw '-NpcScenario requires -NpcFire'}
 $root=Split-Path $PSScriptRoot -Parent
 $stamp=Get-Content -LiteralPath (Join-Path $GameDir 'DEPLOYED-FROM.txt') -Raw
 $output=Join-Path $root ('build/jeep-ffv/baseline-'+(Get-Date -Format 'yyyyMMdd-HHmmss'))
@@ -59,6 +63,13 @@ try {
     if ($before.result -ne '30') {throw 'Passenger fired before baseline capture'}
     $null=Send @{cmd='screenshot';path=(Join-Path $output 'seated.png')}
     if ($NpcFire) {
+        $null=Send @{cmd='eval';code='local ffvPassenger'}
+        if ($NpcScenario -eq 'outside') {
+            $null=Send @{cmd='exec';code='ffvTarget setPos [9700,3660,0]'}
+        }
+        if ($NpcScenario -eq 'blocked') {
+            $null=Send @{cmd='exec';code='ffvBlock="Ural" createVehicle [9704,3600,0]; ffvBlock setDir 0'}
+        }
         $null=Send @{cmd='exec';code='ffvPassenger switchMove "OPJeepAim"; ffvPassenger reveal ffvTarget; ffvPassenger doTarget ffvTarget'}
         Start-Sleep -Seconds 2
         $null=Send @{cmd='eval';code='ffvShots'} '0'
@@ -108,7 +119,9 @@ try {
         Write-Host "Animation frames require visual inspection: $output"
         return
     }
-    $null=Send @{cmd='exec';code='ffvPassenger reveal ffvTarget; ffvPassenger doTarget ffvTarget; ffvPassenger setCombatMode "YELLOW"; ffvPassenger doFire ffvTarget'}
+    if (!$NpcFire -or $NpcScenario -ne 'hold') {
+        $null=Send @{cmd='exec';code='ffvPassenger reveal ffvTarget; ffvPassenger doTarget ffvTarget; ffvPassenger setCombatMode "YELLOW"; ffvPassenger doFire ffvTarget'}
+    }
     Start-Sleep -Seconds 10
     $after=Send @{cmd='eval';code='ffvPassenger ammo "M16"'}
     $seated=Send @{cmd='eval';code='vehicle ffvPassenger == ffvJeep'}
@@ -116,13 +129,21 @@ try {
     $cargoShots=Send @{cmd='eval';code='ffvShots'}
     $null=Send @{cmd='screenshot';path=(Join-Path $output 'ordered-fire.png')}
     if ($NpcFire) {
-        $null=Send @{cmd='crew_pose_probe'}
-        if ($seated.result -ne 'true' -or [double]$after.result -ge 30 -or [double]$damage.result -le 0 -or [int]$cargoShots.result -le 0) {
-            throw 'NPC passenger failed to remain seated and hit with real M16 ammunition'
+        $probe=Send @{cmd='crew_pose_probe'}
+        $remaining=Send @{cmd='eval';code='magazinesArray ffvPassenger'}
+        if ($seated.result -ne 'true') {throw 'NPC no longer occupies the real cargo seat'}
+        if ($NpcScenario -eq 'clear') {
+            if ([double]$after.result -ge 30 -or [double]$damage.result -le 0 -or [int]$cargoShots.result -le 0) {
+                throw 'NPC passenger failed to hit with real M16 ammunition'
+            }
+        } elseif ($after.result -ne '30' -or $damage.result -ne '0' -or $cargoShots.result -ne '0') {
+            throw "Unsafe NPC shot in negative case: $NpcScenario"
         }
+        [pscustomobject]@{kind='stationary-npc-integration';scenario=$NpcScenario;installed=$stamp.Trim();ammo=$after.result;magazines=$remaining.result;shots=$cargoShots.result;targetDamage=$damage.result;probe=$probe} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $output 'npc-observation.json')
         $null=Send @{cmd='exit'}
         if (!$p.WaitForExit(30000) -or $p.ExitCode -ne 0) {throw 'NPC fire exit failed'}
-        Write-Host "Stationary NPC integration passed, NOT moving/player/reload acceptance: $output"
+        if (Select-String -LiteralPath $log -Pattern 'Bad animation|Broken animation|Animation .*not found|Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION' -Quiet) {throw 'NPC integration load/runtime error'}
+        Write-Host "Stationary NPC $NpcScenario integration passed, NOT moving/player/reload acceptance: $output"
         return
     }
     $null=Send @{cmd='exec';code='ffvPassenger setCombatMode "BLUE"; unassignVehicle ffvPassenger; ffvPassenger action ["EJECT",ffvJeep]'}

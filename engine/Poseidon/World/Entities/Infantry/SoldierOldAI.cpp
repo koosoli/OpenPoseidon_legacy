@@ -35,7 +35,7 @@ const CargoWeaponSeat* Man::GetActiveCargoWeaponSeat() const
     Transport* vehicle = unit->GetVehicleIn();
     if (!vehicle || vehicle->IsDammageDestroyed())
         return nullptr;
-    for (int i = 0; i < vehicle->GetManCargoSize(); ++i)
+    for (int i = 0; i < vehicle->GetManCargo().Size(); ++i)
     {
         if (vehicle->GetManCargo()[i] != this)
             continue;
