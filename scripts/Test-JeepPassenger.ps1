@@ -1,4 +1,4 @@
-param([string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
+param([switch]$ProjectileFrame, [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
 $root=Split-Path $PSScriptRoot -Parent
@@ -80,6 +80,19 @@ try {
     if ([int]$footShots.result -le [int]$cargoShots.result -or [double]::Parse($footDamage.result,[Globalization.CultureInfo]::InvariantCulture) -le 0) {throw 'On-foot firing control failed'}
     if ($roundsBefore -le 0 -or $roundsAfter -ge $roundsBefore) {throw 'No verified rifle ammunition consumption'}
     $null=Send @{cmd='screenshot';path=(Join-Path $output 'on-foot-control.png')}
+    if ($ProjectileFrame) {
+        $null=Send @{cmd='exec';code='ffvPassenger setCombatMode "BLUE"; ffvPassenger assignAsCargo ffvJeep; ffvPassenger moveInCargo ffvJeep; ffvJeep setPos [9740,3670,0]'}
+        Start-Sleep -Seconds 1
+        foreach ($heading in @(0,90,180)) {
+            $null=Send @{cmd='exec';code=("ffvJeep setDir $heading; ffvJeep setVelocity [8,0,3]")}
+            $probe=Send @{cmd='crew_projectile_probe'}
+            if ($probe.positionError -gt 0.001 -or $probe.velocityError -gt 0.001 -or $probe.directionDot -lt 0.99 -or
+                $probe.worldX -lt 9700 -or $probe.worldZ -lt 3650 -or $probe.inheritedSpeed -lt 1) {
+                throw 'Attached projectile frame/translation inheritance mismatch'
+            }
+        }
+        $null=Send @{cmd='eval';code='vehicle ffvPassenger == ffvJeep'} 'true'
+    }
     # Observation only: identical ammunition is expected on the unmodified path,
     # not success criteria for future FFV. Never label this a firing acceptance.
     [pscustomobject]@{kind='baseline-observation';installed=$stamp.Trim();ammoBefore=$before.result;ammoAfter=$after.result;stillCargo=$seated.result;targetDamage=$damage.result;cargoShots=$cargoShots.result;onFootAmmo=$footAmmo.result;onFootDamage=$footDamage.result;totalShots=$footShots.result;rifleRoundsBefore=$roundsBefore;rifleRoundsAfter=$roundsAfter} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $output 'observation.json')

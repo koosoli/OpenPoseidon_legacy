@@ -37,6 +37,8 @@ using namespace Poseidon;
 #include <Poseidon/Network/MasterServerBrowser.hpp>
 #include <Poseidon/Network/HttpTestRewrite.hpp>
 #include <Poseidon/AI/AIUnit.hpp>
+#include <Poseidon/AI/AIGroup.hpp>
+#include <Poseidon/World/Entities/Weapons/Weapons.hpp>
 #include <Poseidon/Core/ModId.hpp>
 #include <Poseidon/Core/ServerModResolve.hpp>
 #include <Poseidon/Core/PendingConnect.hpp>
@@ -85,6 +87,55 @@ static GameVarSpace s_evalScope;
 
 void RegisterSqf(HarnessServer& hs)
 {
+    hs.RegisterCommand({"crew_projectile_probe", "SP harness only: raw bullet launch, not gameplay/FFV acceptance", {}},
+                       [](const std::string&, cJSON*) -> std::string
+                       {
+                           if (!GWorld || GWorld->GetMode() == GModeNetware)
+                               return HarnessProtocol::ErrorResponse("singleplayer world required");
+                           AIUnit* focus = GWorld->FocusOn();
+                           AIGroup* group = focus ? focus->GetGroup() : nullptr;
+                           AIUnit* unit = group ? group->UnitWithID(2) : nullptr;
+                           Person* person = unit ? unit->GetPerson() : nullptr;
+                           if (!person || !person->IsLocal() || !unit->IsInCargo() ||
+                               !person->GetHierachyParent() || person->IsDammageDestroyed())
+                               return HarnessProtocol::ErrorResponse("local living cargo unit in group slot 1 required");
+                           int weapon = -1;
+                           for (int i = 0; i < person->NMagazineSlots(); ++i)
+                           {
+                               const auto& slot = person->GetMagazineSlot(i);
+                               const auto* mode = person->GetWeaponMode(i);
+                               if (slot._magazine && slot._magazine->_ammo > 0 && mode && mode->_ammo &&
+                                   mode->_ammo->_simulation == AmmoShotBullet)
+                               {
+                                   weapon = i;
+                                   break;
+                               }
+                           }
+                           if (weapon < 0)
+                               return HarnessProtocol::ErrorResponse("loaded bullet weapon required");
+                           const auto& slot = person->GetMagazineSlot(weapon);
+                           const float muzzleSpeed = slot._magazine->_type->_initSpeed;
+                           const Vector3 offset = person->GetWeaponPoint(weapon);
+                           const Matrix4 frame = person->WorldTransform();
+                           const Vector3 expectedPos = frame.FastTransform(offset);
+                           const Vector3 inheritedSpeed = person->WorldSpeed();
+                           // Deliberately bypasses animation/readiness/ammo logic to test only
+                           // the shared projectile constructor. Never an FFV gameplay success.
+                           if (!person->FireMGun(weapon, offset, VForward, nullptr))
+                               return HarnessProtocol::ErrorResponse("raw projectile creation failed");
+                           Entity* shot = person->GetLastShot();
+                           if (!shot)
+                               return HarnessProtocol::ErrorResponse("no created projectile");
+                           const Vector3 expectedSpeed = inheritedSpeed + shot->Direction() * muzzleSpeed;
+                           cJSON* resp = cJSON_CreateObject();
+                           cJSON_AddNumberToObject(resp, "positionError", (shot->Position() - expectedPos).Size());
+                           cJSON_AddNumberToObject(resp, "velocityError", (shot->Speed() - expectedSpeed).Size());
+                           cJSON_AddNumberToObject(resp, "directionDot", shot->Direction() * frame.Direction());
+                           cJSON_AddNumberToObject(resp, "worldX", shot->Position().X());
+                           cJSON_AddNumberToObject(resp, "worldZ", shot->Position().Z());
+                           cJSON_AddNumberToObject(resp, "inheritedSpeed", inheritedSpeed.Size());
+                           return HarnessProtocol::JsonResponse(resp);
+                       });
     hs.RegisterCommand({"eval", "Evaluate SQF expression and return result as string", {{"code", "string", true}}},
                        [](const std::string&, cJSON* root) -> std::string
                        {
