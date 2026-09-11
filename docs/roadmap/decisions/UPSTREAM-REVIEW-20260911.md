@@ -1,5 +1,15 @@
 # Upstream recheck, September 11
 
+## Cursor implementation follow-up
+
+Adapted 078bb2f7/4c6aff84: shared LayoutCanvas/CursorLayout and upstream unit
+tests, menu hotspot/size, world-projected cursor and map guide-line dimensions.
+AspectRatio's existing full-width UI policy is retained; only its identical
+canvas constants are shared. No GL renderer transplant, physics or AI change.
+Build and 10223 assertions across CursorLayout/AspectRatio/snow pass. Installed
+4:3/16:9/21:9 menu/editor cursor smoke checks pending at this checkpoint.
+The review below records the pre-adaptation state, not the current implementation.
+
 Fork inspected: asset-obs-001 `ba808734` (also safety/consolidated-v2).
 Fresh `git fetch upstream main` and `git ls-remote upstream refs/heads/main`
 both resolve to `3541affa8027e92e072a5ef899b588a31823100b`.
