@@ -2,6 +2,12 @@
 
 ## Aktueller Nachtrag 20:32 (kein Gesamtabschluss)
 
+23:00: Installiert 88542064. M113-Tiefschneekontakt im Stand und bei Fahrt
+geprueft: 0.65 m Freilegung in 1 m Schnee, breite Rinne, ausserhalb unveraendert,
+erneutes Zuschneien bestanden. UAZ-Regressionslauf ebenfalls bestanden. Kein
+Fahrphysik-Umbau; konservative geometrische Naeherung, Kanten noch kantig und
+Grossflottenkosten noch nicht gemessen. Details im Snow-Deep-Contact-Decision.
+
 22:54: Installiert 804ad7d4. Reforger-Vorladeversuch viermal (ABBA) und mit
 zwei Dorfansichten geprueft. Keine Material-/Geometrieaenderung; einzelne
 Maximalspitzen kleiner, uebrige Framezeiten gemischt. Deshalb NICHT als neue

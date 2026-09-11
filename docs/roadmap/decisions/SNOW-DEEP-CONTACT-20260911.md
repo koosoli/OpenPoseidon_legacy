@@ -100,3 +100,21 @@ bounded centre deficit (0.65 m at 1 m cover), untouched outside sample and refil
 Near view confirms a broad geometric channel, still visibly faceted. Approximate
 0.35 m underside clearance, 10 Hz; no suspension/traction/physical snow change.
 Tracked vehicles and multi-vehicle cost measurements remain open.
+
+## Tracked contact follow-up
+
+Installed 88542064. TrackOptimized::UpdateTrackedSnow adds the same bounded
+0.35 m visual underside clearance, 10 Hz. Width comes from the two authored
+track positions, length from collision geometry bounds; invalid/oversized
+footprints are ignored. The motorcycle method is unchanged. Tank::Simulate now
+updates this contact outside the stopped-motion branch, after its transform.
+No suspension, traction, collision or navigation changes. This is a capsule
+approximation, not exact per-triangle hull displacement or snow resistance.
+
+Build passes, snow suite 9989 assertions / 15 cases passes. Installed M113
+fixture crawl-20260911-225703 passes: initial position [9700,3630,-0.005],
+stationary centre deficit 0.65 m, departure to [9700,3665.22,-0.005], outside
+sample remains zero, precipitation refills. Stationary and near trail captures
+inspected: broad geometric channel, still faceted edges. UAZ regression fixture
+crawl-20260911-225842 also passes. Other tracked models, slopes/bridges and
+large-fleet CPU costs remain unmeasured; this does not close all snow requests.
