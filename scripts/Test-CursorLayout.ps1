@@ -36,11 +36,30 @@ try {
     }
     function CaptureCursor($name) {
         $null=Send @{cmd='exec';code='triCursorMove [0,0]'}
-        Start-Sleep -Seconds 2
-        $draw=Send @{cmd='eval';code='triCursorDrawRect'}
+        $cursorDeadline=[DateTime]::UtcNow.AddSeconds(20)
+        do {
+            Start-Sleep -Seconds 1
+            $draw=Send @{cmd='eval';code='triCursorDrawRect'}
+        } while ($draw.result.Trim('"') -eq 'none' -and [DateTime]::UtcNow -lt $cursorDeadline)
+        $null=Send @{cmd='screenshot';path="$out/$name.png"}
+        if ($draw.result.Trim('"') -eq 'none') {throw "No cursor draw: inspect $out/$name.png"}
         $rect=($draw.result.Trim('"') -split ',') | ForEach-Object {[int]$_}
         if ($rect.Count -ne 5 -or $rect[3] -le 0 -or $rect[3] -ne $rect[4]) {throw "Non-square cursor: $($draw.result)"}
-        $null=Send @{cmd='screenshot';path="$out/$name.png"}
+        Add-Type -AssemblyName System.Drawing
+        # Harness acknowledges capture scheduling before the PNG is written.
+        $capture=$null
+        $captureDeadline=[DateTime]::UtcNow.AddSeconds(15)
+        do {
+            try {$capture=[Drawing.Image]::FromFile("$out/$name.png")} catch {
+                if ([DateTime]::UtcNow -ge $captureDeadline) {throw}
+                Start-Sleep -Milliseconds 200
+            }
+        } while (!$capture)
+        try {
+            if ($capture.Width -ne $Width -or $capture.Height -ne $Height) {
+                throw "Unexpected viewport $($capture.Width)x$($capture.Height), requested ${Width}x$Height"
+            }
+        } finally {$capture.Dispose()}
         Write-Output "$name cursor: $($draw.result)"
     }
     Start-Sleep -Seconds 12

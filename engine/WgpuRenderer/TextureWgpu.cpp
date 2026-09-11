@@ -1018,7 +1018,11 @@ static void CheckProducerMayTouchRenderer(const char* what)
     if (EngineWgpu::ProducerMayTouchRenderer())
         return;
     g_rendererRuleViolations.fetch_add(1, std::memory_order_relaxed);
+    auto& admit = Poseidon::render::GObjectAdmitProfile;
+    const uint64_t waitBegan = admit.active ? NowUs() : 0;
     EngineWgpu::AcquireProducerWindow(what);
+    if (admit.active)
+        admit.textureWindowWaitMs += (NowUs() - waitBegan) / 1000.0;
 }
 
 TextureWgpu::~TextureWgpu()

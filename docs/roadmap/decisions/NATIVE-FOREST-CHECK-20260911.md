@@ -38,3 +38,33 @@ farfield-bench and Measure-NativeReforger now support bounded motion sequences.
 Metadata marks them performance_comparable=false; farfield-compare rejects them
 and three regression tests cover rejection and legacy/single-frame acceptance.
 Readback-contaminated frame timings are not an optimisation result.
+
+## Moving residency trace on installed 142b6d6a
+
+Evidence: build/native-stream-cancellation/cancel-20260911-215738-slow-trace-bank-trace-texture-keys-1-lazy-bcr-default-bc7-default-driver-memory.
+Test-NativeStreamCancellation with TraceSlowFrames, TraceBankTables and
+SampleDriverMemory; same 100 m/s route, 1280x720 native/MSAA4/DLSS off,
+Ultra profile, fixed LOD range 1. Lifecycle and route/coverage gates pass.
+No rendering change or A/B treatment in this run.
+
+Full FrameProfiler windows, milliseconds (not log timestamp gaps):
+static n=288 median 33.884, P95 37.638, P99 39.815, max 112.463;
+moving n=1286 median 30.649, P95 43.819, P99 89.410, max 160.093.
+Five moving frames exceed 100 ms, none 250 ms. Late screenshot frame 4119
+takes 269.984 ms and is outside the moving window; do not count as streaming.
+
+Worst moving frame 1486: residency 156.476 ms, simulation 0.991 ms.
+M923A1_wreck_static.xob cold admission takes 155.0 ms: optimisation/registration
+154.9, mesh 1.6, section excluding textures 76.9, texture work 72.0 ms
+(read 1.1, create 60.1, fallback 10.8). Header timer 69.5 ms overlaps the
+section bucket: do not add it again. Bank preparation here is only 0.025 ms.
+This particular tail is not evidence for parallel AI or a new scheduler.
+Texture create currently includes producer-window acquisition; add a subset
+timer before attributing all of it to staging or driver work.
+
+Peak process working set 4116471808 bytes, private bytes 7860178944 (1 Hz).
+Whole-GPU driver usage peaks at 4398 MiB, includes other applications.
+Endpoint tracked GPU allocation 1675.057 MiB; object textures 1003.057 MiB /
+1417 entries, live geometry 272.790 MiB (pool capacity 672 MiB).
+Prepared queue drains; DDS preparation remains deliberately off after prior
+unsuccessful experiments. No FPS/memory improvement inferred from this trace.

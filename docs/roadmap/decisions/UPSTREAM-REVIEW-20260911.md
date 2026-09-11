@@ -7,7 +7,14 @@ tests, menu hotspot/size, world-projected cursor and map guide-line dimensions.
 AspectRatio's existing full-width UI policy is retained; only its identical
 canvas constants are shared. No GL renderer transplant, physics or AI change.
 Build and 10223 assertions across CursorLayout/AspectRatio/snow pass. Installed
-4:3/16:9/21:9 menu/editor cursor smoke checks pending at this checkpoint.
+4:3/16:9/21:9 menu/editor/disabled-child cursor smoke checks now pass on installed
+9c9e1607: build/cursor-layout/20260911-222055-800x600, 222129-1280x720,
+222203-1680x720. Actual PNG sizes checked, editor images inspected. Cursor sizes
+are 16/24 pixels at 600 high, 19/29 at 720 high. Ultrawide intentionally retains
+the existing centered 4:3 UI band (960 pixels wide), not a new full-width policy.
+Initial ultrawide attempt returned no draw; the fixture now waits boundedly and
+waits for asynchronous PNG completion. In-game world aim and live resolution
+switch remain outside this smoke acceptance.
 The review below records the pre-adaptation state, not the current implementation.
 
 Fork inspected: asset-obs-001 `ba808734` (also safety/consolidated-v2).

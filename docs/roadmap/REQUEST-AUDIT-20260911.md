@@ -2,6 +2,15 @@
 
 ## Aktueller Nachtrag 20:32 (kein Gesamtabschluss)
 
+22:24: Installiert 9c9e1607. Upstream-Cursoranpassung im installierten Spiel
+bei 800x600, 1280x720, 1680x720 mit Menue/Editor/Kinddialog geprueft; Bildmasse
+und quadratische Cursor stimmen. Ultrawide behaelt das vorhandene zentrale
+UI-Band. Reforger-Ladespitzen weiter offen: aktuelle Fahrt auf 142b6d6a hat
+P99 89.410 ms und Maximum 160.093 ms; davon im schlimmsten Frame 156.476 ms
+Residency. Kein neuer FPS-Gewinn behauptet. Details im Native-Forest-Decision.
+Jeep bleibt auf Besitzerwunsch geparkt; Satmaps haben weiterhin keine Doerfer
+oder Baumkronen. Diese Dokumentation bedeutet nicht, dass jene Ziele fertig sind.
+
 Installiert 142b6d6a: TrackOptimizedFour verbreitert tiefen Schnee zwischen den
 vier Radkontakten, 10 Hz, 0.35 m visuelle Unterboden-Naeherung. Flacher Schnee,
 Motorrad-/Panzerpfad und Fahrphysik unveraendert. Build und 10012 Pruefungen
