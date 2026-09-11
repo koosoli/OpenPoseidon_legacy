@@ -269,7 +269,11 @@ try {
             Start-Sleep -Seconds 1
             $reloadBefore=Send @{cmd='eval';code='magazinesArray ffvPassenger'}
             $shotsBeforeReload=Send @{cmd='eval';code='ffvShots'}
-            if ($PlayerFire) {$null=Send @{cmd='key';sc=21}} else {$null=Send @{cmd='crew_request_reload'}}
+            if ($PlayerFire) {
+                $null=Send @{cmd='key';sc=21;hold=$true}
+                Start-Sleep -Milliseconds 200
+                $null=Send @{cmd='key_up';sc=21}
+            } else {$null=Send @{cmd='crew_request_reload'}}
             $samples=@(); $seenReload=$false; $reloadSaved=$false; $clock=[Diagnostics.Stopwatch]::StartNew()
             do {
                 $motion=Send @{cmd='crew_pose_probe'}
