@@ -2,13 +2,16 @@
 
 ## September 11 Jeep implementation continuation
 
-Latest continuation: installed 43ceac10, actual NPC fire still NOT accepted.
+Latest continuation: installed c640257b, first real stationary NPC hit passed.
 The bounded SP loop, seat-frame visibility and collision gate are implemented;
 installed probes found that protected retail Jeep config rejected the seat
 metadata. The external exact-class mapping now works in the installed game.
 The next gates exposed self-collision through the carrier hierarchy and missing
-cargo perception/cache participation. These are being verified without weakening
-carrier collision, target knowledge or original config protection. The owner backlog
+cargo perception/cache participation. Real M16 ammo/event/damage checks now pass
+at heading 0, with and without a driver. Hold-fire, outside-arc and truck-occlusion
+cases pass. Rotated occupied Jeeps remain under diagnosis; these results do not
+accept moving fire or a shippable pack. No carrier collision, target knowledge or
+original config protection was bypassed. The owner backlog
 is still open. Default activation, transitions, reload, player and moving fire
 must not be inferred from these prerequisites.
 

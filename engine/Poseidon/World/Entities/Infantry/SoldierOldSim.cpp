@@ -207,9 +207,24 @@ void Man::BasicSimulation(float deltaT, SimulationImportance prec, float speedFa
 
     RefreshMoveQueue(prec <= SimulateVisibleFar);
 
-    const bool cargoWeapon = GetActiveCargoWeaponSeat() != nullptr;
+    const CargoWeaponSeat* cargoSeat = GetActiveCargoWeaponSeat();
+    const bool cargoWeapon = cargoSeat != nullptr;
     if (cargoWeapon)
     {
+        // Raising the configured rifle must not depend on already knowing a
+        // target; the selected weapon supplies the ordinary observation cone.
+        if (SelectedWeapon() < 0)
+        {
+            for (int i = 0; i < NMagazineSlots(); ++i)
+            {
+                const WeaponType* weapon = GetMagazineSlot(i)._weapon;
+                if (weapon && strcmpi(weapon->GetName(), cargoSeat->weapon) == 0)
+                {
+                    SelectWeapon(i);
+                    break;
+                }
+            }
+        }
         SimulateWeaponActivity(deltaT, prec);
         if (Soldier* soldier = dyn_cast<Soldier>(this))
             soldier->AIFire(deltaT);
