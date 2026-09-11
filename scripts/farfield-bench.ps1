@@ -475,6 +475,11 @@ try {
         $timedOut = $false
         if (-not $exited) {
             $timedOut = $true
+            if ($env:OS -eq 'Windows_NT' -and !$process.HasExited) {
+                try {
+                    & "$PSScriptRoot/Write-OwnedProcessMinidump.ps1" -Process $process -ExpectedExe $gameExe -Path "$stem.hang.dmp"
+                } catch { Write-Warning "Could not capture owned-process hang dump: $_" }
+            }
             Write-Warning "Repeat $repeat exceeded the ${timeout}s watchdog; stopping PID $($process.Id) only."
             Stop-OwnedProcess -RootProcessId ([int]$process.Id) -Protected $protectedPids
             $process.WaitForExit(10000) | Out-Null

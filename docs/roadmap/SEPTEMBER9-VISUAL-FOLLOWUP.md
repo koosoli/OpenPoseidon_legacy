@@ -1,5 +1,23 @@
 # September 9 visual follow-up
 
+## September 11: native DDS byte oracle passes, shutdown gate failed
+
+Installed d8c931d5, pack 0.1.4. Clean oracle capture
+cancel-20260911-015523-slow-trace-dds-prep-bc7-default-driver-memory-tint-reuse-0-async-dds-verify-dds
+completed shutdown and verified 671 consumed DDS sources exactly (375 tinted,
+95 coverage composites; categories overlap). 134.7 s, 22370 instances. An earlier
+667-source oracle had a +dirty harness stamp and is diagnostic only.
+The same-build OFF timing control cancel-20260911-015814-slow-trace-bc7-default-driver-memory-tint-reuse-0
+passed, but ON run cancel-20260911-020051-slow-trace-bc7-default-driver-memory-tint-reuse-0-async-dds
+hung in DDTerm after sun/moon loading and hit the 290 s watchdog. It is INVALID
+for acceptance, despite having an image/metrics file. Similar DDTerm hangs existed
+before this feature; no causal attribution yet. Experimental preparation remains
+OFF by default. The manual debugger attach did not obtain usable stacks before
+timeout. The harness now saves a MiniDumpNormal of its owned process before
+timeout termination, not a full-memory dump. PS5.1 ownership/signature/overwrite
+fixtures pass (~605 KB); LLDB successfully reads a separate fixture's stacks.
+Next: obtain the actual hang dump and diagnose it before claiming pipeline acceptance.
+
 ## September 11: native DDS worker experiment awaiting runtime acceptance
 
 After 185a9c4a, the existing native model workers and DDS factory are connected
