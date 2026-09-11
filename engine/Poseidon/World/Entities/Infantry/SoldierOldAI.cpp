@@ -2498,10 +2498,19 @@ LSError Man::Serialize(ParamArchive& ar)
                 }
             }
         }
-        PARAM_CHECK(ar.Serialize("opCargoReloadMove", cargoReloadMove, 1, ""))
-        PARAM_CHECK(ar.Serialize("opCargoReloadCreator", cargoReloadCreator, 1, -1))
-        PARAM_CHECK(ar.Serialize("opCargoReloadId", cargoReloadId, 1, -1))
-        PARAM_CHECK(ar.Serialize("opCargoReloadMuzzle", cargoReloadMuzzle, 1, ""))
+        // Scalars normally load only in PassFirst. These locals must be read
+        // again after references resolve, without changing the surrounding pass.
+        const bool resolvedPass = ar.IsLoading() && ar.GetPass() == ParamArchive::PassSecond;
+        if (resolvedPass) ar.FirstPass();
+        const LSError cargoReloadError = [&]() -> LSError {
+            PARAM_CHECK(ar.Serialize("opCargoReloadMove", cargoReloadMove, 1, ""))
+            PARAM_CHECK(ar.Serialize("opCargoReloadCreator", cargoReloadCreator, 1, -1))
+            PARAM_CHECK(ar.Serialize("opCargoReloadId", cargoReloadId, 1, -1))
+            PARAM_CHECK(ar.Serialize("opCargoReloadMuzzle", cargoReloadMuzzle, 1, ""))
+            return LSOK;
+        }();
+        if (resolvedPass) ar.SecondPass();
+        PARAM_CHECK(cargoReloadError)
         if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassSecond && cargoReloadMove.GetLength() > 0)
         {
             const auto* seat = GetConfiguredCargoWeaponSeat();
