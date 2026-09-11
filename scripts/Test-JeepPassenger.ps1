@@ -1,7 +1,7 @@
 param([switch]$ProjectileFrame, [switch]$AnimationPreview, [switch]$AnimationVideo, [switch]$NpcFire,
       [ValidateSet('clear','hold','outside','blocked','friendly')][string]$NpcScenario='clear',
       [ValidateSet(0,90,180)][int]$NpcHeading=0, [switch]$NpcDriver,
-      [switch]$NpcTransitions,
+      [switch]$NpcTransitions, [switch]$NpcMoving,
       [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
@@ -10,6 +10,8 @@ if ($NpcFire -and ($AnimationPreview -or $ProjectileFrame)) {throw 'Select one i
 if (!$NpcFire -and $NpcScenario -ne 'clear') {throw '-NpcScenario requires -NpcFire'}
 if (!$NpcFire -and ($NpcHeading -ne 0 -or $NpcDriver)) {throw 'NPC heading/driver requires -NpcFire'}
 if ($NpcTransitions -and (!$NpcFire -or $NpcScenario -ne 'clear')) {throw 'Transition/reload requires the clear NPC case'}
+if ($NpcMoving -and (!$NpcFire -or $NpcScenario -ne 'clear' -or $NpcHeading -ne 0 -or $NpcTransitions)) {throw 'Moving test requires clear heading-zero NPC case without reload'}
+if ($NpcMoving) {$NpcDriver=$true}
 $root=Split-Path $PSScriptRoot -Parent
 $stamp=Get-Content -LiteralPath (Join-Path $GameDir 'DEPLOYED-FROM.txt') -Raw
 $output=Join-Path $root ('build/jeep-ffv/baseline-'+(Get-Date -Format 'yyyyMMdd-HHmmss'))
@@ -95,12 +97,8 @@ try {
         if ($NpcScenario -eq 'friendly') {
             $null=Send @{cmd='exec';code=('"SoldierWB" createUnit [[{0},{1},0],group player,"ffvFriendly=this; this disableAI ""MOVE""; removeAllWeapons this; this setUnitPos ""UP"""]' -f (9700+4*$rightX),(3600+4*$rightZ))}
         }
-        if ($NpcTransitions) {
-            $entry=Send @{cmd='crew_pose_probe'}
-            if (!$entry.cargoWeaponActive) {throw 'Automatic cargo animation entry failed'}
-        } else {
-            $null=Send @{cmd='exec';code='ffvPassenger switchMove "OPJeepAim"'}
-        }
+        $entry=Send @{cmd='crew_pose_probe'}
+        if (!$entry.cargoWeaponActive) {throw 'Automatic cargo animation entry failed'}
         $null=Send @{cmd='exec';code='ffvPassenger reveal ffvTarget; ffvPassenger doTarget ffvTarget'}
         Start-Sleep -Seconds 2
         $null=Send @{cmd='eval';code='ffvShots'} '0'
@@ -151,6 +149,17 @@ try {
         Write-Host "Animation frames require visual inspection: $output"
         return
     }
+    if ($NpcMoving) {
+        $null=Send @{cmd='exec';code='ffvMovingShots=0; ffvPassenger addEventHandler ["Fired",{if (abs(speed ffvJeep)>5) then {ffvMovingShots=ffvMovingShots+1}}]; ffvTarget setPos [9760,3610,0]; ffvDriver enableAI "MOVE"; ffvDriver setSpeedMode "LIMITED"; ffvDriver doMove [9700,3680,0]; ffvView camSetPos [9706,3615,3]; ffvView camSetTarget ffvJeep; ffvView camCommit 0'}
+        $driveDeadline=[DateTime]::UtcNow.AddSeconds(20)
+        do {
+            Start-Sleep -Milliseconds 250
+            $driveSpeed=Send @{cmd='eval';code='abs(speed ffvJeep)'}
+        } while ([double]$driveSpeed.result -le 5 -and [DateTime]::UtcNow -lt $driveDeadline)
+        if ([double]$driveSpeed.result -le 5) {throw 'AI driver never started moving'}
+        $null=Send @{cmd='eval';code='ffvShots'} '0'
+        $null=Send @{cmd='screenshot';path=(Join-Path $output 'moving-before-fire.png')}
+    }
     if (!$NpcFire -or $NpcScenario -ne 'hold') {
         $null=Send @{cmd='exec';code='ffvPassenger reveal ffvTarget; ffvPassenger doTarget ffvTarget; ffvPassenger setCombatMode "YELLOW"; ffvPassenger doFire ffvTarget'}
     }
@@ -159,6 +168,11 @@ try {
     $seated=Send @{cmd='eval';code='vehicle ffvPassenger == ffvJeep'}
     $damage=Send @{cmd='eval';code='getDammage ffvTarget'}
     $cargoShots=Send @{cmd='eval';code='ffvShots'}
+    if ($NpcMoving) {
+        $movingShots=Send @{cmd='eval';code='ffvMovingShots'}
+        $driveEnd=Send @{cmd='eval';code='getPos ffvJeep'}
+        if ([int]$movingShots.result -le 0) {throw 'No actual passenger shot during AI-driven movement'}
+    }
     $null=Send @{cmd='screenshot';path=(Join-Path $output 'ordered-fire.png')}
     if ($NpcFire) {
         $null=Send @{cmd='eval';code='getPos ffvTarget'}
@@ -172,7 +186,7 @@ try {
         } elseif ($after.result -ne '30' -or $damage.result -ne '0' -or $cargoShots.result -ne '0') {
             throw "Unsafe NPC shot in negative case: $NpcScenario"
         }
-        [pscustomobject]@{kind='stationary-npc-integration';scenario=$NpcScenario;heading=$NpcHeading;driver=[bool]$NpcDriver;installed=$stamp.Trim();ammo=$after.result;magazines=$remaining.result;shots=$cargoShots.result;targetDamage=$damage.result;probe=$probe} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $output 'npc-observation.json')
+        [pscustomobject]@{kind='npc-integration';moving=[bool]$NpcMoving;movingShots=$movingShots.result;scenario=$NpcScenario;heading=$NpcHeading;driver=[bool]$NpcDriver;installed=$stamp.Trim();ammo=$after.result;magazines=$remaining.result;shots=$cargoShots.result;targetDamage=$damage.result;probe=$probe} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $output 'npc-observation.json')
         if ($NpcTransitions) {
             $null=Send @{cmd='exec';code='ffvPassenger setCombatMode "BLUE"; ffvView camSetPos [9701.8,3599.6,1.6]; ffvView camSetTarget [9700.4,3600,1.35]; ffvView camCommit 0'}
             Start-Sleep -Seconds 1
@@ -207,7 +221,7 @@ try {
             & python "$PSScriptRoot/default-content/make_jeep_pose_video.py" $output
             if ($LASTEXITCODE -ne 0) {throw 'Reload video encoding failed'}
         }
-        Write-Host "Stationary NPC $NpcScenario integration passed, NOT moving/player/reload acceptance: $output"
+        Write-Host "NPC $NpcScenario passed (moving=$NpcMoving, reload=$NpcTransitions); NOT player/visual/default-release acceptance: $output"
         return
     }
     $null=Send @{cmd='exec';code='ffvPassenger setCombatMode "BLUE"; unassignVehicle ffvPassenger; ffvPassenger action ["EJECT",ffvJeep]'}

@@ -2,7 +2,8 @@
 
 ## September 11 Jeep implementation continuation
 
-Latest continuation: installed 57da8b28, stationary NPC hits at 0/90/180 passed.
+Latest continuation: installed 36bcea5f, automatic entry and real reload passed.
+57da8b28 stationary NPC hits at 0/90/180 also passed.
 The bounded SP loop, seat-frame visibility and collision gate are implemented;
 installed probes found that protected retail Jeep config rejected the seat
 metadata. The external exact-class mapping now works in the installed game.
@@ -12,7 +13,8 @@ at heading 0, with and without a driver. Hold-fire, outside-arc and truck-occlus
 cases pass, as do a friendly in the corridor and the no-package/on-foot control.
 The next increment uses explicit version-2 animation states and the existing
 move graph/reload context for automatic entry, raise/lower and real reload.
-Those transitions are not yet accepted, nor are moving fire or a shippable pack.
+Automatic entry, shooting, reload and return toward idle pass installed run
+110517; detailed hand/motion polish, moving fire and a shippable pack remain open.
 No carrier collision, target knowledge or
 original config protection was bypassed. The owner backlog
 is still open. Default activation, transitions, reload, player and moving fire
