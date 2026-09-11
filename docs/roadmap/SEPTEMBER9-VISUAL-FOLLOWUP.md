@@ -1,5 +1,13 @@
 # September 9 visual follow-up
 
+## September 11 Jeep implementation continuation
+
+[Jeep baseline and integration](decisions/JEEP-FFV-20260911.md): real cargo vs
+on-foot M16 control now exists, including ammunition and Fired-event checks.
+First engine increment corrects attached bullet launch coordinates to the
+existing seat hierarchy. It does not yet enable FFV or provide the animation
+package. The entire owner backlog remains authorized, not closed by this step.
+
 ## September 11 owner completion audit
 
 [Current requirement checklist](REQUEST-AUDIT-20260911.md), source 8152607f,

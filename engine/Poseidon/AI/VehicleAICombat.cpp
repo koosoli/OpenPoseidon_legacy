@@ -2035,8 +2035,15 @@ bool EntityAI::FireMGun(int weapon, Vector3Par offset, Vector3Par direction, Tar
     }
 
     Entity* shell = NewShot(this, type, nullptr);
+    // Crew are rendered through an animated seat proxy. Their independent
+    // transform/speed is not the muzzle's world frame while inside a vehicle.
+    const bool attached = GetHierachyParent() != nullptr;
+    const Matrix4 shotFrame = attached ? WorldTransform() : Transform();
     Vector3 wDirection(NoInit);
-    DirectionModelToWorld(wDirection, direction);
+    if (attached)
+        wDirection = shotFrame.Rotate(direction);
+    else
+        DirectionModelToWorld(wDirection, direction);
     shell->SetOrient(wDirection, VUp);
     // do random dispersion of projectiles
     const int gausPassNum = 4;
@@ -2066,8 +2073,8 @@ bool EntityAI::FireMGun(int weapon, Vector3Par offset, Vector3Par direction, Tar
     shell->DirectionModelToWorld(dir, dir);
     shell->SetOrient(dir, shell->DirectionUp());
     // final speed and position
-    shell->SetSpeed(_speed + dir * aInfo->_initSpeed);
-    shell->SetPosition(PositionModelToWorld(offset));
+    shell->SetSpeed((attached ? WorldSpeed() : _speed) + dir * aInfo->_initSpeed);
+    shell->SetPosition(attached ? shotFrame.FastTransform(offset) : PositionModelToWorld(offset));
     GLOB_WORLD->AddFastVehicle(shell);
 
     if (GWorld->GetMode() == GModeNetware)
