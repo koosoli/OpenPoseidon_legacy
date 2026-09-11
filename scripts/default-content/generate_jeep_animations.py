@@ -130,7 +130,7 @@ def pose(spec, raised, recoil=0.0, reload=0.0):
                     arm['pole'])
         result[side+'biceps'] = segment(shoulder_rest, elbow_rest, shoulder, mid)
         result[side+'loket'] = segment(elbow_rest, wrist_rest, mid, wrist)
-        hand_r = gun_r @ rotation(arm['hand_axis'], arm['hand_degrees'])
+        hand_r = rotation(wrist-mid, arm['hand_degrees']) @ result[side+'loket'][:3, :3]
         result[side+'ruka'] = frame(hand_r, wrist - hand_r @ wrist_rest)
     return result
 

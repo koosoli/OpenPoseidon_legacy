@@ -1,6 +1,7 @@
-param([switch]$ProjectileFrame, [switch]$AnimationPreview, [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
+param([switch]$ProjectileFrame, [switch]$AnimationPreview, [switch]$AnimationVideo, [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
+if ($AnimationVideo -and !$AnimationPreview) {throw '-AnimationVideo requires -AnimationPreview'}
 $root=Split-Path $PSScriptRoot -Parent
 $stamp=Get-Content -LiteralPath (Join-Path $GameDir 'DEPLOYED-FROM.txt') -Raw
 $output=Join-Path $root ('build/jeep-ffv/baseline-'+(Get-Date -Format 'yyyyMMdd-HHmmss'))
@@ -71,9 +72,30 @@ try {
         $null=Send @{cmd='exec';code='ffvPassenger switchMove "OPJeepAim"; ffvView camSetPos [9701.8,3599.6,1.6]; ffvView camSetTarget [9700.4,3600,1.35]; ffvView camCommit 0'}
         Start-Sleep -Seconds 1
         $null=Send @{cmd='screenshot';path=(Join-Path $output 'pose-aim-side.png')}
+        if ($AnimationVideo) {
+            $samples=@()
+            $clock=[Diagnostics.Stopwatch]::StartNew()
+            foreach ($pose in @('Idle','Raise','Aim','Recoil','Reload','Lower')) {
+                $null=Send @{cmd='exec';code=('ffvPassenger switchMove "OPJeep'+$pose+'"')}
+                $end=$clock.Elapsed.TotalSeconds + $(if ($pose -eq 'Reload') {3.0} else {1.5})
+                do {
+                    $name='motion-{0:D4}.png' -f $samples.Count
+                    $beforeCapture=$clock.Elapsed.TotalSeconds
+                    $null=Send @{cmd='screenshot';path=(Join-Path $output $name)}
+                    $afterCapture=$clock.Elapsed.TotalSeconds
+                    $samples += [pscustomobject]@{file=$name;pose=$pose;time=($beforeCapture+$afterCapture)*0.5;captureSeconds=$afterCapture-$beforeCapture}
+                    Start-Sleep -Milliseconds 60
+                } while ($clock.Elapsed.TotalSeconds -lt $end)
+            }
+            $samples | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $output 'motion-samples.json')
+        }
         $null=Send @{cmd='exit'}
         if (!$p.WaitForExit(30000) -or $p.ExitCode -ne 0) {throw 'Animation preview exit failed'}
         if (Select-String -LiteralPath $log -Pattern 'Bad animation|Broken animation|Animation .*not found|Validation Error|panicked at|DeviceLost' -Quiet) {throw 'Animation preview load/render error'}
+        if ($AnimationVideo) {
+            & python "$PSScriptRoot/default-content/make_jeep_pose_video.py" $output
+            if ($LASTEXITCODE -ne 0) {throw 'Pose video encoding failed'}
+        }
         Write-Host "Animation frames require visual inspection: $output"
         return
     }
