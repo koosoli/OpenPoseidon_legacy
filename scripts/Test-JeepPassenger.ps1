@@ -292,6 +292,11 @@ try {
         # doMove creates a separate subgroup with SpeedNormal. Use the existing
         # group move for an actual LIMITED run; retain individual as the stress case.
         $driverMove=if ($DriverCommand -eq 'group') {'ffvDriverGroup move'} else {'ffvDriver doMove'}
+        if ($DriverCommand -eq 'group') {
+            # The fuel-zero setup can make group AI unassign an immobile vehicle.
+            $null=Send @{cmd='exec';code='ffvJeep setFuel 1; ffvDriver assignAsDriver ffvJeep; [ffvDriver] orderGetIn true; ffvDriver moveInDriver ffvJeep'}
+            $null=Send @{cmd='eval';code='driver ffvJeep == ffvDriver'} 'true'
+        }
         $null=Send @{cmd='exec';code=('ffvMovingShots=0; ffvPassenger addEventHandler ["Fired",{if (abs(speed ffvJeep)>5) then {ffvMovingShots=ffvMovingShots+1}}]; ffvJeep setFuel 1; ffvDriver setBehaviour "CARELESS"; ffvDriver setSpeedMode "LIMITED"; '+$driverMove+' [9700,3680,0]; ffvView camSetPos [9706,3615,3]; ffvView camSetTarget ffvJeep; ffvView camCommit 0')}
         if ($NpcTurning) {
             $null=Send @{cmd='exec';code=('ffvTurnShots=0; ffvShotHeadings=[]; ffvPassenger addEventHandler ["Fired",{ffvShotHeadings=ffvShotHeadings+[getDir ffvJeep]; if ((abs(speed ffvJeep)>5) && (abs(sin(getDir ffvJeep))>0.087)) then {ffvTurnShots=ffvTurnShots+1}}]; '+$driverMove+' [9660,3680,0]')}
@@ -303,6 +308,7 @@ try {
             $turnReady=$true
             if ($NpcTurning) {$turnReady=(Send @{cmd='eval';code='abs(sin(getDir ffvJeep))>0.087'}).result -ceq 'true'}
         } while (([double]$driveSpeed.result -le 5 -or !$turnReady) -and [DateTime]::UtcNow -lt $driveDeadline)
+        $null=Send @{cmd='eval';code='[driver ffvJeep == ffvDriver,vehicle ffvDriver == ffvJeep,unitReady ffvDriver,speedMode ffvDriverGroup,behaviour ffvDriver,getPos ffvDriver]'}
         if ([double]$driveSpeed.result -le 5 -or !$turnReady) {throw 'AI driver never reached the required motion/heading'}
         $null=Send @{cmd='eval';code='ffvShots'} '0'
         $null=Send @{cmd='screenshot';path=(Join-Path $output 'moving-before-fire.png')}
