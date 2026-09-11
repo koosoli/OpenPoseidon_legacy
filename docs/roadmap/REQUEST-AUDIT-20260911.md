@@ -2,6 +2,13 @@
 
 ## Aktueller Nachtrag 20:32 (kein Gesamtabschluss)
 
+21:02: Installiert 7329e2c4, kompletter Build und 10006 Unit-Pruefungen gruen.
+Zusatzfreilegung am animierten Augenpunkt ist kein nachgewiesener Fix fuer den
+Untergrundblick; dieser bleibt offen. Rotor-Wiederholung auf c529af69 bestanden:
+117 Updates, Mittel 0.20 ms, P95 0.40 ms pro Update (4 Hz), ein Helikopter.
+Keine Aussage zu allgemeinem FPS-Gewinn. Reforger-Waldmessung und verbleibende
+Lade-/GPU-Kosten: decisions/NATIVE-FOREST-CHECK-20260911.md.
+
 20:49: Installiert 000aa2fe. Rotorabtrag am Boden ist jetzt implementiert und
 mit besetzter UH60 geprueft: Motor aus unveraendert, Motor an schrittweise frei,
 Umgebung bleibt stehen, Niederschlag fuellt wieder auf. Kein separater

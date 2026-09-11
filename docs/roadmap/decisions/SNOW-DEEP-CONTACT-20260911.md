@@ -71,3 +71,10 @@ Prone-eye follow-up prepared: preserve the head-axis clearance and additionally
 clear to CalculateCameraPosition(moveTrans), the animated pilot point actually
 used by InsideCamera. No camera movement, per-view snow hiding, or larger global
 brush. Installed internal-camera acceptance remains pending.
+
+Installed 7329e2c4, crawl-20260911-210053: lifecycle passes, but internal image
+still shows a nearby dark snow wall. The eye extension is NOT an accepted fix
+for the reported underground view. This horizontal NPC-camera fixture does not
+yet distinguish legitimate occlusion below 1 m cover from seeing through terrain
+when looking down. Next diagnosis must record the actual view position/angle and
+snow mesh at the eye; do not keep increasing the clearance radius blindly.
