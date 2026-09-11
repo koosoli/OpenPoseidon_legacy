@@ -1,5 +1,15 @@
 # September 9 visual follow-up
 
+## September 11 owner completion audit
+
+[Current requirement checklist](REQUEST-AUDIT-20260911.md), source 8152607f,
+installed e1738ab4: NOT complete. BuildAutomaticSatmap bakes ground textures,
+not village/building/canopy objects. VehicleActions automatic discovery exists,
+but the Jeep personal-weapon cargo feature and animation package do not. Neither
+goal is rejected. The checklist separates later fixes from old pending entries,
+and preserves unclosed snow, caves, Fusion editing, visual and streaming work.
+This is a documentation/source audit, not a fresh runtime acceptance or delivery.
+
 ## September 11 renewed native visual priority
 
 Owner reiterates that streaming improvements do not close native Reforger visual
