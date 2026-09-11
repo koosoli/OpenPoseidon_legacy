@@ -121,11 +121,15 @@ class TrackAccumulator
 class TrackOptimized: public TrackAccumulator
 {
 	TrackDraw _left,_right;
+	Vector3 _snowHullFront = VZero, _snowHullBack = VZero, _snowHullLast = VZero;
+	float _snowHullRadius = 0, _snowHullTime = 0;
+	bool _snowHullValid = false;
 	
 	public:
 	TrackOptimized( const LODShape *lShape );
 	void Update( const Frame &pos, float deltaT, bool terminate );
 	void UpdateSnow(const Frame& pos, bool terminate) { _left.UpdateSnow(pos, terminate); _right.UpdateSnow(pos, terminate); }
+	void UpdateTrackedSnow(const Frame& pos, bool terminate, float deltaT);
 
 	Vector3 LeftPos() const {return _left.CenterPos();}
 	Vector3 RightPos() const {return _right.CenterPos();}

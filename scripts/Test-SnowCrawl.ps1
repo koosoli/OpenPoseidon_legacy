@@ -1,5 +1,6 @@
 param([switch]$ResetSettings, [switch]$Storm, [switch]$Refill,
       [ValidateRange(0.01,1.0)][double]$Depth=0.18, [switch]$ProneView, [switch]$Walking, [switch]$Rotor, [switch]$Vehicle, [switch]$PlayerProne,
+      [ValidateSet('UAZ','M113')][string]$VehicleClass='UAZ',
       [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
 if ($Walking -and $ProneView) {throw 'Walking and ProneView are different fixtures'}
@@ -13,7 +14,7 @@ $output=Join-Path $root ('build/snow-crawl/acceptance/crawl-'+(Get-Date -Format 
 $env:POSEIDON_USER_DIR=Join-Path $output 'user'
 New-Item -ItemType Directory -Force $env:POSEIDON_USER_DIR | Out-Null
 $stamp | Set-Content -LiteralPath (Join-Path $output 'DEPLOYED-FROM.txt')
-[pscustomobject]@{installed=$stamp.Trim();depth=$Depth;playerProne=[bool]$PlayerProne;vehicle=[bool]$Vehicle;rotor=[bool]$Rotor;walking=[bool]$Walking;proneView=[bool]$ProneView;refill=[bool]$Refill;storm=[bool]$Storm;resetSettings=[bool]$ResetSettings} |
+[pscustomobject]@{installed=$stamp.Trim();depth=$Depth;vehicleClass=$VehicleClass;playerProne=[bool]$PlayerProne;vehicle=[bool]$Vehicle;rotor=[bool]$Rotor;walking=[bool]$Walking;proneView=[bool]$ProneView;refill=[bool]$Refill;storm=[bool]$Storm;resetSettings=[bool]$ResetSettings} |
     ConvertTo-Json | Set-Content -LiteralPath (Join-Path $output 'test-context.json')
 & "$PSScriptRoot/Write-BenchmarkGraphics.ps1" -UserDir $env:POSEIDON_USER_DIR -DlssMode 0
 $env:POSEIDON_SNOW_TEST_DEPTH=$Depth.ToString([Globalization.CultureInfo]::InvariantCulture)
@@ -83,7 +84,7 @@ try {
     }
     if ($Vehicle) {
         if ($Depth -lt 0.8) {throw 'Vehicle hull fixture requires deep snow'}
-        $null=Send @{cmd='exec';code='doStop crawlWalker; snowCar="UAZ" createVehicle [9700,3630,0]; snowCar setDir 0; crawlWalker moveInDriver snowCar; doStop crawlWalker; crawlView="camera" camCreate [9704,3626,2.5]; crawlView cameraEffect ["internal","back"]; crawlView camSetTarget [9700,3630,0]; crawlView camCommit 0'}
+        $null=Send @{cmd='exec';code=('doStop crawlWalker; snowCar="{0}" createVehicle [9700,3630,0]; snowCar setDir 0; crawlWalker moveInDriver snowCar; doStop crawlWalker; crawlView="camera" camCreate [9704,3626,2.5]; crawlView cameraEffect ["internal","back"]; crawlView camSetTarget [9700,3630,0]; crawlView camCommit 0' -f $VehicleClass)}
         Start-Sleep -Seconds 5
         $initialPosition=Send @{cmd='eval';code='getPos snowCar'}
         $initialCoords=($initialPosition.result.Trim('[',']') -split ',') | ForEach-Object { [double]::Parse($_,[Globalization.CultureInfo]::InvariantCulture) }

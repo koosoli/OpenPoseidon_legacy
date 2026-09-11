@@ -1392,8 +1392,6 @@ void Tank::Simulate(float deltaT, SimulationImportance prec)
             IsMoved();
         }
 
-        _track.UpdateSnow(*this, !_landContact || DirectionUp().Y() < 0.3f);
-
         // simulate track drawing
         if (EnableVisualEffects(prec))
         {
@@ -1490,6 +1488,8 @@ void Tank::Simulate(float deltaT, SimulationImportance prec)
         DirectionWorldToModel(_modelSpeed, _speed);
     } // if (!GetStopped() && !isStatic)
 
+    // A resting hull still keeps new snowfall out of its occupied volume.
+    _track.UpdateTrackedSnow(*this, isStatic || !_landContact || DirectionUp().Y() < 0.3f, deltaT);
     base::Simulate(deltaT, prec);
 }
 

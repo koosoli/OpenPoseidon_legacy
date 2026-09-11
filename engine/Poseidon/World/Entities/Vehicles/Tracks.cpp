@@ -595,6 +595,54 @@ TrackOptimized::TrackOptimized(const LODShape* lShape)
         _right.SetOffsets(lShape->MemoryPoint("Stopa ZPP"), lShape->MemoryPoint("Stopa ZPL"),
                           GLOB_SCENE->Preloaded(TrackTextureFour), alpha);
     }
+
+    // Classic track points locate the two belts, not chassis clearance. Use
+    // collision bounds for the longitudinal footprint; never apply to motorcycles.
+    const Shape* geometry = lShape->GeometryLevel();
+    if (geometry && lShape->MemoryPointExists("Stopa LL") && lShape->MemoryPointExists("Stopa RL"))
+    {
+        const float radius = std::abs(LeftPos().X() - RightPos().X()) * 0.5f;
+        const float minZ = geometry->Min().Z(), maxZ = geometry->Max().Z();
+        if (std::isfinite(radius) && radius >= 0.25f && radius <= 4.0f &&
+            std::isfinite(minZ) && std::isfinite(maxZ) && maxZ > minZ && maxZ - minZ <= 12.0f)
+        {
+            const float x = (LeftPos().X() + RightPos().X()) * 0.5f;
+            const float midZ = (minZ + maxZ) * 0.5f;
+            _snowHullBack = Vector3(x, 0, std::min(minZ + radius, midZ));
+            _snowHullFront = Vector3(x, 0, std::max(maxZ - radius, midZ));
+            _snowHullRadius = radius;
+        }
+    }
+}
+
+void TrackOptimized::UpdateTrackedSnow(const Frame& pos, bool terminate, float deltaT)
+{
+    UpdateSnow(pos, terminate);
+    constexpr float clearance = 0.35f;
+    if (terminate || !GSnow().enabled || GSnow().Depth() <= clearance || _snowHullRadius <= 0)
+    {
+        _snowHullValid = false;
+        _snowHullTime = 0;
+        return;
+    }
+    if (!std::isfinite(deltaT) || deltaT <= 0) return;
+    _snowHullTime += std::min(deltaT, 0.1f);
+    if (_snowHullTime < 0.1f) return;
+    _snowHullTime -= 0.1f;
+    const Vector3 front = pos.PositionModelToWorld(_snowHullFront);
+    const Vector3 back = pos.PositionModelToWorld(_snowHullBack);
+    const Vector3 centre = (front + back) * 0.5f;
+    const float ground = GLandscape->SurfaceY(centre.X(), centre.Z());
+    if (ground <= GLandscape->GetSeaLevel() || GLandscape->RoadSurfaceY(centre.X(), centre.Z()) > ground + 0.3f)
+    {
+        _snowHullValid = false;
+        return;
+    }
+    GSnow().PressVehicle(back.X(), back.Z(), front.X(), front.Z(), _snowHullRadius, clearance);
+    if (_snowHullValid)
+        GSnow().PressVehicle(_snowHullLast.X(), _snowHullLast.Z(), centre.X(), centre.Z(), _snowHullRadius, clearance);
+    _snowHullLast = centre;
+    _snowHullValid = true;
 }
 
 void TrackOptimized::Update(const Frame& pos, float deltaT, bool terminate)
