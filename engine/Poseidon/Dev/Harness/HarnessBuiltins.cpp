@@ -217,6 +217,13 @@ void RegisterSqf(HarnessServer& hs)
                            cJSON_AddBoolToObject(resp, "prepareOnly", man->IsFirePrepare());
                            cJSON_AddNumberToObject(resp, "selectedWeapon", man->SelectedWeapon());
                            cJSON_AddBoolToObject(resp, "reloadInProgress", man->IsActionInProgress(MFReload));
+                           cJSON_AddNumberToObject(resp, "nearTrackAge", Glob.time - man->GetTrackNearTargetsTime());
+                           cJSON_AddNumberToObject(resp, "nearestEnemyDist2", unit->GetNearestEnemyDist2());
+                           cJSON_AddBoolToObject(resp, "hasAI", unit->HasAI());
+                           const Vector3 eye = man->GetEyeDirection();
+                           cJSON_AddNumberToObject(resp, "eyeX", eye.X());
+                           cJSON_AddNumberToObject(resp, "eyeY", eye.Y());
+                           cJSON_AddNumberToObject(resp, "eyeZ", eye.Z());
                            const Vector3 pivot = seat.FastTransform(man->GetWeaponCenter(weapon));
                            cJSON_AddNumberToObject(resp, "pivotX", pivot.X());
                            cJSON_AddNumberToObject(resp, "pivotY", pivot.Y());

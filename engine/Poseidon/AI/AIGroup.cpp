@@ -3,6 +3,7 @@
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/AI/AICostAccum.hpp> // PERF-014
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
+#include <Poseidon/World/Entities/Infantry/SoldierOld.hpp>
 #include <Poseidon/AI/AIRadio.hpp>
 #include <Poseidon/AI/CommandDelivery.hpp>
 #include <Poseidon/Core/Global.hpp>
@@ -1400,7 +1401,12 @@ bool AIGroup::Think()
             {
                 continue;
             }
-            if (!unit->IsUnit())
+            // Supported cargo observes as the person, never through its driver.
+            // Use the same simulation-time throttle and ordered scan as infantry.
+            Man* passenger = unit->IsInCargo() ? dyn_cast<Man>(unit->GetPerson()) : nullptr;
+            EntityAI* sensor = passenger && passenger->GetActiveCargoWeaponSeat()
+                ? passenger : (unit->IsUnit() ? unit->GetVehicle() : nullptr);
+            if (!sensor)
             {
                 continue;
             }
@@ -1420,13 +1426,12 @@ bool AIGroup::Think()
                 // ways: it removes 91% of this loop's cost and it DOES change what the AI
                 // perceives, so it was never a call a measurement could make. The AI tab puts
                 // it back to 0, which is the 2001 behaviour exactly.
-                EntityAI* vehicle = unit->GetVehicle();
                 const float trackPeriod = AITuning::TrackNearTargetsPeriod();
-                if (trackPeriod <= 0.0f || Glob.time > vehicle->GetTrackNearTargetsTime() + trackPeriod)
+                if (trackPeriod <= 0.0f || Glob.time > sensor->GetTrackNearTargetsTime() + trackPeriod)
                 {
                     AICost::AICosts().trackCalls++;
                     AICost::AICosts().trackPairs += static_cast<std::uint64_t>(_targetList.Size());
-                    vehicle->TrackNearTargets(_targetList);
+                    sensor->TrackNearTargets(_targetList);
                 }
             }
         }
