@@ -154,7 +154,8 @@ try {
         # tests stale perception rather than the intended seat/steering case.
         if ($NpcTurning) {
             $position=if ($TurnTarget -eq 'far') {'[9780,3640,0]'} else {'[9730,3620,0]'}
-            $null=Send @{cmd='exec';code=('ffvTarget setPos '+$position)}
+            # A newly placed target has no pre-mission memory at the old position.
+            $null=Send @{cmd='exec';code=('ffvTurnTargetGroup=createGroup east; deleteVehicle ffvTarget; "SoldierEB" createUnit ['+$position+',ffvTurnTargetGroup,"ffvTarget=this; removeAllWeapons this; this disableAI ""MOVE"""]')}
         }
         elseif ($NpcMoving) {$null=Send @{cmd='exec';code='ffvTarget setPos [9760,3610,0]'}}
         if ($NpcDriver) {
