@@ -1258,6 +1258,19 @@ std::string AnswerServiceQuery(const char* what, cJSON* root)
 
 void RegisterKeyInjection(HarnessServer& hs)
 {
+    hs.RegisterCommand({"mouse_motion", "Inject relative SDL mouse movement", {{"dx","int",true},{"dy","int",true}}},
+        [](const std::string&, cJSON* root) -> std::string {
+            const int dx = HarnessProtocol::GetInt(root,"dx");
+            const int dy = HarnessProtocol::GetInt(root,"dy");
+            if (dx < -1000 || dx > 1000 || dy < -1000 || dy > 1000)
+                return HarnessProtocol::ErrorResponse("mouse movement out of range");
+            SDL_Event event{};
+            event.type = SDL_EVENT_MOUSE_MOTION;
+            event.motion.xrel = static_cast<float>(dx);
+            event.motion.yrel = static_cast<float>(dy);
+            if (!SDL_PushEvent(&event)) return HarnessProtocol::ErrorResponse("mouse event rejected");
+            return HarnessProtocol::OkResponse();
+        });
     hs.RegisterCommand({"mouse_button", "Inject SDL mouse button state", {{"button","int",true},{"down","bool",true}}},
         [](const std::string&, cJSON* root) -> std::string {
             const int button = HarnessProtocol::GetInt(root,"button");
