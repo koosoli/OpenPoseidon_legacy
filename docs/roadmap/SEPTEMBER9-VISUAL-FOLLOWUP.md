@@ -1,5 +1,27 @@
 # September 9 visual follow-up
 
+## September 11 renewed native visual priority
+
+Owner reiterates that streaming improvements do not close native Reforger visual
+quality: compare forest/ground contrast and tree quality against the converted
+map, and fix trunk/crown wind disagreement. Keep these alongside performance,
+not behind a claim that reduced texture memory fixes appearance.
+
+Current code check: frame.wgsl already caps extra leaf flutter to centimetres;
+NTC RG normal correction also exists (prior acceptance below). Neither proves
+the reported issues are gone. A concrete remaining wind hypothesis is phase
+identity: direct shader3d seeds from absolute object origin, whereas retained
+gpu_driven seeds from inst.center (forest patches use crown centres). Trace the
+actual native bark/leaf draw paths and transforms before changing this; if they
+straddle paths or use distinct centres, shared main bending can disagree even
+with bounded flutter. Any correction must also cover both velocity paths and
+shadow rendering. Verify with motion captures, not a still image.
+
+Material acceptance must compare the same tree/terrain location, sun, exposure,
+LOD, resolution and upscaler. Check authored normals, alpha coverage, material
+channels, canopy-normal treatment and ambient/translucency separately. No global
+contrast increase or density reduction as a substitute for importer correctness.
+
 ## September 11 native texture identity optimization
 
 [Measured native bank costs and canonical texture reuse](decisions/NATIVE-TEXTURE-IDENTITY-20260911.md):
