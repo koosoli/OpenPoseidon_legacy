@@ -24,8 +24,13 @@ that this session independently reproduced every case or knows the tester build.
    UI distinguishes current capacity from historical rejected cells.
    Unit tests: 11 snow cases / 9933 assertions, including filling the entire
    storage cap, preserving live tracks, refilling, renewed stamping, refresh of
-   a chunk deadline, bounded reclamation and reset. Installed refill/crawl test
-   is pending. The finite cap still applies if all stored trails remain live.
+   a chunk deadline, bounded reclamation and reset. Installed 0a76682f passes
+   Test-SnowCrawl -Refill (crawl-20260911-031116): eight chunks become zero after
+   deposition, then real crawling creates five new chunks without reset. Images
+   confirm filled surface followed by a new visible depression; clean exit.
+   The finite cap still applies if all stored trails remain live. At 0.5 m the
+   new-trail image also shows partial burial of the prone actor, not acceptance
+   of deep-snow body clearance or the first-person camera.
 2. High snow has inappropriate foot/vehicle tracks. Open: stamping currently
    removes a fraction of global depth with fixed footprint/tyre widths, not a
    body/undercarriage contact volume. Deep snow needs continuous displacement

@@ -7,7 +7,8 @@ reported working storm/indoor mask/crawl/refill/craters from deep-snow, rotor-wa
 and post-edit player-visibility defects. Filled snow chunks previously remained
 allocated forever until the hard cap blocked new trails. Bounded reclamation is
 implemented and unit-tested without evicting live depressions; installed
-refill/crawl acceptance is pending. Other tester issues remain open, not folded
+0a76682f refill/crawl acceptance passes (crawl-20260911-031116, chunks 8 -> 0 -> 5,
+visible renewed trail without reset, clean exit). Other tester issues remain open, not folded
 into that storage fix.
 
 ## September 11: complete-window installed acceptance
