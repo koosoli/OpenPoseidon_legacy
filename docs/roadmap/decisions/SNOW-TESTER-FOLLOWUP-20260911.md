@@ -43,7 +43,16 @@ that this session independently reproduced every case or knows the tester build.
    existing field with bounded, time-scaled erosion and shelter checks; no new
    helicopter scan per snow cell and no instantaneous full-disc craters.
 5. Player invisible after large terrain edits, first and third person. Open,
-   not reproduced. PaintTerrain changes heights/collision and FlushCache; no
+   not reproduced in installed 0a76682f with Test-TerrainFineBrush -LargeNogova,
+   brush-20260911-031804. Sixty accepted 1 m strokes make two 40 m radius pits
+   and one hill, 20 m centre delta each. Actor outside the footprints stays alive
+   at [7760,4405,0.0000896], original ground 22.6169 m. Inspected external view
+   shows the soldier and internal view shows arms/rifle; restore and exit pass.
+   This tests the actual paint/cache path, NOT the full interactive freefly/editor
+   transition or painting beneath the actor. Initial harness attempt used an
+   invalid 20 m single-stroke delta and was rejected; the passing test uses the
+   accepted repeated-stroke path, not a relaxed engine guard.
+   PaintTerrain changes heights/collision and FlushCache; no
    direct player-hiding call found in that path. Need installed Nogova sequence
    with actor position, camera mode, alive/hidden state and terrain height before
    and after two pits and a hill, including a view outside the edited footprint.

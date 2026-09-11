@@ -1,15 +1,16 @@
-param([string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
+param([switch]$LargeNogova, [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
 $root=Split-Path $PSScriptRoot -Parent
-$output=Join-Path $root 'build/terrain-brush/acceptance'
+$output=Join-Path $root ('build/terrain-brush/acceptance/brush-'+(Get-Date -Format 'yyyyMMdd-HHmmss'))
 $env:POSEIDON_USER_DIR=Join-Path $output 'user'
 New-Item -ItemType Directory -Force $env:POSEIDON_USER_DIR | Out-Null
-[IO.File]::WriteAllText((Join-Path $env:POSEIDON_USER_DIR 'graphics.cfg'), "qualityPreset=3;`nterrainDetail=4;`nmsaaSamples=4;`ndlssMode=0;`nvsync=0;`nfpsCap=60;`n")
+& "$PSScriptRoot/Write-BenchmarkGraphics.ps1" -UserDir $env:POSEIDON_USER_DIR -DlssMode 0
 $env:WGR_AUTO_EXPOSURE='0'; $env:WGR_EXPOSURE='0.15'
 $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0)
 $listener.Start(); $port=$listener.LocalEndpoint.Port; $listener.Stop()
 $mission=Join-Path $root 'dev-missions/terrain-brush.Intro'
+if ($LargeNogova) {$mission=Join-Path $root 'dev-missions/smoke-room.noe'}
 $p=Start-Process -FilePath (Join-Path $GameDir 'OpenPoseidon.exe') -WorkingDirectory $GameDir -WindowStyle Hidden -PassThru -ArgumentList @('--render','wgpu','--window','--dev','--width','1280','--height','720','--harness',"$port",'--test-mission',('"'+$mission+'"'),'--log-file',('"'+(Join-Path $output 'fine.log')+'"'))
 $null=$p.Handle
 $client=$null
@@ -36,6 +37,37 @@ try {
         return $r
     }
     Start-Sleep -Seconds 12
+    if ($LargeNogova) {
+        $null=Send @{cmd='exec';code='player allowDamage false; player switchCamera "EXTERNAL"'}
+        Start-Sleep -Seconds 2
+        $null=Send @{cmd='screenshot';path=(Join-Path $output 'before-external.png')}
+        $null=Send @{cmd='eval';code='getPos player'}
+        $null=Send @{cmd='eval';code='triTerrainHeight [7760,4405]'}
+        # Keep the actor outside all three footprints; burial is not invisibility.
+        foreach ($stroke in @('[7900,4405,40,-1]','[7900,4510,40,-1]','[7790,4540,40,1]')) {
+            for ($i=0; $i -lt 20; ++$i) {
+                $r=Send @{cmd='eval';code=('triTerrainPaint '+$stroke)}
+                if ($r.result -notmatch 'OK') {throw "Large edit refused: $stroke"}
+            }
+        }
+        foreach ($view in @('EXTERNAL','INTERNAL')) {
+            $null=Send @{cmd='exec';code=('player switchCamera "'+$view+'"')}
+            Start-Sleep -Seconds 2
+            $null=Send @{cmd='screenshot';path=(Join-Path $output ('after-'+$view+'.png'))}
+        }
+        $null=Send @{cmd='eval';code='getPos player'}
+        $alive=Send @{cmd='eval';code='alive player'}
+        if ($alive.result -notmatch 'true') {throw 'Player died during edit test'}
+        $null=Send @{cmd='eval';code='triTerrainHeight [7760,4405]'}
+        $null=Send @{cmd='eval';code='triTerrainBrushMode "restore"'}
+        $null=Send @{cmd='exec';code='player switchCamera "EXTERNAL"'}
+        Start-Sleep -Seconds 2
+        $null=Send @{cmd='screenshot';path=(Join-Path $output 'restored-external.png')}
+        $null=Send @{cmd='exit'}
+        if (!$p.WaitForExit(20000) -or $p.ExitCode -ne 0) {throw 'Game exit failed'}
+        Write-Host "Large Nogova edits completed. Inspect actor visibility in $output; state alone is not visual acceptance."
+        return
+    }
     $null=Send @{cmd='eval';code='triFreeFlyPose "9700 3570 55 0 -45"'}
     $a=[double](Send @{cmd='eval';code='triTerrainHeight [9700,3600]'}).result
     $b=[double](Send @{cmd='eval';code='triTerrainHeight [9706.25,3600]'}).result
