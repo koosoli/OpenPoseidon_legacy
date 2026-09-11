@@ -1,6 +1,7 @@
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
+#include <Poseidon/World/Entities/Infantry/SoldierOld.hpp>
 #include <Poseidon/AI/AIRadio.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Core/Config/UserConfig.hpp>
@@ -439,7 +440,8 @@ void AIGroup::ReactToEnemyDetected()
         if (unit->IsInCargo())
         {
             Transport* trans = unit->GetVehicleIn();
-            if (trans && trans->Type()->GetUnloadInCombat())
+            const Man* man = dyn_cast<Man>(unit->GetPerson());
+            if (trans && trans->Type()->GetUnloadInCombat() && !(man && man->GetActiveCargoWeaponSeat()))
             {
                 unit->OrderGetIn(false);
             }

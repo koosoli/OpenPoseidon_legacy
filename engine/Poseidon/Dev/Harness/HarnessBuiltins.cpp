@@ -116,6 +116,10 @@ void RegisterSqf(HarnessServer& hs)
                            const Vector3 direction = man->GetWeaponDirection(weapon);
                            cJSON* resp = cJSON_CreateObject();
                            cJSON_AddStringToObject(resp, "move", man->GetCurrentMove());
+                           cJSON_AddBoolToObject(resp, "cargoWeaponActive", man->GetActiveCargoWeaponSeat() != nullptr);
+                           cJSON_AddBoolToObject(resp, "cargoWeaponLineClear", man->CargoWeaponLineClear(weapon));
+                           cJSON_AddBoolToObject(resp, "fireTarget", man->GetFireTarget() != nullptr);
+                           cJSON_AddNumberToObject(resp, "aimed", man->GetAimed(weapon, man->GetFireTarget()));
                            cJSON_AddNumberToObject(resp, "muzzleX", muzzle.X());
                            cJSON_AddNumberToObject(resp, "muzzleY", muzzle.Y());
                            cJSON_AddNumberToObject(resp, "muzzleZ", muzzle.Z());

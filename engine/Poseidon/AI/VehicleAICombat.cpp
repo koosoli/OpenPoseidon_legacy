@@ -1476,7 +1476,7 @@ static void CheckNearFriendlies(EntityAIList& res, const EntityAI* from, const E
     // do not check myself and target
     // collect information about near troops
     int xMin, xMax, zMin, zMax;
-    Vector3Val fromPos = from->Position();
+    const Vector3 fromPos = from->GetHierachyParent() ? from->WorldTransform().Position() : from->Position();
     ObjRadiusRectangle(xMin, xMax, zMin, zMax, fromPos, fromPos, maxDistance);
     AIGroup* grp = from->GetGroup();
     if (!grp)
@@ -1564,7 +1564,8 @@ bool EntityAI::CheckFriendlyFire(int weapon, Target* target) const
             AUTO_STATIC_ARRAY(OLink<EntityAI>, nearFriendlies, 32);
             // check near part of bullet trajectory
             Vector3Par dir = GetWeaponDirection(weapon);
-            float distToTarget = target->AimingPosition().Distance(Position());
+            const Vector3 origin = GetHierachyParent() ? WorldTransform().Position() : Position();
+            float distToTarget = target->AimingPosition().Distance(origin);
             // if target is very near, be less carefull about friendly fire
             float radius = 2.0f;
             float maxDist = 50;

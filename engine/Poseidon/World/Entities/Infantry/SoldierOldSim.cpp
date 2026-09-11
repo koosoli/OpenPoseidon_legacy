@@ -207,8 +207,16 @@ void Man::BasicSimulation(float deltaT, SimulationImportance prec, float speedFa
 
     RefreshMoveQueue(prec <= SimulateVisibleFar);
 
-    bool forceRecalcMatrix = MoveHead(deltaT);
-    if (forceRecalcMatrix)
+    const bool cargoWeapon = GetActiveCargoWeaponSeat() != nullptr;
+    if (cargoWeapon)
+    {
+        SimulateWeaponActivity(deltaT, prec);
+        if (Soldier* soldier = dyn_cast<Soldier>(this))
+            soldier->AIFire(deltaT);
+    }
+    if (cargoWeapon)
+        MoveWeapons(deltaT, false); // Includes the single head update for this step.
+    else if (MoveHead(deltaT))
     {
         RecalcGunTransform();
     }

@@ -21,6 +21,7 @@ DEFINE_ENUM_END(MoveId)
 
 class MotionType;
 class AIGroup;
+struct CargoWeaponSeat;
 
 float SoldierStealthStanceExposure(AIGroup* group, bool holdingFire, int x, int z);
 
@@ -738,6 +739,8 @@ class Man: public Person
 	float LandSlope(bool &forceStand) const;
 	bool IsAbleToStand() const;
 	bool IsAbleToFire() const override;
+	const CargoWeaponSeat* GetActiveCargoWeaponSeat() const;
+	bool CargoWeaponLineClear(int weapon) const;
 
 	float GetHandsHit() const {return GetHit(Type()->_handsHit);}
 

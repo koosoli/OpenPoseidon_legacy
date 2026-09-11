@@ -15,4 +15,4 @@ foreach ($file in Get-ChildItem -LiteralPath $stage -Force) {
 }
 & $tools pbo pack $stage "$pack/AddOns/op_jeep_animation_preview.pbo" --prefix op_jeep_animation_preview
 if ($LASTEXITCODE -ne 0) {throw 'Preview packaging failed'}
-Write-Host "Animation preview only, no default installation or FFV permission: $pack"
+Write-Host "Development preview only, one SP NPC integration seat, no default installation: $pack"

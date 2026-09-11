@@ -1396,7 +1396,8 @@ float VisibilityTracker::Value(const EntityAI* sensor, int weapon, float reserve
         }
         float maxDistance2 = Square(floatMax(irRange, TACTICAL_VISIBILITY));
         float visible = 0;
-        if (sensor->Position().Distance2(ai->Position()) < maxDistance2)
+        const Vector3 sensorPosition = sensor->GetHierachyParent() ? sensor->WorldTransform().Position() : sensor->Position();
+        if (sensorPosition.Distance2(ai->Position()) < maxDistance2)
         {
             Time lastVisTime = GWorld->VisibilityTime(sensor->CommanderUnit(), ai);
             if (lastVisTime >= Glob.time - 30)
@@ -1408,7 +1409,9 @@ float VisibilityTracker::Value(const EntityAI* sensor, int weapon, float reserve
                 }
                 else
                 {
-                    weaponPos = sensor->PositionModelToWorld(sensor->GetWeaponPoint(weapon));
+                    weaponPos = sensor->GetHierachyParent()
+                        ? sensor->WorldTransform().FastTransform(sensor->GetWeaponPoint(weapon))
+                        : sensor->PositionModelToWorld(sensor->GetWeaponPoint(weapon));
                 }
                 visible = GLandscape->Visible(weaponPos, sensor, ai, reserve, ObjIntersectFire);
             }

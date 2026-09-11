@@ -1855,7 +1855,15 @@ static Matrix3 CreateZRotation(float sinr, float cosr)
 void Man::RecalcGunTransform()
 {
     Vector3 gunAxis = GetWeaponCenter(0);
-    if (QIsManual())
+    if (const auto* seat = GetActiveCargoWeaponSeat())
+    {
+        const float azimuth = seat->azimuth * (H_PI / 180.0f);
+        const Matrix4 basis(MRotationY, -azimuth);
+        _gunTrans = Matrix4(MTranslation, gunAxis) * basis * Matrix4(MRotationY, _gunYRot) *
+                    Matrix4(MRotationX, -_gunXRot) * Matrix4(MRotationY, azimuth) * Matrix4(MTranslation, -gunAxis);
+        _gunTransIdent = false;
+    }
+    else if (QIsManual())
     {
         Matrix4 correctBank;
         correctBank.SetOrientation(CreateZRotation(_correctBankSin, _correctBankCos));

@@ -1,4 +1,4 @@
-param([switch]$ProjectileFrame, [switch]$AnimationPreview, [switch]$AnimationVideo, [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
+param([switch]$ProjectileFrame, [switch]$AnimationPreview, [switch]$AnimationVideo, [switch]$NpcFire, [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
 if ($AnimationVideo -and !$AnimationPreview) {throw '-AnimationVideo requires -AnimationPreview'}
@@ -16,7 +16,7 @@ $listener.Start(); $port=$listener.LocalEndpoint.Port; $listener.Stop()
 $mission=Join-Path $root 'dev-missions/jeep-ffv.Intro'
 $log=Join-Path $output 'jeep.log'
 $gameArgs=@('--render','wgpu','--window','--no-dev','--width','1280','--height','720','--harness',"$port",'--test-mission',('"'+$mission+'"'),'--log-file',('"'+$log+'"'))
-if ($AnimationPreview) {
+if ($AnimationPreview -or $NpcFire) {
     $preview=Join-Path $root 'build/jeep-ffv/animation-preview'
     if (!(Test-Path -LiteralPath "$preview/AddOns/op_jeep_animation_preview.pbo")) {throw 'Build animation preview first'}
     $gameArgs+=@('--mod',('"'+$preview+'"'))
@@ -58,6 +58,12 @@ try {
     $null=Send @{cmd='eval';code='alive ffvTarget && getDammage ffvTarget == 0'} 'true'
     if ($before.result -ne '30') {throw 'Passenger fired before baseline capture'}
     $null=Send @{cmd='screenshot';path=(Join-Path $output 'seated.png')}
+    if ($NpcFire) {
+        $null=Send @{cmd='exec';code='ffvPassenger switchMove "OPJeepAim"; ffvPassenger reveal ffvTarget; ffvPassenger doTarget ffvTarget'}
+        Start-Sleep -Seconds 2
+        $null=Send @{cmd='eval';code='ffvShots'} '0'
+        $null=Send @{cmd='crew_pose_probe'}
+    }
     if ($AnimationPreview) {
         $null=Send @{cmd='crew_pose_probe'}
         $null=Send @{cmd='exec';code='ffvView camSetPos [9701.8,3599.6,1.6]; ffvView camSetTarget [9700.4,3600,1.35]; ffvView camCommit 0'}
@@ -109,6 +115,16 @@ try {
     $damage=Send @{cmd='eval';code='getDammage ffvTarget'}
     $cargoShots=Send @{cmd='eval';code='ffvShots'}
     $null=Send @{cmd='screenshot';path=(Join-Path $output 'ordered-fire.png')}
+    if ($NpcFire) {
+        $null=Send @{cmd='crew_pose_probe'}
+        if ($seated.result -ne 'true' -or [double]$after.result -ge 30 -or [double]$damage.result -le 0 -or [int]$cargoShots.result -le 0) {
+            throw 'NPC passenger failed to remain seated and hit with real M16 ammunition'
+        }
+        $null=Send @{cmd='exit'}
+        if (!$p.WaitForExit(30000) -or $p.ExitCode -ne 0) {throw 'NPC fire exit failed'}
+        Write-Host "Stationary NPC integration passed, NOT moving/player/reload acceptance: $output"
+        return
+    }
     $null=Send @{cmd='exec';code='ffvPassenger setCombatMode "BLUE"; unassignVehicle ffvPassenger; ffvPassenger action ["EJECT",ffvJeep]'}
     Start-Sleep -Seconds 3
     $null=Send @{cmd='eval';code='vehicle ffvPassenger == ffvPassenger'} 'true'

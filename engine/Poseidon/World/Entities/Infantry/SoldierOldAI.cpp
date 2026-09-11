@@ -24,6 +24,57 @@ namespace Poseidon
 {
 using namespace Foundation;
 
+const CargoWeaponSeat* Man::GetActiveCargoWeaponSeat() const
+{
+    // First integration is SP NPC-only. Unconfigured seats and original animations
+    // never enter the passenger weapon loop; player/MP need separate acceptance.
+    AIUnit* unit = Brain();
+    if (!GWorld || GWorld->GetMode() == GModeNetware || !IsLocal() || _isDead ||
+        !unit || unit->IsPlayer() || !unit->IsInCargo() || !GetHierachyParent())
+        return nullptr;
+    Transport* vehicle = unit->GetVehicleIn();
+    if (!vehicle || vehicle->IsDammageDestroyed())
+        return nullptr;
+    for (int i = 0; i < vehicle->GetManCargoSize(); ++i)
+    {
+        if (vehicle->GetManCargo()[i] != this)
+            continue;
+        const auto* seat = vehicle->Type()->GetCargoWeaponSeat(i);
+        if (!seat || strcmpi(GetCurrentMove(), seat->action) != 0 || WeaponsDisabled())
+            return nullptr;
+        return seat;
+    }
+    return nullptr;
+}
+
+bool Man::CargoWeaponLineClear(int weapon) const
+{
+    const auto* seat = GetActiveCargoWeaponSeat();
+    if (!seat || !GLandscape || weapon < 0 || weapon >= NMagazineSlots())
+        return false;
+    const auto& slot = GetMagazineSlot(weapon);
+    const auto* mode = GetWeaponMode(weapon);
+    if (!slot._weapon || strcmpi(slot._weapon->GetName(), seat->weapon) != 0 ||
+        !mode || !mode->_ammo || mode->_ammo->_simulation != AmmoShotBullet)
+        return false;
+    const auto* vehicle = Brain()->GetVehicleIn();
+    const Vector3 direction = GetWeaponDirection(weapon).Normalized();
+    if (!seat->ContainsDirection(vehicle->DirWorldToModel() * direction))
+        return false;
+    const Matrix4 frame = WorldTransform();
+    const Vector3 muzzle = frame.FastTransform(GetWeaponPoint(weapon));
+    const Vector3 pivot = frame.FastTransform(GetWeaponCenter(weapon));
+    const Vector3 end = muzzle + direction * 2.0f;
+    CollisionBuffer hits;
+    // Do not ignore the carrier: a muzzle outside a windscreen is not permission
+    // to push the rifle through it. Check the pivot-to-muzzle segment as well.
+    GLandscape->ObjectCollision(hits, const_cast<Man*>(this), nullptr, pivot, muzzle, .02f, ObjIntersectFire);
+    if (hits.Size() > 0)
+        return false;
+    GLandscape->ObjectCollision(hits, const_cast<Man*>(this), nullptr, muzzle, end, .02f, ObjIntersectFire);
+    return hits.Size() == 0 && GLandscape->IntersectWithGround(nullptr, muzzle, direction, 0, 2.0f) >= 2.0f;
+}
+
 void Man::AimHeadForward()
 {
     _headYRotWanted = 0;
@@ -115,6 +166,14 @@ void Man::AimWeaponAI(int weapon, Vector3Par direction, float deltaT)
     const WeaponModeType* mode = GetWeaponMode(weapon);
     const AmmoType* ammo = mode ? mode->_ammo : nullptr;
     const MagazineType* mag = magazine->_type;
+
+    if (const auto* seat = GetActiveCargoWeaponSeat())
+    {
+        constexpr float radians = H_PI / 180.0f;
+        yRotWanted = std::remainder(yRotWanted + seat->azimuth * radians, 2 * H_PI);
+        Limit(yRotWanted, -seat->halfAngle * radians, seat->halfAngle * radians);
+        Limit(xRotWanted, seat->minElevation * radians, seat->maxElevation * radians);
+    }
 
     if (ammo->_simulation == AmmoShotShell && mag->_initSpeed < 30)
     {
@@ -824,7 +883,7 @@ bool Soldier::FireWeapon(int weapon, TargetType* target)
     {
         return false;
     }
-    if (weapon >= NMagazineSlots())
+    if (weapon < 0 || weapon >= NMagazineSlots())
     {
         return false;
     }
@@ -832,6 +891,9 @@ bool Soldier::FireWeapon(int weapon, TargetType* target)
     {
         return false;
     }
+
+    if (Brain() && Brain()->IsInCargo() && !CargoWeaponLineClear(weapon))
+        return false;
 
     if (_waterContact)
     {
@@ -1215,6 +1277,17 @@ float Soldier::GetTypeCost(OperItemType type) const
 float Soldier::FireInRange(int weapon, float& timeToAim, const Target& target) const
 {
     timeToAim = 0;
+    if (const auto* seat = GetActiveCargoWeaponSeat())
+    {
+        if (weapon < 0 || weapon >= NMagazineSlots())
+            return 0;
+        const auto* type = GetMagazineSlot(weapon)._weapon;
+        if (!type || strcmpi(type->GetName(), seat->weapon) != 0)
+            return 0;
+        const auto* vehicle = Brain()->GetVehicleIn();
+        const Vector3 direction = target.position - WorldTransform().FastTransform(GetWeaponPoint(weapon));
+        return seat->ContainsDirection(vehicle->DirWorldToModel() * direction) ? 1.0f : 0.0f;
+    }
     Vector3 relDir = PositionWorldToModel(target.position);
     return FireAngleInRange(weapon, relDir);
 }
