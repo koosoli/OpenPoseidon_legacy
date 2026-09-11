@@ -2,6 +2,12 @@
 
 ## Aktueller Nachtrag 20:32 (kein Gesamtabschluss)
 
+22:54: Installiert 804ad7d4. Reforger-Vorladeversuch viermal (ABBA) und mit
+zwei Dorfansichten geprueft. Keine Material-/Geometrieaenderung; einzelne
+Maximalspitzen kleiner, uebrige Framezeiten gemischt. Deshalb NICHT als neue
+Standardoptimierung aktiviert. Details: NATIVE-FOREST-CHECK-20260911.md.
+Kettenfahrzeug-Tiefschneekontakt in Arbeit, noch nicht als abgenommen markieren.
+
 22:24: Installiert 9c9e1607. Upstream-Cursoranpassung im installierten Spiel
 bei 800x600, 1280x720, 1680x720 mit Menue/Editor/Kinddialog geprueft; Bildmasse
 und quadratische Cursor stimmen. Ultrawide behaelt das vorhandene zentrale
