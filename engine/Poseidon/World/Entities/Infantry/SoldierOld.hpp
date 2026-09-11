@@ -891,6 +891,14 @@ class Man: public Person
 	) const override;
 
 	float GetAimed( int weapon, Target *target ) const override;
+	struct AimingDiagnostics
+	{
+		const char* gate = "invalid-weapon-or-target";
+		float visibility = 0;
+		float error = 0;
+		float targetSize = 0;
+	};
+	float GetAimed( int weapon, Target *target, AimingDiagnostics* diagnostics ) const;
 
 	bool IsDead() const;
 	bool ShadowPoseFrozen() const override;

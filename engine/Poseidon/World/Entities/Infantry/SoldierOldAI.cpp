@@ -1399,6 +1399,12 @@ void Soldier::Simulate(float deltaT, SimulationImportance prec)
 
 float Man::GetAimed(int weapon, Target* target) const
 {
+    return GetAimed(weapon, target, nullptr);
+}
+
+float Man::GetAimed(int weapon, Target* target, AimingDiagnostics* diagnostics) const
+{
+    if (diagnostics) *diagnostics = {};
     if (weapon < 0 || weapon >= NMagazineSlots())
     {
         return 0;
@@ -1413,16 +1419,20 @@ float Man::GetAimed(int weapon, Target* target) const
     }
     if (WeaponsDisabled())
     {
+        if (diagnostics) diagnostics->gate = "weapons-disabled";
         return 0;
     }
     float visible = _visTracker.Value(this, _currentWeapon, target->idExact, 0.9f);
+    if (diagnostics) diagnostics->visibility = visible;
     if (visible < 0.3f)
     {
+        if (diagnostics) diagnostics->gate = "muzzle-visibility";
         return 0;
     }
 
     if (target->lastSeen < Glob.time - 5)
     {
+        if (diagnostics) diagnostics->gate = "last-seen";
         return 0;
     }
 
@@ -1433,9 +1443,11 @@ float Man::GetAimed(int weapon, Target* target) const
 
     if (target->posError.SquareSize() > Square(ammo->indirectHitRange * 2))
     {
+        if (diagnostics) diagnostics->gate = "target-position-error";
         return 0;
     }
 
+    if (diagnostics) diagnostics->gate = "special-weapon";
     Vector3 ap = target->AimingPosition();
     if (ammo && (ammo->_simulation != AmmoShotMissile || ammo->maxControlRange < 10))
     {
@@ -1552,6 +1564,13 @@ float Man::GetAimed(int weapon, Target* target) const
         float dCoef = floatMax(muzzle->_aiDispersionCoefX, muzzle->_aiDispersionCoefY);
         tgtSize += dist * mode->_dispersion * dCoef * aimPrecision * 0.5f;
 
+        if (diagnostics)
+        {
+            diagnostics->error = error;
+            diagnostics->targetSize = tgtSize;
+            diagnostics->gate = "aim-error";
+        }
+
 #if _ENABLE_CHEATS
         if ((Object*)this == GWorld->CameraOn() && CHECK_DIAG(DECombat))
         {
@@ -1568,8 +1587,10 @@ float Man::GetAimed(int weapon, Target* target) const
         }
         if (!CheckFriendlyFire(weapon, target))
         {
+            if (diagnostics) diagnostics->gate = "friendly-fire";
             return 0;
         }
+        if (diagnostics) diagnostics->gate = "accepted";
         if (error <= tgtSize)
         {
             return visible;

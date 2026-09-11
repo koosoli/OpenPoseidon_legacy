@@ -215,7 +215,12 @@ void RegisterSqf(HarnessServer& hs)
                            }
                            cJSON_AddBoolToObject(resp, "cargoWeaponLineClear", man->CargoWeaponLineClear(weapon));
                            cJSON_AddBoolToObject(resp, "fireTarget", man->GetFireTarget() != nullptr);
-                           cJSON_AddNumberToObject(resp, "aimed", man->GetAimed(weapon, man->GetFireTarget()));
+                           Man::AimingDiagnostics aiming;
+                           cJSON_AddNumberToObject(resp, "aimed", man->GetAimed(weapon, man->GetFireTarget(), &aiming));
+                           cJSON_AddStringToObject(resp, "aimGate", aiming.gate);
+                           cJSON_AddNumberToObject(resp, "aimVisibility", aiming.visibility);
+                           cJSON_AddNumberToObject(resp, "aimError", aiming.error);
+                           cJSON_AddNumberToObject(resp, "aimTargetSize", aiming.targetSize);
                            cJSON_AddBoolToObject(resp, "loaded", man->GetWeaponLoaded(weapon));
                            cJSON_AddBoolToObject(resp, "ready", man->GetWeaponReady(weapon, man->GetFireTarget()));
                            cJSON_AddBoolToObject(resp, "prepareOnly", man->IsFirePrepare());
