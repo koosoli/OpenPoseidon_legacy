@@ -2430,6 +2430,43 @@ void Soldier::AIPilot(float deltaT, SimulationImportance prec)
     _walkSpeedWanted = speedWanted;
 }
 
+void Man::RestoreCargoReloadAfterLoad()
+{
+    if (_cargoReloadAfterLoad.id == MoveIdNone)
+        return;
+    const MotionPathItem pending = _cargoReloadAfterLoad;
+    _cargoReloadAfterLoad = MotionPathItem(MoveId(MoveIdNone));
+    const auto* seat = GetConfiguredCargoWeaponSeat();
+    const auto* context = static_cast<const ActionContextDefault*>(pending.context.GetRef());
+    bool validMuzzle = false;
+    if (seat && seat->HasTransitions() && Brain()->IsInCargo() && context &&
+        seat->OwnsAction(Type()->GetMoveName(_primaryMove.id)) &&
+        strcmpi(Type()->GetMoveName(pending.id), seat->reloadAction) == 0 &&
+        FindMagazine(context->param, context->param2))
+    {
+        for (int i = 0; i < NMagazineSlots(); ++i)
+        {
+            const auto& slot = GetMagazineSlot(i);
+            if (slot._weapon && slot._muzzle && strcmpi(slot._weapon->GetName(), seat->weapon) == 0 &&
+                slot._weapon->GetName() + RString("|") + slot._muzzle->GetName() == context->param3)
+                validMuzzle = true;
+        }
+    }
+    if (!validMuzzle)
+    {
+        LOG_WARN(AI, "Cargo reload save no longer matches a supported seat/magazine; ignoring action");
+        return;
+    }
+    if (_primaryMove.id == pending.id)
+    {
+        _primaryMove.context = pending.context;
+        _externalMove = pending;
+        _externalMoveFinished = false;
+    }
+    else
+        _externalQueue.Add(pending);
+}
+
 LSError Man::Serialize(ParamArchive& ar)
 {
     PARAM_CHECK(base::Serialize(ar))
@@ -2445,6 +2482,7 @@ LSError Man::Serialize(ParamArchive& ar)
         }
         else if (ar.GetPass() == ParamArchive::PassFirst)
         {
+            _cargoReloadAfterLoad = MotionPathItem(MoveId(MoveIdNone));
             RString name;
             PARAM_CHECK(ar.Serialize("primaryMove", name, 1, ""))
             if (name.GetLength() == 0)
@@ -2484,7 +2522,8 @@ LSError Man::Serialize(ParamArchive& ar)
                     return item.id != MoveIdNone && item.context && item.context->function == MFReload &&
                            strcmpi(Type()->GetMoveName(item.id), seat->reloadAction) == 0;
                 };
-                if (isReload(_primaryMove)) pending = &_primaryMove;
+                if (isReload(_cargoReloadAfterLoad)) pending = &_cargoReloadAfterLoad;
+                else if (isReload(_primaryMove)) pending = &_primaryMove;
                 else if (isReload(_externalMove)) pending = &_externalMove;
                 else for (int i = 0; i < _externalQueue.Size(); ++i)
                     if (isReload(_externalQueue[i])) { pending = &_externalQueue[i]; break; }
@@ -2513,38 +2552,20 @@ LSError Man::Serialize(ParamArchive& ar)
         PARAM_CHECK(cargoReloadError)
         if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassSecond && cargoReloadMove.GetLength() > 0)
         {
-            const auto* seat = GetConfiguredCargoWeaponSeat();
-            bool validMuzzle = false;
-            if (seat && seat->HasTransitions() && strcmpi(cargoReloadMove, seat->reloadAction) == 0 &&
-                FindMagazine(cargoReloadCreator, cargoReloadId))
-            {
-                for (int i = 0; i < NMagazineSlots(); ++i)
-                {
-                    const auto& slot = GetMagazineSlot(i);
-                    if (slot._weapon && slot._muzzle && strcmpi(slot._weapon->GetName(), seat->weapon) == 0 &&
-                        slot._weapon->GetName() + RString("|") + slot._muzzle->GetName() == cargoReloadMuzzle)
-                        validMuzzle = true;
-                }
-            }
             const MoveId reloadMove = Type()->GetMoveId(cargoReloadMove);
-            if (validMuzzle && reloadMove != MoveIdNone)
+            if (reloadMove != MoveIdNone)
             {
                 Ref<ActionContextDefault> context = new ActionContextDefault;
                 context->function = MFReload;
                 context->param = cargoReloadCreator;
                 context->param2 = cargoReloadId;
                 context->param3 = cargoReloadMuzzle;
-                if (_primaryMove.id == reloadMove)
-                {
-                    _primaryMove.context = context;
-                    _externalMove = MotionPathItem(reloadMove, context);
-                    _externalMoveFinished = false;
-                }
-                else
-                    _externalQueue.Add(MotionPathItem(reloadMove, context));
+                // Other entities' second passes and the attachment hierarchy
+                // are not yet complete. Validate once simulation resumes.
+                _cargoReloadAfterLoad = MotionPathItem(reloadMove, context);
             }
             else
-                LOG_WARN(AI, "Cargo reload save no longer matches a supported seat/magazine; ignoring action");
+                LOG_WARN(AI, "Cargo reload animation is absent; ignoring saved action");
         }
 
         PARAM_CHECK(ar.Serialize("walkSpeedWanted", _walkSpeedWanted, 1, 0))

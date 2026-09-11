@@ -205,6 +205,7 @@ void Man::BasicSimulation(float deltaT, SimulationImportance prec, float speedFa
 {
     float turn, moveX, moveZ;
 
+    RestoreCargoReloadAfterLoad();
     RefreshMoveQueue(prec <= SimulateVisibleFar);
 
     const CargoWeaponSeat* cargoSeat = GetActiveCargoWeaponSeat();
@@ -340,6 +341,7 @@ void Man::OnPositionChanged()
 
 void Man::Simulate(float deltaT, SimulationImportance prec)
 {
+    RestoreCargoReloadAfterLoad();
     if (_ladderBuilding && _ladderIndex >= 0)
     {
         if (IsDammageDestroyed())
