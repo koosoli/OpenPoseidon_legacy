@@ -5,7 +5,7 @@ import unittest
 
 import numpy as np
 
-from generate_jeep_animations import clip, elbow, encode, point, pose
+from generate_jeep_animations import clip, elbow, encode, point, pose, rest_point, rest_proxy
 
 
 class JeepAnimations(unittest.TestCase):
@@ -46,10 +46,15 @@ class JeepAnimations(unittest.TestCase):
 
     def test_hands_remain_on_authored_grips(self):
         for _, matrices in clip(self.spec, 'raise'):
-            gun = matrices['zbran'] @ np.array(self.spec['weapon_proxy'])
+            gun = matrices['zbran'] @ rest_proxy(self.spec)
             for side in ('p', 'l'):
-                wrist = point(matrices[side+'ruka'], self.spec['arms'][side]['wrist'])
+                wrist = point(matrices[side+'ruka'], rest_point(self.spec, self.spec['arms'][side]['wrist']))
                 np.testing.assert_allclose(wrist, point(gun, self.spec['grips'][side]), atol=1e-9)
+
+    def test_rtm_pivots_are_not_centered_mesh_coordinates(self):
+        hip = rest_point(self.spec, self.spec['legs']['p']['hip'])
+        self.assertLess(np.linalg.norm(hip), .2)
+        self.assertGreater(np.linalg.norm(self.spec['legs']['p']['hip']), .6)
 
 
 if __name__ == '__main__':

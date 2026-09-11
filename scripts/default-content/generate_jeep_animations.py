@@ -82,17 +82,28 @@ def smooth(t):
     return t*t*(3-2*t)
 
 
+def rest_point(spec, p):
+    # The model API exposes centered ODOL vertices; RTMs act before centering.
+    return np.asarray(p) + np.asarray(spec['model_center'])
+
+
+def rest_proxy(spec):
+    proxy = np.array(spec['weapon_proxy'], dtype=float)
+    proxy[:3, 3] += spec['model_center']
+    return proxy
+
+
 def pose(spec, raised, recoil=0.0, reload=0.0):
     # RTMs contain absolute deformation matrices, not parent-relative joints.
     root = frame(rotation([0, 1, 0], spec['root_yaw']), spec['root_offset'])
-    torso = root @ pivot([0, 1, 0], spec['torso_yaw'] * raised, spec['waist'])
+    torso = root @ pivot([0, 1, 0], spec['torso_yaw'] * raised, rest_point(spec, spec['waist']))
     result = {name: root.copy() for name in spec['bones']}
     for name in ('bricho', 'zebra', 'hrudnik', 'krk', 'hlava', 'prameno', 'lrameno', 'roura'):
         result[name] = torso.copy()
     for side, leg in spec['legs'].items():
-        thigh = root @ pivot([0, 0, 1], spec['thigh_bend'], leg['hip'])
-        shin = thigh @ pivot([0, 0, 1], spec['knee_bend'], leg['knee'])
-        foot = shin @ pivot([0, 0, 1], -spec['thigh_bend']-spec['knee_bend'], leg['ankle'])
+        thigh = root @ pivot([0, 0, 1], spec['thigh_bend'], rest_point(spec, leg['hip']))
+        shin = thigh @ pivot([0, 0, 1], spec['knee_bend'], rest_point(spec, leg['knee']))
+        foot = shin @ pivot([0, 0, 1], -spec['thigh_bend']-spec['knee_bend'], rest_point(spec, leg['ankle']))
         result[side+'stehno'] = thigh
         result[side+'holen'] = shin
         result[side+'chodidlo'] = foot
@@ -102,10 +113,11 @@ def pose(spec, raised, recoil=0.0, reload=0.0):
     gun_r = rotation([0, 1, 0], spec['gun_yaw']) @ rotation([1, 0, 0], -25*(1-raised))
     gun_pos -= gun_r[:, 2] * recoil
     gun = frame(gun_r, gun_pos)
-    proxy = np.array(spec['weapon_proxy'], dtype=float)
+    proxy = rest_proxy(spec)
     result['zbran'] = gun @ np.linalg.inv(proxy)
     for side, arm in spec['arms'].items():
-        shoulder = point(torso, arm['shoulder'])
+        shoulder_rest, elbow_rest, wrist_rest = (rest_point(spec, arm[j]) for j in ('shoulder', 'elbow', 'wrist'))
+        shoulder = point(torso, shoulder_rest)
         wrist = point(gun, spec['grips'][side])
         # Left support hand travels to the magazine, then returns to its grip.
         if side == 'l':
@@ -114,10 +126,10 @@ def pose(spec, raised, recoil=0.0, reload=0.0):
                     np.linalg.norm(np.subtract(arm['elbow'], arm['shoulder'])),
                     np.linalg.norm(np.subtract(arm['wrist'], arm['elbow'])),
                     arm['pole'])
-        result[side+'biceps'] = segment(arm['shoulder'], arm['elbow'], shoulder, mid)
-        result[side+'loket'] = segment(arm['elbow'], arm['wrist'], mid, wrist)
+        result[side+'biceps'] = segment(shoulder_rest, elbow_rest, shoulder, mid)
+        result[side+'loket'] = segment(elbow_rest, wrist_rest, mid, wrist)
         hand_r = gun_r @ rotation(arm['hand_axis'], arm['hand_degrees'])
-        result[side+'ruka'] = frame(hand_r, wrist - hand_r @ arm['wrist'])
+        result[side+'ruka'] = frame(hand_r, wrist - hand_r @ wrist_rest)
     return result
 
 
