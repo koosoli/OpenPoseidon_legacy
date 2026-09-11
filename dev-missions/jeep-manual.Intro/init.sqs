@@ -1,0 +1,9 @@
+~0.5
+ffvPassenger assignAsCargo ffvJeep
+ffvPassenger moveInCargo ffvJeep
+ffvPassenger selectWeapon "M16"
+ffvShots=0
+ffvPassenger addEventHandler ["Fired",{ffvShots=ffvShots+1}]
+~2
+hint "Jeep: M16, front passenger. Aim RIGHT. Left mouse: fire. R: reload. Free look off."
+exit

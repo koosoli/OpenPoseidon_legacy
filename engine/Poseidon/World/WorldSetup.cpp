@@ -1165,6 +1165,11 @@ void World::VehicleSwitched(Object* from, Object* to)
 
 void World::SwitchCameraTo(Object* vehicle, CameraType camType)
 {
+    // Ordinary boarding (including reboarding) targets the carrier. Supported
+    // personal-weapon cargo needs the soldier's camera and cursor constraints.
+    if (Man* passenger = dyn_cast<Man>(PlayerOn()); passenger && passenger->GetActiveCargoWeaponSeat() &&
+        passenger->Brain()->GetVehicleIn() == vehicle)
+        vehicle = passenger;
     bool change = (vehicle != _cameraOn);
     float changeDist2 = 1e10;
     if (vehicle && _cameraOn)

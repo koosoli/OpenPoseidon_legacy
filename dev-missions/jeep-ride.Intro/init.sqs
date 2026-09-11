@@ -1,0 +1,25 @@
+~0.5
+ffvDriver assignAsDriver ffvJeep
+ffvDriver moveInDriver ffvJeep
+ffvJeep setFuel 0
+ffvPassenger assignAsCargo ffvJeep
+ffvShots=0
+ffvPassenger addEventHandler ["Fired",{ffvShots=ffvShots+1}]
+hint "Board the Jeep as passenger. Driver waits for you. Targets on the RIGHT are unarmed. Left mouse: fire. R: reload."
+#wait
+~0.25
+? !(ffvPassenger in ffvJeep): goto "wait"
+ffvJeep setFuel 1
+ffvDriver doMove [9700,3840,0]
+#ride
+~0.25
+? !(ffvPassenger in ffvJeep): goto "stop"
+? ((getPos ffvJeep) select 1) > 3828: goto "finish"
+goto "ride"
+#stop
+ffvJeep setFuel 0
+goto "wait"
+#finish
+ffvJeep setFuel 0
+hint "End of firing lane. You can get out and board again."
+exit
