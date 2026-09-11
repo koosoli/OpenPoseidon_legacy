@@ -6,8 +6,10 @@ $output=Join-Path $root 'build/showcase/showcase_lab.pbo'
 python "$PSScriptRoot/showcase/build_showcase.py" $output
 if ($LASTEXITCODE -ne 0) { throw 'Showcase addon generation failed' }
 if (!(Test-Path -LiteralPath (Join-Path $GameDir 'OpenPoseidon.exe'))) { throw 'Not a game install' }
-New-Item -ItemType Directory -Force (Join-Path $GameDir 'Addons') | Out-Null
-New-Item -ItemType Directory -Force (Join-Path $GameDir 'Missions') | Out-Null
-Copy-Item -LiteralPath $output -Destination (Join-Path $GameDir 'Addons/showcase_lab.pbo') -Force
-Copy-Item -LiteralPath (Join-Path $root 'content/showcase/ShowcaseLab.Intro') -Destination (Join-Path $GameDir 'Missions') -Recurse -Force
+& "$PSScriptRoot/Move-DefaultContentToMods.ps1" -GameDir $GameDir
+$pack=Join-Path $GameDir 'Mods/@OP_Showcase'
+New-Item -ItemType Directory -Force "$pack/AddOns", "$pack/Missions" | Out-Null
+Copy-Item -LiteralPath $output -Destination "$pack/AddOns/showcase_lab.pbo" -Force
+Copy-Item -LiteralPath (Join-Path $root 'content/showcase/ShowcaseLab.Intro') -Destination "$pack/Missions" -Recurse -Force
+Copy-Item -LiteralPath "$root/content/default-packs/layout/@OP_Showcase.json" -Destination "$pack/mod.json" -Force
 Write-Output 'Installed: Single Missions / Showcase Lab - Physics and Light'

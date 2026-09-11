@@ -1,7 +1,9 @@
 param([switch]$ResetSettings, [switch]$Storm, [switch]$Refill,
-      [ValidateRange(0.01,1.0)][double]$Depth=0.18, [switch]$ProneView,
+      [ValidateRange(0.01,1.0)][double]$Depth=0.18, [switch]$ProneView, [switch]$Walking,
       [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
+if ($Walking -and $ProneView) {throw 'Walking and ProneView are different fixtures'}
+$posture=if ($Walking) {'UP'} else {'DOWN'}
 if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
 $root=Split-Path $PSScriptRoot -Parent
 $stamp=Get-Content -LiteralPath (Join-Path $GameDir 'DEPLOYED-FROM.txt') -Raw
@@ -9,7 +11,7 @@ $output=Join-Path $root ('build/snow-crawl/acceptance/crawl-'+(Get-Date -Format 
 $env:POSEIDON_USER_DIR=Join-Path $output 'user'
 New-Item -ItemType Directory -Force $env:POSEIDON_USER_DIR | Out-Null
 $stamp | Set-Content -LiteralPath (Join-Path $output 'DEPLOYED-FROM.txt')
-[pscustomobject]@{installed=$stamp.Trim();depth=$Depth;proneView=[bool]$ProneView;refill=[bool]$Refill;storm=[bool]$Storm;resetSettings=[bool]$ResetSettings} |
+[pscustomobject]@{installed=$stamp.Trim();depth=$Depth;walking=[bool]$Walking;proneView=[bool]$ProneView;refill=[bool]$Refill;storm=[bool]$Storm;resetSettings=[bool]$ResetSettings} |
     ConvertTo-Json | Set-Content -LiteralPath (Join-Path $output 'test-context.json')
 & "$PSScriptRoot/Write-BenchmarkGraphics.ps1" -UserDir $env:POSEIDON_USER_DIR -DlssMode 0
 $env:POSEIDON_SNOW_TEST_DEPTH=$Depth.ToString([Globalization.CultureInfo]::InvariantCulture)
@@ -57,7 +59,7 @@ try {
     $null=Send @{cmd='exec';code='crawlWalker setPos [9700,3600,0]; doStop crawlWalker; crawlView="camera" camCreate [9703,3598,3]; crawlView cameraEffect ["internal","back"]; crawlView camSetTarget [9700,3604,0]; crawlView camCommit 0'}
     Start-Sleep -Seconds 2
     $null=Send @{cmd='screenshot';path=(Join-Path $output 'before.png')}
-    $null=Send @{cmd='exec';code='crawlWalker setUnitPos "DOWN"; crawlWalker setBehaviour "COMBAT"; crawlWalker doMove [9700,3606,0]'}
+    $null=Send @{cmd='exec';code=('crawlWalker setUnitPos "'+$posture+'"; crawlWalker setBehaviour "COMBAT"; crawlWalker forceSpeed 1; crawlWalker doMove [9700,3606,0]')}
     Start-Sleep -Seconds 10
     $position=Send @{cmd='eval';code='getPos crawlWalker'}
     $null=Send @{cmd='screenshot';path=(Join-Path $output 'crawling.png')}
@@ -85,7 +87,7 @@ try {
         $afterFill=Send @{cmd='dev_snow';action='state'}
         if ($afterFill.chunks -ge $beforeFill.chunks) {throw 'Filled tracks were not reclaimed'}
         $null=Send @{cmd='screenshot';path=(Join-Path $output 'refilled.png')}
-        $null=Send @{cmd='exec';code='crawlWalker setPos [9700,3600,0]; crawlWalker setUnitPos "DOWN"; crawlWalker doMove [9700,3606,0]'}
+        $null=Send @{cmd='exec';code=('crawlWalker setPos [9700,3600,0]; crawlWalker setUnitPos "'+$posture+'"; crawlWalker doMove [9700,3606,0]')}
         Start-Sleep -Seconds 10
         $afterCrawl=Send @{cmd='dev_snow';action='state'}
         if ($afterCrawl.chunks -le $afterFill.chunks) {throw 'New crawl failed to create tracks after refill'}

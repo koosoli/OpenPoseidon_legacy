@@ -4,7 +4,7 @@ if ($Preset -notmatch '^win-x64-clang-(rwdi|rel|dbg)$') {throw 'Unsupported cont
 $root=Split-Path $PSScriptRoot -Parent
 $suffix=($Preset -split '-')[-1]
 $stage=Join-Path $root 'build/jeep-ffv/animation-source'
-$pack=if ($Preview) {Join-Path $root 'build/jeep-ffv/animation-preview'} else {Join-Path $root "dist/x64-win-$suffix/@OP_VehicleActions"}
+$pack=if ($Preview) {Join-Path $root 'build/jeep-ffv/animation-preview'} else {Join-Path $root "dist/x64-win-$suffix/Mods/@OP_VehicleActions"}
 $archive=if ($Preview) {'op_jeep_animation_preview.pbo'} else {'op_jeep_actions.pbo'}
 $source=Join-Path $root 'content/default-packs/vehicle-actions'
 $tools=Join-Path $root "dist/x64-win-$suffix/PoseidonTools.exe"
@@ -20,4 +20,10 @@ foreach ($file in Get-ChildItem -LiteralPath $stage -Force) {
 & $tools pbo pack $stage "$pack/AddOns/$archive" --prefix op_jeep_actions
 if ($LASTEXITCODE -ne 0) {throw 'VehicleActions packaging failed'}
 if (!$Preview) {Copy-Item -LiteralPath "$source/mod.json" -Destination "$pack/mod.json" -Force}
+if (!$Preview) {
+    New-Item -ItemType Directory -Force "$pack/Missions" | Out-Null
+    foreach ($mission in @('jeep-manual.Intro','jeep-ride.Intro')) {
+        Copy-Item -LiteralPath "$root/dev-missions/$mission" -Destination "$pack/Missions" -Recurse -Force
+    }
+}
 Write-Host "Staged own Jeep animations and one SP seat: $pack (preview=$Preview)"

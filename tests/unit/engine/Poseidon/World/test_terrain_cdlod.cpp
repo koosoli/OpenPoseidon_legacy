@@ -188,6 +188,33 @@ TEST_CASE("Deep prone snow clears the animated head corridor without residual co
     CHECK(snow.DeficitAt(0, 10) == Catch::Approx(0.8f));
 }
 
+TEST_CASE("Deep walking snow forms a continuous channel instead of footprints", "[snow][terrain]")
+{
+    SnowField snow;
+    snow.enabled = true;
+    snow.maxDepth = 1.0f;
+    snow.Deposit(0.25f);
+    CHECK_FALSE(snow.NeedsWalkingChannel());
+    snow.PressWalking(0.0625f, 0.0625f, 0.0625f, 2.0625f);
+    CHECK(snow.Chunks() == 0);
+    snow.Deposit(0.75f);
+    REQUIRE(snow.NeedsWalkingChannel());
+    snow.PressWalking(0.0625f, 0.0625f, 0.0625f, 2.0625f);
+    for (int z = 0; z <= 16; ++z)
+        CHECK(snow.DeficitAt(0, z) == Catch::Approx(1.0f));
+    CHECK(snow.DeficitAt(1, 8) == Catch::Approx(1.0f));
+    CHECK(snow.DeficitAt(4, 8) == 0.0f);
+    snow.PressWalking(0.0625f, 2.0625f, 100.0625f, 2.0625f);
+    CHECK(snow.DeficitAt(400, 16) == 0.0f);
+    CHECK(snow.DeficitAt(800, 16) == Catch::Approx(1.0f));
+    snow.Deposit(0.2f);
+    CHECK(snow.DeficitAt(0, 8) == Catch::Approx(0.8f));
+    snow.enabled = false;
+    CHECK_FALSE(snow.NeedsWalkingChannel());
+    snow.PressWalking(0, 0, 10, 0);
+    CHECK(snow.DeficitAt(80, 0) == 0.0f);
+}
+
 TEST_CASE("Snow tracks interpolate travel and ignore teleports", "[snow][terrain]")
 {
     SnowField snow;

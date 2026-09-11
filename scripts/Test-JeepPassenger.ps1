@@ -57,7 +57,7 @@ if ($UserMod) {
     $gameArgs+=@('--mod',('"'+$UserMod+'"'))
 }
 if ($DefaultPackage) {
-    $packArchive=Join-Path $GameDir '@OP_VehicleActions/AddOns/op_jeep_actions.pbo'
+    $packArchive=Join-Path $GameDir 'Mods/@OP_VehicleActions/AddOns/op_jeep_actions.pbo'
     if (!(Test-Path -LiteralPath $packArchive)) {
         if (!$AutomaticOriginal) {throw 'Default VehicleActions is not installed'}
         $packArchive=$null

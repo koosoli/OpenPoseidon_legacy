@@ -21,3 +21,18 @@ head corridor, outside footprint, invalid offsets and refill by precipitation.
 
 Installed A/B acceptance is pending. This does not close standing body or vehicle
 displacement, rotor erosion, general buried-camera cases, or the whole snow task.
+
+## Walking follow-up (not yet runtime accepted)
+
+The owner clarified that deep walking must produce a continuous channel, not
+individual footsteps. Above 0.25 m cover, the existing 10 Hz body-contact path
+now stamps a continuous full-depth channel, radius 0.22 to 0.35 m with depth.
+Shallow snow retains toe/heel stamps; deep snow suppresses the legacy footprint
+decals as well. Land/bridge/water gates remain; teleports clear only their
+destination, never the intervening landscape. This is visual surface clearance,
+not a new snow locomotion or collision simulation.
+
+Unit coverage verifies continuity, untouched surrounding snow, shallow/disabled
+no-op, teleport rejection and refill. Combined snow/default-content tests:
+9998 assertions, 15 cases passed. Test-SnowCrawl -Walking selects an upright
+actor for installed acceptance. Vehicle and rotor displacement remain open.

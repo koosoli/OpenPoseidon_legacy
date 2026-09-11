@@ -1,0 +1,26 @@
+; Separate from the free-drive vehicles and the terrain-crater station.
+labRideJeep = "Jeep" createVehicle [9800,3300,0]
+labRideJeep setDir 0
+labRideDriver assignAsDriver labRideJeep
+labRideDriver moveInDriver labRideJeep
+doStop labRideDriver
+#wait
+~0.25
+? !(alive labRideDriver) : exit
+? !(alive labRideJeep) : exit
+? !(player in labRideJeep) : goto "wait"
+labRideDriver doMove [9800,3540,0]
+#ride
+~0.25
+? !(alive labRideDriver) : exit
+? !(alive labRideJeep) : exit
+? !(player in labRideJeep) : goto "stop"
+? ((getPos labRideJeep) select 1) > 3528 : goto "finish"
+goto "ride"
+#stop
+doStop labRideDriver
+goto "wait"
+#finish
+doStop labRideDriver
+hint "End of Jeep range. Leave the vehicle to return to the main LAB using its station actions. Restart the mission for fresh targets."
+exit

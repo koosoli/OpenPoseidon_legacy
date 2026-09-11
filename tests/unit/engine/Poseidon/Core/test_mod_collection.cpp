@@ -45,11 +45,17 @@ TEST_CASE("Default content packs require an explicit compatible contract", "[mod
         std::filesystem::path path;
         ~Cleanup() { std::error_code ec; std::filesystem::remove_all(path, ec); }
     } cleanup{root};
-    const auto visual = root / "@OP_VisualUpgrade";
-    const auto vehicle = root / "@OP_VehicleActions";
+    const auto visual = root / "Mods" / "@OP_VisualUpgrade";
+    const auto vehicle = root / "Mods" / "@OP_VehicleActions";
     auto resolve = [&] { return ResolveDefaultContentPacks(root.string(), {}, ""); };
     CHECK(resolve().mountPath.empty());
-    REQUIRE(resolve().diagnostics.size() == 2);
+    REQUIRE(resolve().diagnostics.size() == 5);
+    // A leftover root copy must not override or resurrect canonical content.
+    const auto obsolete = root / "@OP_VisualUpgrade";
+    std::filesystem::create_directories(obsolete / "AddOns");
+    std::ofstream(obsolete / "mod.json") << R"({"defaultContentApi":"1","version":"1.0.0"})";
+    std::ofstream(obsolete / "AddOns" / "op_ground_materials.pbo") << "old fixture";
+    CHECK(resolve().mountPath.empty());
     std::filesystem::create_directories(visual / "AddOns");
     std::ofstream(visual / "AddOns" / "op_ground_materials.pbo") << "fixture";
     CHECK(resolve().mountPath.empty());

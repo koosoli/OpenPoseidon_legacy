@@ -391,7 +391,10 @@ DefaultContentResolveResult ResolveDefaultContentPacks(const std::string& gameDi
         const char* archive;
     };
     static constexpr Pack packs[] = {{"@OP_VisualUpgrade", "op_ground_materials.pbo"},
-                                     {"@OP_VehicleActions", "op_jeep_actions.pbo"}};
+                                     {"@OP_VehicleActions", "op_jeep_actions.pbo"},
+                                     {"@OP_Fusion", "fusion_ofp.pbo"},
+                                     {"@OP_Showcase", "showcase_lab.pbo"},
+                                     {"@OP_SizeProbe", "fusion_size_probe.pbo"}};
     const ModCollection users = ActiveModsFromMountPath(userMountPath);
     for (const Pack& pack : packs)
     {
@@ -409,7 +412,8 @@ DefaultContentResolveResult ResolveDefaultContentPacks(const std::string& gameDi
             report("explicit user mod owns this identity; automatic mount skipped");
             continue;
         }
-        const std::string path = AbsoluteResolvedModPath(std::filesystem::path(gameDir) / pack.folder);
+        // One canonical content root. Do not silently revive obsolete root packs.
+        const std::string path = AbsoluteResolvedModPath(std::filesystem::path(gameDir) / "Mods" / pack.folder);
         if (path.empty())
         {
             report("not installed; using original content");

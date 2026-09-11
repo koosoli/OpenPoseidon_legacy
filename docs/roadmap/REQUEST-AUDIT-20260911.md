@@ -159,3 +159,34 @@ autorisiertes Gameplay-Paket und wird nicht durch Streaming-Arbeit ersetzt.
   grenze, keine Begruendung, diese Ziele dauerhaft zu streichen.
 - Kein Wunsch wird hier allein wegen seiner Groesse als schlechte Idee erklaert.
   Insbesondere Satmaps mit Objekten, Jeep-FFV und echte Hoehlen bleiben offen.
+
+## Erneut bestaetigte offene Abnahmeziele (Abend)
+
+Diese Punkte bleiben gleichrangig neben Performance; keine Streichung durch
+einen erfolgreichen Build, Einzeltest oder Speichergewinn:
+
+- Tiefschnee: Beim Gehen muessen Beine/Koerper eine zusammenhaengende Rinne
+  verdraengen, nicht einzelne Fussabdruecke hinterlassen. Entsprechende
+  Fahrzeug-/Rumpfverdraengung fehlt ebenfalls. Bestehende Kriechspuren nicht
+  als fehlendes Feature behandeln. Der separate Untergrundblick beim Kriechen
+  blieb im Ein-Meter-Vergleich trotz verbesserter Freilegung offen.
+- Rotorwind: bodennahen Schnee abtragen; noch nicht fertig integriert.
+- Unsichtbarer Spieler nach Terrainbearbeitung: bislang nicht reproduziert,
+  insbesondere Freefly-/Editor-Wechsel noch gesondert pruefen. Nicht als fix
+  verbuchen, nur weil die bisherige Nogova-Sequenz keinen Fehler zeigte.
+- Satmaps: Boden vorhanden; Doerfer und Baumkronen weiterhin fehlende Abnahme.
+- Jeep: Aussage "nur Paket-Infrastruktur" ist inzwischen veraltet. SP-Sitz,
+  eigene Animationen und echte Schuesse existieren teilweise; Bedienung und
+  normale Einstiegsabnahme bleiben nach Besitzerfeedback offen. Installiert
+  35e3a0d4: separierte Kamera, normaler relativer Maustest bestanden. Keine
+  allgemeine Waffen-/Fahrzeugfreigabe oder vollstaendige FFV-Abnahme behaupten.
+- Mods-Ordner und Sandbox-Jeepstation sind im Quelltext vorbereitet, aber noch
+  nicht gebaut/installiert/runtime-geprueft, solange die Besitzersitzung laeuft.
+- Reforger-Streaming: Speicherverbesserungen schliessen Nachladehaenger nicht.
+  Entfernte Objekte brauchen einen budgetierten niedrigen LOD-Pfad, sodass die
+  sichtbare Ladegrenze verschwindet, nicht mehr Nebel oder weniger Sichtweite.
+- Reforger-Wald/Boden: Kontrast und Materialtiefe; Baumqualitaet gegen die
+  konvertierte Karte vergleichen; Stamm/Krone zusammenhaengend im Wind bewegen.
+- Echte Hoehlen, Fusion-Terrainbearbeitung, Licht-/DLSS-/Waldfehler und die
+  vollstaendige Materialabnahme bleiben offen. Jeweils tatsaechlichen Code und
+  reproduzierbare Tests pruefen, bevor ein Teilziel geschlossen wird.

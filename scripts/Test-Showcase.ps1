@@ -17,7 +17,7 @@ $listener.Start()
 $port=$listener.LocalEndpoint.Port
 $listener.Stop()
 $log=Join-Path $out 'showcase.log'
-$mission=Join-Path $GameDir 'Missions/ShowcaseLab.Intro'
+$mission=Join-Path $GameDir 'Mods/@OP_Showcase/Missions/ShowcaseLab.Intro'
 $argsGame=@('--render','wgpu','--window','--no-dev','--width','1280','--height','720','--harness',"$port",'--test-mission',('"'+$mission+'"'),'--log-file',('"'+$log+'"'),'--log-level','debug')
 if ($Menu) {
  $argsGame=@('--render','wgpu','--window','--no-dev','--width','1280','--height','720','--harness',"$port",'--log-file',('"'+$log+'"'),'--log-level','debug')
@@ -213,6 +213,19 @@ try {
  Send @{cmd='eval';code='triPhysicsShowcase "craterreset"'} '"OK"'
  Start-Sleep -Seconds 3
  Send @{cmd='screenshot';path=(Join-Path $out 'terrain-restored.png')}
+ Send @{cmd='eval';code='driver labRideJeep == labRideDriver'} 'true'
+ Send @{cmd='eval';code='abs(speed labRideJeep) < 1'} 'true'
+ Send @{cmd='exec';code='[player,player,labRideVisit] exec "action.sqs"'}
+ Start-Sleep -Seconds 2
+ Send @{cmd='eval';code='vehicle player == player'} 'true'
+ Send @{cmd='exec';code='player moveInCargo labRideJeep'}
+ Start-Sleep -Seconds 8
+ Send @{cmd='eval';code='vehicle player == labRideJeep'} 'true'
+ Send @{cmd='eval';code='abs(speed labRideJeep) > 1'} 'true'
+ Send @{cmd='exec';code='unassignVehicle player; player action ["EJECT",labRideJeep]'}
+ Start-Sleep -Seconds 5
+ Send @{cmd='eval';code='vehicle player == player'} 'true'
+ Send @{cmd='eval';code='abs(speed labRideJeep) < 1'} 'true'
  Send @{cmd='exit'}
  if (!$p.WaitForExit(30000)) {throw 'Exit timed out'}
  if ($p.ExitCode -ne 0) {throw "Game exit $($p.ExitCode)"}

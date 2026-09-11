@@ -79,6 +79,8 @@ labCool = player addAction ["LAB: cool light colour", "action.sqs"]
 labClear = player addAction ["LAB: clear bodies", "action.sqs"]
 labDay = player addAction ["LAB: day / night", "action.sqs"]
 labHelp = player addAction ["LAB: help / station guide", "action.sqs"]
+labRideVisit = player addAction ["LAB: visit Jeep passenger firing range", "action.sqs"]
+[] exec "jeep-ride.sqs"
 labNight = false
 ~2
 logInfo (triPhysicsShowcase "reset")

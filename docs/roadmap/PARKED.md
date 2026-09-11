@@ -6,7 +6,16 @@ would unpark it.
 
 Ordered by what it would take to pick up again, cheapest first.
 
-Last status reconciliation: 2026-09-10. Dated evidence below remains historical.
+Last status reconciliation: 2026-09-11. Dated evidence below remains historical.
+
+## Jeep passenger firing: parked by owner, 2026-09-11
+
+Owner reports the interactive feature still does not work reliably and explicitly
+limits further effort to a quick fix, otherwise park it. No demonstrated quick
+fix remains. Stop FFV animation, weapon expansion and specialised test work;
+prioritise snow, world visuals/streaming and content layout. Existing code and
+fixtures remain available, but successful harness runs are NOT owner acceptance.
+Resume only with a concrete bounded diagnosis or renewed owner authorisation.
 
 ## Current owner authorisation, 2026-09-10
 

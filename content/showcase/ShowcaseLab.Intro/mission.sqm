@@ -6,7 +6,7 @@ class Mission
  class Intel {briefingName="Showcase Lab - Physics and Light"; briefingDescription="A playable renderer and Box3D test campus."; year=1985; month=6; day=21; hour=17; minute=0; startWeather=0.15; forecastWeather=0.15; startFog=0; forecastFog=0;};
  class Groups
  {
-  items=1;
+  items=3;
   class Item0
   {
    side="WEST";
@@ -14,6 +14,28 @@ class Mission
    {
     items=1;
     class Item0 {position[]={9485,0,3493}; azimut=35; id=0; side="WEST"; vehicle="SoldierWB"; player="PLAYER COMMANDER"; leader=1; skill=1;};
+   };
+  };
+  class Item1
+  {
+   side="WEST";
+   class Vehicles
+   {
+    items=1;
+    class Item0 {position[]={9800,0,3300}; id=1; side="WEST"; vehicle="SoldierWB"; leader=1; skill=1; init="labRideDriver=this; this setBehaviour ""CARELESS""; this setCombatMode ""BLUE""";};
+   };
+  };
+  class Item2
+  {
+   side="EAST";
+   class Vehicles
+   {
+    items=5;
+    class Item0 {position[]={9840,0,3330}; id=2; side="EAST"; vehicle="SoldierEB"; leader=1; skill=0; init="removeAllWeapons this; this disableAI ""MOVE""; this setCombatMode ""BLUE""";};
+    class Item1 {position[]={9840,0,3370}; id=3; side="EAST"; vehicle="SoldierEB"; skill=0; init="removeAllWeapons this; this disableAI ""MOVE""";};
+    class Item2 {position[]={9840,0,3410}; id=4; side="EAST"; vehicle="SoldierEB"; skill=0; init="removeAllWeapons this; this disableAI ""MOVE""";};
+    class Item3 {position[]={9840,0,3450}; id=5; side="EAST"; vehicle="SoldierEB"; skill=0; init="removeAllWeapons this; this disableAI ""MOVE""";};
+    class Item4 {position[]={9840,0,3490}; id=6; side="EAST"; vehicle="SoldierEB"; skill=0; init="removeAllWeapons this; this disableAI ""MOVE""";};
    };
   };
  };

@@ -25,11 +25,11 @@ function RunCase([string]$Name, [string[]]$Extra) {
 RunCase 'default-npc' @('-DefaultPackage','-NpcFire','-NpcTransitions','-SaveLoad')
 RunCase 'default-player' @('-DefaultPackage','-PlayerFire','-SaveLoad','-Lifecycle')
 RunCase 'disabled' @()
-$archive=Join-Path $stage '@OP_VehicleActions/AddOns/op_jeep_actions.pbo'
+$archive=Join-Path $stage 'Mods/@OP_VehicleActions/AddOns/op_jeep_actions.pbo'
 Move-Item -LiteralPath $archive -Destination "$archive.held"
 try {RunCase 'missing' @('-DefaultPackage','-AutomaticOriginal','missing')}
 finally {Move-Item -LiteralPath "$archive.held" -Destination $archive}
-$metadata=Join-Path $stage '@OP_VehicleActions/mod.json'
+$metadata=Join-Path $stage 'Mods/@OP_VehicleActions/mod.json'
 Move-Item -LiteralPath $metadata -Destination "$metadata.held"
 try {
     Copy-Item -LiteralPath "$root/tests/fixtures/default-content/incompatible-vehicle-mod.json" -Destination $metadata

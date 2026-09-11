@@ -17,6 +17,10 @@ python (Join-Path $PSScriptRoot 'fusion/build_fusion.py') (Join-Path $build 'sou
 if ($LASTEXITCODE -ne 0) {throw 'Fusion generation failed'}
 & $tools terrain inspect (Join-Path $build 'output/fusion.wrp')
 if ($LASTEXITCODE -ne 0) {throw 'Generated WRP validation failed'}
-Copy-Item -LiteralPath (Join-Path $build 'output/fusion_ofp.pbo') -Destination (Join-Path $GameDir 'AddOns/fusion_ofp.pbo') -Force
-Copy-Item -LiteralPath (Join-Path $root 'content/fusion/FusionTour.FusionOFP') -Destination (Join-Path $GameDir 'Missions') -Recurse -Force
+& "$PSScriptRoot/Move-DefaultContentToMods.ps1" -GameDir $GameDir
+$pack=Join-Path $GameDir 'Mods/@OP_Fusion'
+New-Item -ItemType Directory -Force "$pack/AddOns", "$pack/Missions" | Out-Null
+Copy-Item -LiteralPath (Join-Path $build 'output/fusion_ofp.pbo') -Destination "$pack/AddOns/fusion_ofp.pbo" -Force
+Copy-Item -LiteralPath (Join-Path $root 'content/fusion/FusionTour.FusionOFP') -Destination "$pack/Missions" -Recurse -Force
+Copy-Item -LiteralPath "$root/content/default-packs/layout/@OP_Fusion.json" -Destination "$pack/mod.json" -Force
 Write-Output 'Installed: Single Missions / OFP Fusion - Five Islands; editor world: OFP Fusion - Five Islands.'

@@ -227,7 +227,7 @@ bool Man::AdvanceMoveQueue(float deltaT, float adjustSpeed, float& moveX, float&
                         float yr = GLandscape->RoadSurfaceYAboveWater(pos);
                         if (yr <= ys + 0.2f)
                         {
-                            if (GSnow().enabled && ys > GLandscape->GetSeaLevel())
+                            if (GSnow().enabled && !GSnow().NeedsWalkingChannel() && ys > GLandscape->GetSeaLevel())
                             {
                                 const Vector3 toe = pos + Direction() * 0.075f;
                                 const Vector3 heel = pos - Direction() * 0.075f;
@@ -235,7 +235,8 @@ bool Man::AdvanceMoveQueue(float deltaT, float adjustSpeed, float& moveX, float&
                                 GSnow().Stamp(heel.X(), heel.Z(), 0.125f);
                             }
                             LODShapeWithShadow* shape =
-                                EnableVisualEffects(prec) && markTtl > 0.0f ? GScene->Preloaded(left ? FootStepL : FootStepR) : nullptr;
+                                EnableVisualEffects(prec) && markTtl > 0.0f && !GSnow().NeedsWalkingChannel()
+                                    ? GScene->Preloaded(left ? FootStepL : FootStepR) : nullptr;
                             if (shape)
                             {
                                 Ref<Mark> mark = new Mark(shape, 0.25f, timeToLive);

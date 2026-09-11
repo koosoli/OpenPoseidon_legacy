@@ -4,6 +4,7 @@ _id = _this select 2
 ? _id == labRoom : goto "room"
 ? _id == labRoomLight : goto "roomlight"
 ? _id == labGlassVisit : goto "glass"
+? _id == labRideVisit : goto "jeepride"
 ? _id == labCrater : goto "crater"
 ? _id == labCraterReset : goto "craterreset"
 ? _id == labThrow : goto "throw"
@@ -43,6 +44,20 @@ hint (triPhysicsShowcase "crater")
 player setPos [9700,3430,0]
 player setDir 0
 hint "EXPERIMENTAL TERRAIN\nCrater ahead at 9700 / 3600. Real heightfield and collision change; coarse source-grid resolution. Walk in or drop a physics body. Restore with LAB: restore crater terrain.\nNot saved, not networked, no tunnels. One rebuild can briefly pause."
+exit
+#jeepride
+? vehicle player != player : goto "ridegetout"
+player setPos [9802,3300,0]
+player setDir 270
+? !("M16" in weapons player) : player addWeapon "M16"
+player addMagazine "M16"
+player addMagazine "M16"
+player selectWeapon "M16"
+player assignAsCargo labRideJeep
+hint "JEEP FIRING RANGE\nBoard as passenger. The driver waits, then drives past five unarmed enemies on your RIGHT. Mouse: look/aim. Left click: fire. R: reload.\nThe rifle lowers outside the supported firing arc. The original free-drive Jeep remains at the main campus."
+exit
+#ridegetout
+hint "Leave your current vehicle before visiting the Jeep firing range."
 exit
 #craterreset
 hint (triPhysicsShowcase "craterreset")

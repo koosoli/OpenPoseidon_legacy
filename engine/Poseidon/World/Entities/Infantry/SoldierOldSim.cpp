@@ -988,7 +988,7 @@ void Man::Simulate(float deltaT, SimulationImportance prec)
                 change = true;
             }
         }
-        if (GSnow().enabled && GSnow().Depth() > 0 && IsDown() && !IsDead() &&
+        if (GSnow().enabled && GSnow().Depth() > 0 && (IsDown() || GSnow().NeedsWalkingChannel()) && !IsDead() &&
             (_landContact || _objectContact) && !freeFall && std::isfinite(deltaT) && deltaT > 0)
         {
             _snowBodyStampTime += std::min(deltaT, 0.1f);
@@ -1001,13 +1001,30 @@ void Man::Simulate(float deltaT, SimulationImportance prec)
                 if (ground > GLandscape->GetSeaLevel() &&
                     GLandscape->RoadSurfaceYAboveWater(p) <= ground+0.2f)
                 {
-                    GSnow().PressBody(p.X(),p.Z(),moveTrans.Direction().X(),moveTrans.Direction().Z());
-                    const Vector3 head = moveTrans.FastTransform(GetHeadCenter());
-                    GSnow().PressHead(p.X(), p.Z(), head.X(), head.Z());
+                    if (IsDown())
+                    {
+                        GSnow().PressBody(p.X(),p.Z(),moveTrans.Direction().X(),moveTrans.Direction().Z());
+                        const Vector3 head = moveTrans.FastTransform(GetHeadCenter());
+                        GSnow().PressHead(p.X(), p.Z(), head.X(), head.Z());
+                        _snowWalkingValid = false;
+                    }
+                    else
+                    {
+                        GSnow().PressWalking(_snowWalkingValid ? _snowWalkingX : p.X(),
+                                             _snowWalkingValid ? _snowWalkingZ : p.Z(), p.X(), p.Z());
+                        _snowWalkingX = p.X();
+                        _snowWalkingZ = p.Z();
+                        _snowWalkingValid = true;
+                    }
                 }
+                else _snowWalkingValid = false;
             }
         }
-        else _snowBodyStampTime = 0;
+        else
+        {
+            _snowBodyStampTime = 0;
+            _snowWalkingValid = false;
+        }
         Move(moveTrans);
         DirectionWorldToModel(_modelSpeed, _speed);
 

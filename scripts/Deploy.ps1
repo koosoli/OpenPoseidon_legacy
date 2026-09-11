@@ -192,8 +192,8 @@ if (Test-Path -LiteralPath $stampPath)
 
 $contentPayload = @()
 foreach ($pack in @(
-    @{Folder='@OP_VisualUpgrade'; Archive='op_ground_materials.pbo'},
-    @{Folder='@OP_VehicleActions'; Archive='op_jeep_actions.pbo'})) {
+    @{Folder='Mods/@OP_VisualUpgrade'; Archive='op_ground_materials.pbo'},
+    @{Folder='Mods/@OP_VehicleActions'; Archive='op_jeep_actions.pbo'})) {
     $sourcePack = Join-Path $distDir $pack.Folder
     if (!(Test-Path -LiteralPath $sourcePack)) { continue }
     $metadata = Join-Path $sourcePack 'mod.json'
@@ -214,10 +214,20 @@ foreach ($pack in @(
     }
     $contentPayload += @{Source=$metadata; Relative=($pack.Folder + '/mod.json')}
     $contentPayload += @{Source=$archive; Relative=($pack.Folder + '/AddOns/' + $pack.Archive)}
+    $missions = Join-Path $sourcePack 'Missions'
+    if (Test-Path -LiteralPath $missions) {
+        foreach ($file in Get-ChildItem -LiteralPath $missions -Recurse -File) {
+            $contentPayload += @{Source=$file.FullName; Relative=($pack.Folder + '/Missions/' + $file.FullName.Substring($missions.Length+1))}
+        }
+    }
 }
 
 Write-Host "From: $distDir"
 Write-Host "To:   $GameDir`n"
+
+if (Test-Path -LiteralPath (Join-Path $GameDir 'OpenPoseidon.exe')) {
+    & "$PSScriptRoot/Move-DefaultContentToMods.ps1" -GameDir $GameDir
+}
 
 foreach ($name in $payload)
 {

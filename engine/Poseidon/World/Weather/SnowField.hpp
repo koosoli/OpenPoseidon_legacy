@@ -142,6 +142,16 @@ public:
             Stamp(ax + (bx - ax) * t, az + (bz - az) * t, radius, strength);
         }
     }
+    bool NeedsWalkingChannel() const { return enabled && Depth() > 0.25f; }
+    void PressWalking(float ax, float az, float bx, float bz)
+    {
+        if (!NeedsWalkingChannel()) return;
+        const float depthFactor = std::clamp((Depth() - 0.25f) / 0.4f, 0.0f, 1.0f);
+        const float radius = 0.22f + 0.13f * depthFactor;
+        Trail(ax, az, bx, bz, radius, 1.0f);
+        // A teleport clears the destination footprint, never the intervening map.
+        Stamp(bx, bz, radius, 1.0f);
+    }
     void PressBody(float x, float z, float directionX, float directionZ)
     {
         const float length = std::hypot(directionX, directionZ);

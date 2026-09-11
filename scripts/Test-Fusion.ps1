@@ -15,7 +15,7 @@ New-Item -ItemType Directory -Force $env:POSEIDON_USER_DIR | Out-Null
 $prefix=if ($Large) {'size-probe'} else {'fusion'}
 $env:WGR_OFP_SATMAP=if ($NoSatmap) {'0'} else {'1'}
 if ($NoSatmap) { $prefix += '-no-satmap' }
-$mission=if ($Large) {'Missions\SizeProbe.FusionSizeProbe'} else {'Missions\FusionTour.FusionOFP'}
+$mission=if ($Large) {'Mods\@OP_SizeProbe\Missions\SizeProbe.FusionSizeProbe'} else {'Mods\@OP_Fusion\Missions\FusionTour.FusionOFP'}
 $log=Join-Path $output "$prefix.log"
 $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0)
 $listener.Start(); $port=$listener.LocalEndpoint.Port; $listener.Stop()

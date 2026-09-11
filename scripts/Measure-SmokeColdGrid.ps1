@@ -18,7 +18,7 @@ if ($VerifyBatch) {$settings.POSEIDON_SMOKE_BATCH_VERIFY='1'}
 $mission=Join-Path $root 'dev-missions/smoke-room.noe'
 $camera=@('--test-world-freefly','7755','4405','29','310','-8')
 if ($Showcase) {
- $mission=Join-Path $GameDir 'Missions/ShowcaseLab.Intro'
+ $mission=Join-Path $GameDir 'Mods/@OP_Showcase/Missions/ShowcaseLab.Intro'
  $settings.POSEIDON_TEST_SMOKE_AT='9547 31 3504'
  $camera=@('--test-world-freefly','9570','3495','40','290','-15')
 }
