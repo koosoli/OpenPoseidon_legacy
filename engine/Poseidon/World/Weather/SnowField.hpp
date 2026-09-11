@@ -130,7 +130,7 @@ public:
                 it->second.filledAt = std::max(it->second.filledAt, _precipitation + cell.deficit);
             }
     }
-    void Trail(float ax, float az, float bx, float bz, float radius)
+    void Trail(float ax, float az, float bx, float bz, float radius, float strength = 0.8f)
     {
         if (!enabled || !std::isfinite(radius) || radius <= 0.0f) return;
         const float length = std::hypot(bx - ax, bz - az);
@@ -139,7 +139,7 @@ public:
         for (int i = 0; i <= steps; ++i)
         {
             const float t = float(i) / steps;
-            Stamp(ax + (bx - ax) * t, az + (bz - az) * t, radius, 0.8f);
+            Stamp(ax + (bx - ax) * t, az + (bz - az) * t, radius, strength);
         }
     }
     void PressBody(float x, float z, float directionX, float directionZ)
@@ -148,7 +148,15 @@ public:
         if (!std::isfinite(length) || length < 0.001f) return;
         const float dx = directionX / length * 0.55f;
         const float dz = directionZ / length * 0.55f;
-        Trail(x-dx, z-dz, x+dx, z+dz, 0.3f);
+        Trail(x-dx, z-dz, x+dx, z+dz, 0.3f, 1.0f);
+    }
+    void PressHead(float bodyX, float bodyZ, float headX, float headZ)
+    {
+        // The animated head can extend beyond the old root-centred capsule.
+        // Keep the neck/head corridor clear too, including a near-plane margin.
+        const float distance = std::hypot(headX - bodyX, headZ - bodyZ);
+        if (!std::isfinite(distance) || distance > 2.5f) return;
+        Trail(bodyX, bodyZ, headX, headZ, 0.4f, 1.0f);
     }
     float DeficitAt(int ix, int iz) const
     {

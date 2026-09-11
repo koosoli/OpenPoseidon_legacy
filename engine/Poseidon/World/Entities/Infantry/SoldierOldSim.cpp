@@ -999,7 +999,11 @@ void Man::Simulate(float deltaT, SimulationImportance prec)
                 // Do not stamp ground under a bridge, elevated floor or swimming soldier.
                 if (ground > GLandscape->GetSeaLevel() &&
                     GLandscape->RoadSurfaceYAboveWater(p) <= ground+0.2f)
+                {
                     GSnow().PressBody(p.X(),p.Z(),moveTrans.Direction().X(),moveTrans.Direction().Z());
+                    const Vector3 head = moveTrans.FastTransform(GetHeadCenter());
+                    GSnow().PressHead(p.X(), p.Z(), head.X(), head.Z());
+                }
             }
         }
         else _snowBodyStampTime = 0;

@@ -2,6 +2,11 @@
 
 ## September 11 Jeep implementation continuation
 
+Deep-snow continuation: [real 1 m prone baseline and bounded contact correction](decisions/SNOW-DEEP-CONTACT-20260911.md).
+Installed 957a14a1 reproduces the internal-view snow-wall intersection. The
+earlier 18 cm crawl pass was not deep-snow acceptance. Animated head clearance
+is being tested; standing/vehicle displacement and rotor erosion remain open.
+
 Latest installed release at this checkpoint: 89030aee, both real default packages, no mod parameter
 needed. Fresh release 125134 passes NPC, player, disabled, missing archive,
 incompatible manifest and explicit user-mod precedence. Own six-RTM source,

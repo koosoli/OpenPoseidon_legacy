@@ -168,6 +168,26 @@ TEST_CASE("Experimental snow persists until new precipitation fills tracks", "[s
     CHECK(snow.Depth() == 0.0f);
 }
 
+TEST_CASE("Deep prone snow clears the animated head corridor without residual cover", "[snow][terrain]")
+{
+    SnowField snow;
+    snow.enabled = true;
+    snow.maxDepth = 1.0f;
+    snow.Deposit(1.0f);
+    snow.PressBody(0.0625f, 0.0625f, 0, 1);
+    CHECK(snow.DeficitAt(0, 0) == Catch::Approx(1.0f));
+    snow.PressHead(0.0625f, 0.0625f, 0.0625f, 1.3125f);
+    for (int z = 0; z <= 10; ++z)
+        CHECK(snow.DeficitAt(0, z) == Catch::Approx(1.0f));
+    CHECK(snow.DeficitAt(8, 10) == 0.0f);
+    const auto chunks = snow.Chunks();
+    snow.PressHead(0, 0, 100, 0);
+    snow.PressHead(0, 0, std::numeric_limits<float>::quiet_NaN(), 0);
+    CHECK(snow.Chunks() == chunks);
+    snow.Deposit(0.2f);
+    CHECK(snow.DeficitAt(0, 10) == Catch::Approx(0.8f));
+}
+
 TEST_CASE("Snow tracks interpolate travel and ignore teleports", "[snow][terrain]")
 {
     SnowField snow;
