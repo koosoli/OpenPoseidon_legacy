@@ -58,13 +58,19 @@ try {
     if ($before.result -ne '30') {throw 'Passenger fired before baseline capture'}
     $null=Send @{cmd='screenshot';path=(Join-Path $output 'seated.png')}
     if ($AnimationPreview) {
+        $null=Send @{cmd='crew_pose_probe'}
         $null=Send @{cmd='exec';code='deleteVehicle ffvTarget; ffvPassenger setBehaviour "SAFE"; ffvView camSetPos [9703,3602,1.8]; ffvView camSetTarget [9700.4,3600,1.0]; ffvView camCommit 0'}
         foreach ($pose in @('Idle','Raise','Aim','Recoil','Reload','Lower')) {
             $null=Send @{cmd='exec';code=('ffvPassenger switchMove "OPJeep'+$pose+'"')}
             Start-Sleep -Milliseconds 250
             $null=Send @{cmd='eval';code='vehicle ffvPassenger == ffvJeep'} 'true'
+            $probe=Send @{cmd='crew_pose_probe'}
+            if ($probe.move -ine ('OPJeep'+$pose)) {throw 'Requested animation state is not active'}
             $null=Send @{cmd='screenshot';path=(Join-Path $output ("pose-$pose.png"))}
         }
+        $null=Send @{cmd='exec';code='ffvPassenger switchMove "OPJeepAim"; ffvView camSetPos [9701.8,3599.6,1.6]; ffvView camSetTarget [9700.4,3600,1.35]; ffvView camCommit 0'}
+        Start-Sleep -Seconds 1
+        $null=Send @{cmd='screenshot';path=(Join-Path $output 'pose-aim-side.png')}
         $null=Send @{cmd='exit'}
         if (!$p.WaitForExit(30000) -or $p.ExitCode -ne 0) {throw 'Animation preview exit failed'}
         if (Select-String -LiteralPath $log -Pattern 'Bad animation|Broken animation|Animation .*not found|Validation Error|panicked at|DeviceLost' -Quiet) {throw 'Animation preview load/render error'}

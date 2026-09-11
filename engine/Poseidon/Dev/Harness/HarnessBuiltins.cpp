@@ -88,6 +88,44 @@ static GameVarSpace s_evalScope;
 
 void RegisterSqf(HarnessServer& hs)
 {
+    hs.RegisterCommand({"crew_pose_probe", "Read-only SP passenger pose/muzzle diagnostics", {}},
+                       [](const std::string&, cJSON*) -> std::string
+                       {
+                           if (!GWorld || GWorld->GetMode() == GModeNetware)
+                               return HarnessProtocol::ErrorResponse("singleplayer world required");
+                           AIUnit* focus = GWorld->FocusOn();
+                           AIGroup* group = focus ? focus->GetGroup() : nullptr;
+                           AIUnit* unit = group ? group->UnitWithID(2) : nullptr;
+                           Man* man = unit ? dyn_cast<Man>(unit->GetPerson()) : nullptr;
+                           if (!man || !unit->IsInCargo() || !man->GetHierachyParent())
+                               return HarnessProtocol::ErrorResponse("cargo infantry in group slot 1 required");
+                           int weapon = -1;
+                           for (int i = 0; i < man->NMagazineSlots(); ++i)
+                           {
+                               const auto* mode = man->GetWeaponMode(i);
+                               if (mode && mode->_ammo && mode->_ammo->_simulation == AmmoShotBullet)
+                               {
+                                   weapon = i;
+                                   break;
+                               }
+                           }
+                           if (weapon < 0)
+                               return HarnessProtocol::ErrorResponse("bullet weapon required");
+                           const Matrix4 seat = man->WorldTransform();
+                           const Vector3 muzzle = seat.FastTransform(man->GetWeaponPoint(weapon));
+                           const Vector3 direction = man->GetWeaponDirection(weapon);
+                           cJSON* resp = cJSON_CreateObject();
+                           cJSON_AddStringToObject(resp, "move", man->GetCurrentMove());
+                           cJSON_AddNumberToObject(resp, "muzzleX", muzzle.X());
+                           cJSON_AddNumberToObject(resp, "muzzleY", muzzle.Y());
+                           cJSON_AddNumberToObject(resp, "muzzleZ", muzzle.Z());
+                           cJSON_AddNumberToObject(resp, "directionX", direction.X());
+                           cJSON_AddNumberToObject(resp, "directionY", direction.Y());
+                           cJSON_AddNumberToObject(resp, "directionZ", direction.Z());
+                           cJSON_AddNumberToObject(resp, "seatForwardX", seat.Direction().X());
+                           cJSON_AddNumberToObject(resp, "seatForwardZ", seat.Direction().Z());
+                           return HarnessProtocol::JsonResponse(resp);
+                       });
     hs.RegisterCommand({"crew_projectile_probe", "SP harness only: raw bullet launch, not gameplay/FFV acceptance", {}},
                        [](const std::string&, cJSON*) -> std::string
                        {

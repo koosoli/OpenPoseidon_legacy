@@ -7,10 +7,16 @@ on-foot M16 control now exists, including ammunition and Fired-event checks.
 First engine increment corrects attached bullet launch coordinates to the
 existing seat hierarchy. It does not yet enable FFV or provide the animation
 package. The entire owner backlog remains authorized, not closed by this step.
-Installed 3dc399de constructor test now passes translated/moving seat frames at
-0/90/180 degrees; this deliberately is not gameplay firing acceptance. Optional
-versioned cargo-seat metadata and angular-envelope parsing are the next engine
-increment, with 30 combined cargo/ballistics cases / 454 assertions passing.
+Installed 6e82120a constructor/weapon-direction test passes translated/moving
+seat frames at 0/90/180 degrees; this deliberately is not gameplay firing
+acceptance. Versioned cargo-seat metadata and angular-envelope parsing are
+implemented, with 30 combined cargo/ballistics cases / 454 assertions passing.
+Six reproducibly authored RTM drafts and an isolated animation-preview PBO now
+exist; no seats are opted in and the release VehicleActions pack is not shipped.
+The first preview exposed centered-ODOL vs uncentered-RTM anchor coordinates;
+2b3141d3 corrects that, with six generator tests passing. The second installed
+preview (083544, engine 6e82120a) removes the gross limb stretching. Hand/gun
+orientation, shooting clearance and transition videos remain unaccepted.
 
 ## September 11 owner completion audit
 
