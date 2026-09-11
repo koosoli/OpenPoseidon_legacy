@@ -145,6 +145,13 @@ void RegisterSnowProbe(HarnessServer& hs)
             else if (std::strcmp(action, "enable") == 0) snow.enabled = true;
             else if (std::strcmp(action, "disable") == 0) snow.enabled = false;
             else if (std::strcmp(action, "storm") == 0) snow.ApplySnowstormPreset();
+            else if (std::strcmp(action, "deposit") == 0)
+            {
+                const cJSON* metres = cJSON_GetObjectItemCaseSensitive(root, "metres");
+                if (!cJSON_IsNumber(metres) || !(metres->valuedouble > 0 && metres->valuedouble <= 1))
+                    return HarnessProtocol::ErrorResponse("deposit requires metres in (0, 1]");
+                snow.Deposit(static_cast<float>(metres->valuedouble));
+            }
             else if (std::strcmp(action, "state") != 0) return HarnessProtocol::ErrorResponse("unknown snow action");
             cJSON* out = cJSON_CreateObject();
             cJSON_AddBoolToObject(out, "enabled", snow.enabled);

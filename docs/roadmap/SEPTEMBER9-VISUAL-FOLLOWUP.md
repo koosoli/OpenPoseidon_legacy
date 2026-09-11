@@ -1,5 +1,15 @@
 # September 9 visual follow-up
 
+## September 11 tester snow/terrain report
+
+[Snow tester follow-up](decisions/SNOW-TESTER-FOLLOWUP-20260911.md) separates the
+reported working storm/indoor mask/crawl/refill/craters from deep-snow, rotor-wash
+and post-edit player-visibility defects. Filled snow chunks previously remained
+allocated forever until the hard cap blocked new trails. Bounded reclamation is
+implemented and unit-tested without evicting live depressions; installed
+refill/crawl acceptance is pending. Other tester issues remain open, not folded
+into that storage fix.
+
 ## September 11: complete-window installed acceptance
 
 Installed c22aa78b, native run cancel-20260911-024613-slow-trace-bc7-default-driver-memory-tint-reuse-0

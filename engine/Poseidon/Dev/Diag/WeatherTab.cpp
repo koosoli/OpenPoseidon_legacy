@@ -951,7 +951,10 @@ void DrawWeatherTab()
         if (ImGui::Button("Reset snow settings (keep tracks)")) snow.ResetSettings();
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Restores the default settings and disables snow. Re-enabling reveals the preserved cover and tracks. Use Clear snow and tracks to erase them.");
         ImGui::Text("Depth %.1f cm; persistent chunks %zu / %zu", snow.Depth() * 100.0f, snow.Chunks(), SnowField::MaxChunks);
-        if (snow.Rejected()) ImGui::TextWrapped("Track storage full: existing tracks retained; new stamps skipped.");
+        if (snow.Chunks() >= SnowField::MaxChunks)
+            ImGui::TextWrapped("Track storage full: visible tracks retained. Filled tracks are reclaimed automatically.");
+        if (snow.Rejected())
+            ImGui::Text("Snow cells previously skipped at storage limit: %zu", snow.Rejected());
         ImGui::TextWrapped("Mission-local terrain experiment. Tracks do not expire with time or camera movement; only new snowfall fills them. No savegame/network replication or changed ground collision yet.");
     }
     if (ImGui::CollapsingHeader("Cloud cover and fog", ImGuiTreeNodeFlags_DefaultOpen))

@@ -219,6 +219,40 @@ TEST_CASE("Snow storage cap never evicts existing depressions", "[snow][terrain]
     CHECK(snow.Chunks() == SnowField::MaxChunks);
     CHECK(snow.Rejected() > 0);
     CHECK(snow.DeficitAt(4, 4) == first);
+    snow.Deposit(0.2f); // All old tracks are now genuinely filled.
+    snow.Stamp(-20.0f, -20.0f, 1.0f);
+    CHECK(snow.DeficitAt(-160, -160) > 0.0f);
+    CHECK(snow.Chunks() < SnowField::MaxChunks);
+    CHECK(snow.DeficitAt(4, 4) == 0.0f);
+}
+
+TEST_CASE("Snow reclaims only fully filled chunks with bounded work", "[snow][terrain]")
+{
+    SnowField snow;
+    snow.enabled = true;
+    snow.falling = false;
+    snow.Deposit(0.5f);
+    for (int i = 0; i < 300; ++i)
+        snow.Stamp(float(i) * 2 + 0.5625f, 0.5625f, 0.125f, 0.2f);
+    REQUIRE(snow.Chunks() == 300);
+    snow.Deposit(0.11f);
+    // Refresh one track after precipitation: its old fill deadline must not win.
+    snow.Stamp(0.5625f, 0.5625f, 0.125f, 1.0f);
+    snow.Advance(1.0f);
+    CHECK(snow.Chunks() >= 172);
+    for (int i = 0; i < 8; ++i) snow.Advance(1.0f);
+    CHECK(snow.Chunks() == 1);
+    CHECK(snow.DeficitAt(4, 4) == Catch::Approx(0.5f));
+    snow.Stamp(-10, -10, 1, 0);
+    CHECK(snow.Chunks() == 1);
+    snow.Deposit(0.51f);
+    snow.Advance(1.0f);
+    CHECK(snow.Chunks() == 0);
+    snow.Reset();
+    snow.Deposit(0.2f);
+    snow.Stamp(0.5625f, 0.5625f, 0.125f);
+    snow.Advance(1.0f);
+    CHECK(snow.Chunks() == 1);
 }
 
 namespace

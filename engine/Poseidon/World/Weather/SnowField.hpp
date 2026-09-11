@@ -63,6 +63,8 @@ public:
     void Reset()
     {
         _chunks.clear();
+        _chunkKeys.clear();
+        _reclaimCursor = 0;
         _depth = 0.0f;
         _precipitation = 0.0;
         _rejected = 0;
@@ -71,6 +73,8 @@ public:
     {
         if (enabled && falling && std::isfinite(seconds) && seconds > 0.0f)
             Deposit(std::min(seconds, 1.0f) * std::clamp(metresPerMinute, 0.0f, 1.0f) / 60.0f);
+        if (enabled && std::isfinite(seconds) && seconds > 0.0f)
+            ReclaimFilledChunks(128);
     }
     void Deposit(float metres)
     {
@@ -86,7 +90,9 @@ public:
     {
         if (!enabled || _depth <= 0.0f || !std::isfinite(x) || !std::isfinite(z) ||
             std::abs(x) > 1000000.0f || std::abs(z) > 1000000.0f ||
-            !std::isfinite(radius) || radius <= 0.0f || !std::isfinite(strength)) return;
+            !std::isfinite(radius) || radius <= 0.0f || !std::isfinite(strength) || strength <= 0.0f) return;
+        // A manual deposit can fill the store between simulation ticks.
+        if (_chunks.size() >= MaxChunks) ReclaimFilledChunks(128);
         radius = std::clamp(radius, CellSize, 15.0f);
         const int x0 = static_cast<int>(std::floor((x - radius) / CellSize));
         const int z0 = static_cast<int>(std::floor((z - radius) / CellSize));
@@ -105,12 +111,23 @@ public:
                 if (it == _chunks.end())
                 {
                     if (_chunks.size() >= MaxChunks) { ++_rejected; continue; }
-                    it = _chunks.emplace(key, Chunk{}).first;
+                    // Keep a stable-key sweep rather than an iterator invalidated by rehash.
+                    _chunkKeys.push_back(key);
+                    try
+                    {
+                        it = _chunks.emplace(key, Chunk{}).first;
+                    }
+                    catch (...)
+                    {
+                        _chunkKeys.pop_back();
+                        throw;
+                    }
                 }
                 Cell& cell = it->second.cells[(iz - cz * ChunkSize) * ChunkSize + ix - cx * ChunkSize];
                 const float edge = std::clamp((1.0f - r) * 4.0f, 0.0f, 1.0f);
                 cell.deficit = std::max(Remaining(cell), _depth * std::clamp(strength, 0.0f, 1.0f) * edge);
                 cell.precipitation = _precipitation;
+                it->second.filledAt = std::max(it->second.filledAt, _precipitation + cell.deficit);
             }
     }
     void Trail(float ax, float az, float bx, float bz, float radius)
@@ -165,7 +182,30 @@ public:
     }
 private:
     struct Cell { double precipitation = 0.0; float deficit = 0.0f; };
-    struct Chunk { std::array<Cell, ChunkSize * ChunkSize> cells{}; };
+    struct Chunk
+    {
+        std::array<Cell, ChunkSize * ChunkSize> cells{};
+        double filledAt = 0.0;
+    };
+    void ReclaimFilledChunks(size_t budget)
+    {
+        budget = std::min(budget, _chunkKeys.size());
+        while (budget-- > 0 && !_chunkKeys.empty())
+        {
+            _reclaimCursor %= _chunkKeys.size();
+            const auto it = _chunks.find(_chunkKeys[_reclaimCursor]);
+            // This deadline is the latest fill point of every cell in the chunk.
+            // Live depressions are never evicted, even far from all cameras.
+            if (it != _chunks.end() && it->second.filledAt <= _precipitation)
+            {
+                _chunks.erase(it);
+                _chunkKeys[_reclaimCursor] = _chunkKeys.back();
+                _chunkKeys.pop_back();
+            }
+            else
+                ++_reclaimCursor;
+        }
+    }
     static int FloorChunk(int x) { return static_cast<int>(std::floor(double(x) / ChunkSize)); }
     static uint64_t Key(int x, int z) { return (uint64_t(uint32_t(x)) << 32) | uint32_t(z); }
     float Remaining(const Cell& c) const
@@ -173,6 +213,8 @@ private:
         return std::max(0.0f, c.deficit - static_cast<float>(_precipitation - c.precipitation));
     }
     std::unordered_map<uint64_t, Chunk> _chunks;
+    std::vector<uint64_t> _chunkKeys;
+    size_t _reclaimCursor = 0;
     double _precipitation = 0.0;
     float _depth = 0.0f;
     size_t _rejected = 0;

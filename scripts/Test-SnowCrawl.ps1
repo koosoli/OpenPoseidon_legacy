@@ -1,11 +1,11 @@
-param([switch]$ResetSettings, [switch]$Storm, [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
+param([switch]$ResetSettings, [switch]$Storm, [switch]$Refill, [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
 $root=Split-Path $PSScriptRoot -Parent
-$output=Join-Path $root 'build/snow-crawl/acceptance'
+$output=Join-Path $root ('build/snow-crawl/acceptance/crawl-'+(Get-Date -Format 'yyyyMMdd-HHmmss'))
 $env:POSEIDON_USER_DIR=Join-Path $output 'user'
 New-Item -ItemType Directory -Force $env:POSEIDON_USER_DIR | Out-Null
-[IO.File]::WriteAllText((Join-Path $env:POSEIDON_USER_DIR 'graphics.cfg'), "qualityPreset=3;`nterrainDetail=4;`nmsaaSamples=4;`ndlssMode=-1;`n")
+& "$PSScriptRoot/Write-BenchmarkGraphics.ps1" -UserDir $env:POSEIDON_USER_DIR -DlssMode 0
 $env:POSEIDON_SNOW_TEST_DEPTH='0.18'
 Remove-Item Env:POSEIDON_SNOW_TEST_RATE -ErrorAction SilentlyContinue
 $env:WGR_AUTO_EXPOSURE='0'
@@ -53,6 +53,22 @@ try {
     $null=Send @{cmd='exec';code='doStop crawlWalker; crawlWalker setPos [9660,3600,0]'}
     Start-Sleep -Seconds 2
     $null=Send @{cmd='screenshot';path=(Join-Path $output 'trail.png')}
+    if ($Refill) {
+        $null=Send @{cmd='exec';code='crawlWalker setUnitPos "UP"'}
+        Start-Sleep -Seconds 2
+        $beforeFill=Send @{cmd='dev_snow';action='state'}
+        if ($beforeFill.chunks -lt 2) {throw 'Not enough real track chunks for refill test'}
+        $null=Send @{cmd='dev_snow';action='deposit';metres=1}
+        Start-Sleep -Seconds 2
+        $afterFill=Send @{cmd='dev_snow';action='state'}
+        if ($afterFill.chunks -ge $beforeFill.chunks) {throw 'Filled tracks were not reclaimed'}
+        $null=Send @{cmd='screenshot';path=(Join-Path $output 'refilled.png')}
+        $null=Send @{cmd='exec';code='crawlWalker setPos [9700,3600,0]; crawlWalker setUnitPos "DOWN"; crawlWalker doMove [9700,3606,0]'}
+        Start-Sleep -Seconds 10
+        $afterCrawl=Send @{cmd='dev_snow';action='state'}
+        if ($afterCrawl.chunks -le $afterFill.chunks) {throw 'New crawl failed to create tracks after refill'}
+        $null=Send @{cmd='screenshot';path=(Join-Path $output 'refilled-new-trail.png')}
+    }
     if ($ResetSettings) {
         $null=Send @{cmd='dev_reset_probe'}
         Start-Sleep -Seconds 2
