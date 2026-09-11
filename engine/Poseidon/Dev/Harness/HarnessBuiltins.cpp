@@ -149,8 +149,9 @@ void RegisterSqf(HarnessServer& hs)
                                    CollisionBuffer hits;
                                    GLandscape->ObjectCollision(hits, man, nullptr, start, end, .02f, ObjIntersectFire);
                                    cJSON* list = cJSON_AddArrayToObject(resp, name);
-                                   for (const auto& hit : hits)
+                                   for (int i = 0; i < hits.Size(); ++i)
                                    {
+                                       const auto& hit = hits[i];
                                        cJSON* item = cJSON_CreateObject();
                                        cJSON_AddBoolToObject(item, "carrier", hit.object == vehicle);
                                        cJSON_AddNumberToObject(item, "component", hit.component);
