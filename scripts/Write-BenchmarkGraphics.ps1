@@ -2,6 +2,9 @@ param([Parameter(Mandatory)][string]$UserDir,
       [ValidateSet(-1,0,1,2)][int]$DlssMode = 0)
 $ErrorActionPreference = 'Stop'
 $path = Join-Path $UserDir 'graphics.cfg'
+if ([IO.Path]::GetFullPath($path).Length -ge 260) {
+    throw 'Benchmark graphics.cfg exceeds the legacy engine path limit; use a shorter isolated UserDir'
+}
 if (!(Test-Path -LiteralPath $UserDir -PathType Container)) { throw 'Create the isolated benchmark user directory first' }
 if (Test-Path -LiteralPath $path) { throw "Refusing to overwrite an existing graphics profile: $path" }
 # Match the previously migrated Ultra image explicitly, but preserve Unlimited.

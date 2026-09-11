@@ -3,6 +3,7 @@ param(
  [ValidateRange(1,25)][int]$Repeats=2,
  [ValidateSet('Village','Coast','Forest')][string]$Pose='Village',
  [ValidateRange(0,1)][int]$NativeTextureKeys=1,
+ [ValidateRange(0,1)][int]$LazyBcrTint=0,
  [hashtable]$Overrides=@{},
  [string]$ReforgerAddons='C:\Program Files (x86)\Steam\steamapps\common\Arma Reforger\addons'
 )
@@ -17,6 +18,7 @@ New-Item -ItemType Directory -Force $user | Out-Null
 $settings=@{
  POSEIDON_USER_DIR=$user
  WGR_NATIVE_TEXTURE_KEYS=[string]$NativeTextureKeys
+ WGR_LAZY_BCR_TINT=[string]$LazyBcrTint
  WGR_LOD_GOVERNOR_RANGE='1'
  POSEIDON_VSYNC='0'
  POSEIDON_REFORGER_WORLD='worlds/eden'
@@ -36,6 +38,10 @@ $camera=switch ($Pose) {
 for ($repeat=1; $repeat -le $Repeats; $repeat++) {
  $stem=Join-Path (Join-Path $out "$Pose-$Label") ('run-{0:D2}' -f $repeat)
  $metrics=Get-Content -LiteralPath "$stem.json" -Raw | ConvertFrom-Json
+ if ($metrics.build.render_width -ne 1920 -or $metrics.build.render_height -ne 1080 -or
+     $metrics.build.msaa_samples -ne 4 -or $metrics.build.dlss_active) {
+  throw "Unexpected rendering profile in $stem; not a native-resolution comparison"
+ }
  $terrain=@($metrics.gpu_timings_ms | Where-Object {$_.name -eq 'Terrain: main colour' -and $_.milliseconds -ge 0})
  if (!$metrics.objects.valid -or $metrics.objects.registered_instances -le 0 -or $terrain.Count -ne 1) {
   throw "Incomplete native scene in $stem; not a performance baseline"

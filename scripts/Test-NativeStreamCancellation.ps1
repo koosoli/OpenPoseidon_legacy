@@ -16,7 +16,8 @@ if ($VerifyTintReuse -and $TintReuse -eq 0) {throw 'Tint verification needs reus
 if ($VerifyDdsPrepare -and $DdsPrepare -ne 1) {throw 'DDS preparation verification needs preparation enabled'}
 if (!(Test-Path -LiteralPath $Archives -PathType Container)) {throw 'Native archives missing'}
 $root=Split-Path $PSScriptRoot -Parent
-$label='cancel-'+(Get-Date -Format 'yyyyMMdd-HHmmss')
+$runId=Get-Date -Format 'yyyyMMdd-HHmmss'
+$label='cancel-'+$runId
 if ($LegacyClutter) {$label+='-legacy-clutter'}
 if ($VerifyClutter) {$label+='-verify-clutter'}
 if ($TraceSlowFrames) {$label+='-slow-trace'}
@@ -34,9 +35,11 @@ if ($VerifyTintReuse) {$label+='-verify-tint'}
 if ($DdsPrepare -eq 1) {$label+='-async-dds'}
 if ($VerifyDdsPrepare) {$label+='-verify-dds'}
 $out=Join-Path $root 'build/native-stream-cancellation'
-$user=Join-Path $out ('user-'+$label)
+# The engine's legacy file reader cannot open a graphics.cfg beyond MAX_PATH.
+# Keep the full experiment label in capture metadata, not the profile path.
+$user=Join-Path $out ('user-'+$runId)
 New-Item -ItemType Directory -Force $user | Out-Null
-& "$PSScriptRoot/Write-BenchmarkGraphics.ps1" -UserDir $user
+& "$PSScriptRoot/Write-BenchmarkGraphics.ps1" -UserDir $user -DlssMode 0
 $settings=@{
  WGR_NATIVE_TEXTURE_KEYS=[string]$NativeTextureKeys
  WGR_LAZY_BCR_TINT=[string]$LazyBcrTint
