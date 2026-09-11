@@ -92,9 +92,11 @@ class JeepAnimations(unittest.TestCase):
     def test_raised_head_faces_the_rifle_without_moving_neck_axis(self):
         matrices = pose(self.spec, 1)
         rifle = matrices['zbran'] @ rest_proxy(self.spec)
-        # Both the face and original rifle face -X in their bind frames.
-        np.testing.assert_allclose(matrices['hlava'][:3, :3] @ [-1, 0, 0],
-                                   rifle[:3, :3] @ [-1, 0, 0], atol=1e-9)
+        # Head's -X is already in engine space: RTM load conjugates its matrix
+        # by the X/Z reversal. The stored proxy/rifle bind frame is source-space.
+        flip = np.diag([-1, 1, -1])
+        np.testing.assert_allclose(flip @ matrices['hlava'][:3, :3] @ flip @ [-1, 0, 0],
+                                   flip @ rifle[:3, :3] @ [-1, 0, 0], atol=1e-9)
         neck = rest_point(self.spec, self.spec['waist']) + [0, .55, 0]
         for _, matrices in clip(self.spec, 'raise'):
             np.testing.assert_allclose(point(matrices['hlava'], neck),
