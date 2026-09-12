@@ -283,14 +283,17 @@ try {
         $null=Send @{cmd='eval';code='player == ffvPassenger'} 'true'
         if ($MenuReentry) {
             $entry=Send @{cmd='crew_pose_probe'}
-            if ($null -eq $entry.entryX -or $entry.entryRadius -le 0) {throw 'Fixture has no valid co-driver entry point'}
+            if ($null -eq $entry.entryX -or $entry.entryRadius -le 0) {throw 'Fixture has no valid assigned entry point'}
             $null=Send @{cmd='exec';code='unassignVehicle ffvPassenger; ffvPassenger action ["EJECT",ffvJeep]'}
             Start-Sleep -Seconds 2
             $heading=[math]::Atan2(9700-$entry.entryX,3600-$entry.entryZ)*180/[math]::PI
             $placement=[string]::Format([Globalization.CultureInfo]::InvariantCulture,
-                'ffvJeep lock false; ffvPassenger setPos [{0},{1},0]; ffvPassenger setDir {2}', $entry.entryX,$entry.entryZ,$heading)
+                'ffvPassenger assignAsCargo ffvJeep; ffvPassenger setPos [{0},{1},0]; ffvPassenger setDir {2}', $entry.entryX,$entry.entryZ,$heading)
             $null=Send @{cmd='exec';code=$placement}
             Start-Sleep -Seconds 2
+            $null=Send @{cmd='key';sc=47;hold=$true}
+            Start-Sleep -Milliseconds 250
+            $null=Send @{cmd='key_up';sc=47}
             $null=Send @{cmd='screenshot';path=(Join-Path $output 'menu-before-entry.png')}
             $null=Send @{cmd='key';sc=40;hold=$true}
             Start-Sleep -Milliseconds 250
