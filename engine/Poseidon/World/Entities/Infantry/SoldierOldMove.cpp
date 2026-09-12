@@ -499,6 +499,11 @@ void Man::SwitchVehicleAction(ManVehAction action)
         else
             LOG_WARN(AI, "Cargo weapon animations incomplete for {}; preserving original seat", (const char*)GetDebugName());
     }
+    // Normal boarding completes its external action inside RefreshMoveQueue.
+    // Do not let SwitchMove requeue that completed get-in action behind the
+    // seat idle: it has no transition from the seated FFV animation graph.
+    if (cargoTransitions && _externalMoveFinished)
+        _externalMove = MotionPathItem((MoveId)MoveIdNone);
     SwitchMove(id, nullptr);
     if (cargoTransitions)
         _externalMove = MotionPathItem((MoveId)MoveIdNone); // Internal seat idle, not a forced mission animation.
