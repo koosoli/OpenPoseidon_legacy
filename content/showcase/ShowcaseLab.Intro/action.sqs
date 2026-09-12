@@ -5,6 +5,10 @@ _id = _this select 2
 ? _id == labRoomLight : goto "roomlight"
 ? _id == labGlassVisit : goto "glass"
 ? _id == labRideVisit : goto "jeepride"
+? _id == labRideStart : goto "jeepstart"
+? _id == labFlightVisit : goto "heliboard"
+? _id == labFlightStart : goto "helistart"
+? _id == labFlightLand : goto "heliland"
 ? _id == labCrater : goto "crater"
 ? _id == labCraterReset : goto "craterreset"
 ? _id == labThrow : goto "throw"
@@ -54,10 +58,41 @@ player addMagazine "M16"
 player addMagazine "M16"
 player selectWeapon "M16"
 player assignAsCargo labRideJeep
-hint "JEEP FIRING RANGE\nBoard as passenger. The driver waits, then drives past five unarmed enemies on your RIGHT. Mouse: look/aim. Left click: fire. R: reload.\nThe rifle lowers outside the supported firing arc. The original free-drive Jeep remains at the main campus."
+hint "JEEP CIRCUIT\nBoard as passenger, then choose Ready personal weapon / Waffe im Fahrzeug bereitmachen. When ready, choose LAB: start / stop Jeep circuit.\n37 unarmed targets, repeated slow laps. Targets are on your RIGHT. Mouse: look/aim. Left click: fire. R: reload. The rifle lowers outside the supported firing arc."
+exit
+#jeepstart
+? !(player in labRideJeep) : goto "jeepnotaboard"
+labRideRequested = !labRideRequested
+hint "Jeep circuit toggled. Use the same LAB action to pause or resume. Ready your personal weapon before firing."
+exit
+#jeepnotaboard
+hint "Board the range Jeep as passenger first."
 exit
 #ridegetout
 hint "Leave your current vehicle before visiting the Jeep firing range."
+exit
+#heliboard
+? vehicle player != player : goto "ridegetout"
+? !(alive labHeli) : exit
+? ((getPos labHeli) select 2) > 1.5 : goto "heliairborne"
+player assignAsCargo labHeli
+player moveInCargo labHeli
+hint "HELICOPTER RIFLE CIRCUIT\nYou are a passenger with your personal rifle, not the FFAR gunner. Choose Ready personal weapon, then LAB: start helicopter circuit. Aim through the RIGHT door. LAB: return and land helicopter ends the flight."
+exit
+#helistart
+? !(player in labHeli) : goto "helinotaboard"
+labFlightRequested = true
+hint "Pilot starting repeated circuits. Aim through the right door toward the range. Request return and landing before leaving the helicopter."
+exit
+#heliland
+labFlightRequested = false
+hint "Pilot returning to the campus to land."
+exit
+#helinotaboard
+hint "Use LAB: board helicopter rifle seat first."
+exit
+#heliairborne
+hint "The helicopter is airborne. Request return and landing first."
 exit
 #craterreset
 hint (triPhysicsShowcase "craterreset")

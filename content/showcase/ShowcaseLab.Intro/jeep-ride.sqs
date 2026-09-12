@@ -3,24 +3,45 @@ labRideJeep = "Jeep" createVehicle [9800,3300,0]
 labRideJeep setDir 0
 labRideDriver assignAsDriver labRideJeep
 labRideDriver moveInDriver labRideJeep
-doStop labRideDriver
+(group labRideDriver) setSpeedMode "LIMITED"
+labRideRequested = false
+labRideRoute = [[9800,3700,0],[10200,3700,0],[10200,3300,0],[9800,3300,0]]
+_leg = 0
+; Eight extra unarmed targets on the inside of each leg; separate small groups.
+_side = 0
+#targets
+_group = createGroup east
+_i = 0
+#target
+_pos = [9840,3340 + _i * 40,0]
+? _side == 1 : _pos = [9840 + _i * 40,3660,0]
+? _side == 2 : _pos = [10160,3660 - _i * 40,0]
+? _side == 3 : _pos = [10160 - _i * 40,3340,0]
+"SoldierEB" createUnit [_pos,_group,"removeAllWeapons this; this disableAI ""MOVE""; this setCombatMode ""BLUE"""]
+_i = _i + 1
+? _i < 8 : goto "target"
+_side = _side + 1
+? _side < 4 : goto "targets"
 #wait
 ~0.25
 ? !(alive labRideDriver) : exit
 ? !(alive labRideJeep) : exit
 ? !(player in labRideJeep) : goto "wait"
-labRideDriver doMove [9800,3540,0]
+? !labRideRequested : goto "wait"
+#next
+(group labRideDriver) move (labRideRoute select _leg)
 #ride
 ~0.25
 ? !(alive labRideDriver) : exit
 ? !(alive labRideJeep) : exit
 ? !(player in labRideJeep) : goto "stop"
-? ((getPos labRideJeep) select 1) > 3528 : goto "finish"
-goto "ride"
+? !labRideRequested : goto "stop"
+_pos = getPos labRideJeep
+_target = labRideRoute select _leg
+? (((_pos select 0)-(_target select 0))^2 + ((_pos select 1)-(_target select 1))^2) > 324 : goto "ride"
+_leg = (_leg + 1) mod 4
+goto "next"
 #stop
 doStop labRideDriver
+labRideRequested = false
 goto "wait"
-#finish
-doStop labRideDriver
-hint "End of Jeep range. Leave the vehicle to return to the main LAB using its station actions. Restart the mission for fresh targets."
-exit

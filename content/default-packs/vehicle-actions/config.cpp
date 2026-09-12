@@ -47,6 +47,31 @@ class CfgMovesMC
 // Version 3 uses the personal primary bullet family with the existing seated actions.
 class CfgOPVehicleActions
 {
+    class UH60
+    {
+        class OPCargoWeapons
+        {
+            version = 3;
+            class Seats
+            {
+                class RightDoor
+                {
+                    cargoIndex = 0;
+                    weaponFamily = "rifle";
+                    action = "OPJeepAim";
+                    idleAction = "OPJeepIdle";
+                    raiseAction = "OPJeepRaise";
+                    reloadAction = "OPJeepReload";
+                    lowerAction = "OPJeepLower";
+                    azimuth = 90;
+                    halfAngle = 25;
+                    minElevation = -45;
+                    maxElevation = 20;
+                    aiAimSpeed = 45;
+                };
+            };
+        };
+    };
     class Jeep
     {
         class OPCargoWeapons

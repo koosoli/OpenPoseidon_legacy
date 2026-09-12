@@ -1,0 +1,47 @@
+; Mission-local pilot and repeated clockwise route around the target range.
+labFlightRequested = false
+labFlightHome = getPos labHeli
+labFlightGroup = createGroup west
+"SoldierWB" createUnit [labFlightHome,labFlightGroup,"labFlightPilot=this; this setBehaviour ""CARELESS""; this setCombatMode ""BLUE"""]
+labFlightPilot assignAsDriver labHeli
+labFlightPilot moveInDriver labHeli
+labFlightGroup setSpeedMode "LIMITED"
+labHeli flyInHeight 45
+labFlightRoute = [[9720,3780,0],[10280,3780,0],[10280,3220,0],[9720,3220,0]]
+labFlightLeg = 0
+#wait
+~0.5
+? !(alive labHeli) : exit
+? !(alive labFlightPilot) : exit
+? !(player in labHeli) : goto "wait"
+? !labFlightRequested : goto "wait"
+labHeli land "NONE"
+#next
+labFlightGroup move (labFlightRoute select labFlightLeg)
+#flight
+~0.5
+? !(alive labHeli) : exit
+? !(alive labFlightPilot) : exit
+? !labFlightRequested : goto "home"
+? !(player in labHeli) : goto "home"
+_pos = getPos labHeli
+_target = labFlightRoute select labFlightLeg
+? (((_pos select 0)-(_target select 0))^2 + ((_pos select 1)-(_target select 1))^2) > 6400 : goto "flight"
+labFlightLeg = (labFlightLeg + 1) mod 4
+goto "next"
+#home
+labFlightRequested = false
+labFlightGroup move labFlightHome
+#approach
+~0.5
+? !(alive labHeli) : exit
+? !(alive labFlightPilot) : exit
+_pos = getPos labHeli
+? (((_pos select 0)-(labFlightHome select 0))^2 + ((_pos select 1)-(labFlightHome select 1))^2) > 3600 : goto "approach"
+labHeli land "LAND"
+#landing
+~0.5
+? !(alive labHeli) : exit
+? ((getPos labHeli) select 2) > 1.5 : goto "landing"
+hint "Helicopter landed. Disembark or prepare for another circuit."
+goto "wait"

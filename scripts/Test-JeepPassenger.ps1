@@ -1,6 +1,7 @@
 param([ValidateSet('M16','AK74')][string]$Rifle='M16',
-      [ValidateSet('','Jeep','UAZ','Truck5tOpen')][string]$InspectVehicle='',
+      [ValidateSet('','Jeep','UAZ','Truck5tOpen','UH60')][string]$InspectVehicle='',
       [ValidateRange(0,11)][int]$InspectCargoIndex=0,
+      [ValidateSet('Jeep','UH60')][string]$TestVehicle='Jeep',
       [switch]$ProjectileFrame, [switch]$AnimationPreview, [switch]$AnimationVideo, [switch]$NpcFire,
       [ValidateSet('clear','hold','outside','blocked','friendly')][string]$NpcScenario='clear',
       [ValidateSet(0,90,180)][int]$NpcHeading=0, [switch]$NpcDriver,
@@ -8,7 +9,7 @@ param([ValidateSet('M16','AK74')][string]$Rifle='M16',
       [ValidateSet('near','far')][string]$TurnTarget='near',
       [ValidateSet('individual','group','waypoint')][string]$DriverCommand='individual',
       [switch]$LimitedDriver,
-      [switch]$PlayerFire, [switch]$Lifecycle, [switch]$SaveLoad, [switch]$MenuReentry,
+      [switch]$PlayerFire, [switch]$Lifecycle, [switch]$SaveLoad, [switch]$MenuReentry, [switch]$MovingPlayer,
       [switch]$DefaultPackage, [string]$UserMod='',
       [ValidateSet('','missing','incompatible')][string]$AutomaticOriginal='', [string]$MissionPath='',
       [string]$LoadOriginalSave='',
@@ -177,7 +178,10 @@ try {
         Write-Host "Original seat recorded: $InspectVehicle cargo $InspectCargoIndex; $output"
         return
     }
-    $null=Send @{cmd='eval';code='typeOf ffvJeep'} '"Jeep"'
+    if ($TestVehicle -ne 'Jeep') {
+        $null=Send @{cmd='exec';code=('deleteVehicle ffvJeep; ffvJeep="'+$TestVehicle+'" createVehicle [9700,3600,0]; ffvJeep setDir 0')}
+    }
+    $null=Send @{cmd='eval';code='typeOf ffvJeep'} ('"'+$TestVehicle+'"')
     if ($NpcFire) {
         $angle=$NpcHeading * [math]::PI / 180
         $rightX=[int][math]::Round([math]::Cos($angle)); $rightZ=-[int][math]::Round([math]::Sin($angle))
@@ -379,6 +383,25 @@ try {
         $null=Send @{cmd='crew_pose_probe'}
         $null=Send @{cmd='eval';code='ffvShots'} '0'
         $null=Send @{cmd='screenshot';path=(Join-Path $output 'player-before-fire.png')}
+        if ($MovingPlayer) {
+            $null=Send @{cmd='exec';code='deleteVehicle ffvTarget; ffvDriveGroup=createGroup west; "SoldierWB" createUnit [[9695,3595,0],ffvDriveGroup,"ffvTestDriver=this; this setBehaviour ""CARELESS""; this setCombatMode ""BLUE"""]; ffvTestDriver moveInDriver ffvJeep; ffvDriveGroup move [9700,4100,0]'}
+            $null=Send @{cmd='exec';code='ffvJeep setFuel 1; ffvTestDriver assignAsDriver ffvJeep; ffvTestDriver moveInDriver ffvJeep; ffvTestDriver doMove [9700,4100,0]'}
+            Start-Sleep -Seconds 6
+            $null=Send @{cmd='eval';code='abs(speed ffvJeep)>5'} 'true'
+            for ($i=0; $i -lt 24; ++$i) {
+                $null=Send @{cmd='eval';code='[speed ffvJeep,getDir ffvJeep,ffvShots]'}
+                $null=Send @{cmd='crew_pose_probe'}
+                $null=Send @{cmd='mouse_button';button=1;down=$true}
+                Start-Sleep -Milliseconds 150
+                $null=Send @{cmd='mouse_button';button=1;down=$false}
+                Start-Sleep -Milliseconds 200
+            }
+            $null=Send @{cmd='screenshot';path=(Join-Path $output 'moving-player.png')}
+            $null=Send @{cmd='exit'}
+            if (!$p.WaitForExit(30000) -or $p.ExitCode -ne 0) {throw 'Moving player exit failed'}
+            Write-Host "Moving player diagnostics: $output"
+            return
+        }
         for ($attempt=0; $attempt -lt 12; $attempt++) {
             $null=Send @{cmd='crew_cursor';x=60;y=0.01;z=-0.07}
             $null=Send @{cmd='mouse_button';button=1;down=$true}

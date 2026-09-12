@@ -82,7 +82,12 @@ labClear = player addAction ["LAB: clear bodies", "action.sqs"]
 labDay = player addAction ["LAB: day / night", "action.sqs"]
 labHelp = player addAction ["LAB: help / station guide", "action.sqs"]
 labRideVisit = player addAction ["LAB: visit Jeep passenger firing range", "action.sqs"]
+labRideStart = player addAction ["LAB: start / stop Jeep circuit", "action.sqs"]
 [] exec "jeep-ride.sqs"
+[] exec "heli-ride.sqs"
+labFlightVisit = player addAction ["LAB: board helicopter rifle seat", "action.sqs"]
+labFlightStart = player addAction ["LAB: start helicopter circuit", "action.sqs"]
+labFlightLand = player addAction ["LAB: return and land helicopter", "action.sqs"]
 labNight = false
 ~2
 logInfo (triPhysicsShowcase "reset")
