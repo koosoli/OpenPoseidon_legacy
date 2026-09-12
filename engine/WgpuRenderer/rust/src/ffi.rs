@@ -282,6 +282,7 @@ pub const WGR_MODEL_SECTION_MASK_UV1: u32 = 4;
 // Read by gpu_driven.wgsl's SECTION_NORMAL_RG; there is no Rust-side behaviour, the constant
 // exists so both sides of the ABI name the bit in one place.
 pub const WGR_MODEL_SECTION_NORMAL_RG: u32 = 8;
+pub const WGR_MODEL_SECTION_NATIVE_CAVITY: u32 = 16;
 pub const WGR_DRAW3D_NIGHT_EMITTER: u32 = 4;
 // WgrDraw3D::flags bit 3 (MAT-051): classic GLASS -- alpha-blended pane whose texture is
 // continuous partial alpha. The shader floors output alpha so the pane reads head-on.
@@ -290,6 +291,7 @@ pub const WGR_DRAW3D_GLASS: u32 = 8;
 pub const WGR_DRAW3D_COCKPIT: u32 = 16;
 pub const WGR_DRAW3D_MONITOR: u32 = 32;
 pub const WGR_DRAW3D_NORMAL_RG: u32 = 128;
+pub const WGR_DRAW3D_NATIVE_CAVITY: u32 = 1024;
 
 // Per-section shading, parallel to a model's sections (one per section). The raw material is
 // folded with the frame sun in the GPU-driven fragment shader (matching the per-draw path);

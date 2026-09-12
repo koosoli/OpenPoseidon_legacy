@@ -907,6 +907,12 @@ fn shade_fragment(in: VsOut) -> vec4<f32> {
     // them to the shared shading straight. The GPU-driven path folds raw × frame-sun instead,
     // then calls the same shade(). srgb-decode of albedo + terms happens inside shade().
     var m: ShadeMaterial;
+    m.native_cavity = 1.0;
+#ifdef NATIVE_LEAF_CAVITY
+    if ((material_flags(material) & 1024u) != 0u && material.normal_map.z > 0.5) {
+        m.native_cavity = clamp(normal_sample.a, 0.0, 1.0);
+    }
+#endif
     m.emissive = material.emissive.rgb;
     if (emissive_night < 1.0 && (material_flags(material) & MATFLAG_NIGHT_EMITTER) == 0u) {
         // At EVERY hour, not only at night. The first cut faded this in with the sun-only

@@ -5272,7 +5272,7 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     const bool productionMaterialTarget = !diagnosticSelector && debugSection.surfMat;
     const bool materialBindingTarget = materialDebugTarget || productionMaterialTarget;
     d.normal_texture_id = 0;
-    d.flags &= ~WGR_DRAW3D_NORMAL_RG;
+    d.flags &= ~(WGR_DRAW3D_NORMAL_RG | WGR_DRAW3D_NATIVE_CAVITY);
     // Shared lane: material-debug bits 0-8, REN-TEMP-001H object id bits 16-31.
     d.misc = (materialDebugTarget
                   ? static_cast<uint32_t>(_materialDebug.view) | (_materialDebug.invertNormalY ? 0x100u : 0u)
@@ -5312,6 +5312,8 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                 d.normal_texture_id = handle;
                 if (wgpuNormalTexture->NormalIsRgPacked())
                     d.flags |= WGR_DRAW3D_NORMAL_RG;
+                if (wgpuNormalTexture->NormalHasNativeCavity())
+                    d.flags |= WGR_DRAW3D_NATIVE_CAVITY;
                 static std::unordered_set<std::string> loggedUnassignedNormalFixtures;
                 if (loggedUnassignedNormalFixtures.insert(normalPath).second)
                     LOG_INFO(Graphics, "Wgpu material debug: unassigned Stage1 fixture resolved path={}", normalPath);
@@ -5371,6 +5373,8 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                         d.normal_texture_id = normalHandle;
                         if (wgpuNormalTexture->NormalIsRgPacked())
                             d.flags |= WGR_DRAW3D_NORMAL_RG;
+                        if (wgpuNormalTexture->NormalHasNativeCavity())
+                            d.flags |= WGR_DRAW3D_NATIVE_CAVITY;
                     }
                 }
             }
@@ -5590,6 +5594,8 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                             d.normal_texture_id = normalHandle;
                             if (normalHandle && wgpuTexture->NormalIsRgPacked())
                                 d.flags |= WGR_DRAW3D_NORMAL_RG;
+                            if (normalHandle && wgpuTexture->NormalHasNativeCavity())
+                                d.flags |= WGR_DRAW3D_NATIVE_CAVITY;
                         }
                     }
                 }
@@ -5678,7 +5684,7 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
         return value && value[0] == '1';
     }();
     if (legacyDirectNormals)
-        d.flags &= ~WGR_DRAW3D_NORMAL_RG;
+        d.flags &= ~(WGR_DRAW3D_NORMAL_RG | WGR_DRAW3D_NATIVE_CAVITY);
     // DZ-003: the per-draw twin of the retained set's WGR_MODEL_SECTION_REFLECTIVE. A
     // material naming an EnvironmentMap gets a Fresnel-weighted sky reflection; every
     // other material is untouched. Folded into d.flags below alongside surface flags.
@@ -6869,8 +6875,11 @@ uint64_t EngineWgpu::ResolveMaterialSpecularMap(const ShapeSection& section)
 //
 // A procedural Stage1 is a genuine constant (`#(argb,8,8,3)color(0.5,0.5,1,1,NOHQ)`
 // is a flat normal) and generates like any other, so it binds here too.
-uint64_t EngineWgpu::ResolveMaterialNormalMap(const ShapeSection& section, bool* rgPackedOut)
+uint64_t EngineWgpu::ResolveMaterialNormalMap(const ShapeSection& section, bool* rgPackedOut,
+                                            bool* nativeCavityOut)
 {
+    if (nativeCavityOut != nullptr)
+        *nativeCavityOut = false;
     if (rgPackedOut != nullptr)
         *rgPackedOut = false;
     // NOT honoured here any more. Baking the toggle into the material record meant it
@@ -6940,6 +6949,8 @@ uint64_t EngineWgpu::ResolveMaterialNormalMap(const ShapeSection& section, bool*
     // the section is on the white fallback and has no normal to decode either way.
     if (rgPackedOut != nullptr && handle != 0 && wgpuTexture != nullptr)
         *rgPackedOut = wgpuTexture->NormalIsRgPacked();
+    if (nativeCavityOut != nullptr && handle != 0 && wgpuTexture != nullptr)
+        *nativeCavityOut = wgpuTexture->NormalHasNativeCavity();
     return report(handle, handle ? "" : "upload failed", loadName);
 }
 
@@ -8506,7 +8517,18 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
             // Stage1. Same ordering dependency: the translation cache is populated
             // by ResolveMaterialBaseColour above.
             bool normalRgPacked = false;
-            mat.normal_texture_id = ResolveMaterialNormalMap(s->GetSection(i), &normalRgPacked);
+            bool nativeCavity = false;
+            mat.normal_texture_id = ResolveMaterialNormalMap(s->GetSection(i), &normalRgPacked, &nativeCavity);
+            if (nativeCavity)
+            {
+                sec.flags |= WGR_MODEL_SECTION_NATIVE_CAVITY;
+                static bool reportedNativeCavity = false;
+                if (!reportedNativeCavity)
+                {
+                    LOG_INFO(Graphics, "Wgpu native foliage: preserved NTC cavity bound; shader opt-in WGR_NATIVE_LEAF_CAVITY=1");
+                    reportedNativeCavity = true;
+                }
+            }
             // RFG-047: tell the shader which two channels the normal is in. Only ever set
             // for a compressed Enfusion `_NMO`; a decoded one keeps RFG-045's R-into-A copy
             // and leaves this clear, so the two forms of the same file shade identically.

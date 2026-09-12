@@ -12,7 +12,10 @@ fn coalesced_filter_composes_in_every_receiver() {
         let result = composer.make_naga_module(NagaModuleDescriptor {
             source,
             file_path: path,
-            shader_defs: [("COALESCED_PCF".to_owned(), ShaderDefValue::Bool(true))].into(),
+            shader_defs: [
+                ("COALESCED_PCF".to_owned(), ShaderDefValue::Bool(true)),
+                ("NATIVE_LEAF_CAVITY".to_owned(), ShaderDefValue::Bool(true)),
+            ].into(),
             ..Default::default()
         });
         if let Err(error) = result {

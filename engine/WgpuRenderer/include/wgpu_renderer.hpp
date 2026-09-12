@@ -298,7 +298,8 @@ enum WgrDraw3DFlags : uint32_t
      * for the same surfaces IS the flat scene ambient, so this matches it. */
     WGR_DRAW3D_COCKPIT = 16,
     WGR_DRAW3D_MONITOR = 32,
-    WGR_DRAW3D_NORMAL_RG = 128 // BC5 / compressed Enfusion normal XY, not NOHQ alpha/green
+    WGR_DRAW3D_NORMAL_RG = 128, // BC5 / compressed Enfusion normal XY, not NOHQ alpha/green
+    WGR_DRAW3D_NATIVE_CAVITY = 1024 // 256/512 belong to Z bias
 };
 
 /* Matrices per palette block (the engine's own bone-palette cap). Each skinned
@@ -425,7 +426,8 @@ enum WgrModelSectionFlags : uint32_t
      * ride to the shader instead -- which is what this bit is. Set only for a section whose
      * bound normal map was uploaded compressed; on the decoded path RFG-045's copy still
      * happens and this bit stays clear, so both forms shade identically. */
-    WGR_MODEL_SECTION_NORMAL_RG = 8u
+    WGR_MODEL_SECTION_NORMAL_RG = 8u,
+    WGR_MODEL_SECTION_NATIVE_CAVITY = 16u
 };
 
 /* Per-section shading, parallel to a model's sections (one per section). The RAW

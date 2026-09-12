@@ -57,3 +57,22 @@ No cascade resolution, caster geometry or filter footprint reduction. Scalar
 oracle covers texture edges, fractional UVs and slopes; shader composition covers
 direct, retained, terrain and grass receivers. Both tests pass. Real-device and
 installed A/B timing/image acceptance pending; do not advertise an FPS gain.
+
+Installed 4ad82a79, Forest-pcf-off/on: both lifecycle checks pass, same geometry
+counts and native 1920x1080/MSAA4 profile. GPU endpoints 34.295 / 33.732 ms;
+solid colour 1.88 / 1.66 ms but cutout colour 3.19 / 3.61 ms. Mixed single-pair
+result, not an accepted improvement. Images have no obvious new shadow artefact;
+wind/cloud time prevents interpreting the full image difference as filter error.
+Keep this experiment OFF, and distinguish receiver work from cascade-3 casting.
+
+## Native leaf cavity: opt-in material experiment
+
+WGR_NATIVE_LEAF_CAVITY=1 consumes preserved NTC alpha for foliage ambient only,
+from the existing normal sample, in direct and retained paths. No albedo contrast
+curve, direct-sun change, new texture or geometry. Only BC7 `_ntc` sources qualify:
+BC5 lacks auxiliary alpha and the decoded DDS path currently overwrites it with
+normal R. Those deliberately retain the old appearance until auxiliary channel
+preservation is separately validated. Flag words are reused without ABI growth;
+direct bit 1024 avoids the existing 256/512 depth-bias bits.
+Shader composition and direct-flag regression tests pass, full build passes.
+Installed image/timing acceptance pending. This is not a completed tree fix.

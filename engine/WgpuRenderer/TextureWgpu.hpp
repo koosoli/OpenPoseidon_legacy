@@ -140,6 +140,7 @@ class TextureWgpu : public Texture
     // invert itself. That is why this asks the destination format rather than the name
     // alone. Cheap and const: two integer compares plus, for BC7, one substring test.
     bool NormalIsRgPacked() const;
+    bool NormalHasNativeCavity() const;
 
     bool VerifyChecksum(const MipInfo&) const override { return true; }
     bool IsGpuResident() const override { return _gpuHandle != 0; }

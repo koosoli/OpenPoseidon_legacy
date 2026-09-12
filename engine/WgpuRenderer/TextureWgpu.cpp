@@ -1435,6 +1435,19 @@ bool TextureWgpu::HasAlphaHoles()
     return _alphaStatsScanned && _alphaStats.pctClear >= 2.0;
 }
 
+bool TextureWgpu::NormalHasNativeCavity() const
+{
+    // Decoded DDS currently repacks R into A; BC5 has no auxiliary alpha at all.
+    if (_nMipmaps <= 0 || _mipmaps[0].DstFormat() != PacBC7 || !NormalIsRgPacked())
+        return false;
+    std::string name = Name();
+    for (char& c : name)
+        if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
+    const size_t dot = name.find_last_of('.');
+    const size_t end = dot == std::string::npos ? name.size() : dot;
+    return end >= 4 && name.compare(end - 4, 4, "_ntc") == 0;
+}
+
 bool TextureWgpu::NormalIsRgPacked() const
 {
     if (_nMipmaps <= 0)

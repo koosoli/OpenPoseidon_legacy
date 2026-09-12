@@ -33,6 +33,7 @@ struct ShadeMaterial {
     // SMDI's measured mean (G ~ 47/255) that is 0.028 where 0.184 was meant -- a specular
     // highlight roughly a seventh of its intended strength.
     spec_mask: f32,
+    native_cavity: f32,
 };
 
 // Rotate `v` by the rotation that carries unit vector `src_n` onto unit vector `dst_n`.
@@ -245,7 +246,8 @@ fn shade(
         }
         interior_ao = interior_sky_ao(world_abs, nrm);
     }
-    let amb_ao = sky_vis_ao(world_abs.xz) * gtao_t * interior_ao * clamp(baked_sky_vis, 0.0, 1.0);
+    let amb_ao = sky_vis_ao(world_abs.xz) * gtao_t * interior_ao * clamp(baked_sky_vis, 0.0, 1.0)
+        * select(1.0, mat.native_cavity, is_foliage);
     // ...and a FOURTH, at a scale none of the three can reach: the normal map's own micro-
     // occlusion. Sky-vis is keyed on the terrain column (km), GTAO marches the depth buffer
     // (~2 m), the interior term answers "is there a roof" (room-sized) — the smallest thing any

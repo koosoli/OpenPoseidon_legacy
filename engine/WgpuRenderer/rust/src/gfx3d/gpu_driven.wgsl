@@ -793,6 +793,7 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
     // material (local lights), specular = sun_diffuse x material specular. On the sky-lit HDR
     // path shade() ignores sun_*, so the emissive/light/specular terms are what carry.
     var m: ShadeMaterial;
+    m.native_cavity = 1.0;
     // Imported OFP/A3 materials use the legacy emissive lane for a mixture of
     // real signal lamps and fixed-function brightness compensation. The latter
     // was baked into plant materials to survive OFP's old lighting model; in
@@ -877,9 +878,14 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
         let normal_rg = (sm.flags & SECTION_NORMAL_RG) != 0u;
         if (sm.normal_slot != 0u) {
             let uv0 = in.uv * sm.layer_uv[0].xy + sm.layer_uv[0].zw;
-            normal_ts = decode_nohq_packed(
-                textureSampleBias(textures[sm.normal_slot], samplers[sm.sampler_idx], uv0, frame.renscale.x),
+            let normal_sample = textureSampleBias(textures[sm.normal_slot], samplers[sm.sampler_idx], uv0, frame.renscale.x);
+            normal_ts = decode_nohq_packed(normal_sample,
                 normal_rg);
+#ifdef NATIVE_LEAF_CAVITY
+            if ((sm.flags & 16u) != 0u) {
+                m.native_cavity = clamp(normal_sample.a, 0.0, 1.0);
+            }
+#endif
         }
         // Decode each layer's normal, THEN blend — see decode_nohq_packed on why the packed texels
         // must not be mixed. The weighted sum of unit vectors is renormalised at the end.
