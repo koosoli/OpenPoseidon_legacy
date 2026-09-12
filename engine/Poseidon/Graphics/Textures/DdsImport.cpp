@@ -656,7 +656,9 @@ bool TextureSourceDDS::InitFromMemoryWithOptions(const void* data, size_t size, 
         // channels; NMO alpha is occlusion and NTC alpha is cavity, not normal X.
         // BC5 is covered too because it is a
         // two-channel format by definition and can carry nothing else.
-        if (_format == PixelFormat::BC5 || IsEnfusionRgNormalName(who))
+        // Native consumers now decode RG in both upload paths. Preserve authored
+        // height/transmission and AO/cavity; only legacy BC5 still needs AG.
+        if (_format == PixelFormat::BC5 && !IsEnfusionRgNormalName(who))
         {
             for (DDSMipLevel& level : _levels)
                 for (size_t i = 0; i + 3 < level.data.size(); i += 4)

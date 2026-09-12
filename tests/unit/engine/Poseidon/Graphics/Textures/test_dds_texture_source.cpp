@@ -325,8 +325,10 @@ TEST_CASE("Enfusion RG normals use red rather than cavity or occlusion for X", "
             REQUIRE(pixels[i + 1] == 128);
             // BCR roughness is deliberately not forwarded as coverage by this
             // existing source path. An ordinary RGBA image retains its alpha.
-            const unsigned alpha = Poseidon::IsEnfusionRgNormalName(name) ? 128 :
-                                   (std::strcmp(name, "test_bcr.edds") == 0 ? 255 : 200);
+            // Native RG decoding must retain independent height/transmission B
+            // and AO/cavity A, exactly as the compressed upload does.
+            REQUIRE(pixels[i] == 40);
+            const unsigned alpha = std::strcmp(name, "test_bcr.edds") == 0 ? 255 : 200;
             REQUIRE(static_cast<unsigned>(pixels[i + 3]) == alpha);
         }
     }
