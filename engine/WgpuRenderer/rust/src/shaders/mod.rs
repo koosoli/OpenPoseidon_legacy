@@ -186,6 +186,7 @@ mod tests {
 
     #[test]
     fn entry_shaders_compose() {
+        compose(include_str!("../gfx3d/velocity_obj.wgsl"), "gfx3d/velocity_obj.wgsl");
         compose(
             include_str!("../gfx3d/shader3d.wgsl"),
             "gfx3d/shader3d.wgsl",
@@ -260,6 +261,33 @@ mod tests {
         assert_eq!(visibility(false, 0.25, 0.25), 0.25);
         assert_eq!(visibility(false, 0.0, 0.0), 0.0);
         assert_eq!(visibility(true, 0.1, 1.0), 0.1);
+    }
+
+    #[test]
+    fn native_wind_preserves_branch_attachment_across_mesh_density() {
+        // A branch may attach inside a long trunk edge, rather than at its vertex.
+        // Nonlinear per-vertex bending cannot commute with that interpolation.
+        let old = |y: f64| (y.max(0.0) / 12.0).powf(1.6);
+        assert!(((old(4.0) + old(20.0)) * 0.5 - old(12.0)).abs() > 0.2);
+        for phase in [-2.0, -0.5, 0.0, 0.7, 2.0] {
+            for (a, b) in [(-1.0, 24.0), (0.0, 12.0), (4.0, 20.0), (20.0, 48.0)] {
+                for fraction in [0.0, 0.1, 0.5, 0.8, 1.0] {
+                    let bend = |y: f64| y / 12.0 * phase;
+                    let y = a + (b - a) * fraction;
+                    let trunk = bend(a) + (bend(b) - bend(a)) * fraction;
+                    assert!((trunk - bend(y)).abs() < 1e-12);
+                }
+            }
+        }
+        for source in [include_str!("frame.wgsl"),
+                       include_str!("../gfx3d/velocity_obj.wgsl"),
+                       include_str!("../gfx3d/gpu_driven.wgsl")] {
+            assert!(source.contains("leaf < 0.0"));
+            assert!(source.contains("if (leaf > 0.0)"));
+        }
+        assert!(include_str!("../gfx3d/shader3d.wgsl").contains("-1.0, foliage_kind > 2.5"));
+        assert_eq!(include_str!("../gfx3d/gpu_driven.wgsl")
+            .matches("-1.0, (inst.flags & INST_COHERENT_TREE_WIND) != 0u)").count(), 2);
     }
 
     #[test]

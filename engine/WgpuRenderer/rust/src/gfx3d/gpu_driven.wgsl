@@ -475,6 +475,7 @@ struct VsOut {
 // centre sits mid-trunk, so it wants a larger lift). Mirror WgrInstanceFlags in wgpu_renderer.hpp.
 const INST_CANOPY_BUSH: u32 = 1u;
 const INST_CANOPY_TREE: u32 = 2u;
+const INST_COHERENT_TREE_WIND: u32 = 8u;
 // A merged multi-tree forest mesh (§9 Approach A): per-vertex crown centre instead of inst.center.
 const INST_CANOPY_FOREST: u32 = 4u;
 
@@ -585,7 +586,8 @@ fn vs_gpu(
             let cw = world * vec4<f32>(crown_centres[conform_sel].xyz, 1.0);
             phase_xz = cw.xz;
         }
-        let leaf = select(0.0, 1.0, section_materials[rec.section].alpha_ref > 0.0);
+        let leaf = select(select(0.0, 1.0, section_materials[rec.section].alpha_ref > 0.0),
+                          -1.0, (inst.flags & INST_COHERENT_TREE_WIND) != 0u);
         world_pos = world_pos + veg_sway_offset(pos.y, phase_xz, leaf);
     }
     // Spherical / canopy normals (docs/foliage-translucency-plan.md Stage 3): bend a leaf's normal
@@ -1161,7 +1163,8 @@ fn veg_sway_prev_at(model_y: f32, phase_xz: vec2<f32>, leaf: f32) -> vec3<f32> {
     let t = velp.sway_prev.y;
     let dir = vec2<f32>(velp.sway_prev.z, velp.sway_prev.w);
     let hn = clamp(max(model_y, 0.0) / 12.0, 0.0, 3.0);
-    let hs = pow(hn, velp.sway_prev2.z);
+    let coherent_hs = model_y / 12.0 * (1.6 / max(velp.sway_prev2.z, 0.25));
+    let hs = select(pow(hn, velp.sway_prev2.z), coherent_hs, leaf < 0.0);
     let ph = dot(phase_xz, vec2<f32>(0.37, 0.29));
     let gust = 1.0 + 0.65 * velp.sway_prev2.x;
     let s = sin(t * 0.9 + ph) * 0.65 + sin(t * 1.63 + ph * 1.7) * 0.35;
@@ -1235,7 +1238,8 @@ fn vs_gpu_velocity(
         let cw = world * vec4<f32>(crown_centres[conform_sel].xyz, 1.0);
         phase_xz = cw.xz;
     }
-    let leaf = select(0.0, 1.0, section_materials[rec.section].alpha_ref > 0.0);
+    let leaf = select(select(0.0, 1.0, section_materials[rec.section].alpha_ref > 0.0),
+                      -1.0, (inst.flags & INST_COHERENT_TREE_WIND) != 0u);
     let s_cur = veg_sway_offset(pos.y, phase_xz, leaf);
     let s_prev = veg_sway_prev_at(pos.y, phase_xz, leaf);
     let cur_pos = vec4<f32>(world_pos + s_cur, 1.0);

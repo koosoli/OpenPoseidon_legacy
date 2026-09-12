@@ -38,6 +38,18 @@
 // Decision record: docs/roadmap/decisions/SIM-807-preparer-determinism-20260831.md.
 
 #include <catch2/catch_test_macros.hpp>
+#include <Poseidon/Graphics/Rendering/Shape/TreeWind.hpp>
+
+TEST_CASE("Native coherent tree wind excludes legacy models", "[native-wind]")
+{
+    REQUIRE(IsNativeTreeWindModel("assets/vegetation/tree/t_picea.xob"));
+    REQUIRE(IsNativeTreeWindModel("assets/vegetation/tree/t_picea.XOB"));
+    REQUIRE_FALSE(IsNativeTreeWindModel("data3d/str buk.p3d"));
+    REQUIRE_FALSE(IsNativeTreeWindModel("folder.xob/tree.p3d"));
+    REQUIRE_FALSE(IsNativeTreeWindModel("tree.xob.p3d"));
+    REQUIRE_FALSE(IsNativeTreeWindModel("tree.xobextra"));
+    REQUIRE_FALSE(IsNativeTreeWindModel(nullptr));
+}
 
 #include "../../test_fixtures.hpp"
 

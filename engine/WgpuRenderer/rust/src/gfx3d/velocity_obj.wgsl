@@ -125,7 +125,8 @@ fn veg_sway_at(model_y: f32, phase_xz: vec2<f32>, leaf: f32, p: vec4<f32>, p2: v
     let t = p.y;
     let dir = vec2<f32>(p.z, p.w);
     let hn = clamp(max(model_y, 0.0) / VEG_SWAY_HEIGHT_REF, 0.0, 3.0);
-    let hs = pow(hn, p2.z);
+    let coherent_hs = model_y / VEG_SWAY_HEIGHT_REF * (1.6 / max(p2.z, 0.25));
+    let hs = select(pow(hn, p2.z), coherent_hs, leaf < 0.0);
     let ph = dot(phase_xz, vec2<f32>(0.37, 0.29));
     let gust = 1.0 + 0.65 * p2.x;
     let s = sin(t * 0.9 + ph) * 0.65 + sin(t * 1.63 + ph * 1.7) * 0.35;

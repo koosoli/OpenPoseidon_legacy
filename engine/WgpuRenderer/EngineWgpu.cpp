@@ -44,6 +44,7 @@
 #include <Poseidon/Graphics/Rendering/Frame/PresentationSnapshot.hpp> // RenderSnapshot S1: the frame's environment block
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
 #include <Poseidon/World/MapTypes.hpp>                         // MapBush (spherical/canopy-normal flagging)
+#include <Poseidon/Graphics/Rendering/Shape/TreeWind.hpp>
 #include <Poseidon/World/Scene/Object.hpp>                     // Object accessors (GPU-driven retained scene)
 #include <Poseidon/World/World.hpp>                            // live player/vehicle interaction for grass
 #include <Poseidon/World/Entities/Vehicles/Air/Helicopter.hpp> // rotor wash for grass
@@ -6504,6 +6505,8 @@ WgrInstance BuildGpuInstance(const Object& obj, uint32_t model, const ConformPla
         else if (mt == MapTree || mt == MapSmallTree)
         {
             inst.flags |= WGR_INSTANCE_CANOPY_TREE;
+            if (IsNativeTreeWindModel(s->Name()))
+                inst.flags |= WGR_INSTANCE_COHERENT_TREE_WIND;
         }
         else if (mt == MapForestBorder || mt == MapForestTriangle || mt == MapForestSquare)
         {

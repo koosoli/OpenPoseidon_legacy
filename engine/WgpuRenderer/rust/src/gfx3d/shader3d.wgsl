@@ -463,7 +463,7 @@ fn vs_main(
         // back to seed the phase from an ABSOLUTE world XZ. Seeding from the camera-relative
         // value would make every plant swim as the camera walks.
         let phase_xz = world[3].xz + frame.cam_pos.xz;
-        let leaf = select(0.0, 1.0, alpha_ref > 0.0);
+        let leaf = select(select(0.0, 1.0, alpha_ref > 0.0), -1.0, foliage_kind > 2.5);
         let sway = veg_sway_offset(pos.y, phase_xz, leaf);
         world_pos = vec4<f32>(world_pos.xyz + sway, world_pos.w);
     }

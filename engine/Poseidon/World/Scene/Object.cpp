@@ -1,6 +1,7 @@
 #include <Poseidon/Core/Application.hpp>
 
 #include <Poseidon/World/Scene/Object.hpp>
+#include <Poseidon/Graphics/Rendering/Shape/TreeWind.hpp>
 #include <Poseidon/World/Scene/MapThings.hpp>
 #include <Poseidon/World/Scene/Object2DMapping.hpp>
 #include <Poseidon/Graphics/Core/TLVertex.hpp>
@@ -1288,6 +1289,8 @@ void Object::Draw(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
             const bool isBush = mt == MapBush;
             GCurrentIsVegetation = isTree || isBush;
             GCurrentFoliageKind = isTree ? 2.0f : (isBush ? 1.0f : 0.0f);
+            if ((mt == MapTree || mt == MapSmallTree) && IsNativeTreeWindModel(_shape->Name()))
+                GCurrentFoliageKind = 3.0f;
         }
 
         // Legacy backends need an all-ClipLandOn road physically split at every

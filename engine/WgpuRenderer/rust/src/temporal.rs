@@ -490,7 +490,8 @@ impl Temporal {
     }
 
     // The swaying-vegetation subset: (draws3d index, leaf flag). Selection mirrors the
-    // scene VS gate (material sun_ambient.w: 1 = bush, 2 = tree; leaf = alpha-cutout).
+    // scene VS gate (1 = bush, 2 = legacy tree, 3 = coherent native tree).
+    // A negative section value selects coherent wind, including on solid bark.
     pub fn veg_velocity_subset(&self, draws: &[crate::ffi::WgrDraw3D]) -> Vec<(u32, f32)> {
         if !self.enabled || self.reset {
             return Vec::new();
@@ -500,7 +501,9 @@ impl Temporal {
             if d.mat_sun_ambient[3] <= 0.5 || d.palette_slot != crate::ffi::NO_PALETTE {
                 continue;
             }
-            out.push((i as u32, if d.alpha_ref > 0.0 { 1.0 } else { 0.0 }));
+            let wind_section = if d.mat_sun_ambient[3] > 2.5 { -1.0 }
+                else if d.alpha_ref > 0.0 { 1.0 } else { 0.0 };
+            out.push((i as u32, wind_section));
             if out.len() >= 16384 {
                 break;
             }
@@ -1520,6 +1523,27 @@ mod tests {
         let mut untouched = base;
         t2.apply_jitter(&mut untouched);
         assert_eq!(untouched, base);
+    }
+
+    #[test]
+    fn native_wind_velocity_uses_the_same_mode_for_bark_and_leaves() {
+        let mut temporal = Temporal::from_env();
+        temporal.enabled = true;
+        temporal.reset = false;
+        let mut draws: Vec<crate::ffi::WgrDraw3D> = (0..6)
+            .map(|_| unsafe { std::mem::zeroed() }).collect();
+        for draw in &mut draws { draw.palette_slot = crate::ffi::NO_PALETTE; }
+        draws[0].mat_sun_ambient[3] = 3.0;
+        draws[1].mat_sun_ambient[3] = 3.0;
+        draws[1].alpha_ref = 0.5;
+        draws[2].mat_sun_ambient[3] = 2.0;
+        draws[3].mat_sun_ambient[3] = 2.0;
+        draws[3].alpha_ref = 0.5;
+        // Non-vegetation and skinned objects are still excluded.
+        draws[5].mat_sun_ambient[3] = 3.0;
+        draws[5].palette_slot = 0;
+        assert_eq!(temporal.veg_velocity_subset(&draws),
+                   vec![(0, -1.0), (1, -1.0), (2, 0.0), (3, 1.0)]);
     }
 
     #[test]

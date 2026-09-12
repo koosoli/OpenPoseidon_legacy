@@ -200,6 +200,7 @@ const VEG_SWAY_HEIGHT_REF: f32 = 12.0;
 //              from a camera-relative position makes every plant swim as the camera walks.
 // `leaf`     : 1 on cutout (leaf) sections, 0 on the solid trunk -- flutter is leaves-only,
 //              otherwise a trunk visibly buzzes.
+//              -1 selects the native tree's coherent, material-independent shear.
 // Returns a WORLD-space horizontal offset (Y is always 0: this bends, it does not lift).
 fn veg_sway_offset(model_y: f32, phase_xz: vec2<f32>, leaf: f32) -> vec3<f32> {
     let amp = frame.foliaged.x;
@@ -213,7 +214,11 @@ fn veg_sway_offset(model_y: f32, phase_xz: vec2<f32>, leaf: f32) -> vec3<f32> {
     // cosmetic error.
     let hn = clamp(max(model_y, 0.0) / VEG_SWAY_HEIGHT_REF, 0.0, 3.0);
     // Exponent > 1 keeps the lower trunk planted, so the tree bends instead of sliding.
-    let hs = pow(hn, frame.foliagee.w);
+    // Native trees lack imported branch attachment weights. An affine shear
+    // commutes with mesh interpolation, so a coarse trunk and a fine crown stay
+    // attached. Negative leaf is this mode on EVERY section, not an alpha flag.
+    let coherent_hs = model_y / VEG_SWAY_HEIGHT_REF * (1.6 / max(frame.foliagee.w, 0.25));
+    let hs = select(pow(hn, frame.foliagee.w), coherent_hs, leaf < 0.0);
     let ph = dot(phase_xz, vec2<f32>(0.37, 0.29));
     // Two incommensurate frequencies, so the canopy builds and decays instead of ticking like
     // a metronome. The gust term rides in from the wind AUTHORITY (WindSample::gustFraction),

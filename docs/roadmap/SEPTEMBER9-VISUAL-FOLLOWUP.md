@@ -2037,3 +2037,10 @@ native terrain NHO normal binding installed; forest same-build off/on lifecycle
 checks pass. Tree contrast and native authored far-LOD coverage remain OPEN.
 The roughly 560m count-budget boundary is measured, not fixed by the normal map.
 Receiver-filter optimization is an opt-in experiment awaiting installed acceptance.
+
+September 13 native tree wind follow-up: owner still sees trunk/crown separation.
+A scoped native-tree affine motion correction is in progress, with direct and
+retained temporal paths matched. This removes unsupported whole-cutout flutter
+and mesh-density-dependent attachment drift, not the need for authored branch
+weights. Installed visual acceptance is pending; see
+[native wind record](decisions/NATIVE-TREE-WIND-20260913.md).
