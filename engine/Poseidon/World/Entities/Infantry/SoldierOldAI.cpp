@@ -24,7 +24,7 @@ namespace Poseidon
 {
 using namespace Foundation;
 
-const CargoWeaponSeat* Man::GetConfiguredCargoWeaponSeat() const
+const CargoWeaponSeat* Man::GetAvailableCargoWeaponSeat() const
 {
     // Unsupported seats and multiplayer retain the original cargo path.
     AIUnit* unit = Brain();
@@ -44,6 +44,29 @@ const CargoWeaponSeat* Man::GetConfiguredCargoWeaponSeat() const
         return seat && (!unit->IsPlayer() || seat->HasTransitions()) ? seat : nullptr;
     }
     return nullptr;
+}
+
+const CargoWeaponSeat* Man::GetConfiguredCargoWeaponSeat() const
+{
+    if (Brain() && Brain()->IsPlayer() && !_cargoWeaponRequested)
+        return nullptr;
+    return GetAvailableCargoWeaponSeat();
+}
+
+bool Man::SetCargoWeaponMode(bool enabled)
+{
+    const auto* seat = GetAvailableCargoWeaponSeat();
+    if (!seat || !Brain()->IsPlayer() || !Brain()->IsInCargo() || IsActionInProgress(MFReload))
+        return false;
+    const auto action = Brain()->GetVehicleIn()->CargoAction(seat->cargoIndex);
+    // Seat idles are not pending mission actions and must not be replayed when
+    // switching between the original seat and its optional weapon stance.
+    if (!_externalMove.context && (_externalMove.id == GetVehMove(action) ||
+        (_externalMove.id >= 0 && seat->OwnsAction(Type()->GetMoveName(_externalMove.id)))))
+        _externalMove = MotionPathItem(MoveId(MoveIdNone));
+    _cargoWeaponRequested = enabled;
+    SwitchVehicleAction(action);
+    return true;
 }
 
 const CargoWeaponSeat* Man::GetActiveCargoWeaponSeat() const
@@ -2496,6 +2519,12 @@ void Soldier::AIPilot(float deltaT, SimulationImportance prec)
 
 void Man::RestoreCargoStateAfterLoad()
 {
+    // Old saves and taking control of an AI passenger must not opt the player
+    // into the weapon stance merely because an FFV animation was already active.
+    if (Brain() && Brain()->IsPlayer() && !_cargoWeaponRequested && !IsActionInProgress(MFReload))
+        if (const auto* seat = GetAvailableCargoWeaponSeat(); seat && _primaryMove.id >= 0 &&
+            seat->OwnsAction(Type()->GetMoveName(_primaryMove.id)))
+            _restoreMissingCargoPose = true;
     if (_restoreMissingCargoPose)
     {
         _restoreMissingCargoPose = false;
@@ -2558,6 +2587,7 @@ LSError Man::Serialize(ParamArchive& ar)
 
     if (!IS_UNIT_STATUS_BRANCH(ar.GetArVersion()))
     {
+        PARAM_CHECK(ar.Serialize("cargoWeaponRequested", _cargoWeaponRequested, 1, false))
         if (ar.IsSaving())
         {
             RString name = _primaryMove.id == MoveIdNone ? "" : Type()->GetMoveName(_primaryMove.id);

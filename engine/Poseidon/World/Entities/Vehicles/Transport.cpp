@@ -269,6 +269,8 @@ const EnumName* Foundation::GetEnumNames(UIActionType dummy)
                                              EnumName(ATRefuel, "REFUEL"),
                                              EnumName(ATRearm, "REARM"),
                                              EnumName(ATGetOut, "GETOUT"),
+                                             EnumName(ATCargoWeaponReady, "CARGO WEAPON READY"),
+                                             EnumName(ATCargoWeaponStow, "CARGO WEAPON STOW"),
                                              EnumName(ATLightOn, "LIGHT ON"),
                                              EnumName(ATLightOff, "LIGHT OFF"),
                                              EnumName(ATEngineOn, "ENGINE ON"),

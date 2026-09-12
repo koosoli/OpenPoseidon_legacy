@@ -327,7 +327,17 @@ try {
             Start-Sleep -Seconds 8
             $null=Send @{cmd='screenshot';path=(Join-Path $output 'menu-after-entry.png')}
             $state=Send @{cmd='crew_seat_status'}
-            if (!$state.inCargo -or !$state.active) {throw 'Action-menu entry did not restore supported cargo capability'}
+            if (!$state.inCargo -or $state.active) {throw 'Entry must leave the optional weapon stance disabled'}
+            $null=Send @{cmd='key';sc=48;hold=$true}
+            Start-Sleep -Milliseconds 150
+            $null=Send @{cmd='key_up';sc=48}
+            $null=Send @{cmd='screenshot';path=(Join-Path $output 'menu-ready-selected.png')}
+            $null=Send @{cmd='key';sc=40;hold=$true}
+            Start-Sleep -Milliseconds 150
+            $null=Send @{cmd='key_up';sc=40}
+            Start-Sleep -Seconds 3
+            $state=Send @{cmd='crew_seat_status'}
+            if (!$state.inCargo -or !$state.active) {throw 'Ready action did not enable the optional weapon stance'}
             & "$PSScriptRoot/Test-JeepMouse.ps1" -Reader $reader -Writer $writer -LogPath (Join-Path $output 'mouse-responses.jsonl')
             if (!$?) {throw 'Relative mouse acceptance failed'}
             $null=Send @{cmd='exit'}
@@ -335,6 +345,8 @@ try {
             Write-Host "PASS: menu reentry and relative mouse with $Rifle; $output"
             return
         }
+        $null=Send @{cmd='exec';code='ffvPassenger action ["CARGO WEAPON READY",ffvJeep]'}
+        Start-Sleep -Seconds 2
         $null=Send @{cmd='crew_cursor';x=60;y=0.01;z=-0.07}
         Start-Sleep -Seconds 3
         $null=Send @{cmd='crew_pose_probe'}

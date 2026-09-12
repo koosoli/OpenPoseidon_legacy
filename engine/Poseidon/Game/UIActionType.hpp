@@ -71,4 +71,6 @@ DEFINE_ENUM_BEG(UIActionType)
 	ATTakeMine,
 	ATDeactivateMine,
 	ATUseMagazine,
+	ATCargoWeaponReady,
+	ATCargoWeaponStow,
 DEFINE_ENUM_END(UIActionType)

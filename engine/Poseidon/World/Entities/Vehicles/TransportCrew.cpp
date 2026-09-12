@@ -2,6 +2,7 @@
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/World/Entities/Weapons/ProxyWeapon.hpp>
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
+#include <Poseidon/World/Entities/Infantry/SoldierOld.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
@@ -214,10 +215,12 @@ static void SwapPositions(Transport* vehicle, Ref<Person>& p1, ManVehAction a1, 
     swap(p1, p2);
     if (p1)
     {
+        if (Man* man = dyn_cast<Man>(p1.GetRef())) man->ResetCargoWeaponMode();
         p1->SwitchVehicleAction(a1);
     }
     if (p2)
     {
+        if (Man* man = dyn_cast<Man>(p2.GetRef())) man->ResetCargoWeaponMode();
         p2->SwitchVehicleAction(a2);
     }
     AIUnit* unit1 = p1 ? p1->Brain() : nullptr;
@@ -616,6 +619,13 @@ void Transport::GetActions(UIActions& actions, AIUnit* unit, bool now)
     }
     else if (unit->GetVehicleIn() == this)
     {
+        if (unit->IsPlayer())
+        {
+            Man* man = dyn_cast<Man>(unit->GetPerson());
+            if (man && man->GetAvailableCargoWeaponSeat() && !man->IsActionInProgress(MFReload))
+                actions.Add(man->GetConfiguredCargoWeaponSeat() ? ATCargoWeaponStow : ATCargoWeaponReady,
+                            this, 0.89, 0, true);
+        }
         if (!unit->IsPlayer() || GetLock() != LSLocked)
         {
             if (IsStopped())
@@ -1154,6 +1164,8 @@ void Transport::GetInCargo(Person* soldier, bool sound, int index)
 
     _manCargo.Set(index).man = soldier;
     GetInAny(soldier, sound, "cargo");
+    if (Man* man = dyn_cast<Man>(soldier))
+        man->ResetCargoWeaponMode();
     soldier->SwitchVehicleAction(CargoAction(index));
     GWorld->VehicleSwitched(soldier, this);
     if (!_driver && !_gunner && !_commander)

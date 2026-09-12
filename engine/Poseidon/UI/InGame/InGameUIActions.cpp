@@ -2,6 +2,7 @@
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
+#include <Poseidon/World/Entities/Infantry/SoldierOld.hpp>
 #include <Poseidon/UI/InGame/InGameUIImpl.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
@@ -312,6 +313,14 @@ void UIAction::Process(AIUnit* unit) const
     EntityAI* veh = target;
     switch (type)
     {
+        case ATCargoWeaponReady:
+        case ATCargoWeaponStow:
+        {
+            Man* man = dyn_cast<Man>(unit->GetPerson());
+            if (man && unit->GetVehicleIn() == veh)
+                man->SetCargoWeaponMode(type == ATCargoWeaponReady);
+            return;
+        }
         case ATGetInCommander:
         case ATGetInDriver:
         case ATGetInGunner:

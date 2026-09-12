@@ -352,6 +352,14 @@ RString UIAction::GetDisplayName(AIUnit* unit) const
         case ATGetOut:
             snprintf(buffer, sizeof(buffer), "%s", (const char*)LocalizeString(IDS_ACTION_GETOUT));
             break;
+        case ATCargoWeaponReady:
+            snprintf(buffer, sizeof(buffer), "%s", strcmpi(GLanguage, "German") == 0
+                ? "Waffe im Fahrzeug bereitmachen" : "Ready personal weapon");
+            break;
+        case ATCargoWeaponStow:
+            snprintf(buffer, sizeof(buffer), "%s", strcmpi(GLanguage, "German") == 0
+                ? "Waffe im Fahrzeug wegstecken" : "Stow personal weapon");
+            break;
         case ATLightOn:
             snprintf(buffer, sizeof(buffer), "%s", (const char*)LocalizeString(IDS_ACTION_LIGHTON));
             break;

@@ -598,6 +598,7 @@ class Man: public Person
 	Foundation::Time _posWantedTime;
 
 	MotionPath _queueMove; // shortest path to desired move; desired move is last element
+    bool _cargoWeaponRequested = false;
 	float _primaryFactor; // blend weight between primary and secondary animation
 	float _primaryTime,_secondaryTime;
 
@@ -745,6 +746,9 @@ class Man: public Person
 	bool IsAbleToStand() const;
 	bool IsAbleToFire() const override;
     const CargoWeaponSeat* GetConfiguredCargoWeaponSeat() const;
+    const CargoWeaponSeat* GetAvailableCargoWeaponSeat() const;
+    bool SetCargoWeaponMode(bool enabled);
+    void ResetCargoWeaponMode() { _cargoWeaponRequested = false; }
     bool IsCargoWeaponCandidate(int weapon) const;
     const CargoWeaponSeat* GetActiveCargoWeaponSeat() const;
 	bool CargoWeaponLineClear(int weapon) const;
