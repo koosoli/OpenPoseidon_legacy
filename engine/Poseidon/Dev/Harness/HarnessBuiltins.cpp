@@ -218,6 +218,14 @@ void RegisterSqf(HarnessServer& hs)
                            cJSON_AddStringToObject(resp, "primaryMove", man->GetPrimaryMoveName());
                            cJSON_AddNumberToObject(resp, "phase", man->GetLegPhase());
                            cJSON_AddBoolToObject(resp, "cargoWeaponActive", man->GetActiveCargoWeaponSeat() != nullptr);
+                           cJSON_AddBoolToObject(resp, "cargoCandidate", man->IsCargoWeaponCandidate(weapon));
+                           const auto& candidateSlot = man->GetMagazineSlot(weapon);
+                           if (candidateSlot._weapon)
+                           {
+                               cJSON_AddStringToObject(resp, "candidateName", candidateSlot._weapon->GetName());
+                               cJSON_AddNumberToObject(resp, "candidateKind", candidateSlot._weapon->_weaponType);
+                               cJSON_AddBoolToObject(resp, "candidateTurret", candidateSlot._weapon->_shotFromTurret);
+                           }
                            cJSON_AddBoolToObject(resp, "weaponsDisabled", man->WeaponsDisabled());
                            cJSON_AddBoolToObject(resp, "local", man->IsLocal());
                            cJSON_AddBoolToObject(resp, "player", unit->IsPlayer());
