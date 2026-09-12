@@ -1,0 +1,11 @@
+; Action IDs are local to their owning object. Forward to the shared handlers.
+_id = _this select 2
+? _id == labHeliFlightStart : goto "start"
+? _id == labHeliFlightLand : goto "land"
+exit
+#start
+[player,player,labFlightStart] exec "action.sqs"
+exit
+#land
+[player,player,labFlightLand] exec "action.sqs"
+exit

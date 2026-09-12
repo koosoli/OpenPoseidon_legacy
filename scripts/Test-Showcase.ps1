@@ -1,4 +1,4 @@
-param([string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault', [switch]$Menu, [switch]$InspectRoom, [switch]$CastleOnly, [switch]$GlassOnly, [switch]$GroupingAmmoOnly, [switch]$FlightOnly)
+param([string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault', [switch]$Menu, [switch]$InspectRoom, [switch]$CastleOnly, [switch]$GlassOnly, [switch]$GroupingAmmoOnly, [switch]$FlightOnly, [switch]$FlightMenuOnly)
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) { throw 'Use scripts/with-game-lock.sh' }
 $root=Split-Path $PSScriptRoot -Parent
@@ -153,14 +153,32 @@ try {
   Start-Sleep -Seconds 18
  }
  Send @{cmd='eval';code='typeOf labNormal'} '"LabPanelNormal"'
- if ($FlightOnly) {
+ if ($FlightOnly -or $FlightMenuOnly) {
   Send @{cmd='eval';code='driver labHeli == labFlightPilot'} 'true'
   Send @{cmd='exec';code='[player,player,labFlightVisit] exec "action.sqs"'}
   Start-Sleep -Seconds 2
   Send @{cmd='eval';code='vehicle player == labHeli'} 'true'
+  $actions=(Send @{cmd='eval';code='triActionMenuText'} | ConvertFrom-Json).result
+  foreach ($label in @('LAB: start helicopter circuit','LAB: return and land helicopter')) {
+   if (!$actions.Contains($label)) {throw "Missing passenger action: $label; actual: $actions"}
+  }
   Send @{cmd='exec';code='player action ["CARGO WEAPON READY",labHeli]; labFlightShots=0; player addEventHandler ["Fired",{labFlightShots=labFlightShots+1}]'}
   Start-Sleep -Seconds 2
-  Send @{cmd='exec';code='[player,player,labFlightStart] exec "action.sqs"'}
+  Send @{cmd='exec';code='player action ["USER",labHeli,labHeliFlightStart]'}
+  Start-Sleep -Seconds 1
+  Send @{cmd='eval';code='labFlightRequested'} 'true'
+  if ($FlightMenuOnly) {
+   Send @{cmd='exec';code='player action ["USER",labHeli,labHeliFlightLand]'}
+   Start-Sleep -Seconds 1
+   Send @{cmd='eval';code='labFlightRequested'} 'false'
+   Send @{cmd='key';sc=40;hold=$true}
+   Start-Sleep -Milliseconds 150
+   Send @{cmd='key_up';sc=40}
+   Send @{cmd='screenshot';path=(Join-Path $out 'helicopter-passenger-menu.png')}
+   Send @{cmd='exit'}
+   if (!$p.WaitForExit(30000) -or $p.ExitCode -ne 0) {throw 'Flight menu test exit failed'}
+   return
+  }
   $deadline=[DateTime]::UtcNow.AddSeconds(90)
   do {
    Start-Sleep -Seconds 2
@@ -179,7 +197,7 @@ try {
   }
   Send @{cmd='eval';code='labFlightShots > 3'} 'true'
   Send @{cmd='screenshot';path=(Join-Path $out 'rifle-flight.png')}
-  Send @{cmd='exec';code='[player,player,labFlightLand] exec "action.sqs"'}
+  Send @{cmd='exec';code='player action ["USER",labHeli,labHeliFlightLand]'}
   $deadline=[DateTime]::UtcNow.AddSeconds(180)
   do {
    Start-Sleep -Seconds 3

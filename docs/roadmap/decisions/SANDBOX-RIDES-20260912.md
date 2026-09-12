@@ -139,3 +139,15 @@ The bounded implementation is installed and functional for these measured cases,
 not a completed all-vehicle acceptance matrix. Sandbox boarding still requires
 the explicit Ready personal weapon action; start the pilot circuit afterwards.
 The latest mission hints remove the obsolete artificial firing-arc warning.
+
+### Passenger tour menu regression (September 12)
+
+Owner reports tour entry vanishes after boarding. Confirmed code cause:
+InGameUI::ProcessActions collects unit->GetVehicle()->GetActions, whereas both
+tour commands were installed only on player. Add start/land actions to labHeli
+and forward their object-local IDs through heli-command.sqs to the existing
+mission handlers. No engine, pose or general action-menu behaviour changes.
+Test-Showcase -FlightMenuOnly now checks actual passenger action-menu text and
+executes the carrier USER actions, rather than bypassing them with exec action.sqs.
+Full FlightOnly uses the same route. The earlier flight test did NOT establish
+menu availability. Installation/runtime acceptance pending while owner is playing.
