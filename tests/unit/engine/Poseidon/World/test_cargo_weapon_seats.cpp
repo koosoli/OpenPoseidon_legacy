@@ -1,8 +1,23 @@
 #include <catch2/catch_test_macros.hpp>
 #include <Poseidon/World/Entities/Vehicles/CargoWeaponSeats.hpp>
+#include <Poseidon/World/Scene/CargoSurface.hpp>
 #include <limits>
 
 using namespace Poseidon;
+
+TEST_CASE("Cargo shell ray hits either face without filling cabin space", "[cargo-weapons]")
+{
+    const Vector3 a(-1,-1,0), b(1,-1,0), c(0,1,0);
+    float t = -1;
+    REQUIRE(CargoTriangleHit(Vector3(0,0,-1), Vector3(0,0,1), a,b,c,t));
+    REQUIRE(t == .5f);
+    REQUIRE(CargoTriangleHit(Vector3(0,0,1), Vector3(0,0,-1), a,b,c,t));
+    REQUIRE(t == .5f);
+    REQUIRE_FALSE(CargoTriangleHit(Vector3(0,0,1), Vector3(0,0,2), a,b,c,t));
+    REQUIRE_FALSE(CargoTriangleHit(Vector3(2,0,-1), Vector3(2,0,1), a,b,c,t));
+    REQUIRE_FALSE(CargoTriangleHit(Vector3(0,0,1), Vector3(0,0,1), a,b,c,t));
+    REQUIRE_FALSE(CargoTriangleHit(Vector3(0,0,-1), Vector3(0,0,1), a,a,a,t));
+}
 
 TEST_CASE("Player cargo free aim does not change NPC arc policy", "[cargo-weapons]")
 {

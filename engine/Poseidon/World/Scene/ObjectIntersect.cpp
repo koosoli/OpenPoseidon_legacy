@@ -1,4 +1,5 @@
 #include <Poseidon/Core/Application.hpp>
+#include <Poseidon/World/Scene/CargoSurface.hpp>
 
 #include <Poseidon/World/Scene/Object.hpp>
 #include <Poseidon/Graphics/Core/TLVertex.hpp>
@@ -670,6 +671,59 @@ inline Vector3 NearestPoint(Vector3Par beg, Vector3Par end, Vector3Par pos)
     float t = (eb * pb) / eb.SquareSizeInline();
     saturate(t, 0, 1);
     return beg + eb * t;
+}
+
+bool IntersectCargoSurface(Object& carrier, CollisionBuffer& result, Vector3Par start, Vector3Par end)
+{
+    auto* lod = carrier.GetShape();
+    if (!lod) return false;
+    auto* shape = lod->LevelOpaque(0);
+    if (!shape || shape->BeginFaces() == shape->EndFaces()) return false;
+    const Vector3 segment = end-start;
+    const float length2 = segment.SquareSize();
+    const float along = length2 > 1e-12f ? std::clamp(((carrier.Position()-start)*segment)/length2, 0.0f, 1.0f) : 0;
+    if ((start+segment*along).Distance2(carrier.Position()) > Square(2*carrier.Scale()*lod->BoundingSphere()))
+        return true;
+    carrier.Animate(0);
+    const Matrix4 inverse = carrier.GetInvTransform();
+    const Vector3 s = inverse.FastTransform(start), e = inverse.FastTransform(end);
+    float nearest = 2;
+    Vector3 normal = VZero;
+    Texture* texture = nullptr;
+    bool usable = false;
+    for (Offset o = shape->BeginFaces(); o < shape->EndFaces(); shape->NextFace(o))
+    {
+        const Poly& face = shape->Face(o);
+        if (face.N() < 3 || (face.Special() & (IsHidden | IsHiddenProxy))) continue;
+        usable = true;
+        const Vector3 a = shape->Pos(face.GetVertex(0));
+        for (int i=1; i+1<face.N(); ++i)
+        {
+            const Vector3 b = shape->Pos(face.GetVertex(i)), c = shape->Pos(face.GetVertex(i+1));
+            float t;
+            if (CargoTriangleHit(s,e,a,b,c,t) && t < nearest)
+            {
+                nearest = t;
+                normal = CargoCross(b-a,c-a).Normalized();
+                texture = face.GetTexture();
+            }
+        }
+    }
+    carrier.Deanimate(0);
+    if (nearest <= 1)
+    {
+        auto& hit = result.Append();
+        hit.pos = s+(e-s)*nearest;
+        hit.texture = texture;
+        hit.surfaceNormal = normal;
+        hit.dirOut = normal;
+        hit.under = nearest;
+        hit.underVolume = 0;
+        hit.hierLevel = 0;
+        hit.object = &carrier;
+        hit.component = -1;
+    }
+    return usable;
 }
 
 void Object::Intersect(CollisionBuffer& result, Vector3Par beg, Vector3Par end, float radius, ObjIntersect type) const

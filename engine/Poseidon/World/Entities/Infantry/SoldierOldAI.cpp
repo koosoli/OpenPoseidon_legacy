@@ -2,6 +2,7 @@
 #include <Poseidon/World/Entities/Infantry/SoldierOldCommon.hpp>
 #include <Poseidon/World/Entities/Infantry/InfantryObservation.hpp>
 #include <Poseidon/Core/Application.hpp>
+#include <Poseidon/World/Scene/CargoSurface.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <cmath>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
@@ -185,6 +186,14 @@ Vector3 Man::CargoBulletOrigin(int weapon) const
     CollisionBuffer hits;
     GLandscape->ObjectCollision(hits, const_cast<Man*>(this), nullptr,
         frame.FastTransform(pivot), frame.FastTransform(muzzle), .02f, ObjIntersectFire);
+    Object* carrier = Brain()->GetVehicleIn();
+    CollisionBuffer surface;
+    if (IntersectCargoSurface(*carrier, surface, frame.FastTransform(pivot), frame.FastTransform(muzzle)))
+    {
+        for (int i = 0; i < hits.Size(); ++i)
+            if (hits[i].object == carrier) hits[i].object = nullptr;
+        for (int i = 0; i < surface.Size(); ++i) hits.Append() = surface[i];
+    }
     float entry = 1.0f;
     for (int i = 0; i < hits.Size(); ++i)
         if (hits[i].object && hits[i].object != this && std::isfinite(hits[i].under))

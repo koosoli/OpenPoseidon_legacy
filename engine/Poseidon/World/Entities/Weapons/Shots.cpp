@@ -1,4 +1,6 @@
 #include <Poseidon/Core/Application.hpp>
+#include <Poseidon/World/Scene/CargoSurface.hpp>
+#include <Poseidon/World/Entities/Infantry/Person.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Core/Config/UserConfig.hpp>
 #include <Poseidon/World/Entities/Weapons/Shots.hpp>
@@ -869,6 +871,20 @@ void ShotShell::Simulate(float deltaT, SimulationImportance prec)
         // test collision with objects
         CollisionBuffer collision;
         GLandscape->ObjectCollision(collision, this, _parent, Position(), position, 0);
+        // A passenger's own carrier may have convex hulls spanning its cabin.
+        // Resolve its actual shell without excluding that shell or other crew.
+        if (dyn_cast<ShotBullet>(this) && _parent && _parent == GWorld->GetRealPlayer() &&
+            GWorld->GetMode() != GModeNetware && _parent->GetHierachyParent())
+        {
+            auto* carrier = const_cast<Object*>(_parent->GetHierachyParent());
+            CollisionBuffer surface;
+            if (IntersectCargoSurface(*carrier, surface, Position(), position))
+            {
+                for (int i = 0; i < collision.Size(); ++i)
+                    if (collision[i].object == carrier) collision[i].object = nullptr;
+                for (int i = 0; i < surface.Size(); ++i) collision.Append() = surface[i];
+            }
+        }
         Vector3 probeHit, probeNormal;
         if (IsLocal() && ShowcaseContactBeforeScenery(Position(), position, collision, probeHit, probeNormal))
         {
