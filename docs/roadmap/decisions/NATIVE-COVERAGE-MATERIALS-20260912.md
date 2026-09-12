@@ -121,6 +121,15 @@ The first ambient-only experiment was conservative, not full native semantics.
 The opt-in now also scales foliage sun/local diffuse and local ambient, without
 darkening emissive/specular or changing other materials. New installed A/B pending.
 
+d7268a32 installed diffuse-cavity off/on both pass lifecycle. Identical 22,360
+registered / 6,463 main / 15,756,906 triangles, native 1080p MSAA4, pinned governor.
+Endpoints 34.613/34.878 ms are within the prior run-to-run spread, not a proven
+cost or benefit. Inspected images still show the broad pale forest appearance:
+the cavity change is not a sufficient solution. Keep it OFF rather than claim
+the user's contrast request complete. No further parameter sweeps on this path.
+Ground normal mapping remains ON; the MLOD worker bank-boundary fix is ON.
+Far coverage still requires the authored visual-only integration described above.
+
 ## Disk housekeeping interruption
 
 User's can-this-be-deleted contained the still-required .tmp-dlss-sdk. Restored

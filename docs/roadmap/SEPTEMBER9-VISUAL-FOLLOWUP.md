@@ -2022,6 +2022,16 @@ The intermittent hang remains an open diagnosis, and material/FFV/far-field
 completion is not implied by these safety increments.
 # September 12 native continuation
 
+September 13 installed d7268a32: native MLOD worker material-bank race corrected.
+Dump identified global unordered_map insertion in the conversion worker during
+shutdown; prepared main-thread material rows now cover the MLOD recovery path.
+Three repeated native lifecycle checks and the dedicated 7-assertion material
+identity/no-fallback test pass, plus the 71-assertion existing ODOL fixture.
+Two more diffuse-cavity lifecycle runs pass. Neither cavity nor coalesced PCF
+has earned default activation; both remain OFF. Native ground normals are ON.
+Native distant-object coverage and the requested stronger forest contrast remain
+OPEN, not completed by these tests. Details and metrics are in the record below.
+
 [Native coverage/material evidence](decisions/NATIVE-COVERAGE-MATERIALS-20260912.md):
 native terrain NHO normal binding installed; forest same-build off/on lifecycle
 checks pass. Tree contrast and native authored far-LOD coverage remain OPEN.
