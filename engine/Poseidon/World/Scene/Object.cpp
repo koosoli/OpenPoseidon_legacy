@@ -52,6 +52,80 @@
 
 namespace Poseidon
 {
+// REN-INTERP-001 (see Object.hpp). POSEIDON_RENDER_INTERP=0 turns it off for an A/B; the
+// jump guard is generous on purpose: 40 m in one tick is 2400 m/s, faster than anything
+// the game simulates, so anything beyond it is a teleport and must snap, not slide.
+namespace
+{
+float g_renderInterpAlpha = 1.0f;
+constexpr float kRenderInterpMaxJump = 40.0f;
+bool RenderInterpEnabledFromEnv()
+{
+    const char* e = std::getenv("POSEIDON_RENDER_INTERP");
+    return e == nullptr || e[0] == 0 || e[0] != '0';
+}
+} // namespace
+
+bool Object::RenderInterpEnabled()
+{
+    static const bool on = RenderInterpEnabledFromEnv();
+    return on;
+}
+
+void Object::SetRenderInterpAlpha(float alpha)
+{
+    g_renderInterpAlpha = alpha < 0.0f ? 0.0f : (alpha > 1.0f ? 1.0f : alpha);
+}
+
+float Object::RenderInterpAlpha()
+{
+    return g_renderInterpAlpha;
+}
+
+Matrix4 Object::RenderTransform() const
+{
+    const Matrix4& cur = Transform();
+    if (!_renderPrevValid || !RenderInterpEnabled())
+        return cur;
+    const float alpha = g_renderInterpAlpha;
+    if (alpha >= 1.0f)
+        return cur;
+    const Vector3 dp = cur.Position() - _renderPrev.Position();
+    if (dp.SquareSize() > kRenderInterpMaxJump * kRenderInterpMaxJump)
+        return cur; // teleport / spawn / setPos: snap
+    if (alpha <= 0.0f)
+        return _renderPrev;
+    Matrix4 out;
+    // Orientation: blend the direction and up vectors and rebuild an orthonormal basis;
+    // for the sub-tick rotations this is applied to it is indistinguishable from a slerp,
+    // and the object's scale is re-applied below.
+    const Matrix3& a = _renderPrev.Orientation();
+    const Matrix3& b = cur.Orientation();
+    const Vector3 dir = a.Direction() * (1.0f - alpha) + b.Direction() * alpha;
+    const Vector3 up = a.DirectionUp() * (1.0f - alpha) + b.DirectionUp() * alpha;
+    if (dir.SquareSize() < 1e-8f || up.SquareSize() < 1e-8f)
+        return cur;
+    Matrix3 o;
+    o.SetDirectionAndUp(dir, up);
+    const float scale = cur.Scale();
+    if (scale > 0.0f && fabs(scale - 1.0f) > 1e-4f)
+        o = o * scale;
+    out.SetOrientation(o);
+    out.SetPosition(_renderPrev.Position() + dp * alpha);
+    return out;
+}
+
+const FrameBase& Object::RenderFrame(FrameBase& storage) const
+{
+    if (!_renderPrevValid || !RenderInterpEnabled() || g_renderInterpAlpha >= 1.0f)
+        return *this;
+    storage.SetTransform(RenderTransform());
+    return storage;
+}
+} // namespace Poseidon
+
+namespace Poseidon
+{
 template <>
 const ::Poseidon::Foundation::EnumName* ::Poseidon::Foundation::GetEnumNames(TargetSide dummy)
 {

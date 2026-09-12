@@ -982,6 +982,10 @@ void World::Simulate(float deltaT, bool& enableDraw)
         const std::size_t steps = _simulationSteps.Advance(deltaT);
         for (std::size_t step = 0; step < steps; ++step)
         {
+            // REN-INTERP-001: remember where every moving entity is BEFORE this tick, so the
+            // draw can blend from the last tick's state to this one. Before EACH tick, so a
+            // two-tick frame interpolates between its last two ticks, not across both.
+            CaptureRenderPrevFrames();
             StepSimulation(fixedDeltaT, fixedNoAccDeltaT, camVehicle, updateVisibility);
         }
         stepFrame.steps = static_cast<std::uint32_t>(steps);
@@ -1186,6 +1190,10 @@ void World::Simulate(float deltaT, bool& enableDraw)
         stepFrame.totalTicks = totalTicks;
     }
     Dev::PublishFixedStepFrame(stepFrame);
+    // REN-INTERP-001: a paused world draws its current state (alpha 1); a running one draws
+    // the accumulator's leftover fraction into the last tick. Set once per frame, here,
+    // so every draw of this frame -- objects, shadows, camera -- agrees on the same time.
+    Object::SetRenderInterpAlpha(stepFrame.running ? stepFrame.alpha : 1.0f);
 
     if (IsSimulationEnabled())
     {
@@ -1291,7 +1299,9 @@ void World::Simulate(float deltaT, bool& enableDraw)
         else if (cameraVehicle)
         {
             fov = _camFOV[_camType];
-            transform = cameraVehicle->Transform();
+            // REN-INTERP-001: the camera rides the vehicle's DRAWN frame, never a different
+            // time than the body it is attached to.
+            transform = cameraVehicle->RenderTransform();
             // if any vehicle control key is pressed, set to manual control
             // check vehicle control keys
 
@@ -2233,6 +2243,23 @@ void World::Simulate(float deltaT, bool& enableDraw)
 // recorded that order first precisely so this change could not quietly alter it. In
 // particular scripts still run BEFORE the AI, which is where the engine has always put
 // them and where Phase 8's diagram does not; see the note in SimStageGraph.hpp.
+// REN-INTERP-001: the entities the tick loop moves. Buildings and static world objects
+// never move and are not captured, so they keep drawing at their own frame for free.
+void World::CaptureRenderPrevFrames()
+{
+    if (!Object::RenderInterpEnabled())
+        return;
+    for (int i = 0; i < _vehicles.Size(); i++)
+        if (Entity* e = _vehicles.Get(i))
+            e->CaptureRenderPrev();
+    for (int i = 0; i < _animals.Size(); i++)
+        if (Entity* e = _animals.Get(i))
+            e->CaptureRenderPrev();
+    for (int i = 0; i < _fastVehicles.Size(); i++)
+        if (Entity* e = _fastVehicles[i])
+            e->CaptureRenderPrev();
+}
+
 void World::StepSimulation(float deltaT, float noAccDeltaT, Entity* cameraVehicle, bool updateVisibility)
 {
     struct StepContext

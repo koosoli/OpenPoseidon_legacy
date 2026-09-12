@@ -293,6 +293,14 @@ class Object: public NetworkObject, public FrameBase, public IAnimator
 	// default for non-GPU-driven objects and survives the ClassIsMovableZeroed memset pattern.
 	unsigned char _gpuCoverage = 0;
 
+	// REN-INTERP-001: the transform this object had BEFORE the last fixed-step tick that moved
+	// it, for render interpolation. Written by World::StepSimulation (moving entities only,
+	// before each tick); read by the draw traversal through RenderFrame(). Never read by the
+	// simulation, never written back. Static objects are never captured, so the flag stays
+	// false and RenderFrame() returns *this for them at the cost of one branch.
+	Matrix4 _renderPrev;
+	bool _renderPrevValid = false;
+
 	// Stable per-object render identity (docs/roadmap/render-snapshot-design.md §4,
 	// slice ID-1): a process-monotonic 32-bit id, assigned on first use by the
 	// renderer's per-draw identity bracket. Object-resident for the same reason
@@ -338,6 +346,25 @@ class Object: public NetworkObject, public FrameBase, public IAnimator
 	// EngineWgpu's Scene{ObjectCreated,Removed,Moved} hooks; read by GpuDrivenCoverage().
 	int GetGpuCoverage() const { return _gpuCoverage; }
 	void SetGpuCoverage( int cov ) { _gpuCoverage = (unsigned char)cov; }
+
+	// REN-INTERP-001 -- render interpolation between fixed-step ticks.
+	// The simulation advances in 1/60 s ticks; a frame that is not a whole number of ticks
+	// long shows tick states at uneven world-time spacing (1,1,2,1,1,2 ticks per frame at
+	// 47 fps), which is motion judder even when frames are delivered evenly. Drawing each
+	// moving object at prev + alpha * (cur - prev), alpha being the accumulator's leftover
+	// fraction, makes the displayed world time advance by exactly the frame time.
+	void CaptureRenderPrev() { _renderPrev = Transform(); _renderPrevValid = true; }
+	void InvalidateRenderPrev() { _renderPrevValid = false; }
+	bool HasRenderPrev() const { return _renderPrevValid; }
+	/// The frame to DRAW this object with. Returns *this when interpolation is off, the
+	/// object never moved, or it jumped further than a tick of any plausible motion (a
+	/// teleport, a spawn, a setPos); otherwise fills `storage` and returns it.
+	const FrameBase& RenderFrame(FrameBase& storage) const;
+	Matrix4 RenderTransform() const;
+	/// Per-frame render interpolation state, set by World after its tick loop.
+	static void SetRenderInterpAlpha(float alpha);
+	static float RenderInterpAlpha();
+	static bool RenderInterpEnabled();
 
 	// Perform any animation of object shape. May transform vertices or change face
 	// attributes (texture, flags). When changing face attributes, the section

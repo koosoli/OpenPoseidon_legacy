@@ -462,6 +462,7 @@ class World
 	void RemoveAnyVehicle( Entity *vehicle );
 
 	Entity *GetVehicle( int i ) const {return _vehicles.Get(i);}
+	void CaptureRenderPrevFrames(); // REN-INTERP-001, before each fixed-step tick
 	int NVehicles() const {return _vehicles.Size();}
 	void AddVehicle( Entity *vehicle );
 	void RemoveVehicle( Entity *vehicle );

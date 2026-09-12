@@ -122,14 +122,14 @@ void FramePaceTraceFlush()
     FlushOne(s.prefix + ".main.csv", s.main, s.mainFlushed, s.mainDropped,
              "frame,t_start_ms,t_pace_ms,t_end_ms,deltaT_ms,steps,alpha,total_ticks,setup_ms,sim_ms,"
              "draw_init_ms,draw_ms,hud_ms,sound_ms,swap_ms,cap_fps,pace_period_ms,pace_elapsed_ms,"
-             "pace_sleep_req_ms,pace_sleep_act_ms",
+             "pace_sleep_req_ms,pace_sleep_act_ms,cam_dx_m,interp_alpha",
              [](FILE* f, const FramePaceMainRow& r)
              {
-                 std::fprintf(f, "%u,%.3f,%.3f,%.3f,%.3f,%u,%.4f,%llu,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%d,%.3f,%.3f,%.3f,%.3f\n",
+                 std::fprintf(f, "%u,%.3f,%.3f,%.3f,%.3f,%u,%.4f,%llu,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%d,%.3f,%.3f,%.3f,%.3f,%.4f,%.4f\n",
                               r.frame, r.tStartMs, r.tPaceMs, r.tEndMs, r.deltaTMs, r.steps, r.alpha,
                               static_cast<unsigned long long>(r.totalTicks), r.setupMs, r.simMs, r.drawInitMs,
                               r.drawMs, r.hudMs, r.soundMs, r.swapMs, r.capFps, r.pacePeriodMs, r.paceElapsedMs,
-                              r.paceSleepReqMs, r.paceSleepActMs);
+                              r.paceSleepReqMs, r.paceSleepActMs, r.camDxM, r.interpAlpha);
              });
     FlushOne(s.prefix + ".producer.csv", s.producer, s.producerFlushed, s.producerDropped,
              "frame,t_publish_ms,predraw_wait_ms,lazy_wait_ms,slot_wait_ms,lockstep_wait_ms,render_thread,overlap",

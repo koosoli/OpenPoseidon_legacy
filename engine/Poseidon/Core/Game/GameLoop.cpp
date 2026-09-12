@@ -85,11 +85,47 @@ struct PaceDecision
 };
 static PaceDecision gLastPace;
 
+// PACE-001 diagnostic: POSEIDON_PACE_LEGACY_SLEEP=1 reproduces the pacer as it was in the
+// 2026-08-22 build (integer-millisecond period, ::Sleep, no timeBeginPeriod) INSIDE the
+// current process, so the trace can show what that pacer did with every DLL this build
+// loads -- a standalone probe cannot know whether something in-process had raised the
+// timer resolution. Not a play setting.
+static bool LegacySleepPacer()
+{
+    static const bool v = []
+    {
+        const char* e = std::getenv("POSEIDON_PACE_LEGACY_SLEEP");
+        const bool on = e != nullptr && e[0] != 0 && e[0] != '0';
+        if (on)
+            LOG_WARN(Core, "Frame pacer: LEGACY Sleep(ms) mode (POSEIDON_PACE_LEGACY_SLEEP) -- diagnostic only");
+        return on;
+    }();
+    return v;
+}
+
 static void PaceToFps(int targetFps, Foundation::unsigned64 frameStartUs)
 {
     gLastPace = PaceDecision{};
     if (targetFps <= 0)
         return;
+    if (LegacySleepPacer())
+    {
+        const int minMsPerFrame = 1000 / targetFps;
+        const int64_t elapsedUs = static_cast<int64_t>(Poseidon::Foundation::getSystemTime() - frameStartUs);
+        const int durationMs = static_cast<int>(elapsedUs / 1000);
+        const int sleepMillis = minMsPerFrame - durationMs;
+        gLastPace.capFps = targetFps;
+        gLastPace.periodUs = static_cast<int64_t>(minMsPerFrame) * 1000;
+        gLastPace.elapsedUs = elapsedUs;
+        if (sleepMillis > 0)
+        {
+            gLastPace.sleepReqUs = static_cast<int64_t>(sleepMillis) * 1000;
+            const Foundation::unsigned64 t0 = Poseidon::Foundation::getSystemTime();
+            ::Sleep(static_cast<DWORD>(sleepMillis));
+            gLastPace.sleepActUs = static_cast<int64_t>(Poseidon::Foundation::getSystemTime() - t0);
+        }
+        return;
+    }
 
     const int64_t periodUs = 1'000'000 / targetFps;
     const int64_t elapsedUs = static_cast<int64_t>(Poseidon::Foundation::getSystemTime() - frameStartUs);
@@ -117,6 +153,8 @@ static void PaceToFps(int targetFps, Foundation::unsigned64 frameStartUs)
 static void SetFrameCapTimerResolution(bool wanted)
 {
 #ifdef _WIN32
+    if (LegacySleepPacer())
+        return; // the 2026-08-22 build never asked for 1 ms; the diagnostic must not either
     static bool granted = false;
     if (wanted == granted)
         return;
@@ -292,6 +330,20 @@ void RenderFrame(float deltaT, bool enableDraw)
         row.paceElapsedMs = static_cast<float>(gLastPace.elapsedUs) * 0.001f;
         row.paceSleepReqMs = static_cast<float>(gLastPace.sleepReqUs) * 0.001f;
         row.paceSleepActMs = static_cast<float>(gLastPace.sleepActUs) * 0.001f;
+        // The motion the player actually sees: how far the render camera moved this frame.
+        {
+            static Vector3 lastCam(0, 0, 0);
+            static bool haveLast = false;
+            const Camera* cam = GScene ? GScene->GetCamera() : nullptr;
+            if (cam)
+            {
+                const Vector3 p = cam->Position();
+                row.camDxM = haveLast ? (p - lastCam).Size() : 0.0f;
+                lastCam = p;
+                haveLast = true;
+            }
+        }
+        row.interpAlpha = Object::RenderInterpAlpha();
         Dev::FramePaceTraceMain(row);
     }
 }

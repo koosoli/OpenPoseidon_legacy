@@ -1,0 +1,37 @@
+; PACE-001 ride arm: the player sits in the cargo of an AI-driven jeep, so the view is
+; ATTACHED to a simulated vehicle (the case where fixed-step ticks show as motion judder).
+; Phases run off mission time; FT lines carry the engine frame counter for the trace.
+_settle = 25
+_statdur = 20
+_movedur = 60
+~0.5
+ffvDriver assignAsDriver ffvJeep
+ffvDriver moveInDriver ffvJeep
+ffvPassenger assignAsCargo ffvJeep
+ffvPassenger moveInCargo ffvJeep
+ffvJeep setFuel 1
+doStop ffvDriver
+logInfo format ["RIDE cfg settle=%1 static=%2 move=%3 pos=%4", _settle, _statdur, _movedur, getPos ffvJeep]
+#settle
+logInfo format ["FT W %1 %2", _time, triFrameCount]
+~0.001
+? _time < _settle : goto "settle"
+_r = triPerfReset 0
+logInfo format ["RIDE phase=static t=%1 pos=%2", _time, getPos ffvJeep]
+_statend = _time + _statdur
+#stat
+logInfo format ["FT S %1 %2", _time, triFrameCount]
+~0.001
+? _time < _statend : goto "stat"
+logInfo format ["RIDE staticend t=%1", _time]
+_r = triPerfReset 0
+ffvDriver doMove [9700, 6800, 0]
+_moveend = _time + _movedur
+logInfo format ["RIDE phase=move t=%1", _time]
+#mov
+logInfo format ["FT M %1 %2 %3", _time, triFrameCount, speed ffvJeep]
+~0.001
+? _time < _moveend : goto "mov"
+doStop ffvDriver
+logInfo format ["RIDE moveend t=%1 pos=%2", _time, getPos ffvJeep]
+exit

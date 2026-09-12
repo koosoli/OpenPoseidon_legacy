@@ -106,6 +106,13 @@ def analyse_phase(main, producer, worker, lo, hi):
     flips = sum(1 for a, b in zip(signs, signs[1:]) if a != 0 and b != 0 and a != b)
     alternation = flips / max(1, len(signs) - 1)
 
+    # Motion as seen: camera displacement per frame. Even frames with uneven displacement is
+    # judder; the relative jitter of dx is the number that says so.
+    dx = [r.get("cam_dx_m", 0.0) for r in rows[1:]]
+    dx_med = percentile(dx, 50) if dx else 0.0
+    dx_jitter = (sum(abs(b - a) for a, b in zip(dx, dx[1:])) / max(1, len(dx) - 1)) if dx else 0.0
+    # displacement per millisecond of frame period: constant for smooth motion
+    speed = [d / p * 1000.0 for d, p in zip(dx, periods) if p > 0]
     steps = [r["steps"] for r in rows]
     step_changes = sum(1 for a, b in zip(steps, steps[1:]) if a != b) / max(1, len(steps) - 1)
     step_hist = {}
@@ -138,6 +145,10 @@ def analyse_phase(main, producer, worker, lo, hi):
         "steps_hist": step_hist,
         "steps_change_rate": step_changes,
         "ticks_per_frame": sum(steps) / len(steps),
+        "cam_dx": stats(dx),
+        "cam_dx_jitter_rel": (dx_jitter / dx_med) if dx_med > 1e-6 else float("nan"),
+        "cam_speed": stats(speed),
+        "interp_alpha": stats([r.get("interp_alpha", 0.0) for r in rows]),
     }
     prod = [r for r in producer if lo <= r["frame"] <= hi]
     if prod:
@@ -188,6 +199,7 @@ def report(label, phase, a):
     print(f"        swap/publish {fmt_stats(a['swap_ms'])}")
     print(f"  sim input deltaT {fmt_stats(a['deltaT_ms'])} | ticks/frame {a['ticks_per_frame']:.2f} hist {dict(sorted(a['steps_hist'].items()))} | "
           f"step-count changes between consecutive frames {100*a['steps_change_rate']:.0f}%")
+    print(f"  camera motion: dx/frame {fmt_stats(a['cam_dx'], 'm')} | dx jitter {100*a['cam_dx_jitter_rel']:.0f}% of median | speed {fmt_stats(a['cam_speed'], 'm/s')} | interp alpha {fmt_stats(a['interp_alpha'], '')}")
     if "producer" in a:
         p = a["producer"]
         print(f"  producer (thread={p['render_thread']} overlap={p['overlap']}): predraw {fmt_stats(p['predraw_wait'])}")

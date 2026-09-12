@@ -1912,9 +1912,13 @@ static void DrawSortObject(SortObject* oi)
     } drawObjectGuard(obj);
     const bool cockpit =
         GWorld && oi->drawLOD != LOD_INVISIBLE && oi->drawLOD == obj->InsideLOD(GWorld->GetCameraType());
+    // REN-INTERP-001: moving objects draw at their interpolated frame; everything else at
+    // its own (RenderFrame returns *obj for those, one branch).
+    FrameBase interpFrame;
+    const FrameBase& drawFrame = obj->RenderFrame(interpFrame);
     if (!cockpit)
     {
-        obj->Draw(oi->drawLOD, oi->orClip, *obj);
+        obj->Draw(oi->drawLOD, oi->orClip, drawFrame);
         return;
     }
     const render::PassKindHint savedHint = GEngine->GetPassKindHint();
@@ -1922,7 +1926,7 @@ static void DrawSortObject(SortObject* oi)
     // whether the backend treats the draw as an enclosed interior for ambient.
     GEngine->SetPassKindHint(obj->InsideLODIsEnclosed() ? render::PassKindHint::Cockpit
                                                         : render::PassKindHint::FirstPersonBody);
-    obj->Draw(oi->drawLOD, oi->orClip, *obj);
+    obj->Draw(oi->drawLOD, oi->orClip, drawFrame);
     GEngine->SetPassKindHint(savedHint);
 }
 
@@ -3261,7 +3265,9 @@ void Scene::DrawExShadow(SortObject* oi)
     LODShapeWithShadow* shape = oi->shape;
     Vector3Val objPos = obj->Position();
     Point3 shadowPos = objPos;
-    const FrameBase& pos = *obj;
+    // REN-INTERP-001: the shadow must sit where the body is drawn, not where the tick left it.
+    FrameBase interpFrame;
+    const FrameBase& pos = obj->RenderFrame(interpFrame);
 
     if (!ShadowPos(objPos, shadowPos, _mainLight))
     {

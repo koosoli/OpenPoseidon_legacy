@@ -39,6 +39,8 @@ struct FramePaceMainRow
     float         paceElapsedMs = 0.0f;  ///< Frame time seen by the pacer when it decided.
     float         paceSleepReqMs = 0.0f; ///< What it asked SleepUs for (0 = frame was already late).
     float         paceSleepActMs = 0.0f; ///< What the sleep actually took.
+    float         camDxM = 0.0f;         ///< Camera displacement since the previous frame (m): the motion the player sees.
+    float         interpAlpha = 0.0f;    ///< Render interpolation alpha used for this frame's draw.
 };
 
 /// Producer side of the render handoff (EngineWgpu::NextFrame), one row per published frame.
