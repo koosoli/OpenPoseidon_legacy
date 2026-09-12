@@ -5,6 +5,8 @@ pub(super) struct CameraUpload<'a> {
     queue: &'a wgpu::Queue,
     buffer: &'a wgpu::Buffer,
     bytes: Option<Vec<u8>>,
+    started: Option<std::time::Instant>,
+    writes: usize,
 }
 
 fn copy_write(bytes: &mut [u8], offset: u64, value: &[u8]) {
@@ -16,17 +18,24 @@ fn copy_write(bytes: &mut [u8], offset: u64, value: &[u8]) {
 impl<'a> CameraUpload<'a> {
     pub(super) fn new(queue: &'a wgpu::Queue, buffer: &'a wgpu::Buffer, size: u64) -> Self {
         static ENABLED: OnceLock<bool> = OnceLock::new();
+        static TRACE: OnceLock<bool> = OnceLock::new();
         let enabled = *ENABLED.get_or_init(|| {
             std::env::var("WGR_CAMERA_UPLOAD_BATCH").map_or(true, |v| v != "0")
         });
+        let started = (*TRACE.get_or_init(|| {
+            std::env::var("WGR_CAMERA_UPLOAD_TRACE").is_ok_and(|v| v == "1")
+        })).then(std::time::Instant::now);
         Self {
             queue,
             buffer,
             bytes: enabled.then(|| vec![0; usize::try_from(size).expect("camera size fits usize")]),
+            started,
+            writes: 0,
         }
     }
 
     pub(super) fn write_buffer(&mut self, buffer: &wgpu::Buffer, offset: u64, value: &[u8]) {
+        self.writes += 1;
         if let Some(bytes) = &mut self.bytes {
             copy_write(bytes, offset, value);
         } else {
@@ -35,8 +44,26 @@ impl<'a> CameraUpload<'a> {
     }
 
     pub(super) fn finish(self) {
+        let batched = self.bytes.is_some();
         if let Some(bytes) = self.bytes {
             self.queue.write_buffer(self.buffer, 0, &bytes);
+        }
+        if let Some(started) = self.started {
+            // Diagnostic only: CPU preparation/enqueue, not GPU completion or FPS.
+            thread_local! {
+                static TOTAL: std::cell::Cell<(usize, f64)> = const { std::cell::Cell::new((0, 0.0)) };
+            }
+            let elapsed = started.elapsed().as_secs_f64() * 1e6;
+            TOTAL.with(|total| {
+                let (n, us) = total.get();
+                if n + 1 == 512 {
+                    eprintln!("camera upload: batch={batched} input_writes={} queue_writes={} cpu_mean_us={:.3} samples=512",
+                        self.writes, if batched { 1 } else { self.writes }, (us + elapsed) / 512.0);
+                    total.set((0, 0.0));
+                } else {
+                    total.set((n + 1, us + elapsed));
+                }
+            });
         }
     }
 }
