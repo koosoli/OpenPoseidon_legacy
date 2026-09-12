@@ -118,12 +118,24 @@ the fallback as finished all-vehicle support or a solution for every weapon.
   First-person pose/camera visibly remains draft quality.
 - UAZ validation initially stopped in the harness before player takeover: it
   required active NPC FFV even though the new generic policy is player-only.
-  These failures do not validate or disprove UAZ player firing. Removing that
-  harness assumption is in progress; NPC permissions remain unchanged.
+  These failures do not validate or disprove UAZ player firing. 27e6f1ea removes
+  that harness assumption; NPC permissions remain unchanged.
+- baseline-20260912-200356: Jeep normal mouse sweep/fire, keyboard reload,
+  menu exit/reentry, Ready/Stow/Ready regression passed. Captured muzzle vectors
+  change with mouse aim; this is not merely permission to fire in one direction.
+- baseline-20260912-200605: UAZ generic unmapped cargo fallback passed player
+  exterior hit (first shot, damage 0.50623, ammo 29), reload and save/load.
+  Test aiming now uses the actual muzzle and target position, not a fixed Jeep
+  direction. Earlier UAZ misses with the fixed direction were not acceptance.
+  No UAZ-specific seat configuration or animation was added.
 
-Remaining acceptance: generic unmapped vehicle, mouse sweep/reentry regression,
-save/load, deliberate pilot hit, proxy-heavy/different-skeleton vehicle coverage,
+Remaining acceptance: deliberate pilot hit, proxy-heavy/different-skeleton vehicle coverage,
 glass/material damage fidelity of visual shell contacts (component=-1), and
 measured additional CPU cost. The shell query currently skips hidden/proxy faces;
 do not assume every addon vehicle's shell is represented entirely in visual LOD0.
 No claim of all weapons, multiplayer support or polished full-body aiming.
+
+The bounded implementation is installed and functional for these measured cases,
+not a completed all-vehicle acceptance matrix. Sandbox boarding still requires
+the explicit Ready personal weapon action; start the pilot circuit afterwards.
+The latest mission hints remove the obsolete artificial firing-arc warning.

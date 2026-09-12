@@ -395,7 +395,10 @@ try {
         Start-Sleep -Seconds 2
         $null=Send @{cmd='crew_cursor';x=60;y=0.01;z=-0.07}
         Start-Sleep -Seconds 3
-        $null=Send @{cmd='crew_pose_probe'}
+        $aimPose=Send @{cmd='crew_pose_probe'}
+        $targetPosition=(Send @{cmd='eval';code='getPosASL ffvTarget'}).result | ConvertFrom-Json
+        $null=Send @{cmd='crew_cursor';x=([double]$targetPosition[0]-$aimPose.muzzleX);y=([double]$targetPosition[2]+1.3-$aimPose.muzzleY);z=([double]$targetPosition[1]-$aimPose.muzzleZ)}
+        Start-Sleep -Seconds 2
         $null=Send @{cmd='eval';code='ffvShots'} '0'
         $null=Send @{cmd='screenshot';path=(Join-Path $output 'player-before-fire.png')}
         if ($MovingPlayer) {
@@ -418,7 +421,9 @@ try {
             return
         }
         for ($attempt=0; $attempt -lt 12; $attempt++) {
-            $null=Send @{cmd='crew_cursor';x=60;y=0.01;z=-0.07}
+            $aimPose=Send @{cmd='crew_pose_probe'}
+            $targetPosition=(Send @{cmd='eval';code='getPosASL ffvTarget'}).result | ConvertFrom-Json
+            $null=Send @{cmd='crew_cursor';x=([double]$targetPosition[0]-$aimPose.muzzleX);y=([double]$targetPosition[2]+1.3-$aimPose.muzzleY);z=([double]$targetPosition[1]-$aimPose.muzzleZ)}
             $null=Send @{cmd='mouse_button';button=1;down=$true}
             Start-Sleep -Milliseconds 180
             $null=Send @{cmd='mouse_button';button=1;down=$false}

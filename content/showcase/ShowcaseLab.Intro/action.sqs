@@ -58,7 +58,7 @@ player addMagazine "M16"
 player addMagazine "M16"
 player selectWeapon "M16"
 player assignAsCargo labRideJeep
-hint "JEEP CIRCUIT\nBoard as passenger, then choose Ready personal weapon / Waffe im Fahrzeug bereitmachen. When ready, choose LAB: start / stop Jeep circuit.\n37 unarmed targets, repeated slow laps. Targets are on your RIGHT. Mouse: look/aim. Left click: fire. R: reload. The rifle lowers outside the supported firing arc."
+hint "JEEP CIRCUIT\nBoard as passenger, then choose Ready personal weapon / Waffe im Fahrzeug bereitmachen. When ready, choose LAB: start / stop Jeep circuit.\n37 unarmed targets, repeated slow laps. Targets are on your RIGHT. Mouse: look/aim freely. Left click: fire. R: reload. WARNING: your bullets can hit your own vehicle and crew."
 exit
 #jeepstart
 ? !(player in labRideJeep) : goto "jeepnotaboard"
@@ -77,7 +77,7 @@ exit
 ? ((getPos labHeli) select 2) > 1.5 : goto "heliairborne"
 player assignAsCargo labHeli
 player moveInCargo labHeli
-hint "HELICOPTER RIFLE CIRCUIT\nYou are a passenger with your personal rifle, not the FFAR gunner. Choose Ready personal weapon, then LAB: start helicopter circuit. Aim through the RIGHT door. LAB: return and land helicopter ends the flight."
+hint "HELICOPTER RIFLE CIRCUIT\nYou are a passenger with your personal rifle, not the FFAR gunner. Choose Ready personal weapon, then LAB: start helicopter circuit. Mouse: look/aim freely. The range is by the RIGHT door. WARNING: your bullets can hit your own vehicle and crew. LAB: return and land helicopter ends the flight."
 exit
 #helistart
 ? !(player in labHeli) : goto "helinotaboard"
