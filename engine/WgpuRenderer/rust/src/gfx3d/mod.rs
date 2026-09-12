@@ -14,6 +14,7 @@ pub mod cull;
 
 // Hi-Z depth pyramid for GPU-driven occlusion culling (docs/gpu-culling-and-depth-plan.md §5).
 mod gtao_depth_mips;
+mod camera_upload;
 mod hiz;
 // AST-012A: GPU mip feedback — the finest mip each bindless slot was actually asked for.
 pub mod mip_feedback;
@@ -7125,9 +7126,12 @@ impl Gfx3d {
                 self.gi.generation,
             );
             let buf = self.cameras.buf.as_ref().unwrap();
+            let mut camera_upload = camera_upload::CameraUpload::new(
+                queue, buf, (cameras.len() as u64 - 1) * self.cameras.stride + self.cameras.bind_size,
+            );
             for (i, c) in cameras.iter().enumerate() {
                 let base = i as u64 * self.cameras.stride;
-                queue.write_buffer(buf, base, bytemuck::bytes_of(c));
+                camera_upload.write_buffer(buf, base, bytemuck::bytes_of(c));
                 // Append inv(proj·view) for depth→world unprojection (Frame.inv_view_proj).
                 // Invert view and proj SEPARATELY in f64: the reversed-Z/infinite-far proj has
                 // an ill-conditioned z-row and inverting the combined f32 matrix smears that
@@ -7136,7 +7140,7 @@ impl Gfx3d {
                 let view = glam::DMat4::from_cols_array(&c.view.map(f64::from));
                 let proj = glam::DMat4::from_cols_array(&c.proj.map(f64::from));
                 let inv_vp = (view.inverse() * proj.inverse()).as_mat4().to_cols_array();
-                queue.write_buffer(
+                camera_upload.write_buffer(
                     buf,
                     base + std::mem::size_of::<WgrCamera>() as u64,
                     bytemuck::cast_slice(&inv_vp),
@@ -7154,7 +7158,7 @@ impl Gfx3d {
                 self.cam_gtao_proj[i] = [c.proj[0], c.proj[5], -c.proj[14]];
                 // Foliage knobs (frame.foliage / frame.foliageb) after inv_view_proj — same
                 // append pattern; 32 B, matching the +32 in CameraGroup::new's bind_size.
-                queue.write_buffer(
+                camera_upload.write_buffer(
                     buf,
                     base + std::mem::size_of::<WgrCamera>() as u64 + 64,
                     bytemuck::bytes_of(foliage),
@@ -7163,7 +7167,7 @@ impl Gfx3d {
                     Some((reflected_index, sea)) if i == reflected_index => [0.0, 1.0, 0.0, -sea],
                     _ => [0.0; 4],
                 };
-                queue.write_buffer(
+                camera_upload.write_buffer(
                     buf,
                     base + std::mem::size_of::<WgrCamera>() as u64
                         + 64
@@ -7199,7 +7203,7 @@ impl Gfx3d {
                     // normal-mapped surfaces flat while the main view did not.
                     ambient_normal_mapped(),
                 ];
-                queue.write_buffer(
+                camera_upload.write_buffer(
                     buf,
                     base + std::mem::size_of::<WgrCamera>() as u64
                         + 64
@@ -7250,10 +7254,10 @@ impl Gfx3d {
                     + 16;
                 let dir_off = sky_base + 64 * sky_vis::DIRECTION_COUNT as u64;
                 let knob_off = dir_off + 16 * sky_vis::DIRECTION_COUNT as u64;
-                queue.write_buffer(buf, sky_base, bytemuck::cast_slice(&vp));
-                queue.write_buffer(buf, dir_off, bytemuck::cast_slice(&dir));
-                queue.write_buffer(buf, knob_off, bytemuck::cast_slice(&knobs));
-                queue.write_buffer(buf, knob_off + 16, bytemuck::cast_slice(&knobs_b));
+                camera_upload.write_buffer(buf, sky_base, bytemuck::cast_slice(&vp));
+                camera_upload.write_buffer(buf, dir_off, bytemuck::cast_slice(&dir));
+                camera_upload.write_buffer(buf, knob_off, bytemuck::cast_slice(&knobs));
+                camera_upload.write_buffer(buf, knob_off + 16, bytemuck::cast_slice(&knobs_b));
                 // Baked volumes (Stage 2): gated on the runtime switch AND on a volume actually
                 // existing, so the knob cannot darken anything before a bake has run.
                 let baked_on = sv.baked && !self.sky_volumes.is_empty();
@@ -7263,7 +7267,7 @@ impl Gfx3d {
                     sv.floor,
                     if baked_on && sv.debug { 1.0 } else { 0.0 },
                 ];
-                queue.write_buffer(buf, knob_off + 32, bytemuck::cast_slice(&knobs_c));
+                camera_upload.write_buffer(buf, knob_off + 32, bytemuck::cast_slice(&knobs_c));
                 // REN-GI-001: the two lanes before matdbg (see frame.wgsl).
                 let gs = &self.gi.settings;
                 let gi_lane = [
@@ -7275,8 +7279,8 @@ impl Gfx3d {
                     gs.basis as f32,
                 ];
                 let gi_origin_lane = [gi_origin.x, gi_origin.y, gi_origin.z, gi_spacing];
-                queue.write_buffer(buf, base + self.cameras.bind_size - 112, bytemuck::cast_slice(&gi_lane));
-                queue.write_buffer(buf, base + self.cameras.bind_size - 96, bytemuck::cast_slice(&gi_origin_lane));
+                camera_upload.write_buffer(buf, base + self.cameras.bind_size - 112, bytemuck::cast_slice(&gi_lane));
+                camera_upload.write_buffer(buf, base + self.cameras.bind_size - 96, bytemuck::cast_slice(&gi_origin_lane));
                 // Material Debug (frame.wgsl `matdbg`). Written unconditionally and derived
                 // from bind_size rather than from the sky offsets above, which live inside a
                 // conditional: the retained shader reads this every frame and a stale lane
@@ -7287,7 +7291,7 @@ impl Gfx3d {
                     0.0f32,
                     0.0f32,
                 ];
-                queue.write_buffer(
+                camera_upload.write_buffer(
                     buf,
                     base + self.cameras.bind_size - 80,
                     bytemuck::cast_slice(&matdbg),
@@ -7295,7 +7299,7 @@ impl Gfx3d {
                 // DZ-005 water surface animation (frame.wgsl `wateranim`).
                 // Same reasoning as matdbg: unconditional, so a world that stops publishing
                 // water params cannot leave the ripple frozen at a stale time.
-                queue.write_buffer(
+                camera_upload.write_buffer(
                     buf,
                     base + self.cameras.bind_size - 64,
                     bytemuck::cast_slice(&self.water_anim),
@@ -7309,7 +7313,7 @@ impl Gfx3d {
                 // same way the main view does. Gating a surface property on the GTAO camera is
                 // how you get a rifle whose receiver is flat while the wall behind it is not.
                 let relief = [normal_cavity(), sky_specular(), 0.0f32, 0.0f32];
-                queue.write_buffer(
+                camera_upload.write_buffer(
                     buf,
                     base + self.cameras.bind_size - 48,
                     bytemuck::cast_slice(&relief),
@@ -7317,7 +7321,7 @@ impl Gfx3d {
                 // Far-fog closure (frame.wgsl `fogfar`). Unconditional for the same reason as
                 // the three above: a camera that skipped it would read whatever the previous
                 // frame left there.
-                queue.write_buffer(
+                camera_upload.write_buffer(
                     buf,
                     base + self.cameras.bind_size - 32,
                     bytemuck::cast_slice(&self.fog_far),
@@ -7326,12 +7330,13 @@ impl Gfx3d {
                 // lane. Unconditional like the four above, and for one more reason: the lane
                 // must read 0/0 the moment the render scale returns to native, not whenever
                 // the next camera happens to rewrite it.
-                queue.write_buffer(
+                camera_upload.write_buffer(
                     buf,
                     base + self.cameras.bind_size - 16,
                     bytemuck::cast_slice(&self.render_scale_lane),
                 );
             }
+            camera_upload.finish();
         }
         // Track buffer regrowth so the combined group-1 bind groups (which borrow
         // these buffers) are rebuilt only when one actually moved.
