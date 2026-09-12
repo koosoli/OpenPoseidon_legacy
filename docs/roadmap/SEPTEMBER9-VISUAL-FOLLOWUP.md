@@ -2039,8 +2039,12 @@ The roughly 560m count-budget boundary is measured, not fixed by the normal map.
 Receiver-filter optimization is an opt-in experiment awaiting installed acceptance.
 
 September 13 native tree wind follow-up: owner still sees trunk/crown separation.
-A scoped native-tree affine motion correction is in progress, with direct and
+A scoped native-tree affine motion correction is installed as 8057395c, with direct and
 retained temporal paths matched. This removes unsupported whole-cutout flutter
 and mesh-density-dependent attachment drift, not the need for authored branch
-weights. Installed visual acceptance is pending; see
+weights. Seven C++ assertions, two Rust regressions, shader composition and three
+installed motion/lifecycle runs pass (same-build strong-wind off/on, normal-wind
+LOD0/1/2). No new disconnection was apparent in the inspected frames. Native branch
+animation fidelity, DLSS visual acceptance and moving shadows are not claimed;
+the bounded coherent fallback is default ON for native trees. See
 [native wind record](decisions/NATIVE-TREE-WIND-20260913.md).
