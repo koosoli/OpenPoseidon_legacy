@@ -1,4 +1,6 @@
 param([ValidateSet('M16','AK74')][string]$Rifle='M16',
+      [ValidateSet('','Jeep','UAZ','Truck5tOpen')][string]$InspectVehicle='',
+      [ValidateRange(0,11)][int]$InspectCargoIndex=0,
       [switch]$ProjectileFrame, [switch]$AnimationPreview, [switch]$AnimationVideo, [switch]$NpcFire,
       [ValidateSet('clear','hold','outside','blocked','friendly')][string]$NpcScenario='clear',
       [ValidateSet(0,90,180)][int]$NpcHeading=0, [switch]$NpcDriver,
@@ -13,6 +15,9 @@ param([ValidateSet('M16','AK74')][string]$Rifle='M16',
       [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
+if ($InspectVehicle -and ($PlayerFire -or $NpcFire -or $DefaultPackage -or $AnimationPreview -or $ProjectileFrame)) {
+    throw 'Original seat inspection requires a separate baseline launch without FFV content'
+}
 if ($NpcTurning) {$NpcMoving=$true}
 if ($MenuReentry -and !$PlayerFire) {throw 'Menu reentry requires the player test'}
 if ($DriverCommand -ne 'individual' -and !$NpcMoving) {throw 'Driver command requires a moving test'}
@@ -74,7 +79,7 @@ if ($packArchive) {
     try {$packHash=[BitConverter]::ToString($sha.ComputeHash($packStream)).Replace('-','')}
     finally {$packStream.Dispose(); $sha.Dispose()}
 }
-[pscustomobject]@{rifle=$Rifle;installed=$stamp.Trim();args=$gameArgs;source=(& git -C $root rev-parse HEAD);pack=$packArchive;packSha256=$packHash;driverCommand=$DriverCommand;limitedDriver=[bool]$LimitedDriver;turning=[bool]$NpcTurning;turnTarget=$TurnTarget} |
+[pscustomobject]@{rifle=$Rifle;inspectVehicle=$InspectVehicle;inspectCargoIndex=$InspectCargoIndex;installed=$stamp.Trim();args=$gameArgs;source=(& git -C $root rev-parse HEAD);pack=$packArchive;packSha256=$packHash;driverCommand=$DriverCommand;limitedDriver=[bool]$LimitedDriver;turning=[bool]$NpcTurning;turnTarget=$TurnTarget} |
     ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $output 'test-context.json')
 $p=Start-Process -FilePath (Join-Path $GameDir 'OpenPoseidon.exe') -WorkingDirectory $GameDir -WindowStyle Hidden -PassThru -ArgumentList $gameArgs
 $null=$p.Handle
@@ -153,6 +158,24 @@ try {
         if (!(Select-String -LiteralPath $log -SimpleMatch -Pattern "Default content: @OP_VehicleActions: $diagnostic" -Quiet)) {
             throw "Expected automatic-package diagnostic: $diagnostic"
         }
+    }
+    if ($InspectVehicle) {
+        $null=Send @{cmd='exec';code=('deleteVehicle ffvJeep; ffvJeep="'+$InspectVehicle+'" createVehicle [9700,3600,0]; ffvJeep setDir 0; ffvSeatGroup=createGroup west')}
+        for ($seatIndex=0; $seatIndex -lt $InspectCargoIndex; $seatIndex++) {
+            $null=Send @{cmd='exec';code='"SoldierWB" createUnit [[9700,3600,0],ffvSeatGroup,"this setCombatMode ""BLUE""; this moveInCargo ffvJeep"]'}
+        }
+        $null=Send @{cmd='exec';code='ffvPassenger moveInCargo ffvJeep; ffvView="camera" camCreate [9707,3607,4]; ffvView cameraEffect ["internal","back"]; ffvView camSetTarget [9700,3600,1.8]; ffvView camCommit 0; showCinemaBorder false'}
+        Start-Sleep -Seconds 3
+        $original=Send @{cmd='crew_pose_probe'}
+        if ($original.cargoIndex -ne $InspectCargoIndex -or $original.cargoWeaponActive) {throw 'Original seat inspection resolved the wrong seat or enabled FFV'}
+        $null=Send @{cmd='screenshot';path=(Join-Path $output 'original-seat.png')}
+        $null=Send @{cmd='exec';code='ffvView camSetPos [(getPos ffvJeep select 0)+5,(getPos ffvJeep select 1)-6,4]; ffvView camSetTarget [(getPos ffvJeep select 0),(getPos ffvJeep select 1),2]; ffvView camCommit 0'}
+        Start-Sleep -Seconds 1
+        $null=Send @{cmd='screenshot';path=(Join-Path $output 'original-seat-rear.png')}
+        $null=Send @{cmd='exit'}
+        if (!$p.WaitForExit(30000) -or $p.ExitCode -ne 0) {throw 'Original seat inspection did not shut down cleanly'}
+        Write-Host "Original seat recorded: $InspectVehicle cargo $InspectCargoIndex; $output"
+        return
     }
     $null=Send @{cmd='eval';code='typeOf ffvJeep'} '"Jeep"'
     if ($NpcFire) {
