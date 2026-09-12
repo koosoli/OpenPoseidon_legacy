@@ -502,7 +502,7 @@ void Man::SwitchVehicleAction(ManVehAction action)
     // Normal boarding completes its external action inside RefreshMoveQueue.
     // Do not let SwitchMove requeue that completed get-in action behind the
     // seat idle: it has no transition from the seated FFV animation graph.
-    if (cargoTransitions && _externalMoveFinished)
+    if (GetAvailableCargoWeaponSeat() && _externalMoveFinished)
         _externalMove = MotionPathItem((MoveId)MoveIdNone);
     SwitchMove(id, nullptr);
     if (cargoTransitions)
