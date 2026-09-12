@@ -21,8 +21,10 @@ and AddOns/op_ground_materials.pbo, plus `@OP_VehicleActions` with mod.json and
 AddOns/op_jeep_actions.pbo. Deploy.ps1 copies these own files and verifies
 their SHA256; it does not modify Dta/Data.pbo, LandText.pbo, original models or WRP.
 Source-only roughness/height/soil artifacts are not claimed as bound maps.
-VehicleActions includes six reproducible own RTMs and an exact Jeep cargo-0/M16
-mapping, not a mounted gun or an attached outside soldier. It is SP-only; MP,
+VehicleActions includes six reproducible own RTMs and an exact Jeep cargo-0
+mapping using the version-3 personal primary bullet weapon family. Legacy
+version-1/2 profiles retain explicit weapon-name restrictions. Family eligibility
+does not mean every weapon model has passed pose/handling acceptance. It is SP-only; MP,
 drivers, other vehicles and ordinary cargo retain the original behaviour.
 The authored MC-skeleton calibration/IK source is under `vehicle-actions` and
 `scripts/default-content/generate_jeep_animations.py`. Runtime uses the existing

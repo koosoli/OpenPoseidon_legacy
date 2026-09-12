@@ -1036,7 +1036,7 @@ bool World::LookAroundEnabled() const
     }
     AIUnit* unit = FocusOn();
     const Man* man = unit ? dyn_cast<Man>(unit->GetPerson()) : nullptr;
-    if (man && man->GetActiveCargoWeaponSeat())
+    if (man && man->GetConfiguredCargoWeaponSeat())
         return false;
     return !unit || unit->IsInCargo();
 }
@@ -1167,7 +1167,7 @@ void World::SwitchCameraTo(Object* vehicle, CameraType camType)
 {
     // Ordinary boarding (including reboarding) targets the carrier. Supported
     // personal-weapon cargo needs the soldier's camera and cursor constraints.
-    if (Man* passenger = dyn_cast<Man>(PlayerOn()); passenger && passenger->GetActiveCargoWeaponSeat() &&
+    if (Man* passenger = dyn_cast<Man>(PlayerOn()); passenger && passenger->GetConfiguredCargoWeaponSeat() &&
         passenger->Brain()->GetVehicleIn() == vehicle)
         vehicle = passenger;
     bool change = (vehicle != _cameraOn);

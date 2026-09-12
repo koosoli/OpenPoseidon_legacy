@@ -153,7 +153,7 @@ void RegisterSqf(HarnessServer& hs)
                            if (weapon < 0 || weapon >= man->NMagazineSlots())
                                return HarnessProtocol::ErrorResponse("selected rifle required");
                            const auto& slot = man->GetMagazineSlot(weapon);
-                           if (!slot._weapon || strcmpi(slot._weapon->GetName(), seat->weapon) != 0 || !slot._magazine)
+                           if (!man->IsCargoWeaponCandidate(weapon) || !slot._magazine)
                                return HarnessProtocol::ErrorResponse("configured rifle magazine required");
                            const int spare = man->FindMagazineByType(slot._muzzle, slot._magazine->_type);
                            if (spare < 0 || man->GetMagazine(spare) == slot._magazine || !man->ReloadMagazine(weapon, spare))

@@ -454,7 +454,7 @@ void InGameUI::SimulateHUD(const Camera& camera, EntityAI* vehicle, CameraType c
     }
 
     Man* cargoMan = dyn_cast<Man>(unit->GetPerson());
-    const bool cargoWeapon = cargoMan && cargoMan->GetActiveCargoWeaponSeat();
+    const bool cargoWeapon = cargoMan && cargoMan->GetConfiguredCargoWeaponSeat();
     if (cargoWeapon)
         vehicle = cargoMan; // Same manual gunner path, but the passenger's personal rifle.
     bool isCommander = !cargoWeapon && unit == vehicle->CommanderUnit();

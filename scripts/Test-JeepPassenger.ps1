@@ -1,4 +1,5 @@
-param([switch]$ProjectileFrame, [switch]$AnimationPreview, [switch]$AnimationVideo, [switch]$NpcFire,
+param([ValidateSet('M16','AK74')][string]$Rifle='M16',
+      [switch]$ProjectileFrame, [switch]$AnimationPreview, [switch]$AnimationVideo, [switch]$NpcFire,
       [ValidateSet('clear','hold','outside','blocked','friendly')][string]$NpcScenario='clear',
       [ValidateSet(0,90,180)][int]$NpcHeading=0, [switch]$NpcDriver,
       [switch]$NpcTransitions, [switch]$NpcMoving, [switch]$NpcTurning, [switch]$SecondJeep,
@@ -72,7 +73,7 @@ if ($packArchive) {
     try {$packHash=[BitConverter]::ToString($sha.ComputeHash($packStream)).Replace('-','')}
     finally {$packStream.Dispose(); $sha.Dispose()}
 }
-[pscustomobject]@{installed=$stamp.Trim();args=$gameArgs;source=(& git -C $root rev-parse HEAD);pack=$packArchive;packSha256=$packHash;driverCommand=$DriverCommand;limitedDriver=[bool]$LimitedDriver;turning=[bool]$NpcTurning;turnTarget=$TurnTarget} |
+[pscustomobject]@{rifle=$Rifle;installed=$stamp.Trim();args=$gameArgs;source=(& git -C $root rev-parse HEAD);pack=$packArchive;packSha256=$packHash;driverCommand=$DriverCommand;limitedDriver=[bool]$LimitedDriver;turning=[bool]$NpcTurning;turnTarget=$TurnTarget} |
     ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $output 'test-context.json')
 $p=Start-Process -FilePath (Join-Path $GameDir 'OpenPoseidon.exe') -WorkingDirectory $GameDir -WindowStyle Hidden -PassThru -ArgumentList $gameArgs
 $null=$p.Handle
@@ -81,7 +82,7 @@ function RifleRounds($response) {
     $items=ConvertFrom-Json -InputObject $response.result
     $rounds=0
     for ($i=0; $i -lt $items.Count; $i+=2) {
-        if ($items[$i] -ceq 'M16') {$rounds += [int]$items[$i+1]}
+        if ($items[$i] -ceq $Rifle) {$rounds += [int]$items[$i+1]}
     }
     return $rounds
 }
@@ -114,6 +115,10 @@ try {
         }
     }
     Start-Sleep -Seconds 12
+    if ($Rifle -ne 'M16') {
+        if ($LoadOriginalSave) {throw 'Original-save fixture owns its inventory; do not replace it'}
+        $null=Send @{cmd='exec';code=('removeAllWeapons ffvPassenger; {ffvPassenger removeMagazine _x} forEach magazines ffvPassenger; ffvPassenger addMagazine "'+$Rifle+'"; ffvPassenger addMagazine "'+$Rifle+'"; ffvPassenger addWeapon "'+$Rifle+'"')}
+    }
     if ($LoadOriginalSave) {
         # Discover this launch's test-save directory without assuming a profile name.
         $null=Send @{cmd='eval';code='triSaveGame "path-probe"'} '"OK"'
@@ -176,7 +181,7 @@ try {
     Start-Sleep -Seconds 2
     $null=Send @{cmd='eval';code='vehicle ffvPassenger == ffvJeep'} 'true'
     $null=Send @{cmd='eval';code='weapons ffvPassenger'}
-    $before=Send @{cmd='eval';code='ffvPassenger ammo "M16"'}
+    $before=Send @{cmd='eval';code=('ffvPassenger ammo "'+$Rifle+'"')}
     $magazinesBefore=Send @{cmd='eval';code='magazinesArray ffvPassenger'}
     $null=Send @{cmd='eval';code='alive ffvTarget && getDammage ffvTarget == 0'} 'true'
     if ($before.result -ne '30') {throw 'Passenger fired before baseline capture'}
@@ -219,7 +224,7 @@ try {
         $null=Send @{cmd='eval';code='vehicle ffvSecond == ffvSecondJeep'} 'true'
         if ([int]$secondShots.result -le 0 -or [int]$secondAmmo.result -ge 30 -or [double]$secondDamage.result -le 0) {throw 'Second independent cargo passenger did not hit'}
         $null=Send @{cmd='eval';code='ffvShots'} '0'
-        $null=Send @{cmd='eval';code='ffvPassenger ammo "M16"'} '30'
+        $null=Send @{cmd='eval';code=('ffvPassenger ammo "'+$Rifle+'"')} '30'
         $null=Send @{cmd='exec';code='ffvSecond setCombatMode "BLUE"; deleteVehicle ffvSecondTarget; ffvSecondJeep setDammage 1'}
         Start-Sleep -Seconds 2
         $primary=Send @{cmd='crew_seat_status'}
@@ -340,7 +345,7 @@ try {
         } while ($clock.Elapsed.TotalSeconds -lt 10)
         $samples | ConvertTo-Json -Depth 7 | Set-Content -LiteralPath (Join-Path $output 'motion-samples.json')
     } else {Start-Sleep -Seconds 10}
-    $after=Send @{cmd='eval';code='ffvPassenger ammo "M16"'}
+    $after=Send @{cmd='eval';code=('ffvPassenger ammo "'+$Rifle+'"')}
     $seated=Send @{cmd='eval';code='vehicle ffvPassenger == ffvJeep'}
     $damage=Send @{cmd='eval';code='getDammage ffvTarget'}
     $cargoShots=Send @{cmd='eval';code='ffvShots'}
@@ -363,7 +368,7 @@ try {
         if ($seated.result -ne 'true') {throw 'NPC no longer occupies the real cargo seat'}
         if ($NpcScenario -eq 'clear') {
             if ([double]$after.result -ge 30 -or [double]$damage.result -le 0 -or [int]$cargoShots.result -le 0) {
-                throw 'NPC passenger failed to hit with real M16 ammunition'
+                throw "NPC passenger failed to hit with real $Rifle ammunition"
             }
         } elseif ($after.result -ne '30' -or $damage.result -ne '0' -or $cargoShots.result -ne '0') {
             throw "Unsafe NPC shot in negative case: $NpcScenario"
@@ -419,7 +424,7 @@ try {
             } while ($clock.Elapsed.TotalSeconds -lt 8)
             $samples | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $output 'motion-samples.json')
             $reloadAfter=Send @{cmd='eval';code='magazinesArray ffvPassenger'}
-            $null=Send @{cmd='eval';code='ffvPassenger ammo "M16"'} '30'
+            $null=Send @{cmd='eval';code=('ffvPassenger ammo "'+$Rifle+'"')} '30'
             $null=Send @{cmd='eval';code='ffvShots'} $shotsBeforeReload.result
             $null=Send @{cmd='eval';code='vehicle ffvPassenger == ffvJeep'} 'true'
             $reloadEnd=Send @{cmd='crew_pose_probe'}
@@ -468,7 +473,7 @@ try {
     $null=Send @{cmd='eval';code='vehicle ffvPassenger == ffvPassenger'} 'true'
     $null=Send @{cmd='exec';code='ffvPassenger setPos [9704,3600,0]; ffvPassenger setDir 90; ffvPassenger setUnitPos "UP"; ffvPassenger setBehaviour "COMBAT"; ffvPassenger setCombatMode "YELLOW"; ffvPassenger doTarget ffvTarget; ffvPassenger doFire ffvTarget'}
     Start-Sleep -Seconds 12
-    $footAmmo=Send @{cmd='eval';code='ffvPassenger ammo "M16"'}
+    $footAmmo=Send @{cmd='eval';code=('ffvPassenger ammo "'+$Rifle+'"')}
     $footDamage=Send @{cmd='eval';code='getDammage ffvTarget'}
     $footShots=Send @{cmd='eval';code='ffvShots'}
     $magazinesAfter=Send @{cmd='eval';code='magazinesArray ffvPassenger'}

@@ -15,6 +15,7 @@ struct CargoWeaponSeat
 {
     int cargoIndex = -1;
     RString weapon;
+    bool rifleFamily = false;
     RString action;
     RString idleAction;
     RString raiseAction;
@@ -29,6 +30,12 @@ struct CargoWeaponSeat
     float AITrackingRate() const
     {
         return aiAimSpeed > 0 ? aiAimSpeed * (H_PI / 180.0f) : 0.2f;
+    }
+
+    bool AcceptsWeapon(const char* name, bool personalPrimary, bool bulletMode) const
+    {
+        return name && name[0] && bulletMode &&
+            (rifleFamily ? personalPrimary : strcmpi(name, weapon) == 0);
     }
 
     bool HasTransitions() const { return idleAction.GetLength() > 0; }
@@ -108,8 +115,8 @@ public:
             return fail("OPCargoWeapons must be a class");
         const auto* version = table->FindEntry("version");
         const auto* seats = table->FindEntry("Seats");
-        if (!version || !version->IsIntValue() || (int(*version) != 1 && int(*version) != 2) || !seats || !seats->IsClass())
-            return fail("expected OPCargoWeapons version=1 or 2 and class Seats");
+        if (!version || !version->IsIntValue() || int(*version) < 1 || int(*version) > 3 || !seats || !seats->IsClass())
+            return fail("expected OPCargoWeapons version=1..3 and class Seats");
         if (cargoCount < 0 || seats->GetEntryCount() > cargoCount || seats->GetEntryCount() > 32)
             return fail("seat count exceeds cargo capacity or contract limit");
         for (int i = 0; i < seats->GetEntryCount(); ++i)
@@ -120,17 +127,22 @@ public:
             CargoWeaponSeat seat;
             const auto* index = entry.FindEntry("cargoIndex");
             const auto* weapon = entry.FindEntry("weapon");
+            const auto* family = entry.FindEntry("weaponFamily");
             const auto* action = entry.FindEntry("action");
-            if (!index || !index->IsIntValue() || !weapon || !weapon->IsTextValue() ||
+            if (family && (int(*version) != 3 || weapon || !family->IsTextValue() ||
+                           strcmpi(RStringB(*family), "rifle") != 0))
+                return fail("weaponFamily requires version 3, rifle, and no weapon override");
+            if (!index || !index->IsIntValue() || (!family && (!weapon || !weapon->IsTextValue())) ||
                 !action || !action->IsTextValue())
                 return fail("seat requires integer cargoIndex and explicit weapon/action names");
             seat.cargoIndex = int(*index);
-            seat.weapon = RStringB(*weapon);
+            seat.rifleFamily = family != nullptr;
+            if (weapon) seat.weapon = RStringB(*weapon);
             seat.action = RStringB(*action);
             if (seat.cargoIndex < 0 || seat.cargoIndex >= cargoCount || Find(seat.cargoIndex) ||
-                !seat.weapon.GetLength() || !seat.action.GetLength())
+                (!seat.rifleFamily && !seat.weapon.GetLength()) || !seat.action.GetLength())
                 return fail("invalid or duplicate cargo index, or empty weapon/action");
-            if (int(*version) == 2)
+            if (int(*version) >= 2)
             {
                 const char* keys[] = {"idleAction", "raiseAction", "reloadAction", "lowerAction"};
                 RString* names[] = {&seat.idleAction, &seat.raiseAction, &seat.reloadAction, &seat.lowerAction};

@@ -745,6 +745,7 @@ class Man: public Person
 	bool IsAbleToStand() const;
 	bool IsAbleToFire() const override;
     const CargoWeaponSeat* GetConfiguredCargoWeaponSeat() const;
+    bool IsCargoWeaponCandidate(int weapon) const;
     const CargoWeaponSeat* GetActiveCargoWeaponSeat() const;
 	bool CargoWeaponLineClear(int weapon) const;
 

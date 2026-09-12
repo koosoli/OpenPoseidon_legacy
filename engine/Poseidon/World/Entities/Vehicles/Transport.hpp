@@ -925,6 +925,7 @@ protected:
 	) const override;
 
 	Matrix4 ProxyWorldTransform(const Object *obj) const override;
+    bool TryCargoWeaponFrame(const Person* occupant, int cargoIndex, Matrix4& frame) const;
 	Matrix4 ProxyInvWorldTransform(const Object *obj) const override;
 
 	Texture *GetFlagTexture() override;

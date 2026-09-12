@@ -44,21 +44,20 @@ class CfgMovesMC
         class OPJeepLower: OPJeepIdle { file = "\op_jeep_actions\jeep_lower.rtm"; speed = 1.4; looped = 0; connectTo[] = {"OPJeepIdle",1}; };
     };
 };
-// One explicit SP seat. Other Jeep cargo, drivers and multiplayer retain
-// the original behaviour. Version 2 enters the authored idle on boarding.
+// Version 3 uses the personal primary bullet family with the existing seated actions.
 class CfgOPVehicleActions
 {
     class Jeep
     {
         class OPCargoWeapons
         {
-            version = 2;
+            version = 3;
             class Seats
             {
                 class FrontPassenger
                 {
                     cargoIndex = 0;
-                    weapon = "M16";
+                    weaponFamily = "rifle";
                     action = "OPJeepAim";
                     idleAction = "OPJeepIdle";
                     raiseAction = "OPJeepRaise";

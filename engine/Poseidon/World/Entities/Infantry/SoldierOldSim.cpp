@@ -218,8 +218,7 @@ void Man::BasicSimulation(float deltaT, SimulationImportance prec, float speedFa
         {
             for (int i = 0; i < NMagazineSlots(); ++i)
             {
-                const WeaponType* weapon = GetMagazineSlot(i)._weapon;
-                if (weapon && strcmpi(weapon->GetName(), cargoSeat->weapon) == 0)
+                if (IsCargoWeaponCandidate(i))
                 {
                     SelectWeapon(i);
                     break;
@@ -237,7 +236,7 @@ void Man::BasicSimulation(float deltaT, SimulationImportance prec, float speedFa
                  SelectedWeapon() >= 0 && EnableWeaponManipulation())
         {
             const auto& slot = GetMagazineSlot(SelectedWeapon());
-            if (slot._magazine && slot._weapon && strcmpi(slot._weapon->GetName(), cargoSeat->weapon) == 0)
+            if (slot._magazine && IsCargoWeaponCandidate(SelectedWeapon()))
             {
                 const int spare = FindMagazineByType(slot._muzzle, slot._magazine->_type);
                 if (spare >= 0 && GetMagazine(spare) != slot._magazine)
@@ -255,11 +254,11 @@ void Man::BasicSimulation(float deltaT, SimulationImportance prec, float speedFa
             {
                 Target* target = GetFireTarget();
                 float timeToAim = 0;
-                const bool wantsAim = Brain()->IsPlayer()
+                const bool wantsAim = IsCargoWeaponCandidate(SelectedWeapon()) && (Brain()->IsPlayer()
                     ? QIsManual() && !InputSubsystem::Instance().IsLookAroundEnabled() && GWorld->UI() &&
                       cargoSeat->ContainsDirection(Brain()->GetVehicleIn()->DirWorldToModel() * GWorld->UI()->GetCursorDirection())
                     : target && target->idExact && !target->destroyed &&
-                      target->IsKnownBy(Brain()) && FireInRange(SelectedWeapon(), timeToAim, *target) > 0;
+                      target->IsKnownBy(Brain()) && FireInRange(SelectedWeapon(), timeToAim, *target) > 0);
                 SetMoveQueue(MotionPathItem(Type()->GetMoveId(wantsAim ? cargoSeat->action : cargoSeat->idleAction)), false);
             }
         }

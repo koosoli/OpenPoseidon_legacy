@@ -57,16 +57,27 @@ const CargoWeaponSeat* Man::GetActiveCargoWeaponSeat() const
     return seat;
 }
 
+bool Man::IsCargoWeaponCandidate(int weapon) const
+{
+    const auto* seat = GetConfiguredCargoWeaponSeat();
+    if (!seat || weapon < 0 || weapon >= NMagazineSlots()) return false;
+    const auto& slot = GetMagazineSlot(weapon);
+    const auto* mode = GetWeaponMode(weapon);
+    if (!slot._weapon || !slot._muzzle || !mode || !mode->_ammo) return false;
+    const int kind = slot._weapon->_weaponType;
+    const bool primary = (kind & MaskSlotPrimary) != 0 &&
+        (kind & (MaskSlotSecondary | MaskSlotHandGun | MaskSlotBinocular | MaskHardMounted)) == 0 &&
+        !slot._weapon->_shotFromTurret;
+    return seat->AcceptsWeapon(slot._weapon->GetName(), primary, mode->_ammo->_simulation == AmmoShotBullet);
+}
+
 bool Man::CargoWeaponLineClear(int weapon) const
 {
     const auto* seat = GetActiveCargoWeaponSeat();
     if (!seat || WeaponsDisabled() || _primaryFactor < .99f || strcmpi(Type()->GetMoveName(_primaryMove.id), seat->action) != 0 ||
         strcmpi(GetCurrentMove(), seat->action) != 0 || !GLandscape || weapon < 0 || weapon >= NMagazineSlots())
         return false;
-    const auto& slot = GetMagazineSlot(weapon);
-    const auto* mode = GetWeaponMode(weapon);
-    if (!slot._weapon || strcmpi(slot._weapon->GetName(), seat->weapon) != 0 ||
-        !mode || !mode->_ammo || mode->_ammo->_simulation != AmmoShotBullet)
+    if (!IsCargoWeaponCandidate(weapon))
         return false;
     const auto* vehicle = Brain()->GetVehicleIn();
     if (Brain()->IsPlayer() && (!GWorld->UI() || InputSubsystem::Instance().IsLookAroundEnabled() ||
@@ -75,7 +86,9 @@ bool Man::CargoWeaponLineClear(int weapon) const
     const Vector3 direction = GetWeaponDirection(weapon).Normalized();
     if (!seat->ContainsDirection(vehicle->DirWorldToModel() * direction))
         return false;
-    const Matrix4 frame = WorldTransform();
+    Matrix4 frame;
+    if (!vehicle->TryCargoWeaponFrame(this, seat->cargoIndex, frame))
+        return false;
     const Vector3 muzzle = frame.FastTransform(GetWeaponPoint(weapon));
     const Vector3 pivot = frame.FastTransform(GetWeaponCenter(weapon));
     const Vector3 end = muzzle + direction * 2.0f;
@@ -1332,8 +1345,7 @@ float Soldier::FireInRange(int weapon, float& timeToAim, const Target& target) c
     {
         if (weapon < 0 || weapon >= NMagazineSlots())
             return 0;
-        const WeaponType* type = GetMagazineSlot(weapon)._weapon;
-        if (!type || strcmpi(type->GetName(), seat->weapon) != 0)
+        if (!IsCargoWeaponCandidate(weapon))
             return 0;
         const auto* vehicle = Brain()->GetVehicleIn();
         const Vector3 direction = target.position - WorldTransform().FastTransform(GetWeaponPoint(weapon));
@@ -2510,7 +2522,7 @@ void Man::RestoreCargoStateAfterLoad()
         for (int i = 0; i < NMagazineSlots(); ++i)
         {
             const auto& slot = GetMagazineSlot(i);
-            if (slot._weapon && slot._muzzle && strcmpi(slot._weapon->GetName(), seat->weapon) == 0 &&
+            if (IsCargoWeaponCandidate(i) &&
                 slot._weapon->GetName() + RString("|") + slot._muzzle->GetName() == context->param3)
                 validMuzzle = true;
         }

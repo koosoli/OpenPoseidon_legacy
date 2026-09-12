@@ -949,7 +949,7 @@ bool Man::IsVirtual(CameraType camType) const
 }
 bool Man::IsVirtualX(CameraType camType) const
 {
-    if (GetActiveCargoWeaponSeat() && camType != CamGunner)
+    if (GetConfiguredCargoWeaponSeat() && camType != CamGunner)
         return true; // A seated soldier cannot turn the carrier to follow the mouse.
     auto& input = InputSubsystem::Instance();
     if (input.IsLookAroundEnabled())
@@ -971,7 +971,7 @@ void Man::LimitCursor(CameraType camType, Vector3& dir) const
     {
         return;
     }
-    if (GetActiveCargoWeaponSeat())
+    if (GetConfiguredCargoWeaponSeat())
     {
         // AimWeapon clamps the rifle, not the view. Looking outside the seat arc
         // lowers the rifle rather than dragging the player's camera sideways.

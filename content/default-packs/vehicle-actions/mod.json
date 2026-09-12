@@ -1,6 +1,6 @@
 {
   "name": "OpenPoseidon Vehicle Actions",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "defaultContentApi": "1",
-  "description": "Own animations and personal M16 firing for the original Jeep front passenger, singleplayer only."
+  "description": "Own seated animations and personal primary bullet weapon support for the original Jeep front passenger, singleplayer only. Content coverage is subject to per-loadout acceptance."
 }

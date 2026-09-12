@@ -4,6 +4,24 @@
 
 using namespace Poseidon;
 
+TEST_CASE("Cargo rifle family accepts renamed rifles but rejects other use modes", "[cargo-weapons]")
+{
+    CargoWeaponSeat seat;
+    seat.rifleFamily = true;
+    REQUIRE(seat.AcceptsWeapon("M16", true, true));
+    REQUIRE(seat.AcceptsWeapon("AK74", true, true));
+    REQUIRE(seat.AcceptsWeapon("UserRifle", true, true));
+    REQUIRE_FALSE(seat.AcceptsWeapon("M16GrenadeLauncher", true, false));
+    REQUIRE_FALSE(seat.AcceptsWeapon("Pistol", false, true));
+    REQUIRE_FALSE(seat.AcceptsWeapon("Turret", false, true));
+    REQUIRE_FALSE(seat.AcceptsWeapon(nullptr, true, true));
+    seat.rifleFamily = false;
+    seat.weapon = "M16";
+    REQUIRE(seat.AcceptsWeapon("m16", true, true));
+    REQUIRE_FALSE(seat.AcceptsWeapon("AK74", true, true));
+    REQUIRE_FALSE(seat.AcceptsWeapon("M16", true, false));
+}
+
 namespace
 {
 ParamClass* AddSeat(ParamEntry& seats, const char* name, int index)
@@ -106,6 +124,31 @@ TEST_CASE("Cargo transition contract requires complete distinct authored states"
     SECTION("same as aim") { seat->Add("reloadAction", "OP_JeepRifle"); }
     REQUIRE_FALSE(table.Load(vehicle, 3));
     REQUIRE_FALSE(table.Find(0));
+}
+
+TEST_CASE("Cargo version three family profiles fail closed on ambiguous selectors", "[cargo-weapons]")
+{
+    ParamFile vehicle;
+    auto* config = vehicle.AddClass("OPCargoWeapons");
+    config->Add("version", 3);
+    auto* entry = AddSeat(*config->AddClass("Seats"), "Passenger", 0);
+    entry->Delete("weapon");
+    entry->Add("weaponFamily", "rifle");
+    entry->Add("idleAction", "Idle");
+    entry->Add("raiseAction", "Raise");
+    entry->Add("reloadAction", "Reload");
+    entry->Add("lowerAction", "Lower");
+    CargoWeaponSeats table;
+    REQUIRE(table.Load(vehicle, 3));
+    REQUIRE(table.Find(0)->rifleFamily);
+    REQUIRE(table.Find(0)->HasTransitions());
+    SECTION("legacy contract cannot silently gain family permission") { config->Add("version", 2); }
+    SECTION("unknown family") { entry->Add("weaponFamily", "all"); }
+    SECTION("two selectors") { entry->Add("weapon", "M16"); }
+    SECTION("missing selector") { entry->Delete("weaponFamily"); }
+    SECTION("missing action") { entry->Delete("reloadAction"); }
+    REQUIRE_FALSE(table.Load(vehicle, 3));
+    REQUIRE(table.Find(0) == nullptr);
 }
 
 TEST_CASE("Version one cargo contract does not enable transition or automatic entry", "[cargo-weapons]")

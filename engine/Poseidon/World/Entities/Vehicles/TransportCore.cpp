@@ -2522,6 +2522,17 @@ Object* Transport::GetProxy(LODShapeWithShadow*& shape, int level, Matrix4& tran
     return man;
 }
 
+bool Transport::TryCargoWeaponFrame(const Person* occupant, int cargoIndex, Matrix4& frame) const
+{
+    if (!occupant || cargoIndex < 0 || cargoIndex >= _manCargo.Size() ||
+        _manCargo[cargoIndex] != occupant || cargoIndex >= Type()->_proxies[0]._cargoProxy.Size() ||
+        !Type()->_proxies[0]._cargoProxy[cargoIndex].Present() || !occupant->GetShape())
+        return false;
+    Matrix4 inverse = GetInvTransform();
+    LODShapeWithShadow* shape = nullptr;
+    return GetProxy(shape, 0, frame, inverse, *this, cargoIndex) == occupant && shape;
+}
+
 Matrix4 Transport::ProxyWorldTransform(const Object* obj) const
 {
     int level = 0;
