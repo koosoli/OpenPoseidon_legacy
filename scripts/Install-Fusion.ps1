@@ -23,4 +23,4 @@ New-Item -ItemType Directory -Force "$pack/AddOns", "$pack/Missions/OpenPoseidon
 Copy-Item -LiteralPath (Join-Path $build 'output/fusion_ofp.pbo') -Destination "$pack/AddOns/fusion_ofp.pbo" -Force
 Copy-Item -LiteralPath (Join-Path $root 'content/fusion/FusionTour.FusionOFP') -Destination "$pack/Missions/OpenPoseidon" -Recurse -Force
 Copy-Item -LiteralPath "$root/content/default-packs/layout/@OP_Fusion.json" -Destination "$pack/mod.json" -Force
-Write-Output 'Installed: Single Missions / OFP Fusion - Five Islands; editor world: OFP Fusion - Five Islands.'
+Write-Output 'Installed: Single Missions / OpenPoseidon / OFP Fusion - Five Islands; editor world: OFP Fusion - Five Islands.'

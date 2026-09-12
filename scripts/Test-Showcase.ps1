@@ -141,9 +141,12 @@ try {
   Start-Sleep -Seconds 3
   Send @{cmd='eval';code='triAssertListText [101,"OpenPoseidon..."]'} '"OK"'
   Send @{cmd='eval';code='triSelectListByData [101,"OpenPoseidon"]'} 'true'
-  Send @{cmd='exec';code='triClickText "Play"'}
+  Send @{cmd='exec';code='triClickText "Open"'}
   Start-Sleep -Seconds 2
   Send @{cmd='eval';code='triAssertListText [101,"Showcase Lab - Physics and Light"]'} '"OK"'
+  Send @{cmd='eval';code='triAssertListText [101,"OFP Fusion - Five Islands"]'} '"OK"'
+  Send @{cmd='eval';code='triSelectListByData [101,"jeep-manual.Intro"]'} 'true'
+  Send @{cmd='eval';code='triSelectListByData [101,"jeep-ride.Intro"]'} 'true'
   Send @{cmd='eval';code='triSelectListByData [101,"ShowcaseLab.Intro"]'} 'true'
   Send @{cmd='screenshot';path=(Join-Path $out 'mission-menu.png')}
   Send @{cmd='exec';code='triClickText "Play"'}
@@ -152,15 +155,24 @@ try {
  Send @{cmd='eval';code='typeOf labNormal'} '"LabPanelNormal"'
  if ($GroupingAmmoOnly) {
   Send @{cmd='eval';code='weapons labHeli'}
+  Send @{cmd='exec';code='labAmmoControl="UH60" createVehicle [9700,3600,0]; labAmmoControl setVehicleAmmo 0.1'}
+  Send @{cmd='exec';code='player moveInGunner labHeli; labHeli selectWeapon ((weapons labHeli) select 0)'}
+  Start-Sleep -Seconds 2
+  Send @{cmd='eval';code='[driver labHeli == player,gunner labHeli == player,vehicle player == labHeli,alive player]'}
+  Send @{cmd='screenshot';path=(Join-Path $out 'heli-ammo-seat.png')}
   Send @{cmd='exec';code='labTestWeapon=(weapons labHeli) select 0; labTestMagazineCount=count magazines labHeli; labTestShots=0; labHeli addEventHandler ["Fired",{labTestShots=labTestShots+1}]; labHeli setVehicleAmmo 0.1; labTestAmmo=labHeli ammo labTestWeapon'}
   Send @{cmd='eval';code='labTestAmmo > 0'} 'true'
   foreach ($i in 1..8) {
-   Send @{cmd='exec';code='labHeli fire labTestWeapon'}
-   Start-Sleep -Milliseconds 800
+   Send @{cmd='mouse_button';button=1;down=$true}
+   Start-Sleep -Milliseconds 150
+   Send @{cmd='mouse_button';button=1;down=$false}
+   Start-Sleep -Milliseconds 650
   }
+  Send @{cmd='eval';code='[labTestShots,labTestAmmo,labHeli ammo labTestWeapon,magazinesArray labHeli]'}
   Send @{cmd='eval';code='labTestShots > 1'} 'true'
   Send @{cmd='eval';code='labHeli ammo labTestWeapon > labTestAmmo'} 'true'
   Send @{cmd='eval';code='count magazines labHeli == labTestMagazineCount'} 'true'
+  Send @{cmd='eval';code='labAmmoControl ammo labTestWeapon == labTestAmmo'} 'true'
   Send @{cmd='eval';code='[labTestShots,labTestAmmo,labHeli ammo labTestWeapon,magazinesArray labHeli]'}
   Send @{cmd='exit'}
   if (!$p.WaitForExit(30000) -or $p.ExitCode -ne 0) {throw 'Game exit failed'}

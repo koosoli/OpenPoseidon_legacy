@@ -17,6 +17,15 @@ helicopter unlimited ammunition. No changes to original missions or global ammo.
   shot below full, but is replenished again on every shot.
 - Build passed. Migration fixtures passed including idempotence, stock/user
   preservation, legacy and installed mission grouping, conflicts and junctions.
-- Installed menu/ammunition smoke test pending. Multiplayer not validated.
+- Installed build 33aaf7c8: menu grouping and launch passed; capture
+  build/showcase/smoke/mission-menu.png shows all five supplied missions together.
+- Ammunition test passed with actual mouse input in the UH60 gunner seat:
+  3 initial rockets, 16 shots, 37 remaining, magazine count unchanged, clean exit.
+  Evidence: build/showcase/heli-ammo-smoke.txt. Pilot-only firing was not an
+  appropriate test for this original vehicle's separate gunner role.
+  Multiplayer not validated.
+- Final combined menu + ammunition + unrelated-helicopter control test passed:
+  build/showcase/grouped-smoke-final.txt. The separate control helicopter retained
+  its 3 rockets. Original content and the foreign Cargo.lock remain untouched.
 
 Entry after installation: Single Missions / OpenPoseidon / mission title.

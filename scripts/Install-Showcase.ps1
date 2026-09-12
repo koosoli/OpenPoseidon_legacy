@@ -12,4 +12,4 @@ New-Item -ItemType Directory -Force "$pack/AddOns", "$pack/Missions/OpenPoseidon
 Copy-Item -LiteralPath $output -Destination "$pack/AddOns/showcase_lab.pbo" -Force
 Copy-Item -LiteralPath (Join-Path $root 'content/showcase/ShowcaseLab.Intro') -Destination "$pack/Missions/OpenPoseidon" -Recurse -Force
 Copy-Item -LiteralPath "$root/content/default-packs/layout/@OP_Showcase.json" -Destination "$pack/mod.json" -Force
-Write-Output 'Installed: Single Missions / Showcase Lab - Physics and Light'
+Write-Output 'Installed: Single Missions / OpenPoseidon / Showcase Lab - Physics and Light'
