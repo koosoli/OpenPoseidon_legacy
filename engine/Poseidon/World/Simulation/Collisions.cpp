@@ -1,4 +1,5 @@
 #include <Poseidon/Core/Application.hpp>
+#include <Poseidon/World/Simulation/CollisionQueryMath.hpp>
 #include <Poseidon/Dev/Diag/TerrainBrush.hpp>
 #include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
@@ -259,7 +260,7 @@ void Landscape::ObjectCollision(CollisionBuffer& retVal, Object* with, Object* i
     ObjRadiusRectangle(xMin, xMax, zMin, zMax, beg, end, radius);
     int x, z;
     Vector3 boundingCenter = (end + beg) * 0.5;
-    float boundingSphere = end.Distance(beg) * 0.5;
+    float boundingSphere = SweptSegmentBoundingRadius(end.Distance(beg), radius);
 
 #define DDA_OPTIMIZED 0
 #if DDA_OPTIMIZED
