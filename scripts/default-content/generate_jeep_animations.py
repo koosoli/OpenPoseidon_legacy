@@ -194,12 +194,16 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--spec', type=Path, required=True)
     parser.add_argument('--out', type=Path, required=True)
+    parser.add_argument('--override', type=Path)
+    parser.add_argument('--prefix', choices=('jeep', 'uh60'), default='jeep')
     args = parser.parse_args()
     spec = json.loads(args.spec.read_text())
+    if args.override:
+        spec.update(json.loads(args.override.read_text()))
     outputs = {kind: encode(spec, clip(spec, kind)) for kind in ('idle', 'raise', 'aim', 'recoil', 'reload', 'lower')}
     args.out.mkdir(parents=True, exist_ok=True)
     for kind, data in outputs.items():
-        (args.out / f'jeep_{kind}.rtm').write_bytes(data)
+        (args.out / f'{args.prefix}_{kind}.rtm').write_bytes(data)
     print('Generated six own draft RTMs; in-game pose/transition acceptance is still required.')
 
 

@@ -1,4 +1,4 @@
-param([string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault', [switch]$Menu, [switch]$InspectRoom, [switch]$CastleOnly, [switch]$GlassOnly, [switch]$GroupingAmmoOnly)
+param([string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault', [switch]$Menu, [switch]$InspectRoom, [switch]$CastleOnly, [switch]$GlassOnly, [switch]$GroupingAmmoOnly, [switch]$FlightOnly)
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) { throw 'Use scripts/with-game-lock.sh' }
 $root=Split-Path $PSScriptRoot -Parent
@@ -153,6 +153,45 @@ try {
   Start-Sleep -Seconds 18
  }
  Send @{cmd='eval';code='typeOf labNormal'} '"LabPanelNormal"'
+ if ($FlightOnly) {
+  Send @{cmd='eval';code='driver labHeli == labFlightPilot'} 'true'
+  Send @{cmd='exec';code='[player,player,labFlightVisit] exec "action.sqs"'}
+  Start-Sleep -Seconds 2
+  Send @{cmd='eval';code='vehicle player == labHeli'} 'true'
+  Send @{cmd='exec';code='player action ["CARGO WEAPON READY",labHeli]; labFlightShots=0; player addEventHandler ["Fired",{labFlightShots=labFlightShots+1}]'}
+  Start-Sleep -Seconds 2
+  Send @{cmd='crew_pose_probe'}
+  Send @{cmd='exec';code='[player,player,labFlightStart] exec "action.sqs"'}
+  $deadline=[DateTime]::UtcNow.AddSeconds(90)
+  do {
+   Start-Sleep -Seconds 2
+   $state=(Send @{cmd='eval';code='((getPos labHeli) select 2)>10 && abs(speed labHeli)>5'} | ConvertFrom-Json)
+  } while ($state.result -ne 'true' -and [DateTime]::UtcNow -lt $deadline)
+  if ($state.result -ne 'true') {throw 'Pilot did not take off'}
+  foreach ($i in 1..12) {
+   $heading=[double](Send @{cmd='eval';code='getDir labHeli'} | ConvertFrom-Json).result * [Math]::PI/180
+   Send @{cmd='crew_cursor';x=[Math]::Cos($heading);y=-0.25;z=-[Math]::Sin($heading)}
+   Start-Sleep -Seconds 1
+   Send @{cmd='crew_pose_probe'}
+   Send @{cmd='mouse_button';button=1;down=$true}
+   Start-Sleep -Milliseconds 150
+   Send @{cmd='mouse_button';button=1;down=$false}
+   Send @{cmd='eval';code='[speed labHeli,labFlightLeg,labFlightShots]'}
+  }
+  Send @{cmd='eval';code='labFlightShots > 3'} 'true'
+  Send @{cmd='screenshot';path=(Join-Path $out 'rifle-flight.png')}
+  Send @{cmd='exec';code='[player,player,labFlightLand] exec "action.sqs"'}
+  $deadline=[DateTime]::UtcNow.AddSeconds(180)
+  do {
+   Start-Sleep -Seconds 3
+   $state=(Send @{cmd='eval';code='((getPos labHeli) select 2)<1.5 && abs(speed labHeli)<2'} | ConvertFrom-Json)
+  } while ($state.result -ne 'true' -and [DateTime]::UtcNow -lt $deadline)
+  if ($state.result -ne 'true') {throw 'Pilot did not return and land'}
+  Send @{cmd='eval';code='alive player && alive labFlightPilot && alive labHeli'} 'true'
+  Send @{cmd='exit'}
+  if (!$p.WaitForExit(30000) -or $p.ExitCode -ne 0) {throw 'Flight test exit failed'}
+  return
+ }
  if ($GroupingAmmoOnly) {
   Send @{cmd='eval';code='weapons labHeli'}
   Send @{cmd='exec';code='labAmmoControl="UH60" createVehicle [9700,3600,0]; labAmmoControl setVehicleAmmo 0.1'}

@@ -12,8 +12,11 @@ if (!(Test-Path -LiteralPath $tools)) {throw 'Build PoseidonTools before packagi
 New-Item -ItemType Directory -Force $stage, (Join-Path $pack 'AddOns') | Out-Null
 & $Python "$PSScriptRoot/default-content/generate_jeep_animations.py" --spec "$source/jeep-pose.json" --out $stage
 if ($LASTEXITCODE -ne 0) {throw 'Jeep pose generation failed'}
+& $Python "$PSScriptRoot/default-content/generate_jeep_animations.py" --spec "$source/jeep-pose.json" --override "$source/uh60-pose.json" --prefix uh60 --out $stage
+if ($LASTEXITCODE -ne 0) {throw 'UH60 pose generation failed'}
 Copy-Item -LiteralPath "$source/config.cpp" -Destination "$stage/config.cpp" -Force
 $expected=@('config.cpp','jeep_idle.rtm','jeep_raise.rtm','jeep_aim.rtm','jeep_recoil.rtm','jeep_reload.rtm','jeep_lower.rtm')
+$expected+=@('uh60_idle.rtm','uh60_raise.rtm','uh60_aim.rtm','uh60_recoil.rtm','uh60_reload.rtm','uh60_lower.rtm')
 foreach ($file in Get-ChildItem -LiteralPath $stage -Force) {
     if ($file.PSIsContainer -or $file.Name -notin $expected) {throw "Unexpected animation staging file: $($file.FullName)"}
 }

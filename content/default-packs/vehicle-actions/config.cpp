@@ -16,6 +16,7 @@ class CfgMovesMC
         {
             reloadMagazine = "OPJeepReload";
         };
+        class OPHeliActions: CargoActions { reloadMagazine = "OPHeliReload"; };
     };
     class States
     {
@@ -42,6 +43,11 @@ class CfgMovesMC
         class OPJeepRecoil: OPJeepIdle { file = "\op_jeep_actions\jeep_recoil.rtm"; speed = 4; };
         class OPJeepReload: OPJeepIdle { file = "\op_jeep_actions\jeep_reload.rtm"; speed = 0.4; looped = 0; connectTo[] = {"OPJeepAim",1}; };
         class OPJeepLower: OPJeepIdle { file = "\op_jeep_actions\jeep_lower.rtm"; speed = 1.4; looped = 0; connectTo[] = {"OPJeepIdle",1}; };
+        class OPHeliIdle: OPJeepIdle { file = "\op_jeep_actions\uh60_idle.rtm"; actions = "OPHeliActions"; connectTo[] = {"OPHeliRaise",1}; };
+        class OPHeliRaise: OPHeliIdle { file = "\op_jeep_actions\uh60_raise.rtm"; speed = 1.4; looped = 0; connectTo[] = {"OPHeliAim",1}; };
+        class OPHeliAim: OPHeliIdle { file = "\op_jeep_actions\uh60_aim.rtm"; disableWeapons = 0; connectTo[] = {"OPHeliLower",1,"OPHeliReload",1}; };
+        class OPHeliReload: OPHeliIdle { file = "\op_jeep_actions\uh60_reload.rtm"; speed = 0.4; looped = 0; connectTo[] = {"OPHeliAim",1}; };
+        class OPHeliLower: OPHeliIdle { file = "\op_jeep_actions\uh60_lower.rtm"; speed = 1.4; looped = 0; connectTo[] = {"OPHeliIdle",1}; };
     };
 };
 // Version 3 uses the personal primary bullet family with the existing seated actions.
@@ -58,11 +64,11 @@ class CfgOPVehicleActions
                 {
                     cargoIndex = 10;
                     weaponFamily = "rifle";
-                    action = "OPJeepAim";
-                    idleAction = "OPJeepIdle";
-                    raiseAction = "OPJeepRaise";
-                    reloadAction = "OPJeepReload";
-                    lowerAction = "OPJeepLower";
+                    action = "OPHeliAim";
+                    idleAction = "OPHeliIdle";
+                    raiseAction = "OPHeliRaise";
+                    reloadAction = "OPHeliReload";
+                    lowerAction = "OPHeliLower";
                     azimuth = 90;
                     halfAngle = 25;
                     minElevation = -45;
