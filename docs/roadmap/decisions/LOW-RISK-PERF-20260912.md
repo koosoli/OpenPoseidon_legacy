@@ -90,3 +90,9 @@ for Reforger streaming; GPU attribution of cloud, grass and water for steady FPS
 Existing worker/preparer and palette batching must be reused. The old measured
 null upload-budget experiment and rejected vegetation-detail cuts stay rejected.
 Do not trade visibility, fog, vegetation density or material quality for numbers.
+
+Final installed default smoke: 5f1538dd, Test-TerrainFineBrush.ps1, capture
+build/terrain-brush/acceptance/brush-20260912-215101/fine-crater.png. Fine stroke
+29.835 -> 26.835 m; neighbouring sample stays 29.835; cell-centre stroke changes
+height; restore returns 29.835. Clean exit. This exercises default camera batching
+with original terrain reallocation, not acceptance of the parked reuse lever.
