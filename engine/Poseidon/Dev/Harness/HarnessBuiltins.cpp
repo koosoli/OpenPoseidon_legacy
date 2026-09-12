@@ -256,6 +256,13 @@ void RegisterSqf(HarnessServer& hs)
                                }
                            }
                            cJSON_AddBoolToObject(resp, "cargoWeaponLineClear", man->CargoWeaponLineClear(weapon));
+                           if (GWorld->UI())
+                           {
+                               const Vector3 cursor = GWorld->UI()->GetCursorDirection();
+                               cJSON_AddNumberToObject(resp, "cursorX", cursor.X());
+                               cJSON_AddNumberToObject(resp, "cursorY", cursor.Y());
+                               cJSON_AddNumberToObject(resp, "cursorZ", cursor.Z());
+                           }
                            cJSON_AddBoolToObject(resp, "fireTarget", man->GetFireTarget() != nullptr);
                            Man::AimingDiagnostics aiming;
                            cJSON_AddNumberToObject(resp, "aimed", man->GetAimed(weapon, man->GetFireTarget(), &aiming));

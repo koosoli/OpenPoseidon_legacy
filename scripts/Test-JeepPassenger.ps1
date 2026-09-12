@@ -291,9 +291,6 @@ try {
                 'ffvPassenger assignAsCargo ffvJeep; ffvPassenger setPos [{0},{1},0]; ffvPassenger setDir {2}', $entry.entryX,$entry.entryZ,$heading)
             $null=Send @{cmd='exec';code=$placement}
             Start-Sleep -Seconds 2
-            $null=Send @{cmd='key';sc=47;hold=$true}
-            Start-Sleep -Milliseconds 250
-            $null=Send @{cmd='key_up';sc=47}
             $null=Send @{cmd='screenshot';path=(Join-Path $output 'menu-before-entry.png')}
             $null=Send @{cmd='key';sc=40;hold=$true}
             Start-Sleep -Milliseconds 250

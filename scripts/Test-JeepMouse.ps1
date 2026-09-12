@@ -19,7 +19,9 @@ try {
         return $response
     }
     function SeekPose([bool]$aiming,[int]$dx) {
-        for ($i=0;$i -lt 90;$i++) {
+        # Normal boarding preserves the previous view, unlike the old fixture
+        # which started beside the firing arc. Allow a complete mouse sweep.
+        for ($i=0;$i -lt 360;$i++) {
             $null=Send @{cmd='mouse_motion';dx=$dx;dy=0}
             Start-Sleep -Milliseconds 150
             $pose=Send @{cmd='crew_pose_probe'}
