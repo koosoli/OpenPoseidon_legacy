@@ -6,6 +6,24 @@ use crate::gfx3d::{NORMAL_FORMAT, depth_format};
 
 mod skyvis;
 
+fn terrain_resource_reuse() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var("WGR_TERRAIN_RESOURCE_REUSE").map_or(true, |v| v != "0"))
+}
+
+fn same_texture_size(old: (u32, u32), new: (u32, u32)) -> bool {
+    old == new && new.0 != 0 && new.1 != 0
+}
+
+#[test]
+fn terrain_resource_reuse_requires_matching_nonempty_dimensions() {
+    assert!(same_texture_size((2048, 1024), (2048, 1024)));
+    assert!(!same_texture_size((1024, 2048), (2048, 1024)));
+    assert!(!same_texture_size((2048, 2048), (2048, 1024)));
+    assert!(!same_texture_size((0, 1024), (0, 1024)));
+    assert!(!same_texture_size((1024, 0), (1024, 0)));
+}
+
 // Which terrain pipeline a draw uses (docs/depth-prepass-plan.md). Color = the shading
 // pass (depth write ON). ColorNoWrite = the prepassed segment's colour pass (depth
 // already complete -> GreaterEqual/write-off). Prepass = the depth+normal G-buffer pass.
@@ -1003,7 +1021,13 @@ impl Terrain {
             return;
         }
 
-        let (heightmap, view) = create_heightmap(device, w, h);
+        let reuse_height = terrain_resource_reuse() && self.have_heightmap
+            && same_texture_size((self.hm_width, self.hm_height), (w, h));
+        let (heightmap, view) = if reuse_height {
+            (self.heightmap.clone(), self.heightmap_view.clone())
+        } else {
+            create_heightmap(device, w, h)
+        };
         queue.write_texture(
             texel_copy(&heightmap),
             bytemuck::cast_slice(&heights[..(w as usize * h as usize)]),
@@ -1020,12 +1044,19 @@ impl Terrain {
         );
         queue.write_buffer(&self.params_ubo, 0, bytemuck::bytes_of(&params));
 
-        // Reallocate the sun-shadow mask (a `scale`x-finer grid than the heightmap),
-        // rebuild both binds that reference the (new) heightmap/mask views, and
-        // stage the sweep inputs.
+        // Keep same-size allocations through terrain edits. Queue ordering preserves
+        // earlier frames; content generations and shadow recomputation still advance.
         let (mask_w, mask_h) = shadow_mask_dims(w, h, self.shadow_scale, self.max_dim);
-        let shadow_mask = create_shadow_mask(device, mask_w, mask_h);
-        let mask_view = shadow_mask.create_view(&wgpu::TextureViewDescriptor::default());
+        let reuse_shadow = terrain_resource_reuse() && self.have_heightmap
+            && same_texture_size((self.mask_width, self.mask_height), (mask_w, mask_h));
+        let (shadow_mask, mask_view) = if reuse_shadow {
+            (self.shadow_mask.clone(), self.shadow_mask_view.clone())
+        } else {
+            let mask = create_shadow_mask(device, mask_w, mask_h);
+            let view = mask.create_view(&wgpu::TextureViewDescriptor::default());
+            (mask, view)
+        };
+        eprintln!("terrain upload: {w}x{h} height_reused={reuse_height} shadow_reused={reuse_shadow}");
         self.group1_bind = make_group1(
             device,
             &self.group1_layout,
@@ -1251,9 +1282,21 @@ impl Terrain {
             .iter()
             .map(|v| (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8)
             .collect();
-        let (skyvis_mask, skyvis_view) = create_skyvis(device, queue, sv_w, sv_h, &sv_bytes);
-        self.skyvis_mask = skyvis_mask;
-        self.skyvis_view = skyvis_view;
+        if terrain_resource_reuse() && same_texture_size(
+            (self.skyvis_mask.width(), self.skyvis_mask.height()), (sv_w, sv_h)) {
+            queue.write_texture(
+                texel_copy(&self.skyvis_mask),
+                &sv_bytes,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0, bytes_per_row: Some(sv_w), rows_per_image: Some(sv_h),
+                },
+                wgpu::Extent3d { width: sv_w, height: sv_h, depth_or_array_layers: 1 },
+            );
+        } else {
+            let (skyvis_mask, skyvis_view) = create_skyvis(device, queue, sv_w, sv_h, &sv_bytes);
+            self.skyvis_mask = skyvis_mask;
+            self.skyvis_view = skyvis_view;
+        }
         self.mask_gen += 1;
     }
 
