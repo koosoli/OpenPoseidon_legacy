@@ -1912,6 +1912,29 @@ mod enfusion_ground_tests {
     use crate::ffi::{WgrTerrainMaterial, WgrTerrainParams};
 
     #[test]
+    fn native_ground_ao_composes_with_and_without_ablation() {
+        use naga_oil::compose::{NagaModuleDescriptor, ShaderDefValue};
+        for disabled in [false, true] {
+            let mut composer = crate::shaders::build_composer();
+            let mut defs = std::collections::HashMap::new();
+            if disabled {
+                defs.insert("DISABLE_NATIVE_GROUND_AO".to_string(), ShaderDefValue::Bool(true));
+            }
+            let result = composer.make_naga_module(NagaModuleDescriptor {
+                source: include_str!("terrain.wgsl"),
+                file_path: "terrain/terrain.wgsl",
+                shader_defs: defs,
+                ..Default::default()
+            });
+            if let Err(error) = result {
+                panic!("{}", error.emit_to_string(&composer));
+            }
+        }
+        let source = include_str!("terrain.wgsl");
+        assert!(source.contains("authored_ao = mix(authored_ao, 1.0, coverage)"));
+    }
+
+    #[test]
     fn native_ground_normals_use_raw_rg_and_skip_distant_fetches() {
         let src = include_str!("terrain.wgsl");
         let native = src.split("if (material.enfusion != 0u && tp.enfusion_ground > 0.0) {")
@@ -1921,7 +1944,11 @@ mod enfusion_ground_tests {
         assert!(!native.contains("srgb_to_linear(packed"));
         assert!(native.contains("vec3<f32>(-xy.x, xy.y,"));
         assert!(native.contains("clamp(tp.enfusion_ground, 0.0, 1.0)"));
-        assert!(native.contains("return AuthoredCell(rgb, normal_ts)"));
+        assert!(native.contains("return AuthoredCell(rgb, normal_ts, authored_ao)"));
+        assert!(native.contains("clamp(packed.a, 0.0, 1.0)"));
+        assert!(src.contains("* normal_map_cavity(geometric_n, n) * authored_ao"));
+        assert!(src.contains("authored_ao = c.ambient_occlusion"));
+        assert!(src.contains("w11 * c11.ambient_occlusion"));
     }
 
     // RFG-065. The Enfusion block is read by OFFSET, not by name: a field added to the

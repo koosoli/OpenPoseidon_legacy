@@ -280,6 +280,7 @@ fn terrain_uv_gradient(transform: TerrainUv, source_bit: u32, source_mask: u32,
 struct AuthoredCell {
     rgb: vec3<f32>,
     normal_ts: vec3<f32>,
+    ambient_occlusion: f32,
 };
 
 // Tangent-space view direction for the terrain's world-aligned frame (T = +X, B = +Z,
@@ -507,8 +508,8 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
     //    that fade is not optional decoration: it is what stops a 4 m period from
     //    becoming a lattice in the middle distance.
     //
-    // NHO uses raw RG normal XY, as verified by the native DDS tests. Height/AO
-    // are not used here. `SatMapBlend` is zero on 19 of the 37 that declare it
+    // NHO uses raw RG normal XY and A ambient occlusion. Height remains unused.
+    // `SatMapBlend` is zero on 19 of the 37 that declare it
     // and needs Everon's 2,500 `_supertexture.edds` paged in, which is a build, not a
     // binding.
     if (material.enfusion != 0u && tp.enfusion_ground > 0.0) {
@@ -519,6 +520,7 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
         var rgb = textureSampleGrad(ground[material.legacy], ground_samp, d_uv,
                                     duv * material.detail_scale, dvv * material.detail_scale).rgb;
         var normal_ts = vec3<f32>(0.0, 0.0, 1.0);
+        var authored_ao = 1.0;
         let detail_end = max(material.detail_max, 1.0);
         let detail_far = smoothstep(max(detail_end - max(material.detail_fade, 1.0), 0.0),
                                     detail_end, length(view_pos));
@@ -530,6 +532,12 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
             // Native UVs grow toward +X/+Z, unlike the legacy tile convention.
             let decoded = normalize(vec3<f32>(-xy.x, xy.y, sqrt(max(1.0 - dot(xy, xy), 1e-4))));
             normal_ts = normalize(mix(normal_ts, decoded, (1.0 - detail_far) * clamp(tp.enfusion_ground, 0.0, 1.0)));
+#ifndef DISABLE_NATIVE_GROUND_AO
+            // NHO alpha is linear ambient visibility, not coverage or normal X.
+            // Reuse the normal tap and its detail band; no extra texture read.
+            authored_ao = mix(1.0, clamp(packed.a, 0.0, 1.0),
+                              (1.0 - detail_far) * clamp(tp.enfusion_ground, 0.0, 1.0));
+#endif
         }
         if (material.middle != 0u && material.middle_blend > 0.0) {
             let m_uv = wxz * material.middle_scale;
@@ -561,11 +569,11 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
         // BIT-EXACT the legacy sample below. Full on costs ONE fetch (two with a
         // middle map): the legacy tap is only taken while the slider is between.
         if (tp.enfusion_ground >= 0.999) {
-            return AuthoredCell(rgb, normal_ts);
+            return AuthoredCell(rgb, normal_ts, authored_ao);
         }
         let legacy_rgb = sample_cell(material.legacy, cell, tile_uv, ddx, ddy);
         return AuthoredCell(mix(legacy_rgb, rgb, clamp(tp.enfusion_ground, 0.0, 1.0)),
-                            normal_ts);
+                            normal_ts, authored_ao);
     }
     // The normal renderer must remain byte-for-byte on the established cell
     // path while the authored composition is evaluated and compared.
@@ -575,22 +583,22 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
             let far = smoothstep(800.0, 2400.0, length(view_pos));
             if (far <= 0.0) {
                 return AuthoredCell(sample_cell(material.legacy,cell,tile_uv,ddx,ddy),
-                                    sample_legacy_normal(material,cell,tile_uv,ddx,ddy,world_pos,world_dwx,world_dwy,view_pos));
+                                    sample_legacy_normal(material,cell,tile_uv,ddx,ddy,world_pos,world_dwx,world_dwy,view_pos), 1.0);
             }
             let inv_span = 1.0 / (tp.land_grid * f32(tp.land_range));
             let uv = (world_pos.xz - tp.world_origin) * inv_span;
             let satellite = textureSampleGrad(ground[material.satellite], ground_clamp_samp,
                 uv, world_dwx.xz * inv_span, world_dwy.xz * inv_span).rgb;
             if (far >= 0.999) {
-                return AuthoredCell(satellite, vec3<f32>(0.0,0.0,1.0));
+                return AuthoredCell(satellite, vec3<f32>(0.0,0.0,1.0), 1.0);
             }
             let near = sample_cell(material.legacy,cell,tile_uv,ddx,ddy);
             let normal = sample_legacy_normal(material,cell,tile_uv,ddx,ddy,world_pos,world_dwx,world_dwy,view_pos);
             return AuthoredCell(mix(near,satellite,far),
-                                normalize(mix(normal,vec3<f32>(0.0,0.0,1.0),far)));
+                                normalize(mix(normal,vec3<f32>(0.0,0.0,1.0),far)), 1.0);
         }
         return AuthoredCell(sample_cell(material.legacy, cell, tile_uv, ddx, ddy),
-                            sample_legacy_normal(material,cell,tile_uv,ddx,ddy,world_pos,world_dwx,world_dwy,view_pos));
+                            sample_legacy_normal(material,cell,tile_uv,ddx,ddy,world_pos,world_dwx,world_dwy,view_pos), 1.0);
     }
     // RVMAT `worldPos` is the engine's own world vector, Y up -- the same axes
     // the renderer already carries. The swizzle that used to sit here was
@@ -633,7 +641,7 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
     let detail_fade = 1.0 - smoothstep(detail_fade_start, detail_fade_end, view_dist);
     let blend = authored_weight * detail_fade;
     if (blend <= 0.001) {
-        return AuthoredCell(satellite, tile_normal);
+        return AuthoredCell(satellite, tile_normal, 1.0);
     }
     let mask = textureSampleGrad(ground[material.mask], ground_samp, mask_uv, mask_dwx, mask_dwy).rgba;
     // `var`, not `let`: the loop below indexes it with a non-constant slot.
@@ -699,7 +707,7 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
         // rather than dividing by zero. The tile normal is a property of the TILE, not of
         // the slots the mask selected, so it still applies here.
         return AuthoredCell(sample_cell(material.legacy, cell, tile_uv, ddx, ddy),
-                            tile_normal);
+                            tile_normal, 1.0);
     }
     // `surface` already carries each slot's gain (the x2, or 1/its own average), applied
     // per slot inside the sum above. From here it IS the multiplier the satellite takes.
@@ -756,7 +764,7 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
     // different bands and must not share a distance ramp.
     return AuthoredCell(satellite * gain,
                         blend_normal_ts(normalize(mix(vec3<f32>(0.0, 0.0, 1.0), normal_ts, normal_blend)),
-                                        tile_normal));
+                                        tile_normal), 1.0);
 }
 
 struct VsOut {
@@ -954,6 +962,7 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     let absolute_world_pos = in.world_pos + frame.cam_pos.xyz;
     var rgb = vec3<f32>(0.0);
     var authored_normal_ts = vec3<f32>(0.0, 0.0, 1.0);
+    var authored_ao = 1.0;
     // The four-cell cross-fade exists to hide the LEGACY per-cell texture's hard cell
     // edge. When all four cells name the same entry it changes nothing -- and it is
     // the same entry over the whole interior of every cell, which is nearly the whole
@@ -973,6 +982,7 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
         let c = sample_authored_cell(e00, base, tile_uv, duvdx, duvdy, absolute_world_pos, in.world_pos, dwx_tex, dwy_tex);
         rgb = c.rgb;
         authored_normal_ts = c.normal_ts;
+        authored_ao = c.ambient_occlusion;
     } else {
         let c00 = sample_authored_cell(e00, base, tile_uv, duvdx, duvdy, absolute_world_pos, in.world_pos, dwx_tex, dwy_tex);
         let c10 = sample_authored_cell(e10, base + vec2<f32>(1.0, 0.0), tile_uv, duvdx, duvdy, absolute_world_pos, in.world_pos, dwx_tex, dwy_tex);
@@ -983,6 +993,8 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
         // stays continuous over a cell boundary.
         authored_normal_ts = w00 * c00.normal_ts + w10 * c10.normal_ts
                            + w01 * c01.normal_ts + w11 * c11.normal_ts;
+        authored_ao = w00 * c00.ambient_occlusion + w10 * c10.ambient_occlusion
+                    + w01 * c01.ambient_occlusion + w11 * c11.ambient_occlusion;
     }
 
     // High-frequency detail noise: alpha modulates around neutral (matches GL33's
@@ -1029,6 +1041,7 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
         var snow_rgb = vec3<f32>(0.70, 0.75, 0.80) * (1.0 - compacted * 0.28);
         if (linear <= 0.5) { snow_rgb = ground_linear_to_srgb(snow_rgb); }
         rgb = mix(rgb, snow_rgb, coverage);
+        authored_ao = mix(authored_ao, 1.0, coverage);
         n = normalize(mix(n, geometric_n, coverage) + snow_gradient(in.world_xz) * geometric_n.y * dry);
     }
 
@@ -1127,7 +1140,7 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     sun_ambient *= sky_vis_ao(in.world_xz)
         * gtao_ao(in.clip.xy)
         * interior_sky_ao(in.world_pos + frame.cam_pos.xyz, n)
-        * normal_map_cavity(geometric_n, n);
+        * normal_map_cavity(geometric_n, n) * authored_ao;
     // CLD-020: cloud transmittance dims the DIRECT term only, leaving sky ambient intact, so
     // ground under a cloud settles toward ambient rather than toward black.
     let sun_raw = sun_diffuse * cos_fi * (1.0 - shadow) * cloud_sun_shadow(in.world_xz) + sun_ambient;
