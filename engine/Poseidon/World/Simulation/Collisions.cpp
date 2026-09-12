@@ -254,6 +254,7 @@ void Landscape::CheckObjectCollision(int x, int z, CollisionBuffer& retVal, Chec
 void Landscape::ObjectCollision(CollisionBuffer& retVal, Object* with, Object* ignore, Vector3Par beg, Vector3Par end,
                                 float radius, ObjIntersect type) const
 {
+    const int firstContact = retVal.Size();
     int xMin, xMax, zMin, zMax;
     ObjRadiusRectangle(xMin, xMax, zMin, zMax, beg, end, radius);
     int x, z;
@@ -378,6 +379,17 @@ void Landscape::ObjectCollision(CollisionBuffer& retVal, Object* with, Object* i
         }
     }
 #endif
+    // Intersect can return a child proxy (e.g. a passenger) even when the
+    // top-level vehicle is not excluded. Honour the query's exclusions there
+    // too, without excluding the carrier or any of its other occupants.
+    for (int i = retVal.Size() - 1; i >= firstContact; --i)
+    {
+        const Object* hit = retVal[i].object;
+        if (hit && (hit == with || hit == ignore))
+        {
+            retVal.Delete(i);
+        }
+    }
 }
 
 float Landscape::UnderRoadSurface(const Object* obj, Vector3Par modelPos, float bumpy, float* dX, float* dZ,

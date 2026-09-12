@@ -292,6 +292,10 @@ try {
             $null=Send @{cmd='mouse_button';button=1;down=$false}
             Start-Sleep -Milliseconds 180
             $hit=Send @{cmd='eval';code='getDammage ffvTarget'}
+            $null=Send @{cmd='eval';code='[alive ffvPassenger,getDammage ffvPassenger,ffvShots,vehicle ffvPassenger == ffvJeep]'}
+            $null=Send @{cmd='crew_seat_status'}
+            $null=Send @{cmd='crew_pose_probe'}
+            $null=Send @{cmd='eval';code='alive ffvPassenger && getDammage ffvPassenger == 0'} 'true'
             if ([double]$hit.result -gt 0) {break}
         }
     }
