@@ -253,6 +253,9 @@ try {
  Send @{cmd='exec';code='player moveInCargo labRideJeep'}
  Start-Sleep -Seconds 8
  Send @{cmd='eval';code='vehicle player == labRideJeep'} 'true'
+ Send @{cmd='eval';code='abs(speed labRideJeep) < 1'} 'true'
+ Send @{cmd='exec';code='[player,player,labRideStart] exec "action.sqs"'}
+ Start-Sleep -Seconds 8
  Send @{cmd='eval';code='abs(speed labRideJeep) > 1'} 'true'
  Send @{cmd='exec';code='unassignVehicle player; player action ["EJECT",labRideJeep]'}
  Start-Sleep -Seconds 5

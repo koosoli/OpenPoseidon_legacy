@@ -56,7 +56,7 @@ class CfgOPVehicleActions
             {
                 class RightDoor
                 {
-                    cargoIndex = 0;
+                    cargoIndex = 4;
                     weaponFamily = "rifle";
                     action = "OPJeepAim";
                     idleAction = "OPJeepIdle";

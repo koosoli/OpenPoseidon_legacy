@@ -1,6 +1,7 @@
 param([ValidateSet('M16','AK74')][string]$Rifle='M16',
       [ValidateSet('','Jeep','UAZ','Truck5tOpen','UH60')][string]$InspectVehicle='',
       [ValidateRange(0,11)][int]$InspectCargoIndex=0,
+      [switch]$InspectAllSeats,
       [ValidateSet('Jeep','UH60')][string]$TestVehicle='Jeep',
       [switch]$ProjectileFrame, [switch]$AnimationPreview, [switch]$AnimationVideo, [switch]$NpcFire,
       [ValidateSet('clear','hold','outside','blocked','friendly')][string]$NpcScenario='clear',
@@ -169,6 +170,15 @@ try {
         Start-Sleep -Seconds 3
         $original=Send @{cmd='crew_pose_probe'}
         if ($original.cargoIndex -ne $InspectCargoIndex -or $original.cargoWeaponActive) {throw 'Original seat inspection resolved the wrong seat or enabled FFV'}
+        if ($InspectAllSeats) {
+            for ($i=1;$i -lt 12;$i++) {
+                $null=Send @{cmd='exec';code='unassignVehicle ffvPassenger; ffvPassenger action ["EJECT",ffvJeep]'}
+                Start-Sleep -Milliseconds 500
+                $null=Send @{cmd='exec';code='"SoldierWB" createUnit [[9700,3600,0],ffvSeatGroup,"this setCombatMode ""BLUE""; this moveInCargo ffvJeep"]; ffvPassenger moveInCargo ffvJeep'}
+                Start-Sleep -Milliseconds 400
+                $null=Send @{cmd='crew_pose_probe'}
+            }
+        }
         $null=Send @{cmd='screenshot';path=(Join-Path $output 'original-seat.png')}
         $null=Send @{cmd='exec';code='ffvView camSetPos [(getPos ffvJeep select 0)+5,(getPos ffvJeep select 1)-6,4]; ffvView camSetTarget [(getPos ffvJeep select 0),(getPos ffvJeep select 1),2]; ffvView camCommit 0'}
         Start-Sleep -Seconds 1
@@ -180,6 +190,10 @@ try {
     }
     if ($TestVehicle -ne 'Jeep') {
         $null=Send @{cmd='exec';code=('deleteVehicle ffvJeep; ffvJeep="'+$TestVehicle+'" createVehicle [9700,3600,0]; ffvJeep setDir 0')}
+        $null=Send @{cmd='exec';code='ffvSeatGroup=createGroup west'}
+        for ($i=0;$i -lt $InspectCargoIndex;$i++) {
+            $null=Send @{cmd='exec';code='"SoldierWB" createUnit [[9700,3600,0],ffvSeatGroup,"removeAllWeapons this; this setCombatMode ""BLUE""; this moveInCargo ffvJeep"]'}
+        }
     }
     $null=Send @{cmd='eval';code='typeOf ffvJeep'} ('"'+$TestVehicle+'"')
     if ($NpcFire) {
