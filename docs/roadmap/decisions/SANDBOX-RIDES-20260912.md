@@ -94,3 +94,36 @@ In particular the known UH60 start-inside collision may conservatively hit the
 carrier rather than permit outward fire. Existing fallback pose height/fit in
 other vehicles and extreme-angle body appearance are unaccepted. Do not describe
 the fallback as finished all-vehicle support or a solution for every weapon.
+
+### Installed shared-path results
+
+- f359d256: 12 UH60 player shots consumed ammunition but no exterior target hit.
+  Conservative convex insertion handling alone was insufficient.
+- 1a2dc1f1: carrier-only two-sided visual shell ray query, with normal crew and
+  scenery collision retained. Bounding-sphere rejection prevents repeated full
+  shell walks once bullets leave the carrier. This is player/SP/bullet-only.
+  241 assertions in 14 cargo tests passed, including two-sided finite-segment
+  intersections and unchanged NPC angle policy.
+- baseline-20260912-194142: first M16 shot from stationary UH60 cargo 10 hit the
+  exterior target (damage 0.50623; ammunition 30 to 29). Reload animation ran and
+  ammo returned to 30; initial test falsely expected OPJeepReload rather than
+  OPHeliReload. Corrected test passed in baseline-20260912-195302. Six subsequent
+  floor shots raised carrier damage from 0 to 0.011. Reload video is generated
+  in that capture directory; this is not a performance measurement.
+- 566886fb: sandbox pilot uses direct doMove route orders plus engineOn after
+  land NONE. Installed FlightOnly test completed takeoff, 12 mouse-triggered M16
+  shots (speed reached 121.886 km/h), return/landing and player/pilot/carrier alive
+  checks. build/showcase/shared-rifle-flight2.txt and smoke/rifle-flight.png.
+  A complete repeated lap was NOT observed; return was requested during leg 0.
+  First-person pose/camera visibly remains draft quality.
+- UAZ validation initially stopped in the harness before player takeover: it
+  required active NPC FFV even though the new generic policy is player-only.
+  These failures do not validate or disprove UAZ player firing. Removing that
+  harness assumption is in progress; NPC permissions remain unchanged.
+
+Remaining acceptance: generic unmapped vehicle, mouse sweep/reentry regression,
+save/load, deliberate pilot hit, proxy-heavy/different-skeleton vehicle coverage,
+glass/material damage fidelity of visual shell contacts (component=-1), and
+measured additional CPU cost. The shell query currently skips hidden/proxy faces;
+do not assume every addon vehicle's shell is represented entirely in visual LOD0.
+No claim of all weapons, multiplayer support or polished full-body aiming.

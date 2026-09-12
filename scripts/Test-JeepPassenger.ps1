@@ -10,7 +10,7 @@ param([ValidateSet('M16','AK74')][string]$Rifle='M16',
       [ValidateSet('near','far')][string]$TurnTarget='near',
       [ValidateSet('individual','group','waypoint')][string]$DriverCommand='individual',
       [switch]$LimitedDriver,
-      [switch]$PlayerFire, [switch]$Lifecycle, [switch]$SaveLoad, [switch]$MenuReentry, [switch]$MovingPlayer,
+      [switch]$PlayerFire, [switch]$Lifecycle, [switch]$SaveLoad, [switch]$MenuReentry, [switch]$MovingPlayer, [switch]$CarrierDamage,
       [switch]$DefaultPackage, [string]$UserMod='',
       [ValidateSet('','missing','incompatible')][string]$AutomaticOriginal='', [string]$MissionPath='',
       [string]$LoadOriginalSave='',
@@ -28,6 +28,7 @@ if ($PlayerFire) {
     if ($NpcFire -or $NpcMoving -or $NpcTransitions -or $NpcScenario -ne 'clear') {throw 'Player fire is a separate case'}
     $NpcFire=$true
 }
+if ($CarrierDamage -and (!$PlayerFire -or $Lifecycle -or $MenuReentry -or $MovingPlayer)) {throw 'Carrier damage requires stationary player fire without lifecycle/menu modes'}
 if ($AnimationVideo -and !$AnimationPreview) {throw '-AnimationVideo requires -AnimationPreview'}
 if ($NpcFire -and ($AnimationPreview -or $ProjectileFrame)) {throw 'Select one integration mode per launch'}
 if (!$NpcFire -and $NpcScenario -ne 'clear') {throw '-NpcScenario requires -NpcFire'}
@@ -247,12 +248,12 @@ try {
             $null=Send @{cmd='exec';code=('"SoldierWB" createUnit [[{0},{1},0],group player,"ffvFriendly=this; this disableAI ""MOVE""; removeAllWeapons this; this setUnitPos ""UP"""]' -f (9700+4*$rightX),(3600+4*$rightZ))}
         }
         $entry=Send @{cmd='crew_pose_probe'}
-        if (!$entry.cargoWeaponActive) {throw 'Automatic cargo animation entry failed'}
+        if (!$PlayerFire -and !$entry.cargoWeaponActive) {throw 'Automatic cargo animation entry failed'}
         $null=Send @{cmd='exec';code='ffvPassenger reveal ffvTarget; ffvPassenger doTarget ffvTarget'}
         Start-Sleep -Seconds 2
         $null=Send @{cmd='eval';code='ffvShots'} '0'
         $activation=Send @{cmd='crew_pose_probe'}
-        if (!$activation.cargoWeaponActive) {throw 'NPC fixture did not activate the explicitly configured seat'}
+        if (!$PlayerFire -and !$activation.cargoWeaponActive) {throw 'NPC fixture did not activate the explicitly configured seat'}
     }
     if ($SecondJeep) {
         $null=Send @{cmd='exec';code='ffvSecondJeep="Jeep" createVehicle [9700,3700,0]; ffvSecondJeep setDir 0; ffvSecondGroup=createGroup west; ffvSecondShots=0; "SoldierWB" createUnit [[9700,3700,0],ffvSecondGroup,"ffvSecond=this; this setCombatMode ""BLUE""; removeAllWeapons this"]; {ffvSecond removeMagazine _x} forEach magazines ffvSecond; ffvSecond addMagazine "M16"; ffvSecond addWeapon "M16"; ffvSecond moveInCargo ffvSecondJeep; "SoldierEB" createUnit [[9760,3700,0],group ffvTarget,"ffvSecondTarget=this; removeAllWeapons this; this disableAI ""MOVE"""]; ffvSecond addEventHandler ["Fired",{ffvSecondShots=ffvSecondShots+1}]; ffvSecond reveal ffvSecondTarget; ffvSecond doTarget ffvSecondTarget'}
@@ -604,6 +605,21 @@ try {
             Start-Sleep -Seconds 1
             $destroyed=Send @{cmd='crew_seat_status'}
             if ($destroyed.active) {throw 'Destroyed carrier retained cargo weapon mode'}
+        }
+        if ($CarrierDamage) {
+            $damageBefore=[double](Send @{cmd='eval';code='getDammage ffvJeep'}).result
+            $null=Send @{cmd='crew_cursor';x=0.1;y=-1;z=0}
+            Start-Sleep -Seconds 2
+            foreach ($shot in 1..6) {
+                $null=Send @{cmd='mouse_button';button=1;down=$true}
+                Start-Sleep -Milliseconds 150
+                $null=Send @{cmd='mouse_button';button=1;down=$false}
+                Start-Sleep -Milliseconds 250
+            }
+            $damageAfter=[double](Send @{cmd='eval';code='getDammage ffvJeep'}).result
+            [pscustomobject]@{before=$damageBefore;after=$damageAfter;vehicle=$TestVehicle} |
+                ConvertTo-Json | Set-Content -LiteralPath (Join-Path $output 'carrier-damage.json')
+            if ($damageAfter -le $damageBefore) {throw 'Personal bullets did not damage the carrier floor'}
         }
         $null=Send @{cmd='exit'}
         if (!$p.WaitForExit(30000) -or $p.ExitCode -ne 0) {throw 'NPC fire exit failed'}

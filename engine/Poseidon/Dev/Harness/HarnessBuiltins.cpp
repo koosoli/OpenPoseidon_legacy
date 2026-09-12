@@ -114,8 +114,8 @@ void RegisterSqf(HarnessServer& hs)
             AIGroup* group = focus ? focus->GetGroup() : nullptr;
             AIUnit* unit = group ? group->UnitWithID(2) : nullptr;
             Man* man = unit ? dyn_cast<Man>(unit->GetPerson()) : nullptr;
-            if (!man || !man->GetActiveCargoWeaponSeat())
-                return HarnessProtocol::ErrorResponse("active fixture passenger required");
+            if (!man || !unit->IsInCargo() || !man->GetHierachyParent() || !man->IsLocal())
+                return HarnessProtocol::ErrorResponse("local seated fixture passenger required");
             GWorld->SwitchPlayerTo(man);
             GWorld->SetPlayerManual(true);
             GWorld->SwitchCameraTo(man, CamInternal);
