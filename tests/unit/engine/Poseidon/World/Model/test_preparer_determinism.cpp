@@ -44,6 +44,8 @@
 #include <Poseidon/Foundation/Platform/FpEnvironment.hpp>
 #include <Poseidon/Foundation/Strings/RString.hpp>
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
+#include <Poseidon/Graphics/Dummy/TextureDummy.hpp>
+#include <Poseidon/Graphics/Rendering/Lighting/Material.hpp>
 #include <Poseidon/World/Model/Model.hpp>
 #include <Poseidon/World/Model/ModelCache.hpp>
 #include <Poseidon/World/Model/ShapeAdapter.hpp>
@@ -606,6 +608,49 @@ void RequireAllEqual(const std::vector<uint64_t>& got, uint64_t reference, const
 //
 // A determinism test that agrees because it converted nothing passes for ever
 // and means nothing.  Measure the fixture before trusting any agreement.
+
+TEST_CASE("Native MLOD worker uses prepared material identity without bank fallback",
+          "[preparer][ShapeAdapter][native-bank]")
+{
+    Poseidon::Foundation::CaptureMainFpEnvironment();
+    auto model = BuildFixtureModel();
+    model->sourceFormat = "MLOD";
+    model->lodLevels.resize(1);
+    auto& mesh = model->lodLevels[0].mesh;
+    mesh.sections.clear();
+    const std::string path = "native_worker_prepared_material.emat";
+    for (auto& material : mesh.materials)
+        material.materialPath = path;
+
+    Poseidon::Ref<Poseidon::Texture> texture = new Poseidon::TextureDummy;
+    Poseidon::Ref<Poseidon::TexMaterial> expected = new Poseidon::TexMaterial;
+    Adapter::AdapterBankTables tables;
+    tables.textures.resize(1);
+    tables.textures[0].assign(mesh.materials.size(), texture);
+    tables.surfMats.resize(1);
+    tables.mlodSurfMats.resize(1);
+    tables.mlodSurfMats[0].emplace(path, expected);
+
+    for (bool present : {true, false})
+    {
+        if (!present)
+            tables.mlodSurfMats[0].clear();
+        LODShapeWithShadow* result = nullptr;
+        std::thread worker([&] {
+            Poseidon::Foundation::ApplyMainFpEnvironment();
+            result = Adapter::convertToLODShape(*model, false, &tables, false);
+        });
+        worker.join();
+        std::unique_ptr<LODShapeWithShadow> shape(result);
+        REQUIRE(shape != nullptr);
+        REQUIRE(shape->Level(0)->NSections() > 0);
+        for (int section = 0; section < shape->Level(0)->NSections(); ++section)
+        {
+            const auto* actual = shape->Level(0)->GetSection(section).surfMat.GetRef();
+            REQUIRE(actual == (present ? expected.GetRef() : nullptr));
+        }
+    }
+}
 
 TEST_CASE("SIM-807 preparer fixture is non-degenerate", "[determinism][preparer][ShapeAdapter]")
 {

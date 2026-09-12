@@ -246,8 +246,13 @@ fn shade(
         }
         interior_ao = interior_sky_ao(world_abs, nrm);
     }
+    // Native NTC cavity attenuates ambient AND diffuse (Reforger texture contract),
+    // unlike NMO ambient occlusion. It does not darken specular or emissive light.
+    let leaf_cavity = select(1.0, mat.native_cavity, is_foliage);
+    m_light_diffuse *= leaf_cavity;
+    m_light_ambient *= leaf_cavity;
     let amb_ao = sky_vis_ao(world_abs.xz) * gtao_t * interior_ao * clamp(baked_sky_vis, 0.0, 1.0)
-        * select(1.0, mat.native_cavity, is_foliage);
+        * leaf_cavity;
     // ...and a FOURTH, at a scale none of the three can reach: the normal map's own micro-
     // occlusion. Sky-vis is keyed on the terrain column (km), GTAO marches the depth buffer
     // (~2 m), the interior term answers "is there a roof" (room-sized) — the smallest thing any
@@ -484,7 +489,7 @@ fn shade(
             // distance, and low-LOD billboards otherwise flatten into a bright sheet), so it shares
             // the distance fade above; the base Lambert stays so far foliage matches terrain.
             let fill = (wrap_fill + trans) * fade;
-            sun = m_emissive + ambient + frame.sun_diffuse.rgb * (front + fill) * sun_vis;
+            sun = m_emissive + ambient + frame.sun_diffuse.rgb * (front + fill) * sun_vis * leaf_cavity;
         } else {
             sun = m_emissive + ambient + frame.sun_diffuse.rgb * ndotl * sun_vis;
         }
@@ -493,7 +498,7 @@ fn shade(
         // is the flattest ambient in the renderer and the one with the most to gain. It gets no
         // sky specular: there is no atmosphere on this path to reflect, and sky_irradiance would
         // be reading an SH set the legacy sun never wrote.
-        sun = m_emissive + m_sun_ambient * amb_ao * cavity + m_sun_diffuse * ndotl * sun_vis;
+        sun = m_emissive + m_sun_ambient * amb_ao * cavity + m_sun_diffuse * ndotl * sun_vis * leaf_cavity;
     }
     let local = lights_material_contrib(world_pos, nrm, m_light_diffuse, m_light_ambient,
                                        m_local_specular, mat.spec_power, linear);

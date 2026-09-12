@@ -93,6 +93,34 @@ global lock, shader downgrade or removed authored material. Full build passes;
 native repeated-load/shutdown verification is next. Dedicated MLOD concurrency
 unit coverage is still needed in addition to the existing ODOL-oriented tests.
 
+3392c9b2 installed: bank-fixed-cavity-on repeats 1/2 and bank-fixed-cavity-off
+repeat 1 all pass capture and clean shutdown. Same 22,360 registered, 6,463 main
+instances and 15,756,906 main triangles; visible native materials remain bound.
+GPU endpoints on 33.189/35.511 ms, off 33.517 ms: no established performance gain
+or material-cost regression. This verifies the reproduced workload, not every
+possible concurrent load/exit interleaving. Cavity remains an opt-in experiment.
+
+Important profiling caveat: the controlled benchmark pins governor range to 1,
+so min=max and all 6,463 survivors here select LOD 0. This is not evidence that
+normal gameplay never selects a cheaper LOD. A normal-range-16 capture is a
+separate representative run, NOT a same-quality performance comparison.
+Normal-range run passes: 282 instances at LOD0, 6,129 at LOD1; 7,560,031 main
+triangles, GPU endpoint 24.044 ms. Confirms existing LOD selection works under
+the normal governor. Neither the lower geometry nor its speed is a new feature.
+
+Native-bank unit regression now executes the real MLOD conversion on a worker
+with dummy texture and an explicitly prepared material. It checks exact pointer
+identity and an intentionally missing table entry (must not fall back to the
+global bank): 7 assertions pass. Existing non-degenerate ODOL fixture passes 71
+assertions. PoseidonTests and shader-composition builds pass.
+
+Follow-up channel semantics: Bohemia's primary texture reference explicitly
+defines NTC cavity as affecting diffuse AND ambient, unlike NMO AO:
+https://community.bistudio.com/wiki/Arma_Reforger%3ATextures
+The first ambient-only experiment was conservative, not full native semantics.
+The opt-in now also scales foliage sun/local diffuse and local ambient, without
+darkening emissive/specular or changing other materials. New installed A/B pending.
+
 ## Disk housekeeping interruption
 
 User's can-this-be-deleted contained the still-required .tmp-dlss-sdk. Restored
@@ -102,3 +130,7 @@ duplicate subtree only. Much of its 6.178 GiB was hardlinked, so logical size is
 not recovered capacity. Old images, scripts and sources remain. Requested build
 relocation to D was blocked by execution policy before any copy/delete; current
 build directory remains on C and no junction was created.
+Later free-space check: C 7.18 GiB, D 366.69 GiB. No immediate build migration
+needed; remaining can-this-be-deleted content is about 1.122 GiB of historical
+test material and has not been deleted. Do not equate the original logical
+duplicate size with an independently measured physical-space saving.
