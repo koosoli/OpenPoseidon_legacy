@@ -49,7 +49,7 @@ param(
     # farfield-bench.ps1 directly. The FT lines still carry the phase tags.
     [switch]$Ride,
     [string]$RideMission = 'tests/perf/missions/pace_ride.Intro',
-    [double]$RideSeconds = 110
+    [double]$RideSeconds = 130
 )
 $ErrorActionPreference = 'Continue'
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path

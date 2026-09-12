@@ -60,10 +60,11 @@ def phases_from_log(log_path):
     (a blocking readback) or a slow-frame/slow-block log line fell inside a measured window."""
     if not log_path:
         return {}
-    pat = re.compile(r"FT ([WSM]) ([0-9.]+) ([0-9]+)")
+    pat = re.compile(r"FT ([WSMX]) ([0-9.]+) ([0-9]+)(?: ([0-9.]+))?")
     shot = re.compile(r"Auto-screenshot saved: frame=([0-9]+)")
     frames = {}
     shots = []
+    speeds = {}
     with open(log_path, errors="replace") as f:
         for line in f:
             m = pat.search(line)
@@ -71,6 +72,8 @@ def phases_from_log(log_path):
                 tag, frame = m.group(1), int(m.group(3))
                 lo, hi = frames.get(tag, (frame, frame))
                 frames[tag] = (min(lo, frame), max(hi, frame))
+                if m.group(4) is not None:
+                    speeds.setdefault(tag, []).append(float(m.group(4)))
                 continue
             m = shot.search(line)
             if m:
@@ -82,7 +85,21 @@ def phases_from_log(log_path):
                       f"its readback stall is in this window's p99/max")
     if shots:
         print(f"auto-screenshot frames: {shots}; phases: {frames}")
+    # Ride missions log the vehicle speed on every moving-phase line. A "moving" phase in
+    # which the vehicle did not move is not a measurement: fail loudly, never analyse it.
+    global RIDE_FAILED
+    for tag in ("M", "X"):
+        if tag in speeds:
+            med = percentile(speeds[tag], 50)
+            print(f"ride phase {tag}: vehicle speed median {med:.1f} m/s over {len(speeds[tag])} samples")
+            if med < 1.0:
+                print(f"FAIL: ride phase {tag} — the vehicle did not move (median speed {med:.2f} m/s); phase discarded")
+                frames.pop(tag, None)
+                RIDE_FAILED = True
     return frames
+
+
+RIDE_FAILED = False
 
 
 def stats(values):
@@ -241,7 +258,7 @@ def plot(label, results, png):
     except Exception as e:  # pragma: no cover
         print(f"(no plot: {e})")
         return
-    phases = [p for p in ("S", "M") if p in results]
+    phases = [p for p in ("S", "M", "X") if p in results]
     fig, axes = plt.subplots(len(phases), 2, figsize=(14, 3.6 * len(phases)), squeeze=False)
     for i, ph in enumerate(phases):
         a = results[ph]
@@ -251,7 +268,8 @@ def plot(label, results, png):
         ax.set_ylim(0, max(50, min(200, a["period"]["p99"] * 1.5)))
         ax.set_xlabel("s")
         ax.set_ylabel("frame period ms")
-        ax.set_title(f"{label} {'static' if ph == 'S' else 'moving'}: med {a['period']['median']:.1f} p99 {a['period']['p99']:.1f} jitter {a['jitter_ms']:.1f} ms")
+        phname = {'S': 'static', 'M': 'moving', 'X': 'moving-external'}[ph]
+        ax.set_title(f"{label} {phname}: med {a['period']['median']:.1f} p99 {a['period']['p99']:.1f} jitter {a['jitter_ms']:.1f} ms")
         ax = axes[i][1]
         ax.hist(a["_periods"], bins=80, range=(0, max(50, min(200, a["period"]["p99"] * 1.5))))
         ax.set_xlabel("frame period ms")
@@ -294,14 +312,14 @@ def main():
             print(f"--- {label} / {tag}: too few frames in {lo}..{hi}")
             continue
         results[tag] = a
-        report(label, {"S": "static", "M": "moving"}.get(tag, tag), a)
+        report(label, {"S": "static", "M": "moving", "X": "moving-external"}.get(tag, tag), a)
     if args.png and results:
         plot(label, results, args.png)
     if args.json:
         slim = {k: {kk: vv for kk, vv in v.items() if not kk.startswith("_")} for k, v in results.items()}
         with open(args.json, "w") as f:
             json.dump(slim, f, indent=1, default=str)
-    return 0
+    return 3 if RIDE_FAILED else 0
 
 
 if __name__ == "__main__":

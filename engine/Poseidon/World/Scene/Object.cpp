@@ -91,8 +91,12 @@ Matrix4 Object::RenderTransform() const
     if (alpha >= 1.0f)
         return cur;
     const Vector3 dp = cur.Position() - _renderPrev.Position();
-    if (dp.SquareSize() > kRenderInterpMaxJump * kRenderInterpMaxJump)
-        return cur; // teleport / spawn / setPos: snap
+    // Teleport / spawn / setPos / get-out: snap. A jump is anything further than this body
+    // could have moved in one tick at four times its own speed, with 1.5 m of slack for
+    // objects that report no speed; the 40 m ceiling is the last line for a fast one.
+    const float allowed = std::min(kRenderInterpMaxJump, 1.5f + 4.0f * ObjectSpeed().Size() * (1.0f / 60.0f));
+    if (dp.SquareSize() > allowed * allowed)
+        return cur;
     if (alpha <= 0.0f)
         return _renderPrev;
     Matrix4 out;
@@ -113,6 +117,19 @@ Matrix4 Object::RenderTransform() const
     out.SetOrientation(o);
     out.SetPosition(_renderPrev.Position() + dp * alpha);
     return out;
+}
+
+Matrix4 Object::RenderWorldTransform() const
+{
+    // normal objects are not in any hierarchy (see WorldTransform)
+    return RenderTransform();
+}
+
+Matrix4 Object::RenderDelta() const
+{
+    if (!_renderPrevValid || !RenderInterpEnabled() || g_renderInterpAlpha >= 1.0f)
+        return MIdentity;
+    return RenderWorldTransform() * WorldInvTransform();
 }
 
 const FrameBase& Object::RenderFrame(FrameBase& storage) const

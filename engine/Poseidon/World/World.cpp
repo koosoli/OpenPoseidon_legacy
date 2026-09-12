@@ -1300,8 +1300,9 @@ void World::Simulate(float deltaT, bool& enableDraw)
         {
             fov = _camFOV[_camType];
             // REN-INTERP-001: the camera rides the vehicle's DRAWN frame, never a different
-            // time than the body it is attached to.
-            transform = cameraVehicle->RenderTransform();
+            // time than the body it is attached to (the switch below re-derives every case
+            // from RenderWorldTransform; this is the base for the paths that skip it).
+            transform = cameraVehicle->RenderWorldTransform();
             // if any vehicle control key is pressed, set to manual control
             // check vehicle control keys
 
@@ -1558,17 +1559,24 @@ void World::Simulate(float deltaT, bool& enableDraw)
 
             {
                 Matrix3 camChange = CameraChange(_camHeading[_camType], _camDive[_camType]);
+                // REN-INTERP-001: EVERY branch below derives the camera from the vehicle's DRAWN
+                // frame. The first version set `transform` once above and every case here
+                // overwrote it with the tick-time WorldTransform(), so the normal game camera
+                // was never smoothed (review of 683b8f9f). renderDelta moves tick-time points
+                // and directions (CameraPosition, GetCameraDirection) onto the drawn body.
+                const Matrix4 renderWorld = cameraVehicle->RenderWorldTransform();
+                const Matrix4 renderDelta = cameraVehicle->RenderDelta();
                 switch (_camType)
                 {
                     case CamGunner:
                     {
-                        transform = cameraVehicle->WorldTransform() * cameraVehicle->InsideCamera(_camType);
+                        transform = renderWorld * cameraVehicle->InsideCamera(_camType);
                         camInsideVehicle = dyn_cast<Entity, Object>(cameraVehicle);
                     }
                     break;
                     default: // case CamInternal:
                     {
-                        transform = cameraVehicle->WorldTransform() * cameraVehicle->InsideCamera(_camType);
+                        transform = renderWorld * cameraVehicle->InsideCamera(_camType);
                         camInsideVehicle = dyn_cast<Entity, Object>(cameraVehicle);
                         transform.SetOrientation(transform.Orientation() * camChange);
                     }
@@ -1577,11 +1585,11 @@ void World::Simulate(float deltaT, bool& enableDraw)
                     {
                         Matrix3 vehOrient;
                         Vector3Val dist = cameraVehicle->ExternalCameraPosition(_camType);
-                        Vector3 dir = cameraVehicle->GetCameraDirection(_camType);
+                        Vector3 dir = renderDelta.Rotate(cameraVehicle->GetCameraDirection(_camType));
                         vehOrient.SetUpAndDirection(VUp, dir);
                         vehOrient = vehOrient * camChange;
                         transform.SetOrientation(vehOrient);
-                        Vector3 focPos = cameraVehicle->CameraPosition();
+                        Vector3 focPos = renderDelta.FastTransform(cameraVehicle->CameraPosition());
                         Vector3 camPos = vehOrient * dist + focPos;
                         ClipCamera(camPos, cameraVehicle, focPos, _camMaxDist[_camType]);
                         transform.SetPosition(camPos);
@@ -1592,11 +1600,11 @@ void World::Simulate(float deltaT, bool& enableDraw)
                     case CamGroup:
                     {
                         Matrix3 vehOrient;
-                        vehOrient.SetUpAndDirection(VUp, _cameraOn->Direction());
+                        vehOrient.SetUpAndDirection(VUp, renderDelta.Rotate(_cameraOn->Direction()));
                         float dist = cameraVehicle->OutsideCameraDistance(_camType) * _camNear[_camType];
                         Matrix3Val orient = ENGINE_CONFIG.landEditor ? camChange : vehOrient * camChange;
                         transform.SetOrientation(orient);
-                        Vector3 focPos = cameraVehicle->CameraPosition();
+                        Vector3 focPos = renderDelta.FastTransform(cameraVehicle->CameraPosition());
                         Vector3 camPos = focPos - orient.Direction() * dist;
                         transform.SetPosition(camPos);
                         camChange = M3Identity;

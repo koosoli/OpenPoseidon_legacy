@@ -1267,6 +1267,7 @@ LSError EntityAI::Serialize(ParamArchive& ar)
         if (ar.IsLoading())
         {
             _moveOutState = moveOut ? MOMovedOut : MOIn;
+            InvalidateRenderPrev(); // REN-INTERP-001
         }
 
         PARAM_CHECK(ar.Serialize("stratGoToPos", _stratGoToPos, 1, VZero))

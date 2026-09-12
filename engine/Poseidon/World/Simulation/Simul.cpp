@@ -1690,22 +1690,26 @@ void Entity::CancelMoveOutInProgress()
 {
     DoAssert((MoveOutState)_moveOutState == MOMovingOut);
     _moveOutState = MOIn;
+    InvalidateRenderPrev(); // REN-INTERP-001: a frame from the other side of the door is not a previous tick
 }
 
 void Entity::SetMoveOut(Object* parent)
 {
     PoseidonAssert(_moveOutState == MOIn);
     _moveOutState = MOMovingOut, _hierParent = parent;
+    InvalidateRenderPrev(); // REN-INTERP-001: a frame from the other side of the door is not a previous tick
 }
 void Entity::SetMoveOutDone(Object* parent)
 {
     PoseidonAssert(_moveOutState == MOIn);
     _moveOutState = MOMovedOut, _hierParent = parent;
+    InvalidateRenderPrev(); // REN-INTERP-001: a frame from the other side of the door is not a previous tick
 }
 
 void Entity::SetMoveOutFlag()
 {
     _moveOutState = MOMovedOut;
+    InvalidateRenderPrev(); // REN-INTERP-001: a frame from the other side of the door is not a previous tick
 }
 
 Entity* Entity::CreateObject(NetworkMessageContext& ctx)
@@ -2215,6 +2219,18 @@ bool Entity::IsInLandscape() const
     return (MoveOutState)_moveOutState == MOIn;
 }
 
+// REN-INTERP-001: the drawn world frame. In the world: the interpolated own frame. In a
+// vehicle: the parent's drawn frame composed with this entity's authoritative placement in
+// it, i.e. parentRender * parentWorldInv * WorldTransform(). Never feeds the simulation.
+Matrix4 Entity::RenderWorldTransform() const
+{
+    if ((MoveOutState)_moveOutState == MOIn)
+        return RenderTransform();
+    if (!_hierParent)
+        return WorldTransform();
+    return _hierParent->RenderWorldTransform() * _hierParent->WorldInvTransform() * WorldTransform();
+}
+
 Matrix4 Entity::WorldTransform() const
 {
     if ((MoveOutState)_moveOutState == MOIn)
@@ -2272,6 +2288,7 @@ void Entity::ResetMoveOut()
 {
     DoAssert((MoveOutState)_moveOutState == MOMovedOut);
     _moveOutState = MOIn;
+    InvalidateRenderPrev(); // REN-INTERP-001: a frame from the other side of the door is not a previous tick
 }
 
 void Entity::ResetStatus()

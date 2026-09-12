@@ -325,6 +325,7 @@ class Entity: public Object
 
 	Vector3Val ObjectSpeed() const override {return _speed;} // virtual member of Object
 	Object *GetHierachyParent() const {return _hierParent;} // parent in hierarchy
+	Matrix4 RenderWorldTransform() const override; // REN-INTERP-001
 
 	virtual void PerformFF( FFEffects &effects );
 	virtual void ResetFF();

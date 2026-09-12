@@ -361,6 +361,14 @@ class Object: public NetworkObject, public FrameBase, public IAnimator
 	/// teleport, a spawn, a setPos); otherwise fills `storage` and returns it.
 	const FrameBase& RenderFrame(FrameBase& storage) const;
 	Matrix4 RenderTransform() const;
+	/// World-space counterpart of WorldTransform() at the DRAWN time: for an object in a
+	/// hierarchy (crew in a vehicle) the parent's interpolated frame composed with the
+	/// child's authoritative local placement. Entity overrides it; the base is RenderTransform().
+	virtual Matrix4 RenderWorldTransform() const;
+	/// Rigid map from this object's tick-time world space to its drawn world space, so a
+	/// point or direction computed from tick state (CameraPosition, GetCameraDirection) can
+	/// be moved to where the body is drawn: RenderWorldTransform() * WorldInvTransform().
+	Matrix4 RenderDelta() const;
 	/// Per-frame render interpolation state, set by World after its tick loop.
 	static void SetRenderInterpAlpha(float alpha);
 	static float RenderInterpAlpha();

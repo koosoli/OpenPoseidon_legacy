@@ -5,7 +5,8 @@
 ; island); a far target off the map made the AI refuse to move in the first version.
 _settle = 25
 _statdur = 20
-_movedur = 60
+_movedur = 80
+_extdur = 40
 ~0.5
 ffvDriver assignAsDriver ffvJeep
 ffvDriver moveInDriver ffvJeep
@@ -34,10 +35,14 @@ _moveend = _time + _movedur
 _leg = 0
 _next = _time
 logInfo format ["RIDE phase=move t=%1", _time]
+_extstart = _moveend - _extdur
+_ext = 0
 #mov
 ? _time >= _next : goto "post"
+? (_ext == 0) && (_time >= _extstart) : goto "toext"
 #movres
-logInfo format ["FT M %1 %2 %3", _time, triFrameCount, speed ffvJeep]
+? _ext == 0 : logInfo format ["FT M %1 %2 %3", _time, triFrameCount, speed ffvJeep]
+? _ext == 1 : logInfo format ["FT X %1 %2 %3", _time, triFrameCount, speed ffvJeep]
 ~0.001
 ? _time < _moveend : goto "mov"
 doStop ffvDriver
@@ -49,4 +54,9 @@ _next = _time + 20
 ? (_leg % 2) == 1 : ffvDriver doMove [9700, 3840, 0]
 ? (_leg % 2) == 0 : ffvDriver doMove [9700, 3600, 0]
 logInfo format ["RIDE leg %1 t=%2 pos=%3 speed=%4", _leg, _time, getPos ffvJeep, speed ffvJeep]
+goto "movres"
+#toext
+_ext = 1
+ffvPassenger switchCamera "EXTERNAL"
+logInfo format ["RIDE phase=external t=%1 pos=%2", _time, getPos ffvJeep]
 goto "movres"
