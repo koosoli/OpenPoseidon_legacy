@@ -1,4 +1,7 @@
 _id = _this select 2
+; Action IDs belong to their owner, not to the mission globally.
+? (_this select 0) == labHeli : goto "heliaction"
+? (_this select 0) == labRideJeep : goto "jeepaction"
 ? _id == labReset : goto "reset"
 ? _id == labCastle : goto "castle"
 ? _id == labRoom : goto "room"
@@ -23,6 +26,13 @@ hint "PHYSICS: shoot the stacks, push the dominoes, or select and throw bodies. 
 exit
 #reset
 hint (triPhysicsShowcase "reset")
+exit
+#heliaction
+? _id == labHeliFlightStart : goto "helistart"
+? _id == labHeliFlightLand : goto "heliland"
+exit
+#jeepaction
+? _id == labJeepRideStart : goto "jeepstart"
 exit
 #castle
 hint (triPhysicsShowcase "castle")

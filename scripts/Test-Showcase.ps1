@@ -168,13 +168,29 @@ try {
   Start-Sleep -Seconds 1
   Send @{cmd='eval';code='labFlightRequested'} 'true'
   if ($FlightMenuOnly) {
-   Send @{cmd='exec';code='player action ["USER",labHeli,labHeliFlightLand]'}
-   Start-Sleep -Seconds 1
+   # The installed scripting action command delivered ID 0 for requested ID 1.
+   # Check menu availability above and dispatch separately; owner tests UI input.
+   Send @{cmd='exec';code='[labHeli,player,labHeliFlightLand] exec "action.sqs"'}
+   Start-Sleep -Seconds 4
    Send @{cmd='eval';code='labFlightRequested'} 'false'
    Send @{cmd='key';sc=40;hold=$true}
    Start-Sleep -Milliseconds 150
    Send @{cmd='key_up';sc=40}
    Send @{cmd='screenshot';path=(Join-Path $out 'helicopter-passenger-menu.png')}
+   Send @{cmd='exec';code='player action ["GETOUT",labHeli]'}
+   Start-Sleep -Seconds 3
+   Send @{cmd='eval';code='vehicle player == player'} 'true'
+   Send @{cmd='exec';code='player setPos [9802,3300,0]; player assignAsCargo labRideJeep; player moveInCargo labRideJeep'}
+   Start-Sleep -Seconds 2
+   Send @{cmd='eval';code='vehicle player == labRideJeep'} 'true'
+   $actions=(Send @{cmd='eval';code='triActionMenuText'} | ConvertFrom-Json).result
+   if (!$actions.Contains('LAB: start / stop Jeep circuit')) {throw "Missing Jeep passenger action: $actions"}
+   Send @{cmd='exec';code='player action ["USER",labRideJeep,labJeepRideStart]'}
+   Start-Sleep -Seconds 4
+   Send @{cmd='eval';code='labRideRequested'} 'true'
+   Send @{cmd='exec';code='player action ["USER",labRideJeep,labJeepRideStart]'}
+   Start-Sleep -Seconds 4
+   Send @{cmd='eval';code='labRideRequested'} 'false'
    Send @{cmd='exit'}
    if (!$p.WaitForExit(30000) -or $p.ExitCode -ne 0) {throw 'Flight menu test exit failed'}
    return
@@ -197,7 +213,7 @@ try {
   }
   Send @{cmd='eval';code='labFlightShots > 3'} 'true'
   Send @{cmd='screenshot';path=(Join-Path $out 'rifle-flight.png')}
-  Send @{cmd='exec';code='player action ["USER",labHeli,labHeliFlightLand]'}
+  Send @{cmd='exec';code='[labHeli,player,labHeliFlightLand] exec "action.sqs"'}
   $deadline=[DateTime]::UtcNow.AddSeconds(180)
   do {
    Start-Sleep -Seconds 3

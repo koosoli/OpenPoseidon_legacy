@@ -1,5 +1,6 @@
 ; Separate from the free-drive vehicles and the terrain-crater station.
 labRideJeep = "Jeep" createVehicle [9800,3300,0]
+labJeepRideStart = labRideJeep addAction ["LAB: start / stop Jeep circuit", "action.sqs"]
 labRideJeep setDir 0
 labRideDriver assignAsDriver labRideJeep
 labRideDriver moveInDriver labRideJeep

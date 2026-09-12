@@ -89,8 +89,8 @@ labFlightVisit = player addAction ["LAB: board helicopter rifle seat", "action.s
 labFlightStart = player addAction ["LAB: start helicopter circuit", "action.sqs"]
 labFlightLand = player addAction ["LAB: return and land helicopter", "action.sqs"]
 ; In cargo, the action menu collects the carrier's actions rather than the player's.
-labHeliFlightStart = labHeli addAction ["LAB: start helicopter circuit", "heli-command.sqs"]
-labHeliFlightLand = labHeli addAction ["LAB: return and land helicopter", "heli-command.sqs"]
+labHeliFlightStart = labHeli addAction ["LAB: start helicopter circuit", "action.sqs"]
+labHeliFlightLand = labHeli addAction ["LAB: return and land helicopter", "action.sqs"]
 labNight = false
 ~2
 logInfo (triPhysicsShowcase "reset")

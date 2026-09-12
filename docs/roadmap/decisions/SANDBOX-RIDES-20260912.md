@@ -144,10 +144,19 @@ The latest mission hints remove the obsolete artificial firing-arc warning.
 
 Owner reports tour entry vanishes after boarding. Confirmed code cause:
 InGameUI::ProcessActions collects unit->GetVehicle()->GetActions, whereas both
-tour commands were installed only on player. Add start/land actions to labHeli
-and forward their object-local IDs through heli-command.sqs to the existing
-mission handlers. No engine, pose or general action-menu behaviour changes.
-Test-Showcase -FlightMenuOnly now checks actual passenger action-menu text and
-executes the carrier USER actions, rather than bypassing them with exec action.sqs.
-Full FlightOnly uses the same route. The earlier flight test did NOT establish
-menu availability. Installation/runtime acceptance pending while owner is playing.
+tour commands were installed only on player. Both demos now attach their tour
+actions to the actual carrier: labHeli and labRideJeep (not the free-drive Jeep).
+action.sqs dispatches by owner before comparing object-local action IDs, then
+uses the existing mission handlers. Removed the extra heli forwarding script.
+No engine, pose or general action-menu behaviour changes.
+
+Installed mission-only update and Test-Showcase -FlightMenuOnly passed:
+helicopter passenger menu contains start/land; start sets requested=true and
+landing handler sets false; Jeep passenger menu contains start/stop and two
+USER activations toggle requested true/false. Game exited cleanly.
+Important test limitation: the installed scripting `action ["USER",...,1]`
+delivered ID 0, confirmed by recording the script arguments. Therefore landing
+handler acceptance uses explicit [carrier,player,ID] exec, separately from menu
+text availability. This is not full keyboard/mouse menu acceptance; owner will
+smoke-test both menus. Earlier flight tests also did NOT establish availability.
+Fresh mission restart required; existing saved mission actions are not migrated.
