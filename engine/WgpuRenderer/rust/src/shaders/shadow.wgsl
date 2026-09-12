@@ -26,6 +26,31 @@ fn plane_compare(uv: vec2<f32>, layer: i32, reference: f32, gradient: vec2<f32>)
 }
 
 // Cascaded shadow strength in [0,1] for a camera-relative position (0 = lit).
+#ifdef COALESCED_PCF
+// Nine overlapping bilinear tent taps use only sixteen distinct depth texels.
+// Only called where neither receiver-plane clamp is active and the spacing is
+// exactly one texel. Other filter widths and grazing slopes retain plane_compare.
+fn plane_tent(uv: vec2<f32>, layer: i32, reference: f32, gradient: vec2<f32>) -> f32 {
+    let size = vec2<i32>(textureDimensions(shadow_map));
+    let pixel = uv * vec2<f32>(size) - vec2<f32>(0.5);
+    let base = vec2<i32>(floor(pixel));
+    let f = fract(pixel);
+    let wx = vec4<f32>(1.0 - f.x, 2.0 - f.x, 1.0 + f.x, f.x);
+    let wy = vec4<f32>(1.0 - f.y, 2.0 - f.y, 1.0 + f.y, f.y);
+    var result = 0.0;
+    for (var y = 0; y < 4; y++) {
+        for (var x = 0; x < 4; x++) {
+            let coordinate = clamp(base + vec2<i32>(x - 1, y - 1), vec2<i32>(0), size - vec2<i32>(1));
+            let centre = (vec2<f32>(coordinate) + vec2<f32>(0.5)) / vec2<f32>(size);
+            let depth = textureLoad(shadow_map, coordinate, layer, 0);
+            let adjusted = reference + dot(centre - uv, gradient);
+            result += wx[x] * wy[y] * select(0.0, 1.0, adjusted <= depth);
+        }
+    }
+    return result / 16.0;
+}
+#endif
+
 // Tier select (omni by 3D distance, frustum by eye-depth) with coverage
 // fallthrough, cross-tier blend band, HW-PCF compare, far fade, fog dimming.
 // dwx/dwy are screen-space derivatives of world_pos (receiver-plane bias). This
@@ -131,6 +156,14 @@ fn shadow_strength(world_pos: vec3<f32>, normal_ws: vec3<f32>, fog: f32,
             let ref_z = sc.z - bias;
             var lit: f32;
             let pcf = frame.shadow.ctlb.w;
+#ifdef COALESCED_PCF
+            let dimensions = textureDimensions(shadow_map);
+            if (pcf == 1.0 && dimensions.x == dimensions.y
+                && abs(ts * f32(dimensions.x) - 1.0) < 1e-6
+                && dot(abs(dz_duv), vec2<f32>(ts)) < 0.005) {
+                lit = plane_tent(suv, c, ref_z, dz_duv);
+            } else {
+#endif
             if (pcf >= 0.5) {
                 // 3x3 tent, plane-corrected per tap: smooths the texel-quantised
                 // silhouette teeth that grazing light stretches across receivers.
@@ -148,6 +181,9 @@ fn shadow_strength(world_pos: vec3<f32>, normal_ws: vec3<f32>, fog: f32,
             } else {
                 lit = plane_compare(suv, c, ref_z, dz_duv);
             }
+#ifdef COALESCED_PCF
+            }
+#endif
             lit_sum += w * lit;
             w_sum += w;
         }

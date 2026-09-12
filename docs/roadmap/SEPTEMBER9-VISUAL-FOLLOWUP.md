@@ -2020,3 +2020,10 @@ error from worker threads; active conversion resources are retired outside the
 queue lock. Installed ee43ac8a passes the native route and strict shutdown checks.
 The intermittent hang remains an open diagnosis, and material/FFV/far-field
 completion is not implied by these safety increments.
+# September 12 native continuation
+
+[Native coverage/material evidence](decisions/NATIVE-COVERAGE-MATERIALS-20260912.md):
+native terrain NHO normal binding installed; forest same-build off/on lifecycle
+checks pass. Tree contrast and native authored far-LOD coverage remain OPEN.
+The roughly 560m count-budget boundary is measured, not fixed by the normal map.
+Receiver-filter optimization is an opt-in experiment awaiting installed acceptance.

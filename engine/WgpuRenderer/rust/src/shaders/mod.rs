@@ -15,6 +15,9 @@
 
 use std::borrow::Cow;
 
+#[cfg(test)]
+mod shadow_tent_tests;
+
 use naga_oil::compose::{
     ComposableModuleDescriptor, Composer, NagaModuleDescriptor, ShaderLanguage,
 };
@@ -40,6 +43,9 @@ pub fn early_depth_supported() -> bool {
 
 fn shader_defs() -> std::collections::HashMap<String, naga_oil::compose::ShaderDefValue> {
     let mut defs = std::collections::HashMap::new();
+    if std::env::var("WGR_COALESCED_PCF").as_deref() == Ok("1") {
+        defs.insert("COALESCED_PCF".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
+    }
     if early_depth_supported() {
         defs.insert("EARLY_DEPTH".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
     }
