@@ -46,6 +46,7 @@ class CfgMovesMC
         class OPHeliIdle: OPJeepIdle { file = "\op_jeep_actions\uh60_idle.rtm"; actions = "OPHeliActions"; connectTo[] = {"OPHeliRaise",1}; };
         class OPHeliRaise: OPHeliIdle { file = "\op_jeep_actions\uh60_raise.rtm"; speed = 1.4; looped = 0; connectTo[] = {"OPHeliAim",1}; };
         class OPHeliAim: OPHeliIdle { file = "\op_jeep_actions\uh60_aim.rtm"; disableWeapons = 0; connectTo[] = {"OPHeliLower",1,"OPHeliReload",1}; };
+        class OPHeliRecoil: OPHeliIdle { file = "\op_jeep_actions\uh60_recoil.rtm"; speed = 4; };
         class OPHeliReload: OPHeliIdle { file = "\op_jeep_actions\uh60_reload.rtm"; speed = 0.4; looped = 0; connectTo[] = {"OPHeliAim",1}; };
         class OPHeliLower: OPHeliIdle { file = "\op_jeep_actions\uh60_lower.rtm"; speed = 1.4; looped = 0; connectTo[] = {"OPHeliIdle",1}; };
     };

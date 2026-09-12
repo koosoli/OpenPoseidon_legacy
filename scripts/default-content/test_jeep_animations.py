@@ -20,8 +20,9 @@ class JeepAnimations(unittest.TestCase):
         config = (self.source / 'config.cpp').read_text()
         files = re.findall(r'file\s*=\s*"([^";]+)"', config)
         kinds = ('idle', 'raise', 'aim', 'recoil', 'reload', 'lower')
-        self.assertEqual(set(files), {f'\\op_jeep_actions\\jeep_{kind}.rtm' for kind in kinds})
-        self.assertEqual(len(files), len(kinds))
+        self.assertEqual(set(files), {f'\\op_jeep_actions\\{prefix}_{kind}.rtm'
+                                      for prefix in ('jeep', 'uh60') for kind in kinds})
+        self.assertEqual(len(files), 2 * len(kinds))
         manifest = json.loads((self.source / 'mod.json').read_text())
         self.assertEqual(manifest['defaultContentApi'], '1')
         self.assertTrue(manifest['version'])
@@ -107,6 +108,13 @@ class JeepAnimations(unittest.TestCase):
         matrices['hlava'][:3, 0] *= -1
         with self.assertRaises(ValueError):
             encode(self.spec, [(0, matrices)])
+
+
+class UH60Animations(JeepAnimations):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.spec.update(json.loads((cls.source / 'uh60-pose.json').read_text()))
 
 
 if __name__ == '__main__':

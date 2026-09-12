@@ -1,4 +1,6 @@
 {
   "status": "UH60 cargo 10 fit: restore measured original seated torso height",
-  "root_offset": [0, 0.56, 0]
+  "root_offset": [0, 0.56, 0],
+  "gun_lowered": [-0.15, 0.76, -0.10],
+  "gun_raised": [-0.24, 0.98, -0.06]
 }
