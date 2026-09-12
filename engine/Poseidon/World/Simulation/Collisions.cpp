@@ -1605,6 +1605,14 @@ bool Landscape::CheckVisibility(int x, int z, VisCheckContext& context, ObjInter
         }
         CollisionBuffer result;
         obstacle->Intersect(result, context.objectPos, context.sensorPos, 0, isect);
+        // A carrier's intersection includes occupant proxies. The sensor and
+        // target must not occlude themselves, even inside that hierarchy.
+        for (int i = result.Size() - 1; i >= 0; --i)
+        {
+            const Object* hit = result[i].object;
+            if (hit && (hit == context.skip1 || hit == context.target))
+                result.Delete(i);
+        }
         if (result.Size() > 0)
         {
             float visibleThrough = 1;

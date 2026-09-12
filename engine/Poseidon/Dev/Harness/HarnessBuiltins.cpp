@@ -1,4 +1,5 @@
 #include <Poseidon/Dev/Harness/HarnessBuiltins.hpp>
+#include <Poseidon/Input/InputSubsystem.hpp>
 using namespace Poseidon;
 #include <Poseidon/Dev/Harness/HarnessServer.hpp>
 #include <Poseidon/Dev/Harness/HarnessProtocol.hpp>
@@ -259,6 +260,11 @@ void RegisterSqf(HarnessServer& hs)
                            cJSON_AddBoolToObject(resp, "prepareOnly", man->IsFirePrepare());
                            cJSON_AddNumberToObject(resp, "selectedWeapon", man->SelectedWeapon());
                            cJSON_AddBoolToObject(resp, "reloadInProgress", man->IsActionInProgress(MFReload));
+                           cJSON_AddBoolToObject(resp, "manual", man->QIsManual());
+                           cJSON_AddBoolToObject(resp, "playerSuspended", GWorld->GetPlayerSuspended());
+                           cJSON_AddBoolToObject(resp, "cameraEffect", GWorld->GetCameraEffect() != nullptr);
+                           cJSON_AddBoolToObject(resp, "weaponManipulation", man->EnableWeaponManipulation());
+                           cJSON_AddNumberToObject(resp, "reloadInput", InputSubsystem::Instance().GetAction(UAReloadMagazine));
                            cJSON_AddNumberToObject(resp, "nearTrackAge", Glob.time - man->GetTrackNearTargetsTime());
                            cJSON_AddNumberToObject(resp, "nearestEnemyDist2", unit->GetNearestEnemyDist2());
                            cJSON_AddBoolToObject(resp, "hasAI", unit->HasAI());
