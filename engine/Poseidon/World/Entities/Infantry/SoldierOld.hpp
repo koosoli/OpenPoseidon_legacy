@@ -767,6 +767,7 @@ class Man: public Person
 
 	RString GetCurrentMove() const override;
     RString GetPrimaryMoveName() const;
+    RString GetExternalMoveName() const;
 	void PlayMove(RStringB move, ActionContextBase *context=nullptr) override;
 	void SwitchMove(RStringB move, ActionContextBase *context=nullptr) override;
 

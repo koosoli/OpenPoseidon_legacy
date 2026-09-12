@@ -444,6 +444,11 @@ RString Man::GetPrimaryMoveName() const
     return _primaryMove.id < 0 ? RString() : Type()->GetMoveName(_primaryMove.id);
 }
 
+RString Man::GetExternalMoveName() const
+{
+    return _externalMove.id < 0 ? RString() : Type()->GetMoveName(_externalMove.id);
+}
+
 bool Man::PlayAction(ManAction action, ActionContextBase* context)
 {
     MoveId id = GetMove((ManAction)action);

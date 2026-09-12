@@ -217,6 +217,8 @@ void RegisterSqf(HarnessServer& hs)
                            cJSON* resp = cJSON_CreateObject();
                            cJSON_AddStringToObject(resp, "move", man->GetCurrentMove());
                            cJSON_AddStringToObject(resp, "primaryMove", man->GetPrimaryMoveName());
+                           cJSON_AddStringToObject(resp, "externalMove", man->GetExternalMoveName());
+                           cJSON_AddBoolToObject(resp, "lookAround", InputSubsystem::Instance().IsLookAroundEnabled());
                            cJSON_AddNumberToObject(resp, "phase", man->GetLegPhase());
                            cJSON_AddBoolToObject(resp, "cargoWeaponActive", man->GetActiveCargoWeaponSeat() != nullptr);
                            cJSON_AddBoolToObject(resp, "cargoCandidate", man->IsCargoWeaponCandidate(weapon));
