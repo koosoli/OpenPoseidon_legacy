@@ -1,0 +1,33 @@
+_cam = "camera" camCreate [6532,6466,8]
+_cam cameraEffect ["internal","back"]
+_cam camSetTarget [6300,6500,0]
+_cam camCommit 0
+~20
+_end = _time + 20
+#baseline
+logInfo format ["TERRAINFPS BASE %1 %2", _time, triFrameCount]
+~0.001
+? _time < _end : goto "baseline"
+_i = 0
+#edit
+logInfo format ["TERRAINFPS EDITBEGIN %1 %2", _time, triFrameCount]
+_r = triTerrainPaint [6500 + _i * 3,6460,12,-1]
+logInfo format ["TERRAINFPS EDITEND %1 %2 %3", _time, triFrameCount, _r]
+_i = _i + 1
+~0.2
+? _i < 10 : goto "edit"
+~3
+_end = _time + 20
+#edited
+logInfo format ["TERRAINFPS EDITED %1 %2", _time, triFrameCount]
+~0.001
+? _time < _end : goto "edited"
+logInfo format ["TERRAINFPS RESTORE %1", triTerrainBrushMode "restore"]
+~3
+_end = _time + 20
+#restored
+logInfo format ["TERRAINFPS RESTORED %1 %2", _time, triFrameCount]
+~0.001
+? _time < _end : goto "restored"
+logInfo "TERRAINFPS COMPLETE"
+exit

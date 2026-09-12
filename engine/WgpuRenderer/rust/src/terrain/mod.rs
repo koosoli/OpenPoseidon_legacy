@@ -8,7 +8,8 @@ mod skyvis;
 
 fn terrain_resource_reuse() -> bool {
     static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ENABLED.get_or_init(|| std::env::var("WGR_TERRAIN_RESOURCE_REUSE").map_or(true, |v| v != "0"))
+    // Installed edit A/B did not reduce stalls; retain only as an explicit experiment.
+    *ENABLED.get_or_init(|| std::env::var("WGR_TERRAIN_RESOURCE_REUSE").is_ok_and(|v| v == "1"))
 }
 
 fn same_texture_size(old: (u32, u32), new: (u32, u32)) -> bool {

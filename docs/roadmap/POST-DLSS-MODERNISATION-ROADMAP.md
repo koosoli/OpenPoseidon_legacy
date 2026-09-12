@@ -16,6 +16,13 @@ uses measurements as the gate for optional GPU features.
 
 ## Where the critical path stands, 2026-09-01
 
+September 12 small-change follow-through:
+[camera upload batching and same-size terrain resource reuse](decisions/LOW-RISK-PERF-20260912.md).
+Camera CPU preparation is reduced; a sustained FPS gain is NOT established.
+Terrain reuse targets edit-time allocation churn, not idle terrain throughput;
+its first A/B did not improve stalls, so that experiment remains default OFF.
+See the decision record for installed acceptance and unresolved measurements.
+
 ### Execution overlay, 2026-09-10
 
 The dates in this roadmap matter: historical inventories are not current defect

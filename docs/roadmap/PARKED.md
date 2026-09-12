@@ -343,6 +343,16 @@ must not be guessed — `RESEARCHED` under-claims safely, `INTEGRATED` does not.
 
 ## How to use this page
 
+### Same-size terrain GPU allocation reuse (2026-09-12)
+
+Implemented as `WGR_TERRAIN_RESOURCE_REUSE=1`, default OFF. First installed
+ten-edit/restore pair passed correctness checks but did not reduce stalls:
+edit p95 105.80 -> 118.45 ms, maximum 536.63 -> 584.59 ms. No causal regression
+claim from one pair, but no performance gate passed either. Reopen after
+isolating allocation versus synchronization and the remaining collision/full-grid
+work, with repeated A/B and peak-memory measurements. See
+[LOW-RISK-PERF-20260912.md](decisions/LOW-RISK-PERF-20260912.md).
+
 If you park something, add it here with the reason and the unpark condition. If you unpark
 something, delete its entry in the same commit as the work — an entry that is quietly wrong
 is worse than no page.
