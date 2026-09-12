@@ -1,6 +1,7 @@
 #include <Poseidon/Dev/Diag/StreamingDiag.hpp> // RFG-085 residency levers
 #include <Poseidon/World/Scene/MapThings.hpp>    // RFG-095 hidden proxies
 #include <Poseidon/Dev/Diag/FixedStepStats.hpp> // REN-THR-004: ticks per frame beside the frame hash
+#include <Poseidon/Dev/Diag/FramePaceTrace.hpp> // PACE-001: per-frame pacing trace
 #include "EngineWgpu.hpp"
 #include <atomic>
 #include <Poseidon/Core/BuildInfo.hpp>
@@ -2953,6 +2954,30 @@ void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing, Fr
 
     const auto ms = [](auto a, auto b) { return std::chrono::duration<double, std::milli>(b - a).count(); };
     _rtLastBusyMs = ms(blockStart, blockEnd);
+    if (Dev::FramePaceTraceEnabled())
+    {
+        // PACE-001: the worker's side of the frame. Acquire/submit/present are this frame's
+        // CPU-side timers from the renderer (wgr_get_cpu_timings, read by PublishRendererStats
+        // just above); the GPU total is the latest HARVESTED frame, which lags by one or two.
+        static uint32_t seq = 0;
+        Dev::FramePaceWorkerRow row;
+        row.seq = ++seq;
+        row.tEndMs = Dev::FramePaceNowMs();
+        row.tStartMs = row.tEndMs - _rtLastBusyMs;
+        row.idleBeforeMs = static_cast<float>(_rtLastIdleMs);
+        row.renderMs = static_cast<float>(ms(afterHash, afterRender));
+        {
+            std::lock_guard<std::mutex> lock(_memStatsMutex);
+            const auto cpuAt = [&](int i) { return _publishedCpuTimingCount > i ? _publishedCpuTimings[i] : -1.0f; };
+            row.acquireMs = cpuAt(WGR_GPU_TIMER_WORKER_ACQUIRE);
+            row.submitMs = cpuAt(WGR_GPU_TIMER_WORKER_SUBMIT);
+            row.presentMs = cpuAt(WGR_GPU_TIMER_WORKER_PRESENT);
+            row.gpuFrameMs = _publishedGpuTimingCount > WGR_GPU_TIMER_FRAME_TOTAL
+                                 ? _publishedGpuTimings[WGR_GPU_TIMER_FRAME_TOTAL]
+                                 : -1.0f;
+        }
+        Dev::FramePaceTraceWorker(row);
+    }
 
     if (_slowBlockMs > 0.0 && _rtLastBusyMs >= _slowBlockMs)
     {
@@ -3078,7 +3103,9 @@ void EngineWgpu::AcquireProducerWindow(const char* what)
         return;
     const auto t0 = std::chrono::steady_clock::now();
     self->WaitRenderIdle();
-    self->_rtLazyWaitMsAccum += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    const double lazyMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    self->_rtLazyWaitMsAccum += lazyMs;
+    self->_rtLazyWaitMsFrame += lazyMs;
     self->_rtLazyWaitCountAccum++;
     if (self->_rtLazyOpenerFrame == nullptr)
         self->_rtLazyOpenerFrame = what;
@@ -3286,6 +3313,13 @@ void EngineWgpu::NextFrame()
         const auto frameStartForRt = std::chrono::steady_clock::now();
         double waitMs = _rtPreDrawWaitMs; // the InitDraw wait belongs to this frame
         _rtPreDrawWaitMs = 0.0;
+        // PACE-001: the frame trace wants the waits SEPARATELY, which the accounting above
+        // folds together. Lazy waits happened during the traversal, i.e. since the last NextFrame.
+        const double preDrawWaitForTrace = waitMs;
+        const double lazyWaitForTrace = _rtLazyWaitMsFrame;
+        _rtLazyWaitMsFrame = 0.0;
+        double slotWaitForTrace = 0.0;
+        double lockstepWaitForTrace = 0.0;
         if (_rtLazyOpenerFrame != nullptr)
             _rtLazyOpenerShown = _rtLazyOpenerFrame;
         _rtLazyOpenerFrame = nullptr;
@@ -3918,8 +3952,9 @@ void EngineWgpu::NextFrame()
                 _renderCv.wait(lock, [this, publishSlot]
                                { return !_renderHasWork && _renderBusySlot != publishSlot; });
             }
-            waitMs +=
+            slotWaitForTrace =
                 std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - slotWaitStart).count();
+            waitMs += slotWaitForTrace;
         }
         PushFrameBacking& backing = _pushRing[publishSlot];
         _pushSlot = (_pushSlot + 1) % kPushFrameRing;
@@ -4150,6 +4185,7 @@ void EngineWgpu::NextFrame()
                 g_rendererQuiescent.store(true, std::memory_order_release);
                 waitMs =
                     std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - waitStart).count();
+                lockstepWaitForTrace = waitMs;
             }
         }
         else
@@ -4159,6 +4195,19 @@ void EngineWgpu::NextFrame()
         const auto tEnd = std::chrono::steady_clock::now();
         const double frameMs = std::chrono::duration<double, std::milli>(tEnd - frameStartForRt).count();
         AccumulateRenderThreadTiming(_rtLastBusyMs, waitMs, frameMs);
+        if (Dev::FramePaceTraceEnabled())
+        {
+            Dev::FramePaceProducerRow row;
+            row.frame = _frameCounter;
+            row.tPublishMs = Dev::FramePaceNowMs();
+            row.preDrawWaitMs = static_cast<float>(preDrawWaitForTrace);
+            row.lazyWaitMs = static_cast<float>(lazyWaitForTrace);
+            row.slotWaitMs = static_cast<float>(slotWaitForTrace);
+            row.lockstepWaitMs = static_cast<float>(lockstepWaitForTrace);
+            row.renderThread = _renderThreadOn ? 1 : 0;
+            row.overlap = _overlapOn ? 1 : 0;
+            Dev::FramePaceTraceProducer(row);
+        }
 
         LogObjectPerfRow();
         LogDrawSectionStats();

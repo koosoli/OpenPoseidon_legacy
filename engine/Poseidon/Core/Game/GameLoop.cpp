@@ -11,6 +11,9 @@
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/Dev/Debug/DebugTrap.hpp>
+#include <Poseidon/Dev/Diag/FixedStepStats.hpp>
+#include <Poseidon/Dev/Diag/FrameProfiler.hpp>
+#include <Poseidon/Dev/Diag/FramePaceTrace.hpp>
 #include <SDL3/SDL_events.h>
 #include <SDL3/SDL_scancode.h>
 #include <string>
@@ -70,16 +73,37 @@ int gUserFpsCap = 0;
 // A waitable-timer sleep hits the fractional deadline directly, which steadies
 // frame-to-frame delivery -- the thing a player capping to their refresh rate is
 // actually after.
+// PACE-001: what the pacer decided on the last frame, for the frame trace. Written by the
+// main thread only.
+struct PaceDecision
+{
+    int     capFps = 0;
+    int64_t periodUs = 0;
+    int64_t elapsedUs = 0;
+    int64_t sleepReqUs = 0;
+    int64_t sleepActUs = 0;
+};
+static PaceDecision gLastPace;
+
 static void PaceToFps(int targetFps, Foundation::unsigned64 frameStartUs)
 {
+    gLastPace = PaceDecision{};
     if (targetFps <= 0)
         return;
 
     const int64_t periodUs = 1'000'000 / targetFps;
     const int64_t elapsedUs = static_cast<int64_t>(Poseidon::Foundation::getSystemTime() - frameStartUs);
     const int64_t sleepUs = periodUs - elapsedUs;
+    gLastPace.capFps = targetFps;
+    gLastPace.periodUs = periodUs;
+    gLastPace.elapsedUs = elapsedUs;
     if (sleepUs > 0)
+    {
+        gLastPace.sleepReqUs = sleepUs;
+        const Foundation::unsigned64 t0 = Poseidon::Foundation::getSystemTime();
         Foundation::SleepUs(sleepUs);
+        gLastPace.sleepActUs = static_cast<int64_t>(Poseidon::Foundation::getSystemTime() - t0);
+    }
 }
 
 // Safety net for the pacer's degraded modes. SleepUs normally waits on a
@@ -228,6 +252,47 @@ void RenderFrame(float deltaT, bool enableDraw)
     else
     {
         SetFrameCapTimerResolution(false);
+        gLastPace = PaceDecision{};
+    }
+
+    // PACE-001: one row per frame, only when POSEIDON_FRAME_TRACE is set. The profiler record
+    // is this frame's (World::Simulate ends it); the pacer fields are what the branch above did.
+    if (Dev::FramePaceTraceEnabled())
+    {
+        const Dev::FrameProfiler& perf = Dev::GFrameProfiler();
+        const Dev::FixedStepFrame step = Dev::LastFixedStepFrame();
+        Dev::FramePaceMainRow row;
+        row.frame = GEngine ? GEngine->GetFrameCounter() : 0u;
+        row.tEndMs = Dev::FramePaceNowMs();
+        // The frame start was stamped on the QPC clock; express it on the shared clock by
+        // subtracting the elapsed time, which is the same interval on both.
+        const double elapsedMs =
+            static_cast<double>(Poseidon::Foundation::getSystemTime() - frameStartUs) * 0.001;
+        row.tStartMs = row.tEndMs - elapsedMs;
+        row.tPaceMs = row.tEndMs - static_cast<double>(gLastPace.sleepActUs) * 0.001;
+        row.deltaTMs = deltaT * 1000.0f;
+        row.steps = step.steps;
+        row.alpha = step.alpha;
+        row.totalTicks = step.totalTicks;
+        if (perf.FrameCount() > 0)
+        {
+            using P = Dev::FrameProfiler;
+            const auto& r = perf.Frame(0);
+            row.setupMs = r.ms[P::PhaseSetup];
+            row.simMs = r.ms[P::PhaseSimStep];
+            row.drawInitMs = r.ms[P::PhaseDrawInit];
+            row.drawMs = r.ms[P::PhaseDrawObjPrep] + r.ms[P::PhaseDrawLandGround] + r.ms[P::PhaseDrawLandObjects] +
+                         r.ms[P::PhaseDrawLandscape] + r.ms[P::PhaseDrawObjects] + r.ms[P::PhaseDrawPost];
+            row.hudMs = r.ms[P::PhaseHud];
+            row.soundMs = r.ms[P::PhaseSound];
+            row.swapMs = r.ms[P::PhaseSwap];
+        }
+        row.capFps = gLastPace.capFps;
+        row.pacePeriodMs = static_cast<float>(gLastPace.periodUs) * 0.001f;
+        row.paceElapsedMs = static_cast<float>(gLastPace.elapsedUs) * 0.001f;
+        row.paceSleepReqMs = static_cast<float>(gLastPace.sleepReqUs) * 0.001f;
+        row.paceSleepActMs = static_cast<float>(gLastPace.sleepActUs) * 0.001f;
+        Dev::FramePaceTraceMain(row);
     }
 }
 

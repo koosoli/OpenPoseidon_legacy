@@ -1393,6 +1393,8 @@ class EngineWgpu : public EngineDummy
     double _rtPreDrawWaitMs = 0.0; // WaitRenderIdle time this frame, folded into queueWaitMs
     // REN-THR-013 accounting: lazy window openings (AcquireProducerWindow that had to wait).
     double _rtLazyWaitMsAccum = 0.0;
+    // PACE-001: the same wait, per frame (read and zeroed by NextFrame for the frame trace).
+    double _rtLazyWaitMsFrame = 0.0;
     uint32_t _rtLazyWaitCountAccum = 0;
     const char* _rtLazyOpenerFrame = nullptr; // first opener this frame
     const char* _rtLazyOpenerShown = "none";  // last frame's first opener, for the tab

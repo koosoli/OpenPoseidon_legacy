@@ -12,6 +12,8 @@ namespace Poseidon
 
 } // namespace Poseidon
 #include <Poseidon/Core/Game/GameLoop.hpp>
+#include <Poseidon/Foundation/Framework/Log.hpp>
+#include <cstdlib>
 namespace Poseidon
 {
 using Poseidon::gUserFpsCap;
@@ -188,7 +190,16 @@ void ApplyGraphicsConfigToEngine(const GraphicsConfig& cfg)
         }
         GEngine->SetMultitexturing(cfg.multitexturing);
     }
-    gUserFpsCap = cfg.fpsCap;
+    // POSEIDON_FPS_CAP=<n> pins the cap for a benchmark run without touching the saved setting
+    // (same shape as POSEIDON_VSYNC in EngineWgpu::SetSwapInterval). 0 = uncapped.
+    int fpsCap = cfg.fpsCap;
+    if (const char* pin = std::getenv("POSEIDON_FPS_CAP"); pin != nullptr && pin[0] != 0)
+    {
+        fpsCap = std::atoi(pin);
+        if (fpsCap != cfg.fpsCap)
+            LOG_INFO(Graphics, "Graphics: fpsCap {} requested, pinned to {} by POSEIDON_FPS_CAP", cfg.fpsCap, fpsCap);
+    }
+    gUserFpsCap = fpsCap;
 }
 
 } // namespace Poseidon
