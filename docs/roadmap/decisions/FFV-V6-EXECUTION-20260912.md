@@ -141,3 +141,7 @@ or final shot-permission paths.
   the rest of V6 remain open.
 
 The installed jeep-manual and jeep-ride mission hints describe the new action.
+Final installed 229c82ae / 155612 repeats the M16 menu Ready/Stow/Ready sequence,
+both mouse firing/reload cycles and clean shutdown successfully. The same build
+normalizes the weapon-optics camera to internal view when changing stance; an
+optics-specific interactive acceptance is not included in this recorded run.
