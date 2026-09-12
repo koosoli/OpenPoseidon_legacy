@@ -612,6 +612,8 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<
                     material.middle_color[c] = enf->middleColor[c];
                 if (enf->middle != nullptr)
                     material.middle = bindLayer(enf->middle, false);
+                if (enf->normal != nullptr)
+                    material.tile_normal = bindLayer(enf->normal, false);
             }
         }
     }

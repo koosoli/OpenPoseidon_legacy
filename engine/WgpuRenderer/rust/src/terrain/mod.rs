@@ -1911,6 +1911,19 @@ fn build_grid(device: &wgpu::Device) -> (wgpu::Buffer, wgpu::Buffer, u32) {
 mod enfusion_ground_tests {
     use crate::ffi::{WgrTerrainMaterial, WgrTerrainParams};
 
+    #[test]
+    fn native_ground_normals_use_raw_rg_and_skip_distant_fetches() {
+        let src = include_str!("terrain.wgsl");
+        let native = src.split("if (material.enfusion != 0u && tp.enfusion_ground > 0.0) {")
+            .nth(1).unwrap().split("if (material.surface_count == 0u").next().unwrap();
+        assert!(native.contains("material.tile_normal != 0u && detail_far < 1.0"));
+        assert!(native.contains("let xy = packed.rg * 2.0"));
+        assert!(!native.contains("srgb_to_linear(packed"));
+        assert!(native.contains("vec3<f32>(-xy.x, xy.y,"));
+        assert!(native.contains("clamp(tp.enfusion_ground, 0.0, 1.0)"));
+        assert!(native.contains("return AuthoredCell(rgb, normal_ts)"));
+    }
+
     // RFG-065. The Enfusion block is read by OFFSET, not by name: a field added to the
     // WGSL struct in a different order than to the two Rust/C++ ones renders as the
     // wrong ground rather than as an error, which is the failure mode the existing size

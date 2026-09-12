@@ -71,13 +71,8 @@
 //                  are indistinguishable on this data, so it stays unbound.
 //   Diffuse        14 of 51 declare it and every one is `1 1 1 1`. Nothing to bind.
 //
-//   NHOMap         37 of 51.  The channel packing of an `_NHO` has NOT been measured
-//                  on this corpus. `_NMO`/`_nopx` put normal X in alpha and Y in
-//                  green (MaterialChannels.hpp), and a differently-named map is not
-//                  evidence for the same packing. Binding it on the assumption lights
-//                  the entire island by a guess, and a wrong normal is worse than no
-//                  normal. The census below counts them so the size of the remaining
-//                  gap is on the record.
+//   NHOMap normals are now bound: September 10's native texture tests established
+//   RG normal packing. Height and occlusion remain unused, not albedo or coverage.
 //   SatMapBlend    37 declare it and 19 of those declare ZERO. The other 18 need
 //                  Everon's 2,500 `worlds/Eden/Eden/.Data/Eden_*_supertexture.edds`
 //                  paged in per tile -- the same machinery the Arma satellite path
@@ -231,8 +226,10 @@ bool TerrainWgpu::BuildEnfusionGroundMaterials(const Landscape& land)
     // entries", so a number that does not move after a change says the change did
     // not reach the data, which no per-surface spot check can say.
     int emats = 0, bcr = 0, nho = 0, middle = 0, scaled = 0, satmap = 0, bound = 0, middleBound = 0;
-    int middleColour = 0, middleColourApplied = 0;
+    int middleColour = 0, middleColourApplied = 0, normalBound = 0;
     const bool tintOn = MiddleColorEnabled();
+    const char* normalEnv = std::getenv("WGR_ENFUSION_GROUND_NORMALS");
+    const bool normalsOn = normalEnv == nullptr || normalEnv[0] != '0';
     for (int i = 0; i < layerCount; ++i)
     {
         const std::string ematPath = land.GetEnfusionSurface(i);
@@ -265,7 +262,8 @@ bool TerrainWgpu::BuildEnfusionGroundMaterials(const Landscape& land)
             colour = material.TextureOf("AlbedoMap");
         if (!colour.empty())
             ++bcr;
-        if (!material.TextureOf("NHOMap").empty())
+        const std::string normalPath = material.TextureOf("NHOMap");
+        if (!normalPath.empty())
             ++nho;
         const std::string middlePath = material.TextureOf("BCRMiddleMap");
         if (!middlePath.empty())
@@ -286,6 +284,12 @@ bool TerrainWgpu::BuildEnfusionGroundMaterials(const Landscape& land)
         // reading of that is the corpus median rather than the 12.5 m cell: 36 of the 51
         // shipped surfaces declare a scale and 20 of those declare exactly 4.
         out.detailScale = 1.0f / (scaleUv > 0.0f ? scaleUv : 4.0f);
+        if (normalsOn && !normalPath.empty())
+        {
+            out.normal = load(normalPath, kDetailMaxEdge);
+            if (out.normal != nullptr)
+                ++normalBound;
+        }
         ++bound;
 
         float middleScale = 0.0f;
@@ -336,11 +340,13 @@ bool TerrainWgpu::BuildEnfusionGroundMaterials(const Landscape& land)
     }
 
     LOG_INFO(Graphics,
-             "Wgpu Enfusion ground: {} of {} palette entries read an .emat; {} BCR, {} NHO (not bound: packing "
-             "unmeasured), {} middle BCR, {} ScaleUV, {} SatMapBlend>0 (not bound: needs the supertexture pages); "
+             "Wgpu Enfusion ground: {} of {} palette entries read an .emat; {} BCR, {} NHO, {} middle BCR, "
+             "{} ScaleUV, {} SatMapBlend>0 (not bound: needs the supertexture pages); "
              "bound {} detail + {} middle over {} distinct images; {} MiddleColor declared, {} MiddleColor applied{}",
              emats, layerCount, bcr, nho, middle, scaled, satmap, bound, middleBound, _enfusionGroundTextures.size(),
              middleColour, middleColourApplied, tintOn ? "" : " (POSEIDON_ENFUSION_MIDDLE_COLOR=0)");
+    LOG_INFO(Graphics, "Wgpu Enfusion ground normals: {} of {} NHO sources bound (RG, 512px max; enabled={})",
+             normalBound, nho, normalsOn);
     return bound > 0;
 }
 

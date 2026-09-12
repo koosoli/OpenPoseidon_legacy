@@ -507,10 +507,8 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
     //    that fade is not optional decoration: it is what stops a 4 m period from
     //    becoming a lattice in the middle distance.
     //
-    // What is NOT here, and why: `NHOMap` (37 of 51) is left unbound because the channel
-    // packing of an `_NHO` has not been MEASURED on this corpus -- `_NMO`/`_nopx` put X
-    // in alpha and Y in green, and assuming the same for a differently-named map lights
-    // the whole island by a guess. `SatMapBlend` is zero on 19 of the 37 that declare it
+    // NHO uses raw RG normal XY, as verified by the native DDS tests. Height/AO
+    // are not used here. `SatMapBlend` is zero on 19 of the 37 that declare it
     // and needs Everon's 2,500 `_supertexture.edds` paged in, which is a build, not a
     // binding.
     if (material.enfusion != 0u && tp.enfusion_ground > 0.0) {
@@ -520,6 +518,19 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
         let d_uv = wxz * material.detail_scale;
         var rgb = textureSampleGrad(ground[material.legacy], ground_samp, d_uv,
                                     duv * material.detail_scale, dvv * material.detail_scale).rgb;
+        var normal_ts = vec3<f32>(0.0, 0.0, 1.0);
+        let detail_end = max(material.detail_max, 1.0);
+        let detail_far = smoothstep(max(detail_end - max(material.detail_fade, 1.0), 0.0),
+                                    detail_end, length(view_pos));
+        if (material.tile_normal != 0u && detail_far < 1.0) {
+            let packed = textureSampleGrad(ground[material.tile_normal], ground_samp, d_uv,
+                                          duv * material.detail_scale, dvv * material.detail_scale);
+            let xy = packed.rg * 2.0 - vec2<f32>(1.0);
+            // fs_main's terrain frame points T toward -X, B toward +Z.
+            // Native UVs grow toward +X/+Z, unlike the legacy tile convention.
+            let decoded = normalize(vec3<f32>(-xy.x, xy.y, sqrt(max(1.0 - dot(xy, xy), 1e-4))));
+            normal_ts = normalize(mix(normal_ts, decoded, (1.0 - detail_far) * clamp(tp.enfusion_ground, 0.0, 1.0)));
+        }
         if (material.middle != 0u && material.middle_blend > 0.0) {
             let m_uv = wxz * material.middle_scale;
             var mid = textureSampleGrad(ground[material.middle], ground_samp, m_uv,
@@ -550,11 +561,11 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
         // BIT-EXACT the legacy sample below. Full on costs ONE fetch (two with a
         // middle map): the legacy tap is only taken while the slider is between.
         if (tp.enfusion_ground >= 0.999) {
-            return AuthoredCell(rgb, vec3<f32>(0.0, 0.0, 1.0));
+            return AuthoredCell(rgb, normal_ts);
         }
         let legacy_rgb = sample_cell(material.legacy, cell, tile_uv, ddx, ddy);
         return AuthoredCell(mix(legacy_rgb, rgb, clamp(tp.enfusion_ground, 0.0, 1.0)),
-                            vec3<f32>(0.0, 0.0, 1.0));
+                            normal_ts);
     }
     // The normal renderer must remain byte-for-byte on the established cell
     // path while the authored composition is evaluated and compared.

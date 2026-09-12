@@ -265,6 +265,7 @@ class TerrainWgpu : public ITerrainRenderer
     {
         Texture* detail = nullptr;  //!< BCRMap, mipped, tiled at `detailScale`
         Texture* middle = nullptr;  //!< BCRMiddleMap, or null
+        Texture* normal = nullptr;  //!< NHOMap, raw RG normal channels, or null
         float detailScale = 0.0f;   //!< 1 / ScaleUV, repeats per world metre
         float middleScale = 0.0f;   //!< 1 / MiddleScaleUV
         float middleBlend = 0.0f;   //!< MiddleBCRBlend, clamped to 0..1
