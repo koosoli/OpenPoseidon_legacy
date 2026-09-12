@@ -66,6 +66,9 @@ bool Man::SetCargoWeaponMode(bool enabled)
         _externalMove = MotionPathItem(MoveId(MoveIdNone));
     _cargoWeaponRequested = enabled;
     SwitchVehicleAction(action);
+    Transport* vehicle = Brain()->GetVehicleIn();
+    if (!GWorld->GetCameraEffect() && (GWorld->CameraOn() == this || GWorld->CameraOn() == vehicle))
+        GWorld->SwitchCameraTo(vehicle, GWorld->GetCameraType());
     return true;
 }
 

@@ -340,6 +340,22 @@ try {
             if (!$state.inCargo -or !$state.active) {throw 'Ready action did not enable the optional weapon stance'}
             & "$PSScriptRoot/Test-JeepMouse.ps1" -Reader $reader -Writer $writer -LogPath (Join-Path $output 'mouse-responses.jsonl')
             if (!$?) {throw 'Relative mouse acceptance failed'}
+            $null=Send @{cmd='key';sc=48;hold=$true}
+            Start-Sleep -Milliseconds 150
+            $null=Send @{cmd='key_up';sc=48}
+            $null=Send @{cmd='screenshot';path=(Join-Path $output 'menu-stow-selected.png')}
+            $null=Send @{cmd='key';sc=40;hold=$true}
+            Start-Sleep -Milliseconds 150
+            $null=Send @{cmd='key_up';sc=40}
+            Start-Sleep -Seconds 2
+            $state=Send @{cmd='crew_seat_status'}
+            if (!$state.inCargo -or $state.active) {throw 'Stow action did not restore ordinary cargo'}
+            $shotCount=Send @{cmd='eval';code='ffvShots'}
+            $null=Send @{cmd='mouse_button';button=1;down=$true}
+            Start-Sleep -Milliseconds 200
+            $null=Send @{cmd='mouse_button';button=1;down=$false}
+            $null=Send @{cmd='eval';code='ffvShots'} $shotCount.result
+            $null=Send @{cmd='screenshot';path=(Join-Path $output 'menu-stowed.png')}
             $null=Send @{cmd='exit'}
             if (!$p.WaitForExit(30000) -or $p.ExitCode -ne 0) {throw 'Menu/mouse fixture exit failed'}
             Write-Host "PASS: menu reentry and relative mouse with $Rifle; $output"
@@ -516,7 +532,7 @@ try {
             $null=Send @{cmd='exec';code='ffvPassenger assignAsCargo ffvJeep; ffvPassenger moveInCargo ffvJeep'}
             Start-Sleep -Seconds 2
             $reentry=Send @{cmd='crew_seat_status'}
-            if (!$reentry.active -or !$reentry.inCargo) {throw 'Supported reentry did not restore cargo mode'}
+            if ($reentry.active -eq [bool]$PlayerFire -or !$reentry.inCargo) {throw 'Reentry did not restore the correct player/NPC mode default'}
             $null=Send @{cmd='exec';code='unassignVehicle ffvPassenger; ffvPassenger action ["EJECT",ffvJeep]'}
             Start-Sleep -Seconds 1
             $null=Send @{cmd='exec';code='"SoldierWB" createUnit [[9690,3590,0],group player,"ffvSeatBlocker=this; removeAllWeapons this; this disableAI ""MOVE"""]; ffvSeatBlocker moveInCargo ffvJeep; ffvPassenger assignAsCargo ffvJeep; ffvPassenger moveInCargo ffvJeep'}
@@ -528,7 +544,13 @@ try {
             $null=Send @{cmd='exec';code='deleteVehicle ffvSeatBlocker; ffvPassenger assignAsCargo ffvJeep; ffvPassenger moveInCargo ffvJeep'}
             Start-Sleep -Seconds 2
             $reentry=Send @{cmd='crew_seat_status'}
-            if (!$reentry.active) {throw 'Return from ordinary seat failed'}
+            if ($reentry.active -eq [bool]$PlayerFire) {throw 'Return from ordinary seat kept a stale weapon mode'}
+            if ($PlayerFire) {
+                $null=Send @{cmd='exec';code='ffvPassenger action ["CARGO WEAPON READY",ffvJeep]'}
+                Start-Sleep -Seconds 2
+                $reentry=Send @{cmd='crew_seat_status'}
+                if (!$reentry.active) {throw 'Explicit reactivation after seat change failed'}
+            }
             $null=Send @{cmd='exec';code='ffvJeep setDammage 1'}
             Start-Sleep -Seconds 1
             $destroyed=Send @{cmd='crew_seat_status'}
