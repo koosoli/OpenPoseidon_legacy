@@ -231,18 +231,6 @@ void Man::BasicSimulation(float deltaT, SimulationImportance prec, float speedFa
             if (Soldier* soldier = dyn_cast<Soldier>(this))
                 soldier->AIFire(deltaT);
         }
-        else if (QIsManual() && !GWorld->GetPlayerSuspended() && !GWorld->GetCameraEffect() &&
-                 InputSubsystem::Instance().GetActionToDo(UAReloadMagazine) &&
-                 SelectedWeapon() >= 0 && EnableWeaponManipulation())
-        {
-            const auto& slot = GetMagazineSlot(SelectedWeapon());
-            if (slot._magazine && IsCargoWeaponCandidate(SelectedWeapon()))
-            {
-                const int spare = FindMagazineByType(slot._muzzle, slot._magazine->_type);
-                if (spare >= 0 && GetMagazine(spare) != slot._magazine)
-                    ReloadMagazine(SelectedWeapon(), spare);
-            }
-        }
         if (cargoSeat->HasTransitions())
         {
             // Use the existing external-action context for reloads and mission

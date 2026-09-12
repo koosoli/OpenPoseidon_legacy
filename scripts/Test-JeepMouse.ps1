@@ -48,5 +48,25 @@ try {
     if ((Shoot) -ne 0) {throw 'Shot escaped while looking outside rifle arc'}
     SeekPose $true -8
     if ((Shoot) -lt 1) {throw 'Returning to rifle arc failed'}
-    Write-Output 'PASS: normal relative mouse entered, left and returned to rifle arc; actual shots only inside.'
+    $null=Send @{cmd='key';sc=21;hold=$true}
+    $deadline=[DateTime]::UtcNow.AddSeconds(2)
+    do {
+        Start-Sleep -Milliseconds 50
+        $pose=Send @{cmd='crew_pose_probe'}
+    } while (!$pose.reloadInProgress -and [DateTime]::UtcNow -lt $deadline)
+    $null=Send @{cmd='key_up';sc=21}
+    $seenReload=$false
+    $deadline=[DateTime]::UtcNow.AddSeconds(10)
+    do {
+        Start-Sleep -Milliseconds 100
+        $pose=Send @{cmd='crew_pose_probe'}
+        if ($pose.primaryMove -eq 'opjeepreload') {
+            if (!$pose.weaponsDisabled) {throw 'Reload left firing enabled'}
+            $seenReload=$true
+        }
+    } while ((!$seenReload -or $pose.reloadInProgress -or !$pose.loaded) -and [DateTime]::UtcNow -lt $deadline)
+    if (!$seenReload -or $pose.reloadInProgress -or !$pose.loaded) {throw 'Normal-menu keyboard reload failed'}
+    SeekPose $true -8
+    if ((Shoot) -lt 1) {throw 'Mouse firing after keyboard reload failed'}
+    Write-Output 'PASS: normal menu/mouse firing arc, keyboard reload and firing after reload.'
 } finally {if ($client) {$client.Dispose()}}

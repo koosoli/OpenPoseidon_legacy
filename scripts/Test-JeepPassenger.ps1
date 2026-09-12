@@ -284,8 +284,14 @@ try {
         if ($MenuReentry) {
             $entry=Send @{cmd='crew_pose_probe'}
             if ($null -eq $entry.entryX -or $entry.entryRadius -le 0) {throw 'Fixture has no valid assigned entry point'}
-            $null=Send @{cmd='exec';code='unassignVehicle ffvPassenger; ffvPassenger action ["EJECT",ffvJeep]'}
             Start-Sleep -Seconds 2
+            $null=Send @{cmd='screenshot';path=(Join-Path $output 'menu-before-exit.png')}
+            $null=Send @{cmd='key';sc=40;hold=$true}
+            Start-Sleep -Milliseconds 250
+            $null=Send @{cmd='key_up';sc=40}
+            Start-Sleep -Seconds 2
+            $exitState=Send @{cmd='crew_seat_status'}
+            if ($exitState.inCargo -or $exitState.active) {throw 'Action-menu exit did not release cargo capability'}
             $heading=[math]::Atan2(9700-$entry.entryX,3600-$entry.entryZ)*180/[math]::PI
             $placement=[string]::Format([Globalization.CultureInfo]::InvariantCulture,
                 'ffvPassenger assignAsCargo ffvJeep; ffvPassenger setPos [{0},{1},0]; ffvPassenger setDir {2}', $entry.entryX,$entry.entryZ,$heading)
@@ -433,7 +439,7 @@ try {
                 do {
                     Start-Sleep -Milliseconds 50
                     $inputState=Send @{cmd='crew_pose_probe'}
-                } while (!$inputState.reloadInProgress -and $inputState.reloadInput -le 0 -and [DateTime]::UtcNow -lt $inputDeadline)
+                } while (!$inputState.reloadInProgress -and [DateTime]::UtcNow -lt $inputDeadline)
                 $null=Send @{cmd='key_up';sc=21}
                 if (!$inputState.reloadInProgress -and $inputState.reloadInput -le 0) {throw 'Reload key was not observed by the gameplay input path'}
             } else {$null=Send @{cmd='crew_request_reload'}}

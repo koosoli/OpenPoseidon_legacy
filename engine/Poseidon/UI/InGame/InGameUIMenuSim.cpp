@@ -557,6 +557,23 @@ void InGameUI::SimulateHUD(const Camera& camera, EntityAI* vehicle, CameraType c
         }
     }
 
+    // Input edges belong to the per-frame UI, not the carrier's potentially
+    // throttled BasicSimulation. The normal reload action still owns all events.
+    if (cargoWeapon && unit->IsPlayer() && cargoMan->QIsManual() &&
+        cargoMan->GetActiveCargoWeaponSeat() && !GWorld->GetPlayerSuspended() &&
+        !GWorld->GetCameraEffect() && !GWorld->Chat() && input.GetActionToDo(UAReloadMagazine) &&
+        cargoMan->IsCargoWeaponCandidate(cargoMan->SelectedWeapon()) && cargoMan->EnableWeaponManipulation())
+    {
+        const int weapon = cargoMan->SelectedWeapon();
+        const auto& slot = cargoMan->GetMagazineSlot(weapon);
+        if (slot._magazine)
+        {
+            const int spare = cargoMan->FindMagazineByType(slot._muzzle, slot._magazine->_type);
+            if (spare >= 0 && cargoMan->GetMagazine(spare) != slot._magazine)
+                cargoMan->ReloadMagazine(weapon, spare);
+        }
+    }
+
     // list of visible objects
     const TargetList& visibleList = *VisibleList();
     int i, n = visibleList.Size();
