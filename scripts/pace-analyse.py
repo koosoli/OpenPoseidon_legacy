@@ -91,9 +91,9 @@ def phases_from_log(log_path):
     for tag in ("M", "X"):
         if tag in speeds:
             med = percentile(speeds[tag], 50)
-            print(f"ride phase {tag}: vehicle speed median {med:.1f} m/s over {len(speeds[tag])} samples")
+            print(f"ride phase {tag}: vehicle speed median {med:.1f} km/h (OFP `speed`) over {len(speeds[tag])} samples")
             if med < 1.0:
-                print(f"FAIL: ride phase {tag} — the vehicle did not move (median speed {med:.2f} m/s); phase discarded")
+                print(f"FAIL: ride phase {tag} — the vehicle did not move (median speed {med:.2f} km/h); phase discarded")
                 frames.pop(tag, None)
                 RIDE_FAILED = True
     return frames
@@ -118,9 +118,14 @@ def stats(values):
     }
 
 
-def analyse_phase(main, producer, worker, lo, hi):
+def analyse_phase(main, producer, worker, lo, hi, trim_ms=0.0):
     rows = [r for r in main if lo <= r["frame"] <= hi]
     rows.sort(key=lambda r: r["frame"])
+    if trim_ms > 0 and len(rows) > 10:
+        # e.g. the external-view phase begins with the camera swinging into place; that
+        # transition is real but it is not the motion under test.
+        t0 = rows[0]["t_start_ms"]
+        rows = [r for r in rows if r["t_start_ms"] - t0 >= trim_ms]
     if len(rows) < 3:
         return None
     periods = [b["t_start_ms"] - a["t_start_ms"] for a, b in zip(rows, rows[1:])]
@@ -307,7 +312,7 @@ def main():
         windows["ALL"] = (main_rows[0]["frame"], main_rows[-1]["frame"])
     results = {}
     for tag, (lo, hi) in sorted(windows.items()):
-        a = analyse_phase(main_rows, producer, worker, lo, hi)
+        a = analyse_phase(main_rows, producer, worker, lo, hi, trim_ms=3000.0 if tag == "X" else 0.0)
         if a is None:
             print(f"--- {label} / {tag}: too few frames in {lo}..{hi}")
             continue

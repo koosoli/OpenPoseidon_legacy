@@ -85,6 +85,7 @@ function Write-ScratchGraphicsCfg {
 $movecam = Join-Path $scriptDir 'farfield-movecam.ps1'
 $analyse = Join-Path $scriptDir 'pace-analyse.py'
 $summary = @()
+$failed = @()
 foreach ($cap in $Caps) {
     for ($rep = 1; $rep -le $Repeats; $rep++) {
         $armLabel = '{0}-cap{1}' -f $Label, $cap
@@ -119,9 +120,15 @@ foreach ($cap in $Caps) {
             $pngOut = Join-Path $armOut ($armLabel + '.pace.png')
             $jsonOut = Join-Path $armOut ($armLabel + '.pace.json')
             & python $analyse $tracePrefix --log $log --png $pngOut --json $jsonOut --label $armLabel 2>&1 | ForEach-Object { "$_" }
-            $summary += $armLabel
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning ('arm {0}: analysis reported failure (exit {1}) -- NOT a valid measurement' -f $armLabel, $LASTEXITCODE)
+                $failed += $armLabel
+            } else {
+                $summary += $armLabel
+            }
         } else {
             Write-Warning ('no trace written for {0} (expected {1}.main.csv)' -f $armLabel, $tracePrefix)
+            $failed += $armLabel
         }
         # The stamp the run measured, so the numbers can never be quoted without it.
         $stamp = Get-Content -LiteralPath 'D:\SteamLibrary\steamapps\common\ARMA Cold War Assault\DEPLOYED-FROM.txt' -ErrorAction SilentlyContinue
@@ -130,3 +137,8 @@ foreach ($cap in $Caps) {
 }
 Write-Output ""
 Write-Output ('arms done: {0}' -f ($summary -join ', '))
+if ($failed.Count -gt 0) {
+    Write-Output ('arms FAILED: {0}' -f ($failed -join ', '))
+    exit 1
+}
+exit 0

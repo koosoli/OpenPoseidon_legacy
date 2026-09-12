@@ -97,6 +97,11 @@ Matrix4 Object::RenderTransform() const
     const float allowed = std::min(kRenderInterpMaxJump, 1.5f + 4.0f * ObjectSpeed().Size() * (1.0f / 60.0f));
     if (dp.SquareSize() > allowed * allowed)
         return cur;
+    // An abrupt turn with no travel (setDir, a respawn facing elsewhere) is the same kind of
+    // discontinuity: more than 60 degrees in one tick is 3600 deg/s, beyond any simulated
+    // rotation, so it snaps rather than sweeping the body through the arc over a frame.
+    if (_renderPrev.Direction().DotProduct(cur.Direction()) < 0.5f)
+        return cur;
     if (alpha <= 0.0f)
         return _renderPrev;
     Matrix4 out;
@@ -127,7 +132,12 @@ Matrix4 Object::RenderWorldTransform() const
 
 Matrix4 Object::RenderDelta() const
 {
-    if (!_renderPrevValid || !RenderInterpEnabled() || g_renderInterpAlpha >= 1.0f)
+    // NOT gated on this object's own history: a passenger has none (crew leave the world
+    // lists and are never captured) while the vehicle it sits in does, and
+    // RenderWorldTransform() already answers through the hierarchy. Gating here made the
+    // external/group views of a passenger stay on tick time while the inside view was
+    // smoothed (review of 64f08cfc; measured as 37 % vs 6 % displacement jitter).
+    if (!RenderInterpEnabled() || g_renderInterpAlpha >= 1.0f)
         return MIdentity;
     return RenderWorldTransform() * WorldInvTransform();
 }

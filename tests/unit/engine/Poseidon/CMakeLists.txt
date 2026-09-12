@@ -526,6 +526,7 @@ list(APPEND POSEIDON_TEST_SOURCES
 
     # Scene tests
     World/Scene/test_object.cpp
+    World/Scene/test_render_interp_camera.cpp
     World/Scene/test_scene.cpp
     World/Scene/test_scene_preloader.cpp
     World/Scene/test_surface_draw_order.cpp

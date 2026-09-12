@@ -1,8 +1,9 @@
 # PACE-001 — Community stutter at a high fps cap (Wetzer's report), measured
 
 **Date:** 2026-09-12. **Branch:** `perf/frame-pacing` (from trunk tip `5bd4f8f6`).
-**Status:** measured; fix REN-INTERP-001 built and measured on this machine; NOT confirmed on
-the tester's machine.
+**Status:** mechanism measured on this machine; REN-INTERP-001 built and deployed on the
+branch; its acceptance A/B is recorded in "REN-INTERP-001 measurements" below (nothing above
+that section claims it passed). NOT confirmed on the tester's machine; NOT on trunk.
 
 ## The report
 
@@ -56,7 +57,9 @@ So the three hypotheses split by build:
   the main-thread period is EVEN (below). The back-pressure lands in the worker's
   `get_current_texture` (acquire median 16-17 ms, blocked on 100 % of frames), which the
   producer sees as its slot wait (median 18 ms). There is no burst/stall pattern and the
-  limiter sleeps on 1 % of frames. B is not a cause on the current build.
+  limiter sleeps on 1 % of frames. On the CPU/GPU side B is not a cause on the current
+  build; whether the presentation path shows those frames evenly was not measured (no
+  PresentMon here) and stays open.
 * **C (fixed-step motion judder)** — cannot have caused anything on the 08-22 build (no
   fixed step there), but it IS present on the current build and matches the tester's
   30-smooth / 60-smooth / 47-stutters pattern exactly: 47 fps is 1.28 ticks per frame, so
@@ -149,7 +152,8 @@ RESULTS: see "REN-INTERP-001 measurements" appended below.
 
 Reading it:
 
-* **Frame delivery is even at every cap.** Jitter (mean frame-to-frame change of the period)
+* **The CPU-side frame period is even at every cap** (display timing was not captured, see
+  "Measurement hygiene"). Jitter (mean frame-to-frame change of the period)
   is 1 % at cap 30 and 5-11 % GPU-bound; there is no short/long alternation (alternation
   index 0.14-0.25, where a strict 8/34 ms stream would read ~1.0). The limiter is not the
   bottleneck when the GPU is: it slept on 0-8 % of frames at caps 60/120 and never
@@ -213,3 +217,29 @@ Reading it:
    frame at 25 fps), but that case was not run here.
 4. **Additional fps gain:** none claimed, none measured. Interpolation costs a copy of
    one matrix per moving entity per tick and a lerp per drawn moving object.
+
+## Cost of the slice
+
+`_renderPrev` (a `Matrix4`, 64 bytes) plus a flag live in every `Object`, moving or not, so
+the flag check in the draw path costs no lookup. On stock Everon (82,381 registered objects,
+PHY-010 census) that is ~5.5 MB of process memory, ~8 MB with padding, for a process that
+holds several GB of geometry and textures; a side table keyed by entity would save it at the
+price of a hash probe per drawn object, which the `_gpuCoverage` history in Object.hpp
+records as measured frame cost. Not measured as a frame-time change here; the per-tick
+capture is a 64-byte copy per moving entity (hundreds, not tens of thousands).
+
+## REN-INTERP-001 measurements — ride A/B, same build `64f08cfc`, 2026-09-12 11:37-11:52
+
+`tests/perf/missions/pace_ride.Intro` (Intro island, light scene): the player in the cargo of an
+AI-driven jeep shuttling a 240 m lane with a U-turn at each end (speed median 45-47 km/h),
+20 s static, 40 s inside view, then `switchCamera "EXTERNAL"` for 40 s (first 3 s after the
+switch trimmed). Same scratch settings as Series A. Interpolation switched by
+`POSEIDON_RENDER_INTERP` only. Artefacts: `.tmp-movecam/out/ride{OFF,ON}-cap{120,50}/`
+(run-01.log, *.trace.{main,producer,worker}.csv, *.pace.json, *.pace.png).
+
+| cap | view | fps off / on | cam dx per frame med / p95 m, off -> on | dx jitter off -> on | dyaw jitter off -> on | ticks/frame off / on | tick-count changes off / on |
+|---|---|---|---|---|---|---|---|
+| 120 | inside (passenger) | 46.3 / 47.3 | 0.22 / 0.44 -> 0.27 / 0.32 | **51 % -> 6 %** | 81 % -> 46 % | 1.29 / 1.27 | 58 % / 54 % |
+| 120 | external | 70.4 / 72.7 | 0.19 / 0.23 -> 0.20 / 0.23 | **36 % -> 33 %** | 156 % -> 159 % | 0.85 / 0.83 | 39 % / 39 % |
+| 50 | inside (passenger) | 46.7 / 46.7 | 0.22 / 0.44 -> 0.26 / 0.32 | **49 % -> 5 %** | 86 % -> 49 % | 1.29 / 1.28 | 56 % / 56 % |
+| 50 | external | 48.9 / 48.9 | 0.21 / 0.44 -> 0.21 / 0.44 | **38 % -> 37 %** | 153 % -> 168 % | 1.23 / 1.23 | 45 % / 45 % |
