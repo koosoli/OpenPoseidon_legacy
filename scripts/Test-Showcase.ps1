@@ -164,6 +164,7 @@ try {
   $deadline=[DateTime]::UtcNow.AddSeconds(90)
   do {
    Start-Sleep -Seconds 2
+   Send @{cmd='eval';code='[labFlightRequested,getPos labHeli,speed labHeli,fuel labHeli,alive labFlightPilot,labFlightLeg]'}
    $state=(Send @{cmd='eval';code='((getPos labHeli) select 2)>10 && abs(speed labHeli)>5'} | ConvertFrom-Json)
   } while ($state.result -ne 'true' -and [DateTime]::UtcNow -lt $deadline)
   if ($state.result -ne 'true') {throw 'Pilot did not take off'}

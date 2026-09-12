@@ -23,8 +23,9 @@ labFlightLeg = 0
 ? !(player in labHeli) : goto "wait"
 ? !labFlightRequested : goto "wait"
 labHeli land "NONE"
+labHeli engineOn true
 #next
-labFlightGroup move (labFlightRoute select labFlightLeg)
+labFlightPilot doMove (labFlightRoute select labFlightLeg)
 #flight
 ~0.5
 ? !(alive labHeli) : exit
@@ -38,7 +39,7 @@ labFlightLeg = (labFlightLeg + 1) mod 4
 goto "next"
 #home
 labFlightRequested = false
-labFlightGroup move labFlightHome
+labFlightPilot doMove labFlightHome
 #approach
 ~0.5
 ? !(alive labHeli) : exit

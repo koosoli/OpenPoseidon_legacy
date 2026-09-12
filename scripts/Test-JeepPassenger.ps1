@@ -2,7 +2,7 @@ param([ValidateSet('M16','AK74')][string]$Rifle='M16',
       [ValidateSet('','Jeep','UAZ','Truck5tOpen','UH60','UH60MG')][string]$InspectVehicle='',
       [ValidateRange(0,11)][int]$InspectCargoIndex=0,
       [switch]$InspectAllSeats,
-      [ValidateSet('Jeep','UH60','UH60MG')][string]$TestVehicle='Jeep',
+      [ValidateSet('Jeep','UAZ','Truck5tOpen','UH60','UH60MG')][string]$TestVehicle='Jeep',
       [switch]$ProjectileFrame, [switch]$AnimationPreview, [switch]$AnimationVideo, [switch]$NpcFire,
       [ValidateSet('clear','hold','outside','blocked','friendly')][string]$NpcScenario='clear',
       [ValidateSet(0,90,180)][int]$NpcHeading=0, [switch]$NpcDriver,
@@ -545,9 +545,10 @@ try {
             $samples=@(); $seenReload=$false; $reloadSaved=$false; $clock=[Diagnostics.Stopwatch]::StartNew()
             do {
                 $motion=Send @{cmd='crew_pose_probe'}
-                $seenReload=$seenReload -or ($motion.primaryMove -ieq 'OPJeepReload')
-                if ($motion.primaryMove -ieq 'OPJeepReload' -and !$motion.weaponsDisabled) {throw 'Reload did not disable firing'}
-                if ($SaveLoad -and !$reloadSaved -and $motion.primaryMove -ieq 'OPJeepReload' -and $motion.phase -gt .2) {
+                $inReload = $motion.primaryMove -imatch '^OP(Jeep|Heli)Reload$'
+                $seenReload=$seenReload -or $inReload
+                if ($inReload -and !$motion.weaponsDisabled) {throw 'Reload did not disable firing'}
+                if ($SaveLoad -and !$reloadSaved -and $inReload -and $motion.phase -gt .2) {
                     $clock.Stop()
                     $null=Send @{cmd='eval';code='triSaveGame "jeep-reloading"'} '"OK"'
                     $null=Send @{cmd='eval';code='triLoadGame "jeep-reloading"'} '"OK"'
