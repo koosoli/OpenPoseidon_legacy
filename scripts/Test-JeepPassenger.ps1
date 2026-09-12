@@ -356,6 +356,17 @@ try {
             $null=Send @{cmd='mouse_button';button=1;down=$false}
             $null=Send @{cmd='eval';code='ffvShots'} $shotCount.result
             $null=Send @{cmd='screenshot';path=(Join-Path $output 'menu-stowed.png')}
+            $null=Send @{cmd='key';sc=48;hold=$true}
+            Start-Sleep -Milliseconds 150
+            $null=Send @{cmd='key_up';sc=48}
+            $null=Send @{cmd='key';sc=40;hold=$true}
+            Start-Sleep -Milliseconds 150
+            $null=Send @{cmd='key_up';sc=40}
+            Start-Sleep -Seconds 2
+            $state=Send @{cmd='crew_seat_status'}
+            if (!$state.active -or !$state.inCargo) {throw 'Ready after stowing failed'}
+            & "$PSScriptRoot/Test-JeepMouse.ps1" -Reader $reader -Writer $writer -LogPath (Join-Path $output 'mouse-reactivation.jsonl')
+            if (!$?) {throw 'Firing after stowing and readying again failed'}
             $null=Send @{cmd='exit'}
             if (!$p.WaitForExit(30000) -or $p.ExitCode -ne 0) {throw 'Menu/mouse fixture exit failed'}
             Write-Host "PASS: menu reentry and relative mouse with $Rifle; $output"

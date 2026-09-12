@@ -108,3 +108,36 @@ not an invented [vehicle,index] command overload. These are original baselines,
 not proof of FFV on the new vehicles. The truck's open bed is the second-vehicle
 candidate; actual lower-body seat preservation and neutral upper-body frame
 adaptation remain necessary before shipping that profile.
+
+## Player action-menu activation (owner request)
+
+The owner requested that the shooting pose be explicitly activated through the
+action menu rather than automatically on boarding. This supersedes the automatic
+player stance used in the earlier Delivery 1 measurements, not the common rifle
+or final shot-permission paths.
+
+- Structural availability is now GetAvailableCargoWeaponSeat. The configured
+  player route also requires a saved cargoWeaponRequested flag, default false.
+- Ready personal weapon / Waffe im Fahrzeug bereitmachen enables the existing
+  stance. Stow personal weapon / Waffe im Fahrzeug wegstecken restores the
+  original seat and carrier camera. Camera effects are not overridden.
+- Both menu actions use existing UIAction handling; old enum values stay intact.
+  They are unavailable during a pending reload. NPC automatic behaviour and the
+  multiplayer fallback are unchanged.
+- Boarding and seat swaps clear player intent. Old saves without the flag and
+  newly controlled AI passengers do not silently opt into the shooting pose.
+- c2281f88 and b94cdb9f exposed a delayed replay of completed boarding while the
+  player was in the ordinary pose. 3ab36e6f clears that completed action at entry
+  for available seats, even before optional activation. Future queued mission
+  actions are not globally cleared.
+- Installed 3ab36e6f: 154648 M16 and 154748 AK74 passed normal menu exit/reentry,
+  initial inactive state, menu Ready, mouse firing arc/reload, menu Stow and no
+  extra shot after stowing. Captures show German action labels and the restored
+  original vehicle view. 154847 AK74 save/reload/lifecycle passed, including
+  inactive reentry and explicit reactivation following a seat change.
+- 155020 M16 additionally passed a second menu Ready after Stow and repeated
+  mouse firing/reload checks. 155226 NPC control still fired without player
+  menu activation. General seat pose adaptation, other vehicle profiles and
+  the rest of V6 remain open.
+
+The installed jeep-manual and jeep-ride mission hints describe the new action.

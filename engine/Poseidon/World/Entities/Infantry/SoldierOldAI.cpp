@@ -68,7 +68,10 @@ bool Man::SetCargoWeaponMode(bool enabled)
     SwitchVehicleAction(action);
     Transport* vehicle = Brain()->GetVehicleIn();
     if (!GWorld->GetCameraEffect() && (GWorld->CameraOn() == this || GWorld->CameraOn() == vehicle))
-        GWorld->SwitchCameraTo(vehicle, GWorld->GetCameraType());
+    {
+        const CameraType camera = GWorld->GetCameraType();
+        GWorld->SwitchCameraTo(vehicle, camera == CamGunner ? CamInternal : camera);
+    }
     return true;
 }
 
@@ -2544,7 +2547,7 @@ void Man::RestoreCargoStateAfterLoad()
                 // standing infantry. Resolve the actual seat after all load passes.
                 SwitchVehicleAction(vehicle->CargoAction(i));
                 _cargoReloadAfterLoad = MotionPathItem(MoveId(MoveIdNone));
-                LOG_WARN(AI, "Saved cargo animation absent; restored the current vehicle seat pose");
+                LOG_INFO(AI, "Restored cargo seat pose: optional animation unavailable or not requested");
                 break;
             }
         }
