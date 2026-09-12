@@ -1,0 +1,51 @@
+; PACE-001 heli arm: the player is the GUNNER of an AI-flown Cobra, so the view is the
+; cockpit of a fast, self-shadowing vehicle (the cockpit-flicker report on 3f64710a).
+; Phases run off mission time; FT lines carry the engine frame counter and the speed (km/h).
+_settle = 20
+_statdur = 15
+_movedur = 70
+~0.5
+ffvDriver assignAsDriver ffvJeep
+ffvDriver moveInDriver ffvJeep
+ffvPassenger assignAsGunner ffvJeep
+ffvPassenger moveInGunner ffvJeep
+ffvJeep setFuel 1
+ffvDriver setBehaviour "CARELESS"
+ffvDriver setCombatMode "BLUE"
+ffvJeep flyInHeight 60
+doStop ffvDriver
+~1
+logInfo format ["RIDE cfg settle=%1 static=%2 move=%3 pos=%4 driverIn=%5 playerIn=%6", _settle, _statdur, _movedur, getPos ffvJeep, ffvDriver in ffvJeep, ffvPassenger in ffvJeep]
+#settle
+logInfo format ["FT W %1 %2", _time, triFrameCount]
+~0.001
+? _time < _settle : goto "settle"
+_r = triPerfReset 0
+logInfo format ["RIDE phase=static t=%1 pos=%2", _time, getPos ffvJeep]
+_statend = _time + _statdur
+#stat
+logInfo format ["FT S %1 %2", _time, triFrameCount]
+~0.001
+? _time < _statend : goto "stat"
+logInfo format ["RIDE staticend t=%1", _time]
+_r = triPerfReset 0
+_moveend = _time + _movedur
+_leg = 0
+_next = _time
+logInfo format ["RIDE phase=move t=%1", _time]
+#mov
+? _time >= _next : goto "post"
+#movres
+logInfo format ["FT M %1 %2 %3", _time, triFrameCount, speed ffvJeep]
+~0.001
+? _time < _moveend : goto "mov"
+doStop ffvDriver
+logInfo format ["RIDE moveend t=%1 pos=%2", _time, getPos ffvJeep]
+exit
+#post
+_leg = _leg + 1
+_next = _time + 30
+? (_leg % 2) == 1 : ffvDriver doMove [9700, 4600, 0]
+? (_leg % 2) == 0 : ffvDriver doMove [9700, 3600, 0]
+logInfo format ["RIDE leg %1 t=%2 pos=%3 speed=%4", _leg, _time, getPos ffvJeep, speed ffvJeep]
+goto "movres"

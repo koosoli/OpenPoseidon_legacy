@@ -3335,7 +3335,8 @@ void Scene::DrawExShadow(SortObject* oi)
         {
             continue;
         }
-        Matrix4 trans = obj->Transform(), invTrans = obj->GetInvTransform();
+        // REN-INTERP-001: proxies' shadows follow the DRAWN parent frame (pos), like the body.
+        Matrix4 trans = pos.Transform(), invTrans = pos.GetInvTransform();
 
         LODShapeWithShadow* pshape = nullptr;
         Object* proxy = obj->GetProxy(pshape, level, trans, invTrans, *obj, i);

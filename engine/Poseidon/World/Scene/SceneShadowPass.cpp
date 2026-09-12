@@ -428,7 +428,8 @@ void Scene::RenderShadowMapDepthPass(int nDraw)
             {
                 continue;
             }
-            Matrix4 ptrans = obj->Transform(), pinv = obj->GetInvTransform();
+            Matrix4 ptrans = obj->RenderTransform(); // REN-INTERP-001: drawn frame, see AddShadowCaster
+            Matrix4 pinv = ptrans.InverseScaled();
             LODShapeWithShadow* pshape = nullptr;
             Object* proxy = obj->GetProxy(pshape, geomLOD, ptrans, pinv, *obj, pi);
             if (!proxy || !pshape)
@@ -609,7 +610,11 @@ void Scene::RenderShadowMapDepthPassGpu(int nDraw)
         // same IsGpuOwnedSection predicate the colour path uses), casting only the complement.
         const bool prevSkip = GSkipGpuOwnedSections;
         GSkipGpuOwnedSections = (cov == GpuDrawCoverage::Partial);
-        GEngine->AddShadowCaster(*s, obj->Transform());
+        // REN-INTERP-001: the caster must stand where the body is DRAWN. With the tick-time
+        // frame here and the interpolated one in the colour pass, a vehicle's self-shadow
+        // (a helicopter's fuselage over its own cockpit) moved by up to a tick of travel
+        // against the receiver every frame -- the cockpit flicker reported on 3f64710a.
+        GEngine->AddShadowCaster(*s, obj->RenderTransform());
         GSkipGpuOwnedSections = prevSkip;
         if (animate)
         {
@@ -636,7 +641,8 @@ void Scene::RenderShadowMapDepthPassGpu(int nDraw)
             {
                 continue;
             }
-            Matrix4 ptrans = obj->Transform(), pinv = obj->GetInvTransform();
+            Matrix4 ptrans = obj->RenderTransform(); // REN-INTERP-001: drawn frame, see AddShadowCaster
+            Matrix4 pinv = ptrans.InverseScaled();
             LODShapeWithShadow* pshape = nullptr;
             Object* proxy = obj->GetProxy(pshape, geomLOD, ptrans, pinv, *obj, pi);
             if (!proxy || !pshape)
