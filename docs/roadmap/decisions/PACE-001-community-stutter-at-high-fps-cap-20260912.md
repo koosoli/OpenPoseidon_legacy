@@ -264,3 +264,27 @@ machine and full case (including his re-stutter at cap 30 under heavier GPU load
 any fps gain (none, none claimed). The interpolation is ON by default on this branch and
 `POSEIDON_RENDER_INTERP=0` restores the previous behaviour; a first-person soldier on foot
 and vehicles seen from another vehicle use the same path but were not measured separately.
+
+## Follow-up 12:16 — helicopter cockpit flicker on 3f64710a (owner report)
+
+Cause in code, not a guess: `SceneShadowPass.cpp` submitted every dynamic shadow caster
+with `obj->Transform()` (tick time) while the colour pass draws the body at its
+interpolated frame. A vehicle's self-shadow — the fuselage over its own cockpit — therefore
+sat up to a tick of travel away from the receiving geometry, by a different amount every
+frame. The acceptance series never saw it because it ran with shadows OFF (the tester's
+setting). Fixed in `ac89cf30`: shadow-map casters, both proxy-caster sites and the proxy
+shadow volumes take `RenderTransform()` / the drawn parent frame. Reproduction mission
+`tests/perf/missions/pace_heli.Intro` (player = gunner of an AI-flown Cobra, shadows on):
+flies at 80 km/h median, no crash, camera dx jitter 9 %. Whether the flicker is gone is a
+visual check by the owner; rotor-blade shadows sweeping the cockpit are legitimate and
+remain.
+
+Lesson for the next slice of this kind: every pass that positions a moving object must
+take the SAME frame — colour, shadow casters, shadow volumes, motion vectors (already the
+drawn matrix via `prev_worlds`), and still not covered: vehicle-attached lights, cloudlets,
+skeletal animation phase.
+
+Field note, same time: the tester writes that the stutter appears "as soon as the engine
+no longer reaches the 60 fps limit (38 fps now), then it gets abruptly bad" — on HIS build,
+which does not carry this branch. 38 fps is 1.58 ticks per frame; that is the mechanism
+this branch addresses, observed independently.
