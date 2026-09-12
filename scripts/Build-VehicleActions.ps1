@@ -21,9 +21,17 @@ foreach ($file in Get-ChildItem -LiteralPath $stage -Force) {
 if ($LASTEXITCODE -ne 0) {throw 'VehicleActions packaging failed'}
 if (!$Preview) {Copy-Item -LiteralPath "$source/mod.json" -Destination "$pack/mod.json" -Force}
 if (!$Preview) {
-    New-Item -ItemType Directory -Force "$pack/Missions" | Out-Null
+    New-Item -ItemType Directory -Force "$pack/Missions/OpenPoseidon" | Out-Null
     foreach ($mission in @('jeep-manual.Intro','jeep-ride.Intro')) {
-        Copy-Item -LiteralPath "$root/dev-missions/$mission" -Destination "$pack/Missions" -Recurse -Force
+        $old=[IO.Path]::GetFullPath("$pack/Missions/$mission")
+        $new=[IO.Path]::GetFullPath("$pack/Missions/OpenPoseidon/$mission")
+        if (!$old.StartsWith([IO.Path]::GetFullPath($pack)+'\') -or !$new.StartsWith([IO.Path]::GetFullPath($pack)+'\')) {throw 'Invalid staging path'}
+        if (Test-Path -LiteralPath $old) {
+            if (Test-Path -LiteralPath $new) {throw "Both old and grouped staging missions exist: $mission"}
+            if ((Get-Item -LiteralPath $old).Attributes -band [IO.FileAttributes]::ReparsePoint) {throw 'Linked staging mission'}
+            Move-Item -LiteralPath $old -Destination $new
+        }
+        Copy-Item -LiteralPath "$root/dev-missions/$mission" -Destination "$pack/Missions/OpenPoseidon" -Recurse -Force
     }
 }
 Write-Host "Staged own Jeep animations and one SP seat: $pack (preview=$Preview)"

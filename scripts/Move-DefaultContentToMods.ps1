@@ -15,10 +15,15 @@ function CheckPath([string]$path) {
     return $full
 }
 function PlanFile([string]$source,[string]$destination) {
+    $destination=$destination -replace '(?i)([\\/]Missions[\\/])(FusionTour\.FusionOFP|ShowcaseLab\.Intro|SizeProbe\.FusionSizeProbe|jeep-manual\.Intro|jeep-ride\.Intro)([\\/])', '${1}OpenPoseidon\${2}${3}'
     $source=CheckPath $source; $destination=CheckPath $destination
     if (!(Test-Path -LiteralPath $source -PathType Leaf)) {return}
     if ((Test-Path -LiteralPath $destination) -and
         ((Get-FileHash -LiteralPath $source).Hash -ne (Get-FileHash -LiteralPath $destination).Hash)) {throw "Different files at old/new paths; nothing moved: $source / $destination"}
+    foreach ($prior in $plans) {
+        if ($prior.Destination -eq $destination -and
+            (Get-FileHash -LiteralPath $prior.Source).Hash -ne (Get-FileHash -LiteralPath $source).Hash) {throw "Conflicting sources; nothing moved: $source / $($prior.Source)"}
+    }
     $plans.Add(@{Source=$source; Destination=$destination})
 }
 function PlanTree([string]$source,[string]$destination) {
@@ -45,6 +50,15 @@ foreach ($pack in @(
     @{Name='@OP_SizeProbe'; Archive='fusion_size_probe.pbo'; Mission='SizeProbe.FusionSizeProbe'})) {
     PlanFile (Join-Path $base "AddOns/$($pack.Archive)") (Join-Path $base "Mods/$($pack.Name)/AddOns/$($pack.Archive)")
     PlanTree (Join-Path $base "Missions/$($pack.Mission)") (Join-Path $base "Mods/$($pack.Name)/Missions/$($pack.Mission)")
+}
+foreach ($pack in @(
+    @{Name='@OP_Fusion'; Missions=@('FusionTour.FusionOFP')},
+    @{Name='@OP_Showcase'; Missions=@('ShowcaseLab.Intro')},
+    @{Name='@OP_SizeProbe'; Missions=@('SizeProbe.FusionSizeProbe')},
+    @{Name='@OP_VehicleActions'; Missions=@('jeep-manual.Intro','jeep-ride.Intro')})) {
+    foreach ($mission in $pack.Missions) {
+        PlanTree (Join-Path $base "Mods/$($pack.Name)/Missions/$mission") (Join-Path $base "Mods/$($pack.Name)/Missions/OpenPoseidon/$mission")
+    }
 }
 foreach ($name in @('@OP_Fusion','@OP_Showcase','@OP_SizeProbe')) {
     $metadata=CheckPath (Join-Path $base "Mods/$name/mod.json")

@@ -32,6 +32,7 @@
 #include <Poseidon/Game/UiActions.hpp>
 
 #include <ctype.h>
+#include <cmath>
 #include <time.h>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Containers/Array.hpp>
@@ -286,6 +287,24 @@ GameValue ObjSetAmmoCargo(const GameState* state, GameValuePar oper1, GameValueP
     float current = veh->GetAmmoCargo();
     float ammount = oper2;
     veh->LoadAmmoCargo(ammount * max - current);
+    return NOTHING;
+}
+
+GameValue ObjSetVehicleAmmo(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    EntityAI* vehicle = dyn_cast<EntityAI>(GetObject(oper1));
+    float fraction = oper2;
+    if (!vehicle || !vehicle->IsLocal() || vehicle->IsDammageDestroyed() || !std::isfinite(fraction))
+        return NOTHING;
+    saturate(fraction, 0.0f, 1.0f);
+    // Refill existing magazines in place, including the one currently firing.
+    // Replacing inventory from a Fired handler would invalidate the active slot.
+    for (int i = 0; i < vehicle->NMagazines(); ++i)
+    {
+        Magazine* magazine = vehicle->GetMagazine(i);
+        if (magazine && magazine->_type)
+            magazine->_ammo = int(magazine->_type->_maxAmmo * fraction);
+    }
     return NOTHING;
 }
 

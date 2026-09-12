@@ -1,4 +1,4 @@
-param([string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault', [switch]$Menu, [switch]$InspectRoom, [switch]$CastleOnly, [switch]$GlassOnly)
+param([string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault', [switch]$Menu, [switch]$InspectRoom, [switch]$CastleOnly, [switch]$GlassOnly, [switch]$GroupingAmmoOnly)
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) { throw 'Use scripts/with-game-lock.sh' }
 $root=Split-Path $PSScriptRoot -Parent
@@ -17,7 +17,7 @@ $listener.Start()
 $port=$listener.LocalEndpoint.Port
 $listener.Stop()
 $log=Join-Path $out 'showcase.log'
-$mission=Join-Path $GameDir 'Mods/@OP_Showcase/Missions/ShowcaseLab.Intro'
+$mission=Join-Path $GameDir 'Mods/@OP_Showcase/Missions/OpenPoseidon/ShowcaseLab.Intro'
 $argsGame=@('--render','wgpu','--window','--no-dev','--width','1280','--height','720','--harness',"$port",'--test-mission',('"'+$mission+'"'),'--log-file',('"'+$log+'"'),'--log-level','debug')
 if ($Menu) {
  $argsGame=@('--render','wgpu','--window','--no-dev','--width','1280','--height','720','--harness',"$port",'--log-file',('"'+$log+'"'),'--log-level','debug')
@@ -139,6 +139,10 @@ try {
  if ($Menu) {
   Send @{cmd='exec';code='triSetLanguage "English"; triClickText "SINGLE MISSION"'}
   Start-Sleep -Seconds 3
+  Send @{cmd='eval';code='triAssertListText [101,"OpenPoseidon..."]'} '"OK"'
+  Send @{cmd='eval';code='triSelectListByData [101,"OpenPoseidon"]'} 'true'
+  Send @{cmd='exec';code='triClickText "Play"'}
+  Start-Sleep -Seconds 2
   Send @{cmd='eval';code='triAssertListText [101,"Showcase Lab - Physics and Light"]'} '"OK"'
   Send @{cmd='eval';code='triSelectListByData [101,"ShowcaseLab.Intro"]'} 'true'
   Send @{cmd='screenshot';path=(Join-Path $out 'mission-menu.png')}
@@ -146,6 +150,22 @@ try {
   Start-Sleep -Seconds 18
  }
  Send @{cmd='eval';code='typeOf labNormal'} '"LabPanelNormal"'
+ if ($GroupingAmmoOnly) {
+  Send @{cmd='eval';code='weapons labHeli'}
+  Send @{cmd='exec';code='labTestWeapon=(weapons labHeli) select 0; labTestMagazineCount=count magazines labHeli; labTestShots=0; labHeli addEventHandler ["Fired",{labTestShots=labTestShots+1}]; labHeli setVehicleAmmo 0.1; labTestAmmo=labHeli ammo labTestWeapon'}
+  Send @{cmd='eval';code='labTestAmmo > 0'} 'true'
+  foreach ($i in 1..8) {
+   Send @{cmd='exec';code='labHeli fire labTestWeapon'}
+   Start-Sleep -Milliseconds 800
+  }
+  Send @{cmd='eval';code='labTestShots > 1'} 'true'
+  Send @{cmd='eval';code='labHeli ammo labTestWeapon > labTestAmmo'} 'true'
+  Send @{cmd='eval';code='count magazines labHeli == labTestMagazineCount'} 'true'
+  Send @{cmd='eval';code='[labTestShots,labTestAmmo,labHeli ammo labTestWeapon,magazinesArray labHeli]'}
+  Send @{cmd='exit'}
+  if (!$p.WaitForExit(30000) -or $p.ExitCode -ne 0) {throw 'Game exit failed'}
+  return
+ }
  Send @{cmd='exec';code='hint ""; showCinemaBorder false; labCamera = "camera" camCreate [9483,3488,9]; labCamera cameraEffect ["internal","back"]; labCamera camSetTarget [9503,3507,0]; labCamera camCommit 0'}
  Start-Sleep -Seconds 4
  Send @{cmd='screenshot';path=(Join-Path $out 'campus.png')}

@@ -22,7 +22,7 @@ if ($SatmapObjects -ne 0) {$prefix += '-objects'}
 if ($NoSatmap) { $prefix += '-no-satmap' }
 if ($Pose) { $prefix += '-reported-high'; if (($Pose -split '\s+').Count -ne 5) {throw 'Pose requires x y z azimuth elevation'} }
 Get-Content -LiteralPath "$GameDir/DEPLOYED-FROM.txt" | Set-Content -LiteralPath (Join-Path $output "$prefix.DEPLOYED-FROM.txt")
-$mission=if ($Large) {'Mods\@OP_SizeProbe\Missions\SizeProbe.FusionSizeProbe'} else {'Mods\@OP_Fusion\Missions\FusionTour.FusionOFP'}
+$mission=if ($Large) {'Mods\@OP_SizeProbe\Missions\OpenPoseidon\SizeProbe.FusionSizeProbe'} else {'Mods\@OP_Fusion\Missions\OpenPoseidon\FusionTour.FusionOFP'}
 $log=Join-Path $output "$prefix.log"
 $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0)
 $listener.Start(); $port=$listener.LocalEndpoint.Port; $listener.Stop()

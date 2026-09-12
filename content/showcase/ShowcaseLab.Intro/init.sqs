@@ -60,6 +60,8 @@ labHeli setDir 180
 labJeep setPos [9480,3525,0]
 labTruck setPos [9488,3525,0]
 labHeli setPos [9460,3525,0]
+; Sandbox helicopter only: replenish in place, without accumulating magazines.
+labHeli addEventHandler ["Fired", {(_this select 0) setVehicleAmmo 1}]
 player addMagazine "M16"
 player addMagazine "M16"
 player addMagazine "M16"

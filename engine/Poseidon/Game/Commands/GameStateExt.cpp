@@ -747,6 +747,7 @@ GameValue ObjSaveStatus(const GameState* state, GameValuePar oper1, GameValuePar
 GameValue ObjSay(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ObjSelectWeapon(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ObjSetAmmoCargo(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue ObjSetVehicleAmmo(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ObjSetCaptive(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ObjSetDammage(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ObjSetDir(const GameState* state, GameValuePar oper1, GameValuePar oper2);
@@ -1327,6 +1328,7 @@ static const GameOperator* GetExtBinary(int& count)
         GameOperator(GameNothing, "setFuelCargo", function, ObjSetFuelCargo, GameObject, GameScalar),
         GameOperator(GameNothing, "setRepairCargo", function, ObjSetRepairCargo, GameObject, GameScalar),
         GameOperator(GameNothing, "setAmmoCargo", function, ObjSetAmmoCargo, GameObject, GameScalar),
+        GameOperator(GameNothing, "setVehicleAmmo", function, ObjSetVehicleAmmo, GameObject, GameScalar),
         GameOperator(GameNothing, "addWeaponCargo", function, ObjAddWeaponCargo, GameObject, GameArray),
         GameOperator(GameNothing, "addMagazineCargo", function, ObjAddMagazineCargo, GameObject, GameArray),
 
