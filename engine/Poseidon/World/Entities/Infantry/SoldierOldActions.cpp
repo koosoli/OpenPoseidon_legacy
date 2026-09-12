@@ -1888,7 +1888,7 @@ void Man::RecalcGunTransform()
     }
 
     // head rotation axis is the world-up direction, not the gun pivot
-    Matrix4 headOrient(MIdentity);
+    Matrix4 headOrient = HeadAimBasis();
     Vector3 headAxis = GetHeadCenter();
 
     headOrient.SetPosition(headAxis);

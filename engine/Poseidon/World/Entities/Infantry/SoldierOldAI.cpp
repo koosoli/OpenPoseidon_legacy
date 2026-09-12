@@ -130,6 +130,7 @@ void Man::AimHead(Vector3Par direction)
         relDir = WorldTransform().InverseRotation().Rotate(direction);
     // compensate for aiming (is applied before head)
     relDir = GunTransform().InverseRotation().Rotate(relDir);
+    relDir = HeadAimBasis().InverseRotation().Rotate(relDir);
 
     float yRotWanted = -atan2(relDir.X(), relDir.Z());
     float sizeXZ = sqrt(Square(relDir.X()) + Square(relDir.Z()));
@@ -737,6 +738,16 @@ Matrix4 Man::GetWeaponRelTransform(int weapon) const
     return trans;
 }
 
+Matrix4 Man::HeadAimBasis() const
+{
+    if (!GetActiveCargoWeaponSeat())
+        return MIdentity;
+    Matrix4 head(MDirection, -VAside, VUp);
+    AnimateMatrix(head, Type()->_headOnlyWeight);
+    head.SetPosition(VZero);
+    return head;
+}
+
 Vector3 Man::GetEyeDirection() const
 {
     if (GetActiveCargoWeaponSeat())
@@ -744,8 +755,7 @@ Vector3 Man::GetEyeDirection() const
         // The authored seat turns the torso/head away from model-forward.
         // Match the head bone's RTM -> head -> aiming -> world composition,
         // rather than making a side-facing passenger observe through his back.
-        Matrix4 head(MDirection, -VAside, VUp);
-        AnimateMatrix(head, Type()->_headOnlyWeight);
+        const Matrix4 head = HeadAimBasis();
         return WorldTransform().Rotate(GunTransform().Rotate(_headTrans.Rotate(head.Direction()))).Normalized();
     }
     Vector3 dir = _headTrans.Direction();

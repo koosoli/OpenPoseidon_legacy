@@ -885,6 +885,7 @@ class Man: public Person
 	Vector3 GetWeaponDirection( int weapon ) const override;
 	Vector3 GetWeaponCenter( int weapon ) const override;
 	Vector3 GetHeadCenter() const;
+	Matrix4 HeadAimBasis() const;
 	Vector3 GetEyeDirection() const override;
 	Matrix3 GetHeadRelOrientation() const;
 	Vector3 GetWeaponPoint( int weapon ) const override;
