@@ -243,3 +243,24 @@ switch trimmed). Same scratch settings as Series A. Interpolation switched by
 | 120 | external | 70.4 / 72.7 | 0.19 / 0.23 -> 0.20 / 0.23 | **36 % -> 33 %** | 156 % -> 159 % | 0.85 / 0.83 | 39 % / 39 % |
 | 50 | inside (passenger) | 46.7 / 46.7 | 0.22 / 0.44 -> 0.26 / 0.32 | **49 % -> 5 %** | 86 % -> 49 % | 1.29 / 1.28 | 56 % / 56 % |
 | 50 | external | 48.9 / 48.9 | 0.21 / 0.44 -> 0.21 / 0.44 | **38 % -> 37 %** | 153 % -> 168 % | 1.23 / 1.23 | 45 % / 45 % |
+
+## REN-INTERP-001 measurements — re-run on build `3f64710a` (RenderDelta through the hierarchy), 11:58-12:06
+
+Same mission, settings and harness; artefacts in `.tmp-movecam/out/ride4{OFF,ON}-cap50/`.
+Unit tests: `PoseidonTests "[interp]"` — 4 cases, 29 assertions, green.
+
+| cap | view | fps off / on | cam dx per frame med / p95 m, off -> on | dx jitter off -> on | dyaw jitter off -> on | ticks/frame off / on |
+|---|---|---|---|---|---|---|
+| 50 | inside (passenger) | 48.1 / 46.3 | 0.21 / 0.44 -> 0.27 / 0.31 | **43 % -> 6 %** | **83 % -> 48 %** | 1.25 / 1.30 |
+| 50 | external | 49.0 / 48.9 | 0.21 / 0.43 -> 0.25 / 0.28 | **38 % -> 3 %** | **152 % -> 33 %** | 1.22 / 1.23 |
+
+**Motion smoothing verdict: PASSED on this machine** for the passenger's inside and outside
+views, straight legs and U-turns, at a cap where frames are a fractional number of ticks.
+Both views now show one band of per-frame displacement instead of two. Frame period, fps
+and the tick alternation are unchanged, as expected.
+
+Still open, unchanged by this result: display timing (no PresentMon), the tester's own
+machine and full case (including his re-stutter at cap 30 under heavier GPU load), and
+any fps gain (none, none claimed). The interpolation is ON by default on this branch and
+`POSEIDON_RENDER_INTERP=0` restores the previous behaviour; a first-person soldier on foot
+and vehicles seen from another vehicle use the same path but were not measured separately.
