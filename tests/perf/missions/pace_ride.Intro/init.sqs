@@ -1,6 +1,8 @@
 ; PACE-001 ride arm: the player sits in the cargo of an AI-driven jeep, so the view is
 ; ATTACHED to a simulated vehicle (the case where fixed-step ticks show as motion judder).
-; Phases run off mission time; FT lines carry the engine frame counter for the trace.
+; Phases run off mission time; FT lines carry the engine frame counter and the jeep speed.
+; The jeep shuttles along the lane the dev mission drives (y 3600 .. 3840 on the Intro
+; island); a far target off the map made the AI refuse to move in the first version.
 _settle = 25
 _statdur = 20
 _movedur = 60
@@ -10,8 +12,11 @@ ffvDriver moveInDriver ffvJeep
 ffvPassenger assignAsCargo ffvJeep
 ffvPassenger moveInCargo ffvJeep
 ffvJeep setFuel 1
+ffvDriver setBehaviour "CARELESS"
+ffvDriver setCombatMode "BLUE"
 doStop ffvDriver
-logInfo format ["RIDE cfg settle=%1 static=%2 move=%3 pos=%4", _settle, _statdur, _movedur, getPos ffvJeep]
+~1
+logInfo format ["RIDE cfg settle=%1 static=%2 move=%3 pos=%4 driverIn=%5 playerIn=%6", _settle, _statdur, _movedur, getPos ffvJeep, ffvDriver in ffvJeep, ffvPassenger in ffvJeep]
 #settle
 logInfo format ["FT W %1 %2", _time, triFrameCount]
 ~0.001
@@ -25,13 +30,23 @@ logInfo format ["FT S %1 %2", _time, triFrameCount]
 ? _time < _statend : goto "stat"
 logInfo format ["RIDE staticend t=%1", _time]
 _r = triPerfReset 0
-ffvDriver doMove [9700, 6800, 0]
 _moveend = _time + _movedur
+_leg = 0
+_next = _time
 logInfo format ["RIDE phase=move t=%1", _time]
 #mov
+? _time >= _next : goto "post"
+#movres
 logInfo format ["FT M %1 %2 %3", _time, triFrameCount, speed ffvJeep]
 ~0.001
 ? _time < _moveend : goto "mov"
 doStop ffvDriver
 logInfo format ["RIDE moveend t=%1 pos=%2", _time, getPos ffvJeep]
 exit
+#post
+_leg = _leg + 1
+_next = _time + 20
+? (_leg % 2) == 1 : ffvDriver doMove [9700, 3840, 0]
+? (_leg % 2) == 0 : ffvDriver doMove [9700, 3600, 0]
+logInfo format ["RIDE leg %1 t=%2 pos=%3 speed=%4", _leg, _time, getPos ffvJeep, speed ffvJeep]
+goto "movres"

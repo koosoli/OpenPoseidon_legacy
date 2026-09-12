@@ -169,3 +169,47 @@ Reading it:
   frames: every other frame or so shows twice the motion of its neighbour while the frames
   themselves are 21 ms apart. At cap 30 it is 2.03 ticks per frame with 6 % changes: smooth.
   This is what the tester describes, on the build that has a fixed step.
+
+## Measurement hygiene (checked after the review)
+
+* **Auto-screenshot stalls are outside every measured window.** Series A: the screenshot
+  frame (5614 / 8827 / 9031 / 8843) came after the last moving-phase frame (4355 / 6740 /
+  6898 / 6698) in all four arms. `pace-analyse.py` now warns when a screenshot frame falls
+  inside a phase.
+* **Present/display timing was NOT captured.** PresentMon is not installed on this
+  machine (searched PATH, Program Files, the user profile) and installing software was
+  out of scope. The trace ends at `frame.present()` returning (0.08 ms median under
+  Immediate — the call does not wait). What the display did with those frames is
+  therefore inferred, not measured: with windowed Immediate the DWM samples the latest
+  frame at each refresh, and an even 21 ms CPU/GPU cadence on a 144 Hz (here) or 120 Hz
+  (tester) panel maps onto 3/3/3/4-refresh or 2/3/2/3-refresh intervals respectively.
+  "Even CPU period" is thus a necessary, not a sufficient, condition for even display
+  output. This stays open until someone runs PresentMon alongside the trace.
+* **Acquire blocking locates the back-pressure; it does not by itself prove a pure GPU
+  compute limit.** The GPU timestamp total (20-22 ms per frame, `WGR_GPU_TIMER_FRAME_TOTAL`,
+  i.e. the submitted work) matches the frame period within a millisecond in every
+  GPU-bound arm, which is the direct evidence that the GPU work itself fills the frame;
+  a presentation-path stall would show as acquire time NOT covered by GPU work.
+* **The first ride A/B (11:17) measured nothing:** the AI driver never moved (doMove target
+  off the Intro island; `speed ffvJeep` = 0 for the whole "moving" phase). The mission now
+  shuttles along the lane the dev mission uses and logs the jeep speed on every FT line;
+  the analyser reports camera translation AND turn (dyaw) per frame. Those runs are
+  discarded.
+
+## Separate verdicts (each stands or falls on its own evidence)
+
+1. **Motion smoothing (REN-INTERP-001):** verdict pending the ride A/B with the fixed
+   mission — see "REN-INTERP-001 measurements". The 1/2-tick alternation itself is
+   expected to REMAIN after the fix (it is how a 60 Hz simulation meets a 47 fps frame);
+   the acceptance number is the rendered camera's per-frame displacement and turn jitter,
+   not the tick histogram.
+2. **Frame pacing:** the current limiter is not a cause of uneven frame delivery
+   (Series A). No pacing change was made; the 0.4 ms cap overshoot is noted, not fixed.
+3. **Community case reproduced and fixed:** NOT claimed. The mechanism reproduced here on
+   another machine/scene matches the report's pattern on the fixed-step build; the 08-22
+   build's cause is a different, already-removed defect; the tester's re-stutter at an
+   unchanged 30 fps cap under higher GPU load (from his video) is a separate acceptance
+   point — the interpolation would cover it if the GPU frame exceeds 33 ms (2.4 ticks per
+   frame at 25 fps), but that case was not run here.
+4. **Additional fps gain:** none claimed, none measured. Interpolation costs a copy of
+   one matrix per moving entity per tick and a lerp per drawn moving object.

@@ -41,6 +41,7 @@ struct FramePaceMainRow
     float         paceSleepActMs = 0.0f; ///< What the sleep actually took.
     float         camDxM = 0.0f;         ///< Camera displacement since the previous frame (m): the motion the player sees.
     float         interpAlpha = 0.0f;    ///< Render interpolation alpha used for this frame's draw.
+    float         camDyawDeg = 0.0f;     ///< Angle between this and the previous frame's camera direction (deg).
 };
 
 /// Producer side of the render handoff (EngineWgpu::NextFrame), one row per published frame.

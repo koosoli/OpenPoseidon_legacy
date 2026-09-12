@@ -333,13 +333,22 @@ void RenderFrame(float deltaT, bool enableDraw)
         // The motion the player actually sees: how far the render camera moved this frame.
         {
             static Vector3 lastCam(0, 0, 0);
+            static Vector3 lastDir(0, 0, 1);
             static bool haveLast = false;
             const Camera* cam = GScene ? GScene->GetCamera() : nullptr;
             if (cam)
             {
                 const Vector3 p = cam->Position();
+                const Vector3 d = cam->Direction();
                 row.camDxM = haveLast ? (p - lastCam).Size() : 0.0f;
+                if (haveLast)
+                {
+                    float c = d.DotProduct(lastDir);
+                    c = c > 1.0f ? 1.0f : (c < -1.0f ? -1.0f : c);
+                    row.camDyawDeg = static_cast<float>(acos(c) * (180.0 / 3.14159265358979));
+                }
                 lastCam = p;
+                lastDir = d;
                 haveLast = true;
             }
         }

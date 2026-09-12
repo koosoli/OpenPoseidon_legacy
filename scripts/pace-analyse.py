@@ -56,19 +56,32 @@ def percentile(values, p):
 
 
 def phases_from_log(log_path):
-    """{tag: (first_frame, last_frame)} from the FT lines."""
+    """{tag: (first_frame, last_frame)} from the FT lines. Also warns when an auto-screenshot
+    (a blocking readback) or a slow-frame/slow-block log line fell inside a measured window."""
     if not log_path:
         return {}
     pat = re.compile(r"FT ([WSM]) ([0-9.]+) ([0-9]+)")
+    shot = re.compile(r"Auto-screenshot saved: frame=([0-9]+)")
     frames = {}
+    shots = []
     with open(log_path, errors="replace") as f:
         for line in f:
             m = pat.search(line)
-            if not m:
+            if m:
+                tag, frame = m.group(1), int(m.group(3))
+                lo, hi = frames.get(tag, (frame, frame))
+                frames[tag] = (min(lo, frame), max(hi, frame))
                 continue
-            tag, frame = m.group(1), int(m.group(3))
-            lo, hi = frames.get(tag, (frame, frame))
-            frames[tag] = (min(lo, frame), max(hi, frame))
+            m = shot.search(line)
+            if m:
+                shots.append(int(m.group(1)))
+    for tag, (lo, hi) in frames.items():
+        for sf in shots:
+            if lo <= sf <= hi:
+                print(f"WARNING: auto-screenshot at frame {sf} lies inside phase {tag} ({lo}..{hi}); "
+                      f"its readback stall is in this window's p99/max")
+    if shots:
+        print(f"auto-screenshot frames: {shots}; phases: {frames}")
     return frames
 
 
@@ -113,6 +126,10 @@ def analyse_phase(main, producer, worker, lo, hi):
     dx_jitter = (sum(abs(b - a) for a, b in zip(dx, dx[1:])) / max(1, len(dx) - 1)) if dx else 0.0
     # displacement per millisecond of frame period: constant for smooth motion
     speed = [d / p * 1000.0 for d, p in zip(dx, periods) if p > 0]
+    dyaw = [r.get("cam_dyaw_deg", 0.0) for r in rows[1:]]
+    dyaw_med = percentile(dyaw, 50) if dyaw else 0.0
+    dyaw_jitter = (sum(abs(b - a) for a, b in zip(dyaw, dyaw[1:])) / max(1, len(dyaw) - 1)) if dyaw else 0.0
+    yaw_rate = [d / p * 1000.0 for d, p in zip(dyaw, periods) if p > 0]
     steps = [r["steps"] for r in rows]
     step_changes = sum(1 for a, b in zip(steps, steps[1:]) if a != b) / max(1, len(steps) - 1)
     step_hist = {}
@@ -149,6 +166,9 @@ def analyse_phase(main, producer, worker, lo, hi):
         "cam_dx_jitter_rel": (dx_jitter / dx_med) if dx_med > 1e-6 else float("nan"),
         "cam_speed": stats(speed),
         "interp_alpha": stats([r.get("interp_alpha", 0.0) for r in rows]),
+        "cam_dyaw": stats(dyaw),
+        "cam_dyaw_jitter_rel": (dyaw_jitter / dyaw_med) if dyaw_med > 1e-6 else float("nan"),
+        "cam_yaw_rate": stats(yaw_rate),
     }
     prod = [r for r in producer if lo <= r["frame"] <= hi]
     if prod:
@@ -200,6 +220,7 @@ def report(label, phase, a):
     print(f"  sim input deltaT {fmt_stats(a['deltaT_ms'])} | ticks/frame {a['ticks_per_frame']:.2f} hist {dict(sorted(a['steps_hist'].items()))} | "
           f"step-count changes between consecutive frames {100*a['steps_change_rate']:.0f}%")
     print(f"  camera motion: dx/frame {fmt_stats(a['cam_dx'], 'm')} | dx jitter {100*a['cam_dx_jitter_rel']:.0f}% of median | speed {fmt_stats(a['cam_speed'], 'm/s')} | interp alpha {fmt_stats(a['interp_alpha'], '')}")
+    print(f"  camera turn:   dyaw/frame {fmt_stats(a['cam_dyaw'], 'deg')} | dyaw jitter {100*a['cam_dyaw_jitter_rel']:.0f}% of median | yaw rate {fmt_stats(a['cam_yaw_rate'], 'deg/s')}")
     if "producer" in a:
         p = a["producer"]
         print(f"  producer (thread={p['render_thread']} overlap={p['overlap']}): predraw {fmt_stats(p['predraw_wait'])}")

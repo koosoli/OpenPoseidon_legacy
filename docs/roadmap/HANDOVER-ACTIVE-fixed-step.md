@@ -18,6 +18,17 @@ ticks per frame, so the SIMULATION IS THE FASTER CLOCK on this machine and entit
 interpolation was cancelled rather than built — it only pays when rendering
 outruns simulation.
 
+**CORRECTED 2026-09-12 (PACE-001, `perf/frame-pacing`):** that reasoning was wrong.
+Interpolation pays whenever frames/ticks is FRACTIONAL, not only below 1.0: at 47 fps
+(1.28 ticks per frame) the tick count changes between 48-68 % of consecutive frames,
+so the world advances 16.7 ms on one frame and 33.3 ms on the next while the frames are
+21 ms apart. That is visible motion judder on perfectly even frame delivery, and it is
+what the community "stutter at cap 120, smooth at cap 30" report describes on this build.
+REN-INTERP-001 now draws moving entities (and the vehicle-attached camera) at
+`prev + alpha * (cur - prev)`; `POSEIDON_RENDER_INTERP=0` turns it off. Measurements and
+the limits of the slice (animation phase, cloudlets, attached lights still step) are in
+`docs/roadmap/decisions/PACE-001-community-stutter-at-high-fps-cap-20260912.md`.
+
 **PHY-010.** Stock Everon: 103,115 instances seen, 82,381 registered, 151,038
 shapes, terrain 3061×3061 at 4.17 m. **0 degenerate components, 0 hull
 refusals.** All 32 failing models are roads and ground clutter, which carry no
@@ -178,4 +189,4 @@ permission to take from that tree. One line, so nobody re-opens it.*
 * Turn grass off (`WGR_GRASS=0`) for probe captures. A 20 cm ball is invisible in
   it, which cost several runs.
 
-*Last updated: 2026-08-28, after the merge to trunk and PHY-030.*
+*Last updated: 2026-09-12 (interpolation correction); previously 2026-08-28, after the merge to trunk and PHY-030.*
