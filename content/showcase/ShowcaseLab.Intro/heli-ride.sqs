@@ -5,13 +5,13 @@ labFlightGroup = createGroup west
 "SoldierWB" createUnit [labFlightHome,labFlightGroup,"labFlightPilot=this; this setBehaviour ""CARELESS""; this setCombatMode ""BLUE"""]
 labFlightPilot assignAsDriver labHeli
 labFlightPilot moveInDriver labHeli
-; Occupy the four aft places so ordinary cargo boarding selects the door seat.
+; Reserve the forward right door place through normal cargo boarding order.
 _crew = createGroup west
 _i = 0
 #crew
 "SoldierWB" createUnit [labFlightHome,_crew,"removeAllWeapons this; this setCombatMode ""BLUE""; this moveInCargo labHeli"]
 _i = _i + 1
-? _i < 4 : goto "crew"
+? _i < 10 : goto "crew"
 labFlightGroup setSpeedMode "LIMITED"
 labHeli flyInHeight 45
 labFlightRoute = [[9720,3780,0],[10280,3780,0],[10280,3220,0],[9720,3220,0]]
