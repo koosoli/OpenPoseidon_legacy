@@ -6,7 +6,7 @@ param([ValidateSet('M16','AK74')][string]$Rifle='M16',
       [ValidateSet('near','far')][string]$TurnTarget='near',
       [ValidateSet('individual','group','waypoint')][string]$DriverCommand='individual',
       [switch]$LimitedDriver,
-      [switch]$PlayerFire, [switch]$Lifecycle, [switch]$SaveLoad,
+      [switch]$PlayerFire, [switch]$Lifecycle, [switch]$SaveLoad, [switch]$MenuReentry,
       [switch]$DefaultPackage, [string]$UserMod='',
       [ValidateSet('','missing','incompatible')][string]$AutomaticOriginal='', [string]$MissionPath='',
       [string]$LoadOriginalSave='',
@@ -14,6 +14,7 @@ param([ValidateSet('M16','AK74')][string]$Rifle='M16',
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
 if ($NpcTurning) {$NpcMoving=$true}
+if ($MenuReentry -and !$PlayerFire) {throw 'Menu reentry requires the player test'}
 if ($DriverCommand -ne 'individual' -and !$NpcMoving) {throw 'Driver command requires a moving test'}
 if ($LimitedDriver -and (!$NpcMoving -or $DriverCommand -ne 'individual')) {throw 'Limited subgroup hint requires the individual moving fixture'}
 if ($PlayerFire) {
@@ -280,6 +281,31 @@ try {
         $null=Send @{cmd='exec';code='ffvView cameraEffect ["terminate","back"]'}
         $null=Send @{cmd='crew_take_control'}
         $null=Send @{cmd='eval';code='player == ffvPassenger'} 'true'
+        if ($MenuReentry) {
+            $entry=Send @{cmd='crew_pose_probe'}
+            if ($null -eq $entry.entryX -or $entry.entryRadius -le 0) {throw 'Fixture has no valid co-driver entry point'}
+            $null=Send @{cmd='exec';code='unassignVehicle ffvPassenger; ffvPassenger action ["EJECT",ffvJeep]'}
+            Start-Sleep -Seconds 2
+            $heading=[math]::Atan2(9700-$entry.entryX,3600-$entry.entryZ)*180/[math]::PI
+            $placement=[string]::Format([Globalization.CultureInfo]::InvariantCulture,
+                'ffvJeep lock false; ffvPassenger setPos [{0},{1},0]; ffvPassenger setDir {2}', $entry.entryX,$entry.entryZ,$heading)
+            $null=Send @{cmd='exec';code=$placement}
+            Start-Sleep -Seconds 2
+            $null=Send @{cmd='screenshot';path=(Join-Path $output 'menu-before-entry.png')}
+            $null=Send @{cmd='key';sc=40;hold=$true}
+            Start-Sleep -Milliseconds 250
+            $null=Send @{cmd='key_up';sc=40}
+            Start-Sleep -Seconds 8
+            $null=Send @{cmd='screenshot';path=(Join-Path $output 'menu-after-entry.png')}
+            $state=Send @{cmd='crew_seat_status'}
+            if (!$state.inCargo -or !$state.active) {throw 'Action-menu entry did not restore supported cargo capability'}
+            & "$PSScriptRoot/Test-JeepMouse.ps1" -Reader $reader -Writer $writer -LogPath (Join-Path $output 'mouse-responses.jsonl')
+            if (!$?) {throw 'Relative mouse acceptance failed'}
+            $null=Send @{cmd='exit'}
+            if (!$p.WaitForExit(30000) -or $p.ExitCode -ne 0) {throw 'Menu/mouse fixture exit failed'}
+            Write-Host "PASS: menu reentry and relative mouse with $Rifle; $output"
+            return
+        }
         $null=Send @{cmd='crew_cursor';x=60;y=0.01;z=-0.07}
         Start-Sleep -Seconds 3
         $null=Send @{cmd='crew_pose_probe'}
@@ -403,9 +429,13 @@ try {
             $shotsBeforeReload=Send @{cmd='eval';code='ffvShots'}
             if ($PlayerFire) {
                 $null=Send @{cmd='key';sc=21;hold=$true}
-                Start-Sleep -Milliseconds 200
-                $null=Send @{cmd='crew_pose_probe'}
+                $inputDeadline=[DateTime]::UtcNow.AddSeconds(2)
+                do {
+                    Start-Sleep -Milliseconds 50
+                    $inputState=Send @{cmd='crew_pose_probe'}
+                } while (!$inputState.reloadInProgress -and $inputState.reloadInput -le 0 -and [DateTime]::UtcNow -lt $inputDeadline)
                 $null=Send @{cmd='key_up';sc=21}
+                if (!$inputState.reloadInProgress -and $inputState.reloadInput -le 0) {throw 'Reload key was not observed by the gameplay input path'}
             } else {$null=Send @{cmd='crew_request_reload'}}
             $samples=@(); $seenReload=$false; $reloadSaved=$false; $clock=[Diagnostics.Stopwatch]::StartNew()
             do {

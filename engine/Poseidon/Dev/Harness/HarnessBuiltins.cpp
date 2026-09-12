@@ -231,6 +231,14 @@ void RegisterSqf(HarnessServer& hs)
                            cJSON_AddBoolToObject(resp, "local", man->IsLocal());
                            cJSON_AddBoolToObject(resp, "player", unit->IsPlayer());
                            Transport* vehicle = unit->GetVehicleIn();
+                           if (Transport* assigned = unit->VehicleAssigned(); assigned && assigned->Type()->NCoDriverGetInPos() > 0)
+                           {
+                               const Vector3 entry = assigned->PositionModelToWorld(assigned->Type()->GetCoDriverGetInPos(0));
+                               cJSON_AddNumberToObject(resp, "entryX", entry.X());
+                               cJSON_AddNumberToObject(resp, "entryY", entry.Y() - GLandscape->SurfaceY(entry.X(), entry.Z()));
+                               cJSON_AddNumberToObject(resp, "entryZ", entry.Z());
+                               cJSON_AddNumberToObject(resp, "entryRadius", assigned->Type()->GetGetInRadius());
+                           }
                            cJSON_AddBoolToObject(resp, "vehicleDestroyed", !vehicle || vehicle->IsDammageDestroyed());
                            if (vehicle)
                            {
