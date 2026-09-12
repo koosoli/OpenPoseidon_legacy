@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <Poseidon/Foundation/Types/Pointers.hpp>
@@ -39,6 +40,8 @@ namespace ShapeAdapter
     {
         std::vector<std::vector<Ref<Poseidon::Texture>>> textures;
         std::vector<std::vector<Ref<Poseidon::TexMaterial>>> surfMats;
+        // MLOD has no authored section table; FindSections recovers these by path.
+        std::vector<std::unordered_map<std::string, Ref<Poseidon::TexMaterial>>> mlodSurfMats;
     };
 
     // MAIN THREAD ONLY: touches the global texture bank and material bank, and loads

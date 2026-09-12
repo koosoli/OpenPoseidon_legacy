@@ -76,3 +76,29 @@ preservation is separately validated. Flag words are reused without ABI growth;
 direct bit 1024 avoids the existing 256/512 depth-bias bits.
 Shader composition and direct-flag regression tests pass, full build passes.
 Installed image/timing acceptance pending. This is not a completed tree fix.
+
+Forest-cavity-off passed. Forest-cavity-on saved its image and metrics, then hung
+in shutdown and failed the 300 s lifecycle watchdog; do not accept its timings.
+The dump places main in ObjectStreamPreparer destructor/join and a conversion
+worker in GTexMaterialBank.New -> AssetCache.Insert -> unordered_map insertion,
+called from ShapeAdapter.cpp's MLOD FindSections material recovery. That path
+violates the explicit tables-supplied/no-bank-calls contract. This is a CPU bank
+ownership defect, not evidence of a GPU shader hang. The visual effect in the
+saved forest image is modest; cavity remains OFF pending proper acceptance.
+
+Correction: BuildAdapterBankTables resolves missing-section material paths on
+the main thread into retained mlodSurfMats rows. Worker recovery only reads those
+rows; the synchronous no-tables path retains its old bank lookup. No second bank,
+global lock, shader downgrade or removed authored material. Full build passes;
+native repeated-load/shutdown verification is next. Dedicated MLOD concurrency
+unit coverage is still needed in addition to the existing ODOL-oriented tests.
+
+## Disk housekeeping interruption
+
+User's can-this-be-deleted contained the still-required .tmp-dlss-sdk. Restored
+that SDK to the main checkout's expected path; build/deploy need it. Verified 51
+a2-addons PBOs against inspiration/officialarma with SHA256 before deleting that
+duplicate subtree only. Much of its 6.178 GiB was hardlinked, so logical size is
+not recovered capacity. Old images, scripts and sources remain. Requested build
+relocation to D was blocked by execution policy before any copy/delete; current
+build directory remains on C and no junction was created.

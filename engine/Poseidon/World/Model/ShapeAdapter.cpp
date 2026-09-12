@@ -432,6 +432,8 @@ void BuildAdapterBankTables(const Poseidon::Model::Model& model, AdapterBankTabl
     const int lodCount = static_cast<int>(model.lodLevels.size());
     tables.textures.resize(lodCount);
     tables.surfMats.resize(lodCount);
+    tables.mlodSurfMats.clear();
+    tables.mlodSurfMats.resize(lodCount);
     for (int i = 0; i < lodCount; ++i)
     {
         const Mesh& mesh = model.lodLevels[i].mesh;
@@ -458,6 +460,19 @@ void BuildAdapterBankTables(const Poseidon::Model::Model& model, AdapterBankTabl
             if (trace) { headerMs += Dev::Perf::ElapsedMs(started); ++textureCalls; }
         }
         auto& matRow = tables.surfMats[i];
+        if (mesh.sections.empty())
+        {
+            auto& mlodRow = tables.mlodSurfMats[i];
+            for (size_t m = 0; m < mesh.materials.size(); ++m)
+            {
+                const std::string& path = mesh.materials[m].materialPath;
+                if (path.empty() || !texRow[m] || mlodRow.count(path))
+                    continue;
+                const auto started = trace ? Dev::Perf::Now() : Dev::Perf::Point{};
+                mlodRow.emplace(path, GTexMaterialBank.New(path.c_str()));
+                if (trace) { materialMs += Dev::Perf::ElapsedMs(started); ++materialCalls; }
+            }
+        }
         matRow.resize(mesh.sections.size());
         for (size_t s = 0; s < mesh.sections.size(); ++s)
         {
@@ -1364,7 +1379,20 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
                     const auto found = textureToMaterialPath.find(tex);
                     if (found == textureToMaterialPath.end())
                         continue;
-                    section.surfMat = GTexMaterialBank.New(found->second.c_str());
+                    if (tables)
+                    {
+                        // Worker conversion must never fall back to the global bank:
+                        // concurrent Insert corrupts its hash table and can hang shutdown.
+                        if (static_cast<size_t>(i) < tables->mlodSurfMats.size())
+                        {
+                            const auto& resolved = tables->mlodSurfMats[i];
+                            const auto material = resolved.find(found->second);
+                            if (material != resolved.end())
+                                section.surfMat = material->second;
+                        }
+                    }
+                    else
+                        section.surfMat = GTexMaterialBank.New(found->second.c_str());
                 }
             }
         }
