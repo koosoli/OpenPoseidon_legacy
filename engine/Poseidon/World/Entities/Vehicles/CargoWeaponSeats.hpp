@@ -16,6 +16,7 @@ struct CargoWeaponSeat
     int cargoIndex = -1;
     RString weapon;
     bool rifleFamily = false;
+    bool playerFreeAim = false; // Runtime player policy; never grants NPC fire permission.
     RString action;
     RString idleAction;
     RString raiseAction;
@@ -54,6 +55,8 @@ struct CargoWeaponSeat
             return false;
         if (!std::isfinite(direction.X()) || !std::isfinite(direction.Y()) || !std::isfinite(direction.Z()))
             return false;
+        if (playerFreeAim)
+            return direction.SquareSize() > 1e-12f;
         const double horizontal = std::hypot(double(direction.X()), double(direction.Z()));
         if (horizontal < 1e-8)
             return false;

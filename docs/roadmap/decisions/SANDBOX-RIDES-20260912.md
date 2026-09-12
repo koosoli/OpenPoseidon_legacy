@@ -18,3 +18,79 @@ NPC flight, more targets, enough time to ready the weapon, repeated circuits.
   test is kept explicit rather than counting that failed load as a pose result.
 
 Do not mark this work complete before the installed checks succeed.
+
+## Owner stop / revised scope (2026-09-12)
+
+Further per-seat UH60 fitting and animation experiments are PARKED at the
+owner's request. No further runtime fitting or deployment is authorised by
+this iteration. A generally reusable solution, not a vehicle/weapon/seat
+matrix of bespoke fixes, is the requirement for resuming this work.
+
+Current source/installed stamp: 10515826. The default package contains an
+UNACCEPTED UH60 cargo 10 OPHeli pose trial; parking does not remove that trial
+from the installed package. It must not be advertised as working support.
+The last installed trial restored torso height and passed 24 animation checks,
+but personal-rifle firing remained blocked by carrier component 55 at entry
+parameter zero. Muzzle-forward visibility was clear. This is not proof that
+ignoring carrier collision would be correct. Flight/landing and the new Jeep
+circuit remain unverified. The straight-road Jeep result above is not a fix
+for intermittent firing during turns.
+
+Revised desired behaviour: the player may aim and fire inside the carrier,
+including at its pilot, passengers and body. Carrier obstacles should receive
+real projectile hits, not disable the trigger or be globally ignored. Preserve
+normal ammunition, damage and authority handling. Remove artificial safety
+arcs as a design requirement for this future general path; do not confuse that
+with a tested implementation. Generic aiming/weapon attachment and projectile
+origin handling need validation before claiming support for all vehicles or
+weapons. No cheap, verified general solution has been established yet.
+
+## Bounded general-path reconsideration (2026-09-12)
+
+Owner authorised another short attempt, explicitly not prolonged seat fitting.
+Code-path inspection, not a new runtime acceptance:
+
+- AI/VehicleAICombat.cpp::EntityAI::FireMGun already uses WorldTransform and
+  AttachedPointSpeed for attached shooters. Vehicle motion is not a missing
+  general projectile facility.
+- SoldierOldAI.cpp::GetAvailableCargoWeaponSeat still requires an exact cargo
+  mapping. GetActiveCargoWeaponSeat additionally requires owned animations.
+- SoldierOldSim.cpp::BasicSimulation uses seat angle acceptance to choose aim
+  versus idle; SoldierOldAI.cpp::AimWeapon also clamps aim to those angles.
+  Removing CargoWeaponLineClear alone cannot provide general free aiming.
+- Soldier::FireWeapon passes the animated muzzle to FireMGun. Removing the
+  insertion veto without changing origin handling can spawn beyond an intervening
+  wall. Replacing it by a hit at the first insertion contact also needs a policy
+  for the already observed UH60 contact at parameter zero, rather than claiming
+  that a coarse carrier volume identifies an actual cabin wall.
+
+The earlier explanation that the safety veto was the main obstacle was incomplete:
+the animation/seat eligibility coupling is an independent obstacle. No engine
+patch or further per-seat trial was performed in this bounded reconsideration.
+General support remains PARKED, not rejected as a gameplay idea.
+
+If reopened as an actual larger implementation: separate player weapon eligibility
+from seat animation ownership, supply one generic seated aiming fallback, and
+resolve the interior-to-muzzle segment in the existing projectile/hit path without
+excluding carrier or other occupants. Initially personal bullet weapons and local
+singleplayer only; launchers/grenades and multiplayer require separate acceptance.
+Do not call this all-vehicle support without testing differently oriented cargo
+proxies and enclosed cabins. The flying UH60 sandbox rifle circuit remains the
+required acceptance scene, not a delivered feature.
+
+## Reopened implementation by owner (2026-09-12)
+
+Owner subsequently authorised implementing the shared path. Work in progress:
+player-only runtime cargo policy reuses existing package transitions as a fallback
+for unmapped cargo, without changing NPC permissions or enabling multiplayer.
+Full horizontal aiming removes the seat arc and ordinary infantry gun-turn clamp
+for this policy. Bullet origin is conservatively moved to the shooter's side of
+an insertion obstruction instead of vetoing firing. Carrier geometry and other
+occupants remain targets; recursive collision results for the shooter itself
+are ignored. No new per-seat animations authored.
+
+This is NOT acceptance: compilation and installed runtime tests are pending.
+In particular the known UH60 start-inside collision may conservatively hit the
+carrier rather than permit outward fire. Existing fallback pose height/fit in
+other vehicles and extreme-angle body appearance are unaccepted. Do not describe
+the fallback as finished all-vehicle support or a solution for every weapon.

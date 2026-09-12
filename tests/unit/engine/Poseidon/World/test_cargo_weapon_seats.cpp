@@ -4,6 +4,24 @@
 
 using namespace Poseidon;
 
+TEST_CASE("Player cargo free aim does not change NPC arc policy", "[cargo-weapons]")
+{
+    CargoWeaponSeat npc;
+    npc.cargoIndex = 0;
+    npc.halfAngle = 25;
+    npc.minElevation = -15;
+    npc.maxElevation = 20;
+    CargoWeaponSeat player = npc;
+    player.playerFreeAim = true;
+    REQUIRE_FALSE(npc.ContainsDirection(Vector3(0, 0, -1)));
+    REQUIRE(player.ContainsDirection(Vector3(0, 0, -1)));
+    REQUIRE(player.ContainsDirection(Vector3(1, 0, 0)));
+    REQUIRE(player.ContainsDirection(Vector3(0, 1, 0)));
+    REQUIRE_FALSE(player.ContainsDirection(Vector3(0, 0, 0)));
+    REQUIRE_FALSE(player.ContainsDirection(Vector3(std::numeric_limits<float>::quiet_NaN(), 0, 1)));
+    REQUIRE_FALSE(npc.ContainsDirection(Vector3(0, 0, -1)));
+}
+
 TEST_CASE("Cargo rifle family accepts renamed rifles but rejects other use modes", "[cargo-weapons]")
 {
     CargoWeaponSeat seat;

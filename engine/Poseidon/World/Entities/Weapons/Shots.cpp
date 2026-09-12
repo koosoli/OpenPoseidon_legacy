@@ -895,6 +895,10 @@ void ShotShell::Simulate(float deltaT, SimulationImportance prec)
             for (int i = 0; i < collision.Size(); i++)
             {
                 CollisionInfo& info = collision[i];
+                // Carrier recursion can return the seated shooter even though
+                // the top-level query excludes it. Do not exclude other crew.
+                if (_parent && _parent->GetHierachyParent() && info.object == _parent)
+                    continue;
                 if (detectGlass && info.texture == glass)
                 {
                     continue;
@@ -948,6 +952,8 @@ void ShotShell::Simulate(float deltaT, SimulationImportance prec)
                 for (int i = 0; i < collision.Size(); i++)
                 {
                     CollisionInfo& info = collision[i];
+                    if (_parent && _parent->GetHierachyParent() && info.object == _parent)
+                        continue;
                     if (detectGlass && info.texture != glass)
                     {
                         continue;

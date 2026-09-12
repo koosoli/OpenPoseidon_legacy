@@ -44,8 +44,11 @@ try {
     # No crew_cursor/camera override: mouse events must drive the normal UI.
     SeekPose $true 8
     if ((Shoot) -lt 1) {throw 'First mouse-aimed shot failed'}
-    SeekPose $false 8
-    if ((Shoot) -ne 0) {throw 'Shot escaped while looking outside rifle arc'}
+    for ($turn=0; $turn -lt 8; ++$turn) {
+        $null=Send @{cmd='mouse_motion';dx=100;dy=0}
+        Start-Sleep -Milliseconds 300
+        if ((Shoot) -lt 1) {throw 'Free cargo aiming lost firing permission during mouse sweep'}
+    }
     SeekPose $true -8
     if ((Shoot) -lt 1) {throw 'Returning to rifle arc failed'}
     $null=Send @{cmd='key';sc=21;hold=$true}
@@ -68,5 +71,5 @@ try {
     if (!$seenReload -or $pose.reloadInProgress -or !$pose.loaded) {throw 'Normal-menu keyboard reload failed'}
     SeekPose $true -8
     if ((Shoot) -lt 1) {throw 'Mouse firing after keyboard reload failed'}
-    Write-Output 'PASS: normal menu/mouse firing arc, keyboard reload and firing after reload.'
+    Write-Output 'PASS: normal menu/mouse free cargo fire, keyboard reload and firing after reload.'
 } finally {if ($client) {$client.Dispose()}}

@@ -160,7 +160,6 @@ try {
   Send @{cmd='eval';code='vehicle player == labHeli'} 'true'
   Send @{cmd='exec';code='player action ["CARGO WEAPON READY",labHeli]; labFlightShots=0; player addEventHandler ["Fired",{labFlightShots=labFlightShots+1}]'}
   Start-Sleep -Seconds 2
-  Send @{cmd='crew_pose_probe'}
   Send @{cmd='exec';code='[player,player,labFlightStart] exec "action.sqs"'}
   $deadline=[DateTime]::UtcNow.AddSeconds(90)
   do {
@@ -172,7 +171,6 @@ try {
    $heading=[double](Send @{cmd='eval';code='getDir labHeli'} | ConvertFrom-Json).result * [Math]::PI/180
    Send @{cmd='crew_cursor';x=[Math]::Cos($heading);y=-0.25;z=-[Math]::Sin($heading)}
    Start-Sleep -Seconds 1
-   Send @{cmd='crew_pose_probe'}
    Send @{cmd='mouse_button';button=1;down=$true}
    Start-Sleep -Milliseconds 150
    Send @{cmd='mouse_button';button=1;down=$false}

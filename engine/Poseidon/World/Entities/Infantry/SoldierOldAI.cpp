@@ -41,7 +41,37 @@ const CargoWeaponSeat* Man::GetAvailableCargoWeaponSeat() const
         if (vehicle->GetManCargo()[i] != this)
             continue;
         const auto* seat = vehicle->Type()->GetCargoWeaponSeat(i);
-        return seat && (!unit->IsPlayer() || seat->HasTransitions()) ? seat : nullptr;
+        if (!unit->IsPlayer())
+            return seat;
+        // Reuse the package's common seated graph for otherwise unmapped cargo.
+        // Absence of the package preserves original behaviour. No driver/gunner
+        // role is converted into cargo and no NPC receives this fallback.
+        const char* action = seat && seat->HasTransitions() ? (const char*)seat->action : "OPHeliAim";
+        if (Type()->GetMoveId(action) == MoveIdNone)
+            return nullptr;
+        auto& playerSeat = _playerCargoWeaponSeat;
+        if (playerSeat.cargoIndex != i || strcmpi(playerSeat.action, action) != 0)
+        {
+            if (seat && seat->HasTransitions())
+                playerSeat = *seat;
+            else
+            {
+                playerSeat = CargoWeaponSeat{};
+                playerSeat.action = "OPHeliAim";
+                playerSeat.idleAction = "OPHeliIdle";
+                playerSeat.raiseAction = "OPHeliRaise";
+                playerSeat.reloadAction = "OPHeliReload";
+                playerSeat.lowerAction = "OPHeliLower";
+                playerSeat.azimuth = 90;
+            }
+            playerSeat.cargoIndex = i;
+            playerSeat.rifleFamily = true;
+            playerSeat.playerFreeAim = true;
+            playerSeat.halfAngle = 180;
+            playerSeat.minElevation = -85;
+            playerSeat.maxElevation = 85;
+        }
+        return &playerSeat;
     }
     return nullptr;
 }
@@ -118,6 +148,10 @@ bool Man::CargoWeaponLineClear(int weapon) const
     Matrix4 frame;
     if (!vehicle->TryCargoWeaponFrame(this, seat->cargoIndex, frame))
         return false;
+    // Player shots resolve insertion obstruction in CargoBulletOrigin rather
+    // than suppressing the trigger. The carrier remains a projectile target.
+    if (seat->playerFreeAim)
+        return true;
     const Vector3 muzzle = frame.FastTransform(GetWeaponPoint(weapon));
     const Vector3 pivot = frame.FastTransform(GetWeaponCenter(weapon));
     const Vector3 end = muzzle + direction * 2.0f;
@@ -138,6 +172,30 @@ bool Man::CargoWeaponLineClear(int weapon) const
         if (hits[i].object != this)
             return false;
     return GLandscape->IntersectWithGround(nullptr, muzzle, direction, 0, 2.0f) >= 2.0f;
+}
+
+Vector3 Man::CargoBulletOrigin(int weapon) const
+{
+    const Vector3 muzzle = GetWeaponPoint(weapon);
+    const auto* seat = GetActiveCargoWeaponSeat();
+    if (!seat || !seat->playerFreeAim || !GLandscape)
+        return muzzle;
+    const Vector3 pivot = GetWeaponCenter(weapon);
+    const Matrix4 frame = WorldTransform();
+    CollisionBuffer hits;
+    GLandscape->ObjectCollision(hits, const_cast<Man*>(this), nullptr,
+        frame.FastTransform(pivot), frame.FastTransform(muzzle), .02f, ObjIntersectFire);
+    float entry = 1.0f;
+    for (int i = 0; i < hits.Size(); ++i)
+        if (hits[i].object && hits[i].object != this && std::isfinite(hits[i].under))
+            entry = std::min(entry, std::clamp(hits[i].under, 0.0f, 1.0f));
+    if (entry >= 1.0f)
+        return muzzle;
+    const Vector3 barrel = muzzle - pivot;
+    const float length = barrel.Size();
+    // Start on the shooter's side; do not teleport through an obstructing wall.
+    // A pivot already inside geometry conservatively starts there and hits it.
+    return pivot + barrel * std::max(0.0f, entry - (length > .001f ? .02f / length : 0.0f));
 }
 
 void Man::AimHeadForward()
@@ -1163,7 +1221,7 @@ bool Soldier::FireWeapon(int weapon, TargetType* target)
             {
                 return false;
             }
-            Vector3Val pos = GetWeaponPoint(weapon);
+            const Vector3 pos = CargoBulletOrigin(weapon);
             Vector3 dir = GetWeaponRelDirection(weapon);
 
             if (QIsManual())

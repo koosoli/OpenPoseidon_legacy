@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
+#include <Poseidon/World/Entities/Vehicles/CargoWeaponSeats.hpp>
 #include <Poseidon/World/Simulation/Animation/Animation.hpp>
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/World/Entities/Infantry/Head.hpp>
@@ -599,6 +600,7 @@ class Man: public Person
 
 	MotionPath _queueMove; // shortest path to desired move; desired move is last element
     bool _cargoWeaponRequested = false;
+    mutable CargoWeaponSeat _playerCargoWeaponSeat;
 	float _primaryFactor; // blend weight between primary and secondary animation
 	float _primaryTime,_secondaryTime;
 
@@ -750,6 +752,7 @@ class Man: public Person
     bool SetCargoWeaponMode(bool enabled);
     void ResetCargoWeaponMode() { _cargoWeaponRequested = false; }
     bool IsCargoWeaponCandidate(int weapon) const;
+    Vector3 CargoBulletOrigin(int weapon) const;
     const CargoWeaponSeat* GetActiveCargoWeaponSeat() const;
 	bool CargoWeaponLineClear(int weapon) const;
 

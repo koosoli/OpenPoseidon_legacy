@@ -2030,6 +2030,8 @@ bool Man::MoveHead(float deltaT)
 
 void Man::MoveWeapons(float deltaT, bool forceRecalcMatrix)
 {
+    const auto* cargo = GetActiveCargoWeaponSeat();
+    const bool freeCargoAim = cargo && cargo->playerFreeAim;
     float f = GetLimitGunMovement();
     float ability = floatMax(GetAbility(), 0.5f);
     if (f < 0.01f)
@@ -2054,8 +2056,11 @@ void Man::MoveWeapons(float deltaT, bool forceRecalcMatrix)
         float gunXRotWanted = _gunXRotWanted;
         float gunYRotWanted = _gunYRotWanted;
 
-        Limit(gunXRotWanted, Type()->_minGunElev * f, Type()->_maxGunElev * f);
-        Limit(gunYRotWanted, Type()->_minGunTurnAI * f, Type()->_maxGunTurnAI * f);
+        if (!freeCargoAim)
+        {
+            Limit(gunXRotWanted, Type()->_minGunElev * f, Type()->_maxGunElev * f);
+            Limit(gunYRotWanted, Type()->_minGunTurnAI * f, Type()->_maxGunTurnAI * f);
+        }
 
         float weaponDexterity = 1;
 
@@ -2088,6 +2093,8 @@ void Man::MoveWeapons(float deltaT, bool forceRecalcMatrix)
         _gunXSpeed += delta;
 
         deltaPos = gunYRotWanted - _gunYRot;
+        if (freeCargoAim)
+            deltaPos = std::remainder(deltaPos, 2 * H_PI);
         speed = deltaPos * 6 * weaponDexterity;
         if (fabs(speed) * deltaT > fabs(deltaPos))
         {
@@ -2123,8 +2130,13 @@ void Man::MoveWeapons(float deltaT, bool forceRecalcMatrix)
         _gunXRot += gunXRotChange;
         _gunYRot += gunYRotChange;
 
-        Limit(_gunXRot, Type()->_minGunElev * f, Type()->_maxGunElev * f);
-        Limit(_gunYRot, Type()->_minGunTurnAI * f, Type()->_maxGunTurnAI * f);
+        if (freeCargoAim)
+            _gunYRot = std::remainder(_gunYRot, 2 * H_PI);
+        else
+        {
+            Limit(_gunXRot, Type()->_minGunElev * f, Type()->_maxGunElev * f);
+            Limit(_gunYRot, Type()->_minGunTurnAI * f, Type()->_maxGunTurnAI * f);
+        }
     }
 
     bool headMoved = MoveHead(deltaT);
