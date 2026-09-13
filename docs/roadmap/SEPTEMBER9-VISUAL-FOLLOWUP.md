@@ -2160,3 +2160,13 @@ close installed MSAA4 comparisons pass; broad shadows now visibly spread and
 lighten, but 8-degree adaptive costs +2.31 ms median in the close fixture versus
 fixed (one pair). Not promoted; cloud broadening and motion acceptance remain
 open. Details and historical/prototype boundaries are in the contact decision.
+
+Owner-approved contact-shadow default promotion installed as 0c0bbad5 on
+September 13: adaptive budget mode 2 and the artistic 8-degree area-source
+radius now initialize by default and are restored by Reset to defaults. Fixed
+mode 0 remains the live A/B/fallback path. The no-override installed smoke
+`build/contact-shadows/default-promotion/default-mode2-radius8-smoke/run-01`
+completed and logged `mode=2` / `8 degrees`. This promotion preserves the
+measured +2.31 ms close-fixture median-cost warning; cloud-dependent broadening
+and player-shadow motion flicker remain open rather than being hidden by the
+new default.

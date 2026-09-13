@@ -354,3 +354,9 @@ retained as a material risk; it is one ordered pair, not a universal cost.
 This owner decision supersedes the earlier prototype-only default statements
 above but does not claim that cloud-dependent source broadening or player-shadow
 motion flicker is solved.
+
+Installed-game verification uses build `0c0bbad5` with an empty environment
+override set. `default-mode2-radius8-smoke/run-01` completed its 350-frame
+windowed capture and clean exit; startup reported `mode=2` and an 8-degree sun
+angular radius. This proves normal startup consumes the promoted defaults rather
+than inheriting the benchmark overrides used by the earlier comparisons.
