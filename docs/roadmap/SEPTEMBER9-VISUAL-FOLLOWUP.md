@@ -2119,3 +2119,16 @@ before NextFrame publication, retaining the WGPU capability gate and existing
 queue ownership. It has no measured benefit yet. Trace capture is now exposed
 by Test-NativeStreamCancellation -FrameTrace. Artifacts: trace-20260913-085949
 and trace-20260913-090204 under build/native-stream-cancellation.
+
+Owner-prioritized September 13 shared CSM prototype installed as 434aee7e:
+contact-hardening from metric blocker/receiver separation, configurable solar
+angular radius, live fixed/full/budget A/B, default OFF. Eleven shader tests and
+1,891 assertions in 48 ShadowMath tests pass. Installed OFP town fixtures cover
+buildings, alpha-cutout trees and three equal Jeeps at 0.05/3/12 m. Actual native
+1x, MSAA4 and DLSS Quality+MSAA4 are verified from capture metadata. First labelled
+native runs were invalid (configuration 1 means neither startup OFF nor valid
+MSAA); harness corrected to store 0. DLSS+MSAA1 falls back for missing inputs,
+and is explicitly NOT counted as DLSS acceptance. Full/budget remain opt-in:
+cost matrix and movement/quality limitations are recorded in
+[contact shadow decision](decisions/CONTACT-SHADOWS-20260913.md).
+Reforger material/supertexture work remains separate, not declared resolved.

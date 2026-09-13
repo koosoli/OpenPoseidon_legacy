@@ -178,6 +178,11 @@ mod tests {
         assert!(!helper.contains("eye_depth"));
         assert!(!helper.contains("splits["));
         assert!(helper.contains("textureLoad(shadow_map"));
+        assert!(helper.contains("min(separation / blockers, centre_separation)"));
+        for local_gap in [0.0_f64, 0.05, 3.0, 12.0] {
+            let mixed_blockers = (local_gap + 80.0 * 8.0) / 9.0;
+            assert!((mixed_blockers.min(local_gap) * slope - local_gap * slope).abs() < 1e-10);
+        }
         for (source, file_path) in [
             (include_str!("../gfx3d/shader3d.wgsl"), "gfx3d/shader3d.wgsl"),
             (include_str!("../gfx3d/gpu_driven.wgsl"), "gfx3d/gpu_driven.wgsl"),

@@ -949,8 +949,8 @@ pub struct WgrCameraShadow {
     pub omni_radius: WgrVec4, // omni tiers: camera-distance radius (0 = frustum tier)
     pub ctl: WgrVec4,         // {count, omni_count, fade_range, bias_const}
     pub ctlb: WgrVec4,        // {texel_size (1/res), darkness, normal_offset_scale, pcf}
-    pub cam_fwd: WgrVec4,     // xyz = camera forward (eye-depth cascade select)
-    pub sun_dir: WgrVec4,     // xyz = sun travel direction (normal-offset bias)
+    pub cam_fwd: WgrVec4,     // xyz = camera forward; w = contact mode (0 fixed, 1 full, 2 budget)
+    pub sun_dir: WgrVec4,     // xyz = sun travel direction; w = tan(sun angular radius)
     // LGT-010: one perspective view-projection per shadowing spot light, kept separate from
     // the sun's cascades because they are selected differently (by light index, not by
     // distance) and are a different projection kind.

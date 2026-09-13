@@ -55,3 +55,76 @@ receiver-containing pass timestamps as incremental receiver cost, not a fictitio
 standalone absolute shadow-receiver timer. Report caster-pass GPU time separately
 and full GPU frame time; capture readbacks are excluded from frame-trace statistics.
 Repetition and motion/DLSS visual checks precede any recommendation/default change.
+
+Installed 434aee7e: full game build passes, 1,891 assertions in 48 existing
+ShadowMath cases pass. OFP town images show all three fixture Jeeps and building/
+foliage shadows. First captures labelled native were actually MSAA4: startup
+accepts graphics.cfg msaaSamples=0 for OFF, not 1. Those labels are invalid as
+native-1x evidence; the harness now maps 1x to configuration 0 and asserts actual
+MSAA, DLSS activity and output dimensions from each capture.
+
+A separate pre-existing route problem was exposed: DLSS with MSAA1 reports
+missing depth/velocity/exposure inputs and falls back to bilinear. Mode0 run
+mode0-dlss-radius0.266-matrix is rejected as DLSS evidence. Actual DLSS with
+MSAA4 works in mode1/2; the DLSS comparison therefore uses MSAA4 in every arm.
+Fixing that unrelated input-production route is not bundled into this shader
+experiment. No claim of DLSS1x compatibility is made.
+
+## First installed measurement matrix
+
+1600x900 output; scripted camera has letterboxing, so this is not a full-screen
+pixel-cost extrapolation. OFP Everon town, June 21 15:00, clear weather, exposure
+0.15 fixed, governor range 1, three Jeeps at the specified heights. Every static
+arm has 52,507 registered / 14,492 main instances and 1,205,361 main triangles.
+DLSS Quality renders 1072x603 with MSAA4 and reports active=true in accepted arms.
+
+GPU frame medians/p95 over a 15-second settled trace window ending two seconds
+before shutdown/readback tail (more than 1,000 frames each), milliseconds:
+
+| Route | Fixed median/p95 | Full median/p95 | Budget median/p95 |
+|---|---:|---:|---:|
+| Native 1x | 11.46 / 12.79 | 13.27 / 14.43 | 11.62 / 12.52 |
+| Native MSAA4 | 13.82 / 14.72 | 14.65 / 15.59 | 13.53 / 14.41 |
+| DLSS Quality + MSAA4 | 13.04 / 14.22 | 13.65 / 15.05 | 12.18 / 13.05 |
+
+Single ordered runs, NOT repeated confidence intervals; budget below fixed is
+not proof of a general FPS gain. PCSS can early-out for subtexel penumbrae, but
+other passes and clock/load variance also affect the full-frame result.
+
+Separate captured pass timestamps, milliseconds (fixed / full / budget):
+
+| Route | Receiver-containing colour passes | Caster cascades + shadow cull |
+|---|---:|---:|
+| Native 1x | 1.927 / 2.213 / 2.140 | 0.998 / 0.969 / 1.539 |
+| Native MSAA4 | 2.588 / 2.726 / 2.628 | 0.986 / 0.977 / 0.985 |
+| DLSS Quality + MSAA4 | 1.700 / 2.770 / 1.695 | 1.889 / 0.995 / 0.988 |
+
+Receiver-containing sum includes Terrain main colour, Objects colour solid and
+alpha-test, and Grass colour. It includes ordinary shading, not just shadow
+receiving; its matched difference is only an incremental cost estimate. Casters
+are unchanged by the prototype; the varying caster snapshots illustrate why
+these single samples cannot be treated as precise isolated shader timings.
+No dedicated absolute receiver-only or complete shadow-related timer is claimed.
+
+Artifacts: build/contact-shadows/mode{0,1,2}-native-radius0.266-verified,
+mode{0,1,2}-msaa-radius0.266-matrix, mode{1,2}-dlss-radius0.266-matrix,
+mode0-dlss-radius0.266-verified. Each contains run-01.json/log/png/meta and
+settled-pace.json; trace CSVs are in the parent directory.
+
+Additional fixed/full/budget native images at radius 2 degrees pass lifecycle
+and retain identical geometry. Eight-frame DLSS camera sequences at radius 1
+degree are visual diagnostics only; readbacks invalidate timing comparison.
+Broad static images retain leaf cutout silhouettes and sharp vehicle contact;
+the cheaper/full difference is small at this view scale, not proven negligible
+at all angles. Movement/cascade stability remains an acceptance gate rather than
+an assumed consequence of the stable sample disk. Keep both modes opt-in.
+
+Motion inspection rejects the initial budget variant as visually accepted:
+the elevated Jeep's road shadow is lost in the last budget image while fixed
+and full retain it. Camera samples differ slightly in progress, so this is a
+diagnostic finding, not a pixel-aligned proof of its mechanism. A follow-up caps
+mean blocker separation by the centre blocker's separation when one is known.
+This preserves the local contact constraint in mixed-depth searches; scalar
+regression covers near-contact/3/12 m blockers surrounded by 80 m blockers.
+The measurement matrix above is PRE follow-up and must not be relabelled as
+final performance acceptance. Re-test the same motion and static fixtures.

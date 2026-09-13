@@ -65,6 +65,7 @@ fn contact_filter(uv: vec2<f32>, layer: i32, reference: f32,
     let search_uv = 100.0 * slope * world_to_uv;
     var separation = 0.0;
     var blockers = 0.0;
+    var centre_separation = 100.0;
     // Centre included even in the cheap mode so contact casters are not skipped.
     for (var i = 0u; i <= taps; i++) {
         var offset = vec2<f32>(0.0);
@@ -76,7 +77,9 @@ fn contact_filter(uv: vec2<f32>, layer: i32, reference: f32,
         let receiver = reference + clamp(dot(centre - uv, gradient), -0.02, 0.02);
         let depth = textureLoad(shadow_map, pixel, layer, 0);
         if (depth < receiver) {
-            separation += max(0.0, receiver - depth) / max(depth_per_metre, 1e-8);
+            let gap = max(0.0, receiver - depth) / max(depth_per_metre, 1e-8);
+            separation += gap;
+            if (i == taps) { centre_separation = gap; }
             blockers += 1.0;
         }
     }
@@ -84,7 +87,9 @@ fn contact_filter(uv: vec2<f32>, layer: i32, reference: f32,
         // A sparse search cannot prove there is no thin alpha-tested blocker.
         return plane_compare(uv, layer, reference, gradient);
     }
-    let radius = min(separation / blockers, 100.0) * slope * world_to_uv;
+    // A known local blocker must not inherit the broad penumbra of unrelated
+    // distant blockers sampled around it (especially with the sparse budget disk).
+    let radius = min(min(separation / blockers, centre_separation), 100.0) * slope * world_to_uv;
     if (all(radius * vec2<f32>(size) <= vec2<f32>(0.5))) {
         return plane_compare(uv, layer, reference, gradient);
     }

@@ -4,7 +4,8 @@ param(
  [ValidateRange(0,2)][double]$SunRadius=0.266,
  [ValidateRange(1,10)][int]$Repeats=1,
  [string]$Label='',
- [switch]$Reference
+ [switch]$Reference,
+ [switch]$Motion
 )
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
@@ -12,10 +13,11 @@ $root=Split-Path $PSScriptRoot -Parent
 $out=Join-Path $root 'build/contact-shadows'
 $name="mode$Mode-$AA-radius$SunRadius"
 if ($Reference) {$name="reference-$name"}
+if ($Motion) {$name+="-motion"}
 if ($Label) {$name+="-$Label"}
 $user=Join-Path $out ("user-"+$name)
 New-Item -ItemType Directory -Force $user | Out-Null
-& "$PSScriptRoot/Write-BenchmarkGraphics.ps1" -UserDir $user -DlssMode $(if ($AA -eq 'dlss') {1} else {0}) -MsaaSamples $(if ($AA -eq 'msaa') {4} else {1})
+& "$PSScriptRoot/Write-BenchmarkGraphics.ps1" -UserDir $user -DlssMode $(if ($AA -eq 'dlss') {1} else {0}) -MsaaSamples $(if ($AA -eq 'native') {1} else {4})
 $settings=@{
  POSEIDON_USER_DIR=$user; POSEIDON_VSYNC='0'; POSEIDON_LOCKSTEP_HZ='0'
  WGR_CONTACT_SHADOWS=[string]$Mode
@@ -40,5 +42,18 @@ if ($Reference) {
  $settings.POSEIDON_REFORGER_STREAM='1'
  $settings.WGR_NATIVE_FAR_AUTHORED='1'
 }
+if ($Motion) {
+ if ($Reference) {throw 'Motion fixture is the OFP town, not the static native reference'}
+ $options.WarmupSeconds=85
+ $options.MotionSamples=8
+ $options.MotionInterval=1
+}
 & "$PSScriptRoot/farfield-bench.ps1" @options
 if ($LASTEXITCODE -ne 0) {throw 'Contact shadow capture failed'}
+foreach ($capture in Get-ChildItem -LiteralPath (Join-Path $out $name) -Filter 'run-??.json') {
+ $report=Get-Content -LiteralPath $capture.FullName -Raw | ConvertFrom-Json
+ $expectedMsaa=if ($AA -eq 'native') {1} else {4}
+ if ($report.build.msaa_samples -ne $expectedMsaa) {throw "Wrong actual MSAA: $($report.build.msaa_samples), expected $expectedMsaa"}
+ if ([bool]$report.build.dlss_active -ne ($AA -eq 'dlss')) {throw "Wrong actual DLSS route: $($report.build.dlss_reason)"}
+ if ($report.build.output_width -ne 1600 -or $report.build.output_height -ne 900) {throw 'Wrong output resolution'}
+}
