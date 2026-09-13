@@ -113,6 +113,13 @@ class ObjectListFull : public SmallArray<Ref<Object>>
     /// non-static, so a cell that gained decals lost the skip and was then walked in full,
     /// static objects included.
     int _nTypeVehicle;
+    // Non-owning mirror of TypeVehicle entries. Dense moving-unit scenes can
+    // accumulate thousands of temporary footprint objects in the full cell
+    // list; collision queries that only want vehicles must not scan them all.
+    SmallArray<Object*> _typeVehicles;
+    // Non-owning mirror of objects that can provide a roadway surface. Soldier
+    // ground contact asks only for these after testing the terrain itself.
+    SmallArray<Object*> _roadwayObjects;
 
   private:
     int CountNonStatic() const;
@@ -124,6 +131,9 @@ class ObjectListFull : public SmallArray<Ref<Object>>
 
     int GetNonStaticCount() const { return _nNonStatic; }
     int GetTypeVehicleCount() const { return _nTypeVehicle; }
+    Object* GetTypeVehicle(int index) const { return _typeVehicles[index]; }
+    int GetRoadwayObjectCount() const { return _roadwayObjects.Size(); }
+    Object* GetRoadwayObject(int index) const { return _roadwayObjects[index]; }
     void ChangeNonStaticCount(int val);
     void ChangeTypeVehicleCount(int val);
     void StaticChanged(); // recalculate what is neccessary

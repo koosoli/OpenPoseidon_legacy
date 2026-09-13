@@ -1,3 +1,4 @@
+#include <cstdlib>
 #include <unordered_map>
 #include <SDL3/SDL_scancode.h>
 #include "SimVehicleCost.hpp" // PERF-023
@@ -491,9 +492,16 @@ void World::RemoveSensor(Entity* vehicle)
 
 void World::MoveOutAndDelete(VehicleList& vehicles, float deltaT, bool applyMove)
 {
-    for (int i = 0; i < vehicles.Size();)
+    // Deleting each entry in-place shifts the entire RefArray tail. Footprint
+    // marks expire in large cohorts, turning this maintenance pass quadratic
+    // in dense infantry scenes. Compact survivors once while preserving their
+    // order, so simulation and deterministic gameplay ordering stay unchanged.
+    const int count = vehicles.Size();
+    int write = 0;
+    for (int read = 0; read < count; ++read)
     {
-        Entity* vehicle = vehicles[i];
+        Ref<Entity> keepAlive = vehicles[read];
+        Entity* vehicle = keepAlive;
         if (vehicle->ToDelete())
         {
             vehicle->ResetDelete();
@@ -501,7 +509,6 @@ void World::MoveOutAndDelete(VehicleList& vehicles, float deltaT, bool applyMove
             _scene.GetLandscape()->RemoveObject(vehicle);
             RemoveTarget(vehicle);
             RemoveSensor(vehicle);
-            vehicles.Delete(i);
         }
         else if (vehicle->ToMoveOut())
         {
@@ -513,7 +520,6 @@ void World::MoveOutAndDelete(VehicleList& vehicles, float deltaT, bool applyMove
             _scene.GetLandscape()->RemoveObject(vehicle);
             RemoveTarget(vehicle);
             RemoveSensor(vehicle);
-            vehicles.Delete(i);
             DoAssert(ValidateOutVehicle(vehicle));
         }
         else if (vehicle->ToConvertToObject())
@@ -531,13 +537,17 @@ void World::MoveOutAndDelete(VehicleList& vehicles, float deltaT, bool applyMove
             vehicle->SetType(Primary);
             _scene.GetLandscape()->AddObject(vehicle);
             RemoveSensor(vehicle);
-            vehicles.Delete(i);
         }
         else
         {
-            i++;
+            if (write != read)
+            {
+                vehicles.Set(write) = vehicles[read];
+            }
+            ++write;
         }
     }
+    vehicles.Resize(write);
 }
 
 void World::MoveOutAndDelete(VehiclesDistributed& list, float deltaT, bool applyMove)
@@ -679,9 +689,22 @@ void World::SimulateOnly(VehiclesDistributed& vehicles, float deltaT, VehicleSim
                          SimulationImportance prec)
 {
     SimulateOnly(vehicles._visibleNear, deltaT, simul, insideVehicle, SimulateVisibleNear);
-    SimulateOnly(vehicles._visibleFar, deltaT, simul, insideVehicle, SimulateVisibleFar);
-    SimulateOnly(vehicles._invisibleNear, deltaT, simul, insideVehicle, SimulateInvisibleNear);
-    SimulateOnly(vehicles._invisibleFar, deltaT, simul, insideVehicle, SimulateInvisibleFar);
+
+    // A fixed 60 Hz world tick made the old remainder pass fully simulate every
+    // off-screen unit on every tick. Use the entity's existing deterministic
+    // precision accumulator for non-near lists; visible-near entities and the
+    // camera vehicle retain the exact full-rate path. The escape hatch is an
+    // A/B control and restores the former behaviour without changing saves.
+    static const bool fullRateFar = []
+    {
+        const char* value = std::getenv("POSEIDON_FAR_SIM_FULL_RATE");
+        return value != nullptr && value[0] == '1';
+    }();
+    const VehicleSimulation farSimul =
+        !fullRateFar && simul == &Entity::SimulateRest ? &Entity::SimulateOptimized : simul;
+    SimulateOnly(vehicles._visibleFar, deltaT, farSimul, insideVehicle, SimulateVisibleFar);
+    SimulateOnly(vehicles._invisibleNear, deltaT, farSimul, insideVehicle, SimulateInvisibleNear);
+    SimulateOnly(vehicles._invisibleFar, deltaT, farSimul, insideVehicle, SimulateInvisibleFar);
 }
 
 void World::AddAttachment(AttachedOnVehicle* attach)

@@ -170,10 +170,15 @@ void Landscape::ObjectCollision(CollisionBuffer& retVal, Object* with, const Fra
         for (z = zMin; z <= zMax; z++)
         {
             const ObjectList& list = _objects(x, z);
-            int n = list.Size();
+            const ObjectListFull* fullList = list.GetList();
+            if (onlyVehicles && (!fullList || fullList->GetTypeVehicleCount() <= 0))
+            {
+                continue;
+            }
+            int n = onlyVehicles ? fullList->GetTypeVehicleCount() : list.Size();
             for (int i = 0; i < n; i++)
             {
-                Object* obj = list[i];
+                Object* obj = onlyVehicles ? fullList->GetTypeVehicle(i) : list[i];
                 if (obj == with)
                 {
                     continue;
@@ -189,13 +194,6 @@ void Landscape::ObjectCollision(CollisionBuffer& retVal, Object* with, const Fra
                 if (obj->GetType() == TypeTempVehicle)
                 {
                     continue;
-                }
-                if (onlyVehicles)
-                {
-                    if (obj->Static())
-                    {
-                        continue;
-                    }
                 }
                 // do not collide with "soft" dead objects (man bodies, trees)
                 if (!obj->HasGeometry())
@@ -734,21 +732,21 @@ void Landscape::GroundCollision(GroundCollisionBuffer& retVal, Object* with, con
         {
             // Point3 pos(xC,0,zC);
             const ObjectList& list = _objects(x, z);
-            int n = list.Size();
+            const ObjectListFull* fullList = list.GetList();
+            if (!fullList)
+            {
+                continue;
+            }
+            int n = fullList->GetRoadwayObjectCount();
             for (int i = 0; i < n; i++)
             {
-                Object* obj = list[i];
+                Object* obj = fullList->GetRoadwayObject(i);
                 LODShape* objShape = obj->GetShape();
                 if (!objShape)
                 {
                     continue;
                 }
                 int roadwayLevel = objShape->FindRoadwayLevel();
-
-                if (roadwayLevel < 0)
-                {
-                    continue;
-                }
                 if (obj == with)
                 {
                     continue;
@@ -1451,13 +1449,9 @@ void Landscape::PredictCollision(VehicleCollisionBuffer& ret, const Vehicle* veh
             {
                 continue; // no vehicles in this list
             }
-            for (int i = 0; i < list->Size(); i++)
+            for (int i = 0; i < list->GetTypeVehicleCount(); i++)
             {
-                const Object* obj = list->Get(i);
-                if (obj->GetType() != TypeVehicle)
-                {
-                    continue;
-                }
+                const Object* obj = list->GetTypeVehicle(i);
                 if (obj->Position().Distance2Inline(vehPos) > maxDist2)
                 {
                     continue;

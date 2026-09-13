@@ -1845,10 +1845,15 @@ float Landscape::RoadSurfaceY(float xC, float zC, float* dX, float* dZ, Texture*
         {
             Point3 pos(xC, 0, zC);
             const ObjectList& list = _objects(x, z);
-            int n = list.Size();
+            const ObjectListFull* fullList = list.GetList();
+            if (!fullList)
+            {
+                continue;
+            }
+            int n = fullList->GetRoadwayObjectCount();
             for (int i = 0; i < n; i++)
             {
-                Object* obj = list[i];
+                Object* obj = fullList->GetRoadwayObject(i);
                 if (!obj)
                 {
                     continue; // no collisions with roads
@@ -1964,10 +1969,15 @@ float Landscape::RoadSurfaceY(Vector3Par pos, float* dX, float* dZ, Texture** te
         for (int x = xMin; x <= xMax; x++)
         {
             const ObjectList& list = _objects(x, z);
-            int n = list.Size();
+            const ObjectListFull* fullList = list.GetList();
+            if (!fullList)
+            {
+                continue;
+            }
+            int n = fullList->GetRoadwayObjectCount();
             for (int i = 0; i < n; i++)
             {
-                Object* o = list[i];
+                Object* o = fullList->GetRoadwayObject(i);
                 if (!o)
                 {
                     continue; // no collisions with roads
@@ -3095,6 +3105,7 @@ void ObjectListFull::ChangeTypeVehicleCount(int val)
     // `World::MoveOutAndDelete`'s convert-to-object branch, now removes and re-adds
     // around the change -- and this assert is what says so on every debug run.
     PoseidonAssert(CountTypeVehicle() == _nTypeVehicle);
+    PoseidonAssert(_typeVehicles.Size() == _nTypeVehicle);
 }
 
 void ObjectListFull::ChangeNonStaticCount(int val)
@@ -3156,6 +3167,11 @@ void ObjectListFull::SetBSphere(int x, int z)
 int ObjectListFull::Add(Object* object, bool avoidRecalculation)
 {
     int index = base::Add(object);
+    LODShape* shape = object->GetShape();
+    if (shape && shape->FindRoadwayLevel() >= 0)
+    {
+        _roadwayObjects.Add(object);
+    }
     if (object->Static())
     {
         if (!avoidRecalculation)
@@ -3186,6 +3202,7 @@ int ObjectListFull::Add(Object* object, bool avoidRecalculation)
     }
     if (object->GetType() == TypeVehicle)
     {
+        _typeVehicles.Add(object);
         ChangeTypeVehicleCount(+1);
     }
     return index;
@@ -3196,11 +3213,53 @@ void ObjectListFull::Delete(int index)
     Object* obj = Get(index);
     bool isStatic = obj->Static();
     const bool isVehicle = obj->GetType() == TypeVehicle;
+    const bool isRoadway = obj->GetShape() && obj->GetShape()->FindRoadwayLevel() >= 0;
     // Removing a static object can only shrink the sphere, and only if that object is
     // the one holding the current bound up. Anything strictly inside leaves
     // max(50, max term) untouched, so the rescan can be skipped outright.
     float dist = isStatic ? StaticBSphereTerm(obj, _bCenter) : 0.0f;
+    if (isVehicle)
+    {
+        int vehicleIndex = -1;
+        for (int i = 0; i < _typeVehicles.Size(); ++i)
+        {
+            if (_typeVehicles[i] == obj)
+            {
+                vehicleIndex = i;
+                break;
+            }
+        }
+        PoseidonAssert(vehicleIndex >= 0);
+        if (vehicleIndex >= 0)
+        {
+            _typeVehicles.Delete(vehicleIndex);
+        }
+    }
+    if (isRoadway)
+    {
+        int roadwayIndex = -1;
+        for (int i = 0; i < _roadwayObjects.Size(); ++i)
+        {
+            if (_roadwayObjects[i] == obj)
+            {
+                roadwayIndex = i;
+                break;
+            }
+        }
+        PoseidonAssert(roadwayIndex >= 0);
+        if (roadwayIndex >= 0)
+        {
+            _roadwayObjects.Delete(roadwayIndex);
+        }
+    }
+    // Release the owning cell reference only after its non-owning mirrors no
+    // longer contain the pointer. A static map object can be owned solely by
+    // the landscape index at teardown.
     base::Delete(index);
+    if (isVehicle)
+    {
+        ChangeTypeVehicleCount(-1);
+    }
     if (isStatic)
     {
         if (dist >= _bRadius)
@@ -3212,15 +3271,13 @@ void ObjectListFull::Delete(int index)
     {
         ChangeNonStaticCount(-1);
     }
-    if (isVehicle)
-    {
-        ChangeTypeVehicleCount(-1);
-    }
 }
 
 void ObjectListFull::Clear()
 {
     base::Clear();
+    _typeVehicles.Clear();
+    _roadwayObjects.Clear();
     _nNonStatic = 0;
     _nTypeVehicle = 0;
     // Same rescan as ChangeNonStaticCount - debug-only self-check. (After base::Clear()
