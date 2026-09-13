@@ -2058,3 +2058,22 @@ and pale crowns remain OPEN. Original crown material inspection confirms missing
 spatial AO/colour-variation integration, not a proven simple tint correction.
 The cross-audit distinguishes code findings from unrun runtime/performance gates:
 [upstream cross-audit](decisions/UPSTREAM-CROSS-AUDIT-20260913.md).
+
+September 13 authored native far tier: e70ce642 adds render-only placement
+instances through the existing model preparer/registration path, fixed to the
+coarsest authored non-decal LOD. Shared shape/material lifetime and near/far
+handoffs are retained; no second loader or physics objects are introduced.
+The 200,000-candidate / requested 3 km window is bounded, not guaranteed complete
+3 km coverage. It remains opt-in (`WGR_NATIVE_FAR_AUTHORED=1`) pending acceptance.
+Twenty GPU culling tests pass. Installed Forest off/on runs close cleanly and
+add 153,733 registered instances, 13,657 main-view instances and 368,184 triangles.
+The single captured GPU frames are 31.148 / 31.343 ms, not FPS percentiles.
+ForestHigh visibly fills previously empty terrain, but its first on capture
+has three prepared results remaining and fails the settled-loader gate.
+Its 48.890 / 55.549 ms pair is NOT an accepted performance baseline.
+Artifacts: `build/native-reforger-perf/{Forest,ForestHigh}-authored-far-{off,on}`.
+Follow-up retires redundant prepared results through existing DropStale after a
+far sweep and exposes harness warmup duration; 318 assertions in 16 preparer
+tests pass. Installed acceptance, moving-camera coverage/cost and pale crowns
+remain OPEN. Full model/material loading is still shared, not coarse-only: no
+asset-memory saving is claimed for this new tier.

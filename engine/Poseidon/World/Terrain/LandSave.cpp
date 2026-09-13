@@ -4407,6 +4407,7 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
         return;
     const auto start = std::chrono::steady_clock::now();
     uint32_t added = 0, modelWork = 0;
+    bool completedSweep = false;
     for (size_t scan = 0; scan < std::min<size_t>(4096, _nativeFarCandidates.size()); ++scan)
     {
         if (scan > 0 && std::chrono::duration<double, std::milli>(
@@ -4414,6 +4415,7 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
             break;
         const uint32_t index = _nativeFarCandidates[_nativeFarCursor];
         _nativeFarCursor = (_nativeFarCursor + 1) % _nativeFarCandidates.size();
+        completedSweep |= _nativeFarCursor == 0;
         const auto& placement = _modernObjectPlacements[index];
         const uint32_t modelIndex = placement.modelIndex;
         if (placement.resident || (_nativeFarWanted[index] & 2) || _nativeFarActive.count(index) ||
@@ -4487,6 +4489,27 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
         }
         else
             _nativeFarModelRejected[modelIndex] = 1;
+    }
+    if (completedSweep && _modernObjectPreparer &&
+        _modernObjectModelPrefetchEpoch.size() == _nativeFarModelWanted.size())
+    {
+        // Near and far can install the same model while its earlier parse is still
+        // in flight. Retire redundant results rather than pinning ready-queue slots.
+        auto epochs = _modernObjectModelPrefetchEpoch;
+        for (size_t i = 0; i < epochs.size(); ++i)
+        {
+            if (_nativeFarModelWanted[i] && !_nativeFarModelRejected[i])
+                epochs[i] = _modernObjectPrefetchEpoch;
+            const auto state = _modernObjectPreparer->Query(static_cast<uint32_t>(i));
+            if ((state == ObjectStreamPreparer::State::Ready ||
+                 state == ObjectStreamPreparer::State::Converted) &&
+                Shapes.Find(_modernObjectModels[i], false, true))
+                epochs[i] = _modernObjectPrefetchEpoch - 1;
+        }
+        const size_t retired = _modernObjectPreparer->DropStale(
+            epochs.data(), epochs.size(), _modernObjectPrefetchEpoch);
+        if (retired)
+            LOG_INFO(World, "Native authored far: retired {} unneeded prepared results", retired);
     }
     if (added && (_nativeFarActive.size() / 10000 != (_nativeFarActive.size() - added) / 10000))
         LOG_INFO(World, "Native authored far progress: active={} sharedModels={} near={}",
