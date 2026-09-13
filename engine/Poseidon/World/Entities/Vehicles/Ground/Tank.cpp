@@ -3,6 +3,7 @@
 
 #include <Poseidon/World/Entities/Vehicles/Ground/Tank.hpp>
 #include <Poseidon/World/Entities/Vehicles/Ground/TankNetworkStabilization.hpp>
+#include <Poseidon/World/Entities/Vehicles/Ground/TrackedWaterResponse.hpp>
 #include <Poseidon/AI/AI.hpp>
 
 #include <Poseidon/World/Entities/Weapons/Shots.hpp>
@@ -1200,7 +1201,9 @@ void Tank::Simulate(float deltaT, SimulationImportance prec)
                     // info.pos is world space
                     UndergroundInfo& info = gCollision[i];
                     // we consider two forces
-                    if (info.under < 0)
+                    const bool floatingWaterContact =
+                        info.type == GroundWater && Type()->_canFloat && info.underFlat > 0.0f;
+                    if (info.under < 0 && !floatingWaterContact)
                     {
                         continue;
                     }
@@ -1212,7 +1215,10 @@ void Tank::Simulate(float deltaT, SimulationImportance prec)
                         // first is water is "pushing" everything up - causing some momentum
                         saturateMax(maxUnderWater, info.under);
 
-                        pForce = Vector3(0, 15000 * info.under * coefNPoints, 0);
+                        const float waterUnder = Type()->_canFloat
+                                                     ? AmphibiousTrackedImmersion(info.under, info.underFlat)
+                                                     : info.under;
+                        pForce = Vector3(0, 15000 * waterUnder * coefNPoints, 0);
                         if (!Type()->_canFloat)
                         {
                             pForce *= 0.3f;
@@ -1235,7 +1241,7 @@ void Tank::Simulate(float deltaT, SimulationImportance prec)
                         pForce[1] = speed[1] * fabs(speed[1]) * 15 + speed[1] * 40;
                         pForce[2] = speed[2] * fabs(speed[2]) * 6;
 
-                        pForce = DirectionModelToWorld(pForce * info.under) * GetMass() * (coefNPoints / 350);
+                        pForce = DirectionModelToWorld(pForce * waterUnder) * GetMass() * (coefNPoints / 350);
 #if ARROWS
                         AddForce(wCenter + pCenter, -pForce * InvMass());
 #endif
