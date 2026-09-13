@@ -43,6 +43,9 @@ pub fn early_depth_supported() -> bool {
 
 fn shader_defs() -> std::collections::HashMap<String, naga_oil::compose::ShaderDefValue> {
     let mut defs = std::collections::HashMap::new();
+    if std::env::var("WGR_NATIVE_AUTHORED_NORMALS").as_deref() == Ok("1") {
+        defs.insert("NATIVE_AUTHORED_NORMALS".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
+    }
     if std::env::var("WGR_NATIVE_LEAF_CAVITY").as_deref() == Ok("1") {
         defs.insert("NATIVE_LEAF_CAVITY".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
     }
@@ -153,6 +156,31 @@ mod tests {
             ..Default::default()
         }) {
             panic!("{file_path}: {}", e.emit_to_string(&composer));
+        }
+    }
+
+    #[test]
+    fn native_authored_normals_compose_without_changing_legacy_canopy_gate() {
+        for (source, file_path, gate) in [
+            (include_str!("../gfx3d/shader3d.wgsl"), "gfx3d/shader3d.wgsl",
+             "bend_canopy = bend_canopy && foliage_kind < 2.5;"),
+            (include_str!("../gfx3d/gpu_driven.wgsl"), "gfx3d/gpu_driven.wgsl",
+             "bend_canopy = bend_canopy && (inst.flags & INST_COHERENT_TREE_WIND) == 0u;"),
+        ] {
+            assert!(source.contains(gate));
+            for enabled in [false, true] {
+                let mut composer = build_composer();
+                let mut defs = std::collections::HashMap::new();
+                if enabled {
+                    defs.insert("NATIVE_AUTHORED_NORMALS".to_string(),
+                                naga_oil::compose::ShaderDefValue::Bool(true));
+                }
+                if let Err(e) = composer.make_naga_module(NagaModuleDescriptor {
+                    source, file_path, shader_defs: defs, ..Default::default()
+                }) {
+                    panic!("{file_path}: {}", e.emit_to_string(&composer));
+                }
+            }
         }
     }
 

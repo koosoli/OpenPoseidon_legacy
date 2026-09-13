@@ -2077,3 +2077,25 @@ far sweep and exposes harness warmup duration; 318 assertions in 16 preparer
 tests pass. Installed acceptance, moving-camera coverage/cost and pale crowns
 remain OPEN. Full model/material loading is still shared, not coarse-only: no
 asset-memory saving is claimed for this new tier.
+
+Installed 2d5dba8e follow-up: ForestHigh-far-retire closes cleanly with queued=0,
+ready=0 and exactly three redundant results dropped. Tracked renderer resources
+are 2339 MiB (not whole-driver memory). The 4 km / 100 m/s cancellation route
+passes, recentres repeatedly, and active far instances fall from about 143k to
+71k on departure. Final tracked resources 2441 MiB; process peak working set
+5.29 GiB and private commit 9.85 GiB. No matched route-OFF memory result yet.
+The first Church pose at altitude 80 was BELOW its 156 m terrain: lifecycle only,
+not image acceptance. Corrected Church altitude 240 off/on images show actual
+distant buildings and forests. Captured GPU endpoints 40.381/46.507 ms are a
+coverage cost, not a performance improvement (single ordered pair).
+
+Church lighting ablation (existing WGR_FOLIAGE_ABLATE=1) changes the pale canopy
+appearance but removes several terms together and is NOT a finished material
+correction. A narrower WGR_NATIVE_AUTHORED_NORMALS=1 experiment now suppresses
+only synthetic radial-normal bending for native trees in direct and retained
+paths. Eight shader tests pass, including both define variants; normal OFP
+canopy correction remains unchanged. Native ground/crown parity is still OPEN.
+Build passes, but this narrower shader has NOT been installed/tested yet:
+a user-owned OpenPoseidon process appeared at 08:32 outside the test lock.
+Do not deploy over it. Far default acceptance and the matched route-OFF test
+also remain pending; the installed far feature is still opt-in.

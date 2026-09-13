@@ -35,7 +35,7 @@ $camera=switch ($Pose) {
  'Coast' {@(3800,7960,4,40,-5)}
  'Forest' {@(4697.60,3998.02,50.23,220.6,-5.0)}
  'ForestHigh' {@(4697.60,3998.02,450.0,220.6,-25.0)}
- 'Church' {@(4680.0,6810.0,80.0,28.8,-16.0)}
+ 'Church' {@(4680.0,6810.0,240.0,28.8,-16.0)}
 }
 & "$PSScriptRoot/farfield-bench.ps1" -Label "$Pose-$Label" -Mission 'tests/perf/missions/perf_field.eden' `
  -World $ReforgerAddons -Freefly $camera -Out $out -Env $settings -Repeats $Repeats `

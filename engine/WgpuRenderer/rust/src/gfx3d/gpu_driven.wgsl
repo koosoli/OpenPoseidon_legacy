@@ -600,7 +600,11 @@ fn vs_gpu(
     // glowy SSS fill), so it also helps distant billboards. Blended here — after conform, in the
     // same world/outward space fs_gpu expects — so no fragment-shader change.
     // (`canopy` is computed once above, by the VEG-SWAY block.)
-    if (canopy != 0u && section_materials[rec.section].alpha_ref > 0.0) {
+    var bend_canopy = canopy != 0u && section_materials[rec.section].alpha_ref > 0.0;
+#ifdef NATIVE_AUTHORED_NORMALS
+    bend_canopy = bend_canopy && (inst.flags & INST_COHERENT_TREE_WIND) == 0u;
+#endif
+    if (bend_canopy) {
         // Forests share the tree bend/crown-Y knobs (both shade around a mid-crown centre, unlike a
         // bush whose centre is the whole blob).
         let tree_like = (inst.flags & (INST_CANOPY_TREE | INST_CANOPY_FOREST)) != 0u;

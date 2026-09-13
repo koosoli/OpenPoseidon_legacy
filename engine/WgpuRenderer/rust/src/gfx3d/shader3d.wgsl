@@ -474,7 +474,12 @@ fn vs_main(
     // their PAC texture and alpha cutout are correct. The retained/GPU-driven path already bends
     // cutout canopy normals this way; keep this direct-path equivalent. sun_ambient.w carries
     // 1=bush or 2=tree/forest, so only alpha-cut vegetation changes.
-    if (alpha_ref > 0.0 && foliage_kind > 0.5) {
+    var bend_canopy = alpha_ref > 0.0 && foliage_kind > 0.5;
+#ifdef NATIVE_AUTHORED_NORMALS
+    // Kind 3 identifies native trees independently of the wind amplitude.
+    bend_canopy = bend_canopy && foliage_kind < 2.5;
+#endif
+    if (bend_canopy) {
         let is_tree = foliage_kind > 1.5;
         let crown_y = select(frame.foliageb.z, frame.foliagec.z, is_tree);
         let bend = select(frame.foliageb.y, frame.foliagec.y, is_tree);

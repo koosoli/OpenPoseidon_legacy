@@ -1,6 +1,7 @@
 param([switch]$LegacyClutter, [switch]$VerifyClutter, [switch]$TraceSlowFrames, [switch]$LegacyTableBudget, [switch]$TraceDdsPreparation,
       [switch]$SampleDriverMemory, [switch]$TraceBankTables,
       [ValidateRange(0,1)][int]$NativeTextureKeys=1,
+      [ValidateRange(0,1)][int]$AuthoredFar=0,
       [ValidateRange(-1,1)][int]$LazyBcrTint=-1,
       [ValidateRange(0,64)][int]$ExperimentalTableBudget=0,
       [ValidateRange(-1,1)][int]$TintReuse=-1, [switch]$VerifyTintReuse,
@@ -27,6 +28,7 @@ if ($ExperimentalTableBudget -gt 0) {$label+='-experimental-tables-'+$Experiment
 if ($TraceDdsPreparation) {$label+='-dds-prep'}
 if ($TraceBankTables) {$label+='-bank-trace'}
 $label+='-texture-keys-'+$NativeTextureKeys
+$label+='-authored-far-'+$AuthoredFar
 $label+='-lazy-bcr-'+$(if ($LazyBcrTint -lt 0) {'default'} else {$LazyBcrTint})
 if ($Bc7Batch -gt 0) {$label+='-bc7-'+$Bc7Batch}
 if ($Bc7Batch -lt 0) {$label+='-bc7-default'}
@@ -44,6 +46,7 @@ New-Item -ItemType Directory -Force $user | Out-Null
 & "$PSScriptRoot/Write-BenchmarkGraphics.ps1" -UserDir $user -DlssMode 0
 $settings=@{
  WGR_NATIVE_TEXTURE_KEYS=[string]$NativeTextureKeys
+ WGR_NATIVE_FAR_AUTHORED=[string]$AuthoredFar
  WGR_NATIVE_DDS_PREPARE=[string]$DdsPrepare; WGR_NATIVE_DDS_PREPARE_VERIFY=$(if ($VerifyDdsPrepare) {'1'} else {'0'})
  POSEIDON_USER_DIR=$user; POSEIDON_VSYNC='0'; POSEIDON_LOCKSTEP_HZ='0'
  POSEIDON_REFORGER_WORLD='worlds/eden'; POSEIDON_REFORGER_OBJECTS='1'; POSEIDON_REFORGER_STREAM='1'
@@ -107,6 +110,13 @@ $log=Join-Path (Join-Path $out $label) 'run-01.log'
 if (!(Select-String -LiteralPath $log -Pattern 'FT M' -Quiet)) {throw 'No moving-phase evidence'}
 if (!(Select-String -LiteralPath $log -Pattern 'FFCAM done' -Quiet)) {throw 'Camera route incomplete'}
 if (!(Select-String -LiteralPath $log -Pattern 'Object stream prepare:' -Quiet)) {throw 'No preparer evidence'}
+if ($AuthoredFar -eq 1) {
+    $windows=@(Select-String -LiteralPath $log -Pattern 'Native authored far window:')
+    if ($windows.Count -lt 3) {throw 'Far residency did not follow the moving camera'}
+    if (!(Select-String -LiteralPath $log -Pattern 'Native authored far progress:' -Quiet)) {
+        throw 'No far instances admitted during the route'
+    }
+}
 if ($LazyBcrTint -ne 0 -and !(Select-String -LiteralPath $log -Pattern 'Wgpu lazy BCR tint:' -Quiet)) {throw 'No actual lazy BCR source was used'}
 $metrics=Get-Content -LiteralPath (Join-Path (Split-Path $log -Parent) 'run-01.json') -Raw | ConvertFrom-Json
 if ($metrics.build.render_width -ne 1280 -or $metrics.build.render_height -ne 720 -or
