@@ -1793,6 +1793,7 @@ void World::Simulate(float deltaT, bool& enableDraw)
     // The GPU-driven backend keeps a GPU-resident world set that draws every frame regardless
     // of the per-frame 3D lists we skip below, so it needs the suppression signalled explicitly.
     GEngine->SuppressWorldObjects(suppressWorld);
+    bool farResidencySupported = false;
     if (enableDraw)
     {
         PackedColor color(GEngine->FogColor());
@@ -1819,8 +1820,8 @@ void World::Simulate(float deltaT, bool& enableDraw)
             Camera* residencyCamera = _scene.GetCamera();
             if (modernObjectsEngine && residencyCamera)
             {
+                farResidencySupported = true;
                 GLandscape->UpdateModernObjectResidency(residencyCamera->Position());
-                GLandscape->UpdateNativeFarResidency(residencyCamera->Position());
             }
         }
         // RenderSnapshot Phase 5 step 1: simulation publishes the frame's presentation
@@ -2187,6 +2188,12 @@ void World::Simulate(float deltaT, bool& enableDraw)
 
     if (enableDraw)
     {
+        // Far placements are render-only, not simulation Objects. Cold model
+        // registration may acquire the exclusive renderer window; do it after
+        // traversal so it cannot serialize the whole producer at InitDraw.
+        // NextFrame still owns queue publication and GPU-side mutation ordering.
+        if (farResidencySupported && GLandscape && _scene.GetCamera())
+            GLandscape->UpdateNativeFarResidency(_scene.GetCamera()->Position());
         GEngine->NextFrame();
     }
 

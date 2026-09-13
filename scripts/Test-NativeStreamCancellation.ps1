@@ -1,5 +1,5 @@
 param([switch]$LegacyClutter, [switch]$VerifyClutter, [switch]$TraceSlowFrames, [switch]$LegacyTableBudget, [switch]$TraceDdsPreparation,
-      [switch]$SampleDriverMemory, [switch]$TraceBankTables,
+      [switch]$SampleDriverMemory, [switch]$TraceBankTables, [switch]$FrameTrace,
       [ValidateRange(0,1)][int]$NativeTextureKeys=1,
       [ValidateRange(0,1)][int]$AuthoredFar=0,
       [ValidateRange(-1,1)][int]$LazyBcrTint=-1,
@@ -63,6 +63,7 @@ if ($LegacyTableBudget) {$settings.WGR_OBJECT_STREAM_TABLE_BATCH='0'}
 if ($ExperimentalTableBudget -gt 0) {$settings.WGR_OBJECT_STREAM_TABLE_BATCH=[string]$ExperimentalTableBudget}
 if ($TraceDdsPreparation) {$settings.POSEIDON_DDS_PREP_TRACE='1'}
 if ($TraceBankTables) {$settings.POSEIDON_BANK_TABLE_TRACE='1'}
+if ($FrameTrace) {$settings.POSEIDON_FRAME_TRACE=Join-Path $out ('trace-'+$runId)}
 $settings.WGR_NATIVE_NORMAL_PREFETCH=[string]$NormalPrefetch
 if ($Bc7Batch -ge 0) {$settings.POSEIDON_DDS_BC7_BATCH=[string]$Bc7Batch}
 if ($TintReuse -ge 0) {$settings.POSEIDON_DDS_TINT_REUSE=[string]$TintReuse}

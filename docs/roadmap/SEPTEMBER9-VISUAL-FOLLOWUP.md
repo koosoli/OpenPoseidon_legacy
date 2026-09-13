@@ -2099,3 +2099,23 @@ Build passes, but this narrower shader has NOT been installed/tested yet:
 a user-owned OpenPoseidon process appeared at 08:32 outside the test lock.
 Do not deploy over it. Far default acceptance and the matched route-OFF test
 also remain pending; the installed far feature is still opt-in.
+
+September 13 continuation after owner closed the game: installed 56960714.
+Owner reference [4665.50,7132.80,192.09], az 123.7/el -11.8, hour 16,
+authored-normal OFF/ON passes lifecycle/settled loading with identical geometry.
+Captured GPU frames 39.902/40.677 ms are not performance percentiles. The narrow
+normal change does NOT adequately resolve pale trees and stays opt-in.
+Head neutral lip initialization is covered by 315 assertions in two face-rig
+tests; campaign face regression and full save/network validation remain open.
+
+Matched moving traces at 56960714, far OFF/ON, same 4 km/100 m/s route and
+1280x720 native quality: moving median 32.07/31.55 ms, mean 32.47/34.01 ms,
+p95 45.98/82.14 ms, p99 92.98/96.28 ms. This is one ordered pair, not a repeated
+performance acceptance. The extra far coverage has a pacing regression, so it
+is NOT default-enabled. Trace `lazy` measures AcquireProducerWindow waiting,
+not decode work; cold texture/model registration can interrupt render overlap.
+The next experiment moves render-only far admission after scene traversal,
+before NextFrame publication, retaining the WGPU capability gate and existing
+queue ownership. It has no measured benefit yet. Trace capture is now exposed
+by Test-NativeStreamCancellation -FrameTrace. Artifacts: trace-20260913-085949
+and trace-20260913-090204 under build/native-stream-cancellation.
