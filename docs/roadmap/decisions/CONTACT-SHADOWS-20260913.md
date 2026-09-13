@@ -1,9 +1,9 @@
 # Contact-hardening CSM prototype
 
 Baseline: asset-obs-001, 7aea321f. Owner explicitly prioritized this shared
-renderer experiment over native material work. On September 13 the owner
-visually accepted the 8-degree adaptive result and explicitly authorized its
-promotion to the default; mode 0 remains the fixed-PCF A/B control.
+renderer experiment over native material work. A close-fixture image initially
+passed visual review, but installed outdoor and interior gameplay showed severe
+shadow loss/regression. The promotion was withdrawn; fixed PCF remains default.
 
 ## Implementation
 
@@ -24,7 +24,7 @@ without frame noise or temporal rotation. Historical measurements below explicit
 identify their earlier implementation commits.
 
 Dev tools / Shadows: contact mode 0/1/2 and sun angular radius in degrees.
-Reset restores mode 2 at 8 degrees. Startup diagnostics:
+Reset restores mode 0 at 0.266 degrees. Startup diagnostics:
 WGR_CONTACT_SHADOWS=0/1/2 and WGR_SUN_ANGULAR_RADIUS (clamped 0..8). These use the
 previously unused W lanes of camera-forward and sun-direction in the shared
 shadow block; no FFI layout growth or new bindings. Local lamps are unaffected.
@@ -360,3 +360,12 @@ override set. `default-mode2-radius8-smoke/run-01` completed its 350-frame
 windowed capture and clean exit; startup reported `mode=2` and an 8-degree sun
 angular radius. This proves normal startup consumes the promoted defaults rather
 than inheriting the benchmark overrides used by the earlier comparisons.
+
+## Default promotion withdrawn
+
+Immediate owner testing of the installed promoted build found outdoor shadows
+effectively absent and a severe interior regression that the isolated smoke
+fixture did not represent. Restore mode 0 and 0.266 degrees as both startup and
+Reset-to-defaults values. Modes 1/2 and wider source sizes remain manual A/B
+tools only. Do not promote this PCSS path again without representative outdoor
+and interior gameplay acceptance in addition to the close fixture.

@@ -2170,3 +2170,9 @@ completed and logged `mode=2` / `8 degrees`. This promotion preserves the
 measured +2.31 ms close-fixture median-cost warning; cloud-dependent broadening
 and player-shadow motion flicker remain open rather than being hidden by the
 new default.
+
+The 0c0bbad5 default promotion was withdrawn immediately after owner gameplay
+testing: outdoor shadows disappeared and interiors regressed severely despite
+the isolated close fixture looking acceptable. Startup and Reset defaults return
+to fixed mode 0 / 0.266 degrees. Adaptive modes remain opt-in diagnostics only;
+future acceptance must include representative exterior and interior scenes.
