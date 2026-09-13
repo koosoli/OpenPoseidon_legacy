@@ -48,7 +48,8 @@ Measure-ContactShadows.ps1 uses existing installed-game capture/lifecycle and
 frame-trace mechanisms. Modes 0/1/2, native 1x, MSAA4, DLSS Quality; fixed exposure,
 same scene, resolution and LOD settings. contact_shadows.eden places matching
 Jeeps at 0.05/3/12 m and includes town buildings. Reference option reuses native
-Reforger trees at the owner's camera. Runtime results are pending.
+Reforger trees at the owner's camera. Installed OFP runtime results follow;
+the optional Reforger reference fixture has not been run for this feature.
 
 Receiver shading is fused into colour passes. Report matched differences in
 receiver-containing pass timestamps as incremental receiver cost, not a fictitious
@@ -119,12 +120,85 @@ the cheaper/full difference is small at this view scale, not proven negligible
 at all angles. Movement/cascade stability remains an acceptance gate rather than
 an assumed consequence of the stable sample disk. Keep both modes opt-in.
 
-Motion inspection rejects the initial budget variant as visually accepted:
-the elevated Jeep's road shadow is lost in the last budget image while fixed
-and full retain it. Camera samples differ slightly in progress, so this is a
-diagnostic finding, not a pixel-aligned proof of its mechanism. A follow-up caps
+Initial motion inspection raised a suspected lost Jeep road shadow in budget
+mode. Closer image-region inspection did NOT substantiate disappearance (mean
+luminance in the sampled road-shadow region about 41/40/40 for fixed/full/budget).
+Camera samples differ slightly in progress; do not present this as a confirmed
+bug/fix. A follow-up nevertheless caps
 mean blocker separation by the centre blocker's separation when one is known.
 This preserves the local contact constraint in mixed-depth searches; scalar
 regression covers near-contact/3/12 m blockers surrounded by 80 m blockers.
 The measurement matrix above is PRE follow-up and must not be relabelled as
 final performance acceptance. Re-test the same motion and static fixtures.
+
+Installed follow-up 6c32bfc9 passes the eleven shader tests and the budget DLSS
+motion fixture; its final frame retains the road shadow. That does not establish
+a causal fix to the earlier unconfirmed observation. Final same-build matrix
+uses labels mode{0,1,2}-{native,msaa,dlss}-radius0.266-final.
+
+## Current result: installed 6c32bfc9
+
+All nine final arms passed capture/lifecycle and actual AA-route assertions.
+Same static scene and geometry counts as above; one run per arm, not a promotion
+campaign. Settled GPU frame median/p95 in ms:
+
+| Route | Fixed | Full | Budget |
+|---|---:|---:|---:|
+| Native 1x | 12.85 / 13.62 | 12.95 / 13.88 | 12.47 / 13.49 |
+| Native MSAA4 | 13.93 / 15.09 | 14.82 / 16.53 | 14.23 / 15.48 |
+| DLSS Quality + MSAA4 | 12.62 / 13.50 | 13.17 / 13.66 | 12.50 / 13.22 |
+
+Receiver-containing colour / caster-and-cull snapshot sums, fixed/full/budget:
+
+| Route | Receiver-containing ms | Caster ms |
+|---|---:|---:|
+| Native 1x | 2.11 / 2.69 / 2.14 | 0.98 / 1.19 / 0.97 |
+| Native MSAA4 | 3.31 / 3.28 / 2.57 | 0.98 / 0.97 / 0.96 |
+| DLSS Quality + MSAA4 | 2.37 / 1.73 / 1.69 | 1.01 / 0.96 / 0.98 |
+
+Single pass snapshots do not track the settled full-frame differences reliably.
+Do not interpret a lower colour snapshot as negative PCSS cost. The earlier
+matrix also shows appreciable run variation. Prefer budget for further visual
+evaluation, not default promotion; full's extra samples have not demonstrated
+enough visible benefit in this town view to justify choosing it unconditionally.
+Final native full/budget images retain the three vehicles and cast shadows;
+their small difference at this scale is not a universal quality-equivalence test.
+
+Current status: locally tested, default-OFF prototype. Still required before
+promotion: balanced repeated runs, baseline-versus-candidate-OFF equivalence,
+close-up and moving cascade-boundary acceptance, wind/overcast cases, and
+cross-content visual review. DLSS1x remains explicitly unsupported by the tested
+input route. No claim that community frame pacing or Reforger materials are fixed.
+
+## Alignment with VBS4 exploration v2 and clouds
+
+Read the owner's root-checkout OpenPoseidon_VBS4_Feature_Exploration_Plan_v2.md
+(12 September, historical audit SHA 573dd972) without modifying that checkout.
+Its A1 screen-depth sunlight detail and A2 reusable screen-space CSM resolve are
+proposals, not a replacement for CSM and not evidence of a better implementation
+already shipping. Current shadow.wgsl still evaluates shared CSM visibility in
+receiver shading. This prototype changes that reusable visibility filter only.
+
+- A1 could later supplement missing fine contacts, but must not harden every
+  valid broad PCSS penumbra with an unconditional binary detail mask. Its
+  confidence, cutout, off-screen-caster and direct-light composition gates remain.
+- A2 could reuse this filter if it proves equivalent receiver normals, derivatives,
+  MSAA surfaces and fade/fog inputs. A resolve cannot remove caster work, and
+  moving one evaluation to a texture is not inherently cheaper. No A2 work is
+  authorized merely by reading the plan; no new mask/history/G-buffer added here.
+- Existing material/foliage defects must stay separate from shadow softening.
+
+Cloud audit: frame.wgsl::cloud_sun_shadow already samples local cloud (red) and
+smoke (green) transmittance; shading.wgsl multiplies remaining direct sunlight
+by their product, separately from terrain/CSM occlusion. Thus clouds already
+reduce the contrast of direct cast shadows, rather than attenuating ambient and
+local lighting again. The PCSS angular radius itself is currently cloud-independent.
+
+Cloud-driven penumbra broadening is NOT implemented or accepted yet. Scalar
+transmittance does not describe the angular distribution of scattered skylight;
+using global overcast or the cloud-times-smoke product as a blur radius would be
+an unjustified shortcut. A bounded optional approximation, if pursued, should use
+cloud-only local transmission, retain zero-separation contact and clear-sky
+radius, preserve existing direct-light extinction, and be compared in clear,
+thin-cloud, opaque-cloud and smoke-only negative controls. This remains an
+explicit follow-up, not a silently completed checkbox or a second shadow engine.

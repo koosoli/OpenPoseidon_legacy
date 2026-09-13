@@ -2132,3 +2132,13 @@ and is explicitly NOT counted as DLSS acceptance. Full/budget remain opt-in:
 cost matrix and movement/quality limitations are recorded in
 [contact shadow decision](decisions/CONTACT-SHADOWS-20260913.md).
 Reforger material/supertexture work remains separate, not declared resolved.
+
+Contact-shadow follow-up installed 6c32bfc9: nine same-build final static arms
+pass with verified native/MSAA/DLSS routes; full GPU median/p95 and separate
+receiver-containing/caster snapshots are in the decision above. This is local
+prototype evidence, not promotion: balanced repetitions and moving cascade
+visual acceptance remain open. Budget mode is the next evaluation candidate;
+default remains fixed. VBS4 exploration v2 was cross-checked: screen-depth detail
+and reusable CSM resolve complement, not replace, this filter and are not being
+implemented in parallel. Clouds already attenuate direct light locally; additional
+cloud-scattering penumbra broadening is explicitly not implemented or tested.
