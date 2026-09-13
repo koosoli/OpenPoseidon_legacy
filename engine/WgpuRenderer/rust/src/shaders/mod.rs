@@ -178,6 +178,12 @@ mod tests {
         assert!(!helper.contains("eye_depth"));
         assert!(!helper.contains("splits["));
         assert!(helper.contains("textureLoad(shadow_map"));
+        assert!(helper.contains("point * length(point) * search_uv"));
+        for i in 0..16 {
+            let r = ((i as f64 + 0.5) / 16.0).sqrt();
+            assert!(r * r > 0.0 && r * r < 1.0);
+            assert!(r * r <= r);
+        }
         assert!(!helper.contains("return plane_compare("));
         assert!(helper.contains("smoothstep(0.5, 1.5, radius_texels)"));
         // Continuous reconstruction-to-penumbra handoff, including both endpoints.

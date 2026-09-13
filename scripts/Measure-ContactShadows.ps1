@@ -1,7 +1,7 @@
 param(
  [ValidateRange(0,2)][int]$Mode=0,
  [ValidateSet('native','msaa','dlss')][string]$AA='native',
- [ValidateRange(0,2)][double]$SunRadius=0.266,
+ [ValidateRange(0,8)][double]$SunRadius=0.266,
  [ValidateRange(1,10)][int]$Repeats=1,
  [string]$Label='',
  [switch]$Reference,

@@ -68,7 +68,12 @@ fn contact_filter(uv: vec2<f32>, layer: i32, reference: f32,
     // Centre included even in the cheap mode so contact casters are not skipped.
     for (var i = 0u; i <= taps; i++) {
         var offset = vec2<f32>(0.0);
-        if (i < taps) { offset = contact_disk(i * stride) * search_uv; }
+        if (i < taps) {
+            // Concentrate the search near the receiver while retaining outer
+            // coverage: wide emitters must not jump over small nearby blockers.
+            let point = contact_disk(i * stride);
+            offset = point * length(point) * search_uv;
+        }
         let sample_uv = uv + offset;
         if (any(sample_uv <= vec2<f32>(0.0)) || any(sample_uv >= vec2<f32>(1.0))) { continue; }
         let pixel = vec2<i32>(sample_uv * vec2<f32>(size));

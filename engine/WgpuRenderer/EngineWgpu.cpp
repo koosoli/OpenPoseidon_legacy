@@ -1584,7 +1584,7 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
         _smTuning.contactShadows = static_cast<int>(std::clamp(std::strtol(value, nullptr, 10), 0L, 2L));
     if (const char* value = std::getenv("WGR_SUN_ANGULAR_RADIUS")) {
         const float radius = std::strtof(value, nullptr);
-        if (std::isfinite(radius)) _smTuning.sunAngularRadius = std::clamp(radius, 0.0f, 2.0f);
+        if (std::isfinite(radius)) _smTuning.sunAngularRadius = std::clamp(radius, 0.0f, 8.0f);
     }
     LOG_INFO(Graphics, "CSM contact shadows: mode={} sun angular radius={} degrees (prototype)",
              _smTuning.contactShadows, _smTuning.sunAngularRadius);
@@ -3874,7 +3874,7 @@ void EngineWgpu::NextFrame()
                 sb.cam_fwd = {_cameras[i].dir[0], _cameras[i].dir[1], _cameras[i].dir[2],
                               static_cast<float>(std::clamp(_smTuning.contactShadows, 0, 2))};
                 sb.sun_dir = {_smCascades.sunDir.x, _smCascades.sunDir.y, _smCascades.sunDir.z,
-                              std::tan(std::clamp(_smTuning.sunAngularRadius, 0.0f, 2.0f) * (3.14159265f / 180.0f))};
+                              std::tan(std::clamp(_smTuning.sunAngularRadius, 0.0f, 8.0f) * (3.14159265f / 180.0f))};
                 // LGT-010: one perspective view per shadowing spot. The light list was built
                 // for THIS frame just above, so `_localShadowCount` is already final here.
                 {
