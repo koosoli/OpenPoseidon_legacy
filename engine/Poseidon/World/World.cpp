@@ -1818,7 +1818,10 @@ void World::Simulate(float deltaT, bool& enableDraw)
             }();
             Camera* residencyCamera = _scene.GetCamera();
             if (modernObjectsEngine && residencyCamera)
+            {
                 GLandscape->UpdateModernObjectResidency(residencyCamera->Position());
+                GLandscape->UpdateNativeFarResidency(residencyCamera->Position());
+            }
         }
         // RenderSnapshot Phase 5 step 1: simulation publishes the frame's presentation
         // snapshot at its own draw boundary; the renderer only consumes it. InitDraw

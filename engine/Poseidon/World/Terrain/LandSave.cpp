@@ -3158,8 +3158,12 @@ void Landscape::PrefetchModernObjectModels(const std::vector<ModernObjectCellCan
     // ready IRs for models with no non-resident placement in the new desired set. Without
     // this the ready set (bounded, and the workers park when it is full) could fill with
     // models nobody will Take, and the models this window needs would sit behind them.
+    auto wantedEpochs = _modernObjectModelPrefetchEpoch;
+    for (size_t model = 0; model < _nativeFarModelWanted.size() && model < wantedEpochs.size(); ++model)
+        if (_nativeFarModelWanted[model])
+            wantedEpochs[model] = _modernObjectPrefetchEpoch;
     const size_t staleDropped = _modernObjectPreparer->DropStale(
-        _modernObjectModelPrefetchEpoch.data(), _modernObjectModelPrefetchEpoch.size(), _modernObjectPrefetchEpoch);
+        wantedEpochs.data(), wantedEpochs.size(), _modernObjectPrefetchEpoch);
     // Pass 2: enqueue in that order. A full queue is not an error -- the admit loop
     // re-requests on demand when it reaches a placement whose model is still Unknown.
     uint32_t requested = 0;
@@ -3612,6 +3616,16 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                 // is taken while it is. Nothing about the Object is retained -- it is destroyed
                 // exactly as before, on the same line, in the same frame.
                 LODShapeWithShadow* releasedShape = object->GetShape();
+                if (index < _nativeFarWanted.size())
+                {
+                    // Bit 2 persists across camera windows: never resurrect an observed wreck.
+                    if (object->IsDestroyed())
+                        _nativeFarWanted[index] |= 2;
+                    else if ((_nativeFarWanted[index] & 1) && releasedShape &&
+                             releasedShape->BoundingSphere() >= 2.0f &&
+                             GEngine->SceneFarObjectCreated(index, releasedShape, object->Transform()))
+                        _nativeFarActive.insert(index);
+                }
                 placement.resident = nullptr;
                 RemoveObject(keepAlive);
                 RetainReleasedShape(releasedShape);
@@ -4124,6 +4138,8 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
             placement.resident = admitted;
             if (admitted)
             {
+                if (_nativeFarActive.erase(index))
+                    GEngine->SceneFarObjectRemoved(index);
                 ++created;
                 // (a) If the eviction cache was holding this model, the ObjectCreate above found
                 // it in ShapeBank instead of decoding it again, and the Object now owns it. Drop
@@ -4284,6 +4300,197 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                  texStore.entries, texStore.bytes / (1024.0 * 1024.0), texStore.expired,
                  _modernObjectColdParkHits, _modernObjectColdParkStale);
     }
+}
+
+void Landscape::ClearNativeFarResidency()
+{
+    if (GEngine && !_nativeFarActive.empty())
+        GEngine->ClearFarObjects();
+    _nativeFarActive.clear();
+    _nativeFarModels.clear();
+    _nativeFarCandidates.clear();
+    _nativeFarWanted.clear();
+    _nativeFarModelWanted.clear();
+    _nativeFarModelRejected.clear();
+    _nativeFarCursor = 0;
+    _nativeFarCenterX = _nativeFarCenterZ = -0x3fffffff;
+}
+
+void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
+{
+    // Kept opt-in until the authored-mesh cost/coverage and lifetime tests pass.
+    static const bool enabled = [] {
+        const char* value = std::getenv("WGR_NATIVE_FAR_AUTHORED");
+        return value && value[0] == '1';
+    }();
+    if (!enabled || !_modernObjectStreaming || GetEnfusionSurfaceCount() == 0 || !GEngine)
+        return;
+    if (!std::isfinite(cameraPosition.X()) || !std::isfinite(cameraPosition.Z()) || _landGrid <= 0)
+        return;
+    constexpr float range = 3000.0f;
+    constexpr size_t candidateBudget = 200000;
+    const int cx = static_cast<int>(std::clamp(cameraPosition.X() / _landGrid,
+                                             0.0f, static_cast<float>(_landRange - 1))) / 16 * 16;
+    const int cz = static_cast<int>(std::clamp(cameraPosition.Z() / _landGrid,
+                                             0.0f, static_cast<float>(_landRange - 1))) / 16 * 16;
+    if (cx != _nativeFarCenterX || cz != _nativeFarCenterZ)
+    {
+        _nativeFarCenterX = cx;
+        _nativeFarCenterZ = cz;
+        _nativeFarWanted.resize(_modernObjectPlacements.size(), 0);
+        for (auto& state : _nativeFarWanted)
+            state &= 2; // preserve observed destruction, rebuild only the wanted bit
+        _nativeFarModelWanted.assign(_modernObjectModels.size(), 0);
+        _nativeFarModelRejected.resize(_modernObjectModels.size(), 0);
+        _nativeFarCandidates.clear();
+        _nativeFarCursor = 0;
+        const int radius = static_cast<int>(std::min(std::ceil(range / _landGrid),
+                                                    static_cast<float>(_landRange)));
+        std::vector<ModernObjectCellCandidate> cells;
+        for (int z = std::max(0, cz - radius); z <= std::min(_landRange - 1, cz + radius); ++z)
+            for (int x = std::max(0, cx - radius); x <= std::min(_landRange - 1, cx + radius); ++x)
+            {
+                const uint32_t d2 = (x - cx) * (x - cx) + (z - cz) * (z - cz);
+                const uint32_t cell = z * _landRange + x;
+                if (d2 <= static_cast<uint32_t>(radius * radius) &&
+                    cell < _modernObjectCells.size() && !_modernObjectCells[cell].empty())
+                    cells.push_back({cell, d2});
+            }
+        std::sort(cells.begin(), cells.end(), [](const auto& a, const auto& b) {
+            return a.distance2 != b.distance2 ? a.distance2 < b.distance2 : a.index < b.index;
+        });
+        for (const auto& cell : cells)
+        {
+            for (uint32_t index : _modernObjectCells[cell.index])
+            {
+                const auto& placement = _modernObjectPlacements[index];
+                if (placement.modelIndex >= _modernObjectModels.size() || (_nativeFarWanted[index] & 2))
+                    continue;
+                _nativeFarCandidates.push_back(index);
+                _nativeFarWanted[index] = 1;
+                _nativeFarModelWanted[placement.modelIndex] = 1;
+                if (_nativeFarCandidates.size() >= candidateBudget)
+                    break;
+            }
+            if (_nativeFarCandidates.size() >= candidateBudget)
+                break;
+        }
+        for (auto it = _nativeFarActive.begin(); it != _nativeFarActive.end();)
+        {
+            if ((_nativeFarWanted[*it] & 1) == 0 || _modernObjectPlacements[*it].resident)
+            {
+                GEngine->SceneFarObjectRemoved(*it);
+                it = _nativeFarActive.erase(it);
+            }
+            else
+                ++it;
+        }
+        for (auto it = _nativeFarModels.begin(); it != _nativeFarModels.end();)
+            if (!_nativeFarModelWanted[it->first])
+                it = _nativeFarModels.erase(it);
+            else
+                ++it;
+        // Preserve near requests and retire old far work through the SAME queue.
+        if (_modernObjectPreparer && _modernObjectModelPrefetchEpoch.size() == _nativeFarModelWanted.size())
+        {
+            auto epochs = _modernObjectModelPrefetchEpoch;
+            for (size_t i = 0; i < epochs.size(); ++i)
+                if (_nativeFarModelWanted[i])
+                    epochs[i] = _modernObjectPrefetchEpoch;
+            _modernObjectPreparer->DropStale(epochs.data(), epochs.size(), _modernObjectPrefetchEpoch);
+        }
+        LOG_INFO(World, "Native authored far window: candidates={} active={} models={} radius={}m cap={}",
+                 _nativeFarCandidates.size(), _nativeFarActive.size(), _nativeFarModels.size(), range,
+                 candidateBudget);
+    }
+    if (_nativeFarCandidates.empty())
+        return;
+    const auto start = std::chrono::steady_clock::now();
+    uint32_t added = 0, modelWork = 0;
+    for (size_t scan = 0; scan < std::min<size_t>(4096, _nativeFarCandidates.size()); ++scan)
+    {
+        if (scan > 0 && std::chrono::duration<double, std::milli>(
+                           std::chrono::steady_clock::now() - start).count() >= 2.0)
+            break;
+        const uint32_t index = _nativeFarCandidates[_nativeFarCursor];
+        _nativeFarCursor = (_nativeFarCursor + 1) % _nativeFarCandidates.size();
+        const auto& placement = _modernObjectPlacements[index];
+        const uint32_t modelIndex = placement.modelIndex;
+        if (placement.resident || (_nativeFarWanted[index] & 2) || _nativeFarActive.count(index) ||
+            _nativeFarModelRejected[modelIndex])
+            continue;
+        auto found = _nativeFarModels.find(modelIndex);
+        if (found == _nativeFarModels.end())
+        {
+            const RStringB& name = _modernObjectModels[modelIndex];
+            Ref<LODShapeWithShadow> shape = Shapes.Find(name, false, true);
+            if (!shape)
+            {
+                // Near admissions win. Never decode a cold far model synchronously.
+                if (_modernObjectResidencyPending || modelWork || !_modernObjectPreparer ||
+                    !_modernObjectPreparer->Running())
+                    continue;
+                const auto state = _modernObjectPreparer->Query(modelIndex);
+                if (state == ObjectStreamPreparer::State::Unknown)
+                    _modernObjectPreparer->Request(modelIndex);
+                else if (state == ObjectStreamPreparer::State::Ready)
+                {
+                    auto model = _modernObjectPreparer->Take(modelIndex);
+                    if (model)
+                    {
+                        ++modelWork;
+                        std::string low(static_cast<const char*>(name));
+                        for (char& c : low)
+                            if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
+                        model->sourcePath = low;
+                        auto tables = std::make_shared<Model::ShapeAdapter::AdapterBankTables>();
+                        Model::ShapeAdapter::BuildAdapterBankTables(*model, *tables);
+                        _modernObjectPreparer->SubmitConvert(modelIndex, std::move(model), std::move(tables));
+                    }
+                }
+                else if (state == ObjectStreamPreparer::State::Converted)
+                {
+                    auto converted = _modernObjectPreparer->TakeConverted(modelIndex);
+                    if (converted.shape)
+                    {
+                        ++modelWork;
+                        ShapeBank::WorldModelScope worldModel(Shapes);
+                        shape = Shapes.NewFromModel(name, false, true, std::move(converted.model),
+                                                    nullptr, converted.shape);
+                    }
+                }
+                else if (state == ObjectStreamPreparer::State::Failed || state == ObjectStreamPreparer::State::NotLoose)
+                    _nativeFarModelRejected[modelIndex] = 1;
+                if (!shape)
+                    continue;
+            }
+            // Tiny props do not earn a far instance. No name-based asset substitutions.
+            if (shape->BoundingSphere() < 2.0f)
+            {
+                _nativeFarModelRejected[modelIndex] = 1;
+                continue;
+            }
+            found = _nativeFarModels.emplace(modelIndex, shape).first;
+        }
+        Matrix4 transform;
+        transform.SetDirectionAside(Vector3(placement.rows[0], placement.rows[1], placement.rows[2]));
+        transform.SetDirectionUp(Vector3(placement.rows[3], placement.rows[4], placement.rows[5]));
+        transform.SetDirection(Vector3(placement.rows[6], placement.rows[7], placement.rows[8]));
+        transform.SetPosition(Vector3(placement.rows[9], placement.rows[10], placement.rows[11]));
+        const float scale = transform.Scale();
+        transform.SetUpAndAside(transform.DirectionUp(), transform.DirectionAside());
+        transform.SetScale(scale);
+        if (GEngine->SceneFarObjectCreated(index, found->second, transform))
+        {
+            _nativeFarActive.insert(index);
+            ++added;
+        }
+        else
+            _nativeFarModelRejected[modelIndex] = 1;
+    }
+    if (added && (_nativeFarActive.size() / 10000 != (_nativeFarActive.size() - added) / 10000))
+        LOG_INFO(World, "Native authored far progress: active={} sharedModels={} near={}",
+                 _nativeFarActive.size(), _nativeFarModels.size(), _modernResidentObjectCount);
 }
 
 void Landscape::SnapshotObjectStreamDiag(Poseidon::Dev::ObjectStreamResidencyCounters& out) const

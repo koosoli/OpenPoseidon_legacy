@@ -2977,6 +2977,11 @@ class Engine : public IGraphicsEngine
     // no such readout. The dev panel and the capture metrics print it verbatim.
     virtual std::string DlssStatusReason() { return {}; }
 
+    // Visual-only authored world instances. Append virtuals to preserve existing slots.
+    virtual bool SceneFarObjectCreated(uint32_t, LODShapeWithShadow*, const Matrix4&) { return false; }
+    virtual void SceneFarObjectRemoved(uint32_t) {}
+    virtual void ClearFarObjects() {}
+
   protected:
     // Post-hook fires from OnWindowResized so apps can re-run the aspect policy
     // when the viewport changes.

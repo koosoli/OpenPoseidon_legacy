@@ -184,6 +184,9 @@ class EngineWgpu : public EngineDummy
     // reports whether an object is currently drawn by the GPU path, so the scene draw loop
     // suppresses its CPU colour draw while its shadow caster stays on the CPU path.
     void SceneObjectCreated(Object* obj) override;
+    bool SceneFarObjectCreated(uint32_t id, LODShapeWithShadow* shape, const Matrix4& transform) override;
+    void SceneFarObjectRemoved(uint32_t id) override;
+    void ClearFarObjects() override;
     void SceneObjectRemoved(Object* obj) override;
     void SceneObjectMoved(Object* obj) override;
     GpuDrawCoverage GpuDrivenCoverage(const Object* obj) const override;
@@ -737,6 +740,13 @@ class EngineWgpu : public EngineDummy
     };
     // Objects handed to the GPU path -> their model + retained instance slot.
     std::unordered_map<const Object*, GpuInstance> _gpuInstances;
+    struct FarGpuInstance
+    {
+        uint32_t slot;
+        Ref<LODShapeWithShadow> shape;
+    };
+    std::unordered_map<uint32_t, FarGpuInstance> _farGpuInstances;
+    std::unordered_map<const LODShapeWithShadow*, uint32_t> _farGpuModelRefs;
     // REN-TEMP-001H / ID-1: draw-object identity for motion vectors. The scene draw
     // loop brackets each object via Engine::SetDrawObject; the identity itself lives ON
     // the Object (Object::RenderId, render-snapshot design §4) and is folded to the

@@ -1781,6 +1781,8 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
 
 EngineWgpu::~EngineWgpu()
 {
+    StopRenderThread();
+    ClearFarObjects();
     s_self = nullptr;
     // FIRST: every VertexBufferWgpu still alive holds this link, and Shapes outlive the
     // engine on some teardown orders. Nulling it here turns a late SetSkinData into a no-op
@@ -9075,6 +9077,10 @@ void EngineWgpu::MarkRetainedModelLiveness()
                 _wbank->NoteTextureUse(texture);
     };
 
+    // Far instances have no Object entry; retain their shared material liveness.
+    for (const auto& [shape, count] : _farGpuModelRefs)
+        markShape(shape);
+
     const size_t end = std::min(buckets, _livenessCursor + perFrame);
     for (; _livenessCursor < end; ++_livenessCursor)
     {
@@ -9444,6 +9450,54 @@ void EngineWgpu::SceneObjectCreated(Object* obj)
     _gpuInstances[obj] = GpuInstance{model, slot, shape, obj->Transform().Position(), cp.mode, cov};
     // Mirror the coverage onto the Object so GpuDrivenCoverage() is an O(1) field read (see there).
     obj->SetGpuCoverage(static_cast<int>(cov));
+}
+
+bool EngineWgpu::SceneFarObjectCreated(uint32_t id, LODShapeWithShadow* shape, const Matrix4& transform)
+{
+    if (!_gpuDriven || !_renderer || !shape)
+        return false;
+    if (_farGpuInstances.count(id))
+        return true;
+    const uint32_t model = RegisterGpuModel(shape);
+    if (model == WGR_INVALID_MODEL || _gpuConformShapes.count(shape))
+        return false;
+    WgrInstance inst = BuildGpuProxyInstance(transform, model);
+    inst.flags = WGR_INSTANCE_FAR_AUTHORED;
+    const MapType type = shape->GetMapType();
+    if (type == MapBush)
+        inst.flags |= WGR_INSTANCE_CANOPY_BUSH;
+    else if (type == MapTree || type == MapSmallTree)
+    {
+        inst.flags |= WGR_INSTANCE_CANOPY_TREE;
+        if (IsNativeTreeWindModel(shape->Name()))
+            inst.flags |= WGR_INSTANCE_COHERENT_TREE_WIND;
+    }
+    const uint32_t slot = EnqueueInstanceAdd(inst);
+    ++_ops.instanceAdd;
+    RetainGpuModel(shape);
+    ++_farGpuModelRefs[shape];
+    _farGpuInstances.emplace(id, FarGpuInstance{slot, shape});
+    return true;
+}
+
+void EngineWgpu::SceneFarObjectRemoved(uint32_t id)
+{
+    const auto found = _farGpuInstances.find(id);
+    if (found == _farGpuInstances.end())
+        return;
+    const auto* shape = found->second.shape.GetRef();
+    EnqueueInstanceRemove(found->second.slot);
+    ++_ops.instanceRemove;
+    if (--_farGpuModelRefs[shape] == 0)
+        _farGpuModelRefs.erase(shape);
+    ReleaseGpuModel(shape);
+    _farGpuInstances.erase(found);
+}
+
+void EngineWgpu::ClearFarObjects()
+{
+    while (!_farGpuInstances.empty())
+        SceneFarObjectRemoved(_farGpuInstances.begin()->first);
 }
 
 // REN-TEMP-001H: pointer -> stable 16-bit draw-object id, allocated on first sight.

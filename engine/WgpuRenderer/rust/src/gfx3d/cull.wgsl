@@ -230,6 +230,17 @@ fn classify(idx: u32) -> CullResult {
         level = i;
     }
 
+    // Visual-only authored far tier, shared by colour and shadow culls. Never
+    // admit a special/decal level as its replacement for the resident object.
+    if ((inst.flags & 16u) != 0u && model.lod_count > 0u) {
+        var far_level = model.lod_count - 1u;
+        loop {
+            if (far_level == 0u || lods[model.lod_base + far_level].is_decal == 0u) { break; }
+            far_level--;
+        }
+        level = far_level;
+    }
+
     res.culled = false;
     res.level = level;
     res.dist2 = dist2;
@@ -297,6 +308,14 @@ fn level_for(lod_base: u32, lod_count: u32, resol2: f32) -> u32 {
 fn whatif_triangles(idx: u32, dist2: f32) {
     let inst = instances[idx];
     let model = models[inst.model];
+    if ((inst.flags & 16u) != 0u) {
+        let level = level_for(model.lod_base, model.lod_count, 1.0e30);
+        let tris = lod_triangles(model.lod_base, level);
+        for (var i = 16u; i < 20u; i++) {
+            atomicAdd(&counters[STAT_BASE + i], tris);
+        }
+        return;
+    }
     let base_detail2 = dist2 * cull.lod_inv_width * cull.lod_inv_width;
     let scale2 = cull.lod_scale * cull.lod_scale;
     let f0 = 0.5;

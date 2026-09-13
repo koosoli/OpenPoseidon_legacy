@@ -275,6 +275,7 @@ void Landscape::Init()
             _objects(x, z).Clear();
         }
     }
+    ClearNativeFarResidency();
     _modernObjectPlacements.clear();
     _modernObjectCells.clear();
     _modernObjectModels.clear();
@@ -1531,6 +1532,7 @@ void Landscape::SetTexture(int i, const char* name)
 
 Landscape::~Landscape()
 {
+    ClearNativeFarResidency();
     // clear all objects
     int x, z;
     for (z = 0; z < _landRange; z++)

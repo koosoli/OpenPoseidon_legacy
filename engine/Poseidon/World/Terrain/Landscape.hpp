@@ -12,6 +12,7 @@
 #include <list>
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace Poseidon
@@ -657,6 +658,15 @@ class Landscape : public SerializeClass
     int _modernObjectCandidateRadius = 0; // window radius the cached list was gathered at
     bool _modernObjectCandidatesValid = false;
     std::vector<RStringB> _modernObjectModels;
+    // Native visual-only tier: shares the model preparer and bank with near residency.
+    std::vector<uint32_t> _nativeFarCandidates;
+    std::vector<uint8_t> _nativeFarWanted;
+    std::vector<uint8_t> _nativeFarModelWanted;
+    std::vector<uint8_t> _nativeFarModelRejected;
+    std::unordered_set<uint32_t> _nativeFarActive;
+    std::unordered_map<uint32_t, Ref<LODShapeWithShadow>> _nativeFarModels;
+    size_t _nativeFarCursor = 0;
+    int _nativeFarCenterX = -0x3fffffff, _nativeFarCenterZ = -0x3fffffff;
     std::vector<uint8_t> _modernObjectCellActive;
     std::vector<uint8_t> _modernObjectCellDesired;
     std::vector<uint32_t> _modernObjectCellCursor;
@@ -939,6 +949,8 @@ class Landscape : public SerializeClass
     // No-op for legacy worlds. Called by the WGPU terrain path once the live
     // camera exists; updates only when the camera crosses a small cell block.
     void UpdateModernObjectResidency(Vector3Par cameraPosition);
+    void UpdateNativeFarResidency(Vector3Par cameraPosition);
+    void ClearNativeFarResidency();
     void SaveOptimized(QOStream& f);
     void SaveOptimized(const char* name);
 

@@ -3150,6 +3150,45 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn authored_far_lod_uses_coarse_mesh_skips_decals_and_retires() {
+        let Some((device, queue)) = headless() else { return; };
+        let mut cull = CullState::new(&device);
+        let sections: Vec<_> = (0..3).map(|i| SectionGpu {
+            first_index: i * 6, index_count: 3, base_vertex: 0, variant: 0,
+        }).collect();
+        let lods: Vec<_> = (0..3).map(|i| LodGpu {
+            resolution: i as f32 * 100.0, section_base: i, section_count: 1,
+            is_decal: u32::from(i == 2),
+        }).collect();
+        let model = cull.register_model(1.0, &lods, &sections, &[SectionMaterialGpu::zeroed(); 3]);
+        let mk = |flags| InstanceGpu {
+            world: Mat4::IDENTITY.to_cols_array(), center: [0.0, 0.0, 10.0, 1.0],
+            model, flags, cull_radius: 0, _pad: 0,
+            conform0: [0.0; 4], conform1: [0.0; 4], conform2: [0.0; 4],
+        };
+        cull.instance_add(mk(0));
+        let far = cull.instance_add(mk(16));
+        let mut params = CullParamsGpu::zeroed();
+        params.objects_z2 = 10000.0;
+        params.lod_inv_width = 0.001;
+        params.lod_scale = 1.0;
+        cull.set_params(params);
+        for expected in [vec![0, 6], vec![0]] {
+            cull.prepare(&device, &queue);
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+            cull.dispatch(&mut encoder);
+            queue.submit([encoder.finish()]);
+            let count = CULL_VARIANT_COUNT as u64 * cull.variant_capacity() as u64 * ARG_WORDS;
+            let words = read_u32s(&device, &queue, cull.out_args().unwrap(), count);
+            let mut first_indices: Vec<_> = words.chunks_exact(ARG_WORDS as usize)
+                .filter(|arg| arg[1] > 0).map(|arg| { assert_eq!(arg[1], 1); arg[2] }).collect();
+            first_indices.sort_unstable();
+            assert_eq!(first_indices, expected);
+            if expected.len() == 2 { cull.instance_remove(far); }
+        }
+    }
+
     // Multi-view (§6): a shadow-cascade view culls the SAME retained scene against its own
     // frustum into its OWN args/records, independent of the main view. Here the cascade frustum
     // = the main camera's (a stand-in for a light-VP that frames the instance), so the visible
