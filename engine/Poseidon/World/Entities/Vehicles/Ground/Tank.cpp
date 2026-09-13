@@ -969,8 +969,10 @@ void Tank::Simulate(float deltaT, SimulationImportance prec)
                 // water movement is much less efficient
                 if (!_landContact && !_objectContact)
                 {
-                    invSpeedSizeL *= 0.1f;
-                    invSpeedSizeR *= 0.1f;
+                    const float propulsionScale = AmphibiousTrackedPropulsionScale(
+                        Type()->_canFloat, _landContact, _objectContact);
+                    invSpeedSizeL *= propulsionScale;
+                    invSpeedSizeR *= propulsionScale;
                 }
                 float turnEnhancer = speedSize * 0.5f * (1 / power);
                 turnEnhancer *= CollisionSize() * (1.0f / 3);

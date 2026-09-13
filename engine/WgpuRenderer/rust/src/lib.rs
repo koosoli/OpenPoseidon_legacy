@@ -4829,7 +4829,8 @@ impl Renderer {
                           display_2d: bool,
                           want_2d: bool,
                           depth_write_off: bool,
-                          prepassed_filter: Option<bool>| {
+                          prepassed_filter: Option<bool>,
+                          water_opaque_filter: Option<bool>| {
             let mut st3d = crate::gfx3d::Pass3dState::default();
             for op in sub {
                 if matches!(op, Plan3dOp::Draw2D(_)) != want_2d {
@@ -4842,6 +4843,14 @@ impl Renderer {
                         _ => false,
                     };
                     if is_prepassed != want_prepassed { continue; }
+                }
+                if let Some(want_water_opaque) = water_opaque_filter {
+                    let is_water_opaque = match op {
+                        Plan3dOp::Draw3D { draw, .. } => draws3d.get(*draw as usize)
+                            .is_some_and(crate::gfx3d::draw_replays_before_water),
+                        _ => false,
+                    };
+                    if is_water_opaque != want_water_opaque { continue; }
                 }
                 match op {
                     Plan3dOp::Draw2D(arg) => {
@@ -5437,7 +5446,22 @@ impl Renderer {
                     self.gpu_timers
                         .begin_pass(&mut pass, TimerRegion::OpsPreWater);
                 }
-                render_ops(self, &mut pass, ops_pre_water, display_2d, false, prepassed, None);
+                render_ops(self, &mut pass, ops_pre_water, display_2d, false, prepassed, None, None);
+                // Solid vehicle/object colour can arrive in the legacy sorted tail even though
+                // its depth was prepassed. Draw that subset before transparent water so the sea
+                // covers the submerged hull and leaves a real depth-correct waterline.
+                if water_split.is_some() {
+                    render_ops(
+                        self,
+                        &mut pass,
+                        ops_post_water,
+                        display_2d,
+                        false,
+                        true,
+                        None,
+                        Some(true),
+                    );
+                }
                 if time_segment {
                     self.gpu_timers
                         .end_pass(&mut pass, TimerRegion::OpsPreWater);
@@ -5686,7 +5710,16 @@ impl Renderer {
                     occlusion_query_set: None,
                     multiview_mask: None,
                 });
-                render_ops(self, &mut pass, ops_post_water, display_2d, false, true, Some(true));
+                render_ops(
+                    self,
+                    &mut pass,
+                    ops_post_water,
+                    display_2d,
+                    false,
+                    true,
+                    Some(true),
+                    Some(false),
+                );
             }
 
             // VOLUMETRIC SHAFTS, composited HERE -- after the opaque world, after water and
@@ -5830,6 +5863,7 @@ impl Renderer {
                     false,
                     prepassed,
                     early_opaque.then_some(false),
+                    Some(false),
                 );
                 if time_segment {
                     self.gpu_timers
@@ -5881,7 +5915,7 @@ impl Renderer {
                 // Bracketing the whole pass keeps the region meaning "the 2D work in this
                 // frame" rather than "the last 2D sub-pass".
                 self.gpu_timers.begin_pass(&mut pass, TimerRegion::Ui2d);
-                render_ops(self, &mut pass, seg_ops, display_2d, true, false, None);
+                render_ops(self, &mut pass, seg_ops, display_2d, true, false, None, None);
                 self.gpu_timers.end_pass(&mut pass, TimerRegion::Ui2d);
                 drop(pass);
                 // The 2D sub-pass attaches depth Load/Store, so a depth-tested 2D draw can write

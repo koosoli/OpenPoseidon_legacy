@@ -371,6 +371,12 @@ pub(crate) fn draw_replays_before_rays(d: &WgrDraw3D, cutout_only: bool) -> bool
         && d.flags & (crate::ffi::WGR_DRAW3D_COCKPIT | crate::ffi::WGR_DRAW3D_MONITOR) == 0
 }
 
+/// Solid colour submitted after the sea still belongs in front of its transparent pass.
+/// Cutouts keep their authored order because their coverage needs separate handling.
+pub(crate) fn draw_replays_before_water(d: &WgrDraw3D) -> bool {
+    draw_replays_before_rays(d, false) && d.alpha_ref <= 0.0
+}
+
 #[test]
 fn cutout_ray_replay_preserves_solids_blends_and_cockpits() {
     let mut d: WgrDraw3D = unsafe { std::mem::zeroed() };
@@ -388,6 +394,23 @@ fn cutout_ray_replay_preserves_solids_blends_and_cockpits() {
     assert!(!draw_replays_before_rays(&d, true));
     d.flags = crate::ffi::WGR_DRAW3D_MONITOR;
     assert!(!draw_replays_before_rays(&d, true));
+}
+
+#[test]
+fn water_replay_moves_only_solid_prepassed_world_geometry() {
+    let mut d: WgrDraw3D = unsafe { std::mem::zeroed() };
+    d.blend = WgrBlend::Opaque;
+    d.depth = WgrDepthMode::TestWrite;
+    d.palette_slot = NO_PALETTE;
+    assert!(draw_replays_before_water(&d));
+    d.alpha_ref = 0.5;
+    assert!(!draw_replays_before_water(&d));
+    d.alpha_ref = 0.0;
+    d.blend = WgrBlend::Alpha;
+    assert!(!draw_replays_before_water(&d));
+    d.blend = WgrBlend::Opaque;
+    d.flags = crate::ffi::WGR_DRAW3D_COCKPIT;
+    assert!(!draw_replays_before_water(&d));
 }
 
 #[test]

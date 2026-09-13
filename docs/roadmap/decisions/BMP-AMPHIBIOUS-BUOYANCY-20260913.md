@@ -19,14 +19,25 @@ reject that negative depth, while amphibious tracked vehicles use it to keep
 buoyancy and their existing water-drive gate continuous through the trough.
 This applies only to tracked vehicles whose config already has `canFloat`;
 non-floating tanks, wheeled vehicles, ships and the rendered waves are unchanged.
+Amphibious tracked propulsion now uses a 0.16 open-water scale instead of the
+generic 0.10 scale. It remains boat-like rather than gaining land speed, but has
+enough authority to overcome the quadratic hull drag and modern waves.
+
+The renderer now moves only solid, already-depth-prepassed world geometry from
+the legacy post-water tail into the pre-water colour pass. Transparent water can
+therefore cover the submerged BMP hull while the upper hull occludes it, yielding
+a real depth-tested waterline. Alpha cutouts, blended glass, spray, cockpit and
+monitor surfaces retain their authored order.
 
 ## Verification and remaining acceptance
 
-- `PoseidonTests "[vehicles][tank][waves]"`: 1 case, 6 assertions passed.
+- `PoseidonTests "[vehicles][tank]"`: 3 cases, 11 assertions passed.
 - `PoseidonTests "[Water]"`: 11 cases, 4,109 assertions passed, including
   explicit mean-submerged trough coverage.
-- `PoseidonGame` RelWithDebInfo build passed.
-- Runtime BMP1 acceptance remains open: enter water at rest and under power,
-  cross crest/trough phases, turn, stop, and confirm stable partial submersion
-  without launch or sinking. The change is therefore code-complete but not yet
-  visually accepted.
+- The targeted WGPU water-order test passed. The broader `gfx3d::` selection
+  passed 87/88; its one failure is the unrelated existing normal-map cavity
+  source assertion.
+- `PoseidonGame` and `PoseidonTests` RelWithDebInfo builds passed.
+- Runtime BMP1/BMP2 acceptance remains open: confirm the intersecting waterline,
+  stable partial submersion and forward movement through crest/trough phases.
+  The change is code-complete but not yet visually accepted.
