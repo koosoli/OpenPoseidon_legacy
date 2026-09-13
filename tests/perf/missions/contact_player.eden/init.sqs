@@ -1,0 +1,26 @@
+~1
+shadowWalker setBehaviour "CARELESS"
+shadowWalker setSpeedMode "LIMITED"
+_target=[5110,3970,0]
+shadowWalker doMove _target
+_cam="camera" camCreate [5075,3994,3]
+_cam cameraEffect ["internal","back"]
+_report=0
+#follow
+_p=getPos shadowWalker
+_cam camSetPos [(_p select 0)-5,(_p select 1)-6,3]
+_cam camSetTarget [(_p select 0),(_p select 1),1]
+_cam camCommit 0
+? time < _report : goto "route"
+logInfo format ["CONTACT walker pos=%1 speed=%2",_p,speed shadowWalker]
+_report=time+5
+#route
+_dx=(_p select 0)-(_target select 0)
+_dy=(_p select 1)-(_target select 1)
+? (_dx*_dx+_dy*_dy) > 9 : goto "wait"
+_target=[5080,4000,0]
+? (_p select 0) < 5095 : _target=[5110,3970,0]
+shadowWalker doMove _target
+#wait
+~0.01
+goto "follow"
