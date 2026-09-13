@@ -2048,3 +2048,13 @@ LOD0/1/2). No new disconnection was apparent in the inspected frames. Native bra
 animation fidelity, DLSS visual acceptance and moving shadows are not claimed;
 the bounded coherent fallback is default ON for native trees. See
 [native wind record](decisions/NATIVE-TREE-WIND-20260913.md).
+
+September 13 native material follow-up: d8404fa7 preserves authored auxiliary
+alpha on decoded native RG normal maps; dae19d91 uses NHO AO in terrain ambient
+shading with snow/detail transitions and no additional texture fetch. Six terrain
+tests, DDS tests and installed Coast off/on lifecycle checks pass. The visual
+change is subtle, not Reforger parity. Native far admission (~563 m forest budget)
+and pale crowns remain OPEN. Original crown material inspection confirms missing
+spatial AO/colour-variation integration, not a proven simple tint correction.
+The cross-audit distinguishes code findings from unrun runtime/performance gates:
+[upstream cross-audit](decisions/UPSTREAM-CROSS-AUDIT-20260913.md).
