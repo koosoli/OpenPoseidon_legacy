@@ -1,0 +1,4 @@
+binary = "OpenPoseidon"
+mission = "tests/perf/missions/perf_field.eden"
+timeout = 90
+tags = ["wgpu", "streetlamp"]

@@ -209,6 +209,8 @@ void StreetLampType::InitShape()
     const ParamEntry& par = *_par;
     _scopeLevel = 2;
     base::InitShape();
+    if (!_shape)
+        return; // Abstract lamp types have no hit-point geometry.
     DEF_HIT(_shape, _bulbHit, "lampa", nullptr, par >> "armorBulb");
 }
 void StreetLampType::DeinitShape()
@@ -217,7 +219,8 @@ void StreetLampType::DeinitShape()
 }
 
 StreetLamp::StreetLamp(LODShapeWithShadow* shape, StreetLampType* type, int id)
-    : base(shape, type, id), _pilotLight(true), _lightPos(shape->MemoryPoint("light"))
+    : base(shape, type, id), _pilotLight(true),
+      _lightPos(GetShape() ? GetShape()->MemoryPoint("light") : VZero)
 {
     SetSimulationPrecision(12.1256);
     _destrType = DestructTree;
