@@ -1,7 +1,26 @@
 #include <catch2/catch_test_macros.hpp>
 #include <Poseidon/World/Entities/Infantry/Head.hpp>
+#include <array>
+#include <cstddef>
+#include <new>
 
 using namespace Poseidon;
+
+TEST_CASE("Head starts with neutral lip interpolation in reused storage", "[World][face-rig][lip-init]")
+{
+    HeadType type;
+    alignas(Head) std::array<std::byte, sizeof(Head)> storage;
+    storage.fill(std::byte{0xff});
+    Head* head = new (storage.data()) Head(type, nullptr);
+    CHECK_FALSE(head->_randomLip);
+    CHECK(head->_actualRandomLip == 0.0f);
+    CHECK(head->_wantedRandomLip == 0.0f);
+    CHECK(head->_speedRandomLip == 0.0f);
+    // Time already default-constructs to zero. Keep the existing first-update
+    // schedule rather than consuming gameplay RNG in the constructor.
+    CHECK(head->_nextChangeRandomLip.toInt() == 0);
+    head->~Head();
+}
 
 TEST_CASE("Shared soldier face rig survives repeated setup and skeleton preparation", "[World][face-rig]")
 {

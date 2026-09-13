@@ -4,7 +4,8 @@ param(
  [ValidateRange(1,16)][int]$MotionSamples=1,
  [ValidateRange(0.25,5)][double]$MotionInterval=0.5,
  [ValidateRange(30,600)][int]$WarmupSeconds=90,
- [ValidateSet('Village','Coast','Forest','ForestHigh','Church')][string]$Pose='Village',
+ [ValidateSet('Village','Coast','Forest','ForestHigh','Church','Reference')][string]$Pose='Village',
+ [ValidateRange(-1,23.999)][double]$WorldHour=-1,
  [ValidateRange(0,1)][int]$NativeTextureKeys=1,
  [ValidateRange(-1,1)][int]$LazyBcrTint=-1,
  [hashtable]$Overrides=@{},
@@ -36,9 +37,10 @@ $camera=switch ($Pose) {
  'Forest' {@(4697.60,3998.02,50.23,220.6,-5.0)}
  'ForestHigh' {@(4697.60,3998.02,450.0,220.6,-25.0)}
  'Church' {@(4680.0,6810.0,240.0,28.8,-16.0)}
+ 'Reference' {@(4665.50,7132.80,192.09,123.7,-11.8)}
 }
 & "$PSScriptRoot/farfield-bench.ps1" -Label "$Pose-$Label" -Mission 'tests/perf/missions/perf_field.eden' `
- -World $ReforgerAddons -Freefly $camera -Out $out -Env $settings -Repeats $Repeats `
+ -World $ReforgerAddons -Freefly $camera -WorldHour $WorldHour -Out $out -Env $settings -Repeats $Repeats `
  -Width 1920 -Height 1080 -Windowed -WarmupSeconds $WarmupSeconds -TimeoutSeconds ($WarmupSeconds+210) -RequireAll `
  -MotionSamples $MotionSamples -MotionInterval $MotionInterval
 if ($LASTEXITCODE -ne 0) {throw 'Native capture failed; inspect per-run lifecycle metadata'}

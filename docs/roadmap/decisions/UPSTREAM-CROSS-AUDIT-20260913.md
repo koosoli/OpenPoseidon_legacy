@@ -70,14 +70,17 @@ Paths below are repository-relative.
 
 ### 1. Head/Tank initialization (#173, a5268534)
 
-MISSING. Head.cpp constructor leaves actual/wanted/speed random lip and next-change
-time unset; Head::Simulate reads them without an enabled gate. Tank.cpp leaves
-_doGearSound unset before Sound reads it. Source-level read-before-init confirmed;
-runtime checksum reproduction not performed. Small fix: deterministic zero/no-op
-initialization and distant disabled deadline, preserving SetRandomLip behavior.
-Tests: poisoned allocation, disabled ticks with no RNG draw, enabled transition,
-fixed-seed repeatability, save/load, MP. Old undefined behavior cannot be a valid
-checksum baseline. Risk medium due to shared RNG effects. EXPERIMENT; not patched.
+PARTIAL. The real Head constructor over poisoned storage reproduces three NaNs
+in actual/wanted/speed random lip (3 failed checks, 2 passed). These three floats
+now initialize to zero. Correction to the initial audit: next-change is NOT
+uninitialized; Foundation::Time already defaults to zero. Keep that deadline and
+the existing unconditional Simulate/NextRandomLip schedule, rather than introduce
+a distant deadline or skip disabled ticks and thereby change shared RNG draws.
+Tank.cpp still leaves _doGearSound unset before Sound reads it; NOT patched here.
+The constructor regression is targeted evidence, not campaign/save/load/MP
+acceptance or proof that this caused the reported face screenshot. Those runtime
+gates and a fixed-seed sequence comparison remain open. Old undefined values
+cannot be a valid checksum baseline.
 
 ### 2. NetServer teardown (#122, 36029253)
 

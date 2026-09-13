@@ -286,6 +286,10 @@ void HeadType::InitShape(const ParamEntry& cfg, LODShape* shape)
 
 Head::Head(const HeadType& type, LODShape* lShape)
 {
+    // Simulate interpolates these even before random speech is enabled.
+    _actualRandomLip = 0.0f;
+    _wantedRandomLip = 0.0f;
+    _speedRandomLip = 0.0f;
     _winkPhase = 2;
     _forceWinkPhase = -1;
     _nextWink = Glob.time; // recalculate now
