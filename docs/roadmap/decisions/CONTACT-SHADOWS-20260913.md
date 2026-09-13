@@ -1,7 +1,9 @@
 # Contact-hardening CSM prototype
 
 Baseline: asset-obs-001, 7aea321f. Owner explicitly prioritized this shared
-renderer experiment over native material work. Default remains fixed PCF.
+renderer experiment over native material work. On September 13 the owner
+visually accepted the 8-degree adaptive result and explicitly authorized its
+promotion to the default; mode 0 remains the fixed-PCF A/B control.
 
 ## Implementation
 
@@ -22,8 +24,8 @@ without frame noise or temporal rotation. Historical measurements below explicit
 identify their earlier implementation commits.
 
 Dev tools / Shadows: contact mode 0/1/2 and sun angular radius in degrees.
-Reset restores mode 0. Startup diagnostics: WGR_CONTACT_SHADOWS=0/1/2 and
-WGR_SUN_ANGULAR_RADIUS (default 0.266 degrees, now clamped 0..8). These use the
+Reset restores mode 2 at 8 degrees. Startup diagnostics:
+WGR_CONTACT_SHADOWS=0/1/2 and WGR_SUN_ANGULAR_RADIUS (clamped 0..8). These use the
 previously unused W lanes of camera-forward and sun-direction in the shared
 shadow block; no FFI layout growth or new bindings. Local lamps are unaffected.
 
@@ -337,3 +339,18 @@ lighter falloff but costs more and is an artistic area-source approximation.
 Both require owner visual/cost judgement before promotion. Keep 0.266 physical
 default and mode 0; no quiet global preset change. Latest adaptive implementation
 is not yet motion/DLSS/cloud accepted. Artifact: mode2-msaa-radius4-close-adaptive.
+
+## Owner-authorized default promotion
+
+The owner visually accepted the exact mode 2 / 8-degree image from
+`mode2-msaa-radius8-close-adaptive` and requested it as the default. The engine
+and Reset-to-defaults state therefore use mode 2 and 8 degrees. This is a
+deliberate artistic quality preset rather than the physical solar radius.
+Mode 0 remains available in Dev tools and through `WGR_CONTACT_SHADOWS=0` for
+immediate A/B comparison or fallback.
+
+The measured +2.31 ms median receiver-path cost in the close MSAA4 fixture is
+retained as a material risk; it is one ordered pair, not a universal cost.
+This owner decision supersedes the earlier prototype-only default statements
+above but does not claim that cloud-dependent source broadening or player-shadow
+motion flicker is solved.

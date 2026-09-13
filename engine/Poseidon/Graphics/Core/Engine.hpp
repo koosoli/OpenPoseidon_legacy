@@ -887,8 +887,8 @@ class Engine : public IGraphicsEngine
         // >= 0.5 = 4 taps spread by this many texels (soft). wgpu path only.
         float pcf = 1.0f;
         // Shared WGPU CSM receiver experiment. 0=fixed, 1=PCSS, 2=budget PCSS.
-        int contactShadows = 0;
-        float sunAngularRadius = 0.266f; // degrees, radius rather than diameter
+        int contactShadows = 2;
+        float sunAngularRadius = 8.0f; // artistic area-source radius in degrees
         // Long-distance terrain sun-shadow (heightfield self-shadow) — a compute
         // sweep ray-marches the heightmap toward the sun into a world-aligned mask
         // the terrain samples, giving terrain-on-terrain occlusion at any range

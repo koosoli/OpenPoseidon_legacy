@@ -4575,8 +4575,8 @@ void DrawShadowsTab()
     Dev::PanelHelp("  Fixed mode: < 0.5 = bilinear tap; otherwise a 3x3 tent (wgpu)");
     changed |= Dev::SliderInt("Contact shadows: 0 fixed / 1 full / 2 budget", &t.contactShadows, 0, 2);
     changed |= Dev::SliderFloat("Sun angular radius (degrees)", &t.sunAngularRadius, 0.0f, 8.0f, "%.3f");
-    Dev::PanelHelp("0.266 = physical sun; larger values = artistic area-source softness, not real solar size.");
-    Dev::PanelHelp("  Experimental CSM only. Softness follows caster/receiver separation, not camera distance. Reset restores fixed mode.");
+    Dev::PanelHelp("0.266 = physical sun; the 8-degree default is an artistic area-source setting.");
+    Dev::PanelHelp("  Softness follows caster/receiver separation, not camera distance. Mode 0 provides the fixed-filter A/B control.");
 
     changed |= Dev::SliderFloat("Caster LOD bias", &t.casterLodBias, 1.0f, 8.0f, "%.1f");
     Dev::PanelHelp("  casters pick their LOD as if this many times farther away");
