@@ -369,3 +369,12 @@ fixture did not represent. Restore mode 0 and 0.266 degrees as both startup and
 Reset-to-defaults values. Modes 1/2 and wider source sizes remain manual A/B
 tools only. Do not promote this PCSS path again without representative outdoor
 and interior gameplay acceptance in addition to the close fixture.
+
+## Narrow default selection after withdrawal
+
+The owner subsequently requested budget mode 2 again while explicitly retaining
+the physical 0.266-degree source radius, and requested one omni near tier. This
+is not the withdrawn mode 2 / 8-degree preset: no wide artistic source radius or
+other PCSS change is restored. Startup and Reset therefore use omni count 1,
+budget contact mode 2 and 0.266 degrees. No runtime smoke was run at owner request;
+the owner is performing the visual check.

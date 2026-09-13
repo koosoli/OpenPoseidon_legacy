@@ -4576,7 +4576,7 @@ void DrawShadowsTab()
     changed |= Dev::SliderInt("Contact shadows: 0 fixed / 1 full / 2 budget", &t.contactShadows, 0, 2);
     changed |= Dev::SliderFloat("Sun angular radius (degrees)", &t.sunAngularRadius, 0.0f, 8.0f, "%.3f");
     Dev::PanelHelp("0.266 = physical sun; larger values are experimental artistic area-source settings.");
-    Dev::PanelHelp("  Experimental PCSS modes follow caster/receiver separation. Reset restores fixed mode 0.");
+    Dev::PanelHelp("  Experimental PCSS modes follow caster/receiver separation. Reset restores budget mode 2.");
 
     changed |= Dev::SliderFloat("Caster LOD bias", &t.casterLodBias, 1.0f, 8.0f, "%.1f");
     Dev::PanelHelp("  casters pick their LOD as if this many times farther away");

@@ -867,11 +867,12 @@ class Engine : public IGraphicsEngine
         float fadeRange = 40.0f;
         int resolution = 2048;
         // Leading tiers as camera-centred spheres (omniCoef* radii as a fraction
-        // of the shadow range). Default 0 = pure frustum slices: a sphere spends
+        // of the shadow range). Mode 0 uses pure frustum slices: a sphere spends
         // most of its area on directions the camera can't see (only in-frustum
         // receivers matter; upsun casters are covered by the fit's depth pad),
-        // so slices put several times more texels on visible shadows.
-        int omniCount = 0;
+        // so slices put several times more texels on visible shadows. The default
+        // uses one omni tier for near all-direction caster coverage.
+        int omniCount = 1;
         float omniCoef0 = 0.08f;
         float omniCoef1 = 0.20f;
         // Casters re-select their LOD as if this many times farther than they
@@ -887,7 +888,7 @@ class Engine : public IGraphicsEngine
         // >= 0.5 = 4 taps spread by this many texels (soft). wgpu path only.
         float pcf = 1.0f;
         // Shared WGPU CSM receiver experiment. 0=fixed, 1=PCSS, 2=budget PCSS.
-        int contactShadows = 0;
+        int contactShadows = 2;
         float sunAngularRadius = 0.266f; // physical solar radius in degrees
         // Long-distance terrain sun-shadow (heightfield self-shadow) — a compute
         // sweep ray-marches the heightmap toward the sun into a world-aligned mask

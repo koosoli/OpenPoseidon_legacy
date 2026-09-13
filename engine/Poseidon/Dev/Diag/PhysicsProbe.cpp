@@ -931,9 +931,6 @@ void UpdatePhysicsProbeWind()
     world->SetWind(wind);
 }
 
-Vector3 s_proxyCentre;
-bool    s_proxyLive = false;
-
 void UpdatePhysicsPlayerProxy(Vector3Par position)
 {
     Physics::PhysicsWorld* world = Physics::GetPhysicsWorld();
@@ -944,9 +941,8 @@ void UpdatePhysicsPlayerProxy(Vector3Par position)
     // Height 0 removes it, so switching the checkbox off actually takes the
     // capsule out of the world rather than leaving an invisible one standing
     // where the player last was.
-    s_proxyCentre = position + Vector3(0, s_settings.playerHeight * 0.5f, 0);
-    s_proxyLive = s_settings.playerProxy;
-    world->SetKinematicProxy(s_proxyCentre, s_settings.playerRadius,
+    const Vector3 proxyCentre = position + Vector3(0, s_settings.playerHeight * 0.5f, 0);
+    world->SetKinematicProxy(proxyCentre, s_settings.playerRadius,
                              s_settings.playerProxy ? s_settings.playerHeight : 0.0f);
 }
 
@@ -1170,18 +1166,6 @@ void DrawPhysicsProbes()
     }
 
 drawModels:
-    // The player proxy, drawn so a probe that is NOT being pushed can be told
-    // apart from a proxy that is in the wrong place. Without seeing it, "I walk
-    // through things" and "the capsule is at my chest" look identical.
-    if (s_proxyLive && s_settings.draw)
-    {
-        const PackedColor proxyColor = PackedColor(0xffffc040);
-        const float       half = s_settings.playerHeight * 0.5f;
-        SubmitCircle(s_proxyCentre - Vector3(0, half, 0), s_settings.playerRadius, VForward, VAside, proxyColor);
-        SubmitCircle(s_proxyCentre + Vector3(0, half, 0), s_settings.playerRadius, VForward, VAside, proxyColor);
-        SubmitCircle(s_proxyCentre, s_settings.playerRadius, VForward, VAside, proxyColor);
-    }
-
     // Model probes draw as the real model, placed at the body's transform. The
     // Object is submitted straight to the scene and lives nowhere else -- it is
     // not in the object grid, no entity holds it, and the mission cannot save it.

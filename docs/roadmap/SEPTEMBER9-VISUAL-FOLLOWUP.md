@@ -2176,3 +2176,11 @@ testing: outdoor shadows disappeared and interiors regressed severely despite
 the isolated close fixture looking acceptable. Startup and Reset defaults return
 to fixed mode 0 / 0.266 degrees. Adaptive modes remain opt-in diagnostics only;
 future acceptance must include representative exterior and interior scenes.
+
+Owner follow-up narrows the requested default to omni tier 1 plus budget contact
+mode 2 at the unchanged physical 0.266-degree source radius. This is distinct
+from the withdrawn 8-degree preset and changes no other shadow setting. The
+Physics dev mode no longer draws the yellow player-proxy rings; its kinematic
+proxy and probe-pushing behaviour remain active. Build/tests are required, but
+the game build, 1,891 ShadowMath assertions and eleven shader tests pass.
+Runtime smoke is intentionally left to the owner's current test session.
