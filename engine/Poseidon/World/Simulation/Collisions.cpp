@@ -688,7 +688,8 @@ void Landscape::GroundCollision(GroundCollisionBuffer& retVal, Object* with, con
 
             // water on level bumpySea
             float underWater = above + bumpySea - pos[1];
-            if (underWater <= 0)
+            const float underFlat = above + localSeaLevel - pos[1];
+            if (!ShouldReportWaterContact(underWater, underFlat))
             {
                 continue; // above water, must be above ground
             }
@@ -698,7 +699,7 @@ void Landscape::GroundCollision(GroundCollisionBuffer& retVal, Object* with, con
             info.under = underWater;
             // The same depth with the wave taken out; see UndergroundInfo::underFlat for why the
             // two have to be told apart now that `bumpySea` follows a real surface.
-            info.underFlat = above + localSeaLevel - pos[1];
+            info.underFlat = underFlat;
             info.pos = pos;
             info.pos[1] = bumpySea; // applied directly on surface
             info.dX = 0;

@@ -31,3 +31,12 @@ TEST_CASE("Water surface query returns a normalized finite surface frame", "[Wor
     REQUIRE(sample.normalY > 0.0f);
     REQUIRE(sample.roughness >= 0.0f);
 }
+
+TEST_CASE("Mean-submerged hull contacts survive a wave trough", "[World][Terrain][Water][buoyancy]")
+{
+    CHECK(ShouldReportWaterContact(0.4f, 0.2f));
+    CHECK(ShouldReportWaterContact(-0.4f, 0.2f));
+    CHECK(ShouldReportWaterContact(0.2f, -0.4f));
+    CHECK_FALSE(ShouldReportWaterContact(0.0f, 0.0f));
+    CHECK_FALSE(ShouldReportWaterContact(-0.2f, -0.1f));
+}

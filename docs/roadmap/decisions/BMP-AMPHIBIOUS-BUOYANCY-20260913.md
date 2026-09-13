@@ -13,15 +13,18 @@ bound a related wave-amplified term, but amphibious tanks did not.
 
 `AmphibiousTrackedImmersion()` preserves the mean-sea draft and permits 0.35 m
 of wave motion in either direction. The same bounded immersion drives buoyancy
-and water drag, including contacts that remain below mean sea level during a
-wave trough. This applies only to tracked vehicles whose config already has
-`canFloat`; non-floating tanks, wheeled vehicles, ships and the rendered waves
-are unchanged.
+and water drag. The shared collision query now retains a negative wave-relative
+contact when the point remains below mean sea level; existing consumers still
+reject that negative depth, while amphibious tracked vehicles use it to keep
+buoyancy and their existing water-drive gate continuous through the trough.
+This applies only to tracked vehicles whose config already has `canFloat`;
+non-floating tanks, wheeled vehicles, ships and the rendered waves are unchanged.
 
 ## Verification and remaining acceptance
 
 - `PoseidonTests "[vehicles][tank][waves]"`: 1 case, 6 assertions passed.
-- `PoseidonTests "[Water]"`: 10 cases, 4,104 assertions passed.
+- `PoseidonTests "[Water]"`: 11 cases, 4,109 assertions passed, including
+  explicit mean-submerged trough coverage.
 - `PoseidonGame` RelWithDebInfo build passed.
 - Runtime BMP1 acceptance remains open: enter water at rest and under power,
   cross crest/trough phases, turn, stop, and confirm stable partial submersion

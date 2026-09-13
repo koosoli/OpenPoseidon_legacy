@@ -36,4 +36,12 @@ WaterSurfaceSample QueryWaterSurface(float worldX, float worldZ, float time, flo
 WaterSurfaceSample QueryWaterSurfaceScaled(float worldX, float worldZ, float time, float surfaceLevel,
                                            float waveScale);
 
+// A wave trough can expose a point that is still below mean sea level. Keep the
+// contact record available so stable amphibious solvers can avoid losing a
+// whole buoyancy cycle; legacy consumers still reject its negative `under`.
+inline bool ShouldReportWaterContact(float under, float underFlat)
+{
+    return under > 0.0f || underFlat > 0.0f;
+}
+
 } // namespace Poseidon
