@@ -222,3 +222,18 @@ caster animation, centre-depth cap and default-OFF setting stay unchanged for
 this isolated experiment. It does not create missing geometric detail or prove
 the player's temporal defect fixed. Reconstruction has an additional cost that
 must be measured; no free-performance claim.
+
+Installed reconstruction follow-up 5bdd25dc: game build and all eleven shader
+tests pass. Native1x and actual DLSS Quality+MSAA4 captures pass lifecycle with
+unchanged geometry counts. Native image inspection shows a filtered elevated
+Jeep shadow edge instead of the prior hard steps. This is reconstruction, NOT
+proof of a larger physical penumbra or fixed player motion. Settled 15-second
+GPU median/p95: native 13.99/15.32 ms; DLSS 13.40/13.90 ms. Artifacts:
+build/contact-shadows/mode1-{native,dlss}-radius0.266-reconstruct. Single ordered
+runs, no isolated-cost/promotion claim; native cost is higher than the previous
+full run (12.95/13.88), requiring a cheaper reconstruction evaluation.
+
+Player flicker remains undiagnosed. SceneShadowPass already uses RenderTransform
+for the caster and proxies, and EngineWgpu::AddShadowCaster copies its own bone
+palette. Do not claim that reapplying the old interpolation fix solves this.
+Await owner fixed-mode comparison and reproduce a close moving-player fixture.

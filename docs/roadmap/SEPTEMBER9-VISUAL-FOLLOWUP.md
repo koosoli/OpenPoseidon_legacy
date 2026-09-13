@@ -2142,3 +2142,11 @@ default remains fixed. VBS4 exploration v2 was cross-checked: screen-depth detai
 and reusable CSM resolve complement, not replace, this filter and are not being
 implemented in parallel. Clouds already attenuate direct light locally; additional
 cloud-scattering penumbra broadening is explicitly not implemented or tested.
+
+Owner fullscreen contact-shadow acceptance FAILED: blockiness, player motion
+flicker and insufficient visible softening. Installed 5bdd25dc restores tent
+reconstruction for subtexel/no-blocker results and blends continuously into PCSS;
+native/DLSS captures and eleven shader tests pass. Static edge filtering improves,
+but player flicker, cloud broadening and final visual/cost acceptance remain OPEN.
+The prototype is not ready for default promotion. See the decision for measured
+additional cost and exact artifact paths; no blanket shadow-fix claim.
