@@ -282,3 +282,36 @@ additional full-frame cost in this pair, not a guaranteed free cost. Full's
 larger source is costlier in this scene. Wide town images are insufficient for
 owner acceptance; contact_soft.eden / -Close isolates the elevated vehicle's
 ground shadow at closer range. No distance multiplier on shadow darkness added.
+
+## Wider area-source evaluation, installed 8287fef0
+
+The 2-degree close view still did not demonstrate enough visual separation.
+Extend the existing source-size control consistently (UI/startup/packing/harness)
+to 8 degrees, explicitly labelled artistic above the 0.266-degree physical sun.
+Default remains OFF / 0.266 degrees. No new renderer, pass, texture or ABI field.
+Blocker search uses radially concentrated points (r -> r squared) with the same
+fetch count, covering near blockers as well as the outer search region. Filtering
+still uses the original area-distributed disk. This is a bounded PCSS sampling
+approximation, not exact area-light transport or new geometry.
+
+Build and eleven shader tests pass. Close MSAA4 budget arms at 0.266/8 degrees
+pass lifecycle/AA and have identical geometry. GPU median/p95: 14.96/15.43 versus
+15.48/16.12 ms (15-second settled window, one ordered pair). This is +0.52 ms
+versus the same prototype with small source, NOT total overhead versus fixed PCF.
+At 8 degrees the elevated Jeep shadow visibly spreads and lightens around its
+edge while a darker core remains. Sparse budget filtering has visibly uneven
+coverage in this stress view; do not call it fully smooth or promote by timing
+alone. Artifacts: mode2-msaa-radius{0.266,8}-close-wide.
+
+Cloud-driven source spread remains OPEN and independent of this explicit
+source-size evaluation. Player flicker is OPEN but lower priority per owner.
+The physically correct wide-occluder umbra is not artificially distance-faded.
+
+Full 16-point 8-degree close reference passes at 17.83/18.44 ms median/p95,
+versus budget 15.48/16.12; visually more even, but +2.35 ms is not a cheap
+global setting. Next revision keeps mode 2's nine-fetch blocker search and
+eight filter taps, completing the sixteen-point reference disk only for mixed
+visibility footprints. This is adaptive PCF within the same receiver function,
+not another pass/history/blur layer. An all-lit/all-occluded sparse disk can still
+miss a thin feature: adaptive sampling is not guaranteed reference equivalence.
+Sample-union test ensures the refinement does not duplicate even-index taps.

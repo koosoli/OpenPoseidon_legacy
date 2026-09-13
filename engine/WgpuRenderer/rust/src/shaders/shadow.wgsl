@@ -103,7 +103,18 @@ fn contact_filter(uv: vec2<f32>, layer: i32, reference: f32,
         lit += plane_compare(uv + offset, layer,
                              reference + clamp(dot(offset, gradient), -0.02, 0.02), gradient);
     }
-    let filtered = lit / f32(taps);
+    var sample_count = taps;
+    // Adaptive PCF: refine mixed visibility only. Fully lit/occluded footprints
+    // keep the cheap disk; penumbrae complete the same 16-point reference disk.
+    if (budget && lit > 0.0 && lit < f32(taps)) {
+        for (var i = 0u; i < 8u; i++) {
+            let offset = contact_disk(i * 2u + 1u) * radius;
+            lit += plane_compare(uv + offset, layer,
+                                 reference + clamp(dot(offset, gradient), -0.02, 0.02), gradient);
+        }
+        sample_count = 16u;
+    }
+    let filtered = lit / f32(sample_count);
     if (radius_texels < 1.5) {
         return mix(contact_reconstruct(uv, layer, reference, gradient), filtered,
                    smoothstep(0.5, 1.5, radius_texels));

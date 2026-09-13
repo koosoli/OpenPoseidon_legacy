@@ -179,6 +179,11 @@ mod tests {
         assert!(!helper.contains("splits["));
         assert!(helper.contains("textureLoad(shadow_map"));
         assert!(helper.contains("point * length(point) * search_uv"));
+        assert!(helper.contains("budget && lit > 0.0 && lit < f32(taps)"));
+        // Refinement completes, rather than duplicates, the reference disk.
+        let mut visited = [0; 16];
+        for i in 0..8 { visited[i * 2] += 1; visited[i * 2 + 1] += 1; }
+        assert!(visited.iter().all(|&count| count == 1));
         for i in 0..16 {
             let r = ((i as f64 + 0.5) / 16.0).sqrt();
             assert!(r * r > 0.0 && r * r < 1.0);
