@@ -842,8 +842,8 @@ struct WgrCameraShadow
     WgrVec4 omni_radius;   // omni tiers: camera-distance radius (0 = frustum tier)
     WgrVec4 ctl;           // {count, omni_count, fade_range, bias_const}
     WgrVec4 ctlb;          // {texel_size (1/res), darkness, normal_offset_scale, pcf}
-    WgrVec4 cam_fwd;       // xyz = camera forward (eye-depth cascade select)
-    WgrVec4 sun_dir;       // xyz = sun travel direction (normal-offset bias)
+    WgrVec4 cam_fwd;       // xyz = camera forward; w = contact filter (0 fixed, 1 full, 2 budget)
+    WgrVec4 sun_dir;       // xyz = sun travel direction; w = tan(sun angular radius)
     /* LGT-010 local-light shadows. Kept SEPARATE from cascade_vp rather than extending it:
      * the cascades are the sun's, orthographic and selected by distance, while these are one
      * perspective view per shadowing spot selected by the light's own index. Sharing an array

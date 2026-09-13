@@ -160,6 +160,34 @@ mod tests {
     }
 
     #[test]
+    fn contact_shadow_orthographic_radius_is_cascade_invariant() {
+        let slope = 0.266_f64.to_radians().tan();
+        for separation in [0.0, 0.1, 3.0, 20.0, 80.0] {
+            let expected = separation * slope;
+            for depth_range in [64.0, 256.0, 1024.0] {
+                for width in [32.0, 128.0, 512.0] {
+                    let depth_delta = separation / depth_range;
+                    let radius_uv = depth_delta / (1.0 / depth_range) * slope / width;
+                    assert!((radius_uv * width - expected).abs() < 1e-10);
+                }
+            }
+        }
+        let source = include_str!("shadow.wgsl");
+        let helper = source.split("fn contact_filter").nth(1).unwrap()
+            .split("// Cascaded shadow strength").next().unwrap();
+        assert!(!helper.contains("eye_depth"));
+        assert!(!helper.contains("splits["));
+        assert!(helper.contains("textureLoad(shadow_map"));
+        for (source, file_path) in [
+            (include_str!("../gfx3d/shader3d.wgsl"), "gfx3d/shader3d.wgsl"),
+            (include_str!("../gfx3d/gpu_driven.wgsl"), "gfx3d/gpu_driven.wgsl"),
+            (include_str!("../terrain/terrain.wgsl"), "terrain/terrain.wgsl"),
+        ] {
+            compose(source, file_path);
+        }
+    }
+
+    #[test]
     fn native_authored_normals_compose_without_changing_legacy_canopy_gate() {
         for (source, file_path, gate) in [
             (include_str!("../gfx3d/shader3d.wgsl"), "gfx3d/shader3d.wgsl",

@@ -20,8 +20,8 @@ struct ShadowBlock {
     // `ctlb`, not `ctl2`: naga_oil forbids composable-module identifiers ending
     // in a digit (naga's namer reserves numeric suffixes for disambiguation).
     ctlb: vec4<f32>, // {texel_size, darkness, normal_offset_scale, pcf}
-    cam_fwd: vec4<f32>,
-    sun_dir: vec4<f32>,
+    cam_fwd: vec4<f32>, // w: contact filter (0 fixed, 1 full, 2 budget)
+    sun_dir: vec4<f32>, // w: tan(sun angular radius)
     // LGT-010: one perspective view-projection per shadowing spot light, and
     // {count, darkness, texel_size, first_layer}. Separate from cascade_vp because
     // these are selected by light index rather than by distance.

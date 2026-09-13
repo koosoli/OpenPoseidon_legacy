@@ -1580,6 +1580,15 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
         _smTuning.enabled = std::strtol(sm, nullptr, 10) != 0;
     }
 
+    if (const char* value = std::getenv("WGR_CONTACT_SHADOWS"))
+        _smTuning.contactShadows = static_cast<int>(std::clamp(std::strtol(value, nullptr, 10), 0L, 2L));
+    if (const char* value = std::getenv("WGR_SUN_ANGULAR_RADIUS")) {
+        const float radius = std::strtof(value, nullptr);
+        if (std::isfinite(radius)) _smTuning.sunAngularRadius = std::clamp(radius, 0.0f, 2.0f);
+    }
+    LOG_INFO(Graphics, "CSM contact shadows: mode={} sun angular radius={} degrees (prototype)",
+             _smTuning.contactShadows, _smTuning.sunAngularRadius);
+
     // GPU-driven rendering (docs/gpu-culling-and-depth-plan.md Stage 3b). When on, the
     // landscape/world hooks register shapes + stream retained instances and the CPU colour
     // draw of handed-over objects is suppressed; when off, every hook is a no-op and the CPU
@@ -3862,8 +3871,10 @@ void EngineWgpu::NextFrame()
                 sb.ctl = {static_cast<float>(sunShadowActive ? _smCascades.count : 0),
                           static_cast<float>(_smCascades.omniCount), _smTuning.fadeRange, _smTuning.biasBase};
                 sb.ctlb = {1.0f / static_cast<float>(_smCascadeRes), darkness, _smTuning.normalOffset, _smTuning.pcf};
-                sb.cam_fwd = {_cameras[i].dir[0], _cameras[i].dir[1], _cameras[i].dir[2], 0.0f};
-                sb.sun_dir = {_smCascades.sunDir.x, _smCascades.sunDir.y, _smCascades.sunDir.z, 0.0f};
+                sb.cam_fwd = {_cameras[i].dir[0], _cameras[i].dir[1], _cameras[i].dir[2],
+                              static_cast<float>(std::clamp(_smTuning.contactShadows, 0, 2))};
+                sb.sun_dir = {_smCascades.sunDir.x, _smCascades.sunDir.y, _smCascades.sunDir.z,
+                              std::tan(std::clamp(_smTuning.sunAngularRadius, 0.0f, 2.0f) * (3.14159265f / 180.0f))};
                 // LGT-010: one perspective view per shadowing spot. The light list was built
                 // for THIS frame just above, so `_localShadowCount` is already final here.
                 {

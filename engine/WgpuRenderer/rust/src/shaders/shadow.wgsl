@@ -25,6 +25,78 @@ fn plane_compare(uv: vec2<f32>, layer: i32, reference: f32, gradient: vec2<f32>)
     return result;
 }
 
+// Fixed disk: no frame/pixel random rotation, shared by every cascade and game.
+fn contact_disk(i: u32) -> vec2<f32> {
+    let points = array<vec2<f32>, 16>(
+        vec2<f32>(0.1767767, 0.0000000),
+        vec2<f32>(-0.2257722, 0.2068258),
+        vec2<f32>(0.0345581, -0.3937712),
+        vec2<f32>(0.2845712, 0.3711728),
+        vec2<f32>(-0.5222232, -0.0923739),
+        vec2<f32>(0.4946954, -0.3146847),
+        vec2<f32>(-0.1654659, 0.6155250),
+        vec2<f32>(-0.3155615, -0.6075944),
+        vec2<f32>(0.6846422, 0.2500302),
+        vec2<f32>(-0.7122561, 0.2940090),
+        vec2<f32>(0.3433545, -0.7337286),
+        vec2<f32>(0.2537302, 0.8089320),
+        vec2<f32>(-0.7647459, -0.4431859),
+        vec2<f32>(0.8971340, -0.1972324),
+        vec2<f32>(-0.5475069, 0.7787722),
+        vec2<f32>(-0.1264868, -0.9760897)
+    );
+    return points[i];
+}
+
+// Orthographic sun maps: normalized depth / length(VP depth row) is metres.
+// Never divide by blocker depth as for a perspective light. Search is bounded
+// to 100 m separation; casters beyond that bound are an explicit prototype limit.
+fn contact_filter(uv: vec2<f32>, layer: i32, reference: f32,
+                  gradient: vec2<f32>, world_to_uv: vec2<f32>,
+                  depth_per_metre: f32) -> f32 {
+    let slope = max(frame.shadow.sun_dir.w, 0.0);
+    if (slope <= 0.0) {
+        return plane_compare(uv, layer, reference, gradient);
+    }
+    let budget = frame.shadow.cam_fwd.w > 1.5;
+    let taps = select(16u, 8u, budget);
+    let stride = select(1u, 2u, budget);
+    let size = vec2<i32>(textureDimensions(shadow_map));
+    let search_uv = 100.0 * slope * world_to_uv;
+    var separation = 0.0;
+    var blockers = 0.0;
+    // Centre included even in the cheap mode so contact casters are not skipped.
+    for (var i = 0u; i <= taps; i++) {
+        var offset = vec2<f32>(0.0);
+        if (i < taps) { offset = contact_disk(i * stride) * search_uv; }
+        let sample_uv = uv + offset;
+        if (any(sample_uv <= vec2<f32>(0.0)) || any(sample_uv >= vec2<f32>(1.0))) { continue; }
+        let pixel = vec2<i32>(sample_uv * vec2<f32>(size));
+        let centre = (vec2<f32>(pixel) + vec2<f32>(0.5)) / vec2<f32>(size);
+        let receiver = reference + clamp(dot(centre - uv, gradient), -0.02, 0.02);
+        let depth = textureLoad(shadow_map, pixel, layer, 0);
+        if (depth < receiver) {
+            separation += max(0.0, receiver - depth) / max(depth_per_metre, 1e-8);
+            blockers += 1.0;
+        }
+    }
+    if (blockers == 0.0) {
+        // A sparse search cannot prove there is no thin alpha-tested blocker.
+        return plane_compare(uv, layer, reference, gradient);
+    }
+    let radius = min(separation / blockers, 100.0) * slope * world_to_uv;
+    if (all(radius * vec2<f32>(size) <= vec2<f32>(0.5))) {
+        return plane_compare(uv, layer, reference, gradient);
+    }
+    var lit = 0.0;
+    for (var i = 0u; i < taps; i++) {
+        let offset = contact_disk(i * stride) * radius;
+        lit += plane_compare(uv + offset, layer,
+                             reference + clamp(dot(offset, gradient), -0.02, 0.02), gradient);
+    }
+    return lit / f32(taps);
+}
+
 // Cascaded shadow strength in [0,1] for a camera-relative position (0 = lit).
 #ifdef COALESCED_PCF
 // Nine overlapping bilinear tent taps use only sixteen distinct depth texels.
@@ -156,6 +228,11 @@ fn shadow_strength(world_pos: vec3<f32>, normal_ws: vec3<f32>, fog: f32,
             let ref_z = sc.z - bias;
             var lit: f32;
             let pcf = frame.shadow.ctlb.w;
+            if (frame.shadow.cam_fwd.w > 0.5) {
+                let sy = length(vec3<f32>(vp[0][1], vp[1][1], vp[2][1]));
+                let sz = length(vec3<f32>(vp[0][2], vp[1][2], vp[2][2]));
+                lit = contact_filter(suv, c, ref_z, dz_duv, vec2<f32>(sx, sy) * 0.5, sz);
+            } else {
 #ifdef COALESCED_PCF
             let dimensions = textureDimensions(shadow_map);
             if (pcf == 1.0 && dimensions.x == dimensions.y
@@ -184,6 +261,7 @@ fn shadow_strength(world_pos: vec3<f32>, normal_ws: vec3<f32>, fog: f32,
 #ifdef COALESCED_PCF
             }
 #endif
+            }
             lit_sum += w * lit;
             w_sum += w;
         }
