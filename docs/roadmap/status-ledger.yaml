@@ -6248,3 +6248,70 @@ tickets:
       - docs/roadmap/decisions/RND-034-the-capture-sub-rect-was-the-cinema-border-not-a-sizing-bug-20260815.md
       - apps/cwr/Game/GameApplication.cpp
       - engine/Poseidon/Graphics/Shared/SdlWindow.cpp
+  - id: PERF-032
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: Dense infantry avoids footprint cell scans and far full-rate body simulation
+    class: RUNTIME_INFRA
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: OPEN
+    status: INTEGRATED
+    outcome: null
+    owner: null
+    branch: asset-obs-001
+    baseline_commit: ad181620
+    verification_commit: null
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: [283ff04d]
+    production_call_sites:
+      - file: engine/Poseidon/World/Terrain/Landscape.cpp
+        symbol: ObjectListFull::Add
+        verified_commit: null
+      - file: engine/Poseidon/World/Simulation/Collisions.cpp
+        symbol: Landscape::ObjectCollision
+        verified_commit: null
+      - file: engine/Poseidon/World/WorldSetup.cpp
+        symbol: World::MoveOutAndDelete
+        verified_commit: null
+      - file: engine/Poseidon/World/WorldSetup.cpp
+        symbol: World::SimulateOnly
+        verified_commit: null
+    test_ids:
+      - perf-032-63groups-full-rate-control
+      - perf-032-63groups-final-verified
+    benchmark_artifacts:
+      - build/ai-63groups/63groups-full-rate-control
+      - build/ai-63groups/63groups-final-verified
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/PERF-032-dense-infantry-cell-index-and-far-simulation-rate-20260913.md
+    known_failures:
+      - >-
+        The first installed reporting window still includes load work and discards
+        25 fixed steps. Every later window holds 60-61 ticks per second without a
+        discard, but loading itself is not fixed by this ticket.
+      - >-
+        Multiplayer authority, save/load replay and long-distance scripted-object
+        behavior have not yet received a dedicated A/B replay. Existing precision
+        values and all AI Think scheduling remain unchanged.
+    fallback: >-
+      POSEIDON_FAR_SIM_FULL_RATE=1 restores the former full-rate remainder path.
+      The complete cell list remains authoritative and can replace either compact
+      mirror locally if a collision compatibility regression is found.
+    reviewer: null
+    reviewer_method: >-
+      Not owner-reviewed. Automated evidence comprises a successful WGPU build,
+      seven targeted CTest cases and an installed 708-soldier mission capture.
+      It does not establish multiplayer replay equivalence or every temporary
+      object collision combination, so this ticket is INTEGRATED, not VALIDATED.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/PERF-032-dense-infantry-cell-index-and-far-simulation-rate-20260913.md
+      - engine/Poseidon/World/Terrain/Landscape.hpp
+      - engine/Poseidon/World/Terrain/Landscape.cpp
+      - engine/Poseidon/World/Simulation/Collisions.cpp
+      - engine/Poseidon/World/WorldSetup.cpp
