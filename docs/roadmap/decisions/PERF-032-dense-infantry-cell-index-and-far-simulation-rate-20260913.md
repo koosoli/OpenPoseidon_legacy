@@ -103,6 +103,15 @@ The settled frame is not used to claim the initial-scene simulation speedup:
 mission state and camera/player position evolve differently when one arm falls
 behind. The causal comparison is the early per-second simulation log above.
 
+A separate nearby-control A/B uses the generated 80-soldier mission and the
+same camera in both arms. Both report all 81 units and 11 groups, sustain
+60-61 simulation ticks/s, and discard no steps. Settled simulation ranges are
+0.531-0.552 ms/tick by default and 0.542-0.576 ms/tick with full-rate forced;
+average FPS is 89.31 and 88.73 respectively. This single ordered pair supports
+the intended `VisibleNear` invariance, but is not enough to claim a frame-rate
+difference. Artifacts are `build/ai-scale/perf032-near-default` and
+`build/ai-scale/perf032-near-fullrate`.
+
 An ablation with footprint creation disabled reduced the old baseline to about
 15 ms/tick and established footprints as the source of the spatial-query
 regression. Disabling footprints is not the shipped fix.
@@ -115,6 +124,8 @@ regression. Disabling footprints is not the shipped fix.
 - Installed mission run exits cleanly and produces metrics and screenshot.
 - No validation error, panic, assertion or fatal error is present in the final
   run log.
+- The nearby 81-actor A/B keeps actor counts, full tick pacing and simulation
+  cost equivalent within run-to-run variation.
 
 The complete CTest discovery currently also contains one pre-existing malformed
 aggregate command. It reports `BAD_COMMAND` when selected by a broad regex; the
