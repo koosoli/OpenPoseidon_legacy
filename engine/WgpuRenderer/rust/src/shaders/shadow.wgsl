@@ -56,7 +56,7 @@ fn contact_filter(uv: vec2<f32>, layer: i32, reference: f32,
                   depth_per_metre: f32) -> f32 {
     let slope = max(frame.shadow.sun_dir.w, 0.0);
     if (slope <= 0.0) {
-        return plane_compare(uv, layer, reference, gradient);
+        return contact_reconstruct(uv, layer, reference, gradient);
     }
     let budget = frame.shadow.cam_fwd.w > 1.5;
     let taps = select(16u, 8u, budget);
@@ -85,13 +85,14 @@ fn contact_filter(uv: vec2<f32>, layer: i32, reference: f32,
     }
     if (blockers == 0.0) {
         // A sparse search cannot prove there is no thin alpha-tested blocker.
-        return plane_compare(uv, layer, reference, gradient);
+        return contact_reconstruct(uv, layer, reference, gradient);
     }
     // A known local blocker must not inherit the broad penumbra of unrelated
     // distant blockers sampled around it (especially with the sparse budget disk).
     let radius = min(min(separation / blockers, centre_separation), 100.0) * slope * world_to_uv;
-    if (all(radius * vec2<f32>(size) <= vec2<f32>(0.5))) {
-        return plane_compare(uv, layer, reference, gradient);
+    let radius_texels = max(radius.x * f32(size.x), radius.y * f32(size.y));
+    if (radius_texels <= 0.5) {
+        return contact_reconstruct(uv, layer, reference, gradient);
     }
     var lit = 0.0;
     for (var i = 0u; i < taps; i++) {
@@ -99,11 +100,15 @@ fn contact_filter(uv: vec2<f32>, layer: i32, reference: f32,
         lit += plane_compare(uv + offset, layer,
                              reference + clamp(dot(offset, gradient), -0.02, 0.02), gradient);
     }
-    return lit / f32(taps);
+    let filtered = lit / f32(taps);
+    if (radius_texels < 1.5) {
+        return mix(contact_reconstruct(uv, layer, reference, gradient), filtered,
+                   smoothstep(0.5, 1.5, radius_texels));
+    }
+    return filtered;
 }
 
 // Cascaded shadow strength in [0,1] for a camera-relative position (0 = lit).
-#ifdef COALESCED_PCF
 // Nine overlapping bilinear tent taps use only sixteen distinct depth texels.
 // Only called where neither receiver-plane clamp is active and the spacing is
 // exactly one texel. Other filter widths and grazing slopes retain plane_compare.
@@ -126,7 +131,26 @@ fn plane_tent(uv: vec2<f32>, layer: i32, reference: f32, gradient: vec2<f32>) ->
     }
     return result / 16.0;
 }
-#endif
+
+// Reconstruction is separate from the physical penumbra: a subtexel light
+// footprint must not disable shadow-map antialiasing. Keep the baseline tent.
+fn contact_reconstruct(uv: vec2<f32>, layer: i32, reference: f32,
+                       gradient: vec2<f32>) -> f32 {
+    let texel = 1.0 / vec2<f32>(textureDimensions(shadow_map));
+    if (dot(abs(gradient), texel) < 0.005) {
+        return plane_tent(uv, layer, reference, gradient);
+    }
+    var sum = 0.0;
+    for (var y = -1; y <= 1; y++) {
+        for (var x = -1; x <= 1; x++) {
+            let offset = vec2<f32>(f32(x), f32(y)) * texel;
+            let weight = (2.0 - abs(f32(x))) * (2.0 - abs(f32(y)));
+            sum += weight * plane_compare(uv + offset, layer,
+                reference + clamp(dot(offset, gradient), -0.02, 0.02), gradient);
+        }
+    }
+    return sum / 16.0;
+}
 
 // Tier select (omni by 3D distance, frustum by eye-depth) with coverage
 // fallthrough, cross-tier blend band, HW-PCF compare, far fade, fog dimming.

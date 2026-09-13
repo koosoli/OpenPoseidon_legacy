@@ -178,6 +178,18 @@ mod tests {
         assert!(!helper.contains("eye_depth"));
         assert!(!helper.contains("splits["));
         assert!(helper.contains("textureLoad(shadow_map"));
+        assert!(!helper.contains("return plane_compare("));
+        assert!(helper.contains("smoothstep(0.5, 1.5, radius_texels)"));
+        // Continuous reconstruction-to-penumbra handoff, including both endpoints.
+        let blend = |radius: f64| {
+            let t = (radius - 0.5).clamp(0.0, 1.0);
+            t * t * (3.0 - 2.0 * t)
+        };
+        assert_eq!(blend(0.0), 0.0);
+        assert_eq!(blend(0.5), 0.0);
+        assert_eq!(blend(1.5), 1.0);
+        assert!(blend(0.50001) < 1e-8);
+        assert!(1.0 - blend(1.49999) < 1e-8);
         assert!(helper.contains("min(separation / blockers, centre_separation)"));
         for local_gap in [0.0_f64, 0.05, 3.0, 12.0] {
             let mixed_blockers = (local_gap + 80.0 * 8.0) / 9.0;

@@ -164,7 +164,8 @@ enough visible benefit in this town view to justify choosing it unconditionally.
 Final native full/budget images retain the three vehicles and cast shadows;
 their small difference at this scale is not a universal quality-equivalence test.
 
-Current status: locally tested, default-OFF prototype. Still required before
+Current status: owner visual acceptance FAILED (see follow-up below), default-OFF
+prototype. Still required before
 promotion: balanced repeated runs, baseline-versus-candidate-OFF equivalence,
 close-up and moving cascade-boundary acceptance, wind/overcast cases, and
 cross-content visual review. DLSS1x remains explicitly unsupported by the tested
@@ -202,3 +203,22 @@ cloud-only local transmission, retain zero-separation contact and clear-sky
 radius, preserve existing direct-light extinction, and be compared in clear,
 thin-cloud, opaque-cloud and smoke-only negative controls. This remains an
 explicit follow-up, not a silently completed checkbox or a second shadow engine.
+
+## Owner fullscreen rejection and reconstruction follow-up
+
+Owner tested 6c32bfc9 in ShowcaseLab.Intro, full PCSS, solar radius 0.266 degrees.
+Log verifies DLSS Quality 2305x965 -> 3441x1440 with MSAA4 and cascade splits
+61/129/271/1200 m. Reports: blocky shadows, player-shadow flicker in motion,
+insufficient height-dependent softness, and no cloud-dependent softening.
+This supersedes any implication that the distant static town images established
+acceptable visual quality. Cloud broadening was indeed absent, not a user error.
+
+Source-confirmed flaw: subtexel/no-blocker PCSS returned a single bilinear
+comparison, dropping baseline 3x3 reconstruction. The follow-up retains the
+baseline tent (16 unique fetches in the unclamped-gradient domain, exact
+plane-corrected fallback otherwise) and continuously blends to the wider PCSS
+filter over 0.5..1.5 shadow texels. Physical penumbra math, cloud composition,
+caster animation, centre-depth cap and default-OFF setting stay unchanged for
+this isolated experiment. It does not create missing geometric detail or prove
+the player's temporal defect fixed. Reconstruction has an additional cost that
+must be measured; no free-performance claim.
