@@ -6,7 +6,8 @@ param(
  [string]$Label='',
  [switch]$Reference,
  [switch]$Motion,
- [switch]$PlayerMotion
+ [switch]$PlayerMotion,
+ [switch]$Close
 )
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
@@ -16,6 +17,7 @@ $name="mode$Mode-$AA-radius$SunRadius"
 if ($Reference) {$name="reference-$name"}
 if ($Motion) {$name+="-motion"}
 if ($PlayerMotion) {$name+="-player"}
+if ($Close) {$name+="-close"}
 if ($Label) {$name+="-$Label"}
 $user=Join-Path $out ("user-"+$name)
 New-Item -ItemType Directory -Force $user | Out-Null
@@ -56,6 +58,10 @@ if ($PlayerMotion) {
  $options.WarmupSeconds=30
  $options.MotionSamples=16
  $options.MotionInterval=0.25
+}
+if ($Close) {
+ if ($Reference -or $Motion -or $PlayerMotion) {throw 'Close is a separate static fixture'}
+ $options.Mission='tests/perf/missions/contact_soft.eden'
 }
 & "$PSScriptRoot/farfield-bench.ps1" @options
 if ($LASTEXITCODE -ne 0) {throw 'Contact shadow capture failed'}

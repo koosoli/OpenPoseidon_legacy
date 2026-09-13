@@ -1,0 +1,22 @@
+~1
+_near="Jeep" createVehicle [5075,4000,0]
+_middle="Jeep" createVehicle [5085,4000,3]
+_high="Jeep" createVehicle [5095,4000,12]
+_near setDir 90
+_middle setDir 90
+_high setDir 90
+_cam="camera" camCreate [5078,3990,5]
+_cam cameraEffect ["internal","back"]
+_cam camSetTarget [5085,4000,0]
+_cam camSetPos [5078,3990,5]
+_cam camCommit 0
+logInfo format ["CONTACT close fixture: near=%1 middle=%2 high=%3",_near,_middle,_high]
+#hold
+_near setPos [5075,4000,0.05]
+_middle setPos [5085,4000,3]
+_high setPos [5095,4000,12]
+_near setVelocity [0,0,0]
+_middle setVelocity [0,0,0]
+_high setVelocity [0,0,0]
+~0.01
+goto "hold"

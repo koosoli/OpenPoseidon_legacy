@@ -266,3 +266,19 @@ fixture used unsupported object-to-array distance and was rejected, not counted.
 The subject crosses a building shadow, so these sequences are not a quantitative
 temporal-flicker verdict. Tests use an AI walker, not actual user input. No claim
 that the player's reported problem is reproduced/fixed. Keep that work separate.
+
+Installed cd5631bd passes game build and eleven shader tests. Four static native
+arms, labels mode{1,2}-native-radius{0.266,2}-mean, pass lifecycle and retain
+identical geometry. Settled GPU median/p95, ms:
+
+| Mode | 0.266 degrees | 2 degrees (artistic) |
+|---|---:|---:|
+| Full | 14.47 / 15.81 | 15.61 / 17.04 |
+| Budget | 13.19 / 14.87 | 13.17 / 14.18 |
+
+One ordered run per arm, not confidence intervals or isolated shadow timing.
+Budget is the preferred evaluation path; wider source has no demonstrated
+additional full-frame cost in this pair, not a guaranteed free cost. Full's
+larger source is costlier in this scene. Wide town images are insufficient for
+owner acceptance; contact_soft.eden / -Close isolates the elevated vehicle's
+ground shadow at closer range. No distance multiplier on shadow darkness added.
