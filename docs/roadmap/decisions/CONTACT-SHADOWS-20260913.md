@@ -237,3 +237,32 @@ Player flicker remains undiagnosed. SceneShadowPass already uses RenderTransform
 for the caster and proxies, and EngineWgpu::AddShadowCaster copies its own bone
 palette. Do not claim that reapplying the old interpolation fix solves this.
 Await owner fixed-mode comparison and reproduce a close moving-player fixture.
+
+## Priority revision: source size and standard blocker estimate
+
+Owner reports no meaningful difference between fixed and prototype after the
+reconstruction follow-up; player flicker is explicitly lower priority now.
+Prioritize soft, gradually lighter penumbrae with low cost, not arbitrary
+distance fading or additional special-case patches.
+
+Remove the unvalidated centre-blocker minimum introduced in 6c32bfc9. Standard
+mean blocker separation drives the shared PCSS footprint again. This removes a
+discontinuous cap that could collapse the footprint on a near/self depth sample;
+it is not yet proven to be the cause of the owner's observation. Retain the
+reconstruction filter independently of physical emitter size.
+
+At the physical solar radius 0.266 degrees, a 10 m light-space separation gives
+about 9.3 cm full penumbra width; the shadow-map reconstruction can obscure that
+difference. Compare 0.266 degrees with an explicitly artistic 1..2 degree emitter
+using the existing source-size setting. Do not pretend this larger value is the
+astronomical solar radius or alter the global default without acceptance.
+Normalized visibility filtering makes a finite shadow lighter as the source
+becomes partially visible. Large fully occluding surfaces retain an umbra:
+fading those purely by distance would incorrectly leak direct sunlight.
+
+Close walker fixture contact_player.eden / -PlayerMotion passes both fixed and
+full native capture/lifecycle (16 frames per arm, labels player-near2). The first
+fixture used unsupported object-to-array distance and was rejected, not counted.
+The subject crosses a building shadow, so these sequences are not a quantitative
+temporal-flicker verdict. Tests use an AI walker, not actual user input. No claim
+that the player's reported problem is reproduced/fixed. Keep that work separate.

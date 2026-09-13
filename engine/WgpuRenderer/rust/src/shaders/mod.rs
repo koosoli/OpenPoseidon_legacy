@@ -190,11 +190,18 @@ mod tests {
         assert_eq!(blend(1.5), 1.0);
         assert!(blend(0.50001) < 1e-8);
         assert!(1.0 - blend(1.49999) < 1e-8);
-        assert!(helper.contains("min(separation / blockers, centre_separation)"));
-        for local_gap in [0.0_f64, 0.05, 3.0, 12.0] {
-            let mixed_blockers = (local_gap + 80.0 * 8.0) / 9.0;
-            assert!((mixed_blockers.min(local_gap) * slope - local_gap * slope).abs() < 1e-10);
-        }
+        assert!(!helper.contains("centre_separation"));
+        assert!(helper.contains("min(separation / blockers, 100.0)"));
+        // A finite occluder's umbra diminishes as its penumbra grows, without
+        // an arbitrary distance multiplier on shadow strength. Infinite/wide
+        // blockers must still be allowed to cast fully dark direct shadows.
+        let blocked_fraction = |half_width: f64, gap: f64, angle: f64| {
+            let radius = gap * angle.to_radians().tan();
+            if radius == 0.0 { 1.0 } else { (half_width / radius).min(1.0) }
+        };
+        assert_eq!(blocked_fraction(0.05, 0.0, 1.0), 1.0);
+        assert!(blocked_fraction(0.05, 12.0, 1.0) < blocked_fraction(0.05, 3.0, 1.0));
+        assert_eq!(blocked_fraction(100.0, 12.0, 1.0), 1.0);
         for (source, file_path) in [
             (include_str!("../gfx3d/shader3d.wgsl"), "gfx3d/shader3d.wgsl"),
             (include_str!("../gfx3d/gpu_driven.wgsl"), "gfx3d/gpu_driven.wgsl"),

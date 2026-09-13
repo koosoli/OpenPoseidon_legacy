@@ -65,7 +65,6 @@ fn contact_filter(uv: vec2<f32>, layer: i32, reference: f32,
     let search_uv = 100.0 * slope * world_to_uv;
     var separation = 0.0;
     var blockers = 0.0;
-    var centre_separation = 100.0;
     // Centre included even in the cheap mode so contact casters are not skipped.
     for (var i = 0u; i <= taps; i++) {
         var offset = vec2<f32>(0.0);
@@ -79,7 +78,6 @@ fn contact_filter(uv: vec2<f32>, layer: i32, reference: f32,
         if (depth < receiver) {
             let gap = max(0.0, receiver - depth) / max(depth_per_metre, 1e-8);
             separation += gap;
-            if (i == taps) { centre_separation = gap; }
             blockers += 1.0;
         }
     }
@@ -87,9 +85,9 @@ fn contact_filter(uv: vec2<f32>, layer: i32, reference: f32,
         // A sparse search cannot prove there is no thin alpha-tested blocker.
         return contact_reconstruct(uv, layer, reference, gradient);
     }
-    // A known local blocker must not inherit the broad penumbra of unrelated
-    // distant blockers sampled around it (especially with the sparse budget disk).
-    let radius = min(min(separation / blockers, centre_separation), 100.0) * slope * world_to_uv;
+    // Standard PCSS mean blocker depth. A centre-depth minimum collapses the
+    // entire footprint when one near receiver/self sample enters the search.
+    let radius = min(separation / blockers, 100.0) * slope * world_to_uv;
     let radius_texels = max(radius.x * f32(size.x), radius.y * f32(size.y));
     if (radius_texels <= 0.5) {
         return contact_reconstruct(uv, layer, reference, gradient);
