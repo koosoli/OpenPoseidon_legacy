@@ -2150,3 +2150,13 @@ native/DLSS captures and eleven shader tests pass. Static edge filtering improve
 but player flicker, cloud broadening and final visual/cost acceptance remain OPEN.
 The prototype is not ready for default promotion. See the decision for measured
 additional cost and exact artifact paths; no blanket shadow-fix claim.
+
+Owner reprioritized soft, lighter penumbrae over player flicker. Installed
+d6892d6e removes the experimental centre-depth cap, retains standard blocker
+mean and reconstruction, supports explicitly artistic source sizes up to 8
+degrees, and refines budget PCF only on mixed visibility. Shared receiver path,
+no distance-opacity hack, new pass, texture or ABI. Eleven shader tests and
+close installed MSAA4 comparisons pass; broad shadows now visibly spread and
+lighten, but 8-degree adaptive costs +2.31 ms median in the close fixture versus
+fixed (one pair). Not promoted; cloud broadening and motion acceptance remain
+open. Details and historical/prototype boundaries are in the contact decision.

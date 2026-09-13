@@ -13,15 +13,17 @@ radius), then converts metres to UV with each cascade's X/Y row lengths.
 Camera distance and cascade index do not determine the physical radius.
 Existing cascade coverage fallthrough and overlap blending remain intact.
 
-Mode 0 preserves the fixed-filter branch. Mode 1 uses 17 blocker depth fetches
-(including the centre) and 16 plane-corrected bilinear filter taps. Mode 2 uses
-9 blocker fetches and 8 filter taps, on every cascade, not a softness-changing
-far-tier switch. Contact/subtexel penumbrae use one bilinear comparison. The
-sample disk is fixed, without frame noise or temporal rotation.
+Current implementation: mode 0 preserves the fixed-filter branch. Mode 1 uses
+17 blocker depth fetches (including the centre) and 16 plane-corrected bilinear
+filter taps. Mode 2 uses 9 blocker fetches and 8 filter taps, refined to 16 when
+visibility is mixed, on every cascade, not a softness-changing far-tier switch.
+Contact/subtexel penumbrae retain tent reconstruction. The sample disk is fixed,
+without frame noise or temporal rotation. Historical measurements below explicitly
+identify their earlier implementation commits.
 
 Dev tools / Shadows: contact mode 0/1/2 and sun angular radius in degrees.
 Reset restores mode 0. Startup diagnostics: WGR_CONTACT_SHADOWS=0/1/2 and
-WGR_SUN_ANGULAR_RADIUS (default 0.266 degrees, clamped 0..2). These use the
+WGR_SUN_ANGULAR_RADIUS (default 0.266 degrees, now clamped 0..8). These use the
 previously unused W lanes of camera-forward and sun-direction in the shared
 shadow block; no FFI layout growth or new bindings. Local lamps are unaffected.
 
@@ -315,3 +317,23 @@ visibility footprints. This is adaptive PCF within the same receiver function,
 not another pass/history/blur layer. An all-lit/all-occluded sparse disk can still
 miss a thin feature: adaptive sampling is not guaranteed reference equivalence.
 Sample-union test ensures the refinement does not duplicate even-index taps.
+
+Installed adaptive revision d6892d6e: game build and eleven shader tests pass.
+Same-build fixed/adaptive MSAA4 close arms at 8 degrees pass lifecycle and have
+identical geometry. GPU median/p95: 13.46/14.79 fixed, 15.77/16.87 adaptive,
+one settled 15-second window per run. Adaptive broad shadow looks closer to the
+full reference but retains a small uneven dark core. +2.31 ms versus fixed in
+this scene is material, not negligible. Full's prior 17.83 ms was a different
+run/build; do not turn that comparison into a guaranteed saving. Keep default
+OFF and evaluate a moderate source size before any quality/cost recommendation.
+Artifacts: mode{0,2}-msaa-radius8-close-adaptive.
+
+Moderate 4-degree adaptive close arm passes at 14.76/15.43 ms median/p95,
+versus fixed 13.46/14.79 and broad 8-degree 15.77/16.87. Same geometry and
+settings except source size/mode, single runs; approximately +1.30/+2.31 ms
+versus fixed, not universal costs. Four degrees retains a substantial dark
+umbra in the close Jeep image; eight shows the owner's requested much broader,
+lighter falloff but costs more and is an artistic area-source approximation.
+Both require owner visual/cost judgement before promotion. Keep 0.266 physical
+default and mode 0; no quiet global preset change. Latest adaptive implementation
+is not yet motion/DLSS/cloud accepted. Artifact: mode2-msaa-radius4-close-adaptive.
