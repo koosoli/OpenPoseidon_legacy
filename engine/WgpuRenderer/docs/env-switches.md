@@ -50,6 +50,7 @@ have been.
 | `WGR_TERRAIN_SHADOW_PENUMBRA` | Rust | |
 | `WGR_TERRAIN_SKIRT_K` | Rust | |
 | `WGR_WATER_SKIRT_K` | Rust | |
+| `WGR_VB_UPDATE_STATS` | C++ bridge | Logs two-second, per-`VBType` create/destroy/cancel and update/build/hash/upload counts, bytes, total time and maximum call time. Diagnostic only; unset/`0` avoids timers and atomics in `VertexBufferWgpu`. |
 
 ## Regenerating
 

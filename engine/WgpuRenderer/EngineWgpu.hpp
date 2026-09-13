@@ -78,6 +78,7 @@ struct CpuMeshSlot
 {
     uint64_t producer = 0; // from EngineWgpu::_nextMeshHandle -- ONE handle space with the retained meshes
     uint64_t renderer = 0; // written at the drain; 0 means "the create has not landed yet"
+    VBType type = VBStatic; // UP-126: preserves the producer classification for lifecycle diagnostics
     bool dead = false;     // the buffer died; a create still queued must be skipped, not fulfilled
     // What the queued create will upload. VertexBufferWgpu::Update rewrites this in place
     // while `renderer` is still 0 instead of issuing an upload against a mesh that does not

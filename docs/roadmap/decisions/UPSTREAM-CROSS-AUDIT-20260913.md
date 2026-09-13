@@ -239,3 +239,70 @@ Every performance comparison must preserve scene, camera, resolution, DLSS,
 shadows and LOD quality; record frame p50/p95/p99, loading spikes and RAM/VRAM.
 The current single-pose GPU endpoints do not satisfy that performance gate.
 No performance optimization from this audit is accepted into consolidated-v2.
+
+## September 13 follow-up: current upstream renderer candidates
+
+Re-fetched `upstream/main` at `0e24d744` and rechecked the current fork at
+`c4ccadab` before making changes. The old candidate hashes had moved, but the
+three relevant ideas remain represented by current upstream commits
+`02c0d741` (benchmark LOD lock), `cc4bd699` (opaque grouping) and the
+discardable-buffer work discussed in issue/PR #126. GL33 buffer teardown,
+heightmap-texture and local-light UBO commits remain backend-specific and were
+not transplanted into WGPU.
+
+### LOD lock: already present, no duplicate
+
+`scripts/Measure-NativeReforger.ps1` and `scripts/Measure-AIScale.ps1` use the
+existing `WGR_LOD_GOVERNOR_RANGE=1` fixed-quality control. It freezes the
+governor's range while retaining the fork's own retained-instance accounting.
+Adding upstream's second `POSEIDON_LOD_FIX` control would create two authorities
+for the same benchmark condition. No production or diagnostic code was added.
+
+### Discardable buffers: instrumented and rejected as an optimization target
+
+`WGR_VB_UPDATE_STATS=1` now records, per `VBType`, create/destroy/cancel
+counts and bytes plus update/build/hash/upload counts, bytes, total CPU time and
+maximum call time. It is read once at startup; with the switch unset, the
+`VertexBufferWgpu` path performs no clocks or atomic counter operations.
+`Measure-AIScale.ps1` carries the switch and shadow-map override into its
+captured environment so the result is reproducible.
+
+Installed evidence, all at fixed LOD quality:
+
+- Native Reforger Reference, 1920x1080 native, MSAA4, DLSS off:
+  `build/native-reforger-perf/Reference-vbdiag/run-01.*`. The eight screenshot
+  readbacks make this run invalid for an FPS comparison, but not for the
+  lifecycle census. No `VBSmallDiscardable` row occurred: zero creates, updates
+  and uploads. Settled static `Update()` gates handled about 182,108 calls per
+  two seconds in 5.87-6.19 ms total, about 0.05 ms/frame at the observed rate,
+  with zero builds and uploads. Pass-1 sorting settled at 0.086 ms/frame.
+- 80 visible idle soldiers, 1280x720, fixed LOD, normal CSM:
+  `build/ai-scale/vbdiag-idle-80-Near/run-01.*`. Across about 60 seconds,
+  2,373,718 dynamic update calls produced eight builds, two uploads and only
+  544 uploaded bytes. Total instrumented update time was 68.863 ms, about
+  1.15 ms per wall-clock second (roughly 0.011 ms/frame at 100 FPS). No
+  discardable-buffer row occurred.
+- Same 80-soldier fixture with `WGR_SHADOW_MAPS=0`:
+  `build/ai-scale/vbdiag-lifecycle-idle-80-Near/run-01.*`. Startup requested 33
+  dynamic buffers (795,812 bytes) and 26 static buffers (238,828 bytes).
+  `VBSmallDiscardable` and `VBBigDiscardable` again had zero creates, destroys,
+  updates and uploads. The steady captured frame was 8.760 ms, but this is a
+  diagnostic arm, not a same-quality CSM performance comparison.
+
+Conclusion: changing `VBSmallDiscardable` from dynamic to static cannot improve
+these active WGPU paths because the candidate class performs no measured work.
+The existing clean-buffer and content-hash gates already suppress the update
+storm that motivated the upstream GL change. Keep the opt-in census for a
+future scene that actually produces the class; do not change its semantics
+without such a reproduction, especially because animated shadows and rotor
+poses share the surrounding lifetime machinery.
+
+### Opaque bucketing: not implemented after the measurement gate
+
+The native run measured pass-1 sort at 0.086 ms/frame; the 80-soldier runs
+settled at 0.004 ms/frame. Replacing packed-key/radix sorting with mutable
+per-`LODShape` bucket epochs would therefore have no material whole-frame
+benefit in these fixtures and would add ordering/thread-safety risk. The
+upstream bucket implementation remains a candidate only if a future matched
+capture attributes a material frame tail to sorting. Transparent and decal
+ordering must remain outside any such experiment.

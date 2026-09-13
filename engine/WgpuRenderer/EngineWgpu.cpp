@@ -783,6 +783,141 @@ inline uint64_t HashVertices(const void* data, size_t bytes)
     return h;
 }
 
+// UP-126: VBSmallDiscardable is still classified as dynamic by the WGPU bridge, but
+// changing that contract without evidence risks stale animated shadows and rotor poses.
+// This opt-in census measures the work at the only authoritative boundary: Update(),
+// where a dirty mesh is rebuilt, hashed, and either uploaded or suppressed. Keeping the
+// branch behind one startup-time flag means normal play pays neither clocks nor atomics.
+struct VbUpdateCounters
+{
+    std::atomic<uint64_t> createRequests{0};
+    std::atomic<uint64_t> createBytes{0};
+    std::atomic<uint64_t> destroyRequests{0};
+    std::atomic<uint64_t> cancelledCreates{0};
+    std::atomic<uint64_t> calls{0};
+    std::atomic<uint64_t> cleanSkips{0};
+    std::atomic<uint64_t> sharedSkips{0};
+    std::atomic<uint64_t> skinnedSkips{0};
+    std::atomic<uint64_t> builds{0};
+    std::atomic<uint64_t> hashSkips{0};
+    std::atomic<uint64_t> pendingRewrites{0};
+    std::atomic<uint64_t> uploads{0};
+    std::atomic<uint64_t> refusedUploads{0};
+    std::atomic<uint64_t> uploadBytes{0};
+    std::atomic<uint64_t> updateNs{0};
+    std::atomic<uint64_t> updateMaxNs{0};
+    std::atomic<uint64_t> hashNs{0};
+    std::atomic<uint64_t> hashMaxNs{0};
+};
+
+constexpr size_t kVbTypeCount = 4;
+std::array<VbUpdateCounters, kVbTypeCount> GVbUpdateCounters;
+
+bool VbUpdateStatsEnabled()
+{
+    static const bool enabled = []
+    {
+        const char* value = std::getenv("WGR_VB_UPDATE_STATS");
+        return value != nullptr && std::atoi(value) != 0;
+    }();
+    return enabled;
+}
+
+void AtomicMax(std::atomic<uint64_t>& target, uint64_t value)
+{
+    uint64_t old = target.load(std::memory_order_relaxed);
+    while (old < value && !target.compare_exchange_weak(old, value, std::memory_order_relaxed))
+    {
+    }
+}
+
+class ScopedVbUpdateTimer
+{
+  public:
+    explicit ScopedVbUpdateTimer(VbUpdateCounters* counters) : _counters(counters)
+    {
+        if (_counters)
+        {
+            _counters->calls.fetch_add(1, std::memory_order_relaxed);
+            _start = std::chrono::steady_clock::now();
+        }
+    }
+
+    ~ScopedVbUpdateTimer()
+    {
+        if (!_counters)
+        {
+            return;
+        }
+        const uint64_t ns = static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - _start).count());
+        _counters->updateNs.fetch_add(ns, std::memory_order_relaxed);
+        AtomicMax(_counters->updateMaxNs, ns);
+    }
+
+  private:
+    VbUpdateCounters* _counters = nullptr;
+    std::chrono::steady_clock::time_point _start{};
+};
+
+void RecordVbHashTime(VbUpdateCounters* counters, std::chrono::steady_clock::time_point start)
+{
+    if (!counters)
+    {
+        return;
+    }
+    const uint64_t ns = static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start).count());
+    counters->hashNs.fetch_add(ns, std::memory_order_relaxed);
+    AtomicMax(counters->hashMaxNs, ns);
+}
+
+void LogVbUpdateStats()
+{
+    if (!VbUpdateStatsEnabled())
+    {
+        return;
+    }
+
+    static constexpr const char* names[kVbTypeCount] = {
+        "dynamic", "static", "big-discardable", "small-discardable"};
+    for (size_t i = 0; i < kVbTypeCount; ++i)
+    {
+        VbUpdateCounters& c = GVbUpdateCounters[i];
+        const uint64_t creates = c.createRequests.exchange(0, std::memory_order_relaxed);
+        const uint64_t createBytes = c.createBytes.exchange(0, std::memory_order_relaxed);
+        const uint64_t destroys = c.destroyRequests.exchange(0, std::memory_order_relaxed);
+        const uint64_t cancelled = c.cancelledCreates.exchange(0, std::memory_order_relaxed);
+        const uint64_t calls = c.calls.exchange(0, std::memory_order_relaxed);
+        const uint64_t clean = c.cleanSkips.exchange(0, std::memory_order_relaxed);
+        const uint64_t shared = c.sharedSkips.exchange(0, std::memory_order_relaxed);
+        const uint64_t skinned = c.skinnedSkips.exchange(0, std::memory_order_relaxed);
+        const uint64_t builds = c.builds.exchange(0, std::memory_order_relaxed);
+        const uint64_t hashSkips = c.hashSkips.exchange(0, std::memory_order_relaxed);
+        const uint64_t pending = c.pendingRewrites.exchange(0, std::memory_order_relaxed);
+        const uint64_t uploads = c.uploads.exchange(0, std::memory_order_relaxed);
+        const uint64_t refused = c.refusedUploads.exchange(0, std::memory_order_relaxed);
+        const uint64_t bytes = c.uploadBytes.exchange(0, std::memory_order_relaxed);
+        const uint64_t updateNs = c.updateNs.exchange(0, std::memory_order_relaxed);
+        const uint64_t updateMaxNs = c.updateMaxNs.exchange(0, std::memory_order_relaxed);
+        const uint64_t hashNs = c.hashNs.exchange(0, std::memory_order_relaxed);
+        const uint64_t hashMaxNs = c.hashMaxNs.exchange(0, std::memory_order_relaxed);
+        if (creates == 0 && destroys == 0 && calls == 0 && uploads == 0 && pending == 0)
+        {
+            continue;
+        }
+        LOG_INFO(Graphics,
+                 "VB update [{}] create={} create-bytes={} destroy={} cancel-create={} | "
+                 "calls={} clean={} shared={} skinned={} builds={} hash-skip={} "
+                 "pending={} uploads={} refused={} bytes={} | update={:.3f} ms max={:.3f} ms | "
+                 "hash={:.3f} ms max={:.3f} ms",
+                 names[i], creates, createBytes, destroys, cancelled, calls, clean, shared, skinned, builds,
+                 hashSkips, pending, uploads, refused, bytes,
+                 static_cast<double>(updateNs) / 1.0e6, static_cast<double>(updateMaxNs) / 1.0e6,
+                 static_cast<double>(hashNs) / 1.0e6, static_cast<double>(hashMaxNs) / 1.0e6);
+    }
+}
+
 class VertexBufferWgpu : public VertexBuffer
 {
   public:
@@ -807,6 +942,7 @@ class VertexBufferWgpu : public VertexBuffer
     std::shared_ptr<CpuMeshLink> link;
     int vertexCount = 0;
     bool isDynamic = false;
+    VBType bufferType = VBStatic;
     AutoArray<render::mesh::MeshSection> sections;
 
     // Content hash of the last vertex data actually uploaded, so Update can skip a
@@ -838,8 +974,9 @@ class VertexBufferWgpu : public VertexBuffer
     uint64_t RendererMesh() const { return slot ? slot->renderer : 0; }
 
     VertexBufferWgpu(WgrRenderer* r, const WgrUploader* up, std::shared_ptr<CpuMeshSlot> s,
-                     std::shared_ptr<CpuMeshLink> l, int nv, bool dynamic)
-        : renderer(r), uploader(up), slot(std::move(s)), link(std::move(l)), vertexCount(nv), isDynamic(dynamic)
+                     std::shared_ptr<CpuMeshLink> l, int nv, bool dynamic, VBType type)
+        : renderer(r), uploader(up), slot(std::move(s)), link(std::move(l)), vertexCount(nv), isDynamic(dynamic),
+          bufferType(type)
     {
     }
     ~VertexBufferWgpu() override
@@ -867,6 +1004,18 @@ class VertexBufferWgpu : public VertexBuffer
         // strictly better than fulfilling it and then destroying it: no pool allocation, no
         // bind-cache clear, no generation bump for a mesh nobody can name any more.
         slot->dead = true;
+        if (VbUpdateStatsEnabled())
+        {
+            const size_t typeIndex = static_cast<size_t>(bufferType);
+            if (typeIndex < kVbTypeCount)
+            {
+                GVbUpdateCounters[typeIndex].destroyRequests.fetch_add(1, std::memory_order_relaxed);
+                if (slot->renderer == 0)
+                {
+                    GVbUpdateCounters[typeIndex].cancelledCreates.fetch_add(1, std::memory_order_relaxed);
+                }
+            }
+        }
         if (slot->sharedProducer != 0 && !slot->ownsShared)
         {
             // RFG-088: the retained model owns the pool allocation; nothing to destroy here.
@@ -906,6 +1055,16 @@ class VertexBufferWgpu : public VertexBuffer
     // mesh that re-derives byte-identical geometry), skipping just the GPU copy.
     void Update(const Shape& src, bool dynamic) override
     {
+        VbUpdateCounters* diag = nullptr;
+        if (VbUpdateStatsEnabled())
+        {
+            const size_t typeIndex = static_cast<size_t>(bufferType);
+            if (typeIndex < kVbTypeCount)
+            {
+                diag = &GVbUpdateCounters[typeIndex];
+            }
+        }
+        ScopedVbUpdateTimer updateTimer(diag);
         if (!renderer || !slot)
         {
             return;
@@ -941,6 +1100,7 @@ class VertexBufferWgpu : public VertexBuffer
                         wgr_mesh_update(renderer, slot->renderer, AsMeshVerts(bind));
                     }
                 }
+                if (diag) { diag->skinnedSkips.fetch_add(1, std::memory_order_relaxed); }
                 Poseidon::GFaceDiag().updSkinSkip++;
                 return;
             }
@@ -972,6 +1132,7 @@ class VertexBufferWgpu : public VertexBuffer
         {
             // RFG-088: the bytes are the retained model's; a static level never changes them.
             bufferDirty = false;
+            if (diag) { diag->sharedSkips.fetch_add(1, std::memory_order_relaxed); }
             if (cpuPosed) { Poseidon::GFaceDiag().updShared++; }
             return;
         }
@@ -987,6 +1148,7 @@ class VertexBufferWgpu : public VertexBuffer
         // verts changed" — only bufferDirty does).
         if (!bufferDirty && (!isDynamic || haveUploadHash))
         {
+            if (diag) { diag->cleanSkips.fetch_add(1, std::memory_order_relaxed); }
             if (cpuPosed) { Poseidon::GFaceDiag().updClean++; }
             return;
         }
@@ -996,6 +1158,7 @@ class VertexBufferWgpu : public VertexBuffer
             return;
         }
         std::vector<SVertex> verts(static_cast<size_t>(vertexCount));
+        if (diag) { diag->builds.fetch_add(1, std::memory_order_relaxed); }
         // A terrain-conform plane is active only inside a conformed object's draw
         // (ForestPlain). Then upload the UNDEFORMED mesh (OrigPos/OrigNorm) and let the
         // vertex shader conform each instance: the base bytes are identical across all
@@ -1030,9 +1193,12 @@ class VertexBufferWgpu : public VertexBuffer
             Poseidon::GFaceDiag().drawVerts = vertexCount;
         }
         bufferDirty = false;
+        const auto hashStart = diag ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
         const uint64_t hash = HashVertices(verts.data(), verts.size() * sizeof(SVertex));
+        RecordVbHashTime(diag, hashStart);
         if (haveUploadHash && hash == lastUploadHash)
         {
+            if (diag) { diag->hashSkips.fetch_add(1, std::memory_order_relaxed); }
             if (cpuPosed) { Poseidon::GFaceDiag().updHash++; }
             return;
         }
@@ -1054,6 +1220,7 @@ class VertexBufferWgpu : public VertexBuffer
         // ClipLand selector, and it runs in the same draw phase as the create.
         if (slot->renderer == 0)
         {
+            if (diag) { diag->pendingRewrites.fetch_add(1, std::memory_order_relaxed); }
             if (cpuPosed) { Poseidon::GFaceDiag().updPending++; }
             slot->verts = std::move(verts);
             return;
@@ -1061,6 +1228,18 @@ class VertexBufferWgpu : public VertexBuffer
         if (uploader)
         {
             const uint32_t okUp = wgr_uploader_mesh_update(uploader, slot->renderer, AsMeshVerts(verts));
+            if (diag)
+            {
+                if (okUp != 0)
+                {
+                    diag->uploads.fetch_add(1, std::memory_order_relaxed);
+                    diag->uploadBytes.fetch_add(verts.size() * sizeof(SVertex), std::memory_order_relaxed);
+                }
+                else
+                {
+                    diag->refusedUploads.fetch_add(1, std::memory_order_relaxed);
+                }
+            }
             if (cpuPosed)
             {
                 Poseidon::GFaceDiag().updUploader++;
@@ -1069,6 +1248,11 @@ class VertexBufferWgpu : public VertexBuffer
         }
         else
         {
+            if (diag)
+            {
+                diag->uploads.fetch_add(1, std::memory_order_relaxed);
+                diag->uploadBytes.fetch_add(verts.size() * sizeof(SVertex), std::memory_order_relaxed);
+            }
             if (cpuPosed) { Poseidon::GFaceDiag().updDirect++; }
             wgr_mesh_update(renderer, slot->renderer, AsMeshVerts(verts));
         }
@@ -4492,8 +4676,19 @@ VertexBuffer* EngineWgpu::CreateVertexBuffer(const Shape& src, VBType type)
     _ops.meshCreate++;
     auto slot = std::make_shared<CpuMeshSlot>();
     slot->producer = _nextMeshHandle++; // one handle space with the retained meshes
+    slot->type = type;
     slot->verts = std::move(verts);
     slot->indices = std::move(indices);
+    if (VbUpdateStatsEnabled())
+    {
+        const size_t typeIndex = static_cast<size_t>(type);
+        if (typeIndex < kVbTypeCount)
+        {
+            GVbUpdateCounters[typeIndex].createRequests.fetch_add(1, std::memory_order_relaxed);
+            const uint64_t bytes = slot->verts.size() * sizeof(SVertex) + slot->indices.size() * sizeof(VertexIndex);
+            GVbUpdateCounters[typeIndex].createBytes.fetch_add(bytes, std::memory_order_relaxed);
+        }
+    }
     // RFG-088: a STATIC buffer for a level the retained path already holds draws through that
     // mesh. Measured on native Everon at 800 retained models: the retained meshes were 759 MB
     // and the direct-path buffers 880 MB of the same pool, the largest mesh 12.9 MB on both
@@ -4560,7 +4755,7 @@ VertexBuffer* EngineWgpu::CreateVertexBuffer(const Shape& src, VBType type)
     // the guard at the top of this function has already ruled out; the buffer falls back
     // to the renderer handle in that case rather than silently dropping uploads.
     const WgrUploader* uploader = wgr_uploader_get(_renderer);
-    auto* buf = new VertexBufferWgpu(_renderer, uploader, std::move(slot), _cpuMeshLink, nv, dynamic);
+    auto* buf = new VertexBufferWgpu(_renderer, uploader, std::move(slot), _cpuMeshLink, nv, dynamic, type);
     render::mesh::BuildSections(src, buf->sections);
     return buf;
 }
@@ -10706,6 +10901,8 @@ void EngineWgpu::LogObjectPerfRow()
     if ((now - lastLog) < std::chrono::seconds(2))
         return;
     lastLog = now;
+
+    LogVbUpdateStats();
 
     float gpu[kGpuRegionEnd] = {};
     const int n = GetWaterGpuTimings(gpu, kGpuRegionEnd);
