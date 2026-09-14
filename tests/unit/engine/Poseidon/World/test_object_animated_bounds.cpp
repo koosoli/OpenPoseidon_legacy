@@ -144,6 +144,60 @@ TEST_CASE("Destroyed objects report shared shape deformation", "[World][Object][
     CHECK_FALSE(object->DeformsSharedShape(0));
 }
 
+TEST_CASE("AnimatedBSphere answers from the warm bounds cache", "[World][Object][Bounds]")
+{
+    // UP-9a298d09: a cache-warm query must not touch Animate/Deanimate, whether
+    // standalone or nested inside an outer Animate block.
+    Landscape landscape(nullptr, nullptr);
+    GlobalLandscapeScope globalLandscape(&landscape);
+
+    Ref<LODShapeWithShadow> lod = new LODShapeWithShadow();
+    Shape* level = new Shape();
+    level->SetHints(ClipLandOn, ClipLandOn);
+    SetBounds(*level, Vector3(1, 2, 3), Vector3(4, 5, 6));
+    lod->AddShape(level, 0.0f);
+
+    Ref<CountingObject> object = new CountingObject(lod, 1);
+    Vector3 bounds[2];
+    object->AnimatedMinMax(0, bounds);
+    REQUIRE(object->AnimateCalls() == 1);
+
+    Vector3 center;
+    float radius = 0.0f;
+    object->AnimatedBSphere(0, center, radius, false);
+    REQUIRE(object->AnimateCalls() == 1);
+    REQUIRE(center == Vector3(2.5f, 3.5f, 4.5f));
+    REQUIRE(radius == Vector3(3, 3, 3).Size() * 0.5f);
+
+    object->AnimatedBSphere(0, center, radius, true);
+    REQUIRE(object->AnimateCalls() == 1);
+    REQUIRE(center == Vector3(2.5f, 3.5f, 4.5f));
+}
+
+TEST_CASE("Animated bounds do not nest object animation", "[World][Object][Bounds]")
+{
+    // Upstream 9a298d09 regression shape: a non-cacheable (destroyed) object
+    // queried from inside an Animate block must not start its own animation.
+    Landscape landscape(nullptr, nullptr);
+    GlobalLandscapeScope globalLandscape(&landscape);
+
+    Ref<LODShapeWithShadow> lod = new LODShapeWithShadow();
+    Shape* level = new Shape();
+    level->SetHints(ClipLandOn, ClipLandOn);
+    SetBounds(*level, Vector3(1, 2, 3), Vector3(4, 5, 6));
+    lod->AddShape(level, 0.0f);
+
+    Ref<CountingObject> object = new CountingObject(lod, 1);
+    object->SetDestructType(DestructBuilding);
+    object->MarkDestroyed();
+
+    Vector3 center;
+    float radius = 0.0f;
+    object->AnimatedBSphere(0, center, radius, true);
+
+    CHECK(object->AnimateCalls() == 0);
+}
+
 TEST_CASE("Object::RenderId is stable, unique and nonzero", "[World][Object][RenderId]")
 {
     // ID-1 (render-snapshot design section 4): the render identity lives on the Object

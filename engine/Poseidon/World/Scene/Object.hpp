@@ -392,6 +392,10 @@ class Object: public NetworkObject, public FrameBase, public IAnimator
 
 	// Get min-max of object after animate. Default (generic) implementation may be slow when shape is complex.
 	virtual void AnimatedMinMax( int level, Vector3 *minMax );
+	// UP-9a298d09: cache predicate/read split (upstream animated-bounds port) so a
+	// nested bounds query can reuse the warm box without touching Animate/Deanimate.
+	bool AnimBBoxCacheable( int level ) const;
+	bool CachedAnimatedMinMax( int level, Vector3 *minMax ) const;
 	// Get bounding sphere of object after animate. Default (generic) implementation may be slow when shape is complex.
 	virtual void AnimatedBSphere( int level, Vector3 &bCenter, float &bRadius, bool isAnimated );
 

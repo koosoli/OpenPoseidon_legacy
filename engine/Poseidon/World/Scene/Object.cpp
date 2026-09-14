@@ -664,13 +664,11 @@ void Object::AnimatedMinMax(int level, Vector3* minMax)
     // conform signal; excluding damage/destruction leaves only the static-conform case
     // (re-checked each call, so a tree becoming damaged falls back to the live path). The
     // cache is invalidated on Move.
-    const bool cacheable = IsAnimated(level) && GetTotalDammage() == 0 && !(_isDestroyed && _destroyPhase > 0);
-    if (cacheable && _animBBoxLevel == level)
+    if (CachedAnimatedMinMax(level, minMax))
     {
-        minMax[0] = _animBBoxMin;
-        minMax[1] = _animBBoxMax;
         return;
     }
+    const bool cacheable = AnimBBoxCacheable(level);
 
     // default implementation - slow, but robust
     Animate(level);
@@ -701,8 +699,37 @@ void Object::AnimatedMinMax(int level, Vector3* minMax)
     }
 }
 
+bool Object::AnimBBoxCacheable(int level) const
+{
+    const bool destroying = _isDestroyed && _destroyPhase > 0;
+    return IsAnimated(level) && GetTotalDammage() == 0 && !destroying;
+}
+
+bool Object::CachedAnimatedMinMax(int level, Vector3* minMax) const
+{
+    if (_animBBoxLevel != level || !AnimBBoxCacheable(level))
+    {
+        return false;
+    }
+    minMax[0] = _animBBoxMin;
+    minMax[1] = _animBBoxMax;
+    return true;
+}
+
 void Object::AnimatedBSphere(int level, Vector3& bCenter, float& bRadius, bool isAnimated)
 {
+    // UP-9a298d09 (port of the upstream animated-bounds fix): answer from the
+    // warm box without touching Animate/Deanimate. Besides skipping the measure,
+    // a nested query (isAnimated) can no longer disturb an active outer
+    // deformation. Sphere-from-box always contains the geometry, so culling
+    // stays safe (marginally looser than BSphereDynamic).
+    Vector3 mm[2];
+    if (CachedAnimatedMinMax(level, mm))
+    {
+        bCenter = (mm[0] + mm[1]) * 0.5f;
+        bRadius = (mm[1] - mm[0]).Size() * 0.5f;
+        return;
+    }
     // isAnimated should be set
     // when function is called inside Animate/Deanimate block
     // default implementation - slow, but robust

@@ -597,6 +597,10 @@ void Landscape::ResampleTerrain(int sampleStepLog)
     _terrainRangeLog -= sampleStepLog;
     _terrainGrid *= sampleStep;
     _invTerrainGrid = 1 / _terrainGrid;
+    // UP-315733ab: a grid change must retire cached heightfields keyed off
+    // HeightRevision, otherwise setTerrainGrid leaves visual and physical
+    // terrain out of sync.
+    ++_heightRevision;
 
     MakeObjectsTerrainAbsolute();
 
@@ -1002,6 +1006,8 @@ void Landscape::SubdivideTerrainOneStep()
     _terrainRangeLog += 1;
     _terrainGrid /= 2;
     _invTerrainGrid = 1 / _terrainGrid;
+    // UP-315733ab: see ResampleTerrain -- grid change retires HeightRevision key holders.
+    ++_heightRevision;
 }
 
 void Landscape::SubdivideTerrain(int subdivStepLog)
@@ -1093,6 +1099,8 @@ bool Landscape::LoadSubdivCache(int targetSubdivLog)
     _terrainRangeLog = cachedTerrainRangeLog;
     _terrainGrid = cachedTerrainGrid;
     _invTerrainGrid = 1.0f / _terrainGrid;
+    // UP-315733ab: see ResampleTerrain -- grid change retires HeightRevision key holders.
+    ++_heightRevision;
 
     // Adjust objects back to absolute with new terrain heights
     MakeObjectsTerrainAbsolute();
