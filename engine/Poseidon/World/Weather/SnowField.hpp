@@ -116,9 +116,9 @@ public:
         if (t >= 1.0f) return snowlineDepth;
         return snowlineDepth * (t * t * (3.0f - 2.0f * t));
     }
-    // Effective snow base depth: snowfall deposit or altitude cover, whichever
-    // is deeper. Tracks and presses scale against this.
-    float BaseDepthAt(float x, float z) const { return std::max(_depth, AltitudeDepthAt(x, z)); }
+    // Effective snow base depth: snowfall deposit (only while enabled) or
+    // altitude cover, whichever is deeper. Tracks and presses scale against this.
+    float BaseDepthAt(float x, float z) const { return std::max(enabled ? _depth : 0.0f, AltitudeDepthAt(x, z)); }
 
     void Stamp(float x, float z, float radius, float strength = 0.9f)
     {
