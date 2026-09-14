@@ -6173,7 +6173,7 @@ void DrawSkyTab()
                       "At Cloud shadow strength = 0 the map is uniformly lit and there is no cloud shape "
                       "left to read, so this control goes inert -- keep that slider above 0.");
     float rayDensity = s.godRayDensity * 1e6f;
-    // Headroom above the default of 60 (the renderer clamps at 200), so the default is not pinned
+    // Headroom above the default of 13 (the renderer clamps at 200), so the default is not pinned
     // to the end of the track and float round-trip through *1e6 cannot land outside the range.
     if (Dev::SliderFloat("Air density (x1e-6)", &rayDensity, 0.0f, 120.0f, "%.2f"))
     {

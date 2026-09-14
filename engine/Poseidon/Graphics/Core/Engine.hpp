@@ -2138,9 +2138,9 @@ class Engine : public IGraphicsEngine
         bool godRays = true;
         float godRayIntensity = 4.0f;      // multiplier on the physical single-scatter estimate
         // Scattering coefficient (1/m); clear-day Mie is 6e-6. The renderer reads it relative to
-        // its DENSITY_REF (1.2e-5 = 1.0x), so this default is a 5x multiplier on the physical
-        // density. The Sky tab shows it in units of 1e-6, i.e. "Air density (x1e-6)" = 60.
-        float godRayDensity = 6.0e-5f;
+        // its DENSITY_REF (1.2e-5 = 1.0x), so this default is just above the physical
+        // density. The Sky tab shows it in units of 1e-6, i.e. "Air density (x1e-6)" = 13.
+        float godRayDensity = 1.3e-5f;
         // March cap. Short on purpose: the cloud map spans 4 km centred on the camera, so a ray
         // leaves it by ~2-2.9 km and reads fully lit past that, and the aerial froxel already owns
         // sun-shafted haze beyond. What this pass adds over the froxel is cloud shaping and
