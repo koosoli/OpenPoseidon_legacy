@@ -220,7 +220,7 @@ void TrackDraw::SetOffsets(Vector3Par lOffset, Vector3Par rOffset, Texture* text
 
 void TrackDraw::UpdateSnow(const Frame& pos, bool terminate)
 {
-    if (!GSnow().enabled || !_offsets || terminate)
+    if (!GSnow().CoverActive() || !_offsets || terminate)
     {
         _snowLastValid = false;
         return;
@@ -484,7 +484,7 @@ void TrackOptimizedFour::UpdateSnow(const Frame& pos, bool terminate, float delt
     // Classic wheel memory points do not specify the chassis underside. Use a
     // conservative visual clearance; this does not change suspension or traction.
     constexpr float clearance = 0.35f;
-    if (terminate || !GSnow().enabled ||
+    if (terminate || !GSnow().CoverActive() ||
         !_fLeft.HasOffsets() || !_fRight.HasOffsets() ||
         !_bLeft.HasOffsets() || !_bRight.HasOffsets())
     {
@@ -626,7 +626,7 @@ void TrackOptimized::UpdateTrackedSnow(const Frame& pos, bool terminate, float d
 {
     UpdateSnow(pos, terminate);
     constexpr float clearance = 0.35f;
-    if (terminate || !GSnow().enabled || _snowHullRadius <= 0)
+    if (terminate || !GSnow().CoverActive() || _snowHullRadius <= 0)
     {
         _snowHullValid = false;
         _snowHullTime = 0;

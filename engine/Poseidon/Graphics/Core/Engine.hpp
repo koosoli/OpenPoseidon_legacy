@@ -1839,7 +1839,7 @@ class Engine : public IGraphicsEngine
         bool temporalOn = true;      // jitter + motion vectors + history
         bool dlssOn = true;          // request; effective only on a WGR_DLSS launch
         int renderScalePct = 67;     // 50..200 (<100 upscaling, 100+DLSS = DLAA, >100 SSAA)
-        int jitterPhases = 0;        // 0 = auto (~8 x (out/render)^2)
+        int jitterPhases = 0;        // 0 = auto (frozen at native, cycling when upscaling)
         bool mipBiasAuto = true;     // auto = half log2(scale)
         float mipBias = -0.3f;       // used when !mipBiasAuto, clamped [-4, 0]
         float reactiveSky = 0.4f;    // history-control strengths (0 = off)

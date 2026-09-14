@@ -138,7 +138,7 @@ public:
 private:
     void ModifyDisc(float x, float z, float radius, float strength, bool additive)
     {
-        if (!enabled || !std::isfinite(x) || !std::isfinite(z) ||
+        if (!CoverActive() || !std::isfinite(x) || !std::isfinite(z) ||
             std::abs(x) > 1000000.0f || std::abs(z) > 1000000.0f ||
             !std::isfinite(radius) || radius <= 0.0f || !std::isfinite(strength) || strength <= 0.0f) return;
         // Tracks carve into whatever snow is actually there: snowfall deposit
@@ -189,7 +189,7 @@ private:
 public:
     void Trail(float ax, float az, float bx, float bz, float radius, float strength = 0.8f)
     {
-        if (!enabled || !std::isfinite(radius) || radius <= 0.0f) return;
+        if (!CoverActive() || !std::isfinite(radius) || radius <= 0.0f) return;
         const float length = std::hypot(bx - ax, bz - az);
         if (!std::isfinite(length) || length > 25.0f) return; // Teleport, not a driven track.
         const int steps = std::max(1, static_cast<int>(std::ceil(length / std::max(radius, CellSize))));
@@ -199,6 +199,10 @@ public:
             Stamp(ax + (bx - ax) * t, az + (bz - az) * t, radius, strength);
         }
     }
+    // The snow system is live for cover, tracks and gameplay when snowfall is
+    // enabled OR the alpine snowline is on. Falling flakes stay on `falling`
+    // alone: the snowline changes where snow lies, never the snowfall itself.
+    bool CoverActive() const { return enabled || snowlineEnabled; }
     bool NeedsWalkingChannel() const { return enabled && Depth() > 0.25f; }
     // Deposit-only global; kept for external callers. In-engine call sites with
     // a position use NeedsWalkingChannelAt so altitude cover wades too.
@@ -217,7 +221,7 @@ public:
     }
     void PressWalking(float ax, float az, float bx, float bz)
     {
-        if (!enabled) return;
+        if (!CoverActive()) return;
         const float base = BaseDepthAt((ax + bx) * 0.5f, (az + bz) * 0.5f);
         if (base <= 0.25f) return;
         const float depthFactor = std::clamp((base - 0.25f) / 0.4f, 0.0f, 1.0f);
@@ -260,7 +264,7 @@ public:
         data[1] = oz * CellSize;
         data[2] = CellSize;
         data[3] = enabled ? _depth : 0.0f;
-        if (!enabled) return data;
+        if (!CoverActive()) return data;
         for (int z = 0; z < WindowSize; z += ChunkSize)
             for (int x = 0; x < WindowSize; x += ChunkSize)
             {

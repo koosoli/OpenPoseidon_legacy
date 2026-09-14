@@ -309,13 +309,20 @@ impl Temporal {
             // positions to reconstruct detail from — 8 phases at Quality ratio measurably
             // soften the result). WGR_JITTER_PHASES overrides for A/Bs; the sequence
             // itself stays replaceable per the plan.
+            // At native scale (ratio <= 1) there is nothing to reconstruct, so the
+            // cycle only adds shimmer: freeze on the first offset instead. The panel
+            // slider / WGR_JITTER_PHASES still force any count explicitly.
             let override_phases =
                 (self.jitter_phase_override > 0).then_some(self.jitter_phase_override);
             let phases = override_phases.unwrap_or_else(|| {
                 let (rw, _) = self.render_size;
                 let out_w = self.output_width_hint.max(rw).max(1);
                 let ratio = out_w as f32 / rw.max(1) as f32;
-                ((8.0 * ratio * ratio).ceil() as u64).clamp(8, 64)
+                if ratio <= 1.0 {
+                    1
+                } else {
+                    ((8.0 * ratio * ratio).ceil() as u64).clamp(8, 64)
+                }
             });
             let i = self.frame_index % phases + 1;
             [halton(i, 2) - 0.5, halton(i, 3) - 0.5]

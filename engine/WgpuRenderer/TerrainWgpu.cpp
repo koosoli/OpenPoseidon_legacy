@@ -3067,14 +3067,14 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     _params.snowline_depth = std::clamp(GSnow().snowlineDepth, 0.0f, 1.0f);
     _engine.QueueTerrainParams(_params); // REN-THR-013: queued, applied before wgr_render_frame
     const auto& snow = GSnow();
-    if (camera && (snow.enabled || _snowWasEnabled || uploaded) &&
-        (snow.enabled != _snowWasEnabled || uploaded || _params.time < _snowUploadTime || _params.time - _snowUploadTime >= 0.1f))
+    if (camera && (snow.CoverActive() || _snowWasEnabled || uploaded) &&
+        (snow.CoverActive() != _snowWasEnabled || uploaded || _params.time < _snowUploadTime || _params.time - _snowUploadTime >= 0.1f))
     {
         auto snapshot = snow.Snapshot(camera->Position().X(), camera->Position().Z());
         MaskSnowShelters(land, snapshot);
         _engine.QueueSnow(snapshot);
         _snowUploadTime = _params.time;
-        _snowWasEnabled = snow.enabled;
+        _snowWasEnabled = snow.CoverActive();
     }
 
     if (camera == nullptr)
@@ -3118,7 +3118,7 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     // Effective snow depth at the camera's ground: snowfall deposit or altitude
     // snowline cover, so the close-up relief also refines on permanent snowfields.
     const float snowEffDepth = std::max(snow.Depth(), snow.AltitudeDepthAt(snowCamera.X(), snowCamera.Z()));
-    const bool refineSnow = snow.enabled && snow.detailedGeometry && snowEffDepth > 0.002f &&
+    const bool refineSnow = snow.CoverActive() && snow.detailedGeometry && snowEffDepth > 0.002f &&
         std::abs(snowCamera.Y() - land.SurfaceY(snowCamera.X(), snowCamera.Z())) < 15.0f;
     auto emit = [&](const CdlodSelection& s)
     {
@@ -3138,7 +3138,7 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     // extent so seabed always underlies the ocean.)
     SelectVisibleCdlod(
         _tree, _rootIndex, _numLevels, _ranges, _morphRegion, *camera, rx0, rz0, rx1, rz1,
-        [](const CdlodNode&) { return true; }, emit, snow.enabled ? snowEffDepth : 0.0f);
+        [](const CdlodNode&) { return true; }, emit, snow.CoverActive() ? snowEffDepth : 0.0f);
 
     _engine.SubmitTerrain(_selected);
     // The procedural path must remain available on maps that use the modern GPU

@@ -975,7 +975,7 @@ void Man::Simulate(float deltaT, SimulationImportance prec)
                 change = true;
             }
         }
-        if (GSnow().enabled && !IsDead() &&
+        if (GSnow().CoverActive() && !IsDead() &&
             (_landContact || _objectContact) && !freeFall && std::isfinite(deltaT) && deltaT > 0)
         {
             _snowBodyStampTime += std::min(deltaT, 0.1f);

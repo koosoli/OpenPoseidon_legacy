@@ -203,7 +203,7 @@ bool Man::AdvanceMoveQueue(float deltaT, float adjustSpeed, float& moveX, float&
                     step = true;
                     _soundStepOverride = prim->GetSoundOverride();
                 }
-                if (step && (EnableVisualEffects(prec) || GSnow().enabled) && ValueTest(&MoveInfo::OnLand) < 0.5f)
+                if (step && (EnableVisualEffects(prec) || GSnow().CoverActive()) && ValueTest(&MoveInfo::OnLand) < 0.5f)
                 {
                     int index = (left ? Type()->_stepLIndex : Type()->_stepRIndex);
                     if (index >= 0)
@@ -227,7 +227,7 @@ bool Man::AdvanceMoveQueue(float deltaT, float adjustSpeed, float& moveX, float&
                         float yr = GLandscape->RoadSurfaceYAboveWater(pos);
                         if (yr <= ys + 0.2f)
                         {
-                            if (GSnow().enabled && !GSnow().NeedsWalkingChannelAt(pos.X(), pos.Z()) && ys > GLandscape->GetSeaLevel())
+                            if (GSnow().CoverActive() && !GSnow().NeedsWalkingChannelAt(pos.X(), pos.Z()) && ys > GLandscape->GetSeaLevel())
                             {
                                 const Vector3 toe = pos + Direction() * 0.075f;
                                 const Vector3 heel = pos - Direction() * 0.075f;

@@ -5632,9 +5632,11 @@ void DrawTemporalTab()
         t.jitterPhases = phases;
         changed = true;
     }
-    Dev::PanelTooltip("Auto cycles sub-pixel offsets so upscalers reconstruct detail (needs 8+ phases at Quality).\n"
-                      "1 freezes the offset: stable image, no shimmer, but no temporal detail gain.\n"
-                      "Shimmer at native scale -> 1; upscaled softness -> auto. Saved by \"Save as default\".");
+    Dev::PanelTooltip("Auto = frozen at native scale (no shimmer), cycling when upscaling so DLSS/FSR\n"
+                      "receive distinct samples to reconstruct detail from (8+ phases at Quality).\n"
+                      "1 forces the frozen offset everywhere (stable image, no temporal detail gain).\n"
+                      "Shimmer at native scale should already be gone on auto; if not, set 1.\n"
+                      "Saved by \"Save as default\".");
 
     if (ImGui::CollapsingHeader("Conventions (A/B probes - leave alone)"))
     {

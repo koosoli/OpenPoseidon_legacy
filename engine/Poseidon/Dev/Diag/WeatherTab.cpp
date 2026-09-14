@@ -960,6 +960,15 @@ void DrawWeatherTab()
         if (ImGui::SliderFloat("Snowline snow depth (cm)", &snowlineDepthCm, 1.0f, 30.0f, "%.0f"))
             snow.snowlineDepth = snowlineDepthCm / 100.0f;
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("How deep the alpine cover itself is. Full white from ~4 cm; more mainly lifts the surface.");
+        // Tuning aid: ground height and resulting cover where the camera stands,
+        // so the snowline slider can be set against the actual terrain.
+        if (GScene != nullptr && GScene->GetCamera() != nullptr && GLandscape != nullptr)
+        {
+            const Vector3 camPos = GScene->GetCamera()->Position();
+            const float groundY = GLandscape->SurfaceY(camPos.X(), camPos.Z());
+            ImGui::Text("Ground under camera: %.1f m (camera %.1f m); snowline cover here: %.1f cm",
+                        groundY, camPos.Y(), snow.AltitudeDepthAt(camPos.X(), camPos.Z()) * 100.0f);
+        }
         ImGui::Text("Depth %.1f cm; persistent chunks %zu / %zu", snow.Depth() * 100.0f, snow.Chunks(), SnowField::MaxChunks);
         if (snow.Chunks() >= SnowField::MaxChunks)
             ImGui::TextWrapped("Track storage full: visible tracks retained. Filled tracks are reclaimed automatically.");

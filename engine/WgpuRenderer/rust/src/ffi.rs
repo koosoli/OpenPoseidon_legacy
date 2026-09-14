@@ -1795,7 +1795,7 @@ pub struct WgrTemporalTuning {
     // decided at startup and cannot change live).
     pub dlss_on: u32,
     pub render_scale_pct: u32, // 50..=100
-    pub jitter_phases: u32,    // 0 = auto (~8 x (out/render)^2)
+    pub jitter_phases: u32,    // 0 = auto (frozen at native scale, ~8 x (out/render)^2 when upscaling)
     pub mip_bias: f32,         // > 0 = auto (half log2(scale)); else clamped [-4, 0]
     pub reactive_sky: f32,
     pub reactive_water: f32,

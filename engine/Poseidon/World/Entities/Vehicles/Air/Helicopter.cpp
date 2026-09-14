@@ -364,7 +364,7 @@ void Helicopter::Simulate(float deltaT, SimulationImportance prec)
 
     // Persistent ground edits belong to each helicopter, not the camera's four
     // nearest airflow emitters. Keep the fine snow-field work at 4 Hz.
-    if (GSnow().enabled && GSnow().BaseDepthAt(Position().X(), Position().Z()) > 0.0f && GAirflow.LocalEnabled() &&
+    if (GSnow().CoverActive() && GSnow().BaseDepthAt(Position().X(), Position().Z()) > 0.0f && GAirflow.LocalEnabled() &&
         _rotorSpeed > 0.1f && std::isfinite(deltaT) && deltaT > 0 && DirectionUp().Y() > 0.5f)
     {
         _snowRotorTime += std::min(deltaT, 0.25f);

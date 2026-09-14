@@ -951,7 +951,7 @@ void Landscape::ExplosionDammageEffects(EntityAI* owner, Shot* shot, Object* dir
         return;
     }
 
-    if (GSnow().enabled && type->explosive)
+    if (GSnow().CoverActive() && type->explosive)
     {
         const float surface = SurfaceY(pos.X(), pos.Z());
         const float radius = std::clamp(type->indirectHitRange, 0.5f, 15.0f);
