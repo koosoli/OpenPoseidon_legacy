@@ -83,6 +83,33 @@ void Entity::Simulate(float deltaT, SimulationImportance prec)
 void Entity::SimulateOptimized(float deltaT, SimulationImportance prec)
 {
     float step = SimulationPrecision();
+    // PERF-033: tiered far-visible rate. A soldier declares 1/5 s, which as a
+    // blanket far-bucket throttle freezes distant-visible troops for ~11 ticks
+    // and reads as 5 fps (no skeletal interpolation exists to hide it). Cap the
+    // accumulator step for the visible-far bucket only; invisible buckets keep
+    // the declared precision, near buckets never reach this path. Smaller steps
+    // run more often but simulate the same total time, so this converges toward
+    // full-rate behaviour instead of away from it. Tunable without a rebuild:
+    // POSEIDON_FAR_VISIBLE_STEP=<seconds>, clamped to (0, 1].
+    if (prec == SimulateVisibleFar)
+    {
+        static const float farVisibleMaxStep = []
+        {
+            if (const char* v = std::getenv("POSEIDON_FAR_VISIBLE_STEP"))
+            {
+                const float parsed = static_cast<float>(std::atof(v));
+                if (parsed > 0.0f && parsed <= 1.0f)
+                {
+                    return parsed;
+                }
+            }
+            return 1.0f / 15.0f;
+        }();
+        if (step > farVisibleMaxStep)
+        {
+            step = farVisibleMaxStep;
+        }
+    }
     _simulationSkipped += deltaT;
     if (_simulationSkipped >= step)
     {

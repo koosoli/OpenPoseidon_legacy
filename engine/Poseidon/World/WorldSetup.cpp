@@ -692,10 +692,13 @@ void World::SimulateOnly(VehiclesDistributed& vehicles, float deltaT, VehicleSim
 
     // A fixed 60 Hz world tick made the old remainder pass fully simulate every
     // off-screen unit on every tick. Use the entity's existing deterministic
-    // precision accumulator for lists nobody can see; visible-near, visible-far
-    // and the camera vehicle retain the exact full-rate path so distant-visible
-    // soldiers keep smooth animation (their 1/5 s precision would otherwise
-    // freeze them for ~11 ticks, then jump). The escape hatch is an
+    // precision accumulator off-screen; visible-near entities and the camera
+    // vehicle retain the exact full-rate path. Visible-far goes through the
+    // accumulator too, but Entity::SimulateOptimized caps its step
+    // (PERF-033, default 1/15 s) so distant-visible soldiers stay smooth
+    // instead of freezing at their 1/5 s declared precision. Full-rate
+    // visible-far was measured at 26-50 ms/tick and re-entered the catch-up
+    // spiral, so it is not the fallback. The escape hatch is an
     // A/B control and restores the former behaviour without changing saves.
     static const bool fullRateFar = []
     {
@@ -704,7 +707,7 @@ void World::SimulateOnly(VehiclesDistributed& vehicles, float deltaT, VehicleSim
     }();
     const VehicleSimulation farSimul =
         !fullRateFar && simul == &Entity::SimulateRest ? &Entity::SimulateOptimized : simul;
-    SimulateOnly(vehicles._visibleFar, deltaT, simul, insideVehicle, SimulateVisibleFar);
+    SimulateOnly(vehicles._visibleFar, deltaT, farSimul, insideVehicle, SimulateVisibleFar);
     SimulateOnly(vehicles._invisibleNear, deltaT, farSimul, insideVehicle, SimulateInvisibleNear);
     SimulateOnly(vehicles._invisibleFar, deltaT, farSimul, insideVehicle, SimulateInvisibleFar);
 }
