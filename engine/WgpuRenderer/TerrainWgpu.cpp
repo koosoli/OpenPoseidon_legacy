@@ -3061,8 +3061,9 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     _params.enfusion_ground = _enfusionGroundEnabled ? 1.0f : 0.0f;
     // Alpine snowline (dev weather tab): permanent cover above a height, pushed
     // per frame like the wet band so the slider is live. Off = -1.
-    _params.snowline_height = snow.snowlineEnabled && snow.snowlineRange > 0.0f ? snow.snowlineHeight : -1.0f;
-    _params.snowline_range = std::max(snow.snowlineRange, 0.0f);
+    _params.snowline_height =
+        GSnow().snowlineEnabled && GSnow().snowlineRange > 0.0f ? GSnow().snowlineHeight : -1.0f;
+    _params.snowline_range = std::max(GSnow().snowlineRange, 0.0f);
     _engine.QueueTerrainParams(_params); // REN-THR-013: queued, applied before wgr_render_frame
     const auto& snow = GSnow();
     if (camera && (snow.enabled || _snowWasEnabled || uploaded) &&
