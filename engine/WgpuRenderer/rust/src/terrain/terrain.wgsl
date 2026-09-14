@@ -107,10 +107,10 @@ fn snow_cover(world_xz: vec2<f32>, world_y: f32) -> f32 {
     if (snow.info.w <= 0.0 && line_depth <= 0.0) { return 0.0; }
     return max(max(snow.info.w * snow_drift(world_xz), line_depth) - snow_deficit(world_xz), 0.0);
 }
-fn snow_gradient(xz: vec2<f32>) -> vec3<f32> {
+fn snow_gradient(xz: vec2<f32>, world_y: f32) -> vec3<f32> {
     let h = 0.125;
-    let dx = (snow_depth(xz + vec2<f32>(h, 0.0)) - snow_depth(xz - vec2<f32>(h, 0.0))) / (2.0 * h);
-    let dz = (snow_depth(xz + vec2<f32>(0.0, h)) - snow_depth(xz - vec2<f32>(0.0, h))) / (2.0 * h);
+    let dx = (snow_cover(xz + vec2<f32>(h, 0.0), world_y) - snow_cover(xz - vec2<f32>(h, 0.0), world_y)) / (2.0 * h);
+    let dz = (snow_cover(xz + vec2<f32>(0.0, h), world_y) - snow_cover(xz - vec2<f32>(0.0, h), world_y)) / (2.0 * h);
     return vec3<f32>(-dx, 0.0, -dz);
 }
 // Bindless ground textures: one texture_2d per Landscape texture index, native
@@ -1075,12 +1075,15 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
         let dry = smoothstep(tp.sea_level, tp.sea_level + 0.25, world_y);
         let snow_h = snow_cover(in.world_xz, world_y) * dry;
         let coverage = smoothstep(0.002, 0.04, snow_h) * smoothstep(0.35, 0.7, geometric_n.y);
-        let compacted = clamp(1.0 - snow_h / max(snow.info.w, 0.001), 0.0, 1.0);
+        // Compact against the deepest base present, so pressed altitude tracks
+        // darken exactly like pressed deposit snow. Deposit-only is unchanged.
+        let snow_ref = max(snow.info.w, line_depth);
+        let compacted = clamp(1.0 - snow_h / max(snow_ref, 0.001), 0.0, 1.0);
         var snow_rgb = vec3<f32>(0.70, 0.75, 0.80) * (1.0 - compacted * 0.28);
         if (linear <= 0.5) { snow_rgb = ground_linear_to_srgb(snow_rgb); }
         rgb = mix(rgb, snow_rgb, coverage);
         authored_ao = mix(authored_ao, 1.0, coverage);
-        n = normalize(mix(n, geometric_n, coverage) + snow_gradient(in.world_xz) * geometric_n.y * dry);
+        n = normalize(mix(n, geometric_n, coverage) + snow_gradient(in.world_xz, world_y) * geometric_n.y * dry);
     }
 
     // Combined sun shadow: CSM (objects + near contact) and the long-range
@@ -1226,9 +1229,10 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
 @fragment
 fn fs_terrain_prepass(in: VsOut) -> @location(0) vec2<f32> {
     var n = sample_normal(in.world_xz, tp.terrain_grid);
-    if (snow.info.w > 0.0) {
-        let dry = smoothstep(tp.sea_level, tp.sea_level + 0.25, sample_height(in.world_xz));
-        n = normalize(n + snow_gradient(in.world_xz) * n.y * dry);
+    let py = sample_height(in.world_xz);
+    if (snow.info.w > 0.0 || snowline_depth(in.world_xz, py) > 0.0) {
+        let dry = smoothstep(tp.sea_level, tp.sea_level + 0.25, py);
+        n = normalize(n + snow_gradient(in.world_xz, py) * n.y * dry);
     }
     let n_view = (frame.view * vec4<f32>(n, 0.0)).xyz;
     return oct_encode(normalize(n_view));
