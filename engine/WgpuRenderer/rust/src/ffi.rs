@@ -1618,7 +1618,8 @@ const _: () = assert!(std::mem::size_of::<WgrShadowPass>() == 1840);
 const _: () = assert!(std::mem::size_of::<WgrCmd>() == 8);
 const _: () = assert!(std::mem::size_of::<WgrOverlayVertex>() == 20);
 const _: () = assert!(std::mem::size_of::<WgrOverlayDraw>() == 40);
-const _: () = assert!(std::mem::size_of::<WgrTerrainParams>() == 64);
+// Alpine snowline grew this by height + range + 2 pad words: 64 + 16.
+const _: () = assert!(std::mem::size_of::<WgrTerrainParams>() == 80);
 const _: () = assert!(std::mem::size_of::<WgrTerrainNode>() == 24);
 const _: () = assert!(std::mem::size_of::<WgrTerrainBatch>() == 16);
 const _: () = assert!(std::mem::size_of::<WgrGrassBatch>() == 16);
