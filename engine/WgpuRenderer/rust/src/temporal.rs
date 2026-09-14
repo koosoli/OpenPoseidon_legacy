@@ -304,23 +304,21 @@ impl Temporal {
         self.frame_index += 1;
         self.prev_jitter_px = self.jitter_px;
         self.jitter_px = if self.enabled {
-            // Halton (2,3). Phase count follows the upscale ratio (NVIDIA's guidance:
-            // ~8 x (output/render)^2, so an upscaler actually receives distinct sample
-            // positions to reconstruct detail from — 8 phases at Quality ratio measurably
-            // soften the result). WGR_JITTER_PHASES overrides for A/Bs; the sequence
-            // itself stays replaceable per the plan.
-            // At native scale (ratio <= 1) there is nothing to reconstruct, so the
-            // cycle only adds shimmer: freeze on the first offset instead. The panel
-            // slider / WGR_JITTER_PHASES still force any count explicitly.
+            // Auto means: frozen offset at native scale (ratio <= 1, nothing to
+            // reconstruct, cycling would only shimmer), cycling ~8 x ratio^2 when
+            // upscaling so DLSS/FSR receive distinct samples to reconstruct detail
+            // from. An explicit slider value / WGR_JITTER_PHASES always wins, which
+            // is how a shimmer-sensitive upscaled setup pins the frozen offset.
+            // The Halton (2,3) sequence itself stays replaceable per the plan.
             let override_phases =
                 (self.jitter_phase_override > 0).then_some(self.jitter_phase_override);
             let phases = override_phases.unwrap_or_else(|| {
                 let (rw, _) = self.render_size;
                 let out_w = self.output_width_hint.max(rw).max(1);
-                let ratio = out_w as f32 / rw.max(1) as f32;
-                if ratio <= 1.0 {
+                if out_w <= rw.max(1) {
                     1
                 } else {
+                    let ratio = out_w as f32 / rw.max(1) as f32;
                     ((8.0 * ratio * ratio).ceil() as u64).clamp(8, 64)
                 }
             });

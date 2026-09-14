@@ -89,11 +89,21 @@ fn snow_deficit(world_xz: vec2<f32>) -> f32 {
     let edge = min(min(t.x, t.y), min(511.0 - t.x, 511.0 - t.y));
     return deficit * smoothstep(0.0, 24.0, edge);
 }
+// Alpine snowline (dev weather tab): permanent cover above snowline_height,
+// ramping from first flakes to full cover over snowline_range. Negative
+// height (or non-positive range) = off. This is WHERE snow lies, independent
+// of the snowfall deposit above; the two combine by maximum. Shares the
+// deposit drift so both snow families read as the same material.
+fn snowline_depth(world_xz: vec2<f32>, world_y: f32) -> f32 {
+    if (tp.snowline_height < 0.0 || tp.snowline_range <= 0.0) { return 0.0; }
+    return tp.snowline_depth * snow_drift(world_xz)
+        * smoothstep(tp.snowline_height, tp.snowline_height + tp.snowline_range, world_y);
+}
 // Total volumetric snow at a terrain point: snowfall deposit or altitude
 // cover, whichever is deeper, minus track/rotor carving. Deposit-only scenes
 // reduce to the old snow_depth formula exactly.
 fn snow_cover(world_xz: vec2<f32>, world_y: f32) -> f32 {
-    let line_depth = snowline_depth(world_y);
+    let line_depth = snowline_depth(world_xz, world_y);
     if (snow.info.w <= 0.0 && line_depth <= 0.0) { return 0.0; }
     return max(max(snow.info.w * snow_drift(world_xz), line_depth) - snow_deficit(world_xz), 0.0);
 }
@@ -102,14 +112,6 @@ fn snow_gradient(xz: vec2<f32>) -> vec3<f32> {
     let dx = (snow_depth(xz + vec2<f32>(h, 0.0)) - snow_depth(xz - vec2<f32>(h, 0.0))) / (2.0 * h);
     let dz = (snow_depth(xz + vec2<f32>(0.0, h)) - snow_depth(xz - vec2<f32>(0.0, h))) / (2.0 * h);
     return vec3<f32>(-dx, 0.0, -dz);
-}
-// Alpine snowline (dev weather tab): permanent cover above snowline_height,
-// ramping from first flakes to full cover over snowline_range. Negative
-// height (or non-positive range) = off. This is WHERE snow lies, independent
-// of the snowfall deposit above; the two combine by maximum.
-fn snowline_depth(world_y: f32) -> f32 {
-    if (tp.snowline_height < 0.0 || tp.snowline_range <= 0.0) { return 0.0; }
-    return tp.snowline_depth * smoothstep(tp.snowline_height, tp.snowline_height + tp.snowline_range, world_y);
 }
 // Bindless ground textures: one texture_2d per Landscape texture index, native
 // size/format/mips. Indexed non-uniformly per fragment (needs the device's
@@ -1068,7 +1070,7 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     // Fine-surface world height, sampled once and shared by the snow cover
     // below and the terrain-shadow test further down (LOD/morph-independent).
     let world_y = sample_height(in.world_xz);
-    let line_depth = snowline_depth(world_y);
+    let line_depth = snowline_depth(in.world_xz, world_y);
     if (snow.info.w > 0.0 || line_depth > 0.0) {
         let dry = smoothstep(tp.sea_level, tp.sea_level + 0.25, world_y);
         let snow_h = snow_cover(in.world_xz, world_y) * dry;

@@ -969,6 +969,8 @@ void DrawWeatherTab()
             ImGui::Text("Ground under camera: %.1f m (camera %.1f m); snowline cover here: %.1f cm",
                         groundY, camPos.Y(), snow.AltitudeDepthAt(camPos.X(), camPos.Z()) * 100.0f);
         }
+        if (SnowField::ResolveSnowlineOverride().active)
+            ImGui::TextDisabled("POSEIDON_SNOWLINE overrides the height above.");
         ImGui::Text("Depth %.1f cm; persistent chunks %zu / %zu", snow.Depth() * 100.0f, snow.Chunks(), SnowField::MaxChunks);
         if (snow.Chunks() >= SnowField::MaxChunks)
             ImGui::TextWrapped("Track storage full: visible tracks retained. Filled tracks are reclaimed automatically.");

@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <unordered_map>
 #include <vector>
 #include <Poseidon/World/Terrain/Landscape.hpp>
@@ -100,6 +101,33 @@ public:
     size_t Chunks() const { return _chunks.size(); }
     size_t Rejected() const { return _rejected; }
 
+    // Headless A/B override POSEIDON_SNOWLINE="off" | "<height m>". Read once;
+    // the panel keeps showing the stored values while the override wins.
+    struct SnowlineOverride { bool active = false; bool off = false; float height = 0.0f; };
+    static SnowlineOverride ResolveSnowlineOverride()
+    {
+        static const SnowlineOverride o = [] {
+            SnowlineOverride r;
+            const char* v = std::getenv("POSEIDON_SNOWLINE");
+            if (v == nullptr || v[0] == '\0') return r;
+            r.active = true;
+            if (v[0] == 'o' || v[0] == 'O') { r.off = true; return r; }
+            const float h = static_cast<float>(std::atof(v));
+            if (std::isfinite(h)) r.height = h; else r.active = false;
+            return r;
+        }();
+        return o;
+    }
+    bool EffSnowlineEnabled() const
+    {
+        const SnowlineOverride o = ResolveSnowlineOverride();
+        return o.active ? !o.off : snowlineEnabled;
+    }
+    float EffSnowlineHeight() const
+    {
+        const SnowlineOverride o = ResolveSnowlineOverride();
+        return o.active && !o.off ? o.height : snowlineHeight;
+    }
     // Altitude snowline as volumetric base depth at (x, z): the permanent cover
     // above snowlineHeight ramping over snowlineRange (smoothstep, mirroring the
     // terrain shader). 0 below the line or when disabled. This is what makes the
@@ -107,11 +135,11 @@ public:
     // carves into it exactly like snowfall deposit.
     float AltitudeDepthAt(float x, float z) const
     {
-        if (!snowlineEnabled || snowlineRange <= 0.0f || snowlineDepth <= 0.0f) return 0.0f;
+        if (!EffSnowlineEnabled() || snowlineRange <= 0.0f || snowlineDepth <= 0.0f) return 0.0f;
         if (GLandscape == nullptr) return 0.0f;
         const float h = GLandscape->SurfaceY(x, z);
         if (!std::isfinite(h)) return 0.0f;
-        const float t = (h - snowlineHeight) / snowlineRange;
+        const float t = (h - EffSnowlineHeight()) / snowlineRange;
         if (t <= 0.0f) return 0.0f;
         if (t >= 1.0f) return snowlineDepth;
         return snowlineDepth * (t * t * (3.0f - 2.0f * t));
