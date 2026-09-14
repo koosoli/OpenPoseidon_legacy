@@ -484,7 +484,7 @@ void TrackOptimizedFour::UpdateSnow(const Frame& pos, bool terminate, float delt
     // Classic wheel memory points do not specify the chassis underside. Use a
     // conservative visual clearance; this does not change suspension or traction.
     constexpr float clearance = 0.35f;
-    if (terminate || !GSnow().enabled || GSnow().Depth() <= clearance ||
+    if (terminate || !GSnow().enabled ||
         !_fLeft.HasOffsets() || !_fRight.HasOffsets() ||
         !_bLeft.HasOffsets() || !_bRight.HasOffsets())
     {
@@ -505,8 +505,15 @@ void TrackOptimizedFour::UpdateSnow(const Frame& pos, bool terminate, float delt
         _snowHullValid = false;
         return;
     }
+    // Clearance against the snow that is actually there: deposit or altitude cover.
+    if (GSnow().BaseDepthAt(centre.X(), centre.Z()) <= clearance)
+    {
+        _snowHullValid = false;
+        _snowHullTime = 0;
+        return;
+    }
     const float radius = std::min(FrontLeftPos().Distance(FrontRightPos()),
-                                  BackLeftPos().Distance(BackRightPos())) * 0.5f;
+                                   BackLeftPos().Distance(BackRightPos())) * 0.5f;
     if (!std::isfinite(radius) || radius < 0.25f || radius > 4.0f) return;
     GSnow().PressVehicle(back.X(), back.Z(), front.X(), front.Z(), radius, clearance);
     if (_snowHullValid)
@@ -619,7 +626,7 @@ void TrackOptimized::UpdateTrackedSnow(const Frame& pos, bool terminate, float d
 {
     UpdateSnow(pos, terminate);
     constexpr float clearance = 0.35f;
-    if (terminate || !GSnow().enabled || GSnow().Depth() <= clearance || _snowHullRadius <= 0)
+    if (terminate || !GSnow().enabled || _snowHullRadius <= 0)
     {
         _snowHullValid = false;
         _snowHullTime = 0;
@@ -636,6 +643,13 @@ void TrackOptimized::UpdateTrackedSnow(const Frame& pos, bool terminate, float d
     if (ground <= GLandscape->GetSeaLevel() || GLandscape->RoadSurfaceY(centre.X(), centre.Z()) > ground + 0.3f)
     {
         _snowHullValid = false;
+        return;
+    }
+    // Clearance against the snow that is actually there: deposit or altitude cover.
+    if (GSnow().BaseDepthAt(centre.X(), centre.Z()) <= clearance)
+    {
+        _snowHullValid = false;
+        _snowHullTime = 0;
         return;
     }
     GSnow().PressVehicle(back.X(), back.Z(), front.X(), front.Z(), _snowHullRadius, clearance);

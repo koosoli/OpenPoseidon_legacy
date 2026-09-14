@@ -200,16 +200,27 @@ public:
         }
     }
     bool NeedsWalkingChannel() const { return enabled && Depth() > 0.25f; }
+    // Deposit-only global; kept for external callers. In-engine call sites with
+    // a position use NeedsWalkingChannelAt so altitude cover wades too.
+    // Position-aware variant: wading depth is deposit or altitude cover at the
+    // walker's feet. Prefer this at call sites with a position in hand.
+    bool NeedsWalkingChannelAt(float x, float z) const { return enabled && BaseDepthAt(x, z) > 0.25f; }
     void PressVehicle(float ax, float az, float bx, float bz, float radius, float clearance)
     {
-        if (!std::isfinite(clearance) || clearance < 0.0f || Depth() <= clearance) return;
+        if (!std::isfinite(clearance) || clearance < 0.0f) return;
+        // Clearance is measured against the snow that is actually there: deposit
+        // or altitude cover at the lane midpoint.
+        const float base = BaseDepthAt((ax + bx) * 0.5f, (az + bz) * 0.5f);
+        if (base <= clearance) return;
         // Leave snow below the underbody rather than scraping the whole lane to soil.
-        Trail(ax, az, bx, bz, radius, (Depth() - clearance) / Depth());
+        Trail(ax, az, bx, bz, radius, (base - clearance) / base);
     }
     void PressWalking(float ax, float az, float bx, float bz)
     {
-        if (!NeedsWalkingChannel()) return;
-        const float depthFactor = std::clamp((Depth() - 0.25f) / 0.4f, 0.0f, 1.0f);
+        if (!enabled) return;
+        const float base = BaseDepthAt((ax + bx) * 0.5f, (az + bz) * 0.5f);
+        if (base <= 0.25f) return;
+        const float depthFactor = std::clamp((base - 0.25f) / 0.4f, 0.0f, 1.0f);
         const float radius = 0.22f + 0.13f * depthFactor;
         Trail(ax, az, bx, bz, radius, 1.0f);
         // A teleport clears the destination footprint, never the intervening map.

@@ -573,6 +573,8 @@ fn fs_surface(in: VsOut) -> SurfaceOut {
     // The road's distance-scaled depth lift is not physical elevation. Do not let
     // it pull a ground-pinned road/decal through an opaque snow cover. Tracks and
     // roof shelter use the same deficit buffer as the terrain; rigid bridges stay.
+    // Altitude snowline cover intentionally does NOT discard here: a mountain road
+    // reads as cleared asphalt, which is the correct look, not a defect.
     if (in.conform_w > 0.99 && snow_depth(in.world_pos.xz + frame.cam_pos.xz) >= 0.04) {
         discard;
     }

@@ -975,7 +975,7 @@ void Man::Simulate(float deltaT, SimulationImportance prec)
                 change = true;
             }
         }
-        if (GSnow().enabled && GSnow().Depth() > 0 && (IsDown() || GSnow().NeedsWalkingChannel()) && !IsDead() &&
+        if (GSnow().enabled && !IsDead() &&
             (_landContact || _objectContact) && !freeFall && std::isfinite(deltaT) && deltaT > 0)
         {
             _snowBodyStampTime += std::min(deltaT, 0.1f);
@@ -983,9 +983,12 @@ void Man::Simulate(float deltaT, SimulationImportance prec)
             {
                 _snowBodyStampTime = 0;
                 const auto p = moveTrans.Position();
+                // Wade only where snow actually is: deposit or altitude cover.
+                const float snowBase = GSnow().BaseDepthAt(p.X(), p.Z());
                 const float ground = GLandscape->SurfaceY(p.X(),p.Z());
                 // Do not stamp ground under a bridge, elevated floor or swimming soldier.
-                if (ground > GLandscape->GetSeaLevel() &&
+                if (snowBase > 0.0f && (IsDown() || snowBase > 0.25f) &&
+                    ground > GLandscape->GetSeaLevel() &&
                     GLandscape->RoadSurfaceYAboveWater(p) <= ground+0.2f)
                 {
                     if (IsDown())
