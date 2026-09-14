@@ -3,6 +3,7 @@
 
 #include <Poseidon/World/Terrain/TerrainCdlod.hpp>
 #include <Poseidon/World/Terrain/TerrainSatmap.hpp>
+#include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Weather/SnowField.hpp>
 
 #include <cmath>
@@ -10,6 +11,19 @@
 #include <vector>
 
 using namespace Poseidon;
+
+namespace
+{
+class TestLandscapeScope
+{
+  public:
+    explicit TestLandscapeScope(Landscape* landscape) : _previous(GLandscape) { GLandscape = landscape; }
+    ~TestLandscapeScope() { GLandscape = _previous; }
+
+  private:
+    Landscape* _previous;
+};
+} // namespace
 
 TEST_CASE("Clipped CDLOD bounds match exhaustive edge and ocean scans", "[cdlod][water]")
 {
@@ -166,6 +180,34 @@ TEST_CASE("Experimental snow persists until new precipitation fills tracks", "[s
     snow.Reset();
     CHECK(snow.Chunks() == 0);
     CHECK(snow.Depth() == 0.0f);
+}
+
+TEST_CASE("Snowline cover stamps and wades with snowfall disabled", "[snow][terrain][snowline]")
+{
+    // A 700 m highland: every SurfaceY query is far above the snowline, so the
+    // altitude cover must behave exactly like snowfall deposit for stamping.
+    Landscape landscape(nullptr, nullptr);
+    TestLandscapeScope landscapeScope(&landscape);
+    for (int z = 0; z < 32; ++z)
+        for (int x = 0; x < 32; ++x)
+            landscape.HeightChange(x, z, 700.0f);
+
+    SnowField snow;
+    snow.enabled = false; // the point: no snowfall, no deposit at all
+    snow.snowlineEnabled = true;
+    snow.snowlineHeight = 100.0f;
+    snow.snowlineRange = 25.0f;
+    snow.snowlineDepth = 0.06f;
+
+    CHECK(snow.AltitudeDepthAt(25.0f, 25.0f) == Catch::Approx(0.06f));
+    CHECK(snow.BaseDepthAt(25.0f, 25.0f) == Catch::Approx(0.06f));
+    snow.Stamp(25.0f, 25.0f, 0.3f);
+    CHECK(snow.Chunks() > 0);
+    CHECK(snow.DeficitAt(200, 200) > 0.0f);
+    CHECK_FALSE(snow.NeedsWalkingChannelAt(25.0f, 25.0f));
+    snow.snowlineDepth = 0.5f;
+    CHECK(snow.BaseDepthAt(25.0f, 25.0f) == Catch::Approx(0.5f));
+    CHECK(snow.NeedsWalkingChannelAt(25.0f, 25.0f));
 }
 
 TEST_CASE("Deep prone snow clears the animated head corridor without residual cover", "[snow][terrain]")

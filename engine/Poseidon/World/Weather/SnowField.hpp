@@ -236,7 +236,7 @@ public:
     // a position use NeedsWalkingChannelAt so altitude cover wades too.
     // Position-aware variant: wading depth is deposit or altitude cover at the
     // walker's feet. Prefer this at call sites with a position in hand.
-    bool NeedsWalkingChannelAt(float x, float z) const { return enabled && BaseDepthAt(x, z) > 0.25f; }
+    bool NeedsWalkingChannelAt(float x, float z) const { return CoverActive() && BaseDepthAt(x, z) > 0.25f; }
     void PressVehicle(float ax, float az, float bx, float bz, float radius, float clearance)
     {
         if (!std::isfinite(clearance) || clearance < 0.0f) return;
