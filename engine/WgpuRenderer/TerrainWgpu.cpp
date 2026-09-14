@@ -3115,7 +3115,10 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     };
 
     const Vector3 snowCamera = camera->Position();
-    const bool refineSnow = snow.enabled && snow.detailedGeometry && snow.Depth() > 0.002f &&
+    // Effective snow depth at the camera's ground: snowfall deposit or altitude
+    // snowline cover, so the close-up relief also refines on permanent snowfields.
+    const float snowEffDepth = std::max(snow.Depth(), snow.AltitudeDepthAt(snowCamera.X(), snowCamera.Z()));
+    const bool refineSnow = snow.enabled && snow.detailedGeometry && snowEffDepth > 0.002f &&
         std::abs(snowCamera.Y() - land.SurfaceY(snowCamera.X(), snowCamera.Z())) < 15.0f;
     auto emit = [&](const CdlodSelection& s)
     {
@@ -3135,7 +3138,7 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     // extent so seabed always underlies the ocean.)
     SelectVisibleCdlod(
         _tree, _rootIndex, _numLevels, _ranges, _morphRegion, *camera, rx0, rz0, rx1, rz1,
-        [](const CdlodNode&) { return true; }, emit, snow.enabled ? snow.Depth() : 0.0f);
+        [](const CdlodNode&) { return true; }, emit, snow.enabled ? snowEffDepth : 0.0f);
 
     _engine.SubmitTerrain(_selected);
     // The procedural path must remain available on maps that use the modern GPU

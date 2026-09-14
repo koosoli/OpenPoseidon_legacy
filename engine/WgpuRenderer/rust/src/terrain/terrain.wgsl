@@ -66,13 +66,20 @@ struct SnowData {
 
 fn snow_depth(world_xz: vec2<f32>) -> f32 {
     if (snow.info.w <= 0.0) { return 0.0; }
-    // Fixed world-space drifts; never camera/time noise. Keep the maximum at
-    // the CPU depth so culling bounds remain conservative.
-    let drift = 0.90 + 0.05 * sin(dot(world_xz, vec2<f32>(0.37, 0.81)))
-                     + 0.05 * sin(dot(world_xz, vec2<f32>(1.73, -0.79)));
-    let depth = snow.info.w * drift;
+    return max(0.0, snow.info.w * snow_drift(world_xz) - snow_deficit(world_xz));
+}
+// Fixed world-space drifts; never camera/time noise. Keep the maximum at
+// the CPU depth so culling bounds remain conservative.
+fn snow_drift(world_xz: vec2<f32>) -> f32 {
+    return 0.90 + 0.05 * sin(dot(world_xz, vec2<f32>(0.37, 0.81)))
+                + 0.05 * sin(dot(world_xz, vec2<f32>(1.73, -0.79)));
+}
+// Snow pressed away by tracks/rotors at this point (deficit grid around the
+// camera, edge-feathered). Kept separate from the global depth so the altitude
+// snowline below can share the same carving.
+fn snow_deficit(world_xz: vec2<f32>) -> f32 {
     let t = (world_xz - snow.info.xy) / max(snow.info.z, 0.125) - vec2<f32>(0.5);
-    if (any(t < vec2<f32>(0.0)) || any(t >= vec2<f32>(511.0))) { return depth; }
+    if (any(t < vec2<f32>(0.0)) || any(t >= vec2<f32>(511.0))) { return 0.0; }
     let b = vec2<u32>(floor(t));
     let f = fract(t);
     let i = b.y * 512u + b.x;
@@ -80,7 +87,15 @@ fn snow_depth(world_xz: vec2<f32>) -> f32 {
                       mix(snow.deficits[i + 512u], snow.deficits[i + 513u], f.x), f.y);
     // Detail LOD only: leaving this window never deletes the persistent CPU track.
     let edge = min(min(t.x, t.y), min(511.0 - t.x, 511.0 - t.y));
-    return max(0.0, depth - deficit * smoothstep(0.0, 24.0, edge));
+    return deficit * smoothstep(0.0, 24.0, edge);
+}
+// Total volumetric snow at a terrain point: snowfall deposit or altitude
+// cover, whichever is deeper, minus track/rotor carving. Deposit-only scenes
+// reduce to the old snow_depth formula exactly.
+fn snow_cover(world_xz: vec2<f32>, world_y: f32) -> f32 {
+    let line_depth = snowline_depth(world_y);
+    if (snow.info.w <= 0.0 && line_depth <= 0.0) { return 0.0; }
+    return max(max(snow.info.w * snow_drift(world_xz), line_depth) - snow_deficit(world_xz), 0.0);
 }
 fn snow_gradient(xz: vec2<f32>) -> vec3<f32> {
     let h = 0.125;
@@ -820,8 +835,7 @@ fn vs_terrain(
     let world_xz = origin + mix(grid, grid_coarse, morph_k) * size;
 
     let bare_height = sample_height(world_xz);
-    let snow_height = max(snow_depth(world_xz) * smoothstep(tp.sea_level, tp.sea_level + 0.25, bare_height),
-                          snowline_depth(bare_height));
+    let snow_height = snow_cover(world_xz, bare_height) * smoothstep(tp.sea_level, tp.sea_level + 0.25, bare_height);
     let height = bare_height + snow_height - grid_in.z * max((size / GRID_N) * skirt_k, snow.info.w);
     let world_rel = vec3<f32>(world_xz.x, height, world_xz.y) - frame.cam_pos.xyz;
 
@@ -1057,7 +1071,7 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     let line_depth = snowline_depth(world_y);
     if (snow.info.w > 0.0 || line_depth > 0.0) {
         let dry = smoothstep(tp.sea_level, tp.sea_level + 0.25, world_y);
-        let snow_h = max(snow_depth(in.world_xz) * dry, line_depth);
+        let snow_h = snow_cover(in.world_xz, world_y) * dry;
         let coverage = smoothstep(0.002, 0.04, snow_h) * smoothstep(0.35, 0.7, geometric_n.y);
         let compacted = clamp(1.0 - snow_h / max(snow.info.w, 0.001), 0.0, 1.0);
         var snow_rgb = vec3<f32>(0.70, 0.75, 0.80) * (1.0 - compacted * 0.28);

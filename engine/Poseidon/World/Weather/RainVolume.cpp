@@ -31,7 +31,11 @@ void MaskSnowShelters(const Landscape& land, std::vector<float>& data)
 {
     constexpr int n = SnowField::WindowSize;
     constexpr int step = 4; // 0.5m, matching the cached building shell voxels.
-    if (data.size() != 4 + n*n || data[3] <= 0.0f) return;
+    if (data.size() != 4 + n*n) return;
+    // Sheltered ground holds no snow at all: clear to the deepest base present,
+    // snowfall deposit or altitude snowline cover (both read 0 through it).
+    const float clearTo = std::max(data[3], GSnow().snowlineEnabled ? GSnow().snowlineDepth : 0.0f);
+    if (clearTo <= 0.0f) return;
     static const bool disabled = [] {
         const char* value = std::getenv("POSEIDON_SNOW_SHELTER");
         return value && value[0] == '0';
@@ -91,7 +95,7 @@ void MaskSnowShelters(const Landscape& land, std::vector<float>& data)
                 for (int dz = 0; dz < step && z+dz < n; ++dz)
                     for (int dx = 0; dx < step && x+dx < n; ++dx)
                     {
-                        data[4+(z+dz)*n+x+dx] = data[3];
+                        data[4+(z+dz)*n+x+dx] = clearTo;
                         ++masked;
                     }
             }

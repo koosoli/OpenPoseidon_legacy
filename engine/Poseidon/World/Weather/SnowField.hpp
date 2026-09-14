@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <unordered_map>
 #include <vector>
+#include <Poseidon/World/Terrain/Landscape.hpp>
 
 namespace Poseidon
 {
@@ -99,6 +100,26 @@ public:
     size_t Chunks() const { return _chunks.size(); }
     size_t Rejected() const { return _rejected; }
 
+    // Altitude snowline as volumetric base depth at (x, z): the permanent cover
+    // above snowlineHeight ramping over snowlineRange (smoothstep, mirroring the
+    // terrain shader). 0 below the line or when disabled. This is what makes the
+    // snowline real volumetric snow rather than white paint: stamping below
+    // carves into it exactly like snowfall deposit.
+    float AltitudeDepthAt(float x, float z) const
+    {
+        if (!snowlineEnabled || snowlineRange <= 0.0f || snowlineDepth <= 0.0f) return 0.0f;
+        if (GLandscape == nullptr) return 0.0f;
+        const float h = GLandscape->SurfaceY(x, z);
+        if (!std::isfinite(h)) return 0.0f;
+        const float t = (h - snowlineHeight) / snowlineRange;
+        if (t <= 0.0f) return 0.0f;
+        if (t >= 1.0f) return snowlineDepth;
+        return snowlineDepth * (t * t * (3.0f - 2.0f * t));
+    }
+    // Effective snow base depth: snowfall deposit or altitude cover, whichever
+    // is deeper. Tracks and presses scale against this.
+    float BaseDepthAt(float x, float z) const { return std::max(_depth, AltitudeDepthAt(x, z)); }
+
     void Stamp(float x, float z, float radius, float strength = 0.9f)
     {
         ModifyDisc(x, z, radius, strength, false);
@@ -117,9 +138,13 @@ public:
 private:
     void ModifyDisc(float x, float z, float radius, float strength, bool additive)
     {
-        if (!enabled || _depth <= 0.0f || !std::isfinite(x) || !std::isfinite(z) ||
+        if (!enabled || !std::isfinite(x) || !std::isfinite(z) ||
             std::abs(x) > 1000000.0f || std::abs(z) > 1000000.0f ||
             !std::isfinite(radius) || radius <= 0.0f || !std::isfinite(strength) || strength <= 0.0f) return;
+        // Tracks carve into whatever snow is actually there: snowfall deposit
+        // or altitude snowline cover. Below both there is nothing to press.
+        const float base = BaseDepthAt(x, z);
+        if (base <= 0.0f) return;
         // A manual deposit can fill the store between simulation ticks.
         if (_chunks.size() >= MaxChunks) ReclaimFilledChunks(128);
         radius = std::clamp(radius, CellSize, 15.0f);
@@ -155,8 +180,8 @@ private:
                 Cell& cell = it->second.cells[(iz - cz * ChunkSize) * ChunkSize + ix - cx * ChunkSize];
                 const float edge = std::clamp((1.0f - r) * 4.0f, 0.0f, 1.0f);
                 const float remaining = Remaining(cell);
-                cell.deficit = additive ? std::min(_depth, remaining + strength * edge)
-                    : std::max(remaining, _depth * std::clamp(strength, 0.0f, 1.0f) * edge);
+                cell.deficit = additive ? std::min(base, remaining + strength * edge)
+                    : std::max(remaining, base * std::clamp(strength, 0.0f, 1.0f) * edge);
                 cell.precipitation = _precipitation;
                 it->second.filledAt = std::max(it->second.filledAt, _precipitation + cell.deficit);
             }
