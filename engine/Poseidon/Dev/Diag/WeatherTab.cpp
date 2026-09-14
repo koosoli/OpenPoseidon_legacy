@@ -950,6 +950,12 @@ void DrawWeatherTab()
         if (ImGui::Button("Clear snow and tracks")) snow.Reset();
         if (ImGui::Button("Reset snow settings (keep tracks)")) snow.ResetSettings();
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Restores the default settings and disables snow. Re-enabling reveals the preserved cover and tracks. Use Clear snow and tracks to erase them.");
+        ImGui::Separator();
+        ImGui::Checkbox("Alpine snowline (permanent cover above height)", &snow.snowlineEnabled);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Terrain above the snowline is snow-covered without any snowfall. This changes WHERE snow lies, never the snowfall itself; falling snow still accumulates everywhere.");
+        ImGui::SliderFloat("Snowline height (m)", &snow.snowlineHeight, 0.0f, 1500.0f, "%.1f");
+        ImGui::SliderFloat("Snowline transition (m)", &snow.snowlineRange, 10.0f, 500.0f, "%.0f");
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Band over which first flakes ramp to full cover with altitude.");
         ImGui::Text("Depth %.1f cm; persistent chunks %zu / %zu", snow.Depth() * 100.0f, snow.Chunks(), SnowField::MaxChunks);
         if (snow.Chunks() >= SnowField::MaxChunks)
             ImGui::TextWrapped("Track storage full: visible tracks retained. Filled tracks are reclaimed automatically.");

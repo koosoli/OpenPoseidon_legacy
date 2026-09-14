@@ -104,6 +104,11 @@ public:
 	float     fsrSharpness     = 0.25f;
 	// RCAS pass over the DLSS output (owner default: on).
 	int       dlssSharpen      = 1;
+	// Temporal jitter phase count: 0 = auto (~8 x (out/render)^2, needed so an
+	// upscaler receives distinct sample positions), 1 = frozen offset (stable
+	// image, no temporal detail gain). Shimmer-sensitive setups want 1;
+	// upscaled setups want auto. Persisted per user; tolerated as absent.
+	int       jitterPhases     = 0;
 	// RFG-047: hand Enfusion's BC7/BC5/BC4 textures to the GPU compressed instead of
 	// decoding them to 32-bit (1 = on, the default; 0 = the old decode path). Read at
 	// renderer creation -- the choice has to be made before any texture is loaded -- so

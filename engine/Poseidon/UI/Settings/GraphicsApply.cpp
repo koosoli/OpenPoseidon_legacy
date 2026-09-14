@@ -166,6 +166,7 @@ void ApplyGraphicsConfigToEngine(const GraphicsConfig& cfg)
             t.fsrOn = (cfg.dlssMode == -1 || cfg.dlssMode == 2);
             t.fsrSharpness = std::clamp(cfg.fsrSharpness, 0.0f, 2.0f);
             t.dlssSharpen = cfg.dlssSharpen != 0;
+            t.jitterPhases = std::clamp(cfg.jitterPhases, 0, 64);
             const bool ssaaPinned = cfg.renderScale > 1.01f;
             if (!ssaaPinned)
             {

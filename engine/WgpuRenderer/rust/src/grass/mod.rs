@@ -641,7 +641,10 @@ impl Grass {
             wet_height: 0.0,
             wet_darken: 1.0,
             enfusion_ground: 0.0,
+            snowline_height: -1.0,
+            snowline_range: 150.0,
             _pad1: 0.0,
+            _pad2: 0.0,
         };
         queue.write_buffer(&terrain_params, 0, bytemuck::bytes_of(&terrain_default));
         let grass_params = device.create_buffer(&wgpu::BufferDescriptor {

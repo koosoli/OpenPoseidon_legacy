@@ -986,7 +986,14 @@ struct WgrTerrainParams
      * route, byte for byte; 1 = the authored surface. Zero on every world that is not a
      * natively loaded Reforger one, because no material there sets `enfusion`. */
     float enfusion_ground;
+    /* Alpine snowline (dev weather tab): permanent terrain cover above
+     * snowline_height, ramping from first flakes to full cover over
+     * snowline_range metres. snowline_height < 0 = off. Independent of the
+     * snowfall deposit; pushed per frame like the wet band. */
+    float snowline_height;
+    float snowline_range;
     float _pad1;
+    float _pad2;
 };
 
 /* One terrain node instance: the shared grid mesh placed at world-xz `origin`,
@@ -2023,7 +2030,7 @@ static_assert(sizeof(WgrShadowPass) == 288 + 16 + 24 * 64,
 static_assert(sizeof(WgrCmd) == 8, "WgrCmd layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrOverlayVertex) == 20, "WgrOverlayVertex layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrOverlayDraw) == 40, "WgrOverlayDraw layout must match the Rust #[repr(C)] struct");
-static_assert(sizeof(WgrTerrainParams) == 64, "WgrTerrainParams layout must match the Rust #[repr(C)] struct");
+static_assert(sizeof(WgrTerrainParams) == 80, "WgrTerrainParams layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrTerrainNode) == 24, "WgrTerrainNode layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrTerrainBatch) == 16, "WgrTerrainBatch layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrGrassBatch) == 16, "WgrGrassBatch layout must match the Rust #[repr(C)] struct");

@@ -24,6 +24,12 @@ public:
     float metresPerMinute = 0.01f;
     float maxDepth = 0.5f;
     float flakeMultiplier = 1.0f;
+    // Alpine snowline: permanent terrain cover above snowlineHeight, ramping
+    // from first flakes to full cover over snowlineRange metres. This changes
+    // WHERE snow lies, never the snowfall itself. Off when disabled.
+    bool snowlineEnabled = true;
+    float snowlineHeight = 644.88f;
+    float snowlineRange = 150.0f;
 
     void ApplySnowstormPreset()
     {
@@ -42,6 +48,9 @@ public:
         metresPerMinute = defaults.metresPerMinute;
         maxDepth = defaults.maxDepth;
         flakeMultiplier = defaults.flakeMultiplier;
+        snowlineEnabled = defaults.snowlineEnabled;
+        snowlineHeight = defaults.snowlineHeight;
+        snowlineRange = defaults.snowlineRange;
     }
 
     float FallingIntensity() const

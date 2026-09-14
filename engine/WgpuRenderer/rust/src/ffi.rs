@@ -1081,7 +1081,12 @@ pub struct WgrTerrainParams {
     // ScaleUV tiling and its middle-distance map). 0 = the legacy one-image-per-50-m-cell
     // route, byte for byte. Zero on every world that is not a natively loaded Reforger one.
     pub enfusion_ground: f32,
+    // Alpine snowline (dev weather tab): permanent terrain cover above
+    // snowline_height, ramping over snowline_range metres. < 0 = off.
+    pub snowline_height: f32,
+    pub snowline_range: f32,
     pub _pad1: f32,
+    pub _pad2: f32,
 }
 
 #[repr(C)]

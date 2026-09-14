@@ -309,6 +309,8 @@ bool GraphicsConfig::Load(const std::string& path)
         fsrSharpness = (float)*e;
     if (auto* e = cfg.FindEntry("dlssSharpen"))
         dlssSharpen = (int)*e;
+    if (auto* e = cfg.FindEntry("jitterPhases"))
+        jitterPhases = (int)*e;
     if (auto* e = cfg.FindEntry("enfusionCompressedTextures"))
         enfusionCompressedTextures = (int)*e;
     if (auto* e = cfg.FindEntry("enfusionLayerTint"))
@@ -345,6 +347,7 @@ bool GraphicsConfig::Save(const std::string& path) const
     cfg.Add("upscalerQuality", upscalerQuality);
     cfg.Add("fsrSharpness", fsrSharpness);
     cfg.Add("dlssSharpen", dlssSharpen);
+    cfg.Add("jitterPhases", jitterPhases);
     cfg.Add("enfusionCompressedTextures", enfusionCompressedTextures);
     cfg.Add("enfusionLayerTint", enfusionLayerTint);
     cfg.Add("enfusionTintMultiply", enfusionTintMultiply);

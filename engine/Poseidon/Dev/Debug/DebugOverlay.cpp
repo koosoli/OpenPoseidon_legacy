@@ -5602,16 +5602,17 @@ void DrawTemporalTab()
             }
             cfg.fsrSharpness = t.fsrSharpness;
             cfg.dlssSharpen = t.dlssSharpen ? 1 : 0;
+            cfg.jitterPhases = t.jitterPhases;
             if (cfg.Save(cfgPath))
                 LOG_INFO(Graphics,
                          "Dev panel: graphics.cfg saved (dlssMode={}, quality={}, msaa={}, renderScale={:.2f}, "
-                         "sharpness={:.2f}, dlssSharpen={})",
+                         "sharpness={:.2f}, dlssSharpen={}, jitterPhases={})",
                          cfg.dlssMode, cfg.upscalerQuality, cfg.msaaSamples, cfg.renderScale, cfg.fsrSharpness,
-                         cfg.dlssSharpen);
+                         cfg.dlssSharpen, cfg.jitterPhases);
             else
                 LOG_ERROR(Graphics, "Dev panel: saving '{}' failed", cfgPath);
         }
-        Dev::PanelTooltip("Writes the whole tab (upscaler, quality, MSAA, scale, sharpness, DLSS sharpen) to "
+        Dev::PanelTooltip("Writes the whole tab (upscaler, quality, MSAA, scale, sharpness, DLSS sharpen, jitter phases) to "
                           "graphics.cfg - the same file the Options menu edits - applied on every launch.");
     }
 
@@ -5631,6 +5632,9 @@ void DrawTemporalTab()
         t.jitterPhases = phases;
         changed = true;
     }
+    Dev::PanelTooltip("Auto cycles sub-pixel offsets so upscalers reconstruct detail (needs 8+ phases at Quality).\n"
+                      "1 freezes the offset: stable image, no shimmer, but no temporal detail gain.\n"
+                      "Shimmer at native scale -> 1; upscaled softness -> auto. Saved by \"Save as default\".");
 
     if (ImGui::CollapsingHeader("Conventions (A/B probes - leave alone)"))
     {

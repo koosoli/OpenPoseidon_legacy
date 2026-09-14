@@ -467,7 +467,10 @@ impl Terrain {
             wet_height: 1.2,
             wet_darken: 0.55,
             enfusion_ground: 0.0,
+            snowline_height: -1.0,
+            snowline_range: 150.0,
             _pad1: 0.0,
+            _pad2: 0.0,
         };
         queue.write_buffer(&params_ubo, 0, bytemuck::bytes_of(&default_params));
 
@@ -2038,6 +2041,6 @@ mod enfusion_ground_tests {
             "full on must skip the legacy tap rather than blending against it"
         );
         // Zero-initialised, so no world that never sets it can take the branch.
-        assert_eq!(std::mem::size_of::<WgrTerrainParams>(), 64);
+        assert_eq!(std::mem::size_of::<WgrTerrainParams>(), 80);
     }
 }

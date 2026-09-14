@@ -34,7 +34,13 @@ struct TerrainParams {
     // one-image-per-land-cell route, byte for byte. Never non-zero on a world whose
     // materials do not set `enfusion`, so this is inert everywhere but Reforger.
     enfusion_ground: f32,
+    // Alpine snowline (dev weather tab): permanent cover above this height,
+    // ramping over snowline_range. Negative height = off. Must stay in this
+    // order after enfusion_ground: the C++/Rust ABI reads by offset.
+    snowline_height: f32,
+    snowline_range: f32,
     _pad1: f32,
+    _pad2: f32,
 };
 
 // Must match GRID_N in terrain/mod.rs.
@@ -78,6 +84,14 @@ fn snow_gradient(xz: vec2<f32>) -> vec3<f32> {
     let dx = (snow_depth(xz + vec2<f32>(h, 0.0)) - snow_depth(xz - vec2<f32>(h, 0.0))) / (2.0 * h);
     let dz = (snow_depth(xz + vec2<f32>(0.0, h)) - snow_depth(xz - vec2<f32>(0.0, h))) / (2.0 * h);
     return vec3<f32>(-dx, 0.0, -dz);
+}
+// Alpine snowline (dev weather tab): permanent cover above snowline_height,
+// ramping from first flakes to full cover over snowline_range. Negative
+// height (or non-positive range) = off. This is WHERE snow lies, independent
+// of the snowfall deposit above; the two combine by maximum.
+fn snowline_depth(world_y: f32) -> f32 {
+    if (tp.snowline_height < 0.0 || tp.snowline_range <= 0.0) { return 0.0; }
+    return 0.06 * smoothstep(tp.snowline_height, tp.snowline_height + tp.snowline_range, world_y);
 }
 // Bindless ground textures: one texture_2d per Landscape texture index, native
 // size/format/mips. Indexed non-uniformly per fragment (needs the device's
@@ -803,7 +817,8 @@ fn vs_terrain(
     let world_xz = origin + mix(grid, grid_coarse, morph_k) * size;
 
     let bare_height = sample_height(world_xz);
-    let snow_height = snow_depth(world_xz) * smoothstep(tp.sea_level, tp.sea_level + 0.25, bare_height);
+    let snow_height = max(snow_depth(world_xz) * smoothstep(tp.sea_level, tp.sea_level + 0.25, bare_height),
+                          snowline_depth(bare_height));
     let height = bare_height + snow_height - grid_in.z * max((size / GRID_N) * skirt_k, snow.info.w);
     let world_rel = vec3<f32>(world_xz.x, height, world_xz.y) - frame.cam_pos.xyz;
 
@@ -1033,9 +1048,13 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
                     + geometric_n * max(authored_normal_ts.z, 1e-3));
     }
 
-    if (snow.info.w > 0.0) {
-        let dry = smoothstep(tp.sea_level, tp.sea_level + 0.25, sample_height(in.world_xz));
-        let snow_h = snow_depth(in.world_xz) * dry;
+    // Fine-surface world height, sampled once and shared by the snow cover
+    // below and the terrain-shadow test further down (LOD/morph-independent).
+    let world_y = sample_height(in.world_xz);
+    let line_depth = snowline_depth(world_y);
+    if (snow.info.w > 0.0 || line_depth > 0.0) {
+        let dry = smoothstep(tp.sea_level, tp.sea_level + 0.25, world_y);
+        let snow_h = max(snow_depth(in.world_xz) * dry, line_depth);
         let coverage = smoothstep(0.002, 0.04, snow_h) * smoothstep(0.35, 0.7, geometric_n.y);
         let compacted = clamp(1.0 - snow_h / max(snow.info.w, 0.001), 0.0, 1.0);
         var snow_rgb = vec3<f32>(0.70, 0.75, 0.80) * (1.0 - compacted * 0.28);
@@ -1065,8 +1084,9 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     // coarse lattice at distant LODs; testing that mismatched height drops whole patches
     // below the ceiling and flashes tile-sized shadow blobs several km out. Sampling the
     // fine surface makes the test LOD/morph-independent, the same independence the
-    // per-fragment normal above relies on (costs one extra heightmap tap).
-    let world_y = sample_height(in.world_xz);
+    // per-fragment normal above relies on (shared with the snow cover above, so
+    // no extra heightmap tap).
+    // (world_y was sampled once above for the snow cover; reused here.)
     let lit = smoothstep(sm.r - sm.g, sm.r + sm.g + 1e-3, world_y);
     let terrain_s = clamp(sm.b * (1.0 - lit), 0.0, 1.0) * in.fog;
     let shadow = max(csm_s, terrain_s);
