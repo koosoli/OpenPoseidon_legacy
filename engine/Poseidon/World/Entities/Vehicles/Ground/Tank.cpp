@@ -24,6 +24,7 @@
 
 #include <Poseidon/Graphics/Rendering/Draw/SpecLods.hpp>
 #include <stdio.h>
+#include <cstdlib>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
 #include <Poseidon/Foundation/Math/MathDefs.hpp>
@@ -710,6 +711,30 @@ void Tank::SimulateOptimized(float deltaT, SimulationImportance prec)
     {
         // when using simple simulation, we can use very big step
         step = 0.2f;
+    }
+
+    // PERF-033 (canonical step cap lives in Entity::SimulateOptimized,
+    // Simulation/Simul.cpp): the visible-far bucket must not freeze at coarse
+    // steps -- distant tanks/APCs read as 5 fps with no interpolation to hide
+    // it. Only the step size is capped; the simple/full choice above stays.
+    if (prec == SimulateVisibleFar)
+    {
+        static const float farVisibleMaxStep = []
+        {
+            if (const char* v = std::getenv("POSEIDON_FAR_VISIBLE_STEP"))
+            {
+                const float parsed = static_cast<float>(std::atof(v));
+                if (parsed > 0.0f && parsed <= 1.0f)
+                {
+                    return parsed;
+                }
+            }
+            return 1.0f / 15.0f;
+        }();
+        if (step > farVisibleMaxStep)
+        {
+            step = farVisibleMaxStep;
+        }
     }
 
     // variable simulation step, based on distance from camera
