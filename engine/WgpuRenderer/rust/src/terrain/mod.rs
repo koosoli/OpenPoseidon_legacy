@@ -473,6 +473,7 @@ impl Terrain {
             _pad1: 0.0,
             _pad2: 0.0,
             _pad3: 0.0,
+            _pad4: 0.0,
         };
         queue.write_buffer(&params_ubo, 0, bytemuck::bytes_of(&default_params));
 

@@ -996,6 +996,7 @@ struct WgrTerrainParams
     float _pad1;
     float _pad2;
     float _pad3;
+    float _pad4;
 };
 
 /* One terrain node instance: the shared grid mesh placed at world-xz `origin`,

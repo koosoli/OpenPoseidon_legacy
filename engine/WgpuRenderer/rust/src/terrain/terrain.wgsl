@@ -43,6 +43,7 @@ struct TerrainParams {
     _pad1: f32,
     _pad2: f32,
     _pad3: f32,
+    _pad4: f32,
 };
 
 // Must match GRID_N in terrain/mod.rs.
