@@ -956,6 +956,10 @@ void DrawWeatherTab()
         ImGui::SliderFloat("Snowline height (m)", &snow.snowlineHeight, 0.0f, 1500.0f, "%.1f");
         ImGui::SliderFloat("Snowline transition (m)", &snow.snowlineRange, 10.0f, 500.0f, "%.0f");
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Band over which first flakes ramp to full cover with altitude.");
+        float snowlineDepthCm = snow.snowlineDepth * 100.0f;
+        if (ImGui::SliderFloat("Snowline snow depth (cm)", &snowlineDepthCm, 1.0f, 30.0f, "%.0f"))
+            snow.snowlineDepth = snowlineDepthCm / 100.0f;
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("How deep the alpine cover itself is. Full white from ~4 cm; more mainly lifts the surface.");
         ImGui::Text("Depth %.1f cm; persistent chunks %zu / %zu", snow.Depth() * 100.0f, snow.Chunks(), SnowField::MaxChunks);
         if (snow.Chunks() >= SnowField::MaxChunks)
             ImGui::TextWrapped("Track storage full: visible tracks retained. Filled tracks are reclaimed automatically.");

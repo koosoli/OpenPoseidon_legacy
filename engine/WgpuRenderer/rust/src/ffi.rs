@@ -1085,6 +1085,7 @@ pub struct WgrTerrainParams {
     // snowline_height, ramping over snowline_range metres. < 0 = off.
     pub snowline_height: f32,
     pub snowline_range: f32,
+    pub snowline_depth: f32,
     pub _pad1: f32,
     pub _pad2: f32,
     pub _pad3: f32,
@@ -1619,8 +1620,8 @@ const _: () = assert!(std::mem::size_of::<WgrShadowPass>() == 1840);
 const _: () = assert!(std::mem::size_of::<WgrCmd>() == 8);
 const _: () = assert!(std::mem::size_of::<WgrOverlayVertex>() == 20);
 const _: () = assert!(std::mem::size_of::<WgrOverlayDraw>() == 40);
-// Alpine snowline grew this by height + range + 2 pad words: 64 + 16.
-const _: () = assert!(std::mem::size_of::<WgrTerrainParams>() == 80);
+// Alpine snowline grew this by height + range + depth + 3 pad words: 64 + 24.
+const _: () = assert!(std::mem::size_of::<WgrTerrainParams>() == 88);
 const _: () = assert!(std::mem::size_of::<WgrTerrainNode>() == 24);
 const _: () = assert!(std::mem::size_of::<WgrTerrainBatch>() == 16);
 const _: () = assert!(std::mem::size_of::<WgrGrassBatch>() == 16);

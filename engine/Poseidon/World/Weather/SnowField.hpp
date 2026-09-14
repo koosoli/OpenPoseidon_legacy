@@ -29,7 +29,10 @@ public:
     // WHERE snow lies, never the snowfall itself. Off when disabled.
     bool snowlineEnabled = true;
     float snowlineHeight = 644.88f;
-    float snowlineRange = 150.0f;
+    float snowlineRange = 25.0f;
+    // Depth of the alpine cover itself (m). Full white coverage is reached at
+    // ~4 cm; more depth mainly lifts the surface and brightens the powder.
+    float snowlineDepth = 0.06f;
 
     void ApplySnowstormPreset()
     {
@@ -51,6 +54,7 @@ public:
         snowlineEnabled = defaults.snowlineEnabled;
         snowlineHeight = defaults.snowlineHeight;
         snowlineRange = defaults.snowlineRange;
+        snowlineDepth = defaults.snowlineDepth;
     }
 
     float FallingIntensity() const

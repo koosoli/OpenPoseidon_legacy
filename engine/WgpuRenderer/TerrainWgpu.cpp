@@ -3064,6 +3064,7 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     _params.snowline_height =
         GSnow().snowlineEnabled && GSnow().snowlineRange > 0.0f ? GSnow().snowlineHeight : -1.0f;
     _params.snowline_range = std::max(GSnow().snowlineRange, 0.0f);
+    _params.snowline_depth = std::clamp(GSnow().snowlineDepth, 0.0f, 1.0f);
     _engine.QueueTerrainParams(_params); // REN-THR-013: queued, applied before wgr_render_frame
     const auto& snow = GSnow();
     if (camera && (snow.enabled || _snowWasEnabled || uploaded) &&

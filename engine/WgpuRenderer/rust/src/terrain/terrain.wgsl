@@ -39,6 +39,7 @@ struct TerrainParams {
     // order after enfusion_ground: the C++/Rust ABI reads by offset.
     snowline_height: f32,
     snowline_range: f32,
+    snowline_depth: f32,
     _pad1: f32,
     _pad2: f32,
     _pad3: f32,
@@ -92,7 +93,7 @@ fn snow_gradient(xz: vec2<f32>) -> vec3<f32> {
 // of the snowfall deposit above; the two combine by maximum.
 fn snowline_depth(world_y: f32) -> f32 {
     if (tp.snowline_height < 0.0 || tp.snowline_range <= 0.0) { return 0.0; }
-    return 0.06 * smoothstep(tp.snowline_height, tp.snowline_height + tp.snowline_range, world_y);
+    return tp.snowline_depth * smoothstep(tp.snowline_height, tp.snowline_height + tp.snowline_range, world_y);
 }
 // Bindless ground textures: one texture_2d per Landscape texture index, native
 // size/format/mips. Indexed non-uniformly per fragment (needs the device's

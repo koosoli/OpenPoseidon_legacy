@@ -992,6 +992,7 @@ struct WgrTerrainParams
      * snowfall deposit; pushed per frame like the wet band. */
     float snowline_height;
     float snowline_range;
+    float snowline_depth;
     float _pad1;
     float _pad2;
     float _pad3;
@@ -2031,7 +2032,7 @@ static_assert(sizeof(WgrShadowPass) == 288 + 16 + 24 * 64,
 static_assert(sizeof(WgrCmd) == 8, "WgrCmd layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrOverlayVertex) == 20, "WgrOverlayVertex layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrOverlayDraw) == 40, "WgrOverlayDraw layout must match the Rust #[repr(C)] struct");
-static_assert(sizeof(WgrTerrainParams) == 80, "WgrTerrainParams layout must match the Rust #[repr(C)] struct");
+static_assert(sizeof(WgrTerrainParams) == 88, "WgrTerrainParams layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrTerrainNode) == 24, "WgrTerrainNode layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrTerrainBatch) == 16, "WgrTerrainBatch layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrGrassBatch) == 16, "WgrGrassBatch layout must match the Rust #[repr(C)] struct");
