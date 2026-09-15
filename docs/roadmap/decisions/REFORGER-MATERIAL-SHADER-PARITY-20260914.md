@@ -368,6 +368,43 @@ perf delta.
   still-textured terrain, not a decal bug; (b) cloud drift between runs
   (~62% sky-strip diff) confounds naive pixel diffs — use band means and
   the log, not raw deltas.
+
+## 23. NormalPower carried to the shader (2026-09-15, build a9e0b37b)
+
+- Audit-driven find (§24): the `.emat` census shows `NormalPower` on 60
+  crowns (0 = deliberately flat .. 3.0), 245 Multis, 62 Basics — parsed
+  nowhere. The 0.0 values only make sense as an XY amplitude scale (a power
+  curve has no use for 0), matching the water-ripple POWER amplitude
+  vocabulary already in the shaders.
+- Shipped on `parity/foliage-lighting-001`: `TranslatedMaterial.normalPower`
+  (parsed, clamped ≥ 0) → `WgrModelMaterial.normal_power` (280 → 288 bytes,
+  both asserts) → `SectionMaterialGpu` (+12 pad, 256 → 272 stride) →
+  `sm.normal_power` in both WGSL mirrors → post-blend tangent XY scale +
+  Z rebuild. Unconditional: 1.0 is bit-identical (clamp no-op on |xy|≤1,
+  same sqrt), so every legacy material and every silent .emat is untouched.
+  `WGR_MATERIAL_NORMAL_POWER=0` forces 1.0 for the A/B. Direct (per-draw)
+  path NOT yet carried (ABI-frozen draw struct, no spare lane) — retained
+  owns the world; recorded follow-up, no regression (defaults to old look).
+- A/B at Reference 16:00, build a9e0b37b: `foliage-normpower` (default ON)
+  vs `foliage-nopower` (forced 1.0). Crown band mean abs diff 7.66 (village
+  3.88, field 1.02 noise): ON shows deep shadow pockets and separated leaf
+  masses where OFF washes flat. Owner verdict pending (yes/no pictures).
+- Tests: new `TranslateEmat` NormalPower case green; `shaders::` 11/11;
+  material suite 27/27. Build note: the struct's u64 alignment pads 284 →
+  288 — the const assert caught it, both sides updated.
+
+## 24. Audit judgement: census script yes, framework no (2026-09-15)
+
+- Built `emat-census.py` (temp, ~60 lines): parses all 1828 deployed +
+  dumped `.emat` files, counts keys per material class → `emat-census.json`.
+  This directly produced the NormalPower lead (60 crowns + 245 Multis).
+- Verdict on the proposed framework: a static asset→GPU→shader pipeline
+  tracer is NOT worth building — the loader's handled-key lists are small,
+  stable, and already half-documented in code comments; the expensive half
+  is semantics, which no automation can supply. The script + a checked-in
+  status table + the existing knob/harness A/B loop is the whole system
+  needed. Kept the branch name: the work is one parity line, renaming
+  fragments history for taxonomy.
 - Tests: `native_authored_normals...` composes both states, green. The
   `road_and_terrain_share_snow_depth_evaluation` failure is PRE-EXISTING
   (fails on the clean tree; snow snippet drift, unrelated to foliage).
