@@ -160,11 +160,17 @@ no DLSS, fixed LOD): `build/native-reforger-perf/Reference-matdbg-*/run-01.png`
 Each view is distinct and sane; FULL matches the pre-change framing.
 
 Findings (evidence, not fixes):
-- BASE: tree crowns pale grey-green while grass/buildings stay saturated.
-  Albedo-side paleness is tree-specific.
+- BASE (first capture): VOID — see section 11. Do not cite it.
+- BASE (re-captured after the decode fix, build 94c2065f): tree crowns render
+  deep saturated green, matching the authored BCR file pixels (opaque mean
+  58,69,40). Birch trunks white, roofs red, container blue. ALBEDO SIDE
+  EXONERATED: the bound albedo is correct; no tint/colorize/sRGB defect on
+  this asset. WorldColorizeMap absence only costs per-instance variation.
 - LIGHTING (white albedo): foliage multiplier ≈1.0 with no variation while
   buildings model sun/shade correctly. Lighting-side blowout is
-  tree-specific. Pale = pale albedo × flat ~1.0 lighting.
+  tree-specific and valid evidence (white needs no decode). Pale foliage =
+  correct albedo × flat ~1.0 lighting. THE isolated cause is in the foliage
+  lighting terms, not the textures.
 - NORMAL (map viz): flat almost everywhere = few/no normal maps bound on
   native assets. Consistent with NTC/NMO still unwired.
 - AO: foliage ≈1.0 (no occlusion term anywhere on trees).
