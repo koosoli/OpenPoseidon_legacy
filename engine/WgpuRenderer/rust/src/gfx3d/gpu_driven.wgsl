@@ -977,7 +977,14 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
     // cut out. View 0 (full material) falls straight through.
     let dbg_view = matdbg_view();
     if (dbg_view == MATDBG_VIEW_BASE_COLOR) {
-        return vec4<f32>(base.rgb, out_a);
+        // Show exactly what shade() consumes: decode under the HDR flag so the
+        // output encode round-trips to the authored values. Without this the
+        // reference view double-gammas and everything reads pale.
+        var base_dbg = base.rgb;
+        if (linear > 0.5) {
+            base_dbg = srgb_to_linear(base_dbg);
+        }
+        return vec4<f32>(base_dbg, out_a);
     }
     if (dbg_view == MATDBG_VIEW_NORMAL) {
         return vec4<f32>(normal_ts_dbg * 0.5 + vec3<f32>(0.5), out_a);

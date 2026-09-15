@@ -998,7 +998,12 @@ fn shade_fragment(in: VsOut) -> vec4<f32> {
     // Debug views are before shared lighting, fog and environment reflection. That keeps the
     // outputs useful for isolating source/material mistakes instead of mixing them with exposure.
     if (material_view == MATDBG_VIEW_BASE_COLOR) {
-        return vec4<f32>(base.rgb, out_a);
+        // Same contract as the retained path: what shade() consumes.
+        var base_dbg = base.rgb;
+        if (linear > 0.5) {
+            base_dbg = srgb_to_linear(base_dbg);
+        }
+        return vec4<f32>(base_dbg, out_a);
     }
     if (material_view == MATDBG_VIEW_NORMAL) {
         return vec4<f32>(normal_ts * 0.5 + vec3<f32>(0.5), out_a);
