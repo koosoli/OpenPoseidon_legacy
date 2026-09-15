@@ -12560,11 +12560,28 @@ void EngineWgpu::PushRenderParams()
         const char* v = std::getenv("WGR_FOLIAGE_ABLATE");
         return v && v[0] != '0';
     }();
+    // Granular A/B companions to the ablation above: override ONE knob so a wash
+    // can be attributed to ambient boost vs spherical bends instead of only being
+    // switched off wholesale. Unset = configured default. NaN = unset.
+    static const float foliageAmbientBoostOverride = []
+    {
+        const char* v = std::getenv("WGR_FOLIAGE_AMBIENT_BOOST");
+        if (v == nullptr || v[0] == '\0') return std::numeric_limits<float>::quiet_NaN();
+        const float parsed = std::strtof(v, nullptr);
+        return std::isfinite(parsed) ? parsed : std::numeric_limits<float>::quiet_NaN();
+    }();
+    static const float foliageTreeBendOverride = []
+    {
+        const char* v = std::getenv("WGR_FOLIAGE_TREE_BEND");
+        if (v == nullptr || v[0] == '\0') return std::numeric_limits<float>::quiet_NaN();
+        const float parsed = std::strtof(v, nullptr);
+        return std::isfinite(parsed) ? parsed : std::numeric_limits<float>::quiet_NaN();
+    }();
     const float fTrans = foliageAblate ? 0.0f : _foliage.transScale;
     const float fWrap = foliageAblate ? 0.0f : _foliage.wrap;
-    const float fAmbBoost = foliageAblate ? 1.0f : _foliage.ambientBoost;
+    const float fAmbBoost = foliageAblate ? 1.0f : (std::isnan(foliageAmbientBoostOverride) ? _foliage.ambientBoost : foliageAmbientBoostOverride);
     const float fNormalBend = foliageAblate ? 0.0f : _foliage.normalBend;
-    const float fTreeBend = foliageAblate ? 0.0f : _foliage.treeBend;
+    const float fTreeBend = foliageAblate ? 0.0f : (std::isnan(foliageTreeBendOverride) ? _foliage.treeBend : foliageTreeBendOverride);
     // FOLIAGE-DUSK (Poseidon::FoliageDuskCurve, dev panel: Foliage > "Dusk curve"). 1.0 is the
     // untouched daylight ramp, so the ablation takes it too.
     const float fDuskCurve = foliageAblate ? 1.0f : Poseidon::FoliageDuskCurve();

@@ -200,3 +200,29 @@ under the HDR flag, mirroring `shade()` exactly: the view shows what the
 shader consumes. Re-capture base before citing albedo values; the earlier
 base capture's ABSOLUTE brightness is void (relative hue differences stand).
 The LIT view was always valid (white needs no decode).
+
+## 12. Foliage A/B captures (2026-09-15, Reference spot, 16:00)
+
+- `foliage-ablate` (`WGR_FOLIAGE_ABLATE=1`, leaf model off): trees gain real
+  light/shade modeling and read volumetric, far closer to the reference.
+  CONFIRMS the leaf-lighting model (SSS fill + wrap + ambient boost +
+  spherical bends) causes the flat-bright canopy. Ablate-all is not
+  shippable (harsh terminators, no translucency) — it bounds the problem.
+- `foliage-screenano` (`WGR_FOLIAGE_SCREEN_AO=1`): no visible change vs
+  baseline. Missing screen-space occlusion is RULED OUT as the cause.
+- Remaining attribution: ambient boost vs wrap/trans fill vs spherical
+  bends. Granular knobs next, then the per-generation split the
+  `FoliageSettings` comment anticipates (dense crowns ~0 lift, legacy keeps
+  values).
+
+Albedo textures upload as Unorm (no GPU sRGB decode); `shade()` decodes
+under the HDR `linear` flag and the output encodes again. The BASE_COLOR
+early return bypassed `shade()`, so raw gamma values were encoded twice and
+everything read pale — most visibly on dark saturated greens like leaf
+albedo. The Tilia BCR file itself decodes (via PoseidonTools) to a rich dark
+green (opaque mean 58,69,40); transparent texels are dark too (49,58,32), so
+white-fringe is also ruled out. Both object paths now decode the base view
+under the HDR flag, mirroring `shade()` exactly: the view shows what the
+shader consumes. Re-capture base before citing albedo values; the earlier
+base capture's ABSOLUTE brightness is void (relative hue differences stand).
+The LIT view was always valid (white needs no decode).
