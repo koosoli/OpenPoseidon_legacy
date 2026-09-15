@@ -394,7 +394,6 @@ perf delta.
   288 — the const assert caught it, both sides updated.
 
 ## 24. Audit judgement: census script yes, framework no (2026-09-15)
-
 - Built `emat-census.py` (temp, ~60 lines): parses all 1828 deployed +
   dumped `.emat` files, counts keys per material class → `emat-census.json`.
   This directly produced the NormalPower lead (60 crowns + 245 Multis).
@@ -408,3 +407,34 @@ perf delta.
 - Tests: `native_authored_normals...` composes both states, green. The
   `road_and_terrain_share_snow_depth_evaluation` failure is PRE-EXISTING
   (fails on the clean tree; snow snippet drift, unrelated to foliage).
+
+## 25. Reference found + clear weather + crown AO (2026-09-15, build 82e8d29c)
+
+- Owner pointed at inspiration/armareforger_everon-1.jpg (Reference pose,
+  16:00): deep green crowns with near-black interiors, saturated fields.
+  Ours (cloudy captures): +33/+25 on crowns, pale fields. Sky comparison
+  proved WEATHER mismatch (ref clear, ours overcast) on top of materials.
+- 	ests/perf/missions/parity_field.eden: mission copy with
+  startWeather/forecastWeather 0.05, fog 0. Clear-sky captures now match the
+  reference mood; all future parity A/B use it (perf mission untouched).
+- trans0 under clear sky: net ZERO (means identical to 0.1, diff = sway
+  displacement). Transmission is not the brightness source. Closed again.
+- Baked vertex colours (xob 0x20 stream, parsed but dropped everywhere):
+  alnus crown byte2 spans 0..255 in 18 levels, dark core to open rim,
+  openness fit R=0.74 against the authored GeometryAO cylinder; betula grey
+  words consistent with the same byte2 signal; bark/solids carry none, so
+  the runtime applies to cutout sections only. xob inspect --colours
+  [--colour-dump N] audits any model.
+- Shipped: GeometryAO volume (center/height/width/intensity) parsed whole
+  or not at all; WgrModelMaterial 288 -> 320, SectionMaterialGpu 272 -> 304
+  (both asserts); VS computes the factor per-vertex from model-space pos,
+  FS multiplies albedo (vertex-colour semantics); WGR_FOLIAGE_CROWN_AO=0
+  forces off. Forests excluded (patch space), direct path follow-up.
+- Clear-sky A/B: crown std 44.9 (off) -> 52.3 (on), reference 51.6. The
+  on-run was hazier (sky +13), which lifts means but suppresses contrast,
+  so the contrast gain is the AO working against the haze. Interiors gain
+  ref-like pockets but are not yet near-black: radial-only, no vertical or
+  ellipsoid terms. Owner yes/no pending.
+- A/B rigor notes: auto-exposure is OFF by default (no confound); weather
+  still random-walks around the mission value between runs (compare
+  structure metrics, not raw means); sway displaces leaves run to run.
