@@ -211,14 +211,6 @@ The LIT view was always valid (white needs no decode).
 - `foliage-screenano` (`WGR_FOLIAGE_SCREEN_AO=1`): no visible change vs
   baseline. Missing screen-space occlusion is RULED OUT as the cause.
 
-## 14. Fix verification (2026-09-15, build 0bd80d2e)
-
-`Reference-foliage-nativeboost` (no overrides — the shipped default path):
-crowns show light/shade modeling with real depth, close to the reference.
-The per-generation split works end to end. Legacy worlds provably keep old
-values (branch dead without Enfusion surfaces); uniform-only change, no
-perf delta.
-
 ## 13. Granular attribution (2026-09-15, Reference spot, 16:00)
 
 - `foliage-boost1` (`WGR_FOLIAGE_AMBIENT_BOOST=1.0`, new knob): crowns regain
@@ -232,3 +224,11 @@ perf delta.
   This is the per-generation split `FoliageSettings` anticipated, not a global
   ambient cut: legacy output is bit-identical by construction (branch dead on
   legacy worlds).
+
+## 14. Fix verification (2026-09-15, build 0bd80d2e)
+
+`Reference-foliage-nativeboost` (no overrides — the shipped default path):
+crowns show light/shade modeling with real depth, close to the reference.
+The per-generation split works end to end. Legacy worlds provably keep old
+values (branch dead without Enfusion surfaces); uniform-only change, no
+perf delta.
