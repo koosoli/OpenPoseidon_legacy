@@ -325,6 +325,49 @@ perf delta.
   corrosion step's stderr into a terminating error, NOT a code failure.
   `cmake --build` directly exits 0. Prefer that when the wrapper dies early
   with no error text.
+
+## 21. Terrain tint census confirms prior decisions (2026-09-15, no capture)
+
+- Read 16 real surface `.emat` files via `pak cat` (Grass/Pebbles/Dirt/
+  Asphalt/Concrete/Rock/Crop/Forest/Mountain sets).
+- `Diffuse` is `1 1 1 1` wherever present: "terrain ignores diffuse" is
+  HARMLESS, all identity. Closed.
+- Base `Color` (0.59 concrete .. 0.88 asphalt, ignored by the renderer) is
+  NOT an oversight: `TerrainWgpuEnfusionSurface.cpp` documents the RFG-073
+  continuity measurement (detail-alone application rejected at 0.367 vs
+  0.221 unused; unused vs both indistinguishable). Reproducing the census
+  does not overturn it — absolute level vs Reforger needs ground truth the
+  continuity metric cannot supply. Stays unbound. No code change.
+- Still open, semantics unknown (no in-repo measurement found; RFG-065..073
+  docs not present in this worktree): `MiddleBCRBlend` > 1 (Pebbles 2,
+  ForestDeciduous 1.2 — clamped as interpretation), `NHOMiddleMap` dropped
+  (mid-field normals go flat past detail range), `MiddleNOBlend/Power`,
+  `SpecularIBL`/`DielectricReflectance` (spec ~0), `SatMapBrightness`
+  (satmap paging is a project), `ParallaxScale`, `CavityFromAO`,
+  `LocalShadowBias`. None gets a guess; each needs Reforger ground truth.
+
+## 22. Far-tier sun sign: proven wrong, inert on native, NOT changed (2026-09-15)
+
+- `far.wgsl::far_shade` computes `dot(normal, +sun_dir_world)` where every
+  other path uses `sl = -sun_dir_world` (surface→light). For prism roofs/
+  sun walls this is exactly inverted (roofs ambient-only, anti-sun walls
+  lit). Convention proof is airtight; the asset-obs flip is correct.
+- NOT fixed, deliberately: the tier is INERT on natively loaded worlds.
+  `SetFarProxyInstances` has one caller (`LandSave.cpp`, converted-world
+  placements); native streaming never calls it (no "Far instance tier" log
+  line in any native run). `--vd 400` drops 3400 instances into nothing;
+  `WGR_FAR_TIER=0` vs on is pixel-identical at ForestHigh (verified:
+  mean abs diff 0.0 across sky/near/far bands).
+- Verification plan (converted-world workstream, not this branch): Stratis/
+  Abel scene with modern placements + `--vd` to force proxies, compare
+  prism roofs/walls against the same buildings real-drawn. Until then the
+  one-line flip stays out — no unverifiable changes.
+- Cautionary notes from this probe: (a) the ForestHigh LIT view cannot show
+  far shading — terrain and the far pipeline ignore `MATDBG_VIEW_LIGHTING`,
+  so white roads there are correct (~0.84 sunlit decals) next to
+  still-textured terrain, not a decal bug; (b) cloud drift between runs
+  (~62% sky-strip diff) confounds naive pixel diffs — use band means and
+  the log, not raw deltas.
 - Tests: `native_authored_normals...` composes both states, green. The
   `road_and_terrain_share_snow_depth_evaluation` failure is PRE-EXISTING
   (fails on the clean tree; snow snippet drift, unrelated to foliage).
