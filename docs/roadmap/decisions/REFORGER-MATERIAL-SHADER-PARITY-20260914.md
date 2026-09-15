@@ -180,3 +180,17 @@ normals leaking onto native assets (would explain flat ~1.0 lighting),
 (`WGR_LAZY_BCR_TINT=0` A/B), (4) `leaf_cavity`-on-sun semantics.
 No fix is authorized by these captures alone; each needs its control-asset
 trace from section 6 first.
+
+## 11. Method note: the base view lied (fixed 2026-09-15)
+
+Albedo textures upload as Unorm (no GPU sRGB decode); `shade()` decodes
+under the HDR `linear` flag and the output encodes again. The BASE_COLOR
+early return bypassed `shade()`, so raw gamma values were encoded twice and
+everything read pale — most visibly on dark saturated greens like leaf
+albedo. The Tilia BCR file itself decodes (via PoseidonTools) to a rich dark
+green (opaque mean 58,69,40); transparent texels are dark too (49,58,32), so
+white-fringe is also ruled out. Both object paths now decode the base view
+under the HDR flag, mirroring `shade()` exactly: the view shows what the
+shader consumes. Re-capture base before citing albedo values; the earlier
+base capture's ABSOLUTE brightness is void (relative hue differences stand).
+The LIT view was always valid (white needs no decode).
