@@ -107,6 +107,15 @@ Then: Rust gfx3d tests, full build, deploy, verify all 7 views on the Everon
 church spot via fixed-camera captures (views must show distinct, sane output;
 FULL must be pixel-comparable to pre-change).
 
+Pre-existing failure (NOT introduced by this port, NOT fixed here):
+`gfx3d::normal_map_cavity_only_darkens_the_ambient_and_is_inert_on_a_flat_map`
+fails at base `12061d7a` because `shading.wgsl:501` ends the sun term with
+`* sun_vis * leaf_cavity` while the test requires `* sun_vis;` — i.e. the
+shader currently touches the direct sun term the test forbids, on the foliage
+path. Neither file is touched by the Phase 1 port (verified via `git status`).
+Flagged as an open Phase 3 (foliage) question: is `leaf_cavity` on sun
+intended or a regression? Do not weaken the test to make it pass.
+
 ## 6. Control assets (selected after Phase 1 verifies)
 
 - Building: church at the Everon comparison spot (visible in both screenshots).
