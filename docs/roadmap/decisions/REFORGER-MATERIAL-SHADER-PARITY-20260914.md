@@ -245,3 +245,37 @@ crowns show light/shade modeling with real depth, close to the reference.
 The per-generation split works end to end. Legacy worlds provably keep old
 values (branch dead without Enfusion surfaces); uniform-only change, no
 perf delta.
+
+## 16. Wrap/transmission arms + leaf_cavity resolution (2026-09-15)
+
+- `foliage-wrap0` (`WGR_FOLIAGE_WRAP=0`): no significant change at 16:00 high
+  sun. Expected: `wrap_fill` ≈ 0 on lit sides by formula. Wrap is NOT a
+  contributor at issue angles; keep 0.5 for grazing/backlit geometry.
+- `foliage-trans0` (`WGR_FOLIAGE_TRANS_SCALE=0`): no significant change here.
+  Transmission is dark-side/backlit only. Keep 0.54.
+- Stacking verdict: no problematic stacking at issue angles. The wash was
+  single-term dominant (ambient boost); ablate ≈ boost-fix + harshness from
+  lost translucency/wrap at terminators. No combined arm needed.
+- `leaf_cavity` anomaly UNDERSTOOD (no fix needed): `m.native_cavity`
+  defaults to 1.0; NTC-alpha fill sits behind `#ifdef NATIVE_LEAF_CAVITY`
+  (off by default). At runtime the sun term multiplies by 1.0 — dormant.
+  The failing test asserts source text, so it fails regardless; it guards
+  the opt-in path. Pre-existing, untouched, now explained.
+- GPU cost of the shipped fix: uniform-only (one float per frame). No
+  measurable delta by construction; arm frame times 35–49 ms all within
+  scene variance. No FPS claim made.
+
+## 17. Asset-obs audit closure (5 areas)
+
+- Native foliage normals: nothing beyond the adopted `veg_sway_phase`
+  helper to port; no hidden normal fix exists there. The gpu sway line stays
+  deferred (motion, unmeasured).
+- EMAT dependency handling: adopted (`ReadNativeEmat` + texture noting).
+- Material bindings: NTC→slot mapping predates both lines (verified live:
+  441 bound incl. crowns). Nothing to port.
+- Foliage lighting: no fix existed there; the ambient-boost split is new
+  work on this branch.
+- Sun-direction correction (`far.wgsl` flip): NOT RELEVANT TO THIS BRANCH
+  (far pipeline only). Convention analysis supports it
+  (`sl=-sun_dir` on the regular path); needs a far-distance A/B whenever
+  far work resumes. Not ported.
