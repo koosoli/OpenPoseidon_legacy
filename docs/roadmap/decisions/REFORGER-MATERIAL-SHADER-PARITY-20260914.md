@@ -279,3 +279,24 @@ perf delta.
   (far pipeline only). Convention analysis supports it
   (`sl=-sun_dir` on the regular path); needs a far-distance A/B whenever
   far work resumes. Not ported.
+
+## 18. Bend follow-up: native authored normals ship as default (2026-09-15)
+
+- Arm `Reference-foliage-authorednormals` (`WGR_NATIVE_AUTHORED_NORMALS=1`,
+  build 480cb11a, no rebuild needed): foreground crowns gain per-leaf
+  structure and deeper shade pockets vs the shipped-default baseline; the
+  smooth wash recedes. Authored normals read closer to the reference.
+- Shipped on `parity/foliage-lighting-001`: the `NATIVE_AUTHORED_NORMALS`
+  define is now default-ON (`mod.rs`: off only with
+  `WGR_NATIVE_AUTHORED_NORMALS=0`). Zero shader-text change — the two gates
+  already keyed on native-only signals: retained path skips bend for
+  `INST_COHERENT_TREE_WIND` (set only for `.xob` names), direct path skips
+  for `foliage_kind` 3 (assigned only for `.xob` names in `Object.cpp`).
+  Legacy `.p3d` trees can never carry either signal, and the direct path
+  keeps its CWA regression-guard bend for kinds 1/2. Legacy output is
+  identical by construction — same argument class as the boost split, but
+  per-instance rather than per-world.
+- Merged native forests keep their bend (no coherent bit; separate question).
+- Tests: `native_authored_normals...` composes both states, green. The
+  `road_and_terrain_share_snow_depth_evaluation` failure is PRE-EXISTING
+  (fails on the clean tree; snow snippet drift, unrelated to foliage).

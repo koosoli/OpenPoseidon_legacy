@@ -43,7 +43,13 @@ pub fn early_depth_supported() -> bool {
 
 fn shader_defs() -> std::collections::HashMap<String, naga_oil::compose::ShaderDefValue> {
     let mut defs = std::collections::HashMap::new();
-    if std::env::var("WGR_NATIVE_AUTHORED_NORMALS").as_deref() == Ok("1") {
+    // Native (.xob) trees keep their authored leaf normals: the spherical crown
+    // bend flattens dense native crowns into a smooth wash (Reference-spot A/B:
+    // authored = modeled light/shade with depth, bent = flat bright). Default ON;
+    // WGR_NATIVE_AUTHORED_NORMALS=0 restores the bend. Legacy trees can never take
+    // this path (kind 3 / the coherent-wind bit require a .xob model name), so
+    // legacy output is identical either way.
+    if std::env::var("WGR_NATIVE_AUTHORED_NORMALS").as_deref() != Ok("0") {
         defs.insert("NATIVE_AUTHORED_NORMALS".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
     }
     if std::env::var("WGR_NATIVE_LEAF_CAVITY").as_deref() == Ok("1") {
