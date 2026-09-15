@@ -150,3 +150,33 @@ long landscape. No hand-positioned cameras.
    shading), exposure transfer. In that order only if views implicate them.
 4. Trunk ship (`ship-trunk` -> `safety/consolidated-v2`) remains PARKED until
    the owner reprioritizes; installed build stays `snowline-jitter-001`.
+
+## 10. Phase 1 verification (2026-09-15, build 5b4db766)
+
+All 7 views captured valid at the Reference spot (Everon church,
+[4665.50, 7132.80, 192.09] az 123.7 el -11.8, 16:00, 1920x1080, MSAA4,
+no DLSS, fixed LOD): `build/native-reforger-perf/Reference-matdbg-*/run-01.png`
+(~22.3k instances, ~15M tris, ~36-49 ms frames — perf numbers, not claims).
+Each view is distinct and sane; FULL matches the pre-change framing.
+
+Findings (evidence, not fixes):
+- BASE: tree crowns pale grey-green while grass/buildings stay saturated.
+  Albedo-side paleness is tree-specific.
+- LIGHTING (white albedo): foliage multiplier ≈1.0 with no variation while
+  buildings model sun/shade correctly. Lighting-side blowout is
+  tree-specific. Pale = pale albedo × flat ~1.0 lighting.
+- NORMAL (map viz): flat almost everywhere = few/no normal maps bound on
+  native assets. Consistent with NTC/NMO still unwired.
+- AO: foliage ≈1.0 (no occlusion term anywhere on trees).
+- SPEC: ≈0 everywhere. Specular ruled OUT as the paleness cause.
+- UV: sane tiled coordinates, no catastrophe.
+- Pre-existing (recorded, not introduced): cavity test failure
+  (`leaf_cavity` on the sun term vs test invariant) stays an open Phase 3
+  question.
+
+Phase 2/3 attack order from this evidence: (1) legacy rounded-foliage
+normals leaking onto native assets (would explain flat ~1.0 lighting),
+(2) sky-ambient strength on foliage, (3) albedo tint/colorize path
+(`WGR_LAZY_BCR_TINT=0` A/B), (4) `leaf_cavity`-on-sun semantics.
+No fix is authorized by these captures alone; each needs its control-asset
+trace from section 6 first.
