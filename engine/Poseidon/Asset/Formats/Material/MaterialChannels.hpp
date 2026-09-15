@@ -200,6 +200,14 @@ struct TranslatedMaterial
     // 0 (deliberately flat) through 3; the renderer scales the tangent-space XY
     // and renormalises, so 1.0 is bit-identical to no scaling.
     float                normalPower = 1.0f;
+    // Enfusion's crown self-occlusion volume (`GeometryAOCenter/Height/Width/
+    // Intensity`): a radial cylinder about the trunk axis in MODEL space that
+    // darkens interior leaves toward the baked vertex colours. Intensity 0
+    // (every material that names none, all legacy) disables it exactly.
+    float                crownAoCenter[3] = {0.0f, 0.0f, 0.0f};
+    float                crownAoHeight = 0.0f;
+    float                crownAoWidth = 0.0f;
+    float                crownAoIntensity = 0.0f;
 
     const TranslatedSlot* Find(MaterialSlot slot) const
     {

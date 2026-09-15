@@ -113,6 +113,33 @@ TEST_CASE("EMAT adapter: NormalPower carries the authored normal intensity", "[a
     REQUIRE(TranslateEmat(ParseEmat(negative), "origin", "").normalPower == 0.0f);
 }
 
+TEST_CASE("EMAT adapter: crown AO volume parses whole or not at all", "[asset][material][emat]")
+{
+    const char* crown = "MatPBRTreeCrown {\n"
+                        " GeometryAOCenter 0 7 0\n"
+                        " GeometryAOHeight 7.863\n"
+                        " GeometryAOWidth 2.308\n"
+                        " GeometryAOIntensity 1\n"
+                        " BCRMap \"{00}crown.edds\"\n"
+                        "}\n";
+    const TranslatedMaterial full = TranslateEmat(ParseEmat(crown), "origin", "");
+    REQUIRE(full.crownAoCenter[1] == 7.0f);
+    REQUIRE(full.crownAoHeight == 7.863f);
+    REQUIRE(full.crownAoWidth == 2.308f);
+    REQUIRE(full.crownAoIntensity == 1.0f);
+
+    // Missing intensity: the volume cannot evaluate, so nothing is carried.
+    const char* partial = "MatPBRTreeCrown {\n"
+                          " GeometryAOCenter 0 7 0\n"
+                          " GeometryAOHeight 7.863\n"
+                          " GeometryAOWidth 2.308\n"
+                          " BCRMap \"{00}crown.edds\"\n"
+                          "}\n";
+    REQUIRE(TranslateEmat(ParseEmat(partial), "origin", "").crownAoIntensity == 0.0f);
+    // A legacy-style material names none of it.
+    REQUIRE(TranslateEmat(ParseEmat(kRiverEmat), "origin", "CalmWater").crownAoIntensity == 0.0f);
+}
+
 TEST_CASE("EMAT adapter: an albedo map is taken when the material has one", "[asset][material][emat][dz-002]")
 {
     // Rivers and ponds author no albedo; Sakhal's ice lake does.

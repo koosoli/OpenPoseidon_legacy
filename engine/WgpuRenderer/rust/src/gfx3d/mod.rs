@@ -8286,6 +8286,8 @@ impl Gfx3d {
                 layer_colour: m.layer_colour,
                 normal_power: m.normal_power,
                 _pad_np: [0; 3],
+                crown_ao_p0: m.crown_ao_p0,
+                crown_ao_p1: m.crown_ao_p1,
             })
             .collect();
         let model =
@@ -10223,8 +10225,8 @@ fn multi_layer_normals_keep_every_layout_in_step() {
     // Mirrors the C++ static_assert in include/wgpu_renderer.hpp.
     assert_eq!(
         std::mem::size_of::<WgrModelMaterial>(),
-        288,
-        "WgrModelMaterial grew by normal_power (280 -> 284, padded to 288 by the u64 alignment); wgpu_renderer.hpp must agree"
+        320,
+        "WgrModelMaterial grew by crown_ao (288 -> 320); wgpu_renderer.hpp must agree"
     );
     assert_eq!(
         std::mem::offset_of!(WgrModelMaterial, layer_normal_texture_id),
@@ -10248,10 +10250,14 @@ fn multi_layer_normals_keep_every_layout_in_step() {
         std::mem::offset_of!(cull::SectionMaterialGpu, layer_colour),
         192
     );
-    assert_eq!(std::mem::size_of::<cull::SectionMaterialGpu>(), 272);
+    assert_eq!(std::mem::size_of::<cull::SectionMaterialGpu>(), 304);
     assert_eq!(
         std::mem::offset_of!(cull::SectionMaterialGpu, normal_power),
         256
+    );
+    assert_eq!(
+        std::mem::offset_of!(cull::SectionMaterialGpu, crown_ao_p0),
+        272
     );
 
     // Both WGSL mirrors must declare the field, in the same place, with the same padding.
@@ -10282,6 +10288,12 @@ fn multi_layer_normals_keep_every_layout_in_step() {
             assert!(
                 src.contains(pad),
                 "{name} needs three pad words after normal_power for the 16 stride"
+            );
+        }
+        for field in ["crown_ao_p0: vec4<f32>,", "crown_ao_p1: vec4<f32>,"] {
+            assert!(
+                src.contains(field),
+                "{name} must mirror SectionMaterialGpu::{field}"
             );
         }
         for pad in [

@@ -7214,6 +7214,39 @@ float EngineWgpu::ResolveMaterialNormalPower(const ShapeSection& section)
     return cached->second.normalPower;
 }
 
+// Crown self-occlusion volume, packed for the section record. Zero lanes when
+// the material names no volume, so every legacy section and every silent .emat
+// renders exactly as before.
+void EngineWgpu::ResolveMaterialCrownAo(const ShapeSection& section, float aoP0[4], float aoP1[4])
+{
+    aoP0[0] = aoP0[1] = aoP0[2] = aoP0[3] = 0.0f;
+    aoP1[0] = aoP1[1] = aoP1[2] = aoP1[3] = 0.0f;
+    static const bool enabled = []
+    {
+        const char* v = std::getenv("WGR_FOLIAGE_CROWN_AO");
+        return !v || v[0] != '0';
+    }();
+    if (!enabled)
+        return;
+    if (!section.surfMat)
+        return;
+    const char* materialPath = section.surfMat->GetName().Data();
+    if (!materialPath || !*materialPath)
+        return;
+    const auto cached = _materialBindings.find(materialPath);
+    if (cached == _materialBindings.end())
+        return; // ResolveMaterialBaseColour fills the cache first
+    const auto& translated = cached->second;
+    if (translated.crownAoIntensity <= 0.0f || translated.crownAoWidth <= 0.0f)
+        return;
+    aoP0[0] = translated.crownAoCenter[0];
+    aoP0[1] = translated.crownAoCenter[1];
+    aoP0[2] = translated.crownAoCenter[2];
+    aoP0[3] = translated.crownAoIntensity;
+    aoP1[0] = translated.crownAoHeight;
+    aoP1[1] = translated.crownAoWidth;
+}
+
 // The environment (reflection) map a section's material names, or 0 when it names none.
 //
 // DZ-003. Fourth of the same shape as ResolveMaterialNormalMap above, and the reason it
@@ -8782,6 +8815,13 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
             // Authored normal intensity rides the same record; the 1.0 default keeps
             // every material that names none exactly where it was.
             mat.normal_power = ResolveMaterialNormalPower(s->GetSection(i));
+            // Crown self-occlusion volume; zero lanes when unnamed (no-op).
+            {
+                float aoP0[4], aoP1[4];
+                ResolveMaterialCrownAo(s->GetSection(i), aoP0, aoP1);
+                mat.crown_ao_p0 = {aoP0[0], aoP0[1], aoP0[2], aoP0[3]};
+                mat.crown_ao_p1 = {aoP1[0], aoP1[1], aoP1[2], aoP1[3]};
+            }
             if (nativeCavity)
             {
                 sec.flags |= WGR_MODEL_SECTION_NATIVE_CAVITY;

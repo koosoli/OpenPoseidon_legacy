@@ -74,6 +74,10 @@ struct SectionMaterial {
     _pad_np0: u32,
     _pad_np1: u32,
     _pad_np2: u32,
+    // Crown AO lanes: the shadow pass never shades, present only so this mirror
+    // stays field-for-field with SectionMaterialGpu (304 bytes, 16 stride).
+    crown_ao_p0: vec4<f32>,
+    crown_ao_p1: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> pass_data: PassData;

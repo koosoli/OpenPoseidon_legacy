@@ -126,6 +126,21 @@ struct EmatMaterial
         return true;
     }
 
+    //! Three scalars, as Enfusion writes `GeometryAOCenter` and friends.
+    bool Vec3Of(std::string_view name, float out[3]) const
+    {
+        const EmatProperty* property = Find(name);
+        if (!property || property->values.size() != 3)
+            return false;
+        for (size_t i = 0; i < 3; ++i)
+        {
+            if (!property->values[i].isNumber)
+                return false;
+            out[i] = static_cast<float>(property->values[i].number);
+        }
+        return true;
+    }
+
     //! Texture path with the GUID stripped. Empty when the key is absent or carries no
     //! texture -- callers must not treat "" as a resolvable path.
     std::string TextureOf(std::string_view name) const

@@ -586,6 +586,24 @@ inline TranslatedMaterial TranslateEmat(const EmatMaterial& emat, const std::str
     if (emat.FloatOf("NormalPower", normalPower))
         out.normalPower = normalPower < 0.0f ? 0.0f : normalPower;
 
+    // Crown self-occlusion volume. Parsed whole or not at all: a center without
+    // dimensions (or dimensions without an intensity) cannot evaluate, and a
+    // half-read volume would darken the wrong leaves. Intensity clamps to
+    // [0,1] -- occlusion past full black is meaningless.
+    float aoCenter[3] = {};
+    float aoHeight = 0.0f, aoWidth = 0.0f, aoIntensity = 0.0f;
+    if (emat.Vec3Of("GeometryAOCenter", aoCenter) && emat.FloatOf("GeometryAOHeight", aoHeight) &&
+        emat.FloatOf("GeometryAOWidth", aoWidth) && emat.FloatOf("GeometryAOIntensity", aoIntensity) &&
+        aoIntensity > 0.0f && aoWidth > 0.0f)
+    {
+        out.crownAoCenter[0] = aoCenter[0];
+        out.crownAoCenter[1] = aoCenter[1];
+        out.crownAoCenter[2] = aoCenter[2];
+        out.crownAoHeight = aoHeight;
+        out.crownAoWidth = aoWidth;
+        out.crownAoIntensity = aoIntensity < 1.0f ? aoIntensity : 1.0f;
+    }
+
     return out;
 }
 

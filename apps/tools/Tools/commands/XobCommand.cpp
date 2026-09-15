@@ -29,6 +29,7 @@
 #include <iomanip>
 #include <iostream>
 #include <map>
+#include <set>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -2235,7 +2236,7 @@ void PrintTextureReport(const TextureStats& stats, size_t partsTextured, size_t 
 // Subcommand: inspect
 // ---------------------------------------------------------------------------
 
-int Inspect(const std::string& root, const std::string& filter, int limit)
+int Inspect(const std::string& root, const std::string& filter, int limit, bool dumpColours, int dumpPart)
 {
     PakSet paks;
     if (!paks.Open(root))
@@ -2289,6 +2290,110 @@ int Inspect(const std::string& root, const std::string& filter, int limit)
             }
             for (const XobMaterial& material : header.materials)
                 std::cout << "  material " << material.path << "\n";
+            if (dumpColours && !header.lods.empty())
+            {
+                // Vertex-colour stream audit (parity work): the 0x20 stream rides on
+                // all vegetation polyplanes and most bark, is parsed into
+                // XobPart::colours, and is dropped by every downstream consumer.
+                // Per-byte stats (no byte-order assumption) plus brightness-vs-Y
+                // and brightness-vs-radius correlations say whether it is baked
+                // occlusion (dark inside/low) or per-leaf tint (uncorrelated).
+                XobLod lod;
+                std::string lodError;
+                if (!ReadXobLod(bytes.data(), bytes.size(), header, 0, lod, lodError))
+                {
+                    std::cout << "  colours: LOD0 read failed: " << lodError << "\n";
+                }
+                else
+                {
+                    for (size_t p = 0; p < lod.parts.size(); ++p)
+                    {
+                        const XobPart& part = lod.parts[p];
+                        if (part.colours.empty() || part.positions.empty())
+                        {
+                            std::cout << "  colours part" << p << " mat=" << part.materialIndex << " NONE ("
+                                      << part.colours.size() << " colours, " << part.positions.size() << " verts)\n";
+                            continue;
+                        }
+                        const size_t n = std::min(part.colours.size(), part.positions.size());
+                        double sumB[4] = {};
+                        std::set<uint32_t> distinct;
+                        double sumY = 0, sumR = 0, sumL = 0, sumYL = 0, sumRL = 0;
+                        double sumYY = 0, sumRR = 0, sumLL = 0;
+                        double cx = 0, cz = 0;
+                        for (size_t v = 0; v < n; ++v)
+                        {
+                            cx += part.positions[v].x;
+                            cz += part.positions[v].z;
+                        }
+                        cx /= n;
+                        cz /= n;
+                        for (size_t v = 0; v < n; ++v)
+                        {
+                            const uint32_t w = part.colours[v];
+                            distinct.insert(w);
+                            const double b0 = w & 0xff, b1 = (w >> 8) & 0xff;
+                            const double b2 = (w >> 16) & 0xff, b3 = (w >> 24) & 0xff;
+                            sumB[0] += b0;
+                            sumB[1] += b1;
+                            sumB[2] += b2;
+                            sumB[3] += b3;
+                            const double lum = (b0 + b1 + b2) / 3.0;
+                            const double y = part.positions[v].y;
+                            const double dx = part.positions[v].x - cx, dz = part.positions[v].z - cz;
+                            const double r = std::sqrt(dx * dx + dz * dz);
+                            sumY += y;
+                            sumR += r;
+                            sumL += lum;
+                            sumYL += y * lum;
+                            sumRL += r * lum;
+                            sumYY += y * y;
+                            sumRR += r * r;
+                            sumLL += lum * lum;
+                        }
+                        const auto corr = [&](double sxy, double sx, double sy, double sxx, double syy)
+                        {
+                            const double num = n * sxy - sx * sy;
+                            const double den =
+                                std::sqrt(std::max(1e-12, (n * sxx - sx * sx) * (n * syy - sy * sy)));
+                            return num / den;
+                        };
+                        std::cout << "  colours part" << p << " mat=" << part.materialIndex << " n=" << n
+                                  << " distinct=" << distinct.size()
+                                  << " meanB=[" << std::setprecision(1) << sumB[0] / n << "," << sumB[1] / n << ","
+                                  << sumB[2] / n << "," << sumB[3] / n << "]"
+                                  << " corrLumY=" << std::setprecision(3)
+                                  << corr(sumYL, sumY, sumL, sumYY, sumLL)
+                                  << " corrLumR=" << corr(sumRL, sumR, sumL, sumRR, sumLL);
+                        if (distinct.size() <= 40)
+                        {
+                            std::cout << " words=";
+                            bool first = true;
+                            for (uint32_t w : distinct)
+                            {
+                                if (!first)
+                                    std::cout << ",";
+                                first = false;
+                                std::cout << std::hex << std::setw(8) << std::setfill('0') << w << std::dec;
+                            }
+                        }
+                        std::cout << "\n";
+                        if (dumpPart > 0 && static_cast<int>(p) == dumpPart - 1)
+                        {
+                            // Per-vertex dump for offline formula fitting: model-space
+                            // position + raw colour word, one per line.
+                            std::cout << "  corpus x,y,z,word\n";
+                            for (size_t v = 0; v < n; ++v)
+                            {
+                                std::cout << "  corpus " << std::setprecision(4) << part.positions[v].x << ","
+                                          << part.positions[v].y << "," << part.positions[v].z << ","
+                                          << std::hex << std::setw(8) << std::setfill('0') << part.colours[v]
+                                          << std::dec << "\n";
+                            }
+                        }
+                    }
+                }
+            }
             // Fact 9: the COLL shapes, one line each, with the character-blocking
             // verdict the geometry LOD will act on.
             const XobCollision collision = ReadXobCollision(bytes.data(), bytes.size(), header);
@@ -2745,11 +2850,15 @@ void XobCommand::Setup(CLI::App& app)
         static std::string root;
         static std::string filter;
         static int limit = 20;
+        static bool colours = false;
+        static int colourDump = 0;
         auto* cmd = xob->add_subcommand("inspect", "Report a .xob's LOD ladder, bounding box and materials");
         cmd->add_option("input", root, "A .pak file, or a directory to search")->required();
         cmd->add_option("-f,--filter", filter, "Only paths containing this substring (case-insensitive)");
         cmd->add_option("-n,--limit", limit, "Stop after this many models (default 20)");
-        cmd->callback([]() { std::exit(Inspect(root, filter, limit)); });
+        cmd->add_flag("--colours", colours, "Also dump the 0x20 vertex-colour stream stats of LOD0 (mean per byte, brightness vs height/radius correlation)");
+        cmd->add_option("--colour-dump", colourDump, "Also dump per-vertex x,y,z,word CSV lines for LOD0 part N (1-based, 0 = off)");
+        cmd->callback([]() { std::exit(Inspect(root, filter, limit, colours, colourDump)); });
     }
     {
         static std::string root;

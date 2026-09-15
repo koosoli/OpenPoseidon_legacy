@@ -476,6 +476,13 @@ struct WgrModelMaterial
      * the decoded tangent-space XY, renormalised by the shader. 1.0 when the
      * source names none (every legacy material), so the default is a no-op. */
     float normal_power = 1.0f;
+    /* Crown self-occlusion volume (`GeometryAOCenter/Height/Width/Intensity`):
+     * xyz = trunk-axis centre in MODEL space, w = intensity (0 = off); second
+     * lane x = cylinder height (reserved: the fitted falloff is radial-only),
+     * y = cylinder radius. Zero lanes keep every material that names none
+     * exactly where it was. */
+    WgrVec4 crown_ao_p0;
+    WgrVec4 crown_ao_p1;
 };
 
 /* One drawable LOD level: its FindSqrtLevel resolution threshold (_resolutions[i]) +
@@ -527,7 +534,7 @@ struct WgrInstance
 };
 
 static_assert(sizeof(WgrModelSection) == 24, "WgrModelSection must match Rust");
-static_assert(sizeof(WgrModelMaterial) == 288, "WgrModelMaterial must match Rust");
+static_assert(sizeof(WgrModelMaterial) == 320, "WgrModelMaterial must match Rust");
 static_assert(sizeof(WgrModelLod) == 16, "WgrModelLod must match Rust");
 static_assert(sizeof(WgrInstance) == 144, "WgrInstance must match Rust");
 

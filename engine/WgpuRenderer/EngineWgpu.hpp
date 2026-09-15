@@ -1005,6 +1005,12 @@ class EngineWgpu : public EngineDummy
     // fills, so this shares its ordering dependency. WGR_MATERIAL_NORMAL_POWER=0 forces
     // 1.0 everywhere (the pre-support picture) for the A/B.
     float ResolveMaterialNormalPower(const ShapeSection& section);
+    // A section's crown self-occlusion volume, packed for the GPU record:
+    // ao_p0 = trunk-axis centre (model space) + intensity, ao_p1 = height,
+    // radius, 0, 0. All-zero when the material names no volume. Shares the
+    // translation-cache ordering dependency. WGR_FOLIAGE_CROWN_AO=0 zeroes the
+    // intensity lane (the pre-support picture) for the A/B.
+    void ResolveMaterialCrownAo(const ShapeSection& section, float aoP0[4], float aoP1[4]);
     // A section's environment (reflection) map when its material names a loadable one,
     // or 0. DZ-003: DayZ water is authored as a near-black constant plus a reflection,
     // so a non-zero answer here is what marks a surface reflective for the shader.

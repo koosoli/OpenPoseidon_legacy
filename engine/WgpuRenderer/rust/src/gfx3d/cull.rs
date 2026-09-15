@@ -147,6 +147,11 @@ pub struct SectionMaterialGpu {
     // both sides agree on 272.
     pub normal_power: f32,
     pub _pad_np: [u32; 3],
+    // Crown self-occlusion volume (xyz = trunk-axis centre in model space,
+    // w = intensity; second lane x = height reserved, y = radius). 32 bytes,
+    // 16-aligned on both sides, so the stride stays a multiple of 16.
+    pub crown_ao_p0: [f32; 4],
+    pub crown_ao_p1: [f32; 4],
 }
 
 // A permissive plane that never culls anything: dot(0, p) + BIG >= -radius always holds.

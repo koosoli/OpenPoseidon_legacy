@@ -327,6 +327,10 @@ pub struct WgrModelMaterial {
     // Enfusion's per-material normal-map intensity (`NormalPower`): multiplier on the
     // decoded tangent-space XY, renormalised by the shader. 1.0 = no-op default.
     pub normal_power: f32,
+    // Crown self-occlusion volume: xyz = trunk-axis centre (model space),
+    // w = intensity (0 = off); second lane x = height (reserved), y = radius.
+    pub crown_ao_p0: [f32; 4],
+    pub crown_ao_p1: [f32; 4],
 }
 
 // One drawable LOD level of a model: its FindSqrtLevel resolution threshold (`_resolutions[i]`)
@@ -1590,7 +1594,7 @@ const _: () = assert!(std::mem::size_of::<WgrMeshVertex>() == 68);
 const _: () = assert!(std::mem::size_of::<WgrDraw3D>() == 288);
 const _: () = assert!(std::mem::size_of::<WgrLight>() == 64);
 const _: () = assert!(std::mem::size_of::<WgrModelSection>() == 24);
-const _: () = assert!(std::mem::size_of::<WgrModelMaterial>() == 288);
+const _: () = assert!(std::mem::size_of::<WgrModelMaterial>() == 320);
 const _: () = assert!(std::mem::size_of::<WgrModelLod>() == 16);
 const _: () = assert!(std::mem::size_of::<WgrInstance>() == 144);
 const _: () = assert!(std::mem::size_of::<WgrTonemap>() == 64);

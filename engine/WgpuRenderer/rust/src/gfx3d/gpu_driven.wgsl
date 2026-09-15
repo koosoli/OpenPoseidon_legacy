@@ -108,6 +108,10 @@ struct SectionMaterial {
     _pad_np0: u32,
     _pad_np1: u32,
     _pad_np2: u32,
+    // Crown self-occlusion volume (xyz = trunk-axis centre in model space,
+    // w = intensity 0 = off; second lane x = height reserved, y = radius).
+    crown_ao_p0: vec4<f32>,
+    crown_ao_p1: vec4<f32>,
 };
 
 @group(1) @binding(0) var<storage, read> instances: array<Instance>;
@@ -475,6 +479,10 @@ struct VsOut {
     // Second UV set (`tex1`): what Multi's mask / macro / ambient-shadow stages are authored
     // on. Equals uv when the shape carries no second set (MeshBuild copies t0 into t1).
     @location(11) uv1: vec2<f32>,
+    // Crown self-occlusion factor from the vertex shader (Enfusion GeometryAO volume,
+    // 1 = open sky). Smooth-interpolated like a baked vertex colour, which is what it
+    // replaces. 1.0 for every section whose material names no volume.
+    @location(12) crown_ao: f32,
 };
 
 // WgrInstance::flags bits: vegetation canopy — bend cutout-section normals toward a radial crown
@@ -645,6 +653,26 @@ fn vs_gpu(
             }
         }
     }
+    // Crown self-occlusion (Enfusion `GeometryAO*`): a radial cylinder about the
+    // trunk axis in MODEL space -- the runtime form of the baked vertex colours
+    // the .xob colour stream carries (alnus crown: openness fit R=0.74 against
+    // byte2, dark core to open rim). `pos` is the undeformed authored vertex, so
+    // the lookup is in the same frame the volume is authored in, exactly like
+    // the baked-sky-visibility volume below. Gated like the bend (canopy cutout
+    // sections) but independent of the authored-normals opt-out, and excluding
+    // merged forests whose vertices live in patch space, not tree space.
+    // Forests keep 1.0 (follow-up with the per-vertex crown table).
+    var crown_ao = 1.0;
+    if (canopy != 0u && (canopy & INST_CANOPY_FOREST) == 0u &&
+        section_materials[rec.section].alpha_ref > 0.0) {
+        let ao = section_materials[rec.section].crown_ao_p0;
+        if (ao.w > 0.0) {
+            let sh = section_materials[rec.section].crown_ao_p1;
+            let r = length((pos.xz - ao.xz) / max(sh.y, 1e-3));
+            let openness = smoothstep(0.0, 1.0, r);
+            crown_ao = clamp(mix(1.0 - ao.w, 1.0, openness), 0.0, 1.0);
+        }
+    }
     var out: VsOut;
     out.clip = reverse_z(frame.proj * frame.view * vec4<f32>(world_pos, 1.0));
     out.uv = uv;
@@ -659,6 +687,7 @@ fn vs_gpu(
     // Undeformed model-space position: the baked volume is a property of the AUTHORED model, so
     // the lookup must use the authored vertex, not a terrain-conformed one.
     out.model_pos = pos;
+    out.crown_ao = crown_ao;
     out.model_id = inst.model;
     out.model_rot0 = world[0].xyz;
     out.model_rot1 = world[1].xyz;
@@ -734,6 +763,10 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
     // RFG-072: layer 0 worn in its own colour. Identity (1,1,1) for every material that
     // names none, so this is a no-op outside a native MatPBRMulti. See tint_albedo.
     base = vec4<f32>(tint_albedo(base.rgb, sm.layer_colour[0].rgb), base.a);
+    // Crown self-occlusion: the vertex shader's GeometryAO factor, applied to the
+    // albedo like a baked vertex colour (which is what it replaces). 1.0 for every
+    // section whose material names no volume, so this is a no-op everywhere else.
+    base = vec4<f32>(base.rgb * in.crown_ao, base.a);
     // The final per-layer mask weights, hoisted out of the block below so the NORMAL blend
     // (MAT-048, further down) uses exactly the weights the colour blend used — one mask
     // sample, one set of weights, colours and normals agreeing per fragment by construction.
