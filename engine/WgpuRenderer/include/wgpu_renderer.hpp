@@ -472,6 +472,10 @@ struct WgrModelMaterial
      * shared one-metre library tiles are colourless by design -- 436 tiles serve 2,889 of
      * Everon's structure materials -- and this is where each wall becomes its own. */
     float layer_colour[4][4];
+    /* Enfusion's per-material normal-map intensity (`NormalPower`): a multiplier on
+     * the decoded tangent-space XY, renormalised by the shader. 1.0 when the
+     * source names none (every legacy material), so the default is a no-op. */
+    float normal_power = 1.0f;
 };
 
 /* One drawable LOD level: its FindSqrtLevel resolution threshold (_resolutions[i]) +
@@ -523,7 +527,7 @@ struct WgrInstance
 };
 
 static_assert(sizeof(WgrModelSection) == 24, "WgrModelSection must match Rust");
-static_assert(sizeof(WgrModelMaterial) == 280, "WgrModelMaterial must match Rust");
+static_assert(sizeof(WgrModelMaterial) == 288, "WgrModelMaterial must match Rust");
 static_assert(sizeof(WgrModelLod) == 16, "WgrModelLod must match Rust");
 static_assert(sizeof(WgrInstance) == 144, "WgrInstance must match Rust");
 

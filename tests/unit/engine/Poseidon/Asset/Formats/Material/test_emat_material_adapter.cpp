@@ -84,6 +84,7 @@ TEST_CASE("EMAT adapter: water-shader keys are left alone", "[asset][material][e
 
     REQUIRE(material.specular[0] == 1.0f);
     REQUIRE(material.specularPower == 1.0f);
+    REQUIRE(material.normalPower == 1.0f);
     REQUIRE(material.emissive[0] == 0.0f);
     REQUIRE(material.emissive[3] == 1.0f);
 
@@ -91,6 +92,25 @@ TEST_CASE("EMAT adapter: water-shader keys are left alone", "[asset][material][e
     // and giving it one would put a direction field where a colour is expected.
     for (const auto& slot : material.slots)
         REQUIRE(slot.texture.path.canonical().find("flowmap") == std::string::npos);
+}
+
+TEST_CASE("EMAT adapter: NormalPower carries the authored normal intensity", "[asset][material][emat]")
+{
+    // A crown fragment: 2.5x leaf relief. Absent keys stay the 1.0 no-op; a
+    // negative value clamps at parse so downstream code never repeats the guard.
+    const char* crown = "MatPBRTreeCrown {\n"
+                        " NormalPower 2.5\n"
+                        " BCRMap \"{00}tilia_bcr.edds\"\n"
+                        " NTCMap \"{00}tilia_ntc.edds\"\n"
+                        "}\n";
+    REQUIRE(TranslateEmat(ParseEmat(crown), "origin", "").normalPower == 2.5f);
+    REQUIRE(TranslateEmat(ParseEmat(kRiverEmat), "origin", "CalmWater").normalPower == 1.0f);
+
+    const char* negative = "MatPBRBasic {\n"
+                           " NormalPower -2\n"
+                           " BCRMap \"{00}x.edds\"\n"
+                           "}\n";
+    REQUIRE(TranslateEmat(ParseEmat(negative), "origin", "").normalPower == 0.0f);
 }
 
 TEST_CASE("EMAT adapter: an albedo map is taken when the material has one", "[asset][material][emat][dz-002]")

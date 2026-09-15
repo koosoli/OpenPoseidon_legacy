@@ -1000,6 +1000,11 @@ class EngineWgpu : public EngineDummy
     // material-cache walk. nullptr for the per-draw callers, which have their own path.
     uint64_t ResolveMaterialNormalMap(const ShapeSection& section, bool* rgPackedOut = nullptr,
                                       bool* nativeCavityOut = nullptr);
+    // A section's authored normal-map intensity (Enfusion `NormalPower`), 1.0 when the
+    // material names none. Read from the same translation cache ResolveMaterialBaseColour
+    // fills, so this shares its ordering dependency. WGR_MATERIAL_NORMAL_POWER=0 forces
+    // 1.0 everywhere (the pre-support picture) for the A/B.
+    float ResolveMaterialNormalPower(const ShapeSection& section);
     // A section's environment (reflection) map when its material names a loadable one,
     // or 0. DZ-003: DayZ water is authored as a near-black constant plus a reflection,
     // so a non-zero answer here is what marks a surface reflective for the shader.

@@ -324,6 +324,9 @@ pub struct WgrModelMaterial {
     // RFG-072: per layer, layer 0 at index 0: the LINEAR colour multiplier the layer's tile
     // is worn in (Enfusion's `Color_N`), identity for every other material.
     pub layer_colour: [[f32; 4]; 4],
+    // Enfusion's per-material normal-map intensity (`NormalPower`): multiplier on the
+    // decoded tangent-space XY, renormalised by the shader. 1.0 = no-op default.
+    pub normal_power: f32,
 }
 
 // One drawable LOD level of a model: its FindSqrtLevel resolution threshold (`_resolutions[i]`)
@@ -1587,7 +1590,7 @@ const _: () = assert!(std::mem::size_of::<WgrMeshVertex>() == 68);
 const _: () = assert!(std::mem::size_of::<WgrDraw3D>() == 288);
 const _: () = assert!(std::mem::size_of::<WgrLight>() == 64);
 const _: () = assert!(std::mem::size_of::<WgrModelSection>() == 24);
-const _: () = assert!(std::mem::size_of::<WgrModelMaterial>() == 280);
+const _: () = assert!(std::mem::size_of::<WgrModelMaterial>() == 288);
 const _: () = assert!(std::mem::size_of::<WgrModelLod>() == 16);
 const _: () = assert!(std::mem::size_of::<WgrInstance>() == 144);
 const _: () = assert!(std::mem::size_of::<WgrTonemap>() == 64);

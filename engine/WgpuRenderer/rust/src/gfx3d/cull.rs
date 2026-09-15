@@ -141,6 +141,12 @@ pub struct SectionMaterialGpu {
     // RFG-072: per layer, layer 0 at index 0: the linear colour multiplier on the layer's
     // tile (Enfusion `Color_N`), identity elsewhere. vec4-aligned already, no pad needed.
     pub layer_colour: [[f32; 4]; 4],
+    // Enfusion's per-material normal-map intensity (`NormalPower`): multiplier on the
+    // decoded tangent-space XY, renormalised by the shader. 1.0 = no-op default.
+    // Trailing scalar: WGSL rounds the array stride to 16, so the pad is explicit and
+    // both sides agree on 272.
+    pub normal_power: f32,
+    pub _pad_np: [u32; 3],
 }
 
 // A permissive plane that never culls anything: dot(0, p) + BIG >= -radius always holds.

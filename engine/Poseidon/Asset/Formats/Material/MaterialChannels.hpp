@@ -195,6 +195,11 @@ struct TranslatedMaterial
     std::array<float, 4> emissive{{0, 0, 0, 1}};
     std::array<float, 4> specular{{1, 1, 1, 1}};
     float                specularPower = 1.0f;
+    // Enfusion's per-material normal-map intensity (`NormalPower`): a multiplier on
+    // the decoded normal's deviation, 1 when the source names none. Crowns use
+    // 0 (deliberately flat) through 3; the renderer scales the tangent-space XY
+    // and renormalises, so 1.0 is bit-identical to no scaling.
+    float                normalPower = 1.0f;
 
     const TranslatedSlot* Find(MaterialSlot slot) const
     {

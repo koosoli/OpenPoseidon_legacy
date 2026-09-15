@@ -68,6 +68,12 @@ struct SectionMaterial {
     // RFG-072: per layer, layer 0 at index 0: the LINEAR colour multiplier on the layer's
     // tile (Enfusion `Color_N`); identity for every other material.
     layer_colour: array<vec4<f32>, 4>,
+    // NormalPower + pads: the shadow pass never shades, present only so this mirror
+    // stays field-for-field with SectionMaterialGpu (272 bytes, 16 stride).
+    normal_power: f32,
+    _pad_np0: u32,
+    _pad_np1: u32,
+    _pad_np2: u32,
 };
 
 @group(0) @binding(0) var<uniform> pass_data: PassData;

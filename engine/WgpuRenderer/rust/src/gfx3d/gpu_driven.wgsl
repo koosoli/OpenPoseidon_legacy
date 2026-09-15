@@ -101,6 +101,13 @@ struct SectionMaterial {
     // RFG-072: per layer, layer 0 at index 0: the LINEAR colour multiplier on the layer's
     // tile (Enfusion `Color_N`); identity for every other material.
     layer_colour: array<vec4<f32>, 4>,
+    // Enfusion's per-material normal-map intensity (`NormalPower`): multiplier on the
+    // decoded tangent-space XY, renormalised after. 1.0 = no-op default. Trailing
+    // scalar with explicit pads so the array stride stays 16 on both sides (272).
+    normal_power: f32,
+    _pad_np0: u32,
+    _pad_np1: u32,
+    _pad_np2: u32,
 };
 
 @group(1) @binding(0) var<storage, read> instances: array<Instance>;
@@ -928,6 +935,14 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
                 normal_ts = normalize(mixed);
             }
         }
+        // Enfusion `NormalPower`: the material's authored normal-map intensity.
+        // Scales the tangent-space deviation and rebuilds Z, so 1.0 (every legacy
+        // material and any .emat that names none) is bit-identical to no scaling,
+        // while 0.0 flattens deliberately smooth crowns and 2-3x exaggerates leaf
+        // relief. Applied once to the blended result, so base and Multi layer
+        // normals share it (scaling commutes with the blend weights above).
+        let powered_xy = clamp(normal_ts.xy * sm.normal_power, vec2<f32>(-1.0), vec2<f32>(1.0));
+        normal_ts = vec3<f32>(powered_xy, sqrt(max(1.0 - dot(powered_xy, powered_xy), 1e-4)));
         normal_ts_dbg = normal_ts;
         let duv_dx = dpdx(in.uv);
         let duv_dy = dpdy(in.uv);

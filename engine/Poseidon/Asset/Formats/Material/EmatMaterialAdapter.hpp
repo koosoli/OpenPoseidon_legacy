@@ -577,6 +577,15 @@ inline TranslatedMaterial TranslateEmat(const EmatMaterial& emat, const std::str
         out.slots.push_back(std::move(entry));
     }
 
+    // `NormalPower` is the material's normal-map intensity: a multiplier on the
+    // decoded tangent-space deviation (crowns use 0 for deliberately flat
+    // through 2-3 for exaggerated leaf relief). Parsed, never reinterpreted;
+    // the shader scales XY and renormalises, so the 1.0 default is a no-op.
+    // Negative values are meaningless; clamp at parse so no consumer repeats it.
+    float normalPower = 1.0f;
+    if (emat.FloatOf("NormalPower", normalPower))
+        out.normalPower = normalPower < 0.0f ? 0.0f : normalPower;
+
     return out;
 }
 

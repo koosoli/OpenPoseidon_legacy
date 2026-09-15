@@ -7190,6 +7190,30 @@ uint64_t EngineWgpu::ResolveMaterialNormalMap(const ShapeSection& section, bool*
     return report(handle, handle ? "" : "upload failed", loadName);
 }
 
+// Enfusion `NormalPower`: the material's authored normal-map intensity. Same cache
+// ordering as the sibling resolvers above. The shader scales the decoded tangent
+// XY by this and renormalises, so the 1.0 default (every legacy material, every
+// .emat that names none) renders bit-identically with or without the support.
+float EngineWgpu::ResolveMaterialNormalPower(const ShapeSection& section)
+{
+    static const bool enabled = []
+    {
+        const char* v = std::getenv("WGR_MATERIAL_NORMAL_POWER");
+        return !v || v[0] != '0';
+    }();
+    if (!enabled)
+        return 1.0f;
+    if (!section.surfMat)
+        return 1.0f;
+    const char* materialPath = section.surfMat->GetName().Data();
+    if (!materialPath || !*materialPath)
+        return 1.0f;
+    const auto cached = _materialBindings.find(materialPath);
+    if (cached == _materialBindings.end())
+        return 1.0f; // ResolveMaterialBaseColour fills the cache first
+    return cached->second.normalPower;
+}
+
 // The environment (reflection) map a section's material names, or 0 when it names none.
 //
 // DZ-003. Fourth of the same shape as ResolveMaterialNormalMap above, and the reason it
@@ -8755,6 +8779,9 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
             bool normalRgPacked = false;
             bool nativeCavity = false;
             mat.normal_texture_id = ResolveMaterialNormalMap(s->GetSection(i), &normalRgPacked, &nativeCavity);
+            // Authored normal intensity rides the same record; the 1.0 default keeps
+            // every material that names none exactly where it was.
+            mat.normal_power = ResolveMaterialNormalPower(s->GetSection(i));
             if (nativeCavity)
             {
                 sec.flags |= WGR_MODEL_SECTION_NATIVE_CAVITY;

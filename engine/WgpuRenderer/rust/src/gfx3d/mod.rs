@@ -8284,6 +8284,8 @@ impl Gfx3d {
                 _pad_layer: [0; 3],
                 layer_uv: m.layer_uv,
                 layer_colour: m.layer_colour,
+                normal_power: m.normal_power,
+                _pad_np: [0; 3],
             })
             .collect();
         let model =
@@ -10221,8 +10223,8 @@ fn multi_layer_normals_keep_every_layout_in_step() {
     // Mirrors the C++ static_assert in include/wgpu_renderer.hpp.
     assert_eq!(
         std::mem::size_of::<WgrModelMaterial>(),
-        280,
-        "WgrModelMaterial grew by three u64 handles (192 -> 216) and RFG-072 layer_colour (-> 280); wgpu_renderer.hpp must agree"
+        288,
+        "WgrModelMaterial grew by normal_power (280 -> 284, padded to 288 by the u64 alignment); wgpu_renderer.hpp must agree"
     );
     assert_eq!(
         std::mem::offset_of!(WgrModelMaterial, layer_normal_texture_id),
@@ -10246,7 +10248,11 @@ fn multi_layer_normals_keep_every_layout_in_step() {
         std::mem::offset_of!(cull::SectionMaterialGpu, layer_colour),
         192
     );
-    assert_eq!(std::mem::size_of::<cull::SectionMaterialGpu>(), 256);
+    assert_eq!(std::mem::size_of::<cull::SectionMaterialGpu>(), 272);
+    assert_eq!(
+        std::mem::offset_of!(cull::SectionMaterialGpu, normal_power),
+        256
+    );
 
     // Both WGSL mirrors must declare the field, in the same place, with the same padding.
     for (name, src) in [
@@ -10264,6 +10270,20 @@ fn multi_layer_normals_keep_every_layout_in_step() {
             src.contains("layer_colour: array<vec4<f32>, 4>,"),
             "{name} must mirror SectionMaterialGpu::layer_colour (RFG-072)"
         );
+        assert!(
+            src.contains("normal_power: f32,"),
+            "{name} must mirror SectionMaterialGpu::normal_power"
+        );
+        for pad in [
+            "_pad_np0: u32,",
+            "_pad_np1: u32,",
+            "_pad_np2: u32,",
+        ] {
+            assert!(
+                src.contains(pad),
+                "{name} needs three pad words after normal_power for the 16 stride"
+            );
+        }
         for pad in [
             "_pad_layer0: u32,",
             "_pad_layer1: u32,",
