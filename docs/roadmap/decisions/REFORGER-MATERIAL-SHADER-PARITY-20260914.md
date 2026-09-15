@@ -308,6 +308,23 @@ perf delta.
   and 0 in the control — tinted textures are in frame, both loader routes ran,
   same pixels. The tint/colorize path is EXONERATED here; combined with the
   Tilia albedo match, the albedo side of the parity audit is closed.
+
+## 20. Road/terrain snow evaluation re-shared (2026-09-15)
+
+- The `road_and_terrain_share_snow_depth_evaluation` failure was mine: the
+  snowline refactor factored `terrain.wgsl` (`snow_drift`/`snow_deficit`
+  helpers) while `conform.wgsl` (road decals) kept the old inline body.
+- Proved behavior-identical first (same value inside/outside the deficit
+  window, same zero case), then copied the factored trio verbatim into
+  `conform.wgsl`. Zero behavior change by arithmetic; the guard test is green
+  again along with the full `shaders::` suite (11/11).
+- Verified end to end: rebuilt, deployed, `Reference-foliage-snowshare`
+  FULL capture matches the shipped look (shaders compose at runtime).
+- Note: `Build.ps1` aborted twice on the Rust step with only a "Compiling"
+  line — PowerShell 5.1 `$ErrorActionPreference='Stop'` turning the
+  corrosion step's stderr into a terminating error, NOT a code failure.
+  `cmake --build` directly exits 0. Prefer that when the wrapper dies early
+  with no error text.
 - Tests: `native_authored_normals...` composes both states, green. The
   `road_and_terrain_share_snow_depth_evaluation` failure is PRE-EXISTING
   (fails on the clean tree; snow snippet drift, unrelated to foliage).
