@@ -5,7 +5,7 @@
 // point): the plain pipeline binds `object`, the skinned pipeline binds the
 // bone `palette` (from the skin module). Shadowing is the shared cascade kernel.
 
-#import frame::{frame, reverse_z, fog_factor, atmo_applied, terrain_sun_shadow, apply_fog, veg_sway_offset, matdbg_flag, MATDBG_DISABLE_FRESNEL_ENV}
+#import frame::{frame, reverse_z, fog_factor, atmo_applied, terrain_sun_shadow, apply_fog, veg_sway_offset, gtao_ao, matdbg_view, matdbg_flag, MATDBG_VIEW_FULL, MATDBG_VIEW_BASE_COLOR, MATDBG_VIEW_NORMAL, MATDBG_VIEW_AMBIENT_SHADOW, MATDBG_VIEW_SPECULAR_GLOSS, MATDBG_VIEW_UV, MATDBG_VIEW_LIGHTING, MATDBG_DISABLE_FRESNEL_ENV}
 #import shadow::shadow_strength
 #import frame::{surface_rays, cloud_shadow_tex, terrain_shadow_samp, terrain_shadow_map}
 #import frame::monitor_scene
@@ -828,7 +828,7 @@ fn shade_fragment(in: VsOut) -> vec4<f32> {
     }
 
     // REN-TEMP-001D: material samples take the render-scale mip bias (0 at native scale).
-    let base = textureSampleBias(textures[packed >> 3u], samplers[packed & 7u], uv, frame.renscale.x);
+    var base = textureSampleBias(textures[packed >> 3u], samplers[packed & 7u], uv, frame.renscale.x);
     if ((material_flags(material) & 32u) != 0u && linear > 0.5) {
         let dims = vec2<f32>(textureDimensions(monitor_scene));
         let screen_uv = in.clip.xy / dims;
@@ -901,15 +901,12 @@ fn shade_fragment(in: VsOut) -> vec4<f32> {
     if (is_shadow > 0.5) {
         return vec4<f32>(0.0, 0.0, 0.0, frame.params.shadow_strength * base.a);
     }
-    // Material Debug View: Base Color Only is the controlled reference; Normal Map
-    // displays decoded tangent-space X=A (NOHQ) or R (RG), Y=G, reconstructed Z.
-    let material_view = u32(material.normal_map.y + 0.5);
-    if (material_view == 1u) {
-        return vec4<f32>(base.rgb, out_a);
-    }
-    if (material_view == 2u) {
-        return vec4<f32>(normal_ts * 0.5 + vec3<f32>(0.5), out_a);
-    }
+    // Material debug is global for the Dev Tools path. Keep the old per-draw lane as a fallback
+    // for the explicit WGR_MATERIAL_DEBUG_RVMAT selector, so capture fixtures and the live panel
+    // share one set of view IDs without changing the WgrDraw3D ABI.
+    let global_material_view = matdbg_view();
+    let material_view = select(u32(material.normal_map.y + 0.5), global_material_view,
+                               global_material_view != MATDBG_VIEW_FULL);
     // The material colours are already sun-FOLDED on the CPU (mat_sun_* = raw × sun); hand
     // them to the shared shading straight. The GPU-driven path folds raw × frame-sun instead,
     // then calls the same shade(). srgb-decode of albedo + terms happens inside shade().
@@ -940,6 +937,11 @@ fn shade_fragment(in: VsOut) -> vec4<f32> {
     // The per-draw path carries no specular map: this is the ~7 sections a frame that reach
     // DrawSectionTL, not the retained set. 1.0 leaves the flat constant exactly as before.
     m.spec_mask = 1.0;
+    // The direct path has no retained SMDI binding. Show the constant specular lane and its
+    // normalized power, with blue = 0 to make the absence of a texel map explicit.
+    let specular_debug = vec3<f32>(
+        clamp(max(material.specular.r, max(material.specular.g, material.specular.b)), 0.0, 1.0),
+        clamp(material.specular.w / 128.0, 0.0, 1.0), 0.0);
     // Stage 2 MapType gate: foliage lighting (leaf SSS + canopy AO) applies only to real
     // VEGETATION cutouts, so roads / characters / fences don't pick up the leaf look. The object's
     // MapType is published per draw in the free .w of the sun-ambient material lane (only .rgb is
@@ -992,6 +994,27 @@ fn shade_fragment(in: VsOut) -> vec4<f32> {
             water_drift(WATER_DRIFT_DIR_A, WATER_DRIFT_SPEED_A, WATER_RIPPLE_PERIOD_A, t),
             water_drift(WATER_DRIFT_DIR_B, WATER_DRIFT_SPEED_B, WATER_RIPPLE_PERIOD_B, t),
             frame.wateranim.y);
+    }
+    // Debug views are before shared lighting, fog and environment reflection. That keeps the
+    // outputs useful for isolating source/material mistakes instead of mixing them with exposure.
+    if (material_view == MATDBG_VIEW_BASE_COLOR) {
+        return vec4<f32>(base.rgb, out_a);
+    }
+    if (material_view == MATDBG_VIEW_NORMAL) {
+        return vec4<f32>(normal_ts * 0.5 + vec3<f32>(0.5), out_a);
+    }
+    if (material_view == MATDBG_VIEW_AMBIENT_SHADOW) {
+        return vec4<f32>(vec3<f32>(gtao_ao(in.clip.xy)), out_a);
+    }
+    if (material_view == MATDBG_VIEW_SPECULAR_GLOSS) {
+        return vec4<f32>(specular_debug, 1.0);
+    }
+    if (material_view == MATDBG_VIEW_UV) {
+        let uv0 = fract(in.uv);
+        return vec4<f32>(uv0.x, uv0.y, 0.0, out_a);
+    }
+    if (material_view == MATDBG_VIEW_LIGHTING) {
+        base = vec4<f32>(1.0, 1.0, 1.0, base.a);
     }
     let rgb = shade(
         // `geometric_normal` rides along beside the shading normal so the directional sky

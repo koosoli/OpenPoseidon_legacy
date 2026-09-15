@@ -3955,7 +3955,8 @@ pub unsafe extern "C" fn wgr_set_smoke_shadow(
 ///
 /// # Safety
 /// Material Debug state for the RETAINED path (dev panel, Materials tab).
-/// `view`: 0 full material, 1 base colour only, 2 decoded normal.
+/// `view`: 0 full material, 1 base colour only, 2 decoded normal, 3 screen AO,
+/// 4 specular/gloss, 5 UV source, 6 lighting only.
 /// `flags`: bit0 disable normal map, bit1 invert normal Y, bit2 compose Multi layers.
 ///
 /// These are presentation switches read per fragment, NOT baked into the material

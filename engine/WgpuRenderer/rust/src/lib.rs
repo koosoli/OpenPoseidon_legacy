@@ -2225,6 +2225,7 @@ impl Renderer {
     }
 
     // Material Debug (dev panel, Materials tab) for the retained GPU-driven path.
+    // `view`: 0 full, 1 base, 2 normal, 3 screen AO, 4 spec/gloss, 5 UV, 6 lighting.
     // `flags`: bit0 disable normal map, bit1 invert normal Y, bit2 compose Multi layers.
     fn set_material_debug(&mut self, view: u32, flags: u32) {
         self.gfx3d.set_material_debug(view, flags);

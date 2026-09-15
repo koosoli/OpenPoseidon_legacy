@@ -449,14 +449,11 @@ class EngineWgpu : public EngineDummy
         {
             return;
         }
-        uint32_t view = 0;
-        switch (_materialDebug.view)
-        {
-            case MaterialDebugSettings::View::BaseColorOnly: view = 1; break;
-            case MaterialDebugSettings::View::NormalMap: view = 2; break;
-            case MaterialDebugSettings::View::LightingOnly: view = 3; break;
-            default: view = 0; break; // every other view stays on the per-draw path
-        }
+        // Keep the C++ enum and the WGSL debug constants one-to-one. The old code mapped
+        // LightingOnly to 3 even though enum value 3 is AmbientShadow, which made the UI's
+        // later views unreachable and made numeric capture settings ambiguous.
+        const int rawView = static_cast<int>(_materialDebug.view);
+        const uint32_t view = rawView >= 0 && rawView <= 6 ? static_cast<uint32_t>(rawView) : 0u;
         uint32_t flags = 0;
         flags |= _materialDebug.disableNormalMap ? (1u << 0) : 0u;
         flags |= _materialDebug.invertNormalY ? (1u << 1) : 0u;

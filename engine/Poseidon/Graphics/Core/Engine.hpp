@@ -1014,8 +1014,8 @@ class Engine : public IGraphicsEngine
     // state is shared by Dev Tools and automation; it never mutates imported data.
     struct MaterialDebugSettings
     {
-        // LightingOnly is appended, never inserted: the value is uploaded as an int to the
-        // shaders and renumbering it would silently repoint every other view.
+        // These values are uploaded as integers to both object shaders. Keep the order stable:
+        // changing it silently repoints an existing capture or automation setting.
         enum class View : int { FullMaterial = 0, BaseColorOnly, NormalMap, AmbientShadow, SpecularGloss, UvSource,
                                 // Shade with a WHITE albedo: the output IS the lighting multiplier the
                                 // surface is being handed. Pairs with BaseColorOnly -- between them,

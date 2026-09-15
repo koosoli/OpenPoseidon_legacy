@@ -569,6 +569,44 @@ mod local_specular_tests {
     }
 }
 
+#[test]
+fn material_debug_views_are_shared_by_both_object_paths() {
+    // These are presentation-only views. Pin the shared IDs and both shader consumers so a
+    // new mode cannot silently work for retained objects while the direct path keeps an older
+    // numeric mapping (or vice versa).
+    let frame = include_str!("../shaders/frame.wgsl");
+    for (name, value) in [
+        ("MATDBG_VIEW_FULL", 0u32),
+        ("MATDBG_VIEW_BASE_COLOR", 1),
+        ("MATDBG_VIEW_NORMAL", 2),
+        ("MATDBG_VIEW_AMBIENT_SHADOW", 3),
+        ("MATDBG_VIEW_SPECULAR_GLOSS", 4),
+        ("MATDBG_VIEW_UV", 5),
+        ("MATDBG_VIEW_LIGHTING", 6),
+    ] {
+        assert!(
+            frame.contains(&format!("const {name}: u32 = {value}u;")),
+            "frame.wgsl must own stable material-debug ID {name}"
+        );
+    }
+    for (name, src) in [
+        ("shader3d.wgsl", include_str!("shader3d.wgsl")),
+        ("gpu_driven.wgsl", include_str!("gpu_driven.wgsl")),
+    ] {
+        for view in [
+            "MATDBG_VIEW_BASE_COLOR",
+            "MATDBG_VIEW_NORMAL",
+            "MATDBG_VIEW_AMBIENT_SHADOW",
+            "MATDBG_VIEW_SPECULAR_GLOSS",
+            "MATDBG_VIEW_UV",
+            "MATDBG_VIEW_LIGHTING",
+        ] {
+            assert!(src.contains(view), "{name} must consume {view}");
+        }
+        assert!(src.contains("gtao_ao(in.clip.xy)"), "{name} must expose the screen-AO view");
+    }
+}
+
 // One indexed indirect draw command, the layout every backend's
 // draw_indexed_indirect / multi_draw_indexed_indirect consumes (Vulkan/DX/Metal all
 // agree, 20 bytes). Stage 2 (docs/gpu-culling-and-depth-plan.md) builds these on the

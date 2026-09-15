@@ -9,7 +9,7 @@
 // Rigid opaque only: terrain-conformed vegetation, skinned, and transparent draws stay on
 // the CPU path (they never enter the retained instance set), so this VS has no conform.
 
-#import frame::{frame, reverse_z, fog_factor, atmo_applied, veg_sway_offset, matdbg_view, matdbg_flag, MATDBG_DISABLE_NORMAL, MATDBG_INVERT_NORMAL_Y, MATDBG_COMPOSE_MULTI, MATDBG_DISABLE_FRESNEL_ENV, MATDBG_DISABLE_SPECULAR}
+#import frame::{frame, reverse_z, fog_factor, atmo_applied, veg_sway_offset, gtao_ao, matdbg_view, matdbg_flag, MATDBG_VIEW_FULL, MATDBG_VIEW_BASE_COLOR, MATDBG_VIEW_NORMAL, MATDBG_VIEW_AMBIENT_SHADOW, MATDBG_VIEW_SPECULAR_GLOSS, MATDBG_VIEW_UV, MATDBG_VIEW_LIGHTING, MATDBG_DISABLE_NORMAL, MATDBG_INVERT_NORMAL_Y, MATDBG_COMPOSE_MULTI, MATDBG_DISABLE_FRESNEL_ENV, MATDBG_DISABLE_SPECULAR}
 #import shading::{shade, ShadeMaterial, surface_normal}
 #import color::srgb_to_linear
 #import gbuffer::{oct_encode, a2c_coverage, mip_alpha_boost}
@@ -838,8 +838,16 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
     // GlossToRoughnessUnvalidated out of the translation path; the map is bound and the
     // channel is there when that question is answered.
     m.spec_mask = 1.0;
+    // The debug view exposes the authored map without another default-path fetch. Red is
+    // SMDI G (specular level), green is SMDI B (gloss), blue marks that a map was present.
+    // Materials without SMDI show their constant specular level/power and blue = 0.
+    var specular_debug = vec3<f32>(
+        clamp(max(sm.specular.r, max(sm.specular.g, sm.specular.b)), 0.0, 1.0),
+        clamp(sm.specular.w / 128.0, 0.0, 1.0), 0.0);
     if (sm.specular_slot != 0u && !matdbg_flag(MATDBG_DISABLE_SPECULAR)) {
-        m.spec_mask = textureSampleBias(textures[sm.specular_slot], samplers[sm.sampler_idx], in.uv, frame.renscale.x).g;
+        let specular_texel = textureSampleBias(textures[sm.specular_slot], samplers[sm.sampler_idx], in.uv, frame.renscale.x);
+        m.spec_mask = specular_texel.g;
+        specular_debug = vec3<f32>(specular_texel.g, specular_texel.b, 1.0);
     }
     // Foliage lighting (leaf SSS + canopy self-occlusion AO) applies only to real VEGETATION
     // cutouts (Stage 2 MapType gate, carried per-instance via the canopy flag) — other alpha-tested
@@ -968,18 +976,32 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
     // normal that actually shades this fragment, and after the alpha discard so cutouts stay
     // cut out. View 0 (full material) falls straight through.
     let dbg_view = matdbg_view();
-    if (dbg_view == 1u) {
+    if (dbg_view == MATDBG_VIEW_BASE_COLOR) {
         return vec4<f32>(base.rgb, out_a);
     }
-    if (dbg_view == 2u) {
+    if (dbg_view == MATDBG_VIEW_NORMAL) {
         return vec4<f32>(normal_ts_dbg * 0.5 + vec3<f32>(0.5), out_a);
     }
-    // View 3 (LightingOnly): shade with a WHITE albedo, so the output is the lighting
+    if (dbg_view == MATDBG_VIEW_AMBIENT_SHADOW) {
+        // This is the screen-space ambient term that actually reaches shade(). It is deliberately
+        // named in the UI rather than pretending the native path has an authored _AS stage.
+        return vec4<f32>(vec3<f32>(gtao_ao(in.clip.xy)), out_a);
+    }
+    if (dbg_view == MATDBG_VIEW_SPECULAR_GLOSS) {
+        return vec4<f32>(specular_debug, 1.0);
+    }
+    if (dbg_view == MATDBG_VIEW_UV) {
+        // UV0 is red/green; UV1's U is blue. fract keeps tiled and mirrored coordinates readable.
+        let uv0 = fract(in.uv);
+        let uv1 = fract(in.uv1);
+        return vec4<f32>(uv0.x, uv0.y, uv1.x, out_a);
+    }
+    // View 6 (LightingOnly): shade with a WHITE albedo, so the output is the lighting
     // multiplier this surface is handed rather than albedo x lighting. Read beside view 1
     // (BaseColorOnly) it separates the two factors of an over-bright surface, which is the
     // measurement that decides whether to go to the texture or to the light. Everything else
     // about the fragment -- normal, shadow, AO, fog, specular -- is untouched.
-    if (dbg_view == 3u) {
+    if (dbg_view == MATDBG_VIEW_LIGHTING) {
         base = vec4<f32>(1.0, 1.0, 1.0, base.a);
     }
     let rgb = shade(

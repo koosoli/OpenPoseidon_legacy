@@ -1798,12 +1798,20 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
     // captures) while retained-material support remains a separate follow-up.
     if (const char* view = std::getenv("WGR_MATERIAL_DEBUG_VIEW"))
     {
-        if (std::strcmp(view, "base") == 0)
+        if (std::strcmp(view, "full") == 0)
+            _materialDebug.view = MaterialDebugSettings::View::FullMaterial;
+        else if (std::strcmp(view, "base") == 0)
             _materialDebug.view = MaterialDebugSettings::View::BaseColorOnly;
         else if (std::strcmp(view, "normal") == 0)
-            _materialDebug.view = MaterialDebugSettings::View::FullMaterial;
+            _materialDebug.view = MaterialDebugSettings::View::NormalMap;
         else if (std::strcmp(view, "normalviz") == 0)
             _materialDebug.view = MaterialDebugSettings::View::NormalMap;
+        else if (std::strcmp(view, "ao") == 0 || std::strcmp(view, "ambient") == 0)
+            _materialDebug.view = MaterialDebugSettings::View::AmbientShadow;
+        else if (std::strcmp(view, "specular") == 0 || std::strcmp(view, "gloss") == 0)
+            _materialDebug.view = MaterialDebugSettings::View::SpecularGloss;
+        else if (std::strcmp(view, "uv") == 0)
+            _materialDebug.view = MaterialDebugSettings::View::UvSource;
         else if (std::strcmp(view, "lit") == 0)
             _materialDebug.view = MaterialDebugSettings::View::LightingOnly;
         LOG_INFO(Graphics, "Wgpu: material debug view={}", view);
@@ -2799,8 +2807,14 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
         ops.clear();
         return;
     }
+    const auto drainStart = std::chrono::steady_clock::now();
+    const size_t operationCount = ops.size();
+    std::array<uint32_t, 5> kindCounts{};
     for (ResourceOp& op : ops)
     {
+        const size_t kind = static_cast<size_t>(op.kind);
+        if (kind < kindCounts.size())
+            ++kindCounts[kind];
         switch (op.kind)
         {
         case ResourceOp::MeshCreate:
@@ -2914,6 +2928,16 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
         }
     }
     ops.clear();
+    const double drainMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - drainStart).count();
+    if (_slowBlockMs > 0.0 && drainMs >= _slowBlockMs)
+    {
+        LOG_INFO(Graphics,
+                 "Wgpu resource drain: {:.1f} ms | ops={} meshCreate={} meshDestroy={} modelRegister={} "
+                 "cpuMeshCreate={} meshSetSkin={}",
+                 drainMs, operationCount, kindCounts[ResourceOp::MeshCreate], kindCounts[ResourceOp::MeshDestroy],
+                 kindCounts[ResourceOp::ModelRegister], kindCounts[ResourceOp::CpuMeshCreate],
+                 kindCounts[ResourceOp::MeshSetSkin]);
+    }
     // The overlay drain is NOT called from here any more. It is one step of the consumer
     // block's explicit sequence in NextFrame, where the order it depends on is visible --
     // a nested call made the order a property of two functions instead of one list.
@@ -3133,6 +3157,7 @@ void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing, Fr
     const auto blockStart = std::chrono::steady_clock::now();
     ApplyPendingRendererSettings(q.settings);
     const auto afterSettings = std::chrono::steady_clock::now();
+    const size_t resourceOpCount = q.resourceOps.size();
     DrainResourceOps(q.resourceOps);
     const auto afterResources = std::chrono::steady_clock::now();
     DrainInstanceOps(q.instanceOps);
@@ -3184,7 +3209,7 @@ void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing, Fr
                  "Wgpu slow block: total={:.1f} ms | settings={:.1f} resources={:.1f} (ops={}) "
                  "drains={:.1f} hash={:.1f} render={:.1f} stats={:.1f} | d3d={} vert={} casters={} | idle_before={:.1f}",
                  _rtLastBusyMs, ms(blockStart, afterSettings), ms(afterSettings, afterResources),
-                 q.resourceOps.size(), ms(afterResources, afterDrains), ms(afterDrains, afterHash),
+                 resourceOpCount, ms(afterResources, afterDrains), ms(afterDrains, afterHash),
                  ms(afterHash, afterRender), ms(afterRender, blockEnd), frame.draws3d.length,
                  frame.verts.length, frame.shadow_casters.length, _rtLastIdleMs);
     }

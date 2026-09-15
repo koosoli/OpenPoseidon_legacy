@@ -194,6 +194,21 @@ fn grad_scale() -> f32 {
 // amplitude reads sensibly on a 1 m bush and a 25 m spruce.
 const VEG_SWAY_HEIGHT_REF: f32 = 12.0;
 
+// Native Reforger vegetation can arrive as separate authored objects for the solid stem and
+// the crown. Their origins are not guaranteed to be byte-identical, even though they belong to
+// one tree. Use a small world-space phase anchor for the coherent mode so those parts share the
+// same wind sample without making neighbouring trees move as one patch. Legacy OFP foliage keeps
+// its per-object phase for compatibility.
+const VEG_COHERENT_PHASE_CELL: f32 = 2.0;
+
+fn veg_sway_phase(phase_xz: vec2<f32>, leaf: f32) -> vec2<f32> {
+    if (leaf < 0.0) {
+        let cell = vec2<f32>(VEG_COHERENT_PHASE_CELL, VEG_COHERENT_PHASE_CELL);
+        return floor(phase_xz / cell) * cell + cell * 0.5;
+    }
+    return phase_xz;
+}
+
 // `model_y`  : the vertex's UNDEFORMED model-space height (metres above the model origin).
 // `phase_xz` : an ABSOLUTE world XZ used only to decorrelate neighbouring plants. Absolute,
 //              not camera-relative: both shaders work camera-relative, and seeding the phase
@@ -219,7 +234,7 @@ fn veg_sway_offset(model_y: f32, phase_xz: vec2<f32>, leaf: f32) -> vec3<f32> {
     // attached. Negative leaf is this mode on EVERY section, not an alpha flag.
     let coherent_hs = model_y / VEG_SWAY_HEIGHT_REF * (1.6 / max(frame.foliagee.w, 0.25));
     let hs = select(pow(hn, frame.foliagee.w), coherent_hs, leaf < 0.0);
-    let ph = dot(phase_xz, vec2<f32>(0.37, 0.29));
+    let ph = dot(veg_sway_phase(phase_xz, leaf), vec2<f32>(0.37, 0.29));
     // Two incommensurate frequencies, so the canopy builds and decays instead of ticking like
     // a metronome. The gust term rides in from the wind AUTHORITY (WindSample::gustFraction),
     // the same number the grass field and the cloud deck answer to.
@@ -245,6 +260,15 @@ fn veg_sway_offset(model_y: f32, phase_xz: vec2<f32>, leaf: f32) -> vec3<f32> {
 // rounded before masking rather than compared.
 fn matdbg_view() -> u32 { return u32(frame.matdbg.x + 0.5); }
 fn matdbg_flag(bit: u32) -> bool { return (u32(frame.matdbg.y + 0.5) & (1u << bit)) != 0u; }
+// Stable view IDs shared by shader3d.wgsl, gpu_driven.wgsl and Engine.hpp. Keep these
+// append-only: captures and command-line automation upload the integer directly.
+const MATDBG_VIEW_FULL: u32 = 0u;
+const MATDBG_VIEW_BASE_COLOR: u32 = 1u;
+const MATDBG_VIEW_NORMAL: u32 = 2u;
+const MATDBG_VIEW_AMBIENT_SHADOW: u32 = 3u;
+const MATDBG_VIEW_SPECULAR_GLOSS: u32 = 4u;
+const MATDBG_VIEW_UV: u32 = 5u;
+const MATDBG_VIEW_LIGHTING: u32 = 6u;
 const MATDBG_DISABLE_NORMAL: u32 = 0u;
 const MATDBG_INVERT_NORMAL_Y: u32 = 1u;
 const MATDBG_COMPOSE_MULTI: u32 = 2u;

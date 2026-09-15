@@ -5182,10 +5182,15 @@ void DrawMaterialDebugTab()
     bool changed = false;
     changed |= ResetToDefaultsButton(settings);
     int view = static_cast<int>(settings.view);
-    changed |= Dev::Combo("Rendering mode", &view, "Full Material\0Base Color Only\0Visualize Normal Map\0");
+    if (view < 0 || view > 6)
+        view = 0;
+    changed |= Dev::Combo("Rendering mode", &view,
+                          "Full Material\0Base Color Only\0Visualize Normal Map\0"
+                          "Screen AO (not authored _AS)\0Specular / Gloss\0UV Source\0Lighting Only\0");
     settings.view = static_cast<Engine::MaterialDebugSettings::View>(view);
     Dev::PanelHelp(
-        "Base Color Only is the controlled reference. Normal visualization decodes NOHQ as X=A, Y=G, Z reconstructed.");
+        "Base Color Only is the controlled reference. Normal visualization decodes NOHQ as X=A, Y=G, Z reconstructed. "
+        "Screen AO is the engine's screen-space ambient term; it does not claim an authored Reforger _AS map.");
     Dev::PanelSeparator();
     changed |= Dev::Checkbox("Disable Normal Map", &settings.disableNormalMap);
     if (Dev::PanelItemHovered())

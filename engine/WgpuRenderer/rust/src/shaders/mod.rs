@@ -380,6 +380,12 @@ mod tests {
             assert!(source.contains("if (leaf > 0.0)"));
         }
         assert!(include_str!("../gfx3d/shader3d.wgsl").contains("-1.0, foliage_kind > 2.5"));
+        // Native stem/crown coherence shares one world-space phase anchor; the
+        // gpu_driven call stays on the per-object phase until its sway behavior
+        // is measured (deferred with the shared-path sway change).
+        let frame = include_str!("frame.wgsl");
+        assert!(frame.contains("fn veg_sway_phase(phase_xz: vec2<f32>, leaf: f32)"));
+        assert!(frame.contains("veg_sway_phase(phase_xz, leaf)"));
         assert_eq!(include_str!("../gfx3d/gpu_driven.wgsl")
             .matches("-1.0, (inst.flags & INST_COHERENT_TREE_WIND) != 0u)").count(), 2);
     }
