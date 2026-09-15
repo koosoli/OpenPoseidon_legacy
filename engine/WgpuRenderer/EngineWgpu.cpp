@@ -12577,8 +12577,22 @@ void EngineWgpu::PushRenderParams()
         const float parsed = std::strtof(v, nullptr);
         return std::isfinite(parsed) ? parsed : std::numeric_limits<float>::quiet_NaN();
     }();
-    const float fTrans = foliageAblate ? 0.0f : _foliage.transScale;
-    const float fWrap = foliageAblate ? 0.0f : _foliage.wrap;
+    static const float foliageWrapOverride = []
+    {
+        const char* v = std::getenv("WGR_FOLIAGE_WRAP");
+        if (v == nullptr || v[0] == '\0') return std::numeric_limits<float>::quiet_NaN();
+        const float parsed = std::strtof(v, nullptr);
+        return std::isfinite(parsed) ? parsed : std::numeric_limits<float>::quiet_NaN();
+    }();
+    static const float foliageTransOverride = []
+    {
+        const char* v = std::getenv("WGR_FOLIAGE_TRANS_SCALE");
+        if (v == nullptr || v[0] == '\0') return std::numeric_limits<float>::quiet_NaN();
+        const float parsed = std::strtof(v, nullptr);
+        return std::isfinite(parsed) ? parsed : std::numeric_limits<float>::quiet_NaN();
+    }();
+    const float fTrans = foliageAblate ? 0.0f : (std::isnan(foliageTransOverride) ? _foliage.transScale : foliageTransOverride);
+    const float fWrap = foliageAblate ? 0.0f : (std::isnan(foliageWrapOverride) ? _foliage.wrap : foliageWrapOverride);
     // Native dense crowns carry their own depth: the configured lift flattens them
     // (Reference-spot A/B: ambientBoost 1.6 = flat bright canopy, 1.0 = modeled
     // light/shade). Legacy OFP sparse trees keep the configured values untouched.

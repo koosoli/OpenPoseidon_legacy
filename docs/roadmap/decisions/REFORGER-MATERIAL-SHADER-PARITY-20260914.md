@@ -225,7 +225,20 @@ The LIT view was always valid (white needs no decode).
   ambient cut: legacy output is bit-identical by construction (branch dead on
   legacy worlds).
 
-## 14. Fix verification (2026-09-15, build 0bd80d2e)
+## 14. NTC contradiction resolved (2026-09-15, no capture needed)
+
+Asset-obs "NTC bound" vs diagnostic "flat normal response": BOTH TRUE, no
+contradiction. The Tilia NTC file is rich (rainbow leaf normals; channel std
+31-53, no flat channel), the adapter maps NTCMap->NormalMap, the section
+resolve binds it (log: 441 bound incl. MatPBRTreeCrown polyplanes), and a
+full-resolution crop of the normal view shows mottled per-leaf variation.
+The earlier "flat" reading was a downsampling artifact: high-frequency normal
+detail averages to lavender at reduced scale. Lesson: judge normal views only
+at full resolution. Consequence: per-pixel normals VARY, yet lighting stays
+flat — the wash happens downstream (foliage model terms), which is exactly
+what the wrap/transmission/bend A/Bs isolate next.
+
+## 15. Fix verification (2026-09-15, build 0bd80d2e)
 
 `Reference-foliage-nativeboost` (no overrides — the shipped default path):
 crowns show light/shade modeling with real depth, close to the reference.
