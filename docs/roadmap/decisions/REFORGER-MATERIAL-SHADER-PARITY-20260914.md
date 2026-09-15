@@ -297,6 +297,9 @@ perf delta.
   identical by construction — same argument class as the boost split, but
   per-instance rather than per-world.
 - Merged native forests keep their bend (no coherent bit; separate question).
+- Verification (build 25ca056e, deployed): `Reference-foliage-shippednormals`
+  (no overrides) reproduces the experiment arm — structured crowns with
+  shade depth on the default path. Owner gets this build on next launch.
 - Tests: `native_authored_normals...` composes both states, green. The
   `road_and_terrain_share_snow_depth_evaluation` failure is PRE-EXISTING
   (fails on the clean tree; snow snippet drift, unrelated to foliage).
