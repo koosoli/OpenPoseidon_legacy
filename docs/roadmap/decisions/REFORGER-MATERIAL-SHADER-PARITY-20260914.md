@@ -300,6 +300,14 @@ perf delta.
 - Verification (build 25ca056e, deployed): `Reference-foliage-shippednormals`
   (no overrides) reproduces the experiment arm — structured crowns with
   shade depth on the default path. Owner gets this build on next launch.
+
+## 19. Tint route A/B closes attack item (3) (2026-09-15)
+- `Reference-foliage-notint` (`WGR_LAZY_BCR_TINT=0`, build 25ca056e):
+  pixel-identical look vs the shipped default at the Reference spot.
+- Non-vacuous: the lazy route fired (8 capped log lines) in the shipped run
+  and 0 in the control — tinted textures are in frame, both loader routes ran,
+  same pixels. The tint/colorize path is EXONERATED here; combined with the
+  Tilia albedo match, the albedo side of the parity audit is closed.
 - Tests: `native_authored_normals...` composes both states, green. The
   `road_and_terrain_share_snow_depth_evaluation` failure is PRE-EXISTING
   (fails on the clean tree; snow snippet drift, unrelated to foliage).
