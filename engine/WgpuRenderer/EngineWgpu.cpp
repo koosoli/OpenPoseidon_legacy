@@ -12579,7 +12579,15 @@ void EngineWgpu::PushRenderParams()
     }();
     const float fTrans = foliageAblate ? 0.0f : _foliage.transScale;
     const float fWrap = foliageAblate ? 0.0f : _foliage.wrap;
-    const float fAmbBoost = foliageAblate ? 1.0f : (std::isnan(foliageAmbientBoostOverride) ? _foliage.ambientBoost : foliageAmbientBoostOverride);
+    // Native dense crowns carry their own depth: the configured lift flattens them
+    // (Reference-spot A/B: ambientBoost 1.6 = flat bright canopy, 1.0 = modeled
+    // light/shade). Legacy OFP sparse trees keep the configured values untouched.
+    const bool nativeDenseCrowns =
+        GLandscape != nullptr && GLandscape->GetEnfusionSurfaceCount() > 0;
+    const float fAmbBoost = foliageAblate                ? 1.0f
+                            : !std::isnan(foliageAmbientBoostOverride) ? foliageAmbientBoostOverride
+                            : nativeDenseCrowns                        ? 1.0f
+                                                                       : _foliage.ambientBoost;
     const float fNormalBend = foliageAblate ? 0.0f : _foliage.normalBend;
     const float fTreeBend = foliageAblate ? 0.0f : (std::isnan(foliageTreeBendOverride) ? _foliage.treeBend : foliageTreeBendOverride);
     // FOLIAGE-DUSK (Poseidon::FoliageDuskCurve, dev panel: Foliage > "Dusk curve"). 1.0 is the

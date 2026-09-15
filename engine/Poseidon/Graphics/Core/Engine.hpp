@@ -955,7 +955,9 @@ class Engine : public IGraphicsEngine
         // that keeps OFP whole, and it is a compromise, not an optimum for either.
         //
         // If a per-world or per-generation split ever lands, DayZ-like content should take
-        // something near 0 and OFP content the old lift.
+        // something near 0 and OFP content the old lift. LANDED for native Enfusion worlds:
+        // EngineWgpu pushes 1.0 there (measured on Everon: 1.6 flattens dense crowns, 1.0
+        // restores their modeling); legacy worlds keep this configured value.
         float ambientBoost = 1.6f;
         float normalBend = 0.8f;   // BUSH spherical-normal blend (0 = geometric, 1 = full radial)
         float crownYOffset = 0.27f; // BUSH crown-centre Y lift (lifts the crown up into the canopy)

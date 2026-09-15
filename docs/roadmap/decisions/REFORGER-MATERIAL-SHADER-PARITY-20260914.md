@@ -210,19 +210,17 @@ The LIT view was always valid (white needs no decode).
   shippable (harsh terminators, no translucency) — it bounds the problem.
 - `foliage-screenano` (`WGR_FOLIAGE_SCREEN_AO=1`): no visible change vs
   baseline. Missing screen-space occlusion is RULED OUT as the cause.
-- Remaining attribution: ambient boost vs wrap/trans fill vs spherical
-  bends. Granular knobs next, then the per-generation split the
-  `FoliageSettings` comment anticipates (dense crowns ~0 lift, legacy keeps
-  values).
 
-Albedo textures upload as Unorm (no GPU sRGB decode); `shade()` decodes
-under the HDR `linear` flag and the output encodes again. The BASE_COLOR
-early return bypassed `shade()`, so raw gamma values were encoded twice and
-everything read pale — most visibly on dark saturated greens like leaf
-albedo. The Tilia BCR file itself decodes (via PoseidonTools) to a rich dark
-green (opaque mean 58,69,40); transparent texels are dark too (49,58,32), so
-white-fringe is also ruled out. Both object paths now decode the base view
-under the HDR flag, mirroring `shade()` exactly: the view shows what the
-shader consumes. Re-capture base before citing albedo values; the earlier
-base capture's ABSOLUTE brightness is void (relative hue differences stand).
-The LIT view was always valid (white needs no decode).
+## 13. Granular attribution (2026-09-15, Reference spot, 16:00)
+
+- `foliage-boost1` (`WGR_FOLIAGE_AMBIENT_BOOST=1.0`, new knob): crowns regain
+  light/shade modeling, close to the reference. DOMINANT term confirmed.
+- `foliage-bend0` (`WGR_FOLIAGE_TREE_BEND=0`, new knob): slight structure
+  gain, still brightish. Secondary; deferred as follow-up.
+- Fix shipped on `parity/foliage-lighting-001`: native Enfusion worlds push
+  ambientBoost 1.0, legacy worlds keep configured values (branch keyed on the
+  existing `GetEnfusionSurfaceCount()>0` native signal; no shader/ABI change,
+  uniform-only so no perf delta to measure). Env override still wins for A/B.
+  This is the per-generation split `FoliageSettings` anticipated, not a global
+  ambient cut: legacy output is bit-identical by construction (branch dead on
+  legacy worlds).
