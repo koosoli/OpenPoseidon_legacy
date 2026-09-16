@@ -98,3 +98,35 @@
 $env:LOCK_OWNER = "deploy parity fix"
 .\scripts\Deploy.ps1 -GameDir "D:\SteamLibrary\steamapps\common\ARMA Cold War Assault"
 ```
+
+---
+
+## 6. SESSION 2026-09-16: FENCE WIRE (A) FIXED PENDING VISUAL, ROCKS (B) DIAGNOSED
+
+- **Installed binary stamp:** `parity/foliage-lighting-001 d64a5076 2026-09-16_18:09 deploy-ps1`
+- **Commits (pushed to `safety/parity/foliage-lighting-001`):**
+  - `f95cae21` — `DrawSectionTL`: authored-blend emats (`OpacityMap` + `BlendMode AlphaBlend`)
+    keep `AlphaBlend` on the CPU path (`!materialBlends` guard on the bark branch,
+    mirroring the retained path); `.emat` `Color` tint recorded in the
+    `MaterialClass` bind slot (PERF-016 replay-safe) and folded into all four
+    CPU-path albedo lanes.
+  - `d64a5076` — tint restricted to `IsEmatPath` materials: an RVMAT diffuse
+    already reaches `_curMaterial` via `surfMat->Combine`, recording it again
+    would tint twice. Legacy behavior unchanged (owner rule 2026-09-16: legacy
+    paths only with explicit approval; both changes are emat-scoped).
+- **Smoke:** final binary boots clean (`build d64a50764ce3-release`, sim ticks,
+  no `UNHANDLED EXCEPTION`/panic). Boot covered the vehicle scene, NOT Everon,
+  so no `NetFence_Wire` sections streamed — visual confirmation on Everon is
+  the owner's step.
+- **Defect B diagnosis (from `cwr.log`, no image reads):** at/near `[4787, 3860]`
+  both candidates are active and composed on the retained path —
+  `GraniteStone_01.emat` (`MatPBR2Layers`: 2 layers / 1 normal, uv scales
+  1.0/6.0, `mask uvSource=tex` = uv0, layer colours 1.00/0.67) and
+  `GraniteCliff_02.emat` (`MatPBRMulti`: 4 layers / 3 normals, uv 35x, mask
+  uv0). No `layers SKIPPED` for either. If the rock still reads wrong in-game,
+  suspect the mask frame (uv0 vs second UV set) or `layer_w` weighting in
+  `gpu_driven.wgsl` (same family as defect C), not a missing bind.
+- **Next visual checks for the owner on Everon:** (1) wire-mesh fences
+  translucent + dark instead of solid white; (2) rock at `[4787.26, 3860.66,
+  21.28]`; (3) glance at legacy vehicles/props to confirm nothing darkened
+  (tint lane is emat-only by construction).
