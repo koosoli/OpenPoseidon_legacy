@@ -2788,6 +2788,8 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
                  uv.set0Parts, uv.set0SpanLe1, uv.set0SpanLe8, uv.set0SpanLe64, uv.set0SpanGt64);
         for (const std::string& w : uv.set0Wide)
             LOG_INFO(World, "RFG-102 wide UV set 1: {}", w);
+        LOG_INFO(World, "Enfusion native load: face-UV transform census -- {} parts scaled by GlobalMapsUVTransform, first: {}",
+                 uv.partsFaceUvScaled, uv.firstFaceUvScaled.empty() ? "-" : uv.firstFaceUvScaled.c_str());
     }
     InitGeography();
     ProgressFinish();

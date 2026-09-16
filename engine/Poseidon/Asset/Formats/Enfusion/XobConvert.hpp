@@ -23,6 +23,7 @@
 #include <Poseidon/Asset/Formats/Enfusion/XobCollision.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/XobCollisionGeometry.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/XobModel.hpp>
+#include <Poseidon/Asset/Formats/Material/EmatMaterialAdapter.hpp>
 #include <Poseidon/Asset/Formats/P3D/MLODWriter.hpp>
 
 #include <algorithm>
@@ -30,7 +31,9 @@
 #include <cctype>
 #include <cstdio>
 #include <cstdint>
+#include <mutex>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -47,6 +50,10 @@ struct XobUvCensus
     // u/v spans, and the first few wide parts with the range/extra they were unpacked with.
     size_t set0Parts = 0, set0SpanLe1 = 0, set0SpanLe8 = 0, set0SpanLe64 = 0, set0SpanGt64 = 0;
     std::vector<std::string> set0Wide;
+    // Parts whose face UV was scaled by their material's GlobalMapsUVTransform
+    // (first scaled part named, so a bad transform names itself in the log).
+    size_t      partsFaceUvScaled = 0;
+    std::string firstFaceUvScaled;
 };
 inline XobUvCensus& GXobUvCensus()
 {
@@ -343,6 +350,57 @@ inline float VisualLodResolutionFromThreshold(size_t rank, float base, float fin
     return scaled > base ? scaled : VisualLodResolution(rank, base);
 }
 
+//! Face-UV scale/offset from a part material's `GlobalMapsUVTransform`
+//! (e.g. NetFence_Wire.emat TilingU/V 24: sampled at the face's raw UV the
+//! wire cutout is magnified 24x and the panel reads as an empty frame).
+//! Enfusion samples its global maps through this transform, so the converter
+//! bakes it into the written face UV -- both render paths then inherit it,
+//! with no shader or ABI change. The second (mask) set is the object's own
+//! unwrap and stays unscaled. Cached by material path; a material that names
+//! none (or cannot be read, e.g. the offline exporter with no mount open)
+//! converts exactly as before.
+struct FaceUvScale
+{
+    float su = 1.0f, sv = 1.0f, ou = 0.0f, ov = 0.0f;
+    bool  active = false;
+};
+inline FaceUvScale FaceUvScaleForMaterial(const std::string& materialPath)
+{
+    static std::unordered_map<std::string, FaceUvScale> cache;
+    static std::mutex                                   cacheMutex;
+    {
+        std::lock_guard<std::mutex> lock(cacheMutex);
+        if (const auto found = cache.find(materialPath); found != cache.end())
+            return found->second;
+    }
+    FaceUvScale result;
+    try
+    {
+        if (materialPath.size() > 5 && ::Poseidon::Asset::Material::IsEmatPath(materialPath))
+        {
+            ::Poseidon::Asset::Material::EmatMaterial  emat;
+            ::Poseidon::Asset::Material::RvUvTransform t;
+            if (::Poseidon::Asset::Material::ReadEmatFile(materialPath, emat) &&
+                ::Poseidon::Asset::Material::EmatUvTransform(emat, "GlobalMapsUVTransform", t) &&
+                t.present)
+            {
+                result.su = t.aside[0];
+                result.sv = t.up[1];
+                result.ou = t.pos[0];
+                result.ov = t.pos[1];
+                result.active =
+                    (result.su != 1.0f || result.sv != 1.0f || result.ou != 0.0f || result.ov != 0.0f);
+            }
+        }
+    }
+    catch (...)
+    {
+    }
+    std::lock_guard<std::mutex> lock(cacheMutex);
+    cache[materialPath] = result;
+    return result;
+}
+
 //! `sourcePath` is the `.xob`'s own path in the pak; it decides fact 8's `map` property
 //! and nothing else. Empty disables the property (a caller with no path has no class).
 inline bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& options,
@@ -550,6 +608,22 @@ inline bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& 
             if (!materialPath.empty())
                 materialPaths.insert(materialPath);
 
+            // The material's face-UV transform (identity for the overwhelming
+            // majority); resolved once per part, applied per face below.
+            const FaceUvScale faceUvT = FaceUvScaleForMaterial(materialPath);
+            if (faceUvT.active)
+            {
+                XobUvCensus& c = GXobUvCensus();
+                ++c.partsFaceUvScaled;
+                if (c.firstFaceUvScaled.empty())
+                {
+                    char buf[192];
+                    std::snprintf(buf, sizeof(buf), "%s (%s %.2f,%.2f %+.2f,%+.2f)", sourcePath.c_str(),
+                                  materialPath.c_str(), faceUvT.su, faceUvT.sv, faceUvT.ou, faceUvT.ov);
+                    c.firstFaceUvScaled = buf;
+                }
+            }
+
             const bool hasSecond = part.uvSets.size() > 1 && part.uvSets[1].size() == part.positions.size();
             anySecondSet = anySecondSet || hasSecond;
             if (!part.uvSets.empty() && part.uvSets[0].size() == part.positions.size())
@@ -652,8 +726,16 @@ inline bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& 
                     const int32_t point = remap[corner[c]];
                     face.vertices[c].point = point;
                     face.vertices[c].normal = point;
-                    face.vertices[c].u = renderUv ? part.renderUvSets[0][rcorner[c]].u : part.uvSets[0][corner[c]].u;
-                    face.vertices[c].v = renderUv ? part.renderUvSets[0][rcorner[c]].v : part.uvSets[0][corner[c]].v;
+                    // Enfusion samples its global maps through the material's
+                    // GlobalMapsUVTransform; u1/v1 carry the object's own mask
+                    // unwrap and stay unscaled. Identity when the material names
+                    // none, which is bit-exact (u*1+0 == u).
+                    const float fu =
+                        renderUv ? part.renderUvSets[0][rcorner[c]].u : part.uvSets[0][corner[c]].u;
+                    const float fv =
+                        renderUv ? part.renderUvSets[0][rcorner[c]].v : part.uvSets[0][corner[c]].v;
+                    face.vertices[c].u = fu * faceUvT.su + faceUvT.ou;
+                    face.vertices[c].v = fv * faceUvT.sv + faceUvT.ov;
                     if (hasSecond)
                     {
                         face.vertices[c].u1 = (renderUv && part.renderUvSets.size() > 1) ? part.renderUvSets[1][rcorner[c]].u : part.uvSets[1][corner[c]].u;
