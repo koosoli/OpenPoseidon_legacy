@@ -407,6 +407,11 @@ struct MaterialClass
     bool     hasNormal = false;
     RStringB baseLoadName;
     RStringB normalLoadName;
+    // The `.emat` `Color` surface tint (MatPBRBasic wire mesh), as linear
+    // RGB. Identity until a bind resolve records it; the legacy TexMaterial
+    // path never carried it, so without this the BCR albedo draws untinted
+    // (NetFence_Wire's near-white metal instead of its dark authoring).
+    float tint[3] = {1.0f, 1.0f, 1.0f};
 };
 
 // PERF-016 A/B lever. ON by default; `WGR_SECTION_BIND_CACHE=0` restores the per-section
@@ -450,6 +455,7 @@ MaterialClass* MaterialClassSlot(const Ref<TexMaterial>& surfMat)
         slot.hasNormal = false;
         slot.baseLoadName = RStringB();
         slot.normalLoadName = RStringB();
+        slot.tint[0] = slot.tint[1] = slot.tint[2] = 1.0f;
     }
     return &slot;
 }
@@ -5339,6 +5345,9 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
 
     uint64_t tex = 0;
     Poseidon::AlphaStats::Kind alphaClass = Poseidon::AlphaStats::Opaque;
+    // The `.emat` `Color` surface tint for this draw (identity unless the
+    // binding block below records/replays one). Applied at the sun fold.
+    float ematTint[3] = {1.0f, 1.0f, 1.0f};
     if (auto* t = static_cast<TextureWgpu*>(sMesh.GetSection(beg).properties.GetTexture()))
     {
         tex = t->EnsureUploaded();
@@ -5621,6 +5630,9 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                             d.flags |= WGR_DRAW3D_NATIVE_CAVITY;
                     }
                 }
+                ematTint[0] = bindSlot->tint[0];
+                ematTint[1] = bindSlot->tint[1];
+                ematTint[2] = bindSlot->tint[2];
             }
         }
         if (materialPath && *materialPath && !bindServed)
@@ -5878,9 +5890,24 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                         bindSlot->normalLoadName = bindSlot->hasNormal
                                                        ? RStringB(normalSlot->texture.path.canonical().c_str())
                                                        : RStringB();
+                        // The `.emat` `Color` surface tint (NetFence_Wire's
+                        // dark authoring over a near-white BCR tile). A pure
+                        // function of the material path like the rest here.
+                        bindSlot->tint[0] = translated.diffuse[0];
+                        bindSlot->tint[1] = translated.diffuse[1];
+                        bindSlot->tint[2] = translated.diffuse[2];
                         bindSlot->bindResolved = true;
                         Pass1Submit::gSecBindResolves.fetch_add(1, std::memory_order_relaxed);
                     }
+                }
+                // This draw's tint: recorded above on the resolve that just ran
+                // (bindSlot aliases the same slot when caching is enabled).
+                if (MaterialClass* tintSlot = MaterialClassSlot(section.surfMat);
+                    tintSlot && tintSlot->bindResolved)
+                {
+                    ematTint[0] = tintSlot->tint[0];
+                    ematTint[1] = tintSlot->tint[1];
+                    ematTint[2] = tintSlot->tint[2];
                 }
             }
             catch (const std::exception& error)
@@ -6104,11 +6131,13 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
         blend = render::BlendMode::Opaque;
         alphaRef = 0.0f;
     }
-    else if (materialUsesLeafCards && !materialCutout)
+    else if (materialUsesLeafCards && !materialCutout && !materialBlends)
     {
         // A close tree LOD may use the generic TreeAdv material for BOTH its needle cards and
         // its bark. The bark texture has a non-coverage alpha channel, so a leaf alpha test
         // removes it. It still belongs in the opaque pass, just without the discard.
+        // Authored translucency (OpacityMap + BlendMode AlphaBlend: wire mesh, glass)
+        // is excluded: forcing it opaque here drew NetFence_Wire as a solid sheet.
         blend = render::BlendMode::Opaque;
         alphaRef = 0.0f;
     }
@@ -6380,14 +6409,20 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
             d.flags |= WGR_DRAW3D_NIGHT_EMITTER;
         }
     }
-    d.mat_sun_ambient = {ambient.R() * sunEn, ambient.G() * sunEn, ambient.B() * sunEn, ambient.A() * sunEn};
-    d.mat_sun_diffuse = {diffuse.R() * sunEn, diffuse.G() * sunEn, diffuse.B() * sunEn, diffuse.A() * sunEn};
+    d.mat_sun_ambient = {ambient.R() * sunEn * ematTint[0], ambient.G() * sunEn * ematTint[1],
+                         ambient.B() * sunEn * ematTint[2], ambient.A() * sunEn};
+    d.mat_sun_diffuse = {diffuse.R() * sunEn * ematTint[0], diffuse.G() * sunEn * ematTint[1],
+                         diffuse.B() * sunEn * ematTint[2], diffuse.A() * sunEn};
     // Point/spot-light material modulation (GL33's matDif/matAmb): the raw material
     // diffuse/ambient (accommodation in, night rides the per-light colour).
+    // The `.emat` `Color` tint rides all four albedo lanes, sun and local:
+    // it is the surface's own colour, not a property of any one light.
     const Color& lightDif = _curMaterial.diffuse;
     const Color& lightAmb = _curMaterial.ambient;
-    d.mat_light_diffuse = {lightDif.R(), lightDif.G(), lightDif.B(), lightDif.A()};
-    d.mat_light_ambient = {lightAmb.R(), lightAmb.G(), lightAmb.B(), lightAmb.A()};
+    d.mat_light_diffuse = {lightDif.R() * ematTint[0], lightDif.G() * ematTint[1], lightDif.B() * ematTint[2],
+                           lightDif.A()};
+    d.mat_light_ambient = {lightAmb.R() * ematTint[0], lightAmb.G() * ematTint[1], lightAmb.B() * ematTint[2],
+                           lightAmb.A()};
     // Sun-only Blinn-Phong specular, folded exactly like GL33's c18 (specCol =
     // sun->Diffuse() * mat.specular, power in w). The shader adds it per-fragment,
     // gated on w > 0, so fold the sun-enable into the colour and leave w = power.
