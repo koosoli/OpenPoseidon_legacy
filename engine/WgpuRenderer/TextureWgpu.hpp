@@ -130,7 +130,7 @@ class TextureWgpu : public Texture
     // has run its scan. MAT-051 keys the glass sheen on pctClear/pctPartial,
     // which the Kind alone cannot express.
     const AlphaStats& AlphaStatsView() const { return _alphaStats; }
-    bool HasAlphaHoles();
+    bool HasAlphaHoles() override;
 
     // RFG-047: true when this texture, used as a normal map, packs X in RED.
     //

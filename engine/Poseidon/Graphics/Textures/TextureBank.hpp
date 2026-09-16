@@ -71,6 +71,12 @@ class Texture : public RemoveLLinks
     //! routing; computed once and cached by the backend. Default: opaque.
     virtual AlphaStats::Kind GetAlphaClass() { return AlphaStats::Opaque; }
 
+    //! Whether the alpha histogram holds real fully-clear texels (>= 2% clear,
+    //! the ClassifyAlpha clear-coverage floor). Lets routers tell a punch-through
+    //! mask (leaf cards, netting: holes + rim) from hole-less data alpha (glass
+    //! dirt, roughness): same Blend class, opposite routing. Default: none.
+    virtual bool HasAlphaHoles() { return false; }
+
     // some APIs (Glide) require u,v conversion
     virtual float UToPhysical(float u) const { return u; }
     virtual float VToPhysical(float v) const { return v; }

@@ -180,8 +180,18 @@ static bool SectionIsBlend(const ShapeSectionInfo& sec)
     // Legacy A1 foliage has no RVMAT to speak for it, so the histogram is the only voice in
     // the room and it mis-hears antialiased downscales as translucency. See
     // render::IsLegacyPlantCutoutTexture for the measured per-LOD split.
-    if (render::IsLegacyPlantCutoutTexture(tex->Name()) || render::IsEnfusionCoverageTexture(tex->Name()))
+    if (render::IsLegacyPlantCutoutTexture(tex->Name()))
         return false;
+    if (render::IsEnfusionCoverageTexture(tex->Name()))
+    {
+        // Merged coverage WITH holes (leaf cards: mostly clear with a partial
+        // rim) alpha-tests; hole-less coverage (glass dirt: partial everywhere,
+        // 0% clear) is translucency and belongs in the blend pass -- unless the
+        // material authors otherwise, in which case it keeps the cutout route.
+        if (tex->HasAlphaHoles() || SectionMaterialAlphaRoute(sec.surfMat) != AuthoredAlphaRoute::Default)
+            return false;
+        return true;
+    }
     return SectionMaterialAlphaRoute(sec.surfMat) == AuthoredAlphaRoute::Default;
 }
 
@@ -202,11 +212,11 @@ static bool SectionIsBlend(const ShapeSectionInfo& sec)
 //
 // So: a section the retained path REFUSES stays the CPU's, whatever its spec bits say.
 //
-// Reforger is deliberately left alone. EngineWgpu's ClassifyGpuSection reads `.emat` materials
-// (EmatUsesLeafCards) and CAN take a Blend-classified section on that strength, while
-// SectionMaterialAlphaRoute cannot parse an .emat at all and calls the same section Blend.
-// Un-skipping there would draw Everon's foliage twice rather than restore a hole. Until both
-// sides read the same file, an .emat section keeps today's behaviour.
+// Reforger is routed by the same authored route both sides consult
+// (SectionMaterialAlphaRoute reads `.emat` as well as `.rvmat`), so an .emat
+// section the GPU declines is complement-drawn by the CPU and foliage is never
+// drawn twice. Until both sides read the same file, an .emat section keeps
+// today's behaviour -- which, since the route reader landed, they do.
 bool SectionRetainedRefuses(const ShapeSectionInfo& sec)
 {
     if (!SectionIsBlend(sec))
@@ -229,7 +239,13 @@ bool SectionGpuOwned(const ShapeSectionInfo& sec)
         return false;
     if (tex->GetAlphaClass() == Poseidon::AlphaStats::Cutout)
         return true;
-    if (render::IsLegacyPlantCutoutTexture(tex->Name()) || render::IsEnfusionCoverageTexture(tex->Name()))
+    if (render::IsLegacyPlantCutoutTexture(tex->Name()))
+        return true;
+    // Merged coverage owns its section only when it alpha-tests (real holes);
+    // hole-less coverage (glass) falls through to the IsAlpha/Blend handling
+    // below so the CPU blends it.
+    if (render::IsEnfusionCoverageTexture(tex->Name()) &&
+        (tex->HasAlphaHoles() || SectionMaterialAlphaRoute(sec.surfMat) != AuthoredAlphaRoute::Default))
         return true;
     // RFG-075: an IsAlpha-spec section whose texture the histogram calls OPAQUE is owned.
     //

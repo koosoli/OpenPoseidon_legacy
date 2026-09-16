@@ -6101,7 +6101,8 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     }
     else if (tex != 0 && (alphaClass == Poseidon::AlphaStats::Cutout || materialCutout ||
                           (texture && (render::IsLegacyPlantCutoutTexture(texture->Name()) ||
-                                       render::IsEnfusionCoverageTexture(texture->Name())))))
+                                       (render::IsEnfusionCoverageTexture(texture->Name()) &&
+                                        texture->HasAlphaHoles())))))
     {
         // A cutout classification means the source has binary transparent texels, irrespective
         // of whether the P3D section remembered to set IsAlpha.  Some legacy sections are
@@ -6661,7 +6662,8 @@ bool ClassifyGpuSection(const Shape& s, uint64_t mesh, const AutoArray<render::m
     // Treat them as the alpha-tested cards they are, on BOTH paths, or the two disagree and a
     // section is drawn twice or not at all (see IsGpuOwnedSection).
     const bool legacyPlantCutout = texture && (render::IsLegacyPlantCutoutTexture(texture->Name()) ||
-                                               render::IsEnfusionCoverageTexture(texture->Name()));
+                                               (render::IsEnfusionCoverageTexture(texture->Name()) &&
+                                                texture->HasAlphaHoles()));
     const bool materialCutout =
         alphaClass == Poseidon::AlphaStats::Blend && GpuSectionMaterialIsCutout(sec.surfMat, texture);
     // Mirrors DrawSectionTL's three rules, in the same order, so the retained path shades a tree
