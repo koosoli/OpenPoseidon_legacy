@@ -7829,6 +7829,22 @@ bool EngineWgpu::MaterialMaskUsesUv1(const ShapeSection& section)
            (src[2] == 'x' || src[2] == 'X') && src[3] == '1';
 }
 
+// Does the material's global normal map want the second UV set
+// (`UVSrcGlobNormal "UV set 2"`)? Same shape as MaterialMaskUsesUv1 above,
+// reading the translated answer rather than a slot.
+bool EngineWgpu::MaterialNormalUsesUv1(const ShapeSection& section)
+{
+    if (!section.surfMat)
+        return false;
+    const char* materialPath = section.surfMat->GetName().Data();
+    if (!materialPath || !*materialPath)
+        return false;
+    const auto cached = _materialBindings.find(materialPath);
+    if (cached == _materialBindings.end())
+        return false;
+    return cached->second.globalNormalUv1;
+}
+
 // The albedo a section's RVMAT names, or 0 when it names none.
 //
 // An Arma 3 structure commonly carries a placeholder face texture (`*_mlod_co`)
@@ -9111,6 +9127,13 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
                 if (wantsUv1 && hasUv1)
                 {
                     sec.flags |= WGR_MODEL_SECTION_MASK_UV1;
+                }
+                // The global normal map rides the same second set when the
+                // material says so (`UVSrcGlobNormal`); sampled raw, unscaled,
+                // since the tiling transform belongs to the colour tile.
+                if (mat.normal_texture_id != 0 && MaterialNormalUsesUv1(s->GetSection(i)) && s->HasUV1())
+                {
+                    sec.flags |= WGR_MODEL_SECTION_GLOBALNMO_UV1;
                 }
                 // RFG-072 census: the UV half, per distinct shape+material, and the line.
                 const ShapeSection& secM = s->GetSection(i);

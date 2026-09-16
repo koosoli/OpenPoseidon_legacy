@@ -549,6 +549,11 @@ inline TranslatedMaterial TranslateEmat(const EmatMaterial& emat, const std::str
     // a converted model without one keeps uv0 exactly as before.
     if (EmatNamesUvSet2(emat, "UVSrcGlobalMaps"))
         SetEmatSlotUv(out, MaterialSlot::Mask, emat, std::string(), "tex1");
+    // And the global normal map on the same second set when the material says
+    // so (`UVSrcGlobNormal "UV set 2"`); the renderer takes it only when the
+    // shape actually carries a second set, exactly like the mask above.
+    if (EmatNamesUvSet2(emat, "UVSrcGlobNormal"))
+        out.globalNormalUv1 = true;
 
     // RFG-072: each layer's `Color_N`, recorded beside its tile for a shader that can
     // multiply per layer. Only for a material served by the NATIVE mount: the converting

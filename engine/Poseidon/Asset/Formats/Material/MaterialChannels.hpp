@@ -208,6 +208,10 @@ struct TranslatedMaterial
     float                crownAoHeight = 0.0f;
     float                crownAoWidth = 0.0f;
     float                crownAoIntensity = 0.0f;
+    // Enfusion's global normal map (`GlobalNMOMap`, `UVSrcGlobNormal`) lives
+    // in the object's own unwrap rather than the tiling frame: sample it
+    // with the second UV set. False for every material that names neither.
+    bool                 globalNormalUv1 = false;
     // Enfusion `Cull none`: the surface is authored single-sided but drawn
     // double-sided (wire mesh, glass panes). False for every material that
     // names no Cull key, and all legacy.

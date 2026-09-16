@@ -157,6 +157,11 @@ const SECTION_MASK_UV1: u32 = 4u;
 // write, so the convention rides here instead. Clear for every PAA `_nohq` and for a decoded
 // `_NMO`, both of which keep the (a, g) read.
 const SECTION_NORMAL_RG: u32 = 8u;
+// SectionMaterial.flags bit 5 (WGR_MODEL_SECTION_GLOBALNMO_UV1): the global
+// normal map (`UVSrcGlobNormal "UV set 2"`) is painted in the object's own
+// unwrap, so it is sampled with uv1, unscaled -- the tiling transform belongs
+// to the colour tile, not to the global map.
+const SECTION_GLOBALNMO_UV1: u32 = 32u;
 
 // Equirect lookup into the sky reflection env map. Copied from water.wgsl's sky_env_sample
 // rather than reinvented, so both consumers agree with fs_sky_env's convention in sky.wgsl:
@@ -931,7 +936,8 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
         // MatPBRMulti layers are `_NMO` files exactly like its base normal.
         let normal_rg = (sm.flags & SECTION_NORMAL_RG) != 0u;
         if (sm.normal_slot != 0u) {
-            let uv0 = in.uv * sm.layer_uv[0].xy + sm.layer_uv[0].zw;
+            let uv0 = select(in.uv * sm.layer_uv[0].xy + sm.layer_uv[0].zw, in.uv1,
+                (sm.flags & SECTION_GLOBALNMO_UV1) != 0u);
             let normal_sample = textureSampleBias(textures[sm.normal_slot], samplers[sm.sampler_idx], uv0, frame.renscale.x);
             normal_ts = decode_nohq_packed(normal_sample,
                 normal_rg);

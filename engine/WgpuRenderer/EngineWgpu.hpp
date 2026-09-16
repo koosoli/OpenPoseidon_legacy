@@ -1025,6 +1025,8 @@ class EngineWgpu : public EngineDummy
     bool ResolveMaterialLayers(const ShapeSection& section, WgrModelMaterial& material);
     // True when the material's Multi mask stage is authored on uvSource "tex1".
     bool MaterialMaskUsesUv1(const ShapeSection& section);
+    // True when the material's global normal map is authored for "UV set 2".
+    bool MaterialNormalUsesUv1(const ShapeSection& section);
     // Fraction of a translated RVMAT's flat specular constant to apply, standing in
     // for a per-texel specular map that is not bound. 1.0 for anything that is not a
     // translated RVMAT, and 1.0 once `specularMap` is non-zero -- the map is what the

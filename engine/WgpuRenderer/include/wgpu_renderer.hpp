@@ -431,7 +431,10 @@ enum WgrModelSectionFlags : uint32_t
      * bound normal map was uploaded compressed; on the decoded path RFG-045's copy still
      * happens and this bit stays clear, so both forms shade identically. */
     WGR_MODEL_SECTION_NORMAL_RG = 8u,
-    WGR_MODEL_SECTION_NATIVE_CAVITY = 16u
+    WGR_MODEL_SECTION_NATIVE_CAVITY = 16u,
+    /* The global normal map (`GlobalNMOMap`, `UVSrcGlobNormal "UV set 2"`) is
+     * painted in the object's own unwrap: sample it with uv1, unscaled. */
+    WGR_MODEL_SECTION_GLOBALNMO_UV1 = 32u
 };
 
 /* Per-section shading, parallel to a model's sections (one per section). The RAW
