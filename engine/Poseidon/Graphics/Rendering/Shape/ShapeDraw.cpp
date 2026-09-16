@@ -148,7 +148,18 @@ static AuthoredAlphaRoute SectionMaterialAlphaRoute(const Ref<TexMaterial>& surf
     AuthoredAlphaRoute route = AuthoredAlphaRoute::Default;
     try
     {
-        route = ShaderFamilyAlphaRoute(Asset::Material::ParseRvMaterialFile(key).pixelShaderId.c_str());
+        if (Asset::Material::IsEmatPath(key))
+        {
+            // Reforger: a solid-surface `.emat` (walls, roofs, solid props) is
+            // opaque even when its BCR roughness alpha classifies Blend
+            // (RFG-033); foliage, glass, decals and everything else keep the
+            // histogram's route, exactly as before.
+            Asset::Material::EmatMaterial emat;
+            if (Asset::Material::ReadEmatFile(key, emat) && Asset::Material::EmatIsOpaqueSolid(emat))
+                route = AuthoredAlphaRoute::Opaque;
+        }
+        else
+            route = ShaderFamilyAlphaRoute(Asset::Material::ParseRvMaterialFile(key).pixelShaderId.c_str());
     }
     catch (...)
     {
@@ -244,15 +255,12 @@ bool SectionGpuOwned(const ShapeSectionInfo& sec)
             return true;
     }
     // Blend histogram: owned when the material AUTHORS a cutout or an opaque route (TreeAdv leaf
-    // cards and their bark), i.e. exactly when SectionIsBlend says it is not real translucency.
-    // .emat materials are left to the CPU on an IsAlpha spec, as SectionRetainedRefuses leaves
-    // them: this side cannot read an .emat, and drawing Everon's foliage twice is worse than
-    // the status quo.
+    // cards and their bark, i.e. exactly when SectionIsBlend says it is not real translucency).
+    // A solid-surface `.emat` (SectionMaterialAlphaRoute Opaque) is owned for the same
+    // reason: its BCR alpha is roughness, so the GPU draws it solid with the layer
+    // blend; every other `.emat` keeps today's behaviour (CPU-drawn).
     if (tex->GetAlphaClass() == Poseidon::AlphaStats::Blend)
     {
-        const char* mat = sec.surfMat.IsNull() ? nullptr : sec.surfMat->GetName().Data();
-        if (mat && *mat && Asset::Material::IsEmatPath(mat))
-            return false;
         return SectionMaterialAlphaRoute(sec.surfMat) != AuthoredAlphaRoute::Default;
     }
     return false;

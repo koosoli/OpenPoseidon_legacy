@@ -99,6 +99,7 @@ namespace
 // same authored TreeAdv alpha authority before it decides its per-pixel discard.
 bool GpuSectionMaterialUsesLeafCards(const Ref<TexMaterial>& surfMat);
 bool GpuSectionMaterialIsCutout(const Ref<TexMaterial>& surfMat, TextureWgpu* texture);
+bool GpuEmatIsOpaqueSolid(const Ref<TexMaterial>& surfMat);
 bool GpuTextureIsBarkOrTrunk(const TextureWgpu* texture);
 bool GpuSectionMaterialUsesLeafCardsUncached(const Ref<TexMaterial>& surfMat);
 bool GpuTextureIsBarkOrTrunkUncached(const TextureWgpu* texture);
@@ -6109,7 +6110,20 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
         // appropriate common mode for every Cutout texture: keep the blend opaque and only
         // raise the alpha reference to the binary midpoint.
         blend = render::BlendMode::Opaque;
-        alphaRef = std::max(alphaRef, 0.5f);
+        alphaRef = 0.0f;
+    }
+    else if (blend == render::BlendMode::AlphaBlend && tex != 0 && texture && alphaClass == Poseidon::AlphaStats::Blend &&
+             !texture->HasAlphaHoles() && MaterialIsFullyOpaque(_curMaterial) &&
+             GpuEmatIsOpaqueSolid(debugSection.surfMat))
+    {
+        // The Blend-class twin of the Opaque fix above, for the sections the
+        // retained path declines: a solid Enfusion wall/roof over a
+        // roughness-alpha BCR (RFG-033) is opaque, not translucent. The
+        // no-holes test is what keeps decals and cutouts out -- their alpha
+        // has real clear texels -- and the family allow-list inside
+        // GpuEmatIsOpaqueSolid keeps glass and foliage out.
+        blend = render::BlendMode::Opaque;
+        alphaRef = 0.0f;
     }
     else if (_materialDebug.coverageMaskDepth && blend == render::BlendMode::AlphaBlend && tex != 0 && texture &&
              alphaClass == Poseidon::AlphaStats::Blend && MaterialIsFullyOpaque(_curMaterial) &&
@@ -6552,6 +6566,38 @@ bool GpuSectionMaterialIsCutout(const Ref<TexMaterial>& surfMat, TextureWgpu* te
            GpuSectionMaterialUsesLeafCards(surfMat);
 }
 
+// Whether a section's `.emat` is a solid building/prop surface (see
+// EmatIsOpaqueSolid): its BCR alpha is roughness, never coverage. Cached by
+// material path like the leaf-cards answer above, for the same reason.
+bool GpuEmatIsOpaqueSolid(const Ref<TexMaterial>& surfMat)
+{
+    if (surfMat.IsNull())
+        return false;
+    const char* path = surfMat->GetName().Data();
+    if (!path || !*path || !Asset::Material::IsEmatPath(path))
+        return false;
+    static std::unordered_map<std::string, bool> cache;
+    static std::mutex cacheMutex;
+    const std::string key(path);
+    {
+        std::lock_guard<std::mutex> lock(cacheMutex);
+        if (const auto found = cache.find(key); found != cache.end())
+            return found->second;
+    }
+    bool solid = false;
+    try
+    {
+        Asset::Material::EmatMaterial emat;
+        solid = Asset::Material::ReadEmatFile(key, emat) && Asset::Material::EmatIsOpaqueSolid(emat);
+    }
+    catch (...)
+    {
+    }
+    std::lock_guard<std::mutex> lock(cacheMutex);
+    cache[key] = solid;
+    return solid;
+}
+
 
 // RFG-074: name the classifier's refusals, once per (reason, texture). Every one of
 // these was a bare `return false`, and the church's ten opaque wall sections went
@@ -6626,22 +6672,54 @@ bool ClassifyGpuSection(const Shape& s, uint64_t mesh, const AutoArray<render::m
     //     under the generic TreeAdv material) is drawn opaque without a discard;
     //  3. Cutout-class, legacy plant cutout, leaf-card cutout and IsAlpha-spec cutout textures
     //     are hard-tested at 0.5.
-    // A Blend-class texture that is none of those is real translucency; on an .emat material it
-    // keeps today's behaviour (declined here, complement-drawn); on anything else SectionGpuOwned
-    // already refused it and we cannot get here.
+    //  4. A solid Enfusion wall/roof over a roughness-alpha BCR (RFG-033, hole-less,
+    //     opaque-solid family) is drawn opaque without a discard -- same shape as 2.
+    // A Blend-class texture that is none of those is real translucency; declined
+    // here, complement-drawn, and SectionGpuOwned refuses it the same way so no
+    // section is drawn twice or not at all.
     const bool bark = texture && GpuTextureIsBarkOrTrunk(texture);
     const bool blendOpaqueRoute = alphaClass == Poseidon::AlphaStats::Blend && !bark && !materialCutout &&
                                   !legacyPlantCutout && GpuSectionMaterialUsesLeafCards(sec.surfMat);
+    // Raw per-section material first: the alpha guards below consult it, mirroring
+    // the per-draw path (whose Opaque-class branch this twins). Base = the
+    // shading-type material at neutral accommodation (HDR auto-exposure handles adaptation),
+    // then modulated by the section surface material. forcedDiffuse is dropped (the FS has no
+    // term for it; ~always black on static clutter).
+    TLMaterial m;
+    CreateMaterial(m, HWhite, sec.material);
+    if (sec.surfMat)
+    {
+        TLMaterial mod;
+        sec.surfMat->Combine(mod, m);
+        m = mod;
+    }
+    // A Blend-class texture that is none of those is real translucency -- except a
+    // solid Enfusion wall/roof over a roughness-alpha BCR (RFG-033): opaque, like
+    // bark. The no-holes test keeps decals and cutouts out, the family
+    // allow-list keeps glass and foliage out, and SectionGpuOwned answers the
+    // same question on the CPU side so no section is drawn twice or not at all.
+    const bool enfusionOpaqueRoughness = alphaClass == Poseidon::AlphaStats::Blend && !bark && !materialCutout &&
+                                         !legacyPlantCutout && !blendOpaqueRoute && tex != 0 && texture &&
+                                         !texture->HasAlphaHoles() && MaterialIsFullyOpaque(m) &&
+                                         GpuEmatIsOpaqueSolid(sec.surfMat);
     if (alphaClass == Poseidon::AlphaStats::Blend && !bark && !materialCutout && !legacyPlantCutout &&
-        !blendOpaqueRoute)
+        !blendOpaqueRoute && !enfusionOpaqueRoughness)
     {
         TraceClassifyReject(sec, "blend/opaque route");
 
         return false;
     }
     float alphaRef = AlphaRefFromDesc(desc);
-    if (bark || blendOpaqueRoute)
+    if (bark || blendOpaqueRoute || enfusionOpaqueRoughness)
     {
+        alphaRef = 0.0f;
+    }
+    else if (tex != 0 && alphaClass == Poseidon::AlphaStats::Opaque && MaterialIsFullyOpaque(m))
+    {
+        // The per-draw Opaque-class guard's missing twin: an IsAlpha spec over an
+        // opaque texture of a fully opaque material is not a cutout. Without it
+        // the spec's Test+AlphaBlend desc promotes the section to cutout variant
+        // and the shader discards/A2Cs it by its roughness.
         alphaRef = 0.0f;
     }
     else if (tex != 0 && (alphaClass == Poseidon::AlphaStats::Cutout || materialCutout || legacyPlantCutout ||
@@ -6654,18 +6732,7 @@ bool ClassifyGpuSection(const Shape& s, uint64_t mesh, const AutoArray<render::m
     // material translation cache, which is an EngineWgpu member this free function
     // cannot reach.
     secOut.flags = 0;
-    // Raw per-section material (folded with the sun in the GPU-driven FS). Base = the
-    // shading-type material at neutral accommodation (HDR auto-exposure handles adaptation),
-    // then modulated by the section surface material. forcedDiffuse is dropped (the FS has no
-    // term for it; ~always black on static clutter).
-    TLMaterial m;
-    CreateMaterial(m, HWhite, sec.material);
-    if (sec.surfMat)
-    {
-        TLMaterial mod;
-        sec.surfMat->Combine(mod, m);
-        m = mod;
-    }
+    // `m` was built above (the alpha guards consult it); folded with the sun below.
     const float emitterScale = StaticEmitterRadianceScale(sec.surfMat, m.emmisive);
     matOut.emissive = {m.emmisive.R() * emitterScale, m.emmisive.G() * emitterScale,
                        m.emmisive.B() * emitterScale, m.emmisive.A()};

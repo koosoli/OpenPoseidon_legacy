@@ -644,6 +644,24 @@ inline bool EmatUsesLeafCards(const EmatMaterial& emat)
     return emat.FloatOf("AlphaTest", alphaTest) && alphaTest > 0.0f;
 }
 
+// Whether an `.emat` is a solid building/prop surface (as opposed to foliage,
+// glass, a decal, or anything else whose alpha means something). A section of
+// one of these over a Blend-classified texture is an opaque surface with a
+// data alpha -- BCR roughness (RFG-033), never coverage -- not translucency,
+// so routing it to the blend pass draws the wall see-through by its roughness.
+// Allow-listed by family so glass (MatPBRBasicGlass), decals (MatPBRDecal),
+// foliage (MatPBRTreeCrown/Trunk, Grass) and particles keep today's routing;
+// EmatUsesLeafCards additionally excludes anything naming an OpacityMap or
+// AlphaTest, which is where Enfusion puts real cutout coverage.
+inline bool EmatIsOpaqueSolid(const EmatMaterial& emat)
+{
+    if (EmatUsesLeafCards(emat))
+        return false;
+    return EmatMaterial::NameMatches(emat.className, "MatPBRMulti") ||
+           EmatMaterial::NameMatches(emat.className, "MatPBRBasic") ||
+           EmatMaterial::NameMatches(emat.className, "MatPBR2Layers");
+}
+
 // True when the material class is one of Enfusion's vegetation families -- what a
 // consumer that keys on `TreeAdv*` for RV wants to key on for Reforger.
 inline bool IsEmatVegetationFamily(std::string_view family)
