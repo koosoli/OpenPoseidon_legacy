@@ -485,12 +485,31 @@ inline TranslatedMaterial TranslateEmat(const EmatMaterial& emat, const std::str
         baseIsLayerTile = AddEmatSlot(out, emat, "BCR_1", MaterialSlot::BaseColour);
     AddFirstEmatSlot(out, emat, {"NMOMap", "GlobalNMOMap", "NTCMap", "NormalMap"}, MaterialSlot::NormalMap);
     AddEmatSlot(out, emat, "MaskMap", MaterialSlot::Mask);
-    AddEmatSlot(out, emat, "BCR_2", MaterialSlot::LayerColour1);
-    AddEmatSlot(out, emat, "BCR_3", MaterialSlot::LayerColour2);
-    AddEmatSlot(out, emat, "BCR_4", MaterialSlot::LayerColour3);
-    AddEmatSlot(out, emat, "NMO_2", MaterialSlot::LayerNormal1);
-    AddEmatSlot(out, emat, "NMO_3", MaterialSlot::LayerNormal2);
-    AddEmatSlot(out, emat, "NMO_4", MaterialSlot::LayerNormal3);
+    // A layer the material switched off (`Enabled_N 0`) binds nothing: drawing
+    // it anyway paints a layer the author removed. Absent means on (layer 1
+    // has no switch at all, and dozens of materials name a BCR_N with none),
+    // so this only ever removes explicitly disabled layers.
+    const auto layerEnabled = [&](const char* key)
+    {
+        float v = 1.0f;
+        return !emat.FloatOf(key, v) || v != 0.0f;
+    };
+    const bool en2 = layerEnabled("Enabled_2"), en3 = layerEnabled("Enabled_3"), en4 = layerEnabled("Enabled_4");
+    if (en2)
+    {
+        AddEmatSlot(out, emat, "BCR_2", MaterialSlot::LayerColour1);
+        AddEmatSlot(out, emat, "NMO_2", MaterialSlot::LayerNormal1);
+    }
+    if (en3)
+    {
+        AddEmatSlot(out, emat, "BCR_3", MaterialSlot::LayerColour2);
+        AddEmatSlot(out, emat, "NMO_3", MaterialSlot::LayerNormal2);
+    }
+    if (en4)
+    {
+        AddEmatSlot(out, emat, "BCR_4", MaterialSlot::LayerColour3);
+        AddEmatSlot(out, emat, "NMO_4", MaterialSlot::LayerNormal3);
+    }
     AddEmatSlot(out, emat, "EnvironmentMap", MaterialSlot::Environment);
 
     // Each layer at its own scale. Without this every layer samples at the section's raw
