@@ -7224,7 +7224,7 @@ void EngineWgpu::ResolveMaterialCrownAo(const ShapeSection& section, float aoP0[
     static const bool enabled = []
     {
         const char* v = std::getenv("WGR_FOLIAGE_CROWN_AO");
-        return !v || v[0] != '0';
+        return v && v[0] == '1';
     }();
     if (!enabled)
         return;
