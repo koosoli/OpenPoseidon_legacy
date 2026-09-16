@@ -6848,9 +6848,14 @@ bool ClassifyGpuSection(const Shape& s, uint64_t mesh, const AutoArray<render::m
         alphaRef = std::max(alphaRef, 0.5f);
     }
     // Cull-none cutouts (wire mesh) stay CPU-drawn: the material is authored
-    // double-sided and the retained path culls backfaces. SectionGpuOwned
-    // declines them the same way, so no section is drawn twice or not at all.
-    if (alphaRef > 0.0f && GpuEmatCullNone(sec.surfMat))
+    // double-sided and the retained path culls backfaces. Vegetation is
+    // excluded: its crossed cards were tuned for the culled GPU path, and the
+    // per-draw foliage shading is not its twin. SectionGpuOwned declines them
+    // the same way, so no section is drawn twice or not at all.
+    const std::string cullFam = GpuEmatFamily(sec.surfMat);
+    const bool cullVeg =
+        !cullFam.empty() && Asset::Material::IsEmatVegetationFamily(cullFam);
+    if (alphaRef > 0.0f && !cullVeg && GpuEmatCullNone(sec.surfMat))
     {
         TraceClassifyReject(sec, "cull-none cutout (CPU double-sided)");
         return false;

@@ -171,8 +171,42 @@ static AuthoredAlphaRoute SectionMaterialAlphaRoute(const Ref<TexMaterial>& surf
     return route;
 }
 
+// The `.emat` shader family, cached by material path (empty when the section
+// names none or it cannot be read). One file read per material, like the two
+// answers above.
+static std::string SectionMaterialEmatFamily(const Ref<TexMaterial>& surfMat)
+{
+    if (surfMat.IsNull())
+        return {};
+    const char* path = surfMat->GetName().Data();
+    if (!path || !*path || !Asset::Material::IsEmatPath(path))
+        return {};
+    static std::unordered_map<std::string, std::string> cache;
+    static std::mutex                                   cacheMutex;
+    const std::string                                   key(path);
+    {
+        std::lock_guard<std::mutex> lock(cacheMutex);
+        const auto                  found = cache.find(key);
+        if (found != cache.end())
+            return found->second;
+    }
+    std::string family;
+    try
+    {
+        Asset::Material::EmatMaterial emat;
+        if (Asset::Material::ReadEmatFile(key, emat))
+            family = emat.className;
+    }
+    catch (...)
+    {
+    }
+    std::lock_guard<std::mutex> lock(cacheMutex);
+    cache[key] = family;
+    return family;
+}
+
 // Whether a section's `.emat` names `Cull none` (wire mesh, glass panes).
-// Same cached shape as the route above: file read once per material path.
+// Same cached shape as the two answers above: file read once per material.
 static bool SectionMaterialCullNone(const Ref<TexMaterial>& surfMat)
 {
     if (surfMat.IsNull())
@@ -277,8 +311,10 @@ bool SectionGpuOwned(const ShapeSectionInfo& sec)
         return false;
     // Cull-none cutouts (wire mesh, glass) stay CPU-drawn double-sided: the
     // retained path culls backfaces and ClassifyGpuSection declines them the
-    // same way, so no section is drawn twice or not at all.
-    if (SectionMaterialCullNone(sec.surfMat))
+    // same way, so no section is drawn twice or not at all. Vegetation is
+    // excluded: its crossed cards were tuned for the culled GPU path.
+    if (SectionMaterialCullNone(sec.surfMat) &&
+        !Asset::Material::IsEmatVegetationFamily(SectionMaterialEmatFamily(sec.surfMat)))
     {
         const bool cutoutRoute =
             tex->GetAlphaClass() == Poseidon::AlphaStats::Cutout ||
