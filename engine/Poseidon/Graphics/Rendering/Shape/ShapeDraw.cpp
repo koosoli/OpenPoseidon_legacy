@@ -171,6 +171,45 @@ static AuthoredAlphaRoute SectionMaterialAlphaRoute(const Ref<TexMaterial>& surf
     return route;
 }
 
+// Whether a section's `.emat` authors real translucency: an `OpacityMap`
+// plus `BlendMode AlphaBlend` on a non-solid surface (wire mesh, glass).
+// Same cached shape as the answers above.
+static bool SectionMaterialEmatBlends(const Ref<TexMaterial>& surfMat)
+{
+    if (surfMat.IsNull())
+        return false;
+    const char* path = surfMat->GetName().Data();
+    if (!path || !*path || !Asset::Material::IsEmatPath(path))
+        return false;
+    static std::unordered_map<std::string, bool> cache;
+    static std::mutex                            cacheMutex;
+    const std::string                            key(path);
+    {
+        std::lock_guard<std::mutex> lock(cacheMutex);
+        const auto                  found = cache.find(key);
+        if (found != cache.end())
+            return found->second;
+    }
+    bool blends = false;
+    try
+    {
+        Asset::Material::EmatMaterial emat;
+        if (Asset::Material::ReadEmatFile(key, emat) && !emat.TextureOf("OpacityMap").empty() &&
+            !Asset::Material::EmatIsOpaqueSolid(emat))
+        {
+            if (const auto* mode = emat.Find("BlendMode");
+                mode && !mode->values.empty() && !mode->values[0].isNumber)
+                blends = Asset::Material::EmatMaterial::NameMatches(mode->values[0].text, "AlphaBlend");
+        }
+    }
+    catch (...)
+    {
+    }
+    std::lock_guard<std::mutex> lock(cacheMutex);
+    cache[key] = blends;
+    return blends;
+}
+
 // The `.emat` shader family, cached by material path (empty when the section
 // names none or it cannot be read). One file read per material, like the two
 // answers above.
@@ -256,10 +295,13 @@ static bool SectionIsBlend(const ShapeSectionInfo& sec)
         return false;
     if (render::IsEnfusionCoverageTexture(tex->Name()))
     {
-        // Merged coverage WITH holes (leaf cards: mostly clear with a partial
-        // rim) alpha-tests; hole-less coverage (glass dirt: partial everywhere,
-        // 0% clear) is translucency and belongs in the blend pass -- unless the
-        // material authors otherwise, in which case it keeps the cutout route.
+        // Authored translucency (`OpacityMap` + `BlendMode AlphaBlend`: wire
+        // mesh, glass) blends even when holey; merged coverage WITH holes
+        // (leaf cards) alpha-tests; hole-less coverage without an authored
+        // answer (glass dirt) is translucency -- unless the material authors
+        // otherwise, in which case it keeps the cutout route.
+        if (SectionMaterialEmatBlends(sec.surfMat))
+            return true;
         if (tex->HasAlphaHoles() || SectionMaterialAlphaRoute(sec.surfMat) != AuthoredAlphaRoute::Default)
             return false;
         return true;
@@ -327,10 +369,11 @@ bool SectionGpuOwned(const ShapeSectionInfo& sec)
         return true;
     if (render::IsLegacyPlantCutoutTexture(tex->Name()))
         return true;
-    // Merged coverage owns its section only when it alpha-tests (real holes);
-    // hole-less coverage (glass) falls through to the IsAlpha/Blend handling
-    // below so the CPU blends it.
-    if (render::IsEnfusionCoverageTexture(tex->Name()) &&
+    // Merged coverage owns its section only when it alpha-tests (real holes)
+    // or the material authors a non-blend route; hole-less coverage (glass)
+    // and authored translucency (wire mesh) fall through to the IsAlpha/Blend
+    // handling below so the CPU blends them.
+    if (render::IsEnfusionCoverageTexture(tex->Name()) && !SectionMaterialEmatBlends(sec.surfMat) &&
         (tex->HasAlphaHoles() || SectionMaterialAlphaRoute(sec.surfMat) != AuthoredAlphaRoute::Default))
         return true;
     // RFG-075: an IsAlpha-spec section whose texture the histogram calls OPAQUE is owned.

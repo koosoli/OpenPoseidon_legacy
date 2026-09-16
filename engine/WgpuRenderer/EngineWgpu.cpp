@@ -103,6 +103,12 @@ bool GpuEmatIsOpaqueSolid(const Ref<TexMaterial>& surfMat);
 bool GpuEmatCullNone(const Ref<TexMaterial>& surfMat);
 std::string GpuEmatFamily(const Ref<TexMaterial>& surfMat);
 bool GpuEmatIsGlass(const Ref<TexMaterial>& surfMat);
+// Whether a section's `.emat` authors real translucency: an `OpacityMap`
+// plus `BlendMode AlphaBlend` on a non-solid surface (wire mesh, glass).
+// A roughness-alpha BCR can look the same in the histogram; the OpacityMap
+// is what says the alpha is coverage to blend rather than data, and the
+// solid-family exclusion keeps opaque walls out even in odd combinations.
+bool GpuEmatBlends(const Ref<TexMaterial>& surfMat);
 bool GpuTextureIsBarkOrTrunk(const TextureWgpu* texture);
 bool GpuSectionMaterialUsesLeafCardsUncached(const Ref<TexMaterial>& surfMat);
 bool GpuTextureIsBarkOrTrunkUncached(const TextureWgpu* texture);
@@ -6085,7 +6091,11 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     auto* texture = static_cast<TextureWgpu*>(sMesh.GetSection(beg).properties.GetTexture());
     const bool materialUsesLeafCards =
         alphaClass == Poseidon::AlphaStats::Blend && GpuSectionMaterialUsesLeafCards(debugSection.surfMat);
-    const bool materialCutout = materialUsesLeafCards && GpuSectionMaterialIsCutout(debugSection.surfMat, texture);
+    // An OpacityMap material that authors `BlendMode AlphaBlend` (wire mesh,
+    // glass) blends; testing it would keep what the author meant translucent.
+    const bool materialBlends = GpuEmatBlends(debugSection.surfMat);
+    const bool materialCutout =
+        materialUsesLeafCards && !materialBlends && GpuSectionMaterialIsCutout(debugSection.surfMat, texture);
     if (GpuTextureIsBarkOrTrunk(texture))
     {
         // The common legacy section descriptor itself can carry a stale alpha
@@ -6105,7 +6115,7 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     else if (tex != 0 && (alphaClass == Poseidon::AlphaStats::Cutout || materialCutout ||
                           (texture && (render::IsLegacyPlantCutoutTexture(texture->Name()) ||
                                        (render::IsEnfusionCoverageTexture(texture->Name()) &&
-                                        texture->HasAlphaHoles())))))
+                                        texture->HasAlphaHoles() && !materialBlends)))))
     {
         // A cutout classification means the source has binary transparent texels, irrespective
         // of whether the P3D section remembered to set IsAlpha.  Some legacy sections are
@@ -6619,6 +6629,41 @@ bool GpuEmatIsGlass(const Ref<TexMaterial>& surfMat)
     return !family.empty() && Asset::Material::EmatMaterial::NameMatches(family, "MatPBRBasicGlass");
 }
 
+bool GpuEmatBlends(const Ref<TexMaterial>& surfMat)
+{
+    if (surfMat.IsNull())
+        return false;
+    const char* path = surfMat->GetName().Data();
+    if (!path || !*path || !Asset::Material::IsEmatPath(path))
+        return false;
+    static std::unordered_map<std::string, bool> cache;
+    static std::mutex cacheMutex;
+    const std::string key(path);
+    {
+        std::lock_guard<std::mutex> lock(cacheMutex);
+        if (const auto found = cache.find(key); found != cache.end())
+            return found->second;
+    }
+    bool blends = false;
+    try
+    {
+        Asset::Material::EmatMaterial emat;
+        if (Asset::Material::ReadEmatFile(key, emat) && !emat.TextureOf("OpacityMap").empty() &&
+            !Asset::Material::EmatIsOpaqueSolid(emat))
+        {
+            if (const auto* mode = emat.Find("BlendMode");
+                mode && !mode->values.empty() && !mode->values[0].isNumber)
+                blends = Asset::Material::EmatMaterial::NameMatches(mode->values[0].text, "AlphaBlend");
+        }
+    }
+    catch (...)
+    {
+    }
+    std::lock_guard<std::mutex> lock(cacheMutex);
+    cache[key] = blends;
+    return blends;
+}
+
 // Whether a section's `.emat` is a solid building/prop surface (see
 // EmatIsOpaqueSolid): its BCR alpha is roughness, never coverage. Cached by
 // material path like the leaf-cards answer above, for the same reason.
@@ -6776,9 +6821,10 @@ bool ClassifyGpuSection(const Shape& s, uint64_t mesh, const AutoArray<render::m
     // section is drawn twice or not at all (see IsGpuOwnedSection).
     const bool legacyPlantCutout = texture && (render::IsLegacyPlantCutoutTexture(texture->Name()) ||
                                                (render::IsEnfusionCoverageTexture(texture->Name()) &&
-                                                texture->HasAlphaHoles()));
+                                                texture->HasAlphaHoles() && !GpuEmatBlends(sec.surfMat)));
     const bool materialCutout =
-        alphaClass == Poseidon::AlphaStats::Blend && GpuSectionMaterialIsCutout(sec.surfMat, texture);
+        alphaClass == Poseidon::AlphaStats::Blend && !GpuEmatBlends(sec.surfMat) &&
+        GpuSectionMaterialIsCutout(sec.surfMat, texture);
     // Mirrors DrawSectionTL's three rules, in the same order, so the retained path shades a tree
     // exactly as the per-draw path did (2026-09-02, the pine-trunk regression):
     //  1. bark / trunk textures are SOLID whatever their alpha channel says -- their alpha is not
@@ -6794,9 +6840,11 @@ bool ClassifyGpuSection(const Shape& s, uint64_t mesh, const AutoArray<render::m
     // section is drawn twice or not at all.
     const bool bark = texture && GpuTextureIsBarkOrTrunk(texture);
     // Glass excluded: its OpacityMap claims leaf-cards, but its BlendMode is
-    // AlphaBlend and it must blend, never test opaque (P10 greenhouse).
+    // AlphaBlend and it must blend, never test opaque (P10 greenhouse). The
+    // same holds for any OpacityMap material that authors blending (wire
+    // mesh): cutout would test what the author meant to blend.
     const bool blendOpaqueRoute = alphaClass == Poseidon::AlphaStats::Blend && !bark && !materialCutout &&
-                                  !legacyPlantCutout && !GpuEmatIsGlass(sec.surfMat) &&
+                                  !legacyPlantCutout && !GpuEmatIsGlass(sec.surfMat) && !GpuEmatBlends(sec.surfMat) &&
                                   GpuSectionMaterialUsesLeafCards(sec.surfMat);
     // Raw per-section material first: the alpha guards below consult it, mirroring
     // the per-draw path (whose Opaque-class branch this twins). Base = the
