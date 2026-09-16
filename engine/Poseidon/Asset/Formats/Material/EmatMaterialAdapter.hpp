@@ -497,8 +497,13 @@ inline TranslatedMaterial TranslateEmat(const EmatMaterial& emat, const std::str
     const bool en2 = layerEnabled("Enabled_2"), en3 = layerEnabled("Enabled_3"), en4 = layerEnabled("Enabled_4");
     if (en2)
     {
-        AddEmatSlot(out, emat, "BCR_2", MaterialSlot::LayerColour1);
-        AddEmatSlot(out, emat, "NMO_2", MaterialSlot::LayerNormal1);
+        // `MatPBR2Layers` spells its second layer `BCRMap2`/`NMOMap2`
+        // (GraniteStone_01); first key wins per slot, and the two families
+        // never name each other's keys, so both spellings can stand here.
+        if (!AddEmatSlot(out, emat, "BCR_2", MaterialSlot::LayerColour1))
+            AddEmatSlot(out, emat, "BCRMap2", MaterialSlot::LayerColour1);
+        if (!AddEmatSlot(out, emat, "NMO_2", MaterialSlot::LayerNormal1))
+            AddEmatSlot(out, emat, "NMOMap2", MaterialSlot::LayerNormal1);
     }
     if (en3)
     {
@@ -519,6 +524,11 @@ inline TranslatedMaterial TranslateEmat(const EmatMaterial& emat, const std::str
     SetEmatSlotUv(out, MaterialSlot::LayerColour1, emat, "UVTransform_2", nullptr);
     SetEmatSlotUv(out, MaterialSlot::LayerColour2, emat, "UVTransform_3", nullptr);
     SetEmatSlotUv(out, MaterialSlot::LayerColour3, emat, "UVTransform_4", nullptr);
+    // `MatPBR2Layers` spells its layer transform `BCRMap2UVTransform`
+    // (GraniteStone_01, 6x6); used only when the `UVTransform_2` spelling is
+    // absent, so a hybrid material keeps its Multi answer.
+    if (!emat.Find("UVTransform_2"))
+        SetEmatSlotUv(out, MaterialSlot::LayerColour1, emat, "BCRMap2UVTransform", nullptr);
     // RFG-072: and the mask on the SECOND UV set when the material says so.
     //
     // `UVSrcGlobalMaps "UV set 2"` (3,439 of the corpus's materials) names the `.xob`'s
@@ -553,6 +563,12 @@ inline TranslatedMaterial TranslateEmat(const EmatMaterial& emat, const std::str
             SetEmatSlotTint(out, MaterialSlot::LayerColour1, emat, "Color_2");
             SetEmatSlotTint(out, MaterialSlot::LayerColour2, emat, "Color_3");
             SetEmatSlotTint(out, MaterialSlot::LayerColour3, emat, "Color_4");
+            // `MatPBR2Layers` spells its layer tint `Color2` (GraniteStone_01);
+            // SetEmatSlotTint only fills a slot the material already bound, so
+            // this is a no-op for every other family; guarded so a hybrid keeps
+            // its `Color_2` answer.
+            if (!emat.Find("Color_2"))
+                SetEmatSlotTint(out, MaterialSlot::LayerColour1, emat, "Color2");
         }
     }
 
