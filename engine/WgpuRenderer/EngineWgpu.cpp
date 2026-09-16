@@ -5893,9 +5893,15 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                         // The `.emat` `Color` surface tint (NetFence_Wire's
                         // dark authoring over a near-white BCR tile). A pure
                         // function of the material path like the rest here.
-                        bindSlot->tint[0] = translated.diffuse[0];
-                        bindSlot->tint[1] = translated.diffuse[1];
-                        bindSlot->tint[2] = translated.diffuse[2];
+                        // NATIVE emats only: a legacy RVMAT's diffuse already
+                        // reached _curMaterial through surfMat->Combine, so
+                        // recording it here as well would tint twice.
+                        if (Asset::Material::IsEmatPath(materialPath))
+                        {
+                            bindSlot->tint[0] = translated.diffuse[0];
+                            bindSlot->tint[1] = translated.diffuse[1];
+                            bindSlot->tint[2] = translated.diffuse[2];
+                        }
                         bindSlot->bindResolved = true;
                         Pass1Submit::gSecBindResolves.fetch_add(1, std::memory_order_relaxed);
                     }
