@@ -100,6 +100,7 @@ namespace
 bool GpuSectionMaterialUsesLeafCards(const Ref<TexMaterial>& surfMat);
 bool GpuSectionMaterialIsCutout(const Ref<TexMaterial>& surfMat, TextureWgpu* texture);
 bool GpuEmatIsOpaqueSolid(const Ref<TexMaterial>& surfMat);
+bool GpuEmatCullNone(const Ref<TexMaterial>& surfMat);
 bool GpuTextureIsBarkOrTrunk(const TextureWgpu* texture);
 bool GpuSectionMaterialUsesLeafCardsUncached(const Ref<TexMaterial>& surfMat);
 bool GpuTextureIsBarkOrTrunkUncached(const TextureWgpu* texture);
@@ -6291,6 +6292,13 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     {
         d.flags |= WGR_DRAW3D_GLASS;
     }
+    // Enfusion `Cull none`: single-sided-authored surface (wire mesh, glass)
+    // drawn double-sided. The per-draw pipeline drops backface culling for the
+    // draw; the retained path keeps culling (its sections are closed solids).
+    if (GpuEmatCullNone(debugSection.surfMat))
+    {
+        d.flags |= WGR_DRAW3D_DOUBLE_SIDED;
+    }
     // MAT-052 second half: the engine scopes ENCLOSED first-person interiors with
     // PassKindHint::Cockpit (the camera vehicle's inside LOD in DrawSortObject).
     // Carry that scope to the shader so the interior takes a damped sky ambient --
@@ -6597,6 +6605,41 @@ bool GpuEmatIsOpaqueSolid(const Ref<TexMaterial>& surfMat)
     std::lock_guard<std::mutex> lock(cacheMutex);
     cache[key] = solid;
     return solid;
+}
+
+// Whether a section's `.emat` names `Cull none` (wire mesh, glass panes).
+// Same cached shape as the two answers above.
+bool GpuEmatCullNone(const Ref<TexMaterial>& surfMat)
+{
+    if (surfMat.IsNull())
+        return false;
+    const char* path = surfMat->GetName().Data();
+    if (!path || !*path || !Asset::Material::IsEmatPath(path))
+        return false;
+    static std::unordered_map<std::string, bool> cache;
+    static std::mutex cacheMutex;
+    const std::string key(path);
+    {
+        std::lock_guard<std::mutex> lock(cacheMutex);
+        if (const auto found = cache.find(key); found != cache.end())
+            return found->second;
+    }
+    bool cullNone = false;
+    try
+    {
+        Asset::Material::EmatMaterial emat;
+        if (Asset::Material::ReadEmatFile(key, emat))
+        {
+            if (const auto* cull = emat.Find("Cull"); cull && !cull->values.empty() && !cull->values[0].isNumber)
+                cullNone = Asset::Material::EmatMaterial::NameMatches(cull->values[0].text, "none");
+        }
+    }
+    catch (...)
+    {
+    }
+    std::lock_guard<std::mutex> lock(cacheMutex);
+    cache[key] = cullNone;
+    return cullNone;
 }
 
 

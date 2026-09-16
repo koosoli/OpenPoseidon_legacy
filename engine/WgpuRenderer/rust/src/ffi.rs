@@ -290,6 +290,10 @@ pub const WGR_DRAW3D_GLASS: u32 = 8;
 // MAT-052: first-person cockpit draw -- shade with the flat scene ambient, not the sky dome.
 pub const WGR_DRAW3D_COCKPIT: u32 = 16;
 pub const WGR_DRAW3D_MONITOR: u32 = 32;
+// WgrDraw3D::flags bit 6: Enfusion `Cull none` -- draw double-sided (the
+// per-draw pipeline drops backface culling for the draw). Deliberately NOT in
+// direct_material_flags: cull is pipeline state, not a shader constant.
+pub const WGR_DRAW3D_DOUBLE_SIDED: u32 = 64;
 pub const WGR_DRAW3D_NORMAL_RG: u32 = 128;
 pub const WGR_DRAW3D_NATIVE_CAVITY: u32 = 1024;
 

@@ -174,6 +174,10 @@ struct PipelineKey {
     offset: Offset,      // polygon-offset variant
     alpha_ref_bits: u32, // f32::to_bits of the cutout threshold
     skinned: bool,
+    // Enfusion `Cull none` (WGR_DRAW3D_DOUBLE_SIDED): this draw skips backface
+    // culling. Part of the key so single-sided draws keep their culled
+    // pipeline; the variant only materialises for draws that ask for it.
+    double_sided: bool,
     // Colour-pass depth-write override for the depth prepass (decision 2/4): when the
     // prepass already laid down this segment's opaque depth, the colour pass draws the
     // prepassed set GreaterEqual + write-OFF. Same key otherwise, so post-ClearDepth
@@ -421,6 +425,7 @@ fn atmospheric_replay_only_moves_prepassed_objects() {
         offset: Offset::None,
         alpha_ref_bits: 0.0f32.to_bits(),
         skinned: false,
+        double_sided: false,
         depth_write_off: false,
     };
     assert!(key.prepassed());
@@ -454,6 +459,7 @@ impl PipelineKey {
             offset,
             alpha_ref_bits: d.alpha_ref.to_bits(),
             skinned,
+            double_sided: d.flags & crate::ffi::WGR_DRAW3D_DOUBLE_SIDED != 0,
             depth_write_off: false,
         }
     }
@@ -5123,8 +5129,10 @@ impl Gfx3d {
                 // backwards is INVISIBLE, and from inside a cockpit that reads as a
                 // transparent airframe rather than as missing geometry. One run with
                 // this set separates "not drawn because culled" from every other
-                // reason a surface can fail to appear.
-                cull_mode: if std::env::var("WGR_NO_CULL").map(|v| v != "0").unwrap_or(false) {
+                // reason a surface can fail to appear. Per-draw `double_sided`
+                // (Enfusion `Cull none`) takes the same no-cull variant.
+                cull_mode: if key.double_sided
+                    || std::env::var("WGR_NO_CULL").map(|v| v != "0").unwrap_or(false) {
                     None
                 } else {
                     Some(wgpu::Face::Back)

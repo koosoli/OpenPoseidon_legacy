@@ -208,6 +208,10 @@ struct TranslatedMaterial
     float                crownAoHeight = 0.0f;
     float                crownAoWidth = 0.0f;
     float                crownAoIntensity = 0.0f;
+    // Enfusion `Cull none`: the surface is authored single-sided but drawn
+    // double-sided (wire mesh, glass panes). False for every material that
+    // names no Cull key, and all legacy.
+    bool                 doubleSided = false;
 
     const TranslatedSlot* Find(MaterialSlot slot) const
     {

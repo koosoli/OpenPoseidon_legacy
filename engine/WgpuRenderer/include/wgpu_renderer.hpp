@@ -298,6 +298,10 @@ enum WgrDraw3DFlags : uint32_t
      * for the same surfaces IS the flat scene ambient, so this matches it. */
     WGR_DRAW3D_COCKPIT = 16,
     WGR_DRAW3D_MONITOR = 32,
+    /* Enfusion `Cull none`: single-sided-authored surface drawn double-sided
+     * (wire mesh, glass panes). The per-draw pipeline drops backface culling
+     * for the draw; every other draw keeps it. */
+    WGR_DRAW3D_DOUBLE_SIDED = 64,
     WGR_DRAW3D_NORMAL_RG = 128, // BC5 / compressed Enfusion normal XY, not NOHQ alpha/green
     WGR_DRAW3D_NATIVE_CAVITY = 1024 // 256/512 belong to Z bias
 };

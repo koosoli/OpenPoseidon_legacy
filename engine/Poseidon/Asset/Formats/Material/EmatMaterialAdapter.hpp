@@ -586,6 +586,13 @@ inline TranslatedMaterial TranslateEmat(const EmatMaterial& emat, const std::str
     if (emat.FloatOf("NormalPower", normalPower))
         out.normalPower = normalPower < 0.0f ? 0.0f : normalPower;
 
+    // `Cull none` disables backface culling for the surface (wire mesh, glass
+    // panes authored single-sided). Parsed, never reinterpreted; anything but
+    // an explicit `none` keeps the default cull.
+    if (const EmatProperty* cull = emat.Find("Cull");
+        cull && !cull->values.empty() && !cull->values[0].isNumber)
+        out.doubleSided = EmatMaterial::NameMatches(cull->values[0].text, "none");
+
     // Crown self-occlusion volume. Parsed whole or not at all: a center without
     // dimensions (or dimensions without an intensity) cannot evaluate, and a
     // half-read volume would darken the wrong leaves. Intensity clamps to
