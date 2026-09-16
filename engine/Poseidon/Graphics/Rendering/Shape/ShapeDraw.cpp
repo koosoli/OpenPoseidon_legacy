@@ -171,6 +171,44 @@ static AuthoredAlphaRoute SectionMaterialAlphaRoute(const Ref<TexMaterial>& surf
     return route;
 }
 
+// Whether a section's `.emat` names `Cull none` (wire mesh, glass panes).
+// Same cached shape as the route above: file read once per material path.
+static bool SectionMaterialCullNone(const Ref<TexMaterial>& surfMat)
+{
+    if (surfMat.IsNull())
+        return false;
+    const char* path = surfMat->GetName().Data();
+    if (!path || !*path || !Asset::Material::IsEmatPath(path))
+        return false;
+    static std::unordered_map<std::string, bool> cache;
+    static std::mutex                            cacheMutex;
+    const std::string                            key(path);
+    {
+        std::lock_guard<std::mutex> lock(cacheMutex);
+        const auto                  found = cache.find(key);
+        if (found != cache.end())
+            return found->second;
+    }
+    bool cullNone = false;
+    try
+    {
+        Asset::Material::EmatMaterial emat;
+        if (Asset::Material::ReadEmatFile(key, emat))
+        {
+            if (const auto* cull = emat.Find("Cull");
+                cull && !cull->values.empty() && !cull->values[0].isNumber)
+                cullNone =
+                    Asset::Material::EmatMaterial::NameMatches(cull->values[0].text, "none");
+        }
+    }
+    catch (...)
+    {
+    }
+    std::lock_guard<std::mutex> lock(cacheMutex);
+    cache[key] = cullNone;
+    return cullNone;
+}
+
 // The single place that decides whether a section belongs in the back-to-front pass.
 static bool SectionIsBlend(const ShapeSectionInfo& sec)
 {
@@ -237,6 +275,18 @@ bool SectionGpuOwned(const ShapeSectionInfo& sec)
     Texture* tex = sec.properties.GetTexture();
     if (!tex)
         return false;
+    // Cull-none cutouts (wire mesh, glass) stay CPU-drawn double-sided: the
+    // retained path culls backfaces and ClassifyGpuSection declines them the
+    // same way, so no section is drawn twice or not at all.
+    if (SectionMaterialCullNone(sec.surfMat))
+    {
+        const bool cutoutRoute =
+            tex->GetAlphaClass() == Poseidon::AlphaStats::Cutout ||
+            ((render::IsLegacyPlantCutoutTexture(tex->Name()) || render::IsEnfusionCoverageTexture(tex->Name())) &&
+             tex->HasAlphaHoles());
+        if (cutoutRoute)
+            return false;
+    }
     if (tex->GetAlphaClass() == Poseidon::AlphaStats::Cutout)
         return true;
     if (render::IsLegacyPlantCutoutTexture(tex->Name()))

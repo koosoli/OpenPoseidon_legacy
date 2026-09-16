@@ -101,6 +101,8 @@ bool GpuSectionMaterialUsesLeafCards(const Ref<TexMaterial>& surfMat);
 bool GpuSectionMaterialIsCutout(const Ref<TexMaterial>& surfMat, TextureWgpu* texture);
 bool GpuEmatIsOpaqueSolid(const Ref<TexMaterial>& surfMat);
 bool GpuEmatCullNone(const Ref<TexMaterial>& surfMat);
+std::string GpuEmatFamily(const Ref<TexMaterial>& surfMat);
+bool GpuEmatIsGlass(const Ref<TexMaterial>& surfMat);
 bool GpuTextureIsBarkOrTrunk(const TextureWgpu* texture);
 bool GpuSectionMaterialUsesLeafCardsUncached(const Ref<TexMaterial>& surfMat);
 bool GpuTextureIsBarkOrTrunkUncached(const TextureWgpu* texture);
@@ -6575,6 +6577,48 @@ bool GpuSectionMaterialIsCutout(const Ref<TexMaterial>& surfMat, TextureWgpu* te
            GpuSectionMaterialUsesLeafCards(surfMat);
 }
 
+// The `.emat` shader family, cached by material path (empty when the section
+// names none or it cannot be read). One file read per material, like the
+// leaf-cards answer above.
+std::string GpuEmatFamily(const Ref<TexMaterial>& surfMat)
+{
+    if (surfMat.IsNull())
+        return {};
+    const char* path = surfMat->GetName().Data();
+    if (!path || !*path || !Asset::Material::IsEmatPath(path))
+        return {};
+    static std::unordered_map<std::string, std::string> cache;
+    static std::mutex cacheMutex;
+    const std::string key(path);
+    {
+        std::lock_guard<std::mutex> lock(cacheMutex);
+        if (const auto found = cache.find(key); found != cache.end())
+            return found->second;
+    }
+    std::string family;
+    try
+    {
+        Asset::Material::EmatMaterial emat;
+        if (Asset::Material::ReadEmatFile(key, emat))
+            family = emat.className;
+    }
+    catch (...)
+    {
+    }
+    std::lock_guard<std::mutex> lock(cacheMutex);
+    cache[key] = family;
+    return family;
+}
+
+// Whether a section's `.emat` is classic glass (dirt coverage over a pane):
+// an OpacityMap is present, so EmatUsesLeafCards claims it, but its
+// BlendMode is AlphaBlend and it must blend, never test opaque.
+bool GpuEmatIsGlass(const Ref<TexMaterial>& surfMat)
+{
+    const std::string family = GpuEmatFamily(surfMat);
+    return !family.empty() && Asset::Material::EmatMaterial::NameMatches(family, "MatPBRBasicGlass");
+}
+
 // Whether a section's `.emat` is a solid building/prop surface (see
 // EmatIsOpaqueSolid): its BCR alpha is roughness, never coverage. Cached by
 // material path like the leaf-cards answer above, for the same reason.
@@ -6656,6 +6700,32 @@ static void TraceClassifyReject(const ShapeSection& sec, const char* why)
         LOG_INFO(Graphics, "Wgpu material: classifier REFUSED ({}) surfMat='{}' face='{}'", why, mat, faceName);
 }
 
+// One line per `.emat` behind a Blend-class section, saying WHY the opaque
+// route took or declined it: family, solid-surface verdict, alpha holes, the
+// folded material alphas, and the texture class. The transparent-wall/rock
+// question ("which guard failed?") is answered here, not by guessing.
+static void TraceEmatBlendDecision(const ShapeSection& sec, TextureWgpu* texture, const TLMaterial& m, bool accepted)
+{
+    if (sec.surfMat.IsNull())
+        return;
+    const char* path = sec.surfMat->GetName().Data();
+    if (!path || !*path || !Asset::Material::IsEmatPath(path))
+        return;
+    static std::unordered_set<std::string> said;
+    if (!said.insert(std::string(path) + (accepted ? "|a" : "|r")).second)
+        return;
+    const auto alphaClass = texture ? texture->GetAlphaClass() : Poseidon::AlphaStats::Opaque;
+    LOG_INFO(Graphics,
+             "Wgpu material: {} opaque-roughness route for '{}' family='{}' solid={} holes={} class={} "
+             "matAlpha={:.2f},{:.2f},{:.2f}",
+             accepted ? "ACCEPTED" : "DECLINED", path, GpuEmatFamily(sec.surfMat).c_str(),
+             GpuEmatIsOpaqueSolid(sec.surfMat) ? 1 : 0, texture && texture->HasAlphaHoles() ? 1 : 0,
+             alphaClass == Poseidon::AlphaStats::Blend ? "blend"
+             : alphaClass == Poseidon::AlphaStats::Cutout ? "cutout"
+                                                          : "opaque",
+             m.diffuse.A(), m.ambient.A(), m.emmisive.A());
+}
+
 bool ClassifyGpuSection(const Shape& s, uint64_t mesh, const AutoArray<render::mesh::MeshSection>& secs, int i,
                         WgrModelSection& secOut, WgrModelMaterial& matOut)
 {
@@ -6723,8 +6793,11 @@ bool ClassifyGpuSection(const Shape& s, uint64_t mesh, const AutoArray<render::m
     // here, complement-drawn, and SectionGpuOwned refuses it the same way so no
     // section is drawn twice or not at all.
     const bool bark = texture && GpuTextureIsBarkOrTrunk(texture);
+    // Glass excluded: its OpacityMap claims leaf-cards, but its BlendMode is
+    // AlphaBlend and it must blend, never test opaque (P10 greenhouse).
     const bool blendOpaqueRoute = alphaClass == Poseidon::AlphaStats::Blend && !bark && !materialCutout &&
-                                  !legacyPlantCutout && GpuSectionMaterialUsesLeafCards(sec.surfMat);
+                                  !legacyPlantCutout && !GpuEmatIsGlass(sec.surfMat) &&
+                                  GpuSectionMaterialUsesLeafCards(sec.surfMat);
     // Raw per-section material first: the alpha guards below consult it, mirroring
     // the per-draw path (whose Opaque-class branch this twins). Base = the
     // shading-type material at neutral accommodation (HDR auto-exposure handles adaptation),
@@ -6751,9 +6824,11 @@ bool ClassifyGpuSection(const Shape& s, uint64_t mesh, const AutoArray<render::m
         !blendOpaqueRoute && !enfusionOpaqueRoughness)
     {
         TraceClassifyReject(sec, "blend/opaque route");
-
+        TraceEmatBlendDecision(sec, texture, m, false);
         return false;
     }
+    if (enfusionOpaqueRoughness)
+        TraceEmatBlendDecision(sec, texture, m, true);
     float alphaRef = AlphaRefFromDesc(desc);
     if (bark || blendOpaqueRoute || enfusionOpaqueRoughness)
     {
@@ -6771,6 +6846,14 @@ bool ClassifyGpuSection(const Shape& s, uint64_t mesh, const AutoArray<render::m
                           desc.blend == render::BlendMode::AlphaBlend))
     {
         alphaRef = std::max(alphaRef, 0.5f);
+    }
+    // Cull-none cutouts (wire mesh) stay CPU-drawn: the material is authored
+    // double-sided and the retained path culls backfaces. SectionGpuOwned
+    // declines them the same way, so no section is drawn twice or not at all.
+    if (alphaRef > 0.0f && GpuEmatCullNone(sec.surfMat))
+    {
+        TraceClassifyReject(sec, "cull-none cutout (CPU double-sided)");
+        return false;
     }
     secOut.variant = alphaRef > 0.0f ? 1u : 0u;
     // Flags are filled by the caller (RegisterGpuModel): the reflective bit needs the
