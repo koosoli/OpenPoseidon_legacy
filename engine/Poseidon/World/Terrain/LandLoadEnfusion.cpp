@@ -1523,12 +1523,13 @@ LODShapeWithShadow* BuildRoadShape(const std::vector<float>& points, float width
         {
             Fmt::MLOD::WriteFace face;
             face.vertexCount = 3;
-            // A road that authors neither texture nor material (dirt tracks)
-            // would otherwise draw with the white untextured fallback across
-            // metres of landscape. Give it a flat dirt-grey constant through
-            // the existing `enfc|` mechanism (RFG-039) instead: native road
-            // ribbons only, no legacy path names such a texture.
-            face.texture = texture.empty() && material.empty() ? "enfc|0.40,0.35,0.29" : texture;
+            // A road without a texture (dirt tracks, and any material that
+            // resolves to no colour texture) would otherwise draw with the
+            // white untextured fallback across metres of landscape. Give it a
+            // flat dirt-grey constant through the existing `enfc|` mechanism
+            // (RFG-039) instead: native road ribbons only, no legacy path
+            // names such a texture.
+            face.texture = texture.empty() ? "enfc|0.40,0.35,0.29" : texture;
             face.material = material;
             for (int c = 0; c < 3; ++c)
             {
