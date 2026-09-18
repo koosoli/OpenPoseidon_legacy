@@ -6159,7 +6159,7 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
         // appropriate common mode for every Cutout texture: keep the blend opaque and only
         // raise the alpha reference to the binary midpoint.
         blend = render::BlendMode::Opaque;
-        alphaRef = 0.0f;
+        alphaRef = std::max(alphaRef, 0.5f);
     }
     else if (blend == render::BlendMode::AlphaBlend && tex != 0 && texture && alphaClass == Poseidon::AlphaStats::Blend &&
              !texture->HasAlphaHoles() && MaterialIsFullyOpaque(_curMaterial) &&
