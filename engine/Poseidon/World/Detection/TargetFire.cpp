@@ -3,6 +3,7 @@
 
 #include <Poseidon/AI/VehicleAI.hpp>
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
+#include <Poseidon/World/Entities/Infantry/SoldierOld.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Random/randomGen.hpp>
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
@@ -413,6 +414,14 @@ bool EntityAI::AttackThink(FireResult& result, Vector3& pos)
     if (bestFire.gain <= 0)
     {
         return false;
+    }
+    // Existing attack orders also need to leave an unsafe firing lane. Reuse
+    // their path planner; the emission check remains the authority for firing.
+    Man* soldier = dyn_cast<Man>(this);
+    if (soldier && soldier->CombatAttackPosition(_attackTarget, pos))
+    {
+        result = bestFire;
+        return true;
     }
     const float goodEnough = 0.9f;
     const float notBad = 0.4f;

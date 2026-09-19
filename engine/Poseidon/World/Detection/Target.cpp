@@ -1396,9 +1396,11 @@ float VisibilityTracker::Value(const EntityAI* sensor, int weapon, float reserve
         LOG_DEBUG(AI, "VisibilityTracker expired");
         return _lastValue;
     }
-    if (Glob.time - _lastTime > maxDelay)
+    if (Glob.time - _lastTime > maxDelay || weapon != _lastWeapon || reserve != _lastReserve)
     {
         _lastTime = Glob.time;
+        _lastWeapon = weapon;
+        _lastReserve = reserve;
 
         EntityAI* ai = _obj;
         float irRange = sensor->GetType()->GetIRScanRange();
@@ -1430,6 +1432,8 @@ float VisibilityTracker::Value(const EntityAI* sensor, int weapon, float reserve
                         : sensor->PositionModelToWorld(sensor->GetWeaponPoint(weapon));
                 }
                 visible = GLandscape->Visible(weaponPos, sensor, ai, reserve, ObjIntersectFire);
+                if (const Man* man = dyn_cast<const Man>(sensor))
+                    visible = man->UpdateCombatCoverAim(weapon, ai, weaponPos, visible);
             }
         }
 
@@ -1460,7 +1464,7 @@ float VisibilityTrackerCache::KnownValue(const EntityAI* sensor, int weapon, Ent
         VisibilityTracker& tracker = _trackers[i];
         if (tracker._obj == obj)
         {
-            if (Glob.time - tracker._lastTime <= maxDelay)
+            if (Glob.time - tracker._lastTime <= maxDelay && tracker._lastWeapon == weapon && tracker._lastReserve == reserve)
             {
                 return tracker._lastValue;
             }
@@ -1493,10 +1497,7 @@ float VisibilityTrackerCache::Value(const EntityAI* sensor, int weapon, EntityAI
         VisibilityTracker& tracker = _trackers[i];
         if (tracker._obj == obj)
         {
-            if (Glob.time - tracker._lastTime <= maxDelay)
-            {
-                return tracker._lastValue;
-            }
+            return tracker.Value(sensor, weapon, reserve, maxDelay);
         }
         else if (Glob.time - tracker._lastTime > discardAfter || !tracker._obj)
         {

@@ -5,6 +5,7 @@
 #include <Poseidon/Foundation/Logging/Logging.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <spdlog/sinks/callback_sink.h>
+#include <Poseidon/Foundation/Logging/QueuedConsoleSink.hpp>
 #include <spdlog/common.h>
 #include <spdlog/details/log_msg.h>
 #include <spdlog/logger.h>
@@ -415,4 +416,26 @@ TEST_CASE("WipeOldFiles keeps the newest N matching files and ignores the rest",
     CHECK(fs::exists(other));
 
     fs::remove_all(root, ec);
+}
+
+TEST_CASE("Queued console drains messages in order with original categories", "[logging][console]")
+{
+    using Poseidon::Foundation::QueuedConsoleSink;
+    std::vector<std::string> received;
+    auto output = std::make_shared<spdlog::sinks::callback_sink_mt>(
+        [&](const spdlog::details::log_msg& msg) {
+            received.emplace_back(std::string(msg.logger_name.data(), msg.logger_name.size()) + ":" +
+                std::string(msg.payload.data(), msg.payload.size()));
+        });
+    {
+        QueuedConsoleSink sink(output);
+        for (int i = 0; i < 100; ++i)
+        {
+            const std::string text = std::to_string(i);
+            sink.log(spdlog::details::log_msg("AI", spdlog::level::info, text));
+        }
+        sink.flush();
+    }
+    REQUIRE(received.size() == 100);
+    for (int i = 0; i < 100; ++i) CHECK(received[i] == "AI:" + std::to_string(i));
 }

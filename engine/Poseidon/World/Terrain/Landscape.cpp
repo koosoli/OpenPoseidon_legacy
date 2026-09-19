@@ -3167,6 +3167,7 @@ void ObjectListFull::SetBSphere(int x, int z)
 int ObjectListFull::Add(Object* object, bool avoidRecalculation)
 {
     int index = base::Add(object);
+    if (object->GetType() != TypeTempVehicle) _visibilityObjects.Add(object);
     LODShape* shape = object->GetShape();
     if (shape && shape->FindRoadwayLevel() >= 0)
     {
@@ -3252,6 +3253,13 @@ void ObjectListFull::Delete(int index)
             _roadwayObjects.Delete(roadwayIndex);
         }
     }
+    if (obj->GetType() != TypeTempVehicle)
+    {
+        for (int i = 0; i < _visibilityObjects.Size(); ++i)
+        {
+            if (_visibilityObjects[i] == obj) { _visibilityObjects.Delete(i); break; }
+        }
+    }
     // Release the owning cell reference only after its non-owning mirrors no
     // longer contain the pointer. A static map object can be owned solely by
     // the landscape index at teardown.
@@ -3275,6 +3283,7 @@ void ObjectListFull::Delete(int index)
 
 void ObjectListFull::Clear()
 {
+    _visibilityObjects.Clear();
     base::Clear();
     _typeVehicles.Clear();
     _roadwayObjects.Clear();

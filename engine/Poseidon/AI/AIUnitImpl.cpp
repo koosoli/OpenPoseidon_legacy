@@ -7,6 +7,7 @@
 #include <Poseidon/Core/Config/UserConfig.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
+#include <Poseidon/World/Entities/Infantry/SoldierOld.hpp>
 
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
@@ -1221,15 +1222,27 @@ void AIUnit::SetWatch()
         // PERF-019: the auto-attack consideration, its gating condition included (the four
         // CommandSent scans are part of what every full think pays here).
         AICost::ScopedCost attackCost(AICost::Bucket::UnitAttack);
-        if (!IsPlayer() && _targetAssigned && !grp->CommandSent(this, Command::Attack) &&
+        EntityAI* veh = GetVehicle();
+        Man* soldier = dyn_cast<Man>(veh);
+        Target* laneTarget = soldier ? soldier->GetFireTarget() : nullptr;
+        const bool blockedLane = soldier && soldier->CombatLaneBlocked() && laneTarget;
+        if (!IsPlayer() && (_targetAssigned || blockedLane) && !grp->CommandSent(this, Command::Attack) &&
             !grp->CommandSent(this, Command::AttackAndFire) && !grp->CommandSent(this, Command::GetOut) &&
-            !grp->CommandSent(this, Command::GetIn) && (_targetAssigned == _targetEngage || !IsKeepingFormation()))
+            !grp->CommandSent(this, Command::GetIn) &&
+            (blockedLane || _targetAssigned == _targetEngage || !IsKeepingFormation()))
         {
             AICost::AICosts().unitAttackThinks++;
-            EntityAI* veh = GetVehicle();
             FireResult result;
             Vector3 pos;
-            if (veh->AttackThink(result, pos))
+            if (soldier && soldier->FindCombatFiringPosition(laneTarget ? laneTarget : static_cast<Target*>(_targetAssigned), pos))
+            {
+                Command cmd;
+                cmd._message = Command::Move;
+                cmd._targetE = laneTarget ? laneTarget : static_cast<Target*>(_targetAssigned);
+                cmd._destination = pos;
+                grp->NotifyAutoCommand(cmd, this);
+            }
+            else if (_targetAssigned && veh->AttackThink(result, pos))
             {
                 // check if we are ready to fire
                 // if not, we probably will have to attack

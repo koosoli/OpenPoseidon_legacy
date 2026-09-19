@@ -32,6 +32,8 @@ class VisibilityTracker
 	OLink<EntityAI> _obj;
 	Foundation::Time _lastTime;
 	float _lastValue;
+    int _lastWeapon = -2;
+    float _lastReserve = -1;
 
 	public:
 	VisibilityTracker();

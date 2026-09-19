@@ -1,5 +1,7 @@
 # Complete incoming-main inventory, 2026-09-19
 
+Follow-up: the 21 TAKE-P1/P2 packages are now source-integrated; see [COMBAT-EXPANSION-20260919](COMBAT-EXPANSION-20260919.md) for adaptations, verification and delivery. The table below records the original audit, not the updated deployment status.
+
 Compared fork `f380053b` (`parity/foliage-lighting-001`) with fetched upstream
 `ce7c153746d659359260934c5470e46650e81f83`. Common ancestor:
 `a6e3f2fcd7acd3a513cb595b7398ba4597f35427`.

@@ -604,6 +604,19 @@ class Man: public Person
     mutable InfantryCombat::FireLaneWait _combatLaneWait;
     mutable const char* _combatLastGate = "not-evaluated";
     unsigned _combatLaneYields = 0;
+    float _combatRepositionAfter = 0;
+    unsigned _combatRepositionCandidate = 0;
+    unsigned _combatRepositions = 0;
+    unsigned _combatRepositionProbes = 0;
+    Vector3 _combatMoveGoal = VZero;
+    const void* _combatMoveTarget = nullptr;
+    float _combatMoveUntil = 0;
+    struct CombatCoverAim {
+        OLink<EntityAI> target;
+        int weapon = -1;
+        float until = 0;
+    };
+    mutable AutoArray<CombatCoverAim> _combatCoverAims;
     void RecordCombatLaneBlocked(const Target* target) const;
 
     mutable CargoWeaponSeat _playerCargoWeaponSeat;
@@ -697,7 +710,12 @@ class Man: public Person
 
 	void ThrowGrenadeAction(int weapon);
 	bool ImprovedAutonomousCombat() const;
+    float UpdateCombatCoverAim(int weapon, EntityAI* target, Vector3Par muzzle, float visible) const;
+    Vector3 CombatCoverAimOffset(int weapon, const EntityAI* target) const;
 	bool CombatShotSafe(int weapon, const Target* target) const;
+    bool CombatBulletPathSafe(int weapon, Vector3Par origin, Vector3Par direction, unsigned* blockers = nullptr) const;
+    bool FindCombatFiringPosition(Target* target, Vector3& position);
+    bool CombatAttackPosition(Target* target, Vector3& position);
 	bool CombatExplosiveAreaSafe(Vector3Par point, float radius, float delay) const;
 	void ProcessUIAction(const UIAction &action);
 
@@ -913,6 +931,8 @@ class Man: public Person
 
     bool CombatLaneBlocked() const;
     unsigned CombatLaneYields() const { return _combatLaneYields; }
+    unsigned CombatRepositions() const { return _combatRepositions; }
+    unsigned CombatRepositionProbes() const { return _combatRepositionProbes; }
     const char* CombatLastGate() const { return _combatLastGate; }
     int CombatPauseState() const { return static_cast<int>(_fireState); }
     float WalkSpeedWanted() const { return _walkSpeedWanted; }

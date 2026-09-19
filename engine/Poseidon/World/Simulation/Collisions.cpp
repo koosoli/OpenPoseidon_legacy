@@ -34,6 +34,7 @@ using Poseidon::Foundation::MStorage;
 #include <Poseidon/World/Entities/Weapons/Shots.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/AI/VehicleAI.hpp>
+#include <Poseidon/World/Entities/Infantry/SoldierOld.hpp>
 #include <Poseidon/AI/AI.hpp>
 #include <Random/randomGen.hpp>
 #include <Poseidon/Core/Global.hpp>
@@ -1546,10 +1547,10 @@ bool Landscape::CheckVisibility(int x, int z, VisCheckContext& context, ObjInter
     {
         return false;
     }
-    int no = list->Size();
+    int no = list->GetVisibilityObjectCount();
     for (int oi = 0; oi < no; oi++)
     {
-        Object* obstacle = list->Get(oi);
+        Object* obstacle = list->GetVisibilityObject(oi);
         LODShape* obstacleShape = obstacle->GetShape();
         if (!obstacleShape)
         {
@@ -2090,7 +2091,18 @@ float Landscape::Visible(Vector3Par sensorPos, const Object* sensor, const Objec
     float dist2 = objectPos.Distance2(sensorPos);
     if (dist2 < Square(ENGINE_CONFIG.horizontZ * 8))
     {
-        return Visible(sensorPos, objectPos, objectSize, sensor, object, isect);
+        float visible = Visible(sensorPos, objectPos, objectSize, sensor, object, isect);
+        // A torso hidden by low cover is not a completely hidden person. Keep
+        // the normal perception pipeline and its range/knowledge checks; only
+        // sample one physically visible upper-body point when necessary.
+        if (isect == ObjIntersectView && visible < 0.63f && dyn_cast<const Man>(object))
+        {
+            const Man* observer = dyn_cast<const Man>(sensor);
+            if (observer && observer->ImprovedAutonomousCombat())
+                visible = floatMax(visible, Visible(sensorPos,
+                    object->CameraPosition() - Vector3(0, 0.08f, 0), 0.08f, sensor, object, isect));
+        }
+        return visible;
     }
     RptF("Dist %.1f, between %s (%.1f,%.1f,%.1f) and %s (%.1f,%.1f,%.1f)", sqrt(dist2),
          (const char*)ShapeDebugName(sensor), sensorPos.X(), sensorPos.Y(), sensorPos.Z(),

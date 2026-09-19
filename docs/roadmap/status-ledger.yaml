@@ -6427,8 +6427,9 @@ tickets:
     test_ids: [friendly-fire-residual-travel, friendly-fire-block-culling, fire-lane-wait, burst-aim-eligibility]
     benchmark_artifacts: []
     evidence_hash: null
-    decision_record: docs/roadmap/decisions/AI-PROGRESS-20260919.md
+    decision_record: docs/roadmap/decisions/COMBAT-EXPANSION-20260919.md
     known_failures:
+      - Dense surrounding-enemy combat and vanilla-level pacing still require broader visual acceptance; partial-cover controls cover stock sandbags, not every terrain/posture.
       - Visual acceptance and custom fused/obstructed grenade scenarios remain pending; no universal projectile safety claim.
     fallback: AI tab Legacy or POSEIDON_AI_COMBAT_LEGACY=1 restores prior autonomous combat checks.
     reviewer: null
@@ -6440,6 +6441,7 @@ tickets:
       Owner visual review remains open; author tests are not independent review.
     supersedes: []
     evidence:
+      - docs/roadmap/decisions/COMBAT-EXPANSION-20260919.md
       - docs/roadmap/decisions/COMBAT-FIXES-20260919.md
       - docs/roadmap/decisions/SHOT-SHADOW-AUDIT-20260919.md
       - docs/roadmap/decisions/AI-PROGRESS-20260919.md
@@ -6484,3 +6486,46 @@ tickets:
     evidence:
       - docs/roadmap/decisions/AI-PROGRESS-20260919.md
       - engine/Poseidon/World/Simulation/StableExtract.hpp
+
+  - id: PERF-037
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: Exclude footprints from visibility traversal and queue text console output
+    class: RUNTIME_INFRA
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: OPEN
+    status: INTEGRATED
+    outcome: null
+    owner: null
+    branch: parity/foliage-lighting-001
+    baseline_commit: a30452b2
+    verification_commit: null
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: []
+    production_call_sites:
+      - file: engine/Poseidon/World/Simulation/Collisions.cpp
+        symbol: Landscape::CheckVisibility
+        verified_commit: null
+      - file: engine/Poseidon/Foundation/Logging/Logging.cpp
+        symbol: QueuedConsoleSink
+        verified_commit: null
+    test_ids: [visibility-index, logging]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/COMBAT-EXPANSION-20260919.md
+    known_failures:
+      - Dense-scene simulation outliers remain; this does not establish vanilla-level pacing.
+    fallback: POSEIDON_SYNC_CONSOLE=1 restores synchronous console writes; revert the visibility-index change to restore full-cell scans.
+    reviewer: null
+    reviewer_method: >-
+      Author ran the 20000-object visibility index and queued-console ordering/drain tests,
+      followed by the paired 63MAX far-near-far trace reported in the decision record.
+      Independent review and broader owner visual acceptance remain open.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/COMBAT-EXPANSION-20260919.md

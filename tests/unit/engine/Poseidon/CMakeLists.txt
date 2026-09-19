@@ -248,6 +248,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     World/test_first_divergent_boundary.cpp
     World/test_serial_task_graph.cpp
     World/test_stable_extract.cpp
+    World/test_visibility_objects.cpp
     World/test_sim_stage_evidence.cpp
     Foundation/Threads/test_watchdog.cpp
     Foundation/Threads/test_precise_sleep.cpp
@@ -564,6 +565,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     UI/Controls/test_uiControls.cpp
     UI/Controls/test_progress_bar_widget.cpp
     UI/Controls/test_control_object_rotate_devmode.cpp
+    UI/Controls/test_html_table_row.cpp
     UI/test_button_modal_page.cpp
     UI/test_capture_page.cpp
     UI/test_confirm_page.cpp

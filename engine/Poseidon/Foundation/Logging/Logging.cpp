@@ -2,6 +2,7 @@
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <spdlog/spdlog.h>
+#include <Poseidon/Foundation/Logging/QueuedConsoleSink.hpp>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/base_sink.h>
@@ -22,6 +23,7 @@
 #include <ctime>
 #include <mutex>
 #include <ratio>
+#include <set>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -570,7 +572,10 @@ void LoggingSystem::Initialize(const char* logLevel, const char* categoryFilter,
             formatter->add_flag<PoseidonFormatter>('*', this);
             formatter->set_pattern("[%Y-%m-%d %H:%M:%S.%e] %*%v");
             console_sink->set_formatter(std::move(formatter));
-            sinks.push_back(console_sink);
+            if (EnvFlagEnabled("POSEIDON_SYNC_CONSOLE"))
+                sinks.push_back(console_sink);
+            else
+                sinks.push_back(std::make_shared<QueuedConsoleSink>(console_sink));
         }
     }
 
@@ -816,4 +821,25 @@ void LoggingSystem::InitializeFromConfig(const char* appPrefix)
     }
 }
 
+} // namespace Poseidon::Foundation
+
+namespace Poseidon::Foundation
+{
+namespace
+{
+std::mutex g_logOnceLock;
+std::set<std::pair<const void*, std::string>, std::less<>> g_logOnceKeys;
+} // namespace
+
+bool LogOnceForKey(const void* site, const char* key)
+{
+    const std::lock_guard<std::mutex> lock(g_logOnceLock);
+    return g_logOnceKeys.emplace(site, key ? key : "").second;
+}
+
+void ForgetLogOnceKeys()
+{
+    const std::lock_guard<std::mutex> lock(g_logOnceLock);
+    g_logOnceKeys.clear();
+}
 } // namespace Poseidon::Foundation

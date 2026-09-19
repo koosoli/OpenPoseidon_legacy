@@ -434,7 +434,7 @@ bool Man::AimWeapon(int weapon, Vector3Par direction)
     if (GetHierachyParent())
         relDir = WorldTransform().InverseRotation().Rotate(direction);
 
-    const WeaponModeType* mode = weapon >= 0 ? GetWeaponMode(weapon) : nullptr;
+    const WeaponModeType* mode = weapon >= 0 && weapon < NMagazineSlots() ? GetWeaponMode(weapon) : nullptr;
     const AmmoType* aType = mode ? mode->_ammo : nullptr;
 
     float inacc = RifleInaccuracy() * GetInvAbility();
@@ -509,7 +509,7 @@ bool Man::AimWeaponForceFire(int weapon)
     Vector3 dir = Direction();
     dir[1] = 10;
     // different direction depending on weapon type
-    const WeaponModeType* mode = weapon >= 0 ? GetWeaponMode(weapon) : nullptr;
+    const WeaponModeType* mode = weapon >= 0 && weapon < NMagazineSlots() ? GetWeaponMode(weapon) : nullptr;
     if (!mode)
     {
         return false;
@@ -572,7 +572,7 @@ bool Man::CalculateAimWeapon(int weapon, Vector3& dir, Target* target)
     {
         return false;
     }
-    Vector3 tgtPos = target->LandAimingPosition();
+    Vector3 tgtPos = target->LandAimingPosition() + CombatCoverAimOffset(weapon, target->idExact);
     const bool attached = GetHierachyParent() != nullptr;
     const Matrix4 aimFrame = attached ? WorldTransform() : Transform();
     float dist = tgtPos.Distance(attached ? aimFrame.Position() : Position());
@@ -1090,18 +1090,16 @@ bool Man::CombatExplosiveAreaSafe(Vector3Par point, float radius, float delay) c
     return true;
 }
 
-bool Man::CombatShotSafe(int weapon, const Target* target) const
+bool Man::CombatBulletPathSafe(int weapon, Vector3Par origin, Vector3Par direction, unsigned* blockers) const
 {
+    if (blockers) *blockers = ~0u;
     if (!GLandscape || weapon < 0 || weapon >= NMagazineSlots()) return false;
     const auto& slot = GetMagazineSlot(weapon);
     const Magazine* magazine = slot._magazine;
     const WeaponModeType* mode = GetWeaponMode(weapon);
-    if (!magazine || !magazine->_type || !slot._muzzle || !mode || !mode->_ammo) return false;
+    if (!magazine || !magazine->_type || !slot._muzzle || !mode || !mode->_ammo ||
+        mode->_ammo->_simulation != AmmoShotBullet) return false;
     const AmmoType* ammo = mode->_ammo;
-    const Vector3 origin = PositionModelToWorld(GetWeaponPoint(weapon));
-    const Vector3 direction = GetWeaponDirection(weapon).Normalized();
-    if (ammo->_simulation == AmmoShotBullet)
-    {
         const AIGroup* group = GetGroup();
         const AICenter* center = group ? group->GetCenter() : nullptr;
         if (!center) return false;
@@ -1127,6 +1125,7 @@ bool Man::CombatShotSafe(int weapon, const Target* target) const
                 return InfantryCombat::PathDecision::Continue;
             });
         if (!supported) return false;
+        if (blockers) *blockers = 0;
         // Scan the actor population once rather than the same terrain cells at
         // every flight step. This excludes decals and has no radius/speed cutoff
         // that could omit a moving ally. Blocks reject off-path bodies cheaply.
@@ -1139,10 +1138,163 @@ bool Man::CombatShotSafe(int weapon, const Target* target) const
             const auto* shape = ally->GetShape();
             const Vector3 body = shape ? ally->PositionModelToWorld(shape->GeometryCenter()) : ally->Position();
             const float extent = shape ? floatMax(shape->GeometrySphere(), ally->GetRadius()) : ally->GetRadius();
-            if (path.Intersects(body, extent, ally->Speed().Size())) return false;
+            if (path.Intersects(body, extent, ally->Speed().Size()))
+            {
+                if (!blockers) return false;
+                ++*blockers;
+            }
         }
+        return !blockers || *blockers == 0;
+}
+
+bool Man::FindCombatFiringPosition(Target* target, Vector3& position)
+{
+    AIUnit* unit = Brain();
+    if (!ImprovedAutonomousCombat() || !target || !target->idExact || !unit ||
+        !unit->IsFireEnabled(target) || (unit->GetAIDisabled() & AIUnit::DAMove) ||
+        unit->GetState() == AIUnit::Stopped || unit->GetState() == AIUnit::Stopping ||
+        _externalMove.id != MoveIdNone || !target->IsKnownBy(unit) || target->lastSeen < Glob.time - 2 ||
+        !_combatLaneWait.ShouldYield(Glob.time.toFloat(), target->idExact.GetLink()) ||
+        Glob.time.toFloat() < _combatRepositionAfter) return false;
+    _combatRepositionAfter = Glob.time.toFloat() + 1.5f +
+        0.07f * (static_cast<unsigned>(fabs(Position().X()) + fabs(Position().Z())) % 17);
+    const int weapon = _fire._fireMode;
+    const WeaponModeType* mode = weapon >= 0 && weapon < NMagazineSlots() ? GetWeaponMode(weapon) : nullptr;
+    if (!mode || !mode->_ammo || mode->_ammo->_simulation != AmmoShotBullet) return false;
+    const Magazine* magazine = GetMagazineSlot(weapon)._magazine;
+    if (!magazine || !magazine->_type) return false;
+    // Bound planning work globally as well as per soldier; dense missions must
+    // not evaluate hundreds of full trajectories on a single simulation tick.
+    static float budgetTime = -1;
+    static int candidates = 0;
+    const float now = Glob.time.toFloat();
+    if (budgetTime != now) { budgetTime = now; candidates = 0; }
+    if (candidates >= 4) return false;
+    ++candidates;
+    ++_combatRepositionProbes;
+    const Vector3 targetPos = target->LandAimingPosition();
+    Vector3 forward = targetPos - Position();
+    forward[1] = 0;
+    if (forward.SquareSize() < 4) return false;
+    forward.Normalize();
+    const Vector3 right(forward.Z(), 0, -forward.X());
+    const unsigned probe = _combatRepositionCandidate++ % 12;
+    const float sign = ((probe + unit->ID()) & 1) ? 1.0f : -1.0f;
+    const float radius = 8.0f + 8.0f * (probe / 2);
+    position = Position() + right * (sign * radius) - forward * (radius * 0.25f);
+    if (probe >= 8)
+    {
+        const float advance = floatMin(16.0f + 16.0f * ((probe - 8) / 2),
+            floatMax(0.0f, std::sqrt((targetPos - Position()).SquareSizeXZ()) - 8.0f));
+        position = Position() + forward * advance + right * (sign * 8.0f);
+    }
+    const Vector3 proposed = position;
+    if (!unit->FindNearestEmpty(position) || position.Distance2(proposed) > Square(3.0f)) return false;
+    position[1] = GLandscape->RoadSurfaceYAboveWater(position.X(), position.Z());
+    // Infantry GetCombatHeight() is a legacy zero-valued range hint, not a
+    // muzzle height. Translate the actual current weapon point to the candidate.
+    const Vector3 origin = position + PositionModelToWorld(GetWeaponPoint(weapon)) - Position();
+    if (GLandscape->Visible(origin, this, target->idExact, 0.9f, ObjIntersectFire) < 0.63f) return false;
+    Vector3 direction = targetPos - origin;
+    const auto shot = Ballistics::SolveLevelShot(Ballistics::ShellParamsFor(*mode->_ammo),
+        magazine->_type->_initSpeed, direction.Size());
+    if (!shot.valid) return false;
+    direction[1] += shot.drop;
+    direction.Normalize();
+    unsigned candidateBlockers;
+    if (!CombatBulletPathSafe(weapon, origin, direction, &candidateBlockers))
+    {
+        if (candidateBlockers == ~0u) return false;
+        // A crowded ring may have no immediately safe destination. Permit a
+        // step that reduces obstruction, keeping the real emission gate closed
+        // until the whole trajectory is safe. Otherwise every soldier waits
+        // for a perfect opening that nobody is making room for.
+        const Vector3 currentOrigin = PositionModelToWorld(GetWeaponPoint(weapon));
+        Vector3 currentDirection = targetPos - currentOrigin;
+        const auto currentShot = Ballistics::SolveLevelShot(Ballistics::ShellParamsFor(*mode->_ammo),
+            magazine->_type->_initSpeed, currentDirection.Size());
+        if (!currentShot.valid) return false;
+        currentDirection[1] += currentShot.drop;
+        currentDirection.Normalize();
+        unsigned currentBlockers;
+        CombatBulletPathSafe(weapon, currentOrigin, currentDirection, &currentBlockers);
+        if (currentBlockers == ~0u || candidateBlockers >= currentBlockers) return false;
+    }
+    // The caller issues an ordinary autonomous move through the existing
+    // group/path planner. This grants neither a teleport nor permission to fire.
+    _combatRepositionAfter = now + 8;
+    _combatMoveGoal = position;
+    _combatMoveTarget = target->idExact.GetLink();
+    _combatMoveUntil = now + 10;
+    _fireState = FireDone;
+    _fireStateDelay = Glob.time + 3;
+    ++_combatRepositions;
+    return true;
+}
+
+float Man::UpdateCombatCoverAim(int weapon, EntityAI* target, Vector3Par muzzle, float visible) const
+{
+    for (int i = _combatCoverAims.Size() - 1; i >= 0; --i)
+        if (_combatCoverAims[i].until <= Glob.time.toFloat() ||
+            (_combatCoverAims[i].target == target && _combatCoverAims[i].weapon == weapon))
+            _combatCoverAims.Delete(i);
+    const auto* mode = weapon >= 0 && weapon < NMagazineSlots() ? GetWeaponMode(weapon) : nullptr;
+    if (visible >= 0.63f || !ImprovedAutonomousCombat() || !target ||
+        !dyn_cast<Man>(target) || !mode || !mode->_ammo || mode->_ammo->_simulation != AmmoShotBullet)
+        return visible;
+    // A single exposed upper-body sample, only after the normal torso ray fails.
+    // Eyes must see it too: a clear muzzle alone must not grant target knowledge.
+    Vector3 point = target->CameraPosition() - Vector3(0, 0.08f, 0);
+    float eye = GLandscape->Visible(CameraPosition(), point, 0.08f, this, target, ObjIntersectView);
+    if (eye < 0.63f) return visible;
+    float fire = GLandscape->Visible(muzzle, point, 0.08f, this, target, ObjIntersectFire);
+    if (fire < 0.63f) return visible;
+    auto& aim = _combatCoverAims[_combatCoverAims.Add()];
+    aim.target = target;
+    aim.weapon = weapon;
+    aim.until = Glob.time.toFloat() + 1.0f;
+    return floatMin(eye, fire);
+}
+
+Vector3 Man::CombatCoverAimOffset(int weapon, const EntityAI* target) const
+{
+    if (target && ImprovedAutonomousCombat())
+        for (int i = 0; i < _combatCoverAims.Size(); ++i)
+        {
+            const auto& aim = _combatCoverAims[i];
+            if (aim.target == target && aim.weapon == weapon && Glob.time.toFloat() < aim.until)
+                return target->CameraPosition() - Vector3(0, 0.08f, 0) - target->AimingPosition();
+        }
+    return VZero;
+}
+
+bool Man::CombatAttackPosition(Target* target, Vector3& position)
+{
+    if (!ImprovedAutonomousCombat() || !target || !target->idExact || !Brain() ||
+        (Brain()->GetAIDisabled() & AIUnit::DAMove) || Brain()->GetState() == AIUnit::Stopped ||
+        Brain()->GetState() == AIUnit::Stopping || !Brain()->IsFireEnabled(target) ||
+        !target->IsKnownBy(Brain()) || Glob.time - target->lastSeen > 2.0f) return false;
+    if (_combatMoveTarget == target->idExact.GetLink() && Glob.time.toFloat() < _combatMoveUntil &&
+        Position().Distance2(_combatMoveGoal) > Square(2.0f))
+    {
+        position = _combatMoveGoal;
         return true;
     }
+    return FindCombatFiringPosition(target, position);
+}
+
+bool Man::CombatShotSafe(int weapon, const Target* target) const
+{
+    if (!GLandscape || weapon < 0 || weapon >= NMagazineSlots()) return false;
+    const auto& slot = GetMagazineSlot(weapon);
+    const Magazine* magazine = slot._magazine;
+    const WeaponModeType* mode = GetWeaponMode(weapon);
+    if (!magazine || !magazine->_type || !slot._muzzle || !mode || !mode->_ammo) return false;
+    const AmmoType* ammo = mode->_ammo;
+    const Vector3 origin = PositionModelToWorld(GetWeaponPoint(weapon));
+    const Vector3 direction = GetWeaponDirection(weapon).Normalized();
+    if (ammo->_simulation == AmmoShotBullet)
+        return CombatBulletPathSafe(weapon, origin, direction);
     if (ammo->_simulation != AmmoShotShell || magazine->_type->_initSpeed >= 30 || ammo->indirectHit <= 0)
         return true;
 
@@ -1807,7 +1959,7 @@ float Man::GetAimed(int weapon, Target* target, AimingDiagnostics* diagnostics) 
     }
 
     if (diagnostics) diagnostics->gate = "special-weapon";
-    Vector3 ap = target->AimingPosition();
+    Vector3 ap = target->AimingPosition() + CombatCoverAimOffset(weapon, target->idExact);
     if (ammo && (ammo->_simulation != AmmoShotMissile || ammo->maxControlRange < 10))
     {
         switch (mode->_ammo->_simulation)
@@ -2919,6 +3071,11 @@ LSError Man::Serialize(ParamArchive& ar)
         _combatLaneWait.Clear();
         _combatLastGate = "not-evaluated";
         _combatLaneYields = 0;
+        _combatRepositionAfter = 0;
+        _combatRepositionCandidate = _combatRepositions = 0;
+        _combatMoveTarget = nullptr;
+        _combatMoveUntil = 0;
+        _combatCoverAims.Clear();
     }
     PARAM_CHECK(base::Serialize(ar))
 

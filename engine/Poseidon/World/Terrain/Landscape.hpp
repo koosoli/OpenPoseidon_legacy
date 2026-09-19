@@ -120,6 +120,9 @@ class ObjectListFull : public SmallArray<Ref<Object>>
     // Non-owning mirror of objects that can provide a roadway surface. Soldier
     // ground contact asks only for these after testing the terrain itself.
     SmallArray<Object*> _roadwayObjects;
+    // Visibility rejects TypeTempVehicle unconditionally. Preserve the full
+    // list order while avoiding footprint traversal on every sight query.
+    SmallArray<Object*> _visibilityObjects;
 
   private:
     int CountNonStatic() const;
@@ -134,6 +137,8 @@ class ObjectListFull : public SmallArray<Ref<Object>>
     Object* GetTypeVehicle(int index) const { return _typeVehicles[index]; }
     int GetRoadwayObjectCount() const { return _roadwayObjects.Size(); }
     Object* GetRoadwayObject(int index) const { return _roadwayObjects[index]; }
+    int GetVisibilityObjectCount() const { return _visibilityObjects.Size(); }
+    Object* GetVisibilityObject(int index) const { return _visibilityObjects[index]; }
     void ChangeNonStaticCount(int val);
     void ChangeTypeVehicleCount(int val);
     void StaticChanged(); // recalculate what is neccessary

@@ -114,6 +114,8 @@ void RegisterSqf(HarnessServer& hs)
                 cJSON_AddBoolToObject(resp, "hasTarget", man->GetFireTarget() != nullptr);
                 cJSON_AddNumberToObject(resp, "selected", man->SelectedWeapon());
                 cJSON_AddNumberToObject(resp, "laneYields", man->CombatLaneYields());
+                cJSON_AddNumberToObject(resp, "repositions", man->CombatRepositions());
+                cJSON_AddNumberToObject(resp, "repositionProbes", man->CombatRepositionProbes());
                 cJSON_AddNumberToObject(resp, "pauseState", man->CombatPauseState());
                 cJSON_AddBoolToObject(resp, "laneBlocked", man->CombatLaneBlocked());
                 cJSON_AddStringToObject(resp, "gate", man->CombatLastGate());
@@ -134,6 +136,47 @@ void RegisterSqf(HarnessServer& hs)
                     cJSON_AddItemToArray(slots, row);
                 }
             }
+            return HarnessProtocol::JsonResponse(resp);
+        });
+    hs.RegisterCommand({"ai_cover_probe", "Explicit fixture-only eye/muzzle visibility samples", {}},
+        [](const std::string&, cJSON*) -> std::string {
+            if (!GWorld || !GLandscape || GWorld->GetMode() == GModeNetware)
+                return HarnessProtocol::ErrorResponse("singleplayer world required");
+            GameState* gs = GWorld->GetGameState();
+            gs->BeginContext(&s_evalScope);
+            GameValue sv = gs->EvaluateMultiple("auditShooter");
+            GameValue tv = gs->EvaluateMultiple("auditTarget");
+            GameValue wv = gs->EvaluateMultiple("auditWall");
+            gs->EndContext();
+            EntityAI* shooter = sv.GetType() == GameObject ? dyn_cast<EntityAI>(static_cast<GameDataObject*>(sv.GetData())->GetObject().GetLink()) : nullptr;
+            EntityAI* target = tv.GetType() == GameObject ? dyn_cast<EntityAI>(static_cast<GameDataObject*>(tv.GetData())->GetObject().GetLink()) : nullptr;
+            if (!shooter || !target) return HarnessProtocol::ErrorResponse("fixture objects required");
+            cJSON* resp = cJSON_CreateObject();
+            Object* wall = wv.GetType() == GameObject ? static_cast<GameDataObject*>(wv.GetData())->GetObject().GetLink() : nullptr;
+            if (wall && wall->GetShape())
+            {
+                cJSON_AddStringToObject(resp, "wallShape", wall->GetShape()->GetName());
+                cJSON_AddNumberToObject(resp, "wallX", wall->Position().X());
+                cJSON_AddNumberToObject(resp, "wallZ", wall->Position().Z());
+                cJSON_AddNumberToObject(resp, "wallY", wall->Position().Y());
+                cJSON_AddNumberToObject(resp, "wallRadius", wall->GetRadius());
+            }
+            const Vector3 muzzle = shooter->PositionModelToWorld(shooter->GetWeaponPoint(shooter->SelectedWeapon()));
+            const Vector3 aim = target->AimingPosition();
+            const Vector3 head = target->CameraPosition();
+            if (wall)
+            {
+                CollisionBuffer hits;
+                wall->Intersect(hits, aim, muzzle, 0, ObjIntersectFire);
+                cJSON_AddNumberToObject(resp, "wallAimHits", hits.Size());
+                cJSON_AddBoolToObject(resp, "wallFireOcclusion", wall->OcclusionFire());
+                cJSON_AddBoolToObject(resp, "targetIgnoresWall", target->IgnoreObstacle(wall, ObjIntersectFire));
+            }
+            cJSON_AddNumberToObject(resp, "preferred", GLandscape->Visible(muzzle, shooter, target, 0.9f, ObjIntersectFire));
+            cJSON_AddNumberToObject(resp, "muzzleToHead", GLandscape->Visible(muzzle, head, 0.12f, shooter, target, ObjIntersectFire));
+            cJSON_AddNumberToObject(resp, "eyeToHead", GLandscape->Visible(shooter->CameraPosition(), head, 0.12f, shooter, target, ObjIntersectView));
+            cJSON_AddNumberToObject(resp, "aimHeight", aim.Y() - target->Position().Y());
+            cJSON_AddNumberToObject(resp, "headHeight", head.Y() - target->Position().Y());
             return HarnessProtocol::JsonResponse(resp);
         });
     hs.RegisterCommand({"ai_stress_state", "Passive infantry state near player (no AI decision evaluation)", {{"recordShots", "int", false}}},
@@ -171,6 +214,8 @@ void RegisterSqf(HarnessServer& hs)
                         cJSON_AddNumberToObject(row, "pathSize", man->Brain() ? man->Brain()->GetPath().Size() : 0);
                         cJSON_AddBoolToObject(row, "laneBlocked", man->CombatLaneBlocked());
                         cJSON_AddNumberToObject(row, "laneYields", man->CombatLaneYields());
+                        cJSON_AddNumberToObject(row, "repositions", man->CombatRepositions());
+                        cJSON_AddNumberToObject(row, "repositionProbes", man->CombatRepositionProbes());
                         cJSON_AddStringToObject(row, "gate", man->CombatLastGate());
                         cJSON_AddNumberToObject(row, "distance", man->Position().Distance(player));
                         cJSON_AddNumberToObject(row, "height", man->Position().Y());
@@ -1352,15 +1397,16 @@ std::string AnswerDownloadQuery(cJSON* root)
     };
     DownloadProgress progress;
 
-    const bool ok = DownloadMasterServerServiceFile(url, nullptr, dest, &progress,
-                                                    [](void* instance, int64_t received, int64_t total)
-                                                    {
-                                                        auto* p = static_cast<DownloadProgress*>(instance);
-                                                        p->received = received;
-                                                        p->total = total;
-                                                        ++p->calls;
-                                                    });
-    if (!ok)
+    const DownloadFileResult result =
+        DownloadMasterServerServiceFile(url, nullptr, dest, &progress,
+                                        [](void* instance, int64_t received, int64_t total)
+                                        {
+                                            auto* p = static_cast<DownloadProgress*>(instance);
+                                            p->received = received;
+                                            p->total = total;
+                                            ++p->calls;
+                                        });
+    if (result != DownloadFileResult::Success)
     {
         return HarnessProtocol::ErrorResponse("download failed");
     }
