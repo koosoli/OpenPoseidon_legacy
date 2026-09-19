@@ -1,0 +1,138 @@
+{
+  "code_commit": "52ee1cb7",
+  "view_distance_m": 2000,
+  "resolution": "1280x720",
+  "msaa": 4,
+  "runs": {
+    "before-heavy-rain-20260920-000815": {
+      "gpu_frame_ms": {
+        "median": 12.445,
+        "samples": 6
+      },
+      "terrain_gpu_ms": {
+        "median": 0.989,
+        "samples": 6
+      },
+      "logged_slow_frames": 0,
+      "visibility_states": [],
+      "images": {
+        "initial.png": "793b94b62f654660a11284501d0dffeedf829f44a90905cc03cc1a59eb9f2945",
+        "moved.png": "87e987302b324f7ff7582b71c22a009313219484530c350d2fb21fb1f54fe996"
+      }
+    },
+    "fixed-dry-control-20260920-001231": {
+      "gpu_frame_ms": {
+        "median": 13.4905,
+        "samples": 6
+      },
+      "terrain_gpu_ms": {
+        "median": 1.6480000000000001,
+        "samples": 6
+      },
+      "logged_slow_frames": 0,
+      "visibility_states": [
+        {
+          "rain": 0,
+          "fog": 0,
+          "terrainRange": 1980,
+          "baseRange": 1980,
+          "objectRange": 1980,
+          "tacticalVisibility": 2000,
+          "selectedRange": 2000,
+          "ok": true
+        },
+        {
+          "rain": 0,
+          "fog": 0,
+          "terrainRange": 1980,
+          "baseRange": 1980,
+          "objectRange": 1980,
+          "tacticalVisibility": 2000,
+          "selectedRange": 2000,
+          "ok": true
+        },
+        {
+          "rain": 0,
+          "fog": 0,
+          "terrainRange": 1980,
+          "baseRange": 1980,
+          "objectRange": 1980,
+          "tacticalVisibility": 2000,
+          "selectedRange": 2000,
+          "ok": true
+        },
+        {
+          "rain": 0,
+          "fog": 0.5,
+          "terrainRange": 472.4999694824219,
+          "baseRange": 472.4999694824219,
+          "objectRange": 1333.3333740234375,
+          "tacticalVisibility": 472.4999694824219,
+          "selectedRange": 2000,
+          "ok": true
+        }
+      ],
+      "images": {
+        "initial.png": "09b6c0826430766b8bc52e6f626696966c8a79b23122e991b04601a3c3f229cc",
+        "moved.png": "f7c9e9a5ce3b0f7960af3a9109ba9c71313670c93399c45d01927b6545b199fc"
+      }
+    },
+    "fixed-heavy-rain-20260920-001131": {
+      "gpu_frame_ms": {
+        "median": 14.296,
+        "samples": 6
+      },
+      "terrain_gpu_ms": {
+        "median": 1.7505000000000002,
+        "samples": 6
+      },
+      "logged_slow_frames": 0,
+      "visibility_states": [
+        {
+          "rain": 0.9999988079071045,
+          "fog": 0,
+          "terrainRange": 1980,
+          "baseRange": 1980,
+          "objectRange": 1980,
+          "tacticalVisibility": 262.50146484375,
+          "selectedRange": 2000,
+          "ok": true
+        },
+        {
+          "rain": 0.9999988079071045,
+          "fog": 0,
+          "terrainRange": 1980,
+          "baseRange": 1980,
+          "objectRange": 1980,
+          "tacticalVisibility": 262.50146484375,
+          "selectedRange": 2000,
+          "ok": true
+        },
+        {
+          "rain": 0.9999988079071045,
+          "fog": 0,
+          "terrainRange": 1980,
+          "baseRange": 1980,
+          "objectRange": 1980,
+          "tacticalVisibility": 262.50146484375,
+          "selectedRange": 2000,
+          "ok": true
+        },
+        {
+          "rain": 0.9999988079071045,
+          "fog": 0.5,
+          "terrainRange": 137.81326293945312,
+          "baseRange": 137.81326293945312,
+          "objectRange": 1333.3333740234375,
+          "tacticalVisibility": 137.81326293945312,
+          "selectedRange": 2000,
+          "ok": true
+        }
+      ],
+      "images": {
+        "initial.png": "8228b0d4a7b3426d78cc62c58e810fa31bbff3eb5962da1dd202be42523dfa0e",
+        "moved.png": "47e419839cfeb9ce9792570e50c51e85757ef333cfd8fc21b7d37c37f56d89df"
+      }
+    }
+  }
+}

@@ -6571,3 +6571,38 @@ tickets:
       - docs/roadmap/decisions/OCEAN-SURF-IMPLEMENTATION-20260919.md
       - docs/roadmap/decisions/OCEAN-SURF-20260919.md
       - docs/roadmap/modernisation/OpenPoseidon_WGPU_Ocean_and_Shore_Surf_Plan.md
+
+  - id: WX-VIS-001
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: Heavy-rain terrain and object render-range consistency
+    class: WORLD_VISUAL
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: OPEN
+    status: INTEGRATED
+    outcome: null
+    owner: null
+    branch: codex/ocean-release
+    baseline_commit: c9006e58
+    verification_commit: 52ee1cb7
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: [52ee1cb7]
+    production_call_sites: []
+    test_ids: [rain-terrain-freefly, rain-terrain-dry-control, rain-terrain-explicit-fog]
+    benchmark_artifacts: []
+    evidence_hash: 64f1197ebf4f690a586fe8a62f50ce52fcdc782148bab352aaf1890bd4fb43dd
+    decision_record: docs/roadmap/decisions/RAIN-TERRAIN-VISIBILITY-20260920.md
+    known_failures:
+      - Owner confirmation on original map/settings and wider performance coverage remain open.
+    fallback: Explicit weather fog retains the existing weather-shortened display range; GL33 is unchanged.
+    reviewer: null
+    reviewer_method: Author-run installed free-flight reproduction and repeat, passive range assertions, dry/fog controls, screenshot-free timing.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/RAIN-TERRAIN-VISIBILITY-20260920.md
+      - docs/roadmap/evidence/rain-terrain-20260920.json
