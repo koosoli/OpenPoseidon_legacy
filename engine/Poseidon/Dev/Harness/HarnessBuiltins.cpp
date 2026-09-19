@@ -11,6 +11,7 @@ using namespace Poseidon;
 #include <Poseidon/World/Weather/RainVolume.hpp>
 #include <Poseidon/World/Physics/PhysicsWorld.hpp>
 #include <Poseidon/Dev/Diag/PhysicsCorpus.hpp>
+#include <Poseidon/Dev/Diag/StreamingDiag.hpp>
 #include <Poseidon/Dev/Diag/BallisticsRecorder.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/Dev/Debug/DevPanelWidgets.hpp>
@@ -72,6 +73,29 @@ namespace HarnessBuiltins
 
 void RegisterScreenshot(HarnessServer& hs)
 {
+    hs.RegisterCommand({"stream_residency", "Read residency; optional experimental test budget", {}},
+        [](const std::string&, cJSON* root) -> std::string {
+            if (!GLandscape) return HarnessProtocol::ErrorResponse("no landscape");
+            if (const auto* budget = cJSON_GetObjectItemCaseSensitive(root, "budget")) {
+                if (!cJSON_IsNumber(budget) || !std::isfinite(budget->valuedouble) ||
+                    budget->valuedouble < 2000 || budget->valuedouble > 20000 ||
+                    std::floor(budget->valuedouble) != budget->valuedouble ||
+                    !GLandscape->SetObjectStreamTestBudget(static_cast<uint32_t>(budget->valuedouble)))
+                    return HarnessProtocol::ErrorResponse("requires streamed world, WGR_OBJECT_STREAM_TEST_BUDGET=1 and integer budget 2000..20000");
+            }
+            ObjectStreamResidencyCounters state;
+            GLandscape->SnapshotObjectStreamDiag(state);
+            auto* result = cJSON_CreateObject();
+            cJSON_AddBoolToObject(result, "valid", state.valid);
+            cJSON_AddNumberToObject(result, "resident", state.residentObjects);
+            cJSON_AddNumberToObject(result, "budget", state.budget);
+            cJSON_AddNumberToObject(result, "desired", GLandscape->ObjectStreamDesiredCount());
+            cJSON_AddBoolToObject(result, "pending", GLandscape->ObjectStreamPending());
+            cJSON_AddNumberToObject(result, "centerX", GLandscape->ObjectStreamCenterX());
+            cJSON_AddNumberToObject(result, "centerZ", GLandscape->ObjectStreamCenterZ());
+            cJSON_AddNumberToObject(result, "admitUpdates", static_cast<double>(state.admitUpdates));
+            return HarnessProtocol::JsonResponse(result);
+        });
     hs.RegisterCommand({"weather_visibility", "Read-only weather, terrain and object draw ranges", {}},
         [](const std::string&, cJSON*) -> std::string {
             if (!GScene || !GLandscape) return HarnessProtocol::ErrorResponse("no world");

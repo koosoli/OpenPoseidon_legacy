@@ -6537,7 +6537,7 @@ tickets:
     class: WORLD_VISUAL
     obligation: OPTIONAL
     execution_mode: IMPLEMENT
-    scheduling_state: OPEN
+    scheduling_state: HOLD
     status: INTEGRATED
     outcome: null
     owner: null
@@ -6556,6 +6556,7 @@ tickets:
     evidence_hash: b5c0b7351a9a53b0c9bb6ebb5a8ffb99ff56f75230e8964a66037d598b80fa78
     decision_record: docs/roadmap/decisions/OCEAN-SURF-IMPLEMENTATION-20260919.md
     known_failures:
+      - Parked by owner on 2026-09-20. Preserved on safety/codex/backup-waves-20260920 at 03e713714b9b699e3f6f4eae7cdce7f488a13b64; no further wave implementation scheduled.
       - Curling prototype c9006e58 is installed and runtime checked, but its surface remains visibly smooth/tubular. Owner visual acceptance and broader rollout remain open; old ocean stays default.
       - Owner rejected surf appearance and requested old behavior remain default. Revised opt-in surf preserves underlying ocean waves; visual acceptance remains open.
       - Existing warped and nearshore normals are approximate; frozen clips do not freeze legacy sea-level bobbing.

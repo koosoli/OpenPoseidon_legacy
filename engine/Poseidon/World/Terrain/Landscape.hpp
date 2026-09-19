@@ -697,6 +697,7 @@ class Landscape : public SerializeClass
     // logged, so the clamp reports each change once rather than every recentre.
     uint32_t _modernObjectEffectiveBudget = 0;
     uint32_t _modernObjectBudgetLogged = 0;
+    uint32_t _modernObjectDesiredCount = 0;
     uint32_t _modernObjectCreatesPerUpdate = 128;
     uint32_t _modernResidentObjectCount = 0;
     // Cadence counter for the residency progress row (see UpdateModernObjectResidency).
@@ -964,6 +965,12 @@ class Landscape : public SerializeClass
     // No-op for legacy worlds. Called by the WGPU terrain path once the live
     // camera exists; updates only when the camera crosses a small cell block.
     void UpdateModernObjectResidency(Vector3Par cameraPosition);
+    // Harness-only budget injection; callers must opt in explicitly. No shipping UI policy.
+    bool SetObjectStreamTestBudget(uint32_t budget);
+    uint32_t ObjectStreamDesiredCount() const { return _modernObjectDesiredCount; }
+    bool ObjectStreamPending() const { return _modernObjectResidencyPending; }
+    int ObjectStreamCenterX() const { return _modernObjectCenterX; }
+    int ObjectStreamCenterZ() const { return _modernObjectCenterZ; }
     void UpdateNativeFarResidency(Vector3Par cameraPosition);
     void ClearNativeFarResidency();
     void SaveOptimized(QOStream& f);

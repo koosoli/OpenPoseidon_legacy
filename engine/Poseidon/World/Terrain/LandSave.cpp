@@ -3285,6 +3285,15 @@ static uint32_t GpuClampedObjectBudget(uint32_t itemBudget, uint32_t residentNow
     return effective;
 }
 
+bool Landscape::SetObjectStreamTestBudget(uint32_t budget)
+{
+    const char* enabled = std::getenv("WGR_OBJECT_STREAM_TEST_BUDGET");
+    if (!enabled || enabled[0] != '1' || !_modernObjectStreaming || budget < 2000 || budget > 20000)
+        return false;
+    _modernObjectBudget = budget;
+    return true;
+}
+
 void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
 {
     if (!_modernObjectStreaming || _modernObjectCells.empty())
@@ -3603,6 +3612,7 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                 requested += static_cast<uint32_t>(_modernObjectCells[cell.index].size());
     }
 
+    _modernObjectDesiredCount = requested;
     uint32_t released = 0;
     if (centerChanged)
     {
