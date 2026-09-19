@@ -108,6 +108,9 @@ pub struct Water {
     instance_count: u32,
     pipeline: wgpu::RenderPipeline,
     whitewater_pipeline: wgpu::RenderPipeline,
+    curling_pipeline: Option<wgpu::RenderPipeline>,
+    curling_layout: Option<wgpu::BindGroupLayout>,
+    curling_bind: Option<wgpu::BindGroup>,
     // Set once wgr_water_set_params has run (i.e. a map is loaded); until then there
     // is nothing sensible to draw.
     have_params: bool,
@@ -837,6 +840,42 @@ impl Water {
             cache: None,
         });
 
+        // Explicit experiment only: no pipeline allocation or draw in normal play.
+        let mut curling_layout = None;
+        let mut curling_bind = None;
+        let curling_pipeline = if std::env::var("WGR_WATER_CURLING_BREAKER").ok().as_deref() == Some("1") {
+            let entries: Vec<_> = [0u32,2,3,6,9,17,18].into_iter().map(|binding| {
+                let ty = match binding {
+                    0|18 => wgpu::BindingType::Buffer {ty: wgpu::BufferBindingType::Uniform,has_dynamic_offset:false,min_binding_size:None},
+                    3|9 => wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    _ => wgpu::BindingType::Texture {sample_type:wgpu::TextureSampleType::Float {filterable:binding!=17},
+                        view_dimension:if binding==6 {wgpu::TextureViewDimension::D2Array} else {wgpu::TextureViewDimension::D2},multisampled:false},
+                };
+                wgpu::BindGroupLayoutEntry {binding,visibility:wgpu::ShaderStages::VERTEX_FRAGMENT,ty,count:None}
+            }).collect();
+            let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {label:Some("curl_no_scene_depth"),entries:&entries});
+            curling_bind = Some(build_curl_group(device,&layout,&params_ubo,&dummy_env,&env_sampler,
+                fft.as_ref().map_or(&fft_fallback_view,|f|f.displacement_view()),&fft_sampler,&heightmap_view,&conform_params));
+            let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label:Some("curl_pipeline_layout"),bind_group_layouts:&[Some(camera_layout),Some(&layout)],immediate_size:0});
+            curling_layout = Some(layout);
+            Some(device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("wgr_curling_breaker"), layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState { module: &shader, entry_point: Some("vs_curling_breaker"),
+                    compilation_options: Default::default(), buffers: &[] },
+                primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
+                depth_stencil: Some(wgpu::DepthStencilState { format: depth_format(device),
+                    depth_write_enabled: Some(true), depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
+                    stencil: Default::default(), bias: Default::default() }),
+                multisample: wgpu::MultisampleState {count: sample_count, ..Default::default()},
+                fragment: Some(wgpu::FragmentState {module: &shader, entry_point: Some("fs_curling_breaker"),
+                    compilation_options: wgpu::PipelineCompilationOptions {constants: &water_fs_constants, ..Default::default()},
+                    targets: &[Some(wgpu::ColorTargetState {format: surface_format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),write_mask: wgpu::ColorWrites::ALL})]}),
+                multiview_mask: None, cache: None,
+            }))
+        } else {None};
+
         Water {
             params_ubo,
             group1_layout,
@@ -872,6 +911,9 @@ impl Water {
             instance_count: 0,
             pipeline,
             whitewater_pipeline,
+            curling_pipeline,
+            curling_layout,
+            curling_bind,
             have_params: false,
             last_params: None,
         }
@@ -906,6 +948,10 @@ impl Water {
     }
 
     fn rebuild_group1(&mut self, device: &wgpu::Device) {
+        if let Some(layout) = &self.curling_layout {
+            self.curling_bind = Some(build_curl_group(device,layout,&self.params_ubo,&self.env_view,&self.env_sampler,
+                self.fft.as_ref().map_or(&self.fft_fallback_view,|f|f.displacement_view()),&self.fft_sampler,&self.heightmap_view,&self.conform_params));
+        }
         self.group1_bind = build_group1(
             device,
             &self.group1_layout,
@@ -1317,6 +1363,16 @@ impl Water {
             self.instance_cap = cap;
         }
         queue.write_buffer(&self.instance_buf, 0, bytemuck::cast_slice(nodes));
+    }
+
+    pub fn has_curling_breaker(&self) -> bool {self.curling_pipeline.is_some() && self.have_params}
+    pub fn draw_curling(&self, pass: &mut wgpu::RenderPass<'_>, camera: &wgpu::BindGroup, offset: u32) {
+        if let (Some(pipeline),Some(bind))=(&self.curling_pipeline,&self.curling_bind) {
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0,camera,&[offset]);
+            pass.set_bind_group(1,bind,&[]);
+            pass.draw(0..(64*48*6+512*6),0..1);
+        }
     }
 
     // Draw one batch (a [first_node, first_node+node_count) run of the prepared
@@ -2382,4 +2438,19 @@ mod tests {
             176
         );
     }
+}
+
+fn build_curl_group(device:&wgpu::Device,layout:&wgpu::BindGroupLayout,params:&wgpu::Buffer,
+    sky:&wgpu::TextureView,sky_sampler:&wgpu::Sampler,fft:&wgpu::TextureView,fft_sampler:&wgpu::Sampler,
+    bed:&wgpu::TextureView,conform:&wgpu::Buffer)->wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {label:Some("curl_without_depth_feedback"),layout,
+        entries:&[
+            wgpu::BindGroupEntry {binding:0,resource:params.as_entire_binding()},
+            wgpu::BindGroupEntry {binding:2,resource:wgpu::BindingResource::TextureView(sky)},
+            wgpu::BindGroupEntry {binding:3,resource:wgpu::BindingResource::Sampler(sky_sampler)},
+            wgpu::BindGroupEntry {binding:6,resource:wgpu::BindingResource::TextureView(fft)},
+            wgpu::BindGroupEntry {binding:9,resource:wgpu::BindingResource::Sampler(fft_sampler)},
+            wgpu::BindGroupEntry {binding:17,resource:wgpu::BindingResource::TextureView(bed)},
+            wgpu::BindGroupEntry {binding:18,resource:conform.as_entire_binding()},
+        ]})
 }

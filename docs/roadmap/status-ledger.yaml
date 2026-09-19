@@ -6553,9 +6553,10 @@ tickets:
     production_call_sites: []
     test_ids: [gpu-ocean-scale, gpu-surf-arrival, gpu-foam-pipeline, gpu-reference-seas, water-shaders, cpu-water-queries]
     benchmark_artifacts: []
-    evidence_hash: 69821f74671c13ebed6c40cc1a12b3292428b067ebea72c4e8e4cac85d6c2213
+    evidence_hash: 4dfa20f34f0c751b3c5aad38d6600a03573d5284398998d262f249845159b51f
     decision_record: docs/roadmap/decisions/OCEAN-SURF-IMPLEMENTATION-20260919.md
     known_failures:
+      - Curling mesh prototype is under visual review; old ocean remains default, no rollout accepted.
       - Owner rejected surf appearance and requested old behavior remain default. Revised opt-in surf preserves underlying ocean waves; visual acceptance remains open.
       - Existing warped and nearshore normals are approximate; frozen clips do not freeze legacy sea-level bobbing.
     fallback: Old behavior is default by explicit owner request; WGR_WATER_SURF_PILOT=1 opts into the experimental surf only.
@@ -6563,6 +6564,7 @@ tickets:
     reviewer_method: Author-run GPU regressions, rebuilt CPU water suite, calibrated live clips and lifecycle/fallback captures.
     supersedes: []
     evidence:
+      - docs/roadmap/decisions/CURLING-BREAKER-PROTOTYPE-20260919.md
       - docs/roadmap/evidence/ocean-surf-revision-20260919.json
       - docs/roadmap/evidence/ocean-surf-20260919.json
       - docs/roadmap/decisions/OCEAN-SURF-IMPLEMENTATION-20260919.md

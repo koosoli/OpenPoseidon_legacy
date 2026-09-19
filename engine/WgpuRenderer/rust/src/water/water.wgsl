@@ -1,3 +1,4 @@
+#import water_curling_breaker::{curl_point}
 #import water_shore_surf::{coastal_surf, SurfState, add_surf_displacement}
 // GPU water: a CDLOD surface at the global sea level, displaced by a sum of Gerstner
 // waves in the vertex shader and shaded per-fragment with an analytic wave normal, a
@@ -2373,4 +2374,120 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
     let physical_alpha = max(shore, combined_foam) * body_coverage;
     let alpha = select(legacy_alpha, physical_alpha, physical_look && shared_optics);
     return vec4<f32>(rgb, alpha);
+}
+
+// Local curling-sheet prototype. No grid displacement or physics is replaced.
+struct CurlOut {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) world_rel: vec3<f32>,
+    @location(1) normal: vec3<f32>,
+    @location(2) data: vec4<f32>, // coverage, collapse, across coordinate, particle flag
+    @location(3) uv: vec2<f32>,
+};
+fn curl_world(uv: vec2<f32>) -> vec3<f32> {
+    let s = curl_point(uv, wp.time);
+    // Attach the tail to the existing ocean, leaving the barrel's underside open.
+    let dist = length(vec3<f32>(s.position.x, wp.sea_level, s.position.z) - frame.cam_pos.xyz);
+    var ocean = gerstner_disp(s.position.xz, dist);
+    if (wp.fft_control.x > 0.5) { ocean = fft_geometry_disp(s.position.xz, dist, 0.0); }
+    let tail = 1.0 - smoothstep(0.0, 0.40, uv.x);
+    return s.position + vec3<f32>(0.0, wp.sea_level + 0.04 + ocean.y * tail, 0.0);
+}
+@vertex
+fn vs_curling_breaker(@builtin(vertex_index) vertex: u32) -> CurlOut {
+    var out: CurlOut;
+    let corners = array<vec2<f32>,6>(vec2<f32>(0,0),vec2<f32>(1,0),vec2<f32>(0,1),
+                                      vec2<f32>(0,1),vec2<f32>(1,0),vec2<f32>(1,1));
+    let cells_x = 64u;
+    let cells_z = 48u;
+    let sheet_vertices = cells_x * cells_z * 6u;
+    var world: vec3<f32>;
+    if (vertex < sheet_vertices) {
+        let cell = vertex / 6u;
+        let uv = (vec2<f32>(f32(cell % cells_x), f32(cell / cells_x)) + corners[vertex%6u]) /
+                 vec2<f32>(f32(cells_x), f32(cells_z));
+        let s = curl_point(uv, wp.time);
+        world = curl_world(uv);
+        // Derivatives of the actual folded surface, not a heightfield normal.
+        let du = curl_point(uv + vec2<f32>(0.001,0.0), wp.time).position -
+                 curl_point(uv - vec2<f32>(0.001,0.0), wp.time).position;
+        let dv = curl_point(uv + vec2<f32>(0.0,0.001), wp.time).position -
+                 curl_point(uv - vec2<f32>(0.0,0.001), wp.time).position;
+        out.normal = normalize(cross(du,dv) + vec3<f32>(0.0,1e-8,0.0));
+        out.data = vec4<f32>(s.coverage, s.collapse, uv.x, 0.0);
+        out.uv = uv;
+    } else {
+        let particle = (vertex-sheet_vertices)/6u;
+        let seed = f32(particle);
+        let random = fract(sin(vec3<f32>(seed*12.9898,seed*78.233,seed*31.713)+1.0)*43758.5453);
+        let uv = vec2<f32>(1.0,random.x);
+        let s = curl_point(uv,wp.time);
+        let t = s.age - 5.6 - random.y * 0.65;
+        let life = smoothstep(0.0,0.12,t) * (1.0-smoothstep(0.8,1.6,t));
+        let start = curl_point(uv,wp.time-max(t,0.0)).position;
+        world = start + vec3<f32>(-max(t,0.0)*(1.0+random.z*3.0),
+                wp.sea_level + max(t,0.0)*(2.5+random.y*3.0)-4.905*t*t,
+                (random.z-0.5)*max(t,0.0)*3.0);
+        let corner = corners[(vertex-sheet_vertices)%6u]*2.0-vec2<f32>(1.0);
+        let view = frame.view*vec4<f32>(world-frame.cam_pos.xyz,1.0);
+        let size = 0.025 + random.y*0.07;
+        out.clip = reverse_z(frame.proj*(view+vec4<f32>(corner*size,0.0,0.0)));
+        out.normal = vec3<f32>(0,1,0);
+        out.data = vec4<f32>(life*s.coverage,1.0,1.0,1.0);
+        out.uv = corner;
+    }
+    out.world_rel = world-frame.cam_pos.xyz;
+    if (vertex < sheet_vertices) { out.clip = reverse_z(frame.proj*frame.view*vec4<f32>(out.world_rel,1.0)); }
+    // This fixture requires the expected coastal terrain and stays off in other maps.
+    if (!seabed_contains(vec2<f32>(7852.0,4582.0)) ||
+        abs(seabed_height(vec2<f32>(7852.0,4582.0)) + 3.59631) > 0.35) {
+        out.clip = vec4<f32>(2.0,2.0,2.0,1.0);
+    }
+    return out;
+}
+@fragment
+fn fs_curling_breaker(in: CurlOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    let world = in.world_rel + frame.cam_pos.xyz;
+    if (in.data.x < 0.005 || world.y < wp.sea_level - 0.05) { discard; }
+    var n = select(-in.normal,in.normal,front);
+    let v = normalize(-in.world_rel);
+    if (dot(n,v)<0.0) { n = -n; }
+    let l = normalize(-frame.sun_dir_world.xyz);
+    var sun = frame.sun_diffuse.rgb;
+    var ambient = frame.sun_ambient.rgb;
+    var fog = frame.fog_color.rgb;
+    if (linear > 0.5) {
+        if (frame.sun_diffuse.w < 0.5) {sun=srgb_to_linear(sun);ambient=srgb_to_linear(ambient);}
+        fog=srgb_to_linear(fog);
+    }
+    // Material coordinates follow the sheet, rather than vertically projecting
+    // world xz onto its nearly vertical face (which made foam into long stripes).
+    let material = in.uv * vec2<f32>(14.0,36.0);
+    let footprint = max(length(dpdx(material)),length(dpdy(material)));
+    let noise = vnoise_lod(material*3.1+vec2<f32>(wp.time*0.12),footprint*3.1);
+    let lip = smoothstep(0.92,1.0,in.data.z) * 0.55;
+    let foam = clamp(in.data.y + lip,0.0,1.0) * smoothstep(0.20,0.62,noise);
+    n = micro_normal(world.xz, length(in.world_rel), 2.0, n, 0.0);
+    let fresnel = 0.02+0.98*pow(1.0-max(dot(n,v),0.0),5.0);
+    let reflection = sky_env_sample(reflect(-v,n));
+    let sun_visibility = smoothstep(0.0,0.06,l.y) * cloud_sun_shadow(world.xz);
+    let irradiance = ambient * sky_vis_ao(world.xz) + sun * max(dot(n,l),0.0) * sun_visibility;
+    var shallow = wp.shallow_color.rgb;
+    var deep = wp.deep_color.rgb;
+    if (linear>0.5) {shallow=srgb_to_linear(shallow);deep=srgb_to_linear(deep);}
+    // Same authored swatches and irradiance/pi convention as the existing sea.
+    let tint = mix(deep,shallow,0.35);
+    var rgb = mix(tint * irradiance / PI, reflection, clamp(fresnel * wp.look_params.w,0.0,1.0));
+    let foam_light = (ambient + sun * sun_visibility * max(l.y,0.0)) / PI;
+    rgb = mix(rgb,vec3<f32>(0.82,0.88,0.86)*foam_light,foam);
+    // This sheet is a thin lip over the retained ocean, not an opaque solid wall.
+    var alpha = in.data.x * max(mix(0.32,0.9,fresnel),foam);
+    if (in.data.w>0.5) {
+        let radial = max(1.0-dot(in.uv,in.uv),0.0);
+        alpha = alpha*radial*radial;
+        rgb = vec3<f32>(0.85,0.9,0.88)*foam_light;
+        if (alpha<0.02) {discard;}
+    }
+    rgb = mix(fog,rgb,fog_factor(length(in.world_rel)));
+    return vec4<f32>(rgb,alpha);
 }

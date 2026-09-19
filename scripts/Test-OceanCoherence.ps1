@@ -1,5 +1,5 @@
 param(
- [switch]$PerfOnly, [switch]$Menu, [switch]$LegacyShore, [switch]$Matrix, [switch]$NoFft, [ValidateRange(0,35)][double]$WindSpeed=8, [switch]$LiveClip, [switch]$LowQuality, [switch]$Surf, [ValidateRange(0,5)][int]$Preset=1, [string]$Label='current', [string]$BinaryDir='', [switch]$Quick, [switch]$Review,
+ [switch]$CurlingBaseline, [switch]$Curling, [switch]$PerfOnly, [switch]$Menu, [switch]$LegacyShore, [switch]$Matrix, [switch]$NoFft, [ValidateRange(0,35)][double]$WindSpeed=8, [switch]$LiveClip, [switch]$LowQuality, [switch]$Surf, [ValidateRange(0,5)][int]$Preset=1, [string]$Label='current', [string]$BinaryDir='', [switch]$Quick, [switch]$Review,
  [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault'
 )
 $ErrorActionPreference='Stop'
@@ -10,6 +10,8 @@ if (!$env:LOCK_OWNER) {
  if ($BinaryDir) {$argv+=@('-BinaryDir',$BinaryDir)}
  $argv+=@('-Preset',"$Preset")
  if ($Surf) {$argv+='-Surf'}
+ if ($Curling) {$argv+='-Curling'}
+ if ($CurlingBaseline) {$argv+='-CurlingBaseline'}
  if ($LegacyShore) {$argv+='-LegacyShore'}
  if ($Menu) {$argv+='-Menu'}
  if ($PerfOnly) {$argv+='-PerfOnly'}
@@ -46,6 +48,7 @@ if ($Menu) {
  if (Test-Path $ownerWater) {Get-ChildItem -LiteralPath $ownerWater -Filter '*.cfg' | Copy-Item -Destination $profileDir}
  Remove-Item Env:POSEIDON_WIND_OVERRIDE -ErrorAction SilentlyContinue
 }
+if ($Curling) {$env:WGR_WATER_CURLING_BREAKER='1'} else {Remove-Item Env:WGR_WATER_CURLING_BREAKER -ErrorAction SilentlyContinue}
 $env:WGR_OCEAN_PROFILE='1'
 $env:WGR_AUTO_EXPOSURE='0'; $env:WGR_EXPOSURE='0.5'
 $mission=Join-Path $root 'tests/perf/missions/ocean_shore.noe'
@@ -95,6 +98,7 @@ try {
  $null=Send @{cmd='water_probe'}
  $null=Send @{cmd='water_bathymetry';x=7900;z=4550}
  if ($Preset -ge 3 -or $Surf) {$null=Send @{cmd='exec';code='oceanCamera camSetPos [7875,4582,8]; oceanCamera camSetTarget [7828,4582,0]; oceanCamera camCommit 0'}}
+ if ($Curling -or $CurlingBaseline) {$null=Send @{cmd='exec';code='oceanCamera camSetPos [7838,4602,1.4]; oceanCamera camSetTarget [7849,4582,1.3]; oceanCamera camSetFov 0.7; oceanCamera camCommit 0'}}
  if ($Review) {
   Write-Host 'Live ocean review. Use the Water tab to compare scales. Close the game to finish; no automatic timeout.'
   while (!$process.HasExited) {Start-Sleep -Milliseconds 250}
@@ -110,6 +114,18 @@ try {
   if (!$process.WaitForExit(15000) -or $process.ExitCode) {throw 'Performance test failed to exit cleanly'}
   if (Select-String -LiteralPath $log -Pattern 'Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION' -Quiet) {throw 'Renderer error in performance log'}
   Write-Output "Ocean performance evidence (no screenshots): $out"
+  return
+ }
+ if ($Curling) {
+  foreach ($stage in @(@{name='approach';time=2.0},@{name='barrel';time=5.25},@{name='collapse';time=6.4},@{name='wash';time=7.7})) {
+   $null=Send @{cmd='water_probe';freezeTime=$true;fixedTime=$stage.time}
+   Start-Sleep -Milliseconds 250
+   $null=Send @{cmd='screenshot';path=(Join-Path $out ($stage.name+'.png'))}
+  }
+  $null=Send @{cmd='exit'}
+  if (!$process.WaitForExit(15000) -or $process.ExitCode) {throw 'Curl test failed to exit cleanly'}
+  if (Select-String -LiteralPath $log -Pattern 'Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION' -Quiet) {throw 'Renderer error in curl log'}
+  Write-Output "Curling breaker evidence: $out"
   return
  }
  $null=Send @{cmd='screenshot';path=(Join-Path $out 'live-shore.png')}

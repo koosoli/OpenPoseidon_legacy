@@ -5613,6 +5613,31 @@ impl Renderer {
                         wpass.end_occlusion_query();
                     }
                     drop(wpass);
+                    if self.water.has_curling_breaker() {
+                        // Folded sheets must occlude themselves. The dedicated bind group
+                        // deliberately excludes scene depth, so this pass may write it safely.
+                        let mut curl = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                            label:Some("wgr_curling_breaker_pass"),
+                            color_attachments:&[Some(wgpu::RenderPassColorAttachment {view:&target,depth_slice:None,
+                                resolve_target:None,ops:wgpu::Operations {load:wgpu::LoadOp::Load,store:wgpu::StoreOp::Store}})],
+                            depth_stencil_attachment:Some(wgpu::RenderPassDepthStencilAttachment {view:seg_depth,
+                                depth_ops:Some(wgpu::Operations {load:wgpu::LoadOp::Load,store:wgpu::StoreOp::Store}),stencil_ops:None}),
+                            timestamp_writes:None,occlusion_query_set:None,multiview_mask:None,
+                        });
+                        for op in seg_ops {
+                            if let Plan3dOp::Water(arg)=op {
+                                if let Some(b)=water_batches.get(*arg as usize) {
+                                    if b.first_node==0 {
+                                        let off=(b.camera as u64*self.gfx3d.camera_stride()) as u32;
+                                        self.water.draw_curling(&mut curl,cam,off);
+                                    }
+                                }
+                            }
+                        }
+                        drop(curl);
+                        self.far_depth_resolve_current=false;
+                        self.frame_depth_final_resolved=false;
+                    }
                     encoder.pop_debug_group();
                     self.gpu_timers.end(&mut encoder, TimerRegion::WaterDraw);
                 }

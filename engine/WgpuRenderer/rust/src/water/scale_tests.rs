@@ -521,3 +521,90 @@ fn probe(@builtin(global_invocation_id) id: vec3<u32>) {
         "flat shelf manufactured a shore direction"
     );
 }
+
+#[test]
+fn gpu_curling_sheet_overhang_collapse_and_world_anchor() {
+    let instance =
+        wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+    let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
+        eprintln!("SKIP foam GPU probe: no adapter");
+        return;
+    };
+    let (device, queue) = pollster::block_on(adapter.request_device(&Default::default())).unwrap();
+    let mut source = include_str!("curling_breaker.wgsl").replace("#define_import_path water_curling_breaker", "");
+    source.push_str(r#"
+@group(0) @binding(0) var<storage,read_write> result: array<vec4<f32>>;
+@compute @workgroup_size(1)
+fn probe(@builtin(global_invocation_id) id: vec3<u32>) {
+    let times=array<f32,4>(2.0,5.25,6.4,7.7);
+    let time=times[id.x];
+    let a=curl_point(vec2<f32>(0.80,0.5),time);
+    let b=curl_point(vec2<f32>(0.801,0.5),time);
+    let c=curl_point(vec2<f32>(0.98,0.5),time);
+    let d=curl_point(vec2<f32>(0.981,0.5),time);
+    result[id.x*2u]=vec4<f32>(a.position.y,c.position.y,b.position.x-a.position.x,d.position.x-c.position.x);
+    let tail=curl_point(vec2<f32>(0.0,0.5),time);
+    let repeated=curl_point(vec2<f32>(0.80,0.5),time+10.0);
+    result[id.x*2u+1u]=vec4<f32>(tail.position.x,a.collapse,a.coverage,length(a.position-repeated.position));
+}
+"#);
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: None,
+        source: wgpu::ShaderSource::Wgsl(source.into()),
+    });
+    let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: None,
+        layout: None,
+        module: &shader,
+        entry_point: Some("probe"),
+        compilation_options: Default::default(),
+        cache: None,
+    });
+    let output = device.create_buffer(&wgpu::BufferDescriptor {
+        label: None,
+        size: 128,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
+    });
+    let read = device.create_buffer(&wgpu::BufferDescriptor {
+        label: None,
+        size: 128,
+        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: None,
+        layout: &pipeline.get_bind_group_layout(0),
+        entries: &[wgpu::BindGroupEntry {
+            binding: 0,
+            resource: output.as_entire_binding(),
+        }],
+    });
+    let mut encoder = device.create_command_encoder(&Default::default());
+    {
+        let mut pass = encoder.begin_compute_pass(&Default::default());
+        pass.set_pipeline(&pipeline);
+        pass.set_bind_group(0, &group, &[]);
+        pass.dispatch_workgroups(4, 1, 1);
+    }
+    encoder.copy_buffer_to_buffer(&output, 0, &read, 0, 128);
+    queue.submit([encoder.finish()]);
+    let (tx, rx) = std::sync::mpsc::channel();
+    read.slice(..).map_async(wgpu::MapMode::Read, move |r| {
+        tx.send(r).unwrap();
+    });
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    rx.recv().unwrap().unwrap();
+    let bytes = read.slice(..).get_mapped_range();
+    let values: &[[f32; 4]] = bytemuck::cast_slice(&bytes);
+    eprintln!("curl stages: {values:?}");
+    // A single-valued heightfield cannot reverse horizontal tangent at its lip.
+    assert!(values[2][2] < 0.0 && values[2][3] > 0.0, "no actual overhang");
+    assert!(values[2][0] > 1.0 && values[2][1] > 0.05, "barrel collapsed prematurely");
+    assert!(values[6][0] < 0.3 && values[6][1] < 0.3, "impact did not collapse into wash");
+    assert!(values[3][0] < values[1][0] - 6.0, "crest did not approach coast");
+    for i in 0..4 {
+        assert!(values[i*2+1][3] < 0.01, "unstable repeating world anchor");
+        for value in values[i*2] {assert!(value.is_finite());}
+    }
+}
