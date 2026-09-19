@@ -2471,17 +2471,29 @@ fn fs_curling_breaker(in: CurlOut, @builtin(front_facing) front: bool) -> @locat
     let fresnel = 0.02+0.98*pow(1.0-max(dot(n,v),0.0),5.0);
     let reflection = sky_env_sample(reflect(-v,n));
     let sun_visibility = smoothstep(0.0,0.06,l.y) * cloud_sun_shadow(world.xz);
-    let irradiance = ambient * sky_vis_ao(world.xz) + sun * max(dot(n,l),0.0) * sun_visibility;
+    let inside = select(0.0,1.0,dot(in.normal,v)<0.0);
+    let irradiance = ambient * sky_vis_ao(world.xz) * mix(1.0,0.45,inside) +
+                     sun * max(dot(n,l),0.0) * sun_visibility * mix(1.0,0.2,inside);
     var shallow = wp.shallow_color.rgb;
     var deep = wp.deep_color.rgb;
     if (linear>0.5) {shallow=srgb_to_linear(shallow);deep=srgb_to_linear(deep);}
     // Same authored swatches and irradiance/pi convention as the existing sea.
-    let tint = mix(deep,shallow,0.35);
-    var rgb = mix(tint * irradiance / PI, reflection, clamp(fresnel * wp.look_params.w,0.0,1.0));
+    let thickness = mix(3.0,0.35,smoothstep(0.4,1.0,in.data.z));
+    let sigma = water_extinction(wp.deep_color.rgb,wp.color_ext,clamp(wp.underwater_params.z,0.0,1.0));
+    let path = thickness/max(abs(dot(n,v)),0.25);
+    let transmittance = water_transmittance(sigma,path);
+    let tint = water_albedo_along_path(shallow,deep,sigma,path);
+    let view_n = (frame.view*vec4<f32>(n,0.0)).xy;
+    let offset = view_n*clamp(thickness/max(length(in.world_rel),1.0)*0.10,0.002,0.025);
+    let uv = clamp(scene_uv(in.clip.xy)+offset,vec2<f32>(0.001),vec2<f32>(0.999));
+    let background = textureSampleLevel(scene_color,scene_samp,uv,0.0).rgb;
+    var rgb = mix(background*transmittance+water_inscatter(tint,irradiance,transmittance),
+                  reflection,clamp(fresnel*wp.look_params.w,0.0,1.0));
     let foam_light = (ambient + sun * sun_visibility * max(l.y,0.0)) / PI;
     rgb = mix(rgb,vec3<f32>(0.82,0.88,0.86)*foam_light,foam);
-    // This sheet is a thin lip over the retained ocean, not an opaque solid wall.
-    var alpha = in.data.x * max(mix(0.32,0.9,fresnel),foam);
+    // Transmitted background is already composited above, as in the old ocean.
+    // Framebuffer alpha only fades the geometric ends; do not double-blend it.
+    var alpha = in.data.x;
     if (in.data.w>0.5) {
         let radial = max(1.0-dot(in.uv,in.uv),0.0);
         alpha = alpha*radial*radial;

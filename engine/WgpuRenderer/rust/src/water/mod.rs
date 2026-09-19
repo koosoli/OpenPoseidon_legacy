@@ -844,10 +844,10 @@ impl Water {
         let mut curling_layout = None;
         let mut curling_bind = None;
         let curling_pipeline = if std::env::var("WGR_WATER_CURLING_BREAKER").ok().as_deref() == Some("1") {
-            let entries: Vec<_> = [0u32,2,3,6,9,17,18].into_iter().map(|binding| {
+            let entries: Vec<_> = [0u32,2,3,6,9,12,13,17,18].into_iter().map(|binding| {
                 let ty = match binding {
                     0|18 => wgpu::BindingType::Buffer {ty: wgpu::BufferBindingType::Uniform,has_dynamic_offset:false,min_binding_size:None},
-                    3|9 => wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    3|9|13 => wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     _ => wgpu::BindingType::Texture {sample_type:wgpu::TextureSampleType::Float {filterable:binding!=17},
                         view_dimension:if binding==6 {wgpu::TextureViewDimension::D2Array} else {wgpu::TextureViewDimension::D2},multisampled:false},
                 };
@@ -855,7 +855,7 @@ impl Water {
             }).collect();
             let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {label:Some("curl_no_scene_depth"),entries:&entries});
             curling_bind = Some(build_curl_group(device,&layout,&params_ubo,&dummy_env,&env_sampler,
-                fft.as_ref().map_or(&fft_fallback_view,|f|f.displacement_view()),&fft_sampler,&heightmap_view,&conform_params));
+                fft.as_ref().map_or(&fft_fallback_view,|f|f.displacement_view()),&fft_sampler,&heightmap_view,&conform_params,&scene_view,&scene_sampler));
             let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label:Some("curl_pipeline_layout"),bind_group_layouts:&[Some(camera_layout),Some(&layout)],immediate_size:0});
             curling_layout = Some(layout);
@@ -950,7 +950,7 @@ impl Water {
     fn rebuild_group1(&mut self, device: &wgpu::Device) {
         if let Some(layout) = &self.curling_layout {
             self.curling_bind = Some(build_curl_group(device,layout,&self.params_ubo,&self.env_view,&self.env_sampler,
-                self.fft.as_ref().map_or(&self.fft_fallback_view,|f|f.displacement_view()),&self.fft_sampler,&self.heightmap_view,&self.conform_params));
+                self.fft.as_ref().map_or(&self.fft_fallback_view,|f|f.displacement_view()),&self.fft_sampler,&self.heightmap_view,&self.conform_params,&self.scene_view,&self.scene_sampler));
         }
         self.group1_bind = build_group1(
             device,
@@ -2442,7 +2442,7 @@ mod tests {
 
 fn build_curl_group(device:&wgpu::Device,layout:&wgpu::BindGroupLayout,params:&wgpu::Buffer,
     sky:&wgpu::TextureView,sky_sampler:&wgpu::Sampler,fft:&wgpu::TextureView,fft_sampler:&wgpu::Sampler,
-    bed:&wgpu::TextureView,conform:&wgpu::Buffer)->wgpu::BindGroup {
+    bed:&wgpu::TextureView,conform:&wgpu::Buffer,scene:&wgpu::TextureView,scene_sampler:&wgpu::Sampler)->wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {label:Some("curl_without_depth_feedback"),layout,
         entries:&[
             wgpu::BindGroupEntry {binding:0,resource:params.as_entire_binding()},
@@ -2452,5 +2452,7 @@ fn build_curl_group(device:&wgpu::Device,layout:&wgpu::BindGroupLayout,params:&w
             wgpu::BindGroupEntry {binding:9,resource:wgpu::BindingResource::Sampler(fft_sampler)},
             wgpu::BindGroupEntry {binding:17,resource:wgpu::BindingResource::TextureView(bed)},
             wgpu::BindGroupEntry {binding:18,resource:conform.as_entire_binding()},
+            wgpu::BindGroupEntry {binding:12,resource:wgpu::BindingResource::TextureView(scene)},
+            wgpu::BindGroupEntry {binding:13,resource:wgpu::BindingResource::Sampler(scene_sampler)},
         ]})
 }

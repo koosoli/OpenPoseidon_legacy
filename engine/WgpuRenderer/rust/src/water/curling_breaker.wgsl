@@ -33,11 +33,13 @@ fn curl_point(uv: vec2<f32>, time: f32) -> CurlPoint {
                       sin(uv.x * 63.0 - along * 1.7 + age * 7.0)) * 0.055;
     height = mix(height, 0.12 + turbulence, crash);
     let ends = smoothstep(0.0, 0.12, uv.y) * (1.0 - smoothstep(0.88, 1.0, uv.y));
+    // Fade coverage at the lateral ends, not the curl height: collapsing the
+    // cross-section there sealed the barrel opening with a sloping curtain.
     let leading = smoothstep(0.0, 0.06, uv.x);
     var s: CurlPoint;
     // Westward arrival: x decreases. Arrival at roughly the 2m contour.
     let crest_x = 7861.0 - min(age, 7.2) * 2.35;
-    s.position = vec3<f32>(crest_x - forward, height * ends * fade, 4582.0 + along);
+    s.position = vec3<f32>(crest_x - forward, height * fade, 4582.0 + along);
     s.collapse = crash;
     s.coverage = grow * fade * ends * leading;
     s.age = age;
