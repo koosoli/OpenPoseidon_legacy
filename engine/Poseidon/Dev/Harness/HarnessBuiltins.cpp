@@ -6,6 +6,7 @@ using namespace Poseidon;
 
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/World/World.hpp>
+#include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/World/Weather/RainVolume.hpp>
 #include <Poseidon/World/Physics/PhysicsWorld.hpp>
@@ -71,6 +72,19 @@ namespace HarnessBuiltins
 
 void RegisterScreenshot(HarnessServer& hs)
 {
+    hs.RegisterCommand({"weather_visibility", "Read-only weather, terrain and object draw ranges", {}},
+        [](const std::string&, cJSON*) -> std::string {
+            if (!GScene || !GLandscape) return HarnessProtocol::ErrorResponse("no world");
+            auto* result = cJSON_CreateObject();
+            cJSON_AddNumberToObject(result, "rain", GLandscape->GetRainDensity());
+            cJSON_AddNumberToObject(result, "fog", GLandscape->GetFog());
+            cJSON_AddNumberToObject(result, "terrainRange", GScene->GetFogMaxRange());
+            cJSON_AddNumberToObject(result, "baseRange", GScene->GetBaseFogMaxRange());
+            cJSON_AddNumberToObject(result, "objectRange", GScene->GetObjectDrawDistance());
+            cJSON_AddNumberToObject(result, "tacticalVisibility", GScene->GetTacticalVisibility());
+            cJSON_AddNumberToObject(result, "selectedRange", ENGINE_CONFIG.tacticalZ);
+            return HarnessProtocol::JsonResponse(result);
+        });
     hs.RegisterCommand({"water_bathymetry", "Read a bounded terrain-height grid for the ocean fixture", {}},
         [](const std::string&, cJSON* root) -> std::string
         {

@@ -31,6 +31,7 @@ using Poseidon::Foundation::Time;
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
 #include <Poseidon/UI/Settings/GameSettingsConfig.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
+#include <Poseidon/Graphics/GraphicsEngineFactory.hpp>
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
@@ -141,7 +142,6 @@ void Scene::ResetFog()
     ENGINE_CONFIG.horizontZ = floatMin(_rainRange + 20, ENGINE_CONFIG.tacticalZ);
     minRange = MAX_FOG * 0.3f, maxRange = MAX_FOG;
     UpdateFogRange(minRange, maxRange, _rainRange);
-    _baseFogMaxRange = maxRange;
 
     // FAR-001: the DISPLAY fog range, and only that one, may be widened by the
     // altitude policy. Computed into separate locals rather than by mutating
@@ -151,6 +151,18 @@ void Scene::ResetFog()
     // what the game considers visible, which is exactly the ground-play spillover
     // this whole change exists to avoid.
     float dispMin = minRange, dispMax = maxRange;
+    // WGPU disables distance haze when the weather fog setting is zero. In
+    // that mode rain/night's tactical visibility must not remove terrain:
+    // heavy rain otherwise leaves a ~350m terrain rectangle with unfogged
+    // objects visible beyond it. Keep the selected display reach, while the
+    // legacy min/max, horizontZ, shadow fog and tactical fog stay unchanged.
+    const char* backend = GraphicsEngineFactory::ActiveBackendCode();
+    if (backend && std::strcmp(backend, "wgpu") == 0 && _landscape && _landscape->GetFog() <= 0.0f)
+    {
+        dispMax = std::max(dispMax, ENGINE_CONFIG.tacticalZ - 20.0f);
+        dispMin = dispMax * 0.3f;
+    }
+    _baseFogMaxRange = dispMax;
     if (_aerialFogMaxRange > dispMax)
     {
         dispMax = _aerialFogMaxRange;
