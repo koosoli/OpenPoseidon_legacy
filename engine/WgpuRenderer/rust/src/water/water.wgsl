@@ -2408,7 +2408,7 @@ fn curl_world(uv: vec2<f32>) -> vec3<f32> {
     var ocean = gerstner_disp(position.xz, dist);
     if (wp.fft_control.x > 0.5) { ocean = fft_geometry_disp(position.xz, dist, 0.0); }
     let tail = 1.0 - smoothstep(0.0, 0.40, uv.x);
-    return position + vec3<f32>(0.0, wp.sea_level + 0.04 + ocean.y * tail, 0.0);
+    return position + vec3<f32>(0.0, wp.sea_level + 0.04 + ocean.y * max(tail,curl_point(uv,wp.time).collapse), 0.0);
 }
 @vertex
 fn vs_curling_breaker(@builtin(vertex_index) vertex: u32) -> CurlOut {
@@ -2482,12 +2482,17 @@ fn fs_curling_breaker(in: CurlOut, @builtin(front_facing) front: bool) -> @locat
     // world xz onto its nearly vertical face (which made foam into long stripes).
     let material = in.uv * vec2<f32>(14.0,36.0);
     let footprint = max(length(dpdx(material)),length(dpdy(material)));
-    let flow = material + vec2<f32>(wp.time*0.12,0.0);
+    let warp = vec2<f32>(vnoise_lod(material*0.53,footprint*0.53),
+                         vnoise_lod(material*0.53+vec2<f32>(7.3,2.1),footprint*0.53));
+    let flow = material + warp*1.4 + vec2<f32>(wp.time*0.12,0.0);
     let noise = 0.55 * vnoise_lod(flow*1.7,footprint*1.7) +
                 0.30 * vnoise_lod(flow*4.3+vec2<f32>(0.37,0.81),footprint*4.3) +
                 0.15 * vnoise_lod(flow*11.1,footprint*11.1);
     let lip = smoothstep(0.92,1.0,in.data.z) * 0.55;
-    let foam = clamp(in.data.y * (0.72 + noise * 0.45) + lip * smoothstep(0.25,0.6,noise),0.0,1.0);
+    // Aeration starts at impact, not across the entire still-standing wall.
+    let impact = in.data.y * (1.0-smoothstep(0.25,1.2,world.y-wp.sea_level));
+    let foam = clamp(impact * smoothstep(0.30,0.62,noise) +
+                     lip * smoothstep(0.25,0.6,noise),0.0,1.0);
     // The ocean helper deliberately suppresses detail on steep heightfields.
     // Evaluate it in the sheet's tangent frame so the vertical lip keeps ripples.
     let detail = micro_normal(material, length(in.world_rel), 2.0, vec3<f32>(0,1,0), 0.0);
@@ -2522,7 +2527,7 @@ fn fs_curling_breaker(in: CurlOut, @builtin(front_facing) front: bool) -> @locat
     rgb = mix(rgb,vec3<f32>(0.82,0.88,0.86)*foam_light,foam);
     // Transmitted background is already composited above, as in the old ocean.
     // Framebuffer alpha only fades the geometric ends; do not double-blend it.
-    var alpha = in.data.x;
+    var alpha = in.data.x * mix(1.0,smoothstep(0.30,0.48,noise),impact);
     if (in.data.w>0.5) {
         let radial = max(1.0-dot(in.uv,in.uv),0.0);
         alpha = alpha*radial*radial;

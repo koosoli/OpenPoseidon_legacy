@@ -96,9 +96,28 @@ try {
  }
  $null=Send @{cmd='exec';code='oceanCamera="camera" camCreate [7900,4500,10]; oceanCamera cameraEffect ["internal","back"]; oceanCamera camSetTarget [7900,4600,0]; oceanCamera camSetFov 0.7; oceanCamera camCommit 0; showCinemaBorder false; hint ""'}
  $null=Send @{cmd='water_probe'}
- $null=Send @{cmd='water_bathymetry';x=7900;z=4550}
- if ($Preset -ge 3 -or $Surf) {$null=Send @{cmd='exec';code='oceanCamera camSetPos [7875,4582,8]; oceanCamera camSetTarget [7828,4582,0]; oceanCamera camCommit 0'}}
- if ($Curling -or $CurlingBaseline) {$null=Send @{cmd='exec';code='oceanCamera camSetPos [7859,4608,3]; oceanCamera camSetTarget [7847,4582,1.0]; oceanCamera camSetFov 0.7; oceanCamera camCommit 0'}}
+ $bathymetry=Send @{cmd='water_bathymetry';x=7900;z=4550}
+ if ($Preset -ge 3 -or $Surf -or $Curling -or $CurlingBaseline) {$null=Send @{cmd='exec';code='oceanCamera camSetPos [7875,4582,8]; oceanCamera camSetTarget [7828,4582,0]; oceanCamera camCommit 0'}}
+ if ($Curling -or $CurlingBaseline) {
+  # The mission tide is several metres above datum. Frame the actual waterline,
+  # not the zero-height contour, otherwise this camera looks behind the break.
+  Start-Sleep -Milliseconds 250
+  $heightProbe=Send @{cmd='eval';code='getPosASL oceanCamera'}
+  # The calibrated camera above was placed eight metres above this open water.
+  $seaLevel=($heightProbe.result | ConvertFrom-Json)[2]-8.0
+  $row=@($bathymetry.samples | Where-Object {[Math]::Abs($_[1]-4582.0) -lt 0.1})
+  $shoreX=$null
+  for ($i=0;$i -lt $row.Count-1;$i++) {
+   $a=$row[$i];$b=$row[$i+1]
+   if ($a[2] -ge $seaLevel -and $b[2] -lt $seaLevel) {
+    $shoreX=$a[0]+($b[0]-$a[0])*($a[2]-$seaLevel)/($a[2]-$b[2]);break
+   }
+  }
+  if ($null -eq $shoreX) {throw 'No waterline found for curling fixture camera'}
+  $centre=($shoreX+12.054).ToString('F3',[Globalization.CultureInfo]::InvariantCulture)
+  $camera=($shoreX+0.054).ToString('F3',[Globalization.CultureInfo]::InvariantCulture)
+  $null=Send @{cmd='exec';code="oceanCamera camSetPos [$camera,4582,1.6]; oceanCamera camSetTarget [$centre,4582,1.0]; oceanCamera camSetFov 0.7; oceanCamera camCommit 0"}
+ }
  if ($Review) {
   Write-Host 'Live ocean review. Use the Water tab to compare scales. Close the game to finish; no automatic timeout.'
   while (!$process.HasExited) {Start-Sleep -Milliseconds 250}
@@ -108,6 +127,10 @@ try {
  $null=Send @{cmd='exec';code='logInfo "OCEAN_PERF_BEGIN"; triPerfReset 0'}
  Start-Sleep -Seconds 12
  $null=Send @{cmd='eval';code='triPerfStats 0'}
+ if ($Curling -or $CurlingBaseline) {
+  $null=Send @{cmd='eval';code='getPosASL oceanCamera'}
+  $null=Send @{cmd='eval';code='getDir oceanCamera'}
+ }
  $null=Send @{cmd='exec';code='logInfo "OCEAN_PERF_END"'}
  if ($PerfOnly) {
   $null=Send @{cmd='exit'}

@@ -12,7 +12,7 @@ fn curl_point(uv: vec2<f32>, time: f32) -> CurlPoint {
     let along = (uv.y - 0.5) * 36.0;
     let age = fract((time + along * 0.15) / 10.0) * 10.0;
     let grow = smoothstep(0.0, 1.6, age);
-    let crash = smoothstep(5.5, 7.2, age);
+    let crash = smoothstep(5.5 + (1.0 - uv.x) * 0.65, 7.2, age);
     let fade = 1.0 - smoothstep(8.1, 9.8, age);
     let tip = mix(2.6, 5.85, smoothstep(2.0, 5.7, age));
     let radius = 1.35 * grow * (1.0 + 0.055 * sin(along * 0.53) + 0.025 * sin(along * 1.37));
