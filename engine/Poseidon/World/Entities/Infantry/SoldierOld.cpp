@@ -710,7 +710,6 @@ Man::Man(VehicleType* name, bool fullCreate)
     // Ordinary firearm sprites are visible effects, not dense shadow-casting
     // smoke. Keep the separate muzzle light and intentional smoke sources.
     _mGunClouds.SetSmokeShadow(false);
-    _mGunFire.SetSmokeShadow(false);
     _gunClouds.Load((*Type()->_par) >> "GunClouds");
     _mGunFireFrames = 0;
     _mGunFireTime = UITIME_MIN;
