@@ -6543,17 +6543,17 @@ tickets:
     owner: null
     branch: codex/ocean-release
     baseline_commit: 5457e729
-    verification_commit: e99d7262
+    verification_commit: 4de6ea57
     milestone: 0
     milestone_role: NON_BLOCKING
     depends_on: []
     blocked_by: []
     blocks: []
-    implementation_commits: [ed6a2989, 643abc64, e99d7262]
+    implementation_commits: [ed6a2989, 643abc64, e99d7262, 4b0b721e, 4de6ea57]
     production_call_sites: []
     test_ids: [gpu-ocean-scale, gpu-surf-arrival, gpu-foam-pipeline, gpu-reference-seas, water-shaders, cpu-water-queries]
     benchmark_artifacts: []
-    evidence_hash: c4fdd3ba385a721593c9db85ff3a7e2c985c175e3168d26da4b0685ca414b1fb
+    evidence_hash: 69821f74671c13ebed6c40cc1a12b3292428b067ebea72c4e8e4cac85d6c2213
     decision_record: docs/roadmap/decisions/OCEAN-SURF-IMPLEMENTATION-20260919.md
     known_failures:
       - Owner rejected surf appearance and requested old behavior remain default. Revised opt-in surf preserves underlying ocean waves; visual acceptance remains open.
@@ -6563,6 +6563,7 @@ tickets:
     reviewer_method: Author-run GPU regressions, rebuilt CPU water suite, calibrated live clips and lifecycle/fallback captures.
     supersedes: []
     evidence:
+      - docs/roadmap/evidence/ocean-surf-revision-20260919.json
       - docs/roadmap/evidence/ocean-surf-20260919.json
       - docs/roadmap/decisions/OCEAN-SURF-IMPLEMENTATION-20260919.md
       - docs/roadmap/decisions/OCEAN-SURF-20260919.md

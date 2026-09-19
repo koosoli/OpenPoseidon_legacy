@@ -1,0 +1,56 @@
+{
+  "production_commit": "4de6ea57",
+  "default": "original behavior; experimental surf only with explicit opt-in",
+  "water_tests": 55,
+  "shader_tests": 1,
+  "costs_without_screenshots": {
+    "revised-surf-20260919-223341": {
+      "gpu_samples": 6,
+      "gpu_medians": {
+        "evolve": 0.1075,
+        "fftH": 0.206,
+        "fftV": 0.2005,
+        "compose": 0.1145,
+        "draw": 2.392,
+        "foam": 0.202,
+        "interaction": 0.010499999999999999,
+        "planar": 1.5675,
+        "total": 5.032
+      },
+      "cpu_mean": 0.09398333333333334,
+      "cpu_p95_max": 0.1808,
+      "slow_frames": 0
+    },
+    "restored-default-20260919-223601": {
+      "gpu_samples": 6,
+      "gpu_medians": {
+        "evolve": 0.1085,
+        "fftH": 0.209,
+        "fftV": 0.2025,
+        "compose": 0.118,
+        "draw": 2.5435,
+        "foam": 0.1765,
+        "interaction": 0.010499999999999999,
+        "planar": 1.427,
+        "total": 4.8985
+      },
+      "cpu_mean": 0.09403333333333333,
+      "cpu_p95_max": 0.1625,
+      "slow_frames": 0
+    }
+  },
+  "comparison": "build/surf-revision-comparison/ocean-live-comparison.mp4",
+  "comparison_seconds": 41.5,
+  "comparison_note": "Recorded elapsed time resampled at 8fps; independent runs, phases not locked. Visual acceptance remains open.",
+  "binary_sha256": {
+    "OpenPoseidon.exe": "14df65e91c9e1367e9a72ceb372921646feaa01a2e35257e296ef4f32e77eead",
+    "wgpu_renderer.dll": "3f22a4e04a939f3a95293b6c82b6aaac0b191d7a615363f88b562b7ebcec6e9b"
+  },
+  "installed_test": {
+    "run": "build\\ocean-runs\\installed-old-default-20260919-224008",
+    "exit": 0,
+    "screenshots": 0,
+    "log_sha256": "be46e19f631f0b970c05ee58f73fb649e086b65323f8eef49f6c300bc6685c9b",
+    "surf_override_absent": true
+  }
+}
