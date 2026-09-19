@@ -76,3 +76,12 @@ Logs/build evidence: `build/ai-distance*` (local, not committed).
 The full COMPAT-C1 ledger validator stops at a pre-existing AST-011B evidence
 hash mismatch (recorded 2d228694..., actual ce123a20...). None of its twelve
 evidence files were changed by this task. Historical evidence was not restamped.
+
+## Launcher correction after owner report
+
+The initial launcher called `pwsh` through Git Bash and failed with exit 127
+on Windows PowerShell installations without PowerShell 7 on PATH. It now
+reuses its current PowerShell executable via an absolute path under PSHOME.
+`-CheckOnly` checks the real lock/relaunch/mission paths without starting the
+game. Both Helicopter and Stress passed through Windows PowerShell
+5.1.26100.9444 after this correction. No game build or deployment was needed.
