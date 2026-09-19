@@ -1,5 +1,5 @@
 param(
- [switch]$Matrix, [switch]$NoFft, [ValidateRange(0,35)][double]$WindSpeed=8, [switch]$LiveClip, [switch]$LowQuality, [switch]$Surf, [ValidateRange(0,5)][int]$Preset=1, [string]$Label='current', [string]$BinaryDir='', [switch]$Quick, [switch]$Review,
+ [switch]$Menu, [switch]$LegacyShore, [switch]$Matrix, [switch]$NoFft, [ValidateRange(0,35)][double]$WindSpeed=8, [switch]$LiveClip, [switch]$LowQuality, [switch]$Surf, [ValidateRange(0,5)][int]$Preset=1, [string]$Label='current', [string]$BinaryDir='', [switch]$Quick, [switch]$Review,
  [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault'
 )
 $ErrorActionPreference='Stop'
@@ -10,6 +10,8 @@ if (!$env:LOCK_OWNER) {
  if ($BinaryDir) {$argv+=@('-BinaryDir',$BinaryDir)}
  $argv+=@('-Preset',"$Preset")
  if ($Surf) {$argv+='-Surf'}
+ if ($LegacyShore) {$argv+='-LegacyShore'}
+ if ($Menu) {$argv+='-Menu'}
  $argv+=@('-WindSpeed',$WindSpeed.ToString([Globalization.CultureInfo]::InvariantCulture))
  if ($Matrix) {$argv+='-Matrix'}
  if ($NoFft) {$argv+='-NoFft'}
@@ -34,9 +36,15 @@ $referenceScale=if ($Preset -ge 3) {'1.0'} else {'0.65'}
 $coupling=if ($Preset -ge 3) {'0'} else {'1'}
 # Existing owner scale, controlled material. No stored developer overrides leak in.
 [IO.File]::WriteAllText((Join-Path $profileDir 'noe_noe_wrp.cfg'),"v 5`nwave 1 1 1 $referenceScale`nquality $qualityFlag 1 512 $Preset`nsea $coupling 0.1 1`n")
-if ($Surf) {$env:WGR_WATER_SURF_PILOT='1'} else {$env:WGR_WATER_SURF_PILOT='0'}
+if ($LegacyShore) {$env:WGR_WATER_SURF_PILOT='0'} elseif ($Surf) {$env:WGR_WATER_SURF_PILOT='1'} else {Remove-Item Env:WGR_WATER_SURF_PILOT -ErrorAction SilentlyContinue}
 $env:POSEIDON_WIND_OVERRIDE=$WindSpeed.ToString([Globalization.CultureInfo]::InvariantCulture)+' 90 0'
 if ($NoFft) {$env:WGR_WATER_FFT='0'} else {$env:WGR_WATER_FFT='1'}
+if ($Menu) {
+ # Copy saved water settings into the private profile; never edit the owner's files.
+ $ownerWater=Join-Path $env:APPDATA 'CWR/water-look'
+ if (Test-Path $ownerWater) {Get-ChildItem -LiteralPath $ownerWater -Filter '*.cfg' | Copy-Item -Destination $profileDir}
+ Remove-Item Env:POSEIDON_WIND_OVERRIDE -ErrorAction SilentlyContinue
+}
 $env:WGR_OCEAN_PROFILE='1'
 $env:WGR_AUTO_EXPOSURE='0'; $env:WGR_EXPOSURE='0.5'
 $mission=Join-Path $root 'tests/perf/missions/ocean_shore.noe'
@@ -44,6 +52,7 @@ $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0)
 $listener.Start(); $port=$listener.LocalEndpoint.Port; $listener.Stop()
 $log=Join-Path $out 'engine.log'
 $arguments=@('-C',('"'+$GameDir+'"'),'--render=wgpu','--window','--no-dev','--width','1280','--height','720','--harness',"$port",'--test-mission',('"'+$mission+'"'),'--log-file',('"'+$log+'"'))
+if ($Menu) {$arguments=@('-C',('"'+$GameDir+'"'),'--render=wgpu','--window','--no-dev','--width','1280','--height','720','--harness',"$port",'--log-file',('"'+$log+'"'))}
 if ($Review) {$arguments=$arguments | ForEach-Object {if ($_ -eq '--no-dev') {'--dev'} else {$_}}}
 @{head=(& git -C $root rev-parse HEAD);arguments=$arguments;hashes=@(Get-FileHash (Join-Path $BinaryDir 'OpenPoseidon.exe'),(Join-Path $BinaryDir 'wgpu_renderer.dll'),(Join-Path $mission 'mission.sqm'));settings=@(Get-ChildItem Env: | Where-Object Name -Match '^(WGR|POSEIDON)' | Select-Object Name,Value);deployment=(Get-Content (Join-Path $GameDir 'DEPLOYED-FROM.txt'))} | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $out 'provenance.json')
 $sourcePatch=Join-Path $out 'source.patch'
@@ -68,6 +77,19 @@ try {
   if (!$reply.ok) {throw $line};return $reply
  }
  Start-Sleep -Seconds 12
+ if ($Menu) {
+  $null=Send @{cmd='water_probe'}
+  $null=Send @{cmd='screenshot';path=(Join-Path $out 'menu.png')}
+  for ($i=0;$i -lt 24;$i++) {
+   Start-Sleep -Milliseconds 250
+   $null=Send @{cmd='screenshot';path=(Join-Path $out ('menu-{0:d3}.png' -f $i))}
+  }
+  $null=Send @{cmd='exit'}
+  if (!$process.WaitForExit(15000) -or $process.ExitCode) {throw 'Menu test failed to exit cleanly'}
+  if (Select-String -LiteralPath $log -Pattern 'Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION' -Quiet) {throw 'Renderer error in menu log'}
+  Write-Output "Ocean menu evidence: $out"
+  return
+ }
  $null=Send @{cmd='exec';code='oceanCamera="camera" camCreate [7900,4500,10]; oceanCamera cameraEffect ["internal","back"]; oceanCamera camSetTarget [7900,4600,0]; oceanCamera camSetFov 0.7; oceanCamera camCommit 0; showCinemaBorder false; hint ""'}
  $null=Send @{cmd='water_probe'}
  $null=Send @{cmd='water_bathymetry';x=7900;z=4550}

@@ -681,7 +681,7 @@ impl Water {
             .ok()
             .and_then(|v| v.parse::<f64>().ok())
             .unwrap_or(0.34);
-        let surf_pilot = if std::env::var("WGR_WATER_SURF_PILOT").ok().as_deref() == Some("1") {1.0} else {0.0};
+        let surf_pilot = if std::env::var("WGR_WATER_SURF_PILOT").ok().as_deref() == Some("0") {0.0} else {1.0};
         let vs_constants = [("skirt_k", skirt_k), ("surf_pilot", surf_pilot)];
         // `fs_constants` is shared with the whitewater pipeline below, whose shader declares only
         // `linear` — wgpu rejects a pipeline whose constant map names an override the module does

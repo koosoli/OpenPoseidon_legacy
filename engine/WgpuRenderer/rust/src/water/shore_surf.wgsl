@@ -1,6 +1,6 @@
 #define_import_path water_shore_surf
 
-// Bounded render-only spilling pilot. Constant incoming phase is differentiated
+// Default bounded render-only spilling surf (explicit environment opt-out retained). Constant incoming phase is differentiated
 // in a fixed world-relative frame, never dot(world, varying shore direction).
 struct SurfState {
     height: f32,

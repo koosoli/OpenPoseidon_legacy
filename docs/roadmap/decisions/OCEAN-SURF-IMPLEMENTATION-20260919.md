@@ -81,3 +81,13 @@ The old installed matched pair is preserved at `build/ocean-installed-backup-545
 Implementation, integration and focused runtime verification are complete for this bounded version. The ledger remains **INTEGRATED**, rather than falsely recording owner visual acceptance: `validate_execution_ledger.py` requires an actual named owner review for a visual ticket's final VALIDATED/SHIPPABLE state. Existing conservative approximations and the unclaimed broader checks are listed above; no owner review or multiplayer session has been invented.
 
 Final ledger check: the repository-wide compat-C1 validator stops at the pre-existing, unrelated AST-011B evidence-hash mismatch. Its entry was left untouched. The WTR-SURF-001 evidence hash was independently recomputed and checked against its four evidence files.
+
+## Owner rejection and normal-start correction
+
+Oliver rejected the normal-start shoreline on 2026-09-19: dense striped highlights and overlapping sheets still looked like slime. The earlier implementation-complete statement was premature as a visual claim. The pilot-only fixture bypassed the still-active legacy shore train; the saved intro profile used wave amplitude 4 and shore gain 1.
+
+The follow-up makes shared surf default-on (explicit `WGR_WATER_SURF_PILOT=0` remains the diagnostic opt-out), including existing profiles. The legacy comparison path now uses fixed propagation direction/wavenumbers and terrain-relative coordinates: local direction or depth changes can no longer multiply a kilometre-scale world coordinate into a phase discontinuity. This does not add a refraction solver; the shared surf retains its conservative authored incoming heading and exposure bounds.
+
+A new production-function GPU regression checks phase invariance under changing bathymetry/direction, translated terrain origin, and sub-metre spatial continuity. The current release branch passed 56 water tests and entry-shader composition; previous 61-test counts came from the earlier development branch. A new `-Menu` capture copies the owner's water settings into an isolated profile and launches the actual menu without a test mission or a wind override. `-LegacyShore` explicitly selects the comparison path; the ordinary test invocation no longer forces surf off.
+
+Runtime verification and installed follow-up commit: pending while the owner's review game is open. No visual acceptance is claimed by this source/test checkpoint.
