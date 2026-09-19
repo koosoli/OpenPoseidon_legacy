@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <Poseidon/AI/FriendlyFire.hpp>
+#include <Poseidon/AI/InfantryCombat.hpp>
 using namespace Poseidon;
 
 namespace
@@ -63,4 +64,28 @@ TEST_CASE("blocked flight envelopes agree with exhaustive segment tests", "[comb
             }
     path.Clear();
     CHECK_FALSE(path.Intersects(Vector3(0, 5, 600), 100, 100));
+}
+
+TEST_CASE("fire lane movement requires sustained rejection for the same target", "[combat]")
+{
+    InfantryCombat::FireLaneWait wait;
+    int target = 0, another = 0;
+    CHECK_FALSE(wait.ShouldYield(0, &target));
+    wait.Blocked(1, &target);
+    CHECK_FALSE(wait.ShouldYield(1.2f, &target));
+    wait.Blocked(1.5f, &target);
+    wait.Blocked(1.8f, &target);
+    CHECK(wait.ShouldYield(1.8f, &target));
+    CHECK_FALSE(wait.ShouldYield(1.8f, &another));
+    CHECK_FALSE(wait.ShouldYield(3, &target));
+    wait.Blocked(3, &target);
+    CHECK_FALSE(wait.ShouldYield(3, &target));
+    wait.Blocked(3.5f, &target);
+    wait.Blocked(3.8f, &another);
+    CHECK_FALSE(wait.ShouldYield(3.8f, &another));
+    wait.Clear();
+    CHECK_FALSE(wait.Recent(3.9f, &another));
+    wait.Blocked(4, &target);
+    wait.Blocked(2, &target); // rewound mission clock cannot retain a stale wait
+    CHECK_FALSE(wait.ShouldYield(2, &target));
 }

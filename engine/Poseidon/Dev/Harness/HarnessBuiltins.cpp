@@ -10,6 +10,7 @@ using namespace Poseidon;
 #include <Poseidon/World/Weather/RainVolume.hpp>
 #include <Poseidon/World/Physics/PhysicsWorld.hpp>
 #include <Poseidon/Dev/Diag/PhysicsCorpus.hpp>
+#include <Poseidon/Dev/Diag/BallisticsRecorder.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/Dev/Debug/DevPanelWidgets.hpp>
 #include <SDL3/SDL_events.h>
@@ -112,6 +113,10 @@ void RegisterSqf(HarnessServer& hs)
                 cJSON_AddBoolToObject(resp, "active", man->ImprovedAutonomousCombat());
                 cJSON_AddBoolToObject(resp, "hasTarget", man->GetFireTarget() != nullptr);
                 cJSON_AddNumberToObject(resp, "selected", man->SelectedWeapon());
+                cJSON_AddNumberToObject(resp, "laneYields", man->CombatLaneYields());
+                cJSON_AddNumberToObject(resp, "pauseState", man->CombatPauseState());
+                cJSON_AddBoolToObject(resp, "laneBlocked", man->CombatLaneBlocked());
+                cJSON_AddStringToObject(resp, "gate", man->CombatLastGate());
                 cJSON* slots = cJSON_AddArrayToObject(resp, "slots");
                 for (int i = 0; i < man->NMagazineSlots(); ++i)
                 {
@@ -131,10 +136,17 @@ void RegisterSqf(HarnessServer& hs)
             }
             return HarnessProtocol::JsonResponse(resp);
         });
-    hs.RegisterCommand({"ai_stress_state", "Passive infantry state near player (no AI decision evaluation)", {}},
-        [](const std::string&, cJSON*) -> std::string {
+    hs.RegisterCommand({"ai_stress_state", "Passive infantry state near player (no AI decision evaluation)", {{"recordShots", "int", false}}},
+        [](const std::string&, cJSON* root) -> std::string {
             if (!GWorld || !GLandscape || !GWorld->PlayerOn() || GWorld->GetMode() == GModeNetware)
                 return HarnessProtocol::ErrorResponse("singleplayer required");
+            const int record = HarnessProtocol::GetInt(root, "recordShots", -1);
+            if (record == 0 || record == 1)
+            {
+                Ballistics::SetEnabled(record == 1);
+                Ballistics::SetDrawTrails(false);
+                Ballistics::Store().SetCapacity(128);
+            }
             cJSON* resp = cJSON_CreateObject();
             cJSON* rows = cJSON_AddArrayToObject(resp, "units");
             int xMin, xMax, zMin, zMax;
@@ -150,7 +162,16 @@ void RegisterSqf(HarnessServer& hs)
                         const Man* man = dyn_cast<Man>(list->GetTypeVehicle(i));
                         if (!man || man->IsDammageDestroyed() || man == GWorld->PlayerOn()) continue;
                         cJSON* row = cJSON_CreateObject();
+                        cJSON_AddStringToObject(row, "name", man->GetDebugName());
                         cJSON_AddNumberToObject(row, "speed", man->Speed().Size());
+                        cJSON_AddNumberToObject(row, "wantedSpeed", man->WalkSpeedWanted());
+                        cJSON_AddNumberToObject(row, "importance", man->GetLastImportance());
+                        cJSON_AddNumberToObject(row, "pauseState", man->CombatPauseState());
+                        cJSON_AddNumberToObject(row, "unitState", man->Brain() ? man->Brain()->GetState() : -1);
+                        cJSON_AddNumberToObject(row, "pathSize", man->Brain() ? man->Brain()->GetPath().Size() : 0);
+                        cJSON_AddBoolToObject(row, "laneBlocked", man->CombatLaneBlocked());
+                        cJSON_AddNumberToObject(row, "laneYields", man->CombatLaneYields());
+                        cJSON_AddStringToObject(row, "gate", man->CombatLastGate());
                         cJSON_AddNumberToObject(row, "distance", man->Position().Distance(player));
                         cJSON_AddNumberToObject(row, "height", man->Position().Y());
                         cJSON_AddStringToObject(row, "move", man->GetPrimaryMoveName());
@@ -168,6 +189,19 @@ void RegisterSqf(HarnessServer& hs)
                         cJSON_AddItemToArray(rows, row);
                     }
                 }
+            cJSON* shots = cJSON_AddArrayToObject(resp, "shots");
+            const auto& store = Ballistics::Store();
+            for (int i = 0; i < store.Size(); ++i)
+            {
+                const auto& shot = store.At(i);
+                cJSON* row = cJSON_CreateObject();
+                cJSON_AddNumberToObject(row, "id", shot.id);
+                cJSON_AddStringToObject(row, "ammo", shot.ammo.Get());
+                cJSON_AddStringToObject(row, "shooter", shot.shooter.Get());
+                cJSON_AddNumberToObject(row, "dirY", shot.dirY);
+                cJSON_AddNumberToObject(row, "speed", shot.muzzleSpeed);
+                cJSON_AddItemToArray(shots, row);
+            }
             return HarnessProtocol::JsonResponse(resp);
         });
     hs.RegisterCommand({"crew_seat_status", "Read-only SP fixture seat lifecycle status", {}},

@@ -1,5 +1,5 @@
 param(
- [ValidateSet('Helicopter','Stress','Combat','Grenades','Burst','Crossfire','Shadows')][string]$Scenario='Helicopter',
+ [ValidateSet('Helicopter','Stress','StressDistance','StressBehavior','LaneMove','Combat','Grenades','Burst','BurstAim','Crossfire','Shadows')][string]$Scenario='Helicopter',
  [int]$Seconds=90, [switch]$Reference, [switch]$Diagnostics, [switch]$LegacyTargetScan, [switch]$LegacyCombat, [switch]$VehicleCosts, [switch]$FixedCamera, [switch]$CenterPlayer,
  [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault'
 )
@@ -43,13 +43,14 @@ $env:POSEIDON_SIM_VEHICLE_COST=$(if ($VehicleCosts) {'1'} else {'0'})
 $env:POSEIDON_SMOKE_SYSTEM='0'
 $env:WGR_AUTO_EXPOSURE='0'; $env:WGR_EXPOSURE='0.15'
 $mission=Join-Path $root 'tests/perf/missions/combat_audit.Intro'
+if ($Scenario -eq 'LaneMove') {$mission=Join-Path $root 'tests/perf/missions/combat_lane.Intro'}
 if ($Scenario -eq 'Helicopter') {$mission=Join-Path $root 'tests/perf/missions/perf_heli_distance.Intro'}
-if ($Scenario -eq 'Stress') {$mission=Join-Path $GameDir 'Mods/@63units/63MAX.west_ls2'}
+if ($Scenario -in @('Stress','StressDistance','StressBehavior')) {$mission=Join-Path $GameDir 'Mods/@63units/63MAX.west_ls2'}
 $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0)
 $listener.Start(); $port=$listener.LocalEndpoint.Port; $listener.Stop()
 $log=Join-Path $out 'engine.log'
 $gameArgs=@('-C',('"'+$GameDir+'"'),'--render=wgpu','--window','--no-dev','--width','1280','--height','720','--harness',"$port",'--test-mission',('"'+$mission+'"'),'--log-file',('"'+$log+'"'))
-if ($Scenario -eq 'Stress') {$gameArgs+=@('--addon-root',('"'+(Join-Path $GameDir 'Mods/@63units')+'"'))}
+if ($Scenario -in @('Stress','StressDistance','StressBehavior')) {$gameArgs+=@('--addon-root',('"'+(Join-Path $GameDir 'Mods/@63units')+'"'))}
 @{head=(& git -C $root rev-parse HEAD);reference=[bool]$Reference;diagnostics=[bool]$Diagnostics;linearScan=[bool]$LegacyTargetScan;mission=$mission;gameArgs=$gameArgs;environment=@(Get-ChildItem Env: | Where-Object Name -Match '^(POSEIDON|WGR)' | Select-Object Name,Value);dataHashes=@(Get-FileHash (Join-Path $GameDir 'bin/CONFIG.BIN'),(Join-Path $GameDir 'bin/remaster.cpp'),(Join-Path $mission 'mission.sqm'));hashes=@(Get-FileHash (Join-Path $bin 'OpenPoseidon.exe'),(Join-Path $bin 'wgpu_renderer.dll'));deployment=(Get-Content (Join-Path $GameDir 'DEPLOYED-FROM.txt') -ErrorAction SilentlyContinue)} | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $out 'provenance.json')
 $p=Start-Process -FilePath $exe -ArgumentList $gameArgs -WorkingDirectory $bin -PassThru -WindowStyle Hidden
 $null=$p.Handle
@@ -84,7 +85,33 @@ try {
    Start-Sleep -Seconds 2
   }
   $null=Send @{cmd='eval';code='triPerfCapture 0'}
- } elseif ($Scenario -eq 'Stress') {
+ } elseif ($Scenario -eq 'StressDistance') {
+  # Startup wall time varies with shader/resource warmup. Match mission time,
+  # otherwise one arm has thousands fewer footprints when the camera moves.
+  $readyDeadline=[DateTime]::UtcNow.AddSeconds(60)
+  do {
+   $ready=Send @{cmd='eval';code='time'}
+   if ([double]$ready.result -ge 10.25) {break}
+   if ([DateTime]::UtcNow -gt $readyDeadline) {throw 'Mission did not reach measurement time'}
+   Start-Sleep -Milliseconds 200
+  } while ($true)
+  $null=Send @{cmd='exec';code='player allowDamage false; hint ""; auditCamera="camera" camCreate [10860,6380,40]; auditCamera cameraEffect ["internal","back"]; auditCamera camSetTarget [10860,6940,1]; auditCamera camSetFov 0.14; auditCamera camCommit 0; showCinemaBorder false'}
+  $null=Send @{cmd='eval';code='triPerfCapture 8192'}
+  foreach ($phase in @('far','near','far')) {
+   $cameraCode=if ($phase -eq 'near') {'auditCamera camSetPos [10860,6820,8]; auditCamera camSetFov 0.7'} else {'auditCamera camSetPos [10860,6380,40]; auditCamera camSetFov 0.14'}
+   $null=Send @{cmd='exec';code=($cameraCode+'; auditCamera camSetTarget [10860,6940,1]; auditCamera camCommit 0')}
+   $null=Send @{cmd='eval';code=('["'+$phase+'",time]')}
+   $null=Send @{cmd='ai_stress_state'}
+   Start-Sleep -Seconds 8
+  }
+  $null=Send @{cmd='eval';code='triPerfCapture 0'}
+  $null=Send @{cmd='ai_stress_state'}
+  $null=Send @{cmd='screenshot';path=(Join-Path $out 'distance.png')}
+ } elseif ($Scenario -in @('Stress','StressBehavior')) {
+  if ($Scenario -eq 'StressBehavior') {
+   $CenterPlayer=$true
+   $null=Send @{cmd='ai_stress_state';recordShots=1}
+  }
   if ($CenterPlayer) {$null=Send @{cmd='exec';code='player allowDamage false; player setPos [10860,6940,0]'}}
   for ($i=0;$i -lt $Seconds;$i+=5) {
    $null=Send @{cmd='eval';code='time'}
@@ -92,13 +119,41 @@ try {
    Start-Sleep -Seconds 5
   }
   $null=Send @{cmd='screenshot';path=(Join-Path $out 'stress.png')}
- } elseif ($Scenario -in @('Combat','Grenades','Burst','Crossfire')) {
-  $null=Send @{cmd='exec';code='auditCrossing=false; auditShots=0; auditShooter addEventHandler ["Fired",{auditShots=auditShots+1; if (auditCrossing && auditShots==1) then {auditFriend setPos [9700,3610,0]}}]; auditTarget allowDamage false; auditFriend allowDamage false; hint ""; auditCamera="camera" camCreate [9695,3595,3]; auditCamera cameraEffect ["internal","back"]; auditCamera camSetTarget auditTarget; auditCamera camCommit 0; showCinemaBorder false'}
+ } elseif ($Scenario -in @('Combat','Grenades','Burst','BurstAim','Crossfire','LaneMove')) {
+  $null=Send @{cmd='exec';code='auditTwist=false; auditWrongShots=0; auditCrossing=false; auditShots=0; auditShooter addEventHandler ["Fired",{auditShots=auditShots+1; if (auditTwist && auditShots>1 && getDir auditShooter>30 && getDir auditShooter<330) then {auditWrongShots=auditWrongShots+1}; if (auditTwist && auditShots==1) then {auditShooter setDir 90}; if (auditCrossing && auditShots==1) then {auditFriend setPos [9700,3610,0]}}]; auditTarget allowDamage false; auditFriend allowDamage false; hint ""; auditCamera="camera" camCreate [9695,3595,3]; auditCamera cameraEffect ["internal","back"]; auditCamera camSetTarget auditTarget; auditCamera camCommit 0; showCinemaBorder false'}
   if (!$Reference) {
    $null=Send @{cmd='ai_combat';improved=0}
    $r=Send @{cmd='ai_combat';improved=1}
    if (!$r.improved -or !$r.active) {throw 'AI combat setting did not activate'}
    $null=Send @{cmd='ai_combat';improved=$(if ($LegacyCombat) {0} else {1})}
+  }
+  if ($Scenario -eq 'BurstAim') {
+   $modes=if ($Reference) {@(1)} else {@(0,1)}
+   foreach ($mode in $modes) {
+    $null=Send @{cmd='ai_combat';improved=$mode}
+    $null=Send @{cmd='exec';code='auditTwist=false; auditShooter setCombatMode "BLUE"; auditShooter setDir 0; auditFriend setPos [9720,3620,0]; auditShooter setVehicleAmmo 1; auditShooter reveal auditTarget; auditShooter doTarget auditTarget'}
+    Start-Sleep -Seconds 2
+    $null=Send @{cmd='exec';code='auditShots=0; auditWrongShots=0; auditTwist=true; auditShooter setCombatMode "RED"'}
+    Start-Sleep -Seconds 6
+    $null=Send @{cmd='eval';code='[time,auditShots,auditWrongShots,getDir auditShooter]'}
+    $null=Send @{cmd='ai_combat'}
+    $null=Send @{cmd='exec';code='auditTwist=false; auditShooter setCombatMode "BLUE"'}
+   }
+  }
+  if ($Scenario -eq 'LaneMove') {
+   foreach ($mode in @(0,1)) {
+    $null=Send @{cmd='ai_combat';improved=$mode}
+    $null=Send @{cmd='exec';code='auditShooter setCombatMode "BLUE"; auditShooter setPos [9700,3600,0]; auditShooter setDir 0; auditFriend setPos [9700,3620,0]; auditShooter setVehicleAmmo 1; auditShooter reveal auditTarget; auditShooter doTarget auditTarget'}
+    Start-Sleep -Seconds 2
+    $null=Send @{cmd='exec';code='auditShots=0; auditShooter setCombatMode "RED"; auditShooter doMove [9700,3640,0]'}
+    for ($i=0;$i -lt 12;$i++) {
+     Start-Sleep -Seconds 1
+     $null=Send @{cmd='ai_combat'}
+     $null=Send @{cmd='ai_stress_state'}
+     $null=Send @{cmd='eval';code='[time,getPos auditShooter,auditShots]'}
+    }
+    $null=Send @{cmd='exec';code='auditShooter setCombatMode "BLUE"; doStop auditShooter'}
+   }
   }
   if ($Scenario -eq 'Crossfire') {
    # Keep the hostile target at 100 m; allies on the far side must still inhibit fire.
@@ -138,7 +193,7 @@ try {
    $null=Send @{cmd='eval';code='[time,auditShots,alive auditTarget,getDammage auditTarget,alive auditFriend,getDammage auditFriend]'}
    $null=Send @{cmd='exec';code='auditShooter setCombatMode "BLUE"'}
   }
-  if ($Scenario -notin @('Burst','Crossfire')) {
+  if ($Scenario -notin @('Burst','BurstAim','Crossfire','LaneMove')) {
   # The installed HandGrenade AI envelope is 40..60 m. A 30 m control
   # never reaches grenade selection and cannot validate the safety gate.
   $null=Send @{cmd='exec';code='auditShooter setCombatMode "BLUE"; removeAllWeapons auditShooter; {auditShooter removeMagazine _x} forEach magazines auditShooter; auditShooter addMagazine "HandGrenade"; auditShooter addMagazine "HandGrenade"; auditShooter addMagazine "HandGrenade"; auditShooter addWeapon "Throw"; auditTarget setPos [9700,3645,0]'}

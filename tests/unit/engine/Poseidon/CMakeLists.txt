@@ -247,6 +247,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     World/test_physics_determinism.cpp
     World/test_first_divergent_boundary.cpp
     World/test_serial_task_graph.cpp
+    World/test_stable_extract.cpp
     World/test_sim_stage_evidence.cpp
     Foundation/Threads/test_watchdog.cpp
     Foundation/Threads/test_precise_sleep.cpp

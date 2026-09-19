@@ -1,3 +1,4 @@
+#include <Poseidon/World/Simulation/StableExtract.hpp>
 #include <cstdlib>
 #include <unordered_map>
 #include <SDL3/SDL_scancode.h>
@@ -341,10 +342,9 @@ void World::DistributeImportances(VehiclesDistributed& target, VehicleList& list
 {
     SimulationImportance maxPrecG = SimulateInvisibleFar;
 
-    int i;
-    for (i = 0; i < list.Size();)
-    {
-        Entity* vehicle = list[i];
+    // Removing each item separately shifted the remainder on every transfer:
+    // crossing a detail boundary with 25k footprint marks became quadratic.
+    StableExtract(list, [&](Entity* vehicle) {
         SimulationImportance iPrec = vehicle->CalculateImportance(viewerPos, nViewers);
         if (iPrec > maxPrecG)
         {
@@ -356,8 +356,7 @@ void World::DistributeImportances(VehiclesDistributed& target, VehicleList& list
         }
         if (iPrec == prec)
         {
-            i++;
-            continue;
+            return false;
         }
         VehicleList* tgt = nullptr;
         switch (iPrec)
@@ -377,8 +376,8 @@ void World::DistributeImportances(VehiclesDistributed& target, VehicleList& list
         }
         PoseidonAssert(tgt);
         tgt->Insert(vehicle);
-        list.Delete(i);
-    }
+        return true;
+    });
 }
 
 void World::GetViewerList(StaticArrayAuto<Vector3>& viewers)

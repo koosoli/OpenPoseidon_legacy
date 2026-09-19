@@ -1,4 +1,5 @@
 #pragma once
+#include <Poseidon/AI/InfantryCombat.hpp>
 
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
 #include <Poseidon/World/Entities/Vehicles/CargoWeaponSeats.hpp>
@@ -600,6 +601,11 @@ class Man: public Person
 
 	MotionPath _queueMove; // shortest path to desired move; desired move is last element
     bool _cargoWeaponRequested = false;
+    mutable InfantryCombat::FireLaneWait _combatLaneWait;
+    mutable const char* _combatLastGate = "not-evaluated";
+    unsigned _combatLaneYields = 0;
+    void RecordCombatLaneBlocked(const Target* target) const;
+
     mutable CargoWeaponSeat _playerCargoWeaponSeat;
 	float _primaryFactor; // blend weight between primary and secondary animation
 	float _primaryTime,_secondaryTime;
@@ -905,6 +911,11 @@ class Man: public Person
 		int weapon, Matrix4 &pos, Vector3 &vel
 	) const override;
 
+    bool CombatLaneBlocked() const;
+    unsigned CombatLaneYields() const { return _combatLaneYields; }
+    const char* CombatLastGate() const { return _combatLastGate; }
+    int CombatPauseState() const { return static_cast<int>(_fireState); }
+    float WalkSpeedWanted() const { return _walkSpeedWanted; }
 	float GetAimed( int weapon, Target *target ) const override;
 	struct AimingDiagnostics
 	{

@@ -6424,20 +6424,63 @@ tickets:
       - file: engine/Poseidon/World/Entities/Infantry/SoldierOld.cpp
         symbol: Man::ThrowGrenadeAction
         verified_commit: 7c3d528a
-    test_ids: [friendly-fire-residual-travel, friendly-fire-block-culling]
+    test_ids: [friendly-fire-residual-travel, friendly-fire-block-culling, fire-lane-wait, burst-aim-eligibility]
     benchmark_artifacts: []
     evidence_hash: null
-    decision_record: docs/roadmap/decisions/COMBAT-CROSSFIRE-20260919.md
+    decision_record: docs/roadmap/decisions/AI-PROGRESS-20260919.md
     known_failures:
       - Visual acceptance and custom fused/obstructed grenade scenarios remain pending; no universal projectile safety claim.
     fallback: AI tab Legacy or POSEIDON_AI_COMBAT_LEGACY=1 restores prior autonomous combat checks.
     reviewer: null
     reviewer_method: >-
-      Author ran 39 targeted tests (429 assertions), open and allied-blocked fire,
+      Author ran 46 targeted tests (20503 assertions), open and allied-blocked fire,
       corrected 45 m grenade controls, actual setting toggles and an ally-entering-burst
       A/B (Legacy 3 rounds, Improved 1), plus separate shot-shadow and timing controls.
+      Later timed movement and burst-direction controls establish the new gates.
       Owner visual review remains open; author tests are not independent review.
     supersedes: []
     evidence:
       - docs/roadmap/decisions/COMBAT-FIXES-20260919.md
       - docs/roadmap/decisions/SHOT-SHADOW-AUDIT-20260919.md
+      - docs/roadmap/decisions/AI-PROGRESS-20260919.md
+  - id: PERF-036
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: Linear stable transfers between simulation distance groups
+    class: RUNTIME_INFRA
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: OPEN
+    status: INTEGRATED
+    outcome: null
+    owner: null
+    branch: parity/foliage-lighting-001
+    baseline_commit: 7c3d528a
+    verification_commit: null
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: []
+    production_call_sites:
+      - file: engine/Poseidon/World/WorldSetup.cpp
+        symbol: World::DistributeImportances
+        verified_commit: null
+    test_ids: [sim-distribution]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/AI-PROGRESS-20260919.md
+    known_failures:
+      - Other dense-scene simulation spikes remain; no vanilla FPS parity claim.
+    fallback: Revert the isolated stable-transfer change to restore per-item removal.
+    reviewer: null
+    reviewer_method: >-
+      Author verified 20000-object ownership/order invariants and a bounded
+      far-near-far 63MAX comparison at matched initial mission time. Peak
+      accumulated reassignment window 762.390 ms reference, 2.160 ms changed;
+      similar mark populations. Instrumented costs are not uninstrumented FPS.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/AI-PROGRESS-20260919.md
+      - engine/Poseidon/World/Simulation/StableExtract.hpp

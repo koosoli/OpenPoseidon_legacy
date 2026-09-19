@@ -1310,9 +1310,30 @@ bool Soldier::FireWeapon(int weapon, TargetType* target)
         return false;
     }
 
-    if (ImprovedAutonomousCombat() &&
-        (!GetAIFireEnabled(GetFireTarget()) || !CombatShotSafe(weapon, GetFireTarget())))
-        return false;
+    if (ImprovedAutonomousCombat())
+    {
+        if (!GetAIFireEnabled(GetFireTarget())) return false;
+        if (mode->_ammo->_simulation == AmmoShotBullet && magazine->_burstLeft > 0)
+        {
+            // SimulateWeaponActivity continues bursts without passing AIFire's
+            // aimed check. A turn/pose change between rounds must not authorize
+            // a fresh shot in the new, unrelated direction. Reuse the existing
+            // eligibility threshold; do not tighten accuracy or sample RNG.
+            Target* fireTarget = GetFireTarget();
+            if (!fireTarget || !fireTarget->idExact || fireTarget->destroyed || fireTarget->idExact != target)
+            {
+                magazine->_burstLeft = 0; // only un-emitted rounds; consumes no ammo
+                _combatLastGate = "burst-target-changed";
+                return false;
+            }
+            if (GetAimed(weapon, fireTarget) < 0.5f) return false;
+        }
+        if (!CombatShotSafe(weapon, GetFireTarget()))
+        {
+            if (mode->_ammo->_simulation == AmmoShotBullet) RecordCombatLaneBlocked(GetFireTarget());
+            return false;
+        }
+    }
 
     switch (mode->_ammo->_simulation)
     {
@@ -1429,6 +1450,8 @@ bool Soldier::FireWeapon(int weapon, TargetType* target)
 
     if (fired)
     {
+        _combatLaneWait.Clear();
+        _combatLastGate = "fired";
         base::FireWeapon(weapon, target);
         return true;
     }
@@ -1696,19 +1719,45 @@ void Soldier::Simulate(float deltaT, SimulationImportance prec)
     }
 }
 
+void Man::RecordCombatLaneBlocked(const Target* target) const
+{
+    if (!target || !target->idExact) return;
+    _combatLaneWait.Blocked(Glob.time.toFloat(), target->idExact.GetLink());
+    _combatLastGate = "friendly-fire";
+}
+
+bool Man::CombatLaneBlocked() const
+{
+    const Target* target = GetFireTarget();
+    return target && _combatLaneWait.Recent(Glob.time.toFloat(), target->idExact.GetLink());
+}
+
 float Man::GetAimed(int weapon, Target* target) const
 {
-    // Audit only: observe the one naturally scheduled evaluation. Never query
-    // visibility/readiness a second time or evaluate a skipped decision stage.
+    // Observe the naturally scheduled decision, without evaluating it twice.
     static const bool audit = [] { const char* v = std::getenv("POSEIDON_COMBAT_AUDIT"); return v && v[0] == '1'; }();
-    if (!audit || strcmpi(GetVarName(), "auditShooter") != 0)
-        return GetAimed(weapon, target, nullptr);
+    const bool improved = ImprovedAutonomousCombat();
+    const bool log = audit && strcmpi(GetVarName(), "auditShooter") == 0;
+    if (!improved && !log) return GetAimed(weapon, target, nullptr);
     AimingDiagnostics diagnostics;
     const float result = GetAimed(weapon, target, &diagnostics);
-    LOG_INFO(AI, "COMBAT-AUDIT t={} weapon={} current={} gate={} visibility={} miss={} tolerance={} aimed={} seenAge={} posError={}",
-        Glob.time.toFloat(), weapon, _currentWeapon, diagnostics.gate,
-        diagnostics.visibility, diagnostics.error, diagnostics.targetSize, result,
-        target ? Glob.time - target->lastSeen : -1.0f, target ? target->posError.Size() : -1.0f);
+    if (improved)
+    {
+        _combatLastGate = diagnostics.gate;
+        const WeaponModeType* mode = weapon >= 0 && weapon < NMagazineSlots() ? GetWeaponMode(weapon) : nullptr;
+        if (mode && mode->_ammo && mode->_ammo->_simulation == AmmoShotBullet &&
+            strcmp(diagnostics.gate, "friendly-fire") == 0)
+            RecordCombatLaneBlocked(target);
+        // Ordinary aim sway is not evidence that an observed obstruction went
+        // away. Keep recent blocked observations through other aim gates; they
+        // expire after 0.75 s without another rejection, or a successful shot.
+        // An accepted aim also must not erase emission-gate rejections.
+    }
+    if (log)
+        LOG_INFO(AI, "COMBAT-AUDIT t={} weapon={} current={} gate={} visibility={} miss={} tolerance={} aimed={} seenAge={} posError={}",
+            Glob.time.toFloat(), weapon, _currentWeapon, diagnostics.gate,
+            diagnostics.visibility, diagnostics.error, diagnostics.targetSize, result,
+            target ? Glob.time - target->lastSeen : -1.0f, target ? target->posError.Size() : -1.0f);
     return result;
 }
 
@@ -2169,6 +2218,27 @@ void Soldier::AIPilot(float deltaT, SimulationImportance prec)
 #if DIAG_FIRE
     LOG_DEBUG(Physics, "Fire {} state {} prepare {}", _fireMode, _fireState, _firePrepareOnly);
 #endif
+
+    if (ImprovedAutonomousCombat())
+    {
+        const Target* target = GetFireTarget();
+        const auto state = unit->GetState();
+        const Path& path = unit->GetPath();
+        // Resume an existing route instead of inventing a sidestep through
+        // terrain/obstacles. Never override stopped orders or disabled movement.
+        if (target && (_fireState == FireAim || _fireState == FireAimed) &&
+            (state == AIUnit::Busy || state == AIUnit::Init || state == AIUnit::Replan) &&
+            !(unit->GetAIDisabled() & AIUnit::DAMove) && path.Size() > 0 &&
+            path.End().Distance2(Position()) > Square(2.0f) &&
+            _combatLaneWait.ShouldYield(Glob.time.toFloat(), target->idExact.GetLink()))
+        {
+            _fireState = FireDone;
+            _fireStateDelay = Glob.time + 2.0f;
+            _combatLaneWait.Clear();
+            ++_combatLaneYields;
+        }
+    }
+    else _combatLaneWait.Clear();
 
     if (unit->GetState() == AIUnit::Stopping)
     {
@@ -2844,6 +2914,12 @@ void Man::RestoreCargoStateAfterLoad()
 
 LSError Man::Serialize(ParamArchive& ar)
 {
+    if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassFirst)
+    {
+        _combatLaneWait.Clear();
+        _combatLastGate = "not-evaluated";
+        _combatLaneYields = 0;
+    }
     PARAM_CHECK(base::Serialize(ar))
 
     if (!IS_UNIT_STATUS_BRANCH(ar.GetArVersion()))
