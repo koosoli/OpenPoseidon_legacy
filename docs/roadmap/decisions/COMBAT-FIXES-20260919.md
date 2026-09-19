@@ -54,6 +54,7 @@ code is cf18101f (AI d2f82018, renderer 6992a839 following 962bebac).
 | Grenades-20260919-132143 | Passive config probe established HandGrenade min/max AI range 40/60 m, blast range 7 m. The earlier 30 m fixture could never validate grenade safety. Runtime switch changed both configured and effective state. |
 | Grenades-20260919-132255 | Corrected 45 m control: 3 releases with friend 50 m aside; 0 with friend at the target. Subsequent fixture revision also restores target position and adds a clear-again phase. |
 | Burst-20260919-133418 | Same process, actual AI-tab setting backend: an event inserts an allied other-group soldier 10 m ahead immediately after round one. Legacy emits all 3 burst rounds; Improved emits only the already-authorized first round. No subsequent rounds after ally entry. This verifies the emission-path bypass and its fix, not immunity of a round already airborne. |
+| Grenades-20260919-133947 | Final installed binary pair, isolated reference copy: clear / blocked / clear-again releases **3 / 0 / 1**. Magazine replenished between phases; target restored to 45 m. Clean harness exit, no script/panic/validation errors. |
 | Shadows-20260919-132406 | Ordinary muzzle cloudlets 11/12 with zero shadow blobs; intentional smoke 122 cloudlets/108 blobs, later 457/439 and the 512 cap. Rifle screenshot inspected: sprite still visible, soldier shadow retained. Previous reference rifle had nonzero smoke-shadow blobs. |
 | Helicopter-20260919-131214 | Before microsecond delta change: 1,638 post-warmup rows, deltaT average 17.100 ms, p99 18 ms, max 28 ms; all delta inputs rounded to whole ms. This is a real frame trace, unlike the earlier CPU-work-only profiler capture. |
 | Helicopter-20260919-132900 | After clock correction: 1,636 post-warmup rows, average 17.084 ms, p99 17.457 ms, max 21.090 ms. Only 9 rows round to whole ms at CSV precision, vs all 1,638 before. Maxima are observations from short runs, not a guarantee against presentation stalls. |
@@ -65,6 +66,22 @@ preceding telemetry is intact; no successful final screenshot/driver completion
 is claimed for that run. The fixed 35-second measurement completed normally.
 Whole runs recorded 45 / 55 discarded steps, with different durations; these
 counts do not establish an improvement in worst-case hitching.
+
+## Delivery
+
+Production build **29568e0f**, built from the committed tree and deployed through
+Deploy.ps1 under the game lock at 13:39. Both payload hashes match dist and the
+final installed-pair smoke run:
+
+- OpenPoseidon.exe: `C43F90DA558B3739B07D91CBF295AA84B312587717926A1ACC14A5A6D329E468`
+- wgpu_renderer.dll: `D82520873535059C62799E954990FC85E4763C978564501EA3AA216357C4E227`
+
+The deployment stamp names the isolated builder branch codex/combat-fixes;
+parity/foliage-lighting-001 was fast-forwarded to the same production commit and
+pushed. Its pre-existing Cargo.lock edit retained hash
+`9A4E74D791B26A4303E064867DA67B862C1439D0635DF3E19ED5A97AADF31A2E`.
+Subsequent commits recording these final results change documentation only.
+No test game instance remains running.
 
 ## Limits of the claim
 
