@@ -39,16 +39,16 @@ RTX3070, Vulkan595.79,1280×720 native,MSAA4,FFT512,geometry1,reference incoming
 
 | GPU region, median ms | Surf disabled | Consolidated pilot |
 |---|---:|---:|
-| Evolve |0.108|0.112|
-| FFT horizontal / vertical |0.207 /0.201|0.207 /0.200|
-| Compose |0.115|0.112|
-| Water draw |2.140|2.217|
+| Evolve |0.115|0.112|
+| FFT horizontal / vertical |0.206 /0.199|0.207 /0.200|
+| Compose |0.112|0.112|
+| Water draw |2.149|2.217|
 | Foam |0.177|0.233|
-| Interaction |0.011|0.011|
-| Reflection |1.419|1.417|
-| Total water regions |4.494|4.696|
+| Interaction |0.010|0.011|
+| Reflection |1.416|1.417|
+| Total water regions |4.391|4.696|
 
-Six timing samples per arm; sequential short-run evidence, not a cross-hardware promise or established speedup. Approximately+0.202ms total meets the provisional+0.35ms pilot target in this view. An earlier provisional run had reflection variation and4.899ms total; it is retained rather than hidden. Consolidated CPU preparation/submission averaged0.093–0.098ms per reporting window, p95 0.118–0.167ms, max0.229ms. No slow-frame log entry occurred during that measured interval. This is CPU submission wall time, not GPU execution time or whole-game CPU time. Complete frame-time percentiles are not inferred from thresholded slow-frame logs.
+Six timing samples per arm; sequential short-run evidence, not a cross-hardware promise or established speedup. Approximately+0.305ms total meets the provisional+0.35ms pilot target in this view. An earlier provisional run had reflection variation and4.899ms total; it is retained rather than hidden. Consolidated CPU preparation/submission averaged0.093–0.098ms per reporting window, p95 0.118–0.167ms, max0.229ms. No slow-frame log entry occurred during that measured interval. This is CPU submission wall time, not GPU execution time or whole-game CPU time. Complete frame-time percentiles are not inferred from thresholded slow-frame logs.
 
 The coastal view selected222 nodes:4,091,904 surface triangles plus170,496 skirt triangles = **4,262,400 submitted triangles**, before clipping. No pilot geometry is added. Added texture/buffer simulation memory is zero; only small bind-group/pipeline metadata is added. The existing foam allocation remains two1024²RGBA16F textures (16MiB total). No new coastal resource rebuild stream exists; existing terrain view generation controls rebinds.
 
@@ -69,3 +69,15 @@ Final integration/installed-build verification is recorded in the status ledger 
 ## Water-only integration
 
 `codex/ocean-release` starts at the actually installed `5457e729`, importing only the water changes from `ed6a2989`/`643abc64` and their diagnostics. It excludes the intervening unaccepted squad-AI implementation commits. The original `codex/ocean-surf` work is committed and backed up. Parity, the root checkout and their uncommitted files were not edited. Final committed-build and installed-runtime verification follows this integration.
+
+## Installed delivery
+
+Production commit **e99d7262** was built from the committed water-only tree (`build/ocean-shipping-build.log`), pushed and deployed through `Deploy.ps1` under the game lock. Installed stamp: `codex/ocean-release e99d7262 2026-09-19_21:39 deploy-ps1`. The actual installed EXE/DLL then passed the full-FFT,1m/s-wind, surf-enabled quick/moving/turn/teleport/underwater/return scenario: `installed-e99d7262-20260919-213929`, exit0 and no renderer validation/device errors. The game was closed afterward. Binary and evidence hashes are in [the delivery manifest](../evidence/ocean-surf-20260919.json).
+
+Additional runtime arms: `surf-final-off-20260919-213154` supplies the CPU-instrumented final disabled baseline in the table; its mean CPU windows were0.094–0.095ms versus0.093–0.098ms for the pilot. Both undisturbed intervals logged zero spectrum configuration changes and zero slow-frame entries. `surf-lowwind-fallback-20260919-213230` passed with1m/s wind, low quality and FFT disabled, including the view-transition matrix. Its fallback surface was inspected; it is not the calibrated FFT height measurement.
+
+The old installed matched pair is preserved at `build/ocean-installed-backup-5457e729`. Default-content PBO payloads/attributes and mod manifests were compared with the installation before deployment: identical contents, with only archive metadata/hash differences from repacking. No unrelated squad implementation was installed. Parity remained e486e719 and its foreign Cargo.lock hash remained unchanged.
+
+Implementation, integration and focused runtime verification are complete for this bounded version. The ledger remains **INTEGRATED**, rather than falsely recording owner visual acceptance: `validate_execution_ledger.py` requires an actual named owner review for a visual ticket's final VALIDATED/SHIPPABLE state. Existing conservative approximations and the unclaimed broader checks are listed above; no owner review or multiplayer session has been invented.
+
+Final ledger check: the repository-wide compat-C1 validator stops at the pre-existing, unrelated AST-011B evidence-hash mismatch. Its entry was left untouched. The WTR-SURF-001 evidence hash was independently recomputed and checked against its four evidence files.

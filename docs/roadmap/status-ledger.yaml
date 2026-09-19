@@ -6534,7 +6534,7 @@ tickets:
     overlay: COMPAT-C1-EXEC-001
     is_example: false
     title: WGPU ocean scale coherence and staged shore surf
-    class: RUNTIME_INFRA
+    class: WORLD_VISUAL
     obligation: OPTIONAL
     execution_mode: IMPLEMENT
     scheduling_state: OPEN
@@ -6543,26 +6543,27 @@ tickets:
     owner: null
     branch: codex/ocean-release
     baseline_commit: 5457e729
-    verification_commit: null
+    verification_commit: e99d7262
     milestone: 0
     milestone_role: NON_BLOCKING
     depends_on: []
     blocked_by: []
     blocks: []
-    implementation_commits: [ed6a2989, 643abc64]
+    implementation_commits: [ed6a2989, 643abc64, e99d7262]
     production_call_sites: []
     test_ids: [gpu-ocean-scale, gpu-surf-arrival, gpu-foam-pipeline, gpu-reference-seas, water-shaders, cpu-water-queries]
     benchmark_artifacts: []
-    evidence_hash: null
+    evidence_hash: 12623b80e5d4a12165dcd245e025cdeee6fb43c4be802318fa7b4def39a6c67f
     decision_record: docs/roadmap/decisions/OCEAN-SURF-IMPLEMENTATION-20260919.md
     known_failures:
-      - Implementation and focused validation complete; final water-only integration and installed-build smoke pending.
+      - Implementation and installed verification complete; formal owner visual acceptance is not claimed.
       - Existing warped and nearshore normals are approximate; frozen clips do not freeze legacy sea-level bobbing.
-    fallback: Normal installation unchanged; preserved baseline pair and isolated review launcher.
+    fallback: Surf is opt-in; omit its launch flag to disable. Old matched installed pair is preserved for rollback.
     reviewer: null
     reviewer_method: Author-run GPU regressions, rebuilt CPU water suite, calibrated live clips and lifecycle/fallback captures.
     supersedes: []
     evidence:
+      - docs/roadmap/evidence/ocean-surf-20260919.json
       - docs/roadmap/decisions/OCEAN-SURF-IMPLEMENTATION-20260919.md
       - docs/roadmap/decisions/OCEAN-SURF-20260919.md
       - docs/roadmap/modernisation/OpenPoseidon_WGPU_Ocean_and_Shore_Surf_Plan.md

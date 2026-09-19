@@ -1,0 +1,150 @@
+{
+  "production_commit": "e99d7262",
+  "branch": "codex/ocean-release",
+  "installed_stamp": "codex/ocean-release e99d7262 2026-09-19_21:39 deploy-ps1",
+  "binary_sha256": {
+    "OpenPoseidon.exe": "983fab2bfe195ebdaabbb19848f8deb7c74e7f555095551b3f5605ef594401bd",
+    "wgpu_renderer.dll": "2382ea5ac94bab81c7000e3e2f478a7333490b69168952e96b179df78a11efeb"
+  },
+  "installed_runtime": {
+    "run": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\ocean-runs\\installed-e99d7262-20260919-213929",
+    "log_sha256": "e91255e37f23b185f48f817fd923f8c572a8255236a32d1e1f3f2ae96ae3999c",
+    "harness_sha256": "7e9c1fcb187563eaefa7284072e808dedb670d7b5cbec98d06917f0d81405c18",
+    "exit": 0,
+    "full_fft": true,
+    "surf_pilot": true,
+    "wind_mps": 1,
+    "matrix": [
+      "moving camera",
+      "turn/FOV",
+      "teleport",
+      "underwater",
+      "return"
+    ]
+  },
+  "rust_water_tests": 61,
+  "entry_shader_tests": 1,
+  "cpu_water_tests": 11,
+  "cpu_water_assertions": 4109,
+  "reference_Hs_m": [
+    0.1784,
+    0.8261,
+    1.9896
+  ],
+  "costs": {
+    "surf-final-off-20260919-213154": {
+      "gpu_samples": 6,
+      "gpu_median": {
+        "evolve": 0.11449999999999999,
+        "fftH": 0.206,
+        "fftV": 0.199,
+        "compose": 0.112,
+        "draw": 2.149,
+        "foam": 0.1765,
+        "interaction": 0.01,
+        "planar": 1.416,
+        "total": 4.390499999999999
+      },
+      "cpu_windows": [
+        {
+          "mean": 0.0938,
+          "p95": 0.125,
+          "max": 0.1978
+        },
+        {
+          "mean": 0.0953,
+          "p95": 0.1247,
+          "max": 0.1936
+        },
+        {
+          "mean": 0.0945,
+          "p95": 0.13,
+          "max": 0.2547
+        },
+        {
+          "mean": 0.095,
+          "p95": 0.1205,
+          "max": 0.2548
+        },
+        {
+          "mean": 0.0946,
+          "p95": 0.132,
+          "max": 0.2279
+        },
+        {
+          "mean": 0.0945,
+          "p95": 0.1248,
+          "max": 0.2265
+        }
+      ],
+      "slow_frame_log_count": 0,
+      "spectrum_config_changes": 0
+    },
+    "surf-final-on-20260919-212334": {
+      "gpu_samples": 6,
+      "gpu_median": {
+        "evolve": 0.112,
+        "fftH": 0.207,
+        "fftV": 0.1995,
+        "compose": 0.1115,
+        "draw": 2.2165,
+        "foam": 0.2325,
+        "interaction": 0.011,
+        "planar": 1.4169999999999998,
+        "total": 4.6955
+      },
+      "cpu_windows": [
+        {
+          "mean": 0.0953,
+          "p95": 0.1348,
+          "max": 0.1662
+        },
+        {
+          "mean": 0.0948,
+          "p95": 0.1343,
+          "max": 0.1934
+        },
+        {
+          "mean": 0.0983,
+          "p95": 0.1666,
+          "max": 0.2286
+        },
+        {
+          "mean": 0.0933,
+          "p95": 0.1178,
+          "max": 0.1994
+        },
+        {
+          "mean": 0.0957,
+          "p95": 0.1445,
+          "max": 0.2233
+        },
+        {
+          "mean": 0.0964,
+          "p95": 0.1294,
+          "max": 0.1811
+        }
+      ],
+      "slow_frame_log_count": 0,
+      "spectrum_config_changes": 0
+    }
+  },
+  "default_content_check": {
+    "Mods/@OP_VisualUpgrade/AddOns/op_ground_materials.pbo": {
+      "payloads_equal": true,
+      "attributes_equal": true,
+      "different_entries": []
+    },
+    "Mods/@OP_VehicleActions/AddOns/op_jeep_actions.pbo": {
+      "payloads_equal": true,
+      "attributes_equal": true,
+      "different_entries": []
+    }
+  },
+  "limits": [
+    "Live comparison is not phase locked",
+    "Authoritative water unchanged; no new multiplayer session claimed",
+    "Local surf is a bounded analytic approximation",
+    "Formal owner visual review is not claimed"
+  ]
+}
