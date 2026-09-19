@@ -81,3 +81,20 @@ cell-per-step experiment Stress-20260919-143809 was much slower (mission time
 Stationary/turning infantry and incomplete simultaneous player targeting occur
 in both modes. This bounded observation does not diagnose every reported
 locomotion/aim issue or the owner's far-versus-near framerate difference.
+
+## Installed acceptance
+
+Production commit **7c3d528a**, built from the committed tree, pushed on
+codex/combat-fixes and parity/foliage-lighting-001, deployed under the game lock
+via Deploy.ps1 at 14:48. Both installed payload hashes match staged files:
+
+- EXE: `624869AB2498AFCEA8528EC65497C7303B986D9F72F845CF4A36361437ADFBD8`
+- DLL: `FCE987B1DC02F17CD9AB1949623D9AF8EAB46ABB8329806BF69026F27683434A`
+
+Crossfire-20260919-144906 uses an isolated copy of that final installed pair:
+**0 / 0 / 0 / 21** rounds. WGPU initializes as build 7c3d528a910d-release;
+clean harness/process exit, no script errors, renderer validation errors or panic.
+No test process remains. The parity worktree's existing Cargo.lock modification
+retains SHA256 9A4E74D791B26A4303E064867DA67B862C1439D0635DF3E19ED5A97AADF31A2E.
+The following documentation-only commit records acceptance without changing the
+installed production source.
