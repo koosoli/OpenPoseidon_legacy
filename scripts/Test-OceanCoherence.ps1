@@ -1,5 +1,5 @@
 param(
- [switch]$Menu, [switch]$LegacyShore, [switch]$Matrix, [switch]$NoFft, [ValidateRange(0,35)][double]$WindSpeed=8, [switch]$LiveClip, [switch]$LowQuality, [switch]$Surf, [ValidateRange(0,5)][int]$Preset=1, [string]$Label='current', [string]$BinaryDir='', [switch]$Quick, [switch]$Review,
+ [switch]$PerfOnly, [switch]$Menu, [switch]$LegacyShore, [switch]$Matrix, [switch]$NoFft, [ValidateRange(0,35)][double]$WindSpeed=8, [switch]$LiveClip, [switch]$LowQuality, [switch]$Surf, [ValidateRange(0,5)][int]$Preset=1, [string]$Label='current', [string]$BinaryDir='', [switch]$Quick, [switch]$Review,
  [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault'
 )
 $ErrorActionPreference='Stop'
@@ -12,6 +12,7 @@ if (!$env:LOCK_OWNER) {
  if ($Surf) {$argv+='-Surf'}
  if ($LegacyShore) {$argv+='-LegacyShore'}
  if ($Menu) {$argv+='-Menu'}
+ if ($PerfOnly) {$argv+='-PerfOnly'}
  $argv+=@('-WindSpeed',$WindSpeed.ToString([Globalization.CultureInfo]::InvariantCulture))
  if ($Matrix) {$argv+='-Matrix'}
  if ($NoFft) {$argv+='-NoFft'}
@@ -36,7 +37,7 @@ $referenceScale=if ($Preset -ge 3) {'1.0'} else {'0.65'}
 $coupling=if ($Preset -ge 3) {'0'} else {'1'}
 # Existing owner scale, controlled material. No stored developer overrides leak in.
 [IO.File]::WriteAllText((Join-Path $profileDir 'noe_noe_wrp.cfg'),"v 5`nwave 1 1 1 $referenceScale`nquality $qualityFlag 1 512 $Preset`nsea $coupling 0.1 1`n")
-if ($LegacyShore) {$env:WGR_WATER_SURF_PILOT='0'} elseif ($Surf) {$env:WGR_WATER_SURF_PILOT='1'} else {$env:WGR_WATER_SURF_PILOT='0'}
+if ($LegacyShore) {$env:WGR_WATER_SURF_PILOT='0'} elseif ($Surf) {$env:WGR_WATER_SURF_PILOT='1'} else {Remove-Item Env:WGR_WATER_SURF_PILOT -ErrorAction SilentlyContinue}
 $env:POSEIDON_WIND_OVERRIDE=$WindSpeed.ToString([Globalization.CultureInfo]::InvariantCulture)+' 90 0'
 if ($NoFft) {$env:WGR_WATER_FFT='0'} else {$env:WGR_WATER_FFT='1'}
 if ($Menu) {
@@ -104,6 +105,13 @@ try {
  Start-Sleep -Seconds 12
  $null=Send @{cmd='eval';code='triPerfStats 0'}
  $null=Send @{cmd='exec';code='logInfo "OCEAN_PERF_END"'}
+ if ($PerfOnly) {
+  $null=Send @{cmd='exit'}
+  if (!$process.WaitForExit(15000) -or $process.ExitCode) {throw 'Performance test failed to exit cleanly'}
+  if (Select-String -LiteralPath $log -Pattern 'Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION' -Quiet) {throw 'Renderer error in performance log'}
+  Write-Output "Ocean performance evidence (no screenshots): $out"
+  return
+ }
  $null=Send @{cmd='screenshot';path=(Join-Path $out 'live-shore.png')}
  if ($LiveClip) {
   $clock=[Diagnostics.Stopwatch]::StartNew();$samples=@()
