@@ -6344,7 +6344,7 @@ tickets:
     evidence_hash: null
     decision_record: docs/roadmap/decisions/AI-DISTANCE-20260919.md
     known_failures:
-      - Owner reports mostly smooth helicopter flight but occasional jumps remain; save-load and multiplayer pending.
+      - Occasional presentation hitches still need visual acceptance; save-load and multiplayer pending. Follow-up cf18101f removes integer-ms simulation input quantization.
     fallback: POSEIDON_HELI_FAR_FULL_RATE=0 restores the prior helicopter cadence.
     reviewer: null
     reviewer_method: >-
@@ -6385,7 +6385,7 @@ tickets:
     evidence_hash: null
     decision_record: docs/roadmap/decisions/AI-DISTANCE-20260919.md
     known_failures:
-      - 63MAX still stutters; isolated uninstrumented run measured 14.402 ms/tick with discarded steps. No new speedup claimed.
+      - 63MAX still has overload spikes. Matched follow-up windows measured 13.184 to 12.694 ms/tick; moveout pass 1.581 to 1.082 ms. No vanilla parity or worst-case hitch elimination claimed.
     fallback: POSEIDON_TARGET_SCAN_LINEAR=1 restores linear membership lookup.
     reviewer: null
     reviewer_method: >-
@@ -6397,3 +6397,47 @@ tickets:
       - docs/roadmap/decisions/AI-DISTANCE-20260919.md
       - engine/Poseidon/World/Detection/Target.cpp
       - docs/roadmap/decisions/COMBAT-AUDIT-20260919.md
+  - id: AI-COMBAT-001
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: Autonomous infantry combat safety with AI-tab legacy comparison
+    class: RUNTIME_INFRA
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: OPEN
+    status: INTEGRATED
+    outcome: null
+    owner: null
+    branch: parity/foliage-lighting-001
+    baseline_commit: 29f3b479
+    verification_commit: cf18101f
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: [d2f82018, cf18101f, 6992a839]
+    production_call_sites:
+      - file: engine/Poseidon/World/Entities/Infantry/SoldierOldAI.cpp
+        symbol: Soldier::FireWeapon
+        verified_commit: cf18101f
+      - file: engine/Poseidon/World/Entities/Infantry/SoldierOld.cpp
+        symbol: Man::ThrowGrenadeAction
+        verified_commit: cf18101f
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/COMBAT-FIXES-20260919.md
+    known_failures:
+      - Visual acceptance and custom fused/obstructed grenade scenarios remain pending; no universal projectile safety claim.
+    fallback: AI tab Legacy or POSEIDON_AI_COMBAT_LEGACY=1 restores prior autonomous combat checks.
+    reviewer: null
+    reviewer_method: >-
+      Author ran 39 targeted tests (429 assertions), open and allied-blocked fire,
+      corrected 45 m grenade controls, actual setting toggles and an ally-entering-burst
+      A/B (Legacy 3 rounds, Improved 1), plus separate shot-shadow and timing controls.
+      Owner visual review remains open; author tests are not independent review.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/COMBAT-FIXES-20260919.md
+      - docs/roadmap/decisions/SHOT-SHADOW-AUDIT-20260919.md

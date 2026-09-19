@@ -1,5 +1,9 @@
 # Combat, distance and performance audit — 2026-09-19
 
+This document records the original investigation. The owner subsequently
+authorized implementation; see [the follow-up](COMBAT-FIXES-20260919.md) for
+changes, corrected grenade test range and current validation results.
+
 Status: investigation, diagnostic/test changes only. No gameplay fix or deployment authorized by the attached audit request. Renderer investigation is on independent branch render/shot-effects-shadow-audit-001.
 
 ## Identity and scope
