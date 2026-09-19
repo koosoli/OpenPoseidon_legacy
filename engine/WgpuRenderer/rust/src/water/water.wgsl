@@ -2447,7 +2447,7 @@ fn vs_curling_breaker(@builtin(vertex_index) vertex: u32) -> CurlOut {
                 (random.z-0.5)*max(t,0.0)*3.0);
         let corner = corners[(vertex-sheet_vertices)%6u]*2.0-vec2<f32>(1.0);
         let view = frame.view*vec4<f32>(world-frame.cam_pos.xyz,1.0);
-        let size = 0.025 + random.y*0.07;
+        let size = 0.004 + random.y*0.018;
         out.clip = reverse_z(frame.proj*(view+vec4<f32>(corner*size,0.0,0.0)));
         out.normal = vec3<f32>(0,1,0);
         out.data = vec4<f32>(life*s.coverage,1.0,1.0,1.0);
@@ -2521,7 +2521,14 @@ fn fs_curling_breaker(in: CurlOut, @builtin(front_facing) front: bool) -> @locat
     let offset = view_n*clamp(thickness/max(length(in.world_rel),1.0)*0.10,0.002,0.025);
     let uv = clamp(scene_uv(in.clip.xy)+offset,vec2<f32>(0.001),vec2<f32>(0.999));
     let background = textureSampleLevel(scene_color,scene_samp,uv,0.0).rgb;
-    var rgb = mix(background*transmittance+water_inscatter(tint,irradiance,transmittance),
+    // The opaque snapshot cannot represent refraction through a second water
+    // boundary. Use the rear water body's radiance behind the folded face;
+    // only the very thin lip admits a little of the refracted scene. Otherwise
+    // distant hills read as a sharp image pasted through a sheet of glass.
+    let rear_body = water_inscatter(deep,ambient*sky_vis_ao(world.xz)+sun*sun_visibility*0.2,vec3<f32>(0.0));
+    let thin_lip = smoothstep(0.94,1.0,in.data.z) * (1.0-in.data.y) * 0.12;
+    let transmitted = mix(rear_body,background,thin_lip);
+    var rgb = mix(transmitted*transmittance+water_inscatter(tint,irradiance,transmittance),
                   reflection,clamp(fresnel*wp.look_params.w,0.0,1.0));
     let foam_light = (ambient + sun * sun_visibility * max(l.y,0.0)) / PI;
     rgb = mix(rgb,vec3<f32>(0.82,0.88,0.86)*foam_light,foam);
@@ -2530,7 +2537,7 @@ fn fs_curling_breaker(in: CurlOut, @builtin(front_facing) front: bool) -> @locat
     var alpha = in.data.x * mix(1.0,smoothstep(0.30,0.48,noise),impact);
     if (in.data.w>0.5) {
         let radial = max(1.0-dot(in.uv,in.uv),0.0);
-        alpha = alpha*radial*radial;
+        alpha = alpha*radial*radial*0.55;
         rgb = vec3<f32>(0.85,0.9,0.88)*foam_light;
         if (alpha<0.02) {discard;}
     }
