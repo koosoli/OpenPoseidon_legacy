@@ -1,4 +1,4 @@
-#import water_shore_surf::coastal_surf
+#import water_shore_surf::{coastal_surf, add_surf_displacement}
 // GodotOceanWaves-style sea spray.  The reference uses a GPUParticles3D emitter
 // over a 10m grid and lets each particle follow the FFT displacement at its start
 // point.  This port uses the same principle, but derives all particle state from the
@@ -161,9 +161,9 @@ fn crest_source(world_xz: vec2<f32>) -> CrestSource {
                 if (dot(q,q)<1.06) {return out;}
             }
         }
-        out.displacement = mix(out.displacement, vec3<f32>(0.0, surf.height, 0.0), surf.weight);
-        out.breaking = out.breaking * (1.0 - surf.weight) + surf.breaking * 0.35;
-        out.velocity = mix(out.velocity, vec3<f32>(surf.flow.x, 0.0, surf.flow.y), surf.weight);
+        out.displacement = add_surf_displacement(out.displacement, surf);
+        out.breaking = max(out.breaking, surf.breaking * 0.35);
+        out.velocity = out.velocity + vec3<f32>(surf.flow.x, 0.0, surf.flow.y);
     }
     return out;
 }

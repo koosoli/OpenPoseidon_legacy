@@ -1,4 +1,4 @@
-#import water_shore_surf::{coastal_surf, SurfState}
+#import water_shore_surf::{coastal_surf, SurfState, add_surf_displacement}
 // GPU water: a CDLOD surface at the global sea level, displaced by a sum of Gerstner
 // waves in the vertex shader and shaded per-fragment with an analytic wave normal, a
 // sharp HDR sun specular, and a Fresnel mix toward the horizon tint. The shared grid
@@ -197,8 +197,10 @@ fn gerstner_normal(p_in: vec2<f32>, dist: f32) -> vec3<f32> {
 // Near a coastline, shallow-water waves refract and their crests run toward land.
 // This is a local breaker train layered over the unchanged offshore FFT, avoiding
 // seams from attempting to rotate a global FFT lookup.
-// Legacy comparison path: a bounded amplitude envelope follows shallow depth.
-// Propagation is fixed; this approximation does not solve depth-dependent refraction.
+// Shoaling. As a swell runs into shallowing water its group speed drops, so its energy piles up:
+// Green's law gives height ~ depth^(-1/4) while the wavelength shortens. `shore_factor` already
+// ramps 0 (deep water) -> 1 (the beach), so it stands in for that depth coordinate. The train also
+// tightens as it shoals, which is what turns a long low swell into a steep short breaker.
 struct ShoreWave {
     amp_a: f32,
     amp_b: f32,
@@ -210,18 +212,13 @@ struct ShoreWave {
 };
 
 fn shore_wave_setup(p: vec2<f32>, shore_dir: vec2<f32>, factor: f32) -> ShoreWave {
-    // A spatially varying direction/wavenumber inside dot(world, direction)*k
-    // differentiates into terms proportional to the map coordinate. Even a
-    // gentle beach then becomes a dense folded lattice kilometres from origin.
-    // Keep propagation fixed; terrain may modulate the bounded envelope only.
-    let d = normalize(wp.fft_wind_sea.xy + vec2<f32>(1e-4, 0.0));
+    let d = normalize(shore_dir + vec2<f32>(1e-4, 0.0));
     let lateral = vec2<f32>(-d.y, d.x);
-    let local = p - cf.origin;
-    let along = dot(local, d);
-    let across = dot(local, lateral);
-    // Fixed wavelengths; depth-dependent refraction needs an integrated phase field.
-    let k_a = 0.18;
-    let k_b = 0.31;
+    let along = dot(p, d);
+    let across = dot(p, lateral);
+    // Wavenumbers: ~57 m offshore swell compressing to ~24 m at the break (k = 2*pi/lambda).
+    let k_a = mix(0.11, 0.26, factor);
+    let k_b = mix(0.21, 0.47, factor);
     // Green's law height gain, ~3.2x from the outer band to the break.
     let shoal = 1.0 + factor * factor * 2.2;
     let gain = wp.wave_amp * factor * shoal * max(wp.sea_params.w, 0.0);
@@ -229,7 +226,7 @@ fn shore_wave_setup(p: vec2<f32>, shore_dir: vec2<f32>, factor: f32) -> ShoreWav
     w.dir = d;
     w.k_a = k_a;
     w.k_b = k_b;
-    // Gentle lateral variation in the same fixed propagation frame.
+    // Crests bend to follow the depth contours, so the lateral wobble stays gentle.
     w.phase_a = along * k_a - wp.time * 2.05 + sin(across * 0.045) * 0.50;
     w.phase_b = along * k_b - wp.time * 2.70 + sin(across * 0.085 + 1.7) * 0.32;
     w.amp_a = 0.62 * gain;
@@ -724,7 +721,7 @@ fn vs_water(
     if (body_index == 0) {
         if (surf_pilot > 0.5) {
             let surf = pilot_surf(base_xz);
-            disp = mix(disp, vec3<f32>(0.0, surf.height, 0.0), surf.weight);
+            disp = add_surf_displacement(disp, surf);
         } else {
             disp = disp + shore_breaker_disp(base_xz, vertex_shore_dir, vertex_shore_factor);
         }
@@ -1485,7 +1482,7 @@ fn evaluate_water_surface(in: VsOut) -> WaterSurfaceState {
     var shore_n = shore_breaker_normal(in.base_xz, in.shore_dir, in.shore_factor);
     if (surf_pilot > 0.5 && in.body_id < 0.5) {
         let surf = state.surf;
-        n = normalize(mix(n, normalize(vec3<f32>(-surf.slope.x, 1.0, -surf.slope.y)), surf.weight));
+        n = normalize(n + vec3<f32>(-surf.slope.x, 0.0, -surf.slope.y) * n.y);
         shore_n = vec3<f32>(0.0, 1.0, 0.0);
     }
     n = normalize(n + shore_n - vec3<f32>(0.0, 1.0, 0.0));

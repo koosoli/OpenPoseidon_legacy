@@ -91,3 +91,11 @@ The follow-up makes shared surf default-on (explicit `WGR_WATER_SURF_PILOT=0` re
 A new production-function GPU regression checks phase invariance under changing bathymetry/direction, translated terrain origin, and sub-metre spatial continuity. The current release branch passed 56 water tests and entry-shader composition; previous 61-test counts came from the earlier development branch. A new `-Menu` capture copies the owner's water settings into an isolated profile and launches the actual menu without a test mission or a wind override. `-LegacyShore` explicitly selects the comparison path; the ordinary test invocation no longer forces surf off.
 
 Runtime verification and installed follow-up commit: pending while the owner's review game is open. No visual acceptance is claimed by this source/test checkpoint.
+
+## Default rollback requested by Oliver
+
+Oliver reported flat water and explicitly requires the old behavior to remain default until the new behavior is demonstrated and accepted. This supersedes the default-on proposal above. Both production pipeline defaults and the launcher now select the original path; its shader function is restored byte-for-byte from e99d7262. The installed e99d7262 was never replaced by the default-on proposal.
+
+The opt-in experiment had blended the entire ocean displacement/normal into a fixed 0.30m coastal field. At full coastal weight this erased the underlying swell and horizontal displacement; the envelope was also applied twice. The revised opt-in path preserves the ocean displacement and adds the bounded local height once, adds its normal slope, and preserves the ocean contribution to spray position, velocity and breaking. A production WGSL GPU check confirms a full-strength local contribution preserves a 3m input wave and both horizontal components. 55 water tests and shader composition pass. This is a correction of destructive blending, not proof that the surf art is acceptable. The fixed-heading and approximate-normal limitations remain; old behavior stays default pending owner acceptance.
+
+Runtime comparison and installation evidence will be appended after the focused checks. Live comparison generation now resamples recorded elapsed timestamps, rather than playing slow screenshot readbacks faster than real time.

@@ -1,5 +1,6 @@
 """Pair fixed-FFT-time harness frames; the clip is visual evidence, not FPS data."""
 import argparse
+import bisect
 import json
 from pathlib import Path
 
@@ -18,6 +19,16 @@ def main():
     for view in (("live",) if args.live else ("shore", "elevated")):
         sequences = [json.loads((p / f"{view}-samples.json").read_text(encoding="utf-8-sig"))
                      for p in (args.before, args.after)]
+        if args.live:
+            # Screenshot readbacks can run slower than the requested cadence.
+            # Resample recorded wall time so playback does not speed the ocean up.
+            end = min(sequence[-1]["elapsed"] for sequence in sequences)
+            times = np.arange(0.0, end, 0.125)
+            resampled = []
+            for sequence in sequences:
+                stamps = [sample["elapsed"] for sample in sequence]
+                resampled.append([sequence[min(bisect.bisect_left(stamps, float(t)), len(sequence)-1)] for t in times])
+            sequences = resampled
         if len(sequences[0]) != len(sequences[1]):
             raise ValueError("Mismatched capture lengths")
         path = args.output / f"ocean-{view}-comparison.mp4"

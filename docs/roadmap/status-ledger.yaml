@@ -6553,12 +6553,12 @@ tickets:
     production_call_sites: []
     test_ids: [gpu-ocean-scale, gpu-surf-arrival, gpu-foam-pipeline, gpu-reference-seas, water-shaders, cpu-water-queries]
     benchmark_artifacts: []
-    evidence_hash: 9dbf0f587cd39fee42ffd2226860ac4a396cb1ec57be5b0c282803f69f6c3de6
+    evidence_hash: c4fdd3ba385a721593c9db85ff3a7e2c985c175e3168d26da4b0685ca414b1fb
     decision_record: docs/roadmap/decisions/OCEAN-SURF-IMPLEMENTATION-20260919.md
     known_failures:
-      - Owner rejected default-start shoreline visuals; default-on surf and legacy phase correction are undergoing runtime verification.
+      - Owner rejected surf appearance and requested old behavior remain default. Revised opt-in surf preserves underlying ocean waves; visual acceptance remains open.
       - Existing warped and nearshore normals are approximate; frozen clips do not freeze legacy sea-level bobbing.
-    fallback: Corrected build enables surf by default; WGR_WATER_SURF_PILOT=0 selects legacy comparison. Old matched installed pair is preserved for rollback.
+    fallback: Old behavior is default by explicit owner request; WGR_WATER_SURF_PILOT=1 opts into the experimental surf only.
     reviewer: null
     reviewer_method: Author-run GPU regressions, rebuilt CPU water suite, calibrated live clips and lifecycle/fallback captures.
     supersedes: []

@@ -254,7 +254,7 @@ impl Foam {
             ],
         });
         let terrain_group = coastal_group(device, &terrain_layout, heightmap, conform);
-        let constants = [constants[0], ("surf_pilot", if std::env::var("WGR_WATER_SURF_PILOT").ok().as_deref() == Some("0") {0.0} else {1.0})];
+        let constants = [constants[0], ("surf_pilot", if std::env::var("WGR_WATER_SURF_PILOT").ok().as_deref() == Some("1") {1.0} else {0.0})];
         let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("wgr_water_foam_pipeline"),
             layout: Some(

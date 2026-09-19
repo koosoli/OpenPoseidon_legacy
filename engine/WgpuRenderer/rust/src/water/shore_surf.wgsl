@@ -1,6 +1,6 @@
 #define_import_path water_shore_surf
 
-// Default bounded render-only spilling surf (explicit environment opt-out retained). Constant incoming phase is differentiated
+// Opt-in bounded render-only spilling experiment. Constant incoming phase is differentiated
 // in a fixed world-relative frame, never dot(world, varying shore direction).
 struct SurfState {
     height: f32,
@@ -22,8 +22,8 @@ fn surf_cycle(p: vec2<f32>, time: f32, depth: f32, shoreward: vec2<f32>,
     let approach = smoothstep(0.15, 0.65, dot(shoreward, direction));
     let shallow = (1.0 - smoothstep(2.0, 6.0, depth)) * smoothstep(-0.12, 0.3, depth);
     s.weight = beach * approach * clamp(exposure, 0.0, 1.0) * shallow * clamp(gain, 0.0, 1.0);
-    // Fixed 0.30m amplitude budget; fade the replacement in, rather than adding
-    // a full shore train on top of the offshore wave field.
+    // Bounded 0.30m local contribution; preserve the existing ocean displacement.
+    // Weight the contribution once, never crossfade away the underlying swell.
     let amplitude = 0.30 * s.weight;
     s.height = amplitude * (sin(phase) + 0.18 * sin(2.0 * phase));
     s.slope = direction * amplitude * k * (cos(phase) + 0.36 * cos(2.0 * phase));
@@ -72,4 +72,10 @@ fn coastal_surf(hm: texture_2d<f32>, p: vec2<f32>, origin: vec2<f32>, grid: f32,
         }
     }
     return surf_cycle(local,time,depth,normalize(grad+vec2<f32>(1e-6,0.0)),length(grad),exposure,gain);
+}
+
+// Keep the resolved ocean field intact. A full-strength coastal mask must not
+// replace metre-scale swell with the bounded local surf contribution.
+fn add_surf_displacement(ocean: vec3<f32>, surf: SurfState) -> vec3<f32> {
+    return ocean + vec3<f32>(0.0, surf.height, 0.0);
 }

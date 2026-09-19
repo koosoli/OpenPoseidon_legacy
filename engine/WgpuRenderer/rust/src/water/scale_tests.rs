@@ -355,6 +355,7 @@ fn gpu_surf_arrival_bounds_and_exposure() {
     let surf = include_str!("shore_surf.wgsl");
     let mut source = block(surf, "struct SurfState").to_owned();
     source.push_str(block(surf, "fn surf_cycle"));
+    source.push_str(block(surf, "fn add_surf_displacement"));
     source.push_str(block(surf, "fn surf_bed"));
     source.push_str(block(surf, "fn coastal_surf"));
     source.push_str(r#"
@@ -376,10 +377,14 @@ fn probe(@builtin(global_invocation_id) id: vec3<u32>) {
         let q = coastal_surf(bed,origin+select(vec2<f32>(40.0,32.0),vec2<f32>(-1.0,32.0),id.x==22u),origin,1.0,1.0,0.0,0.0,select(1.0,0.0,id.x==23u));
         result[id.x]=vec4<f32>(q.height,q.breaking,q.wash,q.weight);
     }
-    if (id.x>=24u) {
+    if (id.x>=24u && id.x<28u) {
         let positions = array<vec2<f32>,4>(vec2<f32>(40.0,10.0),vec2<f32>(40.0,50.0),vec2<f32>(32.5,23.0),vec2<f32>(40.0,28.0));
         let q=coastal_surf(bed,positions[id.x-24u],vec2<f32>(0.0),1.0,1.0,0.0,0.0,1.0);
         result[id.x]=vec4<f32>(q.height,q.breaking,q.wash,q.weight);
+    }
+    if (id.x==28u) {
+        var q: SurfState; q.weight=1.0; q.height=0.30;
+        result[id.x]=vec4<f32>(add_surf_displacement(vec3<f32>(2.0,3.0,-1.0),q),1.0);
     }
     if (id.x==19u) {let q=surf_cycle(p,0.0,10.0,vec2<f32>(-1.0,0.0),0.06,1.0,1.0);result[id.x]=vec4<f32>(q.height,q.breaking,q.wash,q.weight);}
 }
@@ -398,13 +403,13 @@ fn probe(@builtin(global_invocation_id) id: vec3<u32>) {
     });
     let output = device.create_buffer(&wgpu::BufferDescriptor {
         label: None,
-        size: 448,
+        size: 464,
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
         mapped_at_creation: false,
     });
     let read = device.create_buffer(&wgpu::BufferDescriptor {
         label: None,
-        size: 448,
+        size: 464,
         usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
@@ -469,9 +474,9 @@ fn probe(@builtin(global_invocation_id) id: vec3<u32>) {
         let mut pass = encoder.begin_compute_pass(&Default::default());
         pass.set_pipeline(&pipeline);
         pass.set_bind_group(0, &group, &[]);
-        pass.dispatch_workgroups(28, 1, 1);
+        pass.dispatch_workgroups(29, 1, 1);
     }
-    encoder.copy_buffer_to_buffer(&output, 0, &read, 0, 448);
+    encoder.copy_buffer_to_buffer(&output, 0, &read, 0, 464);
     queue.submit([encoder.finish()]);
     let (tx, rx) = std::sync::mpsc::channel();
     read.slice(..).map_async(wgpu::MapMode::Read, move |r| {
@@ -482,6 +487,7 @@ fn probe(@builtin(global_invocation_id) id: vec3<u32>) {
     let bytes = read.slice(..).get_mapped_range();
     let values: &[[f32; 4]] = bytemuck::cast_slice(&bytes);
 
+    assert_eq!(values[28], [2.0,3.3,-1.0,1.0], "surf erased existing ocean displacement");
     for row in &values[..16] {
         assert!(row[0].abs() <= 0.36);
         assert!(row[2] >= 0.0 && row[2] <= 0.12);
@@ -516,97 +522,3 @@ fn probe(@builtin(global_invocation_id) id: vec3<u32>) {
     );
 }
 
-#[test]
-fn gpu_default_shore_phase_is_independent_of_bathymetry() {
-    let instance =
-        wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
-    let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
-        eprintln!("SKIP default shore phase GPU probe: no adapter");
-        return;
-    };
-    let (device, queue) = pollster::block_on(adapter.request_device(&Default::default())).unwrap();
-    let surface = include_str!("water.wgsl");
-    let mut source = String::from(r#"
-struct WaterParams { wave_amp: f32, time: f32, sea_params: vec4<f32>, fft_wind_sea: vec4<f32> }
-struct Conform { origin: vec2<f32> }
-var<private> wp: WaterParams;
-var<private> cf: Conform;
-"#);
-    source.push_str(block(surface, "struct ShoreWave"));
-    source.push_str(block(surface, "fn shore_wave_setup"));
-    source.push_str(r#"
-@group(0) @binding(0) var<storage,read_write> result: array<vec4<f32>>;
-@compute @workgroup_size(1)
-fn probe(@builtin(global_invocation_id) id: vec3<u32>) {
-    wp.wave_amp=1.0; wp.time=12.0; wp.sea_params.w=1.0;
-    wp.fft_wind_sea=vec4<f32>(0.8,0.6,8.0,0.5);
-    cf.origin=vec2<f32>(0.0);
-    let p=vec2<f32>(10000.0,12000.0);
-    let angle=f32(id.x)*0.003;
-    let q=shore_wave_setup(p,vec2<f32>(cos(angle),sin(angle)),0.5+f32(id.x)*0.001);
-    let r=shore_wave_setup(p+vec2<f32>(0.125,0.0),vec2<f32>(cos(angle),sin(angle)),0.5+f32(id.x)*0.001);
-    cf.origin=vec2<f32>(8000.0,9000.0);
-    let moved=shore_wave_setup(p+cf.origin,vec2<f32>(cos(angle),sin(angle)),0.5+f32(id.x)*0.001);
-    result[id.x*2u]=vec4<f32>(q.phase_a,q.phase_b,r.phase_a-q.phase_a,r.phase_b-q.phase_b);
-    result[id.x*2u+1u]=vec4<f32>(moved.phase_a,moved.phase_b,q.amp_a,q.amp_b);
-}
-"#);
-    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: None,
-        source: wgpu::ShaderSource::Wgsl(source.into()),
-    });
-    let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: None,
-        layout: None,
-        module: &shader,
-        entry_point: Some("probe"),
-        compilation_options: Default::default(),
-        cache: None,
-    });
-    let output = device.create_buffer(&wgpu::BufferDescriptor {
-        label: None,
-        size: 128,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    });
-    let read = device.create_buffer(&wgpu::BufferDescriptor {
-        label: None,
-        size: 128,
-        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-    let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: None,
-        layout: &pipeline.get_bind_group_layout(0),
-        entries: &[wgpu::BindGroupEntry {
-            binding: 0,
-            resource: output.as_entire_binding(),
-        }],
-    });
-    let mut encoder = device.create_command_encoder(&Default::default());
-    {
-        let mut pass = encoder.begin_compute_pass(&Default::default());
-        pass.set_pipeline(&pipeline);
-        pass.set_bind_group(0, &group, &[]);
-        pass.dispatch_workgroups(4, 1, 1);
-    }
-    encoder.copy_buffer_to_buffer(&output, 0, &read, 0, 128);
-    queue.submit([encoder.finish()]);
-    let (tx, rx) = std::sync::mpsc::channel();
-    read.slice(..).map_async(wgpu::MapMode::Read, move |r| {
-        tx.send(r).unwrap();
-    });
-    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
-    rx.recv().unwrap().unwrap();
-    let bytes = read.slice(..).get_mapped_range();
-    let values: &[[f32; 4]] = bytemuck::cast_slice(&bytes);
-    for i in 0..4 {
-        eprintln!("default shore phase {i}: {:?}",values[i*2]);
-        assert_eq!(values[i*2][0],values[0][0],"depth/direction changed carrier phase");
-        assert_eq!(values[i*2][1],values[0][1],"depth/direction changed carrier phase");
-        assert_eq!(values[i*2][0],values[i*2+1][0],"translation changed phase");
-        assert_eq!(values[i*2][1],values[i*2+1][1],"translation changed phase");
-        assert!(values[i*2][2].abs()<0.04,"sub-metre phase discontinuity");
-        assert!(values[i*2][3].abs()<0.06,"sub-metre phase discontinuity");
-    }
-}
