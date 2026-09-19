@@ -6315,3 +6315,81 @@ tickets:
       - engine/Poseidon/World/Terrain/Landscape.cpp
       - engine/Poseidon/World/Simulation/Collisions.cpp
       - engine/Poseidon/World/WorldSetup.cpp
+  - id: PERF-034
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: Distant helicopters update each world tick
+    class: RUNTIME_INFRA
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: OPEN
+    status: INTEGRATED
+    outcome: null
+    owner: null
+    branch: parity/foliage-lighting-001
+    baseline_commit: 4a2a30b4
+    verification_commit: null
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: [4ac8199c]
+    production_call_sites:
+      - file: engine/Poseidon/World/Entities/Vehicles/Air/Helicopter.cpp
+        symbol: Helicopter::SimulateOptimized
+        verified_commit: null
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/AI-DISTANCE-20260919.md
+    known_failures:
+      - Owner flight/rotor, save-load and multiplayer checks pending; helicopters beyond view range also cost more.
+    fallback: POSEIDON_HELI_FAR_FULL_RATE=0 restores the prior helicopter cadence.
+    reviewer: null
+    reviewer_method: >-
+      Not owner-reviewed. Build and existing AI ordering/header tests only;
+      user explicitly reserved all game smoke tests for their own session.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/AI-DISTANCE-20260919.md
+      - engine/Poseidon/World/Entities/Vehicles/Air/Helicopter.cpp
+  - id: PERF-035
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: Avoid quadratic target-membership searches during dense AI discovery
+    class: RUNTIME_INFRA
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: OPEN
+    status: INTEGRATED
+    outcome: null
+    owner: null
+    branch: parity/foliage-lighting-001
+    baseline_commit: 4a2a30b4
+    verification_commit: null
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: [4ac8199c]
+    production_call_sites:
+      - file: engine/Poseidon/World/Detection/Target.cpp
+        symbol: EntityAI::AddNewTargets
+        verified_commit: null
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/AI-DISTANCE-20260919.md
+    known_failures:
+      - Owner 63-group performance and live target-discovery parity checks pending; no FPS speedup claimed.
+    fallback: POSEIDON_TARGET_SCAN_LINEAR=1 restores linear membership lookup.
+    reviewer: null
+    reviewer_method: >-
+      Not owner-reviewed. Build and existing AI ordering/header tests only;
+      user explicitly reserved all game smoke tests for their own session.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/AI-DISTANCE-20260919.md
+      - engine/Poseidon/World/Detection/Target.cpp
