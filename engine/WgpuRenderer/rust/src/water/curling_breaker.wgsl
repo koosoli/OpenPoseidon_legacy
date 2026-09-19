@@ -10,7 +10,7 @@ struct CurlPoint {
 };
 fn curl_point(uv: vec2<f32>, time: f32) -> CurlPoint {
     let along = (uv.y - 0.5) * 36.0;
-    let age = fract((time + along * 0.15) / 10.0) * 10.0;
+    let age = fract((time + along * 0.035) / 10.0) * 10.0;
     let grow = smoothstep(0.0, 1.6, age);
     let crash = smoothstep(5.5 + (1.0 - uv.x) * 0.65, 7.2, age);
     let fade = 1.0 - smoothstep(8.1, 9.8, age);
@@ -18,11 +18,11 @@ fn curl_point(uv: vec2<f32>, time: f32) -> CurlPoint {
     let radius = 1.35 * grow * (1.0 + 0.055 * sin(along * 0.53) + 0.025 * sin(along * 1.37));
     let q = clamp((uv.x - 0.38) / 0.62, 0.0, 1.0);
     let theta = mix(1.57079633, tip, q);
-    var forward = -radius * sin(theta);
+    var forward = -radius * 1.25 * sin(theta);
     var height = radius * (1.0 - cos(theta));
     if (uv.x < 0.38) {
         let t = uv.x / 0.38;
-        forward = mix(-8.0, -radius, sin(t * 1.57079633));
+        forward = mix(-8.0, -radius * 1.25, sin(t * 1.57079633));
         height = radius * (1.0 - cos(t * 1.57079633));
     }
     // The lip passes beyond vertical (theta > 3*pi/2), then drops and spreads.

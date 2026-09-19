@@ -115,8 +115,8 @@ try {
   }
   if ($null -eq $shoreX) {throw 'No waterline found for curling fixture camera'}
   $centre=($shoreX+12.054).ToString('F3',[Globalization.CultureInfo]::InvariantCulture)
-  $camera=($shoreX+4.054).ToString('F3',[Globalization.CultureInfo]::InvariantCulture)
-  $null=Send @{cmd='exec';code="oceanCamera camSetPos [$camera,4594,1.6]; oceanCamera camSetTarget [$centre,4582,1.0]; oceanCamera camSetFov 0.7; oceanCamera camCommit 0"}
+  $camera=($shoreX+18.054).ToString('F3',[Globalization.CultureInfo]::InvariantCulture)
+  $null=Send @{cmd='exec';code="oceanCamera camSetPos [$camera,4558,1.35]; oceanCamera camSetTarget [$centre,4582,1.35]; oceanCamera camSetFov 0.7; oceanCamera camCommit 0"}
  }
  if ($Review) {
   Write-Host 'Live ocean review. Use the Water tab to compare scales. Close the game to finish; no automatic timeout.'

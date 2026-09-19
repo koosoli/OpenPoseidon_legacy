@@ -2480,7 +2480,7 @@ fn fs_curling_breaker(in: CurlOut, @builtin(front_facing) front: bool) -> @locat
     }
     // Material coordinates follow the sheet, rather than vertically projecting
     // world xz onto its nearly vertical face (which made foam into long stripes).
-    let material = in.uv * vec2<f32>(14.0,36.0);
+    let material = mix(in.uv * vec2<f32>(14.0,36.0),world.xz-vec2<f32>(7836.6085,4582.0),in.data.y);
     let footprint = max(length(dpdx(material)),length(dpdy(material)));
     let warp = vec2<f32>(vnoise_lod(material*0.53,footprint*0.53),
                          vnoise_lod(material*0.53+vec2<f32>(7.3,2.1),footprint*0.53));
