@@ -6410,17 +6410,17 @@ tickets:
     owner: null
     branch: parity/foliage-lighting-001
     baseline_commit: 29f3b479
-    verification_commit: 7c3d528a
+    verification_commit: a30452b2
     milestone: 0
     milestone_role: NON_BLOCKING
     depends_on: []
     blocked_by: []
     blocks: []
-    implementation_commits: [d2f82018, cf18101f, 6992a839, 7c3d528a]
+    implementation_commits: [d2f82018, cf18101f, 6992a839, 7c3d528a, a30452b2]
     production_call_sites:
       - file: engine/Poseidon/World/Entities/Infantry/SoldierOldAI.cpp
         symbol: Soldier::FireWeapon
-        verified_commit: 7c3d528a
+        verified_commit: a30452b2
       - file: engine/Poseidon/World/Entities/Infantry/SoldierOld.cpp
         symbol: Man::ThrowGrenadeAction
         verified_commit: 7c3d528a
@@ -6456,17 +6456,17 @@ tickets:
     owner: null
     branch: parity/foliage-lighting-001
     baseline_commit: 7c3d528a
-    verification_commit: null
+    verification_commit: a30452b2
     milestone: 0
     milestone_role: NON_BLOCKING
     depends_on: []
     blocked_by: []
     blocks: []
-    implementation_commits: []
+    implementation_commits: [a30452b2]
     production_call_sites:
       - file: engine/Poseidon/World/WorldSetup.cpp
         symbol: World::DistributeImportances
-        verified_commit: null
+        verified_commit: a30452b2
     test_ids: [sim-distribution]
     benchmark_artifacts: []
     evidence_hash: null

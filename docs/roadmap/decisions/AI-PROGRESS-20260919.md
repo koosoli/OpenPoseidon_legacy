@@ -113,3 +113,30 @@ results and installed payload identity are appended after completion.
   combat changes: **0 / 0 / 0 / 21** rounds. Friends at 20/150/300 m inhibit
   fire; 20 m lateral clearance restores the original 21-round control. Normal
   clear-lane burst volume is preserved in this fixture. Clean harness exit.
+
+## Installed delivery and helicopter regression
+
+Production commit **a30452b2** was built from the committed tree, pushed to the
+safety remote, fast-forwarded onto parity/foliage-lighting-001, and deployed as a
+matching EXE/DLL pair on 2026-09-19 at 15:37 local time. Installed and staged hashes:
+
+- OpenPoseidon.exe SHA256: 9E801F7EE1DF305E621A3FD7D39768600A0984BF3BE4654943F5EA41592361F3
+- wgpu_renderer.dll SHA256: 98E175EA7D14BF4008CA7AB473148BBF3B53F0A4462050A129B637B312DF87E2
+
+Helicopter-20260919-153754 runs that installed pair via the isolated reference
+copy, fixed camera, 30-second observation. Pilot remains alive throughout and
+harness exits cleanly. FramePaceTrace reports no dropped trace records. After
+20 seconds startup, 1,589 main-loop deltaT samples average 17.219 ms, p99 17.523 ms,
+maximum 300 ms (the simulation delta clamp). The outlier must not be discarded:
+frame 1403 spends 306.971 ms in drawing; CPU profiler identifies land:gnd maximum
+306.848 ms. The following frame catches up eight steps and pacing diagnostics
+report ten discarded steps. Thus occasional helicopter presentation jumps are
+NOT closed by this result. The trace localizes this captured stall to the terrain
+render phase, not expensive helicopter simulation (capture sim:step max 0.749 ms),
+but does not yet establish the lower-level cause. Startup separately discarded
+20 steps across two frames. No additional helicopter code was changed here.
+
+Raw artifacts: build/audit-runs/Helicopter-20260919-153754 and
+build/heli-after-ai-progress.{main,producer,worker}.csv. The remaining rendering
+stall and dense-scene overload remain open, as does broader owner visual acceptance.
+The infantry improvements default to Improved and retain the AI-tab Legacy switch.
