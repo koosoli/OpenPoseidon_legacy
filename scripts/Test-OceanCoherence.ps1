@@ -98,7 +98,7 @@ try {
  $null=Send @{cmd='water_probe'}
  $null=Send @{cmd='water_bathymetry';x=7900;z=4550}
  if ($Preset -ge 3 -or $Surf) {$null=Send @{cmd='exec';code='oceanCamera camSetPos [7875,4582,8]; oceanCamera camSetTarget [7828,4582,0]; oceanCamera camCommit 0'}}
- if ($Curling -or $CurlingBaseline) {$null=Send @{cmd='exec';code='oceanCamera camSetPos [7838,4602,1.4]; oceanCamera camSetTarget [7849,4582,1.3]; oceanCamera camSetFov 0.7; oceanCamera camCommit 0'}}
+ if ($Curling -or $CurlingBaseline) {$null=Send @{cmd='exec';code='oceanCamera camSetPos [7849,4606,1.2]; oceanCamera camSetTarget [7849,4582,1.2]; oceanCamera camSetFov 0.7; oceanCamera camCommit 0'}}
  if ($Review) {
   Write-Host 'Live ocean review. Use the Water tab to compare scales. Close the game to finish; no automatic timeout.'
   while (!$process.HasExited) {Start-Sleep -Milliseconds 250}

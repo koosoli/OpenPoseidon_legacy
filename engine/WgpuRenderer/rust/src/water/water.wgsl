@@ -2478,7 +2478,9 @@ fn fs_curling_breaker(in: CurlOut, @builtin(front_facing) front: bool) -> @locat
     var deep = wp.deep_color.rgb;
     if (linear>0.5) {shallow=srgb_to_linear(shallow);deep=srgb_to_linear(deep);}
     // Same authored swatches and irradiance/pi convention as the existing sea.
-    let thickness = mix(3.0,0.35,smoothstep(0.4,1.0,in.data.z));
+    // The refracted ray also traverses the rear water wall; the opaque
+    // scene input contains no curling geometry, so include that path here.
+    let thickness = 3.0 + mix(2.0,0.35,smoothstep(0.4,1.0,in.data.z));
     let sigma = water_extinction(wp.deep_color.rgb,wp.color_ext,clamp(wp.underwater_params.z,0.0,1.0));
     let path = thickness/max(abs(dot(n,v)),0.25);
     let transmittance = water_transmittance(sigma,path);
