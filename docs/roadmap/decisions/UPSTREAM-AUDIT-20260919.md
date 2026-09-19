@@ -29,3 +29,13 @@ The previous audit's unfinished items are still unfinished, not silently adopted
 This task instead addresses the visible helicopter cadence directly and the
 renderer-independent quadratic target-membership scan (AI-DISTANCE-20260919.md).
 No upstream terrain merge or GL33 expansion was performed.
+
+## Expanded coverage after owner follow-up
+
+The seven-commit delta above was not a complete incoming-history audit.
+[UPSTREAM-COVERAGE-20260919.md](UPSTREAM-COVERAGE-20260919.md) now inventories
+all 84 incoming main commits: two patch-equivalent, 82 individually accounted
+for, including relevant missing audio, Unicode/mod, mission-loading, logging,
+download and UI changes. It distinguishes old unmerged PR-head candidates.
+This follow-up changes documentation only; installed owner-test build remains
+`f380053b`. Recommendations are not claims of already-integrated fixes.
