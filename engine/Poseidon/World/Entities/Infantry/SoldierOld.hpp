@@ -690,6 +690,9 @@ class Man: public Person
 	bool Supply(EntityAI *vehicle, UIActionType action, int param, int param2, RString param3) override;
 
 	void ThrowGrenadeAction(int weapon);
+	bool ImprovedAutonomousCombat() const;
+	bool CombatShotSafe(int weapon, const Target* target) const;
+	bool CombatExplosiveAreaSafe(Vector3Par point, float radius, float delay) const;
 	void ProcessUIAction(const UIAction &action);
 
 	void ProcessMoveFunction( ActionContextBase *context );

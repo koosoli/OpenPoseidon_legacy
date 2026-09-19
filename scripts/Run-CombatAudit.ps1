@@ -1,6 +1,6 @@
 param(
- [ValidateSet('Helicopter','Stress','Combat','Shadows')][string]$Scenario='Helicopter',
- [int]$Seconds=90, [switch]$Reference, [switch]$Diagnostics, [switch]$LegacyTargetScan, [switch]$VehicleCosts, [switch]$FixedCamera,
+ [ValidateSet('Helicopter','Stress','Combat','Grenades','Shadows')][string]$Scenario='Helicopter',
+ [int]$Seconds=90, [switch]$Reference, [switch]$Diagnostics, [switch]$LegacyTargetScan, [switch]$LegacyCombat, [switch]$VehicleCosts, [switch]$FixedCamera,
  [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault'
 )
 $ErrorActionPreference='Stop'
@@ -11,6 +11,7 @@ if (!$env:LOCK_OWNER) {
  if ($Reference) {$argv+='-Reference'}
  if ($Diagnostics) {$argv+='-Diagnostics'}
  if ($LegacyTargetScan) {$argv+='-LegacyTargetScan'}
+ if ($LegacyCombat) {$argv+='-LegacyCombat'}
  if ($VehicleCosts) {$argv+='-VehicleCosts'}
  if ($FixedCamera) {$argv+='-FixedCamera'}
  $env:LOCK_OWNER='isolated combat and performance audit'
@@ -35,6 +36,7 @@ $env:POSEIDON_USER_DIR=Join-Path $out 'user'
 New-Item -ItemType Directory -Force $env:POSEIDON_USER_DIR | Out-Null
 [IO.File]::WriteAllLines((Join-Path $env:POSEIDON_USER_DIR 'graphics.cfg'),@('qualityPreset=3;','msaaSamples=4;','dlssMode=0;','vsync=0;','fpsCap=60;'))
 $env:POSEIDON_COMBAT_AUDIT=$(if ($Diagnostics) {'1'} else {'0'})
+$env:POSEIDON_AI_COMBAT_LEGACY=$(if ($LegacyCombat) {'1'} else {'0'})
 $env:POSEIDON_TARGET_SCAN_LINEAR=$(if ($LegacyTargetScan) {'1'} else {'0'})
 $env:POSEIDON_SIM_VEHICLE_COST=$(if ($VehicleCosts) {'1'} else {'0'})
 $env:POSEIDON_SMOKE_SYSTEM='0'
@@ -87,25 +89,36 @@ try {
    Start-Sleep -Seconds 5
   }
   $null=Send @{cmd='screenshot';path=(Join-Path $out 'stress.png')}
- } elseif ($Scenario -eq 'Combat') {
+ } elseif ($Scenario -in @('Combat','Grenades')) {
   $null=Send @{cmd='exec';code='auditShots=0; auditShooter addEventHandler ["Fired",{auditShots=auditShots+1}]; auditTarget allowDamage false; auditFriend allowDamage false; hint ""; auditCamera="camera" camCreate [9695,3595,3]; auditCamera cameraEffect ["internal","back"]; auditCamera camSetTarget auditTarget; auditCamera camCommit 0; showCinemaBorder false'}
-  foreach ($range in @(100,250,400)) {
+  if (!$Reference) {
+   $null=Send @{cmd='ai_combat';improved=0}
+   $r=Send @{cmd='ai_combat';improved=1}
+   if (!$r.improved -or !$r.active) {throw 'AI combat setting did not activate'}
+   $null=Send @{cmd='ai_combat';improved=$(if ($LegacyCombat) {0} else {1})}
+  }
+  $ranges=if ($Scenario -eq 'Combat') {@(100,250,400)} else {@()}
+  foreach ($range in $ranges) {
    $null=Send @{cmd='exec';code=('auditShots=0; auditShooter setCombatMode "BLUE"; auditShooter setVehicleAmmo 1; auditTarget setDammage 0; auditTarget setPos [9700,'+(3600+$range)+',0]; auditShooter reveal auditTarget; auditShooter doTarget auditTarget; auditShooter setCombatMode "RED"')}
    Start-Sleep -Seconds 12
    $null=Send @{cmd='eval';code='[time,auditShots,alive auditTarget,getDammage auditTarget,auditShooter knowsAbout auditTarget,magazines auditShooter]'}
    $null=Send @{cmd='screenshot';path=(Join-Path $out ("open-"+$range+".png"))}
    $null=Send @{cmd='exec';code='auditShooter setCombatMode "BLUE"'}
   }
-  foreach ($offset in @(0,20)) {
+  $offsets=if ($Scenario -eq 'Combat') {@(0,20)} else {@()}
+  foreach ($offset in $offsets) {
    $null=Send @{cmd='exec';code=('auditShots=0; auditTarget setDammage 0; auditTarget setPos [9700,3700,0]; auditFriend setDammage 0; auditFriend setPos ['+(9700+$offset)+',3620,0]; auditShooter setVehicleAmmo 1; auditShooter reveal auditTarget; auditShooter setCombatMode "RED"')}
    Start-Sleep -Seconds 12
    $null=Send @{cmd='eval';code='[time,auditShots,alive auditTarget,getDammage auditTarget,alive auditFriend,getDammage auditFriend]'}
    $null=Send @{cmd='exec';code='auditShooter setCombatMode "BLUE"'}
   }
-  $null=Send @{cmd='exec';code='auditShooter setCombatMode "BLUE"; removeAllWeapons auditShooter; {auditShooter removeMagazine _x} forEach magazines auditShooter; auditShooter addMagazine "HandGrenade"; auditShooter addMagazine "HandGrenade"; auditShooter addMagazine "HandGrenade"; auditShooter addWeapon "Throw"; auditTarget setPos [9700,3630,0]'}
-  foreach ($offset in @(35,0)) {
-   $null=Send @{cmd='exec';code=('auditShots=0; auditFriend setPos ['+(9700+$offset)+',3630,0]; auditShooter reveal auditTarget; auditShooter doTarget auditTarget; auditShooter setCombatMode "RED"')}
+  # The installed HandGrenade AI envelope is 40..60 m. A 30 m control
+  # never reaches grenade selection and cannot validate the safety gate.
+  $null=Send @{cmd='exec';code='auditShooter setCombatMode "BLUE"; removeAllWeapons auditShooter; {auditShooter removeMagazine _x} forEach magazines auditShooter; auditShooter addMagazine "HandGrenade"; auditShooter addMagazine "HandGrenade"; auditShooter addMagazine "HandGrenade"; auditShooter addWeapon "Throw"; auditTarget setPos [9700,3645,0]'}
+  foreach ($offset in @(50,0,50)) {
+   $null=Send @{cmd='exec';code=('auditShots=0; auditTarget setPos [9700,3645,0]; auditFriend setPos ['+(9700+$offset)+',3645,0]; auditShooter reveal auditTarget; auditShooter doTarget auditTarget; auditShooter setCombatMode "RED"')}
    Start-Sleep -Seconds 18
+   if (!$Reference) {$null=Send @{cmd='ai_combat'}}
    $null=Send @{cmd='eval';code='[time,auditShots,magazines auditShooter,getPos auditFriend,getPos auditTarget]'}
    $null=Send @{cmd='exec';code='auditShooter setCombatMode "BLUE"; auditShooter setVehicleAmmo 1'}
   }

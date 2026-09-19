@@ -38,6 +38,8 @@ using namespace Poseidon;
 #include <Poseidon/Network/MasterServerBrowser.hpp>
 #include <Poseidon/Network/HttpTestRewrite.hpp>
 #include <Poseidon/AI/AIUnit.hpp>
+#include <Poseidon/AI/InfantryCombat.hpp>
+#include <Poseidon/Game/Commands/GameStateExt.hpp>
 #include <Poseidon/AI/AIGroup.hpp>
 #include <Poseidon/World/Entities/Weapons/Weapons.hpp>
 #include <Poseidon/Core/ModId.hpp>
@@ -91,6 +93,44 @@ static GameVarSpace s_evalScope;
 
 void RegisterSqf(HarnessServer& hs)
 {
+    hs.RegisterCommand({"ai_combat", "SP combat setting and passive audit fixture state", {{"improved", "int", false}}},
+        [](const std::string&, cJSON* root) -> std::string {
+            if (!GWorld || GWorld->GetMode() == GModeNetware)
+                return HarnessProtocol::ErrorResponse("singleplayer required");
+            const int mode = HarnessProtocol::GetInt(root, "improved", -1);
+            if (mode == 0 || mode == 1) InfantryCombat::SetImproved(mode == 1);
+            cJSON* resp = cJSON_CreateObject();
+            cJSON_AddBoolToObject(resp, "improved", InfantryCombat::Improved());
+            GameState* gs = GWorld->GetGameState();
+            gs->BeginContext(&s_evalScope);
+            GameValue value = gs->EvaluateMultiple("auditShooter");
+            gs->EndContext();
+            Man* man = value.GetType() == GameObject
+                ? dyn_cast<Man>(static_cast<GameDataObject*>(value.GetData())->GetObject().GetLink()) : nullptr;
+            if (man)
+            {
+                cJSON_AddBoolToObject(resp, "active", man->ImprovedAutonomousCombat());
+                cJSON_AddBoolToObject(resp, "hasTarget", man->GetFireTarget() != nullptr);
+                cJSON_AddNumberToObject(resp, "selected", man->SelectedWeapon());
+                cJSON* slots = cJSON_AddArrayToObject(resp, "slots");
+                for (int i = 0; i < man->NMagazineSlots(); ++i)
+                {
+                    const auto& slot = man->GetMagazineSlot(i);
+                    const auto* mode = man->GetWeaponMode(i);
+                    if (!slot._magazine || !mode || !mode->_ammo) continue;
+                    cJSON* row = cJSON_CreateObject();
+                    cJSON_AddNumberToObject(row, "slot", i);
+                    cJSON_AddNumberToObject(row, "ammo", slot._magazine->_ammo);
+                    cJSON_AddStringToObject(row, "name", slot._magazine->_type->GetName());
+                    cJSON_AddNumberToObject(row, "speed", slot._magazine->_type->_initSpeed);
+                    cJSON_AddNumberToObject(row, "minRange", mode->_ammo->minRange);
+                    cJSON_AddNumberToObject(row, "maxRange", mode->_ammo->maxRange);
+                    cJSON_AddNumberToObject(row, "blastRange", mode->_ammo->indirectHitRange);
+                    cJSON_AddItemToArray(slots, row);
+                }
+            }
+            return HarnessProtocol::JsonResponse(resp);
+        });
     hs.RegisterCommand({"crew_seat_status", "Read-only SP fixture seat lifecycle status", {}},
         [](const std::string&, cJSON*) -> std::string {
             if (!GWorld || GWorld->GetMode() == GModeNetware)

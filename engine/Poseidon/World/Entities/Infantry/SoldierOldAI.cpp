@@ -21,6 +21,8 @@
 #include <Poseidon/Foundation/Types/RemoveLinks.hpp>
 #include <Random/randomGen.hpp>
 #include <Poseidon/World/Entities/Weapons/Ballistics.hpp>
+#include <Poseidon/World/Entities/Weapons/GrenadeFuse.hpp>
+#include <Poseidon/AI/InfantryCombat.hpp>
 
 namespace Poseidon
 {
@@ -1048,6 +1050,162 @@ void Man::FireAttemptWhenNotPossible()
     }
 }
 
+bool Man::ImprovedAutonomousCombat() const
+{
+    return InfantryCombat::Improved() && GWorld && GWorld->GetMode() != GModeNetware &&
+           IsLocal() && Brain() && !Brain()->IsPlayer() && !QIsManual() &&
+           !GetHierachyParent() && _forceFireWeapon < 0;
+}
+
+bool Man::CombatExplosiveAreaSafe(Vector3Par point, float radius, float delay) const
+{
+    const AIGroup* group = GetGroup();
+    const AICenter* center = group ? group->GetCenter() : nullptr;
+    if (!GLandscape || !center || !std::isfinite(radius) || radius < 0 || radius > 250 ||
+        !std::isfinite(delay) || delay < 0 || delay > 8)
+        return false;
+    // Existing damage broad phase reaches 4*indirectHitRange plus body radius.
+    // No assumed wall immunity. Include thrower, player and allied other groups.
+    if (Position().Distance(point) <= radius + GetRadius() + Speed().Size() * delay)
+        return false;
+    int xMin, xMax, zMin, zMax;
+    ObjRadiusRectangle(xMin, xMax, zMin, zMax, point, point, radius + 50 + 150 * delay);
+    for (int z = zMin; z <= zMax; ++z)
+        for (int x = xMin; x <= xMax; ++x)
+        {
+            const ObjectListFull* list = GLandscape->GetObjects(z, x).GetList();
+            if (!list) continue;
+            for (int i = 0; i < list->GetTypeVehicleCount(); ++i)
+            {
+                const EntityAI* ally = dyn_cast<EntityAI>(list->GetTypeVehicle(i));
+                if (!ally || ally == this || ally->IsDammageDestroyed() || !center->IsFriendly(ally->GetTargetSide()))
+                    continue;
+                const float reach = ally->Speed().Size() * delay;
+                if (ally->Position().Distance(point) <= radius + ally->GetRadius() + reach)
+                    return false;
+            }
+        }
+    return true;
+}
+
+bool Man::CombatShotSafe(int weapon, const Target* target) const
+{
+    if (!GLandscape || weapon < 0 || weapon >= NMagazineSlots()) return false;
+    const auto& slot = GetMagazineSlot(weapon);
+    const Magazine* magazine = slot._magazine;
+    const WeaponModeType* mode = GetWeaponMode(weapon);
+    if (!magazine || !magazine->_type || !slot._muzzle || !mode || !mode->_ammo) return false;
+    const AmmoType* ammo = mode->_ammo;
+    const Vector3 origin = PositionModelToWorld(GetWeaponPoint(weapon));
+    const Vector3 direction = GetWeaponDirection(weapon).Normalized();
+    if (ammo->_simulation == AmmoShotBullet)
+    {
+        const AIGroup* group = GetGroup();
+        const AICenter* center = group ? group->GetCenter() : nullptr;
+        if (!center) return false;
+        // The actor-only spatial index excludes thousands of footprint marks.
+        // Re-read current bodies on EVERY emitted round, including burst rounds.
+        // Continue past the intended enemy through the authored effective range.
+        const float distance = floatMin(1000.0f, floatMax(ammo->maxRange,
+            target ? target->AimingPosition().Distance(origin) : 0.0f));
+        const float dispersion = mode->_dispersion * floatMax(slot._muzzle->_aiDispersionCoefX, slot._muzzle->_aiDispersionCoefY);
+        const Vector3 end = origin + direction * distance;
+        int xMin, xMax, zMin, zMax;
+        ObjRadiusRectangle(xMin, xMax, zMin, zMax, origin, end, 15 + distance * dispersion);
+        for (int z = zMin; z <= zMax; ++z)
+            for (int x = xMin; x <= xMax; ++x)
+            {
+                const ObjectListFull* list = GLandscape->GetObjects(z, x).GetList();
+                if (!list) continue;
+                for (int i = 0; i < list->GetTypeVehicleCount(); ++i)
+                {
+                    const EntityAI* ally = dyn_cast<EntityAI>(list->GetTypeVehicle(i));
+                    if (!ally || ally == this || ally->IsDammageDestroyed() || !center->IsFriendly(ally->GetTargetSide()))
+                        continue;
+                    const Vector3 body = ally->VisiblePosition();
+                    float along = (body - origin) * direction;
+                    saturate(along, 0, distance);
+                    const float extent = ally->GetShape() ? ally->GetShape()->GeometrySphere() : ally->GetRadius();
+                    const float radius = extent + along * dispersion;
+                    if (body.Distance2(origin + direction * along) <= Square(radius)) return false;
+                }
+            }
+        return true;
+    }
+    if (ammo->_simulation != AmmoShotShell || magazine->_type->_initSpeed >= 30 || ammo->indirectHit <= 0)
+        return true;
+
+    // Bounded forward flight using the same drag law. Obstructed throws are
+    // withheld. Terrain bounces use the projectile's own bounce response;
+    // uncertainty expands the final blast rather than trusting wall shielding.
+    if (!target || !target->idExact) return false;
+    const auto shell = Ballistics::ShellParamsFor(*ammo);
+    const auto& fuseSettings = GrenadeFuse::Get();
+    const float fuse = fuseSettings.enabled && ammo->explosionTime > 0
+        ? (fuseSettings.fuseOverrideSeconds > 0 ? fuseSettings.fuseOverrideSeconds : ammo->explosionTime) : 0;
+    if (fuse > 8 || shell.initTime > 0) return false;
+    Vector3 position = origin;
+    Vector3 velocity = Speed() + direction * magazine->_type->_initSpeed;
+    constexpr float dt = 1.0f / 60;
+    float elapsed = 0;
+    float uncertainty = 2 + target->posError.Size();
+    bool atRest = false;
+    for (int step = 0; step < 480; ++step)
+    {
+        if (atRest || (fuse > 0 && elapsed >= fuse))
+            return CombatExplosiveAreaSafe(position,
+                4 * ammo->indirectHitRange + uncertainty, floatMax(fuse, elapsed));
+        const Vector3 next = position + velocity * dt;
+        CollisionBuffer collisions;
+        GLandscape->ObjectCollision(collisions, const_cast<Man*>(this), nullptr, position, next, 0, ObjIntersectFire);
+        if (collisions.Size() > 0)
+        {
+            // A contact grenade can safely burst on the intended enemy. A
+            // fused throw obstructed by an object remains withheld because its
+            // rebound depends on geometry that this terrain predictor omits.
+            if (fuse > 0) return false;
+            Vector3 contact = next;
+            float nearest = next.Distance2(position);
+            for (int i = 0; i < collisions.Size(); ++i)
+            {
+                const auto& hit = collisions[i];
+                if (!hit.object) return false;
+                const Vector3 point = hit.object->PositionModelToTop(hit.pos);
+                if (point.Distance2(position) <= nearest)
+                {
+                    nearest = point.Distance2(position);
+                    contact = point;
+                }
+            }
+            return CombatExplosiveAreaSafe(contact,
+                4 * ammo->indirectHitRange + uncertainty, elapsed + dt);
+        }
+        elapsed += dt;
+        float dX, dZ;
+        const float ground = GLandscape->SurfaceYAboveWater(next.X(), next.Z(), &dX, &dZ);
+        uncertainty += magazine->_type->_initSpeed * dt * mode->_dispersion * 2;
+        if (next.Y() <= ground)
+        {
+            position = next;
+            position[1] = ground;
+            if (fuse <= 0)
+                return CombatExplosiveAreaSafe(position, 4 * ammo->indirectHitRange + uncertainty, elapsed);
+            const Vector3 normal = Vector3(-dX, 1, -dZ).Normalized();
+            const auto bounce = GrenadeFuse::Bounce(velocity, normal, fuseSettings);
+            velocity = bounce.speed;
+            atRest = bounce.atRest;
+            position += normal * 0.03f;
+            uncertainty += 0.25f;
+            continue;
+        }
+        position = next;
+        const float drag = Ballistics::DragRetardation(shell.dragModel, shell.airFriction, shell.ballisticCoefficient, velocity.Size());
+        const Vector3 acceleration = velocity * (velocity.Size() * drag) - VUp * (shell.coefGravity * G_CONST);
+        velocity += acceleration * dt;
+    }
+    return false;
+}
+
 bool Soldier::FireWeapon(int weapon, TargetType* target)
 {
     if (GetNetworkManager().IsControlsPaused())
@@ -1140,6 +1298,10 @@ bool Soldier::FireWeapon(int weapon, TargetType* target)
     {
         return false;
     }
+
+    if (ImprovedAutonomousCombat() &&
+        (!GetAIFireEnabled(GetFireTarget()) || !CombatShotSafe(weapon, GetFireTarget())))
+        return false;
 
     switch (mode->_ammo->_simulation)
     {
@@ -1559,7 +1721,7 @@ float Man::GetAimed(int weapon, Target* target, AimingDiagnostics* diagnostics) 
         if (diagnostics) diagnostics->gate = "weapons-disabled";
         return 0;
     }
-    float visible = _visTracker.Value(this, _currentWeapon, target->idExact, 0.9f);
+    float visible = _visTracker.Value(this, ImprovedAutonomousCombat() ? weapon : _currentWeapon, target->idExact, 0.9f);
     if (diagnostics) diagnostics->visibility = visible;
     if (visible < 0.3f)
     {
@@ -1636,6 +1798,9 @@ float Man::GetAimed(int weapon, Target* target, AimingDiagnostics* diagnostics) 
         }
 
         Vector3 leadSpeed = target->speed;
+        float evaluatedDrop = 0.5f * G_CONST * balFactor * time * time;
+        if (ImprovedAutonomousCombat() && mode->_ammo->_simulation == AmmoShotBullet)
+            Ballistics::SolveAimForAmmo(mode->_ammo, aInfo->_initSpeed, dist, time, evaluatedDrop);
         LimitLead(leadSpeed, aInfo->_maxLeadSpeed * GetAbility());
         Vector3 estPos = ap + leadSpeed * time * leadFactor;
 
@@ -1646,7 +1811,7 @@ float Man::GetAimed(int weapon, Target* target, AimingDiagnostics* diagnostics) 
         Vector3 hit = wPos + wDir * eDist;
         if (attached)
             hit += AttachedPointSpeed(wPos) * time;
-        hit[1] -= 0.5f * G_CONST * balFactor * time * time;
+        hit[1] -= evaluatedDrop;
 
         Vector3 norm = (hit - wPos);
         hit = norm.Normalized() * eDist + wPos;

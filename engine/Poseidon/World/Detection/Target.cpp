@@ -6,6 +6,8 @@
 
 #include <Poseidon/AI/VehicleAI.hpp>
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
+#include <Poseidon/World/Entities/Infantry/SoldierOld.hpp>
+#include <Poseidon/World/Entities/Weapons/GrenadeFuse.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Random/randomGen.hpp>
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
@@ -1620,6 +1622,23 @@ bool EntityAI::WhatShootResult(FireResult& result, const Target& target, int wea
         LOG_DEBUG(AI, "    x: distance ({:.1f} <> {:.1f}..{:.1f})", dist, aInfo->minRange, aInfo->maxRange);
 #endif
         return false;
+    }
+    // Friendly blast exposure is a veto, not a cost that a valuable enemy can
+    // outweigh. Selection uses remembered target position; emission rechecks
+    // the actual muzzle trajectory after the throw animation's delay.
+    if (aInfo->_simulation == AmmoShotShell && ammoInfo->_initSpeed < 30 && aInfo->indirectHit > 0)
+    {
+        const Man* man = dyn_cast<const Man>(this);
+        if (man && man->ImprovedAutonomousCombat())
+        {
+            const auto& fuse = GrenadeFuse::Get();
+            const float delay = fuse.enabled && aInfo->explosionTime > 0
+                ? (fuse.fuseOverrideSeconds > 0 ? fuse.fuseOverrideSeconds : aInfo->explosionTime)
+                : dist / floatMax(1, ammoInfo->_initSpeed);
+            if (!man->CombatExplosiveAreaSafe(target.AimingPosition(),
+                    4 * aInfo->indirectHitRange + target.posError.Size() + 1, delay))
+                return false;
+        }
     }
     EntityAI* ai = tgt;
 

@@ -1422,6 +1422,11 @@ void Man::ThrowGrenadeAction(int weapon)
         GLandscape->ExplosionDammage(this, nullptr, directHit, hitPos, Direction(), ammo);
         return;
     }
+    // Animation delay can outlive the clearance checked when the throw began.
+    // Recheck before creating a shell or consuming ammunition, never afterwards.
+    if (ImprovedAutonomousCombat() &&
+        (!GetAIFireEnabled(GetFireTarget()) || !CombatShotSafe(weapon, GetFireTarget())))
+        return;
     bool fired = FireShell(weapon, GetWeaponPoint(weapon), GetWeaponRelDirection(weapon), target);
     if (fired)
     {

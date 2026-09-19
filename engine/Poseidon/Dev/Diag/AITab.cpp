@@ -13,6 +13,7 @@
 
 #include <Poseidon/AI/AITuning.hpp>
 #include <Poseidon/AI/AICostAccum.hpp>
+#include <Poseidon/AI/InfantryCombat.hpp>
 
 // See the note in FixedStepTab.cpp: Foundation's DebugLog macro eats ImGui's member of the
 // same name. Nothing here logs.
@@ -27,6 +28,19 @@ namespace Poseidon::Dev
 
 void DrawAITab()
 {
+    ImGui::TextUnformatted("Infantry combat");
+    Dev::PanelSameLine();
+    Dev::PanelHelp("Switch friendly-fire checks, grenade safety and ballistic shot evaluation "
+                   "between the new behaviour and the behaviour before these fixes. "
+                   "Applies to autonomous infantry in singleplayer. Changes take effect immediately "
+                   "and last for this session.");
+    int combatMode = InfantryCombat::Improved() ? 0 : 1;
+    if (ImGui::Combo("Combat behaviour", &combatMode, "Improved\0Legacy (before combat fixes)\0"))
+    {
+        InfantryCombat::SetImproved(combatMode == 0);
+    }
+    ImGui::Separator();
+
     ImGui::TextUnformatted("Near-target scanning");
     Dev::PanelSameLine();
     Dev::PanelHelp("How often a unit re-scans the enemies it can see within 100 m. Measured on "
