@@ -131,6 +131,45 @@ void RegisterSqf(HarnessServer& hs)
             }
             return HarnessProtocol::JsonResponse(resp);
         });
+    hs.RegisterCommand({"ai_stress_state", "Passive infantry state near player (no AI decision evaluation)", {}},
+        [](const std::string&, cJSON*) -> std::string {
+            if (!GWorld || !GLandscape || !GWorld->PlayerOn() || GWorld->GetMode() == GModeNetware)
+                return HarnessProtocol::ErrorResponse("singleplayer required");
+            cJSON* resp = cJSON_CreateObject();
+            cJSON* rows = cJSON_AddArrayToObject(resp, "units");
+            int xMin, xMax, zMin, zMax;
+            const Vector3 player = GWorld->PlayerOn()->Position();
+            ObjRadiusRectangle(xMin, xMax, zMin, zMax, player, player, 1200);
+            for (int z = zMin; z <= zMax; ++z)
+                for (int x = xMin; x <= xMax; ++x)
+                {
+                    const auto* list = GLandscape->GetObjects(z, x).GetList();
+                    if (!list) continue;
+                    for (int i = 0; i < list->GetTypeVehicleCount(); ++i)
+                    {
+                        const Man* man = dyn_cast<Man>(list->GetTypeVehicle(i));
+                        if (!man || man->IsDammageDestroyed() || man == GWorld->PlayerOn()) continue;
+                        cJSON* row = cJSON_CreateObject();
+                        cJSON_AddNumberToObject(row, "speed", man->Speed().Size());
+                        cJSON_AddNumberToObject(row, "distance", man->Position().Distance(player));
+                        cJSON_AddNumberToObject(row, "height", man->Position().Y());
+                        cJSON_AddStringToObject(row, "move", man->GetPrimaryMoveName());
+                        cJSON_AddBoolToObject(row, "prepare", man->IsFirePrepare());
+                        const auto* target = man->GetFireTarget();
+                        cJSON_AddBoolToObject(row, "target", target != nullptr);
+                        cJSON_AddBoolToObject(row, "playerTarget", target && target->idExact == GWorld->PlayerOn());
+                        const int weapon = man->SelectedWeapon();
+                        if (weapon >= 0 && weapon < man->NMagazineSlots())
+                        {
+                            cJSON_AddNumberToObject(row, "barrelY", man->GetWeaponDirection(weapon).Y());
+                            const auto* mode = man->GetWeaponMode(weapon);
+                            if (mode && mode->_ammo) cJSON_AddNumberToObject(row, "range", mode->_ammo->maxRange);
+                        }
+                        cJSON_AddItemToArray(rows, row);
+                    }
+                }
+            return HarnessProtocol::JsonResponse(resp);
+        });
     hs.RegisterCommand({"crew_seat_status", "Read-only SP fixture seat lifecycle status", {}},
         [](const std::string&, cJSON*) -> std::string {
             if (!GWorld || GWorld->GetMode() == GModeNetware)

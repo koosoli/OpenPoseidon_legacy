@@ -1,6 +1,6 @@
 param(
- [ValidateSet('Helicopter','Stress','Combat','Grenades','Burst','Shadows')][string]$Scenario='Helicopter',
- [int]$Seconds=90, [switch]$Reference, [switch]$Diagnostics, [switch]$LegacyTargetScan, [switch]$LegacyCombat, [switch]$VehicleCosts, [switch]$FixedCamera,
+ [ValidateSet('Helicopter','Stress','Combat','Grenades','Burst','Crossfire','Shadows')][string]$Scenario='Helicopter',
+ [int]$Seconds=90, [switch]$Reference, [switch]$Diagnostics, [switch]$LegacyTargetScan, [switch]$LegacyCombat, [switch]$VehicleCosts, [switch]$FixedCamera, [switch]$CenterPlayer,
  [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault'
 )
 $ErrorActionPreference='Stop'
@@ -14,6 +14,7 @@ if (!$env:LOCK_OWNER) {
  if ($LegacyCombat) {$argv+='-LegacyCombat'}
  if ($VehicleCosts) {$argv+='-VehicleCosts'}
  if ($FixedCamera) {$argv+='-FixedCamera'}
+ if ($CenterPlayer) {$argv+='-CenterPlayer'}
  $env:LOCK_OWNER='isolated combat and performance audit'
  try { & 'C:\Program Files\Git\bin\bash.exe' @argv; if ($LASTEXITCODE) {throw "Audit exited $LASTEXITCODE"} }
  finally {Remove-Item Env:LOCK_OWNER}
@@ -84,18 +85,31 @@ try {
   }
   $null=Send @{cmd='eval';code='triPerfCapture 0'}
  } elseif ($Scenario -eq 'Stress') {
+  if ($CenterPlayer) {$null=Send @{cmd='exec';code='player allowDamage false; player setPos [10860,6940,0]'}}
   for ($i=0;$i -lt $Seconds;$i+=5) {
    $null=Send @{cmd='eval';code='time'}
+   if (!$Reference) {$null=Send @{cmd='ai_stress_state'}}
    Start-Sleep -Seconds 5
   }
   $null=Send @{cmd='screenshot';path=(Join-Path $out 'stress.png')}
- } elseif ($Scenario -in @('Combat','Grenades','Burst')) {
+ } elseif ($Scenario -in @('Combat','Grenades','Burst','Crossfire')) {
   $null=Send @{cmd='exec';code='auditCrossing=false; auditShots=0; auditShooter addEventHandler ["Fired",{auditShots=auditShots+1; if (auditCrossing && auditShots==1) then {auditFriend setPos [9700,3610,0]}}]; auditTarget allowDamage false; auditFriend allowDamage false; hint ""; auditCamera="camera" camCreate [9695,3595,3]; auditCamera cameraEffect ["internal","back"]; auditCamera camSetTarget auditTarget; auditCamera camCommit 0; showCinemaBorder false'}
   if (!$Reference) {
    $null=Send @{cmd='ai_combat';improved=0}
    $r=Send @{cmd='ai_combat';improved=1}
    if (!$r.improved -or !$r.active) {throw 'AI combat setting did not activate'}
    $null=Send @{cmd='ai_combat';improved=$(if ($LegacyCombat) {0} else {1})}
+  }
+  if ($Scenario -eq 'Crossfire') {
+   # Keep the hostile target at 100 m; allies on the far side must still inhibit fire.
+   foreach ($position in @('[9700,3620,0]','[9700,3750,0]','[9700,3900,0]','[9720,3900,0]')) {
+    $null=Send @{cmd='exec';code=('auditShooter setCombatMode "BLUE"; auditFriend setPos '+$position+'; auditTarget setPos [9700,3700,0]; auditShooter setVehicleAmmo 1; auditShooter reveal auditTarget; auditShooter doTarget auditTarget')}
+    Start-Sleep -Seconds 2
+    $null=Send @{cmd='exec';code='auditShots=0; auditShooter setCombatMode "RED"'}
+    Start-Sleep -Seconds 8
+    $null=Send @{cmd='eval';code='[time,auditShots,getPos auditFriend,getPos auditTarget]'}
+    $null=Send @{cmd='exec';code='auditShooter setCombatMode "BLUE"'}
+   }
   }
   if ($Scenario -eq 'Burst') {
    if ($Reference) {throw 'Burst A/B requires the new build with the AI combat setting'}
@@ -124,7 +138,7 @@ try {
    $null=Send @{cmd='eval';code='[time,auditShots,alive auditTarget,getDammage auditTarget,alive auditFriend,getDammage auditFriend]'}
    $null=Send @{cmd='exec';code='auditShooter setCombatMode "BLUE"'}
   }
-  if ($Scenario -ne 'Burst') {
+  if ($Scenario -notin @('Burst','Crossfire')) {
   # The installed HandGrenade AI envelope is 40..60 m. A 30 m control
   # never reaches grenade selection and cannot validate the safety gate.
   $null=Send @{cmd='exec';code='auditShooter setCombatMode "BLUE"; removeAllWeapons auditShooter; {auditShooter removeMagazine _x} forEach magazines auditShooter; auditShooter addMagazine "HandGrenade"; auditShooter addMagazine "HandGrenade"; auditShooter addMagazine "HandGrenade"; auditShooter addWeapon "Throw"; auditTarget setPos [9700,3645,0]'}

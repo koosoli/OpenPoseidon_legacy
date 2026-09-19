@@ -239,6 +239,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     World/test_cargo_weapon_seats.cpp
     World/test_collision_query_math.cpp
     World/test_loose_objects.cpp
+    World/Weapons/test_friendly_fire.cpp
     World/Weapons/test_grenade_fuse.cpp
     World/Weapons/test_penetration.cpp
     World/test_physics_world.cpp

@@ -23,6 +23,8 @@
 #include <Poseidon/World/Entities/Weapons/Ballistics.hpp>
 #include <Poseidon/World/Entities/Weapons/GrenadeFuse.hpp>
 #include <Poseidon/AI/InfantryCombat.hpp>
+#include <Poseidon/AI/FriendlyFire.hpp>
+#include <Poseidon/World/Weather/WindModel.hpp>
 
 namespace Poseidon
 {
@@ -1103,33 +1105,42 @@ bool Man::CombatShotSafe(int weapon, const Target* target) const
         const AIGroup* group = GetGroup();
         const AICenter* center = group ? group->GetCenter() : nullptr;
         if (!center) return false;
-        // The actor-only spatial index excludes thousands of footprint marks.
-        // Re-read current bodies on EVERY emitted round, including burst rounds.
-        // Continue past the intended enemy through the authored effective range.
-        const float distance = floatMin(1000.0f, floatMax(ammo->maxRange,
-            target ? target->AimingPosition().Distance(origin) : 0.0f));
-        const float dispersion = mode->_dispersion * floatMax(slot._muzzle->_aiDispersionCoefX, slot._muzzle->_aiDispersionCoefY);
-        const Vector3 end = origin + direction * distance;
-        int xMin, xMax, zMin, zMax;
-        ObjRadiusRectangle(xMin, xMax, zMin, zMax, origin, end, 15 + distance * dispersion);
-        for (int z = zMin; z <= zMax; ++z)
-            for (int x = xMin; x <= xMax; ++x)
-            {
-                const ObjectListFull* list = GLandscape->GetObjects(z, x).GetList();
-                if (!list) continue;
-                for (int i = 0; i < list->GetTypeVehicleCount(); ++i)
-                {
-                    const EntityAI* ally = dyn_cast<EntityAI>(list->GetTypeVehicle(i));
-                    if (!ally || ally == this || ally->IsDammageDestroyed() || !center->IsFriendly(ally->GetTargetSide()))
-                        continue;
-                    const Vector3 body = ally->VisiblePosition();
-                    float along = (body - origin) * direction;
-                    saturate(along, 0, distance);
-                    const float extent = ally->GetShape() ? ally->GetShape()->GeometrySphere() : ally->GetRadius();
-                    const float radius = extent + along * dispersion;
-                    if (body.Distance2(origin + direction * along) <= Square(radius)) return false;
-                }
-            }
+        const auto shell = Ballistics::ShellParamsFor(*ammo);
+        const float dx = mode->_dispersion * slot._muzzle->_aiDispersionCoefX;
+        const float dy = mode->_dispersion * slot._muzzle->_aiDispersionCoefY;
+        const float spreadSpeed = magazine->_type->_initSpeed * std::sqrt(dx * dx + dy * dy);
+        Vector3 wind = VZero;
+        if (WindModel::BallisticsEnabled())
+        {
+            const auto& sample = GWind.Sample();
+            wind = Vector3(sample.velocityX, 0, sample.velocityZ);
+        }
+        // Retain allocation only, never a previous safety result/body snapshot.
+        // The simulation thread completes this query without callbacks/re-entry.
+        thread_local InfantryCombat::BulletEnvelope path;
+        path.Clear();
+        const bool supported = InfantryCombat::BulletPathSafe(origin, Speed() + direction * magazine->_type->_initSpeed,
+            shell, spreadSpeed, wind, [&](Vector3Par from, Vector3Par to, float time, float envelope) {
+                path.Add(from, to, time, envelope);
+                if (to.Y() + envelope < GLandscape->SurfaceYAboveWater(to.X(), to.Z()))
+                    return InfantryCombat::PathDecision::Ground;
+                return InfantryCombat::PathDecision::Continue;
+            });
+        if (!supported) return false;
+        // Scan the actor population once rather than the same terrain cells at
+        // every flight step. This excludes decals and has no radius/speed cutoff
+        // that could omit a moving ally. Blocks reject off-path bodies cheaply.
+        for (int i = 0, count = GWorld->NVehicles(); i < count; ++i)
+        {
+            const EntityAI* ally = dyn_cast<EntityAI>(GWorld->GetVehicle(i));
+            if (!ally || ally == this || ally->IsDammageDestroyed() || !center->IsFriendly(ally->GetTargetSide()))
+                continue;
+            // GeometrySphere belongs to GeometryCenter, not the aiming point.
+            const auto* shape = ally->GetShape();
+            const Vector3 body = shape ? ally->PositionModelToWorld(shape->GeometryCenter()) : ally->Position();
+            const float extent = shape ? floatMax(shape->GeometrySphere(), ally->GetRadius()) : ally->GetRadius();
+            if (path.Intersects(body, extent, ally->Speed().Size())) return false;
+        }
         return true;
     }
     if (ammo->_simulation != AmmoShotShell || magazine->_type->_initSpeed >= 30 || ammo->indirectHit <= 0)

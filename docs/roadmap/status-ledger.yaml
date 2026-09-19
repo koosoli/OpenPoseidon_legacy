@@ -6424,10 +6424,10 @@ tickets:
       - file: engine/Poseidon/World/Entities/Infantry/SoldierOld.cpp
         symbol: Man::ThrowGrenadeAction
         verified_commit: cf18101f
-    test_ids: []
+    test_ids: [friendly-fire-residual-travel, friendly-fire-block-culling]
     benchmark_artifacts: []
     evidence_hash: null
-    decision_record: docs/roadmap/decisions/COMBAT-FIXES-20260919.md
+    decision_record: docs/roadmap/decisions/COMBAT-CROSSFIRE-20260919.md
     known_failures:
       - Visual acceptance and custom fused/obstructed grenade scenarios remain pending; no universal projectile safety claim.
     fallback: AI tab Legacy or POSEIDON_AI_COMBAT_LEGACY=1 restores prior autonomous combat checks.
