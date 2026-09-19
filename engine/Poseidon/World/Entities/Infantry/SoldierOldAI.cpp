@@ -5,6 +5,7 @@
 #include <Poseidon/World/Scene/CargoSurface.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <cmath>
+#include <cstdlib>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Containers/Array.hpp>
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
@@ -1524,7 +1525,18 @@ void Soldier::Simulate(float deltaT, SimulationImportance prec)
 
 float Man::GetAimed(int weapon, Target* target) const
 {
-    return GetAimed(weapon, target, nullptr);
+    // Audit only: observe the one naturally scheduled evaluation. Never query
+    // visibility/readiness a second time or evaluate a skipped decision stage.
+    static const bool audit = [] { const char* v = std::getenv("POSEIDON_COMBAT_AUDIT"); return v && v[0] == '1'; }();
+    if (!audit || strcmpi(GetVarName(), "auditShooter") != 0)
+        return GetAimed(weapon, target, nullptr);
+    AimingDiagnostics diagnostics;
+    const float result = GetAimed(weapon, target, &diagnostics);
+    LOG_INFO(AI, "COMBAT-AUDIT t={} weapon={} current={} gate={} visibility={} miss={} tolerance={} aimed={} seenAge={} posError={}",
+        Glob.time.toFloat(), weapon, _currentWeapon, diagnostics.gate,
+        diagnostics.visibility, diagnostics.error, diagnostics.targetSize, result,
+        target ? Glob.time - target->lastSeen : -1.0f, target ? target->posError.Size() : -1.0f);
+    return result;
 }
 
 float Man::GetAimed(int weapon, Target* target, AimingDiagnostics* diagnostics) const

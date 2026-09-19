@@ -1,0 +1,121 @@
+param(
+ [ValidateSet('Helicopter','Stress','Combat','Shadows')][string]$Scenario='Helicopter',
+ [int]$Seconds=90, [switch]$Reference, [switch]$Diagnostics, [switch]$LegacyTargetScan, [switch]$VehicleCosts, [switch]$FixedCamera,
+ [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault'
+)
+$ErrorActionPreference='Stop'
+$root=Split-Path $PSScriptRoot -Parent
+if (!$env:LOCK_OWNER) {
+ $shellExe=Join-Path $PSHOME $(if ($PSVersionTable.PSEdition -eq 'Core') {'pwsh.exe'} else {'powershell.exe'})
+ $argv=@((Join-Path $PSScriptRoot 'with-game-lock.sh'),$shellExe.Replace('\','/'),'-NoProfile','-File',$PSCommandPath,'-Scenario',$Scenario,'-Seconds',"$Seconds",'-GameDir',$GameDir)
+ if ($Reference) {$argv+='-Reference'}
+ if ($Diagnostics) {$argv+='-Diagnostics'}
+ if ($LegacyTargetScan) {$argv+='-LegacyTargetScan'}
+ if ($VehicleCosts) {$argv+='-VehicleCosts'}
+ if ($FixedCamera) {$argv+='-FixedCamera'}
+ $env:LOCK_OWNER='isolated combat and performance audit'
+ try { & 'C:\Program Files\Git\bin\bash.exe' @argv; if ($LASTEXITCODE) {throw "Audit exited $LASTEXITCODE"} }
+ finally {Remove-Item Env:LOCK_OWNER}
+ return
+}
+if (Get-Process OpenPoseidon -ErrorAction SilentlyContinue) {throw 'Game already running'}
+$out=Join-Path $root ('build/audit-runs/'+$Scenario+'-'+(Get-Date -Format yyyyMMdd-HHmmss))
+New-Item -ItemType Directory -Force $out | Out-Null
+$bin=Join-Path $root 'dist/x64-win-rwdi'
+if ($Reference) {
+ $bin=Join-Path $root 'build/audit-reference'
+ New-Item -ItemType Directory -Force $bin | Out-Null
+ foreach ($name in @('OpenPoseidon.exe','wgpu_renderer.dll','OpenAL32.dll')) {
+  Copy-Item -LiteralPath (Join-Path $GameDir $name) -Destination (Join-Path $bin $name)
+ }
+}
+$exe=Join-Path $bin 'OpenPoseidon.exe'
+if (!(Test-Path $exe)) {throw "Missing build: $exe"}
+$env:POSEIDON_USER_DIR=Join-Path $out 'user'
+New-Item -ItemType Directory -Force $env:POSEIDON_USER_DIR | Out-Null
+[IO.File]::WriteAllLines((Join-Path $env:POSEIDON_USER_DIR 'graphics.cfg'),@('qualityPreset=3;','msaaSamples=4;','dlssMode=0;','vsync=0;','fpsCap=60;'))
+$env:POSEIDON_COMBAT_AUDIT=$(if ($Diagnostics) {'1'} else {'0'})
+$env:POSEIDON_TARGET_SCAN_LINEAR=$(if ($LegacyTargetScan) {'1'} else {'0'})
+$env:POSEIDON_SIM_VEHICLE_COST=$(if ($VehicleCosts) {'1'} else {'0'})
+$env:POSEIDON_SMOKE_SYSTEM='0'
+$env:WGR_AUTO_EXPOSURE='0'; $env:WGR_EXPOSURE='0.15'
+$mission=Join-Path $root 'tests/perf/missions/combat_audit.Intro'
+if ($Scenario -eq 'Helicopter') {$mission=Join-Path $root 'tests/perf/missions/perf_heli_distance.Intro'}
+if ($Scenario -eq 'Stress') {$mission=Join-Path $GameDir 'Mods/@63units/63MAX.west_ls2'}
+$listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0)
+$listener.Start(); $port=$listener.LocalEndpoint.Port; $listener.Stop()
+$log=Join-Path $out 'engine.log'
+$gameArgs=@('-C',('"'+$GameDir+'"'),'--render=wgpu','--window','--no-dev','--width','1280','--height','720','--harness',"$port",'--test-mission',('"'+$mission+'"'),'--log-file',('"'+$log+'"'))
+if ($Scenario -eq 'Stress') {$gameArgs+=@('--addon-root',('"'+(Join-Path $GameDir 'Mods/@63units')+'"'))}
+@{head=(& git -C $root rev-parse HEAD);reference=[bool]$Reference;diagnostics=[bool]$Diagnostics;linearScan=[bool]$LegacyTargetScan;mission=$mission;gameArgs=$gameArgs;environment=@(Get-ChildItem Env: | Where-Object Name -Match '^(POSEIDON|WGR)' | Select-Object Name,Value);dataHashes=@(Get-FileHash (Join-Path $GameDir 'bin/CONFIG.BIN'),(Join-Path $GameDir 'bin/remaster.cpp'),(Join-Path $mission 'mission.sqm'));hashes=@(Get-FileHash (Join-Path $bin 'OpenPoseidon.exe'),(Join-Path $bin 'wgpu_renderer.dll'));deployment=(Get-Content (Join-Path $GameDir 'DEPLOYED-FROM.txt') -ErrorAction SilentlyContinue)} | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $out 'provenance.json')
+$p=Start-Process -FilePath $exe -ArgumentList $gameArgs -WorkingDirectory $bin -PassThru -WindowStyle Hidden
+$null=$p.Handle
+try {
+ $client=[Net.Sockets.TcpClient]::new()
+ $deadline=[DateTime]::UtcNow.AddSeconds(90)
+ while (!$client.Connected) {
+  try {$client.Connect('127.0.0.1',$port)} catch {
+   if ($p.HasExited -or [DateTime]::UtcNow -gt $deadline) {throw}
+   Start-Sleep -Milliseconds 250
+  }
+ }
+ $stream=$client.GetStream(); $stream.ReadTimeout=30000
+ $reader=[IO.StreamReader]::new($stream)
+ $writer=[IO.StreamWriter]::new($stream,[Text.UTF8Encoding]::new($false)); $writer.AutoFlush=$true
+ function Send($command) {
+  $writer.WriteLine(($command | ConvertTo-Json -Compress))
+  do { $line=$reader.ReadLine(); if ($null -eq $line) {throw 'Harness closed'}; $r=$line | ConvertFrom-Json } while ($null -eq $r.ok)
+  ($command | ConvertTo-Json -Compress) | Add-Content (Join-Path $out 'harness.jsonl')
+  $line | Add-Content (Join-Path $out 'harness.jsonl')
+  if (!$r.ok) {throw $line}
+  return $r
+ }
+ Start-Sleep -Seconds 15
+ if ($Scenario -eq 'Helicopter') {
+  $null=Send @{cmd='exec';code='hint ""; auditCamera="camera" camCreate [9700,3600,2]; auditCamera cameraEffect ["internal","back"]; auditCamera camSetTarget distanceHeli; auditCamera camSetFov 0.2; auditCamera camCommit 0; showCinemaBorder false'}
+  if ($FixedCamera) {$null=Send @{cmd='exec';code='auditCamera camSetTarget [9700,4150,80]; auditCamera camSetFov 0.35; auditCamera camCommit 0'}}
+  $null=Send @{cmd='screenshot';path=(Join-Path $out 'heli-start.png')}
+  $null=Send @{cmd='eval';code='triPerfCapture 8192'}
+  for ($i=0; $i -lt $Seconds; $i+=2) {
+   $null=Send @{cmd='eval';code='[time,getPos distanceHeli,velocity distanceHeli,alive distancePilot]'}
+   Start-Sleep -Seconds 2
+  }
+  $null=Send @{cmd='eval';code='triPerfCapture 0'}
+ } elseif ($Scenario -eq 'Stress') {
+  for ($i=0;$i -lt $Seconds;$i+=5) {
+   $null=Send @{cmd='eval';code='time'}
+   Start-Sleep -Seconds 5
+  }
+  $null=Send @{cmd='screenshot';path=(Join-Path $out 'stress.png')}
+ } elseif ($Scenario -eq 'Combat') {
+  $null=Send @{cmd='exec';code='auditShots=0; auditShooter addEventHandler ["Fired",{auditShots=auditShots+1}]; auditTarget allowDamage false; auditFriend allowDamage false; hint ""; auditCamera="camera" camCreate [9695,3595,3]; auditCamera cameraEffect ["internal","back"]; auditCamera camSetTarget auditTarget; auditCamera camCommit 0; showCinemaBorder false'}
+  foreach ($range in @(100,250,400)) {
+   $null=Send @{cmd='exec';code=('auditShots=0; auditShooter setCombatMode "BLUE"; auditShooter setVehicleAmmo 1; auditTarget setDammage 0; auditTarget setPos [9700,'+(3600+$range)+',0]; auditShooter reveal auditTarget; auditShooter doTarget auditTarget; auditShooter setCombatMode "RED"')}
+   Start-Sleep -Seconds 12
+   $null=Send @{cmd='eval';code='[time,auditShots,alive auditTarget,getDammage auditTarget,auditShooter knowsAbout auditTarget,magazines auditShooter]'}
+   $null=Send @{cmd='screenshot';path=(Join-Path $out ("open-"+$range+".png"))}
+   $null=Send @{cmd='exec';code='auditShooter setCombatMode "BLUE"'}
+  }
+  foreach ($offset in @(0,20)) {
+   $null=Send @{cmd='exec';code=('auditShots=0; auditTarget setDammage 0; auditTarget setPos [9700,3700,0]; auditFriend setDammage 0; auditFriend setPos ['+(9700+$offset)+',3620,0]; auditShooter setVehicleAmmo 1; auditShooter reveal auditTarget; auditShooter setCombatMode "RED"')}
+   Start-Sleep -Seconds 12
+   $null=Send @{cmd='eval';code='[time,auditShots,alive auditTarget,getDammage auditTarget,alive auditFriend,getDammage auditFriend]'}
+   $null=Send @{cmd='exec';code='auditShooter setCombatMode "BLUE"'}
+  }
+  $null=Send @{cmd='exec';code='auditShooter setCombatMode "BLUE"; removeAllWeapons auditShooter; {auditShooter removeMagazine _x} forEach magazines auditShooter; auditShooter addMagazine "HandGrenade"; auditShooter addMagazine "HandGrenade"; auditShooter addMagazine "HandGrenade"; auditShooter addWeapon "Throw"; auditTarget setPos [9700,3630,0]'}
+  foreach ($offset in @(35,0)) {
+   $null=Send @{cmd='exec';code=('auditShots=0; auditFriend setPos ['+(9700+$offset)+',3630,0]; auditShooter reveal auditTarget; auditShooter doTarget auditTarget; auditShooter setCombatMode "RED"')}
+   Start-Sleep -Seconds 18
+   $null=Send @{cmd='eval';code='[time,auditShots,magazines auditShooter,getPos auditFriend,getPos auditTarget]'}
+   $null=Send @{cmd='exec';code='auditShooter setCombatMode "BLUE"; auditShooter setVehicleAmmo 1'}
+  }
+ } else {throw 'Use renderer-specific capture procedure for Shadows'}
+ $null=Send @{cmd='exit'}
+ if (!$p.WaitForExit(30000)) {throw 'Exit timed out'}
+ if ($p.ExitCode -ne 0) {throw "Game exit $($p.ExitCode)"}
+ if (Select-String -LiteralPath $log -Pattern 'Script error|Validation Error|panicked at|UNHANDLED EXCEPTION') {throw 'Runtime error; inspect engine.log'}
+ Write-Output "Audit complete: $out"
+} finally {
+ if ($client) {$client.Dispose()}
+ if (!$p.HasExited) {Stop-Process -Id $p.Id; $p.WaitForExit()}
+}

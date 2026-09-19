@@ -6344,16 +6344,18 @@ tickets:
     evidence_hash: null
     decision_record: docs/roadmap/decisions/AI-DISTANCE-20260919.md
     known_failures:
-      - Owner flight/rotor, save-load and multiplayer checks pending; helicopters beyond view range also cost more.
+      - Owner reports mostly smooth helicopter flight but occasional jumps remain; save-load and multiplayer pending.
     fallback: POSEIDON_HELI_FAR_FULL_RATE=0 restores the prior helicopter cadence.
     reviewer: null
     reviewer_method: >-
-      Not owner-reviewed. Build and existing AI ordering/header tests only;
-      user explicitly reserved all game smoke tests for their own session.
+      Owner permitted author smoke tests on 2026-09-19. Corrected isolated flight
+      fixture survived 90 seconds with zero discarded simulation steps. Owner
+      reports occasional visual skips; not accepted as fully fixed.
     supersedes: []
     evidence:
       - docs/roadmap/decisions/AI-DISTANCE-20260919.md
       - engine/Poseidon/World/Entities/Vehicles/Air/Helicopter.cpp
+      - docs/roadmap/decisions/COMBAT-AUDIT-20260919.md
   - id: PERF-035
     overlay: COMPAT-C1-EXEC-001
     is_example: false
@@ -6383,13 +6385,15 @@ tickets:
     evidence_hash: null
     decision_record: docs/roadmap/decisions/AI-DISTANCE-20260919.md
     known_failures:
-      - Owner 63-group performance and live target-discovery parity checks pending; no FPS speedup claimed.
+      - 63MAX still stutters; isolated uninstrumented run measured 14.402 ms/tick with discarded steps. No new speedup claimed.
     fallback: POSEIDON_TARGET_SCAN_LINEAR=1 restores linear membership lookup.
     reviewer: null
     reviewer_method: >-
-      Not owner-reviewed. Build and existing AI ordering/header tests only;
-      user explicitly reserved all game smoke tests for their own session.
+      Author ran isolated reference stress controls with owner permission on
+      2026-09-19; separated instrumentation overhead from actual simulation
+      and GPU costs. Live target-discovery parity remains pending.
     supersedes: []
     evidence:
       - docs/roadmap/decisions/AI-DISTANCE-20260919.md
       - engine/Poseidon/World/Detection/Target.cpp
+      - docs/roadmap/decisions/COMBAT-AUDIT-20260919.md

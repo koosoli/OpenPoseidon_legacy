@@ -21,14 +21,9 @@ class Mission
             class Vehicles
             {
                 items=1;
-                class Item0 { position[]={9250,0,4150}; id=1; side="WEST"; vehicle="SoldierWPilot"; leader=1; skill=1; init="distancePilot=this; this setBehaviour ""CARELESS""; this setCombatMode ""BLUE"""; };
+                class Item0 { position[]={9250,0,4150}; id=1; side="WEST"; vehicle="UH60"; special="FLY"; leader=1; skill=1; azimut=90; init="distanceHeli=this; distancePilot=driver this; this setBehaviour ""CARELESS""; this setCombatMode ""BLUE"""; };
             };
         };
-    };
-    class Vehicles
-    {
-        items=1;
-        class Item0 { position[]={9250,0,4150}; id=2; side="EMPTY"; vehicle="UH60"; azimut=90; init="distanceHeli=this"; };
     };
 };
 class Intro { randomSeed=1; class Intel {}; };

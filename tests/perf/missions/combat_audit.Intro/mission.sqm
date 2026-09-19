@@ -1,0 +1,17 @@
+version=11;
+class Mission
+{
+ randomSeed=1234;
+ class Intel { year=1985; month=6; day=21; hour=10; minute=0; startWeather=0; forecastWeather=0; startFog=0; forecastFog=0; };
+ class Groups
+ {
+  items=4;
+  class Item0 { side="WEST"; class Vehicles { items=1; class Item0 { position[]={9700,0,3550}; id=0; side="WEST"; vehicle="SoldierWB"; player="PLAYER COMMANDER"; leader=1; skill=1; init="auditPlayer=this"; }; }; };
+  class Item1 { side="WEST"; class Vehicles { items=1; class Item0 { position[]={9700,0,3600}; id=1; side="WEST"; vehicle="SoldierWB"; leader=1; skill=1; azimut=0; text="auditShooter"; init="this setCombatMode ""BLUE""; this setUnitPos ""UP""; this disableAI ""MOVE"""; }; }; };
+  class Item2 { side="EAST"; class Vehicles { items=1; class Item0 { position[]={9700,0,3700}; id=2; side="EAST"; vehicle="SoldierEB"; leader=1; skill=1; init="auditTarget=this; removeAllWeapons this; this setUnitPos ""UP""; this disableAI ""MOVE"""; }; }; };
+  class Item3 { side="WEST"; class Vehicles { items=1; class Item0 { position[]={9720,0,3620}; id=3; side="WEST"; vehicle="SoldierWB"; leader=1; skill=1; init="auditFriend=this; removeAllWeapons this; this setUnitPos ""UP""; this disableAI ""MOVE"""; }; }; };
+ };
+};
+class Intro { randomSeed=1; class Intel {}; };
+class OutroWin { randomSeed=2; class Intel {}; };
+class OutroLoose { randomSeed=3; class Intel {}; };

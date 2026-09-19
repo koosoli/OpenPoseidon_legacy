@@ -1,0 +1,4 @@
+~0.5
+setViewDistance 1600
+auditShooter setBehaviour "COMBAT"
+hint "Combat audit: controlled by the harness. Shooter holds fire until each case begins."
