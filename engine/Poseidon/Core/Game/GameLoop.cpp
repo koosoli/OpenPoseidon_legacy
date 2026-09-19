@@ -414,21 +414,24 @@ bool AppIdle()
     bool enableDraw = (focused || (GApp->m_forceRender || testMissionActive) &&
                                       (ENGINE_CONFIG.landEditor || ENGINE_CONFIG.useWindow));
 
-    static DWORD lastTime;
-    DWORD actTime = Poseidon::Foundation::GlobalTickCount();
-    DWORD deltaTMs = actTime - lastTime;
+    // Render interpolation needs the same sub-millisecond clock as the pacer.
+    // Millisecond ticks turn smooth 60 Hz motion into alternating 16/17 ms
+    // advances, even when the actual presentation interval is steady.
+    static Foundation::unsigned64 lastTime;
+    Foundation::unsigned64 actTime = Poseidon::Foundation::getSystemTime();
+    auto deltaTUs = actTime - lastTime;
 
     if (!enableDraw)
     {
-        if (deltaTMs < 50)
+        if (deltaTUs < 50'000)
         {
-            Sleep(50 - deltaTMs);
-            actTime = Poseidon::Foundation::GlobalTickCount();
-            deltaTMs = actTime - lastTime;
+            Foundation::SleepUs(static_cast<int64_t>(50'000 - deltaTUs));
+            actTime = Poseidon::Foundation::getSystemTime();
+            deltaTUs = actTime - lastTime;
         }
     }
 
-    float deltaT = deltaTMs * 0.001;
+    float deltaT = static_cast<float>(deltaTUs * 0.000001);
     lastTime = actTime;
 
     static DWORD lastSysTime;

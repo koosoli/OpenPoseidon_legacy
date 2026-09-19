@@ -500,6 +500,16 @@ void World::MoveOutAndDelete(VehicleList& vehicles, float deltaT, bool applyMove
     int write = 0;
     for (int read = 0; read < count; ++read)
     {
+        // Most entries survive. Avoid two reference-count writes per mark on
+        // every tick; retain the guard around lifecycle callbacks below.
+        Entity* current = vehicles[read];
+        if (!current->ToDelete() && !current->ToMoveOut() && !current->ToConvertToObject())
+        {
+            if (write != read)
+                vehicles.Set(write) = vehicles[read];
+            ++write;
+            continue;
+        }
         Ref<Entity> keepAlive = vehicles[read];
         Entity* vehicle = keepAlive;
         if (vehicle->ToDelete())
