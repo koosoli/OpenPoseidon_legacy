@@ -6543,27 +6543,28 @@ tickets:
     owner: null
     branch: codex/ocean-release
     baseline_commit: 5457e729
-    verification_commit: 4de6ea57
+    verification_commit: c9006e58
     milestone: 0
     milestone_role: NON_BLOCKING
     depends_on: []
     blocked_by: []
     blocks: []
-    implementation_commits: [ed6a2989, 643abc64, e99d7262, 4b0b721e, 4de6ea57]
+    implementation_commits: [ed6a2989, 643abc64, e99d7262, 4b0b721e, 4de6ea57, bdca433e, 03bda0aa, 5a9a3d49, 11cdf5b0, f3739d52, e5da1695, c9006e58]
     production_call_sites: []
-    test_ids: [gpu-ocean-scale, gpu-surf-arrival, gpu-foam-pipeline, gpu-reference-seas, water-shaders, cpu-water-queries]
+    test_ids: [gpu-curling-overhang-collapse, gpu-ocean-scale, gpu-surf-arrival, gpu-foam-pipeline, gpu-reference-seas, water-shaders, cpu-water-queries]
     benchmark_artifacts: []
-    evidence_hash: 4dfa20f34f0c751b3c5aad38d6600a03573d5284398998d262f249845159b51f
+    evidence_hash: b5c0b7351a9a53b0c9bb6ebb5a8ffb99ff56f75230e8964a66037d598b80fa78
     decision_record: docs/roadmap/decisions/OCEAN-SURF-IMPLEMENTATION-20260919.md
     known_failures:
-      - Curling mesh prototype is under visual review; old ocean remains default, no rollout accepted.
+      - Curling prototype c9006e58 is installed and runtime checked, but its surface remains visibly smooth/tubular. Owner visual acceptance and broader rollout remain open; old ocean stays default.
       - Owner rejected surf appearance and requested old behavior remain default. Revised opt-in surf preserves underlying ocean waves; visual acceptance remains open.
       - Existing warped and nearshore normals are approximate; frozen clips do not freeze legacy sea-level bobbing.
-    fallback: Old behavior is default by explicit owner request; WGR_WATER_SURF_PILOT=1 opts into the experimental surf only.
+    fallback: Old behavior is default by explicit owner request; WGR_WATER_SURF_PILOT=1 opts into heightfield surf, WGR_WATER_CURLING_BREAKER=1 into the separate local curling prototype.
     reviewer: null
     reviewer_method: Author-run GPU regressions, rebuilt CPU water suite, calibrated live clips and lifecycle/fallback captures.
     supersedes: []
     evidence:
+      - docs/roadmap/evidence/curling-breaker-20260919.json
       - docs/roadmap/decisions/CURLING-BREAKER-PROTOTYPE-20260919.md
       - docs/roadmap/evidence/ocean-surf-revision-20260919.json
       - docs/roadmap/evidence/ocean-surf-20260919.json

@@ -1,0 +1,32 @@
+{
+  "code_commit": "c9006e58",
+  "default": "old ocean; local curling prototype requires explicit opt-in",
+  "visual_acceptance": false,
+  "runs": {
+    "installed-curl-open-20260919-235705": {
+      "water_draw_ms": {
+        "median": 3.173,
+        "samples": 6
+      },
+      "whole_gpu_frame_ms": {
+        "median": 13.548,
+        "samples": 6
+      },
+      "logged_slow_frames": 0
+    },
+    "installed-curl-open-baseline-20260919-235803": {
+      "water_draw_ms": {
+        "median": 3.0445,
+        "samples": 6
+      },
+      "whole_gpu_frame_ms": {
+        "median": 13.4725,
+        "samples": 6
+      },
+      "logged_slow_frames": 0
+    }
+  },
+  "OpenPoseidon.exe_sha256": "634385652e92518201339a9b2e50b7a19517ee1964d5b2ef5536221474463383",
+  "wgpu_renderer.dll_sha256": "d03b6b8a2ad02c8fd873a598ec8db345bf236e09e3a6bf36fc2c5524db0b58a7",
+  "provenance_note": "Deploy stamped +dirty because the evidence report/ledger and new launcher were uncommitted. Engine sources match committed c9006e58; built and installed binary hashes match."
+}
