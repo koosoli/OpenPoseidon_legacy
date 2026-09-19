@@ -661,7 +661,8 @@ class Landscape : public SerializeClass
     // window centre. The list is a pure function of the (quantised) centre -- the window radius
     // is derived from it, and the per-cell placement lists never change after load -- so it is
     // rebuilt only when the centre moves. Draining the admission backlog re-walks it, but does
-    // not re-derive or re-sort it. See UpdateModernObjectResidency.
+    // not re-derive or re-sort it. Budget changes also invalidate window growth.
+    // See UpdateModernObjectResidency.
     struct ModernObjectCellCandidate
     {
         uint32_t index;
@@ -698,6 +699,8 @@ class Landscape : public SerializeClass
     uint32_t _modernObjectEffectiveBudget = 0;
     uint32_t _modernObjectBudgetLogged = 0;
     uint32_t _modernObjectDesiredCount = 0;
+    uint32_t _modernObjectDesiredBudget = 0;
+    uint32_t _modernObjectCandidateBudget = 0;
     uint32_t _modernObjectCreatesPerUpdate = 128;
     uint32_t _modernResidentObjectCount = 0;
     // Cadence counter for the residency progress row (see UpdateModernObjectResidency).
@@ -748,7 +751,7 @@ class Landscape : public SerializeClass
     // ALREADY crossed a 4-cell boundary, so every admit is on the critical path. These four
     // fields carry a smoothed camera velocity between updates so the window centre can be biased
     // ahead of the camera. Derived here rather than passed in because
-    // UpdateModernObjectResidency's only input is a position (TerrainWgpu.cpp:2485).
+    // UpdateModernObjectResidency receives the camera position from World::Draw.
     bool _modernObjectVelocityValid = false;
     float _modernObjectLastCameraX = 0.0f;
     float _modernObjectLastCameraZ = 0.0f;
@@ -963,7 +966,7 @@ class Landscape : public SerializeClass
     /// LandLoadEnfusion.cpp for what is deliberately absent.
     bool LoadEnfusionNative(const char* addonsDir);
     // No-op for legacy worlds. Called by the WGPU terrain path once the live
-    // camera exists; updates only when the camera crosses a small cell block.
+    // camera exists; reevaluates for center or budget changes, drains pending work.
     void UpdateModernObjectResidency(Vector3Par cameraPosition);
     // Harness-only budget injection; callers must opt in explicitly. No shipping UI policy.
     bool SetObjectStreamTestBudget(uint32_t budget);

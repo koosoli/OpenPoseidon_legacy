@@ -1,9 +1,9 @@
-param([switch]$Baseline,[string]$Label='stationary-budget',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
+param([switch]$Baseline,[switch]$Normal,[string]$Label='stationary-budget',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {
  $shellName=if ($PSVersionTable.PSEdition -eq 'Core') {'pwsh.exe'} else {'powershell.exe'}
  $argv=@((Join-Path $PSScriptRoot 'with-game-lock.sh'),(Join-Path $PSHOME $shellName).Replace('\','/'),'-NoProfile','-File',$PSCommandPath,'-Label',$Label,'-GameDir',$GameDir)
- if ($Baseline) {$argv+='-Baseline'}
+ if ($Baseline) {$argv+='-Baseline'}; if ($Normal) {$argv+='-Normal'}
  $env:LOCK_OWNER='stationary residency check'
  try {& 'C:\Program Files\Git\bin\bash.exe' @argv; if ($LASTEXITCODE) {throw "Residency test exited $LASTEXITCODE"}} finally {Remove-Item Env:LOCK_OWNER}
  return
@@ -18,7 +18,7 @@ $env:POSEIDON_REFORGER_WORLD='worlds/eden'
 $env:POSEIDON_REFORGER_OBJECTS='1'
 $env:POSEIDON_REFORGER_STREAM='1'
 $env:WGR_OBJECT_STREAM_TEST_BUDGET='1'
-$env:WGR_OBJECT_STREAM_MAX_OBJECTS='8000'
+$env:WGR_OBJECT_STREAM_MAX_OBJECTS=if ($Normal) {'20000'} else {'8000'}
 $env:WGR_OBJECT_STREAM_GPU_BUDGET='0'
 $env:WGR_PASS1_STATS='1'
 Remove-Item Env:POSEIDON_TEST_RAIN -ErrorAction SilentlyContinue
@@ -54,6 +54,7 @@ try {
  if ($idle.admitUpdates -ne $before.admitUpdates) {throw 'Settled fast path did not remain idle'}
  $null=Send @{cmd='eval';code='triPerfStats 0'}
  $null=Send @{cmd='exec';code='logInfo "STREAM_PERF_END"'}
+ if (!$Normal) {
  $null=Send @{cmd='stream_residency';budget=4000}
  Start-Sleep -Seconds 3
  $small=Wait-Settled
@@ -67,7 +68,20 @@ try {
  Start-Sleep -Seconds 2
  $restored=Wait-Settled
  if ($restored.desired -ne $before.desired -or $restored.resident -ne $before.resident) {throw 'Budget restoration lost coverage'}
- @{before=$before;small=$small;restored=$restored;baselineReproduced=[bool]$Baseline} | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $out 'result.json')
+ } else {
+  $small=$null
+  $null=Send @{cmd='exec';code='logInfo "STREAM_TRAVERSE_BEGIN"; triPerfReset 0'}
+  foreach ($x in @(5192.61,5292.61,5392.61,5492.61,5392.61,5292.61,5192.61,5092.61)) {
+   $r=Send @{cmd='eval';code=('triFreeFlyPose "'+$x+' 3995.64 18.3 200.9 -13.5"')}
+   if ($r.result -notmatch 'OK') {throw 'Traversal pose refused'}
+   Start-Sleep -Seconds 3
+  }
+  $null=Send @{cmd='eval';code='triPerfStats 0'}
+  $null=Send @{cmd='exec';code='logInfo "STREAM_TRAVERSE_END"'}
+  $restored=Wait-Settled
+  if ($restored.centerX -ne $before.centerX -or $restored.centerZ -ne $before.centerZ -or $restored.desired -ne $before.desired -or $restored.resident -ne $before.resident) {throw 'Traversal return lost coverage'}
+ }
+ @{before=$before;small=$small;restored=$restored;normal=[bool]$Normal;baselineReproduced=([bool]$Baseline -and !$Normal)} | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $out 'result.json')
  $null=Send @{cmd='screenshot';path=(Join-Path $out 'settled.png')}
  $null=Send @{cmd='exit'}
  if (!$p.WaitForExit(15000) -or $p.ExitCode) {throw 'Game failed to exit cleanly'}

@@ -284,6 +284,11 @@ void Landscape::Init()
     _modernObjectCellCursor.clear();
     _modernObjectCandidates.clear();
     _modernObjectCandidatesValid = false;
+    _modernObjectCandidateBudget = 0;
+    _modernObjectDesiredBudget = 0;
+    _modernObjectDesiredCount = 0;
+    _modernObjectEffectiveBudget = 0;
+    _modernObjectBudgetLogged = 0;
     _modernObjectCandidateCenterX = -0x3fffffff;
     _modernObjectCandidateCenterZ = -0x3fffffff;
     _modernObjectCandidateRadius = 0;

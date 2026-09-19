@@ -2319,6 +2319,11 @@ bool Landscape::LoadOprwModern(const char* path)
         _modernObjectCandidateCenterX = -0x3fffffff;
         _modernObjectCandidateCenterZ = -0x3fffffff;
         _modernObjectCandidateRadius = 0;
+        _modernObjectCandidateBudget = 0;
+        _modernObjectDesiredBudget = 0;
+        _modernObjectDesiredCount = 0;
+        _modernObjectEffectiveBudget = 0;
+        _modernObjectBudgetLogged = 0;
 
         if (const char* radius = std::getenv("WGR_OBJECT_STREAM_RADIUS_CELLS"))
             _modernObjectRadius = std::clamp(static_cast<int>(std::strtol(radius, nullptr, 10)), 8, _landRange);
@@ -3274,7 +3279,7 @@ static uint32_t GpuClampedObjectBudget(uint32_t itemBudget, uint32_t residentNow
         // Fit the count to the budget, never below a floor that keeps the near
         // window populated -- an empty world is worse than an over-budget one.
         const uint64_t fits = mem.budgetBytes / perObject;
-        const uint32_t target = static_cast<uint32_t>(std::clamp<uint64_t>(fits, 2000u, itemBudget));
+        const uint32_t target = static_cast<uint32_t>(std::clamp<uint64_t>(fits, std::min(2000u, itemBudget), itemBudget));
         effective = std::min(effective, target);
     }
     else if (projected < low)
@@ -3488,42 +3493,9 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
     }();
     const bool preloading = preloadRequested && !_modernObjectPreloadDone;
 
-    if (!centerChanged && !_modernObjectResidencyPending)
-    {
-        return;
-    }
-    if (centerChanged)
-    {
-        _modernObjectCenterX = centerX;
-        _modernObjectCenterZ = centerZ;
-    }
-
-    using CellCandidate = ModernObjectCellCandidate;
-    // Rebuild the candidate list only when the window centre moves.
-    //
-    // Everything below -- the geometric window growth, the candidate gather and the sort -- is a
-    // function of the (quantised) centre alone: the per-cell placement lists are fixed at load,
-    // so `enclosedPlacements` and therefore `windowRadius` are too. The early-out above, however,
-    // only returns while the world is CONVERGED; while the admission backlog is still draining
-    // (`_modernObjectResidencyPending`) the whole derivation ran again on every single frame, and
-    // that is precisely the interval that matters, because it is the interval the world spends
-    // filling. On Everon that is a 256x256 land grid: up to log2(256) passes of `enclosedPlacements`
-    // over the window, a gather over the window and an O(n log n) sort of every non-empty cell in
-    // it, per frame, to arrive at a list identical to the previous frame's.
-    const bool candidateCacheOn = ResidencyCandidateCacheEnabled();
-    const bool rebuildCandidates = !candidateCacheOn || !_modernObjectCandidatesValid || centerChanged ||
-                                   _modernObjectCandidateCenterX != centerX || _modernObjectCandidateCenterZ != centerZ;
-    // The live set must be bounded by the OBJECT BUDGET, not by geometry. The radius is a
-    // second, independent bound, and on any world whose whole placement database already fits
-    // the budget it is the one that binds -- silently, because nothing reports it. Reforger's
-    // Everon carries 19,644 placements against a 20,000-object budget, but its land grid is
-    // 256x256 at 50 m, so a fixed 64-cell window spans 6.4 km of a 12.8 km world and enclosed
-    // only 9,176 of them. 10,468 objects were refused for want of nothing: half the island
-    // stayed empty while 10,824 budget slots went unused. Grow the window geometrically until
-    // the budget is the bound or the window covers the map, so the radius is a starting size
-    // rather than a ceiling. Worlds where the budget already binds (Stratis requests 19,998 of
-    // 163,953 inside the first 64 cells, ChernarusPlus far sooner) never enter the loop and
-    // keep their measured behaviour and memory exactly.
+    // Budget is part of demand, even after the admission backlog has converged.
+    // The GPU estimator is still opt-in; with it disabled this is a count read,
+    // with no renderer query or candidate scan on the settled fast path.
     // Phase 7: the count, clamped by measured GPU cost (no-op when it fits).
     const uint32_t effectiveBudget =
         GpuClampedObjectBudget(_modernObjectBudget, _modernResidentObjectCount,
@@ -3536,6 +3508,36 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
              "(measured cost per resident object; WGR_OBJECT_STREAM_GPU_BUDGET=0 disables)",
              _modernObjectBudget, effectiveBudget);
     }
+    const bool demandChanged = centerChanged || effectiveBudget != _modernObjectDesiredBudget;
+    if (!demandChanged && !_modernObjectResidencyPending)
+    {
+        return;
+    }
+    if (centerChanged)
+    {
+        _modernObjectCenterX = centerX;
+        _modernObjectCenterZ = centerZ;
+    }
+
+    using CellCandidate = ModernObjectCellCandidate;
+    // Candidate-window growth depends on both center and effective budget.
+    // Pending admission alone must not repeat the gather/sort; a changed budget
+    // must invalidate it even if the camera is stationary.
+    const bool candidateCacheOn = ResidencyCandidateCacheEnabled();
+    const bool rebuildCandidates = !candidateCacheOn || !_modernObjectCandidatesValid || centerChanged ||
+                                   _modernObjectCandidateCenterX != centerX || _modernObjectCandidateCenterZ != centerZ ||
+                                   _modernObjectCandidateBudget != effectiveBudget;
+    // The live set must be bounded by the OBJECT BUDGET, not by geometry. The radius is a
+    // second, independent bound, and on any world whose whole placement database already fits
+    // the budget it is the one that binds -- silently, because nothing reports it. Reforger's
+    // Everon carries 19,644 placements against a 20,000-object budget, but its land grid is
+    // 256x256 at 50 m, so a fixed 64-cell window spans 6.4 km of a 12.8 km world and enclosed
+    // only 9,176 of them. 10,468 objects were refused for want of nothing: half the island
+    // stayed empty while 10,824 budget slots went unused. Grow the window geometrically until
+    // the budget is the bound or the window covers the map, so the radius is a starting size
+    // rather than a ceiling. Worlds where the budget already binds (Stratis requests 19,998 of
+    // 163,953 inside the first 64 cells, ChernarusPlus far sooner) never enter the loop and
+    // keep their measured behaviour and memory exactly.
     if (rebuildCandidates)
     {
         const auto enclosedPlacements = [&](int radius)
@@ -3579,12 +3581,13 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
         _modernObjectCandidateCenterX = centerX;
         _modernObjectCandidateCenterZ = centerZ;
         _modernObjectCandidateRadius = windowRadius;
+        _modernObjectCandidateBudget = effectiveBudget;
         _modernObjectCandidatesValid = true;
     }
     const std::vector<CellCandidate>& candidates = _modernObjectCandidates;
 
     uint32_t requested = 0;
-    if (centerChanged)
+    if (demandChanged)
     {
         std::fill(_modernObjectCellDesired.begin(), _modernObjectCellDesired.end(), 0);
         // (b) Record where the desired set actually ran out of budget. The candidates are
@@ -3613,8 +3616,9 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
     }
 
     _modernObjectDesiredCount = requested;
+    _modernObjectDesiredBudget = effectiveBudget;
     uint32_t released = 0;
-    if (centerChanged)
+    if (demandChanged)
     {
         for (size_t cell = 0; cell < _modernObjectCells.size(); ++cell)
         {
