@@ -358,6 +358,26 @@ static Vector3 RotorUpForce(Vector3Val speed, float coef, float alt)
 
 #define FAST_COEF (1.0 / 25) // use fast/slow simulation mode
 
+void Helicopter::SimulateOptimized(float deltaT, SimulationImportance prec)
+{
+    // PERF-034: the render history covers one world tick, not the four ticks
+    // between 15 Hz body updates. Keep far helicopter motion/rotors on the
+    // remainder path so that history has a new pose every tick. Do not raise
+    // the rate of the hundreds of infantry sharing the visible-far list.
+    // WorstImportance clamps helicopters to VisibleFar even beyond view range.
+    static const bool smoothFar = []
+    {
+        const char* value = std::getenv("POSEIDON_HELI_FAR_FULL_RATE");
+        return value == nullptr || value[0] != '0';
+    }();
+    if (prec == SimulateVisibleFar && smoothFar)
+    {
+        SimulateRest(deltaT, prec);
+        return;
+    }
+    base::SimulateOptimized(deltaT, prec);
+}
+
 void Helicopter::Simulate(float deltaT, SimulationImportance prec)
 {
     _isDead = IsDammageDestroyed();

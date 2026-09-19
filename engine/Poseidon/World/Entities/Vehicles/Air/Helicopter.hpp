@@ -144,6 +144,7 @@ class Helicopter: public Transport
 	bool IsPossibleToGetIn() const override;
 
 	void Simulate( float deltaT, SimulationImportance prec ) override;
+	void SimulateOptimized(float deltaT, SimulationImportance prec) override;
 	void Sound( bool inside, float deltaT ) override;
 	void UnloadSound() override;
 

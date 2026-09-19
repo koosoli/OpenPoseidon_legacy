@@ -1,4 +1,6 @@
 #include <algorithm>
+#include <cstdlib>
+#include <unordered_set>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Core/Config/UserConfig.hpp>
 
@@ -513,6 +515,26 @@ void EntityAI::AddNewTargets(TargetList& res, bool initialize)
 
     int nv = GLOB_WORLD->NVehicles();
     int nb = GLOB_WORLD->NBuildings();
+    // PERF-035: membership only. Keep the world traversal and append order below;
+    // iterating this hash table would change target tie-breaking and AI behaviour.
+    // Local to this scan so deletion, sorting, save/load and expired weak links
+    // cannot leave a persistent index stale. This replaces a full target-list
+    // walk for every nearby candidate (quadratic in dense infantry missions).
+    std::unordered_set<EntityAI*> knownTargets;
+    static const bool indexedScan = []
+    {
+        const char* value = std::getenv("POSEIDON_TARGET_SCAN_LINEAR");
+        return value == nullptr || value[0] != '1';
+    }();
+    if (indexedScan)
+    {
+        knownTargets.reserve(res.Size());
+        for (int index = 0; index < res.Size(); ++index)
+        {
+            EntityAI* existing = res[index]->idExact;
+            knownTargets.insert(existing);
+        }
+    }
     for (int i = 0; i < nv + nb; i++)
     {
         Vehicle* vehicle = i < nv ? GLOB_WORLD->GetVehicle(i) : GLOB_WORLD->GetBuilding(i - nv);
@@ -545,17 +567,7 @@ void EntityAI::AddNewTargets(TargetList& res, bool initialize)
             saturateMin(nearestEnemyDist2, dist2);
         }
 
-        int index = 0;
-        for (; index < res.Size(); index++)
-        {
-            Target* target = res[index];
-            EntityAI* obj = target->idExact;
-            if (obj == ai)
-            {
-                break;
-            }
-        }
-        if (index >= res.Size())
+        if (indexedScan ? knownTargets.insert(ai).second : res.Find(ai) < 0)
         {
             Target* target = new Target(group);
             res.Add(target);

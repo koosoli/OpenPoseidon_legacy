@@ -1,0 +1,23 @@
+; Owner-run visual check: a crewed helicopter crosses north of the observer.
+; No frame-by-frame logging, automatic capture, or automatic termination.
+~0.5
+setViewDistance 1600
+distancePilot assignAsDriver distanceHeli
+distancePilot moveInDriver distanceHeli
+distanceHeli setPos [9250,4150,80]
+distanceHeli engineOn true
+distanceHeli setVelocity [25,0,0]
+distanceHeli flyInHeight 80
+hint "Helicopter test: look north (0 degrees), about 550 m away. Use binoculars. The UH-60 flies back and forth."
+#east
+distancePilot doMove [10150,4150,80]
+~2
+#waitEast
+~1
+? distanceHeli distance [10150,4150,80] > 150 : goto "waitEast"
+distancePilot doMove [9250,4150,80]
+~2
+#waitWest
+~1
+? distanceHeli distance [9250,4150,80] > 150 : goto "waitWest"
+goto "east"
