@@ -1,10 +1,15 @@
-#import water_fft_sampling::fft_aperiodic_uv
+#import water_shore_surf::{coastal_surf, SurfState}
+#import water_fft_sampling::fft_scaled_uv
 #import water_optics::whitecap_wind_factor
 
 override breaker_history_legacy: f32 = 0.0;
+override surf_pilot: f32 = 0.0;
+struct ConformParams { origin: vec2<f32>, terrain_grid: f32, enabled: f32, hm_width: u32, hm_height: u32, };
+@group(1) @binding(0) var seabed: texture_2d<f32>;
+@group(1) @binding(1) var<uniform> conform: ConformParams;
 
 struct InteractionParams { domain: vec4<f32>, previous_domain: vec4<f32>, grid: vec4<f32>, physics: vec4<f32>, misc: vec4<f32>, weather: vec4<f32>, };
-struct WaterParams { world_origin: vec2<f32>, terrain_grid: f32, sea_level: f32, hm_width: u32, hm_height: u32, time: f32, wave_amp: f32, wave_choppy: f32, wave_speed: f32, wave_scale: f32, fade_start: f32, fade_end: f32, warp_amp: f32, spec_power: f32, spec_intensity: f32, alpha: f32, shadow_dim: f32, color_ext: f32, coast_fade: f32, shallow_color: vec4<f32>, deep_color: vec4<f32>, foam_width: f32, foam_intensity: f32, swash_amp: f32, swash_speed: f32, fft_control: vec4<f32>, fft_wind_sea: vec4<f32>, fft_cascade_lengths: vec4<f32>, flow_direction_speed: vec4<f32>, debug_params: vec4<f32>, look_params: vec4<f32>, sea_params: vec4<f32>, underwater_params: vec4<f32>, underwater_gate: vec4<f32>, optics_params: vec4<f32>, };
+struct WaterParams { world_origin: vec2<f32>, terrain_grid: f32, sea_level: f32, hm_width: u32, hm_height: u32, time: f32, wave_amp: f32, wave_choppy: f32, wave_speed: f32, wave_scale: f32, fade_start: f32, fade_end: f32, warp_amp: f32, spec_power: f32, spec_intensity: f32, alpha: f32, shadow_dim: f32, color_ext: f32, coast_fade: f32, shallow_color: vec4<f32>, deep_color: vec4<f32>, foam_width: f32, foam_intensity: f32, swash_amp: f32, swash_speed: f32, fft_control: vec4<f32>, fft_wind_sea: vec4<f32>, fft_cascade_lengths: vec4<f32>, flow_direction_speed: vec4<f32>, debug_params: vec4<f32>, look_params: vec4<f32>, sea_params: vec4<f32>, underwater_params: vec4<f32>, underwater_gate: vec4<f32>, optics_params: vec4<f32>, bodies: array<vec4<f32>,48>, };
 @group(0) @binding(0) var<uniform> interaction_params: InteractionParams;
 @group(0) @binding(1) var<uniform> water: WaterParams;
 @group(0) @binding(2) var previous_foam: texture_2d<f32>;
@@ -63,7 +68,7 @@ fn fft_source(world: vec2<f32>) -> f32 {
         let cfg = cascades.config[u32(layer)];
         if (cfg.enabled == 0u) { continue; }
         let scale = max(water.fft_cascade_lengths[layer], 1.0);
-        let uv = fft_aperiodic_uv(world, scale, layer, water.warp_amp);
+        let uv = fft_scaled_uv(world, scale, layer, water.warp_amp, water.wave_scale);
         let auxiliary = textureSampleLevel(fft_auxiliary, field_sampler, uv, layer, 0.0);
         // Exact fft_unpack.glsl whitecap source:
         //   foam_factor = -min(0, jacobian - whitecap)
@@ -76,6 +81,15 @@ fn fft_source(world: vec2<f32>) -> f32 {
     return source;
 }
 
+// Continuous coverage balance: dc/dt = source*(1-c) - decay*c.
+// Display contrast belongs to the material, never to persistent coverage.
+fn foam_coverage_step(coverage: f32, source: f32, decay: f32, dt: f32) -> f32 {
+    let rate = max(source, 0.0) + max(decay, 0.0);
+    if (dt <= 0.0 || rate <= 1e-6) { return coverage; }
+    let equilibrium = max(source, 0.0) / rate;
+    return clamp(equilibrium + (coverage - equilibrium) * exp(-rate * dt), 0.0, 1.0);
+}
+
 @compute @workgroup_size(8, 8, 1)
 fn foam_update(@builtin(global_invocation_id) id: vec3<u32>) {
     let dimensions = textureDimensions(next_foam);
@@ -84,7 +98,12 @@ fn foam_update(@builtin(global_invocation_id) id: vec3<u32>) {
     let size = vec2<f32>(dimensions);
     let uv = (vec2<f32>(id.xy) + 0.5) / size;
     let world = interaction_params.domain.xy + uv * interaction_params.domain.z;
-    let dt = clamp(interaction_params.grid.y, 0.0, 0.033);
+    let dt = clamp(interaction_params.grid.y, 0.0, 0.05);
+    if (dt <= 0.0) {
+        let old_uv = (world-interaction_params.previous_domain.xy)*interaction_params.previous_domain.w;
+        textureStore(next_foam,vec2<i32>(id.xy),sample_history(old_uv));
+        return;
+    }
     let texel = vec2<f32>(1.0) / size;
 
     // Sample current interaction velocity field and central differences for WTR-082 divergence & vorticity
@@ -124,7 +143,19 @@ fn foam_update(@builtin(global_invocation_id) id: vec3<u32>) {
     // Was `vec2<f32>(centre_inter.g * 0.4)`, which fills BOTH components with the same scalar — so
     // every ripple advected foam along a perfect 45-degree diagonal regardless of the actual flow.
     // The ripple's real horizontal flow is the down-slope term computed above.
-    let surface_velocity = ripple_flow * 0.4 + flow_dir + wind_drift;
+    var surf = coastal_surf(seabed, world, conform.origin, conform.terrain_grid,
+        conform.enabled * surf_pilot, water.sea_level, water.time, 1.0);
+    if (surf.weight > 0.0) {
+        for (var body=0; body<16; body=body+1) {
+            let e = water.bodies[body*3];
+            if (e.z <= 0.0 || e.w <= 0.0) { continue; }
+            let angle = water.bodies[body*3+2].w;
+            let d = world-e.xy;
+            let q = vec2<f32>(cos(angle)*d.x+sin(angle)*d.y, -sin(angle)*d.x+cos(angle)*d.y)/e.zw;
+            if (dot(q,q)<1.06) { var empty: SurfState; surf = empty; break; }
+        }
+    }
+    let surface_velocity = ripple_flow * 0.4 + flow_dir + wind_drift + surf.flow;
 
     let previous_world = world - surface_velocity * dt;
     let previous_uv = (previous_world - interaction_params.previous_domain.xy) * interaction_params.previous_domain.w;
@@ -137,48 +168,38 @@ fn foam_update(@builtin(global_invocation_id) id: vec3<u32>) {
     let history = vec4<f32>(
         mix(sharp_history.r, spread_history.r,
             select(1.0 - exp(-25.847 * dt), 0.35, breaker_history_legacy > 0.5)),
-        mix(sharp_history.g, spread_history.g, 0.22),
-        mix(sharp_history.b, spread_history.b, 0.70),
+        mix(sharp_history.g, spread_history.g, 1.0 - exp(-14.908 * dt)),
+        mix(sharp_history.b, spread_history.b, 1.0 - exp(-72.238 * dt)),
         sharp_history.a);
 
     // WTR-081 — Physical breaking energy and interaction aeration injection
-    let fft_breaker = fft_source(world);
+    let fft_breaker = fft_source(world) * (1.0 - surf.weight) + surf.breaking * 5.0;
     let aeration = clamp(centre_inter.b, 0.0, 1.0);
     let wake_breaker = clamp(convergence * 0.35 + centre_inter.g * 0.15 + aeration, 0.0, 1.0);
 
-    // Dissipation and decay rates. The rate now depends on coverage: a thin, unreplenished film
-    // ruptures far faster than a thick fresh raft, so foam dissolves with an accelerating tail
-    // instead of fading uniformly. This is the ageing behaviour, obtained without spending a
-    // texture channel on an explicit age (all four are already in use).
-    let breaker_decay = history.r * exp(-dt * mix(5.2, 2.6, clamp(history.r, 0.0, 1.0)));
-    let wake_decay = history.g * exp(-dt * mix(4.0, 2.2, clamp(history.g, 0.0, 1.0)));
-    let aeration_decay = history.b * exp(-dt * mix(6.0, 3.4, clamp(history.b, 0.0, 1.0)));
-
-    let breaker_injection = 1.0 - exp(-fft_breaker * dt);
-    let wake_injection = 1.0 - exp(-wake_breaker * dt * 1.50);
-
-    let breaker_raw = 1.0 - (1.0 - breaker_decay) * (1.0 - breaker_injection);
-    let wake_raw = 1.0 - (1.0 - wake_decay) * (1.0 - wake_injection);
-    let air_entrainment = max(aeration_decay, aeration);
-    // Diffusion on its own turns foam into a soft grey wash — the exact "blurred texture pasted on
-    // the ocean" failure. Re-applying a mild S-curve restores a defined edge at the new, wider
-    // extent, so the result reads as foam that has spread rather than foam that has been blurred.
-    // smoothstep's own polynomial preserves 0 and 1 exactly, so downstream thresholds in the water
-    // shader keep their meaning.
-    // Coverage is persistent state, not display contrast. Repeated smoothstep
-    // extinguishes every thin raft each frame, even at dt=0. Keep contrast in
-    // the surface shader; preserve the old update only for matched A/B captures.
+    // Fixed per-second channel decay avoids a frame-dependent operator split.
+    // Rates are the midpoints of the previous coverage-dependent ranges.
+    let breaker_raw = foam_coverage_step(history.r, fft_breaker, 3.9, dt);
+    let wake_raw = foam_coverage_step(history.g, wake_breaker * 1.50, 3.1, dt);
+    let air_entrainment = foam_coverage_step(history.b, aeration * 6.0, 4.7, dt);
+    // Retain the explicit legacy contrast toggle for old diagnostic captures.
     let breaker_foam = select(clamp(breaker_raw, 0.0, 1.0),
         breaker_raw * breaker_raw * (3.0 - 2.0 * breaker_raw), breaker_history_legacy > 0.5);
-    let wake_foam = wake_raw * wake_raw * (3.0 - 2.0 * wake_raw);
+    let wake_foam = wake_raw;
 
     let edge = min(min(uv.x, uv.y), min(1.0 - uv.x, 1.0 - uv.y));
-    let edge_mask = smoothstep(0.002, 0.018, edge);
+    // Edge absorption is elapsed-time based; a paused domain retains its state.
+    let edge_mask = pow(max(smoothstep(0.002, 0.018, edge), 1e-6), dt * 60.0);
 
+    // Pilot wetness uses the previously unused display alpha lane. Unlike foam,
+    // beach wetness is sampled at a fixed world point and does not advect.
+    let stationary_uv = (world-interaction_params.previous_domain.xy)*interaction_params.previous_domain.w;
+    let wetness = foam_coverage_step(sample_history(stationary_uv).a,
+        surf.wash * 40.0, 0.18, dt);
     textureStore(next_foam, vec2<i32>(id.xy), vec4<f32>(
         breaker_foam * edge_mask,
         wake_foam * edge_mask,
         air_entrainment * edge_mask,
-        clamp(vorticity, 0.0, 1.0) * edge_mask
+        select(clamp(vorticity, 0.0, 1.0), wetness, surf_pilot > 0.5) * edge_mask
     ));
 }

@@ -6533,11 +6533,22 @@ void DrawWaterTab()
     Dev::PanelSeparator();
     Dev::PanelHeading("Waves (cosmetic — buoyancy stays on the flat plane)");
 
-    const char* cascadePresets[] = {"Production Non-Harmonic (37m, 89m, 211m, 503m - >50km repeat)",
+    const char* cascadePresets[] = {"Production Non-Harmonic (97m, 257m, 683m, 1777m domains)",
                                     "GodotOceanWaves Reference Style (88m, 57m, 16m - 3 cascades)",
-                                    "Legacy Harmonic (48m, 144m, 432m, 1296m - 1296m repeat)"};
+                                    "Legacy Harmonic (48m, 144m, 432m, 1296m - 1296m repeat)",
+                                    "Reference: Sheltered water",
+                                    "Reference: Exposed coast / incoming swell",
+                                    "Reference: Rough open water"};
     if (Dev::Combo("Cascade Preset", &s.cascadePreset, cascadePresets, IM_ARRAYSIZE(cascadePresets)))
     {
+        if (s.cascadePreset >= 3)
+        {
+            s.waveScale = 1.0f;
+            s.waveSpeed = 1.0f;
+            s.waveAmp = 1.0f;
+            s.seaStateCoupling = false;
+            s.shoreWaveGain = 0.0f;
+        }
         changed = true;
     }
     Dev::PanelTooltip("WTR-036C / WTR-037: Toggle between production non-harmonic coprime cascades, "

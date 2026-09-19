@@ -1,3 +1,4 @@
+#import water_shore_surf::coastal_surf
 // GodotOceanWaves-style sea spray.  The reference uses a GPUParticles3D emitter
 // over a 10m grid and lets each particle follow the FFT displacement at its start
 // point.  This port uses the same principle, but derives all particle state from the
@@ -5,7 +6,7 @@
 
 #import frame::{frame, reverse_z, fog_factor}
 #import color::srgb_to_linear
-#import water_fft_sampling::fft_aperiodic_uv
+#import water_fft_sampling::fft_scaled_uv
 #import water_optics::whitecap_wind_factor
 
 const TAU: f32 = 6.28318530718;
@@ -34,6 +35,7 @@ struct WaterParams {
     fft_cascade_lengths: vec4<f32>, flow_direction_speed: vec4<f32>,
     debug_params: vec4<f32>, look_params: vec4<f32>, sea_params: vec4<f32>,
     underwater_params: vec4<f32>, underwater_gate: vec4<f32>, optics_params: vec4<f32>,
+    bodies: array<vec4<f32>,48>,
 };
 
 // This is deliberately the same group-1 interface as water.wgsl.  The unused
@@ -80,6 +82,10 @@ fn quad_corner(vertex: u32) -> vec2<f32> {
     return corners[vertex];
 }
 
+override surf_pilot: f32 = 0.0;
+struct ConformParams { origin: vec2<f32>, terrain_grid: f32, enabled: f32, hm_width: u32, hm_height: u32, };
+@group(1) @binding(17) var seabed: texture_2d<f32>;
+@group(1) @binding(18) var<uniform> cf: ConformParams;
 struct CrestSource {
     displacement: vec3<f32>,
     breaking: f32,
@@ -99,10 +105,10 @@ fn crest_source(world_xz: vec2<f32>) -> CrestSource {
     for (var layer = 0; layer < 4; layer = layer + 1) {
         let tile = wp.fft_cascade_lengths[layer];
         if (tile > 0.5) {
-            let uv = fft_aperiodic_uv(world_xz, tile, layer, wp.warp_amp);
+            let uv = fft_scaled_uv(world_xz, tile, layer, wp.warp_amp, wp.wave_scale);
             let d = textureSampleLevel(fft_displacement, fft_samp, uv, layer, 0.0);
             let a = textureSampleLevel(fft_auxiliary, fft_samp, uv, layer, 0.0);
-            displacement += d.xyz;
+            displacement += d.xyz * max(wp.wave_scale, 0.01);
             crest = max(crest, d.w);
             compression = max(compression, a.y);
             slope = max(slope, sqrt(max(a.w, 0.0)));
@@ -117,7 +123,7 @@ fn crest_source(world_xz: vec2<f32>) -> CrestSource {
             // right, which is what the spray needs.
             let k_peak = TAU / max(tile, 1.0);
             let omega = sqrt(G * k_peak);
-            velocity += d.xyz * omega;
+            velocity += d.xyz * max(wp.wave_scale, 0.01) * omega;
         }
     }
     let domain_origin = floor((frame.cam_pos.xz - vec2<f32>(128.0)) / 4.0) * 4.0;
@@ -142,6 +148,23 @@ fn crest_source(world_xz: vec2<f32>) -> CrestSource {
     out.displacement = displacement;
     out.breaking = breaking;
     out.velocity = velocity;
+    if (surf_pilot > 0.5) {
+        let surf = coastal_surf(seabed, world_xz, cf.origin, cf.terrain_grid, cf.enabled,
+                                wp.sea_level, wp.time, 1.0);
+        if (surf.weight > 0.0) {
+            for (var body=0; body<16; body=body+1) {
+                let e=wp.bodies[body*3];
+                if (e.z<=0.0 || e.w<=0.0) {continue;}
+                let angle=wp.bodies[body*3+2].w;
+                let d=world_xz-e.xy;
+                let q=vec2<f32>(cos(angle)*d.x+sin(angle)*d.y,-sin(angle)*d.x+cos(angle)*d.y)/e.zw;
+                if (dot(q,q)<1.06) {return out;}
+            }
+        }
+        out.displacement = mix(out.displacement, vec3<f32>(0.0, surf.height, 0.0), surf.weight);
+        out.breaking = out.breaking * (1.0 - surf.weight) + surf.breaking * 0.35;
+        out.velocity = mix(out.velocity, vec3<f32>(surf.flow.x, 0.0, surf.flow.y), surf.weight);
+    }
     return out;
 }
 

@@ -279,6 +279,35 @@ static float SnapToBucket(float value, float bucket)
     return std::round(value / bucket) * bucket;
 }
 
+// Opt-in measurement of CPU preparation/submission, never a GPU-time estimate.
+static bool OceanProfileEnabled()
+{
+    static const bool enabled = [] { const char* v = std::getenv("WGR_OCEAN_PROFILE"); return v && std::strcmp(v, "1") == 0; }();
+    return enabled;
+}
+struct OceanCpuSample
+{
+    using Clock = std::chrono::steady_clock;
+    Clock::time_point start = OceanProfileEnabled() ? Clock::now() : Clock::time_point{};
+    ~OceanCpuSample()
+    {
+        if (!OceanProfileEnabled()) return;
+        static std::array<double, 2048> samples{};
+        static size_t count = 0;
+        static auto last = Clock::now();
+        const auto now = Clock::now();
+        const double ms = std::chrono::duration<double, std::milli>(now - start).count();
+        if (count < samples.size()) samples[count++] = ms;
+        if (now - last < std::chrono::seconds(2) || count == 0) return;
+        std::sort(samples.begin(), samples.begin() + count);
+        double sum = 0.0;
+        for (size_t i = 0; i < count; ++i) sum += samples[i];
+        LOG_INFO(Graphics, "Ocean CPU prepare+submit ms: samples={} mean={:.4f} p95={:.4f} max={:.4f}",
+                 count, sum / count, samples[(count - 1) * 95 / 100], samples[count - 1]);
+        count = 0; last = now;
+    }
+};
+
 static void ApplyCascadePreset(WgrRenderer* renderer, int preset, int fftResolution = 512, uint32_t seedXor = 0,
                                float windMultiplier = 1.0f, float lengthMultiplier = 1.0f,
                                float windDirDeltaRad = 0.0f)
@@ -306,14 +335,16 @@ static void ApplyCascadePreset(WgrRenderer* renderer, int preset, int fftResolut
     // Push one cascade config, applying the WTR-001 dev seed override (xor) so a non-zero
     // override re-randomises the whole h0 field deterministically while seedXor == 0 leaves
     // the tuned preset seeds untouched.
-    auto push = [renderer, seedXor, windMultiplier, lengthMultiplier, windDirDeltaRad](
+    auto push = [renderer, seedXor, windMultiplier, lengthMultiplier, windDirDeltaRad, preset](
                     uint32_t index, const WgrWaterCascadeConfig& cfg)
     {
         WgrWaterCascadeConfig out = cfg;
         out.spectrum_seed ^= seedXor;
         // Sea-state coupling: wind speed drives the JONSWAP energy AND the peak frequency, and
         // the tile has to grow with the peak wavelength so the longer swell still fits.
-        out.wind_speed *= windMultiplier;
+        // Reference exposed/rough presets retain their remote swell when local wind falls.
+        const bool remoteSwell = preset >= 4 && preset <= 5 && index == 0;
+        out.wind_speed *= remoteSwell ? 1.0f : windMultiplier;
         out.tile_length_x *= lengthMultiplier;
         out.tile_length_y *= lengthMultiplier;
         // World wind heading. Added as a DELTA rather than assigned, so the small
@@ -321,10 +352,50 @@ static void ApplyCascadePreset(WgrRenderer* renderer, int preset, int fftResolut
         // spread that keeps the sea from being a single-heading corduroy) survives
         // the rotation. The delta comes from the latched sea wind, so it changes in
         // 15-degree steps at most once per 20 s and does not churn the spectrum.
-        out.wind_direction_rad += windDirDeltaRad;
+        out.wind_direction_rad += remoteSwell ? 0.0f : windDirDeltaRad;
         EngineWgpu::AcquireProducerWindow("water cascade config"); // load-time / preset change
         wgr_water_set_cascade_config(renderer, index, &out);
     };
+
+    if (preset >= 3 && preset <= 5)
+    {
+        // Reference domains are metres, not wavelength labels. The long layer is
+        // incoming swell (-X) independent of the local wind; the short layer is wind chop.
+        struct Reference { int id; float wind, displacement, chopWind, chopFoam; };
+        static constexpr Reference references[] = {
+#define OCEAN_REFERENCE(id, wind, displacement, chopWind, chopFoam) {id, wind, displacement, chopWind, chopFoam},
+#include "OceanReferencePresets.def"
+#undef OCEAN_REFERENCE
+        };
+        const auto& reference = references[preset - 3];
+        c.tile_length_x = c.tile_length_y = 257.0f;
+        c.wind_speed = reference.wind;
+        c.wind_direction_rad = 3.14159265359f;
+        c.fetch_meters = 350000.0f;
+        c.water_depth_meters = 30.0f;
+        c.directional_spread = 0.12f;
+        c.swell = 0.95f;
+        c.displacement_scale = c.horiz_displacement_scale = reference.displacement;
+        c.normal_scale = c.displacement_scale;
+        c.foam_scale = preset == 3 ? 0.0f : 2.0f;
+        c.spectrum_seed = 1471;
+        WgrWaterCascadeConfig chop = c;
+        chop.tile_length_x = chop.tile_length_y = 57.0f;
+        chop.wind_speed = reference.chopWind;
+        chop.wind_direction_rad = 0.349f;
+        chop.directional_spread = 0.5f;
+        chop.swell = 0.25f;
+        chop.spectrum_seed = 8623;
+        chop.foam_scale = reference.chopFoam;
+        WgrWaterCascadeConfig detail = chop;
+        detail.tile_length_x = detail.tile_length_y = 16.0f;
+        detail.displacement_scale = detail.horiz_displacement_scale = 0.0f;
+        detail.normal_scale = 0.15f;
+        detail.foam_scale = 0.0f;
+        WgrWaterCascadeConfig disabled{};
+        push(0, c); push(1, chop); push(2, detail); push(3, disabled);
+        return;
+    }
 
     if (preset == 1)
     {
@@ -717,6 +788,7 @@ bool WaterWgpu::RebuildIfNeeded(const Landscape& land)
 
 void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
 {
+    OceanCpuSample cpuSample;
     if (_renderer == nullptr || GLandscape == nullptr)
     {
         return;
@@ -893,7 +965,11 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
     std::memcpy(&freezeBits, &freezeMask, sizeof(freezeBits));
     _params.fft_control.z = freezeBits;
     // WTR-036C / WTR-037 — Apply cascade configuration presets
-    if (look.cascadePreset == 1)
+    if (look.cascadePreset >= 3 && look.cascadePreset <= 5)
+    {
+        _params.fft_cascade_lengths = {257.0f, 57.0f, 16.0f, 0.0f};
+    }
+    else if (look.cascadePreset == 1)
     {
         // GodotOceanWaves Reference Style (3 cascades: 88m, 57m, 16m)
         _params.fft_cascade_lengths = {88.0f, 57.0f, 16.0f, 0.0f};
@@ -977,6 +1053,7 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
         {
             ApplyCascadePreset(_renderer, want.preset, want.fft, want.seed, want.wind, want.len, want.dir);
             _cascadeApplied = want;
+            if (OceanProfileEnabled()) LOG_INFO(Graphics, "Ocean spectrum configuration changed: preset={} wind={:.3f} length={:.3f}", want.preset, want.wind, want.len);
         }
     }
 
@@ -1453,7 +1530,8 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
             }
 
             stats.nodes = static_cast<unsigned int>(_selected.size());
-            stats.triangles = static_cast<unsigned int>(_selected.size()) * 96u * 96u * 2u;
+            // Submitted index count includes the four edge skirts (768 triangles/node).
+            stats.triangles = static_cast<unsigned int>(_selected.size()) * (96u * 96u * 2u + 96u * 8u);
             for (int i = 0; i < WaterFrameStats::kLodBuckets; ++i)
             {
                 stats.lod[i] = static_cast<unsigned int>(histogram[static_cast<size_t>(i)]);
@@ -1549,7 +1627,7 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
                          "Water CDLOD nodes: total={} lod0={} lod1={} lod2={} lod3={} lod4={} lod5+={} tris={}",
                          _selected.size(), histogram[0], histogram[1], histogram[2], histogram[3], histogram[4],
                          histogram[5] + histogram[6] + histogram[7] + histogram[8] + histogram[9],
-                         _selected.size() * 96u * 96u * 2u);
+                         _selected.size() * (96u * 96u * 2u + 96u * 8u));
                 lastHistogram = histogram;
             }
             // Stamp the budget here, not inside the histogram branch: a static camera leaves

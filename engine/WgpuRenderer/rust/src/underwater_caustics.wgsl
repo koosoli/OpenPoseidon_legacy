@@ -1,4 +1,4 @@
-#import water_fft_sampling::fft_aperiodic_uv
+#import water_fft_sampling::fft_scaled_uv
 
 struct Params {
     time_height_range_ext: vec4<f32>,
@@ -39,11 +39,11 @@ fn cs_underwater_caustics(@builtin(global_invocation_id) gid: vec3<u32>) {
             break;
         }
         let length_m = max(params.cascade_lengths[layer], 1.0);
-        let fft_uv = fft_aperiodic_uv(world_xz, length_m, layer, warp);
+        let fft_uv = fft_scaled_uv(world_xz, length_m, layer, warp, params.water_controls.z);
         let dynamics = textureSampleLevel(fft_dynamics, fft_samp, fft_uv, layer, 0.0);
         let auxiliary = textureSampleLevel(fft_auxiliary, fft_samp, fft_uv, layer, 0.0);
         let compression = clamp(auxiliary.y, 0.0, 1.5);
-        let curvature = 1.0 - exp(-max(auxiliary.z, 0.0) * 0.22);
+        let curvature = 1.0 - exp(-max(auxiliary.z, 0.0) / max(params.water_controls.z, 0.01) * 0.22);
         let slope_focus = 1.0 - exp(-length(dynamics.xy) * 0.65);
         let cascade_weight = 1.0 / (1.0 + f32(layer) * 0.45);
         energy = energy + (compression * 0.58 + curvature * 0.30 +

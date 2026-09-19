@@ -106,7 +106,8 @@ fn underwater_volume_is_shadowed_and_caustics_follow_fft() {
     assert!(caustics.contains("fft_dynamics"));
     // The FFT lookup is imported, never copied: a copy is a waterline that drifts.
     for (name, text) in [("underwater.wgsl", include_str!("underwater.wgsl")), ("underwater_caustics.wgsl", caustics)] {
-        assert!(text.contains("#import water_fft_sampling::fft_aperiodic_uv"), "{name}");
+        assert!(text.contains("#import water_fft_sampling::fft_aperiodic_uv") ||
+                text.contains("#import water_fft_sampling::fft_scaled_uv"), "{name}");
         assert!(!text.contains("fn fft_aperiodic_uv"), "{name} still carries a private fft_aperiodic_uv");
     }
     assert!(caustics.contains("fft_auxiliary"));

@@ -71,6 +71,69 @@ namespace HarnessBuiltins
 
 void RegisterScreenshot(HarnessServer& hs)
 {
+    hs.RegisterCommand({"water_bathymetry", "Read a bounded terrain-height grid for the ocean fixture", {}},
+        [](const std::string&, cJSON* root) -> std::string
+        {
+            if (!GLandscape) return HarnessProtocol::ErrorResponse("no landscape");
+            const auto* x = cJSON_GetObjectItemCaseSensitive(root, "x");
+            const auto* z = cJSON_GetObjectItemCaseSensitive(root, "z");
+            if (!cJSON_IsNumber(x) || !cJSON_IsNumber(z) || !std::isfinite(x->valuedouble) || !std::isfinite(z->valuedouble))
+                return HarnessProtocol::ErrorResponse("finite x/z required");
+            auto* result = cJSON_CreateObject();
+            auto* rows = cJSON_AddArrayToObject(result, "samples");
+            for (int j = -8; j <= 8; ++j)
+                for (int i = -8; i <= 8; ++i)
+                {
+                    const float px = static_cast<float>(x->valuedouble) + i * 16.0f;
+                    const float pz = static_cast<float>(z->valuedouble) + j * 16.0f;
+                    auto* sample = cJSON_CreateArray();
+                    cJSON_AddItemToArray(sample, cJSON_CreateNumber(px));
+                    cJSON_AddItemToArray(sample, cJSON_CreateNumber(pz));
+                    cJSON_AddItemToArray(sample, cJSON_CreateNumber(GLandscape->SurfaceY(px, pz)));
+                    cJSON_AddItemToArray(rows, sample);
+                }
+            return HarnessProtocol::JsonResponse(result);
+        });
+    hs.RegisterCommand({"water_probe", "Read or set existing renderer-only water diagnostic controls", {}},
+        [](const std::string&, cJSON* root) -> std::string {
+            if (!GEngine || !GEngine->SupportsWater()) return HarnessProtocol::ErrorResponse("GPU water unavailable");
+            auto settings = GEngine->GetWaterSettings();
+            bool changed = false;
+            const auto number = [&](const char* key, float& value, float low, float high) {
+                const auto* item = cJSON_GetObjectItemCaseSensitive(root, key);
+                if (!item) return true;
+                if (!cJSON_IsNumber(item) || !std::isfinite(item->valuedouble) ||
+                    item->valuedouble < low || item->valuedouble > high) return false;
+                value = float(item->valuedouble); changed = true; return true;
+            };
+            if (!number("scale", settings.waveScale, 0.25f, 4.0f) ||
+                !number("shoreGain", settings.shoreWaveGain, 0.0f, 2.0f) ||
+                !number("fixedTime", settings.freeze.fixedTime, 0.0f, 100000.0f))
+                return HarnessProtocol::ErrorResponse("water probe value out of range");
+            const auto flag = [&](const char* key, bool& value) {
+                if (const auto* item = cJSON_GetObjectItemCaseSensitive(root, key)) {
+                    if (!cJSON_IsBool(item)) return false;
+                    value = cJSON_IsTrue(item); changed = true;
+                }
+                return true;
+            };
+            if (!flag("freezeTime", settings.freeze.freezeTime) ||
+                !flag("freezeFoam", settings.freeze.freezeFoam))
+                return HarnessProtocol::ErrorResponse("water probe expects boolean freezes");
+            if (changed) GEngine->SetWaterSettings(settings);
+            auto* response = cJSON_CreateObject();
+            cJSON_AddNumberToObject(response,"scale",settings.waveScale);
+            cJSON_AddNumberToObject(response,"amplitude",settings.waveAmp);
+            cJSON_AddNumberToObject(response,"warp",settings.warpAmp);
+            cJSON_AddNumberToObject(response,"shoreGain",settings.shoreWaveGain);
+            cJSON_AddNumberToObject(response,"preset",settings.cascadePreset);
+            cJSON_AddNumberToObject(response,"fftResolution",settings.fftResolution);
+            cJSON_AddNumberToObject(response,"geometryQuality",settings.geometryQuality);
+            cJSON_AddNumberToObject(response,"fixedTime",settings.freeze.fixedTime);
+            cJSON_AddBoolToObject(response,"freezeTime",settings.freeze.freezeTime);
+            cJSON_AddBoolToObject(response,"freezeFoam",settings.freeze.freezeFoam);
+            return HarnessProtocol::JsonResponse(response);
+        });
     hs.RegisterCommand({"screenshot", "Capture screenshot to file", {{"path", "string", true}}},
                        [](const std::string&, cJSON* root) -> std::string
                        {

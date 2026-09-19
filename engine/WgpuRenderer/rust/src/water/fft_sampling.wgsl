@@ -5,6 +5,14 @@
 // frequencies, far beyond the playable world.
 #define_import_path water_fft_sampling
 
+// Artistic uniform dilation of a fixed spectrum: D_S(x,t)=S*D(x/S,t).
+// Displacement scales by S, slopes/Jacobian do not, curvature scales by 1/S.
+// Period is unchanged, so crest speed scales by S; this is not a new physical
+// sea state. Every field associated with that spectrum must use this coordinate.
+fn fft_scaled_uv(world_xz: vec2<f32>, tile_length: f32, layer: i32, warp: f32, wave_scale: f32) -> vec2<f32> {
+    return fft_aperiodic_uv(world_xz / max(wave_scale, 0.01), tile_length, layer, warp);
+}
+
 fn fft_hash(cell: vec2<i32>) -> f32 {
     let c = vec2<u32>(cell) & vec2<u32>(0xffffu);
     var n = c.x * 1597334677u + c.y * 3812015801u;

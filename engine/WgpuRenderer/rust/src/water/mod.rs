@@ -8,6 +8,12 @@ mod fft;
 pub use fft::FFT_RESOLUTION;
 use fft::Fft;
 mod foam;
+#[cfg(test)]
+mod scale_tests;
+#[cfg(test)]
+mod reference_tests;
+#[cfg(test)]
+mod foam_cadence_tests;
 use crate::ffi::{WgrWaterInteractionEvent, WgrWaterInteractionParams};
 use foam::Foam;
 
@@ -283,7 +289,7 @@ impl Water {
                 // (correctly) hid it and tore a moving hole in the shoreline.
                 wgpu::BindGroupLayoutEntry {
                     binding: 17,
-                    visibility: wgpu::ShaderStages::VERTEX,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Float { filterable: false },
                         view_dimension: wgpu::TextureViewDimension::D2,
@@ -297,7 +303,7 @@ impl Water {
                 // texture means the sampling cannot silently disagree with the texture it reads.
                 wgpu::BindGroupLayoutEntry {
                     binding: 18,
-                    visibility: wgpu::ShaderStages::VERTEX,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -566,6 +572,8 @@ impl Water {
                 fft.displacement_view(),
                 fft.auxiliary_view(),
                 fft.cascade_config_buffer(),
+                &heightmap_view,
+                &conform_params,
             )
         });
         let group1_bind = build_group1(
@@ -673,7 +681,8 @@ impl Water {
             .ok()
             .and_then(|v| v.parse::<f64>().ok())
             .unwrap_or(0.34);
-        let vs_constants = [("skirt_k", skirt_k)];
+        let surf_pilot = if std::env::var("WGR_WATER_SURF_PILOT").ok().as_deref() == Some("1") {1.0} else {0.0};
+        let vs_constants = [("skirt_k", skirt_k), ("surf_pilot", surf_pilot)];
         // `fs_constants` is shared with the whitewater pipeline below, whose shader declares only
         // `linear` — wgpu rejects a pipeline whose constant map names an override the module does
         // not have, so the surface's extra override needs its own array.
@@ -689,6 +698,7 @@ impl Water {
                 .ok().and_then(|v| v.parse::<f64>().ok())
                 .filter(|v| v.is_finite()).unwrap_or(1.0).clamp(0.0, 1.0)),
             ("shore_foam_legacy", shore_foam_legacy),
+            ("surf_pilot", surf_pilot),
             ("foam_band_outer", foam_band_outer),
             ("foam_patch_gain", foam_patch_gain),
             ("foam_band_meander", foam_band_meander),
@@ -787,7 +797,7 @@ impl Water {
                 entry_point: Some("vs_whitewater"),
                 compilation_options: wgpu::PipelineCompilationOptions {
                     constants: &[("spray_world_anchor", if std::env::var("WGR_SPRAY_WORLD_ANCHOR")
-                        .is_ok_and(|v| v == "0") { 0.0 } else { 1.0 })],
+                        .is_ok_and(|v| v == "0") { 0.0 } else { 1.0 }), ("surf_pilot", surf_pilot)],
                     ..Default::default()
                 },
                 buffers: &[],
@@ -1286,6 +1296,7 @@ impl Water {
         }
         self.heightmap_view = heightmap.clone();
         self.heightmap_gen = view_gen;
+        if let Some(foam) = &mut self.foam { foam.set_heightmap(device, &self.heightmap_view, &self.conform_params); }
         self.rebuild_group1(device);
     }
 

@@ -45,23 +45,25 @@ fn fft_compose(@builtin(global_invocation_id) id: vec3<u32>) {
     let h_r = textureLoad(pack0, c_r, layer, 0).y * centred_inverse_sign(c_r);
     let h_d = textureLoad(pack0, c_d, layer, 0).y * centred_inverse_sign(c_d);
     let h_u = textureLoad(pack0, c_u, layer, 0).y * centred_inverse_sign(c_u);
-    // Exact fft_unpack.glsl field layout.
-    let slope_x = p0.w * cfg.normal_scale / (1.0 + abs(p1.y));
-    let slope_z = p1.x * cfg.normal_scale / (1.0 + abs(p1.z));
-    let curvature = -(h_l + h_r + h_d + h_u - 4.0 * p0.y) / max(cell * cell, 0.001);
-    let crest = clamp(max(p0.y, 0.0) + max(curvature, 0.0) * 0.1, 0.0, 1.0);
-    let d_dxdx = p1.y;
-    let d_dxdz = p1.w;
-    let d_dzdx = p1.w;
-    let d_dzdz = p1.z;
+    // Auxiliary derivatives must describe the displacement actually written below.
+    // Per-cascade amplitude/choppiness are consumer scales, absent from pack1.
+    let vertical_scale = cfg.displacement_scale;
+    let horizontal_scale = cfg.displacement_scale * water.wave_choppy;
+    // Independent normal strength remains an artistic control.
+    let slope_x = p0.w * cfg.normal_scale / (1.0 + abs(p1.y * horizontal_scale));
+    let slope_z = p1.x * cfg.normal_scale / (1.0 + abs(p1.z * horizontal_scale));
+    let curvature = -(h_l + h_r + h_d + h_u - 4.0 * p0.y) * vertical_scale / max(cell * cell, 0.001);
+    let crest = clamp(max(p0.y * vertical_scale, 0.0) + max(curvature, 0.0) * 0.1, 0.0, 1.0);
+    let d_dxdx = p1.y * horizontal_scale;
+    let d_dxdz = p1.w * horizontal_scale;
+    let d_dzdx = p1.w * horizontal_scale;
+    let d_dzdz = p1.z * horizontal_scale;
     let jacobian = (1.0 + d_dxdx) * (1.0 + d_dzdz) - d_dxdz * d_dzdx;
     let compression = max(1.0 - jacobian, 0.0);
     let slope_variance = slope_x * slope_x + slope_z * slope_z;
     // displacement = (Dx, height, Dz, crest); dynamics.xy = height slope.
     // auxiliary = (signed horizontal Jacobian J, compression max(1-J,0),
     //              positive crest curvature, local height-slope magnitude squared).
-    let vertical_scale = cfg.displacement_scale;
-    let horizontal_scale = cfg.displacement_scale * water.wave_choppy;
     textureStore(displacement, c, layer, vec4<f32>(
         p0.x * horizontal_scale, p0.y * vertical_scale, p0.z * horizontal_scale, crest));
     textureStore(dynamics, c, layer, vec4<f32>(slope_x, slope_z, 0.0, 0.0));

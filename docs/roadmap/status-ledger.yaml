@@ -6529,3 +6529,40 @@ tickets:
     supersedes: []
     evidence:
       - docs/roadmap/decisions/COMBAT-EXPANSION-20260919.md
+
+  - id: WTR-SURF-001
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: WGPU ocean scale coherence and staged shore surf
+    class: RUNTIME_INFRA
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: OPEN
+    status: INTEGRATED
+    outcome: null
+    owner: null
+    branch: codex/ocean-release
+    baseline_commit: 5457e729
+    verification_commit: null
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: [ed6a2989, 643abc64]
+    production_call_sites: []
+    test_ids: [gpu-ocean-scale, gpu-surf-arrival, gpu-foam-pipeline, gpu-reference-seas, water-shaders, cpu-water-queries]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/OCEAN-SURF-IMPLEMENTATION-20260919.md
+    known_failures:
+      - Implementation and focused validation complete; final water-only integration and installed-build smoke pending.
+      - Existing warped and nearshore normals are approximate; frozen clips do not freeze legacy sea-level bobbing.
+    fallback: Normal installation unchanged; preserved baseline pair and isolated review launcher.
+    reviewer: null
+    reviewer_method: Author-run GPU regressions, rebuilt CPU water suite, calibrated live clips and lifecycle/fallback captures.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/OCEAN-SURF-IMPLEMENTATION-20260919.md
+      - docs/roadmap/decisions/OCEAN-SURF-20260919.md
+      - docs/roadmap/modernisation/OpenPoseidon_WGPU_Ocean_and_Shore_Surf_Plan.md

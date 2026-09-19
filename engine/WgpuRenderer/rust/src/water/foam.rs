@@ -10,6 +10,8 @@ pub struct Foam {
     sampler: wgpu::Sampler,
     bind_groups: [[wgpu::BindGroup; 2]; 2],
     pipeline: wgpu::ComputePipeline,
+    terrain_layout: wgpu::BindGroupLayout,
+    terrain_group: wgpu::BindGroup,
     current: usize,
 }
 
@@ -75,6 +77,8 @@ impl Foam {
         displacement: &wgpu::TextureView,
         auxiliary: &wgpu::TextureView,
         cascade_configs: &wgpu::Buffer,
+        heightmap: &wgpu::TextureView,
+        conform: &wgpu::Buffer,
     ) -> Self {
         let texture = |label| {
             device
@@ -242,12 +246,21 @@ impl Foam {
         );
         let legacy = std::env::var("WGR_BREAKER_HISTORY_LEGACY").ok().as_deref() == Some("1");
         let constants = [("breaker_history_legacy", if legacy { 1.0 } else { 0.0 })];
+        let terrain_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("wgr_foam_coastal_layout"),
+            entries: &[
+                entry(0, wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Float {filterable: false}, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false }),
+                entry(1, wgpu::BindingType::Buffer {ty: wgpu::BufferBindingType::Uniform,has_dynamic_offset:false,min_binding_size:None}),
+            ],
+        });
+        let terrain_group = coastal_group(device, &terrain_layout, heightmap, conform);
+        let constants = [constants[0], ("surf_pilot", if std::env::var("WGR_WATER_SURF_PILOT").ok().as_deref() == Some("1") {1.0} else {0.0})];
         let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("wgr_water_foam_pipeline"),
             layout: Some(
                 &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some("wgr_water_foam_pipeline_layout"),
-                    bind_group_layouts: &[Some(&layout)],
+                    bind_group_layouts: &[Some(&layout), Some(&terrain_layout)],
                     immediate_size: 0,
                 }),
             ),
@@ -265,8 +278,14 @@ impl Foam {
             sampler,
             bind_groups,
             pipeline,
+            terrain_layout,
+            terrain_group,
             current: 0,
         }
+    }
+
+    pub fn set_heightmap(&mut self, device: &wgpu::Device, heightmap: &wgpu::TextureView, conform: &wgpu::Buffer) {
+        self.terrain_group = coastal_group(device, &self.terrain_layout, heightmap, conform);
     }
 
     pub fn set_params(&self, queue: &wgpu::Queue, params: WgrWaterInteractionParams) {
@@ -280,6 +299,7 @@ impl Foam {
         });
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.bind_groups[self.current][interaction_current], &[]);
+        pass.set_bind_group(1, &self.terrain_group, &[]);
         pass.dispatch_workgroups(FOAM_RESOLUTION / 8, FOAM_RESOLUTION / 8, 1);
         drop(pass);
         self.current = 1 - self.current;
@@ -300,4 +320,11 @@ fn entry(binding: u32, ty: wgpu::BindingType) -> wgpu::BindGroupLayoutEntry {
         ty,
         count: None,
     }
+}
+
+fn coastal_group(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, heightmap: &wgpu::TextureView, conform: &wgpu::Buffer) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {label:Some("wgr_foam_coastal_group"),layout,entries:&[
+        wgpu::BindGroupEntry {binding:0,resource:wgpu::BindingResource::TextureView(heightmap)},
+        wgpu::BindGroupEntry {binding:1,resource:conform.as_entire_binding()},
+    ]})
 }

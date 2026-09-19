@@ -1,3 +1,4 @@
+#import water_shore_surf::{coastal_surf, SurfState}
 // GPU water: a CDLOD surface at the global sea level, displaced by a sum of Gerstner
 // waves in the vertex shader and shaded per-fragment with an analytic wave normal, a
 // sharp HDR sun specular, and a Fresnel mix toward the horizon tint. The shared grid
@@ -13,7 +14,7 @@
 #import frame::{frame, reverse_z, fog_factor, apply_fog, terrain_sun_shadow, sky_vis_ao, cloud_sun_shadow}
 #import shadow::shadow_strength
 #import color::srgb_to_linear
-#import water_fft_sampling::fft_aperiodic_uv
+#import water_fft_sampling::fft_scaled_uv
 #import water_optics::{water_extinction, water_transmittance, water_inscatter, water_albedo_along_path, whitecap_wind_factor}
 
 const PI: f32 = 3.14159265359;
@@ -300,14 +301,13 @@ fn texture_bicubic_displacement_at(uv: vec2<f32>, layer: i32, magnified: bool) -
 fn fft_sample(xz: vec2<f32>, layer: i32, dist: f32) -> vec4<f32> {
     let length_m = max(wp.fft_cascade_lengths[layer], 1.0);
     let dims = f32(textureDimensions(fft_displacement).x);
-    let texel_m = length_m / max(dims, 1.0);
+    let texel_m = length_m * max(wp.wave_scale, 0.01) / max(dims, 1.0);
     let pixel_m = dist * 2.0 / (max(wp.debug_params.w, 1.0) * max(frame.proj[1][1], 1e-3));
     let magnified = texel_m > pixel_m;
     // Preserve the Water-tab convention: scale > 1 means longer waves.  The
     // spectrum stays stable; only the world-space lookup is dilated.
     let scale = max(wp.wave_scale, 0.01);
-    let scaled_xz = xz / scale;
-    let uv = fft_aperiodic_uv(scaled_xz, length_m, layer, wp.warp_amp);
+    let uv = fft_scaled_uv(xz, length_m, layer, wp.warp_amp, wp.wave_scale);
     let s = texture_bicubic_displacement_at(uv, layer, magnified);
     // Dilating the lookup changes the wavelength but NOT the stored displacement, so the control
     // used to alter steepness instead of scale: at 0.25 the waves came out four times shorter at
@@ -344,7 +344,7 @@ fn compute_cascade_weights(layer: i32, dist: f32, view_dir: vec3<f32>) -> Cascad
     // resolution, FOV and camera pitch.
     let screen_h = max(wp.debug_params.w, 1.0);
     let tan_half_fov_y = 1.0 / max(frame.proj[1][1], 1e-4);
-    let proj_pixels = (length_m * 0.5 * screen_h) / (max(dist, 0.1) * tan_half_fov_y * view_angle_cos);
+    let proj_pixels = (length_m * max(wp.wave_scale, 0.01) * 0.5 * screen_h) / (max(dist, 0.1) * tan_half_fov_y * view_angle_cos);
 
     w.geometry_weight = smoothstep(1.5, 4.0, proj_pixels);
     w.normal_weight = smoothstep(0.5, 2.0, proj_pixels);
@@ -399,8 +399,7 @@ fn texture_bicubic_dynamics(uv: vec2<f32>, layer: i32) -> vec4<f32> {
 }
 
 fn sample_fft_dynamics_filtered(xz: vec2<f32>, layer: i32, length_m: f32, dist: f32) -> vec4<f32> {
-    let scaled_xz = xz / max(wp.wave_scale, 0.01);
-    let uv = fft_aperiodic_uv(scaled_xz, length_m, layer, wp.warp_amp);
+    let uv = fft_scaled_uv(xz, length_m, layer, wp.warp_amp, wp.wave_scale);
     if (wp.sea_params.z > 0.5) {
         return textureSampleLevel(fft_dynamics, fft_samp, uv, layer, 0.0);
     }
@@ -414,7 +413,7 @@ fn sample_fft_dynamics_filtered(xz: vec2<f32>, layer: i32, length_m: f32, dist: 
     // paid twice. The threshold is per cascade, since a 16 m cascade's texels shrink below a pixel
     // far sooner than an 88 m one's.
     let dims = f32(textureDimensions(fft_dynamics).x);
-    let texel_m = length_m / max(dims, 1.0);
+    let texel_m = length_m * max(wp.wave_scale, 0.01) / max(dims, 1.0);
     // Approximate world size of one pixel at this distance, from the live viewport height and the
     // projection's vertical FOV term — the same inputs compute_cascade_weights uses.
     let pixel_m = dist * 2.0 / (max(wp.debug_params.w, 1.0) * max(frame.proj[1][1], 1e-3));
@@ -503,8 +502,9 @@ fn fft_normal_with_weights(xz: vec2<f32>, dist: f32, view_dir: vec3<f32>) -> vec
         // is the more expensive of the two. Explicit-LOD sampling is used throughout, so taking it
         // inside non-uniform control flow is well-defined.
         if (w.normal_weight > 0.002) {
-            // A dilated lookup has proportionally shallower world-space derivatives.
-            let layer_slope = sample_fft_dynamics_filtered(xz, layer, length_m, dist).xy / max(wp.wave_scale, 0.01);
+            // Both position and displacement are dilated: d[S*h(x/S)]/dx = h'(x/S).
+            // Keep the producer's independent artistic normal strength unchanged.
+            let layer_slope = sample_fft_dynamics_filtered(xz, layer, length_m, dist).xy;
             slope = slope + layer_slope * w.normal_weight;
         }
     }
@@ -549,6 +549,11 @@ struct ConformParams {
 };
 @group(1) @binding(17) var seabed_heightmap: texture_2d<f32>;
 @group(1) @binding(18) var<uniform> cf: ConformParams;
+
+fn pilot_surf(p: vec2<f32>) -> SurfState {
+    return coastal_surf(seabed_heightmap, p, cf.origin, cf.terrain_grid,
+                        cf.enabled * surf_pilot, wp.sea_level, wp.time, 1.0);
+}
 
 fn seabed_load(ix: i32, iz: i32) -> f32 {
     let cx = clamp(ix, 0, i32(cf.hm_width) - 1);
@@ -714,7 +719,12 @@ fn vs_water(
         disp = fft_geometry_disp(base_xz, dist, vertex_shore_factor);
     }
     if (body_index == 0) {
-        disp = disp + shore_breaker_disp(base_xz, vertex_shore_dir, vertex_shore_factor);
+        if (surf_pilot > 0.5) {
+            let surf = pilot_surf(base_xz);
+            disp = mix(disp, vec3<f32>(0.0, surf.height, 0.0), surf.weight);
+        } else {
+            disp = disp + shore_breaker_disp(base_xz, vertex_shore_dir, vertex_shore_factor);
+        }
     }
     disp = vec3<f32>(disp.x * horizontal_keep, disp.y, disp.z * horizontal_keep) * body_wave;
     let interaction = interaction_sample(base_xz);
@@ -744,6 +754,7 @@ override linear: f32 = 0.0;
 // lattice, and the old (much stronger) band gains. Driven from WGR_WATER_SHORE_FOAM_LEGACY so both
 // looks are reachable from one binary for an A/B capture. See the shoreline foam block in fs_water.
 override shore_foam_legacy: f32 = 0.0;
+override surf_pilot: f32 = 0.0;
 
 // Deep-side extent of the shoreline foam band, in units of `ft` (column depth over
 // foam_width * 2.2). The owner's report is that the wash still reaches too far out to sea, so
@@ -1392,6 +1403,7 @@ fn debug_view(view: i32, base_xz: vec2<f32>, world_rel: vec3<f32>, water_depth: 
 
 // WTR-011 / WTR-012 — Shared water-surface state representation & evaluation
 struct WaterSurfaceState {
+    surf: SurfState,
     material_position: vec2<f32>,
     world_pos: vec3<f32>,
     displaced_pos: vec3<f32>,
@@ -1419,6 +1431,7 @@ struct WaterSurfaceState {
 
 fn evaluate_water_surface(in: VsOut) -> WaterSurfaceState {
     var state: WaterSurfaceState;
+    if (surf_pilot > 0.5 && in.body_id < 0.5) { state.surf = pilot_surf(in.base_xz); }
     state.material_position = in.base_xz;
     state.world_pos = in.world_pos;
     state.displaced_pos = in.world_pos;
@@ -1452,21 +1465,26 @@ fn evaluate_water_surface(in: VsOut) -> WaterSurfaceState {
             // pay two texture fetches plus projected-weight math here before multiplying
             // nothing by nothing. Disabled layers contain no surface diagnostics.
             if (raw_length > 0.0) {
-                let uv = fft_aperiodic_uv(in.base_xz, raw_length, layer, wp.warp_amp);
+                let uv = fft_scaled_uv(in.base_xz, raw_length, layer, wp.warp_amp, wp.wave_scale);
                 let aux = textureSampleLevel(fft_auxiliary, fft_samp, uv, layer, 0.0);
                 fft_slope_var = fft_slope_var + aux.w;
                 let lost_w = 1.0 - clamp(compute_cascade_weights(layer, dist, view_dir).normal_weight, 0.0, 1.0);
                 fft_slope_var_lost = fft_slope_var_lost + aux.w * lost_w;
                 fft_crest = max(fft_crest, textureSampleLevel(fft_displacement, fft_samp, uv, layer, 0.0).w);
                 fft_comp = max(fft_comp, aux.y);
-                fft_curv = max(fft_curv, aux.z);
+                fft_curv = max(fft_curv, aux.z / max(wp.wave_scale, 0.01));
             }
         }
     }
     
     // FFT normals replace the offshore Gerstner normal above; add the same local
     // shoreward component after that replacement so geometry and lighting agree.
-    let shore_n = shore_breaker_normal(in.base_xz, in.shore_dir, in.shore_factor);
+    var shore_n = shore_breaker_normal(in.base_xz, in.shore_dir, in.shore_factor);
+    if (surf_pilot > 0.5 && in.body_id < 0.5) {
+        let surf = state.surf;
+        n = normalize(mix(n, normalize(vec3<f32>(-surf.slope.x, 1.0, -surf.slope.y)), surf.weight));
+        shore_n = vec3<f32>(0.0, 1.0, 0.0);
+    }
     n = normalize(n + shore_n - vec3<f32>(0.0, 1.0, 0.0));
     let interaction_texel = interaction_sample(in.base_xz);
     state.interaction_height = interaction_texel.r;
@@ -1876,8 +1894,8 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
         if (wp.fft_control.x > 0.5) {
             for (var layer = 0; layer < 4; layer = layer + 1) {
                 let length_m = max(wp.fft_cascade_lengths[layer], 1.0);
-                let duv = fft_aperiodic_uv(in.base_xz, length_m, layer, wp.warp_amp);
-                fft_disp = fft_disp + textureSampleLevel(fft_displacement, fft_samp, duv, layer, 0.0).xyz;
+                let duv = fft_scaled_uv(in.base_xz, length_m, layer, wp.warp_amp, wp.wave_scale);
+                fft_disp = fft_disp + textureSampleLevel(fft_displacement, fft_samp, duv, layer, 0.0).xyz * max(wp.wave_scale, 0.01);
                 fft_slope_v = fft_slope_v + textureSampleLevel(fft_dynamics, fft_samp, duv, layer, 0.0).xy;
             }
         }
@@ -2039,12 +2057,17 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
         body_surf = 0.15;
     }
     let swash = sin(TWO_PI * wp.time * wp.swash_speed);
-    let eff_depth = water_depth + swash * wp.swash_amp * body_surf;
+    let surf = state.surf;
+    let wetness = select(0.0, state.foam_history_sample.a, surf_pilot > 0.5 && body_index == 0);
+    let wet_band = (1.0 - smoothstep(0.03, 0.25, water_depth)) * surf.weight;
+    // One surface owns the thin wet film; no extra translucent terrain overlay.
+    rgb = mix(rgb, own_background * 0.78, wetness * wet_band * 0.55);
+    let eff_depth = water_depth + mix(swash * wp.swash_amp * body_surf, surf.wash, surf.weight) + wetness * wet_band * 0.02;
     let coast_flow = shallow_flow(water_depth, in.base_xz);
     let spray_wind = normalize(wp.fft_wind_sea.xy + vec2<f32>(1e-4, 0.0)) * max(wp.fft_wind_sea.z, 0.5);
 
     let surface_wave = in.world_pos.y + frame.cam_pos.y - in.body_level;
-    let shore_break = smoothstep(0.015, 0.12, surface_wave);
+    let shore_break = mix(smoothstep(0.015, 0.12, surface_wave), surf.breaking, surf.weight);
 
     // Shoreline foam: churning procedural noise in a band along the (swash-moved) edge. The band
     // fades IN from the waterline and OUT into deeper water (peak ~1/4 of foam_width in), so the
@@ -2220,6 +2243,9 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
         breaker_foam = clamp(crest_top * mix(0.28, 0.72, jacobian_break) * crest_shape * break_readiness,
             0.0, 1.0);
     }
+    // Incoming-swell breaking is independent of local wind. The pilot owns this
+    // source only where it also owns the displaced surface.
+    breaker_foam = breaker_foam * (1.0 - surf.weight) + surf.breaking * 0.65;
     // Sparse short-lived flecks sell wind-torn shore break and whitecap spindrift
     // without a separate particle system or a broad white surface layer.
     let spray_source = foam_band * shore_break + breaker_foam;
