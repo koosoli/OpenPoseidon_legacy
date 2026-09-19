@@ -10,12 +10,12 @@ struct CurlPoint {
 };
 fn curl_point(uv: vec2<f32>, time: f32) -> CurlPoint {
     let along = (uv.y - 0.5) * 36.0;
-    let age = fract((time - along * 0.035) / 10.0) * 10.0;
+    let age = fract((time + along * 0.15) / 10.0) * 10.0;
     let grow = smoothstep(0.0, 1.6, age);
     let crash = smoothstep(5.5, 7.2, age);
     let fade = 1.0 - smoothstep(8.1, 9.8, age);
     let tip = mix(2.6, 5.85, smoothstep(2.0, 5.7, age));
-    let radius = 1.35 * grow;
+    let radius = 1.35 * grow * (1.0 + 0.055 * sin(along * 0.53) + 0.025 * sin(along * 1.37));
     let q = clamp((uv.x - 0.38) / 0.62, 0.0, 1.0);
     let theta = mix(1.57079633, tip, q);
     var forward = -radius * sin(theta);
@@ -27,6 +27,7 @@ fn curl_point(uv: vec2<f32>, time: f32) -> CurlPoint {
     }
     // The lip passes beyond vertical (theta > 3*pi/2), then drops and spreads.
     // The wave sheet has multiple heights at the same horizontal coordinate.
+    height -= 0.14 * pow(q, 8.0) * smoothstep(3.5, 5.4, age);
     let wash_forward = mix(-8.0, 5.0, uv.x);
     forward = mix(forward, wash_forward, crash);
     let turbulence = (sin(uv.x * 39.0 + along * 2.2 - age * 9.0) +

@@ -2384,14 +2384,31 @@ struct CurlOut {
     @location(2) data: vec4<f32>, // coverage, collapse, across coordinate, particle flag
     @location(3) uv: vec2<f32>,
 };
+// Bounded local contour search, using the existing terrain texture. This is
+// only called by the opt-in fixture; normal ocean vertices pay no cost.
+fn curl_shore_offset(z: f32) -> f32 {
+    var dry = 7790.0;
+    var wet = 7900.0;
+    for (var i = 0u; i < 8u; i += 1u) {
+        let x = (dry + wet) * 0.5;
+        if (seabed_height(vec2<f32>(x,z)) > wp.sea_level) {dry=x;} else {wet=x;}
+    }
+    let hd = seabed_height(vec2<f32>(dry,z)) - wp.sea_level;
+    let hw = seabed_height(vec2<f32>(wet,z)) - wp.sea_level;
+    return mix(dry,wet,clamp(hd/max(hd-hw,1e-5),0.0,1.0)) - 7836.6085;
+}
+fn curl_placed(uv: vec2<f32>, time: f32) -> vec3<f32> {
+    let p = curl_point(uv,time).position;
+    return p + vec3<f32>(curl_shore_offset(p.z),0.0,0.0);
+}
 fn curl_world(uv: vec2<f32>) -> vec3<f32> {
-    let s = curl_point(uv, wp.time);
+    let position = curl_placed(uv, wp.time);
     // Attach the tail to the existing ocean, leaving the barrel's underside open.
-    let dist = length(vec3<f32>(s.position.x, wp.sea_level, s.position.z) - frame.cam_pos.xyz);
-    var ocean = gerstner_disp(s.position.xz, dist);
-    if (wp.fft_control.x > 0.5) { ocean = fft_geometry_disp(s.position.xz, dist, 0.0); }
+    let dist = length(vec3<f32>(position.x, wp.sea_level, position.z) - frame.cam_pos.xyz);
+    var ocean = gerstner_disp(position.xz, dist);
+    if (wp.fft_control.x > 0.5) { ocean = fft_geometry_disp(position.xz, dist, 0.0); }
     let tail = 1.0 - smoothstep(0.0, 0.40, uv.x);
-    return s.position + vec3<f32>(0.0, wp.sea_level + 0.04 + ocean.y * tail, 0.0);
+    return position + vec3<f32>(0.0, wp.sea_level + 0.04 + ocean.y * tail, 0.0);
 }
 @vertex
 fn vs_curling_breaker(@builtin(vertex_index) vertex: u32) -> CurlOut {
@@ -2411,8 +2428,8 @@ fn vs_curling_breaker(@builtin(vertex_index) vertex: u32) -> CurlOut {
         // Derivatives of the actual folded surface, not a heightfield normal.
         let du = curl_point(uv + vec2<f32>(0.001,0.0), wp.time).position -
                  curl_point(uv - vec2<f32>(0.001,0.0), wp.time).position;
-        let dv = curl_point(uv + vec2<f32>(0.0,0.001), wp.time).position -
-                 curl_point(uv - vec2<f32>(0.0,0.001), wp.time).position;
+        let dv = curl_placed(uv + vec2<f32>(0.0,0.01), wp.time) -
+                 curl_placed(uv - vec2<f32>(0.0,0.01), wp.time);
         out.normal = normalize(cross(du,dv) + vec3<f32>(0.0,1e-8,0.0));
         out.data = vec4<f32>(s.coverage, s.collapse, uv.x, 0.0);
         out.uv = uv;
@@ -2424,7 +2441,7 @@ fn vs_curling_breaker(@builtin(vertex_index) vertex: u32) -> CurlOut {
         let s = curl_point(uv,wp.time);
         let t = s.age - 5.6 - random.y * 0.65;
         let life = smoothstep(0.0,0.12,t) * (1.0-smoothstep(0.8,1.6,t));
-        let start = curl_point(uv,wp.time-max(t,0.0)).position;
+        let start = curl_placed(uv,wp.time-max(t,0.0));
         world = start + vec3<f32>(-max(t,0.0)*(1.0+random.z*3.0),
                 wp.sea_level + max(t,0.0)*(2.5+random.y*3.0)-4.905*t*t,
                 (random.z-0.5)*max(t,0.0)*3.0);
@@ -2448,7 +2465,8 @@ fn vs_curling_breaker(@builtin(vertex_index) vertex: u32) -> CurlOut {
 @fragment
 fn fs_curling_breaker(in: CurlOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
     let world = in.world_rel + frame.cam_pos.xyz;
-    if (in.data.x < 0.005 || world.y < wp.sea_level - 0.05) { discard; }
+    if (in.data.x < 0.005 || world.y < wp.sea_level - 0.05 ||
+        seabed_height(world.xz) > world.y - 0.02) { discard; }
     var n = select(-in.normal,in.normal,front);
     let v = normalize(-in.world_rel);
     if (dot(n,v)<0.0) { n = -n; }
@@ -2464,10 +2482,19 @@ fn fs_curling_breaker(in: CurlOut, @builtin(front_facing) front: bool) -> @locat
     // world xz onto its nearly vertical face (which made foam into long stripes).
     let material = in.uv * vec2<f32>(14.0,36.0);
     let footprint = max(length(dpdx(material)),length(dpdy(material)));
-    let noise = vnoise_lod(material*3.1+vec2<f32>(wp.time*0.12),footprint*3.1);
+    let flow = material + vec2<f32>(wp.time*0.12,0.0);
+    let noise = 0.55 * vnoise_lod(flow*1.7,footprint*1.7) +
+                0.30 * vnoise_lod(flow*4.3+vec2<f32>(0.37,0.81),footprint*4.3) +
+                0.15 * vnoise_lod(flow*11.1,footprint*11.1);
     let lip = smoothstep(0.92,1.0,in.data.z) * 0.55;
-    let foam = clamp(in.data.y + lip,0.0,1.0) * smoothstep(0.20,0.62,noise);
-    n = micro_normal(world.xz, length(in.world_rel), 2.0, n, 0.0);
+    let foam = clamp(in.data.y * (0.72 + noise * 0.45) + lip * smoothstep(0.25,0.6,noise),0.0,1.0);
+    // The ocean helper deliberately suppresses detail on steep heightfields.
+    // Evaluate it in the sheet's tangent frame so the vertical lip keeps ripples.
+    let detail = micro_normal(material, length(in.world_rel), 2.0, vec3<f32>(0,1,0), 0.0);
+    let axis = select(vec3<f32>(0,0,1),vec3<f32>(1,0,0),abs(n.z)>0.95);
+    let tangent = normalize(cross(axis,n));
+    let bitangent = cross(n,tangent);
+    n = normalize(n*detail.y + tangent*detail.x + bitangent*detail.z);
     let fresnel = 0.02+0.98*pow(1.0-max(dot(n,v),0.0),5.0);
     let reflection = sky_env_sample(reflect(-v,n));
     let sun_visibility = smoothstep(0.0,0.06,l.y) * cloud_sun_shadow(world.xz);
