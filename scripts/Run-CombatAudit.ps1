@@ -1,5 +1,5 @@
 param(
- [ValidateSet('Helicopter','Stress','Combat','Grenades','Shadows')][string]$Scenario='Helicopter',
+ [ValidateSet('Helicopter','Stress','Combat','Grenades','Burst','Shadows')][string]$Scenario='Helicopter',
  [int]$Seconds=90, [switch]$Reference, [switch]$Diagnostics, [switch]$LegacyTargetScan, [switch]$LegacyCombat, [switch]$VehicleCosts, [switch]$FixedCamera,
  [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault'
 )
@@ -89,13 +89,25 @@ try {
    Start-Sleep -Seconds 5
   }
   $null=Send @{cmd='screenshot';path=(Join-Path $out 'stress.png')}
- } elseif ($Scenario -in @('Combat','Grenades')) {
-  $null=Send @{cmd='exec';code='auditShots=0; auditShooter addEventHandler ["Fired",{auditShots=auditShots+1}]; auditTarget allowDamage false; auditFriend allowDamage false; hint ""; auditCamera="camera" camCreate [9695,3595,3]; auditCamera cameraEffect ["internal","back"]; auditCamera camSetTarget auditTarget; auditCamera camCommit 0; showCinemaBorder false'}
+ } elseif ($Scenario -in @('Combat','Grenades','Burst')) {
+  $null=Send @{cmd='exec';code='auditCrossing=false; auditShots=0; auditShooter addEventHandler ["Fired",{auditShots=auditShots+1; if (auditCrossing && auditShots==1) then {auditFriend setPos [9700,3610,0]}}]; auditTarget allowDamage false; auditFriend allowDamage false; hint ""; auditCamera="camera" camCreate [9695,3595,3]; auditCamera cameraEffect ["internal","back"]; auditCamera camSetTarget auditTarget; auditCamera camCommit 0; showCinemaBorder false'}
   if (!$Reference) {
    $null=Send @{cmd='ai_combat';improved=0}
    $r=Send @{cmd='ai_combat';improved=1}
    if (!$r.improved -or !$r.active) {throw 'AI combat setting did not activate'}
    $null=Send @{cmd='ai_combat';improved=$(if ($LegacyCombat) {0} else {1})}
+  }
+  if ($Scenario -eq 'Burst') {
+   if ($Reference) {throw 'Burst A/B requires the new build with the AI combat setting'}
+   foreach ($mode in @(0,1)) {
+    $null=Send @{cmd='ai_combat';improved=$mode}
+    $null=Send @{cmd='exec';code='auditCrossing=false; auditShooter setCombatMode "BLUE"; auditFriend setPos [9720,3620,0]; auditTarget setPos [9700,3700,0]; auditShooter setVehicleAmmo 1; auditShooter reveal auditTarget; auditShooter doTarget auditTarget'}
+    Start-Sleep -Seconds 2
+    $null=Send @{cmd='exec';code='auditShots=0; auditCrossing=true; auditShooter setCombatMode "RED"'}
+    Start-Sleep -Seconds 6
+    $null=Send @{cmd='eval';code='[time,auditShots,getPos auditFriend,magazines auditShooter]'}
+    $null=Send @{cmd='exec';code='auditCrossing=false; auditShooter setCombatMode "BLUE"'}
+   }
   }
   $ranges=if ($Scenario -eq 'Combat') {@(100,250,400)} else {@()}
   foreach ($range in $ranges) {
@@ -112,6 +124,7 @@ try {
    $null=Send @{cmd='eval';code='[time,auditShots,alive auditTarget,getDammage auditTarget,alive auditFriend,getDammage auditFriend]'}
    $null=Send @{cmd='exec';code='auditShooter setCombatMode "BLUE"'}
   }
+  if ($Scenario -ne 'Burst') {
   # The installed HandGrenade AI envelope is 40..60 m. A 30 m control
   # never reaches grenade selection and cannot validate the safety gate.
   $null=Send @{cmd='exec';code='auditShooter setCombatMode "BLUE"; removeAllWeapons auditShooter; {auditShooter removeMagazine _x} forEach magazines auditShooter; auditShooter addMagazine "HandGrenade"; auditShooter addMagazine "HandGrenade"; auditShooter addMagazine "HandGrenade"; auditShooter addWeapon "Throw"; auditTarget setPos [9700,3645,0]'}
@@ -121,6 +134,7 @@ try {
    if (!$Reference) {$null=Send @{cmd='ai_combat'}}
    $null=Send @{cmd='eval';code='[time,auditShots,magazines auditShooter,getPos auditFriend,getPos auditTarget]'}
    $null=Send @{cmd='exec';code='auditShooter setCombatMode "BLUE"; auditShooter setVehicleAmmo 1'}
+  }
   }
  } else {throw 'Use renderer-specific capture procedure for Shadows'}
  $null=Send @{cmd='exit'}
