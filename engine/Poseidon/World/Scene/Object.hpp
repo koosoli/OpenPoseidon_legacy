@@ -263,6 +263,7 @@ class Object: public NetworkObject, public FrameBase, public IAnimator
 	bool _canSmoke:1; // object may smoke when destructed
 	bool _isDestroyed:1; // object is already destructed
 	bool _static:1; // object is static (never changing position)
+	bool _visualResident:1 = true; // streamed logical state may outlive its drawing resources
 
 	// Cached animated bounding box for static terrain-conform objects (ClipLand veg,
 	// ForestPlain): the conform is time-invariant (immutable terrain + no movement), so
@@ -344,6 +345,8 @@ class Object: public NetworkObject, public FrameBase, public IAnimator
 
 	// GPU-driven coverage cache (raw GpuDrawCoverage value; see _gpuCoverage). Written only by
 	// EngineWgpu's Scene{ObjectCreated,Removed,Moved} hooks; read by GpuDrivenCoverage().
+	bool IsVisualResident() const { return _visualResident; }
+	void SetVisualResident(bool resident) { _visualResident = resident; }
 	int GetGpuCoverage() const { return _gpuCoverage; }
 	void SetGpuCoverage( int cov ) { _gpuCoverage = (unsigned char)cov; }
 

@@ -109,7 +109,11 @@ void RegisterScreenshot(HarnessServer& hs)
                     const double dz = object->Position().Z() - z->valuedouble;
                     nearest.emplace_back(dx * dx + dz * dz, all[i]);
                 }
-                const size_t count = std::min<size_t>(16, nearest.size());
+                const auto* limit = cJSON_GetObjectItemCaseSensitive(root, "limit");
+                if (limit && (!cJSON_IsNumber(limit) || !std::isfinite(limit->valuedouble) ||
+                    limit->valuedouble < 1 || limit->valuedouble > 64 || std::floor(limit->valuedouble) != limit->valuedouble))
+                    return HarnessProtocol::ErrorResponse("limit must be an integer 1..64");
+                const size_t count = std::min<size_t>(limit ? limit->valueint : 16, nearest.size());
                 std::partial_sort(nearest.begin(), nearest.begin() + count, nearest.end());
                 for (size_t i = 0; i < count; ++i) ids.push_back(nearest[i].second);
             }
@@ -122,6 +126,7 @@ void RegisterScreenshot(HarnessServer& hs)
                 cJSON_AddBoolToObject(item, "present", object != nullptr);
                 if (object) {
                     cJSON_AddBoolToObject(item, "destroyed", object->IsDestroyed());
+                    cJSON_AddBoolToObject(item, "visualResident", object->IsVisualResident());
                     cJSON_AddNumberToObject(item, "x", object->Position().X());
                     cJSON_AddNumberToObject(item, "z", object->Position().Z());
                     cJSON_AddNumberToObject(item, "y", object->Position().Y());

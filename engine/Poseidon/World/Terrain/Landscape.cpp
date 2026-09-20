@@ -2884,6 +2884,7 @@ Object* Landscape::ObjectCreate(int id, const char* name, const Matrix4& transfo
     // create object based on Class hint in LOD 0
     Ref<LODShapeWithShadow> shape = Shapes.New(name, false, true);
     Object* obj = NewObject(shape, id);
+    obj->SetVisualResident(registerVisual);
 
     if (obj->GetType() != Primary && obj->GetType() != Network)
     {
@@ -2963,6 +2964,7 @@ Object* Landscape::ObjectCreate(int id, const char* name, const Matrix4& transfo
 
 void Landscape::RegisterModernObjectVisual(Object* object)
 {
+    object->SetVisualResident(true);
     if (GEngine)
         GEngine->SceneObjectCreated(object);
     auto* shape = object->GetShape();

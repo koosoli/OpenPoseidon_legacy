@@ -152,22 +152,28 @@ try {
  }
  if ($RequiredIdentity) {
   if ($Corpus -ne 'DayZ') {throw 'RequiredIdentity fixture is a known DayZ placement'}
-  $null=Send @{cmd='exec';code='streamRequired = object 83903272; streamRequired setDammage 0.25'}
+  # Select a real obstruction before requesting/pinning anything. A geometry LOD
+  # name alone is not evidence (e.g. the crosswalk decal has LODs but no ray hits).
+  $candidates=Send @{cmd='stream_identity_probe';x=$baseX;z=$baseZ;limit=64}
+  $fireQuery=$null; $requiredId=0
+  foreach ($fixture in $candidates.objects) {
+   if (!$fixture.hasFireGeometry -or $fixture.radius -lt 4 -or [double][single]$fixture.id -ne [double]$fixture.id) {continue}
+   $extent=[Math]::Min(900,[Math]::Max(2,[double]$fixture.radius+1))
+   foreach ($axis in 0..2) {
+    $from=@($fixture.x,$fixture.y,$fixture.z); $to=@($fixture.x,$fixture.y,$fixture.z)
+    $from[$axis]-=$extent; $to[$axis]+=$extent
+    $query=@{cmd='stream_fire_probe';from=$from;to=$to}
+    $hits=Send $query
+    if (@($hits.contacts | Where-Object {$_.id -eq $fixture.id}).Count) {$fireQuery=$query; $requiredId=$fixture.id; break}
+   }
+   if ($fireQuery) {break}
+  }
+  if (!$fireQuery) {throw 'No exactly script-representable fixture with observed fire intersection; no obstruction acceptance'}
+  $null=Send @{cmd='exec';code=("streamRequired = object $requiredId; streamRequired setDammage 0.25")}
   $r=Send @{cmd='eval';code='!(isNull streamRequired)'}
   if ($r.result -notmatch 'true') {throw 'Required placement did not resolve'}
   $Identity=$true
-  $identityBefore=Send @{cmd='stream_identity_probe';ids=@(83903272)}
-  $fixture=$identityBefore.objects[0]
-  $extent=[Math]::Min(900,[Math]::Max(2,$fixture.radius+1))
-  $fireQuery=$null
-  foreach ($axis in 0..2) {
-   $from=@($fixture.x,$fixture.y,$fixture.z); $to=@($fixture.x,$fixture.y,$fixture.z)
-   $from[$axis]-=$extent; $to[$axis]+=$extent
-   $query=@{cmd='stream_fire_probe';from=$from;to=$to}
-   $hits=Send $query
-   if (@($hits.contacts | Where-Object {$_.id -eq 83903272}).Count) {$fireQuery=$query; break}
-  }
-  if (!$fireQuery) {throw 'Fixture has no observed fire-geometry intersection; cannot prove obstruction retention'}
+  $identityBefore=Send @{cmd='stream_identity_probe';ids=@($requiredId)}
  }
  if ($Identity) {
   $null=Send @{cmd='eval';code=('triFreeFlyPose "'+(Pose ($baseX+1500) ($baseY+150))+'"')}
@@ -175,14 +181,14 @@ try {
   $identityAway=Send @{cmd='stream_identity_probe';ids=@($identityBefore.objects | ForEach-Object {$_.id})}
   if ($RequiredIdentity) {
    $hits=Send $fireQuery
-   if (!@($hits.contacts | Where-Object {$_.id -eq 83903272}).Count) {throw 'Required object stopped obstructing fire while camera was away'}
+   if (!@($hits.contacts | Where-Object {$_.id -eq $requiredId}).Count) {throw 'Required object stopped obstructing fire while camera was away'}
   }
   $null=Send @{cmd='eval';code=('triFreeFlyPose "'+(Pose $baseX)+'"')}
   $null=Wait-Settled
   $identityReturned=Send @{cmd='stream_identity_probe';ids=@($identityBefore.objects | ForEach-Object {$_.id})}
   if ($RequiredIdentity) {
-   if (!$identityAway.objects[0].present -or !$identityAway.objects[0].hasGeometry -or !$identityAway.objects[0].hasFireGeometry -or !$identityReturned.objects[0].present) {throw 'Required identity or collision payload disappeared'}
-   $r=Send @{cmd='eval';code='(streamRequired == object 83903272) && (getDammage streamRequired > 0.24) && (getDammage streamRequired < 0.26)'}
+   if ($identityAway.objects[0].visualResident -or !$identityReturned.objects[0].visualResident -or !$identityAway.objects[0].present -or !$identityAway.objects[0].hasGeometry -or !$identityAway.objects[0].hasFireGeometry -or !$identityReturned.objects[0].present) {throw 'Required identity or collision payload disappeared'}
+   $r=Send @{cmd='eval';code=("(streamRequired == object $requiredId) && (getDammage streamRequired > 0.24) && (getDammage streamRequired < 0.26)")}
    if ($r.result -notmatch 'true') {throw 'Required identity or mutation changed on return'}
   }
  }

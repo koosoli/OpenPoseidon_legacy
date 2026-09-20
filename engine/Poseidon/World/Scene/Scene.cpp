@@ -1052,6 +1052,9 @@ void Scene::LodTraceFlush()
 
 void Scene::ObjectForDrawing(Object* obj, int forceLOD, ClipFlags clip)
 {
+    // Camera-independent collision/state must not re-enter through CPU fallback.
+    if (!obj->IsVisualResident())
+        return;
     LODShapeWithShadow* shape = obj->GetShapeOnPos(obj->Position());
 
     // some objects may be trivially clipped

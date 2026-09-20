@@ -3639,6 +3639,7 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                 {
                     if (GEngine)
                         GEngine->SceneObjectRemoved(object);
+                    object->SetVisualResident(false);
                     _modernLogicalOnlyObjects.insert(placement.id);
                     _modernObjectLightOwners.erase(placement.id);
                     if (index < _nativeFarWanted.size() && object->IsDestroyed())
