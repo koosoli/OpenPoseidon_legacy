@@ -4179,6 +4179,30 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
         if (admitBudgetSpent())
             break;
     }
+    // A proxy or another admission can populate ShapeBank after its asynchronous
+    // request was queued. Its prepared copy then has no consumer: warm admissions
+    // bypass Take(). Under byte pressure even one such copy can park every parser.
+    // Reclaim only completed, demonstrably redundant results on the owner thread;
+    // never discard a cold result or change active conversion ownership.
+    if (asyncOn && created == 0 && waited > 0)
+    {
+        const auto prep = _modernObjectPreparer->SnapshotStats();
+        if (prep.readyByteParks && prep.readyPayloadBytes && !prep.parseReservedBytes &&
+            !prep.conversionReservedBytes)
+        {
+            uint32_t redundant = 0;
+            for (uint32_t i = 0; i < _modernObjectModels.size(); ++i)
+            {
+                if (_modernObjectPreparer->Query(i) == ObjectStreamPreparer::State::Ready &&
+                    Shapes.Find(_modernObjectModels[i], false, true))
+                {
+                    if (_modernObjectPreparer->Take(i)) ++redundant;
+                }
+            }
+            if (redundant)
+                LOG_INFO(World, "Object stream prepare: released {} redundant warm results", redundant);
+        }
+    }
     _modernObjectAsyncInstalled += installed;
     _modernObjectAsyncWaited += waited;
     _modernObjectSyncCold += syncCold;
