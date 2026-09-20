@@ -124,11 +124,48 @@ void RegisterScreenshot(HarnessServer& hs)
                     cJSON_AddBoolToObject(item, "destroyed", object->IsDestroyed());
                     cJSON_AddNumberToObject(item, "x", object->Position().X());
                     cJSON_AddNumberToObject(item, "z", object->Position().Z());
+                    cJSON_AddNumberToObject(item, "y", object->Position().Y());
+                    cJSON_AddNumberToObject(item, "radius", object->GetRadius());
                     const auto* shape = object->GetShape();
+                    if (shape) cJSON_AddStringToObject(item, "model", shape->Name());
                     cJSON_AddBoolToObject(item, "hasGeometry", shape && shape->FindGeometryLevel() >= 0);
                     cJSON_AddBoolToObject(item, "hasFireGeometry", shape && shape->FindFireGeometryLevel() >= 0);
                 }
                 cJSON_AddItemToArray(objects, item);
+            }
+            return HarnessProtocol::JsonResponse(result);
+        });
+    hs.RegisterCommand({"stream_fire_probe", "Read-only bounded world fire-geometry segment query", {}},
+        [](const std::string&, cJSON* root) -> std::string {
+            if (!GLandscape) return HarnessProtocol::ErrorResponse("no landscape");
+            Vector3 endpoints[2];
+            const char* keys[] = {"from", "to"};
+            for (int end = 0; end < 2; ++end) {
+                const auto* coords = cJSON_GetObjectItemCaseSensitive(root, keys[end]);
+                if (!cJSON_IsArray(coords) || cJSON_GetArraySize(coords) != 3)
+                    return HarnessProtocol::ErrorResponse("from/to require [x,y,z]");
+                for (int axis = 0; axis < 3; ++axis) {
+                    const auto* value = cJSON_GetArrayItem(coords, axis);
+                    if (!cJSON_IsNumber(value) || !std::isfinite(value->valuedouble) ||
+                        std::abs(value->valuedouble) > 1000000)
+                        return HarnessProtocol::ErrorResponse("finite bounded coordinates required");
+                    endpoints[end][axis] = static_cast<float>(value->valuedouble);
+                }
+            }
+            const float length = endpoints[0].Distance(endpoints[1]);
+            if (length < 0.001f || length > 2000)
+                return HarnessProtocol::ErrorResponse("segment length must be 0.001..2000 metres");
+            CollisionBuffer hits;
+            GLandscape->ObjectCollision(hits, nullptr, nullptr, endpoints[0], endpoints[1], 0.01f, ObjIntersectFire);
+            auto* result = cJSON_CreateObject();
+            auto* contacts = cJSON_AddArrayToObject(result, "contacts");
+            for (int i = 0; i < hits.Size(); ++i) {
+                const auto& hit = hits[i];
+                if (!hit.object) continue;
+                auto* item = cJSON_CreateObject();
+                cJSON_AddNumberToObject(item, "id", hit.object->ID());
+                if (hit.object->GetShape()) cJSON_AddStringToObject(item, "model", hit.object->GetShape()->Name());
+                cJSON_AddItemToArray(contacts, item);
             }
             return HarnessProtocol::JsonResponse(result);
         });

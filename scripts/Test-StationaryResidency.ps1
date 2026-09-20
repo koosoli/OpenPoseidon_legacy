@@ -157,11 +157,26 @@ try {
   if ($r.result -notmatch 'true') {throw 'Required placement did not resolve'}
   $Identity=$true
   $identityBefore=Send @{cmd='stream_identity_probe';ids=@(83903272)}
+  $fixture=$identityBefore.objects[0]
+  $extent=[Math]::Min(900,[Math]::Max(2,$fixture.radius+1))
+  $fireQuery=$null
+  foreach ($axis in 0..2) {
+   $from=@($fixture.x,$fixture.y,$fixture.z); $to=@($fixture.x,$fixture.y,$fixture.z)
+   $from[$axis]-=$extent; $to[$axis]+=$extent
+   $query=@{cmd='stream_fire_probe';from=$from;to=$to}
+   $hits=Send $query
+   if (@($hits.contacts | Where-Object {$_.id -eq 83903272}).Count) {$fireQuery=$query; break}
+  }
+  if (!$fireQuery) {throw 'Fixture has no observed fire-geometry intersection; cannot prove obstruction retention'}
  }
  if ($Identity) {
   $null=Send @{cmd='eval';code=('triFreeFlyPose "'+(Pose ($baseX+1500) ($baseY+150))+'"')}
   $null=Wait-Settled
   $identityAway=Send @{cmd='stream_identity_probe';ids=@($identityBefore.objects | ForEach-Object {$_.id})}
+  if ($RequiredIdentity) {
+   $hits=Send $fireQuery
+   if (!@($hits.contacts | Where-Object {$_.id -eq 83903272}).Count) {throw 'Required object stopped obstructing fire while camera was away'}
+  }
   $null=Send @{cmd='eval';code=('triFreeFlyPose "'+(Pose $baseX)+'"')}
   $null=Wait-Settled
   $identityReturned=Send @{cmd='stream_identity_probe';ids=@($identityBefore.objects | ForEach-Object {$_.id})}

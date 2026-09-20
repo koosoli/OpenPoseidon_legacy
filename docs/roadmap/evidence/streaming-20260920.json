@@ -692,6 +692,130 @@
         "provenance.json": "0024a6d3088d5261a2d0f1e01035df3efb6d5c48ef10dec5dd0b4488b7ce03cc"
       },
       "result": "modern object lookup FAILED; simulation passed"
+    },
+    {
+      "run": "dayz-logical-identity-20260920-133200",
+      "result": "PASS identity/mutation; mixed performance",
+      "provenance": {
+        "incrementalSkyUploads": true,
+        "corpus": "DayZ",
+        "head": "cd3d5c68dac40709f4f4d5b4317b04d9ac87b913",
+        "readyMb": -1,
+        "packedModels": false,
+        "controlled": true,
+        "packedTextures": false,
+        "adaptive": false,
+        "pressureGrowth": false,
+        "installed": "codex/streaming-residency cd3d5c68 2026-09-20_13:31 deploy-ps1",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "B710D033B89DB4CEABE1B9395337AC05E52BAE8C3B96CC48B663901F11F528C7",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "F86162AD86801610538A4E14973B7821F8A802849934F49E2A9D597DD0511730",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "geoGrowth": 2.0
+      },
+      "sha256": {
+        "engine.log": "54c089faaa929211f043554dc3d039f5a03eb6a971a287e0c592e58cbbc2111c",
+        "harness.jsonl": "bd9f19958593bb203b145993b0aae1c438499ac3c6e33f16cb83f0ded3cb3d83",
+        "provenance.json": "9717175a41850dc32d5bb61c52837308dab6416f0bfc85036207b8c5ceb98cd5",
+        "result.json": "49fcbcaa89c59c2d3fbad78cdbd4945f588aa20ca73e2f293a1127014158dd49"
+      }
+    },
+    {
+      "run": "headless-dayz-20260920-133026",
+      "result": "Presence observed; assertion returns were not logged; superseded by strict run",
+      "provenance": {
+        "initHash": {
+          "Algorithm": "SHA256",
+          "Hash": "FA5E423A24F7A6A4A7B69494B9D0D3C47CB55F412D7DDFF76D9A36E040CAD245",
+          "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\headless-dayz-20260920-133026\\stream_headless.eden\\init.sqs"
+        },
+        "head": "cd3d5c68dac40709f4f4d5b4317b04d9ac87b913",
+        "missionHash": {
+          "Algorithm": "SHA256",
+          "Hash": "74F79F513F1DAAE0564C7CD531AE05454EE8B269401582B991AA5EB943BE2B88",
+          "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\headless-dayz-20260920-133026\\stream_headless.eden\\mission.sqm"
+        },
+        "serverHash": {
+          "Algorithm": "SHA256",
+          "Hash": "84E64847612439B65DE3ABBA786338D2F15614FCBE8EB74A694EB33E6D808329",
+          "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\dist\\x64-win-rwdi\\PoseidonServer.exe"
+        }
+      },
+      "sha256": {
+        "console.log": "3e42bf4a05ab5a1d7b38a53f102b86a97dd18a10972e6521acba2e014b5020cd",
+        "engine.log": "a40b30aa179fcf8ee5e2e44b1a39e799930b5391042a96710df86f8cedd7181f",
+        "provenance.json": "be06e89d515d0d7dfd01b64c3e15a775d08324bf93ab23c43d549dca6a4cf750"
+      }
+    },
+    {
+      "run": "headless-dayz-20260920-133810",
+      "result": "PASS six explicit logged assertions",
+      "provenance": {
+        "initHash": {
+          "Algorithm": "SHA256",
+          "Hash": "2F82063EEE8CBA3D22703BFB19DAC1C82890FFDD56FF09BB3AF87A1238549DFD",
+          "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\headless-dayz-20260920-133810\\stream_headless.eden\\init.sqs"
+        },
+        "missionHash": {
+          "Algorithm": "SHA256",
+          "Hash": "74F79F513F1DAAE0564C7CD531AE05454EE8B269401582B991AA5EB943BE2B88",
+          "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\headless-dayz-20260920-133810\\stream_headless.eden\\mission.sqm"
+        },
+        "serverHash": {
+          "Algorithm": "SHA256",
+          "Hash": "EDF61CD693C4B837311983764F58E448E71AE45D1BBE86F5A1EA9193BFCA56E9",
+          "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\dist\\x64-win-rwdi\\PoseidonServer.exe"
+        },
+        "head": "d8ac1c8dcc8f3d7ffbf2047465db000a00fd6d3c"
+      },
+      "sha256": {
+        "console.log": "2b2f52308ba5f47ea24f13f50df044d49759741f66347bedff6311325f5b4e1a",
+        "engine.log": "6e518c35e72327c478517d0304215dae1e966141aededa35fbbab5fa9794fa36",
+        "provenance.json": "30fc91da63c8bb5fc9db7e1087096bf1049a7f36b53ccfea49a8f1a7ac6ff7ff"
+      }
+    },
+    {
+      "run": "dayz-texture-capacity-20260920-133927",
+      "result": "PASS coverage/lifecycle; no general performance acceptance",
+      "provenance": {
+        "readyMb": -1,
+        "installed": "codex/streaming-residency d8ac1c8d 2026-09-20_13:39 deploy-ps1",
+        "incrementalSkyUploads": true,
+        "packedTextures": true,
+        "head": "d8ac1c8dcc8f3d7ffbf2047465db000a00fd6d3c",
+        "adaptive": false,
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "9223ECCA357AEFEB9D7AB6C6119E776149551810BD618613C087E16DDBD21290",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "C223940CFA9C8EF003ADEC5838E7F33F4E016D045A7959623555F7FFFE728B9E",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "corpus": "DayZ",
+        "packedModels": true,
+        "geoGrowth": 1.5,
+        "controlled": true,
+        "pressureGrowth": false
+      },
+      "sha256": {
+        "engine.log": "7c24e196d7f5a016003ec45c5e91e6e691a4b006d138b36dcb9603ad00aea853",
+        "harness.jsonl": "82187920602b24cd1ef6acc3fb0199c06bb13ef21a520a53808fd2130199a5da",
+        "provenance.json": "19f05a56615f0fd7550d16b3f52ad7bc3af74804a7fded99c97c4b4e72a284df",
+        "result.json": "278ebd4dbe7b083b262042b9adf40805aab57edce65869d7e9c0a8f4da689515"
+      }
     }
   ]
 }

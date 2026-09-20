@@ -15,7 +15,7 @@ The wave prototype is parked on GitHub remote `safety`, branch
 |---|---|
 | Residency invocation | `World.cpp`, before `CapturePresentationSnapshot`, inside `enableDraw` and renderer capability/camera checks. Already moved from TerrainWgpu, but still not a headless simulation service. |
 | Native/modern placements | `LandSave.cpp`: retained placement table, cell desired set, main-thread admission and release. Original legacy OFP maps keep their existing lifecycle. |
-| Eviction | Clears resident link, removes Object and ID map entry; retains shape only. Native far destruction bit is not full mutable-state persistence. Geography accumulation is monotonic and does not establish collision residency. |
+| Eviction | Baseline clears resident link, removes Object and ID map entry; cd3d5c68 now retains explicitly required identities and MustBeSaved state with separate visual retirement. Native far destruction bit is not full mutable-state persistence. Geography accumulation is monotonic and does not establish collision residency. |
 | Preparation | `ObjectStreamPrepare`: existing loose/native archive model loading, compatible adapter workers, generation cancellation. Shared archive MRU/shape-bank mutation ownership must stay explicit. |
 | Texture preparation | Existing PreparedTextureStore budget and generation tracking. No second cache needed. Decode transients still need distinct accounting. |
 | Textures/geometry | Existing lazy texture uploads, stable bindless leases/pins and shared retained meshes. Mip feedback is telemetry, not per-texture promotion/demotion. |
@@ -546,3 +546,42 @@ This does NOT yet establish camera-independent actor-neighbourhood collision,
 projectile corridors, navigation or nearest-object queries for never-requested
 placements. Those still require a simulation demand policy. Aggressive visual
 object-pressure control remains gated. Runtime verification pending.
+
+
+### cd3d5c68 required identity runtime and d8ac1c8d capacity accounting
+
+`dayz-logical-identity-20260920-133200` completed normal factor-2 traversal and
+1500 m away/return. Explicitly requested ID 83903272 remained present with
+geometry/fire-geometry payloads while away (required=1, logicalOnly=1).
+The client evaluated unchanged object identity and damage 0.25 as true after
+return. That is payload/state evidence, not yet an actual obstruction ray test.
+Initial/controlled-return visual coverage 19923. Endpoint inspected; some tree
+silhouettes differ from the prior endpoint, so numerical coverage is not a
+blanket visual-equivalence claim. No renderer errors. Whole-GPU peak 7666 MiB.
+Frame mean/p95/max: 23.28/30.28/50.12, 19.76/20.69/145.80,
+13.36/19.83/125.33, 19.40/22.57/63.30 ms. This is mixed performance, with a
+slower first pose versus the previous control; no global performance pass.
+
+The initial headless runner discarded triAssertEq's returned string. Its
+successful exit did not validate those assertions (presence/time/damage values
+explicitly logged remain observations). The checked-in Test-HeadlessResidency
+runner now logs and requires exactly three legacy or six DayZ OK replies,
+and rejects FAIL replies. Strict run `headless-dayz-20260920-133810` logged
+all six OKs: advancing simulation, living/damaged AI, existing authored object,
+repeated identity and retained damage. This supersedes the loose initial checks.
+
+PAA store admission/removal now charges vector capacity, including mip metadata,
+while cumulative transfer counters still count useful payload. Map/string and
+allocator overhead are explicitly excluded, not claimed as measured. A 1 MiB
+test budget passed 280 assertions / 22 cases, including tiny valid payloads
+whose retained capacities exceed the budget and exact release after Take/Upload.
+`dayz-texture-capacity-20260920-133927` passed with both packed prototypes ON,
+factor 1.5, visual coverage 19923 and final reservations zero. Peak conversion
+reservation 318,598,236 bytes. Frame mean/p95/max: 20.19/22.47/93.20,
+19.97/22.05/86.07, 12.98/23.30/145.61, 18.86/21.80/36.44 ms; whole-GPU
+peak 7801 MiB. Packed prototypes remain OFF. This run validates accounting
+integration, not a broad frame-time improvement.
+
+Next diagnostic adds read-only, bounded fire-geometry segment queries and model
+names/positions to the identity probe. It will distinguish retained payloads
+from an actual world obstruction while the camera is elsewhere.
