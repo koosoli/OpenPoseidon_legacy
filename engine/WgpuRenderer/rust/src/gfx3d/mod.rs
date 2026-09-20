@@ -1893,6 +1893,30 @@ impl StorageArray {
         true
     }
 
+    // Append-only atlases keep stable offsets. Copy their existing prefix on
+    // occasional growth instead of staging the entire atlas again after every
+    // added item. Queue order preserves prior writes and in-flight readers.
+    fn ensure_preserving(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, bytes: u64) -> bool {
+        if self.cap >= bytes && self.buf.is_some() { return false; }
+        let cap = bytes.next_power_of_two().max(4096);
+        crate::gfx3d::storage_array_note(self.label, cap);
+        let next = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(self.label), size: cap,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        if let Some(old) = self.buf.as_ref() {
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("wgr_atlas_grow"),
+            });
+            encoder.copy_buffer_to_buffer(old, 0, &next, 0, self.cap);
+            queue.submit([encoder.finish()]);
+        }
+        self.buf = Some(next);
+        self.cap = cap;
+        true
+    }
+
     // Drop the buffer and forget its capacity, so the next `ensure` builds a fresh one.
     //
     // `ensure` records the size it ASKED for, not the size it GOT: wgpu answers an
@@ -3982,9 +4006,10 @@ pub struct Gfx3d {
     // fully open sky — the pre-bake behaviour — until the result lands a frame or two later.
     sky_bakes_pending: Vec<(u32, sky_bake::PendingBake, Option<std::path::PathBuf>)>,
     sky_bake: Option<sky_bake::SkyBake>,
-    // model index -> (volume, padded model-space AABB). CPU-side for now; the GPU atlas + the
-    // per-fragment sample are the next step.
-    sky_volumes: FxHashMap<u32, (Vec<[f32; 4]>, [f32; 3], [f32; 3])>,
+    // Model index -> (volume, padded model-space AABB, stable GPU atlas offset).
+    sky_volumes: FxHashMap<u32, (Vec<[f32; 4]>, [f32; 3], [f32; 3], usize)>,
+    sky_volume_uploads: Vec<u32>,
+    sky_volume_voxels: usize,
     // Diagnostics awaiting a log sink (sky bake, staging refusals); drained by lib.rs each
     // frame. Gfx3d has no log sink of its own, and `eprintln!` never reaches --log-file.
     queued_log: Vec<String>,
@@ -4792,6 +4817,8 @@ impl Gfx3d {
             sky_bake: None,
             sky_bakes_pending: Vec::new(),
             sky_volumes: FxHashMap::default(),
+            sky_volume_uploads: Vec::new(),
+            sky_volume_voxels: 0,
             // Announced through the GAME log (drained by lib.rs into the LogSink on the first
             // frame) so a captured road screenshot can be matched to which arm produced it.
             queued_log: vec![road_pixel_conform_log_line()],
@@ -8443,6 +8470,9 @@ impl Gfx3d {
     }
 
     fn finish_sky_bake(&mut self, model: u32, vis: Vec<[f32; 4]>, bmin: [f32; 3], bmax: [f32; 3]) {
+        let dims = sky_bake::BakeSettings::default().dims;
+        if vis.len() != (dims[0] * dims[1] * dims[2]) as usize { return; }
+        let previous_bytes = self.sky_volumes.get(&model).map_or(0, |old| (old.0.len() * 16) as u64);
         // Report the first few, because a bake that silently produces an all-open volume is
         // indistinguishable from a working one downstream — the same failure mode the per-frame
         // map's coverage check exists for. `enclosed` is the fraction of voxels that see less
@@ -8460,12 +8490,12 @@ impl Gfx3d {
         let verdict = if enclosed < min_enclosed {
             self.sky_bakes_dropped_open += 1;
             false
-        } else if self.sky_bake_bytes + bytes > budget_bytes {
+        } else if self.sky_bake_bytes - previous_bytes + bytes > budget_bytes {
             self.sky_bakes_dropped_budget += 1;
             false
         } else {
             self.sky_bakes_kept += 1;
-            self.sky_bake_bytes += bytes;
+            self.sky_bake_bytes = self.sky_bake_bytes - previous_bytes + bytes;
             true
         };
         let decided = self.sky_bakes_kept + self.sky_bakes_dropped_open + self.sky_bakes_dropped_budget;
@@ -8496,7 +8526,16 @@ impl Gfx3d {
                     bmax[2] - bmin[2],
             ));
         }
-        self.sky_volumes.insert(model, (vis, bmin, bmax));
+        let offset = if let Some(old) = self.sky_volumes.get(&model) {
+            if old.0.len() != vis.len() { return; }
+            old.3
+        } else {
+            let offset = self.sky_volume_voxels;
+            self.sky_volume_voxels += vis.len();
+            offset
+        };
+        self.sky_volumes.insert(model, (vis, bmin, bmax, offset));
+        self.sky_volume_uploads.push(model);
         self.sky_volumes_dirty = true;
     }
 
@@ -9143,13 +9182,38 @@ impl Gfx3d {
             return false;
         }
         self.sky_volumes_dirty = false;
+        static INCREMENTAL: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        let incremental = *INCREMENTAL.get_or_init(||
+            std::env::var("WGR_SKY_VOLUME_INCREMENTAL").map_or(true, |v| v != "0"));
+        if incremental {
+            let models = self.sky_volumes.keys().copied().max().unwrap_or(0) as u64 + 1;
+            let mut grew = self.sky_volume_meta.ensure_preserving(device, queue, models * 32);
+            grew |= self.sky_volume_data.ensure_preserving(device, queue,
+                (self.sky_volume_voxels as u64 * 16).max(16));
+            if self.sky_volume_voxels == 0 {
+                queue.write_buffer(self.sky_volume_data.buf.as_ref().unwrap(), 0,
+                    bytemuck::cast_slice(&[[0.0f32, 1.0, 0.0, 1.0]]));
+            }
+            for model in self.sky_volume_uploads.drain(..) {
+                if let Some((vis, lo, hi, offset)) = self.sky_volumes.get(&model) {
+                    let meta = [[lo[0], lo[1], lo[2], *offset as f32],
+                                [hi[0], hi[1], hi[2], 1.0]];
+                    queue.write_buffer(self.sky_volume_meta.buf.as_ref().unwrap(), u64::from(model) * 32,
+                        bytemuck::cast_slice(&meta));
+                    queue.write_buffer(self.sky_volume_data.buf.as_ref().unwrap(), *offset as u64 * 16,
+                        bytemuck::cast_slice(vis));
+                }
+            }
+            return grew;
+        }
+        self.sky_volume_uploads.clear();
         let d = sky_bake::BakeSettings::default().dims;
         let stride = (d[0] * d[1] * d[2]) as usize;
         let n_models = self.sky_volumes.keys().copied().max().unwrap_or(0) as usize + 1;
         // meta[model] = (min.xyz, offset_in_voxels) then (max.xyz, has_volume)
         let mut meta = vec![[0.0f32; 4]; n_models * 2];
         let mut data: Vec<[f32; 4]> = Vec::with_capacity(self.sky_volumes.len() * stride);
-        for (&model, (vis, lo, hi)) in self.sky_volumes.iter() {
+        for (&model, (vis, lo, hi, _)) in self.sky_volumes.iter() {
             if vis.len() != stride {
                 continue;
             }
@@ -11479,5 +11543,42 @@ mod vegetation_flutter_tests {
         assert_eq!(amplitude(0.01, 0.1, 1.0, 1.0), 0.01 * 0.1 * 0.22);
         assert_eq!(amplitude(1.05, 5.0, 1.65, 1.0), 0.025);
         assert_eq!(amplitude(1.05, 5.0, 1.65, 2.0), 0.05);
+    }
+}
+
+
+#[cfg(test)]
+mod sky_atlas_tests {
+    #[test]
+    fn atlas_growth_preserves_prior_payload_and_zeroes_unwritten_rows() {
+        let instance = wgpu::Instance::default();
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())).unwrap();
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).unwrap();
+        let mut atlas = super::StorageArray::new("sky_atlas_test");
+        assert!(atlas.ensure_preserving(&device, &queue, 16));
+        let first = [1.25f32, 2.5, 3.75, 4.0];
+        queue.write_buffer(atlas.buf.as_ref().unwrap(), 0, bytemuck::cast_slice(&first));
+        assert!(!atlas.ensure_preserving(&device, &queue, 32));
+        assert!(atlas.ensure_preserving(&device, &queue, 8192));
+        let second = [9.0f32, 8.0, 7.0, 6.0];
+        queue.write_buffer(atlas.buf.as_ref().unwrap(), 4096, bytemuck::cast_slice(&second));
+        let staging = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("sky_atlas_readback"), size: 8192,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        encoder.copy_buffer_to_buffer(atlas.buf.as_ref().unwrap(), 0, &staging, 0, 8192);
+        queue.submit([encoder.finish()]);
+        let (tx, rx) = std::sync::mpsc::channel();
+        staging.slice(..).map_async(wgpu::MapMode::Read, move |r| { let _ = tx.send(r); });
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        rx.recv().unwrap().unwrap();
+        let data = staging.slice(..).get_mapped_range();
+        let values: &[f32] = bytemuck::cast_slice(&data);
+        assert_eq!(&values[..4], &first);
+        assert_eq!(&values[1024..1028], &second);
+        assert!(values[4..1024].iter().all(|&x| x == 0.0));
+        assert!(values[1028..].iter().all(|&x| x == 0.0));
     }
 }

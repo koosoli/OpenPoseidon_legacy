@@ -371,3 +371,22 @@ parser, worker conversion, queue limits and generation rejection. Compressed,
 encrypted, patched or oversized members retain the normal VFS fallback. No
 worker touches QFBank seek state or the file-server MRU. The snapshot path is
 OFF by default until its corpus/performance comparison passes.
+
+
+### Packed-model runtime and sky-atlas follow-up
+
+`dayz-packed-models-20260920-120708` on dca4f954 FAILED with renderer
+OutOfMemory at 12:08:58.941; subsequent timings are invalid. The worker path
+captured 2352 packed-model requests and moved parsing/adaptation off the owner
+thread, but factor-1.5 geometry growth still coincided with sky_volume_data
+128 -> 256 MiB growth. Packed preparation remains OFF. The paired parser tests
+passed (155 assertions / 6 cases including cancellation); private PBO read
+concurrency and bounds passed separately (14 assertions / 1 case).
+
+Inspection found that each added sky volume recopied and restaged the entire
+atlas. Incremental uploads retain stable voxel offsets, upload only new volumes
+and metadata, and copy the GPU prefix only when capacity grows. Lighting samples
+and gates are unchanged. WGR_SKY_VOLUME_INCREMENTAL=0 retains full-upload control;
+runner -FullSkyUploads records this setting. A real GPU readback test verifies
+prefix preservation, new writes and zeroed missing metadata through growth.
+Runtime comparison is still pending; this does not prove the OOM resolved.
