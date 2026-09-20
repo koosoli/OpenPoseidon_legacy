@@ -10,6 +10,8 @@
 #include <cstdint>
 #include <map>
 #include <string>
+#include <optional>
+#include <vector>
 
 #ifndef _WIN32
 #include <Poseidon/IO/Filesystem/DirScanner.hpp>
@@ -17,6 +19,17 @@
 
 namespace Poseidon
 {
+// Owner-thread snapshot of an uncompressed member. Read owns its stream and never
+// accesses bank cursors, the VFS MRU or engine references. Consumers must reject
+// results from a departed mount/world generation before publishing them.
+struct BankReadRequest
+{
+    std::string archive;
+    uint64_t offset = 0;
+    uint64_t bytes = 0;
+    bool Read(std::vector<char>& out) const;
+};
+
 class QFBank;
 
 //! tests whether a bank/file is accessible in a given context
@@ -305,6 +318,7 @@ class QFBank
     const RString& GetProperty(const RString& name) const;
 
     const FileInfoO& FindFileInfo(const char* name) const;
+    std::optional<BankReadRequest> CaptureReadRequest(const char* member) const;
     bool FileExists(const char* name) const;
     // low level access to bank
     void Read(char* buf, long size, const char* name) const; // read raw bytes from bank

@@ -260,6 +260,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     World/Model/test_shape_adapter_collision.cpp
     World/Model/test_shape_adapter_proxy.cpp
     World/Model/test_preparer_determinism.cpp
+    World/Model/test_owned_model_read.cpp
 
 
     # P3D format tests

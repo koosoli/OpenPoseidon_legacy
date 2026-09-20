@@ -13,6 +13,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <string>
 #include <vector>
 
@@ -379,4 +380,39 @@ TEST_CASE("QFBank::GetContentHash cost on a real archive", "[.][ast003bench]")
         std::fflush(stdout);
         bank.Unlock();
     }
+}
+
+
+TEST_CASE("Owned bank reads preserve member ranges without sharing the bank cursor", "[pbo][owned-read]")
+{
+    const std::string first(131071, 'a'), second(65537, 'z');
+    TempPbo pbo("owned_read", {{"first.bin", Bytes(first), 0}, {"second.bin", Bytes(second), 0}});
+    QFBank bank;
+    REQUIRE(bank.open(RString(BankNameOf(pbo.path).c_str())));
+    bank.Lock();
+    auto a = bank.CaptureReadRequest("first.bin");
+    auto b = bank.CaptureReadRequest("second.bin");
+    REQUIRE(a); REQUIRE(b);
+    CHECK_FALSE(bank.CaptureReadRequest("absent.bin"));
+    auto readMany = [](BankReadRequest request, const std::string& expected) {
+        for (int i = 0; i < 20; ++i) {
+            std::vector<char> bytes;
+            if (!request.Read(bytes) || std::string(bytes.begin(), bytes.end()) != expected) return false;
+        }
+        return true;
+    };
+    auto workerA = std::async(std::launch::async, readMany, *a, first);
+    auto workerB = std::async(std::launch::async, readMany, *b, second);
+    CHECK(ReadMember(bank, "second.bin") == second);
+    CHECK(ReadMember(bank, "first.bin") == first);
+    CHECK(workerA.get()); CHECK(workerB.get());
+    std::vector<char> bytes{'x'};
+    auto truncated = *b;
+    ++truncated.bytes; // range extends one byte beyond the archive
+    CHECK_FALSE(truncated.Read(bytes));
+    a->offset = UINT64_MAX;
+    CHECK_FALSE(a->Read(bytes));
+    CHECK(bytes.empty());
+    b->bytes = 65ull * 1024 * 1024;
+    CHECK_FALSE(b->Read(bytes));
 }

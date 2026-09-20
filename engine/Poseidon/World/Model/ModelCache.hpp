@@ -38,6 +38,11 @@ public:
     static std::shared_ptr<Model::Model> LoadLooseFile(const std::string& filePath, std::string* error,
                                                        bool* opened);
 
+    // Pure parser entry for an owned worker read. Does not access the VFS or
+    // mutable derived-cache statistics; sourcePath retains material resolution.
+    static std::shared_ptr<Model::Model> LoadOwnedBytes(const char* data, size_t size,
+                                                       const std::string& sourcePath, std::string& error);
+
     /// RFG-097: a loader for names no file or PBO answers -- a natively mounted Reforger
     /// `.xob`, built through the same converter the world loader uses. Installed by the
     /// native world loader while its archives are mounted; null otherwise. Consulted by

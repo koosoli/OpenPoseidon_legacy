@@ -16,6 +16,7 @@
 #include <Poseidon/Asset/Formats/Enfusion/EnfusionMount.hpp>
 #include <Poseidon/World/Model/Model.hpp>
 #include <Poseidon/World/Model/ModelMemory.hpp>
+#include <Poseidon/IO/Streams/QBStream.hpp>
 #include <Poseidon/World/Model/ModelCache.hpp>
 
 #include <algorithm>
@@ -191,6 +192,7 @@ struct ObjectStreamPreparer::Impl
 
     size_t count = 0;
     std::vector<std::string> paths;
+    std::vector<std::optional<BankReadRequest>> packedReads;
     std::unique_ptr<std::atomic<uint8_t>[]> states;
     std::vector<ModelPtr> models;
     // Protected by mutex. In-flight slots stay occupied until their worker exits.
@@ -215,8 +217,10 @@ struct ObjectStreamPreparer::Impl
     std::vector<uint64_t> payloadBytes;
     uint64_t ParseReservation() const
     {
-        constexpr uint64_t unknownBytes = 16ull * 1024 * 1024;
-        return stats.readyByteBudget ? std::min(unknownBytes, stats.readyByteBudget) : unknownBytes;
+        uint64_t estimate = 16ull * 1024 * 1024;
+        if (!queue.empty() && queue.front() < packedReads.size() && packedReads[queue.front()])
+            estimate += packedReads[queue.front()]->bytes; // owned source buffer overlaps parsing
+        return stats.readyByteBudget ? std::min(estimate, stats.readyByteBudget) : estimate;
     }
     bool HasParseByteRoom() const
     {
@@ -363,14 +367,15 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
             continue;
         }
         const uint32_t index = queue.front();
+        const uint64_t reservation = ParseReservation();
         queue.pop_front();
         --stats.queued;
         if (index >= count)
             continue;
         const uint64_t gen = generation.load(std::memory_order_relaxed);
         const std::string path = paths[index];
+        const auto packedRead = packedReads[index];
         Set(index, State::Parsing);
-        const uint64_t reservation = ParseReservation();
         stats.parseReservedBytes += reservation;
         lock.unlock();
 
@@ -398,6 +403,15 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
         try
         {
             model = ModelCache::LoadLooseFile(path, &error, &opened);
+            if (!opened && packedRead)
+            {
+                std::vector<char> bytes;
+                opened = true;
+                if (packedRead->Read(bytes))
+                    model = ModelCache::LoadOwnedBytes(bytes.data(), bytes.size(), path, error);
+                else
+                    error = "owned archive read failed; retry through VFS";
+            }
             // RFG-103: a native `.xob` is not a loose file -- it lives in a Reforger pak. The
             // world loader's external loader (ModelCache::SetExternalLoader) reads the pak
             // (one ifstream per read) and runs the pure converter, so it is safe here; without
@@ -740,6 +754,23 @@ size_t ObjectStreamPreparer::ModelCount() const
 
 void ObjectStreamPreparer::Reset(const std::string* paths, size_t modelCount)
 {
+    std::vector<std::optional<BankReadRequest>> packedReads(modelCount);
+    const char* packedFlag = std::getenv("WGR_OBJECT_STREAM_PBO");
+    size_t packedCount = 0;
+    if (packedFlag && packedFlag[0] == '1' && GUseFileBanks)
+    {
+        for (size_t i = 0; i < modelCount; ++i)
+        {
+            const auto& path = paths[i];
+            if (path.size() < 4 || path.substr(path.size() - 4) != ".p3d") continue;
+            if (auto* bank = QIFStreamB::AutoBank(path.c_str()))
+            {
+                packedReads[i] = bank->CaptureReadRequest(path.c_str() + bank->GetPrefix().GetLength());
+                packedCount += packedReads[i].has_value();
+            }
+        }
+    }
+    if (packedCount) LOG_INFO(World, "Object stream prepare: {} owned PBO read requests", packedCount);
     std::vector<Impl::ModelPtr> freeLater;
     std::vector<LODShapeWithShadow*> freeShapes;
     std::deque<Impl::ConvertJob> freeConversions;
@@ -780,6 +811,7 @@ void ObjectStreamPreparer::Reset(const std::string* paths, size_t modelCount)
         _impl->stale.assign(modelCount, false);
         _impl->requestedAtUs.assign(modelCount, 0);
         _impl->paths.assign(paths, paths + modelCount);
+        _impl->packedReads = std::move(packedReads);
         _impl->count = modelCount;
         _impl->states = modelCount > 0 ? std::make_unique<std::atomic<uint8_t>[]>(modelCount) : nullptr;
         for (size_t i = 0; i < modelCount; ++i)

@@ -16,6 +16,7 @@
 #include <fstream>
 #include <cstring>
 #include <vector>
+#include <limits>
 
 namespace Poseidon
 {
@@ -143,6 +144,18 @@ std::shared_ptr<Poseidon::Model::Model> DeriveOrHit(const char* data, int size, 
 }
 
 } // namespace
+
+std::shared_ptr<Poseidon::Model::Model> ModelCache::LoadOwnedBytes(
+    const char* data, size_t size, const std::string& sourcePath, std::string& error)
+{
+    error.clear();
+    if (!data || size < 8 || size > static_cast<size_t>(std::numeric_limits<int>::max()))
+    {
+        error = "invalid model byte span";
+        return nullptr;
+    }
+    return DeriveOrHit(data, static_cast<int>(size), sourcePath, std::string(data, 4), {}, error);
+}
 
 std::shared_ptr<Poseidon::Model::Model> ModelCache::LoadLooseFile(const std::string& filePath, std::string* error,
                                                                  bool* opened)

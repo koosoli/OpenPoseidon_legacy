@@ -182,7 +182,7 @@ alone are insufficient coverage evidence. Both runs remain performance failures:
 
 per-pose p95 frame times reach roughly 90-97 ms versus 25-36 ms with detail disabled.
 
-No FPS gain is claimed from their lower medians. Optional detail remains OFF.
+No FPS gain is claimed from their lower means. Optional detail remains OFF.
 
 ### Conventional geometry audit (F)
 
@@ -328,3 +328,46 @@ remove the measured read/upload/renderer-window component. Packed file-server
 MRU access remains on its owner thread.
 
 The artifact checksum manifest is `docs/roadmap/evidence/streaming-20260920.json`.
+
+
+### f602332c runtime results
+
+The committed build passed 8 Rust pool tests, 13 ABI tests and 139 C++ assertions
+across five preparation/cancellation cases. The installed pair is stamped
+f602332c; the ABI handshake succeeds with the memory structure in its layout hash.
+
+`dayz-pressure-growth-20260920-114119` completed full 20k-budget traversal and
+1500 m away/return without renderer errors. The actual growth decision used
+5,533,293,728 allocated bytes against a 5,884,503,654-byte soft budget, choosing
+544 -> 816 MiB vertex capacity instead of 544 -> 1088 MiB. No geometry/object cap
+was reduced. First full set: 19923 placements after 240 admission updates.
+Whole-device peak: 7770 MiB. Per-pose frame mean/p95/max in ms:
+20.96/22.86/49.92, 23.86/28.39/49.93, 13.61/22.06/104.64,
+20.52/35.91/97.20. Endpoint screenshot inspected: expected street buildings,
+walls, trees and wreck remain present; this is comparable coverage, not a claim
+that all DayZ materials or placements are correct.
+
+The same-build, equally instrumented factor-1.5 control
+`dayz-matched-growth15-20260920-114805` also completed cleanly. First full set
+again took 240 updates. Whole-device peak: 7832 MiB. Pose times:
+22.98/29.54/44.78, 20.56/24.00/105.91, 15.39/22.56/133.28,
+19.64/22.25/28.42. The automatic arm has a worse last-pose p95; do NOT advertise
+universal improvement or enable it by default on this evidence. Both controls
+remain available without modifying global graphics settings.
+
+`legacy-control-20260920-114612` completed normally, never entered the modern
+streamer, and retained all 16 selected object IDs before/away/after. Native and
+DayZ lose the corresponding selected IDs while away. This confirms the lifecycle
+boundary rather than validating camera-independent simulation in modern worlds.
+
+### Next measured CPU slice: owned packed-model reads (experimental)
+
+The selected DayZ residential PBO contains 299 uncompressed P3D members,
+including City_School (2,341,505 stored bytes). The existing async preparer
+refuses packed paths, forcing parser and adapter work onto the owner thread.
+WGR_OBJECT_STREAM_PBO=1 snapshots uncompressed member locations on the owner
+thread and reads them using private worker streams. It reuses the existing P3D
+parser, worker conversion, queue limits and generation rejection. Compressed,
+encrypted, patched or oversized members retain the normal VFS fallback. No
+worker touches QFBank seek state or the file-server MRU. The snapshot path is
+OFF by default until its corpus/performance comparison passes.

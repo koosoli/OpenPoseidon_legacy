@@ -232,6 +232,101 @@
         "provenance.json": "63908cbbfaa173571904551da9fdbd7437f91c6afc41624c9d1f84b48d2d4d88",
         "result.json": "9fbbfc3e56e0dada5c803ea2d36a50fc6ff49fbf772966d2051d2ce971ef2087"
       }
+    },
+    {
+      "run": "dayz-pressure-growth-20260920-114119",
+      "provenance": {
+        "head": "f602332cc58428d424784d9660b9057136c8246b",
+        "adaptive": false,
+        "geoGrowth": 0.0,
+        "corpus": "DayZ",
+        "installed": "codex/streaming-residency f602332c 2026-09-20_11:41 deploy-ps1",
+        "readyMb": -1,
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "9B81DF78928073CF3C37F7C248915BA03790617972B4366725993D9EC178086F",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "BC436364917F16633E3F9F957E5E1743459958B7725CD6D906E3B65F7DDE52CF",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "controlled": true,
+        "pressureGrowth": true
+      },
+      "sha256": {
+        "engine.log": "8146c6b4e20d3213e9c81e70aa8affd132bcd6e8c4df78f1749d2ec5e1cecca5",
+        "harness.jsonl": "d7426bbe3a85e46013906a83a3208f49580c5d8ed23f2dce5ec9710a0ac656f0",
+        "provenance.json": "73f68161cd8c77523a18cfe2090c0a967747871354f7aec429a9eb5ee43d6c3a",
+        "result.json": "93fefbe8ae68901a84c22ed362a6cb1363a9be6aa8a26865c8298fd39b759eb3",
+        "whole-gpu-memory.csv": "0fff2a89563921f29304e6320b45d378ae3ad1a7395d48b2fc3428de436ff98c"
+      }
+    },
+    {
+      "run": "legacy-control-20260920-114612",
+      "provenance": {
+        "geoGrowth": 2.0,
+        "adaptive": false,
+        "pressureGrowth": false,
+        "head": "f602332cc58428d424784d9660b9057136c8246b",
+        "corpus": "Legacy",
+        "installed": "codex/streaming-residency f602332c 2026-09-20_11:41 deploy-ps1",
+        "readyMb": -1,
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "9B81DF78928073CF3C37F7C248915BA03790617972B4366725993D9EC178086F",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "BC436364917F16633E3F9F957E5E1743459958B7725CD6D906E3B65F7DDE52CF",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "controlled": false
+      },
+      "sha256": {
+        "engine.log": "193735662ab51956abec9bace28c244fe8afcc80f320de6bc1e579eea00db0fc",
+        "harness.jsonl": "e5a27c94fffd3b32e6734ed7a5d1c0c685c74ffa3f231c5e129388f6fdd621e5",
+        "provenance.json": "1a82df9c6b804c7d355a326bf9daba1c4fa8054cbe616909a6fc1b581fb403fd",
+        "result.json": "c7886873157d319b2c36f18441dd97c403c0ffe88fa5b18fb7433b72fe574604"
+      }
+    },
+    {
+      "run": "dayz-matched-growth15-20260920-114805",
+      "provenance": {
+        "head": "f602332cc58428d424784d9660b9057136c8246b",
+        "installed": "codex/streaming-residency f602332c 2026-09-20_11:41 deploy-ps1",
+        "geoGrowth": 1.5,
+        "readyMb": -1,
+        "adaptive": false,
+        "corpus": "DayZ",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "9B81DF78928073CF3C37F7C248915BA03790617972B4366725993D9EC178086F",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "BC436364917F16633E3F9F957E5E1743459958B7725CD6D906E3B65F7DDE52CF",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "controlled": true,
+        "pressureGrowth": false
+      },
+      "sha256": {
+        "engine.log": "0bbd6bba02106e7c6a42fd2a5468a1082b49f11a543de510f1b4b45d4e15bc75",
+        "harness.jsonl": "fbe94443b3bbb4261631a2b5142d381dd41f9680a6af3440d4dd8e44e215dc87",
+        "provenance.json": "9a9ca1016d7984b8dbd35f546aae1246b7ef7838fa10c1b84e5be9a3669d0720",
+        "result.json": "432e9924add036579eb85eba2760b0178a7bfb631b41d68659f9eb1408e04bfe",
+        "whole-gpu-memory.csv": "f325c17324f55c7aea5863735857447adb4ea7c1c17f4161f0d826b754d1c1be"
+      }
     }
   ]
 }

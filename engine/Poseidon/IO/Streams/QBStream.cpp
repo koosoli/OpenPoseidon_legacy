@@ -9,6 +9,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <string>
+#include <fstream>
 #include <vector>
 #include <Poseidon/Foundation/Algorithms/Sha256.hpp>
 #include <Poseidon/Foundation/Containers/Array.hpp>
@@ -1024,6 +1025,42 @@ int QFBank::GetFileOrder(const char* file)
         return 0;
     }
     return info.startOffset;
+}
+
+bool BankReadRequest::Read(std::vector<char>& out) const
+{
+    out.clear();
+    // Bound the optional fast path. Larger or unsupported members retain the VFS
+    // fallback; never allocate based on an unchecked archive length.
+    if (bytes == 0 || bytes > 64ull * 1024 * 1024) return false;
+    std::ifstream stream(archive, std::ios::binary | std::ios::ate);
+    if (!stream) return false;
+    const std::streamoff end = stream.tellg();
+    if (end < 0 || offset > static_cast<uint64_t>(end) ||
+        bytes > static_cast<uint64_t>(end) - offset) return false;
+    stream.seekg(static_cast<std::streamoff>(offset));
+    out.resize(static_cast<size_t>(bytes));
+    if (!stream.read(out.data(), static_cast<std::streamsize>(bytes)))
+    {
+        out.clear();
+        return false;
+    }
+    return true;
+}
+
+std::optional<BankReadRequest> QFBank::CaptureReadRequest(const char* member) const
+{
+    // MAIN THREAD ONLY. Copy metadata while the mounted bank owns its archive.
+    // Do not expose an unlocked QFBank pointer or a mapped Ref to workers.
+    if (!Load()) return std::nullopt;
+    const auto& info = FindFileInfo(member);
+    if (IsNull(info) || info.compressedMagic != 0 || info.startOffset < 0 ||
+        info.length <= 0 || info.length > 64 * 1024 * 1024) return std::nullopt;
+#if _ENABLE_PATCHING
+    if (info.loadFromFile) return std::nullopt;
+#endif
+    return BankReadRequest{std::string(static_cast<const char*>(_openName)),
+                           static_cast<uint64_t>(info.startOffset), static_cast<uint64_t>(info.length)};
 }
 
 Ref<IFileBuffer> QFBank::Read(const char* name) const
