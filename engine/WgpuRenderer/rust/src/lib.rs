@@ -1685,7 +1685,7 @@ impl Renderer {
             config.format,
             sample_count,
         );
-        let gfx3d = Gfx3d::new(
+        let mut gfx3d = Gfx3d::new(
             &device,
             &textures,
             color_format,
@@ -1696,6 +1696,7 @@ impl Renderer {
             gpu_driven_enabled,
             gpu_driven_enabled && multi_draw_count,
         );
+        gfx3d.set_geometry_pressure_budget(residency_budget_bytes);
         // One line, every renderer gate, always printed — because "is this feature on?"
         // turned out to be genuinely hard to answer. Each gate is decided in up to three
         // layers: the Rust default here, a separate C++ default in EngineWgpu, and
@@ -2338,7 +2339,14 @@ impl Renderer {
             .saturating_add(object_texture_retired_bytes)
             .saturating_add(geometry.capacity_bytes)
             .saturating_add(geometry.retired_bytes);
+        // Backend counters include fixed targets, staging and in-flight resources.
+        // They do not include allocator slack or other applications, and some
+        // backends leave counters unset. Do not silently redefine payload budgets.
+        let counters = self.device.get_internal_counters().hal;
+        let backend_allocation_bytes = (counters.buffer_memory.read().max(0) as u64)
+            .saturating_add(counters.texture_memory.read().max(0) as u64);
         ffi::WgrMemoryStats {
+            backend_allocation_bytes,
             tracked_bytes,
             budget_bytes: self.residency_budget_bytes,
             object_texture_bytes,

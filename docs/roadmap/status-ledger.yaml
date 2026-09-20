@@ -6621,13 +6621,13 @@ tickets:
     owner: null
     branch: codex/streaming-residency
     baseline_commit: 03e71371
-    verification_commit: 21b89e79
+    verification_commit: c2c8eb0b
     milestone: 0
     milestone_role: NON_BLOCKING
     depends_on: []
     blocked_by: []
     blocks: []
-    implementation_commits: [7d5f3e71, f733e708, 8e09f391, 7d8fb75b, a531d7b9, 21b89e79]
+    implementation_commits: [7d5f3e71, f733e708, 8e09f391, 7d8fb75b, a531d7b9, 21b89e79, 082eaa06, c2c8eb0b]
     production_call_sites: []
     test_ids: [stationary-residency, preparer-byte-budget, preparer-generation-cancellation]
     benchmark_artifacts: []
@@ -6637,8 +6637,8 @@ tickets:
       - The staged streaming plan remains in progress; see the decision record for uncompleted gates.
       - Camera residency still removes native logical objects. Do not broaden this lifecycle to legacy worlds or default-enable pressure-driven object removal.
       - Preparation accounting includes estimated conversion reservations; actual decoder scratch and Shape allocations are not measured.
-      - Adaptive texture detail remains opt-in; first controlled comparisons failed due to render-thread stalls. Mesh loss is corrected; nonblocking repeat is in progress.
-      - DayZ dense traversal on a531d7b9 failed with GPU Out of Memory during pool growth; subsequent timings are invalid.
+      - Adaptive texture detail remains opt-in; first controlled comparisons failed due to render-thread stalls. Mesh loss is corrected; nonblocking native p95 is comparable, but long maxima and broader quality gates remain.
+      - DayZ growth-factor 2 run failed with GPU Out of Memory; factor 1.5 completed cleanly but remains a diagnostic override pending a comparable automatic-policy test.
     fallback: WGR_ADAPTIVE_TEXTURE_DETAIL and WGR_OBJECT_STREAM_GPU_BUDGET remain off; WGR_OBJECT_STREAM_READY_MB=0 disables the new ready-payload gate; old ocean remains default.
     reviewer: null
     reviewer_method: Installed native runtime reproduction, comparable-coverage checks and real worker cancellation tests.

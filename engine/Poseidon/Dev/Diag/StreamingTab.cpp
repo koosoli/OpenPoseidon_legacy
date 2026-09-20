@@ -222,6 +222,8 @@ void DrawStreamingTab()
         // device's VRAM -- read "over" with that in mind.
         if (s.gpu.valid)
         {
+            Row("backend buffers + textures", "%.0f MB (excludes allocator slack)",
+                s.gpu.backendAllocationBytes / (1024.0 * 1024.0));
             Row("gpu tracked / budget", "%.0f / %.0f MB%s", s.gpu.trackedBytes / (1024.0 * 1024.0),
                 s.gpu.budgetBytes / (1024.0 * 1024.0), s.gpu.overBudget ? "  OVER" : "");
             Row("gpu tex / geom live / geom cap", "%.0f / %.0f / %.0f MB",

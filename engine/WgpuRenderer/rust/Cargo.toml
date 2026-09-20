@@ -21,7 +21,7 @@ dlss = ["dep:ash"]
 [dependencies]
 # naga-ir: lets us hand wgpu a pre-composed naga::Module (ShaderSource::Naga),
 # which is how the naga_oil-composed shaders are fed in (see src/shaders/).
-wgpu = { version = "29.0", features = ["naga-ir"] }
+wgpu = { version = "29.0", features = ["naga-ir", "counters"] }
 # Shader module system (#import / #define_import_path). 0.22 tracks naga 29, the
 # same naga wgpu 29 pins, so the naga crate unifies to one version.
 naga_oil = "0.22"

@@ -4494,11 +4494,11 @@ void EngineWgpu::NextFrame()
             {
                 LOG_INFO(Graphics,
                          "Wgpu residency: tracked={} budget={} textures={} textureBytes={} "
-                         "geometryLive={} geometryCapacity={} geometryRetired={} overBudget={}",
+                         "geometryLive={} geometryCapacity={} geometryRetired={} overBudget={} backendAllocations={}",
                          stats.trackedBytes, stats.budgetBytes, stats.objectTextureCount,
                          stats.objectTextureBytes, stats.geometryLiveBytes,
                          stats.geometryCapacityBytes, stats.geometryRetiredBytes,
-                         stats.overBudget ? 1 : 0);
+                         stats.overBudget ? 1 : 0, stats.backendAllocationBytes);
             }
         }
         FlushPendingScreenshot();
@@ -11696,6 +11696,7 @@ bool EngineWgpu::GetGpuMemoryStatsFromRenderer(GpuMemoryStatsOut& out) const
     out.geometryCapacityBytes = stats.geometry_capacity_bytes;
     out.geometryRetiredBytes = stats.geometry_retired_bytes;
     out.objectTextureRetiredBytes = stats.object_texture_retired_bytes;
+    out.backendAllocationBytes = stats.backend_allocation_bytes;
     out.objectTextureCount = stats.object_texture_count;
     out.overBudget = stats.over_budget != 0;
     return true;

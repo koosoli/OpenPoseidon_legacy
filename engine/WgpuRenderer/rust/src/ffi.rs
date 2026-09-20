@@ -1739,6 +1739,7 @@ const fn wgr_layout_hash() -> u32 {
     // rule 0 exists for, in the one direction where it corrupts the caller's stack.
     h = hash_size(h, sz::<WgrObjectStats>());
     h = hash_size(h, sz::<WgrSmokeVolumeParams>()); // SMK-038
+    h = hash_size(h, sz::<WgrMemoryStats>());
     h
 }
 
@@ -1759,9 +1760,9 @@ pub extern "C" fn wgr_abi_version() -> u32 {
     if cfg!(debug_assertions) {
         option_env!("WGR_TEST_ABI_VERSION")
             .and_then(|value| value.parse::<u32>().ok())
-            .unwrap_or(10)
+            .unwrap_or(11)
     } else {
-        10
+        11
     }
 }
 
@@ -2042,7 +2043,7 @@ mod abi_tests {
 
     #[test]
     fn exported_abi_version_matches_the_public_contract() {
-        assert_eq!(super::wgr_abi_version(), 10); // negative 2D fog lane carries HDR particle gain
+        assert_eq!(super::wgr_abi_version(), 11); // backend allocation counter extends WgrMemoryStats
     }
 
     #[test]
@@ -3496,6 +3497,7 @@ pub struct WgrMemoryStats {
     pub object_texture_count: u32,
     pub over_budget: u32,
     pub object_texture_retired_bytes: u64,
+    pub backend_allocation_bytes: u64, // buffers + textures, including non-streamed render resources
 }
 
 /// Fill `out` with the latest grass instance counts. Returns 1 on success, 0 when

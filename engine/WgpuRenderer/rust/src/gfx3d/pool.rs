@@ -108,6 +108,18 @@ fn grown_cap(cap: u32, n: u32) -> u32 {
     scaled.max(cap.saturating_add(n))
 }
 
+// Keep ordinary growth unchanged unless its old+new overlap crosses the soft
+// allocation budget. Required geometry still fits; pressure only reduces slack.
+fn pressure_cap(cap: u32, n: u32, ordinary: u32, unit_bytes: u64,
+                allocated: u64, budget: u64) -> u32 {
+    if budget == 0 || allocated == 0 ||
+        allocated.saturating_add(u64::from(ordinary) * unit_bytes) <= budget {
+        return ordinary;
+    }
+    let smaller = (u64::from(cap) * 3).div_ceil(2).min(u64::from(u32::MAX)) as u32;
+    ordinary.min(smaller.max(cap.saturating_add(n)))
+}
+
 // A first-fit free-list allocator over a linear space of `cap` fixed-size units
 // (vertices for the vbuf, indices for the ibuf). Freed ranges coalesce with adjacent
 // free blocks so fragmentation doesn't accumulate across map changes.
@@ -287,6 +299,7 @@ pub struct GeometryPool {
     // realloc + GPU copy. Reset to 0 by any frame that is not under the mark, by any
     // growth, and by a shrink that actually fired.
     shrink_streak: u32,
+    pressure_budget: u64,
 }
 
 impl GeometryPool {
@@ -341,6 +354,7 @@ impl GeometryPool {
             retired: Vec::new(),
             submitted_retired_bytes: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
             shrink_streak: 0,
+            pressure_budget: 0,
         }
     }
 
@@ -585,12 +599,35 @@ impl GeometryPool {
         self.ialloc.free(alloc.ibase, icount);
     }
 
+    pub fn set_pressure_budget(&mut self, bytes: u64) {
+        // Explicit historical factor overrides remain exact for reproducible A/B.
+        let enabled = std::env::var("WGR_GEO_POOL_PRESSURE_GROWTH").is_ok_and(|v| v == "1");
+        if enabled && std::env::var_os("WGR_GEO_POOL_GROWTH").is_none() {
+            self.pressure_budget = bytes;
+        }
+    }
+
+    fn growth_capacity(&self, device: &wgpu::Device, cap: u32, n: u32, unit: u64) -> u32 {
+        let ordinary = grown_cap(cap, n);
+        if self.pressure_budget == 0 { return ordinary; }
+        let counters = device.get_internal_counters().hal;
+        let allocated = (counters.buffer_memory.read().max(0) as u64)
+            .saturating_add(counters.texture_memory.read().max(0) as u64);
+        let result = pressure_cap(cap, n, ordinary, unit, allocated, self.pressure_budget);
+        if result != ordinary {
+            pool_event(&format!("pressure growth {} -> {} instead of {} bytes; allocated {} budget {}",
+                u64::from(cap) * unit, u64::from(result) * unit, u64::from(ordinary) * unit,
+                allocated, self.pressure_budget));
+        }
+        result
+    }
+
     fn alloc_verts(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, n: u32) -> u32 {
         if let Some(o) = self.valloc.alloc(n) {
             return o;
         }
         let cap = self.valloc.cap;
-        let new_cap = grown_cap(cap, n);
+        let new_cap = self.growth_capacity(device, cap, n, VERT_SIZE);
         let new_buf = Self::make_vbuf(device, new_cap);
         Self::copy_prefix(
             device,
@@ -614,7 +651,7 @@ impl GeometryPool {
             return o;
         }
         let cap = self.ialloc.cap;
-        let new_cap = grown_cap(cap, n);
+        let new_cap = self.growth_capacity(device, cap, n, INDEX_SIZE);
         let new_buf = Self::make_ibuf(device, new_cap);
         Self::copy_prefix(
             device,
@@ -895,6 +932,17 @@ mod tests {
     // Whatever WGR_GEO_POOL_GROWTH is set to, growth must (a) always serve the allocation that
     // triggered it and (b) never wrap. `cap + n` used to be a plain add: at a capacity near
     // u32::MAX that is an overflow panic in a debug build instead of a saturating refusal.
+    #[test]
+    fn pressure_growth_counts_overlap_without_losing_required_capacity() {
+        // Current allocation includes the old pool; the full new pool overlaps it.
+        assert_eq!(super::pressure_cap(100, 1, 200, 4, 1000, 1800), 200);
+        assert_eq!(super::pressure_cap(100, 1, 200, 4, 1000, 1799), 150);
+        assert_eq!(super::pressure_cap(100, 90, 200, 4, 1000, 1799), 190);
+        assert_eq!(super::pressure_cap(100, 1, 200, 4, 0, 100), 200);
+        assert_eq!(super::pressure_cap(100, 1, 200, 4, 1000, 0), 200);
+        assert_eq!(super::pressure_cap(u32::MAX-1, 4, u32::MAX, 36, u64::MAX, 1), u32::MAX);
+    }
+
     #[test]
     fn growth_always_fits_the_pending_alloc_and_never_overflows() {
         for &(cap, n) in &[

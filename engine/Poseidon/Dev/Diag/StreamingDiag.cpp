@@ -72,6 +72,7 @@ StreamingSnapshot CollectStreamingSnapshot()
             out.gpu.geometryCapacityBytes = mem.geometryCapacityBytes;
             out.gpu.geometryRetiredBytes = mem.geometryRetiredBytes;
             out.gpu.objectTextureRetiredBytes = mem.objectTextureRetiredBytes;
+            out.gpu.backendAllocationBytes = mem.backendAllocationBytes;
             out.gpu.objectTextureCount = mem.objectTextureCount;
             out.gpu.overBudget = mem.overBudget;
         }

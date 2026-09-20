@@ -34,7 +34,7 @@
 // and the handshake refuses the pair — so this number only has to move for
 // changes the hash cannot see (an added/removed entry point, a semantic change
 // to an existing one).
-#define WGR_ABI_VERSION 10u
+#define WGR_ABI_VERSION 11u
 
 // Required capabilities are negotiated as a bit set inside WgrAbiCheck. A
 // newer engine can reject an older renderer DLL even if the shared layouts
@@ -1796,6 +1796,7 @@ struct WgrMemoryStats
     uint32_t object_texture_count;
     uint32_t over_budget;
     uint64_t object_texture_retired_bytes; // submitted payload awaiting queue completion
+    uint64_t backend_allocation_bytes; // all backend buffer/texture allocations; zero if unavailable
 };
 
 enum WgrWaterKind : uint32_t { WGR_WATER_KIND_OCEAN = 0, WGR_WATER_KIND_RIVER = 1 };
@@ -2845,6 +2846,7 @@ constexpr uint32_t WgrLayoutHash()
     // with the handshake reporting no problem -- a silent mismatch that corrupts the caller.
     h = WgrHashSize(h, sizeof(WgrObjectStats));
     h = WgrHashSize(h, sizeof(WgrSmokeVolumeParams)); // SMK-038
+    h = WgrHashSize(h, sizeof(WgrMemoryStats));
     return h;
 }
 

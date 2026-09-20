@@ -1,0 +1,237 @@
+{
+  "scope": "Local reproducibility manifest; failed runs are explicitly classified in STREAMING-AUDIT-20260920.md. Reforger is workload evidence, not ground-truth asset compatibility.",
+  "runs": [
+    {
+      "run": "detail-off-20260920-103354",
+      "provenance": {
+        "head": "7d8fb75b895cddd08d29cc6f5bb29bbd3cecf764",
+        "controlled": true,
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "7A070D421C133BB30D58CCF2BBD2D952241B6C10AB26257D5C58CC711659A13C",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "E8689875C4CE06514FD1424F48389E2795D29AF76D70EF11E920FE2D047049E6",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "readyMb": -1,
+        "adaptive": false,
+        "installed": "codex/streaming-residency 7d8fb75b 2026-09-20_10:33 deploy-ps1"
+      },
+      "sha256": {
+        "engine.log": "2128fcf167363855f6e6a55b674018a46197e1e04ed130e9d13f1392e862bd29",
+        "harness.jsonl": "701b4cfb403cd230863a507094d4e18f9c802739e8a966f339e3e998eebc80ba",
+        "provenance.json": "ef351cda7f2b171d429696f14fdc869ce7ba8efaca5c8efdd54a846dd1a2c6b5",
+        "result.json": "8a15a347e8ff9046e48e6b8a345887b0454407e56096717f21176d8a96e5e391"
+      }
+    },
+    {
+      "run": "detail-on-20260920-103730",
+      "provenance": {
+        "head": "7d8fb75b895cddd08d29cc6f5bb29bbd3cecf764",
+        "readyMb": -1,
+        "adaptive": true,
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "7A070D421C133BB30D58CCF2BBD2D952241B6C10AB26257D5C58CC711659A13C",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "E8689875C4CE06514FD1424F48389E2795D29AF76D70EF11E920FE2D047049E6",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "controlled": true,
+        "installed": "codex/streaming-residency 7d8fb75b 2026-09-20_10:33 deploy-ps1"
+      },
+      "sha256": {
+        "engine.log": "22b1ac6e2fc4065a95a7366caf8607f4389f9bfac3d766aa5bafeda3db28dc84",
+        "harness.jsonl": "08c40915ab8408582dd8991ad60c20b4430014d917e6af4f36b0e735e4452846",
+        "provenance.json": "96a9aa43b53f633e37e0e442936b97347495a275dbb579b80b558dcf8de57eb9",
+        "result.json": "5176088ad4e3979b78942ab77afd4dce778b4f6b18801100b0631facd18bc111"
+      }
+    },
+    {
+      "run": "detail-fixed-20260920-104616",
+      "provenance": {
+        "head": "a531d7b97d1cf2d5db722d0519c6f8ebbcdfd764",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "7CF2BAE3C75462DFE60BDE11E55992550DDFD3A71B43FB633AE898F03D2B0C3B",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "93C918F06E8E06C65B5384365E05998326EBD917E29457064114FF40AB5DB58D",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "adaptive": true,
+        "installed": "codex/streaming-residency a531d7b9 2026-09-20_10:46 deploy-ps1",
+        "controlled": true,
+        "readyMb": -1
+      },
+      "sha256": {
+        "engine.log": "7cd7392d7f0d74ea833193cb0dbd78a8e4454727dc89bd2014e47bcfe996aa09",
+        "harness.jsonl": "cc42c58dbf44169aaf64583cf1ed2d289be64503a716f5c604145733f7e426ee",
+        "provenance.json": "f64389a0aaf0f5ad91cfd5f00cf4eff93bd803f23953a2e0851f629bf7334ce6",
+        "result.json": "99c0d92288f70cc8a49fdb65363ced9e7ffac11736ce4c0d73977e819451a77b"
+      }
+    },
+    {
+      "run": "detail-idle-20260920-105734",
+      "provenance": {
+        "corpus": "Native",
+        "adaptive": true,
+        "controlled": true,
+        "installed": "codex/streaming-residency 21b89e79 2026-09-20_10:57 deploy-ps1",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "5FD3F4E2442FCC9367876891F967E5BDF0D6F8A596808997997BB236BC58FCB4",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "0316B6B0CB2D57B42D0639909EA7259C5B238C5E26F08C0E494C2E74777A4A4A",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "readyMb": -1,
+        "head": "21b89e79d7edd76a56439a80a66b150c40841c56"
+      },
+      "sha256": {
+        "engine.log": "63131f4fb2c9c714ff2f116f4dd3fb1e11ad99ef7a018c6003c007d2e8229e34",
+        "harness.jsonl": "4d2b63d2352656586a0e3fb342881803a7fe965bab54f09d22f7f28aa72e2aca",
+        "provenance.json": "a60cffd4eb7556a40fdb94a66086c67f4a13819666eef0ac12dcc18eba5a8d10",
+        "result.json": "6ab658772c3c5b34dc4a1acdd2660dbb83aed0a59bd85a637c4b7047bb9f4840"
+      }
+    },
+    {
+      "run": "dayz-dense-20260920-104925",
+      "provenance": {
+        "corpus": "DayZ",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "7CF2BAE3C75462DFE60BDE11E55992550DDFD3A71B43FB633AE898F03D2B0C3B",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "93C918F06E8E06C65B5384365E05998326EBD917E29457064114FF40AB5DB58D",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "adaptive": false,
+        "controlled": true,
+        "installed": "codex/streaming-residency a531d7b9 2026-09-20_10:46 deploy-ps1",
+        "head": "a531d7b97d1cf2d5db722d0519c6f8ebbcdfd764",
+        "readyMb": -1
+      },
+      "sha256": {
+        "engine.log": "7cdd2c1f5f6e49d5cd7d3c2af858aab0e3ab4b47dd639eb50230cf5da6c13bc3",
+        "harness.jsonl": "b612f4a5ef43b57233073be436d7c4d159366e1f4bc8d9cb44453ec9f5c07e55",
+        "provenance.json": "06f5bda357801d3a9647baa399cf8698e2d324c074d27950fff62666f84595a6",
+        "result.json": "1371c7ab981214a23ea7a770a267c17b6dc2044b37e671cb7df3773819488c19"
+      }
+    },
+    {
+      "run": "dayz-growth15-20260920-110626",
+      "provenance": {
+        "controlled": true,
+        "corpus": "DayZ",
+        "readyMb": -1,
+        "installed": "codex/streaming-residency 082eaa06 2026-09-20_11:06 deploy-ps1",
+        "adaptive": false,
+        "geoGrowth": 1.5,
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "FD7D95E679F11375F6818E2A39B0ACFFF781294DF1D0712D0CCDA10316DAAFAF",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "6316DF8922556737B5CBFF58403550CCB60136AC3A32DFD3E8A9C733B98699B7",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "head": "082eaa068221866da2e42d307f8b5dcf4577b4cb"
+      },
+      "sha256": {
+        "engine.log": "c1a6cb58800331c5f3d3b7a5261af9bd59fc3ca10c4a56c5618a22e6442a9b3d",
+        "harness.jsonl": "abe3efb43a8140ae6899cb4c6b01f7bd1be888a77d7d5cb3b32c897a98746bf1",
+        "provenance.json": "8e233b1e7f2da740d1d08f464e45eb1cb7633f033edf23a6665a0a48167b7776",
+        "result.json": "2f25d215879f4fff4ca6204e7b414ff59ddc0038207386a07087aa7605cdec04",
+        "whole-gpu-memory.csv": "2b13d0ce482b6794a7035f9de6f6eb910e5e11915c73baafa04237cb40cbdfdc"
+      }
+    },
+    {
+      "run": "pressure-fill-20260920-111148",
+      "provenance": {
+        "corpus": "Native",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "FD7D95E679F11375F6818E2A39B0ACFFF781294DF1D0712D0CCDA10316DAAFAF",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "6316DF8922556737B5CBFF58403550CCB60136AC3A32DFD3E8A9C733B98699B7",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "adaptive": false,
+        "readyMb": 1,
+        "head": "082eaa068221866da2e42d307f8b5dcf4577b4cb",
+        "geoGrowth": 2.0,
+        "installed": "codex/streaming-residency 082eaa06 2026-09-20_11:06 deploy-ps1",
+        "controlled": false
+      },
+      "sha256": {
+        "engine.log": "b1af2ca110589433f20280cc7ba11a910cd397db3c1438ab811af4d179170847",
+        "harness.jsonl": "ff70e108ff6e8c1f4a023275c116447458539558031ffc6583cb59be0d1ba7b4",
+        "provenance.json": "8a18d6defe4e544dca05b80b9077f5b9f2a14568ed6524ff35c03a2408eabafa"
+      }
+    },
+    {
+      "run": "pressure-progress-20260920-112406",
+      "provenance": {
+        "geoGrowth": 2.0,
+        "installed": "codex/streaming-residency c2c8eb0b+dirty 2026-09-20_11:23 deploy-ps1",
+        "controlled": false,
+        "head": "c2c8eb0bd60b7635e593db872d014988a54eba6b",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "A6EDDC45B67B6EF2966B1C02A3581946198D39903C9B70C1A2F634AC05589B75",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "E3B1027A7FFC2E64B65125285EB422F6CC3445CDE6A8A5C783AF948EB48E77A3",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "corpus": "Native",
+        "readyMb": 1,
+        "adaptive": false
+      },
+      "sha256": {
+        "engine.log": "d083aa40b259299c4b60cbd651de456a64668e6ad9380a071e633f38a440f6b8",
+        "harness.jsonl": "ea07e8af65c20a91752ab9b03954c78275e538e089413914eac86cefcb8815ba",
+        "provenance.json": "63908cbbfaa173571904551da9fdbd7437f91c6afc41624c9d1f84b48d2d4d88",
+        "result.json": "9fbbfc3e56e0dada5c803ea2d36a50fc6ff49fbf772966d2051d2ce971ef2087"
+      }
+    }
+  ]
+}

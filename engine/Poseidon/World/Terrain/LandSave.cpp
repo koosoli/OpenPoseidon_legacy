@@ -4187,16 +4187,27 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
     if (asyncOn && created == 0 && waited > 0)
     {
         const auto prep = _modernObjectPreparer->SnapshotStats();
-        if (prep.readyByteParks && prep.readyPayloadBytes && !prep.parseReservedBytes &&
-            !prep.conversionReservedBytes)
+        if (prep.readyByteParks && (prep.readyPayloadBytes || prep.conversionReservedBytes) &&
+            !prep.parseReservedBytes)
         {
             uint32_t redundant = 0;
             for (uint32_t i = 0; i < _modernObjectModels.size(); ++i)
             {
-                if (_modernObjectPreparer->Query(i) == ObjectStreamPreparer::State::Ready &&
+                const auto state = _modernObjectPreparer->Query(i);
+                if ((state == ObjectStreamPreparer::State::Ready ||
+                     state == ObjectStreamPreparer::State::Converted) &&
                     Shapes.Find(_modernObjectModels[i], false, true))
                 {
-                    if (_modernObjectPreparer->Take(i)) ++redundant;
+                    if (state == ObjectStreamPreparer::State::Ready)
+                    {
+                        if (_modernObjectPreparer->Take(i)) ++redundant;
+                    }
+                    else
+                    {
+                        auto converted = _modernObjectPreparer->TakeConverted(i);
+                        delete converted.shape;
+                        ++redundant;
+                    }
                 }
             }
             if (redundant)

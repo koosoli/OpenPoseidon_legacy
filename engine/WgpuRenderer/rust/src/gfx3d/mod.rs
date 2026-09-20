@@ -5320,6 +5320,10 @@ impl Gfx3d {
         key.data().as_ffi()
     }
 
+    pub fn set_geometry_pressure_budget(&mut self, bytes: u64) {
+        self.pool.set_pressure_budget(bytes);
+    }
+
     pub fn geometry_residency(&self) -> pool::GeometryResidency {
         self.pool.residency()
     }
