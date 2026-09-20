@@ -6621,25 +6621,25 @@ tickets:
     owner: null
     branch: codex/streaming-residency
     baseline_commit: 03e71371
-    verification_commit: f602332c
+    verification_commit: 82cbb5a2
     milestone: 0
     milestone_role: NON_BLOCKING
     depends_on: []
     blocked_by: []
     blocks: []
-    implementation_commits: [7d5f3e71, f733e708, 8e09f391, 7d8fb75b, a531d7b9, 21b89e79, 082eaa06, c2c8eb0b, f602332c]
+    implementation_commits: [7d5f3e71, f733e708, 8e09f391, 7d8fb75b, a531d7b9, 21b89e79, 082eaa06, c2c8eb0b, f602332c, dca4f954, 0d6a498f, 82cbb5a2]
     production_call_sites: []
     test_ids: [stationary-residency, preparer-byte-budget, preparer-generation-cancellation]
     benchmark_artifacts: [docs/roadmap/evidence/streaming-20260920.json]
-    evidence_hash: af2410cbbd26cfa4868487e40dbd4ad17d9220a8012c7e999e7bccdf6db3dce6
+    evidence_hash: 2a9ca5c31647f7cc5cfd30a9d990c56f27b229180c9fd79d21f17971ae78fcaa
     decision_record: docs/roadmap/decisions/STREAMING-AUDIT-20260920.md
     known_failures:
       - The staged streaming plan remains in progress; see the decision record for uncompleted gates.
       - Camera residency still removes native logical objects. Do not broaden this lifecycle to legacy worlds or default-enable pressure-driven object removal.
       - Preparation accounting includes estimated conversion reservations; actual decoder scratch and Shape allocations are not measured.
       - Adaptive texture detail remains opt-in; first controlled comparisons failed due to render-thread stalls. Mesh loss is corrected; nonblocking native p95 is comparable, but long maxima and broader quality gates remain.
-      - DayZ growth-factor 2 run failed with GPU Out of Memory; factor 1.5 and allocation-aware growth completed cleanly. Automatic growth remains off because the final pose had worse p95 than the same-build factor-1.5 control.
-    fallback: WGR_ADAPTIVE_TEXTURE_DETAIL and WGR_OBJECT_STREAM_GPU_BUDGET remain off; WGR_OBJECT_STREAM_READY_MB=0 disables the new ready-payload gate; old ocean remains default.
+      - DayZ growth-factor 2 run failed with GPU Out of Memory; factor 1.5 and allocation-aware growth completed with the original PBO path, but packed worker preparation still causes OOM. Automatic growth remains off because the final pose had worse p95 than the same-build factor-1.5 control.
+    fallback: WGR_OBJECT_STREAM_PBO remains off; WGR_SKY_VOLUME_INCREMENTAL=0 restores full atlas uploads; WGR_ADAPTIVE_TEXTURE_DETAIL and WGR_OBJECT_STREAM_GPU_BUDGET remain off; WGR_OBJECT_STREAM_READY_MB=0 disables the new ready-payload gate; old ocean remains default.
     reviewer: null
     reviewer_method: Installed native runtime reproduction, comparable-coverage checks and real worker cancellation tests.
     supersedes: []

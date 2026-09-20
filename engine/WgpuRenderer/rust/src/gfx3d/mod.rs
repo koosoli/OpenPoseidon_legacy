@@ -4010,6 +4010,7 @@ pub struct Gfx3d {
     sky_volumes: FxHashMap<u32, (Vec<[f32; 4]>, [f32; 3], [f32; 3], usize)>,
     sky_volume_uploads: Vec<u32>,
     sky_volume_voxels: usize,
+    sky_volume_free: Vec<usize>,
     // Diagnostics awaiting a log sink (sky bake, staging refusals); drained by lib.rs each
     // frame. Gfx3d has no log sink of its own, and `eprintln!` never reaches --log-file.
     queued_log: Vec<String>,
@@ -4819,6 +4820,7 @@ impl Gfx3d {
             sky_volumes: FxHashMap::default(),
             sky_volume_uploads: Vec::new(),
             sky_volume_voxels: 0,
+            sky_volume_free: Vec::new(),
             // Announced through the GAME log (drained by lib.rs into the LogSink on the first
             // frame) so a captured road screenshot can be matched to which arm produced it.
             queued_log: vec![road_pixel_conform_log_line()],
@@ -8529,6 +8531,8 @@ impl Gfx3d {
         let offset = if let Some(old) = self.sky_volumes.get(&model) {
             if old.0.len() != vis.len() { return; }
             old.3
+        } else if let Some(offset) = self.sky_volume_free.pop() {
+            offset
         } else {
             let offset = self.sky_volume_voxels;
             self.sky_volume_voxels += vis.len();
@@ -8537,6 +8541,18 @@ impl Gfx3d {
         self.sky_volumes.insert(model, (vis, bmin, bmax, offset));
         self.sky_volume_uploads.push(model);
         self.sky_volumes_dirty = true;
+    }
+
+    pub fn retire_model(&mut self, model: u32) {
+        self.cull.retire_model(model);
+        // A completed readback of a dead model must not consume its slot again.
+        self.sky_bakes_pending.retain(|(id, _, _)| *id != model);
+        if let Some((vis, _, _, offset)) = self.sky_volumes.remove(&model) {
+            self.sky_bake_bytes -= (vis.len() * 16) as u64;
+            self.sky_volume_free.push(offset);
+            self.sky_volume_uploads.push(model); // zero old metadata before drawing
+            self.sky_volumes_dirty = true;
+        }
     }
 
     pub fn register_crown_centres(&mut self, centres: &[[f32; 4]]) -> u32 {
@@ -9186,7 +9202,8 @@ impl Gfx3d {
         let incremental = *INCREMENTAL.get_or_init(||
             std::env::var("WGR_SKY_VOLUME_INCREMENTAL").map_or(true, |v| v != "0"));
         if incremental {
-            let models = self.sky_volumes.keys().copied().max().unwrap_or(0) as u64 + 1;
+            let models = self.sky_volumes.keys().copied().chain(self.sky_volume_uploads.iter().copied())
+                .max().unwrap_or(0) as u64 + 1;
             let mut grew = self.sky_volume_meta.ensure_preserving(device, queue, models * 32);
             grew |= self.sky_volume_data.ensure_preserving(device, queue,
                 (self.sky_volume_voxels as u64 * 16).max(16));
@@ -9202,14 +9219,18 @@ impl Gfx3d {
                         bytemuck::cast_slice(&meta));
                     queue.write_buffer(self.sky_volume_data.buf.as_ref().unwrap(), *offset as u64 * 16,
                         bytemuck::cast_slice(vis));
+                } else {
+                    queue.write_buffer(self.sky_volume_meta.buf.as_ref().unwrap(), u64::from(model) * 32,
+                        bytemuck::cast_slice(&[[0.0f32; 4]; 2]));
                 }
             }
             return grew;
         }
+        let max_pending = self.sky_volume_uploads.iter().copied().max().unwrap_or(0);
         self.sky_volume_uploads.clear();
         let d = sky_bake::BakeSettings::default().dims;
         let stride = (d[0] * d[1] * d[2]) as usize;
-        let n_models = self.sky_volumes.keys().copied().max().unwrap_or(0) as usize + 1;
+        let n_models = self.sky_volumes.keys().copied().max().unwrap_or(0).max(max_pending) as usize + 1;
         // meta[model] = (min.xyz, offset_in_voxels) then (max.xyz, has_volume)
         let mut meta = vec![[0.0f32; 4]; n_models * 2];
         let mut data: Vec<[f32; 4]> = Vec::with_capacity(self.sky_volumes.len() * stride);

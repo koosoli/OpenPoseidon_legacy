@@ -979,6 +979,18 @@ impl CullState {
         model_id
     }
 
+    // Keep append-only IDs valid for stale instance references, but make every
+    // owned LOD empty. Do not shift tables or turn zero LOD count into an invalid
+    // shader lod_base lookup. The mesh ranges have their own retirement fence.
+    pub fn retire_model(&mut self, id: u32) {
+        if let Some(model) = self.models.get(id as usize) {
+            for lod in &mut self.lods[model.lod_base as usize..(model.lod_base + model.lod_count) as usize] {
+                lod.section_count = 0;
+            }
+            self.tables_dirty = true;
+        }
+    }
+
     // Append a batch of per-tree crown centres (model space) to the global table; return the base
     // index of this batch (foliage-translucency-plan.md §9 Approach A). Forest vertices carry
     // `base + local_component_index` in their `conform` word, which vs_gpu reads to get a per-tree
@@ -3159,6 +3171,18 @@ pub(crate) mod tests {
             1,
             "record.section == LOD1 section id"
         );
+        // Retiring a model must suppress even an accidentally retained instance,
+        // without indexing another model's LOD or reusing its stable identifier.
+        cull.retire_model(model);
+        cull.retire_model(model); // idempotent
+        cull.retire_model(u32::MAX); // invalid id is ignored
+        cull.prepare(&device, &queue);
+        let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        cull.dispatch(&mut enc);
+        queue.submit([enc.finish()]);
+        let retired = read_u32s(&device, &queue, cull.out_args().unwrap(), total);
+        assert!(retired.chunks_exact(words_per_arg as usize).all(|a| a[1] == 0));
+
     }
 
     #[test]

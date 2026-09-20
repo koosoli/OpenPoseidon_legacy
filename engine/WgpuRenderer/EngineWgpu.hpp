@@ -1258,7 +1258,8 @@ class EngineWgpu : public EngineDummy
             MeshDestroy,
             ModelRegister,
             CpuMeshCreate, // REN-THR-011: identity is `cpu`, not `mesh` -- see CpuMeshSlot
-            MeshSetSkin    // REN-THR-011: bind pose in `verts`, plus `bones` / `weights`
+            MeshSetSkin,   // REN-THR-011: bind pose in `verts`, plus `bones` / `weights`
+            ModelRetire
         };
         Kind kind = MeshCreate;
         uint64_t mesh = 0;  // MeshCreate: the producer handle being defined; MeshDestroy: the one dying

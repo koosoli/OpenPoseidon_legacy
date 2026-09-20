@@ -413,3 +413,34 @@ model materials. A shared texture reuploaded by another model can change its
 image handle without changing the baked slot. Such models need no geometry
 re-registration. A newly acquired lease after a previously unleased upload is
 NOT accepted as proof; null/missing/moved slots retain the old rebuild path.
+
+
+Same-build `dayz-sky-full-control-20260920-122922` also passed, with the same
+19923 before/return coverage. Full-upload control frame mean/p95/max in ms:
+19.25/20.72/125.72, 20.78/23.22/125.88, 17.18/27.32/39.72,
+20.82/22.28/24.81. Whole-GPU peak 7758 MiB. These settled measurements are close
+and maxima are noisy; they do not establish a broad FPS improvement. The atlas
+change removes repeated full-atlas CPU/staging copies by construction, preserving
+GPU data in the readback test and scene coverage in the route. Remaining pressure
+failures are reported independently, never labelled fixed by this change.
+
+
+### 82cbb5a2 shared-slot verification
+
+Build and three existing GPU slot lifetime tests passed. The packed-model DayZ
+route `dayz-shared-refill-20260920-123531` completed without renderer errors,
+with 19923 placements before/after and zero queued/reserved preparation work.
+Frame mean/p95/max: 19.85/21.32/22.84, 19.79/21.01/73.97,
+13.36/24.07/131.05, 18.91/20.93/26.81 ms. Whole-GPU peak 7798 MiB.
+The shared-refill counter did NOT fire, so this run does not establish that
+shared refills caused the earlier OOM or that this correction resolved it.
+Worker ordering and memory peaks remain variable; packed preparation stays off.
+
+Next measured ownership boundary: C++ releases model meshes, but the Rust
+registration previously had no matching retirement, leaving CPU sky volumes,
+GPU atlas slots and pending sky bakes behind. Explicit FIFO model retirement
+now cancels pending bakes, frees the CPU payload/budget, reuses fixed-size atlas
+slots, clears retired metadata and empties the retired model's LOD draws.
+IDs are not reused; geometry ranges retain their existing queue-completion
+lifetime. Atlas capacity is retained for reuse, not claimed as freed VRAM.
+ABI version 12 requires a matching executable/DLL pair. Validation pending.

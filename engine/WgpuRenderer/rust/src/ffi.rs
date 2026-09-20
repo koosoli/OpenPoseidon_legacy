@@ -1760,9 +1760,9 @@ pub extern "C" fn wgr_abi_version() -> u32 {
     if cfg!(debug_assertions) {
         option_env!("WGR_TEST_ABI_VERSION")
             .and_then(|value| value.parse::<u32>().ok())
-            .unwrap_or(11)
+            .unwrap_or(12)
     } else {
-        11
+        12
     }
 }
 
@@ -2043,7 +2043,7 @@ mod abi_tests {
 
     #[test]
     fn exported_abi_version_matches_the_public_contract() {
-        assert_eq!(super::wgr_abi_version(), 11); // backend allocation counter extends WgrMemoryStats
+        assert_eq!(super::wgr_abi_version(), 12); // model retirement export
     }
 
     #[test]
@@ -2505,6 +2505,17 @@ pub unsafe extern "C" fn wgr_mesh_destroy(renderer: *mut WgrRenderer, id: u64) {
 
 /// Sentinel returned by `wgr_model_register` on failure.
 pub const WGR_INVALID_MODEL: u32 = u32::MAX;
+
+/// Retire a model's retained drawing and lighting state. IDs are not reused.
+/// # Safety
+/// `renderer` must be live or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_model_retire(renderer: *mut WgrRenderer, model: u32) {
+    if renderer.is_null() { return; }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        unsafe { &mut *renderer }.gfx3d.retire_model(model);
+    }));
+}
 
 /// Register one opaque-rigid model for GPU-driven rendering. `lods`, `sections`, and
 /// `materials` describe a single LODShapeWithShadow: `sections` and `materials` are parallel

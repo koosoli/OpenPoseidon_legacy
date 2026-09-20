@@ -2826,7 +2826,7 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
     }
     const auto drainStart = std::chrono::steady_clock::now();
     const size_t operationCount = ops.size();
-    std::array<uint32_t, 5> kindCounts{};
+    std::array<uint32_t, 6> kindCounts{};
     for (ResourceOp& op : ops)
     {
         const size_t kind = static_cast<size_t>(op.kind);
@@ -2926,6 +2926,15 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
             }
             wgr_mesh_update(_renderer, op.cpu->renderer, AsMeshVerts(op.verts));
             wgr_mesh_set_skin(_renderer, op.cpu->renderer, op.bones, op.weights);
+            break;
+        }
+        case ResourceOp::ModelRetire:
+        {
+            if (const auto it = _modelIdOf.find(op.model); it != _modelIdOf.end())
+            {
+                wgr_model_retire(_renderer, it->second);
+                _modelIdOf.erase(it);
+            }
             break;
         }
         case ResourceOp::ModelRegister:
@@ -9825,6 +9834,15 @@ uint32_t EngineWgpu::InvalidateStaleGpuModels()
 
 uint32_t EngineWgpu::DestroyGpuModelMeshes(const LODShapeWithShadow* shape)
 {
+    // All callers destroy this registration; retire its lighting allocation too.
+    // FIFO ordering covers registrations that have not reached the render thread yet.
+    if (const auto it = _gpuModels.find(shape); _renderer && it != _gpuModels.end() && it->second != WGR_INVALID_MODEL)
+    {
+        ResourceOp op;
+        op.kind = ResourceOp::ModelRetire;
+        op.model = it->second;
+        _resourceOps.push_back(std::move(op));
+    }
     uint32_t releasedMeshes = 0;
     if (const auto found = _gpuModelMeshes.find(shape); found != _gpuModelMeshes.end())
     {
