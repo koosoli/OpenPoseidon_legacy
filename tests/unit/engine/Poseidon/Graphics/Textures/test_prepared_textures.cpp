@@ -158,20 +158,22 @@ TEST_CASE("Prepared texture probes preserve payloads of the other kind", "[Graph
     DecodedImage image = DecodePAABuffer(bytes.data(), bytes.size(), true);
     REQUIRE(image.valid());
     const auto expected = image.rgba;
+    const auto imageCapacity = image.rgba.capacity();
     REQUIRE(store.PutDecoded("typed-image", std::move(image)));
     PAABlockChain chain;
     CHECK_FALSE(store.Take("typed-image", chain));
     CHECK_FALSE(chain.valid());
-    CHECK(store.SnapshotStats().bytes == expected.size());
+    CHECK(store.SnapshotStats().bytes == imageCapacity);
     REQUIRE(store.TakeDecoded("typed-image", image));
     CHECK(image.rgba == expected);
     CHECK(store.SnapshotStats().bytes == 0);
 
     REQUIRE(ReadPAABlockChainBuffer(bytes.data(), bytes.size(), chain));
     const auto blocks = chain.blocks;
+    const auto chainCapacity = chain.blocks.capacity() + chain.levels.capacity() * sizeof(PAABlockLevel);
     REQUIRE(store.Put("typed-chain", std::move(chain)));
     CHECK_FALSE(store.TakeDecoded("typed-chain", image));
-    CHECK(store.SnapshotStats().bytes == blocks.size());
+    CHECK(store.SnapshotStats().bytes == chainCapacity);
     REQUIRE(store.Take("typed-chain", chain));
     CHECK(chain.blocks == blocks);
     CHECK(store.SnapshotStats().bytes == 0);
@@ -322,4 +324,50 @@ TEST_CASE("PAA worker bound rejects before block allocation and sums all levels"
     CHECK_FALSE(ReadPAABlockChainBuffer(file.data(), file.size(), chain, &error, 1024));
     CHECK(error == "block chain exceeds preparation byte limit");
     CHECK_FALSE(chain.valid());
+}
+
+TEST_CASE("Prepared PAA budgets charge retained capacity and release it exactly", "[Graphics][PAA][streaming-budget]")
+{
+    auto& store = render::PreparedTextureStore::Instance();
+    if (!store.Enabled()) SKIP("Requires texture preparation");
+    store.Clear();
+    const auto bytes = TinyDxt1Paa();
+    PAABlockChain chain;
+    REQUIRE(ReadPAABlockChainBuffer(bytes.data(), bytes.size(), chain));
+    chain.blocks.reserve(4096);
+    chain.levels.reserve(32);
+    const auto retained = chain.blocks.capacity() + chain.levels.capacity() * sizeof(PAABlockLevel);
+    REQUIRE(store.Put("capacity-chain", std::move(chain)));
+    CHECK(store.SnapshotStats().bytes == retained);
+    REQUIRE(store.Take("capacity-chain", chain));
+    CHECK(store.SnapshotStats().bytes == 0);
+    CHECK(chain.blocks.capacity() + chain.levels.capacity() * sizeof(PAABlockLevel) == retained);
+    auto image = DecodePAABuffer(bytes.data(), bytes.size(), true);
+    image.rgba.reserve(8192);
+    const auto imageCapacity = image.rgba.capacity();
+    REQUIRE(store.PutDecoded("capacity-image", std::move(image)));
+    CHECK(store.SnapshotStats().bytes == imageCapacity);
+    store.MarkUploaded("capacity-image");
+    CHECK(store.SnapshotStats().bytes == 0);
+    store.Clear();
+}
+
+TEST_CASE("Prepared PAA refuses tiny payload with oversized retained capacity", "[Graphics][PAA][streaming-budget]")
+{
+    auto& store = render::PreparedTextureStore::Instance();
+    if (!store.Enabled() || store.ByteBudget() > 4 * 1024 * 1024)
+        SKIP("Run with WGR_OBJECT_STREAM_TEXTURE_PREPARE_MB=1 to bound fixture allocation");
+    store.Clear();
+    const auto bytes = TinyDxt1Paa();
+    PAABlockChain chain;
+    REQUIRE(ReadPAABlockChainBuffer(bytes.data(), bytes.size(), chain));
+    chain.blocks.reserve(store.ByteBudget() + 1);
+    CHECK_FALSE(store.Put("oversized-capacity-chain", std::move(chain)));
+    CHECK(store.SnapshotStats().bytes == 0);
+    auto image = DecodePAABuffer(bytes.data(), bytes.size(), true);
+    image.rgba.reserve(store.ByteBudget() + 1);
+    CHECK_FALSE(store.PutDecoded("oversized-capacity-image", std::move(image)));
+    CHECK(store.SnapshotStats().bytes == 0);
+    CHECK(store.SnapshotStats().entries == 0);
+    store.Clear();
 }

@@ -36,8 +36,10 @@ struct PreparedTextureStore::Impl
         DdsPreparationOptions ddsOptions{};
         size_t preparedDdsBytes = 0;
     };
+    static size_t ChainBytes(const PAABlockChain& chain)
+    { return chain.blocks.capacity() + chain.levels.capacity() * sizeof(PAABlockLevel); }
     static size_t EntryBytes(const Entry& entry)
-    { return entry.chain.blocks.size() + entry.image.rgba.size() + (entry.dds ? entry.dds->bytes : 0) + entry.preparedDdsBytes; }
+    { return ChainBytes(entry.chain) + entry.image.rgba.capacity() + (entry.dds ? entry.dds->bytes : 0) + entry.preparedDdsBytes; }
     mutable std::mutex mutex;
     // Insertion order = production order = (through the preparer's queue) distance order, so
     // the front is the oldest and the TTL sweep walks from there and stops early.
@@ -217,16 +219,17 @@ bool PreparedTextureStore::Put(const std::string& key, PAABlockChain&& chain,
         {
             ++_impl->stats.rejectedDup;
         }
-        else if (_impl->bytes + chain.blocks.size() > ByteBudget())
+        else if (Impl::ChainBytes(chain) > ByteBudget() - std::min(_impl->bytes, ByteBudget()))
         {
             ++_impl->stats.rejectedFull;
         }
         else
         {
             const size_t size = chain.blocks.size();
+            const size_t retained = Impl::ChainBytes(chain);
             _impl->order.push_back(Impl::Entry{key, std::move(chain), DecodedImage{}, Impl::Clock::now()});
             _impl->byKey.emplace(key, std::prev(_impl->order.end()));
-            _impl->bytes += size;
+            _impl->bytes += retained;
             ++_impl->stats.puts;
             _impl->stats.putBytes += size;
             _impl->stats.entries = _impl->byKey.size();
@@ -262,16 +265,17 @@ bool PreparedTextureStore::PutDecoded(const std::string& key, DecodedImage&& ima
         {
             ++_impl->stats.rejectedDup;
         }
-        else if (_impl->bytes + image.rgba.size() > ByteBudget())
+        else if (image.rgba.capacity() > ByteBudget() - std::min(_impl->bytes, ByteBudget()))
         {
             ++_impl->stats.rejectedFull;
         }
         else
         {
             const size_t size = image.rgba.size();
+            const size_t retained = image.rgba.capacity();
             _impl->order.push_back(Impl::Entry{key, PAABlockChain{}, std::move(image), Impl::Clock::now()});
             _impl->byKey.emplace(key, std::prev(_impl->order.end()));
-            _impl->bytes += size;
+            _impl->bytes += retained;
             ++_impl->stats.decodedPuts;
             _impl->stats.putBytes += size;
             _impl->stats.entries = _impl->byKey.size();

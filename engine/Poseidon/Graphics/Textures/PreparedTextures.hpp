@@ -76,7 +76,7 @@ class PreparedTextureStore
         uint64_t ddsPreparedTakes = 0;
         uint64_t ddsConfigurationMisses = 0;
         size_t entries = 0;         // current
-        size_t bytes = 0;           // current
+        size_t bytes = 0;           // retained payload capacities incl. mip metadata; excludes map/string/allocator overhead
     };
 
     static PreparedTextureStore& Instance();
