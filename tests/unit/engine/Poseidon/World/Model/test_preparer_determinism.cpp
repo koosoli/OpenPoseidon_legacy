@@ -1599,3 +1599,74 @@ TEST_CASE("SIM-807 concurrent conversion of one model agrees", "[determinism][pr
     INFO("reference hash " << reference << ", " << threads << " threads, " << nsel << " selections per LOD");
     REQUIRE(divergent.empty());
 }
+
+TEST_CASE("Preparer payload budget parks speculation but lets an oversized asset progress", "[preparer][streaming-budget]")
+{
+    if (!ObjectStreamPreparer::AsyncEnabled()) SKIP("Requires workers");
+    struct RestoreLoader {
+        Poseidon::ModelCache::ExternalLoader previous = Poseidon::ModelCache::GetExternalLoader();
+        ~RestoreLoader() { Poseidon::ModelCache::SetExternalLoader(previous); }
+    } restore;
+    Poseidon::ModelCache::SetExternalLoader(+[](const std::string&, std::string&) {
+        auto model = std::make_shared<ModelIR::Model>();
+        model->lodLevels.emplace_back();
+        model->lodLevels[0].mesh.vertices.resize(2048);
+        return model;
+    });
+    ObjectStreamPreparer prep(1024); // less than one useful model: must not deadlock or discard it
+    std::string paths[] = {"budget_first.xob", "budget_second.xob"};
+    prep.Reset(paths, 2);
+    REQUIRE(prep.Request(0));
+    REQUIRE(prep.Request(1));
+    REQUIRE(WaitFor([&] { return prep.Query(0) == ObjectStreamPreparer::State::Ready; }));
+    REQUIRE(WaitFor([&] { return prep.SnapshotStats().readyByteParks > 0; }));
+    CHECK(prep.Query(1) == ObjectStreamPreparer::State::Queued);
+    CHECK(prep.SnapshotStats().readyPayloadBytes > 1024);
+    CHECK(prep.SnapshotStats().oversizedPayloads == 1);
+    SECTION("consumption frees room for the next model") { REQUIRE(prep.Take(0)); }
+    SECTION("camera cancellation frees room for the next model") {
+        const uint32_t epochs[] = {0, 1};
+        CHECK(prep.DropStale(epochs, 2, 1) == 1);
+    }
+    REQUIRE(WaitFor([&] { return prep.Query(1) == ObjectStreamPreparer::State::Ready; }));
+    REQUIRE(prep.Take(1));
+    CHECK(prep.SnapshotStats().readyPayloadBytes == 0);
+    CHECK(prep.SnapshotStats().parseReservedBytes == 0);
+}
+
+TEST_CASE("Preparer keeps old-world reservations until active workers finish", "[preparer][streaming-budget][cancellation]")
+{
+    if (!ObjectStreamPreparer::AsyncEnabled()) SKIP("Requires workers");
+    static std::atomic<unsigned> entered{0};
+    static std::atomic<bool> release{false};
+    entered = 0; release = false;
+    struct RestoreLoader {
+        Poseidon::ModelCache::ExternalLoader previous = Poseidon::ModelCache::GetExternalLoader();
+        ~RestoreLoader() { Poseidon::ModelCache::SetExternalLoader(previous); }
+    } restore;
+    Poseidon::ModelCache::SetExternalLoader(+[](const std::string&, std::string&) {
+        ++entered;
+        WaitFor([] { return release.load(); });
+        auto model = std::make_shared<ModelIR::Model>();
+        model->lodLevels.emplace_back();
+        return model;
+    });
+    ObjectStreamPreparer prep(1024);
+    struct ReleaseBeforeJoin { ~ReleaseBeforeJoin() { release = true; } } guard;
+    const std::string path = "budget_generation.xob";
+    prep.Reset(&path, 1);
+    REQUIRE(prep.Request(0));
+    REQUIRE(WaitFor([] { return entered.load() == 1; }));
+    CHECK(prep.SnapshotStats().parseReservedBytes == 1024);
+    prep.Reset(&path, 1);
+    REQUIRE(prep.Request(0));
+    CHECK(prep.SnapshotStats().parseReservedBytes == 1024);
+    CHECK(prep.Query(0) == ObjectStreamPreparer::State::Queued);
+    release = true;
+    REQUIRE(WaitFor([&] { return prep.Query(0) == ObjectStreamPreparer::State::Ready; }));
+    CHECK(entered == 2);
+    CHECK(prep.SnapshotStats().dropped >= 1);
+    REQUIRE(prep.Take(0));
+    CHECK(prep.SnapshotStats().readyPayloadBytes == 0);
+    CHECK(prep.SnapshotStats().parseReservedBytes == 0);
+}

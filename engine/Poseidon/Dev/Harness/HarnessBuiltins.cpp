@@ -87,6 +87,11 @@ void RegisterScreenshot(HarnessServer& hs)
             GLandscape->SnapshotObjectStreamDiag(state);
             auto* result = cJSON_CreateObject();
             cJSON_AddBoolToObject(result, "valid", state.valid);
+            cJSON_AddNumberToObject(result, "readyPayloadBytes", static_cast<double>(state.prep.readyPayloadBytes));
+            cJSON_AddNumberToObject(result, "parseReservedBytes", static_cast<double>(state.prep.parseReservedBytes));
+            cJSON_AddNumberToObject(result, "peakReadyPayloadBytes", static_cast<double>(state.prep.peakReadyPayloadBytes));
+            cJSON_AddNumberToObject(result, "readyByteParks", static_cast<double>(state.prep.readyByteParks));
+            cJSON_AddNumberToObject(result, "readyByteBudget", static_cast<double>(state.prep.readyByteBudget));
             cJSON_AddNumberToObject(result, "resident", state.residentObjects);
             cJSON_AddNumberToObject(result, "budget", state.budget);
             cJSON_AddNumberToObject(result, "desired", GLandscape->ObjectStreamDesiredCount());

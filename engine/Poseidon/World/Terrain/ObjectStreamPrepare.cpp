@@ -15,6 +15,7 @@
 #include <Poseidon/Graphics/Textures/DdsImport.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/EnfusionMount.hpp>
 #include <Poseidon/World/Model/Model.hpp>
+#include <Poseidon/World/Model/ModelMemory.hpp>
 #include <Poseidon/World/Model/ModelCache.hpp>
 
 #include <algorithm>
@@ -163,6 +164,16 @@ size_t ObjectStreamPreparer::ReadyLimit()
 // itself runs with the mutex released; the critical sections are pointer moves and counter
 // bumps. Freeing an IR (megabytes) is always done with the mutex released, too.
 // ------------------------------------------------------------------------------------------
+uint64_t ObjectStreamPreparer::ReadyByteBudget()
+{
+    static const uint64_t bytes = [] {
+        const char* value = std::getenv("WGR_OBJECT_STREAM_READY_MB");
+        const long mb = value ? std::strtol(value, nullptr, 10) : 512;
+        return static_cast<uint64_t>(std::clamp<long>(mb, 0, 16384)) * 1024 * 1024;
+    }();
+    return bytes;
+}
+
 struct ObjectStreamPreparer::Impl
 {
     using State = ObjectStreamPreparer::State;
@@ -199,6 +210,20 @@ struct ObjectStreamPreparer::Impl
     std::vector<LODShapeWithShadow*> convertedShapes;
     std::vector<ModelPtr> convertedModels;
     Stats stats;
+    std::vector<uint64_t> payloadBytes;
+    uint64_t ParseReservation() const
+    {
+        constexpr uint64_t unknownBytes = 16ull * 1024 * 1024;
+        return stats.readyByteBudget ? std::min(unknownBytes, stats.readyByteBudget) : unknownBytes;
+    }
+    bool HasParseByteRoom() const
+    {
+        return !stats.readyByteBudget ||
+            (stats.readyPayloadBytes <= stats.readyByteBudget &&
+             stats.parseReservedBytes <= stats.readyByteBudget - stats.readyPayloadBytes &&
+             ParseReservation() <= stats.readyByteBudget - stats.readyPayloadBytes - stats.parseReservedBytes);
+    }
+
     // Per model index: when Request() enqueued it, for the request->ready / request->taken
     // latency figures. Written under the mutex; a DropStale->re-Request simply restamps.
     std::vector<uint64_t> requestedAtUs;
@@ -252,9 +277,11 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
         // not be counted as the bound biting.
         if (!stop && convertQueue.empty() && !queue.empty() && stats.ready >= ObjectStreamPreparer::ReadyLimit())
             ++stats.readyFullParks;
+        if (!stop && convertQueue.empty() && !queue.empty() && !HasParseByteRoom())
+            ++stats.readyByteParks;
         cv.wait(lock, [&] {
             return stop || !convertQueue.empty() ||
-                   (!queue.empty() && stats.ready < ObjectStreamPreparer::ReadyLimit());
+                   (!queue.empty() && stats.ready < ObjectStreamPreparer::ReadyLimit() && HasParseByteRoom());
         });
         if (stop)
             return;
@@ -331,6 +358,8 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
         const uint64_t gen = generation.load(std::memory_order_relaxed);
         const std::string path = paths[index];
         Set(index, State::Parsing);
+        const uint64_t reservation = ParseReservation();
+        stats.parseReservedBytes += reservation;
         lock.unlock();
 
         // ---- unlocked: the parse ------------------------------------------------------
@@ -587,7 +616,10 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
         }
         // ---------------------------------------------------------------------------------
 
+        const uint64_t payload = model ? Model::ResidentPayloadBytes(*model) : 0;
         lock.lock();
+        stats.parseReservedBytes -= reservation;
+        cv.notify_all(); // failed/stale completion also releases its reservation
         stats.texPrepared += texPrepared;
         stats.texPreparedBytes += texPreparedBytes;
         stats.texSkipped += texSkipped;
@@ -609,6 +641,10 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
         const bool parseFailed = !model && opened;
         if (model)
         {
+            payloadBytes[index] = payload;
+            stats.readyPayloadBytes += payload;
+            stats.peakReadyPayloadBytes = std::max(stats.peakReadyPayloadBytes, stats.readyPayloadBytes);
+            if (stats.readyByteBudget && payload > stats.readyByteBudget) ++stats.oversizedPayloads;
             models[index] = std::move(model);
             Set(index, State::Ready);
             ++stats.prepared;
@@ -646,7 +682,10 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
 
 // ------------------------------------------------------------------------------------------
 
-ObjectStreamPreparer::ObjectStreamPreparer() : _impl(std::make_unique<Impl>()) {}
+ObjectStreamPreparer::ObjectStreamPreparer(uint64_t readyByteBudget) : _impl(std::make_unique<Impl>())
+{
+    _impl->stats.readyByteBudget = readyByteBudget;
+}
 
 ObjectStreamPreparer::~ObjectStreamPreparer()
 {
@@ -698,6 +737,9 @@ void ObjectStreamPreparer::Reset(const std::string* paths, size_t modelCount)
         _impl->stats.dropped += _impl->stats.ready;
         _impl->stats.queued = 0;
         _impl->stats.ready = 0;
+        _impl->stats.readyPayloadBytes = 0;
+        // Do not clear parseReservedBytes: old-generation workers still own their reservation.
+        _impl->payloadBytes.assign(modelCount, 0);
         _impl->queue.clear();
         // Jobs own model IR and bank-table references, not just queue indices.
         // Their last-reference destructors must not run under the queue mutex.
@@ -796,6 +838,8 @@ std::shared_ptr<Model::Model> ObjectStreamPreparer::Take(uint32_t index)
     }
     ++_impl->stats.taken;
     --_impl->stats.ready;
+    _impl->stats.readyPayloadBytes -= _impl->payloadBytes[index];
+    _impl->payloadBytes[index] = 0;
     // Room in the ready set: wake a worker parked on the ready-limit predicate.
     _impl->cv.notify_one();
     return model;
@@ -823,6 +867,8 @@ size_t ObjectStreamPreparer::DropStale(const uint32_t* epochs, size_t count, uin
                 _impl->models[i].reset();
                 _impl->Set(static_cast<uint32_t>(i), State::Unknown);
                 --_impl->stats.ready;
+                _impl->stats.readyPayloadBytes -= _impl->payloadBytes[i];
+                _impl->payloadBytes[i] = 0;
                 ++dropped;
             }
             else if (state == State::Converted)

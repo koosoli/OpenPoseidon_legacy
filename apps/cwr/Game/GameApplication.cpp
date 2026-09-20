@@ -421,6 +421,12 @@ bool WriteCaptureMetrics(const std::string& path)
             cJSON_AddNumberToObject(prep, "coalesced_stuck", (double)p.coalescedStuck);
             // The ready bound biting: workers parked with queue work in hand.
             cJSON_AddNumberToObject(prep, "ready_full_parks", (double)p.readyFullParks);
+            cJSON_AddNumberToObject(prep, "ready_payload_bytes", (double)p.readyPayloadBytes);
+            cJSON_AddNumberToObject(prep, "parse_reserved_bytes", (double)p.parseReservedBytes);
+            cJSON_AddNumberToObject(prep, "peak_ready_payload_bytes", (double)p.peakReadyPayloadBytes);
+            cJSON_AddNumberToObject(prep, "ready_byte_parks", (double)p.readyByteParks);
+            cJSON_AddNumberToObject(prep, "ready_byte_budget", (double)p.readyByteBudget);
+            cJSON_AddNumberToObject(prep, "oversized_payloads", (double)p.oversizedPayloads);
             cJSON_AddNumberToObject(prep, "ready_limit", (double)Poseidon::ObjectStreamPreparer::ReadyLimit());
             cJSON_AddNumberToObject(prep, "prepared", (double)p.prepared);
             cJSON_AddNumberToObject(prep, "taken", (double)p.taken);

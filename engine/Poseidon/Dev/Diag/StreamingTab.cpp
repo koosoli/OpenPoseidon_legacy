@@ -179,6 +179,10 @@ void DrawStreamingTab()
                     asks ? 100.0 * (double)p.coalesced / (double)asks : 0.0, asks,
                     (unsigned long long)p.coalescedStuck);
             }
+            Row("IR ready / reserved", "%.1f / %.1f MiB (budget %.1f)",
+                p.readyPayloadBytes / 1048576.0, p.parseReservedBytes / 1048576.0, p.readyByteBudget / 1048576.0);
+            Row("IR byte-bound parks", "%llu; oversize %llu", (unsigned long long)p.readyByteParks,
+                (unsigned long long)p.oversizedPayloads);
             Row("ready-bound parks", "%llu (limit %zu)", (unsigned long long)p.readyFullParks,
                 ObjectStreamPreparer::ReadyLimit());
             Row("prepared / taken", "%llu / %llu", (unsigned long long)p.prepared, (unsigned long long)p.taken);

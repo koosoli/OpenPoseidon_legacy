@@ -132,6 +132,12 @@ class ObjectStreamPreparer
         // taking" and "the workers are idle because there is nothing to do" looked identical
         // from outside. Counted once per park, under the mutex, immediately before the wait.
         uint64_t readyFullParks = 0;
+        uint64_t readyByteParks = 0;
+        uint64_t readyPayloadBytes = 0;
+        uint64_t parseReservedBytes = 0; // includes old-generation workers until they finish
+        uint64_t peakReadyPayloadBytes = 0;
+        uint64_t oversizedPayloads = 0; // useful oversize results admitted, never discarded/reparsed
+        uint64_t readyByteBudget = 0;
         uint64_t prepared = 0;  // parses that produced an IR
         uint64_t taken = 0;     // IRs handed to the main thread (installed)
         uint64_t notLoose = 0;
@@ -175,7 +181,11 @@ class ObjectStreamPreparer
     static size_t QueueLimit();
     static size_t ReadyLimit();
 
-    ObjectStreamPreparer();
+    // Soft IR-payload budget. Unknown parses reserve 16 MiB each; an oversize result
+    // may exceed it on in-flight completions, blocking new parses until consumed.
+    // Decoder scratch / converted Shape bytes are not represented by this metric.
+    static uint64_t ReadyByteBudget();
+    explicit ObjectStreamPreparer(uint64_t readyByteBudget = ReadyByteBudget());
     ~ObjectStreamPreparer(); // joins the workers; the only blocking call in this class
 
     ObjectStreamPreparer(const ObjectStreamPreparer&) = delete;
