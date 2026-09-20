@@ -180,7 +180,9 @@ struct TextureStreamSnapshot
 struct ObjectStreamResidencyCounters
 {
     bool valid = false;
-    uint64_t residentObjects = 0;
+    uint64_t residentObjects = 0; // visual residency
+    uint64_t requiredObjects = 0;
+    uint64_t logicalOnlyObjects = 0;
     uint64_t budget = 0;
     uint64_t shapeCacheSize = 0;
     uint64_t shapeCacheLimit = 0;

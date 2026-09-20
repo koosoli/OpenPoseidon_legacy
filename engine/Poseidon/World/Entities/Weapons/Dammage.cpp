@@ -699,7 +699,7 @@ Object* Object::CreateObject(ParamArchive& ar)
     {
         return nullptr;
     }
-    return GLandscape->FindObject(id);
+    return GLandscape->ResolveObject(id);
 }
 
 bool Object::MustBeSaved() const
@@ -856,7 +856,7 @@ Object* Object::CreateObject(NetworkMessageContext& ctx)
     {
         return nullptr;
     }
-    return GLandscape->FindObject(id);
+    return GLandscape->ResolveObject(id);
 }
 
 void Object::DestroyObject()

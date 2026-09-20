@@ -568,6 +568,130 @@
         "whole-gpu-memory.csv": "bb56c1b0d8b17cf3af040ff96bd4e64289c673685591648f58ae3dcaf5a4f9c5",
         "settled.png": "063d0bde4050f2a910accbf09aab851c860a47c995a07399107eb55d983fa5d6"
       }
+    },
+    {
+      "run": "dayz-active-texture-scratch-20260920-130525",
+      "provenance": {
+        "packedTextures": true,
+        "controlled": true,
+        "installed": "codex/streaming-residency 08bbada3 2026-09-20_13:05 deploy-ps1",
+        "pressureGrowth": false,
+        "readyMb": -1,
+        "incrementalSkyUploads": true,
+        "geoGrowth": 1.5,
+        "corpus": "DayZ",
+        "adaptive": false,
+        "head": "08bbada337c3c9911f0e848202d6a3da3c06045a",
+        "packedModels": true,
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "A46828DF499865CC0C8C77926D47CDE2BDA70A414BA6D001C885464D50E75DE8",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "EC7F9B1C422F38DE3C55C5334EB50A6D840276F729306FA50B60772D51F68BD3",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ]
+      },
+      "sha256": {
+        "engine.log": "94e0685935c24c72987053bf244baa76c89e54bb92e856b02c47be9125e2a38e",
+        "harness.jsonl": "63d6f845e8cb0a918a247e1904aeee8fb46cd472bcfd27fd61711c712bc43fe2",
+        "provenance.json": "72c17dd1b733e63a76060a941115739c66a2803016323929b7a227e5fa0c6493",
+        "result.json": "ec3b253ef298ff3e942bd743b6eabc9e7eb3407b191d996abade0ac8f8a73f2d"
+      },
+      "result": "PASS"
+    },
+    {
+      "run": "dayz-default-settings-20260920-130807",
+      "provenance": {
+        "readyMb": -1,
+        "packedModels": false,
+        "corpus": "DayZ",
+        "adaptive": false,
+        "controlled": true,
+        "pressureGrowth": false,
+        "installed": "codex/streaming-residency 08bbada3 2026-09-20_13:05 deploy-ps1",
+        "packedTextures": false,
+        "geoGrowth": 2.0,
+        "head": "08bbada337c3c9911f0e848202d6a3da3c06045a",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "A46828DF499865CC0C8C77926D47CDE2BDA70A414BA6D001C885464D50E75DE8",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "EC7F9B1C422F38DE3C55C5334EB50A6D840276F729306FA50B60772D51F68BD3",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "incrementalSkyUploads": true
+      },
+      "sha256": {
+        "engine.log": "a4001f40547a9e59922166028af46011a52c1367c39952b721451004f9f62569",
+        "harness.jsonl": "22ff34567309455fc36b5cdb1cd524437dc9fa7d6243351d3edcba3fffc04e4e",
+        "provenance.json": "f6592d36489267b879c6ca25c63b784533261b7ef3576f7e1722b47edefa8cfa",
+        "result.json": "c0e5207e736c26e235c5b7eea5637bb8ea14ff83485e1c31b8b9179edc3e5efa"
+      },
+      "result": "PASS"
+    },
+    {
+      "run": "headless-legacy-20260920-131039",
+      "provenance": {
+        "initHash": {
+          "Algorithm": "SHA256",
+          "Hash": "91D671264B26816A08E7F0DB1337DDA75BFCE1272F56F8F05FFC3E04F9F9691A",
+          "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\headless-legacy-20260920-131039\\stream_headless.eden\\init.sqs"
+        },
+        "missionHash": {
+          "Algorithm": "SHA256",
+          "Hash": "74F79F513F1DAAE0564C7CD531AE05454EE8B269401582B991AA5EB943BE2B88",
+          "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\headless-legacy-20260920-131039\\stream_headless.eden\\mission.sqm"
+        },
+        "head": "08bbada337c3c9911f0e848202d6a3da3c06045a",
+        "serverHash": {
+          "Algorithm": "SHA256",
+          "Hash": "B9ABA9A501AEC9D0D13582841CD4F9CA920981437B7DF6E5F41528A3B51258C3",
+          "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\dist\\x64-win-rwdi\\PoseidonServer.exe"
+        }
+      },
+      "sha256": {
+        "console.log": "b061493c73dc62b073f33c2c3d5ca9c530e079c22c16fba2b4d51f5d737d8431",
+        "engine.log": "6cfe0a7326257ccecf342c117da03701a4c1c81e5e6f2d17ed38ea90eb53efc0",
+        "provenance.json": "0a0fc2b3926ef5e7bad3f07ef5f94919be8dc74f8309eb76dd541a7fbc77c3f8"
+      },
+      "result": "PASS"
+    },
+    {
+      "run": "headless-dayz-20260920-131418",
+      "provenance": {
+        "initHash": {
+          "Algorithm": "SHA256",
+          "Hash": "EF9FD6150826BC54065F3C583E5D8044C450B0A2EA26359B007F438E92F011D1",
+          "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\headless-dayz-20260920-131418\\stream_headless.eden\\init.sqs"
+        },
+        "serverHash": {
+          "Algorithm": "SHA256",
+          "Hash": "B9ABA9A501AEC9D0D13582841CD4F9CA920981437B7DF6E5F41528A3B51258C3",
+          "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\dist\\x64-win-rwdi\\PoseidonServer.exe"
+        },
+        "missionHash": {
+          "Algorithm": "SHA256",
+          "Hash": "74F79F513F1DAAE0564C7CD531AE05454EE8B269401582B991AA5EB943BE2B88",
+          "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\headless-dayz-20260920-131418\\stream_headless.eden\\mission.sqm"
+        },
+        "head": "08bbada337c3c9911f0e848202d6a3da3c06045a"
+      },
+      "sha256": {
+        "console.log": "ddf84831f2b92ebb8be464c8498041484731ea4dcf92518fa8a124981b9c3c97",
+        "engine.log": "02694e879a98d3737d6ebc605934920c746aac7659c313ace05b378fe9ca7d9e",
+        "provenance.json": "0024a6d3088d5261a2d0f1e01035df3efb6d5c48ef10dec5dd0b4488b7ce03cc"
+      },
+      "result": "modern object lookup FAILED; simulation passed"
     }
   ]
 }

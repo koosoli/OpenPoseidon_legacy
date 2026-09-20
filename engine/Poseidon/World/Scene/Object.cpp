@@ -1989,7 +1989,7 @@ Object* Object::LoadRef(ParamArchive& ar)
     {
         return nullptr;
     }
-    return GLandscape->FindObject(id);
+    return GLandscape->ResolveObject(id);
 }
 
 LSError Object::SaveRef(ParamArchive& ar)

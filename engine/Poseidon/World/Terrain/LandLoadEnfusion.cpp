@@ -2248,6 +2248,8 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
                     _modernObjectModels.emplace_back(mesh.first.c_str());
                 for (const auto& mesh : attachMeshes)
                     _modernObjectModels.emplace_back(mesh.first.c_str());
+                _modernRequiredObjects.clear();
+                _modernLogicalOnlyObjects.clear();
                 _modernObjectPlacements.clear();
                 _modernObjectPlacements.reserve(placed.size() * 2);
                 _modernObjectCells.assign(static_cast<size_t>(_landRange) * _landRange, {});

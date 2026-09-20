@@ -154,6 +154,8 @@ void RegisterScreenshot(HarnessServer& hs)
             cJSON_AddNumberToObject(result, "readyByteParks", static_cast<double>(state.prep.readyByteParks));
             cJSON_AddNumberToObject(result, "readyByteBudget", static_cast<double>(state.prep.readyByteBudget));
             cJSON_AddNumberToObject(result, "resident", state.residentObjects);
+            cJSON_AddNumberToObject(result, "required", state.requiredObjects);
+            cJSON_AddNumberToObject(result, "logicalOnly", state.logicalOnlyObjects);
             cJSON_AddNumberToObject(result, "budget", state.budget);
             cJSON_AddNumberToObject(result, "desired", GLandscape->ObjectStreamDesiredCount());
             cJSON_AddBoolToObject(result, "pending", GLandscape->ObjectStreamPending());

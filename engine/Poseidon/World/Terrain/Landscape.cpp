@@ -276,6 +276,8 @@ void Landscape::Init()
         }
     }
     ClearNativeFarResidency();
+    _modernRequiredObjects.clear();
+    _modernLogicalOnlyObjects.clear();
     _modernObjectPlacements.clear();
     _modernObjectCells.clear();
     _modernObjectModels.clear();
@@ -2229,7 +2231,7 @@ inline bool IsShape(Object* obj, const char* name)
     return strstr(obj->GetShape()->Name(), name) != nullptr;
 }
 
-void Landscape::AddObject(Object* obj, int* xr, int* zr, bool avoidRecalculation)
+void Landscape::AddObject(Object* obj, int* xr, int* zr, bool avoidRecalculation, bool registerVisual)
 {
     int x, z;
     SelectObjectList(x, z, obj->Position().X(), obj->Position().Z());
@@ -2246,7 +2248,7 @@ void Landscape::AddObject(Object* obj, int* xr, int* zr, bool avoidRecalculation
     Verify(list.Add(obj, x, z, avoidRecalculation) >= 0); // <0  -> error
     // GPU-driven rendering (docs/gpu-culling-and-depth-plan.md Stage 3b): let a GPU-driven
     // backend register this object into its retained scene. No-op unless WGR_GPU_DRIVEN is on.
-    if (GEngine)
+    if (GEngine && registerVisual)
     {
         GEngine->SceneObjectCreated(obj);
     }
@@ -2877,7 +2879,7 @@ void AddA3StaticMarkerLights(Object* obj, LODShapeWithShadow* shape, const char*
 } // namespace
 
 Object* Landscape::ObjectCreate(int id, const char* name, const Matrix4& transform, int* x, int* z,
-                                bool avoidRecalculation, bool preserveAuthoredElevation)
+                                bool avoidRecalculation, bool preserveAuthoredElevation, bool registerVisual)
 {
     // create object based on Class hint in LOD 0
     Ref<LODShapeWithShadow> shape = Shapes.New(name, false, true);
@@ -2942,7 +2944,9 @@ Object* Landscape::ObjectCreate(int id, const char* name, const Matrix4& transfo
     }
 #endif
 
-    AddObject(obj, x, z, avoidRecalculation);
+    AddObject(obj, x, z, avoidRecalculation, registerVisual);
+    if (!registerVisual)
+        return obj;
     if (_modernObjectStreaming)
     {
         RefArray<LightPoint>& lights = _modernObjectLightOwners[id];
@@ -2955,6 +2959,20 @@ Object* Landscape::ObjectCreate(int id, const char* name, const Matrix4& transfo
         AddA3StaticMarkerLights(obj, shape, name, _staticMarkerLights);
     }
     return obj;
+}
+
+void Landscape::RegisterModernObjectVisual(Object* object)
+{
+    if (GEngine)
+        GEngine->SceneObjectCreated(object);
+    auto* shape = object->GetShape();
+    if (shape)
+    {
+        auto& lights = _modernObjectLightOwners[object->ID()];
+        AddA3StaticMarkerLights(object, shape, shape->Name(), lights);
+        if (lights.Size() == 0)
+            _modernObjectLightOwners.erase(object->ID());
+    }
 }
 
 void Landscape::ObjectTypeChange(int id, const char* name)

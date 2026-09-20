@@ -2308,6 +2308,8 @@ bool Landscape::LoadOprwModern(const char* path)
         _modernObjectModels.reserve(world.models.size());
         for (const std::string& model : world.models)
             _modernObjectModels.emplace_back(model.c_str());
+        _modernRequiredObjects.clear();
+        _modernLogicalOnlyObjects.clear();
         _modernObjectPlacements.clear();
         _modernObjectPlacements.reserve(placementLimit);
         _modernObjectCells.assign(static_cast<size_t>(_landRange) * _landRange, {});
@@ -3629,8 +3631,21 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
             {
                 ModernObjectPlacement& placement = _modernObjectPlacements[index];
                 Object* object = placement.resident;
-                if (!object)
+                if (!object || _modernLogicalOnlyObjects.contains(placement.id))
                     continue;
+                // Camera eviction may retire the visual, never a required identity or
+                // non-default state that save/load must still be able to discover.
+                if (_modernRequiredObjects.contains(placement.id) || object->MustBeSaved())
+                {
+                    if (GEngine)
+                        GEngine->SceneObjectRemoved(object);
+                    _modernLogicalOnlyObjects.insert(placement.id);
+                    _modernObjectLightOwners.erase(placement.id);
+                    if (index < _nativeFarWanted.size() && object->IsDestroyed())
+                        _nativeFarWanted[index] |= 2;
+                    ++released;
+                    continue;
+                }
                 Ref<Object> keepAlive = object;
                 // (a) Take a reference to the MODEL before the Object that owns it dies at the
                 // end of this iteration. This is the whole eviction cache: `keepAlive` still
@@ -3871,6 +3886,14 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
             ModernObjectPlacement& placement = _modernObjectPlacements[index];
             if (placement.resident || placement.modelIndex >= _modernObjectModels.size())
             {
+                if (placement.resident && _modernLogicalOnlyObjects.contains(placement.id))
+                {
+                    RegisterModernObjectVisual(placement.resident);
+                    _modernLogicalOnlyObjects.erase(placement.id);
+                    if (_nativeFarActive.erase(index) && GEngine)
+                        GEngine->SceneFarObjectRemoved(index);
+                    ++created;
+                }
                 std::swap(placements[scan], placements[cursor]);
                 ++cursor;
                 ++scan;
@@ -4582,6 +4605,8 @@ void Landscape::SnapshotObjectStreamDiag(Poseidon::Dev::ObjectStreamResidencyCou
     if (!out.valid)
         return;
     out.residentObjects = _modernResidentObjectCount;
+    out.requiredObjects = _modernRequiredObjects.size();
+    out.logicalOnlyObjects = _modernLogicalOnlyObjects.size();
     out.budget = _modernObjectBudget;
     out.shapeCacheSize = _modernObjectShapeCache.size();
     out.shapeCacheLimit = _modernObjectShapeCacheLimit;
@@ -4909,6 +4934,50 @@ void Landscape::AddToIDCache(Object* object)
 {
     int id = object->ID();
     _objectIds[id] = object;
+}
+
+Object* Landscape::ResolveObject(int id)
+{
+    if (!_modernObjectStreaming || id < 0)
+        return GetObject(id);
+    const auto cached = _objectIds.find(id);
+    if (cached != _objectIds.end() && cached->second)
+    {
+        _modernRequiredObjects.insert(id);
+        return cached->second;
+    }
+    // Explicit, rare gameplay lookup. Do not build a second multi-million-entry
+    // hash table, nor load the whole world on a dedicated server. Repeat lookups
+    // hit the existing ID map. Background workers never touch this owner-thread path.
+    for (auto& placement : _modernObjectPlacements)
+    {
+        if (placement.id != id || placement.modelIndex >= _modernObjectModels.size())
+            continue;
+        Matrix4 transform;
+        transform.SetDirectionAside(Vector3(placement.rows[0], placement.rows[1], placement.rows[2]));
+        transform.SetDirectionUp(Vector3(placement.rows[3], placement.rows[4], placement.rows[5]));
+        transform.SetDirection(Vector3(placement.rows[6], placement.rows[7], placement.rows[8]));
+        transform.SetPosition(Vector3(placement.rows[9], placement.rows[10], placement.rows[11]));
+        ShapeBank::WorldModelScope worldModel(Shapes);
+        Object* object = ObjectCreate(id, _modernObjectModels[placement.modelIndex], transform,
+                                      nullptr, nullptr, false, true, false);
+        if (!object)
+            return nullptr;
+        placement.resident = object;
+        _modernRequiredObjects.insert(id);
+        _modernLogicalOnlyObjects.insert(id);
+        if (_geoAccumEnabled)
+            AccumulateGeographyForObject(object);
+        const int x = std::clamp(static_cast<int>(std::floor(placement.rows[9] * _invLandGrid)), 0, _landRange - 1);
+        const int z = std::clamp(static_cast<int>(std::floor(placement.rows[11] * _invLandGrid)), 0, _landRange - 1);
+        const size_t cell = static_cast<size_t>(z) * _landRange + x;
+        _modernObjectCellActive[cell] = 0;
+        _modernObjectCellCursor[cell] = 0;
+        _modernObjectResidencyPending = true;
+        LOG_INFO(World, "Object stream: resolved required identity {} without visual admission", id);
+        return object;
+    }
+    return nullptr;
 }
 
 Object* Landscape::FindObject(int id) const

@@ -655,6 +655,11 @@ class Landscape : public SerializeClass
         std::array<float, 12> rows{};
         OLink<Object> resident;
     };
+    // Explicit script/save/network identities and mutated state outlive camera residency.
+    // Sparse sets avoid adding per-placement overhead to multi-million-object worlds.
+    std::unordered_set<int> _modernRequiredObjects;
+    std::unordered_set<int> _modernLogicalOnlyObjects;
+    void RegisterModernObjectVisual(Object* object);
     std::vector<ModernObjectPlacement> _modernObjectPlacements;
     std::vector<std::vector<uint32_t>> _modernObjectCells;
     // One non-empty cell inside the residency window, with its squared cell distance from the
@@ -1027,6 +1032,9 @@ class Landscape : public SerializeClass
     Object* FindObjectNC(int id) const; // do not use cache
     Object* FindObject(int id) const;   // cache may be available
     Object* GetObject(int id) const;
+    // Owner-thread, potentially synchronous: resolve an authored placement and retain
+    // its logical identity. FindObject/GetObject remain read-only residency probes.
+    Object* ResolveObject(int id);
 
     // object ID management
     void ClearIDCache();
@@ -1118,7 +1126,8 @@ class Landscape : public SerializeClass
     void TextureChange(int x, int z, int id);
 
     Object* ObjectCreate(int id, const char* shape, const Matrix4& transform, int* x = nullptr, int* z = nullptr,
-                         bool avoidRecalculation = false, bool preserveAuthoredElevation = false);
+                         bool avoidRecalculation = false, bool preserveAuthoredElevation = false,
+                         bool registerVisual = true);
     void ObjectDestroy(int id);
     void ObjectMove(int id, const Matrix4& transform);
     void ObjectTypeChange(int id, const char* shape);
@@ -1228,7 +1237,8 @@ class Landscape : public SerializeClass
     inline void SelectObjectList(int& xl, int& zl, float x, float z);
 
   public:
-    void AddObject(Object* obj, int* xr = nullptr, int* zr = nullptr, bool avoidRecalculation = false);
+    void AddObject(Object* obj, int* xr = nullptr, int* zr = nullptr, bool avoidRecalculation = false,
+                   bool registerVisual = true);
     void Recalculate();
     void RemoveObject(Object* obj);
     void MoveObject(Object* obj, const Matrix4& transform);

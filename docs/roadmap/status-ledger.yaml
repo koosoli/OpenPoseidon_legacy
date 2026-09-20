@@ -6621,13 +6621,13 @@ tickets:
     owner: null
     branch: codex/streaming-residency
     baseline_commit: 03e71371
-    verification_commit: e0b88e7a
+    verification_commit: 08bbada3
     milestone: 0
     milestone_role: NON_BLOCKING
     depends_on: []
     blocked_by: []
     blocks: []
-    implementation_commits: [7d5f3e71, f733e708, 8e09f391, 7d8fb75b, a531d7b9, 21b89e79, 082eaa06, c2c8eb0b, f602332c, dca4f954, 0d6a498f, 82cbb5a2, 486d5e9b, e0b88e7a]
+    implementation_commits: [7d5f3e71, f733e708, 8e09f391, 7d8fb75b, a531d7b9, 21b89e79, 082eaa06, c2c8eb0b, f602332c, dca4f954, 0d6a498f, 82cbb5a2, 486d5e9b, e0b88e7a, 08bbada3]
     production_call_sites: []
     test_ids: [stationary-residency, preparer-byte-budget, preparer-generation-cancellation]
     benchmark_artifacts: [docs/roadmap/evidence/streaming-20260920.json]

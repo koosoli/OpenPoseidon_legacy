@@ -635,7 +635,7 @@ GameValue ObjGetAllMagazines(const GameState* state, GameValuePar oper1)
 GameValue GetObject(const GameState* state, GameValuePar oper1)
 {
     int id = toInt((float)oper1);
-    Object* obj = GLandscape->GetObject(id);
+    Object* obj = GLandscape->ResolveObject(id);
     if (!obj)
     {
         return GameValueExt((Object*)nullptr);

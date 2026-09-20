@@ -90,23 +90,29 @@ how long asynchronously admitted geometry is visible during a leg. This is not
 
 accepted as proof of no moving regression; repeat with controlled per-pose coverage.
 
-## Remaining gates
+## Current gates (updated after the implementation runs below)
 
-A: camera/ID/geometry probe, modern OPRW and legacy corpus checks, controlled movement comparison.
-
-B: change during unfinished fill, repeated same-demand controls and documented simulation-pinning limitation.
-
-C: conversion/decoder transient accounting and resource-aware pressure policy; ready IR alone is not all memory.
-
-D: profile uncovered synchronous work. Existing blanket DDS-worker experiment previously showed
-
-no stable gain; do not enable it merely because the worker exists.
-
-E: validate replacement lifetime and feedback identity/age before opt-in adaptive detail.
-
-F: finish authored LOD/allocation audit; G only if a measured bottleneck justifies it.
-
-T0: modern opaque terrain/water routing already present; no speculative wrapper removal.
+- A/B: stationary shrink/restore, in-flight changes, unchanged-demand idle path,
+  native/DayZ/legacy coverage and read-only ID probes are verified. Modern IDs
+  still disappear while the camera is away. Distant collision/query, mutable
+  save/reload and modern headless simulation independence are NOT established.
+- C: ready IR and active scratch reservations, real backend counters and GPU
+  retirement are implemented. Model/Shape allocator costs remain estimates;
+  automatic allocation-aware growth remains experimental after mixed timing.
+  PreparedTextureStore's budget is payload-based, not total allocator capacity.
+- D: incremental sky uploads and model-lighting retirement are integrated.
+  Owned PBO model/PAA preparation is implemented but OFF pending comparisons.
+  Late material stages, texture uploads and alpha classification still cost time
+  on the owner thread; a nonblocking parser does not bound the entire frame.
+- E: lease-safe whole-image replacement and conservative feedback selection are
+  opt-in. Native timing is mixed; secondary-view/visual acceptance is incomplete.
+- F: authored LOD/conventional path has been audited/tested. Geometry capacity
+  and growth overlap matter; a selected coarse draw does not release fine LODs.
+  No hierarchical page implementation is promoted on this evidence.
+- G: conditional experiment remains unselected while the above conventional
+  lifetime/preparation costs are addressed.
+- T0: modern opaque terrain/water delegation already returns before the legacy
+  loops. No speculative wrapper removal or GL33 work is warranted.
 
 Texture-lifetime prerequisite: a new headless GPU test reproduced an old-handle
 
@@ -491,3 +497,52 @@ producing a 5.58 GB reservation estimate even though only worker-count scratch
 buffers can exist. Scratch is now charged only while the worker is active and
 released before the Converted publication; model/IR reservations keep their
 existing lifetime, including cancellation across Reset. Repeat validation pending.
+
+
+### 08bbada3 active scratch, normal defaults, headless diagnosis
+
+The active-worker scratch correction passed 265 assertions / 20 targeted tests.
+`dayz-active-texture-scratch-20260920-130525` passed at factor 1.5 with both
+packed prototypes enabled: conversion reservation peak 393,735,268 bytes,
+final reservations zero, coverage 19923. Controlled-prefix texture read cost
+5176 ms versus 12158 ms in the matched 486d5e9b prefix (excluding its extra
+1500 m route). First full admission 28.7 s versus 31.7 s; one observation,
+not a universal gain. Frame mean/p95/max: 19.05/20.41/86.81,
+18.90/20.12/93.26, 19.13/20.20/54.45, 18.78/21.49/23.18 ms.
+Whole-GPU peak 7404 MiB. Both packed prototypes remain OFF.
+
+`dayz-default-settings-20260920-130807` passed with normal factor 2 and both
+packed prototypes OFF, coverage 19923 before/return. Frame mean/p95/max:
+19.80/21.08/33.46, 19.69/21.17/74.12, 19.58/20.80/38.76,
+19.69/21.35/23.07 ms; whole-GPU peak 7776 MiB. This is a successful normal
+configuration route, not proof that every former OOM is eliminated.
+
+Private loopback headless legacy run `headless-legacy-20260920-131039` passed
+simulation time progression, living AI and retained damage 0.25 without a
+renderer. Modern run `headless-dayz-20260920-131418` passed those simulation
+checks but FAILED the authored placement lookup: ID 83903272, known present
+with geometry/fire geometry on the client, was absent. A clean process exit
+is NOT a pass for modern-world gameplay correctness.
+
+### Required logical identities: implementation under validation
+
+Explicit script `object ID`, static network identity creation, save object
+creation and reference restoration now use an owner-thread resolver. The
+compact authored table is searched on a cold explicit lookup; repeat queries
+use the existing ID cache. This may synchronously load one model; it does not
+instantiate the whole map or manufacture a geometry-free object. The read-only
+harness and FindObject/GetObject do not trigger admission or pinning.
+
+Queried identities and objects with MustBeSaved state remain in the logical
+object grid when the camera departs. Only visual registration and marker-light
+ownership are retired, and the existing object is re-registered on return.
+Sparse required/logical-only sets are cleared with the world and exposed in
+residency counters; required CPU state is not claimed as reclaimed memory.
+References remain retained for the world lifetime. Native far proxies stay
+conservatively suppressed for retained objects, rather than drawing an
+unmutated substitute for changed state.
+
+This does NOT yet establish camera-independent actor-neighbourhood collision,
+projectile corridors, navigation or nearest-object queries for never-requested
+placements. Those still require a simulation demand policy. Aggressive visual
+object-pressure control remains gated. Runtime verification pending.

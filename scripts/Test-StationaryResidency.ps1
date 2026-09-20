@@ -1,10 +1,10 @@
-param([ValidateSet("Native","DayZ","Legacy")][string]$Corpus="Native",[ValidateRange(0,2.0)][double]$GeoGrowth=2.0,[switch]$PressureGrowth,[switch]$PackedModels,[switch]$PackedTextures,[switch]$FullSkyUploads,[switch]$SampleDriverMemory,[switch]$Baseline,[switch]$Normal,[switch]$Adaptive,[switch]$Controlled,[switch]$Identity,[switch]$DuringFill,[ValidateRange(-1,16384)][int]$ReadyMb=-1,[string]$Label='stationary-budget',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
+param([ValidateSet("Native","DayZ","Legacy")][string]$Corpus="Native",[ValidateRange(0,2.0)][double]$GeoGrowth=2.0,[switch]$PressureGrowth,[switch]$PackedModels,[switch]$PackedTextures,[switch]$FullSkyUploads,[switch]$SampleDriverMemory,[switch]$Baseline,[switch]$Normal,[switch]$Adaptive,[switch]$Controlled,[switch]$Identity,[switch]$RequiredIdentity,[switch]$DuringFill,[ValidateRange(-1,16384)][int]$ReadyMb=-1,[string]$Label='stationary-budget',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {
  $shellName=if ($PSVersionTable.PSEdition -eq 'Core') {'pwsh.exe'} else {'powershell.exe'}
  $argv=@((Join-Path $PSScriptRoot 'with-game-lock.sh'),(Join-Path $PSHOME $shellName).Replace('\','/'),'-NoProfile','-File',$PSCommandPath,'-Label',$Label,'-GameDir',$GameDir)
  if ($Baseline) {$argv+='-Baseline'}; if ($Normal) {$argv+='-Normal'}
- foreach ($flag in @('Adaptive','Controlled','Identity','DuringFill','SampleDriverMemory','PressureGrowth','PackedModels','PackedTextures','FullSkyUploads')) {if ((Get-Variable $flag -ValueOnly)) {$argv+=('-'+$flag)}}
+ foreach ($flag in @('Adaptive','Controlled','Identity','RequiredIdentity','DuringFill','SampleDriverMemory','PressureGrowth','PackedModels','PackedTextures','FullSkyUploads')) {if ((Get-Variable $flag -ValueOnly)) {$argv+=('-'+$flag)}}
  $argv+=@('-ReadyMb',[string]$ReadyMb,'-Corpus',$Corpus,'-GeoGrowth',$GeoGrowth.ToString([Globalization.CultureInfo]::InvariantCulture))
  $env:LOCK_OWNER='stationary residency check'
  try {& 'C:\Program Files\Git\bin\bash.exe' @argv; if ($LASTEXITCODE) {throw "Residency test exited $LASTEXITCODE"}} finally {Remove-Item Env:LOCK_OWNER}
@@ -150,6 +150,14 @@ try {
   $unchanged=Send @{cmd='stream_residency'}
   if ($unchanged.admitUpdates -ne $restored.admitUpdates) {throw 'Repeated unchanged budgets caused admission churn'}
  }
+ if ($RequiredIdentity) {
+  if ($Corpus -ne 'DayZ') {throw 'RequiredIdentity fixture is a known DayZ placement'}
+  $null=Send @{cmd='exec';code='streamRequired = object 83903272; streamRequired setDammage 0.25'}
+  $r=Send @{cmd='eval';code='!(isNull streamRequired)'}
+  if ($r.result -notmatch 'true') {throw 'Required placement did not resolve'}
+  $Identity=$true
+  $identityBefore=Send @{cmd='stream_identity_probe';ids=@(83903272)}
+ }
  if ($Identity) {
   $null=Send @{cmd='eval';code=('triFreeFlyPose "'+(Pose ($baseX+1500) ($baseY+150))+'"')}
   $null=Wait-Settled
@@ -157,6 +165,11 @@ try {
   $null=Send @{cmd='eval';code=('triFreeFlyPose "'+(Pose $baseX)+'"')}
   $null=Wait-Settled
   $identityReturned=Send @{cmd='stream_identity_probe';ids=@($identityBefore.objects | ForEach-Object {$_.id})}
+  if ($RequiredIdentity) {
+   if (!$identityAway.objects[0].present -or !$identityAway.objects[0].hasGeometry -or !$identityAway.objects[0].hasFireGeometry -or !$identityReturned.objects[0].present) {throw 'Required identity or collision payload disappeared'}
+   $r=Send @{cmd='eval';code='(streamRequired == object 83903272) && (getDammage streamRequired > 0.24) && (getDammage streamRequired < 0.26)'}
+   if ($r.result -notmatch 'true') {throw 'Required identity or mutation changed on return'}
+  }
  }
  @{during=$during;identityBefore=$identityBefore;identityAway=$identityAway;identityReturned=$identityReturned;poses=$poseResults;before=$before;small=$small;restored=$restored;normal=[bool]$Normal;baselineReproduced=([bool]$Baseline -and !$Normal)} | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $out 'result.json')
  $null=Send @{cmd='screenshot';path=(Join-Path $out 'settled.png')}
