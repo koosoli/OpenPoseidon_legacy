@@ -274,3 +274,28 @@ TEST_CASE("PreparedTextureStore key normalisation and round trip", "[Graphics][P
 
     store.Clear();
 }
+
+#include <Poseidon/Graphics/Textures/MipDemand.hpp>
+
+TEST_CASE("Adaptive mip demand is conservative across stale feedback and view changes", "[streaming][mip-demand]")
+{
+    Poseidon::render::MipDemand demand;
+    CHECK(demand.Choose(2, 255, 0, 32, 100, false, 3) == 0);
+    CHECK(demand.Choose(2, 4, 90, 32, 100, false, 3) == 0);
+    CHECK(demand.Choose(2, 4, 0, 0, 100, false, 3) == 0);
+    CHECK(demand.Choose(2, 4, 0, 32, 100, true, 3) == 0);
+    CHECK(demand.Choose(2, 0, 0, 32, 100, false, 3) == 0);
+}
+TEST_CASE("Adaptive mip demand demotes slowly and converts relative feedback to source mips", "[streaming][mip-demand]")
+{
+    Poseidon::render::MipDemand demand;
+    CHECK(demand.Choose(0, 3, 0, 32, 100, false, 3) == 0);
+    CHECK(demand.Choose(0, 3, 0, 32, 219, false, 3) == 0);
+    CHECK(demand.Choose(0, 3, 0, 32, 220, false, 3) == 2);
+    demand.Replaced(220);
+    CHECK(demand.Choose(2, 255, 0, 32, 224, false, 3) == 2);
+    CHECK(demand.Choose(2, 1, 0, 32, 230, false, 3) == 2);
+    CHECK(demand.Choose(2, 0, 0, 32, 231, false, 3) == 0);
+    demand.Replaced(240);
+    CHECK(demand.Choose(2, 255, 0, 32, 400, false, 3) == 0);
+}

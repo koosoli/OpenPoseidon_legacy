@@ -1795,6 +1795,7 @@ struct WgrMemoryStats
     uint64_t geometry_retired_bytes;
     uint32_t object_texture_count;
     uint32_t over_budget;
+    uint64_t object_texture_retired_bytes; // submitted payload awaiting queue completion
 };
 
 enum WgrWaterKind : uint32_t { WGR_WATER_KIND_OCEAN = 0, WGR_WATER_KIND_RIVER = 1 };

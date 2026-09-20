@@ -62,8 +62,8 @@ const DEFAULT_GROUPS: u32 = 32;
 
 enum Slot {
     Idle,
-    Pending,
-    InFlight(mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>),
+    Pending(u64),
+    InFlight(mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>, u64),
 }
 
 /// One harvested observation for a bindless slot.
@@ -82,6 +82,7 @@ pub struct MipFeedback {
     readback: Vec<(wgpu::Buffer, Slot)>,
     /// Latest observation per bindless slot, indexed by slot.
     latest: Vec<SlotObservation>,
+    valid_after_frame: Vec<u64>,
     groups: u32,
     group: u32,
     frame: u64,
@@ -124,6 +125,7 @@ impl MipFeedback {
             capacity: 0,
             readback: Vec::new(),
             latest: Vec::new(),
+            valid_after_frame: Vec::new(),
             groups,
             group: 0,
             frame: 0,
@@ -171,6 +173,7 @@ impl MipFeedback {
             .collect();
         self.capacity = capacity;
         self.latest.resize(capacity as usize, SlotObservation::default());
+        self.valid_after_frame.resize(capacity as usize, 0);
         true
     }
 
@@ -227,7 +230,7 @@ impl MipFeedback {
             return;
         };
         encoder.copy_buffer_to_buffer(src, 0, dst, 0, size);
-        *state = Slot::Pending;
+        *state = Slot::Pending(self.frame);
     }
 
     /// Kick map_async on freshly copied slots and drain completed ones (non-blocking). Called
@@ -237,27 +240,28 @@ impl MipFeedback {
             return;
         }
         for (buf, state) in &mut self.readback {
-            if matches!(state, Slot::Pending) {
+            if let Slot::Pending(captured_frame) = state {
+                let captured_frame = *captured_frame;
                 let (tx, rx) = mpsc::channel();
                 buf.slice(..).map_async(wgpu::MapMode::Read, move |r| {
                     let _ = tx.send(r);
                 });
-                *state = Slot::InFlight(rx);
+                *state = Slot::InFlight(rx, captured_frame);
             }
         }
         let _ = device.poll(wgpu::PollType::Poll);
-        let frame = self.frame;
         let mut decoded = false;
         for (buf, state) in &mut self.readback {
-            let Slot::InFlight(rx) = state else {
+            let Slot::InFlight(rx, captured_frame) = state else {
                 continue;
             };
+            let frame = *captured_frame;
             match rx.try_recv() {
                 Ok(Ok(())) => {
                     {
                         let data = buf.slice(..).get_mapped_range();
                         let words = data.len() / 4;
-                        {
+                        if frame >= self.frag_prev_frame {
                             let mut cur = [0u32; HEADER_WORDS as usize];
                             for (k, w) in cur.iter_mut().enumerate() {
                                 if k < words {
@@ -292,8 +296,7 @@ impl MipFeedback {
                             }
                             let slot = i - HEADER_WORDS as usize;
                             if let Some(obs) = self.latest.get_mut(slot) {
-                                obs.desired_mip = MIP_CODE_BASE.saturating_sub(code.min(MIP_CODE_BASE));
-                                obs.frame = frame;
+                                record_observation(obs, self.valid_after_frame[slot], frame, code);
                             }
                         }
                     }
@@ -331,10 +334,43 @@ impl MipFeedback {
         self.harvests
     }
 
+    /// A new lease owner or replacement image invalidates relative-mip observations.
+    /// Readbacks already in flight carry their capture frame and cannot revive old data.
+    pub fn invalidate_slot(&mut self, slot: u32) {
+        if let Some(obs) = self.latest.get_mut(slot as usize) {
+            *obs = SlotObservation::default();
+            self.valid_after_frame[slot as usize] = self.frame.saturating_add(1);
+        }
+    }
+
     pub fn observation(&self, slot: u32) -> SlotObservation {
         self.latest
             .get(slot as usize)
             .copied()
             .unwrap_or_default()
+    }
+}
+
+fn record_observation(obs: &mut SlotObservation, valid_after: u64, captured: u64, code: u32) {
+    if code != 0 && captured >= valid_after && captured >= obs.frame {
+        obs.desired_mip = MIP_CODE_BASE.saturating_sub(code.min(MIP_CODE_BASE));
+        obs.frame = captured;
+    }
+}
+
+#[cfg(test)]
+mod identity_tests {
+    use super::*;
+    #[test]
+    fn delayed_readbacks_cannot_revive_old_slot_identity_or_age() {
+        let mut obs = SlotObservation::default();
+        record_observation(&mut obs, 101, 100, 16);
+        assert_eq!(obs.frame, 0); // previous texture's result arrived late
+        record_observation(&mut obs, 101, 104, 13);
+        assert_eq!((obs.desired_mip, obs.frame), (3, 104));
+        record_observation(&mut obs, 101, 102, 16);
+        assert_eq!((obs.desired_mip, obs.frame), (3, 104)); // out-of-order ring completion
+        record_observation(&mut obs, 101, 110, 0);
+        assert_eq!(obs.frame, 104); // an unsampled rotation is not a fresh observation
     }
 }

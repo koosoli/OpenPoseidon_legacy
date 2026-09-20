@@ -262,6 +262,7 @@ struct GpuResidencySnapshot
     uint64_t geometryLiveBytes = 0;
     uint64_t geometryCapacityBytes = 0; // pool capacity, i.e. what is actually allocated
     uint64_t geometryRetiredBytes = 0;
+    uint64_t objectTextureRetiredBytes = 0;
     unsigned objectTextureCount = 0;
     bool overBudget = false;
     // trackedBytes / resident objects, 0 when nothing is resident. The headline figure:

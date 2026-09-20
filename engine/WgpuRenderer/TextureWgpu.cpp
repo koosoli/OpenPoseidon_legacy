@@ -1607,6 +1607,72 @@ int TextureMipBias()
     return std::clamp(Poseidon::Dev::GResidencyLevers().textureMipBias, 0, 4);
 }
 
+bool TextureWgpu::AdaptiveMipCandidate()
+{
+    static const bool enabled = [] { const char* v = std::getenv("WGR_ADAPTIVE_TEXTURE_DETAIL"); return v && v[0] == '1'; }();
+    if (!enabled) return false;
+    // Narrow prototype: immutable in-memory DDS BCR sources, opaque object colour only.
+    // No archive reads, composites, cutouts, normals, dynamic/UI images or borrowed tint views.
+    if (!_gpuHandle || !_slotLease || _dynamic || _tintDelegate || _cpuTintView || !_src ||
+        !dynamic_cast<TextureSourceDDS*>(static_cast<ITextureSource*>(_src)) ||
+        _nMipmaps < 2 || TextureMipBias() != 0)
+        return false;
+    const char* name = SourceName();
+    if (!name) return false;
+    const size_t length = std::strlen(name);
+    const auto suffix = [&](const char* ending) {
+        const size_t n = std::strlen(ending);
+        return length >= n && strcmpi(name + length - n, ending) == 0;
+    };
+    return (suffix("_bcr.edds") || suffix("_bcr.dds")) &&
+        BcFormatFor(_mipmaps[0].DstFormat()) >= 0 && GetAlphaClass() == AlphaStats::Opaque;
+}
+
+bool TextureWgpu::ReplaceMipTail(int firstLevel, uint64_t frame)
+{
+    if (!AdaptiveMipCandidate() || firstLevel == _uploadedFirstLevel || firstLevel < 0 || firstLevel >= _nMipmaps)
+        return false;
+    const PacFormat format = _mipmaps[0].DstFormat();
+    const int count = _nMipmaps - firstLevel;
+    std::vector<size_t> offsets(static_cast<size_t>(count));
+    size_t bytes = 0;
+    for (int i = 0; i < count; ++i) {
+        offsets[i] = bytes;
+        const auto& mip = _mipmaps[firstLevel + i];
+        bytes += render::mipmap::ComputeLayout(format, mip._w, mip._h).dataSize;
+    }
+    // One bounded upload, retaining the old valid image. Include new image + staging
+    // overlap; trackedBytes also includes submitted old textures awaiting completion.
+    constexpr size_t maxUpload = 4 * 1024 * 1024;
+    WgrMemoryStats memory{};
+    if (bytes == 0 || bytes > maxUpload || !EngineWgpu::LastMemoryStats(memory) ||
+        !memory.budget_bytes || memory.tracked_bytes >= memory.budget_bytes ||
+        bytes * 2 > memory.budget_bytes - memory.tracked_bytes)
+        return false;
+    std::vector<uint8_t> blocks(bytes);
+    std::vector<MipmapRead> reads(static_cast<size_t>(count));
+    for (int i = 0; i < count; ++i)
+        reads[i] = MipmapRead{blocks.data() + offsets[i], &_mipmaps[firstLevel + i], firstLevel + i};
+    if (!_src->GetMipmapChain(reads.data(), count)) return false; // DDS copies resident CPU blocks
+    CheckProducerMayTouchRenderer("adaptive mip replacement");
+    auto* renderer = _bank->Renderer();
+    const auto& top = _mipmaps[firstLevel];
+    const uint64_t next = wgr_texture_create_in_slot(renderer, top._w, top._h, BcFormatFor(format),
+        count, 0, blocks.data(), static_cast<uint32_t>(bytes), _slotLease);
+    if (!next) return false; // old handle and leased descriptor remain valid
+    const uint64_t previous = _gpuHandle;
+    _gpuHandle = next;
+    _w = top._w; _h = top._h;
+    const int oldBias = _uploadedFirstLevel;
+    _uploadedFirstLevel = firstLevel;
+    _mipDemand.Replaced(frame);
+    wgr_texture_destroy(renderer, previous);
+    GTextureStreamStats.frameUploadBytes.fetch_add(bytes, std::memory_order_relaxed);
+    LOG_INFO(Graphics, "Adaptive texture detail: mip {} -> {} bytes={} slot={} source='{}'",
+        oldBias, firstLevel, bytes, _slotLease, SourceName());
+    return true;
+}
+
 uint64_t TextureWgpu::EnsureUploaded()
 {
     if (_bank)
@@ -1830,6 +1896,7 @@ uint64_t TextureWgpu::EnsureUploaded()
             // texture whose level 0 is missing, which is a validation error, not a
             // smaller texture. _w/_h are updated below so samplers and any later reader
             // see the size that really exists on the GPU.
+            _uploadedFirstLevel = firstLevel;
             _w = _mipmaps[firstLevel]._w;
             _h = _mipmaps[firstLevel]._h;
             // Into this texture's LEASED slot, so a re-upload after an eviction reclaims

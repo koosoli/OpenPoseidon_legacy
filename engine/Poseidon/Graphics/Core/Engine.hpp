@@ -1655,6 +1655,7 @@ class Engine : public IGraphicsEngine
           uint64_t geometryLiveBytes = 0;
           uint64_t geometryCapacityBytes = 0;
           uint64_t geometryRetiredBytes = 0;
+          uint64_t objectTextureRetiredBytes = 0;
           unsigned objectTextureCount = 0;
           bool overBudget = false;
       };

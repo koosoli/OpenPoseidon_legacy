@@ -6607,3 +6607,41 @@ tickets:
     evidence:
       - docs/roadmap/decisions/RAIN-TERRAIN-VISIBILITY-20260920.md
       - docs/roadmap/evidence/rain-terrain-20260920.json
+
+  - id: STREAM-RES-001
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: Streaming residency correctness and bounded preparation
+    class: WORLD_VISUAL
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: OPEN
+    status: INTEGRATED
+    outcome: null
+    owner: null
+    branch: codex/streaming-residency
+    baseline_commit: 03e71371
+    verification_commit: 8e09f391
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: [7d5f3e71, f733e708, 8e09f391]
+    production_call_sites: []
+    test_ids: [stationary-residency, preparer-byte-budget, preparer-generation-cancellation]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/STREAMING-AUDIT-20260920.md
+    known_failures:
+      - The staged streaming plan remains in progress; see the decision record for uncompleted gates.
+      - Camera residency still removes native logical objects. Do not broaden this lifecycle to legacy worlds or default-enable pressure-driven object removal.
+      - Ready IR byte accounting excludes decoder scratch and converted Shape storage.
+      - Initial moving performance comparison varies and requires controlled per-pose coverage before acceptance.
+    fallback: WGR_OBJECT_STREAM_GPU_BUDGET remains off; WGR_OBJECT_STREAM_READY_MB=0 disables the new ready-payload gate; old ocean remains default.
+    reviewer: null
+    reviewer_method: Installed native runtime reproduction, comparable-coverage checks and real worker cancellation tests.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/STREAMING-AUDIT-20260920.md
+      - docs/roadmap/modernisation/OpenPoseidon_Streaming_and_Virtualized_Geometry_Plan.md

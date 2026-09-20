@@ -9526,6 +9526,10 @@ impl Gfx3d {
         self.mip_feedback.harvest(device);
     }
 
+    pub fn invalidate_texture_feedback(&mut self, slot: u32) {
+        self.mip_feedback.invalidate_slot(slot);
+    }
+
     pub fn mip_feedback_state(&self) -> &MipFeedback {
         &self.mip_feedback
     }

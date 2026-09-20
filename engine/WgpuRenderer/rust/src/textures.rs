@@ -1,4 +1,5 @@
 use slotmap::{Key, KeyData, SlotMap};
+use std::sync::{Arc, atomic::{AtomicU64, Ordering}};
 
 use crate::ffi::WgrSampler2D;
 use crate::log::{LogSink, log_level};
@@ -261,6 +262,8 @@ pub struct SharedTextures {
     bindless_slots: Vec<Option<wgpu::TextureView>>,
     bindless_free: Vec<u32>,
     bindless_retired: Vec<u32>,
+    retired_payload: Arc<AtomicU64>,
+    retiring_this_submission: u64,
     bindless_dirty: bool,
     // LEASED slots (REN-RES-001). A lease belongs to a logical texture -- one C++
     // `TextureWgpu`, i.e. one texture NAME -- not to a single GPU upload of it. While a
@@ -586,6 +589,8 @@ impl SharedTextures {
             bindless_slots,
             bindless_free: Vec::new(),
             bindless_retired: Vec::new(),
+            retired_payload: Arc::new(AtomicU64::new(0)),
+            retiring_this_submission: 0,
             bindless_dirty: false,
             bindless_leased: std::collections::HashSet::new(),
             object_cap,
@@ -698,7 +703,7 @@ impl SharedTextures {
             .registry
             .create(device, queue, &self.texture_layout, tex, lease);
         // On failure the lease is deliberately NOT released: it still belongs to the
-        // caller's texture, which may retry. The slot stays white in the meantime.
+        // caller's texture, which may retry. Any previous valid image stays bound.
         if handle != 0
             && let Some(t) = self.registry.get(handle)
         {
@@ -714,8 +719,13 @@ impl SharedTextures {
 
     pub fn destroy(&mut self, handle: u64) {
         if let Some(t) = self.registry.get(handle) {
+            self.retiring_this_submission += t.resident_bytes;
+            self.retired_payload.fetch_add(t.resident_bytes, Ordering::Relaxed);
             let slot = t.slot;
-            if slot != 0 && (slot as usize) < self.bindless_slots.len() {
+            // A newer image may already occupy the same lease (upload-before-retire).
+            // Only the image currently bound to the slot may clear it.
+            if slot != 0 && (slot as usize) < self.bindless_slots.len()
+                && self.bindless_slots[slot as usize].as_ref() == Some(&t.view) {
                 self.bindless_slots[slot as usize] = None;
                 self.bindless_dirty = true;
                 // TWO rules apply here and they compose (REN-RES-001 + the submit-boundary
@@ -735,8 +745,19 @@ impl SharedTextures {
     // Called immediately after the frame's queue submit — the point at which no
     // encoded work can still reference a slot freed by destroy this frame. Slots
     // parked by destroy become reusable here (mirrors GeometryPool::frame_submitted).
-    pub fn frame_submitted(&mut self) {
+    pub fn frame_submitted(&mut self, queue: &wgpu::Queue) {
         self.bindless_free.append(&mut self.bindless_retired);
+        let bytes = std::mem::take(&mut self.retiring_this_submission);
+        if bytes != 0 {
+            let retired = self.retired_payload.clone();
+            queue.on_submitted_work_done(move || {
+                retired.fetch_sub(bytes, Ordering::Relaxed);
+            });
+        }
+    }
+
+    pub fn retired_payload_bytes(&self) -> u64 {
+        self.retired_payload.load(Ordering::Relaxed)
     }
 
     // Dense bindless slot for `handle` (0 = white fallback for missing/zero handles).
@@ -1152,6 +1173,33 @@ fn fs() -> @location(0) vec4<f32> {
     // captured BEFORE the eviction and never refreshed, which is precisely the situation
     // cull.rs's append-only material table leaves a registered model in.
     #[test]
+    fn leased_slot_replacement_survives_old_handle_retirement() {
+        let Some((device, queue)) = bindless_headless() else { return; };
+        let mut shared = shared(&device, &queue);
+        let red = texel([255, 0, 0, 255]);
+        let green = texel([0, 255, 0, 255]);
+        let lease = shared.slot_acquire();
+        let old = shared.create_in_slot(&device, &queue, &data(&red), lease);
+        let replacement = shared.create_in_slot(&device, &queue, &data(&green), lease);
+        assert_ne!(old, 0);
+        assert_ne!(replacement, 0);
+        shared.ensure_bindless(&device);
+        assert_eq!(sample_slot(&device, &queue, &shared, lease), [0, 255, 0, 255]);
+        // Upload first, retire second: the old handle must not erase its replacement.
+        shared.destroy(old);
+        assert!(shared.retired_payload_bytes() > 0);
+        shared.ensure_bindless(&device);
+        assert_eq!(sample_slot(&device, &queue, &shared, lease), [0, 255, 0, 255]);
+        shared.frame_submitted(&queue);
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        assert_eq!(shared.retired_payload_bytes(), 0);
+        shared.destroy(old); // a stale duplicate retire must also be harmless
+        shared.destroy(replacement);
+        shared.ensure_bindless(&device);
+        assert_eq!(sample_slot(&device, &queue, &shared, lease), [255, 255, 255, 255]);
+    }
+
+    #[test]
     fn leased_slot_survives_evict_and_reupload() {
         let Some((device, queue)) = bindless_headless() else {
             return;
@@ -1275,7 +1323,7 @@ fn fs() -> @location(0) vec4<f32> {
         // The within-frame half of the rule has its own test
         // (destroyed_slot_is_not_reused_until_frame_submitted); here we only drive the
         // boundary and assert the slot does come back afterwards.
-        shared.frame_submitted();
+        shared.frame_submitted(&queue);
         let b = shared.create(&device, &queue, &data(&red));
         assert_eq!(
             shared.texture_slot(b),
@@ -1438,7 +1486,7 @@ mod slot_lease_tests {
             "same-frame create must not reuse the destroyed slot"
         );
 
-        st.frame_submitted();
+        st.frame_submitted(&queue);
         let c = st.create(&device, &queue, &data);
         assert_ne!(c, 0);
         assert_eq!(
@@ -1467,7 +1515,7 @@ mod slot_lease_tests {
         };
         let a = st.create(&device, &queue, &data);
         st.destroy(a);
-        st.frame_submitted();
+        st.frame_submitted(&queue);
         let b = st.create(&device, &queue, &data);
         assert_ne!(
             a, b,

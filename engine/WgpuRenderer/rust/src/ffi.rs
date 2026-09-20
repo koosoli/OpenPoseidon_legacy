@@ -3495,6 +3495,7 @@ pub struct WgrMemoryStats {
     pub geometry_retired_bytes: u64,
     pub object_texture_count: u32,
     pub over_budget: u32,
+    pub object_texture_retired_bytes: u64,
 }
 
 /// Fill `out` with the latest grass instance counts. Returns 1 on success, 0 when

@@ -1,3 +1,4 @@
+#include <Poseidon/World/Scene/Scene.hpp>
 #include "TextureBankWgpu.hpp"
 #include "EngineWgpu.hpp" // AcquireProducerWindow / LastMemoryStats (REN-THR-013)
 
@@ -185,9 +186,60 @@ void TextureBankWgpu::ReportMipFeedback()
              hist[2], hist[3], hist[4], slackPct, slots, fb.observed, fb.groups, fb.harvests);
 }
 
+void TextureBankWgpu::UpdateAdaptiveTextureDetail()
+{
+    static const bool enabled = [] {
+        const char* value = std::getenv("WGR_ADAPTIVE_TEXTURE_DETAIL");
+        return value && value[0] == '1';
+    }();
+    if (!enabled || !_renderer || (_residencyFrame % 8) != 0 || !GScene || !GScene->GetCamera()) return;
+    const auto position = GScene->GetCamera()->Position();
+    const auto direction = GScene->GetCamera()->Direction();
+    const float dx = position.X() - _adaptiveViewX, dy = position.Y() - _adaptiveViewY, dz = position.Z() - _adaptiveViewZ;
+    const float alignment = direction.X() * _adaptiveDirX + direction.Y() * _adaptiveDirY + direction.Z() * _adaptiveDirZ;
+    const float projectionX = GScene->GetCamera()->InvLeft() * (GEngine ? GEngine->Width() : 0);
+    const float projectionY = GScene->GetCamera()->InvTop() * (GEngine ? GEngine->Height() : 0);
+    if (!_adaptiveViewValid || dx * dx + dy * dy + dz * dz > 4.0f || alignment < 0.999f ||
+        projectionX != _adaptiveProjectionX || projectionY != _adaptiveProjectionY) {
+        ++_adaptiveViewEpoch;
+        _adaptiveViewX = position.X(); _adaptiveViewY = position.Y(); _adaptiveViewZ = position.Z();
+        _adaptiveDirX = direction.X(); _adaptiveDirY = direction.Y(); _adaptiveDirZ = direction.Z();
+        _adaptiveViewValid = true;
+        _adaptiveProjectionX = projectionX; _adaptiveProjectionY = projectionY;
+    }
+    if (_mipDesired.size() < 65536) { _mipDesired.resize(65536); _mipAge.resize(65536); }
+    EngineWgpu::AcquireProducerWindow("adaptive texture feedback");
+    WgrMipFeedbackStats feedback{};
+    const uint32_t slots = wgr_get_mip_feedback(_renderer, &feedback, _mipDesired.data(), _mipAge.data(), 65536);
+    if (!slots) return;
+    const size_t count = static_cast<size_t>(_texture.Size());
+    // Round-robin prevents one frequently changing texture from starving the others.
+    for (size_t scanned = 0; scanned < count; ++scanned) {
+        _adaptiveCursor %= count;
+        TextureWgpu* texture = _texture[static_cast<int>(_adaptiveCursor++)];
+        if (!texture || IsTerrainOwnedTexture(texture) || !texture->AdaptiveMipCandidate()) continue;
+        const uint32_t slot = texture->_slotLease;
+        if (slot >= slots) continue;
+        const bool moved = texture->_adaptiveViewEpoch != _adaptiveViewEpoch;
+        int maxBias = std::min(3, texture->_nMipmaps - 1);
+        while (maxBias > 0 && (texture->_mipmaps[maxBias]._w < 128 || texture->_mipmaps[maxBias]._h < 128)) --maxBias;
+        const int target = texture->_mipDemand.Choose(texture->_uploadedFirstLevel, _mipDesired[slot],
+            _mipAge[slot], feedback.groups, _residencyFrame, moved, maxBias);
+        if (target == texture->_uploadedFirstLevel) {
+            if (target == 0) texture->_adaptiveViewEpoch = _adaptiveViewEpoch;
+            continue;
+        }
+        if (texture->ReplaceMipTail(target, _residencyFrame)) {
+            texture->_adaptiveViewEpoch = _adaptiveViewEpoch;
+            break; // at most one image / 4 MiB per eight frames
+        }
+    }
+}
+
 void TextureBankWgpu::TrimResidency()
 {
     ++_residencyFrame;
+    UpdateAdaptiveTextureDetail();
     if (!_renderer)
         return;
     // Every 600 residency frames -- roughly ten seconds of play, and long enough that the
@@ -281,6 +333,7 @@ void TextureBankWgpu::TrimResidency()
         TextureWgpu* texture = _texture[i];
         if (!texture || !texture->GpuHandle() || texture->IsDynamicTexture() || IsTerrainOwnedTexture(texture))
             continue;
+        if (texture->AdaptiveMipCandidate()) continue; // prototype retains a valid image; reports soft overage instead of white fallback
         const bool pinned = texture->ResidentPins() != 0;
         if (pinned && !_retainedLivenessActive)
             continue;

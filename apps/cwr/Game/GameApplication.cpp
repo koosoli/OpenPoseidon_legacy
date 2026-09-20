@@ -471,6 +471,7 @@ bool WriteCaptureMetrics(const std::string& path)
             cJSON_AddNumberToObject(gpu, "geometry_live_mb", g.geometryLiveBytes / (1024.0 * 1024.0));
             cJSON_AddNumberToObject(gpu, "geometry_capacity_mb", g.geometryCapacityBytes / (1024.0 * 1024.0));
             cJSON_AddNumberToObject(gpu, "geometry_retired_mb", g.geometryRetiredBytes / (1024.0 * 1024.0));
+            cJSON_AddNumberToObject(gpu, "texture_retired_mb", g.objectTextureRetiredBytes / (1024.0 * 1024.0));
             cJSON_AddNumberToObject(gpu, "object_textures", g.objectTextureCount);
             cJSON_AddBoolToObject(gpu, "over_budget", g.overBudget);
             // Only when it was actually derived. A stock CWA mission does not use the

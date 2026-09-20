@@ -11668,6 +11668,7 @@ bool EngineWgpu::GetGpuMemoryStatsFromRenderer(GpuMemoryStatsOut& out) const
     out.geometryLiveBytes = stats.geometry_live_bytes;
     out.geometryCapacityBytes = stats.geometry_capacity_bytes;
     out.geometryRetiredBytes = stats.geometry_retired_bytes;
+    out.objectTextureRetiredBytes = stats.object_texture_retired_bytes;
     out.objectTextureCount = stats.object_texture_count;
     out.overBudget = stats.over_budget != 0;
     return true;

@@ -60,6 +60,10 @@ using namespace Poseidon;
 
 #include <SDL3/SDL.h>
 
+#include <algorithm>
+#include <climits>
+#include <unordered_set>
+#include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
 #include <chrono>
 #include <cmath>
 #include <cstring>
@@ -73,6 +77,61 @@ namespace HarnessBuiltins
 
 void RegisterScreenshot(HarnessServer& hs)
 {
+    hs.RegisterCommand({"stream_identity_probe", "Read world IDs and geometry presence without retaining objects", {}},
+        [](const std::string&, cJSON* root) -> std::string {
+            if (!GLandscape) return HarnessProtocol::ErrorResponse("no landscape");
+            std::vector<int> ids;
+            const auto worldIds = GLandscape->GetObjectIDList();
+            std::unordered_set<int> presentIds;
+            for (int i = 0; i < worldIds.Size(); ++i) presentIds.insert(worldIds[i]);
+            const auto* requested = cJSON_GetObjectItemCaseSensitive(root, "ids");
+            if (requested) {
+                if (!cJSON_IsArray(requested) || cJSON_GetArraySize(requested) > 16)
+                    return HarnessProtocol::ErrorResponse("ids must be an array of at most 16 integers");
+                for (int i = 0; i < cJSON_GetArraySize(requested); ++i) {
+                    const auto* id = cJSON_GetArrayItem(requested, i);
+                    if (!cJSON_IsNumber(id) || !std::isfinite(id->valuedouble) || id->valuedouble < 0 ||
+                        id->valuedouble > INT_MAX || std::floor(id->valuedouble) != id->valuedouble)
+                        return HarnessProtocol::ErrorResponse("invalid object ID");
+                    ids.push_back(id->valueint);
+                }
+            } else {
+                const auto* x = cJSON_GetObjectItemCaseSensitive(root, "x");
+                const auto* z = cJSON_GetObjectItemCaseSensitive(root, "z");
+                if (!cJSON_IsNumber(x) || !cJSON_IsNumber(z) || !std::isfinite(x->valuedouble) || !std::isfinite(z->valuedouble))
+                    return HarnessProtocol::ErrorResponse("finite x/z or explicit ids required");
+                const auto all = GLandscape->GetObjectIDList();
+                std::vector<std::pair<double, int>> nearest;
+                for (int i = 0; i < all.Size(); ++i) {
+                    auto* object = GLandscape->FindObject(all[i]);
+                    if (!object || !object->GetShape()) continue;
+                    const double dx = object->Position().X() - x->valuedouble;
+                    const double dz = object->Position().Z() - z->valuedouble;
+                    nearest.emplace_back(dx * dx + dz * dz, all[i]);
+                }
+                const size_t count = std::min<size_t>(16, nearest.size());
+                std::partial_sort(nearest.begin(), nearest.begin() + count, nearest.end());
+                for (size_t i = 0; i < count; ++i) ids.push_back(nearest[i].second);
+            }
+            auto* result = cJSON_CreateObject();
+            auto* objects = cJSON_AddArrayToObject(result, "objects");
+            for (int id : ids) {
+                auto* item = cJSON_CreateObject();
+                cJSON_AddNumberToObject(item, "id", id);
+                auto* object = presentIds.contains(id) ? GLandscape->FindObject(id) : nullptr;
+                cJSON_AddBoolToObject(item, "present", object != nullptr);
+                if (object) {
+                    cJSON_AddBoolToObject(item, "destroyed", object->IsDestroyed());
+                    cJSON_AddNumberToObject(item, "x", object->Position().X());
+                    cJSON_AddNumberToObject(item, "z", object->Position().Z());
+                    const auto* shape = object->GetShape();
+                    cJSON_AddBoolToObject(item, "hasGeometry", shape && shape->FindGeometryLevel() >= 0);
+                    cJSON_AddBoolToObject(item, "hasFireGeometry", shape && shape->FindFireGeometryLevel() >= 0);
+                }
+                cJSON_AddItemToArray(objects, item);
+            }
+            return HarnessProtocol::JsonResponse(result);
+        });
     hs.RegisterCommand({"stream_residency", "Read residency; optional experimental test budget", {}},
         [](const std::string&, cJSON* root) -> std::string {
             if (!GLandscape) return HarnessProtocol::ErrorResponse("no landscape");

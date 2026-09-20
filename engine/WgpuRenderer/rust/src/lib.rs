@@ -2333,7 +2333,9 @@ impl Renderer {
     fn memory_stats(&self) -> ffi::WgrMemoryStats {
         let (object_texture_bytes, object_texture_count) = self.textures.residency();
         let geometry = self.gfx3d.geometry_residency();
+        let object_texture_retired_bytes = self.textures.retired_payload_bytes();
         let tracked_bytes = object_texture_bytes
+            .saturating_add(object_texture_retired_bytes)
             .saturating_add(geometry.capacity_bytes)
             .saturating_add(geometry.retired_bytes);
         ffi::WgrMemoryStats {
@@ -2344,6 +2346,7 @@ impl Renderer {
             geometry_capacity_bytes: geometry.capacity_bytes,
             geometry_retired_bytes: geometry.retired_bytes,
             object_texture_count,
+            object_texture_retired_bytes,
             over_budget: u32::from(
                 self.residency_budget_bytes != 0 && tracked_bytes > self.residency_budget_bytes,
             ),
@@ -6145,7 +6148,7 @@ impl Renderer {
         self.publish_pool_to_uploader();
         // Same boundary for bindless texture slots: a slot freed by texture_destroy
         // this frame may only be reused for creates in later frames.
-        self.textures.frame_submitted();
+        self.textures.frame_submitted(&self.queue);
         // Load-time sky bakes are submitted without waiting; their readbacks complete
         // during polls/submissions and are drained here, 1-2 frames after registration.
         self.gfx3d.collect_sky_bakes(&self.device);
@@ -6247,7 +6250,7 @@ impl Renderer {
         data: &[u8],
         slot: u32,
     ) -> u64 {
-        self.textures.create_in_slot(
+        let handle = self.textures.create_in_slot(
             &self.device,
             &self.queue,
             &TextureData {
@@ -6259,11 +6262,17 @@ impl Renderer {
                 bytes: data,
             },
             slot,
-        )
+        );
+        if handle != 0 {
+            self.gfx3d.invalidate_texture_feedback(self.textures.texture_slot(handle));
+        }
+        handle
     }
 
     fn texture_slot_acquire(&mut self) -> u32 {
-        self.textures.slot_acquire()
+        let slot = self.textures.slot_acquire();
+        self.gfx3d.invalidate_texture_feedback(slot);
+        slot
     }
 
     fn texture_slot_release(&mut self, slot: u32) {

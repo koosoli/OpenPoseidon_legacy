@@ -4,6 +4,7 @@
 #include <Poseidon/Foundation/Types/Pointers.hpp>
 
 #include <wgpu_renderer.hpp>
+#include <Poseidon/Graphics/Textures/MipDemand.hpp>
 
 #include <cstdint>
 
@@ -34,6 +35,11 @@ class TextureWgpu : public Texture
     PacLevelMem _mipmaps[MAX_MIPMAPS];
 
     uint64_t _gpuHandle = 0;
+    int _uploadedFirstLevel = 0;
+    render::MipDemand _mipDemand;
+    uint64_t _adaptiveViewEpoch = 0;
+    bool AdaptiveMipCandidate();
+    bool ReplaceMipTail(int firstLevel, uint64_t frame);
     uint64_t _lastUsedFrame = 0;
     uint32_t _residentPins = 0;
     // REN-RES-001: the bindless slot this texture's uploads occupy, reserved for the
