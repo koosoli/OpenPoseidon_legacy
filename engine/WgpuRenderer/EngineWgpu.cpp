@@ -8438,9 +8438,9 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
                 for (size_t i = 0; handlesLive && i < n; i++)
                 {
                     TextureWgpu* texture = textures->second[i];
-                    if (texture && texture->HasAdaptiveReplacement())
-                        handles->second[i] = texture->GpuHandle(); // same leased slot, opaque mip replacement
-                    if (!texture || texture->GpuHandle() != handles->second[i])
+                    if (texture && handles->second[i].SameSlot(texture->GpuHandle(), texture->SlotLease()))
+                        handles->second[i].handle = texture->GpuHandle(); // shared refill or detail replacement
+                    if (!texture || texture->GpuHandle() != handles->second[i].handle)
                         handlesLive = false;
                 }
             }
@@ -9422,10 +9422,10 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
         // The handles baked into `materials` are the ones these textures hold RIGHT NOW (every
         // EnsureUploaded above ran on this thread, before this line). Recorded so a later
         // unpark can prove nothing moved.
-        std::vector<uint64_t> handles;
+        std::vector<ModelTextureBinding> handles;
         handles.reserve(modelTextures.size());
         for (const TextureWgpu* texture : modelTextures)
-            handles.push_back(texture ? texture->GpuHandle() : 0);
+            handles.push_back({texture ? texture->GpuHandle() : 0, texture ? texture->SlotLease() : 0});
         _gpuModelTextureHandles[shape] = std::move(handles);
         _gpuModelMeshes[shape] = std::move(modelMeshes);
         _gpuModelTextures[shape] = std::move(modelTextures);
@@ -9762,7 +9762,7 @@ uint32_t EngineWgpu::InvalidateStaleGpuModels()
     // never got one (bindless array at cap) falls back to per-upload slots, where the baked
     // index really has moved, and it must go down the destroy path exactly as before.
     std::vector<const LODShapeWithShadow*> stale;
-    uint32_t refilled = 0;
+    uint32_t refilled = 0, sharedRefills = 0;
     for (auto& [shape, handles] : _gpuModelTextureHandles)
     {
         const auto textures = _gpuModelTextures.find(shape);
@@ -9784,22 +9784,25 @@ uint32_t EngineWgpu::InvalidateStaleGpuModels()
                 broken = true;
                 break;
             }
-            if (texture->GpuHandle() == handles[i])
+            if (texture->GpuHandle() == handles[i].handle)
                 continue;
-            // Adaptive replacement retains the same leased material slot. Tearing
-            // down the mesh here causes needless GPU reuploads and missing frames.
-            // The prototype excludes alpha/shadow textures and non-leased images.
-            if (texture->HasAdaptiveReplacement())
+            // Another model may already have refilled this shared texture. Its image
+            // handle changes, but the baked material slot does not. Require the lease
+            // captured at registration: acquiring a NEW lease after an unleased upload
+            // is not proof that the old material points there.
+            if (handles[i].SameSlot(texture->GpuHandle(), texture->SlotLease()))
             {
-                handles[i] = texture->GpuHandle();
+                handles[i].handle = texture->GpuHandle();
+                ++sharedRefills;
                 continue;
             }
-            if (live && texture->GpuHandle() == 0 && texture->SlotLease() != 0)
+            if (live && texture->GpuHandle() == 0 && handles[i].handle != 0 &&
+                handles[i].lease != 0 && texture->SlotLease() == handles[i].lease)
             {
                 const uint64_t handle = texture->EnsureUploaded();
                 if (handle != 0)
                 {
-                    handles[i] = handle; // same slot, new handle -- see the lease note above
+                    handles[i].handle = handle; // same slot, new handle -- see the lease note above
                     ++refilled;
                     continue;
                 }
@@ -9812,6 +9815,8 @@ uint32_t EngineWgpu::InvalidateStaleGpuModels()
     }
     if (refilled)
         LOG_INFO(Graphics, "Wgpu model residency: {} evicted textures re-uploaded into their leased slots", refilled);
+    if (sharedRefills && std::getenv("WGR_RESIDENCY_TRACE"))
+        LOG_INFO(Graphics, "Wgpu model residency: {} shared texture replacements retained their baked slots", sharedRefills);
     // Collected first: DestroyGpuModel erases from the very maps being walked.
     for (const LODShapeWithShadow* shape : stale)
         DestroyGpuModel(shape);

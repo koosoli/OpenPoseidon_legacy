@@ -390,3 +390,26 @@ and gates are unchanged. WGR_SKY_VOLUME_INCREMENTAL=0 retains full-upload contro
 runner -FullSkyUploads records this setting. A real GPU readback test verifies
 prefix preservation, new writes and zeroed missing metadata through growth.
 Runtime comparison is still pending; this does not prove the OOM resolved.
+
+
+### 0d6a498f atlas validation and remaining pressure failure
+
+The GPU prefix-copy/readback test passed. `dayz-sky-incremental-20260920-122407`
+(PBO workers enabled) still failed with OutOfMemory during return traversal;
+reducing atlas staging alone is NOT the complete memory fix. No post-error
+measurements are accepted. PBO workers remain opt-in.
+
+`dayz-sky-default-20260920-122632` (existing synchronous PBO model path,
+factor 1.5, incremental sky atlas) completed the controlled route with
+19923 placements before/after, no renderer errors, and an inspected endpoint
+capture retaining the street/building/tree/wreck coverage. Whole-GPU peak
+7783 MiB; backend allocation peak 5,855,836,000 bytes. Per-pose frame mean/p95/max:
+19.65/21.17/69.11, 20.06/21.24/112.55, 17.43/28.02/201.45,
+18.88/22.52/117.80 ms. Long-tail frame stalls remain. A full-upload control on
+the same build is being measured; this is not yet a universal performance claim.
+
+The next lifetime correction records the actual texture slot lease when baking
+model materials. A shared texture reuploaded by another model can change its
+image handle without changing the baked slot. Such models need no geometry
+re-registration. A newly acquired lease after a previously unleased upload is
+NOT accepted as proof; null/missing/moved slots retain the old rebuild path.

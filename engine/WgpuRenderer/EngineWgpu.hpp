@@ -806,7 +806,16 @@ class EngineWgpu : public EngineDummy
     // still the live ones (a TrimResidency eviction in between changes them); if not, the
     // parked entry is destroyed and the model rebuilt. Shape death (LODShape::SetDestroyListener
     // -> OnShapeDestroyed) destroys the entry, so a key can never dangle.
-    std::unordered_map<const LODShapeWithShadow*, std::vector<uint64_t>> _gpuModelTextureHandles;
+    struct ModelTextureBinding
+    {
+        uint64_t handle = 0;
+        uint32_t lease = 0; // Slot used when the model material was baked, never inferred later.
+        bool SameSlot(uint64_t currentHandle, uint32_t currentLease) const
+        {
+            return handle != 0 && currentHandle != 0 && lease != 0 && lease == currentLease;
+        }
+    };
+    std::unordered_map<const LODShapeWithShadow*, std::vector<ModelTextureBinding>> _gpuModelTextureHandles;
     std::list<const LODShapeWithShadow*> _gpuModelParked; // front = oldest
     std::unordered_map<const LODShapeWithShadow*, std::list<const LODShapeWithShadow*>::iterator> _gpuModelParkedIndex;
     void DestroyGpuModel(const LODShapeWithShadow* shape); // meshes + every shape-keyed map entry
