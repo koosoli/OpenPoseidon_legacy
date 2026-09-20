@@ -497,6 +497,41 @@
         "whole-gpu-memory.csv": "917db8e3271cd70812dcd85e819a193282e5b08ea2e8850953b0709d690bc2a9",
         "settled.png": "cf975a00d24028d4a55b73b0499fec4840389ea704a4993bc7094ab17f69c224"
       }
+    },
+    {
+      "run": "dayz-model-retirement-20260920-124602",
+      "provenance": {
+        "readyMb": -1,
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "B318EF43A9F70D80DD6BA1E319222634DF3EC14B861E2E4042EBC7C45A41526F",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "78831D6F58E169508BB1DDF070BD89341E10F107912438321E0C574AD13BE3B3",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "corpus": "DayZ",
+        "pressureGrowth": false,
+        "packedModels": true,
+        "geoGrowth": 1.5,
+        "adaptive": false,
+        "controlled": true,
+        "installed": "codex/streaming-residency 486d5e9b 2026-09-20_12:45 deploy-ps1",
+        "head": "486d5e9b7e22c2de730022c0f0cfff87a6c034e4",
+        "incrementalSkyUploads": true
+      },
+      "sha256": {
+        "engine.log": "7141eb40ef7b8ca0a904dbc4eed869664d4900c97367c5263c67f0ec7585277a",
+        "harness.jsonl": "7ed3d826d29c62f811853ebabeac5f02fa54ba3df983b49081ad318b9015ad69",
+        "provenance.json": "f2428d6aba768a992e8285765ea16b3826c2c9e8c6eef734553c952c07ab3498",
+        "result.json": "7205200892bcf3559381d73d9ea9d4872ec6c4f71492658bbccfdf68f3349170",
+        "whole-gpu-memory.csv": "67e6a428c21ce2ef2bc64ff03c658840ee726af63341ceeffbd2bcc09ca995e9",
+        "settled.png": "0d215f96b071999931f5ee4149fe0e9f94582aab0caaf75939ed8c922645add4"
+      }
     }
   ]
 }

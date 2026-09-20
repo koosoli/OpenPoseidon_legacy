@@ -444,3 +444,31 @@ slots, clears retired metadata and empties the retired model's LOD draws.
 IDs are not reused; geometry ranges retain their existing queue-completion
 lifetime. Atlas capacity is retained for reuse, not claimed as freed VRAM.
 ABI version 12 requires a matching executable/DLL pair. Validation pending.
+
+
+### 486d5e9b model retirement validation
+
+The GPU cull end-to-end test now retires a visible model while leaving its
+instance behind, repeats retirement and passes an invalid ID, then verifies
+zero indirect draws. It passed, as did six ABI contract tests. The paired build
+completed `dayz-model-retirement-20260920-124602`, including controlled traversal
+and the 1500 m away/return. Before/return coverage is 19923, final screenshot
+inspected. Sky atlas capacity stayed at 128 MiB instead of the previous 256 MiB;
+whole-GPU peak was 7764 MiB. Frame mean/p95/max: 19.66/20.78/45.32,
+19.02/20.29/70.66, 11.30/21.80/118.64, 18.80/20.90/24.63 ms.
+This addresses orphan lighting residency, not modern-world logical object
+identity: the read-only ID probe still observes removal while away.
+
+### Next bounded packed-texture experiment (OFF)
+
+WGR_OBJECT_STREAM_PBO_TEXTURES=1 captures at most 64 immutable uncompressed PBO
+texture spans per conversion on the owner thread, using IR stages and existing
+adapter texture tables. Workers reuse ReadPAABlockChainBuffer and the existing
+PreparedTextureStore/generation contract. Each source and decoded block chain
+is capped at 16 MiB; prepared mip metadata is capped at 32 levels. Conversion
+reservations include a conservative source/vector growth allowance, explicitly
+not an allocator-capacity measurement. The store retains its own byte bound.
+No worker calls the bank/MRU or uploads to the renderer. Other formats, stages
+resolved only later, failed reads and refused publication retain the ordinary
+path. The model PBO prototype now also respects enabled model DDC by declining
+its bypass; it must not silently discard warm-cache performance.

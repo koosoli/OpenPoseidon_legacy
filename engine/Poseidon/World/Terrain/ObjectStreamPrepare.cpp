@@ -18,6 +18,8 @@
 #include <Poseidon/World/Model/ModelMemory.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
 #include <Poseidon/World/Model/ModelCache.hpp>
+#include <Poseidon/World/Model/ModelDerivedCache.hpp>
+#include <Poseidon/Graphics/Textures/TextureBank.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -202,8 +204,16 @@ struct ObjectStreamPreparer::Impl
     // between the worker finishing and TakeConverted; Reset/DropStale delete stale
     // ones OUTSIDE the mutex (a fresh shape holds no vertex buffers, so its
     // destructor touches only refcounted textures and the locked fast allocator).
+    struct PackedTextureRead
+    {
+        std::string key;
+        BankReadRequest read;
+    };
+    static constexpr size_t PackedTextureLimit = 16 * 1024 * 1024;
     struct ConvertJob
     {
+        std::vector<PackedTextureRead> textures;
+        uint64_t textureGeneration = 0;
         uint32_t index = 0;
         uint64_t reservation = 0;
         ModelPtr model;
@@ -320,6 +330,36 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
             }
             const double convMs =
                 std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - convStart).count();
+            uint64_t prepared = 0, preparedBytes = 0, skipped = 0, unreadable = 0;
+            const auto textureStart = std::chrono::steady_clock::now();
+            if (shape)
+            {
+                auto& store = render::PreparedTextureStore::Instance();
+                for (const auto& texture : job.textures)
+                {
+                    {
+                        std::lock_guard<std::mutex> pendingLock(mutex);
+                        if (stop || jobGen != generation.load(std::memory_order_relaxed) || stale[job.index]) break;
+                    }
+                    if (!store.ShouldPrepare(texture.key)) { ++skipped; continue; }
+                    try
+                    {
+                        PAABlockChain chain;
+                        {
+                            std::vector<char> source;
+                            if (!texture.read.Read(source) || !ReadPAABlockChainBuffer(source.data(), source.size(),
+                                    chain, nullptr, PackedTextureLimit)) { ++unreadable; continue; }
+                        }
+                        const size_t bytes = chain.blocks.size();
+                        if (store.Put(texture.key, std::move(chain), job.textureGeneration))
+                        { ++prepared; preparedBytes += bytes; }
+                        else ++skipped;
+                    }
+                    catch (...) { ++unreadable; } // ordinary owner-thread decode remains the fallback
+                }
+            }
+            const double textureMs = std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - textureStart).count();
 
             lock.lock();
             if (jobGen != generation.load(std::memory_order_relaxed) || stale[job.index])
@@ -336,6 +376,11 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                 lock.lock();
                 continue;
             }
+            stats.texPrepared += prepared;
+            stats.texPreparedBytes += preparedBytes;
+            stats.texSkipped += skipped;
+            stats.texUnreadable += unreadable;
+            stats.texMs += textureMs;
             stats.convertMs += convMs;
             stats.convertMaxMs = std::max(stats.convertMaxMs, convMs);
             if (shape && job.index < count)
@@ -757,7 +802,7 @@ void ObjectStreamPreparer::Reset(const std::string* paths, size_t modelCount)
     std::vector<std::optional<BankReadRequest>> packedReads(modelCount);
     const char* packedFlag = std::getenv("WGR_OBJECT_STREAM_PBO");
     size_t packedCount = 0;
-    if (packedFlag && packedFlag[0] == '1' && GUseFileBanks)
+    if (packedFlag && packedFlag[0] == '1' && GUseFileBanks && !ModelDerivedCache::Instance().Enabled())
     {
         for (size_t i = 0; i < modelCount; ++i)
         {
@@ -984,6 +1029,35 @@ bool ObjectStreamPreparer::SubmitConvert(uint32_t index, std::shared_ptr<Model::
 {
     if (!model || !tables)
         return false;
+    // Owner-thread snapshot only. Workers receive immutable archive spans and names,
+    // never Texture pointers, bank handles, ParamFile state or the file-server MRU.
+    std::vector<Impl::PackedTextureRead> textures;
+    const uint64_t textureGeneration = render::PreparedTextureStore::Instance().Generation();
+    const char* flag = std::getenv("WGR_OBJECT_STREAM_PBO_TEXTURES");
+    if (flag && flag[0] == '1' && GUseFileBanks && render::PreparedTextureStore::Enabled())
+    {
+        auto note = [&](const std::string& raw)
+        {
+            if (textures.size() >= 64) return; // bounded per-model metadata; remaining inputs use VFS
+            const std::string key = render::PreparedTextureStore::Key(raw);
+            if (key.size() < 4 || (key.substr(key.size()-4) != ".paa" && key.substr(key.size()-4) != ".pac")) return;
+            if (!render::PreparedTextureStore::Instance().ShouldPrepare(key)) return;
+            if (std::any_of(textures.begin(), textures.end(), [&](const auto& t) { return t.key == key; })) return;
+            if (auto* bank = QIFStreamB::AutoBank(key.c_str()))
+                if (auto read = bank->CaptureReadRequest(key.c_str() + bank->GetPrefix().GetLength());
+                    read && read->bytes <= Impl::PackedTextureLimit)
+                    textures.push_back({key, std::move(*read)});
+        };
+        for (const auto& level : model->lodLevels)
+            for (const auto& material : level.mesh.materials)
+            {
+                note(material.texturePath);
+                for (const auto& stage : material.embeddedStages) note(stage.texturePath);
+            }
+        for (const auto& level : tables->textures)
+            for (const auto& texture : level)
+                if (texture) note(static_cast<const char*>(texture->GetName()));
+    }
     std::lock_guard<std::mutex> lock(_impl->mutex);
     if (index >= _impl->count || _impl->workers.empty())
         return false;
@@ -997,6 +1071,12 @@ bool ObjectStreamPreparer::SubmitConvert(uint32_t index, std::shared_ptr<Model::
     // scheduling estimate, not a measurement of Shape allocations. Useful
     // conversions always progress; their debt parks subsequent speculative parses.
     job.reservation = 2 * Model::ResidentPayloadBytes(*model);
+    // One <=16 MiB source, bounded block output and conservative vector-growth
+    // overlap allowance at a time (not a measurement of allocator capacity).
+    // Retained chains are charged separately by PreparedTextureStore.
+    if (!textures.empty()) job.reservation += 4 * Impl::PackedTextureLimit + 8192;
+    job.textures = std::move(textures);
+    job.textureGeneration = textureGeneration;
     _impl->stats.conversionReservedBytes += job.reservation;
     _impl->stats.peakConversionReservedBytes = std::max(
         _impl->stats.peakConversionReservedBytes, _impl->stats.conversionReservedBytes);

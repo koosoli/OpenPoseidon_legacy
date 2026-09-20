@@ -299,3 +299,27 @@ TEST_CASE("Adaptive mip demand demotes slowly and converts relative feedback to 
     demand.Replaced(240);
     CHECK(demand.Choose(2, 255, 0, 32, 400, false, 3) == 0);
 }
+
+
+TEST_CASE("PAA worker bound rejects before block allocation and sums all levels", "[Graphics][PAA][streaming-budget]")
+{
+    auto file = TinyDxt1Paa();
+    PAABlockChain chain;
+    std::string error;
+    REQUIRE(ReadPAABlockChainBuffer(file.data(), file.size(), chain, &error, 8));
+    CHECK_FALSE(ReadPAABlockChainBuffer(file.data(), file.size(), chain, &error, 7));
+    CHECK_FALSE(chain.valid());
+    // Duplicate the level before the terminator; each level fits but the total does not.
+    const auto first = file;
+    file.insert(file.end()-4, first.begin()+4, first.end()-4);
+    CHECK_FALSE(ReadPAABlockChainBuffer(file.data(), file.size(), chain, &error, 8));
+    REQUIRE(ReadPAABlockChainBuffer(file.data(), file.size(), chain, &error, 16));
+    CHECK(chain.blocks.size() == 16);
+    // A small claimed compressed input must not trigger a large output allocation.
+    file = first;
+    file[4] = 0; file[5] = 0xA0; // LZO flag + width 8192
+    file[6] = 0; file[7] = 0x20; // height 8192
+    CHECK_FALSE(ReadPAABlockChainBuffer(file.data(), file.size(), chain, &error, 1024));
+    CHECK(error == "block chain exceeds preparation byte limit");
+    CHECK_FALSE(chain.valid());
+}

@@ -874,7 +874,7 @@ bool IsDxtMagic(uint16_t magic)
 }
 } // namespace
 
-bool ReadPAABlockChainBuffer(const void* data, size_t size, PAABlockChain& out, std::string* errorOut)
+bool ReadPAABlockChainBuffer(const void* data, size_t size, PAABlockChain& out, std::string* errorOut, size_t maxBlockBytes)
 {
     out = PAABlockChain{};
     auto fail = [&](const char* why)
@@ -941,6 +941,10 @@ bool ReadPAABlockChainBuffer(const void* data, size_t size, PAABlockChain& out, 
         if (!in.need(stored))
             return fail("level payload past end of file");
         const size_t expected = static_cast<size_t>((rw + 3) / 4) * static_cast<size_t>((rh + 3) / 4) * blockBytes;
+        if (expected > maxBlockBytes || out.blocks.size() > maxBlockBytes - expected)
+            return fail("block chain exceeds preparation byte limit");
+        if (maxBlockBytes != SIZE_MAX && out.levels.size() >= 32)
+            return fail("too many prepared mip levels");
         PAABlockLevel level;
         level.width = rw;
         level.height = rh;

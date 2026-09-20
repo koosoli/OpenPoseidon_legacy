@@ -104,7 +104,9 @@ struct PAABlockChain
 // header/chain, an LZO level that did not inflate to its dimensions' block size, or a level
 // whose stored size disagrees with its dimensions. `errorOut` (optional) names which.
 bool ReadPAABlockChain(const std::string& path, PAABlockChain& out, std::string* errorOut = nullptr);
-bool ReadPAABlockChainBuffer(const void* data, size_t size, PAABlockChain& out, std::string* errorOut = nullptr);
+// Optional output bound is checked BEFORE allocating/decompressing each level.
+bool ReadPAABlockChainBuffer(const void* data, size_t size, PAABlockChain& out,
+                            std::string* errorOut = nullptr, size_t maxBlockBytes = SIZE_MAX);
 
 // Decode PAA/PAC file to RGBA8888 pixel buffer
 DecodedImage DecodePAAFile(const std::string& path);
