@@ -275,6 +275,8 @@ pub struct GeometryPool {
     // GPU work still in flight. Keeping a fixed number of *growth generations*
     // instead retained hundreds of MiB indefinitely on dense A3/DayZ worlds.
     retired: Vec<wgpu::Buffer>,
+    // Submission drops handles, but allocation overlap lasts until GPU completion.
+    submitted_retired_bytes: std::sync::Arc<std::sync::atomic::AtomicU64>,
     // Bumped whenever vbuf or ibuf is reallocated by a growth OR a shrink. Cached bind
     // groups / pass state referencing a pool buffer compare against this to know when to
     // rebuild.
@@ -337,6 +339,7 @@ impl GeometryPool {
             ialloc: RangeAllocator::new(Self::INIT_INDICES),
             epoch: 0,
             retired: Vec::new(),
+            submitted_retired_bytes: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
             shrink_streak: 0,
         }
     }
@@ -401,6 +404,13 @@ impl GeometryPool {
     pub fn frame_submitted(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) -> bool {
         if !self.retired.is_empty() {
             pool_event(&format!("clear {} retired", self.retired.len()));
+        }
+        let bytes: u64 = self.retired.iter().map(wgpu::Buffer::size).sum();
+        if bytes != 0 {
+            use std::sync::atomic::Ordering::Relaxed;
+            self.submitted_retired_bytes.fetch_add(bytes, Relaxed);
+            let pending = self.submitted_retired_bytes.clone();
+            queue.on_submitted_work_done(move || { pending.fetch_sub(bytes, Relaxed); });
         }
         self.retired.clear();
         self.maybe_shrink(device, queue)
@@ -512,7 +522,8 @@ impl GeometryPool {
                 + self.ialloc.used() as u64 * INDEX_SIZE,
             capacity_bytes: self.valloc.cap as u64 * VERT_SIZE
                 + self.ialloc.cap as u64 * INDEX_SIZE,
-            retired_bytes: self.retired.iter().map(wgpu::Buffer::size).sum(),
+            retired_bytes: self.retired.iter().map(wgpu::Buffer::size).sum::<u64>()
+                + self.submitted_retired_bytes.load(std::sync::atomic::Ordering::Relaxed),
         }
     }
 
@@ -716,6 +727,16 @@ mod tests {
             grown > GeometryPool::INIT_VERTS as u64 * VERT_SIZE,
             "the setup must actually grow the pool, else the test proves nothing"
         );
+
+        let retired = pool.residency().retired_bytes;
+        assert!(retired > 0);
+        pool.frame_submitted(&device, &queue);
+        // Without polling the device, dropping application handles must not announce
+        // this overlap as free. A completion callback, not a frame count, clears it.
+        assert_eq!(pool.residency().retired_bytes, retired);
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        assert_eq!(pool.residency().retired_bytes, 0);
+        pool.shrink_streak = 0;
 
         // Hand the big allocation back: live collapses to 100 vertices against a capacity
         // sized for 400,100 — the doubling slack this change exists to recover.

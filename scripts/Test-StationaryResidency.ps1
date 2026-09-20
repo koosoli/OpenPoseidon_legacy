@@ -1,11 +1,11 @@
-param([ValidateSet("Native","DayZ","Legacy")][string]$Corpus="Native",[switch]$Baseline,[switch]$Normal,[switch]$Adaptive,[switch]$Controlled,[switch]$Identity,[switch]$DuringFill,[ValidateRange(-1,16384)][int]$ReadyMb=-1,[string]$Label='stationary-budget',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
+param([ValidateSet("Native","DayZ","Legacy")][string]$Corpus="Native",[ValidateRange(1.25,2.0)][double]$GeoGrowth=2.0,[switch]$SampleDriverMemory,[switch]$Baseline,[switch]$Normal,[switch]$Adaptive,[switch]$Controlled,[switch]$Identity,[switch]$DuringFill,[ValidateRange(-1,16384)][int]$ReadyMb=-1,[string]$Label='stationary-budget',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {
  $shellName=if ($PSVersionTable.PSEdition -eq 'Core') {'pwsh.exe'} else {'powershell.exe'}
  $argv=@((Join-Path $PSScriptRoot 'with-game-lock.sh'),(Join-Path $PSHOME $shellName).Replace('\','/'),'-NoProfile','-File',$PSCommandPath,'-Label',$Label,'-GameDir',$GameDir)
  if ($Baseline) {$argv+='-Baseline'}; if ($Normal) {$argv+='-Normal'}
- foreach ($flag in @('Adaptive','Controlled','Identity','DuringFill')) {if ((Get-Variable $flag -ValueOnly)) {$argv+=('-'+$flag)}}
- $argv+=@('-ReadyMb',[string]$ReadyMb,'-Corpus',$Corpus)
+ foreach ($flag in @('Adaptive','Controlled','Identity','DuringFill','SampleDriverMemory')) {if ((Get-Variable $flag -ValueOnly)) {$argv+=('-'+$flag)}}
+ $argv+=@('-ReadyMb',[string]$ReadyMb,'-Corpus',$Corpus,'-GeoGrowth',$GeoGrowth.ToString([Globalization.CultureInfo]::InvariantCulture))
  $env:LOCK_OWNER='stationary residency check'
  try {& 'C:\Program Files\Git\bin\bash.exe' @argv; if ($LASTEXITCODE) {throw "Residency test exited $LASTEXITCODE"}} finally {Remove-Item Env:LOCK_OWNER}
  return
@@ -38,6 +38,7 @@ function Pose($x,$height=$baseY) { return "$x $baseZ $height $azimuth $elevation
 $env:WGR_OBJECT_STREAM_TEST_BUDGET='1'
 $env:WGR_OBJECT_STREAM_MAX_OBJECTS=if ($Normal) {'20000'} else {'8000'}
 $env:WGR_OBJECT_STREAM_GPU_BUDGET='0'
+$env:WGR_GEO_POOL_GROWTH=$GeoGrowth.ToString([Globalization.CultureInfo]::InvariantCulture)
 $env:WGR_PASS1_STATS='1'
 $env:WGR_RESIDENCY_TRACE='1'
 $env:WGR_ADAPTIVE_TEXTURE_DETAIL=if ($Adaptive) {'1'} else {'0'}
@@ -46,9 +47,14 @@ Remove-Item Env:POSEIDON_TEST_RAIN -ErrorAction SilentlyContinue
 Remove-Item Env:WGR_WATER_CURLING_BREAKER -ErrorAction SilentlyContinue
 $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0);$listener.Start();$port=$listener.LocalEndpoint.Port;$listener.Stop()
 $mission=Join-Path $root 'tests/perf/missions/perf_field.eden';$log=Join-Path $out 'engine.log'
-@{head=(& git -C $root rev-parse HEAD);installed=(Get-Content (Join-Path $GameDir 'DEPLOYED-FROM.txt'));corpus=$Corpus;adaptive=[bool]$Adaptive;controlled=[bool]$Controlled;readyMb=$ReadyMb;hashes=@(Get-FileHash (Join-Path $GameDir 'OpenPoseidon.exe'),(Join-Path $GameDir 'wgpu_renderer.dll'))} | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $out 'provenance.json')
-$p=$null;$client=$null
+@{head=(& git -C $root rev-parse HEAD);installed=(Get-Content (Join-Path $GameDir 'DEPLOYED-FROM.txt'));corpus=$Corpus;geoGrowth=$GeoGrowth;adaptive=[bool]$Adaptive;controlled=[bool]$Controlled;readyMb=$ReadyMb;hashes=@(Get-FileHash (Join-Path $GameDir 'OpenPoseidon.exe'),(Join-Path $GameDir 'wgpu_renderer.dll'))} | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $out 'provenance.json')
+$p=$null;$client=$null;$gpuSampler=$null
 try {
+ if ($SampleDriverMemory) {
+  $smi=Get-Command nvidia-smi -ErrorAction Stop
+  $gpuSampler=Start-Process -FilePath $smi.Source -ArgumentList @('--query-gpu=timestamp,index,memory.total,memory.used,utilization.gpu','--format=csv,noheader,nounits','--loop-ms=1000') -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $out 'whole-gpu-memory.csv') -RedirectStandardError (Join-Path $out 'whole-gpu-memory-errors.txt')
+  'Whole GPU including other applications; 1 second interval; compare only equally instrumented arms.' | Set-Content (Join-Path $out 'whole-gpu-memory-scope.txt')
+ }
  $p=Start-Process -FilePath (Join-Path $GameDir 'OpenPoseidon.exe') -WorkingDirectory $GameDir -WindowStyle Hidden -PassThru -ArgumentList (@('--render=wgpu','--window','--dev','--width','1280','--height','720','--vd','2000','--harness',"$port",'--capture-metrics',('"'+(Join-Path $out 'capture.json')+'"'),'--test-world-freefly',[string]$baseX,[string]$baseZ,[string]$baseY,[string]$azimuth,[string]$elevation,'--test-mission',('"'+$mission+'"'),'--log-file',('"'+$log+'"'))+$worldArgs)
  $null=$p.Handle;$client=[Net.Sockets.TcpClient]::new();$deadline=[DateTime]::UtcNow.AddSeconds(90)
  while (!$client.Connected) {try {$client.Connect('127.0.0.1',$port)} catch {if ($p.HasExited -or [DateTime]::UtcNow -gt $deadline) {throw};Start-Sleep -Milliseconds 250}}
@@ -63,6 +69,7 @@ try {
   $until=[DateTime]::UtcNow.AddSeconds(240)
   do {
    Start-Sleep -Seconds 2
+   if ((Get-Content -LiteralPath $log -Tail 150) -match 'Out of Memory|Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION') {throw 'Renderer failure; refusing further measurements'}
    $r=Send @{cmd='stream_residency'}
    if ($Corpus -eq 'Legacy') {if ($r.valid) {throw 'Legacy unexpectedly entered modern streamer'}; return $r}
    if ([DateTime]::UtcNow -gt $until) {throw 'Residency failed to settle in 240 seconds'}
@@ -149,9 +156,10 @@ try {
  $null=Send @{cmd='screenshot';path=(Join-Path $out 'settled.png')}
  $null=Send @{cmd='exit'}
  if (!$p.WaitForExit(15000) -or $p.ExitCode) {throw 'Game failed to exit cleanly'}
- if (Select-String -LiteralPath $log -Pattern 'Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION' -Quiet) {throw 'Renderer error'}
+ if (Select-String -LiteralPath $log -Pattern 'Out of Memory|Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION' -Quiet) {throw 'Renderer error'}
  Write-Output "Stationary residency evidence: $out"
 } finally {
+ if ($gpuSampler -and !$gpuSampler.HasExited) {Stop-Process -Id $gpuSampler.Id}
  if ($client) {$client.Dispose()}
  if ($p -and !$p.HasExited) {Stop-Process -Id $p.Id -Force}
 }
