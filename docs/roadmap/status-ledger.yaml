@@ -6621,17 +6621,17 @@ tickets:
     owner: null
     branch: codex/streaming-residency
     baseline_commit: 03e71371
-    verification_commit: 486d5e9b
+    verification_commit: e0b88e7a
     milestone: 0
     milestone_role: NON_BLOCKING
     depends_on: []
     blocked_by: []
     blocks: []
-    implementation_commits: [7d5f3e71, f733e708, 8e09f391, 7d8fb75b, a531d7b9, 21b89e79, 082eaa06, c2c8eb0b, f602332c, dca4f954, 0d6a498f, 82cbb5a2, 486d5e9b]
+    implementation_commits: [7d5f3e71, f733e708, 8e09f391, 7d8fb75b, a531d7b9, 21b89e79, 082eaa06, c2c8eb0b, f602332c, dca4f954, 0d6a498f, 82cbb5a2, 486d5e9b, e0b88e7a]
     production_call_sites: []
     test_ids: [stationary-residency, preparer-byte-budget, preparer-generation-cancellation]
     benchmark_artifacts: [docs/roadmap/evidence/streaming-20260920.json]
-    evidence_hash: ea56b24a47805249628fdeecded98bcb9ab41152e5f120054eaf6a26d2ddca2d
+    evidence_hash: 60600b17f9fb201ddf0a59e1874c5daca2b2fa6074b6bb965cdbbd6b63922911
     decision_record: docs/roadmap/decisions/STREAMING-AUDIT-20260920.md
     known_failures:
       - The staged streaming plan remains in progress; see the decision record for uncompleted gates.

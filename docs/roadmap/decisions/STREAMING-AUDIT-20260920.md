@@ -472,3 +472,22 @@ No worker calls the bank/MRU or uploads to the renderer. Other formats, stages
 resolved only later, failed reads and refused publication retain the ordinary
 path. The model PBO prototype now also respects enabled model DDC by declining
 its bypass; it must not silently discard warm-cache performance.
+
+
+### e0b88e7a packed texture runtime (experimental)
+
+265 assertions / 20 PAA, preparation budget and cancellation tests passed.
+`dayz-packed-textures-20260920-125624` completed the controlled route cleanly.
+1375 prepared chains were consumed; main-thread texture-read time accumulated
+5421 ms by route end. Do not compare that total with the preceding 486d5e9b
+run's full-log total: that run includes a further 1500 m away/return.
+First-full admission from engine log start took 34.3 s versus 31.7 s in that
+preceding run; this is not yet a loading-time gain. Frame mean/p95/max:
+19.90/22.10/71.36, 18.90/20.10/61.45, 20.21/24.13/56.15,
+19.17/21.11/25.63 ms; whole-GPU peak 7720 MiB. Packed paths remain OFF.
+
+The first experiment charged scratch against every queued/ready conversion,
+producing a 5.58 GB reservation estimate even though only worker-count scratch
+buffers can exist. Scratch is now charged only while the worker is active and
+released before the Converted publication; model/IR reservations keep their
+existing lifetime, including cancellation across Reset. Repeat validation pending.

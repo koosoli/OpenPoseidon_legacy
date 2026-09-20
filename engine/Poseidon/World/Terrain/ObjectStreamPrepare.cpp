@@ -312,6 +312,11 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
         {
             ConvertJob job = std::move(convertQueue.front());
             convertQueue.pop_front();
+            // Only active workers allocate source/decode scratch. Queued and ready
+            // jobs keep their model charge, not dozens of nonexistent 64 MiB buffers.
+            const uint64_t textureScratch = job.textures.empty() ? 0 : 4 * PackedTextureLimit + 8192;
+            stats.conversionReservedBytes += textureScratch;
+            stats.peakConversionReservedBytes = std::max(stats.peakConversionReservedBytes, stats.conversionReservedBytes);
             const uint64_t jobGen = generation.load(std::memory_order_relaxed);
             const std::string conversionPath = paths[job.index];
             lock.unlock();
@@ -362,6 +367,7 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                 std::chrono::steady_clock::now() - textureStart).count();
 
             lock.lock();
+            stats.conversionReservedBytes -= textureScratch;
             if (jobGen != generation.load(std::memory_order_relaxed) || stale[job.index])
             {
                 if (jobGen == generation.load(std::memory_order_relaxed))
@@ -1071,10 +1077,8 @@ bool ObjectStreamPreparer::SubmitConvert(uint32_t index, std::shared_ptr<Model::
     // scheduling estimate, not a measurement of Shape allocations. Useful
     // conversions always progress; their debt parks subsequent speculative parses.
     job.reservation = 2 * Model::ResidentPayloadBytes(*model);
-    // One <=16 MiB source, bounded block output and conservative vector-growth
-    // overlap allowance at a time (not a measurement of allocator capacity).
+    // Scratch is charged when a worker starts, and released before publishing.
     // Retained chains are charged separately by PreparedTextureStore.
-    if (!textures.empty()) job.reservation += 4 * Impl::PackedTextureLimit + 8192;
     job.textures = std::move(textures);
     job.textureGeneration = textureGeneration;
     _impl->stats.conversionReservedBytes += job.reservation;
