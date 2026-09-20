@@ -8421,6 +8421,8 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
                 for (size_t i = 0; handlesLive && i < n; i++)
                 {
                     TextureWgpu* texture = textures->second[i];
+                    if (texture && texture->HasAdaptiveReplacement())
+                        handles->second[i] = texture->GpuHandle(); // same leased slot, opaque mip replacement
                     if (!texture || texture->GpuHandle() != handles->second[i])
                         handlesLive = false;
                 }
@@ -9767,6 +9769,14 @@ uint32_t EngineWgpu::InvalidateStaleGpuModels()
             }
             if (texture->GpuHandle() == handles[i])
                 continue;
+            // Adaptive replacement retains the same leased material slot. Tearing
+            // down the mesh here causes needless GPU reuploads and missing frames.
+            // The prototype excludes alpha/shadow textures and non-leased images.
+            if (texture->HasAdaptiveReplacement())
+            {
+                handles[i] = texture->GpuHandle();
+                continue;
+            }
             if (live && texture->GpuHandle() == 0 && texture->SlotLease() != 0)
             {
                 const uint64_t handle = texture->EnsureUploaded();

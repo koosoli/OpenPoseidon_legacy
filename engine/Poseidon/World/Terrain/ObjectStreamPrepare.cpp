@@ -203,12 +203,14 @@ struct ObjectStreamPreparer::Impl
     struct ConvertJob
     {
         uint32_t index = 0;
+        uint64_t reservation = 0;
         ModelPtr model;
         std::shared_ptr<const Model::ShapeAdapter::AdapterBankTables> tables;
     };
     std::deque<ConvertJob> convertQueue;
     std::vector<LODShapeWithShadow*> convertedShapes;
     std::vector<ModelPtr> convertedModels;
+    std::vector<uint64_t> conversionBytes;
     Stats stats;
     std::vector<uint64_t> payloadBytes;
     uint64_t ParseReservation() const
@@ -218,10 +220,15 @@ struct ObjectStreamPreparer::Impl
     }
     bool HasParseByteRoom() const
     {
-        return !stats.readyByteBudget ||
-            (stats.readyPayloadBytes <= stats.readyByteBudget &&
-             stats.parseReservedBytes <= stats.readyByteBudget - stats.readyPayloadBytes &&
-             ParseReservation() <= stats.readyByteBudget - stats.readyPayloadBytes - stats.parseReservedBytes);
+        if (!stats.readyByteBudget) return true;
+        uint64_t remaining = stats.readyByteBudget;
+        for (const uint64_t charge : {stats.readyPayloadBytes, stats.parseReservedBytes,
+                                     stats.conversionReservedBytes})
+        {
+            if (charge > remaining) return false;
+            remaining -= charge;
+        }
+        return ParseReservation() <= remaining;
     }
 
     // Per model index: when Request() enqueued it, for the request->ready / request->taken
@@ -316,6 +323,8 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                 if (jobGen == generation.load(std::memory_order_relaxed))
                     Set(job.index, State::Unknown);
                 ++stats.dropped;
+                stats.conversionReservedBytes -= job.reservation;
+                cv.notify_all();
                 lock.unlock();
                 delete shape;
                 job.model.reset();
@@ -327,6 +336,7 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
             stats.convertMaxMs = std::max(stats.convertMaxMs, convMs);
             if (shape && job.index < count)
             {
+                conversionBytes[job.index] = job.reservation;
                 convertedShapes[job.index] = shape;
                 shape = nullptr; // Ownership is now in the published slot.
                 convertedModels[job.index] = std::move(job.model);
@@ -335,6 +345,8 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
             }
             else
             {
+                stats.conversionReservedBytes -= job.reservation;
+                cv.notify_all();
                 // Conversion failed: sticky Failed, the admit loop falls back to the
                 // synchronous path for this model exactly like a parse failure.
                 if (job.index < count)
@@ -744,6 +756,12 @@ void ObjectStreamPreparer::Reset(const std::string* paths, size_t modelCount)
         // Jobs own model IR and bank-table references, not just queue indices.
         // Their last-reference destructors must not run under the queue mutex.
         freeConversions.swap(_impl->convertQueue);
+        for (const auto& job : freeConversions)
+            _impl->stats.conversionReservedBytes -= job.reservation;
+        for (const uint64_t bytes : _impl->conversionBytes)
+            _impl->stats.conversionReservedBytes -= bytes;
+        // Active jobs retain their local reservation across generation changes.
+        _impl->conversionBytes.assign(modelCount, 0);
         for (Impl::ModelPtr& m : _impl->models)
             if (m)
                 freeLater.push_back(std::move(m));
@@ -873,6 +891,8 @@ size_t ObjectStreamPreparer::DropStale(const uint32_t* epochs, size_t count, uin
             }
             else if (state == State::Converted)
             {
+                _impl->stats.conversionReservedBytes -= _impl->conversionBytes[i];
+                _impl->conversionBytes[i] = 0;
                 if (_impl->convertedShapes[i])
                 {
                     freeShapes.push_back(_impl->convertedShapes[i]);
@@ -909,6 +929,7 @@ size_t ObjectStreamPreparer::DropStale(const uint32_t* epochs, size_t count, uin
             if (_impl->stale[job.index])
             {
                 _impl->Set(job.index, State::Unknown);
+                _impl->stats.conversionReservedBytes -= job.reservation;
                 freeConversions.push_back(std::move(job));
                 ++dropped;
             }
@@ -940,6 +961,13 @@ bool ObjectStreamPreparer::SubmitConvert(uint32_t index, std::shared_ptr<Model::
     _impl->Set(index, State::Converting);
     Impl::ConvertJob job;
     job.index = index;
+    // Retain the IR charge plus an equal workspace/output allowance. This is a
+    // scheduling estimate, not a measurement of Shape allocations. Useful
+    // conversions always progress; their debt parks subsequent speculative parses.
+    job.reservation = 2 * Model::ResidentPayloadBytes(*model);
+    _impl->stats.conversionReservedBytes += job.reservation;
+    _impl->stats.peakConversionReservedBytes = std::max(
+        _impl->stats.peakConversionReservedBytes, _impl->stats.conversionReservedBytes);
     job.model = std::move(model);
     job.tables = std::move(tables);
     _impl->convertQueue.push_back(std::move(job));
@@ -953,6 +981,9 @@ ObjectStreamPreparer::ConvertedShape ObjectStreamPreparer::TakeConverted(uint32_
     std::lock_guard<std::mutex> lock(_impl->mutex);
     if (index >= _impl->count || _impl->Get(index) != State::Converted)
         return out;
+    _impl->stats.conversionReservedBytes -= _impl->conversionBytes[index];
+    _impl->conversionBytes[index] = 0;
+    _impl->cv.notify_all();
     out.shape = _impl->convertedShapes[index];
     _impl->convertedShapes[index] = nullptr;
     out.model = std::move(_impl->convertedModels[index]);

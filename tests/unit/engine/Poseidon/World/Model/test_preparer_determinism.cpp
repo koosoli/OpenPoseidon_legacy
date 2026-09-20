@@ -1670,3 +1670,36 @@ TEST_CASE("Preparer keeps old-world reservations until active workers finish", "
     CHECK(prep.SnapshotStats().readyPayloadBytes == 0);
     CHECK(prep.SnapshotStats().parseReservedBytes == 0);
 }
+
+TEST_CASE("Conversion debt parks speculative parses until ownership is released", "[preparer][streaming-budget]")
+{
+    if (!ObjectStreamPreparer::AsyncEnabled()) SKIP("Requires workers");
+    auto model = BuildFixtureModel();
+    auto tables = std::make_shared<Adapter::AdapterBankTables>();
+    Adapter::BuildAdapterBankTables(*model, *tables);
+    ObjectStreamPreparer prep(1); // a useful conversion must still finish under pressure
+    const std::string paths[] = {"conversion_debt.p3d", "nonexistent_debt_test.p3d"};
+    prep.Reset(paths, 2);
+    REQUIRE(prep.SubmitConvert(0, model, tables));
+    REQUIRE(WaitFor([&] { return prep.Query(0) == ObjectStreamPreparer::State::Converted; }));
+    CHECK(prep.SnapshotStats().conversionReservedBytes > 1);
+    REQUIRE(prep.Request(1));
+    CHECK_FALSE(WaitFor([&] { return prep.Query(1) != ObjectStreamPreparer::State::Queued; }, 100));
+    CHECK(prep.Query(1) == ObjectStreamPreparer::State::Queued);
+    SECTION("consume") {
+        auto result = prep.TakeConverted(0);
+        REQUIRE(result.shape);
+        delete result.shape;
+    }
+    SECTION("cancel") {
+        const uint32_t epochs[] = {0, 1};
+        CHECK(prep.DropStale(epochs, 2, 1) == 1);
+    }
+    SECTION("world reset") {
+        prep.Reset(paths, 2);
+        REQUIRE(prep.Request(1));
+    }
+    CHECK(prep.SnapshotStats().conversionReservedBytes == 0);
+    REQUIRE(WaitFor([&] { return prep.Query(1) == ObjectStreamPreparer::State::NotLoose; }));
+    CHECK(prep.SnapshotStats().parseReservedBytes == 0);
+}

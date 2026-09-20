@@ -93,6 +93,7 @@ class TextureWgpu : public Texture
     bool ScanTopMipAlphaBlocks(AlphaScanPath& path);
 
   public:
+    bool HasAdaptiveReplacement() const { return _gpuHandle && _slotLease && _mipDemand.replaced != 0; }
     explicit TextureWgpu(TextureBankWgpu* bank);
     ~TextureWgpu() override;
 
