@@ -91,7 +91,6 @@ class TextureBankWgpu : public AbstractTextBank
     uint64_t _mipReportDue = 0;
     // What the GPU says about the CPU's residency decisions. See ReportMipFeedback.
     void ReportMipFeedback();
-    void UpdateAdaptiveTextureDetail();
     uint64_t _adaptiveViewEpoch = 1;
     bool _adaptiveViewValid = false;
     float _adaptiveViewX = 0, _adaptiveViewY = 0, _adaptiveViewZ = 0;
@@ -100,6 +99,7 @@ class TextureBankWgpu : public AbstractTextBank
     float _adaptiveProjectionX = 0, _adaptiveProjectionY = 0;
 
   public:
+    void UpdateAdaptiveTextureDetail(); // InitDraw, before any frame records reference texture handles
     explicit TextureBankWgpu(WgrRenderer* renderer);
     ~TextureBankWgpu() override;
 

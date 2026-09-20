@@ -2510,6 +2510,7 @@ void EngineWgpu::InitDraw(bool clear, PackedColor color)
     if (_wbank)
     {
         _wbank->StartFrame();
+        _wbank->UpdateAdaptiveTextureDetail();
     }
 }
 
@@ -3330,6 +3331,22 @@ bool EngineWgpu::ProducerMayTouchRenderer()
 }
 
 EngineWgpu* EngineWgpu::s_self = nullptr;
+
+bool EngineWgpu::TryAcquireProducerWindow()
+{
+    EngineWgpu* self = s_self;
+    // Model registrations queued during world admission still carry current upload
+    // handles. Let the consumer bake their leases before replacing any image.
+    if (!self || !self->_resourceOps.empty()) return false;
+    if (ProducerMayTouchRenderer()) return true;
+    {
+        std::unique_lock<std::mutex> lock(self->_renderMutex, std::try_to_lock);
+        if (!lock.owns_lock() || self->_renderHasWork || self->_renderBusySlot >= 0) return false;
+        // Only this producer can publish another frame; idle remains idle on unlock.
+    }
+    self->WaitRenderIdle(); // now nonblocking; also applies pending producer settings
+    return true;
+}
 
 void EngineWgpu::AcquireProducerWindow(const char* what)
 {

@@ -208,7 +208,7 @@ void TextureBankWgpu::UpdateAdaptiveTextureDetail()
         _adaptiveProjectionX = projectionX; _adaptiveProjectionY = projectionY;
     }
     if (_mipDesired.size() < 65536) { _mipDesired.resize(65536); _mipAge.resize(65536); }
-    EngineWgpu::AcquireProducerWindow("adaptive texture feedback");
+    if (!EngineWgpu::TryAcquireProducerWindow()) return; // optional work must not serialize render overlap
     WgrMipFeedbackStats feedback{};
     const uint32_t slots = wgr_get_mip_feedback(_renderer, &feedback, _mipDesired.data(), _mipAge.data(), 65536);
     if (!slots) return;
@@ -239,7 +239,6 @@ void TextureBankWgpu::UpdateAdaptiveTextureDetail()
 void TextureBankWgpu::TrimResidency()
 {
     ++_residencyFrame;
-    UpdateAdaptiveTextureDetail();
     if (!_renderer)
         return;
     // Every 600 residency frames -- roughly ten seconds of play, and long enough that the

@@ -1,11 +1,11 @@
-param([switch]$Baseline,[switch]$Normal,[switch]$Adaptive,[switch]$Controlled,[switch]$Identity,[switch]$DuringFill,[ValidateRange(-1,16384)][int]$ReadyMb=-1,[string]$Label='stationary-budget',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
+param([ValidateSet("Native","DayZ","Legacy")][string]$Corpus="Native",[switch]$Baseline,[switch]$Normal,[switch]$Adaptive,[switch]$Controlled,[switch]$Identity,[switch]$DuringFill,[ValidateRange(-1,16384)][int]$ReadyMb=-1,[string]$Label='stationary-budget',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {
  $shellName=if ($PSVersionTable.PSEdition -eq 'Core') {'pwsh.exe'} else {'powershell.exe'}
  $argv=@((Join-Path $PSScriptRoot 'with-game-lock.sh'),(Join-Path $PSHOME $shellName).Replace('\','/'),'-NoProfile','-File',$PSCommandPath,'-Label',$Label,'-GameDir',$GameDir)
  if ($Baseline) {$argv+='-Baseline'}; if ($Normal) {$argv+='-Normal'}
  foreach ($flag in @('Adaptive','Controlled','Identity','DuringFill')) {if ((Get-Variable $flag -ValueOnly)) {$argv+=('-'+$flag)}}
- $argv+=@('-ReadyMb',[string]$ReadyMb)
+ $argv+=@('-ReadyMb',[string]$ReadyMb,'-Corpus',$Corpus)
  $env:LOCK_OWNER='stationary residency check'
  try {& 'C:\Program Files\Git\bin\bash.exe' @argv; if ($LASTEXITCODE) {throw "Residency test exited $LASTEXITCODE"}} finally {Remove-Item Env:LOCK_OWNER}
  return
@@ -16,9 +16,25 @@ $out=Join-Path $root ('build/stream-residency/'+$Label+'-'+(Get-Date -Format yyy
 $env:POSEIDON_USER_DIR=Join-Path $out 'user'
 New-Item -ItemType Directory -Force $env:POSEIDON_USER_DIR | Out-Null
 [IO.File]::WriteAllText((Join-Path $env:POSEIDON_USER_DIR 'graphics.cfg'),"qualityPreset=3;`nmsaaSamples=4;`ndlssMode=0;`nvsync=0;`nfpsCap=60;`n")
-$env:POSEIDON_REFORGER_WORLD='worlds/eden'
-$env:POSEIDON_REFORGER_OBJECTS='1'
-$env:POSEIDON_REFORGER_STREAM='1'
+$baseX=5092.61; $baseZ=3995.64; $baseY=18.3; $azimuth=200.9; $elevation=-13.5
+$worldArgs=@('--test-world','"C:\Program Files (x86)\Steam\steamapps\common\Arma Reforger\addons"')
+if ($Corpus -eq 'Native') {
+ $env:POSEIDON_REFORGER_WORLD='worlds/eden'
+ $env:POSEIDON_REFORGER_OBJECTS='1'
+ $env:POSEIDON_REFORGER_STREAM='1'
+} else {
+ foreach ($key in @('POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_STREAM')) {Remove-Item ('Env:'+ $key) -ErrorAction SilentlyContinue}
+ if ($Corpus -eq 'DayZ') {
+  $baseX=5704.58; $baseZ=2523.37; $baseY=73.74; $azimuth=260.9; $elevation=-3.8
+  $world=(Resolve-Path -LiteralPath (Join-Path $root '../../../packages/dayz-compat/world/chernarusplus/chernarusplus.wrp')).Path
+  $worldArgs=@('--test-world',('"'+$world+'"'),'--addon-root','"D:\SteamLibrary\steamapps\common\DayZ\Addons"','--test-world-hour','10')
+ } else {
+  if (!$Normal) {throw 'Legacy lifecycle control requires -Normal'}
+  $baseX=6378.7; $baseZ=5672.5; $baseY=74.4; $azimuth=120; $elevation=-12
+  $worldArgs=@()
+ }
+}
+function Pose($x,$height=$baseY) { return "$x $baseZ $height $azimuth $elevation" }
 $env:WGR_OBJECT_STREAM_TEST_BUDGET='1'
 $env:WGR_OBJECT_STREAM_MAX_OBJECTS=if ($Normal) {'20000'} else {'8000'}
 $env:WGR_OBJECT_STREAM_GPU_BUDGET='0'
@@ -30,10 +46,10 @@ Remove-Item Env:POSEIDON_TEST_RAIN -ErrorAction SilentlyContinue
 Remove-Item Env:WGR_WATER_CURLING_BREAKER -ErrorAction SilentlyContinue
 $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0);$listener.Start();$port=$listener.LocalEndpoint.Port;$listener.Stop()
 $mission=Join-Path $root 'tests/perf/missions/perf_field.eden';$log=Join-Path $out 'engine.log'
-@{head=(& git -C $root rev-parse HEAD);installed=(Get-Content (Join-Path $GameDir 'DEPLOYED-FROM.txt'));adaptive=[bool]$Adaptive;controlled=[bool]$Controlled;readyMb=$ReadyMb;hashes=@(Get-FileHash (Join-Path $GameDir 'OpenPoseidon.exe'),(Join-Path $GameDir 'wgpu_renderer.dll'))} | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $out 'provenance.json')
+@{head=(& git -C $root rev-parse HEAD);installed=(Get-Content (Join-Path $GameDir 'DEPLOYED-FROM.txt'));corpus=$Corpus;adaptive=[bool]$Adaptive;controlled=[bool]$Controlled;readyMb=$ReadyMb;hashes=@(Get-FileHash (Join-Path $GameDir 'OpenPoseidon.exe'),(Join-Path $GameDir 'wgpu_renderer.dll'))} | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $out 'provenance.json')
 $p=$null;$client=$null
 try {
- $p=Start-Process -FilePath (Join-Path $GameDir 'OpenPoseidon.exe') -WorkingDirectory $GameDir -WindowStyle Hidden -PassThru -ArgumentList @('--render=wgpu','--window','--dev','--width','1280','--height','720','--vd','2000','--harness',"$port",'--capture-metrics',('"'+(Join-Path $out 'capture.json')+'"'),'--test-world','"C:\Program Files (x86)\Steam\steamapps\common\Arma Reforger\addons"','--test-world-freefly','5092.61','3995.64','18.3','200.9','-13.5','--test-mission',('"'+$mission+'"'),'--log-file',('"'+$log+'"'))
+ $p=Start-Process -FilePath (Join-Path $GameDir 'OpenPoseidon.exe') -WorkingDirectory $GameDir -WindowStyle Hidden -PassThru -ArgumentList (@('--render=wgpu','--window','--dev','--width','1280','--height','720','--vd','2000','--harness',"$port",'--capture-metrics',('"'+(Join-Path $out 'capture.json')+'"'),'--test-world-freefly',[string]$baseX,[string]$baseZ,[string]$baseY,[string]$azimuth,[string]$elevation,'--test-mission',('"'+$mission+'"'),'--log-file',('"'+$log+'"'))+$worldArgs)
  $null=$p.Handle;$client=[Net.Sockets.TcpClient]::new();$deadline=[DateTime]::UtcNow.AddSeconds(90)
  while (!$client.Connected) {try {$client.Connect('127.0.0.1',$port)} catch {if ($p.HasExited -or [DateTime]::UtcNow -gt $deadline) {throw};Start-Sleep -Milliseconds 250}}
  $stream=$client.GetStream();$stream.ReadTimeout=30000;$reader=[IO.StreamReader]::new($stream);$writer=[IO.StreamWriter]::new($stream,[Text.UTF8Encoding]::new($false));$writer.AutoFlush=$true
@@ -48,6 +64,7 @@ try {
   do {
    Start-Sleep -Seconds 2
    $r=Send @{cmd='stream_residency'}
+   if ($Corpus -eq 'Legacy') {if ($r.valid) {throw 'Legacy unexpectedly entered modern streamer'}; return $r}
    if ([DateTime]::UtcNow -gt $until) {throw 'Residency failed to settle in 240 seconds'}
   } while (!$r.valid -or $r.pending -or $r.resident -eq 0)
   return $r
@@ -67,7 +84,7 @@ try {
  $before=Wait-Settled
  if ($Controlled -or $Adaptive) {Start-Sleep -Seconds 8}
  $identityBefore=$null; $identityAway=$null; $identityReturned=$null
- if ($Identity) {$identityBefore=Send @{cmd='stream_identity_probe';x=5092.61;z=3995.64}}
+ if ($Identity) {$identityBefore=Send @{cmd='stream_identity_probe';x=$baseX;z=$baseZ}}
  $null=Send @{cmd='exec';code='logInfo "STREAM_PERF_BEGIN"; triPerfReset 0'}
  Start-Sleep -Seconds 12
  $idle=Send @{cmd='stream_residency'}
@@ -92,10 +109,10 @@ try {
   $small=$null
   $null=Send @{cmd='exec';code='logInfo "STREAM_TRAVERSE_BEGIN"; triPerfReset 0'}
   $poseResults=@()
-  $route=if ($Controlled) {@(5292.61,5492.61,5292.61,5092.61)} else {@(5192.61,5292.61,5392.61,5492.61,5392.61,5292.61,5192.61,5092.61)}
+  $route=if ($Controlled) {@(($baseX+200),($baseX+400),($baseX+200),$baseX)} else {@(($baseX+100),($baseX+200),($baseX+300),($baseX+400),($baseX+300),($baseX+200),($baseX+100),$baseX)}
   $poseIndex=0
   foreach ($x in $route) {
-   $r=Send @{cmd='eval';code=('triFreeFlyPose "'+$x+' 3995.64 18.3 200.9 -13.5"')}
+   $r=Send @{cmd='eval';code=('triFreeFlyPose "'+(Pose $x)+'"')}
    if ($r.result -notmatch 'OK') {throw 'Traversal pose refused'}
    if ($Controlled) {
     $settled=Wait-Settled
@@ -113,7 +130,7 @@ try {
   $restored=Wait-Settled
   if ($restored.centerX -ne $before.centerX -or $restored.centerZ -ne $before.centerZ -or $restored.desired -ne $before.desired -or $restored.resident -ne $before.resident) {throw 'Traversal return lost coverage'}
  }
- if (!$Baseline) {
+ if (!$Baseline -and $Corpus -ne 'Legacy') {
   $sameBudget=$restored.budget
   for ($i=0;$i -lt 5;$i++) {$null=Send @{cmd='stream_residency';budget=$sameBudget}}
   Start-Sleep -Seconds 2
@@ -121,10 +138,10 @@ try {
   if ($unchanged.admitUpdates -ne $restored.admitUpdates) {throw 'Repeated unchanged budgets caused admission churn'}
  }
  if ($Identity) {
-  $null=Send @{cmd='eval';code='triFreeFlyPose "6592.61 3995.64 150 200.9 -13.5"'}
+  $null=Send @{cmd='eval';code=('triFreeFlyPose "'+(Pose ($baseX+1500) ($baseY+150))+'"')}
   $null=Wait-Settled
   $identityAway=Send @{cmd='stream_identity_probe';ids=@($identityBefore.objects | ForEach-Object {$_.id})}
-  $null=Send @{cmd='eval';code='triFreeFlyPose "5092.61 3995.64 18.3 200.9 -13.5"'}
+  $null=Send @{cmd='eval';code=('triFreeFlyPose "'+(Pose $baseX)+'"')}
   $null=Wait-Settled
   $identityReturned=Send @{cmd='stream_identity_probe';ids=@($identityBefore.objects | ForEach-Object {$_.id})}
  }

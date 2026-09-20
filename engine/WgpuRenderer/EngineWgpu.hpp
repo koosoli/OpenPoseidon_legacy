@@ -1456,6 +1456,8 @@ class EngineWgpu : public EngineDummy
     // main thread, or between publish and the next InitDraw under overlap, it is false and
     // a direct call is a data race with wgr_render_frame. Checked by the texture paths.
     static bool ProducerMayTouchRenderer();
+    // Optional streaming work may acquire an already idle renderer, never wait for one.
+    static bool TryAcquireProducerWindow();
     // REN-THR-013: the lazy producer window. Every remaining direct renderer call on the
     // producer side goes through this instead of relying on InitDraw having waited: it returns
     // at once while the worker is idle, and otherwise waits for it -- and records who asked, so

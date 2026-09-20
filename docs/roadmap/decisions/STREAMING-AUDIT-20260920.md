@@ -86,3 +86,74 @@ It uses conservative full-detail demand on camera/projection changes or unknown
 feedback, delays demotion, retains a valid image, and caps each replacement at
 4 MiB with old/new/staging headroom. It is not yet runtime-accepted and remains off
 by default. General adaptive texture rollout is not claimed.
+
+
+## Follow-up validation and limits
+
+Oliver clarified that native Reforger compatibility is incomplete (material/shader
+metadata anomalies and missing furniture). Treat it as a load/cancellation fixture
+and a same-build change detector, never as a ground-truth visual corpus. The DayZ
+ChernarusPlus packed OPRW corpus is now also included, at his dense location
+(5704.58, 2523.37, 73.74), azimuth 260.9, elevation -3.8. The runner also provides
+an original CWA control (`-Corpus Legacy -Normal -Identity`).
+
+`a531d7b9` closes an ownership-accounting gap between parsing and install: queued,
+active and completed conversions keep the IR charge plus an explicit equal-sized
+workspace/output reservation until consumed/cancelled. Old-generation active jobs
+retain their charge until completion. This is a scheduling estimate, **not** actual
+Shape allocation or decoder scratch measurement. Useful conversions are never
+blocked by this debt; speculative parsing is. Five worker tests / 139 assertions
+cover consumption, cancellation, reset and oversize progress.
+
+The first adaptive-detail run on `7d8fb75b` FAILED visual acceptance despite matching
+logical object counts: image-handle changes triggered whole retained-model teardown.
+The same-slot material remained valid, but buildings/fences disappeared. `a531d7b9`
+keeps these registrations for the narrowly eligible opaque replacement path.
+The repeat has zero texture-caused model re-registrations and restores the missing
+geometry in the endpoint capture. This demonstrates why resident-object counts
+alone are insufficient coverage evidence. Both runs remain performance failures:
+per-pose p95 frame times reach roughly 90–97 ms versus 25–36 ms with detail disabled.
+No FPS gain is claimed from their lower medians. Optional detail remains OFF.
+
+### Conventional geometry audit (F)
+
+- XOB conversion (`XobConvert.hpp`) visits visual LODs, maps authored thresholds,
+  validates monotonic resolutions, and handles special geometry separately.
+- Model IR / ShapeAdapter retain visual and query-purpose distinctions; renderer
+  registration in `EngineWgpu::RegisterGpuModel` skips special levels >=900 and
+  appends each eligible drawable level with its resolution and section range.
+- Rust `CullState::register_model` stores all submitted LOD/section records; compute
+  `cull.wgsl` selects a level per instance. Selection does **not** free other LOD
+  payloads. Geometry pool capacity also differs from live geometry bytes.
+- Existing retained/direct mesh sharing is already enabled; CPU complements keep
+  proxies, animated/non-owned sections and supported legacy foliage/window fallbacks.
+  Removing these would lose content, not optimize equivalent rendering.
+- The comparable native endpoint uses about 624.5 MB live geometry within 704.6 MB
+  pool capacity, alongside about 1003 MB object textures and a 5884.5 MB reported
+  budget. This does not demonstrate a geometry-residency capacity crisis. Shadow
+  rasterization remains a large GPU cost; it is not proof that page streaming helps.
+- Do not schedule optional Stage G's hierarchy until conventional geometry costs
+  establish a benefit. No content decimation, collision LOD changes, mesh-shader
+  requirement or GL33 work is justified by these measurements.
+
+Stage D's DayZ cold-model rows demonstrate that packed models still take the
+synchronous fallback. An example `misc_range_roof` costs 275 ms, of which about
+269 ms is texture work (34 ms read, 236 ms create); moving its ~4 ms model parse to
+workers alone cannot fix that stall. The unlocked file-server MRU must stay on its
+owner thread. This is attribution, not a claimed fix or an excuse to disable assets.
+
+
+DayZ `dayz-dense-20260920-104925` on a531d7b9 is a **failed** runtime run:
+at 10:50:57 the GPU reported Out of Memory while vertex capacity grew from
+544 to 1088 MiB. Subsequent timings/screenshots are invalid performance evidence;
+the process did not complete clean shutdown inside the test timeout. The report's
+275 ms roof example above was after this failure and is withdrawn as performance
+attribution. Earlier cold rows remain useful leads only. Do not combine pre/post
+failure timings. The camera identity probe reports 16/16 IDs missing while away
+and restored on return; this agrees with source ownership but does not establish
+full query/collision correctness, and must be repeated in a clean run.
+
+The pool already has a measured growth-factor lever (`WGR_GEO_POOL_GROWTH`,
+default 2, range 1.25–2); do not invent a duplicate growth policy. Next compare its
+existing smaller-growth option and actual retirement/overlap accounting without
+reducing the object budget or sight distance.
