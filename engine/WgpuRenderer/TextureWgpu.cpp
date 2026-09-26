@@ -1908,17 +1908,28 @@ uint64_t TextureWgpu::EnsureUploaded()
     if (!_gpuHandle)
     {
         const uint64_t began = (timed || profiled) ? NowUs() : 0;
+        // Pure owner-held pixel work can overlap the preceding render. Acquire
+        // renderer ownership only after encoding, immediately before each GPU call.
+        auto encodeBc3 = [&](const uint8_t* rgba, int width, int height,
+                             std::vector<uint8_t>& blocks, std::vector<uint32_t>& offsets, int& levels)
+        {
+            const uint64_t encodeBegan = profiled ? NowUs() : 0;
+            const bool encoded = EncodeBc3Chain(rgba, width, height, blocks, offsets, levels);
+            if (profiled)
+                admit.textureEncodeMs += (NowUs() - encodeBegan) / 1000.0;
+            return encoded;
+        };
         DecodedImage prepared;
         if (render::PreparedTextureStore::Enabled() &&
             render::PreparedTextureStore::Instance().TakeDecoded(render::PreparedTextureStore::Key(SourceName()), prepared))
         {
-            CheckProducerMayTouchRenderer("texture create");
             std::vector<uint8_t>  bc3;
             std::vector<uint32_t> bc3Offsets;
             int                   bc3Levels = 0;
             if (CompositeWantsBc3(Name()) &&
-                EncodeBc3Chain(prepared.rgba.data(), prepared.width, prepared.height, bc3, bc3Offsets, bc3Levels))
+                encodeBc3(prepared.rgba.data(), prepared.width, prepared.height, bc3, bc3Offsets, bc3Levels))
             {
+                CheckProducerMayTouchRenderer("texture create");
                 _gpuHandle = wgr_texture_create_in_slot(r, static_cast<uint32_t>(prepared.width),
                                                         static_cast<uint32_t>(prepared.height), WGR_TEXTURE_BC3,
                                                         static_cast<uint32_t>(bc3Levels), 0, bc3.data(),
@@ -1932,10 +1943,13 @@ uint64_t TextureWgpu::EnsureUploaded()
                 }
             }
             if (!_gpuHandle)
+            {
+                CheckProducerMayTouchRenderer("texture create");
                 _gpuHandle = wgr_texture_create(r, static_cast<uint32_t>(prepared.width),
                                                 static_cast<uint32_t>(prepared.height), WGR_TEXTURE_RGBA8, 1,
                                                 WGR_TEXTURE_GEN_MIPS, prepared.rgba.data(),
                                                 static_cast<uint32_t>(prepared.rgba.size()));
+            }
             if (_gpuHandle && bc3.empty())
             {
                 _w = prepared.width;
@@ -1972,12 +1986,12 @@ uint64_t TextureWgpu::EnsureUploaded()
                 if (dst == PacARGB8888)
                     for (size_t i = 0; i + 2 < pixels.size(); i += 4)
                         std::swap(pixels[i], pixels[i + 2]);
-                CheckProducerMayTouchRenderer("texture create");
                 std::vector<uint8_t>  bc3;
                 std::vector<uint32_t> bc3Offsets;
                 int                   bc3Levels = 0;
-                if (CompositeWantsBc3(Name()) && EncodeBc3Chain(pixels.data(), _w, _h, bc3, bc3Offsets, bc3Levels))
+                if (CompositeWantsBc3(Name()) && encodeBc3(pixels.data(), _w, _h, bc3, bc3Offsets, bc3Levels))
                 {
+                    CheckProducerMayTouchRenderer("texture create");
                     _gpuHandle = wgr_texture_create_in_slot(
                         r, static_cast<uint32_t>(_w), static_cast<uint32_t>(_h), WGR_TEXTURE_BC3,
                         static_cast<uint32_t>(bc3Levels), 0, bc3.data(), static_cast<uint32_t>(bc3.size()),
@@ -1987,6 +2001,7 @@ uint64_t TextureWgpu::EnsureUploaded()
                 }
                 if (!_gpuHandle)
                 {
+                    CheckProducerMayTouchRenderer("texture create");
                     _gpuHandle = wgr_texture_create_in_slot(
                         r, static_cast<uint32_t>(_w), static_cast<uint32_t>(_h), WGR_TEXTURE_RGBA8, 1,
                         WGR_TEXTURE_GEN_MIPS, pixels.data(), static_cast<uint32_t>(pixels.size()), AcquireSlotLease());

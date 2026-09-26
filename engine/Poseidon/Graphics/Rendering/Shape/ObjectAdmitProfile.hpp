@@ -56,6 +56,7 @@ struct ObjectAdmitProfile
     double textureReadMs = 0.0;     // ITextureSource::GetMipmapChain (file open + read + LZO)
     double textureCreateMs = 0.0;   // wgr_texture_create (staging copy + write_texture)
     double textureWindowWaitMs = 0.0; // subset of texture work: waiting for render ownership
+    double textureEncodeMs = 0.0;   // subset of fallback: CPU-only BC3 mip/encoding work
     double textureFallbackMs = 0.0; // whole-file RGBA8 decode path (non-block formats)
     double alphaScanMs = 0.0;       // GetAlphaClass scans that touched blocks or the file
 

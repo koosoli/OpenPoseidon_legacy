@@ -4172,7 +4172,7 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                          "Object stream cold model: {} mode={} parse={:.1f} adapt={:.1f} opt={:.1f} create={:.1f} "
                          "[reg={:.1f} mesh={:.1f} sect={:.1f} tex={:.1f} (read={:.1f} create={:.1f} fb={:.1f} "
                          "alpha={:.1f} up={} prep={}) ffi={:.1f} prox={:.1f} other={:.1f} park={}] "
-                         "texhdr={:.1f}/{} total={:.1f} ms{} texWindowWait={:.3f}",
+                         "texhdr={:.1f}/{} total={:.1f} ms{} texWindowWait={:.3f} texEncodeMs={:.3f}",
                          (const char*)modelName, timing.preparsed ? "async" : (asyncOn ? "sync-fallback" : "sync"),
                          timing.parseMs, timing.adaptMs, timing.optimizeMs, createMs, admitProfile.registerMs,
                          meshMs, sectOnlyMs, texMs, admitProfile.textureReadMs, admitProfile.textureCreateMs,
@@ -4181,7 +4181,8 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                          otherMs,
                          admitProfile.parkHits ? "hit" : (admitProfile.parkStale ? "stale" : "miss"),
                          admitProfile.texHeaderLoadMs, admitProfile.texHeaderLoads, totalMs,
-                         timing.canonical ? "" : " (legacy loader)", admitProfile.textureWindowWaitMs);
+                         timing.canonical ? "" : " (legacy loader)", admitProfile.textureWindowWaitMs,
+                         admitProfile.textureEncodeMs);
             }
             else
                 warmMs += totalMs;
