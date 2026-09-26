@@ -269,11 +269,21 @@ struct ObjectStreamPreparer::Impl
         bool requested = false;
         bool attempted = false;
         uint64_t diagnosticParseToken = 0;
+        SourceConversionToken convertedToken;
         Streaming::StaticSourceEnvelope envelope;
         Streaming::StaticPlainSourceSummary plainSource;
     };
     std::vector<SourceEnvelopeSlot> sourceEnvelopes; // lazy, bounded, no IR/config pointers
     uint64_t nextDiagnosticParseToken = 0; // owner only; never advanced by ordinary Request
+    // Caller holds queue mutex. No new identity scans or allocation; parse tokens
+    // are unique across model indices and survive Reset sequence advancement.
+    bool SourceBindingMatches(uint32_t index, SourceConversionToken token) const
+    {
+        return token.generation != 0 && token.diagnosticParseToken != 0 &&
+            token.generation == generation.load(std::memory_order_relaxed) && index < sourceEnvelopes.size() &&
+            sourceEnvelopes[index].attempted &&
+            sourceEnvelopes[index].diagnosticParseToken == token.diagnosticParseToken;
+    }
 
     // Caller holds mutex. RadiusSlot belongs to this generation's inventory;
     // Reset destroys/reinitializes the slots, while payload retirement leaves them alone.
@@ -318,6 +328,7 @@ struct ObjectStreamPreparer::Impl
         bool radiusIdentityAccepted = false;
         uint64_t radiusGeneration = 0;
         std::string radiusIdentity; // copied owner token, never a borrowed model/shape
+        SourceConversionToken sourceToken; // bound to THIS converted model job only
         uint64_t reservation = 0;
         ModelPtr model;
         std::shared_ptr<const Model::ShapeAdapter::AdapterBankTables> tables;
@@ -484,7 +495,8 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
 
             lock.lock();
             stats.conversionReservedBytes -= textureScratch;
-            if (jobGen != generation.load(std::memory_order_relaxed) || stale[job.index])
+            if (jobGen != generation.load(std::memory_order_relaxed) || stale[job.index] ||
+                (job.sourceToken.diagnosticParseToken && !SourceBindingMatches(job.index, job.sourceToken)))
             {
                 if (jobGen == generation.load(std::memory_order_relaxed))
                     Set(job.index, State::Unknown);
@@ -511,6 +523,7 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                 convertedShapes[job.index] = shape;
                 shape = nullptr; // Ownership is now in the published slot.
                 convertedModels[job.index] = std::move(job.model);
+                if (job.index < sourceEnvelopes.size()) sourceEnvelopes[job.index].convertedToken = job.sourceToken;
                 Set(job.index, State::Converted);
                 ++stats.converted;
             }
@@ -1251,10 +1264,12 @@ size_t ObjectStreamPreparer::DropStale(const uint32_t* epochs, size_t count, uin
 
 bool ObjectStreamPreparer::SubmitConvert(uint32_t index, std::shared_ptr<Model::Model> model,
                                          std::shared_ptr<const Model::ShapeAdapter::AdapterBankTables> tables,
-                                         const RadiusCertificate* inventoryToken)
+                                         const RadiusCertificate* inventoryToken,
+                                         const SourceEnvelopeSnapshot* originalSource)
 {
     if (!model || !tables)
         return false;
+    if (originalSource && !Foundation::IsMainThread()) return false;
     // Owner-thread snapshot only. Workers receive immutable archive spans and names,
     // never Texture pointers, bank handles, ParamFile state or the file-server MRU.
     std::vector<Impl::PackedTextureRead> textures;
@@ -1289,10 +1304,19 @@ bool ObjectStreamPreparer::SubmitConvert(uint32_t index, std::shared_ptr<Model::
         return false;
     if (_impl->Get(index) != State::Unknown)
         return false;
+    SourceConversionToken sourceToken;
+    if (originalSource)
+    {
+        sourceToken = {originalSource->generation, originalSource->diagnosticParseToken};
+        if (!originalSource->attempted || originalSource->modelIdentity != _impl->paths[index] ||
+            !_impl->SourceBindingMatches(index, sourceToken)) return false;
+    }
+    if (index < _impl->sourceEnvelopes.size()) _impl->sourceEnvelopes[index].convertedToken = {};
     _impl->stale[index] = false;
     _impl->Set(index, State::Converting);
     Impl::ConvertJob job;
     job.index = index;
+    job.sourceToken = sourceToken;
     job.radiusGeneration = _impl->generation.load(std::memory_order_relaxed);
     // Admission lowercases sourcePath for ShapeBank after taking the IR. Only
     // an exact owner inventory token authorizes this otherwise ambiguous mapping.
@@ -1322,7 +1346,7 @@ bool ObjectStreamPreparer::SubmitConvert(uint32_t index, std::shared_ptr<Model::
 ObjectStreamPreparer::ConvertedShape ObjectStreamPreparer::TakeConverted(uint32_t index)
 {
     ConvertedShape out;
-    std::lock_guard<std::mutex> lock(_impl->mutex);
+    std::unique_lock<std::mutex> lock(_impl->mutex);
     if (index >= _impl->count || _impl->Get(index) != State::Converted)
         return out;
     _impl->stats.conversionReservedBytes -= _impl->conversionBytes[index];
@@ -1333,6 +1357,20 @@ ObjectStreamPreparer::ConvertedShape ObjectStreamPreparer::TakeConverted(uint32_
     out.model = std::move(_impl->convertedModels[index]);
     _impl->convertedModels[index].reset();
     _impl->Set(index, State::Unknown);
+    if (index < _impl->sourceEnvelopes.size())
+    {
+        // Read the token stored with the actual completed job, never infer it
+        // from whichever parse snapshot happens to be current now.
+        out.sourceToken = _impl->sourceEnvelopes[index].convertedToken;
+        _impl->sourceEnvelopes[index].convertedToken = {};
+    }
+    if (out.sourceToken.diagnosticParseToken && !_impl->SourceBindingMatches(index, out.sourceToken))
+    {
+        ++_impl->stats.dropped;
+        lock.unlock(); // shape/model retirement is never under the queue mutex
+        delete out.shape;
+        out = {};
+    }
     return out;
 }
 

@@ -1,4 +1,5 @@
 #pragma once
+#include <Poseidon/World/Terrain/StaticSourceEnvelope.hpp>
 
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
 #include <Poseidon/World/Model/ModelMemory.hpp>
@@ -177,6 +178,17 @@ inline bool SimulationShapeAdmissible(LODShapeWithShadow& shape)
             return false;
     }
     return true;
+}
+
+// Source evidence bounds ONLY the fresh static empty-class ODOL adapter path.
+// Callers must separately bind the exact parse/converted job and refuse bank
+// aliases, probe live config in this owner operation, and reconcile placement.
+inline bool PositiveColdShapeMatchesSource(LODShapeWithShadow& shape,
+    const StaticSourceEnvelope& source, uint64_t generation)
+{
+    const auto radius = source.RadiusForGeneration(generation);
+    return radius && *shape.GetPropertyClass() == 0 && SimulationShapeAdmissible(shape) &&
+        shape.BoundingSphere() <= *radius;
 }
 
 // Visible owned element bytes only, not capacity/RSS: no public parent-owned

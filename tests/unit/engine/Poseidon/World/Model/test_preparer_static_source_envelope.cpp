@@ -2,6 +2,8 @@
 #include <Poseidon/World/Terrain/ObjectStreamPrepare.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Model/ModelCache.hpp>
+#include <Poseidon/World/Model/ShapeAdapter.hpp>
+#include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
 #include <Poseidon/Foundation/Threads/ThreadAffinity.hpp>
 #include <atomic>
 #include <chrono>
@@ -343,6 +345,132 @@ TEST_CASE("Selected source diagnostics own bounded temporary demand but no prepa
     REQUIRE(Wait([&]{return land.Prep().Query(0)==Preparer::State::NotLoose || land.Prep().Query(0)==Preparer::State::Failed;}));
     REQUIRE(land.SnapshotModernSourceDiagnostic(0).status==Status::Refused);
     REQUIRE(land.Prep().SnapshotStats().sourceEnvelopeScans==scansBeforeMissing);
+}
+
+TEST_CASE("Source conversion associates only explicitly validated original worker parse jobs", "[preparer][static-source-envelope][ShapeAdapter]")
+{
+    Poseidon::Foundation::CaptureMainThread();
+    SourceFile file; Preparer prep; prep.Reset(&file.path,1); RequireWorkers(prep);
+    REQUIRE(prep.RequestWithStaticSourceEnvelope(0)==Request::Requested);
+    REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::Ready;}));
+    auto source=prep.QueryStaticSourceEnvelope(0);
+    const auto generation=source.generation, token=source.diagnosticParseToken;
+    auto model=prep.Take(0); REQUIRE(model);
+    auto tables=std::make_shared<Poseidon::Model::ShapeAdapter::AdapterBankTables>();
+    Poseidon::Model::ShapeAdapter::BuildAdapterBankTables(*model,*tables);
+    // This is the one permitted relabeling, not a new IR/property/vertex snapshot.
+    for(char& c : model->sourcePath) if(c>='A' && c<='Z') c=char(c+('a'-'A'));
+    const Preparer::SourceEnvelopeSnapshot* explicitSource=&source;
+    bool accepted=true;
+    SECTION("valid original association is copied into real worker result") {}
+    SECTION("ordinary conversion never infers source eligibility") { explicitSource=nullptr; }
+    SECTION("wrong generation rejects enqueue") { ++source.generation; accepted=false; }
+    SECTION("wrong per-parse token rejects enqueue") { ++source.diagnosticParseToken; accepted=false; }
+    SECTION("wrong exact inventory identity rejects enqueue") { source.modelIdentity+="different"; accepted=false; }
+    SECTION("unattempted snapshot rejects enqueue") { source.attempted=false; accepted=false; }
+    REQUIRE(prep.SubmitConvert(0,model,tables,nullptr,explicitSource)==accepted);
+    if(!accepted)
+    {
+        REQUIRE(prep.Query(0)==Preparer::State::Unknown);
+        REQUIRE(prep.SnapshotStats().conversionReservedBytes==0);
+        REQUIRE_FALSE(prep.TakeConverted(0).shape);
+        return;
+    }
+    const bool bound=explicitSource!=nullptr;
+    source={}; // No borrowed snapshot is available to the worker after enqueue.
+    REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::Converted;}));
+    auto result=prep.TakeConverted(0);
+    std::unique_ptr<Poseidon::LODShapeWithShadow> shape(result.shape);
+    REQUIRE(shape); REQUIRE(result.model==model);
+    REQUIRE(result.sourceToken.generation==(bound ? generation : 0));
+    REQUIRE(result.sourceToken.diagnosticParseToken==(bound ? token : 0));
+    REQUIRE_FALSE(prep.TakeConverted(0).shape);
+    REQUIRE(prep.SnapshotStats().conversionReservedBytes==0);
+}
+
+TEST_CASE("Source conversion token cannot bind another index or a Reset replacement", "[preparer][static-source-envelope][ShapeAdapter]")
+{
+    Poseidon::Foundation::CaptureMainThread();
+    SourceFile file; Preparer prep;
+    std::vector<std::string> paths(2,file.path); prep.Reset(paths.data(),paths.size()); RequireWorkers(prep);
+    for(uint32_t i=0;i<2;++i) REQUIRE(prep.RequestWithStaticSourceEnvelope(i)==Request::Requested);
+    REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::Ready && prep.Query(1)==Preparer::State::Ready;}));
+    const auto first=prep.QueryStaticSourceEnvelope(0), second=prep.QueryStaticSourceEnvelope(1);
+    REQUIRE(first.modelIdentity==second.modelIdentity);
+    REQUIRE(first.diagnosticParseToken!=second.diagnosticParseToken);
+    auto model=prep.Take(1); REQUIRE(model);
+    auto tables=std::make_shared<Poseidon::Model::ShapeAdapter::AdapterBankTables>();
+    Poseidon::Model::ShapeAdapter::BuildAdapterBankTables(*model,*tables);
+    REQUIRE_FALSE(prep.SubmitConvert(1,model,tables,nullptr,&first));
+    REQUIRE(prep.SubmitConvert(1,model,tables,nullptr,&second));
+    REQUIRE(Wait([&]{return prep.Query(1)==Preparer::State::Converted;}));
+    prep.Reset(paths.data(),paths.size()); // Completed old job cannot cross inventories.
+    REQUIRE_FALSE(prep.TakeConverted(1).shape);
+    REQUIRE_FALSE(prep.SubmitConvert(1,model,tables,nullptr,&second));
+    REQUIRE(prep.RequestWithStaticSourceEnvelope(1)==Request::Requested);
+    REQUIRE(Wait([&]{return prep.Query(1)==Preparer::State::Ready;}));
+    const auto replacement=prep.QueryStaticSourceEnvelope(1);
+    REQUIRE(replacement.generation!=second.generation);
+    REQUIRE(replacement.diagnosticParseToken!=second.diagnosticParseToken);
+    auto replaced=prep.Take(1); REQUIRE(replaced);
+    auto replacementTables=std::make_shared<Poseidon::Model::ShapeAdapter::AdapterBankTables>();
+    Poseidon::Model::ShapeAdapter::BuildAdapterBankTables(*replaced,*replacementTables);
+    REQUIRE(prep.SubmitConvert(1,replaced,replacementTables,nullptr,&replacement));
+    REQUIRE(Wait([&]{return prep.Query(1)==Preparer::State::Converted;}));
+    auto result=prep.TakeConverted(1);
+    std::unique_ptr<Poseidon::LODShapeWithShadow> shape(result.shape);
+    REQUIRE(shape);
+    REQUIRE(result.sourceToken.generation==replacement.generation);
+    REQUIRE(result.sourceToken.diagnosticParseToken==replacement.diagnosticParseToken);
+}
+
+TEST_CASE("Cancelled queued source conversion cannot lend a token to ordinary rescue", "[preparer][static-source-envelope][ShapeAdapter][cancellation]")
+{
+    if(!Preparer::AsyncEnabled()) SKIP("Requires asynchronous preparer workers");
+    Poseidon::Foundation::CaptureMainThread();
+    static std::atomic<unsigned> entered{0}; static std::atomic<bool> release{false};
+    entered=0; release=false;
+    struct RestoreLoader
+    {
+        Poseidon::ModelCache::ExternalLoader previous=Poseidon::ModelCache::GetExternalLoader();
+        ~RestoreLoader() { Poseidon::ModelCache::SetExternalLoader(previous); }
+    } restore;
+    Poseidon::ModelCache::SetExternalLoader(+[](const std::string&,std::string&) -> std::shared_ptr<Poseidon::Model::Model>
+    { ++entered; Wait([]{return release.load();}); return {}; });
+    SourceFile file; Preparer prep;
+    struct ReleaseBeforeJoin { ~ReleaseBeforeJoin(){release=true;} } unblock;
+    const size_t workers=Preparer::WorkerCount();
+    std::vector<std::string> paths(workers+1,"source-conversion-barrier.xob"); paths[0]=file.path;
+    prep.Reset(paths.data(),paths.size());
+    REQUIRE(prep.RequestWithStaticSourceEnvelope(0)==Request::Requested);
+    REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::Ready;}));
+    const auto source=prep.QueryStaticSourceEnvelope(0);
+    auto model=prep.Take(0); REQUIRE(model);
+    auto tables=std::make_shared<Poseidon::Model::ShapeAdapter::AdapterBankTables>();
+    Poseidon::Model::ShapeAdapter::BuildAdapterBankTables(*model,*tables);
+    for(uint32_t i=1;i<=workers;++i) REQUIRE(prep.Request(i));
+    REQUIRE(Wait([&]{return entered.load()==workers;}));
+    REQUIRE(prep.SubmitConvert(0,model,tables,nullptr,&source));
+    REQUIRE(prep.Query(0)==Preparer::State::Converting); // Real worker queue held behind actual parses.
+    std::vector<uint32_t> epochs(paths.size(),1); epochs[0]=0;
+    prep.DropStale(epochs.data(),epochs.size(),1);
+    REQUIRE(prep.Query(0)==Preparer::State::Unknown);
+    REQUIRE_FALSE(prep.SubmitConvert(0,model,tables,nullptr,&source));
+    REQUIRE(prep.Request(0)); // Ordinary fresh parse must stay unbound.
+    release=true;
+    REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::Ready;}));
+    REQUIRE(prep.QueryStaticSourceEnvelope(0).diagnosticParseToken==0);
+    auto ordinary=prep.Take(0); REQUIRE(ordinary);
+    auto ordinaryTables=std::make_shared<Poseidon::Model::ShapeAdapter::AdapterBankTables>();
+    Poseidon::Model::ShapeAdapter::BuildAdapterBankTables(*ordinary,*ordinaryTables);
+    REQUIRE(prep.SubmitConvert(0,ordinary,ordinaryTables));
+    REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::Converted;}));
+    auto result=prep.TakeConverted(0);
+    std::unique_ptr<Poseidon::LODShapeWithShadow> shape(result.shape);
+    REQUIRE(shape); REQUIRE(result.model==ordinary);
+    REQUIRE(result.sourceToken.generation==0);
+    REQUIRE(result.sourceToken.diagnosticParseToken==0);
+    REQUIRE(prep.SnapshotStats().conversionReservedBytes==0);
 }
 
 TEST_CASE("Diagnostic demand survives camera cancellation only while an actual parse is pending", "[streaming-source-diagnostic][cancellation]")

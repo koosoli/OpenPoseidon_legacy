@@ -1,10 +1,10 @@
-param([switch]$Disabled,[switch]$Capacity,[switch]$ActiveCapacity,[switch]$MovedWatcher,[switch]$LargeWall,[switch]$SourceDiagnostic,[switch]$PositiveWarming,[string]$Label='simulation-residency',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',[string]$Python='C:\Program Files\Python311\python.exe')
+param([switch]$Disabled,[switch]$Capacity,[switch]$ActiveCapacity,[switch]$MovedWatcher,[switch]$LargeWall,[switch]$SourceDiagnostic,[switch]$PositiveWarming,[switch]$ColdPositive,[string]$Label='simulation-residency',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',[string]$Python='C:\Program Files\Python311\python.exe')
 $ErrorActionPreference='Stop'
-if (@($Disabled,$Capacity,$ActiveCapacity,$MovedWatcher,$LargeWall,$SourceDiagnostic,$PositiveWarming | Where-Object {$_}).Count -gt 1) {throw 'Simulation fixture switches are separate scenarios'}
+if (@($Disabled,$Capacity,$ActiveCapacity,$MovedWatcher,$LargeWall,$SourceDiagnostic,$PositiveWarming,$ColdPositive | Where-Object {$_}).Count -gt 1) {throw 'Simulation fixture switches are separate scenarios'}
 if (!$env:LOCK_OWNER) {
  $shellName=if ($PSVersionTable.PSEdition -eq 'Core') {'pwsh.exe'} else {'powershell.exe'}
  $argv=@((Join-Path $PSScriptRoot 'with-game-lock.sh'),(Join-Path $PSHOME $shellName).Replace('\','/'),'-NoProfile','-File',$PSCommandPath,'-Label',$Label,'-GameDir',$GameDir,'-Python',$Python)
- foreach ($flag in @('Disabled','Capacity','ActiveCapacity','MovedWatcher','LargeWall','SourceDiagnostic','PositiveWarming')) {if ((Get-Variable $flag -ValueOnly)) {$argv+=('-'+$flag)}}
+ foreach ($flag in @('Disabled','Capacity','ActiveCapacity','MovedWatcher','LargeWall','SourceDiagnostic','PositiveWarming','ColdPositive')) {if ((Get-Variable $flag -ValueOnly)) {$argv+=('-'+$flag)}}
  $env:LOCK_OWNER='simulation residency fixture'
  try {& 'C:\Program Files\Git\bin\bash.exe' @argv; if ($LASTEXITCODE) {throw "Simulation fixture exited $LASTEXITCODE"}} finally {Remove-Item Env:LOCK_OWNER}
  return
@@ -13,7 +13,7 @@ if (Get-Process OpenPoseidon -ErrorAction SilentlyContinue) {throw 'Game already
 $root=Split-Path $PSScriptRoot -Parent
 $out=Join-Path $root ('build/stream-residency/'+$Label+'-'+(Get-Date -Format yyyyMMdd-HHmmss))
 $fixture=Join-Path $out 'fixture'
-if ($SourceDiagnostic) {$fixture=Join-Path ([IO.Path]::GetTempPath()) ('op-src-'+[guid]::NewGuid().ToString('N').Substring(0,8))}
+if ($SourceDiagnostic -or $ColdPositive) {$fixture=Join-Path ([IO.Path]::GetTempPath()) ('op-src-'+[guid]::NewGuid().ToString('N').Substring(0,8))}
 $mission=Join-Path $out 'simulation-fixture.eden'
 $env:POSEIDON_USER_DIR=Join-Path $out 'user'
 New-Item -ItemType Directory -Force $mission,$env:POSEIDON_USER_DIR | Out-Null
@@ -23,6 +23,7 @@ if ($ActiveCapacity) {$fixtureArgs+=@('--model-count','257','--reference-all-mod
 if ($PositiveWarming) {$fixtureArgs+=@('--model-count','257','--reference-all-models','--positive-warming')}
 if ($LargeWall) {$fixtureArgs+='--large-wall'}
 if ($SourceDiagnostic) {& $Python (Join-Path $PSScriptRoot 'streaming/build_source_diagnostic_fixture.py') $fixture}
+elseif ($ColdPositive) {& $Python (Join-Path $PSScriptRoot 'streaming/build_positive_cold_fixture.py') $fixture}
 else {& $Python (Join-Path $PSScriptRoot 'streaming/build_simulation_residency_fixture.py') @fixtureArgs}
 if ($LASTEXITCODE) {throw 'Original fixture generation failed'}
 @'
@@ -50,6 +51,7 @@ class OutroLoose { randomSeed=3; class Intel {}; };
 [IO.File]::WriteAllText((Join-Path $env:POSEIDON_USER_DIR 'graphics.cfg'),"qualityPreset=3;`nmsaaSamples=4;`ndlssMode=0;`nvsync=0;`nfpsCap=60;`n")
 $env:WGR_SIMULATION_RESIDENCY=if ($Disabled -or $SourceDiagnostic) {'0'} else {'1'}
 $env:WGR_SIMULATION_RESIDENCY_TEST=if ($Disabled -or $SourceDiagnostic) {'0'} else {'1'}
+$env:WGR_SIMULATION_POSITIVE_COLD=if ($ColdPositive) {'1'} else {'0'}
 $env:WGR_OBJECT_STREAM_WINDOW_GROWTH='0'
 $env:WGR_OBJECT_STREAM_RADIUS_CELLS='8'
 $env:WGR_OBJECT_STREAM_GPU_BUDGET='0'
@@ -130,6 +132,22 @@ try {
   $cold=State;$coldIds=Ids
   if ($cold.status -ne 'Disabled' -or $cold.ownerPumps -ne 0 -or @($coldIds.objects | Where-Object {$_.present}).Count) {throw 'Default-off fixture performed simulation work or loaded remote walls'}
   $result=@{cold=$cold;coldIds=$coldIds}
+ } elseif ($ColdPositive) {
+  $cold=Wait-State {param($r) $r.status -eq 'CapacityExceeded' -and $r.metadataComplete -and $r.positiveColdCreated -eq 2 -and $r.positiveLeasedPlacements -eq 2 -and $r.positiveScannedRegions -ge 1} 'two source-bound cold actor walls'
+  $coldIds=Ids;$coldResidency=Send @{cmd='stream_residency'}
+  if ($cold.models -ne 257 -or $cold.referencedModels -ne 257 -or $cold.inventoryRows -ne 257 -or $cold.preparedModels -ne 0 -or $cold.readyRegions -ne 0 -or $cold.readyQueries -ne 0 -or $cold.positiveColdRequested -ne 2 -or $cold.positiveColdPrepared -ne 2 -or $cold.positiveColdRefused -ne 0 -or $cold.positiveColdInterrupted -ne 0) {throw 'Cold actor stage expanded unrelated models or query readiness'}
+  foreach($wall in $coldIds.objects){if(!$wall.present -or $wall.visualResident -or !$wall.shapeVisualDeferred -or $wall.normalVertexBuffers -ne 0 -or !$wall.hasGeometry -or !$wall.hasFireGeometry){throw 'Cold actor wall absent or visually uploaded'}}
+  if($coldResidency.required -ne 0 -or $coldResidency.sourceEnvelopeScans -ne 2 -or $coldResidency.sourceEnvelopePublished -ne 2 -or $cold.payloadCapacityCharge -gt 67108864 -or $cold.shapeSchedulingCharge -gt 268435456 -or $cold.positiveColdWorkingModels -gt 256){throw 'Cold actor stage exceeded source/capacity scope'}
+  $coldQueryQueued=Query 'queue';$coldQuery=Query 'status';$coldCollision=Query 'collide'
+  if($coldQuery.status -ne 'CapacityExceeded' -or $coldCollision.status -ne 'CapacityExceeded' -or @($coldCollision.contacts).Count -ne 0){throw 'Cold partial stage lent complete Fire readiness'}
+  $null=Send @{cmd='exec';code='streamFixtureActor setPos [700,900,0]'}
+  $released=Wait-State {param($r) $r.leasedPlacements -eq 0 -and $r.positiveColdWorkingModels -eq 0 -and $r.positiveColdFactsBytes -eq 0 -and $r.payloadCapacityCharge -eq 0 -and $r.shapeSchedulingCharge -eq 0} 'cold actor replacement and working charge retirement'
+  $until=[DateTime]::UtcNow.AddSeconds(30)
+  do{Start-Sleep -Milliseconds 500;$releasedIds=Ids}while(@($releasedIds.objects | Where-Object {$_.present}).Count -and [DateTime]::UtcNow -lt $until)
+  if(@($releasedIds.objects | Where-Object {$_.present}).Count -or $released.status -ne 'CapacityExceeded' -or $released.readyRegions -ne 0){throw 'Cold replacement retained unmodified remote walls or readiness'}
+  $finalResidency=Send @{cmd='stream_residency'}
+  if($finalResidency.required -ne 0 -or $finalResidency.parseReservedBytes -ne 0 -or $finalResidency.readyPayloadBytes -ne 0 -or $finalResidency.conversionReservedBytes -ne 0){throw 'Cold actor replacement retained preparation debt or pins'}
+  $result=@{coldPositive=$true;cold=$cold;coldIds=$coldIds;coldResidency=$coldResidency;coldQueryQueued=$coldQueryQueued;coldQuery=$coldQuery;coldCollision=$coldCollision;released=$released;releasedIds=$releasedIds;finalResidency=$finalResidency;performanceMeasured=$false}
  } elseif ($PositiveWarming) {
   $cold=Wait-State {param($r) $r.status -eq 'CapacityExceeded' -and $r.metadataComplete} 'complete capacity-limited inventory'
   $coldIds=Ids

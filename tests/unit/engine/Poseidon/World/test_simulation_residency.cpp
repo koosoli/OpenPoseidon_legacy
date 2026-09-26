@@ -371,6 +371,88 @@ TEST_CASE("Late camera admissions cannot repeatedly roll back an unfinished posi
     REQUIRE(state.leaseCounts.empty());
 }
 
+TEST_CASE("Cold positive source bounds reject a subsequently transformed cached shape", "[streaming-simulation-residency]")
+{
+    Foundation::CaptureMainThread();
+    auto shape = LoadedPositivePlainShape();
+    // Original synthetic audited static IR used only to exercise the owner
+    // bound predicate; parser provenance is covered by source-audit tests.
+    auto source = Asset::Formats::MLODLoader::load(GET_FIXTURE("mlod/p3dm_geometry_mass.p3d"));
+    const auto geometry = std::find_if(source.lodLevels.begin(), source.lodLevels.end(),
+        [](const auto& lod) { return lod.purpose == Model::LodPurpose::Geometry; });
+    REQUIRE(geometry != source.lodLevels.end());
+    auto view = *geometry, fire = *geometry;
+    view.purpose = Model::LodPurpose::ViewGeometry; view.resolution = 6e15f;
+    fire.purpose = Model::LodPurpose::FireGeometry; fire.resolution = 7e15f;
+    source.lodLevels.push_back(view); source.lodLevels.push_back(fire);
+    source.sourceFormat = "ODOL"; source.sourceVersion = 7; source.allowAnimation = false;
+    source.boundingSphere.radius = shape->BoundingSphere();
+    for (auto& lod : source.lodLevels)
+    {
+        for (auto& vertex : lod.mesh.vertices) vertex.flags = Model::VertexFlags{};
+        for (auto& selection : lod.mesh.selections)
+        { selection.vertexWeights.clear(); selection.sourceVertexWeights.clear(); }
+    }
+    auto& audit = source.sourceAudit;
+    audit.producerVersion = 1; audit.sourceRevision = 7;
+    audit.geometryCoverage = Model::SourceGeometryCoverage::DeclaredLodsDecoded;
+    audit.observations = Model::SourceAuditAllObservations;
+    audit.declaredLods = audit.decodedLods = uint32_t(source.lodLevels.size());
+    const auto envelope = BuildStaticSourceEnvelope(source, 42, StaticSourceCoverage::FullCompiledIR);
+    REQUIRE(envelope.State() == StaticSourceEnvelopeState::SourceEvidence);
+    REQUIRE(PositiveColdShapeMatchesSource(*shape, envelope, 42));
+    REQUIRE_FALSE(PositiveColdShapeMatchesSource(*shape, envelope, 43));
+    shape->InternalTransform(Matrix4(MScale, 1000));
+    REQUIRE(shape->BoundingSphere() > *envelope.RadiusForGeneration(42));
+    REQUIRE_FALSE(PositiveColdShapeMatchesSource(*shape, envelope, 42));
+}
+
+TEST_CASE("Cold selection cannot replace legacy ownership before a shape exists", "[streaming-simulation-residency]")
+{
+    SimulationResidencyState::Group group;
+    REQUIRE(group.CanEnlistPositiveCold());
+    SECTION("pending legacy request without a published shape") { group.requestOutstanding = true; }
+    SECTION("interrupted charged handoff without a published shape")
+    { group.charged = true; group.payloadCharge = 4096; group.shapeCharge = 1048576; }
+    SECTION("residual accounting cannot be silently overwritten") { group.payloadCharge = 4096; }
+    SECTION("previously validated legacy source") { group.sourceValidated = true; }
+    SECTION("legacy refusal remains a refusal") { group.status = SimulationResidencyState::ModelState::Unknown; }
+    REQUIRE_FALSE(group.shape);
+    REQUIRE_FALSE(group.CanEnlistPositiveCold());
+    REQUIRE_FALSE(group.positiveCold);
+}
+
+TEST_CASE("Selected cold retirement balances bounded facts and payload charges without certifying groups", "[streaming-simulation-residency]")
+{
+    Foundation::CaptureMainThread();
+    SimulationResidencyState state; state.groups.resize(SimulationMaxModels + 1);
+    for (auto& group : state.groups) group.memberCount = 1;
+    state.referencedModels = state.groups.size(); state.FinishInventory();
+    REQUIRE(state.activeModelCapacityExceeded);
+    auto& selected = state.groups[0];
+    selected.positiveCold = std::make_unique<SimulationResidencyState::PositiveColdFacts>();
+    selected.positiveCold->factCharge = 512;
+    selected.positiveCold->stage = SimulationResidencyState::PositiveColdStage::Held;
+    selected.shape = LoadedPositivePlainShape();
+    selected.charged = true; selected.payloadCharge = 4096; selected.shapeCharge = 1048576;
+    state.positiveColdWork.push_back(0);
+    state.stats.positiveColdFactsBytes = 512;
+    state.stats.payloadCapacityCharge = 4096; state.stats.shapeSchedulingCharge = 1048576;
+    REQUIRE(selected.status == SimulationResidencyState::ModelState::Waiting);
+    SECTION("expired selection releases held working geometry") { state.RetirePositiveCold(0); }
+    SECTION("rejected final owner tail prevents retries in this inventory")
+    { state.RetirePositiveCold(0, true); REQUIRE(selected.positiveColdRefused); }
+    REQUIRE_FALSE(selected.positiveCold); REQUIRE_FALSE(selected.shape);
+    REQUIRE(state.positiveColdWork.empty());
+    REQUIRE(state.positiveColdWork.capacity() == 0);
+    REQUIRE(state.stats.positiveColdFactsBytes == 0);
+    REQUIRE(state.stats.payloadCapacityCharge == 0); REQUIRE(state.stats.shapeSchedulingCharge == 0);
+    REQUIRE(selected.status == SimulationResidencyState::ModelState::Waiting);
+    REQUIRE(state.activeModelCapacityExceeded);
+    state.RetirePositiveCold(0); // Joined cleanup can observe an already retired job.
+    REQUIRE(state.stats.positiveColdFactsBytes == 0);
+}
+
 TEST_CASE("Identical query centre lines contain nested engine float radii without clearance erosion", "[streaming-simulation-residency]")
 {
     const CoveragePoint from{1190,11.5,1200}, to{1210,11.5,1200};

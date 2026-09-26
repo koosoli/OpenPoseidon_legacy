@@ -299,14 +299,28 @@ class ObjectStreamPreparer
     // has renamed sourcePath for the ShapeBank. Copied during this call. An
     // invalid token disables certification only, without changing conversion.
     // Without a token, sourcePath must match inventory identity exactly.
+    struct SourceConversionToken
+    {
+        uint64_t generation = 0;
+        uint64_t diagnosticParseToken = 0;
+    };
+    // Explicit originalSource requests association ONLY, not static eligibility.
+    // Query + Take must refer to the SAME original immutable Ready IR in one
+    // nonyielding owner operation. Controlled bank-name relabeling is allowed;
+    // vertices/properties/audit must not be mutated or replaced afterwards.
+    // Snapshot/sidecar identity, generation and per-parse token must match.
+    // Invalid explicit binding rejects the job; never silently converts it as
+    // ordinary work. Cancellation invalidates publication even after rescue.
     bool SubmitConvert(uint32_t index, std::shared_ptr<Model::Model> model,
                        std::shared_ptr<const Model::ShapeAdapter::AdapterBankTables> tables,
-                       const RadiusCertificate* inventoryToken = nullptr);
+                       const RadiusCertificate* inventoryToken = nullptr,
+                       const SourceEnvelopeSnapshot* originalSource = nullptr);
 
     struct ConvertedShape
     {
         LODShapeWithShadow* shape = nullptr; // ownership transfers to the caller
         std::shared_ptr<Model::Model> model; // the IR it was converted from
+        SourceConversionToken sourceToken; // actual job association; ordinary jobs remain zero
     };
     // Main thread. If Converted, returns the shape + IR and returns the slot to
     // Unknown; else {}. The caller MUST run CreateAdapterProxies + ShapeBank install.

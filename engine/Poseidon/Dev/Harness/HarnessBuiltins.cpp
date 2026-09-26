@@ -299,6 +299,16 @@ void RegisterStreamingProbes(HarnessServer& hs)
             number("leasedPlacements", state.leasedPlacements);
             number("positiveScannedRegions", state.positiveScannedRegions);
             number("positiveLeasedPlacements", state.positiveLeasedPlacements);
+            number("positiveColdRequested", state.positiveColdRequested);
+            number("positiveColdPrepared", state.positiveColdPrepared);
+            number("positiveColdCreated", state.positiveColdCreated);
+            number("positiveColdRefused", state.positiveColdRefused);
+            number("positiveColdInterrupted", state.positiveColdInterrupted);
+            number("positiveColdWorkingModels", state.positiveColdWorkingModels);
+            number("positiveColdFactsBytes", state.positiveColdFactsBytes);
+            number("positiveColdTailCalls", state.positiveColdTailCalls);
+            cJSON_AddNumberToObject(result, "positiveColdLastTailMs", state.positiveColdLastTailMs);
+            cJSON_AddNumberToObject(result, "positiveColdMaxTailMs", state.positiveColdMaxTailMs);
             number("created", state.created);
             number("released", state.released);
             number("queueRefused", state.queueRefused);

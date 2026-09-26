@@ -27,6 +27,10 @@ struct SimulationResidencyStats
     // Positive channel0 selection retains only observed resident Plain objects.
     // Completed scans prove neither complete coverage nor query readiness.
     uint64_t positiveScannedRegions = 0, positiveLeasedPlacements = 0;
+    uint64_t positiveColdRequested = 0, positiveColdPrepared = 0, positiveColdCreated = 0;
+    uint64_t positiveColdRefused = 0, positiveColdInterrupted = 0, positiveColdWorkingModels = 0;
+    uint64_t positiveColdFactsBytes = 0, positiveColdTailCalls = 0;
+    double positiveColdLastTailMs = 0, positiveColdMaxTailMs = 0;
     uint64_t watchedPlacements = 0, liveWatchedPlacements = 0;
     uint64_t queryRegions = 0, readyQueries = 0, pendingQueries = 0, unknownQueries = 0, refusedQueries = 0;
     uint64_t queueRefused = 0, payloadCapacityCharge = 0, shapeSchedulingCharge = 0;

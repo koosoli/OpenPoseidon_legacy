@@ -1217,6 +1217,15 @@ class Landscape : public SerializeClass
     Object* ObjectCreate(int id, const char* shape, const Matrix4& transform, int* x = nullptr, int* z = nullptr,
                          bool avoidRecalculation = false, bool preserveAuthoredElevation = false,
                          bool registerVisual = true);
+  private:
+    Object* ObjectCreateFromShape(int id, LODShapeWithShadow* shape, const char* name,
+                                 const Matrix4& transform, int* x, int* z, bool avoidRecalculation,
+                                 bool preserveAuthoredElevation, bool registerVisual);
+    // Joined owner only. Caller holds its checked fresh source-bound shape and
+    // repeats the live config probe in the same operation. This seam does not
+    // look up a name, certify coverage, or enable visual registration.
+    Object* ObjectCreateModernPlainFromShape(int id, LODShapeWithShadow* shape, const Matrix4& transform);
+  public:
     void ObjectDestroy(int id);
     void ObjectMove(int id, const Matrix4& transform);
     void ObjectTypeChange(int id, const char* shape);

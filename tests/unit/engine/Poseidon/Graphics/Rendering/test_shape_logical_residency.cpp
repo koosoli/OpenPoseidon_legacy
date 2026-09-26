@@ -166,6 +166,30 @@ TEST_CASE("Deferred visual promotion survives unavailable engine and failed regi
     REQUIRE(engine.vertexBufferCalls > 0);
 }
 
+TEST_CASE("Fresh worker shape is destroyed when owner registration throws",
+          "[ShapeBank][streaming-logical-shape]")
+{
+    LogicalLoadEngine engine;
+    RenderingGuard guard(&engine);
+    ShapeBank bank;
+    bank.OptimizeAll();
+    ShapeBank::WorldModelScope world(bank);
+    auto model = BoxModel();
+    auto* prepared = Model::ShapeAdapter::convertToLODShape(*model, false);
+    REQUIRE(prepared != nullptr);
+    Link<LODShapeWithShadow> witness = prepared;
+    engine.throwOnWorldLoad = true;
+    REQUIRE_THROWS_AS(bank.NewFromModel("fresh_throw.p3d", false, true, model, nullptr, prepared), std::runtime_error);
+    REQUIRE(static_cast<LODShapeWithShadow*>(witness) == nullptr);
+    REQUIRE(bank.Find("fresh_throw.p3d", false, true) == nullptr);
+    REQUIRE(engine.liveBuffers == 0);
+    engine.throwOnWorldLoad = false;
+    Ref<LODShapeWithShadow> retry = bank.NewFromModel("fresh_throw.p3d", false, true, BoxModel(), nullptr);
+    REQUIRE(retry.GetRef() != nullptr);
+    REQUIRE(bank.Find("fresh_throw.p3d", false, true) == retry.GetRef());
+    RequireCollisionGeometry(*retry);
+}
+
 TEST_CASE("Only requested logical shapes promote after the bulk boundary",
           "[ShapeBank][streaming-logical-shape]")
 {

@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <Poseidon/IO/ParamFileExt.hpp>
 
 namespace Poseidon
 {
@@ -18,6 +19,11 @@ namespace
 {
 using State = SimulationResidencyState;
 using Status = SimulationResidencyStatus;
+bool PositiveColdEnabled()
+{
+    static const bool enabled = [] { const char* v = std::getenv("WGR_SIMULATION_POSITIVE_COLD"); return v && std::strcmp(v, "1") == 0; }();
+    return enabled;
+}
 CoveragePoint Point(Vector3Par p) { return {p.X(), p.Y(), p.Z()}; }
 bool ValidRegion(const CoveragePoint& a, const CoveragePoint& b, double radius)
 {
@@ -175,8 +181,18 @@ void Landscape::PreserveModernSimulationModelRequests(std::vector<uint32_t>& epo
 {
     if (!_modernSimulation || epochs.size() != _modernSimulation->groups.size()) return;
     for (size_t i = 0; i < epochs.size(); ++i)
-        if (_modernSimulation->groups[i].requestOutstanding && _modernSimulation->groups[i].status == State::ModelState::Waiting)
-            epochs[i] = epoch;
+    {
+        const auto& g = _modernSimulation->groups[i];
+        if (g.positiveCold)
+        {
+            if (!g.requestOutstanding || !_modernObjectPreparer) continue;
+            const auto current = _modernObjectPreparer->QueryStaticSourceEnvelope(uint32_t(i));
+            const auto& owned = g.positiveCold->source;
+            if (current.generation == owned.generation && current.diagnosticParseToken == owned.diagnosticParseToken &&
+                current.modelIdentity == owned.modelIdentity) epochs[i] = epoch;
+        }
+        else if (g.requestOutstanding && g.status == State::ModelState::Waiting) epochs[i] = epoch;
+    }
 }
 Status Landscape::QueueModernSimulationRegion(Object& actor, Vector3Par from, Vector3Par to, double radius, bool automatic)
 { return QueueModernSimulationRegionForChannel(actor, from, to, radius, automatic, 0); }
@@ -335,6 +351,7 @@ SimulationResidencyStats Landscape::SnapshotModernSimulationResidency() const
     out = s.stats; out.status = ObservedStatus(s); out.regions = out.queryRegions = 0; out.coverageGeneration = s.generation;
     out.metadataComplete = s.inventoryComplete; out.referencedModels = s.referencedModels;
     out.activeModels = 0; out.sparseLeaseRecords = s.leaseCounts.size();
+    out.positiveColdWorkingModels = s.positiveColdWork.size();
     out.preparedModels = out.unknownModels = out.leasedPlacements = 0;
     out.watchedPlacements = s.watches.size(); out.liveWatchedPlacements = 0;
     for (const auto& [index, watch] : s.watches) if (static_cast<Object*>(watch.object)) ++out.liveWatchedPlacements;
@@ -449,12 +466,14 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
     }
     // At most ONE bank-table/handoff tail per pump. No synchronous fallback:
     // packed/failed/unsupported models are explicit Unknown, never omitted.
+    bool ownerModelHandoffUsed = false;
     if (s.inventoryComplete && !s.inventoryInvalid && !s.activeModelCapacityExceeded && _modernObjectPreparer && elapsed() < 2 && !s.groups.empty())
     {
         for (size_t scan = 0; scan < s.groups.size(); ++scan)
         {
             const uint32_t i = uint32_t(s.modelCursor++ % s.groups.size());
             auto& g = s.groups[i];
+            if (g.positiveCold) continue; // Positive jobs never enter the full-coverage producer.
             if (g.status != State::ModelState::Waiting) continue;
             if (!g.validRows) { g.status = State::ModelState::Unknown; continue; }
             const auto state = _modernObjectPreparer->Query(i);
@@ -469,6 +488,7 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
             { auto result = _modernObjectPreparer->TakeConverted(i); converted = result.shape; model = std::move(result.model); }
             else model = _modernObjectPreparer->Take(i);
             if (!model) { delete converted; break; }
+            ownerModelHandoffUsed = true;
             // The simulation now owns this handoff even when the original parse
             // was requested by the camera. Preserve only actual owned work.
             g.requestOutstanding = true;
@@ -503,7 +523,9 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
                 }
                 // NewFromModel owns the converted raw pointer on entry, even a cache hit.
                 auto* transferred = converted; converted = nullptr;
+                const bool hadShape = bool(g.shape);
                 g.shape = Shapes.NewFromModel(_modernObjectModels[i], false, true, std::move(model), nullptr, transferred);
+                if (!hadShape && g.shape) ++s.legacyShapeSlots;
                 if (!g.shape || !SimulationShapeAdmissible(*g.shape)) g.status = State::ModelState::Unknown;
                 else
                 {
@@ -536,7 +558,7 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
     for (auto& g : s.groups)
     {
         if (elapsed() >= 2) break;
-        if (g.status != State::ModelState::Ready || !g.shape || g.shape->QueryPolicyRevision() == g.revision) continue;
+        if (g.positiveCold || g.status != State::ModelState::Ready || !g.shape || g.shape->QueryPolicyRevision() == g.revision) continue;
         if (!SimulationShapeAdmissible(*g.shape)) g.status = State::ModelState::Unknown;
         else
         {
@@ -560,6 +582,171 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
                 s.placementPadding = std::max({s.placementPadding,
                     upper->max[axis] - g.origins.max[axis], g.origins.min[axis] - lower->min[axis]});
         }
+    }
+    const bool coldEnabled = PositiveColdEnabled();
+    const auto enlistCold = [&](uint32_t modelIndex, uint32_t placementIndex)
+    {
+        auto& g = s.groups[modelIndex];
+        if (!coldEnabled || !g.CanEnlistPositiveCold() || !_modernObjectPreparer ||
+            s.legacyShapeSlots + s.positiveColdWork.size() >= SimulationMaxModels) return;
+        const char* path = _modernObjectModels[modelIndex];
+        size_t pathBytes = 0;
+        while (pathBytes < 128 && path[pathBytes]) ++pathBytes;
+        if (!pathBytes || pathBytes >= 128) { g.positiveColdRefused = true; ++s.stats.positiveColdRefused; return; }
+        const uint64_t maximumFacts = sizeof(State::PositiveColdFacts) + 128 + SimulationMaxModels * sizeof(uint32_t);
+        if (s.stats.metadataRecordBytes > SimulationMaxMetadataRecordBytes ||
+            s.stats.positiveColdFactsBytes > SimulationMaxMetadataRecordBytes - s.stats.metadataRecordBytes ||
+            maximumFacts > SimulationMaxMetadataRecordBytes - s.stats.metadataRecordBytes - s.stats.positiveColdFactsBytes)
+        { ++s.stats.positiveColdRefused; return; }
+        if (_modernObjectPreparer->Query(modelIndex) != ObjectStreamPreparer::State::Unknown ||
+            Shapes.Find(_modernObjectModels[modelIndex], false, true)) return; // Never steal camera work/cache aliases.
+        try
+        {
+            auto facts = std::make_unique<State::PositiveColdFacts>();
+            s.positiveColdWork.reserve(SimulationMaxModels);
+            const auto result = _modernObjectPreparer->RequestWithStaticSourceEnvelope(modelIndex);
+            if (result != ObjectStreamPreparer::SourceEnvelopeRequest::Requested)
+            {
+                if (s.positiveColdWork.empty()) std::vector<uint32_t>().swap(s.positiveColdWork);
+                return;
+            }
+            facts->source = _modernObjectPreparer->QueryStaticSourceEnvelope(modelIndex);
+            facts->selectedPlacement = placementIndex;
+            facts->factCharge = sizeof(State::PositiveColdFacts) + facts->source.modelIdentity.capacity() + 1;
+            if (!facts->source.generation || !facts->source.diagnosticParseToken ||
+                facts->source.modelIdentity != static_cast<const char*>(_modernObjectModels[modelIndex]) ||
+                facts->source.modelIdentity.size() >= 128 ||
+                facts->factCharge + s.positiveColdWork.capacity() * sizeof(uint32_t) >
+                    SimulationMaxMetadataRecordBytes - s.stats.metadataRecordBytes - s.stats.positiveColdFactsBytes)
+            { ++s.stats.positiveColdRefused; facts->retiring = true; } // Drain any successfully enqueued job.
+            s.stats.positiveColdFactsBytes += facts->factCharge;
+            g.positiveCold = std::move(facts); g.requestOutstanding = !g.positiveCold->retiring;
+            s.positiveColdWork.push_back(modelIndex); ++s.stats.positiveColdRequested;
+        }
+        catch (...)
+        {
+            ++s.stats.positiveColdRefused;
+            if (s.positiveColdWork.empty()) std::vector<uint32_t>().swap(s.positiveColdWork);
+        }
+    };
+    // One selected job per pump, never a whole-model-table sweep. A lost actor
+    // withdraws intent; already-running work is drained without bank/adaptation.
+    if (coldEnabled && !ownerModelHandoffUsed && !s.positiveColdWork.empty() && elapsed() < 2)
+    {
+        const uint32_t index = s.positiveColdWork[s.positiveColdCursor++ % s.positiveColdWork.size()];
+        auto& g = s.groups[index]; auto& facts = *g.positiveCold;
+        const auto& selected = _modernObjectPlacements[facts.selectedPlacement];
+        bool desired = false;
+        for (const auto& [key, region] : s.regions)
+        {
+            if (key.channel != 0 || !static_cast<Object*>(region.actor)) continue;
+            const double pad = region.radius + _landGrid;
+            if (selected.rows[9] >= std::min(region.from[0], region.to[0]) - pad &&
+                selected.rows[9] <= std::max(region.from[0], region.to[0]) + pad &&
+                selected.rows[11] >= std::min(region.from[2], region.to[2]) - pad &&
+                selected.rows[11] <= std::max(region.from[2], region.to[2]) + pad) { desired = true; break; }
+        }
+        if (!desired && !facts.residentEntries) { facts.retiring = true; g.requestOutstanding = false; }
+        const auto state = _modernObjectPreparer->Query(index);
+        const auto current = _modernObjectPreparer->QueryStaticSourceEnvelope(index);
+        const bool same = current.generation == facts.source.generation &&
+            current.diagnosticParseToken == facts.source.diagnosticParseToken && current.modelIdentity == facts.source.modelIdentity;
+        const auto retire = [&](bool refused, bool interrupted)
+        {
+            if (refused) ++s.stats.positiveColdRefused;
+            if (interrupted) ++s.stats.positiveColdInterrupted;
+            s.RetirePositiveCold(index, refused);
+        };
+        if (facts.stage == State::PositiveColdStage::Held)
+        {
+            if (current.generation != facts.source.generation || current.modelIdentity != facts.source.modelIdentity)
+                facts.retiring = true;
+            if (facts.retiring && !facts.residentEntries) retire(false, false);
+        }
+        else if (!same || state == ObjectStreamPreparer::State::Failed || state == ObjectStreamPreparer::State::NotLoose)
+            retire(state == ObjectStreamPreparer::State::Failed || state == ObjectStreamPreparer::State::NotLoose, !same);
+        else if (facts.stage == State::PositiveColdStage::Parse && state == ObjectStreamPreparer::State::Ready)
+        {
+            // Pair current source facts and THIS Take in one owner operation.
+            auto model = _modernObjectPreparer->Take(index);
+            if (!model) retire(false, true);
+            else if (facts.retiring) retire(false, false);
+            else
+            {
+                const uint64_t bytes = Model::ResidentPayloadBytes(*model);
+                const uint64_t charge = bytes <= SimulationMaxModelPayload ? bytes * 4 + 1024 * 1024 : 0;
+                // Paired immutable SourceEvidence already validates all source
+                // vertices/selections on the worker. Keep the stricter adapter
+                // LOD cap here without repeating the full scan on the owner.
+                if (!current.attempted || bytes > SimulationMaxModelPayload || model->lodLevels.size() > MAX_LOD_LEVELS ||
+                    current.envelope.State() != StaticSourceEnvelopeState::SourceEvidence ||
+                    Streaming::ProbeStaticPlainRouteNow(current.plainSource, current.generation, current.modelIdentity, Pars) !=
+                        StaticPlainRouteObservation::EmptyClassNow ||
+                    bytes > SimulationMaxPayloadCharge - s.stats.payloadCapacityCharge ||
+                    charge > SimulationMaxShapeCharge - s.stats.shapeSchedulingCharge)
+                    retire(true, false);
+                else
+                {
+                    facts.source = current;
+                    g.charged = true; g.payloadCharge = bytes; g.shapeCharge = charge;
+                    s.stats.payloadCapacityCharge += bytes; s.stats.shapeSchedulingCharge += charge;
+                    try
+                    {
+                        ShapeBank::CpuOnlyLoadScope cpuOnly;
+                        model->sourcePath = facts.source.modelIdentity;
+                        for (char& c : model->sourcePath) if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
+                        auto tables = std::make_shared<Model::ShapeAdapter::AdapterBankTables>();
+                        Model::ShapeAdapter::BuildAdapterBankTables(*model, *tables);
+                        const auto radius = _modernObjectPreparer->QueryRadius(index);
+                        if (_modernObjectPreparer->SubmitConvert(index, std::move(model), std::move(tables), &radius, &facts.source))
+                            facts.stage = State::PositiveColdStage::Convert;
+                        else retire(false, true);
+                    }
+                    catch (...) { retire(true, false); }
+                }
+            }
+        }
+        else if (facts.stage == State::PositiveColdStage::Convert && state == ObjectStreamPreparer::State::Converted)
+        {
+            auto converted = _modernObjectPreparer->TakeConverted(index);
+            std::unique_ptr<LODShapeWithShadow> guarded(converted.shape);
+            if (!converted.model || !guarded || converted.sourceToken.generation != facts.source.generation ||
+                converted.sourceToken.diagnosticParseToken != facts.source.diagnosticParseToken)
+                retire(false, true);
+            else if (facts.retiring) retire(false, false);
+            else if (Streaming::ProbeStaticPlainRouteNow(facts.source.plainSource, facts.source.generation,
+                facts.source.modelIdentity, Pars) != StaticPlainRouteObservation::EmptyClassNow ||
+                Shapes.Find(_modernObjectModels[index], false, true)) retire(true, false);
+            else
+            {
+                const auto tailStart = std::chrono::steady_clock::now();
+                try
+                {
+                    ShapeBank::CpuOnlyLoadScope cpuOnly;
+                    ShapeBank::WorldModelScope worldModel(Shapes);
+                    ShapeBank::LoadTiming timing;
+                    g.shape = Shapes.NewFromModel(_modernObjectModels[index], false, true,
+                        std::move(converted.model), &timing, guarded.release());
+                    if (!g.shape || timing.cacheHit || !timing.preparsed || !timing.canonical ||
+                        !PositiveColdShapeMatchesSource(*g.shape, facts.source.envelope, facts.source.generation)) retire(true, false);
+                    else
+                    {
+                        facts.stage = State::PositiveColdStage::Held; facts.shapeRevision = g.shape->QueryPolicyRevision();
+                        g.requestOutstanding = false; ++s.stats.positiveColdPrepared;
+                        if (s.positiveAdmissionGeneration == std::numeric_limits<uint64_t>::max()) s.inventoryInvalid = true;
+                        else ++s.positiveAdmissionGeneration;
+                    }
+                }
+                catch (...) { retire(true, false); }
+                s.stats.positiveColdLastTailMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tailStart).count();
+                s.stats.positiveColdMaxTailMs = std::max(s.stats.positiveColdMaxTailMs, s.stats.positiveColdLastTailMs);
+                ++s.stats.positiveColdTailCalls;
+            }
+        }
+        else if (state == ObjectStreamPreparer::State::Unknown ||
+            (facts.stage == State::PositiveColdStage::Parse && state != ObjectStreamPreparer::State::Queued && state != ObjectStreamPreparer::State::Parsing) ||
+            (facts.stage == State::PositiveColdStage::Convert && state != ObjectStreamPreparer::State::Converting))
+            retire(false, true);
     }
     const bool completeCoverage = ObservedStatus(s) == Status::Ready;
     // Partial positive warming reuses actor channel0 and the SAME sparse leases.
@@ -611,7 +798,57 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
                 const uint32_t index = cell[r.offset++]; ++s.stats.lastPumpVisits;
                 auto& p = _modernObjectPlacements[index];
                 Object* object = static_cast<Object*>(p.resident);
-                if (!object || r.pendingSet.contains(index)) continue;
+                if (r.pendingSet.contains(index)) continue;
+                auto& group = s.groups[p.modelIndex];
+                if (!object && coldEnabled)
+                {
+                    auto* held = group.positiveCold.get();
+                    if (!held) enlistCold(p.modelIndex, index);
+                    else if (held->stage == State::PositiveColdStage::Held && !held->retiring && group.shape)
+                    {
+                        const auto inventory = _modernObjectPreparer->QueryStaticSourceEnvelope(p.modelIndex);
+                        if (inventory.generation != held->source.generation || inventory.modelIdentity != held->source.modelIdentity ||
+                            held->shapeRevision != group.shape->QueryPolicyRevision() ||
+                            !PositiveColdShapeMatchesSource(*group.shape, held->source.envelope, held->source.generation) ||
+                            Streaming::ProbeStaticPlainRouteNow(held->source.plainSource, held->source.generation,
+                                held->source.modelIdentity, Pars) != StaticPlainRouteObservation::EmptyClassNow)
+                            held->retiring = true;
+                        else if (s.entries.size() < SimulationMaxLeasedPlacements &&
+                            r.active.size() + r.pendingNew < SimulationMaxRegionLeases && s.CanAcquireLease(index))
+                        {
+                            const auto frame = RepairWorldObjectPlacementFrame(SimulationPlacementFrame(p.rows), false, false,
+                                (group.shape->GetOrHints() & ClipLandKeep) != 0);
+                            const auto candidate = BuildEngineBroadphaseEnvelope(Point(frame.Position()), frame.Scale(), group.shape->BoundingSphere());
+                            if (!candidate || !Overlap(*candidate, r)) continue; // No speculative outside-region object.
+                            try
+                            {
+                                object = ObjectCreateModernPlainFromShape(p.id, group.shape.GetRef(), SimulationPlacementFrame(p.rows));
+                            }
+                            catch (...) { object = nullptr; }
+                            if (object)
+                            {
+                                p.resident = object; _modernLogicalOnlyObjects.insert(p.id);
+                                ++s.stats.created; ++s.stats.positiveColdCreated;
+                                // Even a refused final observation must retire the
+                                // newly created logical object through joined cleanup.
+                                if (!s.entries.contains(index))
+                                {
+                                    s.cleanupQueue.push_back(index);
+                                    auto& created = s.entries[index]; created.object = object; created.shape = object->GetShape();
+                                    created.frame = SimulationFrameSample(object->Transform()); created.radius = object->GetRadius();
+                                    created.positiveColdModel = p.modelIndex; ++held->residentEntries;
+                                }
+                                ObserveModernSimulationPlacement(index, object);
+                                if (_geoAccumEnabled) AccumulateGeographyForObject(object);
+                                const size_t ci = size_t(std::floor(p.rows[11] * _invLandGrid)) * _landRange +
+                                    size_t(std::floor(p.rows[9] * _invLandGrid));
+                                if (_modernObjectCellDesired[ci])
+                                { _modernObjectCellActive[ci] = 0; _modernObjectCellCursor[ci] = 0; _modernObjectResidencyPending = true; }
+                            }
+                        }
+                    }
+                }
+                if (!object) continue;
                 auto observed = State::ObservePositiveResident(*object, p.id, p.rows);
                 if (!observed) continue;
                 const auto box = BuildEngineBroadphaseEnvelope(Point(object->Position()), object->Scale(), object->GetShape()->BoundingSphere());
@@ -621,7 +858,15 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
                     (!r.activeSet.contains(index) && !s.CanAcquireLease(index)) ||
                     (!s.entries.contains(index) && s.entries.size() >= SimulationMaxLeasedPlacements))
                 { r.status = Status::CapacityExceeded; break; }
-                if (!s.entries.contains(index)) s.cleanupQueue.push_back(index);
+                uint32_t coldModel = std::numeric_limits<uint32_t>::max();
+                if (group.positiveCold && group.shape.GetRef() == object->GetShape()) coldModel = p.modelIndex;
+                if (!s.entries.contains(index))
+                {
+                    s.cleanupQueue.push_back(index);
+                    if (coldModel != std::numeric_limits<uint32_t>::max()) ++group.positiveCold->residentEntries;
+                }
+                else coldModel = s.entries[index].positiveColdModel;
+                observed->positiveColdModel = coldModel;
                 s.entries[index] = std::move(*observed);
                 if (!r.activeSet.contains(index))
                 {
@@ -759,6 +1004,9 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
             _objectIds.erase(p.id); _modernLogicalOnlyObjects.erase(p.id); _modernObjectLightOwners.erase(p.id);
             ++s.stats.released; ++retired;
         }
+        const auto coldModel = found->second.positiveColdModel;
+        if (coldModel < s.groups.size() && s.groups[coldModel].positiveCold && s.groups[coldModel].positiveCold->residentEntries)
+            --s.groups[coldModel].positiveCold->residentEntries;
         s.entries.erase(found);
     }
     const size_t watchVisits = std::min(size_t(128), s.watchCleanupQueue.size());

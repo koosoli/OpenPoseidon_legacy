@@ -2911,6 +2911,27 @@ Object* Landscape::ObjectCreate(int id, const char* name, const Matrix4& transfo
     const ShapeBank::CpuOnlyLoadScope cpuOnly(!registerVisual);
     // create object based on Class hint in LOD 0
     Ref<LODShapeWithShadow> shape = Shapes.New(name, false, true);
+    return ObjectCreateFromShape(id, shape, name, transform, x, z, avoidRecalculation,
+                                 preserveAuthoredElevation, registerVisual);
+}
+
+Object* Landscape::ObjectCreateModernPlainFromShape(int id, LODShapeWithShadow* shape, const Matrix4& transform)
+{
+    if (!Foundation::IsMainThread() || !_modernObjectStreaming || id < 0 || !shape ||
+        static_cast<const char*>(shape->GetPropertyClass())[0] != '\0' ||
+        !Streaming::ValidSimulationFrame(transform) || !Streaming::SimulationShapeAdmissible(*shape))
+        return nullptr;
+    const auto existing = _objectIds.find(id);
+    if (existing != _objectIds.end() && static_cast<Object*>(existing->second)) return nullptr;
+    Ref<LODShapeWithShadow> keepShape = shape;
+    return ObjectCreateFromShape(id, keepShape, shape->Name(), transform, nullptr, nullptr, false, true, false);
+}
+
+Object* Landscape::ObjectCreateFromShape(int id, LODShapeWithShadow* shape, const char* name,
+                                       const Matrix4& transform, int* x, int* z, bool avoidRecalculation,
+                                       bool preserveAuthoredElevation, bool registerVisual)
+{
+    const ShapeBank::CpuOnlyLoadScope cpuOnly(!registerVisual);
     Object* obj = NewObject(shape, id);
     obj->SetVisualResident(registerVisual);
 

@@ -5,12 +5,15 @@
 #include <Poseidon/World/Terrain/SimulationResidencyPolicy.hpp>
 #include <Poseidon/World/Terrain/SimulationDemand.hpp>
 #include <Poseidon/World/Terrain/SimulationResidencyCapacity.hpp>
+#include <Poseidon/World/Terrain/ObjectStreamPrepare.hpp>
 
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 #include <deque>
 #include <optional>
+#include <algorithm>
+#include <memory>
 
 namespace Poseidon::Streaming
 {
@@ -31,6 +34,16 @@ struct SimulationResidencyState
         { return std::hash<const Object*>{}(key.actor) ^ (size_t(key.channel) * size_t(0x9e3779b9)); }
     };
     enum class ModelState { Waiting, Ready, Unknown, CapacityExceeded };
+    enum class PositiveColdStage { Parse, Convert, Held };
+    struct PositiveColdFacts
+    {
+        ObjectStreamPreparer::SourceEnvelopeSnapshot source;
+        PositiveColdStage stage = PositiveColdStage::Parse;
+        uint32_t selectedPlacement = 0;
+        uint64_t shapeRevision = 0, factCharge = 0;
+        uint32_t residentEntries = 0;
+        bool retiring = false;
+    };
     // Complete authored inventory metadata, no duplicate placement indices.
     // Group's full fixed record (including empty active fields) is byte charged.
     struct ModelMetadataRecord
@@ -48,6 +61,16 @@ struct SimulationResidencyState
         float radius = 0;
         SimulationFactoryRoute route = SimulationFactoryRoute::Unsupported;
         ModelState status = ModelState::Waiting;
+        std::unique_ptr<PositiveColdFacts> positiveCold;
+        bool positiveColdRefused = false;
+        bool CanEnlistPositiveCold() const
+        {
+            // A legacy handoff can own charges/request intent before a shape
+            // exists. Cold admission must never replace that accounting.
+            return status == ModelState::Waiting && !positiveCold && !positiveColdRefused &&
+                !shape && !charged && !requestOutstanding && !sourceValidated &&
+                payloadCharge == 0 && shapeCharge == 0;
+        }
     };
     struct Entry
     {
@@ -57,6 +80,7 @@ struct SimulationResidencyState
         float radius = 0;
         uint64_t positiveRevision = 0;
         int positiveId = -1;
+        uint32_t positiveColdModel = std::numeric_limits<uint32_t>::max();
         bool MatchesPositiveResident(const Object& live) const
         {
             auto* current = live.GetShape();
@@ -153,6 +177,8 @@ struct SimulationResidencyState
     size_t inventoryCursor = 0, modelCursor = 0, actorCursor = 0, regionCursor = 0;
     uint64_t tick = 0, generation = 1;
     uint64_t positiveAdmissionGeneration = 1;
+    std::vector<uint32_t> positiveColdWork;
+    size_t positiveColdCursor = 0, legacyShapeSlots = 0;
     bool inventoryComplete = false, inventoryInvalid = false;
     uint64_t referencedModels = 0;
     bool activeModelCapacityExceeded = false;
@@ -165,6 +191,25 @@ struct SimulationResidencyState
         for (auto& g : groups) if (!g.memberCount) g.status = ModelState::Ready;
         if (referencedModels > SimulationMaxModels)
         { activeModelCapacityExceeded = true; ++stats.activeModelRefusals; }
+    }
+
+    void RetirePositiveCold(uint32_t index, bool refused = false)
+    {
+        auto& g = groups[index];
+        if (!g.positiveCold) return;
+        stats.positiveColdFactsBytes -= g.positiveCold->factCharge;
+        if (g.charged)
+        {
+            stats.payloadCapacityCharge -= g.payloadCharge;
+            stats.shapeSchedulingCharge -= g.shapeCharge;
+        }
+        g.shape = nullptr; g.positiveCold.reset(); g.positiveColdRefused = refused;
+        g.requestOutstanding = g.charged = g.sourceValidated = false;
+        g.payloadCharge = g.shapeCharge = g.revision = 0;
+        auto found = std::find(positiveColdWork.begin(), positiveColdWork.end(), index);
+        if (found != positiveColdWork.end()) positiveColdWork.erase(found);
+        if (positiveColdWork.empty())
+        { std::vector<uint32_t>().swap(positiveColdWork); positiveColdCursor = 0; }
     }
 
     bool HasLease(uint32_t index) const

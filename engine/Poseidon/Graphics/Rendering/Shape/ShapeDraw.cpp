@@ -901,6 +901,9 @@ LODShapeWithShadow* ShapeBank::NewFromModel(const char* name, bool reversed, boo
     POSEIDON_MAIN_THREAD_ONLY("ShapeBank::NewFromModel -- the model bank, AssetCache and vertex-buffer "
                               "creation are main-thread only; workers produce IR (ModelCache::LoadLooseFile) "
                               "and hand it here");
+    // Own transferred worker geometry immediately, including cache-hit and
+    // throwing tail/registration paths. Cache links are weak and null on delete.
+    std::unique_ptr<LODShapeWithShadow> ownedShape(preadapted);
     char lowName[128];
     char cacheKey[160];
     BuildShapeCacheKey(name, reversed, shadow, lowName, cacheKey);
@@ -919,7 +922,7 @@ LODShapeWithShadow* ShapeBank::NewFromModel(const char* name, bool reversed, boo
     {
         if (timing)
             timing->cacheHit = true;
-        delete preadapted; // someone else installed it first; ours is redundant
+        ownedShape.reset(); // someone else installed it first; ours is redundant
         EnsureVisualRendering(existing);
         return existing;
     }
@@ -945,7 +948,7 @@ LODShapeWithShadow* ShapeBank::NewFromModel(const char* name, bool reversed, boo
                      "reference is dropped (empty shape). Nesting depth {}.",
                      lowName, GShapeLoadsInFlight.size());
         }
-        delete preadapted; // a cyclic-proxy load cannot adopt a shape from outside
+        ownedShape.reset(); // a cyclic-proxy load cannot adopt a shape from outside
         return new LODShapeWithShadow();
     }
     const ShapeLoadInFlightScope inFlight(cacheKey);
@@ -1016,6 +1019,7 @@ LODShapeWithShadow* ShapeBank::NewFromModel(const char* name, bool reversed, boo
             Poseidon::Model::ShapeAdapter::AdapterBankTables tables;
             Poseidon::Model::ShapeAdapter::BuildAdapterBankTables(*model, tables);
             shape = Poseidon::Model::ShapeAdapter::convertToLODShape(*model, reversed, &tables);
+            ownedShape.reset(shape);
             if (timing)
                 timing->canonical = true;
         }
@@ -1024,12 +1028,16 @@ LODShapeWithShadow* ShapeBank::NewFromModel(const char* name, bool reversed, boo
             LOG_INFO(Graphics, "Shape loader: legacy path for {} (canonical format={})", lowName,
                      model ? model->sourceFormat : "<unavailable>");
             shape = new LODShapeWithShadow(lowName, reversed);
+            ownedShape.reset(shape);
         }
         if (timing)
             timing->adaptMs = ::Poseidon::Dev::Perf::ElapsedMs(adaptStart);
     }
     if (!shape)
-        shape = new LODShapeWithShadow();
+    {
+        ownedShape = std::make_unique<LODShapeWithShadow>();
+        shape = ownedShape.get();
+    }
 
     shape->SetRemarks(shape->Remarks() | remNeeded);
     if (!shadow)
@@ -1068,7 +1076,7 @@ LODShapeWithShadow* ShapeBank::NewFromModel(const char* name, bool reversed, boo
     ::Poseidon::Dev::Perf::EmitTraceEventAssetNum(Poseidon::Foundation::LogCategory::Graphics, "ShapeBank::New",
                                                   _perfShapeLoadStart, static_cast<const char*>(lowName), "lods",
                                                   shape->NLevels());
-    return shape;
+    return ownedShape.release();
 }
 
 void Shape::ConvertToVBuffer(VBType type)
