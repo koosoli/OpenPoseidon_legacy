@@ -2,6 +2,7 @@
 // thread-safety boundary; this file is the mechanism only.
 
 #include <Poseidon/World/Terrain/ObjectStreamPrepare.hpp>
+#include <Poseidon/World/Terrain/ObjectStreamTextureNames.hpp>
 #include <Poseidon/World/Model/ShapeAdapter.hpp>
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
 
@@ -72,8 +73,9 @@ bool PrepareNativeDds(const std::string& key, uint64_t generation, size_t& bytes
 // the mounted archive is safe here: EnfusionMount returns an owned request, and the parser plus
 // inheritance fold are pure. This deliberately does not touch the texture bank or GPU state.
 bool ReadNativeEmat(const Asset::Formats::Enfusion::EnfusionMount& mount, const std::string& path,
-                    Asset::Material::EmatMaterial& out)
+                    Asset::Material::EmatMaterial& out, bool& complete)
 {
+    complete = false;
     const auto request = mount.MakeReadRequest(path);
     if (!request)
         return false;
@@ -85,7 +87,7 @@ bool ReadNativeEmat(const Asset::Formats::Enfusion::EnfusionMount& mount, const 
     out = Mat::ParseEmat(std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size()));
     if (!out.valid())
         return false;
-    Mat::ResolveEmatInheritance(out,
+    complete = Mat::ResolveEmatInheritance(out,
                                 [&mount](const std::string& parentPath, std::string& text)
                                 {
                                     const auto parent = mount.MakeReadRequest(parentPath);
@@ -523,90 +525,28 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
             {
                 render::PreparedTextureStore& store = render::PreparedTextureStore::Instance();
                 const uint64_t textureGeneration = store.Generation();
-                std::vector<std::string> names;
-                auto noteName = [&](const std::string& raw)
-                {
-                    if (raw.empty())
-                        return;
-                    // Same extension gate as the main thread's block path (BcFormatFor): only
-                    // .paa/.pac can carry a DXT chain this reader understands.
-                    const size_t dot = raw.find_last_of('.');
-                    if (dot == std::string::npos)
-                        return;
-                    std::string ext = raw.substr(dot);
-                    for (char& c : ext)
-                        if (c >= 'A' && c <= 'Z')
-                            c = static_cast<char>(c - 'A' + 'a');
-                    const bool nativeDds = nativeArchiveModel && render::PreparedTextureStore::NativeDdsEnabled() &&
-                                           (ext == ".edds" || ext == ".dds");
-                    if (ext != ".paa" && ext != ".pac" && !nativeDds)
-                        return;
-                    std::string key = render::PreparedTextureStore::Key(raw);
-                    if (std::find(names.begin(), names.end(), key) == names.end())
-                        names.push_back(std::move(key));
-                };
-                // Materials the IR names by PATH (.emat) get their stage textures included.
-                // Measured before this existed (asset-obs-vehicle30-r2): 1,797 of the store's
-                // takes MISSED because registration-time stage textures (normal/detail maps)
-                // are not in the IR's texturePath fields -- two thirds of the uploads paid the
-                // main-thread file read anyway. The worker parses the .emat itself, but ONLY
-                // as a loose file (ReadEmatFileLoose: plain ifstream + the deploy roots); the
-                // resolver route is main-thread-only, and a bank-resident material simply
-                // misses here and behaves exactly as before. RVMATs are not attempted: their
-                // parser runs through ParamFile + QIFStreamB, neither of which a worker may
-                // touch. Every collected value still passes noteName's .paa/.pac gate, so an
-                // Enfusion-native reference that never became a PAA costs nothing.
-                auto noteEmatTextures = [&](const std::string& materialPath)
-                {
-                    if (nativeArchiveModel)
-                    {
-                        // Unlike the loose .emat path below, this reads the source material
-                        // from the same mounted pak as the native XOB. Raw stage names feed
-                        // normal/mask slots; the exact enfa wrapper also feeds leaf coverage
-                        // without making the main thread compose it during registration.
-                        if (!Asset::Material::IsEmatMaterialPath(materialPath))
-                            return;
-                        Asset::Material::EmatMaterial emat;
-                        const auto& mount = Asset::Formats::Enfusion::EnfusionMount::Instance();
-                        if (!ReadNativeEmat(mount, materialPath, emat))
-                            return;
-                        for (const Asset::Material::EmatProperty& property : emat.properties)
-                            for (const Asset::Material::EmatValue& value : property.values)
-                                if (value.isTexture())
-                                    noteName(value.text);
-
-                        // The native converter names a cutout's visible texture as this
-                        // composite. Only add the un-tinted own-colour form here; shared
-                        // layer tiles have a separate tint/weight rule and remain on their
-                        // established path until that exact composition is prepared.
-                        std::string colour = emat.TextureOf("BCRMap");
-                        if (colour.empty())
-                            colour = emat.TextureOf("AlbedoMap");
-                        const std::string opacity = emat.TextureOf("OpacityMap");
-                        if (!colour.empty() && !opacity.empty())
-                            noteName("enfa|" + opacity + "|" + colour);
-                        return;
-                    }
-                    if (materialPath.empty() || !Asset::Material::IsEmatMaterialPath(materialPath))
-                        return;
-                    Asset::Material::EmatMaterial emat;
-                    if (!Asset::Material::ReadEmatFileLoose(materialPath, emat))
-                        return;
-                    for (const Asset::Material::EmatProperty& property : emat.properties)
-                        for (const Asset::Material::EmatValue& value : property.values)
-                            if (value.isTexture())
-                                noteName(value.text);
-                };
-                for (const Model::LODLevel& level : model->lodLevels)
-                {
-                    for (const Model::Material& material : level.mesh.materials)
-                    {
-                        noteName(material.texturePath);
-                        for (const Model::MaterialStage& stage : material.embeddedStages)
-                            noteName(stage.texturePath);
-                        noteEmatTextures(material.materialPath);
-                    }
-                }
+                const auto& mount = Asset::Formats::Enfusion::EnfusionMount::Instance();
+                const auto names = CollectObjectStreamTextureNames(*model, nativeArchiveModel,
+                    render::PreparedTextureStore::NativeDdsEnabled(),
+                    [&](const std::string& path) {
+                        // Loose files may be case-sensitive. Native archive entries
+                        // have a canonical identity, without any filesystem fallback.
+                        return nativeArchiveModel ? mount.CanonicalPath(path).value_or(std::string{}) : path;
+                    },
+                    [&](const std::string& path, Asset::Material::EmatMaterial& material, bool& complete) {
+                        if (nativeArchiveModel) return ReadNativeEmat(mount, path, material, complete);
+                        // Preserve the loose reader's route and partial-inheritance
+                        // fallback, while exposing whether a retry can still add maps.
+                        std::string text;
+                        if (!Asset::Material::ReadEmatTextLoose(path, text)) return false;
+                        material = Asset::Material::ParseEmat(text);
+                        if (!material.valid()) return false;
+                        complete = Asset::Material::ResolveEmatInheritance(material,
+                            [](const std::string& parent, std::string& parentText) {
+                                return Asset::Material::ReadEmatTextLoose(parent, parentText);
+                            });
+                        return true;
+                    });
                 for (const std::string& key : names)
                 {
                     {
