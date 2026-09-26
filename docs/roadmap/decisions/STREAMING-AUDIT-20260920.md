@@ -1613,3 +1613,39 @@ Scope is only these two models, not the full DayZ corpus.
 
 Positive actor warming is a new implementation in progress/unverified. It is not
 promoted from offline facts. Whole plan OPEN, experimental defaults remain OFF.
+
+### Positive leases for already-loaded actor geometry — 26 September 2026
+
+9b13b51c retains already-loaded actor-neighbourhood objects through bounded
+positive leases even when full source/model inventory cannot establish Ready.
+Independent live entry witnesses establish only those positives; unknown groups,
+global watch overflow or active-model cap cannot become partial query Ready.
+It reuses sparse lease cleanup and does not cold-create/load models or claim
+collision clearance. Review corrected full-group hot scanning and pending-prefix
+starvation before final build. Initial193-node build/480 assertions35cases and
+final21-node stampedbuild/1450 assertions75cases pass; installed9b13 at21:05.
+
+First runtime210610 has no result: valid descriptor enqueue returns Pending,
+runner incorrectly expects Capacity rather than reading separate query status.
+1b8a03a0 corrects runner/pushed safety; installed engine remains9b13.
+Retry210728 passes clean0:257-model fixture retains two positive leases despite
+CapacityExceeded, ReadyRegions0/FireCapacity, prepared/created/source-envelope0,
+required0; actor departure releases them. This does not close cold integration.
+
+Actual DayZ210842 passes positive-resident diagnostic/clean0 at normal budget20000.
+All2971218 placements/2352 references are metadata-complete; loaded resident19923
+has303 positive leases. Camera9704 departure loads19983 elsewhere and preserves
+303 logical-only identities; actor12000,12000 releases303 to0. Global queries stay
+CapacityExceeded with noReadyRegions. Watch cap16384 is reached, but independent
+bounded witnesses preserve only observed loaded positives; they do not certify
+global completeness. Cold source/model preparation/creation/envelope work and
+required pins remain0. Last pump samples .0583/.0819/.0042ms are point diagnostic
+observations, not FPS/no-regression proof. Root viewed normal street screenshot;
+stress-content appearance is not compatibility ground truth.
+
+Full lifecycle211114 passes clean0: existing cold actor fixture admission,
+visual promotion/demotion, Fire, .25 mutation and saved-state release retention.
+Default-OFF211128 passes clean0 Disabled/ownerPumps0/coldwallsabsent.
+These preserve narrow prior behavior, not arbitrary retail classes/MP or generic
+consumers. Cold integration remains pending; whole plan OPEN/defaultsOFF,
+Nanite/Tidewater research deferred and waves parked.

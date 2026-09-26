@@ -4784,6 +4784,1113 @@
         "result.json": "5af9db6d472640ab358602181e4273e16b7dfeae4e63ffaaf14df05d13d2f48b",
         "simulation-fixture.eden/mission.sqm": "c47524083395a8c78a581822629f83c760dd0c1a3ef45eaceb24da88580e9d4c"
       }
+    },
+    {
+      "run": "positive-warming-20260926-20260926-210610",
+      "classification": "FAILED runner/no result: descriptor enqueue Pending was valid; runner wrongly expected queueCapacity instead of separate statusCapacity. Corrected1b8a03a0; no engine regression attribution.",
+      "provenance": {
+        "disabled": false,
+        "scriptSha256": "30D2DAF9C7F6758C30F7612FC2B00AAD1051F94CE72D2CB70DC054F4D81817F1",
+        "installed": "codex/streaming-residency 9b13b51c 2026-09-26_21:05 deploy-ps1",
+        "fixture": {
+          "absolute_model_path": true,
+          "actor": [
+            1190,
+            10,
+            1200
+          ],
+          "camera": [
+            100,
+            80,
+            100
+          ],
+          "camera_isolation_env": {
+            "WGR_OBJECT_STREAM_RADIUS_CELLS": "8",
+            "WGR_OBJECT_STREAM_WINDOW_GROWTH": "0"
+          },
+          "cell_metres": 50.0,
+          "elevation": 10.0,
+          "fire_segment": [
+            [
+              1190,
+              11.5,
+              1200
+            ],
+            [
+              1210,
+              11.5,
+              1200
+            ]
+          ],
+          "half_depth": 6.0,
+          "land_range": 32,
+          "large_wall": false,
+          "model_sha256": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+          "notes": [
+            "Absolute-model mode uses original loose files without an archive mount; relative mode needs a separately configured loose-file root.",
+            "Camera at 100 is isolated from walls at 1200/1230 with growth disabled.",
+            "No ResolveObject: actor demand must admit geometry with transient leases.",
+            "Generic inventory/classification/admission must establish readiness.",
+            "Self-check is not engine parsing, collision or runtime verification."
+          ],
+          "positive_warming": true,
+          "reference_all_models": true,
+          "schema": 1,
+          "terrain_range": 32,
+          "world_sha256": "b69d171147136b600314444aa56a993128f523c45beea70643da846c397ee9d6",
+          "modelCount": 257,
+          "placementCount": 257,
+          "firstTwoModelBasenames": [
+            "wall.p3d",
+            "wall_unused_001.p3d"
+          ],
+          "firstTwoPlacements": [
+            {
+              "id": 1001,
+              "model_index": 0,
+              "position": [
+                1200.0,
+                11.5,
+                1200.0
+              ]
+            },
+            {
+              "id": 1002,
+              "model_index": 1,
+              "position": [
+                1230.0,
+                11.5,
+                1200.0
+              ]
+            }
+          ],
+          "firstTwoBounds": [
+            [
+              1199.5,
+              10,
+              1194.0,
+              1200.5,
+              13,
+              1206.0
+            ],
+            [
+              1229.5,
+              10,
+              1194.0,
+              1230.5,
+              13,
+              1206.0
+            ]
+          ],
+          "otherPlacements": {
+            "count": 255,
+            "first": {
+              "id": 1003,
+              "model_index": 2,
+              "position": [
+                650.0,
+                11.5,
+                650.0
+              ]
+            },
+            "last": {
+              "id": 1257,
+              "model_index": 256,
+              "position": [
+                650.0,
+                11.5,
+                650.0
+              ]
+            },
+            "scope": "Remaining one-per-model placements share the distant650,11.5,650 position; full original arrays retained in hashed provenance.json and fixture/fixture.json."
+          },
+          "fullFixtureArtifacts": {
+            "provenanceSha256": "d09d80cb343901e700d1e1c483c7a10339f1a01e3af125a454c49c3a195ba9d2",
+            "fixtureSha256": "648f035018791f675815c1e37edb56b5a599e1c698373bfeec2c18a9dabb7364"
+          }
+        },
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "9A112AD15016F282283E75C5E7776C8C4973208EF9BC9C63BA28F1043ADE65C3",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "F954B91C82DB125DFBF32453B94508D998B7AEC1D040E2F6C0A8900ED6BFB159",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "head": "9b13b51ccb1d5483eb784af2ec9bb38f5ec3b0b1"
+      },
+      "sha256": {
+        "engine.log": "4d30ab02566878df52e7705905c6a883be39b557c65cb35541544da2814b6abb",
+        "harness.jsonl": "d4b7c275b945ec1fa4ba4fcee18257baa63caa7f6203834bdc813268720fd228",
+        "provenance.json": "d09d80cb343901e700d1e1c483c7a10339f1a01e3af125a454c49c3a195ba9d2",
+        "fixture/fixture.json": "648f035018791f675815c1e37edb56b5a599e1c698373bfeec2c18a9dabb7364",
+        "fixture/simulation-residency.wrp": "b69d171147136b600314444aa56a993128f523c45beea70643da846c397ee9d6",
+        "fixture/streaming_fixture/wall_unused_001.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_002.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_003.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_004.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_005.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_006.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_007.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_008.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_009.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_010.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_011.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_012.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_013.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_014.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_015.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_016.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_017.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_018.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_019.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_020.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_021.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_022.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_023.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_024.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_025.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_026.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_027.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_028.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_029.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_030.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_031.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_032.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_033.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_034.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_035.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_036.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_037.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_038.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_039.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_040.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_041.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_042.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_043.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_044.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_045.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_046.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_047.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_048.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_049.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_050.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_051.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_052.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_053.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_054.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_055.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_056.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_057.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_058.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_059.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_060.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_061.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_062.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_063.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_064.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_065.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_066.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_067.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_068.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_069.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_070.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_071.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_072.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_073.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_074.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_075.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_076.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_077.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_078.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_079.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_080.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_081.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_082.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_083.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_084.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_085.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_086.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_087.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_088.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_089.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_090.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_091.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_092.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_093.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_094.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_095.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_096.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_097.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_098.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_099.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_100.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_101.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_102.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_103.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_104.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_105.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_106.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_107.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_108.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_109.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_110.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_111.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_112.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_113.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_114.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_115.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_116.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_117.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_118.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_119.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_120.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_121.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_122.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_123.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_124.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_125.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_126.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_127.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_128.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_129.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_130.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_131.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_132.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_133.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_134.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_135.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_136.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_137.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_138.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_139.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_140.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_141.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_142.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_143.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_144.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_145.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_146.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_147.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_148.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_149.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_150.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_151.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_152.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_153.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_154.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_155.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_156.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_157.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_158.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_159.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_160.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_161.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_162.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_163.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_164.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_165.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_166.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_167.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_168.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_169.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_170.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_171.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_172.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_173.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_174.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_175.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_176.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_177.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_178.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_179.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_180.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_181.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_182.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_183.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_184.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_185.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_186.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_187.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_188.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_189.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_190.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_191.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_192.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_193.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_194.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_195.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_196.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_197.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_198.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_199.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_200.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_201.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_202.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_203.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_204.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_205.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_206.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_207.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_208.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_209.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_210.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_211.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_212.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_213.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_214.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_215.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_216.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_217.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_218.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_219.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_220.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_221.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_222.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_223.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_224.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_225.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_226.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_227.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_228.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_229.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_230.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_231.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_232.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_233.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_234.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_235.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_236.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_237.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_238.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_239.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_240.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_241.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_242.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_243.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_244.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_245.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_246.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_247.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_248.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_249.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_250.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_251.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_252.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_253.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_254.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_255.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_256.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "simulation-fixture.eden/mission.sqm": "c47524083395a8c78a581822629f83c760dd0c1a3ef45eaceb24da88580e9d4c"
+      }
+    },
+    {
+      "run": "positive-warming-retry-20260926-20260926-210728",
+      "classification": "PASS clean0 unchangedinstalled9b13: tiny257-model fixture2 alreadyresident positiveleases preserved while globalCapacityExceeded; ReadyRegions0, FireCapacity, prepared/created0/sourceenvelope0/required0. Actor release drops positives, no cold integration/Ready claim.",
+      "provenance": {
+        "disabled": false,
+        "installed": "codex/streaming-residency 9b13b51c 2026-09-26_21:05 deploy-ps1",
+        "fixture": {
+          "absolute_model_path": true,
+          "actor": [
+            1190,
+            10,
+            1200
+          ],
+          "camera": [
+            100,
+            80,
+            100
+          ],
+          "camera_isolation_env": {
+            "WGR_OBJECT_STREAM_RADIUS_CELLS": "8",
+            "WGR_OBJECT_STREAM_WINDOW_GROWTH": "0"
+          },
+          "cell_metres": 50.0,
+          "elevation": 10.0,
+          "fire_segment": [
+            [
+              1190,
+              11.5,
+              1200
+            ],
+            [
+              1210,
+              11.5,
+              1200
+            ]
+          ],
+          "half_depth": 6.0,
+          "land_range": 32,
+          "large_wall": false,
+          "model_sha256": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+          "notes": [
+            "Absolute-model mode uses original loose files without an archive mount; relative mode needs a separately configured loose-file root.",
+            "Camera at 100 is isolated from walls at 1200/1230 with growth disabled.",
+            "No ResolveObject: actor demand must admit geometry with transient leases.",
+            "Generic inventory/classification/admission must establish readiness.",
+            "Self-check is not engine parsing, collision or runtime verification."
+          ],
+          "positive_warming": true,
+          "reference_all_models": true,
+          "schema": 1,
+          "terrain_range": 32,
+          "world_sha256": "955c584b411c79996beffde7e8ba457de079605d1c6d5d3ba7fe14b5889aae6a",
+          "modelCount": 257,
+          "placementCount": 257,
+          "firstTwoModelBasenames": [
+            "wall.p3d",
+            "wall_unused_001.p3d"
+          ],
+          "firstTwoPlacements": [
+            {
+              "id": 1001,
+              "model_index": 0,
+              "position": [
+                1200.0,
+                11.5,
+                1200.0
+              ]
+            },
+            {
+              "id": 1002,
+              "model_index": 1,
+              "position": [
+                1230.0,
+                11.5,
+                1200.0
+              ]
+            }
+          ],
+          "firstTwoBounds": [
+            [
+              1199.5,
+              10,
+              1194.0,
+              1200.5,
+              13,
+              1206.0
+            ],
+            [
+              1229.5,
+              10,
+              1194.0,
+              1230.5,
+              13,
+              1206.0
+            ]
+          ],
+          "otherPlacements": {
+            "count": 255,
+            "first": {
+              "id": 1003,
+              "model_index": 2,
+              "position": [
+                650.0,
+                11.5,
+                650.0
+              ]
+            },
+            "last": {
+              "id": 1257,
+              "model_index": 256,
+              "position": [
+                650.0,
+                11.5,
+                650.0
+              ]
+            },
+            "scope": "Remaining one-per-model placements share the distant650,11.5,650 position; full original arrays retained in hashed provenance.json and fixture/fixture.json."
+          },
+          "fullFixtureArtifacts": {
+            "provenanceSha256": "96b3c13bb9f6f00d02c9f27801d6869da046f31e6e0366c6c856b19387113482",
+            "fixtureSha256": "ad2c9889bc3c87d7df5e036f6612be5dbe920e5c3caf34554dfb7b88bb3e1c83"
+          }
+        },
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "9A112AD15016F282283E75C5E7776C8C4973208EF9BC9C63BA28F1043ADE65C3",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "F954B91C82DB125DFBF32453B94508D998B7AEC1D040E2F6C0A8900ED6BFB159",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "head": "9b13b51ccb1d5483eb784af2ec9bb38f5ec3b0b1",
+        "scriptSha256": "14F03F0B4253B212C868CF0EBC437CD5F19AE2B25EF15B7DF0E11CE204033182"
+      },
+      "sha256": {
+        "engine.log": "15690844201ad3293cda8812321128d844cd918f44d801d5b47eb58a341d55d9",
+        "harness.jsonl": "5b09361bbb44ff4837398e94b4a849f214addfa2b8bdbb5839696e182398cfa2",
+        "positive-loaded.png": "226c8233e9d86e707839998c11a18f7f33f7f31434770d39720174e5a3abe862",
+        "provenance.json": "96b3c13bb9f6f00d02c9f27801d6869da046f31e6e0366c6c856b19387113482",
+        "result.json": "5a49a6b57e833631fc2c622dddfd1e050cd733e04aa1feba940132ebe6ca04f5",
+        "fixture/fixture.json": "ad2c9889bc3c87d7df5e036f6612be5dbe920e5c3caf34554dfb7b88bb3e1c83",
+        "fixture/simulation-residency.wrp": "955c584b411c79996beffde7e8ba457de079605d1c6d5d3ba7fe14b5889aae6a",
+        "fixture/streaming_fixture/wall_unused_001.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_002.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_003.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_004.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_005.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_006.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_007.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_008.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_009.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_010.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_011.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_012.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_013.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_014.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_015.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_016.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_017.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_018.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_019.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_020.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_021.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_022.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_023.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_024.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_025.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_026.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_027.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_028.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_029.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_030.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_031.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_032.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_033.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_034.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_035.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_036.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_037.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_038.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_039.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_040.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_041.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_042.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_043.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_044.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_045.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_046.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_047.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_048.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_049.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_050.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_051.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_052.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_053.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_054.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_055.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_056.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_057.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_058.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_059.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_060.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_061.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_062.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_063.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_064.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_065.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_066.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_067.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_068.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_069.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_070.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_071.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_072.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_073.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_074.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_075.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_076.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_077.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_078.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_079.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_080.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_081.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_082.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_083.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_084.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_085.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_086.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_087.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_088.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_089.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_090.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_091.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_092.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_093.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_094.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_095.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_096.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_097.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_098.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_099.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_100.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_101.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_102.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_103.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_104.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_105.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_106.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_107.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_108.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_109.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_110.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_111.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_112.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_113.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_114.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_115.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_116.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_117.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_118.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_119.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_120.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_121.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_122.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_123.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_124.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_125.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_126.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_127.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_128.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_129.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_130.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_131.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_132.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_133.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_134.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_135.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_136.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_137.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_138.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_139.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_140.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_141.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_142.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_143.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_144.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_145.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_146.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_147.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_148.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_149.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_150.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_151.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_152.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_153.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_154.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_155.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_156.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_157.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_158.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_159.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_160.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_161.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_162.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_163.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_164.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_165.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_166.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_167.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_168.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_169.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_170.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_171.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_172.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_173.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_174.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_175.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_176.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_177.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_178.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_179.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_180.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_181.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_182.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_183.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_184.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_185.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_186.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_187.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_188.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_189.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_190.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_191.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_192.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_193.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_194.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_195.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_196.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_197.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_198.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_199.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_200.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_201.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_202.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_203.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_204.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_205.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_206.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_207.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_208.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_209.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_210.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_211.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_212.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_213.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_214.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_215.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_216.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_217.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_218.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_219.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_220.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_221.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_222.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_223.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_224.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_225.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_226.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_227.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_228.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_229.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_230.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_231.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_232.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_233.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_234.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_235.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_236.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_237.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_238.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_239.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_240.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_241.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_242.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_243.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_244.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_245.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_246.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_247.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_248.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_249.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_250.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_251.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_252.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_253.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_254.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_255.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall_unused_256.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "fixture/streaming_fixture/wall.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "simulation-fixture.eden/mission.sqm": "c47524083395a8c78a581822629f83c760dd0c1a3ef45eaceb24da88580e9d4c"
+      }
+    },
+    {
+      "run": "dayz-positive-warming-20260926-20260926-210842",
+      "classification": "PASS positive-resident diagnostic/clean0 installed9b13: default20000/res19923, full2971218 metadata/2352refs,303 positives retained at camera9704away/res19983; actor12000,12000 releases303 to0. GlobalCapacity throughout/ReadyRegions0; watched16384 cap reached, independent bounded entry witnesses support positives only, no partial queryReady. No cold creation/models/source-envelope/requiredpins. Pump point samples.0583/.0819/.0042ms not FPS proof. Root normalstreet screenshot stress evidence not groundtruth.",
+      "provenance": {
+        "scope": "Already loaded positive actor leases at 20000-object camera budget; no cold source/factory admission, complete-query readiness or performance acceptance.",
+        "pose": [
+          5704.58,
+          2523.37,
+          73.74,
+          260.9,
+          -3.8
+        ],
+        "scriptSha256": "8321724DD177659B0948DF2824E486A894B5F1C783BE51ED7911F0C3D40B7149",
+        "head": "9b13b51ccb1d5483eb784af2ec9bb38f5ec3b0b1",
+        "environment": {
+          "WGR_OBJECT_STREAM_PBO_TEXTURES": "0",
+          "WGR_OBJECT_STREAM_TEST_BUDGET": "1",
+          "WGR_OBJECT_STREAM_MAX_OBJECTS": "20000",
+          "WGR_OBJECT_STREAM_GPU_BUDGET": "0",
+          "WGR_GEO_POOL_GROWTH": "2.0",
+          "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\dayz-positive-warming-20260926-20260926-210842\\user",
+          "WGR_SIMULATION_RESIDENCY": "1",
+          "WGR_NATIVE_DDS_BC3_ONLY": "0",
+          "WGR_SIMULATION_RESIDENCY_TEST": "1",
+          "WGR_LOD_GOVERNOR_RANGE": "1",
+          "WGR_ADAPTIVE_TEXTURE_DETAIL": "0",
+          "WGR_NATIVE_DDS_PREPARE": "0",
+          "WGR_OBJECT_STREAM_PBO": "0",
+          "WGR_SKY_VOLUME_INCREMENTAL": "1",
+          "WGR_GEO_POOL_PRESSURE_GROWTH": "0"
+        },
+        "world": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\packages\\dayz-compat\\world\\chernarusplus\\chernarusplus.wrp",
+        "installed": "codex/streaming-residency 9b13b51c 2026-09-26_21:05 deploy-ps1",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "9A112AD15016F282283E75C5E7776C8C4973208EF9BC9C63BA28F1043ADE65C3",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "F954B91C82DB125DFBF32453B94508D998B7AEC1D040E2F6C0A8900ED6BFB159",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ]
+      },
+      "sha256": {
+        "engine.log": "dc6ce5b7a5376da4941711c673e88021884fab45fd711d0af82bbe372aa5e50d",
+        "harness.jsonl": "c45228a81a2e1d17c1a034015c9794dee68e0ed05114d5e07ac86b6a2639b7b2",
+        "loaded.png": "fac908f981980b91032c96dc5860bcea893088f71538900a4a96a3ebedaf7fb2",
+        "provenance.json": "4efb1a7d0e9cc3c7cfbe1fbc6ee4d36ec518e230515543a09d0e17b935ab24c5",
+        "result.json": "7f6684699b71ea82dfdc427a6516e373c0f032995610eb5ca6b6d43d08360aed",
+        "samples.jsonl": "3bf88b111a90102e5ef26b24472a1ba3a0eaff3afc705b4a50d4973e79a4501d",
+        "positive-warming.eden/mission.sqm": "009f3e47d2352f31aa39884a339ff32dd644f5132e64f9d37cede8aeb4b018d9"
+      }
+    },
+    {
+      "run": "positive-warming-full-lifecycle-20260926-20260926-211114",
+      "classification": "PASS clean0 installed9b13: existing tiny actorcold admission/visualpromotion-demotion/Fire/mutation.25/MustBeSaved release retention regression. No general retail/MP/consumer acceptance.",
+      "provenance": {
+        "fixture": {
+          "absolute_model_path": true,
+          "actor": [
+            1190,
+            10,
+            1200
+          ],
+          "camera": [
+            100,
+            80,
+            100
+          ],
+          "camera_isolation_env": {
+            "WGR_OBJECT_STREAM_RADIUS_CELLS": "8",
+            "WGR_OBJECT_STREAM_WINDOW_GROWTH": "0"
+          },
+          "cell_metres": 50.0,
+          "elevation": 10.0,
+          "fire_segment": [
+            [
+              1190,
+              11.5,
+              1200
+            ],
+            [
+              1210,
+              11.5,
+              1200
+            ]
+          ],
+          "half_depth": 6.0,
+          "land_range": 32,
+          "large_wall": false,
+          "model_sha256": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+          "models": [
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\positive-warming-full-lifecycle-20260926-20260926-211114\\fixture\\streaming_fixture\\wall.p3d"
+          ],
+          "notes": [
+            "Absolute-model mode uses original loose files without an archive mount; relative mode needs a separately configured loose-file root.",
+            "Camera at 100 is isolated from walls at 1200/1230 with growth disabled.",
+            "No ResolveObject: actor demand must admit geometry with transient leases.",
+            "Generic inventory/classification/admission must establish readiness.",
+            "Self-check is not engine parsing, collision or runtime verification."
+          ],
+          "placements": [
+            {
+              "id": 1001,
+              "model_index": 0,
+              "position": [
+                1200.0,
+                11.5,
+                1200.0
+              ]
+            },
+            {
+              "id": 1002,
+              "model_index": 0,
+              "position": [
+                1230.0,
+                11.5,
+                1200.0
+              ]
+            }
+          ],
+          "positive_warming": false,
+          "reference_all_models": false,
+          "schema": 1,
+          "terrain_range": 32,
+          "wall_world_bounds": [
+            [
+              1199.5,
+              10,
+              1194.0,
+              1200.5,
+              13,
+              1206.0
+            ],
+            [
+              1229.5,
+              10,
+              1194.0,
+              1230.5,
+              13,
+              1206.0
+            ]
+          ],
+          "world_sha256": "847d06211e23ce16503ac44c131adb70ab7d86d819cfcb296590c61307c59706"
+        },
+        "disabled": false,
+        "head": "9b13b51ccb1d5483eb784af2ec9bb38f5ec3b0b1",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "9A112AD15016F282283E75C5E7776C8C4973208EF9BC9C63BA28F1043ADE65C3",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "F954B91C82DB125DFBF32453B94508D998B7AEC1D040E2F6C0A8900ED6BFB159",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "scriptSha256": "14F03F0B4253B212C868CF0EBC437CD5F19AE2B25EF15B7DF0E11CE204033182",
+        "installed": "codex/streaming-residency 9b13b51c 2026-09-26_21:05 deploy-ps1"
+      },
+      "sha256": {
+        "engine.log": "294b2dafcba59550cbeb04e33e503f2ab579afc2d3cfb4b4615e035b4140ac76",
+        "harness.jsonl": "3de2a3bbcf624fd18486bb68b4fd12639809c3cdc01bced9a1f9768a04404763",
+        "provenance.json": "ad285f618154065b4f3ffac674f1fada309173c676ba177d8e6a2b0b2dd52392",
+        "result.json": "60151ae3d178c39be383d5bc133ec1b68b7b9bde4faeb1377eb214818850c9f3",
+        "visual.png": "a402c7225f4b758069bf38dff315018aa4e78c034bbab9489dfcacb02cb11656",
+        "fixture/fixture.json": "3426cc91a0bb1f97f2acc6d9631b34d5bbbb5e36140670cb19a33490ae0d82e2",
+        "fixture/simulation-residency.wrp": "847d06211e23ce16503ac44c131adb70ab7d86d819cfcb296590c61307c59706",
+        "fixture/streaming_fixture/wall.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "simulation-fixture.eden/mission.sqm": "c47524083395a8c78a581822629f83c760dd0c1a3ef45eaceb24da88580e9d4c"
+      }
+    },
+    {
+      "run": "positive-warming-default-off-20260926-20260926-211128",
+      "classification": "PASS clean0 installed9b13: simulationDisabled/ownerPumps0/coldwallsabsent. Default-off regression only.",
+      "provenance": {
+        "fixture": {
+          "absolute_model_path": true,
+          "actor": [
+            1190,
+            10,
+            1200
+          ],
+          "camera": [
+            100,
+            80,
+            100
+          ],
+          "camera_isolation_env": {
+            "WGR_OBJECT_STREAM_RADIUS_CELLS": "8",
+            "WGR_OBJECT_STREAM_WINDOW_GROWTH": "0"
+          },
+          "cell_metres": 50.0,
+          "elevation": 10.0,
+          "fire_segment": [
+            [
+              1190,
+              11.5,
+              1200
+            ],
+            [
+              1210,
+              11.5,
+              1200
+            ]
+          ],
+          "half_depth": 6.0,
+          "land_range": 32,
+          "large_wall": false,
+          "model_sha256": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+          "models": [
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\positive-warming-default-off-20260926-20260926-211128\\fixture\\streaming_fixture\\wall.p3d"
+          ],
+          "notes": [
+            "Absolute-model mode uses original loose files without an archive mount; relative mode needs a separately configured loose-file root.",
+            "Camera at 100 is isolated from walls at 1200/1230 with growth disabled.",
+            "No ResolveObject: actor demand must admit geometry with transient leases.",
+            "Generic inventory/classification/admission must establish readiness.",
+            "Self-check is not engine parsing, collision or runtime verification."
+          ],
+          "placements": [
+            {
+              "id": 1001,
+              "model_index": 0,
+              "position": [
+                1200.0,
+                11.5,
+                1200.0
+              ]
+            },
+            {
+              "id": 1002,
+              "model_index": 0,
+              "position": [
+                1230.0,
+                11.5,
+                1200.0
+              ]
+            }
+          ],
+          "positive_warming": false,
+          "reference_all_models": false,
+          "schema": 1,
+          "terrain_range": 32,
+          "wall_world_bounds": [
+            [
+              1199.5,
+              10,
+              1194.0,
+              1200.5,
+              13,
+              1206.0
+            ],
+            [
+              1229.5,
+              10,
+              1194.0,
+              1230.5,
+              13,
+              1206.0
+            ]
+          ],
+          "world_sha256": "a9559ca2f5b27c8d12bcbb719f6adca7349bcfa3adb4cbd25ccc752fd71dd5b6"
+        },
+        "disabled": true,
+        "head": "9b13b51ccb1d5483eb784af2ec9bb38f5ec3b0b1",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "9A112AD15016F282283E75C5E7776C8C4973208EF9BC9C63BA28F1043ADE65C3",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "F954B91C82DB125DFBF32453B94508D998B7AEC1D040E2F6C0A8900ED6BFB159",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "scriptSha256": "14F03F0B4253B212C868CF0EBC437CD5F19AE2B25EF15B7DF0E11CE204033182",
+        "installed": "codex/streaming-residency 9b13b51c 2026-09-26_21:05 deploy-ps1"
+      },
+      "sha256": {
+        "engine.log": "f643aa5d983eb25354cfe2638196d44dd189a1d4866ae381c6f9256f8c718d3e",
+        "harness.jsonl": "0139aac23ea05dcb8fc1cf9e435a1e5b3214a1ca052352274a9831fb4a456b5e",
+        "provenance.json": "534bd8e271308811ab51ad79e3776640296063ec603fd145c7776f0cb36d9a03",
+        "result.json": "aa81117f0d8e8a59f2d82af4f703f823f286a8bacf817501356add3a918cc026",
+        "fixture/fixture.json": "1d34647c4d9f17ef10b3e679ee8ac3c949f7ce6db87d079c67273871c8797141",
+        "fixture/simulation-residency.wrp": "a9559ca2f5b27c8d12bcbb719f6adca7349bcfa3adb4cbd25ccc752fd71dd5b6",
+        "fixture/streaming_fixture/wall.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "simulation-fixture.eden/mission.sqm": "c47524083395a8c78a581822629f83c760dd0c1a3ef45eaceb24da88580e9d4c"
+      }
     }
   ],
   "microbenchmarks": [
@@ -5076,6 +6183,24 @@
       "sha256": {
         "build-offline-source-summary-20260926.log": "e501c78a9b475e5aaa6ffc6715f6792e1d646c326fb9601ffafb5100bda8a313",
         "test-offline-source-summary-20260926.log": "3cb5e594db8c16bea63810060e844f109a12ddaca2bdfed4fe9521efbba0b23e"
+      }
+    },
+    {
+      "artifactRoot": "build",
+      "runtimeSourceCommit": "9b13b51c",
+      "runnerCommit": "1b8a03a0",
+      "result": "Initial193-node build PASS/units480 assertions35cases PASS. Read-only review fixed fullgroup performance scan and pendingprefix starvation; final21-node stampedbuild PASS/final1450 assertions75cases PASS/deploy21:05. Positive-only loaded-instance leases independently bounded; globalqueries failclosed, no cold source/model creation. DefaultOFF remains, cold integration pending.",
+      "sha256": {
+        "build-positive-warming-integration-20260926.log": "b008c8fdd20a64a15baee1b5dd001955045322d60655b644216d67a5cd461db6",
+        "build-positive-warming-stamped-20260926.log": "13c8d54dd2c545fec540114e989dfc183cae0fd929aa8b7762be3986e60a573a",
+        "deploy-positive-warming-20260926.log": "b29c73d911a00685f99c8f09c1456bdab0ceaace69f356f934e555c5d04695fc",
+        "smoke-dayz-positive-warming-20260926.log": "bf122d5144d040458688549d235653fc1c90138452f0964f8e9bc90fdfb8e48b",
+        "smoke-positive-warming-20260926.log": "f920404c1051b0348e794a9c7c985c5bf2a024c0be9d1ace0a9e03685de63de8",
+        "smoke-positive-warming-default-off-20260926.log": "7fbb9af2020ce023a2451e1412f06789d0d798a8be9b3682cf65ee9fc128ed6d",
+        "smoke-positive-warming-full-lifecycle-20260926.log": "2fb554251d1b00e3f798439588834575c5ca0c5882cc9f5a5b996e5beee71221",
+        "smoke-positive-warming-retry-20260926.log": "fae5e3df411bc06f197c94c428f208cdf7add61e7be40d7293aad490a28a4bf7",
+        "test-positive-warming-final-20260926.log": "f50930d02e84b6bb9e2e0b919652f7f837cebb2b6e214d7233391d853e77bfaf",
+        "test-positive-warming-initial-20260926.log": "e3b5775894e3bbdf8be685c440a158532d27d68d339058cd5349b0cbce801ce4"
       }
     }
   ],
