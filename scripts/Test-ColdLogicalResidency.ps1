@@ -51,7 +51,20 @@ try {
   } while (!$r.valid -or $r.pending)
   return $r
  }
- $before=Wait-Settled
+ $null=Wait-Settled
+ # Visual admission completion precedes queued GPU operations and lazy draw
+ # buffers. Require a stable live-geometry baseline before attributing a delta
+ # to this cold logical load; never relax the equality check after loading it.
+ Start-Sleep -Seconds 8
+ $before=Send @{cmd='stream_residency'}
+ $stable=0;$stabilityDeadline=[DateTime]::UtcNow.AddSeconds(60)
+ do {
+  Start-Sleep -Seconds 2
+  $sample=Send @{cmd='stream_residency'}
+  if (!$sample.pending -and $sample.geometryLiveBytes -eq $before.geometryLiveBytes -and $sample.admitUpdates -eq $before.admitUpdates) {$stable++} else {$stable=0}
+  $before=$sample
+  if ([DateTime]::UtcNow -gt $stabilityDeadline) {throw 'Initial GPU geometry did not reach a stable baseline; no cold allocation attribution'}
+ } while ($stable -lt 3)
  $id=83912800
  $coldBefore=Send @{cmd='stream_identity_probe';ids=@($id)}
  if ($coldBefore.objects[0].present) {throw 'Fixture already present; cold proof invalid'}
