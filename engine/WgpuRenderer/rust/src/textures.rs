@@ -140,7 +140,7 @@ impl TextureRegistry {
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        layout: &wgpu::BindGroupLayout,
+        _layout: &wgpu::BindGroupLayout,
         tex: &TextureData,
         slot: u32,
     ) -> u64 {

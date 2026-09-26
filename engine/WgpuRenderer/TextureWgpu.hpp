@@ -114,6 +114,14 @@ class TextureWgpu : public Texture
     // per-upload slots, where that promise does NOT hold.
     uint32_t SlotLease() const { return _slotLease; }
     bool IsDynamicTexture() const { return _dynamic; }
+    // CPU source presence only; external file availability is checked by upload.
+    bool HasReloadableSource() const
+    {
+        if (_dynamic || _src == nullptr || _nMipmaps <= 0)
+            return false;
+        const char* name = SourceName();
+        return name && *name;
+    }
     void PinResident() { ++_residentPins; }
     void UnpinResident()
     {

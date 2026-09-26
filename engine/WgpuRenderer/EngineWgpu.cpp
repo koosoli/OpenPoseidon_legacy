@@ -19,6 +19,7 @@
 #include <Poseidon/Graphics/Core/FoliageDusk.hpp>
 #include <Poseidon/Graphics/Core/MeshVertex.hpp>
 #include <Poseidon/Graphics/Core/ZBiasMath.hpp>
+#include <Poseidon/Graphics/Core/ParkedModelRefill.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/LegacyGlass.hpp>
 #include <Poseidon/Graphics/Shared/SdlWindow.hpp>
 #include <Poseidon/Graphics/Core/TLVertex.hpp>
@@ -8371,6 +8372,16 @@ namespace
 // still paid a full RegisterGpuModel -- BuildVertices, wgr_mesh_create, section
 // classification -- because ReleaseGpuModel had erased the registration the cache's LODShape
 // was keeping warm.
+bool GpuModelParkRefillEnabled()
+{
+    static const bool on = []
+    {
+        const char* value = std::getenv("WGR_GPU_MODEL_PARK_REFILL");
+        return value && std::strcmp(value, "1") == 0;
+    }();
+    return on;
+}
+
 size_t GpuModelParkLimit()
 {
     static const size_t n = []
@@ -8541,6 +8552,13 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
         if (const auto parked = _gpuModelParkedIndex.find(shape); parked != _gpuModelParkedIndex.end())
         {
             bool handlesLive = true;
+            const bool refillEnabled = GpuModelParkRefillEnabled();
+            const auto refs = refillEnabled ? _gpuModelRefs.find(shape) : _gpuModelRefs.end();
+            const render::ParkedRefillContext refillContext{
+                refillEnabled, true, refillEnabled && RetainedModelIsLive(shape),
+                refs == _gpuModelRefs.end() ? 0u : refs->second};
+            uint32_t activationRefills = 0;
+            bool refillFailed = false, leaseChanged = false;
             if (const auto handles = _gpuModelTextureHandles.find(shape); handles != _gpuModelTextureHandles.end())
             {
                 const auto textures = _gpuModelTextures.find(shape);
@@ -8550,11 +8568,55 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
                 for (size_t i = 0; handlesLive && i < n; i++)
                 {
                     TextureWgpu* texture = textures->second[i];
+                    if (refillEnabled && texture && handles->second[i].lease != 0 &&
+                        texture->GpuHandle() != handles->second[i].handle)
+                        leaseChanged |= handles->second[i].lease != texture->SlotLease();
+                    if (refillEnabled && refillContext.references == 0 &&
+                        texture && texture->GpuHandle() == 0)
+                    {
+                        const render::ParkedImageBinding image{
+                            handles->second[i].handle, handles->second[i].lease, texture->GpuHandle(),
+                            texture->SlotLease(), true, texture->IsDynamicTexture(), texture->HasReloadableSource()};
+                        if (render::CanRefillParkedImageActivation(refillContext, image))
+                        {
+                            uint64_t uploaded = 0;
+                            try { uploaded = texture->EnsureUploaded(); }
+                            catch (...) { refillFailed = true; }
+                            if (render::RefilledParkedImageMatches(image, uploaded, texture->GpuHandle(),
+                                                                  texture->SlotLease()))
+                            {
+                                handles->second[i].handle = uploaded;
+                                ++activationRefills;
+                            }
+                            else
+                            {
+                                refillFailed = true;
+                                handlesLive = false;
+                            }
+                        }
+                        else if (image.capturedLease != 0 && image.capturedLease != image.currentLease)
+                            leaseChanged = true;
+                    }
                     if (texture && handles->second[i].SameSlot(texture->GpuHandle(), texture->SlotLease()))
                         handles->second[i].handle = texture->GpuHandle(); // shared refill or detail replacement
                     if (!texture || texture->GpuHandle() != handles->second[i].handle)
                         handlesLive = false;
                 }
+            }
+            else if (refillEnabled)
+                handlesLive = false;
+            if (refillEnabled)
+            {
+                _parkRefillActivationImages += activationRefills;
+                _parkRefillActivationFailures += refillFailed ? 1 : 0;
+                _parkRefillLeaseChangedStale += leaseChanged ? 1 : 0;
+                if ((activationRefills || refillFailed || leaseChanged) && std::getenv("WGR_MODEL_RESIDENCY_TRACE"))
+                    LOG_INFO(Graphics,
+                             "Wgpu parked refill activation: model={} images={} reused={} failed={} leaseChanged={} "
+                             "totals deferredChecks={} activationImages={} activationFailures={} leaseChangedStale={}",
+                             shape->Name(), activationRefills, handlesLive, refillFailed, leaseChanged,
+                             _parkRefillDormantModels, _parkRefillActivationImages,
+                             _parkRefillActivationFailures, _parkRefillLeaseChangedStale);
             }
             if (handlesLive)
             {
@@ -9874,7 +9936,8 @@ uint32_t EngineWgpu::InvalidateStaleGpuModels()
     // never got one (bindless array at cap) falls back to per-upload slots, where the baked
     // index really has moved, and it must go down the destroy path exactly as before.
     std::vector<const LODShapeWithShadow*> stale;
-    uint32_t refilled = 0, sharedRefills = 0;
+    uint32_t refilled = 0, sharedRefills = 0, deferredParked = 0, leaseChangedParked = 0;
+    const bool parkRefillEnabled = GpuModelParkRefillEnabled();
     for (auto& [shape, handles] : _gpuModelTextureHandles)
     {
         const auto textures = _gpuModelTextures.find(shape);
@@ -9888,6 +9951,11 @@ uint32_t EngineWgpu::InvalidateStaleGpuModels()
         // reads (EvictGpu clears _uploadTried, so a re-upload re-reads every mip).
         const bool live = RetainedModelIsLive(shape);
         bool broken = false;
+        bool deferred = false, leaseChanged = false;
+        const auto refs = parkRefillEnabled ? _gpuModelRefs.find(shape) : _gpuModelRefs.end();
+        const render::ParkedRefillContext refillContext{
+            parkRefillEnabled, parkRefillEnabled && _gpuModelParkedIndex.count(shape) != 0, live,
+            refs == _gpuModelRefs.end() ? 0u : refs->second};
         for (size_t i = 0; i < handles.size(); i++)
         {
             TextureWgpu* texture = textures->second[i];
@@ -9908,6 +9976,23 @@ uint32_t EngineWgpu::InvalidateStaleGpuModels()
                 ++sharedRefills;
                 continue;
             }
+            if (parkRefillEnabled && refillContext.parked && refillContext.references == 0 &&
+                !refillContext.live && texture->GpuHandle() == 0)
+            {
+                const render::ParkedImageBinding image{
+                    handles[i].handle, handles[i].lease, texture->GpuHandle(), texture->SlotLease(), true,
+                    texture->IsDynamicTexture(), texture->HasReloadableSource()};
+                if (render::CanDeferParkedImage(refillContext, image))
+                {
+                    // Keep only the existing bounded parked registration. No image
+                    // upload, new retain/pin, or material rebake while out of range.
+                    deferred = true;
+                    continue;
+                }
+                leaseChanged |= image.capturedLease != 0 && image.capturedLease != image.currentLease;
+            }
+            else if (parkRefillEnabled && refillContext.parked && handles[i].lease != 0)
+                leaseChanged |= handles[i].lease != texture->SlotLease();
             if (live && texture->GpuHandle() == 0 && handles[i].handle != 0 &&
                 handles[i].lease != 0 && texture->SlotLease() == handles[i].lease)
             {
@@ -9924,6 +10009,21 @@ uint32_t EngineWgpu::InvalidateStaleGpuModels()
         }
         if (broken)
             stale.push_back(shape);
+        else if (deferred)
+            ++deferredParked;
+        if (broken && leaseChanged)
+            ++leaseChangedParked;
+    }
+    if (parkRefillEnabled)
+    {
+        _parkRefillDormantModels += deferredParked;
+        _parkRefillLeaseChangedStale += leaseChangedParked;
+        if ((deferredParked || leaseChangedParked) && std::getenv("WGR_MODEL_RESIDENCY_TRACE"))
+            LOG_INFO(Graphics,
+                     "Wgpu parked refill deferred: models={} leaseChangedStale={} totals deferredChecks={} "
+                     "activationImages={} activationFailures={} leaseChangedStale={}",
+                     deferredParked, leaseChangedParked, _parkRefillDormantModels,
+                     _parkRefillActivationImages, _parkRefillActivationFailures, _parkRefillLeaseChangedStale);
     }
     if (refilled)
         LOG_INFO(Graphics, "Wgpu model residency: {} evicted textures re-uploaded into their leased slots", refilled);

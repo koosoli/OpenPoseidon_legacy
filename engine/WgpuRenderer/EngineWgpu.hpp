@@ -825,6 +825,11 @@ class EngineWgpu : public EngineDummy
     std::unordered_map<const LODShapeWithShadow*, std::vector<ModelTextureBinding>> _gpuModelTextureHandles;
     std::list<const LODShapeWithShadow*> _gpuModelParked; // front = oldest
     std::unordered_map<const LODShapeWithShadow*, std::list<const LODShapeWithShadow*>::iterator> _gpuModelParkedIndex;
+    // Opt-in bounded parked-image experiment; historical counters, not coverage.
+    uint64_t _parkRefillDormantModels = 0;
+    uint64_t _parkRefillActivationImages = 0;
+    uint64_t _parkRefillActivationFailures = 0;
+    uint64_t _parkRefillLeaseChangedStale = 0;
     void DestroyGpuModel(const LODShapeWithShadow* shape); // meshes + every shape-keyed map entry
     //! Drop every registered model whose baked bindless slots no longer match the textures
     //! they were baked from, so the next admit rebuilds them. Returns how many went.

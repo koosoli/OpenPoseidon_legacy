@@ -2,6 +2,7 @@ param(
     [ValidateSet('Disabled', 'Cold')][string]$Mode = 'Disabled',
     [switch]$TerrainPageTimings,
     [ValidateSet('Counted', 'Timed')][string]$AdmissionMode = 'Counted',
+    [switch]$ParkedTextureRefill,
     [string]$Label = 'dayz-streaming-latency',
     [string]$GameDir = 'D:\SteamLibrary\steamapps\common\ARMA Cold War Assault'
 )
@@ -14,6 +15,7 @@ if (!$env:LOCK_OWNER) {
     try {
         $argv = @((Join-Path $PSScriptRoot 'with-game-lock.sh'), $shellExe, '-NoProfile', '-File', $PSCommandPath, '-Mode', $Mode, '-AdmissionMode', $AdmissionMode, '-Label', $Label, '-GameDir', $GameDir)
         if ($TerrainPageTimings) { $argv += '-TerrainPageTimings' }
+        if ($ParkedTextureRefill) { $argv += '-ParkedTextureRefill' }
         & 'C:\Program Files\Git\bin\bash.exe' @argv
         if ($LASTEXITCODE) { throw "Latency screening exited $LASTEXITCODE" }
     } finally { Remove-Item Env:LOCK_OWNER }
@@ -59,6 +61,10 @@ if ($TerrainPageTimings) {
     $environment.POSEIDON_SLOW_FRAME_TRACE = '1'
 }
 if ($AdmissionMode -eq 'Timed') { $environment.WGR_OBJECT_STREAM_ADMIT = 'timed' }
+if ($ParkedTextureRefill) {
+    $environment.WGR_GPU_MODEL_PARK_REFILL = '1'
+    $environment.WGR_MODEL_RESIDENCY_TRACE = '1'
+}
 # Shape trace enables on variable presence, so leave it absent in both modes.
 $clearNames = @((Get-ChildItem Env: | Where-Object { $_.Name -like 'WGR_*' -or $_.Name -like 'POSEIDON_*' } | ForEach-Object { $_.Name }))
 $changedNames = @($clearNames + @($environment.Keys) | Select-Object -Unique)
@@ -157,10 +163,21 @@ try {
     $expectedPhases = @('setup', 'sim:step', 'drw:init', 'drw:prep', 'land:gnd', 'land:obj', 'drw:land', 'drw:obj', 'drw:post', 'hud', 'sound', 'swap')
     if ($phases.Count -ne $expectedPhases.Count) { throw 'Engine phase timing evidence incomplete' }
     foreach ($phase in $expectedPhases) { if (@($phases | Where-Object { $_.phase -eq $phase }).Count -ne 1) { throw "Engine phase timing missing or duplicated: $phase" } }
+    $parkedProof = $null
+    if ($ParkedTextureRefill) {
+        $deferredRows = @(Select-String -LiteralPath $log -Pattern 'Wgpu parked refill deferred: models=([1-9]\d*)')
+        $reusedRows = @(Select-String -LiteralPath $log -Pattern 'Wgpu parked refill activation: .* images=([1-9]\d*) reused=true failed=false')
+        $parkedProof = @{deferredObserved = $deferredRows.Count -gt 0; activationReuseObserved = $reusedRows.Count -gt 0
+            deferredRows = @($deferredRows | ForEach-Object { $_.Line }); reusedRows = @($reusedRows | ForEach-Object { $_.Line })
+            scope = 'Repeated parked observations are not unique model counts; successful leased-slot activation only, not memory convergence or performance acceptance'}
+        $parkedProof | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $out 'parked-refill-proof.json')
+        if (!$parkedProof.deferredObserved -or !$parkedProof.activationReuseObserved) { throw 'Parked refill path was not exercised through both deferral and successful activation' }
+    }
     $raw | ConvertTo-Json | Set-Content (Join-Path $out 'route-frame-ms.json')
-    @{passed = $true; mode = $Mode; admissionMode = $AdmissionMode; screeningOnly = $true; performanceAccepted = $false; terrainPageTimings = [bool]$TerrainPageTimings
+    @{passed = $true; mode = $Mode; admissionMode = $AdmissionMode; parkedTextureRefill = [bool]$ParkedTextureRefill; screeningOnly = $true; performanceAccepted = $false; terrainPageTimings = [bool]$TerrainPageTimings
         frameCount = $count; dropped = $dropped; enginePhaseTiming = $phases; baseline = $baseline; returned = $returned
         routeSamples = $routeSamples; postExitHashes = $finalHashes
+        parkedRefillProof = $parkedProof
         limitation = 'No automatic performance threshold, vanilla parity, cold-cache guarantee or whole-world query readiness; compare matched separate mode processes'
     } | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $out 'result.json')
     Write-Output "DayZ latency screening evidence: $out"
