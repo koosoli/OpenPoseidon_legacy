@@ -1324,6 +1324,30 @@ Query Ready covers limited static terrain-object residency, not clear collision
 or a hit-free ray. Legacy candidate enumeration still expands by a hardcoded 25m
 object-origin radius and can omit large objects; broadphase/query consumers,
 background AI publication and all-type eligibility remain OPEN. The current
-approximately 6m wall fixture cannot close those gates. Headless query runner and
-probe registration are in progress/unverified. No new FPS, memory eviction,
+approximately 6m wall fixture cannot close those gates. Headless readonly probes and automatic actor admission now pass below; generic
+query/consumer completeness remains unverified. No new FPS, memory eviction,
 multiplayer authority or whole-plan completion claim is made.
+
+### Headless automatic actor admission — 26 September 2026
+
+d24fe050 registers only readonly identity, simulation-status and fire probes for
+the server; mutation and screenshot commands remain client-only. The supported
+build passes, with 100 assertions/10 focused unit cases passing. Server runtime
+uses the built dist PoseidonServer artifact (SHA256 recorded in provenance) with
+installed-game files through -C. The unchanged installed graphical 89db0dcc stamp
+is not the evidence for this server binary.
+
+Headless OFF 163239 and ON 163331 both pass strict JSON checks and clean exit0.
+OFF reports Disabled, ownerPumps 0, both walls absent, required 0 and renderer None.
+ON reports automatic Ready with inventory 2/one prepared model/two regions/
+leases 2, query 0/required 0 and renderer None. Both walls have authored Geom/Fire/View
+geometry on CPU, visualResident=false, deferred=true, normalVB0; the fire probe hits
+wall 1001. Admission follows actor position without ResolveObject, camera
+residency or a manually queued query. Actual server/runner/mission provenance and
+run logs/results/fixture hashes are recorded separately.
+
+This is the original narrow static two-wall fixture. It does not prove
+arbitrary modern model eligibility, multiplayer/full-save authority, full
+collision enumeration or generic query consumer migration. Simulation residency
+remains default OFF; large-offset query correctness and cancellation-token
+publication visibility remain OPEN. The complete streaming plan stays OPEN.

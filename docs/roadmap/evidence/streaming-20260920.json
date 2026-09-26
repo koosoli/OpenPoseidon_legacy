@@ -3034,6 +3034,336 @@
         "fixture/streaming_fixture/wall.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
         "simulation-fixture.eden/mission.sqm": "c47524083395a8c78a581822629f83c760dd0c1a3ef45eaceb24da88580e9d4c"
       }
+    },
+    {
+      "run": "simulation-headless-default-off-20260926-163239",
+      "runtimeSourceCommit": "d24fe050",
+      "provenance": {
+        "scope": "Original static two-wall fixture; does not prove generic query completeness or gameplay consumer migration",
+        "head": "d24fe05044ec8e754bbe04f1b33c75381bdec2c4",
+        "disabled": true,
+        "harnessPort": 50095,
+        "gameDir": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault",
+        "environment": {
+          "WGR_NATIVE_DDS_BC3_ONLY": "0",
+          "WGR_OBJECT_STREAM_WINDOW_GROWTH": "0",
+          "POSEIDON_REFORGER_WORLD": null,
+          "POSEIDON_LOCKSTEP_HZ": null,
+          "WGR_LOD_GOVERNOR_RANGE": null,
+          "WGR_OBJECT_STREAM_PBO_TEXTURES": "0",
+          "WGR_SIMULATION_RESIDENCY": "0",
+          "WGR_OBJECT_STREAM_TEST_BUDGET": null,
+          "WGR_OBJECT_STREAM_GPU_BUDGET": "0",
+          "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-headless-default-off-20260926-163239\\user",
+          "WGR_WATER_CURLING_BREAKER": null,
+          "POSEIDON_REFORGER_OBJECTS": null,
+          "WGR_OBJECT_STREAM_RADIUS_CELLS": "8",
+          "WGR_ADAPTIVE_TEXTURE_DETAIL": "0",
+          "WGR_NATIVE_DDS_PREPARE": "0",
+          "WGR_SIMULATION_RESIDENCY_TEST": "0",
+          "POSEIDON_REFORGER_STREAM": null,
+          "POSEIDON_TEST_RAIN": null,
+          "WGR_OBJECT_STREAM_PBO": "0"
+        },
+        "arguments": [
+          "-C",
+          "\"D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\"",
+          "--simulate",
+          "\"C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-headless-default-off-20260926-163239\\simulation-headless.eden\"",
+          "--duration",
+          "240",
+          "--stats",
+          "2",
+          "--private",
+          "--bind-address",
+          "127.0.0.1",
+          "--port",
+          "50096",
+          "--nosound",
+          "--harness",
+          "50095",
+          "--test-world",
+          "\"C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-headless-default-off-20260926-163239\\fixture\\simulation-residency.wrp\"",
+          "--log-file",
+          "\"C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-headless-default-off-20260926-163239\\engine.log\""
+        ],
+        "scriptSha256": "CF61C2943DAB3F32DB95939223153BB6CD9F4E26624AE9DFC03A9A0FBB53A2CC",
+        "installed": "codex/streaming-residency 89db0dcc 2026-09-26_16:25 deploy-ps1",
+        "serverExe": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\dist\\x64-win-rwdi\\PoseidonServer.exe",
+        "serverHash": {
+          "Algorithm": "SHA256",
+          "Hash": "E92848DAEF3FBEA89FF3CC898F659F20E21CEBBB9DCCF43CAAFFA3C466F5AA40",
+          "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\dist\\x64-win-rwdi\\PoseidonServer.exe"
+        },
+        "fixture": {
+          "absolute_model_path": true,
+          "actor": [
+            1190,
+            10,
+            1200
+          ],
+          "camera": [
+            100,
+            80,
+            100
+          ],
+          "camera_isolation_env": {
+            "WGR_OBJECT_STREAM_RADIUS_CELLS": "8",
+            "WGR_OBJECT_STREAM_WINDOW_GROWTH": "0"
+          },
+          "cell_metres": 50.0,
+          "elevation": 10.0,
+          "fire_segment": [
+            [
+              1190,
+              11.5,
+              1200
+            ],
+            [
+              1210,
+              11.5,
+              1200
+            ]
+          ],
+          "land_range": 32,
+          "model_sha256": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+          "models": [
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-headless-default-off-20260926-163239\\fixture\\streaming_fixture\\wall.p3d"
+          ],
+          "notes": [
+            "Absolute-model mode uses original loose files without an archive mount; relative mode needs a separately configured loose-file root.",
+            "Camera at 100 is isolated from walls at 1200/1230 with growth disabled.",
+            "No ResolveObject: actor demand must admit geometry with transient leases.",
+            "Generic inventory/classification/admission must establish readiness.",
+            "Self-check is not engine parsing, collision or runtime verification."
+          ],
+          "placements": [
+            {
+              "id": 1001,
+              "model_index": 0,
+              "position": [
+                1200.0,
+                11.5,
+                1200.0
+              ]
+            },
+            {
+              "id": 1002,
+              "model_index": 0,
+              "position": [
+                1230.0,
+                11.5,
+                1200.0
+              ]
+            }
+          ],
+          "schema": 1,
+          "terrain_range": 32,
+          "wall_world_bounds": [
+            [
+              1199.5,
+              10,
+              1194,
+              1200.5,
+              13,
+              1206
+            ],
+            [
+              1229.5,
+              10,
+              1194,
+              1230.5,
+              13,
+              1206
+            ]
+          ],
+          "world_sha256": "89cf31e72951dde136de2df8fd88fd65259dd93817e6f30f50f0a96fad3bfc29"
+        },
+        "networkPort": 50096,
+        "missionHash": {
+          "Algorithm": "SHA256",
+          "Hash": "7525FAF397AB5817AF6BBFA379682F5378B82B54E6E5D98F12CD7208C329CF67",
+          "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-headless-default-off-20260926-163239\\simulation-headless.eden\\mission.sqm"
+        }
+      },
+      "classification": "PASS headless default Disabled, ownerPumps0, both walls absent, required0, rendererNone, clean0.",
+      "sha256": {
+        "engine.log": "826c5e44005c546598d5c8a136e7687bd829463ca574b7bdffb5a0883348b5af",
+        "harness.jsonl": "6f6699819a48149a676154a87bc9be46eed379ef50f28486aea261bbacfd7eba",
+        "provenance.json": "c561c872a7a3d243966050fbd8e883df8b4920f88733d427c493dd4b3df35504",
+        "result.json": "ab2da73be80c54ddde23ce581b989d7a07a3d04561b3e9ebe928eb66c85a973f",
+        "stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout.log": "f30cb768fc5f896d2f9710a19829e3f784f08f5abda6621a7ee17371880d7e51",
+        "fixture/fixture.json": "9eb3274358adc14f5ad9de6505d1baeb7ecd82156add6516d1f9af648b640372",
+        "fixture/simulation-residency.wrp": "89cf31e72951dde136de2df8fd88fd65259dd93817e6f30f50f0a96fad3bfc29",
+        "fixture/streaming_fixture/wall.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "simulation-headless.eden/mission.sqm": "7525faf397ab5817af6bbfa379682f5378b82b54e6e5d98f12cd7208c329cf67"
+      }
+    },
+    {
+      "run": "simulation-headless-actor-leases-20260926-163331",
+      "runtimeSourceCommit": "d24fe050",
+      "provenance": {
+        "serverExe": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\dist\\x64-win-rwdi\\PoseidonServer.exe",
+        "environment": {
+          "WGR_OBJECT_STREAM_TEST_BUDGET": null,
+          "WGR_ADAPTIVE_TEXTURE_DETAIL": "0",
+          "POSEIDON_REFORGER_OBJECTS": null,
+          "WGR_SIMULATION_RESIDENCY_TEST": "0",
+          "WGR_WATER_CURLING_BREAKER": null,
+          "WGR_OBJECT_STREAM_WINDOW_GROWTH": "0",
+          "WGR_OBJECT_STREAM_PBO_TEXTURES": "0",
+          "WGR_OBJECT_STREAM_RADIUS_CELLS": "8",
+          "POSEIDON_REFORGER_STREAM": null,
+          "POSEIDON_TEST_RAIN": null,
+          "WGR_NATIVE_DDS_BC3_ONLY": "0",
+          "WGR_LOD_GOVERNOR_RANGE": null,
+          "WGR_OBJECT_STREAM_GPU_BUDGET": "0",
+          "WGR_OBJECT_STREAM_PBO": "0",
+          "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-headless-actor-leases-20260926-163331\\user",
+          "WGR_SIMULATION_RESIDENCY": "1",
+          "POSEIDON_LOCKSTEP_HZ": null,
+          "POSEIDON_REFORGER_WORLD": null,
+          "WGR_NATIVE_DDS_PREPARE": "0"
+        },
+        "networkPort": 57712,
+        "installed": "codex/streaming-residency 89db0dcc 2026-09-26_16:25 deploy-ps1",
+        "harnessPort": 57711,
+        "gameDir": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault",
+        "missionHash": {
+          "Algorithm": "SHA256",
+          "Hash": "7525FAF397AB5817AF6BBFA379682F5378B82B54E6E5D98F12CD7208C329CF67",
+          "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-headless-actor-leases-20260926-163331\\simulation-headless.eden\\mission.sqm"
+        },
+        "disabled": false,
+        "scope": "Original static two-wall fixture; does not prove generic query completeness or gameplay consumer migration",
+        "fixture": {
+          "absolute_model_path": true,
+          "actor": [
+            1190,
+            10,
+            1200
+          ],
+          "camera": [
+            100,
+            80,
+            100
+          ],
+          "camera_isolation_env": {
+            "WGR_OBJECT_STREAM_RADIUS_CELLS": "8",
+            "WGR_OBJECT_STREAM_WINDOW_GROWTH": "0"
+          },
+          "cell_metres": 50.0,
+          "elevation": 10.0,
+          "fire_segment": [
+            [
+              1190,
+              11.5,
+              1200
+            ],
+            [
+              1210,
+              11.5,
+              1200
+            ]
+          ],
+          "land_range": 32,
+          "model_sha256": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+          "models": [
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-headless-actor-leases-20260926-163331\\fixture\\streaming_fixture\\wall.p3d"
+          ],
+          "notes": [
+            "Absolute-model mode uses original loose files without an archive mount; relative mode needs a separately configured loose-file root.",
+            "Camera at 100 is isolated from walls at 1200/1230 with growth disabled.",
+            "No ResolveObject: actor demand must admit geometry with transient leases.",
+            "Generic inventory/classification/admission must establish readiness.",
+            "Self-check is not engine parsing, collision or runtime verification."
+          ],
+          "placements": [
+            {
+              "id": 1001,
+              "model_index": 0,
+              "position": [
+                1200.0,
+                11.5,
+                1200.0
+              ]
+            },
+            {
+              "id": 1002,
+              "model_index": 0,
+              "position": [
+                1230.0,
+                11.5,
+                1200.0
+              ]
+            }
+          ],
+          "schema": 1,
+          "terrain_range": 32,
+          "wall_world_bounds": [
+            [
+              1199.5,
+              10,
+              1194,
+              1200.5,
+              13,
+              1206
+            ],
+            [
+              1229.5,
+              10,
+              1194,
+              1230.5,
+              13,
+              1206
+            ]
+          ],
+          "world_sha256": "afdf628905b6fe7c12d590ab1abd68b49d1474efbd93ad8f52ae2c82310d8d9c"
+        },
+        "scriptSha256": "CF61C2943DAB3F32DB95939223153BB6CD9F4E26624AE9DFC03A9A0FBB53A2CC",
+        "serverHash": {
+          "Algorithm": "SHA256",
+          "Hash": "E92848DAEF3FBEA89FF3CC898F659F20E21CEBBB9DCCF43CAAFFA3C466F5AA40",
+          "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\dist\\x64-win-rwdi\\PoseidonServer.exe"
+        },
+        "head": "d24fe05044ec8e754bbe04f1b33c75381bdec2c4",
+        "arguments": [
+          "-C",
+          "\"D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\"",
+          "--simulate",
+          "\"C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-headless-actor-leases-20260926-163331\\simulation-headless.eden\"",
+          "--duration",
+          "240",
+          "--stats",
+          "2",
+          "--private",
+          "--bind-address",
+          "127.0.0.1",
+          "--port",
+          "57712",
+          "--nosound",
+          "--harness",
+          "57711",
+          "--test-world",
+          "\"C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-headless-actor-leases-20260926-163331\\fixture\\simulation-residency.wrp\"",
+          "--log-file",
+          "\"C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-headless-actor-leases-20260926-163331\\engine.log\""
+        ]
+      },
+      "classification": "PASS headless automatic actor admission: Ready, two placements/one prepared model/two regions/leases2, query0/required0, rendererNone; all Geom/Fire/View roles CPU-only/deferred/normalVB0, firehit1001, clean0. No Resolve/camera/manual queue. Original static fixture only, not MP save, generic modern models or complete query proof.",
+      "sha256": {
+        "engine.log": "716dd88812ba6e63fb122732e97d8ba62923d84cba87ca158caa991ced4e2b71",
+        "harness.jsonl": "6a66fa134b69fcc082afd5d20108fad7276cf7dd4d59d54fcde3cfa0f7347f23",
+        "provenance.json": "a078689d5ffdc52415cb68b6db861fceeabed7d839902fe099724842015ff9c0",
+        "result.json": "d2fea596cdddec51a2caa9bc1fa7f7e652525b5df1f6819f29c21571b651d114",
+        "stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout.log": "16c3e2fb2abb6e708f932a7ce6b6d035aae77ce2e52b1b3686e476417dba32f3",
+        "fixture/fixture.json": "d5df4ef7fd828d2e00ffa914d5c245f01887ea6b5bdaee65bcf16abac03a01cb",
+        "fixture/simulation-residency.wrp": "afdf628905b6fe7c12d590ab1abd68b49d1474efbd93ad8f52ae2c82310d8d9c",
+        "fixture/streaming_fixture/wall.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "simulation-headless.eden/mission.sqm": "7525faf397ab5817af6bbfa379682f5378b82b54e6e5d98f12cd7208c329cf67"
+      }
     }
   ],
   "microbenchmarks": [
@@ -3214,6 +3544,15 @@
         "test-simulation-query-default-20260926.log": "d7ed2fe610d26d69852e5cd10d9e271cf6d00da3027acedb0ebf59ed1e08c450",
         "test-simulation-query-broad-20260926.log": "281252ef895fe8ab23bfcaac1fba217259c8027c5a86e8cb586eb7f34c3e4c5f",
         "test-simulation-query-narrow-20260926.log": "836d28677c836bee444c9118d26613ea7bdc556dd7fb28ed1ca440e0175d1399"
+      }
+    },
+    {
+      "artifactRoot": "build",
+      "runtimeSourceCommit": "d24fe050",
+      "result": "Supported headless probes build PASS; focused unit tests100 assertions/10 cases PASS. Server exposes only readonly identity/simulation/fire probes; mutation/screenshot commands remain client-only. Installed graphical89db stamp is not server evidence; server artifact hash comes from runtime provenance.",
+      "sha256": {
+        "build-simulation-headless-probes-20260926.log": "5d28a6518a9cc3114fd95548246a15586ac6b169d6e48efe5805c2149948e934",
+        "test-simulation-headless-probes-20260926.log": "e816f0433978ed54ec0898a7da1f8f4c8863fed985d9aebac61e837be2fd5d35"
       }
     }
   ],
