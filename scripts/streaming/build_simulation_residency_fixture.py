@@ -34,7 +34,7 @@ def bulk(payload):
     return bytes(zeros + 1) + bytes((tail + 1,)) + payload + b"\x11\0\0"
 
 
-def build_world():
+def build_world(model_path=MODEL_PATH):
     leaf = b"\0" * 5  # Uniform quadtree: root tag plus four-byte leaf.
     zero_grid = bytes(LAND * LAND)
     out = bytearray(b"OPRW" + pack("6if", 25, 0, LAND, LAND, LAND, LAND, CELL))
@@ -44,7 +44,7 @@ def build_world():
     out += bulk(zero_grid) * 2  # grass approximation, primary texture index
     out += bulk(pack("f", HEIGHT) * (LAND * LAND))
     out += pack("i", 1) + b"\0\0"  # one empty fallback terrain material
-    out += pack("i", 1) + MODEL_PATH.encode("ascii") + b"\0"
+    out += pack("i", 1) + model_path.encode("ascii") + b"\0"
     out += pack("i", 0)  # no config-backed static entity records
     out += leaf + pack("i", len(PLACEMENTS) * 60)  # object offsets and byte count
     out += leaf + pack("i", 0)  # map-info offsets and byte count
@@ -104,7 +104,7 @@ class Cursor:
         return result
 
 
-def verify_world(payload):
+def verify_world(payload, model_path=MODEL_PATH):
     r = Cursor(payload)
     assert r.take(4) == b"OPRW"
     assert r.unpack("6if") == (25, 0, LAND, LAND, LAND, LAND, CELL)
@@ -116,7 +116,7 @@ def verify_world(payload):
     assert r.grid(LAND * LAND) == bytes(LAND * LAND)
     assert struct.unpack("<1024f", r.grid(LAND * LAND * 4)) == (HEIGHT,) * 1024
     assert r.unpack("i") == (1,) and r.z() == "" and r.take(1) == b"\0"
-    assert r.unpack("i") == (1,) and r.z() == MODEL_PATH
+    assert r.unpack("i") == (1,) and r.z() == model_path
     assert r.unpack("i") == (0,)
     assert r.take(5) == bytes(5) and r.unpack("i") == (120,)
     assert r.take(5) == bytes(5) and r.unpack("i") == (0,)
@@ -159,19 +159,20 @@ def verify_model(payload):
     assert r.pos == len(payload)
 
 
-def generate(output):
-    world, model = build_world(), build_model()
-    verify_world(world)
-    verify_model(model)
-    # No implicit output location and no cleanup/deletion of caller files.
+def generate(output, absolute_model_path=False):
     output = output.resolve()
     model_file = output / "streaming_fixture" / "wall.p3d"
+    model_path = str(model_file) if absolute_model_path else MODEL_PATH
+    world, model = build_world(model_path), build_model()
+    verify_world(world, model_path)
+    verify_model(model)
+    # No implicit output location and no cleanup/deletion of caller files.
     model_file.parent.mkdir(parents=True, exist_ok=True)
     model_file.write_bytes(model)
     (output / "simulation-residency.wrp").write_bytes(world)
     metadata = {
         "schema": 1, "land_range": LAND, "terrain_range": LAND, "cell_metres": CELL,
-        "elevation": HEIGHT, "models": [MODEL_PATH], "placements": [
+        "elevation": HEIGHT, "models": [model_path], "absolute_model_path": absolute_model_path, "placements": [
             {"id": p[0], "model_index": 0, "position": list(p[1:])} for p in PLACEMENTS],
         "camera": [100, 80, 100], "actor": [1190, 10, 1200],
         "fire_segment": [[1190, 11.5, 1200], [1210, 11.5, 1200]],
@@ -181,7 +182,7 @@ def generate(output):
         "model_sha256": hashlib.sha256(model).hexdigest(),
         "camera_isolation_env": {"WGR_OBJECT_STREAM_WINDOW_GROWTH": "0",
                                  "WGR_OBJECT_STREAM_RADIUS_CELLS": "8"},
-        "notes": ["Use output as addon root; world uses only original loose assets.",
+        "notes": ["Absolute-model mode uses original loose files without an archive mount; relative mode needs a separately configured loose-file root.",
                   "Camera at 100 is isolated from walls at 1200/1230 with growth disabled.",
                   "No ResolveObject: actor demand must admit geometry with transient leases.",
                   "Generic inventory/classification/admission must establish readiness.",
@@ -193,7 +194,8 @@ def generate(output):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=Path, help="Private caller-selected output directory")
+    parser.add_argument("--absolute-model-path", action="store_true", help="Embed the private absolute loose model path; --addon-root accepts archives, not loose folders")
     args = parser.parse_args()
-    manifest = generate(args.output)
+    manifest = generate(args.output, args.absolute_model_path)
     print(json.dumps({"output": str(args.output.resolve()), "world_sha256": manifest["world_sha256"],
                       "model_sha256": manifest["model_sha256"]}, sort_keys=True))
