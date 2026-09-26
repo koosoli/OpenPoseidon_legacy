@@ -1,16 +1,17 @@
-param([ValidateSet("Native","DayZ","Legacy")][string]$Corpus="Native",[ValidateRange(0,2.0)][double]$GeoGrowth=2.0,[switch]$PressureGrowth,[switch]$PackedModels,[switch]$PackedTextures,[switch]$NativeDdsPrepared,[switch]$NativeBc3Only,[switch]$FullSkyUploads,[switch]$SampleDriverMemory,[switch]$Baseline,[switch]$Normal,[switch]$Adaptive,[switch]$Controlled,[switch]$Identity,[switch]$RequiredIdentity,[switch]$CoverageOnly,[switch]$SaveRoundTrip,[switch]$FreshReload,[switch]$DuringFill,[ValidateRange(-1,16384)][int]$ReadyMb=-1,[string]$Label='stationary-budget',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
+param([ValidateSet("Native","DayZ","Legacy")][string]$Corpus="Native",[ValidateRange(0,2.0)][double]$GeoGrowth=2.0,[switch]$PressureGrowth,[switch]$PackedModels,[switch]$PackedTextures,[switch]$NativeDdsPrepared,[switch]$NativeBc3Only,[switch]$SimulationMetadata,[switch]$FullSkyUploads,[switch]$SampleDriverMemory,[switch]$Baseline,[switch]$Normal,[switch]$Adaptive,[switch]$Controlled,[switch]$Identity,[switch]$RequiredIdentity,[switch]$CoverageOnly,[switch]$SaveRoundTrip,[switch]$FreshReload,[switch]$DuringFill,[ValidateRange(-1,16384)][int]$ReadyMb=-1,[string]$Label='stationary-budget',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {
  $shellName=if ($PSVersionTable.PSEdition -eq 'Core') {'pwsh.exe'} else {'powershell.exe'}
  $argv=@((Join-Path $PSScriptRoot 'with-game-lock.sh'),(Join-Path $PSHOME $shellName).Replace('\','/'),'-NoProfile','-File',$PSCommandPath,'-Label',$Label,'-GameDir',$GameDir)
  if ($Baseline) {$argv+='-Baseline'}; if ($Normal) {$argv+='-Normal'}
- foreach ($flag in @('Adaptive','Controlled','Identity','RequiredIdentity','CoverageOnly','SaveRoundTrip','FreshReload','DuringFill','SampleDriverMemory','PressureGrowth','PackedModels','PackedTextures','NativeDdsPrepared','NativeBc3Only','FullSkyUploads')) {if ((Get-Variable $flag -ValueOnly)) {$argv+=('-'+$flag)}}
+ foreach ($flag in @('Adaptive','Controlled','Identity','RequiredIdentity','CoverageOnly','SaveRoundTrip','FreshReload','DuringFill','SampleDriverMemory','PressureGrowth','PackedModels','PackedTextures','NativeDdsPrepared','NativeBc3Only','SimulationMetadata','FullSkyUploads')) {if ((Get-Variable $flag -ValueOnly)) {$argv+=('-'+$flag)}}
  $argv+=@('-ReadyMb',[string]$ReadyMb,'-Corpus',$Corpus,'-GeoGrowth',$GeoGrowth.ToString([Globalization.CultureInfo]::InvariantCulture))
  $env:LOCK_OWNER='stationary residency check'
  try {& 'C:\Program Files\Git\bin\bash.exe' @argv; if ($LASTEXITCODE) {throw "Residency test exited $LASTEXITCODE"}} finally {Remove-Item Env:LOCK_OWNER}
  return
 }
 if (Get-Process OpenPoseidon -ErrorAction SilentlyContinue) {throw 'Game already running'}
+if ($SimulationMetadata -and ($Corpus -ne 'DayZ' -or !$Normal -or $Adaptive -or $Controlled -or $DuringFill -or $Identity -or $RequiredIdentity -or $SaveRoundTrip -or $FreshReload)) {throw 'SimulationMetadata requires the normal DayZ workload without other correctness or adaptive modes'}
 if ($FreshReload) {$SaveRoundTrip=$true}
 if ($NativeBc3Only) {$NativeDdsPrepared=$true}
 if ($SaveRoundTrip) {if (!$Normal -or $Baseline -or $DuringFill -or $Controlled -or $CoverageOnly) {throw 'SaveRoundTrip requires Normal and excludes performance modes'}; $RequiredIdentity=$true}
@@ -49,7 +50,7 @@ $env:WGR_OBJECT_STREAM_PBO=if ($PackedModels) {'1'} else {'0'}
 $env:WGR_OBJECT_STREAM_PBO_TEXTURES=if ($PackedTextures) {'1'} else {'0'}
 $env:WGR_NATIVE_DDS_PREPARE=if ($NativeDdsPrepared) {'1'} else {'0'}
 $env:WGR_NATIVE_DDS_BC3_ONLY=if ($NativeBc3Only) {'1'} else {'0'}
-$env:WGR_SIMULATION_RESIDENCY='0'
+$env:WGR_SIMULATION_RESIDENCY=if ($SimulationMetadata) {'1'} else {'0'}
 $env:WGR_SKY_VOLUME_INCREMENTAL=if ($FullSkyUploads) {'0'} else {'1'}
 $env:WGR_PASS1_STATS='1'
 $env:WGR_RESIDENCY_TRACE='1'
@@ -248,12 +249,23 @@ try {
  }
  $null=Send @{cmd='screenshot';path=(Join-Path $out 'settled.png')}
  if ($RequiredIdentity -or $CoverageOnly) {Start-Sleep -Seconds 8; $null=Send @{cmd='screenshot';path=(Join-Path $out 'returned-settled.png')}}
+ $simulationMetadataResult=$null
+ if ($SimulationMetadata) {
+  $until=[DateTime]::UtcNow.AddSeconds(180)
+  do {
+   Start-Sleep -Milliseconds 500
+   if ($p.HasExited) {throw 'Game exited during compact metadata scan'}
+   $simulationMetadataResult=Send @{cmd='stream_simulation_residency'}
+  } while (!$simulationMetadataResult.metadataComplete -and [DateTime]::UtcNow -lt $until)
+  $m=$simulationMetadataResult
+  if (!$m.metadataComplete -or $m.inventoryRows -ne $m.inventoryTotal -or $m.inventoryTotal -lt 2900000 -or $m.referencedModels -le 256 -or $m.status -ne 'CapacityExceeded' -or $m.activeModelRefusals -ne 1 -or $m.activeModels -ne 0 -or $m.preparedModels -ne 0 -or $m.sparseLeaseRecords -ne 0 -or $m.created -ne 0 -or $m.metadataRecordBytes -le 0 -or $m.metadataRecordBytes -gt 4194304) {throw 'Real DayZ compact inventory was incomplete, unbounded, or admitted simulation geometry before its active capacity refusal'}
+ }
  $null=Send @{cmd='exit'}
  if (!$p.WaitForExit(15000) -or $p.ExitCode) {throw 'Game failed to exit cleanly'}
  if (Select-String -LiteralPath $log -Pattern 'Out of Memory|Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION' -Quiet) {throw 'Renderer error'}
  if ($FreshReload -and (Select-String -LiteralPath $reloadLog -Pattern 'Out of Memory|Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION' -Quiet)) {throw 'Reload renderer error'}
  # A result is accepted only after clean shutdown and renderer-error checks.
- @{passed=$true;coverageOnly=[bool]$CoverageOnly;saveRoundTrip=[bool]$SaveRoundTrip;freshReload=[bool]$FreshReload;during=$during;identityBefore=$identityBefore;identityAway=$identityAway;identityReturned=$identityReturned;poses=$poseResults;before=$before;small=$small;restored=$restored;normal=[bool]$Normal;baselineReproduced=([bool]$Baseline -and !$Normal)} | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $out 'result.json')
+ @{passed=$true;simulationMetadata=$simulationMetadataResult;coverageOnly=[bool]$CoverageOnly;saveRoundTrip=[bool]$SaveRoundTrip;freshReload=[bool]$FreshReload;during=$during;identityBefore=$identityBefore;identityAway=$identityAway;identityReturned=$identityReturned;poses=$poseResults;before=$before;small=$small;restored=$restored;normal=[bool]$Normal;baselineReproduced=([bool]$Baseline -and !$Normal)} | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $out 'result.json')
  Write-Output "Stationary residency evidence: $out"
 } finally {
  if ($gpuSampler -and !$gpuSampler.HasExited) {Stop-Process -Id $gpuSampler.Id}

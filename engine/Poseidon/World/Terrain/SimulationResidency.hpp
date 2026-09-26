@@ -30,6 +30,9 @@ struct SimulationResidencyStats
     uint64_t shapeElementBytes = 0, lastPumpVisits = 0, ownerPumps = 0;
     uint64_t fireCollisionCalls = 0, fireCollisionCandidateTests = 0, fireCollisionWorkRefusals = 0;
     double lastFireCollisionMs = 0;
+    bool metadataComplete = false;
+    uint64_t metadataRecordBytes = 0, referencedModels = 0, activeModels = 0, sparseLeaseRecords = 0;
+    uint64_t metadataPlacementRefusals = 0, metadataModelRefusals = 0, metadataByteRefusals = 0, activeModelRefusals = 0;
     double lastPumpMs = 0;
 };
 

@@ -192,6 +192,15 @@ void RegisterStreamingProbes(HarnessServer& hs)
             };
             number("inventoryRows", state.inventoryRows);
             number("inventoryTotal", state.inventoryTotal);
+            cJSON_AddBoolToObject(result, "metadataComplete", state.metadataComplete);
+            number("metadataRecordBytes", state.metadataRecordBytes);
+            number("referencedModels", state.referencedModels);
+            number("activeModels", state.activeModels);
+            number("sparseLeaseRecords", state.sparseLeaseRecords);
+            number("metadataPlacementRefusals", state.metadataPlacementRefusals);
+            number("metadataModelRefusals", state.metadataModelRefusals);
+            number("metadataByteRefusals", state.metadataByteRefusals);
+            number("activeModelRefusals", state.activeModelRefusals);
             number("coverageGeneration", state.coverageGeneration);
             number("models", state.models);
             number("preparedModels", state.preparedModels);

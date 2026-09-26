@@ -29,7 +29,7 @@ bool ValidRegion(const CoveragePoint& a, const CoveragePoint& b, double radius)
 }
 Status MetadataStatus(const State& s)
 {
-    if (s.stats.status == Status::CapacityExceeded || s.watchCapacityExceeded) return Status::CapacityExceeded;
+    if (s.stats.status == Status::CapacityExceeded || s.watchCapacityExceeded || s.activeModelCapacityExceeded) return Status::CapacityExceeded;
     if (s.inventoryInvalid) return Status::Unknown;
     if (!s.inventoryComplete) return Status::Pending;
     bool pending = false;
@@ -38,7 +38,7 @@ Status MetadataStatus(const State& s)
         if (g.status == State::ModelState::CapacityExceeded) return Status::CapacityExceeded;
         if (g.status == State::ModelState::Unknown || !g.validRows) return Status::Unknown;
         if (g.status != State::ModelState::Ready) pending = true;
-        else if (!g.members.empty() && (!g.shape || g.revision == 0 || g.shape->QueryPolicyRevision() != g.revision))
+        else if (g.memberCount && (!g.shape || g.revision == 0 || g.shape->QueryPolicyRevision() != g.revision))
             return Status::Unknown;
     }
     return pending ? Status::Pending : Status::Ready;
@@ -108,10 +108,24 @@ void Landscape::EnsureModernSimulationResidency()
     s.stats.status = Status::Pending;
     s.stats.inventoryTotal = _modernObjectPlacements.size();
     s.stats.models = _modernObjectModels.size();
-    if (_modernObjectModels.size() > SimulationMaxModels || _modernObjectPlacements.size() > SimulationMaxPlacements)
-    { s.stats.status = Status::CapacityExceeded; return; }
+    const auto preflight = PreflightSimulationMetadata(_modernObjectPlacements.size(), _modernObjectModels.size(), sizeof(State::Group));
+    if (preflight.refusal != SimulationMetadataRefusal::None)
+    {
+        s.stats.status = Status::CapacityExceeded;
+        if (preflight.refusal == SimulationMetadataRefusal::PlacementCount) ++s.stats.metadataPlacementRefusals;
+        else if (preflight.refusal == SimulationMetadataRefusal::ModelCount) ++s.stats.metadataModelRefusals;
+        else ++s.stats.metadataByteRefusals;
+        return;
+    }
     s.groups.resize(_modernObjectModels.size());
-    s.leaseCounts.resize(_modernObjectPlacements.size());
+    // Charge actual fixed-record capacity, not requested rows or allocator RSS.
+    const auto actual = PreflightSimulationMetadata(_modernObjectPlacements.size(), s.groups.capacity(), sizeof(State::Group));
+    if (actual.refusal != SimulationMetadataRefusal::None)
+    {
+        std::vector<State::Group>().swap(s.groups);
+        ++s.stats.metadataByteRefusals; s.stats.status = Status::CapacityExceeded; return;
+    }
+    s.stats.metadataRecordBytes = actual.recordBytes;
     if (!_modernObjectPreparer) EnsureModernObjectPreparer();
     if (!_modernObjectPreparer) s.inventoryInvalid = true;
 }
@@ -143,13 +157,13 @@ void Landscape::ObserveModernSimulationPlacement(uint32_t index, Object* object)
 }
 bool Landscape::HasModernSimulationLease(uint32_t index) const
 {
-    return _modernSimulation && index < _modernSimulation->leaseCounts.size() && _modernSimulation->leaseCounts[index] != 0;
+    return _modernSimulation && _modernSimulation->HasLease(index);
 }
 void Landscape::PreserveModernSimulationModelRequests(std::vector<uint32_t>& epochs, uint32_t epoch) const
 {
     if (!_modernSimulation || epochs.size() != _modernSimulation->groups.size()) return;
     for (size_t i = 0; i < epochs.size(); ++i)
-        if (!_modernSimulation->groups[i].members.empty() && _modernSimulation->groups[i].status == State::ModelState::Waiting)
+        if (_modernSimulation->groups[i].requestOutstanding && _modernSimulation->groups[i].status == State::ModelState::Waiting)
             epochs[i] = epoch;
 }
 Status Landscape::QueueModernSimulationRegion(Object& actor, Vector3Par from, Vector3Par to, double radius, bool automatic)
@@ -307,12 +321,15 @@ SimulationResidencyStats Landscape::SnapshotModernSimulationResidency() const
     if (!_modernSimulation) { out.status = Status::Pending; return out; }
     const auto& s = *_modernSimulation;
     out = s.stats; out.status = ObservedStatus(s); out.regions = out.queryRegions = 0; out.coverageGeneration = s.generation;
+    out.metadataComplete = s.inventoryComplete; out.referencedModels = s.referencedModels;
+    out.activeModels = 0; out.sparseLeaseRecords = s.leaseCounts.size();
     out.preparedModels = out.unknownModels = out.leasedPlacements = 0;
     out.watchedPlacements = s.watches.size(); out.liveWatchedPlacements = 0;
     for (const auto& [index, watch] : s.watches) if (static_cast<Object*>(watch.object)) ++out.liveWatchedPlacements;
     for (const auto& g : s.groups)
     {
-        if (!g.members.empty() && g.status == State::ModelState::Ready) ++out.preparedModels;
+        if (g.shape) ++out.activeModels;
+        if (g.memberCount && g.status == State::ModelState::Ready) ++out.preparedModels;
         if (g.status == State::ModelState::Unknown || !g.validRows) ++out.unknownModels;
     }
     for (const auto& [i, entry] : s.entries) if (HasModernSimulationLease(i)) ++out.leasedPlacements;
@@ -350,6 +367,8 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
     const auto started = std::chrono::steady_clock::now();
     const auto elapsed = [&] { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count(); };
     ++s.tick; ++s.stats.ownerPumps; s.stats.lastPumpVisits = 0;
+    if (s.inventoryComplete && s.activeModelCapacityExceeded)
+    { s.stats.lastPumpMs = elapsed(); return; }
     // This owner boundary is after FinishSecondary, so weak actors and physical
     // object grids are never read/mutated concurrently with background AI.
     const size_t totalActors = _world ? size_t(_world->NVehicles() + _world->NFastVehicles()) : 0;
@@ -379,8 +398,11 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
     {
         if (s.inventoryCursor == _modernObjectPlacements.size())
         {
-            s.inventoryComplete = true;
-            for (auto& g : s.groups) if (g.members.empty()) g.status = State::ModelState::Ready;
+            // This groundwork does not eagerly expand CPU shapes to cover a
+            // production-world model inventory. Finish metadata, then refuse
+            // before ANY simulation Request/Take/ShapeBank work when the full
+            // referenced active set cannot fit the unchanged256-model bound.
+            s.FinishInventory();
             break;
         }
         const uint32_t i = uint32_t(s.inventoryCursor++);
@@ -396,16 +418,18 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
         else
         {
             g.maximumScale = std::max(g.maximumScale, *scale);
-            if (g.members.empty()) g.origins = {origin, origin};
+            if (!g.memberCount) g.origins = {origin, origin};
             else for (size_t axis = 0; axis < 3; ++axis)
             { g.origins.min[axis] = std::min(g.origins.min[axis], origin[axis]); g.origins.max[axis] = std::max(g.origins.max[axis], origin[axis]); }
         }
-        g.members.push_back(i);
+        if (!g.memberCount++) ++s.referencedModels;
         ObserveModernSimulationPlacement(i, p.resident);
     }
+    if (s.activeModelCapacityExceeded)
+    { s.stats.lastPumpMs = elapsed(); return; }
     // At most ONE bank-table/handoff tail per pump. No synchronous fallback:
     // packed/failed/unsupported models are explicit Unknown, never omitted.
-    if (s.inventoryComplete && !s.inventoryInvalid && _modernObjectPreparer && elapsed() < 2 && !s.groups.empty())
+    if (s.inventoryComplete && !s.inventoryInvalid && !s.activeModelCapacityExceeded && _modernObjectPreparer && elapsed() < 2 && !s.groups.empty())
     {
         for (size_t scan = 0; scan < s.groups.size(); ++scan)
         {
@@ -416,7 +440,8 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
             const auto state = _modernObjectPreparer->Query(i);
             if (state == ObjectStreamPreparer::State::NotLoose || state == ObjectStreamPreparer::State::Failed)
             { g.status = State::ModelState::Unknown; continue; }
-            if (state == ObjectStreamPreparer::State::Unknown) { _modernObjectPreparer->Request(i); continue; }
+            if (state == ObjectStreamPreparer::State::Unknown)
+            { if (_modernObjectPreparer->Request(i)) g.requestOutstanding = true; continue; }
             if (state != ObjectStreamPreparer::State::Ready && state != ObjectStreamPreparer::State::Converted) continue;
             std::shared_ptr<Model::Model> model;
             LODShapeWithShadow* converted = nullptr;
@@ -424,6 +449,9 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
             { auto result = _modernObjectPreparer->TakeConverted(i); converted = result.shape; model = std::move(result.model); }
             else model = _modernObjectPreparer->Take(i);
             if (!model) { delete converted; break; }
+            // The simulation now owns this handoff even when the original parse
+            // was requested by the camera. Preserve only actual owned work.
+            g.requestOutstanding = true;
             const uint64_t bytes = Model::ResidentPayloadBytes(*model);
             if (bytes > SimulationMaxModelPayload)
             { delete converted; g.status = State::ModelState::CapacityExceeded; break; }
@@ -502,7 +530,7 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
         s.placementPadding = 0;
         for (auto& g : s.groups)
         {
-            if (g.members.empty() || g.status != State::ModelState::Ready) continue;
+            if (!g.memberCount || g.status != State::ModelState::Ready) continue;
             const auto upper = BuildEngineBroadphaseEnvelope(g.origins.max, g.maximumScale, g.radius);
             const auto lower = BuildEngineBroadphaseEnvelope(g.origins.min, g.maximumScale, g.radius);
             if (!upper || !lower) { g.status = State::ModelState::Unknown; continue; }
@@ -551,6 +579,7 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
                 if (!Overlap(*box, r) || r.pendingSet.contains(index)) continue;
                 if ((!r.activeSet.contains(index) && r.active.size() + r.pendingNew >= SimulationMaxRegionLeases) ||
                     (r.pending.size() >= SimulationMaxRegionLeases) ||
+                    (!r.activeSet.contains(index) && !s.CanAcquireLease(index)) ||
                     (!s.entries.contains(index) && s.entries.size() >= SimulationMaxLeasedPlacements))
                 { r.status = Status::CapacityExceeded; break; }
                 Object* object = static_cast<Object*>(p.resident);
@@ -592,7 +621,11 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
                 for (auto& group : s.groups) if (group.shape.GetRef() == g.shape.GetRef()) group.revision = g.shape->QueryPolicyRevision();
                 auto& e = s.entries[index]; e.object = object; e.shape = object->GetShape();
                 e.frame = SimulationFrameSample(object->Transform()); e.radius = object->GetRadius();
-                if (!r.activeSet.contains(index)) { ++s.leaseCounts[index]; ++r.pendingNew; }
+                if (!r.activeSet.contains(index))
+                {
+                    if (!s.AcquireLease(index)) { r.status = Status::CapacityExceeded; break; }
+                    ++r.pendingNew;
+                }
                 r.pending.push_back(index); r.pendingSet.insert(index);
             }
             if (r.status == Status::Pending && r.cell == r.plan.cells.size())

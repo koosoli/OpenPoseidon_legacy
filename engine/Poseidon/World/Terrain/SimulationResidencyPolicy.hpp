@@ -14,7 +14,6 @@ namespace Poseidon::Streaming
 {
 
 inline constexpr size_t SimulationMaxModels = 256;
-inline constexpr size_t SimulationMaxPlacements = 1000000;
 inline constexpr size_t SimulationMaxRegions = 128;
 inline constexpr size_t SimulationMaxRegionLeases = 4096;
 inline constexpr size_t SimulationMaxLeasedPlacements = 16384;

@@ -4,6 +4,7 @@
 #include <Poseidon/World/Terrain/SimulationResidency.hpp>
 #include <Poseidon/World/Terrain/SimulationResidencyPolicy.hpp>
 #include <Poseidon/World/Terrain/SimulationDemand.hpp>
+#include <Poseidon/World/Terrain/SimulationResidencyCapacity.hpp>
 
 #include <unordered_map>
 #include <unordered_set>
@@ -29,12 +30,18 @@ struct SimulationResidencyState
         { return std::hash<const Object*>{}(key.actor) ^ (size_t(key.channel) * size_t(0x9e3779b9)); }
     };
     enum class ModelState { Waiting, Ready, Unknown, CapacityExceeded };
-    struct Group
+    // Complete authored inventory metadata, no duplicate placement indices.
+    // Group's full fixed record (including empty active fields) is byte charged.
+    struct ModelMetadataRecord
     {
-        std::vector<uint32_t> members;
+        uint64_t memberCount = 0;
         CoverageEnvelope origins{};
-        bool validRows = true, sourceValidated = false, charged = false;
+        bool validRows = true;
         double maximumScale = 0;
+    };
+    struct Group : ModelMetadataRecord
+    {
+        bool sourceValidated = false, charged = false, requestOutstanding = false;
         Ref<LODShapeWithShadow> shape;
         uint64_t revision = 0, payloadCharge = 0, shapeCharge = 0;
         float radius = 0;
@@ -90,7 +97,9 @@ struct SimulationResidencyState
 
     SimulationResidencyStats stats;
     std::vector<Group> groups;
-    std::vector<uint32_t> leaseCounts;
+    // Sparse, bounded live lease debt; zero-count rows are erased. There is no
+    // allocation proportional to the landscape's millions of placement rows.
+    std::unordered_map<uint32_t, uint32_t> leaseCounts;
     std::unordered_map<uint32_t, Entry> entries;
     std::deque<uint32_t> cleanupQueue;
     // Complete bounded registry of actual modern-placement admissions. Weak
@@ -102,11 +111,41 @@ struct SimulationResidencyState
     size_t inventoryCursor = 0, modelCursor = 0, actorCursor = 0, regionCursor = 0;
     uint64_t tick = 0, generation = 1;
     bool inventoryComplete = false, inventoryInvalid = false;
+    uint64_t referencedModels = 0;
+    bool activeModelCapacityExceeded = false;
     double placementPadding = 0;
 
+    void FinishInventory()
+    {
+        if (inventoryComplete) return;
+        inventoryComplete = true;
+        for (auto& g : groups) if (!g.memberCount) g.status = ModelState::Ready;
+        if (referencedModels > SimulationMaxModels)
+        { activeModelCapacityExceeded = true; ++stats.activeModelRefusals; }
+    }
+
+    bool HasLease(uint32_t index) const
+    {
+        return leaseCounts.contains(index);
+    }
+    bool CanAcquireLease(uint32_t index) const
+    {
+        return HasLease(index) || leaseCounts.size() < SimulationMaxLeasedPlacements;
+    }
+    bool AcquireLease(uint32_t index)
+    {
+        if (!CanAcquireLease(index)) return false;
+        ++leaseCounts[index];
+        return true;
+    }
     void DropLease(uint32_t index)
     {
-        if (index < leaseCounts.size() && leaseCounts[index]) --leaseCounts[index];
+        const auto found = leaseCounts.find(index);
+        if (found != leaseCounts.end())
+        {
+            if (found->second <= 1) leaseCounts.erase(found);
+            else --found->second;
+        }
     }
     void DropPending(Region& r)
     {

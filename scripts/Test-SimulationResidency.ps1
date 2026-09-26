@@ -1,10 +1,10 @@
-param([switch]$Disabled,[switch]$Capacity,[switch]$MovedWatcher,[switch]$LargeWall,[string]$Label='simulation-residency',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',[string]$Python='C:\Program Files\Python311\python.exe')
+param([switch]$Disabled,[switch]$Capacity,[switch]$ActiveCapacity,[switch]$MovedWatcher,[switch]$LargeWall,[string]$Label='simulation-residency',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',[string]$Python='C:\Program Files\Python311\python.exe')
 $ErrorActionPreference='Stop'
-if (@($Disabled,$Capacity,$MovedWatcher,$LargeWall | Where-Object {$_}).Count -gt 1) {throw 'Disabled, Capacity, MovedWatcher and LargeWall are separate scenarios'}
+if (@($Disabled,$Capacity,$ActiveCapacity,$MovedWatcher,$LargeWall | Where-Object {$_}).Count -gt 1) {throw 'Disabled, Capacity, ActiveCapacity, MovedWatcher and LargeWall are separate scenarios'}
 if (!$env:LOCK_OWNER) {
  $shellName=if ($PSVersionTable.PSEdition -eq 'Core') {'pwsh.exe'} else {'powershell.exe'}
  $argv=@((Join-Path $PSScriptRoot 'with-game-lock.sh'),(Join-Path $PSHOME $shellName).Replace('\','/'),'-NoProfile','-File',$PSCommandPath,'-Label',$Label,'-GameDir',$GameDir,'-Python',$Python)
- foreach ($flag in @('Disabled','Capacity','MovedWatcher','LargeWall')) {if ((Get-Variable $flag -ValueOnly)) {$argv+=('-'+$flag)}}
+ foreach ($flag in @('Disabled','Capacity','ActiveCapacity','MovedWatcher','LargeWall')) {if ((Get-Variable $flag -ValueOnly)) {$argv+=('-'+$flag)}}
  $env:LOCK_OWNER='simulation residency fixture'
  try {& 'C:\Program Files\Git\bin\bash.exe' @argv; if ($LASTEXITCODE) {throw "Simulation fixture exited $LASTEXITCODE"}} finally {Remove-Item Env:LOCK_OWNER}
  return
@@ -17,7 +17,8 @@ $mission=Join-Path $out 'simulation-fixture.eden'
 $env:POSEIDON_USER_DIR=Join-Path $out 'user'
 New-Item -ItemType Directory -Force $mission,$env:POSEIDON_USER_DIR | Out-Null
 $fixtureArgs=@($fixture,'--absolute-model-path')
-if ($Capacity) {$fixtureArgs+=@('--model-count','257')}
+if ($Capacity) {$fixtureArgs+=@('--model-count','8193')}
+if ($ActiveCapacity) {$fixtureArgs+=@('--model-count','257','--reference-all-models')}
 if ($LargeWall) {$fixtureArgs+='--large-wall'}
 & $Python (Join-Path $PSScriptRoot 'streaming/build_simulation_residency_fixture.py') @fixtureArgs
 if ($LASTEXITCODE) {throw 'Original fixture generation failed'}
@@ -93,11 +94,13 @@ try {
   $cold=State;$coldIds=Ids
   if ($cold.status -ne 'Disabled' -or $cold.ownerPumps -ne 0 -or @($coldIds.objects | Where-Object {$_.present}).Count) {throw 'Default-off fixture performed simulation work or loaded remote walls'}
   $result=@{cold=$cold;coldIds=$coldIds}
- } elseif ($Capacity) {
+ } elseif ($Capacity -or $ActiveCapacity) {
   $cold=Wait-State {param($r) $r.status -eq 'CapacityExceeded'} 'pre-admission model capacity refusal'
   $coldIds=Ids
-  if ($cold.models -ne 257 -or $cold.inventoryRows -ne 0 -or $cold.preparedModels -ne 0 -or $cold.leasedPlacements -ne 0 -or $cold.created -ne 0 -or @($coldIds.objects | Where-Object {$_.present}).Count) {throw 'Capacity refusal admitted a partial world'}
-  $result=@{cold=$cold;coldIds=$coldIds;capacity=$true}
+  if ($cold.preparedModels -ne 0 -or $cold.activeModels -ne 0 -or $cold.leasedPlacements -ne 0 -or $cold.sparseLeaseRecords -ne 0 -or $cold.created -ne 0 -or @($coldIds.objects | Where-Object {$_.present}).Count) {throw 'Capacity refusal admitted a partial world'}
+  if ($Capacity -and ($cold.models -ne 8193 -or $cold.inventoryRows -ne 0 -or $cold.metadataComplete -or $cold.metadataModelRefusals -ne 1 -or $cold.metadataRecordBytes -ne 0)) {throw 'Metadata capacity refusal performed a partial allocation/scan'}
+  if ($ActiveCapacity -and ($cold.models -ne 257 -or $cold.inventoryRows -ne 257 -or !$cold.metadataComplete -or $cold.referencedModels -ne 257 -or $cold.activeModelRefusals -ne 1 -or $cold.metadataRecordBytes -gt 4194304)) {throw 'Active model cap was conflated with compact metadata capacity'}
+  $result=@{cold=$cold;coldIds=$coldIds;capacity=[bool]$Capacity;activeCapacity=[bool]$ActiveCapacity}
  } else {
   $cold=Wait-State {param($r) $r.status -eq 'Ready' -and $r.inventoryRows -eq 2 -and $r.preparedModels -eq 1 -and $r.leasedPlacements -eq 2 -and $r.readyRegions -ge 2 -and !$r.pendingRegions -and !$r.unknownRegions -and !$r.refusedRegions} 'complete actor region'
   $coldIds=Ids

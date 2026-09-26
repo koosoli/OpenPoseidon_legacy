@@ -8,9 +8,79 @@
 #include <limits>
 #include <cstddef>
 #include <new>
+#include <algorithm>
 
 using namespace Poseidon;
 using namespace Poseidon::Streaming;
+
+TEST_CASE("Compact simulation metadata preflight separates complete world records from active shape work", "[streaming-simulation-residency]")
+{
+    const auto production = PreflightSimulationMetadata(2971218,2352,sizeof(SimulationResidencyState::Group));
+    REQUIRE(production.refusal == SimulationMetadataRefusal::None);
+    REQUIRE(production.recordBytes == 2352 * sizeof(SimulationResidencyState::Group));
+    REQUIRE(production.recordBytes <= SimulationMaxMetadataRecordBytes);
+    REQUIRE(PreflightSimulationMetadata(SimulationMaxMetadataPlacements,SimulationMaxMetadataModels,sizeof(SimulationResidencyState::Group)).refusal == SimulationMetadataRefusal::None);
+    REQUIRE(PreflightSimulationMetadata(SimulationMaxMetadataPlacements+1,1,1).refusal == SimulationMetadataRefusal::PlacementCount);
+    REQUIRE(PreflightSimulationMetadata(2,SimulationMaxMetadataModels+1,1).refusal == SimulationMetadataRefusal::ModelCount);
+    REQUIRE(PreflightSimulationMetadata(2,1,std::numeric_limits<uint64_t>::max()).refusal == SimulationMetadataRefusal::RecordBytes);
+    REQUIRE(PreflightSimulationMetadata(2,2,SimulationMaxMetadataRecordBytes).refusal == SimulationMetadataRefusal::RecordBytes);
+    REQUIRE(PreflightSimulationMetadata(2,1,0).refusal == SimulationMetadataRefusal::RecordBytes);
+}
+
+TEST_CASE("Large metadata inventories never invent active shape readiness or enlarge the active model cap", "[streaming-simulation-residency]")
+{
+    Foundation::CaptureMainThread();
+    SimulationResidencyState state;
+    state.groups.resize(SimulationMaxMetadataModels);
+    SECTION("unused table rows consume metadata only")
+    {
+        state.groups[0].memberCount = 2; state.referencedModels = 1;
+        state.FinishInventory();
+        REQUIRE(state.inventoryComplete);
+        REQUIRE_FALSE(state.activeModelCapacityExceeded);
+        REQUIRE(state.groups[0].status == SimulationResidencyState::ModelState::Waiting);
+        REQUIRE(state.groups.back().status == SimulationResidencyState::ModelState::Ready);
+        REQUIRE(state.stats.activeModelRefusals == 0);
+    }
+    SECTION("referenced active set refuses after complete scan before any shape work")
+    {
+        for (size_t i=0; i<SimulationMaxModels+1; ++i) ++state.groups[i].memberCount;
+        state.referencedModels = SimulationMaxModels+1;
+        state.FinishInventory();
+        REQUIRE(state.inventoryComplete);
+        REQUIRE(state.activeModelCapacityExceeded);
+        REQUIRE(state.stats.activeModelRefusals == 1);
+        state.FinishInventory();
+        REQUIRE(state.stats.activeModelRefusals == 1);
+    }
+    REQUIRE_FALSE(std::any_of(state.groups.begin(),state.groups.end(),[](const auto& group) {return bool(group.shape) || group.requestOutstanding || group.charged;}));
+    REQUIRE(state.leaseCounts.empty());
+}
+
+TEST_CASE("Sparse simulation lease debt supports distant placement indices without allocating world-sized rows", "[streaming-simulation-residency]")
+{
+    SimulationResidencyState state;
+    const uint32_t distantIndex = uint32_t(SimulationMaxMetadataPlacements-1);
+    REQUIRE(state.AcquireLease(distantIndex)); REQUIRE(state.AcquireLease(distantIndex));
+    REQUIRE(state.leaseCounts.size() == 1);
+    state.DropLease(distantIndex);
+    REQUIRE(state.HasLease(distantIndex));
+    state.DropLease(distantIndex);
+    REQUIRE_FALSE(state.HasLease(distantIndex));
+    REQUIRE(state.leaseCounts.empty());
+    state.DropLease(distantIndex);
+    REQUIRE(state.leaseCounts.empty());
+    bool filled = true;
+    for (uint32_t i=0; i<SimulationMaxLeasedPlacements; ++i) filled &= state.AcquireLease(i);
+    REQUIRE(filled);
+    REQUIRE_FALSE(state.AcquireLease(distantIndex));
+    REQUIRE(state.AcquireLease(0)); // Existing owner's shared debt still fits.
+    state.DropLease(0);
+    REQUIRE_FALSE(state.AcquireLease(distantIndex)); // One owner still holds that row.
+    state.DropLease(0);
+    REQUIRE(state.AcquireLease(distantIndex));
+    REQUIRE(state.leaseCounts.size() == SimulationMaxLeasedPlacements);
+}
 
 TEST_CASE("Simulation eligibility rejects recursive animated and unsupported sources before installation", "[streaming-simulation-residency]")
 {
@@ -85,14 +155,16 @@ TEST_CASE("Transient simulation replacement protects old geometry until complete
 {
     Foundation::CaptureMainThread();
     SimulationResidencyState state;
-    state.leaseCounts = {1, 2, 1, 0};
+    REQUIRE(state.AcquireLease(0));
+    REQUIRE(state.AcquireLease(1)); REQUIRE(state.AcquireLease(1));
+    REQUIRE(state.AcquireLease(2));
     SimulationResidencyState::Region region;
     region.active = {0, 1}; region.activeSet = {0, 1};
     region.pending = {1, 2}; region.pendingSet = {1, 2}; region.pendingNew = 1;
     SECTION("cancelled incomplete replacement")
     {
         state.DropPending(region);
-        REQUIRE(state.leaseCounts == std::vector<uint32_t>{1, 2, 0, 0});
+        REQUIRE((state.leaseCounts == std::unordered_map<uint32_t,uint32_t>{{0,1},{1,2}}));
         REQUIRE(region.active == std::vector<uint32_t>{0, 1});
         REQUIRE(region.pending.empty());
     }
@@ -100,19 +172,19 @@ TEST_CASE("Transient simulation replacement protects old geometry until complete
     {
         state.CompleteReplacement(region);
         REQUIRE(region.status == SimulationResidencyStatus::Ready);
-        REQUIRE(state.leaseCounts == std::vector<uint32_t>{0, 2, 1, 0});
+        REQUIRE((state.leaseCounts == std::unordered_map<uint32_t,uint32_t>{{1,2},{2,1}}));
         REQUIRE(region.active == std::vector<uint32_t>{1, 2});
         state.DropRegion(region);
-        REQUIRE(state.leaseCounts == std::vector<uint32_t>{0, 1, 0, 0});
+        REQUIRE((state.leaseCounts == std::unordered_map<uint32_t,uint32_t>{{1,1}}));
         // Second actor still owns placement1; releasing the first did not evict it.
         REQUIRE(region.active.empty());
     }
     SECTION("dead actor releases old plus unshared pending once")
     {
         state.DropRegion(region);
-        REQUIRE(state.leaseCounts == std::vector<uint32_t>{0, 1, 0, 0});
+        REQUIRE((state.leaseCounts == std::unordered_map<uint32_t,uint32_t>{{1,1}}));
         state.DropRegion(region);
-        REQUIRE(state.leaseCounts == std::vector<uint32_t>{0, 1, 0, 0});
+        REQUIRE((state.leaseCounts == std::unordered_map<uint32_t,uint32_t>{{1,1}}));
     }
 }
 
@@ -178,7 +250,7 @@ TEST_CASE("Fire query channel cannot override automatic neighborhood or inherit 
     Ref<LODShapeWithShadow> shape = new LODShapeWithShadow;
     Ref<ObjectPlain> actor = new ObjectPlain(shape, 42);
     SimulationResidencyState state;
-    state.leaseCounts = {1, 1};
+    REQUIRE(state.AcquireLease(0)); REQUIRE(state.AcquireLease(1));
     const SimulationResidencyState::RegionKey neighborhood{actor, 0};
     const SimulationResidencyState::RegionKey fire{actor, uint8_t(SimulationQueryPurpose::Fire)};
     auto& local = state.regions[neighborhood]; local.actor = actor.GetRef();
@@ -189,7 +261,7 @@ TEST_CASE("Fire query channel cannot override automatic neighborhood or inherit 
     REQUIRE(state.regions.at(fire).status == SimulationResidencyStatus::Pending);
     REQUIRE(state.regions.at(neighborhood).status == SimulationResidencyStatus::Ready);
     state.DropRegion(state.regions.at(fire)); state.regions.erase(fire);
-    REQUIRE(state.leaseCounts == std::vector<uint32_t>{1, 0});
+    REQUIRE((state.leaseCounts == std::unordered_map<uint32_t,uint32_t>{{0,1}}));
     REQUIRE(state.regions.at(neighborhood).status == SimulationResidencyStatus::Ready);
     REQUIRE(state.regions.at(neighborhood).automatic);
     actor = nullptr;

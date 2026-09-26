@@ -40,7 +40,7 @@ def model_paths(model_path, model_count):
     return [model_path] + [model_path[:-4] + f"_unused_{i:03}.p3d" for i in range(1, model_count)]
 
 
-def build_world(model_path=MODEL_PATH, model_count=1, placements=PLACEMENTS):
+def build_world(model_path=MODEL_PATH, model_count=1, placements=PLACEMENTS, reference_all=False):
     leaf = b"\0" * 5  # Uniform quadtree: root tag plus four-byte leaf.
     zero_grid = bytes(LAND * LAND)
     out = bytearray(b"OPRW" + pack("6if", 25, 0, LAND, LAND, LAND, LAND, CELL))
@@ -59,8 +59,8 @@ def build_world(model_path=MODEL_PATH, model_count=1, placements=PLACEMENTS):
     out += bulk(zero_grid) * 2  # persistent and subdivision hints
     out += pack("2i", max(p[0] for p in placements), LAND * LAND * 4)
     out += bytes(LAND * LAND * 4)  # every road-link count is zero
-    for identity, x, y, z in placements:
-        out += pack("2i12fi", identity, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, x, y, z, 0)
+    for index, (identity, x, y, z) in enumerate(placements):
+        out += pack("2i12fi", identity, index if reference_all else 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, x, y, z, 0)
     return bytes(out)
 
 
@@ -112,7 +112,7 @@ class Cursor:
         return result
 
 
-def verify_world(payload, model_path=MODEL_PATH, model_count=1, placements=PLACEMENTS):
+def verify_world(payload, model_path=MODEL_PATH, model_count=1, placements=PLACEMENTS, reference_all=False):
     r = Cursor(payload)
     assert r.take(4) == b"OPRW"
     assert r.unpack("6if") == (25, 0, LAND, LAND, LAND, LAND, CELL)
@@ -131,8 +131,8 @@ def verify_world(payload, model_path=MODEL_PATH, model_count=1, placements=PLACE
     assert r.take(5) == bytes(5) and r.unpack("i") == (0,)
     assert r.grid(1024) == bytes(1024) and r.grid(1024) == bytes(1024)
     assert r.unpack("2i") == (max(p[0] for p in placements), 4096) and r.take(4096) == bytes(4096)
-    for identity, x, y, z in placements:
-        assert r.unpack("2i12fi") == (identity, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, x, y, z, 0)
+    for index, (identity, x, y, z) in enumerate(placements):
+        assert r.unpack("2i12fi") == (identity, index if reference_all else 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, x, y, z, 0)
     assert r.pos == len(payload)
 
 
@@ -168,7 +168,7 @@ def verify_model(payload, half_depth=6.0):
     assert r.pos == len(payload)
 
 
-def generate(output, absolute_model_path=False, model_count=1, large_wall=False):
+def generate(output, absolute_model_path=False, model_count=1, large_wall=False, reference_all=False):
     output = output.resolve()
     model_file = output / "streaming_fixture" / "wall.p3d"
     model_path = str(model_file) if absolute_model_path else MODEL_PATH
@@ -176,19 +176,26 @@ def generate(output, absolute_model_path=False, model_count=1, large_wall=False)
     # origin-cell padding. The original wall still intersects the same ray;
     # eight vertices keep this a correctness fixture rather than a load test.
     placements = tuple((p[0], p[1], p[2], 1400.0) for p in PLACEMENTS) if large_wall else PLACEMENTS
+    if reference_all:
+        if model_count != 257 or large_wall:
+            raise ValueError("Referenced-model capacity fixture requires 257 models and ordinary walls")
+        placements = tuple((1001 + i, 1200.0 + 30.0 * (i % 2), 11.5, 1200.0) for i in range(model_count))
     half_depth = 206.0 if large_wall else 6.0
-    world, model = build_world(model_path, model_count, placements), build_model(half_depth)
-    verify_world(world, model_path, model_count, placements)
+    world, model = build_world(model_path, model_count, placements, reference_all), build_model(half_depth)
+    verify_world(world, model_path, model_count, placements, reference_all)
     verify_model(model, half_depth)
     # No implicit output location and no cleanup/deletion of caller files.
     model_file.parent.mkdir(parents=True, exist_ok=True)
     model_file.write_bytes(model)
+    if reference_all:
+        for i in range(1, model_count):
+            model_file.with_name(model_file.stem + f"_unused_{i:03}.p3d").write_bytes(model)
     (output / "simulation-residency.wrp").write_bytes(world)
     metadata = {
         "schema": 1, "land_range": LAND, "terrain_range": LAND, "cell_metres": CELL,
         "elevation": HEIGHT, "models": model_paths(model_path, model_count), "absolute_model_path": absolute_model_path,
-        "large_wall": large_wall, "half_depth": half_depth, "placements": [
-            {"id": p[0], "model_index": 0, "position": list(p[1:])} for p in placements],
+        "large_wall": large_wall, "reference_all_models": reference_all, "half_depth": half_depth, "placements": [
+            {"id": p[0], "model_index": i if reference_all else 0, "position": list(p[1:])} for i, p in enumerate(placements)],
         "camera": [100, 80, 100], "actor": [1190, 10, 1200],
         "fire_segment": [[1190, 11.5, 1200], [1210, 11.5, 1200]],
         "wall_world_bounds": [[p[1] - 0.5, 10, p[3] - half_depth,
@@ -210,9 +217,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=Path, help="Private caller-selected output directory")
     parser.add_argument("--absolute-model-path", action="store_true", help="Embed the private absolute loose model path; --addon-root accepts archives, not loose folders")
-    parser.add_argument("--model-count", type=int, choices=(1, 257), default=1, help="257 adds unused metadata rows for the service's pre-admission capacity refusal")
+    parser.add_argument("--model-count", type=int, choices=(1, 257, 8193), default=1, help="Unused metadata rows or bounded referenced-model fixture")
+    parser.add_argument("--reference-all-models", action="store_true", help="257 original walls reference every model to test the separate active-work capacity")
     parser.add_argument("--large-wall", action="store_true", help="Original wall intersects the ray with its origin 200 m away from it")
     args = parser.parse_args()
-    manifest = generate(args.output, args.absolute_model_path, args.model_count, args.large_wall)
+    manifest = generate(args.output, args.absolute_model_path, args.model_count, args.large_wall, args.reference_all_models)
     print(json.dumps({"output": str(args.output.resolve()), "world_sha256": manifest["world_sha256"],
                       "model_sha256": manifest["model_sha256"]}, sort_keys=True))
