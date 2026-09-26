@@ -168,7 +168,7 @@ def verify_model(payload, half_depth=6.0):
     assert r.pos == len(payload)
 
 
-def generate(output, absolute_model_path=False, model_count=1, large_wall=False, reference_all=False):
+def generate(output, absolute_model_path=False, model_count=1, large_wall=False, reference_all=False, positive_warming=False):
     output = output.resolve()
     model_file = output / "streaming_fixture" / "wall.p3d"
     model_path = str(model_file) if absolute_model_path else MODEL_PATH
@@ -180,6 +180,12 @@ def generate(output, absolute_model_path=False, model_count=1, large_wall=False,
         if model_count != 257 or large_wall:
             raise ValueError("Referenced-model capacity fixture requires 257 models and ordinary walls")
         placements = tuple((1001 + i, 1200.0 + 30.0 * (i % 2), 11.5, 1200.0) for i in range(model_count))
+    if positive_warming:
+        if not reference_all or model_count != 257 or large_wall:
+            raise ValueError("Positive warming fixture needs the complete 257-model capacity inventory")
+        # Only two models enter either actor's camera window. The other 255
+        # remain referenced metadata, outside both camera windows/actor regions.
+        placements = PLACEMENTS + tuple((1001+i, 650.0, 11.5, 650.0) for i in range(2, model_count))
     half_depth = 206.0 if large_wall else 6.0
     world, model = build_world(model_path, model_count, placements, reference_all), build_model(half_depth)
     verify_world(world, model_path, model_count, placements, reference_all)
@@ -194,7 +200,7 @@ def generate(output, absolute_model_path=False, model_count=1, large_wall=False,
     metadata = {
         "schema": 1, "land_range": LAND, "terrain_range": LAND, "cell_metres": CELL,
         "elevation": HEIGHT, "models": model_paths(model_path, model_count), "absolute_model_path": absolute_model_path,
-        "large_wall": large_wall, "reference_all_models": reference_all, "half_depth": half_depth, "placements": [
+        "large_wall": large_wall, "reference_all_models": reference_all, "positive_warming": positive_warming, "half_depth": half_depth, "placements": [
             {"id": p[0], "model_index": i if reference_all else 0, "position": list(p[1:])} for i, p in enumerate(placements)],
         "camera": [100, 80, 100], "actor": [1190, 10, 1200],
         "fire_segment": [[1190, 11.5, 1200], [1210, 11.5, 1200]],
@@ -220,7 +226,8 @@ if __name__ == "__main__":
     parser.add_argument("--model-count", type=int, choices=(1, 257, 8193), default=1, help="Unused metadata rows or bounded referenced-model fixture")
     parser.add_argument("--reference-all-models", action="store_true", help="257 original walls reference every model to test the separate active-work capacity")
     parser.add_argument("--large-wall", action="store_true", help="Original wall intersects the ray with its origin 200 m away from it")
+    parser.add_argument("--positive-warming", action="store_true", help="Separate two camera-loaded walls from the other 255 referenced models")
     args = parser.parse_args()
-    manifest = generate(args.output, args.absolute_model_path, args.model_count, args.large_wall, args.reference_all_models)
+    manifest = generate(args.output, args.absolute_model_path, args.model_count, args.large_wall, args.reference_all_models, args.positive_warming)
     print(json.dumps({"output": str(args.output.resolve()), "world_sha256": manifest["world_sha256"],
                       "model_sha256": manifest["model_sha256"]}, sort_keys=True))

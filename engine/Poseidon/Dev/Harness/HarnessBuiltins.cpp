@@ -297,6 +297,8 @@ void RegisterStreamingProbes(HarnessServer& hs)
             number("unknownQueries", state.unknownQueries);
             number("refusedQueries", state.refusedQueries);
             number("leasedPlacements", state.leasedPlacements);
+            number("positiveScannedRegions", state.positiveScannedRegions);
+            number("positiveLeasedPlacements", state.positiveLeasedPlacements);
             number("created", state.created);
             number("released", state.released);
             number("queueRefused", state.queueRefused);

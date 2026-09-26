@@ -137,9 +137,17 @@ void Landscape::ObserveModernSimulationPlacement(uint32_t index, Object* object)
 {
     if (!ModernSimulationResidencyEnabled() || !Foundation::IsMainThread() || !_modernSimulation || !object) return;
     auto& s = *_modernSimulation;
-    if (s.stats.status == Status::CapacityExceeded || s.watchCapacityExceeded || index >= _modernObjectPlacements.size()) return;
+    if (s.stats.status == Status::CapacityExceeded || index >= _modernObjectPlacements.size()) return;
     auto found = s.watches.find(index);
     if (found != s.watches.end() && static_cast<Object*>(found->second.object) == object) return;
+    // Camera/explicit admissions can populate a previously empty selected cell
+    // without moving the actor. Invalidate completed positive scans cheaply.
+    if (s.positiveAdmissionGeneration == std::numeric_limits<uint64_t>::max())
+    { s.inventoryInvalid = true; return; }
+    ++s.positiveAdmissionGeneration;
+    // Full query-watch refusal remains sticky, but this actual admission must
+    // still invalidate positive selection; its independent Entry is bounded.
+    if (s.watchCapacityExceeded) return;
     if (found == s.watches.end())
     {
         if (s.watches.size() >= SimulationMaxWatchedPlacements) { s.watchCapacityExceeded = true; return; }
@@ -191,7 +199,7 @@ Status Landscape::QueueModernSimulationRegionForChannel(Object& actor, Vector3Pa
     if (!ValidRegion(a, b, radius) || !ValidSimulationFrame(actor.Transform()) || !std::isfinite(actor.GetRadius())) return Status::Invalid;
     EnsureModernSimulationResidency();
     auto& s = *_modernSimulation;
-    if (s.stats.status == Status::CapacityExceeded || s.watchCapacityExceeded) return Status::CapacityExceeded;
+    if (s.stats.status == Status::CapacityExceeded || (channel != 0 && s.watchCapacityExceeded)) return Status::CapacityExceeded;
     auto found = s.regions.find(State::RegionKey{&actor, channel});
     if (found == s.regions.end())
     {
@@ -336,7 +344,11 @@ SimulationResidencyStats Landscape::SnapshotModernSimulationResidency() const
         if (g.memberCount && g.status == State::ModelState::Ready) ++out.preparedModels;
         if (g.status == State::ModelState::Unknown || !g.validRows) ++out.unknownModels;
     }
-    for (const auto& [i, entry] : s.entries) if (HasModernSimulationLease(i)) ++out.leasedPlacements;
+    for (const auto& [i, entry] : s.entries) if (HasModernSimulationLease(i))
+    {
+        ++out.leasedPlacements;
+        if (entry.positiveRevision) ++out.positiveLeasedPlacements;
+    }
     for (const auto& [key, r] : s.regions)
     {
         Object* actor = static_cast<Object*>(r.actor);
@@ -345,6 +357,11 @@ SimulationResidencyStats Landscape::SnapshotModernSimulationResidency() const
         if (key.channel == 0)
         {
             ++out.regions;
+            if (r.positiveOnly)
+            {
+                if (r.positiveScanComplete && r.positiveAdmissionGeneration == s.positiveAdmissionGeneration)
+                    ++out.positiveScannedRegions;
+            }
             if (status == Status::Ready) ++out.readyRegions;
             else if (status == Status::Pending) ++out.pendingRegions;
             else if (status == Status::Unknown) ++out.unknownRegions;
@@ -374,8 +391,6 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
     const auto started = std::chrono::steady_clock::now();
     const auto elapsed = [&] { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count(); };
     ++s.tick; ++s.stats.ownerPumps; s.stats.lastPumpVisits = 0;
-    if (s.inventoryComplete && s.activeModelCapacityExceeded)
-    { s.stats.lastPumpMs = elapsed(); return; }
     // This owner boundary is after FinishSecondary, so weak actors and physical
     // object grids are never read/mutated concurrently with background AI.
     const size_t totalActors = _world ? size_t(_world->NVehicles() + _world->NFastVehicles()) : 0;
@@ -432,8 +447,6 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
         if (!g.memberCount++) ++s.referencedModels;
         ObserveModernSimulationPlacement(i, p.resident);
     }
-    if (s.activeModelCapacityExceeded)
-    { s.stats.lastPumpMs = elapsed(); return; }
     // At most ONE bank-table/handoff tail per pump. No synchronous fallback:
     // packed/failed/unsupported models are explicit Unknown, never omitted.
     if (s.inventoryComplete && !s.inventoryInvalid && !s.activeModelCapacityExceeded && _modernObjectPreparer && elapsed() < 2 && !s.groups.empty())
@@ -518,6 +531,8 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
     // same-valued changes. This is the scoped query-policy contract, not a
     // certificate for untracked mutable per-LOD vertex APIs.
     bool revised = false;
+    // Refused active inventories have no admitted group shapes to reconcile.
+    if (!s.activeModelCapacityExceeded)
     for (auto& g : s.groups)
     {
         if (elapsed() >= 2) break;
@@ -546,7 +561,83 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
                     upper->max[axis] - g.origins.max[axis], g.origins.min[axis] - lower->min[axis]});
         }
     }
-    if (ObservedStatus(s) == Status::Ready && elapsed() < 2)
+    const bool completeCoverage = ObservedStatus(s) == Status::Ready;
+    // Partial positive warming reuses actor channel0 and the SAME sparse leases.
+    // Authored origin cells are a selection heuristic here, never a completeness
+    // proof: cold/missing/unsupported and off-bin instances are not declared clear.
+    if (!completeCoverage && s.inventoryComplete && !s.inventoryInvalid && elapsed() < 2)
+    {
+        size_t regionIndex = 0;
+        const size_t first = s.regions.empty() ? 0 : s.regionCursor++ % s.regions.size();
+        for (auto& [key, r] : s.regions)
+        {
+            if (regionIndex++ != first) continue;
+            if (key.channel != 0) break; // Exact Fire remains behind the complete-coverage gate.
+            Object* actor = static_cast<Object*>(r.actor);
+            if (!actor || !ActorUnchanged(r, *actor)) { r.status = Status::Pending; break; }
+            if (r.NeedsPositiveRestart(s.generation, s.positiveAdmissionGeneration))
+            {
+                s.DropPending(r); r.positiveOnly = true;
+                r.positiveAdmissionGeneration = s.positiveAdmissionGeneration;
+                r.status = Status::Pending;
+            }
+            if (r.positiveScanComplete)
+            {
+                // Amortized weak/policy validation of retained positives; this
+                // never publishes readiness from a validated prefix.
+                for (size_t n = 0; n < std::min(size_t(32), r.active.size()) && elapsed() < 2; ++n)
+                {
+                    const auto index = r.active[r.positiveValidationCursor++ % r.active.size()];
+                    const auto found = s.entries.find(index);
+                    Object* object = static_cast<Object*>(_modernObjectPlacements[index].resident);
+                    if (found == s.entries.end() || !object || !found->second.MatchesPositiveResident(*object))
+                    { s.DropPending(r); r.status = Status::Pending; break; }
+                }
+                if (r.positiveScanComplete) break;
+            }
+            if (r.status == Status::Unknown || r.status == Status::CapacityExceeded) break;
+            if (r.planGeneration != s.generation)
+            {
+                r.plan = PlanSimulationDemand(r.from[0], r.from[2], r.to[0], r.to[2],
+                    r.radius, _landGrid, uint32_t(_landRange), 4096);
+                r.planGeneration = s.generation;
+                if (r.plan.status != DemandStatus::Complete)
+                { r.status = r.plan.status == DemandStatus::CapacityExceeded ? Status::CapacityExceeded : Status::Invalid; break; }
+            }
+            while (r.cell < r.plan.cells.size() && s.stats.lastPumpVisits < 2048 && elapsed() < 2)
+            {
+                const auto& cell = _modernObjectCells[r.plan.cells[r.cell]];
+                if (r.offset == cell.size()) { ++r.cell; r.offset = 0; continue; }
+                const uint32_t index = cell[r.offset++]; ++s.stats.lastPumpVisits;
+                auto& p = _modernObjectPlacements[index];
+                Object* object = static_cast<Object*>(p.resident);
+                if (!object || r.pendingSet.contains(index)) continue;
+                auto observed = State::ObservePositiveResident(*object, p.id, p.rows);
+                if (!observed) continue;
+                const auto box = BuildEngineBroadphaseEnvelope(Point(object->Position()), object->Scale(), object->GetShape()->BoundingSphere());
+                if (!box || !Overlap(*box, r)) continue;
+                if ((!r.activeSet.contains(index) && r.active.size() + r.pendingNew >= SimulationMaxRegionLeases) ||
+                    r.pending.size() >= SimulationMaxRegionLeases ||
+                    (!r.activeSet.contains(index) && !s.CanAcquireLease(index)) ||
+                    (!s.entries.contains(index) && s.entries.size() >= SimulationMaxLeasedPlacements))
+                { r.status = Status::CapacityExceeded; break; }
+                if (!s.entries.contains(index)) s.cleanupQueue.push_back(index);
+                s.entries[index] = std::move(*observed);
+                if (!r.activeSet.contains(index))
+                {
+                    if (!s.AcquireLease(index)) { r.status = Status::CapacityExceeded; break; }
+                    ++r.pendingNew;
+                }
+                r.pending.push_back(index); r.pendingSet.insert(index);
+            }
+            if (r.status == Status::Pending && r.cell == r.plan.cells.size())
+                s.CompleteReplacement(r, false); // Lease replacement only: NEVER Ready.
+            if (r.status != Status::Pending)
+            { s.DropPending(r); r.planGeneration = s.generation; }
+            break;
+        }
+    }
+    if (completeCoverage && elapsed() < 2)
     {
         size_t regionIndex = 0;
         const size_t first = s.regions.empty() ? 0 : s.regionCursor++ % s.regions.size();
@@ -555,6 +646,8 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
             if (regionIndex++ != first) continue;
             Object* actor = static_cast<Object*>(r.actor);
             if (!actor || !ActorUnchanged(r, *actor)) { r.status = Status::Pending; break; }
+            if (r.positiveOnly)
+            { s.DropPending(r); r.positiveOnly = false; r.status = Status::Pending; }
             if (r.planGeneration != s.generation) r.status = Status::Pending;
             if (r.status == Status::Ready)
             {
@@ -628,6 +721,7 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
                 for (auto& group : s.groups) if (group.shape.GetRef() == g.shape.GetRef()) group.revision = g.shape->QueryPolicyRevision();
                 auto& e = s.entries[index]; e.object = object; e.shape = object->GetShape();
                 e.frame = SimulationFrameSample(object->Transform()); e.radius = object->GetRadius();
+                e.positiveRevision = 0; e.positiveId = -1;
                 if (!r.activeSet.contains(index))
                 {
                     if (!s.AcquireLease(index)) { r.status = Status::CapacityExceeded; break; }

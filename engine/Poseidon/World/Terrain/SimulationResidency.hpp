@@ -24,6 +24,9 @@ struct SimulationResidencyStats
     uint64_t models = 0, preparedModels = 0, unknownModels = 0;
     uint64_t regions = 0, leasedPlacements = 0, created = 0, released = 0;
     uint64_t readyRegions = 0, pendingRegions = 0, unknownRegions = 0, refusedRegions = 0;
+    // Positive channel0 selection retains only observed resident Plain objects.
+    // Completed scans prove neither complete coverage nor query readiness.
+    uint64_t positiveScannedRegions = 0, positiveLeasedPlacements = 0;
     uint64_t watchedPlacements = 0, liveWatchedPlacements = 0;
     uint64_t queryRegions = 0, readyQueries = 0, pendingQueries = 0, unknownQueries = 0, refusedQueries = 0;
     uint64_t queueRefused = 0, payloadCapacityCharge = 0, shapeSchedulingCharge = 0;

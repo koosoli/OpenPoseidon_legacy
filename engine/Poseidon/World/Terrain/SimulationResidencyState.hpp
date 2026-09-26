@@ -10,6 +10,7 @@
 #include <unordered_set>
 #include <vector>
 #include <deque>
+#include <optional>
 
 namespace Poseidon::Streaming
 {
@@ -54,7 +55,40 @@ struct SimulationResidencyState
         Link<LODShape> shape;
         std::array<float, 12> frame{};
         float radius = 0;
+        uint64_t positiveRevision = 0;
+        int positiveId = -1;
+        bool MatchesPositiveResident(const Object& live) const
+        {
+            auto* current = live.GetShape();
+            return static_cast<Object*>(object) == &live && current && current == shape.GetRef() &&
+                positiveRevision != 0 && current->QueryPolicyRevision() == positiveRevision &&
+                SimulationRoute(static_cast<const char*>(current->GetPropertyClass())) == SimulationFactoryRoute::Plain &&
+                live.ID() == positiveId && live.Static() && live.GetType() == Primary && !live.MustBeSaved() && !live.IsDestroyed() &&
+                live.GetDestroyed() == 0 && live.GetRawTotalDammage() == 0 &&
+                SimulationFrameSample(live.Transform()) == frame && live.GetRadius() == radius;
+        }
     };
+    // Positive observation of an ALREADY resident Plain instance only. No group
+    // shape, source certificate, factory, config lookup or query readiness.
+    static std::optional<Entry> ObservePositiveResident(Object& object, int authoredId,
+        const std::array<float, 12>& authoredRows)
+    {
+        if (!Foundation::IsMainThread()) return std::nullopt;
+        auto* shape = object.GetShape();
+        if (!shape || object.ID() != authoredId ||
+            SimulationRoute(static_cast<const char*>(shape->GetPropertyClass())) != SimulationFactoryRoute::Plain ||
+            !SimulationShapeAdmissible(*shape)) return std::nullopt;
+        const auto canonical = RepairWorldObjectPlacementFrame(SimulationPlacementFrame(authoredRows), false, false,
+            (shape->GetOrHints() & ClipLandKeep) != 0);
+        if (!ValidSimulationFrame(canonical) || !std::isfinite(object.GetRadius()) ||
+            object.GetRadius() != canonical.Scale() * shape->BoundingSphere()) return std::nullopt;
+        Entry out; out.object = &object; out.shape = shape;
+        out.frame = SimulationFrameSample(canonical); out.radius = object.GetRadius();
+        out.positiveRevision = shape->QueryPolicyRevision();
+        out.positiveId = authoredId;
+        if (!out.MatchesPositiveResident(object)) return std::nullopt;
+        return out;
+    }
     struct Watch
     {
         OLink<Object> object;
@@ -87,12 +121,20 @@ struct SimulationResidencyState
         float actorRadius = 0;
         int actorId = -1;
         bool automatic = false;
+        bool positiveOnly = false, positiveScanComplete = false;
+        uint64_t positiveAdmissionGeneration = 0;
+        size_t positiveValidationCursor = 0;
         uint64_t seen = 0, planGeneration = 0;
         SimulationResidencyStatus status = SimulationResidencyStatus::Pending;
         SimulationDemand plan;
         size_t cell = 0, offset = 0, pendingNew = 0;
         std::vector<uint32_t> active, pending;
         std::unordered_set<uint32_t> activeSet, pendingSet;
+        bool NeedsPositiveRestart(uint64_t worldGeneration, uint64_t admissionGeneration) const
+        {
+            return !positiveOnly || planGeneration != worldGeneration ||
+                (positiveScanComplete && positiveAdmissionGeneration != admissionGeneration);
+        }
     };
 
     SimulationResidencyStats stats;
@@ -110,6 +152,7 @@ struct SimulationResidencyState
     std::unordered_map<RegionKey, Region, RegionKeyHash> regions;
     size_t inventoryCursor = 0, modelCursor = 0, actorCursor = 0, regionCursor = 0;
     uint64_t tick = 0, generation = 1;
+    uint64_t positiveAdmissionGeneration = 1;
     bool inventoryComplete = false, inventoryInvalid = false;
     uint64_t referencedModels = 0;
     bool activeModelCapacityExceeded = false;
@@ -152,6 +195,7 @@ struct SimulationResidencyState
         for (auto i : r.pending) if (!r.activeSet.contains(i)) DropLease(i);
         r.pending.clear(); r.pendingSet.clear(); r.pendingNew = 0;
         r.plan = {}; r.cell = r.offset = 0; r.planGeneration = 0;
+        r.positiveScanComplete = false; r.positiveValidationCursor = 0;
     }
     void DropRegion(Region& r)
     {
@@ -159,12 +203,14 @@ struct SimulationResidencyState
         for (auto i : r.active) DropLease(i);
         r.active.clear(); r.activeSet.clear();
     }
-    void CompleteReplacement(Region& r)
+    void CompleteReplacement(Region& r, bool completeCoverage = true)
     {
         for (auto i : r.active) if (!r.pendingSet.contains(i)) DropLease(i);
         r.active.swap(r.pending); r.activeSet.swap(r.pendingSet);
         r.pending.clear(); r.pendingSet.clear(); r.pendingNew = 0;
-        r.status = SimulationResidencyStatus::Ready;
+        r.positiveOnly = !completeCoverage;
+        r.positiveScanComplete = !completeCoverage;
+        r.status = completeCoverage ? SimulationResidencyStatus::Ready : SimulationResidencyStatus::Pending;
     }
 };
 

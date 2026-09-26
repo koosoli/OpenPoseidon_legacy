@@ -1,10 +1,10 @@
-param([switch]$Disabled,[switch]$Capacity,[switch]$ActiveCapacity,[switch]$MovedWatcher,[switch]$LargeWall,[switch]$SourceDiagnostic,[string]$Label='simulation-residency',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',[string]$Python='C:\Program Files\Python311\python.exe')
+param([switch]$Disabled,[switch]$Capacity,[switch]$ActiveCapacity,[switch]$MovedWatcher,[switch]$LargeWall,[switch]$SourceDiagnostic,[switch]$PositiveWarming,[string]$Label='simulation-residency',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',[string]$Python='C:\Program Files\Python311\python.exe')
 $ErrorActionPreference='Stop'
-if (@($Disabled,$Capacity,$ActiveCapacity,$MovedWatcher,$LargeWall,$SourceDiagnostic | Where-Object {$_}).Count -gt 1) {throw 'Simulation fixture switches are separate scenarios'}
+if (@($Disabled,$Capacity,$ActiveCapacity,$MovedWatcher,$LargeWall,$SourceDiagnostic,$PositiveWarming | Where-Object {$_}).Count -gt 1) {throw 'Simulation fixture switches are separate scenarios'}
 if (!$env:LOCK_OWNER) {
  $shellName=if ($PSVersionTable.PSEdition -eq 'Core') {'pwsh.exe'} else {'powershell.exe'}
  $argv=@((Join-Path $PSScriptRoot 'with-game-lock.sh'),(Join-Path $PSHOME $shellName).Replace('\','/'),'-NoProfile','-File',$PSCommandPath,'-Label',$Label,'-GameDir',$GameDir,'-Python',$Python)
- foreach ($flag in @('Disabled','Capacity','ActiveCapacity','MovedWatcher','LargeWall','SourceDiagnostic')) {if ((Get-Variable $flag -ValueOnly)) {$argv+=('-'+$flag)}}
+ foreach ($flag in @('Disabled','Capacity','ActiveCapacity','MovedWatcher','LargeWall','SourceDiagnostic','PositiveWarming')) {if ((Get-Variable $flag -ValueOnly)) {$argv+=('-'+$flag)}}
  $env:LOCK_OWNER='simulation residency fixture'
  try {& 'C:\Program Files\Git\bin\bash.exe' @argv; if ($LASTEXITCODE) {throw "Simulation fixture exited $LASTEXITCODE"}} finally {Remove-Item Env:LOCK_OWNER}
  return
@@ -20,6 +20,7 @@ New-Item -ItemType Directory -Force $mission,$env:POSEIDON_USER_DIR | Out-Null
 $fixtureArgs=@($fixture,'--absolute-model-path')
 if ($Capacity) {$fixtureArgs+=@('--model-count','8193')}
 if ($ActiveCapacity) {$fixtureArgs+=@('--model-count','257','--reference-all-models')}
+if ($PositiveWarming) {$fixtureArgs+=@('--model-count','257','--reference-all-models','--positive-warming')}
 if ($LargeWall) {$fixtureArgs+='--large-wall'}
 if ($SourceDiagnostic) {& $Python (Join-Path $PSScriptRoot 'streaming/build_source_diagnostic_fixture.py') $fixture}
 else {& $Python (Join-Path $PSScriptRoot 'streaming/build_simulation_residency_fixture.py') @fixtureArgs}
@@ -129,6 +130,33 @@ try {
   $cold=State;$coldIds=Ids
   if ($cold.status -ne 'Disabled' -or $cold.ownerPumps -ne 0 -or @($coldIds.objects | Where-Object {$_.present}).Count) {throw 'Default-off fixture performed simulation work or loaded remote walls'}
   $result=@{cold=$cold;coldIds=$coldIds}
+ } elseif ($PositiveWarming) {
+  $cold=Wait-State {param($r) $r.status -eq 'CapacityExceeded' -and $r.metadataComplete} 'complete capacity-limited inventory'
+  $coldIds=Ids
+  if ($cold.models -ne 257 -or $cold.referencedModels -ne 257 -or $cold.inventoryRows -ne 257 -or $cold.preparedModels -ne 0 -or $cold.activeModels -ne 0 -or $cold.leasedPlacements -ne 0 -or $cold.created -ne 0 -or @($coldIds.objects | Where-Object {$_.present}).Count) {throw 'Positive warming loaded a cold partial world'}
+  $coldQuery=Query 'queue'
+  if ($coldQuery.status -ne 'CapacityExceeded') {throw 'Cold query borrowed positive warming readiness'}
+  $pose=Send @{cmd='eval';code='triFreeFlyPose "1188 1200 18 90 -8"'}
+  if ($pose.result.Trim('"') -ne 'OK') {throw 'Near camera pose refused'}
+  $until=[DateTime]::UtcNow.AddSeconds(60)
+  do {Start-Sleep -Milliseconds 500;$visual=Ids} while ((@($visual.objects | Where-Object {$_.visualResident -and $_.normalVertexBuffers -gt 0}).Count -ne 2) -and [DateTime]::UtcNow -lt $until)
+  if (@($visual.objects | Where-Object {$_.visualResident -and $_.normalVertexBuffers -gt 0}).Count -ne 2) {throw 'Camera did not load both authored walls'}
+  $warmed=Wait-State {param($r) $r.positiveLeasedPlacements -eq 2 -and $r.positiveScannedRegions -ge 1} 'positive loaded actor leases'
+  $warmedResidency=Send @{cmd='stream_residency'}
+  if ($warmed.status -ne 'CapacityExceeded' -or $warmed.readyRegions -ne 0 -or $warmed.readyQueries -ne 0 -or $warmed.preparedModels -ne 0 -or $warmed.activeModels -ne 0 -or $warmed.created -ne 0 -or $warmedResidency.required -ne 0) {throw 'Positive loaded warming changed query readiness or cold admission'}
+  $null=Send @{cmd='screenshot';path=(Join-Path $out 'positive-loaded.png')}
+  $null=Send @{cmd='eval';code='triFreeFlyPose "100 100 80 45 -25"'}
+  $until=[DateTime]::UtcNow.AddSeconds(60)
+  do {Start-Sleep -Milliseconds 500;$away=Ids} while (@($away.objects | Where-Object {$_.visualResident}).Count -and [DateTime]::UtcNow -lt $until)
+  if (@($away.objects | Where-Object {$_.present -and !$_.visualResident -and $_.hasGeometry -and $_.hasFireGeometry}).Count -ne 2) {throw 'Camera eviction lost positive CPU actor leases'}
+  $awayState=State;$awayQuery=Query 'status';$awayCollision=Query 'collide';$awayResidency=Send @{cmd='stream_residency'}
+  if ($awayState.status -ne 'CapacityExceeded' -or $awayQuery.status -ne 'CapacityExceeded' -or $awayCollision.status -ne 'CapacityExceeded' -or @($awayCollision.contacts).Count -ne 0 -or $awayState.positiveLeasedPlacements -ne 2 -or $awayState.preparedModels -ne 0 -or $awayState.created -ne 0 -or $awayResidency.required -ne 0) {throw 'Away positive leases changed capacity/query/admission state'}
+  $null=Send @{cmd='exec';code='streamFixtureActor setPos [700,900,0]'}
+  $released=Wait-State {param($r) $r.leasedPlacements -eq 0 -and $r.positiveLeasedPlacements -eq 0 -and $r.positiveScannedRegions -ge 1} 'positive actor replacement release'
+  $until=[DateTime]::UtcNow.AddSeconds(30)
+  do {Start-Sleep -Milliseconds 500;$releasedIds=Ids} while (@($releasedIds.objects | Where-Object {$_.present}).Count -and [DateTime]::UtcNow -lt $until)
+  if (@($releasedIds.objects | Where-Object {$_.present}).Count -or $released.status -ne 'CapacityExceeded' -or $released.readyRegions -ne 0 -or $released.preparedModels -ne 0 -or $released.created -ne 0) {throw 'Positive release retained authored walls or changed global readiness'}
+  $result=@{positiveWarming=$true;cold=$cold;coldIds=$coldIds;coldQuery=$coldQuery;visual=$visual;warmed=$warmed;warmedResidency=$warmedResidency;away=$away;awayState=$awayState;awayQuery=$awayQuery;awayCollision=$awayCollision;awayResidency=$awayResidency;released=$released;releasedIds=$releasedIds}
  } elseif ($Capacity -or $ActiveCapacity) {
   $cold=Wait-State {param($r) $r.status -eq 'CapacityExceeded'} 'pre-admission model capacity refusal'
   $coldIds=Ids

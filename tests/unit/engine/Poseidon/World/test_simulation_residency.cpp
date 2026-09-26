@@ -222,6 +222,155 @@ TEST_CASE("Exact-query containment refuses uncertain boundaries and unsafe numer
     REQUIRE_FALSE(SimulationCapsuleContains(point, point, EngineBroadphaseSafeMagnitude() * 2, point, point, 0));
 }
 
+namespace
+{
+Ref<LODShapeWithShadow> LoadedPositivePlainShape()
+{
+    auto model = Asset::Formats::MLODLoader::load(GET_FIXTURE("mlod/p3dm_geometry_mass.p3d"));
+    const auto geometry = std::find_if(model.lodLevels.begin(), model.lodLevels.end(),
+        [](const auto& lod) { return lod.purpose == Model::LodPurpose::Geometry; });
+    REQUIRE(geometry != model.lodLevels.end());
+    auto view = *geometry, fire = *geometry;
+    view.purpose = Model::LodPurpose::ViewGeometry; view.resolution = 6e15f;
+    fire.purpose = Model::LodPurpose::FireGeometry; fire.resolution = 7e15f;
+    model.lodLevels.push_back(std::move(view)); model.lodLevels.push_back(std::move(fire));
+    ShapeBank::CpuOnlyLoadScope cpuOnly;
+    Ref<LODShapeWithShadow> shape = Model::ShapeAdapter::convertToLODShape(model, false);
+    REQUIRE(shape);
+    REQUIRE(SimulationShapeAdmissible(*shape));
+    REQUIRE(SimulationRoute(static_cast<const char*>(shape->GetPropertyClass())) == SimulationFactoryRoute::Plain);
+    return shape;
+}
+}
+
+TEST_CASE("Positive loaded Plain observation uses the actual instance without a model-group certificate", "[streaming-simulation-residency]")
+{
+    Foundation::CaptureMainThread();
+    auto shape = LoadedPositivePlainShape();
+    Ref<ObjectPlain> wall = new ObjectPlain(shape, 1001); wall->SetType(Primary);
+    Matrix4 frame = MIdentity; frame.SetPosition(Vector3(1200, 11.5f, 1200)); wall->SetTransform(frame);
+    const auto rows = SimulationFrameSample(frame);
+    auto observed = SimulationResidencyState::ObservePositiveResident(*wall, 1001, rows);
+    REQUIRE(observed.has_value());
+    REQUIRE(observed->MatchesPositiveResident(*wall));
+    SECTION("same-valued policy mutation invalidates the independent witness")
+    {
+        shape->SetAutoCenter(shape->IsAutoCenter());
+        REQUIRE_FALSE(observed->MatchesPositiveResident(*wall));
+    }
+    SECTION("moved retained object is no longer an immutable authored positive")
+    {
+        wall->SetPosition(Vector3(100, 11.5f, 100));
+        REQUIRE_FALSE(observed->MatchesPositiveResident(*wall));
+        REQUIRE_FALSE(SimulationResidencyState::ObservePositiveResident(*wall, 1001, rows).has_value());
+    }
+    SECTION("persistent damage is excluded without dropping its save ownership")
+    {
+        wall->SetDammage(.25f);
+        REQUIRE(wall->MustBeSaved());
+        REQUIRE_FALSE(observed->MatchesPositiveResident(*wall));
+        REQUIRE_FALSE(SimulationResidencyState::ObservePositiveResident(*wall, 1001, rows).has_value());
+    }
+    SECTION("wrong identity or factory type cannot be admitted")
+    {
+        REQUIRE_FALSE(SimulationResidencyState::ObservePositiveResident(*wall, 1002, rows).has_value());
+        wall->SetType(Network);
+        REQUIRE_FALSE(SimulationResidencyState::ObservePositiveResident(*wall, 1001, rows).has_value());
+    }
+}
+
+TEST_CASE("Actor positive replacement retains loaded geometry on large inventories without making Fire ready", "[streaming-simulation-residency]")
+{
+    Foundation::CaptureMainThread();
+    SimulationResidencyState state;
+    state.groups.resize(SimulationMaxModels + 1);
+    for (auto& group : state.groups) group.memberCount = 1;
+    state.referencedModels = state.groups.size(); state.FinishInventory();
+    REQUIRE(state.activeModelCapacityExceeded);
+    SECTION("complete query watch refusal does not prevent independent positive observation")
+    {
+        state.watchCapacityExceeded = true;
+    }
+    auto shape = LoadedPositivePlainShape();
+    Ref<ObjectPlain> wall = new ObjectPlain(shape, 1001); wall->SetType(Primary);
+    Matrix4 frame = MIdentity; frame.SetPosition(Vector3(1200, 11.5f, 1200)); wall->SetTransform(frame);
+    auto observed = SimulationResidencyState::ObservePositiveResident(*wall, 1001, SimulationFrameSample(frame));
+    REQUIRE(observed.has_value());
+    state.entries[0] = std::move(*observed);
+    auto& actor = state.regions[{wall.GetRef(), 0}]; actor.actor = wall.GetRef();
+    actor.pending = {0}; actor.pendingSet = {0}; actor.pendingNew = 1;
+    REQUIRE(state.AcquireLease(0));
+    state.CompleteReplacement(actor, false);
+    REQUIRE(actor.positiveOnly); REQUIRE(actor.positiveScanComplete);
+    REQUIRE(actor.status == SimulationResidencyStatus::Pending);
+    REQUIRE(state.HasLease(0));
+    REQUIRE(state.entries[0].MatchesPositiveResident(*wall));
+    REQUIRE_FALSE(std::any_of(state.groups.begin(), state.groups.end(), [](const auto& g)
+        { return bool(g.shape) || g.requestOutstanding || g.charged; }));
+    auto& fire = state.regions[{wall.GetRef(), uint8_t(SimulationQueryPurpose::Fire)}];
+    fire.actor = wall.GetRef();
+    REQUIRE(fire.status == SimulationResidencyStatus::Pending);
+    REQUIRE(fire.active.empty());
+    REQUIRE(state.activeModelCapacityExceeded);
+    SECTION("moving actor completes an empty new selection and releases old lease")
+    {
+        state.DropPending(actor); // New descriptor: preserve old active until replacement completes.
+        REQUIRE_FALSE(actor.positiveScanComplete); REQUIRE(state.HasLease(0));
+        state.CompleteReplacement(actor, false);
+        REQUIRE_FALSE(state.HasLease(0)); REQUIRE(actor.active.empty());
+        REQUIRE(actor.status != SimulationResidencyStatus::Ready);
+    }
+    SECTION("actor expiry balances pending and active positive debt")
+    {
+        state.DropRegion(actor);
+        REQUIRE_FALSE(state.HasLease(0)); REQUIRE(actor.active.empty());
+    }
+    REQUIRE(state.activeModelCapacityExceeded);
+    REQUIRE(fire.status != SimulationResidencyStatus::Ready);
+}
+
+TEST_CASE("Late camera admissions cannot repeatedly roll back an unfinished positive lease prefix", "[streaming-simulation-residency]")
+{
+    SimulationResidencyState state;
+    auto& region = state.regions[{nullptr, 0}];
+    region.positiveOnly = true; region.planGeneration = state.generation;
+    region.positiveAdmissionGeneration = state.positiveAdmissionGeneration;
+    region.cell = 7; region.offset = 12;
+    REQUIRE(state.AcquireLease(10));
+    region.pending = {10}; region.pendingSet = {10}; region.pendingNew = 1;
+    // Camera populates already-visited cells and later cells while this scan
+    // progresses. Preserve the cursor and debt instead of restarting its prefix.
+    for (int admission = 0; admission < 100; ++admission)
+    {
+        ++state.positiveAdmissionGeneration;
+        REQUIRE_FALSE(region.NeedsPositiveRestart(state.generation, state.positiveAdmissionGeneration));
+    }
+    REQUIRE(region.cell == 7); REQUIRE(region.offset == 12);
+    REQUIRE(state.HasLease(10));
+    REQUIRE(state.AcquireLease(20));
+    region.pending.push_back(20); region.pendingSet.insert(20); ++region.pendingNew;
+    state.CompleteReplacement(region, false);
+    REQUIRE(region.NeedsPositiveRestart(state.generation, state.positiveAdmissionGeneration));
+    REQUIRE(region.status != SimulationResidencyStatus::Ready);
+    REQUIRE(region.active == std::vector<uint32_t>{10, 20});
+    // Next pump revisits stale completed selection, retaining active geometry
+    // until the new complete selection includes a late-admitted earlier object.
+    state.DropPending(region);
+    region.positiveAdmissionGeneration = state.positiveAdmissionGeneration;
+    region.planGeneration = state.generation;
+    REQUIRE_FALSE(region.NeedsPositiveRestart(state.generation, state.positiveAdmissionGeneration));
+    REQUIRE(state.HasLease(10)); REQUIRE(state.HasLease(20));
+    REQUIRE(state.AcquireLease(30));
+    region.pending = {20, 30}; region.pendingSet = {20, 30}; region.pendingNew = 1;
+    state.CompleteReplacement(region, false);
+    REQUIRE_FALSE(state.HasLease(10)); REQUIRE(state.HasLease(20)); REQUIRE(state.HasLease(30));
+    REQUIRE_FALSE(region.NeedsPositiveRestart(state.generation, state.positiveAdmissionGeneration));
+    REQUIRE(region.NeedsPositiveRestart(state.generation + 1, state.positiveAdmissionGeneration));
+    REQUIRE(region.status != SimulationResidencyStatus::Ready);
+    state.DropRegion(region);
+    REQUIRE(state.leaseCounts.empty());
+}
+
 TEST_CASE("Identical query centre lines contain nested engine float radii without clearance erosion", "[streaming-simulation-residency]")
 {
     const CoveragePoint from{1190,11.5,1200}, to{1210,11.5,1200};
