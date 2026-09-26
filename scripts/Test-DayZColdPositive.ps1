@@ -1,11 +1,11 @@
-param([switch]$Lifecycle,[switch]$SaveRoundTrip,[switch]$FreshReload,[string]$Label='dayz-cold-positive',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
+param([switch]$Lifecycle,[switch]$SaveRoundTrip,[switch]$FreshReload,[switch]$PBOTextures,[string]$Label='dayz-cold-positive',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
 if($FreshReload){$SaveRoundTrip=$true}
 if($SaveRoundTrip){$Lifecycle=$true}
 if (!$env:LOCK_OWNER) {
  $shellName=if($PSVersionTable.PSEdition -eq 'Core'){'pwsh.exe'}else{'powershell.exe'}
  $env:LOCK_OWNER='DayZ source-bound cold actor admission'
- try { $argv=@((Join-Path $PSScriptRoot 'with-game-lock.sh'),((Join-Path $PSHOME $shellName).Replace('\','/')),'-NoProfile','-File',$PSCommandPath,'-Label',$Label,'-GameDir',$GameDir);if($Lifecycle){$argv+='-Lifecycle'};if($SaveRoundTrip){$argv+='-SaveRoundTrip'};if($FreshReload){$argv+='-FreshReload'}; & 'C:/Program Files/Git/bin/bash.exe' @argv; if($LASTEXITCODE){throw "DayZ cold test exited $LASTEXITCODE"} }
+ try { $argv=@((Join-Path $PSScriptRoot 'with-game-lock.sh'),((Join-Path $PSHOME $shellName).Replace('\','/')),'-NoProfile','-File',$PSCommandPath,'-Label',$Label,'-GameDir',$GameDir);if($Lifecycle){$argv+='-Lifecycle'};if($SaveRoundTrip){$argv+='-SaveRoundTrip'};if($FreshReload){$argv+='-FreshReload'};if($PBOTextures){$argv+='-PBOTextures'}; & 'C:/Program Files/Git/bin/bash.exe' @argv; if($LASTEXITCODE){throw "DayZ cold test exited $LASTEXITCODE"} }
  finally {Remove-Item Env:LOCK_OWNER}
  return
 }
@@ -33,6 +33,7 @@ class OutroLoose {randomSeed=3;class Intel {};};
 $world=(Resolve-Path -LiteralPath (Join-Path $root '../../../packages/dayz-compat/world/chernarusplus/chernarusplus.wrp')).Path
 $log=Join-Path $out 'engine.log'; $exe=Join-Path $GameDir 'OpenPoseidon.exe'
 $environment=@{POSEIDON_USER_DIR=$profile;WGR_SIMULATION_RESIDENCY='1';WGR_SIMULATION_RESIDENCY_TEST='1';WGR_SIMULATION_POSITIVE_COLD='1';WGR_OBJECT_STREAM_TEST_BUDGET='1';WGR_OBJECT_STREAM_MAX_OBJECTS='20000';WGR_OBJECT_STREAM_GPU_BUDGET='0';WGR_GEO_POOL_GROWTH='2.0';WGR_GEO_POOL_PRESSURE_GROWTH='0';WGR_OBJECT_STREAM_PBO='1';POSEIDON_MODEL_DDC='0';WGR_OBJECT_STREAM_PBO_TEXTURES='0';WGR_NATIVE_DDS_PREPARE='0';WGR_NATIVE_DDS_BC3_ONLY='0';WGR_ADAPTIVE_TEXTURE_DETAIL='0';WGR_LOD_GOVERNOR_RANGE='1';WGR_SKY_VOLUME_INCREMENTAL='1'}
+if($PBOTextures){$environment.WGR_OBJECT_STREAM_PBO_TEXTURES='1'}
 $clearNames=@((Get-ChildItem Env: | Where-Object {$_.Name -like 'WGR_*' -or $_.Name -like 'POSEIDON_REFORGER_*'} | ForEach-Object {$_.Name}))+@('POSEIDON_USER_DIR','POSEIDON_TEST_RAIN')
 $savedEnvironment=@{}; foreach($name in @($clearNames+@($environment.Keys) | Select-Object -Unique)){$savedEnvironment[$name]=[Environment]::GetEnvironmentVariable($name)}
 $p=$null;$client=$null;$reloadLog=$null

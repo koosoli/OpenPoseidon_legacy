@@ -1919,9 +1919,50 @@ Source freshness prerequisite remains explicit. BankReadRequest path/offset/
 length snapshot opens a new stream and does not retain bank access lifetime/file
 identity; bank unload or pathname replacement can outlive current world/store
 generation. Existing tests prove captured decoded facts/narrow functionality,
-not an immutable/fresh-source theorem. Windows archive-read lease work is pending;
+not an immutable/fresh-source theorem. At this3db checkpoint Windows archive-read lease work was pending;
 defaults PBOOFF unchanged, Linux immutable behavior unproven fallback. Pre-upload
 alpha-facts experiment remains frozen with no implementation.
 
 Weak registered metadata is later work under development/unverified, not this
 binary. Whole plan/defaultReady/performance/MP/general consumers remain OPEN.
+
+### Optional physical archive lease prerequisite — 26 September 2026
+
+1e0b7611 full582-node and stamped18-node all-target builds pass, clean installed
+stamp23:37 identified by provenance binary hashes. Required Windows capture can
+retain an independent read-only archive handle, compare mounted physical file
+identity and bounds, and validate the worker reader against that identity.
+FILE_SHARE_READ denies writes/deletion for the lease lifetime. This is optional:
+existing calls keep the default unleased capture; POSIX required capture refuses.
+Source freshness at all production call sites remains OPEN, and prepared-alpha
+facts have no implementation in this binary. Later weak-metadata/alpha work is
+not included.
+
+Core exact archive-lease tests pass71 assertions/3 cases using actual Windows
+OS operations. Core union194 assertions/24 cases has20 passed/4 external-data
+skips. PoseidonTests IO union144 assertions/22 cases has19 passed/3 skips and
+contains no archive-lease tests; it is not OS-lease proof. Streaming/alpha/source
+borrow111374 assertions/181 cases passes. Default-disabled233709 runtime passes
+clean0 with ownerPumps0/required0/queryborrow0/0 and both remote walls absent.
+This checks normal unleased compatibility, not required-lease game activation.
+
+### Existing PBO texture baseline before prepared-alpha changes — 26 September 2026
+
+Same installed1e0 ordered ON234444/OFF234559 runs pass clean0, view1280x720/vd2000,
+with19985 camera residents before/final. Original per-run script hashes preserve
+the later PBOTextures runner option. No capture.json exists; no frame percentiles,
+FPS or no-regression acceptance is available.
+
+Fraxinus ON read10.156/decode6.382/hist10.291/shape10.577ms, alpha37.7/model38.6;
+OFF7.069/4.039/2.898/10.158ms, alpha24.4/model25.0. ON retains320 prepared-texture
+entries/536868112 capacity bytes and peakconversion467008340; OFF0/0 and171011444.
+These are existing-pipeline measurements, not new prepared-alpha evidence or
+causal timing attribution: order/cache/other phases confound the single pair.
+
+Both targets retire with required0 and cold work/facts/payload/shape charges0;
+historical created/released are81/81 ON and77/77 OFF. Both retain422 positive
+leases for the normal actor already at the starting location, not globalzero.
+DayZ2971218 placements/2352models, watch16384 and globalCapacity remain; no full
+world Ready. Default PBOtextures0 remains, performanceAccepted/defaultReady false.
+Whole plan OPEN; geometry cache, generic consumers, source freshness, broad
+state/multiplayer and performance gates remain.
