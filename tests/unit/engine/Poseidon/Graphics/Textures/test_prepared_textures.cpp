@@ -596,10 +596,54 @@ TEST_CASE("Prepared alpha facts refuse mismatch cancellation and departed genera
             SKIP("Run with WGR_OBJECT_STREAM_TEXTURE_PREPARE_MB=1");
         const auto metadata = fixture.chain.levels.capacity() * sizeof(PAABlockLevel);
         fixture.chain.blocks.reserve(store.ByteBudget() - metadata);
+        const auto before = store.SnapshotStats();
+        CHECK_FALSE(store.CanRetainAlphaFacts("alpha-member", fixture.chain, fixture.read, generation));
+        CHECK(store.SnapshotStats().alphaFactsCapacitySkipped == before.alphaFactsCapacitySkipped + 1);
+        CHECK(store.SnapshotStats().alphaFactsCancelled == before.alphaFactsCancelled);
         auto facts = store.BuildAlphaFacts(fixture.chain, fixture.read); REQUIRE(facts);
         CHECK_FALSE(store.Put("alpha-member", std::move(fixture.chain), generation, std::move(facts)));
         CHECK(store.SnapshotStats().bytes == 0);
         CHECK_FALSE(store.HasAlphaFacts("alpha-member"));
+    }
+    SECTION("advisory permission never reserves against an intervening publication")
+    {
+        if (store.ByteBudget() > 4 * 1024 * 1024)
+            SKIP("Run with WGR_OBJECT_STREAM_TEXTURE_PREPARE_MB=1");
+        REQUIRE(store.CanRetainAlphaFacts("alpha-member", fixture.chain, fixture.read, generation));
+        PAABlockChain competitor;
+        const auto ordinary = TinyDxt1Paa();
+        REQUIRE(ReadPAABlockChainBuffer(ordinary.data(), ordinary.size(), competitor));
+        competitor.blocks.reserve(store.ByteBudget() - competitor.levels.capacity() * sizeof(PAABlockLevel) - 1);
+        REQUIRE(store.Put("competitor", std::move(competitor), generation));
+        const auto before = store.SnapshotStats();
+        CHECK_FALSE(store.CanRetainAlphaFacts("alpha-member", fixture.chain, fixture.read, generation));
+        CHECK(store.SnapshotStats().alphaFactsCapacitySkipped == before.alphaFactsCapacitySkipped + 1);
+        // A previously granted advisory answer cannot force final acceptance.
+        auto late = fixture.chain;
+        auto facts = store.BuildAlphaFacts(late, fixture.read); REQUIRE(facts);
+        CHECK_FALSE(store.Put("alpha-member", std::move(late), generation, std::move(facts)));
+        PAABlockChain released; REQUIRE(store.Take("competitor", released));
+        REQUIRE(store.CanRetainAlphaFacts("alpha-member", fixture.chain, fixture.read, generation));
+        facts = store.BuildAlphaFacts(fixture.chain, fixture.read); REQUIRE(facts);
+        REQUIRE(store.Put("alpha-member", std::move(fixture.chain), generation, std::move(facts)));
+        render::PreparedAlphaFacts copied;
+        REQUIRE(store.CopyAlphaFacts("alpha-member", fixture.read, 0xFF03, 4, 4, 16, 4, copied));
+    }
+    SECTION("generation duplicate and uploaded refusals are not capacity or cancellation failures")
+    {
+        const auto before = store.SnapshotStats();
+        REQUIRE(store.CanRetainAlphaFacts("alpha-member", fixture.chain, fixture.read, generation));
+        store.MarkUploaded("alpha-member");
+        CHECK_FALSE(store.CanRetainAlphaFacts("alpha-member", fixture.chain, fixture.read, generation));
+        store.MarkEvicted("alpha-member");
+        auto chain = fixture.chain;
+        REQUIRE(store.Put("ordinary-duplicate", std::move(chain), generation));
+        CHECK_FALSE(store.CanRetainAlphaFacts("ordinary-duplicate", fixture.chain, fixture.read, generation));
+        store.Clear();
+        CHECK_FALSE(store.CanRetainAlphaFacts("alpha-member", fixture.chain, fixture.read, generation));
+        CHECK(store.SnapshotStats().alphaFactsCapacitySkipped == before.alphaFactsCapacitySkipped);
+        CHECK(store.SnapshotStats().alphaFactsCancelled == before.alphaFactsCancelled);
+        REQUIRE(store.CanRetainAlphaFacts("alpha-member", fixture.chain, fixture.read, store.Generation()));
     }
     SECTION("TTL forbids a claim even without another worker publication")
     {

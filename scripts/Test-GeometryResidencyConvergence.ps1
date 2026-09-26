@@ -192,6 +192,13 @@ try {
             } while ($report.status -eq 'Pending')
             if ($report.status -ne 'Ready' -or !$report.valid -or $report.invalidRanges -ne 0 -or $report.unresolvedNames -ne 0) { throw 'Allocation report failed validity checks' }
             if (($report.uniqueVertexBytes + $report.uniqueIndexBytes) -gt $report.poolLiveBytes) { throw 'Unique retained mesh allocation exceeds the whole pool' }
+            foreach ($field in @('overlapWithinInspectedMeshes', 'overlapWithinInspectedVertexBytes', 'overlapWithinInspectedIndexBytes', 'ownershipCoverageComplete')) {
+                if (!$report.PSObject.Properties[$field]) { throw "Allocation report omitted ownership attribution field $field" }
+            }
+            if ($report.overlapWithinInspectedMeshes -gt $report.uniqueMeshes -or
+                $report.overlapWithinInspectedVertexBytes -gt $report.uniqueVertexBytes -or
+                $report.overlapWithinInspectedIndexBytes -gt $report.uniqueIndexBytes) { throw 'Inspected allocation overlap exceeds its unique union' }
+            if ($report.ownershipCoverageComplete) { throw 'Diagnostic subset incorrectly claimed complete allocation ownership' }
             if ($report.registryEntriesVisited -gt $report.maxModels -or
                 ($report.modelsRequested + $report.ineligibleEntriesSkipped) -ne $report.registryEntriesVisited) { throw 'Registry sampling and negative-cache accounting disagree' }
             if ($report.missingModels -ne 0 -or $report.missingMeshes -ne 0) { throw 'Settled eligible retained models or meshes are missing' }

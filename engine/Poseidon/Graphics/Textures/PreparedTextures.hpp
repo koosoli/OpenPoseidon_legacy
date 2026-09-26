@@ -84,6 +84,7 @@ class PreparedTextureStore
         uint64_t expired = 0;       // entries dropped by the TTL sweep
         uint64_t alphaFactsPuts = 0, alphaFactsHits = 0, alphaFactsMisses = 0;
         uint64_t alphaFactsCancelled = 0;
+        uint64_t alphaFactsCapacitySkipped = 0; // advisory refused known retained byte charge
         uint64_t skippedUploaded = 0; // ShouldPrepare said no: main thread already uploaded it
         uint64_t uploadedMarks = 0; // names currently marked Uploaded
         // The RGBA8 side (non-DXT PAAs -- the Reforger mask population): whole-file
@@ -137,6 +138,11 @@ class PreparedTextureStore
     // until Put. No renderer/environment reads or content-freshness promise.
     static std::unique_ptr<PreparedAlphaFacts> BuildAlphaFacts(const PAABlockChain& chain,
         const BankReadRequest& source, const std::function<bool()>& cancelled = {});
+    // Advisory only: never reserves, evicts, publishes or changes the ordinary
+    // chain path. A concurrent Take/Clear/Put can change the answer immediately;
+    // final Put still validates generation and actual retained capacity atomically.
+    bool CanRetainAlphaFacts(const std::string& key, const PAABlockChain& chain,
+        const BankReadRequest& source, uint64_t generation);
     // Advisory metadata lookup avoids native recapture on absent facts. Copy
     // checks current generation/TTL and actual current leased member under mutex.
     bool HasAlphaFacts(const std::string& key) const;

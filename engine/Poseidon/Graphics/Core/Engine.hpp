@@ -1677,6 +1677,8 @@ class Engine : public IGraphicsEngine
           uint64_t requestId = 0;
           std::vector<GeometryAllocationRow> rows;
           uint64_t uniqueVertexBytes = 0, uniqueIndexBytes = 0;
+          uint64_t overlapWithinInspectedMeshes = 0;
+          uint64_t overlapWithinInspectedVertexBytes = 0, overlapWithinInspectedIndexBytes = 0;
           uint64_t poolLiveBytes = 0, poolCapacityBytes = 0, poolRetiredBytes = 0;
           uint32_t registryEntriesAtRequest = 0, registryEntriesVisited = 0, ineligibleEntriesSkipped = 0;
           uint32_t modelsRequested = 0, modelsVisited = 0;
@@ -1685,9 +1687,12 @@ class Engine : public IGraphicsEngine
           uint32_t unresolvedNames = 0;
           uint32_t maxModels = 0, maxRows = 0, maxSectionVisits = 0;
           bool valid = false, truncated = false;
+          bool ownershipCoverageComplete = false; // no complete renderer-wide ownership inventory
           // Row/union scope: retained meshes only, excluding direct-only meshes,
           // standalone skin/bake buffers, driver alignment and textures/materials.
           // Global pool counters also include direct meshes. Not reclaimable bytes.
+          // Overlap counts each live mesh once if distinct inspected model/LOD
+          // pairs reference it; absent overlap does not prove exclusive ownership.
       };
       virtual GeometryReportStatus RequestGeometryAllocationReport(uint32_t, uint32_t, uint32_t,
           uint64_t& requestId) { requestId = 0; return GeometryReportStatus::Unsupported; }

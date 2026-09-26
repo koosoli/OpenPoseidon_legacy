@@ -428,9 +428,12 @@ void RegisterScreenshot(HarnessServer& hs)
             if (status == Engine::GeometryReportStatus::Ready) {
                 cJSON_AddBoolToObject(result, "valid", report.valid);
                 cJSON_AddBoolToObject(result, "truncated", report.truncated);
+                cJSON_AddBoolToObject(result, "ownershipCoverageComplete", report.ownershipCoverageComplete);
                 cJSON_AddStringToObject(result, "scope", "retained whole-mesh allocations; overlapping LOD rows; not selected usage or reclaimable memory");
 #define GEOMETRY_REPORT_FIELD(field) cJSON_AddNumberToObject(result, #field, static_cast<double>(report.field))
                 GEOMETRY_REPORT_FIELD(uniqueVertexBytes); GEOMETRY_REPORT_FIELD(uniqueIndexBytes);
+                GEOMETRY_REPORT_FIELD(overlapWithinInspectedMeshes);
+                GEOMETRY_REPORT_FIELD(overlapWithinInspectedVertexBytes); GEOMETRY_REPORT_FIELD(overlapWithinInspectedIndexBytes);
                 GEOMETRY_REPORT_FIELD(poolLiveBytes); GEOMETRY_REPORT_FIELD(poolCapacityBytes); GEOMETRY_REPORT_FIELD(poolRetiredBytes);
                 GEOMETRY_REPORT_FIELD(registryEntriesAtRequest); GEOMETRY_REPORT_FIELD(registryEntriesVisited); GEOMETRY_REPORT_FIELD(ineligibleEntriesSkipped); GEOMETRY_REPORT_FIELD(modelsRequested); GEOMETRY_REPORT_FIELD(modelsVisited);
                 GEOMETRY_REPORT_FIELD(lodsInVisitedModels); GEOMETRY_REPORT_FIELD(sectionVisits); GEOMETRY_REPORT_FIELD(uniqueMeshes);
@@ -532,6 +535,7 @@ void RegisterScreenshot(HarnessServer& hs)
               cJSON_AddNumberToObject(result, "preparedAlphaFactsHits", static_cast<double>(texturePrep.alphaFactsHits));
               cJSON_AddNumberToObject(result, "preparedAlphaFactsMisses", static_cast<double>(texturePrep.alphaFactsMisses));
               cJSON_AddNumberToObject(result, "preparedAlphaFactsCancelled", static_cast<double>(texturePrep.alphaFactsCancelled));
+              cJSON_AddNumberToObject(result, "preparedAlphaFactsCapacitySkipped", static_cast<double>(texturePrep.alphaFactsCapacitySkipped));
             cJSON_AddNumberToObject(result, "preparedDdsPuts", static_cast<double>(texturePrep.ddsPreparedPuts));
             cJSON_AddNumberToObject(result, "preparedDdsTakes", static_cast<double>(texturePrep.ddsPreparedTakes));
             cJSON_AddNumberToObject(result, "preparedDdsConfigurationMisses", static_cast<double>(texturePrep.ddsConfigurationMisses));

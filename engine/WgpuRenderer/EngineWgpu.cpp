@@ -2990,6 +2990,10 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
                 report.valid = true;
                 report.uniqueVertexBytes = summary.unique_vertex_bytes;
                 report.uniqueIndexBytes = summary.unique_index_bytes;
+                report.overlapWithinInspectedMeshes = summary.overlap_within_inspected_meshes;
+                report.overlapWithinInspectedVertexBytes = summary.overlap_within_inspected_vertex_bytes;
+                report.overlapWithinInspectedIndexBytes = summary.overlap_within_inspected_index_bytes;
+                report.ownershipCoverageComplete = false; // inspected retained LODs are not all mesh owners
                 report.poolLiveBytes = summary.pool_live_bytes;
                 report.poolCapacityBytes = summary.pool_capacity_bytes;
                 report.poolRetiredBytes = summary.pool_retired_bytes;

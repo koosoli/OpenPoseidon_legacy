@@ -34,7 +34,7 @@
 // and the handshake refuses the pair — so this number only has to move for
 // changes the hash cannot see (an added/removed entry point, a semantic change
 // to an existing one).
-#define WGR_ABI_VERSION 12u
+#define WGR_ABI_VERSION 13u // geometry overlap summary; engine/DLL must be deployed together
 
 // Required capabilities are negotiated as a bit set inside WgrAbiCheck. A
 // newer engine can reject an older renderer DLL even if the shared layouts
@@ -1814,8 +1814,14 @@ struct WgrGeometryAllocationSummary
     uint64_t pool_live_bytes, pool_capacity_bytes, pool_retired_bytes;
     uint32_t unique_meshes, models_visited, lods_total, section_visits;
     uint32_t missing_models, missing_meshes, invalid_ranges, truncated, rows_written;
+    // Unique allocations shared across distinct inspected (model, LOD) rows.
+    // No global ownership/exclusive/reclaimable interpretation.
+    uint64_t overlap_within_inspected_meshes;
+    uint64_t overlap_within_inspected_vertex_bytes, overlap_within_inspected_index_bytes;
 };
-static_assert(sizeof(WgrGeometryAllocationSummary) == 80);
+static_assert(sizeof(WgrGeometryAllocationSummary) == 104);
+static_assert(offsetof(WgrGeometryAllocationSummary, overlap_within_inspected_meshes) == 80);
+static_assert(offsetof(WgrGeometryAllocationSummary, overlap_within_inspected_index_bytes) == 96);
 
 enum WgrWaterKind : uint32_t { WGR_WATER_KIND_OCEAN = 0, WGR_WATER_KIND_RIVER = 1 };
 /* WTR-003 — water debug view selector, written to WgrWaterParams.debug_params.x. The water

@@ -1,7 +1,7 @@
 //! On-demand retained geometry attribution; no GPU readback or residency policy.
 use super::{cull::LodGpu, GpuSectionSrc};
 use crate::ffi::{WgrGeometryAllocationRow, WgrGeometryAllocationSummary};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 pub(super) fn collect(
     models: &[(u32, Option<&[LodGpu]>)],
@@ -12,7 +12,9 @@ pub(super) fn collect(
 ) -> (Vec<WgrGeometryAllocationRow>, WgrGeometryAllocationSummary) {
     let mut rows = Vec::new();
     let mut summary = WgrGeometryAllocationSummary::default();
-    let mut union = HashSet::new();
+    // At most max_visits entries, created only for this diagnostic. Retain the
+    // first distinct (model, LOD) reference, not section occurrence counts.
+    let mut union = HashMap::new();
     for &(model_id, lods) in models {
         let Some(lods) = lods else { summary.missing_models += 1; continue };
         summary.models_visited += 1;
@@ -44,10 +46,22 @@ pub(super) fn collect(
                 row.live_meshes += 1;
                 row.vertex_bytes += vertex_bytes;
                 row.index_bytes += index_bytes;
-                if union.insert(section.mesh) {
-                    summary.unique_meshes += 1;
-                    summary.unique_vertex_bytes += vertex_bytes;
-                    summary.unique_index_bytes += index_bytes;
+                match union.entry(section.mesh) {
+                    std::collections::hash_map::Entry::Vacant(entry) => {
+                        entry.insert(((model_id, lod_index), false));
+                        summary.unique_meshes += 1;
+                        summary.unique_vertex_bytes += vertex_bytes;
+                        summary.unique_index_bytes += index_bytes;
+                    }
+                    std::collections::hash_map::Entry::Occupied(mut entry) => {
+                        let (first, overlap) = entry.get_mut();
+                        if *first != (model_id, lod_index) && !*overlap {
+                            *overlap = true;
+                            summary.overlap_within_inspected_meshes += 1;
+                            summary.overlap_within_inspected_vertex_bytes += vertex_bytes;
+                            summary.overlap_within_inspected_index_bytes += index_bytes;
+                        }
+                    }
                 }
             }
             rows.push(row);
@@ -70,6 +84,26 @@ mod tests {
         assert_eq!(rows.len(), 3); assert!(rows.iter().all(|r| r.vertex_bytes == 136 && r.index_bytes == 12 && r.live_meshes == 1));
         assert_eq!((s.unique_meshes, s.unique_vertex_bytes, s.unique_index_bytes), (1, 136, 12));
         assert_eq!(s.section_visits, 4);
+        assert_eq!((s.overlap_within_inspected_meshes, s.overlap_within_inspected_vertex_bytes,
+            s.overlap_within_inspected_index_bytes), (1, 136, 12));
+    }
+    #[test]
+    fn duplicate_sections_and_repeated_model_requests_do_not_imply_overlap() {
+        let levels = [lod(0, 2)]; let sources = [section(7), section(7)];
+        let (_, s) = collect(&[(1, Some(&levels)), (1, Some(&levels))], &sources, 8, 8, |_| Some((136, 12)));
+        assert_eq!(s.unique_meshes, 1); assert_eq!(s.section_visits, 4);
+        assert_eq!((s.overlap_within_inspected_meshes, s.overlap_within_inspected_vertex_bytes,
+            s.overlap_within_inspected_index_bytes), (0, 0, 0));
+    }
+    #[test]
+    fn overlap_counts_unique_allocations_not_extra_references_or_unshared_meshes() {
+        let first = [lod(0, 2), lod(2, 1)]; let second = [lod(2, 1)];
+        let sources = [section(7), section(8), section(7)];
+        let (_, s) = collect(&[(1, Some(&first)), (2, Some(&second))], &sources, 8, 8,
+            |id| Some(if id == 7 { (136, 12) } else { (68, 4) }));
+        assert_eq!((s.unique_meshes, s.unique_vertex_bytes, s.unique_index_bytes), (2, 204, 16));
+        assert_eq!((s.overlap_within_inspected_meshes, s.overlap_within_inspected_vertex_bytes,
+            s.overlap_within_inspected_index_bytes), (1, 136, 12));
     }
     #[test]
     fn missing_ranges_and_handles_never_fabricate_bytes() {
@@ -78,6 +112,7 @@ mod tests {
         assert_eq!(rows[0].missing_meshes, 1); assert_eq!(s.missing_meshes, 1);
         assert_eq!(s.invalid_ranges, 1); assert_eq!(s.missing_models, 1);
         assert_eq!(s.unique_vertex_bytes + s.unique_index_bytes, 0);
+        assert_eq!(s.overlap_within_inspected_meshes, 0);
     }
     #[test]
     fn row_and_visit_limits_do_not_publish_partial_lods() {
@@ -86,6 +121,19 @@ mod tests {
             let (rows, s) = collect(&[(1, Some(&levels))], &sources, rows_cap, visit_cap, |_| Some((68, 4)));
             assert_eq!(rows.len(), 1); assert_eq!(s.truncated, 1);
             assert_eq!(s.section_visits, 1); assert_eq!(s.unique_meshes, 1);
+        }
+    }
+    #[test]
+    fn truncation_reports_only_overlap_in_fully_inspected_rows() {
+        let levels = [lod(0, 1), lod(1, 1), lod(2, 1)];
+        let sources = [section(7), section(7), section(7)];
+        for (rows_cap, visit_cap, expected_overlap) in [(1, 8, 0), (8, 1, 0), (2, 8, 1), (8, 2, 1)] {
+            let (rows, s) = collect(&[(1, Some(&levels))], &sources, rows_cap, visit_cap, |_| Some((136, 12)));
+            assert_eq!(rows.len(), if expected_overlap == 0 { 1 } else { 2 });
+            assert_eq!(s.truncated, 1); assert_eq!(s.unique_meshes, 1);
+            assert_eq!(s.overlap_within_inspected_meshes, expected_overlap);
+            assert_eq!(s.overlap_within_inspected_vertex_bytes, 136 * expected_overlap);
+            assert_eq!(s.overlap_within_inspected_index_bytes, 12 * expected_overlap);
         }
     }
 }

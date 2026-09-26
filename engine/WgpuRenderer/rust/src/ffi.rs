@@ -1762,9 +1762,9 @@ pub extern "C" fn wgr_abi_version() -> u32 {
     if cfg!(debug_assertions) {
         option_env!("WGR_TEST_ABI_VERSION")
             .and_then(|value| value.parse::<u32>().ok())
-            .unwrap_or(12)
+            .unwrap_or(13)
     } else {
-        12
+        13
     }
 }
 
@@ -2034,8 +2034,10 @@ mod abi_tests {
     fn geometry_report_layout_and_invalid_request_are_bounded() {
         assert_eq!(std::mem::size_of::<super::WgrGeometryAllocationRow>(), 40);
         assert_eq!(std::mem::offset_of!(super::WgrGeometryAllocationRow, model_id), 16);
-        assert_eq!(std::mem::size_of::<super::WgrGeometryAllocationSummary>(), 80);
+        assert_eq!(std::mem::size_of::<super::WgrGeometryAllocationSummary>(), 104);
         assert_eq!(std::mem::offset_of!(super::WgrGeometryAllocationSummary, unique_meshes), 40);
+        assert_eq!(std::mem::offset_of!(super::WgrGeometryAllocationSummary, overlap_within_inspected_meshes), 80);
+        assert_eq!(std::mem::offset_of!(super::WgrGeometryAllocationSummary, overlap_within_inspected_index_bytes), 96);
         assert_eq!(unsafe { super::wgr_get_geometry_allocation_report(
             std::ptr::null_mut(), super::WgrSlice { data: std::ptr::null(), len: 0 },
             1, 1, std::ptr::null_mut(), 1, std::ptr::null_mut()) }, 0);
@@ -2055,12 +2057,19 @@ mod abi_tests {
 
     #[test]
     fn exported_abi_version_matches_the_public_contract() {
-        assert_eq!(super::wgr_abi_version(), 12); // model retirement export
+        assert_eq!(super::wgr_abi_version(), 13); // geometry overlap summary; matched engine/DLL required
     }
 
     #[test]
     fn matching_abi_declaration_is_accepted() {
         assert_eq!(unsafe { super::wgr_abi_validate(&good_check()) }, 1);
+    }
+
+    #[test]
+    fn pre_overlap_summary_abi_is_refused_before_report_writes() {
+        let mut check = good_check();
+        check.abi_version = 12; // old 80-byte allocation summary
+        assert_eq!(unsafe { super::wgr_abi_validate(&check) }, 0);
     }
 
     #[test]
@@ -3554,6 +3563,11 @@ pub struct WgrGeometryAllocationSummary {
     pub invalid_ranges: u32,
     pub truncated: u32,
     pub rows_written: u32,
+    /// Unique allocations referenced by >1 distinct (model, LOD) among fully
+    /// inspected rows only. Not global ownership, exclusive or reclaimable bytes.
+    pub overlap_within_inspected_meshes: u64,
+    pub overlap_within_inspected_vertex_bytes: u64,
+    pub overlap_within_inspected_index_bytes: u64,
 }
 
 /// Read-only renderer-owner snapshot. No waits/readback; bounded metadata visits only.

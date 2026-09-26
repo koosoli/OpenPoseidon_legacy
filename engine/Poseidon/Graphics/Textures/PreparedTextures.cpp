@@ -9,6 +9,7 @@
 #include <list>
 #include <mutex>
 #include <memory>
+#include <limits>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -38,16 +39,26 @@ struct PreparedTextureStore::Impl
         DdsPublicationToken publication;
         std::unique_ptr<PreparedAlphaFacts> alphaFacts;
     };
+    static size_t AddCharge(size_t a, size_t b)
+    { return b > std::numeric_limits<size_t>::max() - a ? std::numeric_limits<size_t>::max() : a + b; }
     static size_t ChainBytes(const PAABlockChain& chain)
-    { return chain.blocks.capacity() + chain.levels.capacity() * sizeof(PAABlockLevel); }
+    {
+        if (chain.levels.capacity() > std::numeric_limits<size_t>::max() / sizeof(PAABlockLevel))
+            return std::numeric_limits<size_t>::max();
+        return AddCharge(chain.blocks.capacity(), chain.levels.capacity() * sizeof(PAABlockLevel));
+    }
     static size_t EntryBytes(const Entry& entry)
     { return ChainBytes(entry.chain) + entry.image.rgba.capacity() + (entry.dds ? entry.dds->bytes : 0) + entry.preparedDdsBytes + AlphaFactsBytes(entry.alphaFacts.get()); }
     static size_t AlphaFactsBytes(const PreparedAlphaFacts* facts)
     {
         // Known C++ capacities plus a conservative shared_ptr control-block
         // guard. Shared archive leases are deliberately charged per entry.
-        return facts ? sizeof(PreparedAlphaFacts) + facts->source.archive.capacity() + 1 +
-            facts->source.ArchiveIdentityBytes() + 64 : 0;
+        return facts ? AlphaFactsSourceBytes(facts->source) : 0;
+    }
+    static size_t AlphaFactsSourceBytes(const BankReadRequest& source)
+    {
+        return AddCharge(AddCharge(sizeof(PreparedAlphaFacts) + 1 + 64, source.archive.capacity()),
+                         source.ArchiveIdentityBytes());
     }
     mutable std::mutex mutex;
     // Insertion order = production order = (through the preparer's queue) distance order, so
@@ -250,6 +261,28 @@ uint64_t PreparedTextureStore::Generation() const
     return _impl->generation;
 }
 
+bool PreparedTextureStore::CanRetainAlphaFacts(const std::string& key, const PAABlockChain& chain,
+    const BankReadRequest& source, uint64_t generation)
+{
+    if (!Enabled() || key.empty() || !chain.valid() || !source.HasArchiveIdentity() ||
+        chain.magic < 0xFF02 || chain.magic > 0xFF05 || !chain.levels[0].legacyBlockReadCompatible ||
+        chain.levels[0].sourceHeaderOffset == SIZE_MAX) return false;
+    // Same retained-charge arithmetic as Put, without copying strings or pixels.
+    // A copied string may have a different capacity; final Put always checks its
+    // actual charge. This snapshot is neither a reservation nor acceptance.
+    const size_t factsBytes = Impl::AlphaFactsSourceBytes(source);
+    const size_t chainBytes = Impl::ChainBytes(chain);
+    std::lock_guard<std::mutex> lock(_impl->mutex);
+    if (generation != _impl->generation || _impl->uploaded.count(key) || _impl->byKey.count(key)) return false;
+    const size_t available = ByteBudget() - std::min(_impl->bytes, ByteBudget());
+    if (chainBytes > available || factsBytes > available - chainBytes)
+    {
+        ++_impl->stats.alphaFactsCapacitySkipped;
+        return false;
+    }
+    return true;
+}
+
 std::unique_ptr<PreparedAlphaFacts> PreparedTextureStore::BuildAlphaFacts(const PAABlockChain& chain,
     const BankReadRequest& source, const std::function<bool()>& cancelled)
 {
@@ -350,14 +383,14 @@ bool PreparedTextureStore::Put(const std::string& key, PAABlockChain&& chain,
         {
             ++_impl->stats.rejectedDup;
         }
-        else if (Impl::ChainBytes(chain) + Impl::AlphaFactsBytes(alphaFacts.get()) > ByteBudget() - std::min(_impl->bytes, ByteBudget()))
+        else if (Impl::AddCharge(Impl::ChainBytes(chain), Impl::AlphaFactsBytes(alphaFacts.get())) > ByteBudget() - std::min(_impl->bytes, ByteBudget()))
         {
             ++_impl->stats.rejectedFull;
         }
         else
         {
             const size_t size = chain.blocks.size();
-            const size_t retained = Impl::ChainBytes(chain) + Impl::AlphaFactsBytes(alphaFacts.get());
+            const size_t retained = Impl::AddCharge(Impl::ChainBytes(chain), Impl::AlphaFactsBytes(alphaFacts.get()));
             _impl->order.push_back(Impl::Entry{key, std::move(chain), DecodedImage{}, Impl::Clock::now()});
             _impl->order.back().alphaFacts = std::move(alphaFacts);
             if (_impl->order.back().alphaFacts) ++_impl->stats.alphaFactsPuts;

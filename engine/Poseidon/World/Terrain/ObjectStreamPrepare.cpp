@@ -497,7 +497,10 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                             return stop || jobGen != generation.load(std::memory_order_relaxed) || stale[job.index];
                         };
                         std::unique_ptr<render::PreparedAlphaFacts> facts;
-                        try { facts = render::PreparedTextureStore::BuildAlphaFacts(chain, texture.read, cancelled); }
+                        try {
+                            if (store.CanRetainAlphaFacts(texture.key, chain, texture.read, job.textureGeneration))
+                                facts = render::PreparedTextureStore::BuildAlphaFacts(chain, texture.read, cancelled);
+                        }
                         catch (...) { } // optional analysis failure retains the original upload chain
                         if (cancelled()) { store.NoteAlphaFactsCancelled(); break; }
                         if (store.Put(texture.key, std::move(chain), job.textureGeneration, std::move(facts)))
