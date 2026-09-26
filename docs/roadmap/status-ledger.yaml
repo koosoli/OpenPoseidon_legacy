@@ -6621,17 +6621,17 @@ tickets:
     owner: null
     branch: codex/streaming-residency
     baseline_commit: 03e71371
-    verification_commit: d70fd977
+    verification_commit: dde3d4fb
     milestone: 0
     milestone_role: NON_BLOCKING
     depends_on: []
     blocked_by: []
     blocks: []
-    implementation_commits: [7d5f3e71, f733e708, 8e09f391, 7d8fb75b, a531d7b9, 21b89e79, 082eaa06, c2c8eb0b, f602332c, dca4f954, 0d6a498f, 82cbb5a2, 486d5e9b, e0b88e7a, 08bbada3, cd3d5c68, d8ac1c8d, a92bab54, f4ffc510, d7c35c0f, f0572b3c, 52b00a22, b12e46ca, 11c5ca04, 91a2073e, b4bdb20b, 68143711, 037f188d, 1f04f324, cba650fd, bd9b472d, 9fa064f7, 4fcfeea8, d8b7126f]
+    implementation_commits: [7d5f3e71, f733e708, 8e09f391, 7d8fb75b, a531d7b9, 21b89e79, 082eaa06, c2c8eb0b, f602332c, dca4f954, 0d6a498f, 82cbb5a2, 486d5e9b, e0b88e7a, 08bbada3, cd3d5c68, d8ac1c8d, a92bab54, f4ffc510, d7c35c0f, f0572b3c, 52b00a22, b12e46ca, 11c5ca04, 91a2073e, b4bdb20b, 68143711, 037f188d, 1f04f324, cba650fd, bd9b472d, 9fa064f7, 4fcfeea8, d8b7126f, 69f9b479, dde3d4fb]
     production_call_sites: []
-    test_ids: [stationary-residency, preparer-byte-budget, preparer-generation-cancellation, required-fire-obstruction, fixed-detail-return, strict-headless-identity, same-world-save-away-roundtrip, fresh-process-save-away-roundtrip, cold-logical-identity, logical-proxy-promotion, texture-encode-window, preparer-radius-certificate, exact-placement-frame, cold-destroyed-visual-promotion]
+    test_ids: [stationary-residency, preparer-byte-budget, preparer-generation-cancellation, required-fire-obstruction, fixed-detail-return, strict-headless-identity, same-world-save-away-roundtrip, fresh-process-save-away-roundtrip, cold-logical-identity, logical-proxy-promotion, texture-encode-window, preparer-radius-certificate, exact-placement-frame, cold-destroyed-visual-promotion, instance-coverage-owner-lease, instance-coverage-weak-aba, bc3-worker-parity, bc3-worker-budget, bc3-worker-parse-cancel]
     benchmark_artifacts: [docs/roadmap/evidence/streaming-20260920.json]
-    evidence_hash: 5e9fa4ab0a1e72727e937903bc08933e716db6b1e4e7d56f1adf286bbef2e683
+    evidence_hash: 3e9548661f4eb36c256a90a836a02b0c44d8f824ed545405755c964d495f4199
     decision_record: docs/roadmap/decisions/STREAMING-AUDIT-20260920.md
     known_failures:
       - The staged streaming plan remains in progress; see the decision record for uncompleted gates.
@@ -6650,7 +6650,9 @@ tickets:
       - Latest 4fcfeea8 supported build and 6882 assertions in 131 cases passed. Worker radius certificates remain pre-constructor model-space evidence; NewObject type-shape replacement and VehicleAddRef autocenter/radius changes require eligibility/reconciliation before world coverage Ready. Automatic demand remains unintegrated.
       - Corrected d70fd977 cold destroyed wall runtime passed with runner d8b7126f: same identity/phase, normalVB0 while logical-only then normalVB4 on visual return. Prior 141048 failed only the runner's unclamped damage predicate, not engine destruction. One explicit diagnostic fixture is not all-types/full-save/MP or performance acceptance.
       - Native d70fd977 fixed-LOD coverage diagnostic passed with normal 20000 budget and 19999 restored; street structures present but vegetation appearance differs. 1466 cold rows report 1458.605 ms encoding, 223.066 ms over 16 encodes before renderer acquisition, while one Betula row still waits 583.524 ms. This is a measured opportunity, not GPU overlap/FPS/loading gain or Reforger ground-truth quality.
-    fallback: WGR_NATIVE_DEFER_ATTACHMENT_SHAPES remains off (unset/0 restores eager attachment shapes); WGR_OBJECT_STREAM_PBO and WGR_OBJECT_STREAM_PBO_TEXTURES remain off; WGR_SKY_VOLUME_INCREMENTAL=0 restores full atlas uploads; WGR_ADAPTIVE_TEXTURE_DETAIL and WGR_OBJECT_STREAM_GPU_BUDGET remain off; WGR_OBJECT_STREAM_READY_MB=0 disables the new ready-payload gate; old ocean remains default.
+      - Latest dde3d4fb build passed; OFF regression 7330 assertions/150 cases (145 passed, 5 explicit enabled-only skips), fresh ON 292 assertions/10 cases. Live observation is one current owner-leased instance with weak ABA witnesses; group/query readiness and per-LOD/animation mutation proof remain open.
+      - Native DDS/BC3 ON and default OFF coverage diagnostics both passed at 19999 with equal geometry/texture allocation counters, but first-full/overall observed loading is slower ON (49.924/107.590 seconds vs 39.318/87.311 from first engine log). Lower owner encoding and 30 CPU claims are not GPU completion or a pure BC3/FPS gain; prototype remains OFF. Active encode cancellation, exact vegetation quality, automatic actor/query demand and broad performance remain unverified.
+    fallback: WGR_NATIVE_DDS_PREPARE remains off; WGR_NATIVE_DEFER_ATTACHMENT_SHAPES remains off (unset/0 restores eager attachment shapes); WGR_OBJECT_STREAM_PBO and WGR_OBJECT_STREAM_PBO_TEXTURES remain off; WGR_SKY_VOLUME_INCREMENTAL=0 restores full atlas uploads; WGR_ADAPTIVE_TEXTURE_DETAIL and WGR_OBJECT_STREAM_GPU_BUDGET remain off; WGR_OBJECT_STREAM_READY_MB=0 disables the new ready-payload gate; old ocean remains default.
     reviewer: null
     reviewer_method: Installed native runtime reproduction, comparable-coverage checks and real worker cancellation tests.
     supersedes: []

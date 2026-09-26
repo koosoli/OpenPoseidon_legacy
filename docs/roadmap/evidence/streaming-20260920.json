@@ -1663,6 +1663,154 @@
         "screenshotReview": "Root inspected initial.png and returned-settled.png: structures/street present at both; visible vegetation appearance differs. No exact vegetation quality parity claim.",
         "limitations": "CoverageOnly fixed lodGovernorRange1 is diagnostic, not normal FPS. Summed CPU encoding before renderer acquisition is not measured GPU overlap or throughput gain. Whole-GPU sampler includes other applications. Native/Reforger is a stress workload, not ground-truth compatibility. Long renderer-window acquisition remains a measured opportunity."
       }
+    },
+    {
+      "run": "native-worker-bc3-20260926-150849",
+      "result": "PASS normal-budget fixed-LOD coverage diagnostic: passed=true, coverageOnly=true, normal=true, 19999 before/returned, own clean exit0. No normal-FPS or broad no-regression acceptance.",
+      "provenance": {
+        "saveRoundTrip": false,
+        "installed": "codex/streaming-residency dde3d4fb 2026-09-26_15:08 deploy-ps1",
+        "incrementalSkyUploads": true,
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "A6C10A4F0DDC79A419E6B8C43BC40A966154EEB57E4783CF3D5FEB6CE6436666",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "287E8F08337575B280441A70C03EB26C30217BBE70E1BC50C17FF73643F77FA6",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "packedModels": false,
+        "lodGovernorRange": "1",
+        "adaptive": false,
+        "readyMb": -1,
+        "nativeDdsPrepared": true,
+        "freshReload": false,
+        "scriptSha256": "FF478F93052C8D5C68DF8009ABD82217CE2E12E0A11008D80AA58293820E9C82",
+        "packedTextures": false,
+        "coverageOnly": true,
+        "geoGrowth": 2.0,
+        "corpus": "Native",
+        "head": "dde3d4fbece70431ddac7e76472d635381422670",
+        "pressureGrowth": false,
+        "controlled": false
+      },
+      "sha256": {
+        "engine.log": "4937ace89940fd7bc33fc219c155600a22e5c383cb94bb9ab2758efa3d8cd9d3",
+        "harness.jsonl": "85597d01832d6a53bbcc8286c07acbfc8a199885e3bd4069c5913cf45190b079",
+        "provenance.json": "b9b71ffe5018efd9bcd347525b0813bcc71419fdabc4252f7abc8836db83adcd",
+        "result.json": "fdd998fda0d4053088cac948ff8b90724dd875b273a30bc1b8b8729a25aa1ba9",
+        "initial.png": "2be48532e4f6fb278c05f74e14f8e031dfcc90d760854b49c05bdf25ae8da1a7",
+        "settled.png": "b8d7c30ef72d610acd0b2cece439f5ea189402daaa8dffef84b7d2dc212dbdda",
+        "returned-settled.png": "2b0cee61d655ae5e31c4677b56f06191b5f3be7b4f2bd0d80bf09a578398bb8c",
+        "whole-gpu-memory.csv": "1081c53840bbb55cdaf6a72847b4da504659ecfbee43d030a4b2f349a540eb28",
+        "whole-gpu-memory-errors.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "whole-gpu-memory-scope.txt": "e6d61a4bc6b06e8fb1dc4466dcf4edfe9454430f738b2012fc0f1e1708b9b75c"
+      },
+      "observations": {
+        "nativeDdsPrototypeEnabled": true,
+        "coldProfileRows": 1466,
+        "ownerEncodeMs": 1146.57,
+        "encodeBeforeWindowMs": 306.974,
+        "encodeBeforeWindowCount": 13,
+        "firstFullSecondsFromFirstEngineLog": 49.924,
+        "shutdownSecondsFromFirstEngineLog": 107.59,
+        "cpuSidecarClaims": 30,
+        "cpuSidecarClaimBytes": 21321024,
+        "workerBc3Prepared": 43,
+        "workerBc3BudgetSkipped": 0,
+        "workerBc3Ms": 2226.5582,
+        "peakEncodeReservedBytes": 32856480,
+        "peakConversionReservedBytes": 133490202,
+        "peakReadyReservedBytes": 132545020,
+        "finalReservations": 0,
+        "beforeResident": 19999,
+        "returnedResident": 19999,
+        "geometryLiveBytes": 642734708,
+        "geometryCapacityBytes": 704643072,
+        "objectTextureBytes": 995821696,
+        "objectTextureCount": 1298,
+        "backendAllocationBytes": 2964816304,
+        "screenshotReview": "Root reviewed initial and returned street/structures present, vegetation appearance varies as in earlier controls; no exact vegetation quality parity",
+        "limitations": "Single sequential fixed-LOD diagnostic runs, cache/system confounded. ON combines native DDS composition preparation and BC3, not pure BC3 A/B. Claims indicate CPU ownership transfer, not GPU completion. Lower owner encoding does not establish load/FPS gain; ON first full and overall scenario are slower. Reforger is stress workload, not ground-truth compatibility. Prototype remains default OFF."
+      }
+    },
+    {
+      "run": "native-worker-bc3-default-20260926-151427",
+      "result": "PASS normal-budget fixed-LOD coverage diagnostic: passed=true, coverageOnly=true, normal=true, 19999 before/returned, own clean exit0. No normal-FPS or broad no-regression acceptance.",
+      "provenance": {
+        "scriptSha256": "FF478F93052C8D5C68DF8009ABD82217CE2E12E0A11008D80AA58293820E9C82",
+        "head": "dde3d4fbece70431ddac7e76472d635381422670",
+        "adaptive": false,
+        "packedTextures": false,
+        "installed": "codex/streaming-residency dde3d4fb 2026-09-26_15:08 deploy-ps1",
+        "readyMb": -1,
+        "packedModels": false,
+        "geoGrowth": 2.0,
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "A6C10A4F0DDC79A419E6B8C43BC40A966154EEB57E4783CF3D5FEB6CE6436666",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "287E8F08337575B280441A70C03EB26C30217BBE70E1BC50C17FF73643F77FA6",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "corpus": "Native",
+        "incrementalSkyUploads": true,
+        "saveRoundTrip": false,
+        "freshReload": false,
+        "pressureGrowth": false,
+        "controlled": false,
+        "nativeDdsPrepared": false,
+        "coverageOnly": true,
+        "lodGovernorRange": "1"
+      },
+      "sha256": {
+        "engine.log": "f79c5b6df331504ca73f360821d97010f0d773685fe44d2660179dcad483ec0b",
+        "harness.jsonl": "b8a9608258bb436d54263ac3a26fc3c14f79b57da9a36ffc5cffda1aa3c2d4d6",
+        "provenance.json": "201cc99434c84bae46c0bc5d52d2ba3113933be68fae064af20a1e305f21904b",
+        "result.json": "53724d7d2b919bfe6e5485559b867c8fb7d94958861a50ecdc337b3807aac3d1",
+        "initial.png": "cceeb14cbdbde00aa64e68ed865e80d1edeac51b7b821fe8653169900de6c640",
+        "settled.png": "bd23b65c9d58f10a826aae249dfa55ab719ae310e59aa40c5658c0617e845a96",
+        "returned-settled.png": "2d71aa75bb441797e93bc94bca6a490176b8f4a1490a7cf5eaa4751c03925b21",
+        "whole-gpu-memory.csv": "d1e9926ef20857e388b23836b8ef5f1ad09a7d36bc0e5f3a2fd8779a7f9fc396",
+        "whole-gpu-memory-errors.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "whole-gpu-memory-scope.txt": "e6d61a4bc6b06e8fb1dc4466dcf4edfe9454430f738b2012fc0f1e1708b9b75c"
+      },
+      "observations": {
+        "nativeDdsPrototypeEnabled": false,
+        "coldProfileRows": 1466,
+        "ownerEncodeMs": 1564.368,
+        "encodeBeforeWindowMs": 303.199,
+        "encodeBeforeWindowCount": 17,
+        "firstFullSecondsFromFirstEngineLog": 39.318,
+        "shutdownSecondsFromFirstEngineLog": 87.311,
+        "cpuSidecarClaims": 0,
+        "cpuSidecarClaimBytes": 0,
+        "workerBc3Prepared": 0,
+        "workerBc3BudgetSkipped": 0,
+        "workerBc3Ms": 0,
+        "peakEncodeReservedBytes": 0,
+        "peakConversionReservedBytes": 206436020,
+        "peakReadyReservedBytes": 191289445,
+        "finalReservations": 0,
+        "beforeResident": 19999,
+        "returnedResident": 19999,
+        "geometryLiveBytes": 642734708,
+        "geometryCapacityBytes": 704643072,
+        "objectTextureBytes": 995821696,
+        "objectTextureCount": 1298,
+        "backendAllocationBytes": 2963766560,
+        "screenshotReview": "Root reviewed initial and returned street/structures present, vegetation appearance varies as in earlier controls; no exact vegetation quality parity",
+        "limitations": "Single sequential fixed-LOD diagnostic runs, cache/system confounded. ON combines native DDS composition preparation and BC3, not pure BC3 A/B. Claims indicate CPU ownership transfer, not GPU completion. Lower owner encoding does not establish load/FPS gain; ON first full and overall scenario are slower. Reforger is stress workload, not ground-truth compatibility. Prototype remains default OFF."
+      }
     }
   ],
   "microbenchmarks": [
@@ -1777,6 +1925,44 @@
       "sha256": {
         "build-radius-placement-20260926.log": "cf164739652d26461200601c319aab95e50effbdec48f521d98e8a8eb6320274",
         "test-radius-placement-20260926.log": "44a37e15c98fb55a4b9a7ced4d937035667f61d8d9e2dd7b40587453d4185caa"
+      }
+    },
+    {
+      "artifactRoot": "build",
+      "runtimeSourceCommit": "dde3d4fb",
+      "implementationCommits": [
+        "69f9b479",
+        "dde3d4fb"
+      ],
+      "result": "PASS final supported build; default NativeDds OFF regression 7330 assertions/150 cases (145 passed,5 explicitly skipped); fresh NativeDds ON 292 assertions/10 cases, no skips. Active encoding cancellation remains untested.",
+      "sha256": {
+        "build-worker-bc3-owner-20260926.log": "4db72b6daad952e9d9d1c2d9bb1f38d2cd4f6ce1cd55071fefbb07881388d06f",
+        "build-worker-bc3-policy-final-20260926.log": "c3cb82e4dabff735dcaa4072d297028f74e06b1c81d292337a3f34e6ac5a859d",
+        "build-worker-bc3-policy-witness-20260926.log": "b04569a981545136c43ea35fbaba260779baa7d2342f65c1e3c678349a782898",
+        "test-worker-bc3-regression-20260926.log": "b7f300d21ede8bb62ac3a97ce02e2ff8370663b4d1ebe06a9ef2482d5fbd3400",
+        "test-worker-bc3-enabled-20260926.log": "f4aacea9a0996e2ae0a3a2b43c67c2f7a4bb30dee124b5acb7f272cd1e827d61"
+      }
+    },
+    {
+      "artifactRoot": "build",
+      "result": "Intermediate compile failures repaired before successful final build: renderer SRef cast in initial/retry and private fixture BindPreparedMips use in policy attempt. Not runtime regressions.",
+      "sha256": {
+        "build-worker-bc3-coverage-20260926.log": "e4aad72996cd9f802c379b6765a14afb78ec9d8899e557f7568f658ddd6d7d09",
+        "build-worker-bc3-coverage-retry-20260926.log": "45b611404ef450f3acfe8f03e4f2e9b740e640f51fb095ab0eb52f853d8904d2",
+        "build-worker-bc3-policy-20260926.log": "69b50afe697b28182bab828383c4514efd6929fe5cc9321506ef09f8372cd758"
+      }
+    }
+  ],
+  "fixtures": [
+    {
+      "artifactRoot": "build",
+      "result": "PASS EngineTools parser probes: two authored world placements1001/1002 and four MLOD levels. Generated content/tool parsing only; not logical admission, collision/fire/query readiness or runtime acceptance.",
+      "sha256": {
+        "probe-simulation-fixture-world-20260926.log": "e9b2302da2c4451801cd0a951f41dd5467a121e9398d7c977333d172189b059e",
+        "probe-simulation-fixture-model-20260926.log": "226b2cf1302067ed93a7760fddafe66281a16d9918b1a32a456a2759bbf573b5",
+        "stream-residency/simulation-fixture-generated/fixture.json": "0fe614af29f9e7d6020d9f3524a4056d79baef8f0d94e2c4ec441e1421ad973f",
+        "stream-residency/simulation-fixture-generated/simulation-residency.wrp": "2039ab363055663d7a22e098dd2a079e2463b2b88b0bcaf8874112f60899196c",
+        "stream-residency/simulation-fixture-generated/streaming_fixture/wall.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e"
       }
     }
   ]

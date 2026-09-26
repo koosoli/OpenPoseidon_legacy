@@ -1140,3 +1140,72 @@ sampler includes other applications; its error file is empty. Engine/harness,
 provenance/result, three actually present images and sampler files are hashed.
 The streaming plan, texture stall attribution and visual/performance gates stay
 OPEN.
+### Live instance observations and bounded native DDS/BC3 prototype
+
+`69f9b479` adds owner-thread live-instance observations, a local shape query-policy
+revision and weak object/shape lifetime witnesses. The observation samples the
+actual constructed object frame and radius, revalidates them within a lexical
+owner-operation lease, and refuses stale movement, identity, mutation, wrong
+owner or expired scope. Weak witnesses reject an identical-address replacement
+without retaining the object/shape. This is evidence for **one existing live
+instance**, not a model-group certificate, persistent world/config epoch or AI
+publication barrier. It does not certify arbitrary per-LOD mutation/animation,
+geometry installed or a clear query. ID-cache observations do not load or pin.
+
+`dde3d4fb` extracts the exact legacy CPU BC3 block/mip encoder and optionally
+prepares upload-only sidecars for eligible native DDS composites. Source and
+workspace/output reservations are bounded; budget refusal keeps ordinary DDS
+preparation and fallback progress. Source pixels/classification stay available;
+owner choice is captured, and adoption checks options, identity/name and
+source dimensions with a one-shot claim. Native DDS preparation remains default
+OFF (`WGR_NATIVE_DDS_PREPARE=1` opts in). GPU/bank ownership stays with its
+existing owner. Source/parity/budget-skip/parse-cancellation tests pass; cancelling
+while actively encoding remains untested. Reservations are not allocator-exact.
+
+The final supported build passed. Default-OFF regression checks passed **7330
+assertions in 150 cases: 145 passed, 5 explicitly skipped** for enabled-only native
+fixtures. A fresh ON process passed **292 assertions in 10 cases**, no skips.
+Earlier initial/retry SRef-cast compile errors and private fixture BindPreparedMips
+access were repaired before this build; they are not runtime regressions. Actual
+successful and failed build/test logs are separately hashed. EngineTools also
+parses the generated fixture as two authored placements and four MLOD levels;
+those tool results/content hashes establish parsing, not simulation admission.
+
+Both native coverage runs use the same clean installed dde3d4fb pair (15:08 stamp),
+normal 20000 budget, factor 2 and fixed lodGovernorRange1. Both write passed=true,
+restore 19999, drain reservations and exit cleanly. Root reviewed initial/returned
+images: street/structures present, vegetation appearance varies again. Reforger
+is workload evidence, not ground truth, and fixed-LOD coverage is not normal FPS.
+
+| Measured scope | Native DDS/BC3 ON | Default OFF |
+|---|---:|---:|
+| First full admission from first engine log |49.924s|39.318s|
+| First engine log to shutdown complete |107.590s|87.311s|
+| Owner encode across 1466 cold rows |1146.570ms|1564.368ms|
+| CPU encoding before window |306.974ms/13|303.199ms/17|
+| CPU sidecar claims/bytes |30/21321024|0/0|
+| Worker prepared/time |43/2226.5582ms|0/0|
+| Peak encode reservation bytes |32856480|0|
+| Peak conversion/ready bytes |133490202/132545020|206436020/191289445|
+
+At equivalent allocated counters, both have geometry 642734708 live/704643072
+capacity bytes and object textures 995821696 bytes/1298 items. Reported backend
+allocations are 2964816304 ON versus 2963766560 OFF (earlier control 2964815152).
+These counts do not establish exact visual parity or complete driver memory.
+The OFF run verifies worker preparation/claims/encode reservations remain zero.
+
+The ON Betula3s cold row drops to 11.4 ms, owner encoding 0 and two CPU claims totaling
+2796192 bytes; the earlier control row was 683.4 ms, including 583.524 ms window wait
+and 60.185 ms encoding. This is a useful local opportunity, **not a headline gain**:
+ON includes native DDS composition as well as BC3 preparation, and whole first
+admission/scenario latency is slower than the matched OFF run. Single sequential
+runs have cache/system ordering confounds. CPU claims do not establish GPU
+completion/overlap. The prototype stays OFF pending causal diagnosis and
+performance/quality acceptance. Runtime logs/results/provenance, actual images
+and whole-device sampler artifacts are hashed for both arms.
+
+Automatic actor/query residency is under implementation as a separate default-OFF
+prototype and is unverified/uncommitted at this evidence checkpoint. No automatic
+collision, AI, navigation or Ready completeness is claimed. Constructor/group
+coverage, active-encode cancellation, secondary views, wider mutable state/MP and
+comparable-quality performance remain OPEN; the streaming plan is incomplete.
