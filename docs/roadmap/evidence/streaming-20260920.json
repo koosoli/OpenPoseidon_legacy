@@ -1377,6 +1377,62 @@
         ],
         "limitations": "Whole-device expanded sampler only in this arm; no comparable historical clocks. LOD/triangle demand differs. Ordered cache/system effects and combined source increments prevent causal loading/performance acceptance."
       }
+    },
+    {
+      "run": "dayz-cold-logical-20260926-133048",
+      "result": "INCOMPLETE: cold explicit identity/fire observations succeeded, but GPU geometry equality assertion failed with an unsettled baseline; no visual-promotion/runtime PASS",
+      "provenance": {
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "F56FA242D5C7E74D2DF6DE5BD4BFC119A86B12E28165E2ACB8117F304723CC38",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "BEA32A0DECC84ABEEC2B469E0A4B4F26E37AD0E51EA7CEF5287FA8EF93C7A8D5",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "installed": "codex/streaming-residency 037f188d 2026-09-26_13:30 deploy-ps1",
+        "scriptSha256": "37DC5A11CBEE099E7775020FB493CF3275486F6343E5914112F8059A6287A457",
+        "head": "037f188d505b029cbe67d154134d95a971208ad6",
+        "scope": "Cold explicit script identity and fire geometry, then visual promotion. Not automatic simulation demand or performance acceptance."
+      },
+      "sha256": {
+        "engine.log": "49965f56403b992540a67d750d9980673c6bc16d6b3c0dd90dd1b0ded4ca5d8e",
+        "harness.jsonl": "09c74d3c45ebb6ac871cdde44532b722b80ed598330cac1bedfca63ea22005e3",
+        "provenance.json": "3b2812d597051acbc62159fe0dc954add14166c2ab3a5a8fc822ef949582391d"
+      },
+      "observations": "Read-only identity initially absent; explicit script resolve produced required identity 83912800, damage command .25, visualResident=false, shapeVisualDeferred=true, geometry/fire geometry present and a real fire contact. Global geometry changed 67037524 -> 67147508 (+109984 bytes) after a first pending=false snapshot; last visual drain was not a stable baseline. Global counters cannot attribute the increase to this logical object. No completed result artifact."
+    },
+    {
+      "run": "dayz-cold-logical-20260926-133403",
+      "result": "INTERRUPTED: stable geometry samples reached, then socket disconnect/clean engine exit before identity probe; no runtime PASS",
+      "provenance": {
+        "installed": "codex/streaming-residency 037f188d 2026-09-26_13:30 deploy-ps1",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "F56FA242D5C7E74D2DF6DE5BD4BFC119A86B12E28165E2ACB8117F304723CC38",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "BEA32A0DECC84ABEEC2B469E0A4B4F26E37AD0E51EA7CEF5287FA8EF93C7A8D5",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "scope": "Cold explicit script identity and fire geometry, then visual promotion. Not automatic simulation demand or performance acceptance.",
+        "scriptSha256": "AE62F2D5C3988247E1171D9FAA0F3159CD8FECC93D2784C2481475417AE9D1D1",
+        "head": "1f04f324fe20165db20c9d1b01e4182c4585b9cb"
+      },
+      "sha256": {
+        "engine.log": "5474fb3e5fb7810e9c31dc7b391a15068acd43289eb8bc9dcb6bd99ecd358734",
+        "harness.jsonl": "4b3e2077ca7ed9786f859c2f447d9c73d959a853370382819b38004345b6824c",
+        "provenance.json": "1b18efc3b7afa1193915a3eef5cd6df3e9c361a8ece784afd125742d90099bdf"
+      },
+      "observations": "Repeated geometryLiveBytes samples held at 67147508, while texture/backend counters continued changing. Engine logged harness disconnect and clean exit 0 before the intended identity probe. External/unknown closure cause is not established; no cold resolve/promotion proof and no result artifact."
     }
   ],
   "microbenchmarks": [
@@ -1459,6 +1515,17 @@
         "side2048CandidateScratchBytes": 4194304,
         "scratchMeaning": "logical vector sizes, not allocator capacities",
         "limitations": "Existing RGBA fixed-stride wrapper independently unmeasured; synthetic CPU benchmark excludes GPU/game attribution."
+      }
+    }
+  ],
+  "buildChecks": [
+    {
+      "artifactRoot": "build",
+      "runtimeSourceCommit": "037f188d",
+      "result": "PASS supported combined build and 6565 assertions in 110 cases; coverage-index foundation added afterward is not built in this evidence",
+      "sha256": {
+        "build-logical-texture-window-20260926.log": "0042479a8f2f4701ef532f58a04388a6d4caf6ebaa7e794681e2a19e3db83bee",
+        "test-logical-texture-window-20260926.log": "c352a4262bf095165e682693669f88925945d2f8b32773ef0869ff90cb84a152"
       }
     }
   ]

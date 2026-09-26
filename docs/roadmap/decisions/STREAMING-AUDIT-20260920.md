@@ -931,3 +931,52 @@ is bounded owner-thread logical admission for never-requested actor/query
 geometry, with cold CPU collision verification; that runtime admission is still
 pending. Multiplayer, broader mutable state and equivalent-detail performance
 gates remain OPEN.
+### 037f188d cold CPU-only logical residency and deferred texture window
+
+Production commit `68143711` adds CPU-only cold logical shape loading and later
+visual/proxy promotion; `037f188d` moves fallback BC3 encoding before renderer
+ownership, using the limited window for the first eligible work item per frame.
+The supported combined build passed, and the targeted test log records **6565
+assertions in 110 cases**. Those checks cover the compiled source, including
+logical proxy promotion and texture-window ownership guards. They establish no
+loading/FPS improvement or broad no-regression acceptance.
+
+The installed executable/renderer pair is clean-stamped
+`codex/streaming-residency 037f188d 2026-09-26_13:30 deploy-ps1`;
+binary and per-run provenance hashes are in the manifest. The two cold-logical
+attempts below are deliberately **not PASS**:
+
+- `dayz-cold-logical-20260926-133048`: the read-only identity probe initially
+  finds fixture 83912800 absent. Explicit script resolution then produces the
+  real platform/stairs/wall identity, `visualResident=false`,
+  `shapeVisualDeferred=true`, physical/fire geometry and an actual fire-ray
+  contact. However, the global geometry counter increases from 67037524 to
+  67147508 bytes (+109984) between the initial `pending=false` snapshot and the
+  post-resolve sample. The initial snapshot preceded the final visual drain;
+  the equality assertion therefore has no stable baseline. These counters
+  cannot attribute the delta to the cold logical object. The runner does not
+  complete visual-promotion acceptance and produces no result artifact.
+- `dayz-cold-logical-20260926-133403`: runner commit `1f04f324` first waits for
+  repeated stable GPU geometry samples. Samples remain at 67147508 bytes,
+  although texture/backend allocations still change. The engine then logs a
+  harness socket disconnect and clean shutdown with exit code 0 before the
+  identity probe. The closure cause is external/unknown and not established by
+  these logs. It proves neither a cold resolve nor promotion, and there is no
+  result artifact. Clean process exit alone is not test acceptance.
+
+Both harness and engine logs and both provenance records are hashed as actually
+present. No missing result file or screenshot is invented. The revised runner
+addresses the baseline timing defect; the remaining installed cold-identity and
+visual-promotion acceptance gate stays OPEN.
+
+A separate `SimulationCoverageIndex.hpp` foundation and six test cases are now
+source-complete, but are **not built or runtime-integrated** in the checks above.
+It accepts numeric evidence from a validated fully adapted engine shape and
+final repaired position/scale, enlarging the existing engine guard sphere by
+2x and conservative roundoff. Uncertified model groups block coverage globally;
+certified disjoint group envelopes can allow progress. Monotonic generation
+leases, cancellation and bounded scans/matches reject stale or partial answers.
+`Ready` means metadata coverage only, never collision installed or obstacle-free.
+The producer/publisher still must certify every placement in a group and
+invalidate records after content/frame changes. No automatic actor/query/AI
+admission is wired, and the overall streaming plan remains OPEN.
