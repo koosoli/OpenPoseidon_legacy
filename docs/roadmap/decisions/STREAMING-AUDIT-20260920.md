@@ -1500,3 +1500,50 @@ broader comparable-quality performance and conditional paging remain OPEN.
 [Tidewater research](TIDEWATER-STREAMING-REVIEW-20260926.md) is retained as deferred
 architectural research, not implementation/runtime evidence. Waves remain parked.
 Reforger stress content remains workload evidence, not compatibility ground truth.
+
+### Audited raw source prerequisites and opt-in preparation — 26 September 2026
+
+20ab9ead carries producer/version/revision, declared/decoded LOD coverage and
+observed-bit raw directory/skeleton/keyframe/bone facts. Previously skipped motion
+payload and omitted directory facts cannot be inferred absent from adapted IR.
+Old parsed-IR absence reports above remain qualified. Optional tagged60-byte
+ModelBlob footer retains base1/cache key; exact old base blobs load with source
+audit Unknown. Unknown/missing/motion facts fail closed for static consumers.
+
+Combined game/tests/server/tools build passes. Initial prerequisite suite fails
+one positive quoted-numeric empty-class fixture:763/764 assertions,46/47 cases;
+that failed log is retained. Corrected integration1011/61, AST004 oldbase cache
+compatibility3551/11 and pathguard1023/63 pass. Stamped build/deploy pass;
+installed20ab9ead19:32 provenance matches compiled source.
+
+ODOL numeric-envelope sidecar is opt-in/default0, computed only for exclusive
+parse before Ready. External aliases and late Queued/Parsing/Ready requests are
+refused. Live plain-route class probe is one current owner operation, not a
+config-epoch certificate/cache or durable world Ready;127/128 path boundary
+checks prevent truncated class lookup. Raw source audit is decoded-source
+evidence, not actual class/constructor/final object proof.
+
+Tiny fixture lifecycle193346 passes clean0: coldReady2 rows/one model, two
+leases, independent Fire, cleanup/reacquire, .25 MustBeSaved mutation retained/
+globalUnknown at lease0. This does not extend eligibility to arbitrary retail
+classes or establish multiplayer/generic consumer integration.
+
+DayZ193954 passes clean0 AllocationDiagnosticOnly, convergenceMeasuredfalse.
+All27 samples report sourceEnvelopeBytes/Scans/Published/Ms0: default-OFF sidecar
+does no measured work. Allocation report is valid/truncated: registry683/256
+visited/70 skipped, valid requested186/visited186/missing0; union98160624 versus
+pool380859292/cap637534208. Root viewed normal street screenshot, not visual
+compatibility ground truth. No repeated traversal or performance claim follows.
+
+Offline source-audit eligibility inspects the two original ODOL54 walls:
+producer1/revision54/geometryCoverage1/observations15, declared=decoded8/6 LODs.
+Observed directory animation/skeleton/keyframe/bone counts are0; zeros certify
+absence only with corresponding observed bits. Actual config/class/constructor/
+world readiness remains separate. Tool/provenance/source reports are hashed.
+
+[Geometry streaming research](GEOMETRY-STREAMING-RESEARCH-20260926.md) records
+the staged Nanite-like investigation, not implemented pages or accepted gains.
+[Tidewater research](TIDEWATER-STREAMING-REVIEW-20260926.md) remains deferred;
+waves stay parked. Next compact source-summary foundation is in progress without
+validated ledger claim. Full plan OPEN, experimental defaults OFF, Reforger
+stress evidence not ground truth, production/MP/performance gates unresolved.
