@@ -1,5 +1,5 @@
 use slotmap::{Key, KeyData, SlotMap};
-use std::sync::{Arc, atomic::{AtomicU64, Ordering}};
+use std::sync::{Arc, OnceLock, atomic::{AtomicU64, Ordering}};
 
 use crate::ffi::WgrSampler2D;
 use crate::log::{LogSink, log_level};
@@ -97,7 +97,7 @@ pub struct Texture2D {
     texture: wgpu::Texture,
     pub view: wgpu::TextureView,
     // Single-texture group used by the shadow-depth pass (per-caster alpha cutout).
-    pub bind_group: wgpu::BindGroup,
+    bind_group: OnceLock<wgpu::BindGroup>,
     // Dense index into the bindless object-texture array (0 = white fallback). Read
     // per-instance by the lit-mesh + prepass fragment shaders. Assigned by
     // SharedTextures on create, freed on destroy.
@@ -200,19 +200,12 @@ impl TextureRegistry {
         }
 
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("wgr_texture_bind"),
-            layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::TextureView(&view),
-            }],
-        });
-
         let key = self.map.insert(Texture2D {
             texture,
             view,
-            bind_group,
+            // Terrain and retained draws only need the view/bindless slot.
+            // The immutable image's direct/shadow group is made on first use.
+            bind_group: OnceLock::new(),
             slot,
             resident_bytes: (0..mip_level_count)
                 .map(|i| format.expected_len((width >> i).max(1), (height >> i).max(1)) as u64)
@@ -606,10 +599,17 @@ impl SharedTextures {
     }
 
     // Texture bind group for `handle`, falling back to the 1x1 white texture.
-    pub fn texture_bind(&self, handle: u64) -> &wgpu::BindGroup {
-        self.registry
-            .get(handle)
-            .map_or(&self.white_bind, |t| &t.bind_group)
+    pub fn texture_bind(&self, device: &wgpu::Device, handle: u64) -> &wgpu::BindGroup {
+        self.registry.get(handle).map_or(&self.white_bind, |t| {
+            t.bind_group.get_or_init(|| device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("wgr_texture_bind"),
+                layout: &self.texture_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&t.view),
+                }],
+            }))
+        })
     }
 
     // Texture view for `handle`, falling back to the 1x1 white texture.
@@ -997,16 +997,22 @@ mod tests {
     // lit-mesh fragment shader does. This is the point of the test: asserting on
     // `texture_slot()` alone would only prove this module's own bookkeeping, not that the
     // GPU sees the right texels behind that index.
-    fn sample_slot(
+    fn sample_slot(device: &wgpu::Device, queue: &wgpu::Queue, shared: &SharedTextures, slot: u32) -> [u8; 4] {
+        sample_binding(device, queue, shared, slot, None)
+    }
+
+    fn sample_binding(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         shared: &SharedTextures,
         slot: u32,
+        single_handle: Option<u64>,
     ) -> [u8; 4] {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("bindless_probe"),
             source: wgpu::ShaderSource::Wgsl(
-                r#"
+                {
+                    let source = r#"
 @group(0) @binding(0) var textures: binding_array<texture_2d<f32>>;
 // vec4 so the uniform block is exactly 16 bytes; only .x is meaningful.
 struct Which { slot: vec4<u32> };
@@ -1024,8 +1030,12 @@ fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
 fn fs() -> @location(0) vec4<f32> {
     return textureLoad(textures[which.slot.x], vec2<i32>(0, 0), 0);
 }
-"#
-                .into(),
+"#;
+                    if single_handle.is_some() {
+                        source.replace("binding_array<texture_2d<f32>>", "texture_2d<f32>")
+                            .replace("textures[which.slot.x]", "textures").into()
+                    } else { source.into() }
+                },
             ),
         });
 
@@ -1060,7 +1070,7 @@ fn fs() -> @location(0) vec4<f32> {
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: None,
-            bind_group_layouts: &[Some(&shared.bindless_layout), Some(&which_layout)],
+            bind_group_layouts: &[Some(if single_handle.is_some() { &shared.texture_layout } else { &shared.bindless_layout }), Some(&which_layout)],
             immediate_size: 0,
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -1128,7 +1138,7 @@ fn fs() -> @location(0) vec4<f32> {
                 multiview_mask: None,
             });
             pass.set_pipeline(&pipeline);
-            pass.set_bind_group(0, shared.bindless_bind(), &[]);
+            pass.set_bind_group(0, single_handle.map_or_else(|| shared.bindless_bind(), |h| shared.texture_bind(device, h)), &[]);
             pass.set_bind_group(1, &which_bind, &[]);
             pass.draw(0..3, 0..1);
         }
@@ -1164,6 +1174,39 @@ fn fs() -> @location(0) vec4<f32> {
         rx.recv().unwrap().unwrap();
         let mapped = slice.get_mapped_range();
         [mapped[0], mapped[1], mapped[2], mapped[3]]
+    }
+
+    #[test]
+    fn lazy_single_texture_group_samples_replacement_and_reuses_first_binding() {
+        let Some((device, queue)) = bindless_headless() else {
+            eprintln!("SKIP lazy_single_texture_group: no adapter/device with required bindless capabilities");
+            return;
+        };
+        let mut shared = shared(&device, &queue);
+        let lease = shared.slot_acquire();
+        let red = texel([255, 0, 0, 255]);
+        let green = texel([0, 255, 0, 255]);
+        let old = shared.create_in_slot(&device, &queue, &data(&red), lease);
+        assert_ne!(old, 0);
+        assert!(shared.registry.get(old).unwrap().bind_group.get().is_none());
+        assert_eq!(sample_binding(&device, &queue, &shared, 0, Some(old)), [255, 0, 0, 255]);
+        assert!(shared.registry.get(old).unwrap().bind_group.get().is_some());
+        assert!(std::ptr::eq(shared.texture_bind(&device, old), shared.texture_bind(&device, old)));
+        let replacement = shared.create_in_slot(&device, &queue, &data(&green), lease);
+        assert_ne!(replacement, 0);
+        assert_eq!(shared.texture_slot(replacement), lease);
+        assert!(shared.registry.get(replacement).unwrap().bind_group.get().is_none());
+        assert_eq!(sample_binding(&device, &queue, &shared, 0, Some(replacement)), [0, 255, 0, 255]);
+        assert!(!std::ptr::eq(shared.texture_bind(&device, old), shared.texture_bind(&device, replacement)));
+        // Old per-image direct group must still sample its own image; a lease
+        // replacement only changes the bindless route, not old handle identity.
+        assert_eq!(sample_binding(&device, &queue, &shared, 0, Some(old)), [255, 0, 0, 255]);
+        shared.destroy(old);
+        assert_eq!(sample_binding(&device, &queue, &shared, 0, Some(old)), [255, 255, 255, 255]);
+        assert_eq!(sample_binding(&device, &queue, &shared, 0, Some(replacement)), [0, 255, 0, 255]);
+        shared.destroy(replacement);
+        assert!(std::ptr::eq(shared.texture_bind(&device, replacement), &shared.white_bind));
+        assert_eq!(sample_binding(&device, &queue, &shared, 0, Some(replacement)), [255, 255, 255, 255]);
     }
 
     // THE invariant REN-RES-001 exists for: a model bakes a slot index once, the texture is

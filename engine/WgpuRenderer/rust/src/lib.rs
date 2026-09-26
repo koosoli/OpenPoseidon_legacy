@@ -4541,6 +4541,7 @@ impl Renderer {
             .cpu_begin(crate::gpu_timers::Region::WorkerEncShadow);
         encoder.push_debug_group("wgr_shadow_cascades");
         self.gfx3d.render_shadow_passes(
+            &self.device,
             &mut encoder,
             &self.textures,
             shadow,
@@ -4871,7 +4872,7 @@ impl Renderer {
                         if let Some(b) = batches.get(*arg as usize) {
                             renderer
                                 .gfx2d
-                                .draw_one(pass, &renderer.textures, b, display_2d);
+                                .draw_one(&renderer.device, pass, &renderer.textures, b, display_2d);
                         }
                     }
                     Plan3dOp::Draw3D {
@@ -6089,6 +6090,7 @@ impl Renderer {
                 multiview_mask: None,
             });
             self.gfx2d.render_overlay(
+                &self.device,
                 &mut pass,
                 &self.textures,
                 overlay_draws,

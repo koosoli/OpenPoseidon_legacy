@@ -2137,3 +2137,40 @@ in this observation. Initial page update precedes route capture and is not a
 route tail percentile. Frame532 init829.587 includes residency829.535ms versus
 renderer.001ms; next residency814.242ms. Next texture-detail telemetry is pending/
 unbuilt, not part of accbc. No terrain optimization, FPS or no-regression verdict.
+
+## Sept27 texture phases and counted/timed admission screening
+
+ec5dfcb1 opt-in texture telemetry builds19/stamp18PASS, installedclean04a5856a.
+Counted012836 passes clean0. Threshold2ms/first128coldterrain-familysources is
+bounded source order, not top-N or all504Ensure calls; only3qualifying logs,
+no truncation. Actual s_017_030 read.848/create76.848/total77.804ms;
+m_017_030 .304/1.750/2.742; s_020_0261.341/27.424/28.847. Preparedfalse,
+uploadedtrue/fallback0. Create is owner elapsed including producer wait,
+not GPU elapsed. Family filter layers/LCA/LCO excludes other source names.
+Initial pre-route ensure1104.554 versus descriptor3.907/load61.661ms; return
+ensure262.763ms dominates total269.183. The three logs cannot be summed to
+explain all inclusive Ensure cost. No behavior change or texture optimization.
+
+Same04a Counted012836→Timed013022 clean0 single ordered screening:
+876→975frames; median23.0405→23.143, mean39.757965→34.752372,
+p95119.825→89.504, p99356.144→189.474, max1055.883→455.512ms.
+Initmax912.984→365.289 but groundmax270.114→287.965 worsens. Loggedwarm
+max893.4→269.1ms includes startup, not routepercentiles or16ms guarantee;
+actual Timed674-object warmbatch55.5ms remains. Sameinitial19923payload;
+bothreturn19923settled, but geometry716552916→732333188 and textures
+2776835208/2530→2924549716/2652 differ. EarlyTimed residents15846vs16256,
+18129vs19341,16559vs19032, pose5pending18145vs19497 show transientcoverage
+tradeoff. Root inspected returned street/bus/buildings/furniture/trees matching
+narrowly, minor clouds differ; no moving-route visual acceptance follows.
+Counted remains production default. Cache/order/async/clock confounds and
+allocation differences exclude Timed default/no-regression/FPS acceptance.
+
+Normal admission source audit: LandSave.cpp2791+ counted mode deliberately
+bypasses wall-clock ceilings for warm admissions up to1536 attempt cap; known
+model does not guarantee cheap ObjectCreate/registration/texture work.
+Existing comments contrasting cheap warm work are not a measured cost bound.
+Observed city_school initial cold row01:15:55.083 has texture-read549.8ms versus
+alpha83.9ms, total926.4ms; this is before route capture, not the route outlier.
+Target texture/owner work separately from alpha. Lazy per-image bindgroup
+candidate is in progress and not implemented/runtime-proven in installed04a.
+First normal traversal performance fix remains pending; fullplanOPEN/defaultsOFF.

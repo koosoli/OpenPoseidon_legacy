@@ -6714,6 +6714,7 @@ impl Gfx3d {
 
     pub fn render_shadow_passes(
         &self,
+        device: &wgpu::Device,
         encoder: &mut wgpu::CommandEncoder,
         textures: &SharedTextures,
         pass: &WgrShadowPass,
@@ -6903,7 +6904,7 @@ impl Gfx3d {
                     }
                     rp.set_bind_group(
                         2,
-                        textures.texture_bind(if alpha { caster.texture_id } else { 0 }),
+                        textures.texture_bind(device, if alpha { caster.texture_id } else { 0 }),
                         &[],
                     );
                     rp.set_bind_group(3, textures.sampler_bind(caster.sampler.index()), &[]);
@@ -7111,7 +7112,7 @@ impl Gfx3d {
             rp.set_pipeline(&pipes.solid);
             rp.set_bind_group(0, self.shadow_pass_ubo.bind.as_ref().unwrap(), &[0]);
             rp.set_bind_group(1, &caster_bind, &[]);
-            rp.set_bind_group(2, textures.texture_bind(0), &[]);
+            rp.set_bind_group(2, textures.texture_bind(device, 0), &[]);
             rp.set_bind_group(3, textures.sampler_bind(0), &[]);
             rp.set_bind_group(4, self.conform.bind.as_ref().unwrap(), &[]);
             rp.set_vertex_buffer(0, vbuf.slice(..));

@@ -399,6 +399,7 @@ impl Gfx2d {
     // and, when opaque, write).
     pub fn draw_one(
         &self,
+        device: &wgpu::Device,
         pass: &mut wgpu::RenderPass<'_>,
         textures: &SharedTextures,
         b: &WgrDraw2DBatch,
@@ -442,7 +443,7 @@ impl Gfx2d {
         pass.set_pipeline(pipeline);
         pass.set_vertex_buffer(0, vbuf.slice(..));
         pass.set_bind_group(0, &self.globals_bind, &[]);
-        pass.set_bind_group(1, textures.texture_bind(b.texture_id), &[]);
+        pass.set_bind_group(1, textures.texture_bind(device, b.texture_id), &[]);
         pass.set_bind_group(2, textures.sampler_bind(b.sampler.index()), &[]);
         if let Some(bind) = soft {
             pass.set_bind_group(3, bind, &[]);
@@ -543,6 +544,7 @@ impl Gfx2d {
 
     pub fn render_overlay(
         &self,
+        device: &wgpu::Device,
         pass: &mut wgpu::RenderPass<'_>,
         textures: &SharedTextures,
         draws: &[WgrOverlayDraw],
@@ -567,7 +569,7 @@ impl Gfx2d {
                 continue;
             }
             pass.set_scissor_rect(x0, y0, x1 - x0, y1 - y0);
-            pass.set_bind_group(1, textures.texture_bind(d.texture_id), &[]);
+            pass.set_bind_group(1, textures.texture_bind(device, d.texture_id), &[]);
             pass.draw_indexed(
                 d.first_index..(d.first_index + d.index_count),
                 d.base_vertex as i32,
