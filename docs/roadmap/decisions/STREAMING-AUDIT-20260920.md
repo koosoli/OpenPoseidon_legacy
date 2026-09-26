@@ -960,8 +960,8 @@ attempts below are deliberately **not PASS**:
   repeated stable GPU geometry samples. Samples remain at 67147508 bytes,
   although texture/backend allocations still change. The engine then logs a
   harness socket disconnect and clean shutdown with exit code 0 before the
-  identity probe. The closure cause is external/unknown and not established by
-  these logs. It proves neither a cold resolve nor promotion, and there is no
+  identity probe. Later launcher/source analysis identifies the sea-origin scenario setup
+  as the explanation (below). It proves neither cold resolution nor promotion, and there is no
   result artifact. Clean process exit alone is not test acceptance.
 
 Both harness and engine logs and both provenance records are hashed as actually
@@ -970,7 +970,8 @@ addresses the baseline timing defect; the remaining installed cold-identity and
 visual-promotion acceptance gate stays OPEN.
 
 A separate `SimulationCoverageIndex.hpp` foundation and six test cases are now
-source-complete, but are **not built or runtime-integrated** in the checks above.
+compiled and tested in the subsequent bd9b472d combined build (below), but remain
+**unused metadata foundations**, with no automatic runtime demand integration.
 It accepts numeric evidence from a validated fully adapted engine shape and
 final repaired position/scale, enlarging the existing engine guard sphere by
 2x and conservative roundoff. Uncertified model groups block coverage globally;
@@ -980,3 +981,73 @@ leases, cancellation and bounded scans/matches reject stale or partial answers.
 The producer/publisher still must certify every placement in a group and
 invalidate records after content/frame changes. No automatic actor/query/AI
 admission is wired, and the overall streaming plan remains OPEN.
+### Compiled coverage foundation and logical destruction-buffer deferral
+
+`cba650fd` commits the bounded simulation coverage metadata foundation, and
+`bd9b472d` defers destroyed logical-object buffer work until visual admission.
+The combined supported build passed; the targeted log records **6685 assertions
+in 120 cases**, including coverage and logical shape checks. The new build/test
+logs are hashed separately in the evidence manifest. The clean installed build
+is stamped `codex/streaming-residency 9c35f49d 2026-09-26_13:44 deploy-ps1`.
+
+The coverage foundation is now compiled/tested but unused by automatic runtime
+query, actor or AI demand. Its metadata Ready status still does not mean installed
+collision or clearance. Logical destruction-buffer deferral has source/unit
+validation; its current installed runtime verification is pending. No running
+smoke test is classified as completed evidence here. The two earlier incomplete
+cold-logical attempts retain their classifications, and performance, automatic
+simulation demand, broader state and multiplayer gates remain OPEN.
+### Strict headless identity pass and corrected cold-logical scenario origin
+
+`headless-dayz-20260926-134511` PASSED on the matching 9c35f49d server build:
+engine/console logs contain six explicit `STREAM_ASSERT_OK` lines, followed by
+`triEndTest` and clean exit 0. The mission verifies simulation time, alive/damage
+state of the mission probe and explicit placement 83903272 existence, repeated
+identity and damage .25. This is headless identity/damage acceptance only;
+it does not test fire geometry, full save, multiplayer or automatic demand.
+Both logs, provenance and the actual mission/init sources are hashed.
+
+The third graphic attempt is actually
+`dayz-cold-logical-20260926-134647`. It reaches a stable geometry baseline, then
+ends before the cold identity probe, so remains INCOMPLETE rather than PASS.
+Root diagnosed the repeated clean early exits as a scenario setup issue:
+`apps/cwr/Game/GameApplication.cpp:2075–2090` grounds the freefly camera carrier
+at terrain height for the requested x/z. The launcher log records player
+position `100, -49.12667, 100`, below sea at the runner's sea origin. The source
+explains the drowning/end-mission route to clean exit. This source-supported
+scenario diagnosis supersedes the earlier unspecified closure classification;
+it is not evidence of a crash or cold-logical engine regression.
+
+Runner-only commit `9fa064f7` changes the initial freefly pose to inland
+`10000, 10000, 450`; it makes no engine code change. The corrected attempt later passes the explicit identity gate below; it does
+not turn the interrupted attempts into passes. The first unstable-counter attempt
+and both pre-probe interruptions retain their incomplete classifications.
+### Cold explicit logical identity and later visual promotion PASS
+
+`dayz-cold-logical-20260926-134949` PASSED on clean installed 9c35f49d with
+runner commit 9fa064f7's inland origin. The initial read-only probe confirms
+real wall fixture **83912800** absent; explicit script resolution then supplies
+physical/fire geometry and a real fire-ray contact, while `visualResident=false`
+and `shapeVisualDeferred=true`. After a stable baseline, global geometry live
+bytes remain **35207752 before and after cold resolution**; capacity, texture
+and backend snapshot counters are also unchanged. This supports CPU-only cold
+creation for this fixture without attributing unrelated pending visual work.
+It does not measure CPU allocations or prove all models avoid GPU work.
+
+The cold phase deliberately uses a 1000-object diagnostic budget (921 resident
+placements). Returning to the fixture with a 20000 budget converges to **19923**
+placements. The same fixture becomes `visualResident=true` and
+`shapeVisualDeferred=false`; script reference equality and damage .25 remain
+true, and the known wall still appears in the fire contacts. Root inspected
+`promoted.png` and saw the road, buildings and vegetation. The runner writes
+`passed=true`, requests exit itself, and the engine exits cleanly with no fatal
+renderer error. Result, harness/engine logs, provenance and promoted image are
+hashed in the evidence manifest.
+
+This closes the **single explicit cold logical identity/fire/promotion** runtime
+gate. It does not close automatic query/actor/AI admission, general collision
+completeness, runtime destruction-state coverage, wider save/multiplayer state,
+secondary views, or equal-quality performance. The small cold budget is a
+correctness diagnostic, not a normal-settings performance improvement. The
+metadata coverage index is compiled/tested but remains runtime-unused, and the
+streaming plan stays OPEN. The three earlier graphic attempts remain incomplete.

@@ -1408,7 +1408,7 @@
     },
     {
       "run": "dayz-cold-logical-20260926-133403",
-      "result": "INTERRUPTED: stable geometry samples reached, then socket disconnect/clean engine exit before identity probe; no runtime PASS",
+      "result": "INCOMPLETE scenario setup: stable geometry then clean exit before identity probe; sea-origin drowning/end-mission diagnosis supported by launcher/source; no runtime PASS",
       "provenance": {
         "installed": "codex/streaming-residency 037f188d 2026-09-26_13:30 deploy-ps1",
         "hashes": [
@@ -1432,7 +1432,116 @@
         "harness.jsonl": "4b3e2077ca7ed9786f859c2f447d9c73d959a853370382819b38004345b6824c",
         "provenance.json": "1b18efc3b7afa1193915a3eef5cd6df3e9c361a8ece784afd125742d90099bdf"
       },
-      "observations": "Repeated geometryLiveBytes samples held at 67147508, while texture/backend counters continued changing. Engine logged harness disconnect and clean exit 0 before the intended identity probe. External/unknown closure cause is not established; no cold resolve/promotion proof and no result artifact."
+      "observations": "Repeated geometryLiveBytes samples held at 67147508, while texture/backend counters continued changing. Harness disconnected and engine exited 0 before the identity probe. Later source/launcher analysis diagnosed the sea-origin scenario: freefly grounds the carrier at terrain elevation at x/z=100,100, below sea; drowning can end this mission. Runner-only fix 9fa064f7 selects inland coordinates. No completed cold resolve/promotion result."
+    },
+    {
+      "run": "headless-dayz-20260926-134511",
+      "result": "PASS six explicitly logged strict STREAM_ASSERT_OK assertions and triEndTest clean exit 0",
+      "provenance": {
+        "initHash": {
+          "Algorithm": "SHA256",
+          "Hash": "2F82063EEE8CBA3D22703BFB19DAC1C82890FFDD56FF09BB3AF87A1238549DFD",
+          "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\headless-dayz-20260926-134511\\stream_headless.eden\\init.sqs"
+        },
+        "head": "9c35f49d93f135773ffd737512ec03271e8d196d",
+        "missionHash": {
+          "Algorithm": "SHA256",
+          "Hash": "74F79F513F1DAAE0564C7CD531AE05454EE8B269401582B991AA5EB943BE2B88",
+          "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\headless-dayz-20260926-134511\\stream_headless.eden\\mission.sqm"
+        },
+        "serverHash": {
+          "Algorithm": "SHA256",
+          "Hash": "7DC1C508D47B8E1F6889E9C30C4EE7E952B9F1779F797347D98A0A3A23A656E1",
+          "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\dist\\x64-win-rwdi\\PoseidonServer.exe"
+        }
+      },
+      "sha256": {
+        "engine.log": "99e4095f7f632fa3a08cf2e896cdd67d13e1ddcd6c1f8a8a07fca363fb88a6f4",
+        "console.log": "49a61a64d2382580c0008a5ab74b5714082ffe97f8b8abe6d66967fb8a95f1cd",
+        "provenance.json": "2652ddb198600b3b98e397306d4c107e610c97972c8aa03fa385398e59f7b448",
+        "stream_headless.eden/init.sqs": "2f82063eee8cba3d22703bfb19dac1c82890ffdd56ff09bb3af87a1238549dfd",
+        "stream_headless.eden/mission.sqm": "74f79f513f1daae0564c7cd531ae05454ee8b269401582b991aa5eb943be2b88"
+      },
+      "scope": "Single headless DayZ server: simulation time/alive/damage of mission probe and explicit authored placement 83903272 existence, repeat identity and damage .25. No fire/collision, full save, multiplayer, automatic demand or performance acceptance."
+    },
+    {
+      "run": "dayz-cold-logical-20260926-134647",
+      "result": "INCOMPLETE scenario setup: stable geometry baseline then clean exit before cold identity probe; no runtime PASS",
+      "provenance": {
+        "scriptSha256": "AE62F2D5C3988247E1171D9FAA0F3159CD8FECC93D2784C2481475417AE9D1D1",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "7440C9C87A63E004AEC069C8576AAE1157016D629E3D75A558C318CCFCEE48AC",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "49FFC394D0B29E01729F0A3C7835AC78F96302878F3A887F15659F2BBEA6E646",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "head": "9c35f49d93f135773ffd737512ec03271e8d196d",
+        "scope": "Cold explicit script identity and fire geometry, then visual promotion. Not automatic simulation demand or performance acceptance.",
+        "installed": "codex/streaming-residency 9c35f49d 2026-09-26_13:44 deploy-ps1"
+      },
+      "sha256": {
+        "engine.log": "bd7251a768248ce9494ea3d1185a751ada97e85cc4eea7a66bc1d3b8ecb14559",
+        "harness.jsonl": "efc6e8a2362e3790a9af6bfe9b1892a50d7edcbc3a2cbae0cb20e4fae7cff5f8",
+        "provenance.json": "16613d7936b313d83f6a52e548a5b64516bd28fa61e192a6b3297a3172a90a65"
+      },
+      "scope": "Actual folder is 134647. Same sea freefly origin as previous interruption: launcher log grounds player at 100,-49.12667,100; launcher source grounds camera carrier at terrain elevation, so sea-origin drowning/end-mission is the diagnosed scenario explanation. Runner 9fa064f7 switches to inland 10000,10000,450; no engine change. No completed result artifact."
+    },
+    {
+      "run": "dayz-cold-logical-20260926-134949",
+      "result": "PASS cold explicit identity CPU-only/fire geometry, unchanged stable GPU counters, subsequent visual promotion and retained identity/damage/fire contact; own clean exit0",
+      "provenance": {
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "7440C9C87A63E004AEC069C8576AAE1157016D629E3D75A558C318CCFCEE48AC",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "49FFC394D0B29E01729F0A3C7835AC78F96302878F3A887F15659F2BBEA6E646",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "scriptSha256": "C7A3F51A4FEB655E08B6C3EFF25D88B0B351F90B627765E075AC28803D6D2693",
+        "head": "9fa064f7ee2d46be00ed1cf3e0bcc665f09bfe17",
+        "scope": "Cold explicit script identity and fire geometry, then visual promotion. Not automatic simulation demand or performance acceptance.",
+        "installed": "codex/streaming-residency 9c35f49d 2026-09-26_13:44 deploy-ps1"
+      },
+      "sha256": {
+        "engine.log": "cf6d210541f7f94d0c5c0fde007c346204aa20d8c06309db5b5778dde1e05ce0",
+        "harness.jsonl": "708ba170e9915b4275b139344c9ffb14167d0ca472a418b9d91283bbd17b8fd6",
+        "provenance.json": "a22b71db7bc5a3ad66880856ab6b2a43f5ff4833e1c1286d55d46839bd2e8a92",
+        "result.json": "8761c4330780dd75e8331bb560a3e9a0f153b5b379c42a0fddb5e0d65bebfb38",
+        "promoted.png": "aa7f877dec7a441d2098a50a4a6eb220913a016c8ad976465dda3225b831ef6a"
+      },
+      "observations": {
+        "fixtureId": 83912800,
+        "fixtureModel": "dz\\structures\\residential\\platforms\\platform1_stairs_30_wallr.p3d",
+        "initiallyAbsent": true,
+        "coldVisualResident": false,
+        "coldShapeVisualDeferred": true,
+        "coldGeometry": true,
+        "coldFireGeometry": true,
+        "coldFireHit": true,
+        "beforeGeometryLiveBytes": 35207752,
+        "afterColdGeometryLiveBytes": 35207752,
+        "beforeResident": 921,
+        "coldDiagnosticBudget": 1000,
+        "promotedResident": 19923,
+        "promotedBudget": 20000,
+        "promotedVisualResident": true,
+        "promotedShapeVisualDeferred": false,
+        "retainedIdentityAndDamage025": true,
+        "promotedFixtureFireHit": true,
+        "screenshotReview": "Root visually inspected promoted.png: road/buildings/vegetation present; no broader visual-quality acceptance",
+        "limitations": "Single explicitly script-resolved logical obstacle; initial 1000-object diagnostic budget, then 20000 promotion. No automatic actor/query/AI demand, general collision completeness, destruction runtime coverage, full save/MP or FPS/loading/no-regression acceptance."
+      }
     }
   ],
   "microbenchmarks": [
@@ -1526,6 +1635,17 @@
       "sha256": {
         "build-logical-texture-window-20260926.log": "0042479a8f2f4701ef532f58a04388a6d4caf6ebaa7e794681e2a19e3db83bee",
         "test-logical-texture-window-20260926.log": "c352a4262bf095165e682693669f88925945d2f8b32773ef0869ff90cb84a152"
+      }
+    },
+    {
+      "artifactRoot": "build",
+      "runtimeSourceCommit": "bd9b472d",
+      "installedHead": "9c35f49d",
+      "installedStamp": "codex/streaming-residency 9c35f49d 2026-09-26_13:44 deploy-ps1",
+      "result": "PASS supported combined build and 6685 assertions in 120 cases; compiled coverage-index metadata remains unused by automatic runtime demand/AI. Destruction buffer deferral source validated by tests; installed runtime acceptance pending.",
+      "sha256": {
+        "build-logical-destruction-coverage-20260926.log": "8d0ff9f5d809f67b0668fa768ff7757ced4e25d16a6f6ce28eb7bcc5c8d58bc1",
+        "test-logical-destruction-coverage-20260926.log": "63d0d1cc19f8990e29adbe0f2627debaebd17341430727f95de733c534aeb6a3"
       }
     }
   ]
