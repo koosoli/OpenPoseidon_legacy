@@ -2168,7 +2168,7 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
                     LOG_WARN(World, "Enfusion native load: OVERSIZED '{}' radius {:.0f} m, {} placements",
                              meshes[index].first, shape->BoundingSphere(), meshes[index].second);
             }
-            // RFG-064: the nonstreamed path builds attachment meshes OUTSIDE the
+            // RFG-064: the eager path builds attachment meshes OUTSIDE the
             // model cap, so rare doors and windows do not lose to common trees.
             //
             // The cap ranks meshes by placement count, and a door or a window is a
@@ -2178,13 +2178,21 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
             // would build every house shell and not one of the openings, and the
             // repair would show as nothing at all. This eager path builds every
             // distinct part resolved for the world, including parts of shells
-            // outside the cap. Streaming instead retains every part's model path
-            // and flattened placement below; its ordinary cold admission loads
-            // each shape when needed, just as it does for the main models.
+            // outside the cap. Optional streaming deferral retains every part's
+            // model path and flattened placement below for ordinary cold admission.
+            // Keep eager attachment shapes as the default until the candidate's
+            // GPU slowdown is explained; startup/lifecycle tests alone do not
+            // establish performance acceptance.
+            const char* deferAttachments = std::getenv("WGR_NATIVE_DEFER_ATTACHMENT_SHAPES");
+            const bool deferAttachmentShapes = streamNative && deferAttachments != nullptr &&
+                                               deferAttachments[0] == '1' && deferAttachments[1] == '\0';
+            if (streamNative)
+                LOG_INFO(World, "Enfusion native load: attachment shape deferral {} (WGR_NATIVE_DEFER_ATTACHMENT_SHAPES=1)",
+                         deferAttachmentShapes ? "enabled" : "disabled");
             std::unordered_map<uint32_t, LODShapeWithShadow*> attachShapes;
             size_t attachBuilt = 0, attachBuildFailed = 0;
             std::string firstAttachFailure;
-            for (size_t i = 0; !streamNative && i < attachMeshes.size(); ++i)
+            for (size_t i = 0; !deferAttachmentShapes && i < attachMeshes.size(); ++i)
             {
                 std::string why;
                 LODShapeWithShadow* shape =

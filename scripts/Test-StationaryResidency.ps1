@@ -68,8 +68,8 @@ $p=$null;$client=$null;$gpuSampler=$null
 try {
  if ($SampleDriverMemory) {
   $smi=Get-Command nvidia-smi -ErrorAction Stop
-  $gpuSampler=Start-Process -FilePath $smi.Source -ArgumentList @('--query-gpu=timestamp,index,memory.total,memory.used,utilization.gpu','--format=csv,noheader,nounits','--loop-ms=1000') -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $out 'whole-gpu-memory.csv') -RedirectStandardError (Join-Path $out 'whole-gpu-memory-errors.txt')
-  'Whole GPU including other applications; 1 second interval; compare only equally instrumented arms.' | Set-Content (Join-Path $out 'whole-gpu-memory-scope.txt')
+  $gpuSampler=Start-Process -FilePath $smi.Source -ArgumentList @('--query-gpu=timestamp,index,memory.total,memory.used,utilization.gpu,utilization.memory,clocks.gr,clocks.mem,power.draw,temperature.gpu,pstate','--format=csv,noheader,nounits','--loop-ms=1000') -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $out 'whole-gpu-memory.csv') -RedirectStandardError (Join-Path $out 'whole-gpu-memory-errors.txt')
+  'Whole GPU including other applications; 1 second interval; compare only equally instrumented arms. Columns: timestamp,index,totalMiB,usedMiB,gpuPercent,memoryPercent,graphicsMHz,memoryMHz,powerW,temperatureC,pstate.' | Set-Content (Join-Path $out 'whole-gpu-memory-scope.txt')
  }
  $p=Start-Process -FilePath (Join-Path $GameDir 'OpenPoseidon.exe') -WorkingDirectory $GameDir -WindowStyle Hidden -PassThru -ArgumentList (@('--render=wgpu','--window','--dev','--width','1280','--height','720','--vd','2000','--harness',"$port",'--capture-metrics',('"'+(Join-Path $out 'capture.json')+'"'),'--test-world-freefly',[string]$baseX,[string]$baseZ,[string]$baseY,[string]$azimuth,[string]$elevation,'--test-mission',('"'+$mission+'"'),'--log-file',('"'+$log+'"'))+$worldArgs)
  $null=$p.Handle;$client=[Net.Sockets.TcpClient]::new();$deadline=[DateTime]::UtcNow.AddSeconds(90)
