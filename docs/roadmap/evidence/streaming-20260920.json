@@ -2163,6 +2163,152 @@
         "fixture/streaming_fixture/wall.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
         "simulation-fixture.eden/mission.sqm": "c47524083395a8c78a581822629f83c760dd0c1a3ef45eaceb24da88580e9d4c"
       }
+    },
+    {
+      "run": "native-worker-bc3only-candidate-20260926-155306",
+      "provenance": {
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "4BC6B426D9184465FED71D899C357FC871F7B13CDEB9BEE1DACD1858CB45B1F5",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "C595A9A592F4757AC8207FB9F2E5FD1EE94E4DB3B43A0AA2DE43732F8EE00793",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "pressureGrowth": false,
+        "packedTextures": false,
+        "corpus": "Native",
+        "lodGovernorRange": "1",
+        "geoGrowth": 2.0,
+        "packedModels": false,
+        "scriptSha256": "A5CE38DE968CDB4432ACF41B7BF0D0D5ADE134B8B2DAEA4515313A336CB993DE",
+        "adaptive": false,
+        "head": "0afcac2c616e5857699529f1f6910d65b453ab29",
+        "freshReload": false,
+        "nativeDdsPrepared": true,
+        "nativeBc3Only": true,
+        "coverageOnly": true,
+        "saveRoundTrip": false,
+        "installed": "codex/streaming-residency 0afcac2c 2026-09-26_15:47 deploy-ps1",
+        "readyMb": -1,
+        "controlled": false,
+        "incrementalSkyUploads": true
+      },
+      "runtimeSourceCommit": "0afcac2c",
+      "embeddedBuildCommit": "826a189a",
+      "classification": "PASS fixed-LOD normal-20000 coverage route and clean exit0; root reviewed initial/returned street, structures and trees closely matching arms, with wind/lighting/returned vegetation variation. Not exact pixel parity or Reforger ground truth. Narrow worker preparation remains OFF: first admission/scenario slower ON in this single ordered pair.",
+      "measurement": {
+        "first_full_seconds": 38.08,
+        "scenario_seconds": 85.142,
+        "residency_phase_seconds": [
+          17.563,
+          5.801,
+          16.607
+        ],
+        "cold_rows": 1466,
+        "owner_ms": {
+          "texWindowWait": 3843.298,
+          "texEncodeMs": 39.407
+        },
+        "encode_without_window_ms": 32.458,
+        "encode_without_window_count": 1,
+        "worker_claims": 74,
+        "worker_claim_bytes": 60358688,
+        "betula3s": [
+          "[2026-09-26 15:53:31.677] [app-5d7c] [INFO] [WORLD]   Object stream cold model: Assets/Vegetation/Tree/Betula_Pendula/t_betula_pendula_3s.xob mode=async parse=0.0 adapt=0.0 opt=99.4 create=0.0 [reg=0.0 mesh=0.1 sect=31.7 tex=63.6 (read=1.0 create=59.1 fb=3.4 alpha=0.0 up=8 prep=2) ffi=0.0 prox=0.0 other=0.0 park=miss] texhdr=29.7/5 total=99.5 ms texWindowWait=57.240 texEncodeMs=0.000 texEncodeWithoutWindow=0.000/0 workerBc3Claims=2/2796192",
+          "[2026-09-26 15:53:57.646] [app-5d7c] [INFO] [WORLD]   Object stream cold model: Assets/Vegetation/Tree/Betula_Pendula/t_betula_pendula_3s.xob mode=async parse=0.0 adapt=0.0 opt=0.8 create=0.0 [reg=0.0 mesh=0.2 sect=0.1 tex=0.0 (read=0.0 create=0.0 fb=0.0 alpha=0.0 up=0 prep=0) ffi=0.0 prox=0.0 other=0.0 park=miss] texhdr=0.0/0 total=0.8 ms texWindowWait=0.000 texEncodeMs=0.000 texEncodeWithoutWindow=0.000/0 workerBc3Claims=0/0",
+          "[2026-09-26 15:54:04.353] [app-5d7c] [INFO] [WORLD]   Object stream cold model: Assets/Vegetation/Tree/Betula_Pendula/t_betula_pendula_3s.xob mode=async parse=0.0 adapt=0.0 opt=0.9 create=0.0 [reg=0.0 mesh=0.1 sect=0.1 tex=0.0 (read=0.0 create=0.0 fb=0.0 alpha=0.0 up=0 prep=0) ffi=0.0 prox=0.0 other=0.0 park=miss] texhdr=0.0/0 total=1.0 ms texWindowWait=0.000 texEncodeMs=0.000 texEncodeWithoutWindow=0.000/0 workerBc3Claims=0/0"
+        ]
+      },
+      "sha256": {
+        "engine.log": "1d0b00d9f76c3e260535554f30b1df99f9ed364b0c2882930a981b9fd2a0bbaf",
+        "harness.jsonl": "b59cb2ea61ee5c3407335c754cb42a43ded41836cc37943c3f350a8c932f9a04",
+        "initial.png": "098034b75a68959a9abdf03e0bb969feb9eac7e327123dcadd80db9fce3b4f91",
+        "provenance.json": "075f60f2ec3e4c32ca5720c6b9bca5f8ef77e3ee8949408b3cbc8b398d36930b",
+        "result.json": "3948f6f06537eb673191f5ce2d762439f9cb44a44fa3d0d0131aaf8cce8a3fd1",
+        "returned-settled.png": "d2fa155be675d447724e54832563f3d0fd563f95ee80a808b3c29df7ca973a6a",
+        "settled.png": "85f790d62ceab5e9714e09ba480d318d791815868a46e49fdb70f668e4315845",
+        "whole-gpu-memory-errors.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "whole-gpu-memory-scope.txt": "e6d61a4bc6b06e8fb1dc4466dcf4edfe9454430f738b2012fc0f1e1708b9b75c",
+        "whole-gpu-memory.csv": "056973dbe62a0a59f0d7e2c847e546073dcb6b1e9e6af52d5941212f7f2ae008"
+      }
+    },
+    {
+      "run": "native-worker-bc3only-default-20260926-155603",
+      "provenance": {
+        "incrementalSkyUploads": true,
+        "nativeDdsPrepared": false,
+        "controlled": false,
+        "corpus": "Native",
+        "scriptSha256": "A5CE38DE968CDB4432ACF41B7BF0D0D5ADE134B8B2DAEA4515313A336CB993DE",
+        "coverageOnly": true,
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "4BC6B426D9184465FED71D899C357FC871F7B13CDEB9BEE1DACD1858CB45B1F5",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "C595A9A592F4757AC8207FB9F2E5FD1EE94E4DB3B43A0AA2DE43732F8EE00793",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "geoGrowth": 2.0,
+        "lodGovernorRange": "1",
+        "head": "0afcac2c616e5857699529f1f6910d65b453ab29",
+        "pressureGrowth": false,
+        "installed": "codex/streaming-residency 0afcac2c 2026-09-26_15:47 deploy-ps1",
+        "adaptive": false,
+        "packedModels": false,
+        "saveRoundTrip": false,
+        "nativeBc3Only": false,
+        "readyMb": -1,
+        "freshReload": false,
+        "packedTextures": false
+      },
+      "runtimeSourceCommit": "0afcac2c",
+      "embeddedBuildCommit": "826a189a",
+      "classification": "PASS fixed-LOD normal-20000 coverage route and clean exit0; root reviewed initial/returned street, structures and trees closely matching arms, with wind/lighting/returned vegetation variation. Not exact pixel parity or Reforger ground truth. Narrow worker preparation remains OFF: first admission/scenario slower ON in this single ordered pair.",
+      "measurement": {
+        "first_full_seconds": 36.626,
+        "scenario_seconds": 81.851,
+        "residency_phase_seconds": [
+          16.776,
+          5.769,
+          16.463
+        ],
+        "cold_rows": 1466,
+        "owner_ms": {
+          "texWindowWait": 2712.875,
+          "texEncodeMs": 1408.813
+        },
+        "encode_without_window_ms": 277.828,
+        "encode_without_window_count": 16,
+        "worker_claims": 0,
+        "worker_claim_bytes": 0,
+        "betula3s": [
+          "[2026-09-26 15:56:28.142] [app-cd2c] [INFO] [WORLD]   Object stream cold model: Assets/Vegetation/Tree/Betula_Pendula/t_betula_pendula_3s.xob mode=async parse=0.0 adapt=0.0 opt=638.9 create=0.0 [reg=0.0 mesh=0.2 sect=27.2 tex=608.5 (read=0.8 create=548.3 fb=59.4 alpha=0.0 up=8 prep=0) ffi=0.0 prox=0.0 other=0.0 park=miss] texhdr=24.1/5 total=639.0 ms texWindowWait=545.330 texEncodeMs=53.241 texEncodeWithoutWindow=0.000/0 workerBc3Claims=0/0",
+          "[2026-09-26 15:56:53.689] [app-cd2c] [INFO] [WORLD]   Object stream cold model: Assets/Vegetation/Tree/Betula_Pendula/t_betula_pendula_3s.xob mode=async parse=0.0 adapt=0.0 opt=0.7 create=0.0 [reg=0.0 mesh=0.1 sect=0.1 tex=0.0 (read=0.0 create=0.0 fb=0.0 alpha=0.0 up=0 prep=0) ffi=0.0 prox=0.0 other=0.0 park=miss] texhdr=0.0/0 total=0.7 ms texWindowWait=0.000 texEncodeMs=0.000 texEncodeWithoutWindow=0.000/0 workerBc3Claims=0/0",
+          "[2026-09-26 15:56:58.754] [app-cd2c] [INFO] [WORLD]   Object stream cold model: Assets/Vegetation/Tree/Betula_Pendula/t_betula_pendula_3s.xob mode=async parse=0.0 adapt=0.0 opt=0.9 create=0.0 [reg=0.0 mesh=0.1 sect=0.1 tex=0.0 (read=0.0 create=0.0 fb=0.0 alpha=0.0 up=0 prep=0) ffi=0.0 prox=0.0 other=0.0 park=miss] texhdr=0.0/0 total=0.9 ms texWindowWait=0.000 texEncodeMs=0.000 texEncodeWithoutWindow=0.000/0 workerBc3Claims=0/0"
+        ]
+      },
+      "sha256": {
+        "engine.log": "dba9560a11f7119a60f16fd408b1c132e5cf775719de37dbd105ff9f96d57daa",
+        "harness.jsonl": "53808a2bb2dc94c80cd9ff3aef702c4b18341e958d4d5e9a528acfc2899f3a43",
+        "initial.png": "e1e6d25c771d66dd6b0309a595f760a6fb9d60f00bc2a4ad0689dea26427b2ee",
+        "provenance.json": "bfcca8de3e001efba764d5c5e6e791044e83c7b1287c3ae9f2d6361ef9c24066",
+        "result.json": "35d0c8508bf42a211d2c4c3ccaf7549982e03e2542eb15049475ca075aad2fe0",
+        "returned-settled.png": "297d9c5cb8cf1aadcb06aaed1ae40ad59af22a0d95c4a94fcf62f1b6be0ad3c1",
+        "settled.png": "3ed691254e48910a0438a7c25d056ceea2d8902b9bae4a8ca7566782b4c7b9c5",
+        "whole-gpu-memory-errors.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "whole-gpu-memory-scope.txt": "e6d61a4bc6b06e8fb1dc4466dcf4edfe9454430f738b2012fc0f1e1708b9b75c",
+        "whole-gpu-memory.csv": "8f0ecb5aacc77fbfad17e0ff40e3ecb0d2d369a905db5fb5da6c4c9e9cdfc539"
+      }
     }
   ],
   "microbenchmarks": [
@@ -2245,6 +2391,14 @@
         "side2048CandidateScratchBytes": 4194304,
         "scratchMeaning": "logical vector sizes, not allocator capacities",
         "limitations": "Existing RGBA fixed-stride wrapper independently unmeasured; synthetic CPU benchmark excludes GPU/game attribution."
+      }
+    },
+    {
+      "artifactRoot": "build",
+      "classification": "Read-only native narrow BC3 log analysis, not a CPU microbenchmark or independent runtime. Single ordered pair with cache/system confounds; counts do not prove quality, CPU claims do not prove GPU completion.",
+      "sha256": {
+        "analyze_bc3only.py": "49108d1e0fcf5d0fd3a22e71a75b75f5294df6e83dd7f2a8674b48189145c72c",
+        "stream-residency/native-bc3only-comparison-20260926.json": "648af0e2288404140eef0a07b2101ae102dc5a48c0fce313ed2e4b378166ea79"
       }
     }
   ],

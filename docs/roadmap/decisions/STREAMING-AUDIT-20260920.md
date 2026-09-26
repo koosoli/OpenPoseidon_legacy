@@ -1214,7 +1214,7 @@ comparable-quality performance remain OPEN; the streaming plan is incomplete.
 
 Source 766bef7b limits optional native DDS preparation to successful BC3
 composites; both preparation and this narrower switch remain OFF by default.
-The matched BC3-only performance comparison is pending at this checkpoint.
+The matched BC3-only performance comparison is recorded below; loading remains slower ON.
 0afcac2c adds a separate owner simulation residency service, enabled only by
 WGR_SIMULATION_RESIDENCY=1, with source 4 MiB, payload 64 MiB and Shape scheduling
 256 MiB bounds. Scheduling charges are estimates, not allocator RSS. Inventory
@@ -1253,3 +1253,37 @@ away; this approximately6m fixture does not close that generic clearance gate.
 Exact query demand/readiness is under implementation and unverified. Broad
 performance, active-encode cancellation, complete class coverage, secondary views,
 wider mutable state and MP authority remain open. The streaming plan is OPEN.
+
+### Narrow BC3-only matched pair — 26 September 2026
+
+The candidate 155306 and default 155603 both pass the coverage route, exit0 and
+restore 19999 on the same clean 0afcac2c installed pair, fixed LOD range 1, normal
+20000 budget and whole-device sampler. Root reviewed both initial/returned
+images: street, structures and trees closely match between arms; vegetation,
+wind and lighting vary on return. This is not exact pixel parity, complete
+Reforger compatibility or a normal FPS measurement.
+
+| Measured scope | BC3-only ON | Default OFF |
+|---|---:|---:|
+| First full admission from first engine log |38.080s|36.626s|
+| First engine log to shutdown |85.142s|81.851s|
+| Residency phase elapsed |17.563/5.801/16.607s|16.776/5.769/16.463s|
+| Owner encoding,1466 cold rows |39.407ms|1408.813ms|
+| Renderer window wait, same cold rows |3843.298ms|2712.875ms|
+| CPU encoding before window |32.458ms/1|277.828ms/16|
+| CPU claims/bytes in cold profiles |74/60358688|0/0|
+
+Both report identical geometry 642734708 live/704643072 capacity bytes, object
+textures 995821696 bytes/1298 items and backend 2964815152. Candidate before
+reports 104 prepared, 2188.0521 worker ms, 104 DDS puts/90 takes/0 configuration
+misses,one remaining cache entry/109668 bytes; OFF preparation counters are zero.
+Profile claims cover the cold rows, not every sidecar transfer or GPU completion.
+
+The first Betula3s row is 99.5ms ON (window 57.240ms,owner encoding 0,two claims/
+2796192 bytes) versus 639.0ms OFF (window 545.330ms,encoding 53.241ms,no claims).
+Narrowing avoids broad unused DDS compositions/cache growth and removes much owner
+encoding, but total first-full/scenario latency remains approximately 4% slower
+ON. This single ordered pair has cache/system confounds; it neither establishes
+a headline FPS improvement nor meets the performance gate. Both switches remain
+default OFF; the complete streaming plan stays OPEN. Actual logs, results,
+provenance, images, sampler files and the read-only analysis/output are hashed.
