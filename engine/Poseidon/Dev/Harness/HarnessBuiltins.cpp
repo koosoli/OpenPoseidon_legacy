@@ -307,6 +307,9 @@ void RegisterStreamingProbes(HarnessServer& hs)
             number("positiveColdWorkingModels", state.positiveColdWorkingModels);
             number("positiveColdFactsBytes", state.positiveColdFactsBytes);
             number("positiveColdTailCalls", state.positiveColdTailCalls);
+            number("positiveColdBankCalls", state.positiveColdBankCalls);
+            cJSON_AddNumberToObject(result, "positiveColdLastBankMs", state.positiveColdLastBankMs);
+            cJSON_AddNumberToObject(result, "positiveColdMaxBankMs", state.positiveColdMaxBankMs);
             cJSON_AddNumberToObject(result, "positiveColdLastTailMs", state.positiveColdLastTailMs);
             cJSON_AddNumberToObject(result, "positiveColdMaxTailMs", state.positiveColdMaxTailMs);
             number("created", state.created);

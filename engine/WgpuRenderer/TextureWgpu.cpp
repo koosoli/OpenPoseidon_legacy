@@ -37,6 +37,29 @@ namespace Poseidon
 namespace
 {
 
+uint64_t NowUs();
+
+// No clock reads outside an existing admission profile. Stop permits consecutive
+// phases without extending a bucket over later work; destruction covers failures.
+class AlphaProfilePhase
+{
+    double* _bucket;
+    uint64_t _began;
+public:
+    explicit AlphaProfilePhase(double render::ObjectAdmitProfile::* bucket)
+        : _bucket(render::GObjectAdmitProfile.active ? &(render::GObjectAdmitProfile.*bucket) : nullptr),
+          _began(_bucket ? NowUs() : 0) {}
+    ~AlphaProfilePhase() { Stop(); }
+    void Stop()
+    {
+        if (_bucket)
+        {
+            *_bucket += (NowUs() - _began) / 1000.0;
+            _bucket = nullptr;
+        }
+    }
+};
+
 bool IsPaaName(const char* name)
 {
     const char* ext = name ? strrchr(name, '.') : nullptr;
@@ -643,6 +666,7 @@ AlphaStats ScanTopMipAlphaStats(const char* name)
     {
         return {};
     }
+    AlphaProfilePhase readPhase(&render::ObjectAdmitProfile::alphaSourceReadMs);
     QIFStream in;
     GFileServer->Open(in, name);
     const int size = in.fail() ? 0 : in.rest();
@@ -654,15 +678,21 @@ AlphaStats ScanTopMipAlphaStats(const char* name)
     fileData.Realloc(size);
     fileData.Resize(size);
     in.read(fileData.Data(), size);
+    readPhase.Stop();
 
     const size_t len = strlen(name);
     const bool isPaa = len >= 4 && (name[len - 1] == 'a' || name[len - 1] == 'A'); // .paa vs .pac
+    AlphaProfilePhase decodePhase(&render::ObjectAdmitProfile::alphaDecodeMs);
     const DecodedImage img = DecodePAABuffer(fileData.Data(), static_cast<size_t>(size), isPaa);
+    decodePhase.Stop();
     if (!img.valid())
     {
         return {};
     }
+    AlphaProfilePhase histogramPhase(&render::ObjectAdmitProfile::alphaHistogramMs);
     AlphaStats stats = ClassifyAlpha(img.rgba.data(), static_cast<size_t>(img.width) * static_cast<size_t>(img.height));
+    histogramPhase.Stop();
+    AlphaProfilePhase shapePhase(&render::ObjectAdmitProfile::alphaShapeMs);
     RefineAlphaClassByShape(stats, img.rgba.data(), img.width, img.height, name);
     return stats;
 }
@@ -709,9 +739,14 @@ bool ClassifyAlphaFromBlocks(const uint8_t* blocks, size_t size, int w, int h, P
         return false;
     }
     std::vector<uint8_t> alpha;
+    AlphaProfilePhase decodePhase(&render::ObjectAdmitProfile::alphaDecodeMs);
     if (!DecodeBlockAlpha(blocks, size, w, h, fmt == PacDXT4 || fmt == PacDXT5, alpha))
         return false;
+    decodePhase.Stop();
+    AlphaProfilePhase histogramPhase(&render::ObjectAdmitProfile::alphaHistogramMs);
     out = ClassifyAlphaSamples(alpha.data(), alpha.size(), 1);
+    histogramPhase.Stop();
+    AlphaProfilePhase shapePhase(&render::ObjectAdmitProfile::alphaShapeMs);
     RefineAlphaClassByShape(out, alpha.data(), w, h, name, 1, 0);
     return true;
 }
@@ -1125,10 +1160,12 @@ bool TextureWgpu::ScanTopMipAlphaBlocks(AlphaScanPath& path)
     }
     std::vector<uint8_t> blocks(static_cast<size_t>(need));
     const MipmapRead read{blocks.data(), &_mipmaps[0], 0};
+    AlphaProfilePhase readPhase(&render::ObjectAdmitProfile::alphaSourceReadMs);
     if (!_src->GetMipmapChain(&read, 1))
     {
         return false;
     }
+    readPhase.Stop();
     if (!ClassifyAlphaFromBlocks(blocks.data(), blocks.size(), w, h, fmt, _alphaStats, Name()))
     {
         return false;
@@ -1243,8 +1280,12 @@ AlphaStats::Kind TextureWgpu::GetAlphaClass()
                         _h > 0)
                     {
                         std::vector<uint8_t> top(static_cast<size_t>(_w) * static_cast<size_t>(_h) * 4);
-                        if (_src->GetMipmapData(top.data(), _mipmaps[0], 0))
+                        AlphaProfilePhase readPhase(&render::ObjectAdmitProfile::alphaSourceReadMs);
+                        const bool readOk = _src->GetMipmapData(top.data(), _mipmaps[0], 0);
+                        readPhase.Stop();
+                        if (readOk)
                         {
+                            AlphaProfilePhase histogramPhase(&render::ObjectAdmitProfile::alphaHistogramMs);
                             _alphaStats = ClassifyAlpha(top.data(), static_cast<size_t>(_w) * static_cast<size_t>(_h));
                             scannedFromSource = true;
                         }
@@ -1255,6 +1296,9 @@ AlphaStats::Kind TextureWgpu::GetAlphaClass()
                 if (profiled)
                 {
                     ++admit.alphaScans;
+                    if (path == AlphaScanPath::Handoff) ++admit.alphaHandoffScans;
+                    else if (path == AlphaScanPath::BlockRead) ++admit.alphaBlockReadScans;
+                    else ++admit.alphaFullDecodeScans;
                     admit.alphaScanMs += (NowUs() - began) / 1000.0;
                 }
                 // Both scan paths have run the histogram and the shape guard; the last word

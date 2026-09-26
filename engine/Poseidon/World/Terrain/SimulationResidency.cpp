@@ -690,6 +690,16 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
                     facts.source = current;
                     g.charged = true; g.payloadCharge = bytes; g.shapeCharge = charge;
                     s.stats.payloadCapacityCharge += bytes; s.stats.shapeSchedulingCharge += charge;
+                    const auto bankStart = std::chrono::steady_clock::now();
+                    bool bankRecorded = false;
+                    const auto recordBank = [&]
+                    {
+                        if (bankRecorded) return;
+                        bankRecorded = true;
+                        s.stats.positiveColdLastBankMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - bankStart).count();
+                        s.stats.positiveColdMaxBankMs = std::max(s.stats.positiveColdMaxBankMs, s.stats.positiveColdLastBankMs);
+                        ++s.stats.positiveColdBankCalls;
+                    };
                     try
                     {
                         ShapeBank::CpuOnlyLoadScope cpuOnly;
@@ -697,12 +707,13 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
                         for (char& c : model->sourcePath) if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
                         auto tables = std::make_shared<Model::ShapeAdapter::AdapterBankTables>();
                         Model::ShapeAdapter::BuildAdapterBankTables(*model, *tables);
+                        recordBank(); // Excludes queue/token submission and the later owner tail.
                         const auto radius = _modernObjectPreparer->QueryRadius(index);
                         if (_modernObjectPreparer->SubmitConvert(index, std::move(model), std::move(tables), &radius, &facts.source))
                             facts.stage = State::PositiveColdStage::Convert;
                         else retire(false, true);
                     }
-                    catch (...) { retire(true, false); }
+                    catch (...) { recordBank(); retire(true, false); }
                 }
             }
         }

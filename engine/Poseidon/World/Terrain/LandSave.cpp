@@ -4178,7 +4178,8 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                          "Object stream cold model: {} mode={} parse={:.1f} adapt={:.1f} opt={:.1f} create={:.1f} "
                          "[reg={:.1f} mesh={:.1f} sect={:.1f} tex={:.1f} (read={:.1f} create={:.1f} fb={:.1f} "
                          "alpha={:.1f} up={} prep={}) ffi={:.1f} prox={:.1f} other={:.1f} park={}] "
-                         "texhdr={:.1f}/{} total={:.1f} ms{} texWindowWait={:.3f} texEncodeMs={:.3f} texEncodeWithoutWindow={:.3f}/{} workerBc3Claims={}/{}",
+                         "texhdr={:.1f}/{} total={:.1f} ms{} texWindowWait={:.3f} texEncodeMs={:.3f} texEncodeWithoutWindow={:.3f}/{} workerBc3Claims={}/{} "
+                         "alphaPartsMs(read/decode/hist/shape)={:.3f}/{:.3f}/{:.3f}/{:.3f} alphaPaths(handoff/block/full)={}/{}/{}",
                          (const char*)modelName, timing.preparsed ? "async" : (asyncOn ? "sync-fallback" : "sync"),
                          timing.parseMs, timing.adaptMs, timing.optimizeMs, createMs, admitProfile.registerMs,
                          meshMs, sectOnlyMs, texMs, admitProfile.textureReadMs, admitProfile.textureCreateMs,
@@ -4190,7 +4191,10 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                          timing.canonical ? "" : " (legacy loader)", admitProfile.textureWindowWaitMs,
                          admitProfile.textureEncodeMs, admitProfile.textureEncodeWithoutWindowMs,
                          admitProfile.textureEncodesWithoutWindow,
-                         admitProfile.textureBc3PreparedClaims, admitProfile.textureBc3PreparedBytes);
+                         admitProfile.textureBc3PreparedClaims, admitProfile.textureBc3PreparedBytes,
+                         admitProfile.alphaSourceReadMs, admitProfile.alphaDecodeMs,
+                         admitProfile.alphaHistogramMs, admitProfile.alphaShapeMs,
+                         admitProfile.alphaHandoffScans, admitProfile.alphaBlockReadScans, admitProfile.alphaFullDecodeScans);
             }
             else
                 warmMs += totalMs;

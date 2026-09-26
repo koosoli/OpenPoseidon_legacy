@@ -61,6 +61,12 @@ struct ObjectAdmitProfile
     uint32_t textureEncodesWithoutWindow = 0;
     double textureFallbackMs = 0.0; // whole-file RGBA8 decode path (non-block formats)
     double alphaScanMs = 0.0;       // GetAlphaClass scans that touched blocks or the file
+    // Disjoint subsets of alphaScanMs. Failed attempts also contribute their work;
+    // source calls can include format conversion/decompression, not just file I/O.
+    double alphaSourceReadMs = 0.0;
+    double alphaDecodeMs = 0.0;
+    double alphaHistogramMs = 0.0;
+    double alphaShapeMs = 0.0; // neighbor analysis and existing refinement policy/trace
 
     uint32_t meshes = 0;          // pool meshes created
     uint32_t sections = 0;        // sections classified as GPU-owned
@@ -69,6 +75,9 @@ struct ObjectAdmitProfile
     uint32_t textureBc3PreparedClaims = 0; // worker CPU payload consumed; not GPU acceptance/completion
     uint64_t textureBc3PreparedBytes = 0; // compressed payload bytes consumed by those claims
     uint32_t alphaScans = 0;
+    uint32_t alphaHandoffScans = 0;
+    uint32_t alphaBlockReadScans = 0;
+    uint32_t alphaFullDecodeScans = 0; // includes source-provided RGBA fallback
     uint32_t proxyModels = 0;     // proxy shapes registered
     uint32_t parkHits = 0;        // RegisterGpuModel served from the parked (evict-cache) set
     uint32_t parkStale = 0;       // parked entry found but its textures had moved: rebuilt

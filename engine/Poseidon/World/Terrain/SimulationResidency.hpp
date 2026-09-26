@@ -30,6 +30,10 @@ struct SimulationResidencyStats
     uint64_t positiveColdRequested = 0, positiveColdPrepared = 0, positiveColdCreated = 0;
     uint64_t positiveColdRefused = 0, positiveColdInterrupted = 0, positiveColdWorkingModels = 0;
     uint64_t positiveColdFactsBytes = 0, positiveColdTailCalls = 0;
+    // Bank timing includes owner allocation/name normalization and table build;
+    // final ShapeBank installation is recorded separately by TailMs.
+    uint64_t positiveColdBankCalls = 0;
+    double positiveColdLastBankMs = 0, positiveColdMaxBankMs = 0;
     double positiveColdLastTailMs = 0, positiveColdMaxTailMs = 0;
     uint64_t watchedPlacements = 0, liveWatchedPlacements = 0;
     uint64_t queryRegions = 0, readyQueries = 0, pendingQueries = 0, unknownQueries = 0, refusedQueries = 0;
