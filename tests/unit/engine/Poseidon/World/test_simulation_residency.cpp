@@ -4,6 +4,8 @@
 #include <Poseidon/World/Terrain/SimulationResidencyPolicy.hpp>
 #include <Poseidon/Asset/Formats/P3D/MLODLoader.hpp>
 #include <Poseidon/World/Model/ShapeAdapter.hpp>
+#include <Poseidon/IO/ParamFile/InitLibraryElement.hpp>
+#include <Poseidon/IO/Streams/QBStream.hpp>
 #include "test_fixtures.hpp"
 #include <limits>
 #include <cstddef>
@@ -649,4 +651,243 @@ TEST_CASE("Fire query weak identity cannot inherit Ready after same-address same
     REQUIRE(state.regions.find({&replacement, uint8_t(SimulationQueryPurpose::Fire)}) != state.regions.end());
     // Address/ID/pose equality cannot bypass the independent weak lifetime witness.
     REQUIRE(static_cast<Object*>(record.actor) != &replacement);
+}
+
+namespace
+{
+void ParseRegisteredConfig(ParamFile& root, const std::string& text)
+{
+    InitLibraryElement(); QIStream input(text.data(), static_cast<int>(text.size())); root.Parse(input);
+}
+struct RegisteredPlainInventory
+{
+    ShapeBank bank;
+    ParamFile config;
+    SimulationResidencyState state;
+    std::vector<RStringB> names;
+    std::shared_ptr<Model::Model> prototype;
+    // External owners represent the normal camera/object ownership; the bank
+    // and metadata hold weak witnesses only. No simulation-owned global array.
+    std::vector<Ref<LODShapeWithShadow>> external;
+    explicit RegisteredPlainInventory(size_t count)
+    {
+        Foundation::CaptureMainThread();
+        std::string configText = "class CfgModels {";
+        for (size_t i = 0; i < count; ++i)
+            configText += "class registered_" + std::to_string(i) + " { properties[]={\"class\",\"\"}; };";
+        for (size_t i = 0; i < 128; ++i)
+            configText += "class unused_" + std::to_string(i) + " { properties[]={\"class\",\"house\"}; };";
+        configText += "};"; ParseRegisteredConfig(config, configText);
+        auto model = Asset::Formats::MLODLoader::load(GET_FIXTURE("mlod/p3dm_geometry_mass.p3d"));
+        const auto geometry = std::find_if(model.lodLevels.begin(), model.lodLevels.end(),
+            [](const auto& lod) { return lod.purpose == Model::LodPurpose::Geometry; });
+        REQUIRE(geometry != model.lodLevels.end());
+        auto view = *geometry, fire = *geometry;
+        view.purpose = Model::LodPurpose::ViewGeometry; view.resolution = 6e15f;
+        fire.purpose = Model::LodPurpose::FireGeometry; fire.resolution = 7e15f;
+        model.lodLevels.push_back(std::move(view)); model.lodLevels.push_back(std::move(fire));
+        prototype = std::make_shared<Model::Model>(model);
+        state.groups.resize(count); names.reserve(count); external.reserve(count);
+        ShapeBank::CpuOnlyLoadScope cpuOnly;
+        for (uint32_t i = 0; i < count; ++i)
+        {
+            const auto name = "registered_" + std::to_string(i) + ".p3d";
+            names.emplace_back(name.c_str()); model.sourcePath = name;
+            external.emplace_back(bank.NewFromModel(name.c_str(), false, true, std::make_shared<Model::Model>(model), nullptr));
+            REQUIRE(external.back());
+            auto& group = state.groups[i]; group.memberCount = 1; group.maximumScale = 1;
+            group.origins = {{double(i ? 650 : 1200), 10, double(i ? 650 : 1200)},
+                             {double(i ? 650 : 1230), 10, double(i ? 650 : 1230)}};
+        }
+        state.referencedModels = count; state.FinishInventory();
+        for (uint32_t i = 0; i < count; ++i)
+        {
+            bool changed = false;
+            REQUIRE(state.RefreshRegisteredModel(i, bank, names[i], config, changed, [] { return true; }) == SimulationResidencyStatus::Ready);
+            REQUIRE(changed);
+        }
+    }
+};
+}
+
+TEST_CASE("Complete registered bank metadata can select one strong model from 257 without a full source producer", "[streaming-simulation-residency]")
+{
+    RegisteredPlainInventory fixture(SimulationMaxModels + 1); auto& s = fixture.state;
+    REQUIRE(s.activeModelCapacityExceeded);
+    REQUIRE(s.AdvanceRegisteredPadding(fixture.bank, fixture.names, fixture.config, [] { return true; }) == SimulationResidencyStatus::Ready);
+    REQUIRE(s.registeredMetadataEverComplete); REQUIRE_FALSE(s.registeredMetadataDirty);
+    REQUIRE(s.placementPadding >= fixture.external[0]->BoundingSphere());
+    REQUIRE(s.registeredBorrowedModels == 0);
+    for (const auto& g : s.groups) { REQUIRE_FALSE(g.shape); REQUIRE_FALSE(g.queryBorrow); REQUIRE_FALSE(g.charged); }
+
+    auto* shape = fixture.bank.Find(fixture.names[0], false, true);
+    REQUIRE(s.HoldRegisteredQueryModel(0, shape) == SimulationResidencyState::RegisteredBorrowResult::Held);
+    const auto charge = s.registeredBorrowShapeCharge;
+    REQUIRE(charge > 0); REQUIRE(charge <= SimulationMaxShapeCharge);
+    REQUIRE(s.HoldRegisteredQueryModel(0, shape) == SimulationResidencyState::RegisteredBorrowResult::Held);
+    REQUIRE(s.registeredBorrowedModels == 1); REQUIRE(s.registeredBorrowShapeCharge == charge);
+    Ref<ObjectPlain> a = new ObjectPlain(shape, 1001), b = new ObjectPlain(shape, 1002);
+    a->SetType(Primary); b->SetType(Primary);
+    SimulationResidencyState::Entry first, second;
+    first.object = a.GetRef(); first.shape = shape; second.object = b.GetRef(); second.shape = shape;
+    REQUIRE(s.AttachQueryBorrow(0, first)); REQUIRE(s.AttachQueryBorrow(0, second));
+    REQUIRE(s.MatchesQueryBorrow(first)); REQUIRE(s.MatchesQueryBorrow(second));
+    REQUIRE(s.groups[0].queryEntries == 2);
+    // A model observation does not manufacture any actor/query region Ready.
+    REQUIRE(s.regions.empty()); REQUIRE(s.stats.readyRegions == 0); REQUIRE(s.stats.readyQueries == 0);
+    SECTION("saved survivor retains its own CPU state after model debt retires")
+    {
+        b->SetDammage(.25f); REQUIRE(b->MustBeSaved());
+        s.ReleaseQueryBorrow(first); REQUIRE(s.registeredBorrowedModels == 1);
+        s.ReleaseQueryBorrow(second);
+        REQUIRE(s.registeredBorrowedModels == 0); REQUIRE(s.registeredBorrowShapeCharge == 0);
+        REQUIRE(b->GetShape() == shape); REQUIRE(b->GetRawTotalDammage() == .25f); REQUIRE(b->MustBeSaved());
+    }
+    SECTION("expired off-bin model blocks complete metadata despite intact selected geometry")
+    {
+        fixture.external.back() = nullptr;
+        REQUIRE(fixture.bank.Find(fixture.names.back(), false, true) == nullptr);
+        REQUIRE(s.groups.back().registeredShape.GetRef() == nullptr);
+        REQUIRE(s.ValidateRegisteredMetadata(fixture.bank, fixture.names, fixture.config, [] { return true; }) == SimulationResidencyStatus::Unknown);
+        REQUIRE(s.MatchesQueryBorrow(first)); REQUIRE(s.registeredBorrowedModels == 1);
+    }
+    SECTION("current config is reprobed rather than cached with the bank")
+    {
+        ParamFile changed; ParseRegisteredConfig(changed, "class CfgModels { class registered_256 { properties[]={\"class\",\"house\"}; }; };");
+        REQUIRE(s.ValidateRegisteredMetadata(fixture.bank, fixture.names, changed, [] { return true; }) == SimulationResidencyStatus::Unknown);
+        REQUIRE(s.ValidateRegisteredMetadata(fixture.bank, fixture.names, fixture.config, [] { return true; }) == SimulationResidencyStatus::Ready);
+    }
+    SECTION("expired and reloaded bank identity cannot inherit the old weak witness even with equal radius and revision")
+    {
+        const float radius = fixture.external.back()->BoundingSphere();
+        const uint64_t revision = fixture.external.back()->QueryPolicyRevision();
+        Link<LODShape> old = fixture.external.back().GetRef();
+        fixture.external.back() = nullptr; REQUIRE(old.GetRef() == nullptr);
+        ShapeBank::CpuOnlyLoadScope cpuOnly;
+        fixture.external.back() = fixture.bank.NewFromModel(fixture.names.back(), false, true,
+            std::make_shared<Model::Model>(*fixture.prototype), nullptr);
+        REQUIRE(fixture.external.back()->BoundingSphere() == radius);
+        REQUIRE(fixture.external.back()->QueryPolicyRevision() == revision);
+        REQUIRE(old.GetRef() == nullptr);
+        REQUIRE(s.ValidateRegisteredMetadata(fixture.bank, fixture.names, fixture.config, [] { return true; }) == SimulationResidencyStatus::Unknown);
+        bool changed = false;
+        REQUIRE(s.RefreshRegisteredModel(uint32_t(s.groups.size() - 1), fixture.bank, fixture.names.back(), fixture.config, changed, [] { return true; }) == SimulationResidencyStatus::Ready);
+        REQUIRE(changed); REQUIRE(s.registeredMetadataDirty);
+    }
+    SECTION("same-valued off-bin revision cannot pass numeric equality")
+    {
+        fixture.external.back()->SetAutoCenter(fixture.external.back()->IsAutoCenter());
+        REQUIRE(s.ValidateRegisteredMetadata(fixture.bank, fixture.names, fixture.config, [] { return true; }) == SimulationResidencyStatus::Unknown);
+    }
+    SECTION("unversioned point mutation cannot reuse an old shape/radius certificate")
+    {
+        auto* changed = fixture.external.back().GetRef(); const auto revision = changed->QueryPolicyRevision();
+        auto* geometry = changed->GeometryLevel(); geometry->SetPos(0) = Vector3(1000000, 0, 0);
+        REQUIRE(changed->QueryPolicyRevision() == revision);
+        REQUIRE(s.ValidateRegisteredMetadata(fixture.bank, fixture.names, fixture.config, [] { return true; }) == SimulationResidencyStatus::Unknown);
+    }
+    SECTION("unversioned LOD box mutation is re-read in this owner operation")
+    {
+        auto* changed = fixture.external.back().GetRef(); const auto revision = changed->QueryPolicyRevision();
+        changed->GeometryLevel()->MinMax()[0] = Vector3(1000000, 1000000, 1000000);
+        REQUIRE(changed->QueryPolicyRevision() == revision);
+        REQUIRE(s.ValidateRegisteredMetadata(fixture.bank, fixture.names, fixture.config, [] { return true; }) == SimulationResidencyStatus::Unknown);
+    }
+    SECTION("nonfinite query points cannot hide behind finite authored bounds")
+    {
+        fixture.external.back()->GeometryLevel()->SetPos(0) = Vector3(std::numeric_limits<float>::quiet_NaN(), 0, 0);
+        REQUIRE(s.ValidateRegisteredMetadata(fixture.bank, fixture.names, fixture.config, [] { return true; }) == SimulationResidencyStatus::Unknown);
+    }
+    SECTION("undersized unversioned query LOD sphere cannot pass an otherwise valid parent sphere and box")
+    {
+        auto* changed = fixture.external.back().GetRef(); const auto revision = changed->QueryPolicyRevision();
+        auto* geometry = changed->GeometryLevel();
+        REQUIRE(geometry->BSphereRadius() > 0);
+        geometry->SetMinMax(geometry->Min(), geometry->Max(), geometry->BSphereCenter(), 0);
+        REQUIRE(changed->QueryPolicyRevision() == revision);
+        REQUIRE(s.ValidateRegisteredMetadata(fixture.bank, fixture.names, fixture.config, [] { return true; }) == SimulationResidencyStatus::Unknown);
+    }
+    SECTION("shifted unversioned query LOD sphere cannot pass merely because its radius is unchanged")
+    {
+        auto* changed = fixture.external.back().GetRef(); const auto revision = changed->QueryPolicyRevision();
+        auto* geometry = changed->GeometryLevel();
+        geometry->SetMinMax(geometry->Min(), geometry->Max(), Vector3(1000000, 0, 0), geometry->BSphereRadius());
+        REQUIRE(changed->QueryPolicyRevision() == revision);
+        REQUIRE(s.ValidateRegisteredMetadata(fixture.bank, fixture.names, fixture.config, [] { return true; }) == SimulationResidencyStatus::Unknown);
+    }
+    SECTION("unversioned invalid query face references refuse before the legacy narrow phase")
+    {
+        auto* changed = fixture.external.back().GetRef(); const auto revision = changed->QueryPolicyRevision();
+        auto* geometry = changed->GeometryLevel();
+        geometry->Face(geometry->BeginFaces()).Set(0, geometry->NPos());
+        REQUIRE(changed->QueryPolicyRevision() == revision);
+        REQUIRE(s.ValidateRegisteredMetadata(fixture.bank, fixture.names, fixture.config, [] { return true; }) == SimulationResidencyStatus::Unknown);
+    }
+    SECTION("unversioned query vertex conform flags cannot borrow static coverage")
+    {
+        auto* changed = fixture.external.back().GetRef(); const auto revision = changed->QueryPolicyRevision();
+        auto* geometry = changed->GeometryLevel();
+        geometry->SetClip(0, geometry->Clip(0) | ClipLandKeep);
+        REQUIRE(changed->QueryPolicyRevision() == revision);
+        REQUIRE(s.ValidateRegisteredMetadata(fixture.bank, fixture.names, fixture.config, [] { return true; }) == SimulationResidencyStatus::Unknown);
+    }
+    SECTION("bounded validation cannot turn a valid prefix into completeness")
+    {
+        size_t visits = 0;
+        REQUIRE(s.ValidateRegisteredMetadata(fixture.bank, fixture.names, fixture.config, [&] { return ++visits < 50; }) == SimulationResidencyStatus::Pending);
+        REQUIRE(s.registeredValidationBudgetRefusals > 0);
+    }
+    SECTION("watch overflow remains a complete-query refusal")
+    {
+        s.watchCapacityExceeded = true;
+        REQUIRE(s.ValidateRegisteredMetadata(fixture.bank, fixture.names, fixture.config, [] { return true; }) == SimulationResidencyStatus::CapacityExceeded);
+    }
+}
+
+TEST_CASE("Registered model borrowing reserves the combined union before factory work and rolls back unused holds", "[streaming-simulation-residency]")
+{
+    RegisteredPlainInventory fixture(SimulationMaxModels + 1); auto& s = fixture.state;
+    REQUIRE(s.AdvanceRegisteredPadding(fixture.bank, fixture.names, fixture.config, [] { return true; }) == SimulationResidencyStatus::Ready);
+    auto* shape = fixture.external[0].GetRef();
+    SECTION("normal and cold ownership use the same 256-model union")
+    {
+        s.legacyShapeSlots = SimulationMaxModels - 1; s.positiveColdWork.push_back(1);
+        REQUIRE(s.HoldRegisteredQueryModel(0, shape) == SimulationResidencyState::RegisteredBorrowResult::CapacityExceeded);
+        REQUIRE_FALSE(s.groups[0].queryBorrow); REQUIRE(s.registeredBorrowShapeCharge == 0);
+    }
+    SECTION("shape scheduling cannot ignore existing legacy/cold debt")
+    {
+        s.stats.shapeSchedulingCharge = SimulationMaxShapeCharge;
+        REQUIRE(s.HoldRegisteredQueryModel(0, shape) == SimulationResidencyState::RegisteredBorrowResult::CapacityExceeded);
+        REQUIRE_FALSE(s.groups[0].queryBorrow); REQUIRE(s.registeredBorrowedModels == 0);
+    }
+    SECTION("failed factory has no entry and releases its reserved debt")
+    {
+        REQUIRE(s.HoldRegisteredQueryModel(0, shape) == SimulationResidencyState::RegisteredBorrowResult::Held);
+        REQUIRE(s.groups[0].queryEntries == 0);
+        s.ReleaseUnusedRegisteredBorrow(0); s.ReleaseUnusedRegisteredBorrow(0);
+        REQUIRE_FALSE(s.groups[0].queryBorrow); REQUIRE(s.registeredBorrowedModels == 0); REQUIRE(s.registeredBorrowShapeCharge == 0);
+        REQUIRE(fixture.bank.Find(fixture.names[0], false, true) == shape);
+    }
+    SECTION("inherited current config and long alias names are unsupported")
+    {
+        ParamFile inherited; ParseRegisteredConfig(inherited, "class Base { properties[]={\"class\",\"house\"}; }; class CfgModels { class registered_0: Base {}; };");
+        LODShapeWithShadow* found = nullptr;
+        REQUIRE(SimulationResidencyState::ProbeRegisteredPlainNow(fixture.bank, fixture.names[0], inherited, found, [] { return true; }) == SimulationResidencyStatus::Unknown);
+        REQUIRE(found == nullptr);
+        const std::string prefix(127, 'a');
+        const std::string alias = prefix + "X.p3d", collision = prefix + "Y.p3d";
+        ShapeBank::CpuOnlyLoadScope cpuOnly;
+        Ref<LODShapeWithShadow> cached = fixture.bank.NewFromModel(alias.c_str(), false, true,
+            std::make_shared<Model::Model>(*fixture.prototype), nullptr);
+        REQUIRE(fixture.bank.Find(collision.c_str(), false, true) == cached.GetRef()); // real 128-byte bank-key alias
+        REQUIRE(SimulationResidencyState::ProbeRegisteredPlainNow(fixture.bank, alias.c_str(), fixture.config, found, [] { return true; }) == SimulationResidencyStatus::Unknown);
+        REQUIRE(SimulationResidencyState::ProbeRegisteredPlainNow(fixture.bank, collision.c_str(), fixture.config, found, [] { return true; }) == SimulationResidencyStatus::Unknown);
+    }
+    SECTION("huge off-bin geometry cannot retain the previous small-radius certificate")
+    {
+        Matrix4 large = MIdentity; large.SetScale(1000000);
+        fixture.external.back()->InternalTransform(large);
+        REQUIRE(s.ValidateRegisteredMetadata(fixture.bank, fixture.names, fixture.config, [] { return true; }) == SimulationResidencyStatus::Unknown);
+    }
 }

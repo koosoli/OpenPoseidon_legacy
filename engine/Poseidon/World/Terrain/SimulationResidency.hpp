@@ -38,6 +38,11 @@ struct SimulationResidencyStats
     uint64_t watchedPlacements = 0, liveWatchedPlacements = 0;
     uint64_t queryRegions = 0, readyQueries = 0, pendingQueries = 0, unknownQueries = 0, refusedQueries = 0;
     uint64_t queryBorrowedModels = 0, queryBorrowedEntries = 0;
+    uint64_t registeredBorrowedModels = 0, registeredBorrowShapeCharge = 0;
+    uint64_t registeredValidationBudgetRefusals = 0;
+    // Historical observation only. Current coverage requires revalidating every
+    // weak bank/config witness; this flag must never substitute for Ready.
+    bool registeredMetadataEverComplete = false;
     uint64_t queueRefused = 0, payloadCapacityCharge = 0, shapeSchedulingCharge = 0;
     uint64_t shapeElementBytes = 0, lastPumpVisits = 0, ownerPumps = 0;
     uint64_t fireCollisionCalls = 0, fireCollisionCandidateTests = 0, fireCollisionWorkRefusals = 0;

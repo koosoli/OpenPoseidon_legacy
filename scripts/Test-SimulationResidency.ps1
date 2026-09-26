@@ -1,10 +1,10 @@
-param([switch]$Disabled,[switch]$Capacity,[switch]$ActiveCapacity,[switch]$MovedWatcher,[switch]$LargeWall,[switch]$SourceDiagnostic,[switch]$PositiveWarming,[switch]$ColdPositive,[string]$Label='simulation-residency',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',[string]$Python='C:\Program Files\Python311\python.exe')
+param([switch]$Disabled,[switch]$Capacity,[switch]$ActiveCapacity,[switch]$MovedWatcher,[switch]$LargeWall,[switch]$SourceDiagnostic,[switch]$PositiveWarming,[switch]$ColdPositive,[switch]$RegisteredWarming,[string]$Label='simulation-residency',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',[string]$Python='C:\Program Files\Python311\python.exe')
 $ErrorActionPreference='Stop'
-if (@($Disabled,$Capacity,$ActiveCapacity,$MovedWatcher,$LargeWall,$SourceDiagnostic,$PositiveWarming,$ColdPositive | Where-Object {$_}).Count -gt 1) {throw 'Simulation fixture switches are separate scenarios'}
+if (@($Disabled,$Capacity,$ActiveCapacity,$MovedWatcher,$LargeWall,$SourceDiagnostic,$PositiveWarming,$ColdPositive,$RegisteredWarming | Where-Object {$_}).Count -gt 1) {throw 'Simulation fixture switches are separate scenarios'}
 if (!$env:LOCK_OWNER) {
  $shellName=if ($PSVersionTable.PSEdition -eq 'Core') {'pwsh.exe'} else {'powershell.exe'}
  $argv=@((Join-Path $PSScriptRoot 'with-game-lock.sh'),(Join-Path $PSHOME $shellName).Replace('\','/'),'-NoProfile','-File',$PSCommandPath,'-Label',$Label,'-GameDir',$GameDir,'-Python',$Python)
- foreach ($flag in @('Disabled','Capacity','ActiveCapacity','MovedWatcher','LargeWall','SourceDiagnostic','PositiveWarming','ColdPositive')) {if ((Get-Variable $flag -ValueOnly)) {$argv+=('-'+$flag)}}
+ foreach ($flag in @('Disabled','Capacity','ActiveCapacity','MovedWatcher','LargeWall','SourceDiagnostic','PositiveWarming','ColdPositive','RegisteredWarming')) {if ((Get-Variable $flag -ValueOnly)) {$argv+=('-'+$flag)}}
  $env:LOCK_OWNER='simulation residency fixture'
  try {& 'C:\Program Files\Git\bin\bash.exe' @argv; if ($LASTEXITCODE) {throw "Simulation fixture exited $LASTEXITCODE"}} finally {Remove-Item Env:LOCK_OWNER}
  return
@@ -13,7 +13,7 @@ if (Get-Process OpenPoseidon -ErrorAction SilentlyContinue) {throw 'Game already
 $root=Split-Path $PSScriptRoot -Parent
 $out=Join-Path $root ('build/stream-residency/'+$Label+'-'+(Get-Date -Format yyyyMMdd-HHmmss))
 $fixture=Join-Path $out 'fixture'
-if ($SourceDiagnostic -or $ColdPositive) {$fixture=Join-Path ([IO.Path]::GetTempPath()) ('op-src-'+[guid]::NewGuid().ToString('N').Substring(0,8))}
+if ($SourceDiagnostic -or $ColdPositive -or $RegisteredWarming) {$fixture=Join-Path ([IO.Path]::GetTempPath()) ('op-src-'+[guid]::NewGuid().ToString('N').Substring(0,8))}
 $mission=Join-Path $out 'simulation-fixture.eden'
 $env:POSEIDON_USER_DIR=Join-Path $out 'user'
 New-Item -ItemType Directory -Force $mission,$env:POSEIDON_USER_DIR | Out-Null
@@ -21,6 +21,7 @@ $fixtureArgs=@($fixture,'--absolute-model-path')
 if ($Capacity) {$fixtureArgs+=@('--model-count','8193')}
 if ($ActiveCapacity) {$fixtureArgs+=@('--model-count','257','--reference-all-models')}
 if ($PositiveWarming) {$fixtureArgs+=@('--model-count','257','--reference-all-models','--positive-warming')}
+if ($RegisteredWarming) {$fixtureArgs+=@('--model-count','257','--reference-all-models','--registered-warming')}
 if ($LargeWall) {$fixtureArgs+='--large-wall'}
 if ($SourceDiagnostic) {& $Python (Join-Path $PSScriptRoot 'streaming/build_source_diagnostic_fixture.py') $fixture}
 elseif ($ColdPositive) {& $Python (Join-Path $PSScriptRoot 'streaming/build_positive_cold_fixture.py') $fixture}
@@ -56,13 +57,14 @@ $env:WGR_OBJECT_STREAM_WINDOW_GROWTH='0'
 $env:WGR_OBJECT_STREAM_RADIUS_CELLS='8'
 $env:WGR_OBJECT_STREAM_GPU_BUDGET='0'
 $env:WGR_OBJECT_STREAM_PBO='0'
+if ($RegisteredWarming) {$env:WGR_OBJECT_STREAM_EVICT_CACHE='0'}
 $env:WGR_NATIVE_DDS_PREPARE='0'
 $env:WGR_NATIVE_DDS_BC3_ONLY='0'
 $env:WGR_ADAPTIVE_TEXTURE_DETAIL='0'
 foreach ($key in @('POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_STREAM','POSEIDON_TEST_RAIN','WGR_WATER_CURLING_BREAKER','WGR_LOD_GOVERNOR_RANGE')) {Remove-Item ('Env:'+ $key) -ErrorAction SilentlyContinue}
 $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0);$listener.Start();$port=$listener.LocalEndpoint.Port;$listener.Stop()
 $log=Join-Path $out 'engine.log'
-@{scriptSha256=(Get-FileHash $PSCommandPath).Hash;head=(& git -C $root rev-parse HEAD);installed=(Get-Content (Join-Path $GameDir 'DEPLOYED-FROM.txt'));disabled=[bool]$Disabled;fixture=(Get-Content (Join-Path $fixture 'fixture.json') -Raw | ConvertFrom-Json);hashes=@(Get-FileHash (Join-Path $GameDir 'OpenPoseidon.exe'),(Join-Path $GameDir 'wgpu_renderer.dll'))} | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $out 'provenance.json')
+@{scriptSha256=(Get-FileHash $PSCommandPath).Hash;head=(& git -C $root rev-parse HEAD);installed=(Get-Content (Join-Path $GameDir 'DEPLOYED-FROM.txt'));disabled=[bool]$Disabled;registeredWarming=[bool]$RegisteredWarming;shapeCacheLimit=$env:WGR_OBJECT_STREAM_EVICT_CACHE;fixture=(Get-Content (Join-Path $fixture 'fixture.json') -Raw | ConvertFrom-Json);hashes=@(Get-FileHash (Join-Path $GameDir 'OpenPoseidon.exe'),(Join-Path $GameDir 'wgpu_renderer.dll'))} | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $out 'provenance.json')
 $p=$null;$client=$null
 try {
  $p=Start-Process -FilePath (Join-Path $GameDir 'OpenPoseidon.exe') -WorkingDirectory $GameDir -WindowStyle Hidden -PassThru -ArgumentList @('--render=wgpu','--window','--dev','--width','1280','--height','720','--vd','2000','--harness',"$port",'--test-world-freefly','100','100','80','45','-25','--test-mission',('"'+$mission+'"'),'--test-world',('"'+(Join-Path $fixture 'simulation-residency.wrp')+'"'),'--log-file',('"'+$log+'"'))
@@ -132,6 +134,41 @@ try {
   $cold=State;$coldIds=Ids
   if ($cold.status -ne 'Disabled' -or $cold.ownerPumps -ne 0 -or @($coldIds.objects | Where-Object {$_.present}).Count) {throw 'Default-off fixture performed simulation work or loaded remote walls'}
   $result=@{cold=$cold;coldIds=$coldIds}
+ } elseif ($RegisteredWarming) {
+  $cold=Wait-State {param($r) $r.status -eq 'CapacityExceeded' -and $r.metadataComplete} 'unregistered 257-model inventory'
+  $coldIds=Ids
+  if ($cold.models -ne 257 -or $cold.referencedModels -ne 257 -or $cold.inventoryRows -ne 258 -or $cold.preparedModels -ne 0 -or $cold.registeredMetadataEverComplete -or $cold.queryBorrowedModels -ne 0 -or @($coldIds.objects | Where-Object {$_.present}).Count) {throw 'Cold registered fixture eagerly retained geometry'}
+  $null=Query 'queue';$coldQuery=Query 'status';$coldCollision=Query 'collide'
+  if ($coldQuery.status -ne 'CapacityExceeded' -or $coldCollision.status -ne 'CapacityExceeded' -or @($coldCollision.contacts).Count) {throw 'Incomplete registered inventory lent query readiness'}
+  # Both clusters are inside the ordinary eight-cell camera window. Camera
+  # objects, rather than this harness, supply the strong owners for 257 shapes.
+  $null=Send @{cmd='eval';code='triFreeFlyPose "850 850 200 225 -35"'}
+  $until=[DateTime]::UtcNow.AddSeconds(60)
+  do {
+   Start-Sleep -Milliseconds 500;$warmed=State;$warmIds=Ids;$warmResidency=Send @{cmd='stream_residency'}
+   if ($p.HasExited) {throw 'Game exited during registered camera warming'}
+  } while (($warmed.status -ne 'Ready' -or $warmed.queryBorrowedEntries -ne 2) -and [DateTime]::UtcNow -lt $until)
+  if ($warmed.status -ne 'Ready' -or !$warmed.registeredMetadataEverComplete -or $warmed.preparedModels -ne 0 -or $warmed.queryBorrowedModels -ne 1 -or $warmed.queryBorrowedEntries -ne 2 -or $warmed.registeredBorrowedModels -ne 1 -or $warmed.registeredBorrowShapeCharge -le 0 -or $warmed.registeredBorrowShapeCharge -gt 268435456 -or $warmResidency.required -ne 0) {throw 'Registered warming did not establish complete metadata with bounded selected ownership'}
+  if (@($warmIds.objects | Where-Object {$_.present -and $_.visualResident -and $_.hasGeometry -and $_.hasFireGeometry}).Count -ne 2) {throw 'Ordinary camera did not create both query walls'}
+  $warmQuery=Query 'status';$warmCollision=Query 'collide'
+  if ($warmQuery.status -ne 'Ready' -or $warmCollision.status -ne 'Ready' -or @($warmCollision.contacts | Where-Object {$_.id -eq 1001}).Count -ne 1) {throw 'Registered complete Fire query missed its authored obstruction'}
+  $null=Query 'release';$queryReleased=State
+  if ($queryReleased.queryRegions -ne 0 -or $queryReleased.queryBorrowedModels -ne 1 -or $queryReleased.queryBorrowedEntries -ne 2) {throw 'Independent Fire release retired actor ownership'}
+  # Cache=0 is explicit fixture isolation. The camera must actually destroy
+  # off-query owners; metadata may not retain all models to keep Ready alive.
+  $null=Send @{cmd='eval';code='triFreeFlyPose "100 100 80 45 -25"'}
+  $until=[DateTime]::UtcNow.AddSeconds(30)
+  do {Start-Sleep -Milliseconds 500;$away=State;$awayIds=Ids} while (($away.status -ne 'Unknown' -or @($awayIds.objects | Where-Object {$_.visualResident}).Count) -and [DateTime]::UtcNow -lt $until)
+  if ($away.status -ne 'Unknown' -or !$away.registeredMetadataEverComplete -or $away.queryBorrowedModels -ne 1 -or $away.queryBorrowedEntries -ne 2 -or @($awayIds.objects | Where-Object {$_.present -and !$_.visualResident -and $_.hasFireGeometry}).Count -ne 2) {throw 'Off-query weak expiry retained Ready or lost selected actor geometry'}
+  $null=Query 'queue';$awayQuery=Query 'status';$awayCollision=Query 'collide'
+  if ($awayQuery.status -ne 'Unknown' -or $awayCollision.status -ne 'Unknown' -or @($awayCollision.contacts).Count) {throw 'Expired global metadata published partial Fire clearance'}
+  $damage=Send @{cmd='stream_existing_damage';id=1002;damage=0.25}
+  if (!$damage.mustBeSaved -or [Math]::Abs($damage.rawDamage-0.25) -gt 0.001) {throw 'Registered selected mutation was not retained'}
+  $null=Query 'release';$null=Send @{cmd='exec';code='deleteVehicle streamFixtureActor'}
+  $released=Wait-State {param($r) $r.leasedPlacements -eq 0 -and $r.queryBorrowedModels -eq 0 -and $r.queryBorrowedEntries -eq 0 -and $r.registeredBorrowedModels -eq 0 -and $r.registeredBorrowShapeCharge -eq 0} 'registered selected ownership retirement'
+  $releasedIds=Ids;$final=Send @{cmd='stream_residency'}
+  if ($releasedIds.objects[0].present -or !$releasedIds.objects[1].present -or !$releasedIds.objects[1].mustBeSaved -or [Math]::Abs($releasedIds.objects[1].rawDamage-0.25) -gt 0.001 -or $final.required -ne 0 -or $released.status -eq 'Ready') {throw 'Registered release lost saved state, kept transient objects or lent stale coverage'}
+  $result=@{registeredWarming=$true;cold=$cold;coldIds=$coldIds;coldQuery=$coldQuery;coldCollision=$coldCollision;warmed=$warmed;warmIds=$warmIds;warmResidency=$warmResidency;warmQuery=$warmQuery;warmCollision=$warmCollision;queryReleased=$queryReleased;away=$away;awayIds=$awayIds;awayQuery=$awayQuery;awayCollision=$awayCollision;damage=$damage;released=$released;releasedIds=$releasedIds;final=$final;performanceMeasured=$false;shapeCacheLimit=0}
  } elseif ($ColdPositive) {
   $cold=Wait-State {param($r) $r.status -eq 'CapacityExceeded' -and $r.metadataComplete -and $r.positiveColdCreated -eq 2 -and $r.positiveLeasedPlacements -eq 2 -and $r.positiveScannedRegions -ge 1} 'two source-bound cold actor walls'
   $coldIds=Ids;$coldResidency=Send @{cmd='stream_residency'}

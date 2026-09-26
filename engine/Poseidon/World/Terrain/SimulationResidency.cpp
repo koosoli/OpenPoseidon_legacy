@@ -33,11 +33,21 @@ bool ValidRegion(const CoveragePoint& a, const CoveragePoint& b, double radius)
             std::abs(a[i]) > EngineBroadphaseSafeMagnitude() || std::abs(b[i]) > EngineBroadphaseSafeMagnitude()) return false;
     return true;
 }
-Status MetadataStatus(const State& s)
+template<class Budget>
+Status MetadataStatus(const State& s, const std::vector<RStringB>& paths, Budget&& budget)
 {
-    if (s.stats.status == Status::CapacityExceeded || s.watchCapacityExceeded || s.activeModelCapacityExceeded) return Status::CapacityExceeded;
+    if (s.stats.status == Status::CapacityExceeded || s.watchCapacityExceeded) return Status::CapacityExceeded;
     if (s.inventoryInvalid) return Status::Unknown;
     if (!s.inventoryComplete) return Status::Pending;
+    if (s.activeModelCapacityExceeded)
+    {
+        // Preserve the historical census refusal until a complete actual bank
+        // observation exists, without retaining/loading the full inventory.
+        if (!s.registeredMetadataEverComplete) return Status::CapacityExceeded;
+        const auto status = s.ValidateRegisteredMetadata(Shapes, paths, Pars, budget);
+        if (status != Status::Ready) return status;
+        return s.registeredMetadataDirty ? Status::Pending : Status::Ready;
+    }
     bool pending = false;
     for (const auto& g : s.groups)
     {
@@ -55,17 +65,36 @@ bool WatchMatches(const State& s, const State::Watch& watch)
     if (!object) return true; // Joined owner cleanup retires the tombstone later.
     if (!watch.authored || watch.model >= s.groups.size()) return false;
     const auto& g = s.groups[watch.model];
-    return watch.MatchesImmutableObject(g.shape, g.route);
+    auto* expected = s.activeModelCapacityExceeded ? static_cast<LODShapeWithShadow*>(g.registeredShape.GetRef()) : g.shape.GetRef();
+    return watch.MatchesImmutableObject(expected, s.activeModelCapacityExceeded ? SimulationFactoryRoute::Plain : g.route);
 }
-Status ObservedStatus(const State& s)
+template<class Budget>
+Status ObservedStatus(const State& s, const std::vector<RStringB>& paths, Budget&& budget)
 {
-    const auto metadata = MetadataStatus(s);
+    const auto metadata = MetadataStatus(s, paths, budget);
     if (metadata != Status::Ready) return metadata;
     // Complete immediate owner read, bounded by16384 registered weak instances.
     // No stale incremental prefix can establish a Ready query.
-    for (const auto& [index, watch] : s.watches) if (!WatchMatches(s, watch)) return Status::Unknown;
+    for (const auto& [index, watch] : s.watches)
+    {
+        if (s.activeModelCapacityExceeded && !budget())
+        { ++s.registeredValidationBudgetRefusals; return Status::Pending; }
+        if (!WatchMatches(s, watch)) return Status::Unknown;
+    }
     return Status::Ready;
 }
+Status ObservedStatus(const State& s, const std::vector<RStringB>& paths)
+{
+    if (!s.activeModelCapacityExceeded) return ObservedStatus(s, paths, [] { return true; });
+    const auto started = std::chrono::steady_clock::now();
+    return ObservedStatus(s, paths, [&] { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count() < 2; });
+}
+struct RegisteredBorrowRollback
+{
+    State* state = nullptr;
+    uint32_t model = 0;
+    ~RegisteredBorrowRollback() { if (state) state->ReleaseUnusedRegisteredBorrow(model); }
+};
 bool ActorUnchanged(const State::Region& r, const Object& actor)
 {
     const auto speed = actor.ObjectSpeed();
@@ -336,7 +365,7 @@ Status Landscape::ModernSimulationRegionStatusForChannel(const Object& actor, ui
     if (!Foundation::IsMainThread()) return Status::WrongOwner;
     if (!_modernSimulation) return Status::Pending;
     const auto& s = *_modernSimulation;
-    const auto metadata = ObservedStatus(s);
+    const auto metadata = ObservedStatus(s, _modernObjectModels);
     if (metadata != Status::Ready) return metadata;
     const auto found = s.regions.find(State::RegionKey{&actor, channel});
     return found == s.regions.end() ? Status::Pending : RegionRecordStatus(s, found->second, actor);
@@ -348,8 +377,13 @@ SimulationResidencyStats Landscape::SnapshotModernSimulationResidency() const
     if (!Foundation::IsMainThread()) { out.status = Status::WrongOwner; return out; }
     if (!_modernSimulation) { out.status = Status::Pending; return out; }
     const auto& s = *_modernSimulation;
-    out = s.stats; out.status = ObservedStatus(s); out.regions = out.queryRegions = 0; out.coverageGeneration = s.generation;
+    out = s.stats; out.status = ObservedStatus(s, _modernObjectModels); out.regions = out.queryRegions = 0; out.coverageGeneration = s.generation;
     out.metadataComplete = s.inventoryComplete; out.referencedModels = s.referencedModels;
+    out.registeredBorrowedModels = s.registeredBorrowedModels;
+    out.registeredBorrowShapeCharge = s.registeredBorrowShapeCharge;
+    // Historical observation, never a substitute for out.status/current proof.
+    out.registeredMetadataEverComplete = s.registeredMetadataEverComplete;
+    out.registeredValidationBudgetRefusals = s.registeredValidationBudgetRefusals;
     out.activeModels = 0; out.sparseLeaseRecords = s.leaseCounts.size();
     out.positiveColdWorkingModels = s.positiveColdWork.size();
     out.preparedModels = out.unknownModels = out.leasedPlacements = 0;
@@ -502,7 +536,7 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
             if (!g.charged)
             {
                 if (bytes > SimulationMaxModelPayload || bytes > SimulationMaxPayloadCharge - s.stats.payloadCapacityCharge ||
-                    charge > SimulationMaxShapeCharge - s.stats.shapeSchedulingCharge)
+                    !s.CanScheduleShape(charge))
                 { delete converted; g.status = State::ModelState::CapacityExceeded; break; }
                 g.charged = true; g.payloadCharge = bytes; g.shapeCharge = charge;
                 s.stats.payloadCapacityCharge += bytes; s.stats.shapeSchedulingCharge += charge;
@@ -585,12 +619,27 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
                     upper->max[axis] - g.origins.max[axis], g.origins.min[axis] - lower->min[axis]});
         }
     }
+    // Weak owner observations only; an overflowing watch registry already
+    // blocks complete queries, so leave production positive warming unchanged.
+    if (s.activeModelCapacityExceeded && s.inventoryComplete && !s.inventoryInvalid && !s.watchCapacityExceeded && elapsed() < 2)
+    {
+        bool changed = false;
+        for (size_t n = 0; n < std::min(size_t(32), s.groups.size()) && elapsed() < 2; ++n)
+        {
+            const uint32_t i = uint32_t(s.registeredCursor++ % s.groups.size());
+            if (!s.groups[i].memberCount) continue;
+            s.RefreshRegisteredModel(i, Shapes, _modernObjectModels[i], Pars, changed, [&] { return elapsed() < 2; });
+        }
+        // Staged padding is never a prefix exclusion/completeness certificate.
+        if (s.registeredMetadataDirty)
+            s.AdvanceRegisteredPadding(Shapes, _modernObjectModels, Pars, [&] { return elapsed() < 2; });
+    }
     const bool coldEnabled = PositiveColdEnabled();
     const auto enlistCold = [&](uint32_t modelIndex, uint32_t placementIndex)
     {
         auto& g = s.groups[modelIndex];
         if (!coldEnabled || !g.CanEnlistPositiveCold() || !_modernObjectPreparer ||
-            s.legacyShapeSlots + s.positiveColdWork.size() >= SimulationMaxModels) return;
+            s.legacyShapeSlots + s.positiveColdWork.size() + s.registeredBorrowedModels >= SimulationMaxModels) return;
         const char* path = _modernObjectModels[modelIndex];
         size_t pathBytes = 0;
         while (pathBytes < 128 && path[pathBytes]) ++pathBytes;
@@ -685,7 +734,7 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
                     Streaming::ProbeStaticPlainRouteNow(current.plainSource, current.generation, current.modelIdentity, Pars) !=
                         StaticPlainRouteObservation::EmptyClassNow ||
                     bytes > SimulationMaxPayloadCharge - s.stats.payloadCapacityCharge ||
-                    charge > SimulationMaxShapeCharge - s.stats.shapeSchedulingCharge)
+                    !s.CanScheduleShape(charge))
                     retire(true, false);
                 else
                 {
@@ -761,7 +810,7 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
             (facts.stage == State::PositiveColdStage::Convert && state != ObjectStreamPreparer::State::Converting))
             retire(false, true);
     }
-    const bool completeCoverage = ObservedStatus(s) == Status::Ready;
+    const bool completeCoverage = ObservedStatus(s, _modernObjectModels, [&] { return elapsed() < 2; }) == Status::Ready;
     // Partial positive warming reuses actor channel0 and the SAME sparse leases.
     // Authored origin cells are a selection heuristic here, never a completeness
     // proof: cold/missing/unsupported and off-bin instances are not declared clear.
@@ -934,9 +983,13 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
                 if (r.offset == cell.size()) { ++r.cell; r.offset = 0; continue; }
                 const uint32_t index = cell[r.offset++]; ++s.stats.lastPumpVisits;
                 auto& p = _modernObjectPlacements[index]; auto& g = s.groups[p.modelIndex];
+                const bool registered = s.activeModelCapacityExceeded;
+                auto* modelShape = registered ? static_cast<LODShapeWithShadow*>(g.registeredShape.GetRef()) : g.shape.GetRef();
+                const float modelRadius = registered ? g.registeredRadius : g.radius;
+                if (!modelShape) { r.status = Status::Unknown; break; }
                 const Matrix4 finalFrame = RepairWorldObjectPlacementFrame(SimulationPlacementFrame(p.rows), false,
-                    g.route == SimulationFactoryRoute::Road, (g.shape->GetOrHints() & ClipLandKeep) != 0);
-                const auto box = BuildEngineBroadphaseEnvelope(Point(finalFrame.Position()), finalFrame.Scale(), g.radius);
+                    !registered && g.route == SimulationFactoryRoute::Road, (modelShape->GetOrHints() & ClipLandKeep) != 0);
+                const auto box = BuildEngineBroadphaseEnvelope(Point(finalFrame.Position()), finalFrame.Scale(), modelRadius);
                 if (!box) { r.status = Status::Unknown; break; }
                 if (!Overlap(*box, r) || r.pendingSet.contains(index)) continue;
                 if ((!r.activeSet.contains(index) && r.active.size() + r.pendingNew >= SimulationMaxRegionLeases) ||
@@ -944,6 +997,21 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
                     (!r.activeSet.contains(index) && !s.CanAcquireLease(index)) ||
                     (!s.entries.contains(index) && s.entries.size() >= SimulationMaxLeasedPlacements))
                 { r.status = Status::CapacityExceeded; break; }
+                RegisteredBorrowRollback rollback;
+                if (registered)
+                {
+                    // Re-probe immediately before reserving a strong model ref
+                    // and before creating anything. No Shapes.New/load fallback.
+                    LODShapeWithShadow* current = nullptr;
+                    const auto proof = State::ProbeRegisteredPlainNow(Shapes, _modernObjectModels[p.modelIndex], Pars,
+                        current, [&] { return elapsed() < 2; });
+                    if (proof != Status::Ready || current != modelShape || !s.RegisteredShapeMatches(p.modelIndex, current))
+                    { r.status = proof == Status::Pending ? Status::Pending : Status::Unknown; --r.offset; break; }
+                    const auto held = s.HoldRegisteredQueryModel(p.modelIndex, current);
+                    if (held != State::RegisteredBorrowResult::Held)
+                    { r.status = held == State::RegisteredBorrowResult::CapacityExceeded ? Status::CapacityExceeded : Status::Unknown; break; }
+                    rollback.state = &s; rollback.model = p.modelIndex;
+                }
                 Object* object = static_cast<Object*>(p.resident);
                 if (!object)
                 {
@@ -951,8 +1019,9 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
                     {
                         ShapeBank::CpuOnlyLoadScope cpuOnly;
                         ShapeBank::WorldModelScope worldModel(Shapes);
-                        object = ObjectCreate(p.id, _modernObjectModels[p.modelIndex], SimulationPlacementFrame(p.rows),
-                                              nullptr, nullptr, false, true, false);
+                        object = registered ? ObjectCreateModernPlainFromShape(p.id, g.queryBorrow, SimulationPlacementFrame(p.rows)) :
+                            ObjectCreate(p.id, _modernObjectModels[p.modelIndex], SimulationPlacementFrame(p.rows),
+                                         nullptr, nullptr, false, true, false);
                     }
                     catch (...) { object = nullptr; }
                     if (object)
@@ -973,14 +1042,15 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
                     auto& cleanup = s.entries[index]; cleanup.object = object; cleanup.shape = object->GetShape();
                     cleanup.frame = SimulationFrameSample(object->Transform()); cleanup.radius = object->GetRadius();
                 }
-                if (!object || object->GetShape() != g.shape.GetRef() || !object->Static() || object->MustBeSaved() ||
+                if (!object || object->GetShape() != modelShape || !object->Static() || object->MustBeSaved() ||
                     (object->GetType() != Primary && object->GetType() != Network) ||
                     SimulationFrameSample(object->Transform()) != SimulationFrameSample(finalFrame) ||
-                    object->GetRadius() != finalFrame.Scale() * g.radius || !SimulationShapeAdmissible(*g.shape))
+                    object->GetRadius() != finalFrame.Scale() * modelRadius || !SimulationShapeAdmissible(*modelShape))
                 { r.status = Status::Unknown; break; }
                 // Road constructors can normalize shape query policy in place. Accept
                 // that known owner-tail change only after validating the exact result.
-                for (auto& group : s.groups) if (group.shape.GetRef() == g.shape.GetRef()) group.revision = g.shape->QueryPolicyRevision();
+                if (!registered)
+                    for (auto& group : s.groups) if (group.shape.GetRef() == modelShape) group.revision = modelShape->QueryPolicyRevision();
                 auto& e = s.entries[index]; e.object = object; e.shape = object->GetShape();
                 e.frame = SimulationFrameSample(object->Transform()); e.radius = object->GetRadius();
                 e.positiveRevision = 0; e.positiveId = -1;
@@ -995,7 +1065,13 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
             }
             if (r.status == Status::Pending && r.cell == r.plan.cells.size())
             {
-                s.CompleteReplacement(r);
+                // Owner constructors may mutate query state. The same operation
+                // must validate the complete inventory and watchers again before
+                // publishing Ready; a timed-out prefix leaves pending leases.
+                const auto proof = s.activeModelCapacityExceeded ?
+                    ObservedStatus(s, _modernObjectModels, [&] { return elapsed() < 2; }) : Status::Ready;
+                if (proof == Status::Ready) s.CompleteReplacement(r);
+                else r.status = proof;
             }
             if (r.status != Status::Pending && r.status != Status::Ready)
             {

@@ -301,7 +301,11 @@ void RegisterStreamingProbes(HarnessServer& hs)
             number("liveWatchedPlacements", state.liveWatchedPlacements);
             number("queryRegions", state.queryRegions);
             number("queryBorrowedModels", state.queryBorrowedModels);
-            number("queryBorrowedEntries", state.queryBorrowedEntries);
+              number("queryBorrowedEntries", state.queryBorrowedEntries);
+              number("registeredBorrowedModels", state.registeredBorrowedModels);
+              number("registeredBorrowShapeCharge", state.registeredBorrowShapeCharge);
+              number("registeredValidationBudgetRefusals", state.registeredValidationBudgetRefusals);
+              cJSON_AddBoolToObject(result, "registeredMetadataEverComplete", state.registeredMetadataEverComplete);
             number("readyQueries", state.readyQueries);
             number("pendingQueries", state.pendingQueries);
             number("unknownQueries", state.unknownQueries);
@@ -523,7 +527,11 @@ void RegisterScreenshot(HarnessServer& hs)
             cJSON_AddNumberToObject(result, "ddsPublicationBytes", static_cast<double>(state.prep.ddsPublicationBytes));
             const auto texturePrep = render::PreparedTextureStore::Instance().SnapshotStats();
             cJSON_AddNumberToObject(result, "preparedTextureEntries", static_cast<double>(texturePrep.entries));
-            cJSON_AddNumberToObject(result, "preparedTextureCapacityBytes", static_cast<double>(texturePrep.bytes));
+              cJSON_AddNumberToObject(result, "preparedTextureCapacityBytes", static_cast<double>(texturePrep.bytes));
+              cJSON_AddNumberToObject(result, "preparedAlphaFactsPuts", static_cast<double>(texturePrep.alphaFactsPuts));
+              cJSON_AddNumberToObject(result, "preparedAlphaFactsHits", static_cast<double>(texturePrep.alphaFactsHits));
+              cJSON_AddNumberToObject(result, "preparedAlphaFactsMisses", static_cast<double>(texturePrep.alphaFactsMisses));
+              cJSON_AddNumberToObject(result, "preparedAlphaFactsCancelled", static_cast<double>(texturePrep.alphaFactsCancelled));
             cJSON_AddNumberToObject(result, "preparedDdsPuts", static_cast<double>(texturePrep.ddsPreparedPuts));
             cJSON_AddNumberToObject(result, "preparedDdsTakes", static_cast<double>(texturePrep.ddsPreparedTakes));
             cJSON_AddNumberToObject(result, "preparedDdsConfigurationMisses", static_cast<double>(texturePrep.ddsConfigurationMisses));

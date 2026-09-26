@@ -1,11 +1,12 @@
-param([switch]$Lifecycle,[switch]$SaveRoundTrip,[switch]$FreshReload,[switch]$PBOTextures,[string]$Label='dayz-cold-positive',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
+param([switch]$Lifecycle,[switch]$SaveRoundTrip,[switch]$FreshReload,[switch]$PBOTextures,[switch]$RequirePreparedAlphaFacts,[string]$Label='dayz-cold-positive',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
 if($FreshReload){$SaveRoundTrip=$true}
 if($SaveRoundTrip){$Lifecycle=$true}
+if($RequirePreparedAlphaFacts){$PBOTextures=$true}
 if (!$env:LOCK_OWNER) {
  $shellName=if($PSVersionTable.PSEdition -eq 'Core'){'pwsh.exe'}else{'powershell.exe'}
  $env:LOCK_OWNER='DayZ source-bound cold actor admission'
- try { $argv=@((Join-Path $PSScriptRoot 'with-game-lock.sh'),((Join-Path $PSHOME $shellName).Replace('\','/')),'-NoProfile','-File',$PSCommandPath,'-Label',$Label,'-GameDir',$GameDir);if($Lifecycle){$argv+='-Lifecycle'};if($SaveRoundTrip){$argv+='-SaveRoundTrip'};if($FreshReload){$argv+='-FreshReload'};if($PBOTextures){$argv+='-PBOTextures'}; & 'C:/Program Files/Git/bin/bash.exe' @argv; if($LASTEXITCODE){throw "DayZ cold test exited $LASTEXITCODE"} }
+ try { $argv=@((Join-Path $PSScriptRoot 'with-game-lock.sh'),((Join-Path $PSHOME $shellName).Replace('\','/')),'-NoProfile','-File',$PSCommandPath,'-Label',$Label,'-GameDir',$GameDir);if($Lifecycle){$argv+='-Lifecycle'};if($SaveRoundTrip){$argv+='-SaveRoundTrip'};if($FreshReload){$argv+='-FreshReload'};if($PBOTextures){$argv+='-PBOTextures'};if($RequirePreparedAlphaFacts){$argv+='-RequirePreparedAlphaFacts'}; & 'C:/Program Files/Git/bin/bash.exe' @argv; if($LASTEXITCODE){throw "DayZ cold test exited $LASTEXITCODE"} }
  finally {Remove-Item Env:LOCK_OWNER}
  return
 }
@@ -64,6 +65,7 @@ try {
  $target=$cold.identity.objects[0]
  if(!$target.present -or $target.visualResident -or !$target.shapeVisualDeferred -or $target.normalVertexBuffers -ne 0 -or !$target.hasGeometry -or !$target.hasFireGeometry -or !$target.hasViewGeometry -or $target.model -ne 'dz\structures\residential\platforms\platform1_stairs_30_wallr.p3d' -or $cold.simulation.positiveColdCreated -le $before.simulation.positiveColdCreated){throw 'Real DayZ actor failed source-bound CPU-only cold admission'}
  if($cold.simulation.status -ne 'CapacityExceeded' -or $cold.simulation.readyRegions -ne 0 -or $cold.camera.required -ne 0){throw 'Partial production admission changed query readiness or pins'}
+ if($RequirePreparedAlphaFacts -and ($cold.camera.preparedAlphaFactsPuts -le 0 -or $cold.camera.preparedAlphaFactsHits -le 0)){throw 'Actual DayZ did not publish and consume any prepared alpha facts before upload'}
  $fire=Send @{cmd='stream_fire_probe';from=@(5705.061035,68.4318695,2512.391357);to=@(5717.061035,68.4318695,2512.391357)}
  if(!@($fire.contacts | Where-Object {$_.id -eq 83912800}).Count){throw 'Cold target failed known real fire ray'}
  $query=@{cmd='stream_simulation_query';actor='streamColdActor';action='queue';from=@(5705.061035,68.4318695,2512.391357);to=@(5717.061035,68.4318695,2512.391357);radius=0.01;purpose=1}
@@ -161,7 +163,7 @@ try {
  $null=Send @{cmd='exit'};if(!$p.WaitForExit(15000) -or $p.ExitCode){throw 'Game failed clean exit'}
  if(Select-String -LiteralPath $log -Pattern 'Out of Memory|Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION' -Quiet){throw 'Renderer error'}
  if($reloadLog -and (Select-String -LiteralPath $reloadLog -Pattern 'Out of Memory|Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION' -Quiet)){throw 'Fresh reload renderer error'}
- @{passed=$true;lifecycle=[bool]$Lifecycle;saveRoundTrip=[bool]$SaveRoundTrip;freshReload=[bool]$FreshReload;saveEvidence=$saveEvidence;before=$before;cold=$cold;fire=$fire;queued=$queued;collision=$collision;promoted=$promoted;demoted=$demoted;damage=$damage;released=$released;performanceMeasured=$false} | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $out 'result.json')
+ @{passed=$true;lifecycle=[bool]$Lifecycle;saveRoundTrip=[bool]$SaveRoundTrip;freshReload=[bool]$FreshReload;pboTextures=[bool]$PBOTextures;requiredPreparedAlphaFacts=[bool]$RequirePreparedAlphaFacts;saveEvidence=$saveEvidence;before=$before;cold=$cold;fire=$fire;queued=$queued;collision=$collision;promoted=$promoted;demoted=$demoted;damage=$damage;released=$released;performanceMeasured=$false} | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $out 'result.json')
  Write-Output "DayZ cold actor evidence: $out"
 }finally{
  if($client){$client.Dispose()};if($p -and !$p.HasExited){Stop-Process -Id $p.Id -Force}

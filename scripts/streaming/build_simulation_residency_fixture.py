@@ -40,7 +40,13 @@ def model_paths(model_path, model_count):
     return [model_path] + [model_path[:-4] + f"_unused_{i:03}.p3d" for i in range(1, model_count)]
 
 
-def build_world(model_path=MODEL_PATH, model_count=1, placements=PLACEMENTS, reference_all=False):
+def placement_model(index, reference_all, registered_warming=False):
+    # The first two placements share one physical model in the weak-registration
+    # fixture; the remaining 256 placements reference every other inventory row.
+    return max(0, index - 1) if registered_warming else index if reference_all else 0
+
+
+def build_world(model_path=MODEL_PATH, model_count=1, placements=PLACEMENTS, reference_all=False, registered_warming=False):
     leaf = b"\0" * 5  # Uniform quadtree: root tag plus four-byte leaf.
     zero_grid = bytes(LAND * LAND)
     out = bytearray(b"OPRW" + pack("6if", 25, 0, LAND, LAND, LAND, LAND, CELL))
@@ -60,7 +66,7 @@ def build_world(model_path=MODEL_PATH, model_count=1, placements=PLACEMENTS, ref
     out += pack("2i", max(p[0] for p in placements), LAND * LAND * 4)
     out += bytes(LAND * LAND * 4)  # every road-link count is zero
     for index, (identity, x, y, z) in enumerate(placements):
-        out += pack("2i12fi", identity, index if reference_all else 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, x, y, z, 0)
+        out += pack("2i12fi", identity, placement_model(index, reference_all, registered_warming), 1, 0, 0, 0, 1, 0, 0, 0, 1, x, y, z, 0)
     return bytes(out)
 
 
@@ -112,7 +118,7 @@ class Cursor:
         return result
 
 
-def verify_world(payload, model_path=MODEL_PATH, model_count=1, placements=PLACEMENTS, reference_all=False):
+def verify_world(payload, model_path=MODEL_PATH, model_count=1, placements=PLACEMENTS, reference_all=False, registered_warming=False):
     r = Cursor(payload)
     assert r.take(4) == b"OPRW"
     assert r.unpack("6if") == (25, 0, LAND, LAND, LAND, LAND, CELL)
@@ -132,7 +138,7 @@ def verify_world(payload, model_path=MODEL_PATH, model_count=1, placements=PLACE
     assert r.grid(1024) == bytes(1024) and r.grid(1024) == bytes(1024)
     assert r.unpack("2i") == (max(p[0] for p in placements), 4096) and r.take(4096) == bytes(4096)
     for index, (identity, x, y, z) in enumerate(placements):
-        assert r.unpack("2i12fi") == (identity, index if reference_all else 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, x, y, z, 0)
+        assert r.unpack("2i12fi") == (identity, placement_model(index, reference_all, registered_warming), 1, 0, 0, 0, 1, 0, 0, 0, 1, x, y, z, 0)
     assert r.pos == len(payload)
 
 
@@ -168,7 +174,7 @@ def verify_model(payload, half_depth=6.0):
     assert r.pos == len(payload)
 
 
-def generate(output, absolute_model_path=False, model_count=1, large_wall=False, reference_all=False, positive_warming=False):
+def generate(output, absolute_model_path=False, model_count=1, large_wall=False, reference_all=False, positive_warming=False, registered_warming=False):
     output = output.resolve()
     model_file = output / "streaming_fixture" / "wall.p3d"
     model_path = str(model_file) if absolute_model_path else MODEL_PATH
@@ -186,9 +192,15 @@ def generate(output, absolute_model_path=False, model_count=1, large_wall=False,
         # Only two models enter either actor's camera window. The other 255
         # remain referenced metadata, outside both camera windows/actor regions.
         placements = PLACEMENTS + tuple((1001+i, 650.0, 11.5, 650.0) for i in range(2, model_count))
+    if registered_warming:
+        if not reference_all or model_count != 257 or large_wall or positive_warming:
+            raise ValueError("Registered warming needs its separate complete 257-model fixture")
+        if len(model_path) >= 128 or any(len(p) >= 128 for p in model_paths(model_path, model_count)):
+            raise ValueError("Registered warming requires short canonical model paths; use a private temp directory")
+        placements = PLACEMENTS + tuple((1003+i, 650.0, 11.5, 650.0) for i in range(256))
     half_depth = 206.0 if large_wall else 6.0
-    world, model = build_world(model_path, model_count, placements, reference_all), build_model(half_depth)
-    verify_world(world, model_path, model_count, placements, reference_all)
+    world, model = build_world(model_path, model_count, placements, reference_all, registered_warming), build_model(half_depth)
+    verify_world(world, model_path, model_count, placements, reference_all, registered_warming)
     verify_model(model, half_depth)
     # No implicit output location and no cleanup/deletion of caller files.
     model_file.parent.mkdir(parents=True, exist_ok=True)
@@ -200,8 +212,8 @@ def generate(output, absolute_model_path=False, model_count=1, large_wall=False,
     metadata = {
         "schema": 1, "land_range": LAND, "terrain_range": LAND, "cell_metres": CELL,
         "elevation": HEIGHT, "models": model_paths(model_path, model_count), "absolute_model_path": absolute_model_path,
-        "large_wall": large_wall, "reference_all_models": reference_all, "positive_warming": positive_warming, "half_depth": half_depth, "placements": [
-            {"id": p[0], "model_index": i if reference_all else 0, "position": list(p[1:])} for i, p in enumerate(placements)],
+        "large_wall": large_wall, "reference_all_models": reference_all, "positive_warming": positive_warming, "registered_warming": registered_warming, "half_depth": half_depth, "placements": [
+            {"id": p[0], "model_index": placement_model(i, reference_all, registered_warming), "position": list(p[1:])} for i, p in enumerate(placements)],
         "camera": [100, 80, 100], "actor": [1190, 10, 1200],
         "fire_segment": [[1190, 11.5, 1200], [1210, 11.5, 1200]],
         "wall_world_bounds": [[p[1] - 0.5, 10, p[3] - half_depth,
@@ -227,7 +239,8 @@ if __name__ == "__main__":
     parser.add_argument("--reference-all-models", action="store_true", help="257 original walls reference every model to test the separate active-work capacity")
     parser.add_argument("--large-wall", action="store_true", help="Original wall intersects the ray with its origin 200 m away from it")
     parser.add_argument("--positive-warming", action="store_true", help="Separate two camera-loaded walls from the other 255 referenced models")
+    parser.add_argument("--registered-warming", action="store_true", help="258 placements reference 257 models; the two query walls share model 0")
     args = parser.parse_args()
-    manifest = generate(args.output, args.absolute_model_path, args.model_count, args.large_wall, args.reference_all_models, args.positive_warming)
+    manifest = generate(args.output, args.absolute_model_path, args.model_count, args.large_wall, args.reference_all_models, args.positive_warming, args.registered_warming)
     print(json.dumps({"output": str(args.output.resolve()), "world_sha256": manifest["world_sha256"],
                       "model_sha256": manifest["model_sha256"]}, sort_keys=True))
