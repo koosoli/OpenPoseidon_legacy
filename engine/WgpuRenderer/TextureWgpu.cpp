@@ -40,6 +40,57 @@ namespace
 
 uint64_t NowUs();
 
+// Diagnostic-only, cached startup option shared with terrain page rebuilds.
+// Source family matches TerrainWgpu's page-eviction classifier; no policy use.
+bool TerrainPageUploadTimingsEnabled()
+{
+    static const bool enabled = [] {
+        const char* value = std::getenv("WGR_TERRAIN_PAGE_TIMINGS");
+        return value && value[0] == '1';
+    }();
+    return enabled;
+}
+bool TerrainColdUploadTimingsEnabled(const char* name)
+{
+    if (!TerrainPageUploadTimingsEnabled() || !name) return false;
+    for (const char* at = name; *at; ++at)
+        if (strnicmp(at, "\\layers\\", 8) == 0 || strnicmp(at, "/layers/", 8) == 0 ||
+            strnicmp(at, "_lca.", 5) == 0 || strnicmp(at, "_lco.", 5) == 0) return true;
+    return false;
+}
+struct TerrainColdUploadTiming
+{
+    bool enabled;
+    const char* source;
+    uint64_t began;
+    double preparedTakeMs = 0.0, blockReadMs = 0.0, compressedCreateOwnerMs = 0.0;
+    double fallbackReadDecodeMs = 0.0, fallbackCreateOwnerMs = 0.0, fallbackOwnerMs = 0.0;
+    bool preparedTaken = false, preparedUsed = false, uploaded = false;
+    explicit TerrainColdUploadTiming(const char* name)
+        : enabled(TerrainColdUploadTimingsEnabled(name)), source(name), began(enabled ? NowUs() : 0) {}
+    ~TerrainColdUploadTiming()
+    {
+        if (!enabled) return;
+        const double totalMs = (NowUs() - began) / 1000.0;
+        if (totalMs < 2.0) return;
+        // First 128 slow cold page uploads per process, not a top-N ranking.
+        // Saturation avoids any unbounded counter wrap/log flood.
+        static std::atomic<unsigned> logged{0};
+        unsigned slot = logged.load(std::memory_order_relaxed);
+        while (slot < 129 && !logged.compare_exchange_weak(slot, slot + 1, std::memory_order_relaxed)) {}
+        if (slot == 128)
+            LOG_INFO(Graphics, "Wgpu terrain cold upload timings truncated: limit=128 thresholdMs=2");
+        if (slot >= 128) return;
+        LOG_INFO(Graphics,
+            "Wgpu terrain cold upload timing: source={} preparedTaken={} preparedUsed={} uploaded={} "
+            "preparedTakeMs={:.3f} blockReadOwnerMs={:.3f} compressedCreateOwnerMs={:.3f} "
+            "fallbackReadDecodeMs={:.3f} fallbackCreateOwnerMs={:.3f} fallbackOwnerMs={:.3f} totalOwnerMs={:.3f}",
+            source, preparedTaken, preparedUsed, uploaded, preparedTakeMs, blockReadMs,
+            compressedCreateOwnerMs, fallbackReadDecodeMs, fallbackCreateOwnerMs, fallbackOwnerMs, totalMs);
+    }
+};
+
+
 // No clock reads outside an existing admission profile. Stop permits consecutive
 // phases without extending a bucket over later work; destruction covers failures.
 class AlphaProfilePhase
@@ -1633,6 +1684,7 @@ uint64_t TextureWgpu::EnsureUploaded()
     {
         return _gpuHandle;
     }
+    TerrainColdUploadTiming terrainTiming(TerrainPageUploadTimingsEnabled() ? SourceName() : nullptr);
     _uploadTried = true;
 
     WgrRenderer* r = _bank ? _bank->Renderer() : nullptr;
@@ -1716,7 +1768,14 @@ uint64_t TextureWgpu::EnsureUploaded()
         {
             PAABlockChain prepared;
             const std::string key = render::PreparedTextureStore::Key(SourceName());
-            if (render::PreparedTextureStore::Instance().Take(key, prepared))
+            const uint64_t takeBegan = terrainTiming.enabled ? NowUs() : 0;
+            const bool taken = render::PreparedTextureStore::Instance().Take(key, prepared);
+            if (terrainTiming.enabled)
+            {
+                terrainTiming.preparedTakeMs += (NowUs() - takeBegan) / 1000.0;
+                terrainTiming.preparedTaken = taken;
+            }
+            if (taken)
             {
                 const PacFormat preparedFormat = PacFormatFromMagic(prepared.magic);
                 bool matches = preparedFormat == dst &&
@@ -1775,8 +1834,11 @@ uint64_t TextureWgpu::EnsureUploaded()
             {
                 reads[i] = MipmapRead{blocks.data() + offsets[i], &_mipmaps[firstLevel + i], firstLevel + i};
             }
+            const uint64_t sourceReadBegan = terrainTiming.enabled ? NowUs() : 0;
             ok = _src->GetMipmapChain(reads.data(), levelCount);
+            if (terrainTiming.enabled) terrainTiming.blockReadMs += (NowUs() - sourceReadBegan) / 1000.0;
         }
+        if (terrainTiming.enabled) terrainTiming.preparedUsed = fromPrepared;
         // The frame BYTE accumulator is unconditional: the admission loop's per-frame upload
         // budget (WGR_OBJECT_STREAM_UPLOAD_MB) reads it, and a diagnostics opt-out
         // (WGR_TEXTURE_STREAM_STATS=0) must not silently disarm a throttle. One relaxed
@@ -1810,10 +1872,12 @@ uint64_t TextureWgpu::EnsureUploaded()
             _h = _mipmaps[firstLevel]._h;
             // Into this texture's LEASED slot, so a re-upload after an eviction reclaims
             // the bindless index registered models already baked (REN-RES-001).
+            const uint64_t terrainCreateBegan = terrainTiming.enabled ? NowUs() : 0;
             CheckProducerMayTouchRenderer("texture create");
             _gpuHandle = wgr_texture_create_in_slot(r, static_cast<uint32_t>(_w), static_cast<uint32_t>(_h), bcFormat,
                                                     static_cast<uint32_t>(levelCount), 0, blocks.data(),
                                                     static_cast<uint32_t>(blocks.size()), AcquireSlotLease());
+            if (terrainTiming.enabled) terrainTiming.compressedCreateOwnerMs += (NowUs() - terrainCreateBegan) / 1000.0;
             if (_gpuHandle)
                 NoteUploadSize(_w, _h, blocks.size(), true);
             if (timed)
@@ -1864,6 +1928,7 @@ uint64_t TextureWgpu::EnsureUploaded()
     if (!_gpuHandle)
     {
         const uint64_t began = (timed || profiled) ? NowUs() : 0;
+        const uint64_t terrainFallbackBegan = terrainTiming.enabled ? NowUs() : 0;
         // Pure owner-held pixel work can overlap the preceding render. Acquire
         // renderer ownership only after encoding, immediately before each GPU call.
         auto encodeBc3 = [&](const uint8_t* rgba, int width, int height,
@@ -1894,11 +1959,13 @@ uint64_t TextureWgpu::EnsureUploaded()
             if (CompositeWantsBc3(Name()) &&
                 encodeBc3(prepared.rgba.data(), prepared.width, prepared.height, bc3, bc3Offsets, bc3Levels))
             {
+                const uint64_t terrainCreateBegan = terrainTiming.enabled ? NowUs() : 0;
                 CheckProducerMayTouchRenderer("texture create");
                 _gpuHandle = wgr_texture_create_in_slot(r, static_cast<uint32_t>(prepared.width),
                                                         static_cast<uint32_t>(prepared.height), WGR_TEXTURE_BC3,
                                                         static_cast<uint32_t>(bc3Levels), 0, bc3.data(),
                                                         static_cast<uint32_t>(bc3.size()), AcquireSlotLease());
+                if (terrainTiming.enabled) terrainTiming.fallbackCreateOwnerMs += (NowUs() - terrainCreateBegan) / 1000.0;
                 if (_gpuHandle)
                 {
                     _w = prepared.width;
@@ -1909,11 +1976,13 @@ uint64_t TextureWgpu::EnsureUploaded()
             }
             if (!_gpuHandle)
             {
+                const uint64_t terrainCreateBegan = terrainTiming.enabled ? NowUs() : 0;
                 CheckProducerMayTouchRenderer("texture create");
                 _gpuHandle = wgr_texture_create(r, static_cast<uint32_t>(prepared.width),
                                                 static_cast<uint32_t>(prepared.height), WGR_TEXTURE_RGBA8, 1,
                                                 WGR_TEXTURE_GEN_MIPS, prepared.rgba.data(),
                                                 static_cast<uint32_t>(prepared.rgba.size()));
+                if (terrainTiming.enabled) terrainTiming.fallbackCreateOwnerMs += (NowUs() - terrainCreateBegan) / 1000.0;
             }
             if (_gpuHandle && bc3.empty())
             {
@@ -1943,7 +2012,10 @@ uint64_t TextureWgpu::EnsureUploaded()
             dst == PacARGB8888 && _w > 0 && _h > 0)
         {
             std::vector<uint8_t> pixels(static_cast<size_t>(_w) * static_cast<size_t>(_h) * 4);
-            if (_src->GetMipmapData(pixels.data(), _mipmaps[0], 0))
+            const uint64_t pixelReadBegan = terrainTiming.enabled ? NowUs() : 0;
+            const bool pixelsRead = _src->GetMipmapData(pixels.data(), _mipmaps[0], 0);
+            if (terrainTiming.enabled) terrainTiming.fallbackReadDecodeMs += (NowUs() - pixelReadBegan) / 1000.0;
+            if (pixelsRead)
             {
                 // PacARGB8888 means B,G,R,A in memory here, and the renderer wants
                 // R,G,B,A. Image::FromFile does the same swap at its own call site;
@@ -1977,25 +2049,30 @@ uint64_t TextureWgpu::EnsureUploaded()
                 }
                 if (encoded)
                 {
+                    const uint64_t terrainCreateBegan = terrainTiming.enabled ? NowUs() : 0;
                     CheckProducerMayTouchRenderer("texture create");
                     _gpuHandle = wgr_texture_create_in_slot(
                         r, static_cast<uint32_t>(_w), static_cast<uint32_t>(_h), WGR_TEXTURE_BC3,
                         static_cast<uint32_t>(bc3Levels), 0, bc3.data(), static_cast<uint32_t>(bc3.size()),
                         AcquireSlotLease());
+                    if (terrainTiming.enabled) terrainTiming.fallbackCreateOwnerMs += (NowUs() - terrainCreateBegan) / 1000.0;
                     if (_gpuHandle)
                         NoteUploadSize(_w, _h, bc3.size(), true);
                 }
                 if (!_gpuHandle)
                 {
+                    const uint64_t terrainCreateBegan = terrainTiming.enabled ? NowUs() : 0;
                     CheckProducerMayTouchRenderer("texture create");
                     _gpuHandle = wgr_texture_create_in_slot(
                         r, static_cast<uint32_t>(_w), static_cast<uint32_t>(_h), WGR_TEXTURE_RGBA8, 1,
                         WGR_TEXTURE_GEN_MIPS, pixels.data(), static_cast<uint32_t>(pixels.size()), AcquireSlotLease());
+                    if (terrainTiming.enabled) terrainTiming.fallbackCreateOwnerMs += (NowUs() - terrainCreateBegan) / 1000.0;
                     NoteUploadSize(_w, _h, pixels.size() * 4 / 3, false, Name());
                 }
                 GTextureStreamStats.frameUploadBytes.fetch_add(pixels.size(), std::memory_order_relaxed);
             }
         }
+        const uint64_t fallbackReadBegan = (terrainTiming.enabled && !_gpuHandle) ? NowUs() : 0;
         QIFStreamB stream;
         if (!_gpuHandle)
             stream.AutoOpen(SourceName());
@@ -2003,18 +2080,24 @@ uint64_t TextureWgpu::EnsureUploaded()
         if (fb && !fb->GetError() && fb->GetSize() > 0)
         {
             DecodedImage img = DecodePAABuffer(fb->GetData(), static_cast<size_t>(fb->GetSize()), IsPaaName(SourceName()));
+            if (terrainTiming.enabled && fallbackReadBegan) terrainTiming.fallbackReadDecodeMs += (NowUs() - fallbackReadBegan) / 1000.0;
             if (img.valid())
             {
+                const uint64_t terrainCreateBegan = terrainTiming.enabled ? NowUs() : 0;
                 CheckProducerMayTouchRenderer("texture create");
                 _gpuHandle = wgr_texture_create_in_slot(
                     r, static_cast<uint32_t>(img.width), static_cast<uint32_t>(img.height), WGR_TEXTURE_RGBA8, 1,
                     WGR_TEXTURE_GEN_MIPS, img.rgba.data(), static_cast<uint32_t>(img.rgba.size()), AcquireSlotLease());
+                if (terrainTiming.enabled) terrainTiming.fallbackCreateOwnerMs += (NowUs() - terrainCreateBegan) / 1000.0;
                 _w = img.width;
                 _h = img.height;
                 NoteUploadSize(_w, _h, img.rgba.size() * 4 / 3, false, Name());
                 GTextureStreamStats.frameUploadBytes.fetch_add(img.rgba.size(), std::memory_order_relaxed);
             }
         }
+        else if (terrainTiming.enabled && fallbackReadBegan)
+            terrainTiming.fallbackReadDecodeMs += (NowUs() - fallbackReadBegan) / 1000.0;
+        if (terrainTiming.enabled) terrainTiming.fallbackOwnerMs = (NowUs() - terrainFallbackBegan) / 1000.0;
         if (timed)
         {
             const uint64_t fallbackDelta = NowUs() - began;
@@ -2058,6 +2141,7 @@ uint64_t TextureWgpu::EnsureUploaded()
     {
         render::PreparedTextureStore::Instance().MarkUploaded(render::PreparedTextureStore::Key(SourceName()));
     }
+    if (terrainTiming.enabled) terrainTiming.uploaded = _gpuHandle != 0;
     return _gpuHandle;
 }
 
