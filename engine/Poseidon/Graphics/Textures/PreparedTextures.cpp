@@ -136,6 +136,15 @@ bool PreparedTextureStore::NativeDdsEnabled()
     return Enabled() && on; // A/B experiment until native lifecycle/performance acceptance.
 }
 
+bool PreparedTextureStore::NativeDdsBc3Only()
+{
+    static const bool on = [] {
+        const char* value = std::getenv("WGR_NATIVE_DDS_BC3_ONLY");
+        return value && std::strcmp(value, "1") == 0;
+    }();
+    return NativeDdsEnabled() && on;
+}
+
 size_t PreparedTextureStore::ByteBudget()
 {
     static const size_t bytes = []

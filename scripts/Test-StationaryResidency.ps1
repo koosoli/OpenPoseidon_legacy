@@ -1,10 +1,10 @@
-param([ValidateSet("Native","DayZ","Legacy")][string]$Corpus="Native",[ValidateRange(0,2.0)][double]$GeoGrowth=2.0,[switch]$PressureGrowth,[switch]$PackedModels,[switch]$PackedTextures,[switch]$NativeDdsPrepared,[switch]$FullSkyUploads,[switch]$SampleDriverMemory,[switch]$Baseline,[switch]$Normal,[switch]$Adaptive,[switch]$Controlled,[switch]$Identity,[switch]$RequiredIdentity,[switch]$CoverageOnly,[switch]$SaveRoundTrip,[switch]$FreshReload,[switch]$DuringFill,[ValidateRange(-1,16384)][int]$ReadyMb=-1,[string]$Label='stationary-budget',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
+param([ValidateSet("Native","DayZ","Legacy")][string]$Corpus="Native",[ValidateRange(0,2.0)][double]$GeoGrowth=2.0,[switch]$PressureGrowth,[switch]$PackedModels,[switch]$PackedTextures,[switch]$NativeDdsPrepared,[switch]$NativeBc3Only,[switch]$FullSkyUploads,[switch]$SampleDriverMemory,[switch]$Baseline,[switch]$Normal,[switch]$Adaptive,[switch]$Controlled,[switch]$Identity,[switch]$RequiredIdentity,[switch]$CoverageOnly,[switch]$SaveRoundTrip,[switch]$FreshReload,[switch]$DuringFill,[ValidateRange(-1,16384)][int]$ReadyMb=-1,[string]$Label='stationary-budget',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {
  $shellName=if ($PSVersionTable.PSEdition -eq 'Core') {'pwsh.exe'} else {'powershell.exe'}
  $argv=@((Join-Path $PSScriptRoot 'with-game-lock.sh'),(Join-Path $PSHOME $shellName).Replace('\','/'),'-NoProfile','-File',$PSCommandPath,'-Label',$Label,'-GameDir',$GameDir)
  if ($Baseline) {$argv+='-Baseline'}; if ($Normal) {$argv+='-Normal'}
- foreach ($flag in @('Adaptive','Controlled','Identity','RequiredIdentity','CoverageOnly','SaveRoundTrip','FreshReload','DuringFill','SampleDriverMemory','PressureGrowth','PackedModels','PackedTextures','NativeDdsPrepared','FullSkyUploads')) {if ((Get-Variable $flag -ValueOnly)) {$argv+=('-'+$flag)}}
+ foreach ($flag in @('Adaptive','Controlled','Identity','RequiredIdentity','CoverageOnly','SaveRoundTrip','FreshReload','DuringFill','SampleDriverMemory','PressureGrowth','PackedModels','PackedTextures','NativeDdsPrepared','NativeBc3Only','FullSkyUploads')) {if ((Get-Variable $flag -ValueOnly)) {$argv+=('-'+$flag)}}
  $argv+=@('-ReadyMb',[string]$ReadyMb,'-Corpus',$Corpus,'-GeoGrowth',$GeoGrowth.ToString([Globalization.CultureInfo]::InvariantCulture))
  $env:LOCK_OWNER='stationary residency check'
  try {& 'C:\Program Files\Git\bin\bash.exe' @argv; if ($LASTEXITCODE) {throw "Residency test exited $LASTEXITCODE"}} finally {Remove-Item Env:LOCK_OWNER}
@@ -12,6 +12,7 @@ if (!$env:LOCK_OWNER) {
 }
 if (Get-Process OpenPoseidon -ErrorAction SilentlyContinue) {throw 'Game already running'}
 if ($FreshReload) {$SaveRoundTrip=$true}
+if ($NativeBc3Only) {$NativeDdsPrepared=$true}
 if ($SaveRoundTrip) {if (!$Normal -or $Baseline -or $DuringFill -or $Controlled -or $CoverageOnly) {throw 'SaveRoundTrip requires Normal and excludes performance modes'}; $RequiredIdentity=$true}
 $root=Split-Path $PSScriptRoot -Parent
 $out=Join-Path $root ('build/stream-residency/'+$Label+'-'+(Get-Date -Format yyyyMMdd-HHmmss))
@@ -47,6 +48,8 @@ $env:WGR_GEO_POOL_PRESSURE_GROWTH=if ($PressureGrowth) {'1'} else {'0'}
 $env:WGR_OBJECT_STREAM_PBO=if ($PackedModels) {'1'} else {'0'}
 $env:WGR_OBJECT_STREAM_PBO_TEXTURES=if ($PackedTextures) {'1'} else {'0'}
 $env:WGR_NATIVE_DDS_PREPARE=if ($NativeDdsPrepared) {'1'} else {'0'}
+$env:WGR_NATIVE_DDS_BC3_ONLY=if ($NativeBc3Only) {'1'} else {'0'}
+$env:WGR_SIMULATION_RESIDENCY='0'
 $env:WGR_SKY_VOLUME_INCREMENTAL=if ($FullSkyUploads) {'0'} else {'1'}
 $env:WGR_PASS1_STATS='1'
 $env:WGR_RESIDENCY_TRACE='1'
@@ -64,7 +67,7 @@ Remove-Item Env:WGR_WATER_CURLING_BREAKER -ErrorAction SilentlyContinue
 $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0);$listener.Start();$port=$listener.LocalEndpoint.Port;$listener.Stop()
 $mission=Join-Path $root 'tests/perf/missions/perf_field.eden';$log=Join-Path $out 'engine.log'
 $testLog=$log
-@{scriptSha256=(Get-FileHash $PSCommandPath).Hash;head=(& git -C $root rev-parse HEAD);installed=(Get-Content (Join-Path $GameDir 'DEPLOYED-FROM.txt'));corpus=$Corpus;geoGrowth=$GeoGrowth;pressureGrowth=[bool]$PressureGrowth;packedModels=[bool]$PackedModels;packedTextures=[bool]$PackedTextures;nativeDdsPrepared=[bool]$NativeDdsPrepared;coverageOnly=[bool]$CoverageOnly;saveRoundTrip=[bool]$SaveRoundTrip;freshReload=[bool]$FreshReload;lodGovernorRange=($env:WGR_LOD_GOVERNOR_RANGE);incrementalSkyUploads=(!$FullSkyUploads);adaptive=[bool]$Adaptive;controlled=[bool]$Controlled;readyMb=$ReadyMb;hashes=@(Get-FileHash (Join-Path $GameDir 'OpenPoseidon.exe'),(Join-Path $GameDir 'wgpu_renderer.dll'))} | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $out 'provenance.json')
+@{scriptSha256=(Get-FileHash $PSCommandPath).Hash;head=(& git -C $root rev-parse HEAD);installed=(Get-Content (Join-Path $GameDir 'DEPLOYED-FROM.txt'));corpus=$Corpus;geoGrowth=$GeoGrowth;pressureGrowth=[bool]$PressureGrowth;packedModels=[bool]$PackedModels;packedTextures=[bool]$PackedTextures;nativeDdsPrepared=[bool]$NativeDdsPrepared;nativeBc3Only=[bool]$NativeBc3Only;coverageOnly=[bool]$CoverageOnly;saveRoundTrip=[bool]$SaveRoundTrip;freshReload=[bool]$FreshReload;lodGovernorRange=($env:WGR_LOD_GOVERNOR_RANGE);incrementalSkyUploads=(!$FullSkyUploads);adaptive=[bool]$Adaptive;controlled=[bool]$Controlled;readyMb=$ReadyMb;hashes=@(Get-FileHash (Join-Path $GameDir 'OpenPoseidon.exe'),(Join-Path $GameDir 'wgpu_renderer.dll'))} | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $out 'provenance.json')
 $p=$null;$client=$null;$gpuSampler=$null
 try {
  if ($SampleDriverMemory) {

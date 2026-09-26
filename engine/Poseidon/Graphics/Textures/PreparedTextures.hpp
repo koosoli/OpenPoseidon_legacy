@@ -85,6 +85,8 @@ class PreparedTextureStore
     // (WGR_OBJECT_STREAM_TEXTURE_PREPARE, default 1); the others are the bounds above.
     static bool Enabled();
     static bool NativeDdsEnabled();
+    // Optional narrower native experiment. Default OFF; requires NativeDdsEnabled.
+    static bool NativeDdsBc3Only(); // WGR_NATIVE_DDS_BC3_ONLY=1, read once
     static size_t ByteBudget();
     static double TtlSeconds();
 

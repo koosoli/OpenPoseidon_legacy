@@ -45,7 +45,7 @@ namespace
 {
 template<class Reserve, class Release>
 bool PrepareNativeDds(const std::string& key, uint64_t generation, size_t& bytes,
-                      bool prepareBc3, Reserve&& reserve, Release&& release)
+                      bool prepareBc3, bool bc3Only, Reserve&& reserve, Release&& release)
 {
     try
     {
@@ -77,6 +77,12 @@ bool PrepareNativeDds(const std::string& key, uint64_t generation, size_t& bytes
             try
             {
                 encoded = source->PrepareCompositeBc3(encodeReservation);
+                if (bc3Only && !encoded)
+                {
+                    source.reset();
+                    finish(false);
+                    return false;
+                }
                 // A mount/world may have changed during this comparatively long
                 // pure CPU operation. reserve(0) validates the model job only.
                 if (mount.Generation() != mountGeneration || !reserve(0))
@@ -101,7 +107,9 @@ bool PrepareNativeDds(const std::string& key, uint64_t generation, size_t& bytes
                 throw;
             }
         }
-        if (mount.Generation() != mountGeneration || !reserve(0)) return false;
+        // Narrow mode never retains ordinary DDS when the sidecar was ineligible
+        // or its optional scratch reservation was refused. Owner fallback remains.
+        if (bc3Only || mount.Generation() != mountGeneration || !reserve(0)) return false;
         bytes = source->PreparedByteSize();
         return render::PreparedTextureStore::Instance().PutDdsPrepared(key, std::move(source), options, generation);
     }
@@ -613,6 +621,7 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
             {
                 render::PreparedTextureStore& store = render::PreparedTextureStore::Instance();
                 const uint64_t textureGeneration = store.Generation();
+                const bool bc3Only = nativeArchiveModel && render::PreparedTextureStore::NativeDdsBc3Only();
                 const auto& mount = Asset::Formats::Enfusion::EnfusionMount::Instance();
                 const auto names = CollectObjectStreamTextureNames(*model, nativeArchiveModel,
                     render::PreparedTextureStore::NativeDdsEnabled(),
@@ -637,6 +646,10 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                     });
                 for (const std::string& key : names)
                 {
+                    // Filter before store lookups or source reads. Raw material
+                    // stages and nested tint wrappers stay on their ordinary path.
+                    if (bc3Only && (!prepareBc3 || !key.starts_with("enfa|")))
+                        continue;
                     {
                         // Poll between textures, never hold the queue mutex during I/O.
                         // Check generation first: Reset may have replaced/shrunk stale.
@@ -653,7 +666,7 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                         (key.ends_with(".edds") || key.ends_with(".dds")))
                     {
                         size_t bytes = 0;
-                        if (PrepareNativeDds(key, textureGeneration, bytes, prepareBc3,
+                        if (PrepareNativeDds(key, textureGeneration, bytes, prepareBc3, bc3Only,
                             [&](size_t needed) {
                                 std::lock_guard<std::mutex> budgetLock(mutex);
                                 if (stop || gen != generation.load(std::memory_order_relaxed) ||

@@ -29,16 +29,16 @@ void Be32(std::vector<uint8_t>& out, uint32_t v)
 { for (int i = 3; i >= 0; --i) out.push_back(static_cast<uint8_t>(v >> (i * 8))); }
 void Tag(std::vector<uint8_t>& out, const char* v) { out.insert(out.end(), v, v + 4); }
 void Word(std::vector<uint8_t>& out, size_t at, uint32_t v) { std::memcpy(out.data() + at, &v, 4); }
-std::vector<uint8_t> Edds(bool coverage)
+std::vector<uint8_t> Edds(bool coverage, int edge)
 {
     std::vector<uint8_t> out(128, 0);
     std::memcpy(out.data(), "DDS ", 4);
-    Word(out, 4, 124); Word(out, 8, 0x20000); Word(out, 12, 16); Word(out, 16, 16); Word(out, 28, 1);
+    Word(out, 4, 124); Word(out, 8, 0x20000); Word(out, 12, edge); Word(out, 16, edge); Word(out, 28, 1);
     std::memcpy(out.data() + 36, "ENF1", 4);
     Word(out, 76, 32); Word(out, 80, 0x41); Word(out, 88, 32);
     Word(out, 92, 0xff0000); Word(out, 96, 0xff00); Word(out, 100, 0xff); Word(out, 104, 0xff000000);
-    Le32(out, 0x59504f43); Le32(out, 16 * 16 * 4);
-    for (unsigned i = 0; i < 256; ++i)
+    Le32(out, 0x59504f43); Le32(out, edge * edge * 4);
+    for (unsigned i = 0; i < static_cast<unsigned>(edge * edge); ++i)
     {
         out.push_back(coverage ? (i % 3 ? 255 : 0) : static_cast<uint8_t>(i * 13));
         out.push_back(static_cast<uint8_t>(i * 7)); out.push_back(static_cast<uint8_t>(i * 23)); out.push_back(255);
@@ -65,6 +65,8 @@ std::shared_ptr<Poseidon::Model::Model> NativeModel(const std::string& path, std
     model->sourcePath = path; model->sourceFormat = "MLOD";
     model->lodLevels.emplace_back(1.0f);
     model->lodLevels[0].mesh.materials.emplace_back("synthetic-native", Composite);
+    model->lodLevels[0].mesh.materials.emplace_back("raw-stage", "colour.edds");
+    model->lodLevels[0].mesh.materials.emplace_back("nested-tint", "enft|1,1,1|colour.edds");
     return model;
 }
 struct Fixture
@@ -74,14 +76,14 @@ struct Fixture
     std::string oldRoot = enf::EnfusionMount::Instance().Root();
     Poseidon::ModelCache::ExternalLoader oldLoader = Poseidon::ModelCache::GetExternalLoader();
     bool oldCompress = Poseidon::Dev::GResidencyLevers().compressComposites;
-    Fixture()
+    explicit Fixture(int edge = 16)
     {
         REQUIRE(std::filesystem::create_directory(directory));
         std::vector<uint8_t> data, index{0, 0};
         Le32(index, 2);
         for (const auto& item : {std::pair{"coverage.edds", true}, std::pair{"colour.edds", false}})
         {
-            const auto pixels = Edds(item.second);
+            const auto pixels = Edds(item.second, edge);
             const std::string name = item.first;
             index.push_back(1); index.push_back(static_cast<uint8_t>(name.size()));
             index.insert(index.end(), name.begin(), name.end());
@@ -131,6 +133,7 @@ void RequireEnabled()
 TEST_CASE("Non-owner native requests retain ordinary preparation without consulting owner BC3 policy", "[preparer][bc3-worker][native-fixture]")
 {
     RequireEnabled(); Fixture fixture;
+    if (PreparedTextureStore::NativeDdsBc3Only()) SKIP("Ordinary DDS retained only in broad native preparation mode");
     ObjectStreamPreparer prep(128ull * 1024 * 1024);
     const std::string path = "synthetic_bc3_nonowner.xob";
     prep.Reset(&path, 1);
@@ -157,6 +160,7 @@ TEST_CASE("Non-owner native requests retain ordinary preparation without consult
 TEST_CASE("Native worker BC3 budget refusal retains ordinary DDS preparation and progresses", "[preparer][bc3-worker][native-fixture]")
 {
     RequireEnabled(); Fixture fixture;
+    if (PreparedTextureStore::NativeDdsBc3Only()) SKIP("Ordinary DDS retained only in broad native preparation mode");
     ObjectStreamPreparer prep(1024);
     const std::string path = "synthetic_bc3_budget.xob";
     prep.Reset(&path, 1); REQUIRE(prep.Request(0));
@@ -241,4 +245,48 @@ TEST_CASE("Native worker cancellation preserves active parse debt and publishes 
     CHECK(prep.SnapshotStats().textureEncodeReservedBytes == 0);
     CHECK(prep.SnapshotStats().workerBc3Prepared == 0);
     CHECK_FALSE(PreparedTextureStore::Instance().TakeDdsPrepared(Composite, Poseidon::CaptureDdsPreparationOptions()));
+}
+
+TEST_CASE("BC3-only native preparation retains only successfully encoded own composites", "[preparer][bc3-worker][native-fixture][bc3-only]")
+{
+    RequireEnabled();
+    if (!PreparedTextureStore::NativeDdsBc3Only())
+        SKIP("Fresh process additionally requires WGR_NATIVE_DDS_BC3_ONLY=1");
+    int edge = 16;
+    uint64_t budget = 128ull * 1024 * 1024;
+    bool expectSidecar = false, expectBudgetSkip = false, nonOwner = false, policyOff = false;
+    SECTION("Eligible composite publishes while raw stages and nested tint remain absent") { expectSidecar = true; }
+    SECTION("Refused scratch reservation does not retain an ordinary DDS") { budget = 1024; expectBudgetSkip = true; }
+    SECTION("Below-minimum dimensions do not retain an ordinary DDS") { edge = 2; }
+    SECTION("Non-owner request keeps model preparation but reads no native textures") { nonOwner = true; }
+    SECTION("Disabled owner compression keeps model preparation but reads no native textures") { policyOff = true; }
+    Fixture fixture(edge);
+    if (policyOff) Poseidon::Dev::GResidencyLevers().compressComposites = false;
+    ObjectStreamPreparer prep(budget);
+    const std::string path = "synthetic_bc3_only.xob";
+    prep.Reset(&path, 1);
+    bool accepted = false;
+    if (nonOwner) { std::thread caller([&] { accepted = prep.Request(0); }); caller.join(); }
+    else accepted = prep.Request(0);
+    REQUIRE(accepted);
+    REQUIRE(Wait([&] { return prep.Query(0) == ObjectStreamPreparer::State::Ready; }));
+    const auto stats = prep.SnapshotStats();
+    CHECK(stats.workerBc3Prepared == static_cast<uint64_t>(expectSidecar));
+    CHECK(stats.workerBc3BudgetSkipped == static_cast<uint64_t>(expectBudgetSkip));
+    CHECK(stats.textureEncodeReservedBytes == 0); CHECK(stats.parseReservedBytes == 0);
+    CHECK(stats.texPrepared == static_cast<uint64_t>(expectSidecar));
+    const auto storeStats = PreparedTextureStore::Instance().SnapshotStats();
+    CHECK(storeStats.entries == static_cast<size_t>(expectSidecar));
+    if (!expectSidecar) CHECK(storeStats.bytes == 0);
+    auto source = PreparedTextureStore::Instance().TakeDdsPrepared(Composite, Poseidon::CaptureDdsPreparationOptions());
+    if (expectSidecar)
+    {
+        REQUIRE(source);
+        Poseidon::Bc3MipChain chain; REQUIRE(source->TakeCompositeBc3(Composite, 16, 16, chain));
+        CHECK_FALSE(chain.blocks.empty());
+    }
+    else CHECK_FALSE(source);
+    CHECK_FALSE(PreparedTextureStore::Instance().TakeDdsPrepared("colour.edds", Poseidon::CaptureDdsPreparationOptions()));
+    CHECK_FALSE(PreparedTextureStore::Instance().TakeDdsPrepared("enft|1,1,1|colour.edds", Poseidon::CaptureDdsPreparationOptions()));
+    REQUIRE(prep.Take(0));
 }
