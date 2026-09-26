@@ -2079,3 +2079,61 @@ performance. Fraxinus still block-path alpha30.1/model31.2ms, shape14.682ms:
 no owner-thread gain, FPS or no-regression acceptance follows. Later PAA
 publication-token fix is pending/unbuilt, GPU LOD feedback is a separate proposal;
 neither is part of0f runtime. Whole plan OPEN/defaultsOFF.
+
+## Sept27 accbc27e: PAA cancellation, dispatched LOD samples and default screening
+
+All-target319/stamped18 builds pass; combined137747 assertions/206cases
+(204PASS/2explicitSKIP), actual paused PAAworker110/1, fresh1MiBTTL.01alpha362/2,
+Rustfeedback7/ABI9 pass. Initial opt-in shader fails because target is reserved
+WGSL; retained failed log and demand_slot repair validating both variants recorded.
+OFF uses exact original borrowed WGSL, no composer/source allocation/new binding
+or counter expansion. Optional PAA jobs capture bounded model cancellation tokens.
+Put/claims reject invalid tokens, including DropStale after last worker check;
+invalid cached payload may linger until bounded sweep. Cancellation after a
+successful prior claim is not rollback. Actual paused worker test covers this
+boundary; cold011720 PaaCancelled0 is compatibility, not forced runtime cancel.
+General immutable source/freshness proof remains limited.
+
+Cold011720 passes clean0: original DayZ83912800 absent→CPUgeometry/fire/view,
+deferred/visualfalse/VB0 and real fire contacts. Actor-away target absent,
+81created/81released/required0/cold work/facts/payload/shape charges0, but422
+normal positive leases remain. GlobalCapacity/watch16384/Readyregions0 persists.
+Publication inventory18848B/DDSalias0;318prepared entries/536780472capacityB,
+facts285puts60hits0miss/cancel/skips665, peakconversion475294444B.
+MaxBank1.8059/MaxTail1.6447ms observations, not hard bounds. Fraxinusalpha22.3/
+model23.3ms stillblock path/handoff0. No performance/lifecycle/save claim.
+
+LOD011828 passes clean0 AllocationDiagnosticOnly/convergenceMeasuredfalse.
+Epoch1 request/Busy/cancel and epoch2 replacement/stale-ID refusal pass.
+Samples12of16attempts/drop4/mapfail0/dropdispatch0/views72/passmask7(main/color/
+shadow)/age3. Selected89/59/56/97/136/36/98/34 masks1/3/3/3/1/1/1/3 within
+authored LODs. Copies precede reused counter clearing, mapping follows submit
+nonblocking. Cached undispatched views not covered; ownershipCoverageComplete/
+cachedViewCoverageCompletefalse. Subsetregistry683/visited256/skipped80/valid176,
+missing0/truncated,631mesh/1097sections uniqueV75947840/I11674404; inspected
+overlap0 does not prove global exclusivity/reclaim. No paging implemented.
+
+Matched disabled baseline004802(0f)→current011529(accbc) clean0 screening:
+736→823frames/drop0, median23.8955→23.198, mean48.544704→42.648450,
+p95150.296→134.881, p99435.774→421.172ms, but max856.428→1252.678 and
+initmax705.389→1240.396 worsen. Percentiles floor((n-1)*p), evenmedian middlepair.
+Same route/settings/initial19923payload; final19923settled counts but geometry
+730649324→713414164 and textures2835207828/2560→2748831188/2489 differ.
+Currentpose5 pending19632 vsbaseline settled19972. Single ordered async/cache/
+clock-confounded comparison excludes headline gain/no-regression acceptance.
+PBOmodel1/DDC0/budget20000/fixedLOD1/1280x720MSAA4VD2000 matched renderer fixture
+is not all normal defaults. Terrain telemetry opt-in attribution only.
+FullplanOPEN/defaultsOFF/performanceAcceptedfalse.
+Terrain trace011941 passes clean0 with opt-in page/slow-frame clocks. Initial
+pre-route page upload715.662/update716.503ms includes ensure696.480ms; outbound
+56.597/update56.915 includes ensure47.037ms; return319.058/update319.434 includes
+ensure312.189ms. All505layers/504ensure calls;7193descriptor records,1363/1368
+candidate materials and20276/20280load calls, scan.252–.305ms, descriptor2.342–
+3.164ms, final explicit acquire0;28page evictions per traversal window change.
+Return frame647 ground319.783/whole484.858ms corroborates active-path cost.
+EnsureUploaded is inclusive owner elapsed with internal reads/decodes/uploads/
+windows, not pure CPU work or GPU elapsed. Descriptor rebuilding is not dominant
+in this observation. Initial page update precedes route capture and is not a
+route tail percentile. Frame532 init829.587 includes residency829.535ms versus
+renderer.001ms; next residency814.242ms. Next texture-detail telemetry is pending/
+unbuilt, not part of accbc. No terrain optimization, FPS or no-regression verdict.

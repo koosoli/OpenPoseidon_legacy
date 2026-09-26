@@ -1,6 +1,7 @@
 param(
     [ValidateSet('Disabled', 'Cold')][string]$Mode = 'Disabled',
     [switch]$TerrainPageTimings,
+    [ValidateSet('Counted', 'Timed')][string]$AdmissionMode = 'Counted',
     [string]$Label = 'dayz-streaming-latency',
     [string]$GameDir = 'D:\SteamLibrary\steamapps\common\ARMA Cold War Assault'
 )
@@ -11,7 +12,7 @@ if (!$env:LOCK_OWNER) {
     if (!(Test-Path -LiteralPath $shellExe)) { throw "PowerShell executable missing: $shellExe" }
     $env:LOCK_OWNER = 'DayZ bounded streaming latency screening'
     try {
-        $argv = @((Join-Path $PSScriptRoot 'with-game-lock.sh'), $shellExe, '-NoProfile', '-File', $PSCommandPath, '-Mode', $Mode, '-Label', $Label, '-GameDir', $GameDir)
+        $argv = @((Join-Path $PSScriptRoot 'with-game-lock.sh'), $shellExe, '-NoProfile', '-File', $PSCommandPath, '-Mode', $Mode, '-AdmissionMode', $AdmissionMode, '-Label', $Label, '-GameDir', $GameDir)
         if ($TerrainPageTimings) { $argv += '-TerrainPageTimings' }
         & 'C:\Program Files\Git\bin\bash.exe' @argv
         if ($LASTEXITCODE) { throw "Latency screening exited $LASTEXITCODE" }
@@ -57,6 +58,7 @@ if ($TerrainPageTimings) {
     $environment.WGR_TERRAIN_PAGE_TIMINGS = '1'
     $environment.POSEIDON_SLOW_FRAME_TRACE = '1'
 }
+if ($AdmissionMode -eq 'Timed') { $environment.WGR_OBJECT_STREAM_ADMIT = 'timed' }
 # Shape trace enables on variable presence, so leave it absent in both modes.
 $clearNames = @((Get-ChildItem Env: | Where-Object { $_.Name -like 'WGR_*' -or $_.Name -like 'POSEIDON_*' } | ForEach-Object { $_.Name }))
 $changedNames = @($clearNames + @($environment.Keys) | Select-Object -Unique)
@@ -156,7 +158,7 @@ try {
     if ($phases.Count -ne $expectedPhases.Count) { throw 'Engine phase timing evidence incomplete' }
     foreach ($phase in $expectedPhases) { if (@($phases | Where-Object { $_.phase -eq $phase }).Count -ne 1) { throw "Engine phase timing missing or duplicated: $phase" } }
     $raw | ConvertTo-Json | Set-Content (Join-Path $out 'route-frame-ms.json')
-    @{passed = $true; mode = $Mode; screeningOnly = $true; performanceAccepted = $false; terrainPageTimings = [bool]$TerrainPageTimings
+    @{passed = $true; mode = $Mode; admissionMode = $AdmissionMode; screeningOnly = $true; performanceAccepted = $false; terrainPageTimings = [bool]$TerrainPageTimings
         frameCount = $count; dropped = $dropped; enginePhaseTiming = $phases; baseline = $baseline; returned = $returned
         routeSamples = $routeSamples; postExitHashes = $finalHashes
         limitation = 'No automatic performance threshold, vanilla parity, cold-cache guarantee or whole-world query readiness; compare matched separate mode processes'
