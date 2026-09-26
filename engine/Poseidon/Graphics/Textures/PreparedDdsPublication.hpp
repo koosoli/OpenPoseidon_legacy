@@ -10,7 +10,7 @@
 namespace Poseidon::render
 {
 // Cancellation is logical visibility, independent of payload/store lifetime.
-// Only optional native DDS preparation allocates this bounded inventory. Workers
+// Only optional native DDS or PBO texture preparation allocates this bounded inventory. Workers
 // and cached sources may retain it after Reset; no Shape or pixel data lives here.
 class DdsPublicationInventory
 {
@@ -69,5 +69,8 @@ struct DdsPublicationObserver
 {
     void (*beforePut)(void*, bool hasBc3Sidecar) = nullptr;
     void* context = nullptr;
+    // PAA conversion-worker publication, same lock/lifetime rules. Appended to
+    // preserve existing DDS observer aggregate initialisers and callback meaning.
+    void (*beforePaaPut)(void*, bool hasAlphaFacts) = nullptr;
 };
 } // namespace Poseidon::render

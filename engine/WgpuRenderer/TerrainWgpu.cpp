@@ -48,6 +48,24 @@ namespace Poseidon
 // Grid-mesh resolution per axis; must match GRID_N in terrain/mod.rs.
 constexpr int TerrainGridN = 32;
 
+namespace
+{
+bool TerrainPageTimingsEnabled()
+{
+    static const bool enabled = [] {
+        const char* value = std::getenv("WGR_TERRAIN_PAGE_TIMINGS");
+        return value && value[0] == '1';
+    }();
+    return enabled;
+}
+using TerrainPageClock = std::chrono::steady_clock;
+double TerrainPageElapsedMs(TerrainPageClock::time_point start)
+{
+    return std::chrono::duration<double, std::milli>(TerrainPageClock::now() - start).count();
+}
+} // namespace
+
+
 // ---------------------------------------------------------------------------
 // The geography word uploaded to the grass system (one R32Uint texel per land
 // cell). Mirrored by GEO_* in grass/grass.wgsl -- change both together.
@@ -484,6 +502,11 @@ bool TerrainWgpu::UploadIfNeeded(const Landscape& land)
 
 void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<int>* activeMaterials)
 {
+    const bool timings = TerrainPageTimingsEnabled();
+    const auto timingStart = timings ? TerrainPageClock::now() : TerrainPageClock::time_point{};
+    double loadMs = 0.0, ensureMs = 0.0;
+    size_t loadCalls = 0, ensureCalls = 0;
+
     // A terrain material and a ground layer are different things. Modern worlds
     // can declare thousands of per-region material descriptors and page images;
     // only the camera working set receives its full authored composition. Every
@@ -520,7 +543,9 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<
             return 0;
         }
         auto* texture = static_cast<TextureWgpu*>(raw);
+        const auto ensureStart = timings ? TerrainPageClock::now() : TerrainPageClock::time_point{};
         const uint64_t handle = texture->EnsureUploaded();
+        if (timings) { ensureMs += TerrainPageElapsedMs(ensureStart); ++ensureCalls; }
         if (handle == 0)
             return 0;
         boundTextures.push_back(raw);
@@ -539,7 +564,9 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<
         resolved = false;
         if (name.GetLength() == 0)
             return fallback;
+        const auto loadStart = timings ? TerrainPageClock::now() : TerrainPageClock::time_point{};
         Ref<Texture> texture = GlobLoadTexture(name);
+        if (timings) { loadMs += TerrainPageElapsedMs(loadStart); ++loadCalls; }
         Texture* raw = texture;
         if (raw == nullptr)
             return fallback;
@@ -725,9 +752,15 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<
 
     // Replace the terrain bind group before destroying pages referenced by the
     // previous group. Shared texture views then release cleanly on the Rust side.
+    const double descriptorTotalMs = timings ? TerrainPageElapsedMs(timingStart) : 0.0;
+    const auto acquireStart = timings ? TerrainPageClock::now() : TerrainPageClock::time_point{};
     EngineWgpu::AcquireProducerWindow("terrain ground layers");
+    const double acquireMs = timings ? TerrainPageElapsedMs(acquireStart) : 0.0;
+    const auto bindStart = timings ? TerrainPageClock::now() : TerrainPageClock::time_point{};
     wgr_terrain_set_ground_layers(_renderer, handles.data(), static_cast<uint32_t>(handles.size()));
     wgr_terrain_set_materials(_renderer, materials.data(), static_cast<uint32_t>(materials.size()));
+    const double bindMs = timings ? TerrainPageElapsedMs(bindStart) : 0.0;
+    const auto evictionStart = timings ? TerrainPageClock::now() : TerrainPageClock::time_point{};
     size_t evicted = 0;
     for (TextureWgpu* old : oldPageTextures)
     {
@@ -737,6 +770,21 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<
             old->EvictGpu();
             ++evicted;
         }
+    }
+
+    if (timings)
+    {
+        const double evictionMs = TerrainPageElapsedMs(evictionStart);
+        // Disjoint synchronous CPU phases; EnsureUploaded contains its own
+        // reads/decodes/uploads and internal producer windows. acquireMs only
+        // measures the explicit final terrain acquire, never GPU elapsed time.
+        LOG_INFO(Graphics,
+            "Wgpu terrain page timings: mode={} descriptors={} candidates={} layers={} evictions={} "
+            "loadCalls={} ensureCalls={} descriptorMs={:.3f} loadOwnerMs={:.3f} ensureOwnerMs={:.3f} "
+            "finalAcquireMs={:.3f} bindMs={:.3f} evictionMs={:.3f} uploadTotalMs={:.3f}",
+            paged ? "paged" : "eager", materialCount, ids.size(), handles.size(), evicted,
+            loadCalls, ensureCalls, std::max(0.0, descriptorTotalMs - loadMs - ensureMs), loadMs, ensureMs,
+            acquireMs, bindMs, evictionMs, TerrainPageElapsedMs(timingStart));
     }
     LOG_INFO(Graphics,
              "Wgpu terrain material pages: mode={} candidates={} authored={} complete={} layers={}/{} dropped={} "
@@ -2972,6 +3020,8 @@ void TerrainWgpu::UpdateGroundTexturePages(const Landscape& land, const Camera& 
         return;
     _terrainPageCenterX = centerX;
     _terrainPageCenterZ = centerZ;
+    const bool timings = TerrainPageTimingsEnabled();
+    const auto timingStart = timings ? TerrainPageClock::now() : TerrainPageClock::time_point{};
 
     const int range = land.GetLandRange();
     const int x0 = std::clamp(centerX - _terrainPageRadius, 0, range);
@@ -3002,7 +3052,14 @@ void TerrainWgpu::UpdateGroundTexturePages(const Landscape& land, const Camera& 
         (void)distance;
         materials.push_back(id);
     }
+    const double candidateScanMs = timings ? TerrainPageElapsedMs(timingStart) : 0.0;
     UploadGroundTextures(land, &materials);
+    if (timings)
+        LOG_INFO(Graphics,
+            "Wgpu terrain page update timings: centre=({}, {}) candidateCells={} candidates={} "
+            "candidateScanSortMs={:.3f} updateTotalMs={:.3f}",
+            centerX, centerZ, static_cast<uint64_t>(x1 - x0) * static_cast<uint64_t>(z1 - z0),
+            materials.size(), candidateScanMs, TerrainPageElapsedMs(timingStart));
     LOG_INFO(Graphics, "Wgpu terrain page window: centre=({}, {}) radius={} cells candidateMaterials={}", centerX,
              centerZ, _terrainPageRadius, materials.size());
 }

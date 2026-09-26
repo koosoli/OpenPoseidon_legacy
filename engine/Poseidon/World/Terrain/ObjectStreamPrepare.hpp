@@ -185,7 +185,8 @@ class ObjectStreamPreparer
         uint64_t sourceEnvelopePublished = 0;
         double sourceEnvelopeMs = 0.0;
         uint64_t bc3PolicyBytes = 0; // owner-snapshot vector capacity
-        uint64_t ddsPublicationBytes = 0; // current bounded atomic inventory; excludes shared_ptr allocator overhead
+        uint64_t ddsPublicationBytes = 0; // DDS-enabled alias of texturePublicationBytes, never an additional allocation
+        uint64_t texturePublicationBytes = 0; // bounded DDS/PBO atomic inventory; excludes shared_ptr allocator overhead
         uint64_t textureEncodeReservedBytes = 0; // source + bounded optional BC3 workspace/output
         uint64_t peakTextureEncodeReservedBytes = 0;
         uint64_t workerBc3Prepared = 0;

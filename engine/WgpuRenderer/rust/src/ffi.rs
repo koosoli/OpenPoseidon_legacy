@@ -1742,6 +1742,8 @@ const fn wgr_layout_hash() -> u32 {
     h = hash_size(h, sz::<WgrMemoryStats>());
     h = hash_size(h, sz::<WgrGeometryAllocationRow>());
     h = hash_size(h, sz::<WgrGeometryAllocationSummary>());
+    h = hash_size(h, sz::<WgrLodDemandRow>());
+    h = hash_size(h, sz::<WgrLodDemandReport>());
     h
 }
 
@@ -1762,9 +1764,9 @@ pub extern "C" fn wgr_abi_version() -> u32 {
     if cfg!(debug_assertions) {
         option_env!("WGR_TEST_ABI_VERSION")
             .and_then(|value| value.parse::<u32>().ok())
-            .unwrap_or(13)
+            .unwrap_or(14)
     } else {
-        13
+        14
     }
 }
 
@@ -2057,7 +2059,7 @@ mod abi_tests {
 
     #[test]
     fn exported_abi_version_matches_the_public_contract() {
-        assert_eq!(super::wgr_abi_version(), 13); // geometry overlap summary; matched engine/DLL required
+        assert_eq!(super::wgr_abi_version(), 14); // selected-LOD diagnostic exports; matched engine/DLL required
     }
 
     #[test]
@@ -2069,6 +2071,17 @@ mod abi_tests {
     fn pre_overlap_summary_abi_is_refused_before_report_writes() {
         let mut check = good_check();
         check.abi_version = 12; // old 80-byte allocation summary
+        assert_eq!(unsafe { super::wgr_abi_validate(&check) }, 0);
+    }
+    #[test]
+    fn lod_demand_layout_and_invalid_request_are_bounded() {
+        assert_eq!(std::mem::size_of::<super::WgrLodDemandRow>(), 16);
+        assert_eq!(std::mem::size_of::<super::WgrLodDemandReport>(), 192);
+        assert_eq!(std::mem::offset_of!(super::WgrLodDemandReport, rows), 64);
+        assert_eq!(unsafe { super::wgr_start_lod_demand(std::ptr::null_mut(), 1,
+            super::WgrSlice { data: std::ptr::null(), len: 0 }, 1) }, 2);
+        assert_eq!(unsafe { super::wgr_poll_lod_demand(std::ptr::null_mut(), 1, std::ptr::null_mut()) }, 0);
+        let mut check = good_check(); check.abi_version = 13;
         assert_eq!(unsafe { super::wgr_abi_validate(&check) }, 0);
     }
 
@@ -3568,6 +3581,64 @@ pub struct WgrGeometryAllocationSummary {
     pub overlap_within_inspected_meshes: u64,
     pub overlap_within_inspected_vertex_bytes: u64,
     pub overlap_within_inspected_index_bytes: u64,
+}
+
+/// Monotonic renderer handles only; not an asset identity or ownership proof.
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct WgrLodDemandRow {
+    pub model_id: u32,
+    pub lod_count: u32,
+    pub lod_mask: u32,
+    pub state: u32, // 0 observed/live, 1 missing, 2 retired, 3 unsupported LOD count
+}
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct WgrLodDemandReport {
+    pub epoch: u64,
+    pub current_frame: u64,
+    pub last_sample_frame: u64,
+    pub status: u32, // 1 sampling/draining, 2 completed, 3 cancelled
+    pub frames_requested: u32,
+    pub frames_attempted: u32,
+    pub frames_sampled: u32,
+    pub dropped_frames: u32,
+    pub map_failures: u32,
+    pub dropped_dispatches: u32,
+    pub dispatched_views: u32,
+    pub pass_mask: u32, // actually dispatched prepass/color/shadow/reflection/interior: bits0..4
+    pub row_count: u32,
+    pub rows: [WgrLodDemandRow; 8],
+}
+
+/// Explicit renderer-owner-only request. Zero=unsupported,1=started,2=invalid,3=busy.
+/// # Safety
+/// Renderer and readable models must be valid and exclusively owner accessed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_start_lod_demand(renderer: *mut WgrRenderer, epoch: u64,
+    models: WgrSlice<u32>, frames: u32) -> u32 {
+    if renderer.is_null() || models.data.is_null() || models.len == 0 || models.len > 8 || epoch == 0 || frames == 0 || frames > 64 { return 2; }
+    catch_unwind(AssertUnwindSafe(|| {
+        let r = unsafe { &mut *renderer };
+        r.gfx3d.start_lod_demand(&r.device, epoch, unsafe { std::slice::from_raw_parts(models.data, models.len as usize) }, frames)
+    })).unwrap_or(2)
+}
+/// # Safety
+/// Renderer must be exclusively owner accessed; out must be valid writable memory.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_poll_lod_demand(renderer: *mut WgrRenderer, epoch: u64, out: *mut WgrLodDemandReport) -> u32 {
+    if renderer.is_null() || out.is_null() || epoch == 0 { return 0; }
+    catch_unwind(AssertUnwindSafe(|| {
+        let Some(report) = unsafe { &*renderer }.gfx3d.lod_demand_report(epoch) else { return 0; };
+        unsafe { *out = report; } 1
+    })).unwrap_or(0)
+}
+/// # Safety
+/// Renderer must be valid and exclusively owner accessed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_cancel_lod_demand(renderer: *mut WgrRenderer, epoch: u64) {
+    if renderer.is_null() { return; }
+    let _ = catch_unwind(AssertUnwindSafe(|| unsafe { &mut *renderer }.gfx3d.cancel_lod_demand(epoch)));
 }
 
 /// Read-only renderer-owner snapshot. No waits/readback; bounded metadata visits only.

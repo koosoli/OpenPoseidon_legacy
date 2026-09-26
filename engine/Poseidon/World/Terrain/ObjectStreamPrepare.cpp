@@ -324,6 +324,8 @@ struct ObjectStreamPreparer::Impl
     {
         std::vector<PackedTextureRead> textures;
         uint64_t textureGeneration = 0;
+        render::DdsPublicationToken texturePublication;
+        bool texturePublicationRequired = false;
         uint32_t index = 0;
         bool radiusIdentityAccepted = false;
         uint64_t radiusGeneration = 0;
@@ -494,16 +496,21 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                         // scratch reservation, including conservative growth.
                         auto cancelled = [&] {
                             std::lock_guard<std::mutex> pendingLock(mutex);
-                            return stop || jobGen != generation.load(std::memory_order_relaxed) || stale[job.index];
+                            return stop || jobGen != generation.load(std::memory_order_relaxed) || stale[job.index] ||
+                                (job.texturePublicationRequired && !job.texturePublication.Valid());
                         };
                         std::unique_ptr<render::PreparedAlphaFacts> facts;
                         try {
-                            if (store.CanRetainAlphaFacts(texture.key, chain, texture.read, job.textureGeneration))
+                            if (store.CanRetainAlphaFacts(texture.key, chain, texture.read, job.textureGeneration,
+                                    job.texturePublicationRequired ? &job.texturePublication : nullptr))
                                 facts = render::PreparedTextureStore::BuildAlphaFacts(chain, texture.read, cancelled);
                         }
                         catch (...) { } // optional analysis failure retains the original upload chain
                         if (cancelled()) { store.NoteAlphaFactsCancelled(); break; }
-                        if (store.Put(texture.key, std::move(chain), job.textureGeneration, std::move(facts)))
+                        if (publicationObserver.beforePaaPut)
+                            publicationObserver.beforePaaPut(publicationObserver.context, bool(facts));
+                        if (store.Put(texture.key, std::move(chain), job.textureGeneration, std::move(facts),
+                                job.texturePublicationRequired ? &job.texturePublication : nullptr))
                         { ++prepared; preparedBytes += bytes; }
                         else ++skipped;
                     }
@@ -967,7 +974,11 @@ size_t ObjectStreamPreparer::ModelCount() const
 
 void ObjectStreamPreparer::Reset(const std::string* paths, size_t modelCount)
 {
-    auto publication = render::PreparedTextureStore::NativeDdsEnabled()
+    static const bool pboTextures = [] {
+        const char* flag = std::getenv("WGR_OBJECT_STREAM_PBO_TEXTURES");
+        return render::PreparedTextureStore::Enabled() && flag && flag[0] == '1';
+    }();
+    auto publication = (render::PreparedTextureStore::NativeDdsEnabled() || pboTextures)
         ? render::DdsPublicationInventory::Create(modelCount) : nullptr;
     std::vector<std::optional<BankReadRequest>> packedReads(modelCount);
     const char* packedFlag = std::getenv("WGR_OBJECT_STREAM_PBO");
@@ -994,7 +1005,9 @@ void ObjectStreamPreparer::Reset(const std::string* paths, size_t modelCount)
         ++_impl->generation;
         if (_impl->ddsPublication) _impl->ddsPublication->InvalidateAll();
         publication.swap(_impl->ddsPublication); // old metadata retires outside queue mutex
-        _impl->stats.ddsPublicationBytes = _impl->ddsPublication ? _impl->ddsPublication->MetadataBytes() : 0;
+        _impl->stats.texturePublicationBytes = _impl->ddsPublication ? _impl->ddsPublication->MetadataBytes() : 0;
+        _impl->stats.ddsPublicationBytes = render::PreparedTextureStore::NativeDdsEnabled()
+            ? _impl->stats.texturePublicationBytes : 0;
         _impl->stats.dropped += _impl->stats.ready;
         _impl->stats.queued = 0;
         _impl->stats.ready = 0;
@@ -1340,6 +1353,10 @@ bool ObjectStreamPreparer::SubmitConvert(uint32_t index, std::shared_ptr<Model::
     _impl->Set(index, State::Converting);
     Impl::ConvertJob job;
     job.index = index;
+    job.texturePublicationRequired = !textures.empty();
+    if (job.texturePublicationRequired)
+        job.texturePublication = {_impl->ddsPublication, index,
+            _impl->ddsPublication ? _impl->ddsPublication->Epoch(index) : 0};
     job.sourceToken = sourceToken;
     job.radiusGeneration = _impl->generation.load(std::memory_order_relaxed);
     // Admission lowercases sourcePath for ShapeBank after taking the IR. Only

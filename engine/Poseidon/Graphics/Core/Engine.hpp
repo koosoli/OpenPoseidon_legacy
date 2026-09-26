@@ -1698,6 +1698,19 @@ class Engine : public IGraphicsEngine
           uint64_t& requestId) { requestId = 0; return GeometryReportStatus::Unsupported; }
       virtual GeometryReportStatus PollGeometryAllocationReport(uint64_t,
           GeometryAllocationReport&) const { return GeometryReportStatus::Unsupported; }
+      struct LodDemandRow { uint32_t rendererModel = 0, lodCount = 0, lodMask = 0, state = 0; };
+      struct LodDemandReport
+      {
+          uint64_t requestId = 0, currentFrame = 0, lastSampleFrame = 0;
+          uint32_t samplingStatus = 0, framesRequested = 0, framesAttempted = 0, framesSampled = 0;
+          uint32_t droppedFrames = 0, mapFailures = 0, droppedDispatches = 0, dispatchedViews = 0, passMask = 0;
+          std::vector<LodDemandRow> rows;
+          bool ownershipCoverageComplete = false, cachedViewCoverageComplete = false;
+      };
+      virtual GeometryReportStatus RequestLodDemandReport(const std::vector<uint32_t>&, uint32_t,
+          uint64_t& requestId) { requestId = 0; return GeometryReportStatus::Unsupported; }
+      virtual GeometryReportStatus PollLodDemandReport(uint64_t, LodDemandReport&) const { return GeometryReportStatus::Unsupported; }
+      virtual GeometryReportStatus CancelLodDemandReport(uint64_t) { return GeometryReportStatus::Unsupported; }
 
       virtual int GetGrassSurfaceCount() const { return 0; }
       virtual const char* GetGrassLoadedMapName() const { return ""; }

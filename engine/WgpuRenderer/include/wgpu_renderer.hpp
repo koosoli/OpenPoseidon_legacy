@@ -34,7 +34,7 @@
 // and the handshake refuses the pair — so this number only has to move for
 // changes the hash cannot see (an added/removed entry point, a semantic change
 // to an existing one).
-#define WGR_ABI_VERSION 13u // geometry overlap summary; engine/DLL must be deployed together
+#define WGR_ABI_VERSION 14u // selected-LOD diagnostic exports; matched engine/DLL required
 
 // Required capabilities are negotiated as a bit set inside WgrAbiCheck. A
 // newer engine can reject an older renderer DLL even if the shared layouts
@@ -1822,6 +1822,17 @@ struct WgrGeometryAllocationSummary
 static_assert(sizeof(WgrGeometryAllocationSummary) == 104);
 static_assert(offsetof(WgrGeometryAllocationSummary, overlap_within_inspected_meshes) == 80);
 static_assert(offsetof(WgrGeometryAllocationSummary, overlap_within_inspected_index_bytes) == 96);
+struct WgrLodDemandRow { uint32_t model_id, lod_count, lod_mask, state; };
+struct WgrLodDemandReport
+{
+    uint64_t epoch, current_frame, last_sample_frame;
+    uint32_t status, frames_requested, frames_attempted, frames_sampled, dropped_frames;
+    uint32_t map_failures, dropped_dispatches, dispatched_views, pass_mask, row_count;
+    WgrLodDemandRow rows[8];
+};
+static_assert(sizeof(WgrLodDemandRow) == 16);
+static_assert(sizeof(WgrLodDemandReport) == 192);
+static_assert(offsetof(WgrLodDemandReport, rows) == 64);
 
 enum WgrWaterKind : uint32_t { WGR_WATER_KIND_OCEAN = 0, WGR_WATER_KIND_RIVER = 1 };
 /* WTR-003 — water debug view selector, written to WgrWaterParams.debug_params.x. The water
@@ -2536,6 +2547,10 @@ extern "C"
     WGR_API uint32_t wgr_get_geometry_allocation_report(WgrRenderer* renderer,
         WgrSlice<uint32_t> models, uint32_t max_rows, uint32_t max_visits,
         WgrGeometryAllocationRow* rows, uint32_t row_capacity, WgrGeometryAllocationSummary* summary);
+    // Explicit owner-only diagnostics; no blocking GPU wait, no asset/ownership proof.
+    WGR_API uint32_t wgr_start_lod_demand(WgrRenderer*, uint64_t epoch, WgrSlice<uint32_t> models, uint32_t frames);
+    WGR_API uint32_t wgr_poll_lod_demand(WgrRenderer*, uint64_t epoch, WgrLodDemandReport*);
+    WGR_API void wgr_cancel_lod_demand(WgrRenderer*, uint64_t epoch);
 
     /* AST-012A — the latest GPU mip feedback: for each bindless texture slot, the finest mip
      * level any fragment actually asked for. `out_mip[slot]` gets that level, or 0xFF when the
@@ -2879,6 +2894,8 @@ constexpr uint32_t WgrLayoutHash()
     h = WgrHashSize(h, sizeof(WgrMemoryStats));
     h = WgrHashSize(h, sizeof(WgrGeometryAllocationRow));
     h = WgrHashSize(h, sizeof(WgrGeometryAllocationSummary));
+    h = WgrHashSize(h, sizeof(WgrLodDemandRow));
+    h = WgrHashSize(h, sizeof(WgrLodDemandReport));
     return h;
 }
 

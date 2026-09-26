@@ -2829,6 +2829,11 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
                 failed->requestId = op.geometryReport->requestId;
                 _geometryReportUnpublished = std::move(failed);
             }
+            else if (op.kind == ResourceOp::LodDemandStart || op.kind == ResourceOp::LodDemandCancel)
+            {
+                auto failed = std::make_shared<LodDemandReport>(); failed->requestId = op.lodDemand->epoch;
+                _lodDemandUnpublished = std::move(failed); _lodDemandOwnerStatus = GeometryReportStatus::Failed;
+            }
         ops.clear();
         return;
     }
@@ -3031,6 +3036,24 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
             _geometryReportUnpublished = std::make_shared<const GeometryAllocationReport>(std::move(report));
             break;
         }
+        case ResourceOp::LodDemandStart:
+        {
+            const auto& request = *op.lodDemand;
+            const auto result = wgr_start_lod_demand(_renderer, request.epoch,
+                WgrSlice<uint32_t>{request.models.data(), static_cast<uint32_t>(request.models.size())}, request.frames);
+            _lodDemandOwnerEpoch = result == 1 ? request.epoch : 0;
+            _lodDemandOwnerStatus = result == 1 ? GeometryReportStatus::Pending : result == 0 ? GeometryReportStatus::Unsupported :
+                result == 3 ? GeometryReportStatus::Busy : GeometryReportStatus::Invalid;
+            if (result != 1)
+            {
+                auto failed = std::make_shared<LodDemandReport>(); failed->requestId = request.epoch;
+                _lodDemandUnpublished = std::move(failed);
+            }
+            break;
+        }
+        case ResourceOp::LodDemandCancel:
+            wgr_cancel_lod_demand(_renderer, op.lodDemand->epoch);
+            break;
         }
     }
     ops.clear();
@@ -11690,10 +11713,74 @@ Engine::GeometryReportStatus EngineWgpu::PollGeometryAllocationReport(uint64_t r
     return status;
 }
 
+Engine::GeometryReportStatus EngineWgpu::RequestLodDemandReport(const std::vector<uint32_t>& models, uint32_t frames, uint64_t& requestId)
+{
+    requestId = 0;
+    if (!Foundation::IsMainThread() || models.empty() || models.size() > 8 || !frames || frames > 64) return GeometryReportStatus::Invalid;
+    for (size_t i = 0; i < models.size(); ++i)
+        if (models[i] == WGR_INVALID_MODEL || std::find(models.begin(), models.begin() + i, models[i]) != models.begin() + i) return GeometryReportStatus::Invalid;
+    const char* flag = std::getenv("WGR_GEOMETRY_LOD_FEEDBACK");
+    if (!_renderer || !flag || std::strcmp(flag, "1")) return GeometryReportStatus::Unsupported;
+    std::unique_lock<std::mutex> lock(_lodDemandMutex, std::try_to_lock);
+    if (!lock.owns_lock() || _lodDemandStatus == GeometryReportStatus::Pending) return GeometryReportStatus::Busy;
+    if (_lodDemandNextRequest == std::numeric_limits<uint64_t>::max()) return GeometryReportStatus::Invalid;
+    ResourceOp op; op.kind = ResourceOp::LodDemandStart; op.lodDemand = std::make_unique<ResourceOp::LodDemandRequest>();
+    op.lodDemand->epoch = ++_lodDemandNextRequest; op.lodDemand->frames = frames; op.lodDemand->models = models;
+    requestId = _lodDemandRequest = op.lodDemand->epoch; _lodDemandStatus = GeometryReportStatus::Pending; _lodDemandReport.reset();
+    _resourceOps.push_back(std::move(op)); return GeometryReportStatus::Pending;
+}
+Engine::GeometryReportStatus EngineWgpu::PollLodDemandReport(uint64_t requestId, LodDemandReport& out) const
+{
+    if (!requestId) return GeometryReportStatus::Invalid;
+    std::unique_lock<std::mutex> lock(_lodDemandMutex, std::try_to_lock);
+    if (!lock.owns_lock()) return GeometryReportStatus::Pending;
+    if (_lodDemandRequest != requestId) return GeometryReportStatus::Invalid;
+    if (_lodDemandReport) out = *_lodDemandReport;
+    return _lodDemandStatus;
+}
+Engine::GeometryReportStatus EngineWgpu::CancelLodDemandReport(uint64_t requestId)
+{
+    if (!Foundation::IsMainThread() || !requestId) return GeometryReportStatus::Invalid;
+    std::unique_lock<std::mutex> lock(_lodDemandMutex, std::try_to_lock);
+    if (!lock.owns_lock()) return GeometryReportStatus::Busy;
+    if (_lodDemandRequest != requestId) return GeometryReportStatus::Invalid;
+    if (_lodDemandStatus != GeometryReportStatus::Pending) return _lodDemandStatus;
+    ResourceOp op; op.kind = ResourceOp::LodDemandCancel; op.lodDemand = std::make_unique<ResourceOp::LodDemandRequest>();
+    op.lodDemand->epoch = requestId; _resourceOps.push_back(std::move(op)); return GeometryReportStatus::Pending;
+}
+
 // Called once per frame, right after wgr_render_frame, where the readbacks have just
 // landed. Three FFI calls a frame instead of one per consumer.
 void EngineWgpu::PublishRendererStats()
 {
+    if (_lodDemandOwnerEpoch && _renderer)
+    {
+        WgrLodDemandReport raw{};
+        if (wgr_poll_lod_demand(_renderer, _lodDemandOwnerEpoch, &raw) && raw.row_count <= 8)
+        {
+            auto report = std::make_shared<LodDemandReport>();
+            report->requestId = raw.epoch; report->currentFrame = raw.current_frame; report->lastSampleFrame = raw.last_sample_frame;
+            report->samplingStatus = raw.status; report->framesRequested = raw.frames_requested;
+            report->framesAttempted = raw.frames_attempted; report->framesSampled = raw.frames_sampled;
+            report->droppedFrames = raw.dropped_frames; report->mapFailures = raw.map_failures;
+            report->droppedDispatches = raw.dropped_dispatches; report->dispatchedViews = raw.dispatched_views; report->passMask = raw.pass_mask;
+            for (uint32_t i = 0; i < raw.row_count; ++i)
+                report->rows.push_back({raw.rows[i].model_id, raw.rows[i].lod_count, raw.rows[i].lod_mask, raw.rows[i].state});
+            _lodDemandUnpublished = std::move(report);
+            _lodDemandOwnerStatus = raw.status == 1 ? GeometryReportStatus::Pending : GeometryReportStatus::Ready;
+            if (raw.status != 1) _lodDemandOwnerEpoch = 0;
+        }
+    }
+    if (_lodDemandUnpublished)
+    {
+        std::unique_lock<std::mutex> lock(_lodDemandMutex, std::try_to_lock);
+        if (lock.owns_lock())
+        {
+            if (_lodDemandRequest == _lodDemandUnpublished->requestId)
+            { _lodDemandReport = std::move(_lodDemandUnpublished); _lodDemandStatus = _lodDemandOwnerStatus; }
+            _lodDemandUnpublished.reset();
+        }
+    }
     if (_geometryReportUnpublished)
     {
         std::unique_lock<std::mutex> lock(_geometryReportMutex, std::try_to_lock);

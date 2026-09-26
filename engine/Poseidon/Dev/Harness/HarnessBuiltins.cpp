@@ -385,6 +385,67 @@ void RegisterStreamingProbes(HarnessServer& hs)
 void RegisterScreenshot(HarnessServer& hs)
 {
     RegisterStreamingProbes(hs);
+    hs.RegisterCommand({"stream_lod_demand", "Explicit bounded selected retained-GPU LOD demand diagnostic", {}},
+        [](const std::string&, cJSON* root) -> std::string {
+            if (!GEngine) return HarnessProtocol::ErrorResponse("engine unavailable");
+            const auto* actionNode = cJSON_GetObjectItemCaseSensitive(root, "action");
+            if (!cJSON_IsString(actionNode)) return HarnessProtocol::ErrorResponse("request, poll or cancel action required");
+            const std::string action = actionNode->valuestring;
+            const auto integer = [](const cJSON* node, double maximum) {
+                return cJSON_IsNumber(node) && std::isfinite(node->valuedouble) && node->valuedouble >= 0 &&
+                    node->valuedouble <= maximum && std::floor(node->valuedouble) == node->valuedouble;
+            };
+            uint64_t requestId = 0; Engine::LodDemandReport report;
+            auto status = Engine::GeometryReportStatus::Invalid;
+            if (action == "request") {
+                const auto* ids = cJSON_GetObjectItemCaseSensitive(root, "modelIds");
+                const auto* frames = cJSON_GetObjectItemCaseSensitive(root, "frames");
+                if (!cJSON_IsArray(ids) || cJSON_GetArraySize(ids) < 1 || cJSON_GetArraySize(ids) > 8 ||
+                    !integer(frames, 64) || frames->valuedouble < 1) return HarnessProtocol::ErrorResponse("1..8 distinct renderer modelIds and 1..64 frames required");
+                std::vector<uint32_t> models;
+                for (int i = 0; i < cJSON_GetArraySize(ids); ++i) {
+                    const auto* id = cJSON_GetArrayItem(ids, i);
+                    if (!integer(id, UINT32_MAX - 1)) return HarnessProtocol::ErrorResponse("uint32 renderer handles excluding the invalid sentinel required");
+                    models.push_back(static_cast<uint32_t>(id->valuedouble));
+                }
+                status = GEngine->RequestLodDemandReport(models, static_cast<uint32_t>(frames->valuedouble), requestId);
+            } else if (action == "poll" || action == "cancel") {
+                const auto* id = cJSON_GetObjectItemCaseSensitive(root, "requestId");
+                if (!integer(id, 9007199254740991.0) || id->valuedouble < 1) return HarnessProtocol::ErrorResponse("exact positive requestId required");
+                requestId = static_cast<uint64_t>(id->valuedouble);
+                status = action == "poll" ? GEngine->PollLodDemandReport(requestId, report) : GEngine->CancelLodDemandReport(requestId);
+            } else return HarnessProtocol::ErrorResponse("unknown LOD diagnostic action");
+            const char* name = "Failed";
+            switch (status) {
+                case Engine::GeometryReportStatus::Unsupported: name = "Unsupported"; break;
+                case Engine::GeometryReportStatus::Pending: name = "Pending"; break;
+                case Engine::GeometryReportStatus::Busy: name = "Busy"; break;
+                case Engine::GeometryReportStatus::Ready: name = report.samplingStatus == 3 ? "Cancelled" : "Ready"; break;
+                case Engine::GeometryReportStatus::Invalid: name = "Invalid"; break;
+                case Engine::GeometryReportStatus::Failed: break;
+            }
+            auto* result = cJSON_CreateObject(); cJSON_AddStringToObject(result, "status", name);
+            cJSON_AddNumberToObject(result, "requestId", static_cast<double>(requestId));
+            cJSON_AddStringToObject(result, "scope", "selected monotonic renderer handles; retained LODs demanded by actually dispatched cull passes; no asset freshness, paging or clearance proof");
+            cJSON_AddBoolToObject(result, "ownershipCoverageComplete", false); cJSON_AddBoolToObject(result, "cachedViewCoverageComplete", false);
+            cJSON_AddBoolToObject(result, "snapshotAvailable", report.requestId == requestId && requestId != 0);
+            if (report.requestId == requestId && requestId) {
+#define LOD_DEMAND_FIELD(field) cJSON_AddNumberToObject(result, #field, static_cast<double>(report.field))
+                LOD_DEMAND_FIELD(currentFrame); LOD_DEMAND_FIELD(lastSampleFrame); LOD_DEMAND_FIELD(framesRequested);
+                LOD_DEMAND_FIELD(framesAttempted); LOD_DEMAND_FIELD(framesSampled); LOD_DEMAND_FIELD(droppedFrames);
+                LOD_DEMAND_FIELD(mapFailures); LOD_DEMAND_FIELD(droppedDispatches); LOD_DEMAND_FIELD(dispatchedViews); LOD_DEMAND_FIELD(passMask);
+#undef LOD_DEMAND_FIELD
+                cJSON_AddNumberToObject(result, "sampleAgeFrames", static_cast<double>(report.currentFrame - std::min(report.currentFrame, report.lastSampleFrame)));
+                auto* rows = cJSON_AddArrayToObject(result, "rows");
+                const char* states[] = {"Live", "Missing", "Retired", "UnsupportedLodCount"};
+                for (const auto& row : report.rows) {
+                    auto* item = cJSON_CreateObject(); cJSON_AddNumberToObject(item, "rendererModel", row.rendererModel);
+                    cJSON_AddNumberToObject(item, "lodCount", row.lodCount); cJSON_AddNumberToObject(item, "lodMask", row.lodMask);
+                    cJSON_AddStringToObject(item, "state", row.state < 4 ? states[row.state] : "Unknown"); cJSON_AddItemToArray(rows, item);
+                }
+            }
+            return HarnessProtocol::JsonResponse(result);
+        });
     hs.RegisterCommand({"geometry_allocations", "Request/poll bounded retained mesh allocation diagnostics", {}},
         [](const std::string&, cJSON* root) -> std::string {
             if (!GEngine) return HarnessProtocol::ErrorResponse("no renderer");
@@ -528,6 +589,7 @@ void RegisterScreenshot(HarnessServer& hs)
             cJSON_AddNumberToObject(result, "workerBc3BudgetSkipped", static_cast<double>(state.prep.workerBc3BudgetSkipped));
             cJSON_AddNumberToObject(result, "workerBc3Ms", state.prep.workerBc3Ms);
             cJSON_AddNumberToObject(result, "ddsPublicationBytes", static_cast<double>(state.prep.ddsPublicationBytes));
+            cJSON_AddNumberToObject(result, "texturePublicationBytes", static_cast<double>(state.prep.texturePublicationBytes));
             const auto texturePrep = render::PreparedTextureStore::Instance().SnapshotStats();
             cJSON_AddNumberToObject(result, "preparedTextureEntries", static_cast<double>(texturePrep.entries));
               cJSON_AddNumberToObject(result, "preparedTextureCapacityBytes", static_cast<double>(texturePrep.bytes));
@@ -536,6 +598,7 @@ void RegisterScreenshot(HarnessServer& hs)
               cJSON_AddNumberToObject(result, "preparedAlphaFactsMisses", static_cast<double>(texturePrep.alphaFactsMisses));
               cJSON_AddNumberToObject(result, "preparedAlphaFactsCancelled", static_cast<double>(texturePrep.alphaFactsCancelled));
               cJSON_AddNumberToObject(result, "preparedAlphaFactsCapacitySkipped", static_cast<double>(texturePrep.alphaFactsCapacitySkipped));
+              cJSON_AddNumberToObject(result, "preparedPaaCancelled", static_cast<double>(texturePrep.paaCancelled));
             cJSON_AddNumberToObject(result, "preparedDdsPuts", static_cast<double>(texturePrep.ddsPreparedPuts));
             cJSON_AddNumberToObject(result, "preparedDdsTakes", static_cast<double>(texturePrep.ddsPreparedTakes));
             cJSON_AddNumberToObject(result, "preparedDdsConfigurationMisses", static_cast<double>(texturePrep.ddsConfigurationMisses));

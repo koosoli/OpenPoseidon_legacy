@@ -71,6 +71,11 @@ struct PreparedTextureStore::Impl
     size_t bytes = 0;
     uint64_t generation = 0;
     Stats stats;
+    void CountCancelled(const Entry& entry)
+    {
+        if (entry.preparedDds) ++stats.ddsCancelled;
+        else ++stats.paaCancelled;
+    }
 
     void EraseLocked(std::unordered_map<std::string, std::list<Entry>::iterator>::iterator it, PAABlockChain* takeInto,
                      DecodedImage* takeImageInto = nullptr, std::list<Entry>* retired = nullptr)
@@ -140,8 +145,8 @@ struct PreparedTextureStore::Impl
                 auto indexed = byKey.find(node->key);
                 if (indexed != byKey.end())
                 {
+                    CountCancelled(*node);
                     EraseLocked(indexed, nullptr, nullptr, &retired);
-                    ++stats.ddsCancelled;
                 }
             }
         }
@@ -242,8 +247,8 @@ bool PreparedTextureStore::ShouldPrepare(const std::string& key)
     const auto old = _impl->byKey.find(key);
     if (old != _impl->byKey.end() && old->second->publication.inventory && !old->second->publication.Valid())
     {
+        _impl->CountCancelled(*old->second);
         _impl->EraseLocked(old, nullptr, nullptr, &retired);
-        ++_impl->stats.ddsCancelled;
     }
     if (_impl->uploaded.count(key))
     {
@@ -262,7 +267,7 @@ uint64_t PreparedTextureStore::Generation() const
 }
 
 bool PreparedTextureStore::CanRetainAlphaFacts(const std::string& key, const PAABlockChain& chain,
-    const BankReadRequest& source, uint64_t generation)
+    const BankReadRequest& source, uint64_t generation, const DdsPublicationToken* publication)
 {
     if (!Enabled() || key.empty() || !chain.valid() || !source.HasArchiveIdentity() ||
         chain.magic < 0xFF02 || chain.magic > 0xFF05 || !chain.levels[0].legacyBlockReadCompatible ||
@@ -272,8 +277,16 @@ bool PreparedTextureStore::CanRetainAlphaFacts(const std::string& key, const PAA
     // actual charge. This snapshot is neither a reservation nor acceptance.
     const size_t factsBytes = Impl::AlphaFactsSourceBytes(source);
     const size_t chainBytes = Impl::ChainBytes(chain);
+    std::list<Impl::Entry> retired;
     std::lock_guard<std::mutex> lock(_impl->mutex);
-    if (generation != _impl->generation || _impl->uploaded.count(key) || _impl->byKey.count(key)) return false;
+    if ((publication && !publication->Valid()) || generation != _impl->generation || _impl->uploaded.count(key)) return false;
+    const auto old = _impl->byKey.find(key);
+    if (old != _impl->byKey.end() && old->second->publication.inventory && !old->second->publication.Valid())
+    {
+        _impl->CountCancelled(*old->second);
+        _impl->EraseLocked(old, nullptr, nullptr, &retired);
+    }
+    if (_impl->byKey.count(key)) return false;
     const size_t available = ByteBudget() - std::min(_impl->bytes, ByteBudget());
     if (chainBytes > available || factsBytes > available - chainBytes)
     {
@@ -324,7 +337,8 @@ bool PreparedTextureStore::HasAlphaFacts(const std::string& key) const
 {
     std::lock_guard<std::mutex> lock(_impl->mutex);
     const auto it = _impl->byKey.find(key);
-    return it != _impl->byKey.end() && bool(it->second->alphaFacts);
+    return it != _impl->byKey.end() && bool(it->second->alphaFacts) &&
+        (!it->second->publication.inventory || it->second->publication.Valid());
 }
 
 bool PreparedTextureStore::CopyAlphaFacts(const std::string& key, const BankReadRequest& current,
@@ -336,7 +350,8 @@ bool PreparedTextureStore::CopyAlphaFacts(const std::string& key, const BankRead
     const auto* entry = it != _impl->byKey.end() ? &*it->second : nullptr;
     const auto* facts = entry ? entry->alphaFacts.get() : nullptr;
     const double ttl = TtlSeconds();
-    if (!facts || (ttl > 0.0 && std::chrono::duration<double>(Impl::Clock::now() - entry->stored).count() >= ttl) ||
+    if (!facts || (entry->publication.inventory && !entry->publication.Valid()) ||
+        (ttl > 0.0 && std::chrono::duration<double>(Impl::Clock::now() - entry->stored).count() >= ttl) ||
         !facts->source.SameArchiveMember(current) || facts->magic != magic || facts->width != width ||
         facts->height != height || facts->topOffset != 0 || facts->topBytes != topBytes ||
         sourceHeaderOffset < 0 || facts->sourceHeaderOffset != static_cast<size_t>(sourceHeaderOffset))
@@ -356,7 +371,8 @@ void PreparedTextureStore::NoteAlphaFactsCancelled()
 }
 
 bool PreparedTextureStore::Put(const std::string& key, PAABlockChain&& chain,
-                               std::optional<uint64_t> generation, std::unique_ptr<PreparedAlphaFacts> alphaFacts)
+                               std::optional<uint64_t> generation, std::unique_ptr<PreparedAlphaFacts> alphaFacts,
+                               const DdsPublicationToken* publication)
 {
     if (!Enabled() || key.empty() || !chain.valid())
         return false;
@@ -366,12 +382,29 @@ bool PreparedTextureStore::Put(const std::string& key, PAABlockChain&& chain,
         !chain.levels[0].legacyBlockReadCompatible || alphaFacts->sourceHeaderOffset != chain.levels[0].sourceHeaderOffset))
         alphaFacts.reset(); // unsupported facts never prevent the ordinary chain fallback
     if (alphaFacts) alphaFacts->pairedBlocks = nullptr;
+    std::list<Impl::Entry> pending;
+    pending.emplace_back(Impl::Entry{key, std::move(chain), DecodedImage{}, Impl::Clock::now()});
+    pending.back().alphaFacts = std::move(alphaFacts);
+    if (publication) pending.back().publication = *publication;
+    const size_t retained = Impl::AddCharge(Impl::ChainBytes(pending.back().chain), Impl::AlphaFactsBytes(pending.back().alphaFacts.get()));
+    const size_t size = pending.back().chain.blocks.size();
     std::list<Impl::Entry> freeLater;
     bool stored = false;
     {
         std::lock_guard<std::mutex> lock(_impl->mutex);
         _impl->SweepLocked(freeLater);
-        if (generation && *generation != _impl->generation)
+        _impl->SweepCancelledLocked(freeLater);
+        const auto old = _impl->byKey.find(key);
+        if (old != _impl->byKey.end() && old->second->publication.inventory && !old->second->publication.Valid())
+        {
+            _impl->CountCancelled(*old->second);
+            _impl->EraseLocked(old, nullptr, nullptr, &freeLater);
+        }
+        if (publication && (!generation || !publication->Valid()))
+        {
+            ++_impl->stats.paaCancelled;
+        }
+        else if (generation && *generation != _impl->generation)
         {
             ++_impl->stats.rejectedStale;
         }
@@ -383,18 +416,18 @@ bool PreparedTextureStore::Put(const std::string& key, PAABlockChain&& chain,
         {
             ++_impl->stats.rejectedDup;
         }
-        else if (Impl::AddCharge(Impl::ChainBytes(chain), Impl::AlphaFactsBytes(alphaFacts.get())) > ByteBudget() - std::min(_impl->bytes, ByteBudget()))
+        else if (retained > ByteBudget() - std::min(_impl->bytes, ByteBudget()))
         {
             ++_impl->stats.rejectedFull;
         }
         else
         {
-            const size_t size = chain.blocks.size();
-            const size_t retained = Impl::AddCharge(Impl::ChainBytes(chain), Impl::AlphaFactsBytes(alphaFacts.get()));
-            _impl->order.push_back(Impl::Entry{key, std::move(chain), DecodedImage{}, Impl::Clock::now()});
-            _impl->order.back().alphaFacts = std::move(alphaFacts);
-            if (_impl->order.back().alphaFacts) ++_impl->stats.alphaFactsPuts;
-            _impl->byKey.emplace(key, std::prev(_impl->order.end()));
+            // Index allocation precedes noexcept splice; failures retire owned
+            // payloads outside the mutex without creating an unindexed entry.
+            _impl->byKey.emplace(key, pending.begin());
+            if (pending.back().alphaFacts) ++_impl->stats.alphaFactsPuts;
+            if (pending.back().publication.inventory) ++_impl->tokenEntries;
+            _impl->order.splice(_impl->order.end(), pending);
             _impl->bytes += retained;
             ++_impl->stats.puts;
             _impl->stats.putBytes += size;
@@ -475,6 +508,7 @@ bool PreparedTextureStore::Take(const std::string& key, PAABlockChain& out)
     out = PAABlockChain{};
     if (!Enabled() || key.empty())
         return false;
+    std::list<Impl::Entry> retired;
     std::lock_guard<std::mutex> lock(_impl->mutex);
     auto it = _impl->byKey.find(key);
     if (it == _impl->byKey.end() || !it->second->chain.valid())
@@ -482,7 +516,14 @@ bool PreparedTextureStore::Take(const std::string& key, PAABlockChain& out)
         ++_impl->stats.misses;
         return false;
     }
-    _impl->EraseLocked(it, &out);
+    if (it->second->publication.inventory && !it->second->publication.Valid())
+    {
+        _impl->CountCancelled(*it->second);
+        _impl->EraseLocked(it, nullptr, nullptr, &retired);
+        ++_impl->stats.misses;
+        return false;
+    }
+    _impl->EraseLocked(it, &out, nullptr, &retired);
     ++_impl->stats.takes;
     _impl->stats.takeBytes += out.blocks.size();
     return true;
@@ -514,8 +555,8 @@ bool PreparedTextureStore::PutDdsPrepared(const std::string& key, std::unique_pt
     const auto previous = _impl->byKey.find(key);
     if (previous != _impl->byKey.end() && previous->second->publication.inventory && !previous->second->publication.Valid())
     {
+        _impl->CountCancelled(*previous->second);
         _impl->EraseLocked(previous, nullptr, nullptr, &retired);
-        ++_impl->stats.ddsCancelled;
     }
     if (_impl->byKey.count(key)) { ++_impl->stats.rejectedDup; return false; }
     if (bytes > ByteBudget() - std::min(ByteBudget(), _impl->bytes)) {

@@ -388,6 +388,9 @@ class EngineWgpu : public EngineDummy
         uint32_t maxSectionVisits, uint64_t& requestId) override;
     GeometryReportStatus PollGeometryAllocationReport(uint64_t requestId,
         GeometryAllocationReport& out) const override;
+    GeometryReportStatus RequestLodDemandReport(const std::vector<uint32_t>& models, uint32_t frames, uint64_t& requestId) override;
+    GeometryReportStatus PollLodDemandReport(uint64_t requestId, LodDemandReport& out) const override;
+    GeometryReportStatus CancelLodDemandReport(uint64_t requestId) override;
 
     // GPU-driven cull DEBUG (ImGui Culling tab): only meaningful when GPU-driven is on.
     bool SupportsCullDebug() const override { return _renderer != nullptr && _gpuDriven; }
@@ -1264,7 +1267,9 @@ class EngineWgpu : public EngineDummy
             CpuMeshCreate, // REN-THR-011: identity is `cpu`, not `mesh` -- see CpuMeshSlot
             MeshSetSkin,   // REN-THR-011: bind pose in `verts`, plus `bones` / `weights`
             ModelRetire,
-            GeometryReport
+            GeometryReport,
+            LodDemandStart,
+            LodDemandCancel
         };
         Kind kind = MeshCreate;
         uint64_t mesh = 0;  // MeshCreate: the producer handle being defined; MeshDestroy: the one dying
@@ -1293,6 +1298,8 @@ class EngineWgpu : public EngineDummy
         };
         // Ordinary resource operations carry only a null pointer, not diagnostic buffers.
         std::unique_ptr<GeometryReportRequest> geometryReport;
+        struct LodDemandRequest { uint64_t epoch = 0; uint32_t frames = 0; std::vector<uint32_t> models; };
+        std::unique_ptr<LodDemandRequest> lodDemand;
     };
     std::vector<ResourceOp> _resourceOps;
     uint64_t _nextMeshHandle = 1;  // 0 stays "no mesh", matching the FFI's failure value
@@ -1415,6 +1422,13 @@ class EngineWgpu : public EngineDummy
     uint64_t _geometryReportRequest = 0;
     uint64_t _geometryReportNextRequest = 0;
     GeometryReportStatus _geometryReportStatus = GeometryReportStatus::Invalid;
+    mutable std::mutex _lodDemandMutex;
+    std::shared_ptr<const LodDemandReport> _lodDemandReport;
+    std::shared_ptr<const LodDemandReport> _lodDemandUnpublished; // renderer owner only
+    uint64_t _lodDemandRequest = 0, _lodDemandNextRequest = 0;
+    uint64_t _lodDemandOwnerEpoch = 0; // renderer owner only; zero default skips FFI polls
+    GeometryReportStatus _lodDemandStatus = GeometryReportStatus::Invalid;
+    GeometryReportStatus _lodDemandOwnerStatus = GeometryReportStatus::Pending;
 
     // REN-THR-014 -- the render thread. Everything that touches the renderer handle is one
     // function now (RunConsumerBlock); this runs it on a worker instead of inline.

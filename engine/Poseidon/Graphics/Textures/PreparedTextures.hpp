@@ -85,6 +85,7 @@ class PreparedTextureStore
         uint64_t alphaFactsPuts = 0, alphaFactsHits = 0, alphaFactsMisses = 0;
         uint64_t alphaFactsCancelled = 0;
         uint64_t alphaFactsCapacitySkipped = 0; // advisory refused known retained byte charge
+        uint64_t paaCancelled = 0; // invalid token puts or retired cancelled PAA entries
         uint64_t skippedUploaded = 0; // ShouldPrepare said no: main thread already uploaded it
         uint64_t uploadedMarks = 0; // names currently marked Uploaded
         // The RGBA8 side (non-DXT PAAs -- the Reforger mask population): whole-file
@@ -128,9 +129,14 @@ class PreparedTextureStore
     // this token; publication checks it under the same mutex as Clear.
     uint64_t Generation() const;
     // Worker. Stores a chain; false if refused (full / duplicate / disabled).
+    // Optional publication binds same-world cancellation to the captured job.
+    // A cancellation after validation may leave an invalid retained entry;
+    // claims validate the token before transferring ownership. Cancellation
+    // after that claim accepts the prior claim, as on the DDS path.
     bool Put(const std::string& key, PAABlockChain&& chain,
              std::optional<uint64_t> generation = std::nullopt,
-             std::unique_ptr<PreparedAlphaFacts> alphaFacts = nullptr);
+             std::unique_ptr<PreparedAlphaFacts> alphaFacts = nullptr,
+             const DdsPublicationToken* publication = nullptr);
     // Worker-only pure analysis, <=16 MiB aggregate chain and transient plane.
     // Cancellation is checked between decode/histogram/shape/publication; the
     // callback must own its context until return. Caller supplies the unchanged
@@ -138,11 +144,12 @@ class PreparedTextureStore
     // until Put. No renderer/environment reads or content-freshness promise.
     static std::unique_ptr<PreparedAlphaFacts> BuildAlphaFacts(const PAABlockChain& chain,
         const BankReadRequest& source, const std::function<bool()>& cancelled = {});
-    // Advisory only: never reserves, evicts, publishes or changes the ordinary
+    // Advisory only: never reserves, evicts live entries, publishes or changes the ordinary
     // chain path. A concurrent Take/Clear/Put can change the answer immediately;
     // final Put still validates generation and actual retained capacity atomically.
+    // A cancelled same-key entry may be retired; payload frees occur outside the lock.
     bool CanRetainAlphaFacts(const std::string& key, const PAABlockChain& chain,
-        const BankReadRequest& source, uint64_t generation);
+        const BankReadRequest& source, uint64_t generation, const DdsPublicationToken* publication = nullptr);
     // Advisory metadata lookup avoids native recapture on absent facts. Copy
     // checks current generation/TTL and actual current leased member under mutex.
     bool HasAlphaFacts(const std::string& key) const;

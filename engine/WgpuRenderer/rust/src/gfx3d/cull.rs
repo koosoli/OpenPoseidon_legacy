@@ -10,6 +10,7 @@
 use bytemuck::Zeroable;
 use glam::{Mat4, Vec3, Vec4};
 use std::sync::mpsc;
+use std::cell::RefCell;
 
 // --- GPU buffer layouts (the CPU side of the structs in cull.wgsl) ---
 
@@ -235,6 +236,8 @@ const ARG_WORDS: u64 = super::INDIRECT_ARG_SIZE / 4;
 const STAT_BASE_WORD: u64 = 4;
 pub const STATS_WORDS: usize = 24; // +16..+19 what-if triangles (see cull.wgsl word map)
 const COUNTER_WORDS: u64 = STAT_BASE_WORD + STATS_WORDS as u64;
+fn counter_words_for(feedback: bool) -> u64 { COUNTER_WORDS + if feedback { super::lod_feedback::WORDS } else { 0 } }
+fn counter_words() -> u64 { counter_words_for(super::lod_feedback::enabled()) }
 // Which readback slot each cull view's counters are gathered into. Sky-visibility views
 // deliberately SHARE the last slot: there are 5 of them (sky_vis::DIRECTION_COUNT) and their
 // numbers are not what this instrumentation is about, so they land in a scratch slot whose sum
@@ -320,7 +323,7 @@ impl ShadowCullView {
         });
         let counter_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("wgr_cull_shadow_counters"),
-            size: COUNTER_WORDS * 4,
+            size: counter_words() * 4,
             // COPY_SRC: PERF-005 gathers this buffer's accounting tail into the readback ring.
             usage: wgpu::BufferUsages::STORAGE
                 | wgpu::BufferUsages::INDIRECT
@@ -485,6 +488,8 @@ impl InstanceTable {
 }
 
 pub struct CullState {
+    // No heap/readback allocation until an enabled explicit request.
+    lod_feedback: Option<RefCell<Box<super::lod_feedback::LodFeedback>>>,
     // Instancing-collapse three-pass pipelines (§3.6), all over `layout`: COUNT (1/instance) ->
     // EMIT (1/section) -> SCATTER (1/instance). Shared by the main + every shadow view.
     count_pipeline: wgpu::ComputePipeline,
@@ -592,6 +597,54 @@ enum StatsSlot {
 const STATS_RING_SLOTS: usize = 3;
 
 impl CullState {
+    pub fn start_lod_demand(&mut self, device: &wgpu::Device, epoch: u64, ids: &[u32], frames: u32) -> u32 {
+        if !super::lod_feedback::enabled() { return 0; }
+        let previous = self.lod_feedback.as_ref().map(|state| { let state = state.borrow(); (state.report.epoch, state.report.status) });
+        let valid = super::lod_feedback::validate_request(epoch, ids, frames, previous);
+        if valid != 1 { return valid; }
+        let rows: Vec<_> = ids.iter().map(|&id| {
+            let mut row = crate::ffi::WgrLodDemandRow { model_id: id, state: 1, ..Default::default() };
+            if let Some(lods) = self.allocation_lods(id) {
+                row.lod_count = lods.len() as u32;
+                row.state = if lods.is_empty() || lods.iter().all(|l| l.section_count == 0) { 2 }
+                    else if lods.len() > 32 { 3 } else { 0 };
+            }
+            row
+        }).collect();
+        self.clear_lod_demand_targets();
+        for (i, row) in rows.iter().enumerate() {
+            if row.state == 0 { self.models[row.model_id as usize]._pad = i as u32 + 1; self.tables_dirty = true; }
+        }
+        let state = self.lod_feedback.get_or_insert_with(|| RefCell::new(Box::new(super::lod_feedback::LodFeedback::new(device))));
+        state.borrow_mut().start(epoch, frames, &rows);
+        1
+    }
+    fn clear_lod_demand_targets(&mut self) {
+        if let Some(state) = &self.lod_feedback {
+            let state = state.borrow();
+            for row in &state.report.rows[..state.report.row_count as usize] {
+                if let Some(model) = self.models.get_mut(row.model_id as usize) {
+                    if model._pad != 0 { model._pad = 0; self.tables_dirty = true; }
+                }
+            }
+        }
+    }
+    pub fn cancel_lod_demand(&mut self, epoch: u64) {
+        if self.lod_feedback.as_ref().is_some_and(|s| s.borrow().report.epoch == epoch) {
+            self.clear_lod_demand_targets(); self.lod_feedback.as_ref().unwrap().borrow_mut().cancel(epoch);
+        }
+    }
+    pub fn begin_lod_demand(&mut self) {
+        let Some(state) = &self.lod_feedback else { return; };
+        let done = { let s = state.borrow(); s.report.frames_attempted >= s.report.frames_requested || s.report.status != 1 };
+        if done { self.clear_lod_demand_targets(); }
+        self.lod_feedback.as_ref().unwrap().borrow_mut().begin();
+    }
+    pub fn resolve_lod_demand(&self) { if let Some(s) = &self.lod_feedback { s.borrow_mut().resolve(); } }
+    pub fn harvest_lod_demand(&self, device: &wgpu::Device) { if let Some(s) = &self.lod_feedback { s.borrow_mut().harvest(device); } }
+    pub fn lod_demand_report(&self, epoch: u64) -> Option<crate::ffi::WgrLodDemandReport> {
+        self.lod_feedback.as_ref().and_then(|s| { let s = s.borrow(); (s.report.epoch == epoch).then_some(s.report) })
+    }
     pub(super) fn allocation_lods(&self, model: u32) -> Option<&[LodGpu]> {
         let model = self.models.get(model as usize)?;
         let start = model.lod_base as usize;
@@ -603,7 +656,8 @@ impl CullState {
     pub fn new(device: &wgpu::Device) -> Self {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("wgr_cull"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("cull.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(super::lod_feedback::shader_source(
+                include_str!("cull.wgsl"), super::lod_feedback::enabled()).expect("checked LOD feedback shader source")),
         });
 
         // Bindings 0..=6, matching cull.wgsl. 0 uniform, 1..=4 read-only storage,
@@ -728,7 +782,7 @@ impl CullState {
 
         let counter_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("wgr_cull_counters"),
-            size: COUNTER_WORDS * 4,
+            size: counter_words() * 4,
             // COPY_SRC: PERF-005 gathers this buffer's accounting tail into the readback ring.
             usage: wgpu::BufferUsages::STORAGE
                 | wgpu::BufferUsages::INDIRECT
@@ -744,7 +798,7 @@ impl CullState {
         });
         let color_counter_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("wgr_cull_color_counters"),
-            size: COUNTER_WORDS * 4,
+            size: counter_words() * 4,
             // COPY_SRC: PERF-005 gathers this buffer's accounting tail into the readback ring.
             usage: wgpu::BufferUsages::STORAGE
                 | wgpu::BufferUsages::INDIRECT
@@ -824,6 +878,7 @@ impl CullState {
             hiz_view: None,
             stats_readback,
             stats_latest: CullStats::default(),
+            lod_feedback: None,
         }
     }
 
@@ -988,6 +1043,7 @@ impl CullState {
     // owned LOD empty. Do not shift tables or turn zero LOD count into an invalid
     // shader lod_base lookup. The mesh ranges have their own retirement fence.
     pub fn retire_model(&mut self, id: u32) {
+        if let Some(feedback) = &self.lod_feedback { feedback.borrow_mut().retire(id); }
         if let Some(model) = self.models.get(id as usize) {
             for lod in &mut self.lods[model.lod_base as usize..(model.lod_base + model.lod_count) as usize] {
                 lod.section_count = 0;
@@ -1511,6 +1567,12 @@ impl CullState {
             pass(emit_pl, sec_groups, label);
         }
         pass(scatter_pl, inst_groups, label);
+        drop(pass);
+        if let Some(feedback) = &self.lod_feedback {
+            let category = if label.contains("shadow") { 4 } else if label.contains("reflection") { 8 }
+                else if label.contains("sky") { 16 } else if label.contains("color") { 2 } else { 1 };
+            feedback.borrow_mut().capture(encoder, counters, COUNTER_WORDS * 4, category);
+        }
     }
 
     // Record the main-view cull. No-op until prepare() has run with instances present.
@@ -2701,14 +2763,21 @@ pub(crate) mod tests {
 
     #[test]
     fn cull_wgsl_validates() {
-        let module =
-            naga::front::wgsl::parse_str(include_str!("cull.wgsl")).expect("cull.wgsl parse");
+        for feedback in [false, true] {
+        let source = super::super::lod_feedback::shader_source(include_str!("cull.wgsl"), feedback).unwrap();
+        let module = naga::front::wgsl::parse_str(&source).expect("cull.wgsl parse");
         naga::valid::Validator::new(
             naga::valid::ValidationFlags::all(),
             naga::valid::Capabilities::all(),
         )
         .validate(&module)
         .expect("cull.wgsl validate");
+        assert_eq!(module.global_variables.iter().filter(|(_, v)| v.binding.is_some()).count(), 10);
+        let ir = format!("{:?}", module.functions);
+        assert_eq!(ir.contains("InclusiveOr"), feedback); // optional injection leaves OFF source unchanged
+        }
+        assert_eq!(counter_words_for(false), COUNTER_WORDS);
+        assert_eq!(counter_words_for(true), COUNTER_WORDS + 8);
     }
 
     // AST-012A: binding 8 is fragment-visible WRITABLE storage, which needs a downlevel

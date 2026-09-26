@@ -4,6 +4,7 @@ use wgpu::util::DeviceExt;
 
 pub(crate) mod pool;
 mod allocation_report;
+mod lod_feedback;
 use pool::{GeometryPool, MeshAlloc};
 
 // GPU cull + LOD + indirect-arg compaction (docs/gpu-culling-and-depth-plan.md Stage 3).
@@ -9459,6 +9460,15 @@ impl Gfx3d {
     pub fn begin_frame_object_stats(&self, encoder: &mut wgpu::CommandEncoder) {
         self.cull.begin_frame_stats(encoder);
     }
+    pub fn start_lod_demand(&mut self, device: &wgpu::Device, epoch: u64, ids: &[u32], frames: u32) -> u32 {
+        if !self.gpu_driven_enabled { return 0; }
+        self.cull.start_lod_demand(device, epoch, ids, frames)
+    }
+    pub fn cancel_lod_demand(&mut self, epoch: u64) { self.cull.cancel_lod_demand(epoch); }
+    pub fn lod_demand_report(&self, epoch: u64) -> Option<crate::ffi::WgrLodDemandReport> { self.cull.lod_demand_report(epoch) }
+    pub fn begin_lod_demand(&mut self) { self.cull.begin_lod_demand(); }
+    pub fn resolve_lod_demand(&self) { self.cull.resolve_lod_demand(); }
+    pub fn harvest_lod_demand(&self, device: &wgpu::Device) { self.cull.harvest_lod_demand(device); }
 
     /// Copy this frame's stats into the readback ring (after every cull dispatch, before submit).
     pub fn resolve_object_stats(&mut self, encoder: &mut wgpu::CommandEncoder) {

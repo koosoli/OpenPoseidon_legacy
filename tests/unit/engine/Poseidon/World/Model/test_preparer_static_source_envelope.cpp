@@ -5,6 +5,8 @@
 #include <Poseidon/World/Model/ShapeAdapter.hpp>
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
 #include <Poseidon/Foundation/Threads/ThreadAffinity.hpp>
+#include <Poseidon/Graphics/Textures/PreparedTextures.hpp>
+#include <Poseidon/IO/Streams/QBStream.hpp>
 #include <atomic>
 #include <chrono>
 #include <cstring>
@@ -13,6 +15,9 @@
 #include <stdexcept>
 #include <thread>
 #include <vector>
+#include <condition_variable>
+#include <mutex>
+#include <cstdlib>
 
 namespace
 {
@@ -89,7 +94,182 @@ void RequireWorkers(Preparer& prep)
     if (!Preparer::AsyncEnabled()) SKIP("Requires asynchronous preparer workers");
     REQUIRE(prep.Running());
 }
+#ifdef _WIN32
+struct PaaWorkerBank
+{
+    std::filesystem::path path;
+    std::string prefix, key;
+    int index = -1;
+    bool oldUseBanks = GUseFileBanks;
+    PaaWorkerBank()
+    {
+        const auto suffix = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+        prefix = "paa_worker_" + suffix + "\\";
+        key = prefix + "member.paa";
+        path = std::filesystem::temp_directory_path() / ("paa_worker_" + suffix + ".pbo");
+        const std::vector<char> paa = {3, char(0xFF), 0, 0, 4, 0, 4, 0, 16, 0, 0,
+            char(0xF0), char(0xF0), char(0xF0), char(0xF0), char(0xF0), char(0xF0), char(0xF0), char(0xF0),
+            0, char(0xF8), 0, char(0xF8), 0, 0, 0, 0, 0, 0, 0, 0};
+        Bytes bytes;
+        const char member[] = "member.paa";
+        bytes.data.insert(bytes.data.end(), member, member + sizeof(member));
+        bytes.U32(0); bytes.U32(uint32_t(paa.size())); bytes.U32(0); bytes.U32(0); bytes.U32(uint32_t(paa.size()));
+        bytes.U8(0); for (int i = 0; i < 5; ++i) bytes.U32(0);
+        bytes.data.insert(bytes.data.end(), paa.begin(), paa.end());
+        std::ofstream file(path, std::ios::binary);
+        file.write(bytes.data.data(), std::streamsize(bytes.data.size()));
+        if (!file) throw std::runtime_error("original PAA worker archive write failed");
+        file.close();
+        Poseidon::render::PreparedTextureStore::Instance().Clear();
+        GUseFileBanks = true;
+        index = Poseidon::GFileBanks.Add();
+        auto name = path; name.replace_extension();
+        if (!Poseidon::GFileBanks[index].open(Poseidon::RString(name.string().c_str())))
+        {
+            Poseidon::GFileBanks.Delete(index); index = -1; GUseFileBanks = oldUseBanks;
+            throw std::runtime_error("original PAA worker archive mount failed");
+        }
+        Poseidon::GFileBanks[index].SetPrefix(Poseidon::RString(prefix.c_str()));
+        Poseidon::GFileBanks[index].Lock();
+    }
+    ~PaaWorkerBank()
+    {
+        if (index >= 0) Poseidon::GFileBanks.Delete(index);
+        Poseidon::render::PreparedTextureStore::Instance().Clear();
+        GUseFileBanks = oldUseBanks;
+        std::error_code error; std::filesystem::remove(path, error);
+    }
+};
+struct PaaPublicationLatch
+{
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool entered = false, released = false, hadFacts = false;
+    unsigned calls = 0;
+    static void Observe(void* context, bool hasFacts)
+    {
+        auto& self = *static_cast<PaaPublicationLatch*>(context);
+        std::unique_lock lock(self.mutex);
+        if (++self.calls != 1) return;
+        self.entered = true; self.hadFacts = hasFacts; self.cv.notify_all();
+
+        self.cv.wait(lock, [&] { return self.released; });
+    }
+    void Release() { std::lock_guard lock(mutex); released = true; cv.notify_all(); }
+};
+#endif
 }
+
+#ifdef _WIN32
+TEST_CASE("Actual PAA conversion-worker publication cannot borrow a rescued cancellation epoch", "[preparer][paa-worker-publication]")
+{
+    const char* flag = std::getenv("WGR_OBJECT_STREAM_PBO_TEXTURES");
+    if (!flag || flag[0] != '1' || !Poseidon::render::PreparedTextureStore::Enabled())
+        SKIP("Run fresh with WGR_OBJECT_STREAM_PBO_TEXTURES=1");
+    if (Preparer::WorkerCount() != 1)
+        SKIP("Run fresh with WGR_OBJECT_STREAM_ASYNC_WORKERS=1 for deterministic replacement ordering");
+    Poseidon::Foundation::CaptureMainThread();
+    SourceFile file, replacement;
+    PaaWorkerBank bank;
+    PaaPublicationLatch latch;
+    Poseidon::render::DdsPublicationObserver observer{nullptr, &latch, PaaPublicationLatch::Observe};
+    Preparer prep(128ull * 1024 * 1024, nullptr, &observer);
+    // Declared after prep: unwinding releases the worker before its destructor
+    // joins. Both context and bank remain alive until AFTER that join.
+    struct ReleaseBeforeJoin { PaaPublicationLatch& latch; ~ReleaseBeforeJoin() { latch.Release(); } } unblock{latch};
+    auto& store = Poseidon::render::PreparedTextureStore::Instance();
+    prep.Reset(&file.path, 1); RequireWorkers(prep);
+    REQUIRE(prep.SnapshotStats().texturePublicationBytes > 0);
+    if (!store.NativeDdsEnabled()) CHECK(prep.SnapshotStats().ddsPublicationBytes == 0);
+    auto submit = [&](const std::string& path) {
+        REQUIRE(prep.Request(0));
+        REQUIRE(Wait([&] { return prep.Query(0) == Preparer::State::Ready; }));
+        auto model = prep.Take(0); REQUIRE(model);
+        REQUIRE(model->sourcePath == path);
+        // Ordinary conversion only: the original authored triangle geometry is
+        // parsed unchanged; the test-owned material names the original PAA. No
+        // static source/Plain/Ready certification is claimed for modified IR.
+        for (auto& lod : model->lodLevels)
+            lod.mesh.materials.emplace_back("owned-PAA-worker", bank.key);
+        auto tables = std::make_shared<Poseidon::Model::ShapeAdapter::AdapterBankTables>();
+        REQUIRE(prep.SubmitConvert(0, model, tables));
+    };
+    submit(file.path);
+    {
+        std::unique_lock lock(latch.mutex);
+        REQUIRE(latch.cv.wait_for(lock, std::chrono::seconds(10), [&] { return latch.entered; }));
+        REQUIRE(latch.hadFacts); // real alpha analysis finished, before store publication
+    }
+    REQUIRE(prep.Query(0) == Preparer::State::Converting);
+    const auto activeDebt = prep.SnapshotStats().conversionReservedBytes;
+    const auto cancelledBefore = store.SnapshotStats().paaCancelled;
+    const auto storeGeneration = store.Generation();
+    REQUIRE(activeDebt >= 64ull * 1024 * 1024);
+    CHECK_FALSE(store.HasAlphaFacts(bank.key));
+    SECTION("DropStale then ordinary rescue cannot recapture a token for the old job")
+    {
+        const uint32_t epochs = 0; prep.DropStale(&epochs, 1, 1);
+        CHECK_FALSE(prep.Request(0)); // rescues the model job, not its cancelled texture epoch
+        CHECK(prep.SnapshotStats().conversionReservedBytes == activeDebt);
+        CHECK_FALSE(store.HasAlphaFacts(bank.key));
+        latch.Release();
+        REQUIRE(Wait([&] { return prep.Query(0) == Preparer::State::Converted; }));
+        auto old = prep.TakeConverted(0);
+        std::unique_ptr<Poseidon::LODShapeWithShadow> oldShape(old.shape);
+        REQUIRE(oldShape); REQUIRE(old.model);
+        CHECK_FALSE(store.HasAlphaFacts(bank.key));
+        Poseidon::PAABlockChain chain; CHECK_FALSE(store.Take(bank.key, chain));
+        CHECK(store.SnapshotStats().paaCancelled == cancelledBefore + 1);
+        CHECK(prep.SnapshotStats().conversionReservedBytes == 0);
+        submit(file.path); // new owner admission captures the CURRENT epoch
+    }
+    SECTION("Reset invalidates the old job while same-key replacement is queued")
+    {
+        prep.Reset(&replacement.path, 1);
+        CHECK(store.Generation() == storeGeneration); // Reset proof cannot rely on store.Clear
+        CHECK(prep.SnapshotStats().conversionReservedBytes == activeDebt);
+        REQUIRE(prep.Request(0));
+        CHECK(prep.Query(0) == Preparer::State::Queued);
+        latch.Release();
+        REQUIRE(Wait([&] { return prep.Query(0) == Preparer::State::Ready; }));
+        CHECK_FALSE(store.HasAlphaFacts(bank.key));
+        Poseidon::PAABlockChain chain; CHECK_FALSE(store.Take(bank.key, chain));
+        CHECK(store.SnapshotStats().paaCancelled == cancelledBefore + 1);
+        auto model = prep.Take(0); REQUIRE(model);
+        REQUIRE(model->sourcePath == replacement.path);
+        CHECK(prep.SnapshotStats().conversionReservedBytes == 0);
+        for (auto& lod : model->lodLevels) lod.mesh.materials.emplace_back("replacement-PAA-worker", bank.key);
+        auto tables = std::make_shared<Poseidon::Model::ShapeAdapter::AdapterBankTables>();
+        REQUIRE(prep.SubmitConvert(0, model, tables));
+    }
+    SECTION("DropStale without rescue discards the converted payload and texture claims")
+    {
+        const uint32_t epochs = 0; prep.DropStale(&epochs, 1, 1);
+        CHECK(prep.SnapshotStats().conversionReservedBytes == activeDebt);
+        latch.Release();
+        REQUIRE(Wait([&] { return prep.Query(0) == Preparer::State::Unknown &&
+            prep.SnapshotStats().conversionReservedBytes == 0; }));
+        CHECK_FALSE(prep.TakeConverted(0).shape);
+        CHECK_FALSE(store.HasAlphaFacts(bank.key));
+        Poseidon::PAABlockChain chain; CHECK_FALSE(store.Take(bank.key, chain));
+        CHECK(store.SnapshotStats().paaCancelled == cancelledBefore + 1);
+        submit(file.path);
+    }
+    REQUIRE(Wait([&] { return prep.Query(0) == Preparer::State::Converted; }));
+    auto current = prep.TakeConverted(0);
+    std::unique_ptr<Poseidon::LODShapeWithShadow> shape(current.shape);
+    REQUIRE(shape); REQUIRE(shape->NLevels() > 0); REQUIRE(shape->Level(0)->NVertex() > 0);
+    CHECK(prep.SnapshotStats().conversionReservedBytes == 0);
+    REQUIRE(store.HasAlphaFacts(bank.key));
+    auto request = Poseidon::GFileBanks[bank.index].CaptureReadRequest("member.paa", true);
+    REQUIRE(request);
+    Poseidon::render::PreparedAlphaFacts facts;
+    REQUIRE(store.CopyAlphaFacts(bank.key, *request, 0xFF03, 4, 4, 16, 4, facts));
+    Poseidon::PAABlockChain chain; REQUIRE(store.Take(bank.key, chain));
+    CHECK(chain.blocks.size() == 16);
+    CHECK_FALSE(store.HasAlphaFacts(bank.key));
+}
+#endif
 
 TEST_CASE("Worker source envelope is opt-in immutable numeric evidence before Ready", "[preparer][static-source-envelope]")
 {

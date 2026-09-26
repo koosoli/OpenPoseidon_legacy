@@ -3807,6 +3807,7 @@ impl Renderer {
                     late_surface_slots.iter().filter(|v| **v).count(), surface_rays[2][0]));
             }
         }
+        self.gfx3d.begin_lod_demand(); // before model-table upload; disabled/no request is a no-op
         self.gfx3d.prepare(
             &self.device,
             &self.queue,
@@ -6136,6 +6137,7 @@ impl Renderer {
         self.gpu_timers
             .cpu_begin(crate::gpu_timers::Region::WorkerEncTail);
         self.gfx3d.resolve_object_stats(&mut encoder);
+        self.gfx3d.resolve_lod_demand();
         self.gfx3d.resolve_mip_feedback(&mut encoder);
         self.water_visibility.resolve(&mut encoder);
         self.gpu_timers
@@ -6213,6 +6215,7 @@ impl Renderer {
             .cpu_begin(crate::gpu_timers::Region::WorkerHarvest);
         self.gpu_timers.harvest(&self.device);
         self.gfx3d.harvest_object_stats(&self.device);
+        self.gfx3d.harvest_lod_demand(&self.device);
         self.gfx3d.harvest_mip_feedback(&self.device);
         self.water_visibility.harvest(&self.device);
         self.grass.harvest_stats(&self.device);

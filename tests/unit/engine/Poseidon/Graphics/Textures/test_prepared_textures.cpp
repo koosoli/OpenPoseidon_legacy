@@ -590,6 +590,61 @@ TEST_CASE("Prepared alpha facts refuse mismatch cancellation and departed genera
         CHECK_FALSE(store.Put("alpha-member", std::move(fixture.chain), generation, std::move(facts)));
         CHECK_FALSE(store.HasAlphaFacts("alpha-member"));
     }
+    SECTION("same-world cancellation denies claims before physical retirement")
+    {
+        auto inventory = render::DdsPublicationInventory::Create(1); REQUIRE(inventory);
+        const render::DdsPublicationToken token{inventory, 0, inventory->Epoch(0)};
+        auto facts = store.BuildAlphaFacts(fixture.chain, fixture.read); REQUIRE(facts);
+        REQUIRE(store.CanRetainAlphaFacts("alpha-member", fixture.chain, fixture.read, generation, &token));
+        REQUIRE(store.Put("alpha-member", std::move(fixture.chain), generation, std::move(facts), &token));
+        render::PreparedAlphaFacts priorClaim;
+        REQUIRE(store.CopyAlphaFacts("alpha-member", fixture.read, 0xFF03, 4, 4, 16, 4, priorClaim));
+        const auto retained = store.SnapshotStats().bytes;
+        const auto before = store.SnapshotStats();
+        inventory->CancelModel(0);
+        CHECK_FALSE(store.HasAlphaFacts("alpha-member"));
+        render::PreparedAlphaFacts rejected;
+        CHECK_FALSE(store.CopyAlphaFacts("alpha-member", fixture.read, 0xFF03, 4, 4, 16, 4, rejected));
+        CHECK(store.SnapshotStats().bytes == retained); // logical invisibility is not eager deletion
+        Poseidon::PAABlockChain chain; CHECK_FALSE(store.Take("alpha-member", chain));
+        CHECK(store.SnapshotStats().bytes == 0);
+        CHECK(store.SnapshotStats().paaCancelled == before.paaCancelled + 1);
+        CHECK(store.SnapshotStats().ddsCancelled == before.ddsCancelled);
+        CHECK(priorClaim.histogram.pctClear > 0); // prior linearized claims remain owned values
+    }
+    SECTION("cancelled retained entry cannot block a new epoch for the same key")
+    {
+        auto inventory = render::DdsPublicationInventory::Create(1); REQUIRE(inventory);
+        const render::DdsPublicationToken old{inventory, 0, inventory->Epoch(0)};
+        auto chain = fixture.chain;
+        auto facts = store.BuildAlphaFacts(chain, fixture.read); REQUIRE(facts);
+        REQUIRE(store.Put("alpha-member", std::move(chain), generation, std::move(facts), &old));
+        inventory->CancelModel(0);
+        const render::DdsPublicationToken current{inventory, 0, inventory->Epoch(0)};
+        const auto before = store.SnapshotStats();
+        CHECK_FALSE(store.CanRetainAlphaFacts("alpha-member", fixture.chain, fixture.read, generation, &old));
+        CHECK(store.SnapshotStats().alphaFactsCapacitySkipped == before.alphaFactsCapacitySkipped);
+        REQUIRE(store.CanRetainAlphaFacts("alpha-member", fixture.chain, fixture.read, generation, &current));
+        CHECK(store.SnapshotStats().bytes == 0); // targeted retirement releases payload outside lock
+        facts = store.BuildAlphaFacts(fixture.chain, fixture.read); REQUIRE(facts);
+        REQUIRE(store.Put("alpha-member", std::move(fixture.chain), generation, std::move(facts), &current));
+        render::PreparedAlphaFacts copied;
+        REQUIRE(store.CopyAlphaFacts("alpha-member", fixture.read, 0xFF03, 4, 4, 16, 4, copied));
+    }
+    SECTION("late cancelled token put fails closed without cancelling ordinary callers")
+    {
+        auto inventory = render::DdsPublicationInventory::Create(1); REQUIRE(inventory);
+        const render::DdsPublicationToken old{inventory, 0, inventory->Epoch(0)};
+        inventory->InvalidateAll();
+        auto late = fixture.chain;
+        auto facts = store.BuildAlphaFacts(late, fixture.read); REQUIRE(facts);
+        CHECK_FALSE(store.Put("alpha-member", std::move(late), generation, std::move(facts), &old));
+        CHECK_FALSE(store.HasAlphaFacts("alpha-member"));
+        CHECK(store.SnapshotStats().bytes == 0);
+        REQUIRE(store.Put("ordinary-member", std::move(fixture.chain))); // no token preserves original API
+        Poseidon::PAABlockChain chain; REQUIRE(store.Take("ordinary-member", chain));
+        CHECK(chain.blocks.size() == 16);
+    }
     SECTION("sidecar capacity participates in the same retained budget")
     {
         if (store.ByteBudget() > 4 * 1024 * 1024)

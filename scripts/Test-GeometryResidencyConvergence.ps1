@@ -2,11 +2,12 @@ param(
     [switch]$SampleDriverMemory,
     [switch]$AllocationReport,
     [switch]$DiagnosticOnly,
+    [switch]$LodDemandReport,
     [string]$Label = 'dayz-resource-convergence',
     [string]$GameDir = 'D:\SteamLibrary\steamapps\common\ARMA Cold War Assault'
 )
 $ErrorActionPreference = 'Stop'
-if ($DiagnosticOnly) { $AllocationReport = $true }
+if ($DiagnosticOnly -or $LodDemandReport) { $AllocationReport = $true }
 if (!$env:LOCK_OWNER) {
     $shellName = if ($PSVersionTable.PSEdition -eq 'Core') { 'pwsh.exe' } else { 'powershell.exe' }
     $shellExe = (Join-Path $PSHOME $shellName).Replace('\', '/')
@@ -16,6 +17,7 @@ if (!$env:LOCK_OWNER) {
     if ($SampleDriverMemory) { $lockArgs += '-SampleDriverMemory' }
     if ($AllocationReport) { $lockArgs += '-AllocationReport' }
     if ($DiagnosticOnly) { $lockArgs += '-DiagnosticOnly' }
+    if ($LodDemandReport) { $lockArgs += '-LodDemandReport' }
     $env:LOCK_OWNER = 'DayZ resource convergence'
     try {
         & 'C:\Program Files\Git\bin\bash.exe' @lockArgs
@@ -51,6 +53,7 @@ $environment = @{
     WGR_ADAPTIVE_TEXTURE_DETAIL = '0'; WGR_LOD_GOVERNOR_RANGE = '1'; WGR_SKY_VOLUME_INCREMENTAL = '1'
     WGR_PASS1_STATS = '1'; WGR_RESIDENCY_TRACE = '1'
 }
+if ($LodDemandReport) { $environment.WGR_GEOMETRY_LOD_FEEDBACK = '1' }
 # Remove inherited experiments, then restore the caller's environment on exit.
 # Ordinary terrain paging remains the installed engine default.
 $clearNames = @((Get-ChildItem Env: | Where-Object {
@@ -213,6 +216,43 @@ try {
         if ($stale.status -ne 'Invalid') { throw 'Superseded report ID remained claimable' }
         $allocation | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $out 'geometry-allocations.json')
         $boundedReport | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $out 'geometry-allocations-bounded.json')
+        if ($LodDemandReport) {
+            # Row bytes are a selection heuristic, not exclusive/reclaimable bytes.
+            $modelIds = @($allocation.rows | Sort-Object { $_.vertexBytes + $_.indexBytes } -Descending |
+                Select-Object -ExpandProperty rendererModel -Unique | Select-Object -First 8)
+            if (!$modelIds.Count) { throw 'No retained renderer models for LOD demand observation' }
+            function Wait-LodDemand($id) {
+                $deadline = [DateTime]::UtcNow.AddSeconds(30)
+                do {
+                    Start-Sleep -Milliseconds 100
+                    $report = Send @{cmd='stream_lod_demand'; action='poll'; requestId=$id}
+                    if ([DateTime]::UtcNow -gt $deadline) { throw 'Bounded LOD demand observation did not complete asynchronously' }
+                } while ($report.status -in @('Pending', 'Draining'))
+                return $report
+            }
+            $first = Send @{cmd='stream_lod_demand'; action='request'; modelIds=$modelIds; frames=64}
+            if ($first.status -ne 'Pending' -or $first.requestId -lt 1) { throw 'LOD demand request was not accepted' }
+            $busy = Send @{cmd='stream_lod_demand'; action='request'; modelIds=$modelIds; frames=64}
+            if ($busy.status -ne 'Busy') { throw 'Concurrent LOD demand request replaced an active epoch' }
+            $cancel = Send @{cmd='stream_lod_demand'; action='cancel'; requestId=$first.requestId}
+            $cancelled = Wait-LodDemand $first.requestId
+            if ($cancelled.status -ne 'Cancelled') { throw 'LOD demand cancellation did not retire its epoch' }
+            $second = Send @{cmd='stream_lod_demand'; action='request'; modelIds=$modelIds; frames=16}
+            if ($second.status -ne 'Pending' -or $second.requestId -le $first.requestId) { throw 'Replacement LOD demand epoch did not advance' }
+            $staleDemand = Send @{cmd='stream_lod_demand'; action='poll'; requestId=$first.requestId}
+            if ($staleDemand.status -ne 'Invalid') { throw 'Superseded LOD demand remained claimable' }
+            $demand = Wait-LodDemand $second.requestId
+            if ($demand.status -ne 'Ready' -or @($demand.rows).Count -ne $modelIds.Count) { throw 'Selected retained LOD demand response incomplete' }
+            if ($demand.framesSampled -lt 1 -or $demand.passMask -eq 0 -or !@($demand.rows | Where-Object { $_.lodMask -ne 0 }).Count) { throw 'No actual dispatched GPU LOD feedback observed for the selected models' }
+            if (!$demand.PSObject.Properties['ownershipCoverageComplete'] -or !$demand.PSObject.Properties['cachedViewCoverageComplete'] -or
+                $demand.ownershipCoverageComplete -or $demand.cachedViewCoverageComplete) { throw 'Dispatched-pass diagnostic omitted limitations or claimed complete geometry ownership or cached-view usage' }
+            foreach ($row in $demand.rows) {
+                if ($row.rendererModel -notin $modelIds -or $row.state -ne 'Live' -or $row.lodCount -lt 1 -or $row.lodCount -gt 32) { throw 'Actual retained model identity or LOD bounds changed during observation' }
+                if ($row.lodCount -lt 32 -and [uint64]$row.lodMask -ge ([uint64]1 -shl $row.lodCount)) { throw 'LOD demand mask exceeded the actual model LOD count' }
+            }
+            @{selectionScope='Largest inspected rows; not exclusive bytes'; modelIds=$modelIds; first=$first; busy=$busy; cancel=$cancel; cancelled=$cancelled; second=$second; stale=$staleDemand; demand=$demand} |
+                ConvertTo-Json -Depth 8 | Set-Content (Join-Path $out 'geometry-lod-demand.json')
+        }
     }
     $null = Send @{cmd = 'screenshot'; path = (Join-Path $out 'returned-settled.png')}
     $null = Send @{cmd = 'exit'}
@@ -223,7 +263,7 @@ try {
     @{passed = ($converged -or $DiagnosticOnly); convergenceMeasured = !$DiagnosticOnly; status = $status; initialCold = $initialCold; initialQuiet = $initialQuiet
         returns = $returns; comparison = $comparison; lateQuiet = $lateQuiet; retiredClear = $retiredClear
         processScope = 'Diagnostic private/RSS samples retained; GPU convergence does not establish process-memory convergence'
-        allocationReport = $allocation
+        allocationReport = $allocation; lodDemandMeasured = [bool]$LodDemandReport
     } | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $out 'result.json')
     Write-Output "Resource convergence evidence: $out ($status)"
     if (!$converged -and !$DiagnosticOnly) { throw "Convergence not established: $status (see result.json and raw samples)" }
