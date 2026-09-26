@@ -1811,6 +1811,358 @@
         "screenshotReview": "Root reviewed initial and returned street/structures present, vegetation appearance varies as in earlier controls; no exact vegetation quality parity",
         "limitations": "Single sequential fixed-LOD diagnostic runs, cache/system confounded. ON combines native DDS composition preparation and BC3, not pure BC3 A/B. Claims indicate CPU ownership transfer, not GPU completion. Lower owner encoding does not establish load/FPS gain; ON first full and overall scenario are slower. Reforger is stress workload, not ground-truth compatibility. Prototype remains default OFF."
       }
+    },
+    {
+      "run": "simulation-default-off-20260926-154800",
+      "provenance": {
+        "disabled": true,
+        "installed": "codex/streaming-residency 0afcac2c 2026-09-26_15:47 deploy-ps1",
+        "fixture": {
+          "actor": [
+            1190,
+            10,
+            1200
+          ],
+          "camera": [
+            100,
+            80,
+            100
+          ],
+          "camera_isolation_env": {
+            "WGR_OBJECT_STREAM_RADIUS_CELLS": "8",
+            "WGR_OBJECT_STREAM_WINDOW_GROWTH": "0"
+          },
+          "cell_metres": 50.0,
+          "elevation": 10.0,
+          "fire_segment": [
+            [
+              1190,
+              11.5,
+              1200
+            ],
+            [
+              1210,
+              11.5,
+              1200
+            ]
+          ],
+          "land_range": 32,
+          "model_sha256": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+          "models": [
+            "streaming_fixture\\wall.p3d"
+          ],
+          "notes": [
+            "Use output as addon root; world uses only original loose assets.",
+            "Camera at 100 is isolated from walls at 1200/1230 with growth disabled.",
+            "No ResolveObject: actor demand must admit geometry with transient leases.",
+            "Generic inventory/classification/admission must establish readiness.",
+            "Self-check is not engine parsing, collision or runtime verification."
+          ],
+          "placements": [
+            {
+              "id": 1001,
+              "model_index": 0,
+              "position": [
+                1200.0,
+                11.5,
+                1200.0
+              ]
+            },
+            {
+              "id": 1002,
+              "model_index": 0,
+              "position": [
+                1230.0,
+                11.5,
+                1200.0
+              ]
+            }
+          ],
+          "schema": 1,
+          "terrain_range": 32,
+          "wall_world_bounds": [
+            [
+              1199.5,
+              10,
+              1194,
+              1200.5,
+              13,
+              1206
+            ],
+            [
+              1229.5,
+              10,
+              1194,
+              1230.5,
+              13,
+              1206
+            ]
+          ],
+          "world_sha256": "2039ab363055663d7a22e098dd2a079e2463b2b88b0bcaf8874112f60899196c"
+        },
+        "head": "0afcac2c616e5857699529f1f6910d65b453ab29",
+        "scriptSha256": "EE756D06154399FD2A43A18E6B3A277F8A4AE92706B4F834611C61F012A2E282",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "4BC6B426D9184465FED71D899C357FC871F7B13CDEB9BEE1DACD1858CB45B1F5",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "C595A9A592F4757AC8207FB9F2E5FD1EE94E4DB3B43A0AA2DE43732F8EE00793",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ]
+      },
+      "runtimeSourceCommit": "0afcac2c",
+      "embeddedBuildCommit": "826a189a",
+      "classification": "FAILED runner CLI: addon-root pointed at loose fixture without PBO archives; no harness/result created. Corrected runner a9548bf8 uses original private absolute-model file and no archive flag; not an engine collision failure.",
+      "sha256": {
+        "engine.log": "8981cb032d93e3d48e32b140418bbe63b3b2210d129a819f20dfcf870c80cc56",
+        "provenance.json": "57b71095b8fba4e56121bfe39129b905ce574611111286c83dce54bd0a4e2c30",
+        "fixture/fixture.json": "0fe614af29f9e7d6020d9f3524a4056d79baef8f0d94e2c4ec441e1421ad973f",
+        "fixture/simulation-residency.wrp": "2039ab363055663d7a22e098dd2a079e2463b2b88b0bcaf8874112f60899196c",
+        "fixture/streaming_fixture/wall.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "simulation-fixture.eden/mission.sqm": "c47524083395a8c78a581822629f83c760dd0c1a3ef45eaceb24da88580e9d4c"
+      }
+    },
+    {
+      "run": "simulation-default-off-loose-20260926-155037",
+      "provenance": {
+        "fixture": {
+          "absolute_model_path": true,
+          "actor": [
+            1190,
+            10,
+            1200
+          ],
+          "camera": [
+            100,
+            80,
+            100
+          ],
+          "camera_isolation_env": {
+            "WGR_OBJECT_STREAM_RADIUS_CELLS": "8",
+            "WGR_OBJECT_STREAM_WINDOW_GROWTH": "0"
+          },
+          "cell_metres": 50.0,
+          "elevation": 10.0,
+          "fire_segment": [
+            [
+              1190,
+              11.5,
+              1200
+            ],
+            [
+              1210,
+              11.5,
+              1200
+            ]
+          ],
+          "land_range": 32,
+          "model_sha256": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+          "models": [
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-default-off-loose-20260926-155037\\fixture\\streaming_fixture\\wall.p3d"
+          ],
+          "notes": [
+            "Absolute-model mode uses original loose files without an archive mount; relative mode needs a separately configured loose-file root.",
+            "Camera at 100 is isolated from walls at 1200/1230 with growth disabled.",
+            "No ResolveObject: actor demand must admit geometry with transient leases.",
+            "Generic inventory/classification/admission must establish readiness.",
+            "Self-check is not engine parsing, collision or runtime verification."
+          ],
+          "placements": [
+            {
+              "id": 1001,
+              "model_index": 0,
+              "position": [
+                1200.0,
+                11.5,
+                1200.0
+              ]
+            },
+            {
+              "id": 1002,
+              "model_index": 0,
+              "position": [
+                1230.0,
+                11.5,
+                1200.0
+              ]
+            }
+          ],
+          "schema": 1,
+          "terrain_range": 32,
+          "wall_world_bounds": [
+            [
+              1199.5,
+              10,
+              1194,
+              1200.5,
+              13,
+              1206
+            ],
+            [
+              1229.5,
+              10,
+              1194,
+              1230.5,
+              13,
+              1206
+            ]
+          ],
+          "world_sha256": "f95ca6ff33dcba6c6a46a2a876dceaa4c29f3c201f8e9ea2b5807332c300d2a5"
+        },
+        "installed": "codex/streaming-residency 0afcac2c 2026-09-26_15:47 deploy-ps1",
+        "disabled": true,
+        "head": "0afcac2c616e5857699529f1f6910d65b453ab29",
+        "scriptSha256": "00B9E6457EA1CECC50C092D6ACE7041582B8389ED82A07E61A1FBA7299DF305E",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "4BC6B426D9184465FED71D899C357FC871F7B13CDEB9BEE1DACD1858CB45B1F5",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "C595A9A592F4757AC8207FB9F2E5FD1EE94E4DB3B43A0AA2DE43732F8EE00793",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ]
+      },
+      "runtimeSourceCommit": "0afcac2c",
+      "embeddedBuildCommit": "826a189a",
+      "classification": "PASS default OFF: Disabled, ownerPumps/inventory/created zero, both walls absent, clean exit 0.",
+      "sha256": {
+        "engine.log": "2df2fbd4d5a4e3c9e1345e882e651b773fcf07f664fec6695b6190563b1c57c5",
+        "provenance.json": "ca98262b39025f1f1c74d5010bc7289e336c824f37712b1eba4c772e183c761c",
+        "harness.jsonl": "905e84d8b7275842a0bbfca25953f426aab738ececd542d0e7c9c3d5ca75b876",
+        "result.json": "7753ef1d1c8b95e726e130423d8e9a6cbd773bec438ff64cd9498d98b5c6e7b0",
+        "fixture/fixture.json": "115fbba8fd1690b037e5030428759b9ec3213070fce72e08c28d7ece637385da",
+        "fixture/simulation-residency.wrp": "f95ca6ff33dcba6c6a46a2a876dceaa4c29f3c201f8e9ea2b5807332c300d2a5",
+        "fixture/streaming_fixture/wall.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "simulation-fixture.eden/mission.sqm": "c47524083395a8c78a581822629f83c760dd0c1a3ef45eaceb24da88580e9d4c"
+      }
+    },
+    {
+      "run": "simulation-actor-leases-20260926-155116",
+      "provenance": {
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "4BC6B426D9184465FED71D899C357FC871F7B13CDEB9BEE1DACD1858CB45B1F5",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "C595A9A592F4757AC8207FB9F2E5FD1EE94E4DB3B43A0AA2DE43732F8EE00793",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "head": "0afcac2c616e5857699529f1f6910d65b453ab29",
+        "fixture": {
+          "absolute_model_path": true,
+          "actor": [
+            1190,
+            10,
+            1200
+          ],
+          "camera": [
+            100,
+            80,
+            100
+          ],
+          "camera_isolation_env": {
+            "WGR_OBJECT_STREAM_RADIUS_CELLS": "8",
+            "WGR_OBJECT_STREAM_WINDOW_GROWTH": "0"
+          },
+          "cell_metres": 50.0,
+          "elevation": 10.0,
+          "fire_segment": [
+            [
+              1190,
+              11.5,
+              1200
+            ],
+            [
+              1210,
+              11.5,
+              1200
+            ]
+          ],
+          "land_range": 32,
+          "model_sha256": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+          "models": [
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-actor-leases-20260926-155116\\fixture\\streaming_fixture\\wall.p3d"
+          ],
+          "notes": [
+            "Absolute-model mode uses original loose files without an archive mount; relative mode needs a separately configured loose-file root.",
+            "Camera at 100 is isolated from walls at 1200/1230 with growth disabled.",
+            "No ResolveObject: actor demand must admit geometry with transient leases.",
+            "Generic inventory/classification/admission must establish readiness.",
+            "Self-check is not engine parsing, collision or runtime verification."
+          ],
+          "placements": [
+            {
+              "id": 1001,
+              "model_index": 0,
+              "position": [
+                1200.0,
+                11.5,
+                1200.0
+              ]
+            },
+            {
+              "id": 1002,
+              "model_index": 0,
+              "position": [
+                1230.0,
+                11.5,
+                1200.0
+              ]
+            }
+          ],
+          "schema": 1,
+          "terrain_range": 32,
+          "wall_world_bounds": [
+            [
+              1199.5,
+              10,
+              1194,
+              1200.5,
+              13,
+              1206
+            ],
+            [
+              1229.5,
+              10,
+              1194,
+              1230.5,
+              13,
+              1206
+            ]
+          ],
+          "world_sha256": "956af88cb614be5a881f75ce0601d813b748374ea875bab9901ba192aa25b736"
+        },
+        "scriptSha256": "00B9E6457EA1CECC50C092D6ACE7041582B8389ED82A07E61A1FBA7299DF305E",
+        "installed": "codex/streaming-residency 0afcac2c 2026-09-26_15:47 deploy-ps1",
+        "disabled": false
+      },
+      "runtimeSourceCommit": "0afcac2c",
+      "embeddedBuildCommit": "826a189a",
+      "classification": "PASS narrow actor-lease fixture: two placements/one model/two Ready regions, cold Geom/Fire geometry and VB0, fire hit1001; visual promotion then away preserves leases/fire; mutate1002 .25 without Resolve/permanent pin; actor moves100, leases0/released1, unmodified1001 absent, mutated1002 retained MustBeSaved at phase0/required0. Clean exit0; root reviewed visual.png original two white walls. Shared promoted Shape retains one VB while logical-only; not GPU eviction or generic clearance proof.",
+      "sha256": {
+        "engine.log": "917163403576fcbcfbe64cf466c244e0c8067ed8a8e09c3e950821d9bf2f32db",
+        "provenance.json": "8ddafa7e7b3157369fa82abd198c1ccac3faae83bf5c502580875a0f037ba90c",
+        "harness.jsonl": "94b838ecc36b939d0b6c3dbdbd516540185859ca654a7195deea190f16497a48",
+        "result.json": "aa40f9bd300c5c65cd4e70ff5530f5614ce4167b5a30679c49424345a9bdfd89",
+        "visual.png": "1162ef9834f54bd2de1a366f64aa31f826f7fb09eb3dfaa82b23dca5e06710a6",
+        "fixture/fixture.json": "6ef0ce2e35cdd73c8136ec202051edcc4f6a2def2b9540508d76fb65ddcddfd3",
+        "fixture/simulation-residency.wrp": "956af88cb614be5a881f75ce0601d813b748374ea875bab9901ba192aa25b736",
+        "fixture/streaming_fixture/wall.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "simulation-fixture.eden/mission.sqm": "c47524083395a8c78a581822629f83c760dd0c1a3ef45eaceb24da88580e9d4c"
+      }
     }
   ],
   "microbenchmarks": [
@@ -1950,6 +2302,23 @@
         "build-worker-bc3-coverage-20260926.log": "e4aad72996cd9f802c379b6765a14afb78ec9d8899e557f7568f658ddd6d7d09",
         "build-worker-bc3-coverage-retry-20260926.log": "45b611404ef450f3acfe8f03e4f2e9b740e640f51fb095ab0eb52f853d8904d2",
         "build-worker-bc3-policy-20260926.log": "69b50afe697b28182bab828383c4514efd6929fe5cc9321506ef09f8372cd758"
+      }
+    },
+    {
+      "artifactRoot": "build",
+      "runtimeSourceCommit": "0afcac2c",
+      "implementationCommits": [
+        "766bef7b",
+        "0afcac2c",
+        "a9548bf8"
+      ],
+      "result": "Supported retry build PASS; first build failed ten OLink GetRef compile errors, repaired. Default 7389 assertions/156 cases (150 passed,6 explicit skips); broad 292/11 (10 passed,1 skipped); narrow 349/11 (9 passed,2 skipped). Narrow BC3 and simulation residency remain default OFF. Runtime query consumer integration and active encode cancellation still pending.",
+      "sha256": {
+        "build-simulation-bc3only-20260926.log": "24914055d364f82726fdd12d1545294b23d7c8b3d1335a40fa9bec295c5d8785",
+        "build-simulation-bc3only-retry-20260926.log": "7f3f1f6aa6c12a89919cabc4d6062e8a809f512d6930483b7d166d5d54c5ca26",
+        "test-simulation-bc3only-default-20260926.log": "3de756136219f07524e4c6a7dc6f44262d8ff067e7169d0513bcf2f69a51be61",
+        "test-simulation-bc3only-broad-20260926.log": "31546ff4dba57e14be6bee6d6479eb77aa826fb4fff7dd0c1e29bff70ebd0260",
+        "test-simulation-bc3only-narrow-20260926.log": "915c610b1549a4559f3195c10f002f558ad149dabb870006174b26b3e2340be7"
       }
     }
   ],

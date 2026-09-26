@@ -13,7 +13,7 @@ The wave prototype is parked on GitHub remote `safety`, branch
 ## Verified ownership and routing
 | Area | Current owner and result |
 |---|---|
-| Residency invocation | `World.cpp`, before `CapturePresentationSnapshot`, inside `enableDraw` and renderer capability/camera checks. Already moved from TerrainWgpu, but still not a headless simulation service. |
+| Residency invocation | `World.cpp`, before `CapturePresentationSnapshot`, inside `enableDraw` and renderer capability/camera checks. Already moved from TerrainWgpu. Separate default-OFF simulation residency now pumps at the owner boundary after background AI joins; existing camera residency remains independent. |
 | Native/modern placements | `LandSave.cpp`: retained placement table, cell desired set, main-thread admission and release. Original legacy OFP maps keep their existing lifecycle. |
 | Eviction | Baseline clears resident link, removes Object and ID map entry; cd3d5c68 now retains explicitly required identities and MustBeSaved state with separate visual retirement. Native far destruction bit is not full mutable-state persistence. Geography accumulation is monotonic and does not establish collision residency. |
 | Preparation | `ObjectStreamPrepare`: existing loose/native archive model loading, compatible adapter workers, generation cancellation. Shared archive MRU/shape-bank mutation ownership must stay explicit. |
@@ -1204,8 +1204,52 @@ completion/overlap. The prototype stays OFF pending causal diagnosis and
 performance/quality acceptance. Runtime logs/results/provenance, actual images
 and whole-device sampler artifacts are hashed for both arms.
 
-Automatic actor/query residency is under implementation as a separate default-OFF
-prototype and is unverified/uncommitted at this evidence checkpoint. No automatic
-collision, AI, navigation or Ready completeness is claimed. Constructor/group
+Automatic static actor residency is now a committed separate default-OFF prototype
+with a passing two-wall runtime fixture below. Generic query consumers, AI and
+navigation have not migrated, and generic clearance completeness remains open. Constructor/group
 coverage, active-encode cancellation, secondary views, wider mutable state/MP and
 comparable-quality performance remain OPEN; the streaming plan is incomplete.
+
+### Default-OFF static actor leases — 26 September 2026
+
+Source 766bef7b limits optional native DDS preparation to successful BC3
+composites; both preparation and this narrower switch remain OFF by default.
+The matched BC3-only performance comparison is pending at this checkpoint.
+0afcac2c adds a separate owner simulation residency service, enabled only by
+WGR_SIMULATION_RESIDENCY=1, with source 4 MiB, payload 64 MiB and Shape scheduling
+256 MiB bounds. Scheduling charges are estimates, not allocator RSS. Inventory
+is bounded at 256 model groups/one million placements; unsupported groups remain
+globally Unknown. Eligibility currently covers static authored Geom/Fire/View
+payloads, not arbitrary constructor classes, animated/proxy models or all queries.
+
+The supported retry build passed after ten OLink GetRef compile errors were
+repaired; the failed build log is retained separately. Default regression passed
+7389 assertions/156 cases (150 passed,6 explicit skips); broad preparation
+292/11 (10 passed,1 skip); narrow preparation 349/11 (9 passed,2 skips).
+Enabled-only and mutually exclusive preparation fixture skips are explicit.
+
+Both actor fixtures use the clean 15:47 installed 0afcac2c pair. Its embedded
+build tag is 826a189a because compilation preceded the source commit; functional
+code corresponds to 0afcac2c and actual binary hashes are recorded. Corrective
+runner/generator a9548bf8 uses original private absolute-model files. The first
+154800 attempt failed CLI validation because addon-root requires PBO archives;
+it produced no harness/result and is not a collision regression.
+
+Default OFF (155037) passes with Disabled, inventory/ownerPumps/created zero and
+both walls absent. ON (155116) passes without ResolveObject or permanent pins:
+two authored walls/one model/two Ready regions admit cold CPU geometry/fire with
+visualResident=false, deferred=true and normalVB0; the fire segment hits1001.
+Camera promotion renders both original white walls (root reviewed visual.png).
+Moving the camera away preserves actor leases and fire contact. Mutating1002 to
+damage .25 then moving the actor to100 releases all leases: unmodified1001 is
+removed;1002 remains MustBeSaved, phase0, damage .25, required0. Both runs exit0.
+The shared Shape retains one normal VB after visual promotion while logical-only;
+this proves logical/state leases, not GPU eviction.
+
+No existing AI, collision, navigation or generic query caller is migrated.
+Actor-region Ready is not a certificate for arbitrary rays. Existing origin-grid
+25m candidate enumeration can omit a large building whose origin lies farther
+away; this approximately6m fixture does not close that generic clearance gate.
+Exact query demand/readiness is under implementation and unverified. Broad
+performance, active-encode cancellation, complete class coverage, secondary views,
+wider mutable state and MP authority remain open. The streaming plan is OPEN.
