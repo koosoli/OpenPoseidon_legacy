@@ -264,6 +264,7 @@ class Object: public NetworkObject, public FrameBase, public IAnimator
 	bool _isDestroyed:1; // object is already destructed
 	bool _static:1; // object is static (never changing position)
 	bool _visualResident:1 = true; // streamed logical state may outlive its drawing resources
+	bool _destroyedVisualPending:1 = false; // CPU destruction can precede visual residency
 
 	// Cached animated bounding box for static terrain-conform objects (ClipLand veg,
 	// ForestPlain): the conform is time-invariant (immutable terrain + no movement), so
@@ -682,6 +683,9 @@ class Object: public NetworkObject, public FrameBase, public IAnimator
 	// Built-in shape destruction function.
 	void SetDestroyPhase(int phase);
 	void SetDestroyed( float anim );
+	// Complete postponed destruction buffers after visual admission. Object state,
+	// not the shared shape's marker, owns this pending transition.
+	void PrepareDestroyedVisualRendering();
 	float GetDestroyed() const {return _destroyPhase*(1.0f/255);}
 	virtual int MaxDammageRegions() const {return 2;}
 

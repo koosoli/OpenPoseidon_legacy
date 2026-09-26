@@ -41,6 +41,7 @@ public:
     bool returnBuffers = false;
     bool throwOnWorldLoad = false;
     std::vector<LODShapeWithShadow*> worldLoads;
+    std::vector<VBType> bufferTypes;
 
     void WorldShapeLoaded(LODShapeWithShadow* shape) override
     {
@@ -49,9 +50,10 @@ public:
         worldLoads.push_back(shape);
     }
 
-    VertexBuffer* CreateVertexBuffer(const Shape&, VBType) override
+    VertexBuffer* CreateVertexBuffer(const Shape&, VBType type) override
     {
         ++vertexBufferCalls;
+        bufferTypes.push_back(type);
         if (vertexBufferCalls == throwOnBufferCall)
             throw std::runtime_error("mock later-LOD allocation failure");
         if (returnBuffers)
@@ -346,4 +348,134 @@ TEST_CASE("Logical proxy loads inherit CPU ownership across banks and promote ea
     bank.EnsureVisualRendering(parent);
     REQUIRE(engine.worldLoads.size() == 2);
     REQUIRE(engine.vertexBufferCalls == calls);
+}
+
+TEST_CASE("Logical destruction preserves shared visual buffers until object promotion",
+          "[ShapeBank][streaming-logical-shape][destruction]")
+{
+    LogicalLoadEngine engine;
+    engine.returnBuffers = true;
+    RenderingGuard guard(&engine);
+    ShapeBank bank;
+    bank.OptimizeAll();
+    Ref<LODShapeWithShadow> shape = bank.NewFromModel("shared_destroyed.p3d", false, true, BoxModel(), nullptr);
+    REQUIRE(engine.vertexBufferCalls == 1);
+    VertexBuffer* sharedBuffer = shape->Level(0)->GetVertexBuffer();
+    Ref<ObjectPlain> object = new ObjectPlain(shape, -1);
+    object->SetType(Network); // This fixture has no terrain operational cache.
+    object->SetDestructType(DestructBuilding);
+    object->SetVisualResident(false);
+    object->SetDestroyed(0.5f);
+    REQUIRE(object->IsDestroyed());
+    REQUIRE(object->GetDestroyed() == Catch::Approx(127.0f / 255));
+    REQUIRE_FALSE(shape->DeferredVisualRendering());
+    REQUIRE(shape->Level(0)->GetVertexBuffer() == sharedBuffer);
+    REQUIRE(engine.vertexBufferCalls == 1);
+    RequireCollisionGeometry(*shape);
+    const ::Vector3 originalCorner = shape->GeometryLevel()->Pos(4);
+    object->AnimateGeometry();
+    REQUIRE(shape->GeometryLevel()->Pos(4).Distance2(originalCorner) > 0);
+    object->DeanimateGeometry();
+    REQUIRE(engine.vertexBufferCalls == 1);
+    object->PrepareDestroyedVisualRendering();
+    REQUIRE(engine.vertexBufferCalls == 1);
+
+    object->SetVisualResident(true);
+    object->PrepareDestroyedVisualRendering();
+    REQUIRE(engine.vertexBufferCalls == 2);
+    REQUIRE(engine.bufferTypes.back() == VBDynamic);
+    REQUIRE(engine.liveBuffers == 1);
+    object->SetDestroyed(0.75f);
+    object->PrepareDestroyedVisualRendering();
+    REQUIRE(engine.vertexBufferCalls == 2);
+}
+
+TEST_CASE("Cold logical destruction preserves CPU state and completes dynamic buffers on admission",
+          "[ShapeBank][streaming-logical-shape][destruction]")
+{
+    LogicalLoadEngine engine;
+    engine.returnBuffers = true;
+    RenderingGuard guard(&engine);
+    ShapeBank bank;
+    bank.OptimizeAll();
+    Ref<LODShapeWithShadow> shape;
+    {
+        ShapeBank::CpuOnlyLoadScope logical;
+        shape = bank.NewFromModel("cold_destroyed.p3d", false, true, BoxModel(), nullptr);
+    }
+    Ref<ObjectPlain> object = new ObjectPlain(shape, -1);
+    object->SetType(Network);
+    object->SetDestructType(DestructBuilding);
+    object->SetVisualResident(false);
+    object->SetDestroyed(0.5f);
+    REQUIRE(object->IsDestroyed());
+    REQUIRE(shape->DeferredVisualRendering());
+    REQUIRE(engine.vertexBufferCalls == 0);
+    RequireCollisionGeometry(*shape);
+    const ::Vector3 originalCorner = shape->GeometryLevel()->Pos(4);
+    object->AnimateGeometry();
+    REQUIRE(shape->GeometryLevel()->Pos(4).Distance2(originalCorner) > 0);
+    object->DeanimateGeometry();
+    REQUIRE(engine.vertexBufferCalls == 0);
+    REQUIRE(shape->DeferredVisualRendering());
+    bank.EnsureVisualRendering(shape);
+    object->SetVisualResident(true);
+    object->PrepareDestroyedVisualRendering();
+    REQUIRE_FALSE(shape->DeferredVisualRendering());
+    REQUIRE(engine.vertexBufferCalls == 2);
+    REQUIRE(engine.bufferTypes.back() == VBDynamic);
+    REQUIRE(engine.liveBuffers == 1);
+    object->PrepareDestroyedVisualRendering();
+    REQUIRE(engine.vertexBufferCalls == 2);
+}
+
+TEST_CASE("Destroyed visual buffers retry partial allocation without changing CPU destruction",
+          "[ShapeBank][streaming-logical-shape][destruction]")
+{
+    LogicalLoadEngine engine;
+    engine.returnBuffers = true;
+    RenderingGuard guard(&engine);
+    ShapeBank bank;
+    bank.OptimizeAll();
+    auto model = BoxModel();
+    model->lodLevels.push_back(model->lodLevels.front());
+    model->lodLevels.back().resolution = 2.0f;
+    Ref<LODShapeWithShadow> shape = bank.NewFromModel("destroyed_retry.p3d", false, true, model, nullptr);
+    REQUIRE(engine.vertexBufferCalls == 2);
+    Ref<ObjectPlain> object = new ObjectPlain(shape, -1);
+    object->SetType(Network);
+    object->SetDestructType(DestructBuilding);
+    engine.throwOnBufferCall = 4;
+    REQUIRE_THROWS_AS(object->SetDestroyed(0.5f), std::runtime_error);
+    REQUIRE(object->IsDestroyed());
+    REQUIRE(object->GetDestroyed() == Catch::Approx(127.0f / 255));
+    REQUIRE(engine.liveBuffers == 0);
+    RequireCollisionGeometry(*shape);
+    engine.throwOnBufferCall = 0;
+    object->PrepareDestroyedVisualRendering();
+    REQUIRE(engine.vertexBufferCalls == 6);
+    REQUIRE(engine.liveBuffers == 2);
+    REQUIRE(engine.bufferTypes[4] == VBDynamic);
+    REQUIRE(engine.bufferTypes[5] == VBDynamic);
+    object->PrepareDestroyedVisualRendering();
+    REQUIRE(engine.vertexBufferCalls == 6);
+}
+
+TEST_CASE("An intact object admission does not rebuild an already visual shape",
+          "[ShapeBank][streaming-logical-shape][destruction]")
+{
+    LogicalLoadEngine engine;
+    RenderingGuard guard(&engine);
+    ShapeBank bank;
+    bank.OptimizeAll();
+    Ref<LODShapeWithShadow> shape = bank.NewFromModel("intact_shared.p3d", false, true, BoxModel(), nullptr);
+    REQUIRE(engine.vertexBufferCalls == 1);
+    Ref<ObjectPlain> object = new ObjectPlain(shape, -1);
+    object->SetType(Network);
+    object->SetDestructType(DestructBuilding);
+    object->SetVisualResident(false);
+    object->SetVisualResident(true);
+    bank.EnsureVisualRendering(shape);
+    object->PrepareDestroyedVisualRendering();
+    REQUIRE(engine.vertexBufferCalls == 1);
 }

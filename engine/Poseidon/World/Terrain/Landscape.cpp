@@ -2971,6 +2971,7 @@ void Landscape::RegisterModernObjectVisual(Object* object)
         Shapes.EnsureVisualRendering(shape, true);
     }
     object->SetVisualResident(true);
+    object->PrepareDestroyedVisualRendering();
     if (GEngine)
         GEngine->SceneObjectCreated(object);
     auto* shape = object->GetShape();

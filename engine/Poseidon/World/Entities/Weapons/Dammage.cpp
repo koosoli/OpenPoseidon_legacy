@@ -497,6 +497,7 @@ void Object::SetDestroyed(float anim)
     // took the Everon hospoda to total 1.35 and nothing changed on screen.
     if ((_isDestroyed && !wasDestroyed) || (phase > 0 && oldPhase == 0))
     {
+        _destroyedVisualPending = true;
         if (GEngine)
         {
             GEngine->SceneObjectRemoved(this);
@@ -509,19 +510,6 @@ void Object::SetDestroyed(float anim)
         // shells took `hospoda_mesto` to total dammage 1.35 with no visible change. Give the
         // shape its own DYNAMIC buffers, which are never shared and re-upload when the
         // vertices change. Intact copies keep drawing from the retained model.
-        if (_shape != nullptr)
-        {
-            for (int level = 0; level < _shape->NLevels(); level++)
-            {
-                if (!_shape->IsNormalLevel(level))
-                    continue;
-                if (Shape* lvl = _shape->Level(level))
-                {
-                    lvl->ReleaseVBuffer();
-                    lvl->ConvertToVBuffer(VBDynamic);
-                }
-            }
-        }
         if (GetType() == Primary)
         {
             int xLand = toIntFloor(Position().X() * InvLandGrid);
@@ -534,6 +522,45 @@ void Object::SetDestroyed(float anim)
                 }
             }
         }
+    }
+    PrepareDestroyedVisualRendering();
+}
+
+void Object::PrepareDestroyedVisualRendering()
+{
+    if (!_destroyedVisualPending)
+        return;
+    if (!_isDestroyed || _destroyPhase == 0)
+    {
+        _destroyedVisualPending = false;
+        return;
+    }
+    // Shared shapes may already have visual buffers for an intact neighbour.
+    // A logical object's mutation must not replace them before it is visible.
+    if (!IsVisualResident() || !GEngine)
+        return;
+    try
+    {
+        if (_shape)
+            for (int level = 0; level < _shape->NLevels(); ++level)
+                if (_shape->IsNormalLevel(level))
+                    if (Shape* lod = _shape->Level(level))
+                    {
+                        lod->ReleaseVBuffer();
+                        lod->ConvertToVBuffer(VBDynamic);
+                    }
+        _destroyedVisualPending = false;
+    }
+    catch (...)
+    {
+        // Keep the transition retryable if a later level failed after earlier
+        // levels allocated. Collision geometry and destruction phase stay intact.
+        if (_shape)
+            for (int level = 0; level < _shape->NLevels(); ++level)
+                if (_shape->IsNormalLevel(level))
+                    if (Shape* lod = _shape->Level(level))
+                        lod->ReleaseVBuffer();
+        throw;
     }
 }
 
