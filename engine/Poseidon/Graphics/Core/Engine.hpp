@@ -1678,7 +1678,8 @@ class Engine : public IGraphicsEngine
           std::vector<GeometryAllocationRow> rows;
           uint64_t uniqueVertexBytes = 0, uniqueIndexBytes = 0;
           uint64_t poolLiveBytes = 0, poolCapacityBytes = 0, poolRetiredBytes = 0;
-          uint32_t registeredModelsAtRequest = 0, modelsRequested = 0, modelsVisited = 0;
+          uint32_t registryEntriesAtRequest = 0, registryEntriesVisited = 0, ineligibleEntriesSkipped = 0;
+          uint32_t modelsRequested = 0, modelsVisited = 0;
           uint32_t lodsInVisitedModels = 0, sectionVisits = 0, uniqueMeshes = 0;
           uint32_t missingModels = 0, missingMeshes = 0, invalidRanges = 0;
           uint32_t unresolvedNames = 0;

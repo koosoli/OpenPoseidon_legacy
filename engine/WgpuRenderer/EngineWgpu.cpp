@@ -2968,7 +2968,9 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
             report.maxModels = op.geometryReport->maxModels;
             report.maxRows = op.geometryReport->rows;
             report.maxSectionVisits = op.geometryReport->visits;
-            report.registeredModelsAtRequest = op.geometryReport->registered;
+            report.registryEntriesAtRequest = op.geometryReport->registryEntries;
+            report.registryEntriesVisited = op.geometryReport->registryEntriesVisited;
+            report.ineligibleEntriesSkipped = op.geometryReport->ineligibleEntriesSkipped;
             report.modelsRequested = static_cast<uint32_t>(op.geometryReport->models.size());
             report.unresolvedNames = op.geometryReport->unresolvedNames;
             std::vector<uint32_t> ids;
@@ -2998,7 +3000,7 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
                 report.missingModels = summary.missing_models;
                 report.missingMeshes = summary.missing_meshes;
                 report.invalidRanges = summary.invalid_ranges;
-                report.truncated = summary.truncated != 0 || op.geometryReport->registered > ids.size();
+                report.truncated = summary.truncated != 0 || op.geometryReport->registryEntries > op.geometryReport->registryEntriesVisited;
                 report.rows.reserve(summary.rows_written);
                 for (uint32_t i = 0; i < summary.rows_written; ++i)
                 {
@@ -11643,11 +11645,18 @@ Engine::GeometryReportStatus EngineWgpu::RequestGeometryAllocationReport(uint32_
     op.geometryReport->maxModels = maxModels;
     op.geometryReport->rows = maxRows;
     op.geometryReport->visits = maxSectionVisits;
-    op.geometryReport->registered = static_cast<uint32_t>(std::min<size_t>(_gpuModels.size(), UINT32_MAX));
+    op.geometryReport->registryEntries = static_cast<uint32_t>(std::min<size_t>(_gpuModels.size(), UINT32_MAX));
     op.geometryReport->models.reserve(std::min<size_t>(_gpuModels.size(), maxModels));
     for (const auto& [shape, model] : _gpuModels)
     {
-        if (op.geometryReport->models.size() == maxModels) break;
+        if (op.geometryReport->registryEntriesVisited == maxModels) break;
+        ++op.geometryReport->registryEntriesVisited;
+        // Rejected shapes are cached as INVALID to avoid repeated classification.
+        // They have no retained renderer model and must not be reported as missing.
+        if (model == WGR_INVALID_MODEL) {
+            ++op.geometryReport->ineligibleEntriesSkipped;
+            continue;
+        }
         // Snapshot name+monotonic producer ID now; never carry the Shape pointer to drain.
         const char* name = shape ? static_cast<const char*>(shape->Name()) : nullptr;
         size_t length = 0;

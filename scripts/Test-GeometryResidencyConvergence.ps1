@@ -1,10 +1,12 @@
 param(
     [switch]$SampleDriverMemory,
     [switch]$AllocationReport,
+    [switch]$DiagnosticOnly,
     [string]$Label = 'dayz-resource-convergence',
     [string]$GameDir = 'D:\SteamLibrary\steamapps\common\ARMA Cold War Assault'
 )
 $ErrorActionPreference = 'Stop'
+if ($DiagnosticOnly) { $AllocationReport = $true }
 if (!$env:LOCK_OWNER) {
     $shellName = if ($PSVersionTable.PSEdition -eq 'Core') { 'pwsh.exe' } else { 'powershell.exe' }
     $shellExe = (Join-Path $PSHOME $shellName).Replace('\', '/')
@@ -13,6 +15,7 @@ if (!$env:LOCK_OWNER) {
         $PSCommandPath, '-Label', $Label, '-GameDir', $GameDir)
     if ($SampleDriverMemory) { $lockArgs += '-SampleDriverMemory' }
     if ($AllocationReport) { $lockArgs += '-AllocationReport' }
+    if ($DiagnosticOnly) { $lockArgs += '-DiagnosticOnly' }
     $env:LOCK_OWNER = 'DayZ resource convergence'
     try {
         & 'C:\Program Files\Git\bin\bash.exe' @lockArgs
@@ -144,7 +147,8 @@ try {
     }
     $initialCold = Wait-Settled 'initial-cold'; $initialQuiet = Wait-Quiet 'initial-quiet'
     $returns = @()
-    for ($cycle = 1; $cycle -le 3; $cycle++) {
+    $cycleCount = if ($DiagnosticOnly) { 0 } else { 3 }
+    for ($cycle = 1; $cycle -le $cycleCount; $cycle++) {
         $null = Send @{cmd = 'exec'; code = ('logInfo "CONVERGENCE_ROUTE_' + $cycle + '_BEGIN"; triPerfReset 0')}
         foreach ($x in $route) {
             $reply = Send @{cmd = 'eval'; code = ('triFreeFlyPose "' + (Pose $x) + '"')}
@@ -159,7 +163,7 @@ try {
         $returns += [pscustomobject]@{cycle = $cycle; logical = $settled; quiet = $quiet; routeTiming = $timing}
     }
     $comparison = @(); $bounded = $true
-    foreach ($field in $resourceFields) {
+    foreach ($field in $(if ($DiagnosticOnly) { @() } else { $resourceFields })) {
         $second = [double]$returns[1].quiet.last.state.$field; $third = [double]$returns[2].quiet.last.state.$field
         $fixed = if ($field -eq 'objectTextureCount') { 8 } else { 8 * 1024 * 1024 }
         $allowance = [Math]::Max($fixed, [Math]::Ceiling($second * 0.01)); $growth = $third - $second
@@ -167,10 +171,11 @@ try {
         $comparison += [pscustomobject]@{field = $field; return2 = $second; return3 = $third; growth = $growth; allowedGrowth = $allowance; accepted = $accepted}
         if (!$accepted) { $bounded = $false }
     }
-    $lateQuiet = $returns[1].quiet.quiet -and $returns[2].quiet.quiet
-    $retiredClear = $returns[1].quiet.last.state.geometryRetiredBytes -eq 0 -and $returns[2].quiet.last.state.geometryRetiredBytes -eq 0
+    $lateQuiet = !$DiagnosticOnly -and $returns[1].quiet.quiet -and $returns[2].quiet.quiet
+    $retiredClear = !$DiagnosticOnly -and $returns[1].quiet.last.state.geometryRetiredBytes -eq 0 -and $returns[2].quiet.last.state.geometryRetiredBytes -eq 0
     $converged = $bounded -and $lateQuiet -and $retiredClear
     $status = if (!$lateQuiet) { 'PendingWarmup' } elseif (!$converged) { 'ResourceGrowth' } else { 'Converged' }
+    if ($DiagnosticOnly) { $status = 'AllocationDiagnosticOnly' }
     $allocation = $null
     if ($AllocationReport) {
         function Read-Allocation($request) {
@@ -184,6 +189,9 @@ try {
             } while ($report.status -eq 'Pending')
             if ($report.status -ne 'Ready' -or !$report.valid -or $report.invalidRanges -ne 0 -or $report.unresolvedNames -ne 0) { throw 'Allocation report failed validity checks' }
             if (($report.uniqueVertexBytes + $report.uniqueIndexBytes) -gt $report.poolLiveBytes) { throw 'Unique retained mesh allocation exceeds the whole pool' }
+            if ($report.registryEntriesVisited -gt $report.maxModels -or
+                ($report.modelsRequested + $report.ineligibleEntriesSkipped) -ne $report.registryEntriesVisited) { throw 'Registry sampling and negative-cache accounting disagree' }
+            if ($report.missingModels -ne 0 -or $report.missingMeshes -ne 0) { throw 'Settled eligible retained models or meshes are missing' }
             return $report
         }
         # Diagnostics run after timed routes and quiet samples; they do not prove usage or reclaimability.
@@ -202,13 +210,13 @@ try {
     if (Select-String -LiteralPath $log -Pattern 'Out of Memory|Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION' -Quiet) { throw 'Renderer error' }
     # Publish verdict only after the owned process exits cleanly. Process/driver
     # measurements remain raw evidence; resident count alone proves no memory bound.
-    @{passed = $converged; status = $status; initialCold = $initialCold; initialQuiet = $initialQuiet
+    @{passed = ($converged -or $DiagnosticOnly); convergenceMeasured = !$DiagnosticOnly; status = $status; initialCold = $initialCold; initialQuiet = $initialQuiet
         returns = $returns; comparison = $comparison; lateQuiet = $lateQuiet; retiredClear = $retiredClear
         processScope = 'Diagnostic private/RSS samples retained; GPU convergence does not establish process-memory convergence'
         allocationReport = $allocation
     } | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $out 'result.json')
     Write-Output "Resource convergence evidence: $out ($status)"
-    if (!$converged) { throw "Convergence not established: $status (see result.json and raw samples)" }
+    if (!$converged -and !$DiagnosticOnly) { throw "Convergence not established: $status (see result.json and raw samples)" }
 } finally {
     if ($gpuSampler -and !$gpuSampler.HasExited) { Stop-Process -Id $gpuSampler.Id }
     if ($client) { $client.Dispose() }

@@ -1286,7 +1286,8 @@ class EngineWgpu : public EngineDummy
         struct GeometryReportRequest
         {
             uint64_t requestId = 0;
-            uint32_t rows = 0, visits = 0, maxModels = 0, registered = 0;
+            uint32_t rows = 0, visits = 0, maxModels = 0, registryEntries = 0;
+            uint32_t registryEntriesVisited = 0, ineligibleEntriesSkipped = 0;
             uint32_t unresolvedNames = 0;
             std::vector<std::pair<uint32_t, std::string>> models;
         };

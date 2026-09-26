@@ -324,7 +324,7 @@ void RegisterScreenshot(HarnessServer& hs)
 #define GEOMETRY_REPORT_FIELD(field) cJSON_AddNumberToObject(result, #field, static_cast<double>(report.field))
                 GEOMETRY_REPORT_FIELD(uniqueVertexBytes); GEOMETRY_REPORT_FIELD(uniqueIndexBytes);
                 GEOMETRY_REPORT_FIELD(poolLiveBytes); GEOMETRY_REPORT_FIELD(poolCapacityBytes); GEOMETRY_REPORT_FIELD(poolRetiredBytes);
-                GEOMETRY_REPORT_FIELD(registeredModelsAtRequest); GEOMETRY_REPORT_FIELD(modelsRequested); GEOMETRY_REPORT_FIELD(modelsVisited);
+                GEOMETRY_REPORT_FIELD(registryEntriesAtRequest); GEOMETRY_REPORT_FIELD(registryEntriesVisited); GEOMETRY_REPORT_FIELD(ineligibleEntriesSkipped); GEOMETRY_REPORT_FIELD(modelsRequested); GEOMETRY_REPORT_FIELD(modelsVisited);
                 GEOMETRY_REPORT_FIELD(lodsInVisitedModels); GEOMETRY_REPORT_FIELD(sectionVisits); GEOMETRY_REPORT_FIELD(uniqueMeshes);
                 GEOMETRY_REPORT_FIELD(missingModels); GEOMETRY_REPORT_FIELD(missingMeshes); GEOMETRY_REPORT_FIELD(invalidRanges); GEOMETRY_REPORT_FIELD(unresolvedNames);
                 GEOMETRY_REPORT_FIELD(maxModels); GEOMETRY_REPORT_FIELD(maxRows); GEOMETRY_REPORT_FIELD(maxSectionVisits);
