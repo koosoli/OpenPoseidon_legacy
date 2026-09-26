@@ -1,16 +1,17 @@
-param([ValidateSet("Native","DayZ","Legacy")][string]$Corpus="Native",[ValidateRange(0,2.0)][double]$GeoGrowth=2.0,[switch]$PressureGrowth,[switch]$PackedModels,[switch]$PackedTextures,[switch]$FullSkyUploads,[switch]$SampleDriverMemory,[switch]$Baseline,[switch]$Normal,[switch]$Adaptive,[switch]$Controlled,[switch]$Identity,[switch]$RequiredIdentity,[switch]$CoverageOnly,[switch]$SaveRoundTrip,[switch]$DuringFill,[ValidateRange(-1,16384)][int]$ReadyMb=-1,[string]$Label='stationary-budget',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
+param([ValidateSet("Native","DayZ","Legacy")][string]$Corpus="Native",[ValidateRange(0,2.0)][double]$GeoGrowth=2.0,[switch]$PressureGrowth,[switch]$PackedModels,[switch]$PackedTextures,[switch]$FullSkyUploads,[switch]$SampleDriverMemory,[switch]$Baseline,[switch]$Normal,[switch]$Adaptive,[switch]$Controlled,[switch]$Identity,[switch]$RequiredIdentity,[switch]$CoverageOnly,[switch]$SaveRoundTrip,[switch]$FreshReload,[switch]$DuringFill,[ValidateRange(-1,16384)][int]$ReadyMb=-1,[string]$Label='stationary-budget',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {
  $shellName=if ($PSVersionTable.PSEdition -eq 'Core') {'pwsh.exe'} else {'powershell.exe'}
  $argv=@((Join-Path $PSScriptRoot 'with-game-lock.sh'),(Join-Path $PSHOME $shellName).Replace('\','/'),'-NoProfile','-File',$PSCommandPath,'-Label',$Label,'-GameDir',$GameDir)
  if ($Baseline) {$argv+='-Baseline'}; if ($Normal) {$argv+='-Normal'}
- foreach ($flag in @('Adaptive','Controlled','Identity','RequiredIdentity','CoverageOnly','SaveRoundTrip','DuringFill','SampleDriverMemory','PressureGrowth','PackedModels','PackedTextures','FullSkyUploads')) {if ((Get-Variable $flag -ValueOnly)) {$argv+=('-'+$flag)}}
+ foreach ($flag in @('Adaptive','Controlled','Identity','RequiredIdentity','CoverageOnly','SaveRoundTrip','FreshReload','DuringFill','SampleDriverMemory','PressureGrowth','PackedModels','PackedTextures','FullSkyUploads')) {if ((Get-Variable $flag -ValueOnly)) {$argv+=('-'+$flag)}}
  $argv+=@('-ReadyMb',[string]$ReadyMb,'-Corpus',$Corpus,'-GeoGrowth',$GeoGrowth.ToString([Globalization.CultureInfo]::InvariantCulture))
  $env:LOCK_OWNER='stationary residency check'
  try {& 'C:\Program Files\Git\bin\bash.exe' @argv; if ($LASTEXITCODE) {throw "Residency test exited $LASTEXITCODE"}} finally {Remove-Item Env:LOCK_OWNER}
  return
 }
 if (Get-Process OpenPoseidon -ErrorAction SilentlyContinue) {throw 'Game already running'}
+if ($FreshReload) {$SaveRoundTrip=$true}
 if ($SaveRoundTrip) {if (!$Normal -or $Baseline -or $DuringFill -or $Controlled -or $CoverageOnly) {throw 'SaveRoundTrip requires Normal and excludes performance modes'}; $RequiredIdentity=$true}
 $root=Split-Path $PSScriptRoot -Parent
 $out=Join-Path $root ('build/stream-residency/'+$Label+'-'+(Get-Date -Format yyyyMMdd-HHmmss))
@@ -61,7 +62,8 @@ Remove-Item Env:POSEIDON_TEST_RAIN -ErrorAction SilentlyContinue
 Remove-Item Env:WGR_WATER_CURLING_BREAKER -ErrorAction SilentlyContinue
 $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0);$listener.Start();$port=$listener.LocalEndpoint.Port;$listener.Stop()
 $mission=Join-Path $root 'tests/perf/missions/perf_field.eden';$log=Join-Path $out 'engine.log'
-@{scriptSha256=(Get-FileHash $PSCommandPath).Hash;head=(& git -C $root rev-parse HEAD);installed=(Get-Content (Join-Path $GameDir 'DEPLOYED-FROM.txt'));corpus=$Corpus;geoGrowth=$GeoGrowth;pressureGrowth=[bool]$PressureGrowth;packedModels=[bool]$PackedModels;packedTextures=[bool]$PackedTextures;coverageOnly=[bool]$CoverageOnly;saveRoundTrip=[bool]$SaveRoundTrip;lodGovernorRange=($env:WGR_LOD_GOVERNOR_RANGE);incrementalSkyUploads=(!$FullSkyUploads);adaptive=[bool]$Adaptive;controlled=[bool]$Controlled;readyMb=$ReadyMb;hashes=@(Get-FileHash (Join-Path $GameDir 'OpenPoseidon.exe'),(Join-Path $GameDir 'wgpu_renderer.dll'))} | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $out 'provenance.json')
+$testLog=$log
+@{scriptSha256=(Get-FileHash $PSCommandPath).Hash;head=(& git -C $root rev-parse HEAD);installed=(Get-Content (Join-Path $GameDir 'DEPLOYED-FROM.txt'));corpus=$Corpus;geoGrowth=$GeoGrowth;pressureGrowth=[bool]$PressureGrowth;packedModels=[bool]$PackedModels;packedTextures=[bool]$PackedTextures;coverageOnly=[bool]$CoverageOnly;saveRoundTrip=[bool]$SaveRoundTrip;freshReload=[bool]$FreshReload;lodGovernorRange=($env:WGR_LOD_GOVERNOR_RANGE);incrementalSkyUploads=(!$FullSkyUploads);adaptive=[bool]$Adaptive;controlled=[bool]$Controlled;readyMb=$ReadyMb;hashes=@(Get-FileHash (Join-Path $GameDir 'OpenPoseidon.exe'),(Join-Path $GameDir 'wgpu_renderer.dll'))} | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $out 'provenance.json')
 $p=$null;$client=$null;$gpuSampler=$null
 try {
  if ($SampleDriverMemory) {
@@ -83,7 +85,7 @@ try {
   $until=[DateTime]::UtcNow.AddSeconds(240)
   do {
    Start-Sleep -Seconds 2
-   if ((Get-Content -LiteralPath $log -Tail 150) -match 'Out of Memory|Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION') {throw 'Renderer failure; refusing further measurements'}
+   if ((Get-Content -LiteralPath $testLog -Tail 150) -match 'Out of Memory|Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION') {throw 'Renderer failure; refusing further measurements'}
    $r=Send @{cmd='stream_residency'}
    if ($Corpus -eq 'Legacy') {if ($r.valid) {throw 'Legacy unexpectedly entered modern streamer'}; return $r}
    if ([DateTime]::UtcNow -gt $until) {throw 'Residency failed to settle in 240 seconds'}
@@ -204,6 +206,25 @@ try {
    $null=Send @{cmd='exec';code=("(object $requiredId) setDammage 0.75")}
    $r=Send @{cmd='eval';code=("getDammage (object $requiredId) > 0.74")}
    if ($r.result -notmatch 'true') {throw 'Mutation control failed before reload'}
+   if ($FreshReload) {
+    # Keep the same private profile/save, but prove restoration into a NEW world.
+    # Preserve the first process log and metrics; only this script's PID is stopped.
+    $reloadLog=Join-Path $out 'reload-engine.log'
+    $testLog=$reloadLog
+    $reloadArgs=$p.StartInfo.Arguments.Replace($log,$reloadLog).Replace((Join-Path $out 'capture.json'),(Join-Path $out 'reload-capture.json'))
+    $null=Send @{cmd='exit'}
+    if (!$p.WaitForExit(15000) -or $p.ExitCode) {throw 'Save process failed to exit cleanly'}
+    $client.Dispose()
+    $p=Start-Process -FilePath (Join-Path $GameDir 'OpenPoseidon.exe') -WorkingDirectory $GameDir -WindowStyle Hidden -PassThru -ArgumentList $reloadArgs
+    $null=$p.Handle; $client=[Net.Sockets.TcpClient]::new(); $deadline=[DateTime]::UtcNow.AddSeconds(90)
+    while (!$client.Connected) {try {$client.Connect('127.0.0.1',$port)} catch {if ($p.HasExited -or [DateTime]::UtcNow -gt $deadline) {throw}; Start-Sleep -Milliseconds 250}}
+    $stream=$client.GetStream(); $stream.ReadTimeout=30000
+    $reader=[IO.StreamReader]::new($stream); $writer=[IO.StreamWriter]::new($stream,[Text.UTF8Encoding]::new($false)); $writer.AutoFlush=$true
+    $null=Send @{cmd='eval';code=('triFreeFlyPose "'+(Pose ($baseX+1500) ($baseY+150))+'"')}
+    $null=Wait-Settled
+    $unloaded=Send @{cmd='stream_identity_probe';ids=@($requiredId)}
+    if ($unloaded.objects[0].present) {throw 'Fresh reload fixture already resident; cold restoration not established'}
+   }
    $stream.ReadTimeout=60000
    try {$r=Send @{cmd='eval';code='triLoadGame "stream-away-roundtrip"'}} finally {$stream.ReadTimeout=30000}
    if ($r.result.Trim('"') -ne 'OK') {throw 'Full mission reload failed'}
@@ -221,12 +242,13 @@ try {
    if ($r.result -notmatch 'true') {throw 'Required identity or mutation changed on return'}
   }
  }
- @{coverageOnly=[bool]$CoverageOnly;saveRoundTrip=[bool]$SaveRoundTrip;during=$during;identityBefore=$identityBefore;identityAway=$identityAway;identityReturned=$identityReturned;poses=$poseResults;before=$before;small=$small;restored=$restored;normal=[bool]$Normal;baselineReproduced=([bool]$Baseline -and !$Normal)} | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $out 'result.json')
+ @{coverageOnly=[bool]$CoverageOnly;saveRoundTrip=[bool]$SaveRoundTrip;freshReload=[bool]$FreshReload;during=$during;identityBefore=$identityBefore;identityAway=$identityAway;identityReturned=$identityReturned;poses=$poseResults;before=$before;small=$small;restored=$restored;normal=[bool]$Normal;baselineReproduced=([bool]$Baseline -and !$Normal)} | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $out 'result.json')
  $null=Send @{cmd='screenshot';path=(Join-Path $out 'settled.png')}
  if ($RequiredIdentity -or $CoverageOnly) {Start-Sleep -Seconds 8; $null=Send @{cmd='screenshot';path=(Join-Path $out 'returned-settled.png')}}
  $null=Send @{cmd='exit'}
  if (!$p.WaitForExit(15000) -or $p.ExitCode) {throw 'Game failed to exit cleanly'}
  if (Select-String -LiteralPath $log -Pattern 'Out of Memory|Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION' -Quiet) {throw 'Renderer error'}
+ if ($FreshReload -and (Select-String -LiteralPath $reloadLog -Pattern 'Out of Memory|Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION' -Quiet)) {throw 'Reload renderer error'}
  Write-Output "Stationary residency evidence: $out"
 } finally {
  if ($gpuSampler -and !$gpuSampler.HasExited) {Stop-Process -Id $gpuSampler.Id}
