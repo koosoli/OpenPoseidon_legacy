@@ -1,9 +1,10 @@
-param([switch]$Disabled,[string]$Label='simulation-residency',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',[string]$Python='C:\Program Files\Python311\python.exe')
+param([switch]$Disabled,[switch]$Capacity,[switch]$MovedWatcher,[string]$Label='simulation-residency',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',[string]$Python='C:\Program Files\Python311\python.exe')
 $ErrorActionPreference='Stop'
+if (@($Disabled,$Capacity,$MovedWatcher | Where-Object {$_}).Count -gt 1) {throw 'Disabled, Capacity and MovedWatcher are separate scenarios'}
 if (!$env:LOCK_OWNER) {
  $shellName=if ($PSVersionTable.PSEdition -eq 'Core') {'pwsh.exe'} else {'powershell.exe'}
  $argv=@((Join-Path $PSScriptRoot 'with-game-lock.sh'),(Join-Path $PSHOME $shellName).Replace('\','/'),'-NoProfile','-File',$PSCommandPath,'-Label',$Label,'-GameDir',$GameDir,'-Python',$Python)
- if ($Disabled) {$argv+='-Disabled'}
+ foreach ($flag in @('Disabled','Capacity','MovedWatcher')) {if ((Get-Variable $flag -ValueOnly)) {$argv+=('-'+$flag)}}
  $env:LOCK_OWNER='simulation residency fixture'
  try {& 'C:\Program Files\Git\bin\bash.exe' @argv; if ($LASTEXITCODE) {throw "Simulation fixture exited $LASTEXITCODE"}} finally {Remove-Item Env:LOCK_OWNER}
  return
@@ -15,7 +16,9 @@ $fixture=Join-Path $out 'fixture'
 $mission=Join-Path $out 'simulation-fixture.eden'
 $env:POSEIDON_USER_DIR=Join-Path $out 'user'
 New-Item -ItemType Directory -Force $mission,$env:POSEIDON_USER_DIR | Out-Null
-& $Python (Join-Path $PSScriptRoot 'streaming/build_simulation_residency_fixture.py') $fixture --absolute-model-path
+$fixtureArgs=@($fixture,'--absolute-model-path')
+if ($Capacity) {$fixtureArgs+=@('--model-count','257')}
+& $Python (Join-Path $PSScriptRoot 'streaming/build_simulation_residency_fixture.py') @fixtureArgs
 if ($LASTEXITCODE) {throw 'Original fixture generation failed'}
 @'
 version=11;
@@ -67,6 +70,9 @@ try {
  }
  function State {Send @{cmd='stream_simulation_residency'}}
  function Ids {Send @{cmd='stream_identity_probe';ids=@(1001,1002)}}
+ function Query($action,$from=@(1190,11.5,1200),$to=@(1210,11.5,1200),$radius=0.01,$purpose=1) {
+  Send @{cmd='stream_simulation_query';actor='streamFixtureActor';action=$action;from=$from;to=$to;radius=$radius;purpose=$purpose}
+ }
  function Wait-State($predicate,$description) {
   $until=[DateTime]::UtcNow.AddSeconds(90)
   do {
@@ -86,6 +92,11 @@ try {
   $cold=State;$coldIds=Ids
   if ($cold.status -ne 'Disabled' -or $cold.ownerPumps -ne 0 -or @($coldIds.objects | Where-Object {$_.present}).Count) {throw 'Default-off fixture performed simulation work or loaded remote walls'}
   $result=@{cold=$cold;coldIds=$coldIds}
+ } elseif ($Capacity) {
+  $cold=Wait-State {param($r) $r.status -eq 'CapacityExceeded'} 'pre-admission model capacity refusal'
+  $coldIds=Ids
+  if ($cold.models -ne 257 -or $cold.inventoryRows -ne 0 -or $cold.preparedModels -ne 0 -or $cold.leasedPlacements -ne 0 -or $cold.created -ne 0 -or @($coldIds.objects | Where-Object {$_.present}).Count) {throw 'Capacity refusal admitted a partial world'}
+  $result=@{cold=$cold;coldIds=$coldIds;capacity=$true}
  } else {
   $cold=Wait-State {param($r) $r.status -eq 'Ready' -and $r.inventoryRows -eq 2 -and $r.preparedModels -eq 1 -and $r.leasedPlacements -eq 2 -and $r.readyRegions -ge 2 -and !$r.pendingRegions -and !$r.unknownRegions -and !$r.refusedRegions} 'complete actor region'
   $coldIds=Ids
@@ -95,6 +106,29 @@ try {
   $query=@{cmd='stream_fire_probe';from=@(1190,11.5,1200);to=@(1210,11.5,1200)}
   $hits=Send $query
   if (!@($hits.contacts | Where-Object {$_.id -eq 1001}).Count) {throw 'Cold actor wall did not obstruct fire'}
+  $queryBefore=Query 'status'
+  if ($queryBefore.status -ne 'Pending') {throw 'Neighborhood readiness was reused as a fire query'}
+  $invalidPurpose=Query 'queue' -purpose 2
+  if ($invalidPurpose.status -ne 'Invalid') {throw 'Unsupported query purpose was admitted'}
+  $null=Query 'queue'
+  $until=[DateTime]::UtcNow.AddSeconds(60)
+  do {Start-Sleep -Milliseconds 250;$queryReady=Query 'status'} while ($queryReady.status -eq 'Pending' -and [DateTime]::UtcNow -lt $until)
+  if ($queryReady.status -ne 'Ready') {throw 'Exact fire residency did not complete'}
+  $wrongRay=Query 'status' -from @(100,11.5,100) -to @(120,11.5,100)
+  if ($wrongRay.status -ne 'Pending') {throw 'Unrelated ray inherited fire readiness'}
+  $independent=State
+  if ($independent.regions -lt 2 -or $independent.readyRegions -lt 2 -or $independent.queryRegions -ne 1 -or $independent.readyQueries -ne 1) {throw 'Query channel replaced automatic neighborhood'}
+  $null=Query 'release'
+  $queryReleased=State
+  if ($queryReleased.queryRegions -ne 0 -or $queryReleased.leasedPlacements -ne 2) {throw 'Query release retired another interest owner'}
+  if ($MovedWatcher) {
+   $null=Send @{cmd='stream_existing_move';id=1002;position=@(100,11.5,100)}
+   $moved=State;$movedIds=Ids
+   if ($moved.status -ne 'Unknown' -or $moved.liveWatchedPlacements -ne 2 -or $movedIds.objects[1].x -ne 100 -or $movedIds.objects[1].z -ne 100) {throw 'Movement outside authored bins reused a stale complete-world certificate'}
+   $movedQuery=Query 'status' -from @(100,11.5,100) -to @(120,11.5,100)
+   if ($movedQuery.status -ne 'Unknown') {throw 'Moved live placement was ignored by an unrelated query'}
+   $result=@{cold=$cold;coldIds=$coldIds;queryBefore=$queryBefore;queryReady=$queryReady;invalidPurpose=$invalidPurpose;wrongRay=$wrongRay;independent=$independent;queryReleased=$queryReleased;moved=$moved;movedIds=$movedIds;movedQuery=$movedQuery;movedWatcher=$true}
+  } else {
   $pose=Send @{cmd='eval';code='triFreeFlyPose "1188 1200 18 90 -8"'}
   if ($pose.result.Trim('"') -ne 'OK') {throw 'Near camera pose refused'}
   $until=[DateTime]::UtcNow.AddSeconds(60)
@@ -107,15 +141,27 @@ try {
   if (!$away.objects[0].present -or $away.objects[0].visualResident) {throw 'Camera eviction lost actor lease or did not retire visual residency'}
   $awayHits=Send $query
   if (!@($awayHits.contacts | Where-Object {$_.id -eq 1001}).Count) {throw 'Camera eviction lost actor obstruction'}
+  # Complete an unmodified moving-actor replacement before introducing state
+  # that correctly makes the immutable model contract globally Unknown.
+  $null=Send @{cmd='exec';code='streamFixtureActor setPos [100,100,0]'}
+  $movedAway=Wait-State {param($r) $r.status -eq 'Ready' -and $r.leasedPlacements -eq 0 -and !$r.pendingRegions} 'moving actor replacement'
+  $movedAwayIds=Ids
+  if (@($movedAwayIds.objects | Where-Object {$_.present}).Count) {throw 'Moving actor retained unmodified remote placements'}
+  $null=Send @{cmd='exec';code='streamFixtureActor setPos [1190,1200,0]'}
+  $reacquired=Wait-State {param($r) $r.status -eq 'Ready' -and $r.leasedPlacements -eq 2 -and !$r.pendingRegions} 'moving actor reacquisition'
   $damage=Send @{cmd='stream_existing_damage';id=1002;damage=0.25}
   if (!$damage.mustBeSaved -or [Math]::Abs($damage.rawDamage-0.25) -gt 0.001) {throw 'Existing object mutation did not create saved state'}
-  $null=Send @{cmd='exec';code='streamFixtureActor setPos [100,100,0]'}
+  $mutated=State
+  if ($mutated.status -ne 'Unknown') {throw 'Mutable geometry retained an immutable-world certificate'}
+  $null=Send @{cmd='exec';code='deleteVehicle streamFixtureActor'}
   $released=Wait-State {param($r) $r.leasedPlacements -eq 0 -and !$r.pendingRegions} 'transient lease release'
   $releasedIds=Ids
   if ($releasedIds.objects[0].present -or !$releasedIds.objects[1].present -or !$releasedIds.objects[1].mustBeSaved -or [Math]::Abs($releasedIds.objects[1].rawDamage-0.25) -gt 0.001) {throw 'Lease retirement lost mutation or retained unmodified wall'}
   $final=Send @{cmd='stream_residency'}
   if ($final.required -ne 0) {throw 'Fixture permanently pinned an object'}
-  $result=@{cold=$cold;coldIds=$coldIds;residency=$residency;hits=$hits;visual=$visual;away=$away;awayHits=$awayHits;damage=$damage;released=$released;releasedIds=$releasedIds;final=$final}
+  if ($released.status -ne 'Unknown' -or $released.liveWatchedPlacements -ne 1) {throw 'Zero-lease mutable placement lost its freshness watcher'}
+  $result=@{cold=$cold;coldIds=$coldIds;residency=$residency;hits=$hits;queryBefore=$queryBefore;queryReady=$queryReady;invalidPurpose=$invalidPurpose;wrongRay=$wrongRay;independent=$independent;queryReleased=$queryReleased;visual=$visual;away=$away;awayHits=$awayHits;movedAway=$movedAway;movedAwayIds=$movedAwayIds;reacquired=$reacquired;damage=$damage;mutated=$mutated;released=$released;releasedIds=$releasedIds;final=$final}
+  }
  }
  $null=Send @{cmd='exit'}
  if (!$p.WaitForExit(15000) -or $p.ExitCode) {throw 'Game failed to exit cleanly'}

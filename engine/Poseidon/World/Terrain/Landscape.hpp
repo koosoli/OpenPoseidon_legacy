@@ -660,6 +660,11 @@ class Landscape : public SerializeClass
     // Explicit script/save/network identities and mutated state outlive camera residency.
     // Sparse sets avoid adding per-placement overhead to multi-million-object worlds.
     std::unique_ptr<Streaming::SimulationResidencyState> _modernSimulation;
+    Streaming::SimulationResidencyStatus QueueModernSimulationRegionForChannel(
+        Object& actor, Vector3Par from, Vector3Par to, double radius, bool automatic, uint8_t channel);
+    Streaming::SimulationResidencyStatus ModernSimulationRegionStatusForChannel(const Object& actor, uint8_t channel) const;
+    void ReleaseModernSimulationRegionForChannel(Object& actor, uint8_t channel);
+    void ObserveModernSimulationPlacement(uint32_t placement, Object* object);
     void ResetModernSimulationResidency();
     void EnsureModernSimulationResidency();
     bool HasModernSimulationLease(uint32_t placement) const;
@@ -987,6 +992,13 @@ class Landscape : public SerializeClass
         Object& actor, Vector3Par from, Vector3Par to, double radius, bool automatic = false);
     void ReleaseModernSimulationRegion(Object& actor);
     Streaming::SimulationResidencyStatus ModernSimulationRegionStatus(const Object& actor) const;
+    // Exact query channel, independent of automatic neighborhoods. Ready is
+    // geometry residency only; the origin-grid >25m collision limitation remains.
+    Streaming::SimulationResidencyStatus QueueModernSimulationQuery(Object& actor,
+        Streaming::SimulationQueryPurpose purpose, Vector3Par from, Vector3Par to, double radius);
+    Streaming::SimulationResidencyStatus ModernSimulationQueryStatus(const Object& actor,
+        Streaming::SimulationQueryPurpose purpose, Vector3Par from, Vector3Par to, double radius) const;
+    void ReleaseModernSimulationQuery(Object& actor, Streaming::SimulationQueryPurpose purpose);
     Streaming::SimulationResidencyStats SnapshotModernSimulationResidency() const;
     // Only World can mint the owner boundary, after its real background-AI join.
     void PumpModernSimulationResidency(const Streaming::SimulationResidencyOwnerBoundary& boundary);

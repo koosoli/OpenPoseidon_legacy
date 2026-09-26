@@ -4192,6 +4192,7 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
             else
                 warmMs += totalMs;
             placement.resident = admitted;
+            ObserveModernSimulationPlacement(index, admitted);
             if (admitted)
             {
                 if (_nativeFarActive.erase(index))
@@ -4990,6 +4991,7 @@ Object* Landscape::ResolveObject(int id)
         if (!object)
             return nullptr;
         placement.resident = object;
+        ObserveModernSimulationPlacement(uint32_t(&placement - _modernObjectPlacements.data()), object);
         _modernRequiredObjects.insert(id);
         _modernLogicalOnlyObjects.insert(id);
         if (_geoAccumEnabled)

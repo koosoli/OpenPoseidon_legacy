@@ -17,6 +17,17 @@ namespace Poseidon::Streaming
 // references are created, read and destroyed on the owner, never by AI workers.
 struct SimulationResidencyState
 {
+    struct RegionKey
+    {
+        const Object* actor = nullptr;
+        uint8_t channel = 0; // 0 neighborhood, SimulationQueryPurpose otherwise
+        bool operator==(const RegionKey&) const = default;
+    };
+    struct RegionKeyHash
+    {
+        size_t operator()(const RegionKey& key) const
+        { return std::hash<const Object*>{}(key.actor) ^ (size_t(key.channel) * size_t(0x9e3779b9)); }
+    };
     enum class ModelState { Waiting, Ready, Unknown, CapacityExceeded };
     struct Group
     {
@@ -37,6 +48,28 @@ struct SimulationResidencyState
         std::array<float, 12> frame{};
         float radius = 0;
     };
+    struct Watch
+    {
+        OLink<Object> object;
+        Link<LODShape> shape;
+        std::array<float, 12> frame{};
+        uint32_t model = 0;
+        int id = -1, type = 0;
+        float radius = 0;
+        bool authored = false;
+        // Only the owner may read weak witnesses. Shape policy/content scope is
+        // validated separately; arbitrary mutable per-LOD APIs are excluded.
+        bool MatchesImmutableObject(const LODShapeWithShadow* expectedShape, SimulationFactoryRoute expectedRoute) const
+        {
+            Object* live = static_cast<Object*>(object);
+            if (!live) return true; // Joined cleanup may retain a harmless tombstone.
+            return authored && live->ID() == id && live->Static() && live->GetType() == type &&
+                live->GetType() == (expectedRoute == SimulationFactoryRoute::Road ? Network : Primary) &&
+                live->GetShape() == shape.GetRef() && live->GetShape() == expectedShape &&
+                SimulationFrameSample(live->Transform()) == frame && live->GetRadius() == radius &&
+                !live->MustBeSaved() && !live->IsDestroyed() && live->GetDestroyed() == 0 && live->GetRawTotalDammage() == 0;
+        }
+    };
     struct Region
     {
         OLink<Object> actor;
@@ -45,6 +78,7 @@ struct SimulationResidencyState
         std::array<float, 12> actorFrame{};
         std::array<float, 3> actorSpeed{};
         float actorRadius = 0;
+        int actorId = -1;
         bool automatic = false;
         uint64_t seen = 0, planGeneration = 0;
         SimulationResidencyStatus status = SimulationResidencyStatus::Pending;
@@ -59,7 +93,12 @@ struct SimulationResidencyState
     std::vector<uint32_t> leaseCounts;
     std::unordered_map<uint32_t, Entry> entries;
     std::deque<uint32_t> cleanupQueue;
-    std::unordered_map<const Object*, Region> regions;
+    // Complete bounded registry of actual modern-placement admissions. Weak
+    // watchers survive lease0; they neither instantiate nor retain an Object.
+    std::unordered_map<uint32_t, Watch> watches;
+    std::deque<uint32_t> watchCleanupQueue;
+    bool watchCapacityExceeded = false;
+    std::unordered_map<RegionKey, Region, RegionKeyHash> regions;
     size_t inventoryCursor = 0, modelCursor = 0, actorCursor = 0, regionCursor = 0;
     uint64_t tick = 0, generation = 1;
     bool inventoryComplete = false, inventoryInvalid = false;

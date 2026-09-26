@@ -34,7 +34,13 @@ def bulk(payload):
     return bytes(zeros + 1) + bytes((tail + 1,)) + payload + b"\x11\0\0"
 
 
-def build_world(model_path=MODEL_PATH):
+def model_paths(model_path, model_count):
+    # Unused inventory rows exercise refusal BEFORE geometry loading. Only the
+    # first model is referenced by either placement; no missing asset is admitted.
+    return [model_path] + [model_path[:-4] + f"_unused_{i:03}.p3d" for i in range(1, model_count)]
+
+
+def build_world(model_path=MODEL_PATH, model_count=1):
     leaf = b"\0" * 5  # Uniform quadtree: root tag plus four-byte leaf.
     zero_grid = bytes(LAND * LAND)
     out = bytearray(b"OPRW" + pack("6if", 25, 0, LAND, LAND, LAND, LAND, CELL))
@@ -44,7 +50,9 @@ def build_world(model_path=MODEL_PATH):
     out += bulk(zero_grid) * 2  # grass approximation, primary texture index
     out += bulk(pack("f", HEIGHT) * (LAND * LAND))
     out += pack("i", 1) + b"\0\0"  # one empty fallback terrain material
-    out += pack("i", 1) + model_path.encode("ascii") + b"\0"
+    out += pack("i", model_count)
+    for path in model_paths(model_path, model_count):
+        out += path.encode("ascii") + b"\0"
     out += pack("i", 0)  # no config-backed static entity records
     out += leaf + pack("i", len(PLACEMENTS) * 60)  # object offsets and byte count
     out += leaf + pack("i", 0)  # map-info offsets and byte count
@@ -104,7 +112,7 @@ class Cursor:
         return result
 
 
-def verify_world(payload, model_path=MODEL_PATH):
+def verify_world(payload, model_path=MODEL_PATH, model_count=1):
     r = Cursor(payload)
     assert r.take(4) == b"OPRW"
     assert r.unpack("6if") == (25, 0, LAND, LAND, LAND, LAND, CELL)
@@ -116,7 +124,8 @@ def verify_world(payload, model_path=MODEL_PATH):
     assert r.grid(LAND * LAND) == bytes(LAND * LAND)
     assert struct.unpack("<1024f", r.grid(LAND * LAND * 4)) == (HEIGHT,) * 1024
     assert r.unpack("i") == (1,) and r.z() == "" and r.take(1) == b"\0"
-    assert r.unpack("i") == (1,) and r.z() == model_path
+    assert r.unpack("i") == (model_count,)
+    assert [r.z() for _ in range(model_count)] == model_paths(model_path, model_count)
     assert r.unpack("i") == (0,)
     assert r.take(5) == bytes(5) and r.unpack("i") == (120,)
     assert r.take(5) == bytes(5) and r.unpack("i") == (0,)
@@ -159,12 +168,12 @@ def verify_model(payload):
     assert r.pos == len(payload)
 
 
-def generate(output, absolute_model_path=False):
+def generate(output, absolute_model_path=False, model_count=1):
     output = output.resolve()
     model_file = output / "streaming_fixture" / "wall.p3d"
     model_path = str(model_file) if absolute_model_path else MODEL_PATH
-    world, model = build_world(model_path), build_model()
-    verify_world(world, model_path)
+    world, model = build_world(model_path, model_count), build_model()
+    verify_world(world, model_path, model_count)
     verify_model(model)
     # No implicit output location and no cleanup/deletion of caller files.
     model_file.parent.mkdir(parents=True, exist_ok=True)
@@ -172,7 +181,7 @@ def generate(output, absolute_model_path=False):
     (output / "simulation-residency.wrp").write_bytes(world)
     metadata = {
         "schema": 1, "land_range": LAND, "terrain_range": LAND, "cell_metres": CELL,
-        "elevation": HEIGHT, "models": [model_path], "absolute_model_path": absolute_model_path, "placements": [
+        "elevation": HEIGHT, "models": model_paths(model_path, model_count), "absolute_model_path": absolute_model_path, "placements": [
             {"id": p[0], "model_index": 0, "position": list(p[1:])} for p in PLACEMENTS],
         "camera": [100, 80, 100], "actor": [1190, 10, 1200],
         "fire_segment": [[1190, 11.5, 1200], [1210, 11.5, 1200]],
@@ -195,7 +204,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=Path, help="Private caller-selected output directory")
     parser.add_argument("--absolute-model-path", action="store_true", help="Embed the private absolute loose model path; --addon-root accepts archives, not loose folders")
+    parser.add_argument("--model-count", type=int, choices=(1, 257), default=1, help="257 adds unused metadata rows for the service's pre-admission capacity refusal")
     args = parser.parse_args()
-    manifest = generate(args.output, args.absolute_model_path)
+    manifest = generate(args.output, args.absolute_model_path, args.model_count)
     print(json.dumps({"output": str(args.output.resolve()), "world_sha256": manifest["world_sha256"],
                       "model_sha256": manifest["model_sha256"]}, sort_keys=True))

@@ -18,9 +18,55 @@ inline constexpr size_t SimulationMaxPlacements = 1000000;
 inline constexpr size_t SimulationMaxRegions = 128;
 inline constexpr size_t SimulationMaxRegionLeases = 4096;
 inline constexpr size_t SimulationMaxLeasedPlacements = 16384;
+inline constexpr size_t SimulationMaxWatchedPlacements = 16384;
 inline constexpr uint64_t SimulationMaxModelPayload = 4 * 1024 * 1024;
 inline constexpr uint64_t SimulationMaxPayloadCharge = 64 * 1024 * 1024;
 inline constexpr uint64_t SimulationMaxShapeCharge = 256 * 1024 * 1024;
+
+// Convex swept L-infinity capsule containment, not endpoint-AABB containment.
+// Both endpoint boxes must fit; convexity then covers the complete requested
+// sweep. Conservative roundoff shrinks available clearance. Identical domains
+// (including reversed endpoints) avoid needless rejection at radius zero.
+inline bool SimulationCapsuleContains(const CoveragePoint& from, const CoveragePoint& to, double radius,
+    const CoveragePoint& queryFrom, const CoveragePoint& queryTo, double queryRadius)
+{
+    if (!std::isfinite(radius) || radius < 0 || radius > EngineBroadphaseSafeMagnitude() || !std::isfinite(queryRadius) || queryRadius < 0 || queryRadius > radius)
+        return false;
+    double magnitude = std::max({radius, queryRadius, 1.0});
+    for (size_t axis = 0; axis < 3; ++axis)
+    {
+        for (double value : {from[axis], to[axis], queryFrom[axis], queryTo[axis]})
+        {
+            if (!std::isfinite(value) || std::abs(value) > EngineBroadphaseSafeMagnitude()) return false;
+            magnitude = std::max(magnitude, std::abs(value));
+        }
+    }
+    if (((from == queryFrom && to == queryTo) || (from == queryTo && to == queryFrom)) && radius == queryRadius)
+        return true;
+    const double margin = 32 * std::numeric_limits<float>::epsilon() * magnitude;
+    const double available = radius - queryRadius - margin;
+    if (available < 0) return false;
+    const auto containsPoint = [&](const CoveragePoint& point)
+    {
+        double begin = 0, end = 1;
+        for (size_t axis = 0; axis < 3; ++axis)
+        {
+            const double delta = to[axis] - from[axis];
+            const double low = point[axis] - available, high = point[axis] + available;
+            if (delta == 0)
+            {
+                if (from[axis] < low || from[axis] > high) return false;
+                continue;
+            }
+            double a = (low - from[axis]) / delta, b = (high - from[axis]) / delta;
+            if (a > b) std::swap(a, b);
+            begin = std::max(begin, a); end = std::min(end, b);
+            if (begin > end) return false;
+        }
+        return true;
+    };
+    return containsPoint(queryFrom) && containsPoint(queryTo);
+}
 
 enum class SimulationFactoryRoute { Plain, Road, Unsupported };
 

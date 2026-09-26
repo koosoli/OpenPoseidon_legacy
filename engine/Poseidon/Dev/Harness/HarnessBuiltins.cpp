@@ -77,6 +77,21 @@ namespace Poseidon::Dev
 namespace HarnessBuiltins
 {
 
+static const char* SimulationStatusName(Streaming::SimulationResidencyStatus status)
+{
+    using Status = Streaming::SimulationResidencyStatus;
+    switch (status) {
+        case Status::Disabled: return "Disabled";
+        case Status::Pending: return "Pending";
+        case Status::Ready: return "Ready";
+        case Status::Unknown: return "Unknown";
+        case Status::Invalid: return "Invalid";
+        case Status::CapacityExceeded: return "CapacityExceeded";
+        case Status::WrongOwner: return "WrongOwner";
+    }
+    return "Invalid";
+}
+
 void RegisterScreenshot(HarnessServer& hs)
 {
     hs.RegisterCommand({"stream_identity_probe", "Read world IDs and geometry presence without retaining objects", {}},
@@ -185,6 +200,13 @@ void RegisterScreenshot(HarnessServer& hs)
             number("pendingRegions", state.pendingRegions);
             number("unknownRegions", state.unknownRegions);
             number("refusedRegions", state.refusedRegions);
+            number("watchedPlacements", state.watchedPlacements);
+            number("liveWatchedPlacements", state.liveWatchedPlacements);
+            number("queryRegions", state.queryRegions);
+            number("readyQueries", state.readyQueries);
+            number("pendingQueries", state.pendingQueries);
+            number("unknownQueries", state.unknownQueries);
+            number("refusedQueries", state.refusedQueries);
             number("leasedPlacements", state.leasedPlacements);
             number("created", state.created);
             number("released", state.released);
@@ -217,6 +239,30 @@ void RegisterScreenshot(HarnessServer& hs)
             cJSON_AddNumberToObject(result, "rawDamage", object->GetRawTotalDammage());
             cJSON_AddBoolToObject(result, "mustBeSaved", object->MustBeSaved());
             return HarnessProtocol::JsonResponse(result);
+        });
+    hs.RegisterCommand({"stream_existing_move", "Test-only move of an existing logical static object; never resolves or pins", {}},
+        [](const std::string&, cJSON* root) -> std::string {
+            const auto* enabled = std::getenv("WGR_SIMULATION_RESIDENCY_TEST");
+            if (!enabled || std::strcmp(enabled, "1") || !GLandscape || !GLandscape->ModernSimulationResidencyEnabled())
+                return HarnessProtocol::ErrorResponse("requires enabled simulation residency and WGR_SIMULATION_RESIDENCY_TEST=1");
+            const auto* id = cJSON_GetObjectItemCaseSensitive(root, "id");
+            const auto* coords = cJSON_GetObjectItemCaseSensitive(root, "position");
+            if (!cJSON_IsNumber(id) || !std::isfinite(id->valuedouble) || id->valuedouble < 0 ||
+                id->valuedouble > INT_MAX || std::floor(id->valuedouble) != id->valuedouble ||
+                !cJSON_IsArray(coords) || cJSON_GetArraySize(coords) != 3)
+                return HarnessProtocol::ErrorResponse("integer existing ID and [x,y,z] position required");
+            Vector3 position;
+            for (int axis = 0; axis < 3; ++axis) {
+                const auto* value = cJSON_GetArrayItem(coords, axis);
+                if (!cJSON_IsNumber(value) || !std::isfinite(value->valuedouble) || std::abs(value->valuedouble) > 1000000)
+                    return HarnessProtocol::ErrorResponse("finite bounded position required");
+                position[axis] = static_cast<float>(value->valuedouble);
+            }
+            auto* object = GLandscape->FindObject(id->valueint);
+            if (!object || !object->Static() || object->IsVisualResident())
+                return HarnessProtocol::ErrorResponse("existing logical-only static object required");
+            object->Move(position);
+            return HarnessProtocol::OkResponse();
         });
     hs.RegisterCommand({"stream_fire_probe", "Read-only bounded world fire-geometry segment query", {}},
         [](const std::string&, cJSON* root) -> std::string {
@@ -409,6 +455,61 @@ static GameVarSpace s_evalScope;
 
 void RegisterSqf(HarnessServer& hs)
 {
+    hs.RegisterCommand({"stream_simulation_query", "Test-only independent fire residency channel; never a collision-clear result or pump", {}},
+        [](const std::string&, cJSON* root) -> std::string {
+            const auto* enabled = std::getenv("WGR_SIMULATION_RESIDENCY_TEST");
+            if (!enabled || std::strcmp(enabled, "1") || !GLandscape || !GWorld || GWorld->GetMode() == GModeNetware)
+                return HarnessProtocol::ErrorResponse("requires singleplayer and WGR_SIMULATION_RESIDENCY_TEST=1");
+            const auto* actorName = HarnessProtocol::GetString(root, "actor");
+            const auto* action = HarnessProtocol::GetString(root, "action");
+            if (!actorName || !actorName[0] || std::strlen(actorName) > 64 || !action ||
+                (std::strcmp(action, "queue") && std::strcmp(action, "status") && std::strcmp(action, "release")))
+                return HarnessProtocol::ErrorResponse("actor variable and queue/status/release required");
+            for (const char* p = actorName; *p; ++p)
+                if (!((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') ||
+                    (*p >= '0' && *p <= '9') || *p == '_'))
+                    return HarnessProtocol::ErrorResponse("actor must name one script variable");
+            auto* gs = GWorld->GetGameState();
+            gs->BeginContext(&s_evalScope);
+            GameValue value = gs->EvaluateMultiple(actorName);
+            gs->EndContext();
+            Object* actor = value.GetType() == GameObject
+                ? static_cast<GameDataObject*>(value.GetData())->GetObject().GetLink() : nullptr;
+            if (!actor) return HarnessProtocol::ErrorResponse("existing actor required");
+            const auto* purposeValue = cJSON_GetObjectItemCaseSensitive(root, "purpose");
+            if (purposeValue && (!cJSON_IsNumber(purposeValue) || !std::isfinite(purposeValue->valuedouble) ||
+                purposeValue->valuedouble < 0 || purposeValue->valuedouble > 255 ||
+                std::floor(purposeValue->valuedouble) != purposeValue->valuedouble))
+                return HarnessProtocol::ErrorResponse("purpose must be an integer 0..255");
+            const auto purpose = static_cast<Streaming::SimulationQueryPurpose>(purposeValue ? purposeValue->valueint : 1);
+            if (!std::strcmp(action, "release")) {
+                GLandscape->ReleaseModernSimulationQuery(*actor, purpose);
+                return HarnessProtocol::OkResponse();
+            }
+            Vector3 endpoints[2];
+            const char* keys[] = {"from", "to"};
+            for (int end = 0; end < 2; ++end) {
+                const auto* coords = cJSON_GetObjectItemCaseSensitive(root, keys[end]);
+                if (!cJSON_IsArray(coords) || cJSON_GetArraySize(coords) != 3)
+                    return HarnessProtocol::ErrorResponse("from/to require [x,y,z]");
+                for (int axis = 0; axis < 3; ++axis) {
+                    const auto* item = cJSON_GetArrayItem(coords, axis);
+                    if (!cJSON_IsNumber(item) || !std::isfinite(item->valuedouble) || std::abs(item->valuedouble) > 1000000)
+                        return HarnessProtocol::ErrorResponse("finite bounded endpoints required");
+                    endpoints[end][axis] = static_cast<float>(item->valuedouble);
+                }
+            }
+            const auto* radius = cJSON_GetObjectItemCaseSensitive(root, "radius");
+            if (!cJSON_IsNumber(radius) || !std::isfinite(radius->valuedouble) || radius->valuedouble < 0 || radius->valuedouble > 1000)
+                return HarnessProtocol::ErrorResponse("finite radius 0..1000 required");
+            const auto status = !std::strcmp(action, "queue")
+                ? GLandscape->QueueModernSimulationQuery(*actor, purpose, endpoints[0], endpoints[1], radius->valuedouble)
+                : GLandscape->ModernSimulationQueryStatus(*actor, purpose, endpoints[0], endpoints[1], radius->valuedouble);
+            auto* result = cJSON_CreateObject();
+            cJSON_AddStringToObject(result, "status", SimulationStatusName(status));
+            cJSON_AddStringToObject(result, "scope", "static terrain-object residency; not collision clearance");
+            return HarnessProtocol::JsonResponse(result);
+        });
     hs.RegisterCommand({"ai_combat", "SP combat setting and passive audit fixture state", {{"improved", "int", false}}},
         [](const std::string&, cJSON* root) -> std::string {
             if (!GWorld || GWorld->GetMode() == GModeNetware)

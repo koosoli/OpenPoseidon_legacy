@@ -7,6 +7,8 @@ namespace Poseidon { class World; }
 namespace Poseidon::Streaming
 {
 
+enum class SimulationQueryPurpose : uint8_t { Fire = 1 };
+
 enum class SimulationResidencyStatus : uint8_t
 {
     Disabled, Pending, Ready, Unknown, Invalid, CapacityExceeded, WrongOwner
@@ -22,6 +24,8 @@ struct SimulationResidencyStats
     uint64_t models = 0, preparedModels = 0, unknownModels = 0;
     uint64_t regions = 0, leasedPlacements = 0, created = 0, released = 0;
     uint64_t readyRegions = 0, pendingRegions = 0, unknownRegions = 0, refusedRegions = 0;
+    uint64_t watchedPlacements = 0, liveWatchedPlacements = 0;
+    uint64_t queryRegions = 0, readyQueries = 0, pendingQueries = 0, unknownQueries = 0, refusedQueries = 0;
     uint64_t queueRefused = 0, payloadCapacityCharge = 0, shapeSchedulingCharge = 0;
     uint64_t shapeElementBytes = 0, lastPumpVisits = 0, ownerPumps = 0;
     double lastPumpMs = 0;
