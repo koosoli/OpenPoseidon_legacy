@@ -1106,3 +1106,37 @@ post-destruction fire blocker; the returned ray contains other scene contacts,
 and no such wall-hit persistence is claimed. Broader destruction, full save/MP,
 constructor eligibility, automatic simulation demand, secondary views and
 comparable-quality performance remain OPEN. The streaming plan is not complete.
+### Native fixed-LOD coverage and texture-window opportunity
+
+`native-window-encode-20260926-142234` PASSED its targeted coverage scenario on
+clean installed d70fd977, with normal 20000 object budget, factor 2, packed paths
+OFF, adaptive/pressure growth OFF and fixed lodGovernorRange1. It restores 19999
+placements, drains reservations and exits cleanly. Root inspected initial.png
+and returned-settled.png: street/structures are present in both, but vegetation
+appearance visibly differs. This is fixed-LOD diagnostic coverage, not normal
+FPS measurement or exact vegetation-quality parity. Native Reforger remains a
+stress workload with known compatibility anomalies, never asset ground truth.
+
+Across all 1466 cold-model profile rows in this log, texture encoding sums
+1458.605 ms. The explicit `texEncodeWithoutWindow` sum is 223.066 ms over 16 encodes.
+This reports eligible CPU work completed before renderer acquisition; it does
+not demonstrate concurrent GPU work, overlap, FPS gain or loading improvement.
+The source currently opens this limited preparation window for the first
+eligible item per frame, so the counter is not coverage of all fallback encodes.
+
+A remaining Betula_Pendula/t_betula_pendula_3s.xob cold row reports
+`texWindowWait=583.524`, `texEncodeMs=60.185` and
+`texEncodeWithoutWindow=0.000/0`, with total cold cost 683.4 ms. This is a measured
+renderer-window acquisition/preparation bottleneck worth targeting; the previous
+ownership change has not eliminated it. The next correction must preserve
+producer/render ownership and validate comparable content/detail rather than
+crediting fewer objects or different vegetation as performance improvement.
+
+Before/returned geometry counters match 642734708 live/704643072 capacity bytes;
+radius certificate capacity is 14184 bytes, peak conversion/ready reservations
+172255128/183109033 bytes. These counters are scoped as described above, not
+allocator-exact or complete driver memory. The optional one-second whole-GPU
+sampler includes other applications; its error file is empty. Engine/harness,
+provenance/result, three actually present images and sampler files are hashed.
+The streaming plan, texture stall attribution and visual/performance gates stay
+OPEN.

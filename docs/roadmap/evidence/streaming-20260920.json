@@ -1600,6 +1600,69 @@
         "promoted.png": "34794da05695d9c724b9ac1d38f74aeacf5cbef358b2ec7f4ec5a20c28b62b16"
       },
       "scope": "Installed d70fd977 with runner HEAD d8b7126f. Initially absent wall 83912800 gets intact CPU physical/fire geometry and real fire contact with stable GPU geometry 35207752 unchanged. Destroyed cold phase 0.9960784912109375, visual=false/deferred=true/normalVB=0; visual return same ID/phase, visual=true/deferred=false/normalVB=4, clamped getter 1. Diagnostic 1000 cold budget then 20000/19923 promoted. Root screenshot review: street assets normal. Post-destruction wall fire contact is NOT preserved/required; promoted ray contains other scene contacts. No automatic demand, all-types certificate, full save/MP or FPS/loading acceptance."
+    },
+    {
+      "run": "native-window-encode-20260926-142234",
+      "result": "PASS native fixed-LOD coverage diagnostic with normal 20000 budget; restored19999 and own clean exit0. Not normal-governor FPS acceptance or exact vegetation-quality parity.",
+      "provenance": {
+        "packedTextures": false,
+        "lodGovernorRange": "1",
+        "pressureGrowth": false,
+        "controlled": false,
+        "installed": "codex/streaming-residency d70fd977 2026-09-26_14:10 deploy-ps1",
+        "adaptive": false,
+        "saveRoundTrip": false,
+        "incrementalSkyUploads": true,
+        "coverageOnly": true,
+        "head": "d8b7126fba7332332757ddf2b84c3dc5366e470a",
+        "corpus": "Native",
+        "freshReload": false,
+        "geoGrowth": 2.0,
+        "scriptSha256": "42608B4BE6D132BB1EE55D37CDF9215E0FAD2E1B343A16EA0D143B05C6183649",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "DDF6523A01F0EB324B8AC25B1D4FAC40ACF0E5F936D6F39FE18152741A092F18",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "50BA98B6C8205C60606D66AC1E4655F6562279FD709258E199C749E07143BE63",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "packedModels": false,
+        "readyMb": -1
+      },
+      "sha256": {
+        "engine.log": "904007704d0e1c85a0aa9fe8e6887d4bb4a0819507452600c96c6cdcaa3a66cc",
+        "harness.jsonl": "5176f6b3b8f09ad9457fd63dc59cb22306387b12cd63a1dc5c37cc30cd697a2e",
+        "provenance.json": "59d257c4359895ec4afcb0e30c81c1f465dcb744b1345eb4d02b92bff3730575",
+        "result.json": "99940b21c95136f886da7ee9415c8bc6a39de06b05d703c759b694a5a505b96c",
+        "initial.png": "9ebddc9c40d8a975f754bb50702bb1119c69a7a3e83834b43191d8ac3ce0774d",
+        "settled.png": "df8d6caa93f6e63b403b88040dfedc36cb584f583f3a5d3c895d519f8bccf169",
+        "returned-settled.png": "4ec7c71805602f8abf8cda764ea55377fe752f1327ffa695fc38d3ba46b6613c",
+        "whole-gpu-memory.csv": "83130f0a6032c4e22325ee48d3e59fe276e554b5dec3142f7564d5860c4c9107",
+        "whole-gpu-memory-errors.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "whole-gpu-memory-scope.txt": "e6d61a4bc6b06e8fb1dc4466dcf4edfe9454430f738b2012fc0f1e1708b9b75c"
+      },
+      "observations": {
+        "coldProfileRows": 1466,
+        "textureEncodeMs": 1458.605,
+        "textureEncodeWithoutWindowMs": 223.066,
+        "textureEncodesWithoutWindow": 16,
+        "betulaModel": "Assets/Vegetation/Tree/Betula_Pendula/t_betula_pendula_3s.xob",
+        "betulaWindowWaitMs": 583.524,
+        "betulaEncodeMs": 60.185,
+        "betulaEncodeWithoutWindowMs": 0,
+        "beforeResident": 19999,
+        "restoredResident": 19999,
+        "radiusCertificateBytes": 14184,
+        "peakConversionReservationBytes": 172255128,
+        "peakReadyReservationBytes": 183109033,
+        "screenshotReview": "Root inspected initial.png and returned-settled.png: structures/street present at both; visible vegetation appearance differs. No exact vegetation quality parity claim.",
+        "limitations": "CoverageOnly fixed lodGovernorRange1 is diagnostic, not normal FPS. Summed CPU encoding before renderer acquisition is not measured GPU overlap or throughput gain. Whole-GPU sampler includes other applications. Native/Reforger is a stress workload, not ground-truth compatibility. Long renderer-window acquisition remains a measured opportunity."
+      }
     }
   ],
   "microbenchmarks": [
