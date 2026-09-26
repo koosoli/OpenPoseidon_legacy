@@ -604,6 +604,8 @@ list(APPEND POSEIDON_TEST_SOURCES
     World/Entities/Vehicles/test_transport.cpp
     # World tests
     World/test_world.cpp
+    World/test_simulation_demand.cpp
+    World/test_authored_object_ids.cpp
     World/test_world_serialization.cpp
     World/test_segment_cache_lod.cpp
     World/test_effect_shape_guards_audit.cpp

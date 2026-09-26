@@ -661,6 +661,7 @@ class Landscape : public SerializeClass
     std::unordered_set<int> _modernLogicalOnlyObjects;
     void RegisterModernObjectVisual(Object* object);
     std::vector<ModernObjectPlacement> _modernObjectPlacements;
+    int AuthoredObjectIDFloor() const;
     std::vector<std::vector<uint32_t>> _modernObjectCells;
     // One non-empty cell inside the residency window, with its squared cell distance from the
     // window centre. The list is a pure function of the (quantised) centre -- the window radius

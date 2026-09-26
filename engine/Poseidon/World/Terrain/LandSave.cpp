@@ -4,6 +4,7 @@
 #include <chrono>
 
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Terrain/AuthoredObjectIds.hpp>
 #include <Poseidon/World/Terrain/TerrainSubdivision.hpp>
 #include <Poseidon/Foundation/Logging/Logging.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
@@ -2443,6 +2444,9 @@ bool Landscape::LoadOprwModern(const char* path)
                 ProgressRefresh();
         }
         _modernObjectStreaming = true;
+        // Reserve all authored (including reassigned duplicate) IDs before mission entities
+        // can allocate IDs, rather than waiting for a camera-populated cache rebuild.
+        _objectId = std::max(_objectId, AuthoredObjectIDFloor());
         _modernObjectResidencyPending = false;
         _modernObjectCenterX = -0x3fffffff;
         _modernObjectCenterZ = -0x3fffffff;
@@ -4669,7 +4673,14 @@ void Landscape::SaveOptimized(const char* name)
 // load/save current status (no terrain/object data save here)
 LSError Landscape::Serialize(ParamArchive& ar)
 {
+    const int authoredFloor = AuthoredObjectIDFloor();
+    if (_modernObjectStreaming && ar.IsSaving())
+        _objectId = std::max(_objectId, authoredFloor);
     PARAM_CHECK(ar.Serialize("lastObjectID", _objectId, 1))
+    // Old saves may contain a counter derived only from the camera's resident subset.
+    // Preserve larger dynamic counters, but never allocate inside unseen authored IDs.
+    if (_modernObjectStreaming && !ar.IsSaving())
+        _objectId = std::max(_objectId, authoredFloor);
     if (ar.IsSaving())
     {
         RefArray<Object> objects;
@@ -4744,7 +4755,7 @@ void Landscape::ResetObjectIDs()
     Log("ResetObjectIDs");
     ClearIDCache();
     // reset id of all vehicles - use with caution
-    int maxId = -1;
+    int maxId = AuthoredObjectIDFloor();
     int x, z;
     for (x = 0; x < _landRange; x++)
     {
@@ -4898,7 +4909,7 @@ void Landscape::RebuildIDCache()
     long long walked = 0;
     long long cached = 0;
     int x, z;
-    int maxId = -1;
+    int maxId = AuthoredObjectIDFloor();
     for (x = 0; x < _landRange; x++)
     {
         for (z = 0; z < _landRange; z++)
@@ -4935,6 +4946,11 @@ void Landscape::AddToIDCache(Object* object)
 {
     int id = object->ID();
     _objectIds[id] = object;
+}
+
+int Landscape::AuthoredObjectIDFloor() const
+{
+    return Streaming::AuthoredObjectIdFloor(_modernObjectStreaming, _modernObjectPlacements);
 }
 
 Object* Landscape::ResolveObject(int id)
