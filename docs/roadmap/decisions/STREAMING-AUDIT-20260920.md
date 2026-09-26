@@ -1304,8 +1304,9 @@ passes 7430 assertions/163 cases (155 passed,8 explicit skips), broad preparatio
 enabled-only or mutually exclusive fixtures, not silently omitted failures.
 
 Four installed 89db0dcc runs (16:25 stamp,actual binary hashes) report passed=true
-and clean exit0. Root reviewed JSON; current actor-run visual PNG judgement is
-pending and is not inherited from earlier image review.
+and clean exit0. Root reviewed JSON and actor visual.png: both original white walls are present
+with normal rendered geometry. This tiny artificial fixture is not retail or
+Reforger parity.
 
 - Default 162544 verifies Disabled with no admission.
 - Actor 162621 verifies Fire request starts Pending despite Neighborhood Ready,

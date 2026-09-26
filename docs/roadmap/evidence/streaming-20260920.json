@@ -2532,7 +2532,7 @@
           }
         ]
       },
-      "classification": "PASS independent Fire query channel starts Pending, then Ready; changed ray Pending, invalid purpose Invalid; release preserves Neighborhood. Actor move removes/reacquires unmodified leases; mutation .25 retained MustBeSaved and global Unknown watch persists at lease0. Ready only limited static terrain residency, not collision clearance. Root JSON reviewed; new visual PNG judgement pending.",
+      "classification": "PASS independent Fire query channel starts Pending, then Ready; changed ray Pending, invalid purpose Invalid; release preserves Neighborhood. Actor move removes/reacquires unmodified leases; mutation .25 retained MustBeSaved and global Unknown watch persists at lease0. Ready only limited static terrain residency, not collision clearance. Root JSON and visual.png reviewed: both original white walls present with normal rendered geometry. Tiny artificial fixture only, no retail/Reforger parity.",
       "sha256": {
         "engine.log": "6d4ef030dc93954a996d7802700fe7a427f6962691bd09aad0505bce9659da3c",
         "harness.jsonl": "643f7879c8952c084022b60ad20645a655f9b2c138820e36209a1e91be57bbac",
