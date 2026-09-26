@@ -6621,7 +6621,7 @@ tickets:
     owner: null
     branch: codex/streaming-residency
     baseline_commit: 03e71371
-    verification_commit: 11c5ca04
+    verification_commit: 10f6e695
     milestone: 0
     milestone_role: NON_BLOCKING
     depends_on: []
@@ -6631,7 +6631,7 @@ tickets:
     production_call_sites: []
     test_ids: [stationary-residency, preparer-byte-budget, preparer-generation-cancellation, required-fire-obstruction, fixed-detail-return, strict-headless-identity, same-world-save-away-roundtrip, fresh-process-save-away-roundtrip]
     benchmark_artifacts: [docs/roadmap/evidence/streaming-20260920.json]
-    evidence_hash: fe76d4cff73684c6f5ebc0dd0d16402c3b21b1062b65cf8ecb16e126e3fe0a2b
+    evidence_hash: 08b5928d0d19b7b1c988cacbfbc7167c382af117c8147e66d4f03e10da4b4d01
     decision_record: docs/roadmap/decisions/STREAMING-AUDIT-20260920.md
     known_failures:
       - The staged streaming plan remains in progress; see the decision record for uncompleted gates.
@@ -6642,7 +6642,7 @@ tickets:
       - Required-obstruction visual retirement and same-world client save restoration passed on f4ffc510; fresh-process client required-obstacle damage/identity/fire restoration passed on 11c5ca04. Never-requested actor/query/navigation demand, wider state and multiplayer/headless save still need validation.
       - Fixed-detail returned vegetation is equivalent at one DayZ pose; normal governor variation, secondary views and broader quality/performance acceptance remain open.
       - Sept26 build and 6277 assertions in 92 cases passed; DayZ11c5ca04 route/lifecycle passed but measured LOD/triangle demand differs and timings are mixed. No equal-quality FPS/no-regression acceptance; native attachment startup/lifecycle and fresh-process client required-obstacle save passed, but native first pose was materially slower and fixed-detail performance attribution remains open. Pure corridor planning does not admit query objects.
-      - Isolated compact-alpha CPU benchmark passed 18 parity conditions with improved medians and one-quarter scratch logical size; no game FPS acceptance. Material-input dedup and CompleteSource bounds are new foundations pending validation; CompleteSource is not collision Ready or runtime actor/query admission.
+      - Isolated compact-alpha CPU benchmark passed 18 parity conditions with improved medians and one-quarter scratch logical size; no game FPS acceptance. 10f6e695 build and 6443 assertions in 103 cases passed, and native eager-default/material-input-dedup integration route passed with mixed/slower loading. CompleteSource bounds are metadata, not collision Ready; bounded cold CPU logical actor/query admission remains pending.
     fallback: WGR_NATIVE_DEFER_ATTACHMENT_SHAPES remains off (unset/0 restores eager attachment shapes); WGR_OBJECT_STREAM_PBO and WGR_OBJECT_STREAM_PBO_TEXTURES remain off; WGR_SKY_VOLUME_INCREMENTAL=0 restores full atlas uploads; WGR_ADAPTIVE_TEXTURE_DETAIL and WGR_OBJECT_STREAM_GPU_BUDGET remain off; WGR_OBJECT_STREAM_READY_MB=0 disables the new ready-payload gate; old ocean remains default.
     reviewer: null
     reviewer_method: Installed native runtime reproduction, comparable-coverage checks and real worker cancellation tests.

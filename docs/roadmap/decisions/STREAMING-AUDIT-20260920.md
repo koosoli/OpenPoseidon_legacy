@@ -876,3 +876,58 @@ at one-second intervals. These include other applications and are diagnostics,
 not per-game resource attribution. The guard/new material preparation/bounds
 changes are not in the measured 11c5ca04 binary; their new build/runtime checks
 remain pending. The authoritative streaming plan stays OPEN.
+### 10f6e695 normal native default and material-preparation integration
+
+The supported build passed and 6443 assertions in 103 targeted cases passed.
+`native-default-material-dedup-20260926-130401` then PASSED its normal controlled
+route on the clean installed 10f6e695 pair. Startup explicitly logs attachment
+shape deferral disabled and builds 525 attachment shapes. The restored default
+therefore runs the old eager attachment path; the optional prototype stays OFF.
+Numerical per-pose coverage is 19997 / 19996 / 19997 / 19999, with 19999 restored,
+zero final reservations, no renderer fatal errors and clean exit.
+
+| Pose | 10f6e695 frame mean/p95/max ms |
+|---|---|
+| +200 m | 31.40 / 34.72 / 93.88 |
+| +400 m | 24.06 / 25.85 / 27.05 |
+| +200 m return | 31.66 / 36.23 / 42.78 |
+| Base return | 21.23 / 25.19 / 65.97 |
+
+First-pose raster costs return toward the old f4 control range: shadows around
+6.95–8.77 ms, water draw around 6.86 ms and swap mean 28.84 ms, compared with
+11c5ca04's automatic-deferral candidate at roughly 16 ms shadows, 12 ms water
+and 54.28 ms swap. This does not isolate the cause: source/settings differ,
+LOD selection still changes during samples, and there are no matching old-arm
+clock samples. Current main triangles span 4.006–4.771 M at pose 0,
+6.912 M at pose 1, 4.006–5.107 M at pose 2 and 6.903 M at pose 3. Consequently
+this successful default route is not blanket equal-quality/no-regression evidence.
+
+Loading/preparation remains mixed and is slower in this observation. The eager
+shape phase is 8780 ms versus 5121 ms in the old f4 control. First full admission
+from the first engine log line is 86.320 seconds versus 54.752 f4 and 50.503 for
+the deferred 11c5ca04 candidate. First-full cold model count is 503, matching f4
+(and 755 with deferral); aggregate worker time is 46661 ms/max job 2555 ms versus
+f4 30726/max 1632. Peak conversion/ready reservations are 207200834/203526363
+bytes. Through STREAM_TRAVERSE_END, cold-profile rows total 864 versus f4 867;
+accumulated read/create/alpha costs are 201.3/4293.9/2.3 ms versus
+111.7/2904.2/1.3 ms. Optional texture-input preparation worker time sums 632 ms
+versus 807 ms, with zero prepared chains consumed in both and the same consumed
+model counter 1018. These are cumulative profiling observations, not complete
+material-read counts or a proven dedup loading-time gain. Cache state, combined
+increments and system scheduling remain uncontrolled.
+
+The added one-second whole-device sampler peaked at 4449 MiB. During pose 0 it
+reports P0, graphics clock 1920 MHz, memory clock 7001 MHz, utilization 99%, power
+about 210–212 W and temperature 71–73 C. Its error log is empty. Older controls
+lack comparable clock/power instrumentation, and these whole-device samples
+include other applications; they cannot retrospectively explain the 11c slowdown.
+Reported backend allocation peak is 2994881536 bytes, final geometry live/capacity
+624496320/704643072 bytes, final backend allocations 2970803888 bytes.
+
+Material-input dedup is now integrated through this native runtime route; no
+loading/performance improvement is claimed. Simulation bounds remain only
+CompleteSource/Unknown metadata foundations. The next required gameplay gate
+is bounded owner-thread logical admission for never-requested actor/query
+geometry, with cold CPU collision verification; that runtime admission is still
+pending. Multiplayer, broader mutable state and equivalent-detail performance
+gates remain OPEN.

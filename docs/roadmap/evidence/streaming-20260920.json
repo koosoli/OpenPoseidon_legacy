@@ -1305,6 +1305,78 @@
         "settled.png"
       ],
       "visualQualification": "Local endpoint retains expected street/building/window/fence/sign coverage; not ground-truth native asset completeness."
+    },
+    {
+      "run": "native-default-material-dedup-20260926-130401",
+      "result": "PASS eager native attachment default/route/material-preparation integration; mixed and slower loading observation, no broad performance acceptance",
+      "runtimeCommit": "10f6e695f1d1255ec7ff66ff8d975e1f17eb840a",
+      "provenance": {
+        "incrementalSkyUploads": true,
+        "freshReload": false,
+        "lodGovernorRange": null,
+        "packedModels": false,
+        "pressureGrowth": false,
+        "head": "10f6e695f1d1255ec7ff66ff8d975e1f17eb840a",
+        "coverageOnly": false,
+        "readyMb": -1,
+        "scriptSha256": "42608B4BE6D132BB1EE55D37CDF9215E0FAD2E1B343A16EA0D143B05C6183649",
+        "adaptive": false,
+        "corpus": "Native",
+        "geoGrowth": 2.0,
+        "controlled": true,
+        "packedTextures": false,
+        "saveRoundTrip": false,
+        "installed": "codex/streaming-residency 10f6e695 2026-09-26_13:01 deploy-ps1",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "DBCCBECC6197E05C03057DAE45E9E62E8128192D6B040EDAA90F31DAD82688FC",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "217BD16306632F284D5948BE32047B98BCB01391B526BD3F8E71DBCCD4492B33",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ]
+      },
+      "sha256": {
+        "engine.log": "d0b999a62a8b2b31fe2b616ee2bb5368fe5e0d9ab99d3510e1c78814078eea65",
+        "harness.jsonl": "138f4a2f86f19f42fce50a5291a57f458fbb2716cdafb8da2b39d335e5e46ecc",
+        "provenance.json": "943135b90ce5036783f1d9221dc0addc58e5310f4783f03b8a5e02eb15676fb2",
+        "result.json": "b9a20331e77be8c9760f83f08b26da5f4b2f77b79a3142f38238811526828215",
+        "settled.png": "b5d9051e1b279cefa3ef8a8fd269401024fad6fd683f050f8c938d06b1bea74b",
+        "whole-gpu-memory.csv": "68324ec678573946fae6dfaf4c32aa821abc9f7c4ef994295b18474e0d39c0ba",
+        "whole-gpu-memory-errors.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "whole-gpu-memory-scope.txt": "e6d61a4bc6b06e8fb1dc4466dcf4edfe9454430f738b2012fc0f1e1708b9b75c"
+      },
+      "comparison": {
+        "firstFullSeconds": 86.32,
+        "timeOrigin": "first engine log line",
+        "attachmentDeferralEnabled": false,
+        "attachmentShapesBuilt": 525,
+        "shapeBuildMs": 8780,
+        "firstFullColdModels": 503,
+        "firstFullWorkerTotalMs": 46661,
+        "firstFullWorkerMaxMs": 2555,
+        "prefixEnd": "STREAM_TRAVERSE_END",
+        "coldProfileRows": 864,
+        "textureReadMs": 201.3,
+        "textureCreateMs": 4293.9,
+        "textureAlphaMs": 2.3,
+        "textureInputPrepareWorkerMs": 632,
+        "peakConversionReservedBytes": 207200834,
+        "peakReadyPayloadBytes": 203526363,
+        "peakBackendAllocations": 2994881536,
+        "wholeDevicePeakMiB": 4449,
+        "poseResident": [
+          19997,
+          19996,
+          19997,
+          19999
+        ],
+        "limitations": "Whole-device expanded sampler only in this arm; no comparable historical clocks. LOD/triangle demand differs. Ordered cache/system effects and combined source increments prevent causal loading/performance acceptance."
+      }
     }
   ],
   "microbenchmarks": [
