@@ -4,6 +4,13 @@ use std::sync::{Arc, OnceLock, atomic::{AtomicU64, Ordering}};
 use crate::ffi::WgrSampler2D;
 use crate::log::{LogSink, log_level};
 
+// Experimental first-consumer work shift; eager group creation remains default
+// until matched normal-renderer performance is accepted. Read once per process.
+fn lazy_texture_bind_groups_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var("WGR_LAZY_TEXTURE_BIND_GROUPS").is_ok_and(|v| v == "1"))
+}
+
 slotmap::new_key_type! {
     struct TextureKey;
 }
@@ -200,12 +207,25 @@ impl TextureRegistry {
         }
 
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let bind_group = OnceLock::new();
+        if !lazy_texture_bind_groups_enabled() {
+            // Original eager order: texture -> mip writes -> view -> group -> registry.
+            let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("wgr_texture_bind"),
+                layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                }],
+            });
+            let _ = bind_group.set(group); // brand-new cell cannot already be initialised
+        }
         let key = self.map.insert(Texture2D {
             texture,
             view,
-            // Terrain and retained draws only need the view/bindless slot.
-            // The immutable image's direct/shadow group is made on first use.
-            bind_group: OnceLock::new(),
+            // Opt-in lazy mode makes the immutable image's group on first use;
+            // default mode already filled the cell above, in the original order.
+            bind_group,
             slot,
             resident_bytes: (0..mip_level_count)
                 .map(|i| format.expected_len((width >> i).max(1), (height >> i).max(1)) as u64)
@@ -1177,9 +1197,22 @@ fn fs() -> @location(0) vec4<f32> {
     }
 
     #[test]
+    fn default_eager_single_texture_group_samples_replacement_and_reuses_first_binding() {
+        single_texture_group_samples_replacement(false);
+    }
+
+    #[test]
     fn lazy_single_texture_group_samples_replacement_and_reuses_first_binding() {
+        single_texture_group_samples_replacement(true);
+    }
+
+    fn single_texture_group_samples_replacement(lazy: bool) {
+        if lazy_texture_bind_groups_enabled() != lazy {
+            eprintln!("SKIP single_texture_group: requested lazy={lazy} differs from cached WGR_LAZY_TEXTURE_BIND_GROUPS; use a fresh process");
+            return;
+        }
         let Some((device, queue)) = bindless_headless() else {
-            eprintln!("SKIP lazy_single_texture_group: no adapter/device with required bindless capabilities");
+            eprintln!("SKIP single_texture_group lazy={lazy}: no adapter/device with required bindless capabilities");
             return;
         };
         let mut shared = shared(&device, &queue);
@@ -1188,14 +1221,14 @@ fn fs() -> @location(0) vec4<f32> {
         let green = texel([0, 255, 0, 255]);
         let old = shared.create_in_slot(&device, &queue, &data(&red), lease);
         assert_ne!(old, 0);
-        assert!(shared.registry.get(old).unwrap().bind_group.get().is_none());
+        assert_eq!(shared.registry.get(old).unwrap().bind_group.get().is_none(), lazy);
         assert_eq!(sample_binding(&device, &queue, &shared, 0, Some(old)), [255, 0, 0, 255]);
         assert!(shared.registry.get(old).unwrap().bind_group.get().is_some());
         assert!(std::ptr::eq(shared.texture_bind(&device, old), shared.texture_bind(&device, old)));
         let replacement = shared.create_in_slot(&device, &queue, &data(&green), lease);
         assert_ne!(replacement, 0);
         assert_eq!(shared.texture_slot(replacement), lease);
-        assert!(shared.registry.get(replacement).unwrap().bind_group.get().is_none());
+        assert_eq!(shared.registry.get(replacement).unwrap().bind_group.get().is_none(), lazy);
         assert_eq!(sample_binding(&device, &queue, &shared, 0, Some(replacement)), [0, 255, 0, 255]);
         assert!(!std::ptr::eq(shared.texture_bind(&device, old), shared.texture_bind(&device, replacement)));
         // Old per-image direct group must still sample its own image; a lease

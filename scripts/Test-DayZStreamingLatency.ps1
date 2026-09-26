@@ -3,6 +3,7 @@ param(
     [switch]$TerrainPageTimings,
     [ValidateSet('Counted', 'Timed')][string]$AdmissionMode = 'Counted',
     [switch]$ParkedTextureRefill,
+    [switch]$LazyTextureGroups,
     [string]$Label = 'dayz-streaming-latency',
     [string]$GameDir = 'D:\SteamLibrary\steamapps\common\ARMA Cold War Assault'
 )
@@ -16,6 +17,7 @@ if (!$env:LOCK_OWNER) {
         $argv = @((Join-Path $PSScriptRoot 'with-game-lock.sh'), $shellExe, '-NoProfile', '-File', $PSCommandPath, '-Mode', $Mode, '-AdmissionMode', $AdmissionMode, '-Label', $Label, '-GameDir', $GameDir)
         if ($TerrainPageTimings) { $argv += '-TerrainPageTimings' }
         if ($ParkedTextureRefill) { $argv += '-ParkedTextureRefill' }
+        if ($LazyTextureGroups) { $argv += '-LazyTextureGroups' }
         & 'C:\Program Files\Git\bin\bash.exe' @argv
         if ($LASTEXITCODE) { throw "Latency screening exited $LASTEXITCODE" }
     } finally { Remove-Item Env:LOCK_OWNER }
@@ -65,6 +67,7 @@ if ($ParkedTextureRefill) {
     $environment.WGR_GPU_MODEL_PARK_REFILL = '1'
     $environment.WGR_MODEL_RESIDENCY_TRACE = '1'
 }
+if ($LazyTextureGroups) { $environment.WGR_LAZY_TEXTURE_BIND_GROUPS = '1' }
 # Shape trace enables on variable presence, so leave it absent in both modes.
 $clearNames = @((Get-ChildItem Env: | Where-Object { $_.Name -like 'WGR_*' -or $_.Name -like 'POSEIDON_*' } | ForEach-Object { $_.Name }))
 $changedNames = @($clearNames + @($environment.Keys) | Select-Object -Unique)
@@ -174,7 +177,7 @@ try {
         if (!$parkedProof.deferredObserved -or !$parkedProof.activationReuseObserved) { throw 'Parked refill path was not exercised through both deferral and successful activation' }
     }
     $raw | ConvertTo-Json | Set-Content (Join-Path $out 'route-frame-ms.json')
-    @{passed = $true; mode = $Mode; admissionMode = $AdmissionMode; parkedTextureRefill = [bool]$ParkedTextureRefill; screeningOnly = $true; performanceAccepted = $false; terrainPageTimings = [bool]$TerrainPageTimings
+    @{passed = $true; mode = $Mode; admissionMode = $AdmissionMode; parkedTextureRefill = [bool]$ParkedTextureRefill; lazyTextureGroups = [bool]$LazyTextureGroups; screeningOnly = $true; performanceAccepted = $false; terrainPageTimings = [bool]$TerrainPageTimings
         frameCount = $count; dropped = $dropped; enginePhaseTiming = $phases; baseline = $baseline; returned = $returned
         routeSamples = $routeSamples; postExitHashes = $finalHashes
         parkedRefillProof = $parkedProof
