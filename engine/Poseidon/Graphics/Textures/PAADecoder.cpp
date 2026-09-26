@@ -12,41 +12,56 @@
 namespace Poseidon
 {
 
-AlphaStats ClassifyAlpha(const uint8_t* rgba, size_t pixelCount, double partialThreshold, double clearThreshold)
+namespace
 {
-    return ClassifyAlphaSamples(rgba && pixelCount ? rgba + 3 : nullptr, pixelCount, 4,
-                                partialThreshold, clearThreshold);
-}
-
-AlphaStats ClassifyAlphaSamples(const uint8_t* alpha, size_t pixelCount, size_t stride,
-                               double partialThreshold, double clearThreshold)
+struct AlphaHistogram
 {
-    AlphaStats s;
-    if (!alpha || pixelCount == 0 || stride == 0 ||
-        pixelCount - 1 > std::numeric_limits<size_t>::max() / stride)
-        return s;
     size_t clear = 0, opaque = 0, partial = 0, mid = 0;
     int aMin = 255, aMax = 0;
     unsigned long long aSum = 0;
-    for (size_t i = 0; i < pixelCount; i++)
+};
+
+template<size_t FixedStride>
+AlphaHistogram CollectAlphaHistogram(const uint8_t* alpha, size_t pixelCount)
+{
+    AlphaHistogram h;
+    constexpr size_t chunkLimit = 65536;
+    static_assert(chunkLimit * 255 <= std::numeric_limits<uint32_t>::max());
+    for (size_t start = 0; start < pixelCount;)
     {
-        const int a = alpha[i * stride];
-        aSum += static_cast<unsigned long long>(a);
-        if (a < aMin)
-            aMin = a;
-        if (a > aMax)
-            aMax = a;
-        if (a == 0)
-            clear++;
-        else if (a == 255)
-            opaque++;
-        else
+        const size_t count = std::min(chunkLimit, pixelCount - start);
+        const uint8_t* samples = alpha + start * FixedStride;
+        // Local reductions cannot overflow: at most 65536 samples and 16,711,680
+        // alpha sum. Widen only once per chunk into the original unsigned totals.
+        uint32_t clear = 0, opaque = 0, mid = 0, sum = 0;
+        int aMin = 255, aMax = 0;
+        for (size_t i = 0; i < count; ++i)
         {
-            partial++;
-            if (a >= 16 && a <= 239)
-                mid++;
+            const int a = samples[i * FixedStride];
+            sum += static_cast<uint32_t>(a);
+            if (a < aMin) aMin = a;
+            if (a > aMax) aMax = a;
+            clear += static_cast<uint32_t>(a == 0);
+            opaque += static_cast<uint32_t>(a == 255);
+            mid += static_cast<uint32_t>(a >= 16 && a <= 239);
         }
+        h.clear += clear; h.opaque += opaque; h.mid += mid;
+        h.aSum += static_cast<unsigned long long>(sum);
+        if (aMin < h.aMin) h.aMin = aMin;
+        if (aMax > h.aMax) h.aMax = aMax;
+        start += count;
     }
+    h.partial = pixelCount - h.clear - h.opaque;
+    return h;
+}
+
+AlphaStats FinishAlphaHistogram(const AlphaHistogram& histogram, size_t pixelCount,
+                                double partialThreshold, double clearThreshold)
+{
+    AlphaStats s;
+    const size_t clear = histogram.clear, opaque = histogram.opaque, partial = histogram.partial, mid = histogram.mid;
+    const int aMin = histogram.aMin, aMax = histogram.aMax;
+    const unsigned long long aSum = histogram.aSum;
     s.aMin = aMin;
     s.aMax = aMax;
     s.aMean = static_cast<int>(aSum / pixelCount);
@@ -98,6 +113,61 @@ AlphaStats ClassifyAlphaSamples(const uint8_t* alpha, size_t pixelCount, size_t 
         s.kind = AlphaStats::Opaque;
 
     return s;
+}
+
+AlphaStats ClassifyAlphaSamplesGeneric(const uint8_t* alpha, size_t pixelCount, size_t stride,
+                                      double partialThreshold, double clearThreshold)
+{
+    AlphaStats s;
+    if (!alpha || pixelCount == 0 || stride == 0 ||
+        pixelCount - 1 > std::numeric_limits<size_t>::max() / stride)
+        return s;
+    size_t clear = 0, opaque = 0, partial = 0, mid = 0;
+    int aMin = 255, aMax = 0;
+    unsigned long long aSum = 0;
+    for (size_t i = 0; i < pixelCount; i++)
+    {
+        const int a = alpha[i * stride];
+        aSum += static_cast<unsigned long long>(a);
+        if (a < aMin)
+            aMin = a;
+        if (a > aMax)
+            aMax = a;
+        if (a == 0)
+            clear++;
+        else if (a == 255)
+            opaque++;
+        else
+        {
+            partial++;
+            if (a >= 16 && a <= 239)
+                mid++;
+        }
+    }
+    return FinishAlphaHistogram({clear, opaque, partial, mid, aMin, aMax, aSum}, pixelCount,
+                                partialThreshold, clearThreshold);
+}
+} // namespace
+
+AlphaStats ClassifyAlpha(const uint8_t* rgba, size_t pixelCount, double partialThreshold, double clearThreshold)
+{
+    return ClassifyAlphaSamples(rgba && pixelCount ? rgba + 3 : nullptr, pixelCount, 4,
+                                partialThreshold, clearThreshold);
+}
+
+AlphaStats ClassifyAlphaSamples(const uint8_t* alpha, size_t pixelCount, size_t stride,
+                               double partialThreshold, double clearThreshold)
+{
+    // Isolate the original arbitrary-stride loop from fixed-stride reduction blocks.
+    if (stride != 1 && stride != 4)
+        return ClassifyAlphaSamplesGeneric(alpha, pixelCount, stride, partialThreshold, clearThreshold);
+    AlphaStats s;
+    if (!alpha || pixelCount == 0 || stride == 0 ||
+        pixelCount - 1 > std::numeric_limits<size_t>::max() / stride)
+        return s;
+    const AlphaHistogram histogram = stride == 1 ? CollectAlphaHistogram<1>(alpha, pixelCount)
+                                                : CollectAlphaHistogram<4>(alpha, pixelCount);
+    return FinishAlphaHistogram(histogram, pixelCount, partialThreshold, clearThreshold);
 }
 
 bool DecodeBlockAlpha(const uint8_t* blocks, size_t size, int width, int height, bool bc3,
