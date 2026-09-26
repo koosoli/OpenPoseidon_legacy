@@ -97,8 +97,8 @@ accepted as proof of no moving regression; repeat with controlled per-pose cover
   required identities and MustBeSaved state survive visual retirement. An actual
   required-object fire obstruction survives a 1500 m camera departure. Never-
   requested placements still disappear; actor-neighbourhood collision/navigation,
-  view queries, fresh-process save/reload and multiplayer independence are NOT
-  established. A same-world client save/reload of required damage is verified.
+  view queries and multiplayer independence are NOT established. Same-world and
+  fresh-process client save/reload of one required damaged obstruction are verified.
 - C: ready IR and active scratch reservations, real backend counters and GPU
   retirement are implemented. Model/Shape allocator costs remain estimates;
   automatic allocation-aware growth remains experimental after mixed timing.
@@ -691,3 +691,188 @@ not a normal frame-time comparison.
 
 These commits are implementation increments, not new runtime acceptance. The
 verification build remains f4ffc510 until the candidate completes its gates.
+### 11c5ca04 DayZ lifecycle validation and mixed timing
+
+The complete supported build passed, followed by 6277 assertions in 92 targeted
+cases. The first single-texel alpha reference used an invalid 1x1 PAA fixture:
+the reference reader requires the format's minimum supported dimensions.
+b12e46ca supplies a valid reference fixture; that failed fixture is not a runtime
+alpha-rendering failure. Compressed alpha-plane parity preserves exact decoded
+alpha/class decisions against the canonical decoder in these tests; no texture
+resolution change or general FPS improvement follows from that result.
+
+Same-day old-build control `dayz-pre-alpha-control-20260926-121957` and candidate
+`dayz-compact-alpha-candidate-20260926-122958` both PASSED their controlled routes,
+settled idle/unchanged-demand checks and clean exit. Old control provenance lists
+checkout HEAD 52b00a22, but its installed stamp and executable/DLL hashes identify
+actual runtime f4ffc510. The candidate is the clean installed 11c5ca04 pair,
+including source increments through 52b00a22 and the valid alpha fixture. The
+native attachment gate does not execute for this DayZ corpus. Later uncommitted
+work is not in either measured binary.
+
+Both routes admitted/restored 19923 at the base pose. Controlled per-pose resident
+counts were identical: 19972 / 19966 / 19972 / 19923. Frame mean/p95/max in ms:
+
+| Pose | f4ffc510 control | 11c5ca04 candidate |
+|---|---|---|
+| +200 m | 21.04 / 24.95 / 52.52 | 22.67 / 27.40 / 51.42 |
+| +400 m | 21.14 / 29.76 / 191.79 | 26.45 / 44.70 / 132.86 |
+| +200 m return | 15.70 / 24.04 / 125.69 | 8.99 / 12.83 / 99.00 |
+| Base return | 18.93 / 23.50 / 28.76 | 19.15 / 28.05 / 144.21 |
+
+Through STREAM_TRAVERSE_END, cold-profile rows total 736/731 (control/candidate).
+Their accumulated texture read/create/alpha costs are respectively
+13068.1/1409.5/3120.0 ms and 14371.0/1552.0/3494.3 ms. First full admission,
+measured from the first engine log line, is 35.304/38.216 seconds. These numbers
+do not show an overall loading or alpha-time gain. Tests were ordered control
+then candidate, making file-cache/driver and warm-path effects confounded.
+
+Actual render demand also differs despite matching placement counts. Inside
+pose measurement markers, main triangles are control/candidate: pose 0
+1.287–2.019 M / 1.044–1.209 M; pose 1 0.616 M / 0.405–0.442 M;
+pose 2 0.965 M / 0.546 M; pose 3 0.620–1.403 M / 0.382 M. LOD histograms
+confirm differing selected detail. For example, pose 2's control histogram
+is 412/1198/1668/1499/439/68/6/5 (LOD0..7+), whereas the candidate is
+82/696/906/1016/321/60/4/0. The active governor changes detail within some
+measurement windows. Faster candidate pose 2 therefore cannot be advertised as
+an equal-quality FPS gain; worse candidate p95/maxima also prevent a blanket
+no-regression acceptance. Counts alone are not visual equivalence.
+
+Acceptance here is lifecycle/build/decoder parity only. Matched fixed-detail
+performance/visual evidence, candidate native attachment admission and the new
+fresh-process save test remain pending. Existing off-by-default pressure,
+packed-preparation and adaptive-detail gates stay unchanged. No source change
+is promoted as a universal performance fix by this comparison.
+### Fresh-process saved-object restoration on 11c5ca04
+
+`dayz-fresh-save-candidate-20260926-123431` PASSED with the clean installed
+11c5ca04 pair. The first client saved required obstruction ID 83912800 at damage
+0.25 while the camera was away and its visual residency was retired, then
+changed damage to 0.75 and verified that control. The owning harness exited that
+client cleanly and started a fresh game process with the same private profile.
+Before triLoadGame, the read-only identity probe reported the fixture absent;
+it did not pin or resolve the object. Loading the full save restored the authored
+identity, damage 0.25 and its real fire-ray contact while the camera was still
+away. On camera return visualResident became true and the saved script reference
+comparison remained true. Both processes exited cleanly; initial and reload logs
+contain no renderer fatal errors. Base numerical coverage returned to 19923.
+
+Both process logs, common harness/provenance, result, available images and the
+.fps save artifact are checksummed. This closes the narrower fresh-process
+client restoration gate for this explicitly required, mutated static obstacle.
+It does not validate every mutable component or multiplayer/network/headless
+save behavior, nor admit never-requested actor-neighbourhood/query geometry.
+This is an uncontrolled correctness route and provides no performance acceptance.
+Candidate native attachment streaming and equal-detail performance/visual gates
+remain pending independently.
+### Native attachment deferral: startup/lifecycle passed, performance gate open
+
+`native-deferred-attachments-candidate-20260926-123842` PASSED on 11c5ca04 with
+clean shutdown, unchanged settled demand and 19999 restored placements. The
+same-day f4 control is `native-pre-deferral-control-20260926-120448`. Both retain
+1296350 compact placements, 1773 model paths, 330 slot-bearing prefabs, 8836 socket
+bones, 525 distinct part meshes and 3986 buildings with attachments; no socket
+resolution failures are reported. The change preserves path/index generation
+and all flattened attachment placements by construction, instead of suppressing
+parts to reduce work. Both endpoint screenshots were inspected: the street,
+buildings, windows, fences and signs remain present with comparable local
+coverage. This is a same-scene change check, not ground-truth Reforger material,
+furniture or asset-completeness validation.
+
+Eager attachment shapes fell from 525 to zero and the startup shape-build phase
+from 5121 to 0 ms. First full admission, from the first engine log line, fell from
+54.752 to 50.503 seconds. Part work moves into the ordinary admission pipeline:
+at first full admission the cold-model count rises from 503 to 755, aggregate
+worker time 30726 -> 39883 ms, maximum worker job 1632 -> 2219 ms, and owner-thread
+cold optimization totals 8139 -> 10991 ms. These are cumulative profiling sums,
+not wall-clock waits or exact allocator measurements. Peak conversion reservation
+rises 173786868 -> 195817052 bytes, while peak ready payload falls
+194226893 -> 129502661 bytes; final reservations are zero.
+
+Peak backend allocation observations are 2995051136 / 2990779680 bytes
+(control/candidate). Final geometry capacity stays 704643072 bytes; live geometry
+is 624496320 / 523627400 bytes and final backend allocations 2970787616 /
+2970112128 bytes. Capacity is retained, and neither counters nor fewer live bytes
+establish complete equivalent GPU coverage or exact driver VRAM savings.
+
+| Pose | f4ffc510 control mean/p95/max ms | 11c5ca04 candidate mean/p95/max ms |
+|---|---|---|
+| +200 m | 30.22 / 32.09 / 34.32 | 57.66 / 68.99 / 71.80 |
+| +400 m | 19.84 / 27.69 / 62.23 | 20.25 / 26.90 / 59.55 |
+| +200 m return | 29.92 / 33.96 / 90.40 | 31.66 / 34.79 / 42.98 |
+| Base return | 21.22 / 24.92 / 27.33 | 23.30 / 27.82 / 49.01 |
+
+Per-pose placement counts match: 19997 / 19996 / 19997 / 19999. Main render
+triangles still differ: control/candidate pose 0 4.705–5.049 M / 3.866 M,
+pose 1 5.219–5.942 M / 5.617–6.708 M, pose 2 4.501–4.505 M /
+4.006–5.144 M, and pose 3 6.671–7.008 M / 6.520–7.666 M. LOD histograms confirm
+varying governor selection; equal placement counts are not equal rendering work.
+
+The first candidate pose is a material slowdown signal even with fewer main-view
+triangles: swap averages 54.28 ms versus 28.00 ms. GPU samples also show higher
+shadow time (about 15.9–16.9 versus 7.5–8.5 ms), terrain colour and AO costs,
+while cull cost stays similar. No matching admission activity is recorded within
+that settled sample. This does not establish that startup deferral caused the
+GPU slowdown, but it prevents accepting the change as regression-free. Candidate
+also combines ID reservation and compact alpha work, and ordered runtime/cache,
+LOD and possible external GPU effects are uncontrolled. Startup deferral is
+verified; matched fixed-detail GPU/performance attribution remains an open gate.
+First-pose attribution follow-up: candidate retained mesh, texture, geometry and
+backend allocation counters stay fixed throughout the measurement markers. No
+cold admission, geometry growth, texture upload or far-tier event is logged in
+that window. The last geometry growth finished at 12:39:32, about 34 seconds
+before the sample; sky-atlas growth was at 12:39:11. The next reported sky-bake
+gate change is after the first pose. Native authored-far demand is opt-in and no
+far-tier activity is reported. Existing telemetry cannot rule out every hidden
+GPU task, but does not support attributing the slowdown to ongoing admission.
+
+Grass census is identical at 15992 near clumps, 90 mid cards and 6717360 grass
+triangles/frame. Candidate shadow triangles are also lower, yet water draw costs
+11.8–14.2 ms versus about 6.2 ms, and colour-pass costs 28.6–32.1 versus
+14.5–15.7 ms. Broad raster/fragment stages become slower while cull is stable.
+The next useful diagnostic is a persistent fixed-detail first pose with stable
+resource counters, water node/triangle statistics, grass fragment counts and
+GPU stage samples, including a base/return leg to test whether the state recurs.
+External GPU load/clocks and missing hidden-work telemetry remain uncertainties;
+CPU alpha classification is not established as the cause.
+
+The attachment deferral prototype is now gated in source by
+WGR_NATIVE_DEFER_ATTACHMENT_SHAPES=1, and only when native streaming is enabled.
+Unset/0 keeps the old eager attachment startup as default; nonstreamed placement
+remains eager. The main-model deferral is unchanged. The measured 11c5ca04 build
+had the automatic candidate behavior and proves startup/lifecycle only. The
+new default-restoration guard still needs its committed build/runtime check;
+it is not retroactively included in the measured candidate. Deferral remains
+OFF pending the performance attribution gate.
+### Isolated alpha CPU benchmark and next committed preparation foundations
+
+The standalone diagnostic under `build/alpha-microbenchmark` compares separately
+compiled production-source baseline/candidate paths with /O2, no LTO, fresh
+scratch allocations inside timing, alternating arm order and 18 BC2/BC3 cases:
+512/1024/2048 textures, opaque/mask/blend patterns. All 18 parity checks passed.
+The first run uses 15 batches x 2 repetitions; longer confirmation uses
+31 batches x 3. Confirmation candidate/baseline median ratios are
+0.3909–0.6831 for BC2 and 0.6238–0.9455 for BC3. At 2048 dimensions the scratch
+vector's logical size falls from 16777216 to 4194304 bytes (16 -> 4 MiB).
+This is isolated algorithmic CPU evidence; allocator capacity, GPU/game FPS,
+map loading and the pre-existing RGBA fixed-stride wrapper are not established
+by the benchmark. Some short-run p95 values are noisier; no universal latency
+or engine performance claim is made. Actual source/provenance, compiler script,
+empty successful compile log, binary and both CSV artifacts are checksummed.
+
+91a2073e deduplicates successfully completed optional material-input reads within
+one model preparation job. It retains embedded/face texture inputs, preserves
+available partial material results and retries failed/incomplete inheritance;
+no cross-job mutable cache is introduced. Its conservative simulation-source
+bounds foundation marks only CompleteSource or Unknown. CompleteSource is not
+engine collision readiness: adaptation, synthesized geometry, animation/proxies
+and placement transforms require separate validation before admission can use
+any bound. It is not yet integrated into runtime actor/query loading.
+
+b4bdb20b commits the native attachment prototype's opt-in guard and restores eager
+attachment startup by default. The optional whole-device sampler now includes
+GPU/memory utilization, graphics/memory clocks, power, temperature and pstate
+at one-second intervals. These include other applications and are diagnostics,
+not per-game resource attribution. The guard/new material preparation/bounds
+changes are not in the measured 11c5ca04 binary; their new build/runtime checks
+remain pending. The authoritative streaming plan stays OPEN.

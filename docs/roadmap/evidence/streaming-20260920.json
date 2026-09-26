@@ -1065,6 +1065,329 @@
         "user/Users/mail/Saved/Tmp/stream-away-roundtrip.fps": "75a9247a0141f02a4bed15d48e67f44de5119d6b0472d8f153cea3f98fb2f273"
       },
       "qualification": "Installed f4ffc510+dirty stamp and executable/DLL hashes match previous controls; these tests do not run the Sept26 candidate source commits."
+    },
+    {
+      "run": "dayz-pre-alpha-control-20260926-121957",
+      "result": "PASS lifecycle/route; mixed timing with different LOD/triangle demand, no performance or equal-quality acceptance",
+      "provenance": {
+        "lodGovernorRange": null,
+        "coverageOnly": false,
+        "adaptive": false,
+        "readyMb": -1,
+        "incrementalSkyUploads": true,
+        "head": "52b00a229d3f92eb6e0c488b5446b847d5492c38",
+        "saveRoundTrip": false,
+        "packedModels": false,
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "87052804920A1C3A1B182226127820263321BC4C5572F51520723D2FCDC043F7",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "16956408087C600D76C66167326F44827495E348250E66350FF377B4A2AC4CF8",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "installed": "codex/streaming-residency f4ffc510+dirty 2026-09-20_13:56 deploy-ps1",
+        "packedTextures": false,
+        "corpus": "DayZ",
+        "geoGrowth": 2.0,
+        "scriptSha256": "7764679B24539D1AD1524F885D1358D7A70292B5FD2A1543E2D68146720276AF",
+        "controlled": true,
+        "pressureGrowth": false
+      },
+      "sha256": {
+        "engine.log": "a52c8635c0942491c8b579067c26c6f958aca03cfb2ef9541fd0fdee8822a853",
+        "harness.jsonl": "2ef0570acac78576fbf3b99f48c79a2cdcf05178067b5a9cad04332720dfcf36",
+        "provenance.json": "d7db37c715bb5a793754185589b639355fb899af859ab1cd467ebd4738e275dd",
+        "result.json": "cbeac81e94bcbc03a6e6f784ea9a1e70d2c362e819ba5302ff90683b2fec43d1",
+        "settled.png": "ee24d64c465a05cebb231189f0d694fd003140410840219be383f7c233eb784f"
+      },
+      "runtimeCommit": "f4ffc5106745d0491489f52108bf93fa5658a6ff",
+      "qualification": "Provenance head is checkout52b00a22; actual tested executable/DLL are installed f4 hashes.",
+      "comparison": {
+        "prefixEnd": "STREAM_TRAVERSE_END",
+        "coldProfileRows": 736,
+        "textureReadMs": 13068.1,
+        "textureCreateMs": 1409.5,
+        "textureAlphaMs": 3120.0,
+        "firstFullSeconds": 35.304,
+        "firstFullTimeOrigin": "first engine log line",
+        "poseResident": [
+          19972,
+          19966,
+          19972,
+          19923
+        ],
+        "limitations": "Ordered control then candidate confounds I/O cache; LOD/triangle demand differs within pose markers; resident counts are not quality equivalence."
+      }
+    },
+    {
+      "run": "dayz-compact-alpha-candidate-20260926-122958",
+      "result": "PASS lifecycle/route; mixed timing with different LOD/triangle demand, no performance or equal-quality acceptance",
+      "provenance": {
+        "pressureGrowth": false,
+        "geoGrowth": 2.0,
+        "controlled": true,
+        "packedTextures": false,
+        "lodGovernorRange": null,
+        "coverageOnly": false,
+        "scriptSha256": "D1D9585C627EE2F10FC1774754E472E4A839B6F36943C88B3220BBDF402601A9",
+        "installed": "codex/streaming-residency 11c5ca04 2026-09-26_12:28 deploy-ps1",
+        "adaptive": false,
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "38E8434F2876434CDBA8447EEC17C35CDF6FDD8B227C5E1A9F012916F62C7EED",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "3DD81A40B723DB654F4A2BECDFBBF6F380EBE5FC9C09E91219A5EEF1A4FCDBF2",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "packedModels": false,
+        "readyMb": -1,
+        "incrementalSkyUploads": true,
+        "corpus": "DayZ",
+        "head": "11c5ca04c8bfae1c8850069fc969a4cc759d6eaf",
+        "freshReload": false,
+        "saveRoundTrip": false
+      },
+      "sha256": {
+        "engine.log": "612418876443c5eea74a9c6589c2a70febe183f6c385e4ea802a3823f9ceb63c",
+        "harness.jsonl": "075ad133add8f888aa61977d557c9b295e818585125e234f4a80a967a7886a21",
+        "provenance.json": "67b279295dcd2c73fbbb4ac360f0cf8a389f55c8ec2606d55a0abf3c58de9dd1",
+        "result.json": "ea471e099c42b1562ac0b8d48f2ef4bf7a00df6d670e93ae1b644404214a4d8f",
+        "settled.png": "d97a9b9d35e9cc3f4b27fcf57270a90803b495bc03bc656c21e157ccf4dbd0fe"
+      },
+      "runtimeCommit": "11c5ca04c8bfae1c8850069fc969a4cc759d6eaf",
+      "qualification": "Clean installed pair; later uncommitted source not measured.",
+      "comparison": {
+        "prefixEnd": "STREAM_TRAVERSE_END",
+        "coldProfileRows": 731,
+        "textureReadMs": 14371.0,
+        "textureCreateMs": 1552.0,
+        "textureAlphaMs": 3494.3,
+        "firstFullSeconds": 38.216,
+        "firstFullTimeOrigin": "first engine log line",
+        "poseResident": [
+          19972,
+          19966,
+          19972,
+          19923
+        ],
+        "limitations": "Ordered control then candidate confounds I/O cache; LOD/triangle demand differs within pose markers; resident counts are not quality equivalence."
+      }
+    },
+    {
+      "run": "dayz-fresh-save-candidate-20260926-123431",
+      "result": "PASS fresh-process client full-save required-obstacle identity/damage/fire restoration; no multiplayer or never-requested simulation-query acceptance",
+      "runtimeCommit": "11c5ca04c8bfae1c8850069fc969a4cc759d6eaf",
+      "provenance": {
+        "freshReload": true,
+        "packedModels": false,
+        "geoGrowth": 2.0,
+        "corpus": "DayZ",
+        "lodGovernorRange": null,
+        "saveRoundTrip": true,
+        "readyMb": -1,
+        "packedTextures": false,
+        "pressureGrowth": false,
+        "installed": "codex/streaming-residency 11c5ca04 2026-09-26_12:28 deploy-ps1",
+        "controlled": false,
+        "scriptSha256": "D1D9585C627EE2F10FC1774754E472E4A839B6F36943C88B3220BBDF402601A9",
+        "coverageOnly": false,
+        "head": "11c5ca04c8bfae1c8850069fc969a4cc759d6eaf",
+        "adaptive": false,
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "38E8434F2876434CDBA8447EEC17C35CDF6FDD8B227C5E1A9F012916F62C7EED",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "3DD81A40B723DB654F4A2BECDFBBF6F380EBE5FC9C09E91219A5EEF1A4FCDBF2",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "incrementalSkyUploads": true
+      },
+      "sha256": {
+        "engine.log": "0f3daa1d03f7c93ba326000b6e90fa386a2fca5549bb373335e972431e42c47b",
+        "reload-engine.log": "68165eb7159b9387e388b3b1f8e9b55cc50ea6d3e69bfb68cbcb9a2f48a2143b",
+        "harness.jsonl": "c5ab03f1145c41ba69fc6f0f04abc9d129e95b8bc946bd49710472b67282cc8a",
+        "provenance.json": "58bd2c172f75771557a941cc3e223f56ed9e7b974ad5a211ad143b2842af2e2a",
+        "result.json": "5d727d12c7b601497fc746832cf42c8eded43ec515f0484a36d2e352945dd15b",
+        "initial.png": "4c726069b853f7904db28fad4c16aabf3fa3bbe9c969052159d6aa521af06529",
+        "settled.png": "3b95b928b47c2ff8831e9b770bc8a8bb03fedd72e17a53343d983d20ca32196a",
+        "returned-settled.png": "e6a90adfda441c99d5d18938f7fa563d3b6d84b194f433d7dc924cb1e9632bc2",
+        "user/Users/mail/Saved/Tmp/stream-away-roundtrip.fps": "c4e9bfa9531d4c8e2e1f30152eccf789dcded54655eae622192174d2b3b7af7b"
+      },
+      "qualification": "Private profile reused after clean first-process exit; read-only fixture absent before load, required authored obstacle .25 restored after .75 mutation control; uncontrolled correctness run, no performance acceptance."
+    },
+    {
+      "run": "native-deferred-attachments-candidate-20260926-123842",
+      "result": "PASS startup deferral/route/lifecycle; first-pose slowdown signal, performance gate OPEN",
+      "runtimeCommit": "11c5ca04c8bfae1c8850069fc969a4cc759d6eaf",
+      "provenance": {
+        "packedModels": false,
+        "readyMb": -1,
+        "lodGovernorRange": null,
+        "corpus": "Native",
+        "freshReload": false,
+        "saveRoundTrip": false,
+        "coverageOnly": false,
+        "geoGrowth": 2.0,
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "38E8434F2876434CDBA8447EEC17C35CDF6FDD8B227C5E1A9F012916F62C7EED",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "3DD81A40B723DB654F4A2BECDFBBF6F380EBE5FC9C09E91219A5EEF1A4FCDBF2",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "head": "11c5ca04c8bfae1c8850069fc969a4cc759d6eaf",
+        "scriptSha256": "D1D9585C627EE2F10FC1774754E472E4A839B6F36943C88B3220BBDF402601A9",
+        "installed": "codex/streaming-residency 11c5ca04 2026-09-26_12:28 deploy-ps1",
+        "controlled": true,
+        "adaptive": false,
+        "pressureGrowth": false,
+        "incrementalSkyUploads": true,
+        "packedTextures": false
+      },
+      "sha256": {
+        "engine.log": "bf5bebaf44a3923f2540ce96344ed466ac90270b337981b3e8516ae5a71cec3c",
+        "harness.jsonl": "97f86f996b1d4429da4df4216e96e39f6b7b1178423587d0f15bec4d2ac8794d",
+        "provenance.json": "3fadcf6c8233925c7bbc956d8e45b3885c6c2ad555a500a7ddd6ce90482a6f48",
+        "result.json": "722acfc1eb579d5eabb3d05cbd97b7a2d7cd5c35576cc9afeebd5fc1a6c2d7e4",
+        "settled.png": "1c57751dfbeebcfd1e5b08de1760300be1e41a2a1e2585cb8c9a813430eb2a6b"
+      },
+      "comparison": {
+        "control": "native-pre-deferral-control-20260926-120448",
+        "firstFullSeconds": 50.503,
+        "controlFirstFullSeconds": 54.752,
+        "timeOrigin": "first engine log line",
+        "startupShapeBuildMs": 0,
+        "controlStartupShapeBuildMs": 5121,
+        "attachmentShapesBuilt": 0,
+        "controlAttachmentShapesBuilt": 525,
+        "compactPlacements": 1296350,
+        "modelPaths": 1773,
+        "attachmentPartMeshes": 525,
+        "slotBones": 8836,
+        "firstFullColdModels": 755,
+        "controlFirstFullColdModels": 503,
+        "firstFullWorkerTotalMs": 39883,
+        "controlFirstFullWorkerTotalMs": 30726,
+        "peakConversionReservedBytes": 195817052,
+        "peakReadyPayloadBytes": 129502661,
+        "peakBackendAllocations": 2990779680,
+        "finalGeometryLiveBytes": 523627400,
+        "geometryCapacityBytes": 704643072,
+        "poseResident": [
+          19997,
+          19996,
+          19997,
+          19999
+        ],
+        "limitations": "Startup/lifecycle pass; materially slower first candidate pose and different LOD/triangle work preclude performance acceptance. Ordered caches and combined source increments confound attribution. Native compatibility is workload evidence, not asset correctness."
+      },
+      "imagesInspected": [
+        "settled.png"
+      ],
+      "visualQualification": "Local endpoint retains expected street/building/window/fence/sign coverage; not ground-truth native asset completeness."
+    }
+  ],
+  "microbenchmarks": [
+    {
+      "artifactRoot": "build/alpha-microbenchmark",
+      "result": "PASS 18 synthetic parity conditions; isolated compact-alpha CPU median improvement, no game/GPU FPS acceptance",
+      "provenance": {
+        "baseline": "f4ffc5106745d0491489f52108bf93fa5658a6ff",
+        "currentHead": "11c5ca04c8bfae1c8850069fc969a4cc759d6eaf",
+        "sources": {
+          "baselinePaa": "7139ee8b49d4c6c4d8201de235599f4e5941056cd2eaa0070edc3cff361f54de",
+          "baselineTexture": "f6d0cb808815848ae679b7c985187e705a92f4f2bd517a9871380d01a0159d26",
+          "candidatePaa": "35fd8d7bcce5a45d988a590785911748bb0881956507b2081ca4abffa1904ece",
+          "candidateTexture": "bb29d2d2efe77875950a17457003132094e3dce8461ac01e77a535a2f306afb5",
+          "blockCompression": "9b7ad18b83293bb8ea0588b69fbbdbb3238570eabdb66a7b08567335fbf50b41"
+        },
+        "benchmarkFiles": {
+          "bench-common.hpp": "9edaff0a00376d62f49f629e26e37457bdde1f6a17425fe8f8aaaab1b87032b8",
+          "shared-bc.cpp": "6425c7ed294b00c45dab409cdf8839110f448ef0d64a2dec6b226f4b14e8b93d",
+          "baseline-hist.cpp": "35580bd673321a613d8ae733b38bfa668ef1e1f9cced1c06a5276eedc66e84a7",
+          "baseline-run.cpp": "5b3d806a674955f20b5e6116b7bbd32c96263a1f9e7ef17774b2eb48067514cb",
+          "candidate-paa.cpp": "fbe016c2a472a3841caaa00106b4951541a923aff5459aba49b701779af48acb",
+          "candidate-run.cpp": "b166be73ac4fe346c4924e415cfc383e201f74b915b76c204a7e3691b5fd1b77",
+          "bench-main-generated.cpp": "ce0a682060806f2df4139d654a9443d48f49aee61a88bf050f2bfda452f95d93"
+        },
+        "compiler": "D:/Program Files/LLVM/bin/clang-cl.exe",
+        "flags": [
+          "/O2",
+          "/std:c++20",
+          "/EHsc",
+          "/MD",
+          "/DNDEBUG",
+          "-fuse-ld=lld",
+          "/INCREMENTAL:NO",
+          "/OPT:REF"
+        ],
+        "translationUnitsSeparate": true,
+        "lto": false,
+        "exeSha256": "8b8edfb22cf43a41a94b5acce137f5f23a7089e7c91e30b19f03b83b3f5afc3e",
+        "resultFiles": {
+          "results.csv": "ec4743eccbd89325000042d63adda5ef99fdfe8633fd6c7127bad9bce2551087",
+          "results-confirmation.csv": "e957d8a73f73e87add1664a8d70f788e9ad555234a9eac6dc4063fda289aac5f"
+        },
+        "limitations": [
+          "Synthetic CPU-only workloads; not a game/GPU performance acceptance test",
+          "Existing RGBA fixed-stride wrapper cost not independently tested",
+          "Scratch bytes are vector logical sizes, not measured allocator capacities"
+        ]
+      },
+      "sha256": {
+        "alpha-bench.exe": "8b8edfb22cf43a41a94b5acce137f5f23a7089e7c91e30b19f03b83b3f5afc3e",
+        "baseline-hist.cpp": "35580bd673321a613d8ae733b38bfa668ef1e1f9cced1c06a5276eedc66e84a7",
+        "baseline-run.cpp": "5b3d806a674955f20b5e6116b7bbd32c96263a1f9e7ef17774b2eb48067514cb",
+        "bench-common.hpp": "9edaff0a00376d62f49f629e26e37457bdde1f6a17425fe8f8aaaab1b87032b8",
+        "bench-main-generated.cpp": "ce0a682060806f2df4139d654a9443d48f49aee61a88bf050f2bfda452f95d93",
+        "bench-main.cpp": "bf5b15c74e7af1fea0295728e7f5b0e461183f2cf90fee8782032e8f7a1a1b72",
+        "candidate-paa.cpp": "fbe016c2a472a3841caaa00106b4951541a923aff5459aba49b701779af48acb",
+        "candidate-run.cpp": "b166be73ac4fe346c4924e415cfc383e201f74b915b76c204a7e3691b5fd1b77",
+        "compile.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "Compile.ps1": "a1074dd833a1ef91273d4a3e4c572296c7590f5899322c432728adcd279e0cce",
+        "generate.py": "c11ae987b24d42180b9ca73c533c17f003db0d2c6ab1728fd447e7068354632c",
+        "provenance.json": "280179778a025a7c7425870e1b813519c86fbe34fe446ea29f2da1d9710f1a4d",
+        "README.txt": "a5bd4aee8271d7397805e1d3f3523cfe56797bb9038d5a98d4f7bbdc42dc8176",
+        "results-confirmation.csv": "e957d8a73f73e87add1664a8d70f788e9ad555234a9eac6dc4063fda289aac5f",
+        "results.csv": "ec4743eccbd89325000042d63adda5ef99fdfe8633fd6c7127bad9bce2551087",
+        "shared-bc.cpp": "6425c7ed294b00c45dab409cdf8839110f448ef0d64a2dec6b226f4b14e8b93d"
+      },
+      "confirmation": {
+        "batches": 31,
+        "repetitions": 3,
+        "bc2CandidateBaselineMedianRatio": [
+          0.3909,
+          0.6831
+        ],
+        "bc3CandidateBaselineMedianRatio": [
+          0.6238,
+          0.9455
+        ],
+        "side2048BaselineScratchBytes": 16777216,
+        "side2048CandidateScratchBytes": 4194304,
+        "scratchMeaning": "logical vector sizes, not allocator capacities",
+        "limitations": "Existing RGBA fixed-stride wrapper independently unmeasured; synthetic CPU benchmark excludes GPU/game attribution."
+      }
     }
   ]
 }

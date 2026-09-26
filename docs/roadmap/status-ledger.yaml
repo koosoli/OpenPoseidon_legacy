@@ -6621,17 +6621,17 @@ tickets:
     owner: null
     branch: codex/streaming-residency
     baseline_commit: 03e71371
-    verification_commit: f4ffc510
+    verification_commit: 11c5ca04
     milestone: 0
     milestone_role: NON_BLOCKING
     depends_on: []
     blocked_by: []
     blocks: []
-    implementation_commits: [7d5f3e71, f733e708, 8e09f391, 7d8fb75b, a531d7b9, 21b89e79, 082eaa06, c2c8eb0b, f602332c, dca4f954, 0d6a498f, 82cbb5a2, 486d5e9b, e0b88e7a, 08bbada3, cd3d5c68, d8ac1c8d, a92bab54, f4ffc510, d7c35c0f, f0572b3c, 52b00a22]
+    implementation_commits: [7d5f3e71, f733e708, 8e09f391, 7d8fb75b, a531d7b9, 21b89e79, 082eaa06, c2c8eb0b, f602332c, dca4f954, 0d6a498f, 82cbb5a2, 486d5e9b, e0b88e7a, 08bbada3, cd3d5c68, d8ac1c8d, a92bab54, f4ffc510, d7c35c0f, f0572b3c, 52b00a22, b12e46ca, 11c5ca04, 91a2073e, b4bdb20b]
     production_call_sites: []
-    test_ids: [stationary-residency, preparer-byte-budget, preparer-generation-cancellation, required-fire-obstruction, fixed-detail-return, strict-headless-identity, same-world-save-away-roundtrip]
+    test_ids: [stationary-residency, preparer-byte-budget, preparer-generation-cancellation, required-fire-obstruction, fixed-detail-return, strict-headless-identity, same-world-save-away-roundtrip, fresh-process-save-away-roundtrip]
     benchmark_artifacts: [docs/roadmap/evidence/streaming-20260920.json]
-    evidence_hash: 2ff1ecedbae1fa9fe96f963bb39db6070bb02e3264a5a0d9b093b08cbfd05574
+    evidence_hash: fe76d4cff73684c6f5ebc0dd0d16402c3b21b1062b65cf8ecb16e126e3fe0a2b
     decision_record: docs/roadmap/decisions/STREAMING-AUDIT-20260920.md
     known_failures:
       - The staged streaming plan remains in progress; see the decision record for uncompleted gates.
@@ -6639,10 +6639,11 @@ tickets:
       - Preparation accounting includes estimated conversion reservations; actual decoder scratch and Shape allocations are not measured.
       - Adaptive texture detail remains opt-in; first controlled comparisons failed due to render-thread stalls. Mesh loss is corrected; nonblocking native p95 is comparable, but long maxima and broader quality gates remain.
       - Earlier DayZ factor-2 and packed-worker routes failed with GPU Out of Memory; later normal factor-2 and packed routes completed after lifetime changes. This does not prove all OOMs eliminated. Automatic growth and packed paths remain off; mixed timings and tail stalls do not establish a broad no-regression pass.
-      - Required-obstruction identity/damage, visual retirement and same-world client full-save damage/fire restoration passed on f4ffc510; never-requested actor/query/navigation demand, fresh-process reload, wider state and multiplayer still need validation.
+      - Required-obstruction visual retirement and same-world client save restoration passed on f4ffc510; fresh-process client required-obstacle damage/identity/fire restoration passed on 11c5ca04. Never-requested actor/query/navigation demand, wider state and multiplayer/headless save still need validation.
       - Fixed-detail returned vegetation is equivalent at one DayZ pose; normal governor variation, secondary views and broader quality/performance acceptance remain open.
-      - Sept26 authored-ID reservation, pure corridor planner, compact alpha classification and native attachment deferral are committed but candidate build/runtime acceptance remains pending.
-    fallback: WGR_OBJECT_STREAM_PBO and WGR_OBJECT_STREAM_PBO_TEXTURES remain off; WGR_SKY_VOLUME_INCREMENTAL=0 restores full atlas uploads; WGR_ADAPTIVE_TEXTURE_DETAIL and WGR_OBJECT_STREAM_GPU_BUDGET remain off; WGR_OBJECT_STREAM_READY_MB=0 disables the new ready-payload gate; old ocean remains default.
+      - Sept26 build and 6277 assertions in 92 cases passed; DayZ11c5ca04 route/lifecycle passed but measured LOD/triangle demand differs and timings are mixed. No equal-quality FPS/no-regression acceptance; native attachment startup/lifecycle and fresh-process client required-obstacle save passed, but native first pose was materially slower and fixed-detail performance attribution remains open. Pure corridor planning does not admit query objects.
+      - Isolated compact-alpha CPU benchmark passed 18 parity conditions with improved medians and one-quarter scratch logical size; no game FPS acceptance. Material-input dedup and CompleteSource bounds are new foundations pending validation; CompleteSource is not collision Ready or runtime actor/query admission.
+    fallback: WGR_NATIVE_DEFER_ATTACHMENT_SHAPES remains off (unset/0 restores eager attachment shapes); WGR_OBJECT_STREAM_PBO and WGR_OBJECT_STREAM_PBO_TEXTURES remain off; WGR_SKY_VOLUME_INCREMENTAL=0 restores full atlas uploads; WGR_ADAPTIVE_TEXTURE_DETAIL and WGR_OBJECT_STREAM_GPU_BUDGET remain off; WGR_OBJECT_STREAM_READY_MB=0 disables the new ready-payload gate; old ocean remains default.
     reviewer: null
     reviewer_method: Installed native runtime reproduction, comparable-coverage checks and real worker cancellation tests.
     supersedes: []
