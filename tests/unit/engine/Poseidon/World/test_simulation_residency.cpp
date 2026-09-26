@@ -150,6 +150,28 @@ TEST_CASE("Exact-query containment refuses uncertain boundaries and unsafe numer
     REQUIRE_FALSE(SimulationCapsuleContains(point, point, EngineBroadphaseSafeMagnitude() * 2, point, point, 0));
 }
 
+TEST_CASE("Identical query centre lines contain nested engine float radii without clearance erosion", "[streaming-simulation-residency]")
+{
+    const CoveragePoint from{1190,11.5,1200}, to{1210,11.5,1200};
+    const double actualFloatRadius = double(.01f);
+    REQUIRE(actualFloatRadius < .01);
+    REQUIRE(SimulationCapsuleContains(from, to, .01, from, to, actualFloatRadius));
+    REQUIRE(SimulationCapsuleContains(from, to, .01, to, from, actualFloatRadius));
+    REQUIRE(SimulationCapsuleContains(from, to, .01, from, to, 0));
+    REQUIRE(SimulationCapsuleContains(from, from, .01, from, from, actualFloatRadius));
+    REQUIRE(SimulationCapsuleContains(from, from, .01, from, from, 0));
+    REQUIRE(SimulationCapsuleContains(from, from, 0, from, from, 0));
+    REQUIRE_FALSE(SimulationCapsuleContains(from, to, .01, from, to, .02));
+    REQUIRE_FALSE(SimulationCapsuleContains(from, from, .01, from, from, .02));
+    // Upward float rounding cannot invent extra source radius. Callers should
+    // canonicalise queue/status and geometry radius to that same stored float.
+    REQUIRE_FALSE(SimulationCapsuleContains(from, to, .1, from, to, double(.1f)));
+    REQUIRE(SimulationCapsuleContains(from, to, double(.1f), from, to, double(.1f)));
+    auto displaced = to;
+    displaced[2] += .00001;
+    REQUIRE_FALSE(SimulationCapsuleContains(from, to, .01, from, displaced, actualFloatRadius));
+}
+
 TEST_CASE("Fire query channel cannot override automatic neighborhood or inherit its Ready state", "[streaming-simulation-residency]")
 {
     Foundation::CaptureMainThread();

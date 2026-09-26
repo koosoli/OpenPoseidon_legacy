@@ -25,8 +25,11 @@ inline constexpr uint64_t SimulationMaxShapeCharge = 256 * 1024 * 1024;
 
 // Convex swept L-infinity capsule containment, not endpoint-AABB containment.
 // Both endpoint boxes must fit; convexity then covers the complete requested
-// sweep. Conservative roundoff shrinks available clearance. Identical domains
-// (including reversed endpoints) avoid needless rejection at radius zero.
+// sweep. Conservative roundoff shrinks available clearance. Identical centre
+// lines (including reversed endpoints/points) nest exactly for any smaller
+// radius, so they do not require numerical clearance erosion. Fire callers
+// should queue/status using double(actualEngineFloatRadius): a decimal double
+// such as .1 can be smaller than the engine's converted float .1f.
 inline bool SimulationCapsuleContains(const CoveragePoint& from, const CoveragePoint& to, double radius,
     const CoveragePoint& queryFrom, const CoveragePoint& queryTo, double queryRadius)
 {
@@ -41,7 +44,7 @@ inline bool SimulationCapsuleContains(const CoveragePoint& from, const CoverageP
             magnitude = std::max(magnitude, std::abs(value));
         }
     }
-    if (((from == queryFrom && to == queryTo) || (from == queryTo && to == queryFrom)) && radius == queryRadius)
+    if ((from == queryFrom && to == queryTo) || (from == queryTo && to == queryFrom))
         return true;
     const double margin = 32 * std::numeric_limits<float>::epsilon() * magnitude;
     const double available = radius - queryRadius - margin;

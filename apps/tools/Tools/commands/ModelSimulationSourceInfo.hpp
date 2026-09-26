@@ -1,0 +1,78 @@
+#pragma once
+
+#include <Poseidon/World/Model/Model.hpp>
+#include <algorithm>
+#include <cmath>
+#include <iomanip>
+#include <sstream>
+#include <string>
+#include <string_view>
+
+namespace PoseidonTools
+{
+// Raw IR evidence only. These limits bound output, not parser allocations.
+inline constexpr size_t SimulationInfoMaxLods = 64;
+inline constexpr size_t SimulationInfoMaxProperties = 64;
+inline constexpr size_t SimulationInfoMaxStringBytes = 256;
+
+inline std::string SimulationInfoQuoted(std::string_view value)
+{
+    std::ostringstream out;
+    out << '"';
+    for (unsigned char ch : value.substr(0, SimulationInfoMaxStringBytes))
+    {
+        if (ch == '"' || ch == '\\') out << '\\' << char(ch);
+        else if (ch < 32 || ch == 127)
+            out << "\\x" << std::hex << std::setw(2) << std::setfill('0') << unsigned(ch) << std::dec;
+        else out << char(ch);
+    }
+    out << '"';
+    if (value.size() > SimulationInfoMaxStringBytes)
+        out << " omittedBytes=" << value.size() - SimulationInfoMaxStringBytes;
+    return out.str();
+}
+
+inline std::string FormatModelSimulationSourceInfo(const Poseidon::Model::Model& model)
+{
+    std::ostringstream out;
+    out << "Simulation source info: parsed IR evidence only\n"
+           "Parser coverage: absent fields describe this parser representation; source completeness is not certified.\n"
+           "No Shape adaptation, constructor/config resolution, or simulation Ready certification.\n";
+    out << "Source: " << SimulationInfoQuoted(model.sourcePath) << '\n';
+    out << "Format: " << SimulationInfoQuoted(model.sourceFormat) << " version=" << model.sourceVersion << '\n';
+    out << "allowAnimation: " << model.allowAnimation << '\n';
+    out << "LOD count: " << model.lodLevels.size() << '\n';
+    const size_t count = std::min(model.lodLevels.size(), SimulationInfoMaxLods);
+    for (size_t i = 0; i < count; ++i)
+    {
+        const auto& lod = model.lodLevels[i];
+        const auto& mesh = lod.mesh;
+        size_t proxySelections = 0, weightedSelections = 0, nonUnitSourceWeights = 0, nonfinitePositions = 0;
+        for (const auto& selection : mesh.selections)
+        {
+            proxySelections += selection.name.starts_with("proxy:");
+            weightedSelections += !selection.vertexWeights.empty();
+            for (auto weight : selection.sourceVertexWeights) nonUnitSourceWeights += weight != 1;
+        }
+        for (const auto& vertex : mesh.vertices)
+            nonfinitePositions += !std::isfinite(vertex.position.x) || !std::isfinite(vertex.position.y) ||
+                                  !std::isfinite(vertex.position.z);
+        out << "LOD " << i << ": resolution=" << std::setprecision(9) << lod.resolution
+            << " purpose=" << Poseidon::Model::LodPurposeName(lod.purpose)
+            << " encoding=" << SimulationInfoQuoted(lod.sourceEncoding) << '\n';
+        out << "  vertices=" << mesh.vertices.size() << " triangles=" << mesh.triangles.size()
+            << " quads=" << mesh.quads.size() << " nonfinitePositions=" << nonfinitePositions << '\n';
+        out << "  proxies=" << mesh.proxies.size() << " frames=" << mesh.frames.size()
+            << " selections=" << mesh.selections.size() << " proxySelections=" << proxySelections
+            << " weightedSelections=" << weightedSelections << " nonUnitSourceWeights=" << nonUnitSourceWeights << '\n';
+        out << "  properties=" << mesh.properties.size() << '\n';
+        const size_t properties = std::min(mesh.properties.size(), SimulationInfoMaxProperties);
+        for (size_t p = 0; p < properties; ++p)
+            out << "    [" << p << "] name=" << SimulationInfoQuoted(mesh.properties[p].name)
+                << " value=" << SimulationInfoQuoted(mesh.properties[p].value) << '\n';
+        if (properties < mesh.properties.size()) out << "  omittedProperties=" << mesh.properties.size() - properties << '\n';
+    }
+    if (count < model.lodLevels.size()) out << "omittedLods=" << model.lodLevels.size() - count << '\n';
+    return out.str();
+}
+} // namespace PoseidonTools

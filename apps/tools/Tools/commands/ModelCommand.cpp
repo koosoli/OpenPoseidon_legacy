@@ -1,4 +1,6 @@
 #include "ModelCommand.hpp"
+#include "ModelSimulationSourceInfo.hpp"
+#include <Poseidon/World/Model/ModelCache.hpp>
 #include "../SDLPreview.hpp"
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
 #include <Poseidon/Asset/Probes/AssetInfo.hpp>
@@ -86,6 +88,7 @@ static void setupModelInspect(CLI::App& model)
     static bool showSections = false;
     static bool showAll = false;
     static bool classify = false;
+    static bool simulationSourceInfo = false;
     static std::string texRoot;
 
     cmd->add_option("input", inputPath, "Input P3D file path")->required()->check(CLI::ExistingFile);
@@ -94,12 +97,26 @@ static void setupModelInspect(CLI::App& model)
     cmd->add_flag("--sections", showSections, "Show section details with render hints");
     cmd->add_flag("-a,--all", showAll, "Show all details");
     cmd->add_flag("--classify", classify, "Classify each texture's alpha (opaque/cutout/blend) + render route");
+    cmd->add_flag("--simulation-source-info", simulationSourceInfo,
+                  "Show bounded raw IR properties/animation/proxy facts; no engine eligibility certification");
     cmd->add_option("--texroot", texRoot,
                     "Directory to resolve texture paths from (recursive basename match; defaults to model dir)");
 
     cmd->callback(
         [&]()
         {
+            if (simulationSourceInfo)
+            {
+                std::string error;
+                const auto source = Poseidon::ModelCache::LoadLooseFile(inputPath, &error, nullptr);
+                if (!source)
+                {
+                    std::cerr << "Error: Failed to parse " << inputPath << ": " << error << std::endl;
+                    throw CLI::RuntimeError(1);
+                }
+                std::cout << FormatModelSimulationSourceInfo(*source);
+                return;
+            }
             auto info = Poseidon::InspectModel(inputPath);
 
             std::cout << "File: " << inputPath << std::endl;

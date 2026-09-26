@@ -266,6 +266,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     World/test_simulation_residency.cpp
     World/test_simulation_fire_collision.cpp
     World/Model/test_dds_publication_token.cpp
+    World/Model/test_model_simulation_source_info.cpp
     Graphics/Textures/test_bc3_prepared_sidecar.cpp
     World/Model/test_stream_texture_names.cpp
     World/Model/test_owned_model_read.cpp

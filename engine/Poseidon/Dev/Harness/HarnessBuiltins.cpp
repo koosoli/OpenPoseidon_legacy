@@ -519,14 +519,17 @@ void RegisterSqf(HarnessServer& hs)
             const auto* radius = cJSON_GetObjectItemCaseSensitive(root, "radius");
             if (!cJSON_IsNumber(radius) || !std::isfinite(radius->valuedouble) || radius->valuedouble < 0 || radius->valuedouble > 1000)
                 return HarnessProtocol::ErrorResponse("finite radius 0..1000 required");
+            // Queue and trace the same engine-float radius. Otherwise a caller
+            // can enqueue a narrower double domain than Intersect actually uses.
+            const float engineRadius = static_cast<float>(radius->valuedouble);
             CollisionBuffer contacts;
             const auto status = !std::strcmp(action, "collide")
                 ? (purpose == Streaming::SimulationQueryPurpose::Fire
-                    ? GLandscape->TryModernSimulationFireCollision(contacts, *actor, nullptr, nullptr, endpoints[0], endpoints[1], float(radius->valuedouble))
+                    ? GLandscape->TryModernSimulationFireCollision(contacts, *actor, nullptr, nullptr, endpoints[0], endpoints[1], engineRadius)
                     : Streaming::SimulationResidencyStatus::Invalid)
                 : !std::strcmp(action, "queue")
-                ? GLandscape->QueueModernSimulationQuery(*actor, purpose, endpoints[0], endpoints[1], radius->valuedouble)
-                : GLandscape->ModernSimulationQueryStatus(*actor, purpose, endpoints[0], endpoints[1], radius->valuedouble);
+                ? GLandscape->QueueModernSimulationQuery(*actor, purpose, endpoints[0], endpoints[1], double(engineRadius))
+                : GLandscape->ModernSimulationQueryStatus(*actor, purpose, endpoints[0], endpoints[1], double(engineRadius));
             auto* result = cJSON_CreateObject();
             cJSON_AddStringToObject(result, "status", SimulationStatusName(status));
             cJSON_AddStringToObject(result, "scope", "static terrain-object residency; not collision clearance");
