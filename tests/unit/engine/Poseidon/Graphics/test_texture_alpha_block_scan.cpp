@@ -341,17 +341,30 @@ TEST_CASE("Compact block alpha matches every full-decode texel including edge bl
             const int count = ((w + 3) / 4) * ((h + 3) / 4);
             for (int i = 0; i < count; ++i)
                 Append(blocks, bc3 ? Bc3Block(i % 2 ? 17 : 241, i % 2 ? 201 : 7, indices) : Bc2Block(nibbles));
-            const auto paa = BuildDxtPaa(bc3 ? kDxt5Magic : kDxt3Magic, w, h, blocks);
+            // PacLevelMem rejects PAA levels smaller than 2 in either dimension.
+            // The raw block helper also supports 1x1: decode the same block through
+            // a valid 2x2 PAA, then crop the independent RGBA reference to 1x1.
+            // Both sizes occupy one block, so the source bytes stay identical.
+            const int referenceW = std::max(2, w), referenceH = std::max(2, h);
+            const auto paa = BuildDxtPaa(bc3 ? kDxt5Magic : kDxt3Magic, referenceW, referenceH, blocks);
             const auto reference = DecodePAABuffer(paa.data(), paa.size(), true);
             REQUIRE(reference.valid());
-            REQUIRE(reference.width == w);
-            REQUIRE(reference.height == h);
+            REQUIRE(reference.width == referenceW);
+            REQUIRE(reference.height == referenceH);
             std::vector<uint8_t> alpha;
             REQUIRE(DecodeBlockAlpha(blocks.data(), blocks.size(), w, h, bc3, alpha));
-            REQUIRE(alpha.size() * 4 == reference.rgba.size());
-            for (size_t i = 0; i < alpha.size(); ++i)
-                CHECK(alpha[i] == reference.rgba[i * 4 + 3]);
-            RequireSameStats(ClassifyAlpha(reference.rgba.data(), alpha.size()),
+            REQUIRE(alpha.size() == static_cast<size_t>(w) * static_cast<size_t>(h));
+            std::vector<uint8_t> croppedRgba(alpha.size() * 4);
+            for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                {
+                    const size_t sample = static_cast<size_t>(y) * w + x;
+                    const size_t referenceSample = static_cast<size_t>(y) * referenceW + x;
+                    CHECK(alpha[sample] == reference.rgba[referenceSample * 4 + 3]);
+                    std::copy_n(reference.rgba.data() + referenceSample * 4, 4,
+                                croppedRgba.data() + sample * 4);
+                }
+            RequireSameStats(ClassifyAlpha(croppedRgba.data(), alpha.size()),
                              ClassifyAlphaSamples(alpha.data(), alpha.size(), 1));
         }
 }
