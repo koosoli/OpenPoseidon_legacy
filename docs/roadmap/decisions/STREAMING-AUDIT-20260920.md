@@ -2024,3 +2024,58 @@ cache-confounded component observation, no FPS/no-regression acceptance. Actual
 ON303 prepared entries/536787952 capacity and cold283puts62hits remain scoped.
 Future advisory-capacity source is unbuilt and not in this tested binary.
 Defaults OFF/wholeplan OPEN/source-bound and shared-buffer limits remain.
+
+### Capacity screening and inspected geometry overlap — 27 September 2026
+
+0f0b2559 builds259 nodes/stamped18 pass. Rust overlap6 and ABI8 tests pass,
+including rejection of oldABI12; C++86559 assertions/95 cases has93pass2skips;
+fresh1MiB/TTL.01 alpha316 assertions/2 cases passes. ABI13 adds104-byte matched
+summary layout. Overlap counts unique live meshes only when distinct inspected
+(model,LOD) pairs reference them, never duplicate sections or repeated same-model
+requests. Truncated subsets stay partial and ownershipCoverageCompletefalse;
+no global exclusive/reclaimable bytes or selected-use interpretation.
+
+Capacity screening checks conservative chain+facts charges before expensive
+optional analysis, grants no reservation, and final Put recomputes actual charge.
+TTL not yet swept may conservatively skip facts; ordinary chain/classification
+fallback remains. This is an opportunity, not unconditional loading/FPS benefit.
+
+Actual003805 passes clean0 with671 capacityskips/284 factsputs/62 hits/0 miss/
+cancel. Resident19985/livegeometry230706772/cap318767104/objecttexture1262855596/
+1573/backend2744302016 matches predecessor. Peakconversion428760152,319 prepared
+entries/536869024 capacity bytes; fraxinusalpha26.1/model27.1ms does not demonstrate owner
+performance benefit. Actor-away target absent/required0/coldwork/facts/payload/
+shape charges0, historicalcreated/released81/81 but422 normal positiveleases remain.
+
+Procedural limit: deploy held the game lock, but this subsequent test inherited
+LOCK_OWNER after that lock returned and did not own the semaphore. Root confirmed
+solePID38192 and other agents performed no runtime. Retain actual correctness
+evidence; do not label this a lock-controlled performance comparison.
+
+Fresh Reset generation rejects stale publication, but same-world DropStale has
+a late post-cancellation PAA publication gap. No generic linearisation or actual
+full-worker latch proof is claimed. Properly self-locked geometry diagnostic is
+pending; whole plan OPEN/defaultsOFF, no paging/reclaim/performance acceptance.
+
+Properly self-locked geometry003921 now passes clean0 AllocationDiagnosticOnly,
+convergenceMeasuredfalse. Report unionV88982216/I14558520/658meshes across189
+valid inspected models/658LODs/1253section visits; registry683/visited256/skipped67,
+missing0/truncatedtrue. Overlap0 with ownershipCoverageCompletefalse means only no
+shared allocation across these inspected rows; it does not certify global
+exclusive/reclaimable bytes or selected demand. Global poollive380859292/
+cap637534208/retired0 remains broader than the union. Request capped1 registry
+record/1row passes bounded reporting (first negative-cache record gives0valid
+models), and stale request-ID refusal passes. Controlled alpha retry remains
+pending; no repeated-convergence/performance/paging acceptance.
+
+Properly self-locked controlled004139 retry now passes clean0 on unchanged0f.
+Cold657 capacityskips/282 factsputs/61 hits/0 miss/cancel,304prepared entries/
+536866368 capacity bytes, peakconversion453154616. Same19985/live230706772/
+cap318767104/objecttexture1262855596/count1573/backend2744302016 retains coverage.
+Actor-away target absent/required0/cold debt0, historicalcreated/released81/81
+but422 normal positiveleases remain. This closes the procedural runtime gate;
+the initial unprotected003805 remains actual correctness evidence, not controlled
+performance. Fraxinus still block-path alpha30.1/model31.2ms, shape14.682ms:
+no owner-thread gain, FPS or no-regression acceptance follows. Later PAA
+publication-token fix is pending/unbuilt, GPU LOD feedback is a separate proposal;
+neither is part of0f runtime. Whole plan OPEN/defaultsOFF.

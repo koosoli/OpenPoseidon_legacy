@@ -7601,6 +7601,180 @@
         "samples.jsonl": "82597268c46876fffb2b8bf2cbeed3b81144a215027f4dc5f08918ebc394dcfc",
         "cold-positive.eden/mission.sqm": "9e1384738678862d37b5021bb6701bb1a8884ffa26f82cd51688a1eb5e10cbec"
       }
+    },
+    {
+      "run": "alpha-capacity-actual-20260927-20260927-003805",
+      "classification": "PASSclean0 actualcorrectness ONLY: rootsolePID38192 confirmed but game inheritedLOCK_OWNERafterdeploylockreturned and didNOTownsemaphore; NOTcontrolledperformance. Installed0f0b2559; cold671capacityskips284factsputs62hits0miss/cancel,19985/live230706772/cap318767104/objecttex1262855596/1573/backend2744302016 samepredecessor. Peakconversion428760152/prepared319cap536869024; fraxinusalpha26.1/model27.1ms noownerbenefit/FPSclaim. Actorawaytargetabsent/coldworkfactspayloadshapecharges0/required0, historical81created81released but422normalpositiveleasesremain/globalCapacity. Advisorycapacity snapshotnotreservation/finalPutrechecks; expiredentries mayconservativelyskipordinaryfallback. SameworldDropStalelatePAApublish raceOPEN; freshResetgenerationrefusal notgenericlinearisation/latchproof. DefaultsOFF/noPaging/reclaim/Ready/performanceaccepted.",
+      "provenance": {
+        "scriptSha256": "7FD592684D996A652974BCA37037F4ADA2BC833B7BCC9506CDB07F52F1BCBEAA",
+        "environment": {
+          "WGR_GEO_POOL_GROWTH": "2.0",
+          "WGR_NATIVE_DDS_PREPARE": "0",
+          "WGR_OBJECT_STREAM_PBO_TEXTURES": "1",
+          "WGR_OBJECT_STREAM_PBO": "1",
+          "WGR_NATIVE_DDS_BC3_ONLY": "0",
+          "WGR_SKY_VOLUME_INCREMENTAL": "1",
+          "WGR_SIMULATION_RESIDENCY_TEST": "1",
+          "POSEIDON_MODEL_DDC": "0",
+          "WGR_GEO_POOL_PRESSURE_GROWTH": "0",
+          "WGR_OBJECT_STREAM_MAX_OBJECTS": "20000",
+          "WGR_LOD_GOVERNOR_RANGE": "1",
+          "WGR_SIMULATION_POSITIVE_COLD": "1",
+          "WGR_OBJECT_STREAM_TEST_BUDGET": "1",
+          "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\alpha-capacity-actual-20260927-20260927-003805\\user",
+          "WGR_SIMULATION_RESIDENCY": "1",
+          "WGR_OBJECT_STREAM_GPU_BUDGET": "0",
+          "WGR_ADAPTIVE_TEXTURE_DETAIL": "0"
+        },
+        "head": "0f0b2559bedb9928293188b2a8aa8f93b484eeeb",
+        "installed": "codex/streaming-residency 0f0b2559 2026-09-27_00:38 deploy-ps1",
+        "scope": "Actual inventory83912800 cold actor admission, unchanged20000 camera budget; no object getter, source diagnostic, asset whitelist or full-query readiness.",
+        "world": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\packages\\dayz-compat\\world\\chernarusplus\\chernarusplus.wrp",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "25FCCB9A7E7E77CB551C700C74A5B1ABD82A0C0A106A96CD328BB62DF8ED099C",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "42292D4CF91E7699D708D495CEC1E5228524487979D2C9CC0E58407544ADB012",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ]
+      },
+      "sha256": {
+        "engine.log": "6e551cadee353e3ae27e58151037a3eb79a7fb193f84b3eabb323c406af2a6c2",
+        "harness.jsonl": "0bc546a8f383fc33097f491447ea691fa58eaa44cdb894b8caf08cab2dd1ed8a",
+        "provenance.json": "f80061a1592023152e55fea1ba3e93ff1933f896b0fa0d17e565e20a0d17ee91",
+        "result.json": "6bae75c8703a9b5186b36ae17a3967aa4d3a186fac04bc4efbeb7e792abc2230",
+        "samples.jsonl": "83ce4da616d575f5bb67841df5054b21b97239a3263100d9cf5a9ca18545d8dd",
+        "cold-positive.eden/mission.sqm": "9e1384738678862d37b5021bb6701bb1a8884ffa26f82cd51688a1eb5e10cbec"
+      }
+    },
+    {
+      "run": "geometry-overlap-actual-20260927-20260927-003921",
+      "classification": "ProperlyselflockPASSclean0 AllocationDiagnosticOnly/convergenceMeasuredfalse. ActualV88982216/I14558520 union658mesh189validmodel/658LODs/1253sections; registry683/visited256/skipped67/missing0/truncatedtrue. Overlap0 ownershipCoverageCompletefalse meansONLY nooverlapininspectedrows, notglobalexclusive/reclaim/demand. Poollive380859292/cap637534208/retired0 broaderthaninspectedunion. Boundedmax1model/1row request validtruncated with0validrequestedmodels(firstnegativecache), staleIDInvalidassert passes. No repeatedconvergence/performance/paging proof.",
+      "provenance": {
+        "quietTimeoutSeconds": 30,
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "25FCCB9A7E7E77CB551C700C74A5B1ABD82A0C0A106A96CD328BB62DF8ED099C",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "42292D4CF91E7699D708D495CEC1E5228524487979D2C9CC0E58407544ADB012",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "installed": "codex/streaming-residency 0f0b2559 2026-09-27_00:38 deploy-ps1",
+        "pose": [
+          5704.58,
+          2523.37,
+          73.74,
+          260.9,
+          -3.8
+        ],
+        "cycles": 3,
+        "environment": {
+          "WGR_PASS1_STATS": "1",
+          "WGR_OBJECT_STREAM_TEST_BUDGET": "1",
+          "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\geometry-overlap-actual-20260927-20260927-003921\\user",
+          "WGR_ADAPTIVE_TEXTURE_DETAIL": "0",
+          "WGR_NATIVE_DDS_BC3_ONLY": "0",
+          "WGR_OBJECT_STREAM_GPU_BUDGET": "0",
+          "WGR_NATIVE_DDS_PREPARE": "0",
+          "WGR_OBJECT_STREAM_PBO": "0",
+          "WGR_OBJECT_STREAM_PBO_TEXTURES": "0",
+          "WGR_SIMULATION_RESIDENCY": "0",
+          "WGR_SKY_VOLUME_INCREMENTAL": "1",
+          "WGR_GEO_POOL_GROWTH": "2.0",
+          "WGR_RESIDENCY_TRACE": "1",
+          "WGR_GEO_POOL_PRESSURE_GROWTH": "0",
+          "WGR_LOD_GOVERNOR_RANGE": "1",
+          "WGR_OBJECT_STREAM_MAX_OBJECTS": "20000"
+        },
+        "driverSampled": false,
+        "routePoseHoldSeconds": 3,
+        "growthAllowance": "max(1% of return2, 8 MiB); texture count max(1%, 8)",
+        "routeX": [
+          5804.58,
+          5904.58,
+          6004.58,
+          6104.58,
+          6004.58,
+          5904.58,
+          5804.58,
+          5704.58
+        ],
+        "corpus": "DayZ",
+        "quietSamples": 10,
+        "processScope": "PrivateMemorySize64 and WorkingSet64 of owned game PID; diagnostic, not a GPU convergence proof",
+        "head": "0f0b2559bedb9928293188b2a8aa8f93b484eeeb",
+        "scriptSha256": "7C56EBC4E965151D4DF3451FE0539AAEAF7F4EA3D2CB4418A514F772EAC8E897"
+      },
+      "sha256": {
+        "engine.log": "1b3fdbd442c2e7fd2ea7eb6abdf279607fb0ef6b2061f648c02aa361cdaf1e13",
+        "geometry-allocations-bounded.json": "41fff6d56c9fcffc41744bcfdc71f998fbfbc3897ff18f931e9118612032d7e7",
+        "geometry-allocations.json": "a58776f67ebd4aad2c9763db05b39432f31e584c0824c8416979dc39408b371e",
+        "harness.jsonl": "8684405cc290b704dc89d2a1aff99a05ecf38785b88cc3805212e6312d1254a2",
+        "provenance.json": "91ebbcb5dc7a498bf37598216aa3c417f2a5cfd000c5dd338689d79d9cbb69ea",
+        "result.json": "af56d4d8d077f13437543d153370ca09b8be9684c15f5b0242df6bc09a8acf8d",
+        "returned-settled.png": "571d8aca3ad1e05951e0d248d212356e7506e216bc1bf7bc0e2cfcd1f90d83bb",
+        "samples.jsonl": "d56ae142176c8360f5911502cdd2048e1f8e4466b57f3964b27e7e623d76e053"
+      }
+    },
+    {
+      "run": "alpha-capacity-locked-20260927-20260927-004139",
+      "classification": "ProperlyselflockedPASSclean0 unchanged0f0b2559 closesproceduralruntimegate ONLY. Cold657capacityskips282factsputs61hits0misscancel/304entries536866368bytes/peakconversion453154616;19985/live230706772/cap318767104/objecttex1262855596/1573/backend2744302016 samepredecessor. Actualfraxinusalpha30.1/model31.2 shape14.682ms remainsblockpath, noowner/FPS/no-reggainclaim. Actorawaytargetabsent/required0/coldworkfacts-payloadshapecharges0/historical81created81released but422normalactorleases/globalCapacityremain. Priorunprotected003805retainedcorrectnessnotcontrolledperformance. FuturePAApublicationtokenfix unbuilt/GPULODfeedbackproposal notincluded. DefaultsOFF/fullplanOPEN/performanceAcceptedfalse.",
+      "provenance": {
+        "world": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\packages\\dayz-compat\\world\\chernarusplus\\chernarusplus.wrp",
+        "scope": "Actual inventory83912800 cold actor admission, unchanged20000 camera budget; no object getter, source diagnostic, asset whitelist or full-query readiness.",
+        "installed": "codex/streaming-residency 0f0b2559 2026-09-27_00:38 deploy-ps1",
+        "head": "0f0b2559bedb9928293188b2a8aa8f93b484eeeb",
+        "environment": {
+          "WGR_OBJECT_STREAM_MAX_OBJECTS": "20000",
+          "WGR_OBJECT_STREAM_GPU_BUDGET": "0",
+          "WGR_SIMULATION_POSITIVE_COLD": "1",
+          "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\alpha-capacity-locked-20260927-20260927-004139\\user",
+          "WGR_OBJECT_STREAM_TEST_BUDGET": "1",
+          "WGR_SIMULATION_RESIDENCY": "1",
+          "WGR_GEO_POOL_GROWTH": "2.0",
+          "WGR_GEO_POOL_PRESSURE_GROWTH": "0",
+          "WGR_LOD_GOVERNOR_RANGE": "1",
+          "WGR_NATIVE_DDS_BC3_ONLY": "0",
+          "WGR_OBJECT_STREAM_PBO_TEXTURES": "1",
+          "WGR_NATIVE_DDS_PREPARE": "0",
+          "WGR_ADAPTIVE_TEXTURE_DETAIL": "0",
+          "WGR_SKY_VOLUME_INCREMENTAL": "1",
+          "POSEIDON_MODEL_DDC": "0",
+          "WGR_SIMULATION_RESIDENCY_TEST": "1",
+          "WGR_OBJECT_STREAM_PBO": "1"
+        },
+        "scriptSha256": "7FD592684D996A652974BCA37037F4ADA2BC833B7BCC9506CDB07F52F1BCBEAA",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "25FCCB9A7E7E77CB551C700C74A5B1ABD82A0C0A106A96CD328BB62DF8ED099C",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "42292D4CF91E7699D708D495CEC1E5228524487979D2C9CC0E58407544ADB012",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ]
+      },
+      "sha256": {
+        "engine.log": "8367dda2cc61f3886f973fc704dd9f22f9f0f5b545641c73148bec1e8669d75e",
+        "harness.jsonl": "619d62ec53e10c64a0048262d86b4dd32095b49e81624e2f8a9e9b3a1baa1d79",
+        "provenance.json": "dc993c49ee8dd10b0c4ca17fcad8b7735f9e1906eeed6c6542e76e1103c42362",
+        "result.json": "ebe1f6cb28640697ca1cd9d2336c4175c1a34200b3c0187ee4346bc0a36dd537",
+        "samples.jsonl": "59812053124e30f2a52d248cb242addd9a1aec88ff0d3dad7a187ef869bdf183",
+        "cold-positive.eden/mission.sqm": "9e1384738678862d37b5021bb6701bb1a8884ffa26f82cd51688a1eb5e10cbec"
+      }
     }
   ],
   "microbenchmarks": [
@@ -8249,6 +8423,19 @@
         "test-alpha-facts-budget-ttl-20260927.log": "97ad3bf00e893971efb2989fb616524f72c963e7b84e5defa7dbb89489048117",
         "test-registered-alpha-combined-20260927.log": "a0d6fee70f273c77a6d27d48b5d293da6c646750ab36ba8c61b3d27dd7b4c9d5",
         "test-registered-alpha-io-20260927.log": "866f6719fa6a350dc3bac8b872133628fddd38a50afa1440873fa9736aafd757"
+      }
+    },
+    {
+      "artifactRoot": "build",
+      "runtimeSourceCommit": "0f0b2559",
+      "result": "259node+stamp18PASS, Rustoverlap6/ABI8PASS inclold12negative, CPP86559assert95cases93PASS2SKIP, fresh1MiBTTL.01alpha316assert2casesPASS. ABI13summary104bytes/layoutmatched; distinctinspectedmodelLODmesh overlaponly/ownershipCoverageCompletefalse/noexclusive. Capacity advisory boundedcharge snapshotnoreservation/finalPutrechecks; beforeTTL conservative skipsordinaryfallback. SameworldDropStalelatePAApublish gapOPEN; nofullworker-latch/genericlinearisationclaim.",
+      "sha256": {
+        "build-alpha-capacity-overlap-20260927.log": "0f6083438a0fed959588eef8cef0c405a3ee0040634c6d8dc8ef6d8b9559a45c",
+        "build-alpha-capacity-overlap-stamp-20260927.log": "4efd446b7cf0b3958eb8413831bb823391ed8848d23e2bce43626ced8860fe58",
+        "test-alpha-capacity-budget-20260927.log": "b2f4219477c43ede2ddf5a37a513119172835e3fc1312e6e3a417e69062731e2",
+        "test-capacity-overlap-cpp-20260927.log": "bdab810fcffa3ebb5a12f79106d9068b003dc81d7932eabc4f342b9ef914e063",
+        "test-geometry-overlap-abi-20260927.log": "7308133d9bd350401b6dd7aeb609e96114b7d3fb29c70689a3e7e641a6f34718",
+        "test-geometry-overlap-rust-20260927.log": "f1219a40cdd0d4da96dcaa959c18b558969c5bcabbf87cd3f0df2aa9ff0d8514"
       }
     }
   ],
