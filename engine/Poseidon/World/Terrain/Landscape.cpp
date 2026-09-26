@@ -2881,6 +2881,7 @@ void AddA3StaticMarkerLights(Object* obj, LODShapeWithShadow* shape, const char*
 Object* Landscape::ObjectCreate(int id, const char* name, const Matrix4& transform, int* x, int* z,
                                 bool avoidRecalculation, bool preserveAuthoredElevation, bool registerVisual)
 {
+    const ShapeBank::CpuOnlyLoadScope cpuOnly(!registerVisual);
     // create object based on Class hint in LOD 0
     Ref<LODShapeWithShadow> shape = Shapes.New(name, false, true);
     Object* obj = NewObject(shape, id);
@@ -2964,6 +2965,11 @@ Object* Landscape::ObjectCreate(int id, const char* name, const Matrix4& transfo
 
 void Landscape::RegisterModernObjectVisual(Object* object)
 {
+    if (auto* shape = object->GetShape())
+    {
+        ShapeBank::WorldModelScope worldModel(Shapes);
+        Shapes.EnsureVisualRendering(shape, true);
+    }
     object->SetVisualResident(true);
     if (GEngine)
         GEngine->SceneObjectCreated(object);

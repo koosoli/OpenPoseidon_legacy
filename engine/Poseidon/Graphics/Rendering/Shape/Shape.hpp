@@ -1119,12 +1119,18 @@ class LODShape: public RefCountWithLinks
 class LODShapeWithShadow: public LODShape
 {
 	private:
+	friend class ShapeBank;
+	enum class LogicalVisualState : uint8_t { None, Deferred, Promoting };
+	LogicalVisualState _logicalVisualState = LogicalVisualState::None;
+	bool _logicalWorldModel = false;
+	bool _logicalVisualRequested = false;
 	Ref<LODShape> _shadow;
 
 	Ref<LODShape> _destroyed;
 	Ref<LODShape> _destroyedShadow;
 
 	public:
+	bool DeferredVisualRendering() const { return _logicalVisualState != LogicalVisualState::None; }
 	LODShapeWithShadow();
 	LODShapeWithShadow
 	(
@@ -1163,6 +1169,24 @@ transition (mission load after briefing).
 class ShapeBank
 {
 	public:
+	// Owner-only, nested across all banks: proxy construction uses the global Shapes bank.
+	// Suppresses rendering allocation only; parsing/adaptation/CPU collision work still runs.
+	class CpuOnlyLoadScope
+	{
+	public:
+		explicit CpuOnlyLoadScope(bool enabled = true);
+		~CpuOnlyLoadScope();
+		CpuOnlyLoadScope(const CpuOnlyLoadScope&) = delete;
+		CpuOnlyLoadScope& operator=(const CpuOnlyLoadScope&) = delete;
+		bool Active() const { return _active; }
+	private:
+		bool _active = false;
+	};
+	static bool CpuOnlyLoadActive() { return _cpuOnlyLoadDepth != 0; }
+	// Promote a deferred shape and its proxy graph before a logical object becomes visible.
+	// Normal already-visual cache hits do no graph walk. Deferred markers survive no-engine
+	// frames and exceptions; the transient Promoting state breaks shared/cyclic recursion.
+	void EnsureVisualRendering(LODShapeWithShadow* shape, bool worldModel = false);
 	using HandleT = ::Poseidon::Handle<LODShapeWithShadow>;
 
 	// Report cached-model count in the memory-budget panel. Observability only:
@@ -1223,8 +1247,14 @@ class ShapeBank
 	// set it around their loads; weapons, characters and UI shapes never see it.
 	struct WorldModelScope
 	{
-		explicit WorldModelScope(ShapeBank& bank) : _bank(bank), _prev(bank._worldModelScope) { bank._worldModelScope = true; }
-		~WorldModelScope() { _bank._worldModelScope = _prev; }
+		explicit WorldModelScope(ShapeBank& bank) : _bank(bank), _prev(bank._worldModelScope)
+		{
+			bank._worldModelScope = true;
+			++_worldModelDepth;
+		}
+		~WorldModelScope() { _bank._worldModelScope = _prev; --_worldModelDepth; }
+		WorldModelScope(const WorldModelScope&) = delete;
+		WorldModelScope& operator=(const WorldModelScope&) = delete;
 		ShapeBank& _bank;
 		bool _prev;
 	};
@@ -1242,6 +1272,10 @@ class ShapeBank
 	void Clear();
 
 	private:
+	static thread_local uint32_t _cpuOnlyLoadDepth;
+	// Proxy construction uses global Shapes even when its parent belongs to
+	// another bank. Deferred children must retain that parent's world intent.
+	static thread_local uint32_t _worldModelDepth;
 	::Poseidon::AssetCache<LODShapeWithShadow, Link<LODShapeWithShadow>> _cache;
 	Foundation::MemoryDomainProbe _memProbe;
 	// True once OptimizeAll has run at least once, i.e. world load is past the

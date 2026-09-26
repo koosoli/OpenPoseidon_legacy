@@ -821,6 +821,73 @@ LODShapeWithShadow* ShapeBank::New(const char* name, bool reversed, bool shadow)
     return NewFromModel(name, reversed, shadow, nullptr, nullptr);
 }
 
+thread_local uint32_t ShapeBank::_cpuOnlyLoadDepth = 0;
+thread_local uint32_t ShapeBank::_worldModelDepth = 0;
+
+ShapeBank::CpuOnlyLoadScope::CpuOnlyLoadScope(bool enabled)
+{
+    if (!enabled)
+        return;
+    POSEIDON_MAIN_THREAD_ONLY("ShapeBank::CpuOnlyLoadScope -- logical shape loads are owner-thread only");
+    if (!Foundation::IsMainThread())
+        return;
+    ++_cpuOnlyLoadDepth;
+    _active = true;
+}
+
+ShapeBank::CpuOnlyLoadScope::~CpuOnlyLoadScope()
+{
+    if (_active)
+        --_cpuOnlyLoadDepth;
+}
+
+void ShapeBank::EnsureVisualRendering(LODShapeWithShadow* shape, bool worldModel)
+{
+    if (!shape || CpuOnlyLoadActive() || !shape->DeferredVisualRendering())
+        return;
+    POSEIDON_MAIN_THREAD_ONLY("ShapeBank::EnsureVisualRendering -- visual shape promotion is owner-thread only");
+    if (!Foundation::IsMainThread())
+        return;
+    shape->_logicalVisualRequested = true;
+    shape->_logicalWorldModel |= worldModel || _worldModelScope || _worldModelDepth != 0;
+    if (!_bulkOptimizeDone || !GEngine ||
+        shape->_logicalVisualState == LODShapeWithShadow::LogicalVisualState::Promoting)
+        return;
+    shape->_logicalVisualState = LODShapeWithShadow::LogicalVisualState::Promoting;
+    try
+    {
+        for (int level = 0; level < shape->NLevels(); ++level)
+        {
+            Shape* lod = shape->Level(level);
+            if (!lod)
+                continue;
+            for (int proxy = 0; proxy < lod->NProxies(); ++proxy)
+            {
+                Object* object = lod->Proxy(proxy).obj;
+                if (object)
+                    EnsureVisualRendering(object->GetShape(), shape->_logicalWorldModel);
+            }
+        }
+        if (shape->_logicalWorldModel)
+            GEngine->WorldShapeLoaded(shape);
+        OptimizeOneShape(shape);
+        shape->_logicalVisualState = LODShapeWithShadow::LogicalVisualState::None;
+        shape->_logicalWorldModel = false;
+        shape->_logicalVisualRequested = false;
+    }
+    catch (...)
+    {
+        shape->_logicalVisualState = LODShapeWithShadow::LogicalVisualState::Deferred;
+        // A later LOD may fail after an earlier LOD acquired its buffer. The
+        // retry must start without those buffers (ConvertToVBuffer asserts this).
+        // Successfully promoted proxy children remain independently owned.
+        for (int level = 0; level < shape->NLevels(); ++level)
+            if (Shape* lod = shape->Level(level))
+                lod->ReleaseVBuffer();
+        throw;
+    }
+}
+
 LODShapeWithShadow* ShapeBank::NewFromModel(const char* name, bool reversed, bool shadow,
                                             std::shared_ptr<Model::Model> preparsed, LoadTiming* timing,
                                             LODShapeWithShadow* preadapted)
@@ -853,6 +920,7 @@ LODShapeWithShadow* ShapeBank::NewFromModel(const char* name, bool reversed, boo
         if (timing)
             timing->cacheHit = true;
         delete preadapted; // someone else installed it first; ours is redundant
+        EnsureVisualRendering(existing);
         return existing;
     }
     // Proxy cycle: this key is already being loaded further up this call stack, so the miss
@@ -968,6 +1036,11 @@ LODShapeWithShadow* ShapeBank::NewFromModel(const char* name, bool reversed, boo
     {
         shape->OrSpecial(NoShadow);
     }
+    if (CpuOnlyLoadActive())
+    {
+        shape->_logicalVisualState = LODShapeWithShadow::LogicalVisualState::Deferred;
+        shape->_logicalWorldModel = _worldModelScope || _worldModelDepth != 0;
+    }
     _cache.Insert(cacheKey, Link<LODShapeWithShadow>(shape));
 
     // A shape loaded after world load missed OptimizeAll's bulk pass, so nothing
@@ -975,7 +1048,7 @@ LODShapeWithShadow* ShapeBank::NewFromModel(const char* name, bool reversed, boo
     // it for the rest of its life.  Optimize it now.  Before the bulk pass this is
     // deliberately skipped: OptimizeAll releases and rebuilds every buffer anyway,
     // so doing it per shape during map load would be pure duplicated work.
-    if (_bulkOptimizeDone)
+    if (_bulkOptimizeDone && !CpuOnlyLoadActive())
     {
         const auto optimizeStart = ::Poseidon::Dev::Perf::Now();
         // RFG-099: let the retained renderer own the mesh first (see Engine::WorldShapeLoaded).
@@ -1171,13 +1244,27 @@ void ShapeBank::OptimizeAll()
         LOG_DEBUG(Graphics, "ShapeBank::OptimizeAll");
     }
     LogRoadGpuVertexBufferLever();
-    ForEach([](LODShapeWithShadow& shape) { shape.OptimizeRendering(); });
+    ForEach([](LODShapeWithShadow& shape)
+    {
+        if (!shape.DeferredVisualRendering())
+            shape.OptimizeRendering();
+    });
     // From here on, a newly loaded shape has to build its own buffers (ShapeBank::New).
     _bulkOptimizeDone = true;
+    ForEach([this](LODShapeWithShadow& shape)
+    {
+        if (shape._logicalVisualRequested)
+            EnsureVisualRendering(&shape);
+    });
 }
 
 void ShapeBank::OptimizeOneShape(LODShape* shape)
 {
+    if (CpuOnlyLoadActive())
+        return;
+    const auto* logical = dynamic_cast<const LODShapeWithShadow*>(shape);
+    if (logical && logical->_logicalVisualState == LODShapeWithShadow::LogicalVisualState::Deferred)
+        return;
     if (shape)
     {
         shape->OptimizeRendering();

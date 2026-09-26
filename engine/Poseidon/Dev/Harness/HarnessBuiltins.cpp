@@ -135,6 +135,7 @@ void RegisterScreenshot(HarnessServer& hs)
                     if (shape) cJSON_AddStringToObject(item, "model", shape->Name());
                     cJSON_AddBoolToObject(item, "hasGeometry", shape && shape->FindGeometryLevel() >= 0);
                     cJSON_AddBoolToObject(item, "hasFireGeometry", shape && shape->FindFireGeometryLevel() >= 0);
+                    cJSON_AddBoolToObject(item, "shapeVisualDeferred", shape && shape->DeferredVisualRendering());
                 }
                 cJSON_AddItemToArray(objects, item);
             }
@@ -204,6 +205,19 @@ void RegisterScreenshot(HarnessServer& hs)
             cJSON_AddNumberToObject(result, "centerX", GLandscape->ObjectStreamCenterX());
             cJSON_AddNumberToObject(result, "centerZ", GLandscape->ObjectStreamCenterZ());
             cJSON_AddNumberToObject(result, "admitUpdates", static_cast<double>(state.admitUpdates));
+            cJSON_AddNumberToObject(result, "lastObjectId", GLandscape->GetLastObjectID());
+            Engine::GpuMemoryStatsOut gpu{};
+            const bool gpuValid = GEngine && GEngine->GetGpuMemoryStats(gpu);
+            cJSON_AddBoolToObject(result, "gpuMemoryValid", gpuValid);
+            if (gpuValid)
+            {
+                cJSON_AddNumberToObject(result, "geometryLiveBytes", static_cast<double>(gpu.geometryLiveBytes));
+                cJSON_AddNumberToObject(result, "geometryCapacityBytes", static_cast<double>(gpu.geometryCapacityBytes));
+                cJSON_AddNumberToObject(result, "geometryRetiredBytes", static_cast<double>(gpu.geometryRetiredBytes));
+                cJSON_AddNumberToObject(result, "objectTextureBytes", static_cast<double>(gpu.objectTextureBytes));
+                cJSON_AddNumberToObject(result, "objectTextureCount", gpu.objectTextureCount);
+                cJSON_AddNumberToObject(result, "backendAllocationBytes", static_cast<double>(gpu.backendAllocationBytes));
+            }
             return HarnessProtocol::JsonResponse(result);
         });
     hs.RegisterCommand({"weather_visibility", "Read-only weather, terrain and object draw ranges", {}},
