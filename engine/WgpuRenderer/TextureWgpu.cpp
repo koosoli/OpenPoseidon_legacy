@@ -271,16 +271,16 @@ bool AlphaMaskDemoteEnabled()
     return enabled;
 }
 
-// One pass over the RGBA-shaped buffer (alpha at byte 3), 4 neighbour loads per texel.
-AlphaShape MeasureAlphaShape(const uint8_t* rgba, int w, int h)
+// One pass over alpha samples, either RGBA byte 3 or a compact plane; 4 neighbour loads per texel.
+AlphaShape MeasureAlphaShape(const uint8_t* rgba, int w, int h, size_t stride, size_t offset)
 {
     AlphaShape shape;
     if (!rgba || w <= 0 || h <= 0)
     {
         return shape;
     }
-    const auto alphaAt = [rgba, w](int x, int y) -> int
-    { return rgba[(static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)) * 4u + 3u]; };
+    const auto alphaAt = [rgba, w, stride, offset](int x, int y) -> int
+    { return rgba[(static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)) * stride + offset]; };
 
     size_t clear = 0, clustered = 0, clearAdjacency = 0, partial = 0, perimeter = 0;
     for (int y = 0; y < h; y++)
@@ -355,7 +355,8 @@ bool AlphaShapeTraceEnabled()
 // the whole-file decode cannot disagree about routing.  Returns the shape it measured (or an
 // unmeasured one when the histogram verdict was never in question) purely so callers can log
 // it; the verdict is written straight into `stats.kind`.
-AlphaShape RefineAlphaClassByShape(AlphaStats& stats, const uint8_t* rgba, int w, int h, const char* name)
+AlphaShape RefineAlphaClassByShape(AlphaStats& stats, const uint8_t* rgba, int w, int h, const char* name,
+                                  size_t stride = 4, size_t offset = 3)
 {
     AlphaShape shape;
     if (!AlphaShapeGuardEnabled())
@@ -373,7 +374,7 @@ AlphaShape RefineAlphaClassByShape(AlphaStats& stats, const uint8_t* rgba, int w
         return shape; // glass, solid colour, and every already-Opaque texture exit here
     }
 
-    shape = MeasureAlphaShape(rgba, w, h);
+    shape = MeasureAlphaShape(rgba, w, h, stride, offset);
     if (!shape.measured)
     {
         return shape;
@@ -692,12 +693,11 @@ bool IsBlockAlphaFormat(PacFormat fmt)
 // per block into a full-resolution image -- and then ClassifyAlpha reads one byte in four
 // and throws the rest away. Three quarters of that work exists to be discarded.
 //
-// Here only the alpha half of each block is decoded, into a buffer whose colour bytes are
-// never written or read. That is not an approximation of the old answer, it IS the old
+// Here only the alpha half of each block is decoded into a one-byte-per-texel plane. That is not an approximation of the old answer, it IS the old
 // answer: BC3's alpha half is a BC4 block, and DecodeBc4Block builds the same 8-entry
 // palette by the same rounding (BlockCompression.cpp) that decompressDXT5 builds inline;
 // BC2's is the same low-nibble-first `(n<<4)|n` expansion decompressDXT3 does. The same
-// bytes then go through the same unmodified ClassifyAlpha, so the verdict cannot move.
+// bytes then go through the same histogram and shape policy, so the verdict cannot move.
 //
 // Still the TOP mip -- the buffer is full resolution and every texel is classified. Nothing
 // here samples a smaller level; the crisp 0/255 holes a cutout needs are all present.
@@ -708,58 +708,11 @@ bool ClassifyAlphaFromBlocks(const uint8_t* blocks, size_t size, int w, int h, P
     {
         return false;
     }
-    const int blockCols = (w + 3) / 4;
-    const int blockRows = (h + 3) / 4;
-    const size_t need = static_cast<size_t>(blockCols) * static_cast<size_t>(blockRows) * 16u;
-    if (size < need)
-    {
+    std::vector<uint8_t> alpha;
+    if (!DecodeBlockAlpha(blocks, size, w, h, fmt == PacDXT4 || fmt == PacDXT5, alpha))
         return false;
-    }
-
-    // RGBA-shaped so ClassifyAlpha can be reused verbatim; only the alpha lane is filled.
-    // The colour lanes stay zero and are read by nobody -- ClassifyAlpha indexes `i*4+3`.
-    std::vector<uint8_t> alphaOnly(static_cast<size_t>(w) * static_cast<size_t>(h) * 4u, 0);
-    const size_t rowPitch = static_cast<size_t>(w) * 4u;
-    const bool bc3 = fmt == PacDXT4 || fmt == PacDXT5;
-
-    for (int by = 0; by < blockRows; by++)
-    {
-        for (int bx = 0; bx < blockCols; bx++)
-        {
-            const uint8_t* block = blocks + (static_cast<size_t>(by) * blockCols + bx) * 16u;
-            uint8_t* dst =
-                alphaOnly.data() + static_cast<size_t>(by) * 4u * rowPitch + static_cast<size_t>(bx) * 16u + 3u;
-            // A partial block at the right/bottom edge writes only the texels that exist,
-            // matching writeDXTBlock's clamp. PAA levels are powers of two so this is the
-            // dormant case, but a clamp that only holds for the common case is not a clamp.
-            const int usableW = std::min(4, w - bx * 4);
-            const int usableH = std::min(4, h - by * 4);
-            if (bc3)
-            {
-                // BC3 = BC4 alpha block, then the colour block we deliberately never touch.
-                DecodeBc4Block(block, dst, rowPitch, 4, usableW, usableH);
-            }
-            else
-            {
-                // BC2: 16 explicit 4-bit alphas in the first 8 bytes, low nibble first.
-                for (int i = 0; i < 16; i++)
-                {
-                    const int py = i / 4;
-                    const int px = i % 4;
-                    if (py >= usableH || px >= usableW)
-                    {
-                        continue;
-                    }
-                    const int nibble = (i & 1) ? (block[i / 2] >> 4) : (block[i / 2] & 0xF);
-                    dst[static_cast<size_t>(py) * rowPitch + static_cast<size_t>(px) * 4u] =
-                        static_cast<uint8_t>((nibble << 4) | nibble);
-                }
-            }
-        }
-    }
-
-    out = ClassifyAlpha(alphaOnly.data(), static_cast<size_t>(w) * static_cast<size_t>(h));
-    RefineAlphaClassByShape(out, alphaOnly.data(), w, h, name);
+    out = ClassifyAlphaSamples(alpha.data(), alpha.size(), 1);
+    RefineAlphaClassByShape(out, alpha.data(), w, h, name, 1, 0);
     return true;
 }
 

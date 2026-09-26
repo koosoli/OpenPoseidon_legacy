@@ -18,17 +18,8 @@
 // 0/255 terminals, BC2's nibble expansion, and the all-clear case ClassifyAlpha deliberately
 // re-routes to Opaque.
 //
-// Note on what this file can reach: PoseidonTests links Poseidon, not WgpuRenderer, so it
-// exercises the primitives TextureWgpu is built from (DecodeBc4Block, GetMipmapChain,
-// ClassifyAlpha) rather than the class itself. The invariant is the same one, and it is the
-// one that can break underneath the renderer without anybody noticing.
-//
-// That leaves one real gap: the block walk below is a SECOND authoring of the loop in
-// TextureWgpu::ClassifyAlphaFromBlocks, so the shipped copy could drift and every assertion
-// here would still pass. `the_renderer_carries_the_same_block_walk` closes it by pinning the
-// lines that must not diverge — the same trick far/mod.rs uses to hold its shader and its
-// Rust predicate together. A source-text pin is crude, but a test that silently stops
-// covering the code it names is worse.
+// The block walk is a shared production helper used by TextureWgpu and these tests.
+// Compare it with the independent whole-file decoder, including every alpha byte at edges.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -50,6 +41,8 @@
 #include <cstdio>
 #include <memory>
 #include <vector>
+#include <utility>
+#include <limits>
 
 using namespace Poseidon;
 
@@ -57,47 +50,15 @@ namespace
 {
 
 // ---------------------------------------------------------------------------------------
-// The block path, written exactly as TextureWgpu::ClassifyAlphaFromBlocks writes it: fill
-// only the alpha lane of an RGBA-shaped buffer, then hand that to the UNMODIFIED
-// ClassifyAlpha. Nothing here decodes a colour texel.
+// The production helper, not a second implementation of its block walk.
 AlphaStats AlphaFromBlocks(const uint8_t* blocks, int w, int h, bool bc3)
 {
-    const int blockCols = (w + 3) / 4;
-    const int blockRows = (h + 3) / 4;
-    std::vector<uint8_t> alphaOnly(static_cast<size_t>(w) * static_cast<size_t>(h) * 4u, 0);
-    const size_t rowPitch = static_cast<size_t>(w) * 4u;
-
-    for (int by = 0; by < blockRows; by++)
-    {
-        for (int bx = 0; bx < blockCols; bx++)
-        {
-            const uint8_t* block = blocks + (static_cast<size_t>(by) * blockCols + bx) * 16u;
-            uint8_t* dst =
-                alphaOnly.data() + static_cast<size_t>(by) * 4u * rowPitch + static_cast<size_t>(bx) * 16u + 3u;
-            const int usableW = std::min(4, w - bx * 4);
-            const int usableH = std::min(4, h - by * 4);
-            if (bc3)
-            {
-                DecodeBc4Block(block, dst, rowPitch, 4, usableW, usableH);
-            }
-            else
-            {
-                for (int i = 0; i < 16; i++)
-                {
-                    const int py = i / 4;
-                    const int px = i % 4;
-                    if (py >= usableH || px >= usableW)
-                    {
-                        continue;
-                    }
-                    const int nibble = (i & 1) ? (block[i / 2] >> 4) : (block[i / 2] & 0xF);
-                    dst[static_cast<size_t>(py) * rowPitch + static_cast<size_t>(px) * 4u] =
-                        static_cast<uint8_t>((nibble << 4) | nibble);
-                }
-            }
-        }
-    }
-    return ClassifyAlpha(alphaOnly.data(), static_cast<size_t>(w) * static_cast<size_t>(h));
+    std::vector<uint8_t> alpha;
+    const size_t bytes = ((static_cast<size_t>(w) + 3) / 4) *
+                         ((static_cast<size_t>(h) + 3) / 4) * 16;
+    REQUIRE(DecodeBlockAlpha(blocks, bytes, w, h, bc3, alpha));
+    REQUIRE(alpha.size() == static_cast<size_t>(w) * static_cast<size_t>(h));
+    return ClassifyAlphaSamples(alpha.data(), alpha.size(), 1);
 }
 
 // Every field, not just the verdict. A kind-only comparison would pass on alpha values that
@@ -111,6 +72,7 @@ void RequireSameStats(const AlphaStats& reference, const AlphaStats& fromBlocks)
     CHECK(fromBlocks.pctClear == reference.pctClear);
     CHECK(fromBlocks.pctOpaque == reference.pctOpaque);
     CHECK(fromBlocks.pctPartial == reference.pctPartial);
+    CHECK(fromBlocks.pctMid == reference.pctMid);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -366,49 +328,48 @@ TEST_CASE("A real PAA classifies the same from one level as from the whole file"
     }
 }
 
-// The block walk above is a second authoring of TextureWgpu::ClassifyAlphaFromBlocks. Nothing
-// else stops the shipped copy drifting — a wrong nibble order or a dropped edge clamp there
-// would leave every assertion in this file passing while the renderer misclassified every
-// BC2 cutout in the game.
-//
-// Pinned as source text because PoseidonTests cannot link WgpuRenderer to call the real
-// thing. If this fails because the renderer was legitimately rewritten, re-derive the walk
-// above against it rather than deleting the check.
-TEST_CASE("The renderer carries the same block walk", "[graphics][texture]")
+TEST_CASE("Compact block alpha matches every full-decode texel including edge blocks", "[graphics][texture]")
 {
-    // Walked rather than counted: a fixed number of parent_path() calls is silently wrong the
-    // day this file moves a directory, and it was wrong by one when first written.
-    std::filesystem::path src;
-    for (std::filesystem::path at = std::filesystem::path(__FILE__).parent_path(); !at.empty();
-         at = at.parent_path())
-    {
-        const std::filesystem::path candidate = at / "engine" / "WgpuRenderer" / "TextureWgpu.cpp";
-        if (std::filesystem::is_regular_file(candidate))
+    const int indices[16] = {0, 1, 2, 3, 4, 5, 6, 7, 7, 6, 5, 4, 3, 2, 1, 0};
+    const int nibbles[16] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+    for (const bool bc3 : {false, true})
+        for (const auto [w, h] : {std::pair{1, 1}, std::pair{2, 3}, std::pair{5, 7},
+                                 std::pair{7, 5}, std::pair{8, 8}})
         {
-            src = candidate;
-            break;
+            CAPTURE(bc3, w, h);
+            std::vector<uint8_t> blocks;
+            const int count = ((w + 3) / 4) * ((h + 3) / 4);
+            for (int i = 0; i < count; ++i)
+                Append(blocks, bc3 ? Bc3Block(i % 2 ? 17 : 241, i % 2 ? 201 : 7, indices) : Bc2Block(nibbles));
+            const auto paa = BuildDxtPaa(bc3 ? kDxt5Magic : kDxt3Magic, w, h, blocks);
+            const auto reference = DecodePAABuffer(paa.data(), paa.size(), true);
+            REQUIRE(reference.valid());
+            REQUIRE(reference.width == w);
+            REQUIRE(reference.height == h);
+            std::vector<uint8_t> alpha;
+            REQUIRE(DecodeBlockAlpha(blocks.data(), blocks.size(), w, h, bc3, alpha));
+            REQUIRE(alpha.size() * 4 == reference.rgba.size());
+            for (size_t i = 0; i < alpha.size(); ++i)
+                CHECK(alpha[i] == reference.rgba[i * 4 + 3]);
+            RequireSameStats(ClassifyAlpha(reference.rgba.data(), alpha.size()),
+                             ClassifyAlphaSamples(alpha.data(), alpha.size(), 1));
         }
-        if (at == at.root_path())
-        {
-            break;
-        }
-    }
-    INFO("searched upward from " << std::filesystem::path(__FILE__).parent_path().string()
-                                 << " for engine/WgpuRenderer/TextureWgpu.cpp");
-    REQUIRE(std::filesystem::is_regular_file(src));
+}
 
-    std::ifstream in(src, std::ios::binary);
-    REQUIRE(in.good());
-    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-
-    // BC3's alpha half IS a BC4 block — the whole reason this shortcut is exact.
-    CHECK(text.find("DecodeBc4Block(block, dst, rowPitch, 4, usableW, usableH);") != std::string::npos);
-    // BC2's low-nibble-first expansion. `n << 4` alone turns 100% opaque into 100% partial.
-    CHECK(text.find("(block[i / 2] >> 4) : (block[i / 2] & 0xF)") != std::string::npos);
-    CHECK(text.find("(nibble << 4) | nibble") != std::string::npos);
-    // The alpha lane is byte 3, and the verdict still comes from the unmodified classifier.
-    CHECK(text.find("ClassifyAlpha(alphaOnly.data()") != std::string::npos);
-    // The edge clamp, which is dormant on power-of-two PAA levels and would go unnoticed.
-    CHECK(text.find("std::min(4, w - bx * 4)") != std::string::npos);
-    CHECK(text.find("std::min(4, h - by * 4)") != std::string::npos);
+TEST_CASE("Compact block alpha rejects invalid and truncated inputs", "[graphics][texture]")
+{
+    const uint8_t block[16] = {};
+    std::vector<uint8_t> alpha(64, 123);
+    CHECK_FALSE(DecodeBlockAlpha(nullptr, 16, 4, 4, true, alpha));
+    CHECK(alpha.empty());
+    CHECK_FALSE(DecodeBlockAlpha(block, 16, 0, 4, true, alpha));
+    CHECK_FALSE(DecodeBlockAlpha(block, 16, 4, -1, false, alpha));
+    CHECK_FALSE(DecodeBlockAlpha(block, 15, 4, 4, true, alpha));
+    CHECK_FALSE(DecodeBlockAlpha(block, 16, 5, 4, false, alpha));
+    CHECK_FALSE(DecodeBlockAlpha(block, 16, 2147483647, 2147483647, true, alpha));
+    CHECK(alpha.empty());
+    RequireSameStats(AlphaStats{}, ClassifyAlphaSamples(nullptr, 1, 1));
+    RequireSameStats(AlphaStats{}, ClassifyAlphaSamples(block, 0, 1));
+    RequireSameStats(AlphaStats{}, ClassifyAlphaSamples(block, 1, 0));
+    RequireSameStats(AlphaStats{}, ClassifyAlphaSamples(block, std::numeric_limits<size_t>::max(), 4));
 }

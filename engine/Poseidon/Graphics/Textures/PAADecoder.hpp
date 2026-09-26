@@ -145,6 +145,17 @@ struct AlphaStats
 AlphaStats ClassifyAlpha(const uint8_t* rgba, size_t pixelCount, double partialThreshold = 2.0,
                          double clearThreshold = 2.0);
 
+// Same histogram and policy as ClassifyAlpha; alpha points to the first sample.
+// stride=1 accepts a compact alpha plane, stride=4 an RGBA channel.
+AlphaStats ClassifyAlphaSamples(const uint8_t* alpha, size_t pixelCount, size_t stride,
+                               double partialThreshold = 2.0, double clearThreshold = 2.0);
+
+// Decode only the alpha half of BC2 (bc3=false) or BC3 blocks, one byte/texel.
+// Rejects invalid dimensions/truncated input before allocating; edge blocks are clamped.
+// Colour bytes are never decoded. On failure out is empty.
+bool DecodeBlockAlpha(const uint8_t* blocks, size_t size, int width, int height, bool bc3,
+                      std::vector<uint8_t>& out);
+
 const char* AlphaKindName(AlphaStats::Kind kind);
 
 // Decide a texture's alpha class from its cheap header flags + format, deferring

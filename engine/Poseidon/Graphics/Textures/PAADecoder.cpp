@@ -1,4 +1,5 @@
 #include <Poseidon/Graphics/Textures/PAADecoder.hpp>
+#include <Poseidon/Graphics/Textures/BlockCompression.hpp>
 #include <Poseidon/Foundation/Algorithms/Lzo1x.hpp>
 #include <Poseidon/Graphics/Rendering/Font/Pactext.hpp>
 #include <Poseidon/IO/Streams/QStream.hpp>
@@ -6,21 +7,30 @@
 #include <algorithm>
 #include <cstring>
 #include <ctype.h>
+#include <limits>
 
 namespace Poseidon
 {
 
 AlphaStats ClassifyAlpha(const uint8_t* rgba, size_t pixelCount, double partialThreshold, double clearThreshold)
 {
+    return ClassifyAlphaSamples(rgba && pixelCount ? rgba + 3 : nullptr, pixelCount, 4,
+                                partialThreshold, clearThreshold);
+}
+
+AlphaStats ClassifyAlphaSamples(const uint8_t* alpha, size_t pixelCount, size_t stride,
+                               double partialThreshold, double clearThreshold)
+{
     AlphaStats s;
-    if (!rgba || pixelCount == 0)
+    if (!alpha || pixelCount == 0 || stride == 0 ||
+        pixelCount - 1 > std::numeric_limits<size_t>::max() / stride)
         return s;
     size_t clear = 0, opaque = 0, partial = 0, mid = 0;
     int aMin = 255, aMax = 0;
     unsigned long long aSum = 0;
     for (size_t i = 0; i < pixelCount; i++)
     {
-        const int a = rgba[i * 4 + 3];
+        const int a = alpha[i * stride];
         aSum += static_cast<unsigned long long>(a);
         if (a < aMin)
             aMin = a;
@@ -88,6 +98,40 @@ AlphaStats ClassifyAlpha(const uint8_t* rgba, size_t pixelCount, double partialT
         s.kind = AlphaStats::Opaque;
 
     return s;
+}
+
+bool DecodeBlockAlpha(const uint8_t* blocks, size_t size, int width, int height, bool bc3,
+                      std::vector<uint8_t>& out)
+{
+    out.clear();
+    if (!blocks || width <= 0 || height <= 0)
+        return false;
+    const size_t w = static_cast<size_t>(width), h = static_cast<size_t>(height);
+    const size_t cols = (w + 3) / 4, rows = (h + 3) / 4;
+    if (cols > std::numeric_limits<size_t>::max() / rows / 16 ||
+        w > std::numeric_limits<size_t>::max() / h || size < cols * rows * 16)
+        return false;
+    out.resize(w * h);
+    for (size_t by = 0; by < rows; ++by)
+        for (size_t bx = 0; bx < cols; ++bx)
+        {
+            const uint8_t* block = blocks + (by * cols + bx) * 16;
+            uint8_t* dst = out.data() + by * 4 * w + bx * 4;
+            const int usableW = static_cast<int>(std::min(size_t(4), w - bx * 4));
+            const int usableH = static_cast<int>(std::min(size_t(4), h - by * 4));
+            if (bc3)
+                DecodeBc4Block(block, dst, w, 1, usableW, usableH);
+            else
+                for (int y = 0; y < usableH; ++y)
+                    for (int x = 0; x < usableW; ++x)
+                    {
+                        const int i = y * 4 + x;
+                        const int nibble = (i & 1) ? (block[i / 2] >> 4) : (block[i / 2] & 0xF);
+                        dst[static_cast<size_t>(y) * w + static_cast<size_t>(x)] =
+                            static_cast<uint8_t>((nibble << 4) | nibble);
+                    }
+        }
+    return true;
 }
 
 AlphaStats::Kind ClassifyTextureAlpha(bool hasAlpha, bool isChromaKey, bool oneBitAlphaFormat,
