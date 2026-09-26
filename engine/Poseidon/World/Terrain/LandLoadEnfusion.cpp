@@ -2168,21 +2168,23 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
                     LOG_WARN(World, "Enfusion native load: OVERSIZED '{}' radius {:.0f} m, {} placements",
                              meshes[index].first, shape->BoundingSphere(), meshes[index].second);
             }
-            // RFG-064: attachment meshes are built OUTSIDE the model cap, on purpose.
+            // RFG-064: the nonstreamed path builds attachment meshes OUTSIDE the
+            // model cap, so rare doors and windows do not lose to common trees.
             //
             // The cap ranks meshes by placement count, and a door or a window is a
             // rare mesh by construction -- Everon draws hundreds of distinct ones,
             // each on a handful of houses. Ranked against 820,184 trees they never
             // make the budget, so a cap of 350-450 models (the owner's usual run)
             // would build every house shell and not one of the openings, and the
-            // repair would show as nothing at all. They are cheap to make that
-            // exception for: a door frame is two orders of magnitude smaller than a
-            // house, and the count is bounded by how many distinct parts the built
-            // shells actually reference.
+            // repair would show as nothing at all. This eager path builds every
+            // distinct part resolved for the world, including parts of shells
+            // outside the cap. Streaming instead retains every part's model path
+            // and flattened placement below; its ordinary cold admission loads
+            // each shape when needed, just as it does for the main models.
             std::unordered_map<uint32_t, LODShapeWithShadow*> attachShapes;
             size_t attachBuilt = 0, attachBuildFailed = 0;
             std::string firstAttachFailure;
-            for (size_t i = 0; i < attachMeshes.size(); ++i)
+            for (size_t i = 0; !streamNative && i < attachMeshes.size(); ++i)
             {
                 std::string why;
                 LODShapeWithShadow* shape =
