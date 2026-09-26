@@ -1093,6 +1093,15 @@ bool BankReadRequest::HasArchiveIdentity() const
 #endif
 }
 
+size_t BankReadRequest::ArchiveIdentityBytes() const
+{
+#ifdef _WIN32
+    return archiveLease ? sizeof(BankArchiveReadLease) + archiveLease->archive.capacity() + 1 : 0;
+#else
+    return 0;
+#endif
+}
+
 bool BankReadRequest::SameArchiveMember(const BankReadRequest& other) const
 {
 #ifdef _WIN32

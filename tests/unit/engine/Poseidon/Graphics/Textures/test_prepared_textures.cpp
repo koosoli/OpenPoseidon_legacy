@@ -22,6 +22,9 @@
 #include <iterator>
 #include <string>
 #include <vector>
+#include <filesystem>
+#include <chrono>
+#include <thread>
 
 using namespace Poseidon;
 
@@ -76,6 +79,11 @@ TEST_CASE("ReadPAABlockChainBuffer parses a minimal DXT1 container", "[Graphics]
     REQUIRE(chain.levels.size() == 1);
     CHECK(chain.levels[0].offset == 0);
     CHECK(chain.levels[0].size == 8);
+    CHECK(chain.levels[0].sourceHeaderOffset == 4);
+    CHECK(chain.levels[0].legacyBlockReadCompatible);
+    const PAABlockLevel synthetic;
+    CHECK(synthetic.sourceHeaderOffset == SIZE_MAX);
+    CHECK_FALSE(synthetic.legacyBlockReadCompatible);
     REQUIRE(chain.blocks.size() == 8);
     CHECK(chain.blocks[1] == 0xF8);
 
@@ -371,3 +379,239 @@ TEST_CASE("Prepared PAA refuses tiny payload with oversized retained capacity", 
     CHECK(store.SnapshotStats().entries == 0);
     store.Clear();
 }
+
+#ifdef _WIN32
+namespace
+{
+struct AlphaArchiveFixture
+{
+    std::filesystem::path path;
+    QFBank bank;
+    BankReadRequest read;
+    PAABlockChain chain;
+    std::vector<uint8_t> file;
+    AlphaArchiveFixture(uint16_t magic = 0xFF03, int layout = 0)
+    {
+        file = {static_cast<uint8_t>(magic), static_cast<uint8_t>(magic >> 8), 0, 0, 4, 0, 4, 0, 16, 0, 0};
+        // BC2: alternating clear/opaque; BC3: endpoint/index mixtures.
+        const uint8_t block[16] = {0xF0, 0xF0, 0xF0, 0xF0, 0xF0, 0xF0, 0xF0, 0xF0,
+                                   0, 0xF8, 0, 0xF8, 0, 0, 0, 0};
+        file.insert(file.end(), block, block + 16);
+        file.insert(file.end(), 4, 0);
+        if (layout == 1)
+        {
+            // Original harmless unknown TAGG changes raw mip-header position,
+            // while magic, dimensions and decoded top span remain identical.
+            const uint8_t tag[] = {'G', 'G', 'A', 'T', 'T', 'S', 'E', 'T', 1, 0, 0, 0, 42};
+            file.insert(file.begin() + 2, tag, tag + sizeof(tag));
+        }
+        if (layout == 2)
+        {
+            file[4] = 0xD2; file[5] = 0x04; // legacy marker 1234,8765
+            file[6] = 0x3D; file[7] = 0x22;
+            const uint8_t dimensions[] = {4, 0, 4, 0};
+            file.insert(file.begin() + 8, dimensions, dimensions + 4);
+        }
+        if (layout == 3)
+        {
+            file[8] = 17; // parser still accepts extra raw bytes; facts must refuse
+            file.insert(file.end() - 4, 77);
+        }
+        path = std::filesystem::temp_directory_path() / ("prepared_alpha_" +
+            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".pbo");
+        std::ofstream output(path, std::ios::binary);
+        output.write("member.paa", 11);
+        auto u32 = [&](uint32_t v) {
+            const char bytes[4] = {static_cast<char>(v), static_cast<char>(v >> 8),
+                                  static_cast<char>(v >> 16), static_cast<char>(v >> 24)};
+            output.write(bytes, 4);
+        };
+        u32(0); u32(static_cast<uint32_t>(file.size())); u32(0); u32(0); u32(static_cast<uint32_t>(file.size()));
+        output.put(0); for (int i = 0; i < 5; ++i) u32(0);
+        output.write(reinterpret_cast<const char*>(file.data()), static_cast<std::streamsize>(file.size()));
+        REQUIRE(output.good()); output.close();
+        auto name = path; name.replace_extension();
+        REQUIRE(bank.open(RString(name.string().c_str()))); bank.Lock();
+        auto request = bank.CaptureReadRequest("member.paa", true);
+        REQUIRE(request); read = *request;
+        std::vector<char> owned;
+        REQUIRE(read.Read(owned));
+        REQUIRE(ReadPAABlockChainBuffer(owned.data(), owned.size(), chain, nullptr, 16 * 1024 * 1024));
+    }
+    ~AlphaArchiveFixture()
+    {
+        bank.close(); read.archiveLease.reset();
+        std::error_code error; std::filesystem::remove(path, error);
+    }
+};
+void CheckAlphaFields(const AlphaStats& actual, const AlphaStats& expected)
+{
+    CHECK(actual.kind == expected.kind); CHECK(actual.aMin == expected.aMin);
+    CHECK(actual.aMax == expected.aMax); CHECK(actual.aMean == expected.aMean);
+    CHECK(actual.pctClear == expected.pctClear); CHECK(actual.pctOpaque == expected.pctOpaque);
+    CHECK(actual.pctPartial == expected.pctPartial); CHECK(actual.pctMid == expected.pctMid);
+}
+}
+
+TEST_CASE("Leased prepared alpha facts match source pixels and retain the upload chain", "[Graphics][PAA][streaming][alpha-facts]")
+{
+    auto& store = render::PreparedTextureStore::Instance();
+    if (!store.Enabled()) SKIP("Requires texture preparation");
+    store.Clear();
+    for (const uint16_t magic : {uint16_t(0xFF02), uint16_t(0xFF03), uint16_t(0xFF04), uint16_t(0xFF05)})
+    {
+        AlphaArchiveFixture fixture(magic);
+        const auto image = DecodePAABuffer(fixture.file.data(), fixture.file.size(), true);
+        REQUIRE(image.valid());
+        const auto expected = ClassifyAlpha(image.rgba.data(), 16);
+        auto facts = store.BuildAlphaFacts(fixture.chain, fixture.read);
+        REQUIRE(facts); CheckAlphaFields(facts->histogram, expected);
+        if ((expected.kind == AlphaStats::Cutout && expected.pctClear > 0) ||
+            (expected.kind == AlphaStats::Blend && expected.pctClear >= 2))
+        {
+            const auto shape = MeasureAlphaShapeAnalysis(image.rgba.data(), 4, 4, 4, 3);
+            CHECK(facts->shape.measured == shape.measured);
+            CHECK(facts->shape.meanClearNeighbours == shape.meanClearNeighbours);
+            CHECK(facts->shape.clusteredClearFrac == shape.clusteredClearFrac);
+            CHECK(facts->shape.partialBandWidth == shape.partialBandWidth);
+        }
+        const auto chainCharge = fixture.chain.blocks.capacity() + fixture.chain.levels.capacity() * sizeof(PAABlockLevel);
+        const auto factCharge = sizeof(render::PreparedAlphaFacts) + facts->source.archive.capacity() + 1 +
+            facts->source.ArchiveIdentityBytes() + 64;
+        const auto blocks = fixture.chain.blocks;
+        REQUIRE(store.Put("alpha-member", std::move(fixture.chain), store.Generation(), std::move(facts)));
+        CHECK(store.SnapshotStats().bytes == chainCharge + factCharge);
+        CHECK(store.HasAlphaFacts("alpha-member"));
+        render::PreparedAlphaFacts copied;
+        REQUIRE(store.CopyAlphaFacts("alpha-member", fixture.read, magic, 4, 4, 16, 4, copied));
+        CheckAlphaFields(copied.histogram, expected);
+        CHECK(store.SnapshotStats().bytes == chainCharge + factCharge);
+        PAABlockChain upload;
+        REQUIRE(store.Take("alpha-member", upload));
+        CHECK(upload.blocks == blocks); CHECK(upload.magic == magic);
+        CHECK_FALSE(store.HasAlphaFacts("alpha-member"));
+        CHECK(store.SnapshotStats().bytes == 0);
+        store.Clear();
+    }
+}
+
+TEST_CASE("Prepared alpha facts refuse mismatch cancellation and departed generations", "[Graphics][PAA][streaming][alpha-facts]")
+{
+    auto& store = render::PreparedTextureStore::Instance();
+    if (!store.Enabled()) SKIP("Requires texture preparation");
+    store.Clear();
+    AlphaArchiveFixture fixture;
+    const auto generation = store.Generation();
+    SECTION("phase cancellation never returns partial facts")
+    {
+        for (int stopAt = 1; stopAt <= 4; ++stopAt)
+        {
+            int calls = 0;
+            CHECK_FALSE(store.BuildAlphaFacts(fixture.chain, fixture.read, [&] { return ++calls == stopAt; }));
+            CHECK(calls == stopAt);
+        }
+    }
+    SECTION("unsupported or truncated chain preserves ordinary fallback")
+    {
+        auto unleased = fixture.read; unleased.archiveLease.reset();
+        CHECK_FALSE(store.BuildAlphaFacts(fixture.chain, unleased));
+        fixture.chain.magic = 0xFF01;
+        CHECK_FALSE(store.BuildAlphaFacts(fixture.chain, fixture.read));
+        fixture.chain.magic = 0xFF03; fixture.chain.levels[0].size = 15;
+        CHECK_FALSE(store.BuildAlphaFacts(fixture.chain, fixture.read));
+    }
+    SECTION("missing provenance is unknown even for otherwise identical blocks")
+    {
+        fixture.chain.levels[0].sourceHeaderOffset = SIZE_MAX;
+        CHECK_FALSE(store.BuildAlphaFacts(fixture.chain, fixture.read));
+        fixture.chain.levels[0].sourceHeaderOffset = 4;
+        fixture.chain.levels[0].legacyBlockReadCompatible = false;
+        CHECK_FALSE(store.BuildAlphaFacts(fixture.chain, fixture.read));
+    }
+    SECTION("TAGG layout binds the stored source cursor rather than decoded block offset")
+    {
+        AlphaArchiveFixture tagged(0xFF03, 1);
+        REQUIRE(tagged.chain.levels[0].sourceHeaderOffset == 17);
+        REQUIRE(tagged.chain.levels[0].offset == 0);
+        REQUIRE(tagged.chain.levels[0].legacyBlockReadCompatible);
+        CHECK(tagged.chain.blocks == fixture.chain.blocks);
+        auto facts = store.BuildAlphaFacts(tagged.chain, tagged.read); REQUIRE(facts);
+        REQUIRE(facts->sourceHeaderOffset == 17);
+        REQUIRE(store.Put("tagged-member", std::move(tagged.chain), generation, std::move(facts)));
+        render::PreparedAlphaFacts copied;
+        CHECK_FALSE(store.CopyAlphaFacts("tagged-member", tagged.read, 0xFF03, 4, 4, 16, 4, copied));
+        REQUIRE(store.CopyAlphaFacts("tagged-member", tagged.read, 0xFF03, 4, 4, 16, 17, copied));
+    }
+    SECTION("legacy-incompatible accepted source layouts still retain ordinary upload bytes")
+    {
+        for (int layout : {2, 3})
+        {
+            AlphaArchiveFixture unsupported(0xFF03, layout);
+            REQUIRE(unsupported.chain.valid());
+            CHECK(unsupported.chain.blocks == fixture.chain.blocks);
+            CHECK_FALSE(unsupported.chain.levels[0].legacyBlockReadCompatible);
+            CHECK_FALSE(store.BuildAlphaFacts(unsupported.chain, unsupported.read));
+            REQUIRE(store.Put("unsupported-member", std::move(unsupported.chain), generation));
+            CHECK_FALSE(store.HasAlphaFacts("unsupported-member"));
+            PAABlockChain upload; REQUIRE(store.Take("unsupported-member", upload));
+            CHECK(upload.blocks == fixture.chain.blocks);
+        }
+    }
+    SECTION("different chain storage cannot borrow facts")
+    {
+        auto facts = store.BuildAlphaFacts(fixture.chain, fixture.read); REQUIRE(facts);
+        auto other = fixture.chain;
+        REQUIRE(store.Put("alpha-member", std::move(other), generation, std::move(facts)));
+        CHECK_FALSE(store.HasAlphaFacts("alpha-member"));
+        PAABlockChain upload; REQUIRE(store.Take("alpha-member", upload));
+        CHECK(upload.blocks == fixture.chain.blocks);
+    }
+    SECTION("claim checks physical source format dimensions and top span")
+    {
+        auto facts = store.BuildAlphaFacts(fixture.chain, fixture.read); REQUIRE(facts);
+        REQUIRE(store.Put("alpha-member", std::move(fixture.chain), generation, std::move(facts)));
+        AlphaArchiveFixture other;
+        render::PreparedAlphaFacts copied;
+        CHECK_FALSE(store.CopyAlphaFacts("alpha-member", other.read, 0xFF03, 4, 4, 16, 4, copied));
+        CHECK_FALSE(store.CopyAlphaFacts("alpha-member", fixture.read, 0xFF05, 4, 4, 16, 4, copied));
+        CHECK_FALSE(store.CopyAlphaFacts("alpha-member", fixture.read, 0xFF03, 8, 4, 16, 4, copied));
+        CHECK_FALSE(store.CopyAlphaFacts("alpha-member", fixture.read, 0xFF03, 4, 4, 15, 4, copied));
+        CHECK_FALSE(store.CopyAlphaFacts("alpha-member", fixture.read, 0xFF03, 4, 4, 16, -1, copied));
+        CHECK_FALSE(store.CopyAlphaFacts("alpha-member", fixture.read, 0xFF03, 4, 4, 16, 5, copied));
+        REQUIRE(store.CopyAlphaFacts("alpha-member", fixture.read, 0xFF03, 4, 4, 16, 4, copied));
+        store.MarkUploaded("alpha-member");
+        CHECK_FALSE(store.HasAlphaFacts("alpha-member"));
+        CHECK_FALSE(store.CopyAlphaFacts("alpha-member", fixture.read, 0xFF03, 4, 4, 16, 4, copied));
+    }
+    SECTION("world clear rejects publication and clears claims")
+    {
+        auto facts = store.BuildAlphaFacts(fixture.chain, fixture.read); REQUIRE(facts);
+        store.Clear();
+        CHECK_FALSE(store.Put("alpha-member", std::move(fixture.chain), generation, std::move(facts)));
+        CHECK_FALSE(store.HasAlphaFacts("alpha-member"));
+    }
+    SECTION("sidecar capacity participates in the same retained budget")
+    {
+        if (store.ByteBudget() > 4 * 1024 * 1024)
+            SKIP("Run with WGR_OBJECT_STREAM_TEXTURE_PREPARE_MB=1");
+        const auto metadata = fixture.chain.levels.capacity() * sizeof(PAABlockLevel);
+        fixture.chain.blocks.reserve(store.ByteBudget() - metadata);
+        auto facts = store.BuildAlphaFacts(fixture.chain, fixture.read); REQUIRE(facts);
+        CHECK_FALSE(store.Put("alpha-member", std::move(fixture.chain), generation, std::move(facts)));
+        CHECK(store.SnapshotStats().bytes == 0);
+        CHECK_FALSE(store.HasAlphaFacts("alpha-member"));
+    }
+    SECTION("TTL forbids a claim even without another worker publication")
+    {
+        if (store.TtlSeconds() <= 0 || store.TtlSeconds() > 0.1)
+            SKIP("Run fresh with WGR_OBJECT_STREAM_TEXTURE_PREPARE_TTL_S=0.01");
+        auto facts = store.BuildAlphaFacts(fixture.chain, fixture.read); REQUIRE(facts);
+        REQUIRE(store.Put("alpha-member", std::move(fixture.chain), generation, std::move(facts)));
+        std::this_thread::sleep_for(std::chrono::milliseconds(150));
+        render::PreparedAlphaFacts copied;
+        CHECK_FALSE(store.CopyAlphaFacts("alpha-member", fixture.read, 0xFF03, 4, 4, 16, 4, copied));
+        CHECK(store.SnapshotStats().alphaFactsMisses > 0);
+    }
+    store.Clear();
+}
+#endif

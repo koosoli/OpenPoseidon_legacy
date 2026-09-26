@@ -313,7 +313,7 @@ bool AlphaShapeTraceEnabled()
 // unmeasured one when the histogram verdict was never in question) purely so callers can log
 // it; the verdict is written straight into `stats.kind`.
 AlphaShape RefineAlphaClassByShape(AlphaStats& stats, const uint8_t* rgba, int w, int h, const char* name,
-                                  size_t stride = 4, size_t offset = 3)
+                                  size_t stride = 4, size_t offset = 3, const AlphaShape* prepared = nullptr)
 {
     AlphaShape shape;
     if (!AlphaShapeGuardEnabled())
@@ -331,7 +331,7 @@ AlphaShape RefineAlphaClassByShape(AlphaStats& stats, const uint8_t* rgba, int w
         return shape; // glass, solid colour, and every already-Opaque texture exit here
     }
 
-    shape = MeasureAlphaShape(rgba, w, h, stride, offset);
+    shape = prepared ? *prepared : MeasureAlphaShape(rgba, w, h, stride, offset);
     if (!shape.measured)
     {
         return shape;
@@ -1076,6 +1076,36 @@ bool TextureWgpu::ScanTopMipAlphaBlocks(AlphaScanPath& path)
         return false;
     }
 
+    // Only the explicit PBO-texture experiment performs a lookup/native capture.
+    // Facts are usable before upload; the raw chain remains available to upload.
+    static const bool pboTextures = [] {
+        const char* value = std::getenv("WGR_OBJECT_STREAM_PBO_TEXTURES");
+        return value && value[0] == '1';
+    }();
+    if (pboTextures && GUseFileBanks && render::PreparedTextureStore::Enabled())
+    {
+        auto& store = render::PreparedTextureStore::Instance();
+        const auto key = render::PreparedTextureStore::Key(SourceName());
+        if (store.HasAlphaFacts(key))
+            if (auto* bank = QIFStreamB::AutoBank(key.c_str()))
+                if (auto current = bank->CaptureReadRequest(key.c_str() + bank->GetPrefix().GetLength(), true))
+                {
+                    const int bytes = render::mipmap::ComputeLayout(fmt, w, h).dataSize;
+                    render::PreparedAlphaFacts facts;
+                    const uint16_t magic = fmt == PacDXT2 ? 0xFF02 : fmt == PacDXT3 ? 0xFF03 :
+                                           fmt == PacDXT4 ? 0xFF04 : 0xFF05;
+                    if (bytes > 0 && _mipmaps[0].SrcFormat() == fmt &&
+                        store.CopyAlphaFacts(key, *current, magic, w, h, static_cast<size_t>(bytes), _mipmaps[0]._start, facts))
+                    {
+                        _alphaStats = facts.histogram;
+                        AlphaProfilePhase shapePhase(&render::ObjectAdmitProfile::alphaShapeMs);
+                        RefineAlphaClassByShape(_alphaStats, nullptr, w, h, Name(), 1, 0, &facts.shape);
+                        path = AlphaScanPath::PreparedFacts;
+                        return true;
+                    }
+                }
+    }
+
     TopMipHandoff& handoff = GTopMipHandoff;
     if (handoff.Matches(SourceName(), w, h, fmt) &&
         ClassifyAlphaFromBlocks(handoff.blocks.data(), handoff.topSize, w, h, fmt, _alphaStats, Name()))
@@ -1232,7 +1262,7 @@ AlphaStats::Kind TextureWgpu::GetAlphaClass()
                     ++admit.alphaScans;
                     if (path == AlphaScanPath::Handoff) ++admit.alphaHandoffScans;
                     else if (path == AlphaScanPath::BlockRead) ++admit.alphaBlockReadScans;
-                    else ++admit.alphaFullDecodeScans;
+                    else if (path == AlphaScanPath::FullDecode) ++admit.alphaFullDecodeScans;
                     admit.alphaScanMs += (NowUs() - began) / 1000.0;
                 }
                 // Both scan paths have run the histogram and the shape guard; the last word

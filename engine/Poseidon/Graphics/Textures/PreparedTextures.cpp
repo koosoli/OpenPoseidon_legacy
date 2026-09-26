@@ -36,11 +36,19 @@ struct PreparedTextureStore::Impl
         DdsPreparationOptions ddsOptions{};
         size_t preparedDdsBytes = 0;
         DdsPublicationToken publication;
+        std::unique_ptr<PreparedAlphaFacts> alphaFacts;
     };
     static size_t ChainBytes(const PAABlockChain& chain)
     { return chain.blocks.capacity() + chain.levels.capacity() * sizeof(PAABlockLevel); }
     static size_t EntryBytes(const Entry& entry)
-    { return ChainBytes(entry.chain) + entry.image.rgba.capacity() + (entry.dds ? entry.dds->bytes : 0) + entry.preparedDdsBytes; }
+    { return ChainBytes(entry.chain) + entry.image.rgba.capacity() + (entry.dds ? entry.dds->bytes : 0) + entry.preparedDdsBytes + AlphaFactsBytes(entry.alphaFacts.get()); }
+    static size_t AlphaFactsBytes(const PreparedAlphaFacts* facts)
+    {
+        // Known C++ capacities plus a conservative shared_ptr control-block
+        // guard. Shared archive leases are deliberately charged per entry.
+        return facts ? sizeof(PreparedAlphaFacts) + facts->source.archive.capacity() + 1 +
+            facts->source.ArchiveIdentityBytes() + 64 : 0;
+    }
     mutable std::mutex mutex;
     // Insertion order = production order = (through the preparer's queue) distance order, so
     // the front is the oldest and the TTL sweep walks from there and stops early.
@@ -242,11 +250,89 @@ uint64_t PreparedTextureStore::Generation() const
     return _impl->generation;
 }
 
+std::unique_ptr<PreparedAlphaFacts> PreparedTextureStore::BuildAlphaFacts(const PAABlockChain& chain,
+    const BankReadRequest& source, const std::function<bool()>& cancelled)
+{
+    constexpr size_t limit = 16 * 1024 * 1024;
+    auto stop = [&] { return cancelled && cancelled(); };
+    if (!source.HasArchiveIdentity() || source.bytes > limit || !chain.valid() ||
+        chain.blocks.size() > limit || chain.blocks.capacity() > 2 * limit || chain.levels.size() > 32 ||
+        chain.levels.capacity() > 8192 / sizeof(PAABlockLevel) ||
+        chain.magic < 0xFF02 || chain.magic > 0xFF05 || stop()) return nullptr;
+    const auto& top = chain.levels[0];
+    if (!top.legacyBlockReadCompatible || top.sourceHeaderOffset == SIZE_MAX ||
+        top.sourceHeaderOffset > source.bytes || source.bytes - top.sourceHeaderOffset < 7 ||
+        top.offset != 0 || top.width != chain.width || top.height != chain.height ||
+        top.width <= 0 || top.height <= 0 || top.offset > chain.blocks.size() ||
+        top.size > chain.blocks.size() - top.offset ||
+        static_cast<uint64_t>(top.width) * static_cast<uint64_t>(top.height) > limit) return nullptr;
+    std::vector<uint8_t> alpha;
+    if (!DecodeBlockAlpha(chain.blocks.data() + top.offset, top.size, top.width, top.height,
+        chain.magic == 0xFF04 || chain.magic == 0xFF05, alpha) || alpha.capacity() > 2 * limit || stop()) return nullptr;
+    const AlphaStats stats = ClassifyAlphaSamples(alpha.data(), alpha.size(), 1);
+    if (stop()) return nullptr;
+    AlphaShapeAnalysis shape;
+    if ((stats.kind == AlphaStats::Cutout && stats.pctClear > 0.0) ||
+        (stats.kind == AlphaStats::Blend && stats.pctClear >= 2.0))
+        shape = MeasureAlphaShapeAnalysis(alpha.data(), top.width, top.height, 1, 0);
+    if (stop()) return nullptr;
+    auto facts = std::make_unique<PreparedAlphaFacts>();
+    facts->source = source;
+    facts->magic = chain.magic;
+    facts->width = top.width; facts->height = top.height;
+    facts->topOffset = top.offset; facts->topBytes = top.size;
+    facts->sourceHeaderOffset = top.sourceHeaderOffset;
+    facts->histogram = stats; facts->shape = shape;
+    facts->pairedBlocks = chain.blocks.data();
+    return facts;
+}
+
+bool PreparedTextureStore::HasAlphaFacts(const std::string& key) const
+{
+    std::lock_guard<std::mutex> lock(_impl->mutex);
+    const auto it = _impl->byKey.find(key);
+    return it != _impl->byKey.end() && bool(it->second->alphaFacts);
+}
+
+bool PreparedTextureStore::CopyAlphaFacts(const std::string& key, const BankReadRequest& current,
+    uint16_t magic, int width, int height, size_t topBytes, int sourceHeaderOffset, PreparedAlphaFacts& out)
+{
+    out = PreparedAlphaFacts{};
+    std::lock_guard<std::mutex> lock(_impl->mutex);
+    const auto it = _impl->byKey.find(key);
+    const auto* entry = it != _impl->byKey.end() ? &*it->second : nullptr;
+    const auto* facts = entry ? entry->alphaFacts.get() : nullptr;
+    const double ttl = TtlSeconds();
+    if (!facts || (ttl > 0.0 && std::chrono::duration<double>(Impl::Clock::now() - entry->stored).count() >= ttl) ||
+        !facts->source.SameArchiveMember(current) || facts->magic != magic || facts->width != width ||
+        facts->height != height || facts->topOffset != 0 || facts->topBytes != topBytes ||
+        sourceHeaderOffset < 0 || facts->sourceHeaderOffset != static_cast<size_t>(sourceHeaderOffset))
+    {
+        ++_impl->stats.alphaFactsMisses;
+        return false;
+    }
+    out = *facts; // leaves both raw mip chain and its uploaded mark untouched
+    ++_impl->stats.alphaFactsHits;
+    return true;
+}
+
+void PreparedTextureStore::NoteAlphaFactsCancelled()
+{
+    std::lock_guard<std::mutex> lock(_impl->mutex);
+    ++_impl->stats.alphaFactsCancelled;
+}
+
 bool PreparedTextureStore::Put(const std::string& key, PAABlockChain&& chain,
-                               std::optional<uint64_t> generation)
+                               std::optional<uint64_t> generation, std::unique_ptr<PreparedAlphaFacts> alphaFacts)
 {
     if (!Enabled() || key.empty() || !chain.valid())
         return false;
+    if (alphaFacts && (!generation || alphaFacts->pairedBlocks != chain.blocks.data() || !alphaFacts->source.HasArchiveIdentity() ||
+        alphaFacts->magic != chain.magic || alphaFacts->width != chain.width || alphaFacts->height != chain.height ||
+        alphaFacts->topOffset != chain.levels[0].offset || alphaFacts->topBytes != chain.levels[0].size ||
+        !chain.levels[0].legacyBlockReadCompatible || alphaFacts->sourceHeaderOffset != chain.levels[0].sourceHeaderOffset))
+        alphaFacts.reset(); // unsupported facts never prevent the ordinary chain fallback
+    if (alphaFacts) alphaFacts->pairedBlocks = nullptr;
     std::list<Impl::Entry> freeLater;
     bool stored = false;
     {
@@ -264,15 +350,17 @@ bool PreparedTextureStore::Put(const std::string& key, PAABlockChain&& chain,
         {
             ++_impl->stats.rejectedDup;
         }
-        else if (Impl::ChainBytes(chain) > ByteBudget() - std::min(_impl->bytes, ByteBudget()))
+        else if (Impl::ChainBytes(chain) + Impl::AlphaFactsBytes(alphaFacts.get()) > ByteBudget() - std::min(_impl->bytes, ByteBudget()))
         {
             ++_impl->stats.rejectedFull;
         }
         else
         {
             const size_t size = chain.blocks.size();
-            const size_t retained = Impl::ChainBytes(chain);
+            const size_t retained = Impl::ChainBytes(chain) + Impl::AlphaFactsBytes(alphaFacts.get());
             _impl->order.push_back(Impl::Entry{key, std::move(chain), DecodedImage{}, Impl::Clock::now()});
+            _impl->order.back().alphaFacts = std::move(alphaFacts);
+            if (_impl->order.back().alphaFacts) ++_impl->stats.alphaFactsPuts;
             _impl->byKey.emplace(key, std::prev(_impl->order.end()));
             _impl->bytes += retained;
             ++_impl->stats.puts;

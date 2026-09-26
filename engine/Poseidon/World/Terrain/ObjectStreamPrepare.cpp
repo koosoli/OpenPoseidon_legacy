@@ -428,7 +428,12 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
             convertQueue.pop_front();
             // Only active workers allocate source/decode scratch. Queued and ready
             // jobs keep their model charge, not dozens of nonexistent 64 MiB buffers.
-            const uint64_t textureScratch = job.textures.empty() ? 0 : 4 * PackedTextureLimit + 8192;
+            uint64_t alphaMetadataScratch = 0;
+            for (const auto& texture : job.textures)
+                if (texture.read.archiveLease)
+                    alphaMetadataScratch = std::max<uint64_t>(alphaMetadataScratch,
+                        sizeof(render::PreparedAlphaFacts) + texture.read.archive.capacity() + 1 + 64);
+            const uint64_t textureScratch = job.textures.empty() ? 0 : 4 * PackedTextureLimit + 8192 + alphaMetadataScratch;
             stats.conversionReservedBytes += textureScratch;
             stats.peakConversionReservedBytes = std::max(stats.peakConversionReservedBytes, stats.conversionReservedBytes);
             const uint64_t jobGen = generation.load(std::memory_order_relaxed);
@@ -479,11 +484,23 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                         PAABlockChain chain;
                         {
                             std::vector<char> source;
-                            if (!texture.read.Read(source) || !ReadPAABlockChainBuffer(source.data(), source.size(),
+                            if (!texture.read.Read(source) || source.capacity() > 2 * PackedTextureLimit ||
+                                !ReadPAABlockChainBuffer(source.data(), source.size(),
                                     chain, nullptr, PackedTextureLimit)) { ++unreadable; continue; }
                         }
                         const size_t bytes = chain.blocks.size();
-                        if (store.Put(texture.key, std::move(chain), job.textureGeneration))
+                        // Source storage has already been released. The <=16 MiB
+                        // chain and compact alpha plane fit the existing 64 MiB
+                        // scratch reservation, including conservative growth.
+                        auto cancelled = [&] {
+                            std::lock_guard<std::mutex> pendingLock(mutex);
+                            return stop || jobGen != generation.load(std::memory_order_relaxed) || stale[job.index];
+                        };
+                        std::unique_ptr<render::PreparedAlphaFacts> facts;
+                        try { facts = render::PreparedTextureStore::BuildAlphaFacts(chain, texture.read, cancelled); }
+                        catch (...) { } // optional analysis failure retains the original upload chain
+                        if (cancelled()) { store.NoteAlphaFactsCancelled(); break; }
+                        if (store.Put(texture.key, std::move(chain), job.textureGeneration, std::move(facts)))
                         { ++prepared; preparedBytes += bytes; }
                         else ++skipped;
                     }
@@ -1285,9 +1302,13 @@ bool ObjectStreamPreparer::SubmitConvert(uint32_t index, std::shared_ptr<Model::
             if (!render::PreparedTextureStore::Instance().ShouldPrepare(key)) return;
             if (std::any_of(textures.begin(), textures.end(), [&](const auto& t) { return t.key == key; })) return;
             if (auto* bank = QIFStreamB::AutoBank(key.c_str()))
-                if (auto read = bank->CaptureReadRequest(key.c_str() + bank->GetPrefix().GetLength());
-                    read && read->bytes <= Impl::PackedTextureLimit)
+            {
+                const char* member = key.c_str() + bank->GetPrefix().GetLength();
+                auto read = bank->CaptureReadRequest(member, true);
+                if (!read) read = bank->CaptureReadRequest(member); // unsupported identity retains ordinary preparation
+                if (read && read->bytes <= Impl::PackedTextureLimit)
                     textures.push_back({key, std::move(*read)});
+            }
         };
         for (const auto& level : model->lodLevels)
             for (const auto& material : level.mesh.materials)
@@ -1329,6 +1350,13 @@ bool ObjectStreamPreparer::SubmitConvert(uint32_t index, std::shared_ptr<Model::
     // scheduling estimate, not a measurement of Shape allocations. Useful
     // conversions always progress; their debt parks subsequent speculative parses.
     job.reservation = 2 * Model::ResidentPayloadBytes(*model);
+    if (!textures.empty())
+    {
+        job.reservation += textures.capacity() * sizeof(Impl::PackedTextureRead);
+        for (const auto& texture : textures)
+            job.reservation += texture.key.capacity() + 1 + texture.read.archive.capacity() + 1 +
+                texture.read.ArchiveIdentityBytes() + (texture.read.archiveLease ? 64 : 0);
+    }
     // Scratch is charged when a worker starts, and released before publishing.
     // Retained chains are charged separately by PreparedTextureStore.
     job.textures = std::move(textures);

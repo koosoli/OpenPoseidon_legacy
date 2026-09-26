@@ -83,6 +83,7 @@ class TextureWgpu : public Texture
     // report.
     enum class AlphaScanPath
     {
+        PreparedFacts, // validated leased worker facts; no owner pixel decode
         Handoff,   // the upload had just inflated this level; no file access at all
         BlockRead, // one level read from the file, alpha decoded off the blocks
         FullDecode // the whole file re-read and decoded to RGBA8 (non-block formats)

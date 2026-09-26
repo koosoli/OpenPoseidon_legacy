@@ -36,6 +36,8 @@
 
 #include <Poseidon/Graphics/Textures/PAADecoder.hpp>
 #include <Poseidon/Graphics/Textures/PreparedDdsPublication.hpp>
+#include <Poseidon/Graphics/Textures/AlphaShapeAnalysis.hpp>
+#include <Poseidon/IO/Streams/QBStream.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -43,11 +45,28 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <functional>
 
 namespace Poseidon { class TextureSourceDDS; struct DdsPreparationOptions; }
 
 namespace Poseidon::render
 {
+
+// Raw pixel facts, never a renderer-policy verdict. Valid only for the exact
+// leased member and mip chain published together. No alpha plane is retained.
+struct PreparedAlphaFacts
+{
+    BankReadRequest source;
+    uint16_t magic = 0;
+    int width = 0, height = 0;
+    size_t topOffset = 0, topBytes = 0;
+    size_t sourceHeaderOffset = SIZE_MAX;
+    AlphaStats histogram;
+    AlphaShapeAnalysis shape;
+private:
+    friend class PreparedTextureStore;
+    const uint8_t* pairedBlocks = nullptr; // used only before publication, then cleared
+};
 
 class PreparedTextureStore
 {
@@ -63,6 +82,8 @@ class PreparedTextureStore
         uint64_t rejectedDup = 0;   // Put refused: already present
         uint64_t rejectedStale = 0; // Worker finished after the world's Clear.
         uint64_t expired = 0;       // entries dropped by the TTL sweep
+        uint64_t alphaFactsPuts = 0, alphaFactsHits = 0, alphaFactsMisses = 0;
+        uint64_t alphaFactsCancelled = 0;
         uint64_t skippedUploaded = 0; // ShouldPrepare said no: main thread already uploaded it
         uint64_t uploadedMarks = 0; // names currently marked Uploaded
         // The RGBA8 side (non-DXT PAAs -- the Reforger mask population): whole-file
@@ -78,7 +99,7 @@ class PreparedTextureStore
         uint64_t ddsConfigurationMisses = 0;
         uint64_t ddsCancelled = 0; // invalid publication puts or retired entries
         size_t entries = 0;         // current
-        size_t bytes = 0;           // retained payload capacities incl. mip metadata; excludes map/string/allocator overhead
+        size_t bytes = 0;           // payload/mip/facts/lease C++ capacities; excludes map/key/allocator/kernel overhead
     };
 
     static PreparedTextureStore& Instance();
@@ -107,7 +128,21 @@ class PreparedTextureStore
     uint64_t Generation() const;
     // Worker. Stores a chain; false if refused (full / duplicate / disabled).
     bool Put(const std::string& key, PAABlockChain&& chain,
-             std::optional<uint64_t> generation = std::nullopt);
+             std::optional<uint64_t> generation = std::nullopt,
+             std::unique_ptr<PreparedAlphaFacts> alphaFacts = nullptr);
+    // Worker-only pure analysis, <=16 MiB aggregate chain and transient plane.
+    // Cancellation is checked between decode/histogram/shape/publication; the
+    // callback must own its context until return. Caller supplies the unchanged
+    // owned chain decoded from source.Read; that storage must remain unmodified
+    // until Put. No renderer/environment reads or content-freshness promise.
+    static std::unique_ptr<PreparedAlphaFacts> BuildAlphaFacts(const PAABlockChain& chain,
+        const BankReadRequest& source, const std::function<bool()>& cancelled = {});
+    // Advisory metadata lookup avoids native recapture on absent facts. Copy
+    // checks current generation/TTL and actual current leased member under mutex.
+    bool HasAlphaFacts(const std::string& key) const;
+    bool CopyAlphaFacts(const std::string& key, const BankReadRequest& current,
+        uint16_t magic, int width, int height, size_t topBytes, int sourceHeaderOffset, PreparedAlphaFacts& out);
+    void NoteAlphaFactsCancelled();
     // Main thread. Moves the entry out if present.
     bool Take(const std::string& key, PAABlockChain& out);
 

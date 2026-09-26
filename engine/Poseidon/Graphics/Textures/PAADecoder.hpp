@@ -87,6 +87,10 @@ struct PAABlockLevel
     int height = 0;
     size_t offset = 0; // into PAABlockChain::blocks
     size_t size = 0;   // bytes of raw blocks at that offset
+    // Source-member-relative level HEADER position, not the decoded block
+    // offset above. Unknown for synthetic/in-memory chains without parser proof.
+    size_t sourceHeaderOffset = SIZE_MAX;
+    bool legacyBlockReadCompatible = false;
 };
 
 struct PAABlockChain

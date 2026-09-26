@@ -35,6 +35,8 @@ struct BankReadRequest
     // certify another path or member. No immutability claim exists without it.
     std::shared_ptr<const BankArchiveReadLease> archiveLease;
     bool HasArchiveIdentity() const;
+    // Known retained C++ object/string capacity, not kernel handle or RSS cost.
+    size_t ArchiveIdentityBytes() const;
     bool SameArchiveMember(const BankReadRequest& other) const;
     bool Read(std::vector<char>& out) const;
 };

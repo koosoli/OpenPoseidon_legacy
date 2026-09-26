@@ -1032,6 +1032,7 @@ bool ReadPAABlockChainBuffer(const void* data, size_t size, PAABlockChain& out, 
 
     for (;;)
     {
+        const size_t sourceHeaderOffset = in.pos();
         uint16_t w = 0, h = 0;
         if (!in.u16(w) || !in.u16(h))
             break; // ran off the end without a terminator: keep what was read
@@ -1039,7 +1040,8 @@ bool ReadPAABlockChainBuffer(const void* data, size_t size, PAABlockChain& out, 
             break;
         const bool lzo = (w & 0x8000) != 0;
         int rw = w & 0x7FFF, rh = h;
-        if (rw == 1234 && rh == 8765)
+        const bool legacyLzwHeader = rw == 1234 && rh == 8765;
+        if (legacyLzwHeader)
         {
             uint16_t w2 = 0, h2 = 0;
             if (!in.u16(w2) || !in.u16(h2))
@@ -1064,6 +1066,10 @@ bool ReadPAABlockChainBuffer(const void* data, size_t size, PAABlockChain& out, 
         level.height = rh;
         level.offset = out.blocks.size();
         level.size = expected;
+        level.sourceHeaderOffset = sourceHeaderOffset;
+        // Do not change parser acceptance or upload bytes. Optional facts must
+        // describe exactly the ordinary PacLevelMem::LoadPaaDXT read layout.
+        level.legacyBlockReadCompatible = !legacyLzwHeader && (lzo || stored == expected);
         out.blocks.resize(level.offset + expected);
         if (lzo)
         {
