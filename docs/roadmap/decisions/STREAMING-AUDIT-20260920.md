@@ -1898,3 +1898,30 @@ asset selection prevent FPS or no-regression acceptance. Exact classification
 111276 assertions/180 cases remains verified, defaults unchanged.
 performanceAccepted/defaultReady false, full plan/production consumer/MP/broad
 state/performance gates OPEN. Future source work has no accepted evidence here.
+
+### Entry-owned query model debt — 26 September 2026
+
+3db4159b193-node/stamped18-node builds and111374 assertions/181 cases pass.
+Actual installed3db+dirty23:20 binary is identified by exact provenance hashes;
+IO archive-lease edits and weak metadata work occur later and are NOT included.
+
+Runtime232003 passes clean0 on original CPU-wall fixture. Actor+Fire interests
+share one charged model and two deduplicated Entry debts; independent query
+release preserves actor1/2. Actor departure releases borrow0/0 and both IDs.
+Reacquire then .25 mutation preserves one MustBeSaved survivor, but joined
+cleanup releases model debt0/0, globalUnknown/liveWatcher1/required0. Existing
+query/fire/camera promotion/demotion checks pass. Ready checks actual model borrow;
+positive observation cannot erase debt. This remains the <=256 full producer/
+same Shape accounting, not weak metadata, cap relaxation,257Ready, full DayZ
+coverage, multiplayer or performance acceptance.
+
+Source freshness prerequisite remains explicit. BankReadRequest path/offset/
+length snapshot opens a new stream and does not retain bank access lifetime/file
+identity; bank unload or pathname replacement can outlive current world/store
+generation. Existing tests prove captured decoded facts/narrow functionality,
+not an immutable/fresh-source theorem. Windows archive-read lease work is pending;
+defaults PBOOFF unchanged, Linux immutable behavior unproven fallback. Pre-upload
+alpha-facts experiment remains frozen with no implementation.
+
+Weak registered metadata is later work under development/unverified, not this
+binary. Whole plan/defaultReady/performance/MP/general consumers remain OPEN.

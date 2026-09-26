@@ -6957,6 +6957,127 @@
         "samples.jsonl": "0b3a606dd3e108d433acbfaa8c211b178a1da1d74a0b742976ab6e02312a1f34",
         "cold-positive.eden/mission.sqm": "9e1384738678862d37b5021bb6701bb1a8884ffa26f82cd51688a1eb5e10cbec"
       }
+    },
+    {
+      "run": "query-model-borrow-20260926-20260926-232003",
+      "classification": "PASS clean0 actual3db4159b+dirty23:20 binary, laterIOlease/weakmetadata editsNOTincluded. OriginalCPUwallfixtureReady, actor+Fire share1model2deduplicatedEntrydebts; queryrelease still1/2, actoraway0/0 idsabsent; reacquire/mutate.25 then finalborrow0/0 withoneMustSaved survivor/Unknown/liveWatcher1/required0. No weakmetadata/caprelaxation/257Ready/DayZfullReady/MP/performance proof.",
+      "provenance": {
+        "disabled": false,
+        "installed": "codex/streaming-residency 3db4159b+dirty 2026-09-26_23:20 deploy-ps1",
+        "head": "3db4159bcfa06b0dcac07ceb2bf11c0d56ffc5a8",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "453C4BC31FC212A7BFFA0907003F36D660088079047D285754E56CC79A432983",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "C725364D113AAA67B84512AD57F86E38D3E72E47AD3E93A1D0AB69D0174F17A3",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "scriptSha256": "2E44D695DAD52A48300F7773001A3CC3F77FF088D8BDBFCC47F76BC5369AF108",
+        "fixture": {
+          "absolute_model_path": true,
+          "actor": [
+            1190,
+            10,
+            1200
+          ],
+          "camera": [
+            100,
+            80,
+            100
+          ],
+          "camera_isolation_env": {
+            "WGR_OBJECT_STREAM_RADIUS_CELLS": "8",
+            "WGR_OBJECT_STREAM_WINDOW_GROWTH": "0"
+          },
+          "cell_metres": 50.0,
+          "elevation": 10.0,
+          "fire_segment": [
+            [
+              1190,
+              11.5,
+              1200
+            ],
+            [
+              1210,
+              11.5,
+              1200
+            ]
+          ],
+          "half_depth": 6.0,
+          "land_range": 32,
+          "large_wall": false,
+          "model_sha256": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+          "models": [
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\query-model-borrow-20260926-20260926-232003\\fixture\\streaming_fixture\\wall.p3d"
+          ],
+          "notes": [
+            "Absolute-model mode uses original loose files without an archive mount; relative mode needs a separately configured loose-file root.",
+            "Camera at 100 is isolated from walls at 1200/1230 with growth disabled.",
+            "No ResolveObject: actor demand must admit geometry with transient leases.",
+            "Generic inventory/classification/admission must establish readiness.",
+            "Self-check is not engine parsing, collision or runtime verification."
+          ],
+          "placements": [
+            {
+              "id": 1001,
+              "model_index": 0,
+              "position": [
+                1200.0,
+                11.5,
+                1200.0
+              ]
+            },
+            {
+              "id": 1002,
+              "model_index": 0,
+              "position": [
+                1230.0,
+                11.5,
+                1200.0
+              ]
+            }
+          ],
+          "positive_warming": false,
+          "reference_all_models": false,
+          "schema": 1,
+          "terrain_range": 32,
+          "wall_world_bounds": [
+            [
+              1199.5,
+              10,
+              1194.0,
+              1200.5,
+              13,
+              1206.0
+            ],
+            [
+              1229.5,
+              10,
+              1194.0,
+              1230.5,
+              13,
+              1206.0
+            ]
+          ],
+          "world_sha256": "13f98d371324c3b5e025edaab782c6bf7fe4bd0e166d0b1933e4479d2a69f2cf"
+        }
+      },
+      "sha256": {
+        "engine.log": "74fc97061fb442899d61c85c8e8ee31d00216fb41aac169160117af6c94da8cb",
+        "harness.jsonl": "301d8dcf7070a11cfcbf824ec0b92087a0e27f71254257d0c77f1051ed3cedbe",
+        "provenance.json": "04c327b3250635b4adff2ab0419e6522efb50b4614ed4cee6e2443ad458b8c16",
+        "result.json": "a87a21277a347cab79b92e96beb9728756c1e3d2470364feec2bc97faa83dd42",
+        "visual.png": "8e44e512c374d09135e08c96c9a1080143e100d85c06db97a404ecb199bc0e43",
+        "fixture/fixture.json": "e8bcfd9dab8450829e9b2c67e99a6d3d4d627c0dd932861f4b2cf90ee2dc80be",
+        "fixture/simulation-residency.wrp": "13f98d371324c3b5e025edaab782c6bf7fe4bd0e166d0b1933e4479d2a69f2cf",
+        "fixture/streaming_fixture/wall.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "simulation-fixture.eden/mission.sqm": "c47524083395a8c78a581822629f83c760dd0c1a3ef45eaceb24da88580e9d4c"
+      }
     }
   ],
   "microbenchmarks": [
@@ -7562,6 +7683,17 @@
       "result": "Finalstamped18nodebuildPASS, actualruntime narrowPASS,111276/180unit evidence retained. Later query-model debt/worker-alpha source editsNOTinstalled/unverified. PerformanceAccepted/defaultReadyfalse/fullplanOPEN.",
       "sha256": {
         "build-alpha-histogram-stamped-20260926.log": "5c048512b944cf27c20a29193608a9c43a40f004eba571fb51aa06da318db29b"
+      }
+    },
+    {
+      "artifactRoot": "build",
+      "runtimeSourceCommit": "3db4159b",
+      "installed": "3db4159b+dirty23:20",
+      "result": "193node+stamped18buildPASS,111374 assertions181casesPASS. Fullproducer<=256 samechargedShapeGroupqueryBorrowRef anddedupperEntryqueryEntries, positiveobservationpreservesdebt/Readyvalidatesborrow/joinedcleanupreleasesMustSaveddebt. Later IOarchivelease/weakregisteredmetadata notincluded/unverified. Sourcefreshnessgap: path-offset-length snapshot lacks retainedbank/fileidentity, captured decoded facts not immutable/fresh source theorem; preuploadalphafacts frozen NONE/defaultPBOOFF.",
+      "sha256": {
+        "build-query-model-borrow-20260926.log": "2db855e16bab39c5bbf56223c6ceab148d345db88170380d21c9efe450155c9f",
+        "build-query-model-borrow-stamped-20260926.log": "920b05bcc1e3d186724066100681370fec4ea97ad96c216d8d244aa63153fa10",
+        "test-query-model-borrow-20260926.log": "638ff180960ea04fcd4f7bd89765c10e97fecee20b66ea48f90df18fc75a33fc"
       }
     }
   ],
