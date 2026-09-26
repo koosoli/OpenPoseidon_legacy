@@ -1,12 +1,14 @@
 #pragma once
 
 #include <Poseidon/World/Model/Model.hpp>
+#include <Poseidon/World/Terrain/StaticPlainSourceSummary.hpp>
 #include <algorithm>
 #include <cmath>
 #include <iomanip>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace PoseidonTools
 {
@@ -51,6 +53,47 @@ inline std::string FormatModelSimulationSourceInfo(const Poseidon::Model::Model&
         << " vertexBoneReferences=" << audit.vertexBoneReferenceCount
         << " neighbourBoneReferences=" << audit.neighbourBoneReferenceCount << '\n';
     out << "  Zero counts establish absence only when their corresponding observed bits are set.\n";
+    // Explicit offline inspection only. Caller supplies the original immutable
+    // raw input; these synthetic tokens cannot serve as runtime inventory proof.
+    using namespace Poseidon::Streaming;
+    constexpr uint64_t diagnosticGeneration = 1;
+    const auto envelope = BuildStaticSourceEnvelope(model, diagnosticGeneration, StaticSourceCoverage::FullCompiledIR);
+    const auto summary = BuildStaticPlainSourceSummary(model, envelope);
+    out << "Offline static source diagnostic: generation=" << diagnosticGeneration
+        << " (synthetic; not world/inventory identity or content freshness)\n"
+           "  Scope: original immutable raw input only; no live config verdict, constructor, final bounds or Ready proof.\n"
+           "  Identity policy uses sourcePath as supplied; extracted disk paths are not resolved to world inventory names.\n";
+    out << "  Source envelope: state="
+        << (envelope.State() == StaticSourceEnvelopeState::SourceEvidence ? "SourceEvidence" : "Unknown")
+        << " payloadBytes=" << envelope.PayloadBytes() << " reasons=[";
+    using Reason = StaticSourceEnvelopeReason;
+    const std::pair<Reason, const char*> reasons[] = {
+        {Reason::Generation,"Generation"}, {Reason::Format,"Format"}, {Reason::Capacity,"Capacity"},
+        {Reason::NonFinite,"NonFinite"}, {Reason::NoVertices,"NoVertices"}, {Reason::MissingRole,"MissingRole"},
+        {Reason::Proxy,"Proxy"}, {Reason::Animation,"Animation"}, {Reason::LandConform,"LandConform"},
+        {Reason::InvalidFace,"InvalidFace"}, {Reason::InconsistentPurpose,"InconsistentPurpose"},
+        {Reason::IncompleteSource,"IncompleteSource"}
+    };
+    bool firstReason = true;
+    for (const auto& [reason, name] : reasons)
+        if (envelope.HasReason(reason)) { out << (firstReason ? "" : ",") << name; firstReason = false; }
+    out << ']';
+    if (const auto radius = envelope.RadiusForGeneration(diagnosticGeneration))
+        out << " sourceRadius=" << std::setprecision(9) << *radius;
+    out << '\n';
+    const char* summaryState = "Unknown";
+    const char* summaryReason = "envelope-not-source-evidence-or-incomplete-source-audit";
+    switch (summary.State())
+    {
+        case StaticPlainSourceSummaryState::SourceFacts:
+            summaryState = "SourceFacts"; summaryReason = "none"; break;
+        case StaticPlainSourceSummaryState::Unsupported:
+            summaryState = "Unsupported"; summaryReason = "source-path-or-property-policy"; break;
+        case StaticPlainSourceSummaryState::Unknown: break;
+    }
+    out << "  Plain source summary: state=" << summaryState << " reason=" << summaryReason
+        << " identity=" << SimulationInfoQuoted(summary.ModelIdentity())
+        << " configModelName=" << SimulationInfoQuoted(summary.ConfigModelName()) << '\n';
     out << "allowAnimation: " << model.allowAnimation << '\n';
     out << "LOD count: " << model.lodLevels.size() << '\n';
     const size_t count = std::min(model.lodLevels.size(), SimulationInfoMaxLods);
