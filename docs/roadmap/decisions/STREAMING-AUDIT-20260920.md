@@ -1649,3 +1649,107 @@ Default-OFF211128 passes clean0 Disabled/ownerPumps0/coldwallsabsent.
 These preserve narrow prior behavior, not arbitrary retail classes/MP or generic
 consumers. Cold integration remains pending; whole plan OPEN/defaultsOFF,
 Nanite/Tidewater research deferred and waves parked.
+
+### Opt-in cold positive actor admission — 26 September 2026
+
+d3f5fe8e adds selected plain original-ODOL cold actor-channel0 binding through
+async conversion. Separate WGR_SIMULATION_POSITIVE_COLD=1 also requires simulation
+enabled; both remain OFF by default. Old request/charge transfer is preserved;
+ShapeBank exception ownership uses RAII, tested with actual throw/cache weak-null/
+retry. Paired worker SourceEvidence avoids repeating source vertex scans on the
+owner, retaining the stricter32-LOD adapter cap. All-target integration202 nodes,
+reviewed17 and stamped18 builds pass; combined1805 assertions/93 cases pass.
+Installedd3f5fe8e21:46 matches source provenance.
+
+Cold214638 passes clean0 on original authored ODOL7 content:257 referenced models,
+only two eligible rows near actor1190, camera100 never visiting that area.
+Requested/Prepared/Created2,Refused/Interrupted0,leases2; identities1001/1002 have
+visualfalse/normalVB0 and Geometry/Fire/View roles true. GlobalCapacity persists,
+not fullReady/collision clearance. Owner bank-tail last.0143/max.0265ms measures
+that tail only, not FPS or a hard complete owner-frame bound. Actor departure
+removes both objects and all jobs/facts/payload/shape charges exactly to0.
+Artificial original content is not retail source/class/general eligibility proof.
+
+DefaultOFF214804 and prior full-lifecycle214821 pass clean0: Disabled/pumps0/
+coldwallsabsent; existing actor/query/camera/movingactor/Fire/mutation.25 saved
+retention unchanged. No default enablement or comparable-quality performance
+acceptance follows.
+
+Actual DayZ inventory83912800 chain is running without classified result at this
+checkpoint; production source/path/liveclass/constructor/cold placement proof
+remains OPEN. Next gates: real production refusal/success evidence, matched
+normal traversal performance, full consumer Pending/Unknown fallback, headless
+cold ownership and wider save/MP state. Hierarchical geometry paging stays
+conditional on measured benefit; Nanite/Tidewater research deferred, waves parked.
+Whole plan OPEN and experimental defaults OFF.
+
+### Actual DayZ source-bound cold actor chain — 26 September 2026
+
+First actual directory215052 has no result: WGR_OBJECT_STREAM_PBO=0 leaves
+archive sources NotLoose, with105 requested/refused and0 prepared/created/
+source-envelope scans. This is incorrect source transport configuration, not
+live class refusal. Failed samples/provenance/logs are retained.
+
+Retry215427 passes clean0 on unchanged installedd3f5fe8e. Existing archive source
+support is opt-in WGR_OBJECT_STREAM_PBO=1; explicit POSEIDON_MODEL_DDC=0 ensures
+original decoded source audit for this proof. Production defaults are unchanged.
+Camera/player stays10000, budget20000/residentdesired19985; target83912800 starts
+absent, then actor remote5711 demand admits the original inventory path
+dz\structures\residential\platforms\platform1_stairs_30_wallr.p3d. No ResolveObject,
+manual source diagnostic/model whitelist or camera visit establishes residency.
+
+Actual target is plain source-bound CPU-only: radius4.731777191, visualfalse/
+normalVB0 with Geometry/Fire/View true. Real stream_fire_probe hits83912800 (and
+nearby83912843). GlobalCapacity/ReadyRegions0 and transactional FireCapacity
+remain unchanged: no fabricated contact list or partial world Ready is published.
+Final105 requests/18 prepared/81 created/72 refused,105 scans/31 publications
+are bounded observations, not whole-corpus eligibility acceptance. Maximum owner
+bank tail1.4754ms is not FPS or a hard complete owner-frame bound.
+
+Actor departure retires target identity and all cold work/facts/payload/shape
+charges to0;422 previously loaded positive leases near player10000 remain.
+This is cold-debt cleanup, not global lease0 or freeing metadata capacity.
+Real inventory/source/current class/actual CPU constructor/contact/retirement
+chain now has one partial production proof. Promotion/mutation/save/MP, wider
+classes, fullquery completeness and matched-performance gates remain OPEN.
+Root-owned runner is uncommitted at this checkpoint; exact launched scriptSHA
+and world/binary provenance are authoritative. Whole plan/default gates unchanged.
+
+### Production cold promotion and mutation retention — 26 September 2026
+
+First lifecycle215804 has no result because runner demands modelVB0 after camera
+demotion. Engine correctly sets VisualResidentfalse. LandSave instance eviction
+calls SceneObjectRemoved and SetVisualResident(false); shared Shape/bank model
+buffers have no inverse deferred-visual teardown contract. Fix changes runner
+expectation only, not engine code. Failed log/samples are retained.
+
+Corrected220125 passes clean0 on unchangedd3f5fe8e: actual83912800 starts CPU-only
+normalVB0, dense camera promotes visualtrue/normalVB4 with physical roles/contact
+preserved, then camera departure demotes visualfalse while shared modelVB4 remains.
+Existing-object damage mutation.25 sets MustBeSavedtrue. Actor departure preserves
+same target .25/visualfalse/saved, with cold work/facts/payload/shape charges0 and
+required pins0. This is actual production in-memory state retention, not disk
+save/reload, multiplayer, fullquery Ready or performance acceptance.
+
+Model-buffer cache retention is explicit: retiring an instance or cold job does
+not prove GPU geometry reclamation. Per-asset geometry demand/cache policy stays
+OPEN pending measured retained-LOD usage and safe shared ownership. Headlesscold
+run remains unclassified at this checkpoint. Wider consumers/classes, diskstate/
+MP and comparable-quality performance remain OPEN/defaultsOFF.
+
+### Headless cold ownership — 26 September 2026
+
+Headless220322 passes on freshly built d3f5fe8e PoseidonServer.exe, actual server
+artifact hash and mission/runner provenance recorded. Renderer is None; original
+ODOL7/257-model fixture requests/prepares/creates exactly two remote CPU-only
+identities with Geometry/Fire/View, normalVB0 and real fire1001. GlobalCapacity
+remains, with no fullReady/query clearance or required pins.
+
+Actor700,900 removes both identities and leases/coldwork/facts/payload/shape
+charges to0. Server exits clean0 under the owned game lock. This verifies one
+narrow server cold lifecycle independently of graphical residency, not multiplayer
+authority, disk-save restoration, arbitrary retail types or performance.
+
+Next owner-bank timing/alpha attribution is planned instrumentation only, not
+implemented/accepted evidence here. Geometry-cache demand, broad consumers/state,
+MP and comparable-quality performance remain OPEN; experimental defaults OFF.

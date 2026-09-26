@@ -5891,6 +5891,654 @@
         "fixture/streaming_fixture/wall.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
         "simulation-fixture.eden/mission.sqm": "c47524083395a8c78a581822629f83c760dd0c1a3ef45eaceb24da88580e9d4c"
       }
+    },
+    {
+      "run": "positive-cold-20260926-20260926-214638",
+      "classification": "PASS clean0 installedd3f5fe8e21:46: originalODOL7 fixture257 referenced models, exactly2 eligible remote actor rows; camera100 nevernear1190. ColdRequested/Prepared/Created2,Refused/Interrupted0,leases2; objects1001/1002 visualfalse/VB0/GeomFireViewtrue. GlobalCapacity/nofullReady persists. Banktail last.0143/max.0265ms only, not FPS/hardowner bound. Actor departure objects absent/jobsfacts/payloadshapecharges0. Not retail/classes/general query proof.",
+      "provenance": {
+        "fixture": {
+          "schema": 1,
+          "originalFormat": "ODOL7",
+          "modelCount": 257,
+          "actor": [
+            1190,
+            10,
+            1200
+          ],
+          "camera": [
+            100,
+            80,
+            100
+          ],
+          "nearPlacements": [
+            {
+              "id": 1001,
+              "model_index": 0,
+              "position": [
+                1200.0,
+                11.5,
+                1200.0
+              ]
+            },
+            {
+              "id": 1002,
+              "model_index": 1,
+              "position": [
+                1230.0,
+                11.5,
+                1200.0
+              ]
+            }
+          ],
+          "otherPlacementCount": 255,
+          "otherPlacementPosition": [
+            650,
+            11.5,
+            650
+          ],
+          "world_sha256": "d128dfeafc7b76006544c53316b38a9a3b765455fb1a3344adbe28733b6cace4",
+          "model_sha256": "f39edcf158d865d874b3c600a6741d0f41c3942f65745fc2cfcc168e0bf1ff88",
+          "notes": [
+            "Original six-face convex boxes, four explicit LOD roles, Component01 memberships with no authored animation weights.",
+            "Only two models are near the actor; all 257 are referenced by the world.",
+            "Source-format decode, live config, actual constructor and timing still require engine checks."
+          ],
+          "fullModelListArtifact": "provenance.json",
+          "fullProvenanceSha256": "721e34583a27fbd39e67189303a688ab5bc18887c0bba78b3dc6e0994f01533a"
+        },
+        "installed": "codex/streaming-residency d3f5fe8e 2026-09-26_21:46 deploy-ps1",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "F64CA76820DF4DEB7DC13FE55F9F830DCDF68DDC545D8FF5FE04C3739238BADB",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "2D33F4CD1172E0DEFBCFBC3AE623A8FD0D7732C7FB10088BD0C9F286A80D8B69",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "head": "d3f5fe8e6614f39b98f2f9b9d751fd63ad5d3446",
+        "disabled": false,
+        "scriptSha256": "5242BE04BD1D3C2A70A24F96BA759BEDF3A1F1F72B670F6676553DE52A1B39B7"
+      },
+      "sha256": {
+        "engine.log": "a85c113e33e91c285a3000e9f955cf70e1baf5e963c2420176568076238c402b",
+        "harness.jsonl": "11644295f3fd6affa44e937721573d70d3a5ed6994f228b1ef068c7494792365",
+        "provenance.json": "721e34583a27fbd39e67189303a688ab5bc18887c0bba78b3dc6e0994f01533a",
+        "result.json": "f243a58a95f92ebe7252dd91dba292a440cb934635227d1497e97d9552a13bbd",
+        "simulation-fixture.eden/mission.sqm": "c47524083395a8c78a581822629f83c760dd0c1a3ef45eaceb24da88580e9d4c"
+      }
+    },
+    {
+      "run": "positive-cold-default-off-20260926-20260926-214804",
+      "classification": "PASS clean0 installedd3f5fe8e: defaultOFF simulationDisabled/pumps0/coldwallsabsent, no cold prototype work.",
+      "provenance": {
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "F64CA76820DF4DEB7DC13FE55F9F830DCDF68DDC545D8FF5FE04C3739238BADB",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "2D33F4CD1172E0DEFBCFBC3AE623A8FD0D7732C7FB10088BD0C9F286A80D8B69",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "fixture": {
+          "absolute_model_path": true,
+          "actor": [
+            1190,
+            10,
+            1200
+          ],
+          "camera": [
+            100,
+            80,
+            100
+          ],
+          "camera_isolation_env": {
+            "WGR_OBJECT_STREAM_RADIUS_CELLS": "8",
+            "WGR_OBJECT_STREAM_WINDOW_GROWTH": "0"
+          },
+          "cell_metres": 50.0,
+          "elevation": 10.0,
+          "fire_segment": [
+            [
+              1190,
+              11.5,
+              1200
+            ],
+            [
+              1210,
+              11.5,
+              1200
+            ]
+          ],
+          "half_depth": 6.0,
+          "land_range": 32,
+          "large_wall": false,
+          "model_sha256": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+          "models": [
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\positive-cold-default-off-20260926-20260926-214804\\fixture\\streaming_fixture\\wall.p3d"
+          ],
+          "notes": [
+            "Absolute-model mode uses original loose files without an archive mount; relative mode needs a separately configured loose-file root.",
+            "Camera at 100 is isolated from walls at 1200/1230 with growth disabled.",
+            "No ResolveObject: actor demand must admit geometry with transient leases.",
+            "Generic inventory/classification/admission must establish readiness.",
+            "Self-check is not engine parsing, collision or runtime verification."
+          ],
+          "placements": [
+            {
+              "id": 1001,
+              "model_index": 0,
+              "position": [
+                1200.0,
+                11.5,
+                1200.0
+              ]
+            },
+            {
+              "id": 1002,
+              "model_index": 0,
+              "position": [
+                1230.0,
+                11.5,
+                1200.0
+              ]
+            }
+          ],
+          "positive_warming": false,
+          "reference_all_models": false,
+          "schema": 1,
+          "terrain_range": 32,
+          "wall_world_bounds": [
+            [
+              1199.5,
+              10,
+              1194.0,
+              1200.5,
+              13,
+              1206.0
+            ],
+            [
+              1229.5,
+              10,
+              1194.0,
+              1230.5,
+              13,
+              1206.0
+            ]
+          ],
+          "world_sha256": "31af030431fa82a10c6f23e4836bdbd3559373fdd4635b6b2d45d6907587977e"
+        },
+        "installed": "codex/streaming-residency d3f5fe8e 2026-09-26_21:46 deploy-ps1",
+        "scriptSha256": "5242BE04BD1D3C2A70A24F96BA759BEDF3A1F1F72B670F6676553DE52A1B39B7",
+        "head": "d3f5fe8e6614f39b98f2f9b9d751fd63ad5d3446",
+        "disabled": true
+      },
+      "sha256": {
+        "engine.log": "fbff09653b07dbf9fb8ef651453fc238746b250db4910f449ce2cfea01acf492",
+        "harness.jsonl": "f02e001096300a3f435025b5d8764100d1b371a2f809c5229f9da977866ff7a1",
+        "provenance.json": "7b2f00a5bb9bbc2aa7def95201333e294b5c226c7deee61eedf76aebb402d8a9",
+        "result.json": "70ad12da219e4bf957dd43c0b3e3ae90661dc1564cb188c363d5468cb9b91e36",
+        "fixture/fixture.json": "c37e91ddc0bc8436e213b602935e38362300a2d9298c5ca939cb64fc6c0d5e69",
+        "fixture/simulation-residency.wrp": "31af030431fa82a10c6f23e4836bdbd3559373fdd4635b6b2d45d6907587977e",
+        "fixture/streaming_fixture/wall.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "simulation-fixture.eden/mission.sqm": "c47524083395a8c78a581822629f83c760dd0c1a3ef45eaceb24da88580e9d4c"
+      }
+    },
+    {
+      "run": "positive-cold-full-lifecycle-20260926-20260926-214821",
+      "classification": "PASS clean0 installedd3f5fe8e: prior narrow actor/query/camera/movingactor/Fire/mutation.25 saved-retention lifecycle regression. No production/MP/performance acceptance.",
+      "provenance": {
+        "scriptSha256": "5242BE04BD1D3C2A70A24F96BA759BEDF3A1F1F72B670F6676553DE52A1B39B7",
+        "fixture": {
+          "absolute_model_path": true,
+          "actor": [
+            1190,
+            10,
+            1200
+          ],
+          "camera": [
+            100,
+            80,
+            100
+          ],
+          "camera_isolation_env": {
+            "WGR_OBJECT_STREAM_RADIUS_CELLS": "8",
+            "WGR_OBJECT_STREAM_WINDOW_GROWTH": "0"
+          },
+          "cell_metres": 50.0,
+          "elevation": 10.0,
+          "fire_segment": [
+            [
+              1190,
+              11.5,
+              1200
+            ],
+            [
+              1210,
+              11.5,
+              1200
+            ]
+          ],
+          "half_depth": 6.0,
+          "land_range": 32,
+          "large_wall": false,
+          "model_sha256": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+          "models": [
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\positive-cold-full-lifecycle-20260926-20260926-214821\\fixture\\streaming_fixture\\wall.p3d"
+          ],
+          "notes": [
+            "Absolute-model mode uses original loose files without an archive mount; relative mode needs a separately configured loose-file root.",
+            "Camera at 100 is isolated from walls at 1200/1230 with growth disabled.",
+            "No ResolveObject: actor demand must admit geometry with transient leases.",
+            "Generic inventory/classification/admission must establish readiness.",
+            "Self-check is not engine parsing, collision or runtime verification."
+          ],
+          "placements": [
+            {
+              "id": 1001,
+              "model_index": 0,
+              "position": [
+                1200.0,
+                11.5,
+                1200.0
+              ]
+            },
+            {
+              "id": 1002,
+              "model_index": 0,
+              "position": [
+                1230.0,
+                11.5,
+                1200.0
+              ]
+            }
+          ],
+          "positive_warming": false,
+          "reference_all_models": false,
+          "schema": 1,
+          "terrain_range": 32,
+          "wall_world_bounds": [
+            [
+              1199.5,
+              10,
+              1194.0,
+              1200.5,
+              13,
+              1206.0
+            ],
+            [
+              1229.5,
+              10,
+              1194.0,
+              1230.5,
+              13,
+              1206.0
+            ]
+          ],
+          "world_sha256": "c6db69ddf8140dbcd832fde760bc65c97cdd6285bd5ddf1b2cccc51f5ea1403d"
+        },
+        "head": "d3f5fe8e6614f39b98f2f9b9d751fd63ad5d3446",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "F64CA76820DF4DEB7DC13FE55F9F830DCDF68DDC545D8FF5FE04C3739238BADB",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "2D33F4CD1172E0DEFBCFBC3AE623A8FD0D7732C7FB10088BD0C9F286A80D8B69",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "disabled": false,
+        "installed": "codex/streaming-residency d3f5fe8e 2026-09-26_21:46 deploy-ps1"
+      },
+      "sha256": {
+        "engine.log": "3e34076145386e88780a40538a6e4d11a2170b4568771d580e76ba1c9518451b",
+        "harness.jsonl": "613d23dc1db7c5b28fafaac19461329864374ccaa677490416e385493a7657a7",
+        "provenance.json": "5e2b422239083b58c398ff98cd0782db29c6df5123572e81f1291236b7c9b403",
+        "result.json": "e37eb7fbe3e210a83e412538455942ebf4f5d943b419b80eddcf054cb5fc04fb",
+        "visual.png": "6f8f49179ce2b10e94dd3afb0c91e3de9278bde120d7889be10be49ef47d67b6",
+        "fixture/fixture.json": "dc47d98bb0754401a58ccde53c201ce6538d2323e1e500f7abf2edb26bafc436",
+        "fixture/simulation-residency.wrp": "c6db69ddf8140dbcd832fde760bc65c97cdd6285bd5ddf1b2cccc51f5ea1403d",
+        "fixture/streaming_fixture/wall.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "simulation-fixture.eden/mission.sqm": "c47524083395a8c78a581822629f83c760dd0c1a3ef45eaceb24da88580e9d4c"
+      }
+    },
+    {
+      "run": "dayz-cold-positive-20260926-20260926-215052",
+      "classification": "FAILED/no result: incorrect WGR_OBJECT_STREAM_PBO0 left original archive models NotLoose;105 cold requests/refusals,0 prepared/created/envelope scans. Source transport configuration failure, not actual class refusal.",
+      "provenance": {
+        "installed": "codex/streaming-residency d3f5fe8e 2026-09-26_21:46 deploy-ps1",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "F64CA76820DF4DEB7DC13FE55F9F830DCDF68DDC545D8FF5FE04C3739238BADB",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "2D33F4CD1172E0DEFBCFBC3AE623A8FD0D7732C7FB10088BD0C9F286A80D8B69",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "scope": "Actual inventory83912800 cold actor admission, unchanged20000 camera budget; no object getter, source diagnostic, asset whitelist or full-query readiness.",
+        "scriptSha256": "5674C88AE090E15170E5806D4BC9E775863F81F2C5C72919F2844EE8D9FE01DC",
+        "world": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\packages\\dayz-compat\\world\\chernarusplus\\chernarusplus.wrp",
+        "environment": {
+          "WGR_OBJECT_STREAM_TEST_BUDGET": "1",
+          "WGR_LOD_GOVERNOR_RANGE": "1",
+          "WGR_NATIVE_DDS_BC3_ONLY": "0",
+          "WGR_SIMULATION_POSITIVE_COLD": "1",
+          "WGR_ADAPTIVE_TEXTURE_DETAIL": "0",
+          "WGR_SIMULATION_RESIDENCY": "1",
+          "WGR_OBJECT_STREAM_GPU_BUDGET": "0",
+          "WGR_SIMULATION_RESIDENCY_TEST": "1",
+          "WGR_GEO_POOL_PRESSURE_GROWTH": "0",
+          "WGR_SKY_VOLUME_INCREMENTAL": "1",
+          "WGR_OBJECT_STREAM_MAX_OBJECTS": "20000",
+          "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\dayz-cold-positive-20260926-20260926-215052\\user",
+          "WGR_OBJECT_STREAM_PBO_TEXTURES": "0",
+          "WGR_GEO_POOL_GROWTH": "2.0",
+          "WGR_OBJECT_STREAM_PBO": "0",
+          "WGR_NATIVE_DDS_PREPARE": "0"
+        },
+        "head": "d3f5fe8e6614f39b98f2f9b9d751fd63ad5d3446"
+      },
+      "sha256": {
+        "engine.log": "eaf3a8ab16778e1fca5f315448208b8fb51a9a0f1e21c9f9bb1903b98c97a52b",
+        "harness.jsonl": "396a12a3151d177bcb2de6d7ac32278f9dc0df868fa657245e51db96747a920a",
+        "provenance.json": "54336c18932d8704a846808921b7e7cecb277e805a5f73e57f451ab396ab72d1",
+        "samples.jsonl": "ee84e268089495f40f373d1b3d4845b2041026f9131552217dda86b6eabf44b8",
+        "cold-positive.eden/mission.sqm": "9e1384738678862d37b5021bb6701bb1a8884ffa26f82cd51688a1eb5e10cbec"
+      }
+    },
+    {
+      "run": "dayz-cold-positive-pbo-20260926-20260926-215427",
+      "classification": "PASS clean0 on installedd3f: originalDayZ realinventory83912800 initiallyabsent, actorremote5711 while camera/player10000/residentdesired19985/budget20000 nevervisit. Actual plain source-bound CPU-onlyradius4.731777191/all3roles/VB0 and real fireprobecontact. GlobalCapacity/Ready0/transactionalFireCapacity persists with no invented contacts. WGR_OBJECT_STREAM_PBO1 and explicitMODEL_DDC0 optins; defaultsunchanged. Final105requests18prepared81created72refused/105scans31published, maxbanktail1.4754ms notFPS/hardownerbound. Targetretires/jobsfacts/payloadshapecharges0;422 existingplayerpositiveleases remain, notglobal0. No promotion/mutation/save/MP or general eligibility proof.",
+      "provenance": {
+        "head": "d3f5fe8e6614f39b98f2f9b9d751fd63ad5d3446",
+        "scope": "Actual inventory83912800 cold actor admission, unchanged20000 camera budget; no object getter, source diagnostic, asset whitelist or full-query readiness.",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "F64CA76820DF4DEB7DC13FE55F9F830DCDF68DDC545D8FF5FE04C3739238BADB",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "2D33F4CD1172E0DEFBCFBC3AE623A8FD0D7732C7FB10088BD0C9F286A80D8B69",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "environment": {
+          "WGR_OBJECT_STREAM_TEST_BUDGET": "1",
+          "WGR_OBJECT_STREAM_PBO": "1",
+          "WGR_LOD_GOVERNOR_RANGE": "1",
+          "WGR_ADAPTIVE_TEXTURE_DETAIL": "0",
+          "WGR_GEO_POOL_GROWTH": "2.0",
+          "WGR_NATIVE_DDS_PREPARE": "0",
+          "WGR_OBJECT_STREAM_GPU_BUDGET": "0",
+          "WGR_OBJECT_STREAM_MAX_OBJECTS": "20000",
+          "WGR_SIMULATION_RESIDENCY_TEST": "1",
+          "WGR_OBJECT_STREAM_PBO_TEXTURES": "0",
+          "POSEIDON_MODEL_DDC": "0",
+          "WGR_SIMULATION_RESIDENCY": "1",
+          "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\dayz-cold-positive-pbo-20260926-20260926-215427\\user",
+          "WGR_NATIVE_DDS_BC3_ONLY": "0",
+          "WGR_GEO_POOL_PRESSURE_GROWTH": "0",
+          "WGR_SIMULATION_POSITIVE_COLD": "1",
+          "WGR_SKY_VOLUME_INCREMENTAL": "1"
+        },
+        "scriptSha256": "377EA77C61B988635A4F9EBE7ED9C920009BB0D82D60EFC770C45B21CAF818B6",
+        "installed": "codex/streaming-residency d3f5fe8e 2026-09-26_21:46 deploy-ps1",
+        "world": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\packages\\dayz-compat\\world\\chernarusplus\\chernarusplus.wrp"
+      },
+      "sha256": {
+        "engine.log": "355fe15e12fe03e417ae67625a8aa9a4be53b832ac39e690c4f909b6b88b2942",
+        "harness.jsonl": "ac00a2470501f2eb55f6e3b85519ac44993a5d559b4ad17367081fd77d7664fd",
+        "provenance.json": "c3abd966184b67c9892b819b3fdbab9febfd068856378cb96dac60262cbf19c4",
+        "result.json": "6e59b8ec4612720d9c7ff62d5b2d40ba1b6e7a5a0af9bbe664c46ce1d29f584a",
+        "samples.jsonl": "6eaf3622d97e1395c705451c5e757d8e595f298794eafbbf5b5d48c566b03f27",
+        "cold-positive.eden/mission.sqm": "9e1384738678862d37b5021bb6701bb1a8884ffa26f82cd51688a1eb5e10cbec"
+      }
+    },
+    {
+      "run": "dayz-cold-positive-lifecycle-20260926-20260926-215804",
+      "classification": "FAILED runner/noresult: postpromotion camera demotion wrongly expected modelVB0. Engine correctly VisualResidentfalse; sharedShape/model buffers retained by bank/cache. Runner expectation corrected only, no engine change/regression attribution.",
+      "provenance": {
+        "world": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\packages\\dayz-compat\\world\\chernarusplus\\chernarusplus.wrp",
+        "scope": "Actual inventory83912800 cold actor admission, unchanged20000 camera budget; no object getter, source diagnostic, asset whitelist or full-query readiness.",
+        "installed": "codex/streaming-residency d3f5fe8e 2026-09-26_21:46 deploy-ps1",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "F64CA76820DF4DEB7DC13FE55F9F830DCDF68DDC545D8FF5FE04C3739238BADB",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "2D33F4CD1172E0DEFBCFBC3AE623A8FD0D7732C7FB10088BD0C9F286A80D8B69",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "head": "d3f5fe8e6614f39b98f2f9b9d751fd63ad5d3446",
+        "environment": {
+          "WGR_SIMULATION_POSITIVE_COLD": "1",
+          "WGR_OBJECT_STREAM_PBO_TEXTURES": "0",
+          "WGR_SIMULATION_RESIDENCY_TEST": "1",
+          "WGR_GEO_POOL_GROWTH": "2.0",
+          "POSEIDON_MODEL_DDC": "0",
+          "WGR_GEO_POOL_PRESSURE_GROWTH": "0",
+          "WGR_ADAPTIVE_TEXTURE_DETAIL": "0",
+          "WGR_OBJECT_STREAM_MAX_OBJECTS": "20000",
+          "WGR_SKY_VOLUME_INCREMENTAL": "1",
+          "WGR_OBJECT_STREAM_GPU_BUDGET": "0",
+          "WGR_NATIVE_DDS_PREPARE": "0",
+          "WGR_NATIVE_DDS_BC3_ONLY": "0",
+          "WGR_OBJECT_STREAM_PBO": "1",
+          "WGR_LOD_GOVERNOR_RANGE": "1",
+          "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\dayz-cold-positive-lifecycle-20260926-20260926-215804\\user",
+          "WGR_OBJECT_STREAM_TEST_BUDGET": "1",
+          "WGR_SIMULATION_RESIDENCY": "1"
+        },
+        "scriptSha256": "C56C27F1BD2B41B089F74C9D02642B2F8F3AD34037147E695AEDF3BBDE1F07E2"
+      },
+      "sha256": {
+        "engine.log": "e4bd3928814b541eb3836054f5bc4fbf33e6b39c8f7e71a81599c131da449fe9",
+        "harness.jsonl": "3f6ed3f924c8797aa9f8057c6d3b9d8777e894f5b59a50d20c66929db841a503",
+        "provenance.json": "279cd54ecdbe15c677a41ed1021ee891d13fcaf64a6038abd5e2d90ea897b096",
+        "samples.jsonl": "979854eacd0e60505eb34942bec9ce94c1dd3c71824bd7d610cbc8e780e83be2",
+        "cold-positive.eden/mission.sqm": "9e1384738678862d37b5021bb6701bb1a8884ffa26f82cd51688a1eb5e10cbec"
+      }
+    },
+    {
+      "run": "dayz-cold-positive-lifecycle-retry-20260926-20260926-220125",
+      "classification": "PASS clean0 unchangedinstalledd3f: actualtarget83912800 CPU-onlycoldVB0→densecamerapromotionvisualtrue/VB4→cameraawayvisualfalse/modelVB4 retained. Real firecontact/physicalroles persist; existing damage.25MustBeSaved thenactoraway targetpresentSaved.25/visualfalse, coldwork/facts/payloadshapecharges0/required0. Sharedmodelbuffer retention not GPUreclaim, diskSave/MP/performance or fullqueryReady proof.",
+      "provenance": {
+        "environment": {
+          "WGR_SIMULATION_POSITIVE_COLD": "1",
+          "WGR_SKY_VOLUME_INCREMENTAL": "1",
+          "WGR_GEO_POOL_GROWTH": "2.0",
+          "WGR_ADAPTIVE_TEXTURE_DETAIL": "0",
+          "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\dayz-cold-positive-lifecycle-retry-20260926-20260926-220125\\user",
+          "WGR_LOD_GOVERNOR_RANGE": "1",
+          "WGR_SIMULATION_RESIDENCY": "1",
+          "WGR_OBJECT_STREAM_PBO": "1",
+          "WGR_GEO_POOL_PRESSURE_GROWTH": "0",
+          "WGR_OBJECT_STREAM_GPU_BUDGET": "0",
+          "WGR_OBJECT_STREAM_TEST_BUDGET": "1",
+          "WGR_SIMULATION_RESIDENCY_TEST": "1",
+          "WGR_OBJECT_STREAM_MAX_OBJECTS": "20000",
+          "WGR_OBJECT_STREAM_PBO_TEXTURES": "0",
+          "WGR_NATIVE_DDS_PREPARE": "0",
+          "POSEIDON_MODEL_DDC": "0",
+          "WGR_NATIVE_DDS_BC3_ONLY": "0"
+        },
+        "installed": "codex/streaming-residency d3f5fe8e 2026-09-26_21:46 deploy-ps1",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "F64CA76820DF4DEB7DC13FE55F9F830DCDF68DDC545D8FF5FE04C3739238BADB",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "2D33F4CD1172E0DEFBCFBC3AE623A8FD0D7732C7FB10088BD0C9F286A80D8B69",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "scriptSha256": "02393535680BF49AF2559C37A79EF1C8E3C1E911C8C8C1372EB94FAD788A8DEE",
+        "scope": "Actual inventory83912800 cold actor admission, unchanged20000 camera budget; no object getter, source diagnostic, asset whitelist or full-query readiness.",
+        "world": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\packages\\dayz-compat\\world\\chernarusplus\\chernarusplus.wrp",
+        "head": "d3f5fe8e6614f39b98f2f9b9d751fd63ad5d3446"
+      },
+      "sha256": {
+        "engine.log": "f6f7cf9e37e61c09789bb64a497794fcb22a4b19afdc2c20aaf10261f372eafd",
+        "harness.jsonl": "37ba5a9b43ea9352f31175a36b07b3db673746a55816b6d6ab02555c3086ee55",
+        "provenance.json": "e3cf5caad06a1cc5cdf297f7789d1ad1c6acf4448733642ab25a5e6328589367",
+        "result.json": "ce36355481f88ff2e583637dcceae322a62cd6fa235376759ec54ec755a65add",
+        "samples.jsonl": "dbcc2f1fbbcf952885ab1a9b7c79bfde156d876f0aa898fd30a62fc33b991623",
+        "cold-positive.eden/mission.sqm": "9e1384738678862d37b5021bb6701bb1a8884ffa26f82cd51688a1eb5e10cbec"
+      }
+    },
+    {
+      "run": "positive-cold-headless-20260926-20260926-220322",
+      "classification": "PASS freshbuilt d3f headlessserver/clean0 rendererNone undergame lock; originalODOL7257model fixture2 Requested/Prepared/Created CPUOnlyGeometryFireView/VB0/fire1001. GlobalCapacity/no fullReady/query/pins. Actor700,900 removesboth/leaseworkfactspayloadshapecharges0. Actualserverartifacthash provenance, not graphicalstampproof; no MP/diskSave/arbitraryretail/normalperformance acceptance.",
+      "provenance": {
+        "missionHash": {
+          "Algorithm": "SHA256",
+          "Hash": "7525FAF397AB5817AF6BBFA379682F5378B82B54E6E5D98F12CD7208C329CF67",
+          "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\positive-cold-headless-20260926-20260926-220322\\simulation-headless.eden\\mission.sqm"
+        },
+        "head": "d3f5fe8e6614f39b98f2f9b9d751fd63ad5d3446",
+        "coldPositive": true,
+        "serverExe": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\win-x64-clang-rwdi\\apps\\cwr\\Server\\PoseidonServer.exe",
+        "scriptSha256": "62BF165B7AF0ABBC2958F07C326D200FCE1779332D2FAF404F3770AC40BEA1C5",
+        "disabled": false,
+        "fixturePath": "C:\\Users\\mail\\AppData\\Local\\Temp\\op-hcold-62bcbc29",
+        "gameDir": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault",
+        "fixture": {
+          "schema": 1,
+          "originalFormat": "ODOL7",
+          "modelCount": 257,
+          "actor": [
+            1190,
+            10,
+            1200
+          ],
+          "camera": [
+            100,
+            80,
+            100
+          ],
+          "nearPlacements": [
+            {
+              "id": 1001,
+              "model_index": 0,
+              "position": [
+                1200.0,
+                11.5,
+                1200.0
+              ]
+            },
+            {
+              "id": 1002,
+              "model_index": 1,
+              "position": [
+                1230.0,
+                11.5,
+                1200.0
+              ]
+            }
+          ],
+          "otherPlacementCount": 255,
+          "otherPlacementPosition": [
+            650,
+            11.5,
+            650
+          ],
+          "world_sha256": "d942fabc146100f0dda9be4487f62b1fbec5ac10f291b3f7fed69c14161801b4",
+          "model_sha256": "f39edcf158d865d874b3c600a6741d0f41c3942f65745fc2cfcc168e0bf1ff88",
+          "notes": [
+            "Original six-face convex boxes, four explicit LOD roles, Component01 memberships with no authored animation weights.",
+            "Only two models are near the actor; all 257 are referenced by the world.",
+            "Source-format decode, live config, actual constructor and timing still require engine checks."
+          ],
+          "fullModelListArtifact": "provenance.json",
+          "fullProvenanceSha256": "4ddb409fce8300419a8d0b141701e76dc19b8e225e42cd4161ed54118c9fc620"
+        },
+        "serverHash": {
+          "Algorithm": "SHA256",
+          "Hash": "45A8C64E012CB98BF88BF7469D8D2FF33AF222A64F26BB0EE79372AFBB269783",
+          "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\win-x64-clang-rwdi\\apps\\cwr\\Server\\PoseidonServer.exe"
+        },
+        "environment": {
+          "POSEIDON_LOCKSTEP_HZ": null,
+          "WGR_OBJECT_STREAM_PBO": "0",
+          "POSEIDON_REFORGER_WORLD": null,
+          "POSEIDON_TEST_RAIN": null,
+          "WGR_OBJECT_STREAM_GPU_BUDGET": "0",
+          "WGR_OBJECT_STREAM_TEST_BUDGET": null,
+          "WGR_NATIVE_DDS_BC3_ONLY": "0",
+          "WGR_SIMULATION_RESIDENCY": "1",
+          "WGR_LOD_GOVERNOR_RANGE": null,
+          "WGR_OBJECT_STREAM_WINDOW_GROWTH": "0",
+          "POSEIDON_REFORGER_STREAM": null,
+          "WGR_SIMULATION_POSITIVE_COLD": "1",
+          "POSEIDON_MODEL_DDC": "0",
+          "WGR_SIMULATION_RESIDENCY_TEST": "0",
+          "WGR_WATER_CURLING_BREAKER": null,
+          "WGR_OBJECT_STREAM_PBO_TEXTURES": "0",
+          "WGR_ADAPTIVE_TEXTURE_DETAIL": "0",
+          "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\positive-cold-headless-20260926-20260926-220322\\user",
+          "WGR_NATIVE_DDS_PREPARE": "0",
+          "POSEIDON_REFORGER_OBJECTS": null,
+          "WGR_OBJECT_STREAM_RADIUS_CELLS": "8"
+        },
+        "scope": "Original static two-wall fixture; does not prove generic query completeness or gameplay consumer migration",
+        "networkPort": 64490,
+        "harnessPort": 64489,
+        "arguments": [
+          "-C",
+          "\"D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\"",
+          "--simulate",
+          "\"C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\positive-cold-headless-20260926-20260926-220322\\simulation-headless.eden\"",
+          "--duration",
+          "240",
+          "--stats",
+          "2",
+          "--private",
+          "--bind-address",
+          "127.0.0.1",
+          "--port",
+          "64490",
+          "--nosound",
+          "--harness",
+          "64489",
+          "--test-world",
+          "\"C:\\Users\\mail\\AppData\\Local\\Temp\\op-hcold-62bcbc29\\simulation-residency.wrp\"",
+          "--log-file",
+          "\"C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\positive-cold-headless-20260926-20260926-220322\\engine.log\""
+        ],
+        "installed": "codex/streaming-residency d3f5fe8e 2026-09-26_21:46 deploy-ps1"
+      },
+      "sha256": {
+        "engine.log": "5a4d80bf10fb527f7b028216c5cfec7f50fe116fd3a23c1e9ab3e48b8bfa400a",
+        "harness.jsonl": "46a0f97da2944279e5426ccf46290a30fad741502deef2522469b3515c32614d",
+        "provenance.json": "4ddb409fce8300419a8d0b141701e76dc19b8e225e42cd4161ed54118c9fc620",
+        "result.json": "436526ddc4e97fde9efacfd737f0e644dee8c84caf8e1071e0e5aa3391090cd5",
+        "stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout.log": "9dc7a2d7c5cee50d405a920ed65791c2d98ff60d83a202ae7070ab49e7a35323",
+        "simulation-headless.eden/mission.sqm": "7525faf397ab5817af6bbfa379682f5378b82b54e6e5d98f12cd7208c329cf67"
+      }
     }
   ],
   "microbenchmarks": [
@@ -6201,6 +6849,47 @@
         "smoke-positive-warming-retry-20260926.log": "fae5e3df411bc06f197c94c428f208cdf7add61e7be40d7293aad490a28a4bf7",
         "test-positive-warming-final-20260926.log": "f50930d02e84b6bb9e2e0b919652f7f837cebb2b6e214d7233391d853e77bfaf",
         "test-positive-warming-initial-20260926.log": "e3b5775894e3bbdf8be685c440a158532d27d68d339058cd5349b0cbce801ce4"
+      }
+    },
+    {
+      "artifactRoot": "build",
+      "runtimeSourceCommit": "d3f5fe8e",
+      "result": "All-target integration202 nodes/reviewed17/stamped18 PASS; combined1805 assertions93 cases PASS; deployed21:46. Cold actor-channel0 original plainODOL selected binding async conversion; separate WGR_SIMULATION_POSITIVE_COLD defaultOFF under simulation gate. Old request/charge takeover repaired, ShapeBank exception ownership RAII tested actualthrow/cacheweaknull/retry. Worker pairedSourceEvidence removes duplicate owner scan, retains32LOD adaptercap. RealDayZ83912800 runtime pending/unclassified.",
+      "sha256": {
+        "build-positive-cold-integration-20260926.log": "0760efa8f4ea36560675adef74fcbb6915bf5cd37d8ca438ebb82d1e74b550e1",
+        "build-positive-cold-reviewed-20260926.log": "a273cd8ef28fcb714732fd1bd9908dbee1ac6845020c0f99e3ec880080f8fbde",
+        "build-positive-cold-stamped-20260926.log": "2e0e2a786f7620dbfd8dff10af9910f619c2f50440b504f267bc73ebcf2756cc",
+        "deploy-positive-cold-20260926.log": "9c85abed7681c6c49f2bd4c6102bb931e2dcf9f0ae095bdfa5f9a823e4ba02a1",
+        "smoke-positive-cold-20260926.log": "d053f251d643b7e301b2fbfc22b0c2225830d74d103339c8c0514c2439e67c69",
+        "smoke-positive-cold-default-off-20260926.log": "350e925002e5a54171234067e7529b2a98f215759b673975dbd1387140c497c0",
+        "smoke-positive-cold-full-lifecycle-20260926.log": "a4832eb0c817024a9b606784b53fcb87c53163553525092659b55f7ee6a148aa",
+        "test-positive-cold-integration-20260926.log": "ad922a609f4d0a76ffcb8928dc48241445e4682ffd6223da4b780af3387f8e58"
+      }
+    },
+    {
+      "artifactRoot": "build",
+      "runtimeSourceCommit": "d3f5fe8e",
+      "result": "Real DayZ failed PBO0 attempt then PBO1/DDC0 retry PASS; same compiled engine. Runner currently root-owned/uncommitted; launched scriptSHA provenance authoritative. Production partial plain-source/constructor/CPU-only admission/contact/retirement proof, not fullworld/queryReady/promotion/mutation/performance.",
+      "sha256": {
+        "smoke-dayz-cold-positive-20260926.log": "8c288c783026e1f55558d9551912123bca797ae9b35727bd7fea92dce45d1d54",
+        "smoke-dayz-cold-positive-pbo-20260926.log": "a92c1526f785cf0b0ddb97729d1a60cc16d88ea8130b74e97ae4e612f099d454"
+      }
+    },
+    {
+      "artifactRoot": "build",
+      "runtimeSourceCommit": "d3f5fe8e",
+      "result": "Actual production lifecycle failed only incorrect runner modelVB-demotion expectation, then same installedengine passes corrected expectation. Instance demotion is SceneObjectRemoved+VisualResidentfalse; no inverseShapeDeferred/sharedbankGPU-buffer eviction contract. Headlesscold proof running/unclassified.",
+      "sha256": {
+        "smoke-dayz-cold-positive-lifecycle-20260926.log": "5c4fc75d5553db0adab5b7904d9c48ab0dc8216d9374a2706867771ee66adb04",
+        "smoke-dayz-cold-positive-lifecycle-retry-20260926.log": "dc278c6010ac820ee2f4593d57f985d5e3013fd95b05a0de28e4d585b6f15a2b"
+      }
+    },
+    {
+      "artifactRoot": "build",
+      "runtimeSourceCommit": "d3f5fe8e",
+      "result": "Fresh actual built server cold-positive runtime PASS; existing all-target build evidence retained. Next main-owner bank timing/alpha attribution planned only, no implementation/performance/defaultReady claim.",
+      "sha256": {
+        "smoke-positive-cold-headless-20260926.log": "2069d67cb7f17dc23d57198aadc3fe42944976f76639afeb158f66a44a783d6e"
       }
     }
   ],

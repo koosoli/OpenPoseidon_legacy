@@ -1,0 +1,99 @@
+param([switch]$Lifecycle,[string]$Label='dayz-cold-positive',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
+$ErrorActionPreference='Stop'
+if (!$env:LOCK_OWNER) {
+ $shellName=if($PSVersionTable.PSEdition -eq 'Core'){'pwsh.exe'}else{'powershell.exe'}
+ $env:LOCK_OWNER='DayZ source-bound cold actor admission'
+ try { $argv=@((Join-Path $PSScriptRoot 'with-game-lock.sh'),((Join-Path $PSHOME $shellName).Replace('\','/')),'-NoProfile','-File',$PSCommandPath,'-Label',$Label,'-GameDir',$GameDir);if($Lifecycle){$argv+='-Lifecycle'}; & 'C:/Program Files/Git/bin/bash.exe' @argv; if($LASTEXITCODE){throw "DayZ cold test exited $LASTEXITCODE"} }
+ finally {Remove-Item Env:LOCK_OWNER}
+ return
+}
+if(Get-Process OpenPoseidon -ErrorAction SilentlyContinue){throw 'Game already running'}
+$root=Split-Path $PSScriptRoot -Parent
+$out=Join-Path $root ('build/stream-residency/'+$Label+'-'+(Get-Date -Format yyyyMMdd-HHmmss))
+$profile=Join-Path $out 'user'; $mission=Join-Path $out 'cold-positive.eden'
+New-Item -ItemType Directory -Path $profile,$mission -Force | Out-Null
+[IO.File]::WriteAllText((Join-Path $profile 'graphics.cfg'),"qualityPreset=3;`nmsaaSamples=4;`ndlssMode=0;`nvsync=0;`nfpsCap=60;`n")
+@'
+version=11;
+class Mission {randomSeed=1234;
+ class Intel {year=1985;month=6;day=21;hour=10;minute=0;};
+ class Groups {items=1;class Item0 {side="WEST";class Vehicles {items=2;
+  class Item0 {position[]={10000,0,10000};id=0;side="WEST";vehicle="SoldierWB";player="PLAYER COMMANDER";leader=1;skill=1;
+   init="this setBehaviour ""CARELESS""; this setCombatMode ""BLUE""; this disableAI ""MOVE""; this disableAI ""TARGET""";};
+  class Item1 {position[]={10002,0,10000};id=1;side="WEST";vehicle="SoldierWB";text="streamColdActor";skill=1;
+   init="this setBehaviour ""CARELESS""; this setCombatMode ""BLUE""; this disableAI ""MOVE""; this disableAI ""TARGET""";};
+ };};};
+};
+class Intro {randomSeed=1;class Intel {};};
+class OutroWin {randomSeed=2;class Intel {};};
+class OutroLoose {randomSeed=3;class Intel {};};
+'@ | Set-Content (Join-Path $mission 'mission.sqm')
+$world=(Resolve-Path -LiteralPath (Join-Path $root '../../../packages/dayz-compat/world/chernarusplus/chernarusplus.wrp')).Path
+$log=Join-Path $out 'engine.log'; $exe=Join-Path $GameDir 'OpenPoseidon.exe'
+$environment=@{POSEIDON_USER_DIR=$profile;WGR_SIMULATION_RESIDENCY='1';WGR_SIMULATION_RESIDENCY_TEST='1';WGR_SIMULATION_POSITIVE_COLD='1';WGR_OBJECT_STREAM_TEST_BUDGET='1';WGR_OBJECT_STREAM_MAX_OBJECTS='20000';WGR_OBJECT_STREAM_GPU_BUDGET='0';WGR_GEO_POOL_GROWTH='2.0';WGR_GEO_POOL_PRESSURE_GROWTH='0';WGR_OBJECT_STREAM_PBO='1';POSEIDON_MODEL_DDC='0';WGR_OBJECT_STREAM_PBO_TEXTURES='0';WGR_NATIVE_DDS_PREPARE='0';WGR_NATIVE_DDS_BC3_ONLY='0';WGR_ADAPTIVE_TEXTURE_DETAIL='0';WGR_LOD_GOVERNOR_RANGE='1';WGR_SKY_VOLUME_INCREMENTAL='1'}
+$clearNames=@((Get-ChildItem Env: | Where-Object {$_.Name -like 'WGR_*' -or $_.Name -like 'POSEIDON_REFORGER_*'} | ForEach-Object {$_.Name}))+@('POSEIDON_USER_DIR','POSEIDON_TEST_RAIN')
+$savedEnvironment=@{}; foreach($name in @($clearNames+@($environment.Keys) | Select-Object -Unique)){$savedEnvironment[$name]=[Environment]::GetEnvironmentVariable($name)}
+$p=$null;$client=$null
+try {
+ foreach($name in $clearNames){Remove-Item ('Env:'+$name) -ErrorAction SilentlyContinue}
+ foreach($name in $environment.Keys){[Environment]::SetEnvironmentVariable($name,$environment[$name])}
+ $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0);$listener.Start();$port=$listener.LocalEndpoint.Port;$listener.Stop()
+ @{head=(& git -C $root rev-parse HEAD);scriptSha256=(Get-FileHash $PSCommandPath).Hash;installed=(Get-Content (Join-Path $GameDir 'DEPLOYED-FROM.txt'));hashes=@(Get-FileHash $exe,(Join-Path $GameDir 'wgpu_renderer.dll'));world=$world;environment=$environment;scope='Actual inventory83912800 cold actor admission, unchanged20000 camera budget; no object getter, source diagnostic, asset whitelist or full-query readiness.'} | ConvertTo-Json -Depth 7 | Set-Content (Join-Path $out 'provenance.json')
+ $p=Start-Process -FilePath $exe -WorkingDirectory $GameDir -WindowStyle Hidden -PassThru -ArgumentList @('--render=wgpu','--window','--dev','--width','1280','--height','720','--vd','2000','--harness',[string]$port,'--capture-metrics',('"'+(Join-Path $out 'capture.json')+'"'),'--test-world-freefly','10000','10000','450','45','-10','--test-world',('"'+$world+'"'),'--addon-root','"D:\SteamLibrary\steamapps\common\DayZ\Addons"','--test-world-hour','10','--test-mission',('"'+$mission+'"'),'--log-file',('"'+$log+'"'))
+ $null=$p.Handle;$client=[Net.Sockets.TcpClient]::new();$deadline=[DateTime]::UtcNow.AddSeconds(120)
+ while(!$client.Connected){try{$client.Connect('127.0.0.1',$port)}catch{if($p.HasExited -or [DateTime]::UtcNow -gt $deadline){throw};Start-Sleep -Milliseconds 250}}
+ $stream=$client.GetStream();$stream.ReadTimeout=30000;$reader=[IO.StreamReader]::new($stream);$writer=[IO.StreamWriter]::new($stream,[Text.UTF8Encoding]::new($false));$writer.AutoFlush=$true
+ function Send($command){
+  $writer.WriteLine(($command | ConvertTo-Json -Compress));do{$line=$reader.ReadLine();if($null -eq $line){throw 'Harness closed'};$reply=$line | ConvertFrom-Json}while($null -eq $reply.ok)
+  ($command | ConvertTo-Json -Compress) | Add-Content (Join-Path $out 'harness.jsonl');$line | Add-Content (Join-Path $out 'harness.jsonl');if(!$reply.ok){throw $line};return $reply
+ }
+ function Sample($phase){
+  if($p.HasExited){throw 'Owned game exited'}
+  $sample=@{utc=[DateTime]::UtcNow.ToString('o');phase=$phase;simulation=(Send @{cmd='stream_simulation_residency'});camera=(Send @{cmd='stream_residency'});identity=(Send @{cmd='stream_identity_probe';ids=@(83912800)})}
+  $sample | ConvertTo-Json -Depth 6 -Compress | Add-Content (Join-Path $out 'samples.jsonl');return $sample
+ }
+ $deadline=[DateTime]::UtcNow.AddSeconds(240)
+ do{Start-Sleep -Seconds 2;$before=Sample 'before'}while((!$before.simulation.metadataComplete -or $before.camera.pending -or !$before.camera.valid) -and [DateTime]::UtcNow -lt $deadline)
+ if(!$before.simulation.metadataComplete -or $before.camera.pending -or !$before.camera.valid -or $before.identity.objects[0].present -or $before.camera.budget -ne 20000){throw 'Actual DayZ cold baseline invalid'}
+ $null=Send @{cmd='exec';code='streamColdActor setPos [5711.061,2512.391,0]'}
+ $deadline=[DateTime]::UtcNow.AddSeconds(120)
+ do{Start-Sleep -Seconds 1;$cold=Sample 'actor-cold'}while(!$cold.identity.objects[0].present -and [DateTime]::UtcNow -lt $deadline)
+ $target=$cold.identity.objects[0]
+ if(!$target.present -or $target.visualResident -or !$target.shapeVisualDeferred -or $target.normalVertexBuffers -ne 0 -or !$target.hasGeometry -or !$target.hasFireGeometry -or !$target.hasViewGeometry -or $target.model -ne 'dz\structures\residential\platforms\platform1_stairs_30_wallr.p3d' -or $cold.simulation.positiveColdCreated -le $before.simulation.positiveColdCreated){throw 'Real DayZ actor failed source-bound CPU-only cold admission'}
+ if($cold.simulation.status -ne 'CapacityExceeded' -or $cold.simulation.readyRegions -ne 0 -or $cold.camera.required -ne 0){throw 'Partial production admission changed query readiness or pins'}
+ $fire=Send @{cmd='stream_fire_probe';from=@(5705.061035,68.4318695,2512.391357);to=@(5717.061035,68.4318695,2512.391357)}
+ if(!@($fire.contacts | Where-Object {$_.id -eq 83912800}).Count){throw 'Cold target failed known real fire ray'}
+ $query=@{cmd='stream_simulation_query';actor='streamColdActor';action='queue';from=@(5705.061035,68.4318695,2512.391357);to=@(5717.061035,68.4318695,2512.391357);radius=0.01;purpose=1}
+ $queued=Send $query;$query.action='collide';$collision=Send $query
+ if($collision.status -ne 'CapacityExceeded' -or @($collision.contacts).Count){throw 'Partial production query fabricated complete contacts'}
+ $promoted=$null;$demoted=$null;$damage=$null
+ if($Lifecycle){
+  $null=Send @{cmd='eval';code='triFreeFlyPose "5704.58 2523.37 73.74 260.9 -3.8"'}
+  $deadline=[DateTime]::UtcNow.AddSeconds(240)
+  do{Start-Sleep -Seconds 2;$promoted=Sample 'camera-promoted'}while(($promoted.camera.pending -or !$promoted.identity.objects[0].visualResident -or $promoted.identity.objects[0].normalVertexBuffers -eq 0) -and [DateTime]::UtcNow -lt $deadline)
+  if($promoted.camera.pending -or !$promoted.identity.objects[0].present -or !$promoted.identity.objects[0].visualResident -or $promoted.identity.objects[0].shapeVisualDeferred -or $promoted.identity.objects[0].normalVertexBuffers -eq 0 -or $promoted.camera.required -ne 0){throw 'Cold actor target failed normal camera promotion'}
+  $promotedFire=Send @{cmd='stream_fire_probe';from=@(5705.061035,68.4318695,2512.391357);to=@(5717.061035,68.4318695,2512.391357)}
+  if(!@($promotedFire.contacts|Where-Object {$_.id -eq 83912800}).Count){throw 'Camera promotion lost target physical contact'}
+  $null=Send @{cmd='eval';code='triFreeFlyPose "10000 10000 450 45 -10"'}
+  $deadline=[DateTime]::UtcNow.AddSeconds(240)
+  do{Start-Sleep -Seconds 2;$demoted=Sample 'camera-demoted'}while(($demoted.camera.pending -or $demoted.identity.objects[0].visualResident) -and [DateTime]::UtcNow -lt $deadline)
+  # Camera demotion removes the instance from rendering. The established bank
+  # keeps promoted model buffers; this is not proof of model-level GPU eviction.
+  if($demoted.camera.pending -or !$demoted.identity.objects[0].present -or $demoted.identity.objects[0].visualResident){throw 'Camera eviction lost actor target or retained visual instance'}
+  $damage=Send @{cmd='stream_existing_damage';id=83912800;damage=0.25}
+  if(!$damage.mustBeSaved -or [Math]::Abs($damage.rawDamage-0.25) -gt 0.001){throw 'Actual cold target mutation not retained'}
+ }
+ $null=Send @{cmd='exec';code='streamColdActor setPos [10002,10000,0]'}
+ $deadline=[DateTime]::UtcNow.AddSeconds(90)
+ do{Start-Sleep -Seconds 1;$released=Sample 'actor-away'}while((($released.identity.objects[0].present -and !$Lifecycle) -or $released.simulation.positiveColdWorkingModels -ne 0) -and [DateTime]::UtcNow -lt $deadline)
+ if($released.camera.required -ne 0 -or $released.simulation.positiveColdWorkingModels -ne 0 -or $released.simulation.positiveColdFactsBytes -ne 0 -or $released.simulation.payloadCapacityCharge -ne 0 -or $released.simulation.shapeSchedulingCharge -ne 0){throw 'Transient DayZ cold job debt failed retirement'}
+ if($Lifecycle){$saved=$released.identity.objects[0];if(!$saved.present -or !$saved.mustBeSaved -or [Math]::Abs($saved.rawDamage-0.25) -gt 0.001 -or $saved.visualResident){throw 'Actor retirement lost saved target damage or retained visual instance'}}
+ elseif($released.identity.objects[0].present){throw 'Transient DayZ cold target failed retirement'}
+ $null=Send @{cmd='exit'};if(!$p.WaitForExit(15000) -or $p.ExitCode){throw 'Game failed clean exit'}
+ if(Select-String -LiteralPath $log -Pattern 'Out of Memory|Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION' -Quiet){throw 'Renderer error'}
+ @{passed=$true;lifecycle=[bool]$Lifecycle;before=$before;cold=$cold;fire=$fire;queued=$queued;collision=$collision;promoted=$promoted;demoted=$demoted;damage=$damage;released=$released;performanceMeasured=$false} | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $out 'result.json')
+ Write-Output "DayZ cold actor evidence: $out"
+}finally{
+ if($client){$client.Dispose()};if($p -and !$p.HasExited){Stop-Process -Id $p.Id -Force}
+ foreach($name in $savedEnvironment.Keys){[Environment]::SetEnvironmentVariable($name,$savedEnvironment[$name])}
+}
