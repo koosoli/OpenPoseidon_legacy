@@ -32,7 +32,7 @@ bool MeasureBc3EncodingFootprint(int width, int height, Bc3EncodingFootprint& ou
 }
 
 bool EncodeBc3ChainRGBA(const uint8_t* rgba, int width, int height, std::vector<uint8_t>& blocks,
-                        std::vector<uint32_t>& offsets, int& levels)
+                        std::vector<uint32_t>& offsets, int& levels, const Bc3EncodingObserver* observer)
 {
     Bc3EncodingFootprint footprint;
     if (!rgba || !MeasureBc3EncodingFootprint(width, height, footprint)) return false;
@@ -59,6 +59,8 @@ bool EncodeBc3ChainRGBA(const uint8_t* rgba, int width, int height, std::vector<
                 blocks.insert(blocks.end(), out, out + 16);
             }
         ++levels;
+        if (observer && levels == 1 && observer->afterTopMip)
+            observer->afterTopMip(observer->context, blocks.size(), blocks.capacity());
         if (w <= 4 && h <= 4) break;
         const int nw = std::max(w / 2, 1), nh = std::max(h / 2, 1);
         std::vector<uint8_t> next(static_cast<size_t>(nw) * nh * 4);

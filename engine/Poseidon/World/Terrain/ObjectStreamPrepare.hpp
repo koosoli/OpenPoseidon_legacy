@@ -80,6 +80,7 @@
 
 namespace Poseidon
 {
+struct Bc3EncodingObserver;
 class LODShapeWithShadow;
 namespace Model
 {
@@ -195,7 +196,11 @@ class ObjectStreamPreparer
     // Conversion IR plus estimated workspace/output is charged until consumed.
     // Decoder scratch / actual converted Shape allocations are not measured.
     static uint64_t ReadyByteBudget();
-    explicit ObjectStreamPreparer(uint64_t readyByteBudget = ReadyByteBudget());
+    // Observer is copied before workers start. Its context must remain alive
+    // until this preparer's destructor has joined ALL workers. Optional CPU-only
+    // observation never grants renderer access or changes reservation lifetime.
+    explicit ObjectStreamPreparer(uint64_t readyByteBudget = ReadyByteBudget(),
+                                  const Bc3EncodingObserver* observer = nullptr);
     ~ObjectStreamPreparer(); // joins the workers; the only blocking call in this class
 
     ObjectStreamPreparer(const ObjectStreamPreparer&) = delete;

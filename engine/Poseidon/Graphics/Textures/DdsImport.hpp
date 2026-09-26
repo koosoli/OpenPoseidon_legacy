@@ -101,7 +101,7 @@ class TextureSourceDDS : public ITextureSource
     // Pure optional native worker seam. Returns required source+scratch reservation
     // only for an exact enfa| ARGB8888 source <=2048 per edge. No global policy reads.
     size_t CompositeBc3Reservation() const;
-    bool PrepareCompositeBc3(size_t reservedBytes);
+    bool PrepareCompositeBc3(size_t reservedBytes, const Bc3EncodingObserver* observer = nullptr);
     // Main-thread one-shot claim. Incompatible dimensions/name leave it unused.
     bool TakeCompositeBc3(const char* sourceName, int width, int height, Bc3MipChain& out);
     // Borrow immutable BC7 BCR pixels. The owner MUST retain this source until

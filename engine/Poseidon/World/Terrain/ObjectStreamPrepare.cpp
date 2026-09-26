@@ -45,7 +45,8 @@ namespace
 {
 template<class Reserve, class Release>
 bool PrepareNativeDds(const std::string& key, uint64_t generation, size_t& bytes,
-                      bool prepareBc3, bool bc3Only, Reserve&& reserve, Release&& release)
+                      bool prepareBc3, bool bc3Only, const Bc3EncodingObserver* observer,
+                      Reserve&& reserve, Release&& release)
 {
     try
     {
@@ -76,7 +77,7 @@ bool PrepareNativeDds(const std::string& key, uint64_t generation, size_t& bytes
             };
             try
             {
-                encoded = source->PrepareCompositeBc3(encodeReservation);
+                encoded = source->PrepareCompositeBc3(encodeReservation, observer);
                 if (bc3Only && !encoded)
                 {
                     source.reset();
@@ -240,6 +241,7 @@ struct ObjectStreamPreparer::Impl
     std::condition_variable cv;
     std::vector<std::thread> workers;
     bool stop = false;
+    Bc3EncodingObserver encodingObserver; // immutable copy, set before workers start
     // Bumped by Reset. A worker that finishes a parse started under an older generation
     // discards its result: the slot it would write belongs to a different world now.
     // Generation tokens distinguish workers from an earlier world after Reset;
@@ -667,6 +669,7 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                     {
                         size_t bytes = 0;
                         if (PrepareNativeDds(key, textureGeneration, bytes, prepareBc3, bc3Only,
+                            encodingObserver.afterTopMip ? &encodingObserver : nullptr,
                             [&](size_t needed) {
                                 std::lock_guard<std::mutex> budgetLock(mutex);
                                 if (stop || gen != generation.load(std::memory_order_relaxed) ||
@@ -829,9 +832,11 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
 
 // ------------------------------------------------------------------------------------------
 
-ObjectStreamPreparer::ObjectStreamPreparer(uint64_t readyByteBudget) : _impl(std::make_unique<Impl>())
+ObjectStreamPreparer::ObjectStreamPreparer(uint64_t readyByteBudget, const Bc3EncodingObserver* observer)
+    : _impl(std::make_unique<Impl>())
 {
     _impl->stats.readyByteBudget = readyByteBudget;
+    if (observer) _impl->encodingObserver = *observer;
 }
 
 ObjectStreamPreparer::~ObjectStreamPreparer()

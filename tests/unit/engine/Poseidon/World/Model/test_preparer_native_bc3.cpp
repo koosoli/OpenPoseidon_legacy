@@ -16,6 +16,7 @@
 #include <mutex>
 #include <thread>
 #include <utility>
+#include <stdexcept>
 
 namespace
 {
@@ -128,6 +129,46 @@ void RequireEnabled()
         SKIP("Fresh process requires WGR_NATIVE_DDS_PREPARE=1 and asynchronous preparation");
     Poseidon::Foundation::CaptureMainThread();
 }
+size_t ExactCompositeReservation()
+{
+    Poseidon::TextureSourceDDS source;
+    Poseidon::PacLevelMem mips[16];
+    REQUIRE(source.InitFromReader(Composite, mips, 16,
+        [](const char* name, std::vector<uint8_t>& out) {
+            out = Edds(std::strcmp(name, "coverage.edds") == 0, 16); return true;
+        }, Poseidon::CaptureDdsPreparationOptions()));
+    const auto bytes = source.CompositeBc3Reservation(); REQUIRE(bytes > 0);
+    return bytes;
+}
+struct EncodingLatch
+{
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool entered = false, released = false, throwFirst = false;
+    unsigned calls = 0;
+    size_t completedBytes = 0, blockCapacity = 0;
+    uint64_t replacementEncodeDebt = 0, replacementParseDebt = 0;
+    ObjectStreamPreparer* preparer = nullptr;
+    static void Observe(void* context, size_t bytes, size_t capacity)
+    {
+        auto& self = *static_cast<EncodingLatch*>(context);
+        std::unique_lock lock(self.mutex);
+        if (++self.calls == 1)
+        {
+            self.completedBytes = bytes; self.blockCapacity = capacity; self.entered = true;
+            self.cv.notify_all();
+            if (self.throwFirst) throw std::runtime_error("synthetic CPU observer failure");
+            self.cv.wait(lock, [&] { return self.released; });
+        }
+        else
+        {
+            const auto stats = self.preparer->SnapshotStats();
+            self.replacementEncodeDebt = stats.textureEncodeReservedBytes;
+            self.replacementParseDebt = stats.parseReservedBytes;
+        }
+    }
+    void Release() { std::lock_guard lock(mutex); released = true; cv.notify_all(); }
+};
 }
 
 TEST_CASE("Non-owner native requests retain ordinary preparation without consulting owner BC3 policy", "[preparer][bc3-worker][native-fixture]")
@@ -288,5 +329,96 @@ TEST_CASE("BC3-only native preparation retains only successfully encoded own com
     else CHECK_FALSE(source);
     CHECK_FALSE(PreparedTextureStore::Instance().TakeDdsPrepared("colour.edds", Poseidon::CaptureDdsPreparationOptions()));
     CHECK_FALSE(PreparedTextureStore::Instance().TakeDdsPrepared("enft|1,1,1|colour.edds", Poseidon::CaptureDdsPreparationOptions()));
+    REQUIRE(prep.Take(0));
+}
+
+TEST_CASE("Actual BC3 encoding cancellation keeps debt until exit and never publishes stale source", "[preparer][bc3-worker][native-fixture][encoding-cancellation]")
+{
+    RequireEnabled(); Fixture fixture;
+    const size_t required = ExactCompositeReservation();
+    constexpr uint64_t parseDebt = 16ull * 1024 * 1024;
+    // Context is declared BEFORE the preparer, and therefore destroyed AFTER
+    // its worker-joining destructor. The copied observer never owns context.
+    EncodingLatch latch;
+    Poseidon::Bc3EncodingObserver observer{EncodingLatch::Observe, &latch};
+    ObjectStreamPreparer prep(parseDebt + required, &observer);
+    observer = {}; // preparer owns a copied callback; only context lifetime is borrowed
+    latch.preparer = &prep;
+    struct ReleaseBeforeJoin { EncodingLatch& value; ~ReleaseBeforeJoin() { value.Release(); } } release{latch};
+    const std::string original = "synthetic_bc3_encoding_old.xob";
+    const std::string replacement = "synthetic_bc3_encoding_new.xob";
+    prep.Reset(&original, 1); REQUIRE(prep.Request(0));
+    {
+        std::unique_lock lock(latch.mutex);
+        REQUIRE(latch.cv.wait_for(lock, std::chrono::seconds(10), [&] { return latch.entered; }));
+        // All sixteen 4x4 blocks of the actual 16x16 top mip are complete;
+        // the encoder is still paused before its 8x8 and 4x4 generated mips.
+        CHECK(latch.completedBytes == 16 * 16);
+        CHECK(latch.blockCapacity > latch.completedBytes);
+    }
+    const auto held = prep.SnapshotStats();
+    REQUIRE(held.textureEncodeReservedBytes == required);
+    REQUIRE(held.parseReservedBytes == parseDebt);
+    CHECK(held.workerBc3Prepared == 0);
+    bool reset = false;
+    SECTION("Reset queues replacement but old workspace debt prevents its parse")
+    {
+        reset = true;
+        prep.Reset(&replacement, 1); REQUIRE(prep.Request(0));
+        CHECK(prep.Query(0) == ObjectStreamPreparer::State::Queued);
+    }
+    SECTION("DropStale keeps active workspace debt until old encoder returns")
+    {
+        const uint32_t epoch = 0; prep.DropStale(&epoch, 1, 1);
+        CHECK(prep.Query(0) == ObjectStreamPreparer::State::Parsing);
+    }
+    CHECK(prep.SnapshotStats().textureEncodeReservedBytes == required);
+    CHECK(prep.SnapshotStats().parseReservedBytes == parseDebt);
+    CHECK_FALSE(PreparedTextureStore::Instance().TakeDdsPrepared(Composite, Poseidon::CaptureDdsPreparationOptions()));
+    // No Clear: the store's generation is unchanged, so only the production
+    // model generation/stale guard can stop the old DDS publication.
+    latch.Release();
+    if (!reset)
+    {
+        REQUIRE(Wait([&] { const auto s = prep.SnapshotStats(); return !s.parseReservedBytes && !s.textureEncodeReservedBytes; }));
+        CHECK(prep.Query(0) == ObjectStreamPreparer::State::Unknown);
+        CHECK_FALSE(PreparedTextureStore::Instance().TakeDdsPrepared(Composite, Poseidon::CaptureDdsPreparationOptions()));
+        REQUIRE(prep.Request(0));
+    }
+    REQUIRE(Wait([&] { return prep.Query(0) == ObjectStreamPreparer::State::Ready; }));
+    const auto done = prep.SnapshotStats();
+    CHECK(done.textureEncodeReservedBytes == 0); CHECK(done.parseReservedBytes == 0);
+    CHECK(done.workerBc3Prepared == 1); CHECK(done.dropped >= 1);
+    {
+        std::lock_guard lock(latch.mutex);
+        CHECK(latch.calls == 2);
+        CHECK(latch.replacementEncodeDebt == required); CHECK(latch.replacementParseDebt == parseDebt);
+    }
+    auto source = PreparedTextureStore::Instance().TakeDdsPrepared(Composite, Poseidon::CaptureDdsPreparationOptions());
+    REQUIRE(source);
+    Poseidon::Bc3MipChain chain; REQUIRE(source->TakeCompositeBc3(Composite, 16, 16, chain));
+    REQUIRE(prep.Take(0));
+}
+
+TEST_CASE("Throwing CPU encoding observer releases each reservation once and keeps worker usable", "[preparer][bc3-worker][native-fixture][encoding-cancellation]")
+{
+    RequireEnabled(); Fixture fixture;
+    EncodingLatch latch; latch.throwFirst = true;
+    const Poseidon::Bc3EncodingObserver observer{EncodingLatch::Observe, &latch};
+    ObjectStreamPreparer prep(128ull * 1024 * 1024, &observer);
+    latch.preparer = &prep;
+    const std::string path = "synthetic_bc3_encoding_exception.xob";
+    prep.Reset(&path, 1); REQUIRE(prep.Request(0));
+    REQUIRE(Wait([&] { return prep.Query(0) == ObjectStreamPreparer::State::Ready; }));
+    CHECK(prep.SnapshotStats().textureEncodeReservedBytes == 0);
+    CHECK(prep.SnapshotStats().parseReservedBytes == 0);
+    CHECK(prep.SnapshotStats().workerBc3Prepared == 0);
+    CHECK_FALSE(PreparedTextureStore::Instance().TakeDdsPrepared(Composite, Poseidon::CaptureDdsPreparationOptions()));
+    REQUIRE(prep.Take(0)); REQUIRE(prep.Request(0));
+    REQUIRE(Wait([&] { return prep.Query(0) == ObjectStreamPreparer::State::Ready; }));
+    CHECK(prep.SnapshotStats().workerBc3Prepared == 1);
+    CHECK(prep.SnapshotStats().textureEncodeReservedBytes == 0);
+    CHECK(prep.SnapshotStats().parseReservedBytes == 0);
+    REQUIRE(PreparedTextureStore::Instance().TakeDdsPrepared(Composite, Poseidon::CaptureDdsPreparationOptions()));
     REQUIRE(prep.Take(0));
 }

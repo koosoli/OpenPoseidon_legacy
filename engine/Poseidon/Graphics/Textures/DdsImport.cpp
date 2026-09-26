@@ -1009,7 +1009,7 @@ size_t TextureSourceDDS::CompositeBc3Reservation() const
     return PreparedByteSize() + footprint.scratchBytes;
 }
 
-bool TextureSourceDDS::PrepareCompositeBc3(size_t reservedBytes)
+bool TextureSourceDDS::PrepareCompositeBc3(size_t reservedBytes, const Bc3EncodingObserver* observer)
 {
     const size_t required = CompositeBc3Reservation();
     if (!required || reservedBytes < required) return false;
@@ -1024,7 +1024,7 @@ bool TextureSourceDDS::PrepareCompositeBc3(size_t reservedBytes)
     if (!GetMipmapData(rgba.data(), mip, 0)) return false;
     for (size_t i = 0; i + 2 < rgba.size(); i += 4) std::swap(rgba[i], rgba[i + 2]);
     Bc3MipChain prepared;
-    if (!EncodeBc3ChainRGBA(rgba.data(), _w, _h, prepared.blocks, prepared.offsets, prepared.levels)) return false;
+    if (!EncodeBc3ChainRGBA(rgba.data(), _w, _h, prepared.blocks, prepared.offsets, prepared.levels, observer)) return false;
     prepared.width = _w; prepared.height = _h;
     _preparedBc3 = std::move(prepared);
     return true;
