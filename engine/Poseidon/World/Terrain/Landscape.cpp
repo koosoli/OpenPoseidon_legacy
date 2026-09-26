@@ -2879,6 +2879,29 @@ void AddA3StaticMarkerLights(Object* obj, LODShapeWithShadow* shape, const char*
 
 } // namespace
 
+Streaming::InstanceCoverageObservation Landscape::ObserveConstructedObjectCoverage(
+    int id, const Streaming::OwnerCoverageObservationScope& scope) const
+{
+    if (!scope.Active() || id < 0)
+        return {};
+    const auto found = _objectIds.find(id);
+    if (found == _objectIds.end() || !found->second)
+        return {};
+    return scope.Observe(*static_cast<Object*>(found->second));
+}
+
+Streaming::InstanceCoverageObservation Landscape::ValidateConstructedObjectCoverage(
+    const Streaming::InstanceCoverageObservation& observation,
+    const Streaming::OwnerCoverageObservationScope& scope) const
+{
+    if (!scope.Active() || observation.ObjectId() < 0)
+        return {};
+    const auto found = _objectIds.find(observation.ObjectId());
+    if (found == _objectIds.end() || !found->second)
+        return {};
+    return scope.Validate(*static_cast<Object*>(found->second), observation);
+}
+
 Object* Landscape::ObjectCreate(int id, const char* name, const Matrix4& transform, int* x, int* z,
                                 bool avoidRecalculation, bool preserveAuthoredElevation, bool registerVisual)
 {

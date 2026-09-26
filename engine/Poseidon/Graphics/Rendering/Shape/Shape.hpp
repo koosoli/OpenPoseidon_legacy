@@ -10,6 +10,8 @@
 #include <Poseidon/Foundation/Types/RemoveLinks.hpp>
 #include <Poseidon/Foundation/Memory/MemFreeReq.hpp>
 
+#include <cstdint>
+#include <limits>
 #include <memory> // std::shared_ptr<Model::Model> in ShapeBank::NewFromModel
 
 // Forward declarations for ShapeAdapter friend access
@@ -810,6 +812,18 @@ class LODShape: public RefCountWithLinks
 	// shape is animated - any cache may need to refreshed when drawing
 	bool _allowAnimation;
 
+	// Local freshness for LOD-level query bounds/classification/frame policy.
+	// Not serialized or copied from another shape. Zero means exhausted forever.
+	// Mutable per-LOD vertices/properties and per-object animation are NOT tracked;
+	// this is not an all-geometry readiness or background publication certificate.
+	uint64_t _queryPolicyRevision = 1;
+	void InvalidateQueryPolicy()
+	{
+		if (_queryPolicyRevision != 0)
+			_queryPolicyRevision = _queryPolicyRevision == std::numeric_limits<uint64_t>::max()
+				? 0 : _queryPolicyRevision + 1;
+	}
+
 	// often needed propetry values
 	RStringB _propertyClass; // value of property "class"
 	RStringB _propertyDammage; // value of property "dammage"
@@ -967,14 +981,14 @@ class LODShape: public RefCountWithLinks
 	void SetRemarks( int remarks ) {_remarks=remarks;}
 
 	void CalculateHints();
-	void SetHints( ClipFlags orHints, ClipFlags andHints ){_orHints=orHints,_andHints=andHints;}
+	void SetHints( ClipFlags orHints, ClipFlags andHints ){InvalidateQueryPolicy(); _orHints=orHints,_andHints=andHints;}
 	ClipFlags GetOrHints() const {return _orHints;}
 	ClipFlags GetAndHints() const {return _andHints;}
 
-	void LockAutoCenter( bool autoCenter ) {_lockAutoCenter=autoCenter;}
-	void SetAutoCenter( bool autoCenter ) {_autoCenter=autoCenter;}
+	void LockAutoCenter( bool autoCenter ) {InvalidateQueryPolicy(); _lockAutoCenter=autoCenter;}
+	void SetAutoCenter( bool autoCenter ) {InvalidateQueryPolicy(); _autoCenter=autoCenter;}
 	bool IsAutoCenter() const {return _autoCenter;}
-	void AllowAnimation( bool allow=true ) {_allowAnimation=allow;} // non static usage detected
+	void AllowAnimation( bool allow=true ) {InvalidateQueryPolicy(); _allowAnimation=allow;} // non static usage detected
 	bool GetAllowAnimation() const {return _allowAnimation;} // non static usage detected
 
 	void OptimizeRendering();
@@ -1000,6 +1014,7 @@ class LODShape: public RefCountWithLinks
 	Vector3Val Min() const {return _minMax[0];}
 	Vector3Val Max() const {return _minMax[1];}
 	const Vector3 *MinMax() const {return _minMax;}
+	uint64_t QueryPolicyRevision() const {return _queryPolicyRevision;}
 	float BoundingSphere() const {return _boundingSphere;}
 	Vector3Val BoundingCenter() const {return _boundingCenter;}
 	float GeometrySphere() const {return _geometrySphere;}
@@ -1032,7 +1047,7 @@ class LODShape: public RefCountWithLinks
 	}
 	int NLevels() const {return _nLods;}
 	float Resolution( int level ) const {return _resolutions[level];}
-	void SetResolution( int level, float res ) {_resolutions[level]=res;}
+	void SetResolution( int level, float res ) {InvalidateQueryPolicy(); _resolutions[level]=res;}
 
 	#define G__Level(level) ( level>=0 ? _lods[level].GetRef() : nullptr )
 

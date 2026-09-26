@@ -6,6 +6,7 @@
 #include <Poseidon/Foundation/Containers/BankArray.hpp>
 #include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
 #include <Poseidon/World/Terrain/ObjectStreamPrepare.hpp>
+#include <Poseidon/World/Terrain/SimulationObjectCoverage.hpp>
 
 #include <array>
 #include <chrono>
@@ -1033,6 +1034,13 @@ class Landscape : public SerializeClass
     Object* FindObjectNC(int id) const; // do not use cache
     Object* FindObject(int id) const;   // cache may be available
     Object* GetObject(int id) const;
+    // Owner-only, instance-only observation of EXISTING constructed objects.
+    // No resolution, required pin, shape load or persistent group certification.
+    Streaming::InstanceCoverageObservation ObserveConstructedObjectCoverage(
+        int id, const Streaming::OwnerCoverageObservationScope& scope) const;
+    Streaming::InstanceCoverageObservation ValidateConstructedObjectCoverage(
+        const Streaming::InstanceCoverageObservation& observation,
+        const Streaming::OwnerCoverageObservationScope& scope) const;
     // Owner-thread, potentially synchronous: resolve an authored placement and retain
     // its logical identity. FindObject/GetObject remain read-only residency probes.
     Object* ResolveObject(int id);

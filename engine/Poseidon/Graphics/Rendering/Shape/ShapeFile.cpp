@@ -592,6 +592,7 @@ void Shape::Reverse()
 
 void LODShape::Reverse()
 {
+    InvalidateQueryPolicy();
     // reverse all relevant vector data
     ReverseVector(_aimingCenter); // where should I lock/aim?
 
@@ -622,6 +623,9 @@ Exact compare of RStringB or strcmp is therefore possible instead of strcmpi.
 
 void LODShape::SerializeBin(SerializeBinStream& f)
 {
+    // Invalidate before any read, including a refused or partial optimized load.
+    if (f.IsLoading())
+        InvalidateQueryPolicy();
 #ifdef _MSC_VER
     if (!f.Version('LODO'))
 #else

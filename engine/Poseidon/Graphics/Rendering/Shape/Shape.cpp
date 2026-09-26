@@ -1520,6 +1520,7 @@ void LODShape::Optimize()
 
 void LODShape::Translate(Vector3Par offset)
 {
+    InvalidateQueryPolicy();
     for_each_alpha for (int level = 0; level < NLevels(); level++)
     {
         Shape* shape = Level(level);
@@ -1546,6 +1547,7 @@ void LODShape::Translate(Vector3Par offset)
 
 void LODShape::InternalTransform(const Matrix4& transform)
 {
+    InvalidateQueryPolicy();
     for_each_alpha for (int level = 0; level < NLevels(); level++)
     {
         Shape* shape = Level(level);

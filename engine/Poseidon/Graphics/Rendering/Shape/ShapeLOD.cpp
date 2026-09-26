@@ -319,6 +319,7 @@ MapType ResolveMapTypeProperty(const char* value, const char* modelName, bool* r
 
 void LODShape::CalculateHints()
 {
+    InvalidateQueryPolicy();
     _andHints = ~0;
     _orHints = 0;
     for_each_alpha for (int level = 0; level < NLevels(); level++)
@@ -373,6 +374,7 @@ void LODShape::DefineMinMax(int level)
 
 void LODShape::CalculateBoundingSphereRadius()
 {
+    InvalidateQueryPolicy();
     float maxSphere2 = 0;
     for (int level = 0; level < _nLods; level++)
     {
@@ -402,6 +404,7 @@ void LODShape::CalculateBoundingSphereRadius()
 
 void LODShape::CalculateBoundingSphere()
 {
+    InvalidateQueryPolicy();
     // -_boundingCenter center is original zero positioned in new coordinate system
     // when you add _boundingCenter to object coordinates, you will get original position
 
@@ -654,7 +657,9 @@ void LODShape::CalculateMass()
 // LOD implementation
 
 void LODShape::DoClear()
-{                        // forget everything but name
+{
+    // Forget everything but name; retain the destination revision lineage.
+    InvalidateQueryPolicy();
     _canOcclude = false; // do not use for occlusions unless told otherwise
     _canBeOccluded = false;
     _autoCenter = true;
@@ -704,6 +709,7 @@ void LODShape::DoConstruct()
 
 void LODShape::DoConstruct(const LODShape& src, bool copyAnimations)
 {
+    InvalidateQueryPolicy();
     // copy shapes, not only references
     for_each_alpha for (int i = 0; i < src._nLods; i++)
     {
@@ -774,6 +780,7 @@ void LODShape::DoConstruct(const LODShape& src, bool copyAnimations)
 
 void LODShape::DoDestruct()
 {
+    InvalidateQueryPolicy();
 #if VERBOSE
     if (_name[0])
     {
@@ -794,6 +801,7 @@ void LODShape::OptimizeShapes()
     if (!GApp)
         return;
 
+    InvalidateQueryPolicy();
     // delete LODs that are too complex
     // this reduces memory usage
     int i = 0;
@@ -1822,6 +1830,7 @@ const V3& Shape::NamedPosition(const char* name, const char* altName) const
 
 void LODShape::ScanProxies(bool modifyFaces)
 {
+    InvalidateQueryPolicy();
     extern bool GReplaceProxies;
     for (int l = 0; l < _nLods; l++)
     {
@@ -2084,6 +2093,7 @@ void LODShape::RescanSpecial()
 
 void LODShape::ScanShapes()
 {
+    InvalidateQueryPolicy();
     _geometry = -1;
     _geometryFire = -1;
     _geometryView = -1;
@@ -2179,6 +2189,7 @@ void LODShape::AddShape(Shape* shape, float resolution)
 
 void LODShape::ChangeShape(int level, Shape* shape)
 {
+    InvalidateQueryPolicy();
     PoseidonAssert(level < _nLods);
     _lods[level] = shape;
     if (shape)

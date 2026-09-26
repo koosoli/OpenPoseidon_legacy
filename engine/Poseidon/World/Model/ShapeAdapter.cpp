@@ -504,6 +504,7 @@ void CreateAdapterProxies(LODShapeWithShadow* shape, const Poseidon::Model::Mode
 {
     if (model.sourceFormat != "ODOL")
         return;
+    shape->InvalidateQueryPolicy();
     const int lodCount = static_cast<int>(model.lodLevels.size());
     // MAT-053: candidate pilot/driver seats from SKIPPED crew proxies, one per
     // lod they appear on; resolved to a single seat after the loop, when the
@@ -667,6 +668,7 @@ void FinishOdolAdapterTail(LODShapeWithShadow* shape, const Poseidon::Model::Mod
 {
     if (model.sourceFormat != "ODOL")
         return; // the MLOD tail has no proxies and stays inside the conversion
+    shape->InvalidateQueryPolicy();
     const int lodCount = static_cast<int>(model.lodLevels.size());
     (void)lodCount;
     // Proxies first: OptimizeShapes below reorders/compacts vertices and
