@@ -5,6 +5,7 @@
 #include <dirent.h>
 #endif
 #include <cctype>
+#include <cstring>
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -1027,12 +1028,110 @@ int QFBank::GetFileOrder(const char* file)
     return info.startOffset;
 }
 
+#ifdef _WIN32
+namespace
+{
+class OwnedArchiveHandle
+{
+    HANDLE _handle;
+public:
+    explicit OwnedArchiveHandle(HANDLE handle) : _handle(handle) {}
+    ~OwnedArchiveHandle() { if (_handle && _handle != INVALID_HANDLE_VALUE) CloseHandle(_handle); }
+    OwnedArchiveHandle(const OwnedArchiveHandle&) = delete;
+    OwnedArchiveHandle& operator=(const OwnedArchiveHandle&) = delete;
+    HANDLE Get() const { return _handle; }
+    void Release() { _handle = INVALID_HANDLE_VALUE; }
+};
+
+struct ArchiveIdentity
+{
+    FILE_ID_INFO fileId{};
+    uint64_t size = 0;
+    bool Capture(HANDLE handle)
+    {
+        LARGE_INTEGER length{};
+        if (!handle || handle == INVALID_HANDLE_VALUE || GetFileType(handle) != FILE_TYPE_DISK ||
+            !GetFileInformationByHandleEx(handle, FileIdInfo, &fileId, sizeof(fileId)) ||
+            !GetFileSizeEx(handle, &length) || length.QuadPart < 0) return false;
+        size = static_cast<uint64_t>(length.QuadPart);
+        return true;
+    }
+    bool Same(const ArchiveIdentity& other) const
+    {
+        return size == other.size && fileId.VolumeSerialNumber == other.fileId.VolumeSerialNumber &&
+            std::memcmp(fileId.FileId.Identifier, other.fileId.FileId.Identifier,
+                        sizeof(fileId.FileId.Identifier)) == 0;
+    }
+};
+}
+
+// No bank, mapped buffer, engine reference or shared read cursor survives here.
+// FILE_SHARE_READ denies writers and deletion while any request copy holds this.
+class BankArchiveReadLease
+{
+public:
+    const HANDLE handle;
+    const ArchiveIdentity identity;
+    const std::string archive;
+    const uint64_t offset, bytes;
+    BankArchiveReadLease(HANDLE h, const ArchiveIdentity& id, const BankReadRequest& request)
+        : handle(h), identity(id), archive(request.archive), offset(request.offset), bytes(request.bytes) {}
+    ~BankArchiveReadLease() { CloseHandle(handle); }
+    bool Matches(const BankReadRequest& request) const
+    {
+        return request.archive == archive && request.offset == offset && request.bytes == bytes;
+    }
+};
+#endif
+
+bool BankReadRequest::HasArchiveIdentity() const
+{
+#ifdef _WIN32
+    return archiveLease && archiveLease->Matches(*this);
+#else
+    return false;
+#endif
+}
+
+bool BankReadRequest::SameArchiveMember(const BankReadRequest& other) const
+{
+#ifdef _WIN32
+    return HasArchiveIdentity() && other.HasArchiveIdentity() && offset == other.offset && bytes == other.bytes &&
+        archiveLease->identity.Same(other.archiveLease->identity);
+#else
+    return false;
+#endif
+}
+
 bool BankReadRequest::Read(std::vector<char>& out) const
 {
     out.clear();
     // Bound the optional fast path. Larger or unsupported members retain the VFS
     // fallback; never allocate based on an unchecked archive length.
     if (bytes == 0 || bytes > 64ull * 1024 * 1024) return false;
+#ifdef _WIN32
+    if (archiveLease)
+    {
+        if (!HasArchiveIdentity()) return false;
+        OwnedArchiveHandle reader(static_cast<HANDLE>(OpenFileForRead(archive.c_str())));
+        ArchiveIdentity actual;
+        if (!actual.Capture(reader.Get()) || !actual.Same(archiveLease->identity) ||
+            offset > actual.size || bytes > actual.size - offset) return false;
+        LARGE_INTEGER position{};
+        position.QuadPart = static_cast<LONGLONG>(offset);
+        if (!SetFilePointerEx(reader.Get(), position, nullptr, FILE_BEGIN)) return false;
+        out.resize(static_cast<size_t>(bytes));
+        DWORD read = 0;
+        if (!ReadFile(reader.Get(), out.data(), static_cast<DWORD>(bytes), &read, nullptr) || read != bytes)
+        {
+            out.clear();
+            return false;
+        }
+        return true;
+    }
+#else
+    if (archiveLease) return false;
+#endif
     std::ifstream stream(archive, std::ios::binary | std::ios::ate);
     if (!stream) return false;
     const std::streamoff end = stream.tellg();
@@ -1048,7 +1147,7 @@ bool BankReadRequest::Read(std::vector<char>& out) const
     return true;
 }
 
-std::optional<BankReadRequest> QFBank::CaptureReadRequest(const char* member) const
+std::optional<BankReadRequest> QFBank::CaptureReadRequest(const char* member, bool requireArchiveIdentity) const
 {
     // MAIN THREAD ONLY. Copy metadata while the mounted bank owns its archive.
     // Do not expose an unlocked QFBank pointer or a mapped Ref to workers.
@@ -1059,8 +1158,29 @@ std::optional<BankReadRequest> QFBank::CaptureReadRequest(const char* member) co
 #if _ENABLE_PATCHING
     if (info.loadFromFile) return std::nullopt;
 #endif
-    return BankReadRequest{std::string(static_cast<const char*>(_openName)),
-                           static_cast<uint64_t>(info.startOffset), static_cast<uint64_t>(info.length)};
+    BankReadRequest request{std::string(static_cast<const char*>(_openName)),
+                            static_cast<uint64_t>(info.startOffset), static_cast<uint64_t>(info.length)};
+    if (!requireArchiveIdentity) return request;
+#ifdef _WIN32
+    // Compare the actual mounted archive, not just its path. The bank's existing
+    // read-only denial remains held throughout capture; no member bytes are read.
+    OwnedArchiveHandle held(static_cast<HANDLE>(OpenFileForRead(request.archive.c_str())));
+    ArchiveIdentity mounted, fresh;
+    if (!mounted.Capture(static_cast<HANDLE>(_handle)) || !fresh.Capture(held.Get()) || !mounted.Same(fresh) ||
+        request.offset > fresh.size || request.bytes > fresh.size - request.offset) return std::nullopt;
+    try
+    {
+        request.archiveLease = std::make_shared<const BankArchiveReadLease>(held.Get(), fresh, request);
+        held.Release();
+    }
+    catch (...)
+    {
+        return std::nullopt;
+    }
+    return request;
+#else
+    return std::nullopt;
+#endif
 }
 
 Ref<IFileBuffer> QFBank::Read(const char* name) const

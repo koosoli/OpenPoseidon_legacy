@@ -9,6 +9,7 @@
 #include <Poseidon/IO/Streams/FileInfo.h>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <string>
 #include <optional>
 #include <vector>
@@ -19,6 +20,7 @@
 
 namespace Poseidon
 {
+class BankArchiveReadLease;
 // Owner-thread snapshot of an uncompressed member. Read owns its stream and never
 // accesses bank cursors, the VFS MRU or engine references. Consumers must reject
 // results from a departed mount/world generation before publishing them.
@@ -27,6 +29,13 @@ struct BankReadRequest
     std::string archive;
     uint64_t offset = 0;
     uint64_t bytes = 0;
+    // Optional Windows-only physical archive lease. Copies share only the denial
+    // handle; each Read opens its own verified handle and has its own cursor.
+    // Public fields must still match the frozen capture; a borrowed lease cannot
+    // certify another path or member. No immutability claim exists without it.
+    std::shared_ptr<const BankArchiveReadLease> archiveLease;
+    bool HasArchiveIdentity() const;
+    bool SameArchiveMember(const BankReadRequest& other) const;
     bool Read(std::vector<char>& out) const;
 };
 
@@ -318,7 +327,9 @@ class QFBank
     const RString& GetProperty(const RString& name) const;
 
     const FileInfoO& FindFileInfo(const char* name) const;
-    std::optional<BankReadRequest> CaptureReadRequest(const char* member) const;
+    // Required identity is unsupported on POSIX and returns nullopt. The default
+    // retains the existing unleased read path and performs no native capture.
+    std::optional<BankReadRequest> CaptureReadRequest(const char* member, bool requireArchiveIdentity = false) const;
     bool FileExists(const char* name) const;
     // low level access to bank
     void Read(char* buf, long size, const char* name) const; // read raw bytes from bank

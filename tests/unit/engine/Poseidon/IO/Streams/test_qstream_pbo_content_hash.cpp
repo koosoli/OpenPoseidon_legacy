@@ -16,6 +16,9 @@
 #include <future>
 #include <string>
 #include <vector>
+#ifdef _WIN32
+#include <Poseidon/Foundation/Common/Win.h>
+#endif
 
 using namespace TestFixtures;
 using namespace Poseidon;
@@ -416,3 +419,132 @@ TEST_CASE("Owned bank reads preserve member ranges without sharing the bank curs
     b->bytes = 65ull * 1024 * 1024;
     CHECK_FALSE(b->Read(bytes));
 }
+
+TEST_CASE("Archive identity is optional and unleased aggregate reads remain available", "[pbo][owned-read][archive-lease]")
+{
+    TempPbo pbo("lease_optional", {{"member.bin", Bytes("member"), 0}});
+    QFBank bank;
+    REQUIRE(bank.open(RString(BankNameOf(pbo.path).c_str())));
+    bank.Lock();
+    auto ordinary = bank.CaptureReadRequest("member.bin");
+    REQUIRE(ordinary);
+    CHECK_FALSE(ordinary->HasArchiveIdentity());
+    BankReadRequest aggregate{ordinary->archive, ordinary->offset, ordinary->bytes};
+    CHECK_FALSE(aggregate.HasArchiveIdentity());
+    CHECK_FALSE(aggregate.SameArchiveMember(*ordinary));
+    std::vector<char> data;
+    REQUIRE(aggregate.Read(data));
+    CHECK(std::string(data.begin(), data.end()) == "member");
+#ifndef _WIN32
+    CHECK_FALSE(bank.CaptureReadRequest("member.bin", true));
+#endif
+}
+
+#ifdef _WIN32
+TEST_CASE("Windows archive leases bind physical members and independent reader cursors", "[pbo][owned-read][archive-lease]")
+{
+    const std::string first(131071, 'a'), second(65537, 'z');
+    TempPbo pbo("lease_identity", {{"first.bin", Bytes(first), 0}, {"second.bin", Bytes(second), 0}});
+    TempPbo other("lease_identity_other", {{"first.bin", Bytes(first), 0}, {"second.bin", Bytes(second), 0}});
+    QFBank bank, otherBank;
+    REQUIRE(bank.open(RString(BankNameOf(pbo.path).c_str())));
+    REQUIRE(otherBank.open(RString(BankNameOf(other.path).c_str())));
+    bank.Lock(); otherBank.Lock();
+    auto a = bank.CaptureReadRequest("first.bin", true);
+    auto recaptured = bank.CaptureReadRequest("first.bin", true);
+    auto b = bank.CaptureReadRequest("second.bin", true);
+    auto differentFile = otherBank.CaptureReadRequest("first.bin", true);
+    REQUIRE(a); REQUIRE(recaptured); REQUIRE(b); REQUIRE(differentFile);
+    CHECK(a->HasArchiveIdentity());
+    CHECK(a->SameArchiveMember(*recaptured));
+    CHECK_FALSE(a->SameArchiveMember(*b));
+    CHECK_FALSE(a->SameArchiveMember(*differentFile));
+    std::vector<char> data{'x'};
+    for (int change = 0; change < 3; ++change)
+    {
+        auto borrowed = *a;
+        if (change == 0) borrowed.archive = differentFile->archive;
+        if (change == 1) ++borrowed.offset;
+        if (change == 2) ++borrowed.bytes;
+        CHECK_FALSE(borrowed.HasArchiveIdentity());
+        CHECK_FALSE(borrowed.SameArchiveMember(*a));
+        CHECK_FALSE(borrowed.Read(data));
+        CHECK(data.empty());
+    }
+    auto readMany = [](BankReadRequest request, const std::string& expected) {
+        for (int i = 0; i < 20; ++i) {
+            std::vector<char> bytes;
+            if (!request.Read(bytes) || std::string(bytes.begin(), bytes.end()) != expected) return false;
+        }
+        return true;
+    };
+    auto workerA = std::async(std::launch::async, readMany, *a, first);
+    auto workerB = std::async(std::launch::async, readMany, *b, second);
+    CHECK(ReadMember(bank, "second.bin") == second);
+    CHECK(ReadMember(bank, "first.bin") == first);
+    CHECK(workerA.get()); CHECK(workerB.get());
+    bank.close();
+    REQUIRE(a->Read(data));
+    CHECK(std::string(data.begin(), data.end()) == first);
+}
+
+TEST_CASE("Windows request copies retain write and delete denial after unused bank unload", "[pbo][owned-read][archive-lease]")
+{
+    TempPbo pbo("lease_unload", {{"member.bin", Bytes("held source"), 0}});
+    const fs::path renamed = pbo.path.string() + ".renamed";
+    struct BankSlot
+    {
+        int index = GFileBanks.Add();
+        ~BankSlot() { GFileBanks.Delete(index); }
+    } slot;
+    auto& bank = GFileBanks[slot.index];
+    REQUIRE(bank.open(RString(BankNameOf(pbo.path).c_str())));
+    bank.Lock();
+    auto request = bank.CaptureReadRequest("member.bin", true);
+    REQUIRE(request);
+    auto copy = *request;
+    REQUIRE(bank.CanBeUnloaded());
+    // UnloadUnused may first retire other mounted banks; bound visits to the
+    // inventory and check that this bank was actually unloaded, without Clear.
+    for (int i = 0; i <= GFileBanks.Size() && bank.CanBeUnloaded(); ++i)
+        GFileBanks.UnloadUnused();
+    REQUIRE_FALSE(bank.CanBeUnloaded());
+    bank.close();
+    const auto wide = pbo.path.wstring();
+    const auto moved = renamed.wstring();
+    auto denied = [&] {
+        HANDLE writer = CreateFileW(wide.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                    nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        DWORD error = GetLastError();
+        if (writer != INVALID_HANDLE_VALUE) CloseHandle(writer);
+        CHECK(writer == INVALID_HANDLE_VALUE);
+        CHECK(error == ERROR_SHARING_VIOLATION);
+        CHECK_FALSE(DeleteFileW(wide.c_str()));
+        CHECK(GetLastError() == ERROR_SHARING_VIOLATION);
+        CHECK_FALSE(MoveFileExW(wide.c_str(), moved.c_str(), 0));
+        CHECK(GetLastError() == ERROR_SHARING_VIOLATION);
+    };
+    denied();
+    request.reset();
+    denied(); // the last request copy, rather than the bank, still owns denial
+    std::vector<char> data;
+    REQUIRE(copy.Read(data));
+    CHECK(std::string(data.begin(), data.end()) == "held source");
+    copy.archiveLease.reset();
+    REQUIRE(MoveFileExW(wide.c_str(), moved.c_str(), 0));
+    REQUIRE(MoveFileExW(moved.c_str(), wide.c_str(), 0));
+    HANDLE writer = CreateFileW(wide.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    REQUIRE(writer != INVALID_HANDLE_VALUE);
+    CloseHandle(writer);
+    REQUIRE(DeleteFileW(wide.c_str()));
+    WritePbo(pbo.path, {{"member.bin", Bytes("replacement"), 0}});
+    QFBank replacement;
+    REQUIRE(replacement.open(RString(BankNameOf(pbo.path).c_str())));
+    replacement.Lock();
+    auto next = replacement.CaptureReadRequest("member.bin", true);
+    REQUIRE(next);
+    REQUIRE(next->Read(data));
+    CHECK(std::string(data.begin(), data.end()) == "replacement");
+}
+#endif
