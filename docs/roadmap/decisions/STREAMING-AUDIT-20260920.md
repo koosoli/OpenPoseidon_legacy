@@ -1351,3 +1351,60 @@ arbitrary modern model eligibility, multiplayer/full-save authority, full
 collision enumeration or generic query consumer migration. Simulation residency
 remains default OFF; large-offset query correctness and cancellation-token
 publication visibility remain OPEN. The complete streaming plan stays OPEN.
+
+### Transactional static Fire and cancellation visibility — 26 September 2026
+
+524741ab adds a bounded owner Fire collision operation that checks the exact
+query token before publishing contacts and supplements legacy candidates with
+certified leased placements. It does not default-enable or migrate general
+collision/AI/dynamic callers. Native DDS owner claims now reject cancellation
+visible after final validation and before Put consumption. Physical canceled
+cached bytes may remain until worker polling (32 visits) or Clear; there is no
+owner store wait. Token metadata is capped at 65536 and inventory counters are
+current logical accounting, not allocator RSS or every old reference.
+
+The first Fire build passes, but its unit suite initially fails four fixture
+type cases; the fixture is corrected to Primary only. Retry passes 1140 assertions/
+24 cases. Publication guards build passes; fresh OFF 7628/176 cases (166 passed,
+10 skips), broad 560/19 (18 passed,1 skip), narrow 617/19 (17 passed,2 skips).
+Rounding final 78/7 and source-info/radius 205/20 targeted checks pass. Failed
+unit output is retained separately rather than relabeled as a build failure.
+
+Large-origin 170046 has no result: query Ready becomes collide Pending because
+double .01 demand is not contained by the canonical smaller float .01 radius.
+65d074e7 corrects mathematically nested centreline coverage and canonical
+engine-float harness requests. Large-origin radius-fix 170935 then passes clean0:
+wall origin z 1400/radius 206; legacy origin-grid query finds zero, the new Fire
+operation returns 1001 exactly once, CPU-only/deferred/VB0 and required0. Ordinary
+small-merge 171051 passes the combined Fire, actor cleanup/reacquire, mutation
+retention and visual route. Root reviewed actual JSON; earlier white-box image
+acceptance is tiny artificial content, not retail/Reforger quality. This closes
+the demonstrated large-origin omission for the narrow operation; untouched
+legacy generic consumers remain a separate OPEN gate.
+
+### Bounded original DayZ source inventory — 26 September 2026
+
+Offline terrain census reads the actual revision29 world: 2971218 placements and
+2352 referenced models. The dense owner pose 5704.58,2523.37 within 250m has 3423
+placements/408 distinct paths. Both full-world caps (1M placements/256 models)
+are exceeded before inventory. Even this local area exceeds the model cap.
+Blindly raising Shape scheduling caps is not an accepted production solution;
+compact metadata and sparse active leases are under implementation/unverified.
+
+Top nearby models include betulahumilis 260, picea3f 155,wall_feng_3=134,
+wall_fen1_5=100 and misc_bench2=90. Two original private source members are
+inspected: platform1_stairs_30_wallr (8 LODs) and wall_feng_3 (6 LODs), both ODOL54.
+New --simulation-source-info reports parsed IR allowAnimation 0, finite positions,
+authored Geometry/View/Fire meshes, no proxies/frames/weighted selections or
+nonunit weights, and no parsed class/animated properties. Platform properties
+include visual lodnoshadow=1 and geometry damage=no; feng geometry damage=no and
+drawimportance=.1. Absent fields describe this parser representation, not source
+completeness; no Shape convex adaptation, config constructor or world Ready is
+certified. Original source hashes, tool versions/commands, private extraction
+logs and parsed reports are recorded. Legacy terrain inspect fails revision29;
+modern census/objects pass. No all-model parsing or retail content is committed.
+
+A new timed DayZ run is active and has no result at this checkpoint; no performance
+or completed sparse-lease claims are made. Production class/consumer coverage,
+mutable state/MP authority, adaptive secondary views and comparable-quality
+performance remain OPEN. Both prototypes and pressure/paging experiments stay OFF.
