@@ -97,7 +97,8 @@ accepted as proof of no moving regression; repeat with controlled per-pose cover
   required identities and MustBeSaved state survive visual retirement. An actual
   required-object fire obstruction survives a 1500 m camera departure. Never-
   requested placements still disappear; actor-neighbourhood collision/navigation,
-  view queries, full save/reload and multiplayer independence are NOT established.
+  view queries, fresh-process save/reload and multiplayer independence are NOT
+  established. A same-world client save/reload of required damage is verified.
 - C: ready IR and active scratch reservations, real backend counters and GPU
   retirement are implemented. Model/Shape allocator costs remain estimates;
   automatic allocation-aware growth remains experimental after mixed timing.
@@ -636,3 +637,57 @@ as the explanation for the earlier capture difference at this pose; it does not
 establish universal visual correctness. The diagnostic fixes detail explicitly
 and supplies no normal-settings FPS/no-regression acceptance. Adaptive detail,
 secondary views and mixed long-tail performance gates remain OPEN.
+### Existing-build controls and same-world save/reload — 26 September 2026
+
+`native-pre-deferral-control-20260926-120448` PASSED on the installed f4ffc510
+pair before attachment deferral. The controlled normal-budget route restored
+19999 placements, with zero final preparation reservations and clean shutdown.
+Four settled frame mean/p95/max samples in ms were 30.22/32.09/34.32,
+19.84/27.69/62.23, 29.92/33.96/90.40 and 21.22/24.92/27.33. The startup build
+phase took 5121 ms: main meshes 0/1248, attachment meshes 525/525, attachment
+objects placed 0. This is the candidate's pre-change workload control, not a
+performance acceptance for the new code or Reforger asset correctness.
+
+`dayz-save-away-roundtrip-20260926-115952` FAILED in the harness: triSaveGame
+success returned the SQF string representation `"OK"`, while the runner expected
+unquoted OK. The save file exists and is checksummed, but the interrupted test
+did not establish a successful round trip. This is a strict reply-matching
+error, not evidence that the engine save failed. The corrected runner accepts
+the exact serialized string reply and still requires successful commands and
+state/fire-query assertions.
+
+Corrective run `dayz-save-away-control-20260926-120807` PASSED on the same
+installed f4ffc510 executable/DLL hashes. Required ID 83912800 was saved at
+damage 0.25 while visualResident was false and the camera was away. Damage was
+then changed to 0.75 and checked before loading the saved full-game state.
+Reload restored damage 0.25, authored identity and its fire-ray contact while
+away; after return, visual residency and the script reference comparison were
+also valid. Numerical coverage before/return was 19923 placements, and shutdown
+completed cleanly with exit 0. The .fps save artifact, harness, provenance, result,
+logs and available captures are checksummed. This is one same-world client
+full-save round trip; fresh-process load, broader mutable state, headless save
+and multiplayer/network validation remain open. The uncontrolled save route is
+not a normal frame-time comparison.
+
+### Committed increments awaiting candidate runtime validation
+
+- d7c35c0f reserves the complete compact authored placement ID range before
+  dynamic mission allocation and during save/load, cache rebuild and ID reset.
+  Existing larger counters remain preserved. It also adds a bounded pure
+  simulation-corridor planner with explicit Invalid/CapacityExceeded outcomes;
+  no objects are loaded and no collision clearance is established by that planner.
+  Actor/query admission ownership is still unimplemented.
+- f0572b3c replaces the compressed-texture RGBA classification temporary with
+  a compact exact-value alpha plane using the existing decoder contract. This
+  targets classification scratch/conversion work, without reducing texture
+  resolution or changing alpha decisions by intention. Candidate tests and
+  runtime equivalence/performance acceptance are pending.
+- 52b00a22 skips native attachment Shape construction at startup when streaming
+  is enabled, matching the already deferred main-model path. All socket/prefab
+  metadata, model paths and flattened part placements remain present; normal
+  cold admission loads the shape/materials. The nonstreamed eager path remains
+  intact. This removes startup work but may shift cold costs into admission;
+  matched startup, settled/tail timing and coverage validation are pending.
+
+These commits are implementation increments, not new runtime acceptance. The
+verification build remains f4ffc510 until the candidate completes its gates.

@@ -939,6 +939,132 @@
         ],
         "scope": "Single-pose equivalent vegetation; not universal coverage or normal FPS acceptance"
       }
+    },
+    {
+      "run": "native-pre-deferral-control-20260926-120448",
+      "result": "PASS existing-f4 controlled route; pre-deferral baseline only, no candidate performance acceptance",
+      "provenance": {
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "87052804920A1C3A1B182226127820263321BC4C5572F51520723D2FCDC043F7",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "16956408087C600D76C66167326F44827495E348250E66350FF377B4A2AC4CF8",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "adaptive": false,
+        "readyMb": -1,
+        "corpus": "Native",
+        "controlled": true,
+        "packedModels": false,
+        "installed": "codex/streaming-residency f4ffc510+dirty 2026-09-20_13:56 deploy-ps1",
+        "packedTextures": false,
+        "incrementalSkyUploads": true,
+        "geoGrowth": 2.0,
+        "head": "f4ffc5106745d0491489f52108bf93fa5658a6ff",
+        "saveRoundTrip": false,
+        "coverageOnly": false,
+        "lodGovernorRange": null,
+        "pressureGrowth": false,
+        "scriptSha256": "7C1B780C8341004364AE8B695D6CF819C7553CD7DFC90143CB492916875D9153"
+      },
+      "sha256": {
+        "engine.log": "d7fa8e715954ddcd08c1f0c3926e56300e11b2a5d312527802bd06abfe7c193d",
+        "harness.jsonl": "a0e8e92ffd018801704721a040beeed528104cc05bf29008925139c1cfbc7c6f",
+        "provenance.json": "090ba527d7d1d6e8486ab7e46e99c4f27e22afdce08fb09c62d575943b42533a",
+        "result.json": "d9e051185563306bc3783357fe4a45c21582e8035c4d11abe52e492ef4ada2d2",
+        "settled.png": "b5435caa63012d27fc7856d3b303c4b4c5b4cc3ce9d91a873c9c2850f99d5fdc"
+      },
+      "qualification": "Installed f4ffc510+dirty stamp and executable/DLL hashes match previous controls; these tests do not run the Sept26 candidate source commits."
+    },
+    {
+      "run": "dayz-save-away-roundtrip-20260926-115952",
+      "result": "FAILED harness strict reply mismatch: save returned quoted SQF OK; not engine-save failure evidence; roundtrip unverified",
+      "provenance": {
+        "packedModels": false,
+        "lodGovernorRange": null,
+        "corpus": "DayZ",
+        "scriptSha256": "7C1B780C8341004364AE8B695D6CF819C7553CD7DFC90143CB492916875D9153",
+        "pressureGrowth": false,
+        "installed": "codex/streaming-residency f4ffc510+dirty 2026-09-20_13:56 deploy-ps1",
+        "coverageOnly": false,
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "87052804920A1C3A1B182226127820263321BC4C5572F51520723D2FCDC043F7",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "16956408087C600D76C66167326F44827495E348250E66350FF377B4A2AC4CF8",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "incrementalSkyUploads": true,
+        "head": "f4ffc5106745d0491489f52108bf93fa5658a6ff",
+        "packedTextures": false,
+        "controlled": false,
+        "readyMb": -1,
+        "geoGrowth": 2.0,
+        "saveRoundTrip": true,
+        "adaptive": false
+      },
+      "sha256": {
+        "engine.log": "2a10f47616d85c2c9293d57425643830fd4139991daf925c606ac1255a0f1d1d",
+        "harness.jsonl": "7d157405d4b2fc2565b2fddf8003da172759dec8ad9e36a8491ecb4576b6be24",
+        "provenance.json": "9c284670cef7cd1bcfd479dd8e49c252acfd7b4a577409de1851fe292e21b3ed",
+        "initial.png": "93baab5d201f9266d98a2b75ea5f0a046ef0e2a798d5e7f5fc306540f3f19b7f",
+        "user/Users/mail/Saved/Tmp/stream-away-roundtrip.fps": "f690914b8b9cee544ff034fcb983d1d172bf1de5dec749710c0049e769c33b4f"
+      },
+      "qualification": "Installed f4ffc510+dirty stamp and executable/DLL hashes match previous controls; these tests do not run the Sept26 candidate source commits."
+    },
+    {
+      "run": "dayz-save-away-control-20260926-120807",
+      "result": "PASS existing-f4 same-world client full-save: required damage restored .75 to .25 and fire contact preserved; no fresh-process or multiplayer acceptance",
+      "provenance": {
+        "pressureGrowth": false,
+        "controlled": false,
+        "packedTextures": false,
+        "corpus": "DayZ",
+        "adaptive": false,
+        "coverageOnly": false,
+        "packedModels": false,
+        "head": "f4ffc5106745d0491489f52108bf93fa5658a6ff",
+        "incrementalSkyUploads": true,
+        "readyMb": -1,
+        "installed": "codex/streaming-residency f4ffc510+dirty 2026-09-20_13:56 deploy-ps1",
+        "saveRoundTrip": true,
+        "geoGrowth": 2.0,
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "87052804920A1C3A1B182226127820263321BC4C5572F51520723D2FCDC043F7",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "16956408087C600D76C66167326F44827495E348250E66350FF377B4A2AC4CF8",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "lodGovernorRange": null,
+        "scriptSha256": "7764679B24539D1AD1524F885D1358D7A70292B5FD2A1543E2D68146720276AF"
+      },
+      "sha256": {
+        "engine.log": "4d173a59baabc30edce2a79b61ed0249b6571225b35cd93b2426e58c491e4180",
+        "harness.jsonl": "84ed5c86cccf14c95029b55f8417d9761a106612148e03abcca7f075c945d012",
+        "provenance.json": "4541467ffa599afb60e00f32ba4f8eb8df7bf4b9f35cd5409686b191648bab78",
+        "result.json": "0b33ee96d8c0562eb2528895a82e5f756a1382f466544c2278c15d9772c9cc28",
+        "initial.png": "8560e972cdaa0408ec0d7873ea698cc1fc1275c1cde296a4bd5d34873e76fe1d",
+        "settled.png": "756b3861e4b1561370dd90297022253c56c7da47eca60b2d7ae381efc7f4af10",
+        "returned-settled.png": "a349de4c945894f6cbdee3103696dc9594fa0b36b1c196350a1a436937fb89a0",
+        "user/Users/mail/Saved/Tmp/stream-away-roundtrip.fps": "75a9247a0141f02a4bed15d48e67f44de5119d6b0472d8f153cea3f98fb2f273"
+      },
+      "qualification": "Installed f4ffc510+dirty stamp and executable/DLL hashes match previous controls; these tests do not run the Sept26 candidate source commits."
     }
   ]
 }
