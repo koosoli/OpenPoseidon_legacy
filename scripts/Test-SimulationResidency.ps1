@@ -147,11 +147,29 @@ try {
   do {
    Start-Sleep -Milliseconds 500;$warmed=State;$warmIds=Ids;$warmResidency=Send @{cmd='stream_residency'}
    if ($p.HasExited) {throw 'Game exited during registered camera warming'}
-  } while (($warmed.status -ne 'Ready' -or $warmed.queryBorrowedEntries -ne 2) -and [DateTime]::UtcNow -lt $until)
+  } while (($warmed.status -ne 'Ready' -or $warmed.queryBorrowedEntries -ne 2 -or $warmed.readyQueries -ne 1) -and [DateTime]::UtcNow -lt $until)
   if ($warmed.status -ne 'Ready' -or !$warmed.registeredMetadataEverComplete -or $warmed.preparedModels -ne 0 -or $warmed.queryBorrowedModels -ne 1 -or $warmed.queryBorrowedEntries -ne 2 -or $warmed.registeredBorrowedModels -ne 1 -or $warmed.registeredBorrowShapeCharge -le 0 -or $warmed.registeredBorrowShapeCharge -gt 268435456 -or $warmResidency.required -ne 0) {throw 'Registered warming did not establish complete metadata with bounded selected ownership'}
   if (@($warmIds.objects | Where-Object {$_.present -and $_.visualResident -and $_.hasGeometry -and $_.hasFireGeometry}).Count -ne 2) {throw 'Ordinary camera did not create both query walls'}
-  $warmQuery=Query 'status';$warmCollision=Query 'collide'
-  if ($warmQuery.status -ne 'Ready' -or $warmCollision.status -ne 'Ready' -or @($warmCollision.contacts | Where-Object {$_.id -eq 1001}).Count -ne 1) {throw 'Registered complete Fire query missed its authored obstruction'}
+  # Aggregate metadata Ready and borrowed entries do not prove publication of
+  # this exact Fire query. Each status/collision operation validates afresh and
+  # may independently exhaust its unchanged two-millisecond owner deadline.
+  $until=[DateTime]::UtcNow.AddSeconds(60);$warmCollision=$null
+  do {
+   $warmQuery=Query 'status'
+   if ($warmQuery.status -eq 'Ready') {$warmCollision=Query 'collide'}
+   if ($warmQuery.status -notin @('Ready','Pending') -or ($null -ne $warmCollision -and $warmCollision.status -notin @('Ready','Pending'))) {
+    $queryState=State
+    throw "Registered exact Fire query refused: status=$($warmQuery | ConvertTo-Json -Compress), collision=$($warmCollision | ConvertTo-Json -Compress), residency=$($queryState | ConvertTo-Json -Compress)"
+   }
+   if ($warmQuery.status -eq 'Ready' -and $null -ne $warmCollision -and $warmCollision.status -eq 'Ready') {break}
+   if ($p.HasExited) {throw 'Game exited while awaiting registered exact Fire readiness'}
+   Start-Sleep -Milliseconds 250
+  } while ([DateTime]::UtcNow -lt $until)
+  if ($warmQuery.status -ne 'Ready' -or $null -eq $warmCollision -or $warmCollision.status -ne 'Ready') {
+   $queryState=State
+   throw "Registered exact Fire query did not converge within 60 seconds; no obstruction result established: status=$($warmQuery | ConvertTo-Json -Compress), collision=$($warmCollision | ConvertTo-Json -Compress), residency=$($queryState | ConvertTo-Json -Compress)"
+  }
+  if (@($warmCollision.contacts | Where-Object {$_.id -eq 1001}).Count -ne 1) {throw 'Ready registered Fire collision missed its authored obstruction or duplicated the contact'}
   $null=Query 'release';$queryReleased=State
   if ($queryReleased.queryRegions -ne 0 -or $queryReleased.queryBorrowedModels -ne 1 -or $queryReleased.queryBorrowedEntries -ne 2) {throw 'Independent Fire release retired actor ownership'}
   # Cache=0 is explicit fixture isolation. The camera must actually destroy

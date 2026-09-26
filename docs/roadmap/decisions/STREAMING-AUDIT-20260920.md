@@ -1966,3 +1966,61 @@ DayZ2971218 placements/2352models, watch16384 and globalCapacity remain; no full
 world Ready. Default PBOtextures0 remains, performanceAccepted/defaultReady false.
 Whole plan OPEN; geometry cache, generic consumers, source freshness, broad
 state/multiplayer and performance gates remain.
+
+### Source-bound prepared alpha and weak registered census — 27 September 2026
+
+b57a0b90 adds optional worker alpha histogram/shape facts paired with the original
+packed top mip and Windows physical archive lease. Consumer checks current
+archive/member, format, dimensions, top bytes and exact original header offset;
+source-bound counters are independent of GPU/CPU upload path. Unsupported identity,
+format/layout, cancellation or analysis failure retains ordinary classification.
+Known C++ capacities plus a64-byte control-block guard are charged, shared leases
+deliberately per entry: conservative retained-capacity accounting, not allocator
+RSS or universal source immutability. Model source capture remains unleased.
+PBOtexture preparation stays OFF by default.
+
+1afb85d8 separates weak registered model census from selected strong borrowed
+residency, keeping selected work/charges bounded. ParentR finite and parent
+QueryPolicyRevision alone do not certify actual CPU points or authored per-LOD
+bounds: adapter copies ODOL min/max/centers/radii, and mutable vertex/LOD accessors
+can bypass parent revision. Registered metadata is not physical clearance.
+Bounds/mutation/source-freshness and broader consumer gates remain explicit.
+
+Full643-node/stamped18 builds pass, clean installed1afb00:17 verified by actual
+provenance hashes. Targeted26619 assertions/25 cases24pass1TTLskip; fresh facts
+budget/TTL283 assertions/2 cases passes; combined137683/206 has204pass2skips;
+CoreIO194/24 has20pass4 external-data skips. Exact prepared-facts parity/budget/
+TTL correctness does not establish whole-game performance.
+
+Actual DayZ002219 passes clean0: cold facts puts283/hits62/miss0/cancel0,
+requiredPreparedAlphaFactstrue,19985 before/final residents. Prepared texture
+entries303/capacity536787952, peakconversion471335268. Target CPU Geometry/Fire/
+View/VB0 and real contact pass, then actor-away target absent/required0/cold work/
+facts/payload/shape charges0. Historicalcreated/released81/81 but422 normal-actor
+positive leases remain. DayZ2971218 placements/2352models/watch16384/globalCapacity
+still refuse full Ready. This is actual facts use/correctness, no FPS or
+no-regression acceptance.
+
+Registered first001734 runtime has no result.json: exact query and collision
+returned Pending, while the runner prematurely expected Ready. Do not classify
+as missing geometry or accept registered runtime. Root owns the repaired retry;
+matched prepared-alpha OFF arm remains pending at this checkpoint.
+Whole plan OPEN/defaultReady/performanceAccepted false; shared model buffers,
+geometry release, broad state/MP and production consumers remain open.
+
+Corrected registered002518 runtime now passes clean0 on unchanged1afb. Waiting
+for the exact Fire channel gives Ready/fire1001, one registered model/two Entry
+borrows/1072864 scheduling charge. Camera departure causes weak expiry Unknown;
+actual .25 Saved survivor remains while final query/registered borrow and charge
+return0, required0. Final validation budget refusals103 are reported. This closes
+the narrow257-model original fixture warm query/debt lifecycle, not arbitrary
+geometry-bound validity, full retail coverage, collision clearance or performance.
+
+Matched new OFF002410 also passes clean0 on the same binary, equal cold resident
+19985/livegeometry230706772/cap318767104/textures1262855596/count1573/backend2744302016.
+OFF peakconversion171011444 versus ON471335268; prepared textures/facts0 OFF.
+Fraxinus ON alpha23.6/model24.3 versus OFF24.7/model25.6ms is a single ordered,
+cache-confounded component observation, no FPS/no-regression acceptance. Actual
+ON303 prepared entries/536787952 capacity and cold283puts62hits remain scoped.
+Future advisory-capacity source is unbuilt and not in this tested binary.
+Defaults OFF/wholeplan OPEN/source-bound and shared-buffer limits remain.
