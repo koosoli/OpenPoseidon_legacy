@@ -1592,3 +1592,24 @@ visual/performance or actual DayZ production claim follows.
 Offline original-format Tool acceptance is separately hashed, not runtime
 quality evidence. Next production eligibility measurement remains pending.
 Whole plan OPEN, experimental defaults OFF; research and parked waves unchanged.
+
+### Original DayZ offline source summaries — 26 September 2026
+
+5dc55f92 extends only Tools diagnostic/header tests; normal engine remains
+unchanged and installed8a87b268. Offline11-node build and224 assertions/15 cases
+pass. Tool was built at9226b63a plus two changed files before source commit;
+actual tool SHA4e412c954068b92cce2f16862898848c825f52a53f34f35945b2cbfde32bbd35
+is recorded, not a stamped5dc game/tool provenance claim.
+
+Two unchanged original ODOL54 DayZ walls are copied to short extraction identities
+preserving original basenames and bytes (original/copy SHA equality in provenance).
+With synthetic generation1, platform1_stairs_30_wallr produces SourceEvidence,
+payload97176/sourceRadius4.76501369 and SourceFacts/config basename matching;
+wall_feng_3 produces77596/1.89691389 and SourceFacts. These are decoded-source
+envelopes and compact summaries, not actual live CfgModels/class/constructor,
+placed world final bounds, Ready or performance evidence. Extraction identities
+are not production inventory identities and generation1 is not content freshness.
+Scope is only these two models, not the full DayZ corpus.
+
+Positive actor warming is a new implementation in progress/unverified. It is not
+promoted from offline facts. Whole plan OPEN, experimental defaults remain OFF.

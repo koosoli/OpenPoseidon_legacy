@@ -5067,6 +5067,16 @@
         "smoke-source-summary-diagnostic-20260926.log": "61ee5a25cbc3aee3d9465e7b066067f4643fb4f70e7f1aece606cb54244ad461",
         "smoke-source-summary-diagnostic-retry-20260926.log": "c904cf144625a4b88f9fafd66d700aed45b8946717306d6287158a214abec5f2"
       }
+    },
+    {
+      "artifactRoot": "build",
+      "toolImplementationCommit": "5dc55f92",
+      "buildSource": "9226b63a plus two Tools-header/unit-test edits, before source commit",
+      "result": "Offline source-summary11-node build PASS,224 assertions/15 cases PASS. Tools diagnostic/tests only; normal engine unchanged/installed8a87b268. Positive actor warming in progress/unverified, not runtime proof.",
+      "sha256": {
+        "build-offline-source-summary-20260926.log": "e501c78a9b475e5aaa6ffc6715f6792e1d646c326fb9601ffafb5100bda8a313",
+        "test-offline-source-summary-20260926.log": "3cb5e594db8c16bea63810060e844f109a12ddaca2bdfed4fe9521efbba0b23e"
+      }
     }
   ],
   "fixtures": [
@@ -5206,6 +5216,44 @@
         "feng-source-info.log": "4ecdd302fba7f77f199919215fd8eb0f60f8bd3ea3561dd22c9b53480f6386db",
         "platform-wall-source-info.log": "fcbac754faf7ee9a81d0d88f40a9c800b53e6f34acb729ce199e3f071bcd6147",
         "provenance.json": "176b5ed25917268f42c3cc5b68d1df73170a0fa14781b54926f9f34b33299d7a"
+      }
+    },
+    {
+      "artifactRoot": "build/stream-residency/dayz-source-summary-20260926",
+      "toolImplementationCommit": "5dc55f92",
+      "classification": "Offline two unchanged originalODOL54 walls only, short extraction identities preserve original basenames and exact bytes, syntheticgeneration1. Platform SourceEvidence payload97176/sourceRadius4.76501369+SourceFacts; feng77596/1.89691389+SourceFacts. No live CfgModels/constructor/finalworldbounds/Ready/performance. Tool built at9226b63a plus2 changed files beforecommit, actual hash in provenance; NOT stamped5dc binary or installedgame proof.",
+      "provenance": {
+        "scriptSha256": "F3B06E5B12A043548E8464B8DAD212EA5510B93BE748CBE703BD9FC0A0CE98DA",
+        "sources": [
+          {
+            "logSha256": "4F0CCD26D418A1849B392E673DDD7A23A620D289F8E47F260F43FCE50F4AC2F6",
+            "copy": "C:\\Users\\mail\\AppData\\Local\\Temp\\op-dzsrc-b522bbef\\platform1_stairs_30_wallr.p3d",
+            "exitCode": 0,
+            "log": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\dayz-source-summary-20260926\\platform1_stairs_30_wallr.log",
+            "copySha256": "EDEDC9CD64E79474D8CBE9107B3FC3A7DEE59DD8B16A8A752630AB210F74AA0E",
+            "identityBytes": 80,
+            "originalSha256": "EDEDC9CD64E79474D8CBE9107B3FC3A7DEE59DD8B16A8A752630AB210F74AA0E",
+            "original": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\production-eligibility-20260926\\residential\\platforms\\platform1_stairs_30_wallr.p3d"
+          },
+          {
+            "logSha256": "DB9DBA7C41DAAC8B4B01238F063EB5B829EDDECD145A6CE4E56AC9FE89040F80",
+            "copy": "C:\\Users\\mail\\AppData\\Local\\Temp\\op-dzsrc-b522bbef\\wall_feng_3.p3d",
+            "exitCode": 0,
+            "log": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\dayz-source-summary-20260926\\wall_feng_3.log",
+            "copySha256": "D9EC544344F6A6BA3DD708E8EB1CCC60955D8511764A5139295470E1AE2A5A93",
+            "identityBytes": 66,
+            "originalSha256": "D9EC544344F6A6BA3DD708E8EB1CCC60955D8511764A5139295470E1AE2A5A93",
+            "original": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\production-eligibility-20260926\\walls\\wall_feng_3.p3d"
+          }
+        ],
+        "head": "9226b63ae7d453a1cb190d5ec13d11929c14067b",
+        "scope": "Two unchanged original ODOL54 sources; supplied short extraction identities and synthetic generation only. No live CfgModels, actual constructor, world placement/final bounds, Ready or performance claim.",
+        "toolSha256": "4E412C954068B92CCE2F16862898848C825F52A53F34F35945B2CBFDE32BBD35"
+      },
+      "sha256": {
+        "platform1_stairs_30_wallr.log": "4f0ccd26d418a1849b392e673ddd7a23a620d289f8e47f260f43fce50f4ac2f6",
+        "provenance.json": "36fedd75d231ec8a7f7d5cdc6cd5ba063db5abddc47a8c288bc15977615c618a",
+        "wall_feng_3.log": "db9dba7c41daac8b4b01238f063eb5b829eddecd145a6ce4e56ac9fe89040f80"
       }
     }
   ],
