@@ -6539,6 +6539,278 @@
         "stdout.log": "9dc7a2d7c5cee50d405a920ed65791c2d98ff60d83a202ae7070ab49e7a35323",
         "simulation-headless.eden/mission.sqm": "7525faf397ab5817af6bbfa379682f5378b82b54e6e5d98f12cd7208c329cf67"
       }
+    },
+    {
+      "run": "dayz-cold-bank-attribution-20260926-20260926-221705",
+      "classification": "PASS class/cold-retirement diagnostic clean0 installedddf890a1:26 bankcalls/maxBank2.1048ms/maxTail2.2402ms, soft2ms notguaranteed owner/frame limit. Bank scope includes relabel/tableallocation/build/exception separately from source audits/conversion/finaltail. Notperformance acceptance.",
+      "provenance": {
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "13A934CEAAB2B786145538F663A7B7166195D68CA299F51EA6C47BA69B193623",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "ACC99829B7EC56828DF17007A9F08DA2F2A3E0F0FFC8B174EB1F5F6CA67DC681",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "world": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\packages\\dayz-compat\\world\\chernarusplus\\chernarusplus.wrp",
+        "scriptSha256": "02393535680BF49AF2559C37A79EF1C8E3C1E911C8C8C1372EB94FAD788A8DEE",
+        "scope": "Actual inventory83912800 cold actor admission, unchanged20000 camera budget; no object getter, source diagnostic, asset whitelist or full-query readiness.",
+        "head": "ddf890a1cb4e170b30c9716200aed42b17d44305",
+        "environment": {
+          "WGR_SIMULATION_RESIDENCY_TEST": "1",
+          "WGR_LOD_GOVERNOR_RANGE": "1",
+          "WGR_NATIVE_DDS_BC3_ONLY": "0",
+          "WGR_OBJECT_STREAM_GPU_BUDGET": "0",
+          "WGR_SKY_VOLUME_INCREMENTAL": "1",
+          "POSEIDON_MODEL_DDC": "0",
+          "WGR_OBJECT_STREAM_PBO_TEXTURES": "0",
+          "WGR_SIMULATION_RESIDENCY": "1",
+          "WGR_GEO_POOL_PRESSURE_GROWTH": "0",
+          "WGR_SIMULATION_POSITIVE_COLD": "1",
+          "WGR_OBJECT_STREAM_PBO": "1",
+          "WGR_NATIVE_DDS_PREPARE": "0",
+          "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\dayz-cold-bank-attribution-20260926-20260926-221705\\user",
+          "WGR_GEO_POOL_GROWTH": "2.0",
+          "WGR_ADAPTIVE_TEXTURE_DETAIL": "0",
+          "WGR_OBJECT_STREAM_MAX_OBJECTS": "20000",
+          "WGR_OBJECT_STREAM_TEST_BUDGET": "1"
+        },
+        "installed": "codex/streaming-residency ddf890a1 2026-09-26_22:15 deploy-ps1"
+      },
+      "sha256": {
+        "engine.log": "78156ab7b5a8d464008e38adf64805215f7a2f4331ad3d80d02a9bce2d30f404",
+        "harness.jsonl": "0b09dbcaa3d28ca1e90f8e2f695cbd104117faa3c7c441c3074f9c9e2dfa5182",
+        "provenance.json": "fdbca2e4b96e4cf319aa9e6df274de9e542391bdfe574b64e27c929cbf2d08f8",
+        "result.json": "98691e5f0b53dfc1b898ceb44febd5fe1f303689cf4958423ff48053fa540616",
+        "samples.jsonl": "9e68c8a1e0bff2e67815bebe5db12c794e1283f84cf25c35f7c7c843b2ecda57",
+        "cold-positive.eden/mission.sqm": "9e1384738678862d37b5021bb6701bb1a8884ffa26f82cd51688a1eb5e10cbec"
+      }
+    },
+    {
+      "run": "dayz-latency-20260926-disabled-20260926-221845",
+      "classification": "PASS runner/clean0 samebinaryddf PBO1/DDC0. Disabled651frames median26.132 mean56.6506 p95199.244 p99633.202 max1423.016ms; traversal stalls severe, noFPS/regression acceptance. Camera-coveredroute coldcreated/sourceScans0.",
+      "provenance": {
+        "environment": {
+          "WGR_GEO_POOL_GROWTH": "2.0",
+          "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\dayz-latency-20260926-disabled-20260926-221845\\user",
+          "WGR_OBJECT_STREAM_PBO_TEXTURES": "0",
+          "WGR_OBJECT_STREAM_MAX_OBJECTS": "20000",
+          "WGR_SIMULATION_POSITIVE_COLD": "0",
+          "WGR_NATIVE_DDS_BC3_ONLY": "0",
+          "WGR_SKY_VOLUME_INCREMENTAL": "1",
+          "WGR_NATIVE_DDS_PREPARE": "0",
+          "WGR_TEXTURE_STREAM_STATS": "0",
+          "WGR_SIMULATION_RESIDENCY": "0",
+          "WGR_ADAPTIVE_TEXTURE_DETAIL": "0",
+          "POSEIDON_MODEL_DDC": "0",
+          "WGR_OBJECT_STREAM_GPU_BUDGET": "0",
+          "WGR_GEO_POOL_PRESSURE_GROWTH": "0",
+          "WGR_OBJECT_STREAM_PBO": "1",
+          "WGR_OBJECT_STREAM_TEST_BUDGET": "1",
+          "WGR_LOD_GOVERNOR_RANGE": "1"
+        },
+        "clearedEnvironmentNames": [],
+        "head": "ddf890a1cb4e170b30c9716200aed42b17d44305",
+        "scriptSha256": "F0329B382F12CB1CB5C055A921414858827C06A08528E59EC5B79D2B503DF0FE",
+        "world": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\packages\\dayz-compat\\world\\chernarusplus\\chernarusplus.wrp",
+        "fpsCap": 60,
+        "width": 1280,
+        "pose": [
+          5704.58,
+          2523.37,
+          73.74,
+          260.9,
+          -3.8
+        ],
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "13A934CEAAB2B786145538F663A7B7166195D68CA299F51EA6C47BA69B193623",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "ACC99829B7EC56828DF17007A9F08DA2F2A3E0F0FFC8B174EB1F5F6CA67DC681",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "measurementScope": "Bounded engine16384-frame route capture; screening only, no FPS acceptance, vanilla parity or full cold-cache proof",
+        "routeX": [
+          5804.58,
+          5904.58,
+          6004.58,
+          6104.58,
+          6004.58,
+          5904.58,
+          5804.58,
+          5704.58,
+          5704.58,
+          5704.58,
+          5704.58
+        ],
+        "msaaSamples": 4,
+        "routeScope": "Eight convergence400m out/return poses plus three stationary recovery holds; one process per invocation",
+        "viewDistance": 2000,
+        "installed": "codex/streaming-residency ddf890a1 2026-09-26_22:15 deploy-ps1",
+        "processScope": "Owned PID private/RSS samples; sparse owner-pump values are observations, not percentiles",
+        "mode": "Disabled",
+        "poseHoldSeconds": 3,
+        "height": 720
+      },
+      "sha256": {
+        "engine.log": "56f23a134f967d21264f2d7f01fb4daf09ef1064e0313f6194a80f0981ec9172",
+        "harness.jsonl": "70d84ac46d402c53b24cd8ed93a4fd5fba1eeab8db61f3b64ef52e3d40ab95a8",
+        "provenance.json": "932bd68454bb4dcf5f881efea0eeb1204871f2deeb4ee499af34113662f42950",
+        "result.json": "d92d3787058e94edb8782a4a45501955e6aa74613690c0eae13db706f133c18e",
+        "returned-settled.png": "fa2f43bf2fce73a7677a9bc5b680833c0c6328611bc4ee507b01d8b59d8da4ea",
+        "route-frame-ms.json": "6d2eb8e72d15d6baa00be6727c72afb35f6ed7414a6f3b743a26f74f174eabc0",
+        "samples.jsonl": "f71730a69cf93d9a12f069bf78788efa0d55092c41be75fbce996219936c6723",
+        "latency.eden/mission.sqm": "feeaec384c114c445f050845560bff3f43e023443916204908ddb932616194cc"
+      }
+    },
+    {
+      "run": "dayz-latency-20260926-cold-20260926-222141",
+      "classification": "PASS runner/clean0 samebinaryddf PBO1/DDC0. Cold727frames median25.380 mean49.7615 p95166.571 p99496.330 max1020.984ms. FeatureON/positive-loaded retention, created/sourceScans0 means NOTcold-job performance. Ordered singlepair/cache/phase confounds, both hitch badly; no regression/gain/FPS acceptance.",
+      "provenance": {
+        "fpsCap": 60,
+        "measurementScope": "Bounded engine16384-frame route capture; screening only, no FPS acceptance, vanilla parity or full cold-cache proof",
+        "width": 1280,
+        "viewDistance": 2000,
+        "routeX": [
+          5804.58,
+          5904.58,
+          6004.58,
+          6104.58,
+          6004.58,
+          5904.58,
+          5804.58,
+          5704.58,
+          5704.58,
+          5704.58,
+          5704.58
+        ],
+        "environment": {
+          "WGR_SIMULATION_RESIDENCY": "1",
+          "WGR_GEO_POOL_GROWTH": "2.0",
+          "WGR_NATIVE_DDS_BC3_ONLY": "0",
+          "WGR_OBJECT_STREAM_PBO_TEXTURES": "0",
+          "WGR_ADAPTIVE_TEXTURE_DETAIL": "0",
+          "WGR_SKY_VOLUME_INCREMENTAL": "1",
+          "WGR_NATIVE_DDS_PREPARE": "0",
+          "WGR_OBJECT_STREAM_PBO": "1",
+          "POSEIDON_MODEL_DDC": "0",
+          "WGR_TEXTURE_STREAM_STATS": "0",
+          "WGR_GEO_POOL_PRESSURE_GROWTH": "0",
+          "WGR_OBJECT_STREAM_GPU_BUDGET": "0",
+          "WGR_LOD_GOVERNOR_RANGE": "1",
+          "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\dayz-latency-20260926-cold-20260926-222141\\user",
+          "WGR_OBJECT_STREAM_TEST_BUDGET": "1",
+          "WGR_SIMULATION_POSITIVE_COLD": "1",
+          "WGR_OBJECT_STREAM_MAX_OBJECTS": "20000"
+        },
+        "poseHoldSeconds": 3,
+        "installed": "codex/streaming-residency ddf890a1 2026-09-26_22:15 deploy-ps1",
+        "head": "ddf890a1cb4e170b30c9716200aed42b17d44305",
+        "clearedEnvironmentNames": [],
+        "pose": [
+          5704.58,
+          2523.37,
+          73.74,
+          260.9,
+          -3.8
+        ],
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "13A934CEAAB2B786145538F663A7B7166195D68CA299F51EA6C47BA69B193623",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "ACC99829B7EC56828DF17007A9F08DA2F2A3E0F0FFC8B174EB1F5F6CA67DC681",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "processScope": "Owned PID private/RSS samples; sparse owner-pump values are observations, not percentiles",
+        "msaaSamples": 4,
+        "height": 720,
+        "world": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\packages\\dayz-compat\\world\\chernarusplus\\chernarusplus.wrp",
+        "routeScope": "Eight convergence400m out/return poses plus three stationary recovery holds; one process per invocation",
+        "mode": "Cold",
+        "scriptSha256": "F0329B382F12CB1CB5C055A921414858827C06A08528E59EC5B79D2B503DF0FE"
+      },
+      "sha256": {
+        "engine.log": "6becf38abb4055e6154d9be98b4e94f97da2307879c6f5964a2ef3b53d8d42bd",
+        "harness.jsonl": "38f4c1e680e9467c88fe879ee5d19153f361e970c45a4886251f31812fb36714",
+        "provenance.json": "28343b7ad562efbc161de136f9b029e2705a6ba4c35a058c013170ca4a7aff97",
+        "result.json": "fb2ae9ad8ad28445599fd2dabd21c958864a765865c736f62df2efda231ec9b7",
+        "returned-settled.png": "777c6140fe4d1d884be9cb550523d6ee609fafe9430e22bada54a9c7b286f49a",
+        "route-frame-ms.json": "f8c39e5a225794cece7e680ef375fbdd17da9581f0bda6ff007d9474656ff84a",
+        "samples.jsonl": "13494e1565d8b1915d22d964e0f8906aa14dc9c9083f47deec7745b546e3bbaa",
+        "latency.eden/mission.sqm": "feeaec384c114c445f050845560bff3f43e023443916204908ddb932616194cc"
+      }
+    },
+    {
+      "run": "dayz-cold-save-roundtrip-20260926-20260926-222342",
+      "classification": "PASS same-world/private-profile SaveBin/LoadBin/clean0 installedddf: initial cold source-bound83912800 required0, promote/demote/.25MustSaved afteractoraway withzero colddebt; triSaveGame actual6968byte privatefps then.75 existingDamage control, triLoadGame restoresID/model/frame/.25/MustSaved/firecontact. LoaderrequiredObjects3 honest; no freshprocess/MP/performance/globalReady proof.",
+      "provenance": {
+        "world": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\packages\\dayz-compat\\world\\chernarusplus\\chernarusplus.wrp",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "13A934CEAAB2B786145538F663A7B7166195D68CA299F51EA6C47BA69B193623",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "ACC99829B7EC56828DF17007A9F08DA2F2A3E0F0FFC8B174EB1F5F6CA67DC681",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "environment": {
+          "WGR_NATIVE_DDS_PREPARE": "0",
+          "WGR_ADAPTIVE_TEXTURE_DETAIL": "0",
+          "WGR_OBJECT_STREAM_TEST_BUDGET": "1",
+          "WGR_SIMULATION_RESIDENCY_TEST": "1",
+          "WGR_NATIVE_DDS_BC3_ONLY": "0",
+          "WGR_OBJECT_STREAM_MAX_OBJECTS": "20000",
+          "WGR_OBJECT_STREAM_PBO_TEXTURES": "0",
+          "WGR_GEO_POOL_PRESSURE_GROWTH": "0",
+          "WGR_SKY_VOLUME_INCREMENTAL": "1",
+          "POSEIDON_MODEL_DDC": "0",
+          "WGR_SIMULATION_POSITIVE_COLD": "1",
+          "WGR_LOD_GOVERNOR_RANGE": "1",
+          "WGR_OBJECT_STREAM_PBO": "1",
+          "WGR_OBJECT_STREAM_GPU_BUDGET": "0",
+          "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\dayz-cold-save-roundtrip-20260926-20260926-222342\\user",
+          "WGR_SIMULATION_RESIDENCY": "1",
+          "WGR_GEO_POOL_GROWTH": "2.0"
+        },
+        "scope": "Actual inventory83912800 cold actor admission, unchanged20000 camera budget; no object getter, source diagnostic, asset whitelist or full-query readiness.",
+        "head": "ddf890a1cb4e170b30c9716200aed42b17d44305",
+        "scriptSha256": "7A0E3C944A81CEADC440B4AD3C500258BA77CD8837FE24D83D5D6E75233AED4C",
+        "installed": "codex/streaming-residency ddf890a1 2026-09-26_22:15 deploy-ps1"
+      },
+      "saveEvidence": {
+        "bytes": 6968,
+        "sha256": "76e0edea5d00140440c6cc6484725d3e2425116dbd19bcbee3fbfad0f208fc73",
+        "relativePath": "user/Users/mail/Saved/Tmp/cold-positive-away.fps",
+        "requiredBeforeSave": 0,
+        "loaderRequiredObjects": 3,
+        "scope": "Same-world SaveBin/LoadBin only; not fresh-process, multiplayer or performance acceptance"
+      },
+      "sha256": {
+        "engine.log": "65891a8faeed174ced8e8fa4f2f36e3e4d636d590f9d965bb330b1b6faf76664",
+        "harness.jsonl": "74a253400e5930fb3aefccb1786c0a927d526fa396db10ee371ba329c5d21a9d",
+        "provenance.json": "f8ea2e3e4805a5116bb94d7e7e29410fa61c2ef1d2ef1c71626f594be243f3d2",
+        "result.json": "56c3a936996abe3dfbe669c3798046682ae4df7e5fce01ba51b45b248d3439a9",
+        "samples.jsonl": "1d45e57f6325c48783735d899be36b5433884c288c0ed522ecca7bf5161d99ab",
+        "user/Users/mail/Saved/Tmp/cold-positive-away.fps": "76e0edea5d00140440c6cc6484725d3e2425116dbd19bcbee3fbfad0f208fc73"
+      }
     }
   ],
   "microbenchmarks": [
@@ -6629,6 +6901,13 @@
       "sha256": {
         "analyze_bc3only.py": "49108d1e0fcf5d0fd3a22e71a75b75f5294df6e83dd7f2a8674b48189145c72c",
         "stream-residency/native-bc3only-comparison-20260926.json": "648af0e2288404140eef0a07b2101ae102dc5a48c0fce313ed2e4b378166ea79"
+      }
+    },
+    {
+      "artifactRoot": "build/stream-residency",
+      "scope": "Actual single ordered DayZ normal route latency screening, not isolatedCPU/coldjob/performance acceptance; bothcamera-coveredcoldCreated/sourceScans0, samebinaryPBO1/DDC0, drw:init/terrain/swap dominate. Pairacceptedfalse.",
+      "sha256": {
+        "dayz-latency-pair-20260926.json": "3d71a1116dabdadfa445cdfb49232d7dd21d12bd1f3f87a6674d05c6a0f26433"
       }
     }
   ],
@@ -6890,6 +7169,29 @@
       "result": "Fresh actual built server cold-positive runtime PASS; existing all-target build evidence retained. Next main-owner bank timing/alpha attribution planned only, no implementation/performance/defaultReady claim.",
       "sha256": {
         "smoke-positive-cold-headless-20260926.log": "2069d67cb7f17dc23d57198aadc3fe42944976f76639afeb158f66a44a783d6e"
+      }
+    },
+    {
+      "artifactRoot": "build",
+      "runtimeSourceCommit": "ddf890a1",
+      "result": "Initial build FAILED ambiguousNowUs declaration wrongnamespace; repair14nodes/stamped18PASS/7041assert169casesPASS/deploy22:15. Attribution-only no behavior/format/class policy change; clocks/counters profileactive only/coldBank optin only. Actualfraxinusexcelsior_2w alpha49.3,total50.1ms:sourceRead11.895/decode3.904/hist11.033/shape21.210/block1; sourceRead includesdecompression/unassignedremainder. New shape-loop optimization source pending/unbuilt, saveRoundTrip running/unclassified.",
+      "sha256": {
+        "build-streaming-latency-attribution-20260926.log": "eb016ea4e0016acefc64c6ea4269e9a529252b82037e3530d0746c8ee689b2d7",
+        "build-streaming-latency-attribution-repair-20260926.log": "d0b622a9bb26c2fc14f8e7184fab297d502f84716d2722287e740ac0de0954d7",
+        "build-streaming-latency-stamped-20260926.log": "ef14e8173f0f6c841a7aa6518c1c846d168b0516cbccfb2843c4d589acbb2732",
+        "deploy-streaming-latency-20260926.log": "8ff2c8ad3008edf61d6b67b028a1d73a058b9cae54aaec948adf3586e76274d3",
+        "test-streaming-latency-attribution-20260926.log": "e6b4e6929b03affbcd96deb3c400b3293ac1a1533ce8821b5f95630396cc0806",
+        "smoke-dayz-cold-bank-attribution-20260926.log": "113d8d0db617a8f9e402f12d2b42d77fdb8f195390dc523232b2860f1616ab16",
+        "smoke-dayz-latency-disabled-20260926.log": "82eea0fd484d3f09b9455879a3a79507715ab87a300f103b27c1d797c97e91d1",
+        "smoke-dayz-latency-cold-20260926.log": "0a6ca12a4785b12208d8fbc7e6295b71ea87b4d36117072ef4565964573e8f8b"
+      }
+    },
+    {
+      "artifactRoot": "build",
+      "runtimeSourceCommit": "ddf890a1",
+      "result": "Sameinstalledddf real DayZ cold-target same-world save roundtrip PASS; only rootownedscript save mode changed. New shape-loop optimization build ongoing/unclassified, no gain or implementation acceptance.",
+      "sha256": {
+        "smoke-dayz-cold-save-roundtrip-20260926.log": "719c61aa0eb9e7fa46908edcc72d70b0783e3be35d1f6b89c9804fdd6e87e121"
       }
     }
   ],

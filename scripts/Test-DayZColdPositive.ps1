@@ -1,9 +1,10 @@
-param([switch]$Lifecycle,[string]$Label='dayz-cold-positive',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
+param([switch]$Lifecycle,[switch]$SaveRoundTrip,[string]$Label='dayz-cold-positive',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
+if($SaveRoundTrip){$Lifecycle=$true}
 if (!$env:LOCK_OWNER) {
  $shellName=if($PSVersionTable.PSEdition -eq 'Core'){'pwsh.exe'}else{'powershell.exe'}
  $env:LOCK_OWNER='DayZ source-bound cold actor admission'
- try { $argv=@((Join-Path $PSScriptRoot 'with-game-lock.sh'),((Join-Path $PSHOME $shellName).Replace('\','/')),'-NoProfile','-File',$PSCommandPath,'-Label',$Label,'-GameDir',$GameDir);if($Lifecycle){$argv+='-Lifecycle'}; & 'C:/Program Files/Git/bin/bash.exe' @argv; if($LASTEXITCODE){throw "DayZ cold test exited $LASTEXITCODE"} }
+ try { $argv=@((Join-Path $PSScriptRoot 'with-game-lock.sh'),((Join-Path $PSHOME $shellName).Replace('\','/')),'-NoProfile','-File',$PSCommandPath,'-Label',$Label,'-GameDir',$GameDir);if($Lifecycle){$argv+='-Lifecycle'};if($SaveRoundTrip){$argv+='-SaveRoundTrip'}; & 'C:/Program Files/Git/bin/bash.exe' @argv; if($LASTEXITCODE){throw "DayZ cold test exited $LASTEXITCODE"} }
  finally {Remove-Item Env:LOCK_OWNER}
  return
 }
@@ -89,9 +90,39 @@ try {
  if($released.camera.required -ne 0 -or $released.simulation.positiveColdWorkingModels -ne 0 -or $released.simulation.positiveColdFactsBytes -ne 0 -or $released.simulation.payloadCapacityCharge -ne 0 -or $released.simulation.shapeSchedulingCharge -ne 0){throw 'Transient DayZ cold job debt failed retirement'}
  if($Lifecycle){$saved=$released.identity.objects[0];if(!$saved.present -or !$saved.mustBeSaved -or [Math]::Abs($saved.rawDamage-0.25) -gt 0.001 -or $saved.visualResident){throw 'Actor retirement lost saved target damage or retained visual instance'}}
  elseif($released.identity.objects[0].present){throw 'Transient DayZ cold target failed retirement'}
+ $saveEvidence=$null
+ if($SaveRoundTrip){
+  # Same-world binary save/reload of a genuinely admitted, mutated object.
+  # No wall object getter or script reference supplies a permanent pin.
+  $saveLabel='cold-positive-away'
+  $stream.ReadTimeout=120000
+  try{$saveReply=Send @{cmd='eval';code=('triSaveGame "'+$saveLabel+'"')}}finally{$stream.ReadTimeout=30000}
+  if($saveReply.result.Trim('"') -ne 'OK'){throw 'Cold mutated-object binary save failed'}
+  # The private profile contains the actual engine user directory (Users/name),
+  # rather than placing Saved/Tmp immediately at POSEIDON_USER_DIR.
+  $saveFiles=@(Get-ChildItem -LiteralPath $profile -Recurse -File -Filter ($saveLabel+'.fps') | Where-Object {$_.Directory.Name -eq 'Tmp' -and $_.Directory.Parent.Name -eq 'Saved'})
+  if($saveFiles.Count -ne 1 -or $saveFiles[0].Length -le 0){throw 'Binary save missing or ambiguous in the private profile Saved/Tmp directory'}
+  $saveHash=Get-FileHash -LiteralPath $saveFiles[0].FullName -Algorithm SHA256
+  $controlDamage=Send @{cmd='stream_existing_damage';id=83912800;damage=0.75}
+  $control=Sample 'save-control-mutation'
+  if(!$control.identity.objects[0].present -or [Math]::Abs($control.identity.objects[0].rawDamage-0.75) -gt 0.001 -or !$control.identity.objects[0].mustBeSaved -or $control.camera.required -ne 0){throw 'Existing cold mutation control failed before binary reload'}
+  $stream.ReadTimeout=120000
+  try{$loadReply=Send @{cmd='eval';code=('triLoadGame "'+$saveLabel+'"')}}finally{$stream.ReadTimeout=30000}
+  if($loadReply.result.Trim('"') -ne 'OK'){throw 'Cold mutated-object binary reload failed'}
+  $deadline=[DateTime]::UtcNow.AddSeconds(240)
+  do{Start-Sleep -Seconds 2;$restored=Sample 'save-restored'}while((!$restored.camera.valid -or $restored.camera.pending) -and [DateTime]::UtcNow -lt $deadline)
+  $restoredTarget=$restored.identity.objects[0]
+  if(!$restored.camera.valid -or $restored.camera.pending -or !$restoredTarget.present -or $restoredTarget.id -ne $saved.id -or $restoredTarget.model -ne $saved.model -or !$restoredTarget.mustBeSaved -or [Math]::Abs($restoredTarget.rawDamage-0.25) -gt 0.001 -or $restoredTarget.visualResident -or $restored.camera.centerX -ne $released.camera.centerX -or $restored.camera.centerZ -ne $released.camera.centerZ){throw 'Same-world reload failed saved identity/damage or away camera residency'}
+  foreach($axis in @('x','y','z')){if([Math]::Abs($restoredTarget.$axis-$saved.$axis) -gt 0.001){throw "Reload changed saved target coordinate $axis"}}
+  $restoredFire=Send @{cmd='stream_fire_probe';from=@(5705.061035,68.4318695,2512.391357);to=@(5717.061035,68.4318695,2512.391357)}
+  if(!@($restoredFire.contacts|Where-Object {$_.id -eq 83912800}).Count){throw 'Same-world reload lost saved target fire geometry'}
+  # Object::CreateObject invokes ResolveObject during load. Its required pins
+  # are loader ownership, so postload zero pins is intentionally not asserted.
+  $saveEvidence=@{scope='Same-world SaveBin/LoadBin only; not fresh-process, multiplayer or performance acceptance';save=$saveReply;saveFile=$saveFiles[0].FullName;saveBytes=$saveFiles[0].Length;saveSha256=$saveHash.Hash;requiredBeforeSave=$released.camera.required;controlDamage=$controlDamage;control=$control;load=$loadReply;restored=$restored;restoredFire=$restoredFire;loaderRequiredObjects=$restored.camera.required}
+ }
  $null=Send @{cmd='exit'};if(!$p.WaitForExit(15000) -or $p.ExitCode){throw 'Game failed clean exit'}
  if(Select-String -LiteralPath $log -Pattern 'Out of Memory|Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION' -Quiet){throw 'Renderer error'}
- @{passed=$true;lifecycle=[bool]$Lifecycle;before=$before;cold=$cold;fire=$fire;queued=$queued;collision=$collision;promoted=$promoted;demoted=$demoted;damage=$damage;released=$released;performanceMeasured=$false} | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $out 'result.json')
+ @{passed=$true;lifecycle=[bool]$Lifecycle;saveRoundTrip=[bool]$SaveRoundTrip;saveEvidence=$saveEvidence;before=$before;cold=$cold;fire=$fire;queued=$queued;collision=$collision;promoted=$promoted;demoted=$demoted;damage=$damage;released=$released;performanceMeasured=$false} | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $out 'result.json')
  Write-Output "DayZ cold actor evidence: $out"
 }finally{
  if($client){$client.Dispose()};if($p -and !$p.HasExited){Stop-Process -Id $p.Id -Force}

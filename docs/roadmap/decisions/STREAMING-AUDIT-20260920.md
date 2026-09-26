@@ -1753,3 +1753,53 @@ authority, disk-save restoration, arbitrary retail types or performance.
 Next owner-bank timing/alpha attribution is planned instrumentation only, not
 implemented/accepted evidence here. Geometry-cache demand, broad consumers/state,
 MP and comparable-quality performance remain OPEN; experimental defaults OFF.
+
+### Latency attribution and normal traversal screening — 26 September 2026
+
+ddf890a1 adds attribution only, no behavior/source format/class policy change.
+Clock/counter work is profile-active only; cold-bank counters require opt-in.
+Initial build fails ambiguous NowUs declaration in wrong namespace; repaired
+14-node and stamped18-node builds pass,7041 assertions/169 cases pass.
+Installedddf22:15 matches source/binary provenance.
+
+Cold-bank221705 passes class/admission/retirement diagnostic clean0. Final26
+bank calls/maxBank2.1048ms/maxTail2.2402ms exceed a hard2ms promise: existing
+budget is soft, not guaranteed owner-frame latency. Bank scope includes relabel,
+table allocation/build/exception ownership; source audits, conversion and final
+tail are separately attributed. Actual t_fraxinusexcelsior_2w alpha49.3/total50.1ms
+has sourceRead11.895/decode3.904/hist11.033/shape21.210ms, blockpath1.
+SourceRead includes decompression and remaining time is unassigned. This is a
+measured cause candidate, not optimized/accepted performance.
+
+Normal-route Disabled221845 and Cold222141 pass runner/clean0 using same installed
+binary and PBO1/DDC0. Actual route frames:
+Disabled651 median26.132/mean56.6506/p95199.244/p99633.202/max1423.016ms;
+Cold727 median25.380/mean49.7615/p95166.571/p99496.330/max1020.984ms.
+Both traverse with severe hitches, dominated by drw:init/terrain/swap. Ordered
+single pair/cache/order/phase variation does not support improvement or regression
+acceptance, no vanilla parity. Both coldCreated/sourceScans0: Cold means feature
+ON with positive-loaded retention on a camera-covered route, not cold-job timing.
+Raw frame samples, phase results/provenance and acceptedfalse comparison are hashed.
+
+Save-roundtrip run remains unclassified/pending here. Shape-loop optimization
+source is being prepared but unbuilt; no implementation/gain claim follows.
+Hard owner-bound, shared geometry-cache demand, source worker coverage and broad
+comparable-quality performance remain OPEN. Defaults OFF/whole plan OPEN.
+
+### Actual cold target same-world disk save — 26 September 2026
+
+DayZ222342 passes clean0 on installedddf890a1. Actual initially cold source-bound
+83912800 has required0, then promotion/demotion and existing-object damage.25
+MustBeSaved retention after actor departure with cold work/facts/payload/shape
+charges0. triSaveGame writes a private6968-byte FPS file, SHA256
+76e0edea5d00140440c6cc6484725d3e2425116dbd19bcbee3fbfad0f208fc73
+as verified against the actual saved file.
+Existing-object .75 mutation provides control; triLoadGame in same world/private
+profile restores target ID/model/frame/.25/MustBeSaved and actual fire contact.
+
+Loader required count3 is recorded, not silently claimed0 after restoration.
+Shared modelVB4 retention continues; restored disk state is not geometry cache
+reclamation. This closes one actual production same-world SaveBin/LoadBin
+roundtrip, not fresh-process/multiplayer/performance or general state coverage.
+Only runner save mode changed; source/binary remainsddf. Shape-loop optimization
+build remains ongoing/unclassified. Whole plan/performance/MP/wider gates OPEN.
