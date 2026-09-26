@@ -114,7 +114,7 @@ accepted as proof of no moving regression; repeat with controlled per-pose cover
   opt-in. Native timing is mixed; secondary-view/visual acceptance is incomplete.
 - F: authored LOD/conventional path has been audited/tested. Geometry capacity
   and growth overlap matter; a selected coarse draw does not release fine LODs.
-  Allocation-only diagnostic is unbuilt source pending; no selected-LOD usage or paging acceptance. No hierarchical page implementation is promoted on this evidence.
+  Bounded allocation-only diagnostic now passes partial-subset attribution; no selected-LOD usage or paging acceptance. No hierarchical page implementation is promoted on this evidence.
 - G: conditional experiment remains unselected while the above conventional
   lifetime/preparation costs are addressed.
 - T0: modern opaque terrain/water delegation already returns before the legacy
@@ -1445,9 +1445,58 @@ does not establish retained-memory convergence. Private/RSS samples are separate
 from GPU accounting. Original launched provenance is authoritative; subsequent
 runner edits do not describe this run. Leak/performance attribution remains OPEN.
 
-StageF bounded allocation-only report is unbuilt source pending validation.
+At the860 checkpoint StageF bounded allocation-only report was unbuilt; the995/abfd validation below supersedes that source-only status.
 Deduplicated per-LOD referenced allocations must remain distinct from global
 pool live/capacity/retired bytes; no selected-LOD usage or default paging claim.
 Whole plan, production consumers/classes, state/MP, secondary/adaptive visuals,
 and comparable-quality performance remain OPEN. Reforger is workload evidence,
 not compatibility ground truth.
+
+### Bounded allocation attribution and predicate correction — 26 September 2026
+
+9950974c adds explicit-request allocation attribution; ordinary frames do not
+scan the model registry. Request payload is an optional sidecar, not extra
+diagnostic vectors/counters in every resource operation. Owner-drained snapshot
+and nonblocking polling preserve producer/renderer ownership. Rust tests3 cover
+sharing/deduplication, missing/invalid inputs and truncation; FFI ABI1 passes.
+Supported/stamped builds pass.
+
+DayZ175633 exits clean0 and passes narrow Converged/persistent quiet: HAL aggregate
+remains in raw samples and return-growth comparison, but is excluded from quiet
+because it includes transient staging/in-flight resources. Return2→3 geometry
++4316028, textures+21844000/+10 pass unchanged declared growth thresholds. This
+is diagnostic convergence at one fixed-LOD route, not FPS/process-memory/all-world
+acceptance. The old174103 PendingWarmup label used a different quiet predicate:
+all29 initial quiet samples have constant live/capacity geometry and object
+texture bytes/count; only HAL varies4429338992–4430388736. Its actual return-growth
+gate failures remain; PendingWarmup alone did not prove objects kept loading.
+
+Original995 report is Ready/valid/truncated, requested256/visited179,639 LODs/
+unique meshes,1119 sections and96360444 unique vertex/index bytes versus global
+pool733798952. The registeredModels750/missingModels77 labels conflate cached
+ineligible shapes with retained GPU models. Source unconditionally caches
+WGR_INVALID_MODEL for rejected shapes; this strongly explains missing77, but
+row-only output cannot independently count those exact77. No retired asset-loss
+claim follows.
+
+abfd4131 separates registry entries/visits/skips and passes only valid producer
+IDs. Corrected181509 exits clean0 AllocationDiagnosticOnly, convergenceMeasured
+false; no repeated traversal/performance pass. Registry683/visited256/skipped68,
+models requested188/visited188,missing0,673 LODs/unique meshes,1231 sections,
+missing meshes/invalid ranges/unresolved names0. Union81965296 vertex+13184856
+index=95150152 bytes; global pool live380859292/cap637534208/retired0.
+Truncation is explicit: bounded registry subset, not top-ranked assets or full
+scene. Per-LOD rows can overlap; union bytes are retained allocations, not selected
+draw usage or reclaimable memory. All experimental defaults remain OFF.
+
+abfd also adds pure bounded complete-compiled-ODOL static-source envelope evidence.
+Supported/stamped game/test/server build and475 assertions/28 cases pass, including
+seven new cases with actual CPUOnly adaptation. This consults no bank, config,
+proxy resolver or Object; it is neither final constructor evidence nor world
+Ready and has no runtime pipeline integration. PlainRouteProbe remains unbuilt/
+unused pending. Production eligibility/query consumers, MP/state authority,
+broader comparable-quality performance and conditional paging remain OPEN.
+
+[Tidewater research](TIDEWATER-STREAMING-REVIEW-20260926.md) is retained as deferred
+architectural research, not implementation/runtime evidence. Waves remain parked.
+Reforger stress content remains workload evidence, not compatibility ground truth.

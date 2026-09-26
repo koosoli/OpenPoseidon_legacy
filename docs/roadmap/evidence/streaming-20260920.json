@@ -4266,7 +4266,7 @@
     },
     {
       "run": "dayz-resource-convergence-20260926-174103",
-      "classification": "NOT PASS despite clean0: passedfalse/PendingWarmup; no10-sample quiet baseline within30s. Return2→3 geometry+8903008, textures+35474656/+42 exceed gates; capacity stable/retired0. FixedLOD1 diagnostic, memory convergence/leak/performance attribution OPEN. Launched provenance authoritative despite later script edits.",
+      "classification": "NOT PASS despite clean0: passedfalse/PendingWarmup; no10-sample quiet baseline within30s. Return2→3 geometry+8903008, textures+35474656/+42 exceed gates; capacity stable/retired0. FixedLOD1 diagnostic, memory convergence/leak/performance attribution OPEN. Launched provenance authoritative despite later script edits. Predicate caveat: initial29 quiet samples have constant live/capacity geometry and object texture bytes/count; only HAL aggregate varies (4429338992–4430388736). Old predicate conflated staging/in-flight variation with object warmup. Later persistent-only predicate differs; old growth-gate failures remain actual.",
       "provenance": {
         "routePoseHoldSeconds": 3,
         "environment": {
@@ -4337,6 +4337,157 @@
         "whole-gpu-memory-errors.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "whole-gpu-memory-scope.txt": "a7836f88562d655e01348c8444e37878976ebdd85ae2de7ab09c52433c96d3cf",
         "whole-gpu-memory.csv": "8221ea790e29a757b0f6de9552f23fa1e0167d778ddfe6a8248da353727800c8"
+      }
+    },
+    {
+      "run": "dayz-geometry-allocation-attribution-20260926-175633",
+      "classification": "PASS narrow convergence/clean0 installed9950974c: persistent-only ten-sample quiet excludes transient HAL aggregate; return2→3 thresholds unchanged and accepted, geometry+4316028/textures+21844000/+10. Report Ready valid truncated: registry label750, requested256/visited179, missing77 strongly consistent with negative-cache INVALID entries (exact77 not independently attributed). Unique retained geometry96360444 versus pool733798952; partial subset, no selected usage/reclaimable/full-scene/performance proof.",
+      "provenance": {
+        "routeX": [
+          5804.58,
+          5904.58,
+          6004.58,
+          6104.58,
+          6004.58,
+          5904.58,
+          5804.58,
+          5704.58
+        ],
+        "quietSamples": 10,
+        "cycles": 3,
+        "quietTimeoutSeconds": 30,
+        "routePoseHoldSeconds": 3,
+        "corpus": "DayZ",
+        "processScope": "PrivateMemorySize64 and WorkingSet64 of owned game PID; diagnostic, not a GPU convergence proof",
+        "scriptSha256": "1A35CC5866A9B59D6D32BA758C8D2A6F6B47327BEBB0CB22DDA6B85A7AAACF5C",
+        "environment": {
+          "WGR_OBJECT_STREAM_PBO_TEXTURES": "0",
+          "WGR_GEO_POOL_GROWTH": "2.0",
+          "WGR_OBJECT_STREAM_GPU_BUDGET": "0",
+          "WGR_PASS1_STATS": "1",
+          "WGR_SIMULATION_RESIDENCY": "0",
+          "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\dayz-geometry-allocation-attribution-20260926-175633\\user",
+          "WGR_OBJECT_STREAM_MAX_OBJECTS": "20000",
+          "WGR_ADAPTIVE_TEXTURE_DETAIL": "0",
+          "WGR_RESIDENCY_TRACE": "1",
+          "WGR_GEO_POOL_PRESSURE_GROWTH": "0",
+          "WGR_NATIVE_DDS_PREPARE": "0",
+          "WGR_LOD_GOVERNOR_RANGE": "1",
+          "WGR_SKY_VOLUME_INCREMENTAL": "1",
+          "WGR_NATIVE_DDS_BC3_ONLY": "0",
+          "WGR_OBJECT_STREAM_TEST_BUDGET": "1",
+          "WGR_OBJECT_STREAM_PBO": "0"
+        },
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "FE87C22B408ACB01E1B91EF6FED54CCF7D2D9CA6CE653E815CFCFAB92731AD21",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "AA7ECDBB5E3EB359BB68AD3A090C057AFD6B95F463C75B211285D60DE1CEB883",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "installed": "codex/streaming-residency 9950974c 2026-09-26_17:55 deploy-ps1",
+        "growthAllowance": "max(1% of return2, 8 MiB); texture count max(1%, 8)",
+        "driverSampled": true,
+        "head": "9950974c9135783f0f347078367f9a38887b7801",
+        "pose": [
+          5704.58,
+          2523.37,
+          73.74,
+          260.9,
+          -3.8
+        ]
+      },
+      "sha256": {
+        "engine.log": "8b2147ba8a4e755259effcaa3fc9010928b8d014af540d6c0670edab634ed549",
+        "geometry-allocations-bounded.json": "06749bd7164ef6d22aeaf4da6fe251a44c1dfe71d9e1ccd7c40fa09e7ce05038",
+        "geometry-allocations.json": "61428993372828e5422c385a3fa417a14f77a7393dacd7ee2ec89b0f543a05eb",
+        "harness.jsonl": "2a25aca634c615146706d3064589e9eb45a0f427964cd793df1cf726b4fac28d",
+        "provenance.json": "933ff10d07ceb45ea5d86b645c809a68f44c5463a7beba7795d1b0638c2c2730",
+        "result.json": "095981670940933ef1a56f861170487c0c9d468cf93ac3f51af503baa2d53737",
+        "returned-settled.png": "7291d3ff38ec65dd371149245f499cfd01050770c4811d6505d91a0055b6da01",
+        "samples.jsonl": "8b8edc24424d4a067d90de892f21cd082569c2acda4f206ff9b3b5ec2ede47c6",
+        "whole-gpu-memory-errors.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "whole-gpu-memory-scope.txt": "a7836f88562d655e01348c8444e37878976ebdd85ae2de7ab09c52433c96d3cf",
+        "whole-gpu-memory.csv": "56a2cebffc250752787583fee0555ff1e92e83f047009c1e0e54367a60272feb"
+      }
+    },
+    {
+      "run": "dayz-eligible-geometry-accounting-20260926-181509",
+      "classification": "PASS AllocationDiagnosticOnly/clean0 installedabfd4131; convergenceMeasuredfalse, no repeated traversal/performance pass. Registry683/visited256/skipped68, valid requested188/visited188, missing0/invalid0. LOD673/section1231/uniqueMeshes673, vertex81965296+index13184856=95150152 vs pool380859292/cap637534208/retired0. Bounded registry subset not top-ranked/full-scene/selected usage or reclaimable bytes.",
+      "provenance": {
+        "head": "abfd413159e527c219d3b1ec034de968947f3b0f",
+        "growthAllowance": "max(1% of return2, 8 MiB); texture count max(1%, 8)",
+        "pose": [
+          5704.58,
+          2523.37,
+          73.74,
+          260.9,
+          -3.8
+        ],
+        "cycles": 3,
+        "installed": "codex/streaming-residency abfd4131 2026-09-26_18:14 deploy-ps1",
+        "routeX": [
+          5804.58,
+          5904.58,
+          6004.58,
+          6104.58,
+          6004.58,
+          5904.58,
+          5804.58,
+          5704.58
+        ],
+        "corpus": "DayZ",
+        "processScope": "PrivateMemorySize64 and WorkingSet64 of owned game PID; diagnostic, not a GPU convergence proof",
+        "quietTimeoutSeconds": 30,
+        "driverSampled": false,
+        "quietSamples": 10,
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "E8AE1958BE2027F72102CBED3EF892813DEDF598AE7F98A7BBDE8442037033C4",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "2F04EC39FA7BEF848C6F4AE3F13D65D0B4749B3F2B78369E7FA56112A7EA280D",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "scriptSha256": "5102254585E754B05F9379C71EFD64E35E976406155E27404BD6678C188CF85C",
+        "routePoseHoldSeconds": 3,
+        "environment": {
+          "WGR_SIMULATION_RESIDENCY": "0",
+          "WGR_OBJECT_STREAM_MAX_OBJECTS": "20000",
+          "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\dayz-eligible-geometry-accounting-20260926-181509\\user",
+          "WGR_GEO_POOL_PRESSURE_GROWTH": "0",
+          "WGR_SKY_VOLUME_INCREMENTAL": "1",
+          "WGR_ADAPTIVE_TEXTURE_DETAIL": "0",
+          "WGR_LOD_GOVERNOR_RANGE": "1",
+          "WGR_OBJECT_STREAM_PBO": "0",
+          "WGR_GEO_POOL_GROWTH": "2.0",
+          "WGR_NATIVE_DDS_PREPARE": "0",
+          "WGR_OBJECT_STREAM_GPU_BUDGET": "0",
+          "WGR_NATIVE_DDS_BC3_ONLY": "0",
+          "WGR_OBJECT_STREAM_TEST_BUDGET": "1",
+          "WGR_RESIDENCY_TRACE": "1",
+          "WGR_OBJECT_STREAM_PBO_TEXTURES": "0",
+          "WGR_PASS1_STATS": "1"
+        }
+      },
+      "sha256": {
+        "engine.log": "f21793621e64f5c1b2ee88f48807e70185b7ec8b9715977bdf313638ed0abb08",
+        "geometry-allocations-bounded.json": "065e740aeb6c2a279382e961b03138eb90d02e455be002cf8987374b861d6880",
+        "geometry-allocations.json": "6015fe981dfb6914c933427ede01edb4643c12f89fd1d349c1b3b5c81802bb5d",
+        "harness.jsonl": "2c78d54461fd262e5c6570b07d7f0718eed17ffae8a44904e4bdc70486b20b0d",
+        "provenance.json": "c41599faa0505a704f2a67ccd2c224c1b161a2612dbb23078ec74a9b29358846",
+        "result.json": "65a4a392dd4b412d144bc6899bdbab7ada53024c998fe0f339363139099d611f",
+        "returned-settled.png": "f89fc790e43fd3e3bdffd55b2d7f33e3e89339f0984f21297ea87346cd171e3e",
+        "samples.jsonl": "77fc761c0bdfa7d6c2f0dc4df9ebd68b7defa897b24aed804ec530d18532b777"
       }
     }
   ],
@@ -4561,6 +4712,26 @@
         "build-simulation-compact-metadata-retry-20260926.log": "2d381e7e431ec7852975b6e23b3475459961ae0e197ddc382749eced1a560e2f",
         "test-simulation-compact-metadata-20260926.log": "0132d95a82a0f7a589138db9664ba6a154f63b7d6f981e2021c5a2e4b363dff7"
       }
+    },
+    {
+      "artifactRoot": "build",
+      "runtimeSourceCommit": "abfd4131",
+      "implementationCommits": [
+        "9950974c",
+        "abfd4131"
+      ],
+      "result": "995 diagnostics/stamped supported build PASS; Rust allocation collect3+FFI ABI1 tests PASS. abfd supported/stamped game/test/server build PASS; static-source-envelope475 assertions/28 cases PASS including7 new cases and actual CPUOnly adaptation. Pure bounded compiled-ODOL source evidence only, no bank/constructor/runtime pipeline integration or Ready. PlainRouteProbe unbuilt/unused pending.",
+      "sha256": {
+        "build-geometry-allocation-diagnostics-20260926.log": "6227b6aa7714f50bdae1d55c799e5f53c2e7463068f6b6060c2b4e071da5a436",
+        "build-geometry-allocation-stamped-20260926.log": "8f09b2a96677694567c28ba44623fc82939dfb44de27994a9eecd21db5c39e17",
+        "deploy-geometry-allocation-20260926.log": "e40eb6ba4bb3d2e8943b69b735df1049f3e9c9536c79a619a1012e237f067401",
+        "test-geometry-allocation-rust-20260926.log": "9dc78a1d3f06425749382fadac5f03fb88c7c7cde09ffb6dc3c37885d123f42e",
+        "test-geometry-allocation-ffi-20260926.log": "1a818ba9d16c27aacb4bc67f780800853c128c367896f615f6368e528bac19df",
+        "build-static-source-envelope-20260926.log": "17fe909a34de9317f2330e17f0f6484fc3ec113c6d8169874bd12856a8eb278c",
+        "build-static-source-envelope-stamped-20260926.log": "2d90e0cfebdbf2eba871e97356e91bff7b4cf12faf961cb1849adfe76456ea83",
+        "deploy-static-source-envelope-20260926.log": "a3edcc35f03595b39cbc2036101591afb218ada69f3cebcbe07c7a9c755b9520",
+        "test-static-source-envelope-20260926.log": "0f758c43f50f27e5378707eb24ecb8345dc1d54d5ad32ef1fdd38e9fcb2733ac"
+      }
     }
   ],
   "fixtures": [
@@ -4671,6 +4842,13 @@
         "walls/wall_feng_3.p3d": "d9ec544344f6a6ba3dd708e8eb1ccc60955d8511764a5139295470e1ae2a5a93",
         "walls/wall_feng_3.p3d.strings.json": "a9a24b4de44030c9f8db697931996e2dd753d696fde7b35a3ad6b98a0f541506"
       }
+    }
+  ],
+  "researchRecords": [
+    {
+      "path": "docs/roadmap/decisions/TIDEWATER-STREAMING-REVIEW-20260926.md",
+      "classification": "Read-only architectural research; implementation deferred, no runtime acceptance; water/waves remain parked.",
+      "sha256": "89be027b015ec0bbbf88efea5ceaf6cea91337e609b1d72fd3e25b2e839a2987"
     }
   ]
 }
