@@ -12,6 +12,13 @@ Poseidon::Model::Model OriginalStaticOdol()
 {
     Poseidon::Model::Model model;
     model.sourceFormat = "ODOL";
+    model.sourceVersion = 54;
+    // Original fixture declares all four source LODs and has no hidden pose data.
+    model.sourceAudit.producerVersion = 1;
+    model.sourceAudit.sourceRevision = 54;
+    model.sourceAudit.geometryCoverage = Poseidon::Model::SourceGeometryCoverage::DeclaredLodsDecoded;
+    model.sourceAudit.observations = Poseidon::Model::SourceAuditAllObservations;
+    model.sourceAudit.declaredLods = model.sourceAudit.decodedLods = 4;
     model.boundingSphere.radius = 1;
     for (float resolution : {1.f, 1e13f, 7e15f, 6e15f})
     {
@@ -194,4 +201,29 @@ TEST_CASE("Original ODOL source envelope encloses actual completed adapter posit
     REQUIRE(positions >= 9);
     REQUIRE(positionOutsideSerializedSphere);
     REQUIRE(double(*radius) > shape->BoundingSphere());
+}
+
+TEST_CASE("Empty ODOL IR pose lists cannot hide missing or discarded source evidence", "[streaming-static-source-envelope]")
+{
+    auto model = OriginalStaticOdol();
+    SECTION("old derived cache has no audit") { model.sourceAudit = {}; }
+    SECTION("unknown producer version") { model.sourceAudit.producerVersion = 2; }
+    SECTION("unsupported revision") { model.sourceAudit.sourceRevision = 99; }
+    SECTION("audit revision differs from the loaded source") { model.sourceVersion = 40; }
+    SECTION("keyframe absence was never observed")
+    { model.sourceAudit.observations &= ~uint32_t(Poseidon::Model::SourceAuditObservation::Keyframes); }
+    SECTION("declared LOD was not decoded") { ++model.sourceAudit.declaredLods; }
+    SECTION("source animation directory exists") { model.sourceAudit.directoryHasAnimations = true; }
+    SECTION("source animation class exists") { model.sourceAudit.directoryAnimationClasses = 1; }
+    SECTION("source skeleton declared but empty") { model.sourceAudit.skeletonDeclared = true; }
+    SECTION("source skeleton bones exist") { model.sourceAudit.skeletonBones = 1; }
+    SECTION("source vertex bone references exist") { model.sourceAudit.vertexBoneReferenceCount = 1; }
+    SECTION("source neighbour bone references exist") { model.sourceAudit.neighbourBoneReferenceCount = 1; }
+    SECTION("source keyframe positions were skipped")
+    { model.sourceAudit.keyframeCount = 1; model.sourceAudit.keyframePayloadDiscarded = true; }
+    for (const auto& lod : model.lodLevels) REQUIRE(lod.mesh.frames.empty());
+    REQUIRE(model.allowAnimation == 0);
+    const auto evidence = Evidence(model);
+    REQUIRE(evidence.HasReason(StaticSourceEnvelopeReason::IncompleteSource));
+    REQUIRE_FALSE(evidence.RadiusForGeneration(17));
 }

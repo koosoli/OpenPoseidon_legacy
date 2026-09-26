@@ -11,6 +11,7 @@
 #include "../../Support/test_fixtures.hpp"
 
 #include <atomic>
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -177,17 +178,16 @@ TEST_CASE("ModelBlob: serialise, deserialise, re-serialise is byte-identical", "
 // fixtures are pinned by digest, so removing, adding, reordering or rewidening
 // any field fails here and names the format as the thing that moved.
 //
-// It is deliberately brittle. When it fails for a change you MEANT to make, the
-// fix is to bump `ModelBlob::kFormatVersion` (so every existing entry becomes a
-// miss instead of being reinterpreted) and paste the new digest -- in that order.
-// Pasting the digest without the bump is the bug this whole design exists to
-// prevent, so the two steps are named together here rather than in a commit
-// message nobody rereads.
+// It is deliberately brittle for the BASE layout: an intentional base change
+// must bump kFormatVersion before updating these digests. The optional source
+// audit has its own tagged version and is tested separately. Pinning the base
+// retains evidence that old DDC entries still mean the same geometry, rather
+// than replacing the old SHA merely because an audit footer was appended.
 //
 // `sourcePath` is normalised away first: it is a real input to the IR, but it is
 // the absolute path of the fixture on this machine, so pinning it would pin the
 // checkout directory.
-TEST_CASE("ModelBlob: the serialised form of two fixtures is pinned by digest", "[ast004]")
+TEST_CASE("ModelBlob: the stable base form of two fixtures is pinned by digest", "[ast004]")
 {
     struct Case
     {
@@ -212,11 +212,25 @@ TEST_CASE("ModelBlob: the serialised form of two fixtures is pinned by digest", 
         model->sourcePath = "<fixture>";
         const std::vector<uint8_t> blob = ModelBlob::Serialize(*model);
         INFO("fixture " << c.fixture);
-        REQUIRE(Foundation::Sha256::Of(blob.data(), blob.size()) == std::string(c.digest));
+        REQUIRE(blob.size() > ModelBlob::kSourceAuditFooterBytes);
+        const size_t baseBytes = blob.size() - ModelBlob::kSourceAuditFooterBytes;
+        REQUIRE(Foundation::Sha256::Of(blob.data(), baseBytes) == std::string(c.digest));
+
+        Poseidon::Model::Model current;
+        REQUIRE(ModelBlob::Deserialize(blob.data(), blob.size(), current));
+        REQUIRE(ModelBlob::Serialize(current) == blob); // Current audit must survive, too.
+        Poseidon::Model::Model legacy;
+        REQUIRE(ModelBlob::Deserialize(blob.data(), baseBytes, legacy));
+        REQUIRE(legacy.sourceAudit.producerVersion == 0);
+        REQUIRE(legacy.sourceAudit.observations == 0);
+        REQUIRE(legacy.sourceAudit.geometryCoverage == Model::SourceGeometryCoverage::Unknown);
+        const auto reencoded = ModelBlob::Serialize(legacy);
+        REQUIRE(reencoded.size() == blob.size());
+        REQUIRE(std::equal(blob.begin(), blob.begin() + baseBytes, reencoded.begin()));
     }
 }
 
-TEST_CASE("ModelBlob: a truncated blob is refused at every length", "[ast004]")
+TEST_CASE("ModelBlob: only the exact legacy base boundary is accepted among short prefixes", "[ast004]")
 {
     const fs::path path = ResolveFixturePath(kMlod);
     if (!fs::exists(path))
@@ -226,15 +240,28 @@ TEST_CASE("ModelBlob: a truncated blob is refused at every length", "[ast004]")
     auto        model  = ModelCache::LoadLooseFile(path.string(), &error, &opened);
     REQUIRE(model);
     const std::vector<uint8_t> blob = ModelBlob::Serialize(*model);
+    REQUIRE(blob.size() > ModelBlob::kSourceAuditFooterBytes);
+    const size_t baseBytes = blob.size() - ModelBlob::kSourceAuditFooterBytes;
 
-    // Every prefix short of the whole thing must be refused. This is the case
-    // that catches a reader which believes a count before checking it can be
-    // satisfied -- the shape of bug that turns a damaged cache entry into an
-    // allocation of whatever the damaged length says.
+    // Exact base-end is a complete old v1 blob and intentionally remains
+    // readable with Unknown audit. Every other prefix must refuse, including
+    // partial audit tags/lengths/payloads. This still catches trusting a count
+    // before its bytes are available, without treating old entries as corrupt.
     for (size_t n = 0; n < blob.size(); ++n)
     {
         Poseidon::Model::Model out;
-        REQUIRE_FALSE(ModelBlob::Deserialize(blob.data(), n, out));
+        if (n == baseBytes)
+        {
+            REQUIRE(ModelBlob::Deserialize(blob.data(), n, out));
+            REQUIRE(out.sourceAudit.producerVersion == 0);
+            REQUIRE(out.sourceAudit.observations == 0);
+            REQUIRE(out.sourceAudit.geometryCoverage == Model::SourceGeometryCoverage::Unknown);
+            REQUIRE(out.lodLevels.size() == model->lodLevels.size());
+            const auto reencoded = ModelBlob::Serialize(out);
+            REQUIRE(reencoded.size() == blob.size());
+            REQUIRE(std::equal(blob.begin(), blob.begin() + baseBytes, reencoded.begin()));
+        }
+        else REQUIRE_FALSE(ModelBlob::Deserialize(blob.data(), n, out));
     }
     Poseidon::Model::Model whole;
     REQUIRE(ModelBlob::Deserialize(blob.data(), blob.size(), whole));

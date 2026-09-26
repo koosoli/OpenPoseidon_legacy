@@ -16,6 +16,7 @@
 #include <Poseidon/Asset/Formats/P3D/ODOLLoader.hpp>
 #include <Poseidon/Asset/Formats/P3D/Odol40.hpp>
 #include <Poseidon/Asset/Formats/P3D/OdolRevision.hpp>
+#include <Poseidon/World/Model/ModelBlob.hpp>
 #include <Poseidon/IO/Streams/QStream.hpp>
 #include <algorithm>
 #include <cstdint>
@@ -141,7 +142,7 @@ namespace
 // array (raw, under the threshold), the four totals, and a non-empty class name
 // -- so a test can state that the reader now KEEPS them. Everything else is
 // byte-identical to the massless model, so the closure tests are unaffected.
-std::vector<char> arma1Model(bool withMass = false)
+std::vector<char> arma1Model(bool withMass = false, bool withSourceMotion = false)
 {
     Bytes b;
     b.data.insert(b.data.end(), {'O', 'D', 'O', 'L'});
@@ -174,7 +175,12 @@ std::vector<char> arma1Model(bool withMass = false)
         for (int i = 0; i < 4; ++i) b.vec3(0.0f, 0.0f, 0.0f); // centre of mass and inverse inertia
     }
     b.zeros(11);   // the eleven flag bytes -- 39 typed bytes on the A2 layout
-    b.asciiz("");  // no skeleton, so no bone table and no pivots string
+    b.asciiz(withSourceMotion ? "original_skeleton" : "");
+    if (withSourceMotion)
+    {
+        b.boolean(false); b.u32(1);
+        b.asciiz("original_bone"); b.asciiz("");
+    }
     b.u8(0);       // map type
     if (withMass)
     {
@@ -194,7 +200,16 @@ std::vector<char> arma1Model(bool withMass = false)
     b.asciiz("");
     b.boolean(false);
     b.u32(0);
-    b.boolean(false); // no animations
+    b.boolean(withSourceMotion);
+    if (withSourceMotion)
+    {
+        b.u32(1); // one original hide animation, revision40 payload
+        b.u32(9); b.asciiz("original_hide"); b.asciiz("original_source");
+        b.f32(0); b.f32(1); b.f32(0); b.f32(1); b.u32(0); b.f32(.5f);
+        b.u32(1); // one resolution
+        b.u32(1); b.u32(1); b.u32(0); // one bone referencing animation0
+        b.i32(-1); // reverse mapping has no axis payload
+    }
 
     const size_t startAt = b.size();
     b.u32(0); // LOD start, patched below
@@ -255,7 +270,11 @@ std::vector<char> arma1Model(bool withMass = false)
 
     b.u32(0); // named selections
     b.u32(1); b.asciiz("class"); b.asciiz("house"); // named properties
-    b.u32(0); // keyframes
+    b.u32(withSourceMotion ? 1 : 0);
+    if (withSourceMotion)
+    {
+        b.f32(.25f); b.u32(1); b.vec3(500, 600, 700);
+    }
 
     b.i32(static_cast<int32_t>(0xff000000)); // colour top
     b.i32(static_cast<int32_t>(0xff000000)); // colour
@@ -279,7 +298,11 @@ std::vector<char> arma1Model(bool withMass = false)
     b.vec3(0.0f, 1.0f, 0.0f);
     b.i32(3); b.boolean(true); b.vec3(0.0f, 0.0f, 1.0f); // normals, condensed
     b.i32(0);                                            // ST coordinates
-    b.i32(0);                                            // vertex bone references
+    b.i32(withSourceMotion ? 1 : 0);
+    if (withSourceMotion)
+    {
+        b.i32(1); b.u8(0); b.u8(255); b.zeros(6); // one raw bone-reference record
+    }
     b.i32(0);                                            // neighbour bone references
 
     // Measured on the whole A1 corpus: declared rest size is always the consumed
@@ -290,6 +313,77 @@ std::vector<char> arma1Model(bool withMass = false)
 }
 
 } // namespace
+
+TEST_CASE("ODOL40 source motion survives audit even when static IR discards it", "[p3d][odol][source-audit]")
+{
+    const auto data = arma1Model(false, true);
+    QIStream stream(const_cast<char*>(data.data()), static_cast<int>(data.size()));
+    BinaryReader reader(stream);
+    const auto raw = P3D::ReadOdol40StaticModel(reader, static_cast<int>(data.size()));
+    REQUIRE(raw.declaredLodBodiesDecoded);
+    REQUIRE(raw.lods[0].keyframesObserved);
+    REQUIRE(raw.lods[0].observedKeyframes == 1);
+    const auto model = ODOLLoader::loadFromBuffer(data.data(), static_cast<int>(data.size()), "original_audit40.p3d");
+    const auto& audit = model.sourceAudit;
+    REQUIRE(audit.producerVersion == 1);
+    REQUIRE(audit.sourceRevision == 40);
+    REQUIRE(audit.geometryCoverage == Poseidon::Model::SourceGeometryCoverage::DeclaredLodsDecoded);
+    REQUIRE(audit.declaredLods == 1);
+    REQUIRE(audit.decodedLods == 1);
+    REQUIRE(audit.observations == Poseidon::Model::SourceAuditAllObservations);
+    REQUIRE(audit.skeletonDeclared);
+    REQUIRE(audit.skeletonBones == 1);
+    REQUIRE(audit.directoryHasAnimations);
+    REQUIRE(audit.directoryAnimationClasses == 1);
+    REQUIRE(audit.keyframeCount == 1);
+    REQUIRE(audit.keyframePayloadDiscarded);
+    REQUIRE(audit.vertexBoneReferenceCount == 1);
+    // Audit fields must not enable animation/change the old converter behavior.
+    REQUIRE(model.allowAnimation == 0);
+    REQUIRE(model.lodLevels[0].mesh.frames.empty());
+    auto blob = Poseidon::ModelBlob::Serialize(model);
+    Poseidon::Model::Model restored;
+    REQUIRE(Poseidon::ModelBlob::Deserialize(blob.data(), blob.size(), restored));
+    REQUIRE(restored.sourceAudit.keyframeCount == 1);
+    REQUIRE(restored.sourceAudit.keyframePayloadDiscarded);
+    REQUIRE(restored.sourceAudit.skeletonBones == 1);
+    REQUIRE(restored.sourceAudit.directoryAnimationClasses == 1);
+    REQUIRE(restored.sourceAudit.vertexBoneReferenceCount == 1);
+    REQUIRE(restored.allowAnimation == 0);
+    REQUIRE(restored.lodLevels[0].mesh.frames.empty());
+    blob.resize(blob.size() - Poseidon::ModelBlob::kSourceAuditFooterBytes);
+    REQUIRE(Poseidon::ModelBlob::Deserialize(blob.data(), blob.size(), restored));
+    REQUIRE(restored.sourceAudit.producerVersion == 0);
+    REQUIRE(restored.sourceAudit.observations == 0);
+    REQUIRE(restored.sourceAudit.geometryCoverage == Poseidon::Model::SourceGeometryCoverage::Unknown);
+}
+
+TEST_CASE("ODOL40 explicitly observes source motion absence without claiming final static eligibility", "[p3d][odol][source-audit]")
+{
+    const auto data = arma1Model();
+    const auto model = ODOLLoader::loadFromBuffer(data.data(), static_cast<int>(data.size()), "original_audit40_static.p3d");
+    REQUIRE(model.sourceAudit.observations == Poseidon::Model::SourceAuditAllObservations);
+    REQUIRE_FALSE(model.sourceAudit.skeletonDeclared);
+    REQUIRE_FALSE(model.sourceAudit.directoryHasAnimations);
+    REQUIRE(model.sourceAudit.keyframeCount == 0);
+    REQUIRE_FALSE(model.sourceAudit.keyframePayloadDiscarded);
+    REQUIRE(model.sourceAudit.vertexBoneReferenceCount == 0);
+}
+
+TEST_CASE("Raw ODOL conversion cannot invent decoder coverage or relabel its revision", "[p3d][odol][source-audit]")
+{
+    const auto data = arma1Model();
+    QIStream stream(const_cast<char*>(data.data()), int(data.size()));
+    BinaryReader reader(stream);
+    auto raw = P3D::ReadOdol40StaticModel(reader, int(data.size()));
+    uint32_t targetRevision = 40;
+    SECTION("caller assembled data lacks declared-body proof") { raw.declaredLodBodiesDecoded = false; }
+    SECTION("decoded40 cannot become audited54") { targetRevision = 54; }
+    const auto converted = ODOLLoader::convertStaticModel(raw, "original_raw_audit.p3d", targetRevision);
+    REQUIRE(converted.sourceAudit.producerVersion == 0);
+    REQUIRE(converted.sourceAudit.observations == 0);
+    REQUIRE(converted.sourceAudit.geometryCoverage == Poseidon::Model::SourceGeometryCoverage::Unknown);
+}
 
 TEST_CASE("An ODOL 40 model closes on its declared boundary", "[p3d][odol][ast-013]")
 {

@@ -2,6 +2,7 @@
 
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
 #include <Poseidon/World/Model/ModelMemory.hpp>
+#include <Poseidon/World/Model/StaticSourceAudit.hpp>
 #include <Poseidon/World/Terrain/SimulationCoverageIndex.hpp>
 #include <Poseidon/World/Terrain/WorldObjectPlacementFrame.hpp>
 
@@ -137,6 +138,7 @@ inline bool SimulationSourceAdmissible(const Model::Model& model)
     if ((model.sourceFormat != "MLOD" && model.sourceFormat != "ODOL") ||
         model.allowAnimation || model.lodLevels.empty() || model.lodLevels.size() > MAX_LOD_LEVELS)
         return false;
+    if (model.sourceFormat == "ODOL" && !Model::HasStaticOdolSourceAudit(model)) return false;
     for (const auto& lod : model.lodLevels)
     {
         if (!lod.mesh.proxies.empty() || !lod.mesh.frames.empty()) return false;

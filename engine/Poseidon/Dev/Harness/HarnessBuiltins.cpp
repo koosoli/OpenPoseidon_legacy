@@ -406,6 +406,10 @@ void RegisterScreenshot(HarnessServer& hs)
             cJSON_AddNumberToObject(result, "parseReservedBytes", static_cast<double>(state.prep.parseReservedBytes));
             cJSON_AddNumberToObject(result, "conversionReservedBytes", static_cast<double>(state.prep.conversionReservedBytes));
             cJSON_AddNumberToObject(result, "radiusCertificateBytes", static_cast<double>(state.prep.radiusCertificateBytes));
+            cJSON_AddNumberToObject(result, "sourceEnvelopeBytes", static_cast<double>(state.prep.sourceEnvelopeBytes));
+            cJSON_AddNumberToObject(result, "sourceEnvelopeScans", static_cast<double>(state.prep.sourceEnvelopeScans));
+            cJSON_AddNumberToObject(result, "sourceEnvelopePublished", static_cast<double>(state.prep.sourceEnvelopePublished));
+            cJSON_AddNumberToObject(result, "sourceEnvelopeMs", state.prep.sourceEnvelopeMs);
             cJSON_AddNumberToObject(result, "bc3PolicyBytes", static_cast<double>(state.prep.bc3PolicyBytes));
             cJSON_AddNumberToObject(result, "textureEncodeReservedBytes", static_cast<double>(state.prep.textureEncodeReservedBytes));
             cJSON_AddNumberToObject(result, "peakTextureEncodeReservedBytes", static_cast<double>(state.prep.peakTextureEncodeReservedBytes));

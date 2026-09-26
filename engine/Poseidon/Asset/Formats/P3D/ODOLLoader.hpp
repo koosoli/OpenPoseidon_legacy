@@ -199,6 +199,37 @@ class ODOLLoader
         model.andHints        = static_cast<RenderHints>(info.andHints);
         model.orHints         = static_cast<RenderHints>(info.orHints);
 
+        // Raw SOURCE facts, independent of what the static IR converter keeps.
+        // Public conversion of an unverified manually assembled struct does
+        // not establish declared-body coverage or known absence of motion.
+        const bool auditedRevision = sourceVersion == 40 || sourceVersion == 48 || sourceVersion == 49 ||
+            sourceVersion == 50 || sourceVersion == 52 || sourceVersion == 54 || sourceVersion == 73;
+        if (auditedRevision && source.decodedRevision == sourceVersion && source.declaredLodBodiesDecoded && !source.lods.empty() &&
+            source.lods.size() == source.directory.starts.size() && source.lods.size() == info.resolutions.size())
+        {
+            auto& audit = model.sourceAudit;
+            audit.producerVersion = 1;
+            audit.sourceRevision = sourceVersion;
+            audit.geometryCoverage = Poseidon::Model::SourceGeometryCoverage::DeclaredLodsDecoded;
+            audit.declaredLods = uint32_t(source.directory.starts.size());
+            audit.decodedLods = uint32_t(source.lods.size());
+            audit.observations = Poseidon::Model::SourceAuditAllObservations;
+            audit.skeletonDeclared = !source.directory.skeletonName.empty();
+            audit.skeletonBones = uint32_t(source.directory.bones.size());
+            audit.directoryHasAnimations = source.directory.hasAnimations;
+            audit.directoryAnimationClasses = uint32_t(source.directory.animations.classes.size());
+            for (const auto& lod : source.lods)
+            {
+                // Parser limits bound these sums to <=100 LODs x1M records.
+                audit.keyframeCount += lod.observedKeyframes;
+                audit.vertexBoneReferenceCount += uint32_t(lod.rest.vertexBoneRefs.size());
+                audit.neighbourBoneReferenceCount += uint32_t(lod.rest.neighbourBoneRefs.size());
+                if (!lod.keyframesObserved)
+                    audit.observations &= ~uint32_t(Poseidon::Model::SourceAuditObservation::Keyframes);
+            }
+            audit.keyframePayloadDiscarded = audit.keyframeCount != 0;
+        }
+
         model.lodLevels.reserve(source.lods.size());
         for (size_t i = 0; i < source.lods.size(); ++i)
         {
@@ -858,6 +889,24 @@ class ODOLLoader
         model.sourcePath   = sourcePath;
         model.sourceFormat = "ODOL";
         model.sourceVersion = odol.header.version;
+
+        // ODOL7's whole declared LOD loop and stored animation flag have been
+        // read by readModel. Skeleton/bone-reference fields do not exist in
+        // that wire format; their absence is format evidence, not IR inference.
+        if (odol.header.version == 7 && !odol.lods.empty() && odol.lods.size() == odol.header.lodCount &&
+            odol.resolutions.size() == odol.header.lodCount)
+        {
+            auto& audit = model.sourceAudit;
+            audit.producerVersion = 1;
+            audit.sourceRevision = 7;
+            audit.geometryCoverage = Poseidon::Model::SourceGeometryCoverage::DeclaredLodsDecoded;
+            audit.observations = Poseidon::Model::SourceAuditAllObservations;
+            audit.declaredLods = odol.header.lodCount;
+            audit.decodedLods = uint32_t(odol.lods.size());
+            audit.directoryHasAnimations = odol.allowAnimation;
+            for (const auto& lod : odol.lods) audit.keyframeCount += uint32_t(lod.frames.frames.size());
+            // These frames are retained by convertLOD; no pose claim follows.
+        }
 
         model.lodLevels.reserve(odol.lods.size());
         for (size_t i = 0; i < odol.lods.size(); ++i)

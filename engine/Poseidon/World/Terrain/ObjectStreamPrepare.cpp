@@ -264,6 +264,13 @@ struct ObjectStreamPreparer::Impl
         RadiusProvenance provenance = RadiusProvenance::None;
     };
     std::vector<RadiusSlot> radiusCertificates; // no retained IR, shape, or duplicate path strings
+    struct SourceEnvelopeSlot
+    {
+        bool requested = false;
+        bool attempted = false;
+        Streaming::StaticSourceEnvelope envelope;
+    };
+    std::vector<SourceEnvelopeSlot> sourceEnvelopes; // lazy, bounded, numeric only
 
     // Caller holds mutex. RadiusSlot belongs to this generation's inventory;
     // Reset destroys/reinitializes the slots, while payload retirement leaves them alone.
@@ -532,6 +539,7 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
         const uint64_t gen = generation.load(std::memory_order_relaxed);
         const std::string path = paths[index];
         const bool prepareBc3 = prepareCompositeBc3[index] != 0;
+        const bool prepareEnvelope = index < sourceEnvelopes.size() && sourceEnvelopes[index].requested;
         const render::DdsPublicationToken publication{ddsPublication, index,
             ddsPublication ? ddsPublication->Epoch(index) : 0};
         const auto packedRead = packedReads[index];
@@ -611,6 +619,24 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
         }
         const double ms =
             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+        // Canonical loaders (including owned DDC deserialization) return a fresh
+        // IR. External loaders may share/mutate theirs: never inspect it here.
+        Streaming::StaticSourceEnvelope sourceEnvelope;
+        bool envelopeScanned = false;
+        double envelopeMs = 0.0;
+        if (prepareEnvelope && model && !nativeArchiveModel)
+        {
+            const auto envelopeStart = std::chrono::steady_clock::now();
+            try
+            {
+                sourceEnvelope = Streaming::BuildStaticSourceEnvelope(*model, gen,
+                    Streaming::StaticSourceCoverage::FullCompiledIR);
+                envelopeScanned = true;
+            }
+            catch (...) {} // optional evidence cannot fail normal preparation
+            envelopeMs = std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - envelopeStart).count();
+        }
 
         // ---- unlocked: the texture prepare (stage 2) ------------------------------------
         // The IR names its face textures (Model::Material::texturePath / embeddedStages);
@@ -780,6 +806,8 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
         stats.texSkipped += texSkipped;
         stats.texUnreadable += texUnreadable;
         stats.texMs += texMs;
+        stats.sourceEnvelopeScans += envelopeScanned;
+        stats.sourceEnvelopeMs += envelopeMs;
         if (gen != generation.load(std::memory_order_relaxed) || stale[index])
         {
             // Do not republish work discarded by a world or camera-window change.
@@ -794,6 +822,13 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
         stats.workerMs += ms;
         stats.workerMaxMs = std::max(stats.workerMaxMs, ms);
         const bool parseFailed = !model && opened;
+        if (prepareEnvelope && index < sourceEnvelopes.size() && sourceEnvelopes[index].requested)
+        {
+            auto& slot = sourceEnvelopes[index];
+            slot.attempted = true;
+            slot.envelope = sourceEnvelope;
+            stats.sourceEnvelopePublished += sourceEnvelope.State() == Streaming::StaticSourceEnvelopeState::SourceEvidence;
+        }
         if (model)
         {
             // Canonical ODOL parses preserve the serialized engine sphere exactly
@@ -963,6 +998,8 @@ void ObjectStreamPreparer::Reset(const std::string* paths, size_t modelCount)
         std::vector<Impl::RadiusSlot>(modelCount).swap(_impl->radiusCertificates);
         _impl->stats.radiusCertificateBytes =
             _impl->radiusCertificates.capacity() * sizeof(Impl::RadiusSlot);
+        std::vector<Impl::SourceEnvelopeSlot>().swap(_impl->sourceEnvelopes);
+        _impl->stats.sourceEnvelopeBytes = 0;
         _impl->packedReads = std::move(packedReads);
         _impl->count = modelCount;
         _impl->states = modelCount > 0 ? std::make_unique<std::atomic<uint8_t>[]>(modelCount) : nullptr;
@@ -986,10 +1023,21 @@ void ObjectStreamPreparer::Reset(const std::string* paths, size_t modelCount)
 
 bool ObjectStreamPreparer::Request(uint32_t index)
 {
+    return RequestInternal(index, false) == SourceEnvelopeRequest::Requested;
+}
+
+ObjectStreamPreparer::SourceEnvelopeRequest ObjectStreamPreparer::RequestWithStaticSourceEnvelope(uint32_t index)
+{
+    if (!Foundation::IsMainThread()) return SourceEnvelopeRequest::WrongThread;
+    return RequestInternal(index, true);
+}
+
+ObjectStreamPreparer::SourceEnvelopeRequest ObjectStreamPreparer::RequestInternal(uint32_t index, bool sourceEnvelope)
+{
     std::lock_guard<std::mutex> lock(_impl->mutex);
     if (index >= _impl->count || _impl->workers.empty())
-        return false;
-    _impl->stale[index] = false;
+        return SourceEnvelopeRequest::Unavailable;
+    if (!sourceEnvelope) _impl->stale[index] = false; // preserve ordinary coalescing/rescue behavior
     const State current = _impl->Get(index);
     if (current != State::Unknown)
     {
@@ -999,13 +1047,27 @@ bool ObjectStreamPreparer::Request(uint32_t index)
             ++_impl->stats.coalescedStuck;
         else
             ++_impl->stats.coalesced;
-        return false;
+        return SourceEnvelopeRequest::TooLate;
     }
     if (_impl->queue.size() >= QueueLimit())
     {
         ++_impl->stats.rejectedFull;
-        return false;
+        return SourceEnvelopeRequest::Capacity;
     }
+    if (sourceEnvelope && (_impl->count > SourceEnvelopeInventoryLimit ||
+        _impl->paths[index].size() > SourceEnvelopeIdentityLimit)) return SourceEnvelopeRequest::Capacity;
+    if (sourceEnvelope && _impl->sourceEnvelopes.empty())
+    {
+        try { _impl->sourceEnvelopes.resize(_impl->count); }
+        catch (...) { return SourceEnvelopeRequest::Capacity; }
+        _impl->stats.sourceEnvelopeBytes = _impl->sourceEnvelopes.capacity() * sizeof(Impl::SourceEnvelopeSlot);
+    }
+    if (index < _impl->sourceEnvelopes.size())
+    {
+        _impl->sourceEnvelopes[index] = {};
+        _impl->sourceEnvelopes[index].requested = sourceEnvelope;
+    }
+    _impl->stale[index] = false;
     _impl->Set(index, State::Queued);
     // Only the captured owner may read the mutable developer checkbox.
     // Other callers retain ordinary preparation without this optional sidecar.
@@ -1018,7 +1080,23 @@ bool ObjectStreamPreparer::Request(uint32_t index)
     ++_impl->stats.queued;
     ++_impl->stats.requested;
     _impl->cv.notify_one();
-    return true;
+    return SourceEnvelopeRequest::Requested;
+}
+
+ObjectStreamPreparer::SourceEnvelopeSnapshot ObjectStreamPreparer::QueryStaticSourceEnvelope(uint32_t index) const
+{
+    SourceEnvelopeSnapshot out;
+    if (!Foundation::IsMainThread()) return out;
+    std::lock_guard<std::mutex> lock(_impl->mutex);
+    out.generation = _impl->generation.load(std::memory_order_relaxed);
+    if (index >= _impl->count || _impl->paths[index].size() > SourceEnvelopeIdentityLimit) return out;
+    out.modelIdentity = _impl->paths[index];
+    if (index < _impl->sourceEnvelopes.size())
+    {
+        out.attempted = _impl->sourceEnvelopes[index].attempted;
+        out.envelope = _impl->sourceEnvelopes[index].envelope;
+    }
+    return out;
 }
 
 ObjectStreamPreparer::State ObjectStreamPreparer::Query(uint32_t index) const
@@ -1090,6 +1168,7 @@ size_t ObjectStreamPreparer::DropStale(const uint32_t* epochs, size_t count, uin
             _impl->stale[i] = epochs[i] != currentEpoch;
             if (epochs[i] == currentEpoch)
                 continue;
+            if (i < _impl->sourceEnvelopes.size()) _impl->sourceEnvelopes[i] = {};
             const State state = _impl->Get(static_cast<uint32_t>(i));
             if (state == State::Ready)
             {

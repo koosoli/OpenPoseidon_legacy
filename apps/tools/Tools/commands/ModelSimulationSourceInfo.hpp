@@ -40,6 +40,17 @@ inline std::string FormatModelSimulationSourceInfo(const Poseidon::Model::Model&
            "No Shape adaptation, constructor/config resolution, or simulation Ready certification.\n";
     out << "Source: " << SimulationInfoQuoted(model.sourcePath) << '\n';
     out << "Format: " << SimulationInfoQuoted(model.sourceFormat) << " version=" << model.sourceVersion << '\n';
+    const auto& audit = model.sourceAudit;
+    out << "Source audit: producer=" << audit.producerVersion << " revision=" << audit.sourceRevision
+        << " geometryCoverage=" << uint32_t(audit.geometryCoverage) << " observations=" << audit.observations
+        << " declaredLods=" << audit.declaredLods << " decodedLods=" << audit.decodedLods << '\n';
+    out << "  directoryHasAnimations=" << audit.directoryHasAnimations
+        << " animationClasses=" << audit.directoryAnimationClasses << " skeletonDeclared=" << audit.skeletonDeclared
+        << " skeletonBones=" << audit.skeletonBones << " keyframes=" << audit.keyframeCount
+        << " keyframePayloadDiscarded=" << audit.keyframePayloadDiscarded
+        << " vertexBoneReferences=" << audit.vertexBoneReferenceCount
+        << " neighbourBoneReferences=" << audit.neighbourBoneReferenceCount << '\n';
+    out << "  Zero counts establish absence only when their corresponding observed bits are set.\n";
     out << "allowAnimation: " << model.allowAnimation << '\n';
     out << "LOD count: " << model.lodLevels.size() << '\n';
     const size_t count = std::min(model.lodLevels.size(), SimulationInfoMaxLods);

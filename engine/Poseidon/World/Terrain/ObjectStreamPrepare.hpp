@@ -77,6 +77,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <Poseidon/World/Terrain/StaticSourceEnvelope.hpp>
 
 namespace Poseidon
 {
@@ -178,6 +179,10 @@ class ObjectStreamPreparer
         double convertMs = 0.0;
         double convertMaxMs = 0.0;
         uint64_t radiusCertificateBytes = 0; // actual compact-slot vector capacity * sizeof(slot)
+        uint64_t sourceEnvelopeBytes = 0; // lazy opt-in slot capacity; default path allocates nothing
+        uint64_t sourceEnvelopeScans = 0;
+        uint64_t sourceEnvelopePublished = 0;
+        double sourceEnvelopeMs = 0.0;
         uint64_t bc3PolicyBytes = 0; // owner-snapshot vector capacity
         uint64_t ddsPublicationBytes = 0; // current bounded atomic inventory; excludes shared_ptr allocator overhead
         uint64_t textureEncodeReservedBytes = 0; // source + bounded optional BC3 workspace/output
@@ -221,6 +226,28 @@ class ObjectStreamPreparer
     // Main thread. Ask for model `index` to be parsed. Returns true if it was enqueued now;
     // false if it is already tracked (any state but Unknown) or the queue is full.
     bool Request(uint32_t index);
+    enum class SourceEnvelopeRequest : uint8_t { Requested, TooLate, Unavailable, Capacity, WrongThread };
+    static constexpr size_t SourceEnvelopeInventoryLimit = 65536;
+    static constexpr size_t SourceEnvelopeIdentityLimit = 4096;
+    // Owner-only opt-in, captured BEFORE parsing. Any already tracked state,
+    // including Queued, is TooLate; callers must explicitly request a fresh parse.
+    // Canonical loaders own an exclusive IR; external loaders are never scanned.
+    SourceEnvelopeRequest RequestWithStaticSourceEnvelope(uint32_t index);
+    struct SourceEnvelopeSnapshot
+    {
+        uint64_t generation = 0;
+        std::string modelIdentity; // exact owned inventory token, never an IR reference
+        bool attempted = false;
+        Streaming::StaticSourceEnvelope envelope;
+    };
+    // Source evidence only, not Plain/Ready or a live config conclusion. Numeric
+    // evidence survives Take, but DropStale and Reset invalidate it even after Take.
+    // Describes the ORIGINAL immutable parse snapshot. Pair Query + Take of the
+    // same Ready entry in one nonyielding owner operation (or maintain equivalent
+    // exact association). Never apply it to a subsequently mutated/reparsed IR.
+    // Generation is world/inventory identity, NOT a per-parse content revision;
+    // neither disk freshness nor validity of an old retained snapshot is implied.
+    SourceEnvelopeSnapshot QueryStaticSourceEnvelope(uint32_t index) const;
     // Main thread. Lock-free.
     State Query(uint32_t index) const;
     enum class RadiusState : uint8_t { Unknown, Certified };
@@ -282,6 +309,7 @@ class ObjectStreamPreparer
     Stats SnapshotStats() const;
 
   private:
+    SourceEnvelopeRequest RequestInternal(uint32_t index, bool sourceEnvelope);
     struct Impl;
     std::unique_ptr<Impl> _impl;
 };

@@ -224,11 +224,12 @@ inline std::vector<Odol73NamedSelection> ReadOdol49NamedSelections(BinaryReader&
     return result;
 }
 
-inline void ReadOdol49Keyframes(BinaryReader& reader, uint32_t end)
+inline uint32_t ReadOdol49Keyframes(BinaryReader& reader, uint32_t end)
 {
     const uint32_t count = reader.read<uint32_t>(); if (count > 4096) throw std::runtime_error("ODOL A2 LOD has too many keyframes");
     for (uint32_t i = 0; i < count; ++i) { (void)reader.read<float>(); const uint32_t vertices = reader.read<uint32_t>(); if (vertices > 1'000'000 || static_cast<uint64_t>(vertices) * sizeof(Vector3) > reader.remaining()) throw std::runtime_error("ODOL A2 keyframe vertex count is invalid"); reader.seekRelative(static_cast<int>(vertices * sizeof(Vector3))); }
     RequireOdol49Range(reader, end, "keyframe data");
+    return count;
 }
 
 inline Odol73StaticRestData ReadOdol49StaticRestData(BinaryReader& reader, const Odol73StaticLodHeader& header, const Odol73StaticPreRestData& preRest, uint32_t end, bool hasRestClip)
@@ -253,7 +254,7 @@ inline Odol73StaticLod ReadOdol49StaticLod(BinaryReader& reader, uint32_t start,
 {
     Odol73StaticLod lod; std::vector<int32_t> oldClip; const bool hasRestClip = revision >= 50;
     lod.header = ReadOdol49StaticLodHeader(reader, start, end, oldClip, revision); lod.materials = ReadOdol73EmbeddedMaterials(reader);
-    lod.pointToVertex = ReadOdol49VertexIndexArray(reader, "point-to-vertex map"); lod.vertexToPoint = ReadOdol49VertexIndexArray(reader, "vertex-to-point map"); lod.polygons = ReadOdol49Polygons(reader, lod.header.vertexCount, end); lod.sections = ReadOdol49StaticSections(reader, end); lod.namedSelections = ReadOdol49NamedSelections(reader, end); lod.namedProperties = ReadOdol73NamedProperties(reader, end); ReadOdol49Keyframes(reader, end);
+    lod.pointToVertex = ReadOdol49VertexIndexArray(reader, "point-to-vertex map"); lod.vertexToPoint = ReadOdol49VertexIndexArray(reader, "vertex-to-point map"); lod.polygons = ReadOdol49Polygons(reader, lod.header.vertexCount, end); lod.sections = ReadOdol49StaticSections(reader, end); lod.namedSelections = ReadOdol49NamedSelections(reader, end); lod.namedProperties = ReadOdol73NamedProperties(reader, end); lod.observedKeyframes = ReadOdol49Keyframes(reader, end); lod.keyframesObserved = true;
     lod.endData.colorTop = reader.read<int32_t>(); lod.endData.color = reader.read<int32_t>(); lod.endData.special = reader.read<int32_t>(); lod.endData.vertexBoneRefIsSimple = reader.read<bool>(); lod.endData.restDataSize = reader.read<uint32_t>();
     lod.rest = ReadOdol49StaticRestData(reader, lod.header, lod.endData, end, hasRestClip); if (!hasRestClip) lod.rest.clip = std::move(oldClip);
     if (reader.tell() != static_cast<int>(end)) throw std::runtime_error("ODOL A2 LOD did not close at its declared boundary"); return lod;
@@ -261,7 +262,7 @@ inline Odol73StaticLod ReadOdol49StaticLod(BinaryReader& reader, uint32_t start,
 
 inline Odol73StaticModel ReadOdolA2StaticModel(BinaryReader& reader, int fileSize, uint32_t revision)
 {
-    Odol73StaticModel model; model.directory = ReadOdol49StaticDirectory(reader, fileSize, revision); model.lods.reserve(model.directory.starts.size()); for (size_t i = 0; i < model.directory.starts.size(); ++i) model.lods.push_back(ReadOdol49StaticLod(reader, model.directory.starts[i], model.directory.ends[i], revision)); return model;
+    Odol73StaticModel model; model.directory = ReadOdol49StaticDirectory(reader, fileSize, revision); model.lods.reserve(model.directory.starts.size()); for (size_t i = 0; i < model.directory.starts.size(); ++i) model.lods.push_back(ReadOdol49StaticLod(reader, model.directory.starts[i], model.directory.ends[i], revision)); model.declaredLodBodiesDecoded = true; model.decodedRevision = revision; return model;
 }
 inline Odol73StaticModel ReadOdol48StaticModel(BinaryReader& reader, int fileSize) { return ReadOdolA2StaticModel(reader, fileSize, 48); }
 inline Odol73StaticModel ReadOdol49StaticModel(BinaryReader& reader, int fileSize) { return ReadOdolA2StaticModel(reader, fileSize, 49); }

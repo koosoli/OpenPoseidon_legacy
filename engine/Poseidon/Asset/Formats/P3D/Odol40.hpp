@@ -389,7 +389,7 @@ inline std::vector<Odol73NamedSelection> ReadOdol40NamedSelections(BinaryReader&
     return result;
 }
 
-inline void ReadOdol40Keyframes(BinaryReader& reader, uint32_t end)
+inline uint32_t ReadOdol40Keyframes(BinaryReader& reader, uint32_t end)
 {
     const uint32_t count = reader.read<uint32_t>();
     if (count > 4096)
@@ -403,6 +403,7 @@ inline void ReadOdol40Keyframes(BinaryReader& reader, uint32_t end)
         reader.seekRelative(static_cast<int>(vertices * sizeof(Vector3)));
     }
     RequireOdol40Range(reader, end, "keyframe data");
+    return count;
 }
 
 // A revision-40 UV set: full-float (u,v) pairs, in a condensed array.  Nothing
@@ -508,7 +509,8 @@ inline Odol73StaticLod ReadOdol40StaticLod(BinaryReader& reader, uint32_t start,
     lod.sections      = ReadOdol40StaticSections(reader, end);
     lod.namedSelections = ReadOdol40NamedSelections(reader, end);
     lod.namedProperties = ReadOdol73NamedProperties(reader, end);
-    ReadOdol40Keyframes(reader, end);
+    lod.observedKeyframes = ReadOdol40Keyframes(reader, end);
+    lod.keyframesObserved = true;
     lod.endData.colorTop             = reader.read<int32_t>();
     lod.endData.color                = reader.read<int32_t>();
     lod.endData.special              = reader.read<int32_t>();
@@ -528,6 +530,8 @@ inline Odol73StaticModel ReadOdol40StaticModel(BinaryReader& reader, int fileSiz
     model.lods.reserve(model.directory.starts.size());
     for (size_t i = 0; i < model.directory.starts.size(); ++i)
         model.lods.push_back(ReadOdol40StaticLod(reader, model.directory.starts[i], model.directory.ends[i]));
+    model.declaredLodBodiesDecoded = true;
+    model.decodedRevision = 40;
     return model;
 }
 

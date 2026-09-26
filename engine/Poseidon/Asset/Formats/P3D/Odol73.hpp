@@ -301,6 +301,8 @@ struct Odol73StaticRestData
 
 struct Odol73StaticLod
 {
+    uint32_t observedKeyframes = 0;
+    bool keyframesObserved = false;
     Odol73StaticLodHeader header;
     std::vector<Odol73EmbeddedMaterial> materials;
     std::vector<int32_t> pointToVertex;
@@ -316,6 +318,9 @@ struct Odol73StaticLod
 
 struct Odol73StaticModel
 {
+    // Only the complete declared-boundary readers establish this proof.
+    bool declaredLodBodiesDecoded = false;
+    uint32_t decodedRevision = 0;
     Odol73LodDirectory directory;
     std::vector<Odol73StaticLod> lods;
 };
@@ -1163,6 +1168,7 @@ inline Odol73StaticLod ReadOdol73StaticLod(BinaryReader& reader, uint32_t start,
     lod.namedSelections = ReadOdol73NamedSelections(reader, end);
     lod.namedProperties = ReadOdol73NamedProperties(reader, end);
     lod.endData = ReadOdol73StaticPreRestData(reader, end);
+    lod.keyframesObserved = true; // Nonzero counts are refused by this reader.
     lod.rest = ReadOdol73StaticRestData(reader, lod.header, lod.endData, end);
     lod.trailingByte = ReadOdol73TrailingLodByte(reader, end);
     return lod;
@@ -1175,6 +1181,8 @@ inline Odol73StaticModel ReadOdol73StaticModel(BinaryReader& reader, int fileSiz
     model.lods.reserve(model.directory.starts.size());
     for (size_t i = 0; i < model.directory.starts.size(); ++i)
         model.lods.push_back(ReadOdol73StaticLod(reader, model.directory.starts[i], model.directory.ends[i]));
+    model.declaredLodBodiesDecoded = true;
+    model.decodedRevision = 73;
     return model;
 }
 

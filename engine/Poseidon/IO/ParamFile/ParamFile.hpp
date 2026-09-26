@@ -281,6 +281,8 @@ class ParamClass : public ParamEntry
     int GetEntryCount() const override { return _entries.Size(); }
     const ParamEntry& GetEntry(int i) const override { return *_entries[i]; }
     const char* GetBaseName() const { return _base.NotNull() ? _base->GetName() : nullptr; }
+    // Presence is independent of the base's name (runtime bases may be unnamed).
+    bool HasBase() const { return _base.NotNull(); }
 
     bool IsDerivedFrom(const ParamClass& parent) const;
 

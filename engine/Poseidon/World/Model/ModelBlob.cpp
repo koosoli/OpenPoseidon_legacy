@@ -744,6 +744,24 @@ void Serialize(const Poseidon::Model::Model& m, std::vector<uint8_t>& out)
     w.I32(m.pathsLODIndex);
     w.I32(m.hitpointsLODIndex);
     w.I32(m.remarksFlags);
+
+    const auto& audit = m.sourceAudit;
+    w.U32(kSourceAuditTag);
+    w.U32(kSourceAuditVersion);
+    w.U32(kSourceAuditPayloadBytes);
+    w.U32(audit.producerVersion);
+    w.U32(audit.sourceRevision);
+    w.U32(uint32_t(audit.geometryCoverage));
+    w.U32(audit.observations);
+    w.U32(audit.declaredLods);
+    w.U32(audit.decodedLods);
+    w.U32(audit.skeletonBones);
+    w.U32(audit.directoryAnimationClasses);
+    w.U32(audit.keyframeCount);
+    w.U32(audit.vertexBoneReferenceCount);
+    w.U32(audit.neighbourBoneReferenceCount);
+    w.U32((audit.directoryHasAnimations ? 1u : 0u) | (audit.skeletonDeclared ? 2u : 0u) |
+          (audit.keyframePayloadDiscarded ? 4u : 0u));
 }
 
 std::vector<uint8_t> Serialize(const Poseidon::Model::Model& m)
@@ -862,6 +880,53 @@ bool Deserialize(const void* data, size_t size, Poseidon::Model::Model& m)
     m.pathsLODIndex         = r.I32();
     m.hitpointsLODIndex     = r.I32();
     m.remarksFlags          = r.I32();
+
+    if (!r.ok) return false;
+    if (r.at == r.n) return true; // Old base v1: sourceAudit stays wholly Unknown.
+    if (r.Remaining() != kSourceAuditFooterBytes || r.U32() != kSourceAuditTag ||
+        r.U32() != kSourceAuditVersion || r.U32() != kSourceAuditPayloadBytes) return false;
+    ModelSourceAudit audit;
+    audit.producerVersion = r.U32();
+    audit.sourceRevision = r.U32();
+    const auto coverage = r.U32();
+    audit.observations = r.U32();
+    audit.declaredLods = r.U32();
+    audit.decodedLods = r.U32();
+    audit.skeletonBones = r.U32();
+    audit.directoryAnimationClasses = r.U32();
+    audit.keyframeCount = r.U32();
+    audit.vertexBoneReferenceCount = r.U32();
+    audit.neighbourBoneReferenceCount = r.U32();
+    const auto flags = r.U32();
+    if (!r.ok || coverage > uint32_t(SourceGeometryCoverage::DeclaredLodsDecoded) ||
+        audit.producerVersion > 1 || (audit.observations & ~SourceAuditAllObservations) || (flags & ~7u)) return false;
+    audit.geometryCoverage = SourceGeometryCoverage(coverage);
+    audit.directoryHasAnimations = (flags & 1u) != 0;
+    audit.skeletonDeclared = (flags & 2u) != 0;
+    audit.keyframePayloadDiscarded = (flags & 4u) != 0;
+    if (!audit.producerVersion)
+    {
+        if (coverage || audit.sourceRevision || audit.observations || audit.declaredLods || audit.decodedLods ||
+            audit.skeletonBones || audit.directoryAnimationClasses || audit.keyframeCount ||
+            audit.vertexBoneReferenceCount || audit.neighbourBoneReferenceCount || flags) return false;
+    }
+    else
+    {
+        const auto revision = audit.sourceRevision;
+        if (m.sourceFormat != "ODOL" || revision != m.sourceVersion || (revision != 7 && revision != 40 && revision != 48 && revision != 49 &&
+            revision != 50 && revision != 52 && revision != 54 && revision != 73)) return false;
+        if (audit.declaredLods > 100 || audit.decodedLods > audit.declaredLods ||
+            audit.decodedLods != m.lodLevels.size()) return false;
+        if (coverage && (!audit.declaredLods || audit.decodedLods != audit.declaredLods)) return false;
+        if ((!audit.Observed(SourceAuditObservation::Skeleton) && (audit.skeletonBones || audit.skeletonDeclared)) ||
+            (!audit.Observed(SourceAuditObservation::DirectoryAnimation) && (audit.directoryAnimationClasses || audit.directoryHasAnimations)) ||
+            (!audit.Observed(SourceAuditObservation::BoneReferences) && (audit.vertexBoneReferenceCount || audit.neighbourBoneReferenceCount)) ||
+            (!audit.Observed(SourceAuditObservation::Keyframes) && (audit.keyframeCount || audit.keyframePayloadDiscarded)) ||
+            (audit.keyframePayloadDiscarded && !audit.keyframeCount) ||
+            (audit.directoryAnimationClasses && !audit.directoryHasAnimations) ||
+            (audit.skeletonBones && !audit.skeletonDeclared)) return false;
+    }
+    m.sourceAudit = audit;
 
     // Trailing bytes are as much a sign of a wrong reading as missing ones, so
     // an entry that decodes but does not END where the writer stopped is a miss.

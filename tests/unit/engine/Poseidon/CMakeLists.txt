@@ -261,13 +261,16 @@ list(APPEND POSEIDON_TEST_SOURCES
     World/Model/test_shape_adapter_proxy.cpp
     World/Model/test_preparer_determinism.cpp
     World/Model/test_preparer_radius_certificate.cpp
+    World/Model/test_preparer_static_source_envelope.cpp
     World/Model/test_preparer_native_bc3.cpp
     World/test_simulation_object_coverage.cpp
     World/test_simulation_residency.cpp
     World/test_simulation_fire_collision.cpp
     World/test_static_source_envelope.cpp
+    World/test_static_plain_route_probe.cpp
     World/Model/test_dds_publication_token.cpp
     World/Model/test_model_simulation_source_info.cpp
+    World/Model/test_model_source_audit.cpp
     Graphics/Textures/test_bc3_prepared_sidecar.cpp
     World/Model/test_stream_texture_names.cpp
     World/Model/test_owned_model_read.cpp

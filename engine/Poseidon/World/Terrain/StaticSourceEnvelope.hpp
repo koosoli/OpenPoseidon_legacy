@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Poseidon/World/Model/Model.hpp>
+#include <Poseidon/World/Model/StaticSourceAudit.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -111,6 +112,8 @@ inline StaticSourceEnvelope BuildStaticSourceEnvelope(const Model::Model& model,
     if (!generation) refuse(StaticSourceEnvelopeReason::Generation);
     if (coverage != StaticSourceCoverage::FullCompiledIR) refuse(StaticSourceEnvelopeReason::IncompleteSource);
     if (model.sourceFormat != "ODOL") refuse(StaticSourceEnvelopeReason::Format);
+    if (model.sourceFormat == "ODOL" && !Model::HasStaticOdolSourceAudit(model))
+        refuse(StaticSourceEnvelopeReason::IncompleteSource);
     const auto payload = StaticSourceDetail::BoundedPayloadBytes(model);
     if (!payload) { refuse(StaticSourceEnvelopeReason::Capacity); return out; }
     out._payloadBytes = *payload;

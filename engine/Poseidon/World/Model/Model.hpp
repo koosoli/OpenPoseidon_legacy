@@ -334,7 +334,33 @@ struct LODLevel {
         : resolution(resolution), purpose(ClassifyLodResolution(resolution)), mesh(mesh) {}
 };
 
+enum class SourceGeometryCoverage : uint32_t { Unknown, DeclaredLodsDecoded };
+enum class SourceAuditObservation : uint32_t
+{
+    DirectoryAnimation = 1 << 0, Skeleton = 1 << 1,
+    BoneReferences = 1 << 2, Keyframes = 1 << 3
+};
+inline constexpr uint32_t SourceAuditAllObservations = 0x0f;
+
+// Neutral SOURCE facts, never inferred from empty IR arrays or compile success.
+// Observed bits include known absence. Geometry coverage means declared LOD
+// bodies decoded, not correct physics/animation or final object readiness.
+// Never enables animation or changes rendering policy. Old blobs and unaudited
+// converters leave producerVersion zero.
+struct ModelSourceAudit
+{
+    uint32_t producerVersion = 0, sourceRevision = 0;
+    SourceGeometryCoverage geometryCoverage = SourceGeometryCoverage::Unknown;
+    uint32_t observations = 0, declaredLods = 0, decodedLods = 0;
+    uint32_t skeletonBones = 0, directoryAnimationClasses = 0;
+    uint32_t keyframeCount = 0, vertexBoneReferenceCount = 0, neighbourBoneReferenceCount = 0;
+    bool directoryHasAnimations = false, skeletonDeclared = false;
+    bool keyframePayloadDiscarded = false;
+    bool Observed(SourceAuditObservation fact) const { return (observations & uint32_t(fact)) != 0; }
+};
+
 struct Model {
+    ModelSourceAudit sourceAudit;
     // LOD levels sorted by resolution, highest detail first
     std::vector<LODLevel> lodLevels;
 
@@ -453,4 +479,3 @@ struct Model {
 
 } // namespace Model
 } // namespace Poseidon
-

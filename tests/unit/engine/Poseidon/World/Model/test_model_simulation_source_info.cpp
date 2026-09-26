@@ -26,7 +26,25 @@ TEST_CASE("Raw simulation source report retains authored properties and unsafe a
     CHECK(output.find("proxies=1 frames=1 selections=1 proxySelections=1 weightedSelections=1 nonUnitSourceWeights=2") != std::string::npos);
     CHECK(output.find("nonfinitePositions=1") != std::string::npos);
     CHECK(output.find("source completeness is not certified") != std::string::npos);
+    CHECK(output.find("Source audit: producer=0 revision=0 geometryCoverage=0 observations=0") != std::string::npos);
     CHECK(output.find("No Shape adaptation, constructor/config resolution, or simulation Ready certification") != std::string::npos);
+}
+
+TEST_CASE("Source report exposes discarded authored motion independently of empty IR frames", "[tools][simulation-source-info]")
+{
+    Poseidon::Model::Model model;
+    model.sourceFormat = "ODOL"; model.sourceVersion = 54;
+    auto& audit = model.sourceAudit;
+    audit.producerVersion = 1; audit.sourceRevision = 54;
+    audit.geometryCoverage = Poseidon::Model::SourceGeometryCoverage::DeclaredLodsDecoded;
+    audit.observations = Poseidon::Model::SourceAuditAllObservations;
+    audit.declaredLods = audit.decodedLods = 1;
+    audit.keyframeCount = 2; audit.keyframePayloadDiscarded = true;
+    model.lodLevels.emplace_back(1.f);
+    const auto output = PoseidonTools::FormatModelSimulationSourceInfo(model);
+    CHECK(output.find("keyframes=2 keyframePayloadDiscarded=1") != std::string::npos);
+    CHECK(output.find("proxies=0 frames=0") != std::string::npos);
+    CHECK(output.find("observations=15 declaredLods=1 decodedLods=1") != std::string::npos);
 }
 
 TEST_CASE("Raw simulation source report bounds rows and strings and escapes embedded control bytes", "[tools][simulation-source-info]")

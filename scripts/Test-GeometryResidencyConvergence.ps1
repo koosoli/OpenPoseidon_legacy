@@ -110,6 +110,9 @@ try {
         $state = Send @{cmd = 'stream_residency'}
         if (!$state.gpuMemoryValid) { throw 'GPU memory snapshot unavailable' }
         foreach ($field in $resourceFields) { if ($null -eq $state.$field) { throw "Missing resource field $field" } }
+        foreach ($field in @('sourceEnvelopeBytes', 'sourceEnvelopeScans', 'sourceEnvelopePublished', 'sourceEnvelopeMs')) {
+            if ($null -eq $state.$field -or $state.$field -ne 0) { throw "Default-off source-envelope work changed: $field" }
+        }
         $p.Refresh()
         $sample = [pscustomobject]@{utc = [DateTime]::UtcNow.ToString('o'); phase = $phase; state = $state
             processPrivateBytes = $p.PrivateMemorySize64; processWorkingSetBytes = $p.WorkingSet64}

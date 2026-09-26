@@ -47,18 +47,22 @@ struct Model;
 //      point at arbitrary bytes.
 //
 // WHAT IT IS NOT. It is not an asset format and nothing outside the cache should
-// read or write it. It has no compatibility promise: `kFormatVersion` is bumped
-// whenever a field is added, moved or reinterpreted, and every entry written by
-// an older version becomes a miss. That is the whole compatibility story, and it
-// is why the version is in the cache key as well as in the blob.
+// read or write it. Base-layout changes bump kFormatVersion. The optional,
+// independently versioned source-audit footer preserves the existing base/key:
+// new readers accept old exact base blobs with Unknown audit; old readers reject
+// new trailing data and fall back to parsing. Missing facts never mean static.
 namespace ModelBlob
 {
 
 inline constexpr char     kMagic[4]      = {'P', 'M', 'D', 'L'};
-// Bump on ANY change to what Serialize writes -- a new field, a reordered one, a
-// widened one. This value is also fed into the cache key as an option, so a bump
-// invalidates every entry rather than reinterpreting it.
+// Bump on changes to the BASE layout. Optional audit facts use their own tagged
+// version below; retaining the base version/key keeps old blobs readable without
+// treating absent audit as known absence of motion.
 inline constexpr uint32_t kFormatVersion = 1;
+inline constexpr uint32_t kSourceAuditTag = 0x44554153; // "SAUD", little endian
+inline constexpr uint32_t kSourceAuditVersion = 1;
+inline constexpr uint32_t kSourceAuditPayloadBytes = 48;
+inline constexpr uint32_t kSourceAuditFooterBytes = 12 + kSourceAuditPayloadBytes;
 
 // Appends the model's whole IR to `out`. Deterministic: the same Model always
 // produces the same bytes, and no field is read from memory the writer did not
