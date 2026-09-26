@@ -2377,6 +2377,11 @@ void World::StepSimulation(float deltaT, float noAccDeltaT, Entity* cameraVehicl
 #else
                                     world.PerformAI(step.deltaT, step.noAccDeltaT);
 #endif
+                                    if (GLandscape && GLandscape->ModernSimulationResidencyEnabled())
+                                    {
+                                        Streaming::SimulationResidencyOwnerBoundary boundary;
+                                        GLandscape->PumpModernSimulationResidency(boundary);
+                                    }
                                     // Inside the fixed step, after the stage that decides.
                                     // Recording per FRAME instead would make the number of
                                     // entries depend on framerate, and two runs would not

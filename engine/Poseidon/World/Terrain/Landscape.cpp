@@ -6,6 +6,7 @@
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Terrain/SimulationResidencyState.hpp>
 #include <Poseidon/World/Scene/MapThings.hpp>
 #include <Poseidon/World/Scene/Thing.hpp>
 #include <Poseidon/AI/EntityAIType.hpp>
@@ -59,6 +60,7 @@ bool Landscape::s_enfusionRoadClutterClear = true;
 
 void Landscape::Init()
 {
+    ResetModernSimulationResidency();
     int i, x, z;
     // RFG-062: GLandscape is a reused singleton, so a world loaded after a native
     // Reforger one would otherwise inherit its surface names and grow Everon's clutter
@@ -1540,6 +1542,7 @@ void Landscape::SetTexture(int i, const char* name)
 
 Landscape::~Landscape()
 {
+    ResetModernSimulationResidency();
     ClearNativeFarResidency();
     // clear all objects
     int x, z;

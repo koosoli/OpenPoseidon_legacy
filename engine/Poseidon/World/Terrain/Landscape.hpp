@@ -7,6 +7,7 @@
 #include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
 #include <Poseidon/World/Terrain/ObjectStreamPrepare.hpp>
 #include <Poseidon/World/Terrain/SimulationObjectCoverage.hpp>
+#include <Poseidon/World/Terrain/SimulationResidency.hpp>
 
 #include <array>
 #include <chrono>
@@ -658,6 +659,11 @@ class Landscape : public SerializeClass
     };
     // Explicit script/save/network identities and mutated state outlive camera residency.
     // Sparse sets avoid adding per-placement overhead to multi-million-object worlds.
+    std::unique_ptr<Streaming::SimulationResidencyState> _modernSimulation;
+    void ResetModernSimulationResidency();
+    void EnsureModernSimulationResidency();
+    bool HasModernSimulationLease(uint32_t placement) const;
+    void PreserveModernSimulationModelRequests(std::vector<uint32_t>& epochs, uint32_t epoch) const;
     std::unordered_set<int> _modernRequiredObjects;
     std::unordered_set<int> _modernLogicalOnlyObjects;
     void RegisterModernObjectVisual(Object* object);
@@ -975,6 +981,16 @@ class Landscape : public SerializeClass
     // No-op for legacy worlds. Called by the WGPU terrain path once the live
     // camera exists; reevaluates for center or budget changes, drains pending work.
     void UpdateModernObjectResidency(Vector3Par cameraPosition);
+    // Experimental, default OFF. No load/pin/geometry work on a disabled call.
+    bool ModernSimulationResidencyEnabled() const;
+    Streaming::SimulationResidencyStatus QueueModernSimulationRegion(
+        Object& actor, Vector3Par from, Vector3Par to, double radius, bool automatic = false);
+    void ReleaseModernSimulationRegion(Object& actor);
+    Streaming::SimulationResidencyStatus ModernSimulationRegionStatus(const Object& actor) const;
+    Streaming::SimulationResidencyStats SnapshotModernSimulationResidency() const;
+    // Only World can mint the owner boundary, after its real background-AI join.
+    void PumpModernSimulationResidency(const Streaming::SimulationResidencyOwnerBoundary& boundary);
+
     // Harness-only budget injection; callers must opt in explicitly. No shipping UI policy.
     bool SetObjectStreamTestBudget(uint32_t budget);
     uint32_t ObjectStreamDesiredCount() const { return _modernObjectDesiredCount; }

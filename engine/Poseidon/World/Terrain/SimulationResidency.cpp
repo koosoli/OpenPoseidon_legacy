@@ -1,0 +1,470 @@
+#include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Terrain/SimulationResidencyState.hpp>
+#include <Poseidon/World/Terrain/ObjectStreamPrepare.hpp>
+#include <Poseidon/World/Model/ShapeAdapter.hpp>
+#include <Poseidon/World/World.hpp>
+#include <Poseidon/AI/EntityAI.hpp>
+#include <Poseidon/Foundation/Threads/ThreadAffinity.hpp>
+#include <chrono>
+#include <cstdlib>
+#include <cstring>
+#include <limits>
+
+namespace Poseidon
+{
+using namespace Streaming;
+namespace
+{
+using State = SimulationResidencyState;
+using Status = SimulationResidencyStatus;
+CoveragePoint Point(Vector3Par p) { return {p.X(), p.Y(), p.Z()}; }
+bool ValidRegion(const CoveragePoint& a, const CoveragePoint& b, double radius)
+{
+    if (!std::isfinite(radius) || radius < 0 || radius > EngineBroadphaseSafeMagnitude()) return false;
+    for (size_t i = 0; i < 3; ++i)
+        if (!std::isfinite(a[i]) || !std::isfinite(b[i]) ||
+            std::abs(a[i]) > EngineBroadphaseSafeMagnitude() || std::abs(b[i]) > EngineBroadphaseSafeMagnitude()) return false;
+    return true;
+}
+Status MetadataStatus(const State& s)
+{
+    if (s.stats.status == Status::CapacityExceeded) return Status::CapacityExceeded;
+    if (s.inventoryInvalid) return Status::Unknown;
+    if (!s.inventoryComplete) return Status::Pending;
+    bool pending = false;
+    for (const auto& g : s.groups)
+    {
+        if (g.status == State::ModelState::CapacityExceeded) return Status::CapacityExceeded;
+        if (g.status == State::ModelState::Unknown || !g.validRows) return Status::Unknown;
+        if (g.status != State::ModelState::Ready) pending = true;
+        else if (!g.members.empty() && (!g.shape || g.revision == 0 || g.shape->QueryPolicyRevision() != g.revision))
+            return Status::Unknown;
+    }
+    return pending ? Status::Pending : Status::Ready;
+}
+bool ActorUnchanged(const State::Region& r, const Object& actor)
+{
+    const auto speed = actor.ObjectSpeed();
+    return static_cast<Object*>(r.actor) == &actor && r.actorFrame == SimulationFrameSample(actor.Transform()) &&
+        r.actorSpeed == std::array<float, 3>{speed.X(), speed.Y(), speed.Z()} && r.actorRadius == actor.GetRadius();
+}
+bool Overlap(const CoverageEnvelope& box, const State::Region& r)
+{
+    // Conservative swept AABB: over-admission is permitted; omission is not.
+    for (size_t axis = 0; axis < 3; ++axis)
+        if (box.max[axis] < std::min(r.from[axis], r.to[axis]) - r.radius ||
+            box.min[axis] > std::max(r.from[axis], r.to[axis]) + r.radius) return false;
+    return true;
+}
+}
+
+bool Landscape::ModernSimulationResidencyEnabled() const
+{
+    static const bool enabled = [] { const char* v = std::getenv("WGR_SIMULATION_RESIDENCY"); return v && std::strcmp(v, "1") == 0; }();
+    return enabled && _modernObjectStreaming;
+}
+void Landscape::ResetModernSimulationResidency() { _modernSimulation.reset(); }
+void Landscape::EnsureModernSimulationResidency()
+{
+    if (!ModernSimulationResidencyEnabled() || !Foundation::IsMainThread() || _modernSimulation) return;
+    _modernSimulation = std::make_unique<State>();
+    auto& s = *_modernSimulation;
+    s.stats.status = Status::Pending;
+    s.stats.inventoryTotal = _modernObjectPlacements.size();
+    s.stats.models = _modernObjectModels.size();
+    if (_modernObjectModels.size() > SimulationMaxModels || _modernObjectPlacements.size() > SimulationMaxPlacements)
+    { s.stats.status = Status::CapacityExceeded; return; }
+    s.groups.resize(_modernObjectModels.size());
+    s.leaseCounts.resize(_modernObjectPlacements.size());
+    if (!_modernObjectPreparer) EnsureModernObjectPreparer();
+    if (!_modernObjectPreparer) s.inventoryInvalid = true;
+}
+bool Landscape::HasModernSimulationLease(uint32_t index) const
+{
+    return _modernSimulation && index < _modernSimulation->leaseCounts.size() && _modernSimulation->leaseCounts[index] != 0;
+}
+void Landscape::PreserveModernSimulationModelRequests(std::vector<uint32_t>& epochs, uint32_t epoch) const
+{
+    if (!_modernSimulation || epochs.size() != _modernSimulation->groups.size()) return;
+    for (size_t i = 0; i < epochs.size(); ++i)
+        if (!_modernSimulation->groups[i].members.empty() && _modernSimulation->groups[i].status == State::ModelState::Waiting)
+            epochs[i] = epoch;
+}
+Status Landscape::QueueModernSimulationRegion(Object& actor, Vector3Par from, Vector3Par to, double radius, bool automatic)
+{
+    if (!ModernSimulationResidencyEnabled()) return Status::Disabled;
+    if (!Foundation::IsMainThread()) return Status::WrongOwner;
+    EnsureModernSimulationResidency();
+    auto& s = *_modernSimulation;
+    if (s.stats.status == Status::CapacityExceeded) return Status::CapacityExceeded;
+    const auto a = Point(from), b = Point(to);
+    if (!ValidRegion(a, b, radius) || !ValidSimulationFrame(actor.Transform()) || !std::isfinite(actor.GetRadius())) return Status::Invalid;
+    auto found = s.regions.find(&actor);
+    if (found == s.regions.end())
+    {
+        if (s.regions.size() >= SimulationMaxRegions) { ++s.stats.queueRefused; return Status::CapacityExceeded; }
+        found = s.regions.try_emplace(&actor).first;
+        found->second.actor = &actor;
+    }
+    auto& r = found->second;
+    // A stale allocator address must not inherit the prior actor's leases.
+    if (static_cast<Object*>(r.actor) != &actor) { s.DropRegion(r); r = State::Region{}; r.actor = &actor; }
+    if (automatic && !r.automatic && r.seen != 0) return r.status;
+    r.seen = s.tick + 1;
+    const auto frame = SimulationFrameSample(actor.Transform());
+    const auto currentSpeed = actor.ObjectSpeed();
+    if (r.from == a && r.to == b && r.radius == radius)
+    {
+        r.actorFrame = frame;
+        r.actorSpeed = {currentSpeed.X(), currentSpeed.Y(), currentSpeed.Z()}; r.actorRadius = actor.GetRadius();
+        r.automatic = automatic;
+        return r.status;
+    }
+    s.DropPending(r);
+    r.from = a; r.to = b; r.radius = radius; r.automatic = automatic;
+    r.actorFrame = SimulationFrameSample(actor.Transform());
+    const auto speed = actor.ObjectSpeed(); r.actorSpeed = {speed.X(), speed.Y(), speed.Z()}; r.actorRadius = actor.GetRadius();
+    r.status = Status::Pending;
+    return r.status;
+}
+void Landscape::ReleaseModernSimulationRegion(Object& actor)
+{
+    if (!Foundation::IsMainThread() || !_modernSimulation) return;
+    auto& s = *_modernSimulation;
+    auto it = s.regions.find(&actor);
+    if (it != s.regions.end()) { s.DropRegion(it->second); s.regions.erase(it); }
+}
+Status Landscape::ModernSimulationRegionStatus(const Object& actor) const
+{
+    if (!ModernSimulationResidencyEnabled()) return Status::Disabled;
+    if (!Foundation::IsMainThread()) return Status::WrongOwner;
+    if (!_modernSimulation) return Status::Pending;
+    const auto& s = *_modernSimulation;
+    const auto metadata = MetadataStatus(s);
+    if (metadata != Status::Ready) return metadata;
+    const auto found = s.regions.find(&actor);
+    if (found == s.regions.end() || !ActorUnchanged(found->second, actor)) return Status::Pending;
+    const auto& r = found->second;
+    if (r.status != Status::Ready || r.planGeneration != s.generation) return r.status == Status::Ready ? Status::Pending : r.status;
+    for (auto i : r.active)
+    {
+        const auto entry = s.entries.find(i);
+        if (entry == s.entries.end() || i >= _modernObjectPlacements.size()) return Status::Unknown;
+        Object* object = static_cast<Object*>(entry->second.object);
+        if (!object || object != static_cast<Object*>(_modernObjectPlacements[i].resident) ||
+            object->GetShape() != entry->second.shape.GetRef() || !object->Static() || object->MustBeSaved() ||
+            (object->GetType() != Primary && object->GetType() != Network) ||
+            SimulationFrameSample(object->Transform()) != entry->second.frame || object->GetRadius() != entry->second.radius)
+            return Status::Unknown;
+    }
+    return Status::Ready;
+}
+SimulationResidencyStats Landscape::SnapshotModernSimulationResidency() const
+{
+    SimulationResidencyStats out;
+    if (!ModernSimulationResidencyEnabled()) return out;
+    if (!Foundation::IsMainThread()) { out.status = Status::WrongOwner; return out; }
+    if (!_modernSimulation) { out.status = Status::Pending; return out; }
+    const auto& s = *_modernSimulation;
+    out = s.stats; out.status = MetadataStatus(s); out.regions = s.regions.size(); out.coverageGeneration = s.generation;
+    out.preparedModels = out.unknownModels = out.leasedPlacements = 0;
+    for (const auto& g : s.groups)
+    {
+        if (!g.members.empty() && g.status == State::ModelState::Ready) ++out.preparedModels;
+        if (g.status == State::ModelState::Unknown || !g.validRows) ++out.unknownModels;
+    }
+    for (const auto& [i, entry] : s.entries) if (HasModernSimulationLease(i)) ++out.leasedPlacements;
+    for (const auto& [key, r] : s.regions)
+    {
+        Object* actor = static_cast<Object*>(r.actor);
+        const auto status = actor ? ModernSimulationRegionStatus(*actor) : Status::Unknown;
+        if (status == Status::Ready) ++out.readyRegions;
+        else if (status == Status::Pending) ++out.pendingRegions;
+        else if (status == Status::Unknown) ++out.unknownRegions;
+        else ++out.refusedRegions;
+    }
+    return out;
+}
+
+void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoundary&)
+{
+    if (!ModernSimulationResidencyEnabled() || !Foundation::IsMainThread()) return;
+    EnsureModernSimulationResidency();
+    auto& s = *_modernSimulation;
+    if (s.stats.status == Status::CapacityExceeded) return;
+    const auto started = std::chrono::steady_clock::now();
+    const auto elapsed = [&] { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count(); };
+    ++s.tick; ++s.stats.ownerPumps; s.stats.lastPumpVisits = 0;
+    // This owner boundary is after FinishSecondary, so weak actors and physical
+    // object grids are never read/mutated concurrently with background AI.
+    const size_t totalActors = _world ? size_t(_world->NVehicles() + _world->NFastVehicles()) : 0;
+    for (size_t count = 0; count < std::min(size_t(32), totalActors) && elapsed() < 2; ++count)
+    {
+        const size_t index = s.actorCursor++ % totalActors;
+        Object* actor = index < size_t(_world->NVehicles()) ? _world->GetVehicle(int(index)) :
+            _world->GetFastVehicle(int(index - _world->NVehicles()));
+        if (!actor) continue;
+        const auto quantized = [](Vector3Par p)
+        { return Vector3(float(std::floor(p.X() / 10.0) * 10 + 5), float(std::floor(p.Y() / 10.0) * 10 + 5),
+                         float(std::floor(p.Z() / 10.0) * 10 + 5)); };
+        QueueModernSimulationRegion(*actor, quantized(actor->Position()),
+                                    quantized(actor->Position() + actor->ObjectSpeed() * 0.1f),
+                                    std::max(75.0, double(actor->GetRadius()) + 25), true);
+    }
+    const uint64_t expiry = 2 * ((totalActors + 31) / 32) + 8;
+    size_t expired = 0;
+    for (auto it = s.regions.begin(); it != s.regions.end();)
+    {
+        if ((!static_cast<Object*>(it->second.actor) || (it->second.automatic && s.tick > it->second.seen + expiry)) &&
+            expired < 4 && elapsed() < 2)
+        { s.DropRegion(it->second); it = s.regions.erase(it); ++expired; }
+        else ++it;
+    }
+    for (size_t visits = 0; !s.inventoryComplete && visits < 2048 && elapsed() < 2; ++visits)
+    {
+        if (s.inventoryCursor == _modernObjectPlacements.size())
+        {
+            s.inventoryComplete = true;
+            for (auto& g : s.groups) if (g.members.empty()) g.status = State::ModelState::Ready;
+            break;
+        }
+        const uint32_t i = uint32_t(s.inventoryCursor++);
+        const auto& p = _modernObjectPlacements[i];
+        ++s.stats.lastPumpVisits; s.stats.inventoryRows = s.inventoryCursor;
+        if (p.id < 0 || p.modelIndex >= s.groups.size()) { s.inventoryInvalid = true; continue; }
+        auto& g = s.groups[p.modelIndex];
+        const auto scale = SimulationPlacementMaximumScale(p.rows);
+        const CoveragePoint origin = {p.rows[9], p.rows[10], p.rows[11]};
+        const double extent = _landRange * double(_landGrid);
+        if (!scale || origin[0] < 0 || origin[2] < 0 || origin[0] >= extent || origin[2] >= extent)
+            g.validRows = false;
+        else
+        {
+            g.maximumScale = std::max(g.maximumScale, *scale);
+            if (g.members.empty()) g.origins = {origin, origin};
+            else for (size_t axis = 0; axis < 3; ++axis)
+            { g.origins.min[axis] = std::min(g.origins.min[axis], origin[axis]); g.origins.max[axis] = std::max(g.origins.max[axis], origin[axis]); }
+        }
+        g.members.push_back(i);
+    }
+    // At most ONE bank-table/handoff tail per pump. No synchronous fallback:
+    // packed/failed/unsupported models are explicit Unknown, never omitted.
+    if (s.inventoryComplete && !s.inventoryInvalid && _modernObjectPreparer && elapsed() < 2 && !s.groups.empty())
+    {
+        for (size_t scan = 0; scan < s.groups.size(); ++scan)
+        {
+            const uint32_t i = uint32_t(s.modelCursor++ % s.groups.size());
+            auto& g = s.groups[i];
+            if (g.status != State::ModelState::Waiting) continue;
+            if (!g.validRows) { g.status = State::ModelState::Unknown; continue; }
+            const auto state = _modernObjectPreparer->Query(i);
+            if (state == ObjectStreamPreparer::State::NotLoose || state == ObjectStreamPreparer::State::Failed)
+            { g.status = State::ModelState::Unknown; continue; }
+            if (state == ObjectStreamPreparer::State::Unknown) { _modernObjectPreparer->Request(i); continue; }
+            if (state != ObjectStreamPreparer::State::Ready && state != ObjectStreamPreparer::State::Converted) continue;
+            std::shared_ptr<Model::Model> model;
+            LODShapeWithShadow* converted = nullptr;
+            if (state == ObjectStreamPreparer::State::Converted)
+            { auto result = _modernObjectPreparer->TakeConverted(i); converted = result.shape; model = std::move(result.model); }
+            else model = _modernObjectPreparer->Take(i);
+            if (!model) { delete converted; break; }
+            const uint64_t bytes = Model::ResidentPayloadBytes(*model);
+            if (bytes > SimulationMaxModelPayload)
+            { delete converted; g.status = State::ModelState::CapacityExceeded; break; }
+            const uint64_t charge = bytes * 4 + 1024 * 1024; // multiplication safe after the 4 MiB cap
+            if (!SimulationSourceAdmissible(*model)) { delete converted; g.status = State::ModelState::Unknown; break; }
+            if (!g.charged)
+            {
+                if (bytes > SimulationMaxModelPayload || bytes > SimulationMaxPayloadCharge - s.stats.payloadCapacityCharge ||
+                    charge > SimulationMaxShapeCharge - s.stats.shapeSchedulingCharge)
+                { delete converted; g.status = State::ModelState::CapacityExceeded; break; }
+                g.charged = true; g.payloadCharge = bytes; g.shapeCharge = charge;
+                s.stats.payloadCapacityCharge += bytes; s.stats.shapeSchedulingCharge += charge;
+            }
+            g.sourceValidated = true;
+            try
+            {
+                ShapeBank::CpuOnlyLoadScope cpuOnly;
+                ShapeBank::WorldModelScope worldModel(Shapes);
+                if (!converted && !Shapes.Find(_modernObjectModels[i], false, true))
+                {
+                    std::string lower(static_cast<const char*>(_modernObjectModels[i]));
+                    for (char& c : lower) if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
+                    model->sourcePath = lower;
+                    auto tables = std::make_shared<Model::ShapeAdapter::AdapterBankTables>();
+                    Model::ShapeAdapter::BuildAdapterBankTables(*model, *tables);
+                    const auto token = _modernObjectPreparer->QueryRadius(i);
+                    _modernObjectPreparer->SubmitConvert(i, std::move(model), std::move(tables), &token);
+                    break;
+                }
+                // NewFromModel owns the converted raw pointer on entry, even a cache hit.
+                auto* transferred = converted; converted = nullptr;
+                g.shape = Shapes.NewFromModel(_modernObjectModels[i], false, true, std::move(model), nullptr, transferred);
+                if (!g.shape || !SimulationShapeAdmissible(*g.shape)) g.status = State::ModelState::Unknown;
+                else
+                {
+                    g.radius = g.shape->BoundingSphere(); g.revision = g.shape->QueryPolicyRevision();
+                    g.route = SimulationRoute(static_cast<const char*>(g.shape->GetPropertyClass()));
+                    g.status = State::ModelState::Ready;
+                    s.stats.shapeElementBytes += SimulationShapeElementBytes(*g.shape);
+                    const auto box = BuildEngineBroadphaseEnvelope(g.origins.max, g.maximumScale, g.radius);
+                    if (!box) g.status = State::ModelState::Unknown;
+                    else
+                    {
+                        const auto lowerBox = BuildEngineBroadphaseEnvelope(g.origins.min, g.maximumScale, g.radius);
+                        if (!lowerBox) g.status = State::ModelState::Unknown;
+                        else for (size_t axis = 0; axis < 3; ++axis)
+                            s.placementPadding = std::max({s.placementPadding,
+                                box->max[axis] - g.origins.max[axis], g.origins.min[axis] - lowerBox->min[axis]});
+                    }
+                }
+            }
+            catch (...) { delete converted; g.status = State::ModelState::Unknown; }
+            break;
+        }
+    }
+    // Reconcile a bounded set of owner-observed policy changes, including
+    // same-valued changes. This is the scoped query-policy contract, not a
+    // certificate for untracked mutable per-LOD vertex APIs.
+    bool revised = false;
+    for (auto& g : s.groups)
+    {
+        if (elapsed() >= 2) break;
+        if (g.status != State::ModelState::Ready || !g.shape || g.shape->QueryPolicyRevision() == g.revision) continue;
+        if (!SimulationShapeAdmissible(*g.shape)) g.status = State::ModelState::Unknown;
+        else
+        {
+            g.radius = g.shape->BoundingSphere(); g.revision = g.shape->QueryPolicyRevision();
+            g.route = SimulationRoute(static_cast<const char*>(g.shape->GetPropertyClass()));
+        }
+        revised = true;
+    }
+    if (revised)
+    {
+        if (s.generation == std::numeric_limits<uint64_t>::max()) s.inventoryInvalid = true;
+        else ++s.generation;
+        s.placementPadding = 0;
+        for (auto& g : s.groups)
+        {
+            if (g.members.empty() || g.status != State::ModelState::Ready) continue;
+            const auto upper = BuildEngineBroadphaseEnvelope(g.origins.max, g.maximumScale, g.radius);
+            const auto lower = BuildEngineBroadphaseEnvelope(g.origins.min, g.maximumScale, g.radius);
+            if (!upper || !lower) { g.status = State::ModelState::Unknown; continue; }
+            for (size_t axis = 0; axis < 3; ++axis)
+                s.placementPadding = std::max({s.placementPadding,
+                    upper->max[axis] - g.origins.max[axis], g.origins.min[axis] - lower->min[axis]});
+        }
+    }
+    if (MetadataStatus(s) == Status::Ready && elapsed() < 2)
+    {
+        size_t regionIndex = 0;
+        const size_t first = s.regions.empty() ? 0 : s.regionCursor++ % s.regions.size();
+        for (auto& [actorKey, r] : s.regions)
+        {
+            if (regionIndex++ != first) continue;
+            Object* actor = static_cast<Object*>(r.actor);
+            if (!actor || !ActorUnchanged(r, *actor)) { r.status = Status::Pending; break; }
+            if (r.planGeneration != s.generation) r.status = Status::Pending;
+            if (r.status == Status::Ready)
+            {
+                const auto live = ModernSimulationRegionStatus(*actor);
+                if (live != Status::Ready) r.status = live;
+                else break;
+            }
+            if (r.status == Status::Unknown || r.status == Status::CapacityExceeded) break;
+            if (r.planGeneration != s.generation)
+            {
+                s.DropPending(r);
+                r.plan = PlanSimulationDemand(r.from[0], r.from[2], r.to[0], r.to[2],
+                    r.radius + s.placementPadding, _landGrid, uint32_t(_landRange), 4096);
+                if (r.plan.status != DemandStatus::Complete)
+                { r.status = r.plan.status == DemandStatus::CapacityExceeded ? Status::CapacityExceeded : Status::Invalid; break; }
+                r.planGeneration = s.generation;
+            }
+            while (r.cell < r.plan.cells.size() && s.stats.lastPumpVisits < 2048 && elapsed() < 2)
+            {
+                const auto& cell = _modernObjectCells[r.plan.cells[r.cell]];
+                if (r.offset == cell.size()) { ++r.cell; r.offset = 0; continue; }
+                const uint32_t index = cell[r.offset++]; ++s.stats.lastPumpVisits;
+                auto& p = _modernObjectPlacements[index]; auto& g = s.groups[p.modelIndex];
+                const Matrix4 finalFrame = RepairWorldObjectPlacementFrame(SimulationPlacementFrame(p.rows), false,
+                    g.route == SimulationFactoryRoute::Road, (g.shape->GetOrHints() & ClipLandKeep) != 0);
+                const auto box = BuildEngineBroadphaseEnvelope(Point(finalFrame.Position()), finalFrame.Scale(), g.radius);
+                if (!box) { r.status = Status::Unknown; break; }
+                if (!Overlap(*box, r) || r.pendingSet.contains(index)) continue;
+                if ((!r.activeSet.contains(index) && r.active.size() + r.pendingNew >= SimulationMaxRegionLeases) ||
+                    (r.pending.size() >= SimulationMaxRegionLeases) ||
+                    (!s.entries.contains(index) && s.entries.size() >= SimulationMaxLeasedPlacements))
+                { r.status = Status::CapacityExceeded; break; }
+                Object* object = static_cast<Object*>(p.resident);
+                if (!object)
+                {
+                    try
+                    {
+                        ShapeBank::CpuOnlyLoadScope cpuOnly;
+                        ShapeBank::WorldModelScope worldModel(Shapes);
+                        object = ObjectCreate(p.id, _modernObjectModels[p.modelIndex], SimulationPlacementFrame(p.rows),
+                                              nullptr, nullptr, false, true, false);
+                    }
+                    catch (...) { object = nullptr; }
+                    if (object)
+                    {
+                        p.resident = object; _modernLogicalOnlyObjects.insert(p.id); ++s.stats.created;
+                        if (_geoAccumEnabled) AccumulateGeographyForObject(object);
+                        const size_t x = size_t(std::floor(p.rows[9] * _invLandGrid));
+                        const size_t z = size_t(std::floor(p.rows[11] * _invLandGrid));
+                        const size_t ci = z * _landRange + x;
+                        if (_modernObjectCellDesired[ci])
+                        { _modernObjectCellActive[ci] = 0; _modernObjectCellCursor[ci] = 0; _modernObjectResidencyPending = true; }
+                    }
+                }
+                if (object && !s.entries.contains(index))
+                {
+                    s.cleanupQueue.push_back(index);
+                    auto& cleanup = s.entries[index]; cleanup.object = object; cleanup.shape = object->GetShape();
+                    cleanup.frame = SimulationFrameSample(object->Transform()); cleanup.radius = object->GetRadius();
+                }
+                if (!object || object->GetShape() != g.shape.GetRef() || !object->Static() || object->MustBeSaved() ||
+                    (object->GetType() != Primary && object->GetType() != Network) ||
+                    SimulationFrameSample(object->Transform()) != SimulationFrameSample(finalFrame) ||
+                    object->GetRadius() != finalFrame.Scale() * g.radius || !SimulationShapeAdmissible(*g.shape))
+                { r.status = Status::Unknown; break; }
+                // Road constructors can normalize shape query policy in place. Accept
+                // that known owner-tail change only after validating the exact result.
+                for (auto& group : s.groups) if (group.shape.GetRef() == g.shape.GetRef()) group.revision = g.shape->QueryPolicyRevision();
+                auto& e = s.entries[index]; e.object = object; e.shape = object->GetShape();
+                e.frame = SimulationFrameSample(object->Transform()); e.radius = object->GetRadius();
+                if (!r.activeSet.contains(index)) { ++s.leaseCounts[index]; ++r.pendingNew; }
+                r.pending.push_back(index); r.pendingSet.insert(index);
+            }
+            if (r.status == Status::Pending && r.cell == r.plan.cells.size())
+            {
+                s.CompleteReplacement(r);
+            }
+            if (r.status != Status::Pending && r.status != Status::Ready) s.DropPending(r);
+            break;
+        }
+    }
+    // Only this joined owner boundary retires logical instances. Changed regions
+    // kept their old active leases until a complete replacement was admitted.
+    size_t retired = 0;
+    const size_t cleanupVisits = std::min(size_t(128), s.cleanupQueue.size());
+    for (size_t visit = 0; visit < cleanupVisits && retired < 32 && elapsed() < 2; ++visit)
+    {
+        const uint32_t index = s.cleanupQueue.front(); s.cleanupQueue.pop_front();
+        auto found = s.entries.find(index);
+        if (found == s.entries.end()) continue;
+        if (HasModernSimulationLease(index)) { s.cleanupQueue.push_back(index); continue; }
+        auto& p = _modernObjectPlacements[index]; Object* object = static_cast<Object*>(p.resident);
+        if (object && object == static_cast<Object*>(found->second.object) && _modernLogicalOnlyObjects.contains(p.id) &&
+            !_modernRequiredObjects.contains(p.id) && !object->MustBeSaved())
+        {
+            Ref<Object> keepAlive = object; p.resident = nullptr; RemoveObject(keepAlive);
+            _objectIds.erase(p.id); _modernLogicalOnlyObjects.erase(p.id); _modernObjectLightOwners.erase(p.id);
+            ++s.stats.released; ++retired;
+        }
+        s.entries.erase(found);
+    }
+    s.stats.lastPumpMs = elapsed();
+}
+} // namespace Poseidon

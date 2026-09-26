@@ -12,6 +12,7 @@ using namespace Poseidon;
 #include <Poseidon/World/Physics/PhysicsWorld.hpp>
 #include <Poseidon/Dev/Diag/PhysicsCorpus.hpp>
 #include <Poseidon/Dev/Diag/StreamingDiag.hpp>
+#include <Poseidon/Graphics/Textures/PreparedTextures.hpp>
 #include <Poseidon/Dev/Diag/BallisticsRecorder.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/Dev/Debug/DevPanelWidgets.hpp>
@@ -67,6 +68,7 @@ using namespace Poseidon;
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <cstdlib>
 #include <string>
 #include <thread>
 
@@ -127,6 +129,8 @@ void RegisterScreenshot(HarnessServer& hs)
                 if (object) {
                     cJSON_AddBoolToObject(item, "destroyed", object->IsDestroyed());
                     cJSON_AddNumberToObject(item, "destroyPhase", object->GetDestroyed());
+                    cJSON_AddNumberToObject(item, "rawDamage", object->GetRawTotalDammage());
+                    cJSON_AddBoolToObject(item, "mustBeSaved", object->MustBeSaved());
                     cJSON_AddBoolToObject(item, "visualResident", object->IsVisualResident());
                     cJSON_AddNumberToObject(item, "x", object->Position().X());
                     cJSON_AddNumberToObject(item, "z", object->Position().Z());
@@ -146,6 +150,72 @@ void RegisterScreenshot(HarnessServer& hs)
                 }
                 cJSON_AddItemToArray(objects, item);
             }
+            return HarnessProtocol::JsonResponse(result);
+        });
+    hs.RegisterCommand({"stream_simulation_residency", "Read-only owner simulation-residency snapshot; never pumps or resolves", {}},
+        [](const std::string&, cJSON*) -> std::string {
+            if (!GLandscape) return HarnessProtocol::ErrorResponse("no landscape");
+            const auto state = GLandscape->SnapshotModernSimulationResidency();
+            const char* status = "Invalid";
+            using Status = Streaming::SimulationResidencyStatus;
+            switch (state.status) {
+                case Status::Disabled: status = "Disabled"; break;
+                case Status::Pending: status = "Pending"; break;
+                case Status::Ready: status = "Ready"; break;
+                case Status::Unknown: status = "Unknown"; break;
+                case Status::Invalid: break;
+                case Status::CapacityExceeded: status = "CapacityExceeded"; break;
+                case Status::WrongOwner: status = "WrongOwner"; break;
+            }
+            auto* result = cJSON_CreateObject();
+            cJSON_AddStringToObject(result, "status", status);
+            // These are CPU installation/lease observations, never a clear-ray
+            // result or evidence that existing legacy collision users are migrated.
+            const auto number = [&](const char* name, uint64_t value) {
+                cJSON_AddNumberToObject(result, name, static_cast<double>(value));
+            };
+            number("inventoryRows", state.inventoryRows);
+            number("inventoryTotal", state.inventoryTotal);
+            number("coverageGeneration", state.coverageGeneration);
+            number("models", state.models);
+            number("preparedModels", state.preparedModels);
+            number("unknownModels", state.unknownModels);
+            number("regions", state.regions);
+            number("readyRegions", state.readyRegions);
+            number("pendingRegions", state.pendingRegions);
+            number("unknownRegions", state.unknownRegions);
+            number("refusedRegions", state.refusedRegions);
+            number("leasedPlacements", state.leasedPlacements);
+            number("created", state.created);
+            number("released", state.released);
+            number("queueRefused", state.queueRefused);
+            number("payloadCapacityCharge", state.payloadCapacityCharge);
+            number("shapeSchedulingCharge", state.shapeSchedulingCharge);
+            number("shapeElementBytes", state.shapeElementBytes);
+            number("lastPumpVisits", state.lastPumpVisits);
+            number("ownerPumps", state.ownerPumps);
+            cJSON_AddNumberToObject(result, "lastPumpMs", state.lastPumpMs);
+            return HarnessProtocol::JsonResponse(result);
+        });
+    hs.RegisterCommand({"stream_existing_damage", "Test-only mutation of an already installed object; never resolves or pins", {}},
+        [](const std::string&, cJSON* root) -> std::string {
+            const auto* enabled = std::getenv("WGR_SIMULATION_RESIDENCY_TEST");
+            if (!enabled || std::strcmp(enabled, "1") || !GLandscape || !GLandscape->ModernSimulationResidencyEnabled())
+                return HarnessProtocol::ErrorResponse("requires enabled simulation residency and WGR_SIMULATION_RESIDENCY_TEST=1");
+            const auto* id = cJSON_GetObjectItemCaseSensitive(root, "id");
+            const auto* damage = cJSON_GetObjectItemCaseSensitive(root, "damage");
+            if (!cJSON_IsNumber(id) || !std::isfinite(id->valuedouble) || id->valuedouble < 0 ||
+                id->valuedouble > INT_MAX || std::floor(id->valuedouble) != id->valuedouble ||
+                !cJSON_IsNumber(damage) || !std::isfinite(damage->valuedouble) ||
+                damage->valuedouble <= 0 || damage->valuedouble >= 1)
+                return HarnessProtocol::ErrorResponse("integer existing ID and non-destructive damage in (0,1) required");
+            auto* object = GLandscape->FindObject(id->valueint);
+            if (!object || !object->Static() || object->IsVisualResident())
+                return HarnessProtocol::ErrorResponse("existing logical-only static object required");
+            object->SetDammage(static_cast<float>(damage->valuedouble));
+            auto* result = cJSON_CreateObject();
+            cJSON_AddNumberToObject(result, "rawDamage", object->GetRawTotalDammage());
+            cJSON_AddBoolToObject(result, "mustBeSaved", object->MustBeSaved());
             return HarnessProtocol::JsonResponse(result);
         });
     hs.RegisterCommand({"stream_fire_probe", "Read-only bounded world fire-geometry segment query", {}},
@@ -206,6 +276,12 @@ void RegisterScreenshot(HarnessServer& hs)
             cJSON_AddNumberToObject(result, "workerBc3Prepared", static_cast<double>(state.prep.workerBc3Prepared));
             cJSON_AddNumberToObject(result, "workerBc3BudgetSkipped", static_cast<double>(state.prep.workerBc3BudgetSkipped));
             cJSON_AddNumberToObject(result, "workerBc3Ms", state.prep.workerBc3Ms);
+            const auto texturePrep = render::PreparedTextureStore::Instance().SnapshotStats();
+            cJSON_AddNumberToObject(result, "preparedTextureEntries", static_cast<double>(texturePrep.entries));
+            cJSON_AddNumberToObject(result, "preparedTextureCapacityBytes", static_cast<double>(texturePrep.bytes));
+            cJSON_AddNumberToObject(result, "preparedDdsPuts", static_cast<double>(texturePrep.ddsPreparedPuts));
+            cJSON_AddNumberToObject(result, "preparedDdsTakes", static_cast<double>(texturePrep.ddsPreparedTakes));
+            cJSON_AddNumberToObject(result, "preparedDdsConfigurationMisses", static_cast<double>(texturePrep.ddsConfigurationMisses));
             cJSON_AddNumberToObject(result, "peakConversionReservedBytes", static_cast<double>(state.prep.peakConversionReservedBytes));
             cJSON_AddNumberToObject(result, "peakReadyPayloadBytes", static_cast<double>(state.prep.peakReadyPayloadBytes));
             cJSON_AddNumberToObject(result, "readyByteParks", static_cast<double>(state.prep.readyByteParks));

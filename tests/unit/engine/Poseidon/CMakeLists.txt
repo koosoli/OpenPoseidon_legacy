@@ -263,6 +263,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     World/Model/test_preparer_radius_certificate.cpp
     World/Model/test_preparer_native_bc3.cpp
     World/test_simulation_object_coverage.cpp
+    World/test_simulation_residency.cpp
     Graphics/Textures/test_bc3_prepared_sidecar.cpp
     World/Model/test_stream_texture_names.cpp
     World/Model/test_owned_model_read.cpp

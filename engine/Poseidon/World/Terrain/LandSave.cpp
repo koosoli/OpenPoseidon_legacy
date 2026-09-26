@@ -2309,6 +2309,7 @@ bool Landscape::LoadOprwModern(const char* path)
         _modernObjectModels.reserve(world.models.size());
         for (const std::string& model : world.models)
             _modernObjectModels.emplace_back(model.c_str());
+        ResetModernSimulationResidency();
         _modernRequiredObjects.clear();
         _modernLogicalOnlyObjects.clear();
         _modernObjectPlacements.clear();
@@ -3181,6 +3182,7 @@ void Landscape::PrefetchModernObjectModels(const std::vector<ModernObjectCellCan
     for (size_t model = 0; model < _nativeFarModelWanted.size() && model < wantedEpochs.size(); ++model)
         if (_nativeFarModelWanted[model])
             wantedEpochs[model] = _modernObjectPrefetchEpoch;
+    PreserveModernSimulationModelRequests(wantedEpochs, _modernObjectPrefetchEpoch);
     const size_t staleDropped = _modernObjectPreparer->DropStale(
         wantedEpochs.data(), wantedEpochs.size(), _modernObjectPrefetchEpoch);
     // Pass 2: enqueue in that order. A full queue is not an error -- the admit loop
@@ -3639,7 +3641,7 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                     continue;
                 // Camera eviction may retire the visual, never a required identity or
                 // non-default state that save/load must still be able to discover.
-                if (_modernRequiredObjects.contains(placement.id) || object->MustBeSaved())
+                if (_modernRequiredObjects.contains(placement.id) || object->MustBeSaved() || HasModernSimulationLease(index))
                 {
                     if (GEngine)
                         GEngine->SceneObjectRemoved(object);
@@ -4486,6 +4488,7 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
             for (size_t i = 0; i < epochs.size(); ++i)
                 if (_nativeFarModelWanted[i])
                     epochs[i] = _modernObjectPrefetchEpoch;
+            PreserveModernSimulationModelRequests(epochs, _modernObjectPrefetchEpoch);
             _modernObjectPreparer->DropStale(epochs.data(), epochs.size(), _modernObjectPrefetchEpoch);
         }
         LOG_INFO(World, "Native authored far window: candidates={} active={} models={} radius={}m cap={}",
@@ -4596,6 +4599,7 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
                 Shapes.Find(_modernObjectModels[i], false, true))
                 epochs[i] = _modernObjectPrefetchEpoch - 1;
         }
+        PreserveModernSimulationModelRequests(epochs, _modernObjectPrefetchEpoch);
         const size_t retired = _modernObjectPreparer->DropStale(
             epochs.data(), epochs.size(), _modernObjectPrefetchEpoch);
         if (retired)
