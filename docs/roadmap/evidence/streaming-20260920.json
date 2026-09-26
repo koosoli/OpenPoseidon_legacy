@@ -6907,6 +6907,56 @@
         "samples.jsonl": "8de0d7a9dfa12e4aad2e0ce1e327e66319895043c8af06870b861f9371e0b5ac",
         "user/Users/mail/Saved/Tmp/cold-positive-away.fps": "ee19753949ba02e4b53a103e08cfbf155f7999be443635ed6798b9996c9d6b1e"
       }
+    },
+    {
+      "run": "dayz-alpha-histogram-20260926-20260926-230454",
+      "classification": "PASS narrowcorrectness/clean0 actualf5e51c5e+dirty23:04 docsdirtybuild, later service/workeralpha editsNOTincluded. Realcold83912800 CPU3roles/VB0/firecontact/GlobalCapacity/nofabricatedReady/pins; actorawaytargetabsent/coldworkfactspayloadshape0. Fraxinusread11.656/decode3.477/hist3.221/shape11.004/alpha30.8/model31.7 vs c04hist9.092/shape10.458/alpha34.9/model35.9; orderedlocalcomponent evidence notFPS/noreg acceptance. Unit111276/180exactclassification, defaultsunchanged.",
+      "provenance": {
+        "environment": {
+          "WGR_NATIVE_DDS_BC3_ONLY": "0",
+          "WGR_SIMULATION_RESIDENCY": "1",
+          "WGR_GEO_POOL_PRESSURE_GROWTH": "0",
+          "WGR_OBJECT_STREAM_TEST_BUDGET": "1",
+          "WGR_ADAPTIVE_TEXTURE_DETAIL": "0",
+          "WGR_SKY_VOLUME_INCREMENTAL": "1",
+          "WGR_OBJECT_STREAM_PBO_TEXTURES": "0",
+          "POSEIDON_MODEL_DDC": "0",
+          "WGR_OBJECT_STREAM_GPU_BUDGET": "0",
+          "WGR_NATIVE_DDS_PREPARE": "0",
+          "WGR_OBJECT_STREAM_MAX_OBJECTS": "20000",
+          "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\dayz-alpha-histogram-20260926-20260926-230454\\user",
+          "WGR_LOD_GOVERNOR_RANGE": "1",
+          "WGR_SIMULATION_RESIDENCY_TEST": "1",
+          "WGR_SIMULATION_POSITIVE_COLD": "1",
+          "WGR_OBJECT_STREAM_PBO": "1",
+          "WGR_GEO_POOL_GROWTH": "2.0"
+        },
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "5FD620CA903641EA216F60A930A92CBCC2E17F2FAB2487903768F2886AEB3600",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "17FD59EF2B628DDBD4FFD59E11F327272EC73F14F27CD3BD9EDEF4E45DEA65A5",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "world": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\packages\\dayz-compat\\world\\chernarusplus\\chernarusplus.wrp",
+        "scope": "Actual inventory83912800 cold actor admission, unchanged20000 camera budget; no object getter, source diagnostic, asset whitelist or full-query readiness.",
+        "head": "f5e51c5ef92cc27fd944854c9f4aa99631049871",
+        "installed": "codex/streaming-residency f5e51c5e+dirty 2026-09-26_23:04 deploy-ps1",
+        "scriptSha256": "76014EFA19E5DE3BB2CA24AC52A35B84044DD123D7E875841FC17350C86CF4EA"
+      },
+      "sha256": {
+        "engine.log": "942ef6bd730b20d9bd35bc2d88592d041c3adeb0f9c045d6e8212930d42938c4",
+        "harness.jsonl": "04ead30a7a8cde97d9c7d2a9f8520a1905e19f2c7a8f890a24fda20d84606dea",
+        "provenance.json": "b74cab373a7d389a275bf6558779e2bf3dccf0925b383b0095fe6b25fc382fb5",
+        "result.json": "b72d9014af3a88e6b61078da427afdb1602df7dbce5d78acac9c030abac95fea",
+        "samples.jsonl": "0b3a606dd3e108d433acbfaa8c211b178a1da1d74a0b742976ab6e02312a1f34",
+        "cold-positive.eden/mission.sqm": "9e1384738678862d37b5021bb6701bb1a8884ffa26f82cd51688a1eb5e10cbec"
+      }
     }
   ],
   "microbenchmarks": [
@@ -7091,6 +7141,114 @@
         "performanceAccepted": false,
         "defaultReady": false,
         "ordering": "alternating baseline/candidate first"
+      }
+    },
+    {
+      "artifactRoot": "build/alpha-histogram-benchmark-20260926",
+      "implementationCommit": "f5e51c5e",
+      "classification": "Pendingactualasset/runtime, performanceAcceptedfalse. Candidate0 many35–84% regressions rejected; chunkrepair1 production1/4 better but genericstride3 sparseblend+18–20% two runs rejected. Final outlinedoriginalgenericbranch/sharedpolicy/65536 uint32 chunks sum<=16711680, allocation/policy/defaultsunchanged.9patterns×3strides 2048²9×3alternating exactAlphaStats equality, separateTUsclang-cl22.1/O2/noLTO; reductions vectorizable, no disassembly/vectorinstruction claim. Finalgenericmedian ratioswithin1.6% exceptspeckles improves3.3%, not fixednoregproof; RGBAopaque+.054ms1.18%,sparse+.008ms.16%; productionmostimprove. Maxbatch column actualmax9batchmeans, notframe percentile.",
+      "initialProvenance": {
+        "ordering": "alternating baseline/candidate first",
+        "batches": 9,
+        "compiler": "clang-cl22.1 /O2 C++20 /MD /DNDEBUG separate translation units noLTO",
+        "performanceAccepted": false,
+        "scope": "Isolated histogram screening; candidate0 failed broad performance guard and is not installed",
+        "scansPerBatch": 3,
+        "installed": "codex/streaming-residency c04ae3f6+dirty 2026-09-26_22:46 deploy-ps1",
+        "head": "4709a0b1839937b32d4aaf51d215cd040f33b0d0",
+        "sourceHashes": {
+          "engine\\Poseidon\\Graphics\\Textures\\PAADecoder.cpp": "875a2031567d246625fe4b8dc15f91037f886d109ed9d98b27e0e2e4c280945e",
+          "tests\\unit\\engine\\Poseidon\\Graphics\\test_alpha_classify.cpp": "b50aa5f016f000d2bccdc980db10b5c95385be4d97e8333b18d7aca222c60006",
+          "build\\alpha-histogram-benchmark-20260926\\baseline.cpp": "b9c4e9662eb080053006971f8c82c71f43ed94702c10678853c87a1542ba3724",
+          "build\\alpha-histogram-benchmark-20260926\\candidate.cpp": "6bb35cda4a5606ab7aff9b9cdba4c60f0796bb0fc7333be10c68d19a63c4cea4"
+        },
+        "count": 4194304,
+        "files": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "B283DDDB48B82BE0B3C0776DF5695C974268F0ECD1BF9E54F5BA57E8AED415FB",
+            "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\alpha-histogram-benchmark-20260926\\histogram-bench.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "714FB21F5E361A5CE926DC5083594009FDD5DA64DDBECE05B674B62DD5D402C6",
+            "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\alpha-histogram-benchmark-20260926\\results.csv"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "EEE3E747108734516B76DC45F4611ED499AF778D139164D039645BF930274776",
+            "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\alpha-histogram-benchmark-20260926\\main.cpp"
+          }
+        ]
+      },
+      "finalSourceHashes": {
+        "engine\\Poseidon\\Graphics\\Textures\\PAADecoder.cpp": "f72add8f7e41e7dfd123e5a84abcd06e43c862a7f84273b229493e67b78c8ea6",
+        "tests\\unit\\engine\\Poseidon\\Graphics\\test_alpha_classify.cpp": "442837f07a5f8e98f5453459d9165f10dd8d49446d1aaa825fb21c16d28e6931",
+        "build\\alpha-histogram-benchmark-20260926\\baseline.cpp": "6a12251d151f97a639485c5b827910c69484bac58d3dc8262cc5e57364873403",
+        "build\\alpha-histogram-benchmark-20260926\\candidate.cpp": "1d8e88c70387c75d0f93949a0c579071769bc01842b5ecab797a72753edaf0ab"
+      },
+      "sha256": {
+        "baseline.cpp": "6a12251d151f97a639485c5b827910c69484bac58d3dc8262cc5e57364873403",
+        "candidate-repair1.cpp": "603399d6b4e89b61190edd8a0c212faa7fbacaebf525fec10007a7e4dde3e83c",
+        "candidate.cpp": "1d8e88c70387c75d0f93949a0c579071769bc01842b5ecab797a72753edaf0ab",
+        "candidate0.cpp": "6bb35cda4a5606ab7aff9b9cdba4c60f0796bb0fc7333be10c68d19a63c4cea4",
+        "compile-repair1.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compile-repair2.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compile.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "generate.py": "a377a3e3f385246876c99cdf59428f5f8d3884575fe4900900298ae79e29ebf2",
+        "histogram-bench.exe": "b283dddb48b82be0b3c0776df5695c974268f0ecd1bf9e54f5ba57e8aed415fb",
+        "histogram-repair1-bench.exe": "fe5913945c6f9ce18981798ec8382590b750d39af422ae0ade539e7bc428d9e7",
+        "histogram-repair2-bench.exe": "b17ff2cfab150acd8bab03e9c6b8d2deaff20ab4ceba53df157219ad90345cfc",
+        "main.cpp": "eee3e747108734516b76dc45f4611ed499af778d139164d039645bf930274776",
+        "provenance-candidate0.json": "cfae9e76505869b10123906fe3e4f942457ef5dfd28df9aed5c52f72ddaf3431",
+        "results-repair1-confirmation.csv": "5d0257dd0fcf403741caa3c63fe7bf3a44668dc7aaa2de1ae87b0980a0eb7799",
+        "results-repair1.csv": "3e72667a0cdf77f15357625872ee570753e5137c44f13f2cbbc01d90acda5e0e",
+        "results-repair2.csv": "f8f83e7fd590103b4d20b1ebe33b219802770a60437e747a3d482227d1f01736",
+        "results.csv": "714fb21f5e361a5ce926dc5083594009fdd5da64ddbece05b674b62dd5d402c6",
+        "source-provenance-candidate0.json": "37de0dfb76c12d10130c5899e6fa37a4d890d52ce8db55432d54e1edb8932cd3",
+        "source-provenance-repair1.json": "6415cffccaa4b9671c7f5448bdcf1aea3eb3c4b8f7b99d9bc2a70c9567df686d",
+        "source-provenance-repair2.json": "c23adafb129a7b3045dd62b7ab6ff290909969bd24b007b916cae7effe7b9fdf",
+        "source-provenance.json": "c23adafb129a7b3045dd62b7ab6ff290909969bd24b007b916cae7effe7b9fdf",
+        "provenance-repair2.json": "0b81e2fb9ef1922a492b9b31e41476f6ca1d1acb93727866dfa6d6eda6cf38b6"
+      },
+      "finalProvenance": {
+        "defaultReady": false,
+        "compiler": "clang-cl22.1 /O2 C++20 /MD /DNDEBUG separate translation units noLTO",
+        "ordering": "alternating baseline/candidate first; allocation excluded",
+        "scope": "Isolated final histogram screening; not FPS/default/performance acceptance",
+        "count": 4194304,
+        "files": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "B17FF2CFAB150ACD8BAB03E9C6B8D2DEAFF20AB4CEBA53DF157219AD90345CFC",
+            "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\alpha-histogram-benchmark-20260926\\histogram-repair2-bench.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "F8F83E7FD590103B4D20B1EBE33B219802770A60437E747A3D482227D1F01736",
+            "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\alpha-histogram-benchmark-20260926\\results-repair2.csv"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "EEE3E747108734516B76DC45F4611ED499AF778D139164D039645BF930274776",
+            "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\alpha-histogram-benchmark-20260926\\main.cpp"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "A377A3E3F385246876C99CDF59428F5F8D3884575FE4900900298AE79E29EBF2",
+            "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\alpha-histogram-benchmark-20260926\\generate.py"
+          }
+        ],
+        "performanceAccepted": false,
+        "scansPerBatch": 3,
+        "sourceHashes": {
+          "engine\\Poseidon\\Graphics\\Textures\\PAADecoder.cpp": "f72add8f7e41e7dfd123e5a84abcd06e43c862a7f84273b229493e67b78c8ea6",
+          "tests\\unit\\engine\\Poseidon\\Graphics\\test_alpha_classify.cpp": "442837f07a5f8e98f5453459d9165f10dd8d49446d1aaa825fb21c16d28e6931",
+          "build\\alpha-histogram-benchmark-20260926\\baseline.cpp": "6a12251d151f97a639485c5b827910c69484bac58d3dc8262cc5e57364873403",
+          "build\\alpha-histogram-benchmark-20260926\\candidate.cpp": "1d8e88c70387c75d0f93949a0c579071769bc01842b5ecab797a72753edaf0ab"
+        },
+        "batches": 9,
+        "sourceHead": "f5e51c5ef92cc27fd944854c9f4aa99631049871"
       }
     }
   ],
@@ -7386,6 +7544,24 @@
         "build-alpha-repair2-freshsave-20260926.log": "77d5c94bc71c6e3f16badff0f51570611d2a6b6398b374c72f32e63355225e7c",
         "build-alpha-freshsave-stamped-20260926.log": "d2533026bba3f3ab67de82f200e940475fd19072c5bc22a86cc9d5b9bc8b47b7",
         "test-alpha-repair2-freshsave-20260926.log": "d1ab072e89348455aa88aadf159ba210c921ea1bf3131a30d8646a40e13b7b3c"
+      }
+    },
+    {
+      "artifactRoot": "build",
+      "implementationCommit": "f5e51c5e",
+      "result": "20-node histogram buildPASS,111276 assertions180casesPASS. Final18-node stampedbuild running/unclassified; no runtime/deploy evidence yet.Onlyhelper/testsource; serviceagent design notincluded. No actualasset/FPS/defaultReady/performance acceptance.",
+      "sha256": {
+        "build-alpha-histogram-20260926.log": "488b2fe1ebc39a2c554ed8e4a8da03f1e66d3016119fff9696dc31ad07512770",
+        "test-alpha-histogram-20260926.log": "95fa87a19eaae9f2c46a0cdc52b1878fbe0033eaa16f81348101f3d48ac4f7be"
+      }
+    },
+    {
+      "artifactRoot": "build",
+      "runtimeSourceCommit": "f5e51c5e",
+      "installed": "f5e51c5e+dirty23:04 (docsdirty at build)",
+      "result": "Finalstamped18nodebuildPASS, actualruntime narrowPASS,111276/180unit evidence retained. Later query-model debt/worker-alpha source editsNOTinstalled/unverified. PerformanceAccepted/defaultReadyfalse/fullplanOPEN.",
+      "sha256": {
+        "build-alpha-histogram-stamped-20260926.log": "5c048512b944cf27c20a29193608a9c43a40f004eba571fb51aa06da318db29b"
       }
     }
   ],

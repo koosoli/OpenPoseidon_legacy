@@ -1804,7 +1804,7 @@ roundtrip, not fresh-process/multiplayer/performance or general state coverage.
 Only runner save mode changed; source/binary remainsddf. Shape-loop optimization
 build remains ongoing/unclassified. Whole plan/performance/MP/wider gates OPEN.
 
-### Alpha shape helper candidate measurements — pending integration
+### Alpha shape helper measurements — initial pre-integration screening
 
 Isolated benchmark at f0d0a0c5 compares an independent pre-optimization reference
 with the candidate in separate translation units, O2/no LTO,2048² synthetic data,
@@ -1824,9 +1824,7 @@ reduce about10–60%, not a fixed no-regression or whole-texture/FPS guarantee.
 All benchmark sources, executables, compile logs, result CSVs and initial
 provenance hashes are retained. Initial provenance describes its capture phase;
 later repair artifacts have their own hashes, not a stamped source-build claim.
-Root parity build remains running/unclassified; runtime and actual-asset results
-are absent. performanceAccepted/defaultReady remain false, implementation is
-pending validation, full plan OPEN/defaultsOFF.
+At this initial screening checkpoint parity build and runtime/actual-asset results were still pending. The following c04ae3f6 section records subsequent passing validation; performanceAccepted/defaultReady remain false, full plan OPEN/defaultsOFF.
 
 ### Alpha repair2 and production fresh-process restore — 26 September 2026
 
@@ -1852,3 +1850,51 @@ not FPS improvement or comparable-quality no-regression acceptance. Synthetic
 parity and accepted local functionality do not enable experimental defaults.
 Later histogram candidate remains pending/unbuilt; full plan/performance/MP/
 general-state/consumer/defaultReady gates OPEN.
+
+### Histogram candidate screening — initial pre-runtime checkpoint
+
+f5e51c5e final histogram helper/test source builds20 nodes and passes111276
+assertions/180 cases. At this initial checkpoint stamped18-node build/runtime were pending; the following installed proof supersedes that pending state. Service agent design remains separate/not included.
+
+Candidate0 regresses many patterns35–84%, rejected. Repair1 bounded chunks improve
+production stride1/4 but generic stride3 sparse-blend regresses18–20% in two runs,
+also rejected. Final repair outlines the original generic branch, shares policy
+and uses65536-sample32-bit chunks (maximum sum16711680, checked safe). No allocation,
+classification policy or default change follows. /O2 makes reductions vectorizable;
+no disassembly evidence establishes specific SIMD instructions or speed guarantee.
+
+Independent baseline/candidate separate translation units, clang-cl22.1/O2/noLTO,
+2048² pixels, nine patterns×strides1/4/3, nine alternating batches of three calls
+check every AlphaStats metric exactly. Max-batch column is largest nine batch means,
+not a game-frame tail distribution. Final generic sparse-blend ratio.995 reverses
+prior1.19; generic medians fluctuate within about1.6% except3.3% speckles reduction.
+Production medians mostly improve; opaqueRGBA+.054ms/1.18%, sparseRGBA+.008ms/.16%
+are small observed costs, not a fixed no-regression pass. Actual source/header/
+executables/results and phase-specific provenance hashes are retained.
+
+performanceAccepted/defaultReady remain false; actual-asset/runtime gates pending.
+No gameplay consumer migration, no service-model-cap or fullclearance proof.
+Whole plan OPEN/defaultsOFF.
+
+### Histogram actual-asset checkpoint — 26 September 2026
+
+Final stamped18-node build passes. Actual f5e51c5e+dirty23:04 installed stamp
+reflects docs dirty at build; exact binary/provenance hashes identify the tested
+source. Later query-model-debt and worker-alpha edits are unbuilt/unverified and
+NOT included in this binary. Final repair2 benchmark provenance is separately
+hashed, including phase-specific sources and executable.
+
+DayZ230454 passes clean0: actual83912800 cold admission has CPU Geometry/Fire/View,
+normalVB0 and real fire contact; globalCapacity remains with no fabricated Ready
+or required pin. Actor departure removes target and cold work/facts/payload/shape
+charges to0. This accepts narrow correctness/integration, not general gameplay/
+world coverage or performance.
+
+Actual fraxinus row read11.656/decode3.477/hist3.221/shape11.004ms, alpha30.8/
+model31.7ms; earlier c04 hist9.092/shape10.458/alpha34.9/model35.9 and ddf
+hist11.033/shape21.210/alpha49.3/model50.1. Histogram component is lower in these
+ordered local observations, while other parts change. OS/cache/order and limited
+asset selection prevent FPS or no-regression acceptance. Exact classification
+111276 assertions/180 cases remains verified, defaults unchanged.
+performanceAccepted/defaultReady false, full plan/production consumer/MP/broad
+state/performance gates OPEN. Future source work has no accepted evidence here.
