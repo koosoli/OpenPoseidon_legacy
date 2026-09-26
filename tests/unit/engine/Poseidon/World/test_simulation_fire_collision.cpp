@@ -193,3 +193,24 @@ TEST_CASE("Simulation fire nonReady and complete-set capacity refusal perform no
     REQUIRE(result.Size() == 1);
     REQUIRE(result[0].component == 99);
 }
+
+TEST_CASE("Empty simulation fire output never turns refused coverage into a Ready clear ray", "[streaming-simulation-fire]")
+{
+    Objects objects;
+    CollisionBuffer result;
+    std::vector<Object*> candidates{objects.nearWall.GetRef()};
+    auto readiness = SimulationResidencyStatus::Pending;
+    SECTION("Pending") {}
+    SECTION("Unknown") {readiness = SimulationResidencyStatus::Unknown;}
+    SECTION("Invalid") {readiness = SimulationResidencyStatus::Invalid;}
+    SECTION("WrongOwner") {readiness = SimulationResidencyStatus::WrongOwner;}
+    SECTION("CapacityExceeded") {readiness = SimulationResidencyStatus::CapacityExceeded;}
+    int calls = 0;
+    const auto status = AppendSimulationFireContacts(result, candidates, nullptr, nullptr,
+        [&](CollisionBuffer&) {++calls;}, [&](CollisionBuffer&, Object&) {++calls;},
+        [&] {return readiness;}, [] {return true;});
+    REQUIRE(status == readiness);
+    REQUIRE(status != SimulationResidencyStatus::Ready);
+    REQUIRE(result.Size() == 0);
+    REQUIRE(calls == 0);
+}

@@ -31,6 +31,7 @@
 #include <Poseidon/Graphics/Core/MipmapLayout.hpp>
 #include <Poseidon/Graphics/Rendering/Font/Pactext.hpp>
 #include <Poseidon/Graphics/Textures/BlockCompression.hpp>
+#include <Poseidon/Graphics/Textures/AlphaShapeAnalysis.hpp>
 #include <Poseidon/Graphics/Textures/PAADecoder.hpp>
 #include <Poseidon/Graphics/Textures/TextureBank.hpp> // MAX_MIPMAPS
 
@@ -385,4 +386,180 @@ TEST_CASE("Compact block alpha rejects invalid and truncated inputs", "[graphics
     RequireSameStats(AlphaStats{}, ClassifyAlphaSamples(block, 0, 1));
     RequireSameStats(AlphaStats{}, ClassifyAlphaSamples(block, 1, 0));
     RequireSameStats(AlphaStats{}, ClassifyAlphaSamples(block, std::numeric_limits<size_t>::max(), 4));
+}
+
+namespace
+{
+// Literal pre-optimization renderer loop, intentionally independent of the new
+// row-pointer helper. Its border omission and integer ratios are the reference.
+AlphaShapeAnalysis ReferenceAlphaShape(const uint8_t* rgba, int w, int h, size_t stride, size_t offset)
+{
+    AlphaShapeAnalysis shape;
+    if (!rgba || w <= 0 || h <= 0) return shape;
+    const auto alphaAt = [rgba, w, stride, offset](int x, int y) -> int
+    { return rgba[(static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)) * stride + offset]; };
+    size_t clear = 0, clustered = 0, clearAdjacency = 0, partial = 0, perimeter = 0;
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++)
+        {
+            const int a = alphaAt(x, y);
+            if (a != 0 && a != 255) { partial++; continue; }
+            if (a != 0) continue;
+            clear++;
+            int clearNeighbours = 0, otherNeighbours = 0;
+            const int nx[4] = {x - 1, x + 1, x, x};
+            const int ny[4] = {y, y, y - 1, y + 1};
+            for (int n = 0; n < 4; n++)
+            {
+                if (nx[n] < 0 || nx[n] >= w || ny[n] < 0 || ny[n] >= h) continue;
+                if (alphaAt(nx[n], ny[n]) == 0) clearNeighbours++;
+                else otherNeighbours++;
+            }
+            clearAdjacency += static_cast<size_t>(clearNeighbours);
+            if (clearNeighbours >= 2) clustered++;
+            perimeter += static_cast<size_t>(otherNeighbours);
+        }
+    shape.meanClearNeighbours = clear ? static_cast<double>(clearAdjacency) / static_cast<double>(clear) : 4.0;
+    shape.clusteredClearFrac = clear ? static_cast<double>(clustered) / static_cast<double>(clear) : 1.0;
+    shape.partialBandWidth = perimeter ? static_cast<double>(partial) / static_cast<double>(perimeter)
+                                       : (partial ? std::numeric_limits<double>::infinity() : 0.0);
+    shape.measured = true;
+    return shape;
+}
+
+void RequireSameShape(const AlphaShapeAnalysis& expected, const AlphaShapeAnalysis& actual)
+{
+    CHECK(actual.measured == expected.measured);
+    CHECK(actual.meanClearNeighbours == expected.meanClearNeighbours);
+    CHECK(actual.clusteredClearFrac == expected.clusteredClearFrac);
+    CHECK(actual.partialBandWidth == expected.partialBandWidth);
+}
+
+void CheckShapeLayouts(const std::vector<uint8_t>& alpha, int w, int h)
+{
+    REQUIRE(alpha.size() == static_cast<size_t>(w) * static_cast<size_t>(h));
+    const auto reference = ReferenceAlphaShape(alpha.data(), w, h, 1, 0);
+    // Offset0 compact, real RGBA alpha3, and two generic strides. Non-alpha
+    // bytes include clear, opaque and partial sentinels so RGB reads cannot pass.
+    for (const auto layout : {std::pair<size_t, size_t>{1, 0}, {4, 3}, {3, 1}, {7, 5}})
+    {
+        std::vector<uint8_t> pixels(alpha.size() * layout.first);
+        for (size_t i = 0; i < pixels.size(); ++i)
+            pixels[i] = i % 3 == 0 ? 0 : i % 3 == 1 ? 255 : 91;
+        for (size_t i = 0; i < alpha.size(); ++i) pixels[i * layout.first + layout.second] = alpha[i];
+        RequireSameShape(reference, MeasureAlphaShapeAnalysis(pixels.data(), w, h, layout.first, layout.second));
+        RequireSameShape(ReferenceAlphaShape(pixels.data(), w, h, layout.first, layout.second),
+                         MeasureAlphaShapeAnalysis(pixels.data(), w, h, layout.first, layout.second));
+    }
+}
+} // namespace
+
+TEST_CASE("Alpha shape row scan preserves fixed border and degenerate facts", "[graphics][texture][alpha-shape]")
+{
+    const uint8_t pixel = 0;
+    RequireSameShape({}, MeasureAlphaShapeAnalysis(nullptr, 1, 1, 1, 0));
+    RequireSameShape({}, MeasureAlphaShapeAnalysis(&pixel, 0, 1, 1, 0));
+    RequireSameShape({}, MeasureAlphaShapeAnalysis(&pixel, 1, -1, 1, 0));
+    struct Golden { int w, h; std::vector<uint8_t> alpha; double mean, clustered, band; };
+    const std::vector<Golden> cases = {
+        {1, 1, {0}, 0, 0, 0},
+        {1, 1, {255}, 4, 1, 0},
+        {1, 1, {128}, 4, 1, std::numeric_limits<double>::infinity()},
+        {3, 3, std::vector<uint8_t>(9, 0), 8.0 / 3.0, 1, 0},
+        {3, 3, {255,255,255,255,0,255,255,255,255}, 0, 0, 0},
+        {3, 1, {0,128,255}, 0, 0, 1},
+        {1, 3, {0,0,255}, 1, 0, 0},
+        {2, 2, {0,0,0,255}, 4.0 / 3.0, 1.0 / 3.0, 0},
+        {2, 2, {0,128,128,255}, 0, 0, 1}
+    };
+    for (const auto& test : cases)
+    {
+        const auto actual = MeasureAlphaShapeAnalysis(test.alpha.data(), test.w, test.h, 1, 0);
+        CHECK(actual.measured);
+        CHECK(actual.meanClearNeighbours == test.mean);
+        CHECK(actual.clusteredClearFrac == test.clustered);
+        CHECK(actual.partialBandWidth == test.band);
+        CheckShapeLayouts(test.alpha, test.w, test.h);
+    }
+    // Generic zero stride was accepted by the old helper: preserve its repeated
+    // sample semantics rather than introducing a new policy/failure condition.
+    RequireSameShape(ReferenceAlphaShape(&pixel, 3, 2, 0, 0), MeasureAlphaShapeAnalysis(&pixel, 3, 2, 0, 0));
+}
+
+TEST_CASE("Alpha shape row scan matches exhaustive small masks on every layout", "[graphics][texture][alpha-shape]")
+{
+    constexpr uint8_t values[] = {0, 128, 255};
+    for (const auto dimensions : {std::pair<int, int>{1, 1}, {1, 3}, {3, 1}, {2, 2}, {3, 2}, {2, 3}})
+    {
+        const size_t count = static_cast<size_t>(dimensions.first) * dimensions.second;
+        size_t combinations = 1; for (size_t i = 0; i < count; ++i) combinations *= 3;
+        std::vector<uint8_t> alpha(count);
+        for (size_t pattern = 0; pattern < combinations; ++pattern)
+        {
+            size_t digits = pattern;
+            for (auto& value : alpha) { value = values[digits % 3]; digits /= 3; }
+            CheckShapeLayouts(alpha, dimensions.first, dimensions.second);
+        }
+    }
+}
+
+TEST_CASE("Alpha shape row scan preserves large odd borders and mixed alpha", "[graphics][texture][alpha-shape]")
+{
+    uint32_t random = 0x7139a2u;
+    for (const auto dimensions : {std::pair<int, int>{1, 17}, {19, 1}, {7, 13}, {17, 9}, {32, 15}})
+    {
+        const int w = dimensions.first, h = dimensions.second;
+        std::vector<uint8_t> alpha(static_cast<size_t>(w) * h);
+        for (int pattern = 0; pattern < 8; ++pattern)
+        {
+            for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                {
+                    uint8_t value = 255;
+                    if (pattern == 0) value = 0;
+                    else if (pattern == 1) value = 128;
+                    else if (pattern == 2) value = (x + y) % 2 ? 255 : 0;
+                    else if (pattern == 3) value = x == 0 || y == 0 || x + 1 == w || y + 1 == h ? 0 : 255;
+                    else if (pattern == 4) value = x == w / 2 && y == h / 2 ? 0 : 255;
+                    else if (pattern == 5) value = x < w / 2 && y < h / 2 ? 0 : 255;
+                    else if (pattern == 6) { random = random * 1664525u + 1013904223u; value = static_cast<uint8_t>(random >> 24); }
+                    else { constexpr uint8_t samples[] = {0,1,15,16,128,239,240,254,255}; value = samples[(x + 3 * y) % 9]; }
+                    alpha[static_cast<size_t>(y) * w + x] = value;
+                }
+            CheckShapeLayouts(alpha, w, h);
+        }
+    }
+}
+
+TEST_CASE("Alpha shape row scan preserves repeating clear partial opaque stripes", "[graphics][texture][alpha-shape]")
+{
+    // This eligible mask exposed a compact-stride timing regression in the
+    // oneoff benchmark. It receives no special production path or percentage gate.
+    for (const auto dimensions : {std::pair<int, int>{9, 1}, {27, 7}, {31, 13}})
+    {
+        const int w = dimensions.first, h = dimensions.second;
+        std::vector<uint8_t> alpha(static_cast<size_t>(w) * h);
+        for (int y = 0; y < h; ++y)
+            for (int x = 0; x < w; ++x)
+                alpha[static_cast<size_t>(y) * w + x] = x % 9 < 3 ? 0 : x % 9 < 6 ? 128 : 255;
+        CheckShapeLayouts(alpha, w, h);
+    }
+}
+
+TEST_CASE("Alpha shape row scan preserves sparse clear and mixed masks", "[graphics][texture][alpha-shape]")
+{
+    for (const auto dimensions : {std::pair<int, int>{1001, 1}, {37, 31}, {67, 37}})
+    {
+        const int w = dimensions.first, h = dimensions.second;
+        std::vector<uint8_t> alpha(static_cast<size_t>(w) * h, 255);
+        for (size_t i = 0; i < alpha.size(); ++i) if (i % 1000 == 0) alpha[i] = 0;
+        CheckShapeLayouts(alpha, w, h);
+        uint32_t seed = 0x83ac1047u;
+        for (auto& value : alpha)
+        {
+            seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5;
+            value = seed % 100 < 3 ? 0 : seed % 100 < 5 ? 128 : 255;
+        }
+        CheckShapeLayouts(alpha, w, h);
+    }
 }

@@ -230,6 +230,14 @@ void RegisterStreamingProbes(HarnessServer& hs)
                     cJSON_AddNumberToObject(item, "z", object->Position().Z());
                     cJSON_AddNumberToObject(item, "y", object->Position().Y());
                     cJSON_AddNumberToObject(item, "radius", object->GetRadius());
+                    // Read the actual instance frame without resolving or pinning
+                    // an object. Column order is right, up, forward, translation.
+                    auto* frame = cJSON_AddArrayToObject(item, "frame");
+                    const auto& transform = object->Transform();
+                    for (const auto& column : {transform.DirectionAside(), transform.DirectionUp(),
+                                               transform.Direction(), transform.Position()})
+                        for (int axis = 0; axis < 3; ++axis)
+                            cJSON_AddItemToArray(frame, cJSON_CreateNumber(column[axis]));
                     const auto* shape = object->GetShape();
                     if (shape) cJSON_AddStringToObject(item, "model", shape->Name());
                     cJSON_AddBoolToObject(item, "hasGeometry", shape && shape->FindGeometryLevel() >= 0);

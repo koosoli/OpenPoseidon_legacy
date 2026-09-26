@@ -4,6 +4,7 @@
 
 #include <Poseidon/Graphics/Core/MipmapLayout.hpp>
 #include <Poseidon/Graphics/Textures/BlockCompression.hpp>
+#include <Poseidon/Graphics/Textures/AlphaShapeAnalysis.hpp>
 #include <Poseidon/Graphics/Textures/DdsImport.hpp> // IsEnfusionRgNormalName (RFG-047)
 #include <Poseidon/Graphics/Textures/EnfusionTextureName.hpp> // SkipLayerTint (RFG-070)
 #include <Poseidon/Graphics/Textures/PAADecoder.hpp>
@@ -239,13 +240,7 @@ PacFormat PacFormatFromMagic(uint16_t magic)
 // function is shared with GL33 and with the offline tools, and this is a renderer routing
 // policy, not a truth about the file.  `WGR_ALPHA_SHAPE_GUARD=0` disables it wholesale;
 // both thresholds are separately overridable so a calibration run needs no rebuild.
-struct AlphaShape
-{
-    double meanClearNeighbours = 4.0; // over a==0 texels, mean count of clear 4-neighbours
-    double clusteredClearFrac = 1.0;  // of a==0 texels, share with >= 2 clear neighbours (logged)
-    double partialBandWidth = 0.0;    // partial texels per unit of clear/non-clear perimeter
-    bool measured = false;
-};
+using AlphaShape = AlphaShapeAnalysis;
 
 double EnvDouble(const char* key, double fallback)
 {
@@ -294,71 +289,10 @@ bool AlphaMaskDemoteEnabled()
     return enabled;
 }
 
-// One pass over alpha samples, either RGBA byte 3 or a compact plane; 4 neighbour loads per texel.
+// Pure pixel analysis; policy and its counters remain in the renderer below.
 AlphaShape MeasureAlphaShape(const uint8_t* rgba, int w, int h, size_t stride, size_t offset)
 {
-    AlphaShape shape;
-    if (!rgba || w <= 0 || h <= 0)
-    {
-        return shape;
-    }
-    const auto alphaAt = [rgba, w, stride, offset](int x, int y) -> int
-    { return rgba[(static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)) * stride + offset]; };
-
-    size_t clear = 0, clustered = 0, clearAdjacency = 0, partial = 0, perimeter = 0;
-    for (int y = 0; y < h; y++)
-    {
-        for (int x = 0; x < w; x++)
-        {
-            const int a = alphaAt(x, y);
-            if (a != 0 && a != 255)
-            {
-                partial++;
-                continue;
-            }
-            if (a != 0)
-            {
-                continue;
-            }
-            clear++;
-            int clearNeighbours = 0;
-            int otherNeighbours = 0;
-            // Out-of-bounds neighbours are counted as neither, so an image-edge texel is
-            // judged on the neighbours it has.  Treating the border as clear would make a
-            // full-bleed mask look clustered; treating it as solid would make one look
-            // speckled.  Both are inventions; omitting is not.
-            const int nx[4] = {x - 1, x + 1, x, x};
-            const int ny[4] = {y, y, y - 1, y + 1};
-            for (int n = 0; n < 4; n++)
-            {
-                if (nx[n] < 0 || nx[n] >= w || ny[n] < 0 || ny[n] >= h)
-                {
-                    continue;
-                }
-                if (alphaAt(nx[n], ny[n]) == 0)
-                {
-                    clearNeighbours++;
-                }
-                else
-                {
-                    otherNeighbours++;
-                }
-            }
-            clearAdjacency += static_cast<size_t>(clearNeighbours);
-            if (clearNeighbours >= 2)
-            {
-                clustered++;
-            }
-            perimeter += static_cast<size_t>(otherNeighbours);
-        }
-    }
-
-    shape.meanClearNeighbours = clear ? static_cast<double>(clearAdjacency) / static_cast<double>(clear) : 4.0;
-    shape.clusteredClearFrac = clear ? static_cast<double>(clustered) / static_cast<double>(clear) : 1.0;
-    shape.partialBandWidth = perimeter ? static_cast<double>(partial) / static_cast<double>(perimeter)
-                                       : (partial ? std::numeric_limits<double>::infinity() : 0.0);
-    shape.measured = true;
-    return shape;
+    return MeasureAlphaShapeAnalysis(rgba, w, h, stride, offset);
 }
 
 // How often each demotion fired, reported alongside the streaming stats.  A run in which
