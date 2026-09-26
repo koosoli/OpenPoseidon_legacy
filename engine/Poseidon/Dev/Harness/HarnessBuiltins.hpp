@@ -22,6 +22,10 @@ namespace HarnessBuiltins
 /// `screenshot` — capture PNG via GEngine::Screenshot(path). Client apps only.
 void RegisterScreenshot(HarnessServer& hs);
 
+/// Read-only world identity, simulation residency and fire-geometry probes.
+/// Any app with a world; does not register screenshots or mutation commands.
+void RegisterStreamingProbes(HarnessServer& hs);
+
 /// `eval` + `exec` — SQF via GWorld->GetGameState(). Any app with a world.
 void RegisterSqf(HarnessServer& hs);
 
