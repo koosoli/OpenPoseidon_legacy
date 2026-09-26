@@ -102,9 +102,12 @@ try {
  $promotedState=Wait-Settled
  $promoted=Send @{cmd='stream_identity_probe';ids=@($id)}
  if (!$promoted.objects[0].present -or !$promoted.objects[0].visualResident -or $promoted.objects[0].shapeVisualDeferred) {throw 'Logical shape failed visual promotion'}
- $damageCheck=if ($DestroyCold) {'(getDammage streamColdRequired > 1.09) && (getDammage streamColdRequired < 1.11)'} else {'(getDammage streamColdRequired > 0.24) && (getDammage streamColdRequired < 0.26)'}
- $r=Send @{cmd='eval';code="(streamColdRequired == object $id) && $damageCheck"}
- if ($r.result -notmatch 'true') {throw 'Promotion changed identity or damage'}
+ $r=Send @{cmd='eval';code="streamColdRequired == object $id"}
+ if ($r.result -notmatch 'true') {throw 'Promotion changed object identity'}
+ # The script getter clamps raw damage to 1, including destruction at 1.1.
+ $damageCheck=if ($DestroyCold) {'(getDammage streamColdRequired > 0.99) && (getDammage streamColdRequired < 1.01)'} else {'(getDammage streamColdRequired > 0.24) && (getDammage streamColdRequired < 0.26)'}
+ $r=Send @{cmd='eval';code=$damageCheck}
+ if ($r.result -notmatch 'true') {throw 'Promotion changed object damage'}
  if ($DestroyCold -and (!$promoted.objects[0].destroyed -or $promoted.objects[0].destroyPhase -lt 0.99 -or $promoted.objects[0].normalVertexBuffers -eq 0)) {throw 'Destroyed object failed deferred dynamic buffer completion'}
  $promotedFire=Send $fire
  if (!$DestroyCold -and !@($promotedFire.contacts | Where-Object {$_.id -eq $id}).Count) {throw 'Promoted fixture lost physical obstruction'}
