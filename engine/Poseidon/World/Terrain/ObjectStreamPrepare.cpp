@@ -46,10 +46,13 @@ namespace
 template<class Reserve, class Release>
 bool PrepareNativeDds(const std::string& key, uint64_t generation, size_t& bytes,
                       bool prepareBc3, bool bc3Only, const Bc3EncodingObserver* observer,
+                      const render::DdsPublicationToken& publication,
+                      const render::DdsPublicationObserver& publicationObserver,
                       Reserve&& reserve, Release&& release)
 {
     try
     {
+        if (!publication.Valid()) return false;
         const auto& mount = Asset::Formats::Enfusion::EnfusionMount::Instance();
         const auto mountGeneration = mount.Generation();
         auto source = std::make_unique<TextureSourceDDS>();
@@ -93,8 +96,9 @@ bool PrepareNativeDds(const std::string& key, uint64_t generation, size_t& bytes
                     return false;
                 }
                 bytes = source->PreparedByteSize();
+                if (publicationObserver.beforePut) publicationObserver.beforePut(publicationObserver.context, encoded);
                 const bool stored = render::PreparedTextureStore::Instance().PutDdsPrepared(
-                    key, std::move(source), options, generation);
+                    key, std::move(source), options, generation, &publication);
                 finish(stored && encoded);
                 return stored;
             }
@@ -112,7 +116,8 @@ bool PrepareNativeDds(const std::string& key, uint64_t generation, size_t& bytes
         // or its optional scratch reservation was refused. Owner fallback remains.
         if (bc3Only || mount.Generation() != mountGeneration || !reserve(0)) return false;
         bytes = source->PreparedByteSize();
-        return render::PreparedTextureStore::Instance().PutDdsPrepared(key, std::move(source), options, generation);
+        if (publicationObserver.beforePut) publicationObserver.beforePut(publicationObserver.context, false);
+        return render::PreparedTextureStore::Instance().PutDdsPrepared(key, std::move(source), options, generation, &publication);
     }
     catch (...)
     {
@@ -242,6 +247,8 @@ struct ObjectStreamPreparer::Impl
     std::vector<std::thread> workers;
     bool stop = false;
     Bc3EncodingObserver encodingObserver; // immutable copy, set before workers start
+    render::DdsPublicationObserver publicationObserver;
+    std::shared_ptr<render::DdsPublicationInventory> ddsPublication;
     // Bumped by Reset. A worker that finishes a parse started under an older generation
     // discards its result: the slot it would write belongs to a different world now.
     // Generation tokens distinguish workers from an earlier world after Reset;
@@ -525,6 +532,8 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
         const uint64_t gen = generation.load(std::memory_order_relaxed);
         const std::string path = paths[index];
         const bool prepareBc3 = prepareCompositeBc3[index] != 0;
+        const render::DdsPublicationToken publication{ddsPublication, index,
+            ddsPublication ? ddsPublication->Epoch(index) : 0};
         const auto packedRead = packedReads[index];
         Set(index, State::Parsing);
         stats.parseReservedBytes += reservation;
@@ -670,6 +679,7 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                         size_t bytes = 0;
                         if (PrepareNativeDds(key, textureGeneration, bytes, prepareBc3, bc3Only,
                             encodingObserver.afterTopMip ? &encodingObserver : nullptr,
+                            publication, publicationObserver,
                             [&](size_t needed) {
                                 std::lock_guard<std::mutex> budgetLock(mutex);
                                 if (stop || gen != generation.load(std::memory_order_relaxed) ||
@@ -832,11 +842,13 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
 
 // ------------------------------------------------------------------------------------------
 
-ObjectStreamPreparer::ObjectStreamPreparer(uint64_t readyByteBudget, const Bc3EncodingObserver* observer)
+ObjectStreamPreparer::ObjectStreamPreparer(uint64_t readyByteBudget, const Bc3EncodingObserver* observer,
+                                         const render::DdsPublicationObserver* publicationObserver)
     : _impl(std::make_unique<Impl>())
 {
     _impl->stats.readyByteBudget = readyByteBudget;
     if (observer) _impl->encodingObserver = *observer;
+    if (publicationObserver) _impl->publicationObserver = *publicationObserver;
 }
 
 ObjectStreamPreparer::~ObjectStreamPreparer()
@@ -844,6 +856,7 @@ ObjectStreamPreparer::~ObjectStreamPreparer()
     {
         std::lock_guard<std::mutex> lock(_impl->mutex);
         _impl->stop = true;
+        if (_impl->ddsPublication) _impl->ddsPublication->InvalidateAll();
     }
     _impl->cv.notify_all();
     for (std::thread& worker : _impl->workers)
@@ -880,6 +893,8 @@ size_t ObjectStreamPreparer::ModelCount() const
 
 void ObjectStreamPreparer::Reset(const std::string* paths, size_t modelCount)
 {
+    auto publication = render::PreparedTextureStore::NativeDdsEnabled()
+        ? render::DdsPublicationInventory::Create(modelCount) : nullptr;
     std::vector<std::optional<BankReadRequest>> packedReads(modelCount);
     const char* packedFlag = std::getenv("WGR_OBJECT_STREAM_PBO");
     size_t packedCount = 0;
@@ -903,6 +918,9 @@ void ObjectStreamPreparer::Reset(const std::string* paths, size_t modelCount)
     {
         std::lock_guard<std::mutex> lock(_impl->mutex);
         ++_impl->generation;
+        if (_impl->ddsPublication) _impl->ddsPublication->InvalidateAll();
+        publication.swap(_impl->ddsPublication); // old metadata retires outside queue mutex
+        _impl->stats.ddsPublicationBytes = _impl->ddsPublication ? _impl->ddsPublication->MetadataBytes() : 0;
         _impl->stats.dropped += _impl->stats.ready;
         _impl->stats.queued = 0;
         _impl->stats.ready = 0;
@@ -1067,6 +1085,8 @@ size_t ObjectStreamPreparer::DropStale(const uint32_t* epochs, size_t count, uin
         bool queueTouched = false;
         for (size_t i = 0; i < n; ++i)
         {
+            if (epochs[i] != currentEpoch && !_impl->stale[i] && _impl->ddsPublication)
+                _impl->ddsPublication->CancelModel(i);
             _impl->stale[i] = epochs[i] != currentEpoch;
             if (epochs[i] == currentEpoch)
                 continue;

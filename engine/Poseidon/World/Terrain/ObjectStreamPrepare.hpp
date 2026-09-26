@@ -81,6 +81,7 @@
 namespace Poseidon
 {
 struct Bc3EncodingObserver;
+namespace render { struct DdsPublicationObserver; }
 class LODShapeWithShadow;
 namespace Model
 {
@@ -178,6 +179,7 @@ class ObjectStreamPreparer
         double convertMaxMs = 0.0;
         uint64_t radiusCertificateBytes = 0; // actual compact-slot vector capacity * sizeof(slot)
         uint64_t bc3PolicyBytes = 0; // owner-snapshot vector capacity
+        uint64_t ddsPublicationBytes = 0; // current bounded atomic inventory; excludes shared_ptr allocator overhead
         uint64_t textureEncodeReservedBytes = 0; // source + bounded optional BC3 workspace/output
         uint64_t peakTextureEncodeReservedBytes = 0;
         uint64_t workerBc3Prepared = 0;
@@ -200,7 +202,8 @@ class ObjectStreamPreparer
     // until this preparer's destructor has joined ALL workers. Optional CPU-only
     // observation never grants renderer access or changes reservation lifetime.
     explicit ObjectStreamPreparer(uint64_t readyByteBudget = ReadyByteBudget(),
-                                  const Bc3EncodingObserver* observer = nullptr);
+                                  const Bc3EncodingObserver* observer = nullptr,
+                                  const render::DdsPublicationObserver* publicationObserver = nullptr);
     ~ObjectStreamPreparer(); // joins the workers; the only blocking call in this class
 
     ObjectStreamPreparer(const ObjectStreamPreparer&) = delete;

@@ -217,6 +217,10 @@ void RegisterStreamingProbes(HarnessServer& hs)
             number("shapeElementBytes", state.shapeElementBytes);
             number("lastPumpVisits", state.lastPumpVisits);
             number("ownerPumps", state.ownerPumps);
+            number("fireCollisionCalls", state.fireCollisionCalls);
+            number("fireCollisionCandidateTests", state.fireCollisionCandidateTests);
+            number("fireCollisionWorkRefusals", state.fireCollisionWorkRefusals);
+            cJSON_AddNumberToObject(result, "lastFireCollisionMs", state.lastFireCollisionMs);
             ObjectStreamResidencyCounters visualState;
             GLandscape->SnapshotObjectStreamDiag(visualState);
             number("requiredObjects", visualState.requiredObjects);
@@ -333,12 +337,14 @@ void RegisterScreenshot(HarnessServer& hs)
             cJSON_AddNumberToObject(result, "workerBc3Prepared", static_cast<double>(state.prep.workerBc3Prepared));
             cJSON_AddNumberToObject(result, "workerBc3BudgetSkipped", static_cast<double>(state.prep.workerBc3BudgetSkipped));
             cJSON_AddNumberToObject(result, "workerBc3Ms", state.prep.workerBc3Ms);
+            cJSON_AddNumberToObject(result, "ddsPublicationBytes", static_cast<double>(state.prep.ddsPublicationBytes));
             const auto texturePrep = render::PreparedTextureStore::Instance().SnapshotStats();
             cJSON_AddNumberToObject(result, "preparedTextureEntries", static_cast<double>(texturePrep.entries));
             cJSON_AddNumberToObject(result, "preparedTextureCapacityBytes", static_cast<double>(texturePrep.bytes));
             cJSON_AddNumberToObject(result, "preparedDdsPuts", static_cast<double>(texturePrep.ddsPreparedPuts));
             cJSON_AddNumberToObject(result, "preparedDdsTakes", static_cast<double>(texturePrep.ddsPreparedTakes));
             cJSON_AddNumberToObject(result, "preparedDdsConfigurationMisses", static_cast<double>(texturePrep.ddsConfigurationMisses));
+            cJSON_AddNumberToObject(result, "preparedDdsCancelled", static_cast<double>(texturePrep.ddsCancelled));
             cJSON_AddNumberToObject(result, "peakConversionReservedBytes", static_cast<double>(state.prep.peakConversionReservedBytes));
             cJSON_AddNumberToObject(result, "peakReadyPayloadBytes", static_cast<double>(state.prep.peakReadyPayloadBytes));
             cJSON_AddNumberToObject(result, "readyByteParks", static_cast<double>(state.prep.readyByteParks));
@@ -474,8 +480,8 @@ void RegisterSqf(HarnessServer& hs)
             const auto* actorName = HarnessProtocol::GetString(root, "actor");
             const auto* action = HarnessProtocol::GetString(root, "action");
             if (!actorName || !actorName[0] || std::strlen(actorName) > 64 || !action ||
-                (std::strcmp(action, "queue") && std::strcmp(action, "status") && std::strcmp(action, "release")))
-                return HarnessProtocol::ErrorResponse("actor variable and queue/status/release required");
+                (std::strcmp(action, "queue") && std::strcmp(action, "status") && std::strcmp(action, "release") && std::strcmp(action, "collide")))
+                return HarnessProtocol::ErrorResponse("actor variable and queue/status/release/collide required");
             for (const char* p = actorName; *p; ++p)
                 if (!((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') ||
                     (*p >= '0' && *p <= '9') || *p == '_'))
@@ -513,12 +519,26 @@ void RegisterSqf(HarnessServer& hs)
             const auto* radius = cJSON_GetObjectItemCaseSensitive(root, "radius");
             if (!cJSON_IsNumber(radius) || !std::isfinite(radius->valuedouble) || radius->valuedouble < 0 || radius->valuedouble > 1000)
                 return HarnessProtocol::ErrorResponse("finite radius 0..1000 required");
-            const auto status = !std::strcmp(action, "queue")
+            CollisionBuffer contacts;
+            const auto status = !std::strcmp(action, "collide")
+                ? (purpose == Streaming::SimulationQueryPurpose::Fire
+                    ? GLandscape->TryModernSimulationFireCollision(contacts, *actor, nullptr, nullptr, endpoints[0], endpoints[1], float(radius->valuedouble))
+                    : Streaming::SimulationResidencyStatus::Invalid)
+                : !std::strcmp(action, "queue")
                 ? GLandscape->QueueModernSimulationQuery(*actor, purpose, endpoints[0], endpoints[1], radius->valuedouble)
                 : GLandscape->ModernSimulationQueryStatus(*actor, purpose, endpoints[0], endpoints[1], radius->valuedouble);
             auto* result = cJSON_CreateObject();
             cJSON_AddStringToObject(result, "status", SimulationStatusName(status));
             cJSON_AddStringToObject(result, "scope", "static terrain-object residency; not collision clearance");
+            if (!std::strcmp(action, "collide")) {
+                auto* hits = cJSON_AddArrayToObject(result, "contacts");
+                for (int i = 0; i < contacts.Size(); ++i) {
+                    if (!contacts[i].object) continue;
+                    auto* item = cJSON_CreateObject();
+                    cJSON_AddNumberToObject(item, "id", contacts[i].object->ID());
+                    cJSON_AddItemToArray(hits, item);
+                }
+            }
             return HarnessProtocol::JsonResponse(result);
         });
     hs.RegisterCommand({"ai_combat", "SP combat setting and passive audit fixture state", {{"improved", "int", false}}},

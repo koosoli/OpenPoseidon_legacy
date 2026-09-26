@@ -1,5 +1,6 @@
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Terrain/SimulationResidencyState.hpp>
+#include <Poseidon/World/Terrain/SimulationFireCollision.hpp>
 #include <Poseidon/World/Terrain/ObjectStreamPrepare.hpp>
 #include <Poseidon/World/Model/ShapeAdapter.hpp>
 #include <Poseidon/World/World.hpp>
@@ -228,6 +229,63 @@ Status Landscape::ModernSimulationQueryStatus(const Object& actor, SimulationQue
     const auto found = _modernSimulation->regions.find(State::RegionKey{&actor, uint8_t(purpose)});
     const auto& r = found->second;
     return SimulationCapsuleContains(r.from, r.to, r.radius, Point(from), Point(to), radius) ? Status::Ready : Status::Pending;
+}
+
+Status Landscape::TryModernSimulationFireCollision(CollisionBuffer& retVal, const Object& actor,
+    Object* with, Object* ignore, Vector3Par from, Vector3Par to, float radius) const
+{
+    if (!ModernSimulationResidencyEnabled()) return Status::Disabled;
+    if (!Foundation::IsMainThread()) return Status::WrongOwner;
+    if (!ValidRegion(Point(from), Point(to), radius)) return Status::Invalid;
+    const auto broadphase = SimulationFireBroadphaseStatus(from, to, radius, _invLandGrid, _landRange);
+    if (broadphase != Status::Ready) return broadphase;
+    if (!_modernSimulation) return Status::Pending;
+    auto& s = *_modernSimulation;
+    const auto start = std::chrono::steady_clock::now();
+    const auto elapsed = [&] { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count(); };
+    const auto validate = [&] { return ModernSimulationQueryStatus(actor, SimulationQueryPurpose::Fire, from, to, radius); };
+    const auto finish = [&](Status status) {
+        ++s.stats.fireCollisionCalls;
+        s.stats.lastFireCollisionMs = elapsed();
+        return status;
+    };
+    const auto status = validate();
+    if (status != Status::Ready) return finish(status);
+    const auto found = s.regions.find(State::RegionKey{&actor, uint8_t(SimulationQueryPurpose::Fire)});
+    if (found == s.regions.end()) return finish(Status::Pending);
+    if (found->second.active.size() > SimulationMaxRegionLeases) return finish(Status::CapacityExceeded);
+    std::vector<Object*> candidates;
+    candidates.reserve(found->second.active.size());
+    for (auto index : found->second.active)
+    {
+        const auto entry = s.entries.find(index);
+        if (entry == s.entries.end() || !HasModernSimulationLease(index)) return finish(Status::Unknown);
+        Object* object = static_cast<Object*>(entry->second.object);
+        if (!object) return finish(Status::Unknown);
+        candidates.push_back(object);
+    }
+    bool workRefused = false;
+    const auto budget = [&] {
+        const bool allowed = elapsed() < 2;
+        workRefused |= !allowed;
+        return allowed;
+    };
+    // Candidate collection performs only owner reads/allocation, so retain the
+    // just-completed initial validation instead of rescanning 16k watchers twice
+    // before any geometry work. The post-trace validation is always fresh.
+    bool useInitialValidation = true;
+    const auto revalidate = [&] {
+        if (useInitialValidation) { useInitialValidation = false; return status; }
+        return validate();
+    };
+    const auto result = AppendSimulationFireContacts(retVal, std::span<Object* const>(candidates.data(), candidates.size()), with, ignore,
+        [&](CollisionBuffer& staged) { ObjectCollision(staged, with, ignore, from, to, radius, ObjIntersectFire); },
+        [&](CollisionBuffer& staged, Object& object) {
+            ++s.stats.fireCollisionCandidateTests;
+            object.Intersect(staged, from, to, radius, ObjIntersectFire);
+        }, revalidate, budget);
+    if (workRefused) ++s.stats.fireCollisionWorkRefusals;
+    return finish(result);
 }
 
 Status Landscape::ModernSimulationRegionStatusForChannel(const Object& actor, uint8_t channel) const

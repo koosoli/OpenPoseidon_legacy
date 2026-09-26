@@ -1,10 +1,10 @@
-param([switch]$Disabled,[switch]$Capacity,[switch]$MovedWatcher,[string]$Label='simulation-residency',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',[string]$Python='C:\Program Files\Python311\python.exe')
+param([switch]$Disabled,[switch]$Capacity,[switch]$MovedWatcher,[switch]$LargeWall,[string]$Label='simulation-residency',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',[string]$Python='C:\Program Files\Python311\python.exe')
 $ErrorActionPreference='Stop'
-if (@($Disabled,$Capacity,$MovedWatcher | Where-Object {$_}).Count -gt 1) {throw 'Disabled, Capacity and MovedWatcher are separate scenarios'}
+if (@($Disabled,$Capacity,$MovedWatcher,$LargeWall | Where-Object {$_}).Count -gt 1) {throw 'Disabled, Capacity, MovedWatcher and LargeWall are separate scenarios'}
 if (!$env:LOCK_OWNER) {
  $shellName=if ($PSVersionTable.PSEdition -eq 'Core') {'pwsh.exe'} else {'powershell.exe'}
  $argv=@((Join-Path $PSScriptRoot 'with-game-lock.sh'),(Join-Path $PSHOME $shellName).Replace('\','/'),'-NoProfile','-File',$PSCommandPath,'-Label',$Label,'-GameDir',$GameDir,'-Python',$Python)
- foreach ($flag in @('Disabled','Capacity','MovedWatcher')) {if ((Get-Variable $flag -ValueOnly)) {$argv+=('-'+$flag)}}
+ foreach ($flag in @('Disabled','Capacity','MovedWatcher','LargeWall')) {if ((Get-Variable $flag -ValueOnly)) {$argv+=('-'+$flag)}}
  $env:LOCK_OWNER='simulation residency fixture'
  try {& 'C:\Program Files\Git\bin\bash.exe' @argv; if ($LASTEXITCODE) {throw "Simulation fixture exited $LASTEXITCODE"}} finally {Remove-Item Env:LOCK_OWNER}
  return
@@ -18,6 +18,7 @@ $env:POSEIDON_USER_DIR=Join-Path $out 'user'
 New-Item -ItemType Directory -Force $mission,$env:POSEIDON_USER_DIR | Out-Null
 $fixtureArgs=@($fixture,'--absolute-model-path')
 if ($Capacity) {$fixtureArgs+=@('--model-count','257')}
+if ($LargeWall) {$fixtureArgs+='--large-wall'}
 & $Python (Join-Path $PSScriptRoot 'streaming/build_simulation_residency_fixture.py') @fixtureArgs
 if ($LASTEXITCODE) {throw 'Original fixture generation failed'}
 @'
@@ -105,15 +106,21 @@ try {
   if ($residency.required -ne 0) {throw 'Actor admission used permanent required IDs'}
   $query=@{cmd='stream_fire_probe';from=@(1190,11.5,1200);to=@(1210,11.5,1200)}
   $hits=Send $query
-  if (!@($hits.contacts | Where-Object {$_.id -eq 1001}).Count) {throw 'Cold actor wall did not obstruct fire'}
+  if (!$LargeWall -and !@($hits.contacts | Where-Object {$_.id -eq 1001}).Count) {throw 'Cold actor wall did not obstruct fire'}
+  if ($LargeWall -and @($hits.contacts | Where-Object {$_.id -eq 1001}).Count) {throw 'Large origin-offset fixture no longer exposes legacy omission; reassess this test'}
   $queryBefore=Query 'status'
   if ($queryBefore.status -ne 'Pending') {throw 'Neighborhood readiness was reused as a fire query'}
+  $collisionBefore=Query 'collide'
+  if ($collisionBefore.status -ne 'Pending' -or @($collisionBefore.contacts).Count) {throw 'Unqueued collision published contacts'}
   $invalidPurpose=Query 'queue' -purpose 2
   if ($invalidPurpose.status -ne 'Invalid') {throw 'Unsupported query purpose was admitted'}
   $null=Query 'queue'
   $until=[DateTime]::UtcNow.AddSeconds(60)
   do {Start-Sleep -Milliseconds 250;$queryReady=Query 'status'} while ($queryReady.status -eq 'Pending' -and [DateTime]::UtcNow -lt $until)
   if ($queryReady.status -ne 'Ready') {throw 'Exact fire residency did not complete'}
+  $until=[DateTime]::UtcNow.AddSeconds(10)
+  do {Start-Sleep -Milliseconds 100;$collision=Query 'collide'} while ($collision.status -eq 'Pending' -and [DateTime]::UtcNow -lt $until)
+  if ($collision.status -ne 'Ready' -or @($collision.contacts | Where-Object {$_.id -eq 1001}).Count -ne 1) {throw 'Complete fire query missed the wall or duplicated its contacts'}
   $wrongRay=Query 'status' -from @(100,11.5,100) -to @(120,11.5,100)
   if ($wrongRay.status -ne 'Pending') {throw 'Unrelated ray inherited fire readiness'}
   $independent=State
@@ -121,7 +128,12 @@ try {
   $null=Query 'release'
   $queryReleased=State
   if ($queryReleased.queryRegions -ne 0 -or $queryReleased.leasedPlacements -ne 2) {throw 'Query release retired another interest owner'}
-  if ($MovedWatcher) {
+  if ($LargeWall) {
+   if ($coldIds.objects[0].z -ne 1400 -or $coldIds.objects[0].radius -lt 200) {throw 'Large original wall did not retain its distant origin/envelope'}
+   $after=State
+   if ($after.fireCollisionCandidateTests -lt 1 -or $after.fireCollisionCalls -lt 2) {throw 'Large wall did not exercise the supplementary query path'}
+   $result=@{cold=$cold;coldIds=$coldIds;legacyHits=$hits;collisionBefore=$collisionBefore;queryReady=$queryReady;collision=$collision;independent=$independent;queryReleased=$queryReleased;after=$after;largeWall=$true}
+  } elseif ($MovedWatcher) {
    $null=Send @{cmd='stream_existing_move';id=1002;position=@(100,11.5,100)}
    $moved=State;$movedIds=Ids
    if ($moved.status -ne 'Unknown' -or $moved.liveWatchedPlacements -ne 2 -or $movedIds.objects[1].x -ne 100 -or $movedIds.objects[1].z -ne 100) {throw 'Movement outside authored bins reused a stale complete-world certificate'}

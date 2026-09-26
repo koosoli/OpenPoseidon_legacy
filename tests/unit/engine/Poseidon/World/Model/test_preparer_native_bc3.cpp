@@ -169,6 +169,24 @@ struct EncodingLatch
     }
     void Release() { std::lock_guard lock(mutex); released = true; cv.notify_all(); }
 };
+struct PublicationLatch
+{
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool entered = false, released = false, throwFirst = false;
+    unsigned calls = 0;
+    static void Observe(void* context, bool hasBc3)
+    {
+        if (!hasBc3) return; // Broad mode also prepares ordinary DDS stages.
+        auto& self = *static_cast<PublicationLatch*>(context);
+        std::unique_lock lock(self.mutex);
+        if (++self.calls != 1) return;
+        self.entered = true; self.cv.notify_all();
+        if (self.throwFirst) throw std::runtime_error("synthetic publication observer failure");
+        self.cv.wait(lock, [&] { return self.released; });
+    }
+    void Release() { std::lock_guard lock(mutex); released = true; cv.notify_all(); }
+};
 }
 
 TEST_CASE("Non-owner native requests retain ordinary preparation without consulting owner BC3 policy", "[preparer][bc3-worker][native-fixture]")
@@ -408,6 +426,88 @@ TEST_CASE("Throwing CPU encoding observer releases each reservation once and kee
     ObjectStreamPreparer prep(128ull * 1024 * 1024, &observer);
     latch.preparer = &prep;
     const std::string path = "synthetic_bc3_encoding_exception.xob";
+    prep.Reset(&path, 1); REQUIRE(prep.Request(0));
+    REQUIRE(Wait([&] { return prep.Query(0) == ObjectStreamPreparer::State::Ready; }));
+    CHECK(prep.SnapshotStats().textureEncodeReservedBytes == 0);
+    CHECK(prep.SnapshotStats().parseReservedBytes == 0);
+    CHECK(prep.SnapshotStats().workerBc3Prepared == 0);
+    CHECK_FALSE(PreparedTextureStore::Instance().TakeDdsPrepared(Composite, Poseidon::CaptureDdsPreparationOptions()));
+    REQUIRE(prep.Take(0)); REQUIRE(prep.Request(0));
+    REQUIRE(Wait([&] { return prep.Query(0) == ObjectStreamPreparer::State::Ready; }));
+    CHECK(prep.SnapshotStats().workerBc3Prepared == 1);
+    CHECK(prep.SnapshotStats().textureEncodeReservedBytes == 0);
+    CHECK(prep.SnapshotStats().parseReservedBytes == 0);
+    REQUIRE(PreparedTextureStore::Instance().TakeDdsPrepared(Composite, Poseidon::CaptureDdsPreparationOptions()));
+    REQUIRE(prep.Take(0));
+}
+
+TEST_CASE("Cancellation after final job validation cannot publish a claimable DDS", "[preparer][bc3-worker][native-fixture][publication-cancellation]")
+{
+    RequireEnabled(); Fixture fixture;
+    const size_t required = ExactCompositeReservation();
+    constexpr uint64_t parseDebt = 16ull * 1024 * 1024;
+    PublicationLatch latch;
+    Poseidon::render::DdsPublicationObserver observer{PublicationLatch::Observe, &latch};
+    ObjectStreamPreparer prep(parseDebt + required, nullptr, &observer);
+    observer = {}; // The callback value was copied before worker creation.
+    struct ReleaseBeforeJoin { PublicationLatch& value; ~ReleaseBeforeJoin() { value.Release(); } } release{latch};
+    const std::string path = "synthetic_bc3_publication.xob";
+    prep.Reset(&path, 1); REQUIRE(prep.Request(0));
+    {
+        std::unique_lock lock(latch.mutex);
+        REQUIRE(latch.cv.wait_for(lock, std::chrono::seconds(10), [&] { return latch.entered; }));
+    }
+    // The full BC3 chain is now encoded and the last reserve(0) succeeded.
+    // Worker is held immediately before Put, with no queue/store lock owned.
+    const auto held = prep.SnapshotStats();
+    CHECK(held.textureEncodeReservedBytes == required);
+    CHECK(held.parseReservedBytes == parseDebt);
+    CHECK(held.ddsPublicationBytes > 0);
+    const auto storeGeneration = PreparedTextureStore::Instance().Generation();
+    bool reset = false;
+    SECTION("Reset returns while publication is paused and queues the same texture key")
+    {
+        reset = true;
+        prep.Reset(&path, 1); REQUIRE(prep.Request(0));
+        CHECK(prep.Query(0) == ObjectStreamPreparer::State::Queued);
+    }
+    SECTION("DropStale returns while publication is paused")
+    {
+        const uint32_t epoch = 0; prep.DropStale(&epoch, 1, 1);
+        CHECK(prep.Query(0) == ObjectStreamPreparer::State::Parsing);
+    }
+    CHECK(PreparedTextureStore::Instance().Generation() == storeGeneration);
+    CHECK(prep.SnapshotStats().textureEncodeReservedBytes == required);
+    CHECK(prep.SnapshotStats().parseReservedBytes == parseDebt);
+    CHECK_FALSE(PreparedTextureStore::Instance().TakeDdsPrepared(Composite, Poseidon::CaptureDdsPreparationOptions()));
+    latch.Release();
+    if (!reset)
+    {
+        REQUIRE(Wait([&] { const auto s = prep.SnapshotStats(); return !s.parseReservedBytes && !s.textureEncodeReservedBytes; }));
+        CHECK(prep.Query(0) == ObjectStreamPreparer::State::Unknown);
+        CHECK_FALSE(PreparedTextureStore::Instance().TakeDdsPrepared(Composite, Poseidon::CaptureDdsPreparationOptions()));
+        REQUIRE(PreparedTextureStore::Instance().ShouldPrepare(Composite));
+        REQUIRE(prep.Request(0));
+    }
+    REQUIRE(Wait([&] { return prep.Query(0) == ObjectStreamPreparer::State::Ready; }));
+    CHECK(prep.SnapshotStats().textureEncodeReservedBytes == 0);
+    CHECK(prep.SnapshotStats().parseReservedBytes == 0);
+    CHECK(prep.SnapshotStats().workerBc3Prepared == 1);
+    CHECK(PreparedTextureStore::Instance().SnapshotStats().ddsCancelled > 0);
+    { std::lock_guard lock(latch.mutex); CHECK(latch.calls == 2); }
+    auto source = PreparedTextureStore::Instance().TakeDdsPrepared(Composite, Poseidon::CaptureDdsPreparationOptions());
+    REQUIRE(source);
+    Poseidon::Bc3MipChain chain; REQUIRE(source->TakeCompositeBc3(Composite, 16, 16, chain));
+    REQUIRE(prep.Take(0));
+}
+
+TEST_CASE("Publication observer failure frees encoded workspace exactly once", "[preparer][bc3-worker][native-fixture][publication-cancellation]")
+{
+    RequireEnabled(); Fixture fixture;
+    PublicationLatch latch; latch.throwFirst = true;
+    const Poseidon::render::DdsPublicationObserver observer{PublicationLatch::Observe, &latch};
+    ObjectStreamPreparer prep(128ull * 1024 * 1024, nullptr, &observer);
+    const std::string path = "synthetic_bc3_publication_exception.xob";
     prep.Reset(&path, 1); REQUIRE(prep.Request(0));
     REQUIRE(Wait([&] { return prep.Query(0) == ObjectStreamPreparer::State::Ready; }));
     CHECK(prep.SnapshotStats().textureEncodeReservedBytes == 0);

@@ -999,6 +999,19 @@ class Landscape : public SerializeClass
     Streaming::SimulationResidencyStatus ModernSimulationQueryStatus(const Object& actor,
         Streaming::SimulationQueryPurpose purpose, Vector3Par from, Vector3Par to, double radius) const;
     void ReleaseModernSimulationQuery(Object& actor, Streaming::SimulationQueryPurpose purpose);
+    // Experimental owner-only Fire-channel query. NonReady leaves retVal
+    // unchanged. Ready appends legacy contacts plus complete leased static
+    // terrain contacts independent of the legacy 25m origin-grid margin.
+    // Radius certifies conservative residency padding; Object::Intersect keeps
+    // its existing segment/contact semantics (this is NOT a thick-ray API).
+    // A measured 2ms soft work guard can return Pending without any contacts;
+    // one legacy scan/Intersect and final append are not preemptible. No default
+    // gameplay consumer is migrated, nor is arbitrary dynamic coverage proven.
+    // Degenerate (<=1mm) segments/unsafe float-to-grid conversions are Invalid;
+    // legacy AABB scans beyond4096 cells refuse CapacityExceeded before work.
+    Streaming::SimulationResidencyStatus TryModernSimulationFireCollision(
+        CollisionBuffer& retVal, const Object& actor, Object* with, Object* ignore,
+        Vector3Par from, Vector3Par to, float radius) const;
     Streaming::SimulationResidencyStats SnapshotModernSimulationResidency() const;
     // Only World can mint the owner boundary, after its real background-AI join.
     void PumpModernSimulationResidency(const Streaming::SimulationResidencyOwnerBoundary& boundary);

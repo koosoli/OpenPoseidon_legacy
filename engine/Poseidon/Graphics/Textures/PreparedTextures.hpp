@@ -35,6 +35,7 @@
 // copies a mip chain under the lock.
 
 #include <Poseidon/Graphics/Textures/PAADecoder.hpp>
+#include <Poseidon/Graphics/Textures/PreparedDdsPublication.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -75,6 +76,7 @@ class PreparedTextureStore
         uint64_t ddsPreparedPuts = 0;
         uint64_t ddsPreparedTakes = 0;
         uint64_t ddsConfigurationMisses = 0;
+        uint64_t ddsCancelled = 0; // invalid publication puts or retired entries
         size_t entries = 0;         // current
         size_t bytes = 0;           // retained payload capacities incl. mip metadata; excludes map/string/allocator overhead
     };
@@ -121,7 +123,8 @@ class PreparedTextureStore
     // queue. Caller must use these options for preparation. Generation is mandatory.
     // No pixel copy at hand-off. Publication refusal destroys the owned source.
     bool PutDdsPrepared(const std::string& key, std::unique_ptr<TextureSourceDDS> source,
-                        const DdsPreparationOptions& options, uint64_t generation);
+                        const DdsPreparationOptions& options, uint64_t generation,
+                        const DdsPublicationToken* publication = nullptr);
     std::unique_ptr<TextureSourceDDS> TakeDdsPrepared(const std::string& key,
                                                      const DdsPreparationOptions& options);
 

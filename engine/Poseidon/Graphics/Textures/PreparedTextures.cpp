@@ -35,6 +35,7 @@ struct PreparedTextureStore::Impl
         std::unique_ptr<TextureSourceDDS> preparedDds;
         DdsPreparationOptions ddsOptions{};
         size_t preparedDdsBytes = 0;
+        DdsPublicationToken publication;
     };
     static size_t ChainBytes(const PAABlockChain& chain)
     { return chain.blocks.capacity() + chain.levels.capacity() * sizeof(PAABlockLevel); }
@@ -44,6 +45,8 @@ struct PreparedTextureStore::Impl
     // Insertion order = production order = (through the preparer's queue) distance order, so
     // the front is the oldest and the TTL sweep walks from there and stops early.
     std::list<Entry> order;
+    std::list<Entry>::iterator cancellationCursor = order.end();
+    size_t tokenEntries = 0;
     std::unordered_map<std::string, std::list<Entry>::iterator> byKey;
     std::unordered_set<std::string> uploaded;
     size_t bytes = 0;
@@ -54,6 +57,8 @@ struct PreparedTextureStore::Impl
                      DecodedImage* takeImageInto = nullptr, std::list<Entry>* retired = nullptr)
     {
         std::list<Entry>::iterator node = it->second;
+        if (cancellationCursor == node) ++cancellationCursor;
+        if (node->publication.inventory) --tokenEntries;
         bytes -= EntryBytes(*node);
         if (node->dds)
             stats.ddsReuseBytes -= node->dds->bytes;
@@ -90,6 +95,8 @@ struct PreparedTextureStore::Impl
                 EraseLocked(it, nullptr, nullptr, &retired);
             else
             {
+                if (cancellationCursor == order.begin()) ++cancellationCursor;
+                if (head.publication.inventory) --tokenEntries;
                 bytes -= EntryBytes(head);
                 if (head.dds) stats.ddsReuseBytes -= head.dds->bytes;
                 retired.splice(retired.end(), order, order.begin());
@@ -98,6 +105,27 @@ struct PreparedTextureStore::Impl
         }
         stats.entries = byKey.size();
         stats.bytes = bytes;
+    }
+
+    // Worker maintenance only: bounded visits, with destruction outside mutex.
+    void SweepCancelledLocked(std::list<Entry>& retired)
+    {
+        if (!tokenEntries) return;
+        const size_t visits = std::min<size_t>(32, order.size());
+        for (size_t i = 0; i < visits && !order.empty(); ++i)
+        {
+            if (cancellationCursor == order.end()) cancellationCursor = order.begin();
+            auto node = cancellationCursor++;
+            if (node->publication.inventory && !node->publication.Valid())
+            {
+                auto indexed = byKey.find(node->key);
+                if (indexed != byKey.end())
+                {
+                    EraseLocked(indexed, nullptr, nullptr, &retired);
+                    ++stats.ddsCancelled;
+                }
+            }
+        }
     }
 };
 
@@ -189,7 +217,15 @@ bool PreparedTextureStore::ShouldPrepare(const std::string& key)
 {
     if (!Enabled() || key.empty())
         return false;
+    std::list<Impl::Entry> retired;
     std::lock_guard<std::mutex> lock(_impl->mutex);
+    _impl->SweepCancelledLocked(retired);
+    const auto old = _impl->byKey.find(key);
+    if (old != _impl->byKey.end() && old->second->publication.inventory && !old->second->publication.Valid())
+    {
+        _impl->EraseLocked(old, nullptr, nullptr, &retired);
+        ++_impl->stats.ddsCancelled;
+    }
     if (_impl->uploaded.count(key))
     {
         ++_impl->stats.skippedUploaded;
@@ -332,7 +368,8 @@ bool PreparedTextureStore::Take(const std::string& key, PAABlockChain& out)
 }
 
 bool PreparedTextureStore::PutDdsPrepared(const std::string& key, std::unique_ptr<TextureSourceDDS> source,
-                                         const DdsPreparationOptions& options, uint64_t generation)
+                                         const DdsPreparationOptions& options, uint64_t generation,
+                                         const DdsPublicationToken* publication)
 {
     if (!Enabled() || key.empty() || !source || source->_levels.empty() ||
         source->_mipmaps != static_cast<int>(source->_levels.size()) ||
@@ -345,11 +382,20 @@ bool PreparedTextureStore::PutDdsPrepared(const std::string& key, std::unique_pt
     pending.back().preparedDds = std::move(source);
     pending.back().ddsOptions = options;
     pending.back().preparedDdsBytes = bytes;
+    if (publication) pending.back().publication = *publication;
     std::list<Impl::Entry> retired;
     std::lock_guard<std::mutex> lock(_impl->mutex);
     _impl->SweepLocked(retired);
+    _impl->SweepCancelledLocked(retired);
+    if (publication && !publication->Valid()) { ++_impl->stats.ddsCancelled; return false; }
     if (generation != _impl->generation) { ++_impl->stats.rejectedStale; return false; }
     if (_impl->uploaded.count(key)) { ++_impl->stats.skippedUploaded; return false; }
+    const auto previous = _impl->byKey.find(key);
+    if (previous != _impl->byKey.end() && previous->second->publication.inventory && !previous->second->publication.Valid())
+    {
+        _impl->EraseLocked(previous, nullptr, nullptr, &retired);
+        ++_impl->stats.ddsCancelled;
+    }
     if (_impl->byKey.count(key)) { ++_impl->stats.rejectedDup; return false; }
     if (bytes > ByteBudget() - std::min(ByteBudget(), _impl->bytes)) {
         ++_impl->stats.rejectedFull;
@@ -358,6 +404,7 @@ bool PreparedTextureStore::PutDdsPrepared(const std::string& key, std::unique_pt
     // Allocate the index before the noexcept splice: an allocation failure must
     // not leave an unindexed payload resident or destroy it under this mutex.
     _impl->byKey.emplace(key, pending.begin());
+    if (pending.back().publication.inventory) ++_impl->tokenEntries;
     pending.back().stored = Impl::Clock::now();
     _impl->order.splice(_impl->order.end(), pending);
     _impl->bytes += bytes;
@@ -379,6 +426,15 @@ std::unique_ptr<TextureSourceDDS> PreparedTextureStore::TakeDdsPrepared(
         _impl->SweepLocked(retired);
         const auto it = _impl->byKey.find(key);
         if (it == _impl->byKey.end() || !it->second->preparedDds) return nullptr;
+        // This is the claim linearization point. Cancellation after a valid
+        // claim belongs to the owner reset pipeline; cancelled sources never
+        // escape even if publication raced a prior Reset/DropStale.
+        if (it->second->publication.inventory && !it->second->publication.Valid())
+        {
+            _impl->EraseLocked(it, nullptr, nullptr, &retired);
+            ++_impl->stats.ddsCancelled;
+            return nullptr;
+        }
         const auto& stored = it->second->ddsOptions;
         if (stored.compressedPassthrough == options.compressedPassthrough &&
             stored.linearTintMultiply == options.linearTintMultiply &&
@@ -493,6 +549,8 @@ void PreparedTextureStore::Clear()
         std::lock_guard<std::mutex> lock(_impl->mutex);
         ++_impl->generation;
         freeLater.swap(_impl->order);
+        _impl->cancellationCursor = _impl->order.end();
+        _impl->tokenEntries = 0;
         _impl->byKey.clear();
         _impl->uploaded.clear();
         _impl->bytes = 0;
