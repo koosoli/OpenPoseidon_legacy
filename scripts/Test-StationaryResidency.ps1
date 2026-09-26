@@ -242,13 +242,14 @@ try {
    if ($r.result -notmatch 'true') {throw 'Required identity or mutation changed on return'}
   }
  }
- @{coverageOnly=[bool]$CoverageOnly;saveRoundTrip=[bool]$SaveRoundTrip;freshReload=[bool]$FreshReload;during=$during;identityBefore=$identityBefore;identityAway=$identityAway;identityReturned=$identityReturned;poses=$poseResults;before=$before;small=$small;restored=$restored;normal=[bool]$Normal;baselineReproduced=([bool]$Baseline -and !$Normal)} | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $out 'result.json')
  $null=Send @{cmd='screenshot';path=(Join-Path $out 'settled.png')}
  if ($RequiredIdentity -or $CoverageOnly) {Start-Sleep -Seconds 8; $null=Send @{cmd='screenshot';path=(Join-Path $out 'returned-settled.png')}}
  $null=Send @{cmd='exit'}
  if (!$p.WaitForExit(15000) -or $p.ExitCode) {throw 'Game failed to exit cleanly'}
  if (Select-String -LiteralPath $log -Pattern 'Out of Memory|Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION' -Quiet) {throw 'Renderer error'}
  if ($FreshReload -and (Select-String -LiteralPath $reloadLog -Pattern 'Out of Memory|Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION' -Quiet)) {throw 'Reload renderer error'}
+ # A result is accepted only after clean shutdown and renderer-error checks.
+ @{passed=$true;coverageOnly=[bool]$CoverageOnly;saveRoundTrip=[bool]$SaveRoundTrip;freshReload=[bool]$FreshReload;during=$during;identityBefore=$identityBefore;identityAway=$identityAway;identityReturned=$identityReturned;poses=$poseResults;before=$before;small=$small;restored=$restored;normal=[bool]$Normal;baselineReproduced=([bool]$Baseline -and !$Normal)} | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $out 'result.json')
  Write-Output "Stationary residency evidence: $out"
 } finally {
  if ($gpuSampler -and !$gpuSampler.HasExited) {Stop-Process -Id $gpuSampler.Id}
