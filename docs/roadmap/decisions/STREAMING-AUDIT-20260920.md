@@ -1803,3 +1803,52 @@ reclamation. This closes one actual production same-world SaveBin/LoadBin
 roundtrip, not fresh-process/multiplayer/performance or general state coverage.
 Only runner save mode changed; source/binary remainsddf. Shape-loop optimization
 build remains ongoing/unclassified. Whole plan/performance/MP/wider gates OPEN.
+
+### Alpha shape helper candidate measurements — pending integration
+
+Isolated benchmark at f0d0a0c5 compares an independent pre-optimization reference
+with the candidate in separate translation units, O2/no LTO,2048² synthetic data,
+nine alternating-order batches of three calls. Allocations are excluded. Exact
+measured/meanClearNeighbours/clusteredClearFrac/partialBandWidth equality is checked.
+Extended suite is eight patterns with stride1 compact alpha and stride4 RGBA.
+CSV p95 column is largest of nine batch values, not a full-game frame percentile.
+
+Initial compact partial pattern regresses33–39% and opaque29–50%; candidate is
+rejected. Repair1 improves some patterns but sparse .1% clear regresses91–126%;
+that candidate is also rejected. Repair2 adds opaque fast exit and partial
+branch loop, then extended+confirmation results show no reproducible material
+median slowdown in this limited screening. Sparse compact deltas +.029/- .064ms;
+RGBA -.068/+.034ms change sign. Other tested eligible synthetic medians generally
+reduce about10–60%, not a fixed no-regression or whole-texture/FPS guarantee.
+
+All benchmark sources, executables, compile logs, result CSVs and initial
+provenance hashes are retained. Initial provenance describes its capture phase;
+later repair artifacts have their own hashes, not a stamped source-build claim.
+Root parity build remains running/unclassified; runtime and actual-asset results
+are absent. performanceAccepted/defaultReady remain false, implementation is
+pending validation, full plan OPEN/defaultsOFF.
+
+### Alpha repair2 and production fresh-process restore — 26 September 2026
+
+c04ae3f6 repair2/freshsave22-node build, stamped18-node build and61695 assertions/
+175 cases pass. Actual installed stamp is c04ae3f6+dirty22:46 (docs dirty at build);
+exact executable/renderer hashes in both provenance records identify this binary.
+Later histogram candidate source edits are unbuilt and NOT included.
+
+DayZ224706 passes both processes clean0. Source-bound target83912800 initially
+cold/unpinned is promoted/demoted, damaged.25 and saved; .75 mutation controls
+restoration. First process exits, new PID starts with same private profile/world,
+target absent before LoadGame/required0, then actual disk load restores ID/model/
+all12 frame coefficients within1e-6 (actual delta0), radius4.731777191, damage.25/
+MustBeSaved, CPU Geometry/Fire/View, deferred visual/normalVB0 and real firehit.
+Loader pin count3 is retained honestly. Actual6968-byte save/provenance hashes
+are recorded. This closes one real production fresh-process save gate, not
+multiplayer, broad state, migrated gameplay consumers or fullworld Ready.
+
+Same actual tree log records shape21.210→10.458ms versus prior ddf, sourceRead
+11.895→11.135/decode3.904→3.181/hist11.033→9.092ms, alpha49.3→34.9/model50.1→35.9ms.
+That is one ordered local-asset observation with OS/cache/other-part confounds,
+not FPS improvement or comparable-quality no-regression acceptance. Synthetic
+parity and accepted local functionality do not enable experimental defaults.
+Later histogram candidate remains pending/unbuilt; full plan/performance/MP/
+general-state/consumer/defaultReady gates OPEN.

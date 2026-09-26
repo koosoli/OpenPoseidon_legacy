@@ -6811,6 +6811,102 @@
         "samples.jsonl": "1d45e57f6325c48783735d899be36b5433884c288c0ed522ecca7bf5161d99ab",
         "user/Users/mail/Saved/Tmp/cold-positive-away.fps": "76e0edea5d00140440c6cc6484725d3e2425116dbd19bcbee3fbfad0f208fc73"
       }
+    },
+    {
+      "run": "dayz-alpha-fresh-save-20260926-20260926-224706",
+      "classification": "PASS bothfreshprocessclean0 on actualc04ae3f6+dirty22:46 binary (docsdirtyatbuild, laterhistogramcandidateNOTincluded). FreshtargetabsentpreLoad/required0; initialcold/promotion/demotion/.25save/.75control→newPIDsameprivateprofiletriLoadGame restoresID/model/exact12frame1e-6/radius/.25MustSaved/CPU3roles/deferredVB0/realfirehit. Loaderrequired3. Narrowfreshprocess gate, noMP/generalstate/consumerReady/performance acceptance. Actualfraxinusshape21.210→10.458ms/sourceRead11.895→11.135/decode3.904→3.181/hist11.033→9.092/alpha49.3→34.9/model50.1→35.9; singleorderedasset/cacheconfounded notFPSregression/gain verdict.",
+      "provenance": {
+        "head": "c04ae3f6155bd95f3971515e6312c6a16238c4fe",
+        "environment": {
+          "WGR_NATIVE_DDS_PREPARE": "0",
+          "WGR_OBJECT_STREAM_PBO": "1",
+          "WGR_OBJECT_STREAM_GPU_BUDGET": "0",
+          "WGR_ADAPTIVE_TEXTURE_DETAIL": "0",
+          "WGR_SIMULATION_RESIDENCY": "1",
+          "WGR_SIMULATION_POSITIVE_COLD": "1",
+          "WGR_OBJECT_STREAM_PBO_TEXTURES": "0",
+          "WGR_SKY_VOLUME_INCREMENTAL": "1",
+          "WGR_GEO_POOL_GROWTH": "2.0",
+          "WGR_NATIVE_DDS_BC3_ONLY": "0",
+          "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\dayz-alpha-fresh-save-20260926-20260926-224706\\user",
+          "WGR_LOD_GOVERNOR_RANGE": "1",
+          "WGR_OBJECT_STREAM_MAX_OBJECTS": "20000",
+          "POSEIDON_MODEL_DDC": "0",
+          "WGR_SIMULATION_RESIDENCY_TEST": "1",
+          "WGR_GEO_POOL_PRESSURE_GROWTH": "0",
+          "WGR_OBJECT_STREAM_TEST_BUDGET": "1"
+        },
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "EA336F517AC54A3349C0B595FE37F7E0E5341559792E5F0CFA119D70F310CA93",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "53FDF87B3C5766A43BDCB16494E6121C44FBB57318FC8447B8226AE40D970E4C",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "world": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\packages\\dayz-compat\\world\\chernarusplus\\chernarusplus.wrp",
+        "scope": "Actual inventory83912800 cold actor admission, unchanged20000 camera budget; no object getter, source diagnostic, asset whitelist or full-query readiness.",
+        "installed": "codex/streaming-residency c04ae3f6+dirty 2026-09-26_22:46 deploy-ps1",
+        "scriptSha256": "76014EFA19E5DE3BB2CA24AC52A35B84044DD123D7E875841FC17350C86CF4EA"
+      },
+      "reloadProvenance": {
+        "environment": {
+          "WGR_NATIVE_DDS_PREPARE": "0",
+          "WGR_OBJECT_STREAM_PBO": "1",
+          "WGR_OBJECT_STREAM_GPU_BUDGET": "0",
+          "WGR_ADAPTIVE_TEXTURE_DETAIL": "0",
+          "WGR_SIMULATION_RESIDENCY": "1",
+          "WGR_SIMULATION_POSITIVE_COLD": "1",
+          "WGR_OBJECT_STREAM_PBO_TEXTURES": "0",
+          "WGR_SKY_VOLUME_INCREMENTAL": "1",
+          "WGR_GEO_POOL_GROWTH": "2.0",
+          "WGR_NATIVE_DDS_BC3_ONLY": "0",
+          "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\dayz-alpha-fresh-save-20260926-20260926-224706\\user",
+          "WGR_LOD_GOVERNOR_RANGE": "1",
+          "WGR_OBJECT_STREAM_MAX_OBJECTS": "20000",
+          "POSEIDON_MODEL_DDC": "0",
+          "WGR_SIMULATION_RESIDENCY_TEST": "1",
+          "WGR_GEO_POOL_PRESSURE_GROWTH": "0",
+          "WGR_OBJECT_STREAM_TEST_BUDGET": "1"
+        },
+        "arguments": "--render=wgpu --window --dev --width 1280 --height 720 --vd 2000 --harness 59010 --capture-metrics \"C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\dayz-alpha-fresh-save-20260926-20260926-224706\\reload-capture.json\" --test-world-freefly 10000 10000 450 45 -10 --test-world \"C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\packages\\dayz-compat\\world\\chernarusplus\\chernarusplus.wrp\" --addon-root \"D:\\SteamLibrary\\steamapps\\common\\DayZ\\Addons\" --test-world-hour 10 --test-mission \"C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\dayz-alpha-fresh-save-20260926-20260926-224706\\cold-positive.eden\" --log-file \"C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\dayz-alpha-fresh-save-20260926-20260926-224706\\reload-engine.log\"",
+        "firstProcessCleanExit": true,
+        "reloadProcessId": 12868,
+        "rendererHash": "53FDF87B3C5766A43BDCB16494E6121C44FBB57318FC8447B8226AE40D970E4C",
+        "mission": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\dayz-alpha-fresh-save-20260926-20260926-224706\\cold-positive.eden",
+        "saveSha256": "EE19753949BA02E4B53A103E08CFBF155F7999BE443635ED6798B9996C9D6B1E",
+        "reloadProcessStartUtc": "2026-09-26T20:48:16.7874122Z",
+        "firstProcessId": 11456,
+        "exeHash": "EA336F517AC54A3349C0B595FE37F7E0E5341559792E5F0CFA119D70F310CA93",
+        "firstProcessStartUtc": "2026-09-26T20:47:06.5385396Z",
+        "world": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\packages\\dayz-compat\\world\\chernarusplus\\chernarusplus.wrp",
+        "profile": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\dayz-alpha-fresh-save-20260926-20260926-224706\\user"
+      },
+      "saveEvidence": {
+        "scope": "Fresh-process SaveBin/LoadBin of one previously unpinned cold mutation in the same authored world; not multiplayer or performance acceptance",
+        "bytes": 6968,
+        "sha256": "ee19753949ba02e4b53a103e08cfbf155f7999be443635ed6798b9996c9d6b1e",
+        "relativePath": "user/Users/mail/Saved/Tmp/cold-positive-away.fps",
+        "requiredBeforeSave": 0,
+        "loaderRequiredObjects": 3,
+        "freshReload": true,
+        "frameTolerance": 1E-06,
+        "actualMaxFrameDelta": 0.0
+      },
+      "sha256": {
+        "engine.log": "a7225838d2b54e8a198de0027862e584b270ca39cb28adcee54027403bb643a7",
+        "harness.jsonl": "f6d8bffe3f4fda8e243345dddfe16d78a7d177076bd2bb452a54e3aaf62d9f69",
+        "provenance.json": "3015c899722f6b512222db2f58f1bd569bdfdefc5db25bc738d751bb79714b6b",
+        "reload-engine.log": "bb56f710e119abcf41d97f4a5bea049a27c40fabb5768e4edd5f124ea79f95e7",
+        "reload-provenance.json": "85beb52b5a14423450d6c40e36b7dfe9c0b0e52a6829965055cc85f748875748",
+        "result.json": "983f011de761fd7804bca630b1aa7497978ce25fd7b7dec506bea74decbaff8a",
+        "samples.jsonl": "8de0d7a9dfa12e4aad2e0ce1e327e66319895043c8af06870b861f9371e0b5ac",
+        "user/Users/mail/Saved/Tmp/cold-positive-away.fps": "ee19753949ba02e4b53a103e08cfbf155f7999be443635ed6798b9996c9d6b1e"
+      }
     }
   ],
   "microbenchmarks": [
@@ -6908,6 +7004,93 @@
       "scope": "Actual single ordered DayZ normal route latency screening, not isolatedCPU/coldjob/performance acceptance; bothcamera-coveredcoldCreated/sourceScans0, samebinaryPBO1/DDC0, drw:init/terrain/swap dominate. Pairacceptedfalse.",
       "sha256": {
         "dayz-latency-pair-20260926.json": "3d71a1116dabdadfa445cdfb49232d7dd21d12bd1f3f87a6674d05c6a0f26433"
+      }
+    },
+    {
+      "artifactRoot": "build/alpha-shape-benchmark-20260926",
+      "baselineHead": "f0d0a0c5",
+      "provenance": {
+        "head": "f0d0a0c5117082455e988aaf95e07b62b4f9779f",
+        "scope": "Pure helper synthetic CPU latency only, allocations excluded; no full texture/GPU/game acceptance. Independent pre-optimization reference. Separate translation units without LTO.",
+        "hashes": {
+          "tests\\unit\\engine\\Poseidon\\Graphics\\test_texture_alpha_block_scan.cpp": "3abc05788758f9b32791b2d67612482a1b94e820fdfa1b22fcd3c43e0c090bed",
+          "engine\\Poseidon\\Graphics\\Textures\\AlphaShapeAnalysis.hpp": "23740ce7a1ebc0c71bc189a441d08408cdad9e35abe0f3da96dacb37849b34c2",
+          "build\\alpha-shape-benchmark-20260926\\baseline.cpp": "497feafff492aa3a2d5afb817145d2235b3d64137dffefed221908c12c37ce15",
+          "build\\alpha-shape-benchmark-20260926\\candidate.cpp": "83197cb0886ab94f8c37a5c142adb8e6b2a8b57c6b4482589e5abf1d958df01d",
+          "build\\alpha-shape-benchmark-20260926\\main.cpp": "265381f6a132fcc58262351aa97b12d9c7f9c89b232cbbd87714f358bf2a161e"
+        }
+      },
+      "classification": "Pending alpha helper candidate, performanceAcceptedfalse/defaultReadyfalse. Initial compact candidate partialstride1 regress33–39%(opaquealso29–50%) rejected; repair1 extended sparse.1% clear regress91–126% rejected. Repair2 two8pattern×stride1/4 confirmations show no reproducible material median slowdown here; compact sparse delta+.029/- .064ms,RGBA-.068/+.034ms, not fixed no-regression proof. Other eligible synthetic medians typically10–60% lower. Separate translationunitsO2/noLTO/2048²9batches×3calls alternating order/exactmetrics parity; allocations excluded. CSVp95 useslargest of9batch values, not fullgame percentile. Provenance captured initialphase hashes, repair artifacts individuallyhashed; no stamped source/runtime/FPS/realasset proof. Root paritybuild ongoing/unclassified.",
+      "sha256": {
+        "alpha-shape-bench.exe": "80fe7b2af3d1376eafdcc85a0c0c627daa948f91dea79ca9b78d0bec1c09e687",
+        "alpha-shape-repair1-bench.exe": "e4303d471603ac1594bc40840565f5c06068fd274d8a20b4c32eb725c474db7e",
+        "alpha-shape-repair1-extended-bench.exe": "bca524beab0479466eca61b39a24c6ee1288941f780dd0f36126afc542ba64cd",
+        "alpha-shape-repair2-extended-bench.exe": "7c6576270b400c1fe94d264b051f0e3eb9437166aa58744c5aa433f8fbea4d0f",
+        "baseline.cpp": "497feafff492aa3a2d5afb817145d2235b3d64137dffefed221908c12c37ce15",
+        "candidate.cpp": "83197cb0886ab94f8c37a5c142adb8e6b2a8b57c6b4482589e5abf1d958df01d",
+        "compile-repair1-extended.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compile-repair1.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compile-repair2-extended.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compile.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "compiler-version.txt": "2e9f2b717a640127a5fd4d309e38d2b86db1be7e84c3aa44f570c1f2cba97965",
+        "generate.py": "9c257f82bef11d39d82e92bcc504ce28afaa667e3779b96f3b6cf569810255ee",
+        "main-extended.cpp": "4d007b271da2bea45d62e94c3d46da89df6009b616f0525ba9f193ed09068283",
+        "main.cpp": "265381f6a132fcc58262351aa97b12d9c7f9c89b232cbbd87714f358bf2a161e",
+        "provenance-repair2.json": "780485ad86d15266b23b18516184978dee21149319c058c1a8df78cc9dddb4f4",
+        "provenance.json": "55cb78331612c3a8413bb4c7f2a0d6d46d5d2c4f9e140503594e0b4752059626",
+        "results-confirmation.csv": "f158c153c2ff43cb9bb06b80e4bb21fbd3b0f0375ad838e50f939badb85e5351",
+        "results-repair1-extended.csv": "8b013ebcea0e8ab5a345eb51cc5053afdfd729c340e213869a7410ed0cbf4ba6",
+        "results-repair1.csv": "367ea181dc94ee5b23c12f14e1618428e0ccfef6f4c3709c6679c9ca51ce6462",
+        "results-repair2-confirmation.csv": "d0df601e57c21fb40c8344ef24236a6fceb24c7e7be5a3135f81a9acbbfe72f4",
+        "results-repair2-extended.csv": "4550d74bcbedb6c0587b1444e34afbe2cf66a0e7877e174425e27f69da971ff9",
+        "results.csv": "364cd2ea5625f10ada3f3e742b0e294bb5496791ce3514ced246ef9d8f0808b8"
+      },
+      "repair2Provenance": {
+        "scope": "Isolated CPU alpha shape scan screening, not FPS or default acceptance",
+        "files": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "497FEAFFF492AA3A2D5AFB817145D2235B3D64137DFFEFED221908C12C37CE15",
+            "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\alpha-shape-benchmark-20260926\\baseline.cpp"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "83197CB0886AB94F8C37A5C142ADB8E6B2A8B57C6B4482589E5ABF1D958DF01D",
+            "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\alpha-shape-benchmark-20260926\\candidate.cpp"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "4D007B271DA2BEA45D62E94C3D46DA89DF6009B616F0525BA9F193ED09068283",
+            "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\alpha-shape-benchmark-20260926\\main-extended.cpp"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "7C6576270B400C1FE94D264B051F0E3EB9437166AA58744C5AA433F8FBEA4D0F",
+            "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\alpha-shape-benchmark-20260926\\alpha-shape-repair2-extended-bench.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "4550D74BCBEDB6C0587B1444E34AFBE2CF66A0E7877E174425E27F69DA971FF9",
+            "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\alpha-shape-benchmark-20260926\\results-repair2-extended.csv"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "D0DF601E57C21FB40C8344EF24236A6FCEB24C7E7BE5A3135F81A9ACBBFE72F4",
+            "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\alpha-shape-benchmark-20260926\\results-repair2-confirmation.csv"
+          }
+        ],
+        "candidateHash": "AC1D587EAD62E9BE7554D718F5F7D1E5F2EBC82936948D827DF3E9D445B671EA",
+        "batches": 9,
+        "width": 2048,
+        "head": "f0d0a0c5117082455e988aaf95e07b62b4f9779f",
+        "timing": "allocations/image construction excluded; median and max of9 batched means; p95 column is max of9 samples",
+        "height": 2048,
+        "options": "/O2 /std:c++20 /EHsc /MD /DNDEBUG -fuse-ld=lld; separate translation units, no LTO",
+        "scansPerBatch": 3,
+        "compiler": "D:/Program Files/LLVM/bin/clang-cl.exe",
+        "performanceAccepted": false,
+        "defaultReady": false,
+        "ordering": "alternating baseline/candidate first"
       }
     }
   ],
@@ -7192,6 +7375,17 @@
       "result": "Sameinstalledddf real DayZ cold-target same-world save roundtrip PASS; only rootownedscript save mode changed. New shape-loop optimization build ongoing/unclassified, no gain or implementation acceptance.",
       "sha256": {
         "smoke-dayz-cold-save-roundtrip-20260926.log": "719c61aa0eb9e7fa46908edcc72d70b0783e3be35d1f6b89c9804fdd6e87e121"
+      }
+    },
+    {
+      "artifactRoot": "build",
+      "runtimeSourceCommit": "c04ae3f6",
+      "installed": "c04ae3f6+dirty22:46 (docsdirty at build)",
+      "result": "Repair2 alpha/freshsave build22nodes/stamped18PASS,61695 assertions175casesPASS. Fresh actualruntimePASS, exacthash provenance; later uncommitted histogramsource NOT built/included. Microbench/actualasset do not establish FPS/performance/defaultReady acceptance.",
+      "sha256": {
+        "build-alpha-repair2-freshsave-20260926.log": "77d5c94bc71c6e3f16badff0f51570611d2a6b6398b374c72f32e63355225e7c",
+        "build-alpha-freshsave-stamped-20260926.log": "d2533026bba3f3ab67de82f200e940475fd19072c5bc22a86cc9d5b9bc8b47b7",
+        "test-alpha-repair2-freshsave-20260926.log": "d1ab072e89348455aa88aadf159ba210c921ea1bf3131a30d8646a40e13b7b3c"
       }
     }
   ],
