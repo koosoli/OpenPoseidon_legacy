@@ -4683,6 +4683,107 @@
         "returned-settled.png": "de3c7d8b4c5c99f63e9d9d081639d646a05f817d8b23614d1b0e2a565e0ac947",
         "samples.jsonl": "14fb3f36da39bba29599a2cd0f5bd3f07151509618ce2e75347f838a56d937c5"
       }
+    },
+    {
+      "run": "source-summary-diagnostic-20260926-20260926-203600",
+      "classification": "FAILED runner/no result: typed PowerShell $Capacity switch collided with local $capacity response assignment; engine capacity refusal correct, finally stopped owned game. No runtime pass or engine failure attribution.",
+      "provenance": {
+        "disabled": false,
+        "scriptSha256": "E425B8C1CC5CE95D5131644E38A4551D2C0424D42710BD6D3540C14322D4CD57",
+        "head": "8a87b2680af4d0daff7c180cde6ed6acd3d16801",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "4DAE03E5763E25FE25A6853F9EF754D3142640CE05498BE67DAA4EE03D9C16D7",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "89A7692E2D5C56DB13FCEA53842B82A5B7528952B481CC72AD5EE4A463E84C19",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "installed": "codex/streaming-residency 8a87b268 2026-09-26_20:35 deploy-ps1",
+        "fixture": {
+          "schema": 1,
+          "models": [
+            "C:\\Users\\mail\\AppData\\Local\\Temp\\op-src-9d4c6b1a\\op_src_original_probe.p3d",
+            "C:\\Users\\mail\\AppData\\Local\\Temp\\op-src-9d4c6b1a\\op_src_original_probe_unused_001.p3d",
+            "C:\\Users\\mail\\AppData\\Local\\Temp\\op-src-9d4c6b1a\\op_src_original_probe_unused_002.p3d",
+            "C:\\Users\\mail\\AppData\\Local\\Temp\\op-src-9d4c6b1a\\op_src_original_probe_unused_003.p3d",
+            "C:\\Users\\mail\\AppData\\Local\\Temp\\op-src-9d4c6b1a\\op_src_original_probe_unused_004.p3d",
+            "C:\\Users\\mail\\AppData\\Local\\Temp\\op-src-9d4c6b1a\\op_src_original_probe_unused_005.p3d",
+            "C:\\Users\\mail\\AppData\\Local\\Temp\\op-src-9d4c6b1a\\op_src_original_probe_unused_006.p3d",
+            "C:\\Users\\mail\\AppData\\Local\\Temp\\op-src-9d4c6b1a\\op_src_original_probe_unused_007.p3d",
+            "C:\\Users\\mail\\AppData\\Local\\Temp\\op-src-9d4c6b1a\\op_src_original_probe_unused_008.p3d"
+          ],
+          "originalFormat": "ODOL7",
+          "world_sha256": "65f5fade59b7ff21dca1e5d0697beeb4b6049ece985d2f54c0e51aeb8b3563a2",
+          "model_sha256": "d5b4eba88b3da8d82cb69da6ff50568d5255a56ba0ea9f37d1720bb96dbf8ee2",
+          "notes": [
+            "Original authored tiny triangles; engine parser is the format authority.",
+            "Only model index0 has placements; no simulation Ready override.",
+            "No source geometry is copied from retail content."
+          ]
+        }
+      },
+      "sha256": {
+        "engine.log": "3bc65853019c26cbdf514a1f103861b51964bd3d60a432a2482c7961eb00f344",
+        "harness.jsonl": "82985579f07c0d7393bf5c7ae80b48ed9067e216ab5f863c6d4308a4f9290283",
+        "provenance.json": "0390310c6d723bbc995cf02cdc595b359d897e7e64412266e9f9675422d17dad",
+        "simulation-fixture.eden/mission.sqm": "c47524083395a8c78a581822629f83c760dd0c1a3ef45eaceb24da88580e9d4c"
+      }
+    },
+    {
+      "run": "source-summary-diagnostic-retry-20260926-20260926-203722",
+      "classification": "PASS clean0 on unchanged installed8a87b26820:35 with corrected runner SHA in provenance. Original9-model ODOL7 fixture yields8 LatestSnapshot sourceEvidence/plainFacts true, each immediate classObservation EmptyClassNow. Ninth request Capacity, late TooLate, TTLExpired diagnosticActivefalse. SimulationOFF/pumps0/resident-required0; cameraDropStale readyPayload/parseReserved0 while metadata capacity2880 persists. Not class/config final bounds/Ready/performance/realDayZ proof.",
+      "provenance": {
+        "installed": "codex/streaming-residency 8a87b268 2026-09-26_20:35 deploy-ps1",
+        "fixture": {
+          "schema": 1,
+          "models": [
+            "C:\\Users\\mail\\AppData\\Local\\Temp\\op-src-1192ecf8\\op_src_original_probe.p3d",
+            "C:\\Users\\mail\\AppData\\Local\\Temp\\op-src-1192ecf8\\op_src_original_probe_unused_001.p3d",
+            "C:\\Users\\mail\\AppData\\Local\\Temp\\op-src-1192ecf8\\op_src_original_probe_unused_002.p3d",
+            "C:\\Users\\mail\\AppData\\Local\\Temp\\op-src-1192ecf8\\op_src_original_probe_unused_003.p3d",
+            "C:\\Users\\mail\\AppData\\Local\\Temp\\op-src-1192ecf8\\op_src_original_probe_unused_004.p3d",
+            "C:\\Users\\mail\\AppData\\Local\\Temp\\op-src-1192ecf8\\op_src_original_probe_unused_005.p3d",
+            "C:\\Users\\mail\\AppData\\Local\\Temp\\op-src-1192ecf8\\op_src_original_probe_unused_006.p3d",
+            "C:\\Users\\mail\\AppData\\Local\\Temp\\op-src-1192ecf8\\op_src_original_probe_unused_007.p3d",
+            "C:\\Users\\mail\\AppData\\Local\\Temp\\op-src-1192ecf8\\op_src_original_probe_unused_008.p3d"
+          ],
+          "originalFormat": "ODOL7",
+          "world_sha256": "8a6d4b6d49d11c4b0c7fefd84f4ce6a50d5c179ce5177fe5f12cf6e298b996b8",
+          "model_sha256": "d5b4eba88b3da8d82cb69da6ff50568d5255a56ba0ea9f37d1720bb96dbf8ee2",
+          "notes": [
+            "Original authored tiny triangles; engine parser is the format authority.",
+            "Only model index0 has placements; no simulation Ready override.",
+            "No source geometry is copied from retail content."
+          ]
+        },
+        "disabled": false,
+        "head": "8a87b2680af4d0daff7c180cde6ed6acd3d16801",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "4DAE03E5763E25FE25A6853F9EF754D3142640CE05498BE67DAA4EE03D9C16D7",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "89A7692E2D5C56DB13FCEA53842B82A5B7528952B481CC72AD5EE4A463E84C19",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "scriptSha256": "6D7FEF9B2D364FE3D796034B3550302DCB7214835213B4F635680A54C71FCFE4"
+      },
+      "sha256": {
+        "engine.log": "bdd1b38f29dc7656895b096876e06e6092ffd9e8ced82d1911b83f506f544a97",
+        "harness.jsonl": "857ba01915b153e8f3a9b4e038ee59b83de894d46ff6a4be0aa98654343b0ecb",
+        "provenance.json": "82e3d82b5612dab675df76757ed9a5d393a0f63d0563ec22944375a90e5a51a2",
+        "result.json": "5af9db6d472640ab358602181e4273e16b7dfeae4e63ffaaf14df05d13d2f48b",
+        "simulation-fixture.eden/mission.sqm": "c47524083395a8c78a581822629f83c760dd0c1a3ef45eaceb24da88580e9d4c"
+      }
     }
   ],
   "microbenchmarks": [
@@ -4943,6 +5044,28 @@
         "deploy-source-audit-20260926.log": "e10dffa898da6f74938fa12c007538afaeda0460809a613ef47aa29bb6ea9567",
         "smoke-source-audit-lifecycle-20260926.log": "191454c4074c430af3b835055eeafd03bdadb14ff2f7aa5d12132e14dcc9eb97",
         "smoke-dayz-source-audit-default-off-20260926.log": "81261eb8d559dc860bdda9666aeea6b25f09a32fa9bc6eefe36bf2ae8825f1da"
+      }
+    },
+    {
+      "artifactRoot": "build",
+      "runtimeSourceCommit": "8a87b268",
+      "result": "Initial integration build FAILED missingHasModernSourceDiagnosticDemand/wrongSuccessResponse; integration retry/boundedness/request-token/terminalguard/scan-baseline/stamped builds PASS. Summary isolated38/4 PASS; diagnostic isolated36/37 assertions1/2 cases FAILED pending alias; composite1161/1162 assertions68/69 cases FAILED same issue. Monotonic explicit opt-in parse token fix final1182/69 PASS. OriginalODOL7 offline Toolformat log PASS, no visual/performance/DayZ eligibility proof. Token lazy8bytes/slot, normalRequest/DropStale clear0; sequence never default advanced/reset, overflow refuses.",
+      "sha256": {
+        "build-source-summary-integration-20260926.log": "1cdefdfa90a6c1a709f609782b61100d68214bbe9de6f5903fcd51ff0a218b6c",
+        "build-source-summary-integration-retry-20260926.log": "b32fdf9a13393921bd001d9e6836da4b11abfc158bdd738d2346bf06dc4e7f6b",
+        "build-source-diagnostic-boundedness-20260926.log": "a6adf69f30027f515e03ea3b6a05113bd755914637abdca7465899f831f9dbf5",
+        "build-source-diagnostic-request-token-20260926.log": "134ecfeff3ee690036061431967ac94a954d6148f45f210ca54728fe10cbb3ce",
+        "build-source-diagnostic-terminal-guard-20260926.log": "76d589fdfab066e9370d1bb71466a819b1ae0454a11600b14fa2309eb8854876",
+        "build-source-summary-scan-baseline-20260926.log": "d8eb52dc760113cad7575efcc4d001c8257edbb91043f3bfe66068744f00cc54",
+        "build-source-summary-stamped-20260926.log": "20f74b8afc68b09d42b0601a1b48e5087f1499cfb4bf29dca10af6d8d6d4c2e3",
+        "deploy-source-summary-20260926.log": "87e1613aee22bc8be00aa979de83ac97e567cd75f90be9026dd53995dfedb250",
+        "test-source-summary-integration-20260926.log": "9b905347235cf2831f7501c271c48999f8425a4e6b985a23cfb32c4989f4427d",
+        "test-source-summary-isolated-20260926.log": "2aa15864568cbd57ac07df860dcd0cddab0e55e1eb33e41730384bbd8103a1c0",
+        "test-source-diagnostic-isolated-20260926.log": "d78a931f55e02881678387d9d092b50725694a6f68c70c19c949edf35f56b824",
+        "test-source-summary-request-token-20260926.log": "e52affb59f5aa4f3ee670a28df67daac326d3fbb0c61b881b87c1a82c10f038c",
+        "test-source-diagnostic-original-format-20260926.log": "f0413e1e0220d800a609dbaf87cf2d0c9d3fe7694e080ef282d9d796dad5521e",
+        "smoke-source-summary-diagnostic-20260926.log": "61ee5a25cbc3aee3d9465e7b066067f4643fb4f70e7f1aece606cb54244ad461",
+        "smoke-source-summary-diagnostic-retry-20260926.log": "c904cf144625a4b88f9fafd66d700aed45b8946717306d6287158a214abec5f2"
       }
     }
   ],

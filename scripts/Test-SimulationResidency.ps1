@@ -102,8 +102,8 @@ try {
    if ($r.requestResult -ne 'Requested') {throw "Selected source request refused: $($r | ConvertTo-Json -Compress)"}
    $requested+=,$r
   }
-  $capacity=Send @{cmd='stream_source_diagnostic';modelIndex=8;action='request'}
-  if ($capacity.requestResult -ne 'Capacity') {throw 'Selected diagnostics exceeded eight slots'}
+  $sourceCapacityResult=Send @{cmd='stream_source_diagnostic';modelIndex=8;action='request'}
+  if ($sourceCapacityResult.requestResult -ne 'Capacity') {throw 'Selected diagnostics exceeded eight slots'}
   for ($i=0;$i -lt 8;$i++) {
    $until=[DateTime]::UtcNow.AddSeconds(15)
    do {Start-Sleep -Milliseconds 100;$r=Send @{cmd='stream_source_diagnostic';modelIndex=$i}} while ($r.status -eq 'Pending' -and [DateTime]::UtcNow -lt $until)
@@ -123,7 +123,7 @@ try {
   $until=[DateTime]::UtcNow.AddSeconds(15)
   do {Start-Sleep -Milliseconds 100;$retired=Send @{cmd='stream_residency'}} while (($retired.readyPayloadBytes -ne 0 -or $retired.parseReservedBytes -ne 0) -and [DateTime]::UtcNow -lt $until)
   if ($retired.readyPayloadBytes -ne 0 -or $retired.parseReservedBytes -ne 0 -or $retired.required -ne 0 -or $retired.resident -ne $baseline.resident) {throw 'Normal cancellation retained diagnostic-only Ready payload or admitted remote objects'}
-  $result=@{sourceDiagnostic=$true;cold=$cold;coldIds=$coldIds;baseline=$baseline;unrequested=$unrequested;requested=$requested;snapshots=$snapshots;capacity=$capacity;late=$late;after=$after;afterIds=$afterIds;simulationAfter=$simulationAfter;expired=$expired;retiredAfterCameraRecentre=$retired}
+  $result=@{sourceDiagnostic=$true;cold=$cold;coldIds=$coldIds;baseline=$baseline;unrequested=$unrequested;requested=$requested;snapshots=$snapshots;capacity=$sourceCapacityResult;late=$late;after=$after;afterIds=$afterIds;simulationAfter=$simulationAfter;expired=$expired;retiredAfterCameraRecentre=$retired}
  } elseif ($Disabled) {
   Start-Sleep -Seconds 4
   $cold=State;$coldIds=Ids

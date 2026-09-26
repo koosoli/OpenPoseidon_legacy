@@ -1547,3 +1547,48 @@ the staged Nanite-like investigation, not implemented pages or accepted gains.
 waves stay parked. Next compact source-summary foundation is in progress without
 validated ledger claim. Full plan OPEN, experimental defaults OFF, Reforger
 stress evidence not ground truth, production/MP/performance gates unresolved.
+
+### Compact source summaries and bounded selected diagnostics — 26 September 2026
+
+8a87b268 adds a private fixed source-summary value <=288 bytes with generation,
+source path and config basename only. No radius, IR/config pointer, disk freshness,
+actual constructor, final bounds or Ready is certified. Summary and numeric
+envelope are published together from the same exclusively owned original parse;
+a live class observation is repeated at the owner operation rather than cached
+as a durable config verdict.
+
+Selected diagnostics own eight fixed records with30-second TTL independently
+of simulation caps. They retain no IR/geometry/Take result, required pin or
+simulation lease. All three DropStale/reset paths and the joined World owner
+guard preserve only explicit unexpired pending demand while simulation is OFF.
+Expiry removes demand; ordinary camera DropStale retires IR. Lazy metadata
+vector capacity remains charged until Reset, not automatically freed at TTL.
+
+First integration build fails two API errors (missing Has method/wrong response
+name); repaired integration/boundedness/request-token/terminalguard/scan-baseline/
+stamped builds pass. Summary isolated38/4 passes. Diagnostic isolated fails
+36/37 assertions1/2 cases, composite1161/1162 assertions68/69 cases: an ordinary
+request could borrow an old diagnostic pending record. Fixed monotonic explicit
+parse token in lazy sidecar (8bytes/slot), inventory generation/identity/token
+checks prevent this. Normal fresh requests/DropStale clear0; Reset changes
+generation but never resets token sequence, UINT64_MAX refuses, and the ordinary
+default path never advances it. Final1182 assertions/69 cases pass.
+
+First runtime actual203600 has no result: runner assigns an object to its typed
+PowerShell Capacity switch. Engine cap refusal was correct; finally stops owned
+game. Failed runner log/provenance are retained. Corrected retry203722 on unchanged
+installed8a87b26820:35 passes clean0; launched corrected script hash in provenance
+is authoritative even though correction follows the source commit.
+
+Original nine-model ODOL7 fixture produces eight LatestSnapshot records with
+sourceEvidence/plainSourceFacts true; actual immediate class observation is
+EmptyClassNow for all eight. Ninth request Capacity, late request TooLate, TTL
+Expired/diagnosticActivefalse. Simulation stays Disabled/ownerPumps0, resident/
+required0. After expiry ordinary camera recenter yields readyPayload/parseReserved0,
+while sourceEnvelopeBytes2880 remains as charged metadata capacity (eight scans/
+publications, .0486ms measured fixture scan time only). No eligibility Ready,
+visual/performance or actual DayZ production claim follows.
+
+Offline original-format Tool acceptance is separately hashed, not runtime
+quality evidence. Next production eligibility measurement remains pending.
+Whole plan OPEN, experimental defaults OFF; research and parked waves unchanged.
