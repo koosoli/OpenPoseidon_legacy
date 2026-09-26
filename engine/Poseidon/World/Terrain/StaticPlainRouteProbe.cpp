@@ -1,8 +1,6 @@
 #include <Poseidon/World/Terrain/StaticPlainRouteProbe.hpp>
-#include <Poseidon/Foundation/Common/Filenames.hpp>
 #include <Poseidon/Foundation/Threads/ThreadAffinity.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
-#include <array>
 #include <string_view>
 
 namespace Poseidon::Streaming
@@ -67,46 +65,25 @@ StaticPlainRouteObservation ProbeStaticPlainRouteNow(
     // Reject before dereferencing the owner-only config (or any source payload).
     if (!Foundation::IsMainThread()) return Result::WrongThread;
     if (!currentGeneration || evidence.SourceGeneration() != currentGeneration) return Result::StaleSource;
-    if (evidence.State() != StaticSourceEnvelopeState::SourceEvidence || source.sourceFormat != "ODOL")
-        return Result::Unknown;
-    if (source.lodLevels.empty() || source.lodLevels.size() > StaticSourceDetail::MaxLods)
-        return Result::Unsupported;
-    size_t propertyCount = 0;
-    for (const auto& lod : source.lodLevels)
-    {
-        if (lod.mesh.properties.size() > StaticPlainRouteLimits::SourceProperties - propertyCount)
-            return Result::Unsupported;
-        propertyCount += lod.mesh.properties.size();
-        for (const auto& prop : lod.mesh.properties)
-        {
-            if (prop.name.empty() || !PrintableAscii(prop.name, StaticPlainRouteLimits::StringBytes) ||
-                !PrintableAscii(prop.value, StaticPlainRouteLimits::StringBytes)) return Result::Unsupported;
-            // Check ALL LODs and duplicates. An empty later override must not hide
-            // an earlier special route, irrespective of adapter LOD selection.
-            if (EqualAsciiNoCase(prop.name, "class") && !prop.value.empty()) return Result::Unsupported;
-        }
-    }
-    if (source.sourcePath.empty() || !PrintableAscii(source.sourcePath, StaticPlainRouteLimits::PathBytes))
-        return Result::Unsupported;
-    // BuildShapeCacheKey truncates into lowName[128], then the adapter sees that
-    // rewritten sourcePath. Never classify the original's different basename.
-    if (source.sourcePath.size() >= StaticPlainRouteLimits::ShapeBankPathBytes)
-        return Result::Unsupported;
-    const auto path = std::string_view(source.sourcePath);
-    const auto separator = path.find_last_of("/\\");
-    const auto basename = path.substr(separator == std::string_view::npos ? 0 : separator + 1);
-    // Legacy GetFilename copies the ENTIRE basename before removing its first
-    // dot. Bound that copy, including the extension, before calling it.
-    if (basename.empty() || basename.size() >= 256) return Result::Unsupported;
-    std::array<char, 256> modelName{};
-    Foundation::GetFilename(modelName.data(), source.sourcePath.c_str());
-    for (char& c : modelName) if (c == ' ' || c == '-' || c == '/' || c == '(' || c == ')') c = '_';
-    if (!modelName[0]) return Result::Unsupported;
+    const auto summary = BuildStaticPlainSourceSummary(source, evidence);
+    return ProbeStaticPlainRouteNow(summary, currentGeneration, source.sourcePath, liveConfigRoot);
+}
+
+StaticPlainRouteObservation ProbeStaticPlainRouteNow(
+    const StaticPlainSourceSummary& source, uint64_t currentGeneration,
+    std::string_view exactModelIdentity, const ParamEntry& liveConfigRoot)
+{
+    using Result = StaticPlainRouteObservation;
+    if (!Foundation::IsMainThread()) return Result::WrongThread;
+    if (!currentGeneration || source.SourceGeneration() != currentGeneration) return Result::StaleSource;
+    if (source.State() == StaticPlainSourceSummaryState::Unknown) return Result::Unknown;
+    if (source.State() != StaticPlainSourceSummaryState::SourceFacts) return Result::Unsupported;
+    if (source.ModelIdentity() != exactModelIdentity) return Result::StaleSource;
 
     const auto models = FindLocal(liveConfigRoot, "CfgModels", StaticPlainRouteLimits::RootEntries);
     if (!models.supported) return Result::Unsupported;
     if (!models.entry) return Result::EmptyClassNow;
-    const auto model = FindLocal(*models.entry, modelName.data(), StaticPlainRouteLimits::ModelEntries);
+    const auto model = FindLocal(*models.entry, source.ConfigModelName(), StaticPlainRouteLimits::ModelEntries);
     if (!model.supported) return Result::Unsupported;
     if (!model.entry) return Result::EmptyClassNow;
     const auto properties = FindLocal(*model.entry, "properties", StaticPlainRouteLimits::OverrideEntries);

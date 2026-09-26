@@ -94,6 +94,85 @@ static const char* SimulationStatusName(Streaming::SimulationResidencyStatus sta
 
 void RegisterStreamingProbes(HarnessServer& hs)
 {
+    hs.RegisterCommand({"stream_source_diagnostic", "Explicit bounded source-snapshot request/poll; no geometry or Ready proof", {}},
+        [](const std::string&, cJSON* root) -> std::string {
+            if (!GLandscape) return HarnessProtocol::ErrorResponse("no landscape");
+            const auto* index = cJSON_GetObjectItemCaseSensitive(root, "modelIndex");
+            if (!cJSON_IsNumber(index) || !std::isfinite(index->valuedouble) || index->valuedouble < 0 ||
+                index->valuedouble > UINT32_MAX || std::floor(index->valuedouble) != index->valuedouble)
+                return HarnessProtocol::ErrorResponse("exact nonnegative integer modelIndex required");
+            const auto modelIndex = static_cast<uint32_t>(index->valuedouble);
+            const auto* action = cJSON_GetObjectItemCaseSensitive(root, "action");
+            if (action && (!cJSON_IsString(action) ||
+                (std::strcmp(action->valuestring, "request") && std::strcmp(action->valuestring, "poll"))))
+                return HarnessProtocol::ErrorResponse("action must be request or poll");
+            using Request = ObjectStreamPreparer::SourceEnvelopeRequest;
+            auto request = Request::Unavailable;
+            const bool requesting = action && !std::strcmp(action->valuestring, "request");
+            if (requesting) request = GLandscape->RequestModernSourceDiagnostic(modelIndex);
+            const auto snapshot = GLandscape->SnapshotModernSourceDiagnostic(modelIndex);
+            if (!requesting) request = snapshot.requestResult;
+            const char* requestName = "Unavailable";
+            switch (request) {
+                case Request::Requested: requestName = "Requested"; break;
+                case Request::TooLate: requestName = "TooLate"; break;
+                case Request::Capacity: requestName = "Capacity"; break;
+                case Request::WrongThread: requestName = "WrongThread"; break;
+                case Request::Unavailable: break;
+            }
+            using Status = Landscape::ModernSourceDiagnosticStatus;
+            const char* status = "Invalid";
+            switch (snapshot.status) {
+                case Status::NotRequested: status = "NotRequested"; break;
+                case Status::Pending: status = "Pending"; break;
+                case Status::LatestSnapshot: status = "LatestSnapshot"; break;
+                case Status::Refused: status = "Refused"; break;
+                case Status::Expired: status = "Expired"; break;
+                case Status::Interrupted: status = "Interrupted"; break;
+                case Status::StaleInventory: status = "StaleInventory"; break;
+                case Status::WrongThread: status = "WrongThread"; break;
+                case Status::Invalid: break;
+            }
+            using Observation = Streaming::StaticPlainRouteObservation;
+            const char* classNow = "Unknown";
+            switch (snapshot.classNow) {
+                case Observation::EmptyClassNow: classNow = "EmptyClassNow"; break;
+                case Observation::Unsupported: classNow = "Unsupported"; break;
+                case Observation::WrongThread: classNow = "WrongThread"; break;
+                case Observation::StaleSource: classNow = "StaleSource"; break;
+                case Observation::Unknown: break;
+            }
+            const auto& latest = snapshot.latestSnapshot;
+            auto* result = cJSON_CreateObject();
+            cJSON_AddStringToObject(result, "scope", "latest original parse source facts and immediate config observation; not final bounds, Ready, disk freshness or per-request completion");
+            cJSON_AddNumberToObject(result, "modelIndex", modelIndex);
+            cJSON_AddStringToObject(result, "requestResult", requestName);
+            cJSON_AddStringToObject(result, "status", status);
+            cJSON_AddBoolToObject(result, "pendingDemand", snapshot.pendingDemand);
+            cJSON_AddBoolToObject(result, "diagnosticActive", GLandscape->HasModernSourceDiagnosticDemand());
+            cJSON_AddBoolToObject(result, "attempted", latest.attempted);
+            cJSON_AddNumberToObject(result, "inventoryGeneration", double(latest.generation));
+            cJSON_AddStringToObject(result, "modelIdentity", latest.modelIdentity.c_str());
+            cJSON_AddBoolToObject(result, "sourceEvidence", latest.envelope.State() == Streaming::StaticSourceEnvelopeState::SourceEvidence);
+            auto* reasons = cJSON_AddArrayToObject(result, "sourceReasons");
+            using Reason = Streaming::StaticSourceEnvelopeReason;
+            const std::pair<Reason, const char*> sourceReasons[] = {
+                {Reason::Generation,"Generation"}, {Reason::Format,"Format"}, {Reason::Capacity,"Capacity"},
+                {Reason::NonFinite,"NonFinite"}, {Reason::NoVertices,"NoVertices"}, {Reason::MissingRole,"MissingRole"},
+                {Reason::Proxy,"Proxy"}, {Reason::Animation,"Animation"}, {Reason::LandConform,"LandConform"},
+                {Reason::InvalidFace,"InvalidFace"}, {Reason::InconsistentPurpose,"InconsistentPurpose"},
+                {Reason::IncompleteSource,"IncompleteSource"}
+            };
+            for (const auto& [reason, name] : sourceReasons)
+                if (latest.envelope.HasReason(reason)) cJSON_AddItemToArray(reasons, cJSON_CreateString(name));
+            cJSON_AddBoolToObject(result, "plainSourceFacts", latest.plainSource.State() == Streaming::StaticPlainSourceSummaryState::SourceFacts);
+            cJSON_AddStringToObject(result, "configModelName", std::string(latest.plainSource.ConfigModelName()).c_str());
+            cJSON_AddStringToObject(result, "latestSnapshotClassObservation", classNow);
+            if (const auto radius = latest.envelope.RadiusForGeneration(latest.generation))
+                cJSON_AddNumberToObject(result, "sourceRadius", *radius);
+            cJSON_AddNumberToObject(result, "sourcePayloadBytes", double(latest.envelope.PayloadBytes()));
+            return HarnessProtocol::JsonResponse(result);
+        });
     hs.RegisterCommand({"stream_identity_probe", "Read world IDs and geometry presence without retaining objects", {}},
         [](const std::string&, cJSON* root) -> std::string {
             if (!GLandscape) return HarnessProtocol::ErrorResponse("no landscape");

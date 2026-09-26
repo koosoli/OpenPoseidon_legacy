@@ -50,7 +50,10 @@ Result Probe(const Model::Model& model, const ParamEntry& root)
     Foundation::CaptureMainThread();
     const auto evidence = BuildStaticSourceEnvelope(model, 17, StaticSourceCoverage::FullCompiledIR);
     REQUIRE(evidence.State() == StaticSourceEnvelopeState::SourceEvidence);
-    return ProbeStaticPlainRouteNow(model, evidence, 17, root);
+    const auto result = ProbeStaticPlainRouteNow(model, evidence, 17, root);
+    const auto summary = BuildStaticPlainSourceSummary(model, evidence);
+    REQUIRE(ProbeStaticPlainRouteNow(summary, 17, model.sourcePath, root) == result);
+    return result;
 }
 }
 
@@ -249,7 +252,10 @@ TEST_CASE("Empty-class observation is refreshed from actual live config mutation
     auto model = OriginalOdol();
     ParamFile root;
     ParseOriginal(root, "class CfgModels { class Wall { properties[]={\"class\",\"\"}; }; };");
+    const auto summary = BuildStaticPlainSourceSummary(model,
+        BuildStaticSourceEnvelope(model, 17, StaticSourceCoverage::FullCompiledIR));
     REQUIRE(Probe(model, root) == Result::EmptyClassNow);
+    REQUIRE(ProbeStaticPlainRouteNow(summary, 17, model.sourcePath, root) == Result::EmptyClassNow);
     auto* models = root.FindEntry("CfgModels");
     REQUIRE(models);
     auto* wall = models->FindEntry("Wall");
@@ -258,8 +264,10 @@ TEST_CASE("Empty-class observation is refreshed from actual live config mutation
     REQUIRE(properties);
     properties->SetValue(1, Foundation::RStringB("house"));
     REQUIRE(Probe(model, root) == Result::Unsupported);
+    REQUIRE(ProbeStaticPlainRouteNow(summary, 17, model.sourcePath, root) == Result::Unsupported);
     properties->SetValue(1, Foundation::RStringB(""));
     REQUIRE(Probe(model, root) == Result::EmptyClassNow);
+    REQUIRE(ProbeStaticPlainRouteNow(summary, 17, model.sourcePath, root) == Result::EmptyClassNow);
 }
 
 TEST_CASE("Probe rejects stale partial or unsupported evidence and wrong owner", "[streaming-static-plain-route]")

@@ -2377,7 +2377,8 @@ void World::StepSimulation(float deltaT, float noAccDeltaT, Entity* cameraVehicl
 #else
                                     world.PerformAI(step.deltaT, step.noAccDeltaT);
 #endif
-                                    if (GLandscape && GLandscape->ModernSimulationResidencyEnabled())
+                                    if (GLandscape && (GLandscape->ModernSimulationResidencyEnabled() ||
+                                        GLandscape->HasModernSourceDiagnosticDemand()))
                                     {
                                         Streaming::SimulationResidencyOwnerBoundary boundary;
                                         GLandscape->PumpModernSimulationResidency(boundary);

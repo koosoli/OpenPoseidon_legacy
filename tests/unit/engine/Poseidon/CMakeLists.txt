@@ -268,6 +268,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     World/test_simulation_fire_collision.cpp
     World/test_static_source_envelope.cpp
     World/test_static_plain_route_probe.cpp
+    World/test_static_plain_source_summary.cpp
     World/Model/test_dds_publication_token.cpp
     World/Model/test_model_simulation_source_info.cpp
     World/Model/test_model_source_audit.cpp

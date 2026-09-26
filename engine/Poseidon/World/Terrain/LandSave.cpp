@@ -3124,6 +3124,7 @@ void Landscape::EnsureModernObjectPreparer()
     paths.reserve(_modernObjectModels.size());
     for (const RStringB& model : _modernObjectModels)
         paths.emplace_back(model.GetLength() > 0 ? (const char*)model : "");
+    ResetModernSourceDiagnostics();
     _modernObjectPreparer->Reset(paths.data(), paths.size());
     // The prepared-texture store belongs to the same lifetime: chains for a previous world's
     // textures are never wanted by this one.
@@ -3183,6 +3184,7 @@ void Landscape::PrefetchModernObjectModels(const std::vector<ModernObjectCellCan
         if (_nativeFarModelWanted[model])
             wantedEpochs[model] = _modernObjectPrefetchEpoch;
     PreserveModernSimulationModelRequests(wantedEpochs, _modernObjectPrefetchEpoch);
+    PreserveModernSourceDiagnosticRequests(wantedEpochs, _modernObjectPrefetchEpoch);
     const size_t staleDropped = _modernObjectPreparer->DropStale(
         wantedEpochs.data(), wantedEpochs.size(), _modernObjectPrefetchEpoch);
     // Pass 2: enqueue in that order. A full queue is not an error -- the admit loop
@@ -3314,6 +3316,7 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
         // (d) Same teardown argument as the cache below: a preparer still holding a dead
         // world's IRs, or a queue of its models, must be flushed. Reset only bumps a
         // generation and drops results; it never joins, so this costs nothing per frame.
+        ResetModernSourceDiagnostics();
         if (_modernObjectPreparer && _modernObjectPreparer->ModelCount() > 0)
             _modernObjectPreparer->Reset(nullptr, 0);
         // (a) STREAMING IS OFF, SO THE CACHE MUST NOT SURVIVE. This is reached both on a world
@@ -4490,6 +4493,7 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
                 if (_nativeFarModelWanted[i])
                     epochs[i] = _modernObjectPrefetchEpoch;
             PreserveModernSimulationModelRequests(epochs, _modernObjectPrefetchEpoch);
+            PreserveModernSourceDiagnosticRequests(epochs, _modernObjectPrefetchEpoch);
             _modernObjectPreparer->DropStale(epochs.data(), epochs.size(), _modernObjectPrefetchEpoch);
         }
         LOG_INFO(World, "Native authored far window: candidates={} active={} models={} radius={}m cap={}",
@@ -4601,6 +4605,7 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
                 epochs[i] = _modernObjectPrefetchEpoch - 1;
         }
         PreserveModernSimulationModelRequests(epochs, _modernObjectPrefetchEpoch);
+        PreserveModernSourceDiagnosticRequests(epochs, _modernObjectPrefetchEpoch);
         const size_t retired = _modernObjectPreparer->DropStale(
             epochs.data(), epochs.size(), _modernObjectPrefetchEpoch);
         if (retired)

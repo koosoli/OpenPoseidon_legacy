@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Poseidon/World/Terrain/StaticSourceEnvelope.hpp>
+#include <Poseidon/World/Terrain/StaticPlainSourceSummary.hpp>
 #include <cstddef>
 
 namespace Poseidon { class ParamEntry; }
@@ -11,20 +11,6 @@ enum class StaticPlainRouteObservation
 {
     EmptyClassNow, Unsupported, Unknown, WrongThread, StaleSource
 };
-
-namespace StaticPlainRouteLimits
-{
-inline constexpr size_t PathBytes = 4096;
-// ShapeBank rewrites sourcePath through lowName[128] before CfgModels lookup.
-// Longer originals are unsupported rather than interpreted under another name.
-inline constexpr size_t ShapeBankPathBytes = 128;
-inline constexpr size_t StringBytes = 256;
-inline constexpr size_t SourceProperties = 4096;
-inline constexpr int RootEntries = 4096;
-inline constexpr int ModelEntries = 4096;
-inline constexpr int OverrideEntries = 128;
-inline constexpr int PropertyElements = 256;
-}
 
 // The caller must supply the SAME immutable full ODOL IR from which evidence
 // was built, and its current source generation. Evidence is not an IR identity
@@ -41,4 +27,12 @@ inline constexpr int PropertyElements = 256;
 StaticPlainRouteObservation ProbeStaticPlainRouteNow(
     const Model::Model& source, const StaticSourceEnvelope& evidence,
     uint64_t currentGeneration, const ParamEntry& liveConfigRoot);
+
+// Equivalent immediate config observation without retaining the original IR.
+// Caller supplies the exact case-sensitive inventory identity and generation
+// associated with the original snapshot; aliases and stale tokens refuse.
+// These tokens do NOT establish freshness of modified files or later IRs.
+StaticPlainRouteObservation ProbeStaticPlainRouteNow(
+    const StaticPlainSourceSummary& source, uint64_t currentGeneration,
+    std::string_view exactModelIdentity, const ParamEntry& liveConfigRoot);
 }

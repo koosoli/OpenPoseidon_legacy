@@ -8,6 +8,7 @@
 #include <Poseidon/World/Terrain/ObjectStreamPrepare.hpp>
 #include <Poseidon/World/Terrain/SimulationObjectCoverage.hpp>
 #include <Poseidon/World/Terrain/SimulationResidency.hpp>
+#include <Poseidon/World/Terrain/StaticPlainRouteProbe.hpp>
 
 #include <array>
 #include <chrono>
@@ -799,6 +800,21 @@ class Landscape : public SerializeClass
     // is not ready. See ObjectStreamPrepare.hpp for the thread-safety boundary and the levers.
     // Created lazily on the first streamed world; destroyed (joined) with the Landscape.
     std::unique_ptr<ObjectStreamPreparer> _modernObjectPreparer;
+    struct ModernSourceDiagnosticEntry
+    {
+        uint32_t index = 0;
+        uint64_t inventoryGeneration = 0;
+        uint64_t diagnosticParseToken = 0;
+        std::array<char, 128> identity{};
+        std::chrono::steady_clock::time_point expires{};
+        ObjectStreamPreparer::SourceEnvelopeRequest requestResult = ObjectStreamPreparer::SourceEnvelopeRequest::Unavailable;
+        bool occupied = false, pending = false;
+    };
+    // Explicit diagnostic requests only: fixed storage, no IR/shape/object ownership.
+    std::array<ModernSourceDiagnosticEntry, 8> _modernSourceDiagnostics{};
+    bool _modernSourceDiagnosticsActive = false;
+    bool ModernSourceDiagnosticInventoryMatches(const ModernSourceDiagnosticEntry& entry,
+        const ObjectStreamPreparer::SourceEnvelopeSnapshot& latest) const;
     // Per model index: the value of _modernObjectPrefetchEpoch when the desired-set walk last
     // considered it, so a recentre requests each distinct cold model once, not once per
     // placement. Sized with _modernObjectModels.
@@ -931,6 +947,29 @@ class Landscape : public SerializeClass
     // residency window streams from, and must not be able to disturb them.
     const std::vector<ModernObjectPlacement>& ModernObjectPlacements() const { return _modernObjectPlacements; }
     const std::vector<RStringB>& ModernObjectModels() const { return _modernObjectModels; }
+
+    enum class ModernSourceDiagnosticStatus
+    { NotRequested, Pending, LatestSnapshot, Refused, Expired, Interrupted, StaleInventory, Invalid, WrongThread };
+    struct ModernSourceDiagnosticSnapshot
+    {
+        ModernSourceDiagnosticStatus status = ModernSourceDiagnosticStatus::NotRequested;
+        ObjectStreamPreparer::SourceEnvelopeRequest requestResult = ObjectStreamPreparer::SourceEnvelopeRequest::Unavailable;
+        bool pendingDemand = false;
+        ObjectStreamPreparer::SourceEnvelopeSnapshot latestSnapshot;
+        Streaming::StaticPlainRouteObservation classNow = Streaming::StaticPlainRouteObservation::Unknown;
+    };
+    static constexpr size_t ModernSourceDiagnosticLimit = 8;
+    static constexpr int ModernSourceDiagnosticTtlSeconds = 30;
+    // Harness-authorized optional parsing. Snapshot is the LATEST original source
+    // snapshot, never per-request completion, final bounds, coverage or Ready.
+    ObjectStreamPreparer::SourceEnvelopeRequest RequestModernSourceDiagnostic(uint32_t index);
+    ModernSourceDiagnosticSnapshot SnapshotModernSourceDiagnostic(uint32_t index) const;
+    void MaintainModernSourceDiagnostics();
+    // Tracks unexpired explicit records, including completed polls; owner
+    // maintenance clears this guard after TTL even when simulation is disabled.
+    bool HasModernSourceDiagnosticDemand() const { return _modernSourceDiagnosticsActive; }
+    void PreserveModernSourceDiagnosticRequests(std::vector<uint32_t>& epochs, uint32_t epoch) const;
+    void ResetModernSourceDiagnostics();
 
     // Streaming observability (dev-panel "Streaming" tab, --capture-metrics): fill the
     // cumulative residency/admission counters that otherwise reach only the log rows.

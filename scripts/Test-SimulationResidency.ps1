@@ -1,10 +1,10 @@
-param([switch]$Disabled,[switch]$Capacity,[switch]$ActiveCapacity,[switch]$MovedWatcher,[switch]$LargeWall,[string]$Label='simulation-residency',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',[string]$Python='C:\Program Files\Python311\python.exe')
+param([switch]$Disabled,[switch]$Capacity,[switch]$ActiveCapacity,[switch]$MovedWatcher,[switch]$LargeWall,[switch]$SourceDiagnostic,[string]$Label='simulation-residency',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',[string]$Python='C:\Program Files\Python311\python.exe')
 $ErrorActionPreference='Stop'
-if (@($Disabled,$Capacity,$ActiveCapacity,$MovedWatcher,$LargeWall | Where-Object {$_}).Count -gt 1) {throw 'Disabled, Capacity, ActiveCapacity, MovedWatcher and LargeWall are separate scenarios'}
+if (@($Disabled,$Capacity,$ActiveCapacity,$MovedWatcher,$LargeWall,$SourceDiagnostic | Where-Object {$_}).Count -gt 1) {throw 'Simulation fixture switches are separate scenarios'}
 if (!$env:LOCK_OWNER) {
  $shellName=if ($PSVersionTable.PSEdition -eq 'Core') {'pwsh.exe'} else {'powershell.exe'}
  $argv=@((Join-Path $PSScriptRoot 'with-game-lock.sh'),(Join-Path $PSHOME $shellName).Replace('\','/'),'-NoProfile','-File',$PSCommandPath,'-Label',$Label,'-GameDir',$GameDir,'-Python',$Python)
- foreach ($flag in @('Disabled','Capacity','ActiveCapacity','MovedWatcher','LargeWall')) {if ((Get-Variable $flag -ValueOnly)) {$argv+=('-'+$flag)}}
+ foreach ($flag in @('Disabled','Capacity','ActiveCapacity','MovedWatcher','LargeWall','SourceDiagnostic')) {if ((Get-Variable $flag -ValueOnly)) {$argv+=('-'+$flag)}}
  $env:LOCK_OWNER='simulation residency fixture'
  try {& 'C:\Program Files\Git\bin\bash.exe' @argv; if ($LASTEXITCODE) {throw "Simulation fixture exited $LASTEXITCODE"}} finally {Remove-Item Env:LOCK_OWNER}
  return
@@ -13,6 +13,7 @@ if (Get-Process OpenPoseidon -ErrorAction SilentlyContinue) {throw 'Game already
 $root=Split-Path $PSScriptRoot -Parent
 $out=Join-Path $root ('build/stream-residency/'+$Label+'-'+(Get-Date -Format yyyyMMdd-HHmmss))
 $fixture=Join-Path $out 'fixture'
+if ($SourceDiagnostic) {$fixture=Join-Path ([IO.Path]::GetTempPath()) ('op-src-'+[guid]::NewGuid().ToString('N').Substring(0,8))}
 $mission=Join-Path $out 'simulation-fixture.eden'
 $env:POSEIDON_USER_DIR=Join-Path $out 'user'
 New-Item -ItemType Directory -Force $mission,$env:POSEIDON_USER_DIR | Out-Null
@@ -20,7 +21,8 @@ $fixtureArgs=@($fixture,'--absolute-model-path')
 if ($Capacity) {$fixtureArgs+=@('--model-count','8193')}
 if ($ActiveCapacity) {$fixtureArgs+=@('--model-count','257','--reference-all-models')}
 if ($LargeWall) {$fixtureArgs+='--large-wall'}
-& $Python (Join-Path $PSScriptRoot 'streaming/build_simulation_residency_fixture.py') @fixtureArgs
+if ($SourceDiagnostic) {& $Python (Join-Path $PSScriptRoot 'streaming/build_source_diagnostic_fixture.py') $fixture}
+else {& $Python (Join-Path $PSScriptRoot 'streaming/build_simulation_residency_fixture.py') @fixtureArgs}
 if ($LASTEXITCODE) {throw 'Original fixture generation failed'}
 @'
 version=11;
@@ -45,8 +47,8 @@ class OutroWin { randomSeed=2; class Intel {}; };
 class OutroLoose { randomSeed=3; class Intel {}; };
 '@ | Set-Content (Join-Path $mission 'mission.sqm')
 [IO.File]::WriteAllText((Join-Path $env:POSEIDON_USER_DIR 'graphics.cfg'),"qualityPreset=3;`nmsaaSamples=4;`ndlssMode=0;`nvsync=0;`nfpsCap=60;`n")
-$env:WGR_SIMULATION_RESIDENCY=if ($Disabled) {'0'} else {'1'}
-$env:WGR_SIMULATION_RESIDENCY_TEST=if ($Disabled) {'0'} else {'1'}
+$env:WGR_SIMULATION_RESIDENCY=if ($Disabled -or $SourceDiagnostic) {'0'} else {'1'}
+$env:WGR_SIMULATION_RESIDENCY_TEST=if ($Disabled -or $SourceDiagnostic) {'0'} else {'1'}
 $env:WGR_OBJECT_STREAM_WINDOW_GROWTH='0'
 $env:WGR_OBJECT_STREAM_RADIUS_CELLS='8'
 $env:WGR_OBJECT_STREAM_GPU_BUDGET='0'
@@ -89,7 +91,40 @@ try {
  $actor=Send @{cmd='eval';code='!(isNull streamFixtureActor)'}
  if ($actor.result -notmatch 'true') {throw 'Remote authoritative actor did not initialize'}
  $null=Send @{cmd='eval';code='getPos streamFixtureActor'}
- if ($Disabled) {
+ if ($SourceDiagnostic) {
+  $cold=State; $coldIds=Ids; $baseline=Send @{cmd='stream_residency'}
+  if ($cold.status -ne 'Disabled' -or $cold.ownerPumps -ne 0 -or $baseline.sourceEnvelopeBytes -ne 0 -or $baseline.sourceEnvelopeScans -ne 0 -or @($coldIds.objects | Where-Object {$_.present}).Count) {throw 'Ordinary disabled fixture performed source or simulation work'}
+  $unrequested=Send @{cmd='stream_source_diagnostic';modelIndex=0}
+  if ($unrequested.status -ne 'NotRequested' -or $unrequested.diagnosticActive) {throw 'Read-only diagnostic poll created demand'}
+  $requested=@(); $snapshots=@()
+  for ($i=0;$i -lt 8;$i++) {
+   $r=Send @{cmd='stream_source_diagnostic';modelIndex=$i;action='request'}
+   if ($r.requestResult -ne 'Requested') {throw "Selected source request refused: $($r | ConvertTo-Json -Compress)"}
+   $requested+=,$r
+  }
+  $capacity=Send @{cmd='stream_source_diagnostic';modelIndex=8;action='request'}
+  if ($capacity.requestResult -ne 'Capacity') {throw 'Selected diagnostics exceeded eight slots'}
+  for ($i=0;$i -lt 8;$i++) {
+   $until=[DateTime]::UtcNow.AddSeconds(15)
+   do {Start-Sleep -Milliseconds 100;$r=Send @{cmd='stream_source_diagnostic';modelIndex=$i}} while ($r.status -eq 'Pending' -and [DateTime]::UtcNow -lt $until)
+   if ($r.status -ne 'LatestSnapshot' -or !$r.attempted -or !$r.sourceEvidence -or !$r.plainSourceFacts -or $r.pendingDemand -or $r.modelIdentity -ne $requested[$i].modelIdentity -or $r.inventoryGeneration -le 0 -or $r.latestSnapshotClassObservation -notin @('EmptyClassNow','Unsupported')) {throw "Paired original source snapshot missing: $($r | ConvertTo-Json -Compress)"}
+   $snapshots+=,$r
+  }
+  $late=Send @{cmd='stream_source_diagnostic';modelIndex=0;action='request'}
+  if ($late.requestResult -ne 'TooLate' -or $late.status -ne 'LatestSnapshot') {throw 'Late request upgraded or discarded an existing snapshot'}
+  $after=Send @{cmd='stream_residency'}; $afterIds=Ids; $simulationAfter=State
+  if ($after.sourceEnvelopeScans -ne 8 -or $after.sourceEnvelopePublished -ne 8 -or $after.sourceEnvelopeBytes -le 0 -or $after.required -ne 0 -or $after.resident -ne $baseline.resident -or @($afterIds.objects | Where-Object {$_.present}).Count -or $simulationAfter.status -ne 'Disabled' -or $simulationAfter.ownerPumps -ne 0) {throw 'Source diagnostics created geometry, pinned identities or simulation work'}
+  Start-Sleep -Seconds 31
+  $expired=Send @{cmd='stream_source_diagnostic';modelIndex=0}
+  if ($expired.status -ne 'Expired' -or $expired.pendingDemand -or $expired.diagnosticActive) {throw 'Owner maintenance did not expire diagnostic demand with simulation disabled'}
+  # TTL removes diagnostic demand, not ordinary preparer cache. Exercise the
+  # real camera DropStale path while keeping the remote objects out of range.
+  $null=Send @{cmd='eval';code='triFreeFlyPose "200 200 80 45 -25"'}
+  $until=[DateTime]::UtcNow.AddSeconds(15)
+  do {Start-Sleep -Milliseconds 100;$retired=Send @{cmd='stream_residency'}} while (($retired.readyPayloadBytes -ne 0 -or $retired.parseReservedBytes -ne 0) -and [DateTime]::UtcNow -lt $until)
+  if ($retired.readyPayloadBytes -ne 0 -or $retired.parseReservedBytes -ne 0 -or $retired.required -ne 0 -or $retired.resident -ne $baseline.resident) {throw 'Normal cancellation retained diagnostic-only Ready payload or admitted remote objects'}
+  $result=@{sourceDiagnostic=$true;cold=$cold;coldIds=$coldIds;baseline=$baseline;unrequested=$unrequested;requested=$requested;snapshots=$snapshots;capacity=$capacity;late=$late;after=$after;afterIds=$afterIds;simulationAfter=$simulationAfter;expired=$expired;retiredAfterCameraRecentre=$retired}
+ } elseif ($Disabled) {
   Start-Sleep -Seconds 4
   $cold=State;$coldIds=Ids
   if ($cold.status -ne 'Disabled' -or $cold.ownerPumps -ne 0 -or @($coldIds.objects | Where-Object {$_.present}).Count) {throw 'Default-off fixture performed simulation work or loaded remote walls'}

@@ -268,9 +268,12 @@ struct ObjectStreamPreparer::Impl
     {
         bool requested = false;
         bool attempted = false;
+        uint64_t diagnosticParseToken = 0;
         Streaming::StaticSourceEnvelope envelope;
+        Streaming::StaticPlainSourceSummary plainSource;
     };
-    std::vector<SourceEnvelopeSlot> sourceEnvelopes; // lazy, bounded, numeric only
+    std::vector<SourceEnvelopeSlot> sourceEnvelopes; // lazy, bounded, no IR/config pointers
+    uint64_t nextDiagnosticParseToken = 0; // owner only; never advanced by ordinary Request
 
     // Caller holds mutex. RadiusSlot belongs to this generation's inventory;
     // Reset destroys/reinitializes the slots, while payload retirement leaves them alone.
@@ -622,6 +625,7 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
         // Canonical loaders (including owned DDC deserialization) return a fresh
         // IR. External loaders may share/mutate theirs: never inspect it here.
         Streaming::StaticSourceEnvelope sourceEnvelope;
+        Streaming::StaticPlainSourceSummary plainSource;
         bool envelopeScanned = false;
         double envelopeMs = 0.0;
         if (prepareEnvelope && model && !nativeArchiveModel)
@@ -631,6 +635,7 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
             {
                 sourceEnvelope = Streaming::BuildStaticSourceEnvelope(*model, gen,
                     Streaming::StaticSourceCoverage::FullCompiledIR);
+                plainSource = Streaming::BuildStaticPlainSourceSummary(*model, sourceEnvelope);
                 envelopeScanned = true;
             }
             catch (...) {} // optional evidence cannot fail normal preparation
@@ -827,6 +832,7 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
             auto& slot = sourceEnvelopes[index];
             slot.attempted = true;
             slot.envelope = sourceEnvelope;
+            slot.plainSource = plainSource;
             stats.sourceEnvelopePublished += sourceEnvelope.State() == Streaming::StaticSourceEnvelopeState::SourceEvidence;
         }
         if (model)
@@ -1055,7 +1061,8 @@ ObjectStreamPreparer::SourceEnvelopeRequest ObjectStreamPreparer::RequestInterna
         return SourceEnvelopeRequest::Capacity;
     }
     if (sourceEnvelope && (_impl->count > SourceEnvelopeInventoryLimit ||
-        _impl->paths[index].size() > SourceEnvelopeIdentityLimit)) return SourceEnvelopeRequest::Capacity;
+        _impl->paths[index].size() > SourceEnvelopeIdentityLimit ||
+        _impl->nextDiagnosticParseToken == UINT64_MAX)) return SourceEnvelopeRequest::Capacity;
     if (sourceEnvelope && _impl->sourceEnvelopes.empty())
     {
         try { _impl->sourceEnvelopes.resize(_impl->count); }
@@ -1066,6 +1073,8 @@ ObjectStreamPreparer::SourceEnvelopeRequest ObjectStreamPreparer::RequestInterna
     {
         _impl->sourceEnvelopes[index] = {};
         _impl->sourceEnvelopes[index].requested = sourceEnvelope;
+        if (sourceEnvelope)
+            _impl->sourceEnvelopes[index].diagnosticParseToken = ++_impl->nextDiagnosticParseToken;
     }
     _impl->stale[index] = false;
     _impl->Set(index, State::Queued);
@@ -1094,7 +1103,9 @@ ObjectStreamPreparer::SourceEnvelopeSnapshot ObjectStreamPreparer::QueryStaticSo
     if (index < _impl->sourceEnvelopes.size())
     {
         out.attempted = _impl->sourceEnvelopes[index].attempted;
+        out.diagnosticParseToken = _impl->sourceEnvelopes[index].diagnosticParseToken;
         out.envelope = _impl->sourceEnvelopes[index].envelope;
+        out.plainSource = _impl->sourceEnvelopes[index].plainSource;
     }
     return out;
 }

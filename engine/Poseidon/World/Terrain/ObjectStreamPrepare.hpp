@@ -78,6 +78,7 @@
 #include <memory>
 #include <string>
 #include <Poseidon/World/Terrain/StaticSourceEnvelope.hpp>
+#include <Poseidon/World/Terrain/StaticPlainSourceSummary.hpp>
 
 namespace Poseidon
 {
@@ -236,11 +237,17 @@ class ObjectStreamPreparer
     struct SourceEnvelopeSnapshot
     {
         uint64_t generation = 0;
+        uint64_t diagnosticParseToken = 0; // nonzero only for an explicit opt-in parse; ordinary Request clears it
         std::string modelIdentity; // exact owned inventory token, never an IR reference
         bool attempted = false;
         Streaming::StaticSourceEnvelope envelope;
+        Streaming::StaticPlainSourceSummary plainSource;
     };
-    // Source evidence only, not Plain/Ready or a live config conclusion. Numeric
+    // Source evidence only, not Plain/Ready or a live config conclusion. Paired
+    // source summary is copied from the SAME exclusive original parse and can be
+    // probed without consulting a consumed/mutated IR. Neither value certifies
+    // final bounds, disk freshness or the completion of a particular request.
+    // Numeric
     // evidence survives Take, but DropStale and Reset invalidate it even after Take.
     // Describes the ORIGINAL immutable parse snapshot. Pair Query + Take of the
     // same Ready entry in one nonyielding owner operation (or maintain equivalent

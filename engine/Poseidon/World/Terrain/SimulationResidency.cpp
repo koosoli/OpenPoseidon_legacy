@@ -99,7 +99,11 @@ bool Landscape::ModernSimulationResidencyEnabled() const
     static const bool enabled = [] { const char* v = std::getenv("WGR_SIMULATION_RESIDENCY"); return v && std::strcmp(v, "1") == 0; }();
     return enabled && _modernObjectStreaming;
 }
-void Landscape::ResetModernSimulationResidency() { _modernSimulation.reset(); }
+void Landscape::ResetModernSimulationResidency()
+{
+    ResetModernSourceDiagnostics();
+    _modernSimulation.reset();
+}
 void Landscape::EnsureModernSimulationResidency()
 {
     if (!ModernSimulationResidencyEnabled() || !Foundation::IsMainThread() || _modernSimulation) return;
@@ -360,6 +364,9 @@ SimulationResidencyStats Landscape::SnapshotModernSimulationResidency() const
 
 void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoundary&)
 {
+    // Explicit diagnostic demand is independent of simulation eligibility/caps.
+    // Ordinary calls return immediately without scanning or allocating anything.
+    MaintainModernSourceDiagnostics();
     if (!ModernSimulationResidencyEnabled() || !Foundation::IsMainThread()) return;
     EnsureModernSimulationResidency();
     auto& s = *_modernSimulation;
