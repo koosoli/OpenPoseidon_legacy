@@ -1249,8 +1249,8 @@ this proves logical/state leases, not GPU eviction.
 No existing AI, collision, navigation or generic query caller is migrated.
 Actor-region Ready is not a certificate for arbitrary rays. Existing origin-grid
 25m candidate enumeration can omit a large building whose origin lies farther
-away; this approximately6m fixture does not close that generic clearance gate.
-Exact query demand/readiness is under implementation and unverified. Broad
+away; this approximately 6m fixture does not close that generic clearance gate.
+Exact query demand/readiness now passes the separate narrow fixture below; generic consumers remain unmigrated. Broad
 performance, active-encode cancellation, complete class coverage, secondary views,
 wider mutable state and MP authority remain open. The streaming plan is OPEN.
 
@@ -1287,3 +1287,42 @@ ON. This single ordered pair has cache/system confounds; it neither establishes
 a headline FPS improvement nor meets the performance gate. Both switches remain
 default OFF; the complete streaming plan stays OPEN. Actual logs, results,
 provenance, images, sampler files and the read-only analysis/output are hashed.
+
+### Independent query leases and live watches — 26 September 2026
+
+704e2b65 adds active BC3 encoding-callback cancellation tests. These establish
+mid-encoding reservation debt cleanup and stale-output refusal. The race between
+the final reservation check and Put publication is a separate OPEN boundary.
+89db0dcc separates Fire-purpose exact query leases from Neighborhood demand and
+watches live placements after leases end. Neither feature migrates generic
+collision, AI, visibility or navigation callers; simulation residency stays OFF.
+
+The retry supported build passed after four ambiguous unit Link assignments
+were repaired; both failed and successful logs are retained. Fresh default OFF
+passes 7430 assertions/163 cases (155 passed,8 explicit skips), broad preparation
+368/13 (12 passed,1 skip), narrow 425/13 (11 passed,2 skips). Skip scopes are
+enabled-only or mutually exclusive fixtures, not silently omitted failures.
+
+Four installed 89db0dcc runs (16:25 stamp,actual binary hashes) report passed=true
+and clean exit0. Root reviewed JSON; current actor-run visual PNG judgement is
+pending and is not inherited from earlier image review.
+
+- Default 162544 verifies Disabled with no admission.
+- Actor 162621 verifies Fire request starts Pending despite Neighborhood Ready,
+  then independently becomes Ready. An altered ray is Pending; invalid purpose
+  is Invalid. Releasing Fire leaves Neighborhood leases intact. Moving the actor
+  releases unmodified walls and returning reacquires them. Damage .25 survives
+  as MustBeSaved; its watch makes coverage globally Unknown even at zero leases.
+- Moved-watch 162744 moves wall 1002 from its authored bins to 100,100; neighborhood
+  and a new query both become Unknown. A live-placement watch refuses stale
+  origin-based readiness rather than inventing a new certificate.
+- Capacity 162814 supplies 257 model groups; CapacityExceeded occurs at inventory
+  rows 0/created 0/ownerPumps 0 before any partial readiness or wall admission.
+
+Query Ready covers limited static terrain-object residency, not clear collision
+or a hit-free ray. Legacy candidate enumeration still expands by a hardcoded 25m
+object-origin radius and can omit large objects; broadphase/query consumers,
+background AI publication and all-type eligibility remain OPEN. The current
+approximately 6m wall fixture cannot close those gates. Headless query runner and
+probe registration are in progress/unverified. No new FPS, memory eviction,
+multiplayer authority or whole-plan completion claim is made.

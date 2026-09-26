@@ -2309,6 +2309,731 @@
         "whole-gpu-memory-scope.txt": "e6d61a4bc6b06e8fb1dc4466dcf4edfe9454430f738b2012fc0f1e1708b9b75c",
         "whole-gpu-memory.csv": "8f0ecb5aacc77fbfad17e0ff40e3ecb0d2d369a905db5fb5da6c4c9e9cdfc539"
       }
+    },
+    {
+      "run": "simulation-query-default-off-20260926-162544",
+      "runtimeSourceCommit": "89db0dcc",
+      "provenance": {
+        "fixture": {
+          "absolute_model_path": true,
+          "actor": [
+            1190,
+            10,
+            1200
+          ],
+          "camera": [
+            100,
+            80,
+            100
+          ],
+          "camera_isolation_env": {
+            "WGR_OBJECT_STREAM_RADIUS_CELLS": "8",
+            "WGR_OBJECT_STREAM_WINDOW_GROWTH": "0"
+          },
+          "cell_metres": 50.0,
+          "elevation": 10.0,
+          "fire_segment": [
+            [
+              1190,
+              11.5,
+              1200
+            ],
+            [
+              1210,
+              11.5,
+              1200
+            ]
+          ],
+          "land_range": 32,
+          "model_sha256": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+          "models": [
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-default-off-20260926-162544\\fixture\\streaming_fixture\\wall.p3d"
+          ],
+          "notes": [
+            "Absolute-model mode uses original loose files without an archive mount; relative mode needs a separately configured loose-file root.",
+            "Camera at 100 is isolated from walls at 1200/1230 with growth disabled.",
+            "No ResolveObject: actor demand must admit geometry with transient leases.",
+            "Generic inventory/classification/admission must establish readiness.",
+            "Self-check is not engine parsing, collision or runtime verification."
+          ],
+          "placements": [
+            {
+              "id": 1001,
+              "model_index": 0,
+              "position": [
+                1200.0,
+                11.5,
+                1200.0
+              ]
+            },
+            {
+              "id": 1002,
+              "model_index": 0,
+              "position": [
+                1230.0,
+                11.5,
+                1200.0
+              ]
+            }
+          ],
+          "schema": 1,
+          "terrain_range": 32,
+          "wall_world_bounds": [
+            [
+              1199.5,
+              10,
+              1194,
+              1200.5,
+              13,
+              1206
+            ],
+            [
+              1229.5,
+              10,
+              1194,
+              1230.5,
+              13,
+              1206
+            ]
+          ],
+          "world_sha256": "6c1bdd72351e24c4d4d7cb3d996762383243832a74fb76827fe35e4804b2bb29"
+        },
+        "scriptSha256": "D21F428A0E90E5EE531CD77C73F7C24AF8976815448426FC5FE83A951C2F6C1B",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "43F248D76A6157F3792A47CCFDDB7AA4FBB80BFF47D48F817E1F850E7C02A410",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "6573426CE547CCF14659CF4075E3D507E9230F80510A6008E83D923570841D14",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "head": "89db0dcc61f4e1b094019121db73875b6fc22c29",
+        "disabled": true,
+        "installed": "codex/streaming-residency 89db0dcc 2026-09-26_16:25 deploy-ps1"
+      },
+      "classification": "PASS default Disabled/no admission; clean0.",
+      "sha256": {
+        "engine.log": "5c0bf02ee94af928e2a64518e0ac570d9ec7bbd6091800e614785cd76e0b8c69",
+        "harness.jsonl": "784cff3ea139e2b827347d3216186b3bd2467e9a82291738fb3761d77993c9de",
+        "provenance.json": "dd3de816a2917d515bd39650402f420ff2a4584dc4ae44c154649ae44d080f0e",
+        "result.json": "12ecc198f67d7d6c0fbbb344fd0419cd7c03a114b5057bd245ce4267d269429e",
+        "fixture/fixture.json": "4b0f76e06badb28c337cc299fea2db6be1fab2c876b02b8663ef8d69a88a326c",
+        "fixture/simulation-residency.wrp": "6c1bdd72351e24c4d4d7cb3d996762383243832a74fb76827fe35e4804b2bb29",
+        "fixture/streaming_fixture/wall.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "simulation-fixture.eden/mission.sqm": "c47524083395a8c78a581822629f83c760dd0c1a3ef45eaceb24da88580e9d4c"
+      }
+    },
+    {
+      "run": "simulation-query-actor-leases-20260926-162621",
+      "runtimeSourceCommit": "89db0dcc",
+      "provenance": {
+        "fixture": {
+          "absolute_model_path": true,
+          "actor": [
+            1190,
+            10,
+            1200
+          ],
+          "camera": [
+            100,
+            80,
+            100
+          ],
+          "camera_isolation_env": {
+            "WGR_OBJECT_STREAM_RADIUS_CELLS": "8",
+            "WGR_OBJECT_STREAM_WINDOW_GROWTH": "0"
+          },
+          "cell_metres": 50.0,
+          "elevation": 10.0,
+          "fire_segment": [
+            [
+              1190,
+              11.5,
+              1200
+            ],
+            [
+              1210,
+              11.5,
+              1200
+            ]
+          ],
+          "land_range": 32,
+          "model_sha256": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+          "models": [
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-actor-leases-20260926-162621\\fixture\\streaming_fixture\\wall.p3d"
+          ],
+          "notes": [
+            "Absolute-model mode uses original loose files without an archive mount; relative mode needs a separately configured loose-file root.",
+            "Camera at 100 is isolated from walls at 1200/1230 with growth disabled.",
+            "No ResolveObject: actor demand must admit geometry with transient leases.",
+            "Generic inventory/classification/admission must establish readiness.",
+            "Self-check is not engine parsing, collision or runtime verification."
+          ],
+          "placements": [
+            {
+              "id": 1001,
+              "model_index": 0,
+              "position": [
+                1200.0,
+                11.5,
+                1200.0
+              ]
+            },
+            {
+              "id": 1002,
+              "model_index": 0,
+              "position": [
+                1230.0,
+                11.5,
+                1200.0
+              ]
+            }
+          ],
+          "schema": 1,
+          "terrain_range": 32,
+          "wall_world_bounds": [
+            [
+              1199.5,
+              10,
+              1194,
+              1200.5,
+              13,
+              1206
+            ],
+            [
+              1229.5,
+              10,
+              1194,
+              1230.5,
+              13,
+              1206
+            ]
+          ],
+          "world_sha256": "889e6d33f14c9d34c0e19fffaf3b22b4a075c8b40900571a7c1212d8dd53337a"
+        },
+        "installed": "codex/streaming-residency 89db0dcc 2026-09-26_16:25 deploy-ps1",
+        "scriptSha256": "D21F428A0E90E5EE531CD77C73F7C24AF8976815448426FC5FE83A951C2F6C1B",
+        "head": "89db0dcc61f4e1b094019121db73875b6fc22c29",
+        "disabled": false,
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "43F248D76A6157F3792A47CCFDDB7AA4FBB80BFF47D48F817E1F850E7C02A410",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "6573426CE547CCF14659CF4075E3D507E9230F80510A6008E83D923570841D14",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ]
+      },
+      "classification": "PASS independent Fire query channel starts Pending, then Ready; changed ray Pending, invalid purpose Invalid; release preserves Neighborhood. Actor move removes/reacquires unmodified leases; mutation .25 retained MustBeSaved and global Unknown watch persists at lease0. Ready only limited static terrain residency, not collision clearance. Root JSON reviewed; new visual PNG judgement pending.",
+      "sha256": {
+        "engine.log": "6d4ef030dc93954a996d7802700fe7a427f6962691bd09aad0505bce9659da3c",
+        "harness.jsonl": "643f7879c8952c084022b60ad20645a655f9b2c138820e36209a1e91be57bbac",
+        "provenance.json": "b224b0530b87747dbe26587971522cc21227806c3ede8b7d71df808082b9c65b",
+        "result.json": "773f985089c30b48deffeb2c3a261455eddff75c3211282697e0c4477bb2cff4",
+        "visual.png": "ce063455f2543ef3abc0b3eb66a69f6c720e77bbf5c8694e7fb0736261f027df",
+        "fixture/fixture.json": "0f7331bcc81ca82b933cdf522e38ada3e8378ff4e842f425ce7033687ec98588",
+        "fixture/simulation-residency.wrp": "889e6d33f14c9d34c0e19fffaf3b22b4a075c8b40900571a7c1212d8dd53337a",
+        "fixture/streaming_fixture/wall.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "simulation-fixture.eden/mission.sqm": "c47524083395a8c78a581822629f83c760dd0c1a3ef45eaceb24da88580e9d4c"
+      }
+    },
+    {
+      "run": "simulation-query-moved-watch-20260926-162744",
+      "runtimeSourceCommit": "89db0dcc",
+      "provenance": {
+        "scriptSha256": "D21F428A0E90E5EE531CD77C73F7C24AF8976815448426FC5FE83A951C2F6C1B",
+        "fixture": {
+          "absolute_model_path": true,
+          "actor": [
+            1190,
+            10,
+            1200
+          ],
+          "camera": [
+            100,
+            80,
+            100
+          ],
+          "camera_isolation_env": {
+            "WGR_OBJECT_STREAM_RADIUS_CELLS": "8",
+            "WGR_OBJECT_STREAM_WINDOW_GROWTH": "0"
+          },
+          "cell_metres": 50.0,
+          "elevation": 10.0,
+          "fire_segment": [
+            [
+              1190,
+              11.5,
+              1200
+            ],
+            [
+              1210,
+              11.5,
+              1200
+            ]
+          ],
+          "land_range": 32,
+          "model_sha256": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+          "models": [
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-moved-watch-20260926-162744\\fixture\\streaming_fixture\\wall.p3d"
+          ],
+          "notes": [
+            "Absolute-model mode uses original loose files without an archive mount; relative mode needs a separately configured loose-file root.",
+            "Camera at 100 is isolated from walls at 1200/1230 with growth disabled.",
+            "No ResolveObject: actor demand must admit geometry with transient leases.",
+            "Generic inventory/classification/admission must establish readiness.",
+            "Self-check is not engine parsing, collision or runtime verification."
+          ],
+          "placements": [
+            {
+              "id": 1001,
+              "model_index": 0,
+              "position": [
+                1200.0,
+                11.5,
+                1200.0
+              ]
+            },
+            {
+              "id": 1002,
+              "model_index": 0,
+              "position": [
+                1230.0,
+                11.5,
+                1200.0
+              ]
+            }
+          ],
+          "schema": 1,
+          "terrain_range": 32,
+          "wall_world_bounds": [
+            [
+              1199.5,
+              10,
+              1194,
+              1200.5,
+              13,
+              1206
+            ],
+            [
+              1229.5,
+              10,
+              1194,
+              1230.5,
+              13,
+              1206
+            ]
+          ],
+          "world_sha256": "5648bd4e8702817cfc75e49d4e484f6a34eaff8a5030681207ec7f4d12171024"
+        },
+        "disabled": false,
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "43F248D76A6157F3792A47CCFDDB7AA4FBB80BFF47D48F817E1F850E7C02A410",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "6573426CE547CCF14659CF4075E3D507E9230F80510A6008E83D923570841D14",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "head": "89db0dcc61f4e1b094019121db73875b6fc22c29",
+        "installed": "codex/streaming-residency 89db0dcc 2026-09-26_16:25 deploy-ps1"
+      },
+      "classification": "PASS moving live wall outside authored bins makes neighborhood and new query Unknown; clean0. Global watch prevents stale authored-origin readiness.",
+      "sha256": {
+        "engine.log": "50a8900e988485f2c6dc14b64ecb95355d6ce6bfabc562fa7a890245f65dd30a",
+        "harness.jsonl": "b97d01b3d0a6770c039aa562be9c879f72b7793415fa5a53bf3d530b7741086c",
+        "provenance.json": "d120e80ef913318c74f7a5951bada5361ad98596e174180db98de1447a234d42",
+        "result.json": "f3c918536b6dcddf3f8ef0e2ec8b184b2c5b2be3185e2964e873da9d34b18093",
+        "fixture/fixture.json": "40d2f7da6696d94093b2d889a4471c6a467464b777b83aa555acf31a2e9045b0",
+        "fixture/simulation-residency.wrp": "5648bd4e8702817cfc75e49d4e484f6a34eaff8a5030681207ec7f4d12171024",
+        "fixture/streaming_fixture/wall.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "simulation-fixture.eden/mission.sqm": "c47524083395a8c78a581822629f83c760dd0c1a3ef45eaceb24da88580e9d4c"
+      }
+    },
+    {
+      "run": "simulation-query-capacity-20260926-162814",
+      "runtimeSourceCommit": "89db0dcc",
+      "provenance": {
+        "head": "89db0dcc61f4e1b094019121db73875b6fc22c29",
+        "installed": "codex/streaming-residency 89db0dcc 2026-09-26_16:25 deploy-ps1",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "43F248D76A6157F3792A47CCFDDB7AA4FBB80BFF47D48F817E1F850E7C02A410",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "6573426CE547CCF14659CF4075E3D507E9230F80510A6008E83D923570841D14",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "disabled": false,
+        "scriptSha256": "D21F428A0E90E5EE531CD77C73F7C24AF8976815448426FC5FE83A951C2F6C1B",
+        "fixture": {
+          "absolute_model_path": true,
+          "actor": [
+            1190,
+            10,
+            1200
+          ],
+          "camera": [
+            100,
+            80,
+            100
+          ],
+          "camera_isolation_env": {
+            "WGR_OBJECT_STREAM_RADIUS_CELLS": "8",
+            "WGR_OBJECT_STREAM_WINDOW_GROWTH": "0"
+          },
+          "cell_metres": 50.0,
+          "elevation": 10.0,
+          "fire_segment": [
+            [
+              1190,
+              11.5,
+              1200
+            ],
+            [
+              1210,
+              11.5,
+              1200
+            ]
+          ],
+          "land_range": 32,
+          "model_sha256": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+          "models": [
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_001.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_002.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_003.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_004.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_005.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_006.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_007.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_008.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_009.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_010.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_011.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_012.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_013.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_014.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_015.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_016.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_017.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_018.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_019.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_020.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_021.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_022.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_023.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_024.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_025.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_026.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_027.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_028.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_029.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_030.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_031.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_032.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_033.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_034.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_035.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_036.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_037.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_038.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_039.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_040.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_041.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_042.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_043.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_044.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_045.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_046.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_047.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_048.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_049.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_050.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_051.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_052.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_053.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_054.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_055.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_056.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_057.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_058.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_059.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_060.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_061.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_062.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_063.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_064.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_065.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_066.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_067.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_068.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_069.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_070.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_071.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_072.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_073.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_074.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_075.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_076.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_077.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_078.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_079.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_080.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_081.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_082.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_083.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_084.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_085.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_086.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_087.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_088.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_089.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_090.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_091.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_092.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_093.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_094.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_095.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_096.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_097.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_098.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_099.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_100.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_101.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_102.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_103.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_104.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_105.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_106.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_107.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_108.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_109.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_110.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_111.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_112.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_113.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_114.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_115.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_116.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_117.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_118.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_119.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_120.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_121.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_122.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_123.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_124.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_125.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_126.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_127.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_128.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_129.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_130.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_131.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_132.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_133.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_134.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_135.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_136.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_137.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_138.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_139.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_140.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_141.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_142.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_143.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_144.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_145.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_146.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_147.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_148.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_149.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_150.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_151.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_152.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_153.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_154.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_155.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_156.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_157.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_158.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_159.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_160.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_161.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_162.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_163.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_164.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_165.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_166.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_167.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_168.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_169.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_170.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_171.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_172.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_173.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_174.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_175.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_176.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_177.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_178.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_179.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_180.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_181.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_182.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_183.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_184.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_185.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_186.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_187.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_188.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_189.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_190.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_191.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_192.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_193.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_194.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_195.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_196.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_197.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_198.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_199.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_200.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_201.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_202.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_203.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_204.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_205.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_206.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_207.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_208.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_209.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_210.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_211.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_212.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_213.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_214.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_215.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_216.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_217.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_218.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_219.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_220.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_221.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_222.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_223.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_224.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_225.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_226.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_227.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_228.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_229.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_230.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_231.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_232.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_233.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_234.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_235.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_236.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_237.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_238.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_239.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_240.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_241.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_242.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_243.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_244.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_245.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_246.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_247.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_248.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_249.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_250.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_251.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_252.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_253.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_254.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_255.p3d",
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\simulation-query-capacity-20260926-162814\\fixture\\streaming_fixture\\wall_unused_256.p3d"
+          ],
+          "notes": [
+            "Absolute-model mode uses original loose files without an archive mount; relative mode needs a separately configured loose-file root.",
+            "Camera at 100 is isolated from walls at 1200/1230 with growth disabled.",
+            "No ResolveObject: actor demand must admit geometry with transient leases.",
+            "Generic inventory/classification/admission must establish readiness.",
+            "Self-check is not engine parsing, collision or runtime verification."
+          ],
+          "placements": [
+            {
+              "id": 1001,
+              "model_index": 0,
+              "position": [
+                1200.0,
+                11.5,
+                1200.0
+              ]
+            },
+            {
+              "id": 1002,
+              "model_index": 0,
+              "position": [
+                1230.0,
+                11.5,
+                1200.0
+              ]
+            }
+          ],
+          "schema": 1,
+          "terrain_range": 32,
+          "wall_world_bounds": [
+            [
+              1199.5,
+              10,
+              1194,
+              1200.5,
+              13,
+              1206
+            ],
+            [
+              1229.5,
+              10,
+              1194,
+              1230.5,
+              13,
+              1206
+            ]
+          ],
+          "world_sha256": "20ab5c4ad058c30bdcfca25b21abd2029c1b89c717e58d0b0167d9c5f0a68095"
+        }
+      },
+      "classification": "PASS 257 models refuses CapacityExceeded before partial inventory/admission; both walls absent; clean0.",
+      "sha256": {
+        "engine.log": "f861a3101f886cd05d3344e9d5cde4a23a11184d284ac56ee6c9ea7f592e341f",
+        "harness.jsonl": "d7d973c0bd79b84738c088882bbab22cd77be7ac003365530600c2d7c0654319",
+        "provenance.json": "311be9b8995fde4d6cbe191e37e541c873f618d005df571f7bcf3801c907cdb2",
+        "result.json": "c1f4fae661763ab175ed10126ea9d913d40cf965c207f174d341dc686a817f50",
+        "fixture/fixture.json": "f019440a5e783a89194cddaed3e728237724af4b28c50e3421062e292d6cd17e",
+        "fixture/simulation-residency.wrp": "20ab5c4ad058c30bdcfca25b21abd2029c1b89c717e58d0b0167d9c5f0a68095",
+        "fixture/streaming_fixture/wall.p3d": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+        "simulation-fixture.eden/mission.sqm": "c47524083395a8c78a581822629f83c760dd0c1a3ef45eaceb24da88580e9d4c"
+      }
     }
   ],
   "microbenchmarks": [
@@ -2473,6 +3198,22 @@
         "test-simulation-bc3only-default-20260926.log": "3de756136219f07524e4c6a7dc6f44262d8ff067e7169d0513bcf2f69a51be61",
         "test-simulation-bc3only-broad-20260926.log": "31546ff4dba57e14be6bee6d6479eb77aa826fb4fff7dd0c1e29bff70ebd0260",
         "test-simulation-bc3only-narrow-20260926.log": "915c610b1549a4559f3195c10f002f558ad149dabb870006174b26b3e2340be7"
+      }
+    },
+    {
+      "artifactRoot": "build",
+      "runtimeSourceCommit": "89db0dcc",
+      "implementationCommits": [
+        "704e2b65",
+        "89db0dcc"
+      ],
+      "result": "Retry build PASS; earlier four ambiguous unit Link assignments repaired. Default7430 assertions/163 cases155 passed8 explicit skips; broad368/13 cases12 passed1 skip; narrow425/13 cases11 passed2 skips. Active encoding callback cancellation proves reservation debt cleanup and stale output refusal during encoding; final reservation-check to Put publication race remains open.",
+      "sha256": {
+        "build-simulation-query-encode-cancel-20260926.log": "2cad8ce96860bcbd9807fabb261d2c0cade64eee7afa246b14eca6b65efd110a",
+        "build-simulation-query-encode-cancel-retry-20260926.log": "bb005272379e7e4113d73a66832f8a9077e8d90a78d09479dc75fb61592aa253",
+        "test-simulation-query-default-20260926.log": "d7ed2fe610d26d69852e5cd10d9e271cf6d00da3027acedb0ebf59ed1e08c450",
+        "test-simulation-query-broad-20260926.log": "281252ef895fe8ab23bfcaac1fba217259c8027c5a86e8cb586eb7f34c3e4c5f",
+        "test-simulation-query-narrow-20260926.log": "836d28677c836bee444c9118d26613ea7bdc556dd7fb28ed1ca440e0175d1399"
       }
     }
   ],
