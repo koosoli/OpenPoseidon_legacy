@@ -1542,6 +1542,64 @@
         "screenshotReview": "Root visually inspected promoted.png: road/buildings/vegetation present; no broader visual-quality acceptance",
         "limitations": "Single explicitly script-resolved logical obstacle; initial 1000-object diagnostic budget, then 20000 promotion. No automatic actor/query/AI demand, general collision completeness, destruction runtime coverage, full save/MP or FPS/loading/no-regression acceptance."
       }
+    },
+    {
+      "run": "dayz-cold-logical-20260926-141048",
+      "result": "FAILED HARNESS predicate: expected unclamped damage 1.1 from getDammage; actual getter clamps at 1. Not an engine destruction failure or runtime PASS",
+      "provenance": {
+        "installed": "codex/streaming-residency d70fd977 2026-09-26_14:10 deploy-ps1",
+        "scope": "Cold explicit script identity and fire geometry, then visual promotion. Not automatic simulation demand or performance acceptance.",
+        "head": "d70fd9777fdaac16f681b506132d5b691facd8d9",
+        "scriptSha256": "BD6580786B08F9363E650E3D694867DB292BC2C8C548E2F4838342BE6FD98641",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "DDF6523A01F0EB324B8AC25B1D4FAC40ACF0E5F936D6F39FE18152741A092F18",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "50BA98B6C8205C60606D66AC1E4655F6562279FD709258E199C749E07143BE63",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ]
+      },
+      "sha256": {
+        "engine.log": "ba6d2ce433653c83ffa1589e18d91d5c0ff818d12e0c3f15a324325a1af89b27",
+        "harness.jsonl": "d3874bac162ba1c9d09b18074c484cf3a6f1bb7566ed2aa4f872b2ac28dc33ee",
+        "provenance.json": "a8e08a19b9af1fee5cc54ef839ab0b055921cc4b8851348545c1a408a0e80169"
+      },
+      "scope": "Observed required wall 83912800 destroyed cold with phase 0.9960784912109375, visual=false/deferred=true/normalVB=0; after return same identity/phase with visual=true/deferred=false/normalVB=4. Runner compared clamped getDammage against 1.09..1.11 and got false. No result.json or promoted screenshot exists."
+    },
+    {
+      "run": "dayz-cold-logical-20260926-141854",
+      "result": "PASS one explicit cold logical destroyed wall state persists without cold visual buffers and promotes buffers on return; result passed=true/destroyCold=true, own clean exit 0",
+      "provenance": {
+        "scriptSha256": "8F1A71750AB39C82E4ABE4F9C42567C7E9BAD6ABC5F2196D51AF6D35AE96DE7F",
+        "scope": "Cold explicit script identity and fire geometry, then visual promotion. Not automatic simulation demand or performance acceptance.",
+        "installed": "codex/streaming-residency d70fd977 2026-09-26_14:10 deploy-ps1",
+        "head": "d8b7126fba7332332757ddf2b84c3dc5366e470a",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "DDF6523A01F0EB324B8AC25B1D4FAC40ACF0E5F936D6F39FE18152741A092F18",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "50BA98B6C8205C60606D66AC1E4655F6562279FD709258E199C749E07143BE63",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ]
+      },
+      "sha256": {
+        "engine.log": "96c5b1d002ec72c3747050ae8d7ccb2982ebf085047c0f4ebeb3944d99281301",
+        "harness.jsonl": "6a465aaaa9d5011934dc9ecd824157fb03c3f13be4f9d979a1507b37b4f35dea",
+        "provenance.json": "4b4b12249516fafbaa8dd3f1023cbd86585bf8da830e9808ba840dc2b8ebf750",
+        "result.json": "eedfef5a877db4a58d69fe025a91170833ad127518e03807ae2d0c67158d265c",
+        "promoted.png": "34794da05695d9c724b9ac1d38f74aeacf5cbef358b2ec7f4ec5a20c28b62b16"
+      },
+      "scope": "Installed d70fd977 with runner HEAD d8b7126f. Initially absent wall 83912800 gets intact CPU physical/fire geometry and real fire contact with stable GPU geometry 35207752 unchanged. Destroyed cold phase 0.9960784912109375, visual=false/deferred=true/normalVB=0; visual return same ID/phase, visual=true/deferred=false/normalVB=4, clamped getter 1. Diagnostic 1000 cold budget then 20000/19923 promoted. Root screenshot review: street assets normal. Post-destruction wall fire contact is NOT preserved/required; promoted ray contains other scene contacts. No automatic demand, all-types certificate, full save/MP or FPS/loading acceptance."
     }
   ],
   "microbenchmarks": [
@@ -1646,6 +1704,16 @@
       "sha256": {
         "build-logical-destruction-coverage-20260926.log": "8d0ff9f5d809f67b0668fa768ff7757ced4e25d16a6f6ce28eb7bcc5c8d58bc1",
         "test-logical-destruction-coverage-20260926.log": "63d0d1cc19f8990e29adbe0f2627debaebd17341430727f95de733c534aeb6a3"
+      }
+    },
+    {
+      "artifactRoot": "build",
+      "runtimeSourceCommit": "4fcfeea8",
+      "installedHead": "d70fd977",
+      "result": "PASS supported build and 6882 assertions in 131 cases. Model-space radius tokens, exact placement repair and logical destruction buffer tests; no complete world-object certificate or automatic admission acceptance.",
+      "sha256": {
+        "build-radius-placement-20260926.log": "cf164739652d26461200601c319aab95e50effbdec48f521d98e8a8eb6320274",
+        "test-radius-placement-20260926.log": "44a37e15c98fb55a4b9a7ced4d937035667f61d8d9e2dd7b40587453d4185caa"
       }
     }
   ]

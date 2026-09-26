@@ -6621,17 +6621,17 @@ tickets:
     owner: null
     branch: codex/streaming-residency
     baseline_commit: 03e71371
-    verification_commit: 9c35f49d
+    verification_commit: d70fd977
     milestone: 0
     milestone_role: NON_BLOCKING
     depends_on: []
     blocked_by: []
     blocks: []
-    implementation_commits: [7d5f3e71, f733e708, 8e09f391, 7d8fb75b, a531d7b9, 21b89e79, 082eaa06, c2c8eb0b, f602332c, dca4f954, 0d6a498f, 82cbb5a2, 486d5e9b, e0b88e7a, 08bbada3, cd3d5c68, d8ac1c8d, a92bab54, f4ffc510, d7c35c0f, f0572b3c, 52b00a22, b12e46ca, 11c5ca04, 91a2073e, b4bdb20b, 68143711, 037f188d, 1f04f324, cba650fd, bd9b472d, 9fa064f7]
+    implementation_commits: [7d5f3e71, f733e708, 8e09f391, 7d8fb75b, a531d7b9, 21b89e79, 082eaa06, c2c8eb0b, f602332c, dca4f954, 0d6a498f, 82cbb5a2, 486d5e9b, e0b88e7a, 08bbada3, cd3d5c68, d8ac1c8d, a92bab54, f4ffc510, d7c35c0f, f0572b3c, 52b00a22, b12e46ca, 11c5ca04, 91a2073e, b4bdb20b, 68143711, 037f188d, 1f04f324, cba650fd, bd9b472d, 9fa064f7, 4fcfeea8, d8b7126f]
     production_call_sites: []
-    test_ids: [stationary-residency, preparer-byte-budget, preparer-generation-cancellation, required-fire-obstruction, fixed-detail-return, strict-headless-identity, same-world-save-away-roundtrip, fresh-process-save-away-roundtrip, cold-logical-identity, logical-proxy-promotion, texture-encode-window]
+    test_ids: [stationary-residency, preparer-byte-budget, preparer-generation-cancellation, required-fire-obstruction, fixed-detail-return, strict-headless-identity, same-world-save-away-roundtrip, fresh-process-save-away-roundtrip, cold-logical-identity, logical-proxy-promotion, texture-encode-window, preparer-radius-certificate, exact-placement-frame, cold-destroyed-visual-promotion]
     benchmark_artifacts: [docs/roadmap/evidence/streaming-20260920.json]
-    evidence_hash: 1cd1f0381079e735dc4b10028fec56428ab8d9742c577fc0130a3ec960ef89a2
+    evidence_hash: 7da8b2420c97a432a5bb1da23afbe62aa3703d1f78911232f1961af1d49655b2
     decision_record: docs/roadmap/decisions/STREAMING-AUDIT-20260920.md
     known_failures:
       - The staged streaming plan remains in progress; see the decision record for uncompleted gates.
@@ -6643,10 +6643,12 @@ tickets:
       - Fixed-detail returned vegetation is equivalent at one DayZ pose; normal governor variation, secondary views and broader quality/performance acceptance remain open.
       - Sept26 build and 6277 assertions in 92 cases passed; DayZ11c5ca04 route/lifecycle passed but measured LOD/triangle demand differs and timings are mixed. No equal-quality FPS/no-regression acceptance; native attachment startup/lifecycle and fresh-process client required-obstacle save passed, but native first pose was materially slower and fixed-detail performance attribution remains open. Pure corridor planning does not admit query objects.
       - Isolated compact-alpha CPU benchmark passed 18 parity conditions with improved medians and one-quarter scratch logical size; no game FPS acceptance. 10f6e695 build and 6443 assertions in 103 cases passed, and native eager-default/material-input-dedup integration route passed with mixed/slower loading. CompleteSource bounds are metadata, not collision Ready; bounded cold CPU logical actor/query admission remains pending.
-      - 037f188d combined build and 6565 assertions in 110 cases passed. Cold logical identity/fire observations succeeded in the first attempt, but an unsettled GPU baseline failed equality; the second/third attempts ended before probing at a sea-origin scenario that could drown the grounded player. None is a graphic runtime PASS; inland runner correction is committed. Coverage-index metadata is now compiled/tested but unused by automatic runtime demand/AI; explicit cold logical identity/fire/promotion now passes in the corrected inland scenario; runtime destruction-state coverage remains pending.
+      - 037f188d combined build and 6565 assertions in 110 cases passed. Cold logical identity/fire observations succeeded in the first attempt, but an unsettled GPU baseline failed equality; the second/third attempts ended before probing at a sea-origin scenario that could drown the grounded player. None is a graphic runtime PASS; inland runner correction is committed. Coverage-index metadata is now compiled/tested but unused by automatic runtime demand/AI; explicit cold logical identity/fire/promotion now passes in the corrected inland scenario; one cold destroyed wall now passes state/buffer promotion; broader destruction coverage remains open.
       - Combined bd9b472d build and 6685 assertions in 120 cases passed; clean installed 9c35f49d passed headless identity/damage and one explicit cold identity/fire/promotion route. Coverage foundation and logical destruction-buffer tests do not close automatic actor/query demand or performance gates.
       - Matching 9c35f49d DayZ headless run passed six explicitly logged identity/damage assertions and triEndTest clean exit 0. This does not cover fire geometry, full save, multiplayer or automatic simulation demand.
       - Corrected inland 9c35f49d cold fixture run passed: initially absent identity 83912800 gains CPU-only physical/fire geometry with unchanged stable global geometry 35207752, then promotes visual rendering at 19923 placements with identity, damage .25 and fire contact preserved. Initial 1000-object budget is diagnostic; no automatic demand or performance acceptance.
+      - Latest 4fcfeea8 supported build and 6882 assertions in 131 cases passed. Worker radius certificates remain pre-constructor model-space evidence; NewObject type-shape replacement and VehicleAddRef autocenter/radius changes require eligibility/reconciliation before world coverage Ready. Automatic demand remains unintegrated.
+      - Corrected d70fd977 cold destroyed wall runtime passed with runner d8b7126f: same identity/phase, normalVB0 while logical-only then normalVB4 on visual return. Prior 141048 failed only the runner's unclamped damage predicate, not engine destruction. One explicit diagnostic fixture is not all-types/full-save/MP or performance acceptance.
     fallback: WGR_NATIVE_DEFER_ATTACHMENT_SHAPES remains off (unset/0 restores eager attachment shapes); WGR_OBJECT_STREAM_PBO and WGR_OBJECT_STREAM_PBO_TEXTURES remain off; WGR_SKY_VOLUME_INCREMENTAL=0 restores full atlas uploads; WGR_ADAPTIVE_TEXTURE_DETAIL and WGR_OBJECT_STREAM_GPU_BUDGET remain off; WGR_OBJECT_STREAM_READY_MB=0 disables the new ready-payload gate; old ocean remains default.
     reviewer: null
     reviewer_method: Installed native runtime reproduction, comparable-coverage checks and real worker cancellation tests.

@@ -99,6 +99,8 @@ accepted as proof of no moving regression; repeat with controlled per-pose cover
   requested placements still disappear; actor-neighbourhood collision/navigation,
   view queries and multiplayer independence are NOT established. Same-world and
   fresh-process client save/reload of one required damaged obstruction are verified.
+  Cold CPU-only explicit wall resolution and later visual promotion now pass;
+  one cold-destroyed wall also preserves identity/phase and defers visual buffers.
 - C: ready IR and active scratch reservations, real backend counters and GPU
   retirement are implemented. Model/Shape allocator costs remain estimates;
   automatic allocation-aware growth remains experimental after mixed timing.
@@ -1051,3 +1053,56 @@ secondary views, or equal-quality performance. The small cold budget is a
 correctness diagnostic, not a normal-settings performance improvement. The
 metadata coverage index is compiled/tested but remains runtime-unused, and the
 streaming plan stays OPEN. The three earlier graphic attempts remain incomplete.
+### Model-space certificates, exact placement repair and destroyed cold wall PASS
+
+Production `4fcfeea8` publishes persistent model-radius metadata, shares the
+exact `ObjectCreate` orientation repair and exposes CPU encode-before-window
+instrumentation. The supported build passed; targeted tests report **6882
+assertions in 131 cases**. Both actual build/test logs are hashed. No FPS or
+loading gain is inferred from these source/ownership checks or counters.
+
+Radius tokens retain generation and exact owned model identity, survive payload
+Take/DropStale and reject stale inventories/conversions. MLOD/XOB source bounds
+remain Unknown until adaptation; tested canonical ODOL/adapted scalars can become
+Certified. `radiusCertificateBytes` charges RadiusSlot vector allocation capacity
+(fresh on Reset), not all preparer/string/allocator storage. The shared placement
+helper preserves existing float RMS scale, forest bypass, Network scale 1 and
+ClipLandKeep repair; legacy elevation correction remains at its original site.
+
+**Constructor reconciliation remains a correctness gate.** Worker QueryRadius
+certifies only pre-constructor model-space evidence. Config-backed NewObject can
+replace the model with a Forest/type shape, and VehicleAddRef can alter shared
+shape autocenter and recompute its radius. A world coverage producer still needs
+actual post-constructor shape radius, actual final repaired position/scale and
+validated eligibility or reconciliation. These tokens/helper cannot certify all
+object types. Unknown coverage must never become Ready from guessed class/type,
+raw transforms, source bounds or a 25 m padding. Automatic actor/query/AI admission
+remains unintegrated.
+
+`dayz-cold-logical-20260926-141048` is a FAILED HARNESS predicate, not an engine
+destruction failure: setDammage 1.1 produces a destroyed object, but getDammage
+clamps its returned total to 1 (`Object.hpp:668`). The runner wrongly expected
+1.09–1.11. Logs already show cold wall 83912800 destroyed at phase 0.9960784912
+with visual=false/deferred=true/normalVB=0, then visual=true/deferred=false/normalVB=4
+and unchanged identity/phase on return. The false damage predicate prevents a
+result artifact; no absent result/image is invented or retroactively marked PASS.
+Runner-only `d8b7126f` separates the clamped getter check from destruction state.
+
+The corrected `dayz-cold-logical-20260926-141854` PASSED with `destroyCold=true`
+and `passed=true`, runner HEAD d8b7126f and clean installed d70fd977 (14:10 stamp).
+Before destruction, the initially absent real wall gains CPU physical/fire
+geometry and a real fire contact, while stable global geometry is unchanged at
+35207752 bytes across cold resolution. After destruction its phase is
+0.9960784912, visual=false/deferred=true and normalVB=0. Returning with budget 20000
+converges to 19923 placements and the same wall/reference/phase, visual=true,
+deferred=false and normalVB=4; the corrected clamped damage getter check is true.
+The root inspected promoted.png and saw normal street assets. The runner requests
+exit itself and shutdown completes cleanly at 14:19:57. Engine/harness/provenance,
+actual result and promoted image are hashed.
+
+This is one explicit cold destruction-state/buffer-promotion case, with an initial
+1000-object diagnostic budget. The destroyed wall is not required to remain a
+post-destruction fire blocker; the returned ray contains other scene contacts,
+and no such wall-hit persistence is claimed. Broader destruction, full save/MP,
+constructor eligibility, automatic simulation demand, secondary views and
+comparable-quality performance remain OPEN. The streaming plan is not complete.
