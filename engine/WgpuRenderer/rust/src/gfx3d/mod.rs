@@ -3,6 +3,7 @@ use slotmap::{Key, KeyData, SlotMap};
 use wgpu::util::DeviceExt;
 
 pub(crate) mod pool;
+mod allocation_report;
 use pool::{GeometryPool, MeshAlloc};
 
 // GPU cull + LOD + indirect-arg compaction (docs/gpu-culling-and-depth-plan.md Stage 3).
@@ -5355,6 +5356,26 @@ impl Gfx3d {
 
     pub fn geometry_residency(&self) -> pool::GeometryResidency {
         self.pool.residency()
+    }
+
+    pub(crate) fn geometry_allocation_report(&self, ids: &[u32], max_rows: usize, max_visits: usize)
+        -> (Vec<crate::ffi::WgrGeometryAllocationRow>, crate::ffi::WgrGeometryAllocationSummary) {
+        let models: Vec<_> = ids.iter().map(|&id| (id, self.cull.allocation_lods(id))).collect();
+        let (rows, mut summary) = allocation_report::collect(&models, &self.gpu_section_src,
+            max_rows, max_visits, |handle| {
+                let key: MeshKey = KeyData::from_ffi(handle).into();
+                let mesh = self.meshes.get(key)?;
+                // Exact live suballocated range payload, using the actual Rust layouts.
+                // Standalone skin/bake buffers and driver alignment are outside this scope.
+                Some((u64::from(mesh.vert_count) * std::mem::size_of::<WgrMeshVertex>() as u64,
+                    u64::from(mesh.index_count) * std::mem::size_of::<u32>() as u64))
+            });
+        let pool = self.pool.residency();
+        summary.pool_live_bytes = pool.live_bytes;
+        summary.pool_capacity_bytes = pool.capacity_bytes;
+        summary.pool_retired_bytes = pool.retired_bytes;
+        summary.rows_written = rows.len() as u32;
+        (rows, summary)
     }
 
     pub fn frame_submitted(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {

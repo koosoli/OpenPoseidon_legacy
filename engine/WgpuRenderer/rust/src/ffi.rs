@@ -1740,6 +1740,8 @@ const fn wgr_layout_hash() -> u32 {
     h = hash_size(h, sz::<WgrObjectStats>());
     h = hash_size(h, sz::<WgrSmokeVolumeParams>()); // SMK-038
     h = hash_size(h, sz::<WgrMemoryStats>());
+    h = hash_size(h, sz::<WgrGeometryAllocationRow>());
+    h = hash_size(h, sz::<WgrGeometryAllocationSummary>());
     h
 }
 
@@ -2028,6 +2030,16 @@ pub unsafe extern "C" fn wgr_screenshot_take(
 
 #[cfg(test)]
 mod abi_tests {
+    #[test]
+    fn geometry_report_layout_and_invalid_request_are_bounded() {
+        assert_eq!(std::mem::size_of::<super::WgrGeometryAllocationRow>(), 40);
+        assert_eq!(std::mem::offset_of!(super::WgrGeometryAllocationRow, model_id), 16);
+        assert_eq!(std::mem::size_of::<super::WgrGeometryAllocationSummary>(), 80);
+        assert_eq!(std::mem::offset_of!(super::WgrGeometryAllocationSummary, unique_meshes), 40);
+        assert_eq!(unsafe { super::wgr_get_geometry_allocation_report(
+            std::ptr::null_mut(), super::WgrSlice { data: std::ptr::null(), len: 0 },
+            1, 1, std::ptr::null_mut(), 1, std::ptr::null_mut()) }, 0);
+    }
     // A well-formed declaration from a same-commit engine build.
     fn good_check() -> super::WgrAbiCheck {
         super::WgrAbiCheck {
@@ -3509,6 +3521,64 @@ pub struct WgrMemoryStats {
     pub over_budget: u32,
     pub object_texture_retired_bytes: u64,
     pub backend_allocation_bytes: u64, // buffers + textures, including non-streamed render resources
+}
+
+/// Whole live mesh ranges referenced by one retained drawable LOD. Rows can overlap.
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct WgrGeometryAllocationRow {
+    pub vertex_bytes: u64,
+    pub index_bytes: u64,
+    pub model_id: u32,
+    pub lod_index: u32,
+    pub resolution: f32,
+    pub section_count: u32,
+    pub live_meshes: u32,
+    pub missing_meshes: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct WgrGeometryAllocationSummary {
+    pub unique_vertex_bytes: u64,
+    pub unique_index_bytes: u64,
+    pub pool_live_bytes: u64,
+    pub pool_capacity_bytes: u64,
+    pub pool_retired_bytes: u64,
+    pub unique_meshes: u32,
+    pub models_visited: u32,
+    pub lods_total: u32, // only models actually visited, not whole renderer inventory
+    pub section_visits: u32,
+    pub missing_models: u32,
+    pub missing_meshes: u32,
+    pub invalid_ranges: u32,
+    pub truncated: u32,
+    pub rows_written: u32,
+}
+
+/// Read-only renderer-owner snapshot. No waits/readback; bounded metadata visits only.
+/// Returns zero for invalid input. Pool capacity/retired bytes are global, not per asset.
+/// # Safety
+/// Renderer must be exclusively renderer-owner accessed. Models, rows and summary must
+/// be valid readable/writable allocations of their declared lengths, with no aliasing.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_get_geometry_allocation_report(
+    renderer: *mut WgrRenderer, models: WgrSlice<u32>, max_rows: u32, max_visits: u32,
+    rows: *mut WgrGeometryAllocationRow, row_capacity: u32,
+    summary: *mut WgrGeometryAllocationSummary,
+) -> u32 {
+    if renderer.is_null() || summary.is_null() || rows.is_null() || models.len > 256 ||
+        (models.len != 0 && models.data.is_null()) || max_rows == 0 || max_rows > 2048 ||
+        max_visits == 0 || max_visits > 65536 || row_capacity < max_rows { return 0 }
+    catch_unwind(AssertUnwindSafe(|| {
+        let ids = if models.len == 0 { &[][..] } else {
+            unsafe { std::slice::from_raw_parts(models.data, models.len as usize) }
+        };
+        let (result, totals) = unsafe { &*renderer }.gfx3d.geometry_allocation_report(
+            ids, max_rows as usize, max_visits as usize);
+        unsafe { std::ptr::copy_nonoverlapping(result.as_ptr(), rows, result.len()); *summary = totals; }
+        1
+    })).unwrap_or(0)
 }
 
 /// Fill `out` with the latest grass instance counts. Returns 1 on success, 0 when

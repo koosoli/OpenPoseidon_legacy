@@ -384,6 +384,10 @@ class EngineWgpu : public EngineDummy
     // GRS-A — grass instance counts, read back from wgr_get_grass_stats.
     bool GetGrassStats(GrassStatsOut& out) const override;
     bool GetGpuMemoryStats(GpuMemoryStatsOut& out) const override;
+    GeometryReportStatus RequestGeometryAllocationReport(uint32_t maxModels, uint32_t maxRows,
+        uint32_t maxSectionVisits, uint64_t& requestId) override;
+    GeometryReportStatus PollGeometryAllocationReport(uint64_t requestId,
+        GeometryAllocationReport& out) const override;
 
     // GPU-driven cull DEBUG (ImGui Culling tab): only meaningful when GPU-driven is on.
     bool SupportsCullDebug() const override { return _renderer != nullptr && _gpuDriven; }
@@ -1259,7 +1263,8 @@ class EngineWgpu : public EngineDummy
             ModelRegister,
             CpuMeshCreate, // REN-THR-011: identity is `cpu`, not `mesh` -- see CpuMeshSlot
             MeshSetSkin,   // REN-THR-011: bind pose in `verts`, plus `bones` / `weights`
-            ModelRetire
+            ModelRetire,
+            GeometryReport
         };
         Kind kind = MeshCreate;
         uint64_t mesh = 0;  // MeshCreate: the producer handle being defined; MeshDestroy: the one dying
@@ -1276,6 +1281,17 @@ class EngineWgpu : public EngineDummy
         std::vector<WgrModelSection> sections;     // ModelRegister; .mesh holds PRODUCER handles
         std::vector<WgrModelMaterial> materials;   // ModelRegister (texture handles baked, see cpp)
         std::string name;
+        // Filled only by an explicit diagnostic request; names captured on producer,
+        // never recovered by dereferencing a Shape after a later frame/lifetime change.
+        struct GeometryReportRequest
+        {
+            uint64_t requestId = 0;
+            uint32_t rows = 0, visits = 0, maxModels = 0, registered = 0;
+            uint32_t unresolvedNames = 0;
+            std::vector<std::pair<uint32_t, std::string>> models;
+        };
+        // Ordinary resource operations carry only a null pointer, not diagnostic buffers.
+        std::unique_ptr<GeometryReportRequest> geometryReport;
     };
     std::vector<ResourceOp> _resourceOps;
     uint64_t _nextMeshHandle = 1;  // 0 stays "no mesh", matching the FFI's failure value
@@ -1392,6 +1408,12 @@ class EngineWgpu : public EngineDummy
     bool _publishedGrassStatsValid = false;
     bool _publishedMemoryStatsValid = false;
     void PublishRendererStats();
+    mutable std::mutex _geometryReportMutex;
+    std::shared_ptr<const GeometryAllocationReport> _geometryReport;
+    std::shared_ptr<const GeometryAllocationReport> _geometryReportUnpublished; // renderer owner only
+    uint64_t _geometryReportRequest = 0;
+    uint64_t _geometryReportNextRequest = 0;
+    GeometryReportStatus _geometryReportStatus = GeometryReportStatus::Invalid;
 
     // REN-THR-014 -- the render thread. Everything that touches the renderer handle is one
     // function now (RunConsumerBlock); this runs it on a worker instead of inline.

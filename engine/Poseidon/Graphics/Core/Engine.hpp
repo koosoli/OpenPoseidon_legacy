@@ -1662,6 +1662,37 @@ class Engine : public IGraphicsEngine
       };
       virtual bool GetGpuMemoryStats(GpuMemoryStatsOut& /*out*/) const { return false; }
 
+      // Explicit on-demand Stage F diagnostics. No per-asset selected-LOD usage is inferred.
+      enum class GeometryReportStatus { Unsupported, Pending, Busy, Ready, Invalid, Failed };
+      struct GeometryAllocationRow
+      {
+          std::string asset;
+          uint32_t producerModel = 0, rendererModel = 0, lodIndex = 0;
+          float resolution = 0;
+          uint64_t vertexBytes = 0, indexBytes = 0;
+          uint32_t sections = 0, liveMeshes = 0, missingMeshes = 0;
+      };
+      struct GeometryAllocationReport
+      {
+          uint64_t requestId = 0;
+          std::vector<GeometryAllocationRow> rows;
+          uint64_t uniqueVertexBytes = 0, uniqueIndexBytes = 0;
+          uint64_t poolLiveBytes = 0, poolCapacityBytes = 0, poolRetiredBytes = 0;
+          uint32_t registeredModelsAtRequest = 0, modelsRequested = 0, modelsVisited = 0;
+          uint32_t lodsInVisitedModels = 0, sectionVisits = 0, uniqueMeshes = 0;
+          uint32_t missingModels = 0, missingMeshes = 0, invalidRanges = 0;
+          uint32_t unresolvedNames = 0;
+          uint32_t maxModels = 0, maxRows = 0, maxSectionVisits = 0;
+          bool valid = false, truncated = false;
+          // Row/union scope: retained meshes only, excluding direct-only meshes,
+          // standalone skin/bake buffers, driver alignment and textures/materials.
+          // Global pool counters also include direct meshes. Not reclaimable bytes.
+      };
+      virtual GeometryReportStatus RequestGeometryAllocationReport(uint32_t, uint32_t, uint32_t,
+          uint64_t& requestId) { requestId = 0; return GeometryReportStatus::Unsupported; }
+      virtual GeometryReportStatus PollGeometryAllocationReport(uint64_t,
+          GeometryAllocationReport&) const { return GeometryReportStatus::Unsupported; }
+
       virtual int GetGrassSurfaceCount() const { return 0; }
       virtual const char* GetGrassLoadedMapName() const { return ""; }
       virtual const char* GetGrassSurfaceName(int /*index*/) const { return ""; }

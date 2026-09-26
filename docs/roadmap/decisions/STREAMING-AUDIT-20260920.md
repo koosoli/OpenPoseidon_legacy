@@ -114,7 +114,7 @@ accepted as proof of no moving regression; repeat with controlled per-pose cover
   opt-in. Native timing is mixed; secondary-view/visual acceptance is incomplete.
 - F: authored LOD/conventional path has been audited/tested. Geometry capacity
   and growth overlap matter; a selected coarse draw does not release fine LODs.
-  No hierarchical page implementation is promoted on this evidence.
+  Allocation-only diagnostic is unbuilt source pending; no selected-LOD usage or paging acceptance. No hierarchical page implementation is promoted on this evidence.
 - G: conditional experiment remains unselected while the above conventional
   lifetime/preparation costs are addressed.
 - T0: modern opaque terrain/water delegation already returns before the legacy
@@ -1386,10 +1386,7 @@ legacy generic consumers remain a separate OPEN gate.
 
 Offline terrain census reads the actual revision29 world: 2971218 placements and
 2352 referenced models. The dense owner pose 5704.58,2523.37 within 250m has 3423
-placements/408 distinct paths. Both full-world caps (1M placements/256 models)
-are exceeded before inventory. Even this local area exceeds the model cap.
-Blindly raising Shape scheduling caps is not an accepted production solution;
-compact metadata and sparse active leases are under implementation/unverified.
+placements/408 distinct paths. At65d074e7 former1M/256 inventory caps were exceeded. The860fb1e2 checkpoint below replaces that inventory limitation; active work/class/watch gates still refuse production Ready.
 
 Top nearby models include betulahumilis 260, picea3f 155,wall_feng_3=134,
 wall_fen1_5=100 and misc_bench2=90. Two original private source members are
@@ -1404,7 +1401,53 @@ certified. Original source hashes, tool versions/commands, private extraction
 logs and parsed reports are recorded. Legacy terrain inspect fails revision29;
 modern census/objects pass. No all-model parsing or retail content is committed.
 
-A new timed DayZ run is active and has no result at this checkpoint; no performance
-or completed sparse-lease claims are made. Production class/consumer coverage,
+The Normal DayZ route is completed and classified below; no performance acceptance is made. Production class/consumer coverage,
 mutable state/MP authority, adaptive secondary views and comparable-quality
 performance remain OPEN. Both prototypes and pressure/paging experiments stay OFF.
+
+### Compact metadata and real DayZ convergence — 26 September 2026
+
+860fb1e2 separates compact model metadata from bounded active work. Preflight is
+4M authored placements,8192 referenced models,4MiB fixed model records. Existing
+landscape placement/cell storage, allocator overhead, sparse map nodes, watchers,
+Shape/source payload are excluded. Active models remain capped256; sparse lease
+debt erases zero-count rows. Initial build fails fixture syntax/getter errors;
+repaired retry and focused1218 assertions/30 cases pass. Simulation stays OFF.
+
+Metadata-capacity173048 passes clean0:8193 models refuse before partial inventory
+(rows/prepared/created0). Active-capacity173134 passes clean0: complete257 rows/
+models/32896 bytes accepted, then active work refuses before preparation/creation.
+Actor-lifecycle173733 passes clean0: two rows/one model/128 bytes, sparse leases2,
+independent Fire1001 before/away, wrong-ray Pending, cleanup/reacquire, .25
+MustBeSaved/globalUnknown at lease0, one final logical-only identity. Tiny static
+fixture only, not arbitrary production classes, multiplayer or generic consumers.
+
+DayZ compact-metadata173918 passes the metadata diagnostic/clean0:2971218
+placements/2352 models fully inventoried, metadataComplete true,301056 fixed
+record bytes. Overall simulation CapacityExceeded, activeModelRefusals1,
+active/prepared/leased/created0,unknownModels5,watches16384/live3481.
+Complete metadata is not world Ready; eligibility, active scheduling and complete
+mutable-instance observation remain OPEN.
+
+Correct causal classification of default-publication-correctness171220:
+Normal400m camera traversal/return, budget20000/resident19923, not stationary
+20k-to4k budget shrink/restore. Geometry380668076→727994288; textures2467033284/
+2236→2817465716/2596. Compact Normal route similarly grows geometry380668076→
+781468516 and textures2504779716/2253→2904934452/2654. Initial cold warming/new
+coverage and normal LOD variation are plausible; neither leak nor performance/
+no-regression acceptance is established.
+
+Resource-convergence174103 exits clean0 but is NOT PASS: passedfalse/
+PendingWarmup, no ten-sample quiet baseline within30s including three returns.
+Return2→3 geometry+8903008 bytes and textures+35474656 bytes/42 entries exceed
+declared gates; capacity stable/retired0. FixedLOD1 narrows demand variation but
+does not establish retained-memory convergence. Private/RSS samples are separate
+from GPU accounting. Original launched provenance is authoritative; subsequent
+runner edits do not describe this run. Leak/performance attribution remains OPEN.
+
+StageF bounded allocation-only report is unbuilt source pending validation.
+Deduplicated per-LOD referenced allocations must remain distinct from global
+pool live/capacity/retired bytes; no selected-LOD usage or default paging claim.
+Whole plan, production consumers/classes, state/MP, secondary/adaptive visuals,
+and comparable-quality performance remain OPEN. Reforger is workload evidence,
+not compatibility ground truth.

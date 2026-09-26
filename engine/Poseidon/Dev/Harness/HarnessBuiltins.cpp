@@ -277,6 +277,72 @@ void RegisterStreamingProbes(HarnessServer& hs)
 void RegisterScreenshot(HarnessServer& hs)
 {
     RegisterStreamingProbes(hs);
+    hs.RegisterCommand({"geometry_allocations", "Request/poll bounded retained mesh allocation diagnostics", {}},
+        [](const std::string&, cJSON* root) -> std::string {
+            if (!GEngine) return HarnessProtocol::ErrorResponse("no renderer");
+            uint64_t requestId = 0;
+            Engine::GeometryAllocationReport report;
+            Engine::GeometryReportStatus status;
+            const auto* id = cJSON_GetObjectItemCaseSensitive(root, "requestId");
+            if (id) {
+                if (!cJSON_IsNumber(id) || !std::isfinite(id->valuedouble) ||
+                    id->valuedouble < 1 || id->valuedouble > 9007199254740991.0 ||
+                    std::floor(id->valuedouble) != id->valuedouble)
+                    return HarnessProtocol::ErrorResponse("positive exact integer requestId required");
+                requestId = static_cast<uint64_t>(id->valuedouble);
+                status = GEngine->PollGeometryAllocationReport(requestId, report);
+            } else {
+                uint32_t limits[] = {256, 2048, 65536};
+                const char* keys[] = {"maxModels", "maxRows", "maxSectionVisits"};
+                for (int i = 0; i < 3; ++i) {
+                    const auto* value = cJSON_GetObjectItemCaseSensitive(root, keys[i]);
+                    if (!value) continue;
+                    if (!cJSON_IsNumber(value) || !std::isfinite(value->valuedouble) ||
+                        value->valuedouble < 1 || value->valuedouble > limits[i] ||
+                        std::floor(value->valuedouble) != value->valuedouble)
+                        return HarnessProtocol::ErrorResponse("integer report limits outside supported bounds");
+                    limits[i] = static_cast<uint32_t>(value->valuedouble);
+                }
+                status = GEngine->RequestGeometryAllocationReport(limits[0], limits[1], limits[2], requestId);
+            }
+            const char* name = "Failed";
+            switch (status) {
+                case Engine::GeometryReportStatus::Unsupported: name = "Unsupported"; break;
+                case Engine::GeometryReportStatus::Pending: name = "Pending"; break;
+                case Engine::GeometryReportStatus::Busy: name = "Busy"; break;
+                case Engine::GeometryReportStatus::Ready: name = "Ready"; break;
+                case Engine::GeometryReportStatus::Invalid: name = "Invalid"; break;
+                case Engine::GeometryReportStatus::Failed: break;
+            }
+            auto* result = cJSON_CreateObject();
+            cJSON_AddStringToObject(result, "status", name);
+            cJSON_AddNumberToObject(result, "requestId", static_cast<double>(requestId));
+            if (status == Engine::GeometryReportStatus::Ready) {
+                cJSON_AddBoolToObject(result, "valid", report.valid);
+                cJSON_AddBoolToObject(result, "truncated", report.truncated);
+                cJSON_AddStringToObject(result, "scope", "retained whole-mesh allocations; overlapping LOD rows; not selected usage or reclaimable memory");
+#define GEOMETRY_REPORT_FIELD(field) cJSON_AddNumberToObject(result, #field, static_cast<double>(report.field))
+                GEOMETRY_REPORT_FIELD(uniqueVertexBytes); GEOMETRY_REPORT_FIELD(uniqueIndexBytes);
+                GEOMETRY_REPORT_FIELD(poolLiveBytes); GEOMETRY_REPORT_FIELD(poolCapacityBytes); GEOMETRY_REPORT_FIELD(poolRetiredBytes);
+                GEOMETRY_REPORT_FIELD(registeredModelsAtRequest); GEOMETRY_REPORT_FIELD(modelsRequested); GEOMETRY_REPORT_FIELD(modelsVisited);
+                GEOMETRY_REPORT_FIELD(lodsInVisitedModels); GEOMETRY_REPORT_FIELD(sectionVisits); GEOMETRY_REPORT_FIELD(uniqueMeshes);
+                GEOMETRY_REPORT_FIELD(missingModels); GEOMETRY_REPORT_FIELD(missingMeshes); GEOMETRY_REPORT_FIELD(invalidRanges); GEOMETRY_REPORT_FIELD(unresolvedNames);
+                GEOMETRY_REPORT_FIELD(maxModels); GEOMETRY_REPORT_FIELD(maxRows); GEOMETRY_REPORT_FIELD(maxSectionVisits);
+#undef GEOMETRY_REPORT_FIELD
+                auto* rows = cJSON_AddArrayToObject(result, "rows");
+                for (const auto& row : report.rows) {
+                    auto* item = cJSON_CreateObject();
+                    cJSON_AddStringToObject(item, "asset", row.asset.c_str());
+#define GEOMETRY_ROW_FIELD(field) cJSON_AddNumberToObject(item, #field, static_cast<double>(row.field))
+                    GEOMETRY_ROW_FIELD(producerModel); GEOMETRY_ROW_FIELD(rendererModel); GEOMETRY_ROW_FIELD(lodIndex);
+                    GEOMETRY_ROW_FIELD(resolution); GEOMETRY_ROW_FIELD(vertexBytes); GEOMETRY_ROW_FIELD(indexBytes);
+                    GEOMETRY_ROW_FIELD(sections); GEOMETRY_ROW_FIELD(liveMeshes); GEOMETRY_ROW_FIELD(missingMeshes);
+#undef GEOMETRY_ROW_FIELD
+                    cJSON_AddItemToArray(rows, item);
+                }
+            }
+            return HarnessProtocol::JsonResponse(result);
+        });
     hs.RegisterCommand({"stream_existing_damage", "Test-only mutation of an already installed object; never resolves or pins", {}},
         [](const std::string&, cJSON* root) -> std::string {
             const auto* enabled = std::getenv("WGR_SIMULATION_RESIDENCY_TEST");

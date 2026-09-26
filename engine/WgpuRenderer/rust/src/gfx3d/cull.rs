@@ -592,6 +592,11 @@ enum StatsSlot {
 const STATS_RING_SLOTS: usize = 3;
 
 impl CullState {
+    pub(super) fn allocation_lods(&self, model: u32) -> Option<&[LodGpu]> {
+        let model = self.models.get(model as usize)?;
+        let start = model.lod_base as usize;
+        self.lods.get(start..start.checked_add(model.lod_count as usize)?)
+    }
     // Byte size of one CullParamsGpu (the uniform is fixed-size).
     const PARAMS_SIZE: u64 = std::mem::size_of::<CullParamsGpu>() as u64;
 

@@ -1799,6 +1799,24 @@ struct WgrMemoryStats
     uint64_t backend_allocation_bytes; // all backend buffer/texture allocations; zero if unavailable
 };
 
+// Readonly live pool-range attribution. Referenced row bytes overlap; union is unique.
+struct WgrGeometryAllocationRow
+{
+    uint64_t vertex_bytes, index_bytes;
+    uint32_t model_id, lod_index;
+    float resolution;
+    uint32_t section_count, live_meshes, missing_meshes;
+};
+static_assert(sizeof(WgrGeometryAllocationRow) == 40);
+struct WgrGeometryAllocationSummary
+{
+    uint64_t unique_vertex_bytes, unique_index_bytes;
+    uint64_t pool_live_bytes, pool_capacity_bytes, pool_retired_bytes;
+    uint32_t unique_meshes, models_visited, lods_total, section_visits;
+    uint32_t missing_models, missing_meshes, invalid_ranges, truncated, rows_written;
+};
+static_assert(sizeof(WgrGeometryAllocationSummary) == 80);
+
 enum WgrWaterKind : uint32_t { WGR_WATER_KIND_OCEAN = 0, WGR_WATER_KIND_RIVER = 1 };
 /* WTR-003 — water debug view selector, written to WgrWaterParams.debug_params.x. The water
  * fragment shader maps these to on-surface diagnostics; 0 is normal shading. Views whose
@@ -2509,6 +2527,9 @@ extern "C"
 
     /* Current dynamic-resource residency accounting. Returns 1 on success. */
     WGR_API uint32_t wgr_get_memory_stats(WgrRenderer* renderer, WgrMemoryStats* out);
+    WGR_API uint32_t wgr_get_geometry_allocation_report(WgrRenderer* renderer,
+        WgrSlice<uint32_t> models, uint32_t max_rows, uint32_t max_visits,
+        WgrGeometryAllocationRow* rows, uint32_t row_capacity, WgrGeometryAllocationSummary* summary);
 
     /* AST-012A — the latest GPU mip feedback: for each bindless texture slot, the finest mip
      * level any fragment actually asked for. `out_mip[slot]` gets that level, or 0xFF when the
@@ -2850,6 +2871,8 @@ constexpr uint32_t WgrLayoutHash()
     h = WgrHashSize(h, sizeof(WgrObjectStats));
     h = WgrHashSize(h, sizeof(WgrSmokeVolumeParams)); // SMK-038
     h = WgrHashSize(h, sizeof(WgrMemoryStats));
+    h = WgrHashSize(h, sizeof(WgrGeometryAllocationRow));
+    h = WgrHashSize(h, sizeof(WgrGeometryAllocationSummary));
     return h;
 }
 

@@ -4,6 +4,7 @@
 #include <Poseidon/Dev/Diag/FramePaceTrace.hpp> // PACE-001: per-frame pacing trace
 #include "EngineWgpu.hpp"
 #include <atomic>
+#include <Poseidon/Foundation/Threads/ThreadAffinity.hpp>
 #include <Poseidon/Core/BuildInfo.hpp>
 #include "TerrainWgpu.hpp"
 #include "WaterWgpu.hpp"
@@ -2821,12 +2822,19 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
         return;
     if (!_renderer)
     {
+        for (const auto& op : ops)
+            if (op.kind == ResourceOp::GeometryReport)
+            {
+                auto failed = std::make_shared<GeometryAllocationReport>();
+                failed->requestId = op.geometryReport->requestId;
+                _geometryReportUnpublished = std::move(failed);
+            }
         ops.clear();
         return;
     }
     const auto drainStart = std::chrono::steady_clock::now();
     const size_t operationCount = ops.size();
-    std::array<uint32_t, 6> kindCounts{};
+    std::array<uint32_t, 7> kindCounts{};
     for (ResourceOp& op : ops)
     {
         const size_t kind = static_cast<size_t>(op.kind);
@@ -2949,6 +2957,72 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
                 _renderer, op.sphereRadius, WgrSlice<WgrModelLod>{op.lods.data(), U32(op.lods.size())},
                 WgrSlice<WgrModelSection>{op.sections.data(), U32(op.sections.size())},
                 WgrSlice<WgrModelMaterial>{op.materials.data(), U32(op.materials.size())}, op.name.c_str());
+            break;
+        }
+        case ResourceOp::GeometryReport:
+        {
+            // Only the renderer drain accesses actual IDs/allocations. Never wait for
+            // this request on the producer; a later poll reads the immutable response.
+            GeometryAllocationReport report;
+            report.requestId = op.geometryReport->requestId;
+            report.maxModels = op.geometryReport->maxModels;
+            report.maxRows = op.geometryReport->rows;
+            report.maxSectionVisits = op.geometryReport->visits;
+            report.registeredModelsAtRequest = op.geometryReport->registered;
+            report.modelsRequested = static_cast<uint32_t>(op.geometryReport->models.size());
+            report.unresolvedNames = op.geometryReport->unresolvedNames;
+            std::vector<uint32_t> ids;
+            ids.reserve(op.geometryReport->models.size());
+            for (const auto& entry : op.geometryReport->models)
+            {
+                const auto found = _modelIdOf.find(entry.first);
+                ids.push_back(found == _modelIdOf.end() ? WGR_INVALID_MODEL : found->second);
+            }
+            std::vector<WgrGeometryAllocationRow> rows(op.geometryReport->rows);
+            WgrGeometryAllocationSummary summary{};
+            const bool valid = wgr_get_geometry_allocation_report(_renderer,
+                WgrSlice<uint32_t>{ids.data(), static_cast<uint32_t>(ids.size())},
+                op.geometryReport->rows, op.geometryReport->visits, rows.data(), static_cast<uint32_t>(rows.size()), &summary) != 0;
+            if (valid && summary.rows_written <= rows.size())
+            {
+                report.valid = true;
+                report.uniqueVertexBytes = summary.unique_vertex_bytes;
+                report.uniqueIndexBytes = summary.unique_index_bytes;
+                report.poolLiveBytes = summary.pool_live_bytes;
+                report.poolCapacityBytes = summary.pool_capacity_bytes;
+                report.poolRetiredBytes = summary.pool_retired_bytes;
+                report.modelsVisited = summary.models_visited;
+                report.lodsInVisitedModels = summary.lods_total;
+                report.sectionVisits = summary.section_visits;
+                report.uniqueMeshes = summary.unique_meshes;
+                report.missingModels = summary.missing_models;
+                report.missingMeshes = summary.missing_meshes;
+                report.invalidRanges = summary.invalid_ranges;
+                report.truncated = summary.truncated != 0 || op.geometryReport->registered > ids.size();
+                report.rows.reserve(summary.rows_written);
+                for (uint32_t i = 0; i < summary.rows_written; ++i)
+                {
+                    const auto& raw = rows[i];
+                    const auto found = std::find(ids.begin(), ids.end(), raw.model_id);
+                    if (found == ids.end()) { ++report.missingModels; continue; }
+                    const auto& identity = op.geometryReport->models[static_cast<size_t>(found - ids.begin())];
+                    GeometryAllocationRow row;
+                    row.asset = identity.second;
+                    row.producerModel = identity.first;
+                    row.rendererModel = raw.model_id;
+                    row.lodIndex = raw.lod_index;
+                    row.resolution = raw.resolution;
+                    row.vertexBytes = raw.vertex_bytes;
+                    row.indexBytes = raw.index_bytes;
+                    row.sections = raw.section_count;
+                    row.liveMeshes = raw.live_meshes;
+                    row.missingMeshes = raw.missing_meshes;
+                    report.rows.push_back(std::move(row));
+                }
+            }
+            // Publication happens at the existing end-frame snapshot boundary via
+            // try-lock; even a diagnostic poll cannot make the renderer wait.
+            _geometryReportUnpublished = std::make_shared<const GeometryAllocationReport>(std::move(report));
             break;
         }
         }
@@ -11548,10 +11622,79 @@ bool EngineWgpu::GetGpuMemoryStats(GpuMemoryStatsOut& out) const
     return true;
 }
 
+Engine::GeometryReportStatus EngineWgpu::RequestGeometryAllocationReport(uint32_t maxModels,
+    uint32_t maxRows, uint32_t maxSectionVisits, uint64_t& requestId)
+{
+    requestId = 0;
+    if (!Foundation::IsMainThread()) return GeometryReportStatus::Invalid;
+    if (!maxModels || maxModels > 256 || !maxRows || maxRows > 2048 ||
+        !maxSectionVisits || maxSectionVisits > 65536) return GeometryReportStatus::Invalid;
+    if (!_renderer) return GeometryReportStatus::Unsupported;
+    // Producer/owner operation, just like registration. Does not acquire a renderer window.
+    std::unique_lock<std::mutex> lock(_geometryReportMutex, std::try_to_lock);
+    if (!lock.owns_lock() || _geometryReportStatus == GeometryReportStatus::Pending)
+        return GeometryReportStatus::Busy;
+    if (_geometryReportNextRequest == std::numeric_limits<uint64_t>::max())
+        return GeometryReportStatus::Invalid;
+    ResourceOp op;
+    op.kind = ResourceOp::GeometryReport;
+    op.geometryReport = std::make_unique<ResourceOp::GeometryReportRequest>();
+    op.geometryReport->requestId = ++_geometryReportNextRequest;
+    op.geometryReport->maxModels = maxModels;
+    op.geometryReport->rows = maxRows;
+    op.geometryReport->visits = maxSectionVisits;
+    op.geometryReport->registered = static_cast<uint32_t>(std::min<size_t>(_gpuModels.size(), UINT32_MAX));
+    op.geometryReport->models.reserve(std::min<size_t>(_gpuModels.size(), maxModels));
+    for (const auto& [shape, model] : _gpuModels)
+    {
+        if (op.geometryReport->models.size() == maxModels) break;
+        // Snapshot name+monotonic producer ID now; never carry the Shape pointer to drain.
+        const char* name = shape ? static_cast<const char*>(shape->Name()) : nullptr;
+        size_t length = 0;
+        if (name) while (length < 1024 && name[length]) ++length;
+        if (!length || length == 1024) ++op.geometryReport->unresolvedNames;
+        op.geometryReport->models.emplace_back(model, name ? std::string(name, length) : std::string{});
+    }
+    requestId = op.geometryReport->requestId;
+    _geometryReport.reset();
+    _geometryReportRequest = requestId;
+    _geometryReportStatus = GeometryReportStatus::Pending;
+    _resourceOps.push_back(std::move(op));
+    return GeometryReportStatus::Pending;
+}
+
+Engine::GeometryReportStatus EngineWgpu::PollGeometryAllocationReport(uint64_t requestId,
+    GeometryAllocationReport& out) const
+{
+    if (!requestId) return GeometryReportStatus::Invalid;
+    std::unique_lock<std::mutex> lock(_geometryReportMutex, std::try_to_lock);
+    if (!lock.owns_lock()) return GeometryReportStatus::Pending;
+    if (_geometryReportRequest != requestId) return GeometryReportStatus::Invalid;
+    const auto status = _geometryReportStatus;
+    const auto snapshot = _geometryReport;
+    lock.unlock();
+    if (status == GeometryReportStatus::Ready && snapshot) out = *snapshot;
+    return status;
+}
+
 // Called once per frame, right after wgr_render_frame, where the readbacks have just
 // landed. Three FFI calls a frame instead of one per consumer.
 void EngineWgpu::PublishRendererStats()
 {
+    if (_geometryReportUnpublished)
+    {
+        std::unique_lock<std::mutex> lock(_geometryReportMutex, std::try_to_lock);
+        if (lock.owns_lock())
+        {
+            if (_geometryReportRequest == _geometryReportUnpublished->requestId)
+            {
+                _geometryReport = std::move(_geometryReportUnpublished);
+                _geometryReportStatus = _geometryReport->valid
+                    ? GeometryReportStatus::Ready : GeometryReportStatus::Failed;
+            }
+            _geometryReportUnpublished.reset();
+        }
+    }
     _publishedObjectStatsValid = GetObjectStatsFromRenderer(_publishedObjectStats);
     // LGT-026: how many local shadow views actually re-rendered last frame, and how many were
     // re-used. The whole point of the cache is a number, and without this one "it is cached"
