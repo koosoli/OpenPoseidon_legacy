@@ -6621,24 +6621,26 @@ tickets:
     owner: null
     branch: codex/streaming-residency
     baseline_commit: 03e71371
-    verification_commit: d8ac1c8d
+    verification_commit: f4ffc510
     milestone: 0
     milestone_role: NON_BLOCKING
     depends_on: []
     blocked_by: []
     blocks: []
-    implementation_commits: [7d5f3e71, f733e708, 8e09f391, 7d8fb75b, a531d7b9, 21b89e79, 082eaa06, c2c8eb0b, f602332c, dca4f954, 0d6a498f, 82cbb5a2, 486d5e9b, e0b88e7a, 08bbada3, cd3d5c68, d8ac1c8d]
+    implementation_commits: [7d5f3e71, f733e708, 8e09f391, 7d8fb75b, a531d7b9, 21b89e79, 082eaa06, c2c8eb0b, f602332c, dca4f954, 0d6a498f, 82cbb5a2, 486d5e9b, e0b88e7a, 08bbada3, cd3d5c68, d8ac1c8d, a92bab54, f4ffc510]
     production_call_sites: []
-    test_ids: [stationary-residency, preparer-byte-budget, preparer-generation-cancellation]
+    test_ids: [stationary-residency, preparer-byte-budget, preparer-generation-cancellation, required-fire-obstruction, fixed-detail-return, strict-headless-identity]
     benchmark_artifacts: [docs/roadmap/evidence/streaming-20260920.json]
-    evidence_hash: bf7686f6ec3c33ae42ca35615e94ac318e1659e1fc2a0c86f07baa0580d90f6b
+    evidence_hash: 45e070eb08bbfbb483395cee7b1c419a81761d28be8f7edf5e113d702a51f7ea
     decision_record: docs/roadmap/decisions/STREAMING-AUDIT-20260920.md
     known_failures:
       - The staged streaming plan remains in progress; see the decision record for uncompleted gates.
       - Camera residency still removes unrequested/unmodified native logical objects; required identities and saved state now survive visual retirement. Do not broaden this lifecycle to legacy worlds or default-enable pressure-driven object removal.
       - Preparation accounting includes estimated conversion reservations; actual decoder scratch and Shape allocations are not measured.
       - Adaptive texture detail remains opt-in; first controlled comparisons failed due to render-thread stalls. Mesh loss is corrected; nonblocking native p95 is comparable, but long maxima and broader quality gates remain.
-      - DayZ growth-factor 2 run failed with GPU Out of Memory; factor 1.5 and allocation-aware growth completed with the original PBO path, but packed worker preparation still causes OOM. Automatic growth remains off because the final pose had worse p95 than the same-build factor-1.5 control.
+      - Earlier DayZ factor-2 and packed-worker routes failed with GPU Out of Memory; later normal factor-2 and packed routes completed after lifetime changes. This does not prove all OOMs eliminated. Automatic growth and packed paths remain off; mixed timings and tail stalls do not establish a broad no-regression pass.
+      - Required-obstruction identity/damage and visual retirement passed on f4ffc510; never-requested actor/query/navigation demand, full save/reload and multiplayer still need validation.
+      - Fixed-detail returned vegetation is equivalent at one DayZ pose; normal governor variation, secondary views and broader quality/performance acceptance remain open.
     fallback: WGR_OBJECT_STREAM_PBO and WGR_OBJECT_STREAM_PBO_TEXTURES remain off; WGR_SKY_VOLUME_INCREMENTAL=0 restores full atlas uploads; WGR_ADAPTIVE_TEXTURE_DETAIL and WGR_OBJECT_STREAM_GPU_BUDGET remain off; WGR_OBJECT_STREAM_READY_MB=0 disables the new ready-payload gate; old ocean remains default.
     reviewer: null
     reviewer_method: Installed native runtime reproduction, comparable-coverage checks and real worker cancellation tests.

@@ -93,13 +93,16 @@ accepted as proof of no moving regression; repeat with controlled per-pose cover
 ## Current gates (updated after the implementation runs below)
 
 - A/B: stationary shrink/restore, in-flight changes, unchanged-demand idle path,
-  native/DayZ/legacy coverage and read-only ID probes are verified. Modern IDs
-  still disappear while the camera is away. Distant collision/query, mutable
-  save/reload and modern headless simulation independence are NOT established.
+  native/DayZ/legacy coverage and read-only ID probes are verified. Explicitly
+  required identities and MustBeSaved state survive visual retirement. An actual
+  required-object fire obstruction survives a 1500 m camera departure. Never-
+  requested placements still disappear; actor-neighbourhood collision/navigation,
+  view queries, full save/reload and multiplayer independence are NOT established.
 - C: ready IR and active scratch reservations, real backend counters and GPU
   retirement are implemented. Model/Shape allocator costs remain estimates;
   automatic allocation-aware growth remains experimental after mixed timing.
-  PreparedTextureStore's budget is payload-based, not total allocator capacity.
+  PreparedTextureStore charges retained vector/mip metadata capacity; map/string
+  and allocator overhead remain excluded.
 - D: incremental sky uploads and model-lighting retirement are integrated.
   Owned PBO model/PAA preparation is implemented but OFF pending comparisons.
   Late material stages, texture uploads and alpha classification still cost time
@@ -517,10 +520,11 @@ packed prototypes OFF, coverage 19923 before/return. Frame mean/p95/max:
 19.69/21.35/23.07 ms; whole-GPU peak 7776 MiB. This is a successful normal
 configuration route, not proof that every former OOM is eliminated.
 
-Private loopback headless legacy run `headless-legacy-20260920-131039` passed
+Private loopback headless legacy run `headless-legacy-20260920-131039` logged
 simulation time progression, living AI and retained damage 0.25 without a
-renderer. Modern run `headless-dayz-20260920-131418` passed those simulation
-checks but FAILED the authored placement lookup: ID 83903272, known present
+renderer. These are observations: the original runner discarded assertion
+returns. Modern run `headless-dayz-20260920-131418` logged those simulation
+values but FAILED the authored placement lookup: ID 83903272, known present
 with geometry/fire geometry on the client, was absent. A clean process exit
 is NOT a pass for modern-world gameplay correctness.
 
@@ -545,7 +549,8 @@ unmutated substitute for changed state.
 This does NOT yet establish camera-independent actor-neighbourhood collision,
 projectile corridors, navigation or nearest-object queries for never-requested
 placements. Those still require a simulation demand policy. Aggressive visual
-object-pressure control remains gated. Runtime verification pending.
+object-pressure control remains gated. Required-identity runtime verification
+is recorded below; never-requested placement demand remains open.
 
 
 ### cd3d5c68 required identity runtime and d8ac1c8d capacity accounting
@@ -582,6 +587,52 @@ reservation 318,598,236 bytes. Frame mean/p95/max: 20.19/22.47/93.20,
 peak 7801 MiB. Packed prototypes remain OFF. This run validates accounting
 integration, not a broad frame-time improvement.
 
-Next diagnostic adds read-only, bounded fire-geometry segment queries and model
-names/positions to the identity probe. It will distinguish retained payloads
-from an actual world obstruction while the camera is elsewhere.
+The next diagnostics add read-only, bounded fire-geometry segment queries and
+model names/positions to the identity probe. Their results follow.
+
+### a92bab54/f4ffc510 actual obstruction and visual retirement
+
+The bounded read-only fire probe does not resolve or pin objects. The first
+fixture run `dayz-required-obstruction-20260920-134853` on a92bab54 FAILED its
+fixture precondition: crosswalk ID 83903272 had fire geometry metadata but none
+of the three chosen rays hit it. This is an invalid obstruction fixture, not
+proof of a collision regression. No result.json was produced; failed artifacts
+remain checksummed rather than relabelled successful.
+
+f4ffc510 adds a visual-residency flag to the existing Object boolean storage.
+The ordinary drawing selection rejects logical-only objects before CPU fallback
+can draw or upload them; visual registration restores the flag on admission.
+The fixture selector now requires a real fire contact before resolving/mutating
+its identity, instead of treating fire-LOD presence as collision evidence.
+
+`dayz-fire-identity-20260920-135655` PASSED using the installed f4ffc510 pair.
+It selected ID 83912800, `platform1_stairs_30_wallr.p3d`, at
+(5711.0610, 2512.3914, 68.4319), radius 4.7318 m. The 12 m horizontal fire ray
+hit that identity before departure and again while the camera was 1500 m away.
+The object remained present, visualResident changed true -> false -> true,
+and returned identity/damage 0.25 evaluated true. Coverage returned to 19923;
+shutdown completed cleanly with exit 0 and no renderer fatal error. This proves
+one explicitly required obstruction survives visual retirement, not general
+collision/query admission for never-requested objects or full save/network
+round trips. The uncontrolled traversal is not a settled FPS comparison.
+
+The stamp includes +dirty: pending changes were Cargo.lock generated by the
+build and test-script capture/provenance changes; runtime C++/Rust sources were
+committed f4ffc510. Provenance records the actual matching executable/DLL hashes
+and the harness script SHA256. Images, logs and result are checksummed in the
+manifest. Initial/returned images differed in vegetation silhouettes, requiring
+a comparable-detail follow-up rather than accepting object count as equivalence.
+
+### Fixed-detail visual follow-up — 26 September 2026
+
+`dayz-fixed-detail-return-20260926-115132` PASSED on the same installed f4ffc510
+binary hashes. The harness CoverageOnly control fixes the existing LOD governor
+range at 1; it does not alter production defaults. Initial and returned-settled
+(after eight seconds) images were inspected and show equivalent vegetation at
+the test pose. Coverage restored to 19923; read-only selected identities remain
+absent while away and return afterwards, as expected for unrequired objects.
+Clean shutdown completed with exit 0. This supports LOD-governor/detail variation
+as the explanation for the earlier capture difference at this pose; it does not
+establish universal visual correctness. The diagnostic fixes detail explicitly
+and supplies no normal-settings FPS/no-regression acceptance. Adaptive detail,
+secondary views and mixed long-tail performance gates remain OPEN.

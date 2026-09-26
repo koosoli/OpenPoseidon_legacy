@@ -664,7 +664,7 @@
         "engine.log": "6cfe0a7326257ccecf342c117da03701a4c1c81e5e6f2d17ed38ea90eb53efc0",
         "provenance.json": "0a0fc2b3926ef5e7bad3f07ef5f94919be8dc74f8309eb76dd541a7fbc77c3f8"
       },
-      "result": "PASS"
+      "result": "Logged time/living AI/damage observations; assertion returns were not logged; no assertion PASS"
     },
     {
       "run": "headless-dayz-20260920-131418",
@@ -691,7 +691,7 @@
         "engine.log": "02694e879a98d3737d6ebc605934920c746aac7659c313ace05b378fe9ca7d9e",
         "provenance.json": "0024a6d3088d5261a2d0f1e01035df3efb6d5c48ef10dec5dd0b4488b7ce03cc"
       },
-      "result": "modern object lookup FAILED; simulation passed"
+      "result": "Modern object lookup FAILED; logged simulation observations only; assertion returns were not logged"
     },
     {
       "run": "dayz-logical-identity-20260920-133200",
@@ -815,6 +815,129 @@
         "harness.jsonl": "82187920602b24cd1ef6acc3fb0199c06bb13ef21a520a53808fd2130199a5da",
         "provenance.json": "19f05a56615f0fd7550d16b3f52ad7bc3af74804a7fded99c97c4b4e72a284df",
         "result.json": "278ebd4dbe7b083b262042b9adf40805aab57edce65869d7e9c0a8f4da689515"
+      }
+    },
+    {
+      "run": "dayz-required-obstruction-20260920-134853",
+      "result": "FAILED fixture precondition: no ray contact with crosswalk; not a collision regression verdict",
+      "provenance": {
+        "packedTextures": false,
+        "geoGrowth": 2.0,
+        "controlled": false,
+        "installed": "codex/streaming-residency a92bab54 2026-09-20_13:48 deploy-ps1",
+        "packedModels": false,
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "62D7F02E5ED701E785D6BEB3F11CD33EF5DCE67B2A87460D34321FDB24D88448",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "6599B51AE8306AC9CC710012C7410DAE50F86701F0B105D35D9B5A4BE12AB607",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "head": "a92bab5421f6e537f547bc4599bfb3f1a702913b",
+        "pressureGrowth": false,
+        "readyMb": -1,
+        "incrementalSkyUploads": true,
+        "corpus": "DayZ",
+        "adaptive": false
+      },
+      "sha256": {
+        "engine.log": "45dc7d20003821d08bed01965c9f7aaa303a34155e147974c446eace69140fe3",
+        "harness.jsonl": "00e2bb45fd2e9be4d89051401377d9e36999cf27693eba1bb290d14fdf8cad43",
+        "provenance.json": "4614dd23524b6567f2181595a705c4d28536c4408c426e123dc5dd34b42d94f4"
+      }
+    },
+    {
+      "run": "dayz-fire-identity-20260920-135655",
+      "result": "PASS required fire obstruction, identity/mutation and visual retirement; uncontrolled route, no general performance acceptance",
+      "provenance": {
+        "installed": "codex/streaming-residency f4ffc510+dirty 2026-09-20_13:56 deploy-ps1",
+        "adaptive": false,
+        "geoGrowth": 2.0,
+        "packedTextures": false,
+        "readyMb": -1,
+        "packedModels": false,
+        "head": "f4ffc5106745d0491489f52108bf93fa5658a6ff",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "87052804920A1C3A1B182226127820263321BC4C5572F51520723D2FCDC043F7",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "16956408087C600D76C66167326F44827495E348250E66350FF377B4A2AC4CF8",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "incrementalSkyUploads": true,
+        "corpus": "DayZ",
+        "pressureGrowth": false,
+        "controlled": false,
+        "scriptSha256": "9A77AF9E3BD28D5465865160D79F5D5D932E4535F93B20713359CB68804EB29C"
+      },
+      "sha256": {
+        "engine.log": "2fe70b772606d16101fb61d3bdc38003ead6e543bd097c52b4d69835f2c832e9",
+        "harness.jsonl": "eec56fac288b83a16c33a3152278184979dcaa7de12296860ff5824d9883aa60",
+        "provenance.json": "ddc1e1a3089d1021f9a243ded874121cedef8c0bda40a52022877470db567959",
+        "result.json": "7574865a59b3d5e9a4f11129824d46784723be59b020865a2fc8c1ee9a8906e4",
+        "initial.png": "aec7b798690562715753417006f9f05d9b318b77efa468d31ca592358f833c5c",
+        "settled.png": "0ff1f3888b7b629f3aaa35a500df953036b3d92dceb97f5b23b11217aa9805b6",
+        "returned-settled.png": "d5506df9f0c2a403f0d71366b30f9916fe66dda9a1d6fb7be300fbbc153a2356"
+      },
+      "qualification": "Installed +dirty stamp carried generated Cargo.lock/test-harness changes; runtime sources committed f4ffc510."
+    },
+    {
+      "run": "dayz-fixed-detail-return-20260926-115132",
+      "result": "PASS fixed-detail initial/returned visual comparison at one pose; diagnostic governor range 1, no normal-settings performance acceptance",
+      "provenance": {
+        "head": "f4ffc5106745d0491489f52108bf93fa5658a6ff",
+        "readyMb": -1,
+        "adaptive": false,
+        "controlled": false,
+        "installed": "codex/streaming-residency f4ffc510+dirty 2026-09-20_13:56 deploy-ps1",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "87052804920A1C3A1B182226127820263321BC4C5572F51520723D2FCDC043F7",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "16956408087C600D76C66167326F44827495E348250E66350FF377B4A2AC4CF8",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "packedModels": false,
+        "incrementalSkyUploads": true,
+        "scriptSha256": "D81951E498948089A3139F27346EB48930B9C0C4868B0265740CDFDE2F88EE98",
+        "packedTextures": false,
+        "corpus": "DayZ",
+        "pressureGrowth": false,
+        "geoGrowth": 2.0
+      },
+      "sha256": {
+        "engine.log": "7e83bea05cc72afe62ce34e0b791dd727a9b80954ffe1a66f80909dc785add1e",
+        "harness.jsonl": "086b34a3891a73761dfb08abcc89ba66050794d4e79b8df16488946fb983d4e6",
+        "provenance.json": "c0f79115d8dc8cc2cb1f437c837c2529d473e19fbf3a17897c5a66f089074d49",
+        "result.json": "8faff20deb486991207164e6ba761c311231b3200dfbf5bbcc07c76bee9f5307",
+        "initial.png": "92fda2026b86bb718c12e3def2aad16360e63251b4fa99eff872421e9af9e392",
+        "settled.png": "c957efcb22eb531f12e90d489ee4ef45f571a9b5cdf70347d4a003fb2bdbd234",
+        "returned-settled.png": "f869abb4f867294c11454ee8ae7f5bf64e230fd4216be8e46424097a07a6ba30"
+      },
+      "qualification": "Installed +dirty stamp carried generated Cargo.lock/test-harness changes; runtime sources committed f4ffc510.",
+      "diagnostic": {
+        "coverageOnly": true,
+        "lodGovernorRange": 1,
+        "imagesInspected": [
+          "initial.png",
+          "returned-settled.png"
+        ],
+        "scope": "Single-pose equivalent vegetation; not universal coverage or normal FPS acceptance"
       }
     }
   ]
