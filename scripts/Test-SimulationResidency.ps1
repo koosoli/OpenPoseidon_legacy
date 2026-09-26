@@ -134,7 +134,8 @@ try {
   $cold=Wait-State {param($r) $r.status -eq 'CapacityExceeded' -and $r.metadataComplete} 'complete capacity-limited inventory'
   $coldIds=Ids
   if ($cold.models -ne 257 -or $cold.referencedModels -ne 257 -or $cold.inventoryRows -ne 257 -or $cold.preparedModels -ne 0 -or $cold.activeModels -ne 0 -or $cold.leasedPlacements -ne 0 -or $cold.created -ne 0 -or @($coldIds.objects | Where-Object {$_.present}).Count) {throw 'Positive warming loaded a cold partial world'}
-  $coldQuery=Query 'queue'
+  $coldQueryQueued=Query 'queue'
+  $coldQuery=Query 'status'
   if ($coldQuery.status -ne 'CapacityExceeded') {throw 'Cold query borrowed positive warming readiness'}
   $pose=Send @{cmd='eval';code='triFreeFlyPose "1188 1200 18 90 -8"'}
   if ($pose.result.Trim('"') -ne 'OK') {throw 'Near camera pose refused'}
@@ -156,7 +157,7 @@ try {
   $until=[DateTime]::UtcNow.AddSeconds(30)
   do {Start-Sleep -Milliseconds 500;$releasedIds=Ids} while (@($releasedIds.objects | Where-Object {$_.present}).Count -and [DateTime]::UtcNow -lt $until)
   if (@($releasedIds.objects | Where-Object {$_.present}).Count -or $released.status -ne 'CapacityExceeded' -or $released.readyRegions -ne 0 -or $released.preparedModels -ne 0 -or $released.created -ne 0) {throw 'Positive release retained authored walls or changed global readiness'}
-  $result=@{positiveWarming=$true;cold=$cold;coldIds=$coldIds;coldQuery=$coldQuery;visual=$visual;warmed=$warmed;warmedResidency=$warmedResidency;away=$away;awayState=$awayState;awayQuery=$awayQuery;awayCollision=$awayCollision;awayResidency=$awayResidency;released=$released;releasedIds=$releasedIds}
+  $result=@{positiveWarming=$true;cold=$cold;coldIds=$coldIds;coldQueryQueued=$coldQueryQueued;coldQuery=$coldQuery;visual=$visual;warmed=$warmed;warmedResidency=$warmedResidency;away=$away;awayState=$awayState;awayQuery=$awayQuery;awayCollision=$awayCollision;awayResidency=$awayResidency;released=$released;releasedIds=$releasedIds}
  } elseif ($Capacity -or $ActiveCapacity) {
   $cold=Wait-State {param($r) $r.status -eq 'CapacityExceeded'} 'pre-admission model capacity refusal'
   $coldIds=Ids

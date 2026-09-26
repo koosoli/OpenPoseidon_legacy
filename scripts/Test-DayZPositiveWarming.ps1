@@ -58,7 +58,7 @@ try {
  do{Start-Sleep -Seconds 2;$loaded=Sample 'loaded'}while((!$loaded.simulation.metadataComplete -or $loaded.camera.pending -or !$loaded.camera.valid -or $loaded.simulation.positiveLeasedPlacements -eq 0 -or $loaded.simulation.positiveScannedRegions -eq 0) -and [DateTime]::UtcNow -lt $deadline)
  if(!$loaded.simulation.metadataComplete -or $loaded.simulation.status -ne 'CapacityExceeded' -or $loaded.camera.pending -or !$loaded.camera.valid -or $loaded.simulation.positiveLeasedPlacements -eq 0 -or $loaded.simulation.positiveScannedRegions -eq 0){throw 'Real DayZ did not complete positive loaded warming at unchanged camera coverage'}
  if($loaded.camera.resident -ne 19923 -or $loaded.camera.desired -ne 19923 -or $loaded.camera.budget -ne 20000){throw 'Dense DayZ baseline camera coverage changed'}
- $loadedQuery=Query 'queue';if($loadedQuery.status -ne 'CapacityExceeded'){throw 'Partial DayZ query became ready'}
+ $loadedQueryQueued=Query 'queue';$loadedQuery=Query 'status';if($loadedQuery.status -ne 'CapacityExceeded'){throw 'Partial DayZ query became ready'}
  $null=Send @{cmd='screenshot';path=(Join-Path $out 'loaded.png')}
  $null=Send @{cmd='eval';code='triFreeFlyPose "9704.58 2523.37 73.74 260.9 -3.8"'}
  $deadline=[DateTime]::UtcNow.AddSeconds(180)
@@ -71,7 +71,7 @@ try {
  if($released.simulation.leasedPlacements -ne 0 -or $released.simulation.status -ne 'CapacityExceeded'){throw 'DayZ actor replacement failed to release transient positive leases'}
  $null=Send @{cmd='exit'};if(!$p.WaitForExit(15000) -or $p.ExitCode){throw 'Game failed clean exit'}
  if(Select-String -LiteralPath $log -Pattern 'Out of Memory|Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION' -Quiet){throw 'Renderer error'}
- @{passed=$true;loaded=$loaded;loadedQuery=$loadedQuery;away=$away;awayCollision=$awayCollision;released=$released;performanceMeasured=$false} | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $out 'result.json')
+ @{passed=$true;loaded=$loaded;loadedQueryQueued=$loadedQueryQueued;loadedQuery=$loadedQuery;away=$away;awayCollision=$awayCollision;released=$released;performanceMeasured=$false} | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $out 'result.json')
  Write-Output "DayZ positive warming evidence: $out"
 }finally{
  if($client){$client.Dispose()};if($p -and !$p.HasExited){Stop-Process -Id $p.Id -Force}
