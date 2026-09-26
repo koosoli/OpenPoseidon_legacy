@@ -9,11 +9,13 @@
 #include <Poseidon/Asset/Formats/Material/EmatMaterialAdapter.hpp> // ReadEmatFileLoose (pure, worker-safe)
 #include <Poseidon/Foundation/Logging/Logging.hpp>
 #include <Poseidon/Foundation/Threads/PoThread.hpp>
+#include <Poseidon/Foundation/Threads/ThreadAffinity.hpp>
 #include <Poseidon/Foundation/Threads/WatchDog.hpp>
 #include <Poseidon/Foundation/Platform/FpEnvironment.hpp>
 #include <Poseidon/Graphics/Textures/PAADecoder.hpp>      // ReadPAABlockChain (pure, worker-safe)
 #include <Poseidon/Graphics/Textures/PreparedTextures.hpp> // the worker->main-thread mip-chain store
 #include <Poseidon/Graphics/Textures/DdsImport.hpp>
+#include <Poseidon/Dev/Diag/StreamingDiag.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/EnfusionMount.hpp>
 #include <Poseidon/World/Model/Model.hpp>
 #include <Poseidon/World/Model/ModelMemory.hpp>
@@ -41,7 +43,9 @@ namespace Poseidon
 
 namespace
 {
-bool PrepareNativeDds(const std::string& key, uint64_t generation, size_t& bytes)
+template<class Reserve, class Release>
+bool PrepareNativeDds(const std::string& key, uint64_t generation, size_t& bytes,
+                      bool prepareBc3, Reserve&& reserve, Release&& release)
 {
     try
     {
@@ -59,6 +63,45 @@ bool PrepareNativeDds(const std::string& key, uint64_t generation, size_t& bytes
                 return request->Read(out, error);
             }, options);
         if (!loaded || mount.Generation() != mountGeneration) return false;
+        const size_t encodeReservation = prepareBc3 ? source->CompositeBc3Reservation() : 0;
+        if (encodeReservation && reserve(encodeReservation))
+        {
+            const auto began = std::chrono::steady_clock::now();
+            bool encoded = false;
+            bool reservationActive = true;
+            auto finish = [&](bool published) {
+                reservationActive = false; // never subtract twice if the release callback throws
+                release(encodeReservation, published,
+                        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count());
+            };
+            try
+            {
+                encoded = source->PrepareCompositeBc3(encodeReservation);
+                // A mount/world may have changed during this comparatively long
+                // pure CPU operation. reserve(0) validates the model job only.
+                if (mount.Generation() != mountGeneration || !reserve(0))
+                {
+                    source.reset();
+                    finish(false);
+                    return false;
+                }
+                bytes = source->PreparedByteSize();
+                const bool stored = render::PreparedTextureStore::Instance().PutDdsPrepared(
+                    key, std::move(source), options, generation);
+                finish(stored && encoded);
+                return stored;
+            }
+            catch (...)
+            {
+                if (reservationActive)
+                {
+                    source.reset(); // destroy outstanding pixels before releasing their charge
+                    finish(false);
+                }
+                throw;
+            }
+        }
+        if (mount.Generation() != mountGeneration || !reserve(0)) return false;
         bytes = source->PreparedByteSize();
         return render::PreparedTextureStore::Instance().PutDdsPrepared(key, std::move(source), options, generation);
     }
@@ -197,6 +240,7 @@ struct ObjectStreamPreparer::Impl
 
     size_t count = 0;
     std::vector<std::string> paths;
+    std::vector<uint8_t> prepareCompositeBc3; // written only by owner Request; workers capture before unlocking
     struct RadiusSlot
     {
         float radius = 0.0f;
@@ -269,7 +313,7 @@ struct ObjectStreamPreparer::Impl
         if (!stats.readyByteBudget) return true;
         uint64_t remaining = stats.readyByteBudget;
         for (const uint64_t charge : {stats.readyPayloadBytes, stats.parseReservedBytes,
-                                     stats.conversionReservedBytes})
+                                     stats.conversionReservedBytes, stats.textureEncodeReservedBytes})
         {
             if (charge > remaining) return false;
             remaining -= charge;
@@ -470,6 +514,7 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
             continue;
         const uint64_t gen = generation.load(std::memory_order_relaxed);
         const std::string path = paths[index];
+        const bool prepareBc3 = prepareCompositeBc3[index] != 0;
         const auto packedRead = packedReads[index];
         Set(index, State::Parsing);
         stats.parseReservedBytes += reservation;
@@ -608,7 +653,31 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                         (key.ends_with(".edds") || key.ends_with(".dds")))
                     {
                         size_t bytes = 0;
-                        if (PrepareNativeDds(key, textureGeneration, bytes))
+                        if (PrepareNativeDds(key, textureGeneration, bytes, prepareBc3,
+                            [&](size_t needed) {
+                                std::lock_guard<std::mutex> budgetLock(mutex);
+                                if (stop || gen != generation.load(std::memory_order_relaxed) ||
+                                    index >= count || stale[index]) return false;
+                                if (stats.readyByteBudget)
+                                {
+                                    uint64_t remaining = stats.readyByteBudget;
+                                    for (const uint64_t charge : {stats.readyPayloadBytes, stats.parseReservedBytes,
+                                                                 stats.conversionReservedBytes, stats.textureEncodeReservedBytes})
+                                        remaining -= std::min(remaining, charge);
+                                    if (needed > remaining) { ++stats.workerBc3BudgetSkipped; return false; }
+                                }
+                                stats.textureEncodeReservedBytes += needed;
+                                stats.peakTextureEncodeReservedBytes = std::max(stats.peakTextureEncodeReservedBytes,
+                                                                              stats.textureEncodeReservedBytes);
+                                return true;
+                            },
+                            [&](size_t reserved, bool prepared, double ms) {
+                                std::lock_guard<std::mutex> budgetLock(mutex);
+                                stats.textureEncodeReservedBytes -= reserved;
+                                stats.workerBc3Prepared += prepared;
+                                stats.workerBc3Ms += ms;
+                                cv.notify_all();
+                            }))
                         {
                             ++texPrepared;
                             texPreparedBytes += bytes;
@@ -850,6 +919,9 @@ void ObjectStreamPreparer::Reset(const std::string* paths, size_t modelCount)
         _impl->stale.assign(modelCount, false);
         _impl->requestedAtUs.assign(modelCount, 0);
         _impl->paths.assign(paths, paths + modelCount);
+        std::vector<uint8_t>(modelCount, 0).swap(_impl->prepareCompositeBc3);
+        _impl->stats.bc3PolicyBytes = _impl->prepareCompositeBc3.capacity();
+        // Old workers keep their encoding reservation until publication/destruction.
         // Fresh capacity tracks this inventory, rather than retaining a previous
         // world's larger certificate allocation after Reset.
         std::vector<Impl::RadiusSlot>(modelCount).swap(_impl->radiusCertificates);
@@ -899,6 +971,11 @@ bool ObjectStreamPreparer::Request(uint32_t index)
         return false;
     }
     _impl->Set(index, State::Queued);
+    // Only the captured owner may read the mutable developer checkbox.
+    // Other callers retain ordinary preparation without this optional sidecar.
+    _impl->prepareCompositeBc3[index] = render::PreparedTextureStore::NativeDdsEnabled() &&
+                                      Foundation::IsMainThread() &&
+                                      Poseidon::Dev::GResidencyLevers().compressComposites;
     _impl->queue.push_back(index);
     if (index < _impl->requestedAtUs.size())
         _impl->requestedAtUs[index] = Impl::NowUs();

@@ -388,6 +388,7 @@ bool TextureSourceDDS::InitFromMemoryWithOptions(const void* data, size_t size, 
                                                bool forceDecode, const DdsPreparationOptions& options)
 {
     _tintAverageLevel = {};
+    _preparedBc3 = {};
     const char* who = nameForErrors ? nameForErrors : "?";
 
     if (IsEddsBuffer(data, size))
@@ -752,6 +753,7 @@ bool TextureSourceDDS::InitFromReader(const char* name, PacLevelMem* mips, int m
     DdsPreparationTrace trace(name);
     _name = name;
     _tintAverageLevel = {};
+    _preparedBc3 = {};
 
     // RFG-070: `enft|r,g,b|<inner>` -- strip the tint FIRST and let everything below see
     // the name it would have seen anyway. That is what makes the two composite forms
@@ -992,7 +994,50 @@ size_t TextureSourceDDS::PreparedByteSize() const
     size_t bytes = sizeof(TextureSourceDDS) + _levels.capacity() * sizeof(DDSMipLevel) +
                    _tintAverageLevel.data.capacity();
     for (const auto& level : _levels) bytes += level.data.capacity();
-    return bytes;
+    return bytes + _preparedBc3.RetainedBytes();
+}
+
+size_t TextureSourceDDS::CompositeBc3Reservation() const
+{
+    if (std::strncmp(static_cast<const char*>(_name), "enfa|", 5) != 0 ||
+        _pacFormat != PacARGB8888 || _levels.empty() || _w > 2048 || _h > 2048 ||
+        !_preparedBc3.blocks.empty()) return 0;
+    Bc3EncodingFootprint footprint;
+    if (!MeasureBc3EncodingFootprint(_w, _h, footprint) ||
+        _levels.front().width != _w || _levels.front().height != _h ||
+        _levels.front().data.size() < footprint.rgbaBytes) return 0;
+    return PreparedByteSize() + footprint.scratchBytes;
+}
+
+bool TextureSourceDDS::PrepareCompositeBc3(size_t reservedBytes)
+{
+    const size_t required = CompositeBc3Reservation();
+    if (!required || reservedBytes < required) return false;
+    Bc3EncodingFootprint footprint;
+    if (!MeasureBc3EncodingFootprint(_w, _h, footprint)) return false;
+    // Same top source pixels, channel swap, encoder and generated mips as wgpu's
+    // owner path. Lower original DDS mips and alpha/header semantics are untouched.
+    std::vector<uint8_t> rgba(footprint.rgbaBytes);
+    PacLevelMem mip;
+    mip._w = static_cast<short>(_w); mip._h = static_cast<short>(_h);
+    mip._dFormat = PacARGB8888; mip._pitch = _w * 4;
+    if (!GetMipmapData(rgba.data(), mip, 0)) return false;
+    for (size_t i = 0; i + 2 < rgba.size(); i += 4) std::swap(rgba[i], rgba[i + 2]);
+    Bc3MipChain prepared;
+    if (!EncodeBc3ChainRGBA(rgba.data(), _w, _h, prepared.blocks, prepared.offsets, prepared.levels)) return false;
+    prepared.width = _w; prepared.height = _h;
+    _preparedBc3 = std::move(prepared);
+    return true;
+}
+
+bool TextureSourceDDS::TakeCompositeBc3(const char* sourceName, int width, int height, Bc3MipChain& out)
+{
+    if (!sourceName || std::strcmp(sourceName, static_cast<const char*>(_name)) != 0 ||
+        width != _preparedBc3.width || height != _preparedBc3.height ||
+        _preparedBc3.blocks.empty() || _preparedBc3.levels <= 0) return false;
+    out = std::move(_preparedBc3);
+    _preparedBc3 = {};
+    return true;
 }
 
 class TextureSourceDDSLinearTint final : public ITextureSource
@@ -1204,6 +1249,10 @@ ITextureSource* TextureSourceDDSFactory::Create(const char* name, PacLevelMem* m
             render::PreparedTextureStore::Key(name), CaptureDdsPreparationOptions());
         if (prepared && prepared->BindPreparedMips(mips, maxMips))
         {
+            // The store accepted its normalized key and preparation options.
+            // Adopt the consuming texture's exact spelling for diagnostics and
+            // the one-shot sidecar claim; no composition/header data changes.
+            prepared->_name = name;
             static const bool verify = [] {
                 const char* value = std::getenv("WGR_NATIVE_DDS_PREPARE_VERIFY");
                 return value && std::strcmp(value, "1") == 0;

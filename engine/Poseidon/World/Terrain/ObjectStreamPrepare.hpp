@@ -176,6 +176,12 @@ class ObjectStreamPreparer
         double convertMs = 0.0;
         double convertMaxMs = 0.0;
         uint64_t radiusCertificateBytes = 0; // actual compact-slot vector capacity * sizeof(slot)
+        uint64_t bc3PolicyBytes = 0; // owner-snapshot vector capacity
+        uint64_t textureEncodeReservedBytes = 0; // source + bounded optional BC3 workspace/output
+        uint64_t peakTextureEncodeReservedBytes = 0;
+        uint64_t workerBc3Prepared = 0;
+        uint64_t workerBc3BudgetSkipped = 0;
+        double workerBc3Ms = 0.0;
     };
 
     // WGR_OBJECT_STREAM_ASYNC. Read once.

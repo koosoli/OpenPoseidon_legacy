@@ -4,6 +4,7 @@
 #include <Poseidon/Graphics/Rendering/Font/Pactext.hpp>
 #include <Poseidon/Graphics/Textures/DDSConverter.hpp>
 #include <Poseidon/Graphics/Textures/PixelFormat.hpp>
+#include <Poseidon/Graphics/Textures/Bc3Encoder.hpp>
 
 #include <vector>
 #include <functional>
@@ -88,6 +89,7 @@ class TextureSourceDDS : public ITextureSource
     bool _hasAlpha = false;
     bool _isTransparent = false;
     PackedColor _avgColor{};
+    Bc3MipChain _preparedBc3; // optional upload-only sidecar; original source/metadata stay unchanged
     bool InitFromMemoryWithOptions(const void* data, size_t size, const char* nameForErrors,
                                   bool forceDecode, const DdsPreparationOptions& options);
     bool BindPreparedMips(PacLevelMem* mips, int maxMips);
@@ -96,6 +98,12 @@ class TextureSourceDDS : public ITextureSource
     TextureSourceDDS();
     ~TextureSourceDDS() override;
     size_t PreparedByteSize() const;
+    // Pure optional native worker seam. Returns required source+scratch reservation
+    // only for an exact enfa| ARGB8888 source <=2048 per edge. No global policy reads.
+    size_t CompositeBc3Reservation() const;
+    bool PrepareCompositeBc3(size_t reservedBytes);
+    // Main-thread one-shot claim. Incompatible dimensions/name leave it unused.
+    bool TakeCompositeBc3(const char* sourceName, int width, int height, Bc3MipChain& out);
     // Borrow immutable BC7 BCR pixels. The owner MUST retain this source until
     // after the view dies. No I/O, GPU work, cached decoded chain or workers.
     // Declines other formats/materials; the ordinary factory remains fallback.

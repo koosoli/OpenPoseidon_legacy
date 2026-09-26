@@ -200,6 +200,12 @@ void RegisterScreenshot(HarnessServer& hs)
             cJSON_AddNumberToObject(result, "parseReservedBytes", static_cast<double>(state.prep.parseReservedBytes));
             cJSON_AddNumberToObject(result, "conversionReservedBytes", static_cast<double>(state.prep.conversionReservedBytes));
             cJSON_AddNumberToObject(result, "radiusCertificateBytes", static_cast<double>(state.prep.radiusCertificateBytes));
+            cJSON_AddNumberToObject(result, "bc3PolicyBytes", static_cast<double>(state.prep.bc3PolicyBytes));
+            cJSON_AddNumberToObject(result, "textureEncodeReservedBytes", static_cast<double>(state.prep.textureEncodeReservedBytes));
+            cJSON_AddNumberToObject(result, "peakTextureEncodeReservedBytes", static_cast<double>(state.prep.peakTextureEncodeReservedBytes));
+            cJSON_AddNumberToObject(result, "workerBc3Prepared", static_cast<double>(state.prep.workerBc3Prepared));
+            cJSON_AddNumberToObject(result, "workerBc3BudgetSkipped", static_cast<double>(state.prep.workerBc3BudgetSkipped));
+            cJSON_AddNumberToObject(result, "workerBc3Ms", state.prep.workerBc3Ms);
             cJSON_AddNumberToObject(result, "peakConversionReservedBytes", static_cast<double>(state.prep.peakConversionReservedBytes));
             cJSON_AddNumberToObject(result, "peakReadyPayloadBytes", static_cast<double>(state.prep.peakReadyPayloadBytes));
             cJSON_AddNumberToObject(result, "readyByteParks", static_cast<double>(state.prep.readyByteParks));

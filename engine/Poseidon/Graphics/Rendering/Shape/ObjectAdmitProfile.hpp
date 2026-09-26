@@ -66,6 +66,8 @@ struct ObjectAdmitProfile
     uint32_t sections = 0;        // sections classified as GPU-owned
     uint32_t textureUploads = 0;  // EnsureUploaded calls that reached a real load
     uint32_t texturePrepared = 0; // ...of which the mip chain came from the prepared store
+    uint32_t textureBc3PreparedClaims = 0; // worker CPU payload consumed; not GPU acceptance/completion
+    uint64_t textureBc3PreparedBytes = 0; // compressed payload bytes consumed by those claims
     uint32_t alphaScans = 0;
     uint32_t proxyModels = 0;     // proxy shapes registered
     uint32_t parkHits = 0;        // RegisterGpuModel served from the parked (evict-cache) set
