@@ -260,6 +260,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     World/Model/test_shape_adapter_collision.cpp
     World/Model/test_shape_adapter_proxy.cpp
     World/Model/test_preparer_determinism.cpp
+    World/Model/test_preparer_radius_certificate.cpp
     World/Model/test_stream_texture_names.cpp
     World/Model/test_owned_model_read.cpp
 
@@ -610,6 +611,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     World/test_authored_object_ids.cpp
     World/test_simulation_model_bounds.cpp
     World/test_simulation_coverage_index.cpp
+    World/test_world_object_placement_frame.cpp
     World/test_world_serialization.cpp
     World/test_segment_cache_lod.cpp
     World/test_effect_shape_guards_audit.cpp

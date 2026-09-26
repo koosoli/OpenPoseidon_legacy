@@ -57,6 +57,8 @@ struct ObjectAdmitProfile
     double textureCreateMs = 0.0;   // wgr_texture_create (staging copy + write_texture)
     double textureWindowWaitMs = 0.0; // subset of texture work: waiting for render ownership
     double textureEncodeMs = 0.0;   // subset of fallback: CPU-only BC3 mip/encoding work
+    double textureEncodeWithoutWindowMs = 0.0; // eligible CPU work before renderer acquisition, not measured GPU overlap
+    uint32_t textureEncodesWithoutWindow = 0;
     double textureFallbackMs = 0.0; // whole-file RGBA8 decode path (non-block formats)
     double alphaScanMs = 0.0;       // GetAlphaClass scans that touched blocks or the file
 

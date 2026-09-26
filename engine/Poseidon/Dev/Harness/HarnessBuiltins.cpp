@@ -126,6 +126,7 @@ void RegisterScreenshot(HarnessServer& hs)
                 cJSON_AddBoolToObject(item, "present", object != nullptr);
                 if (object) {
                     cJSON_AddBoolToObject(item, "destroyed", object->IsDestroyed());
+                    cJSON_AddNumberToObject(item, "destroyPhase", object->GetDestroyed());
                     cJSON_AddBoolToObject(item, "visualResident", object->IsVisualResident());
                     cJSON_AddNumberToObject(item, "x", object->Position().X());
                     cJSON_AddNumberToObject(item, "z", object->Position().Z());
@@ -136,6 +137,12 @@ void RegisterScreenshot(HarnessServer& hs)
                     cJSON_AddBoolToObject(item, "hasGeometry", shape && shape->FindGeometryLevel() >= 0);
                     cJSON_AddBoolToObject(item, "hasFireGeometry", shape && shape->FindFireGeometryLevel() >= 0);
                     cJSON_AddBoolToObject(item, "shapeVisualDeferred", shape && shape->DeferredVisualRendering());
+                    int normalBuffers = 0;
+                    if (shape)
+                        for (int level = 0; level < shape->NLevels(); ++level)
+                            if (shape->IsNormalLevel(level) && shape->Level(level) && shape->Level(level)->GetVertexBuffer())
+                                ++normalBuffers;
+                    cJSON_AddNumberToObject(item, "normalVertexBuffers", normalBuffers);
                 }
                 cJSON_AddItemToArray(objects, item);
             }
@@ -192,6 +199,7 @@ void RegisterScreenshot(HarnessServer& hs)
             cJSON_AddNumberToObject(result, "readyPayloadBytes", static_cast<double>(state.prep.readyPayloadBytes));
             cJSON_AddNumberToObject(result, "parseReservedBytes", static_cast<double>(state.prep.parseReservedBytes));
             cJSON_AddNumberToObject(result, "conversionReservedBytes", static_cast<double>(state.prep.conversionReservedBytes));
+            cJSON_AddNumberToObject(result, "radiusCertificateBytes", static_cast<double>(state.prep.radiusCertificateBytes));
             cJSON_AddNumberToObject(result, "peakConversionReservedBytes", static_cast<double>(state.prep.peakConversionReservedBytes));
             cJSON_AddNumberToObject(result, "peakReadyPayloadBytes", static_cast<double>(state.prep.peakReadyPayloadBytes));
             cJSON_AddNumberToObject(result, "readyByteParks", static_cast<double>(state.prep.readyByteParks));

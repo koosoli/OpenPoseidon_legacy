@@ -175,6 +175,7 @@ class ObjectStreamPreparer
         uint64_t converted = 0;
         double convertMs = 0.0;
         double convertMaxMs = 0.0;
+        uint64_t radiusCertificateBytes = 0; // actual compact-slot vector capacity * sizeof(slot)
     };
 
     // WGR_OBJECT_STREAM_ASYNC. Read once.
@@ -208,6 +209,28 @@ class ObjectStreamPreparer
     bool Request(uint32_t index);
     // Main thread. Lock-free.
     State Query(uint32_t index) const;
+    enum class RadiusState : uint8_t { Unknown, Certified };
+    enum class RadiusProvenance : uint8_t { None, ParsedODOL, AdaptedShape };
+    struct RadiusCertificate
+    {
+        RadiusState state = RadiusState::Unknown;
+        RadiusProvenance provenance = RadiusProvenance::None;
+        float radius = 0.0f;
+        uint64_t generation = 0;
+        std::string modelIdentity; // owned inventory identity; never a model/shape reference
+    };
+    // Certified pre-constructor model-space scalar, NOT a final world-object
+    // broadphase certificate or geometric enclosure of arbitrary animation/proxy
+    // poses. Config-backed NewObject branches can substitute a type shape or
+    // change autocenter/recompute its sphere; world coverage must prove constructor
+    // eligibility or reconcile the actual created shape before using this value.
+    // Certificates survive payload Take/DropStale.
+    // An unrequested model remains Unknown. Reset invalidates all certificates.
+    RadiusCertificate QueryRadius(uint32_t index) const;
+    // Owner-thread install seam. Caller supplies the token/identity from QueryRadius
+    // and the successfully installed shape's BoundingSphere; rejects stale inventories.
+    bool RecordAdaptedRadius(uint32_t index, uint64_t generation,
+                             const std::string& modelIdentity, float radius);
     // Main thread. If Ready, returns the IR and returns the slot to Unknown; else null.
     std::shared_ptr<Model::Model> Take(uint32_t index);
     // Main thread. For every model whose `epochs[index] != currentEpoch`: a Queued request is
@@ -224,8 +247,13 @@ class ObjectStreamPreparer
     // Returns false (caller converts synchronously) when workers are absent or the
     // slot is not Unknown. On success the slot is Converting until the worker
     // finishes, then Converted.
+    // The optional exact inventory token permits certification when admission
+    // has renamed sourcePath for the ShapeBank. Copied during this call. An
+    // invalid token disables certification only, without changing conversion.
+    // Without a token, sourcePath must match inventory identity exactly.
     bool SubmitConvert(uint32_t index, std::shared_ptr<Model::Model> model,
-                       std::shared_ptr<const Model::ShapeAdapter::AdapterBankTables> tables);
+                       std::shared_ptr<const Model::ShapeAdapter::AdapterBankTables> tables,
+                       const RadiusCertificate* inventoryToken = nullptr);
 
     struct ConvertedShape
     {

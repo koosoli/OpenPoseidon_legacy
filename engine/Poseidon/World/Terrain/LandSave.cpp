@@ -4018,8 +4018,9 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                         tablePrepareMs += std::chrono::duration<double, std::milli>(
                             std::chrono::steady_clock::now() - tableStart).count();
                         ++tablesPrepared;
+                        const auto radiusToken = _modernObjectPreparer->QueryRadius(placement.modelIndex);
                         if (_modernObjectPreparer->SubmitConvert(placement.modelIndex, std::move(preparsed),
-                                                                std::move(tables)))
+                                                                std::move(tables), &radiusToken))
                         {
                             ++waited;
                             ++scan;
@@ -4172,7 +4173,7 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                          "Object stream cold model: {} mode={} parse={:.1f} adapt={:.1f} opt={:.1f} create={:.1f} "
                          "[reg={:.1f} mesh={:.1f} sect={:.1f} tex={:.1f} (read={:.1f} create={:.1f} fb={:.1f} "
                          "alpha={:.1f} up={} prep={}) ffi={:.1f} prox={:.1f} other={:.1f} park={}] "
-                         "texhdr={:.1f}/{} total={:.1f} ms{} texWindowWait={:.3f} texEncodeMs={:.3f}",
+                         "texhdr={:.1f}/{} total={:.1f} ms{} texWindowWait={:.3f} texEncodeMs={:.3f} texEncodeWithoutWindow={:.3f}/{}",
                          (const char*)modelName, timing.preparsed ? "async" : (asyncOn ? "sync-fallback" : "sync"),
                          timing.parseMs, timing.adaptMs, timing.optimizeMs, createMs, admitProfile.registerMs,
                          meshMs, sectOnlyMs, texMs, admitProfile.textureReadMs, admitProfile.textureCreateMs,
@@ -4182,7 +4183,8 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                          admitProfile.parkHits ? "hit" : (admitProfile.parkStale ? "stale" : "miss"),
                          admitProfile.texHeaderLoadMs, admitProfile.texHeaderLoads, totalMs,
                          timing.canonical ? "" : " (legacy loader)", admitProfile.textureWindowWaitMs,
-                         admitProfile.textureEncodeMs);
+                         admitProfile.textureEncodeMs, admitProfile.textureEncodeWithoutWindowMs,
+                         admitProfile.textureEncodesWithoutWindow);
             }
             else
                 warmMs += totalMs;
@@ -4533,7 +4535,8 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
                         model->sourcePath = low;
                         auto tables = std::make_shared<Model::ShapeAdapter::AdapterBankTables>();
                         Model::ShapeAdapter::BuildAdapterBankTables(*model, *tables);
-                        _modernObjectPreparer->SubmitConvert(modelIndex, std::move(model), std::move(tables));
+                        const auto radiusToken = _modernObjectPreparer->QueryRadius(modelIndex);
+                        _modernObjectPreparer->SubmitConvert(modelIndex, std::move(model), std::move(tables), &radiusToken);
                     }
                 }
                 else if (state == ObjectStreamPreparer::State::Converted)

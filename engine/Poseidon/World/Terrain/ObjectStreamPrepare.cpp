@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <cstdlib>
 #include <fstream>
@@ -196,6 +197,32 @@ struct ObjectStreamPreparer::Impl
 
     size_t count = 0;
     std::vector<std::string> paths;
+    struct RadiusSlot
+    {
+        float radius = 0.0f;
+        RadiusProvenance provenance = RadiusProvenance::None;
+    };
+    std::vector<RadiusSlot> radiusCertificates; // no retained IR, shape, or duplicate path strings
+
+    // Caller holds mutex. RadiusSlot belongs to this generation's inventory;
+    // Reset destroys/reinitializes the slots, while payload retirement leaves them alone.
+    bool PublishRadius(uint32_t index, uint64_t gen, const std::string& identity,
+                       float radius, RadiusProvenance provenance)
+    {
+        if (gen != generation.load(std::memory_order_relaxed) || index >= count || paths[index] != identity)
+            return false;
+        if (!std::isfinite(radius) || radius < 0.0f)
+        {
+            radiusCertificates[index] = {}; // a current failed measurement invalidates old evidence
+            return false;
+        }
+        // An already installed/adapted bound outranks a later speculative parse.
+        if (provenance == RadiusProvenance::ParsedODOL &&
+            radiusCertificates[index].provenance == RadiusProvenance::AdaptedShape)
+            return true;
+        radiusCertificates[index] = {radius, provenance};
+        return true;
+    }
     std::vector<std::optional<BankReadRequest>> packedReads;
     std::unique_ptr<std::atomic<uint8_t>[]> states;
     std::vector<ModelPtr> models;
@@ -217,6 +244,9 @@ struct ObjectStreamPreparer::Impl
         std::vector<PackedTextureRead> textures;
         uint64_t textureGeneration = 0;
         uint32_t index = 0;
+        bool radiusIdentityAccepted = false;
+        uint64_t radiusGeneration = 0;
+        std::string radiusIdentity; // copied owner token, never a borrowed model/shape
         uint64_t reservation = 0;
         ModelPtr model;
         std::shared_ptr<const Model::ShapeAdapter::AdapterBankTables> tables;
@@ -337,6 +367,19 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
             }
             const double convMs =
                 std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - convStart).count();
+            if (shape)
+            {
+                // ODOL's deferred tail never changes this scalar; MLOD already
+                // ran its ordinary all-LOD/frame bounding-sphere computation.
+                // Publish before optional texture work, without another vertex scan.
+                std::lock_guard<std::mutex> radiusLock(mutex);
+                if (jobGen == generation.load(std::memory_order_relaxed) &&
+                    job.index < count && !stale[job.index] && paths[job.index] == conversionPath &&
+                    job.radiusIdentityAccepted && job.radiusGeneration == jobGen &&
+                    (job.model->sourceFormat == "ODOL" || job.model->sourceFormat == "MLOD"))
+                    PublishRadius(job.index, jobGen, job.radiusIdentity,
+                                  shape->BoundingSphere(), RadiusProvenance::AdaptedShape);
+            }
             uint64_t prepared = 0, preparedBytes = 0, skipped = 0, unreadable = 0;
             const auto textureStart = std::chrono::steady_clock::now();
             if (shape)
@@ -658,6 +701,11 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
         const bool parseFailed = !model && opened;
         if (model)
         {
+            // Canonical ODOL parses preserve the serialized engine sphere exactly
+            // through adaptation/tail. IR MLOD/Xob bbox spheres are not equivalent.
+            if (!nativeArchiveModel && model->sourceFormat == "ODOL")
+                PublishRadius(index, gen, model->sourcePath, model->boundingSphere.radius,
+                              RadiusProvenance::ParsedODOL);
             payloadBytes[index] = payload;
             stats.readyPayloadBytes += payload;
             stats.peakReadyPayloadBytes = std::max(stats.peakReadyPayloadBytes, stats.readyPayloadBytes);
@@ -802,6 +850,11 @@ void ObjectStreamPreparer::Reset(const std::string* paths, size_t modelCount)
         _impl->stale.assign(modelCount, false);
         _impl->requestedAtUs.assign(modelCount, 0);
         _impl->paths.assign(paths, paths + modelCount);
+        // Fresh capacity tracks this inventory, rather than retaining a previous
+        // world's larger certificate allocation after Reset.
+        std::vector<Impl::RadiusSlot>(modelCount).swap(_impl->radiusCertificates);
+        _impl->stats.radiusCertificateBytes =
+            _impl->radiusCertificates.capacity() * sizeof(Impl::RadiusSlot);
         _impl->packedReads = std::move(packedReads);
         _impl->count = modelCount;
         _impl->states = modelCount > 0 ? std::make_unique<std::atomic<uint8_t>[]>(modelCount) : nullptr;
@@ -860,6 +913,27 @@ ObjectStreamPreparer::State ObjectStreamPreparer::Query(uint32_t index) const
     if (index >= _impl->count)
         return State::Unknown;
     return _impl->Get(index);
+}
+
+ObjectStreamPreparer::RadiusCertificate ObjectStreamPreparer::QueryRadius(uint32_t index) const
+{
+    std::lock_guard<std::mutex> lock(_impl->mutex);
+    RadiusCertificate out;
+    out.generation = _impl->generation.load(std::memory_order_relaxed);
+    if (index >= _impl->count) return out;
+    out.modelIdentity = _impl->paths[index];
+    const auto& slot = _impl->radiusCertificates[index];
+    out.provenance = slot.provenance;
+    out.radius = slot.radius;
+    if (slot.provenance != RadiusProvenance::None) out.state = RadiusState::Certified;
+    return out;
+}
+
+bool ObjectStreamPreparer::RecordAdaptedRadius(uint32_t index, uint64_t generation,
+                                             const std::string& modelIdentity, float radius)
+{
+    std::lock_guard<std::mutex> lock(_impl->mutex);
+    return _impl->PublishRadius(index, generation, modelIdentity, radius, RadiusProvenance::AdaptedShape);
 }
 
 std::shared_ptr<Model::Model> ObjectStreamPreparer::Take(uint32_t index)
@@ -971,7 +1045,8 @@ size_t ObjectStreamPreparer::DropStale(const uint32_t* epochs, size_t count, uin
 }
 
 bool ObjectStreamPreparer::SubmitConvert(uint32_t index, std::shared_ptr<Model::Model> model,
-                                         std::shared_ptr<const Model::ShapeAdapter::AdapterBankTables> tables)
+                                         std::shared_ptr<const Model::ShapeAdapter::AdapterBankTables> tables,
+                                         const RadiusCertificate* inventoryToken)
 {
     if (!model || !tables)
         return false;
@@ -1013,6 +1088,14 @@ bool ObjectStreamPreparer::SubmitConvert(uint32_t index, std::shared_ptr<Model::
     _impl->Set(index, State::Converting);
     Impl::ConvertJob job;
     job.index = index;
+    job.radiusGeneration = _impl->generation.load(std::memory_order_relaxed);
+    // Admission lowercases sourcePath for ShapeBank after taking the IR. Only
+    // an exact owner inventory token authorizes this otherwise ambiguous mapping.
+    // A rejected explicit token never falls back to inference from sourcePath.
+    job.radiusIdentityAccepted = inventoryToken
+        ? inventoryToken->generation == job.radiusGeneration && inventoryToken->modelIdentity == _impl->paths[index]
+        : model->sourcePath == _impl->paths[index];
+    if (job.radiusIdentityAccepted) job.radiusIdentity = _impl->paths[index];
     // Retain the IR charge plus an equal workspace/output allowance. This is a
     // scheduling estimate, not a measurement of Shape allocations. Useful
     // conversions always progress; their debt parks subsequent speculative parses.

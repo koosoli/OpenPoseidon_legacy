@@ -1914,9 +1914,18 @@ uint64_t TextureWgpu::EnsureUploaded()
                              std::vector<uint8_t>& blocks, std::vector<uint32_t>& offsets, int& levels)
         {
             const uint64_t encodeBegan = profiled ? NowUs() : 0;
+            const bool withoutWindow = profiled && !EngineWgpu::ProducerMayTouchRenderer();
             const bool encoded = EncodeBc3Chain(rgba, width, height, blocks, offsets, levels);
             if (profiled)
-                admit.textureEncodeMs += (NowUs() - encodeBegan) / 1000.0;
+            {
+                const double encodeMs = (NowUs() - encodeBegan) / 1000.0;
+                admit.textureEncodeMs += encodeMs;
+                if (withoutWindow)
+                {
+                    admit.textureEncodeWithoutWindowMs += encodeMs;
+                    ++admit.textureEncodesWithoutWindow;
+                }
+            }
             return encoded;
         };
         DecodedImage prepared;

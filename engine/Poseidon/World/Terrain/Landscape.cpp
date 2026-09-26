@@ -19,6 +19,7 @@
 
 #include <Poseidon/World/Terrain/LandscapeShared.hpp>
 #include <Poseidon/World/Terrain/TerrainProfile.hpp>
+#include <Poseidon/World/Terrain/WorldObjectPlacementFrame.hpp>
 
 #include <Poseidon/Core/TaskPool.hpp>
 
@@ -2897,31 +2898,10 @@ Object* Landscape::ObjectCreate(int id, const char* name, const Matrix4& transfo
     PoseidonAssert(obj->ID() == id);
     // check matrix type
 
-    Matrix4 nTransform = transform;
-
-#if 1
-    // "repair" matrix
-    // matrix should be scaled rotation
-    // (S*R, where S is scale matrix and R is rotation)
-    // some matrices must not be repaired
-    // this holds especially for forests
     static RStringB forestString("forest");
-    if (shape->GetPropertyClass() != forestString)
-    {
-        float scale = obj->GetType() == Network ? 1.0f : nTransform.Scale();
-        // if object is slope following, up should be VUp
-        // if (shape->GetAndHints()&ClipLandKeep)
-        if (shape->GetOrHints() & ClipLandKeep)
-        {
-            nTransform.SetUpAndAside(VUp, nTransform.DirectionAside());
-        }
-        else
-        {
-            nTransform.SetUpAndAside(nTransform.DirectionUp(), nTransform.DirectionAside());
-        }
-        nTransform.SetScale(scale);
-    }
-#endif
+    Matrix4 nTransform = RepairWorldObjectPlacementFrame(transform, shape->GetPropertyClass() == forestString,
+                                                        obj->GetType() == Network,
+                                                        (shape->GetOrHints() & ClipLandKeep) != 0);
 
     obj->SetTransform(nTransform);
 
