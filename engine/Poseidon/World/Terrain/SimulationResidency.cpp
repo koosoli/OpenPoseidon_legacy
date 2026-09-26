@@ -83,7 +83,7 @@ Status RegionRecordStatus(const State& s, const State::Region& r, const Object& 
         const auto watch = s.watches.find(index);
         if (entry == s.entries.end() || watch == s.watches.end()) return Status::Unknown;
         Object* object = static_cast<Object*>(entry->second.object);
-        if (!object || object != static_cast<Object*>(watch->second.object) ||
+        if (!object || !s.MatchesQueryBorrow(entry->second) || object != static_cast<Object*>(watch->second.object) ||
             object->GetShape() != entry->second.shape.GetRef() ||
             SimulationFrameSample(object->Transform()) != entry->second.frame || object->GetRadius() != entry->second.radius)
             return Status::Unknown;
@@ -358,6 +358,8 @@ SimulationResidencyStats Landscape::SnapshotModernSimulationResidency() const
     for (const auto& g : s.groups)
     {
         if (g.shape) ++out.activeModels;
+        if (g.queryBorrow) ++out.queryBorrowedModels;
+        out.queryBorrowedEntries += g.queryEntries;
         if (g.memberCount && g.status == State::ModelState::Ready) ++out.preparedModels;
         if (g.status == State::ModelState::Unknown || !g.validRows) ++out.unknownModels;
     }
@@ -878,6 +880,10 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
                 }
                 else coldModel = s.entries[index].positiveColdModel;
                 observed->positiveColdModel = coldModel;
+                // Positive re-observation does not acquire query ownership, but
+                // must preserve an existing full-producer entry's joined debt.
+                if (const auto previous = s.entries.find(index); previous != s.entries.end())
+                    observed->queryModel = previous->second.queryModel;
                 s.entries[index] = std::move(*observed);
                 if (!r.activeSet.contains(index))
                 {
@@ -978,6 +984,8 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
                 auto& e = s.entries[index]; e.object = object; e.shape = object->GetShape();
                 e.frame = SimulationFrameSample(object->Transform()); e.radius = object->GetRadius();
                 e.positiveRevision = 0; e.positiveId = -1;
+                if (!s.AttachQueryBorrow(p.modelIndex, e))
+                { r.status = Status::Unknown; break; }
                 if (!r.activeSet.contains(index))
                 {
                     if (!s.AcquireLease(index)) { r.status = Status::CapacityExceeded; break; }
@@ -1018,6 +1026,9 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
         const auto coldModel = found->second.positiveColdModel;
         if (coldModel < s.groups.size() && s.groups[coldModel].positiveCold && s.groups[coldModel].positiveCold->residentEntries)
             --s.groups[coldModel].positiveCold->residentEntries;
+        // Save ownership may keep the Object alive after its final lease. Its
+        // query model borrow still ends at this owner cleanup boundary.
+        s.ReleaseQueryBorrow(found->second);
         s.entries.erase(found);
     }
     const size_t watchVisits = std::min(size_t(128), s.watchCleanupQueue.size());

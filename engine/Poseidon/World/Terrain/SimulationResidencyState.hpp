@@ -57,6 +57,11 @@ struct SimulationResidencyState
     {
         bool sourceValidated = false, charged = false, requestOutstanding = false;
         Ref<LODShapeWithShadow> shape;
+        // Selected query ownership, deduplicated per model. The current full
+        // producer already charges this same shape; this is not another asset
+        // allocation or permission to admit metadata beyond its model cap.
+        Ref<LODShapeWithShadow> queryBorrow;
+        uint32_t queryEntries = 0;
         uint64_t revision = 0, payloadCharge = 0, shapeCharge = 0;
         float radius = 0;
         SimulationFactoryRoute route = SimulationFactoryRoute::Unsupported;
@@ -68,7 +73,7 @@ struct SimulationResidencyState
             // A legacy handoff can own charges/request intent before a shape
             // exists. Cold admission must never replace that accounting.
             return status == ModelState::Waiting && !positiveCold && !positiveColdRefused &&
-                !shape && !charged && !requestOutstanding && !sourceValidated &&
+                !shape && !queryBorrow && queryEntries == 0 && !charged && !requestOutstanding && !sourceValidated &&
                 payloadCharge == 0 && shapeCharge == 0;
         }
     };
@@ -81,6 +86,7 @@ struct SimulationResidencyState
         uint64_t positiveRevision = 0;
         int positiveId = -1;
         uint32_t positiveColdModel = std::numeric_limits<uint32_t>::max();
+        uint32_t queryModel = std::numeric_limits<uint32_t>::max();
         bool MatchesPositiveResident(const Object& live) const
         {
             auto* current = live.GetShape();
@@ -183,6 +189,44 @@ struct SimulationResidencyState
     uint64_t referencedModels = 0;
     bool activeModelCapacityExceeded = false;
     double placementPadding = 0;
+
+    bool MatchesQueryBorrow(const Entry& entry) const
+    {
+        if (!Foundation::IsMainThread() || entry.queryModel >= groups.size()) return false;
+        const auto& g = groups[entry.queryModel];
+        Object* object = static_cast<Object*>(entry.object);
+        return object && g.status == ModelState::Ready && g.queryEntries != 0 &&
+            g.queryBorrow && g.queryBorrow.GetRef() == g.shape.GetRef() &&
+            object->GetShape() == g.queryBorrow.GetRef() && entry.shape.GetRef() == g.queryBorrow.GetRef() &&
+            g.revision != 0 && g.queryBorrow->QueryPolicyRevision() == g.revision;
+    }
+    bool AttachQueryBorrow(uint32_t model, Entry& entry)
+    {
+        if (!Foundation::IsMainThread() || model >= groups.size() ||
+            activeModelCapacityExceeded || watchCapacityExceeded || inventoryInvalid) return false;
+        auto& g = groups[model];
+        Object* object = static_cast<Object*>(entry.object);
+        if (!object || g.status != ModelState::Ready || g.positiveCold || !g.shape ||
+            object->GetShape() != g.shape.GetRef() || entry.shape.GetRef() != g.shape.GetRef() ||
+            g.revision == 0 || g.shape->QueryPolicyRevision() != g.revision) return false;
+        if (entry.queryModel != std::numeric_limits<uint32_t>::max())
+            return entry.queryModel == model && MatchesQueryBorrow(entry);
+        if (g.queryEntries == std::numeric_limits<uint32_t>::max() ||
+            (g.queryBorrow && g.queryBorrow.GetRef() != g.shape.GetRef()) ||
+            (!g.queryBorrow && g.queryEntries != 0)) return false;
+        g.queryBorrow = g.shape; ++g.queryEntries; entry.queryModel = model;
+        return true;
+    }
+    void ReleaseQueryBorrow(Entry& entry)
+    {
+        if (!Foundation::IsMainThread()) return;
+        if (entry.queryModel < groups.size())
+        {
+            auto& g = groups[entry.queryModel];
+            if (g.queryEntries && --g.queryEntries == 0) g.queryBorrow = nullptr;
+        }
+        entry.queryModel = std::numeric_limits<uint32_t>::max();
+    }
 
     void FinishInventory()
     {

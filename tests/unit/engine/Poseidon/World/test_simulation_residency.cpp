@@ -279,6 +279,82 @@ TEST_CASE("Positive loaded Plain observation uses the actual instance without a 
     }
 }
 
+TEST_CASE("Complete query entries share selected model ownership until joined lease cleanup", "[streaming-simulation-residency]")
+{
+    Foundation::CaptureMainThread();
+    SimulationResidencyState state; state.groups.resize(2);
+    auto shape = LoadedPositivePlainShape();
+    auto& group = state.groups[0];
+    group.shape = shape; group.status = SimulationResidencyState::ModelState::Ready;
+    group.revision = shape->QueryPolicyRevision();
+    group.charged = true; group.payloadCharge = 1234; group.shapeCharge = 5678;
+    state.stats.payloadCapacityCharge = 1234; state.stats.shapeSchedulingCharge = 5678;
+    Ref<ObjectPlain> first = new ObjectPlain(shape.GetRef(), 1001); first->SetType(Primary);
+    Ref<ObjectPlain> second = new ObjectPlain(shape.GetRef(), 1002); second->SetType(Primary);
+    SimulationResidencyState::Entry a, b;
+    a.object = first.GetRef(); a.shape = shape.GetRef();
+    b.object = second.GetRef(); b.shape = shape.GetRef();
+    REQUIRE(state.AttachQueryBorrow(0, a)); REQUIRE(state.AttachQueryBorrow(0, b));
+    REQUIRE(state.AttachQueryBorrow(0, a)); // repeated region admission owns no additional debt
+    REQUIRE(group.queryEntries == 2);
+    REQUIRE(group.queryBorrow.GetRef() == shape.GetRef());
+    REQUIRE(state.MatchesQueryBorrow(a)); REQUIRE(state.MatchesQueryBorrow(b));
+    REQUIRE_FALSE(state.AttachQueryBorrow(1, a));
+    REQUIRE(group.queryEntries == 2);
+
+    SECTION("overlapping region replacement retains the entry until the final lease retires")
+    {
+        state.entries.emplace(10, a); state.entries.emplace(11, b);
+        SimulationResidencyState::Region old, replacement;
+        REQUIRE(state.AcquireLease(10)); old.active = {10}; old.activeSet.insert(10);
+        REQUIRE(state.AcquireLease(10)); replacement.active = {10}; replacement.activeSet.insert(10);
+        state.DropRegion(old);
+        REQUIRE(state.HasLease(10)); REQUIRE(state.MatchesQueryBorrow(state.entries.at(10)));
+        state.DropRegion(replacement); REQUIRE_FALSE(state.HasLease(10));
+        state.ReleaseQueryBorrow(state.entries.at(10)); state.entries.erase(10);
+        REQUIRE(group.queryEntries == 1); REQUIRE(state.MatchesQueryBorrow(state.entries.at(11)));
+        state.ReleaseQueryBorrow(state.entries.at(11)); state.entries.erase(11);
+        REQUIRE(group.queryEntries == 0); REQUIRE_FALSE(group.queryBorrow);
+    }
+    SECTION("saved survivor loses query debt without losing CPU or save ownership")
+    {
+        second->SetDammage(.25f); REQUIRE(second->MustBeSaved());
+        state.ReleaseQueryBorrow(a); REQUIRE(group.queryEntries == 1);
+        state.ReleaseQueryBorrow(b); state.ReleaseQueryBorrow(b);
+        REQUIRE(group.queryEntries == 0); REQUIRE_FALSE(group.queryBorrow);
+        REQUIRE(second->GetShape() == shape.GetRef());
+        REQUIRE(second->GetRawTotalDammage() == .25f); REQUIRE(second->MustBeSaved());
+        REQUIRE(group.shape.GetRef() == shape.GetRef());
+        REQUIRE(state.stats.payloadCapacityCharge == 1234);
+        REQUIRE(state.stats.shapeSchedulingCharge == 5678);
+    }
+    SECTION("same-valued policy mutation cannot publish a current borrow")
+    {
+        shape->SetAutoCenter(shape->IsAutoCenter());
+        REQUIRE_FALSE(state.MatchesQueryBorrow(a)); REQUIRE_FALSE(state.AttachQueryBorrow(0, a));
+        SimulationResidencyState::Entry fresh; fresh.object = first.GetRef(); fresh.shape = shape.GetRef();
+        REQUIRE_FALSE(state.AttachQueryBorrow(0, fresh)); REQUIRE(group.queryEntries == 2);
+        state.ReleaseQueryBorrow(a); state.ReleaseQueryBorrow(b);
+        REQUIRE_FALSE(group.queryBorrow);
+    }
+    SECTION("another actual shape cannot borrow the registered producer")
+    {
+        auto alias = LoadedPositivePlainShape();
+        Ref<ObjectPlain> other = new ObjectPlain(alias.GetRef(), 1003); other->SetType(Primary);
+        SimulationResidencyState::Entry wrong; wrong.object = other.GetRef(); wrong.shape = alias.GetRef();
+        REQUIRE_FALSE(state.AttachQueryBorrow(0, wrong)); REQUIRE(group.queryEntries == 2);
+    }
+    SECTION("incomplete large-inventory coverage cannot acquire a selected query borrow")
+    {
+        state.activeModelCapacityExceeded = true;
+        SimulationResidencyState::Entry fresh; fresh.object = first.GetRef(); fresh.shape = shape.GetRef();
+        REQUIRE_FALSE(state.AttachQueryBorrow(0, fresh));
+        REQUIRE(group.queryEntries == 2);
+        state.ReleaseQueryBorrow(a); state.ReleaseQueryBorrow(b);
+        REQUIRE_FALSE(group.queryBorrow);
+    }
+}
+
 TEST_CASE("Actor positive replacement retains loaded geometry on large inventories without making Fire ready", "[streaming-simulation-residency]")
 {
     Foundation::CaptureMainThread();

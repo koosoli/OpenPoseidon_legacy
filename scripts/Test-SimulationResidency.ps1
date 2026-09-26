@@ -210,9 +210,11 @@ try {
   if ($wrongRay.status -ne 'Pending') {throw 'Unrelated ray inherited fire readiness'}
   $independent=State
   if ($independent.regions -lt 2 -or $independent.readyRegions -lt 2 -or $independent.queryRegions -ne 1 -or $independent.readyQueries -ne 1) {throw 'Query channel replaced automatic neighborhood'}
+  if ($independent.queryBorrowedModels -ne 1 -or $independent.queryBorrowedEntries -ne 2) {throw 'Shared model query ownership was missing or duplicated'}
   $null=Query 'release'
   $queryReleased=State
   if ($queryReleased.queryRegions -ne 0 -or $queryReleased.leasedPlacements -ne 2) {throw 'Query release retired another interest owner'}
+  if ($queryReleased.queryBorrowedModels -ne 1 -or $queryReleased.queryBorrowedEntries -ne 2) {throw 'Query release lost overlapping actor model ownership'}
   if ($LargeWall) {
    if ($coldIds.objects[0].z -ne 1400 -or $coldIds.objects[0].radius -lt 200) {throw 'Large original wall did not retain its distant origin/envelope'}
    $after=State
@@ -244,6 +246,7 @@ try {
   $movedAway=Wait-State {param($r) $r.status -eq 'Ready' -and $r.leasedPlacements -eq 0 -and !$r.pendingRegions} 'moving actor replacement'
   $movedAwayIds=Ids
   if (@($movedAwayIds.objects | Where-Object {$_.present}).Count) {throw 'Moving actor retained unmodified remote placements'}
+  if ($movedAway.queryBorrowedModels -ne 0 -or $movedAway.queryBorrowedEntries -ne 0) {throw 'Moving actor retained query model ownership'}
   $null=Send @{cmd='exec';code='streamFixtureActor setPos [1190,1200,0]'}
   $reacquired=Wait-State {param($r) $r.status -eq 'Ready' -and $r.leasedPlacements -eq 2 -and !$r.pendingRegions} 'moving actor reacquisition'
   $damage=Send @{cmd='stream_existing_damage';id=1002;damage=0.25}
@@ -257,6 +260,7 @@ try {
   $final=Send @{cmd='stream_residency'}
   if ($final.required -ne 0) {throw 'Fixture permanently pinned an object'}
   if ($released.status -ne 'Unknown' -or $released.liveWatchedPlacements -ne 1) {throw 'Zero-lease mutable placement lost its freshness watcher'}
+  if ($released.queryBorrowedModels -ne 0 -or $released.queryBorrowedEntries -ne 0) {throw 'Saved survivor retained joined query model ownership'}
   $result=@{cold=$cold;coldIds=$coldIds;residency=$residency;hits=$hits;queryBefore=$queryBefore;queryReady=$queryReady;invalidPurpose=$invalidPurpose;wrongRay=$wrongRay;independent=$independent;queryReleased=$queryReleased;visual=$visual;away=$away;awayHits=$awayHits;movedAway=$movedAway;movedAwayIds=$movedAwayIds;reacquired=$reacquired;damage=$damage;mutated=$mutated;released=$released;releasedIds=$releasedIds;final=$final}
   }
  }

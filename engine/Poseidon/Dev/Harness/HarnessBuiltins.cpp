@@ -300,6 +300,8 @@ void RegisterStreamingProbes(HarnessServer& hs)
             number("watchedPlacements", state.watchedPlacements);
             number("liveWatchedPlacements", state.liveWatchedPlacements);
             number("queryRegions", state.queryRegions);
+            number("queryBorrowedModels", state.queryBorrowedModels);
+            number("queryBorrowedEntries", state.queryBorrowedEntries);
             number("readyQueries", state.readyQueries);
             number("pendingQueries", state.pendingQueries);
             number("unknownQueries", state.unknownQueries);
