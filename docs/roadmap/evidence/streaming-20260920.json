@@ -12781,6 +12781,267 @@
         "route-frame-ms.json": "1e8fb43c7e1b5bf112643dcd13e9b10a5270a076dacfcc046474f261ba63b394",
         "samples.jsonl": "b2a3d7d5e04910a3406d60594fe0ec65b84d36b0d03dba2165753dea93afdaf0"
       }
+    },
+    {
+      "run": "warm-textures-actual-20260927-disabled-20260927-071021",
+      "classification": "FAILED strict positive warm-job gate; runner exit1, no result/frame/screenshot/source-proof artifacts",
+      "provenance": {
+        "installed": "codex/streaming-residency 4db08e8f 2026-09-27_07:10 deploy-ps1",
+        "warmTextureJobs": true,
+        "head": "4db08e8fabc0636a059c1d4047d3551c7e814a94",
+        "routeX": [
+          5804.58,
+          5904.58,
+          6004.58,
+          6104.58,
+          6004.58,
+          5904.58,
+          5804.58,
+          5704.58,
+          5704.58,
+          5704.58,
+          5704.58
+        ],
+        "width": 1280,
+        "archiveSourceBindings": true,
+        "viewDistance": 2000,
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "B0D48FD16F591D9B4095C79614637AC6AE2A6BC7B32ED76AE3C99A3B18CF44E7",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "1F297F1E95537DBED7E480449ECFA1894AEED9BC921C1AE5F74F29F8B2936A07",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "msaaSamples": 4,
+        "processScope": "Owned PID private/RSS samples; sparse owner-pump values are observations, not percentiles",
+        "height": 720,
+        "environment": {
+          "WGR_SIMULATION_POSITIVE_COLD": "0",
+          "WGR_OBJECT_STREAM_PBO": "1",
+          "WGR_TEXTURE_STREAM_STATS": "0",
+          "WGR_OBJECT_STREAM_WARM_PROFILE": "1",
+          "POSEIDON_MODEL_DDC": "0",
+          "WGR_GEO_POOL_PRESSURE_GROWTH": "0",
+          "WGR_OBJECT_STREAM_WARM_TEXTURE_JOBS": "1",
+          "WGR_NATIVE_DDS_PREPARE": "0",
+          "WGR_OBJECT_STREAM_MAX_OBJECTS": "20000",
+          "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\warm-textures-actual-20260927-disabled-20260927-071021\\user",
+          "WGR_OBJECT_STREAM_PBO_TEXTURES": "0",
+          "WGR_NATIVE_DDS_BC3_ONLY": "0",
+          "WGR_OBJECT_STREAM_TEST_BUDGET": "1",
+          "WGR_SIMULATION_RESIDENCY": "0",
+          "WGR_GEO_POOL_GROWTH": "2.0",
+          "WGR_LOD_GOVERNOR_RANGE": "1",
+          "WGR_SKY_VOLUME_INCREMENTAL": "1",
+          "WGR_OBJECT_STREAM_GPU_BUDGET": "0",
+          "WGR_ADAPTIVE_TEXTURE_DETAIL": "0",
+          "WGR_OBJECT_STREAM_WARM_TEXTURES": "1"
+        },
+        "paaLzoReplay": false,
+        "paaPreparationInflight": false,
+        "mode": "Disabled",
+        "poseHoldSeconds": 3,
+        "world": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\packages\\dayz-compat\\world\\chernarusplus\\chernarusplus.wrp",
+        "pose": [
+          5704.58,
+          2523.37,
+          73.74,
+          260.9,
+          -3.8
+        ],
+        "paaPreparationDiagnostics": false,
+        "scriptSha256": "038D8738192D65A5BDDBFCA8290C296FC3EEAB8BDC3150CC2E3C251061ACDE22",
+        "measurementScope": "Bounded engine16384-frame route capture; screening only, no FPS acceptance, vanilla parity or full cold-cache proof",
+        "routeScope": "Eight convergence400m out/return poses plus three stationary recovery holds; one process per invocation",
+        "clearedEnvironmentNames": [],
+        "packedTextures": false,
+        "registrationQuota": false,
+        "fpsCap": 60
+      },
+      "summary": {
+        "passed": false,
+        "runnerExitCode": 1,
+        "performanceAccepted": false,
+        "proofScope": "Bounded requested dependencies of cached CPU models; successful GPU block uploads validate initialized physical member and current loaded mount, not whole-model texture readiness or a performance benefit",
+        "warmCounters": {
+          "warmTextureJobsEnabled": true,
+          "warmTextureJobsSubmitted": 0,
+          "warmTextureJobsCompleted": 0,
+          "warmTextureJobsCancelled": 0,
+          "warmTextureJobsCoalesced": 0,
+          "warmTextureJobsRejected": 0,
+          "warmTextureMembersPrepared": 0,
+          "warmTextureMembersSkipped": 0,
+          "warmTextureMembersUnreadable": 0,
+          "warmTextureQueued": 0,
+          "warmTextureActive": 0,
+          "warmTextureMetadataBytes": 0,
+          "warmTextureMetadataBytesPeak": 0,
+          "warmTextureScratchBytes": 0,
+          "warmTextureScratchBytesPeak": 0,
+          "warmTextureQueueBytes": 1048,
+          "warmTextureMs": 0,
+          "warmPreparedPuts": 0,
+          "warmPreparedTakes": 0,
+          "warmPreparedSourceRefused": 0,
+          "warmPreparedUploads": 0,
+          "warmPreparedUploadBytes": 0,
+          "warmPreparedUploadFailed": 0
+        },
+        "resident": 19923,
+        "required": 0
+      },
+      "limits": "All11poses had submitted/completed/prepared/takes/uploads0; no queued/active/metadata/scratch/retainedpayload, optionalwarmqueue storage1048. Strictgate correctly refuses feature PASS. Root diagnosis pending, no raises/promotion/performance proof. Engine/provenance/harness/samples/jobproof are actual retained artifacts; absent result/rawframes/screenshot/sourceproof are not invented. Later boundedcapture diagnostics and failed-artifact runner repairs UNBUILT/notincluded4db.",
+      "sha256": {
+        "engine.log": "029af39b756df67e4a45fb9e3ec962d279dce23194ff5d33b4c824eff6976a75",
+        "harness.jsonl": "0981c704b7d22144a9323d19cf1f83ff05d35ca0257ff0f01ac89f0fc06c3847",
+        "provenance.json": "d50bddacac050bf86bb2d67e51d779d3b98f05473fa8a21da0a5a27299ed2334",
+        "samples.jsonl": "f66e0b63875ed02c2c10e5d28207b4cbb4908bf5a1a7c16343d1c4a5f0a6e5fb",
+        "warm-texture-job-proof.json": "d54a9ae30fde4d5e64a7e263f563a9615159f3fdb10f0ddd531a3830fa2093e5"
+      }
+    },
+    {
+      "run": "warm-textures-default-20260927-disabled-20260927-071247",
+      "classification": "PASS clean exit0; all-new-flagsOFF default compatibility only",
+      "provenance": {
+        "paaPreparationDiagnostics": false,
+        "warmTextureJobs": false,
+        "pose": [
+          5704.58,
+          2523.37,
+          73.74,
+          260.9,
+          -3.8
+        ],
+        "poseHoldSeconds": 3,
+        "routeX": [
+          5804.58,
+          5904.58,
+          6004.58,
+          6104.58,
+          6004.58,
+          5904.58,
+          5804.58,
+          5704.58,
+          5704.58,
+          5704.58,
+          5704.58
+        ],
+        "registrationQuota": false,
+        "archiveSourceBindings": false,
+        "clearedEnvironmentNames": [],
+        "world": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\packages\\dayz-compat\\world\\chernarusplus\\chernarusplus.wrp",
+        "installed": "codex/streaming-residency 4db08e8f 2026-09-27_07:10 deploy-ps1",
+        "environment": {
+          "WGR_NATIVE_DDS_BC3_ONLY": "0",
+          "WGR_SIMULATION_RESIDENCY": "0",
+          "WGR_OBJECT_STREAM_GPU_BUDGET": "0",
+          "WGR_TEXTURE_STREAM_STATS": "0",
+          "WGR_ADAPTIVE_TEXTURE_DETAIL": "0",
+          "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\warm-textures-default-20260927-disabled-20260927-071247\\user",
+          "WGR_OBJECT_STREAM_MAX_OBJECTS": "20000",
+          "WGR_LOD_GOVERNOR_RANGE": "1",
+          "POSEIDON_MODEL_DDC": "0",
+          "WGR_SIMULATION_POSITIVE_COLD": "0",
+          "WGR_SKY_VOLUME_INCREMENTAL": "1",
+          "WGR_OBJECT_STREAM_PBO": "1",
+          "WGR_GEO_POOL_GROWTH": "2.0",
+          "WGR_NATIVE_DDS_PREPARE": "0",
+          "WGR_GEO_POOL_PRESSURE_GROWTH": "0",
+          "WGR_OBJECT_STREAM_TEST_BUDGET": "1",
+          "WGR_OBJECT_STREAM_PBO_TEXTURES": "0"
+        },
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "B0D48FD16F591D9B4095C79614637AC6AE2A6BC7B32ED76AE3C99A3B18CF44E7",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "1F297F1E95537DBED7E480449ECFA1894AEED9BC921C1AE5F74F29F8B2936A07",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "routeScope": "Eight convergence400m out/return poses plus three stationary recovery holds; one process per invocation",
+        "viewDistance": 2000,
+        "packedTextures": false,
+        "mode": "Disabled",
+        "measurementScope": "Bounded engine16384-frame route capture; screening only, no FPS acceptance, vanilla parity or full cold-cache proof",
+        "processScope": "Owned PID private/RSS samples; sparse owner-pump values are observations, not percentiles",
+        "head": "4db08e8fabc0636a059c1d4047d3551c7e814a94",
+        "msaaSamples": 4,
+        "scriptSha256": "038D8738192D65A5BDDBFCA8290C296FC3EEAB8BDC3150CC2E3C251061ACDE22",
+        "width": 1280,
+        "height": 720,
+        "fpsCap": 60,
+        "paaPreparationInflight": false,
+        "paaLzoReplay": false
+      },
+      "summary": {
+        "passed": true,
+        "runnerExitCode": 0,
+        "performanceAccepted": false,
+        "proofScope": "Bounded requested dependencies of cached CPU models; successful GPU block uploads validate initialized physical member and current loaded mount, not whole-model texture readiness or a performance benefit",
+        "warmCounters": {
+          "warmTextureJobsEnabled": false,
+          "warmTextureJobsSubmitted": 0,
+          "warmTextureJobsCompleted": 0,
+          "warmTextureJobsCancelled": 0,
+          "warmTextureJobsCoalesced": 0,
+          "warmTextureJobsRejected": 0,
+          "warmTextureMembersPrepared": 0,
+          "warmTextureMembersSkipped": 0,
+          "warmTextureMembersUnreadable": 0,
+          "warmTextureQueued": 0,
+          "warmTextureActive": 0,
+          "warmTextureMetadataBytes": 0,
+          "warmTextureMetadataBytesPeak": 0,
+          "warmTextureScratchBytes": 0,
+          "warmTextureScratchBytesPeak": 0,
+          "warmTextureQueueBytes": 0,
+          "warmTextureMs": 0,
+          "warmPreparedPuts": 0,
+          "warmPreparedTakes": 0,
+          "warmPreparedSourceRefused": 0,
+          "warmPreparedUploads": 0,
+          "warmPreparedUploadBytes": 0,
+          "warmPreparedUploadFailed": 0
+        },
+        "resident": 19923,
+        "required": 0,
+        "n": 873,
+        "meanMs": 39.74099656357388,
+        "medianMs": 23.136,
+        "p95Ms": 123.028,
+        "p99Ms": 380.234,
+        "maxMs": 1019.781,
+        "quantiles": "nearest-rank ceil(n*p)-1; usual median",
+        "dropped": 0,
+        "geometry": 709408856,
+        "texture": 2801562612,
+        "textureCount": 2540
+      },
+      "limits": "Allwarmfields0/queuestorage0/sourceOFF0/newflagsOFF. Root settledPOI no obvious local geometry/material gaps; narrowdefaultcompatibility, not wholemap/no-regression/performance proof. No warm jobs verified in actualON, no promotion/fullplanOPEN/defaultReadyfalse/performancefalse.",
+      "sha256": {
+        "archive-source-binding-proof.json": "8fe3a4332e40730fde97bc5694eb6e10c793d43d85584ed81365ab122d387677",
+        "engine.log": "650166dfbb31fcf38b368ee397b89bac517e22f46265547be7fc100d66637a59",
+        "harness.jsonl": "003e9861c3e175cdd8a495941fe445099b597a0b3fdd0282a284ca29fd9da858",
+        "paa-attempt-proof.json": "2d5840fa74415236244f11ab3cb21950a804d50173439fc05164a47c47e62e97",
+        "paa-inflight-proof.json": "6b533b2c1b76808471eb8ee03fbc18b5f79ef24d942e2893dfab919d19b52861",
+        "provenance.json": "6bf30e6ebdc145d9a6949bcd3519408c4a03212a232133643d39881e455ceeba",
+        "registration-quota-proof.json": "14fe80029fe881cf15713df5985603c2a35d97d9db0cf33c1d520c777b46c792",
+        "result.json": "f760d906f6174ab95454f73e143f59508b17822fda2b3a75223ca9f6bf263c62",
+        "returned-settled.png": "6aaf81922292f8ef25f6f4057f87c637b6b392f9be595520bf20fcf28bf3de5d",
+        "route-frame-ms.json": "665c3c43286e3c4a581fd63ad90cd30999ea3418e0a9ddcb576f9f8675bf2e84",
+        "samples.jsonl": "186408e87d3de6cb1fc95c352c34fc0087eea9bef396510a552f0105a3604c6c",
+        "warm-texture-job-proof.json": "ce00b41cb5992d4aa099e4bd352c52ef10e8a5a72745461972230f2ee21a6140"
+      }
     }
   ],
   "microbenchmarks": [
@@ -13993,6 +14254,19 @@
         "test-archive-source-default-20260927.log": "7ccbf7064b0ac3a13813a55ff2e5755a984f347481d2debd028a5d00ceb43bd6",
         "test-archive-source-compat-20260927.log": "88098001514864efc90684fa6a10316e4aab219e952eda4f84f8f81564bbe4f4",
         "test-archive-source-core-policy-20260927.log": "6fb3102735cb5b3d653a76323b3e0bf94b0943d7f2c48462fdbc2cd021a6b430"
+      }
+    },
+    {
+      "artifactRoot": "build",
+      "runtimeSourceCommit": "4db08e8f",
+      "result": "Lockedall5targets613scheduledstepsPASS(lastshown610). EngineOFF76assert5cases/ON472assert8cases/4worker17assert1case/compat470assert9cases/Core33assert6cases allPASS/noSKIP. Installedclean4db07:10. Exacttwoflags defaultOFF. Independenttypedwarmjobs bounded8/64members/2active, metadata2MiB conservative/scratch64MiB+64KiB peractive undercombineddebt;32model/256capturevisits perrecentre. AllocationfreeDropStale/Resetcleanup/publishingtoken/currentmountedinitializedsource admission/ownerconsumption tests do not supersede FAILEDactualpositivegate. Future capture diagnostics/runner evidence repair/simulationexpiry changes UNBUILT/excluded.",
+      "sha256": {
+        "build-warm-textures-20260927.log": "c8c777f47573c1d9be52dd6f10added17156f78dbd7a51261aab1c2e490554c4",
+        "test-warm-textures-off-20260927.log": "e2794220426ef72f0938294829875d32c94d26475e2f996dac192b7c07d8feae",
+        "test-warm-textures-on-20260927.log": "8faa90bd2316b351396aafaff0fa666945e4de9862fda62bb8c1ca195a6d7251",
+        "test-warm-textures-workers-20260927.log": "366c7dfd14d31c3bfbad4600817016ed6b9b811490eb8a6b4521a15f7365aab9",
+        "test-warm-textures-compat-20260927.log": "3667253f382095471d1d66bcf37c7e8bb8676010562e311905b0b974434723b3",
+        "test-warm-textures-core-20260927.log": "d42876ecf9b39893dd16fe59c7f946b7bb8c2b92b7fd6e6c58f2c2011cf07e33"
       }
     }
   ],

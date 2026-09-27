@@ -2557,3 +2557,32 @@ cache and mixed ONmean42.38 versusOFF43.71, ONp95139.518 versusOFF128.351
 prevent performance/no-regression acceptance. No warm jobs or speed feature
 shipped; actual-init provenance is a prerequisite in progress, not an external
 blocker. WholeplanOPEN/defaultReady/performanceAcceptedfalse/newflagOFF.
+
+## Sept27 bounded warm-only texture jobs: actual positive gate FAILED
+
+4db08e8f locked all5target build613scheduledsteps PASS (last shown610). Fresh
+OFF76assertions/5cases, ON472/8, fourworker17/1, compatibility470/9, Core33/6
+all PASS/noSKIP. Installedclean4db07:10 EXE B0D48FD16F591D9B4095C79614637AC6AE2A6BC7B32ED76AE3C99A3B18CF44E7,
+DLL 1F297F1E95537DBED7E480449ECFA1894AEED9BC921C1AE5F74F29F8B2936A07.
+Source adds independent texture-only jobs on existing workers, no model-state
+parse/adapt takeover. Optional bounds8jobs/64members/2active, conservative2MiB
+metadata and64MiB+64KiB scratch peractive undercombineddebt; recentre32models/
+256shared capture visits. Reviewed allocation-free DropStale, generation/token
+cancellation, actual initialized/current mounted-member source checks and owner
+Take/upload path remain experimental/defaultOFF; passing unit tests do not
+prove useful production work occurred.
+
+ActualON+WarmProfile071021 strict gate FAILED/runnerexit1: submitted/completed/
+prepared/Take/uploads0 across all11poses; no queue/active/scratch/livepayload,
+optional queue state1048bytes, returned19923/required0. Cause pending bounded
+capture diagnosis. Engine/provenance/harness/samples/jobproof retained; early
+strict gate wrote no result/rawframe/screenshot/sourceproof, and none is
+invented. No PASS/no-regression/performance gain or default promotion. Bounded
+capture log/failed-evidence runner repairs and simulationexpiry work are NEXT
+unbuilt source, excluded from4db. No cap raises or unused-feature success claim.
+
+NormalallOFF071247 PASS/clean0/dropped0,873frames mean39.740997,
+median23.136/p95123.028/p99380.234/max1019.781ms; nearest-rank/usualmedian.
+Returned19923/required0, allwarmfields0/noqueue storage/sourceOFF0. Root viewed
+settledPOI without obvious new local geometry/material gaps, narrow default
+compatibility only. WholeplanOPEN/defaultReady/performanceAcceptedfalse/allnewflagsOFF.
