@@ -322,7 +322,7 @@ impl SprayGpu {
     pub fn set_frame(&mut self, queue: &wgpu::Queue, dt: f32, time: f32, cam: [f32; 3], gain: f32, intensity: f32, on: bool) {
         self.frame = self.frame.wrapping_add(1);
         self.on = on;
-        let p = SprayParams::new(self.frame, dt, time, cam, gain.clamp(0.0, 3.0), intensity.clamp(0.0, 3.0), on);
+        let p = SprayParams::new(self.frame, dt, time, cam, gain.clamp(0.0, 3.0), intensity.clamp(0.0, 50.0), on);
         queue.write_buffer(&self.params, 0, bytemuck::bytes_of(&p));
     }
 

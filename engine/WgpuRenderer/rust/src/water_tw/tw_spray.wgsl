@@ -89,7 +89,10 @@ fn vs_spray(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) ->
     // dense spray is thrown out of the splash as a compact mass and spreads (grows from ~half size)
     let tAge = age / max(life, 1e-3);
     let r = select(r0, r0 * mix(0.45, 1.0, smoothstep(0.0, 0.25, tAge)), kind > 2.5 && kind < 3.5);
-    let size = max(r, pixel * 1.3);
+    // (OP diagnostics: sprite intensity >= 20, e.g. WGR_TW_SPRAY=1,20, draws every live particle as
+    // an opaque magenta dot of at least 4 px, to show where the spray is)
+    let dbgDots = sprayR.b.y >= 20.0;
+    let size = max(r, pixel * select(1.3, 4.0, dbgDots));
 
     // motion blur along the velocity projected on the view plane; ligaments are elongated anyway
     let vPerp = vel - Vd * dot(vel, Vd);
@@ -165,7 +168,7 @@ fn vs_spray(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) ->
     // far: fade out; very near the eye: sheets and mist would fill the screen
     let maxD = sprayR.b.z;
     let distFade = smoothstep(maxD, maxD * 0.55, dist) * select(smoothstep(0.6, 3.0, dist), 1.0, water);
-    let a = baseA * fadeIn * fadeOut * cover * distFade * sprayR.b.y * sprayR.b.w;
+    let a = select(baseA * fadeIn * fadeOut * cover * distFade * sprayR.b.y * sprayR.b.w, 1.0, dbgDots && sprayR.b.w > 0.5);
 
     var o: SprayOut;
     o.vUV = corner;
@@ -185,6 +188,10 @@ fn vs_spray(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) ->
 @fragment
 fn fs_spray(in: SprayOut) -> @location(0) vec4<f32> {
     let uv = in.vUV;
+    if (sprayR.b.y >= 20.0) {
+        if (dot(uv, uv) > 1.0) { discard; }
+        return vec4<f32>(1.0, 0.0, 1.0, 1.0);
+    }
     let vMisc = in.vMisc;
     let kind = vMisc.x;
     let isDrop = kind < 0.5;
