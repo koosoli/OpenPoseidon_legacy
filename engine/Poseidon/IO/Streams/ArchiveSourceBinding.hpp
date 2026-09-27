@@ -64,7 +64,7 @@ class ArchiveSourceBinding
     static std::shared_ptr<const ArchiveSourceBinding> Create(BankReadRequest request);
     static void NoteWrappedRead();
 public:
-    // Optional model-primary Init purpose, NOT source identity or worker access.
+    // Optional model primary/material-stage Init purpose, NOT source identity or worker access.
     // Needed only when BOTH warm-source and warm-job flags are exactly 1;
     // source-only diagnostic capture keeps its original all-PAA behaviour.
     class ModelReadScope

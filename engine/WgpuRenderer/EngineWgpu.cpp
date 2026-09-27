@@ -10175,6 +10175,11 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
     }
 
     PrepareNativeNormalSources(shape);
+    // Retain provenance only for existing owner-side material-stage Init calls.
+    // The scope itself requires BOTH exact warm-source/jobs flags and MainThread;
+    // it adds no loads, cannot retrofit cached unknown headers, and retains no
+    // read buffer. Live/valid parked registrations returned before this point.
+    ArchiveSourceBinding::ModelReadScope materialSourcePurpose;
     std::vector<TextureWgpu*> modelTextures;
     std::vector<uint64_t> modelMeshes;
     if (_wbank)
