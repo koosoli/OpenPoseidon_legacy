@@ -1,0 +1,1215 @@
+version=11;
+class Mission
+{
+	randomSeed=4811048;
+	class Intel
+	{
+		briefingName="Tidewater showcase: Everon south coast";
+		briefingDescription="Camera fly-over of a platoon landing on Everon's south-east bay (2 min).";
+		startWeather=0.25;
+		forecastWeather=0.25;
+		startFog=0;
+		forecastFog=0;
+		year=1985;
+		month=6;
+		day=21;
+		hour=8;
+		minute=0;
+	};
+	class Groups
+	{
+		items=15;
+		class Item0
+		{
+			side="WEST";
+			class Vehicles
+			{
+				items=1;
+				class Item0
+				{
+					position[]={10250,0,1050};
+					azimut=345;
+					id=0;
+					side="WEST";
+					vehicle="CarrierW";
+					leader=1;
+					skill=0.7;
+					text="lst1";
+					init="this setBehaviour ""CARELESS""; this setCombatMode ""BLUE""";
+				};
+			};
+		};
+		class Item1
+		{
+			side="WEST";
+			class Vehicles
+			{
+				items=1;
+				class Item0
+				{
+					position[]={10250,0,1050};
+					azimut=0;
+					id=1;
+					side="WEST";
+					vehicle="OfficerW";
+					player="PLAYER COMMANDER";
+					leader=1;
+					rank="LIEUTENANT";
+					skill=0.7;
+					text="plt";
+					init="go = false; go2 = false; this moveInCargo lst1; this setCaptive true";
+				};
+			};
+		};
+		class Item2
+		{
+			side="WEST";
+			class Vehicles
+			{
+				items=1;
+				class Item0
+				{
+					position[]={10150,0,1110};
+					azimut=335;
+					id=2;
+					side="WEST";
+					vehicle="BoatW";
+					leader=1;
+					rank="SERGEANT";
+					skill=0.7;
+					text="pbr1";
+					init="this setBehaviour ""CARELESS""; this setCombatMode ""BLUE""; this setSpeedMode ""FULL""";
+				};
+			};
+			class Waypoints
+			{
+				items=3;
+				class Item0
+				{
+					position[]={10150,0,1115};
+					speed="FULL";
+					combat="CARELESS";
+					expCond="go";
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+				class Item1
+				{
+					position[]={9825,0,1440};
+					type="TR UNLOAD";
+					speed="FULL";
+					combat="CARELESS";
+					completitionRadius=15;
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+				class Item2
+				{
+					position[]={9760,0,1290};
+					type="HOLD";
+					speed="NORMAL";
+					combat="CARELESS";
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+			};
+		};
+		class Item3
+		{
+			side="WEST";
+			class Vehicles
+			{
+				items=1;
+				class Item0
+				{
+					position[]={10180,0,1150};
+					azimut=335;
+					id=3;
+					side="WEST";
+					vehicle="BoatW";
+					leader=1;
+					rank="SERGEANT";
+					skill=0.7;
+					text="pbr2";
+					init="this setBehaviour ""CARELESS""; this setCombatMode ""BLUE""; this setSpeedMode ""FULL""";
+				};
+			};
+			class Waypoints
+			{
+				items=3;
+				class Item0
+				{
+					position[]={10180,0,1155};
+					speed="FULL";
+					combat="CARELESS";
+					expCond="go";
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+				class Item1
+				{
+					position[]={9900,0,1472};
+					type="TR UNLOAD";
+					speed="FULL";
+					combat="CARELESS";
+					completitionRadius=15;
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+				class Item2
+				{
+					position[]={9900,0,1330};
+					type="HOLD";
+					speed="NORMAL";
+					combat="CARELESS";
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+			};
+		};
+		class Item4
+		{
+			side="WEST";
+			class Vehicles
+			{
+				items=1;
+				class Item0
+				{
+					position[]={10330,0,1150};
+					azimut=320;
+					id=4;
+					side="WEST";
+					vehicle="BoatW";
+					leader=1;
+					rank="SERGEANT";
+					skill=0.7;
+					text="pbr3";
+					init="this setBehaviour ""CARELESS""; this setCombatMode ""BLUE""; this setSpeedMode ""FULL""";
+				};
+			};
+			class Waypoints
+			{
+				items=3;
+				class Item0
+				{
+					position[]={10330,0,1155};
+					speed="FULL";
+					combat="CARELESS";
+					expCond="go";
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+				class Item1
+				{
+					position[]={9975,0,1482};
+					type="TR UNLOAD";
+					speed="FULL";
+					combat="CARELESS";
+					completitionRadius=15;
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+				class Item2
+				{
+					position[]={10040,0,1340};
+					type="HOLD";
+					speed="NORMAL";
+					combat="CARELESS";
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+			};
+		};
+		class Item5
+		{
+			side="WEST";
+			class Vehicles
+			{
+				items=1;
+				class Item0
+				{
+					position[]={10360,0,1110};
+					azimut=320;
+					id=5;
+					side="WEST";
+					vehicle="BoatW";
+					leader=1;
+					rank="SERGEANT";
+					skill=0.7;
+					text="pbr4";
+					init="this setBehaviour ""CARELESS""; this setCombatMode ""BLUE""; this setSpeedMode ""FULL""";
+				};
+			};
+			class Waypoints
+			{
+				items=3;
+				class Item0
+				{
+					position[]={10360,0,1115};
+					speed="FULL";
+					combat="CARELESS";
+					expCond="go";
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+				class Item1
+				{
+					position[]={10075,0,1468};
+					type="TR UNLOAD";
+					speed="FULL";
+					combat="CARELESS";
+					completitionRadius=15;
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+				class Item2
+				{
+					position[]={10180,0,1330};
+					type="HOLD";
+					speed="NORMAL";
+					combat="CARELESS";
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+			};
+		};
+		class Item6
+		{
+			side="WEST";
+			class Vehicles
+			{
+				items=6;
+				class Item0
+				{
+					position[]={10150,0,1050};
+					azimut=340;
+					special="CARGO";
+					id=6;
+					side="WEST";
+					vehicle="SoldierWB";
+					leader=1;
+					rank="SERGEANT";
+					skill=0.7;
+					text="s1_0";
+					init="s1 = group this; ""_x moveInCargo pbr1"" forEach units group this; this setBehaviour ""AWARE""";
+				};
+				class Item1
+				{
+					position[]={10153,0,1050};
+					azimut=340;
+					special="CARGO";
+					id=7;
+					side="WEST";
+					vehicle="SoldierWMG";
+					skill=0.7;
+					text="s1_1";
+				};
+				class Item2
+				{
+					position[]={10156,0,1050};
+					azimut=340;
+					special="CARGO";
+					id=8;
+					side="WEST";
+					vehicle="SoldierWAT";
+					skill=0.7;
+					text="s1_2";
+				};
+				class Item3
+				{
+					position[]={10159,0,1050};
+					azimut=340;
+					special="CARGO";
+					id=9;
+					side="WEST";
+					vehicle="SoldierWG";
+					skill=0.7;
+					text="s1_3";
+				};
+				class Item4
+				{
+					position[]={10162,0,1050};
+					azimut=340;
+					special="CARGO";
+					id=10;
+					side="WEST";
+					vehicle="SoldierWB";
+					skill=0.7;
+					text="s1_4";
+				};
+				class Item5
+				{
+					position[]={10165,0,1050};
+					azimut=340;
+					special="CARGO";
+					id=11;
+					side="WEST";
+					vehicle="SoldierWMedic";
+					skill=0.7;
+					text="s1_5";
+				};
+			};
+			class Waypoints
+			{
+				items=3;
+				class Item0
+				{
+					position[]={9825,0,1440};
+					type="GETOUT";
+					speed="FULL";
+					combat="AWARE";
+					completitionRadius=20;
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+				class Item1
+				{
+					position[]={9725,12.996,1560};
+					speed="FULL";
+					combat="AWARE";
+					formation="LINE";
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+				class Item2
+				{
+					position[]={9690,14.4,1610};
+					speed="NORMAL";
+					combat="AWARE";
+					formation="LINE";
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+			};
+		};
+		class Item7
+		{
+			side="WEST";
+			class Vehicles
+			{
+				items=6;
+				class Item0
+				{
+					position[]={10180,0,1090};
+					azimut=340;
+					special="CARGO";
+					id=12;
+					side="WEST";
+					vehicle="SoldierWB";
+					leader=1;
+					rank="SERGEANT";
+					skill=0.7;
+					text="s2_0";
+					init="s2 = group this; ""_x moveInCargo pbr2"" forEach units group this; this setBehaviour ""AWARE""";
+				};
+				class Item1
+				{
+					position[]={10183,0,1090};
+					azimut=340;
+					special="CARGO";
+					id=13;
+					side="WEST";
+					vehicle="SoldierWMG";
+					skill=0.7;
+					text="s2_1";
+				};
+				class Item2
+				{
+					position[]={10186,0,1090};
+					azimut=340;
+					special="CARGO";
+					id=14;
+					side="WEST";
+					vehicle="SoldierWLAW";
+					skill=0.7;
+					text="s2_2";
+				};
+				class Item3
+				{
+					position[]={10189,0,1090};
+					azimut=340;
+					special="CARGO";
+					id=15;
+					side="WEST";
+					vehicle="SoldierWG";
+					skill=0.7;
+					text="s2_3";
+				};
+				class Item4
+				{
+					position[]={10192,0,1090};
+					azimut=340;
+					special="CARGO";
+					id=16;
+					side="WEST";
+					vehicle="SoldierWB";
+					skill=0.7;
+					text="s2_4";
+				};
+				class Item5
+				{
+					position[]={10195,0,1090};
+					azimut=340;
+					special="CARGO";
+					id=17;
+					side="WEST";
+					vehicle="SoldierWB";
+					skill=0.7;
+					text="s2_5";
+				};
+			};
+			class Waypoints
+			{
+				items=3;
+				class Item0
+				{
+					position[]={9900,0,1472};
+					type="GETOUT";
+					speed="FULL";
+					combat="AWARE";
+					completitionRadius=20;
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+				class Item1
+				{
+					position[]={9800,9.405,1580};
+					speed="FULL";
+					combat="AWARE";
+					formation="LINE";
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+				class Item2
+				{
+					position[]={9780,20.738,1630};
+					speed="NORMAL";
+					combat="AWARE";
+					formation="LINE";
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+			};
+		};
+		class Item8
+		{
+			side="WEST";
+			class Vehicles
+			{
+				items=6;
+				class Item0
+				{
+					position[]={10330,0,1090};
+					azimut=340;
+					special="CARGO";
+					id=18;
+					side="WEST";
+					vehicle="SoldierWB";
+					leader=1;
+					rank="SERGEANT";
+					skill=0.7;
+					text="s3_0";
+					init="s3 = group this; ""_x moveInCargo pbr3"" forEach units group this; this setBehaviour ""AWARE""";
+				};
+				class Item1
+				{
+					position[]={10333,0,1090};
+					azimut=340;
+					special="CARGO";
+					id=19;
+					side="WEST";
+					vehicle="SoldierWMG";
+					skill=0.7;
+					text="s3_1";
+				};
+				class Item2
+				{
+					position[]={10336,0,1090};
+					azimut=340;
+					special="CARGO";
+					id=20;
+					side="WEST";
+					vehicle="SoldierWAT";
+					skill=0.7;
+					text="s3_2";
+				};
+				class Item3
+				{
+					position[]={10339,0,1090};
+					azimut=340;
+					special="CARGO";
+					id=21;
+					side="WEST";
+					vehicle="SoldierWG";
+					skill=0.7;
+					text="s3_3";
+				};
+				class Item4
+				{
+					position[]={10342,0,1090};
+					azimut=340;
+					special="CARGO";
+					id=22;
+					side="WEST";
+					vehicle="SoldierWB";
+					skill=0.7;
+					text="s3_4";
+				};
+				class Item5
+				{
+					position[]={10345,0,1090};
+					azimut=340;
+					special="CARGO";
+					id=23;
+					side="WEST";
+					vehicle="SoldierWB";
+					skill=0.7;
+					text="s3_5";
+				};
+			};
+			class Waypoints
+			{
+				items=3;
+				class Item0
+				{
+					position[]={9975,0,1482};
+					type="GETOUT";
+					speed="FULL";
+					combat="AWARE";
+					completitionRadius=20;
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+				class Item1
+				{
+					position[]={9875,9.405,1575};
+					speed="FULL";
+					combat="AWARE";
+					formation="LINE";
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+				class Item2
+				{
+					position[]={9870,21.006,1625};
+					speed="NORMAL";
+					combat="AWARE";
+					formation="LINE";
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+			};
+		};
+		class Item9
+		{
+			side="WEST";
+			class Vehicles
+			{
+				items=6;
+				class Item0
+				{
+					position[]={10360,0,1050};
+					azimut=340;
+					special="CARGO";
+					id=24;
+					side="WEST";
+					vehicle="SoldierWB";
+					leader=1;
+					rank="SERGEANT";
+					skill=0.7;
+					text="s4_0";
+					init="s4 = group this; ""_x moveInCargo pbr4"" forEach units group this; this setBehaviour ""AWARE""";
+				};
+				class Item1
+				{
+					position[]={10363,0,1050};
+					azimut=340;
+					special="CARGO";
+					id=25;
+					side="WEST";
+					vehicle="SoldierWMG";
+					skill=0.7;
+					text="s4_1";
+				};
+				class Item2
+				{
+					position[]={10366,0,1050};
+					azimut=340;
+					special="CARGO";
+					id=26;
+					side="WEST";
+					vehicle="SoldierWLAW";
+					skill=0.7;
+					text="s4_2";
+				};
+				class Item3
+				{
+					position[]={10369,0,1050};
+					azimut=340;
+					special="CARGO";
+					id=27;
+					side="WEST";
+					vehicle="SoldierWG";
+					skill=0.7;
+					text="s4_3";
+				};
+				class Item4
+				{
+					position[]={10372,0,1050};
+					azimut=340;
+					special="CARGO";
+					id=28;
+					side="WEST";
+					vehicle="SoldierWB";
+					skill=0.7;
+					text="s4_4";
+				};
+				class Item5
+				{
+					position[]={10375,0,1050};
+					azimut=340;
+					special="CARGO";
+					id=29;
+					side="WEST";
+					vehicle="SoldierWMedic";
+					skill=0.7;
+					text="s4_5";
+				};
+			};
+			class Waypoints
+			{
+				items=3;
+				class Item0
+				{
+					position[]={10075,0,1468};
+					type="GETOUT";
+					speed="FULL";
+					combat="AWARE";
+					completitionRadius=20;
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+				class Item1
+				{
+					position[]={9950,11.52,1560};
+					speed="FULL";
+					combat="AWARE";
+					formation="LINE";
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+				class Item2
+				{
+					position[]={9960,22.61,1610};
+					speed="NORMAL";
+					combat="AWARE";
+					formation="LINE";
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+			};
+		};
+		class Item10
+		{
+			side="WEST";
+			class Vehicles
+			{
+				items=2;
+				class Item0
+				{
+					position[]={10700,60,700};
+					azimut=320;
+					special="FLY";
+					id=30;
+					side="WEST";
+					vehicle="UH60MG";
+					leader=1;
+					skill=0.7;
+					text="h1";
+					init="this flyInHeight 35; this setBehaviour ""CARELESS""; this setCombatMode ""BLUE""";
+				};
+				class Item1
+				{
+					position[]={10760,60,660};
+					azimut=320;
+					special="FLY";
+					id=31;
+					side="WEST";
+					vehicle="UH60MG";
+					skill=0.7;
+					text="h2";
+					init="this flyInHeight 35";
+				};
+			};
+			class Waypoints
+			{
+				items=4;
+				class Item0
+				{
+					position[]={10300,35,1300};
+					speed="NORMAL";
+					combat="CARELESS";
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+				class Item1
+				{
+					position[]={9800,35,1620};
+					speed="NORMAL";
+					combat="CARELESS";
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+				class Item2
+				{
+					position[]={9500,35,1350};
+					speed="NORMAL";
+					combat="CARELESS";
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+				class Item3
+				{
+					position[]={10500,35,900};
+					type="CYCLE";
+					speed="NORMAL";
+					combat="CARELESS";
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+			};
+		};
+		class Item11
+		{
+			side="WEST";
+			class Vehicles
+			{
+				items=1;
+				class Item0
+				{
+					position[]={10050,70,-300};
+					azimut=355;
+					special="FLY";
+					id=32;
+					side="WEST";
+					vehicle="Ch47D";
+					leader=1;
+					skill=0.7;
+					text="ch1";
+					init="this flyInHeight 50; this setBehaviour ""CARELESS""; this setCombatMode ""BLUE""";
+				};
+			};
+			class Waypoints
+			{
+				items=4;
+				class Item0
+				{
+					position[]={10150,50,1000};
+					speed="NORMAL";
+					combat="CARELESS";
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+				class Item1
+				{
+					position[]={9850,50,1700};
+					speed="NORMAL";
+					combat="CARELESS";
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+				class Item2
+				{
+					position[]={9300,50,2300};
+					speed="NORMAL";
+					combat="CARELESS";
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+				class Item3
+				{
+					position[]={11200,50,400};
+					type="CYCLE";
+					speed="NORMAL";
+					combat="CARELESS";
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+			};
+		};
+		class Item12
+		{
+			side="WEST";
+			class Vehicles
+			{
+				items=1;
+				class Item0
+				{
+					position[]={10300,70,-250};
+					azimut=355;
+					special="FLY";
+					id=33;
+					side="WEST";
+					vehicle="Cobra";
+					leader=1;
+					skill=0.7;
+					text="cb1";
+					init="this flyInHeight 45; this setBehaviour ""CARELESS""; this setCombatMode ""BLUE""";
+				};
+			};
+			class Waypoints
+			{
+				items=4;
+				class Item0
+				{
+					position[]={10400,45,1100};
+					speed="NORMAL";
+					combat="CARELESS";
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+				class Item1
+				{
+					position[]={10000,45,1800};
+					speed="NORMAL";
+					combat="CARELESS";
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+				class Item2
+				{
+					position[]={9400,45,1400};
+					speed="NORMAL";
+					combat="CARELESS";
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+				class Item3
+				{
+					position[]={10700,45,600};
+					type="CYCLE";
+					speed="NORMAL";
+					combat="CARELESS";
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+			};
+		};
+		class Item13
+		{
+			side="WEST";
+			class Vehicles
+			{
+				items=2;
+				class Item0
+				{
+					position[]={6300,120,1250};
+					azimut=85;
+					special="FLY";
+					id=34;
+					side="WEST";
+					vehicle="A10";
+					leader=1;
+					skill=0.7;
+					text="a1";
+					init="this flyInHeight 70; this setBehaviour ""CARELESS""; this setCombatMode ""BLUE""";
+				};
+				class Item1
+				{
+					position[]={6250,120,1180};
+					azimut=85;
+					special="FLY";
+					id=35;
+					side="WEST";
+					vehicle="A10";
+					skill=0.7;
+					text="a2";
+					init="this flyInHeight 70";
+				};
+			};
+			class Waypoints
+			{
+				items=5;
+				class Item0
+				{
+					position[]={9900,70,1380};
+					speed="FULL";
+					combat="CARELESS";
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+				class Item1
+				{
+					position[]={12400,70,1500};
+					speed="FULL";
+					combat="CARELESS";
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+				class Item2
+				{
+					position[]={12200,70,3200};
+					speed="FULL";
+					combat="CARELESS";
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+				class Item3
+				{
+					position[]={8200,70,3000};
+					speed="FULL";
+					combat="CARELESS";
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+				class Item4
+				{
+					position[]={6800,70,1300};
+					type="CYCLE";
+					speed="FULL";
+					combat="CARELESS";
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+			};
+		};
+		class Item14
+		{
+			side="WEST";
+			class Vehicles
+			{
+				items=2;
+				class Item0
+				{
+					position[]={12400,150,4200};
+					azimut=200;
+					special="FLY";
+					id=36;
+					side="WEST";
+					vehicle="A10";
+					leader=1;
+					skill=0.7;
+					text="a3";
+					init="this flyInHeight 90; this setBehaviour ""CARELESS""; this setCombatMode ""BLUE""";
+				};
+				class Item1
+				{
+					position[]={12450,150,4260};
+					azimut=200;
+					special="FLY";
+					id=37;
+					side="WEST";
+					vehicle="A10";
+					skill=0.7;
+					text="a4";
+					init="this flyInHeight 90";
+				};
+			};
+			class Waypoints
+			{
+				items=5;
+				class Item0
+				{
+					position[]={12300,90,4000};
+					speed="NORMAL";
+					combat="CARELESS";
+					expCond="go2";
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+				class Item1
+				{
+					position[]={11200,60,1700};
+					speed="FULL";
+					combat="CARELESS";
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+				class Item2
+				{
+					position[]={9800,60,1500};
+					speed="FULL";
+					combat="CARELESS";
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+				class Item3
+				{
+					position[]={7000,90,1700};
+					speed="FULL";
+					combat="CARELESS";
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+				class Item4
+				{
+					position[]={7500,90,3500};
+					type="CYCLE";
+					speed="FULL";
+					combat="CARELESS";
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+			};
+		};
+	};
+};
+class Intro
+{
+	randomSeed=1;
+	class Intel
+	{
+	};
+};
+class OutroWin
+{
+	randomSeed=1;
+	class Intel
+	{
+	};
+};
+class OutroLoose
+{
+	randomSeed=1;
+	class Intel
+	{
+	};
+};
