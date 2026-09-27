@@ -2,21 +2,24 @@
 #include <Poseidon/Graphics/Rendering/GeometryPageClodRamPackage.hpp>
 #include <span>
 #include <bit>
-#include <type_traits>
 #include <string_view>
 
 namespace Poseidon::GeometryPages
 {
 // Memory codec only, for already accepted immutable paired pilot cuts. This is NOT
 // source-file freshness, retail eligibility, DAG-selection or GPU-residency proof.
-// Raw SVertex bytes are portable only across the exact little-endian layout key.
+// Explicit LE fields reproduce the pinned 68-byte SVertex layout; no byte buffer
+// is copied into nontrivially-copyable Vector3P/SVertex objects.
 // The 128KiB cap is encoded input/output length, not allocator/RSS or total scratch.
 enum class ClodDiskStatus { Encoded, Decoded, Invalid, Unsupported, Capacity, AllocationFailed };
 namespace ClodDiskDetail
 {
 inline constexpr size_t MaxBytes=128*1024, HeaderBytes=112, DigestAt=80;
 inline constexpr uint32_t Magic=0x31444347, Schema=1;
-static_assert(std::is_trivially_copyable_v<SVertex>);
+static_assert(sizeof(float)==4 && std::numeric_limits<float>::is_iec559);
+static_assert(sizeof(SVertex)==68 && offsetof(SVertex,pos)==0 && offsetof(SVertex,norm)==12 &&
+    offsetof(SVertex,t0)==24 && offsetof(SVertex,conform)==32 && offsetof(SVertex,tangent)==36 &&
+    offsetof(SVertex,binormal)==48 && offsetof(SVertex,t1)==60);
 static_assert(std::string_view(ClodBake::LibraryRevision).size()==40);
 static_assert(ClodBake::AdapterVersion==1 && ClodRamPackage::AdapterVersion==1 && Package::FormatVersion==1);
 inline uint64_t LayoutKey()
@@ -73,6 +76,26 @@ struct Reader
         v.producerVersion=U32();v.coarseRepresentation=U32();v.fineRepresentation=U32();v.vertexLayout=U32();v.materialMapping=U32();return v;
     }
 };
+inline void WriteVertex(Writer& w,const SVertex& v)
+{
+    for(const auto* vector:{&v.pos,&v.norm}) {w.Float(vector->X());w.Float(vector->Y());w.Float(vector->Z());}
+    w.Float(v.t0.u);w.Float(v.t0.v);w.U32(v.conform);
+    for(const auto* vector:{&v.tangent,&v.binormal}) {w.Float(vector->X());w.Float(vector->Y());w.Float(vector->Z());}
+    w.Float(v.t1.u);w.Float(v.t1.v);
+}
+inline SVertex ReadVertex(Reader& r)
+{
+    // Each read is sequenced explicitly; constructor-argument evaluation order
+    // must not reorder the wire fields.
+    const auto vector=[&]() {
+        const float x=r.Float();const float y=r.Float();const float z=r.Float();
+        return Vector3P(x,y,z);
+    };
+    SVertex v;v.pos=vector();v.norm=vector();
+    const float u0=r.Float();const float v0=r.Float();v.t0={u0,v0};v.conform=r.U32();
+    v.tangent=vector();v.binormal=vector();
+    const float u1=r.Float();const float v1=r.Float();v.t1={u1,v1};return v;
+}
 inline bool Ids(const std::vector<uint32_t>& ids)
 {
     if(ids.empty() || ids.size()>64)return false;
@@ -141,7 +164,7 @@ inline bool Validate(const ClodRamPackage& v)
 inline void WriteMesh(Writer& w,const ExportedMesh& m)
 {
     w.U32(uint32_t(m.vertices.size()));w.U32(uint32_t(m.indices.size()));w.U32(uint32_t(m.materials.size()));
-    w.Raw(m.vertices.data(),m.vertices.size()*sizeof(SVertex));
+    for(const auto& vertex:m.vertices)WriteVertex(w,vertex);
     for(auto i:m.indices)w.U32(i);for(auto material:m.materials)w.U32(material);
 }
 inline bool ReadMesh(Reader& r,ExportedMesh& m)
@@ -150,7 +173,7 @@ inline bool ReadMesh(Reader& r,ExportedMesh& m)
     const uint64_t bytes=uint64_t(vertices)*sizeof(SVertex)+uint64_t(indices)*4+uint64_t(materials)*4;
     if(!r.valid || !vertices || vertices>1024 || !indices || indices>4096 || indices%3 || materials!=indices/3 || bytes>r.Left())return false;
     m.vertices.resize(vertices);m.positions.reserve(vertices);m.indices.resize(indices);m.materials.resize(materials);
-    r.Raw(m.vertices.data(),vertices*sizeof(SVertex));
+    for(auto& vertex:m.vertices)vertex=ReadVertex(r);
     for(const auto& v:m.vertices)m.positions.push_back({v.pos.X(),v.pos.Y(),v.pos.Z()});
     for(auto& i:m.indices)i=r.U32();for(auto& material:m.materials)material=r.U32();return r.valid;
 }

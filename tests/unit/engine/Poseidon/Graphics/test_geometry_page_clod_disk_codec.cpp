@@ -161,3 +161,30 @@ TEST_CASE("disk encoding validates page partitions attributes and claimed derive
     SECTION("mutated immutable page") {value.package.pages[0].bytes.back()^=1;}
     REQUIRE(EncodeClodDisk(value,output)==ClodDiskStatus::Invalid);REQUIRE((output==std::vector<uint8_t>{7,9,11}));
 }
+
+TEST_CASE("disk vertex field codec preserves explicit LE wire order and exact finite float bits", "[geometry-clod-disk]")
+{
+    const auto f=[](uint32_t bits){return std::bit_cast<float>(bits);};
+    SVertex source;
+    source.pos=Vector3P(f(0x80000000u),f(0x00000001u),f(0xbf812345u));
+    source.norm=Vector3P(f(0x3f123456u),f(0x80000001u),f(0x3f800000u));
+    source.t0={f(0x80000000u),f(0x3e654321u)};source.conform=0x12345678u;
+    source.tangent=Vector3P(f(0x00800001u),f(0xc0123456u),f(0x00000000u));
+    source.binormal=Vector3P(f(0x3f800001u),f(0x80000000u),f(0x3f123456u));
+    source.t1={f(0x00000001u),f(0xbe654321u)};
+    ClodDiskDetail::Writer writer;ClodDiskDetail::WriteVertex(writer,source);
+    REQUIRE(writer.data.size()==68);
+    // This comparison only READS existing objects as bytes. Construction uses
+    // typed fields; there is no memcpy into Vector3P or SVertex.
+    REQUIRE(std::memcmp(writer.data.data(),&source,sizeof(source))==0);
+    const std::array<uint32_t,17> words={0x80000000u,0x00000001u,0xbf812345u,0x3f123456u,0x80000001u,0x3f800000u,
+        0x80000000u,0x3e654321u,0x12345678u,0x00800001u,0xc0123456u,0x00000000u,
+        0x3f800001u,0x80000000u,0x3f123456u,0x00000001u,0xbe654321u};
+    for(size_t i=0;i<words.size();++i)for(unsigned byte=0;byte<4;++byte)
+        REQUIRE(writer.data[i*4+byte]==uint8_t(words[i]>>(byte*8)));
+    ClodDiskDetail::Reader reader{writer.data};const auto decoded=ClodDiskDetail::ReadVertex(reader);
+    REQUIRE(reader.valid);REQUIRE(reader.Left()==0);REQUIRE(std::memcmp(&source,&decoded,sizeof(source))==0);
+    REQUIRE(std::bit_cast<uint32_t>(decoded.pos.X())==0x80000000u);
+    REQUIRE(std::bit_cast<uint32_t>(decoded.pos.Y())==0x00000001u);
+    REQUIRE(std::bit_cast<uint32_t>(decoded.t1.v)==0xbe654321u);
+}
