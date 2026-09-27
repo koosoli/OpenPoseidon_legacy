@@ -1129,6 +1129,13 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
                                 std::max(t.sss, 0.0f), std::clamp(t.backscatter, 0.0f, 1.0f)};
         _params.tidewater[3] = {std::max(t.gust, 0.0f), std::max(t.slick, 0.0f), std::max(t.windrow, 0.0f),
                                 static_cast<float>(t.debugView)};
+        // TW-WATER W3 — shoreline waves (lanes in wgpu_renderer.hpp). The renderer scales the
+        // amplitude with the swell energy above, so the reference seas move the surf as well.
+        _params.tidewater_shore[0] = {t.shoreWaves ? 1.0f : 0.0f, std::clamp(t.shorePeriod, 3.0f, 20.0f),
+                                      std::clamp(t.shoreAmplitude, 0.0f, 3.0f), std::clamp(t.shoreVariation, 0.0f, 1.5f)};
+        _params.tidewater_shore[1] = {std::clamp(t.shoreGamma, 0.3f, 1.5f), std::clamp(t.shoreBreakSpan, 0.03f, 0.6f),
+                                      std::clamp(t.shoreCurl, 0.0f, 1.5f), std::clamp(t.shoreRunup, 0.0f, 3.0f)};
+        _params.tidewater_shore[2] = {std::clamp(t.shoreTurbidity, 0.0f, 1.0f), 0.0f, 0.0f, 0.0f};
     }
     _params.sea_params = {look.seaStateCoupling ? 1.0f : 0.0f,
                           look.seaStateCoupling ? SeaStateResidualAmplitude(look.waveAmp) : look.waveAmp,

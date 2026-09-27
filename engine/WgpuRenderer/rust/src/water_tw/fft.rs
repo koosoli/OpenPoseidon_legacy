@@ -118,17 +118,23 @@ impl SpectrumInputs {
         for s in &mut sizes {
             *s *= cascade_scale;
         }
+        // Direction convention (W3a correction). With Tidewater's evolution h0·e^{iωt} and the
+        // e^{+ik·x} inverse transform, the waves of a spectrum peaked at angle a travel toward
+        // -(cos a, sin a): the angle is where they come FROM. OP's wind lane is the wind's
+        // velocity direction and the Water tab's swell heading is where the swell travels TO, so
+        // both are turned by 180° here, and the sea runs downwind. (W2 passed them unturned: its
+        // sea ran upwind.)
         let mut local = WaveSystem::LOCAL;
         let wind = [p.fft_wind_sea[0], p.fft_wind_sea[1]];
         if wind[0] != 0.0 || wind[1] != 0.0 {
-            local.wind_direction_deg = wind[1].atan2(wind[0]).to_degrees();
+            local.wind_direction_deg = wind[1].atan2(wind[0]).to_degrees() + 180.0;
         }
         if p.fft_wind_sea[2] > 0.0 {
             local.wind_speed = p.fft_wind_sea[2];
         }
         let mut swell = WaveSystem::SWELL;
         swell.scale = tw[0][2].max(0.0);
-        swell.wind_direction_deg = tw[0][3];
+        swell.wind_direction_deg = tw[0][3] + 180.0;
         // Latch to coarse steps so weather noise cannot rebuild h0 every frame (the producer
         // already latches wind into buckets; this only removes float jitter).
         let q = |v: f32, step: f32| (v / step).round() * step;
@@ -988,6 +994,16 @@ mod tests {
         assert_eq!(cuts[0][0], 0.0001);
         assert!((cuts[0][1] - std::f32::consts::TAU / 157.0 * 6.0).abs() < 1e-6);
         assert_eq!(cuts[3][1], 9999.0);
+    }
+
+    #[test]
+    fn directions_are_turned_so_the_sea_runs_downwind() {
+        let mut p = <WgrWaterParams as bytemuck::Zeroable>::zeroed();
+        p.tidewater = crate::water_tw::DEFAULT_PARAMS;
+        p.fft_wind_sea = [1.0, 0.0, 8.0, 0.5]; // wind blowing toward +x
+        let s = SpectrumInputs::from_params(&p);
+        assert_eq!(s.local.wind_direction_deg, 180.0);
+        assert_eq!(s.swell.wind_direction_deg, 185.0); // swell heading 5° (travels toward)
     }
 
     #[test]

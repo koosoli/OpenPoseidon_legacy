@@ -375,6 +375,7 @@ impl Water {
             water_backend: 0,
             water_backend_pad: [0; 3],
             tidewater: crate::water_tw::DEFAULT_PARAMS,
+            tidewater_shore: crate::water_tw::DEFAULT_SHORE_PARAMS,
         };
         queue.write_buffer(&params_ubo, 0, bytemuck::bytes_of(&default_params));
 
@@ -2396,7 +2397,7 @@ mod tests {
     #[test]
     fn debug_params_appended_without_shifting_existing_lanes() {
         use crate::ffi::WgrWaterParams;
-        assert_eq!(std::mem::size_of::<WgrWaterParams>(), 1136);
+        assert_eq!(std::mem::size_of::<WgrWaterParams>(), 1184);
         assert_eq!(
             std::mem::offset_of!(WgrWaterParams, debug_params),
             192,

@@ -6500,6 +6500,8 @@ impl Renderer {
         self.temporal.notify_reset("world load");
         self.terrain
             .set_heightmap(&self.device, &self.queue, heights, params);
+        // TW-WATER W3: Tidewater's shore field is computed from the heights (on a worker thread).
+        self.water.set_terrain_heights(heights, params);
         self.log.log(log_level::INFO, &format!("Terrain heightfield ready={}", self.terrain.has_heightmap()));
     }
 
