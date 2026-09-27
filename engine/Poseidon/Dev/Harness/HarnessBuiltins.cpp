@@ -466,7 +466,7 @@ void RegisterScreenshot(HarnessServer& hs)
     hs.RegisterCommand({"shared_mesh_lifetime_test", "Test-only private retained mesh and two CPU borrowers; no world-object resolution", {}},
         [](const std::string&, cJSON* root) -> std::string {
             const char* enabled = std::getenv("WGR_SHARED_MESH_LIFETIME_FIXTURE");
-            if (!enabled || std::strcmp(enabled, "1") || !IsMainThread() || !GEngine || !GWorld ||
+            if (!enabled || std::strcmp(enabled, "1") || !Foundation::IsMainThread() || !GEngine || !GWorld ||
                 GWorld->GetMode() == GModeNetware)
                 return HarnessProtocol::ErrorResponse("requires owner-thread singleplayer and WGR_SHARED_MESH_LIFETIME_FIXTURE=1");
             const char* name = HarnessProtocol::GetString(root, "action");
