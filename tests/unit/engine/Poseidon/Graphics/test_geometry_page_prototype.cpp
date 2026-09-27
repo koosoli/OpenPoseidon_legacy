@@ -36,7 +36,7 @@ uint32_t Read(std::span<const uint8_t> bytes, size_t at)
     return uint32_t(bytes[at]) | uint32_t(bytes[at+1])<<8 |
            uint32_t(bytes[at+2])<<16 | uint32_t(bytes[at+3])<<24;
 }
-void Verify(const Package& p, const MeshInput& input, size_t begin, size_t end)
+void CheckPagePayload(const Package& p, const MeshInput& input, size_t begin, size_t end)
 {
     size_t triangles=0;
     for (size_t i=begin; i<end; ++i)
@@ -89,8 +89,8 @@ TEST_CASE("Geometry pages retain original attributes, seams, triangles and mater
     REQUIRE(Build(pilot.Coarse(),pilot.Fine(),Source(),true,p,limits)==Status::Built);
     REQUIRE(p.coarsePages==1); REQUIRE(p.coarseClusters==1);
     REQUIRE(p.pages.size()==3); REQUIRE(p.clusters.size()==3);
-    Verify(p,pilot.Coarse(),0,p.coarseClusters);
-    Verify(p,pilot.Fine(),p.coarseClusters,p.clusters.size());
+    CheckPagePayload(p,pilot.Coarse(),0,p.coarseClusters);
+    CheckPagePayload(p,pilot.Fine(),p.coarseClusters,p.clusters.size());
     uint64_t sum=0;
     for (const auto& page:p.pages)
     {
@@ -168,8 +168,8 @@ TEST_CASE("Geometry cluster vertex cap splits without changing original triangle
     auto source=Source(); source.geometryOptions=7; source.materialOptions=11;
     REQUIRE(Build(pilot.Coarse(),pilot.Fine(),source,true,p,limits)==Status::Built);
     REQUIRE(p.source==source); REQUIRE(p.clusters.size()==5);
-    Verify(p,pilot.Fine(),p.coarseClusters,p.clusters.size());
+    CheckPagePayload(p,pilot.Fine(),p.coarseClusters,p.clusters.size());
     pilot.indices.fill(0); pilot.materials.fill(9);
     REQUIRE(Build(pilot.Coarse(),pilot.Fine(),source,true,p,limits)==Status::Built);
-    Verify(p,pilot.Fine(),p.coarseClusters,p.clusters.size());
+    CheckPagePayload(p,pilot.Fine(),p.coarseClusters,p.clusters.size());
 }
