@@ -36,6 +36,61 @@ pub const GRAVITY: f32 = 9.81;
 pub const BASE_CELL: f32 = 4.0;
 /// Largest field side in cells (memory: rg32float + rgba8snorm = 12 bytes per cell on the GPU).
 pub const MAX_RES: u32 = 2048;
+/// Smoothed sea depth (W3l, OP): the depth the shore waves decide their breaking from, blurred
+/// over ~20 m. OP's heightmaps are 50 m triangle grids, whose depth contours are straight segments
+/// with kinks at the grid lines; Tidewater's breaking switches sharply across a contour, so the
+/// surf zone's foam ended along those polygons. Stored in the direction texture's z, / this range.
+pub const SMOOTH_DEPTH_RANGE: f32 = 32.0;
+/// Blur radius (m) of one of the three box passes (~0.6 x it is the resulting gaussian sigma x 2).
+pub const SMOOTH_DEPTH_RADIUS: f32 = 18.0;
+
+/// Three separable box passes (≈ gaussian) over a row-major rx x rz grid, radius r cells.
+pub fn blur3(v: &mut [f32], rx: usize, rz: usize, r: usize) {
+    if r == 0 || rx == 0 || rz == 0 {
+        return;
+    }
+    let mut tmp = vec![0.0f32; v.len()];
+    for _ in 0..3 {
+        for j in 0..rz {
+            let row = &v[j * rx..(j + 1) * rx];
+            let mut acc = 0.0f32;
+            for i in 0..=r.min(rx - 1) {
+                acc += row[i];
+            }
+            let mut cnt = (r.min(rx - 1) + 1) as f32;
+            for i in 0..rx {
+                tmp[j * rx + i] = acc / cnt;
+                if i + r + 1 < rx {
+                    acc += row[i + r + 1];
+                    cnt += 1.0;
+                }
+                if i >= r {
+                    acc -= row[i - r];
+                    cnt -= 1.0;
+                }
+            }
+        }
+        for i in 0..rx {
+            let mut acc = 0.0f32;
+            for j in 0..=r.min(rz - 1) {
+                acc += tmp[j * rx + i];
+            }
+            let mut cnt = (r.min(rz - 1) + 1) as f32;
+            for j in 0..rz {
+                v[j * rx + i] = acc / cnt;
+                if j + r + 1 < rz {
+                    acc += tmp[(j + r + 1) * rx + i];
+                    cnt += 1.0;
+                }
+                if j >= r {
+                    acc -= tmp[(j - r) * rx + i];
+                    cnt -= 1.0;
+                }
+            }
+        }
+    }
+}
+
 /// Side of the blocks the coast is indexed in for placing shore-simulation regions (half a region).
 pub const COAST_BLOCK: f32 = 190.0;
 /// A block is coast when at least this many field cells in it are surf-zone water.
@@ -91,7 +146,7 @@ pub struct ShoreField {
     pub origin: [f32; 2],
     /// (T, shoreline T) per cell, row-major (z rows)
     pub times: Vec<[f32; 2]>,
-    /// (dirX * exposure, dirZ * exposure) as snorm8, zw unused
+    /// (dirX * exposure, dirZ * exposure, smoothed depth / SMOOTH_DEPTH_RANGE, unused) as snorm8
     pub dirs: Vec<[i8; 4]>,
     pub stamp: FieldStamp,
     /// Centres (world xz) of the COAST_BLOCK blocks that hold a surf zone: where shore-simulation
@@ -404,6 +459,18 @@ pub fn compute(inp: &ShoreFieldInput) -> ShoreField {
         ts = out;
     }
 
+    // (W3l) smoothed depth, land counted as 4 m above the sea so the blur does not pull the
+    // shoreline far out
+    let mut depth_s = vec![0.0f32; n];
+    for j in 0..rzu {
+        let z = oz + (j as f32 + 0.5) * h;
+        for i in 0..rxu {
+            let x = ox + (i as f32 + 0.5) * h;
+            depth_s[j * rxu + i] = (inp.sea_level - height_at(inp, x, z)).clamp(-4.0, SMOOTH_DEPTH_RANGE);
+        }
+    }
+    blur3(&mut depth_s, rxu, rzu, (SMOOTH_DEPTH_RADIUS / h).round() as usize);
+
     // directions + exposure
     let mut times = vec![[0.0f32; 2]; n];
     let mut dirs = vec![[0i8; 4]; n];
@@ -438,7 +505,7 @@ pub fn compute(inp: &ShoreFieldInput) -> ShoreField {
                 if tt.is_finite() { tt } else { 1e5 },
                 if t_shore[k].is_finite() { t_shore[k] } else if tt.is_finite() { tt } else { 1e5 },
             ];
-            dirs[k] = [snorm(dx * exposure), snorm(dz * exposure), 0, 0];
+            dirs[k] = [snorm(dx * exposure), snorm(dz * exposure), snorm(depth_s[k] / SMOOTH_DEPTH_RANGE), 0];
         }
     }
 
@@ -543,6 +610,28 @@ mod tests {
             swell_dir: swell,
             terrain_gen: 1,
         }
+    }
+
+    #[test]
+    fn blur_keeps_a_constant_and_rounds_a_step() {
+        let (rx, rz) = (40, 30);
+        let mut v = vec![5.0f32; rx * rz];
+        blur3(&mut v, rx, rz, 3);
+        assert!(v.iter().all(|x| (x - 5.0).abs() < 1e-4));
+        // a step at i = 20 becomes a ramp, monotonic, symmetric about the step
+        let mut s: Vec<f32> = (0..rx * rz).map(|k| if k % rx < 20 { 0.0 } else { 10.0 }).collect();
+        blur3(&mut s, rx, rz, 3);
+        let row = &s[15 * rx..16 * rx];
+        assert!(row.windows(2).all(|w| w[1] >= w[0] - 1e-4));
+        assert!(row[17] > 0.2 && row[17] < 5.0 && row[22] > 5.0 && row[22] < 9.8, "{row:?}");
+    }
+
+    #[test]
+    fn smoothed_depth_is_in_the_direction_texture() {
+        let f = compute(&beach([0.0, 1.0]));
+        let deep = f.dirs.iter().map(|d| d[2]).max().unwrap();
+        let land = f.dirs.iter().map(|d| d[2]).min().unwrap();
+        assert!(deep > 0 && land < 0, "{deep} {land}");
     }
 
     #[test]

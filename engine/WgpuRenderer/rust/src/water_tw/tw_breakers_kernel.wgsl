@@ -56,7 +56,9 @@ fn breakersProcessCrest(i: u32, pc: vec2<f32>, m: f32, run: f32) {
     let ground = terrainHeightAt(pc);
     let depth = tw.sea.x - ground;
     let A = shoreWaveAmp(m, along);
-    let cr = shoreCrest(A, depth); // (b, H, trough, lipThrow)
+    // (W3l) the breaking state from the smoothed depth, as the water surface's (shoreBreakDepth)
+    let dS = shoreSmoothDepth(pc, depth);
+    let cr = shoreCrest(A, dS); // (b, H, trough, lipThrow)
     let b = cr.x;
     let env = smoothstep(26.0, 13.0, depth) * sat(ph.exposure * 1.4) * tw.shore1.w;
 
@@ -64,9 +66,9 @@ fn breakersProcessCrest(i: u32, pc: vec2<f32>, m: f32, run: f32) {
     if (b > -0.6 && env > 0.3 && depth > 0.12) {
         let c = sqrt(clamp(depth, 0.3, 25.0) * BRK_GRAVITY);
         let lam = c * tw.shore0.x;
-        let s0 = shoreShape(0.0, A, depth, lam);
+        let s0 = shoreShape(0.0, A, dS, lam);
         let ub = 0.4 / lam;
-        let s1 = shoreShape(ub, A, depth, lam);
+        let s1 = shoreShape(ub, A, dS, lam);
         let fd = breakersFftDisp(pc, depth);
         let d3 = vec3<f32>(dir.x, 0.0, dir.y);
         let root = vec3<f32>(pc.x, tw.sea.x, pc.y) + d3 * (s0.x * env) + vec3<f32>(0.0, s0.y * env, 0.0) + fd;
@@ -81,7 +83,7 @@ fn breakersProcessCrest(i: u32, pc: vec2<f32>, m: f32, run: f32) {
         breakersCrestW[k] = vec4<f32>(root, b);
         breakersCrestW[k + 1u] = vec4<f32>(back, H);
         breakersCrestW[k + 2u] = vec4<f32>(dir, trough, id);
-        breakersEmit(i, slot, root, dir, b, H, trough, c, m, depth, shoreBore(A, depth));
+        breakersEmit(i, slot, root, dir, b, H, trough, c, m, depth, shoreBore(A, dS));
     }
 }
 
