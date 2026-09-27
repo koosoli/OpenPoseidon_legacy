@@ -1,3 +1,4 @@
+#include "MeshRecordClosure.hpp"
 #include <Poseidon/Dev/Diag/StreamingDiag.hpp> // RFG-085 residency levers
 #include <Poseidon/World/Scene/MapThings.hpp>    // RFG-095 hidden proxies
 #include <Poseidon/Dev/Diag/FixedStepStats.hpp> // REN-THR-004: ticks per frame beside the frame hash
@@ -2989,7 +2990,8 @@ void EngineWgpu::FillGeometryMeshFacts(GeometryAllocationReport& report)
             WgrSlice<uint64_t>{ids.data(), U32(ids.size())}, facts.data(), U32(facts.size()), &totals) != 0;
         if (!valid || totals.handles_requested != ids.size() || totals.handles_inspected > facts.size() ||
             uint64_t(totals.present) + totals.absent + totals.invalid != totals.handles_inspected ||
-            totals.duplicate_handles > totals.handles_inspected || totals.complete > 1 || (totals.flags & ~3u) != 0) return;
+            totals.duplicate_handles > totals.handles_inspected || totals.complete > 1 || (totals.flags & ~3u) != 0 ||
+            totals.record_scope_valid != 1 || totals.reserved != 0) return;
         report.rendererMeshFactsValid = true;
         report.rendererMeshFactsInspected = totals.handles_inspected;
         report.rendererMeshFactsPresent = totals.present;
@@ -2998,6 +3000,9 @@ void EngineWgpu::FillGeometryMeshFacts(GeometryAllocationReport& report)
         report.rendererMeshFactsDuplicateHandles = totals.duplicate_handles;
         report.rendererMeshFactVertexBytes = totals.unique_vertex_bytes;
         report.rendererMeshFactIndexBytes = totals.unique_index_bytes;
+        report.rendererMeshLiveRecords = totals.live_mesh_records;
+        report.rendererMeshRecordPoolGeneration = totals.pool_generation;
+        report.rendererMeshRecordPoolLiveBytes = totals.pool_live_bytes;
         report.rendererMeshFactsTruncated = report.rendererMeshFactsTruncated || (totals.flags & 1) != 0;
         for (size_t i = 0; i < totals.handles_inspected; ++i)
         {
@@ -3022,6 +3027,15 @@ void EngineWgpu::FillGeometryMeshFacts(GeometryAllocationReport& report)
             totals.handles_inspected == handles.trackedAllocations && totals.duplicate_handles == 0 &&
             report.rendererMeshFactsUnknownMappings == 0 && report.rendererMeshFactsAbsentWithPersistentOwners == 0 &&
             report.rendererMeshFactsPresentScheduledRetired == 0;
+        const auto closure = render::EvaluateMeshRecordClosure({totals.record_scope_valid == 1,
+            totals.complete == 1 && report.rendererMeshFactsUnknownMappings == 0,
+            totals.handles_requested, totals.handles_inspected, totals.present, totals.invalid,
+            totals.duplicate_handles, totals.flags, totals.unique_vertex_bytes, totals.unique_index_bytes,
+            totals.live_mesh_records, totals.pool_live_bytes});
+        report.rendererMeshRecordScopeValid = closure.scopeValid;
+        report.rendererMeshRecordClosureComplete = closure.recordsComplete;
+        report.rendererMeshPoolResidualValid = closure.residualValid;
+        report.rendererMeshPoolUnattributedBytes = closure.unattributedBytes;
         if (_geometryRegisteredRefsEnabled)
         {
             report.rendererRegisteredRefsEnabled = true;
@@ -3091,7 +3105,11 @@ void EngineWgpu::FillGeometryMeshFacts(GeometryAllocationReport& report)
                     ackTotals.handles_requested == totals.handles_requested &&
                     ackTotals.handles_inspected == totals.handles_inspected && ackTotals.present == totals.present &&
                     ackTotals.absent == totals.absent && ackTotals.invalid == 0 && ackTotals.duplicate_handles == 0 &&
-                    ackTotals.unique_vertex_bytes == totals.unique_vertex_bytes && ackTotals.unique_index_bytes == totals.unique_index_bytes;
+                    ackTotals.unique_vertex_bytes == totals.unique_vertex_bytes && ackTotals.unique_index_bytes == totals.unique_index_bytes &&
+                    ackTotals.record_scope_valid == totals.record_scope_valid && ackTotals.reserved == 0 &&
+                    ackTotals.live_mesh_records == totals.live_mesh_records && ackTotals.pool_live_bytes == totals.pool_live_bytes &&
+                    ackTotals.pool_generation == totals.pool_generation && ack.pool_generation == totals.pool_generation &&
+                    ack.pool_live_bytes == totals.pool_live_bytes;
                 for (size_t i = 0; sameCut && i < facts.size(); ++i)
                     sameCut = ackFacts[i].mesh_handle == facts[i].mesh_handle && ackFacts[i].state == facts[i].state &&
                         ackFacts[i].vertex_bytes == facts[i].vertex_bytes && ackFacts[i].index_bytes == facts[i].index_bytes && ackFacts[i].reserved == 0;
@@ -12709,6 +12727,9 @@ void EngineWgpu::PublishRendererStats()
             totals.present == report.rendererMeshAckPresent && totals.absent == report.rendererMeshAckAbsent &&
             totals.invalid == 0 && totals.duplicate_handles == 0 &&
             totals.unique_vertex_bytes == report.rendererMeshAckVertexBytes && totals.unique_index_bytes == report.rendererMeshAckIndexBytes &&
+            totals.record_scope_valid == 1 && totals.reserved == 0 &&
+            totals.live_mesh_records == report.rendererMeshLiveRecords && totals.pool_live_bytes == report.rendererMeshRecordPoolLiveBytes &&
+            totals.pool_generation == report.rendererMeshRecordPoolGeneration &&
             ack.pool_generation == report.rendererMeshAckPoolGeneration && ack.pool_live_bytes == report.rendererMeshAckPoolLiveBytes &&
             ack.pool_capacity_bytes == report.rendererMeshAckPoolCapacityBytes && ack.pool_retired_bytes == report.rendererMeshAckPoolRetiredBytes;
         // A failed cut validation is terminal even when the foreign state was

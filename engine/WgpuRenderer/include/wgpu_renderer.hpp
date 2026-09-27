@@ -34,7 +34,7 @@
 // and the handshake refuses the pair — so this number only has to move for
 // changes the hash cannot see (an added/removed entry point, a semantic change
 // to an existing one).
-#define WGR_ABI_VERSION 14u // selected-LOD diagnostic exports; matched engine/DLL required
+#define WGR_ABI_VERSION 15u // mesh-record/pool-range scope summary; matched engine/DLL required
 
 // Required capabilities are negotiated as a bit set inside WgrAbiCheck. A
 // newer engine can reject an older renderer DLL even if the shared layouts
@@ -1834,10 +1834,14 @@ struct WgrMeshHandleFactSummary
     uint32_t handles_requested, handles_inspected, present, absent, invalid, duplicate_handles;
     uint32_t complete, flags;
     uint64_t unique_vertex_bytes, unique_index_bytes;
+    uint64_t live_mesh_records, pool_live_bytes, pool_generation;
+    uint32_t record_scope_valid, reserved; // mesh records/pool ranges only; not owners or GPU completion
 };
 static_assert(sizeof(WgrMeshHandleFact) == 32);
-static_assert(sizeof(WgrMeshHandleFactSummary) == 48);
+static_assert(sizeof(WgrMeshHandleFactSummary) == 80);
 static_assert(offsetof(WgrMeshHandleFactSummary, unique_vertex_bytes) == 32);
+static_assert(offsetof(WgrMeshHandleFactSummary, live_mesh_records) == 48);
+static_assert(offsetof(WgrMeshHandleFactSummary, record_scope_valid) == 72);
 // Optional bounded snapshot fence. ACK acknowledges preceding queue work only;
 // no device-memory release or future-reference/reclaimability guarantee.
 struct WgrMeshSnapshotAck
@@ -2953,6 +2957,7 @@ constexpr uint32_t WgrLayoutHash()
     h = WgrHashSize(h, sizeof(WgrGeometryAllocationSummary));
     h = WgrHashSize(h, sizeof(WgrLodDemandRow));
     h = WgrHashSize(h, sizeof(WgrLodDemandReport));
+    h = WgrHashSize(h, sizeof(WgrMeshHandleFactSummary));
     return h;
 }
 

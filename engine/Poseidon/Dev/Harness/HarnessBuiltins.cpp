@@ -607,6 +607,12 @@ void RegisterScreenshot(HarnessServer& hs)
                 GEOMETRY_REPORT_FIELD(rendererMeshFactsPresentScheduledRetired); GEOMETRY_REPORT_FIELD(rendererMeshFactsAbsentScheduledRetired);
                 GEOMETRY_REPORT_FIELD(rendererMeshFactsAbsentWithPersistentOwners);
                 GEOMETRY_REPORT_FIELD(rendererMeshFactVertexBytes); GEOMETRY_REPORT_FIELD(rendererMeshFactIndexBytes);
+                cJSON_AddBoolToObject(result, "rendererMeshRecordScopeValid", report.rendererMeshRecordScopeValid);
+                cJSON_AddBoolToObject(result, "rendererMeshRecordClosureComplete", report.rendererMeshRecordClosureComplete);
+                cJSON_AddBoolToObject(result, "rendererMeshPoolResidualValid", report.rendererMeshPoolResidualValid);
+                GEOMETRY_REPORT_FIELD(rendererMeshLiveRecords); GEOMETRY_REPORT_FIELD(rendererMeshRecordPoolGeneration);
+                GEOMETRY_REPORT_FIELD(rendererMeshRecordPoolLiveBytes); GEOMETRY_REPORT_FIELD(rendererMeshPoolUnattributedBytes);
+                cJSON_AddStringToObject(result, "rendererMeshRecordScope", "Current generational mesh records and logical pool source-range payload at the same owner cut; excludes ownership, uploader references, retired-buffer capacity and physical GPU memory");
                 cJSON_AddBoolToObject(result, "rendererRegisteredRefsEnabled", report.rendererRegisteredRefsEnabled);
                 cJSON_AddBoolToObject(result, "rendererRegisteredRefsValid", report.rendererRegisteredRefsValid);
                 cJSON_AddBoolToObject(result, "rendererRegisteredRefsComplete", report.rendererRegisteredRefsComplete);

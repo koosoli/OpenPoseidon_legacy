@@ -1744,6 +1744,7 @@ const fn wgr_layout_hash() -> u32 {
     h = hash_size(h, sz::<WgrGeometryAllocationSummary>());
     h = hash_size(h, sz::<WgrLodDemandRow>());
     h = hash_size(h, sz::<WgrLodDemandReport>());
+    h = hash_size(h, sz::<WgrMeshHandleFactSummary>());
     h
 }
 
@@ -1764,9 +1765,9 @@ pub extern "C" fn wgr_abi_version() -> u32 {
     if cfg!(debug_assertions) {
         option_env!("WGR_TEST_ABI_VERSION")
             .and_then(|value| value.parse::<u32>().ok())
-            .unwrap_or(14)
+            .unwrap_or(15)
     } else {
-        14
+        15
     }
 }
 
@@ -2059,9 +2060,17 @@ mod abi_tests {
 
     #[test]
     fn exported_abi_version_matches_the_public_contract() {
-        assert_eq!(super::wgr_abi_version(), 14); // selected-LOD diagnostic exports; matched engine/DLL required
+        assert_eq!(super::wgr_abi_version(), 15); // mesh-record/pool-range scope; matched engine/DLL required
     }
 
+    #[test]
+    fn old_mesh_fact_summary_pair_is_refused_and_new_layout_is_exact() {
+        assert_eq!(std::mem::size_of::<super::WgrMeshHandleFactSummary>(),80);
+        assert_eq!(std::mem::offset_of!(super::WgrMeshHandleFactSummary,live_mesh_records),48);
+        assert_eq!(std::mem::offset_of!(super::WgrMeshHandleFactSummary,record_scope_valid),72);
+        let mut check=good_check(); check.abi_version=14;
+        assert_eq!(unsafe { super::wgr_abi_validate(&check) },0);
+    }
     #[test]
     fn matching_abi_declaration_is_accepted() {
         assert_eq!(unsafe { super::wgr_abi_validate(&good_check()) }, 1);
@@ -3608,6 +3617,11 @@ pub struct WgrMeshHandleFactSummary {
     pub flags: u32, // 1 output/work truncation, 2 byte-sum overflow
     pub unique_vertex_bytes: u64,
     pub unique_index_bytes: u64,
+    pub live_mesh_records: u64,
+    pub pool_live_bytes: u64,
+    pub pool_generation: u64,
+    pub record_scope_valid: u32,
+    pub reserved: u32,
 }
 
 /// Requested full-generation handle's registered section references. flags bit

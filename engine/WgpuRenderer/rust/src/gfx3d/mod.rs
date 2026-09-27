@@ -5411,12 +5411,21 @@ impl Gfx3d {
 
     pub(crate) fn mesh_handle_facts(&self, handles: &[u64], out: &mut [crate::ffi::WgrMeshHandleFact])
         -> crate::ffi::WgrMeshHandleFactSummary {
-        mesh_facts::collect(handles, out, |handle| {
-            let key: MeshKey = KeyData::from_ffi(handle).into();
-            let mesh = self.meshes.get(key)?;
-            Some((u64::from(mesh.vert_count) * std::mem::size_of::<WgrMeshVertex>() as u64,
-                u64::from(mesh.index_count) * std::mem::size_of::<u32>() as u64))
-        })
+        self.mesh_handle_facts_snapshot(handles,out).0
+    }
+
+    fn mesh_handle_facts_snapshot(&self, handles: &[u64], out: &mut [crate::ffi::WgrMeshHandleFact])
+        -> (crate::ffi::WgrMeshHandleFactSummary,pool::GeometryResidency) {
+        let facts=mesh_facts::collect(handles,out,|handle| {
+            let key: MeshKey=KeyData::from_ffi(handle).into();
+            let mesh=self.meshes.get(key)?;
+            Some((u64::from(mesh.vert_count)*std::mem::size_of::<WgrMeshVertex>() as u64,
+                u64::from(mesh.index_count)*std::mem::size_of::<u32>() as u64))
+        });
+        // O(1) record count; existing allocator free-span/retired metadata walk
+        // remains explicit on-demand cost, not a bounded whole-registry scan.
+        let pool=self.pool.residency();
+        (mesh_facts::with_pool_scope(facts,self.meshes.len() as u64,pool.live_bytes,self.pool.generation()),pool)
     }
 
     /// Explicit bounded census only. No current-frame/uploader/bake ownership,
@@ -5449,8 +5458,7 @@ impl Gfx3d {
         rows.resize(handles.len(), crate::ffi::WgrMeshHandleFact::default());
         // No owner yield or policy mutation between exact generational lookup,
         // pool metadata and request publication. Pool values stay immutable.
-        let totals = self.mesh_handle_facts(handles, &mut rows);
-        let pool = self.pool.residency();
+        let (totals,pool) = self.mesh_handle_facts_snapshot(handles, &mut rows);
         let meta = crate::ffi::WgrMeshSnapshotAck {
             pool_generation: self.pool.generation(), pool_live_bytes: pool.live_bytes,
             pool_capacity_bytes: pool.capacity_bytes, pool_retired_bytes: pool.retired_bytes,

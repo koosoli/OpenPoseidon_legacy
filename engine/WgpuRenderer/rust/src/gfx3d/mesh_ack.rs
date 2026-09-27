@@ -131,6 +131,22 @@ mod tests {
             WgrMeshSnapshotAck { pool_generation: 9, pool_capacity_bytes: 4096, ..Default::default() }).unwrap()
     }
     #[test]
+    fn record_pool_scope_stays_immutable_across_later_cuts_and_ack() {
+        let mut state=MeshAck::new();
+        let original=WgrMeshHandleFactSummary { complete:1,handles_requested:1,handles_inspected:1,present:1,
+            live_mesh_records:2,pool_live_bytes:288,pool_generation:7,record_scope_valid:1,..Default::default() };
+        let id=state.request(1,vec![WgrMeshHandleFact {mesh_handle:7,state:1,..Default::default()}],original,
+            WgrMeshSnapshotAck {pool_generation:7,pool_live_bytes:288,..Default::default()}).unwrap();
+        // A fresh source cut may differ; accepted ticket retains its own copied facts.
+        let later=WgrMeshHandleFactSummary {live_mesh_records:3,pool_live_bytes:432,pool_generation:8,..original};
+        assert_ne!(later.pool_generation,state.snapshot(id).unwrap().1.pool_generation);
+        let mut signal=None; state.main_submitted(|s| signal=Some(s)); signal.unwrap().complete();
+        let (_,summary,ack)=state.snapshot(id).unwrap();
+        assert_eq!((summary.live_mesh_records,summary.pool_live_bytes,summary.pool_generation),(2,288,7));
+        assert_eq!((ack.pool_live_bytes,ack.pool_generation,ack.state),(288,7,ACKNOWLEDGED));
+    }
+
+    #[test]
     fn snapshot_waits_for_next_submission_and_actual_callback() {
         let mut state = MeshAck::new(); let id = request(&mut state, 1);
         assert_eq!(state.snapshot(id).unwrap().2.state, QUEUED);

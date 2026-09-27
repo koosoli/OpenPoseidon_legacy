@@ -39,6 +39,17 @@ pub(super) fn collect(
     summary
 }
 
+// Attached only by the renderer owner after this nonyielding requested-handle
+// lookup. No registry walk: live record count is O(1); the producer explicitly
+// calculates existing allocator free-span/retired metadata once for this cut.
+// This is not current-frame/uploader reference or physical memory coverage.
+pub(super) fn with_pool_scope(mut facts: WgrMeshHandleFactSummary, records: u64, live: u64, generation: u64)
+    -> WgrMeshHandleFactSummary {
+    facts.live_mesh_records=records; facts.pool_live_bytes=live;
+    facts.pool_generation=generation; facts.record_scope_valid=1;
+    facts
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -91,6 +102,21 @@ mod tests {
         assert_eq!((visits, capped.handles_inspected, capped.complete), (8192, 8192, 0));
         assert_eq!(capped.flags & 1, 1);
         assert_eq!(output[8192].state, 0);
+    }
+
+    #[test]
+    fn supplied_generational_subset_keeps_total_live_pool_scope_separate() {
+        let mut rows=[WgrMeshHandleFact::default();3];
+        let full=with_pool_scope(collect(&[7,8,9],&mut rows,|id| if id==9 {None} else {Some((68,4))}),2,144,5);
+        assert_eq!((full.present,full.absent,full.complete,full.live_mesh_records,full.pool_live_bytes,full.record_scope_valid),(2,1,1,2,144,1));
+        let partial=with_pool_scope(collect(&[7],&mut rows,|_| Some((68,4))),2,144,5);
+        assert_eq!((partial.present,partial.live_mesh_records,partial.unique_vertex_bytes),(1,2,68));
+        let duplicate=with_pool_scope(collect(&[7,7],&mut rows,|_| Some((68,4))),2,144,5);
+        assert_eq!((duplicate.complete,duplicate.duplicate_handles,duplicate.live_mesh_records),(0,1,2));
+        let missing=with_pool_scope(collect(&[9],&mut rows,|_| None),2,144,5);
+        assert_eq!((missing.absent,missing.present,missing.pool_live_bytes),(1,0,144));
+        let unknown=collect(&[],&mut rows,|_| None);
+        assert_eq!((unknown.complete,unknown.record_scope_valid),(1,0));
     }
 
     #[test]

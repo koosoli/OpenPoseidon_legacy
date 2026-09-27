@@ -238,6 +238,15 @@ try {
                     $report.rendererMeshFactsAbsentWithPersistentOwners -gt $report.rendererMeshFactsAbsent) {
                     throw 'Renderer presence and persistent owner joins disagree'
                 }
+                $recordBytes=$report.rendererMeshFactVertexBytes + $report.rendererMeshFactIndexBytes
+                if (!$report.rendererMeshRecordScopeValid -or !$report.rendererMeshPoolResidualValid -or
+                    $report.rendererMeshRecordPoolGeneration -lt 1 -or
+                    $report.rendererMeshLiveRecords -lt $report.rendererMeshFactsPresent -or
+                    $recordBytes -gt $report.rendererMeshRecordPoolLiveBytes -or
+                    $report.rendererMeshPoolUnattributedBytes -ne ($report.rendererMeshRecordPoolLiveBytes-$recordBytes) -or
+                    $report.rendererMeshRecordClosureComplete -ne (($report.rendererMeshLiveRecords -eq $report.rendererMeshFactsPresent) -and $report.rendererMeshPoolUnattributedBytes -eq 0)) {
+                    throw 'Same-cut mesh record and logical pool residual evidence was inconsistent'
+                }
                 if ($MeshAck) {
                     if (!$report.rendererMeshAckEnabled -or !$report.rendererMeshAckValid -or $report.rendererMeshAckState -ne 3 -or
                         $report.rendererMeshAckTicket -lt 1 -or $report.rendererMeshAckEpoch -ne $report.rendererMeshFactEpoch -or
@@ -245,6 +254,8 @@ try {
                         $report.rendererMeshAckRequested -ne $report.rendererMeshFactsRequested -or
                         $report.rendererMeshAckPresent -ne $report.rendererMeshFactsPresent -or $report.rendererMeshAckAbsent -ne $report.rendererMeshFactsAbsent -or
                         $report.rendererMeshAckVertexBytes -ne $report.rendererMeshFactVertexBytes -or $report.rendererMeshAckIndexBytes -ne $report.rendererMeshFactIndexBytes -or
+                        $report.rendererMeshAckPoolGeneration -ne $report.rendererMeshRecordPoolGeneration -or
+                        $report.rendererMeshAckPoolLiveBytes -ne $report.rendererMeshRecordPoolLiveBytes -or
                         ($report.rendererMeshAckVertexBytes + $report.rendererMeshAckIndexBytes) -gt $report.rendererMeshAckPoolLiveBytes) {
                         throw 'Actual immutable mesh cut did not receive its bounded asynchronous queue acknowledgement'
                     }

@@ -1727,6 +1727,9 @@ class Engine : public IGraphicsEngine
           uint64_t rendererMeshFactsPresentScheduledRetired = 0, rendererMeshFactsAbsentScheduledRetired = 0;
           uint64_t rendererMeshFactsAbsentWithPersistentOwners = 0;
           uint64_t rendererMeshFactVertexBytes = 0, rendererMeshFactIndexBytes = 0;
+          bool rendererMeshRecordScopeValid = false, rendererMeshRecordClosureComplete = false, rendererMeshPoolResidualValid = false;
+          uint64_t rendererMeshLiveRecords = 0, rendererMeshRecordPoolGeneration = 0;
+          uint64_t rendererMeshRecordPoolLiveBytes = 0, rendererMeshPoolUnattributedBytes = 0;
           // Bounded registered section census, separate from complete allocation
           // ownership. Zero references never imply safe reclamation.
           bool rendererRegisteredRefsEnabled = false, rendererRegisteredRefsValid = false;

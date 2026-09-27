@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <WgpuRenderer/GeometryOwnerLedger.hpp>
+#include <WgpuRenderer/MeshRecordClosure.hpp>
 #include <WgpuRenderer/SharedRetainedMeshLifetime.hpp>
 #include <array>
 #include <algorithm>
@@ -268,4 +269,24 @@ TEST_CASE("Closed or stale scheduling cannot mutate a replacement epoch", "[wgpu
     CHECK(record.rendererHandle==0x20000002c); CHECK(ledger.Snapshot().attributionComplete);
     CHECK(ledger.Snapshot().scheduledRetirementEvents==0);
     CHECK_FALSE(ledger.SnapshotHandle(2,999,record)); CHECK(record.allocationId==0);
+}
+
+TEST_CASE("Mesh record closure refuses partial malformed and overflowing pool evidence", "[wgpu][mesh-record-closure]")
+{
+    using namespace Poseidon::render;
+    MeshRecordClosureInput all{true,true,3,3,2,0,0,0,100,20,2,120};
+    CHECK(EvaluateMeshRecordClosure(all).recordsComplete);
+    CHECK(EvaluateMeshRecordClosure(all).residualValid);
+    all.present=1; all.vertexBytes=50; all.indexBytes=10;
+    const auto partial=EvaluateMeshRecordClosure(all); CHECK_FALSE(partial.recordsComplete);
+    CHECK(partial.residualValid); CHECK(partial.unattributedBytes==60);
+    SECTION("missing scope") { all.sourceScopeValid=false; CHECK_FALSE(EvaluateMeshRecordClosure(all).scopeValid); }
+    SECTION("truncated") { all.inspected=2; CHECK_FALSE(EvaluateMeshRecordClosure(all).residualValid); }
+    SECTION("duplicate generational key") { all.duplicates=1; CHECK_FALSE(EvaluateMeshRecordClosure(all).residualValid); }
+    SECTION("failed collector") { all.factsComplete=false; CHECK_FALSE(EvaluateMeshRecordClosure(all).residualValid); }
+    SECTION("invalid key") { all.invalid=1; CHECK_FALSE(EvaluateMeshRecordClosure(all).residualValid); }
+    SECTION("overflow") { all.vertexBytes=UINT64_MAX; all.indexBytes=1; CHECK_FALSE(EvaluateMeshRecordClosure(all).residualValid); }
+    SECTION("foreign totals exceed actual pool") { all.poolLiveBytes=1; CHECK_FALSE(EvaluateMeshRecordClosure(all).residualValid); }
+    SECTION("present count exceeds inspected") { all.inspected=all.requested=0; CHECK_FALSE(EvaluateMeshRecordClosure(all).residualValid); }
+    SECTION("present count exceeds actual records") { all.liveRecords=0; CHECK_FALSE(EvaluateMeshRecordClosure(all).residualValid); }
 }
