@@ -14,7 +14,7 @@ def load(path, name):
     return module
 
 
-def generate(output):
+def generate(output, alpha_tagged=False):
     output = output.resolve()
     if output.exists():
         raise ValueError("Output must be a new private directory")
@@ -29,7 +29,13 @@ def generate(output):
     prefix = "coldpaa_" + hashlib.sha256(str(output).encode("ascii")).hexdigest()[:12]
     texture = prefix + "\\primary.paa"
     block = struct.pack("<BB6sHHI", 255, 255, bytes(6), 0xf800, 0xf800, 0)
-    paa = bytearray(struct.pack("<HH", 0xff05, 0))
+    paa = bytearray(struct.pack("<H", 0xff05))
+    if alpha_tagged:
+        # Pactext::PacPalette::Load reads little-endian TAGG/FLAG constants:
+        # physical bytes GGAT/GALF, size4, PicFlagAlpha1. BC3 alone is not
+        # authored alpha eligibility. The original opaque BC blocks stay exact.
+        paa += b"GGATGALF" + struct.pack("<II", 4, 1)
+    paa += struct.pack("<H", 0)  # no palette, after optional tags
     mips = []
     for side in (64, 32, 16, 8, 4):
         raw = block * ((side // 4) ** 2)
@@ -42,7 +48,15 @@ def generate(output):
     paa += bytes(4)
     paa = bytes(paa)
     # Independent byte-level self-check, including literal-only LZO payloads.
-    cursor = 4
+    if alpha_tagged:
+        assert paa[:2] == struct.pack("<H", 0xff05)
+        assert paa[2:10] == b"GGATGALF"
+        assert struct.unpack_from("<II", paa, 10) == (4, 1)
+        assert struct.unpack_from("<H", paa, 18)[0] == 0
+        cursor = 20
+    else:
+        assert paa[:4] == struct.pack("<HH", 0xff05, 0)
+        cursor = 4
     for mip in mips:
         w, h = struct.unpack_from("<HH", paa, cursor)
         size = int.from_bytes(paa[cursor+4:cursor+7], "little")
@@ -86,6 +100,9 @@ def generate(output):
     manifest = dict(schema=1, originalGenerated=True, modelCount=2, placements=[1001,1002],
                     sourceName=texture, archivePrefix=prefix, archiveMember="primary.paa",
                     memberOffset=len(header), memberBytes=len(paa), paaSha256=hashlib.sha256(paa).hexdigest(),
+                    alphaTagged=bool(alpha_tagged), alphaFlag=1 if alpha_tagged else 0,
+                    alphaTagBytes=16 if alpha_tagged else 0,
+                    alphaScope="Authored FLAG eligibility only; BC3 alpha samples remain255 and classification/peek require actual engine evidence.",
                     chainBytes=sum(m["decodedBytes"] for m in mips),
                     selectedMipCount=4, selectedChainBytes=sum(m["decodedBytes"] for m in mips if m["side"] > 4),
                     mipSelectionScope="Existing TextureSourcePac::Init MIN_MIP_SIZE=4 excludes final 4x4 from _mipmaps; archive/worker retains all five levels.",
@@ -101,4 +118,6 @@ def generate(output):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=Path)
-    generate(parser.parse_args().output)
+    parser.add_argument("--alpha-tagged", action="store_true", help="Author FLAG PicFlagAlpha=1 without changing any BC3 block")
+    args = parser.parse_args()
+    generate(args.output, args.alpha_tagged)

@@ -18,10 +18,14 @@ $fixture=Join-Path ([IO.Path]::GetTempPath()) ('op-cp-'+[guid]::NewGuid().ToStri
 $profile=Join-Path $out 'user';$mission=Join-Path $out 'cold-paa.eden'
 New-Item -ItemType Directory $out,$profile,$mission | Out-Null
 $generator=Join-Path $PSScriptRoot 'streaming/build_cold_paa_handoff_fixture.py'
-$producerLines=@(& $Python $generator $fixture)
+$producerArgs=@($generator,$fixture)
+if($RequireAlphaPeek){$producerArgs+='--alpha-tagged'}
+$producerLines=@(& $Python @producerArgs)
 if($LASTEXITCODE -or $producerLines.Count -ne 1 -or $producerLines[0].Length -gt 8192){throw 'Original bounded producer failed'}
 $producer=$producerLines[0]|ConvertFrom-Json
 if($producer.schema -ne 1 -or !$producer.originalGenerated -or $producer.modelCount -ne 2 -or @($producer.placements).Count -ne 2 -or $producer.chainBytes -ne 5456 -or $producer.selectedMipCount -ne 4 -or $producer.selectedChainBytes -ne 5440 -or $producer.memberBytes -gt 16777216){throw 'Producer contract mismatch'}
+foreach($field in @('alphaTagged','alphaFlag','alphaTagBytes')){if($producer.PSObject.Properties.Name -notcontains $field -or $null -eq $producer.$field){throw "Missing producer alpha provenance $field"}}
+if([bool]$producer.alphaTagged -ne [bool]$RequireAlphaPeek -or $producer.alphaFlag -ne $(if($RequireAlphaPeek){1}else{0}) -or $producer.alphaTagBytes -ne $(if($RequireAlphaPeek){16}else{0})){throw 'Actual authored alpha tag provenance mismatch'}
 foreach($file in $producer.files){if(!(Test-Path -LiteralPath $file.path) -or (Get-Item -LiteralPath $file.path).Length -ne $file.bytes -or (Get-FileHash -LiteralPath $file.path).Hash -ne $file.sha256){throw 'Producer file hash/size mismatch'}}
 $producerLines[0]|Set-Content (Join-Path $out 'producer.json')
 @'
@@ -96,7 +100,7 @@ try{
  if($Disabled){if($rows.Count){throw 'OFF emitted a cold handoff upload'}}elseif(!$useful.Count){throw 'NotExercised: no actual source-validated operation-local prepared upload'}
  $afterHashes=@(Get-FileHash -LiteralPath $exe,$dll)
  for($i=0;$i -lt 2;$i++){if($hashes[$i].Hash -ne $afterHashes[$i].Hash){throw 'Installed artifact changed during fixture'}}
- $result=@{passed=$true;disabled=[bool]$Disabled;normalShutdown=$true;forcedTermination=$false;exitCode=$p.ExitCode;baseline=$baseline;after=$after;archiveBefore=$archiveBefore;archiveAfter=$archiveAfter;usefulUploadRows=$useful;allColdUploadRows=$rows;scope='Actual primary archived chain upload and fixed two-model camera coverage; no pixel/all-pass/performance acceptance'}
+ $result=@{passed=$true;disabled=[bool]$Disabled;requireAlphaPeek=[bool]$RequireAlphaPeek;alphaTagged=[bool]$producer.alphaTagged;normalShutdown=$true;forcedTermination=$false;exitCode=$p.ExitCode;baseline=$baseline;after=$after;archiveBefore=$archiveBefore;archiveAfter=$archiveAfter;usefulUploadRows=$useful;allColdUploadRows=$rows;scope='Actual primary archived chain upload and fixed two-model camera coverage; no pixel/all-pass/performance acceptance'}
 }catch{$failure=$_}
 finally{
  if($p -and !$p.HasExited){try{if($client -and $client.Connected){$null=Send @{cmd='exit'};$normal=$p.WaitForExit(15000) -and $p.ExitCode -eq 0}}catch{};if(!$p.HasExited){Stop-Process -Id $p.Id -Force;$forced=$true;$p.WaitForExit(5000)|Out-Null}}
