@@ -500,6 +500,19 @@ void RegisterScreenshot(HarnessServer& hs)
                 GEOMETRY_REPORT_FIELD(lodsInVisitedModels); GEOMETRY_REPORT_FIELD(sectionVisits); GEOMETRY_REPORT_FIELD(uniqueMeshes);
                 GEOMETRY_REPORT_FIELD(missingModels); GEOMETRY_REPORT_FIELD(missingMeshes); GEOMETRY_REPORT_FIELD(invalidRanges); GEOMETRY_REPORT_FIELD(unresolvedNames);
                 GEOMETRY_REPORT_FIELD(maxModels); GEOMETRY_REPORT_FIELD(maxRows); GEOMETRY_REPORT_FIELD(maxSectionVisits);
+                cJSON_AddBoolToObject(result, "persistentAttributionEnabled", report.persistentAttributionEnabled);
+                cJSON_AddBoolToObject(result, "persistentAttributionComplete", report.persistentAttributionComplete);
+                cJSON_AddStringToObject(result, "persistentAttributionScope", "Producer/model/CPU-owner facts at a drained event cut; bytes are submitted-geometry estimates; draw, cached-view, in-flight and actual GPU retirement coverage incomplete");
+                GEOMETRY_REPORT_FIELD(persistentAttributionEpoch); GEOMETRY_REPORT_FIELD(persistentIncompleteReasons);
+                GEOMETRY_REPORT_FIELD(producerEstimatedVertexBytes); GEOMETRY_REPORT_FIELD(producerEstimatedIndexBytes);
+                GEOMETRY_REPORT_FIELD(persistentCpuReferencedVertexBytes); GEOMETRY_REPORT_FIELD(persistentCpuReferencedIndexBytes);
+                GEOMETRY_REPORT_FIELD(persistentRetainedSharedCpuVertexBytes); GEOMETRY_REPORT_FIELD(persistentRetainedSharedCpuIndexBytes);
+                GEOMETRY_REPORT_FIELD(persistentStandaloneCpuVertexBytes); GEOMETRY_REPORT_FIELD(persistentStandaloneCpuIndexBytes);
+                GEOMETRY_REPORT_FIELD(persistentTrackedAllocations); GEOMETRY_REPORT_FIELD(persistentTrackedBorrowerRecords);
+                GEOMETRY_REPORT_FIELD(persistentOwnerEstimatedBytes); GEOMETRY_REPORT_FIELD(persistentZeroOwnerEstimatedBytes);
+                GEOMETRY_REPORT_FIELD(persistentCpuBorrowers); GEOMETRY_REPORT_FIELD(persistentModelLodLinks);
+                GEOMETRY_REPORT_FIELD(persistentMailboxPending); GEOMETRY_REPORT_FIELD(persistentMailboxDropped);
+                GEOMETRY_REPORT_FIELD(persistentCancelledCreates); GEOMETRY_REPORT_FIELD(persistentReclaimableBytes);
 #undef GEOMETRY_REPORT_FIELD
                 auto* rows = cJSON_AddArrayToObject(result, "rows");
                 for (const auto& row : report.rows) {

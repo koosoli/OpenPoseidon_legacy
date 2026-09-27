@@ -1688,6 +1688,23 @@ class Engine : public IGraphicsEngine
           uint32_t maxModels = 0, maxRows = 0, maxSectionVisits = 0;
           bool valid = false, truncated = false;
           bool ownershipCoverageComplete = false; // no complete renderer-wide ownership inventory
+          // Optional startup-only persistent mesh-owner attribution. Bytes are
+          // producer payload estimates, not physical GPU allocation sizes. Scope
+          // excludes in-flight draw/caster references, skin/bake buffers and driver
+          // allocations; completeness never establishes safe reclamation.
+          bool persistentAttributionEnabled = false, persistentAttributionComplete = false;
+          uint64_t persistentAttributionEpoch = 0, persistentIncompleteReasons = 0;
+          uint64_t producerEstimatedVertexBytes = 0, producerEstimatedIndexBytes = 0;
+          uint64_t persistentCpuReferencedVertexBytes = 0, persistentCpuReferencedIndexBytes = 0;
+          uint64_t persistentRetainedSharedCpuVertexBytes = 0, persistentRetainedSharedCpuIndexBytes = 0;
+          uint64_t persistentStandaloneCpuVertexBytes = 0, persistentStandaloneCpuIndexBytes = 0;
+          // "Live" here means no producer scheduled-retirement fact. CPU uploader
+          // retirement has no pool-free acknowledgement in this diagnostic.
+          uint64_t persistentTrackedAllocations = 0, persistentTrackedBorrowerRecords = 0;
+          uint64_t persistentOwnerEstimatedBytes = 0, persistentZeroOwnerEstimatedBytes = 0;
+          uint64_t persistentCpuBorrowers = 0, persistentModelLodLinks = 0;
+          uint64_t persistentMailboxPending = 0, persistentMailboxDropped = 0;
+          uint64_t persistentCancelledCreates = 0, persistentReclaimableBytes = 0;
           // Row/union scope: retained meshes only, excluding direct-only meshes,
           // standalone skin/bake buffers, driver alignment and textures/materials.
           // Global pool counters also include direct meshes. Not reclaimable bytes.

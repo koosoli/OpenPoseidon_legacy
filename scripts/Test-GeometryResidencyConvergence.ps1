@@ -3,11 +3,12 @@ param(
     [switch]$AllocationReport,
     [switch]$DiagnosticOnly,
     [switch]$LodDemandReport,
+    [switch]$OwnerLedger,
     [string]$Label = 'dayz-resource-convergence',
     [string]$GameDir = 'D:\SteamLibrary\steamapps\common\ARMA Cold War Assault'
 )
 $ErrorActionPreference = 'Stop'
-if ($DiagnosticOnly -or $LodDemandReport) { $AllocationReport = $true }
+if ($DiagnosticOnly -or $LodDemandReport -or $OwnerLedger) { $AllocationReport = $true }
 if (!$env:LOCK_OWNER) {
     $shellName = if ($PSVersionTable.PSEdition -eq 'Core') { 'pwsh.exe' } else { 'powershell.exe' }
     $shellExe = (Join-Path $PSHOME $shellName).Replace('\', '/')
@@ -18,6 +19,7 @@ if (!$env:LOCK_OWNER) {
     if ($AllocationReport) { $lockArgs += '-AllocationReport' }
     if ($DiagnosticOnly) { $lockArgs += '-DiagnosticOnly' }
     if ($LodDemandReport) { $lockArgs += '-LodDemandReport' }
+    if ($OwnerLedger) { $lockArgs += '-OwnerLedger' }
     $env:LOCK_OWNER = 'DayZ resource convergence'
     try {
         & 'C:\Program Files\Git\bin\bash.exe' @lockArgs
@@ -54,6 +56,7 @@ $environment = @{
     WGR_PASS1_STATS = '1'; WGR_RESIDENCY_TRACE = '1'
 }
 if ($LodDemandReport) { $environment.WGR_GEOMETRY_LOD_FEEDBACK = '1' }
+if ($OwnerLedger) { $environment.WGR_GEOMETRY_OWNER_LEDGER = '1' }
 # Remove inherited experiments, then restore the caller's environment on exit.
 # Ordinary terrain paging remains the installed engine default.
 $clearNames = @((Get-ChildItem Env: | Where-Object {
@@ -70,7 +73,7 @@ try {
     @{
         scriptSha256 = (Get-FileHash $PSCommandPath).Hash; head = (& git -C $root rev-parse HEAD)
         installed = (Get-Content (Join-Path $GameDir 'DEPLOYED-FROM.txt')); hashes = @(Get-FileHash $exe, $dll)
-        corpus = 'DayZ'; pose = @($baseX, $baseZ, $baseY, $azimuth, $elevation); routeX = $route; cycles = 3
+        corpus = 'DayZ'; pose = @($baseX, $baseZ, $baseY, $azimuth, $elevation); routeX = $route; cycles = $(if ($DiagnosticOnly) { 0 } else { 3 })
         environment = $environment; driverSampled = [bool]$SampleDriverMemory
         quietSamples = 10; quietTimeoutSeconds = 30; routePoseHoldSeconds = 3
         growthAllowance = 'max(1% of return2, 8 MiB); texture count max(1%, 8)'
@@ -202,6 +205,19 @@ try {
                 $report.overlapWithinInspectedVertexBytes -gt $report.uniqueVertexBytes -or
                 $report.overlapWithinInspectedIndexBytes -gt $report.uniqueIndexBytes) { throw 'Inspected allocation overlap exceeds its unique union' }
             if ($report.ownershipCoverageComplete) { throw 'Diagnostic subset incorrectly claimed complete allocation ownership' }
+            if ($OwnerLedger) {
+                if (!$report.persistentAttributionEnabled -or $report.persistentAttributionEpoch -lt 1 -or
+                    $report.persistentTrackedAllocations -lt 1 -or $report.persistentCpuBorrowers -lt 1 -or
+                    ($report.persistentCpuReferencedVertexBytes + $report.persistentCpuReferencedIndexBytes) -lt 1) {
+                    throw 'Persistent owner ledger did not observe actual producer allocations and CPU borrowers'
+                }
+                if ($report.persistentReclaimableBytes -ne 0 -or
+                    ($report.persistentAttributionComplete -and $report.persistentIncompleteReasons -ne 0)) {
+                    throw 'Persistent attribution fabricated reclaimability or hid incompleteness'
+                }
+            } elseif ($report.persistentAttributionEnabled) {
+                throw 'Default diagnostic unexpectedly enabled persistent owner attribution'
+            }
             if ($report.registryEntriesVisited -gt $report.maxModels -or
                 ($report.modelsRequested + $report.ineligibleEntriesSkipped) -ne $report.registryEntriesVisited) { throw 'Registry sampling and negative-cache accounting disagree' }
             if ($report.missingModels -ne 0 -or $report.missingMeshes -ne 0) { throw 'Settled eligible retained models or meshes are missing' }
@@ -263,7 +279,7 @@ try {
     @{passed = ($converged -or $DiagnosticOnly); convergenceMeasured = !$DiagnosticOnly; status = $status; initialCold = $initialCold; initialQuiet = $initialQuiet
         returns = $returns; comparison = $comparison; lateQuiet = $lateQuiet; retiredClear = $retiredClear
         processScope = 'Diagnostic private/RSS samples retained; GPU convergence does not establish process-memory convergence'
-        allocationReport = $allocation; lodDemandMeasured = [bool]$LodDemandReport
+        allocationReport = $allocation; lodDemandMeasured = [bool]$LodDemandReport; ownerLedgerMeasured = [bool]$OwnerLedger
     } | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $out 'result.json')
     Write-Output "Resource convergence evidence: $out ($status)"
     if (!$converged -and !$DiagnosticOnly) { throw "Convergence not established: $status (see result.json and raw samples)" }

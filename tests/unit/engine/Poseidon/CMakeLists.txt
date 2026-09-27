@@ -137,6 +137,7 @@ set(POSEIDON_TEST_SOURCES
     Foundation/Memory/test_jimbo_allocator.cpp
     
     # Graphics tests
+    Graphics/test_geometry_owner_ledger.cpp
     Graphics/test_alpha_classify.cpp
     Graphics/test_surface_decompose.cpp
     Graphics/test_shadowmap_math.cpp

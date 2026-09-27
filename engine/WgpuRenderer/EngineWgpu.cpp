@@ -3,6 +3,7 @@
 #include <Poseidon/Dev/Diag/FixedStepStats.hpp> // REN-THR-004: ticks per frame beside the frame hash
 #include <Poseidon/Dev/Diag/FramePaceTrace.hpp> // PACE-001: per-frame pacing trace
 #include "EngineWgpu.hpp"
+#include "GeometryOwnerLedger.hpp"
 #include <atomic>
 #include <Poseidon/Foundation/Threads/ThreadAffinity.hpp>
 #include <Poseidon/Core/BuildInfo.hpp>
@@ -1357,10 +1358,35 @@ class VertexBufferWgpu : public VertexBuffer
     }
 };
 
+// Only ON buffers carry diagnostic lifetime storage. The default buffer's size,
+// allocation and destruction path remain unchanged.
+class AttributedVertexBufferWgpu final : public VertexBufferWgpu
+{
+    std::shared_ptr<render::GeometryOwnerLedger> _ledger;
+    const uint64_t _epoch, _borrower;
+public:
+    AttributedVertexBufferWgpu(WgrRenderer* r, const WgrUploader* up, std::shared_ptr<CpuMeshSlot> s,
+        std::shared_ptr<CpuMeshLink> l, int nv, bool dynamic, VBType type,
+        std::shared_ptr<render::GeometryOwnerLedger> ledger, uint64_t epoch, uint64_t borrower)
+        : VertexBufferWgpu(r, up, std::move(s), std::move(l), nv, dynamic, type),
+          _ledger(std::move(ledger)), _epoch(epoch), _borrower(borrower) {}
+    ~AttributedVertexBufferWgpu() override
+    {
+        // Numeric immutable identity only: this may run outside the owner drain.
+        _ledger->QueueCpuBorrowerDetached(_epoch, _borrower);
+    }
+};
+
 } // namespace
 
 EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.useWindow)
 {
+    const char* ownerLedger = std::getenv("WGR_GEOMETRY_OWNER_LEDGER");
+    if (ownerLedger && std::strcmp(ownerLedger, "1") == 0)
+    {
+        _geometryOwnerLedger = std::make_shared<render::GeometryOwnerLedger>(render::GeometryOwnerLedger::Limits{});
+        _geometryOwnerLedger->BeginEpoch(_geometryOwnerEpoch, true);
+    }
     _cpuMeshLink->engine = this; // see CpuMeshLink; nulled in ~EngineWgpu
     s_self = this;
     {
@@ -2001,6 +2027,7 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
 EngineWgpu::~EngineWgpu()
 {
     StopRenderThread();
+    if (_geometryOwnerLedger) _geometryOwnerLedger->CloseEpoch(_geometryOwnerEpoch);
     ClearFarObjects();
     s_self = nullptr;
     // FIRST: every VertexBufferWgpu still alive holds this link, and Shapes outlive the
@@ -2819,6 +2846,7 @@ GeometryPoolFill GGeometryPoolFill;
 
 void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
 {
+    if (_geometryOwnerLedger) _geometryOwnerLedger->DrainDetachMailbox();
     if (ops.empty())
         return;
     if (!_renderer)
@@ -2850,6 +2878,8 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
         {
         case ResourceOp::MeshCreate:
         {
+            const uint64_t ownerVertexBytes = _geometryOwnerLedger ? op.verts.size() * sizeof(SVertex) : 0;
+            const uint64_t ownerIndexBytes = _geometryOwnerLedger ? op.indices.size() * sizeof(uint32_t) : 0;
             // Crown centres first: their base is baked into the vertex data, which is why
             // the registration could never be queued on its own (REN-THR-008).
             if (!op.crownCentres.empty())
@@ -2864,6 +2894,13 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
             _meshIdOf[op.mesh] = wgr_mesh_create(
                 _renderer, AsMeshVerts(op.verts),
                 WgrSlice<uint32_t>{reinterpret_cast<const uint32_t*>(op.indices.data()), U32(op.indices.size())});
+            if (_geometryOwnerLedger)
+            {
+                _geometryOwnerLedger->AllocationCreated(_geometryOwnerEpoch, op.mesh, ownerVertexBytes, ownerIndexBytes,
+                    render::GeometryOwnerLedger::ProducerKind::Retained, _meshIdOf[op.mesh]);
+                if (!_meshIdOf[op.mesh])
+                    _geometryOwnerLedger->MarkIncomplete(_geometryOwnerEpoch, render::GeometryOwnerLedger::Reason::Protocol);
+            }
             GGeometryPoolFill.Note(0, op.verts.size() * sizeof(SVertex) + op.indices.size() * sizeof(uint32_t));
             break;
         }
@@ -2888,6 +2925,11 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
                 {
                     wgr_mesh_destroy(_renderer, it->second);
                 }
+                if (_geometryOwnerLedger)
+                {
+                    _geometryOwnerLedger->ProducerOwnershipReleased(_geometryOwnerEpoch, op.mesh);
+                    if (!handedOver) _geometryOwnerLedger->AllocationRetired(_geometryOwnerEpoch, op.mesh);
+                }
                 _meshIdOf.erase(it);
             }
             break;
@@ -2899,6 +2941,7 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
             // handling of that case, and it is cheaper than creating and then destroying.
             if (!op.cpu || op.cpu->dead)
             {
+                if (_geometryOwnerLedger) _geometryOwnerLedger->NoteCancelledBeforeCreate(_geometryOwnerEpoch);
                 break;
             }
             if (op.cpu->sharedProducer != 0)
@@ -2908,6 +2951,8 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
                 if (const auto shared = _meshIdOf.find(op.cpu->sharedProducer); shared != _meshIdOf.end())
                 {
                     op.cpu->renderer = shared->second;
+                    if (_geometryOwnerLedger)
+                        _geometryOwnerLedger->CpuBorrowerAttached(_geometryOwnerEpoch, op.cpu->producer, op.cpu->sharedProducer);
                     GGeometryPoolFill.Note(2, op.cpu->verts.size() * sizeof(SVertex) +
                                                   op.cpu->indices.size() * sizeof(uint32_t));
                     std::vector<SVertex>().swap(op.cpu->verts);
@@ -2922,6 +2967,16 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
                 wgr_mesh_create(_renderer, AsMeshVerts(op.cpu->verts),
                                 WgrSlice<uint32_t>{reinterpret_cast<const uint32_t*>(op.cpu->indices.data()),
                                                    U32(op.cpu->indices.size())});
+            if (_geometryOwnerLedger)
+            {
+                _geometryOwnerLedger->AllocationCreated(_geometryOwnerEpoch, op.cpu->producer,
+                    op.cpu->verts.size() * sizeof(SVertex), op.cpu->indices.size() * sizeof(uint32_t),
+                    render::GeometryOwnerLedger::ProducerKind::Cpu, op.cpu->renderer);
+                _geometryOwnerLedger->CpuBorrowerAttached(_geometryOwnerEpoch, op.cpu->producer, op.cpu->producer);
+                _geometryOwnerLedger->ProducerOwnershipReleased(_geometryOwnerEpoch, op.cpu->producer);
+                if (!op.cpu->renderer)
+                    _geometryOwnerLedger->MarkIncomplete(_geometryOwnerEpoch, render::GeometryOwnerLedger::Reason::Protocol);
+            }
             // The payload has done its job; a CPU mesh's later uploads go through the
             // uploader, not through the slot. Release rather than clear -- these are full
             // vertex and index arrays and there are thousands of live CPU meshes.
@@ -2944,6 +2999,7 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
         }
         case ResourceOp::ModelRetire:
         {
+            if (_geometryOwnerLedger) _geometryOwnerLedger->ModelRetired(_geometryOwnerEpoch, op.model);
             if (const auto it = _modelIdOf.find(op.model); it != _modelIdOf.end())
             {
                 wgr_model_retire(_renderer, it->second);
@@ -2953,6 +3009,23 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
         }
         case ResourceOp::ModelRegister:
         {
+            if (_geometryOwnerLedger)
+            {
+                // Capture producer identities before translating sections to renderer
+                // handles; duplicates within one LOD are one persistent owner link.
+                for (uint32_t lod = 0; lod < op.lods.size(); ++lod)
+                {
+                    const auto& level = op.lods[lod];
+                    const uint64_t end = uint64_t(level.section_base) + level.section_count;
+                    if (end > op.sections.size())
+                    {
+                        _geometryOwnerLedger->MarkIncomplete(_geometryOwnerEpoch, render::GeometryOwnerLedger::Reason::Protocol);
+                        continue;
+                    }
+                    for (uint64_t section = level.section_base; section < end; ++section)
+                        _geometryOwnerLedger->ModelLodAttached(_geometryOwnerEpoch, op.model, lod, op.sections[section].mesh);
+                }
+            }
             // The sections carry producer mesh handles; the renderer gets real ones.
             for (WgrModelSection& sec : op.sections)
             {
@@ -2963,6 +3036,11 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
                 _renderer, op.sphereRadius, WgrSlice<WgrModelLod>{op.lods.data(), U32(op.lods.size())},
                 WgrSlice<WgrModelSection>{op.sections.data(), U32(op.sections.size())},
                 WgrSlice<WgrModelMaterial>{op.materials.data(), U32(op.materials.size())}, op.name.c_str());
+            if (_geometryOwnerLedger && _modelIdOf[op.model] == WGR_INVALID_MODEL)
+            {
+                _geometryOwnerLedger->ModelRetired(_geometryOwnerEpoch, op.model);
+                _geometryOwnerLedger->MarkIncomplete(_geometryOwnerEpoch, render::GeometryOwnerLedger::Reason::Protocol);
+            }
             break;
         }
         case ResourceOp::GeometryReport:
@@ -2979,6 +3057,35 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
             report.ineligibleEntriesSkipped = op.geometryReport->ineligibleEntriesSkipped;
             report.modelsRequested = static_cast<uint32_t>(op.geometryReport->models.size());
             report.unresolvedNames = op.geometryReport->unresolvedNames;
+            if (_geometryOwnerLedger)
+            {
+                const auto owners = _geometryOwnerLedger->Snapshot();
+                report.persistentAttributionEnabled = true;
+                report.persistentAttributionComplete = owners.attributionComplete;
+                report.persistentAttributionEpoch = owners.epoch;
+                report.persistentIncompleteReasons = owners.incompleteReasons;
+                report.producerEstimatedVertexBytes = owners.liveEstimatedVertexBytes;
+                report.producerEstimatedIndexBytes = owners.liveEstimatedIndexBytes;
+                report.persistentCpuReferencedVertexBytes = owners.cpuReferencedVertexBytes;
+                report.persistentCpuReferencedIndexBytes = owners.cpuReferencedIndexBytes;
+                report.persistentRetainedSharedCpuVertexBytes = owners.retainedSharedWithCpuVertexBytes;
+                report.persistentRetainedSharedCpuIndexBytes = owners.retainedSharedWithCpuIndexBytes;
+                report.persistentStandaloneCpuVertexBytes = owners.standaloneCpuVertexBytes;
+                report.persistentStandaloneCpuIndexBytes = owners.standaloneCpuIndexBytes;
+                report.persistentTrackedAllocations = owners.trackedAllocations;
+                report.persistentTrackedBorrowerRecords = owners.trackedBorrowerRecords;
+                report.persistentCpuBorrowers = owners.liveCpuBorrowers;
+                report.persistentModelLodLinks = owners.modelLodLinks;
+                report.persistentMailboxPending = owners.queuedDetachEvents;
+                report.persistentMailboxDropped = owners.droppedDetachEvents;
+                report.persistentCancelledCreates = owners.cancelledBeforeCreate;
+                report.persistentOwnerEstimatedBytes = owners.persistentOwnerBytes;
+                report.persistentZeroOwnerEstimatedBytes = owners.zeroPersistentOwnerBytes;
+                // Never a GPU fence/pool-free acknowledgement, including when the
+                // persistent scope is complete. Defaults remain zero/false OFF.
+                report.persistentReclaimableBytes = 0;
+                report.ownershipCoverageComplete = false;
+            }
             std::vector<uint32_t> ids;
             ids.reserve(op.geometryReport->models.size());
             for (const auto& entry : op.geometryReport->models)
@@ -3057,6 +3164,7 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
             break;
         }
     }
+    if (_geometryOwnerLedger) _geometryOwnerLedger->DrainDetachMailbox();
     ops.clear();
     const double drainMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - drainStart).count();
     if (_slowBlockMs > 0.0 && drainMs >= _slowBlockMs)
@@ -4926,7 +5034,15 @@ VertexBuffer* EngineWgpu::CreateVertexBuffer(const Shape& src, VBType type)
     // the guard at the top of this function has already ruled out; the buffer falls back
     // to the renderer handle in that case rather than silently dropping uploads.
     const WgrUploader* uploader = wgr_uploader_get(_renderer);
-    auto* buf = new VertexBufferWgpu(_renderer, uploader, std::move(slot), _cpuMeshLink, nv, dynamic, type);
+    VertexBufferWgpu* buf = nullptr;
+    if (_geometryOwnerLedger)
+    {
+        const uint64_t borrower = slot->producer;
+        buf = new AttributedVertexBufferWgpu(_renderer, uploader, std::move(slot), _cpuMeshLink, nv, dynamic, type,
+                                            _geometryOwnerLedger, _geometryOwnerEpoch, borrower);
+    }
+    else
+        buf = new VertexBufferWgpu(_renderer, uploader, std::move(slot), _cpuMeshLink, nv, dynamic, type);
     render::mesh::BuildSections(src, buf->sections);
     return buf;
 }

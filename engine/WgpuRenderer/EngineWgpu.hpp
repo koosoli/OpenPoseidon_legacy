@@ -35,6 +35,7 @@ struct SDL_Window;
 
 namespace Poseidon
 {
+namespace render { class GeometryOwnerLedger; }
 class TextureBankWgpu;
 class TextureWgpu;
 class TerrainWgpu;
@@ -1310,6 +1311,10 @@ class EngineWgpu : public EngineDummy
     uint64_t _nextMeshHandle = 1;  // 0 stays "no mesh", matching the FFI's failure value
     uint32_t _nextModelHandle = 0; // WGR_INVALID_MODEL is the sentinel and is never allocated
     std::unordered_map<uint64_t, uint64_t> _meshIdOf;  // producer -> renderer (post-drain)
+    // Startup-only diagnostic, absent by default. Only the resource drain mutates
+    // records; buffers retain its bounded numeric destructor mailbox, not the engine.
+    std::shared_ptr<render::GeometryOwnerLedger> _geometryOwnerLedger;
+    uint64_t _geometryOwnerEpoch = 1;
     std::unordered_map<uint32_t, uint32_t> _modelIdOf; // producer -> renderer (post-drain)
     void DrainResourceOps(std::vector<ResourceOp>& ops);
 
