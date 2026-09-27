@@ -2690,3 +2690,28 @@ lifecycle passes/required0. Default080730 PASS/clean0 Disabled/no newownerwork/
 required0/originalbehavior. Tinyfixture only, no gameplayconsumer migration,
 generalretailDayZ/MP/performance/no-regression acceptance. Nextcargo consumer
 is unbuilt/excluded. WholeplanOPEN/defaultReady/performanceAcceptedfalse/serviceOFF.
+
+## Sept27 shared Fire consumer quota and AI cargo Ready contact slice
+
+67b5c113/e6082640 all5target62scheduled buildPASS;27340assertions/48cases
+PASS/noSKIP. Cleanmatching e60808:17 EXE A82227626EA7C5470BE535BCABEB8072748445B152250CBCC696AC2D622C6554,
+DLL 7EF75175194B63D44C9C45C447F427D7FE8FC32F4A9B7D0C39AB20B2E371AE1B.
+Sharedquota4attempts/cumulative2ms perjoinedPump includescapacityreset and
+lexicalallreturns/exceptions; exhaustedPending performs no Tryvalidation/trace.
+Queueproducerwork is NOTcharged; fairness/hardovershoot remain unproven.
+Only AIcargo pivot/muzzle gains Ready staticcontacts; allnonReady preserve exact
+legacyfallback, leaving unloadedobstruction gap OPEN/read-onlyprobesdefaultfalse.
+
+NaturalgameON081805 PASS/clean0:36passivestate samples, ready9/maxquery1/
+collisioncalls2/noWorkRefusal/shots2/ammo28/damage.814349. No harnessQueue/
+collision/probe-created interest. CPU2fixturewalls far1200 versusJeep9700:
+clearfiringconsumer proof, not newlystreamedbarrel obstruction. OFF/defaultmodern
+world081919 PASS/clean0/shots1/ammo29/damage.523728; its runner does not query
+stream_simulation_residency counters, so no measuredzeroownerwork is claimed.
+ControlledOFFflags/matchingpair prove clearlegacygameplay only. Randomness/asynctime preclude
+behavioral/performanceA/B claim. Root viewedONorderedfire localjeep/seatpresent,
+notfullvisualproof. Generated256sideoriginalselfcheck/standard32selfcheckpass.
+Actualsmall2wallservice+heartbeat/sharedquota082057 PASS/clean0: Readywall1001/
+expiry/requeue/independentautomatic/move/damage/delete. No broad originalworld/
+retailDayZ/MP/performance/no-regression acceptance. Nextretainedmeshmultiborrower
+repair is unbuilt/excluded; serviceOFF/fullplanOPEN/defaultReady-performancefalse.

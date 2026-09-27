@@ -14622,6 +14622,237 @@
         "provenance.json": "4e6b12c7d70970cbcbcb464a633463ceac43a2dc065a724fcc356bd40331217d",
         "result.json": "40931245d5e538dd4ebbe03a6b2c6ff07fef8f57d3cb4fe7665e5215545c069e"
       }
+    },
+    {
+      "run": "baseline-20260927-081805",
+      "artifactRoot": "build/jeep-ffv",
+      "classification": "PASS cleanexit0; narrowcargoReady consumer/sharedFirequota/default compatibility",
+      "provenance": {
+        "binaries": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "A82227626EA7C5470BE535BCABEB8072748445B152250CBCC696AC2D622C6554",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "7EF75175194B63D44C9C45C447F427D7FE8FC32F4A9B7D0C39AB20B2E371AE1B",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "scriptSha256": "46442DDE80DB16BB40B01FB6BD92C5889A6E4424113EAD89897CB59BF32E31BD",
+        "simulationResidency": true,
+        "world": {
+          "Algorithm": "SHA256",
+          "Hash": "7294F3F0D148F8E0D637B1A6CA152F1C0F42917B89B5389734FE8376D6416703",
+          "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\cargo-world-20260927-081805\\simulation-residency.wrp"
+        }
+      },
+      "summary": {
+        "passed": true,
+        "ownedExitCode": 0,
+        "performanceAccepted": false,
+        "shots": 2,
+        "ammo": 28,
+        "targetDamage": 0.814349,
+        "simulationResidency": true,
+        "passiveSamples": 36,
+        "readySamples": 9,
+        "maxQueryRegions": 1.0,
+        "maxCollisionCalls": 2.0,
+        "maxCollisionWorkRefusals": 0.0
+      },
+      "limits": "NaturalAIcargo pivot/muzzleFireconsumer ONLY/passive state samples, no harnessQueue/collision/probe-driven interest. CPUfixture2walls at1200 versusJeep9700: clearfiringconsumer proof, NOT newlystreamedbarrelobstruction. ONshots2/ammo28/damage.814349 versusOFF1/29/.523728 randomness/asynctime notbehavioral/performance A/B. RootviewedONorderedfire localjeep/seatpresent, notfullvisualproof. Originalside world256selfcheck and standard32selfcheckpass; not general originalworldsupport. Sharedquota4attempts/cumulative2ms perjoinedPumpinclcapacityreset/lexicalallreturns-exceptions; exhaustedPending zeroTryvalidation/trace. QueueproducerworkNOTcharged/nofairness/hardovershootpossible. ONLY AIcargo pivotmuzzleReady enhancement; allnonReady exactlegacyfallback retains unloadedobstruction gap/read-onlyprobesdefaultfalse. Nextretainedmultiborrowerrepair UNBUILT/excluded. ServiceOFF/fullplanOPEN/defaultReady-performancefalse.",
+      "sha256": {
+        "DEPLOYED-FROM.txt": "be5dac264e4fca730ff7dcd7d060a34e53e1be57dc96bbad394979bfc1626091",
+        "jeep.log": "f5602d594ee26006b88ca5c71aa4ab01870f95ebcb2b7b70daebcff73251452e",
+        "npc-observation.json": "2cbf8f1acd7a7fc897568e1ace65beb8dffabb918433ae2e17b135439df3900a",
+        "ordered-fire.png": "0255e8b3a5bb7d263940b16241799ec3532b1d89df27b20bed205a10cb440818",
+        "responses.jsonl": "79eefc45c7df8530163954ea1d602d7e6d221087fb650beaa1f1e2b5beaf7fb5",
+        "seated.png": "249548c6a0290a1b3906f01fda2f6eee44121bd177b1d20b7d3e3b2c31db0ead",
+        "streaming-consumer.json": "ccd9258674be523752598003da1ad159dc87624ea52360c197bdf4114ec4504c",
+        "streaming-provenance.json": "f682e9b24a9c41155efee77d689bf9bd28cd3c02ca2e8e71d528c7742cea3a30",
+        "test-context.json": "cfb971975db420b32f7ebdf99db16d318aba1e73979ff3d5117cffe9fb9ba1eb"
+      }
+    },
+    {
+      "run": "baseline-20260927-081919",
+      "artifactRoot": "build/jeep-ffv",
+      "classification": "PASS cleanexit0; narrowcargoReady consumer/sharedFirequota/default compatibility",
+      "provenance": {
+        "scriptSha256": "46442DDE80DB16BB40B01FB6BD92C5889A6E4424113EAD89897CB59BF32E31BD",
+        "simulationResidency": false,
+        "binaries": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "A82227626EA7C5470BE535BCABEB8072748445B152250CBCC696AC2D622C6554",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "7EF75175194B63D44C9C45C447F427D7FE8FC32F4A9B7D0C39AB20B2E371AE1B",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "world": {
+          "Algorithm": "SHA256",
+          "Hash": "2BA50EC2BF115AF6F4DC55CED2F9C8BC2DB475C0AB432FF803B52F9D1AC64688",
+          "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\cargo-world-20260927-081919\\simulation-residency.wrp"
+        }
+      },
+      "summary": {
+        "passed": true,
+        "ownedExitCode": 0,
+        "performanceAccepted": false,
+        "shots": 1,
+        "ammo": 29,
+        "targetDamage": 0.523728,
+        "simulationResidency": false
+      },
+      "limits": "NaturalAIcargo pivot/muzzleFireconsumer ONLY/passive state samples, no harnessQueue/collision/probe-driven interest. CPUfixture2walls at1200 versusJeep9700: clearfiringconsumer proof, NOT newlystreamedbarrelobstruction. ONshots2/ammo28/damage.814349 versusOFF1/29/.523728 randomness/asynctime notbehavioral/performance A/B. RootviewedONorderedfire localjeep/seatpresent, notfullvisualproof. Originalside world256selfcheck and standard32selfcheckpass; not general originalworldsupport. Sharedquota4attempts/cumulative2ms perjoinedPumpinclcapacityreset/lexicalallreturns-exceptions; exhaustedPending zeroTryvalidation/trace. QueueproducerworkNOTcharged/nofairness/hardovershootpossible. ONLY AIcargo pivotmuzzleReady enhancement; allnonReady exactlegacyfallback retains unloadedobstruction gap/read-onlyprobesdefaultfalse. Nextretainedmultiborrowerrepair UNBUILT/excluded. ServiceOFF/fullplanOPEN/defaultReady-performancefalse. OFFcargo runner does NOT query stream_simulation_residency counters; no measured0ownerwork claim. ControlledOFFflags+matchingpair prove clearlegacygameplay only.",
+      "sha256": {
+        "DEPLOYED-FROM.txt": "be5dac264e4fca730ff7dcd7d060a34e53e1be57dc96bbad394979bfc1626091",
+        "jeep.log": "52a94df8e97f34df4217f850db32e025a0bd6a964b70daf87a2a7087c26e8aff",
+        "npc-observation.json": "89506536fdde8523bdb7a55085fd39fc530c25b9cdf3b71533f38d9f57d5e80c",
+        "ordered-fire.png": "1712ca51257cbe8d8fb964c8fb8cbfe4f734ed48a917f0c3ebcf4026ce2d59d5",
+        "responses.jsonl": "a37399cc029a62c575ce39cb8a1c0b4b3e87a53e24fec03ea9e049bd975ddaa2",
+        "seated.png": "f0d81f9b5d3808babd37ad97df6c9c424b6ec026655f7058e647a21addebfbe8",
+        "streaming-provenance.json": "4809a0b4b28126bf5929b19d90d4b7fb016ffca39cd4bf4d7ef4dc5cefe92fd1",
+        "test-context.json": "86da4ae8bb522309c9076b89dd1346166a4c3d7c687a5a882591cb4951984e3c"
+      }
+    },
+    {
+      "run": "cargo-shared-quota-wall-20260927-20260927-082057",
+      "artifactRoot": "build/stream-residency",
+      "classification": "PASS cleanexit0; narrowcargoReady consumer/sharedFirequota/default compatibility",
+      "provenance": {
+        "fixture": {
+          "absolute_model_path": true,
+          "actor": [
+            1190,
+            10,
+            1200
+          ],
+          "camera": [
+            100,
+            80,
+            100
+          ],
+          "camera_isolation_env": {
+            "WGR_OBJECT_STREAM_RADIUS_CELLS": "8",
+            "WGR_OBJECT_STREAM_WINDOW_GROWTH": "0"
+          },
+          "cell_metres": 50.0,
+          "elevation": 10.0,
+          "fire_segment": [
+            [
+              1190,
+              11.5,
+              1200
+            ],
+            [
+              1210,
+              11.5,
+              1200
+            ]
+          ],
+          "half_depth": 6.0,
+          "land_range": 32,
+          "large_wall": false,
+          "model_sha256": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+          "models": [
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\cargo-shared-quota-wall-20260927-20260927-082057\\fixture\\streaming_fixture\\wall.p3d"
+          ],
+          "notes": [
+            "Absolute-model mode uses original loose files without an archive mount; relative mode needs a separately configured loose-file root.",
+            "Camera at 100 is isolated from walls at 1200/1230 with growth disabled.",
+            "No ResolveObject: actor demand must admit geometry with transient leases.",
+            "Generic inventory/classification/admission must establish readiness.",
+            "Self-check is not engine parsing, collision or runtime verification."
+          ],
+          "placements": [
+            {
+              "id": 1001,
+              "model_index": 0,
+              "position": [
+                1200.0,
+                11.5,
+                1200.0
+              ]
+            },
+            {
+              "id": 1002,
+              "model_index": 0,
+              "position": [
+                1230.0,
+                11.5,
+                1200.0
+              ]
+            }
+          ],
+          "positive_warming": false,
+          "reference_all_models": false,
+          "registered_warming": false,
+          "schema": 1,
+          "terrain_range": 32,
+          "wall_world_bounds": [
+            [
+              1199.5,
+              10,
+              1194.0,
+              1200.5,
+              13,
+              1206.0
+            ],
+            [
+              1229.5,
+              10,
+              1194.0,
+              1230.5,
+              13,
+              1206.0
+            ]
+          ],
+          "world_sha256": "48a1a52453ba143a30ac47b4a8ad4167c802496ba01584bee800fd6e77c3a5b2"
+        },
+        "disabled": false,
+        "scriptSha256": "B8AB369C03DD72326F5EA5A299EFEED8581AE160D668B1734CA6E78754D1096D",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "A82227626EA7C5470BE535BCABEB8072748445B152250CBCC696AC2D622C6554",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "7EF75175194B63D44C9C45C447F427D7FE8FC32F4A9B7D0C39AB20B2E371AE1B",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "installed": "codex/streaming-residency e6082640 2026-09-27_08:17 deploy-ps1",
+        "head": "e608264063f7189108652aba8f9346c451adad6e",
+        "shapeCacheLimit": null,
+        "registeredWarming": false
+      },
+      "summary": {
+        "passed": true,
+        "ownedExitCode": 0,
+        "performanceAccepted": false,
+        "queryStatus": "Ready",
+        "fireHeartbeatExpiredStatus": "Pending",
+        "fireContactIds": [
+          1001
+        ],
+        "required": 0
+      },
+      "limits": "Actualsmall2wallservice/sharedquota/heartbeat fullfixtureReady1001/expiry/requeue/independentautomatic/move/damage/delete passes. Not gameplaycoldbarrelconsumer completeness/MP/retailworld/performance proof. Sharedquota4attempts/cumulative2ms perjoinedPumpinclcapacityreset/lexicalallreturns-exceptions; exhaustedPending zeroTryvalidation/trace. QueueproducerworkNOTcharged/nofairness/hardovershootpossible. ONLY AIcargo pivotmuzzleReady enhancement; allnonReady exactlegacyfallback retains unloadedobstruction gap/read-onlyprobesdefaultfalse. Nextretainedmultiborrowerrepair UNBUILT/excluded. ServiceOFF/fullplanOPEN/defaultReady-performancefalse.",
+      "sha256": {
+        "engine.log": "cb992b28a711377feeb81556e4caf744f446dc9152fcfec2bf0bc7be9ba6ce16",
+        "harness.jsonl": "7a060231f4a1a2f519532731b26812b839ea2a174e1afd2c904a6318e43b7a82",
+        "provenance.json": "c888d5950caff7d29904f4b64b14f8092f14fa7450f3404881407e43fbcb7a08",
+        "result.json": "b8eae5a6738934caff9fd9ac629932b33d2b9f931ee80c60bbc4ba7500cb1020",
+        "visual.png": "ccb979f7e2e8b7744395139a721497ef8a24fb434aa756d0ac77db5ec20703ae"
+      }
     }
   ],
   "microbenchmarks": [
@@ -15896,6 +16127,22 @@
       "sha256": {
         "build-fire-heartbeat-20260927.log": "39d457d1245b037c503542fceaad932980733e27a9c59bebfaf876c117a866be",
         "test-fire-heartbeat-20260927.log": "d359ca26372aee81c333a0f1ebf8b45bdc51c25d491edac585ca694b9816a091"
+      }
+    },
+    {
+      "artifactRoot": "build",
+      "runtimeSourceCommit": "e6082640",
+      "implementationCommits": [
+        "67b5c113",
+        "e6082640"
+      ],
+      "result": "All5build62scheduledstepsPASS/test27340assert48casesPASS/noSKIP. Cleanmatchinginstalle60808:17. Shared4attempt/2mscumulativeFireownerquota includescapacityreset/lexicalreturns-exceptions; Queueproducerworkuncharged/nofairness/hardovershootpossible. AIcargoReady pivotmuzzlecontacts enhancement with exactlegacyallnonReadyfallback, unloadedobstruction gap remains. Nextretainedmultiborrowerrepair UNBUILT/excluded/serviceOFF/fullplanOPEN/performancefalse.",
+      "sha256": {
+        "build-cargo-consumer-20260927.log": "3244b4edb20db721307862a6c36d47f447ee656e383294873c8e8be09bb68239",
+        "test-cargo-consumer-20260927.log": "91f1ab4fd555d9964c3aad386d4c0f2a44956bb576912ff68880424cae57c67f",
+        "runtime-cargo-consumer-on-20260927.log": "83fd8ba434fc58706e05544daccf205252edebcce02fca9d0656f47fb742958e",
+        "runtime-cargo-consumer-default-20260927.log": "479ba7e6dd79714475b704aeecc485a2317a91f981ba5369555fd7d73a2a1a0e",
+        "runtime-cargo-shared-quota-wall-20260927.log": "4990278503253aa31513c333f992440c804e7f82332c6f7b205b71b5ee66975a"
       }
     }
   ],
