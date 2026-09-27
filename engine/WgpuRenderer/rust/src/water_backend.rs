@@ -411,8 +411,8 @@ impl WaterBackend {
                 owns_terrain_wetness: false,
                 writes_reactive_mask: true,
                 uses_planar_reflection: false,
-                // Tidewater brings its own underwater in W5; until then there is none.
-                has_underwater: false,
+                // W5a: Tidewater's own underwater composite (water_tw/underwater.rs)
+                has_underwater: true,
             },
             Active::Empty => SurfaceProduct {
                 kind: WaterBackendKind::CurrentOp,
@@ -450,7 +450,12 @@ impl WaterBackend {
     // ------------------------------------------------------------------ underwater (Current OP)
 
     pub fn underwater_enabled(&self) -> bool {
-        self.op().is_some_and(|op| op.water.underwater_enabled())
+        match &self.active {
+            Active::CurrentOp(op) => op.water.underwater_enabled(),
+            // TW-WATER W5a: Tidewater's own underwater composite
+            Active::Tidewater(tw) => tw.underwater_enabled(),
+            Active::Empty => false,
+        }
     }
 
     pub fn underwater_tuning(&self) -> (f32, f32, f32, f32) {
@@ -494,10 +499,13 @@ impl WaterBackend {
         depth: &wgpu::TextureView,
         destination: &wgpu::TextureView,
     ) {
-        if let Some(op) = self.op() {
-            let displacement = op.water.underwater_displacement_view();
-            op.underwater
-                .render(device, encoder, source, depth, destination, &displacement);
+        match &self.active {
+            Active::CurrentOp(op) => {
+                let displacement = op.water.underwater_displacement_view();
+                op.underwater.render(device, encoder, source, depth, destination, &displacement);
+            }
+            Active::Tidewater(tw) => tw.render_underwater(device, encoder, source, depth, destination),
+            Active::Empty => {}
         }
     }
 

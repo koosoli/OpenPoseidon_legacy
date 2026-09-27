@@ -38,6 +38,7 @@ mod lace;
 mod shore_field;
 mod shore_sim;
 pub mod spray;
+mod underwater;
 mod textures;
 
 use std::sync::Arc;
@@ -392,6 +393,9 @@ pub struct Tidewater {
     brk_slots: [Option<(([f32; 2], u64, i32), Vec<breakers::Station>)>; shore_sim::K],
     // W4a spray
     spray: spray::SprayGpu,
+    // W5a underwater composite
+    uw: underwater::TwUnderwater,
+    linear: bool,
 }
 
 impl Tidewater {
@@ -621,6 +625,7 @@ impl Tidewater {
             linear,
         );
         let spray = spray::SprayGpu::new(device, queue, camera_layout, &layout, &shader, surface_format, sample_count, linear);
+        let uw = underwater::TwUnderwater::new(device, surface_format);
 
         let (verts, indices) = cdlod::grid_mesh();
         let grid_vbuf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -686,6 +691,8 @@ impl Tidewater {
             brk,
             brk_slots: [const { None }; shore_sim::K],
             spray,
+            uw,
+            linear: linear > 0.5,
         };
         me.rebuild_bind(device);
         me
@@ -891,6 +898,12 @@ impl Tidewater {
         queue.write_buffer(&self.surface_ubo, 0, bytemuck::bytes_of(&block));
 
         let spec = fft::SpectrumInputs::from_params(&p);
+        // W5a: the underwater composite's block (used only while OP's compositor is engaged)
+        {
+            let glow = glow_override().unwrap_or(p.tidewater_fx[2]);
+            let uwp = underwater::UwParams::new(cam, &p, self.linear, glow, spec.sizes, WATER_ABSORPTION, WATER_SCATTERING, p.underwater_gate[0] > 0.5);
+            self.uw.set_frame(queue, &uwp);
+        }
         self.fft.set_frame(queue, spec, p.tidewater[0][1], p.time, dt);
 
         let cam_pos = glam::DVec3::new(cam.cam_pos[0] as f64, cam.cam_pos[1] as f64, cam.cam_pos[2] as f64);
@@ -915,6 +928,23 @@ impl Tidewater {
                 timers.end(encoder, crate::gpu_timers::Region::TwShoreSim);
             }
         }
+    }
+
+    /// W5a: the Water tab's underwater checkbox (the same lane as Current OP's).
+    pub fn underwater_enabled(&self) -> bool {
+        self.last_params.is_some_and(|p| p.underwater_gate[0] > 0.5)
+    }
+
+    /// W5a: the underwater composite (OP's backend underwater slot; see underwater.rs).
+    pub fn render_underwater(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        source: &wgpu::TextureView,
+        depth: &wgpu::TextureView,
+        destination: &wgpu::TextureView,
+    ) {
+        self.uw.render(device, encoder, source, depth, destination, self.fft.displacement_view());
     }
 
     /// W4b: the lips' and the spray's coverage into the upscalers' history-control ("reactive")
