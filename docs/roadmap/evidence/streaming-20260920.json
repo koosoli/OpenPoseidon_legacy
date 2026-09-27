@@ -8573,6 +8573,91 @@
         "route-frame-ms.json": "c5d21f6750051fdda341452577db2bff2581aac8610c76aaf603fb0658b3ce9d",
         "samples.jsonl": "003e3651af5d974cbf5fadad9280edf42f732d7e935128a4dce162db26fab330"
       }
+    },
+    {
+      "run": "warm-admission-actual-20260927-disabled-20260927-021434",
+      "classification": "Clean0 PASS installeda18ead01 opt-in warmprofile, Counted/eagerdefaults unchanged; profilingON notcomparablecausalFPS/no-regacceptance. Aggregate row7 centre100,40/warmCount1536 total455.521/geo0/scene450.224/register285.696/proxy163.930/meshBuild3.207/section435.347/texRead362.606/create66.752/alpha0ms. Row9total185.767/read164.169/create14.680;row10total133.553/read113.064/create11.299, each1536warm. Knownmodel warmth notcheap; texture reads dominate measuredwarmcost. Inclusive scenes/register/proxy/sections/texture subsets overlap notpartitions; do notsum. Aggregate first128process separatelyfromindividualfirst128>=2ms; aggregates include allopenedwarmscopes inclsub2ms, sourceordernotranking/fullframecoverage. Actual848frames screeningonly/performancefalse;final19923settled/required0 geometry705016536 textures2734326836/count2478. UnrelatedLandscapeowner gate sourcecandidate uncommitted/unbuiltnotincluded.",
+      "provenance": {
+        "routeScope": "Eight convergence400m out/return poses plus three stationary recovery holds; one process per invocation",
+        "viewDistance": 2000,
+        "msaaSamples": 4,
+        "poseHoldSeconds": 3,
+        "height": 720,
+        "world": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\packages\\dayz-compat\\world\\chernarusplus\\chernarusplus.wrp",
+        "head": "a18ead01b628c4002bc0bcb2e08c032f632f4a89",
+        "mode": "Disabled",
+        "width": 1280,
+        "fpsCap": 60,
+        "pose": [
+          5704.58,
+          2523.37,
+          73.74,
+          260.9,
+          -3.8
+        ],
+        "processScope": "Owned PID private/RSS samples; sparse owner-pump values are observations, not percentiles",
+        "environment": {
+          "WGR_SIMULATION_POSITIVE_COLD": "0",
+          "WGR_OBJECT_STREAM_MAX_OBJECTS": "20000",
+          "WGR_OBJECT_STREAM_GPU_BUDGET": "0",
+          "WGR_GEO_POOL_GROWTH": "2.0",
+          "WGR_SIMULATION_RESIDENCY": "0",
+          "WGR_TERRAIN_PAGE_TIMINGS": "1",
+          "WGR_NATIVE_DDS_PREPARE": "0",
+          "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\warm-admission-actual-20260927-disabled-20260927-021434\\user",
+          "WGR_OBJECT_STREAM_PBO_TEXTURES": "0",
+          "WGR_OBJECT_STREAM_WARM_PROFILE": "1",
+          "POSEIDON_MODEL_DDC": "0",
+          "WGR_TEXTURE_STREAM_STATS": "0",
+          "WGR_OBJECT_STREAM_PBO": "1",
+          "WGR_GEO_POOL_PRESSURE_GROWTH": "0",
+          "WGR_OBJECT_STREAM_TEST_BUDGET": "1",
+          "WGR_SKY_VOLUME_INCREMENTAL": "1",
+          "WGR_LOD_GOVERNOR_RANGE": "1",
+          "POSEIDON_SLOW_FRAME_TRACE": "1",
+          "WGR_NATIVE_DDS_BC3_ONLY": "0",
+          "WGR_ADAPTIVE_TEXTURE_DETAIL": "0"
+        },
+        "measurementScope": "Bounded engine16384-frame route capture; screening only, no FPS acceptance, vanilla parity or full cold-cache proof",
+        "routeX": [
+          5804.58,
+          5904.58,
+          6004.58,
+          6104.58,
+          6004.58,
+          5904.58,
+          5804.58,
+          5704.58,
+          5704.58,
+          5704.58,
+          5704.58
+        ],
+        "scriptSha256": "E9ADAB0D138E5882831F975745F97335B3FF9596710FC640367DBC12B98CF624",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "35E257C630B66AFD6C1C90C678F1C95B68C6BB79CACA98F14F2B9EB54592AFF8",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "696254574341474F2A483A520D2157F3ACBA61E84FEC5F9223C6166172C193B6",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "installed": "codex/streaming-residency a18ead01 2026-09-27_02:14 deploy-ps1",
+        "clearedEnvironmentNames": []
+      },
+      "sha256": {
+        "engine.log": "c1f580408c0ad51985b7f879c1e873af94e59dfd31c8c0927e7c7a5ae6d474c0",
+        "harness.jsonl": "3b81ea5f002010281696a24984089618f019c75c44f90e9a699c9ee3b3c39383",
+        "latency.eden/mission.sqm": "feeaec384c114c445f050845560bff3f43e023443916204908ddb932616194cc",
+        "provenance.json": "aa8b0382a302b77c61f2b8f034a0f1cf3c5c278b6962ff00235f3cbe3fb04750",
+        "result.json": "91d88079c896ad8437cc3dc892da759182020a2fda59ad2204845eaa8189fb74",
+        "returned-settled.png": "2fdaa16539749c416f1e70f60a7c87b44f5ac02fa1290e81ebd548270b342765",
+        "route-frame-ms.json": "d2f2ba6693631ca5103d0a764235372ff20125c5b51ed2a7f030eab3bca479c5",
+        "samples.jsonl": "8585d5bdcfec6d57baa1624c7902e7315f2f7c31b1cb02e355a93da5fccedf51"
+      }
     }
   ],
   "microbenchmarks": [
@@ -9281,6 +9366,20 @@
         "test-eager-texture-default-20260927.log": "5ddf3898a345eead7f80476d10a928f0b9ed2aa46a2998b23994b375f791fbda",
         "test-eager-texture-default-repair-20260927.log": "4978df3e037d6b552bbff0b039319cccfce30019872e4e804502cf890972b466",
         "test-lazy-texture-optin-20260927.log": "be14aa11bbe4a29e666b13ebd14535daacbab7f450610f7c34e72795ce2ec3f7"
+      }
+    },
+    {
+      "artifactRoot": "build",
+      "sourceCommits": [
+        "086249d3",
+        "a18ead01"
+      ],
+      "runtimeSourceCommit": "a18ead01",
+      "result": "InitialwarmdiagnosticbuildFAILED legacyLogmacro collision, retained; repairrenames summaryoperation/build19PASS/deploymatchingclean. WarmProfile startupOFF/rootrunner requiresactualaggregatepositivegate. No behavior/policy/defaultchange/noFPSacceptance; ownergatecandidate separatepending.",
+      "sha256": {
+        "build-warm-admission-profile-20260927.log": "c15208ae9b8f159c5e85190819b84c99ea808550836ac4b813b35e37aba6e8cd",
+        "build-warm-admission-profile-repair-20260927.log": "e20b2106dfa8c9d54a8b5a1e234e23239ce7c74f9ad94bbb23aa697494227c78",
+        "deploy-warm-admission-profile-20260927.log": "83cdc3ce224a3b3317f636675be5b519683e6c59e00d496f5b95a115f2977775"
       }
     }
   ],

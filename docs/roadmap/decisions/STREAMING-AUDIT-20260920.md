@@ -2209,3 +2209,25 @@ final19923settled req0 geometry707679832/texture2796844308/2547/cap1275068416.
 Ordered cache/async/GPU-clock and differing allocated work exclude peak/no-reg/
 performance acceptance. Warm-profile LandSave candidate is in progress,
 not installed. FullplanOPEN; normal performance fix/pressure proof pending.
+
+## Sept27 aggregate warm admission attribution
+
+086249d3/a18ead01 opt-in warm diagnostics retain initial failed build (legacy
+Log macro collision), repaired19target build/deploy pass. StartupWarmProfileOFF;
+Counted/eager/LazyOFF/ParkedOFF unchanged. Actual021434 sole-root/lock clean0
+passes the runner's required aggregate-row gate. ProfilingON changes observation
+overhead, not admission behavior; not a causal FPS/no-regression comparison.
+
+Aggregate row7 centre100,40/1536warm scopes total455.521ms, geometry0,
+scene450.224/register285.696/proxy163.930, meshBuild3.207/sections435.347,
+textureRead362.606/create66.752/alpha0. Aggregate row9total185.767/read164.169/
+create14.680; row10total133.553/read113.064/create11.299, each1536warm scopes.
+Known-model warmth does not imply cheap creation: observed texture read/owner
+work dominates these warm batches. Inclusive scene/register/proxy/section/
+texture fields overlap; they cannot be summed as disjoint CPU partitions.
+First128aggregate updates are independently capped from first128individual
+slow>=2ms rows; aggregate counts include every opened scope, including sub2ms.
+Source order is not ranking and does not capture whole frame/GPU elapsed.
+848frames are screening only; final19923settled/required0, geometry705016536,
+textures2734326836/count2478. Unrelated Landscape owner-marker candidate is
+uncommitted/unbuilt and not in installeda18. FullplanOPEN/performancefalse.
