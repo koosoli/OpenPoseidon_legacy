@@ -191,7 +191,8 @@ class EngineWgpu : public EngineDummy
     void SceneObjectCreated(Object* obj) override;
     render::RegistrationCost QueryRegistrationCost(const LODShapeWithShadow* shape) const override;
     void CaptureWarmTextureReads(const LODShapeWithShadow* shape,
-        std::vector<WarmTextureRead>& reads, size_t& workRemaining) const override;
+        std::vector<WarmTextureRead>& reads, size_t& workRemaining,
+        size_t* stageSourceAttemptsRemaining = nullptr) const override;
     bool SceneFarObjectCreated(uint32_t id, LODShapeWithShadow* shape, const Matrix4& transform) override;
     void SceneFarObjectRemoved(uint32_t id) override;
     void ClearFarObjects() override;

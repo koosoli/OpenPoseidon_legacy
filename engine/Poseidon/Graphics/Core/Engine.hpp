@@ -3173,10 +3173,11 @@ class Engine : public IGraphicsEngine
     virtual render::RegistrationCost QueryRegistrationCost(const LODShapeWithShadow*) const
     { return render::RegistrationCost::Reusable; }
     // Appended owner observation of already-loaded texture metadata only.
-    // Work budget is shared across the recentre; no loading, material resolution,
-    // or GPU residency mutation is permitted here.
+    // Work budget is shared across the recentre. Default-nullptr permits no loading.
+    // Optional owner preflight may initialize at most two missing cached-material sources
+    // under the explicit warm-material flag; no material resolution or GPU upload.
     virtual void CaptureWarmTextureReads(const LODShapeWithShadow*,
-        std::vector<WarmTextureRead>&, size_t&) const {}
+        std::vector<WarmTextureRead>&, size_t&, size_t* = nullptr) const {}
 
 
     // Explicit bounded private-allocation diagnostic; never unregisters a world

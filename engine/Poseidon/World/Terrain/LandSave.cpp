@@ -3315,13 +3315,14 @@ void Landscape::PrefetchModernObjectModels(const std::vector<ModernObjectCellCan
     }
     if (warmTextures && GEngine)
     {
-        size_t workRemaining = 256; // Shared LOD/section/binding visits for this entire recentre.
+        size_t workRemaining = 256; // Shared LOD/section/binding/source visits for this entire recentre.
+        size_t stageSourceAttemptsRemaining = 2; // Only explicit opt-in WGPU preflight consumes this.
         const auto capture = warmWanted->CaptureWhile([&] { return workRemaining != 0; },
             [&](const WarmModel& candidate)
             {
                 const auto [model, shape] = candidate;
                 std::vector<WarmTextureRead> reads;
-                GEngine->CaptureWarmTextureReads(shape, reads, workRemaining);
+                GEngine->CaptureWarmTextureReads(shape, reads, workRemaining, &stageSourceAttemptsRemaining);
                 if (!reads.empty())
                     _modernObjectPreparer->SubmitWarmTextures(model,
                         _modernObjectPreparer->QueryRadius(model), std::move(reads));

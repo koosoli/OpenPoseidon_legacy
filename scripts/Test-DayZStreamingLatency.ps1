@@ -12,6 +12,8 @@ param(
     [switch]$RegistrationQuota,
     [switch]$ArchiveSourceBindings,
     [switch]$WarmTextureJobs,
+    [switch]$WarmMaterialPreflight,
+    [switch]$RequireWarmMaterialPreflightUpload,
     [switch]$RequireWarmMaterialStageUpload,
     [switch]$LegacySectionRefresh,
     [switch]$SectionReuse,
@@ -29,6 +31,8 @@ if ($RequireColdAlphaPeek -and $RequireColdStartupAlphaPeek) { throw 'Choose exa
 if ($RequireColdAlphaPeek -or $RequireColdStartupAlphaPeek) { $ColdPaaHandoff = $true }
 if ($ColdPaaHandoff) { $ArchiveSourceBindings = $true }
 if ($RequireWarmMaterialStageUpload) { $WarmTextureJobs = $true; $WarmProfile = $true }
+if ($RequireWarmMaterialPreflightUpload) { $WarmMaterialPreflight = $true }
+if ($WarmMaterialPreflight) { $WarmTextureJobs = $true; $WarmProfile = $true }
 if ($WarmTextureJobs) { $ArchiveSourceBindings = $true }
 if ($RegistrationQuota -and $AdmissionMode -ne 'Counted') { throw 'Registration quota requires counted admission' }
 if ($PaaPreparationDiagnostics -or $PaaPreparationInflight) { $PackedTextures = $true }
@@ -50,6 +54,8 @@ if (!$env:LOCK_OWNER) {
         if ($RegistrationQuota) { $argv += '-RegistrationQuota' }
         if ($ArchiveSourceBindings) { $argv += '-ArchiveSourceBindings' }
         if ($WarmTextureJobs) { $argv += '-WarmTextureJobs' }
+        if ($WarmMaterialPreflight) { $argv += '-WarmMaterialPreflight' }
+        if ($RequireWarmMaterialPreflightUpload) { $argv += '-RequireWarmMaterialPreflightUpload' }
         if ($RequireWarmMaterialStageUpload) { $argv += '-RequireWarmMaterialStageUpload' }
         if ($LegacySectionRefresh) { $argv += '-LegacySectionRefresh' }
         if ($SectionReuse) { $argv += '-SectionReuse' }
@@ -106,6 +112,7 @@ $environment = @{
     WGR_CULL_MODEL_ROW_UPLOAD = $(if ($ModelRowUpload) { '1' } else { '0' })
     WGR_GEO_POOL_COPY_DIAGNOSTICS = $(if ($GeometryCopyDiagnostics) { '1' } else { '0' })
     WGR_WATER_BACKEND = '0'
+    WGR_OBJECT_STREAM_WARM_MATERIAL_PREFLIGHT = $(if ($WarmMaterialPreflight) { '1' } else { '0' })
 }
 if ($TerrainPageTimings) {
     $environment.WGR_TERRAIN_PAGE_TIMINGS = '1'
@@ -150,6 +157,8 @@ try {
         requireColdStartupAlphaPeek = [bool]$RequireColdStartupAlphaPeek
         coldPaaHandoffEnvironment = [string]$environment.WGR_OBJECT_STREAM_COLD_TEXTURE_HANDOFF
         warmTextureJobs = [bool]$WarmTextureJobs
+        warmMaterialPreflight = [bool]$WarmMaterialPreflight
+        requireWarmMaterialPreflightUpload = [bool]$RequireWarmMaterialPreflightUpload
         requireWarmMaterialStageUpload = [bool]$RequireWarmMaterialStageUpload
         renderCallCpuTimings = [bool]$TerrainPageTimings
         renderCallCpuTimingEnvironment = [string]$environment.WGR_RENDER_CALL_CPU_TIMINGS
@@ -328,6 +337,27 @@ try {
         truncated = [bool](Select-String -LiteralPath $log -Pattern 'Warm prepared upload witness truncated:' -Quiet)
         scope = 'Successful source-validated bound worker upload of normal/specular filename family only; not shader slot role, visual quality, whole-model readiness or performance acceptance' }
     $warmStageFamilyProof | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $out 'warm-material-stage-family-proof.json')
+    # The captured-stage source must also appear in the existing successful bound upload witness.
+    # This is a same-source join, not a proof of shader slot usage, pixels or causal performance.
+    $preflightRows = @(Select-String -LiteralPath $log -Pattern 'Warm material source preflight: source=(.*?) attemptedLoad=true textureReturned=(true|false) threw=(true|false) boundReadAccepted=(true|false) sourceMs=([0-9.]+) remainingAttempts=(\d+) metadataWorkLeft=(\d+) row=(\d+) limit=64')
+    $preflightObservations = @($preflightRows | ForEach-Object {
+        $g = $_.Matches[0].Groups
+        [pscustomobject]@{source=[string]$g[1].Value; returned=$g[2].Value -eq 'true'; threw=$g[3].Value -eq 'true'
+            accepted=$g[4].Value -eq 'true'; sourceMs=[double]::Parse($g[5].Value,[Globalization.CultureInfo]::InvariantCulture)
+            remainingAttempts=[uint64]$g[6].Value; metadataWorkLeft=[uint64]$g[7].Value; row=[uint64]$g[8].Value}
+    })
+    if (@($preflightObservations | Where-Object { !$_.source -or $_.remainingAttempts -gt 1 -or $_.metadataWorkLeft -gt 256 -or
+        $_.row -lt 1 -or $_.row -gt 64 -or ([double]::IsNaN($_.sourceMs) -or [double]::IsInfinity($_.sourceMs)) -or $_.sourceMs -lt 0 -or
+        ($_.accepted -and (!$_.returned -or $_.threw)) }).Count -gt 0 -or $preflightObservations.Count -gt 64) {throw 'Malformed bounded warm-material preflight witness'}
+    if (!$WarmMaterialPreflight -and $preflightObservations.Count) {throw 'Warm-material preflight unexpectedly active in OFF control'}
+    $warmUploadedStageKeys = @($warmUploadObservations | Where-Object {$_.stageFamily} | ForEach-Object {$_.source.Replace('\','/').ToLowerInvariant()})
+    $joinedPreflightUploads = @($preflightObservations | Where-Object {$_.accepted -and $_.source.Replace('\','/').ToLowerInvariant() -in $warmUploadedStageKeys})
+    $warmPreflightProven = !$RequireWarmMaterialPreflightUpload -or $joinedPreflightUploads.Count -gt 0
+    $warmPreflightProof = @{requested=[bool]$WarmMaterialPreflight; required=[bool]$RequireWarmMaterialPreflightUpload
+        positive=[bool]($joinedPreflightUploads.Count -gt 0); observations=$preflightObservations; sameSourceStageUploads=$joinedPreflightUploads
+        truncated=[bool](Select-String -LiteralPath $log -Pattern 'Warm material source preflight: log truncated after 64' -Quiet)
+        scope='Bounded actual owner missing-stage source loads and same-source successful bound worker filename-family upload only; not complete route, slot-role, pixel or time-budget/performance proof'}
+    $warmPreflightProof | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $out 'warm-material-preflight-proof.json')
     $replayProof = $null
     $replayRows = @(Select-String -LiteralPath $log -Pattern 'PAA LZO replay: hits=(\d+) misses=(\d+) hitOutputBytes=(\d+) storeBytes=(\d+) peakStoreBytes=(\d+) entries=(\d+) evictions=(\d+) oversize=(\d+) admissionFailures=(\d+) budgetBytes=33554432 maxEntries=128')
     if ($PaaLzoReplay) {
@@ -456,7 +486,7 @@ try {
         committedRows=$modelRowCommits.Count;truncatedRows=$modelRowTruncated.Count;
         rows=@($modelRowCommits | ForEach-Object {$_.Line});
         scope='Bounded post-queue-write partial MODEL source ranges; not driver completion, physical memory or performance acceptance'}
-    @{passed = [bool]($warmJobsProven -and $warmStageFamilyProven -and $coldAlphaProven -and $coldStartupProven); mode = $Mode; admissionMode = $AdmissionMode; parkedTextureRefill = [bool]$ParkedTextureRefill; lazyTextureGroups = [bool]$LazyTextureGroups; warmProfile = [bool]$WarmProfile; screeningOnly = $true; performanceAccepted = $false; terrainPageTimings = [bool]$TerrainPageTimings
+    @{passed = [bool]($warmJobsProven -and $warmStageFamilyProven -and $warmPreflightProven -and $coldAlphaProven -and $coldStartupProven); mode = $Mode; admissionMode = $AdmissionMode; parkedTextureRefill = [bool]$ParkedTextureRefill; lazyTextureGroups = [bool]$LazyTextureGroups; warmProfile = [bool]$WarmProfile; screeningOnly = $true; performanceAccepted = $false; terrainPageTimings = [bool]$TerrainPageTimings
         frameCount = $count; dropped = $dropped; enginePhaseTiming = $phases; baseline = $baseline; returned = $returned
         routeSamples = $routeSamples; postExitHashes = $finalHashes
         renderCallCpuTimings = [bool]$TerrainPageTimings; renderCallCpuTimingProof = $callCpuProof
@@ -467,6 +497,7 @@ try {
         paaPreparationInflightProof = $inflightProof
         registrationQuota = [bool]$RegistrationQuota; registrationQuotaProof = $quotaProof
         archiveSourceBindings = [bool]$ArchiveSourceBindings; archiveSourceBindingProof = $archiveBindings
+        warmMaterialPreflight = [bool]$WarmMaterialPreflight; warmMaterialPreflightProof = $warmPreflightProof
         warmTextureJobs = [bool]$WarmTextureJobs; warmTextureJobProof = $warmJobProof
         requireWarmMaterialStageUpload = [bool]$RequireWarmMaterialStageUpload; warmMaterialStageFamilyProof = $warmStageFamilyProof
         coldPaaHandoff = [bool]$ColdPaaHandoff; requireColdAlphaPeek = [bool]$RequireColdAlphaPeek; coldPaaHandoffProof = $coldPaaProof
@@ -478,6 +509,7 @@ try {
     Write-Output "DayZ latency screening evidence: $out"
     if (!$coldStartupProven) { throw 'NotExercised: no positive observed initial DayZ admission alpha delta and source-validated owned upload; evidence retained' }
     if (!$coldAlphaProven) { throw 'NotExercised: no positive real DayZ route alpha peek delta and source-validated cold owned upload; evidence retained' }
+    if (!$warmPreflightProven) { throw 'NotExercised: no same-source initialized-stage preflight and successful bound worker stage upload; evidence retained' }
     if (!$warmJobsProven) { throw 'Warm preparation did not demonstrate an actual source-validated GPU upload; evidence retained' }
     if (!$warmStageFamilyProven) { throw 'Required bound worker normal/specular filename-family upload not exercised; evidence retained, no material-slot proof claimed' }
 } finally {

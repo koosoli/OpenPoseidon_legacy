@@ -16,6 +16,7 @@
 #include "EngineWgpu.hpp"
 #include "GeometryOwnerLedger.hpp"
 #include <Poseidon/World/Terrain/ObjectStreamPrepare.hpp>
+#include <Poseidon/World/Terrain/WarmMaterialStagePreflightPolicy.hpp>
 #include <Poseidon/IO/Streams/ArchiveSourceBinding.hpp>
 #include <atomic>
 #include <stdexcept>
@@ -10402,12 +10403,17 @@ void EngineWgpu::PrepareNativeNormalSources(LODShapeWithShadow* shape)
 }
 
 void EngineWgpu::CaptureWarmTextureReads(const LODShapeWithShadow* shape,
-    std::vector<WarmTextureRead>& reads, size_t& workRemaining) const
+    std::vector<WarmTextureRead>& reads, size_t& workRemaining, size_t* stageSourceAttemptsRemaining) const
 {
     if (!ObjectStreamPreparer::WarmTextureJobsEnabled() || !Foundation::IsMainThread() ||
         !_gpuDriven || !_renderer || !shape || !workRemaining) return;
-    // Diagnostic only for this already opt-in owner path. No clocks, new source
-    // capture, extra bank lookup or changes to the existing shared visit budget.
+    // Existing warm capture stays no-load by default under the shared visit budget.
+    // Explicit material preflight may initialize two missing cached-stage headers;
+    // only those attempted loads add source capture/clocks, never material parsing or upload.
+    static const bool materialPreflightEnabled = [] {
+        const char* value = std::getenv("WGR_OBJECT_STREAM_WARM_MATERIAL_PREFLIGHT");
+        return value && std::strcmp(value, "1") == 0;
+    }();
     const size_t initialWork = workRemaining, initialReads = reads.size();
     size_t inspected = 0, ineligible = 0, noCurrentSource = 0, sizeOrKeyRefused = 0, lodVisits = 0;
     size_t materialCacheHits = 0, stageSlotVisits = 0, stageAccepted = 0;
@@ -10453,7 +10459,9 @@ void EngineWgpu::CaptureWarmTextureReads(const LODShapeWithShadow* shape,
         return;
     }
     // Recreated registrations lost their recorded texture vector. Inspect only
-    // already-cached normal/specular material slots, never resolve/load a stage.
+    // already-cached normal/specular slots. Default only finds existing textures;
+    // explicit preflight may load missing headers under its shared attempt budget,
+    // without resolving a material or uploading a stage.
     // Every slot and texture visit shares the SAME256 recentre budget; raw names
     // are bounded before the existing cache lookup creates its temporary key.
     auto inspectCachedStages = [&](const ShapeSection& section)
@@ -10482,10 +10490,48 @@ void EngineWgpu::CaptureWarmTextureReads(const LODShapeWithShadow* shape,
                 path.find('\0') != std::string::npos || !workRemaining) continue;
             --workRemaining; // existing no-load texture-bank lookup
             const int index = _wbank->Find(RStringB(path.c_str()));
-            if (index < 0 || index >= _wbank->NTextures()) continue;
+            if (index >= 0)
+            {
+                // Found headers are never reinitialized or relabelled, even when binding is Unknown.
+                if (index >= _wbank->NTextures()) continue;
+                const size_t before = reads.size();
+                inspect(dynamic_cast<const TextureWgpu*>(_wbank->GetTexture(index)));
+                stageAccepted += reads.size() - before;
+                continue;
+            }
+            if (!stageSourceAttemptsRemaining ||
+                !Streaming::WarmMaterialStagePreflightPolicy::ReserveMissingSource(
+                    materialPreflightEnabled, false, *stageSourceAttemptsRemaining, workRemaining)) continue;
+            // Two attempts across the entire owner recentre, including failures. Only cached
+            // translated slots reach here; no material parsing, GPU upload, or worker bank access.
+            const auto began = std::chrono::steady_clock::now();
             const size_t before = reads.size();
-            inspect(dynamic_cast<const TextureWgpu*>(_wbank->GetTexture(index)));
+            bool loaded = false, threw = false;
+            try
+            {
+                ArchiveSourceBinding::ModelReadScope purpose;
+                Ref<Texture> stageTexture = _wbank->Load(path.c_str());
+                loaded = stageTexture.GetRef() != nullptr;
+                // The Ref remains alive through capture; only owned initialized-source facts escape.
+                inspect(dynamic_cast<const TextureWgpu*>(stageTexture.GetRef()));
+            }
+            catch (...) { threw = true; } // Ordinary bank ownership/failure behavior is unchanged; no reinitialization.
             stageAccepted += reads.size() - before;
+            const double elapsed = std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - began).count();
+            static unsigned preflightRows = 0; // Owner-only, no clock/format/allocation on OFF path.
+            if (preflightRows < 64)
+            {
+                ++preflightRows;
+                LOG_INFO(World, "Warm material source preflight: source={} attemptedLoad=true textureReturned={} threw={} boundReadAccepted={} sourceMs={:.3f} remainingAttempts={} metadataWorkLeft={} row={} limit=64",
+                    path, loaded, threw, reads.size() > before, elapsed,
+                    *stageSourceAttemptsRemaining, workRemaining, preflightRows);
+            }
+            else if (preflightRows == 64)
+            {
+                ++preflightRows;
+                LOG_INFO(World, "Warm material source preflight: log truncated after 64 attempted loads; source initialization is not worker upload or performance proof");
+            }
         }
     };
     // Primary textures remain unchanged. Lazy LODs, unknown material/source caches,

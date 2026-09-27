@@ -148,6 +148,7 @@ set(POSEIDON_TEST_SOURCES
     Graphics/test_geometry_page_camera_demand.cpp
     Tools/test_geometry_page_mlod_producer.cpp
     Tools/test_selected_cut_surface_certificate.cpp
+    World/Model/test_warm_material_stage_preflight.cpp
     Graphics/test_geometry_page_resident_decode.cpp
     Graphics/test_geometry_page_representation_decode.cpp
     Graphics/test_authored_geometry_page_worker.cpp
