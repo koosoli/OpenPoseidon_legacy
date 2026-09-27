@@ -7,6 +7,7 @@
 #include <Poseidon/World/Terrain/SimulationCoverageIndex.hpp>
 #include <Poseidon/World/Terrain/WorldObjectPlacementFrame.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <chrono>
@@ -25,6 +26,54 @@ inline constexpr size_t SimulationMaxWatchedPlacements = 16384;
 inline constexpr uint64_t SimulationMaxModelPayload = 4 * 1024 * 1024;
 inline constexpr uint64_t SimulationMaxPayloadCharge = 64 * 1024 * 1024;
 inline constexpr uint64_t SimulationMaxShapeCharge = 256 * 1024 * 1024;
+
+// Optional modern contact work shares one consumption allowance between joined
+// owner Pump boundaries. This is a soft elapsed-work limit: an indivisible call
+// can overshoot, and fixed caller ordering provides no actor fairness guarantee.
+class SimulationFireCollisionConsumption
+{
+public:
+    static constexpr size_t MaxAttempts = 4;
+    static constexpr double MaxMilliseconds = 2.0;
+    void Reset() { _attempts = 0; _milliseconds = 0; }
+    bool TryBegin()
+    {
+        if (_attempts >= MaxAttempts || _milliseconds >= MaxMilliseconds) return false;
+        ++_attempts;
+        return true;
+    }
+    void Charge(double milliseconds)
+    {
+        // A broken/negative clock observation fails closed, never lends credit.
+        if (!std::isfinite(milliseconds) || milliseconds < 0) _milliseconds = MaxMilliseconds;
+        else _milliseconds = std::min(MaxMilliseconds, _milliseconds + milliseconds);
+    }
+    size_t Attempts() const { return _attempts; }
+    double ChargedMilliseconds() const { return _milliseconds; }
+private:
+    size_t _attempts = 0;
+    double _milliseconds = 0;
+};
+
+// Owner-only lexical charge, including non-Ready returns and exceptions. Now
+// must be nonthrowing and return a steady-clock time_point; no callback escapes.
+template<class Now>
+class SimulationFireCollisionCharge
+{
+public:
+    SimulationFireCollisionCharge(SimulationFireCollisionConsumption& budget, Now now)
+        : _budget(budget), _now(now), _start(_now()) {}
+    ~SimulationFireCollisionCharge()
+    {
+        _budget.Charge(std::chrono::duration<double, std::milli>(_now() - _start).count());
+    }
+    SimulationFireCollisionCharge(const SimulationFireCollisionCharge&) = delete;
+    SimulationFireCollisionCharge& operator=(const SimulationFireCollisionCharge&) = delete;
+private:
+    SimulationFireCollisionConsumption& _budget;
+    Now _now;
+    std::chrono::steady_clock::time_point _start;
+};
 
 // Explicit Fire interest is renewed only by an accepted owner queue operation.
 // Polling, collision validation and automatic actor visits are not heartbeats.

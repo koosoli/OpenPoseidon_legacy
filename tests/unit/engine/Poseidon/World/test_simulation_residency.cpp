@@ -16,6 +16,65 @@
 using namespace Poseidon;
 using namespace Poseidon::Streaming;
 
+TEST_CASE("Fire collision consumption is shared until the joined owner boundary", "[streaming-simulation-residency]")
+{
+    SimulationFireCollisionConsumption budget;
+    using Clock = std::chrono::steady_clock;
+    auto now = Clock::time_point{};
+    const auto clock = [&]() noexcept { return now; };
+    SECTION("NonReady and exception exits charge the same actual work")
+    {
+        REQUIRE(budget.TryBegin());
+        {
+            SimulationFireCollisionCharge charge(budget, clock);
+            now += std::chrono::microseconds(750); // An Invalid/Pending return still leaves this lexical scope.
+        }
+        REQUIRE(budget.ChargedMilliseconds() == .75);
+        REQUIRE(budget.TryBegin());
+        try
+        {
+            SimulationFireCollisionCharge charge(budget, clock);
+            now += std::chrono::microseconds(1250);
+            throw 1;
+        }
+        catch (int) {}
+        REQUIRE(budget.ChargedMilliseconds() == 2);
+        REQUIRE_FALSE(budget.TryBegin());
+        REQUIRE(budget.Attempts() == 2);
+        budget.Reset(); // Same reset used before Pump's capacity-refusal return.
+        REQUIRE(budget.ChargedMilliseconds() == 0);
+        REQUIRE(budget.Attempts() == 0);
+        REQUIRE(budget.TryBegin());
+    }
+    SECTION("Cheap refusals cannot bypass the attempt cap")
+    {
+        for (size_t i = 0; i < SimulationFireCollisionConsumption::MaxAttempts; ++i)
+        {
+            REQUIRE(budget.TryBegin());
+            SimulationFireCollisionCharge charge(budget, clock);
+        }
+        REQUIRE_FALSE(budget.TryBegin());
+        REQUIRE(budget.Attempts() == SimulationFireCollisionConsumption::MaxAttempts);
+        budget.Reset();
+        REQUIRE(budget.TryBegin());
+    }
+    SECTION("Indivisible overshoot and invalid clock observations fail closed")
+    {
+        REQUIRE(budget.TryBegin());
+        budget.Charge(25); // No hard-duration claim for one indivisible operation.
+        REQUIRE_FALSE(budget.TryBegin());
+        REQUIRE(budget.ChargedMilliseconds() == 2);
+        for (const double invalid : {-1.0, std::numeric_limits<double>::infinity(),
+            std::numeric_limits<double>::quiet_NaN()})
+        {
+            budget.Reset();
+            REQUIRE(budget.TryBegin());
+            budget.Charge(invalid);
+            REQUIRE_FALSE(budget.TryBegin());
+        }
+    }
+}
+
 TEST_CASE("Fire interest requires owner heartbeats and expires independently of automatic visits", "[streaming-simulation-residency]")
 {
     using Clock = SimulationFireHeartbeat::Clock;

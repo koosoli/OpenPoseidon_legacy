@@ -205,6 +205,7 @@ struct SimulationResidencyState
     size_t inventoryCursor = 0, modelCursor = 0, actorCursor = 0, regionCursor = 0;
     uint64_t tick = 0, generation = 1;
     uint64_t automaticActorVisits = 0;
+    mutable SimulationFireCollisionConsumption fireCollisionConsumption;
     uint64_t positiveAdmissionGeneration = 1;
     std::vector<uint32_t> positiveColdWork;
     size_t positiveColdCursor = 0, legacyShapeSlots = 0;

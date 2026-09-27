@@ -300,11 +300,22 @@ Status Landscape::TryModernSimulationFireCollision(CollisionBuffer& retVal, cons
 {
     if (!ModernSimulationResidencyEnabled()) return Status::Disabled;
     if (!Foundation::IsMainThread()) return Status::WrongOwner;
+    if (!_modernSimulation)
+    {
+        if (!ValidRegion(Point(from), Point(to), radius)) return Status::Invalid;
+        const auto broadphase = SimulationFireBroadphaseStatus(from, to, radius, _invLandGrid, _landRange);
+        return broadphase == Status::Ready ? Status::Pending : broadphase;
+    }
+    auto& s = *_modernSimulation;
+    if (!s.fireCollisionConsumption.TryBegin())
+    { ++s.stats.fireCollisionWorkRefusals; return Status::Pending; }
+    SimulationFireCollisionCharge charge(s.fireCollisionConsumption,
+        []() noexcept { return std::chrono::steady_clock::now(); });
     if (!ValidRegion(Point(from), Point(to), radius)) return Status::Invalid;
     const auto broadphase = SimulationFireBroadphaseStatus(from, to, radius, _invLandGrid, _landRange);
     if (broadphase != Status::Ready) return broadphase;
-    if (!_modernSimulation) return Status::Pending;
-    auto& s = *_modernSimulation;
+    const double allowance = SimulationFireCollisionConsumption::MaxMilliseconds -
+        s.fireCollisionConsumption.ChargedMilliseconds();
     const auto start = std::chrono::steady_clock::now();
     const auto elapsed = [&] { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count(); };
     const auto validate = [&] { return ModernSimulationQueryStatus(actor, SimulationQueryPurpose::Fire, from, to, radius); };
@@ -330,7 +341,7 @@ Status Landscape::TryModernSimulationFireCollision(CollisionBuffer& retVal, cons
     }
     bool workRefused = false;
     const auto budget = [&] {
-        const bool allowed = elapsed() < 2;
+        const bool allowed = elapsed() < allowance;
         workRefused |= !allowed;
         return allowed;
     };
@@ -443,6 +454,9 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
     if (!ModernSimulationResidencyEnabled() || !Foundation::IsMainThread()) return;
     EnsureModernSimulationResidency();
     auto& s = *_modernSimulation;
+    // Joined-owner boundary, including metadata-capacity refusal: consumers
+    // never reset this allowance through Queue/status/contact polling.
+    s.fireCollisionConsumption.Reset();
     if (s.stats.status == Status::CapacityExceeded) return;
     const auto started = std::chrono::steady_clock::now();
     const auto elapsed = [&] { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count(); };
