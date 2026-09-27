@@ -96,12 +96,14 @@ void GeometryPageCommand::Setup(CLI::App& app)
     command->callback([output] {try {Produce(*output);} catch(const std::exception& error) {std::cerr<<"geometry-page-pilot: "<<error.what()<<"\n";throw CLI::RuntimeError(2);} });
     auto mlod=app.add_subcommand("geometry-page-mlod","Offline actual original controlled MLOD subset to selected CLOD disk package; no runtime/retail gate");
     auto input=std::make_shared<std::string>();auto originalOutput=std::make_shared<std::string>();
+    auto surfaceCertificate=std::make_shared<bool>(false);
     mlod->add_option("--input",*input,"Actual original MLOD file; whole owned snapshot <=16 MiB")->required();
     mlod->add_option("--output-directory",*originalOutput,"NEW private output directory; parent must exist")->required();
-    mlod->callback([input,originalOutput] {
+    mlod->add_flag("--surface-certificate",*surfaceCertificate,"Optional separate object-space selected-surface upper-bound descriptor; no pixel/fidelity/runtime certificate");
+    mlod->callback([input,originalOutput,surfaceCertificate] {
         try {
             Poseidon::Foundation::CaptureMainThread();
-            MlodPages::Product result;const auto status=MlodPages::ProduceFile(*input,*originalOutput,result,&std::cout);
+            MlodPages::Product result;const auto status=MlodPages::ProduceFile(*input,*originalOutput,result,&std::cout,*surfaceCertificate);
             if(status!=MlodPages::ProducerStatus::Produced)
                 throw std::runtime_error(std::string("bounded original MLOD producer refused, status=")+MlodPages::StatusName(status));
             // Caller captures independent producer stdout and verifies ORIGINAL input hash.
