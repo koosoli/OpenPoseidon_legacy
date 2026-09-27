@@ -15435,6 +15435,388 @@
         "samples.jsonl": "30cb2b6019daa5f09cd979da3a04798d93285abd935da06d62464402f36b6a9e",
         "warm-texture-job-proof.json": "8ee6905f35ef1748bc5c0b3729c5e9a73a5c0d9ddbdb251564453702eda84feb"
       }
+    },
+    {
+      "run": "shared-retirement-ledger-20260927-20260927-090148",
+      "classification": "PASS resulttrue; rootwrapperexit0 and actualengineShutdowncomplete, private shared-retirement diagnostic",
+      "provenance": {
+        "shapeCacheLimit": null,
+        "fixture": {
+          "absolute_model_path": true,
+          "actor": [
+            1190,
+            10,
+            1200
+          ],
+          "camera": [
+            100,
+            80,
+            100
+          ],
+          "camera_isolation_env": {
+            "WGR_OBJECT_STREAM_RADIUS_CELLS": "8",
+            "WGR_OBJECT_STREAM_WINDOW_GROWTH": "0"
+          },
+          "cell_metres": 50.0,
+          "elevation": 10.0,
+          "fire_segment": [
+            [
+              1190,
+              11.5,
+              1200
+            ],
+            [
+              1210,
+              11.5,
+              1200
+            ]
+          ],
+          "half_depth": 6.0,
+          "land_range": 32,
+          "large_wall": false,
+          "model_sha256": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+          "models": [
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\shared-retirement-ledger-20260927-20260927-090148\\fixture\\streaming_fixture\\wall.p3d"
+          ],
+          "notes": [
+            "Absolute-model mode uses original loose files without an archive mount; relative mode needs a separately configured loose-file root.",
+            "Camera at 100 is isolated from walls at 1200/1230 with growth disabled.",
+            "No ResolveObject: actor demand must admit geometry with transient leases.",
+            "Generic inventory/classification/admission must establish readiness.",
+            "Self-check is not engine parsing, collision or runtime verification."
+          ],
+          "placements": [
+            {
+              "id": 1001,
+              "model_index": 0,
+              "position": [
+                1200.0,
+                11.5,
+                1200.0
+              ]
+            },
+            {
+              "id": 1002,
+              "model_index": 0,
+              "position": [
+                1230.0,
+                11.5,
+                1200.0
+              ]
+            }
+          ],
+          "positive_warming": false,
+          "reference_all_models": false,
+          "registered_warming": false,
+          "schema": 1,
+          "terrain_range": 32,
+          "wall_world_bounds": [
+            [
+              1199.5,
+              10,
+              1194.0,
+              1200.5,
+              13,
+              1206.0
+            ],
+            [
+              1229.5,
+              10,
+              1194.0,
+              1230.5,
+              13,
+              1206.0
+            ]
+          ],
+          "world_sha256": "e56532b91f4725b886237c8b8f57ee75216d96d8c4bb86fe3aef469984ebd259"
+        },
+        "installed": "codex/streaming-residency 4f07ba7f 2026-09-27_09:01 deploy-ps1",
+        "registeredWarming": false,
+        "disabled": false,
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "F88F2C9608145E684182E9A07E5CCAEB2D6DE4480EBFB4009AD2249714F2CE8E",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "C6822E73130C36C868B4DCB2D78977BBC37321DFF676399D0682BF0F5829A886",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "head": "4f07ba7facf1656ecbdd100e1d9edba2f626370e",
+        "scriptSha256": "F0D73B5DA0C2C75DC952107D7D88512E23E9020D075F5A463BCCB02DC24E0515"
+      },
+      "summary": {
+        "passed": true,
+        "performanceAccepted": false,
+        "shutdownComplete": true,
+        "simulationOff": {
+          "status": "Disabled",
+          "inventoryRows": 0,
+          "inventoryTotal": 0,
+          "metadataComplete": false,
+          "metadataRecordBytes": 0,
+          "referencedModels": 0,
+          "activeModels": 0,
+          "sparseLeaseRecords": 0,
+          "metadataPlacementRefusals": 0,
+          "metadataModelRefusals": 0,
+          "metadataByteRefusals": 0,
+          "activeModelRefusals": 0,
+          "coverageGeneration": 0,
+          "models": 0,
+          "preparedModels": 0,
+          "unknownModels": 0,
+          "regions": 0,
+          "readyRegions": 0,
+          "pendingRegions": 0,
+          "unknownRegions": 0,
+          "refusedRegions": 0,
+          "watchedPlacements": 0,
+          "liveWatchedPlacements": 0,
+          "queryRegions": 0,
+          "queryBorrowedModels": 0,
+          "queryBorrowedEntries": 0,
+          "registeredBorrowedModels": 0,
+          "registeredBorrowShapeCharge": 0,
+          "registeredValidationBudgetRefusals": 0,
+          "registeredMetadataEverComplete": false,
+          "readyQueries": 0,
+          "pendingQueries": 0,
+          "unknownQueries": 0,
+          "refusedQueries": 0,
+          "leasedPlacements": 0,
+          "positiveScannedRegions": 0,
+          "positiveLeasedPlacements": 0,
+          "positiveColdRequested": 0,
+          "positiveColdPrepared": 0,
+          "positiveColdCreated": 0,
+          "positiveColdRefused": 0,
+          "positiveColdInterrupted": 0,
+          "positiveColdWorkingModels": 0,
+          "positiveColdFactsBytes": 0,
+          "positiveColdTailCalls": 0,
+          "positiveColdBankCalls": 0,
+          "positiveColdLastBankMs": 0,
+          "positiveColdMaxBankMs": 0,
+          "positiveColdLastTailMs": 0,
+          "positiveColdMaxTailMs": 0,
+          "created": 0,
+          "released": 0,
+          "queueRefused": 0,
+          "payloadCapacityCharge": 0,
+          "shapeSchedulingCharge": 0,
+          "shapeElementBytes": 0,
+          "lastPumpVisits": 0,
+          "ownerPumps": 0,
+          "fireCollisionCalls": 0,
+          "fireCollisionCandidateTests": 0,
+          "fireCollisionWorkRefusals": 0,
+          "lastFireCollisionMs": 0,
+          "requiredObjects": 0,
+          "rendererName": "WGPU (Rust / wgpu)",
+          "lastPumpMs": 0,
+          "ok": true
+        },
+        "required": 0,
+        "cases": [
+          {
+            "last": {
+              "status": "Ready",
+              "requestId": 8,
+              "observedRequestId": 8,
+              "producer": "62",
+              "rendererHandle": "4294967357",
+              "knownPayloadBytes": 21744,
+              "meshState": 2,
+              "cpuBorrowers": 0,
+              "producerOwned": false,
+              "sourceCopied": true,
+              "privateAllocation": true,
+              "ledgerEnabled": true,
+              "ledgerRecordObserved": true,
+              "ledgerScheduledRetired": true,
+              "ledgerCpuBorrowers": 0,
+              "ledgerProducerOwned": false,
+              "scope": "Private copied mesh lifetime and generational record state; no world rendering, queue-completion or device-free proof",
+              "ok": true,
+              "priorCuts": []
+            },
+            "created": {
+              "status": "Ready",
+              "requestId": 2,
+              "observedRequestId": 2,
+              "producer": "62",
+              "rendererHandle": "4294967357",
+              "knownPayloadBytes": 21744,
+              "meshState": 1,
+              "cpuBorrowers": 2,
+              "producerOwned": true,
+              "sourceCopied": true,
+              "privateAllocation": true,
+              "ledgerEnabled": true,
+              "ledgerRecordObserved": true,
+              "ledgerScheduledRetired": false,
+              "ledgerCpuBorrowers": 2,
+              "ledgerProducerOwned": true,
+              "scope": "Private copied mesh lifetime and generational record state; no world rendering, queue-completion or device-free proof",
+              "ok": true,
+              "priorCuts": []
+            },
+            "first": {
+              "status": "Ready",
+              "requestId": 4,
+              "observedRequestId": 4,
+              "producer": "62",
+              "rendererHandle": "4294967357",
+              "knownPayloadBytes": 21744,
+              "meshState": 1,
+              "cpuBorrowers": 1,
+              "producerOwned": true,
+              "sourceCopied": true,
+              "privateAllocation": true,
+              "ledgerEnabled": true,
+              "ledgerRecordObserved": true,
+              "ledgerScheduledRetired": false,
+              "ledgerCpuBorrowers": 1,
+              "ledgerProducerOwned": true,
+              "scope": "Private copied mesh lifetime and generational record state; no world rendering, queue-completion or device-free proof",
+              "ok": true,
+              "priorCuts": []
+            },
+            "order": "newest-first",
+            "second": {
+              "status": "Ready",
+              "requestId": 6,
+              "observedRequestId": 6,
+              "producer": "62",
+              "rendererHandle": "4294967357",
+              "knownPayloadBytes": 21744,
+              "meshState": 1,
+              "cpuBorrowers": 1,
+              "producerOwned": false,
+              "sourceCopied": true,
+              "privateAllocation": true,
+              "ledgerEnabled": true,
+              "ledgerRecordObserved": true,
+              "ledgerScheduledRetired": false,
+              "ledgerCpuBorrowers": 1,
+              "ledgerProducerOwned": false,
+              "scope": "Private copied mesh lifetime and generational record state; no world rendering, queue-completion or device-free proof",
+              "ok": true,
+              "priorCuts": []
+            }
+          },
+          {
+            "last": {
+              "status": "Ready",
+              "requestId": 8,
+              "observedRequestId": 8,
+              "producer": "65",
+              "rendererHandle": "12884901949",
+              "knownPayloadBytes": 21744,
+              "meshState": 2,
+              "cpuBorrowers": 0,
+              "producerOwned": false,
+              "sourceCopied": true,
+              "privateAllocation": true,
+              "ledgerEnabled": true,
+              "ledgerRecordObserved": true,
+              "ledgerScheduledRetired": true,
+              "ledgerCpuBorrowers": 0,
+              "ledgerProducerOwned": false,
+              "scope": "Private copied mesh lifetime and generational record state; no world rendering, queue-completion or device-free proof",
+              "ok": true,
+              "priorCuts": []
+            },
+            "created": {
+              "status": "Ready",
+              "requestId": 2,
+              "observedRequestId": 2,
+              "producer": "65",
+              "rendererHandle": "12884901949",
+              "knownPayloadBytes": 21744,
+              "meshState": 1,
+              "cpuBorrowers": 2,
+              "producerOwned": true,
+              "sourceCopied": true,
+              "privateAllocation": true,
+              "ledgerEnabled": true,
+              "ledgerRecordObserved": true,
+              "ledgerScheduledRetired": false,
+              "ledgerCpuBorrowers": 2,
+              "ledgerProducerOwned": true,
+              "scope": "Private copied mesh lifetime and generational record state; no world rendering, queue-completion or device-free proof",
+              "ok": true,
+              "priorCuts": []
+            },
+            "first": {
+              "status": "Ready",
+              "requestId": 4,
+              "observedRequestId": 4,
+              "producer": "65",
+              "rendererHandle": "12884901949",
+              "knownPayloadBytes": 21744,
+              "meshState": 1,
+              "cpuBorrowers": 2,
+              "producerOwned": false,
+              "sourceCopied": true,
+              "privateAllocation": true,
+              "ledgerEnabled": true,
+              "ledgerRecordObserved": true,
+              "ledgerScheduledRetired": false,
+              "ledgerCpuBorrowers": 2,
+              "ledgerProducerOwned": false,
+              "scope": "Private copied mesh lifetime and generational record state; no world rendering, queue-completion or device-free proof",
+              "ok": true,
+              "priorCuts": []
+            },
+            "order": "producer-first",
+            "second": {
+              "status": "Ready",
+              "requestId": 6,
+              "observedRequestId": 6,
+              "producer": "65",
+              "rendererHandle": "12884901949",
+              "knownPayloadBytes": 21744,
+              "meshState": 1,
+              "cpuBorrowers": 1,
+              "producerOwned": false,
+              "sourceCopied": true,
+              "privateAllocation": true,
+              "ledgerEnabled": true,
+              "ledgerRecordObserved": true,
+              "ledgerScheduledRetired": false,
+              "ledgerCpuBorrowers": 1,
+              "ledgerProducerOwned": false,
+              "scope": "Private copied mesh lifetime and generational record state; no world rendering, queue-completion or device-free proof",
+              "ok": true,
+              "priorCuts": []
+            }
+          }
+        ],
+        "sourceObjectsAfter": [
+          {
+            "id": 1001,
+            "present": true,
+            "visualResident": true
+          },
+          {
+            "id": 1002,
+            "present": true,
+            "visualResident": true
+          }
+        ]
+      },
+      "limits": "Actualcopiedcuts bothnewest-first/producer-first ledger records: borrowers2→1→0, finalscheduledRetiredtrue/producerfalse; actual dispatch event outsidegates epochrefusal notinventedfact/selectedO1fixturejoin. Diagnosticledger remainsOFFdefault; typed4096sharedmailbox bothkinds/actualvectorcapacityknownmetadata+transientsecondbatch. Oldaliases all-event truthfulowner-vs-retirefields. No defaultbaseVB layout/drawchanges, noqueueACK/devicefree/reclaim/performance/globalownershipComplete proof. Nextstandalone diagnosticretirement source UNBUILT/excluded. Futurecargo preammo interestrenewal guard recommendation NOTimplemented. WholeplanOPEN/defaultReady-performancefalse.",
+      "sha256": {
+        "engine.log": "e9fe2ddd74bfce49683c0d4196a981d9cf9b26afe52ffad8aa9dfce549d26d14",
+        "harness.jsonl": "63c1afea659e4dc60fd4c3774b797e6c02ecaf1aa81388e562801f914f13f76d",
+        "provenance.json": "47793fca70f59440151a61820ab8dd6127a135078d60e3c92d0cf0c4c6b35866",
+        "result.json": "5ec0f45f00cea6e2cdc4ff78e41cb0dd76be53ffe389aaae2d322fc784fae717"
+      }
     }
   ],
   "microbenchmarks": [
@@ -16742,6 +17124,16 @@
         "runtime-retained-borrower-before-20260927.log": "9c382ab0c765e4f86a063e7f7a5950afe11b6087d35c2395df10316a94b7853d",
         "runtime-retained-borrower-after-20260927.log": "8b60701293aaa6a7b97a607d8ae3483c416dac0b27fb2d2ab7a27f21196e35ce",
         "runtime-retained-borrower-lifetime-20260927.log": "d81257098615f3fe9a0ae764c6ccbdff0a7690460cfd35def3b716d27386dd8e"
+      }
+    },
+    {
+      "artifactRoot": "build",
+      "runtimeSourceCommit": "4f07ba7f",
+      "result": "All5targets248scheduledstepsPASS/test8778assert20casesPASS/noSKIP; cleanmatching4f07ba7f09:01. Typedmailbox4096sharedbothkinds actualvectorcapacityknownmetadata/transientsecondbatch charged; sharedlastborrower dispatch outsidegates/epochrefusalnofact/O1selectedfixturejoin; oldaliases all-event counts notowneronly. LedgerOFF/defaultVBdrawunchanged. Nextstandalonediagretirement UNBUILT/excluded/noACK-devicefree-reclaim-performanceclaims.",
+      "sha256": {
+        "build-shared-retirement-ledger-20260927.log": "e64b9049731b55d7b0145249899bc95f588c89eb5490b68d879b37ffee760d00",
+        "test-shared-retirement-ledger-20260927.log": "65450093171a62909d5ebfb5812f00ae98bb2df2de270193b2d6b26b545bbda0",
+        "runtime-shared-retirement-ledger-20260927.log": "a2bf93af72b11bf25213f824a43035e9be1d6f18f2859f45eb383c6d55e01b29"
       }
     }
   ],

@@ -2743,3 +2743,25 @@ othermetrics improve, but orderedunequalmaterialbytes/cache/asyncwork prevent
 causalFPS/no-regression acceptance. RootbothreturnedlocalPOI bus/buildings/trees/
 street compatible, notall-routeproof. Defaultsharingcorrectnessfixinstalledactive;
 warm/pressure/paging experimentsOFF/fullplanOPEN/performanceAccepted-defaultReadyfalse.
+
+## Sept27 shared-retirement diagnostic events
+
+4f07ba7f all5targets248scheduledstepsPASS;8778assertions/20casesPASS/noSKIP.
+Cleaninstall09:01 EXE F88F2C9608145E684182E9A07E5CCAEB2D6DE4480EBFB4009AD2249714F2CE8E,
+DLL C6822E73130C36C868B4DCB2D78977BBC37321DFF676399D0682BF0F5829A886.
+Typedmailbox4096 shared byowner/retirement kinds; actualvectorcapacity charges
+known C++metadata plus transientsecondbatch, not RSS. Historicalalias counters
+now explicitly all-event, with distinct truthfulowner/retirefields. Lastshared
+borrower actualdispatch event is outsidegates; epochrefusal creates nofact,
+selectedfixturejoin O1. No defaultbaseVB layout/drawchanges; ledger remainsOFF.
+
+Actual090148 resultpassedtrue/rootwrapperexit0, engine.log includes Shutdown
+complete. Bothprivatecases copiedcuts show newest-first/producer-first borrower
+counts2→1→0, finalledgerScheduledRetiredtrue/producerOwnedfalse, matchinggenerational
+Present→Absent rendererrecord. This is diagnostic event/lifetime evidence,
+not queueACK/devicefree/reclaim/performance/globalownershipcomplete. Nextstandalone
+diagnosticretirement source is unbuilt/excluded; wholeplanOPEN/defaultReady-
+performanceAcceptedfalse. Future recommendation, NOTimplemented: SoldierOldAI.cpp
+FireWeapon currently renews cargo insertion interest before magazine/mode/ammo/
+GetWeaponLoaded eligibility; narrowly acquire only viableattempt/releaseinvalid
+or unloaded while preserving legacy CargoWeaponLineClear order/defaultbehavior.
