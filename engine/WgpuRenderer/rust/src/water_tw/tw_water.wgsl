@@ -814,7 +814,8 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
     // 6 path length, 7 seabed seen through, 8 sea depth, 10 SSR weight; OP additions (W3h): the
     // above-water composite split into 20 reflection (+ sun glint), 21 sea bed transmitted,
     // 22 in-scattered light, and 23 the light inputs (r: sun irradiance luminance / 10,
-    // g: sky irradiance luminance, b: Fresnel), all before fog
+    // g: sky irradiance luminance, b: Fresnel), all before fog; W3m: 24 foam sources (r shore
+    // waves, g simulation, b region coverage), 25 (r depth / 26 m, g whitecaps, b foam coverage)
     let dbg = i32(tw.material1.z + 0.5);
     var res = min(outCol, vec3<f32>(16000.0));
     if (dbg == 1) {
@@ -839,6 +840,12 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
         res = dbgTrans;
     } else if (dbg == 22) {
         res = dbgIn;
+    } else if (dbg == 24) {
+        // (W3m) the foam sources: r shore-wave foam (per vertex), g simulated foam, b region coverage
+        res = vec3<f32>(sat(in.shoreFoam), sat(simState.x), simIn);
+    } else if (dbg == 25) {
+        // (W3m) r depth / 26 m (the shore waves' reach), g whitecaps (per vertex), b foam coverage
+        res = vec3<f32>(sat(vDepth / 26.0), sat(in.foam), sat(surf.coverage));
     } else if (dbg == 23) {
         res = dbgLight * vec3<f32>(0.1, 1.0, 1.0);
     }
