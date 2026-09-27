@@ -763,7 +763,7 @@ void RequireColdPaaCapability()
 {
     Poseidon::Foundation::CaptureMainThread();
     if (!Poseidon::render::ColdPaaHandoffEnabled()) SKIP("Fresh WGR_OBJECT_STREAM_COLD_TEXTURE_HANDOFF=1 process required.");
-    if (!Poseidon::QFileAccess::MappingSupported()) SKIP("Actual mapped archive source lease unavailable.");
+    if (!QFileAccess::MappingSupported()) SKIP("Actual mapped archive source lease unavailable.");
     if (Preparer::WorkerCount()!=1) SKIP("Deterministic worker replacement requires WGR_OBJECT_STREAM_ASYNC_WORKERS=1.");
 }
 void SubmitOriginalColdPaa(Preparer& prep, const Poseidon::render::ColdPaaRead& read)
