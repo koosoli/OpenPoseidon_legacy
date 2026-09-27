@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
 #include <Poseidon/IO/Streams/QStream.hpp>
+#include <Poseidon/IO/FileServerMT.hpp>
 #include <Poseidon/Foundation/Algorithms/Sha256.hpp>
 #include <Poseidon/Foundation/Strings/RString.hpp>
 #include <Poseidon/Foundation/Types/Pointers.hpp>
@@ -119,6 +120,80 @@ struct TempPbo
 };
 
 } // namespace
+
+TEST_CASE("FileCache selective bank flush removes exact debt without evicting unrelated bytes",
+          "[qstream][pbo][file-cache]")
+{
+    const std::string suffix = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+    TempPbo first(("filecache_first_" + suffix).c_str(),
+                  {{"one.bin", Bytes(std::string(16, 'a')), 0},
+                   {"two.bin", Bytes(std::string(32, 'b')), 0}});
+    TempPbo second(("filecache_second_" + suffix).c_str(),
+                   {{"keep.bin", Bytes(std::string(24, 'k')), 0}});
+    // The cache also reads loose bytes. This private path shares the helper's
+    // cleanup ownership, but intentionally holds a raw blob rather than an archive.
+    TempPbo loose(("filecache_loose_" + suffix).c_str(), {});
+    {
+        std::ofstream out(loose.path, std::ios::binary | std::ios::trunc);
+        REQUIRE(out.good());
+        out << std::string(32, 'c');
+    }
+    QFBank firstBank, secondBank;
+    REQUIRE(firstBank.open(RString(BankNameOf(first.path).c_str())));
+    REQUIRE(secondBank.open(RString(BankNameOf(second.path).c_str())));
+    QIFStreamB one, two, keep;
+    one.open(firstBank, "one.bin");
+    two.open(firstBank, "two.bin");
+    keep.open(secondBank, "keep.bin");
+    REQUIRE_FALSE(one.fail());
+    REQUIRE_FALSE(two.fail());
+    REQUIRE_FALSE(keep.fail());
+    REQUIRE(one.rest() == 16);
+    REQUIRE(two.rest() == 32);
+    REQUIRE(keep.rest() == 24);
+    struct CachingGuard
+    {
+        bool previous = GEnableCaching;
+        CachingGuard() { GEnableCaching = true; }
+        ~CachingGuard() { GEnableCaching = previous; }
+    } caching;
+    FileCache cache(80, 16);
+    cache.Store(one, "first/one.bin");
+    cache.Store(keep, "second/keep.bin");
+    cache.Store(two, "first/two.bin");
+    REQUIRE(cache.HeldBytes() == 72);
+    cache.FlushBank(&firstBank);
+    CHECK_FALSE(cache.IsLoaded("first/one.bin"));
+    CHECK_FALSE(cache.IsLoaded("first/two.bin"));
+    REQUIRE(cache.IsLoaded("second/keep.bin"));
+    REQUIRE(cache.HeldBytes() == 24);
+    cache.FlushBank(&firstBank); // An already flushed bank cannot subtract twice.
+    REQUIRE(cache.HeldBytes() == 24);
+
+    QIFStream newFile;
+    cache.Open(newFile, loose.path.string().c_str());
+    REQUIRE_FALSE(newFile.fail());
+    CHECK(newFile.rest() == 32);
+    // 24+32 fits the real 80-byte budget. Phantom pre-flush debt previously
+    // exceeded it and discarded keep.bin despite ample actual cache capacity.
+    REQUIRE(cache.HeldBytes() == 56);
+    REQUIRE(cache.IsLoaded("second/keep.bin"));
+    QIFStream unrelated;
+    cache.Open(unrelated, "second/keep.bin");
+    char data[24]{};
+    unrelated.read(data, sizeof(data));
+    REQUIRE_FALSE(unrelated.fail());
+    CHECK(std::string(data, sizeof(data)) == std::string(24, 'k'));
+    REQUIRE(cache.HeldBytes() == 56); // Reader cursors do not change held debt.
+
+    cache.FlushBank(&secondBank);
+    CHECK_FALSE(cache.IsLoaded("second/keep.bin"));
+    REQUIRE(cache.HeldBytes() == 32);
+    cache.FlushBank(nullptr); // Existing all-bank semantics also include loose entries.
+    REQUIRE(cache.HeldBytes() == 0);
+    cache.FlushBank(nullptr);
+    REQUIRE(cache.HeldBytes() == 0);
+}
 
 TEST_CASE("QFBank::GetContentHash is the same for identical bytes under different names",
           "[qstream][pbo][hash][ast003]")

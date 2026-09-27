@@ -242,6 +242,12 @@ void FileCache::FlushBank(QFBank* bank)
         {
             continue;
         }
+        // Match DeleteLast's accounting before the owning cache reference dies.
+        // Otherwise a selective flush leaves phantom bytes that cause Maintain
+        // to evict unrelated entries on the next successful open/store.
+        PoseidonAssert(stream.tellg() == 0);
+        _size -= stream.rest();
+        PoseidonAssert(_size >= 0);
         _cache.Delete(i);
         i--;
     }
