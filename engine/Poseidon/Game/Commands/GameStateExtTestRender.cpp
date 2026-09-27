@@ -32,6 +32,7 @@ using namespace Poseidon;
 #include <Poseidon/Graphics/Rendering/Draw/FontMapping.hpp>
 #include <Poseidon/Dev/Debug/DebugOverlay.hpp>
 #include <Poseidon/Dev/Diag/FrameProfiler.hpp>
+#include <Poseidon/Graphics/Rendering/Font/WarmMipDiagnostics.hpp>
 namespace Poseidon
 {
 extern bool gPerfDumpShapesOnce;
@@ -496,6 +497,13 @@ GameValue TriPerfCapture(const GameState* /*state*/, GameValuePar arg)
             LOG_WARN(Core, "[tri] triPerfCapture failed allocation");
             return GameValue("FAIL:allocation");
         }
+        // Startup can exhaust the optional slow PAA rows before the measured route.
+        // Only the first successful arm resets that diagnostic budget; no new read/work.
+        const auto mipReset = ResetWarmMipChainDiagnosticsForCapture();
+        if (mipReset != WarmMipDiagnosticCaptureReset::Disabled)
+            LOG_INFO(Core, "Warm mip chain capture diagnostics reset: accepted={} refused={} limit=128 thresholdMs=2 oneResetPerProcess=true",
+                mipReset == WarmMipDiagnosticCaptureReset::Accepted,
+                mipReset == WarmMipDiagnosticCaptureReset::Refused);
         LOG_INFO(Core, "[tri] triPerfCapture armed limit={}", static_cast<size_t>(requested));
         return GameValue("OK");
     }

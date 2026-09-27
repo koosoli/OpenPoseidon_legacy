@@ -1,6 +1,8 @@
 #include <Poseidon/Core/Application.hpp>
 
 #include <atomic>
+#include <Poseidon/Foundation/Threads/ThreadAffinity.hpp>
+#include <Poseidon/Graphics/Rendering/Font/WarmMipDiagnostics.hpp>
 #include <chrono>
 #include <cstdlib>
 #include <limits>
@@ -70,13 +72,21 @@ struct PaaLzoReplayReport
 using WarmMipClock = std::chrono::steady_clock;
 struct WarmMipChainTiming;
 thread_local WarmMipChainTiming* GCurrentWarmMipChainTiming = nullptr;
-bool WarmMipChainTimingEnabled()
+// At most128 slow rows before capture plus128 after the FIRST successful owner arm.
+// No timer, decode, cache or texture admission behavior depends on this log budget.
+std::atomic<unsigned> GWarmMipChainRows{0};
+bool GWarmMipCaptureReset = false; // accessed only by the joined owner reset function
+bool WarmMipChainProfileRequested()
 {
     static const bool enabled = [] {
         const char* value = std::getenv("WGR_OBJECT_STREAM_WARM_PROFILE");
         return value && std::strcmp(value, "1") == 0;
     }();
-    return enabled && render::GObjectAdmitProfile.active;
+    return enabled;
+}
+bool WarmMipChainTimingEnabled()
+{
+    return WarmMipChainProfileRequested() && render::GObjectAdmitProfile.active;
 }
 class WarmMipPhase
 {
@@ -118,9 +128,8 @@ struct WarmMipChainTiming
         GCurrentWarmMipChainTiming = previous; // never lend the stack scope beyond this call
         const double totalMs = std::chrono::duration<double, std::milli>(WarmMipClock::now() - began).count();
         if (totalMs < 2.0) return;
-        static std::atomic<unsigned> logged{0};
-        unsigned slot = logged.load(std::memory_order_relaxed);
-        while (slot < 129 && !logged.compare_exchange_weak(slot, slot + 1, std::memory_order_relaxed)) {}
+        unsigned slot = GWarmMipChainRows.load(std::memory_order_relaxed);
+        while (slot < 129 && !GWarmMipChainRows.compare_exchange_weak(slot, slot + 1, std::memory_order_relaxed)) {}
         if (slot == 128)
             LOG_INFO(Graphics, "Warm mip chain timings truncated: limit=128 thresholdMs=2");
         if (slot >= 128) return;
@@ -134,6 +143,16 @@ struct WarmMipChainTiming
 };
 } // namespace
 
+
+WarmMipDiagnosticCaptureReset ResetWarmMipChainDiagnosticsForCapture()
+{
+    if (!WarmMipChainProfileRequested()) return WarmMipDiagnosticCaptureReset::Disabled;
+    if (!Foundation::IsMainThread() || GCurrentWarmMipChainTiming || GWarmMipCaptureReset)
+        return WarmMipDiagnosticCaptureReset::Refused;
+    GWarmMipCaptureReset = true;
+    GWarmMipChainRows.store(0, std::memory_order_relaxed);
+    return WarmMipDiagnosticCaptureReset::Accepted;
+}
 
 inline Pixel Conv888To555(int rgb)
 {
