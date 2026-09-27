@@ -72,6 +72,13 @@ impl SprayParams {
     }
 }
 
+/// `WGR_TW_SPRAY_DEBUG=<n>` (OP diagnostics): every live sprite as a disc showing one opacity
+/// factor (1 vertex opacity, 2 shape, 3 soft scene fade, 4 water fade; tw_spray.wgsl).
+fn sprite_debug() -> u32 {
+    static V: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    *V.get_or_init(|| std::env::var("WGR_TW_SPRAY_DEBUG").ok().and_then(|v| v.trim().parse().ok()).unwrap_or(0))
+}
+
 /// W6i: a CPU emit request (Spray.js `emit`): `count` particles spread along a -> b, base
 /// velocity `vel` with `spread` (m/s) and `jitter` (m) of randomness, radius `size` (m) +-
 /// `size_jitter`, lifetime `life` (s).
@@ -492,6 +499,7 @@ impl SprayGpu {
         self.breakers_on = on;
         self.on = on || self.boat_live > 0.0;
         let mut p = SprayParams::new(self.frame, dt, time, cam, gain.clamp(0.0, 3.0), intensity.clamp(0.0, 50.0), on, self.on);
+        p.seed[3] = sprite_debug();
         p.req = [self.cpu_head, n, nreq as u32, bodies.len().min(MAX_BODIES) as u32];
         for (i, b) in bodies.iter().take(MAX_BODIES).enumerate() {
             p.bodies[i * 8..i * 8 + 8].copy_from_slice(&b.lanes());

@@ -11,7 +11,7 @@ const SPRAY_SHEET: f32 = 4.0;
 // OP: the per-frame spray block (spray.rs SprayParams)
 struct SprayParams {
     seed: vec4<u32>,  // x = frame seed, y = particle slots (GPU ring + CPU tail: the arrays' stride),
-                      // z = GPU ring size (power of two), w unused
+                      // z = GPU ring size (power of two), w = OP sprite diagnostics (WGR_TW_SPRAY_DEBUG)
     a: vec4<f32>,     // x = dt, y = time, z = unused (the budget lives in the head buffer), w = emission gain (`spray`)
     b: vec4<f32>,     // x = emit range m, y = sprite intensity, z = max draw distance m, w = breaker spray on
     cam: vec4<f32>,   // camera position (world), w unused
