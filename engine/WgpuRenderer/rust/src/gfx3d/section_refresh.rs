@@ -105,7 +105,7 @@ mod tests {
     #[test]
     fn section_refresh_clean_frames_skip_and_source_append_and_retire_invalidate() {
         let mut state = SectionRefreshValidity::default();
-        let mut meshes = SlotMap::with_key();
+        let mut meshes: SlotMap<MeshKey, (u32, u32)> = SlotMap::with_key();
         let key = meshes.insert((12, 24));
         let mut sources = Vec::new();
         let mut cached = Vec::new();
@@ -141,7 +141,7 @@ mod tests {
     #[test]
     fn section_refresh_destroy_recreate_same_capacity_never_resurrects_old_generation() {
         let mut state = SectionRefreshValidity::default();
-        let mut meshes = SlotMap::with_key();
+        let mut meshes: SlotMap<MeshKey, (u32, u32)> = SlotMap::with_key();
         let old = meshes.insert((4, 8));
         let mut sources = vec![Source {
             mesh: old.data().as_ffi(),
@@ -234,7 +234,7 @@ mod tests {
         }
         let alloc = pool.alloc(&device, &queue, &verts, &[0, 1, 2]).unwrap();
         let generation = pool.generation();
-        let mut meshes = SlotMap::with_key();
+        let mut meshes: SlotMap<MeshKey, (u32, u32)> = SlotMap::with_key();
         let old = meshes.insert((alloc.vbase, alloc.ibase));
         let mut sources = vec![Source {
             mesh: old.data().as_ffi(),
@@ -365,7 +365,7 @@ mod tests {
     fn section_refresh_legacy_runs_every_body_default_skips_with_exact_same_addresses() {
         let mut optimized = SectionRefreshValidity::default();
         let mut legacy = SectionRefreshValidity::from_setting(Some("0"));
-        let mut meshes = SlotMap::with_key();
+        let mut meshes: SlotMap<MeshKey, (u32, u32)> = SlotMap::with_key();
         let key = meshes.insert((32, 64));
         let sources = [Source {
             mesh: key.data().as_ffi(),
