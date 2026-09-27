@@ -2646,3 +2646,30 @@ OFF/unpromoted, wholeplanOPEN/defaultReady/performanceAcceptedfalse.
 Default model-primary calls retain a cheap disabled RAII/static-flag branch and
 numeric thread_local depth4bytes/thread evenOFF. No capture lease/wrapper/job
 allocation occursOFF; this is not a literal zerooverhead claim.
+
+## Sept27 bounded warm model capture window
+
+7e46b97d all5build202stepsPASS; OFF973assertions/7cases and ON1065/9 PASS/noSKIP
+cover policy/realqueue/cursor/thread/reset and colddefaultpreparerbudget. Landscape
+EOL-only indexrefresh has no semanticdiff; clean7e install07:43 EXE 5E2C484A3CC3FC5248898CBA7135C2D8C2E0B32B008D9559A8A270C5E70A2DE3,
+DLL DBB76DDB59766E94792F83E1DF1BC8F1E03BAB61EB92FBC2F7849F74E3162251.
+OptionalWarmState ownercursor resetsworldgeneration; twofixed32disjointtemps
+retain at most64borrowedpairs/32ACTUALcapturecalls under shared256existingwalk.
+Advancesactualempty/throw, no coldreorder/additionalShapesFind/worldscan. This
+provides model opportunities only, not stationary/bindinglevel/changing-order
+fairness. Next manualFireheartbeat source remains unbuilt/excluded.
+
+ON074358 PASS/clean0/drop0,772frames mean44.546067/median23.0945/p95138.911/
+p99457.419/max789.056ms;4completedjobs/7members/2Take-Upload2796032bytes.
+Finaljobmeta/scratch/queueactive0, optionalqueue1056 remains; peakmetadata64416/
+scratch134348800, PreparedStore1entry1573776 remains, not whole convergence0.
+Source256live/133024knownCpp/init-wrapped256/caprefused842. Returned19923/required0,
+geometry730601736/textures2871337716/2617. Earlier06sameflagprefix3jobs/6members/
+1upload differs in orderedasync work/allocations: no causal improvement claim.
+Default074532 PASS/clean0/drop0,822frames43.307007/24.206/136.179/368.024/
+1288.876ms, returned19923/required0/geometry710528064/textures2749399188/2489,
+allwarm/sourceOFF0/queuestorage0. Quantiles nearest-rank/usualmedian. Defaultmax
+1288.876 exceeds historical06default992.337; mixedtiming/workloads prevent
+acceptance. Root viewed both settledlocalPOI without obvious new gaps, not
+all-route/fullmap/no-regression proof. Feature remainsOFF/unpromoted,
+wholeplanOPEN/defaultReady/performanceAcceptedfalse.
