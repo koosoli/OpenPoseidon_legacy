@@ -503,6 +503,10 @@ TEST_CASE("Actual cached PAA hands off proof and preserves two initialized sourc
         return cached.GetBuffer()->CompleteArchiveSourceInit(exact);
     });
     CHECK_FALSE(offOwner.get()); CHECK(cached.GetBuffer()->GetArchiveSourceBinding() == exact);
+    const auto uncompleted = ArchiveSourceBinding::SnapshotStats();
+    CHECK(uncompleted.weakWrappersPublished == before.weakWrappersPublished + 2);
+    CHECK(uncompleted.weakInitializedHandoffs == before.weakInitializedHandoffs);
+    CHECK(uncompleted.weakFailedInitCompletions == before.weakFailedInitCompletions);
     wrong.reset(); wrongBuffer.Free();
     server.server->cache.Store(cached, R"(weak-proof-fixture\texture.paa)");
     auto first = CreateSource(R"(weak-proof-fixture\texture.paa)"); REQUIRE(first);
@@ -518,6 +522,11 @@ TEST_CASE("Actual cached PAA hands off proof and preserves two initialized sourc
     const auto owned = ArchiveSourceBinding::SnapshotStats();
     CHECK(owned.liveBindings == before.liveBindings + 1);
     CHECK(owned.weakCells == before.weakCells + 1);
+    CHECK(owned.weakInitializedHandoffs == before.weakInitializedHandoffs + 1);
+    CHECK(owned.weakFailedInitCompletions == before.weakFailedInitCompletions);
+    CHECK(owned.weakPeakReservationCells >= before.weakCells + 2);
+    CHECK(owned.weakPeakReservationCells <= owned.capWeakCells);
+    CHECK(owned.weakPeakReservationBytes <= owned.capBytes);
     REQUIRE(first->ReleaseArchiveSourceBinding());
     REQUIRE(second->GetArchiveSourceBinding() == exact);
     exact.reset();
@@ -536,9 +545,15 @@ TEST_CASE("Actual cached PAA hands off proof and preserves two initialized sourc
     CHECK_FALSE(expired->GetArchiveSourceBinding()); // Existing bytes cannot recertify a new lease.
     CHECK(ArchiveSourceBinding::SnapshotStats().wrappedReads == before.wrappedReads + 2);
     CHECK(expired->GetMipmapCount() == first->GetMipmapCount());
+    CHECK(ArchiveSourceBinding::SnapshotStats().weakInitializedHandoffs == owned.weakInitializedHandoffs);
     cached.DoDestruct(); server.server->cache.FlushBank(nullptr);
-    CHECK(ArchiveSourceBinding::SnapshotStats().weakCells == before.weakCells);
-    CHECK(ArchiveSourceBinding::SnapshotStats().knownCppBytes == before.knownCppBytes);
+    const auto after = ArchiveSourceBinding::SnapshotStats();
+    CHECK(after.weakCells == before.weakCells);
+    CHECK(after.knownCppBytes == before.knownCppBytes);
+    CHECK(after.weakWrappersPublished == before.weakWrappersPublished + 2);
+    CHECK(after.weakInitializedHandoffs == before.weakInitializedHandoffs + 1);
+    CHECK(after.weakPeakReservationCells == owned.weakPeakReservationCells);
+    CHECK(after.weakPeakReservationBytes == owned.weakPeakReservationBytes);
 #endif
 }
 
@@ -554,6 +569,12 @@ TEST_CASE("Failed actual cached PAA Init clears only its bootstrap lease and kee
     REQUIRE(cached.GetBuffer()->GetArchiveSourceBinding());
     server.server->cache.Store(cached, R"(weak-proof-fixture\malformed.paa)");
     auto failed = CreateSource(R"(weak-proof-fixture\malformed.paa)"); CHECK_FALSE(failed);
+    const auto completed = ArchiveSourceBinding::SnapshotStats();
+    CHECK(completed.weakWrappersPublished == before.weakWrappersPublished + 1);
+    CHECK(completed.weakInitializedHandoffs == before.weakInitializedHandoffs);
+    CHECK(completed.weakFailedInitCompletions == before.weakFailedInitCompletions + 1);
+    CHECK(cached.GetBuffer()->CompleteArchiveSourceInit({}));
+    CHECK(ArchiveSourceBinding::SnapshotStats().weakFailedInitCompletions == completed.weakFailedInitCompletions);
     CHECK_FALSE(cached.GetBuffer()->GetArchiveSourceBinding());
     CHECK(cached.GetBuffer()->GetSize() == 8); CHECK_FALSE(cached.GetBuffer()->GetError());
     CHECK(ArchiveSourceBinding::SnapshotStats().liveBindings == before.liveBindings);
@@ -569,6 +590,10 @@ TEST_CASE("Cache handoff OFF preserves the original strong mapped wrapper", "[ar
     SKIP("Strong archive identity is Windows-only.");
 #else
     REQUIRE_FALSE(ArchiveSourceBinding::CacheHandoffEnabled());
+    const auto off = ArchiveSourceBinding::SnapshotStats();
+    CHECK(off.weakWrappersPublished == 0); CHECK(off.weakInitializedHandoffs == 0);
+    CHECK(off.weakFailedInitCompletions == 0); CHECK(off.weakPeakReservationCells == 0);
+    CHECK(off.weakPeakReservationBytes == 0);
     REQUIRE(ArchiveSourceBinding::SnapshotStats().enabled); REQUIRE(QFileAccess::MappingSupported());
     Archives files; ServerScope server; ArchiveSourceBinding::ModelReadScope purpose;
     const auto before = ArchiveSourceBinding::SnapshotStats();

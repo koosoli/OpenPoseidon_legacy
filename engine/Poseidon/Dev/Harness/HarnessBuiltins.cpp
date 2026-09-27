@@ -462,8 +462,11 @@ void RegisterScreenshot(HarnessServer& hs)
             ARCHIVE_BINDING_FIELD(allocationRefused);
             ARCHIVE_BINDING_FIELD(weakCells); ARCHIVE_BINDING_FIELD(weakKnownCppBytes); ARCHIVE_BINDING_FIELD(capWeakCells);
             ARCHIVE_BINDING_FIELD(weakCapacityRefused); ARCHIVE_BINDING_FIELD(weakAllocationRefused);
+            ARCHIVE_BINDING_FIELD(weakWrappersPublished); ARCHIVE_BINDING_FIELD(weakInitializedHandoffs);
+            ARCHIVE_BINDING_FIELD(weakFailedInitCompletions);
+            ARCHIVE_BINDING_FIELD(weakPeakReservationCells); ARCHIVE_BINDING_FIELD(weakPeakReservationBytes);
 #undef ARCHIVE_BINDING_FIELD
-            cJSON_AddStringToObject(result, "scope", "Mapped raw PAA Init evidence; liveBindings counts strong native leases, weakCells counts separately charged cache/control metadata within the same total byte cap. Expired cached evidence remains Unknown; no freshness, physical-memory, useful-upload or performance proof");
+            cJSON_AddStringToObject(result, "scope", "Mapped raw PAA Init evidence; liveBindings counts strong native leases, weakCells counts separately charged cache/control metadata within the same total byte cap. Cumulative publication/first Init completion survives cell destruction; peakReservation is charged metadata overlap, not allocator/RSS. Expired cached evidence remains Unknown; no freshness, physical-memory, useful-upload or performance proof");
             return HarnessProtocol::JsonResponse(result);
         });
     hs.RegisterCommand({"shared_mesh_lifetime_test", "Test-only private retained mesh and two CPU borrowers; no world-object resolution", {}},

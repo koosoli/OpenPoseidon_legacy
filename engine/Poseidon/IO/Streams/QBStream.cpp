@@ -1215,6 +1215,7 @@ struct ArchiveBindingState
         2 * 1024 * 1024 - FixedCharge);
     std::atomic<uint64_t> wrapped{0}, retained{0}, captureRefused{0}, capacityRefused{0}, allocationRefused{0};
     std::atomic<uint64_t> weakCapacityRefused{0}, weakAllocationRefused{0};
+    std::atomic<uint64_t> weakWrappersPublished{0}, weakInitializedHandoffs{0}, weakFailedInitCompletions{0};
 };
 ArchiveBindingState& SourceBindingState() { static ArchiveBindingState state; return state; }
 }
@@ -1306,6 +1307,16 @@ void ArchiveSourceBinding::NoteWrappedRead()
 {
     SourceBindingState().wrapped.fetch_add(1, std::memory_order_relaxed);
 }
+void ArchiveSourceBinding::NoteWeakWrapperPublished()
+{
+    SourceBindingState().weakWrappersPublished.fetch_add(1, std::memory_order_relaxed);
+}
+void ArchiveSourceBinding::NoteCacheInitCompletion(bool initialized)
+{
+    // Only a real first completion of an opted-in cell reaches this hook.
+    (initialized ? SourceBindingState().weakInitializedHandoffs : SourceBindingState().weakFailedInitCompletions)
+        .fetch_add(1, std::memory_order_relaxed);
+}
 void ArchiveSourceBinding::NoteInitRetained()
 {
     SourceBindingState().retained.fetch_add(1, std::memory_order_relaxed);
@@ -1321,6 +1332,14 @@ ArchiveSourceBinding::Stats ArchiveSourceBinding::SnapshotStats()
         const auto live = state.budget->Observe();
         out.cacheHandoffEnabled = CacheHandoffEnabled();
         out.weakCells = live.weakCells;
+        if (out.cacheHandoffEnabled)
+        {
+            out.weakWrappersPublished = state.weakWrappersPublished.load(std::memory_order_relaxed);
+            out.weakInitializedHandoffs = state.weakInitializedHandoffs.load(std::memory_order_relaxed);
+            out.weakFailedInitCompletions = state.weakFailedInitCompletions.load(std::memory_order_relaxed);
+            out.weakPeakReservationCells = live.weakPeakReservationCells;
+            out.weakPeakReservationBytes = live.weakPeakReservationBytes;
+        }
         out.weakKnownCppBytes = live.weakBytes;
         out.weakCapacityRefused = state.weakCapacityRefused.load(std::memory_order_relaxed);
         out.weakAllocationRefused = state.weakAllocationRefused.load(std::memory_order_relaxed);
@@ -1380,7 +1399,12 @@ public:
     {
         if (!Foundation::IsMainThread()) return false;
         if (initialized && initialized != Get()) return false; // Wrong source cannot drop debt.
-        _initial.reset(); // Source owns successful exact binding; failure leaves no proof.
+        if (_initial)
+        {
+            // Repeated cached Init and expired-proof Init are NOT new handoffs.
+            _initial.reset(); // Source owns successful exact binding; failure leaves no proof.
+            ArchiveSourceBinding::NoteCacheInitCompletion(bool(initialized));
+        }
         return true;
     }
 };
@@ -1542,6 +1566,8 @@ Ref<IFileBuffer> QFBank::Read(const char* name) const
                         {
                             auto cell = std::make_shared<ArchiveCacheProofCell>(binding, std::move(charge));
                             wrapped = new ArchiveCacheHandoffFileBuffer(buffer, std::move(cell));
+                            // Count only the complete wrapper actually selected for return.
+                            ArchiveSourceBinding::NoteWeakWrapperPublished();
                         }
                         catch (...) { SourceBindingState().weakAllocationRefused.fetch_add(1, std::memory_order_relaxed); }
                     }

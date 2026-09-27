@@ -151,6 +151,7 @@ $clearNames = @((Get-ChildItem Env: | Where-Object { $_.Name -like 'WGR_*' -or $
 $changedNames = @($clearNames + @($environment.Keys) | Select-Object -Unique)
 $savedEnvironment = @{}; foreach ($name in $changedNames) { $savedEnvironment[$name] = [Environment]::GetEnvironmentVariable($name) }
 $p = $null; $client = $null
+$screeningFailure = $null; $forcedTermination = $false; $ownedExitCode = $null; $cleanupError = $null
 try {
     foreach ($name in $clearNames) { Remove-Item ('Env:' + $name) -ErrorAction SilentlyContinue }
     foreach ($name in $environment.Keys) { [Environment]::SetEnvironmentVariable($name, $environment[$name]) }
@@ -281,11 +282,11 @@ try {
     if ($archiveBindings.enabled -ne [bool]$ArchiveSourceBindings -or
         $archiveBindings.liveBindings -gt $archiveBindings.capBindings -or
         $archiveBindings.knownCppBytes -gt $archiveBindings.capBytes) { throw 'Actual-read source binding state or cap mismatch' }
-    foreach($name in @('cacheHandoffEnabled','weakCells','weakKnownCppBytes','capWeakCells','weakCapacityRefused','weakAllocationRefused')) {
+    foreach($name in @('cacheHandoffEnabled','weakCells','weakKnownCppBytes','capWeakCells','weakCapacityRefused','weakAllocationRefused','weakWrappersPublished','weakInitializedHandoffs','weakFailedInitCompletions','weakPeakReservationCells','weakPeakReservationBytes')) {
         if($null -eq $archiveBindings.PSObject.Properties[$name]){throw "Missing weak-cache proof state $name"}
     }
     if($archiveBindings.cacheHandoffEnabled -isnot [bool]){throw 'Invalid weak-cache enabled flag type'}
-    foreach($name in @('weakCells','weakKnownCppBytes','capWeakCells','weakCapacityRefused','weakAllocationRefused','liveBindings','knownCppBytes')) {
+    foreach($name in @('weakCells','weakKnownCppBytes','capWeakCells','weakCapacityRefused','weakAllocationRefused','weakWrappersPublished','weakInitializedHandoffs','weakFailedInitCompletions','weakPeakReservationCells','weakPeakReservationBytes','liveBindings','knownCppBytes')) {
         $value=$archiveBindings.$name
         if($null -eq $value -or $value -is [bool] -or $value -is [string]){throw "Invalid weak-cache counter type $name"}
         $number=[double]$value
@@ -295,7 +296,16 @@ try {
         $archiveBindings.weakCells -gt 1024 -or $archiveBindings.weakKnownCppBytes -gt $archiveBindings.knownCppBytes){throw 'Weak-cache metadata flag/cap/accounting mismatch'}
     if(!$WeakCacheProof -and ($archiveBindings.weakCells -ne 0 -or $archiveBindings.weakKnownCppBytes -ne 0 -or
         $archiveBindings.weakCapacityRefused -ne 0 -or $archiveBindings.weakAllocationRefused -ne 0)){throw 'Weak-cache handoff unexpectedly active in OFF control'}
-    if($WeakCacheProof -and ($archiveBindings.weakCells -lt 1 -or $archiveBindings.weakKnownCppBytes -lt 1)){throw 'NotExercised: no actual retained bounded weak-cache metadata observed'}
+    if($archiveBindings.weakPeakReservationCells -gt 1024 -or $archiveBindings.weakPeakReservationBytes -gt 2097152 -or
+        $archiveBindings.weakCells -gt $archiveBindings.weakPeakReservationCells -or
+        $archiveBindings.weakKnownCppBytes -gt $archiveBindings.weakPeakReservationBytes -or
+        $archiveBindings.weakInitializedHandoffs -gt $archiveBindings.weakWrappersPublished -or
+        $archiveBindings.weakFailedInitCompletions -gt $archiveBindings.weakWrappersPublished - $archiveBindings.weakInitializedHandoffs){throw 'Weak-cache cumulative/reservation accounting mismatch'}
+    if(!$WeakCacheProof -and ($archiveBindings.weakWrappersPublished -ne 0 -or $archiveBindings.weakInitializedHandoffs -ne 0 -or
+        $archiveBindings.weakFailedInitCompletions -ne 0 -or $archiveBindings.weakPeakReservationCells -ne 0 -or
+        $archiveBindings.weakPeakReservationBytes -ne 0)){throw 'OFF path unexpectedly recorded weak-cache work'}
+    if($WeakCacheProof -and ($archiveBindings.weakWrappersPublished -lt 1 -or $archiveBindings.weakInitializedHandoffs -lt 1 -or
+        $archiveBindings.weakPeakReservationCells -lt 1 -or $archiveBindings.weakPeakReservationBytes -lt 1)){throw 'NotExercised: no actual first initialized weak-cache handoff with bounded charged reservation observed'}
     if ($ArchiveSourceBindings) {
         if ($archiveBindings.capBindings -ne 256 -or $archiveBindings.capBytes -ne 2097152 -or
             $archiveBindings.wrappedReads -lt 1 -or $archiveBindings.initRetains -lt 1 -or
@@ -571,17 +581,43 @@ try {
     if (!$warmPreflightProven) { throw 'NotExercised: no same-source initialized-stage preflight and successful bound worker stage upload; evidence retained' }
     if (!$warmJobsProven) { throw 'Warm preparation did not demonstrate an actual source-validated GPU upload; evidence retained' }
     if (!$warmStageFamilyProven) { throw 'Required bound worker normal/specular filename-family upload not exercised; evidence retained, no material-slot proof claimed' }
+} catch {
+    $screeningFailure = $_.Exception.Message
+    throw
 } finally {
-    if ($p -and !$p.HasExited) {
-        # A failed verification still requests normal cleanup from this owned PID.
-        try {
-            if ($client -and $client.Connected) {
-                $null = Send @{cmd = 'exit'}
-                $null = $p.WaitForExit(15000)
+    try {
+        if ($p -and !$p.HasExited) {
+            # A failed verification still requests normal cleanup from this owned PID.
+            try {
+                if ($client -and $client.Connected) {
+                    $null = Send @{cmd = 'exit'}
+                    $null = $p.WaitForExit(15000)
+                }
+            } catch {}
+            if (!$p.HasExited) {
+                $forcedTermination = $true
+                Stop-Process -Id $p.Id -Force
+                $null = $p.WaitForExit(5000)
             }
-        } catch {}
-        if (!$p.HasExited) { Stop-Process -Id $p.Id -Force }
-    }
+        }
+        if ($p -and $p.HasExited) { $ownedExitCode = $p.ExitCode }
+    } catch { $cleanupError = $_.Exception.Message }
     if ($client) { $client.Dispose() }
     foreach ($name in $changedNames) { [Environment]::SetEnvironmentVariable($name, $savedEnvironment[$name]) }
+    # Save early refusals as well as late result failures; never infer exit0 from a log.
+    try {
+        $shutdownComplete = (Test-Path -LiteralPath $log) -and
+            [bool](Select-String -LiteralPath $log -Pattern 'Shutdown complete' -Quiet)
+        $cleanup = [ordered]@{
+            ownedPid = if ($p) { $p.Id } else { $null }
+            ownedExitCode = $ownedExitCode; forcedTermination = $forcedTermination
+            shutdownComplete = $shutdownComplete; cleanupError = $cleanupError
+            screeningFailure = $screeningFailure
+        }
+        $cleanup | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $out 'cleanup.json')
+        if ($null -ne $screeningFailure) {
+            @{ passed = $false; reason = $screeningFailure; cleanup = $cleanup } |
+                ConvertTo-Json -Depth 5 | Set-Content (Join-Path $out 'failure.json')
+        }
+    } catch { Write-Warning "Could not preserve screening cleanup evidence: $($_.Exception.Message)" }
 }

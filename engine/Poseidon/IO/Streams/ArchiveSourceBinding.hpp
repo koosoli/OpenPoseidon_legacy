@@ -9,7 +9,8 @@ namespace Poseidon
 class ArchiveSourceBudget : public std::enable_shared_from_this<ArchiveSourceBudget>
 {
 public:
-    struct Snapshot { size_t bindings = 0, bytes = 0, weakCells = 0, weakBytes = 0; };
+    struct Snapshot { size_t bindings = 0, bytes = 0, weakCells = 0, weakBytes = 0;
+        size_t weakPeakReservationCells = 0, weakPeakReservationBytes = 0; };
     class Ticket
     {
         friend class ArchiveSourceBudget;
@@ -45,7 +46,12 @@ private:
             // make_shared allocates BEFORE this noexcept constructor. Failed allocation
             // cannot destroy an uncharged Ticket or reenter our locked Release path.
             auto ticket = std::make_shared<const Ticket>(Ticket::Key{}, shared_from_this(), bytes, weak);
-            if (weak) { ++_live.weakCells; _live.weakBytes += bytes; }
+            if (weak)
+            {
+                ++_live.weakCells; _live.weakBytes += bytes;
+                if (_live.weakCells > _live.weakPeakReservationCells) _live.weakPeakReservationCells = _live.weakCells;
+                if (_live.weakBytes > _live.weakPeakReservationBytes) _live.weakPeakReservationBytes = _live.weakBytes;
+            }
             else ++_live.bindings;
             _live.bytes += bytes;
             return ticket;
@@ -76,6 +82,7 @@ class ArchiveSourceBinding
         : _request(std::move(request)), _charge(std::move(charge)) {}
     static std::shared_ptr<const ArchiveSourceBinding> Create(BankReadRequest request);
     static void NoteWrappedRead();
+    static void NoteWeakWrapperPublished();
 public:
     // Optional model primary/material-stage Init purpose, NOT source identity or worker access.
     // Needed when BOTH warm-source and warm-job flags are exactly 1, or the
@@ -104,6 +111,10 @@ public:
         bool cacheHandoffEnabled = false;
         size_t weakCells = 0, weakKnownCppBytes = 0, capWeakCells = 1024;
         uint64_t weakCapacityRefused = 0, weakAllocationRefused = 0;
+        // Cumulative wrapper publication and FIRST bootstrap completion only.
+        uint64_t weakWrappersPublished = 0, weakInitializedHandoffs = 0, weakFailedInitCompletions = 0;
+        // Charged reservation high-water; includes allocation overlap/failure, not RSS.
+        size_t weakPeakReservationCells = 0, weakPeakReservationBytes = 0;
         uint64_t wrappedReads = 0, initRetains = 0, captureRefused = 0,
             capacityRefused = 0, allocationRefused = 0;
     };
@@ -111,6 +122,7 @@ public:
     static bool CacheHandoffEnabled();
     static std::shared_ptr<const ArchiveSourceBudget::Ticket> ReserveWeakCell(size_t bytes);
     static Stats SnapshotStats();
+    static void NoteCacheInitCompletion(bool initialized); // Owner-only weak cell first completion, after dropping bootstrap.
     static void NoteInitRetained(); // Called only after successful Init retaining buffer evidence.
     const BankReadRequest& Request() const { return _request; }
     // Capacity accounting includes guards for shared controls, not kernel/RSS/heap proof.
