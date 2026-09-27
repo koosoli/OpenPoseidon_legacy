@@ -2034,6 +2034,19 @@ pub unsafe extern "C" fn wgr_screenshot_take(
 #[cfg(test)]
 mod abi_tests {
     #[test]
+    fn old_geometry_pass_layout_is_refused_before_renderer_or_output_access() {
+        // No renderer exists: a nonnull aligned sentinel must never be dereferenced
+        // for a refused layout. Writable output canaries must likewise stay unchanged.
+        let renderer = std::ptr::NonNull::<super::WgrRenderer>::dangling().as_ptr();
+        let mut output = [0xa5a5_a5a5_a5a5_a5a5u64; 74];
+        let original = output;
+        for (bytes, version) in [(576, 1), (592, 1), (576, 2), (591, 2)] {
+            assert_eq!(unsafe {super::wgr_geometry_pass_facts(renderer,
+                output.as_mut_ptr().cast(), bytes, version)}, 2);
+            assert_eq!(output, original);
+        }
+    }
+    #[test]
     fn geometry_report_layout_and_invalid_request_are_bounded() {
         assert_eq!(std::mem::size_of::<super::WgrGeometryAllocationRow>(), 40);
         assert_eq!(std::mem::offset_of!(super::WgrGeometryAllocationRow, model_id), 16);

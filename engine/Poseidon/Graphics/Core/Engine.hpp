@@ -3137,7 +3137,7 @@ class Engine : public IGraphicsEngine
     { return {}; }
 
     // Ready is a returned-main-frame record cut, not all-pass/pixel or GPU-free proof.
-    enum class GeometryPageFixtureAction { Begin, Coarse, Fine, Observe, Snapshot, Abort, BeginClod, Fallback, BeginPaged, RequestFine, PollFine, CancelFine, HoldFine, ReleaseFine };
+    enum class GeometryPageFixtureAction { Begin, Coarse, Fine, Observe, Snapshot, Abort, BeginClod, Fallback, BeginPaged, RequestFine, PollFine, CancelFine, HoldFine, ReleaseFine, EvictFine };
     struct GeometryPageFixtureReport
     {
         GeometryReportStatus status=GeometryReportStatus::Unsupported;
@@ -3156,6 +3156,7 @@ class Engine : public IGraphicsEngine
             bool valid=false;
             uint32_t version=0, structBytes=0, enabled=0, capabilities=0, required=0, pending=0, recordedThisFrame=0;
             uint64_t frame=0, instanceEpoch=0, cascadeEpoch=0, cascadeFrame=0, giRsmEpoch=0, giRsmFrame=0;
+            uint64_t reflectionEpoch=0, reflectionFrame=0;
             uint32_t localCount=0, localDrawMask=0, localValidMask=0, interiorDrawMask=0, interiorValidMask=0;
             uint32_t cascadeDrawMask=0, cascadeCount=0;
             uint64_t localEpochs[24]{}, localFrames[24]{}, interiorEpochs[5]{}, interiorFrames[5]{};
@@ -3167,6 +3168,12 @@ class Engine : public IGraphicsEngine
         uint64_t pageEpoch=0,pageRequest=0,pageReservedBytes=0,pageCompleted=0,pageCancelled=0;
         uint32_t pageQueued=0,pageActive=0,pageReady=0,pageLiveJobs=0;
         std::string pageWorkState;
+        // Full history: old fine records must be Absent while coarse/refill remain Present.
+        // Absence is a SlotMap fact, not physical GPU release or submission completion.
+        uint32_t expectedPresentMeshes=0,expectedAbsentMeshes=0,observedExpectedPresentMeshes=0,observedExpectedAbsentMeshes=0;
+        uint32_t fineGeneration=0,fineEvictionCount=0,retiredFineFirst=0,retiredFineCount=0;
+        bool fineEvictionPending=false;
+        uint64_t rendererMeshHandles[64]{};
         uint32_t clodAdapterVersion=0, clodGroups=0, clodClusters=0, fallbackTriangles=0, authoredFineTriangles=0;
         double clodBakeMs=0;
         float coarseThreshold=0, fineThreshold=0;

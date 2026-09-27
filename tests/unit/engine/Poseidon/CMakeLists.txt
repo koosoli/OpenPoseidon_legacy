@@ -145,6 +145,7 @@ set(POSEIDON_TEST_SOURCES
     Graphics/test_geometry_page_resident_decode.cpp
     Graphics/test_geometry_page_representation_decode.cpp
     Graphics/test_authored_geometry_page_worker.cpp
+    Graphics/test_geometry_page_eviction_policy.cpp
     Graphics/test_geometry_page_clod_bake.cpp
     Graphics/test_geometry_page_clod_cut_decode.cpp
     Graphics/test_registration_cost_policy.cpp

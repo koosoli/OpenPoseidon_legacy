@@ -1,12 +1,12 @@
 //! Fixture-only actual indirect command-recording facts. No survivor/pixel,
 //! submission/completion or all-reference/all-pass proof. Planning keys are NOT used.
 use std::mem::size_of;
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
 pub const CASCADES: u32 = 1;
 pub const LOCAL: u32 = 2;
 pub const INTERIOR: u32 = 4;
 pub const GI: u32 = 8;
-pub const REFLECTION: u32 = 16; // configured but unsupported by this narrow recorder
+pub const REFLECTION: u32 = 16;
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct WgrGeometryPassFacts {
@@ -36,6 +36,9 @@ pub struct WgrGeometryPassFacts {
     pub local_frames: [u64; 24],
     pub interior_epochs: [u64; 5],
     pub interior_frames: [u64; 5],
+    // Appended in v2: independently culled reflection commands from this exact frame.
+    pub reflection_epoch: u64,
+    pub reflection_frame: u64,
 }
 impl WgrGeometryPassFacts {
     pub fn new() -> Self {
@@ -43,7 +46,7 @@ impl WgrGeometryPassFacts {
             version: VERSION,
             struct_bytes: size_of::<Self>() as u32,
             enabled: 1,
-            capabilities: CASCADES | LOCAL | INTERIOR | GI,
+            capabilities: CASCADES | LOCAL | INTERIOR | GI | REFLECTION,
             ..Self::default()
         }
     }
@@ -110,6 +113,11 @@ impl WgrGeometryPassFacts {
         self.gi_rsm_frame = self.frame;
         self.recorded_this_frame |= GI;
     }
+    pub fn record_reflection(&mut self) {
+        self.reflection_epoch = self.instance_epoch;
+        self.reflection_frame = self.frame;
+        self.recorded_this_frame |= REFLECTION;
+    }
     pub fn snapshot(&self) -> Self {
         let mut r = *self;
         r.pending = r.required & !r.capabilities;
@@ -137,6 +145,11 @@ impl WgrGeometryPassFacts {
         if r.required & GI != 0 && (r.gi_rsm_frame == 0 || r.gi_rsm_epoch != r.instance_epoch) {
             r.pending |= GI;
         }
+        if r.required & REFLECTION != 0
+            && (r.reflection_frame != r.frame || r.reflection_epoch != r.instance_epoch)
+        {
+            r.pending |= REFLECTION;
+        }
         // Saturating frame exhaustion cannot establish a new per-frame observation.
         if r.frame == 0 || r.frame == u64::MAX {
             r.pending = u32::MAX;
@@ -152,7 +165,7 @@ mod tests {
     use super::*;
     #[test]
     fn layout_and_old_size_refusal() {
-        assert_eq!(size_of::<WgrGeometryPassFacts>(), 576);
+        assert_eq!(size_of::<WgrGeometryPassFacts>(), 592);
         assert_eq!(
             std::mem::offset_of!(WgrGeometryPassFacts, local_epochs),
             112
@@ -161,9 +174,13 @@ mod tests {
             std::mem::offset_of!(WgrGeometryPassFacts, interior_epochs),
             496
         );
-        assert!(valid_layout(576, 1));
-        assert!(!valid_layout(575, 1));
-        assert!(!valid_layout(576, 0));
+        assert_eq!(std::mem::offset_of!(WgrGeometryPassFacts, reflection_epoch), 576);
+        assert_eq!(std::mem::offset_of!(WgrGeometryPassFacts, reflection_frame), 584);
+        assert!(valid_layout(592, 2));
+        assert!(!valid_layout(576, 1));
+        assert!(!valid_layout(592, 1));
+        assert!(!valid_layout(576, 2));
+        assert!(!valid_layout(591, 2));
     }
     #[test]
     fn configured_draws_are_pending_until_actual_recording() {
@@ -187,13 +204,38 @@ mod tests {
         assert_eq!(f.snapshot().pending & INTERIOR, INTERIOR);
     }
     #[test]
-    fn unsupported_reflection_and_no_draw_refusal() {
+    fn reflection_no_draw_refusal() {
         let mut f = WgrGeometryPassFacts::new();
         f.begin(4, 0, 0);
         f.required |= REFLECTION;
         assert_eq!(f.snapshot().pending, REFLECTION);
         f.required |= GI;
         assert_eq!(f.snapshot().pending, REFLECTION | GI);
+    }
+    #[test]
+    fn reflection_requires_actual_recording_in_the_same_frame_and_epoch() {
+        let mut f = WgrGeometryPassFacts::new();
+        assert_eq!(f.capabilities, 31);
+        f.begin(4, 0, 0);
+        f.required |= REFLECTION;
+        assert_eq!(f.snapshot().pending, REFLECTION);
+        f.record_reflection();
+        assert_eq!(f.snapshot().pending, 0);
+        assert_eq!(f.snapshot().recorded_this_frame, REFLECTION);
+        f.begin(4, 0, 0);
+        f.required |= REFLECTION;
+        // Resource refusal/no closed reflected draw cannot reuse last frame's evidence.
+        assert_eq!(f.snapshot().pending, REFLECTION);
+        f.record_reflection();
+        assert_eq!(f.snapshot().pending, 0);
+        f.instance_epoch = 5;
+        assert_eq!(f.snapshot().pending, REFLECTION);
+        f.record_reflection();
+        assert_eq!(f.snapshot().pending, 0);
+        f.begin(5, 0, 0);
+        // An unconfigured reflection is not required or falsely recorded.
+        assert_eq!(f.snapshot().pending, 0);
+        assert_eq!(f.snapshot().recorded_this_frame, 0);
     }
     #[test]
     fn same_epoch_selected_refresh_refusal_stays_pending_until_actual_record() {

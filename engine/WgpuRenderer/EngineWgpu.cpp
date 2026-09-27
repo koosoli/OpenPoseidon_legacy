@@ -2,6 +2,7 @@
 #include <Poseidon/Graphics/Rendering/GeometryPageRepresentationDecode.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageClodCutDecode.hpp>
 #include <Poseidon/Graphics/Rendering/AuthoredGeometryPageWorker.hpp>
+#include <Poseidon/Graphics/Rendering/GeometryPageEvictionPolicy.hpp>
 #include <Poseidon/Foundation/Algorithms/Sha256.hpp>
 #include <Poseidon/Dev/Diag/StreamingDiag.hpp> // RFG-085 residency levers
 #include <Poseidon/World/Scene/MapThings.hpp>    // RFG-095 hidden proxies
@@ -2090,7 +2091,7 @@ struct EngineWgpu::GeometryPageFixtureState
     std::mutex mutex;
     GeometryPageFixtureReport report;
     std::array<uint32_t,3> models{UINT32_MAX,UINT32_MAX,UINT32_MAX};
-    uint32_t modelCount=2; // immutable after publication; Clod adds an independent authored fallback
+    uint32_t modelCount=2; // immutable after publication; Clod fallback / Paged refill reserve the third ID
     std::vector<uint64_t> meshes;
     std::array<uint64_t,64> rendererMeshes{}; // consumer-only full-generation history
     uint32_t instance=UINT32_MAX;
@@ -2100,6 +2101,8 @@ struct EngineWgpu::GeometryPageFixtureState
     WgrModelSection pageSection{}; WgrModelMaterial pageMaterial{};
     uint64_t pageBaseKnownBytes=0;
     size_t pageFineFirst=0;
+    uint32_t pageFineSlot=1,pagePendingFineModel=UINT32_MAX;
+    uint32_t pageRetiredBegin=0,pageRetiredEnd=0;
     bool AcceptsModel(uint32_t model) { std::lock_guard lock(mutex);
         return std::find(models.begin(),models.begin()+modelCount,model)!=models.begin()+modelCount; }
 };
@@ -3756,12 +3759,19 @@ void EngineWgpu::DrainInstanceOps(std::vector<InstanceOp>& ops)
             // passing it through would draw a stranger's model, which is precisely the
             // failure mode the ids exist to prevent.
             WgrInstance inst = op.inst;
+            if(_geometryPageFixtureObservation && op.kind==InstanceOp::Update && op.handle==_geometryPageFixtureObservation->instance) {
+                auto& fixture=*_geometryPageFixtureObservation;std::lock_guard lock(fixture.mutex);
+                if(fixture.report.pagedPilot && (op.inst.model==fixture.models[1] || op.inst.model==fixture.models[2]) &&
+                   GeometryPages::DecideFineUpdate(fixture.report.active,fixture.report.fineResident,fixture.report.pageWorkState=="Uploading",
+                       op.inst.model,fixture.models[fixture.pageFineSlot],fixture.pagePendingFineModel,fixture.report.pageRequest)==GeometryPages::FineUpdateDecision::Drop)
+                    continue;
+            }
             const auto it = _modelIdOf.find(inst.model);
             if (it == _modelIdOf.end())
             {
                 if(_geometryPageFixtureObservation && op.kind==InstanceOp::Update && op.handle==_geometryPageFixtureObservation->instance) {
                     auto& fixture=*_geometryPageFixtureObservation;std::lock_guard lock(fixture.mutex);
-                    if(fixture.report.pagedPilot && op.inst.model==fixture.models[1] && !fixture.report.fineResident)
+                    if(fixture.report.pagedPilot && op.inst.model==fixture.pagePendingFineModel && !fixture.report.fineResident)
                         fixture.report.pageWorkState="Failed"; // missing registration preserves actual coarse
                 }
                 static uint32_t reported = 0;
@@ -3778,8 +3788,11 @@ void EngineWgpu::DrainInstanceOps(std::vector<InstanceOp>& ops)
                 auto& fixture=*_geometryPageFixtureObservation;
                 std::unique_lock lock(fixture.mutex);
                 auto& report=fixture.report;
-                if(report.pagedPilot && op.inst.model==fixture.models[1] && !report.fineResident) {
-                    if(!report.active || !report.pageRequest) continue; // cancelled/aborted cut never changes the instance
+                if(report.pagedPilot && (op.inst.model==fixture.models[1] || op.inst.model==fixture.models[2])) {
+                    const auto decision=GeometryPages::DecideFineUpdate(report.active,report.fineResident,report.pageWorkState=="Uploading",
+                        op.inst.model,fixture.models[fixture.pageFineSlot],fixture.pagePendingFineModel,report.pageRequest);
+                    if(decision==GeometryPages::FineUpdateDecision::Drop) continue; // recheck after lookup: Abort/Cancel may have won
+                    if(decision==GeometryPages::FineUpdateDecision::Commit) {
                     bool complete=report.active && report.pageRequest && report.pageWorkState=="Uploading" &&
                         fixture.pageFineFirst<fixture.meshes.size() && fixture.meshes.size()<=64 &&
                         fixture.consumedInstance==_instSlotOf[op.handle] && fixture.consumedModel!=UINT32_MAX;
@@ -3803,6 +3816,7 @@ void EngineWgpu::DrainInstanceOps(std::vector<InstanceOp>& ops)
                         report.fineResident=true;report.fineSelected=true;report.producerModel=op.inst.model;report.pageWorkState="Resident";
                     } else report.pageWorkState="Failed"; // authored coarse remains the actual instance
                     continue;
+                    }
                 }
             }
             inst.model = it->second;
@@ -8439,9 +8453,9 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
             if(!ClassifyGpuSection(*authored.Level(0),0,sections,0,materialSection,material)) return failure;
             if(!material.texture_id) material.texture_id=UntexturedAlbedoHandle(false);
             auto fixture=std::make_shared<GeometryPageFixtureState>();
-            fixture->modelCount=clodPilot?3:2;
+            fixture->modelCount=(clodPilot||pagedPilot)?3:2;
             std::vector<ResourceOp> staged; staged.reserve(selectedMeshes+fixture->modelCount+1);
-            fixture->meshes.reserve(selectedMeshes);
+            fixture->meshes.reserve(pagedPilot?64:selectedMeshes);
             uint64_t known=16384+sizeof(LODShape)+5*sizeof(Shape); // fixed pilot/helper/state metadata allowance, not RSS
             const auto countExport=[&](const ExportedMesh& mesh) {
                 return mesh.positions.capacity()*sizeof(Position)+mesh.vertices.capacity()*sizeof(SVertex)+
@@ -8483,9 +8497,13 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
                 known+=model.sections.capacity()*sizeof(WgrModelSection)+model.materials.capacity()*sizeof(WgrModelMaterial)+model.lods.capacity()*sizeof(WgrModelLod);
                 staged.push_back(std::move(model));
             }
-            if(pagedPilot) { // reserve identity at birth; models/modelCount stay immutable
-                if(_nextModelHandle==WGR_INVALID_MODEL) return failure;
-                fixture->models[1]=_nextModelHandle++;
+            if(pagedPilot) { // one eviction/refill cycle, all identities immutable at birth
+                const uint64_t fineClusters=package.clusters.size()-package.coarseClusters;
+                if(uint64_t(package.coarseClusters)+2*fineClusters>64) return failure;
+                for(uint32_t slot=1;slot<3;++slot) {
+                    if(_nextModelHandle==WGR_INVALID_MODEL) return failure;
+                    fixture->models[slot]=_nextModelHandle++;
+                }
             }
             known+=staged.capacity()*sizeof(ResourceOp)+fixture->meshes.capacity()*sizeof(uint64_t);
             if(known>1024*1024) return failure;
@@ -8535,6 +8553,43 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
         auto& report=fixture->report;
         if((action==GeometryPageFixtureAction::Coarse||action==GeometryPageFixtureAction::Fine||action==GeometryPageFixtureAction::Fallback)&&!report.active) return failure;
         if(action==GeometryPageFixtureAction::Fallback && !report.clodPilot) return failure;
+        if(report.pagedPilot && report.fineEvictionPending &&
+            (action==GeometryPageFixtureAction::EvictFine || action==GeometryPageFixtureAction::RequestFine ||
+             action==GeometryPageFixtureAction::PollFine || action==GeometryPageFixtureAction::CancelFine ||
+             action==GeometryPageFixtureAction::Coarse || action==GeometryPageFixtureAction::Fine)) {
+            auto busy=report;busy.status=GeometryReportStatus::Busy;updatePageStats(busy);return busy;
+        }
+        if(action==GeometryPageFixtureAction::EvictFine) {
+            // Require the latest successful actual coarse cut before scheduling
+            // retirement. CPU selection alone cannot prove that fine stopped drawing.
+            if(!report.pagedPilot || !_geometryPageWorker || !report.active || !report.fineResident || report.fineSelected ||
+               report.fineEvictionCount || report.fineGeneration!=1 || fixture->pageFineSlot!=1 ||
+               report.status!=GeometryReportStatus::Ready || report.observedRequestId!=report.requestId ||
+               !report.mainFrameReturned || report.renderReturnStatus!=0 || report.producerModel!=fixture->models[0] ||
+               report.rendererModel==UINT32_MAX || report.rendererInstance==UINT32_MAX ||
+               !fixture->pageFineFirst || fixture->pageFineFirst>=fixture->meshes.size() ||
+               fixture->meshes.size()>64 || report.meshesPresent!=report.meshCount || report.requestId==UINT64_MAX)
+                return failure;
+            const auto first=uint32_t(fixture->pageFineFirst),end=uint32_t(fixture->meshes.size());
+            for(uint32_t i=first;i<end;++i) if(!fixture->rendererMeshes[i]) return failure;
+            std::vector<ResourceOp> staged;staged.reserve(size_t(end-first)+2);
+            ResourceOp retire;retire.kind=ResourceOp::ModelRetire;retire.model=fixture->models[1];staged.push_back(std::move(retire));
+            for(uint32_t i=first;i<end;++i) {
+                ResourceOp destroy;destroy.kind=ResourceOp::MeshDestroy;destroy.mesh=fixture->meshes[i];staged.push_back(std::move(destroy));
+            }
+            ResourceOp observe;observe.kind=ResourceOp::GeometryPageFixtureObserve;observe.fixtureData=fixture;observe.fixtureRequest=report.requestId+1;staged.push_back(std::move(observe));
+            const auto metadata=staged.capacity()*sizeof(ResourceOp);
+            const auto debt=_geometryPageWorker->Snapshot().reservedBytes;
+            if(metadata>1024*1024 || report.knownPayloadBytes>1024*1024-metadata || debt>1024*1024-metadata-report.knownPayloadBytes) return failure;
+            _resourceOps.reserve(_resourceOps.size()+staged.size()); // no partial retirement publication
+            _geometryPageWorker->Cancel(report.pageEpoch);
+            fixture->pageRetiredBegin=first;fixture->pageRetiredEnd=end;fixture->pagePendingFineModel=UINT32_MAX;
+            report.retiredFineFirst=first;report.retiredFineCount=end-first;report.fineEvictionCount=1;report.fineEvictionPending=true;
+            report.fineResident=false;report.pageRequest=0;report.pageWorkState="Evicting";
+            report.status=GeometryReportStatus::Pending;report.mainFrameReturned=false;report.renderReturnStatus=INT32_MIN;report.passFacts={};++report.requestId;
+            for(auto& op:staged) _resourceOps.push_back(std::move(op));
+            auto cut=report;updatePageStats(cut);return cut;
+        }
         if(report.pagedPilot && report.pageWorkState=="Uploading" &&
             (action==GeometryPageFixtureAction::Coarse || action==GeometryPageFixtureAction::Fine)) {
             auto busy=report;busy.status=GeometryReportStatus::Busy;updatePageStats(busy);return busy;
@@ -8572,10 +8627,10 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
                     }
                     // Owner-only, complete representation transaction. No partial fine
                     // publication, background pointers, constructor/texture reads or FFI.
-                    if(fixture->models[1]==WGR_INVALID_MODEL || report.requestId==UINT64_MAX) return failure;
+                    if(fixture->models[fixture->pageFineSlot]==WGR_INVALID_MODEL || report.requestId==UINT64_MAX) return failure;
                     std::vector<ResourceOp> staged; staged.reserve(size_t(result->decoded.clusters)+2);
                     std::vector<uint64_t> meshes;meshes.reserve(size_t(result->decoded.clusters));
-                    ResourceOp model;model.kind=ResourceOp::ModelRegister;model.model=fixture->models[1];model.sphereRadius=5;model.name="private-authored-fine-page";
+                    ResourceOp model;model.kind=ResourceOp::ModelRegister;model.model=fixture->models[fixture->pageFineSlot];model.sphereRadius=5;model.name="private-authored-fine-page";
                     uint64_t extra=staged.capacity()*sizeof(ResourceOp)+meshes.capacity()*sizeof(uint64_t);
                     for(const auto& page:result->decoded.pages) for(const auto& cluster:page.clusters) {
                         if(!_nextMeshHandle) return failure;
@@ -8597,6 +8652,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
                     _resourceOps.reserve(_resourceOps.size()+staged.size());_instanceOps.reserve(_instanceOps.size()+1);
                     // All capacities ready; publication is now non-allocating.
                     fixture->pageFineFirst=fixture->meshes.size();
+                    fixture->pagePendingFineModel=fineModel;report.fineGeneration=fixture->pageFineSlot;
                     for(auto mesh:meshes) fixture->meshes.push_back(mesh);
                     fixture->placement.model=fineModel;
                     EnqueueInstanceUpdate(fixture->instance,fixture->placement);
@@ -8622,11 +8678,11 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
             EnqueueInstanceRemove(fixture->instance);
             for(uint32_t i=0;i<fixture->modelCount;++i) { ResourceOp op; op.kind=ResourceOp::ModelRetire; op.model=fixture->models[i]; _resourceOps.push_back(std::move(op)); }
             for(auto mesh:fixture->meshes) { ResourceOp op; op.kind=ResourceOp::MeshDestroy; op.mesh=mesh; _resourceOps.push_back(std::move(op)); }
-            report.active=false; report.fineSelected=false; report.fineResident=false; report.fallbackSelected=false; report.producerModel=UINT32_MAX; _geometryPageFixtureActive=false;
+            report.active=false; report.fineSelected=false; report.fineResident=false; report.fineEvictionPending=false; fixture->pagePendingFineModel=UINT32_MAX; report.fallbackSelected=false; report.producerModel=UINT32_MAX; _geometryPageFixtureActive=false;
         } else if(action==GeometryPageFixtureAction::Coarse||action==GeometryPageFixtureAction::Fine||action==GeometryPageFixtureAction::Fallback) {
             report.fineSelected=action==GeometryPageFixtureAction::Fine;
             report.fallbackSelected=action==GeometryPageFixtureAction::Fallback;
-            const uint32_t model=report.clodPilot?(report.fallbackSelected?0:(report.fineSelected?2:1)):(report.fineSelected?1:0);
+            const uint32_t model=report.clodPilot?(report.fallbackSelected?0:(report.fineSelected?2:1)):(report.fineSelected?(report.pagedPilot?fixture->pageFineSlot:1):0);
             report.producerModel=fixture->models[model]; fixture->placement.model=report.producerModel;
             EnqueueInstanceUpdate(fixture->instance,fixture->placement);
         }
@@ -8650,14 +8706,15 @@ void EngineWgpu::PublishGeometryPageFixtureObservation(const WgrFrame& frame, in
     report.passFacts={}; // Failed frame/getter must never expose a prior valid cut.
     if(report.mainFrameReturned) {
         WgrGeometryPassFacts f{};
-        if(wgr_geometry_pass_facts(_renderer,&f,sizeof(f),1)==1 &&
-            f.version==1 && f.struct_bytes==sizeof(f) && f.enabled==1 && !f.reserved && !f.reserved2 &&
+        if(wgr_geometry_pass_facts(_renderer,&f,sizeof(f),2)==1 &&
+            f.version==2 && f.struct_bytes==sizeof(f) && f.enabled==1 && !f.reserved && !f.reserved2 &&
             f.frame>0 && f.frame!=UINT64_MAX && f.cascade_count<=4 && f.local_count<=24) {
             auto& p=report.passFacts;
             p.valid=true; p.version=f.version; p.structBytes=f.struct_bytes; p.enabled=f.enabled;
             p.capabilities=f.capabilities; p.required=f.required; p.pending=f.pending; p.recordedThisFrame=f.recorded_this_frame;
             p.frame=f.frame; p.instanceEpoch=f.instance_epoch; p.cascadeEpoch=f.cascade_epoch; p.cascadeFrame=f.cascade_frame;
             p.giRsmEpoch=f.gi_rsm_epoch; p.giRsmFrame=f.gi_rsm_frame;
+            p.reflectionEpoch=f.reflection_epoch; p.reflectionFrame=f.reflection_frame;
             p.localCount=f.local_count; p.localDrawMask=f.local_draw_mask; p.localValidMask=f.local_valid_mask;
             p.interiorDrawMask=f.interior_draw_mask; p.interiorValidMask=f.interior_valid_mask;
             p.cascadeDrawMask=f.cascade_draw_mask; p.cascadeCount=f.cascade_count;
@@ -8678,19 +8735,39 @@ void EngineWgpu::PublishGeometryPageFixtureObservation(const WgrFrame& frame, in
         summary.handles_requested==fixture->meshes.size() && summary.handles_inspected==fixture->meshes.size() &&
         !summary.invalid && !summary.reserved && summary.record_scope_valid==1 &&
         summary.present+summary.absent==fixture->meshes.size();
+    GeometryPages::PageHistoryScope history{uint32_t(fixture->meshes.size()),fixture->pageRetiredBegin,fixture->pageRetiredEnd,report.active};
+    valid=valid && history.Valid();bool expectations=true;
     report.meshesPresent=report.meshesAbsent=0;
+    report.expectedPresentMeshes=report.expectedAbsentMeshes=report.observedExpectedPresentMeshes=report.observedExpectedAbsentMeshes=0;
+    for(size_t i=0;i<64;++i) report.rendererMeshHandles[i]=i<fixture->meshes.size()?fixture->rendererMeshes[i]:0;
+    for(size_t i=0;i<fixture->meshes.size();++i) {
+        const auto expected=history.Expected(uint32_t(i));
+        if(expected==1) ++report.expectedPresentMeshes;else if(expected==2) ++report.expectedAbsentMeshes;
+    }
     for(size_t i=0;valid && i<fixture->meshes.size();++i) {
         valid=facts[i].mesh_handle==fixture->rendererMeshes[i] && facts[i].reserved==0 &&
             ((facts[i].state==1 && facts[i].vertex_bytes>0 && facts[i].index_bytes>0) ||
              (facts[i].state==2 && !facts[i].vertex_bytes && !facts[i].index_bytes));
         if(facts[i].state==1) ++report.meshesPresent; else if(facts[i].state==2) ++report.meshesAbsent;
+        const auto expected=history.Expected(uint32_t(i));expectations=expectations && facts[i].state==expected;
+        if(expected==1 && facts[i].state==1) ++report.observedExpectedPresentMeshes;
+        if(expected==2 && facts[i].state==2) ++report.observedExpectedAbsentMeshes;
     }
     report.rendererModel=UINT32_MAX;
     if(report.active) if(const auto found=_modelIdOf.find(report.producerModel);found!=_modelIdOf.end()) report.rendererModel=found->second;
     report.rendererInstance=fixture->consumedInstance;
-    valid=valid && (report.active?(report.rendererModel!=UINT32_MAX && report.rendererInstance!=UINT32_MAX && fixture->consumedModel==report.rendererModel && report.meshesPresent==report.meshCount):report.rendererInstance==UINT32_MAX);
+    valid=valid && (report.active?(report.rendererModel!=UINT32_MAX && report.rendererInstance!=UINT32_MAX && fixture->consumedModel==report.rendererModel):report.rendererInstance==UINT32_MAX);
     report.cascadeConfigured=frame.shadow.count!=0; report.localShadowConfigured=frame.shadow.local_count!=0;
-    report.observedRequestId=request; report.status=valid?GeometryReportStatus::Ready:GeometryReportStatus::Failed;
+    if(valid && expectations && report.fineEvictionPending) {
+        // Only the fresh full-generation Absent cut unlocks the reserved refill ID.
+        report.fineEvictionPending=false;report.pageWorkState="Evicted";
+        fixture->pageFineSlot=2;fixture->pageFineFirst=0;
+    }
+    report.observedRequestId=request;
+    // Inactive Ready preserves the original record-cut API; exact Absent counts
+    // remain mandatory for caller cleanup proof. Active eviction never skips expectations.
+    report.status=valid && (!report.active || expectations)?GeometryReportStatus::Ready:
+        valid && report.fineEvictionPending?GeometryReportStatus::Pending:GeometryReportStatus::Failed;
 }
 
 // How much of a material's flat specular constant to apply.

@@ -6567,6 +6567,9 @@ impl Gfx3d {
     pub fn geometry_pass_reflection_configured(&self,active:bool) {
         if active {if let Some(cell)=&self.geometry_pass_facts {let mut f=cell.get();f.required|=geometry_pass_facts::REFLECTION;cell.set(f);}}
     }
+    pub fn record_geometry_reflection(&self) {
+        if let Some(cell)=&self.geometry_pass_facts {let mut f=cell.get();f.record_reflection();cell.set(f);}
+    }
     pub fn geometry_pass_facts(&self)->Option<geometry_pass_facts::WgrGeometryPassFacts> {self.geometry_pass_facts.as_ref().map(|f|f.get().snapshot())}
     fn geometry_depth_recordable(&self,group:Option<&wgpu::BindGroup>,args:Option<&wgpu::Buffer>,counters:Option<&wgpu::Buffer>)->bool {
         self.gpu_driven_enabled && self.shadow_pass_ubo.bind.is_some() && group.is_some() && args.is_some() &&
@@ -10239,7 +10242,7 @@ impl Gfx3d {
         pass: &mut wgpu::RenderPass<'_>,
         textures: &SharedTextures,
         cam_off: u32,
-    ) {
+    ) -> bool {
         self.draw_gpu_driven_impl(
             pass,
             textures,
@@ -10251,7 +10254,7 @@ impl Gfx3d {
                 .reflection_counter_buf()
                 .unwrap_or(self.cull.counter_buf()),
             None,
-        );
+        )
     }
 
     // GPU-driven depth+normal PREPASS draw (fs_gpu_prepass): the MAIN (frustum-only, occluder)
@@ -10390,14 +10393,14 @@ impl Gfx3d {
             &crate::gpu_timers::GpuTimers,
             [crate::gpu_timers::Region; 2],
         )>,
-    ) {
+    ) -> bool {
         if !self.gpu_driven_enabled {
-            return;
+            return false;
         }
         let (Some(camera_bind), Some(group1), Some(args)) =
             (self.cameras.bind.as_ref(), group1, args)
         else {
-            return;
+            return false;
         };
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, camera_bind, &[cam_off]);
@@ -10446,6 +10449,9 @@ impl Gfx3d {
                 }
             }
         }
+        // Both variant indirect draw commands have been encoded. This does not prove
+        // a nonzero survivor count, visible pixels, submission or GPU completion.
+        true
     }
 }
 

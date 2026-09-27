@@ -2,11 +2,13 @@ param(
     [switch]$Disabled,
     [switch]$Clod,
     [switch]$Paged,
+    [switch]$Evict,
     [string]$Label='geometry-page-fixture',
     [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',
     [string]$Python='C:\Program Files\Python311\python.exe'
 )
 $ErrorActionPreference='Stop'
+if ($Evict -and !$Paged) {throw '-Evict requires -Paged'}
 if ($Paged -and $Clod) {throw '-Paged is the authored page worker case; it cannot be combined with -Clod'}
 if (!$env:LOCK_OWNER) {
     $shellName=if ($PSVersionTable.PSEdition -eq 'Core') {'pwsh.exe'} else {'powershell.exe'}
@@ -15,6 +17,7 @@ if (!$env:LOCK_OWNER) {
     if ($Disabled) {$argv+='-Disabled'}
     if ($Clod) {$argv+='-Clod'}
     if ($Paged) {$argv+='-Paged'}
+    if ($Evict) {$argv+='-Evict'}
     $env:LOCK_OWNER='private resident geometry page fixture'
     try {& 'C:\Program Files\Git\bin\bash.exe' @argv; if ($LASTEXITCODE) {throw "Geometry fixture exited $LASTEXITCODE"}}
     finally {Remove-Item Env:LOCK_OWNER}
@@ -58,7 +61,7 @@ $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0)
 $listener.Start();$port=$listener.LocalEndpoint.Port;$listener.Stop()
 $log=Join-Path $out 'engine.log'
 @{head=(& git -C $root rev-parse HEAD);installed=(Get-Content (Join-Path $GameDir 'DEPLOYED-FROM.txt'));
-    disabled=[bool]$Disabled;clod=[bool]$Clod;paged=[bool]$Paged;scriptSha256=(Get-FileHash $PSCommandPath).Hash;
+    disabled=[bool]$Disabled;clod=[bool]$Clod;paged=[bool]$Paged;evict=[bool]$Evict;scriptSha256=(Get-FileHash $PSCommandPath).Hash;
     hashes=@(Get-FileHash (Join-Path $GameDir 'OpenPoseidon.exe'),(Join-Path $GameDir 'wgpu_renderer.dll'))} |
     ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $out 'provenance.json')
 $p=$null;$client=$null
@@ -94,7 +97,10 @@ try {
         $until=[DateTime]::UtcNow.AddSeconds(15)
         do {
             $request=Action 'observe'
-            do {Start-Sleep -Milliseconds 100;$cut=Action 'status'} while ($cut.status -eq 'Pending' -and [DateTime]::UtcNow -lt $until)
+            do {Start-Sleep -Milliseconds 100;$cut=Action 'status'} while ($cut.status -eq 'Pending' -and
+                !($Evict -and $cut.fineEvictionPending -and $cut.mainFrameReturned) -and [DateTime]::UtcNow -lt $until)
+            if ($Evict -and $cut.status -eq 'Pending' -and $cut.fineEvictionPending -and
+                $cut.mainFrameReturned -and [DateTime]::UtcNow -lt $until) {continue}
             if ($cut.status -ne 'Ready') {throw "Fixture refused: $($cut | ConvertTo-Json -Compress)"}
             foreach ($field in @('requestId','observedRequestId','active','fineSelected','mainFrameReturned',
                 'cpuHelpersUnchanged','helperHashBefore','helperHashAfter','sourceSha256','coarseTriangles','fineTriangles',
@@ -113,6 +119,24 @@ try {
                     }
                 }
             }
+            $historyValid=$false
+            if ($Evict) {
+                foreach ($field in @('expectedPresentMeshes','expectedAbsentMeshes','observedExpectedPresentMeshes',
+                    'observedExpectedAbsentMeshes','fineGeneration','fineEvictionCount','fineEvictionPending',
+                    'retiredFineFirst','retiredFineCount','rendererMeshHandles')) {
+                    if ($null -eq $cut.$field) {throw "Missing eviction history field: $field"}
+                }
+                $handles=@($cut.rendererMeshHandles)
+                if ($handles.Count -ne $cut.meshCount -or $cut.fineEvictionCount -gt 1 -or $cut.fineGeneration -gt 2) {
+                    throw 'Unbounded or missing full-generation mesh history'
+                }
+                foreach ($handle in $handles) {if ($handle -notmatch '^[1-9][0-9]*$') {throw 'Invalid historical renderer handle'}}
+                if (@($handles | Select-Object -Unique).Count -ne $handles.Count) {throw 'Historical full-generation handles alias'}
+                $historyValid=($cut.expectedPresentMeshes+$cut.expectedAbsentMeshes) -eq $cut.meshCount -and
+                    $cut.observedExpectedPresentMeshes -eq $cut.expectedPresentMeshes -and
+                    $cut.observedExpectedAbsentMeshes -eq $cut.expectedAbsentMeshes -and
+                    $cut.meshesPresent -eq $cut.expectedPresentMeshes -and $cut.meshesAbsent -eq $cut.expectedAbsentMeshes
+            }
             if (!$active -and $cut.meshesPresent -gt 0 -and [DateTime]::UtcNow -lt $until) {continue}
             if ($null -eq $request.requestId -or $request.requestId -lt 1 -or $cut.requestId -lt 1 -or
                 $cut.observedRequestId -ne $request.requestId -or $cut.active -ne $active -or
@@ -128,7 +152,7 @@ try {
                     $cut.coarseThreshold -le 0 -or $cut.fineThreshold -ne 0 -or $cut.clodBakeMs -lt 0)) -or
                 $cut.knownPayloadBytes -le 0 -or $cut.knownPayloadBytes -gt 1048576 -or $cut.meshCount -lt 1 -or $cut.meshCount -gt 64 -or
                 $cut.meshesPresent -lt 0 -or $cut.meshesAbsent -lt 0 -or ($cut.meshesPresent+$cut.meshesAbsent) -ne $cut.meshCount -or
-                ($active -and ($cut.rendererModel -eq 4294967295 -or $cut.rendererInstance -eq 4294967295 -or $cut.meshesPresent -ne $cut.meshCount)) -or
+                ($active -and ($cut.rendererModel -eq 4294967295 -or $cut.rendererInstance -eq 4294967295 -or ((!$Evict -and $cut.meshesPresent -ne $cut.meshCount) -or ($Evict -and !$historyValid)))) -or
                 (!$active -and ($cut.rendererInstance -ne 4294967295 -or $cut.meshesAbsent -ne $cut.meshCount))) {
                 throw "Unexpected resident cut: $($cut | ConvertTo-Json -Compress)"
             }
@@ -138,10 +162,10 @@ try {
             $pass=$cut.passFacts
             foreach ($field in @('valid','version','structBytes','enabled','frame','instanceEpoch','required','capabilities','pending',
                 'recordedThisFrame','cascadeCount','cascadeDrawMask','cascadeEpoch','cascadeFrame','localCount','localDrawMask',
-                'localValidMask','interiorDrawMask','interiorValidMask','giRsmEpoch','giRsmFrame')) {
+                'localValidMask','interiorDrawMask','interiorValidMask','giRsmEpoch','giRsmFrame','reflectionEpoch','reflectionFrame')) {
                 if ($null -eq $pass.$field) {throw "Missing pass fact: $field"}
             }
-            foreach ($field in @('frame','instanceEpoch','cascadeEpoch','cascadeFrame','giRsmEpoch','giRsmFrame')) {
+            foreach ($field in @('frame','instanceEpoch','cascadeEpoch','cascadeFrame','giRsmEpoch','giRsmFrame','reflectionEpoch','reflectionFrame')) {
                 $number=[double]$pass.$field
                 if ([double]::IsNaN($number) -or [double]::IsInfinity($number) -or $number -lt 0 -or
                     $number -gt 9007199254740991 -or [Math]::Floor($number) -ne $number) {throw "Inexact pass fact: $field"}
@@ -156,7 +180,7 @@ try {
                         $number -gt 9007199254740991 -or [Math]::Floor($number) -ne $number) {throw "Inexact bounded epoch/frame element: $($entry.name)"}
                 }
             }
-            if (!$pass.valid -or $pass.version -ne 1 -or $pass.structBytes -ne 576 -or $pass.enabled -ne 1 -or
+            if (!$pass.valid -or $pass.version -ne 2 -or $pass.structBytes -ne 592 -or $pass.enabled -ne 1 -or
                 $pass.frame -le $script:fixtureObservedFrame -or $pass.cascadeCount -gt 4 -or $pass.localCount -gt 24) {
                 throw 'Invalid or nonmonotonic copied renderer pass facts'
             }
@@ -166,8 +190,14 @@ try {
                 $pass.cascadeEpoch -ne $pass.instanceEpoch -or $pass.cascadeFrame -ne $pass.frame)) {
                 throw 'Configured cascade lacks actual current-epoch command-recording facts'
             }
-            # Reflection and stale cached local/interior/GI bits may remain Pending;
-            # record them honestly rather than requiring or claiming all-pass completeness.
+            if ($pass.capabilities -ne 31) {throw 'Unexpected pass recorder capabilities'}
+            if (($pass.required -band 16) -ne 0 -and ($pass.pending -band 16) -eq 0 -and
+                (($pass.recordedThisFrame -band 16) -eq 0 -or $pass.reflectionEpoch -ne $pass.instanceEpoch -or
+                 $pass.reflectionFrame -ne $pass.frame)) {
+                throw 'Reflection marked complete without actual same-frame command-recording facts'
+            }
+            # Configured reflection resource refusal and stale cached local/interior/GI may remain
+            # Pending. These scoped facts do not claim visible fixture pixels or all-pass completeness.
             $script:fixtureObservedFrame=[double]$pass.frame
             return $cut
         } while ([DateTime]::UtcNow -lt $until)
@@ -249,12 +279,72 @@ try {
         if ($fineReturned.rendererModel -ne $fine.rendererModel -or $fineReturned.rendererInstance -ne $fine.rendererInstance) {
             throw 'Explicit fine switch changed the committed model or instance'
         }
+        $eviction=$null
+        if ($Evict) {
+            $null=Action 'coarse';$beforeEvict=PageCut (Observe $true $false)
+            if ($beforeEvict.fineGeneration -ne 1 -or !$beforeEvict.fineResident -or $beforeEvict.fineEvictionCount -ne 0) {
+                throw 'Initial fine generation did not qualify for one-cycle eviction'
+            }
+            $started=PageCut (Action 'evictFine')
+            if ($started.status -ne 'Pending' -or !$started.fineEvictionPending -or $started.fineResident -or
+                $started.pageRequest -ne 0 -or $started.pageWorkState -ne 'Evicting') {throw 'Fine retirement did not start transactionally'}
+            $evicted=PageCut (Observe $true $false)
+            if ($evicted.pageWorkState -ne 'Evicted' -or $evicted.fineEvictionPending -or
+                $evicted.fineEvictionCount -ne 1 -or $evicted.retiredFineCount -lt 1 -or $evicted.fineResident -or
+                $evicted.expectedPresentMeshes -ne $coarse.meshCount -or $evicted.expectedAbsentMeshes -ne $evicted.retiredFineCount -or
+                $evicted.meshCount -ne $beforeEvict.meshCount -or $evicted.rendererModel -ne $coarse.rendererModel -or
+                $evicted.rendererInstance -ne $coarse.rendererInstance -or $evicted.producerInstance -ne $coarse.producerInstance) {
+                throw 'Exact old fine Absent cut did not preserve the coarse instance/history'
+            }
+            for ($i=0;$i -lt $beforeEvict.meshCount;++$i) {
+                if ($evicted.rendererMeshHandles[$i] -ne $beforeEvict.rendererMeshHandles[$i]) {throw 'Eviction rewrote old full-generation history'}
+            }
+            Capture 'evicted-coarse.png'
+            # Hold another fresh CPU request and cancel it without losing the
+            # coarse cut. The slot-2 model is not registered before full publication.
+            $null=Action 'holdFine';$refillHeldRequest=PageCut (Action 'requestFine')
+            $refillHeld=WaitPage {param($c) $c.pageActive -eq 1}
+            $cancelled=PageCut (Action 'cancelFine')
+            if ($cancelled.pageRequest -ne 0 -or $cancelled.fineResident -or $cancelled.pageReservedBytes -le 0) {
+                throw 'Canceled refill lost fallback or dropped held-job debt early'
+            }
+            $cancelledCoarse=PageCut (Observe $true $false)
+            $refill=PageCut (Action 'requestFine')
+            if ($refill.pageRequest -le $refillHeldRequest.pageRequest -or $refill.pageRequest -le $queued.pageRequest -or
+                $refill.pageQueued -ne 1 -or $refill.pageActive -ne 1 -or $refill.pageLiveJobs -ne 2) {throw 'Fresh refill did not use a distinct bounded request'}
+            $null=Action 'releaseFine';$until=[DateTime]::UtcNow.AddSeconds(15)
+            do {
+                $null=Action 'pollFine';$state=PageCut (Action 'status')
+                if ($state.pageWorkState -eq 'Failed') {throw 'Refill transaction refused'}
+                if ($state.fineResident) {break}
+                Start-Sleep -Milliseconds 100
+            } while ([DateTime]::UtcNow -lt $until)
+            if (!$state.fineResident) {throw 'Refill did not become resident'}
+            $refilled=PageCut (Observe $true $true)
+            if ($refilled.fineGeneration -ne 2 -or $refilled.fineEvictionCount -ne 1 -or
+                $refilled.pageRequest -ne $refill.pageRequest -or $refilled.meshCount -le $evicted.meshCount -or
+                $refilled.meshesAbsent -ne $evicted.retiredFineCount -or $refilled.rendererModel -eq $fine.rendererModel -or
+                $refilled.producerModel -eq $fine.producerModel -or $refilled.rendererInstance -ne $coarse.rendererInstance -or
+                $refilled.producerInstance -ne $coarse.producerInstance) {throw 'Refill did not publish a new complete private generation'}
+            for ($i=0;$i -lt $evicted.meshCount;++$i) {
+                if ($refilled.rendererMeshHandles[$i] -ne $evicted.rendererMeshHandles[$i]) {throw 'Refill erased/replaced old mesh-generation history'}
+            }
+            Capture 'refilled-fine.png'
+            $null=Action 'coarse';$coarseAfterRefill=PageCut (Observe $true $false)
+            if ($coarseAfterRefill.rendererModel -ne $coarse.rendererModel -or $coarseAfterRefill.rendererInstance -ne $coarse.rendererInstance) {
+                throw 'Refill changed the independent coarse model or fixed instance'
+            }
+            $secondEvict=Action 'evictFine'
+            if ($secondEvict.status -ne 'Invalid') {throw 'A second eviction exceeded the one-cycle scope'}
+            $eviction=@{before=$beforeEvict;started=$started;evicted=$evicted;heldRequest=$refillHeldRequest;held=$refillHeld;
+                cancelled=$cancelled;cancelledCoarse=$cancelledCoarse;request=$refill;refilled=$refilled;coarse=$coarseAfterRefill;secondEvict=$secondEvict}
+        }
         $null=Action 'abort';$retired=PageCut (Observe $false $false)
         $settled=WaitPage {param($c) $c.pageLiveJobs -eq 0 -and $c.pageQueued -eq 0 -and
             $c.pageActive -eq 0 -and $c.pageReady -eq 0 -and $c.pageReservedBytes -eq 0}
         $result=@{begin=$begin;firstCoarse=$firstCoarse;requested=$requested;held=$held;oldRetired=$oldRetired;
             replacement=$replacement;coarse=$coarse;queued=$queued;fine=$fine;returned=$returned;fineReturned=$fineReturned;
-            retired=$retired;settled=$settled;disabled=$false;paged=$true;clod=$false}
+            retired=$retired;settled=$settled;eviction=$eviction;disabled=$false;paged=$true;clod=$false}
     } else {
         $fallback=$null; $fallbackReturned=$null
         if ($Clod) {

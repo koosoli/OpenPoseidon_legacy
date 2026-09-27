@@ -540,6 +540,7 @@ void RegisterScreenshot(HarnessServer& hs)
             else if(!std::strcmp(name,"cancelFine")) action=Engine::GeometryPageFixtureAction::CancelFine;
             else if(!std::strcmp(name,"holdFine")) action=Engine::GeometryPageFixtureAction::HoldFine;
             else if(!std::strcmp(name,"releaseFine")) action=Engine::GeometryPageFixtureAction::ReleaseFine;
+            else if(!std::strcmp(name,"evictFine")) action=Engine::GeometryPageFixtureAction::EvictFine;
             else if(!std::strcmp(name,"fallback")) action=Engine::GeometryPageFixtureAction::Fallback;
             else if(!std::strcmp(name,"coarse")) action=Engine::GeometryPageFixtureAction::Coarse;
             else if(!std::strcmp(name,"fine")) action=Engine::GeometryPageFixtureAction::Fine;
@@ -579,22 +580,29 @@ void RegisterScreenshot(HarnessServer& hs)
             PAGE_FIXTURE_NUMBER(pageEpoch); PAGE_FIXTURE_NUMBER(pageRequest); PAGE_FIXTURE_NUMBER(pageReservedBytes);
             PAGE_FIXTURE_NUMBER(pageCompleted); PAGE_FIXTURE_NUMBER(pageCancelled); PAGE_FIXTURE_NUMBER(pageQueued);
             PAGE_FIXTURE_NUMBER(pageActive); PAGE_FIXTURE_NUMBER(pageReady); PAGE_FIXTURE_NUMBER(pageLiveJobs);
+            PAGE_FIXTURE_NUMBER(expectedPresentMeshes); PAGE_FIXTURE_NUMBER(expectedAbsentMeshes);
+            PAGE_FIXTURE_NUMBER(observedExpectedPresentMeshes); PAGE_FIXTURE_NUMBER(observedExpectedAbsentMeshes);
+            PAGE_FIXTURE_NUMBER(fineGeneration); PAGE_FIXTURE_NUMBER(fineEvictionCount);
+            PAGE_FIXTURE_NUMBER(retiredFineFirst); PAGE_FIXTURE_NUMBER(retiredFineCount);
             PAGE_FIXTURE_NUMBER(x); PAGE_FIXTURE_NUMBER(y); PAGE_FIXTURE_NUMBER(z);
             PAGE_FIXTURE_NUMBER(renderReturnStatus);
 #undef PAGE_FIXTURE_NUMBER
 #define PAGE_FIXTURE_BOOL(field) cJSON_AddBoolToObject(result,#field,report.field)
             PAGE_FIXTURE_BOOL(clodPilot); PAGE_FIXTURE_BOOL(fallbackSelected);
-            PAGE_FIXTURE_BOOL(pagedPilot); PAGE_FIXTURE_BOOL(fineResident);
+            PAGE_FIXTURE_BOOL(pagedPilot); PAGE_FIXTURE_BOOL(fineResident); PAGE_FIXTURE_BOOL(fineEvictionPending);
             PAGE_FIXTURE_BOOL(active); PAGE_FIXTURE_BOOL(fineSelected); PAGE_FIXTURE_BOOL(cpuHelpersUnchanged);
             PAGE_FIXTURE_BOOL(mainFrameReturned); PAGE_FIXTURE_BOOL(cascadeConfigured); PAGE_FIXTURE_BOOL(localShadowConfigured);
 #undef PAGE_FIXTURE_BOOL
+            auto* history=cJSON_AddArrayToObject(result,"rendererMeshHandles");
+            for(size_t i=0;i<std::min<size_t>(report.meshCount,64);++i)
+                cJSON_AddItemToArray(history,cJSON_CreateString(std::to_string(report.rendererMeshHandles[i]).c_str()));
             auto* pass=cJSON_AddObjectToObject(result,"passFacts");
             cJSON_AddBoolToObject(pass,"valid",report.passFacts.valid);
 #define PAGE_PASS_NUMBER(field) cJSON_AddNumberToObject(pass,#field,double(report.passFacts.field))
             PAGE_PASS_NUMBER(version); PAGE_PASS_NUMBER(structBytes); PAGE_PASS_NUMBER(enabled);
             PAGE_PASS_NUMBER(capabilities); PAGE_PASS_NUMBER(required); PAGE_PASS_NUMBER(pending); PAGE_PASS_NUMBER(recordedThisFrame);
             PAGE_PASS_NUMBER(frame); PAGE_PASS_NUMBER(instanceEpoch); PAGE_PASS_NUMBER(cascadeEpoch); PAGE_PASS_NUMBER(cascadeFrame);
-            PAGE_PASS_NUMBER(giRsmEpoch); PAGE_PASS_NUMBER(giRsmFrame); PAGE_PASS_NUMBER(localCount);
+            PAGE_PASS_NUMBER(giRsmEpoch); PAGE_PASS_NUMBER(giRsmFrame); PAGE_PASS_NUMBER(reflectionEpoch); PAGE_PASS_NUMBER(reflectionFrame); PAGE_PASS_NUMBER(localCount);
             PAGE_PASS_NUMBER(localDrawMask); PAGE_PASS_NUMBER(localValidMask); PAGE_PASS_NUMBER(interiorDrawMask); PAGE_PASS_NUMBER(interiorValidMask);
             PAGE_PASS_NUMBER(cascadeDrawMask); PAGE_PASS_NUMBER(cascadeCount);
 #undef PAGE_PASS_NUMBER

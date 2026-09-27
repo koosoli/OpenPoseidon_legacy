@@ -4268,9 +4268,12 @@ impl Renderer {
                     multiview_mask: None,
                 });
                 let off = (reflected_index as u64 * self.gfx3d.camera_stride()) as u32;
-                self.gfx3d
+                let reflection_recorded = self.gfx3d
                     .draw_gpu_driven_reflection(&mut object_pass, &self.textures, off);
                 drop(object_pass);
+                if reflection_recorded {
+                    self.gfx3d.record_geometry_reflection();
+                }
                 self.gpu_timers
                     .end(&mut encoder, TimerRegion::PlanarObjects);
                 if !ablate.clouds && self.sky.clouds_active(&self.sky_params) {
