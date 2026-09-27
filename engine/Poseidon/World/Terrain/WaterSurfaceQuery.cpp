@@ -3,6 +3,7 @@
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Weather/WindModel.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -84,6 +85,91 @@ int EffectiveWaterBackend(const Engine::WaterSettings& look)
     return env >= 0 ? env : look.waterBackend;
 }
 
+// TW-WATER W6b — the sea conditions follow the weather, as the drawn sea does.
+//
+// W3e referenced the predictor to Tidewater's DEFAULT sea (7 m/s over a 120 km fetch, swell 0.48)
+// whatever the weather. The renderer does not stop there: with the Water tab's sea conditions on
+// "Weather" (the default) it interpolates Tidewater's preset table (AppUI.js SEA, WaterWgpu.cpp
+// kTwSea) at the world's mean wind, so a calm morning draws a Calm sea and a storm a Storm sea,
+// and a preset (Calm .. Storm) brings its own wind. Boats, amphibians and swimmers kept riding the
+// Breezy sea through all of it. The same table and the same wind source are used here:
+//  * wind: the world's mean wind (WindModel -- simulation state, closed form in mission time and
+//    overcast, identical on every machine), in the renderer's 1 m/s steps; 7 m/s when the sea is
+//    not taking its wind from the weather (Water tab, or no wind model yet);
+//  * the local wind sea's variance from Tidewater's own JONSWAP parameters (fft.rs `packed`:
+//    alpha = 0.076 (gF/U^2)^-0.22, peak omega = 22 (UF/g^2)^-0.33; m0 ~ alpha g^2 / omega_p^4),
+//    relative to the 7 m/s / 120 km reference; the swell's variance with its scale, as in W3e.
+// Amplitude only: the six bands keep their wavelengths (the cascade scale still stretches them).
+struct TidewaterSeaRow
+{
+    float wind, fetchKm, swell;
+};
+constexpr TidewaterSeaRow kTidewaterSeaRows[4] = {
+    {3.5f, 40.0f, 0.28f},   // Calm
+    {7.0f, 120.0f, 0.48f},  // Breezy (Tidewater's defaults, the W3e reference)
+    {12.0f, 300.0f, 0.68f}, // Choppy
+    {20.0f, 900.0f, 1.0f},  // Storm
+};
+
+float TidewaterLocalSeaVariance(float windMs, float fetchKm)
+{
+    auto m0 = [](float u, float fetch)
+    {
+        const float f = std::max(fetch, 1.0f) * 1000.0f;
+        u = std::max(u, 0.5f);
+        const float alpha = 0.076f * std::pow(Gravity * f / (u * u), -0.22f);
+        const float wp = 22.0f * std::pow(u * f / (Gravity * Gravity), -0.33f);
+        return alpha / (wp * wp * wp * wp);
+    };
+    return m0(windMs, fetchKm) / m0(7.0f, 120.0f);
+}
+
+// Variance multiplier of the whole Tidewater sea against the W3e reference (Breezy).
+float TidewaterSeaVarianceScale(const Engine::WaterSettings& look)
+{
+    const bool weatherWind = look.windFromWeather && GWind.IsActive();
+    const float w = weatherWind ? std::round(GWind.Sample().meanSpeed) : 7.0f;
+    const int mode = std::clamp(look.tidewater.seaConditions, 0, 5);
+    float wind = weatherWind ? w : 12.0f; // the spectrum's wind when no preset brings one
+    float fetch = 120.0f;
+    float swell = std::max(look.tidewater.swellScale, 0.0f);
+    if (mode == 0)
+    {
+        int i = 0;
+        while (i < 2 && w > kTidewaterSeaRows[i + 1].wind)
+        {
+            ++i;
+        }
+        const TidewaterSeaRow& a = kTidewaterSeaRows[i];
+        const TidewaterSeaRow& b = kTidewaterSeaRows[i + 1];
+        const float f = std::clamp((w - a.wind) / (b.wind - a.wind), 0.0f, 1.0f);
+        fetch = a.fetchKm + (b.fetchKm - a.fetchKm) * f;
+        swell = a.swell + (b.swell - a.swell) * f;
+    }
+    else if (mode <= 4)
+    {
+        const TidewaterSeaRow& r = kTidewaterSeaRows[mode - 1];
+        wind = r.wind;
+        fetch = r.fetchKm;
+        swell = r.swell;
+    }
+    // the reference seas' swell factors (WaterWgpu.cpp, cascadePreset 3 / 4 / 5)
+    if (look.cascadePreset == 3)
+    {
+        swell *= 0.10f;
+    }
+    else if (look.cascadePreset == 4)
+    {
+        swell *= 1.90f;
+    }
+    else if (look.cascadePreset == 5)
+    {
+        swell *= 1.25f;
+    }
+    const float local = TidewaterLocalSeaVariance(wind, fetch);
+    return (local + kTidewaterSwellShare * swell / kTidewaterDefaultSwell) / (1.0f + kTidewaterSwellShare);
+}
+
 float SmoothStep(float edge0, float edge1, float x)
 {
     const float t = std::clamp((x - edge0) / (edge1 - edge0), 0.0f, 1.0f);
@@ -125,10 +211,19 @@ WaterSurfaceSample QueryWaterSurfaceScaled(float worldX, float worldZ, float tim
     const Engine::WaterSettings look = GEngine != nullptr ? GEngine->GetWaterSettings() : Engine::WaterSettings{};
     if (GEngine != nullptr && EffectiveWaterBackend(look) == 1)
     {
-        // Tidewater Native: follow the Tidewater look (see the block comment above).
-        const float swell = std::max(look.tidewater.swellScale, 0.0f) / kTidewaterDefaultSwell;
-        amplitudeScale = std::clamp(look.tidewater.amplitude, 0.0f, 4.0f) *
-                         std::sqrt((1.0f + kTidewaterSwellShare * swell) / (1.0f + kTidewaterSwellShare));
+        // Tidewater Native: follow the Tidewater look and, W6b, its weather-driven sea conditions
+        // (see the block comments above). The reference seas' amplitude factor (Sheltered x0.55,
+        // Rough x1.60) is the renderer's too.
+        float amplitude = std::clamp(look.tidewater.amplitude, 0.0f, 4.0f);
+        if (look.cascadePreset == 3)
+        {
+            amplitude *= 0.55f;
+        }
+        else if (look.cascadePreset == 5)
+        {
+            amplitude *= 1.60f;
+        }
+        amplitudeScale = amplitude * std::sqrt(TidewaterSeaVarianceScale(look));
         lengthScale = std::max(look.tidewater.cascadeScale, 0.01f);
         shoal = true;
     }
