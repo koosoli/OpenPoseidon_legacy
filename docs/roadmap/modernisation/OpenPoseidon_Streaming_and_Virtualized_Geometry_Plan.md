@@ -327,6 +327,27 @@ Default optional fields/branches are not zero cost. Fine eviction/refill remains
 future work; all ownership/reclaim/pressure/performance/default gates stay OPEN.
 Hashes and actual checkpoint scope are recorded in the CLOD pilot decision.
 
+**One-cycle fine eviction/refill and reflection checkpoint, clean 3d720430 at 12:18.**
+The five-target build (249 scheduled steps), C++ checks (16,004 assertions in
+31 cases) and seven Rust tests passed. Actual fine eviction preserved three
+historical handles: one Present coarse and two Absent old fine records.
+Cancellation retained 172,040 bytes of held refill scheduling debt. Fresh
+generation2 published two new handles/model: five historical records, three
+Present and two Absent. Finally all five were Absent with jobs/reservation zero.
+Stored fixture contents of 64,056 bytes exclude physical GPU payload, RSS, peak
+scratch and reclaimed bytes; a second cycle is refused. The CLOD regression
+records actual reflection commands with version2/592-byte facts and current
+frame/instance epoch; cached interior/GI remain honestly Pending. No pixel,
+survivor, queue or all-pass certification follows. The disabled control passed
+with zero payload/history. The candidate-only Disabled/Counted latency diagnostic
+passed735frames/drop0: mean48.995ms, median24.372ms, p95166.552ms, p99467.457ms,
+max938.199ms, returned19,923/required0. Large draw-init/terrain/swap hitches remain.
+No matched baseline, causal no-regression or performance acceptance is established;
+the unsupported raw-swap ABA helper remains unexecuted.
+Defaults stay off. Disk/retail/autopaging, ownership, reclaim, pressure and
+performance acceptance remain OPEN, as does the whole plan. Actual hashes are
+recorded in the linked pilot decision.
+
 **27 September 2026 refinement following the owner's RTX Mega Geometry question.**
 Keep the current shared streamer and bounded authored-LOD page prototype. For
 the later continuous-LOD bake, evaluate pinned upstream meshoptimizer

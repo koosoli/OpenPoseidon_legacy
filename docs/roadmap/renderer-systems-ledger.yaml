@@ -1057,6 +1057,16 @@ unbuilt_candidates: >-
       RAM pages only; no disk/autopaging/default worker allocation. Optional
       pointer fields/branches remain, not zero default cost. Fine eviction/refill,
       full ownership, physical reclaim and performance/default acceptance OPEN.
+      Clean3d720430 one-cycle fine retirement/refill passed: history3 retains
+      old fineAbsent2/coarsePresent1, cancelled held refill debt172040 retained,
+      generation2 yields history5/Present3/Absent2, final allAbsent/jobs0. No
+      physical reclamation follows. CLOD actual reflection facts v2/592 cap31
+      passed current-frame/epoch command-recording; stale interior/GI stay Pending.
+      Zero recorderPending does not mean pixels/all-pass/queue or full ownership.
+      Disabled122004 passed with zero payload/history. Candidate default122106
+      passed735 frames/drop0, mean48.995/median24.372/p95166.552/p99467.457/
+      max938.199ms; returned19923/required0. Draw-init/terrain/swap hitches remain.
+      One candidate-only diagnostic, no baseline ABA or performance acceptance.
       See decisions/GEOMETRY-CLOD-PILOT-20260927.md for hashes and narrow scope.
     production_call_sites:
       - file: engine/Poseidon/World/Terrain/LandSave.cpp

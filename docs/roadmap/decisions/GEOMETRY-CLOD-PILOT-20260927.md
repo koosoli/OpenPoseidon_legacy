@@ -1,11 +1,10 @@
 # Controlled resident CPU CLOD pilot
 
-Installed clean 28248174 adds an explicit bounded authored-page CPU worker and
-copied renderer command-recording facts; its actual cancellation/replacement
-runtime passed. The earlier bdb02bb8 resident CLOD paired-cut pilot also passed
-its regression on this build. The startup gate remains off by default; normal
-frames do not bake or run the page worker. Stage G and the full plan remain OPEN.
-Historically, the 11:06 installed 86971cce checkpoint linked CLOD only into Tests.
+Installed clean 3d720430 passed the explicit authored fine eviction/refill and
+actual reflection-command recording checks. The earlier bounded RAM-page worker
+and resident CLOD checkpoints remain historical evidence. The startup fixture
+gate remains off; normal frames perform no bake or page work. Stage G and the full
+plan remain OPEN, without performance/default or physical-reclaim acceptance.
 
 The dependency is upstream meshoptimizer at
 [`9e1f07b159d3cb777f1c67ed31fc11fd117986f4`](https://github.com/zeux/meshoptimizer/tree/9e1f07b159d3cb777f1c67ed31fc11fd117986f4),
@@ -301,3 +300,98 @@ Actual checkpoint SHA256 manifest:
 | build/stream-residency/authored-page-paging-disabled-20260927-20260927-115402/harness.jsonl | 42b6ab2850a1cb312c081c48bb302e33e17598a3f053c03c904400e052ef96f2 |
 | build/stream-residency/authored-page-paging-disabled-20260927-20260927-115402/provenance.json | 73fef6f9f20319cf1a9be254b0da901e0606560af55fa691eff35de271502456 |
 | build/stream-residency/authored-page-paging-disabled-20260927-20260927-115402/result.json | be998b54c1bccf1329a1f4dca5c82c0ead873db410da533547b35e7f9a0049b4 |
+
+
+## Actual one-cycle fine eviction/refill and reflection facts, 12:18
+
+Clean installed source 3d720430 passed the five-target build (249 scheduled
+steps), 16,004 assertions in 31 focused C++ cases without skips and seven Rust
+pass-fact tests, including the FFI rejected-layout output canary. Installed EXE
+SHA256 is `6b7aa69ae7aab27adf7bc58f27c9f01bb5a51f8d74a853d368cabc61512f7766`;
+DLL SHA256 is `6f2ad6687862f7e11ba0f2a0a79fa3c0c21db367c0e2840fe4de6ce090bd504d`.
+
+`authored-page-eviction-20260927-20260927-121822` passed with a clean exit. After
+an actual successful coarse frame, generation1 fine retirement preserved the
+ordered three-handle history: one Present coarse and two Absent old fine records.
+A held refill was cancelled with request zero while one active job and 172,040
+scheduling bytes remained. A distinct refill request queued beside it (two jobs,
+344,080 reserved bytes). Generation2 published a fresh model and two new mesh
+handles while preserving old identities: five historical records, three Present
+and two Absent. Final Abort made all five Absent with jobs/reservation zero.
+Known stored fixture contents were 64,056 bytes at the evicted/refilled/final cuts;
+these are not physical GPU payload, peak scratch, RSS or reclaimed bytes. One
+cycle is explicitly bounded; a second eviction returned Invalid. The independent
+coarse model and fixed instance survived throughout. History is never overwritten
+or shortened to conceal retired handles.
+
+`clod-reflection-facts-20260927-20260927-121859` passed with a clean exit. Copied
+facts now use version2/592 bytes and capabilities31. Its coarse observation
+required29/pending12, frame34/instanceEpoch4, cascade mask15, reflectionFrame34 /
+reflectionEpoch4, recordedThisFrame21. Other eviction cuts have pending0,4 or12;
+older interior/GI facts remain honestly Pending. A supported reflected command
+is recorded only after the actual indirect encoding helper succeeds and the pass
+closes, with the same frame and retained-instance epoch. v1/576 and mixed old
+layouts are refused before touching renderer or output. Recording still says
+nothing about nonzero survivors, this fixture's visibility, pixels, submission,
+completion or all-pass parity. A zero pending mask is limited to these recorder
+contracts, not complete renderer geometry ownership or visual certification.
+
+Disabled control `authored-eviction-disabled-20260927-20260927-122004` passed
+with a clean exit and zero fixture payload/history. The same installed candidate
+`default-after-eviction-reflection-20260927-disabled-20260927-122106` also passed
+with a clean exit, 735 captured frames and zero dropped frames. Raw frame times
+were mean48.995293877551056ms, median24.372ms, p95 166.552ms, p99 467.457ms and
+max938.199ms. Tails use nearest rank ceil(n*p)-1; the median is the middle value
+for this odd sample count. Returned residency was19,923, required0, geometry
+730,649,324 bytes/capacity1,275,068,416, textures2,835,557,268 bytes/2,563 entries,
+backend allocation5,387,195,840. Engine phases include drw:init avg17.981/p95
+124.150/max664.686ms, land:gnd max569.422ms and swap max904.632ms: substantial
+traversal hitches remain. This is one candidate-only Disabled/Counted/PBO-model1/
+DDC0/20,000-budget diagnostic, not every normal default setting or matched-work
+baseline. No performance/no-regression acceptance follows. No baseline A/B was executed: the private
+raw-pair-swap helper is incompatible with the mandatory supported Deploy.ps1 path
+and remains unexecuted. No performance verdict follows from these small fixtures.
+Defaults remain off; RAM pages only, no disk/retail/autopaging/pressure policy.
+The earlier ResourceGrowth failure and narrow repeat convergence pass remain
+material limits; full ownership, physical reclaim, performanceAccepted and
+defaultReady remain unresolved. Future changes are excluded from this install.
+
+Actual checkpoint SHA256 manifest:
+
+| Artifact | SHA256 |
+| --- | --- |
+| build/build-authored-eviction-reflection-20260927.log | 3ef85af47dc575530746cefdf2da720b781fa571833faec7f03d5d31ace9578a |
+| build/test-authored-eviction-reflection-20260927.log | 92f842d8031df2d3888e662a6cd7a2592934b2b763fc5f01bc0f62e1a4a2f251 |
+| build/test-reflection-pass-facts-20260927.log | ceaa0fc798c8ce5ac7cc5ea64fde54b84fba6b9ecb1d8a29d13c2a9e6f29e797 |
+| build/stream-residency/authored-page-eviction-20260927-20260927-121822/coarse.png | d286e3abcd1ce974a13136c431ec55fb68d74a0d973c2750122327bd0227baab |
+| build/stream-residency/authored-page-eviction-20260927-20260927-121822/engine.log | 506661c85fe333ac78a7a3046dbcd9ce7b15d866568e910ce5bc84a19ec92c52 |
+| build/stream-residency/authored-page-eviction-20260927-20260927-121822/evicted-coarse.png | b6dc21b37e6be9310eaf7fbb098959a30aab7fd8c61914af89f6f51806fd68ee |
+| build/stream-residency/authored-page-eviction-20260927-20260927-121822/fine.png | e870875b21b98ce48f24115db9a9bd749c984b8ebac697a663ad628bb8e1c510 |
+| build/stream-residency/authored-page-eviction-20260927-20260927-121822/harness.jsonl | 69aeb6671e61b45c4cdaeb4bf69ed5dd854769ea9d9b9796d74745ee4f9de266 |
+| build/stream-residency/authored-page-eviction-20260927-20260927-121822/initial-coarse.png | cbedeb45913f69dcaf3d974d7948241cd81dc11668eac82e7363b0bd4771e72c |
+| build/stream-residency/authored-page-eviction-20260927-20260927-121822/provenance.json | 58c3a766eab088d55e70f2875a88a78f741e347f0c5e95678d88b0db02fbfdc5 |
+| build/stream-residency/authored-page-eviction-20260927-20260927-121822/refilled-fine.png | 30c321aea495ad7c929f642ee5daf0e968d8644bee9a387a43e732271bc7ccaa |
+| build/stream-residency/authored-page-eviction-20260927-20260927-121822/result.json | 0a651ce95f4e0b2597e1a5360b1bb290af139cb1faa6e89579217f1830864a3b |
+| build/stream-residency/clod-reflection-facts-20260927-20260927-121859/coarse.png | d102a8dccbe2d9f3209a0bb65c7456e95cd405f0cd44583b4f318602a5a8906a |
+| build/stream-residency/clod-reflection-facts-20260927-20260927-121859/engine.log | c1df621933dfbd7c1e29225bee1765272dd803d6ef97b5b92671e83febaa8192 |
+| build/stream-residency/clod-reflection-facts-20260927-20260927-121859/fallback.png | b79db3148140d29161d5c97c80cdc78d32013936b49132c092ff51a04b2cec31 |
+| build/stream-residency/clod-reflection-facts-20260927-20260927-121859/fine.png | ba6a093354b446a1283617aa6f3b88f1b9c06601fd5c11000804b80c213e0e9a |
+| build/stream-residency/clod-reflection-facts-20260927-20260927-121859/harness.jsonl | 2768493f43ab654aa50ea9e1916dcb47948d7c8bc0ee8fdf8bb88e3b1a574623 |
+| build/stream-residency/clod-reflection-facts-20260927-20260927-121859/provenance.json | 32aec78b0a2cfcacd7478b6be35b60bb69983432236dea509a19bec9d00f86bb |
+| build/stream-residency/clod-reflection-facts-20260927-20260927-121859/result.json | c58dfe72f55a5536f3c314cf3c7ba7fc1f86436d456437dc5a4cc8678acac5be |
+| build/stream-residency/authored-eviction-disabled-20260927-20260927-122004/engine.log | acc6b3debc39abaa75120e35b42d3e5af5d433780c56ad0126d7f3a828af7d99 |
+| build/stream-residency/authored-eviction-disabled-20260927-20260927-122004/harness.jsonl | 8a2df6ec60c7319e80f648b28973c8ae8e632668948b6ecdffe44f8b00fa79b6 |
+| build/stream-residency/authored-eviction-disabled-20260927-20260927-122004/provenance.json | bf5e9b36139e63be83933a7818ea2571dfea199a10f9c7267ae4bef59479bbf9 |
+| build/stream-residency/authored-eviction-disabled-20260927-20260927-122004/result.json | 5b4550b0702980d6035b46d3a9451d7509f642709f6c8ca12eebff97ae24f40c |
+| build/stream-residency/default-after-eviction-reflection-20260927-disabled-20260927-122106/archive-source-binding-proof.json | 8fe3a4332e40730fde97bc5694eb6e10c793d43d85584ed81365ab122d387677 |
+| build/stream-residency/default-after-eviction-reflection-20260927-disabled-20260927-122106/engine.log | a11d31f2ff7455987afa59bed660d72df68ce2b301db68e314749caa1af70142 |
+| build/stream-residency/default-after-eviction-reflection-20260927-disabled-20260927-122106/harness.jsonl | d4b9839855969e63170e184ecf928bb77290e3269f22c32f3cb8e7f9bbbcd1e1 |
+| build/stream-residency/default-after-eviction-reflection-20260927-disabled-20260927-122106/paa-attempt-proof.json | 281bb4a2a21eb81d7afa18164e48ebac8bebea7f738a47450d6c743f7a5ad8bd |
+| build/stream-residency/default-after-eviction-reflection-20260927-disabled-20260927-122106/paa-inflight-proof.json | 5dfc8e239c862fa3a5dd0c12aad572afa3419f36d5615da4708d5b9146b4cdad |
+| build/stream-residency/default-after-eviction-reflection-20260927-disabled-20260927-122106/provenance.json | 5ba28308d7fd9e63feb6d0b25d02dcf6eed498a7752eda529df481a03b4f2941 |
+| build/stream-residency/default-after-eviction-reflection-20260927-disabled-20260927-122106/registration-quota-proof.json | 20f73eb3e05f3e884a86cdc4236af31b5022d2c14137d2c906ac90552b20de16 |
+| build/stream-residency/default-after-eviction-reflection-20260927-disabled-20260927-122106/result.json | 946cf16a220222776b65d739643cfb95981e32ad8c2f765a73495321a0825eda |
+| build/stream-residency/default-after-eviction-reflection-20260927-disabled-20260927-122106/returned-settled.png | d4ab7614ebb98d7a5f6074364616175c6b69d89100ccbd15583f5aeb3c117e83 |
+| build/stream-residency/default-after-eviction-reflection-20260927-disabled-20260927-122106/route-frame-ms.json | 1cfef78532ae7fff5178f3f5305b2f859cb056aee1cc03bffea2e7830d535bb8 |
+| build/stream-residency/default-after-eviction-reflection-20260927-disabled-20260927-122106/samples.jsonl | 7b0fcc3290232e21d1724fb1cb2c5590b14169c20f6557076d38e2a274d79a57 |
+| build/stream-residency/default-after-eviction-reflection-20260927-disabled-20260927-122106/warm-texture-job-proof.json | 908978856894f46faabad5ef2de34e55a089e443ff070341f8c404d27f6d0625 |
