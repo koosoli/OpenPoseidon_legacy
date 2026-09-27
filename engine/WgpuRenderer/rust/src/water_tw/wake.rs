@@ -87,6 +87,7 @@ impl WakeBoat {
             if !(fl > 1e-4) || ![a[0], a[1], b[0], b[1], c[0], c[1], c[2]].iter().all(|v| v.is_finite()) {
                 continue;
             }
+            let half_len = c[1].clamp(1.0, 45.0);
             *o = Some(WakeBoat {
                 id: b[3] as u32,
                 pos: [a[0], a[1]],
@@ -94,8 +95,10 @@ impl WakeBoat {
                 vel: [b[0], b[1]],
                 throttle: b[2].clamp(-1.0, 1.0),
                 driven: flags & 2 != 0,
-                half_beam: c[0].clamp(0.4, 12.0),
-                half_len: c[1].clamp(1.0, 45.0),
+                // OP's bounding boxes are wider than the hull (the PBR's reads 7.4 m for a ~3.5 m
+                // beam: crew and gun proxies): no displacement hull is wider than ~0.42 x its length
+                half_beam: c[0].clamp(0.4, 12.0).min(0.42 * half_len),
+                half_len,
                 draft: c[2].clamp(0.15, 5.0),
             });
         }
@@ -238,7 +241,7 @@ pub struct WakeGpu {
     enabled: bool,
 }
 
-/// `WGR_TW_WAKE_TUNE=foam=0.35,draft=1,source=1,wash=1,aer=1,amp=1`: look overrides for
+/// `WGR_TW_WAKE_TUNE=foam=0.2,draft=0.7,source=1,wash=0.8,aer=1,amp=1`: look overrides for
 /// captures (foam gain, draft scale, pressure gain, wash scale, aeration gain, height scale).
 #[derive(Clone, Copy, Debug)]
 struct Tune {
@@ -253,7 +256,10 @@ struct Tune {
 fn tune() -> Tune {
     static V: std::sync::OnceLock<Tune> = std::sync::OnceLock::new();
     *V.get_or_init(|| {
-        let mut t = Tune { foam: 0.35, draft: 1.0, source: 1.0, wash: 1.0, aer: 1.0, amp: 1.0 };
+        // OP defaults (W6h.2, from the tuning captures on twwake.eden): Tidewater's foam gain
+        // (0.35) and wash saturate the track of a PBR at 13 m/s into one white slab 150 m long,
+        // and the box bottom (props, rudder) reads deeper than the hull
+        let mut t = Tune { foam: 0.2, draft: 0.7, source: 1.0, wash: 0.8, aer: 1.0, amp: 1.0 };
         if let Ok(v) = std::env::var("WGR_TW_WAKE_TUNE") {
             for kv in v.split(',') {
                 let mut it = kv.splitn(2, '=');
