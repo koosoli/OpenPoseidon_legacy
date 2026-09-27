@@ -12,6 +12,7 @@ param(
     [switch]$RegistrationQuota,
     [switch]$ArchiveSourceBindings,
     [switch]$WarmTextureJobs,
+    [switch]$LegacySectionRefresh,
     [string]$Label = 'dayz-streaming-latency',
     [string]$GameDir = 'D:\SteamLibrary\steamapps\common\ARMA Cold War Assault'
 )
@@ -37,6 +38,7 @@ if (!$env:LOCK_OWNER) {
         if ($RegistrationQuota) { $argv += '-RegistrationQuota' }
         if ($ArchiveSourceBindings) { $argv += '-ArchiveSourceBindings' }
         if ($WarmTextureJobs) { $argv += '-WarmTextureJobs' }
+        if ($LegacySectionRefresh) { $argv += '-LegacySectionRefresh' }
         & 'C:\Program Files\Git\bin\bash.exe' @argv
         if ($LASTEXITCODE) { throw "Latency screening exited $LASTEXITCODE" }
     } finally { Remove-Item Env:LOCK_OWNER }
@@ -76,6 +78,7 @@ $environment = @{
     WGR_NATIVE_DDS_PREPARE = '0'; WGR_NATIVE_DDS_BC3_ONLY = '0'
     WGR_ADAPTIVE_TEXTURE_DETAIL = '0'; WGR_LOD_GOVERNOR_RANGE = '1'; WGR_SKY_VOLUME_INCREMENTAL = '1'
     WGR_TEXTURE_STREAM_STATS = '0'
+    WGR_CULL_SECTION_REFRESH = $(if ($LegacySectionRefresh) { '0' } else { '1' })
 }
 if ($TerrainPageTimings) {
     $environment.WGR_TERRAIN_PAGE_TIMINGS = '1'
@@ -116,6 +119,8 @@ try {
         registrationQuota = [bool]$RegistrationQuota
         archiveSourceBindings = [bool]$ArchiveSourceBindings
         warmTextureJobs = [bool]$WarmTextureJobs
+        legacySectionRefresh = [bool]$LegacySectionRefresh
+        cullSectionRefreshEnvironment = [string]$environment.WGR_CULL_SECTION_REFRESH
         installed = (Get-Content (Join-Path $GameDir 'DEPLOYED-FROM.txt')); hashes = $initialHashes
         world = $world; environment = $environment; clearedEnvironmentNames = $clearNames
         pose = @($baseX, $baseZ, $baseY, $azimuth, $elevation); routeX = $route; poseHoldSeconds = 3
@@ -317,6 +322,7 @@ try {
         registrationQuota = [bool]$RegistrationQuota; registrationQuotaProof = $quotaProof
         archiveSourceBindings = [bool]$ArchiveSourceBindings; archiveSourceBindingProof = $archiveBindings
         warmTextureJobs = [bool]$WarmTextureJobs; warmTextureJobProof = $warmJobProof
+        legacySectionRefresh = [bool]$LegacySectionRefresh; cullSectionRefreshEnvironment = [string]$environment.WGR_CULL_SECTION_REFRESH
         limitation = 'No automatic performance threshold, vanilla parity, cold-cache guarantee or whole-world query readiness; compare matched separate mode processes'
     } | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $out 'result.json')
     Write-Output "DayZ latency screening evidence: $out"

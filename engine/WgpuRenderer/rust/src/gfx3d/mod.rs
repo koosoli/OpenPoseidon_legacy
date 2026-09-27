@@ -7,6 +7,7 @@ mod allocation_report;
 mod mesh_facts;
 mod mesh_ack;
 mod registered_mesh_refs;
+mod section_refresh;
 mod local_pose_cache;
 pub(crate) mod geometry_pass_facts;
 mod lod_feedback;
@@ -1194,7 +1195,7 @@ struct Mesh {
 
 // One GPU-driven section's registration source: the mesh handle it lives in, its mesh-local
 // index range, and its pipeline variant. Kept so base_vertex / first_index can be re-resolved
-// from the current mesh alloc each frame (the pool can move a mesh on VB recreate).
+// from the current generational mesh map after structural changes. Live offsets never move.
 #[derive(Clone, Copy)]
 struct GpuSectionSrc {
     mesh: u64,
@@ -4176,10 +4177,13 @@ pub struct Gfx3d {
     // Per-section registration source (mesh handle + mesh-local range + variant), parallel to
     // the cull's sections table and in the same append order. The pool can relocate a mesh's
     // vertices (VB release + recreate on LOD optimisation / shape reload changes its vbase), so
-    // base_vertex / first_index are RE-RESOLVED from the current mesh alloc every frame in
-    // prepare_cull — exactly as the CPU indirect + shadow paths do — instead of being captured
-    // once at registration (which would leave a stale vbase pointing at freed/reused pool bytes).
+    // base_vertex / first_index are re-resolved after structural mesh/model changes or pool
+    // buffer generation changes. A live allocation never moves; updates/skinning rewrite only
+    // content. Clean frames retain the exact previous resolution, including missing handles.
     gpu_section_src: Vec<GpuSectionSrc>,
+    // Address validity only: fixed source descriptors + generational mesh map.
+    // 16 bytes of scalar state; no allocation, clock, per-source bit or frame scan.
+    gpu_section_refresh: section_refresh::SectionRefreshValidity,
     // Diagnostic: last-reported count of sections whose mesh handle resolved to nothing
     // (stale/destroyed). u32::MAX = never reported. Logged under WGR_GPU_DEBUG when it changes.
     gpu_dbg_stale: u32,
@@ -4929,6 +4933,8 @@ impl Gfx3d {
             indirect_args_cap: 0,
             gpu_driven_enabled,
             gpu_section_src: Vec::new(),
+            gpu_section_refresh: section_refresh::SectionRefreshValidity::from_setting(
+                std::env::var("WGR_CULL_SECTION_REFRESH").ok().as_deref()),
             gpu_dbg_stale: u32::MAX,
             multi_draw_count_enabled,
             cull_inputs: cull::CullInputs::default(),
@@ -5404,6 +5410,8 @@ impl Gfx3d {
             aabb_min,
             aabb_max,
         });
+        // New full-generational identity can change a formerly missing source.
+        self.gpu_section_refresh.invalidate();
         key.data().as_ffi()
     }
 
@@ -5611,6 +5619,7 @@ impl Gfx3d {
             let key: MeshKey = KeyData::from_ffi(handle).into();
             // Return the mesh's pool ranges to the free-list so a later load reuses them.
             if let Some(mesh) = self.meshes.remove(key) {
+                self.gpu_section_refresh.invalidate();
                 self.pool
                     .free(&mesh.alloc, mesh.vert_count, mesh.index_count);
             }
@@ -8423,11 +8432,13 @@ impl Gfx3d {
     // Mutable access to the retained scene for the FFI registration path (Stage 3b-3).
     #[allow(dead_code)] // wired to the model/instance FFI in Stage 3b-3
     pub fn cull_scene(&mut self) -> &mut cull::CullState {
+        // Mutable escape hatch must not bypass section-table validity.
+        self.gpu_section_refresh.invalidate();
         &mut self.cull
     }
 
-    // Resolve one section's pool addressing from the CURRENT mesh alloc (the pool can relocate
-    // a mesh's geometry, so this is done fresh — at registration and again every frame). An
+    // Resolve one section's addressing from the CURRENT generational mesh map. A live
+    // allocation never moves; registration and structural changes require fresh resolution. An
     // unknown mesh handle draws nothing (index_count = 0), keeping the tables parallel.
     fn resolve_section(&self, src: &GpuSectionSrc) -> cull::SectionGpu {
         let key: MeshKey = KeyData::from_ffi(src.mesh).into();
@@ -8449,38 +8460,45 @@ impl Gfx3d {
         }
     }
 
-    // Re-resolve every registered section's pool addressing from the current mesh allocs and
-    // push it into the cull's sections table. The pool relocates a mesh's geometry when its VB
-    // is released + recreated (LOD optimisation / shape reload), which changes its vbase — the
-    // CPU indirect + shadow paths avoid a stale base_vertex by resolving fresh each frame, and
-    // this does the same for the GPU-driven set. No-op when nothing is registered.
+    // Resolve registered sections only after structural changes. MeshAlloc offsets are fixed
+    // for a mesh lifetime; recreation has a new full-generational identity. Vertex uploads and
+    // skin-bake writes do not alter this function's inputs. Pool growth/tail shrink preserve
+    // live offsets too, but generation changes conservatively force the original full refresh.
+    // This skips no mutation/cull/upload work outside the section-address refresh itself.
     fn refresh_cull_sections(&mut self) {
-        if self.gpu_section_src.is_empty() {
-            return;
-        }
-        let mut stale = 0u32;
-        let resolved: Vec<cull::SectionGpu> = self
-            .gpu_section_src
-            .iter()
-            .map(|s| {
-                let r = self.resolve_section(s);
-                // A non-empty section that resolves to 0 indices => its mesh handle is gone.
-                if s.index_count != 0 && r.index_count == 0 {
-                    stale += 1;
-                }
-                r
-            })
-            .collect();
-        if stale != self.gpu_dbg_stale {
-            eprintln!(
-                "[wgr] refresh_cull_sections: {}/{} sections have a STALE/destroyed mesh handle \
-                 (resolve -> 0 indices); those draw nothing",
-                stale,
-                self.gpu_section_src.len(),
-            );
-            self.gpu_dbg_stale = stale;
-        }
-        self.cull.set_sections(&resolved);
+        let pool_generation = self.pool.generation();
+        let validity = self.gpu_section_refresh;
+        let refreshed = validity.run_if_needed(pool_generation, || {
+            if self.gpu_section_src.is_empty() {
+                return;
+            }
+            let mut stale = 0u32;
+            let resolved: Vec<cull::SectionGpu> = self
+                .gpu_section_src
+                .iter()
+                .map(|s| {
+                    let r = self.resolve_section(s);
+                    // A non-empty section that resolves to 0 indices => its mesh handle is gone.
+                    if s.index_count != 0 && r.index_count == 0 {
+                        stale += 1;
+                    }
+                    r
+                })
+                .collect();
+            if stale != self.gpu_dbg_stale {
+                eprintln!(
+                    "[wgr] refresh_cull_sections: {}/{} sections have a STALE/destroyed mesh handle \
+                     (resolve -> 0 indices); those draw nothing",
+                    stale,
+                    self.gpu_section_src.len(),
+                );
+                self.gpu_dbg_stale = stale;
+            }
+            self.cull.set_sections(&resolved);
+        });
+        // Callback completion only: panic/allocation failure leaves the original live
+        // dirty state (or different pool generation) intact for the next attempt.
+        self.gpu_section_refresh = refreshed;
     }
 
     // Register a GPU-driven model from the FFI descriptors (docs/gpu-culling-and-depth-plan.md
@@ -8519,7 +8537,7 @@ impl Gfx3d {
             })
             .collect();
         // Validate + optionally dump the registration-time resolution (diagnostics only; the
-        // authoritative resolution happens each frame in refresh_cull_sections).
+        // authoritative resolution runs after structural changes in refresh_cull_sections).
         for (k, s) in srcs.iter().enumerate() {
             let key: MeshKey = KeyData::from_ffi(s.mesh).into();
             match self.meshes.get(key) {
@@ -8558,6 +8576,8 @@ impl Gfx3d {
         }
         let gpu_sections: Vec<cull::SectionGpu> =
             srcs.iter().map(|s| self.resolve_section(s)).collect();
+        // Invalidate before append, including any exceptional partial mutation.
+        self.gpu_section_refresh.invalidate();
         self.gpu_section_src.extend_from_slice(&srcs);
         // `materials` is parallel to `sections` (one material per section), so the
         // section's flags word rides across here -- DZ-003's reflective bit lives in
@@ -8811,6 +8831,7 @@ impl Gfx3d {
     }
 
     pub fn retire_model(&mut self, model: u32) {
+        self.gpu_section_refresh.invalidate();
         self.cull.retire_model(model);
         // A completed readback of a dead model must not consume its slot again.
         self.sky_bakes_pending.retain(|(id, _, _)| *id != model);
