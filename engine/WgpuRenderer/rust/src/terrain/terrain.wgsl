@@ -185,7 +185,10 @@ const TW_LACE_TILE: f32 = 3.5;
 const TW_LACE_N: i32 = 512;
 
 fn tw_sim_inside(uv: vec2<f32>) -> f32 {
-    return smoothstep(0.0, 0.02, uv.x) * smoothstep(1.0, 0.98, uv.x) * smoothstep(0.0, 0.02, uv.y) * smoothstep(1.0, 0.98, uv.y);
+    // (W3k: 15% of the region, ~57 m, instead of Tidewater's 2%. Tidewater's one region covers its
+    // whole bay, so its border never crosses the surf; OP's regions follow the camera along the
+    // coast, and a 7.6 m fade drew the region's square outline across the whitewater.)
+    return smoothstep(0.0, 0.15, uv.x) * smoothstep(1.0, 0.85, uv.x) * smoothstep(0.0, 0.15, uv.y) * smoothstep(1.0, 0.85, uv.y);
 }
 
 // (layer, inside x weight) of the region the point is deepest inside
