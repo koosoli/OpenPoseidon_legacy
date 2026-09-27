@@ -14,6 +14,7 @@ using namespace Poseidon;
 #include <Poseidon/Dev/Diag/StreamingDiag.hpp>
 #include <Poseidon/Graphics/Textures/PreparedTextures.hpp>
 #include <Poseidon/IO/Streams/ArchiveSourceBinding.hpp>
+#include <Poseidon/World/Terrain/WarmTextureProvenance.hpp>
 #include <Poseidon/Dev/Diag/BallisticsRecorder.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/Dev/Debug/DevPanelWidgets.hpp>
@@ -450,6 +451,8 @@ void RegisterScreenshot(HarnessServer& hs)
         });
     hs.RegisterCommand({"archive_source_bindings", "Read-only bounded actual-read PAA provenance counters", {}},
         [](const std::string&, cJSON*) -> std::string {
+            const auto* trace = Streaming::WarmTextureProvenance::Active();
+            const auto traceSummary = trace ? trace->Observe() : Streaming::WarmTextureProvenance::Summary{};
             const auto snapshot = ArchiveSourceBinding::SnapshotStats();
             auto* result = cJSON_CreateObject();
             cJSON_AddBoolToObject(result, "enabled", snapshot.enabled);
@@ -465,6 +468,11 @@ void RegisterScreenshot(HarnessServer& hs)
             ARCHIVE_BINDING_FIELD(weakWrappersPublished); ARCHIVE_BINDING_FIELD(weakInitializedHandoffs);
             ARCHIVE_BINDING_FIELD(weakFailedInitCompletions);
             ARCHIVE_BINDING_FIELD(weakPeakReservationCells); ARCHIVE_BINDING_FIELD(weakPeakReservationBytes);
+            ARCHIVE_BINDING_FIELD(traceKnownCppBytes);
+            cJSON_AddBoolToObject(result, "warmTraceEnabled", trace != nullptr);
+            cJSON_AddNumberToObject(result, "warmTraceSources", traceSummary.sources);
+            cJSON_AddNumberToObject(result, "warmTraceRows", traceSummary.rows);
+            cJSON_AddBoolToObject(result, "warmTraceTruncated", traceSummary.truncated);
 #undef ARCHIVE_BINDING_FIELD
             cJSON_AddStringToObject(result, "scope", "Mapped raw PAA Init evidence; liveBindings counts strong native leases, weakCells counts separately charged cache/control metadata within the same total byte cap. Cumulative publication/first Init completion survives cell destruction; peakReservation is charged metadata overlap, not allocator/RSS. Expired cached evidence remains Unknown; no freshness, physical-memory, useful-upload or performance proof");
             return HarnessProtocol::JsonResponse(result);

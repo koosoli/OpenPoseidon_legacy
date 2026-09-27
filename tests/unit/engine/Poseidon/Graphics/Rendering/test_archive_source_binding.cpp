@@ -174,6 +174,13 @@ TEST_CASE("PAA source retains exact cached physical member across mount selectio
     REQUIRE_FALSE(replacement.fail());
     auto newBinding = replacement.GetBuffer()->GetArchiveSourceBinding(); REQUIRE(newBinding);
     CHECK_FALSE(oldBinding->Request().SameArchiveMember(newBinding->Request()));
+    BankReadMemberIdentity oldMember, newMember;
+    REQUIRE(oldBinding->Request().CopyMemberIdentity(oldMember));
+    REQUIRE(newBinding->Request().CopyMemberIdentity(newMember));
+    CHECK_FALSE(oldMember == newMember);
+    BankReadMemberIdentity sameMember;
+    REQUIRE(firstRequest->CopyMemberIdentity(sameMember));
+    CHECK(oldMember == sameMember);
     // FileCache deliberately keeps the earlier buffer even if selection now names another bank.
     scope.server->cache.Store(replacement, "binding-fixture\\texture.paa");
     auto cachedAgain = CreateSource("binding-fixture\\texture.paa"); REQUIRE(cachedAgain);

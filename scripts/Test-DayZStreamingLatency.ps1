@@ -15,6 +15,7 @@ param(
     [switch]$WarmMaterialPreflight,
     [switch]$HotSourceProofRetirement,
     [switch]$WeakCacheProof,
+    [switch]$WarmTextureProvenance,
     [switch]$RequireHotSourceProofRetirement,
     [switch]$RequireWarmMaterialPreflightUpload,
     [switch]$RequireWarmMaterialStageUpload,
@@ -37,6 +38,7 @@ if ($RequireWarmMaterialStageUpload) { $WarmTextureJobs = $true; $WarmProfile = 
 if ($RequireWarmMaterialPreflightUpload) { $WarmMaterialPreflight = $true }
 if ($WarmMaterialPreflight) { $WarmTextureJobs = $true; $WarmProfile = $true }
 if ($WeakCacheProof) { $HotSourceProofRetirement = $true }
+if ($WarmTextureProvenance) { $WarmTextureJobs = $true; $WarmProfile = $true }
 if ($RequireHotSourceProofRetirement) { $HotSourceProofRetirement = $true }
 if ($HotSourceProofRetirement) { $WarmTextureJobs = $true; $WarmProfile = $true }
 if ($WarmTextureJobs) { $ArchiveSourceBindings = $true }
@@ -63,6 +65,7 @@ if (!$env:LOCK_OWNER) {
         if ($WarmMaterialPreflight) { $argv += '-WarmMaterialPreflight' }
         if ($HotSourceProofRetirement) { $argv += '-HotSourceProofRetirement' }
         if ($WeakCacheProof) { $argv += '-WeakCacheProof' }
+        if ($WarmTextureProvenance) { $argv += '-WarmTextureProvenance' }
         if ($RequireHotSourceProofRetirement) { $argv += '-RequireHotSourceProofRetirement' }
         if ($RequireWarmMaterialPreflightUpload) { $argv += '-RequireWarmMaterialPreflightUpload' }
         if ($RequireWarmMaterialStageUpload) { $argv += '-RequireWarmMaterialStageUpload' }
@@ -123,6 +126,7 @@ $environment = @{
     WGR_WATER_BACKEND = '0'
     WGR_OBJECT_STREAM_WARM_MATERIAL_PREFLIGHT = $(if ($WarmMaterialPreflight) { '1' } else { '0' })
     WGR_OBJECT_STREAM_WEAK_CACHE_PROOF = $(if ($WeakCacheProof) { '1' } else { '0' })
+    WGR_OBJECT_STREAM_WARM_TEXTURE_TRACE = $(if ($WarmTextureProvenance) { '1' } else { '0' })
     WGR_OBJECT_STREAM_HOT_SOURCE_PROOF_RETIRE = $(if ($HotSourceProofRetirement) { '1' } else { '0' })
 }
 if ($TerrainPageTimings) {
@@ -171,7 +175,7 @@ try {
         warmTextureJobs = [bool]$WarmTextureJobs
         warmMaterialPreflight = [bool]$WarmMaterialPreflight
         hotSourceProofRetirement = [bool]$HotSourceProofRetirement
-        weakCacheProof = [bool]$WeakCacheProof
+        weakCacheProof = [bool]$WeakCacheProof; warmTextureProvenance = [bool]$WarmTextureProvenance
         requireHotSourceProofRetirement = [bool]$RequireHotSourceProofRetirement
         requireWarmMaterialPreflightUpload = [bool]$RequireWarmMaterialPreflightUpload
         requireWarmMaterialStageUpload = [bool]$RequireWarmMaterialStageUpload
@@ -306,6 +310,22 @@ try {
         $archiveBindings.weakPeakReservationBytes -ne 0)){throw 'OFF path unexpectedly recorded weak-cache work'}
     if($WeakCacheProof -and ($archiveBindings.weakWrappersPublished -lt 1 -or $archiveBindings.weakInitializedHandoffs -lt 1 -or
         $archiveBindings.weakPeakReservationCells -lt 1 -or $archiveBindings.weakPeakReservationBytes -lt 1)){throw 'NotExercised: no actual first initialized weak-cache handoff with bounded charged reservation observed'}
+    foreach($name in @('warmTraceEnabled','warmTraceSources','warmTraceRows','warmTraceTruncated','traceKnownCppBytes')) {
+        if($null -eq $archiveBindings.PSObject.Properties[$name]){throw "Missing warm provenance state $name"}
+    }
+    if($archiveBindings.warmTraceEnabled -isnot [bool] -or $archiveBindings.warmTraceTruncated -isnot [bool] -or
+        $archiveBindings.warmTraceEnabled -ne [bool]$WarmTextureProvenance){throw 'Warm provenance flag/type mismatch'}
+    foreach($name in @('warmTraceSources','warmTraceRows','traceKnownCppBytes')){
+        $v=$archiveBindings.$name
+        if($null -eq $v -or $v -is [bool] -or $v -is [string] -or [double]::IsNaN([double]$v) -or
+            [double]::IsInfinity([double]$v) -or [double]$v -lt 0 -or [Math]::Floor([double]$v) -ne [double]$v){throw "Invalid warm provenance counter $name"}
+    }
+    if($WarmTextureProvenance){
+        if($archiveBindings.warmTraceSources -lt 1 -or $archiveBindings.warmTraceSources -gt 8 -or
+            $archiveBindings.warmTraceRows -lt 1 -or $archiveBindings.warmTraceRows -gt 128 -or
+            $archiveBindings.traceKnownCppBytes -lt 1 -or $archiveBindings.traceKnownCppBytes -gt $archiveBindings.knownCppBytes){throw 'NotExercised: no bounded charged warm provenance events'}
+    }elseif($archiveBindings.warmTraceSources -ne 0 -or $archiveBindings.warmTraceRows -ne 0 -or
+        $archiveBindings.traceKnownCppBytes -ne 0 -or $archiveBindings.warmTraceTruncated){throw 'OFF path unexpectedly recorded warm provenance'}
     if ($ArchiveSourceBindings) {
         if ($archiveBindings.capBindings -ne 256 -or $archiveBindings.capBytes -ne 2097152 -or
             $archiveBindings.wrappedReads -lt 1 -or $archiveBindings.initRetains -lt 1 -or
@@ -564,6 +584,7 @@ try {
         registrationQuota = [bool]$RegistrationQuota; registrationQuotaProof = $quotaProof
         archiveSourceBindings = [bool]$ArchiveSourceBindings; archiveSourceBindingProof = $archiveBindings
         weakCacheProof = [bool]$WeakCacheProof; weakCacheProofState = $archiveBindings
+        warmTextureProvenance = [bool]$WarmTextureProvenance
         hotSourceProofRetirement = [bool]$HotSourceProofRetirement; hotSourceProofRetirementProof = $hotRetirementProof
         warmMaterialPreflight = [bool]$WarmMaterialPreflight; warmMaterialPreflightProof = $warmPreflightProof
         warmTextureJobs = [bool]$WarmTextureJobs; warmTextureJobProof = $warmJobProof

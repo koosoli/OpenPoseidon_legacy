@@ -10,49 +10,54 @@ class ArchiveSourceBudget : public std::enable_shared_from_this<ArchiveSourceBud
 {
 public:
     struct Snapshot { size_t bindings = 0, bytes = 0, weakCells = 0, weakBytes = 0;
-        size_t weakPeakReservationCells = 0, weakPeakReservationBytes = 0; };
+        size_t weakPeakReservationCells = 0, weakPeakReservationBytes = 0, traceBytes = 0; };
     class Ticket
     {
         friend class ArchiveSourceBudget;
         struct Key { private: Key() = default; friend class ArchiveSourceBudget; };
         std::shared_ptr<ArchiveSourceBudget> _budget;
         size_t _bytes;
-        bool _weak;
+        enum class Kind : uint8_t { Binding, Weak, Trace };
+        Kind _kind;
     public:
-        Ticket(Key, std::shared_ptr<ArchiveSourceBudget> budget, size_t bytes, bool weak) noexcept
-            : _budget(std::move(budget)), _bytes(bytes), _weak(weak) {}
+        Ticket(Key, std::shared_ptr<ArchiveSourceBudget> budget, size_t bytes, Kind kind) noexcept
+            : _budget(std::move(budget)), _bytes(bytes), _kind(kind) {}
         Ticket(const Ticket&) = delete;
         Ticket& operator=(const Ticket&) = delete;
         Ticket(Ticket&&) = delete;
         Ticket& operator=(Ticket&&) = delete;
-        ~Ticket() { _budget->Release(_bytes, _weak); }
+        ~Ticket() { _budget->Release(_bytes, _kind); }
     };
     ArchiveSourceBudget(size_t bindings, size_t bytes, size_t weakCells = 1024)
         : _maxBindings(bindings), _maxBytes(bytes), _maxWeakCells(weakCells) {}
     std::shared_ptr<const Ticket> Acquire(size_t bytes, bool* capacityRefused = nullptr)
-    { return AcquireImpl(bytes, false, capacityRefused); }
+    { return AcquireImpl(bytes, Ticket::Kind::Binding, capacityRefused); }
     std::shared_ptr<const Ticket> AcquireWeak(size_t bytes, bool* capacityRefused = nullptr)
-    { return AcquireImpl(bytes, true, capacityRefused); }
+    { return AcquireImpl(bytes, Ticket::Kind::Weak, capacityRefused); }
+    std::shared_ptr<const Ticket> AcquireTrace(size_t bytes, bool* capacityRefused = nullptr)
+    { return AcquireImpl(bytes, Ticket::Kind::Trace, capacityRefused); }
 private:
-    std::shared_ptr<const Ticket> AcquireImpl(size_t bytes, bool weak, bool* capacityRefused)
+    std::shared_ptr<const Ticket> AcquireImpl(size_t bytes, Ticket::Kind kind, bool* capacityRefused)
     {
         if (capacityRefused) *capacityRefused = false;
         std::lock_guard<std::mutex> lock(_mutex);
-        if (!bytes || (weak ? _live.weakCells >= _maxWeakCells : _live.bindings >= _maxBindings) ||
+        if (!bytes || (kind == Ticket::Kind::Weak ? _live.weakCells >= _maxWeakCells :
+             kind == Ticket::Kind::Binding && _live.bindings >= _maxBindings) ||
             bytes > _maxBytes - _live.bytes)
         { if (capacityRefused) *capacityRefused = true; return {}; }
         try
         {
             // make_shared allocates BEFORE this noexcept constructor. Failed allocation
             // cannot destroy an uncharged Ticket or reenter our locked Release path.
-            auto ticket = std::make_shared<const Ticket>(Ticket::Key{}, shared_from_this(), bytes, weak);
-            if (weak)
+            auto ticket = std::make_shared<const Ticket>(Ticket::Key{}, shared_from_this(), bytes, kind);
+            if (kind == Ticket::Kind::Weak)
             {
                 ++_live.weakCells; _live.weakBytes += bytes;
                 if (_live.weakCells > _live.weakPeakReservationCells) _live.weakPeakReservationCells = _live.weakCells;
                 if (_live.weakBytes > _live.weakPeakReservationBytes) _live.weakPeakReservationBytes = _live.weakBytes;
             }
-            else ++_live.bindings;
+            else if (kind == Ticket::Kind::Binding) ++_live.bindings;
+            else _live.traceBytes += bytes;
             _live.bytes += bytes;
             return ticket;
         }
@@ -61,11 +66,12 @@ private:
 public:
     Snapshot Observe() const { std::lock_guard<std::mutex> lock(_mutex); return _live; }
 private:
-    void Release(size_t bytes, bool weak)
+    void Release(size_t bytes, Ticket::Kind kind)
     {
         std::lock_guard<std::mutex> lock(_mutex);
-        if (weak) { --_live.weakCells; _live.weakBytes -= bytes; }
-        else --_live.bindings;
+        if (kind == Ticket::Kind::Weak) { --_live.weakCells; _live.weakBytes -= bytes; }
+        else if (kind == Ticket::Kind::Binding) --_live.bindings;
+        else _live.traceBytes -= bytes;
         _live.bytes -= bytes;
     }
     mutable std::mutex _mutex;
@@ -114,13 +120,14 @@ public:
         // Cumulative wrapper publication and FIRST bootstrap completion only.
         uint64_t weakWrappersPublished = 0, weakInitializedHandoffs = 0, weakFailedInitCompletions = 0;
         // Charged reservation high-water; includes allocation overlap/failure, not RSS.
-        size_t weakPeakReservationCells = 0, weakPeakReservationBytes = 0;
+        size_t weakPeakReservationCells = 0, weakPeakReservationBytes = 0, traceKnownCppBytes = 0;
         uint64_t wrappedReads = 0, initRetains = 0, captureRefused = 0,
             capacityRefused = 0, allocationRefused = 0;
     };
     // Separate non-lease cells share the unchanged byte budget; no source-cap raise.
     static bool CacheHandoffEnabled();
     static std::shared_ptr<const ArchiveSourceBudget::Ticket> ReserveWeakCell(size_t bytes);
+    static std::shared_ptr<const ArchiveSourceBudget::Ticket> ReserveTraceMetadata(size_t bytes);
     static Stats SnapshotStats();
     static void NoteCacheInitCompletion(bool initialized); // Owner-only weak cell first completion, after dropping bootstrap.
     static void NoteInitRetained(); // Called only after successful Init retaining buffer evidence.

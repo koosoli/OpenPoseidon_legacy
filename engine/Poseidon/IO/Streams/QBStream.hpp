@@ -8,6 +8,7 @@
 #include <Poseidon/IO/Streams/QStream.hpp>
 #include <Poseidon/IO/Streams/FileInfo.h>
 #include <cstdint>
+#include <cstring>
 #include <map>
 #include <memory>
 #include <string>
@@ -24,6 +25,16 @@ class BankArchiveReadLease;
 // Owner-thread snapshot of an uncompressed member. Read owns its stream and never
 // accesses bank cursors, the VFS MRU or engine references. Consumers must reject
 // results from a departed mount/world generation before publishing them.
+// Copied numeric physical member identity, never a source lease or file path.
+// Equality mirrors SameArchiveMember for exact successful Windows captures.
+struct BankReadMemberIdentity
+{
+    uint64_t volume = 0, archiveBytes = 0, offset = 0, bytes = 0;
+    unsigned char fileId[16]{};
+    bool operator==(const BankReadMemberIdentity& rhs) const noexcept
+    { return volume == rhs.volume && archiveBytes == rhs.archiveBytes && offset == rhs.offset &&
+        bytes == rhs.bytes && std::memcmp(fileId, rhs.fileId, sizeof(fileId)) == 0; }
+};
 struct BankReadRequest
 {
     std::string archive;
@@ -38,6 +49,7 @@ struct BankReadRequest
     // Known retained C++ object/string capacity, not kernel handle or RSS cost.
     size_t ArchiveIdentityBytes() const;
     bool SameArchiveMember(const BankReadRequest& other) const;
+    bool CopyMemberIdentity(BankReadMemberIdentity& out) const; // No IO; leaves out untouched on refusal.
     bool Read(std::vector<char>& out) const;
 };
 

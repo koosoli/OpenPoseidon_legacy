@@ -1,6 +1,7 @@
 #include <Poseidon/Graphics/Textures/PreparedTextures.hpp>
 #include <Poseidon/Graphics/Textures/DdsImport.hpp>
 #include <Poseidon/IO/Streams/ArchiveSourceBinding.hpp>
+#include <Poseidon/World/Terrain/WarmTextureProvenance.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -394,6 +395,8 @@ bool PreparedTextureStore::Put(const std::string& key, PAABlockChain&& chain,
     pending.back().alphaFacts = std::move(alphaFacts);
     pending.back().warmSource = std::move(warmSource);
     const bool boundWarm = bool(pending.back().warmSource);
+    auto* trace = Streaming::WarmTextureProvenance::Active();
+    const auto traceToken = trace && boundWarm ? Streaming::WarmTextureProvenance::Match(key, pending.back().warmSource) : 0;
     if (publication) pending.back().publication = *publication;
     // Conservatively charge a shared source witness per entry as well as the
     // source-capture process cap. Neither number measures physical memory.
@@ -451,6 +454,9 @@ bool PreparedTextureStore::Put(const std::string& key, PAABlockChain&& chain,
     freeLater.clear(); // outside the lock
     if (!stored)
         chain = PAABlockChain{};
+    if (trace) Streaming::WarmTextureProvenance::Emit(trace->Stamp(traceToken, stored ?
+        Streaming::WarmTextureProvenance::Event::StorePut :
+        Streaming::WarmTextureProvenance::Event::StorePutRefused));
     return stored;
 }
 
@@ -523,6 +529,14 @@ bool PreparedTextureStore::Take(const std::string& key, PAABlockChain& out,
     if (!Enabled() || key.empty())
         return false;
     std::list<Impl::Entry> retired;
+    using Proof = Streaming::WarmTextureProvenance;
+    struct Exit
+    {
+        Proof* proof = nullptr; uint32_t token = 0;
+        Proof::Event event = Proof::Event::StoreTakeMissKeyOnly;
+        explicit Exit(const std::string& key) : proof(Proof::Active()), token(proof ? proof->KeyOnly(key) : 0) {}
+        ~Exit() { if (proof) Proof::Emit(proof->Stamp(token, event)); }
+    } trace(key);
     std::lock_guard<std::mutex> lock(_impl->mutex);
     auto it = _impl->byKey.find(key);
     if (it == _impl->byKey.end() || !it->second->chain.valid())
@@ -532,6 +546,12 @@ bool PreparedTextureStore::Take(const std::string& key, PAABlockChain& out,
     }
     if (it->second->publication.inventory && !it->second->publication.Valid())
     {
+        if (it->second->warmSource)
+        {
+            trace.event = Proof::Event::StoreTakeCancelled;
+            trace.token = Proof::Match(key, it->second->warmSource);
+        }
+        else trace.event = Proof::Event::Count;
         _impl->CountCancelled(*it->second);
         _impl->EraseLocked(it, nullptr, nullptr, &retired);
         ++_impl->stats.misses;
@@ -539,16 +559,20 @@ bool PreparedTextureStore::Take(const std::string& key, PAABlockChain& out,
     }
     if (it->second->warmSource)
     {
+        trace.token = Proof::Match(key, it->second->warmSource);
         if (!warmSource)
         {
+            trace.event = Proof::Event::StoreTakeRefused;
             ++_impl->stats.warmSourceRefused;
             _impl->EraseLocked(it, nullptr, nullptr, &retired);
             ++_impl->stats.misses;
             return false;
         }
         *warmSource = it->second->warmSource;
+        trace.event = Proof::Event::StoreTakeWarm;
         ++_impl->stats.warmTakes;
     }
+    if (!it->second->warmSource) trace.event = Proof::Event::Count; // successful non-warm take is not a warm miss
     _impl->EraseLocked(it, &out, nullptr, &retired);
     ++_impl->stats.takes;
     _impl->stats.takeBytes += out.blocks.size();

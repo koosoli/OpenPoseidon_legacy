@@ -2,6 +2,7 @@
 // thread-safety boundary; this file is the mechanism only.
 
 #include <Poseidon/World/Terrain/ObjectStreamPrepare.hpp>
+#include <Poseidon/World/Terrain/WarmTextureProvenance.hpp>
 #include <Poseidon/World/Terrain/ObjectStreamTextureNames.hpp>
 #include <Poseidon/World/Terrain/LoosePaaPreparation.hpp>
 #include <Poseidon/World/Terrain/PaaPreparationInflight.hpp>
@@ -509,19 +510,32 @@ bool ObjectStreamPreparer::Impl::PreparePackedTexture(const PackedTextureRead& t
     uint64_t& skipped, uint64_t& unreadable)
 {
     auto& store = render::PreparedTextureStore::Instance();
+    using Proof = Streaming::WarmTextureProvenance;
+    struct TraceExit
+    {
+        Proof* proof = nullptr; uint32_t token = 0;
+        Proof::Event outcome = Proof::Event::WorkerOutcomeUnknown;
+        ~TraceExit() { if (proof) Proof::Emit(proof->Stamp(token, outcome)); }
+    } trace;
+    if (texture.initializedSource)
+    {
+        trace.proof = Proof::Active();
+        trace.token = Proof::Match(texture.key, texture.initializedSource);
+    }
 
     {
         std::lock_guard<std::mutex> pendingLock(mutex);
         if (stop || jobGen != generation.load(std::memory_order_relaxed) || index >= count || stale[index] ||
-            (publicationRequired && !publication.Valid())) { if (paaAttemptDiagnostics) ++attemptRow.cancelledBeforeRead; return false; }
+            (publicationRequired && !publication.Valid())) { trace.outcome = Proof::Event::WorkerCancelled; if (paaAttemptDiagnostics) ++attemptRow.cancelledBeforeRead; return false; }
     }
-    if (!(texture.initializedSource ? store.ShouldPrepareWarm(texture.key) : store.ShouldPrepare(texture.key))) { ++skipped; if (paaAttemptDiagnostics) ++attemptRow.preSkipped; return true; }
+    if (!(texture.initializedSource ? store.ShouldPrepareWarm(texture.key) : store.ShouldPrepare(texture.key))) { trace.outcome = Proof::Event::WorkerSkipped; ++skipped; if (paaAttemptDiagnostics) ++attemptRow.preSkipped; return true; }
     Streaming::PaaPreparationInflight::Result inflight{Streaming::PaaPreparationInflight::Outcome::UnleasedOrInvalid, {}};
     if (paaInflight && publicationRequired)
     {
         inflight = paaInflight->Acquire(texture.key, textureGeneration, texture.ReadRequest(), publication);
         if (inflight.outcome == Streaming::PaaPreparationInflight::Outcome::Suppressed)
         {
+            trace.outcome = Proof::Event::WorkerSuppressed;
             if (paaAttemptDiagnostics) ++attemptRow.inFlightSuppressed;
             if (!paaInflightProofLogged.exchange(true, std::memory_order_relaxed))
             {
@@ -545,7 +559,7 @@ bool ObjectStreamPreparer::Impl::PreparePackedTexture(const PackedTextureRead& t
             std::vector<char> source;
             if (!texture.ReadRequest().Read(source) || source.capacity() > 2 * PackedTextureLimit ||
                 !ReadPAABlockChainBuffer(source.data(), source.size(),
-                    chain, nullptr, PackedTextureLimit)) { ++unreadable; if (paaAttemptDiagnostics) ++attemptRow.readFailed; return true; }
+                    chain, nullptr, PackedTextureLimit)) { trace.outcome = Proof::Event::WorkerReadFailed; ++unreadable; if (paaAttemptDiagnostics) ++attemptRow.readFailed; return true; }
         }
         const double readDecodeMs = paaAttemptDiagnostics ? std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - readBegan).count() : 0;
         if (paaAttemptDiagnostics) attemptRow.readDecodeMs += readDecodeMs;
@@ -565,17 +579,17 @@ bool ObjectStreamPreparer::Impl::PreparePackedTexture(const PackedTextureRead& t
                 facts = render::PreparedTextureStore::BuildAlphaFacts(chain, texture.ReadRequest(), cancelled);
         }
         catch (...) { } // optional analysis failure retains the original upload chain
-        if (cancelled()) { store.NoteAlphaFactsCancelled(); if (paaAttemptDiagnostics) ++attemptRow.cancelledBeforePut; return false; }
+        if (cancelled()) { trace.outcome = Proof::Event::WorkerCancelled; store.NoteAlphaFactsCancelled(); if (paaAttemptDiagnostics) ++attemptRow.cancelledBeforePut; return false; }
         // CPU read/decode/facts subset excludes the observer latch and Put.
         const double readDecodeFactsMs = paaAttemptDiagnostics ? std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - readBegan).count() : 0;
         if (publicationObserver.beforePaaPut)
             publicationObserver.beforePaaPut(publicationObserver.context, bool(facts));
         if (store.Put(texture.key, std::move(chain), textureGeneration, std::move(facts),
                 publicationRequired ? &publication : nullptr, texture.initializedSource))
-        { ++prepared; preparedBytes += bytes; if (paaAttemptDiagnostics) ++attemptRow.accepted; }
-        else { ++skipped; if (paaAttemptDiagnostics) { ++attemptRow.rejected; attemptRow.rejectedReadDecodeMs += readDecodeMs; attemptRow.rejectedReadDecodeFactsMs += readDecodeFactsMs; } }
+        { trace.outcome = Proof::Event::WorkerPut; ++prepared; preparedBytes += bytes; if (paaAttemptDiagnostics) ++attemptRow.accepted; }
+        else { trace.outcome = Proof::Event::WorkerPutRefused; ++skipped; if (paaAttemptDiagnostics) { ++attemptRow.rejected; attemptRow.rejectedReadDecodeMs += readDecodeMs; attemptRow.rejectedReadDecodeFactsMs += readDecodeFactsMs; } }
     }
-    catch (...) { ++unreadable; if (paaAttemptDiagnostics) ++attemptRow.threw; } // ordinary owner-thread decode remains the fallback
+    catch (...) { trace.outcome = Proof::Event::WorkerReadFailed; ++unreadable; if (paaAttemptDiagnostics) ++attemptRow.threw; } // ordinary owner-thread decode remains the fallback
     return true;
 }
 
@@ -809,6 +823,10 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                 {
                     const auto& read = job.reads[job.next];
                     PackedTextureRead texture{read.key, {}, read.initializedSource, &read.initializedSource->Request()};
+                    if (auto* proof = Streaming::WarmTextureProvenance::Active())
+                        Streaming::WarmTextureProvenance::Emit(proof->Stamp(
+                            Streaming::WarmTextureProvenance::Match(read.key, read.initializedSource),
+                            Streaming::WarmTextureProvenance::Event::WorkerStarted, job.index, job.generation));
                     keep = PreparePackedTexture(texture, job.generation, job.index, job.textureGeneration,
                         job.publication, true, row, prepared, bytes, skipped, unreadable);
                     ++job.next;
@@ -1632,6 +1650,25 @@ ObjectStreamPreparer::WarmTextureSubmit ObjectStreamPreparer::SubmitWarmTextures
 {
     if (!WarmTextureJobsEnabled()) return WarmTextureSubmit::Disabled;
     if (!Foundation::IsMainThread()) return WarmTextureSubmit::WrongThread;
+    // Numeric receipt outlives every queue lock. It never owns a source or key.
+    struct SubmitTrace
+    {
+        Streaming::WarmTextureProvenance* proof = Streaming::WarmTextureProvenance::Active();
+        std::array<uint32_t, 8> tokens{}; size_t count = 0; bool submitted = false, stamped = false;
+        std::array<Streaming::WarmTextureProvenance::Row, 8> rows{};
+        void Capture() { if (!proof || stamped) return; stamped = true;
+            for (size_t i = 0; i < count; ++i) rows[i] = proof->Stamp(tokens[i], submitted ?
+                Streaming::WarmTextureProvenance::Event::Submitted :
+                Streaming::WarmTextureProvenance::Event::SubmitRefused); }
+        ~SubmitTrace() { Capture(); for (size_t i = 0; i < count; ++i)
+            Streaming::WarmTextureProvenance::Emit(rows[i]); }
+    } trace;
+    if (trace.proof) for (const auto& read : reads)
+    {
+        if (trace.count == trace.tokens.size()) break;
+        const auto token = Streaming::WarmTextureProvenance::Match(read.key, read.initializedSource);
+        if (token) trace.tokens[trace.count++] = token;
+    }
     // Validate bounded immutable evidence before taking the queue lock. No bank
     // lookup, source read or new source lease is performed by this API.
     uint64_t charge = sizeof(Impl::WarmState) + Streaming::WarmTextureJobPolicy::JobLimit * sizeof(Impl::WarmJob) + 256; // conservatively charge all queue storage per live job
@@ -1683,6 +1720,7 @@ ObjectStreamPreparer::WarmTextureSubmit ObjectStreamPreparer::SubmitWarmTextures
         _impl->stats.warmTextureMetadataBytesPeak = std::max(_impl->stats.warmTextureMetadataBytesPeak, _impl->stats.warmTextureMetadataBytes);
         _impl->stats.warmTextureQueued = _impl->warm ? _impl->warm->queue.size() : 0;
         ++_impl->stats.warmTextureJobsSubmitted;
+        trace.submitted = true; trace.Capture(); // stamp before worker dequeue, log after queue mutex
     }
     _impl->cv.notify_all();
     return WarmTextureSubmit::Submitted;

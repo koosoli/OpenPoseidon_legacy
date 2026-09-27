@@ -1106,6 +1106,22 @@ size_t BankReadRequest::ArchiveIdentityBytes() const
 #endif
 }
 
+bool BankReadRequest::CopyMemberIdentity(BankReadMemberIdentity& out) const
+{
+#ifdef _WIN32
+    if (!HasArchiveIdentity()) return false;
+    BankReadMemberIdentity value;
+    value.volume = archiveLease->identity.fileId.VolumeSerialNumber;
+    value.archiveBytes = archiveLease->identity.size;
+    value.offset = offset; value.bytes = bytes;
+    std::memcpy(value.fileId, archiveLease->identity.fileId.FileId.Identifier, sizeof(value.fileId));
+    out = value;
+    return true;
+#else
+    (void)out;
+    return false;
+#endif
+}
 bool BankReadRequest::SameArchiveMember(const BankReadRequest& other) const
 {
 #ifdef _WIN32
@@ -1233,6 +1249,11 @@ bool ArchiveSourceBinding::CacheHandoffEnabled()
     }();
     return enabled;
 }
+std::shared_ptr<const ArchiveSourceBudget::Ticket> ArchiveSourceBinding::ReserveTraceMetadata(size_t bytes)
+{
+    try { return SourceBindingState().budget->AcquireTrace(bytes); }
+    catch (...) { return {}; }
+}
 std::shared_ptr<const ArchiveSourceBudget::Ticket> ArchiveSourceBinding::ReserveWeakCell(size_t bytes)
 {
     if (!CacheHandoffEnabled()) return {};
@@ -1345,6 +1366,7 @@ ArchiveSourceBinding::Stats ArchiveSourceBinding::SnapshotStats()
         out.weakAllocationRefused = state.weakAllocationRefused.load(std::memory_order_relaxed);
         out.liveBindings = live.bindings;
         out.knownCppBytes = live.bytes + ArchiveBindingState::FixedCharge;
+        out.traceKnownCppBytes = live.traceBytes;
         out.wrappedReads = state.wrapped.load(std::memory_order_relaxed);
         out.initRetains = state.retained.load(std::memory_order_relaxed);
         out.captureRefused = state.captureRefused.load(std::memory_order_relaxed);

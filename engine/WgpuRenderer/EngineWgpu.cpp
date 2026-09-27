@@ -19,6 +19,7 @@
 #include "EngineWgpu.hpp"
 #include "GeometryOwnerLedger.hpp"
 #include <Poseidon/World/Terrain/ObjectStreamPrepare.hpp>
+#include <Poseidon/World/Terrain/WarmTextureProvenance.hpp>
 #include <Poseidon/World/Terrain/WarmMaterialStagePreflightPolicy.hpp>
 #include <Poseidon/IO/Streams/ArchiveSourceBinding.hpp>
 #include <atomic>
@@ -10679,6 +10680,17 @@ void EngineWgpu::CaptureWarmTextureReads(const LODShapeWithShadow* shape,
         if (key.empty() || key.size() > 8191 ||
             std::any_of(reads.begin(), reads.end(), [&](const auto& prior) { return prior.key == key; })) { ++sizeOrKeyRefused; return; }
         reads.push_back({key, std::move(source)});
+        if (auto* proof = Streaming::WarmTextureProvenance::Active())
+        {
+            BankReadMemberIdentity identity;
+            const auto& retainedSource = reads.back().initializedSource;
+            if (retainedSource->Request().CopyMemberIdentity(identity))
+            {
+                const auto token = proof->Admit(key, identity);
+                Streaming::WarmTextureProvenance::Emit(proof->Stamp(token,
+                    Streaming::WarmTextureProvenance::Event::Accepted, retainedSource->Request().bytes));
+            }
+        }
     };
     if (const auto found = _gpuModelTextures.find(shape); found != _gpuModelTextures.end())
     {

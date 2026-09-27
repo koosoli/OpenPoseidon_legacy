@@ -20,6 +20,7 @@
 #include <Poseidon/IO/Streams/QBStream.hpp>
 #include <Poseidon/IO/Streams/QStream.hpp>
 #include <Poseidon/IO/Streams/ArchiveSourceBinding.hpp>
+#include <Poseidon/World/Terrain/WarmTextureProvenance.hpp>
 #include <Poseidon/Foundation/Threads/ThreadAffinity.hpp>
 
 #include <Poseidon/Graphics/Textures/Bc3Encoder.hpp>
@@ -1886,6 +1887,14 @@ uint64_t TextureWgpu::EnsureUploaded()
             render::ColdPaaRead currentHeader;
             if (render::ColdPaaHandoffEnabled() && CaptureColdPaaRead(currentHeader))
                 fromColdHandoff = render::ColdPaaAdmissionScope::Claim(key, currentHeader.source, currentHeader, prepared);
+            if (auto* proof = Streaming::WarmTextureProvenance::Active())
+            {
+                const auto current = CurrentArchiveSourceBinding(); // Existing no-read loaded-mount check, opt-in only.
+                const uint32_t token = current ? Streaming::WarmTextureProvenance::Match(key, current) : proof->KeyOnly(key);
+                Streaming::WarmTextureProvenance::Emit(proof->Stamp(token, current ?
+                    Streaming::WarmTextureProvenance::Event::OwnerExactAttempt :
+                    Streaming::WarmTextureProvenance::Event::OwnerKeyOnlyAttempt));
+            }
             const bool taken = fromColdHandoff || (render::PreparedTextureStore::Enabled() &&
                 render::PreparedTextureStore::Instance().Take(key, prepared, &warmPreparedSource));
             if (terrainTiming.enabled)
@@ -1898,10 +1907,17 @@ uint64_t TextureWgpu::EnsureUploaded()
                 const PacFormat preparedFormat = PacFormatFromMagic(prepared.magic);
                 bool matches = preparedFormat == dst &&
                                prepared.levels.size() >= static_cast<size_t>(firstLevel + levelCount);
+                bool sourceRefusedForTrace = false;
                 if (matches && warmPreparedSource)
                 {
                     const auto currentSource = CurrentArchiveSourceBinding();
                     matches = currentSource && currentSource->Request().SameArchiveMember(warmPreparedSource->Request());
+                    sourceRefusedForTrace = !matches;
+                    if (auto* proof = Streaming::WarmTextureProvenance::Active())
+                        Streaming::WarmTextureProvenance::Emit(proof->Stamp(
+                            Streaming::WarmTextureProvenance::Match(key, warmPreparedSource), matches ?
+                            Streaming::WarmTextureProvenance::Event::SourceValidated :
+                            Streaming::WarmTextureProvenance::Event::SourceRefused));
                 }
                 for (int i = 0; matches && i < levelCount; i++)
                 {
@@ -1910,6 +1926,13 @@ uint64_t TextureWgpu::EnsureUploaded()
                     const size_t want = static_cast<size_t>(render::mipmap::ComputeLayout(dst, mip._w, mip._h).dataSize);
                     matches = level.width == mip._w && level.height == mip._h && level.size == want &&
                               level.offset + level.size <= prepared.blocks.size() && offsets[i] + want <= total;
+                }
+                if (!matches && warmPreparedSource && !sourceRefusedForTrace)
+                {
+                    if (auto* proof = Streaming::WarmTextureProvenance::Active())
+                        Streaming::WarmTextureProvenance::Emit(proof->Stamp(
+                            Streaming::WarmTextureProvenance::Match(key, warmPreparedSource),
+                            Streaming::WarmTextureProvenance::Event::LayoutRefused));
                 }
                 if (matches)
                 {
@@ -2053,6 +2076,22 @@ uint64_t TextureWgpu::EnsureUploaded()
                 LOG_INFO(Graphics, "Cold PAA handoff upload: source={} bytes={} sourceValidated=true blockUploadSucceeded=true operationLocal=true row={} limit=16",
                     SourceName(), total, rows);
             } else if (rows == 16) { ++rows; LOG_INFO(Graphics, "Cold PAA handoff upload truncated: limit=16; prefix only, no all-texture/model performance proof"); }
+        }
+        if (auto* proof = Streaming::WarmTextureProvenance::Active())
+        {
+            if (fromPrepared && warmPreparedSource)
+                Streaming::WarmTextureProvenance::Emit(proof->Stamp(
+                    Streaming::WarmTextureProvenance::Match(render::PreparedTextureStore::Key(SourceName()), warmPreparedSource),
+                    _gpuHandle ? Streaming::WarmTextureProvenance::Event::UploadSucceeded :
+                    Streaming::WarmTextureProvenance::Event::UploadFailed, total));
+            else if (_gpuHandle)
+            {
+                const auto current = CurrentArchiveSourceBinding();
+                if (current)
+                    Streaming::WarmTextureProvenance::Emit(proof->Stamp(
+                        Streaming::WarmTextureProvenance::Match(render::PreparedTextureStore::Key(SourceName()), current),
+                        Streaming::WarmTextureProvenance::Event::OrdinaryUpload, total));
+            }
         }
         if (warmPreparedSource && fromPrepared)
         {
