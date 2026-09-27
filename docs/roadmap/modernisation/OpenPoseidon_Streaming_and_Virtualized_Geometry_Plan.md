@@ -659,3 +659,84 @@ ownership, reclaim and all-pass acceptance remain outstanding.
 
 
 Exact hashes are recorded in `../decisions/GEOMETRY-CLOD-PILOT-20260927.md`.
+
+## Current CPU attribution and retained-content correctness, 13:26
+
+Clean installed `abd75075` includes unchanged section-resolver extraction and
+actual stale-model main/shadow/color GPU testing (`dddf5df6`), caller-owned current
+render CPU timings/ABI16 (`c1af1457`), exact startup diagnostic opt-in and strict
+runner OFF checks (`3d74e072`, `ab92017c`), model-retirement retained-content epoch
+invalidation (`c1608923`) and unchanged Crown upload suppression (`abd75075`).
+The earlier26-step five-target build passed but was not installed; final18-step
+five-target build passed. Eight Rust tests passed with no failures/ignored/adapter
+skips, including three explicit actual-GPU PASS markers. Expected caught upload
+panic remains a passed refusal test, not an uncaught build/runtime error.
+
+Only a retirement that changes nonzero LOD section counts advances the existing
+retained-content epoch. Repeated/unknown/already-empty retirement is inert; slot
+identity, generation and instance upload ranges remain unchanged. This closes
+that model-retirement cache-key seam, not arbitrary mesh/pose/dynamic changes or
+all cached-image pixel correctness. Actual GPU tests keep stale A's instance,
+retire A, retain B, then reuse A's mesh slot at a new full generation without pool
+relocation and verify exact B/C addresses across main/shadow/color. Model append
+marks four changed upload domains, preserves pending Crown, and initialized Crown
+GPU sentinel/capacity stays untouched until a real Crown append. Missing-buffer
+model/crown/section bootstrap and shared-view growth rebinding remain verified.
+
+Current CPU facts use an additive matched ABI16 function and caller-owned72-byte/
+v1 snapshot. Exact cached startup `WGR_RENDER_CALL_CPU_TIMINGS=1` plus the existing
+slow-block gate opts in; slow-block itself defaults100ms and therefore is not an
+opt-in. OFF calls the original render entry and reads no uninitialized snapshot.
+Completed acquired frames copy the current accumulators after present/harvest;
+skipped acquire and failed/panicked calls clear unavailable facts. Old latest
+getter semantics remain historical. Token identifies the call, not GPU completion.
+No retained renderer snapshot/heap/new clocks; caller stack/gate branches are real
+costs. Foreign layout/token refuses before sentinel dereference; ABI15 is refused.
+
+Actual combined paging `combined-pages-retained-epoch-20260927-20260927-132718`
+passed with clean exit, final14Absent/job0/reservation0 and retained-content epoch21.
+Independent fallback/paired coarse/fine/refill, cancellation debt and historical
+handles remain intact. Record/command facts are still not physical-reclaim,
+queue-completion, nonzero-survivor, pixel or all-pass proof.
+
+Actual same-binary DayZ profile132735 and normal-diagnostic-OFF133030 passed with
+clean exits/zero dropped frames. Profile collected seven paired current-call rows
+from seven slow rows; OFF had four slow rows/zero paired rows and disabled timing
+facts. Raw route metrics use ordinary median and nearest-rank ceil(n*p)-1 tails
+(the tail values coincide with the root floor-index summary for these two counts):
+
+| Arm | Frames | Mean ms | Median ms | p95 ms | p99 ms | Max ms |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Profile132735 | 727 | 49.024567 | 24.326 | 181.443 | 436.068 | 929.794 |
+| DiagnosticOFF133030 | 793 | 44.17028 | 25.481 | 129.548 | 398.908 | 1107.168 |
+
+Both returned19,923 residents/required0/capacity1,275,068,416. Profile geometry
+722,708,572 versus OFF710,804,036 bytes; textures2,774,738,164/2,511 versus
+2,749,704,948/2,491 entries; backend5,327,299,856 versus5,301,168,000.
+Profiling overhead, ordered cache/async history and unequal allocated work forbid
+causal performance/no-regression acceptance. The OFF maximum1,107.168ms remains
+an actual hitch; this snapshot is not normal-default acceptance or vanilla parity.
+
+The bounded parser separates startup from log completions inside the armed route
+window (13:28:13.663–13:28:49.471). Four paired slow rows finish inside capture;
+one records acquire697.201ms/setup-inclusive705.210ms, not a decompression claim.
+Twenty captured warm rows include max texture-read695.743ms/total799.018ms.
+Two captured terrain uploads include ensure737.488ms versus descriptor5.495ms,
+load-owner3.007ms and total748.182ms. These same-field observations are not summed
+across overlapping hierarchies, threads or boundary-spanning calls. CPU acquire includes the complete acquire() call: runtime diagnostics/pool/storage
+event draining precede get_current_texture. The697.201ms observation cannot isolate
+surface wait from that preamble. CPU submit/upload includes owner waits, not GPU
+elapsed time. Mip-chain log cap128
+saturated at startup13:27:56.857; there are zero captured mip-chain rows, so it
+cannot classify the route texture-read bottleneck. Terrain sampled source is a
+bounded source-family observation, not all texture coverage or overall throughput.
+
+Future disk codec/capture-reset patches are unbuilt/excluded. Whole plan and
+Stage G remain OPEN; experimental paging and CPU profiling default OFF,
+performanceAccepted/defaultReady false. No global ownership/reclaim/pressure or
+all-pass certification follows. Installed EXE SHA256
+75B1B1978EFB6C423725FBB7B687757E8AFCDD45B885F0851527F225C99B0EB8;
+DLL313FB39C72FF892D3EAF149AD848C1CAD0622CBB2C5C9966223339CD3D74FEB9.
+
+
+Exact artifact hashes are recorded in `../decisions/GEOMETRY-CLOD-PILOT-20260927.md`.

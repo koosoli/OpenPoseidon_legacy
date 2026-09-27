@@ -1,11 +1,11 @@
 # Controlled resident CPU CLOD pilot
 
-Installed clean c072453c passed the explicit combined selected-CLOD RAM worker,
-independent fallback, one-cycle fine eviction/refill and cancellation-debt checks.
-Default GPU table uploads now use verified dirty domains; traversal performance
-for this new mask remains unmeasured. Earlier51 screening was mixed. The startup
-fixture gate remains off; normal frames perform no bake/page work. Stage G/full
-plan remain OPEN, without performance/default or physical-reclaim acceptance.
+Installed clean abd75075 passed retained-content retirement invalidation,
+unchanged Crown table uploads and explicit paired current-render CPU attribution.
+The combined CLOD RAM paging fixture remains verified; normal diagnostic-OFF
+DayZ traversal still hitches and establishes no performance acceptance. Earlier
+checkpoints remain historical. Startup fixture/profiling gates remain off;
+Stage G/full plan OPEN, performance/default and physical-reclaim unaccepted.
 
 The dependency is upstream meshoptimizer at
 [`9e1f07b159d3cb777f1c67ed31fc11fd117986f4`](https://github.com/zeux/meshoptimizer/tree/9e1f07b159d3cb777f1c67ed31fc11fd117986f4),
@@ -568,3 +568,108 @@ Actual checkpoint SHA256 manifest:
 | build/stream-residency/combined-pages-disabled-20260927-20260927-131349/provenance.json | 3bfca9e27d8aaeaec7a9c32a05ce6cce501bb4e4ca8a3f97cb1b73a5d79ce666 |
 | build/stream-residency/combined-pages-disabled-20260927-20260927-131349/engine.log | 6435f12888e2e902e174b1d12eee6b0d65fdbfe762cd0f30c7a9f0e4819bb0c5 |
 | build/stream-residency/combined-pages-disabled-20260927-20260927-131349/harness.jsonl | 0bd3055df8ce15bb0b5c546408dad951d0945741adfdef238f4247398ad8dba7 |
+
+## Actual retained-content invalidation and paired CPU attribution, 13:26
+
+Clean installed `abd75075` includes unchanged section-resolver extraction and
+actual stale-model main/shadow/color GPU testing (`dddf5df6`), caller-owned current
+render CPU timings/ABI16 (`c1af1457`), exact startup diagnostic opt-in and strict
+runner OFF checks (`3d74e072`, `ab92017c`), model-retirement retained-content epoch
+invalidation (`c1608923`) and unchanged Crown upload suppression (`abd75075`).
+The earlier26-step five-target build passed but was not installed; final18-step
+five-target build passed. Eight Rust tests passed with no failures/ignored/adapter
+skips, including three explicit actual-GPU PASS markers. Expected caught upload
+panic remains a passed refusal test, not an uncaught build/runtime error.
+
+Only a retirement that changes nonzero LOD section counts advances the existing
+retained-content epoch. Repeated/unknown/already-empty retirement is inert; slot
+identity, generation and instance upload ranges remain unchanged. This closes
+that model-retirement cache-key seam, not arbitrary mesh/pose/dynamic changes or
+all cached-image pixel correctness. Actual GPU tests keep stale A's instance,
+retire A, retain B, then reuse A's mesh slot at a new full generation without pool
+relocation and verify exact B/C addresses across main/shadow/color. Model append
+marks four changed upload domains, preserves pending Crown, and initialized Crown
+GPU sentinel/capacity stays untouched until a real Crown append. Missing-buffer
+model/crown/section bootstrap and shared-view growth rebinding remain verified.
+
+Current CPU facts use an additive matched ABI16 function and caller-owned72-byte/
+v1 snapshot. Exact cached startup `WGR_RENDER_CALL_CPU_TIMINGS=1` plus the existing
+slow-block gate opts in; slow-block itself defaults100ms and therefore is not an
+opt-in. OFF calls the original render entry and reads no uninitialized snapshot.
+Completed acquired frames copy the current accumulators after present/harvest;
+skipped acquire and failed/panicked calls clear unavailable facts. Old latest
+getter semantics remain historical. Token identifies the call, not GPU completion.
+No retained renderer snapshot/heap/new clocks; caller stack/gate branches are real
+costs. Foreign layout/token refuses before sentinel dereference; ABI15 is refused.
+
+Actual combined paging `combined-pages-retained-epoch-20260927-20260927-132718`
+passed with clean exit, final14Absent/job0/reservation0 and retained-content epoch21.
+Independent fallback/paired coarse/fine/refill, cancellation debt and historical
+handles remain intact. Record/command facts are still not physical-reclaim,
+queue-completion, nonzero-survivor, pixel or all-pass proof.
+
+Actual same-binary DayZ profile132735 and normal-diagnostic-OFF133030 passed with
+clean exits/zero dropped frames. Profile collected seven paired current-call rows
+from seven slow rows; OFF had four slow rows/zero paired rows and disabled timing
+facts. Raw route metrics use ordinary median and nearest-rank ceil(n*p)-1 tails
+(the tail values coincide with the root floor-index summary for these two counts):
+
+| Arm | Frames | Mean ms | Median ms | p95 ms | p99 ms | Max ms |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Profile132735 | 727 | 49.024567 | 24.326 | 181.443 | 436.068 | 929.794 |
+| DiagnosticOFF133030 | 793 | 44.17028 | 25.481 | 129.548 | 398.908 | 1107.168 |
+
+Both returned19,923 residents/required0/capacity1,275,068,416. Profile geometry
+722,708,572 versus OFF710,804,036 bytes; textures2,774,738,164/2,511 versus
+2,749,704,948/2,491 entries; backend5,327,299,856 versus5,301,168,000.
+Profiling overhead, ordered cache/async history and unequal allocated work forbid
+causal performance/no-regression acceptance. The OFF maximum1,107.168ms remains
+an actual hitch; this snapshot is not normal-default acceptance or vanilla parity.
+
+The bounded parser separates startup from log completions inside the armed route
+window (13:28:13.663–13:28:49.471). Four paired slow rows finish inside capture;
+one records acquire697.201ms/setup-inclusive705.210ms, not a decompression claim.
+Twenty captured warm rows include max texture-read695.743ms/total799.018ms.
+Two captured terrain uploads include ensure737.488ms versus descriptor5.495ms,
+load-owner3.007ms and total748.182ms. These same-field observations are not summed
+across overlapping hierarchies, threads or boundary-spanning calls. CPU acquire includes the complete acquire() call: runtime diagnostics/pool/storage
+event draining precede get_current_texture. The697.201ms observation cannot isolate
+surface wait from that preamble. CPU submit/upload includes owner waits, not GPU
+elapsed time. Mip-chain log cap128
+saturated at startup13:27:56.857; there are zero captured mip-chain rows, so it
+cannot classify the route texture-read bottleneck. Terrain sampled source is a
+bounded source-family observation, not all texture coverage or overall throughput.
+
+Future disk codec/capture-reset patches are unbuilt/excluded. Whole plan and
+Stage G remain OPEN; experimental paging and CPU profiling default OFF,
+performanceAccepted/defaultReady false. No global ownership/reclaim/pressure or
+all-pass certification follows. Installed EXE SHA256
+75B1B1978EFB6C423725FBB7B687757E8AFCDD45B885F0851527F225C99B0EB8;
+DLL313FB39C72FF892D3EAF149AD848C1CAD0622CBB2C5C9966223339CD3D74FEB9.
+
+Actual checkpoint SHA256 manifest:
+
+| Artifact | SHA256 |
+| --- | --- |
+| build/build-render-call-cpu-stale-views-20260927.log | d007023bc1c152562cca117e0db8d19634a06867cb21a84e537119697833d380 |
+| build/build-render-call-cpu-retirement-crown-20260927.log | a793a5d1739f0d8a5662b6a4e9e4abaff757c5e7f448ccd28666f77b6d1952b3 |
+| build/test-render-cpu-retirement-crown-20260927.log | 508b8bf7061f2f2c441afc7392107989235dd43d204e00a0cf8d5d9e02acd846 |
+| build/default-dayz-paired-summary-20260927.json | e7c86d183821e953ad2cf8f478466edd40f83a43748e85e9dc334d706a5d927c |
+| build/stream-residency/combined-pages-retained-epoch-20260927-20260927-132718/result.json | cc5d1404a45577814b99d548f60b6a90b17c64af28d410945f9dd33144427fd5 |
+| build/stream-residency/combined-pages-retained-epoch-20260927-20260927-132718/provenance.json | 1ad19bfc95b566b01af9cd5ec0ccc4633cba23209ef00030aa5a72bf4196058f |
+| build/stream-residency/combined-pages-retained-epoch-20260927-20260927-132718/engine.log | fa2ef42fd45cffe19c1c461f001ce42db9e555098faa4eff006e265161b18bec |
+| build/stream-residency/combined-pages-retained-epoch-20260927-20260927-132718/harness.jsonl | 808dc557983e5e60ab0b5e96cabdbc12446754a180ebba0e80871cfce8a29655 |
+| build/stream-residency/default-dayz-paired-attribution-20260927-disabled-20260927-132735/result.json | e6a108f04cac90bb9ebd28db1402d592a71f6f3ac085d971a665bbeac553e57a |
+| build/stream-residency/default-dayz-paired-attribution-20260927-disabled-20260927-132735/provenance.json | 72448252af471711c0d54d4f4de4069cc1df5becf2c4a62aee4fb3db8378b95a |
+| build/stream-residency/default-dayz-paired-attribution-20260927-disabled-20260927-132735/engine.log | 9f7501626707c1b0a3ec9bda2331db141ab767778138925930d834d9605a53bb |
+| build/stream-residency/default-dayz-paired-attribution-20260927-disabled-20260927-132735/harness.jsonl | bd1285e640c939237ce8665135501f3cbe0c80a461bdc77bf04a4a17a078719f |
+| build/stream-residency/default-dayz-paired-attribution-20260927-disabled-20260927-132735/route-frame-ms.json | eed377d4137ef253665b7cb9f54a433ba6fceadfa27de7c1072f99610beabdfb |
+| build/stream-residency/default-dayz-paired-attribution-20260927-disabled-20260927-132735/render-call-cpu-proof.json | e1a52fa93d301a7aec1c17648ab0a615e608044e3ecaaa9008549cce812099e0 |
+| build/stream-residency/default-dayz-paired-attribution-20260927-disabled-20260927-132735/returned-settled.png | f0c85efd3f0a96a605e3e58a926c80f1ebe7ae8f4ab0d5ff729df4078c6d0874 |
+| build/stream-residency/default-dayz-diagnostics-off-20260927-disabled-20260927-133030/result.json | 2dbf29a6463505cdf0dd7ddac016bdcc8338dc44f70eb72f38023772ffe6b43f |
+| build/stream-residency/default-dayz-diagnostics-off-20260927-disabled-20260927-133030/provenance.json | 3924705366645cb46758f130ab1605a17aabf9221656b26e241c161ecdc9e5ed |
+| build/stream-residency/default-dayz-diagnostics-off-20260927-disabled-20260927-133030/engine.log | e2ee90630d3e2d7f1c4a53f1d9e18ae95cb9463288ef6d39e45eabdd31b3b625 |
+| build/stream-residency/default-dayz-diagnostics-off-20260927-disabled-20260927-133030/harness.jsonl | 1342fc991af310e090729a9ee1d415fa25590167f9e0a12b92ba79681d77e0b1 |
+| build/stream-residency/default-dayz-diagnostics-off-20260927-disabled-20260927-133030/route-frame-ms.json | dff295dfc040f5c1e883eb3eac86d055b281bac0a6e56867292bdd51e2d869fb |
+| build/stream-residency/default-dayz-diagnostics-off-20260927-disabled-20260927-133030/render-call-cpu-proof.json | b317775a429d58bf8f2ad4b2b9dfcbd133d93d7b92d0079935e15ff42a59072a |
+| build/stream-residency/default-dayz-diagnostics-off-20260927-disabled-20260927-133030/returned-settled.png | 0684457681d8be14c5094eca0dc32e1d691fa8598b46f4073793fd8ae2d46260 |
