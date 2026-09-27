@@ -103,8 +103,8 @@ impl Source {
 const VELOCITY: Source = Source { threshold: 0.4, scale: 1.6, intensity: 1.0, lifetime: 0.8 };
 const IMPACT: Source = Source { threshold: 0.6, scale: 1.2, intensity: 3.0, lifetime: 1.4 };
 
-/// The analytic waterline's half breadth (wake.rs `bottom_at`: parallel aft, elliptic entry over
-/// the forward 45 %).
+/// The analytic waterline's half breadth (wake.rs `bottom_at`: parallel aft, a fine entry over the
+/// forward 45 %: B (1 - e^1.3), about 30 degrees half-angle at the stem for a patrol boat).
 fn waterline_half_beam(b: f32, l: f32, z: f32) -> f32 {
     let u = (z + l) / (2.0 * l);
     if !(0.0..=1.0).contains(&u) {
@@ -114,7 +114,7 @@ fn waterline_half_beam(b: f32, l: f32, z: f32) -> f32 {
         return b;
     }
     let e = (u - 0.55) / 0.45;
-    b * (1.0 - e * e).max(0.0).sqrt()
+    b * (1.0 - e.powf(1.3)).max(0.0)
 }
 
 /// The contact segments' end points (boat frame): per side (0-2: +x, 3-5: -x) from the stem aft
@@ -122,7 +122,8 @@ fn waterline_half_beam(b: f32, l: f32, z: f32) -> f32 {
 /// MUST MATCH PresentationSnapshot.cpp `WakeSprayContactPoint` (which samples the sea at the mids).
 fn contact_points(b: f32, l: f32) -> [(V3, V3, f32); CONTACTS] {
     let z_stem = l - 0.02;
-    let z_shoulder = 0.4528 * l;
+    // where 1 - e^1.3 = 0.92: u = 0.55 + 0.45 x 0.08^(1/1.3)
+    let z_shoulder = 0.2287 * l;
     let mut out = [([0.0; 3], [0.0; 3], 1.0); CONTACTS];
     for (k, o) in out.iter_mut().enumerate() {
         let side = if k < SEGMENTS { 1.0 } else { -1.0 };
@@ -206,8 +207,8 @@ impl SprayBoat {
     fn outline(&self) -> ([f32; 4], [f32; 3], [f32; 3]) {
         let (b, l) = (self.half_beam, self.half_len);
         // at the waterline: shoulder where the entrance reaches 95 % of the beam
-        let wl = [0.381 * l, l, b + 0.01];
-        let sheer = [-l, 0.5 * l, l * 1.04, b * 1.05 + 0.02];
+        let wl = [0.19 * l, l, b + 0.01];
+        let sheer = [-l, 0.35 * l, l * 1.04, b * 1.05 + 0.02];
         let ys = [self.freeboard + 0.04, self.freeboard * 1.2 + 0.04, -self.draft - 0.3];
         (sheer, wl, ys)
     }
@@ -254,7 +255,7 @@ struct BoatState {
 #[derive(Default)]
 pub struct BoatSpray {
     boats: [BoatState; 2],
-    /// the last frame's (particles, requests), for the log
+    /// the last stepped frame's (particles, requests), for the log
     pub stats: (u32, u32),
 }
 
@@ -309,7 +310,10 @@ impl BoatSpray {
                 s.id = None;
             }
         }
-        self.stats = (em.particles, em.out.len() as u32);
+        // (the last frame the water clock moved: frames without a step throw nothing)
+        if dt > 0.0 {
+            self.stats = (em.particles, em.out.len() as u32);
+        }
     }
 
     fn update_boat(st: &mut BoatState, b: &SprayBoat, dt: f32, em: &mut Emitter<'_>) {
@@ -476,7 +480,7 @@ mod tests {
         let pts = contact_points(1.8, 4.6);
         // the first station is at the stem, the last where the entrance reaches 92 % of the beam
         assert!((pts[0].0[2] - 4.58).abs() < 1e-4);
-        assert!((waterline_half_beam(1.8, 4.6, pts[2].1[2]) / 1.8 - 0.92).abs() < 0.01);
+        assert!((waterline_half_beam(1.8, 4.6, pts[2].1[2]) / 1.8 - 0.92).abs() < 0.01, "{}", waterline_half_beam(1.8, 4.6, pts[2].1[2]));
         for k in 0..3 {
             assert!(pts[k].0[0] > 0.0 && pts[k + 3].0[0] < 0.0);
             assert_eq!(pts[k].0[2], pts[k + 3].0[2]);

@@ -13,7 +13,7 @@
 //!   this backend, so they have no wake here.
 //! * **No hull lines.** OP's boats have no lines plan: the hull immersion map is baked from an
 //!   analytic hull of the boat's size (half beam, half length, draft from its bounding box: flat
-//!   run aft to a transom, round bilge, elliptic bow that rises toward the stem), blurred to the grid
+//!   run aft to a transom, round bilge, a fine entry (W6i.2) and a keel that rises toward the stem), blurred to the grid
 //!   scale exactly as `_bakeHull` blurs Tidewater's lines.
 //! * **Size-scaled schedules.** The speed schedules (planing trim, hollow, wash width) are keyed to
 //!   the boat's Froude number and beam instead of the constants of Tidewater's one 8 m boat.
@@ -130,8 +130,10 @@ fn bottom_at(dims: [f32; 3], x: f32, z: f32) -> Option<f32> {
     if !(0.0..=1.0).contains(&u) {
         return None;
     }
-    // waterplane: parallel aft, an elliptic entry over the forward 45 %
-    let w = if u < 0.55 { b } else { b * (1.0 - ((u - 0.55) / 0.45).powi(2)).max(0.0).sqrt() };
+    // waterplane: parallel aft, a fine entry over the forward 45 %
+    // (W6i.2: a fine entry, B (1 - e^1.3), ~30 degrees half-angle at the stem; was elliptic, which
+    // made a blunt bow that threw its spray metres high)
+    let w = if u < 0.55 { b } else { b * (1.0 - ((u - 0.55) / 0.45).powf(1.3)).max(0.0) };
     let ax = x.abs();
     if ax >= w || w <= 1e-3 {
         return None;

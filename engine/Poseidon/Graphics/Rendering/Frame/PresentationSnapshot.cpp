@@ -35,7 +35,7 @@ namespace
 {
 // TW-WATER W6i: the bow spray's contact points in the boat frame (x across, y up from the design
 // waterline, z forward from the hull centre), for half beam b and half length l: three segments
-// per side along the analytic waterline (wake.rs `bottom_at`: parallel aft, elliptic entry over the
+// per side along the analytic waterline (wake.rs `bottom_at`: parallel aft, a fine entry B (1 - e^1.3) over the
 // forward 45 %) from the stem aft to where it has opened to 92 % of the beam, stations bunched
 // toward the stem. Index 0-2: +x side, 3-5: -x side (segment mids). MUST MATCH boat_spray.rs.
 float WakeWaterlineHalfBeam(float b, float l, float z)
@@ -46,7 +46,7 @@ float WakeWaterlineHalfBeam(float b, float l, float z)
     if (u < 0.55f)
         return b;
     const float e = (u - 0.55f) / 0.45f;
-    return b * std::sqrt(std::max(1.0f - e * e, 0.0f));
+    return b * std::max(1.0f - std::pow(e, 1.3f), 0.0f);
 }
 
 void WakeSprayContactPoint(float b, float l, int k, float& x, float& z)
@@ -54,7 +54,7 @@ void WakeSprayContactPoint(float b, float l, int k, float& x, float& z)
     const float side = k < 3 ? 1.0f : -1.0f;
     const int seg = k % 3;
     const float zStem = l - 0.02f;
-    const float zShoulder = 0.4528f * l;
+    const float zShoulder = 0.2287f * l;
     auto station = [&](int i, float& sx, float& sz)
     {
         const float f = std::pow(static_cast<float>(i) / 3.0f, 1.3f);
