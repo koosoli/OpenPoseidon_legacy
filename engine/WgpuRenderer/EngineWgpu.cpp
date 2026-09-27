@@ -8437,12 +8437,12 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
                 if(!(coarseThreshold>0) || !std::isfinite(coarseThreshold)) return failure;
                 coarseThreshold=std::nextafter(coarseThreshold,std::numeric_limits<float>::infinity());
                 if(!std::isfinite(coarseThreshold) || coarseThreshold==FLT_MAX) return failure;
-                ClodCut selectedCoarse,selectedFine;
+                ClodCut selectedCoarseCut,selectedFineCut;
                 ClodCutDecodeLimits cutLimits; cutLimits.clusters=64; cutLimits.vertexRecords=4096;
                 cutLimits.indexEntries=8192; cutLimits.knownPayloadBytes=262144;
-                if(!SelectClodCut(bake,coarseThreshold,selectedCoarse) || !SelectClodCut(bake,0,selectedFine) ||
-                   DecodeClodCut(bake,coarseThreshold,selectedCoarse,cutCoarse,cutLimits)!=ClodCutDecodeStatus::Decoded ||
-                   DecodeClodCut(bake,0,selectedFine,cutFine,cutLimits)!=ClodCutDecodeStatus::Decoded) return failure;
+                if(!SelectClodCut(bake,coarseThreshold,selectedCoarseCut) || !SelectClodCut(bake,0,selectedFineCut) ||
+                   DecodeClodCut(bake,coarseThreshold,selectedCoarseCut,cutCoarse,cutLimits)!=ClodCutDecodeStatus::Decoded ||
+                   DecodeClodCut(bake,0,selectedFineCut,cutFine,cutLimits)!=ClodCutDecodeStatus::Decoded) return failure;
                 uint64_t coarseEntries=0,fineEntries=0;
                 for(const auto& cluster:cutCoarse.clusters) { renderCuts[1].push_back(&cluster.mesh); coarseEntries+=cluster.mesh.indices.size(); }
                 for(const auto& cluster:cutFine.clusters) { renderCuts[2].push_back(&cluster.mesh); fineEntries+=cluster.mesh.indices.size(); }
