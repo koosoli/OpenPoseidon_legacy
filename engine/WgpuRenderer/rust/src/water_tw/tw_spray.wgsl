@@ -53,6 +53,7 @@ struct SprayOut {
     @location(2) vCol: vec4<f32>,  // radiance, opacity
     @location(3) vMisc: vec4<f32>, // kind + 0.45 x life fraction, water height, size, seed
     @location(4) vFwd: vec4<f32>,  // forward-scattered sun (thin parts glow with it), w: half-size in pixels
+    @location(5) vSun: vec3<f32>,  // the sun-lit part of vCol (x the cloud shadow in the fragment)
 };
 
 @vertex
@@ -135,22 +136,26 @@ fn vs_spray(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) ->
     }
     let cosT = dot(-Vd, L); // 1 = looking toward the sun through the particle
     let cosA = dot(Vd, L);
-    let sunVis = cloud_sun_shadow(p.xz) * sprayWaveShadow(p, info.w, L);
+    // (OP: the cloud shadow is a fragment-stage texture in the camera group; it is applied in
+    // fs_spray to the sun-lit terms, which are carried apart from the sky-lit ones)
+    let sunVis = sprayWaveShadow(p, info.w, L);
     let sun = sunDiffuse * PI * sunVis;
     // clear water (drop, ligament): the bright sky it refracts and reflects, a strong forward lobe
     // when backlit, a small glint from any side
-    let cWater = skyIrr * 0.9 + sun * (sprayPhaseHG(cosT, 0.85) * 1.2 + 0.12);
+    let sWater = sun * (sprayPhaseHG(cosT, 0.85) * 1.2 + 0.12);
     // dense spray: multiply scattered, white from any side (a diffuse sphere), plus a forward lobe
     let lambert = (sqrt(max(1.0 - cosA * cosA, 0.0)) + (PI - acos(clamp(cosA, -1.0, 1.0))) * cosA) / PI;
-    let cSpray = sun * ((lambert * 0.65 + 0.35) / PI) + skyIrr * 1.15;
+    let sSpray = sun * ((lambert * 0.65 + 0.35) / PI);
     let fSpray = sun * (sprayPhaseHG(cosT, 0.6) * 0.9);
     // mist: a thin veil of fine drops, strongly forward scattering, tinted by the sky
-    let cMist = sun * (0.25 / PI) + skyIrr * 0.9;
+    let sMist = sun * (0.25 / PI);
     let fMist = sun * sprayPhaseHG(cosT, 0.75);
     // clear sheet: thin water, the sky it shows and a little sun off its surface
-    let cClear = skyIrr * 0.95 + sun * 0.05;
+    let sClear = sun * 0.05;
     let fClear = sun * (sprayPhaseHG(cosT, 0.8) * 1.1);
-    let col = select(select(select(cSpray, cClear, isClear), cMist, isMist), cWater, water);
+    let skyK = select(select(select(1.15, 0.95, isClear), 0.9, isMist), 0.9, water);
+    let col = skyIrr * skyK;
+    let sunCol = select(select(select(sSpray, sClear, isClear), sMist, isMist), sWater, water);
 
     // opacity over the particle's life
     let t = age / max(life, 1e-3);
@@ -165,6 +170,7 @@ fn vs_spray(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) ->
     var o: SprayOut;
     o.vUV = corner;
     o.vCol = vec4<f32>(col, a);
+    o.vSun = sunCol;
     o.vFwd = vec4<f32>(select(select(select(fSpray, fClear, isClear), fMist, isMist), vec3<f32>(0.0), water), halfX / pixel);
     // x: kind + 0.45 x life fraction (the kind tests below have 0.5 of margin)
     o.vMisc = vec4<f32>(kind + sat(t) * 0.45, info.z, size, fract(info.w));
@@ -226,6 +232,8 @@ fn fs_spray(in: SprayOut) -> @location(0) vec4<f32> {
     let fadeWater = sat((pos.y - vMisc.y) / (soft * 0.6) + 0.15);
     let aOut = in.vCol.w * shape * fadeScene * fadeWater * (1.0 - farK * 0.4);
     if (aOut < 0.002) { discard; }
-    let col = apply_fog(min(in.vCol.rgb * shade + in.vFwd.xyz * glow, vec3<f32>(16000.0)), in.rel);
+    let cloud = cloud_sun_shadow(pos.xz);
+    let lit = (in.vCol.rgb + in.vSun * cloud) * shade + in.vFwd.xyz * (glow * cloud);
+    let col = apply_fog(min(lit, vec3<f32>(16000.0)), in.rel);
     return vec4<f32>(col * aOut, aOut);
 }
