@@ -223,7 +223,7 @@ try {
                   if ($report.persistentRetirementCandidates -gt 8192 -or
                       $report.persistentCleanupKnownCapacityBytes -ne 65536 -or
                       $report.persistentSelectedDiagnosticPins -ne 0 -or
-                      $report.persistentDetachedHistory -gt $report.persistentCpuBorrowers) {
+                      $report.persistentDetachedHistory -gt $report.persistentTrackedBorrowerRecords) {
                       throw 'Owner-history metadata exceeded its declared bounds or retained a private fixture pin'
                   }
                   if (!$DiagnosticOnly -and ($report.persistentPrunedAllocations -lt 1 -or $report.persistentPrunedBorrowers -lt 1)) {
