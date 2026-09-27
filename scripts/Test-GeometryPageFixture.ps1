@@ -6,6 +6,7 @@ param(
     [switch]$Disk,
     [switch]$SectionReuse,
     [switch]$LodReuse,
+    [switch]$ModelRowUpload,
     [ValidateSet('None','Missing','Corrupt')][string]$DiskFault='None',
     [string]$Tools,
     [string]$Label='geometry-page-fixture',
@@ -28,6 +29,7 @@ if (!$env:LOCK_OWNER) {
     if ($Disk) {$argv+='-Disk'}
     if ($SectionReuse) {$argv+='-SectionReuse'}
     if ($LodReuse) {$argv+='-LodReuse'}
+    if ($ModelRowUpload) {$argv+='-ModelRowUpload'}
     if ($DiskFault -ne 'None') {$argv+=@('-DiskFault',$DiskFault)}
     if ($Tools) {$argv+=@('-Tools',$Tools)}
     $env:LOCK_OWNER='private resident geometry page fixture'
@@ -74,13 +76,14 @@ class OutroLoose { randomSeed=3; class Intel {}; };
 $env:WGR_GEOMETRY_PAGE_FIXTURE=if ($Disabled) {'0'} else {'1'}
 $env:WGR_CULL_SECTION_REUSE=if ($SectionReuse) {'1'} else {'0'}
 $env:WGR_CULL_LOD_REUSE=if ($LodReuse) {'1'} else {'0'}
+$env:WGR_CULL_MODEL_ROW_UPLOAD=if ($ModelRowUpload) {'1'} else {'0'}
 foreach ($key in @('WGR_GEOMETRY_OWNER_LEDGER','WGR_SIMULATION_RESIDENCY','WGR_SIMULATION_RESIDENCY_TEST',
     'WGR_SIMULATION_POSITIVE_COLD','WGR_OBJECT_STREAM_GPU_BUDGET','WGR_WATER_CURLING_BREAKER',
     'WGR_OBJECT_STREAM_WARM_TEXTURE_JOBS','WGR_OBJECT_STREAM_WARM_TEXTURES','WGR_OBJECT_STREAM_WARM_PROFILE',
     'WGR_OBJECT_STREAM_REGISTRATION_QUOTA','WGR_GEOMETRY_MESH_ACK','WGR_GEOMETRY_REGISTERED_REFS',
     'WGR_GEOMETRY_LOD_FEEDBACK','WGR_OBJECT_STREAM_WINDOW_GROWTH','WGR_NATIVE_DDS_PREPARE',
     'WGR_NATIVE_DDS_BC3_ONLY','WGR_ADAPTIVE_TEXTURE_DETAIL','WGR_PAA_LZO_REPLAY_CACHE',
-    'WGR_OBJECT_STREAM_PBO','WGR_OBJECT_STREAM_PBO_TEXTURES')) {Set-Item ('Env:'+ $key) '0'}
+    'WGR_OBJECT_STREAM_PBO','WGR_OBJECT_STREAM_PBO_TEXTURES','WGR_OBJECT_STREAM_COLD_TEXTURE_HANDOFF')) {Set-Item ('Env:'+ $key) '0'}
 foreach ($key in @('POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_STREAM','POSEIDON_TEST_RAIN')) {
     Remove-Item ('Env:'+ $key) -ErrorAction SilentlyContinue
 }
@@ -88,7 +91,7 @@ $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0)
 $listener.Start();$port=$listener.LocalEndpoint.Port;$listener.Stop()
 $log=Join-Path $out 'engine.log'
 @{head=(& git -C $root rev-parse HEAD);installed=(Get-Content (Join-Path $GameDir 'DEPLOYED-FROM.txt'));
-    disabled=[bool]$Disabled;clod=[bool]$Clod;paged=[bool]$Paged;evict=[bool]$Evict;disk=[bool]$Disk;diskFault=$DiskFault;sectionReuse=[bool]$SectionReuse;sectionReuseEnvironment=$env:WGR_CULL_SECTION_REUSE;lodReuse=[bool]$LodReuse;lodReuseEnvironment=$env:WGR_CULL_LOD_REUSE;diskProof=$diskProof;diskFaultProof=$diskFaultProof;scriptSha256=(Get-FileHash $PSCommandPath).Hash;
+    disabled=[bool]$Disabled;clod=[bool]$Clod;paged=[bool]$Paged;evict=[bool]$Evict;disk=[bool]$Disk;diskFault=$DiskFault;sectionReuse=[bool]$SectionReuse;sectionReuseEnvironment=$env:WGR_CULL_SECTION_REUSE;lodReuse=[bool]$LodReuse;lodReuseEnvironment=$env:WGR_CULL_LOD_REUSE;modelRowUpload=[bool]$ModelRowUpload;modelRowUploadEnvironment=$env:WGR_CULL_MODEL_ROW_UPLOAD;diskProof=$diskProof;diskFaultProof=$diskFaultProof;scriptSha256=(Get-FileHash $PSCommandPath).Hash;
     hashes=@(Get-FileHash (Join-Path $GameDir 'OpenPoseidon.exe'),(Join-Path $GameDir 'wgpu_renderer.dll'))} |
     ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $out 'provenance.json')
 $p=$null;$client=$null
@@ -571,6 +574,23 @@ try {
     $result.lodReuseProof=@{requested=[bool]$LodReuse;activationRows=$lodEnabled.Count;
         committedRows=$lodCommitted.Count;disabledRows=$lodDisabled.Count;
         scope='Bounded postcommit LOD index reuse with retained model tombstones, not all-pass pixels or GPU memory freeing'}
+    $modelRowEnabled=@(Select-String -LiteralPath $log -SimpleMatch 'gpu MODEL row upload enabled:')
+    $modelRowCommits=@(Select-String -LiteralPath $log -Pattern 'gpu MODEL row upload committed: first=(\d+) rows=(\d+) tableRows=(\d+) bytes=(\d+) event=(\d+); postQueueWrite=true sourceRangeOnly=true')
+    $modelRowTruncated=@(Select-String -LiteralPath $log -SimpleMatch 'gpu MODEL row upload log truncated:')
+    if ($ModelRowUpload -and ($modelRowEnabled.Count -ne 1 -or $modelRowCommits.Count -lt 1 -or
+        $modelRowCommits.Count -gt 16 -or $modelRowTruncated.Count -gt 1)) {throw 'MODEL row upload activation/actual partial write proof missing or unbounded'}
+    if (!$ModelRowUpload -and ($modelRowEnabled.Count -or $modelRowCommits.Count -or $modelRowTruncated.Count)) {throw 'MODEL row upload activated in OFF control'}
+    foreach ($row in $modelRowCommits) {
+        $m=$row.Matches[0];$first=[uint64]$m.Groups[1].Value;$rows=[uint64]$m.Groups[2].Value
+        $total=[uint64]$m.Groups[3].Value;$bytes=[uint64]$m.Groups[4].Value;$event=[uint64]$m.Groups[5].Value
+        if (!$rows -or $rows -ge $total -or $first -gt $total -or $rows -gt ($total-$first) -or
+            $bytes -ne ($rows*16) -or !$event -or $event -gt 16) {throw 'Invalid MODEL partial source-range write evidence'}
+    }
+    $modelRowProof=@{requested=[bool]$ModelRowUpload;activationRows=$modelRowEnabled.Count;
+        committedRows=$modelRowCommits.Count;truncatedRows=$modelRowTruncated.Count;
+        rows=@($modelRowCommits | ForEach-Object {$_.Line});
+        scope='Bounded post-queue-write partial MODEL source ranges; not driver completion, physical memory or performance acceptance'}
+    $result.modelRowUploadProof=$modelRowProof
     $result.passed=$true;$result.cleanExit=$true;if ($DiskFault -eq 'None') {$result.scope='Private original authored resident geometry, record lifetime and fixed-instance switching; explicit authored/selected-CLOD RAM or external controlled disk worker paging only when selected; no generalized asset/DAG paging, all-pass, device-free or performance acceptance'}
     $result | ConvertTo-Json -Depth 7 | Set-Content -LiteralPath (Join-Path $out 'result.json')
     Write-Output "Geometry page fixture evidence: $out"

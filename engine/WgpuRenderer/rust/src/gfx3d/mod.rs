@@ -9503,6 +9503,8 @@ impl Gfx3d {
         }
         let volumes_grew = self.upload_sky_volumes(device, queue);
         let grew = self.cull.prepare(device, queue) || volumes_grew;
+        if let Some(line) = self.cull.take_model_row_activation() { self.queued_log.push(line); }
+        if let Some(line) = self.cull.take_model_row_commit_notice() { self.queued_log.push(line); }
         let mipfb_grew = std::mem::take(&mut self.mip_feedback_grew);
         if grew
             || mipfb_grew

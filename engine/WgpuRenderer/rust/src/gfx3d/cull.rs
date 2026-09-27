@@ -538,6 +538,8 @@ pub struct CullState {
     // `conform` word indexes it. Draw-side only (group-1 binding 3 in vs_gpu), not a compute input.
     crown_centres: Vec<[f32; 4]>,
     table_uploads: TableUploads,
+    // Fixed optional interval only; no per-model record, row scan or heap allocation.
+    model_row_uploads: Option<ModelRowUploads>,
 
     // Unified instance buffer: the static region (ID-3: an InstanceTable, which owns the
     // slots, the free list and the generations, and needs no device) then the dynamic
@@ -648,14 +650,63 @@ impl TableUploads {
     }
 }
 const _: () = assert!(std::mem::size_of::<TableUploads>() == std::mem::size_of::<bool>());
+// Optional min/max dirty interval for append-only MODEL births. A distant pair of writes
+// includes the unchanged gap; this is bounded metadata, not a sparse ownership cache.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ModelRowUploads {
+    lo: usize, hi: usize,
+    activation_pending: bool, committed_rows: u8,
+    // One fixed numeric event, drained by Gfx3d immediately after prepare. No queued heap.
+    notice: Option<(usize, usize, usize, u8)>,
+}
+impl Default for ModelRowUploads {
+    fn default() -> Self { Self { lo: usize::MAX, hi: 0, activation_pending: true, committed_rows: 0, notice: None } }
+}
+impl ModelRowUploads {
+    fn mark(&mut self, index: usize) {
+        self.lo = self.lo.min(index);
+        self.hi = self.hi.max(index.checked_add(1).unwrap_or(usize::MAX));
+    }
+    // Missing/grown backing storage ALWAYS receives the complete CPU mirror. Unknown
+    // MODEL dirtiness (no captured row) also falls back to full; never an empty stale write.
+    fn reset_interval(&mut self) { self.lo = usize::MAX; self.hi = 0; }
+    fn note_committed(&mut self, first: usize, count: usize, table_rows: usize) {
+        if count == 0 || count >= table_rows || self.committed_rows > 16 { return; }
+        self.committed_rows += 1;
+        self.notice = Some((first, count, table_rows, self.committed_rows));
+    }
+    fn take_activation(&mut self) -> Option<String> {
+        if !std::mem::take(&mut self.activation_pending) { return None; }
+        Some(format!("gpu MODEL row upload enabled: interval=1 knownStateBytes={} commitLogLimit=16; source row writes only, not RSS/performance proof",
+            std::mem::size_of::<Option<Self>>()))
+    }
+    fn take_commit(&mut self) -> Option<String> {
+        let (first, count, table_rows, event) = self.notice.take()?;
+        if event > 16 { return Some("gpu MODEL row upload log truncated: limit=16; partial writes continue unlogged".into()); }
+        Some(format!("gpu MODEL row upload committed: first={} rows={} tableRows={} bytes={} event={}; postQueueWrite=true sourceRangeOnly=true",
+            first, count, table_rows, count * std::mem::size_of::<ModelGpu>(), event))
+    }
+    fn range(self, len: usize, grew: bool) -> std::ops::Range<usize> {
+        if grew || self.lo >= self.hi || self.hi > len { 0..len }
+        else { self.lo..self.hi }
+    }
+    fn run(self, len: usize, grew: bool, mut write: impl FnMut(std::ops::Range<usize>)) {
+        let range = self.range(len, grew);
+        if !range.is_empty() { write(range); }
+    }
+}
+const _: () = assert!(std::mem::size_of::<Option<ModelRowUploads>>() <= 80);
+
 // Optional feedback changes only the model tag; use the same mutation in tests.
-fn set_model_feedback_tag(models: &mut [ModelGpu], uploads: &mut TableUploads, id: u32, tag: u32) {
+fn set_model_feedback_tag(models: &mut [ModelGpu], uploads: &mut TableUploads, id: u32, tag: u32) -> bool {
     if let Some(model) = models.get_mut(id as usize) {
         if model._pad != tag {
             model._pad = tag;
             uploads.mark(TableDomain::Model);
+            return true;
         }
     }
+    false
 }
 
 // Same owner-side retirement transition used by CullState and device-free tests.
@@ -689,6 +740,17 @@ fn retire_model_to_sentinel(models: &mut [ModelGpu], lods: &mut [LodGpu], id: u3
 const STATS_RING_SLOTS: usize = 3;
 
 impl CullState {
+    pub(super) fn take_model_row_activation(&mut self) -> Option<String> {
+        self.model_row_uploads.as_mut().and_then(ModelRowUploads::take_activation)
+    }
+    pub(super) fn take_model_row_commit_notice(&mut self) -> Option<String> {
+        self.model_row_uploads.as_mut().and_then(ModelRowUploads::take_commit)
+    }
+    fn set_feedback_tag(&mut self, id: u32, tag: u32) {
+        if set_model_feedback_tag(&mut self.models, &mut self.table_uploads, id, tag) {
+            if let Some(rows) = &mut self.model_row_uploads { rows.mark(id as usize); }
+        }
+    }
     pub fn start_lod_demand(&mut self, device: &wgpu::Device, epoch: u64, ids: &[u32], frames: u32) -> u32 {
         if !super::lod_feedback::enabled() { return 0; }
         let previous = self.lod_feedback.as_ref().map(|state| { let state = state.borrow(); (state.report.epoch, state.report.status) });
@@ -705,7 +767,7 @@ impl CullState {
         }).collect();
         self.clear_lod_demand_targets();
         for (i, row) in rows.iter().enumerate() {
-            if row.state == 0 { set_model_feedback_tag(&mut self.models, &mut self.table_uploads, row.model_id, i as u32 + 1); }
+            if row.state == 0 { self.set_feedback_tag(row.model_id, i as u32 + 1); }
         }
         let state = self.lod_feedback.get_or_insert_with(|| RefCell::new(Box::new(super::lod_feedback::LodFeedback::new(device))));
         state.borrow_mut().start(epoch, frames, &rows);
@@ -715,7 +777,9 @@ impl CullState {
         if let Some(state) = &self.lod_feedback {
             let state = state.borrow();
             for row in &state.report.rows[..state.report.row_count as usize] {
-                set_model_feedback_tag(&mut self.models, &mut self.table_uploads, row.model_id, 0);
+                if set_model_feedback_tag(&mut self.models, &mut self.table_uploads, row.model_id, 0) {
+                    if let Some(rows) = &mut self.model_row_uploads { rows.mark(row.model_id as usize); }
+                }
             }
         }
     }
@@ -933,6 +997,8 @@ impl CullState {
             section_materials: Vec::new(),
             crown_centres: Vec::new(),
             table_uploads: TableUploads::NONE,
+            model_row_uploads: (std::env::var("WGR_CULL_MODEL_ROW_UPLOAD").ok().as_deref() == Some("1"))
+                .then(ModelRowUploads::default),
             instances: InstanceTable::default(),
             dynamic: Vec::new(),
             uploaded_static_len: 0,
@@ -1166,6 +1232,7 @@ impl CullState {
             bounding_sphere,
             _pad: 0,
         });
+        if let Some(rows) = &mut self.model_row_uploads { rows.mark(model_id as usize); }
         // Model registration changes these four tables, never the crown centres.
         // Preserve any earlier Crown dirtiness in this batch; prepare still bootstraps
         // ALL when any backing buffer is absent, including the empty crown buffer.
@@ -1187,6 +1254,7 @@ impl CullState {
             let (changed, old_span) = retire_model_to_sentinel(&mut self.models, &mut self.lods,
                 id, birth_span, &mut self.instances, &mut self.table_uploads);
             if changed {
+                if let Some(rows) = &mut self.model_row_uploads { rows.mark(id as usize); }
                 if old_span.is_none() { self.disable_section_reuse(); }
                 let pool = self.lod_spans.as_mut().unwrap();
                 // Old model is already a permanent tombstone, before its rows become available.
@@ -1406,13 +1474,19 @@ impl CullState {
             self.table_uploads = TableUploads::ALL;
         }
         let (next_uploads, tables_grew) = self.table_uploads.run(|domain| match domain {
-            TableDomain::Model => upload_slice(device, queue, &mut self.model_buf, &self.models),
+            TableDomain::Model => match &mut self.model_row_uploads {
+                Some(rows) => upload_model_rows(device, queue, &mut self.model_buf, &self.models, rows),
+                None => upload_slice(device, queue, &mut self.model_buf, &self.models),
+            },
             TableDomain::Lod => upload_slice(device, queue, &mut self.lod_buf, &self.lods),
             TableDomain::Section => upload_slice(device, queue, &mut self.section_buf, &self.sections),
             TableDomain::Material => upload_slice(device, queue, &mut self.section_mat_buf, &self.section_materials),
             TableDomain::Crown => upload_slice(device, queue, &mut self.crown_centre_buf, &self.crown_centres),
         });
+        // Publish clean rows only after ALL selected domain bodies returned successfully.
+        // A panic in any later domain retains both MODEL dirtiness and its interval.
         self.table_uploads = next_uploads;
+        if let Some(rows) = &mut self.model_row_uploads { rows.reset_interval(); }
         grew |= tables_grew;
 
         // Instance buffer = static region then the dynamic tail. Ensure capacity for both.
@@ -2935,6 +3009,22 @@ fn ensure_view_outputs(
         grew = true;
     }
 
+    grew
+}
+
+fn upload_model_rows(device: &wgpu::Device, queue: &wgpu::Queue,
+    arr: &mut super::StorageArray, data: &[ModelGpu], rows: &mut ModelRowUploads,
+) -> bool {
+    let grew = arr.ensure(device, std::mem::size_of_val(data).max(1) as u64);
+    let selection = *rows;
+    selection.run(data.len(), grew, |range| {
+        let first = range.start; let count = range.len();
+        queue.write_buffer(arr.buf.as_ref().unwrap(),
+            (first * std::mem::size_of::<ModelGpu>()) as u64,
+            bytemuck::cast_slice(&data[range]));
+        // Only after the real queue.write_buffer returned, never on range choice/growth.
+        rows.note_committed(first, count, data.len());
+    });
     grew
 }
 
@@ -5021,4 +5111,101 @@ pub(crate) mod tests {
         assert_eq!(instances.epoch, epoch.wrapping_add(2));
     }
 
+
+    #[test]
+    fn model_row_upload_interval_counts_actual_selected_writes() {
+        let mut rows = ModelRowUploads::default();
+        rows.mark(100); rows.mark(104); rows.mark(101);
+        let mut writes = Vec::new(); rows.run(200, false, |r| writes.push(r));
+        assert_eq!(writes, vec![100..105]);
+        writes.clear(); rows.run(200, true, |r| writes.push(r));
+        assert_eq!(writes, vec![0..200], "growth must initialize every old row too");
+        writes.clear(); ModelRowUploads::default().run(200, false, |r| writes.push(r));
+        assert_eq!(writes, vec![0..200], "unknown MODEL dirtiness remains conservative");
+        writes.clear(); ModelRowUploads::default().run(0, true, |r| writes.push(r));
+        assert!(writes.is_empty(), "empty bootstrap allocates storage but writes no rows");
+        rows.mark(usize::MAX); writes.clear(); rows.run(200, false, |r| writes.push(r));
+        assert_eq!(writes, vec![0..200]);
+        assert!(rows.take_activation().unwrap().contains("knownStateBytes="));
+        assert!(rows.take_activation().is_none());
+        for event in 1..=16 { rows.note_committed(100, 1, 200);
+            assert!(rows.take_commit().unwrap().contains(&format!("event={}", event))); }
+        rows.note_committed(100, 1, 200); assert!(rows.take_commit().unwrap().contains("truncated"));
+        rows.note_committed(100, 1, 200); assert!(rows.take_commit().is_none());
+        rows.reset_interval(); assert_eq!(rows.committed_rows, 17);
+        let mut tables = TableUploads::NONE;
+        tables.run(|_| panic!("clean prepare makes no resolver/write call"));
+        tables.mark(TableDomain::Model); let pending = rows;
+        let failure = std::panic::catch_unwind(|| tables.run(|_| panic!("failed upload")));
+        assert!(failure.is_err()); assert_eq!(rows, pending); assert_ne!(tables, TableUploads::NONE);
+    }
+
+    #[test]
+    fn model_row_upload_actual_gpu_preserves_neighbors_and_full_growth() {
+        let Some((device, queue)) = headless() else {
+            eprintln!("SKIP model_row_upload_actual_gpu: no adapter/device"); return;
+        };
+        let mut cull = CullState::new(&device);
+        cull.model_row_uploads = Some(ModelRowUploads::default());
+        cull.variant_capacity = 16; // bounded test outputs, production capacity unchanged
+        // COPY_SRC is test-only. Use real production prepare and table mutation APIs.
+        cull.model_buf.cap = 4096;
+        cull.model_buf.buf = Some(device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("model-row-readback"), size: 4096,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        }));
+        let lod = LodGpu { resolution: 1.0, section_base: 0, section_count: 0, is_decal: 0 };
+        for i in 0..128 { cull.register_model(i as f32 + 1.0, &[lod], &[], &[]); }
+        cull.prepare(&device, &queue);
+        let words = (std::mem::size_of_val(cull.models.as_slice()) / 4) as u64;
+        let baseline = read_u32s(&device, &queue, cull.model_buf.buf.as_ref().unwrap(), words);
+        assert_eq!(baseline, bytemuck::cast_slice::<ModelGpu,u32>(&cull.models));
+        // Seed a deliberately different GPU-only neighbor. Partial update must leave it;
+        // the legacy full write would erase it. This proves actual write selection.
+        let sentinel = ModelGpu { lod_base: 0, lod_count: 0, bounding_sphere: 987.0, _pad: 73 };
+        queue.write_buffer(cull.model_buf.buf.as_ref().unwrap(), 0, bytemuck::bytes_of(&sentinel));
+        cull.set_feedback_tag(100, 7);
+        assert_eq!(cull.model_row_uploads.unwrap().range(128, false), 100..101);
+        cull.prepare(&device, &queue);
+        let changed = read_u32s(&device, &queue, cull.model_buf.buf.as_ref().unwrap(), words);
+        assert_eq!(&changed[..4], bytemuck::cast_slice::<ModelGpu,u32>(&[sentinel]));
+        assert_eq!(&changed[4..], &bytemuck::cast_slice::<ModelGpu,u32>(&cull.models)[4..]);
+        cull.set_feedback_tag(100, 7); assert_eq!(cull.table_uploads, TableUploads::NONE);
+        cull.set_feedback_tag(9999, 7); assert_eq!(cull.table_uploads, TableUploads::NONE);
+        // Restore the GPU-only neighbor, then compare exact partial versus legacy bytes.
+        queue.write_buffer(cull.model_buf.buf.as_ref().unwrap(), 0, bytemuck::bytes_of(&cull.models[0]));
+        cull.set_feedback_tag(101, 8); cull.prepare(&device, &queue);
+        let optimized = read_u32s(&device, &queue, cull.model_buf.buf.as_ref().unwrap(), words);
+        upload_slice(&device, &queue, &mut cull.model_buf, &cull.models);
+        assert_eq!(optimized, read_u32s(&device, &queue, cull.model_buf.buf.as_ref().unwrap(), words));
+        // Force actual missing/reallocation path. Existing prefix must be fully initialized.
+        cull.model_buf.buf = None; cull.model_buf.cap = 0;
+        cull.set_feedback_tag(102, 9); cull.prepare(&device, &queue);
+        assert_eq!(read_table_storage_words(&device, &queue, cull.model_buf.buf.as_ref().unwrap(), words),
+            bytemuck::cast_slice::<ModelGpu,u32>(&cull.models));
+        // Actual capacity growth also initializes the full historical prefix, not only
+        // appended rows. New storage cannot inherit old GPU contents without a copy.
+        let old_capacity = cull.model_buf.cap;
+        for i in 128..300 { cull.register_model(i as f32 + 1.0, &[lod], &[], &[]); }
+        cull.prepare(&device, &queue); assert!(cull.model_buf.cap > old_capacity);
+        assert_eq!(read_table_storage_words(&device, &queue, cull.model_buf.buf.as_ref().unwrap(),
+            (std::mem::size_of_val(cull.models.as_slice()) / 4) as u64), bytemuck::cast_slice::<ModelGpu,u32>(&cull.models));
+        // Separate actual epoch starts with its LOD pool at birth; no retroactive fake owner.
+        let mut retirement = CullState::new(&device);
+        retirement.model_row_uploads = Some(ModelRowUploads::default());
+        retirement.variant_capacity = 16;
+        retirement.lod_spans = Some(Box::new(super::super::section_span_pool::SectionSpanPool::new_table("LOD")));
+        retirement.lods = vec![LodGpu::zeroed()];
+        let a = retirement.register_model(3.0, &[lod], &[], &[]);
+        let b = retirement.register_model(4.0, &[lod], &[], &[]);
+        retirement.prepare(&device, &queue); let b_before = bytemuck::bytes_of(&retirement.models[b as usize]).to_vec();
+        retirement.retire_model(a); assert_eq!(retirement.model_row_uploads.unwrap().range(retirement.models.len(), false), a as usize..a as usize+1);
+        retirement.prepare(&device, &queue);
+        assert_eq!(bytemuck::bytes_of(&retirement.models[b as usize]), b_before.as_slice());
+        assert_eq!(read_table_storage_words(&device, &queue, retirement.model_buf.buf.as_ref().unwrap(),
+            (std::mem::size_of_val(retirement.models.as_slice()) / 4) as u64), bytemuck::cast_slice::<ModelGpu,u32>(&retirement.models));
+        retirement.retire_model(a); assert_eq!(retirement.table_uploads, TableUploads::NONE);
+        eprintln!("PASS model_row_upload_actual_gpu: actual production partial/full GPU writes and neighbor readback matched");
+    }
 }

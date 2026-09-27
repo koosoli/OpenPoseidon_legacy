@@ -16,6 +16,7 @@ param(
     [switch]$LegacySectionRefresh,
     [switch]$SectionReuse,
     [switch]$LodReuse,
+    [switch]$ModelRowUpload,
     [string]$Label = 'dayz-streaming-latency',
     [string]$GameDir = 'D:\SteamLibrary\steamapps\common\ARMA Cold War Assault'
 )
@@ -46,6 +47,7 @@ if (!$env:LOCK_OWNER) {
         if ($LegacySectionRefresh) { $argv += '-LegacySectionRefresh' }
         if ($SectionReuse) { $argv += '-SectionReuse' }
         if ($LodReuse) { $argv += '-LodReuse' }
+        if ($ModelRowUpload) { $argv += '-ModelRowUpload' }
         & 'C:\Program Files\Git\bin\bash.exe' @argv
         if ($LASTEXITCODE) { throw "Latency screening exited $LASTEXITCODE" }
     } finally { Remove-Item Env:LOCK_OWNER }
@@ -88,6 +90,7 @@ $environment = @{
     WGR_CULL_SECTION_REFRESH = $(if ($LegacySectionRefresh) { '0' } else { '1' })
     WGR_CULL_SECTION_REUSE = $(if ($SectionReuse) { '1' } else { '0' })
     WGR_CULL_LOD_REUSE = $(if ($LodReuse) { '1' } else { '0' })
+    WGR_CULL_MODEL_ROW_UPLOAD = $(if ($ModelRowUpload) { '1' } else { '0' })
     WGR_WATER_BACKEND = '0'
 }
 if ($TerrainPageTimings) {
@@ -133,6 +136,7 @@ try {
         requireWarmMaterialStageUpload = [bool]$RequireWarmMaterialStageUpload
         renderCallCpuTimings = [bool]$TerrainPageTimings
         renderCallCpuTimingEnvironment = [string]$environment.WGR_RENDER_CALL_CPU_TIMINGS
+        modelRowUpload = [bool]$ModelRowUpload; modelRowUploadEnvironment = [string]$environment.WGR_CULL_MODEL_ROW_UPLOAD
         legacySectionRefresh = [bool]$LegacySectionRefresh
         cullSectionRefreshEnvironment = [string]$environment.WGR_CULL_SECTION_REFRESH
         installed = (Get-Content (Join-Path $GameDir 'DEPLOYED-FROM.txt')); hashes = $initialHashes
@@ -373,6 +377,22 @@ try {
         rows = @($quotaRows | ForEach-Object { $_.Line })
         scope = 'Sampled existing residency log cadence; counted warm registration scheduling only, not texture readiness, total route work, a frame deadline or cross-machine determinism'}
     $quotaProof | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $out 'registration-quota-proof.json')
+    $modelRowEnabled=@(Select-String -LiteralPath $log -SimpleMatch 'gpu MODEL row upload enabled:')
+    $modelRowCommits=@(Select-String -LiteralPath $log -Pattern 'gpu MODEL row upload committed: first=(\d+) rows=(\d+) tableRows=(\d+) bytes=(\d+) event=(\d+); postQueueWrite=true sourceRangeOnly=true')
+    $modelRowTruncated=@(Select-String -LiteralPath $log -SimpleMatch 'gpu MODEL row upload log truncated:')
+    if ($ModelRowUpload -and ($modelRowEnabled.Count -ne 1 -or $modelRowCommits.Count -lt 1 -or
+        $modelRowCommits.Count -gt 16 -or $modelRowTruncated.Count -gt 1)) {throw 'MODEL row upload activation/actual partial write proof missing or unbounded'}
+    if (!$ModelRowUpload -and ($modelRowEnabled.Count -or $modelRowCommits.Count -or $modelRowTruncated.Count)) {throw 'MODEL row upload activated in OFF control'}
+    foreach ($row in $modelRowCommits) {
+        $m=$row.Matches[0];$first=[uint64]$m.Groups[1].Value;$rows=[uint64]$m.Groups[2].Value
+        $total=[uint64]$m.Groups[3].Value;$bytes=[uint64]$m.Groups[4].Value;$event=[uint64]$m.Groups[5].Value
+        if (!$rows -or $rows -ge $total -or $first -gt $total -or $rows -gt ($total-$first) -or
+            $bytes -ne ($rows*16) -or !$event -or $event -gt 16) {throw 'Invalid MODEL partial source-range write evidence'}
+    }
+    $modelRowProof=@{requested=[bool]$ModelRowUpload;activationRows=$modelRowEnabled.Count;
+        committedRows=$modelRowCommits.Count;truncatedRows=$modelRowTruncated.Count;
+        rows=@($modelRowCommits | ForEach-Object {$_.Line});
+        scope='Bounded post-queue-write partial MODEL source ranges; not driver completion, physical memory or performance acceptance'}
     @{passed = [bool]($warmJobsProven -and $warmStageFamilyProven); mode = $Mode; admissionMode = $AdmissionMode; parkedTextureRefill = [bool]$ParkedTextureRefill; lazyTextureGroups = [bool]$LazyTextureGroups; warmProfile = [bool]$WarmProfile; screeningOnly = $true; performanceAccepted = $false; terrainPageTimings = [bool]$TerrainPageTimings
         frameCount = $count; dropped = $dropped; enginePhaseTiming = $phases; baseline = $baseline; returned = $returned
         routeSamples = $routeSamples; postExitHashes = $finalHashes
@@ -386,6 +406,7 @@ try {
         archiveSourceBindings = [bool]$ArchiveSourceBindings; archiveSourceBindingProof = $archiveBindings
         warmTextureJobs = [bool]$WarmTextureJobs; warmTextureJobProof = $warmJobProof
         requireWarmMaterialStageUpload = [bool]$RequireWarmMaterialStageUpload; warmMaterialStageFamilyProof = $warmStageFamilyProof
+        modelRowUpload = [bool]$ModelRowUpload; modelRowUploadProof = $modelRowProof
         legacySectionRefresh = [bool]$LegacySectionRefresh; cullSectionRefreshEnvironment = [string]$environment.WGR_CULL_SECTION_REFRESH
         limitation = 'No automatic performance threshold, vanilla parity, cold-cache guarantee or whole-world query readiness; compare matched separate mode processes'
     } | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $out 'result.json')
