@@ -2910,3 +2910,63 @@ for it, and it does not validate pending history cleanup/export/decoder source.
 Whole plan OPEN; installed binary/defaults remain unchanged and all previous
 ownership/reclaim/performance gates remain false. No 63MAX or grass improvement
 is established by this research.
+
+## Sept27 bounded history pruning and remaining resource growth
+
+Installed source37a460cc at10:28 uses matched ABI15. EXE SHA256
+025D4FFCD34C63D4887A595F5C6476A2ECF022671355C9B3784E39DE6F8D0345;
+DLL6A0FD35F62D4363055237C9F49211E1DD5629D566496277F57E3EA742B73A8BA.
+The initial history/page/export build failed on a Selection helper ambiguity;
+the repair passed all five targets. `build/test-history-page-export-20260927.log`
+passes24,542 assertions/49 cases without skips. This covers the offline authored
+page/export/resident decoder and diagnostic history contracts; pending CLOD,
+whole-representation decoding and resident-draw source was not built or installed.
+
+Actual `build/stream-residency/history-pruning-20260927-20260927-102841/result.json`
+reports **ResourceGrowth / passed=false**. All three returns retain19923 objects,
+required0, and each quiet window establishes ten consecutive plateau samples.
+Return2→3 geometryLiveBytes grows719657672→734996136 (+15338464), exceeding the
+unchanged8388608 allowance. Capacity stays1275068416 and retired bytes stay0.
+Textures fall2836076340→2781160628 (-54915712), count2585→2527; backend bytes
+fall5393309584→5339043408. No tolerance is loosened. Plateau within each quiet
+window does not establish convergence between repeated routes. Process private
+grows9707196416→10006831104, while working set falls3618086912→3269988352;
+these remain diagnostic samples, not process-memory convergence.
+
+The fresh optional diagnostic gate succeeds:6720 allocation records and845
+borrower records pruned; current4147 allocations/3477 borrowers, complete=true,
+incompleteReasons0, mailbox pending/dropped0, candidates/detached history0,
+selected pins0. Candidate-array known capacity65536 and current borrower record
+payload139080 exclude unordered-map nodes/buckets, allocator and RSS. Pruning
+requires exact same-epoch/full-generation RustAbsent, scheduled retirement and
+zero persistent owners; it changes metadata only and never frees GPU resources,
+raises caps or clears sticky incompleteness.
+
+The same-cut renderer report is valid/complete/untruncated:4147 requested,
+inspected and Present records,0 Absent/invalid/duplicate/unknown/AbsentOwned.
+Vertex644067984 + index90928152 equals poolLive734996136; live records4147,
+pool generation12, record closure complete and residual0. Labelled ACK is valid,
+state3, ticket1/epoch1/submission1 and agrees with that copied record cut. This
+closes the observed mesh-record/pool-range attribution gap for this cut; it does
+not close draw/cached-view/uploader/future-reference ownership or establish
+device memory release. ownershipCoverageComplete=false and reclaimableBytes0.
+
+The failed runner still requested normal harness exit; the engine log ends with
+Shutdown complete. ResourceGrowth is not evidence of a forced kill or a leak.
+No performance/no-regression, memory-convergence, complete-ownership, pressure,
+paging or default-readiness acceptance follows.
+
+Private diagnostic-pin regressions both pass with clean exits and Shutdown
+complete: `history-pin-standalone-20260927-20260927-103225` and
+`history-pin-shared-20260927-20260927-103333` under `build/stream-residency/`.
+Standalone producer62/fullhandle4294967357 changes Present1/cpu1 to Absent0/cpu0,
+while ledgerRecordObserved remains true and scheduledRetired changes false→true;
+known payload18360, witness known/peak11224 and capacityRefused0. Shared newest-first
+and producer-first use producer62/65 and fullhandles4294967357/12884901949,
+two→one→zero borrowers, final Absent/producer false/scheduled true with the selected
+ledger record still observed. Shared payload21744, witness peak11408/final11040,
+refused0. The pin protects one diagnostic metadata record until explicit Abort;
+it does not pin GPU memory or establish rendering, completion or device-free proof.
+
+Whole streaming plan remains OPEN, optional
+experiments remain off by default, and waves remain parked.
