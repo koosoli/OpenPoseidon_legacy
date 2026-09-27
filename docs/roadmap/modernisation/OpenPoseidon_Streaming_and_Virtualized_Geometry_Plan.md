@@ -835,3 +835,60 @@ Installed EXE046633FF02A68297B16A3A5235D7C1788A270DF0BEC6EECB7659DC6A7E9F052E;
 DLL16323FFBE55029A28E96A7EA06BB7E161D29464964AD9F9F99A13D83F3C76C5A.
 
 Exact artifact hashes are recorded in `../decisions/GEOMETRY-CLOD-PILOT-20260927.md`.
+
+## bdc7519b offline producer, explicit disk frontier and cached stages (27 September, 14:24)
+
+Offline producer13929948 passed all-five-target build45 scheduled steps and
+4,154 assertions in2 controlled Shape/worker cases without skips. Actual Tools
+CLI emitted a71,652-byte selected package and separate captured producer manifest.
+It retains original raw SHA f0dc3b432424e1323480f6bd6c9c6870935d631df7074d39d2895512a15f45c4
+and derived cut SHA02ec881ef4b63ff9803c59f299b542554a26eb46cba3d2b8c5b6f92f1a97948e,
+matching the earlier controlled renderer input. Coarse64/fine512 triangles,
+original289vertices/512triangles/fallback2, groups4/bakedclusters12/selected7,
+source88,974 known bytes. This is controlled authored data, not retail source
+eligibility, arbitrary DAG certification or GPU proof. The manifest is separate
+producer provenance; stdout/file newline differences require semantic equality
+and distinct artifact hashes, not byte equality or trusting cache-file keys.
+
+Clean installedbdc7519b contains no-load cached-stage capture2af993a8 and explicit
+disk frontierbdc7519b. All-five build passed20 scheduled steps; combined worker,
+codec, producer and frontier tests passed11,331 assertions in18 cases/no skips.
+Cached fallback inspects only existing material cache/texture-bank first normal
+and specular slots, preserving first-slot refusal. No Resolve/Load/new source
+reads, Unknown retrofit or cap increase. Cache/slot/bank/inspect visits share256
+budget and64 accepted-read ceiling. Immutable disk metadata freezes Coarse/Fine;
+RAM and old callers remain Fine, invalid enum refuses before job allocation,
+failed Coarse retains only its requested-role witness with decodedUnavailable.
+Filesystem worker remains CPU-unit validated, not invoked by an Engine game yet.
+
+Actual cached-stage142502 FAILED its required successful-upload gate: runner1,
+result.passed=false, normal owned Shutdown complete14:26:17.033. One submitted/
+completed job, one prepared member/Put, Take0/Upload0 and zero successful filename-
+family witnesses. Failure result/raw frames/proofs/provenance/log/image remain.
+Final job metadata/scratch0, queued/active0, optional queue1,056 bytes, but store
+one entry1,573,776 bytes persists. Peaks20,824metadata/67,174,400scratch bytes.
+Source/capture/fallback limits remain under investigation; no material-slot,
+readiness or gain is inferred from a prepared job.
+
+Raw742frames/drop0, usual median/nearest-rank ceil(n*p)-1 tails: mean48.250581ms,
+median24.281ms, p95150.836ms, p99542.500ms, maximum1,019.661ms; six slow rows/six
+paired CPU rows. Returned19,923/required0/pendingfalse, geometry716,495,592 bytes/
+capacity1,275,068,416/retired0; textures2,770,718,932 bytes/2,504 entries and
+backend5,322,212,160 bytes. Ordered profiled unequal work prevents causal
+performance/no-regression acceptance. No new visual acceptance. Experimental
+warm jobs/source capture remain OFF; plan/Stage G OPEN/defaultReady and
+performanceAccepted false. Future Engine disk-fixture patch is unbuilt/excluded.
+Installed EXEFE201EDEC69E9341DA3EE20E6256BFC578025C8D3913559A194549791947C0C4;
+DLL5BC75016807376DEBEA75A0F5F492C6D4B347E16B437D004D5499AF388B81540.
+
+Exact artifact hashes are recorded in `../decisions/GEOMETRY-CLOD-PILOT-20260927.md`.
+
+Actual producer output directory `build/controlled-clod-producer-20260927-1422`
+was independently checked: parsed captured stdout and manifest.json are equal;
+selected.gcd size/SHA match its producer manifest. Existing-directory CLI refusal
+returned2 and preserved the selected-file hash. Original producer Tools EXE SHA
+FD1A3009ACD6ED7EDB6C2F91A86913F5B48BF8CE585EE540A7F065C04B9CACB0
+belongs to139's actual operation; later bdc Tools rebuild is not that binary claim.
+Bounded cached-stage prefix observes293 slot visits/147 material-cache hits and
+zero accepted stages; prefix counts are not whole-route coverage. No unchanged
+experimental reruns or capacity promotion are justified by this failed gate.
