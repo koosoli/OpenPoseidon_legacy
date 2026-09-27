@@ -6,6 +6,7 @@
 #include <atomic>
 #include <cstdlib>
 #include <cstring>
+#include <iterator>
 #include <memory>
 #include <new>
 #include <string>
@@ -27,8 +28,12 @@ public:
         StorePut, StorePutRefused,
         OwnerExactAttempt, OwnerKeyOnlyAttempt, StoreTakeMissKeyOnly, StoreTakeWarm,
         StoreTakeCancelled, StoreTakeRefused, SourceValidated, SourceRefused, LayoutRefused,
-        UploadSucceeded, UploadFailed, OrdinaryUpload, Count
+        UploadSucceeded, UploadFailed, OrdinaryUpload,
+        StoreRetiredCancelled, StoreRetiredExpired, StoreRetiredUploadedMark,
+        StoreRetiredClear, StoreRetiredOther, Count
     };
+    // Exact source-member retention outcome; no texture payload or model lease.
+    enum class RetireReason : uint8_t { Consumed, Cancelled, Expired, UploadedMark, Clear, Other };
     struct Row
     {
         uint32_t ordinal = 0, token = 0;
@@ -49,6 +54,8 @@ private:
         uint16_t keyBytes = 0;
         BankReadMemberIdentity member;
         std::array<std::atomic<uint8_t>, static_cast<unsigned>(Event::Count)> occurrences{};
+        std::atomic<uint8_t> storeLive{0};
+        std::atomic<uint32_t> pendingRetireReasons{0};
     };
     std::shared_ptr<const ArchiveSourceBudget::Ticket> _charge;
     std::array<Record, MaxRecords> _records{};
@@ -83,6 +90,11 @@ private:
         case Event::UploadSucceeded: return "uploadSucceeded";
         case Event::UploadFailed: return "uploadFailed";
         case Event::OrdinaryUpload: return "ordinaryUpload";
+        case Event::StoreRetiredCancelled: return "storeRetiredCancelled";
+        case Event::StoreRetiredExpired: return "storeRetiredExpired";
+        case Event::StoreRetiredUploadedMark: return "storeRetiredUploadedMark";
+        case Event::StoreRetiredClear: return "storeRetiredClear";
+        case Event::StoreRetiredOther: return "storeRetiredOther";
         case Event::Count: break;
         }
         return "invalid";
@@ -154,6 +166,46 @@ public:
             { if (match) return 0; match = i + 1; }
         return match; // potential key contact, NEVER a physical source match
     }
+    // All Note* methods are bounded atomics; callers may hold the store mutex.
+    // Emission occurs only at a later owner/harness cut outside that mutex.
+    void NoteStored(uint32_t token) noexcept
+    {
+        if (token && token <= _sources.load(std::memory_order_acquire))
+            _records[token - 1].storeLive.store(1, std::memory_order_release);
+    }
+    void NoteRetired(uint32_t token, RetireReason why) noexcept
+    {
+        if (!token || token > _sources.load(std::memory_order_acquire)) return;
+        Record& record = _records[token - 1];
+        if (!record.storeLive.exchange(0, std::memory_order_acq_rel) || why == RetireReason::Consumed) return;
+        // A bit is an occurrence witness, not a count. Repeated same-cause
+        // removals before a flush coalesce for this physical-member token.
+        record.pendingRetireReasons.fetch_or(uint32_t(1) << static_cast<unsigned>(why), std::memory_order_release);
+    }
+    void NoteClearLive() noexcept
+    {
+        const uint32_t count = _sources.load(std::memory_order_acquire);
+        for (uint32_t i = 0; i < count; ++i) NoteRetired(i + 1, RetireReason::Clear);
+    }
+    uint32_t DrainRetirementReasons(uint32_t token) noexcept
+    {
+        return token && token <= _sources.load(std::memory_order_acquire) ?
+            _records[token - 1].pendingRetireReasons.exchange(0, std::memory_order_acq_rel) : 0;
+    }
+    void FlushRetirements() noexcept
+    {
+        const uint32_t count = _sources.load(std::memory_order_acquire);
+        constexpr RetireReason reasons[] = {RetireReason::Cancelled, RetireReason::Expired,
+            RetireReason::UploadedMark, RetireReason::Clear, RetireReason::Other};
+        constexpr Event events[] = {Event::StoreRetiredCancelled, Event::StoreRetiredExpired,
+            Event::StoreRetiredUploadedMark, Event::StoreRetiredClear, Event::StoreRetiredOther};
+        for (uint32_t token = 1; token <= count; ++token)
+        {
+            const uint32_t mask = DrainRetirementReasons(token);
+            for (size_t i = 0; i < std::size(reasons); ++i)
+                if (mask & (uint32_t(1) << static_cast<unsigned>(reasons[i]))) Emit(Stamp(token, events[i]));
+        }
+    }
     Row Stamp(uint32_t token, Event event, uint64_t a = 0, uint64_t b = 0) noexcept
     {
         if (!token || token > _sources.load(std::memory_order_acquire) || event >= Event::Count) return {};
@@ -166,6 +218,12 @@ public:
         if (ordinal > MaxRows)
             return {0, token, event, a, b, !_truncated.exchange(true, std::memory_order_acq_rel)};
         return {ordinal, token, event, a, b, false};
+    }
+    // Test/diagnostic only: capped at four stamps per token/event, not a total.
+    uint8_t EventOccurrences(uint32_t token, Event event) const noexcept
+    {
+        if (!token || token > _sources.load(std::memory_order_acquire) || event >= Event::Count) return 0;
+        return _records[token - 1].occurrences[static_cast<unsigned>(event)].load(std::memory_order_acquire);
     }
     Summary Observe() const noexcept
     {

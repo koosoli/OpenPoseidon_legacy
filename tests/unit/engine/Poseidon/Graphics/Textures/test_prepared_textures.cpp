@@ -14,6 +14,7 @@
 #include <Poseidon/Graphics/Textures/PAADecoder.hpp>
 #include <Poseidon/Graphics/Textures/PreparedTextures.hpp>
 #include <Poseidon/IO/Streams/ArchiveSourceBinding.hpp>
+#include <Poseidon/World/Terrain/WarmTextureProvenance.hpp>
 #include <Poseidon/Foundation/Threads/ThreadAffinity.hpp>
 
 #include "test_fixtures.hpp"
@@ -759,5 +760,49 @@ TEST_CASE("Source-bound warm chains require explicit claims and retain cancellat
     REQUIRE(store.Take("warm-source", output, &claimed));
     CHECK(output.blocks == fixture.chain.blocks); CHECK(claimed == binding);
     store.Clear();
+}
+TEST_CASE("Actual source-bound store retires the matching warm token by cause", "[warm-provenance-store]")
+{
+    Foundation::CaptureMainThread();
+    using Proof = Streaming::WarmTextureProvenance;
+    if (!Proof::Enabled()) SKIP("Run fresh with WGR_OBJECT_STREAM_WARM_TEXTURE_TRACE=1, WARM_TEXTURES=1 and WARM_TEXTURE_JOBS=1.");
+    auto* proof = Proof::Active(); REQUIRE(proof);
+    AlphaArchiveFixture fixture;
+    auto buffer = [&] { ArchiveSourceBinding::ModelReadScope purpose; return fixture.bank.Read("member.paa"); }(); REQUIRE(buffer);
+    auto binding = buffer->GetArchiveSourceBinding(); REQUIRE(binding);
+    BankReadMemberIdentity identity;
+    REQUIRE(binding->Request().CopyMemberIdentity(identity));
+    constexpr const char* key = "exact-retirement-member";
+    const uint32_t sourceToken = proof->Admit(key, identity); REQUIRE(sourceToken);
+    auto& store = render::PreparedTextureStore::Instance();
+    store.Clear();
+    proof->DrainRetirementReasons(sourceToken);
+    const uint64_t generation = store.Generation();
+    auto inventory = render::DdsPublicationInventory::Create(1); REQUIRE(inventory);
+    auto publish = [&](const render::DdsPublicationToken& publication) {
+        auto chain = fixture.chain;
+        return store.Put(key, std::move(chain), generation, nullptr, &publication, binding);
+    };
+    const render::DdsPublicationToken original{inventory, 0, inventory->Epoch(0)};
+    REQUIRE(publish(original));
+    store.MarkUploaded(key);
+    CHECK(proof->DrainRetirementReasons(sourceToken) == (1u << unsigned(Proof::RetireReason::UploadedMark)));
+    store.MarkEvicted(key);
+    REQUIRE(publish(original));
+    inventory->CancelModel(0);
+    CHECK(store.ShouldPrepareWarm(key)); // production cancelled-entry sweep, no Take required
+    CHECK(proof->DrainRetirementReasons(sourceToken) == (1u << unsigned(Proof::RetireReason::Cancelled)));
+    const render::DdsPublicationToken replacement{inventory, 0, inventory->Epoch(0)};
+    REQUIRE(publish(replacement));
+    PAABlockChain claimed;
+    std::shared_ptr<const ArchiveSourceBinding> claimedSource;
+    REQUIRE(store.Take(key, claimed, &claimedSource));
+    CHECK(claimedSource == binding);
+    CHECK(proof->DrainRetirementReasons(sourceToken) == 0); // a successful claim is not a discard
+    REQUIRE(publish(replacement));
+    const auto clearStamps = proof->EventOccurrences(sourceToken, Proof::Event::StoreRetiredClear);
+    store.Clear();
+    CHECK(proof->EventOccurrences(sourceToken, Proof::Event::StoreRetiredClear) == clearStamps + 1);
+    CHECK(proof->DrainRetirementReasons(sourceToken) == 0); // Clear emitted after unlocking
 }
 #endif

@@ -81,3 +81,23 @@ TEST_CASE("Warm trace reservation shares the unchanged archive metadata cap with
     CHECK(budget->Observe().traceBytes == 0);
     CHECK(budget->Acquire(64));
 }
+
+TEST_CASE("Warm trace latches only actually stored exact-source retirement and drains each reason once", "[warm-provenance]")
+{
+    using P = WarmTextureProvenance;
+    P trace;
+    const auto old = trace.Admit("same.paa", Identity(1, 32));
+    const auto remount = trace.Admit("same.paa", Identity(2, 32));
+    REQUIRE(old == 1); REQUIRE(remount == 2);
+    trace.NoteRetired(old, P::RetireReason::Cancelled); // no successful store yet
+    CHECK(trace.DrainRetirementReasons(old) == 0);
+    trace.NoteStored(old); trace.NoteRetired(old, P::RetireReason::Cancelled);
+    CHECK(trace.DrainRetirementReasons(remount) == 0);
+    CHECK(trace.DrainRetirementReasons(old) == (1u << unsigned(P::RetireReason::Cancelled)));
+    CHECK(trace.DrainRetirementReasons(old) == 0);
+    trace.NoteStored(old); trace.NoteRetired(old, P::RetireReason::Consumed);
+    CHECK(trace.DrainRetirementReasons(old) == 0);
+    trace.NoteStored(remount); trace.NoteClearLive();
+    CHECK(trace.DrainRetirementReasons(old) == 0);
+    CHECK(trace.DrainRetirementReasons(remount) == (1u << unsigned(P::RetireReason::Clear)));
+}

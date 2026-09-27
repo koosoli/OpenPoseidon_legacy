@@ -82,9 +82,17 @@ struct PreparedTextureStore::Impl
     }
 
     void EraseLocked(std::unordered_map<std::string, std::list<Entry>::iterator>::iterator it, PAABlockChain* takeInto,
-                     DecodedImage* takeImageInto = nullptr, std::list<Entry>* retired = nullptr)
+                     DecodedImage* takeImageInto = nullptr, std::list<Entry>* retired = nullptr,
+                     Streaming::WarmTextureProvenance::RetireReason reason = Streaming::WarmTextureProvenance::RetireReason::Other)
     {
         std::list<Entry>::iterator node = it->second;
+        if (node->warmSource)
+            if (auto* proof = Streaming::WarmTextureProvenance::Active())
+            {
+                BankReadMemberIdentity member;
+                if (node->warmSource->Request().CopyMemberIdentity(member))
+                    proof->NoteRetired(proof->Find(node->key, member), reason);
+            }
         if (cancellationCursor == node) ++cancellationCursor;
         if (node->publication.inventory) --tokenEntries;
         bytes -= EntryBytes(*node);
@@ -120,9 +128,18 @@ struct PreparedTextureStore::Impl
                 break;
             auto it = byKey.find(head.key);
             if (it != byKey.end())
-                EraseLocked(it, nullptr, nullptr, &retired);
+                EraseLocked(it, nullptr, nullptr, &retired, Streaming::WarmTextureProvenance::RetireReason::Expired);
             else
             {
+                // Defensive unindexed TTL path: keep the exact warm-source reason honest too.
+                if (head.warmSource)
+                    if (auto* proof = Streaming::WarmTextureProvenance::Active())
+                    {
+                        BankReadMemberIdentity member;
+                        if (head.warmSource->Request().CopyMemberIdentity(member))
+                            proof->NoteRetired(proof->Find(head.key, member),
+                                Streaming::WarmTextureProvenance::RetireReason::Expired);
+                    }
                 if (cancellationCursor == order.begin()) ++cancellationCursor;
                 if (head.publication.inventory) --tokenEntries;
                 bytes -= EntryBytes(head);
@@ -150,7 +167,7 @@ struct PreparedTextureStore::Impl
                 if (indexed != byKey.end())
                 {
                     CountCancelled(*node);
-                    EraseLocked(indexed, nullptr, nullptr, &retired);
+                    EraseLocked(indexed, nullptr, nullptr, &retired, Streaming::WarmTextureProvenance::RetireReason::Cancelled);
                 }
             }
         }
@@ -252,7 +269,7 @@ bool PreparedTextureStore::ShouldPrepare(const std::string& key)
     if (old != _impl->byKey.end() && old->second->publication.inventory && !old->second->publication.Valid())
     {
         _impl->CountCancelled(*old->second);
-        _impl->EraseLocked(old, nullptr, nullptr, &retired);
+        _impl->EraseLocked(old, nullptr, nullptr, &retired, Streaming::WarmTextureProvenance::RetireReason::Cancelled);
     }
     if (_impl->uploaded.count(key))
     {
@@ -288,7 +305,7 @@ bool PreparedTextureStore::CanRetainAlphaFacts(const std::string& key, const PAA
     if (old != _impl->byKey.end() && old->second->publication.inventory && !old->second->publication.Valid())
     {
         _impl->CountCancelled(*old->second);
-        _impl->EraseLocked(old, nullptr, nullptr, &retired);
+        _impl->EraseLocked(old, nullptr, nullptr, &retired, Streaming::WarmTextureProvenance::RetireReason::Cancelled);
     }
     if (_impl->byKey.count(key)) return false;
     const size_t available = ByteBudget() - std::min(_impl->bytes, ByteBudget());
@@ -412,7 +429,7 @@ bool PreparedTextureStore::Put(const std::string& key, PAABlockChain&& chain,
         if (old != _impl->byKey.end() && old->second->publication.inventory && !old->second->publication.Valid())
         {
             _impl->CountCancelled(*old->second);
-            _impl->EraseLocked(old, nullptr, nullptr, &freeLater);
+            _impl->EraseLocked(old, nullptr, nullptr, &freeLater, Streaming::WarmTextureProvenance::RetireReason::Cancelled);
         }
         if (publication && (!generation || !publication->Valid()))
         {
@@ -449,6 +466,7 @@ bool PreparedTextureStore::Put(const std::string& key, PAABlockChain&& chain,
             _impl->stats.entries = _impl->byKey.size();
             _impl->stats.bytes = _impl->bytes;
             stored = true;
+            if (boundWarm && trace) trace->NoteStored(traceToken); // exact published entry, under existing store lock
         }
     }
     freeLater.clear(); // outside the lock
@@ -553,7 +571,7 @@ bool PreparedTextureStore::Take(const std::string& key, PAABlockChain& out,
         }
         else trace.event = Proof::Event::Count;
         _impl->CountCancelled(*it->second);
-        _impl->EraseLocked(it, nullptr, nullptr, &retired);
+        _impl->EraseLocked(it, nullptr, nullptr, &retired, Streaming::WarmTextureProvenance::RetireReason::Cancelled);
         ++_impl->stats.misses;
         return false;
     }
@@ -573,7 +591,7 @@ bool PreparedTextureStore::Take(const std::string& key, PAABlockChain& out,
         ++_impl->stats.warmTakes;
     }
     if (!it->second->warmSource) trace.event = Proof::Event::Count; // successful non-warm take is not a warm miss
-    _impl->EraseLocked(it, &out, nullptr, &retired);
+    _impl->EraseLocked(it, &out, nullptr, &retired, Streaming::WarmTextureProvenance::RetireReason::Consumed);
     ++_impl->stats.takes;
     _impl->stats.takeBytes += out.blocks.size();
     return true;
@@ -589,7 +607,7 @@ bool PreparedTextureStore::ShouldPrepareWarm(const std::string& key)
     if (old != _impl->byKey.end() && old->second->publication.inventory && !old->second->publication.Valid())
     {
         _impl->CountCancelled(*old->second);
-        _impl->EraseLocked(old, nullptr, nullptr, &retired);
+        _impl->EraseLocked(old, nullptr, nullptr, &retired, Streaming::WarmTextureProvenance::RetireReason::Cancelled);
     }
     return _impl->byKey.count(key) == 0;
 }
@@ -762,7 +780,7 @@ void PreparedTextureStore::MarkUploaded(const std::string& key)
         _impl->stats.uploadedMarks = _impl->uploaded.size();
         auto it = _impl->byKey.find(key);
         if (it != _impl->byKey.end())
-            _impl->EraseLocked(it, nullptr, nullptr, &retired);
+            _impl->EraseLocked(it, nullptr, nullptr, &retired, Streaming::WarmTextureProvenance::RetireReason::UploadedMark);
     }
     // Both payload kinds free here, outside the lock.
 }
@@ -778,9 +796,11 @@ void PreparedTextureStore::MarkEvicted(const std::string& key)
 
 void PreparedTextureStore::Clear()
 {
+    auto* proof = Streaming::WarmTextureProvenance::Active();
     std::list<Impl::Entry> freeLater;
     {
         std::lock_guard<std::mutex> lock(_impl->mutex);
+        if (proof) proof->NoteClearLive(); // at most eight exact registered sources; no store scan
         ++_impl->generation;
         freeLater.swap(_impl->order);
         _impl->cancellationCursor = _impl->order.end();
@@ -794,6 +814,7 @@ void PreparedTextureStore::Clear()
         _impl->stats.uploadedMarks = 0;
     }
     freeLater.clear();
+    if (proof) proof->FlushRetirements(); // Clear records only under the lock; logs afterward
 }
 
 PreparedTextureStore::Stats PreparedTextureStore::SnapshotStats() const
