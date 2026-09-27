@@ -694,6 +694,32 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
         let sigS = tw.scattering.rgb + surfMed.scatter * sandK + aer * 1.6;
         let sigT = sigA + sigS;
 
+        // (W3f) Light reaching what lies under the water. OP lights its sea bed (and anything else
+        // below the surface) as if it stood in air; Tidewater's UnderwaterLighting attenuates that
+        // light through the water column above it (hookDirectModulation: the sun along its refracted
+        // path, exp(-sigT d / mu); hookAmbientModulation: diffuse light over ~1.2 d, plus a little
+        // in-scattered blue). Without it every metre of sea shows sunlit sand through a thin blue
+        // filter, and deep water reads pale cyan instead of Tidewater's navy. The opaque copy holds
+        // direct + ambient light already summed, so the two attenuations are blended by the direct
+        // share of a flat bed's irradiance. Caustics are not ported here (W5).
+        if (dR > 1e-7 && !thruCrest) {
+            let bedPos = scene_rel_at(uvF, dR) + frame.cam_pos.xyz;
+            let dBed = max(tw.sea.x - bedPos.y, 0.0);
+            if (dBed > 0.0) {
+                let sigTc = tw.absorption.rgb + tw.scattering.rgb;
+                let LsB = refract(-L, vec3<f32>(0.0, 1.0, 0.0), 1.0 / IOR);
+                let muB = max(-LsB.y, 0.15);
+                let attDirect = exp(-sigTc * dBed / muB);
+                let attAmbient = exp(-sigTc * dBed * 1.2) * 0.85 + vec3<f32>(0.0, 0.02, 0.04) * exp(dBed * -0.1);
+                let lumW = vec3<f32>(0.2126, 0.7152, 0.0722);
+                let eSun = dot(sunLight, lumW) * max(L.y, 0.0) * INV_PI;
+                let eSky = dot(skyIrr, lumW);
+                let directShare = eSun / max(eSun + eSky, 1e-5);
+                let bedAtt = attDirect * directShare + attAmbient * (1.0 - directShare);
+                sceneCol *= mix(vec3<f32>(1.0), bedAtt, smoothstep(0.0, 0.08, dBed));
+            }
+        }
+
         let Ls = -refract(-L, vec3<f32>(0.0, 1.0, 0.0), 1.0 / IOR);
         let muS = max(Ls.y, 0.1);
         let muV = max(-Tv.y, 0.15);
