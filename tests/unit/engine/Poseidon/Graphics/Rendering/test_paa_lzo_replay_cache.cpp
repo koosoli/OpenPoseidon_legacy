@@ -87,3 +87,26 @@ TEST_CASE("Production PAA replay opt-in preserves fresh bytes aliases and malfor
     Poseidon::QIStream in(truncated.data(),int(truncated.size())); std::array<uint8_t,16> output{};
     CHECK(level.LoadPaa(in,output.data(),&palette)==-1); CHECK(in.fail());
 }
+
+TEST_CASE("Unsampled input mutation never becomes an exact replay hit", "[paa-lzo-replay]")
+{
+    // 512-byte fingerprint windows are [0,64), [224,288), [448,512).
+    // Change a byte outside all windows. The default fingerprint therefore
+    // collides; correctness must come from full memcmp, not the shortlist.
+    PaaLzoReplayCache cache(32*1024,4);
+    std::array<uint8_t,512> original{};
+    for(size_t i=0;i<original.size();++i) original[i]=static_cast<uint8_t>(i*37+13);
+    auto modified=original; modified[100]^=0x80;
+    REQUIRE(std::memcmp(original.data(),modified.data(),64)==0);
+    REQUIRE(std::memcmp(original.data()+224,modified.data()+224,64)==0);
+    REQUIRE(std::memcmp(original.data()+448,modified.data()+448,64)==0);
+    std::array<uint8_t,16> a{},b{},out{};
+    a.fill(0x2a); b.fill(0xd3);
+    REQUIRE(cache.StoreSuccessful(original.data(),original.size(),a.size(),a.data(),a.size()));
+    CHECK_FALSE(cache.TryCopy(modified.data(),modified.size(),b.size(),out.data()));
+    REQUIRE(cache.StoreSuccessful(modified.data(),modified.size(),b.size(),b.data(),b.size()));
+    CHECK(cache.Snapshot().entries==2); // A sample collision cannot deduplicate distinct inputs.
+    REQUIRE(cache.TryCopy(original.data(),original.size(),a.size(),out.data())); CHECK(out==a);
+    REQUIRE(cache.TryCopy(modified.data(),modified.size(),b.size(),out.data())); CHECK(out==b);
+    CHECK(cache.Snapshot().misses==1); CHECK(cache.Snapshot().hits==2);
+}

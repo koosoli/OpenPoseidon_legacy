@@ -70,9 +70,22 @@ private:
             inputBytes+expected<=_budget-KnownMetadataBytes();
     }
     struct Entry { std::unique_ptr<uint8_t[]> bytes; uint64_t hash=0,age=0; size_t input=0,output=0; };
+    // A bounded shortlist fingerprint, never an exact-content certificate.
+    // Matches still compares EVERY input byte before replay or deduplication.
     static uint64_t HashBytes(const uint8_t* input,size_t count) {
         uint64_t hash=14695981039346656037ull;
-        for(size_t i=0;i<count;++i) { hash^=input[i]; hash*=1099511628211ull; }
+        const auto feed=[&](uint8_t byte) { hash^=byte; hash*=1099511628211ull; };
+        uint64_t length=static_cast<uint64_t>(count);
+        for(unsigned i=0;i<8;++i) { feed(static_cast<uint8_t>(length)); length>>=8; }
+        if(count<=192) {
+            for(size_t i=0;i<count;++i) feed(input[i]);
+        } else {
+            // Subtraction before division/addition avoids offset overflow.
+            const size_t middle=(count-64)/2, last=count-64;
+            for(size_t i=0;i<64;++i) feed(input[i]);
+            for(size_t i=0;i<64;++i) feed(input[middle+i]);
+            for(size_t i=0;i<64;++i) feed(input[last+i]);
+        }
         return hash;
     }
     static bool Matches(const Entry& e,uint64_t hash,const uint8_t* input,size_t count,size_t expected) {
