@@ -787,3 +787,51 @@ Installed EXE374E2CF5DBD23685262ACFB09C7A490CA15DFEB7DEDA9CE1E2A6203CEE988C88;
 DLLECD07DE0C87225B248EE8CDC85F2056F6F72706DAFD99CBEC8C67793F94BE3CB.
 
 Exact artifact hashes are recorded in `../decisions/GEOMETRY-CLOD-PILOT-20260927.md`.
+
+## 7c426809 bounded disk worker and warm filename-family gate (27 September, 14:14)
+
+Installed clean7c426809 contains disk worker19066746, optional existing material
+resolver source-purpose scope66e2c756, upload witness8f886598 and local-name
+compile repair7c426809. Disk/material build passed30 scheduled all-five-target
+steps; filesystem worker/codec tests passed5,754 assertions in14 cases.
+The initial witness build failed its out-of-scope name reference and is preserved;
+repaired all-five build passed. Fresh source-purpose/warm queue tests passed
+1,064 assertions in9 cases without skips. Material scope captures only actual
+existing owner Init reads under optional flags; cached Unknown remains Unknown.
+
+Filesystem worker validation here is CPU unit evidence only, with no Engine/game
+file submission. Bounded worker owns a private const path/key snapshot, rechecks
+copied native capacity/reservation and shares2-live-job/1MiB logical budget with
+RAM jobs. Cancellation debt lasts through actual worker exit/result release;
+private test cleanup verifies exact canonical child before removal. File-size
+check precedes allocation and full memory codec precedes fine publication.
+External keys authenticate captured bytes, not current source freshness; pathname
+status/open TOCTOU, synchronous I/O and allocator/RSS/scratch limits remain.
+
+Actual dayz-bound-stage-family-upload141421 FAILED its strict positive gate:
+runner exit1/result.passed=false, while owned game shut down normally14:15:36.078.
+One job submitted/completed, one member prepared/Put; Take0/Upload0 and empty
+successful filename-family witness observations. Required stage-family positive
+is false, not inferred from a queued job or prepared bytes. Failure result, proof,
+raw frames, provenance/log and screenshot are retained. Final queued/active0,
+job metadata/scratch0, optional queue storage1,056 bytes; PreparedStore still
+one entry1,573,776 bytes (not whole-resource convergence). Peak metadata20,824
+and scratch67,174,400 known bytes. No uploaded material role, readiness or gain
+was established; fallback/capture/cap explanation remains under investigation.
+
+Raw route695 frames/drop0: mean49.799590ms, ordinary median25.342ms,
+nearest-rank ceil(n*p)-1 p95158.628ms/p99542.318ms/max1,069.360ms.
+Three slow rows have three paired current-call CPU snapshots; acquire944.684ms
+includes acquire preamble, not isolated surface wait. Profiling overhead, ordered
+cache and unequal work forbid performance/no-regression acceptance. Returned
+19,923/required0/pendingfalse; geometry731,868,124/capacity1,275,068,416/retired0;
+textures2,883,832,468 bytes/2,633 entries/backend5,436,685,200 bytes.
+No new visual acceptance is asserted. Upload witness only claims successful bound
+source-validated block upload of filename family, not shader/material slot role.
+Experimental jobs/source/witness remain OFF by default. Whole plan/Stage G OPEN,
+performanceAccepted/defaultReady false. Reviewed offline producer is future
+unbuilt/uninstalled work, excluded from this checkpoint.
+Installed EXE046633FF02A68297B16A3A5235D7C1788A270DF0BEC6EECB7659DC6A7E9F052E;
+DLL16323FFBE55029A28E96A7EA06BB7E161D29464964AD9F9F99A13D83F3C76C5A.
+
+Exact artifact hashes are recorded in `../decisions/GEOMETRY-CLOD-PILOT-20260927.md`.

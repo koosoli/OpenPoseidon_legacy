@@ -737,3 +737,68 @@ Actual checkpoint SHA256 manifest:
 | build/stream-residency/dayz-captured-mip-attribution-20260927-disabled-20260927-135612/route-frame-ms.json | 22a4d1e1915751584b113a4f0110f855368ceba670f9e6092a2a78d2cfa3c669 |
 | build/stream-residency/dayz-captured-mip-attribution-20260927-disabled-20260927-135612/render-call-cpu-proof.json | e27f16f56c4c8e8b0e07b9131b9bd00f5281f68393fff27e2a28c219e4ae23d6 |
 | build/stream-residency/dayz-captured-mip-attribution-20260927-disabled-20260927-135612/returned-settled.png | 10dee8179a97942d926b956f363e0e231cf253f89aca77566566b6e62f26a490 |
+
+## 7c426809 bounded disk worker and warm filename-family gate (27 September, 14:14)
+
+Installed clean7c426809 contains disk worker19066746, optional existing material
+resolver source-purpose scope66e2c756, upload witness8f886598 and local-name
+compile repair7c426809. Disk/material build passed30 scheduled all-five-target
+steps; filesystem worker/codec tests passed5,754 assertions in14 cases.
+The initial witness build failed its out-of-scope name reference and is preserved;
+repaired all-five build passed. Fresh source-purpose/warm queue tests passed
+1,064 assertions in9 cases without skips. Material scope captures only actual
+existing owner Init reads under optional flags; cached Unknown remains Unknown.
+
+Filesystem worker validation here is CPU unit evidence only, with no Engine/game
+file submission. Bounded worker owns a private const path/key snapshot, rechecks
+copied native capacity/reservation and shares2-live-job/1MiB logical budget with
+RAM jobs. Cancellation debt lasts through actual worker exit/result release;
+private test cleanup verifies exact canonical child before removal. File-size
+check precedes allocation and full memory codec precedes fine publication.
+External keys authenticate captured bytes, not current source freshness; pathname
+status/open TOCTOU, synchronous I/O and allocator/RSS/scratch limits remain.
+
+Actual dayz-bound-stage-family-upload141421 FAILED its strict positive gate:
+runner exit1/result.passed=false, while owned game shut down normally14:15:36.078.
+One job submitted/completed, one member prepared/Put; Take0/Upload0 and empty
+successful filename-family witness observations. Required stage-family positive
+is false, not inferred from a queued job or prepared bytes. Failure result, proof,
+raw frames, provenance/log and screenshot are retained. Final queued/active0,
+job metadata/scratch0, optional queue storage1,056 bytes; PreparedStore still
+one entry1,573,776 bytes (not whole-resource convergence). Peak metadata20,824
+and scratch67,174,400 known bytes. No uploaded material role, readiness or gain
+was established; fallback/capture/cap explanation remains under investigation.
+
+Raw route695 frames/drop0: mean49.799590ms, ordinary median25.342ms,
+nearest-rank ceil(n*p)-1 p95158.628ms/p99542.318ms/max1,069.360ms.
+Three slow rows have three paired current-call CPU snapshots; acquire944.684ms
+includes acquire preamble, not isolated surface wait. Profiling overhead, ordered
+cache and unequal work forbid performance/no-regression acceptance. Returned
+19,923/required0/pendingfalse; geometry731,868,124/capacity1,275,068,416/retired0;
+textures2,883,832,468 bytes/2,633 entries/backend5,436,685,200 bytes.
+No new visual acceptance is asserted. Upload witness only claims successful bound
+source-validated block upload of filename family, not shader/material slot role.
+Experimental jobs/source/witness remain OFF by default. Whole plan/Stage G OPEN,
+performanceAccepted/defaultReady false. Reviewed offline producer is future
+unbuilt/uninstalled work, excluded from this checkpoint.
+Installed EXE046633FF02A68297B16A3A5235D7C1788A270DF0BEC6EECB7659DC6A7E9F052E;
+DLL16323FFBE55029A28E96A7EA06BB7E161D29464964AD9F9F99A13D83F3C76C5A.
+
+Actual checkpoint SHA256 manifest:
+
+| Artifact | SHA256 |
+| --- | --- |
+| build/build-disk-worker-material-source-20260927.log | 8ea06fa505f7e82ce15cf18ddc6f9eec763f616cea4e4139a5e9a6edc934e0dc |
+| build/test-disk-worker-material-source-20260927.log | a7c48b02b6d92bbe7586da7525b5652429691daa40ce36bbd260e4e225d01a9d |
+| build/build-warm-stage-family-witness-20260927.log | ed5ea587be37c66f0560db6b0f2ad152e2f1ae1f4330a95807526d05e0341d69 |
+| build/build-warm-stage-family-witness-repaired-20260927.log | 6100a970b4836f5b4a8b4417ac2142934eea6a759187a539bca3dcea88c4bc23 |
+| build/test-warm-stage-source-purpose-20260927.log | 9a681f5b194c7a711cb90210b9d9ad3cad00c54b7fd2f064fb9f2f77c150f0ec |
+| build/stream-residency/dayz-bound-stage-family-upload-20260927-disabled-20260927-141421/result.json | da02e731d6318306ef72dfb560be76e7248d1ab8d23847921cf28cdbfdf106a4 |
+| build/stream-residency/dayz-bound-stage-family-upload-20260927-disabled-20260927-141421/provenance.json | a1400d1a07df0e18893bff5ab2a7c6a0bdbf04fac7881ea9d5154c18c0b42c2f |
+| build/stream-residency/dayz-bound-stage-family-upload-20260927-disabled-20260927-141421/engine.log | eed77e59fba06141d6cb34a77f5fb99a7b6f20795a9d0259aac3dd8ed886b23e |
+| build/stream-residency/dayz-bound-stage-family-upload-20260927-disabled-20260927-141421/harness.jsonl | 12c642b0d190bfdc18b13566f723ffb7be1f30fd9fd9ec97be18acd1dd2bbd9c |
+| build/stream-residency/dayz-bound-stage-family-upload-20260927-disabled-20260927-141421/route-frame-ms.json | 7fe27b49d29c51cd7a0a9401793318e5bb387baf804b4c2b01eae04a7df996b3 |
+| build/stream-residency/dayz-bound-stage-family-upload-20260927-disabled-20260927-141421/render-call-cpu-proof.json | c74287812138ea10365dfe2f1d864cbeaa0c09f68c629542ec812ef889e5322c |
+| build/stream-residency/dayz-bound-stage-family-upload-20260927-disabled-20260927-141421/warm-material-stage-family-proof.json | f3d5c09ec57b6e1889b15c20c99d267768df9e5bb709f40b107c261f6226fc0a |
+| build/stream-residency/dayz-bound-stage-family-upload-20260927-disabled-20260927-141421/warm-texture-job-proof.json | 41767d4e3da4328d6a31b8f38a95373cde31a4312fdb85c262d33a8e37edc2f7 |
+| build/stream-residency/dayz-bound-stage-family-upload-20260927-disabled-20260927-141421/returned-settled.png | 474d13a0b273f25fffcc56d168245107f0ca4d166014199b87dcb4b8e0c1eda0 |
