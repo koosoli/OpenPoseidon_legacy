@@ -2887,3 +2887,26 @@ adapter/generator and confirmed-Absent historical ledger pruning are UNBUILT and
 excluded from this installed runtime. No cap increase or completeness weakening
 is accepted. Whole plan OPEN; diagnostics/pressure/paging defaults remain off,
 all ownership/reclaim/performance gates remain false, and waves remain parked.
+
+## Sept27 RTXMG/CLOD source assessment and Stage G refinement
+
+Owner-provided AI attachment reviewed as a proposal, not an authority or an
+instruction to import its code. Primary sources and independent subagent review
+confirm a useful existing CPU CLOD builder in meshoptimizer and a related
+Apache-2.0 NVIDIA sample. Stage G now prefers evaluating that builder instead
+of writing a simplifier from scratch; shared asset streaming remains necessary.
+See [pinned source/dependency review](../modernisation/RTXMG-CLOD-REVIEW-20260927.md).
+
+RTXMG's Cluster LOD consumer is ray tracing only and uses a restricted SDK
+license; no SDK source or renderer dependency is imported. NVIDIA's sample
+streamer excludes persistent fallback bytes from its dynamic budget and states
+its defaults are untuned. Our adapter must retain total-budget accounting,
+paired DAG selection, material/seam preservation, GPU submission retirement,
+all-pass consistency and bounded worker scratch/cancellation. Existing complete
+authored-LOD page selection does not certify a continuous DAG cut.
+
+This checkpoint changes documentation only. No build/runtime test is required
+for it, and it does not validate pending history cleanup/export/decoder source.
+Whole plan OPEN; installed binary/defaults remain unchanged and all previous
+ownership/reclaim/performance gates remain false. No 63MAX or grass improvement
+is established by this research.

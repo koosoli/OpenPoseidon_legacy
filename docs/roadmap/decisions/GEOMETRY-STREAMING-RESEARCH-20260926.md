@@ -1,5 +1,15 @@
 # Asset geometry streaming: staged recommendation
 
+27 September update: the owner supplied an RTX Mega Geometry/CLOD assessment.
+The Stage G amendment now prefers evaluating pinned upstream
+`meshoptimizer/demo/clusterlod.h` for the later CPU hierarchy bake, with
+`nvpro-samples/vk_lod_clusters` as the streaming/selection reference. This
+refines the earlier description of meshoptimizer as building blocks: its CLOD
+example already implements cluster/group hierarchy generation, although it
+still does not supply our asset semantics, scheduler or WGPU lifetime model.
+The existing bounded authored-LOD page foundation remains useful. This is not
+a dependency import, GPU-paging implementation or default/performance promotion.
+
 Owner requested a subagent investigation while the streaming plan continues.
 Local review baseline: `codex/streaming-residency`, `1e8f04da`; allocation
 diagnostic implementation: `abfd4131`. This is research, not a paging or

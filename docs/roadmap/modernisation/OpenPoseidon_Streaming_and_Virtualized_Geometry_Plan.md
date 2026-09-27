@@ -269,6 +269,56 @@ Keep terrain-detail streaming as its own analysis. A heightfield collision sampl
 
 ### Stage G — Optional hierarchical geometry-page experiment
 
+**27 September 2026 refinement following the owner's RTX Mega Geometry question.**
+Keep the current shared streamer and bounded authored-LOD page prototype. For
+the later continuous-LOD bake, evaluate pinned upstream meshoptimizer
+`demo/clusterlod.h` first, using NVIDIA's Apache-2.0 `vk_lod_clusters` as a
+technical reference. Do not invent a replacement simplifier or import the
+RTXMG SDK into the core. This changes the preferred algorithm source, not the
+correctness/performance acceptance gates. The owner has separately authorized
+the independent opt-in prototype to proceed alongside unfinished residency work;
+that authorization does not promote experimental paging to the normal renderer.
+
+The upstream header supplies cluster/group generation and a spatial hierarchy.
+It does not supply OpenPoseidon's asset eligibility, P3D material semantics,
+submission lifetime, simulation ownership or WGPU page consumer. NVIDIA's sample
+uses mesh-shader rasterization; RTXMG's related Cluster LOD path is ray tracing
+only. Our first consumer remains conventional indexed WGPU draws, with bounded
+compute/indirect refinement only after a resident reference works. No NVIDIA
+hardware or mesh-shader requirement is introduced.
+
+Implementation sequence for this refinement:
+
+1. Finish source-to-page validation and an opt-in fully resident authored-LOD
+   draw fixture. Preserve the original mesh and CPU helper LODs as the reference.
+2. Evaluate an isolated offline/worker CLOD bake adapter for rigid opaque pilots.
+   Pin library/fork versions and notices before importing code. Budget input,
+   output, temporary allocations and worker concurrency separately; callback
+   output limits alone do not establish a peak-memory or cancellation bound.
+3. Preserve UV, normal and material seams and authored openings; reject
+   unsupported selections/proxies/animation/destruction. Treat simplification
+   error as an algorithm metric requiring visual validation, not proof of exact
+   appearance preservation. Start without lossy vertex/UV quantization.
+4. Validate the group DAG's paired selection predicates, monotonic group error
+   and conservative bounds against a CPU reference. The current atomic switch
+   between two complete authored LODs is not proof of a valid per-cluster DAG cut.
+   Residency publication must preserve a complete fallback during partial group
+   loads; equal main/depth/shadow/reflection geometry remains a separate gate.
+5. Add bounded asynchronous demand, staging and retirement, then pressure control
+   with hysteresis and measured equivalent quality. Count persistent coarse
+   geometry, metadata and in-flight bytes in our total budget. NVIDIA's sample
+   excludes persistent fallback bytes from its dynamic budget; do not inherit
+   that accounting gap or its untuned thresholds as accepted defaults.
+
+Verified primary references:
+[meshoptimizer CLOD header](https://github.com/zeux/meshoptimizer/blob/master/demo/clusterlod.h),
+[NVIDIA LOD generation](https://github.com/nvpro-samples/vk_lod_clusters/blob/main/docs/lod_generation.md),
+[streaming lifetime and budget limitations](https://github.com/nvpro-samples/vk_lod_clusters/blob/main/docs/streaming.md),
+[RTXMG rendering-path distinction](https://github.com/NVIDIA-RTX/RTXMG/blob/main/docs/ClusterLOD.md).
+The dated review records pinned revisions and dependency/license details.
+No dependency, runtime/default change or performance acceptance is established
+by this plan amendment.
+
 Proceed only if Stage F still demonstrates a material geometry-processing or geometry-residency bottleneck on representative content.
 
 Nanite is a useful design reference: its public description includes hierarchical triangle clusters, view-dependent refinement, compressed fine-grained streaming and a specialized rendering path. That is substantially more than a distance-based object loader. Our experiment would be an independent, narrower design, not an Unreal integration or a claim of feature/performance parity. [E1]
