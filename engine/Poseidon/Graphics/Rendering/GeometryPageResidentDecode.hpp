@@ -77,7 +77,9 @@ inline DecodeStatus DecodeResidentPage(const Package& package, const CacheIdenti
                 for (uint32_t previous=0; previous<v; ++previous) if (ids[previous]==ids[v]) return DecodeStatus::Invalid;
                 if (std::memcmp(bytes.data()+vertexAt+v*sizeof(SVertex),&source.vertices[ids[v]],sizeof(SVertex)))
                     return DecodeStatus::Invalid;
-                std::memcpy(&cluster.vertices[v],bytes.data()+vertexAt+v*sizeof(SVertex),sizeof(SVertex));
+                // The byte witness already matched this live typed source. Use its copy operators;
+                // Vector3P makes SVertex non-trivially-copyable.
+                cluster.vertices[v]=source.vertices[ids[v]];
                 const auto& p=cluster.vertices[v].pos;
                 const std::array<float,3> value{p.X(),p.Y(),p.Z()};
                 const auto supplied=source.positions[ids[v]];
