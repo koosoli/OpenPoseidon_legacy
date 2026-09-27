@@ -8,6 +8,7 @@ mod mesh_facts;
 mod mesh_ack;
 mod registered_mesh_refs;
 mod section_refresh;
+mod section_span_pool;
 mod local_pose_cache;
 pub(crate) mod geometry_pass_facts;
 mod lod_feedback;
@@ -8454,6 +8455,7 @@ impl Gfx3d {
     pub fn cull_scene(&mut self) -> &mut cull::CullState {
         // Mutable escape hatch must not bypass section-table validity.
         self.gpu_section_refresh.invalidate();
+        self.cull.disable_section_reuse();
         &mut self.cull
     }
 
@@ -8470,6 +8472,14 @@ impl Gfx3d {
     // live offsets too, but generation changes conservatively force the original full refresh.
     // This skips no mutation/cull/upload work outside the section-address refresh itself.
     fn refresh_cull_sections(&mut self) {
+        if let Some(line) = self.cull.take_section_reuse_notice() { self.queued_log.push(line); }
+        self.cull.validate_source_table_length(self.gpu_section_src.len());
+        let sources = &mut self.gpu_section_src;
+        if self.cull.clear_retired_sections(|span| {
+            sources[span.base..span.base + span.count].fill(GpuSectionSrc {
+                mesh: 0, index_begin: 0, index_count: 0, variant: 0 });
+        }) { self.gpu_section_refresh.invalidate(); }
+
         let pool_generation = self.pool.generation();
         let validity = self.gpu_section_refresh;
         let refreshed = validity.run_if_needed(pool_generation, || {
@@ -8582,7 +8592,7 @@ impl Gfx3d {
             srcs.iter().map(|s| self.resolve_section(s)).collect();
         // Invalidate before append, including any exceptional partial mutation.
         self.gpu_section_refresh.invalidate();
-        self.gpu_section_src.extend_from_slice(&srcs);
+
         // `materials` is parallel to `sections` (one material per section), so the
         // section's flags word rides across here -- DZ-003's reflective bit lives in
         // WgrModelSection::flags because WgrModelMaterial is size-locked at 192 bytes.
@@ -8622,9 +8632,17 @@ impl Gfx3d {
                 crown_ao_p1: m.crown_ao_p1,
             })
             .collect();
-        let model =
-            self.cull
-                .register_model(bounding_sphere, &gpu_lods, &gpu_sections, &gpu_materials);
+        // Source allocation precedes the coherent three-table commit; IDs remain append-only.
+        self.gpu_section_src.reserve(srcs.len());
+        let previous_source_len = self.gpu_section_src.len();
+        self.cull.validate_source_table_length(self.gpu_section_src.len());
+        let (model, span) = self.cull
+            .register_model_span(bounding_sphere, &gpu_lods, &gpu_sections, &gpu_materials);
+        section_span_pool::write_span(&mut self.gpu_section_src, span, &srcs);
+        // Positive proof is queued only AFTER all three arrays and immutable birth IDs commit.
+        if let Some(line) = self.cull.note_committed_section_reuse(model, span, previous_source_len) {
+            self.queued_log.push(line);
+        }
         self.bake_model_sky_visibility(device, queue, model, lods, sections, name);
         model
     }
