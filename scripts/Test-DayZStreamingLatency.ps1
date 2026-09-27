@@ -25,6 +25,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 if ($RequireColdAlphaPeek) { $ColdPaaHandoff = $true }
+if ($ColdPaaHandoff) { $ArchiveSourceBindings = $true }
 if ($RequireWarmMaterialStageUpload) { $WarmTextureJobs = $true; $WarmProfile = $true }
 if ($WarmTextureJobs) { $ArchiveSourceBindings = $true }
 if ($RegistrationQuota -and $AdmissionMode -ne 'Counted') { throw 'Registration quota requires counted admission' }
@@ -452,7 +453,16 @@ try {
     if (!$warmJobsProven) { throw 'Warm preparation did not demonstrate an actual source-validated GPU upload; evidence retained' }
     if (!$warmStageFamilyProven) { throw 'Required bound worker normal/specular filename-family upload not exercised; evidence retained, no material-slot proof claimed' }
 } finally {
+    if ($p -and !$p.HasExited) {
+        # A failed verification still requests normal cleanup from this owned PID.
+        try {
+            if ($client -and $client.Connected) {
+                $null = Send @{cmd = 'exit'}
+                $null = $p.WaitForExit(15000)
+            }
+        } catch {}
+        if (!$p.HasExited) { Stop-Process -Id $p.Id -Force }
+    }
     if ($client) { $client.Dispose() }
-    if ($p -and !$p.HasExited) { Stop-Process -Id $p.Id -Force }
     foreach ($name in $changedNames) { [Environment]::SetEnvironmentVariable($name, $savedEnvironment[$name]) }
 }
