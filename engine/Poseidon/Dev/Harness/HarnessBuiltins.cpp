@@ -538,6 +538,8 @@ void RegisterScreenshot(HarnessServer& hs)
             else if(!std::strcmp(name,"beginClodPaged")) action=Engine::GeometryPageFixtureAction::BeginClodPaged;
             else if(!std::strcmp(name,"beginDiskClodPaged")) action=Engine::GeometryPageFixtureAction::BeginDiskClodPaged;
             else if(!std::strcmp(name,"beginOriginalDiskClodPaged")) action=Engine::GeometryPageFixtureAction::BeginOriginalDiskClodPaged;
+            else if(!std::strcmp(name,"followCamera")) action=Engine::GeometryPageFixtureAction::FollowCamera;
+            else if(!std::strcmp(name,"stopCamera")) action=Engine::GeometryPageFixtureAction::StopCamera;
             else if(!std::strcmp(name,"requestCoarse")) action=Engine::GeometryPageFixtureAction::RequestCoarse;
             else if(!std::strcmp(name,"pollCoarse")) action=Engine::GeometryPageFixtureAction::PollCoarse;
             else if(!std::strcmp(name,"requestFine")) action=Engine::GeometryPageFixtureAction::RequestFine;
@@ -640,7 +642,20 @@ void RegisterScreenshot(HarnessServer& hs)
                 if(revision->valuestring[40])return HarnessProtocol::ErrorResponse("clod library revision must be exactly 40 characters");
                 diskArgument=&disk;
             }
-            const auto report=GEngine->ControlGeometryPageFixture(action,xyz[0],xyz[1],xyz[2],diskArgument);
+            Engine::GeometryPageCameraDemandInput camera;
+            const Engine::GeometryPageCameraDemandInput* cameraArgument=nullptr;
+            if(action==Engine::GeometryPageFixtureAction::FollowCamera) {
+                const char* rails[]={"nearDistance","farDistance"};double* values[]={&camera.nearDistance,&camera.farDistance};
+                for(size_t i=0;i<2;++i)if(const auto* v=cJSON_GetObjectItemCaseSensitive(root,rails[i])){
+                    if(!cJSON_IsNumber(v)||!std::isfinite(v->valuedouble)||v->valuedouble<=0||v->valuedouble>100000)
+                        return HarnessProtocol::ErrorResponse("camera prefetch rails must be finite positive bounded distances");*values[i]=v->valuedouble;}
+                const char* times[]={"dwellMs","retryMs"};uint32_t* milliseconds[]={&camera.dwellMs,&camera.retryMs};
+                for(size_t i=0;i<2;++i)if(const auto* v=cJSON_GetObjectItemCaseSensitive(root,times[i])){
+                    if(!cJSON_IsNumber(v)||!std::isfinite(v->valuedouble)||v->valuedouble<0||v->valuedouble>2000||std::floor(v->valuedouble)!=v->valuedouble)
+                        return HarnessProtocol::ErrorResponse("camera prefetch intervals must be integer milliseconds <=2000");*milliseconds[i]=uint32_t(v->valuedouble);}
+                cameraArgument=&camera;
+            }
+            const auto report=GEngine->ControlGeometryPageFixture(action,xyz[0],xyz[1],xyz[2],diskArgument,cameraArgument);
             const char* status="Failed";
             switch(report.status) {
                 case Engine::GeometryReportStatus::Unsupported: status="Disabled"; break;
@@ -674,12 +689,16 @@ void RegisterScreenshot(HarnessServer& hs)
             PAGE_FIXTURE_NUMBER(renderReturnStatus);
             PAGE_FIXTURE_NUMBER(sourceAdmissionEpoch);PAGE_FIXTURE_NUMBER(originalSourceBytes);PAGE_FIXTURE_NUMBER(sourceAdmissionKnownBytes);
             PAGE_FIXTURE_NUMBER(helperCount);PAGE_FIXTURE_NUMBER(originalOriginRadius);
+            PAGE_FIXTURE_NUMBER(cameraDemandRevision);PAGE_FIXTURE_NUMBER(cameraRequestedRevision);PAGE_FIXTURE_NUMBER(cameraObservations);
+            PAGE_FIXTURE_NUMBER(cameraRequests);PAGE_FIXTURE_NUMBER(cameraCancels);PAGE_FIXTURE_NUMBER(cameraAttempts);
+            PAGE_FIXTURE_NUMBER(cameraDistance);PAGE_FIXTURE_NUMBER(preparedProducerModel);
 #undef PAGE_FIXTURE_NUMBER
 #define PAGE_FIXTURE_BOOL(field) cJSON_AddBoolToObject(result,#field,report.field)
             PAGE_FIXTURE_BOOL(clodPilot); PAGE_FIXTURE_BOOL(fallbackSelected);
             PAGE_FIXTURE_BOOL(pagedPilot); PAGE_FIXTURE_BOOL(fineResident); PAGE_FIXTURE_BOOL(fineEvictionPending);
             PAGE_FIXTURE_BOOL(diskPilot); PAGE_FIXTURE_BOOL(coarseResident);
             PAGE_FIXTURE_BOOL(originalFilePilot);PAGE_FIXTURE_BOOL(sourceSnapshotValidated);PAGE_FIXTURE_BOOL(sourceAdmissionConsumed);
+            PAGE_FIXTURE_BOOL(cameraDemandActive);PAGE_FIXTURE_BOOL(cameraDesiredFine);PAGE_FIXTURE_BOOL(cameraHasObservation);PAGE_FIXTURE_BOOL(finePrepared);
             PAGE_FIXTURE_BOOL(active); PAGE_FIXTURE_BOOL(fineSelected); PAGE_FIXTURE_BOOL(cpuHelpersUnchanged);
             PAGE_FIXTURE_BOOL(mainFrameReturned); PAGE_FIXTURE_BOOL(cascadeConfigured); PAGE_FIXTURE_BOOL(localShadowConfigured);
 #undef PAGE_FIXTURE_BOOL

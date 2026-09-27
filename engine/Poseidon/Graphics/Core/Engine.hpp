@@ -3188,7 +3188,7 @@ class Engine : public IGraphicsEngine
     { return {}; }
 
     // Ready is a returned-main-frame record cut, not all-pass/pixel or GPU-free proof.
-    enum class GeometryPageFixtureAction { Begin, Coarse, Fine, Observe, Snapshot, Abort, BeginClod, Fallback, BeginPaged, RequestFine, PollFine, CancelFine, HoldFine, ReleaseFine, EvictFine, BeginClodPaged, BeginDiskClodPaged, RequestCoarse, PollCoarse, BeginOriginalDiskClodPaged };
+    enum class GeometryPageFixtureAction { Begin, Coarse, Fine, Observe, Snapshot, Abort, BeginClod, Fallback, BeginPaged, RequestFine, PollFine, CancelFine, HoldFine, ReleaseFine, EvictFine, BeginClodPaged, BeginDiskClodPaged, RequestCoarse, PollCoarse, BeginOriginalDiskClodPaged, FollowCamera, StopCamera, PollFinePrefetch, RequestFinePrefetch };
     struct GeometryPageSourceIdentity
     {
         std::array<uint8_t,32> sha256{};
@@ -3233,6 +3233,10 @@ class Engine : public IGraphicsEngine
         uint32_t schemaVersion=0,pilotVersion=0,codecSchema=0,vertexBytes=0,clodAdapter=0,ramAdapter=0;
         uint32_t formatVersion=0,algorithmVersion=0,clusterVertices=0,clusterTriangles=0,pageBytes=0;
     };
+    struct GeometryPageCameraDemandInput {
+        double nearDistance=30,farDistance=50;
+        uint32_t dwellMs=200,retryMs=250;
+    };
     struct GeometryPageFixtureReport
     {
         GeometryReportStatus status=GeometryReportStatus::Unsupported;
@@ -3260,6 +3264,10 @@ class Engine : public IGraphicsEngine
         bool pagedPilot=false, fineResident=false;
         bool diskPilot=false,coarseResident=false;
         bool originalFilePilot=false,sourceSnapshotValidated=false,sourceAdmissionConsumed=false;
+        bool cameraDemandActive=false,cameraDesiredFine=false,cameraHasObservation=false,finePrepared=false;
+        uint64_t cameraDemandRevision=0,cameraRequestedRevision=0,cameraObservations=0,cameraRequests=0,cameraCancels=0;
+        uint32_t cameraAttempts=0,preparedProducerModel=UINT32_MAX;
+        double cameraDistance=0;
         uint64_t sourceAdmissionEpoch=0,originalSourceBytes=0,sourceAdmissionKnownBytes=0;
         uint32_t helperCount=0; // Original subset has no helper LODs; hashes stay empty.
         float originalOriginRadius=0;
@@ -3286,7 +3294,8 @@ class Engine : public IGraphicsEngine
         std::string helperHashBefore, helperHashAfter, sourceSha256;
     };
     virtual GeometryPageFixtureReport ControlGeometryPageFixture(GeometryPageFixtureAction,
-        float x=1200,float y=11.5f,float z=1200,const GeometryPageDiskFixtureInput* disk=nullptr) { return {}; }
+        float x=1200,float y=11.5f,float z=1200,const GeometryPageDiskFixtureInput* disk=nullptr,
+        const GeometryPageCameraDemandInput* camera=nullptr) { return {}; }
 
   protected:
     // Post-hook fires from OnWindowResized so apps can re-run the aspect policy

@@ -1349,7 +1349,9 @@ class EngineWgpu : public EngineDummy
     void FillGeometryMeshFacts(GeometryAllocationReport& report);
     SharedMeshFixtureReport ControlSharedMeshLifetimeFixture(SharedMeshFixtureAction, const Shape* = nullptr) override;
     GeometryPageFixtureReport ControlGeometryPageFixture(GeometryPageFixtureAction,
-        float x=1200,float y=11.5f,float z=1200,const GeometryPageDiskFixtureInput* disk=nullptr) override;
+        float x=1200,float y=11.5f,float z=1200,const GeometryPageDiskFixtureInput* disk=nullptr,
+        const GeometryPageCameraDemandInput* camera=nullptr) override;
+    void MaintainGeometryPageCameraDemand();
     GeometryPageOriginalAdmissionReport AdmitGeometryPageOriginalStartup(const GeometryPageOriginalStartupInput&) override;
     GeometryPageOriginalAdmissionReport SnapshotGeometryPageOriginalAdmission() const override;
     void PublishGeometryPageFixtureObservation(const WgrFrame& frame, int32_t renderReturnStatus);
