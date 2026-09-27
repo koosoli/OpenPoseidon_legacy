@@ -731,12 +731,59 @@ saturated at startup13:27:56.857; there are zero captured mip-chain rows, so it
 cannot classify the route texture-read bottleneck. Terrain sampled source is a
 bounded source-family observation, not all texture coverage or overall throughput.
 
-Future disk codec/capture-reset patches are unbuilt/excluded. Whole plan and
+At the historical abd checkpoint, disk codec/capture-reset patches were unbuilt/excluded. Whole plan and
 Stage G remain OPEN; experimental paging and CPU profiling default OFF,
 performanceAccepted/defaultReady false. No global ownership/reclaim/pressure or
 all-pass certification follows. Installed EXE SHA256
 75B1B1978EFB6C423725FBB7B687757E8AFCDD45B885F0851527F225C99B0EB8;
 DLL313FB39C72FF892D3EAF149AD848C1CAD0622CBB2C5C9966223339CD3D74FEB9.
 
+
+Exact artifact hashes are recorded in `../decisions/GEOMETRY-CLOD-PILOT-20260927.md`.
+
+## 451db9fe typed vertex codec and captured mip checkpoint (27 September, 13:55)
+
+Clean installed451db9fe contains memory-only bounded CLOD disk codec287107a8,
+first-capture mip diagnostic reset9f4b0837, typed resident assignmentef5297f6,
+and field-wise LE repair451db9fe. Initial build failed its nontrivial-SVertex
+assertion and remains recorded. Vector3P has a custom copy operation; the repair
+serializes all17 field words in pinned68-byte layout and reconstructs valid typed
+vectors/vertices. Resident decoding copies the original typed vertex after the
+existing exact-byte witness. No raw byte writes into nontrivial vertex objects;
+wire/hash policy, validation/caps and exact attributes remain preserved.
+Repaired all-five-target build passed24 scheduled steps. Focused codec, typed
+resident, representation, RAM adapter and worker tests passed18,290 assertions
+in21 cases without skips, including LE signed-zero/subnormal field transport.
+
+Actual typed-resident135554 passed with cleanExit=true. Selected coarse/fine64/512
+triangles, RAM source88,974/copied worker input76,528 known bytes; final generation2
+history14 entirely Absent, jobs/reservation0, helper hashes identical and known
+payload406,543 bytes. Pass facts v2/592 capability31/required29 finalepoch21,
+current cascade/reflection and interior pending4 remain command-recording evidence,
+not all-pass pixels, submission completion or physical device reclamation.
+
+DayZ captured-mip135612 passed and logged Shutdown complete13:57:33.547.
+One accepted reset13:56:51.834 starts the extra bounded window; startup and capture
+each emit128 slow-chain rows and their own truncation marker. This exercises the
+diagnostic without complete route/source coverage. Eleven slow rows have eleven
+paired current-call CPU rows. Ordinary median/nearest-rank ceil(n*p)-1 tails:
+412 frames/drop0, mean87.908430ms, median54.4545ms, p95239.610ms,
+p99651.986ms, maximum1,484.495ms. These poor observed timings remain explicit;
+profiling/order/unequal allocated work prevents performance/no-regression acceptance.
+Acquire1,175.276ms includes pre-surface diagnostics/pool/storage work, not isolated
+surface wait. Mip cost conclusions await bounded phase/source analysis; no
+route-wide decompression attribution is asserted. Returned19,923 residents,
+required0/pendingfalse, geometry759,085,432/capacity1,275,068,416/retired0 bytes;
+textures2,889,614,964 bytes/2,569 entries/backend5,444,114,784 bytes.
+No new visual acceptance is asserted.
+
+The disk filesystem worker is reviewed but NOT applied/installed in451. Memory
+codec external original/derived keys authenticate captured content, not current
+mounted-source freshness. No disk jobs, generalized asset paging, pressure policy
+or normal-frame CLOD bake is enabled. Whole plan/Stage G remain OPEN, experimental
+defaults OFF, performanceAccepted/defaultReady false. Earlier ResourceGrowth
+failure and bounded repeat convergence pass remain separate historical evidence.
+Installed EXE374E2CF5DBD23685262ACFB09C7A490CA15DFEB7DEDA9CE1E2A6203CEE988C88;
+DLLECD07DE0C87225B248EE8CDC85F2056F6F72706DAFD99CBEC8C67793F94BE3CB.
 
 Exact artifact hashes are recorded in `../decisions/GEOMETRY-CLOD-PILOT-20260927.md`.

@@ -640,7 +640,7 @@ saturated at startup13:27:56.857; there are zero captured mip-chain rows, so it
 cannot classify the route texture-read bottleneck. Terrain sampled source is a
 bounded source-family observation, not all texture coverage or overall throughput.
 
-Future disk codec/capture-reset patches are unbuilt/excluded. Whole plan and
+At the historical abd checkpoint, disk codec/capture-reset patches were unbuilt/excluded. Whole plan and
 Stage G remain OPEN; experimental paging and CPU profiling default OFF,
 performanceAccepted/defaultReady false. No global ownership/reclaim/pressure or
 all-pass certification follows. Installed EXE SHA256
@@ -673,3 +673,67 @@ Actual checkpoint SHA256 manifest:
 | build/stream-residency/default-dayz-diagnostics-off-20260927-disabled-20260927-133030/route-frame-ms.json | dff295dfc040f5c1e883eb3eac86d055b281bac0a6e56867292bdd51e2d869fb |
 | build/stream-residency/default-dayz-diagnostics-off-20260927-disabled-20260927-133030/render-call-cpu-proof.json | b317775a429d58bf8f2ad4b2b9dfcbd133d93d7b92d0079935e15ff42a59072a |
 | build/stream-residency/default-dayz-diagnostics-off-20260927-disabled-20260927-133030/returned-settled.png | 0684457681d8be14c5094eca0dc32e1d691fa8598b46f4073793fd8ae2d46260 |
+
+## 451db9fe typed vertex codec and captured mip checkpoint (27 September, 13:55)
+
+Clean installed451db9fe contains memory-only bounded CLOD disk codec287107a8,
+first-capture mip diagnostic reset9f4b0837, typed resident assignmentef5297f6,
+and field-wise LE repair451db9fe. Initial build failed its nontrivial-SVertex
+assertion and remains recorded. Vector3P has a custom copy operation; the repair
+serializes all17 field words in pinned68-byte layout and reconstructs valid typed
+vectors/vertices. Resident decoding copies the original typed vertex after the
+existing exact-byte witness. No raw byte writes into nontrivial vertex objects;
+wire/hash policy, validation/caps and exact attributes remain preserved.
+Repaired all-five-target build passed24 scheduled steps. Focused codec, typed
+resident, representation, RAM adapter and worker tests passed18,290 assertions
+in21 cases without skips, including LE signed-zero/subnormal field transport.
+
+Actual typed-resident135554 passed with cleanExit=true. Selected coarse/fine64/512
+triangles, RAM source88,974/copied worker input76,528 known bytes; final generation2
+history14 entirely Absent, jobs/reservation0, helper hashes identical and known
+payload406,543 bytes. Pass facts v2/592 capability31/required29 finalepoch21,
+current cascade/reflection and interior pending4 remain command-recording evidence,
+not all-pass pixels, submission completion or physical device reclamation.
+
+DayZ captured-mip135612 passed and logged Shutdown complete13:57:33.547.
+One accepted reset13:56:51.834 starts the extra bounded window; startup and capture
+each emit128 slow-chain rows and their own truncation marker. This exercises the
+diagnostic without complete route/source coverage. Eleven slow rows have eleven
+paired current-call CPU rows. Ordinary median/nearest-rank ceil(n*p)-1 tails:
+412 frames/drop0, mean87.908430ms, median54.4545ms, p95239.610ms,
+p99651.986ms, maximum1,484.495ms. These poor observed timings remain explicit;
+profiling/order/unequal allocated work prevents performance/no-regression acceptance.
+Acquire1,175.276ms includes pre-surface diagnostics/pool/storage work, not isolated
+surface wait. Mip cost conclusions await bounded phase/source analysis; no
+route-wide decompression attribution is asserted. Returned19,923 residents,
+required0/pendingfalse, geometry759,085,432/capacity1,275,068,416/retired0 bytes;
+textures2,889,614,964 bytes/2,569 entries/backend5,444,114,784 bytes.
+No new visual acceptance is asserted.
+
+The disk filesystem worker is reviewed but NOT applied/installed in451. Memory
+codec external original/derived keys authenticate captured content, not current
+mounted-source freshness. No disk jobs, generalized asset paging, pressure policy
+or normal-frame CLOD bake is enabled. Whole plan/Stage G remain OPEN, experimental
+defaults OFF, performanceAccepted/defaultReady false. Earlier ResourceGrowth
+failure and bounded repeat convergence pass remain separate historical evidence.
+Installed EXE374E2CF5DBD23685262ACFB09C7A490CA15DFEB7DEDA9CE1E2A6203CEE988C88;
+DLLECD07DE0C87225B248EE8CDC85F2056F6F72706DAFD99CBEC8C67793F94BE3CB.
+
+Actual checkpoint SHA256 manifest:
+
+| Artifact | SHA256 |
+| --- | --- |
+| build/build-clod-disk-mip-diagnostic-20260927.log | 99c858c24fbefe2592957bfe85bee133c8d84b46c04e219d9d1ec4c5298d0eac |
+| build/build-clod-disk-mip-repaired-20260927.log | 4af90e4cc07debe17b8d31e574af3d3266e2e6545411e544b9129bfcc644f193 |
+| build/test-clod-disk-typed-resident-20260927.log | 7424c39e811ff3e0e134f77c811a8c288f9c94ca9c6f2ba31b4991aa4f731a92 |
+| build/stream-residency/typed-resident-page-copy-20260927-20260927-135554/result.json | 50314e096ddcfeb0d0480b05e46d8c22509a09516eb032bbdd21eaad5f02f0b1 |
+| build/stream-residency/typed-resident-page-copy-20260927-20260927-135554/provenance.json | 63c9140c8b911fcb663707e91598f01b5372c6a4621d7e02d85baf2e8affee5a |
+| build/stream-residency/typed-resident-page-copy-20260927-20260927-135554/engine.log | 4ef9220a4a66156811bdd85c1a5696d5bf431edc4babff540175131d80c006ff |
+| build/stream-residency/typed-resident-page-copy-20260927-20260927-135554/harness.jsonl | d4d6d13d75a463e6fccb8994323849d7eb1fadb24faa41f5a13569f2e6d2aaa7 |
+| build/stream-residency/dayz-captured-mip-attribution-20260927-disabled-20260927-135612/result.json | 21c40fd83e79b865fb8aa66d6e233c57133c6897557cd993c902caed59ca6ce6 |
+| build/stream-residency/dayz-captured-mip-attribution-20260927-disabled-20260927-135612/provenance.json | 2ba93feb28c527c2def61c8f319deaa8916408facb03a8e90f0926cedd0a9e4f |
+| build/stream-residency/dayz-captured-mip-attribution-20260927-disabled-20260927-135612/engine.log | dd845b1fcd4e7a37978e2ff032f54d56e343139f462c71099f57dce4740185b6 |
+| build/stream-residency/dayz-captured-mip-attribution-20260927-disabled-20260927-135612/harness.jsonl | 6c6e7cb0c46a3a5dc151f3869d283b6784b89cb8faedfa85391cc7fd33221d11 |
+| build/stream-residency/dayz-captured-mip-attribution-20260927-disabled-20260927-135612/route-frame-ms.json | 22a4d1e1915751584b113a4f0110f855368ceba670f9e6092a2a78d2cfa3c669 |
+| build/stream-residency/dayz-captured-mip-attribution-20260927-disabled-20260927-135612/render-call-cpu-proof.json | e27f16f56c4c8e8b0e07b9131b9bd00f5281f68393fff27e2a28c219e4ae23d6 |
+| build/stream-residency/dayz-captured-mip-attribution-20260927-disabled-20260927-135612/returned-settled.png | 10dee8179a97942d926b956f363e0e231cf253f89aca77566566b6e62f26a490 |
