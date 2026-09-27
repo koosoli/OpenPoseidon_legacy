@@ -731,6 +731,9 @@ void RegisterScreenshot(HarnessServer& hs)
             auto* unionMaximum=cJSON_AddArrayToObject(result,"selectedUnionMaximum");
             for(size_t i=0;i<3;++i){cJSON_AddItemToArray(unionMinimum,cJSON_CreateNumber(report.selectedUnionMinimum[i]));
                 cJSON_AddItemToArray(unionMaximum,cJSON_CreateNumber(report.selectedUnionMaximum[i]));}
+            auto* cameraPosition=cJSON_AddArrayToObject(result,"cameraTuplePosition");
+            for(float coordinate:report.cameraTuplePosition)
+                cJSON_AddItemToArray(cameraPosition,cJSON_CreateNumber(coordinate));
             cJSON_AddStringToObject(result,"surfaceCertificateScope","Verified selected packed coarse/fine union object-space distance only; excludes authored fallback, pixels, attributes and all-pass quality. surfaceSelectedVerified refers to the latest successful bound worker package, not render completion.");
             auto* history=cJSON_AddArrayToObject(result,"rendererMeshHandles");
             for(size_t i=0;i<std::min<size_t>(report.meshCount,64);++i)

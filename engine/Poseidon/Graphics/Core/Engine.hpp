@@ -3303,6 +3303,7 @@ class Engine : public IGraphicsEngine
         uint32_t cameraTupleStatus=0,cameraTupleIndex=UINT32_MAX,cameraTupleSource=0,viewportWidth=0,viewportHeight=0;
         uint64_t cameraTupleGeneration=0,cameraTupleModelBirth=0,cameraTupleCertificateGeneration=0;
         uint32_t cameraTupleVersion=0,cameraTupleStructBytes=0,cameraTupleOutputWidth=0,cameraTupleOutputHeight=0;
+        std::array<float,3> cameraTuplePosition{}; // Copied successful main-frame packet only, not a later live-camera read.
         uint32_t projectedSurfaceStatus=0; // ProjectedSurface::Status+1, zero not requested.
         double projectedSurfaceXUpper=0,projectedSurfaceYUpper=0,projectedSurfaceEuclideanUpper=0;
         bool cameraDemandActive=false,cameraDesiredFine=false,cameraHasObservation=false,finePrepared=false;

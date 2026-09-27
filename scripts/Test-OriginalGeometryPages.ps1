@@ -346,7 +346,14 @@ try{
 
     # Copied successful main-frame tuple + ideal projection only; no pixel/all-pass/GPU-completion claim.
     function TupleCut($c) {
-     Require $c @('cameraTupleEnabled','cameraTupleValid','projectedSurfaceIdealBound','cameraTupleStatus','cameraTupleGeneration','cameraTupleIndex','cameraTupleSource','cameraTupleVersion','cameraTupleStructBytes','cameraTupleOutputWidth','cameraTupleOutputHeight','viewportWidth','viewportHeight','cameraTupleModelBirth','cameraTupleCertificateGeneration','projectedSurfaceStatus','projectedSurfaceXUpper','projectedSurfaceYUpper','projectedSurfaceEuclideanUpper')
+     Require $c @('cameraTupleEnabled','cameraTupleValid','projectedSurfaceIdealBound','cameraTupleStatus','cameraTupleGeneration','cameraTupleIndex','cameraTupleSource','cameraTupleVersion','cameraTupleStructBytes','cameraTupleOutputWidth','cameraTupleOutputHeight','cameraTuplePosition','viewportWidth','viewportHeight','cameraTupleModelBirth','cameraTupleCertificateGeneration','projectedSurfaceStatus','projectedSurfaceXUpper','projectedSurfaceYUpper','projectedSurfaceEuclideanUpper')
+     if(@($c.cameraTuplePosition).Count -ne 3){throw 'Missing copied actual camera position'}
+     foreach($coordinate in @($c.cameraTuplePosition)){
+      if($null -eq $coordinate -or $coordinate -is [string] -or $coordinate -is [bool]){throw 'Invalid copied camera coordinate type'}
+      $v=[double]$coordinate
+      if([double]::IsNaN($v) -or [double]::IsInfinity($v) -or [Math]::Abs($v) -gt 1000000){throw 'Invalid copied camera coordinate'}
+     }
+     if(!$c.cameraTupleValid -and @($c.cameraTuplePosition | Where-Object {$_ -ne 0}).Count){throw 'Refused tuple exposed camera position'}
      foreach($field in @('cameraTupleEnabled','cameraTupleValid','projectedSurfaceIdealBound')){if($c.$field -isnot [bool]){throw "Invalid tuple Boolean $field"}}
      foreach($field in @('cameraTupleGeneration','cameraTupleModelBirth','cameraTupleCertificateGeneration','cameraTupleStatus','cameraTupleIndex','cameraTupleSource','cameraTupleVersion','cameraTupleStructBytes','cameraTupleOutputWidth','cameraTupleOutputHeight','viewportWidth','viewportHeight','projectedSurfaceStatus')){
       $raw=$c.$field;if($raw -is [string] -or $raw -is [bool]){throw "Invalid tuple integer type $field"};$v=[double]$raw
@@ -503,9 +510,15 @@ try{
       throw "Automatic camera state timed out: $($cut|ConvertTo-Json -Compress)"
      }
      if($ProjectedPrefetch){
-      # Actual 10km cut was bounded at4.5886, above the unchanged low rail1.
-      # Use100km for this private ideal-bound test; no visibility/pixel/quality claim.
-      CameraPose '-98800 1240 18 90 0';$projectedFar=TupleCut (PageCut (Observe $true $false));FixedCoarse $projectedFar
+      # Zeus clamps x/z to the loaded world on its next simulation frame. Keep x/z over
+      # the fixture and use altitude for actual far distance; pitch toward the model.
+      # This remains an ideal main-camera pair bound, not a pixel/visibility claim.
+      CameraPose '1200 1240 100000 0 -89';$projectedFar=TupleCut (PageCut (Observe $true $false));FixedCoarse $projectedFar
+      $actual=@($projectedFar.cameraTuplePosition)
+      if(!$projectedFar.cameraTupleValid -or [Math]::Abs([double]$actual[0]-1200) -gt 2 -or
+         [Math]::Abs([double]$actual[1]-100000) -gt 2 -or [Math]::Abs([double]$actual[2]-1240) -gt 2){
+       throw 'Actual rendered camera did not reach the in-world high-altitude pose'
+      }
       if(!$projectedFar.projectedSurfaceIdealBound -or $projectedFar.cameraTupleGeneration -le $coarse.cameraTupleGeneration -or $projectedFar.projectedSurfaceEuclideanUpper -gt 1){throw 'Far pose did not establish actual low ideal pair discrepancy'}
       $follow=Send @{cmd='geometry_page_fixture';action='followProjected';enterUpper=2;leaveUpper=1;dwellMs=200;retryMs=250}
       $far=WaitCamera {param($c) $c.projectedDemandActive -and $c.projectedDemandHasBound -and $c.projectedDemandUpper -le 1 -and !$c.cameraDesiredFine -and $c.cameraObservations -ge 3}
