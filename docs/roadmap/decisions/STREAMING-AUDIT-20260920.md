@@ -2330,3 +2330,20 @@ Default ordinary buffer allocation/subclass unchanged and no extra buffer heap
 OFF. Default OFF runtime was pending at this checkpoint; no FPS/MP/reclaim/paging/performance acceptance.
 FullplanOPEN.
 Same10 default-OFF025919 subsequently passes clean exit0: persistent enabledfalse/completefalse/CPU0/trackedalloc0/reclaim0, while ordinary bounded geometry report remains positive. This validates default flag gating only, not convergence, physical GPU acknowledgement or performance.
+PAA LZO replay0757a71d/4bc427cc build22/final19 and51750assertions/15cases
+productionflag1/noSKIP pass; clean4bc installed03:19. Both actual ON031919/
+OFF032059 clean0 pass, but experiment remains defaultOFF and NOT promoted.
+ON689frames mean52.964115/median22.998/p95205.144/p99612.148/max1250.195;
+OFF856 mean40.237220/median23.2005/p95127.035/p99341.288/max902.483ms.
+This pair uses nearest-rank ceil(n*p)-1 quantiles, unlike historical floor-index screens; even-count median averages the middle pair (OFF23.2005).
+Returned19923/required0 both; ON geometry709821528/textures2638213236/2387
+versusOFF711843332/2759971636/2502 and transient coverage differs. Worse ON
+mean/tails/lag supports no promotion, not a causal FPS/no-regression verdict.
+Bounded first128 startup replay observations saturated03:19:42: last146hits/
+2278misses/75694080hit-output bytes/31459397store/33554040peak/41entries/
+2237evictions/0oversize/failure. Not full-route counters; LZO timer includes
+cache comparison/copy/admission. Exact current original compressed input bytes,
+fullmemcmp and outputcapacity protect memoized result, not source/header freshness.
+Fixed32MiB logical charged data excludes allocator/RSS/caller buffers. Original
+decoder and compressed content unchanged. Subsequent owner-probe source is not
+built/installed here. FullplanOPEN/performancefalse.

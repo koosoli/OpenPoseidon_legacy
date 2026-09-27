@@ -9292,6 +9292,227 @@
         "returned-settled.png": "bf85c28a0c8523d2145b27f8a5fa0f618306867dc316d96a508f0fb57982b56c",
         "samples.jsonl": "6249ef27d1ae0854d9604f8b692ac367db97cadf3be7312e2b14928990201a05"
       }
+    },
+    {
+      "run": "paa-lzo-replay-actual-20260927-disabled-20260927-031919",
+      "classification": "PASS clean exit0 compatibility; opt-in replay remains OFF by default and NOT promoted",
+      "provenance": {
+        "head": "4bc427ccae6563438b920aa299a96767e48f053a",
+        "measurementScope": "Bounded engine16384-frame route capture; screening only, no FPS acceptance, vanilla parity or full cold-cache proof",
+        "viewDistance": 2000,
+        "poseHoldSeconds": 3,
+        "routeX": [
+          5804.58,
+          5904.58,
+          6004.58,
+          6104.58,
+          6004.58,
+          5904.58,
+          5804.58,
+          5704.58,
+          5704.58,
+          5704.58,
+          5704.58
+        ],
+        "pose": [
+          5704.58,
+          2523.37,
+          73.74,
+          260.9,
+          -3.8
+        ],
+        "width": 1280,
+        "processScope": "Owned PID private/RSS samples; sparse owner-pump values are observations, not percentiles",
+        "clearedEnvironmentNames": [],
+        "routeScope": "Eight convergence400m out/return poses plus three stationary recovery holds; one process per invocation",
+        "scriptSha256": "359BA20D95E35C9019F8607EE86AEE3B875A9E97A9A6A30779A06AD8E0F828A1",
+        "height": 720,
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "A07FEB66408DAC9A921FACC43B720059D0E1E2E840EBBC0AC883BDB4EB4D3A1F",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "20A4DAE32A520EB5057452F278CAF6D9C5B63B8301901835C58F414BADDC6E8E",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "world": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\packages\\dayz-compat\\world\\chernarusplus\\chernarusplus.wrp",
+        "msaaSamples": 4,
+        "installed": "codex/streaming-residency 4bc427cc 2026-09-27_03:19 deploy-ps1",
+        "paaLzoReplay": true,
+        "environment": {
+          "WGR_SIMULATION_RESIDENCY": "0",
+          "WGR_GEO_POOL_GROWTH": "2.0",
+          "WGR_SIMULATION_POSITIVE_COLD": "0",
+          "WGR_OBJECT_STREAM_PBO": "1",
+          "POSEIDON_MODEL_DDC": "0",
+          "WGR_GEO_POOL_PRESSURE_GROWTH": "0",
+          "WGR_OBJECT_STREAM_GPU_BUDGET": "0",
+          "WGR_LOD_GOVERNOR_RANGE": "1",
+          "WGR_PAA_LZO_REPLAY_CACHE": "1",
+          "WGR_OBJECT_STREAM_WARM_PROFILE": "1",
+          "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\paa-lzo-replay-actual-20260927-disabled-20260927-031919\\user",
+          "WGR_NATIVE_DDS_PREPARE": "0",
+          "WGR_OBJECT_STREAM_PBO_TEXTURES": "0",
+          "WGR_ADAPTIVE_TEXTURE_DETAIL": "0",
+          "WGR_OBJECT_STREAM_MAX_OBJECTS": "20000",
+          "WGR_TERRAIN_PAGE_TIMINGS": "1",
+          "WGR_OBJECT_STREAM_TEST_BUDGET": "1",
+          "POSEIDON_SLOW_FRAME_TRACE": "1",
+          "WGR_NATIVE_DDS_BC3_ONLY": "0",
+          "WGR_TEXTURE_STREAM_STATS": "0",
+          "WGR_SKY_VOLUME_INCREMENTAL": "1"
+        },
+        "mode": "Disabled",
+        "fpsCap": 60
+      },
+      "summary": {
+        "passed": true,
+        "performanceAccepted": false,
+        "frameCount": 689,
+        "meanMs": 52.96411465892595,
+        "medianMs": 22.998,
+        "p95Ms": 205.144,
+        "p99Ms": 612.148,
+        "maxMs": 1250.195,
+        "quantileConvention": "nearest-rank ceil(n*p)-1; median averages middle pair for even n, unlike historical floor-index screens",
+        "returnedResident": 19923,
+        "required": 0,
+        "geometry": 709821528,
+        "texture": 2638213236,
+        "textureCount": 2387,
+        "replayEnabled": true,
+        "lastBoundedStartupObservation": {
+          "hits": 146,
+          "misses": 2278,
+          "hitOutputBytes": 75694080,
+          "storeBytes": 31459397,
+          "peakStoreBytes": 33554040,
+          "entries": 41,
+          "evictions": 2237,
+          "oversize": 0,
+          "admissionFailures": 0,
+          "time": "03:19:42.281",
+          "rowLimit": 128
+        }
+      },
+      "limits": "Same clean4bc binary ordered pair; transient admission/coverage and final allocation counts differ. ON worse mean/tails/maximum, not causal/no-regression/FPS proof. Replay first128 startup observations not full-route totals; LZO phase includes cache comparison/copy/admission. Fixed32MiB charged known C++ data excludes allocator/RSS/caller buffers. Current original compressed bytes plus exact fullmemcmp/output capacity identity, not file/header freshness. Subsequent owner probe unbuilt and excluded.",
+      "sha256": {
+        "engine.log": "81527f8743b469880b20b6965367e3dbde5f34104e4b22c080b2ec7216854d6d",
+        "harness.jsonl": "09e28abd100179a23a3d85b2b69f92139447faed1e7c3832682b1a0f665fe2f6",
+        "paa-lzo-replay-proof.json": "af19d6785575dfaf769258347d3dc06167068c48aaf6a3c9de50b384a725b858",
+        "provenance.json": "2075100d99d35ac96ce7896e7c114edfd448223faccabd2c02959562a05f6eef",
+        "result.json": "1889374eaa40be3dcdf8ffe5052d49aca4c1b1c2f4344042eb1a91bb660c2fff",
+        "returned-settled.png": "6516f57dce892554c5f83fd3be8716c81316e39e33808de70685947c8a4cf014",
+        "route-frame-ms.json": "77a729ae26035f212441ead6b7e5868b39de3dc93e4e50f6f0015b4193a62a33",
+        "samples.jsonl": "7687bba4fa7941ff9b5c0b7eeff633608622c8c9aa6fac07595147a04712136d"
+      }
+    },
+    {
+      "run": "paa-lzo-replay-off-20260927-disabled-20260927-032059",
+      "classification": "PASS clean exit0 compatibility; opt-in replay remains OFF by default and NOT promoted",
+      "provenance": {
+        "height": 720,
+        "measurementScope": "Bounded engine16384-frame route capture; screening only, no FPS acceptance, vanilla parity or full cold-cache proof",
+        "viewDistance": 2000,
+        "head": "4bc427ccae6563438b920aa299a96767e48f053a",
+        "pose": [
+          5704.58,
+          2523.37,
+          73.74,
+          260.9,
+          -3.8
+        ],
+        "clearedEnvironmentNames": [],
+        "paaLzoReplay": false,
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "A07FEB66408DAC9A921FACC43B720059D0E1E2E840EBBC0AC883BDB4EB4D3A1F",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "20A4DAE32A520EB5057452F278CAF6D9C5B63B8301901835C58F414BADDC6E8E",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "poseHoldSeconds": 3,
+        "processScope": "Owned PID private/RSS samples; sparse owner-pump values are observations, not percentiles",
+        "environment": {
+          "WGR_NATIVE_DDS_PREPARE": "0",
+          "WGR_OBJECT_STREAM_PBO": "1",
+          "WGR_OBJECT_STREAM_MAX_OBJECTS": "20000",
+          "WGR_NATIVE_DDS_BC3_ONLY": "0",
+          "POSEIDON_MODEL_DDC": "0",
+          "WGR_LOD_GOVERNOR_RANGE": "1",
+          "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\paa-lzo-replay-off-20260927-disabled-20260927-032059\\user",
+          "WGR_GEO_POOL_PRESSURE_GROWTH": "0",
+          "WGR_OBJECT_STREAM_PBO_TEXTURES": "0",
+          "WGR_SIMULATION_POSITIVE_COLD": "0",
+          "WGR_TERRAIN_PAGE_TIMINGS": "1",
+          "WGR_GEO_POOL_GROWTH": "2.0",
+          "WGR_TEXTURE_STREAM_STATS": "0",
+          "WGR_OBJECT_STREAM_WARM_PROFILE": "1",
+          "WGR_OBJECT_STREAM_TEST_BUDGET": "1",
+          "WGR_ADAPTIVE_TEXTURE_DETAIL": "0",
+          "WGR_OBJECT_STREAM_GPU_BUDGET": "0",
+          "WGR_SKY_VOLUME_INCREMENTAL": "1",
+          "WGR_SIMULATION_RESIDENCY": "0",
+          "POSEIDON_SLOW_FRAME_TRACE": "1"
+        },
+        "installed": "codex/streaming-residency 4bc427cc 2026-09-27_03:19 deploy-ps1",
+        "world": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\packages\\dayz-compat\\world\\chernarusplus\\chernarusplus.wrp",
+        "routeScope": "Eight convergence400m out/return poses plus three stationary recovery holds; one process per invocation",
+        "mode": "Disabled",
+        "scriptSha256": "359BA20D95E35C9019F8607EE86AEE3B875A9E97A9A6A30779A06AD8E0F828A1",
+        "msaaSamples": 4,
+        "routeX": [
+          5804.58,
+          5904.58,
+          6004.58,
+          6104.58,
+          6004.58,
+          5904.58,
+          5804.58,
+          5704.58,
+          5704.58,
+          5704.58,
+          5704.58
+        ],
+        "width": 1280,
+        "fpsCap": 60
+      },
+      "summary": {
+        "passed": true,
+        "performanceAccepted": false,
+        "frameCount": 856,
+        "meanMs": 40.237219626168255,
+        "medianMs": 23.200499999999998,
+        "p95Ms": 127.035,
+        "p99Ms": 341.288,
+        "maxMs": 902.483,
+        "quantileConvention": "nearest-rank ceil(n*p)-1; median averages middle pair for even n, unlike historical floor-index screens",
+        "returnedResident": 19923,
+        "required": 0,
+        "geometry": 711843332,
+        "texture": 2759971636,
+        "textureCount": 2502,
+        "replayEnabled": false
+      },
+      "limits": "Same clean4bc binary ordered pair; transient admission/coverage and final allocation counts differ. ON worse mean/tails/maximum, not causal/no-regression/FPS proof. Replay first128 startup observations not full-route totals; LZO phase includes cache comparison/copy/admission. Fixed32MiB charged known C++ data excludes allocator/RSS/caller buffers. Current original compressed bytes plus exact fullmemcmp/output capacity identity, not file/header freshness. Subsequent owner probe unbuilt and excluded.",
+      "sha256": {
+        "engine.log": "dd434c017ff5dbe0410dfd735100fe9f57a5e3fc6882c7aaf0d267e3e2ee85da",
+        "harness.jsonl": "28dbef01e608f2ed9a546a9644a8a887fad58dd36b1d2c6f80a249df1cd895d4",
+        "provenance.json": "bf1f9e232a7a89f846bca89cd6586d2ec3c99384b76d0615166141e132305c22",
+        "result.json": "9cddc620da81e2a2009da1a9b2417fe823329921c2d2740dfd7cc6f5d7a30f9d",
+        "returned-settled.png": "f5a2f0c48da0bcc0800dcad59b22a759345590f122e1decf259b007858f77a9b",
+        "route-frame-ms.json": "4836dea27b85ee7ad184430d07bbb154a28ce9a9b04af60f8489cde75c8ae7f2",
+        "samples.jsonl": "7e27eaf1ac1b9439aae00d79557dc29135712bad049cd98424de70dadecf13c4"
+      }
     }
   ],
   "microbenchmarks": [
@@ -10146,6 +10367,26 @@
         "engine/Poseidon/Dev/Harness/HarnessBuiltins.cpp": "c90d3a03ef0980d184e0df1020420aadb443b2cb3877908538c8138eb31a4b58",
         "scripts/Test-GeometryResidencyConvergence.ps1": "d3c7e7ef04556d4db8dd132a1aae302e1fc57bb9a6e125e5f14ddcc8436e1fe6",
         "tests/unit/engine/Poseidon/Graphics/test_geometry_owner_ledger.cpp": "117c8637b19483ad68e00b379fd0719ce5364c0fa708a63e1df3415f3c114f1f"
+      }
+    },
+    {
+      "artifactRoot": "build",
+      "runtimeSourceCommit": "4bc427cc",
+      "implementationCommits": [
+        "0757a71d",
+        "4bc427cc"
+      ],
+      "result": "Build22/final19 PASS; production-flag1 unit51750assertions15casesPASS/noSKIP. Default-OFF experiment, no promotion based on worse ordered actual route screening.",
+      "sha256": {
+        "build-paa-lzo-replay-20260927.log": "deea9a43c77fa6adfd44ed01ee164f5c4ec21d9e23f1ab3701c66518697a829c",
+        "build-paa-lzo-replay-final-20260927.log": "702b82ef4aa0aed0e77497aeefb6c48b2f28a0d96f289b78bab5cee56921732a",
+        "test-paa-lzo-replay-20260927.log": "2a45ec78a439c4d0a37420e45ea0dc8bfc408bf08cc51fd8b680ccd6d88b2910",
+        "deploy-paa-lzo-replay-20260927.log": "81e60ee5908c1ae38a3054990cab8b5e9cca89045f28ea1d1919d8cbd15933b1"
+      },
+      "sourceSha256": {
+        "engine/Poseidon/Graphics/Rendering/Font/PaaLzoReplayCache.hpp": "544c66a0e6c6051bdf9b2322ace288400d764307c7beaa5bd7c08fb1b85760e8",
+        "engine/Poseidon/Graphics/Rendering/Font/Pactext.cpp": "e9539ac3cf8757c94137f32407a8ee84730bb7ad8a521bb89e88915e240123a7",
+        "tests/unit/engine/Poseidon/Graphics/Rendering/test_paa_lzo_replay_cache.cpp": "59ad72fd06e9950a2f0d639acc9f65a6a9fefa2c967f8634caf2c27246530a8b"
       }
     }
   ],
