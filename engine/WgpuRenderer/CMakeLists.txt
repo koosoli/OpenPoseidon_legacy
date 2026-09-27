@@ -77,7 +77,10 @@ target_include_directories(WgpuRenderer PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-target_link_libraries(WgpuRenderer PUBLIC Poseidon PRIVATE wgpu_renderer)
+# Pinned local CPU library. Only explicit fixture BeginClod calls it;
+# no default initializer, frame bake, worker or paging policy is enabled.
+include("${CMAKE_SOURCE_DIR}/cmake/MeshoptimizerClod.cmake")
+target_link_libraries(WgpuRenderer PUBLIC Poseidon PRIVATE wgpu_renderer OpenPoseidon::MeshoptimizerClod)
 
 set_target_properties(WgpuRenderer PROPERTIES
     CXX_STANDARD 20

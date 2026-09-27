@@ -1,5 +1,6 @@
 param(
     [switch]$Disabled,
+    [switch]$Clod,
     [string]$Label='geometry-page-fixture',
     [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',
     [string]$Python='C:\Program Files\Python311\python.exe'
@@ -10,6 +11,7 @@ if (!$env:LOCK_OWNER) {
     $argv=@((Join-Path $PSScriptRoot 'with-game-lock.sh'),(Join-Path $PSHOME $shellName).Replace('\','/'),
         '-NoProfile','-File',$PSCommandPath,'-Label',$Label,'-GameDir',$GameDir,'-Python',$Python)
     if ($Disabled) {$argv+='-Disabled'}
+    if ($Clod) {$argv+='-Clod'}
     $env:LOCK_OWNER='private resident geometry page fixture'
     try {& 'C:\Program Files\Git\bin\bash.exe' @argv; if ($LASTEXITCODE) {throw "Geometry fixture exited $LASTEXITCODE"}}
     finally {Remove-Item Env:LOCK_OWNER}
@@ -53,7 +55,7 @@ $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0)
 $listener.Start();$port=$listener.LocalEndpoint.Port;$listener.Stop()
 $log=Join-Path $out 'engine.log'
 @{head=(& git -C $root rev-parse HEAD);installed=(Get-Content (Join-Path $GameDir 'DEPLOYED-FROM.txt'));
-    disabled=[bool]$Disabled;scriptSha256=(Get-FileHash $PSCommandPath).Hash;
+    disabled=[bool]$Disabled;clod=[bool]$Clod;scriptSha256=(Get-FileHash $PSCommandPath).Hash;
     hashes=@(Get-FileHash (Join-Path $GameDir 'OpenPoseidon.exe'),(Join-Path $GameDir 'wgpu_renderer.dll'))} |
     ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $out 'provenance.json')
 $p=$null;$client=$null
@@ -95,12 +97,31 @@ try {
                 'knownPayloadBytes','meshCount','meshesPresent','meshesAbsent','producerModel','rendererModel','producerInstance','rendererInstance')) {
                 if ($null -eq $cut.$field) {throw "Missing fixture field: $field"}
             }
+            if ($Clod) {
+                foreach ($field in @('clodPilot','fallbackSelected','clodAdapterVersion','clodLibraryRevision',
+                    'authoredFineTriangles','fallbackTriangles','clodGroups','clodClusters',
+                    'coarseThreshold','fineThreshold','clodBakeMs')) {
+                    if ($null -eq $cut.$field) {throw "Missing CLOD fixture field: $field"}
+                }
+                foreach ($field in @('coarseThreshold','fineThreshold','clodBakeMs')) {
+                    if ([double]::IsNaN([double]$cut.$field) -or [double]::IsInfinity([double]$cut.$field)) {
+                        throw "Nonfinite CLOD fixture field: $field"
+                    }
+                }
+            }
             if (!$active -and $cut.meshesPresent -gt 0 -and [DateTime]::UtcNow -lt $until) {continue}
             if ($null -eq $request.requestId -or $request.requestId -lt 1 -or $cut.requestId -lt 1 -or
                 $cut.observedRequestId -ne $request.requestId -or $cut.active -ne $active -or
                 $cut.fineSelected -ne $fine -or !$cut.mainFrameReturned -or !$cut.cpuHelpersUnchanged -or
                 !$cut.helperHashBefore -or !$cut.helperHashAfter -or $cut.sourceSha256 -notmatch '^[a-fA-F0-9]{64}$' -or
-                $cut.helperHashBefore -ne $cut.helperHashAfter -or $cut.coarseTriangles -ne 12 -or $cut.fineTriangles -ne 48 -or
+                $cut.helperHashBefore -ne $cut.helperHashAfter -or
+                (!$Clod -and ($cut.coarseTriangles -ne 12 -or $cut.fineTriangles -ne 48)) -or
+                ($Clod -and (!$cut.clodPilot -or $cut.clodAdapterVersion -ne 1 -or
+                    $cut.clodLibraryRevision -ne '9e1f07b159d3cb777f1c67ed31fc11fd117986f4' -or
+                    $cut.authoredFineTriangles -ne 512 -or $cut.fallbackTriangles -ne 2 -or
+                    $cut.coarseTriangles -le 0 -or $cut.fineTriangles -le $cut.coarseTriangles -or
+                    $cut.fineTriangles -gt 512 -or $cut.clodGroups -lt 2 -or $cut.clodClusters -lt 1 -or $cut.clodClusters -gt 64 -or
+                    $cut.coarseThreshold -le 0 -or $cut.fineThreshold -ne 0 -or $cut.clodBakeMs -lt 0)) -or
                 $cut.knownPayloadBytes -le 0 -or $cut.knownPayloadBytes -gt 1048576 -or $cut.meshCount -lt 1 -or $cut.meshCount -gt 64 -or
                 $cut.meshesPresent -lt 0 -or $cut.meshesAbsent -lt 0 -or ($cut.meshesPresent+$cut.meshesAbsent) -ne $cut.meshCount -or
                 ($active -and ($cut.rendererModel -eq 4294967295 -or $cut.rendererInstance -eq 4294967295 -or $cut.meshesPresent -ne $cut.meshCount)) -or
@@ -111,23 +132,45 @@ try {
         } while ([DateTime]::UtcNow -lt $until)
         throw 'Private geometry records did not settle before deadline'
     }
-    $begin=Action 'begin'
+    $begin=Action $(if($Clod){'beginClod'}else{'begin'})
     if ($Disabled) {
         foreach ($field in @('status','active','meshCount','knownPayloadBytes')) {if ($null -eq $begin.$field) {throw "Missing disabled fixture field: $field"}}
         if ($begin.status -ne 'Disabled' -or $begin.active -or $begin.meshCount -or $begin.knownPayloadBytes) {throw 'Default-off fixture unexpectedly allocated'}
         $result=@{begin=$begin;disabled=$true}
     } else {
+        $fallback=$null; $fallbackReturned=$null
+        if ($Clod) {
+            $fallback=Observe $true $false
+            if (!$fallback.fallbackSelected) {throw 'Clod pilot did not preserve authored fallback'}
+            Capture 'fallback.png'
+            $null=Action 'coarse'
+        }
         $coarse=Observe $true $false
+        if ($Clod -and ($coarse.fallbackSelected -or $coarse.rendererModel -eq $fallback.rendererModel -or
+            $coarse.rendererInstance -ne $fallback.rendererInstance -or $coarse.producerInstance -ne $fallback.producerInstance)) {
+            throw 'Coarse CLOD cut did not independently replace the authored fallback on the fixed instance'
+        }
         Capture 'coarse.png'
         $null=Action 'fine';$fine=Observe $true $true
         if ($fine.rendererModel -eq $coarse.rendererModel -or $fine.rendererInstance -ne $coarse.rendererInstance -or
             $fine.producerInstance -ne $coarse.producerInstance) {throw 'Frontier did not switch one instance to the alternate model'}
+        if ($Clod -and ($fine.fallbackSelected -or $fine.rendererModel -eq $fallback.rendererModel -or
+            $fine.rendererInstance -ne $fallback.rendererInstance -or $fine.producerInstance -ne $fallback.producerInstance)) {
+            throw 'Fine CLOD cut did not select the third independent model on the fixed instance'
+        }
         Capture 'fine.png'
         $null=Action 'coarse';$returned=Observe $true $false
         if ($returned.rendererModel -ne $coarse.rendererModel -or $returned.rendererInstance -ne $coarse.rendererInstance -or
             $returned.producerInstance -ne $coarse.producerInstance) {throw 'Coarse model or fixed instance was not preserved'}
+        if ($Clod) {
+            if ($returned.fallbackSelected) {throw 'Returned coarse CLOD cut incorrectly selected authored fallback'}
+            $null=Action 'fallback';$fallbackReturned=Observe $true $false
+            if (!$fallbackReturned.fallbackSelected -or $fallbackReturned.rendererModel -ne $fallback.rendererModel -or
+                $fallbackReturned.rendererInstance -ne $fallback.rendererInstance -or
+                $fallbackReturned.producerInstance -ne $fallback.producerInstance) {throw 'Authored fallback was not independently retained'}
+        }
         $null=Action 'abort';$retired=Observe $false $false
-        $result=@{begin=$begin;coarse=$coarse;fine=$fine;returned=$returned;retired=$retired;disabled=$false}
+        $result=@{begin=$begin;fallback=$fallback;fallbackReturned=$fallbackReturned;coarse=$coarse;fine=$fine;returned=$returned;retired=$retired;disabled=$false;clod=[bool]$Clod}
     }
     $null=Send @{cmd='exit'}
     if (!$p.WaitForExit(15000) -or $p.ExitCode) {throw 'Game failed to exit cleanly'}

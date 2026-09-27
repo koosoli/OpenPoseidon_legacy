@@ -3137,7 +3137,7 @@ class Engine : public IGraphicsEngine
     { return {}; }
 
     // Ready is a returned-main-frame record cut, not all-pass/pixel or GPU-free proof.
-    enum class GeometryPageFixtureAction { Begin, Coarse, Fine, Observe, Snapshot, Abort };
+    enum class GeometryPageFixtureAction { Begin, Coarse, Fine, Observe, Snapshot, Abort, BeginClod, Fallback };
     struct GeometryPageFixtureReport
     {
         GeometryReportStatus status=GeometryReportStatus::Unsupported;
@@ -3148,6 +3148,11 @@ class Engine : public IGraphicsEngine
         uint32_t coarseTriangles=0, fineTriangles=0, coarsePages=0, finePages=0;
         bool active=false, fineSelected=false, cpuHelpersUnchanged=false;
         bool mainFrameReturned=false, cascadeConfigured=false, localShadowConfigured=false;
+        bool clodPilot=false, fallbackSelected=false;
+        uint32_t clodAdapterVersion=0, clodGroups=0, clodClusters=0, fallbackTriangles=0, authoredFineTriangles=0;
+        double clodBakeMs=0;
+        float coarseThreshold=0, fineThreshold=0;
+        std::string clodLibraryRevision;
         float x=0,y=0,z=0;
         std::string helperHashBefore, helperHashAfter, sourceSha256;
     };

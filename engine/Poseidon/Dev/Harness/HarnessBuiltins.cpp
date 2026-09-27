@@ -533,6 +533,8 @@ void RegisterScreenshot(HarnessServer& hs)
             if(!name) return HarnessProtocol::ErrorResponse("fixture action required");
             Engine::GeometryPageFixtureAction action;
             if(!std::strcmp(name,"begin")) action=Engine::GeometryPageFixtureAction::Begin;
+            else if(!std::strcmp(name,"beginClod")) action=Engine::GeometryPageFixtureAction::BeginClod;
+            else if(!std::strcmp(name,"fallback")) action=Engine::GeometryPageFixtureAction::Fallback;
             else if(!std::strcmp(name,"coarse")) action=Engine::GeometryPageFixtureAction::Coarse;
             else if(!std::strcmp(name,"fine")) action=Engine::GeometryPageFixtureAction::Fine;
             else if(!std::strcmp(name,"observe")) action=Engine::GeometryPageFixtureAction::Observe;
@@ -565,16 +567,21 @@ void RegisterScreenshot(HarnessServer& hs)
             PAGE_FIXTURE_NUMBER(producerInstance); PAGE_FIXTURE_NUMBER(rendererInstance);
             PAGE_FIXTURE_NUMBER(meshCount); PAGE_FIXTURE_NUMBER(meshesPresent); PAGE_FIXTURE_NUMBER(meshesAbsent);
             PAGE_FIXTURE_NUMBER(coarseTriangles); PAGE_FIXTURE_NUMBER(fineTriangles); PAGE_FIXTURE_NUMBER(coarsePages); PAGE_FIXTURE_NUMBER(finePages);
+            PAGE_FIXTURE_NUMBER(clodAdapterVersion); PAGE_FIXTURE_NUMBER(clodGroups); PAGE_FIXTURE_NUMBER(clodClusters);
+            PAGE_FIXTURE_NUMBER(fallbackTriangles); PAGE_FIXTURE_NUMBER(authoredFineTriangles); PAGE_FIXTURE_NUMBER(clodBakeMs);
+            PAGE_FIXTURE_NUMBER(coarseThreshold); PAGE_FIXTURE_NUMBER(fineThreshold);
             PAGE_FIXTURE_NUMBER(x); PAGE_FIXTURE_NUMBER(y); PAGE_FIXTURE_NUMBER(z);
 #undef PAGE_FIXTURE_NUMBER
 #define PAGE_FIXTURE_BOOL(field) cJSON_AddBoolToObject(result,#field,report.field)
+            PAGE_FIXTURE_BOOL(clodPilot); PAGE_FIXTURE_BOOL(fallbackSelected);
             PAGE_FIXTURE_BOOL(active); PAGE_FIXTURE_BOOL(fineSelected); PAGE_FIXTURE_BOOL(cpuHelpersUnchanged);
             PAGE_FIXTURE_BOOL(mainFrameReturned); PAGE_FIXTURE_BOOL(cascadeConfigured); PAGE_FIXTURE_BOOL(localShadowConfigured);
 #undef PAGE_FIXTURE_BOOL
             cJSON_AddStringToObject(result,"helperHashBefore",report.helperHashBefore.c_str());
             cJSON_AddStringToObject(result,"helperHashAfter",report.helperHashAfter.c_str());
             cJSON_AddStringToObject(result,"sourceSha256",report.sourceSha256.c_str());
-            cJSON_AddStringToObject(result,"scope","Private programmatically authored box; returned main frame and full-generation record cut, not all-pass/pixel, mounted-file provenance, queue-completion or device-free proof");
+            cJSON_AddStringToObject(result,"clodLibraryRevision",report.clodLibraryRevision.c_str());
+            cJSON_AddStringToObject(result,"scope","Private programmatically authored box/curved-grid pilot; synchronous bake scratch/latency not hard-bounded; returned main frame and full-generation record cut, not all-pass/pixel, mounted-file provenance, queue-completion or device-free proof");
             return HarnessProtocol::JsonResponse(result);
         });
     hs.RegisterCommand({"geometry_allocations", "Request/poll bounded retained mesh allocation diagnostics", {}},
