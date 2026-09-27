@@ -9371,7 +9371,7 @@ void EngineWgpu::PublishGeometryPageFixtureObservation(const WgrFrame& frame, in
             if(tuple.status==1) {
                 const auto* cameras=frame.cameras.data;
                 const bool fresh=tuple.generation>fixture->cameraLastGeneration&&tuple.generation!=UINT64_MAX;
-                const bool packet=cameras&&tuple.camera_index<frame.cameras.len&&tuple.source>=1&&tuple.source<=4&&
+                const bool packet=cameras&&tuple.camera_index<frame.cameras.count&&tuple.source>=1&&tuple.source<=4&&
                     tuple.render_width==tuple.output_width&&tuple.render_height==tuple.output_height&&
                     std::memcmp(tuple.projection,cameras[tuple.camera_index].proj.m,sizeof(tuple.projection))==0&&
                     std::memcmp(tuple.view,cameras[tuple.camera_index].view.m,sizeof(tuple.view))==0&&
