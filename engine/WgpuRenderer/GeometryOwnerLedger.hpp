@@ -57,6 +57,10 @@ public:
         size_t queuedOwnershipEvents=0; // truthful total; queuedDetachEvents is the historical all-event alias
         Report ownerReport; // Same map cut as records, without a second mailbox drain.
         std::vector<HandleRecord> records;
+        struct SelectedModelLink {uint32_t model=0,lod=0;uint64_t allocation=0;};
+        bool selectedLinksRequested=false,selectedLinksComplete=false,selectedLinksTruncated=false;
+        size_t selectedLinkVisits=0;
+        std::vector<SelectedModelLink> selectedModelLinks; // <=2048 tuples; no default allocation
     };
     // Serial owner-only selected-record cut. Drains the bounded numeric mailbox,
     // then copies one O(1) map lookup; missing evidence is explicit, never Ready.
@@ -278,7 +282,7 @@ public:
     // presence probe can distinguish absence from unknown unobserved handles.
     // This creates no strong resource ownership and never infers retirement.
     // Returned vector allocation is opt-in/on-demand only, at most 8192 records.
-    HandleReport SnapshotHandles()
+    HandleReport SnapshotHandles(const std::vector<uint32_t>* selectedModels=nullptr)
     {
         DrainDetachMailbox();
         HandleReport r; r.epoch=_epoch; r.trackedAllocations=_allocations.size();
@@ -297,7 +301,34 @@ public:
         } catch (...) {
             r.records.clear(); r.truncated=true; r.incompleteReasons|=static_cast<uint32_t>(Reason::Capacity); MarkIncomplete(_epoch,Reason::Capacity);
         }
-        r.ownerReport=BuildSnapshot(); // No drain: records and aggregate see identical owner maps.
+        if(selectedModels) {
+            r.selectedLinksRequested=true;r.selectedLinksComplete=true;
+            constexpr size_t maxModels=256,maxVisits=2048;
+            try {
+                if(selectedModels->size()>maxModels){r.selectedLinksComplete=false;r.selectedLinksTruncated=true;}
+                else {
+                    std::unordered_set<uint32_t> seenModels;
+                    for(uint32_t model:*selectedModels) {
+                        if(r.selectedLinkVisits==maxVisits){r.selectedLinksComplete=false;r.selectedLinksTruncated=true;break;}
+                        ++r.selectedLinkVisits;
+                        if(!seenModels.insert(model).second){r.selectedLinksComplete=false;break;}
+                        auto found=_models.find(model);
+                        if(found==_models.end()){r.selectedLinksComplete=false;break;}
+                        for(const auto& lod:found->second) {
+                            if(r.selectedLinkVisits==maxVisits){r.selectedLinksComplete=false;r.selectedLinksTruncated=true;break;}
+                            ++r.selectedLinkVisits;
+                            for(uint64_t allocation:lod.second) {
+                                if(r.selectedLinkVisits==maxVisits){r.selectedLinksComplete=false;r.selectedLinksTruncated=true;break;}
+                                ++r.selectedLinkVisits;r.selectedModelLinks.push_back({model,lod.first,allocation});
+                            }
+                            if(!r.selectedLinksComplete)break;
+                        }
+                        if(!r.selectedLinksComplete)break;
+                    }
+                }
+            } catch (...) {r.selectedLinksComplete=false;r.selectedLinksTruncated=true;r.selectedModelLinks.clear();}
+        }
+        r.ownerReport=BuildSnapshot(); // No drain: records, tuples and aggregate see identical owner maps.
         r.incompleteReasons|=r.ownerReport.incompleteReasons;
         r.queuedDetachEvents=r.ownerReport.queuedDetachEvents;
         r.queuedOwnershipEvents=r.ownerReport.queuedOwnershipEvents;

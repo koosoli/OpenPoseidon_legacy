@@ -19,6 +19,7 @@
 #include <wgpu_renderer.hpp>
 #include "SharedRetainedMeshLifetime.hpp"
 #include "StandaloneMeshRetirementWitness.hpp"
+#include "ParkedGeometryReport.hpp"
 
 #include <array>
 #include <chrono> // steady_clock, for the opt-in auto-exposure time constant (WGR_AUTO_EXPOSURE_TAU)
@@ -1326,6 +1327,8 @@ class EngineWgpu : public EngineDummy
             uint32_t registryEntriesVisited = 0, ineligibleEntriesSkipped = 0;
             uint32_t unresolvedNames = 0;
             std::vector<std::pair<uint32_t, std::string>> models;
+            bool parkedRequested=false,parkedCaptureFailed=false;
+            std::unique_ptr<render::ParkedGeometryCapture> parked; // optional report only
         };
         // Ordinary resource operations carry only a null pointer, not diagnostic buffers.
         std::unique_ptr<GeometryReportRequest> geometryReport;
@@ -1346,7 +1349,7 @@ class EngineWgpu : public EngineDummy
     uint64_t _geometryOwnerEpoch = 1;
     bool _geometryMeshAckEnabled = false;
     bool _geometryRegisteredRefsEnabled = false;
-    void FillGeometryMeshFacts(GeometryAllocationReport& report);
+    void FillGeometryMeshFacts(GeometryAllocationReport& report,const render::ParkedGeometryCapture* parked=nullptr);
     SharedMeshFixtureReport ControlSharedMeshLifetimeFixture(SharedMeshFixtureAction, const Shape* = nullptr) override;
     GeometryPageFixtureReport ControlGeometryPageFixture(GeometryPageFixtureAction,
         float x=1200,float y=11.5f,float z=1200,const GeometryPageDiskFixtureInput* disk=nullptr,

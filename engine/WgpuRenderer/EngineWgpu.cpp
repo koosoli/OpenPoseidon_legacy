@@ -3001,7 +3001,7 @@ struct GeometryPoolFill
 GeometryPoolFill GGeometryPoolFill;
 } // namespace
 
-void EngineWgpu::FillGeometryMeshFacts(GeometryAllocationReport& report)
+void EngineWgpu::FillGeometryMeshFacts(GeometryAllocationReport& report, const render::ParkedGeometryCapture* parked)
 {
     if (!_geometryOwnerLedger) return;
     report.rendererMeshFactsEnabled = true;
@@ -3010,7 +3010,7 @@ void EngineWgpu::FillGeometryMeshFacts(GeometryAllocationReport& report)
         const auto witnessStats = _standaloneWitnessBudget ? _standaloneWitnessBudget->Snapshot() : render::StandaloneMeshWitnessBudget::Stats{};
         // Refusal is informational: an unused shared-buffer witness can be
         // refused without omitting any standalone retirement evidence.
-        const auto handles = _geometryOwnerLedger->SnapshotHandles();
+        const auto handles = _geometryOwnerLedger->SnapshotHandles(parked ? &parked->models : nullptr);
         const auto& owners = handles.ownerReport;
         report.persistentAttributionEnabled = true;
         report.persistentAttributionComplete = owners.attributionComplete;
@@ -3125,6 +3125,56 @@ void EngineWgpu::FillGeometryMeshFacts(GeometryAllocationReport& report)
         report.rendererMeshRecordClosureComplete = closure.recordsComplete;
         report.rendererMeshPoolResidualValid = closure.residualValid;
         report.rendererMeshPoolUnattributedBytes = closure.unattributedBytes;
+        if (parked)
+        {
+            try
+            {
+                // Selection is from the earlier main-owner request. CPU/model tuples,
+                // records and Rust facts are joined at this one renderer drain cut.
+                std::unordered_map<uint64_t, uint64_t> selectedLinks;
+                bool selectedValid = handles.selectedLinksComplete;
+                for (const auto& link : handles.selectedModelLinks)
+                {
+                    auto& count = selectedLinks[link.allocation];
+                    if (count == UINT64_MAX) selectedValid = false;
+                    else ++count;
+                }
+                std::vector<render::ParkedGeometryObservation> joined;
+                joined.reserve(handles.records.size());
+                for (size_t i = 0; i < handles.records.size(); ++i)
+                {
+                    const auto& record = handles.records[i];
+                    render::ParkedGeometryObservation item;
+                    item.allocation = record.allocationId; item.epoch = record.epoch;
+                    item.handle = record.rendererHandle; item.cpu = record.cpuBorrowers;
+                    item.modelLinks = record.modelLodLinks;
+                    const auto selected = selectedLinks.find(record.allocationId);
+                    item.selectedLinks = selected == selectedLinks.end() ? 0 : selected->second;
+                    item.producer = record.producerOwned; item.retired = record.scheduledRetired;
+                    if (i < totals.handles_inspected)
+                    {
+                        const auto& fact = facts[i];
+                        item.factValid = fact.mesh_handle == record.rendererHandle && fact.reserved == 0;
+                        item.state = fact.state; item.vertexBytes = fact.vertex_bytes; item.indexBytes = fact.index_bytes;
+                    }
+                    joined.push_back(item);
+                }
+                const auto classes = render::ClassifyParkedGeometry(*parked, handles.epoch,
+                    report.rendererMeshFactsComplete && selectedValid, joined);
+                report.parkedJoinComplete = classes.complete;
+                report.parkedTruncated = report.parkedTruncated || handles.selectedLinksTruncated;
+                report.parkedLinkVisits = handles.selectedLinkVisits;
+                report.parkedLinkKnownCapacityBytes = handles.selectedModelLinks.capacity() * sizeof(render::GeometryOwnerLedger::HandleReport::SelectedModelLink);
+                report.parkedUniqueAllocations = classes.uniqueAllocations;
+                report.parkedKnownCandidateBytes = classes.knownCandidateBytes;
+                report.parkedCpuBorrowedAllocations = classes.cpuBorrowed; report.parkedCpuBorrowedBytes = classes.cpuBorrowedBytes;
+                report.parkedUnborrowedAllocations = classes.unborrowed; report.parkedUnborrowedBytes = classes.unborrowedBytes;
+                report.parkedOutsideLinkedAllocations = classes.outsideLinked; report.parkedOutsideLinkedBytes = classes.outsideLinkedBytes;
+                report.parkedAbsentRetiredAllocations = classes.absentRetired;
+                report.parkedUnknownAllocations = classes.unknown; report.parkedUnknownKnownBytes = classes.unknownKnownBytes;
+            }
+            catch (...) { report.parkedJoinComplete = false; report.parkedTruncated = true; }
+        }
         if (_geometryRegisteredRefsEnabled)
         {
             report.rendererRegisteredRefsEnabled = true;
@@ -3492,6 +3542,23 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
             // this request on the producer; a later poll reads the immutable response.
             GeometryAllocationReport report;
             report.requestId = op.geometryReport->requestId;
+            if (op.geometryReport->parkedRequested)
+            {
+                report.parkedReportEnabled = true;
+                report.parkedTruncated = op.geometryReport->parkedCaptureFailed;
+                if (const auto* capture = op.geometryReport->parked.get())
+                {
+                    report.parkedCaptureComplete = capture->complete;
+                    report.parkedTruncated = capture->truncated;
+                    report.parkedModelsVisited = capture->modelsVisited;
+                    report.parkedModelsCaptured = capture->models.size();
+                    report.parkedMetadataVisits = capture->metadataVisits;
+                    report.parkedInvalidEntries = capture->invalidEntries;
+                    report.parkedRequestKnownCapacityBytes = sizeof(*capture) +
+                        capture->models.capacity() * sizeof(uint32_t) + capture->allocations.capacity() * sizeof(uint64_t);
+                }
+                else report.parkedInvalidEntries = 1;
+            }
             report.maxModels = op.geometryReport->maxModels;
             report.maxRows = op.geometryReport->rows;
             report.maxSectionVisits = op.geometryReport->visits;
@@ -3558,7 +3625,7 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
             _geometryReportUnpublished = std::make_shared<GeometryAllocationReport>(std::move(report));
             // Allocate the publication packet before optional fence acquisition,
             // so allocation failure cannot leak an accepted diagnostic ticket.
-            if (_geometryOwnerLedger) FillGeometryMeshFacts(*_geometryReportUnpublished);
+            if (_geometryOwnerLedger) FillGeometryMeshFacts(*_geometryReportUnpublished, op.geometryReport->parked.get());
             break;
         }
         case ResourceOp::GeometryPageFixtureObserve:
@@ -13752,6 +13819,46 @@ Engine::GeometryReportStatus EngineWgpu::RequestGeometryAllocationReport(uint32_
         if (name) while (length < 1024 && name[length]) ++length;
         if (!length || length == 1024) ++op.geometryReport->unresolvedNames;
         op.geometryReport->models.emplace_back(model, name ? std::string(name, length) : std::string{});
+    }
+    if (_geometryOwnerLedger)
+    {
+        static const bool parkedEnabled = [] {
+            const char* value = std::getenv("WGR_GEOMETRY_PARKED_REPORT");
+            return value && value[0] == '1' && value[1] == 0;
+        }();
+        if (parkedEnabled)
+        {
+            op.geometryReport->parkedRequested = true;
+            try
+            {
+                auto capture = std::make_unique<render::ParkedGeometryCapture>();
+                for (const auto* shape : _gpuModelParked)
+                {
+                    if (capture->modelsVisited == render::ParkedGeometryCapture::MaxModels ||
+                        capture->metadataVisits == render::ParkedGeometryCapture::MaxVisits)
+                    { capture->complete = false; capture->truncated = true; break; }
+                    ++capture->modelsVisited; ++capture->metadataVisits;
+                    const auto model = _gpuModels.find(shape);
+                    const auto refs = _gpuModelRefs.find(shape);
+                    const auto meshes = _gpuModelMeshes.find(shape);
+                    if (model == _gpuModels.end() || model->second == WGR_INVALID_MODEL ||
+                        (refs != _gpuModelRefs.end() && refs->second != 0) || meshes == _gpuModelMeshes.end())
+                    { ++capture->invalidEntries; capture->complete = false; continue; }
+                    capture->models.push_back(model->second);
+                    for (const auto allocation : meshes->second)
+                    {
+                        if (capture->metadataVisits == render::ParkedGeometryCapture::MaxVisits)
+                        { capture->complete = false; capture->truncated = true; break; }
+                        ++capture->metadataVisits;
+                        if (!allocation) { ++capture->invalidEntries; capture->complete = false; }
+                        capture->allocations.push_back(allocation);
+                    }
+                    if (capture->truncated) break;
+                }
+                op.geometryReport->parked = std::move(capture);
+            }
+            catch (...) { op.geometryReport->parkedCaptureFailed = true; }
+        }
     }
     requestId = op.geometryReport->requestId;
     _geometryReport.reset();

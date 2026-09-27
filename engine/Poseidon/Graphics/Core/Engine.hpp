@@ -1696,6 +1696,15 @@ class Engine : public IGraphicsEngine
           uint32_t unresolvedNames = 0;
           uint32_t maxModels = 0, maxRows = 0, maxSectionVisits = 0;
           bool valid = false, truncated = false;
+          // Producer-request parked selection versus renderer-drain facts; different cuts.
+          // Logical candidate classes, never reclaim/device-free/all-view ownership proof.
+          bool parkedReportEnabled=false,parkedCaptureComplete=false,parkedJoinComplete=false,parkedTruncated=false;
+          uint64_t parkedModelsVisited=0,parkedModelsCaptured=0,parkedMetadataVisits=0,parkedInvalidEntries=0;
+          uint64_t parkedLinkVisits=0,parkedUniqueAllocations=0,parkedKnownCandidateBytes=0;
+          uint64_t parkedCpuBorrowedAllocations=0,parkedCpuBorrowedBytes=0,parkedUnborrowedAllocations=0,parkedUnborrowedBytes=0;
+          uint64_t parkedOutsideLinkedAllocations=0,parkedOutsideLinkedBytes=0;
+          uint64_t parkedAbsentRetiredAllocations=0,parkedUnknownAllocations=0,parkedUnknownKnownBytes=0;
+          uint64_t parkedRequestKnownCapacityBytes=0,parkedLinkKnownCapacityBytes=0;
           bool ownershipCoverageComplete = false; // no complete renderer-wide ownership inventory
           // Optional startup-only persistent mesh-owner attribution. Bytes are
           // producer payload estimates, not physical GPU allocation sizes. Scope

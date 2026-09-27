@@ -6,11 +6,12 @@ param(
     [switch]$OwnerLedger,
     [switch]$MeshAck,
     [switch]$RegisteredRefs,
+    [switch]$ParkedGeometryReport,
     [string]$Label = 'dayz-resource-convergence',
     [string]$GameDir = 'D:\SteamLibrary\steamapps\common\ARMA Cold War Assault'
 )
 $ErrorActionPreference = 'Stop'
-if ($MeshAck -or $RegisteredRefs) { $OwnerLedger = $true }
+if ($MeshAck -or $RegisteredRefs -or $ParkedGeometryReport) { $OwnerLedger = $true }
 if ($DiagnosticOnly -or $LodDemandReport -or $OwnerLedger) { $AllocationReport = $true }
 if (!$env:LOCK_OWNER) {
     $shellName = if ($PSVersionTable.PSEdition -eq 'Core') { 'pwsh.exe' } else { 'powershell.exe' }
@@ -25,6 +26,7 @@ if (!$env:LOCK_OWNER) {
     if ($OwnerLedger) { $lockArgs += '-OwnerLedger' }
     if ($MeshAck) { $lockArgs += '-MeshAck' }
     if ($RegisteredRefs) { $lockArgs += '-RegisteredRefs' }
+    if ($ParkedGeometryReport) { $lockArgs += '-ParkedGeometryReport' }
     $env:LOCK_OWNER = 'DayZ resource convergence'
     try {
         & 'C:\Program Files\Git\bin\bash.exe' @lockArgs
@@ -64,6 +66,7 @@ if ($LodDemandReport) { $environment.WGR_GEOMETRY_LOD_FEEDBACK = '1' }
 if ($OwnerLedger) { $environment.WGR_GEOMETRY_OWNER_LEDGER = '1' }
 if ($MeshAck) { $environment.WGR_GEOMETRY_MESH_ACK = '1' }
 if ($RegisteredRefs) { $environment.WGR_GEOMETRY_REGISTERED_REFS = '1' }
+$environment.WGR_GEOMETRY_PARKED_REPORT = $(if ($ParkedGeometryReport) { '1' } else { '0' })
 # Remove inherited experiments, then restore the caller's environment on exit.
 # Ordinary terrain paging remains the installed engine default.
 $clearNames = @((Get-ChildItem Env: | Where-Object {
@@ -81,6 +84,7 @@ try {
         scriptSha256 = (Get-FileHash $PSCommandPath).Hash; head = (& git -C $root rev-parse HEAD)
         meshAck = [bool]$MeshAck
         registeredRefs = [bool]$RegisteredRefs
+        parkedGeometryReport = [bool]$ParkedGeometryReport
         installed = (Get-Content (Join-Path $GameDir 'DEPLOYED-FROM.txt')); hashes = @(Get-FileHash $exe, $dll)
         corpus = 'DayZ'; pose = @($baseX, $baseZ, $baseY, $azimuth, $elevation); routeX = $route; cycles = $(if ($DiagnosticOnly) { 0 } else { 3 })
         environment = $environment; driverSampled = [bool]$SampleDriverMemory
@@ -165,6 +169,7 @@ try {
         } while ([DateTime]::UtcNow -lt $deadline)
         return [pscustomobject]@{quiet = $false; status = 'PendingWarmup'; last = $sample; consecutiveSamples = $streak}
     }
+        $script:parkedReportObservations = @()
         function Read-Allocation($request, [bool]$finalEvidence = $false) {
             $started = Send $request
             if ($started.status -ne 'Pending' -or $started.requestId -lt 1) { throw 'Allocation request was not accepted asynchronously' }
@@ -176,6 +181,39 @@ try {
             } while ($report.status -eq 'Pending')
             if ($report.status -ne 'Ready' -or !$report.valid -or $report.invalidRanges -ne 0 -or $report.unresolvedNames -ne 0) { throw 'Allocation report failed validity checks' }
             if (($report.uniqueVertexBytes + $report.uniqueIndexBytes) -gt $report.poolLiveBytes) { throw 'Unique retained mesh allocation exceeds the whole pool' }
+            $parkedFields = @('parkedReportEnabled','parkedCaptureComplete','parkedJoinComplete','parkedTruncated',
+                'parkedModelsVisited','parkedModelsCaptured','parkedMetadataVisits','parkedInvalidEntries','parkedLinkVisits',
+                'parkedUniqueAllocations','parkedCpuBorrowedAllocations','parkedCpuBorrowedBytes',
+                'parkedUnborrowedAllocations','parkedUnborrowedBytes','parkedOutsideLinkedAllocations','parkedOutsideLinkedBytes',
+                'parkedAbsentRetiredAllocations','parkedUnknownAllocations','parkedUnknownKnownBytes','parkedKnownCandidateBytes',
+                'parkedRequestKnownCapacityBytes','parkedLinkKnownCapacityBytes')
+            foreach ($field in $parkedFields) {
+                if ($null -eq $report.$field) { throw "Missing parked candidate field: $field" }
+            }
+            if ([bool]$report.parkedReportEnabled -ne [bool]$ParkedGeometryReport) { throw 'Parked report activation mismatch' }
+            if (!$ParkedGeometryReport) {
+                foreach ($field in $parkedFields) { if ($report.$field -ne 0) { throw "OFF parked report unexpectedly populated $field" } }
+            } else {
+                if ($report.parkedModelsVisited -gt 256 -or $report.parkedModelsCaptured -gt $report.parkedModelsVisited -or
+                    $report.parkedMetadataVisits -gt 2048 -or $report.parkedLinkVisits -gt 2048 -or
+                    $report.parkedUniqueAllocations -gt 2048) { throw 'Parked report exceeded bounded selection' }
+                $classes = [decimal]$report.parkedCpuBorrowedAllocations + [decimal]$report.parkedUnborrowedAllocations +
+                    [decimal]$report.parkedOutsideLinkedAllocations + [decimal]$report.parkedAbsentRetiredAllocations + [decimal]$report.parkedUnknownAllocations
+                $bytes = [decimal]$report.parkedCpuBorrowedBytes + [decimal]$report.parkedUnborrowedBytes +
+                    [decimal]$report.parkedOutsideLinkedBytes + [decimal]$report.parkedUnknownKnownBytes
+                if ($classes -ne $report.parkedUniqueAllocations -or $bytes -ne $report.parkedKnownCandidateBytes) {
+                    throw 'Parked candidate classes are not a disjoint union'
+                }
+                if ($report.parkedJoinComplete -and (!$report.parkedCaptureComplete -or $report.parkedTruncated -or $report.parkedUnknownAllocations -ne 0)) {
+                    throw 'Parked join incorrectly claimed complete selected attribution'
+                }
+            }
+
+            if ($ParkedGeometryReport) {
+                $observation = @{requestId=$report.requestId}
+                foreach ($field in $parkedFields) { $observation[$field]=$report.$field }
+                $script:parkedReportObservations += [pscustomobject]$observation
+            }
             foreach ($field in @('overlapWithinInspectedMeshes', 'overlapWithinInspectedVertexBytes', 'overlapWithinInspectedIndexBytes', 'ownershipCoverageComplete')) {
                 if (!$report.PSObject.Properties[$field]) { throw "Allocation report omitted ownership attribution field $field" }
             }
@@ -419,24 +457,42 @@ try {
                 ConvertTo-Json -Depth 8 | Set-Content (Join-Path $out 'geometry-lod-demand.json')
         }
     }
+    $parkedPositive = !$ParkedGeometryReport -or @($script:parkedReportObservations | Where-Object {
+        $_.parkedModelsCaptured -gt 0 -and $_.parkedUniqueAllocations -gt 0
+    }).Count -gt 0
+    @{requested=[bool]$ParkedGeometryReport; positive=[bool]($ParkedGeometryReport -and $parkedPositive)
+        observations=$script:parkedReportObservations
+        scope='Bounded earlier producer parked selection joined to later renderer facts; diagnostic usage only, incomplete classes remain Unknown; no reclaimability or performance acceptance'} |
+        ConvertTo-Json -Depth 6 | Set-Content (Join-Path $out 'parked-candidate-proof.json')
     $null = Send @{cmd = 'screenshot'; path = (Join-Path $out 'returned-settled.png')}
     $null = Send @{cmd = 'exit'}
     if (!$p.WaitForExit(15000) -or $p.ExitCode) { throw 'Game failed to exit cleanly' }
     if (Select-String -LiteralPath $log -Pattern 'Out of Memory|Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION' -Quiet) { throw 'Renderer error' }
     # Publish verdict only after the owned process exits cleanly. Process/driver
     # measurements remain raw evidence; resident count alone proves no memory bound.
-    @{passed = ($converged -or $DiagnosticOnly); convergenceMeasured = !$DiagnosticOnly; status = $status; initialCold = $initialCold; initialQuiet = $initialQuiet
+    @{passed = (($converged -or $DiagnosticOnly) -and $parkedPositive); convergenceMeasured = !$DiagnosticOnly; status = $status; initialCold = $initialCold; initialQuiet = $initialQuiet
         returns = $returns; comparison = $comparison; lateQuiet = $lateQuiet; retiredClear = $retiredClear
         processScope = 'Diagnostic private/RSS samples retained; GPU convergence does not establish process-memory convergence'
         returnAllocationComparison = $returnAllocationComparison
         allocationReport = $allocation; lodDemandMeasured = [bool]$LodDemandReport; ownerLedgerMeasured = [bool]$OwnerLedger; meshAckMeasured = [bool]$MeshAck
         registeredRefsMeasured = [bool]$RegisteredRefs
+        parkedGeometryReportMeasured = [bool]$ParkedGeometryReport; parkedCandidateUsagePositive = [bool]($ParkedGeometryReport -and $parkedPositive)
     } | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $out 'result.json')
     Write-Output "Resource convergence evidence: $out ($status)"
+    if (!$parkedPositive) { throw 'NotExercised: parked selection did not capture actual model and allocation candidates; evidence retained' }
     if (!$converged -and !$DiagnosticOnly) { throw "Convergence not established: $status (see result.json and raw samples)" }
 } finally {
     if ($gpuSampler -and !$gpuSampler.HasExited) { Stop-Process -Id $gpuSampler.Id }
+    if ($p -and !$p.HasExited) {
+        # Verification failures still allow normal cleanup of this owned session.
+        try {
+            if ($client -and $client.Connected) {
+                $null = Send @{cmd = 'exit'}
+                $null = $p.WaitForExit(15000)
+            }
+        } catch {}
+        if (!$p.HasExited) { Stop-Process -Id $p.Id -Force }
+    }
     if ($client) { $client.Dispose() }
-    if ($p -and !$p.HasExited) { Stop-Process -Id $p.Id -Force }
     foreach ($name in $changedNames) { [Environment]::SetEnvironmentVariable($name, $savedEnvironment[$name]) }
 }
