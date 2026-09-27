@@ -600,3 +600,62 @@ performanceAccepted/defaultReady remain false, experimental paging stays OFF.
 
 
 Artifact hashes are recorded in `../decisions/GEOMETRY-CLOD-PILOT-20260927.md`.
+
+## Combined CLOD RAM worker paging checkpoint, 13:11
+
+Clean installed `c072453c` integrates `3d4874c9` combined selected-CLOD RAM
+paging and `e9d51eb8` dirty GPU table domains. Initial 246-scheduled build failed
+with two errors from a shadowed `ClodCut selectedCoarse`; the preserved failure
+log precedes the four-line naming repair and successful five-target20-step build.
+C++ policy tests passed15,269 assertions/11 cases. Two actual-GPU table tests
+passed with explicit readback/bootstrap PASS markers/no adapter skip; the shared
+upload-closure pure test also passed separately. These are the actual tested scopes.
+
+The optional combined fixture now retains four distinct model birth IDs on one
+instance: independent authored fallback0, selected coarse1, worker fine2 and
+refill3. Selected coarse64/fine512 triangles use the paired CLOD cuts. Derived RAM
+reference is the selected simplified geometry, not original fine coverage. Raw
+source SHA `f0dc3b432424e1323480f6bd6c9c6870935d631df7074d39d2895512a15f45c4`
+remains separate from derived selected-cut SHA
+`02ec881ef4b63ff9803c59f299b542554a26eb46cba3d2b8c5b6f92f1a97948e`.
+Retained RAM package known capacity88,974 bytes and copied worker input76,528
+bytes are both charged; source caps128KiB each, fixture1MiB, pages8/history64 and
+worker2-job bounds remain. Known startup payload371,575 grows to406,543 after fine
+publication; these are stored capacity estimates, not full transient/RSS/GPU peaks.
+
+Actual `clod-paged-eviction-cull-domains-20260927-20260927-131155` passed with
+clean exit. Held epoch1/job1/reservation223,984 survives Abort; replacement has
+two jobs/reservation447,968. Only epoch2 fine publishes. Birth fine produces
+history8/eightPresent. Eviction leaves twoPresent/sixAbsent; a cancelled refill
+keeps job1/debt223,984, replacement request retains two jobs447,968 until old
+work exits. Generation2 appends six fresh handles, history14/eightPresent/sixAbsent;
+old history remains unchanged. Authored fallback returns on the same producer
+instance0/renderer instance16,777,217 with its original model. Final Abort verifies
+fourteenAbsent/jobs0/reservation0. No weaker record Ready contract was introduced.
+
+Copied pass facts remainv2/592, capability31/required29. Actual coarse frame83/
+epoch7 and fine frame96/epoch8 match their reflection command stamps; cached
+interior/GI bits honestly remain Pending12, returned fallback Pending4. Successful
+main return and exact current model/instance/handle records prove command and
+record lifetime only, not nonzero survivors, pixels, all-pass, queue completion,
+device-free or physical reclaim. No new root visual judgement is claimed here.
+
+Three additional clean-exit controls passed: authored worker/eviction131320 final
+fiveAbsent/debt0; resident CLOD131335 fallback/coarse/fine switching and final
+eightAbsent with known351,017 bytes; disabled131349 zero fixture payload/history.
+The fixture gate remains OFF by default; normal frames perform no bake/page jobs.
+
+Default dirty-table mask replaces the old bool with one byte. Registration marks
+ALL, retirement LOD, section replacement SECTION, crown append CROWN, feedback
+MODEL. First dirty crown/section prepare initializes all five backing buffers;
+clean NONE avoids buffer probes and upload callbacks. Every buffer growth still
+rebuilds shared main/cascade/reflection/sky/color views. Pure/actual-GPU parity
+supports correctness, but default traversal performance for this new mask is
+UNMEASURED. Earlier51 mixed screen is historical, not a test of this mask.
+Future current-call timing and retirement-view patches are excluded from c072.
+Whole plan and Stage G remain OPEN; performanceAccepted/defaultReady false.
+General asset/DAG frontier, disk paging, automatic pressure policy, full GPU
+ownership, reclaim and all-pass acceptance remain outstanding.
+
+
+Exact hashes are recorded in `../decisions/GEOMETRY-CLOD-PILOT-20260927.md`.

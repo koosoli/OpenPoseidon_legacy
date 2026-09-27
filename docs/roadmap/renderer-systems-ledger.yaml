@@ -1057,6 +1057,15 @@ unbuilt_candidates: >-
       RAM pages only; no disk/autopaging/default worker allocation. Optional
       pointer fields/branches remain, not zero default cost. Fine eviction/refill,
       full ownership, physical reclaim and performance/default acceptance OPEN.
+      Clean c072453c optional selected-CLOD worker/fallback/one-cycle paging
+      passed actual131155: raw/derived identities distinct, four model IDs,
+      held223984/replacement447968 debt, final14Absent/jobs0. Authored/resident/
+      disabled regressions all cleanPASS. Default one-byte dirty table mask
+      verified by two actualGPU bootstrap/parity tests and one pure test;
+      new-mask normal traversal performance still unmeasured. Five-target20
+      repaired build/CPP15269assert11PASS; initial shadowing compilefail retained.
+      Commands/record lifetime only; no all-pass/physical free/reclaim acceptance.
+      WholeplanOPEN/performanceAccepted-defaultReadyfalse, fixtureOFF.
       Clean51f4e5e0 selected-CLOD RAM adapter/actual CPU worker tests passed
       19160 assertions/18 cases; seven Rust tests include actual GPU marker.
       Default section-refresh cache16B/O1 has exact startup0 legacy rollback.

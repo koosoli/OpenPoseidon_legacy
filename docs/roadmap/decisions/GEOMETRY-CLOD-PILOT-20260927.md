@@ -1,11 +1,10 @@
 # Controlled resident CPU CLOD pilot
 
-Installed clean 51f4e5e0 adds the verified selected-CLOD RAM CPU adapter/worker
-foundation and default section-address refresh cache. Same-binary DayZ screening
-is mixed and establishes no performance acceptance. Historical clean3d720430
-passed explicit authored fine eviction/refill and reflection-command checks. The earlier bounded RAM-page worker
-and resident CLOD checkpoints remain historical evidence. The startup fixture
-gate remains off; normal frames perform no bake or page work. Stage G and the full
+Installed clean c072453c passed the explicit combined selected-CLOD RAM worker,
+independent fallback, one-cycle fine eviction/refill and cancellation-debt checks.
+Default GPU table uploads now use verified dirty domains; traversal performance
+for this new mask remains unmeasured. Earlier51 screening was mixed. The startup
+fixture gate remains off; normal frames perform no bake/page work. Stage G/full
 plan remain OPEN, without performance/default or physical-reclaim acceptance.
 
 The dependency is upstream meshoptimizer at
@@ -484,3 +483,88 @@ Actual checkpoint SHA256 manifest:
 | build/stream-residency/section-refresh-optimized-20260927-disabled-20260927-124850/harness.jsonl | 4a8093cf5b67dfffe7af3a51c46648d71322a6402dc1fddf3ebe2c0b675acb43 |
 | build/stream-residency/section-refresh-optimized-20260927-disabled-20260927-124850/route-frame-ms.json | 0fa5c396aceda91ce957147df8d06a75bbabdd34756c4bd8812c48109367ee0b |
 | build/stream-residency/section-refresh-optimized-20260927-disabled-20260927-124850/returned-settled.png | 71e9340b8c67413f85ee5cbbec695ff69a9f6347ae61033b72f5e5b89ab4fe0e |
+
+## Actual combined selected-CLOD RAM paging and table domains, 13:11
+
+Clean installed `c072453c` integrates `3d4874c9` combined selected-CLOD RAM
+paging and `e9d51eb8` dirty GPU table domains. Initial 246-scheduled build failed
+with two errors from a shadowed `ClodCut selectedCoarse`; the preserved failure
+log precedes the four-line naming repair and successful five-target20-step build.
+C++ policy tests passed15,269 assertions/11 cases. Two actual-GPU table tests
+passed with explicit readback/bootstrap PASS markers/no adapter skip; the shared
+upload-closure pure test also passed separately. These are the actual tested scopes.
+
+The optional combined fixture now retains four distinct model birth IDs on one
+instance: independent authored fallback0, selected coarse1, worker fine2 and
+refill3. Selected coarse64/fine512 triangles use the paired CLOD cuts. Derived RAM
+reference is the selected simplified geometry, not original fine coverage. Raw
+source SHA `f0dc3b432424e1323480f6bd6c9c6870935d631df7074d39d2895512a15f45c4`
+remains separate from derived selected-cut SHA
+`02ec881ef4b63ff9803c59f299b542554a26eb46cba3d2b8c5b6f92f1a97948e`.
+Retained RAM package known capacity88,974 bytes and copied worker input76,528
+bytes are both charged; source caps128KiB each, fixture1MiB, pages8/history64 and
+worker2-job bounds remain. Known startup payload371,575 grows to406,543 after fine
+publication; these are stored capacity estimates, not full transient/RSS/GPU peaks.
+
+Actual `clod-paged-eviction-cull-domains-20260927-20260927-131155` passed with
+clean exit. Held epoch1/job1/reservation223,984 survives Abort; replacement has
+two jobs/reservation447,968. Only epoch2 fine publishes. Birth fine produces
+history8/eightPresent. Eviction leaves twoPresent/sixAbsent; a cancelled refill
+keeps job1/debt223,984, replacement request retains two jobs447,968 until old
+work exits. Generation2 appends six fresh handles, history14/eightPresent/sixAbsent;
+old history remains unchanged. Authored fallback returns on the same producer
+instance0/renderer instance16,777,217 with its original model. Final Abort verifies
+fourteenAbsent/jobs0/reservation0. No weaker record Ready contract was introduced.
+
+Copied pass facts remainv2/592, capability31/required29. Actual coarse frame83/
+epoch7 and fine frame96/epoch8 match their reflection command stamps; cached
+interior/GI bits honestly remain Pending12, returned fallback Pending4. Successful
+main return and exact current model/instance/handle records prove command and
+record lifetime only, not nonzero survivors, pixels, all-pass, queue completion,
+device-free or physical reclaim. No new root visual judgement is claimed here.
+
+Three additional clean-exit controls passed: authored worker/eviction131320 final
+fiveAbsent/debt0; resident CLOD131335 fallback/coarse/fine switching and final
+eightAbsent with known351,017 bytes; disabled131349 zero fixture payload/history.
+The fixture gate remains OFF by default; normal frames perform no bake/page jobs.
+
+Default dirty-table mask replaces the old bool with one byte. Registration marks
+ALL, retirement LOD, section replacement SECTION, crown append CROWN, feedback
+MODEL. First dirty crown/section prepare initializes all five backing buffers;
+clean NONE avoids buffer probes and upload callbacks. Every buffer growth still
+rebuilds shared main/cascade/reflection/sky/color views. Pure/actual-GPU parity
+supports correctness, but default traversal performance for this new mask is
+UNMEASURED. Earlier51 mixed screen is historical, not a test of this mask.
+Future current-call timing and retirement-view patches are excluded from c072.
+Whole plan and Stage G remain OPEN; performanceAccepted/defaultReady false.
+General asset/DAG frontier, disk paging, automatic pressure policy, full GPU
+ownership, reclaim and all-pass acceptance remain outstanding.
+
+Installed pair SHA256: EXE0868845A5418FBD2A577D8FAB8408B797F97156CD96D7C4EBFE5BBFDC98D5931,
+DLL9FF78F25D767AAF4BD29BC0DD37AE488114A7E92820C2C9D45A37FF8ECBBF3FF.
+
+Actual checkpoint SHA256 manifest:
+
+| Artifact | SHA256 |
+| --- | --- |
+| build/build-clod-paged-cull-domains-20260927.log | 98850d9f668d111e4faf998786af3d3247b5eaeed53146c6a273fdbb5e6ebf09 |
+| build/build-clod-paged-cull-domains-repaired-20260927.log | 003683470c96cc13cdd928cdfd83da77bb98166ca7cdae1d315e2b626cc42aef |
+| build/test-cull-table-domains-20260927.log | 6bfb3b72394d9782f4c0660491538fb0f461078fb0eb625eaca0d12a3d625a44 |
+| build/test-table-upload-domains-20260927.log | 24094888fc0b496088f5d1edf324db9a1f0c312fb008da8ad8a39e55cbe58b6c |
+| build/test-clod-paged-policy-20260927.log | ce06ded5bbdfef20e32c3e0c9db8f5030fc9d133d6e40925d063a527c1b24503 |
+| build/stream-residency/clod-paged-eviction-cull-domains-20260927-20260927-131155/result.json | f81ada51b9191263b3651a93a4e64a839bd6850b766c50d4ca443947767a9135 |
+| build/stream-residency/clod-paged-eviction-cull-domains-20260927-20260927-131155/provenance.json | bc9dc0157921c49ce714483a9f2b8bd2104549698a0efd28d183a99f324a77a9 |
+| build/stream-residency/clod-paged-eviction-cull-domains-20260927-20260927-131155/engine.log | c1bcdabecda8cb1de8305c030555e89d5b3777c5d0c92ce5facacbd260745f7b |
+| build/stream-residency/clod-paged-eviction-cull-domains-20260927-20260927-131155/harness.jsonl | c7d3a50a1cda4e505e6c25dd10478e9932220bdce333963f38a9a3cf21d11dae |
+| build/stream-residency/authored-paged-cull-domains-20260927-20260927-131320/result.json | 0e70526c406388cc2e7e2704c4609650f5a462f9d3e3900d4b4f1bda972910db |
+| build/stream-residency/authored-paged-cull-domains-20260927-20260927-131320/provenance.json | 2029083efdf1555a28f860984e195df94b97d59b789cf3302d6e3e2762a6d853 |
+| build/stream-residency/authored-paged-cull-domains-20260927-20260927-131320/engine.log | a89cbda7dd20dcc2ed1cce2b7260f09b87bacb783c11a92c2b09fc0e4c15dea8 |
+| build/stream-residency/authored-paged-cull-domains-20260927-20260927-131320/harness.jsonl | 3248961fd3f853154638376ec66b5a7e8a2687d59bb7811af3d5aaa59e4e18db |
+| build/stream-residency/resident-clod-cull-domains-20260927-20260927-131335/result.json | e4ff0d27d2a31fd1e048c5c558db4ad3945550d49d3da58f56dba1bceb68b380 |
+| build/stream-residency/resident-clod-cull-domains-20260927-20260927-131335/provenance.json | 66b5518399bea4b18ed8f4adeb427d495f35319609310b06873b98ac50bfd432 |
+| build/stream-residency/resident-clod-cull-domains-20260927-20260927-131335/engine.log | 6ba2b43d2c2778c264297e8ee5da463337d818c842b41cf4e77918550372e295 |
+| build/stream-residency/resident-clod-cull-domains-20260927-20260927-131335/harness.jsonl | cc6e310aa21526d5b9f1b1106209ddf5c759ea49d5ac5b0e0c2234eb5c5a4d04 |
+| build/stream-residency/combined-pages-disabled-20260927-20260927-131349/result.json | f7004c917436aeef2d6b287a958206f3b0fa9892c4fdac1da18750b6e0010882 |
+| build/stream-residency/combined-pages-disabled-20260927-20260927-131349/provenance.json | 3bfca9e27d8aaeaec7a9c32a05ce6cce501bb4e4ca8a3f97cb1b73a5d79ce666 |
+| build/stream-residency/combined-pages-disabled-20260927-20260927-131349/engine.log | 6435f12888e2e902e174b1d12eee6b0d65fdbfe762cd0f30c7a9f0e4819bb0c5 |
+| build/stream-residency/combined-pages-disabled-20260927-20260927-131349/harness.jsonl | 0bd3055df8ce15bb0b5c546408dad951d0945741adfdef238f4247398ad8dba7 |
