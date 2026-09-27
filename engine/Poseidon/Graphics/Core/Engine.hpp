@@ -19,6 +19,7 @@
 #include <Poseidon/Graphics/IGraphicsEngine.hpp>
 
 #include <Poseidon/Foundation/Containers/Array.hpp>
+#include <array>
 #include <memory>
 #include <string>
 #include <vector>
