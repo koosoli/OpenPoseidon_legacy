@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include "lzo1x_reference.hpp"
 
 using Poseidon::Foundation::Lzo1x;
 
@@ -101,4 +102,96 @@ TEST_CASE("LZO1X: reports the boundary after an end marker", "[foundation][lzo][
     size_t consumed = 0;
     REQUIRE(Lzo1x::Decompress(stream.data(), stream.size(), out.data(), out.size(), &consumed) == 4);
     REQUIRE(consumed == 8);
+}
+
+namespace
+{
+void differential(const std::vector<uint8_t>& input, size_t prefix, size_t capacity, size_t misalign)
+{
+    std::vector<uint8_t> source(input.size() + 3, 0xC3);
+    for (size_t i = 0; i < input.size(); ++i) source[i + 1] = input[i];
+    const size_t guard = 16 + misalign;
+    std::vector<uint8_t> actual(capacity + guard + 16, 0xA5), expected = actual;
+    size_t gotConsumed = SIZE_MAX, expectedConsumed = SIZE_MAX;
+    const size_t got = Lzo1x::Decompress(source.data() + 1, prefix,
+                                        actual.data() + guard, capacity, &gotConsumed);
+    const size_t want = Lzo1xTestReference::FrozenLzo1x::Decompress(source.data() + 1, prefix,
+                                        expected.data() + guard, capacity, &expectedConsumed);
+    REQUIRE(got == want);
+    REQUIRE(gotConsumed == expectedConsumed);
+    REQUIRE(actual == expected); // Includes partial failure writes and both canaries.
+    for (size_t i = 0; i < guard; ++i) REQUIRE(actual[i] == 0xA5);
+    for (size_t i = guard + capacity; i < actual.size(); ++i) REQUIRE(actual[i] == 0xA5);
+}
+std::vector<uint8_t> matchStream(unsigned distance, unsigned length, unsigned literalCount = 16)
+{
+    std::vector<uint8_t> stream{static_cast<uint8_t>(17 + literalCount)};
+    for (unsigned i = 0; i < literalCount; ++i) stream.push_back(static_cast<uint8_t>('A' + i % 23));
+    unsigned encodedLength = length - 2;
+    if (encodedLength <= 31) stream.push_back(static_cast<uint8_t>(32 + encodedLength));
+    else {
+        stream.push_back(32);
+        encodedLength -= 31;
+        while (encodedLength > 255) { stream.push_back(0); encodedLength -= 255; }
+        stream.push_back(static_cast<uint8_t>(encodedLength));
+    }
+    const unsigned encodedDistance = (distance - 1) << 2;
+    stream.push_back(static_cast<uint8_t>(encodedDistance));
+    stream.push_back(static_cast<uint8_t>(encodedDistance >> 8));
+    stream.insert(stream.end(), kEnd.begin(), kEnd.end());
+    return stream;
+}
+}
+
+TEST_CASE("LZO fast matches preserve disjoint boundaries and forward overlapping recurrence", "[foundation][lzo-fastpath]")
+{
+    for (const unsigned distance : {1u, 2u, 3u, 4u, 8u, 16u}) {
+        for (const unsigned length : {3u, 4u, 8u, 16u, 33u, 305u, 8192u}) {
+            const auto stream = matchStream(distance, length);
+            std::vector<uint8_t> output(16 + length, 0);
+            size_t consumed = 0;
+            REQUIRE(Lzo1x::Decompress(stream.data(), stream.size(), output.data(), output.size(), &consumed) == output.size());
+            REQUIRE(consumed == stream.size());
+            for (size_t i = 16; i < output.size(); ++i) REQUIRE(output[i] == output[i - distance]);
+            differential(stream, stream.size(), output.size(), 1);
+        }
+    }
+}
+
+TEST_CASE("LZO fast matches preserve every truncated prefix and bounded partial failure output", "[foundation][lzo-fastpath]")
+{
+    for (const auto& stream : {matchStream(1, 305), matchStream(2, 33), matchStream(16, 16), matchStream(16, 15)}) {
+        for (size_t prefix = 0; prefix <= stream.size(); ++prefix)
+            for (size_t capacity : {size_t(0), size_t(1), size_t(15), size_t(16), size_t(17), size_t(31), size_t(32), size_t(49), size_t(320), size_t(321), size_t(322)})
+                differential(stream, prefix, capacity, prefix & 1);
+    }
+}
+
+TEST_CASE("LZO fast matches agree with frozen decoder on fixed seed malformed inputs", "[foundation][lzo-fastpath]")
+{
+    uint32_t seed = 0x63A17F29u;
+    const auto next = [&]() { seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5; return seed; };
+    for (unsigned sample = 0; sample < 192; ++sample) {
+        std::vector<uint8_t> stream(1 + next() % 64);
+        for (auto& byte : stream) byte = static_cast<uint8_t>(next());
+        if (sample % 3 == 0) { stream[0] = 21; if (stream.size() < 5) stream.resize(5, 'Q'); }
+        for (const size_t capacity : {size_t(0), size_t(4), size_t(17), size_t(96)})
+            differential(stream, stream.size(), capacity, sample & 1);
+    }
+}
+
+TEST_CASE("LZO fast matches leave literal source alias semantics unchanged", "[foundation][lzo-fastpath]")
+{
+    const auto stream = matchStream(2, 33);
+    for (const size_t offset : {size_t(0), size_t(1), size_t(4), size_t(16)}) {
+        std::vector<uint8_t> actual(128, 0xA5);
+        for (size_t i = 0; i < stream.size(); ++i) actual[16 + i] = stream[i];
+        auto expected = actual;
+        size_t aConsumed = 0, bConsumed = 0;
+        const auto a = Lzo1x::Decompress(actual.data() + 16, stream.size(), actual.data() + 16 + offset, 64, &aConsumed);
+        const auto b = Lzo1xTestReference::FrozenLzo1x::Decompress(expected.data() + 16, stream.size(), expected.data() + 16 + offset, 64, &bConsumed);
+        REQUIRE(a == b);
+        REQUIRE(aConsumed == bConsumed);
+        REQUIRE(actual == expected);
+    }
 }
