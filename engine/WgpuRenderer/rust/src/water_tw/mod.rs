@@ -329,7 +329,9 @@ pub struct Tidewater {
     coast: Vec<[f32; 2]>,
     // W3d breakers
     brk: breakers::BreakersGpu,
-    brk_regions: [Option<[f32; 2]>; shore_sim::K],
+    // stations per region slot, with what they were traced from (centre, terrain generation,
+    // sea level in 0.1 m steps): a slot is re-traced only when that changes
+    brk_slots: [Option<(([f32; 2], u64, i32), Vec<breakers::Station>)>; shore_sim::K],
 }
 
 impl Tidewater {
@@ -608,7 +610,7 @@ impl Tidewater {
             sim,
             coast: Vec::new(),
             brk,
-            brk_regions: [None; shore_sim::K],
+            brk_slots: [const { None }; shore_sim::K],
         };
         me.rebuild_bind(device);
         me
@@ -784,6 +786,7 @@ impl Tidewater {
         } else {
             self.sim.regions = [None; shore_sim::K];
         }
+        self.brk.lips_on = p.tidewater_shore[2][3] > 0.0;
         self.update_stations(queue, p.sea_level);
         let mut inputs = FrameInputs {
             detail_offset: self.detail_offset,
@@ -856,37 +859,50 @@ impl Tidewater {
         self.brk.draw(pass, camera, offset, &self.bind);
     }
 
-    /// Shoreline stations for the breakers, re-traced when the simulated regions move (W3d).
+    /// Shoreline stations for the breakers, traced per simulated region when the region, the
+    /// terrain or the sea level changes (W3d); the others are kept.
     fn update_stations(&mut self, queue: &wgpu::Queue, sea_level: f32) {
-        let now = self.sim.regions.map(|r| r.map(|r| r.centre));
-        if now == self.brk_regions {
-            return;
-        }
-        self.brk_regions = now;
         let Some((heights, tp, generation)) = &self.terrain else {
-            self.brk.set_stations(queue, &[]);
+            if self.brk.ns != 0 {
+                self.brk.set_stations(queue, &[]);
+            }
             return;
         };
-        let inp = shore_field::ShoreFieldInput {
-            heights: heights.clone(),
-            hm_width: tp.hm_width,
-            hm_height: tp.hm_height,
-            origin: [tp.world_origin.x, tp.world_origin.y],
-            grid: tp.terrain_grid,
-            sea_level,
-            swell_dir: [1.0, 0.0],
-            terrain_gen: *generation,
-        };
-        let h = |x: f32, z: f32| shore_field::height_at(&inp, x, z);
-        let mut stations = Vec::new();
-        let mut run = 0u32;
-        for r in self.sim.regions.iter().flatten() {
-            let st = breakers::trace_stations(&h, r.min(), shore_sim::SIZE, sea_level, run);
-            run = st.iter().map(|s| s.run + 1).max().unwrap_or(run);
-            stations.extend(st);
+        if tp.hm_width < 2 || tp.hm_height < 2 || tp.terrain_grid <= 0.0 {
+            return;
         }
-        self.brk.set_stations(queue, &stations);
+        let sea_q = (sea_level / 0.1).round() as i32;
+        let mut changed = false;
+        for (i, r) in self.sim.regions.iter().enumerate() {
+            let key = r.map(|r| (r.centre, *generation, sea_q));
+            let have = self.brk_slots[i].as_ref().map(|s| s.0);
+            if key == have {
+                continue;
+            }
+            changed = true;
+            self.brk_slots[i] = key.map(|k| {
+                let inp = shore_field::ShoreFieldInput {
+                    heights: heights.clone(),
+                    hm_width: tp.hm_width,
+                    hm_height: tp.hm_height,
+                    origin: [tp.world_origin.x, tp.world_origin.y],
+                    grid: tp.terrain_grid,
+                    sea_level,
+                    swell_dir: [1.0, 0.0],
+                    terrain_gen: *generation,
+                };
+                let h = |x: f32, z: f32| shore_field::height_at(&inp, x, z);
+                let min = [k.0[0] - shore_sim::SIZE * 0.5, k.0[1] - shore_sim::SIZE * 0.5];
+                // runs are numbered per slot (512 apart), so no lip joins two regions
+                (k, breakers::trace_stations(&h, min, shore_sim::SIZE, sea_level, i as u32 * 512))
+            });
+        }
+        if changed {
+            let all: Vec<breakers::Station> = self.brk_slots.iter().flatten().flat_map(|s| s.1.iter().copied()).collect();
+            self.brk.set_stations(queue, &all);
+        }
     }
+
 
     /// Triangles submitted by the last draw (for the §7 harness).
     #[allow(dead_code)]

@@ -29,9 +29,7 @@
 pub const SPACING: f32 = 0.6;
 /// Profile vertices across the lip: 2 on the back of the crest + 18 along the curtain.
 pub const NV: u32 = 20;
-/// Transect: K steps of STEP metres seaward from the shoreline.
-pub const TRANSECT_STEPS: u32 = 64;
-pub const TRANSECT_STEP: f32 = 2.0;
+// (the transect, 64 steps of 2 m seaward, is in tw_breakers_kernel.wgsl)
 /// Shoreline runs shorter than this are not given breakers (rocks, piers, small islets).
 pub const MIN_RUN: f32 = 30.0;
 /// Station budget per shore-simulation region (~1.2 km of shoreline).
@@ -74,7 +72,7 @@ fn contour(h: &dyn Fn(f32, f32) -> f32, min: [f32; 2], size: f32, level: f32) ->
     };
     // adjacency: every crossing edge is shared by at most two cells, each linking it to one other
     let mut link: std::collections::HashMap<usize, Vec<usize>> = std::collections::HashMap::new();
-    let mut add = |a: usize, b: usize, link: &mut std::collections::HashMap<usize, Vec<usize>>| {
+    let add = |a: usize, b: usize, link: &mut std::collections::HashMap<usize, Vec<usize>>| {
         link.entry(a).or_default().push(b);
         link.entry(b).or_default().push(a);
     };
@@ -160,7 +158,7 @@ pub fn trace_stations(h: &dyn Fn(f32, f32) -> f32, min: [f32; 2], size: f32, sea
             }
         }
         // resample by arc length
-        let mut stations = Vec::new();
+        let mut stations: Vec<Station> = Vec::new();
         let mut acc = 0.0f32;
         let mut next = 0.0f32;
         for k in 1..sm.len() {
@@ -173,16 +171,23 @@ pub fn trace_stations(h: &dyn Fn(f32, f32) -> f32, min: [f32; 2], size: f32, sea
             while next <= acc + seg {
                 let t = (next - acc) / seg;
                 let (x, z) = (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t);
-                // normal toward the sea: the side where the terrain is lower
-                let (mut nx, mut nz) = (-tz, tx);
-                if h(x + nx * 2.0, z + nz * 2.0) > h(x - nx * 2.0, z - nz * 2.0) {
-                    nx = -nx;
-                    nz = -nz;
-                }
-                stations.push(Station { x, z, nx, nz, run: first_run + ri as u32 });
+                // normal toward the sea: decided once for the whole run below
+                stations.push(Station { x, z, nx: -tz, nz: tx, run: first_run + ri as u32 });
                 next += SPACING;
             }
             acc += seg;
+        }
+        // the side toward the sea (the lower terrain), by a vote over the run: one station on
+        // uneven ground must not flip its transect inland
+        let vote: i32 = stations
+            .iter()
+            .map(|s| if h(s.x + s.nx * 2.0, s.z + s.nz * 2.0) > h(s.x - s.nx * 2.0, s.z - s.nz * 2.0) { -1 } else { 1 })
+            .sum();
+        if vote < 0 {
+            for s in &mut stations {
+                s.nx = -s.nx;
+                s.nz = -s.nz;
+            }
         }
         if out.len() + stations.len() > MAX_STATIONS_PER_REGION {
             continue;
@@ -245,6 +250,8 @@ pub struct BreakersGpu {
     lip_pipeline: wgpu::RenderPipeline,
     /// stations uploaded (0: no lips)
     pub ns: u32,
+    /// the lips are drawn (lip opacity > 0)
+    pub lips_on: bool,
 }
 
 impl BreakersGpu {
@@ -389,7 +396,7 @@ impl BreakersGpu {
             multiview_mask: None,
             cache: None,
         });
-        Self { stations, crest, kernel_layout, kernel, kernel_bind: None, lip_vbuf, lip_ibuf, lip_pipeline, ns: 0 }
+        Self { stations, crest, kernel_layout, kernel, kernel_bind: None, lip_vbuf, lip_ibuf, lip_pipeline, ns: 0, lips_on: true }
     }
 
     pub fn crest_buffer(&self) -> &wgpu::Buffer {
@@ -439,7 +446,7 @@ impl BreakersGpu {
     /// The crest finder (Breakers.update).
     pub fn dispatch(&self, encoder: &mut wgpu::CommandEncoder) {
         let Some(bind) = &self.kernel_bind else { return };
-        if self.ns < 2 {
+        if self.ns < 2 || !self.lips_on {
             return;
         }
         let mut cp = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("tw_brk_crests"), timestamp_writes: None });
@@ -450,7 +457,7 @@ impl BreakersGpu {
 
     /// The lips, over the water (same pass, after the surface).
     pub fn draw(&self, pass: &mut wgpu::RenderPass<'_>, camera: &wgpu::BindGroup, offset: u32, render_bind: &wgpu::BindGroup) {
-        if self.ns < 2 {
+        if self.ns < 2 || !self.lips_on {
             return;
         }
         pass.set_pipeline(&self.lip_pipeline);
