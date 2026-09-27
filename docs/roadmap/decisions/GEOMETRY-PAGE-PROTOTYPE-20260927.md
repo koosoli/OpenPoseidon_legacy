@@ -1,5 +1,11 @@
 # Bounded offline geometry-page prototype
 
+The pending resident-decoder integration uses builder algorithm2: pages roll over
+at256 clusters even when byte capacity remains. Format1 control encoding remains
+unchanged, while the cache identity rejects algorithm1 packages. New rollover and
+resident-decoding tests are source-only pending the root's next build/check; the
+earlier passing checkpoint below does not validate this later change.
+
 The owner explicitly requested implementation of a Nanite-like prototype while
 normal streaming work continues. This is the first independent CPU foundation,
 not Nanite parity, runtime paging, a simplification hierarchy or acceptance.

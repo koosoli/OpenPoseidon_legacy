@@ -173,3 +173,15 @@ TEST_CASE("Geometry cluster vertex cap splits without changing original triangle
     REQUIRE(Build(pilot.Coarse(),pilot.Fine(),source,true,p,limits)==Status::Built);
     CheckPagePayload(p,pilot.Fine(),p.coarseClusters,p.clusters.size());
 }
+
+TEST_CASE("Geometry pages roll over at256 clusters even below byte capacity", "[geometry-page-prototype]")
+{
+    Pilot pilot; std::vector<uint32_t> indices(257*3,0),materials(257,7);
+    auto fine=pilot.Fine(); fine.indices=indices; fine.triangleMaterials=materials;
+    Limits limits; limits.clusterTriangles=1; Package p;
+    REQUIRE(Build(pilot.Coarse(),fine,Source(),true,p,limits)==Status::Built);
+    REQUIRE(p.Identity().algorithmVersion==2);
+    REQUIRE(p.coarsePages==1); REQUIRE(p.pages.size()==3);
+    REQUIRE(Read(p.pages[1].bytes,8)==256); REQUIRE(Read(p.pages[2].bytes,8)==1);
+    CheckPagePayload(p,fine,p.coarseClusters,p.clusters.size());
+}

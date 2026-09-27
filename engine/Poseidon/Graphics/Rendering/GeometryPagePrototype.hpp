@@ -54,7 +54,7 @@ struct CacheIdentity
 {
     SourceIdentity source;
     PackingDescriptor packing;
-    uint32_t formatVersion = 1, algorithmVersion = 1;
+    uint32_t formatVersion = 1, algorithmVersion = 2;
     bool operator==(const CacheIdentity&) const = default;
 };
 struct Cluster
@@ -81,7 +81,8 @@ struct Package
     std::vector<Cluster> clusters;
     uint32_t coarsePages = 0, coarseClusters = 0;
     uint64_t payloadBytes = 0; // Actual serialized bytes, not allocator/RSS.
-    CacheIdentity Identity() const { return {source, packing, FormatVersion, 1}; }
+    // Algorithm2 bounds every page to256 clusters, matching resident decoding.
+    CacheIdentity Identity() const { return {source, packing, FormatVersion, 2}; }
 };
 struct ResidentPages
 {
@@ -166,7 +167,8 @@ inline Status Append(const MeshInput& m, const Limits& l, Package& out)
         const uint64_t bytes = 48ull + uint64_t(count) * (4ull + m.stride) + local.size() * 4ull;
         if (bytes + 16 > l.pageBytes || bytes > l.payloadBytes - std::min(out.payloadBytes, l.payloadBytes))
             return Status::Capacity;
-        if (out.pages.size() == firstPage || out.pages.back().bytes.size() + bytes > l.pageBytes)
+        if (out.pages.size() == firstPage || pageClusters == 256 ||
+            out.pages.back().bytes.size() + bytes > l.pageBytes)
         {
             if (out.pages.size() >= l.maxPages ||
                 bytes + 16 > l.payloadBytes - std::min(out.payloadBytes, l.payloadBytes)) return Status::Capacity;
