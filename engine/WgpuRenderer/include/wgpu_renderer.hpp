@@ -1639,7 +1639,11 @@ enum WgrGpuTimerRegion : uint32_t
      * one-per-view because the question this answers is "what does caching the
      * static ones buy", and that is a per-frame total. */
     WGR_GPU_TIMER_LOCAL_SHADOW = 77,
-    WGR_GPU_TIMER_REGION_COUNT = 78,
+    /* TW-WATER W2 - the Tidewater Native ocean's compute (outermost, encoder-level). In that mode
+     * the Current OP water rows read n/a; in Current OP mode these two do. */
+    WGR_GPU_TIMER_TW_OCEAN_SPECTRUM = 78,
+    WGR_GPU_TIMER_TW_OCEAN_FFT = 79,
+    WGR_GPU_TIMER_REGION_COUNT = 80,
 };
 
 /* PERF-005 - region nesting, and the ONLY correct way to total this array.
