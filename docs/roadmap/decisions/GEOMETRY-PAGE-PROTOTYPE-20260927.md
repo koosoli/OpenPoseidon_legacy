@@ -3,7 +3,8 @@
 The owner explicitly requested implementation of a Nanite-like prototype while
 normal streaming work continues. This is the first independent CPU foundation,
 not Nanite parity, runtime paging, a simplification hierarchy or acceptance.
-It changes no renderer, simulation, default, build registration or source asset.
+It changes no renderer, simulation, default or source asset. Focused tests are
+registered in the existing unit-test target.
 
 `GeometryPagePrototype.hpp` accepts borrowed original interleaved vertex records,
 positions, indexed triangles and one material ID per triangle for two authored
@@ -55,8 +56,12 @@ has no automatically certified silhouette/error correspondence with fine geometr
 Focused `[geometry-page-prototype]` tests reconstruct every triangle, material and
 vertex attribute byte; check bounds, seams, deterministic packing, degenerate
 indices, page/cluster/payload limits, invalid indices/stride/materials/nonfinite
-positions and transactional failure/frontier behavior. These are new unregistered,
-unbuilt tests until the root integrates and runs them. No runtime evidence exists.
+positions and transactional failure/frontier behavior. The first integrated build
+failed because the test helper name collided with the engine's `Verify` macro;
+00220cd0 renames that helper. The repaired five-target build passed, and the
+combined geometry-page/lifetime/ledger suite passed 15,266 assertions in 35 cases
+without skips. This proves the CPU foundation contracts; no runtime page-rendering
+evidence exists.
 
 Next bounded integration: identify a genuinely static opaque authored coarse/fine
 pilot through the actual adapter, preserve mounted source/options identity, add a

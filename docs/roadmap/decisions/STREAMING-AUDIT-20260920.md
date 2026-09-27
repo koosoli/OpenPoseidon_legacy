@@ -2837,3 +2837,53 @@ candidate and parallel offline geometry-page foundation are NEW/UNBUILT and
 excluded from221 runtime evidence. Cargo eligibility guard remains a future task.
 The authoritative streaming plan stays OPEN; diagnostics remain opt-in, pressure
 and paging experiments remain off, and waves remain parked.
+## Sept27 attributed-slot footprint and offline geometry-page foundation
+
+Sources1a266873/af98fc7a/00220cd0 are installed as00220cd0 at09:40.
+Initial build-geometry-pages-slot failed because the engine Verify macro collided
+with the prototype test helper. The002 CheckPagePayload rename repairs that
+compile failure; build-geometry-pages-slot-repair passes all five targets in27
+scheduled steps. Focused tests pass15266 assertions/35 cases, with no skips:
+five geometry-page, nine standalone and six shared-retained lifetime tests plus
+the ledger/record-closure suite. Both build outcomes and test hashes are retained.
+Installed SHA256 was independently verified:
+EXE33A972FA0B5E3B5758E4207994AB3490D319B977A9F30176C534D36E69D97010;
+DLL277E306E8ADB830F627B777CEAE88AA819D33B6B28462C65249AF34B33EF4EE2.
+
+The default per-CpuMeshSlot16-byte witness pointer is removed. An immutable
+ledger-ON factory creates an attributed derived slot and stable typed alias;
+atomic standalone suppression occupies existing Borrower padding, guarded by
+compile-time sizeof checks. OFF still executes a factory branch/destructor atomic
+load and retains the engine16-byte budget pointer: this is not zero instruction
+or zero total metadata cost. Default witness allocation and draw scans remain off.
+
+Actual attributed-slot-standalone094108 and attributed-slot-shared094122 both
+passedtrue/rootwrapper0, and both engine logs contain Shutdown complete.
+Standalone fullhandle4294967357/producer62 goes Present1→Absent0, ledger schedule
+false→true, knownpayload18360/witnessknown11224/refused0. Shared newest-first and
+producer-first use4294967357/12884901949, two→one→zero borrowers, final Absent0/
+scheduledtrue, knownpayload21744/witnessknown11040/refused0. These are private
+copied record-lifetime cuts, not live-world pixels, full ownership, queue ACK,
+physical GPU memory release or reclaim proof.
+
+Actual default DayZ094241 passes clean0/drop0:818frames,
+mean43.51209535452324/median24.35/p95134.652/p99367.314/max1155.44ms.
+Returned19923/required0, geometry714215352/cap1275068416, textures2760408564,
+private9650552832/working-set5032669184. Drawinit avg17.05/p95101.052/max1028.509;
+landobjects6.46/10.563/231.636ms. Mean/median/p99 improve over prior2c091613,
+but p95/max worsen; against7f084558 mean/median/p95/max also worsen. Ordered
+cache/material/async differences prevent causal performance or no-regression
+acceptance. Root judged the returned local street scene compatible only, not
+whole-route or whole-map fidelity. Default/performance acceptance remains false.
+
+Geometry-page foundationaf98fc7a/testrepair002 is now built and tested, superseding
+the prior UNBUILT classification only for the bounded offline CPU foundation.
+It preserves original vertex records/material runs, uses a package identity with
+packing/representation/layout options, and selects complete authored coarse or
+all fine pages transactionally. Positions-to-record correspondence and static
+eligibility remain caller proofs. There is no GPU pager/render integration,
+hierarchy, simplifier or geometric error certification. The next actual shape
+adapter/generator and confirmed-Absent historical ledger pruning are UNBUILT and
+excluded from this installed runtime. No cap increase or completeness weakening
+is accepted. Whole plan OPEN; diagnostics/pressure/paging defaults remain off,
+all ownership/reclaim/performance gates remain false, and waves remain parked.

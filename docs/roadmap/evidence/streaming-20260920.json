@@ -2,6 +2,660 @@
   "scope": "Local reproducibility manifest; failed runs are explicitly classified in STREAMING-AUDIT-20260920.md. Reforger is workload evidence, not ground-truth asset compatibility.",
   "runs": [
     {
+      "run": "attributed-slot-standalone-20260927-20260927-094108",
+      "artifactRoot": "build/stream-residency/attributed-slot-standalone-20260927-20260927-094108",
+      "runtimeSourceCommit": "00220cd0",
+      "rootWrapperExit": 0,
+      "cleanExitObserved": true,
+      "provenance": {
+        "shapeCacheLimit": null,
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "33A972FA0B5E3B5758E4207994AB3490D319B977A9F30176C534D36E69D97010",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "277E306E8ADB830F627B777CEAE88AA819D33B6B28462C65249AF34B33EF4EE2",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "disabled": false,
+        "installed": "codex/streaming-residency 00220cd0 2026-09-27_09:40 deploy-ps1",
+        "registeredWarming": false,
+        "scriptSha256": "946C58793E2B025FDBE81F2FC25489BAC6C2DDDF1253539590814CA5E28CF6F8",
+        "fixture": {
+          "absolute_model_path": true,
+          "actor": [
+            1190,
+            10,
+            1200
+          ],
+          "camera": [
+            100,
+            80,
+            100
+          ],
+          "camera_isolation_env": {
+            "WGR_OBJECT_STREAM_RADIUS_CELLS": "8",
+            "WGR_OBJECT_STREAM_WINDOW_GROWTH": "0"
+          },
+          "cell_metres": 50.0,
+          "elevation": 10.0,
+          "fire_segment": [
+            [
+              1190,
+              11.5,
+              1200
+            ],
+            [
+              1210,
+              11.5,
+              1200
+            ]
+          ],
+          "half_depth": 6.0,
+          "land_range": 32,
+          "large_wall": false,
+          "model_sha256": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+          "models": [
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\attributed-slot-standalone-20260927-20260927-094108\\fixture\\streaming_fixture\\wall.p3d"
+          ],
+          "notes": [
+            "Absolute-model mode uses original loose files without an archive mount; relative mode needs a separately configured loose-file root.",
+            "Camera at 100 is isolated from walls at 1200/1230 with growth disabled.",
+            "No ResolveObject: actor demand must admit geometry with transient leases.",
+            "Generic inventory/classification/admission must establish readiness.",
+            "Self-check is not engine parsing, collision or runtime verification."
+          ],
+          "placements": [
+            {
+              "id": 1001,
+              "model_index": 0,
+              "position": [
+                1200.0,
+                11.5,
+                1200.0
+              ]
+            },
+            {
+              "id": 1002,
+              "model_index": 0,
+              "position": [
+                1230.0,
+                11.5,
+                1200.0
+              ]
+            }
+          ],
+          "positive_warming": false,
+          "reference_all_models": false,
+          "registered_warming": false,
+          "schema": 1,
+          "terrain_range": 32,
+          "wall_world_bounds": [
+            [
+              1199.5,
+              10,
+              1194.0,
+              1200.5,
+              13,
+              1206.0
+            ],
+            [
+              1229.5,
+              10,
+              1194.0,
+              1230.5,
+              13,
+              1206.0
+            ]
+          ],
+          "world_sha256": "90fb31a59fb722dc49804f4b664c4ffd3313fb5c56f52ebb2df9fcd4236d0339"
+        },
+        "head": "00220cd0f6f439acad3574e850bf142bd91e62a2"
+      },
+      "sha256": {
+        "engine.log": "9de9d111fb7e25920cf1a8e667983e60eba91d0a37d75d4afdd69de654b5d773",
+        "harness.jsonl": "968745e5a8251e2b2b065f03e6e61f8752ec8fe6065b0c0219488f01638ea4a7",
+        "provenance.json": "5b9979de9e1b85e636e6aa982ddd04af6f878a6f4a8174bc3d265c7d32719271",
+        "result.json": "cf974614ea8b85d330ebf141018adcebdbf012f163af58b1261ae0a25bedc988"
+      },
+      "performanceAccepted": false,
+      "ownershipCoverageComplete": false,
+      "reclaimAccepted": false,
+      "defaultReady": false,
+      "passed": true,
+      "standalone": true,
+      "cases": [
+        {
+          "last": {
+            "status": "Ready",
+            "requestId": 4,
+            "observedRequestId": 4,
+            "producer": "62",
+            "rendererHandle": "4294967357",
+            "knownPayloadBytes": 18360,
+            "meshState": 2,
+            "cpuBorrowers": 0,
+            "producerOwned": false,
+            "sourceCopied": true,
+            "privateAllocation": true,
+            "ledgerEnabled": true,
+            "ledgerRecordObserved": true,
+            "ledgerScheduledRetired": true,
+            "ledgerCpuBorrowers": 0,
+            "ledgerProducerOwned": false,
+            "standalone": true,
+            "witnessKnownMetadataBytes": 11224,
+            "witnessPeakKnownMetadataBytes": 11224,
+            "witnessCapacityRefused": 0,
+            "scope": "Private copied mesh lifetime and generational record state; no world rendering, queue-completion or device-free proof",
+            "ok": true,
+            "priorCuts": []
+          },
+          "order": "standalone",
+          "created": {
+            "status": "Ready",
+            "requestId": 2,
+            "observedRequestId": 2,
+            "producer": "62",
+            "rendererHandle": "4294967357",
+            "knownPayloadBytes": 18360,
+            "meshState": 1,
+            "cpuBorrowers": 1,
+            "producerOwned": false,
+            "sourceCopied": true,
+            "privateAllocation": true,
+            "ledgerEnabled": true,
+            "ledgerRecordObserved": true,
+            "ledgerScheduledRetired": false,
+            "ledgerCpuBorrowers": 1,
+            "ledgerProducerOwned": false,
+            "standalone": true,
+            "witnessKnownMetadataBytes": 11224,
+            "witnessPeakKnownMetadataBytes": 11224,
+            "witnessCapacityRefused": 0,
+            "scope": "Private copied mesh lifetime and generational record state; no world rendering, queue-completion or device-free proof",
+            "ok": true,
+            "priorCuts": []
+          }
+        }
+      ],
+      "classification": "Private original-source copied lifetime probe; actual generational Present/Absent and ledger schedule cuts, not pixel drawing, queue completion, full ownership or physical device memory release."
+    },
+    {
+      "run": "attributed-slot-shared-20260927-20260927-094122",
+      "artifactRoot": "build/stream-residency/attributed-slot-shared-20260927-20260927-094122",
+      "runtimeSourceCommit": "00220cd0",
+      "rootWrapperExit": 0,
+      "cleanExitObserved": true,
+      "provenance": {
+        "registeredWarming": false,
+        "shapeCacheLimit": null,
+        "scriptSha256": "946C58793E2B025FDBE81F2FC25489BAC6C2DDDF1253539590814CA5E28CF6F8",
+        "installed": "codex/streaming-residency 00220cd0 2026-09-27_09:40 deploy-ps1",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "33A972FA0B5E3B5758E4207994AB3490D319B977A9F30176C534D36E69D97010",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "277E306E8ADB830F627B777CEAE88AA819D33B6B28462C65249AF34B33EF4EE2",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "fixture": {
+          "absolute_model_path": true,
+          "actor": [
+            1190,
+            10,
+            1200
+          ],
+          "camera": [
+            100,
+            80,
+            100
+          ],
+          "camera_isolation_env": {
+            "WGR_OBJECT_STREAM_RADIUS_CELLS": "8",
+            "WGR_OBJECT_STREAM_WINDOW_GROWTH": "0"
+          },
+          "cell_metres": 50.0,
+          "elevation": 10.0,
+          "fire_segment": [
+            [
+              1190,
+              11.5,
+              1200
+            ],
+            [
+              1210,
+              11.5,
+              1200
+            ]
+          ],
+          "half_depth": 6.0,
+          "land_range": 32,
+          "large_wall": false,
+          "model_sha256": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+          "models": [
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\attributed-slot-shared-20260927-20260927-094122\\fixture\\streaming_fixture\\wall.p3d"
+          ],
+          "notes": [
+            "Absolute-model mode uses original loose files without an archive mount; relative mode needs a separately configured loose-file root.",
+            "Camera at 100 is isolated from walls at 1200/1230 with growth disabled.",
+            "No ResolveObject: actor demand must admit geometry with transient leases.",
+            "Generic inventory/classification/admission must establish readiness.",
+            "Self-check is not engine parsing, collision or runtime verification."
+          ],
+          "placements": [
+            {
+              "id": 1001,
+              "model_index": 0,
+              "position": [
+                1200.0,
+                11.5,
+                1200.0
+              ]
+            },
+            {
+              "id": 1002,
+              "model_index": 0,
+              "position": [
+                1230.0,
+                11.5,
+                1200.0
+              ]
+            }
+          ],
+          "positive_warming": false,
+          "reference_all_models": false,
+          "registered_warming": false,
+          "schema": 1,
+          "terrain_range": 32,
+          "wall_world_bounds": [
+            [
+              1199.5,
+              10,
+              1194.0,
+              1200.5,
+              13,
+              1206.0
+            ],
+            [
+              1229.5,
+              10,
+              1194.0,
+              1230.5,
+              13,
+              1206.0
+            ]
+          ],
+          "world_sha256": "6081cb2a9808dbc6be482504bf3d04dc113f3b7a6102aa98e3a441037b6679ac"
+        },
+        "disabled": false,
+        "head": "00220cd0f6f439acad3574e850bf142bd91e62a2"
+      },
+      "sha256": {
+        "engine.log": "3b5f23f4d895d0040bc151f5661b2d8c4dbdb4a357b613ff26b0e1c8480ce2bc",
+        "harness.jsonl": "e5efc1751c5dfe2a025078eea71bac0733f90a736149502e5e90662a6c5a7c57",
+        "provenance.json": "30473c73cafd008af0d7f25f8aa7d14179fa9c4103a2615a66ab0b47983f10e0",
+        "result.json": "cf683054a0e6f55aa9f7c75ef92e3340765f1dea7020d6b076f8ef566dfa76a0"
+      },
+      "performanceAccepted": false,
+      "ownershipCoverageComplete": false,
+      "reclaimAccepted": false,
+      "defaultReady": false,
+      "passed": true,
+      "standalone": false,
+      "cases": [
+        {
+          "created": {
+            "status": "Ready",
+            "requestId": 2,
+            "observedRequestId": 2,
+            "producer": "62",
+            "rendererHandle": "4294967357",
+            "knownPayloadBytes": 21744,
+            "meshState": 1,
+            "cpuBorrowers": 2,
+            "producerOwned": true,
+            "sourceCopied": true,
+            "privateAllocation": true,
+            "ledgerEnabled": true,
+            "ledgerRecordObserved": true,
+            "ledgerScheduledRetired": false,
+            "ledgerCpuBorrowers": 2,
+            "ledgerProducerOwned": true,
+            "standalone": false,
+            "witnessKnownMetadataBytes": 11408,
+            "witnessPeakKnownMetadataBytes": 11408,
+            "witnessCapacityRefused": 0,
+            "scope": "Private copied mesh lifetime and generational record state; no world rendering, queue-completion or device-free proof",
+            "ok": true,
+            "priorCuts": []
+          },
+          "order": "newest-first",
+          "last": {
+            "status": "Ready",
+            "requestId": 8,
+            "observedRequestId": 8,
+            "producer": "62",
+            "rendererHandle": "4294967357",
+            "knownPayloadBytes": 21744,
+            "meshState": 2,
+            "cpuBorrowers": 0,
+            "producerOwned": false,
+            "sourceCopied": true,
+            "privateAllocation": true,
+            "ledgerEnabled": true,
+            "ledgerRecordObserved": true,
+            "ledgerScheduledRetired": true,
+            "ledgerCpuBorrowers": 0,
+            "ledgerProducerOwned": false,
+            "standalone": false,
+            "witnessKnownMetadataBytes": 11040,
+            "witnessPeakKnownMetadataBytes": 11408,
+            "witnessCapacityRefused": 0,
+            "scope": "Private copied mesh lifetime and generational record state; no world rendering, queue-completion or device-free proof",
+            "ok": true,
+            "priorCuts": []
+          },
+          "first": {
+            "status": "Ready",
+            "requestId": 4,
+            "observedRequestId": 4,
+            "producer": "62",
+            "rendererHandle": "4294967357",
+            "knownPayloadBytes": 21744,
+            "meshState": 1,
+            "cpuBorrowers": 1,
+            "producerOwned": true,
+            "sourceCopied": true,
+            "privateAllocation": true,
+            "ledgerEnabled": true,
+            "ledgerRecordObserved": true,
+            "ledgerScheduledRetired": false,
+            "ledgerCpuBorrowers": 1,
+            "ledgerProducerOwned": true,
+            "standalone": false,
+            "witnessKnownMetadataBytes": 11224,
+            "witnessPeakKnownMetadataBytes": 11408,
+            "witnessCapacityRefused": 0,
+            "scope": "Private copied mesh lifetime and generational record state; no world rendering, queue-completion or device-free proof",
+            "ok": true,
+            "priorCuts": []
+          },
+          "second": {
+            "status": "Ready",
+            "requestId": 6,
+            "observedRequestId": 6,
+            "producer": "62",
+            "rendererHandle": "4294967357",
+            "knownPayloadBytes": 21744,
+            "meshState": 1,
+            "cpuBorrowers": 1,
+            "producerOwned": false,
+            "sourceCopied": true,
+            "privateAllocation": true,
+            "ledgerEnabled": true,
+            "ledgerRecordObserved": true,
+            "ledgerScheduledRetired": false,
+            "ledgerCpuBorrowers": 1,
+            "ledgerProducerOwned": false,
+            "standalone": false,
+            "witnessKnownMetadataBytes": 11224,
+            "witnessPeakKnownMetadataBytes": 11408,
+            "witnessCapacityRefused": 0,
+            "scope": "Private copied mesh lifetime and generational record state; no world rendering, queue-completion or device-free proof",
+            "ok": true,
+            "priorCuts": []
+          }
+        },
+        {
+          "created": {
+            "status": "Ready",
+            "requestId": 2,
+            "observedRequestId": 2,
+            "producer": "65",
+            "rendererHandle": "12884901949",
+            "knownPayloadBytes": 21744,
+            "meshState": 1,
+            "cpuBorrowers": 2,
+            "producerOwned": true,
+            "sourceCopied": true,
+            "privateAllocation": true,
+            "ledgerEnabled": true,
+            "ledgerRecordObserved": true,
+            "ledgerScheduledRetired": false,
+            "ledgerCpuBorrowers": 2,
+            "ledgerProducerOwned": true,
+            "standalone": false,
+            "witnessKnownMetadataBytes": 11408,
+            "witnessPeakKnownMetadataBytes": 11408,
+            "witnessCapacityRefused": 0,
+            "scope": "Private copied mesh lifetime and generational record state; no world rendering, queue-completion or device-free proof",
+            "ok": true,
+            "priorCuts": []
+          },
+          "order": "producer-first",
+          "last": {
+            "status": "Ready",
+            "requestId": 8,
+            "observedRequestId": 8,
+            "producer": "65",
+            "rendererHandle": "12884901949",
+            "knownPayloadBytes": 21744,
+            "meshState": 2,
+            "cpuBorrowers": 0,
+            "producerOwned": false,
+            "sourceCopied": true,
+            "privateAllocation": true,
+            "ledgerEnabled": true,
+            "ledgerRecordObserved": true,
+            "ledgerScheduledRetired": true,
+            "ledgerCpuBorrowers": 0,
+            "ledgerProducerOwned": false,
+            "standalone": false,
+            "witnessKnownMetadataBytes": 11040,
+            "witnessPeakKnownMetadataBytes": 11408,
+            "witnessCapacityRefused": 0,
+            "scope": "Private copied mesh lifetime and generational record state; no world rendering, queue-completion or device-free proof",
+            "ok": true,
+            "priorCuts": []
+          },
+          "first": {
+            "status": "Ready",
+            "requestId": 4,
+            "observedRequestId": 4,
+            "producer": "65",
+            "rendererHandle": "12884901949",
+            "knownPayloadBytes": 21744,
+            "meshState": 1,
+            "cpuBorrowers": 2,
+            "producerOwned": false,
+            "sourceCopied": true,
+            "privateAllocation": true,
+            "ledgerEnabled": true,
+            "ledgerRecordObserved": true,
+            "ledgerScheduledRetired": false,
+            "ledgerCpuBorrowers": 2,
+            "ledgerProducerOwned": false,
+            "standalone": false,
+            "witnessKnownMetadataBytes": 11408,
+            "witnessPeakKnownMetadataBytes": 11408,
+            "witnessCapacityRefused": 0,
+            "scope": "Private copied mesh lifetime and generational record state; no world rendering, queue-completion or device-free proof",
+            "ok": true,
+            "priorCuts": []
+          },
+          "second": {
+            "status": "Ready",
+            "requestId": 6,
+            "observedRequestId": 6,
+            "producer": "65",
+            "rendererHandle": "12884901949",
+            "knownPayloadBytes": 21744,
+            "meshState": 1,
+            "cpuBorrowers": 1,
+            "producerOwned": false,
+            "sourceCopied": true,
+            "privateAllocation": true,
+            "ledgerEnabled": true,
+            "ledgerRecordObserved": true,
+            "ledgerScheduledRetired": false,
+            "ledgerCpuBorrowers": 1,
+            "ledgerProducerOwned": false,
+            "standalone": false,
+            "witnessKnownMetadataBytes": 11224,
+            "witnessPeakKnownMetadataBytes": 11408,
+            "witnessCapacityRefused": 0,
+            "scope": "Private copied mesh lifetime and generational record state; no world rendering, queue-completion or device-free proof",
+            "ok": true,
+            "priorCuts": []
+          }
+        }
+      ],
+      "classification": "Private original-source copied lifetime probe; actual generational Present/Absent and ledger schedule cuts, not pixel drawing, queue completion, full ownership or physical device memory release."
+    },
+    {
+      "run": "attributed-slot-default-20260927-disabled-20260927-094241",
+      "artifactRoot": "build/stream-residency/attributed-slot-default-20260927-disabled-20260927-094241",
+      "runtimeSourceCommit": "00220cd0",
+      "rootWrapperExit": 0,
+      "cleanExitObserved": true,
+      "provenance": {
+        "paaPreparationInflight": false,
+        "world": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\packages\\dayz-compat\\world\\chernarusplus\\chernarusplus.wrp",
+        "archiveSourceBindings": false,
+        "registrationQuota": false,
+        "installed": "codex/streaming-residency 00220cd0 2026-09-27_09:40 deploy-ps1",
+        "height": 720,
+        "measurementScope": "Bounded engine16384-frame route capture; screening only, no FPS acceptance, vanilla parity or full cold-cache proof",
+        "packedTextures": false,
+        "fpsCap": 60,
+        "routeScope": "Eight convergence400m out/return poses plus three stationary recovery holds; one process per invocation",
+        "routeX": [
+          5804.58,
+          5904.58,
+          6004.58,
+          6104.58,
+          6004.58,
+          5904.58,
+          5804.58,
+          5704.58,
+          5704.58,
+          5704.58,
+          5704.58
+        ],
+        "clearedEnvironmentNames": [],
+        "paaPreparationDiagnostics": false,
+        "warmTextureJobs": false,
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "33A972FA0B5E3B5758E4207994AB3490D319B977A9F30176C534D36E69D97010",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "277E306E8ADB830F627B777CEAE88AA819D33B6B28462C65249AF34B33EF4EE2",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "viewDistance": 2000,
+        "paaLzoReplay": false,
+        "pose": [
+          5704.58,
+          2523.37,
+          73.74,
+          260.9,
+          -3.8
+        ],
+        "head": "00220cd0f6f439acad3574e850bf142bd91e62a2",
+        "mode": "Disabled",
+        "processScope": "Owned PID private/RSS samples; sparse owner-pump values are observations, not percentiles",
+        "width": 1280,
+        "scriptSha256": "31B20F171E85AB206A8636C13FC113E0CBFF790BED07FE84FBB9712028723913",
+        "poseHoldSeconds": 3,
+        "msaaSamples": 4,
+        "environment": {
+          "WGR_OBJECT_STREAM_GPU_BUDGET": "0",
+          "WGR_SKY_VOLUME_INCREMENTAL": "1",
+          "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\attributed-slot-default-20260927-disabled-20260927-094241\\user",
+          "WGR_LOD_GOVERNOR_RANGE": "1",
+          "WGR_GEO_POOL_PRESSURE_GROWTH": "0",
+          "WGR_OBJECT_STREAM_TEST_BUDGET": "1",
+          "WGR_ADAPTIVE_TEXTURE_DETAIL": "0",
+          "WGR_OBJECT_STREAM_PBO_TEXTURES": "0",
+          "WGR_SIMULATION_RESIDENCY": "0",
+          "WGR_NATIVE_DDS_BC3_ONLY": "0",
+          "WGR_SIMULATION_POSITIVE_COLD": "0",
+          "WGR_TEXTURE_STREAM_STATS": "0",
+          "WGR_OBJECT_STREAM_PBO": "1",
+          "WGR_NATIVE_DDS_PREPARE": "0",
+          "WGR_OBJECT_STREAM_MAX_OBJECTS": "20000",
+          "POSEIDON_MODEL_DDC": "0",
+          "WGR_GEO_POOL_GROWTH": "2.0"
+        }
+      },
+      "sha256": {
+        "archive-source-binding-proof.json": "8fe3a4332e40730fde97bc5694eb6e10c793d43d85584ed81365ab122d387677",
+        "engine.log": "60ba1200f54ca785c858efcd9ef50594fdcf04d45bd43bfec365a3c28c89d979",
+        "harness.jsonl": "9a4d151520114a4e60fe20bfafb2de793d8524241f44f637102d0c27aa2d58ea",
+        "paa-attempt-proof.json": "e50cba4df84635fd2bd1414eff0531bc6c244b6e46d8ccfd29a217df4984dd33",
+        "paa-inflight-proof.json": "23cb7db6a60e45c3745ca102a89e4d660e6e13baa5cc22d254ba8aec1fd7bbef",
+        "provenance.json": "a2328f0780bdb38b3b20cac4a05fa8b35e04c7d87bdca1aaace3733c1b983e66",
+        "registration-quota-proof.json": "6d84a1f381dd19593dd159982179bc1d66857e2d55ecbb701106989b745a884e",
+        "result.json": "20dea206e0f6aa6f900cdb11e1928f2b4804a80f1df13a0aa80b02cf4c6fa30c",
+        "returned-settled.png": "4dc0e2998c39794cddc2398d9ca24f4341d650917709ec34c718029b9f9da3b3",
+        "route-frame-ms.json": "7bd13c038495f78e503f7d8bcdcad9a6234de31d8ce87df686ba00e8b3710f62",
+        "samples.jsonl": "0f856a7e2048a0921fd970dfe11f70fe1dd863aa6dd104944e8596c51981875c",
+        "warm-texture-job-proof.json": "83cd3505a08a92b4268853ffc68ff955531f4ac2bad541b0a2f25b671ca38603"
+      },
+      "performanceAccepted": false,
+      "ownershipCoverageComplete": false,
+      "reclaimAccepted": false,
+      "defaultReady": false,
+      "classification": "Default-off DayZ compatibility screening only; clean exit/drop0. Mixed ordered tails/material-work prevent causal performance/no-regression acceptance.",
+      "frameCount": 818,
+      "frameSummary": {
+        "meanMs": 43.51209535452324,
+        "medianMs": 24.35,
+        "p95Ms": 134.652,
+        "p99Ms": 367.314,
+        "maxMs": 1155.44
+      },
+      "returned": {
+        "resident": 19923,
+        "required": 0,
+        "geometryLiveBytes": 714215352,
+        "geometryCapacityBytes": 1275068416,
+        "objectTextureBytes": 2760408564,
+        "processPrivateBytes": 9650552832,
+        "processWorkingSetBytes": 5032669184
+      },
+      "terrainTimings": [
+        {
+          "phase": "drw:init",
+          "averageMs": 17.05,
+          "p95Ms": 101.052,
+          "maxMs": 1028.509
+        },
+        {
+          "phase": "land:obj",
+          "averageMs": 6.46,
+          "p95Ms": 10.563,
+          "maxMs": 231.636
+        }
+      ],
+      "dropped": 0
+    },
+    {
       "run": "mesh-record-closure-20260927-20260927-092859",
       "artifactRoot": "build/stream-residency/mesh-record-closure-20260927-20260927-092859",
       "classification": "FAILED strict complete owner cut at bounded historical ledger capacity; wrapper exit1, no result.json, no queue acknowledgement, no clean game exit. Historical diagnostic saturation is not proof of actual leak or unreclaimed GPU memory.",
@@ -16973,6 +17627,21 @@
     }
   ],
   "buildChecks": [
+    {
+      "artifactRoot": "build",
+      "sourceCommits": [
+        "1a266873",
+        "af98fc7a",
+        "00220cd0"
+      ],
+      "runtimeSourceCommit": "00220cd0",
+      "result": "InitialbuildFAILED engine Verify macro versus prototype test helper; CheckPagePayload test rename002 repairs. Repairbuild27stepsall5targetsPASS; focusedC++15266assert35casesPASS/noSKIP includes5geometrypages/9standalone/6shared tests. Default per-CpuMeshSlot16B witness removed by ON-only derived slot/typed alias, atomic suppression occupies existing Borrower padding with compile-time sizeof checks. Default factory branch/destructor atomic load remain, engine16B budget pointer remains; not zero instruction cost. No default witness allocations/draw scans. Geometry-page sourceaf98/testrepair002 is only offline bounded packing/authored frontier/cache identity, no GPU paging/hierarchy/error certificate. Actualmatching002 standalone/shared/default runs clean PASS; no causal performance/ownership/reclaim acceptance. Historical-Absent pruning and next shape adapter/generator remain UNBUILT/excluded.",
+      "sha256": {
+        "build-geometry-pages-slot-20260927.log": "56226a30ca7f67986aab259607d880e6c3ead2d02b17951debdb392f2c217e4f",
+        "build-geometry-pages-slot-repair-20260927.log": "01b96327a0b66bea164e8ef4e6610994330c3ccdedd7dd929be6ced876b9ecef",
+        "test-geometry-pages-slot-20260927.log": "45d1f67b5ae7a561a8a9f3bc33f5ce49e2c8984b0067ba7182b0fabad2e721fb"
+      }
+    },
     {
       "artifactRoot": "build",
       "runtimeSourceCommit": "221cb33e",
