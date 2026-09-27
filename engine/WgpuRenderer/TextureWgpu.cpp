@@ -1677,7 +1677,7 @@ bool TextureWgpu::CaptureColdPaaRead(render::ColdPaaRead& out) const
         const auto& mip = _mipmaps[i];
         if (mip.SrcFormat() != format || mip.DstFormat() != format || mip._start < 0) return false;
         candidate.levels[i] = {mip._w, mip._h,
-            render::mipmap::ComputeLayout(format, mip._w, mip._h).dataSize, static_cast<size_t>(mip._start)};
+            static_cast<size_t>(render::mipmap::ComputeLayout(format, mip._w, mip._h).dataSize), static_cast<size_t>(mip._start)};
     }
     if (!candidate.Valid()) return false;
     out = std::move(candidate); return true;
