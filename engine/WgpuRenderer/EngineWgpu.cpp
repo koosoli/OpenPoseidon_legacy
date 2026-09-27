@@ -1,5 +1,6 @@
 #include "MeshRecordClosure.hpp"
 #include <Poseidon/Graphics/Rendering/GeometryPageCameraDemand.hpp>
+#include <Poseidon/Graphics/Rendering/GeometryPageProjectedDemand.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageProjectedSurfaceBound.hpp>
 #include <Poseidon/Graphics/Rendering/Frame/PresentationSnapshot.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageControlledMlodAsset.hpp>
@@ -2175,6 +2176,10 @@ bool PageCameraTupleEnabled() {
         return tuple&&std::strcmp(tuple,"1")==0&&fixture&&std::strcmp(fixture,"1")==0&&surface&&std::strcmp(surface,"1")==0;
     }();return enabled;
 }
+bool PageProjectedDemandEnabled() {
+    static const bool enabled=[] {const auto* value=std::getenv("WGR_GEOMETRY_PAGE_PROJECTED_PREFETCH");
+        return value&&value[0]=='1'&&!value[1]&&PageCameraTupleEnabled();}();return enabled;
+}
 void PageInvalidateCameraTuple(Engine::GeometryPageFixtureReport& report) {
     report.cameraTupleValid=false;report.projectedSurfaceIdealBound=false;
     report.cameraTupleStatus=0;report.projectedSurfaceStatus=0;report.cameraTupleGeneration=0;
@@ -2206,6 +2211,9 @@ struct EngineWgpu::GeometryPageFixtureState
     uint64_t cameraLastGeneration=0; // Renderer-call provenance, no wallclock.
     uint64_t pageBaseKnownBytes=0;
     std::unique_ptr<GeometryPages::CameraPageDemand> cameraDemand; // Allocated only by explicit followCamera.
+    std::unique_ptr<GeometryPages::ProjectedPageDemand> projectedDemand; // Only explicit followProjected, mutually exclusive distance policy.
+    uint64_t projectedConsumedRequest=0,projectedNextObserve=0; // Completed cuts consumed once; <=20Hz explicit probe.
+    bool projectedEverActivated=false; // Single activation; Stop cannot reset lifetime attempt accounting.
     bool pagePrefetchPending=false; // Same complete MODEL/MESH cut, never selects the instance.
     uint32_t cameraCutRetries=0; // At most eight automatic re-observations of a failed returned-frame cut.
     size_t pageFineFirst=0;
@@ -4463,7 +4471,7 @@ void EngineWgpu::StopRenderThread()
 
 void EngineWgpu::NextFrame()
 {
-    if(_geometryPageFixture && _geometryPageFixture->cameraDemand)MaintainGeometryPageCameraDemand();
+    if(_geometryPageFixture && (_geometryPageFixture->cameraDemand||_geometryPageFixture->projectedDemand))MaintainGeometryPageCameraDemand();
     // RFG-048: fire the interior-sky probe from a HEADLESS run.
     //
     // The measurement lives behind a dev-panel button, which a screenshot harness
@@ -8627,8 +8635,64 @@ bool PageOriginalVertexEnclosed(const SVertex& vertex,float radius)
 }
 }
 
+void EngineWgpu::MaintainGeometryPageProjectedDemand()
+{
+    if(!Foundation::IsMainThread()||!_geometryPageFixture)return;
+    auto fixture=_geometryPageFixture;bool cancel=false,request=false,poll=false,observe=false;
+    const auto now=uint64_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
+    {
+        std::lock_guard lock(fixture->mutex);auto& report=fixture->report;
+        if(!fixture->projectedDemand||!report.active)return;
+        // A copied completed frame, never GScene or a later live camera getter.
+        const bool completed=report.observedRequestId==report.requestId&&report.requestId!=fixture->projectedConsumedRequest;
+        if(completed) {
+            fixture->projectedConsumedRequest=report.requestId;
+            fixture->projectedNextObserve=now>UINT64_MAX-50?UINT64_MAX:now+50;
+            const auto owner=fixture->originalAdmission;
+            GeometryPages::ProjectedDemandObservation observation;
+            observation.binding={report.pageEpoch,owner?owner->report.epoch:0,report.cameraTupleCertificateGeneration,
+                uint64_t(fixture->models[fixture->pageCoarseSlot])+1};
+            observation.cameraGeneration=report.cameraTupleGeneration;
+            observation.validatedIdealPairBound=owner&&owner->surface&&report.mainFrameReturned&&report.renderReturnStatus==0&&
+                report.status==GeometryReportStatus::Ready&&report.cameraTupleValid&&report.cameraTupleStatus==1&&
+                report.projectedSurfaceIdealBound&&report.projectedSurfaceStatus==1&&report.active&&report.coarseResident&&
+                !report.fineSelected&&!report.fallbackSelected&&report.producerModel==fixture->models[fixture->pageCoarseSlot]&&
+                report.cameraTupleModelBirth==observation.binding.coarseModelBirth&&
+                report.cameraTupleCertificateGeneration==owner->report.epoch&&report.sourceAdmissionEpoch==owner->report.epoch;
+            observation.pairDiscrepancyUpper=report.projectedSurfaceEuclideanUpper;
+            const bool departed=fixture->projectedDemand->Observe(now,observation);
+            report.projectedDemandGeneration=observation.cameraGeneration;
+            report.projectedDemandStatus=report.projectedSurfaceStatus;
+            report.projectedDemandHasBound=observation.validatedIdealPairBound;
+            report.projectedDemandUpper=observation.validatedIdealPairBound?observation.pairDiscrepancyUpper:0;
+            report.cameraHasObservation=observation.validatedIdealPairBound;
+            if(report.cameraObservations!=UINT64_MAX)++report.cameraObservations;
+            report.cameraDesiredFine=fixture->projectedDemand->DesiredFinePreparation();report.cameraDemandRevision=fixture->projectedDemand->Revision();
+            cancel=departed&&report.pageRequest&&!report.fineResident&&!fixture->pagePrefetchPending&&!fixture->pageFineFirst;
+            request=fixture->projectedDemand->CanAttempt(now,observation.cameraGeneration,report.fineResident,report.pageRequest!=0,
+                fixture->pagePrefetchPending||report.pageWorkState=="Uploading");
+            if(request){fixture->projectedDemand->Attempted(now);report.cameraAttempts=fixture->projectedDemand->Attempts();}
+        }
+        poll=!cancel&&report.cameraDesiredFine&&report.pageRequest&&!report.fineResident&&!fixture->pagePrefetchPending&&
+            report.cameraRequestedRevision==report.cameraDemandRevision;
+        observe=now>=fixture->projectedNextObserve&&!report.finePrepared&&report.observedRequestId==report.requestId&&
+            (!fixture->pagePrefetchPending||fixture->cameraCutRetries<8);
+        if(observe&&fixture->pagePrefetchPending)++fixture->cameraCutRetries;
+    }
+    // Existing nonblocking result path. It may stage complete rows, never select Fine.
+    if(cancel){ControlGeometryPageFixture(GeometryPageFixtureAction::CancelFine);std::lock_guard lock(fixture->mutex);if(fixture->report.cameraCancels!=UINT64_MAX)++fixture->report.cameraCancels;}
+    else if(request)ControlGeometryPageFixture(GeometryPageFixtureAction::RequestFinePrefetch);
+    else if(poll)ControlGeometryPageFixture(GeometryPageFixtureAction::PollFinePrefetch);
+    if(observe) {
+        std::lock_guard lock(fixture->mutex);
+        observe=fixture->report.active&&!fixture->report.finePrepared&&fixture->report.observedRequestId==fixture->report.requestId;
+    }
+    if(observe)ControlGeometryPageFixture(GeometryPageFixtureAction::Observe);
+}
+
 void EngineWgpu::MaintainGeometryPageCameraDemand()
 {
+    if(_geometryPageFixture&&_geometryPageFixture->projectedDemand){MaintainGeometryPageProjectedDemand();return;}
     if(!Foundation::IsMainThread()||!_geometryPageFixture)return;
     auto fixture=_geometryPageFixture;bool cancel=false,request=false,poll=false,observe=false;
     const auto now=uint64_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
@@ -9037,7 +9101,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
              action==GeometryPageFixtureAction::Coarse || action==GeometryPageFixtureAction::Fine)) {
             auto busy=report;busy.status=GeometryReportStatus::Busy;updatePageStats(busy);return busy;
         }
-        if(fixture->cameraDemand && action==GeometryPageFixtureAction::EvictFine){auto busy=report;busy.status=GeometryReportStatus::Busy;return busy;}
+        if((fixture->cameraDemand||fixture->projectedDemand) && action==GeometryPageFixtureAction::EvictFine){auto busy=report;busy.status=GeometryReportStatus::Busy;return busy;}
         if(action==GeometryPageFixtureAction::EvictFine) {
             // Require the latest successful actual coarse cut before scheduling
             // retirement. CPU selection alone cannot prove that fine stopped drawing.
@@ -9077,12 +9141,12 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
         const bool prefetchPoll=action==GeometryPageFixtureAction::PollFinePrefetch;
         const bool prefetchRequest=action==GeometryPageFixtureAction::RequestFinePrefetch;
         if(action==GeometryPageFixtureAction::FollowCamera) {
+            if(fixture->cameraDemand||fixture->projectedDemand||fixture->projectedEverActivated){auto busy=report;busy.status=GeometryReportStatus::Busy;return busy;}
             GeometryPages::CameraDemandSettings settings;
             if(camera){settings.nearDistance=camera->nearDistance;settings.farDistance=camera->farDistance;settings.dwellMs=camera->dwellMs;settings.retryMs=camera->retryMs;}
             if(!settings.Valid()||!report.active||!report.originalFilePilot||!report.coarseResident||report.fineResident||report.fineSelected||
                 report.producerModel!=fixture->models[fixture->pageCoarseSlot]||report.pageRequest||fixture->pageFineFirst||
                 report.status!=GeometryReportStatus::Ready)return failure;
-            if(fixture->cameraDemand){auto busy=report;busy.status=GeometryReportStatus::Busy;return busy;}
             const uint64_t bytes=sizeof(GeometryPages::CameraPageDemand);
             const uint64_t debt=_geometryPageWorker?_geometryPageWorker->Snapshot().reservedBytes:0;
             if(fixture->pageBaseKnownBytes>1024*1024-bytes||debt>1024*1024-bytes-fixture->pageBaseKnownBytes)return failure;
@@ -9092,22 +9156,47 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
             report.cameraDemandActive=true;report.cameraDesiredFine=false;report.cameraDemandRevision=1;report.cameraAttempts=0;
             return report;
         }
+        if(action==GeometryPageFixtureAction::FollowProjected) {
+            if(!PageProjectedDemandEnabled()){auto disabled=report;disabled.status=GeometryReportStatus::Unsupported;return disabled;}
+            if(fixture->cameraDemand||fixture->projectedDemand||fixture->projectedEverActivated||
+                report.cameraObservations||report.cameraRequests||report.cameraAttempts){auto busy=report;busy.status=GeometryReportStatus::Busy;return busy;}
+            GeometryPages::ProjectedDemandSettings settings;
+            if(camera){settings.enterUpper=camera->enterUpper;settings.leaveUpper=camera->leaveUpper;settings.dwellMs=camera->dwellMs;settings.retryMs=camera->retryMs;}
+            const auto owner=fixture->originalAdmission;
+            if(!settings.Valid()||!owner||!owner->surface||!report.active||!report.originalFilePilot||!report.coarseResident||
+                report.fineResident||report.fineSelected||report.fallbackSelected||report.pageRequest||fixture->pageFineFirst||
+                report.status!=GeometryReportStatus::Ready||!report.mainFrameReturned||report.renderReturnStatus!=0||
+                !report.surfaceSelectedVerified||!report.projectedSurfaceIdealBound||!report.cameraTupleValid||report.cameraTupleStatus!=1||
+                report.producerModel!=fixture->models[fixture->pageCoarseSlot]||report.cameraTupleModelBirth!=uint64_t(report.producerModel)+1||
+                report.cameraTupleCertificateGeneration!=owner->report.epoch)return failure;
+            const uint64_t bytes=sizeof(GeometryPages::ProjectedPageDemand);
+            const uint64_t debt=_geometryPageWorker?_geometryPageWorker->Snapshot().reservedBytes:0;
+            if(fixture->pageBaseKnownBytes>1024*1024-bytes||debt>1024*1024-bytes-fixture->pageBaseKnownBytes)return failure;
+            auto demand=std::make_unique<GeometryPages::ProjectedPageDemand>(GeometryPages::ProjectedDemandBinding{
+                report.pageEpoch,owner->report.epoch,owner->report.epoch,uint64_t(report.producerModel)+1},settings);
+            fixture->pageBaseKnownBytes+=bytes;report.knownPayloadBytes+=bytes;fixture->projectedDemand=std::move(demand);
+            fixture->projectedConsumedRequest=0;fixture->projectedNextObserve=0;fixture->projectedEverActivated=true;report.projectedDemandActive=true;report.projectedDemandHasBound=false;
+            report.projectedDemandGeneration=0;report.projectedDemandStatus=0;report.projectedDemandUpper=0;report.cameraDesiredFine=false;
+            report.cameraDemandRevision=1;report.cameraAttempts=0;return report;
+        }
         if(action==GeometryPageFixtureAction::StopCamera) {
             if(fixture->cameraDemand){fixture->pageBaseKnownBytes-=sizeof(GeometryPages::CameraPageDemand);report.knownPayloadBytes-=sizeof(GeometryPages::CameraPageDemand);}
             fixture->cameraDemand.reset();report.cameraDemandActive=false;report.cameraDesiredFine=false;
+            if(fixture->projectedDemand){fixture->pageBaseKnownBytes-=sizeof(GeometryPages::ProjectedPageDemand);report.knownPayloadBytes-=sizeof(GeometryPages::ProjectedPageDemand);}
+            fixture->projectedDemand.reset();report.projectedDemandActive=false;report.projectedDemandHasBound=false;report.projectedDemandUpper=0;
             if(report.pageRequest&&!report.fineResident&&!fixture->pagePrefetchPending&&_geometryPageWorker){
                 _geometryPageWorker->Cancel(report.pageEpoch);report.pageRequest=0;report.pageWorkState="Cancelled";if(report.cameraCancels!=UINT64_MAX)++report.cameraCancels;}
             return report;
         }
         if(prefetchRequest) {
-            if(!fixture->cameraDemand||!report.cameraDesiredFine)return failure;
+            if((!fixture->cameraDemand&&!fixture->projectedDemand)||!report.cameraDesiredFine)return failure;
             action=GeometryPageFixtureAction::RequestFine;
         }
         if(prefetchPoll) {
-            if(!fixture->cameraDemand||!report.cameraDesiredFine||report.cameraRequestedRevision!=report.cameraDemandRevision)return failure;
+            if((!fixture->cameraDemand&&!fixture->projectedDemand)||!report.cameraDesiredFine||report.cameraRequestedRevision!=report.cameraDemandRevision)return failure;
             action=GeometryPageFixtureAction::PollFine;
         }
-        if(fixture->cameraDemand && (action==GeometryPageFixtureAction::Fine||action==GeometryPageFixtureAction::Coarse||
+        if((fixture->cameraDemand||fixture->projectedDemand) && (action==GeometryPageFixtureAction::Fine||action==GeometryPageFixtureAction::Coarse||
             action==GeometryPageFixtureAction::Fallback||action==GeometryPageFixtureAction::EvictFine||
             (!prefetchRequest&&action==GeometryPageFixtureAction::RequestFine)||(!prefetchPoll&&action==GeometryPageFixtureAction::PollFine)||
             action==GeometryPageFixtureAction::RequestCoarse||action==GeometryPageFixtureAction::PollCoarse)){
@@ -9256,7 +9345,9 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
             for(uint32_t i=0;i<fixture->modelCount;++i) { ResourceOp op; op.kind=ResourceOp::ModelRetire; op.model=fixture->models[i]; _resourceOps.push_back(std::move(op)); }
             for(auto mesh:fixture->meshes) { ResourceOp op; op.kind=ResourceOp::MeshDestroy; op.mesh=mesh; _resourceOps.push_back(std::move(op)); }
             if(fixture->cameraDemand){fixture->pageBaseKnownBytes-=sizeof(GeometryPages::CameraPageDemand);report.knownPayloadBytes-=sizeof(GeometryPages::CameraPageDemand);}
-            fixture->cameraDemand.reset();report.cameraDemandActive=false;report.cameraDesiredFine=false;fixture->pagePrefetchPending=false;
+            fixture->cameraDemand.reset();report.cameraDemandActive=false;report.cameraDesiredFine=false;
+            if(fixture->projectedDemand){fixture->pageBaseKnownBytes-=sizeof(GeometryPages::ProjectedPageDemand);report.knownPayloadBytes-=sizeof(GeometryPages::ProjectedPageDemand);}
+            fixture->projectedDemand.reset();report.projectedDemandActive=false;report.projectedDemandHasBound=false;report.projectedDemandUpper=0;fixture->pagePrefetchPending=false;
             report.finePrepared=false;report.preparedProducerModel=UINT32_MAX;
             report.active=false; report.fineSelected=false; report.fineResident=false; report.coarseResident=false; report.fineEvictionPending=false; fixture->pagePendingFineModel=UINT32_MAX; report.fallbackSelected=false; report.producerModel=UINT32_MAX; _geometryPageFixtureActive=false;
         } else if(action==GeometryPageFixtureAction::Coarse||action==GeometryPageFixtureAction::Fine||action==GeometryPageFixtureAction::Fallback) {
@@ -9386,7 +9477,8 @@ void EngineWgpu::PublishGeometryPageFixtureObservation(const WgrFrame& frame, in
                     report.producerModel==fixture->models[fixture->pageFirstFineSlot]||report.producerModel==fixture->models[fixture->pageRefillSlot];
                 if(report.cameraTupleValid) {
                     if(!report.active||report.status!=GeometryReportStatus::Ready) {report.cameraTupleValid=false;report.cameraTupleStatus=11;}
-                    else if(!proof||!fixture->projectedSurfaceResult||!report.surfaceSelectedVerified||report.fallbackSelected||!selected||
+                    else if(!proof||!fixture->projectedSurfaceResult||(!report.surfaceSelectedVerified&&!(fixture->projectedDemand&&report.coarseResident&&
+                        report.producerModel==fixture->models[fixture->pageCoarseSlot]))||report.fallbackSelected||!selected||
                         fixture->placement.flags||fixture->placement.conform2.z!=0)report.cameraTupleStatus=10;
                     else {
                         using namespace GeometryPages::ProjectedSurface;

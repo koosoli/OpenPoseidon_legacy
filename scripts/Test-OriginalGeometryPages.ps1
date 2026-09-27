@@ -1,8 +1,9 @@
-param([ValidateSet('None','Missing','Corrupt')][string]$DiskFault='None',[switch]$CameraPrefetch,[switch]$CameraTuple,[switch]$CameraTupleScaleRefusal,[switch]$SurfaceCertificate,[ValidateSet('None','DigestMismatch','Malformed')][string]$SurfaceFault='None',[string]$Tools='',
+param([ValidateSet('None','Missing','Corrupt')][string]$DiskFault='None',[switch]$CameraPrefetch,[switch]$ProjectedPrefetch,[switch]$CameraTuple,[switch]$CameraTupleScaleRefusal,[switch]$SurfaceCertificate,[ValidateSet('None','DigestMismatch','Malformed')][string]$SurfaceFault='None',[string]$Tools='',
  [string]$Label='original-geometry-pages',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',[string]$Python='C:\Program Files\Python311\python.exe')
 $ErrorActionPreference='Stop'
 if($SurfaceFault -ne 'None'){$SurfaceCertificate=$true}
 if($CameraTupleScaleRefusal){$CameraTuple=$true}
+if($ProjectedPrefetch){$CameraTuple=$true;if($CameraPrefetch -or $CameraTupleScaleRefusal){throw 'ProjectedPrefetch requires native camera tuple and is exclusive with distance prefetch'}}
 if($CameraTuple){$SurfaceCertificate=$true;if($DiskFault -ne 'None' -or $SurfaceFault -ne 'None'){throw 'CameraTuple requires valid disk and surface artifacts'}}
 if($CameraPrefetch -and $DiskFault -ne 'None'){throw 'CameraPrefetch requires a valid disk artifact'}
 if($Label -notmatch '^[a-zA-Z0-9_-]{1,64}$'){throw 'Invalid bounded label'}
@@ -11,6 +12,7 @@ if(!$env:LOCK_OWNER){
  $argv=@((Join-Path $PSScriptRoot 'with-game-lock.sh'),$shell.Replace('\','/'),'-NoProfile','-File',$PSCommandPath,'-Label',$Label,'-GameDir',$GameDir,'-Python',$Python,'-DiskFault',$DiskFault)
  if($Tools){$argv+=@('-Tools',$Tools)}
  if($CameraPrefetch){$argv+='-CameraPrefetch'}
+ if($ProjectedPrefetch){$argv+='-ProjectedPrefetch'}
  if($CameraTuple){$argv+='-CameraTuple'}
  if($CameraTupleScaleRefusal){$argv+='-CameraTupleScaleRefusal'}
  if($SurfaceCertificate){$argv+='-SurfaceCertificate'}
@@ -141,6 +143,7 @@ $environment=@{
 $environment.WGR_GEOMETRY_PAGE_ORIGINAL_SOURCE='1';$environment.WGR_GEOMETRY_PAGE_FIXTURE='1'
 $environment.WGR_GEOMETRY_PAGE_SURFACE_CERTIFICATE=$(if($SurfaceCertificate){'1'}else{'0'})
 $environment.WGR_GEOMETRY_PAGE_CAMERA_TUPLE=$(if($CameraTuple){'1'}else{'0'})
+$environment.WGR_GEOMETRY_PAGE_PROJECTED_PREFETCH=$(if($ProjectedPrefetch){'1'}else{'0'})
 if($CameraTuple){$environment.WGR_HDR='1';$environment.WGR_RENDER_SCALE=$(if($CameraTupleScaleRefusal){'75'}else{'100'})}
 $old=@{};Get-ChildItem Env:|Where-Object {$_.Name -match '^(WGR_|POSEIDON_)'}|ForEach-Object {$old[$_.Name]=$_.Value}
 $p=$null;$client=$null;$normal=$false;$forced=$false;$result=$null;$failure=$null
@@ -153,7 +156,7 @@ try{
  $argv=@('--render=wgpu','--window','--dev','--width','1280','--height','720','--vd','2000','--harness',[string]$port,'--test-world-freefly','1184','1240','18','90','-8','--test-world',('"'+(Join-Path $fixture 'cold-paa.wrp')+'"'),'--addon-root',('"'+(Join-Path $fixture 'addons')+'"'),'--test-mission',('"'+$mission+'"'),'--log-file',('"'+$log+'"'))
  $argv+=@('--geometry-original-source',('"'+$OriginalSource+'"'),'--geometry-original-sha256',$suppliedHash,'--geometry-original-bytes',[string]$rawBytes,'--geometry-original-key',$originalKey)
  if($SurfaceCertificate){$argv+=@('--geometry-pages-surface-manifest',('"'+$surfaceManifest+'"'),$surfaceManifestHash,'--geometry-pages-surface-certificate',('"'+$surfaceDescriptor+'"'),$surfaceDescriptorHash)}
- @{head=(& git -C $root rev-parse HEAD);scriptSha256=(Get-FileHash $PSCommandPath).Hash;generatorSha256=(Get-FileHash $generator).Hash;installed=(Get-Content (Join-Path $GameDir 'DEPLOYED-FROM.txt'));hashes=$hashes;environment=$environment;argv=$argv;fixture=$producer;originalProof=$originalProducer;sourceGeneratorSha256=(Get-FileHash $originalGenerator).Hash;diskFault=$DiskFault;surfaceCertificate=[bool]$SurfaceCertificate;surfaceFault=$SurfaceFault;surfaceProof=$surfaceProof;cameraPrefetch=[bool]$CameraPrefetch;cameraTuple=[bool]$CameraTuple;cameraTupleScaleRefusal=[bool]$CameraTupleScaleRefusal;toolsSha256=$toolsHash;scope='Actual original-source private paging; copied record cuts, no retail/all-pass/pixel/FPS proof'}|ConvertTo-Json -Depth 12|Set-Content (Join-Path $out 'provenance.json')
+ @{head=(& git -C $root rev-parse HEAD);scriptSha256=(Get-FileHash $PSCommandPath).Hash;generatorSha256=(Get-FileHash $generator).Hash;installed=(Get-Content (Join-Path $GameDir 'DEPLOYED-FROM.txt'));hashes=$hashes;environment=$environment;argv=$argv;fixture=$producer;originalProof=$originalProducer;sourceGeneratorSha256=(Get-FileHash $originalGenerator).Hash;diskFault=$DiskFault;surfaceCertificate=[bool]$SurfaceCertificate;surfaceFault=$SurfaceFault;surfaceProof=$surfaceProof;cameraPrefetch=[bool]$CameraPrefetch;projectedPrefetch=[bool]$ProjectedPrefetch;cameraTuple=[bool]$CameraTuple;cameraTupleScaleRefusal=[bool]$CameraTupleScaleRefusal;toolsSha256=$toolsHash;scope='Actual original-source private paging; copied record cuts, no retail/all-pass/pixel/FPS proof'}|ConvertTo-Json -Depth 12|Set-Content (Join-Path $out 'provenance.json')
  $p=Start-Process -FilePath $exe -WorkingDirectory $GameDir -WindowStyle Hidden -PassThru -ArgumentList $argv
  $null=$p.Handle
  $client=[Net.Sockets.TcpClient]::new();$until=[DateTime]::UtcNow.AddSeconds(90)
@@ -461,7 +464,7 @@ try{
      $returnedFallback=PageCut (Observe $true $false)
      if(!$returnedFallback.fallbackSelected -or $returnedFallback.rendererModel -ne $fallback.rendererModel -or $returnedFallback.rendererInstance -ne $fallback.rendererInstance -or $returnedFallback.meshCount -ne $fallback.meshCount -or $returnedFallback.meshesPresent -ne 1 -or $returnedFallback.coarseResident -or $returnedFallback.fineResident){throw 'Fault changed actual fallback/instance/history'}
      Capture 'fault-retained-original-fallback.png'
-    }elseif($CameraPrefetch){
+    }elseif($CameraPrefetch -or $ProjectedPrefetch){
      BootstrapDiskCoarse;$coarse=PageCut (Observe $true $false)
      if($coarse.fallbackSelected -or $coarse.rendererModel -eq $fallback.rendererModel -or $coarse.rendererInstance -ne $fallback.rendererInstance -or $coarse.coarseTriangles -ne 64 -or $coarse.fineTriangles -ne 512){throw 'Camera mode coarse identity/count mismatch'}
      function CameraPose([string]$value){
@@ -474,6 +477,13 @@ try{
       foreach($field in @('cameraDemandRevision','cameraRequestedRevision','cameraObservations','cameraRequests','cameraCancels','cameraAttempts')){
        $n=[double]$cut.$field
        if([double]::IsNaN($n) -or [double]::IsInfinity($n) -or $n -lt 0 -or $n -gt 9007199254740991 -or [Math]::Floor($n) -ne $n){throw "Inexact camera counter $field"}
+      }
+      if($ProjectedPrefetch){
+       Require $cut @('projectedDemandActive','projectedDemandHasBound','projectedDemandGeneration','projectedDemandStatus','projectedDemandUpper')
+       foreach($field in @('projectedDemandActive','projectedDemandHasBound')){if($cut.$field -isnot [bool]){throw 'Untyped projected policy boolean'}}
+       foreach($field in @('projectedDemandGeneration','projectedDemandStatus')){$raw=$cut.$field;if($null -eq $raw -or $raw -is [string] -or $raw -is [bool]){throw 'Invalid projected numeric type'};$v=[double]$raw;if([double]::IsNaN($v) -or [double]::IsInfinity($v) -or $v -lt 0 -or $v -gt 9007199254740991 -or [Math]::Floor($v) -ne $v){throw 'Invalid projected policy identity/status'}}
+       $raw=$cut.projectedDemandUpper;if($null -eq $raw -or $raw -is [string] -or $raw -is [bool]){throw 'Invalid projected bound type'};$u=[double]$raw;if([double]::IsNaN($u) -or [double]::IsInfinity($u) -or $u -lt 0 -or (!$cut.projectedDemandHasBound -and $u -ne 0)){throw 'Invalid/refused projected policy value'}
+       if($cut.cameraDemandActive){throw 'Projected and distance demand overlap'}
       }
       $d=[double]$cut.cameraDistance
       if([double]::IsNaN($d) -or [double]::IsInfinity($d) -or $d -lt 0 -or $cut.cameraAttempts -gt 8 -or $cut.cameraRequests -gt $cut.cameraAttempts){throw 'Invalid camera policy bounds'}
@@ -492,16 +502,29 @@ try{
       }while([DateTime]::UtcNow -lt $until)
       throw "Automatic camera state timed out: $($cut|ConvertTo-Json -Compress)"
      }
-     CameraPose '1080 1240 18 90 -8'
-     $follow=Send @{cmd='geometry_page_fixture';action='followCamera';nearDistance=30;farDistance=50;dwellMs=200;retryMs=250}
-     $far=WaitCamera {param($c) $c.cameraDemandActive -and $c.cameraHasObservation -and $c.cameraDistance -gt 100 -and !$c.cameraDesiredFine -and $c.cameraObservations -ge 3}
+     if($ProjectedPrefetch){
+      CameraPose '-8800 1240 18 90 0';$projectedFar=TupleCut (PageCut (Observe $true $false));FixedCoarse $projectedFar
+      if(!$projectedFar.projectedSurfaceIdealBound -or $projectedFar.projectedSurfaceEuclideanUpper -gt 1){throw 'Far pose did not establish actual low ideal pair discrepancy'}
+      $follow=Send @{cmd='geometry_page_fixture';action='followProjected';enterUpper=2;leaveUpper=1;dwellMs=200;retryMs=250}
+      $far=WaitCamera {param($c) $c.projectedDemandActive -and $c.projectedDemandHasBound -and $c.projectedDemandUpper -le 1 -and !$c.cameraDesiredFine -and $c.cameraObservations -ge 3}
+     }else{
+      CameraPose '1080 1240 18 90 -8'
+      $follow=Send @{cmd='geometry_page_fixture';action='followCamera';nearDistance=30;farDistance=50;dwellMs=200;retryMs=250}
+      $far=WaitCamera {param($c) $c.cameraDemandActive -and $c.cameraHasObservation -and $c.cameraDistance -gt 100 -and !$c.cameraDesiredFine -and $c.cameraObservations -ge 3}
+     }
+     if($ProjectedPrefetch){$exclusive=Send @{cmd='geometry_page_fixture';action='followCamera'};if($exclusive.status -ne 'Busy'){throw 'Distance policy overlapped projected policy'}}
      if($far.cameraRequests -ne 0 -or $far.cameraAttempts -ne 0 -or $far.pageRequest -ne 0 -or $far.fineResident -or $far.finePrepared){throw 'Far camera requested fine'}
      $null=Action 'holdFine';CameraPose '1184 1240 18 90 -8'
      # Owner NextFrame is the only source of fine requests and polls in this branch.
-     $held=WaitCamera {param($c) $c.cameraHasObservation -and $c.cameraDistance -lt 30 -and $c.cameraDesiredFine -and $c.cameraRequests -eq 1 -and $c.pageRequest -gt 0 -and $c.pageActive -eq 1 -and $c.pageReservedBytes -gt 0}
+     $held=WaitCamera {param($c) $c.cameraHasObservation -and $(if($ProjectedPrefetch){$c.projectedDemandHasBound -and $c.projectedDemandUpper -ge 2 -and $c.projectedDemandGeneration -gt $far.projectedDemandGeneration}else{$c.cameraDistance -lt 30}) -and $c.cameraDesiredFine -and $c.cameraRequests -eq 1 -and $c.pageRequest -gt 0 -and $c.pageActive -eq 1 -and $c.pageReservedBytes -gt 0}
      if($held.fineResident -or $held.finePrepared -or $held.cameraAttempts -ne 1 -or $held.cameraRequestedRevision -ne $held.cameraDemandRevision){throw 'Held request lacks fresh automatic interest'}
-     CameraPose '1080 1240 18 90 -8'
-     $cancelled=WaitCamera {param($c) $c.cameraHasObservation -and $c.cameraDistance -gt 100 -and !$c.cameraDesiredFine -and $c.cameraCancels -eq 1 -and $c.pageRequest -eq 0}
+     if($ProjectedPrefetch){
+      CameraPose '1200 1240 15.5 90 0'
+      $cancelled=WaitCamera {param($c) !$c.projectedDemandHasBound -and $c.projectedDemandStatus -eq 5 -and $c.projectedDemandGeneration -gt $held.projectedDemandGeneration -and !$c.cameraDesiredFine -and $c.cameraCancels -eq 1 -and $c.pageRequest -eq 0}
+     }else{
+      CameraPose '1080 1240 18 90 -8'
+      $cancelled=WaitCamera {param($c) $c.cameraHasObservation -and $c.cameraDistance -gt 100 -and !$c.cameraDesiredFine -and $c.cameraCancels -eq 1 -and $c.pageRequest -eq 0}
+     }
      if($cancelled.pageActive -ne 1 -or $cancelled.pageReservedBytes -le 0 -or $cancelled.fineResident -or $cancelled.finePrepared -or $cancelled.cameraRequests -ne 1){throw 'Departure discarded held debt or admitted fine'}
      $cancelledCoarse=CameraCut (Observe $true $false);FixedCoarse $cancelledCoarse
      Capture 'camera-departure-coarse.png';$null=Action 'releaseFine'
@@ -515,7 +538,8 @@ try{
      if(!$prepared.finePrepared -or $prepared.preparedProducerModel -ne $automaticPrepared.preparedProducerModel){throw 'Prepared model changed'}
      Capture 'camera-prepared-coarse.png'
      $stop=CameraCut (Action 'stopCamera')
-     if($stop.cameraDemandActive -or $stop.cameraDesiredFine -or !$stop.finePrepared -or !$stop.fineResident){throw 'Stop lost prepared resources'}
+     if($stop.cameraDemandActive -or ($ProjectedPrefetch -and $stop.projectedDemandActive) -or $stop.cameraDesiredFine -or !$stop.finePrepared -or !$stop.fineResident){throw 'Stop lost prepared resources'}
+     if($ProjectedPrefetch){foreach($action in @('followProjected','followCamera')){$rearm=Send @{cmd='geometry_page_fixture';action=$action};if($rearm.status -ne 'Busy'){throw 'Stopped projected policy reset lifetime attempt budget'}}}
      $null=Action 'fine';$fine=CameraCut (Observe $true $true)
      if($fine.producerModel -ne $prepared.preparedProducerModel -or $fine.rendererModel -eq $coarse.rendererModel -or $fine.producerInstance -ne $coarse.producerInstance -or $fine.rendererInstance -ne $coarse.rendererInstance -or $fine.meshCount -ne $prepared.meshCount -or $fine.pageCompleted -ne $prepared.pageCompleted -or $fine.cameraRequests -ne 2 -or $fine.pageLiveJobs -ne 0 -or $fine.pageReservedBytes -ne 0){throw 'Fine selection did not reuse prepared resources'}
      for($i=0;$i -lt $prepared.meshCount;$i++){if($fine.rendererMeshHandles[$i] -ne $prepared.rendererMeshHandles[$i]){throw 'Manual selection recreated prepared meshes'}}
@@ -565,12 +589,13 @@ try{
     }
     $null=Action 'abort';$retired=PageCut (Observe $false $false)
     $settled=WaitPage {param($c) $c.pageLiveJobs -eq 0 -and $c.pageQueued -eq 0 -and $c.pageActive -eq 0 -and $c.pageReady -eq 0 -and $c.pageReservedBytes -eq 0}
-    if($CameraPrefetch){$retired=CameraCut $retired;$settled=CameraCut $settled;if($retired.cameraDemandActive -or $retired.finePrepared -or $retired.meshCount -ne $fine.meshCount -or $retired.meshesAbsent -ne $fine.meshCount -or $settled.cameraRequests -ne 2){throw 'Camera Abort failed exact cleanup/idle proof'}}
+    if($CameraPrefetch -or $ProjectedPrefetch){$retired=CameraCut $retired;$settled=CameraCut $settled;if($retired.cameraDemandActive -or ($ProjectedPrefetch -and $retired.projectedDemandActive) -or $retired.finePrepared -or $retired.meshCount -ne $fine.meshCount -or $retired.meshesAbsent -ne $fine.meshCount -or $settled.cameraRequests -ne 2){throw 'Camera Abort failed exact cleanup/idle proof'}}
     if($CameraTuple){Require $retired @('cameraTupleValid','projectedSurfaceIdealBound');if($retired.cameraTupleValid -or $retired.projectedSurfaceIdealBound){throw 'Abort retained camera projection authority'}}
     $secondBegin=Action 'beginOriginalDiskClodPaged';Require $secondBegin @('status','pageWorkState')
     if($secondBegin.status -ne 'Busy' -or $secondBegin.pageWorkState -ne 'OriginalAdmissionConsumed'){throw 'Single source admission rearmed after Abort'}
-    $result=@{passed=$true;surfaceCertificate=[bool]$SurfaceCertificate;surfaceFault=$SurfaceFault;surfaceProof=$surfaceProof;diskFault=$DiskFault;cameraPrefetch=[bool]$CameraPrefetch;cameraTuple=[bool]$CameraTuple;cameraTupleScaleRefusal=[bool]$CameraTupleScaleRefusal;cameraEvidence=$cameraEvidence;cameraTupleEvidence=$cameraTupleEvidence;begin=$begin;baseline=$baseline;normalworldCoverage=$worldCoverage;normalworldCamera=$camera;fallback=$fallback;coarse=$coarse;fine=$fine;heldRequest=$heldRequest;held=$held;cancelled=$cancelled;cancelledCoarse=$cancelledCoarse;settledCancel=$settledCancel;evicted=$evicted;refilled=$refilled;returnedFallback=$returnedFallback;typedFault=$refused;retired=$retired;settled=$settled;secondBegin=$secondBegin;sourceFixture=$sourceFixture;producer=$originalProducer;scope='Original authored P3DM controlled subset, actual fallback/coarse/fine/refill record cuts; no retail/all-pass/pixel/FPS/device-free or complete ownership claim'}
-    if($CameraPrefetch){$result.scope='Actual original-file camera prefetch/held departure/complete prepared rows/coarse unchanged/manual Fine reuse/all-Absent cleanup; no eviction/refill/automatic quality/retail/all-pass/pixel/FPS/device-free/complete ownership claim'}
+    $result=@{passed=$true;surfaceCertificate=[bool]$SurfaceCertificate;surfaceFault=$SurfaceFault;surfaceProof=$surfaceProof;diskFault=$DiskFault;cameraPrefetch=[bool]$CameraPrefetch;projectedPrefetch=[bool]$ProjectedPrefetch;cameraTuple=[bool]$CameraTuple;cameraTupleScaleRefusal=[bool]$CameraTupleScaleRefusal;cameraEvidence=$cameraEvidence;cameraTupleEvidence=$cameraTupleEvidence;begin=$begin;baseline=$baseline;normalworldCoverage=$worldCoverage;normalworldCamera=$camera;fallback=$fallback;coarse=$coarse;fine=$fine;heldRequest=$heldRequest;held=$held;cancelled=$cancelled;cancelledCoarse=$cancelledCoarse;settledCancel=$settledCancel;evicted=$evicted;refilled=$refilled;returnedFallback=$returnedFallback;typedFault=$refused;retired=$retired;settled=$settled;secondBegin=$secondBegin;sourceFixture=$sourceFixture;producer=$originalProducer;scope='Original authored P3DM controlled subset, actual fallback/coarse/fine/refill record cuts; no retail/all-pass/pixel/FPS/device-free or complete ownership claim'}
+    if($CameraPrefetch -or $ProjectedPrefetch){$result.scope='Actual original-file camera prefetch/held departure/complete prepared rows/coarse unchanged/manual Fine reuse/all-Absent cleanup; no eviction/refill/automatic quality/retail/all-pass/pixel/FPS/device-free/complete ownership claim'}
+    if($ProjectedPrefetch){$cameraEvidence.projectedFar=$projectedFar;$cameraEvidence.scope='Actual ideal pair-discrepancy preparation preference, refusal/cancellation debt, fixed coarse/manual Fine reuse; no source-error/pixel/automatic quality/all-pass/FPS proof';$result.scope=$cameraEvidence.scope}
     $null=Send @{cmd='exit'}
     if(!$p.WaitForExit(15000) -or $p.ExitCode -ne 0){throw 'Game did not exit normally'};$normal=$true
     $text=Get-Content -LiteralPath $log -Raw

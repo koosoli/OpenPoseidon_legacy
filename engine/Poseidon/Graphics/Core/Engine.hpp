@@ -3208,7 +3208,7 @@ class Engine : public IGraphicsEngine
     { return {}; }
 
     // Ready is a returned-main-frame record cut, not all-pass/pixel or GPU-free proof.
-    enum class GeometryPageFixtureAction { Begin, Coarse, Fine, Observe, Snapshot, Abort, BeginClod, Fallback, BeginPaged, RequestFine, PollFine, CancelFine, HoldFine, ReleaseFine, EvictFine, BeginClodPaged, BeginDiskClodPaged, RequestCoarse, PollCoarse, BeginOriginalDiskClodPaged, FollowCamera, StopCamera, PollFinePrefetch, RequestFinePrefetch };
+    enum class GeometryPageFixtureAction { Begin, Coarse, Fine, Observe, Snapshot, Abort, BeginClod, Fallback, BeginPaged, RequestFine, PollFine, CancelFine, HoldFine, ReleaseFine, EvictFine, BeginClodPaged, BeginDiskClodPaged, RequestCoarse, PollCoarse, BeginOriginalDiskClodPaged, FollowCamera, StopCamera, PollFinePrefetch, RequestFinePrefetch, FollowProjected };
     struct GeometryPageSourceIdentity
     {
         std::array<uint8_t,32> sha256{};
@@ -3263,6 +3263,7 @@ class Engine : public IGraphicsEngine
     };
     struct GeometryPageCameraDemandInput {
         double nearDistance=30,farDistance=50;
+        double enterUpper=2,leaveUpper=1; // Experimental pair-discrepancy preparation preference only.
         uint32_t dwellMs=200,retryMs=250;
     };
     struct GeometryPageFixtureReport
@@ -3308,6 +3309,10 @@ class Engine : public IGraphicsEngine
         uint64_t cameraDemandRevision=0,cameraRequestedRevision=0,cameraObservations=0,cameraRequests=0,cameraCancels=0;
         uint32_t cameraAttempts=0,preparedProducerModel=UINT32_MAX;
         double cameraDistance=0;
+        bool projectedDemandActive=false,projectedDemandHasBound=false;
+        uint64_t projectedDemandGeneration=0;
+        uint32_t projectedDemandStatus=0; // Last consumed projection status; preserved across pending Observe.
+        double projectedDemandUpper=0; // Last authenticated pair discrepancy, not source error or pixels.
         uint64_t sourceAdmissionEpoch=0,originalSourceBytes=0,sourceAdmissionKnownBytes=0;
         uint32_t helperCount=0; // Original subset has no helper LODs; hashes stay empty.
         float originalOriginRadius=0;

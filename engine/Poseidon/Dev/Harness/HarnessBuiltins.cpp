@@ -542,6 +542,7 @@ void RegisterScreenshot(HarnessServer& hs)
             else if(!std::strcmp(name,"beginDiskClodPaged")) action=Engine::GeometryPageFixtureAction::BeginDiskClodPaged;
             else if(!std::strcmp(name,"beginOriginalDiskClodPaged")) action=Engine::GeometryPageFixtureAction::BeginOriginalDiskClodPaged;
             else if(!std::strcmp(name,"followCamera")) action=Engine::GeometryPageFixtureAction::FollowCamera;
+            else if(!std::strcmp(name,"followProjected")) action=Engine::GeometryPageFixtureAction::FollowProjected;
             else if(!std::strcmp(name,"stopCamera")) action=Engine::GeometryPageFixtureAction::StopCamera;
             else if(!std::strcmp(name,"requestCoarse")) action=Engine::GeometryPageFixtureAction::RequestCoarse;
             else if(!std::strcmp(name,"pollCoarse")) action=Engine::GeometryPageFixtureAction::PollCoarse;
@@ -647,7 +648,7 @@ void RegisterScreenshot(HarnessServer& hs)
             }
             Engine::GeometryPageCameraDemandInput camera;
             const Engine::GeometryPageCameraDemandInput* cameraArgument=nullptr;
-            if(action==Engine::GeometryPageFixtureAction::FollowCamera) {
+            if(action==Engine::GeometryPageFixtureAction::FollowCamera||action==Engine::GeometryPageFixtureAction::FollowProjected) {
                 const char* rails[]={"nearDistance","farDistance"};double* values[]={&camera.nearDistance,&camera.farDistance};
                 for(size_t i=0;i<2;++i)if(const auto* v=cJSON_GetObjectItemCaseSensitive(root,rails[i])){
                     if(!cJSON_IsNumber(v)||!std::isfinite(v->valuedouble)||v->valuedouble<=0||v->valuedouble>100000)
@@ -656,6 +657,12 @@ void RegisterScreenshot(HarnessServer& hs)
                 for(size_t i=0;i<2;++i)if(const auto* v=cJSON_GetObjectItemCaseSensitive(root,times[i])){
                     if(!cJSON_IsNumber(v)||!std::isfinite(v->valuedouble)||v->valuedouble<0||v->valuedouble>2000||std::floor(v->valuedouble)!=v->valuedouble)
                         return HarnessProtocol::ErrorResponse("camera prefetch intervals must be integer milliseconds <=2000");*milliseconds[i]=uint32_t(v->valuedouble);}
+                if(action==Engine::GeometryPageFixtureAction::FollowProjected) {
+                    const char* names[]={"enterUpper","leaveUpper"};double* values[]={&camera.enterUpper,&camera.leaveUpper};
+                    for(size_t i=0;i<2;++i)if(const auto* v=cJSON_GetObjectItemCaseSensitive(root,names[i])){
+                        if(!cJSON_IsNumber(v)||!std::isfinite(v->valuedouble)||v->valuedouble<0||v->valuedouble>10000)
+                            return HarnessProtocol::ErrorResponse("projected prefetch thresholds must be finite nonnegative bounded values");*values[i]=v->valuedouble;}
+                }
                 cameraArgument=&camera;
             }
             const auto report=GEngine->ControlGeometryPageFixture(action,xyz[0],xyz[1],xyz[2],diskArgument,cameraArgument);
@@ -696,6 +703,7 @@ void RegisterScreenshot(HarnessServer& hs)
             PAGE_FIXTURE_NUMBER(cameraDemandRevision);PAGE_FIXTURE_NUMBER(cameraRequestedRevision);PAGE_FIXTURE_NUMBER(cameraObservations);
             PAGE_FIXTURE_NUMBER(cameraRequests);PAGE_FIXTURE_NUMBER(cameraCancels);PAGE_FIXTURE_NUMBER(cameraAttempts);
             PAGE_FIXTURE_NUMBER(cameraDistance);PAGE_FIXTURE_NUMBER(preparedProducerModel);
+            PAGE_FIXTURE_NUMBER(projectedDemandGeneration);PAGE_FIXTURE_NUMBER(projectedDemandStatus);PAGE_FIXTURE_NUMBER(projectedDemandUpper);
             PAGE_FIXTURE_NUMBER(cameraTupleStatus);PAGE_FIXTURE_NUMBER(cameraTupleIndex);PAGE_FIXTURE_NUMBER(cameraTupleSource);
             PAGE_FIXTURE_NUMBER(cameraTupleGeneration);PAGE_FIXTURE_NUMBER(cameraTupleModelBirth);PAGE_FIXTURE_NUMBER(cameraTupleCertificateGeneration);
             PAGE_FIXTURE_NUMBER(cameraTupleVersion);PAGE_FIXTURE_NUMBER(cameraTupleStructBytes);
@@ -711,6 +719,7 @@ void RegisterScreenshot(HarnessServer& hs)
             PAGE_FIXTURE_BOOL(surfaceCertificateAdmitted);PAGE_FIXTURE_BOOL(surfaceSelectedVerified);
             PAGE_FIXTURE_BOOL(cameraTupleEnabled);PAGE_FIXTURE_BOOL(cameraTupleValid);PAGE_FIXTURE_BOOL(projectedSurfaceIdealBound);
             cJSON_AddStringToObject(result,"projectedSurfaceScope","Read-only ideal nonjittered main1:1 projected selected-union bound; excludes authored fallback, shader floating-point/raster/pixel/visibility/attributes/all-pass quality and cut selection.");
+            PAGE_FIXTURE_BOOL(projectedDemandActive);PAGE_FIXTURE_BOOL(projectedDemandHasBound);
             PAGE_FIXTURE_BOOL(cameraDemandActive);PAGE_FIXTURE_BOOL(cameraDesiredFine);PAGE_FIXTURE_BOOL(cameraHasObservation);PAGE_FIXTURE_BOOL(finePrepared);
             PAGE_FIXTURE_BOOL(active); PAGE_FIXTURE_BOOL(fineSelected); PAGE_FIXTURE_BOOL(cpuHelpersUnchanged);
             PAGE_FIXTURE_BOOL(mainFrameReturned); PAGE_FIXTURE_BOOL(cascadeConfigured); PAGE_FIXTURE_BOOL(localShadowConfigured);

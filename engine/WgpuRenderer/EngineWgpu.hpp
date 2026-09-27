@@ -1356,6 +1356,7 @@ class EngineWgpu : public EngineDummy
         float x=1200,float y=11.5f,float z=1200,const GeometryPageDiskFixtureInput* disk=nullptr,
         const GeometryPageCameraDemandInput* camera=nullptr) override;
     void MaintainGeometryPageCameraDemand();
+    void MaintainGeometryPageProjectedDemand();
     GeometryPageOriginalAdmissionReport AdmitGeometryPageOriginalStartup(const GeometryPageOriginalStartupInput&) override;
     GeometryPageOriginalAdmissionReport SnapshotGeometryPageOriginalAdmission() const override;
     void PublishGeometryPageFixtureObservation(const WgrFrame& frame, int32_t renderReturnStatus);
