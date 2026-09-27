@@ -85,6 +85,8 @@ try {
         corpus = 'DayZ'; pose = @($baseX, $baseZ, $baseY, $azimuth, $elevation); routeX = $route; cycles = $(if ($DiagnosticOnly) { 0 } else { 3 })
         environment = $environment; driverSampled = [bool]$SampleDriverMemory
         quietSamples = 10; quietTimeoutSeconds = 30; routePoseHoldSeconds = 3
+        perReturnAllocationCuts = [bool]($AllocationReport -and !$DiagnosticOnly)
+        perReturnAllocationScope = 'Returns2/3 after quiet samples, outside route timings; bounded extra inter-route interval; sampled asset/LOD rows may be truncated and overlap'
         growthAllowance = 'max(1% of return2, 8 MiB); texture count max(1%, 8)'
         processScope = 'PrivateMemorySize64 and WorkingSet64 of owned game PID; diagnostic, not a GPU convergence proof'
     } | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $out 'provenance.json')
@@ -163,39 +165,6 @@ try {
         } while ([DateTime]::UtcNow -lt $deadline)
         return [pscustomobject]@{quiet = $false; status = 'PendingWarmup'; last = $sample; consecutiveSamples = $streak}
     }
-    $initialCold = Wait-Settled 'initial-cold'; $initialQuiet = Wait-Quiet 'initial-quiet'
-    $returns = @()
-    $cycleCount = if ($DiagnosticOnly) { 0 } else { 3 }
-    for ($cycle = 1; $cycle -le $cycleCount; $cycle++) {
-        $null = Send @{cmd = 'exec'; code = ('logInfo "CONVERGENCE_ROUTE_' + $cycle + '_BEGIN"; triPerfReset 0')}
-        foreach ($x in $route) {
-            $reply = Send @{cmd = 'eval'; code = ('triFreeFlyPose "' + (Pose $x) + '"')}
-            if ($reply.result -notmatch 'OK') { throw 'Traversal pose refused' }
-            Start-Sleep -Seconds 3
-            $null = Sample ('route-' + $cycle)
-        }
-        $timing = Send @{cmd = 'eval'; code = 'triPerfStats 0'}
-        $null = Send @{cmd = 'exec'; code = ('logInfo "CONVERGENCE_ROUTE_' + $cycle + '_END"')}
-        $settled = Wait-Settled ('return-' + $cycle + '-logical')
-        $quiet = Wait-Quiet ('return-' + $cycle + '-quiet')
-        $returns += [pscustomobject]@{cycle = $cycle; logical = $settled; quiet = $quiet; routeTiming = $timing}
-    }
-    $comparison = @(); $bounded = $true
-    foreach ($field in $(if ($DiagnosticOnly) { @() } else { $resourceFields })) {
-        $second = [double]$returns[1].quiet.last.state.$field; $third = [double]$returns[2].quiet.last.state.$field
-        $fixed = if ($field -eq 'objectTextureCount') { 8 } else { 8 * 1024 * 1024 }
-        $allowance = [Math]::Max($fixed, [Math]::Ceiling($second * 0.01)); $growth = $third - $second
-        $accepted = $growth -le $allowance
-        $comparison += [pscustomobject]@{field = $field; return2 = $second; return3 = $third; growth = $growth; allowedGrowth = $allowance; accepted = $accepted}
-        if (!$accepted) { $bounded = $false }
-    }
-    $lateQuiet = !$DiagnosticOnly -and $returns[1].quiet.quiet -and $returns[2].quiet.quiet
-    $retiredClear = !$DiagnosticOnly -and $returns[1].quiet.last.state.geometryRetiredBytes -eq 0 -and $returns[2].quiet.last.state.geometryRetiredBytes -eq 0
-    $converged = $bounded -and $lateQuiet -and $retiredClear
-    $status = if (!$lateQuiet) { 'PendingWarmup' } elseif (!$converged) { 'ResourceGrowth' } else { 'Converged' }
-    if ($DiagnosticOnly) { $status = 'AllocationDiagnosticOnly' }
-    $allocation = $null
-    if ($AllocationReport) {
         function Read-Allocation($request) {
             $started = Send $request
             if ($started.status -ne 'Pending' -or $started.requestId -lt 1) { throw 'Allocation request was not accepted asynchronously' }
@@ -311,6 +280,98 @@ try {
             if ($report.missingModels -ne 0 -or $report.missingMeshes -ne 0) { throw 'Settled eligible retained models or meshes are missing' }
             return $report
         }
+    $initialCold = Wait-Settled 'initial-cold'; $initialQuiet = Wait-Quiet 'initial-quiet'
+    $returns = @(); $returnAllocations = @()
+    $cycleCount = if ($DiagnosticOnly) { 0 } else { 3 }
+    for ($cycle = 1; $cycle -le $cycleCount; $cycle++) {
+        $null = Send @{cmd = 'exec'; code = ('logInfo "CONVERGENCE_ROUTE_' + $cycle + '_BEGIN"; triPerfReset 0')}
+        foreach ($x in $route) {
+            $reply = Send @{cmd = 'eval'; code = ('triFreeFlyPose "' + (Pose $x) + '"')}
+            if ($reply.result -notmatch 'OK') { throw 'Traversal pose refused' }
+            Start-Sleep -Seconds 3
+            $null = Sample ('route-' + $cycle)
+        }
+        $timing = Send @{cmd = 'eval'; code = 'triPerfStats 0'}
+        $null = Send @{cmd = 'exec'; code = ('logInfo "CONVERGENCE_ROUTE_' + $cycle + '_END"')}
+        $settled = Wait-Settled ('return-' + $cycle + '-logical')
+        $quiet = Wait-Quiet ('return-' + $cycle + '-quiet')
+        $returns += [pscustomobject]@{cycle = $cycle; logical = $settled; quiet = $quiet; routeTiming = $timing}
+        if ($AllocationReport -and $cycle -ge 2) {
+            # A new bounded owner/renderer cut AFTER the quiet sample and route timer.
+            # It is not atomic with that preceding memory sample and adds an inter-route interval.
+            $cutStart = [DateTime]::UtcNow.ToString('o')
+            $returnReport = Read-Allocation @{cmd='geometry_allocations'}
+            $returnReport | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $out ("geometry-allocations-return-$cycle.json"))
+            $returnAllocations += [pscustomobject]@{cycle=$cycle; quietSampleUtc=$quiet.last.utc
+                requestedUtc=$cutStart; completedUtc=[DateTime]::UtcNow.ToString('o'); report=$returnReport}
+        }
+    }
+    $comparison = @(); $bounded = $true
+    foreach ($field in $(if ($DiagnosticOnly) { @() } else { $resourceFields })) {
+        $second = [double]$returns[1].quiet.last.state.$field; $third = [double]$returns[2].quiet.last.state.$field
+        $fixed = if ($field -eq 'objectTextureCount') { 8 } else { 8 * 1024 * 1024 }
+        $allowance = [Math]::Max($fixed, [Math]::Ceiling($second * 0.01)); $growth = $third - $second
+        $accepted = $growth -le $allowance
+        $comparison += [pscustomobject]@{field = $field; return2 = $second; return3 = $third; growth = $growth; allowedGrowth = $allowance; accepted = $accepted}
+        if (!$accepted) { $bounded = $false }
+    }
+    $lateQuiet = !$DiagnosticOnly -and $returns[1].quiet.quiet -and $returns[2].quiet.quiet
+    $retiredClear = !$DiagnosticOnly -and $returns[1].quiet.last.state.geometryRetiredBytes -eq 0 -and $returns[2].quiet.last.state.geometryRetiredBytes -eq 0
+    $converged = $bounded -and $lateQuiet -and $retiredClear
+    $status = if (!$lateQuiet) { 'PendingWarmup' } elseif (!$converged) { 'ResourceGrowth' } else { 'Converged' }
+    if ($DiagnosticOnly) { $status = 'AllocationDiagnosticOnly' }
+    $returnAllocationComparison = $null
+    if ($returnAllocations.Count -eq 2) {
+        $secondReport=$returnAllocations[0].report; $thirdReport=$returnAllocations[1].report
+        $numericFields=@('uniqueVertexBytes','uniqueIndexBytes','poolLiveBytes',
+            'persistentCpuReferencedVertexBytes','persistentCpuReferencedIndexBytes',
+            'persistentRetainedSharedCpuVertexBytes','persistentRetainedSharedCpuIndexBytes',
+            'persistentStandaloneCpuVertexBytes','persistentStandaloneCpuIndexBytes',
+            'persistentTrackedAllocations','persistentCpuBorrowers','persistentModelLodLinks',
+            'rendererMeshLiveRecords','rendererMeshRecordPoolLiveBytes','rendererMeshPoolUnattributedBytes')
+        $numericDeltas=@()
+        foreach($field in $numericFields) {
+            if($null -ne $secondReport.$field -and $null -ne $thirdReport.$field) {
+                $numericDeltas += [pscustomobject]@{field=$field; return2=$secondReport.$field; return3=$thirdReport.$field
+                    delta=([decimal]$thirdReport.$field-[decimal]$secondReport.$field)}
+            }
+        }
+        # Exact asset strings and LOD ordinals identify reported rows, not physical mesh unions.
+        # Multiple registrations/LODs can overlap; unordered registry sampling can also change.
+        $rowSets=@()
+        foreach($report in @($secondReport,$thirdReport)) {
+            $set=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::Ordinal)
+            foreach($row in @($report.rows)) {
+                foreach($field in @('asset','lodIndex','vertexBytes','indexBytes')) {
+                    if($null -eq $row.$field) { throw "Per-return allocation row omitted $field" }
+                }
+                $key=(@([string]$row.asset,[int]$row.lodIndex) | ConvertTo-Json -Compress)
+                if(!$set.ContainsKey($key)) {
+                    $set.Add($key,[pscustomobject]@{asset=$row.asset; lodIndex=$row.lodIndex; occurrences=0; vertexBytes=[decimal]0; indexBytes=[decimal]0})
+                }
+                $entry=$set[$key]; $entry.occurrences++; $entry.vertexBytes += [decimal]$row.vertexBytes; $entry.indexBytes += [decimal]$row.indexBytes
+            }
+            $rowSets += ,$set
+        }
+        $keys=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+        foreach($set in $rowSets) { foreach($key in $set.Keys) { $null=$keys.Add($key) } }
+        $rowDeltas=@(foreach($key in $keys) {
+            $left=$null; $right=$null
+            $null=$rowSets[0].TryGetValue($key,[ref]$left); $null=$rowSets[1].TryGetValue($key,[ref]$right)
+            $identity=if($null -ne $right){$right}else{$left}
+            [pscustomobject]@{asset=$identity.asset; lodIndex=$identity.lodIndex; return2=$left; return3=$right}
+        })
+        $returnAllocationComparison=[pscustomobject]@{
+            scope='Separate post-quiet diagnostic cuts outside route timings; no acceptance override. Asset+LOD rows are sampled overlapping occurrence totals, not physical mesh unions or selected demand.'
+            rowCoverageComplete=(!$secondReport.truncated -and !$thirdReport.truncated)
+            return2Truncated=[bool]$secondReport.truncated; return3Truncated=[bool]$thirdReport.truncated
+            cuts=@($returnAllocations | Select-Object cycle,quietSampleUtc,requestedUtc,completedUtc)
+            numericDeltas=$numericDeltas; assetLodRows=@($rowDeltas | Sort-Object asset,lodIndex)
+        }
+        $returnAllocationComparison | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $out 'geometry-allocations-return-comparison.json')
+    }
+    $allocation = $null
+    if ($AllocationReport) {
         # Diagnostics run after timed routes and quiet samples; they do not prove usage or reclaimability.
         $allocation = Read-Allocation @{cmd='geometry_allocations'}
         if (@($allocation.rows).Count -lt 2 -or $allocation.uniqueMeshes -lt 1) { throw 'No meaningful retained geometry allocation rows' }
@@ -367,6 +428,7 @@ try {
     @{passed = ($converged -or $DiagnosticOnly); convergenceMeasured = !$DiagnosticOnly; status = $status; initialCold = $initialCold; initialQuiet = $initialQuiet
         returns = $returns; comparison = $comparison; lateQuiet = $lateQuiet; retiredClear = $retiredClear
         processScope = 'Diagnostic private/RSS samples retained; GPU convergence does not establish process-memory convergence'
+        returnAllocationComparison = $returnAllocationComparison
         allocationReport = $allocation; lodDemandMeasured = [bool]$LodDemandReport; ownerLedgerMeasured = [bool]$OwnerLedger; meshAckMeasured = [bool]$MeshAck
         registeredRefsMeasured = [bool]$RegisteredRefs
     } | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $out 'result.json')
