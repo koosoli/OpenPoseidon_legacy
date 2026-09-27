@@ -2493,6 +2493,12 @@ class Engine : public IGraphicsEngine
         // the renderer in WgrWaterParams::tidewater; see wgpu_renderer.hpp for the lane layout.
         struct TidewaterLook
         {
+            // W3g — sea conditions, Tidewater's own preset table (AppUI.js SEA): 0 = weather (the
+            // weather wind, with fetch / chop / swell / surf / period / whitecaps interpolated from the
+            // table at that wind, so a 7 m/s day is Tidewater's Breezy), 1 Calm, 2 Breezy, 3 Choppy,
+            // 4 Storm (the preset's own wind too), 5 custom (weather wind, the sliders below as set).
+            int seaConditions = 0;
+            float whitecaps = 0.5f;        // custom mode: whitecap amount (AppUI whitecaps)
             float amplitude = 1.0f;        // spectrum amplitude scale
             float choppiness = 0.9f;       // horizontal displacement (Tessendorf lambda)
             float swellScale = 0.48f;      // energy of the distant-swell system

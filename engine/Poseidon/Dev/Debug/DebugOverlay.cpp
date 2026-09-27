@@ -6556,11 +6556,22 @@ void DrawWaterTab()
         Dev::PanelHelp("Wind speed and heading come from the weather (or the reference sea below), as for "
                        "Current OP. The Current OP controls further down do not affect this mode, except "
                        "Cascade Preset's reference seas, which map onto this group.");
+        const char* twSea[] = {"Weather (Tidewater table at the weather wind)", "Calm", "Breezy (Tidewater default)",
+                               "Choppy", "Storm", "Custom (sliders)"};
+        changed |= Dev::Combo("TW sea conditions", &t.seaConditions, twSea, IM_ARRAYSIZE(twSea));
+        Dev::PanelTooltip("Tidewater's own sea presets (wind, fetch, chop, swell, surf height and period, "
+                          "whitecaps). Weather interpolates them at the weather wind: 3.5 m/s is Calm, 7 m/s "
+                          "Breezy, 12 m/s Choppy, 20 m/s Storm. Custom uses the weather wind and the chop, "
+                          "swell, surf and whitecap sliders below.");
+        const bool twCustom = t.seaConditions == 5;
         changed |= Dev::SliderFloat("TW amplitude", &t.amplitude, 0.0f, 3.0f, "%.2f");
         Dev::PanelTooltip("Displacement scale of all four cascades (WaterSurface amplitude).");
+        ImGui::BeginDisabled(!twCustom);
         changed |= Dev::SliderFloat("TW choppiness", &t.choppiness, 0.0f, 2.0f, "%.2f");
-        Dev::PanelTooltip("Horizontal displacement (lambda). Tidewater default 0.9.");
+        Dev::PanelTooltip("Horizontal displacement (lambda). Tidewater default 0.9. (Custom sea only.)");
         changed |= Dev::SliderFloat("TW swell energy", &t.swellScale, 0.0f, 2.0f, "%.2f");
+        changed |= Dev::SliderFloat("TW whitecaps", &t.whitecaps, 0.0f, 1.0f, "%.2f");
+        ImGui::EndDisabled();
         changed |= Dev::SliderFloat("TW swell heading", &t.swellHeadingDeg, -180.0f, 180.0f, "%.0f deg");
         Dev::PanelTooltip("Direction the distant swell travels toward, world degrees (0 = +X, 90 = +Z).");
         changed |= Dev::SliderFloat("TW cascade scale", &t.cascadeScale, 0.25f, 4.0f, "%.2f");
@@ -6586,9 +6597,12 @@ void DrawWaterTab()
                        "energy.");
         changed |= Dev::Checkbox("TW shore waves", &t.shoreWaves);
         ImGui::BeginDisabled(!t.shoreWaves);
+        ImGui::BeginDisabled(!twCustom);
         changed |= Dev::SliderFloat("TW shore period", &t.shorePeriod, 3.0f, 20.0f, "%.1f s");
         changed |= Dev::SliderFloat("TW shore amplitude", &t.shoreAmplitude, 0.0f, 3.0f, "%.2f m");
-        Dev::PanelTooltip("Offshore amplitude (half the wave height) at the default swell energy 0.48.");
+        Dev::PanelTooltip("Offshore amplitude (half the wave height) at the default swell energy 0.48. (Custom "
+                          "sea only; the presets set the surf themselves.)");
+        ImGui::EndDisabled();
         changed |= Dev::SliderFloat("TW shore variation", &t.shoreVariation, 0.0f, 1.5f, "%.2f");
         changed |= Dev::SliderFloat("TW breaker index", &t.shoreGamma, 0.3f, 1.5f, "%.2f");
         Dev::PanelTooltip("A wave breaks where its height exceeds this x the depth (gamma).");

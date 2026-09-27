@@ -1472,8 +1472,15 @@ struct WgrWaterParams
      * [2] x = surf-zone turbidity 1/m (0.16), y = shore simulation on (1, W3b), z = wet sand
      *     drying time s (28, ShoreSim dryTime), w = breaker lip opacity (1, W3d; 0 = no lips)
      * The renderer scales the amplitude with the swell scale (tidewater[0].z) relative to its default,
-     * so weather and the reference seas move the surf too. sizeof 1136 -> 1184 with the Rust side. */
+     * so weather and the reference seas move the surf too. sizeof 1136 -> 1184 with the Rust side.
+     * (W3g: in the weather / preset modes the C++ side pre-divides the preset surf by that factor,
+     * so the net amplitude is the preset's.) */
     WgrVec4 tidewater_shore[3];
+    /* TW-WATER W3g — sea conditions (Tidewater's preset table, resolved on the C++ side).
+     * x = local wind override m/s (0 = the weather wind, fft_wind_sea.z), y = local fetch km
+     * (0 = Tidewater's 120), z = whitecaps (0.5), w = the conditions mode (diagnostic).
+     * sizeof 1184 -> 1200 with the Rust side. */
+    WgrVec4 tidewater_sea;
 };
 
 struct WgrWaterCascadeConfig
@@ -2172,7 +2179,7 @@ static_assert(sizeof(WgrGrassDownwash) == 16, "WgrGrassDownwash layout must matc
 static_assert(sizeof(WgrSmokeShadowBlob) == 32, "WgrSmokeShadowBlob layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrSmokeVolumeParams) == 96, "WgrSmokeVolumeParams layout must match the Rust #[repr(C)] struct");
   static_assert(sizeof(WgrGrassParams) == 4784, "WgrGrassParams layout must match the Rust #[repr(C)] struct");
-static_assert(sizeof(WgrWaterParams) == 1184, "WgrWaterParams layout must match the Rust #[repr(C)] struct");
+static_assert(sizeof(WgrWaterParams) == 1200, "WgrWaterParams layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrWaterNode) == 40, "WgrWaterNode layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrWaterBatch) == 16, "WgrWaterBatch layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrWaterInteractionEvent) == 64 && alignof(WgrWaterInteractionEvent) == 16, "WgrWaterInteractionEvent must match Rust");
