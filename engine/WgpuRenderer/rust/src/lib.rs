@@ -3533,6 +3533,7 @@ impl Renderer {
             &self.queue,
             shadow,
             shadow_casters,
+            palette,
             &self.grass,
         );
         // The terrain owns the sun-shadow mask; lend its view + world->UV mapping to

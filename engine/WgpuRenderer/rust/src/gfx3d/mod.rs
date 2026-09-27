@@ -6,6 +6,7 @@ pub(crate) mod pool;
 mod allocation_report;
 mod mesh_facts;
 mod mesh_ack;
+mod local_pose_cache;
 mod lod_feedback;
 use pool::{GeometryPool, MeshAlloc};
 
@@ -3786,6 +3787,35 @@ impl NormalResolve {
     }
 }
 
+type LocalPoseSample = (u64, u32, u64, u64, u32, u32);
+struct LocalPoseTraceEvent {
+    plan: u64,
+    counts: [u32; 3],
+    refresh_mask: u32,
+    unwitnessed_mask: u32,
+    rendered: u32,
+    cached: u32,
+    epoch: u64,
+    light_dirty: u32,
+    sample: LocalPoseSample,
+}
+impl LocalPoseTraceEvent {
+    fn log(&self, event: bool, enabled: bool) {
+        let label = if event { "local pose cache event" } else { "local pose cache" };
+        let (mesh, palette, revision, world_key, begin, count) = self.sample;
+        eprintln!("[wgr] {}: enabled={} cpuCasters={} changedCasters={} unwitnessedCasters={} poseRefreshMask={} unwitnessedMask={} rendered={} cached={} instanceEpoch={} lightDirtyMask={} mesh={} palette={} revision={} worldContentKey={} indexBegin={} indexCount={} sourcePlan={}",
+            label, enabled, self.counts[0], self.counts[1], self.counts[2], self.refresh_mask,
+            self.unwitnessed_mask, self.rendered, self.cached, self.epoch, self.light_dirty,
+            mesh, palette, revision, world_key, begin, count, self.plan);
+    }
+}
+struct LocalPoseTrace {
+    plans: u64,
+    rows: u32,
+    // Numeric same-plan event only; no pointers/allocations or broad world proof.
+    last_change: Option<LocalPoseTraceEvent>,
+}
+
 pub struct Gfx3d {
     // Explicit snapshot diagnostic only: no allocation/callback/poll when OFF.
     mesh_ack_enabled: bool,
@@ -3974,6 +4004,12 @@ pub struct Gfx3d {
     // casters' absolute positions quantised to a centimetre so f32 jitter in `abs = rel + cam`
     // cannot pass for movement.
     local_view_key: [Option<u64>; MAX_LOCAL_SHADOWS],
+    // Exact bounded CPU-caster pose witnesses; lazily allocated only when a
+    // cached local view has an actual skinned caster. Retained/sky and concurrent
+    // vertex-update freshness are separate contracts, not solved by this field.
+    local_pose_cache: Option<Box<local_pose_cache::LocalPoseCache>>,
+    local_pose_cache_enabled: bool, // Experimental until runtime/performance proof.
+    local_pose_trace: Option<LocalPoseTrace>, // periodic rows+last event share128-row cap
     local_view_refresh: Vec<usize>,
     // Last frame's shape. Any change here re-renders everything: the tiles move, the layer is
     // reallocated, or the cull view indices shift under the cached tiles.
@@ -4801,6 +4837,10 @@ impl Gfx3d {
             local_shadow_count: 0,
             local_shadow_first_layer: 0,
             local_view_key: [None; MAX_LOCAL_SHADOWS],
+            local_pose_cache: None,
+            local_pose_cache_enabled: std::env::var("WGR_LOCAL_SHADOW_POSE_CACHE").is_ok_and(|v| v == "1"),
+            local_pose_trace: std::env::var("WGR_LOCAL_POSE_CACHE_TRACE").is_ok_and(|v| v == "1")
+                .then_some(LocalPoseTrace { plans: 0, rows: 0, last_change: None }),
             local_view_refresh: Vec::new(),
             local_cache_shape: (0, 0, 0, 0),
             local_views_rendered: 0,
@@ -6495,6 +6535,7 @@ impl Gfx3d {
         &mut self,
         pass: &WgrShadowPass,
         casters: &[WgrShadowCaster],
+        palette: &[WgrMat4],
         count: usize,
         local: usize,
     ) {
@@ -6503,6 +6544,7 @@ impl Gfx3d {
             self.local_views_rendered = 0;
             self.local_views_cached = 0;
             self.local_view_key = [None; MAX_LOCAL_SHADOWS];
+            self.local_pose_cache = None;
             return;
         }
         // The shape the cached tiles were drawn under. A change in ANY of it moves the tiles,
@@ -6516,6 +6558,16 @@ impl Gfx3d {
         let cache_on = local_shadow_cache_env() && (flags & LOCAL_FLAG_CACHE) != 0;
         let forced = (flags & LOCAL_FLAG_FORCE_REFRESH) != 0;
         let epoch = self.cull.instance_epoch();
+        // These frames draw fresh contents without observing poses. Discard old
+        // witnesses so returning to cache cannot trust a pre-toggle pose.
+        local_pose_cache::reset_if_uncached(&mut self.local_pose_cache, self.local_pose_cache_enabled && cache_on, forced);
+        let mut pose_frame_started = false;
+        let mut pose_refresh_mask = 0u32;
+        let mut pose_unwitnessed_mask = 0u32;
+        let mut pose_counts = [0u32; 3]; // trace-only actual/changed/unwitnessed caster observations
+        let mut pose_sample = None;
+        let mut pose_change_sample = None;
+        let pose_trace_active = self.local_pose_trace.as_ref().is_some_and(|trace| trace.rows < 128);
 
         // Per-view content key over what the CPU caster list contributes to that view. The
         // GPU-driven retained set contributes too, and it is not walkable from here -- its
@@ -6531,6 +6583,24 @@ impl Gfx3d {
             let mask = caster.cascade_mask >> count;
             if mask == 0 {
                 continue;
+            }
+            let pose_eligible = self.local_pose_cache_enabled && cache_on && !forced && caster.palette_slot != NO_PALETTE &&
+                self.meshes.get(KeyData::from_ffi(caster.mesh).into()).is_some_and(|m| m.skin.is_some());
+            let mut pose_observation = None;
+            if pose_eligible {
+                let cache = self.local_pose_cache.get_or_insert_with(|| Box::new(local_pose_cache::LocalPoseCache::new()));
+                if !pose_frame_started { cache.begin_frame(); pose_frame_started = true; }
+                // OR, separate from the legacy XOR content hash: duplicated
+                // caster contributions must not cancel a changed-pose verdict.
+                let observation = cache.observe(caster.palette_slot, palette);
+                pose_observation = observation;
+                pose_refresh_mask |= local_pose_cache::refresh_mask(observation, mask);
+                pose_unwitnessed_mask |= local_pose_cache::unwitnessed_mask(observation, mask);
+                if pose_trace_active {
+                    pose_counts[0] = pose_counts[0].saturating_add(1);
+                    if observation.is_some_and(|(_, changed)| changed) { pose_counts[1] = pose_counts[1].saturating_add(1); }
+                    if observation.is_none() { pose_counts[2] = pose_counts[2].saturating_add(1); }
+                }
             }
             // ABSOLUTE position, quantised: `world` is camera-relative, and the point of the
             // key is to be blind to the camera and sensitive to the caster.
@@ -6551,6 +6621,14 @@ impl Gfx3d {
                 u64::from(caster.palette_slot),
             );
             let contrib = key_mix(key_mix(key_mix(key_mix(ident, ax), ay), az), rot);
+            if pose_trace_active && pose_eligible {
+                let sample = (caster.mesh, caster.palette_slot, pose_observation.map_or(0, |p| p.0),
+                    contrib, caster.index_begin, caster.index_count);
+                if pose_sample.is_none() { pose_sample = Some(sample); }
+                if pose_change_sample.is_none() && pose_observation.is_some_and(|(_, changed)| changed) {
+                    pose_change_sample = Some(sample);
+                }
+            }
             for (k, key) in keys.iter_mut().enumerate().take(local) {
                 if mask & (1u32 << k) != 0 {
                     // XOR-accumulate: the caster list's ORDER is not part of what a view
@@ -6570,13 +6648,45 @@ impl Gfx3d {
                 // whatever the allocator left there, and it is sampled every frame.
                 None => true,
             };
-            if !cache_on || forced || shape_changed || stale {
+            if !cache_on || forced || shape_changed || stale || pose_refresh_mask & (1u32 << k) != 0 {
                 self.local_view_refresh.push(k);
-                self.local_view_key[k] = Some(keys[k]);
+                // Refused pose witnesses may draw, but cannot certify cached
+                // tile contents. Reentry must refresh even if old valid pose returns.
+                self.local_view_key[k] = local_pose_cache::published_key(keys[k], pose_unwitnessed_mask & (1u32 << k) != 0);
             }
         }
         self.local_views_rendered = self.local_view_refresh.len() as u32;
         self.local_views_cached = (local - self.local_view_refresh.len()) as u32;
+        if let Some(trace) = &mut self.local_pose_trace {
+            trace.plans = trace.plans.saturating_add(1);
+            if trace.rows < 128 {
+                // Preserve actual event fields together. A brief transition
+                // between periodic samples must not disappear from diagnostics.
+                if let Some(sample) = pose_change_sample {
+                    trace.last_change = Some(LocalPoseTraceEvent { plan: trace.plans, counts: pose_counts,
+                        refresh_mask: pose_refresh_mask, unwitnessed_mask: pose_unwitnessed_mask,
+                        rendered: self.local_views_rendered, cached: self.local_views_cached, epoch,
+                        light_dirty: pass.local_dirty_mask, sample });
+                }
+                if trace.plans <= 4 || trace.plans % 120 == 0 {
+                    LocalPoseTraceEvent { plan: trace.plans, counts: pose_counts,
+                        refresh_mask: pose_refresh_mask, unwitnessed_mask: pose_unwitnessed_mask,
+                        rendered: self.local_views_rendered, cached: self.local_views_cached, epoch,
+                        light_dirty: pass.local_dirty_mask,
+                        sample: pose_sample.unwrap_or((0, NO_PALETTE, 0, 0, 0, 0)) }.log(false, self.local_pose_cache_enabled);
+                    trace.rows += 1;
+                    if trace.rows < 128 {
+                        if let Some(event) = trace.last_change.take() {
+                            event.log(true, self.local_pose_cache_enabled); trace.rows += 1;
+                        }
+                    }
+                    if trace.rows == 128 {
+                        trace.last_change = None;
+                        eprintln!("[wgr] local pose cache: trace truncated after128rows; CPU-listed scope only");
+                    }
+                }
+            }
+        }
     }
 
     /// LGT-026: how many local shadow views re-rendered / were re-used this frame.
@@ -6590,6 +6700,7 @@ impl Gfx3d {
         queue: &wgpu::Queue,
         pass: &WgrShadowPass,
         casters: &[WgrShadowCaster],
+        palette: &[WgrMat4],
         grass: &Grass,
     ) {
         let count = pass.count.min(MAX_CASCADES);
@@ -6629,7 +6740,7 @@ impl Gfx3d {
         self.ensure_shadow_target(device, pass.resolution, count + u32::from(local > 0));
         self.ensure_shadow_pipelines(device);
         self.ensure_local_tile_clear(device);
-        self.plan_local_cache(pass, casters, count as usize, local);
+        self.plan_local_cache(pass, casters, palette, count as usize, local);
 
         self.shadow_pass_ubo
             .ensure(device, LOCAL_UBO_SLOT + MAX_LOCAL_SHADOWS);
