@@ -11,6 +11,7 @@
 
 #include <Poseidon/World/Entities/Vehicles/Ground/Car.hpp>
 #include <Poseidon/World/Entities/Vehicles/Ground/TrackedWaterResponse.hpp>
+#include <Poseidon/Game/OperMap.hpp>
 #include <Poseidon/Network/Network.hpp>
 #include <Poseidon/Graphics/Rendering/Draw/SpecLods.hpp>
 
@@ -2022,6 +2023,20 @@ float Car::GetPathCost(const GeographyInfo& geogr, float dist) const
     cost *= ObjRoadPenalty2[nObj];
 
     return cost * dist;
+}
+
+// TW-WATER W6g: the operative map (the detailed path around the unit) marks water fields
+// OITWater, and EntityAI::GetTypeCost makes them unaccessible. TankWithAI lets an amphibian through;
+// Car never did, so a BRDM could not plan a single step while it was afloat: one placed on the sea
+// kept its engine off and drifted (speedWanted 0, WGR_CAR_TRACE on 09adb3ef), and one driven in from
+// the beach turned back at the water's edge.
+float Car::GetTypeCost(OperItemType type) const
+{
+    if (type == OITWater && Type()->_canFloat)
+    {
+        return 1;
+    }
+    return base::GetTypeCost(type);
 }
 
 void Car::FillPathCost(Path& path) const

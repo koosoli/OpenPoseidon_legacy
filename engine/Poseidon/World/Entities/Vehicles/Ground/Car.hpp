@@ -238,6 +238,8 @@ class Car: public TankOrCar
 	float GetFieldCost( const GeographyInfo &info ) const override;
 	float GetCost( const GeographyInfo &info ) const override;
 	float GetCostTurn( int difDir ) const override;
+	// TW-WATER W6g: an amphibious car may plan through water fields (as TankWithAI does)
+	float GetTypeCost(OperItemType type) const override;
 
 	bool FireWeapon( int weapon, TargetType *target ) override;
 	void FireWeaponEffects(int weapon, const Magazine *magazine,EntityAI *target) override;
