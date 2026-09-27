@@ -1,0 +1,50 @@
+; land.sqs  [squad, boat, beach point, rally point, inland point]
+; Gets one squad off its PBR at the beach and sends it inland. The boat's TR UNLOAD waypoint
+; normally puts the squad ashore; if the boat has stopped near its beach point and the squad is
+; still aboard, they are ordered out here. Never orders anyone out at sea. A PBR can stop in
+; water too deep to stand in, so for half a minute anyone still in deep water is walked in
+; toward the beach (soldiers in this engine cannot swim).
+_g = _this select 0
+_b = _this select 1
+_beach = _this select 2
+_rally = _this select 3
+_inland = _this select 4
+
+#wait
+~1
+?("vehicle _x != _x" count units _g) == 0 : goto "ashore"
+_p = getPos _b
+_dx = (_p select 0) - (_beach select 0)
+_dy = (_p select 1) - (_beach select 1)
+?(_dx * _dx + _dy * _dy < 10000) and (speed _b < 8) : "unassignVehicle _x; _x action [""GETOUT"", vehicle _x]" forEach units _g
+goto "wait"
+
+#ashore
+; the boat has done its job: stop it dead in the surf so it cannot run over the squad
+_b setFuel 0
+_g setBehaviour "AWARE"
+_g setSpeedMode "FULL"
+_g setFormation "LINE"
+_g move _rally
+_n = 0
+
+#wade
+_u = units _g
+_i = 0
+#wadeunit
+?_i >= count _u : goto "wadenext"
+_m = _u select _i
+_p = getPos _m
+_dx = (_beach select 0) - (_p select 0)
+_dy = (_beach select 1) - (_p select 1)
+_d = sqrt (_dx * _dx + _dy * _dy)
+?((_p select 2) < -0.8) and (_d > 3) : _m setPos [(_p select 0) + 2 * _dx / _d, (_p select 1) + 2 * _dy / _d, 0]
+_i = _i + 1
+goto "wadeunit"
+#wadenext
+~0.25
+_n = _n + 1
+?_n < 120 : goto "wade"
+
+_g move _inland
+exit

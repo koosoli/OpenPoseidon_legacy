@@ -13,7 +13,7 @@ class Mission
 		year=1985;
 		month=6;
 		day=21;
-		hour=8;
+		hour=15;
 		minute=0;
 	};
 	class Groups
@@ -27,8 +27,8 @@ class Mission
 				items=1;
 				class Item0
 				{
-					position[]={10250,0,1050};
-					azimut=345;
+					position[]={10230,0,1150};
+					azimut=340;
 					id=0;
 					side="WEST";
 					vehicle="CarrierW";
@@ -47,7 +47,7 @@ class Mission
 				items=1;
 				class Item0
 				{
-					position[]={10250,0,1050};
+					position[]={9300,42.03,1900};
 					azimut=0;
 					id=1;
 					side="WEST";
@@ -57,7 +57,7 @@ class Mission
 					rank="LIEUTENANT";
 					skill=0.7;
 					text="plt";
-					init="go = false; go2 = false; this moveInCargo lst1; this setCaptive true";
+					init="this setCaptive true";
 				};
 			};
 		};
@@ -69,7 +69,7 @@ class Mission
 				items=1;
 				class Item0
 				{
-					position[]={10150,0,1110};
+					position[]={10090,0,1250};
 					azimut=335;
 					id=2;
 					side="WEST";
@@ -83,10 +83,10 @@ class Mission
 			};
 			class Waypoints
 			{
-				items=3;
+				items=2;
 				class Item0
 				{
-					position[]={10150,0,1115};
+					position[]={10090,0,1255};
 					speed="FULL";
 					combat="CARELESS";
 					expCond="go";
@@ -98,23 +98,11 @@ class Mission
 				};
 				class Item1
 				{
-					position[]={9825,0,1440};
+					position[]={9850,0,1458};
 					type="TR UNLOAD";
 					speed="FULL";
 					combat="CARELESS";
 					completitionRadius=15;
-					synchronizations[]={};
-					class Effects
-					{
-					};
-					showWP="NEVER";
-				};
-				class Item2
-				{
-					position[]={9760,0,1290};
-					type="HOLD";
-					speed="NORMAL";
-					combat="CARELESS";
 					synchronizations[]={};
 					class Effects
 					{
@@ -131,7 +119,7 @@ class Mission
 				items=1;
 				class Item0
 				{
-					position[]={10180,0,1150};
+					position[]={10125,0,1285};
 					azimut=335;
 					id=3;
 					side="WEST";
@@ -145,10 +133,10 @@ class Mission
 			};
 			class Waypoints
 			{
-				items=3;
+				items=2;
 				class Item0
 				{
-					position[]={10180,0,1155};
+					position[]={10125,0,1290};
 					speed="FULL";
 					combat="CARELESS";
 					expCond="go";
@@ -165,18 +153,6 @@ class Mission
 					speed="FULL";
 					combat="CARELESS";
 					completitionRadius=15;
-					synchronizations[]={};
-					class Effects
-					{
-					};
-					showWP="NEVER";
-				};
-				class Item2
-				{
-					position[]={9900,0,1330};
-					type="HOLD";
-					speed="NORMAL";
-					combat="CARELESS";
 					synchronizations[]={};
 					class Effects
 					{
@@ -193,7 +169,7 @@ class Mission
 				items=1;
 				class Item0
 				{
-					position[]={10330,0,1150};
+					position[]={10300,0,1275};
 					azimut=320;
 					id=4;
 					side="WEST";
@@ -207,10 +183,10 @@ class Mission
 			};
 			class Waypoints
 			{
-				items=3;
+				items=2;
 				class Item0
 				{
-					position[]={10330,0,1155};
+					position[]={10300,0,1280};
 					speed="FULL";
 					combat="CARELESS";
 					expCond="go";
@@ -227,18 +203,6 @@ class Mission
 					speed="FULL";
 					combat="CARELESS";
 					completitionRadius=15;
-					synchronizations[]={};
-					class Effects
-					{
-					};
-					showWP="NEVER";
-				};
-				class Item2
-				{
-					position[]={10040,0,1340};
-					type="HOLD";
-					speed="NORMAL";
-					combat="CARELESS";
 					synchronizations[]={};
 					class Effects
 					{
@@ -255,7 +219,7 @@ class Mission
 				items=1;
 				class Item0
 				{
-					position[]={10360,0,1110};
+					position[]={10335,0,1240};
 					azimut=320;
 					id=5;
 					side="WEST";
@@ -269,10 +233,10 @@ class Mission
 			};
 			class Waypoints
 			{
-				items=3;
+				items=2;
 				class Item0
 				{
-					position[]={10360,0,1115};
+					position[]={10335,0,1245};
 					speed="FULL";
 					combat="CARELESS";
 					expCond="go";
@@ -295,18 +259,6 @@ class Mission
 					};
 					showWP="NEVER";
 				};
-				class Item2
-				{
-					position[]={10180,0,1330};
-					type="HOLD";
-					speed="NORMAL";
-					combat="CARELESS";
-					synchronizations[]={};
-					class Effects
-					{
-					};
-					showWP="NEVER";
-				};
 			};
 		};
 		class Item6
@@ -317,9 +269,8 @@ class Mission
 				items=6;
 				class Item0
 				{
-					position[]={10150,0,1050};
+					position[]={10090,0,1190};
 					azimut=340;
-					special="CARGO";
 					id=6;
 					side="WEST";
 					vehicle="SoldierWB";
@@ -331,9 +282,8 @@ class Mission
 				};
 				class Item1
 				{
-					position[]={10153,0,1050};
+					position[]={10093,0,1190};
 					azimut=340;
-					special="CARGO";
 					id=7;
 					side="WEST";
 					vehicle="SoldierWMG";
@@ -342,9 +292,8 @@ class Mission
 				};
 				class Item2
 				{
-					position[]={10156,0,1050};
+					position[]={10096,0,1190};
 					azimut=340;
-					special="CARGO";
 					id=8;
 					side="WEST";
 					vehicle="SoldierWAT";
@@ -353,9 +302,8 @@ class Mission
 				};
 				class Item3
 				{
-					position[]={10159,0,1050};
+					position[]={10099,0,1190};
 					azimut=340;
-					special="CARGO";
 					id=9;
 					side="WEST";
 					vehicle="SoldierWG";
@@ -364,9 +312,8 @@ class Mission
 				};
 				class Item4
 				{
-					position[]={10162,0,1050};
+					position[]={10102,0,1190};
 					azimut=340;
-					special="CARGO";
 					id=10;
 					side="WEST";
 					vehicle="SoldierWB";
@@ -375,55 +322,13 @@ class Mission
 				};
 				class Item5
 				{
-					position[]={10165,0,1050};
+					position[]={10105,0,1190};
 					azimut=340;
-					special="CARGO";
 					id=11;
 					side="WEST";
 					vehicle="SoldierWMedic";
 					skill=0.7;
 					text="s1_5";
-				};
-			};
-			class Waypoints
-			{
-				items=3;
-				class Item0
-				{
-					position[]={9825,0,1440};
-					type="GETOUT";
-					speed="FULL";
-					combat="AWARE";
-					completitionRadius=20;
-					synchronizations[]={};
-					class Effects
-					{
-					};
-					showWP="NEVER";
-				};
-				class Item1
-				{
-					position[]={9725,12.996,1560};
-					speed="FULL";
-					combat="AWARE";
-					formation="LINE";
-					synchronizations[]={};
-					class Effects
-					{
-					};
-					showWP="NEVER";
-				};
-				class Item2
-				{
-					position[]={9690,14.4,1610};
-					speed="NORMAL";
-					combat="AWARE";
-					formation="LINE";
-					synchronizations[]={};
-					class Effects
-					{
-					};
-					showWP="NEVER";
 				};
 			};
 		};
@@ -435,9 +340,8 @@ class Mission
 				items=6;
 				class Item0
 				{
-					position[]={10180,0,1090};
+					position[]={10125,0,1225};
 					azimut=340;
-					special="CARGO";
 					id=12;
 					side="WEST";
 					vehicle="SoldierWB";
@@ -449,9 +353,8 @@ class Mission
 				};
 				class Item1
 				{
-					position[]={10183,0,1090};
+					position[]={10128,0,1225};
 					azimut=340;
-					special="CARGO";
 					id=13;
 					side="WEST";
 					vehicle="SoldierWMG";
@@ -460,9 +363,8 @@ class Mission
 				};
 				class Item2
 				{
-					position[]={10186,0,1090};
+					position[]={10131,0,1225};
 					azimut=340;
-					special="CARGO";
 					id=14;
 					side="WEST";
 					vehicle="SoldierWLAW";
@@ -471,9 +373,8 @@ class Mission
 				};
 				class Item3
 				{
-					position[]={10189,0,1090};
+					position[]={10134,0,1225};
 					azimut=340;
-					special="CARGO";
 					id=15;
 					side="WEST";
 					vehicle="SoldierWG";
@@ -482,9 +383,8 @@ class Mission
 				};
 				class Item4
 				{
-					position[]={10192,0,1090};
+					position[]={10137,0,1225};
 					azimut=340;
-					special="CARGO";
 					id=16;
 					side="WEST";
 					vehicle="SoldierWB";
@@ -493,55 +393,13 @@ class Mission
 				};
 				class Item5
 				{
-					position[]={10195,0,1090};
+					position[]={10140,0,1225};
 					azimut=340;
-					special="CARGO";
 					id=17;
 					side="WEST";
 					vehicle="SoldierWB";
 					skill=0.7;
 					text="s2_5";
-				};
-			};
-			class Waypoints
-			{
-				items=3;
-				class Item0
-				{
-					position[]={9900,0,1472};
-					type="GETOUT";
-					speed="FULL";
-					combat="AWARE";
-					completitionRadius=20;
-					synchronizations[]={};
-					class Effects
-					{
-					};
-					showWP="NEVER";
-				};
-				class Item1
-				{
-					position[]={9800,9.405,1580};
-					speed="FULL";
-					combat="AWARE";
-					formation="LINE";
-					synchronizations[]={};
-					class Effects
-					{
-					};
-					showWP="NEVER";
-				};
-				class Item2
-				{
-					position[]={9780,20.738,1630};
-					speed="NORMAL";
-					combat="AWARE";
-					formation="LINE";
-					synchronizations[]={};
-					class Effects
-					{
-					};
-					showWP="NEVER";
 				};
 			};
 		};
@@ -553,9 +411,8 @@ class Mission
 				items=6;
 				class Item0
 				{
-					position[]={10330,0,1090};
+					position[]={10300,0,1215};
 					azimut=340;
-					special="CARGO";
 					id=18;
 					side="WEST";
 					vehicle="SoldierWB";
@@ -567,9 +424,8 @@ class Mission
 				};
 				class Item1
 				{
-					position[]={10333,0,1090};
+					position[]={10303,0,1215};
 					azimut=340;
-					special="CARGO";
 					id=19;
 					side="WEST";
 					vehicle="SoldierWMG";
@@ -578,9 +434,8 @@ class Mission
 				};
 				class Item2
 				{
-					position[]={10336,0,1090};
+					position[]={10306,0,1215};
 					azimut=340;
-					special="CARGO";
 					id=20;
 					side="WEST";
 					vehicle="SoldierWAT";
@@ -589,9 +444,8 @@ class Mission
 				};
 				class Item3
 				{
-					position[]={10339,0,1090};
+					position[]={10309,0,1215};
 					azimut=340;
-					special="CARGO";
 					id=21;
 					side="WEST";
 					vehicle="SoldierWG";
@@ -600,9 +454,8 @@ class Mission
 				};
 				class Item4
 				{
-					position[]={10342,0,1090};
+					position[]={10312,0,1215};
 					azimut=340;
-					special="CARGO";
 					id=22;
 					side="WEST";
 					vehicle="SoldierWB";
@@ -611,55 +464,13 @@ class Mission
 				};
 				class Item5
 				{
-					position[]={10345,0,1090};
+					position[]={10315,0,1215};
 					azimut=340;
-					special="CARGO";
 					id=23;
 					side="WEST";
 					vehicle="SoldierWB";
 					skill=0.7;
 					text="s3_5";
-				};
-			};
-			class Waypoints
-			{
-				items=3;
-				class Item0
-				{
-					position[]={9975,0,1482};
-					type="GETOUT";
-					speed="FULL";
-					combat="AWARE";
-					completitionRadius=20;
-					synchronizations[]={};
-					class Effects
-					{
-					};
-					showWP="NEVER";
-				};
-				class Item1
-				{
-					position[]={9875,9.405,1575};
-					speed="FULL";
-					combat="AWARE";
-					formation="LINE";
-					synchronizations[]={};
-					class Effects
-					{
-					};
-					showWP="NEVER";
-				};
-				class Item2
-				{
-					position[]={9870,21.006,1625};
-					speed="NORMAL";
-					combat="AWARE";
-					formation="LINE";
-					synchronizations[]={};
-					class Effects
-					{
-					};
-					showWP="NEVER";
 				};
 			};
 		};
@@ -671,9 +482,8 @@ class Mission
 				items=6;
 				class Item0
 				{
-					position[]={10360,0,1050};
+					position[]={10335,0,1180};
 					azimut=340;
-					special="CARGO";
 					id=24;
 					side="WEST";
 					vehicle="SoldierWB";
@@ -685,9 +495,8 @@ class Mission
 				};
 				class Item1
 				{
-					position[]={10363,0,1050};
+					position[]={10338,0,1180};
 					azimut=340;
-					special="CARGO";
 					id=25;
 					side="WEST";
 					vehicle="SoldierWMG";
@@ -696,9 +505,8 @@ class Mission
 				};
 				class Item2
 				{
-					position[]={10366,0,1050};
+					position[]={10341,0,1180};
 					azimut=340;
-					special="CARGO";
 					id=26;
 					side="WEST";
 					vehicle="SoldierWLAW";
@@ -707,9 +515,8 @@ class Mission
 				};
 				class Item3
 				{
-					position[]={10369,0,1050};
+					position[]={10344,0,1180};
 					azimut=340;
-					special="CARGO";
 					id=27;
 					side="WEST";
 					vehicle="SoldierWG";
@@ -718,9 +525,8 @@ class Mission
 				};
 				class Item4
 				{
-					position[]={10372,0,1050};
+					position[]={10347,0,1180};
 					azimut=340;
-					special="CARGO";
 					id=28;
 					side="WEST";
 					vehicle="SoldierWB";
@@ -729,55 +535,13 @@ class Mission
 				};
 				class Item5
 				{
-					position[]={10375,0,1050};
+					position[]={10350,0,1180};
 					azimut=340;
-					special="CARGO";
 					id=29;
 					side="WEST";
 					vehicle="SoldierWMedic";
 					skill=0.7;
 					text="s4_5";
-				};
-			};
-			class Waypoints
-			{
-				items=3;
-				class Item0
-				{
-					position[]={10075,0,1468};
-					type="GETOUT";
-					speed="FULL";
-					combat="AWARE";
-					completitionRadius=20;
-					synchronizations[]={};
-					class Effects
-					{
-					};
-					showWP="NEVER";
-				};
-				class Item1
-				{
-					position[]={9950,11.52,1560};
-					speed="FULL";
-					combat="AWARE";
-					formation="LINE";
-					synchronizations[]={};
-					class Effects
-					{
-					};
-					showWP="NEVER";
-				};
-				class Item2
-				{
-					position[]={9960,22.61,1610};
-					speed="NORMAL";
-					combat="AWARE";
-					formation="LINE";
-					synchronizations[]={};
-					class Effects
-					{
-					};
-					showWP="NEVER";
 				};
 			};
 		};
@@ -1011,7 +775,7 @@ class Mission
 				items=2;
 				class Item0
 				{
-					position[]={6300,120,1250};
+					position[]={7000,120,1300};
 					azimut=85;
 					special="FLY";
 					id=34;
@@ -1024,7 +788,7 @@ class Mission
 				};
 				class Item1
 				{
-					position[]={6250,120,1180};
+					position[]={6950,120,1230};
 					azimut=85;
 					special="FLY";
 					id=35;
@@ -1104,8 +868,8 @@ class Mission
 				items=2;
 				class Item0
 				{
-					position[]={12400,150,4200};
-					azimut=200;
+					position[]={1500,150,8000};
+					azimut=145;
 					special="FLY";
 					id=36;
 					side="WEST";
@@ -1113,19 +877,19 @@ class Mission
 					leader=1;
 					skill=0.7;
 					text="a3";
-					init="this flyInHeight 90; this setBehaviour ""CARELESS""; this setCombatMode ""BLUE""";
+					init="this flyInHeight 80; this setBehaviour ""CARELESS""; this setCombatMode ""BLUE""";
 				};
 				class Item1
 				{
-					position[]={12450,150,4260};
-					azimut=200;
+					position[]={1450,150,8070};
+					azimut=145;
 					special="FLY";
 					id=37;
 					side="WEST";
 					vehicle="A10";
 					skill=0.7;
 					text="a4";
-					init="this flyInHeight 90";
+					init="this flyInHeight 80";
 				};
 			};
 			class Waypoints
@@ -1133,10 +897,9 @@ class Mission
 				items=5;
 				class Item0
 				{
-					position[]={12300,90,4000};
-					speed="NORMAL";
+					position[]={5500,80,2500};
+					speed="FULL";
 					combat="CARELESS";
-					expCond="go2";
 					synchronizations[]={};
 					class Effects
 					{
@@ -1145,7 +908,7 @@ class Mission
 				};
 				class Item1
 				{
-					position[]={11200,60,1700};
+					position[]={9900,60,1450};
 					speed="FULL";
 					combat="CARELESS";
 					synchronizations[]={};
@@ -1156,7 +919,7 @@ class Mission
 				};
 				class Item2
 				{
-					position[]={9800,60,1500};
+					position[]={13000,80,1300};
 					speed="FULL";
 					combat="CARELESS";
 					synchronizations[]={};
@@ -1167,7 +930,7 @@ class Mission
 				};
 				class Item3
 				{
-					position[]={7000,90,1700};
+					position[]={12000,90,4000};
 					speed="FULL";
 					combat="CARELESS";
 					synchronizations[]={};
@@ -1178,7 +941,7 @@ class Mission
 				};
 				class Item4
 				{
-					position[]={7500,90,3500};
+					position[]={6000,90,5000};
 					type="CYCLE";
 					speed="FULL";
 					combat="CARELESS";
@@ -1189,6 +952,26 @@ class Mission
 					showWP="NEVER";
 				};
 			};
+		};
+	};
+	class Sensors
+	{
+		items=1;
+		class Item0
+		{
+			position[]={9950,3.105,1500};
+			a=0;
+			b=0;
+			interruptable=1;
+			type="END1";
+			age="UNKNOWN";
+			text="showcase end";
+			expCond="showcaseDone";
+			expActiv="forceEnd";
+			class Effects
+			{
+			};
+			synchronizations[]={};
 		};
 	};
 };

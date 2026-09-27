@@ -3,25 +3,40 @@
 ; beach, UH-60s / a Chinook / a Cobra over the bay and two A-10 passes. Ends itself at 120 s.
 ; Positions here are [east, north, height above the ground or sea surface].
 
+go = false
+go2 = false
+showcaseDone = false
+player setCaptive true
+player moveInCargo lst1
+
 setViewDistance 3000
-showCinemaBorder false
 enableRadio false
 
-_cam = "camera" camCreate [10450, 690, 6]
+; each squad: its boat, its beach point, then a rally point on the flat ground behind the beach
+; and a point further inland (all [east, north, 0])
+[s1, pbr1, [9850, 1458, 0], [9725, 1560, 0], [9690, 1610, 0]] exec "land.sqs"
+[s2, pbr2, [9900, 1472, 0], [9800, 1580, 0], [9780, 1630, 0]] exec "land.sqs"
+[s3, pbr3, [9975, 1482, 0], [9875, 1575, 0], [9870, 1625, 0]] exec "land.sqs"
+[s4, pbr4, [10075, 1468, 0], [9950, 1560, 0], [9960, 1610, 0]] exec "land.sqs"
+
+_cam = "camera" camCreate [10420, 880, 7]
 _cam cameraEffect ["internal", "back"]
+; (after cameraEffect: a camera effect turns the cinema border back on)
+showCinemaBorder false
 _cam camSetFov 0.75
 _cam camSetTarget lst1
 _cam camCommit 0
 titleCut ["", "BLACK IN", 3]
 titleText ["Tidewater - Everon, south coast", "PLAIN DOWN", 1]
 
-; --- shot 1 (0-18 s): skimming the open sea toward the LST and the boats alongside it
-_cam camSetPos [10380, 905, 9]
-_cam camCommit 18
-@_time > 17.5
+; --- shot 1 (0-12 s): skimming the open sea toward the LST as the boats pull away from it
+_cam camSetPos [10340, 1060, 10]
+_cam camCommit 12
+@_time > 3
 go = true
+@_time > 12
 
-; --- shot 2 (18-40 s): chasing PBR 2 on its run to the beach (A-10s cross the coast ~30 s)
+; --- shot 2 (12-34 s): chasing PBR 2 on its run to the beach (the first A-10 pair crosses ~27 s)
 _cam camSetTarget pbr2
 _cam camSetRelPos [9, -24, 5]
 _cam camCommit 0
@@ -29,47 +44,47 @@ _cam camCommit 0
 _cam camSetRelPos [9, -24, 5]
 _cam camCommit 0.25
 ~0.25
-?_time < 40 : goto "chase"
+?_time < 34 : goto "chase"
 
-; --- shot 3 (40-62 s): from the sand at the west end of the beach, the boats arriving through the surf
-_cam camSetPos [9785, 1405, 2.5]
+; --- shot 3 (34-58 s): from the sand at the west end of the beach, the boats arriving through the surf
+_cam camSetPos [9785, 1408, 4.5]
 _cam camSetTarget pbr1
 _cam camSetFov 0.6
 _cam camCommit 0
-_cam camSetPos [9800, 1415, 3.5]
-_cam camCommit 22
-@_time > 62
+_cam camSetPos [9805, 1418, 6]
+_cam camCommit 24
+@_time > 58
 
-; --- shot 4 (62-85 s): crane up over the surf as the squads wade ashore and run for the dunes
+; --- shot 4 (58-82 s): crane up over the surf as the squads wade ashore and run for the flat ground
 _cam camSetPos [10010, 1370, 10]
 _cam camSetTarget [9890, 1520, 2]
 _cam camSetFov 0.75
 _cam camCommit 0
 _cam camSetPos [9905, 1415, 28]
-_cam camCommit 23
-; make sure nobody is left aboard a boat that has reached the beach
-"if (vehicle _x != _x) then {unassignVehicle _x; _x action [""GETOUT"", vehicle _x]}" forEach (units s1 + units s2 + units s3 + units s4)
+_cam camCommit 24
+@_time > 62
 go2 = true
-@_time > 85
+@_time > 82
 
-; --- shot 5 (85-105 s): behind the LST looking at the coast, the second A-10 pair crossing the beachhead
-_cam camSetPos [10560, 1160, 40]
+; --- shot 5 (82-105 s): behind the LST looking at the coast, the second A-10 pair crossing the beachhead
+_cam camSetPos [10560, 1200, 40]
 _cam camSetTarget [9950, 1520, 0]
 _cam camSetFov 0.7
 _cam camCommit 0
-_cam camSetPos [10360, 1010, 55]
-_cam camCommit 20
+_cam camSetPos [10380, 1060, 55]
+_cam camCommit 23
 @_time > 105
 
 ; --- shot 6 (105-120 s): pull back and up to reveal the whole bay, then fade out
-_cam camSetPos [10150, 1250, 18]
+_cam camSetPos [10080, 1340, 22]
 _cam camSetTarget [9950, 1500, 0]
 _cam camSetFov 0.8
 _cam camCommit 0
-_cam camSetPos [10260, 780, 190]
+_cam camSetPos [10150, 760, 190]
 _cam camCommit 15
 @_time > 116
 titleCut ["", "BLACK OUT", 3]
 @_time > 120
-endMission "END1"
+; the END1 trigger in mission.sqm ends the mission (this build has no endMission command)
+showcaseDone = true
 exit
