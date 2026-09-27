@@ -959,6 +959,8 @@ void RegisterScreenshot(HarnessServer& hs)
             WARM_PREP_FIELD(warmTextureQueueBytes);
             WARM_PREP_FIELD(warmTextureMs);
 #undef WARM_PREP_FIELD
+            cJSON_AddNumberToObject(result, "coldAlphaPeeks", static_cast<double>(
+                Poseidon::Dev::GTextureStreamCounters().coldAlphaPeeks.load(std::memory_order_relaxed)));
             const auto texturePrep = render::PreparedTextureStore::Instance().SnapshotStats();
             cJSON_AddNumberToObject(result, "warmPreparedPuts", static_cast<double>(texturePrep.warmPuts));
             cJSON_AddNumberToObject(result, "warmPreparedTakes", static_cast<double>(texturePrep.warmTakes));

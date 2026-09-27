@@ -1,10 +1,12 @@
-param([switch]$Disabled,[string]$Label='cold-paa-handoff',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',[string]$Python='C:\Program Files\Python311\python.exe')
+param([switch]$Disabled,[switch]$RequireAlphaPeek,[string]$Label='cold-paa-handoff',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',[string]$Python='C:\Program Files\Python311\python.exe')
 $ErrorActionPreference='Stop'
+if($Disabled -and $RequireAlphaPeek){throw 'Alpha peek requires the cold handoff option'}
 if($Label -notmatch '^[a-zA-Z0-9_-]{1,64}$'){throw 'Invalid bounded label'}
 if(!$env:LOCK_OWNER){
  $shell=Join-Path $PSHOME $(if($PSVersionTable.PSEdition -eq 'Core'){'pwsh.exe'}else{'powershell.exe'})
  $args=@((Join-Path $PSScriptRoot 'with-game-lock.sh'),$shell.Replace('\','/'),'-NoProfile','-File',$PSCommandPath,'-Label',$Label,'-GameDir',$GameDir,'-Python',$Python)
  if($Disabled){$args+='-Disabled'}
+ if($RequireAlphaPeek){$args+='-RequireAlphaPeek'}
  $env:LOCK_OWNER='cold PAA owned handoff fixture'
  try{& 'C:\Program Files\Git\bin\bash.exe' @args;if($LASTEXITCODE){throw "Fixture child failed $LASTEXITCODE"}}finally{Remove-Item Env:LOCK_OWNER}
  return
@@ -76,6 +78,9 @@ try{
  $until=[DateTime]::UtcNow.AddSeconds(60)
  do{Start-Sleep -Milliseconds 250;if($p.HasExited){throw 'Game exited before coverage'};$after=Sample}while((@($after.identity.objects|Where-Object {$_.present -and $_.visualResident -and $_.normalVertexBuffers -gt 0}).Count -ne 2 -or $after.camera.pending) -and [DateTime]::UtcNow -lt $until)
  $after|ConvertTo-Json -Depth 12|Set-Content (Join-Path $out 'coverage.json')
+ Require $baseline.camera @('coldAlphaPeeks');Require $after.camera @('coldAlphaPeeks')
+ if($Disabled -and ($baseline.camera.coldAlphaPeeks -ne 0 -or $after.camera.coldAlphaPeeks -ne 0)){throw 'OFF performed a cold alpha peek'}
+ if($RequireAlphaPeek -and $after.camera.coldAlphaPeeks -le $baseline.camera.coldAlphaPeeks){throw 'NotExercised: no actual operation-local cold alpha classification'}
  if(@($after.identity.objects|Where-Object {$_.present -and $_.visualResident -and $_.normalVertexBuffers -gt 0}).Count -ne 2 -or !$after.camera.valid -or $after.camera.pending -or $after.camera.resident -ne 2 -or $after.camera.desired -ne 2 -or $after.camera.required -ne 0 -or $after.camera.budget -ne 20000){throw 'Original two-model coverage not established'}
  Start-Sleep -Seconds 3
  $archiveAfter=Send @{cmd='archive_source_bindings'};Require $archiveAfter @('enabled','liveBindings','knownCppBytes','wrappedReads','initRetains')

@@ -17,6 +17,7 @@ param(
     [switch]$SectionReuse,
     [switch]$LodReuse,
     [switch]$ModelRowUpload,
+    [switch]$GeometryCopyDiagnostics,
     [string]$Label = 'dayz-streaming-latency',
     [string]$GameDir = 'D:\SteamLibrary\steamapps\common\ARMA Cold War Assault'
 )
@@ -48,6 +49,7 @@ if (!$env:LOCK_OWNER) {
         if ($SectionReuse) { $argv += '-SectionReuse' }
         if ($LodReuse) { $argv += '-LodReuse' }
         if ($ModelRowUpload) { $argv += '-ModelRowUpload' }
+        if ($GeometryCopyDiagnostics) { $argv += '-GeometryCopyDiagnostics' }
         & 'C:\Program Files\Git\bin\bash.exe' @argv
         if ($LASTEXITCODE) { throw "Latency screening exited $LASTEXITCODE" }
     } finally { Remove-Item Env:LOCK_OWNER }
@@ -91,6 +93,7 @@ $environment = @{
     WGR_CULL_SECTION_REUSE = $(if ($SectionReuse) { '1' } else { '0' })
     WGR_CULL_LOD_REUSE = $(if ($LodReuse) { '1' } else { '0' })
     WGR_CULL_MODEL_ROW_UPLOAD = $(if ($ModelRowUpload) { '1' } else { '0' })
+    WGR_GEO_POOL_COPY_DIAGNOSTICS = $(if ($GeometryCopyDiagnostics) { '1' } else { '0' })
     WGR_WATER_BACKEND = '0'
 }
 if ($TerrainPageTimings) {

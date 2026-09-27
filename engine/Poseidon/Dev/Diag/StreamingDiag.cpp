@@ -48,6 +48,7 @@ StreamingSnapshot CollectStreamingSnapshot()
     out.tex.alphaUs = c.alphaUs.load(std::memory_order_relaxed);
     out.tex.alphaBlockScans = c.alphaBlockScans.load(std::memory_order_relaxed);
     out.tex.alphaHandoffs = c.alphaHandoffs.load(std::memory_order_relaxed);
+    out.tex.coldAlphaPeeks = c.coldAlphaPeeks.load(std::memory_order_relaxed);
     out.tex.preparedHits = c.preparedHits.load(std::memory_order_relaxed);
     out.tex.lastFrameUploads = c.lastFrameUploads;
     out.tex.lastFrameUploadBytes = c.lastFrameUploadBytes;

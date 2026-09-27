@@ -214,6 +214,14 @@ impl RangeAllocator {
             .filter(|&(off, len)| off.saturating_add(len) == self.cap)
     }
 
+    // All live spans end at or before this prefix. Interior holes still belong to
+    // the copy: used() is a SUM and cannot locate the last live allocation.
+    // A trailing free block is sorted/coalesced and touches cap; its start is the
+    // exclusive live high-water bound. No scan, remap or new allocator state.
+    fn occupied_prefix_units(&self) -> u32 {
+        self.trailing_free().map_or(self.cap, |(off, _)| off)
+    }
+
     // Reduce capacity to `new_cap`. Only legal when `new_cap` is at or above the start of
     // the trailing free block — i.e. nothing live sits at or above `new_cap`. Returns false
     // and changes nothing otherwise, so a caller that got the arithmetic wrong loses the
@@ -487,7 +495,7 @@ impl GeometryPool {
                 queue,
                 &self.vbuf,
                 &new_buf,
-                new_cap as u64 * VERT_SIZE,
+                u64::from(self.valloc.occupied_prefix_units()) * VERT_SIZE,
                 "v",
             );
             let old = std::mem::replace(&mut self.vbuf, new_buf);
@@ -504,7 +512,7 @@ impl GeometryPool {
                 queue,
                 &self.ibuf,
                 &new_buf,
-                new_cap as u64 * INDEX_SIZE,
+                u64::from(self.ialloc.occupied_prefix_units()) * INDEX_SIZE,
                 "i",
             );
             let old = std::mem::replace(&mut self.ibuf, new_buf);
@@ -634,7 +642,7 @@ impl GeometryPool {
             queue,
             &self.vbuf,
             &new_buf,
-            cap as u64 * VERT_SIZE,
+            u64::from(self.valloc.occupied_prefix_units()) * VERT_SIZE,
             "v",
         );
         let old_v = std::mem::replace(&mut self.vbuf, new_buf);
@@ -658,7 +666,7 @@ impl GeometryPool {
             queue,
             &self.ibuf,
             &new_buf,
-            cap as u64 * INDEX_SIZE,
+            u64::from(self.ialloc.occupied_prefix_units()) * INDEX_SIZE,
             "i",
         );
         let old_i = std::mem::replace(&mut self.ibuf, new_buf);
@@ -670,8 +678,11 @@ impl GeometryPool {
         self.ialloc.alloc(n).expect("post-grow index alloc")
     }
 
-    // Copy the used prefix of `old` into `new` (growth preserves every existing
-    // allocation at its offset; the appended tail is fresh free space). Load-time only.
+    // Copy through the last possible live allocation, preserving offsets and all
+    // interior gaps. Omit only the unallocated trailing bytes: later allocations
+    // write their entire spans, and free-range contents have no consumer contract.
+    // u32 units * fixed u64 element size cannot overflow; both element sizes are
+    // multiples of COPY_BUFFER_ALIGNMENT. Capacity/growth/shrink policy is unchanged.
     fn copy_prefix(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -680,6 +691,14 @@ impl GeometryPool {
         bytes: u64,
         tag: &str,
     ) {
+        const { assert!(VERT_SIZE % wgpu::COPY_BUFFER_ALIGNMENT == 0); }
+        const { assert!(INDEX_SIZE % wgpu::COPY_BUFFER_ALIGNMENT == 0); }
+        debug_assert!(bytes <= old.size() && bytes <= new.size());
+        debug_assert_eq!(bytes % wgpu::COPY_BUFFER_ALIGNMENT, 0);
+        note_prefix_copy(tag, old.size().min(new.size()), bytes);
+        if bytes == 0 {
+            return; // No live span: no empty encoder/submit or invalid zero-sized copy.
+        }
         let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some(if tag == "v" {
                 "wgr_geo_pool_grow_v"
@@ -689,6 +708,30 @@ impl GeometryPool {
         });
         enc.copy_buffer_to_buffer(old, 0, new, 0, bytes);
         queue.submit(std::iter::once(enc.finish()));
+    }
+}
+
+// Optional bounded reallocation-only evidence, not a frame timing, memory budget
+// or route-total guarantee. Counters/log formatting are absent unless exact1.
+// The cumulative prefix ends after32 notices; the cap marker is explicit.
+fn note_prefix_copy(tag: &str, nominal: u64, copied: u64) {
+    use std::sync::{atomic::{AtomicU64, Ordering::Relaxed}, OnceLock};
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    if !*ENABLED.get_or_init(|| std::env::var("WGR_GEO_POOL_COPY_DIAGNOSTICS").is_ok_and(|v| v == "1")) {
+        return;
+    }
+    static NOTICES: AtomicU64 = AtomicU64::new(0);
+    static NOMINAL: AtomicU64 = AtomicU64::new(0);
+    static COPIED: AtomicU64 = AtomicU64::new(0);
+    let notice = NOTICES.fetch_add(1, Relaxed);
+    if notice < 32 {
+        // At most32 bounded u32-span buffer sizes: these sums fit u64.
+        let nominal_total = NOMINAL.fetch_add(nominal, Relaxed) + nominal;
+        let copied_total = COPIED.fetch_add(copied, Relaxed) + copied;
+        pool_event(&format!("occupied-prefix copy{} kind{} nominal{} copied{} cumulativeNominal{} cumulativeCopied{} scope=process-prefix",
+            notice + 1, tag, nominal, copied, nominal_total, copied_total));
+    } else if notice == 32 {
+        pool_event("occupied-prefix copy diagnostic truncated after32; not full-route totals");
     }
 }
 
@@ -736,6 +779,103 @@ mod tests {
         let data = slice.get_mapped_range();
         let verts: &[WgrMeshVertex] = bytemuck::cast_slice(&data);
         verts.iter().map(|v| v.pos.x).collect()
+    }
+
+    #[test]
+    fn occupied_prefix_includes_holes_and_handles_empty_full_and_u32_end() {
+        let mut ranges = RangeAllocator::new(128);
+        assert_eq!(ranges.occupied_prefix_units(), 0);
+        let a = ranges.alloc(13).unwrap();
+        let hole = ranges.alloc(17).unwrap();
+        let b = ranges.alloc(29).unwrap();
+        assert_eq!(b, 30);
+        ranges.free(hole, 17);
+        assert_eq!(ranges.used(), 42);
+        assert_eq!(ranges.occupied_prefix_units(), 59); // NOT42: B crosses that sum.
+        assert!(ranges.shrink(80)); // Free headroom still omitted from copy.
+        assert_eq!(ranges.occupied_prefix_units(), 59);
+        ranges.free(b, 29);
+        assert_eq!(ranges.occupied_prefix_units(), 13);
+        ranges.free(a, 13);
+        assert_eq!(ranges.occupied_prefix_units(), 0);
+        let mut full = RangeAllocator::new(u32::MAX);
+        assert_eq!(full.alloc(u32::MAX), Some(0));
+        assert_eq!(full.occupied_prefix_units(), u32::MAX);
+        assert_eq!(u64::from(full.occupied_prefix_units()) * VERT_SIZE,
+                   u64::from(u32::MAX) * std::mem::size_of::<WgrMeshVertex>() as u64);
+        full.free(u32::MAX - 7, 7);
+        assert_eq!(full.occupied_prefix_units(), u32::MAX - 7);
+        assert_eq!(RangeAllocator::new(0).occupied_prefix_units(), 0);
+    }
+
+    fn read_pool_bytes(device: &wgpu::Device, queue: &wgpu::Queue,
+                       buffer: &wgpu::Buffer, offset: u64, size: u64) -> Vec<u8> {
+        let staging = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("occupied_prefix_readback"), size,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {label: None});
+        encoder.copy_buffer_to_buffer(buffer, offset, &staging, 0, size);
+        queue.submit(std::iter::once(encoder.finish()));
+        let slice = staging.slice(..);let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |result| { let _ = tx.send(result); });
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        rx.recv().unwrap().unwrap();
+        let bytes = slice.get_mapped_range().to_vec();staging.unmap();bytes
+    }
+
+    #[test]
+    fn occupied_prefix_growth_and_shrink_preserve_separated_gpu_vertex_and_index_spans() {
+        let Some((device, queue)) = crate::gfx3d::cull::tests::headless() else {
+            eprintln!("SKIP occupied-prefix GPU readback: no headless adapter/device");return;
+        };
+        let error_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let mut pool = GeometryPool::new(&device);
+        let (av, ai) = tagged_mesh(19, 1024.0);
+        let a = pool.alloc(&device, &queue, &av, &ai).unwrap();
+        let (hv, hi) = tagged_mesh(37, 2048.0);
+        let hole = pool.alloc(&device, &queue, &hv, &hi).unwrap();
+        let (bv, mut bi) = tagged_mesh(29, 4096.0);bi.reverse();
+        let b = pool.alloc(&device, &queue, &bv, &bi).unwrap();
+        let (tv, ti) = tagged_mesh(41, 8192.0);
+        let tail = pool.alloc(&device, &queue, &tv, &ti).unwrap();
+        pool.free(&hole, 37, 37);pool.free(&tail, 41, 41);
+        assert_eq!(pool.valloc.occupied_prefix_units(), b.vbase + 29);
+        assert_eq!(pool.ialloc.occupied_prefix_units(), b.ibase + 29);
+        assert!(pool.valloc.occupied_prefix_units() > pool.valloc.used());
+        let verify = |pool: &GeometryPool| {
+            for (allocation, vertices, indices) in [(&a, &av, &ai), (&b, &bv, &bi)] {
+                assert_eq!(read_pool_bytes(&device, &queue, pool.vbuf(),
+                    u64::from(allocation.vbase) * VERT_SIZE, vertices.len() as u64 * VERT_SIZE),
+                    bytemuck::cast_slice::<_, u8>(vertices.as_slice()));
+                assert_eq!(read_pool_bytes(&device, &queue, pool.ibuf(),
+                    u64::from(allocation.ibase) * super::INDEX_SIZE, indices.len() as u64 * super::INDEX_SIZE),
+                    bytemuck::cast_slice::<_, u8>(indices.as_slice()));
+            }
+        };
+        verify(&pool);
+        let initial_caps = (pool.valloc.cap, pool.ialloc.cap);
+        let (large_v, large_i) = tagged_mesh(600_000, 16384.0);
+        let large = pool.alloc(&device, &queue, &large_v, &large_i).unwrap();
+        assert!(pool.valloc.cap > initial_caps.0 && pool.ialloc.cap > initial_caps.1);
+        assert_eq!(pool.epoch, 2);verify(&pool); // Both real growth copies preserved A/B.
+        pool.free(&large, 600_000, 600_000);
+        pool.shrink_streak = GeometryPool::SHRINK_FRAMES - 1;
+        assert!(pool.frame_submitted(&device, &queue));
+        assert_eq!((pool.valloc.cap, pool.ialloc.cap), initial_caps);
+        verify(&pool); // Both real shrink copies preserved holes/offsets/full bytes.
+        let refill = pool.alloc(&device, &queue, &hv, &hi).unwrap();
+        assert_eq!((refill.vbase, refill.ibase), (hole.vbase, hole.ibase));
+        assert_eq!(read_pool_bytes(&device, &queue, pool.vbuf(),
+            u64::from(refill.vbase) * VERT_SIZE, hv.len() as u64 * VERT_SIZE),
+            bytemuck::cast_slice::<_, u8>(hv.as_slice()));
+        assert_eq!(read_pool_bytes(&device, &queue, pool.ibuf(),
+            u64::from(refill.ibase) * super::INDEX_SIZE, hi.len() as u64 * super::INDEX_SIZE),
+            bytemuck::cast_slice::<_, u8>(hi.as_slice()));
+        verify(&pool); // New full-span upload does not corrupt either adjacent survivor.
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        assert!(pollster::block_on(error_scope.pop()).is_none());
     }
 
     // REN-RES-002 — the central hysteresis property, on a real device.

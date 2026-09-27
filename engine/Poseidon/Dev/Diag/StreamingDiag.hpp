@@ -47,6 +47,8 @@ struct TextureStreamCounters
     // upload had just inflated the level.
     std::atomic<uint64_t> alphaBlockScans{0};
     std::atomic<uint64_t> alphaHandoffs{0};
+    // Successful non-consuming ColdOwned classifications; counted only on the opt-in path.
+    std::atomic<uint64_t> coldAlphaPeeks{0};
     // Uploads whose mip chain came out of the PreparedTextureStore (a worker read+inflated
     // it ahead of time) vs. read from the file on the main thread.
     std::atomic<uint64_t> preparedHits{0};
@@ -165,6 +167,7 @@ struct TextureStreamSnapshot
     uint64_t alphaUs = 0;
     uint64_t alphaBlockScans = 0;
     uint64_t alphaHandoffs = 0;
+    uint64_t coldAlphaPeeks = 0;
     uint64_t preparedHits = 0;
     uint64_t lastFrameUploads = 0;
     uint64_t lastFrameUploadBytes = 0;

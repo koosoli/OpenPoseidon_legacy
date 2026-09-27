@@ -1147,6 +1147,25 @@ bool TextureWgpu::ScanTopMipAlphaBlocks(AlphaScanPath& path)
         return false;
     }
 
+    // The explicit cold handoff owns these exact Init-bound bytes during shape admission.
+    // Borrow only the top mip; preserve the full chain for the subsequent GPU upload.
+    // Refusal/cancellation falls through to the existing source-reader policy.
+    if (render::ColdPaaHandoffEnabled() && render::ColdPaaAdmissionScope::HasOwnedPayload())
+    {
+        render::ColdPaaRead header;
+        AlphaStats candidate;
+        if (CaptureColdPaaRead(header) && render::ColdPaaAdmissionScope::PeekTopAlpha(
+                header.key, header.source, header, [&](const uint8_t* blocks, size_t bytes) {
+                    return ClassifyAlphaFromBlocks(blocks, bytes, w, h, fmt, candidate, Name());
+                }))
+        {
+            _alphaStats = candidate;
+            path = AlphaScanPath::ColdOwned;
+            GTextureStreamStats.coldAlphaPeeks.fetch_add(1, std::memory_order_relaxed);
+            return true;
+        }
+    }
+
     // Only the explicit PBO-texture experiment performs a lookup/native capture.
     // Facts are usable before upload; the raw chain remains available to upload.
     static const bool pboTextures = [] {

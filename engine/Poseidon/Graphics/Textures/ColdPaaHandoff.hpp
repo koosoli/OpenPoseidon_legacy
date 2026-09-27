@@ -97,6 +97,14 @@ template<class Cancelled> std::unique_ptr<ColdPaaOwned> PrepareColdPaa(
 class ColdPaaAdmissionScope
 {
     inline static thread_local ColdPaaOwned* current = nullptr;
+    static bool Eligible(const ColdPaaOwned* p, const std::string& key,
+        const std::shared_ptr<const ArchiveSourceBinding>& source, const ColdPaaRead& header)
+    {
+        return p && source && p->read.source && p->publication.Valid() && p->read.key == key &&
+            header.key == key && header.source &&
+            p->read.source->Request().SameArchiveMember(source->Request()) &&
+            header.source->Request().SameArchiveMember(source->Request()) && header.Matches(p->chain);
+    }
     ColdPaaOwned* previous = nullptr;
     bool entered = false;
 public:
@@ -107,12 +115,29 @@ public:
     ~ColdPaaAdmissionScope() { if (entered) current = previous; }
     ColdPaaAdmissionScope(const ColdPaaAdmissionScope&) = delete;
     ColdPaaAdmissionScope& operator=(const ColdPaaAdmissionScope&) = delete;
+    // Joined owner only, synchronous/non-yielding visitor: it may read the top span but
+    // must not retain it, claim this payload, mutate the chain, or switch its source.
+    // Classification goes into caller-local scratch; publish it only on a true return.
+    // This does not consume the chain. Later upload retains its exactly-once Claim.
+    static bool HasOwnedPayload() { return current != nullptr; }
+    template<class Visitor>
+    static bool PeekTopAlpha(const std::string& key, const std::shared_ptr<const ArchiveSourceBinding>& source,
+        const ColdPaaRead& currentHeader, Visitor&& visitor)
+    {
+        auto* p = current;
+        if (!Eligible(p, key, source, currentHeader) || p->chain.magic < 0xff02 || p->chain.magic > 0xff05)
+            return false; // BC1 has no multi-bit alpha; use the existing caller policy.
+        const auto& top = p->chain.levels.front();
+        if (!visitor(p->chain.blocks.data() + top.offset, top.size)) return false;
+        // Worker cancellation can race this owner-only classification. No new alpha
+        // verdict is admitted after its publication token was invalidated.
+        return current == p && Eligible(p, key, source, currentHeader);
+    }
     static bool Claim(const std::string& key, const std::shared_ptr<const ArchiveSourceBinding>& source,
         const ColdPaaRead& currentHeader, PAABlockChain& out)
     {
         auto* p = current;
-        if (!p || !source || !p->publication.Valid() || p->read.key != key ||
-            !p->read.source->Request().SameArchiveMember(source->Request()) || !currentHeader.Matches(p->chain)) return false;
+        if (!Eligible(p, key, source, currentHeader)) return false;
         out = std::move(p->chain); // Exactly once; an empty chain never matches again.
         return true;
     }

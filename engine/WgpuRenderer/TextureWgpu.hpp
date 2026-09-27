@@ -78,11 +78,12 @@ class TextureWgpu : public Texture
     // Reserve _slotLease if not already held; returns it (0 = none available).
     uint32_t AcquireSlotLease();
 
-    // How a needed alpha scan was served. The classification is identical in all three
+    // How a needed alpha scan was served. The classification is identical across these
     // cases; only the work to reach it differs, and the split is what the streaming stats
     // report.
     enum class AlphaScanPath
     {
+        ColdOwned, // non-consuming Init-bound admission span; upload still owns the full chain
         PreparedFacts, // validated leased worker facts; no owner pixel decode
         Handoff,   // the upload had just inflated this level; no file access at all
         BlockRead, // one level read from the file, alpha decoded off the blocks

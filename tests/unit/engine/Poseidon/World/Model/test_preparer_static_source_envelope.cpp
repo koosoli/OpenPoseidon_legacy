@@ -121,7 +121,7 @@ struct PaaWorkerBank
     std::string prefix, key;
     int index = -1;
     bool oldUseBanks = GUseFileBanks;
-    explicit PaaWorkerBank(bool coldInitChain = false)
+    explicit PaaWorkerBank(bool coldInitChain = false, bool bc3 = false)
     {
         const auto suffix = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
         prefix = "paa_worker_" + suffix + "\\";
@@ -138,6 +138,14 @@ struct PaaWorkerBank
             paa = {3,char(0xFF),0,0,8,0,8,0,64,0,0};
             for (int i=0;i<4;++i) paa.insert(paa.end(),block.begin(),block.end());
             paa.insert(paa.end(),4,0);
+            if(bc3) { // Original BC3 alpha endpoints/indices, not a relabelled BC2 block.
+                paa[0]=5;
+                for(int blockIndex=0;blockIndex<4;++blockIndex) {
+                    const size_t at=11+16*size_t(blockIndex);
+                    paa[at]=char(255);paa[at+1]=0;
+                    for(size_t j=2;j<8;++j)paa[at+j]=char(0x88+blockIndex);
+                }
+            }
         }
         Bytes bytes;
         const char member[] = "member.paa";
@@ -758,7 +766,7 @@ struct ColdPaaSourceFixture
         read.key = Poseidon::render::PreparedTextureStore::Key(bank.key);
         read.source = source->GetArchiveSourceBinding(); REQUIRE(read.source);
         REQUIRE(Poseidon::GFileBanks[bank.index].MatchesMountedMember("member.paa", read.source->Request()));
-        read.magic = 0xff03; read.count = size_t(source->GetMipmapCount());
+        read.magic = source->GetFormat()==Poseidon::PacDXT5 ? 0xff05 : 0xff03; read.count = size_t(source->GetMipmapCount());
         REQUIRE(read.count == 1); REQUIRE(mips[0]._w == 8); REQUIRE(mips[0]._h == 8);
         for(size_t i=0;i<read.count;++i) {
             mips[i].SetDestFormat(source->GetFormat(), 8); // Same block-preserving setup as TextureWgpu::LoadHeaders.
@@ -897,6 +905,90 @@ TEST_CASE("Cold optional Ready-byte refusal preserves ordinary converted geometr
     auto converted=prep.TakeConverted(0);std::unique_ptr<Poseidon::LODShapeWithShadow> shape(converted.shape);
     REQUIRE(shape);CHECK_FALSE(converted.coldTexture);REQUIRE(Wait([&]{return prep.SnapshotStats().conversionReservedBytes==0;}));
 }
+TEST_CASE("Cold top alpha borrows actual BC bytes without consuming the later upload", "[preparer][cold-paa-handoff][cold-paa-alpha-peek]")
+{
+    RequireColdPaaCapability();
+    bool bc3=false;
+    SECTION("original BC2 archive") {}
+    SECTION("original BC3 archive") {bc3=true;}
+    PaaWorkerBank bank(true,bc3); ColdPaaSourceFixture source(bank);
+    auto inventory=Poseidon::render::DdsPublicationInventory::Create(1); REQUIRE(inventory);
+    auto payload=Poseidon::render::PrepareColdPaa(source.read,{inventory,0,inventory->Epoch(0)},[]{return false;});
+    REQUIRE(payload);
+    const auto original=payload->chain.blocks;
+    std::vector<char> raw; REQUIRE(source.read.source->Request().Read(raw));
+    const auto decoded=Poseidon::DecodePAABuffer(raw.data(),raw.size(),true); REQUIRE(decoded.valid());
+    const auto expected=Poseidon::ClassifyAlpha(decoded.rgba.data(),64);
+    Poseidon::render::ColdPaaAdmissionScope scope(payload.get());
+    for(int repeat=0;repeat<2;++repeat) {
+        Poseidon::AlphaStats stats;
+        REQUIRE(Poseidon::render::ColdPaaAdmissionScope::PeekTopAlpha(source.read.key,source.read.source,source.read,
+            [&](const uint8_t* bytes,size_t size){
+                std::vector<uint8_t> alpha;
+                if(!Poseidon::DecodeBlockAlpha(bytes,size,8,8,bc3,alpha))return false;
+                REQUIRE(alpha.size()==64);
+                for(size_t i=0;i<alpha.size();++i) CHECK(alpha[i]==decoded.rgba[4*i+3]);
+                stats=Poseidon::ClassifyAlphaSamples(alpha.data(),alpha.size(),1); return true;
+            }));
+        CHECK(stats.kind==expected.kind); CHECK(stats.aMin==expected.aMin); CHECK(stats.aMax==expected.aMax);
+        CHECK(stats.aMean==expected.aMean); CHECK(stats.pctClear==expected.pctClear);
+        CHECK(stats.pctOpaque==expected.pctOpaque); CHECK(stats.pctPartial==expected.pctPartial); CHECK(stats.pctMid==expected.pctMid);
+        CHECK(payload->chain.blocks==original);
+    }
+    Poseidon::PAABlockChain upload;
+    REQUIRE(Poseidon::render::ColdPaaAdmissionScope::Claim(source.read.key,source.read.source,source.read,upload));
+    CHECK(upload.blocks==original);
+    CHECK_FALSE(Poseidon::render::ColdPaaAdmissionScope::PeekTopAlpha(source.read.key,source.read.source,source.read,
+        [](const uint8_t*,size_t){FAIL("Consumed upload cannot be visited");return true;}));
+}
+
+TEST_CASE("Cold alpha refuses stale headers and physical sources before visiting", "[preparer][cold-paa-handoff][cold-paa-alpha-peek]")
+{
+    RequireColdPaaCapability(); PaaWorkerBank bank(true), otherBank(true);
+    ColdPaaSourceFixture source(bank), other(otherBank);
+    auto inventory=Poseidon::render::DdsPublicationInventory::Create(1); REQUIRE(inventory);
+    auto payload=Poseidon::render::PrepareColdPaa(source.read,{inventory,0,inventory->Epoch(0)},[]{return false;}); REQUIRE(payload);
+    Poseidon::render::ColdPaaAdmissionScope scope(payload.get()); unsigned calls=0;
+    auto visit=[&](const uint8_t*,size_t){++calls;return true;};
+    auto changed=source.read; ++changed.levels[0].header;
+    CHECK_FALSE(Poseidon::render::ColdPaaAdmissionScope::PeekTopAlpha(source.read.key,source.read.source,changed,visit));
+    changed=source.read; ++changed.levels[0].bytes;
+    CHECK_FALSE(Poseidon::render::ColdPaaAdmissionScope::PeekTopAlpha(source.read.key,source.read.source,changed,visit));
+    CHECK_FALSE(Poseidon::render::ColdPaaAdmissionScope::PeekTopAlpha(source.read.key+"wrong",source.read.source,source.read,visit));
+    CHECK_FALSE(Poseidon::render::ColdPaaAdmissionScope::PeekTopAlpha(source.read.key,other.read.source,source.read,visit));
+    CHECK(calls==0); REQUIRE(payload->chain.valid());
+    inventory->CancelModel(0);
+    CHECK_FALSE(Poseidon::render::ColdPaaAdmissionScope::PeekTopAlpha(source.read.key,source.read.source,source.read,visit));
+    CHECK(calls==0);
+}
+
+TEST_CASE("Cold alpha cancellation before commit keeps the old verdict and scoped lifetime", "[preparer][cold-paa-handoff][cold-paa-alpha-peek]")
+{
+    RequireColdPaaCapability(); PaaWorkerBank bank(true); ColdPaaSourceFixture source(bank);
+    auto inventory=Poseidon::render::DdsPublicationInventory::Create(1); REQUIRE(inventory);
+    auto payload=Poseidon::render::PrepareColdPaa(source.read,{inventory,0,inventory->Epoch(0)},[]{return false;}); REQUIRE(payload);
+    auto innerInventory=Poseidon::render::DdsPublicationInventory::Create(1); REQUIRE(innerInventory);
+    auto inner=Poseidon::render::PrepareColdPaa(source.read,{innerInventory,0,innerInventory->Epoch(0)},[]{return false;}); REQUIRE(inner);
+    const auto original=payload->chain.blocks;
+    Poseidon::render::ColdPaaAdmissionScope scope(payload.get());
+    CHECK_THROWS_AS(Poseidon::render::ColdPaaAdmissionScope::PeekTopAlpha(source.read.key,source.read.source,source.read,
+        [&](const uint8_t*,size_t)->bool{Poseidon::render::ColdPaaAdmissionScope nested(inner.get());throw std::runtime_error("original classifier failure");}),std::runtime_error);
+    REQUIRE(Poseidon::render::ColdPaaAdmissionScope::PeekTopAlpha(source.read.key,source.read.source,source.read,
+        [](const uint8_t*,size_t){return true;})); // Nested failure restored the outer admission.
+    Poseidon::AlphaStats visible; visible.aMean=123;
+    Poseidon::AlphaStats candidate;
+    bool called=false;
+    if(Poseidon::render::ColdPaaAdmissionScope::PeekTopAlpha(source.read.key,source.read.source,source.read,
+        [&](const uint8_t* bytes,size_t size){std::vector<uint8_t> alpha;called=true;
+            REQUIRE(Poseidon::DecodeBlockAlpha(bytes,size,8,8,false,alpha));
+            candidate=Poseidon::ClassifyAlphaSamples(alpha.data(),alpha.size(),1);
+            inventory->CancelModel(0); return true;})) visible=candidate;
+    CHECK(called); CHECK(visible.aMean==123); CHECK(payload->chain.blocks==original);
+    Poseidon::PAABlockChain upload;
+    CHECK_FALSE(Poseidon::render::ColdPaaAdmissionScope::Claim(source.read.key,source.read.source,source.read,upload));
+    CHECK_FALSE(upload.valid());
+}
+
 #endif
 TEST_CASE("Cold texture delivery stays unallocated when its dedicated option is OFF", "[preparer][cold-paa-default]")
 {
