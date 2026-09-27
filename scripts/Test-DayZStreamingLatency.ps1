@@ -18,10 +18,13 @@ param(
     [switch]$LodReuse,
     [switch]$ModelRowUpload,
     [switch]$GeometryCopyDiagnostics,
+    [switch]$ColdPaaHandoff,
+    [switch]$RequireColdAlphaPeek,
     [string]$Label = 'dayz-streaming-latency',
     [string]$GameDir = 'D:\SteamLibrary\steamapps\common\ARMA Cold War Assault'
 )
 $ErrorActionPreference = 'Stop'
+if ($RequireColdAlphaPeek) { $ColdPaaHandoff = $true }
 if ($RequireWarmMaterialStageUpload) { $WarmTextureJobs = $true; $WarmProfile = $true }
 if ($WarmTextureJobs) { $ArchiveSourceBindings = $true }
 if ($RegistrationQuota -and $AdmissionMode -ne 'Counted') { throw 'Registration quota requires counted admission' }
@@ -50,6 +53,8 @@ if (!$env:LOCK_OWNER) {
         if ($LodReuse) { $argv += '-LodReuse' }
         if ($ModelRowUpload) { $argv += '-ModelRowUpload' }
         if ($GeometryCopyDiagnostics) { $argv += '-GeometryCopyDiagnostics' }
+        if ($ColdPaaHandoff) { $argv += '-ColdPaaHandoff' }
+        if ($RequireColdAlphaPeek) { $argv += '-RequireColdAlphaPeek' }
         & 'C:\Program Files\Git\bin\bash.exe' @argv
         if ($LASTEXITCODE) { throw "Latency screening exited $LASTEXITCODE" }
     } finally { Remove-Item Env:LOCK_OWNER }
@@ -86,6 +91,8 @@ $environment = @{
     WGR_OBJECT_STREAM_TEST_BUDGET = '1'; WGR_OBJECT_STREAM_MAX_OBJECTS = '20000'
     WGR_OBJECT_STREAM_GPU_BUDGET = '0'; WGR_GEO_POOL_GROWTH = '2.0'; WGR_GEO_POOL_PRESSURE_GROWTH = '0'
     WGR_OBJECT_STREAM_PBO = '1'; WGR_OBJECT_STREAM_PBO_TEXTURES = '0'
+    # Texture admission is independent of Mode's simulation-only Cold controls.
+    WGR_OBJECT_STREAM_COLD_TEXTURE_HANDOFF = $(if ($ColdPaaHandoff) { '1' } else { '0' })
     WGR_NATIVE_DDS_PREPARE = '0'; WGR_NATIVE_DDS_BC3_ONLY = '0'
     WGR_ADAPTIVE_TEXTURE_DETAIL = '0'; WGR_LOD_GOVERNOR_RANGE = '1'; WGR_SKY_VOLUME_INCREMENTAL = '1'
     WGR_TEXTURE_STREAM_STATS = '0'; WGR_RENDER_CALL_CPU_TIMINGS = '0'
@@ -135,6 +142,8 @@ try {
         packedTextures = [bool]$PackedTextures; paaPreparationInflight = [bool]$PaaPreparationInflight
         registrationQuota = [bool]$RegistrationQuota
         archiveSourceBindings = [bool]$ArchiveSourceBindings
+        coldPaaHandoff = [bool]$ColdPaaHandoff; requireColdAlphaPeek = [bool]$RequireColdAlphaPeek
+        coldPaaHandoffEnvironment = [string]$environment.WGR_OBJECT_STREAM_COLD_TEXTURE_HANDOFF
         warmTextureJobs = [bool]$WarmTextureJobs
         requireWarmMaterialStageUpload = [bool]$RequireWarmMaterialStageUpload
         renderCallCpuTimings = [bool]$TerrainPageTimings
@@ -176,6 +185,10 @@ try {
         if ($p.HasExited) { throw 'Owned game exited before completion' }
         $camera = Send @{cmd = 'stream_residency'}; $simulation = Send @{cmd = 'stream_simulation_residency'}
         if (!$camera.valid -or $camera.budget -ne 20000 -or $camera.required -ne 0 -or $simulation.requiredObjects -ne 0) { throw 'Coverage validity, budget or required pins changed' }
+        if ($null -eq $camera.coldAlphaPeeks -or $camera.coldAlphaPeeks -lt 0 -or
+            [double]::IsNaN([double]$camera.coldAlphaPeeks) -or [double]::IsInfinity([double]$camera.coldAlphaPeeks) -or
+            $camera.coldAlphaPeeks -ne [math]::Truncate([double]$camera.coldAlphaPeeks)) { throw 'Missing or invalid cold alpha commit counter' }
+        if (!$ColdPaaHandoff -and $camera.coldAlphaPeeks -ne 0) { throw 'OFF performed a cold owned alpha peek' }
         if ($Mode -eq 'Disabled' -and ($simulation.status -ne 'Disabled' -or $simulation.positiveColdRequested -ne 0 -or $simulation.positiveColdCreated -ne 0)) { throw 'Disabled mode performed simulation residency or cold admission' }
         if ($Mode -eq 'Cold' -and (($simulation.metadataComplete -and $simulation.status -ne 'CapacityExceeded') -or $simulation.readyRegions -ne 0 -or $simulation.readyQueries -ne 0)) { throw 'Partial production service fabricated full readiness' }
         foreach ($field in @('warmTextureJobsEnabled','warmTextureQueued','warmTextureActive',
@@ -250,6 +263,26 @@ try {
     if ($WarmProfile -and !(Select-String -LiteralPath $log -Pattern 'Object stream warm update profile: row=' -Quiet)) { throw 'Warm admission profile did not observe a measured update' }
     # Filename family does NOT establish an actual shader/material-slot role.
     # Emitted only after current-source/layout validation and successful worker-chain upload.
+    $coldUploadRows = @(Select-String -LiteralPath $log -SimpleMatch 'Cold PAA handoff upload:')
+    $coldUploadMatches = @(Select-String -LiteralPath $log -Pattern 'Cold PAA handoff upload: source=(.+?) bytes=(\d+) sourceValidated=true blockUploadSucceeded=true operationLocal=true row=(\d+) limit=16')
+    if ($coldUploadRows.Count -ne $coldUploadMatches.Count -or $coldUploadMatches.Count -gt 16) { throw 'Malformed or unbounded cold owned upload witness' }
+    $coldUploadObservations = @($coldUploadMatches | ForEach-Object {
+        $match=$_.Matches[0];$source=[string]$match.Groups[1].Value
+        $bytes=[uint64]$match.Groups[2].Value;$row=[uint64]$match.Groups[3].Value
+        if (!$source.Length -or $source.Length -gt 8191 -or !$bytes -or $bytes -gt 16777216 -or !$row -or $row -gt 16) { throw 'Invalid cold owned upload witness fields' }
+        @{source=$source;bytes=$bytes;row=$row;sourceValidated=$true;blockUploadSucceeded=$true;operationLocal=$true}
+    })
+    if (!$ColdPaaHandoff -and $coldUploadObservations.Count) { throw 'Cold handoff upload occurred in OFF control' }
+    $coldPeekDelta = $returned.camera.coldAlphaPeeks - $baseline.camera.coldAlphaPeeks
+    if ($coldPeekDelta -lt 0) { throw 'Cold alpha cumulative counter went backwards' }
+    $coldAlphaProven = !$RequireColdAlphaPeek -or ($coldPeekDelta -gt 0 -and $coldUploadObservations.Count -gt 0)
+    $coldPaaProof = @{requested=[bool]$ColdPaaHandoff;requireAlphaPeek=[bool]$RequireColdAlphaPeek
+        environment=[string]$environment.WGR_OBJECT_STREAM_COLD_TEXTURE_HANDOFF
+        baselinePeeks=$baseline.camera.coldAlphaPeeks;returnedPeeks=$returned.camera.coldAlphaPeeks;routePeekDelta=$coldPeekDelta
+        positive=[bool]($coldPeekDelta -gt 0 -and $coldUploadObservations.Count -gt 0);requirementSatisfied=[bool]$coldAlphaProven;uploadObservations=$coldUploadObservations
+        truncated=[bool](Select-String -LiteralPath $log -SimpleMatch 'Cold PAA handoff upload truncated:' -Quiet)
+        scope='Actual route alpha commit delta plus actual operation-local source-validated owned-chain upload; separate witnesses need not name the same texture. Not byte/pixel parity, whole-route totals, GPU completion or performance acceptance'}
+    $coldPaaProof | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $out 'cold-owned-alpha-proof.json')
     $warmUploadRows = @(Select-String -LiteralPath $log -Pattern 'Warm prepared upload witness: source=(.*?) bytes=(\d+) sourceMemberBytes=(\d+) sourceValidated=true blockUploadSucceeded=true row=(\d+) limit=64')
     $warmUploadObservations = @($warmUploadRows | ForEach-Object {
         $g = $_.Matches[0].Groups
@@ -396,7 +429,7 @@ try {
         committedRows=$modelRowCommits.Count;truncatedRows=$modelRowTruncated.Count;
         rows=@($modelRowCommits | ForEach-Object {$_.Line});
         scope='Bounded post-queue-write partial MODEL source ranges; not driver completion, physical memory or performance acceptance'}
-    @{passed = [bool]($warmJobsProven -and $warmStageFamilyProven); mode = $Mode; admissionMode = $AdmissionMode; parkedTextureRefill = [bool]$ParkedTextureRefill; lazyTextureGroups = [bool]$LazyTextureGroups; warmProfile = [bool]$WarmProfile; screeningOnly = $true; performanceAccepted = $false; terrainPageTimings = [bool]$TerrainPageTimings
+    @{passed = [bool]($warmJobsProven -and $warmStageFamilyProven -and $coldAlphaProven); mode = $Mode; admissionMode = $AdmissionMode; parkedTextureRefill = [bool]$ParkedTextureRefill; lazyTextureGroups = [bool]$LazyTextureGroups; warmProfile = [bool]$WarmProfile; screeningOnly = $true; performanceAccepted = $false; terrainPageTimings = [bool]$TerrainPageTimings
         frameCount = $count; dropped = $dropped; enginePhaseTiming = $phases; baseline = $baseline; returned = $returned
         routeSamples = $routeSamples; postExitHashes = $finalHashes
         renderCallCpuTimings = [bool]$TerrainPageTimings; renderCallCpuTimingProof = $callCpuProof
@@ -409,11 +442,13 @@ try {
         archiveSourceBindings = [bool]$ArchiveSourceBindings; archiveSourceBindingProof = $archiveBindings
         warmTextureJobs = [bool]$WarmTextureJobs; warmTextureJobProof = $warmJobProof
         requireWarmMaterialStageUpload = [bool]$RequireWarmMaterialStageUpload; warmMaterialStageFamilyProof = $warmStageFamilyProof
+        coldPaaHandoff = [bool]$ColdPaaHandoff; requireColdAlphaPeek = [bool]$RequireColdAlphaPeek; coldPaaHandoffProof = $coldPaaProof
         modelRowUpload = [bool]$ModelRowUpload; modelRowUploadProof = $modelRowProof
         legacySectionRefresh = [bool]$LegacySectionRefresh; cullSectionRefreshEnvironment = [string]$environment.WGR_CULL_SECTION_REFRESH
         limitation = 'No automatic performance threshold, vanilla parity, cold-cache guarantee or whole-world query readiness; compare matched separate mode processes'
     } | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $out 'result.json')
     Write-Output "DayZ latency screening evidence: $out"
+    if (!$coldAlphaProven) { throw 'NotExercised: no positive real DayZ route alpha peek delta and source-validated cold owned upload; evidence retained' }
     if (!$warmJobsProven) { throw 'Warm preparation did not demonstrate an actual source-validated GPU upload; evidence retained' }
     if (!$warmStageFamilyProven) { throw 'Required bound worker normal/specular filename-family upload not exercised; evidence retained, no material-slot proof claimed' }
 } finally {
