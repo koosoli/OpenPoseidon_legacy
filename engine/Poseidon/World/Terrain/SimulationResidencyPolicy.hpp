@@ -9,6 +9,7 @@
 
 #include <array>
 #include <cmath>
+#include <chrono>
 #include <limits>
 #include <optional>
 #include <string_view>
@@ -24,6 +25,25 @@ inline constexpr size_t SimulationMaxWatchedPlacements = 16384;
 inline constexpr uint64_t SimulationMaxModelPayload = 4 * 1024 * 1024;
 inline constexpr uint64_t SimulationMaxPayloadCharge = 64 * 1024 * 1024;
 inline constexpr uint64_t SimulationMaxShapeCharge = 256 * 1024 * 1024;
+
+// Explicit Fire interest is renewed only by an accepted owner queue operation.
+// Polling, collision validation and automatic actor visits are not heartbeats.
+// This bounds abandoned query leases, not the global metadata producer's work.
+class SimulationFireHeartbeat
+{
+public:
+    using Clock = std::chrono::steady_clock;
+    static constexpr auto Grace = std::chrono::seconds(2);
+    void Renew(Clock::time_point now)
+    {
+        _deadline = now > Clock::time_point::max() - Grace ? Clock::time_point::max() : now + Grace;
+        _renewed = true;
+    }
+    bool Expired(Clock::time_point now) const { return !_renewed || now >= _deadline; }
+private:
+    Clock::time_point _deadline{};
+    bool _renewed = false;
+};
 
 // Automatic neighbourhoods age by actually visited registry slots, not owner
 // pumps: the shared time budget can permit fewer than the nominal 32 visits.

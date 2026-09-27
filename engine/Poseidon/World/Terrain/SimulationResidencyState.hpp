@@ -166,11 +166,22 @@ struct SimulationResidencyState
         size_t positiveValidationCursor = 0;
         uint64_t seen = 0, planGeneration = 0;
         uint64_t automaticSeenVisit = 0;
+        SimulationFireHeartbeat fireHeartbeat;
         SimulationResidencyStatus status = SimulationResidencyStatus::Pending;
         SimulationDemand plan;
         size_t cell = 0, offset = 0, pendingNew = 0;
         std::vector<uint32_t> active, pending;
         std::unordered_set<uint32_t> activeSet, pendingSet;
+        bool FireInterestExpired(uint8_t channel, SimulationFireHeartbeat::Clock::time_point now) const
+        {
+            return channel == uint8_t(SimulationQueryPurpose::Fire) && fireHeartbeat.Expired(now);
+        }
+        SimulationResidencyStatus FireStatusAtPublication(uint8_t channel, SimulationResidencyStatus status,
+            SimulationFireHeartbeat::Clock::time_point now) const
+        {
+            return status == SimulationResidencyStatus::Ready && FireInterestExpired(channel, now) ?
+                SimulationResidencyStatus::Pending : status;
+        }
         bool NeedsPositiveRestart(uint64_t worldGeneration, uint64_t admissionGeneration) const
         {
             return !positiveOnly || planGeneration != worldGeneration ||

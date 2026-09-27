@@ -65,7 +65,7 @@ foreach ($key in @('POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEID
 $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0);$listener.Start();$port=$listener.LocalEndpoint.Port;$listener.Stop()
 $log=Join-Path $out 'engine.log'
 @{scriptSha256=(Get-FileHash $PSCommandPath).Hash;head=(& git -C $root rev-parse HEAD);installed=(Get-Content (Join-Path $GameDir 'DEPLOYED-FROM.txt'));disabled=[bool]$Disabled;registeredWarming=[bool]$RegisteredWarming;shapeCacheLimit=$env:WGR_OBJECT_STREAM_EVICT_CACHE;fixture=(Get-Content (Join-Path $fixture 'fixture.json') -Raw | ConvertFrom-Json);hashes=@(Get-FileHash (Join-Path $GameDir 'OpenPoseidon.exe'),(Join-Path $GameDir 'wgpu_renderer.dll'))} | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $out 'provenance.json')
-$p=$null;$client=$null
+$p=$null;$client=$null;$heartbeatProof=$null
 try {
  $p=Start-Process -FilePath (Join-Path $GameDir 'OpenPoseidon.exe') -WorkingDirectory $GameDir -WindowStyle Hidden -PassThru -ArgumentList @('--render=wgpu','--window','--dev','--width','1280','--height','720','--vd','2000','--harness',"$port",'--test-world-freefly','100','100','80','45','-25','--test-mission',('"'+$mission+'"'),'--test-world',('"'+(Join-Path $fixture 'simulation-residency.wrp')+'"'),'--log-file',('"'+$log+'"'))
  $null=$p.Handle;$client=[Net.Sockets.TcpClient]::new();$deadline=[DateTime]::UtcNow.AddSeconds(90)
@@ -155,6 +155,7 @@ try {
   # may independently exhaust its unchanged two-millisecond owner deadline.
   $until=[DateTime]::UtcNow.AddSeconds(60);$warmCollision=$null
   do {
+   $null=Query 'queue' # Continuing explicit interest; status/collision polls are not heartbeats.
    $warmQuery=Query 'status'
    if ($warmQuery.status -eq 'Ready') {$warmCollision=Query 'collide'}
    if ($warmQuery.status -notin @('Ready','Pending') -or ($null -ne $warmCollision -and $warmCollision.status -notin @('Ready','Pending'))) {
@@ -256,16 +257,38 @@ try {
   if ($invalidPurpose.status -ne 'Invalid') {throw 'Unsupported query purpose was admitted'}
   $null=Query 'queue'
   $until=[DateTime]::UtcNow.AddSeconds(60)
-  do {Start-Sleep -Milliseconds 250;$queryReady=Query 'status'} while ($queryReady.status -eq 'Pending' -and [DateTime]::UtcNow -lt $until)
+  do {Start-Sleep -Milliseconds 250;$null=Query 'queue';$queryReady=Query 'status'} while ($queryReady.status -eq 'Pending' -and [DateTime]::UtcNow -lt $until)
   if ($queryReady.status -ne 'Ready') {throw 'Exact fire residency did not complete'}
   $until=[DateTime]::UtcNow.AddSeconds(10)
-  do {Start-Sleep -Milliseconds 100;$collision=Query 'collide'} while ($collision.status -eq 'Pending' -and [DateTime]::UtcNow -lt $until)
+  do {Start-Sleep -Milliseconds 100;$null=Query 'queue';$collision=Query 'collide'} while ($collision.status -eq 'Pending' -and [DateTime]::UtcNow -lt $until)
   if ($collision.status -ne 'Ready' -or @($collision.contacts | Where-Object {$_.id -eq 1001}).Count -ne 1) {throw 'Complete fire query missed the wall or duplicated its contacts'}
   $wrongRay=Query 'status' -from @(100,11.5,100) -to @(120,11.5,100)
   if ($wrongRay.status -ne 'Pending') {throw 'Unrelated ray inherited fire readiness'}
   $independent=State
   if ($independent.regions -lt 2 -or $independent.readyRegions -lt 2 -or $independent.queryRegions -ne 1 -or $independent.readyQueries -ne 1) {throw 'Query channel replaced automatic neighborhood'}
   if ($independent.queryBorrowedModels -ne 1 -or $independent.queryBorrowedEntries -ne 2) {throw 'Shared model query ownership was missing or duplicated'}
+  # Deliberately abandon Fire interest. Polls remain read-only and must neither
+  # renew the two-second owner heartbeat nor retire the automatic actor's walls.
+  $until=[DateTime]::UtcNow.AddSeconds(15)
+  do {
+   Start-Sleep -Milliseconds 250
+   $heartbeatStatus=Query 'status';$heartbeatExpired=State
+  } while (($heartbeatExpired.queryRegions -ne 0 -or $heartbeatStatus.status -ne 'Pending') -and [DateTime]::UtcNow -lt $until)
+  if ($heartbeatExpired.queryRegions -ne 0 -or $heartbeatExpired.readyQueries -ne 0 -or $heartbeatStatus.status -ne 'Pending') {throw 'Read-only polling retained abandoned Fire interest'}
+  $heartbeatCollision=Query 'collide';$heartbeatIds=Ids
+  if ($heartbeatCollision.status -ne 'Pending' -or @($heartbeatCollision.contacts).Count -or
+      $heartbeatExpired.leasedPlacements -ne 2 -or $heartbeatExpired.queryBorrowedModels -ne 1 -or $heartbeatExpired.queryBorrowedEntries -ne 2 -or
+      @($heartbeatIds.objects | Where-Object {$_.present -and !$_.visualResident -and $_.hasFireGeometry}).Count -ne 2) {throw 'Fire expiry published contacts or lost overlapping automatic ownership'}
+  # A new valid queue heartbeat may reacquire the exact query. Continue renewing
+  # only while this bounded wait intentionally owns interest in the result.
+  $until=[DateTime]::UtcNow.AddSeconds(60)
+  do {
+   $null=Query 'queue';$heartbeatRequeued=Query 'status';$heartbeatRecollision=Query 'collide'
+   if ($heartbeatRequeued.status -eq 'Ready' -and $heartbeatRecollision.status -eq 'Ready') {break}
+   Start-Sleep -Milliseconds 250
+  } while ([DateTime]::UtcNow -lt $until)
+  if ($heartbeatRequeued.status -ne 'Ready' -or $heartbeatRecollision.status -ne 'Ready' -or @($heartbeatRecollision.contacts | Where-Object {$_.id -eq 1001}).Count -ne 1) {throw 'Fire heartbeat requeue failed to restore the authored obstruction'}
+  $heartbeatProof=@{expired=$heartbeatExpired;status=$heartbeatStatus;collision=$heartbeatCollision;ids=$heartbeatIds;requeued=$heartbeatRequeued;recollision=$heartbeatRecollision}
   $null=Query 'release'
   $queryReleased=State
   if ($queryReleased.queryRegions -ne 0 -or $queryReleased.leasedPlacements -ne 2) {throw 'Query release retired another interest owner'}
@@ -323,6 +346,7 @@ try {
  if (!$p.WaitForExit(15000) -or $p.ExitCode) {throw 'Game failed to exit cleanly'}
  if (Select-String -LiteralPath $log -Pattern 'Out of Memory|Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION' -Quiet) {throw 'Renderer error'}
  $result.passed=$true;$result.disabled=[bool]$Disabled
+ if ($heartbeatProof) {$result.fireHeartbeat=$heartbeatProof}
  $result | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $out 'result.json')
  Write-Output "Simulation residency evidence: $out"
 } finally {

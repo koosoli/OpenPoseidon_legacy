@@ -248,6 +248,8 @@ Status Landscape::QueueModernSimulationRegionForChannel(Object& actor, Vector3Pa
     if (automatic && !r.automatic && r.seen != 0) return r.status;
     r.seen = s.tick + 1;
     if (automatic) r.automaticSeenVisit = s.automaticActorVisits;
+    if (channel == uint8_t(SimulationQueryPurpose::Fire))
+        r.fireHeartbeat.Renew(std::chrono::steady_clock::now());
     const auto frame = SimulationFrameSample(actor.Transform());
     const auto currentSpeed = actor.ObjectSpeed();
     if (r.from == a && r.to == b && r.radius == radius)
@@ -356,10 +358,17 @@ Status Landscape::ModernSimulationRegionStatusForChannel(const Object& actor, ui
     if (!Foundation::IsMainThread()) return Status::WrongOwner;
     if (!_modernSimulation) return Status::Pending;
     const auto& s = *_modernSimulation;
+    const auto found = s.regions.find(State::RegionKey{&actor, channel});
+    if (channel == uint8_t(SimulationQueryPurpose::Fire) && found != s.regions.end() &&
+        found->second.FireInterestExpired(channel, std::chrono::steady_clock::now()))
+        return Status::Pending; // Expiry is effective even before bounded owner retirement.
     const auto metadata = ObservedStatus(s, _modernObjectModels);
     if (metadata != Status::Ready) return metadata;
-    const auto found = s.regions.find(State::RegionKey{&actor, channel});
-    return found == s.regions.end() ? Status::Pending : RegionRecordStatus(s, found->second, actor);
+    if (found == s.regions.end()) return Status::Pending;
+    const auto status = RegionRecordStatus(s, found->second, actor);
+    // Complete geometry/watch validation can cross the heartbeat deadline.
+    return channel == uint8_t(SimulationQueryPurpose::Fire) && status == Status::Ready ?
+        found->second.FireStatusAtPublication(channel, status, std::chrono::steady_clock::now()) : status;
 }
 SimulationResidencyStats Landscape::SnapshotModernSimulationResidency() const
 {
@@ -393,11 +402,14 @@ SimulationResidencyStats Landscape::SnapshotModernSimulationResidency() const
         ++out.leasedPlacements;
         if (entry.positiveRevision) ++out.positiveLeasedPlacements;
     }
+    const auto queryNow = std::chrono::steady_clock::now();
     for (const auto& [key, r] : s.regions)
     {
         Object* actor = static_cast<Object*>(r.actor);
-        const auto status = !actor ? Status::Unknown :
+        auto status = r.FireInterestExpired(key.channel, queryNow) ? Status::Pending : !actor ? Status::Unknown :
             (out.status == Status::Ready ? RegionRecordStatus(s, r, *actor) : out.status);
+        if (key.channel == uint8_t(SimulationQueryPurpose::Fire) && status == Status::Ready)
+            status = r.FireStatusAtPublication(key.channel, status, std::chrono::steady_clock::now());
         if (key.channel == 0)
         {
             ++out.regions;
@@ -455,8 +467,9 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
     size_t expired = 0;
     for (auto it = s.regions.begin(); it != s.regions.end();)
     {
-        if (SimulationAutomaticRegionExpired(it->second.automatic, static_cast<Object*>(it->second.actor) != nullptr,
-                totalActors, s.automaticActorVisits, it->second.automaticSeenVisit) &&
+        if ((it->second.FireInterestExpired(it->first.channel, started) ||
+             SimulationAutomaticRegionExpired(it->second.automatic, static_cast<Object*>(it->second.actor) != nullptr,
+                totalActors, s.automaticActorVisits, it->second.automaticSeenVisit)) &&
             expired < 4 && elapsed() < 2)
         { s.DropRegion(it->second); it = s.regions.erase(it); ++expired; }
         else ++it;
@@ -947,6 +960,12 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
         for (auto& [actorKey, r] : s.regions)
         {
             if (regionIndex++ != first) continue;
+            const auto interestExpired = [&] {
+                return actorKey.channel == uint8_t(SimulationQueryPurpose::Fire) &&
+                    r.FireInterestExpired(actorKey.channel, std::chrono::steady_clock::now());
+            };
+            if (interestExpired())
+                break; // No admissions while retirement quota is exhausted. Keep the retained plan intact for a valid renewed interest.
             Object* actor = static_cast<Object*>(r.actor);
             if (!actor || !ActorUnchanged(r, *actor)) { r.status = Status::Pending; break; }
             if (r.positiveOnly)
@@ -969,7 +988,7 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
                 { r.status = r.plan.status == DemandStatus::CapacityExceeded ? Status::CapacityExceeded : Status::Invalid; break; }
                 r.planGeneration = s.generation;
             }
-            while (r.cell < r.plan.cells.size() && s.stats.lastPumpVisits < 2048 && elapsed() < 2)
+            while (r.cell < r.plan.cells.size() && s.stats.lastPumpVisits < 2048 && elapsed() < 2 && !interestExpired())
             {
                 const auto& cell = _modernObjectCells[r.plan.cells[r.cell]];
                 if (r.offset == cell.size()) { ++r.cell; r.offset = 0; continue; }
@@ -1004,6 +1023,7 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
                     { r.status = held == State::RegisteredBorrowResult::CapacityExceeded ? Status::CapacityExceeded : Status::Unknown; break; }
                     rollback.state = &s; rollback.model = p.modelIndex;
                 }
+                if (interestExpired()) { --r.offset; break; }
                 Object* object = static_cast<Object*>(p.resident);
                 if (!object)
                 {
@@ -1034,6 +1054,9 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
                     auto& cleanup = s.entries[index]; cleanup.object = object; cleanup.shape = object->GetShape();
                     cleanup.frame = SimulationFrameSample(object->Transform()); cleanup.radius = object->GetRadius();
                 }
+                // An indivisible constructor may cross the deadline. Its joined
+                // cleanup record remains, but expired interest acquires no lease.
+                if (interestExpired()) { --r.offset; break; }
                 if (!object || object->GetShape() != modelShape || !object->Static() || object->MustBeSaved() ||
                     (object->GetType() != Primary && object->GetType() != Network) ||
                     SimulationFrameSample(object->Transform()) != SimulationFrameSample(finalFrame) ||
@@ -1048,6 +1071,10 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
                 e.positiveRevision = 0; e.positiveId = -1;
                 if (!s.AttachQueryBorrow(p.modelIndex, e))
                 { r.status = Status::Unknown; break; }
+                // Shape validation/borrow attachment may cross the deadline too.
+                // Keep any other owner's Entry borrow; joined cleanup handles an
+                // unleased new entry, without assigning debt to expired interest.
+                if (interestExpired()) { --r.offset; break; }
                 if (!r.activeSet.contains(index))
                 {
                     if (!s.AcquireLease(index)) { r.status = Status::CapacityExceeded; break; }
@@ -1055,13 +1082,14 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
                 }
                 r.pending.push_back(index); r.pendingSet.insert(index);
             }
-            if (r.status == Status::Pending && r.cell == r.plan.cells.size())
+            if (r.status == Status::Pending && r.cell == r.plan.cells.size() && !interestExpired())
             {
                 // Owner constructors may mutate query state. The same operation
                 // must validate the complete inventory and watchers again before
                 // publishing Ready; a timed-out prefix leaves pending leases.
                 const auto proof = ObservedStatus(s, _modernObjectModels, [&] { return elapsed() < 2; });
-                if (proof == Status::Ready) s.CompleteReplacement(r);
+                if (proof == Status::Ready && !interestExpired()) s.CompleteReplacement(r);
+                else if (interestExpired()) r.status = Status::Pending;
                 else r.status = proof;
             }
             if (r.status != Status::Pending && r.status != Status::Ready)

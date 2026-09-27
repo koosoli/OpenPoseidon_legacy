@@ -16,6 +16,97 @@
 using namespace Poseidon;
 using namespace Poseidon::Streaming;
 
+TEST_CASE("Fire interest requires owner heartbeats and expires independently of automatic visits", "[streaming-simulation-residency]")
+{
+    using Clock = SimulationFireHeartbeat::Clock;
+    const auto start = Clock::time_point{} + std::chrono::seconds(10);
+    SimulationResidencyState::Region region;
+    const auto fire = uint8_t(SimulationQueryPurpose::Fire);
+    REQUIRE(region.FireInterestExpired(fire, start));
+    REQUIRE_FALSE(region.FireInterestExpired(0, start));
+    region.fireHeartbeat.Renew(start);
+    REQUIRE_FALSE(region.FireInterestExpired(fire, start + std::chrono::milliseconds(1999)));
+    REQUIRE(region.FireInterestExpired(fire, start + SimulationFireHeartbeat::Grace));
+    // Initial validation was fresh, but expensive owner work finished at the
+    // deadline: status and snapshot publication use this same final gate.
+    REQUIRE(region.FireStatusAtPublication(fire, SimulationResidencyStatus::Ready,
+        start + std::chrono::milliseconds(1999)) == SimulationResidencyStatus::Ready);
+    REQUIRE(region.FireStatusAtPublication(fire, SimulationResidencyStatus::Ready,
+        start + SimulationFireHeartbeat::Grace) == SimulationResidencyStatus::Pending);
+    REQUIRE(region.FireStatusAtPublication(0, SimulationResidencyStatus::Ready,
+        start + SimulationFireHeartbeat::Grace) == SimulationResidencyStatus::Ready);
+    REQUIRE(region.FireStatusAtPublication(fire, SimulationResidencyStatus::Unknown,
+        start + SimulationFireHeartbeat::Grace) == SimulationResidencyStatus::Unknown);
+    // Read-only polls and automatic clocks do not change the Fire heartbeat.
+    for (size_t poll = 0; poll < 16; ++poll)
+    {
+        ++region.seen; ++region.automaticSeenVisit;
+        REQUIRE_FALSE(region.FireInterestExpired(fire, start + std::chrono::seconds(1)));
+    }
+    REQUIRE(region.FireInterestExpired(fire, start + std::chrono::seconds(3)));
+    region.fireHeartbeat.Renew(start + std::chrono::seconds(3));
+    REQUIRE_FALSE(region.FireInterestExpired(fire, start + std::chrono::seconds(4)));
+    REQUIRE(region.FireInterestExpired(fire, start + std::chrono::seconds(5)));
+}
+
+TEST_CASE("Expired Fire contact publication refuses even when bounded retirement leaves records alive", "[streaming-simulation-residency]")
+{
+    Foundation::CaptureMainThread();
+    using Clock = SimulationFireHeartbeat::Clock;
+    const auto start = Clock::time_point{} + std::chrono::seconds(10);
+    const auto expired = start + SimulationFireHeartbeat::Grace;
+    const auto fire = uint8_t(SimulationQueryPurpose::Fire);
+    Ref<LODShapeWithShadow> shape = new LODShapeWithShadow;
+    Ref<ObjectPlain> actor = new ObjectPlain(shape, 42);
+    SimulationResidencyState state;
+    SimulationResidencyState::Region automatic;
+    automatic.actor = actor.GetRef(); automatic.automatic = true;
+    automatic.active = {0}; automatic.activeSet = {0}; REQUIRE(state.AcquireLease(0));
+    std::array<SimulationResidencyState::Region, 5> queries;
+    for (auto& region : queries)
+    {
+        region.actor = actor.GetRef(); region.status = SimulationResidencyStatus::Ready;
+        region.fireHeartbeat.Renew(start);
+        region.active = {0}; region.activeSet = {0}; REQUIRE(state.AcquireLease(0));
+        region.pending = {0, 1}; region.pendingSet = {0, 1}; REQUIRE(state.AcquireLease(1));
+    }
+    // Existing owner cleanup can retire four, but every remaining record is
+    // already unusable for admission/status/contact publication at its deadline.
+    for (size_t i = 0; i < 4; ++i) state.DropRegion(queries[i]);
+    REQUIRE(state.leaseCounts.at(0) == 2); REQUIRE(state.leaseCounts.at(1) == 1);
+    auto& held = queries.back();
+    REQUIRE(held.status == SimulationResidencyStatus::Ready);
+    REQUIRE(held.FireInterestExpired(fire, expired));
+    CollisionBuffer contacts; CollisionInfo sentinel{}; sentinel.object = actor.GetRef(); sentinel.component = 99;
+    contacts.Add(sentinel);
+    bool legacyCalled = false, directCalled = false;
+    Object* candidates[] = {actor.GetRef()};
+    const auto status = AppendSimulationFireContacts(contacts, std::span<Object* const>(candidates, 1), nullptr, nullptr,
+        [&](CollisionBuffer&) { legacyCalled = true; },
+        [&](CollisionBuffer&, Object&) { directCalled = true; },
+        [&] { return held.FireInterestExpired(fire, expired) ? SimulationResidencyStatus::Pending : held.status; },
+        [] { return true; });
+    REQUIRE(status == SimulationResidencyStatus::Pending);
+    REQUIRE_FALSE(legacyCalled); REQUIRE_FALSE(directCalled);
+    REQUIRE(contacts.Size() == 1); REQUIRE(contacts[0].component == 99); REQUIRE(contacts[0].object.GetRef() == actor.GetRef());
+    // A fresh query can also expire during an indivisible legacy trace. Its
+    // staged hit must not escape the final production publication validation.
+    size_t validations = 0;
+    const auto crossed = AppendSimulationFireContacts(contacts, std::span<Object* const>(candidates, 1), nullptr, nullptr,
+        [&](CollisionBuffer& staged) { auto hit = sentinel; hit.component = 100; staged.Add(hit); },
+        [&](CollisionBuffer&, Object&) { FAIL("Legacy contact already covers this candidate"); },
+        [&] {
+            const auto now = validations++ == 0 ? start : expired;
+            return held.FireStatusAtPublication(fire, held.status, now);
+        }, [] { return true; });
+    REQUIRE(crossed == SimulationResidencyStatus::Pending); REQUIRE(validations == 2);
+    REQUIRE(contacts.Size() == 1); REQUIRE(contacts[0].component == 99);
+    state.DropRegion(held);
+    REQUIRE((state.leaseCounts == std::unordered_map<uint32_t,uint32_t>{{0,1}}));
+    REQUIRE_FALSE(automatic.FireInterestExpired(0, expired));
+    state.DropRegion(automatic); REQUIRE(state.leaseCounts.empty());
+}
+
 TEST_CASE("Automatic actor expiry follows actual sparse visitation rather than pump count", "[streaming-simulation-residency]")
 {
     SimulationResidencyState state;
