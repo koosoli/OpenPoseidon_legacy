@@ -744,7 +744,10 @@ struct ColdPaaSourceFixture
         REQUIRE(Poseidon::GFileBanks[bank.index].MatchesMountedMember("member.paa", read.source->Request()));
         read.magic = 0xff03; read.count = size_t(source->GetMipmapCount());
         REQUIRE(read.count == 1); REQUIRE(mips[0]._w == 8); REQUIRE(mips[0]._h == 8);
-        for(size_t i=0;i<read.count;++i) read.levels[i] = {mips[i]._w,mips[i]._h,64,size_t(mips[i]._start)};
+        for(size_t i=0;i<read.count;++i) {
+            mips[i].SetDestFormat(source->GetFormat(), 8); // Same block-preserving setup as TextureWgpu::LoadHeaders.
+            read.levels[i] = {mips[i]._w,mips[i]._h,64,size_t(mips[i]._start)};
+        }
         REQUIRE(read.Valid());
         } catch (...) { source.reset(); read.source.reset(); Poseidon::GFileServer=previous; GEnableCaching=caching; throw; }
     }
