@@ -1101,9 +1101,13 @@ impl CullState {
             bounding_sphere,
             _pad: 0,
         });
-        // ALL also initialises the empty crown/material buffers on first registration,
-        // preserving the original bindgroup creation contract.
-        self.table_uploads = TableUploads::ALL;
+        // Model registration appends these four tables, never the crown centres.
+        // Preserve any earlier Crown dirtiness in this batch; prepare still bootstraps
+        // ALL when any backing buffer is absent, including the empty crown buffer.
+        self.table_uploads.mark(TableDomain::Model);
+        self.table_uploads.mark(TableDomain::Lod);
+        self.table_uploads.mark(TableDomain::Section);
+        self.table_uploads.mark(TableDomain::Material);
         model_id
     }
 
@@ -4122,8 +4126,8 @@ pub(crate) mod tests {
         let lods = [LodGpu { resolution: 1.0, section_base: 0, section_count: 1, is_decal: 0 }];
         let mut material = SectionMaterialGpu::zeroed(); material.diffuse = [0.2, 0.4, 0.6, 1.0];
         let a = cull.register_model(2.0, &lods, &sections, &[material]);
-        assert_eq!(cull.table_uploads, TableUploads::ALL,
-                   "first registration initializes even empty crown backing buffer");
+        assert_eq!(cull.table_uploads, TableUploads(15),
+                   "model append dirties only its four tables; prepare handles bootstrap");
         let b = cull.register_model(3.0, &lods, &sections, &[material]);
         cull.register_crown_centres(&[[1.0, 2.0, 3.0, 4.0]]);
         cull.prepare(&device, &queue);
@@ -4163,6 +4167,33 @@ pub(crate) mod tests {
         cull.register_crown_centres(&[[5.0, 6.0, 7.0, 8.0]]);
         assert_eq!(cull.table_uploads, TableUploads(TableDomain::Crown.bit()));
         cull.prepare(&device, &queue);
+        // Prove an actual unchanged Crown upload is skipped, not just a mask assertion:
+        // seed different GPU bytes without changing the CPU crown mirror. Registering a
+        // non-crown model must leave these exact GPU bytes and capacity untouched.
+        let cpu_crowns = cull.crown_centres.clone();
+        let crown_capacity = cull.crown_centre_buf.cap;
+        let sentinel = [[91.0f32, 92.0, 93.0, 94.0]];
+        queue.write_buffer(cull.crown_centre_buf.buf.as_ref().unwrap(), 0, bytemuck::cast_slice(&sentinel));
+        let seeded_crown = snapshot(&cull)[4].clone();
+        assert_ne!(seeded_crown, bytemuck::cast_slice::<[f32;4],u32>(&cpu_crowns));
+        cull.register_model(5.0, &lods, &sections, &[material]);
+        let mut selected_writes = Vec::new();
+        cull.table_uploads.run(|domain| { selected_writes.push(domain); false });
+        assert_eq!(selected_writes, vec![TableDomain::Model, TableDomain::Lod,
+                                       TableDomain::Section, TableDomain::Material]);
+        cull.prepare(&device, &queue);
+        assert_eq!(snapshot(&cull)[4], seeded_crown,
+                   "actual production prepare must not overwrite unchanged Crown GPU data");
+        assert_eq!(cull.crown_centres, cpu_crowns);
+        assert_eq!(cull.crown_centre_buf.cap, crown_capacity);
+        // Append Crown FIRST, then a model in the same pending batch. Registration must
+        // preserve that pending domain and upload all authored centres, including the new one.
+        cull.register_crown_centres(&[[9.0, 10.0, 11.0, 12.0]]);
+        cull.register_model(6.0, &lods, &sections, &[material]);
+        assert_eq!(cull.table_uploads, TableUploads::ALL);
+        cull.prepare(&device, &queue);
+        assert_eq!(snapshot(&cull)[4], bytemuck::cast_slice::<[f32;4],u32>(&cull.crown_centres));
+        assert_eq!(cull.crown_centre_buf.cap, crown_capacity);
         let optimized = snapshot(&cull);
         // Original path: all five writes regardless of which mirror changed.
         upload_slice(&device, &queue, &mut cull.model_buf, &cull.models);
@@ -4216,14 +4247,21 @@ pub(crate) mod tests {
         let Some((device, queue)) = headless() else {
             eprintln!("SKIP cull_table_domains_bootstrap: no adapter/device"); return;
         };
-        for crown_first in [true, false] {
+        // All original first-writer cases, plus first registration with NO backing tables.
+        for first_writer in 0..3 {
             let mut cull = CullState::new(&device);
             assert_eq!(cull.table_uploads, TableUploads::NONE);
             assert!(cull.model_buf.buf.is_none() && cull.section_mat_buf.buf.is_none());
             let section = SectionGpu { first_index: 8, index_count: 3, base_vertex: 19, variant: 0 };
-            if crown_first { cull.register_crown_centres(&[[1.0, 2.0, 3.0, 4.0]]); }
-            else { cull.set_sections(&[section]); }
-            // Actual production prepare promotes a first isolated dirty domain to ALL.
+            if first_writer == 0 { cull.register_crown_centres(&[[1.0, 2.0, 3.0, 4.0]]); }
+            else if first_writer == 1 { cull.set_sections(&[section]); }
+            else {
+                let lod = LodGpu { resolution: 1.0, section_base: 0, section_count: 1, is_decal: 0 };
+                let mut material = SectionMaterialGpu::zeroed(); material.diffuse = [0.1, 0.2, 0.3, 1.0];
+                cull.register_model(4.0, &[lod], &[section], &[material]);
+                assert_eq!(cull.table_uploads, TableUploads(15));
+            }
+            // Actual production prepare promotes every missing-buffer first writer to ALL.
             cull.prepare(&device, &queue);
             assert!(cull.model_buf.buf.is_some() && cull.lod_buf.buf.is_some() &&
                     cull.section_buf.buf.is_some() && cull.section_mat_buf.buf.is_some() &&
