@@ -3417,7 +3417,11 @@ impl Renderer {
     }
 
     // `None` = skip this frame
-    fn acquire(&mut self) -> Result<Option<wgpu::SurfaceTexture>, String> {
+    fn acquire(&mut self, diagnostic_call_token: Option<u64>) -> Result<Option<wgpu::SurfaceTexture>, String> {
+        // Existing caller-owned opt-in supplies the token; no second flag/config.
+        // Legacy calls (None) take no new clock/counter/log path. This is CPU
+        // acquisition scope, not GPU completion or completed-frame evidence.
+        let diagnostic_start = diagnostic_call_token.map(|_| std::time::Instant::now());
         let (device_loss, uncaptured_error) = self.runtime_diagnostics.take_messages();
         if let Some(message) = device_loss {
             self.log.log(log_level::ERROR, &message);
@@ -3437,7 +3441,36 @@ impl Renderer {
             self.log.log(log_level::INFO, &line);
         }
         use wgpu::CurrentSurfaceTexture as Cst;
-        match self.surface.get_current_texture() {
+        let preamble_ms = diagnostic_start.map(|start| start.elapsed().as_secs_f64() * 1.0e3);
+        let surface_start = diagnostic_call_token.map(|_| std::time::Instant::now());
+        let acquired = self.surface.get_current_texture();
+        if let (Some(call_token), Some(preamble_ms), Some(surface_start)) =
+            (diagnostic_call_token, preamble_ms, surface_start)
+        {
+            let surface_ms = surface_start.elapsed().as_secs_f64() * 1.0e3;
+            let total_ms = preamble_ms + surface_ms;
+            if total_ms >= 10.0 {
+                use std::sync::atomic::{AtomicU32, Ordering};
+                static ROWS: AtomicU32 = AtomicU32::new(0);
+                let row = ROWS.fetch_update(Ordering::Relaxed, Ordering::Relaxed,
+                    |n| if n < 65 { Some(n + 1) } else { None }).unwrap_or(65);
+                if row < 64 {
+                    let status = match &acquired {
+                        Cst::Success(_) => "success", Cst::Suboptimal(_) => "suboptimal",
+                        Cst::Outdated => "outdated", Cst::Lost => "lost",
+                        Cst::Timeout => "timeout", Cst::Occluded => "occluded",
+                        Cst::Validation => "validation",
+                    };
+                    self.log.log(log_level::INFO, &format!(
+                        "acquire CPU split: callToken={call_token} surfaceStatus={status} preambleCpuMs={preamble_ms:.3} surfaceAcquireCpuMs={surface_ms:.3} measuredTotalCpuMs={total_ms:.3} row={} limit=64 thresholdMs=10 scope=acquisitionOnlyBeforeResultHandling",
+                        row + 1));
+                } else if row == 64 {
+                    self.log.log(log_level::INFO,
+                        "acquire CPU split truncated: limit=64 thresholdMs=10; observed diagnostic calls only, no GPU completion claim");
+                }
+            }
+        }
+        match acquired {
             Cst::Success(t) | Cst::Suboptimal(t) => Ok(Some(t)),
             Cst::Outdated => {
                 self.log.log(
@@ -3987,7 +4020,7 @@ impl Renderer {
         }
 
         let acquire_t0 = std::time::Instant::now();
-        let Some(frame) = self.acquire()? else {
+        let Some(frame) = self.acquire(call_timings.as_deref().map(|facts| facts.call_token))? else {
             if let Some(facts) = call_timings.as_deref_mut() { facts.skip(); }
             return Ok(());
         };
