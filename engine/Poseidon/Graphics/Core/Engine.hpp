@@ -2502,6 +2502,9 @@ class Engine : public IGraphicsEngine
             // W4 — breaker spray (Breakers `spray` emission gain, Spray sprite `intensity`); 0 = off
             float spray = 1.0f;
             float sprayIntensity = 1.0f;
+            // W3j — scale of the light scattered inside the water (1 = Tidewater's formula on OP's
+            // light, pale cyan; the default sits between Tidewater's navy and Current OP's blue)
+            float waterGlow = 0.12f;
             float amplitude = 1.0f;        // spectrum amplitude scale
             float choppiness = 0.9f;       // horizontal displacement (Tessendorf lambda)
             float swellScale = 0.48f;      // energy of the distant-swell system

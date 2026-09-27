@@ -6580,6 +6580,10 @@ void DrawWaterTab()
         changed |= Dev::SliderFloat("TW foam intensity", &t.foamIntensity, 0.0f, 3.0f, "%.2f");
         changed |= Dev::Checkbox("TW screen-space reflections", &t.ssr);
         changed |= Dev::SliderFloat("TW reflection strength", &t.reflectionStrength, 0.0f, 2.0f, "%.2f");
+        changed |= Dev::SliderFloat("TW water glow", &t.waterGlow, 0.0f, 1.0f, "%.2f");
+        Dev::PanelTooltip("Light scattered inside the water toward the eye (W3j). 0 = the surface's reflection "
+                          "only (navy, as debug view 20); 1 = Tidewater's formula on OP's light (pale cyan). "
+                          "Default 0.12: between Tidewater's navy and Current OP's blue.");
         changed |= Dev::SliderFloat("TW roughness", &t.roughness, 0.0f, 0.3f, "%.3f");
         changed |= Dev::SliderFloat("TW crest subsurface", &t.sss, 0.0f, 3.0f, "%.2f");
         changed |= Dev::SliderFloat("TW backscatter", &t.backscatter, 0.0f, 0.3f, "%.3f");

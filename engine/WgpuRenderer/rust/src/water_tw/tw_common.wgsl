@@ -14,7 +14,7 @@ struct TwSurface {
     wind: vec4<f32>,       // wind dir xz (toward), sea-detail drift offset xy (m)
     surface: vec4<f32>,    // amplitude, slope scale, foam coverage, foam pattern scale (1/m)
     material0: vec4<f32>,  // backscatter, sss, foam intensity, reflection strength
-    material1: vec4<f32>,  // roughness, ssr on, debug view, sun-lit sky flag
+    material1: vec4<f32>,  // roughness, ssr on, debug view, water glow (W3j: in-scatter scale)
     absorption: vec4<f32>, // rgb 1/m
     scattering: vec4<f32>, // rgb 1/m
     detail: vec4<f32>,     // gust, slick, streak amounts

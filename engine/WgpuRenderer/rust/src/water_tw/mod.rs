@@ -104,6 +104,12 @@ fn debug_view_override() -> Option<f32> {
     *V.get_or_init(|| std::env::var("WGR_TW_DEBUG").ok().and_then(|v| v.trim().parse::<f32>().ok()))
 }
 
+/// `WGR_TW_GLOW=<scale>`: overrides the Water tab's water glow (W3j), for A/B captures.
+fn glow_override() -> Option<f32> {
+    static V: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
+    *V.get_or_init(|| std::env::var("WGR_TW_GLOW").ok().and_then(|v| v.trim().parse::<f32>().ok()))
+}
+
 pub const DEFAULT_PARAMS: [[f32; 4]; 4] = [
     [1.0, 0.9, 0.48, 5.0],
     [1.0, 1.0, 1.0, 1.0],
@@ -118,8 +124,12 @@ pub const DEFAULT_SHORE_PARAMS: [[f32; 4]; 3] = [
     [0.16, 1.0, 28.0, 1.0],
 ];
 
-/// `WgrWaterParams::tidewater_fx` defaults: Breakers `spray` and Spray `intensity` (W4).
-pub const DEFAULT_FX_PARAMS: [f32; 4] = [1.0, 1.0, 0.0, 0.0];
+/// `WgrWaterParams::tidewater_fx` defaults: Breakers `spray` and Spray `intensity` (W4), the
+/// water glow (W3j: scale of the light scattered inside the water; 1 = Tidewater's formula on
+/// OP's light, which reads pale cyan).
+pub const DEFAULT_FX_PARAMS: [f32; 4] = [1.0, 1.0, GLOW_DEFAULT, 0.0];
+/// See `DEFAULT_FX_PARAMS`; must match `TidewaterLook::waterGlow` on the C++ side.
+pub const GLOW_DEFAULT: f32 = 0.12;
 
 /// The swell scale Tidewater's shore amplitude goes with (OceanFFT's swell system `scale`).
 const DEFAULT_SWELL_SCALE: f32 = 0.48;
@@ -242,8 +252,8 @@ fn surface_block(p: &WgrWaterParams, f: &FrameInputs<'_>) -> TwSurface {
         surface: [tw[0][0], 1.0, tw[1][0], 0.09],
         // backscatter, sss, foam intensity, reflection strength
         material0: [tw[2][3], tw[2][2], tw[1][1], tw[1][3]],
-        // roughness, ssr on, debug view, unused
-        material1: [tw[2][1], tw[1][2], debug_view_override().unwrap_or(tw[3][3]), 0.0],
+        // roughness, ssr on, debug view, water glow (W3j; tidewater_fx.z)
+        material1: [tw[2][1], tw[1][2], debug_view_override().unwrap_or(tw[3][3]), glow_override().unwrap_or(p.tidewater_fx[2]).clamp(0.0, 2.0)],
         absorption: [WATER_ABSORPTION[0], WATER_ABSORPTION[1], WATER_ABSORPTION[2], 0.0],
         scattering: [WATER_SCATTERING[0], WATER_SCATTERING[1], WATER_SCATTERING[2], 0.0],
         detail: [tw[3][0], tw[3][1], tw[3][2], 0.0],

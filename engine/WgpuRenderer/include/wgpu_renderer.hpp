@@ -1482,7 +1482,8 @@ struct WgrWaterParams
      * sizeof 1184 -> 1200 with the Rust side. */
     WgrVec4 tidewater_sea;
     /* TW-WATER W4 — Tidewater effects. x = breaker spray emission gain (1, Breakers `spray`;
-     * 0 = no spray), y = spray sprite intensity (1, Spray `intensity`), z, w unused (0).
+     * 0 = no spray), y = spray sprite intensity (1, Spray `intensity`), z = water glow (W3j:
+     * scale of the light scattered inside the water, 0.12; 1 = Tidewater's formula), w unused (0).
      * sizeof 1200 -> 1216 with the Rust side. */
     WgrVec4 tidewater_fx;
 };

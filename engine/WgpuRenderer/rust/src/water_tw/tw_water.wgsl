@@ -749,7 +749,13 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
         let sssCol = vec3<f32>(0.12, 0.55, 0.45) * 0.06;
         let sss = sunLight * sssCol * back * crest * tw.material0.y * smoothstep(0.0, 0.25, L.y);
 
-        let transmitted = sceneCol * Tview * (1.0 - 0.3 * lipW) + inSun + inAmb + sss;
+        // (W3j) the water's own glow (light scattered inside it toward the eye) x the Water tab's
+        // "TW water glow" (tw.material1.w). Tidewater's formula; OP's lighting makes it several
+        // times brighter relative to the reflection than in Tidewater, which turned deep water
+        // pale cyan (debug view 22). The scale brings it back between Tidewater's reflection-led
+        // navy and Current OP's steel blue.
+        let glowK = tw.material1.w;
+        let transmitted = sceneCol * Tview * (1.0 - 0.3 * lipW) + (inSun + inAmb + sss) * glowK;
 
         // ---- foam: bright diffuse scatterer (albedo ~0.85), wrapped sun + sky irradiance
         var foamLit = (sunLight * (max(dot(N, L), 0.0) * 0.75 + 0.25) * INV_PI + skyIrr * 0.95) * 0.85;
@@ -760,7 +766,7 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
         let water = mix(transmitted, reflCol, F) + sunSpec + skyRefl * (0.22 * rim);
         dbgRefl = reflCol * F + sunSpec;
         dbgTrans = sceneCol * Tview * (1.0 - F);
-        dbgIn = (inSun + inAmb + sss) * (1.0 - F);
+        dbgIn = (inSun + inAmb + sss) * glowK * (1.0 - F);
         dbgLight = vec3<f32>(dot(sunLight, vec3<f32>(0.2126, 0.7152, 0.0722)), dot(skyIrr, vec3<f32>(0.2126, 0.7152, 0.0722)), F);
         let shaded = mix(water, foamCol + sunSpec * 0.05, sat(foam));
         let edgeAA = smoothstep(0.0, thicknessAA, thickness);
@@ -792,8 +798,8 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
         let kS = sigT * (1.0 - min(Rr.y, 0.0) / muU);
         let kA = sigT * (1.0 - min(Rr.y, 0.0) / 0.8);
         let eSunU = sunLight * (1.0 - fresnelDielectric(max(L.y, 0.02), IOR));
-        let deepCol = eSunU * (sigS * phR + albedoMS * sigT * INV_PI) / kS
-            + skyIrr * PI * (sigS * (1.0 / (4.0 * PI)) + albedoMS * sigT * INV_PI) / kA;
+        let deepCol = (eSunU * (sigS * phR + albedoMS * sigT * INV_PI) / kS
+            + skyIrr * PI * (sigS * (1.0 / (4.0 * PI)) + albedoMS * sigT * INV_PI) / kA) * tw.material1.w;
 
         let sceneZ = _waterSceneZAt(screenUV);
         let hasObj = posV.z - sceneZ > 0.0 && sceneZ > -1e8;

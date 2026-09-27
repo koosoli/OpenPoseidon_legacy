@@ -1188,7 +1188,8 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
         _params.tidewater_shore[2] = {std::clamp(t.shoreTurbidity, 0.0f, 1.0f), t.shoreSim ? 1.0f : 0.0f,
                                       std::clamp(t.shoreDryTime, 2.0f, 300.0f), std::clamp(t.shoreLips, 0.0f, 2.0f)};
         _params.tidewater_sea = {seaWindOverride, seaFetch, seaWhitecaps, static_cast<float>(seaMode)};
-        _params.tidewater_fx = {std::clamp(t.spray, 0.0f, 3.0f), std::clamp(t.sprayIntensity, 0.0f, 3.0f), 0.0f, 0.0f};
+        _params.tidewater_fx = {std::clamp(t.spray, 0.0f, 3.0f), std::clamp(t.sprayIntensity, 0.0f, 3.0f),
+                                std::clamp(t.waterGlow, 0.0f, 2.0f), 0.0f};
     }
     _params.sea_params = {look.seaStateCoupling ? 1.0f : 0.0f,
                           look.seaStateCoupling ? SeaStateResidualAmplitude(look.waveAmp) : look.waveAmp,

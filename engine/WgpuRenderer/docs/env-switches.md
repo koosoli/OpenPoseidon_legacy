@@ -52,6 +52,7 @@ have been.
 | `WGR_WATER_SKIRT_K` | Rust | |
 | `WGR_WATER_BACKEND` | Rust (+ Water tab note) | TW-WATER W1. `0` = Current OP, `1` = Tidewater Native; overrides the Water-tab backend selector for the whole session (harness runs). Unset = follow the Water tab. |
 | `WGR_TW_DEBUG` | Rust | TW-WATER W3h. Forces the Tidewater material debug view for the session (Water tab "TW debug view" numbering: 6 path length, 7 sea bed seen through, 8 sea depth, 10 SSR weight). Diagnostic only. |
+| `WGR_TW_GLOW` | Rust | TW-WATER W3j. Overrides the Water tab's "TW water glow" (scale of the light scattered inside the water; 0 = reflection only, 1 = Tidewater's formula on OP's light) for the session. For A/B captures. |
 | `WGR_VB_UPDATE_STATS` | C++ bridge | Logs two-second, per-`VBType` create/destroy/cancel and update/build/hash/upload counts, bytes, total time and maximum call time. Diagnostic only; unset/`0` avoids timers and atomics in `VertexBufferWgpu`. |
 
 ## Regenerating
