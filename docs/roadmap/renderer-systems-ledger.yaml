@@ -1047,6 +1047,16 @@ unbuilt_candidates: >-
       silhouettes do not prove material/all-pass equivalence. CLOD now links
       Renderer only for explicit opt-in operation, with no normal-frame bake.
       Defaults remain off; no paging/reclaim/performance or default acceptance.
+      Clean28248174 explicit authored-page worker runtime passed held-epoch
+      cancellation/replacement: old active scheduling debt retained after Abort,
+      only replacement epoch published, final jobs/reserve zero and 3 records
+      Absent. CLOD regression and disabled worker controls passed. Copied actual
+      pass facts show cascade mask15/current epoch but stale interior/GI and
+      unsupported reflection stay Pending. Successful real render return0 now
+      gates observations; facts do not prove survivors/pixels/all-pass/queue.
+      RAM pages only; no disk/autopaging/default worker allocation. Optional
+      pointer fields/branches remain, not zero default cost. Fine eviction/refill,
+      full ownership, physical reclaim and performance/default acceptance OPEN.
       See decisions/GEOMETRY-CLOD-PILOT-20260927.md for hashes and narrow scope.
     production_call_sites:
       - file: engine/Poseidon/World/Terrain/LandSave.cpp

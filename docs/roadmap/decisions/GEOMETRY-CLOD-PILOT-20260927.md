@@ -1,10 +1,12 @@
 # Controlled resident CPU CLOD pilot
 
-The installed bdb02bb8 explicit resident CLOD pilot now links Renderer and passed
-runtime checks for actual paired-cut submission. Its startup gate remains off by
-default; normal frames perform no bake. This is partial Stage G evidence, not
-completion. Historically, the 11:06 installed 86971cce checkpoint linked CLOD bake
-and cut decoding only into Tests.
+Installed clean 28248174 adds an explicit bounded authored-page CPU worker and
+copied renderer command-recording facts; its actual cancellation/replacement
+runtime passed. The earlier bdb02bb8 resident CLOD paired-cut pilot also passed
+its regression on this build. The startup gate remains off by default; normal
+frames do not bake or run the page worker. Stage G and the full plan remain OPEN.
+Historically, the 11:06 installed 86971cce checkpoint linked CLOD only into Tests.
+
 The dependency is upstream meshoptimizer at
 [`9e1f07b159d3cb777f1c67ed31fc11fd117986f4`](https://github.com/zeux/meshoptimizer/tree/9e1f07b159d3cb777f1c67ed31fc11fd117986f4),
 including its `demo/clusterlod.h` example. The minimal CPU dependency retains its
@@ -226,3 +228,76 @@ Actual checkpoint SHA256 manifest:
 | build/stream-residency/authored-after-clod-20260927-20260927-112142/harness.jsonl | 7b820567b701148d3ffcfeb1d5ba8fefe0d32e3794ec94a8a827232e47215285 |
 | build/stream-residency/authored-after-clod-20260927-20260927-112142/provenance.json | 141457a47b30f62a2e98159df1bd8aebe339d502982e0e636c2976cf942f37b2 |
 | build/stream-residency/authored-after-clod-20260927-20260927-112142/result.json | e901667b12862a6ff5a2280a6159b9d2972c923b739fdd7cd6b478c4cef0c4ec |
+
+
+## Actual authored-page worker and pass-facts checkpoint, 11:50
+
+Source 28248174 passed the five-target build (252 scheduled steps; last printed
+249), 30,683 assertions in 64 focused C++ cases without skips, and five Rust
+`geometry_pass_facts` tests without ignored cases. The later mechanical Rust
+formatting changes no policy. Installed stamp is clean
+`28248174 2026-09-27_11:50 deploy-ps1`. Executable SHA256:
+`a33ac67a98fc31c9496b205ceb1cbc965f181b45c5a884108057bc4878605c7b`;
+DLL SHA256:
+`e6367a5548c9b9d86ad3f95c29beb913cac4f16a5b43664d23fd5a39f9a30750`.
+
+`authored-page-paging-20260927-20260927-115050` passed with a clean exit. One
+explicit immutable RAM-backed authored fine-page job was held at epoch1 while
+its independent coarse fallback stayed Present (54,088 known stored fixture
+bytes). The active job retained 172,040 scheduling bytes after Abort removed the
+one mesh record. Replacement epoch2 retained only its coarse record and queued
+one new job alongside the cancelled active old job: two jobs, 344,080 reserved
+bytes. Releasing the worker published only epoch2. The fine representation had
+three Present records and 63,224 known stored fixture bytes; active/queued/ready
+jobs and reservation fell to zero. Final retirement made all three records Absent
+with no job debt. These values cover declared scheduling/stored contents, not
+RSS, peak scratch, physical GPU freeing or generalized ownership.
+
+The actual copied facts have valid version1/576-byte layout, required mask29 and
+capabilities15. Four cascades recorded mask15 with current instance epoch and
+frame. No local shadow was configured. Interior/GI cached epochs were sometimes
+older, truthfully yielding pending20/28; pending16 is unsupported reflection.
+The C++ observation now requires actual `wgr_render_frame` return zero, clears
+facts for pending/failed frames, and calls the getter only after a successful
+returned real frame. These are indirect command-recording facts: neither nonzero
+survivors, fixture-specific coverage, pixels, queue completion nor all-pass
+parity follows. Selected same-epoch refresh invalidation is unit-tested before
+resource refusal; only actual recording restores the witness.
+
+`clod-after-paging-20260927-20260927-115227` passed with a clean exit on the common
+publication path, preserving the actual resident CLOD cuts. The disabled authored
+worker control `authored-page-paging-disabled-20260927-20260927-115402` passed with
+a clean exit and zero fixture payload/meshes. This is immutable RAM-page decode
+and owner-queued conventional publication, not disk streaming, arbitrary retail
+eligibility or automatic CLOD paging. No default worker/queue is allocated, but
+24 bytes of Engine optional fields, the eight-byte Gfx optional pointer and
+branches remain; default cost is not literally zero. Fine eviction/refill remains
+future work, excluded from this build. The earlier ResourceGrowth failure and
+narrow repeat convergence pass remain unchanged. Full ownership, physical reclaim,
+all-pass, pressure, performanceAccepted and defaultReady gates remain unresolved.
+
+Actual checkpoint SHA256 manifest:
+
+| Artifact | SHA256 |
+| --- | --- |
+| build/build-authored-page-worker-20260927.log | deeba98c062fec83f3bb5a7a018967b43515955c313df51c7bcd7aea069eba6c |
+| build/test-authored-page-worker-20260927.log | 6ff19c2a77478fcb73e2ee3122de248515c0fbaddb887a00ae5b95d979111090 |
+| build/test-geometry-pass-facts-20260927.log | 843f6685f58eccbbcd028c7d9be124bb1604aa19296943aafce6608345947c46 |
+| build/stream-residency/authored-page-paging-20260927-20260927-115050/coarse.png | 704eb21190de4e60a883646b0b0db640de2387e1a17c306b1474e247405d7443 |
+| build/stream-residency/authored-page-paging-20260927-20260927-115050/engine.log | 6ef5b6ee3eb032313ead5beee421c50e4c838dfa7784906c0f120488901a0743 |
+| build/stream-residency/authored-page-paging-20260927-20260927-115050/fine.png | 2fe75b77dff7f2801436f4cf0e2f66e5ec632d0746e4f1c0fcca87c5adc8d620 |
+| build/stream-residency/authored-page-paging-20260927-20260927-115050/harness.jsonl | 75fa593c1feca0c7f007148167d1fc558e64aa37a98dedb6d0f8814c9efb7461 |
+| build/stream-residency/authored-page-paging-20260927-20260927-115050/initial-coarse.png | a7e005813bd85d658335f26424405234f0e58c97d863877006676cf73522b928 |
+| build/stream-residency/authored-page-paging-20260927-20260927-115050/provenance.json | af0ad798f021c1ad0d364463a277489b55ef38835fd248842343299a6bf754fc |
+| build/stream-residency/authored-page-paging-20260927-20260927-115050/result.json | e5b751e47e2aeefd9e0a2ad4604474c829a5f6461c42d5e2eb5c4068a32b31e2 |
+| build/stream-residency/clod-after-paging-20260927-20260927-115227/coarse.png | be8bcb58b105e87b288d1e4adf183a4049f87a0159f2a82c4781b0b4865df28e |
+| build/stream-residency/clod-after-paging-20260927-20260927-115227/engine.log | 09ed79d871a363a2192ea6d0f2dfe74859dd9adb9f1598cd37ec2398559ea215 |
+| build/stream-residency/clod-after-paging-20260927-20260927-115227/fallback.png | ab00fa66f175ec32c8a953224116190e2c71a87959268a5720160cc4cab72b24 |
+| build/stream-residency/clod-after-paging-20260927-20260927-115227/fine.png | 4d78b44362396b4355dc5820a4297ab4da5ecf8b207fdc65a081ff73c36b5cab |
+| build/stream-residency/clod-after-paging-20260927-20260927-115227/harness.jsonl | 9fbd4cb205afaf6e86e2fa233a08bfc7ae862c02ba1a94f3374fac36e63e2f9f |
+| build/stream-residency/clod-after-paging-20260927-20260927-115227/provenance.json | c361d4a1c0577dd497339994d69b855ee0ed594c9f98658e960a8bda51faf40d |
+| build/stream-residency/clod-after-paging-20260927-20260927-115227/result.json | e2ecae8e91a2388c77a1f4e900db59d027b1f51f07719f5e961db5f146ae7b44 |
+| build/stream-residency/authored-page-paging-disabled-20260927-20260927-115402/engine.log | 8de26c6268c2b219fc08546c656d095d87eadd633f4eae2924eba000962013e1 |
+| build/stream-residency/authored-page-paging-disabled-20260927-20260927-115402/harness.jsonl | 42b6ab2850a1cb312c081c48bb302e33e17598a3f053c03c904400e052ef96f2 |
+| build/stream-residency/authored-page-paging-disabled-20260927-20260927-115402/provenance.json | 73fef6f9f20319cf1a9be254b0da901e0606560af55fa691eff35de271502456 |
+| build/stream-residency/authored-page-paging-disabled-20260927-20260927-115402/result.json | be998b54c1bccf1329a1f4dca5c82c0ead873db410da533547b35e7f9a0049b4 |

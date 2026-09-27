@@ -309,6 +309,24 @@ or all-pass equivalence. Normal frames perform no bake; the startup fixture gate
 remains off. Disk backing, async paging, eviction/refill, complete ownership,
 physical reclaim and performance/default acceptance remain unresolved. Actual
 build/runtime hashes are linked in the CLOD pilot decision above.
+**Authored-page worker checkpoint, clean installed 28248174 at 11:50.**
+Five-target build passed 252 scheduled steps; C++ checks passed 30,683 assertions
+in 64 cases without skips and Rust pass-fact checks passed five tests. Actual
+held epoch1 decode kept its coarse fallback and 172,040 scheduling bytes through
+Abort. Replacement epoch2 queued beside that cancelled active job (two jobs,
+344,080 reserved bytes); release published only epoch2, three Present fine mesh
+records, with final jobs/reservation zero and retirement to three Absent records.
+Known stored fixture bytes were 54,088 coarse /63,224 fine, not full scratch/RSS.
+CLOD common-path regression and disabled worker controls passed with clean exits.
+Copied version1/576-byte actual command facts show four cascades/current epoch;
+stale interior/GI and unsupported reflection remain Pending. Observations now
+require real renderer return0; this does not prove survivors, pixels, queue
+completion or all-pass equivalence. Immutable RAM-backed authored pages are the
+only worker source; no disk/retail/autopaging/default promotion is implemented.
+Default optional fields/branches are not zero cost. Fine eviction/refill remains
+future work; all ownership/reclaim/pressure/performance/default gates stay OPEN.
+Hashes and actual checkpoint scope are recorded in the CLOD pilot decision.
+
 **27 September 2026 refinement following the owner's RTX Mega Geometry question.**
 Keep the current shared streamer and bounded authored-LOD page prototype. For
 the later continuous-LOD bake, evaluate pinned upstream meshoptimizer
