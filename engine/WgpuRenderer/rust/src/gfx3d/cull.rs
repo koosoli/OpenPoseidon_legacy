@@ -508,7 +508,7 @@ pub struct CullState {
     layout: wgpu::BindGroupLayout,
 
     // Retained tables — CPU mirrors + GPU buffers. Registered at load, rarely changed, so
-    // re-uploaded wholesale when `tables_dirty`.
+    // uploaded by dirty domain; unchanged historical arrays are not rewritten.
     models: Vec<ModelGpu>,
     lods: Vec<LodGpu>,
     sections: Vec<SectionGpu>,
@@ -519,7 +519,7 @@ pub struct CullState {
     // (foliage-translucency-plan.md §9 Approach A). A global append-only table; a forest vertex's
     // `conform` word indexes it. Draw-side only (group-1 binding 3 in vs_gpu), not a compute input.
     crown_centres: Vec<[f32; 4]>,
-    tables_dirty: bool,
+    table_uploads: TableUploads,
 
     // Unified instance buffer: the static region (ID-3: an InstanceTable, which owns the
     // slots, the free list and the generations, and needs no device) then the dynamic
@@ -604,6 +604,42 @@ enum StatsSlot {
     InFlight(mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>),
 }
 
+// Dirty domains for immutable-index retained tables. One byte replaces the old bool;
+// the production upload closure below also provides a device-free write-selection test seam.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TableDomain { Model, Lod, Section, Material, Crown }
+impl TableDomain {
+    const ALL: [Self; 5] = [Self::Model, Self::Lod, Self::Section, Self::Material, Self::Crown];
+    fn bit(self) -> u8 { 1 << self as u8 }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct TableUploads(u8);
+impl TableUploads {
+    const NONE: Self = Self(0);
+    const ALL: Self = Self(31);
+    fn mark(&mut self, domain: TableDomain) { self.0 |= domain.bit(); }
+    // Clear only after every selected upload returns. A panic leaves caller state dirty.
+    // Every buffer-growth result participates in the shared-view bindgroup invalidation.
+    fn run(self, mut upload: impl FnMut(TableDomain) -> bool) -> (Self, bool) {
+        if self == Self::NONE { return (self, false); }
+        let mut grew = false;
+        for domain in TableDomain::ALL {
+            if self.0 & domain.bit() != 0 { grew |= upload(domain); }
+        }
+        (Self::NONE, grew)
+    }
+}
+const _: () = assert!(std::mem::size_of::<TableUploads>() == std::mem::size_of::<bool>());
+// Optional feedback changes only the model tag; use the same mutation in tests.
+fn set_model_feedback_tag(models: &mut [ModelGpu], uploads: &mut TableUploads, id: u32, tag: u32) {
+    if let Some(model) = models.get_mut(id as usize) {
+        if model._pad != tag {
+            model._pad = tag;
+            uploads.mark(TableDomain::Model);
+        }
+    }
+}
+
 const STATS_RING_SLOTS: usize = 3;
 
 impl CullState {
@@ -623,7 +659,7 @@ impl CullState {
         }).collect();
         self.clear_lod_demand_targets();
         for (i, row) in rows.iter().enumerate() {
-            if row.state == 0 { self.models[row.model_id as usize]._pad = i as u32 + 1; self.tables_dirty = true; }
+            if row.state == 0 { set_model_feedback_tag(&mut self.models, &mut self.table_uploads, row.model_id, i as u32 + 1); }
         }
         let state = self.lod_feedback.get_or_insert_with(|| RefCell::new(Box::new(super::lod_feedback::LodFeedback::new(device))));
         state.borrow_mut().start(epoch, frames, &rows);
@@ -633,9 +669,7 @@ impl CullState {
         if let Some(state) = &self.lod_feedback {
             let state = state.borrow();
             for row in &state.report.rows[..state.report.row_count as usize] {
-                if let Some(model) = self.models.get_mut(row.model_id as usize) {
-                    if model._pad != 0 { model._pad = 0; self.tables_dirty = true; }
-                }
+                set_model_feedback_tag(&mut self.models, &mut self.table_uploads, row.model_id, 0);
             }
         }
     }
@@ -847,7 +881,7 @@ impl CullState {
             sections: Vec::new(),
             section_materials: Vec::new(),
             crown_centres: Vec::new(),
-            tables_dirty: false,
+            table_uploads: TableUploads::NONE,
             instances: InstanceTable::default(),
             dynamic: Vec::new(),
             uploaded_static_len: 0,
@@ -1048,7 +1082,9 @@ impl CullState {
             bounding_sphere,
             _pad: 0,
         });
-        self.tables_dirty = true;
+        // ALL also initialises the empty crown/material buffers on first registration,
+        // preserving the original bindgroup creation contract.
+        self.table_uploads = TableUploads::ALL;
         model_id
     }
 
@@ -1059,18 +1095,18 @@ impl CullState {
         if let Some(feedback) = &self.lod_feedback { feedback.borrow_mut().retire(id); }
         if self.models.get(id as usize).is_some() {
             retire_model_lods(&self.models, &mut self.lods, id);
-            self.tables_dirty = true;
+            self.table_uploads.mark(TableDomain::Lod);
         }
     }
 
     // Append a batch of per-tree crown centres (model space) to the global table; return the base
     // index of this batch (foliage-translucency-plan.md §9 Approach A). Forest vertices carry
     // `base + local_component_index` in their `conform` word, which vs_gpu reads to get a per-tree
-    // radial-normal centre. Register-once, so re-uploaded wholesale under `tables_dirty`.
+    // radial-normal centre. Register-once; only the crown table becomes dirty.
     pub fn register_crown_centres(&mut self, centres: &[[f32; 4]]) -> u32 {
         let base = self.crown_centres.len() as u32;
         self.crown_centres.extend_from_slice(centres);
-        self.tables_dirty = true;
+        self.table_uploads.mark(TableDomain::Crown);
         base
     }
 
@@ -1082,7 +1118,7 @@ impl CullState {
         if self.sections.as_slice() != sections {
             self.sections.clear();
             self.sections.extend_from_slice(sections);
-            self.tables_dirty = true;
+            self.table_uploads.mark(TableDomain::Section);
         }
     }
 
@@ -1211,24 +1247,24 @@ impl CullState {
     pub fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) -> bool {
         let mut grew = false;
 
-        if self.tables_dirty {
-            grew |= upload_slice(device, queue, &mut self.model_buf, &self.models);
-            grew |= upload_slice(device, queue, &mut self.lod_buf, &self.lods);
-            grew |= upload_slice(device, queue, &mut self.section_buf, &self.sections);
-            grew |= upload_slice(
-                device,
-                queue,
-                &mut self.section_mat_buf,
-                &self.section_materials,
-            );
-            grew |= upload_slice(
-                device,
-                queue,
-                &mut self.crown_centre_buf,
-                &self.crown_centres,
-            );
-            self.tables_dirty = false;
+        // Crown/section APIs can be the first writer before any model registration.
+        // Original wholesale upload initialized ALL backing buffers on that first dirty
+        // prepare. Preserve it without probing buffer state or allocating on clean frames.
+        if self.table_uploads != TableUploads::NONE &&
+           (self.model_buf.buf.is_none() || self.lod_buf.buf.is_none() ||
+            self.section_buf.buf.is_none() || self.section_mat_buf.buf.is_none() ||
+            self.crown_centre_buf.buf.is_none()) {
+            self.table_uploads = TableUploads::ALL;
         }
+        let (next_uploads, tables_grew) = self.table_uploads.run(|domain| match domain {
+            TableDomain::Model => upload_slice(device, queue, &mut self.model_buf, &self.models),
+            TableDomain::Lod => upload_slice(device, queue, &mut self.lod_buf, &self.lods),
+            TableDomain::Section => upload_slice(device, queue, &mut self.section_buf, &self.sections),
+            TableDomain::Material => upload_slice(device, queue, &mut self.section_mat_buf, &self.section_materials),
+            TableDomain::Crown => upload_slice(device, queue, &mut self.crown_centre_buf, &self.crown_centres),
+        });
+        self.table_uploads = next_uploads;
+        grew |= tables_grew;
 
         // Instance buffer = static region then the dynamic tail. Ensure capacity for both.
         let static_len = self.instances.len() as u32;
@@ -4021,4 +4057,181 @@ pub(crate) mod tests {
             "per-section record runs must not overlap"
         );
     }
+    #[test]
+    fn table_upload_domains_select_real_closure_writes_and_growth() {
+        let mut writes = Vec::new();
+        let (clean, grew) = TableUploads::ALL.run(|domain| {
+            writes.push(domain); domain == TableDomain::Material
+        });
+        assert_eq!(writes, TableDomain::ALL);
+        assert!(grew, "material buffer growth must invalidate every shared view binding");
+        writes.clear();
+        assert!(!clean.run(|d| { writes.push(d); true }).1);
+        assert!(writes.is_empty(), "clean frames do not call the upload body");
+        for domain in TableDomain::ALL {
+            let mut pending = TableUploads::NONE;
+            pending.mark(domain); pending.mark(domain);
+            writes.clear();
+            let (next, grew) = pending.run(|d| { writes.push(d); true });
+            assert_eq!(writes, vec![domain]);
+            assert!(grew); assert_eq!(next, TableUploads::NONE);
+        }
+        let pending = TableUploads::ALL;
+        let failure = std::panic::catch_unwind(|| pending.run(|_| panic!("upload failure")));
+        assert!(failure.is_err());
+        assert_eq!(pending, TableUploads::ALL, "uncompleted upload cannot publish clean state");
+    }
+
+    #[test]
+    fn cull_table_domains_actual_mutations_and_gpu_content_match_legacy() {
+        let Some((device, queue)) = headless() else {
+            eprintln!("SKIP cull_table_domains_actual_mutations: no adapter/device"); return;
+        };
+        let mut cull = CullState::new(&device);
+        assert_eq!(cull.table_uploads, TableUploads::NONE);
+        assert!(!cull.table_uploads.run(|_| panic!("empty unregistered state has no uploads")).1);
+        // Only test backing buffers gain COPY_SRC: normal resource usage is unchanged.
+        for arr in [&mut cull.model_buf, &mut cull.lod_buf, &mut cull.section_buf,
+                    &mut cull.section_mat_buf, &mut cull.crown_centre_buf] {
+            arr.cap = 4096;
+            arr.buf = Some(device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("table-domain-readback"), size: arr.cap,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            }));
+        }
+        let sections = [SectionGpu { first_index: 7, index_count: 3, base_vertex: 9, variant: 0 }];
+        let lods = [LodGpu { resolution: 1.0, section_base: 0, section_count: 1, is_decal: 0 }];
+        let mut material = SectionMaterialGpu::zeroed(); material.diffuse = [0.2, 0.4, 0.6, 1.0];
+        let a = cull.register_model(2.0, &lods, &sections, &[material]);
+        assert_eq!(cull.table_uploads, TableUploads::ALL,
+                   "first registration initializes even empty crown backing buffer");
+        let b = cull.register_model(3.0, &lods, &sections, &[material]);
+        cull.register_crown_centres(&[[1.0, 2.0, 3.0, 4.0]]);
+        cull.prepare(&device, &queue);
+        assert_eq!(cull.table_uploads, TableUploads::NONE);
+        let snapshot = |c: &CullState| {
+            vec![read_u32s(&device, &queue, c.model_buf.buf.as_ref().unwrap(), (std::mem::size_of_val(c.models.as_slice()) / 4) as u64),
+                 read_u32s(&device, &queue, c.lod_buf.buf.as_ref().unwrap(), (std::mem::size_of_val(c.lods.as_slice()) / 4) as u64),
+                 read_u32s(&device, &queue, c.section_buf.buf.as_ref().unwrap(), (std::mem::size_of_val(c.sections.as_slice()) / 4) as u64),
+                 read_u32s(&device, &queue, c.section_mat_buf.buf.as_ref().unwrap(), (std::mem::size_of_val(c.section_materials.as_slice()) / 4) as u64),
+                 read_u32s(&device, &queue, c.crown_centre_buf.buf.as_ref().unwrap(), (std::mem::size_of_val(c.crown_centres.as_slice()) / 4) as u64)]
+        };
+        let untagged = snapshot(&cull);
+        set_model_feedback_tag(&mut cull.models, &mut cull.table_uploads, b, 1);
+        assert_eq!(cull.table_uploads, TableUploads(TableDomain::Model.bit()));
+        cull.prepare(&device, &queue);
+        let tagged = snapshot(&cull);
+        assert_ne!(untagged[0], tagged[0]);
+        for i in [1, 2, 3, 4] { assert_eq!(untagged[i], tagged[i]); }
+        set_model_feedback_tag(&mut cull.models, &mut cull.table_uploads, b, 1);
+        assert_eq!(cull.table_uploads, TableUploads::NONE);
+        set_model_feedback_tag(&mut cull.models, &mut cull.table_uploads, b, 0);
+        cull.prepare(&device, &queue);
+        let before = snapshot(&cull);
+        cull.retire_model(a);
+        assert_eq!(cull.table_uploads, TableUploads(TableDomain::Lod.bit()));
+        cull.prepare(&device, &queue);
+        let retired = snapshot(&cull);
+        assert_ne!(before[1], retired[1]);
+        for i in [0, 2, 3, 4] { assert_eq!(before[i], retired[i]); }
+        assert_eq!(cull.lods[cull.models[b as usize].lod_base as usize].section_count, 1);
+        let mut changed = cull.sections.clone(); changed[1].base_vertex = 71;
+        cull.set_sections(&changed);
+        assert_eq!(cull.table_uploads, TableUploads(TableDomain::Section.bit()));
+        cull.prepare(&device, &queue);
+        cull.set_sections(&changed);
+        assert_eq!(cull.table_uploads, TableUploads::NONE, "same addresses cause no upload");
+        cull.register_crown_centres(&[[5.0, 6.0, 7.0, 8.0]]);
+        assert_eq!(cull.table_uploads, TableUploads(TableDomain::Crown.bit()));
+        cull.prepare(&device, &queue);
+        let optimized = snapshot(&cull);
+        // Original path: all five writes regardless of which mirror changed.
+        upload_slice(&device, &queue, &mut cull.model_buf, &cull.models);
+        upload_slice(&device, &queue, &mut cull.lod_buf, &cull.lods);
+        upload_slice(&device, &queue, &mut cull.section_buf, &cull.sections);
+        upload_slice(&device, &queue, &mut cull.section_mat_buf, &cull.section_materials);
+        upload_slice(&device, &queue, &mut cull.crown_centre_buf, &cull.crown_centres);
+        assert_eq!(optimized, snapshot(&cull));
+        eprintln!("PASS cull_table_domains_actual_mutations: actual GPU upload/readback equals legacy all-table writes");
+    }
+
+    // Read the actual STORAGE-only production buffer via a tiny GPU copy kernel;
+    // no production COPY_SRC usage or allocation contract changes are needed.
+    fn read_table_storage_words(device: &wgpu::Device, queue: &wgpu::Queue,
+                                source: &wgpu::Buffer, words: u64) -> Vec<u32> {
+        if words == 0 { return Vec::new(); }
+        let output = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("table-bootstrap-output"), size: words * 4,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("table-bootstrap-copy"),
+            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(
+                "@group(0) @binding(0) var<storage, read> source: array<u32>;
+                 @group(0) @binding(1) var<storage, read_write> output: array<u32>;
+                 @compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id: vec3<u32>) {
+                 if id.x < arrayLength(&output) { output[id.x] = source[id.x]; } }")),
+        });
+        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("table-bootstrap-copy"), layout: None, module: &shader,
+            entry_point: Some("main"), compilation_options: Default::default(), cache: None,
+        });
+        let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None, layout: &pipeline.get_bind_group_layout(0),
+            entries: &[wgpu::BindGroupEntry { binding: 0, resource: source.as_entire_binding() },
+                       wgpu::BindGroupEntry { binding: 1, resource: output.as_entire_binding() }],
+        });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None, timestamp_writes: None });
+            pass.set_pipeline(&pipeline); pass.set_bind_group(0, &bind, &[]);
+            pass.dispatch_workgroups(words.div_ceil(64) as u32, 1, 1);
+        }
+        queue.submit([encoder.finish()]);
+        read_u32s(device, queue, &output, words)
+    }
+
+    #[test]
+    fn cull_table_domains_crown_and_section_first_initialize_all_tables() {
+        let Some((device, queue)) = headless() else {
+            eprintln!("SKIP cull_table_domains_bootstrap: no adapter/device"); return;
+        };
+        for crown_first in [true, false] {
+            let mut cull = CullState::new(&device);
+            assert_eq!(cull.table_uploads, TableUploads::NONE);
+            assert!(cull.model_buf.buf.is_none() && cull.section_mat_buf.buf.is_none());
+            let section = SectionGpu { first_index: 8, index_count: 3, base_vertex: 19, variant: 0 };
+            if crown_first { cull.register_crown_centres(&[[1.0, 2.0, 3.0, 4.0]]); }
+            else { cull.set_sections(&[section]); }
+            // Actual production prepare promotes a first isolated dirty domain to ALL.
+            cull.prepare(&device, &queue);
+            assert!(cull.model_buf.buf.is_some() && cull.lod_buf.buf.is_some() &&
+                    cull.section_buf.buf.is_some() && cull.section_mat_buf.buf.is_some() &&
+                    cull.crown_centre_buf.buf.is_some());
+            assert!(cull.bind.is_some(), "first writer preserves existing cull bind construction");
+            let lod = LodGpu { resolution: 1.0, section_base: 0, section_count: 1, is_decal: 0 };
+            let mut material = SectionMaterialGpu::zeroed(); material.diffuse = [0.3, 0.6, 0.9, 1.0];
+            cull.register_model(7.0, &[lod], &[section], &[material]);
+            cull.prepare(&device, &queue);
+            let capture = |c: &CullState| {
+                vec![read_table_storage_words(&device, &queue, c.model_buf.buf.as_ref().unwrap(), (std::mem::size_of_val(c.models.as_slice()) / 4) as u64),
+                     read_table_storage_words(&device, &queue, c.lod_buf.buf.as_ref().unwrap(), (std::mem::size_of_val(c.lods.as_slice()) / 4) as u64),
+                     read_table_storage_words(&device, &queue, c.section_buf.buf.as_ref().unwrap(), (std::mem::size_of_val(c.sections.as_slice()) / 4) as u64),
+                     read_table_storage_words(&device, &queue, c.section_mat_buf.buf.as_ref().unwrap(), (std::mem::size_of_val(c.section_materials.as_slice()) / 4) as u64),
+                     read_table_storage_words(&device, &queue, c.crown_centre_buf.buf.as_ref().unwrap(), (std::mem::size_of_val(c.crown_centres.as_slice()) / 4) as u64)]
+            };
+            let optimized = capture(&cull);
+            assert!(!optimized[0].is_empty() && !optimized[3].is_empty());
+            upload_slice(&device, &queue, &mut cull.model_buf, &cull.models);
+            upload_slice(&device, &queue, &mut cull.lod_buf, &cull.lods);
+            upload_slice(&device, &queue, &mut cull.section_buf, &cull.sections);
+            upload_slice(&device, &queue, &mut cull.section_mat_buf, &cull.section_materials);
+            upload_slice(&device, &queue, &mut cull.crown_centre_buf, &cull.crown_centres);
+            assert_eq!(optimized, capture(&cull));
+        }
+        eprintln!("PASS cull_table_domains_bootstrap: crown-first/section-first actual GPU readback matches wholesale initialization");
+    }
+
 }
