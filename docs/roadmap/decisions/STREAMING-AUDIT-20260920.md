@@ -2424,3 +2424,27 @@ all restored/removed. Private ignored initialized-bc-unbuilt-prototype.patch and
 test_paa_initialized_bc_chain.unbuilt.cpp plus benchmark provenance retained.
 No flag/API shipped, installedclean7b92 unchanged. Reject complexity without
 measured gain; normaldefaults unchanged/fullplanOPEN/performancefalse.
+MeshACK9996a122/PAAattemptdiage54efc50 build475all5targets pass; Rust8PASS/
+0ignored346filtered; Engine9277assertions30cases28PASS2SKIP (4special1MiB/TTL.01
+skip sections), PBOtex+diag flagsON, notallcasespassed. Clean e54 installed04:43.
+Actual meshON044319/default044724 and PAAON044504/default044812 all clean0PASS.
+Mesh DiagnosticOnly0cycles Queued->next main completion Ack3:2602handles2472
+present130absent,poolgen10/sourcebytes380859292/capacity637534208/retired0.
+Ticket1relativeordinal1/fullreport; ticket2ordinal17/Model1Row1 truncatedtrue,
+staleoldrequestInvalid. Relative ordinal begins diagnosticstate allocation,
+not globalframe/wgpuSubmissionIndex. Completion proves preceding queue work,
+not future cached/in-flight references/devicefree/reclaim. Max3 includes
+cancelledcallbacks acrossreset,8192handles/batch; droppedcallback remains
+Submitted honestly, device-loss timeout possible. OFF enabledfalse/ticket0/
+state0/factsCalls0/ownerOFF. No synchronousGPUwait/defaultqueries.
+PAAON915frames/default867frames nearest-rank route numbers are retained only
+for screening, not throughput acceptance: continuing clocks/filename scans after
+64logcap and differingPBOtexture modes confound. Prefix64 conversions434inputs/
+150preSkipped284starts274Putaccepted10rejected10filenamewhole-attemptoverlaps;
+workerSUM1151.309successfulreaddecode,84.603rejected/130.941includingfacts ms,
+maxconversionterminal185.529,0overflow/readfail/cancel/throw. Cannot pair individual
+overlap/rejection/Putreason; notroutewall time. GeometrydiagPBOmodel0 versus
+PAAmodel1 are different workloads. Root ON settled localPOI showed no obvious
+new material/geometry regression, OFFimage review pending at checkpoint.
+No default activation/eviction/paging/FPS/performance acceptance. Future member-
+bound in-flight candidate unbuilt/untested/excluded. FullplanOPEN.
