@@ -104,6 +104,7 @@ models, textures, cloud noise files) is used.
 | `water_tw/tw_shore.wgsl` | `src/ocean/ShoreWaves.js`, `src/world/TerrainGPU.js` (`terrainShoreSample`), `src/engine/render/wgsl/common.js` (`perlin2`) |
 | `water_tw/shore_sim.rs`, `water_tw/tw_sim.wgsl`, `water_tw/tw_sim_kernel.wgsl` | `src/ocean/ShoreSim.js` |
 | `water_tw/lace.rs` | `src/ocean/SurfFoam.js` (`makeLaceTexture`, `laceData`) |
+| `water_tw/tw_surf_foam.wgsl` | `src/ocean/SurfFoam.js` (the `SurfFoam` WGSL module) |
 | `terrain/shore_wet.rs`, the TW-WATER block of `terrain/terrain.wgsl` | `src/App.js` (`terrainWetness`), `src/world/Terrain.js` (wet sand, foam residue), `src/ocean/ShoreSim.js` (`shoreSimSandFoam`) |
 
 ```

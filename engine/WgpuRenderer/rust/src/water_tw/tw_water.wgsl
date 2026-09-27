@@ -9,8 +9,10 @@
 // the shore simulation (ShoreSim.js, tw_sim.wgsl): the material is now WaterMaterial._shadeWGSL's
 // `T && SH && SIM` variant where a simulated region covers the pixel and `T && SH` elsewhere
 // (the two blend by the region weight; Tidewater picks one at compile time for its one region).
-// Surf foam / wake / hull mask / planar reflection / RefractionPass are still off (W3c, W4, W6). Refraction therefore samples the opaque scene copy (Tidewater's own `!found`
-// fallback), which RefractionPass replaces in W4.
+// W3c adds SurfFoam (tw_surf_foam.wgsl), attached with the shore simulation as in Tidewater.
+// Wake / hull mask / planar reflection / RefractionPass are still off (W4, W6). Refraction
+// therefore samples the opaque scene copy (Tidewater's own `!found` fallback), which
+// RefractionPass replaces in W4.
 //
 // Adaptations to OP, all mechanical and listed here once:
 // * Group 0 is OP's frame (camera-relative view, forward-Z proj + reverse_z, reversed depth
@@ -241,6 +243,18 @@ struct WaterSurfaceFrag {
     aeration: f32,
     gust: f32,
     slick: f32,
+    // the surf-zone foam look (SurfFoam, with the shore simulation on)
+    foamInfo: SurfFoamInfo,
+};
+
+// what SurfFoam needs from the material (OP: bundled; Tidewater passes it through SurfFoamArgs)
+struct SurfFoamCtx {
+    simState: vec4<f32>,
+    P: vec3<f32>,
+    dPdx: vec3<f32>,
+    dPdy: vec3<f32>,
+    L: vec3<f32>,
+    on: bool,
 };
 
 fn rot2(v: vec2<f32>, a: f32) -> vec2<f32> {
@@ -252,7 +266,8 @@ fn rot2(v: vec2<f32>, a: f32) -> vec2<f32> {
 // plunging wave, whitewater roller relief (from the vertex stage)
 // simIn: how much a simulated region covers the pixel (Tidewater's SIM, which it decides at
 // compile time for its one region; blended here)
-fn waterSurfaceFragment(lagXZ: vec2<f32>, footprint: f32, depth: f32, vertexFoam: f32, shoreN: vec3<f32>, shoreFoam: f32, extraFoam: f32, surfMask: vec2<f32>, simIn: f32) -> WaterSurfaceFrag {
+// sf: the SurfFoam inputs; sf.on = the shore simulation runs (Tidewater attaches SurfFoam with it)
+fn waterSurfaceFragment(lagXZ: vec2<f32>, footprint: f32, depth: f32, vertexFoam: f32, shoreN: vec3<f32>, shoreFoam: f32, extraFoam: f32, surfMask: vec2<f32>, simIn: f32, sf: SurfFoamCtx) -> WaterSurfaceFrag {
     var d = vec4<f32>(0.0);
     var foamSum = 0.0;
     // the clear concave face of a plunging wave overhangs the trough: the foam carried by the
@@ -293,12 +308,14 @@ fn waterSurfaceFragment(lagXZ: vec2<f32>, footprint: f32, depth: f32, vertexFoam
 
     // base normal: large shoreline waves (per-vertex, can overhang) perturbed by FFT detail
     var normal: vec3<f32>;
+    var baseNormal = vec3<f32>(0.0, 1.0, 0.0);
     {
         // On a coarse mesh the shore normal can flip between the vertices of a folding crest: the
         // interpolated vector then cancels out (or is NaN). Keep it finite and facing up.
         let sn = clamp(shoreN, vec3<f32>(-1.0), vec3<f32>(1.0)) + vec3<f32>(0.0, 1e-3, 0.0);
         let Ns0 = sn / max(length(sn), 1e-4);
         let Ns = normalize(vec3<f32>(Ns0.x, max(Ns0.y, 0.12), Ns0.z));
+        baseNormal = Ns;
         // the ripples and chop ride on the wave: the detail normal is rotated onto the tilted face
         // (reoriented normal mapping) instead of being flattened by it
         let nd = normalize(vec3<f32>(-slopes.x, 1.0, -slopes.y));
@@ -328,9 +345,20 @@ fn waterSurfaceFragment(lagXZ: vec2<f32>, footprint: f32, depth: f32, vertexFoam
     let soft = 0.06 + footprint * 0.1;
     let detail = smoothstep(thresh - soft, thresh + soft, pattern) * (p1.y * 0.25 + 0.8);
     let far = smoothstep(0.15, 1.2, footprint);
-    let foam = mix(detail, coverage * 0.85, far);
+    var foam = mix(detail, coverage * 0.85, far);
 
     var o: WaterSurfaceFrag;
+    o.foamInfo = SurfFoamInfo(foam, sat(coverage), 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+    if (sf.on) {
+        // foam look (surf zone whitewater / lace, see SurfFoam)
+        var fa: SurfFoamArgs;
+        fa.coverage = coverage; fa.foam = foam; fa.footprint = footprint; fa.depth = depth; fa.bubbles = p1.y;
+        fa.lagXZ = lagXZ; fa.normal = normal; fa.baseNormal = baseNormal;
+        fa.fresh = shoreFoam; fa.sim = simFoam; fa.simState = sf.simState; fa.roller = surfMask.y; fa.P = sf.P;
+        fa.dPdx = sf.dPdx; fa.dPdy = sf.dPdy; fa.L = sf.L;
+        o.foamInfo = surfFoamShading(fa);
+        foam = o.foamInfo.foam;
+    }
     o.normal = normal;
     o.foam = foam;
     o.coverage = coverage;
@@ -536,8 +564,12 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
     let simPick = shoreSimPick(pos.xz);
     let simState = shoreSimStateFor(pos.xz, simPick);
     let simIn = simPick.y * select(0.0, 1.0, tw.simP1.w > 0.5);
-    let surf = waterSurfaceFragment(lagXZ, footprint, vDepth, in.foam, in.shoreN, in.shoreFoam + edgeFoam, simState.x, in.surfMask, simIn);
+    let simOn = tw.simP1.w > 0.5;
+    let sfCtx = SurfFoamCtx(simState, pos, dwx, dwy, L, simOn);
+    let surf = waterSurfaceFragment(lagXZ, footprint, vDepth, in.foam, in.shoreN, in.shoreFoam + edgeFoam, simState.x, in.surfMask, simIn, sfCtx);
     let foam = surf.foam;
+    // the gradients the SurfFoam lighting differentiates, in uniform control flow (see tw_surf_foam.wgsl)
+    let foamGrad = surfFoamGrad(surf.foamInfo, dwx, dwy);
 
     // Which medium is the view ray in? (see WaterMaterial.js) The GPU WaterQuery camera slot is
     // not ported in W2: the camera's own medium against the flat sea level decides away from
@@ -688,7 +720,8 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
         let transmitted = sceneCol * Tview * (1.0 - 0.3 * lipW) + inSun + inAmb + sss;
 
         // ---- foam: bright diffuse scatterer (albedo ~0.85), wrapped sun + sky irradiance
-        let foamLit = (sunLight * (max(dot(N, L), 0.0) * 0.75 + 0.25) * INV_PI + skyIrr * 0.95) * 0.85;
+        var foamLit = (sunLight * (max(dot(N, L), 0.0) * 0.75 + 0.25) * INV_PI + skyIrr * 0.95) * 0.85;
+        if (simOn) { foamLit = surfFoamLight(surf.foamInfo, foamGrad, N, L, V, sunLight, skyIrr); }
         let foamCol = foamLit * tw.material0.z;
 
         let rim = smoothstep(0.0, 0.025, frontD) * smoothstep(0.1, 0.035, frontD) * uprush;
