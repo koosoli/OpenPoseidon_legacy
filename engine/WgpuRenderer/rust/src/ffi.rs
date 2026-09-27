@@ -4591,3 +4591,18 @@ pub unsafe extern "C" fn wgr_shadow_depth_probe(
     }))
     .unwrap_or(0)
 }
+
+
+/// Fixture-only copied renderer-owner facts. 0 disabled,1 collected,2 invalid.
+/// Exact new structure size/version checked BEFORE output access; old layouts untouched.
+/// Recorded commands do not prove survivors, pixels, submission completion or device freeing.
+/// # Safety
+/// Exclusive renderer-owner access; nonnull output must be writable for exactly `bytes`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_geometry_pass_facts(renderer:*mut WgrRenderer,out:*mut crate::gfx3d::geometry_pass_facts::WgrGeometryPassFacts,bytes:u32,version:u32)->u32 {
+ if renderer.is_null() ||out.is_null() || !crate::gfx3d::geometry_pass_facts::valid_layout(bytes,version) {return 2;}
+ catch_unwind(AssertUnwindSafe(|| {
+  let Some(facts)=unsafe{&*renderer}.gfx3d.geometry_pass_facts() else{return 0;};
+  unsafe{*out=facts;}1
+ })).unwrap_or(2)
+}

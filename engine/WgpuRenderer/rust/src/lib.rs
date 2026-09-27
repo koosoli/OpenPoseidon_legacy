@@ -3494,6 +3494,7 @@ impl Renderer {
         water_batches: &[WgrWaterBatch],
         grass_batches: &[WgrGrassBatch],
     ) -> Result<(), String> {
+        self.gfx3d.begin_geometry_pass_facts(shadow);
         let setup_t0 = std::time::Instant::now();
         // REN-THR-009 — before anything this frame reads `bake_bind_cache` or allocates
         // from the pool. This is the frame boundary a deferred mesh destroy waits for.
@@ -3654,6 +3655,7 @@ impl Renderer {
             && cameras
                 .get(water_camera)
                 .is_some_and(|c| c.cam_pos[1] >= planar_sea.unwrap());
+        self.gfx3d.geometry_pass_reflection_configured(planar_active);
         // Sticky resolution selection. `divisor_for` is a continuous function of a continuously
         // moving camera, so committing it directly would realloc the target on any frame the
         // coverage crossed a rounding boundary. Require PLANAR_DIV_HOLD consecutive frames of

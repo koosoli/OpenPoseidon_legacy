@@ -8,6 +8,7 @@ mod mesh_facts;
 mod mesh_ack;
 mod registered_mesh_refs;
 mod local_pose_cache;
+pub(crate) mod geometry_pass_facts;
 mod lod_feedback;
 use pool::{GeometryPool, MeshAlloc};
 
@@ -4005,6 +4006,8 @@ pub struct Gfx3d {
     // (hashed C++-side, arriving as `local_dirty_mask`), the retained-set epoch, and the CPU
     // casters' absolute positions quantised to a centimetre so f32 jitter in `abs = rel + cam`
     // cannot pass for movement.
+    // Eight-byte optional pointer tax; allocation ONLY in explicit private fixture mode.
+    geometry_pass_facts: Option<Box<std::cell::Cell<geometry_pass_facts::WgrGeometryPassFacts>>>,
     local_view_key: [Option<u64>; MAX_LOCAL_SHADOWS],
     // Exact bounded CPU-caster pose witnesses; lazily allocated only when a
     // cached local view has an actual skinned caster. Retained/sky and concurrent
@@ -4839,6 +4842,9 @@ impl Gfx3d {
             shadow_plan: Vec::new(),
             local_shadow_count: 0,
             local_shadow_first_layer: 0,
+            geometry_pass_facts: if std::env::var("WGR_GEOMETRY_PAGE_FIXTURE").as_deref()==Ok("1") {
+                Some(Box::new(std::cell::Cell::new(geometry_pass_facts::WgrGeometryPassFacts::new())))
+            } else {None},
             local_view_key: [None; MAX_LOCAL_SHADOWS],
             local_pose_cache: None,
             local_pose_cache_enabled: std::env::var("WGR_LOCAL_SHADOW_POSE_CACHE").is_ok_and(|v| v == "1"),
@@ -6554,6 +6560,19 @@ impl Gfx3d {
         ));
     }
 
+    // Optional fixture recorder; no planning epoch is exported as a draw witness.
+    pub fn begin_geometry_pass_facts(&self,shadow:&WgrShadowPass) {
+        if let Some(cell)=&self.geometry_pass_facts {let mut f=cell.get();f.begin(self.cull.instance_epoch(),shadow.count,shadow.local_count);cell.set(f);}
+    }
+    pub fn geometry_pass_reflection_configured(&self,active:bool) {
+        if active {if let Some(cell)=&self.geometry_pass_facts {let mut f=cell.get();f.required|=geometry_pass_facts::REFLECTION;cell.set(f);}}
+    }
+    pub fn geometry_pass_facts(&self)->Option<geometry_pass_facts::WgrGeometryPassFacts> {self.geometry_pass_facts.as_ref().map(|f|f.get().snapshot())}
+    fn geometry_depth_recordable(&self,group:Option<&wgpu::BindGroup>,args:Option<&wgpu::Buffer>,counters:Option<&wgpu::Buffer>)->bool {
+        self.gpu_driven_enabled && self.shadow_pass_ubo.bind.is_some() && group.is_some() && args.is_some() &&
+            (!self.multi_draw_count_enabled || counters.is_some())
+    }
+
     // LGT-026: decide which local views re-render this frame. See the field comment on
     // `local_view_key` for why the CAMERA is deliberately not part of a key.
     fn plan_local_cache(
@@ -6578,6 +6597,7 @@ impl Gfx3d {
         let shape = (pass.resolution, count, local as u32, self.shadow_gen);
         let shape_changed = shape != self.local_cache_shape;
         self.local_cache_shape = shape;
+        if shape_changed {if let Some(cell)=&self.geometry_pass_facts {let mut f=cell.get();f.local_valid_mask=0;cell.set(f);}}
 
         let flags = pass.local_flags;
         let cache_on = local_shadow_cache_env() && (flags & LOCAL_FLAG_CACHE) != 0;
@@ -6675,6 +6695,7 @@ impl Gfx3d {
             };
             if !cache_on || forced || shape_changed || stale || pose_refresh_mask & (1u32 << k) != 0 {
                 self.local_view_refresh.push(k);
+                if let Some(cell)=&self.geometry_pass_facts {let mut f=cell.get();f.invalidate_local(k);cell.set(f);}
                 // Refused pose witnesses may draw, but cannot certify cached
                 // tile contents. Reentry must refresh even if old valid pose returns.
                 self.local_view_key[k] = local_pose_cache::published_key(keys[k], pose_unwitnessed_mask & (1u32 << k) != 0);
@@ -7172,6 +7193,11 @@ impl Gfx3d {
             // The pass must CLOSE before the encoder-level end timestamp — writing it while `rp`
             // is alive is a validation error, not a slightly wrong number.
             drop(rp);
+            if let Some(cell)=&self.geometry_pass_facts {
+                if self.geometry_depth_recordable(self.gpu_shadow_group1.get(c).and_then(|b|b.as_ref()),self.cull.shadow_out_args(c),self.cull.shadow_counter_buf(c)) {
+                    let mut f=cell.get();f.record_shadow(c,count as usize);cell.set(f);
+                }
+            }
             if let Some(r) = region {
                 timers.end(encoder, r);
                 timers.cpu_end(r);
@@ -7434,6 +7460,7 @@ impl Gfx3d {
             self.prepare_interior_sky(device, sky_cam);
             let epoch = self.cull.instance_epoch();
             let (gi_origin, gi_spacing) = self.gi.prepare(queue, sky_cam, self.sun_dir, epoch);
+            if let Some(cell)=&self.geometry_pass_facts {if self.gi.rsm_refresh.get() {let mut f=cell.get();f.invalidate_gi();cell.set(f);}}
             // Bind the current shadow map (or the dummy while none exists); the
             // depth passes for this frame were prepared before this call, so the
             // target is final.
@@ -8968,6 +8995,11 @@ impl Gfx3d {
         drop(rp);
         timers.end(encoder, crate::gpu_timers::Region::GiRsm);
         self.gi.mark_rsm_drawn();
+        if let Some(cell)=&self.geometry_pass_facts {
+            if self.geometry_depth_recordable(self.gpu_sky_group1.get(i).and_then(|b|b.as_ref()),self.cull.sky_out_args(i),self.cull.sky_counter_buf(i)) {
+                let mut f=cell.get();f.record_gi();cell.set(f);
+            }
+        }
         {
             static ONCE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
             let n = ONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -9062,7 +9094,10 @@ impl Gfx3d {
             self.interior_sky_target = Some((tex, layer_views, sample_view));
             self.interior_sky_gen += 1;
             self.interior_sky_rendered = [None; sky_vis::DIRECTION_COUNT];
+            if let Some(cell)=&self.geometry_pass_facts {let mut f=cell.get();f.interior_valid_mask=0;cell.set(f);}
         }
+        if let Some(cell)=&self.geometry_pass_facts {let mut f=cell.get();f.required|=geometry_pass_facts::INTERIOR;
+            if self.gi.settings.enabled {f.required|=geometry_pass_facts::GI;}cell.set(f);}
         let fresh = sky_vis::build_views(cam_pos, &self.interior_sky);
         let epoch = self.cull.instance_epoch();
         self.interior_sky_refresh.clear();
@@ -9093,6 +9128,7 @@ impl Gfx3d {
                 }
             }
         }
+        if let Some(cell)=&self.geometry_pass_facts {let mut f=cell.get();for &i in &self.interior_sky_refresh {f.invalidate_interior(i);}cell.set(f);}
         self.interior_sky_view = Some(self.interior_sky_views[0]);
     }
 
@@ -9173,6 +9209,12 @@ impl Gfx3d {
                 self.cull.sky_out_args(i),
                 self.cull.sky_counter_buf(i),
             );
+            drop(rp);
+            if let Some(cell)=&self.geometry_pass_facts {
+                if self.geometry_depth_recordable(self.gpu_sky_group1.get(i).and_then(|b|b.as_ref()),self.cull.sky_out_args(i),self.cull.sky_counter_buf(i)) {
+                    let mut f=cell.get();f.record_interior(i);cell.set(f);
+                }
+            }
         }
         timers.end(encoder, crate::gpu_timers::Region::InteriorSkyDraw);
     }

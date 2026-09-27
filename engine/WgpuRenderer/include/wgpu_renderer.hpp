@@ -2155,6 +2155,19 @@ static_assert(sizeof(WgrAbiCheck) == 28, "WgrAbiCheck layout must match Rust");
 
 // --- Functions ---------------------------------------------------------------
 
+
+// Additive fixture-only ABI; existing ABI15 structures remain unchanged.
+// Recorded indirect commands, NOT survivor/pixel/queue completion or all-pass proof.
+struct WgrGeometryPassFacts {
+ uint32_t version,struct_bytes,enabled,capabilities,required,pending,recorded_this_frame,reserved;
+ uint64_t frame,instance_epoch,cascade_epoch,cascade_frame,gi_rsm_epoch,gi_rsm_frame;
+ uint32_t local_count,local_draw_mask,local_valid_mask,interior_draw_mask,interior_valid_mask,cascade_draw_mask,cascade_count,reserved2;
+ uint64_t local_epochs[24],local_frames[24],interior_epochs[5],interior_frames[5];
+};
+static_assert(sizeof(WgrGeometryPassFacts)==576);
+static_assert(offsetof(WgrGeometryPassFacts,local_epochs)==112);
+static_assert(offsetof(WgrGeometryPassFacts,interior_epochs)==496);
+
 extern "C"
 {
     WGR_API const char* wgr_version(void);
@@ -2589,6 +2602,8 @@ extern "C"
 
     /* Current dynamic-resource residency accounting. Returns 1 on success. */
     WGR_API uint32_t wgr_get_memory_stats(WgrRenderer* renderer, WgrMemoryStats* out);
+    // Status0 disabled/1 copied/2 invalid; size576/version1 required; exclusive renderer owner.
+    WGR_API uint32_t wgr_geometry_pass_facts(WgrRenderer*,WgrGeometryPassFacts*,uint32_t bytes,uint32_t version);
     WGR_API uint32_t wgr_get_geometry_allocation_report(WgrRenderer* renderer,
         WgrSlice<uint32_t> models, uint32_t max_rows, uint32_t max_visits,
         WgrGeometryAllocationRow* rows, uint32_t row_capacity, WgrGeometryAllocationSummary* summary);
