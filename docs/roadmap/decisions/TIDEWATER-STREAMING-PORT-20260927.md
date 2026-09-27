@@ -25,3 +25,18 @@ The integration still has a backend wrapper and small replay settings, null/sele
 The copied `TW-WATER-*` decisions and measurements describe the source branch's historical observations, not results on the current streaming branch. W3 visual/performance acceptance and W4 spray remain open. Preserve the copied MIT notice in `CREDITS.md`, including DRG Software Solutions LLC copyright and Tidewater upstream pin `4811ba48d795197de5621985f404e765c0b7c0ef`. No licensed sea/foam assets are imported; the port uses procedural assets from the source implementation.
 
 Root owns final integration against the newer streaming HEAD, all builds, deployment and game smoke. This isolated branch does not replace EngineWgpu files wholesale, launch a second game, deploy binaries, or promote Tidewater as the normal default. Streaming completion, whole-world compatibility, visual quality and performance acceptance remain open.
+
+## Additional showcase branch
+
+The subsequently requested exact safety ref `refs/heads/dec/tidewater-showcase` resolves to `cc27e21e086b91c5d766c89bf448d0197286651b`. It contains the same nine water commits plus one additional mission-only commit; patch-equivalence inspection marks the nine as already included. The additional source commit `cc27e21e` is preserved with `-x` as `eaa0ef73`. It adds `dev-missions/tw-showcase.eden/{README.md,description.ext,init.sqs,mission.sqm}` and changes no renderer code, ABI or normal backend default.
+
+The showcase scripts six camera shots over an original Everon south-east bay landing with an LST, four PBRs, a platoon and aircraft. It ends itself at 120 seconds. This is source inspection of the authored timeline, not a verified mission execution or a water quality/performance result. The root agent owns installed-game verification, and should use the complete selected source checkout's mission directory explicitly if it is not copied by deployment.
+
+After supported deployment of the matched pair, the root-owned water smoke can use this PowerShell launch from the game directory (replace the mission path with the final merged checkout's absolute path):
+
+```powershell
+$env:WGR_WATER_BACKEND = '1'
+.\OpenPoseidon.exe --render=wgpu --window --width=1600 --height=900 --dev --test-mission 'C:\Users\mail\.codex\worktrees\tidewater-streaming-port\CWR-CE-paavohuhtalafork-\dev-missions\tw-showcase.eden'
+```
+
+A Current OP comparison sets the same environment variable to `0`; remove the session override afterwards. Game ownership/locking and supported deployment remain required. No launch was executed by the port subagent. All previous integration adaptations, including Current OP default zero, matched ABI17, lazy shore height capture and Tidewater-only shoreline derivative work, remain intact.
