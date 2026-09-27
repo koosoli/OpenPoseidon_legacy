@@ -1,4 +1,5 @@
 #include "GeometryPageCommand.hpp"
+#include "ControlledMlodPageProducer.hpp"
 #include <Poseidon/Graphics/Rendering/GeometryPageControlledClodPilot.hpp>
 #include <CLI/App.hpp>
 #include <CLI/Option.hpp>
@@ -93,5 +94,22 @@ void GeometryPageCommand::Setup(CLI::App& app)
     auto output=std::make_shared<std::string>();
     command->add_option("--output-directory",*output,"New private directory; parent must exist")->required();
     command->callback([output] {try {Produce(*output);} catch(const std::exception& error) {std::cerr<<"geometry-page-pilot: "<<error.what()<<"\n";throw CLI::RuntimeError(2);} });
+    auto mlod=app.add_subcommand("geometry-page-mlod","Offline actual original controlled MLOD subset to selected CLOD disk package; no runtime/retail gate");
+    auto input=std::make_shared<std::string>();auto originalOutput=std::make_shared<std::string>();
+    mlod->add_option("--input",*input,"Actual original MLOD file; whole owned snapshot <=16 MiB")->required();
+    mlod->add_option("--output-directory",*originalOutput,"NEW private output directory; parent must exist")->required();
+    mlod->callback([input,originalOutput] {
+        try {
+            Poseidon::Foundation::CaptureMainThread();
+            MlodPages::Product result;const auto status=MlodPages::ProduceFile(*input,*originalOutput,result,&std::cout);
+            if(status!=MlodPages::ProducerStatus::Produced)
+                throw std::runtime_error(std::string("bounded original MLOD producer refused, status=")+MlodPages::StatusName(status));
+            // Caller captures independent producer stdout and verifies ORIGINAL input hash.
+            // Declared hashes inside selected.gcd alone never authorize an expected key.
+            // ProduceFile publishes stdout while its owned-directory rollback guard is active.
+        } catch(const std::exception& error) {
+            std::cerr<<"geometry-page-mlod: "<<error.what()<<"\n";throw CLI::RuntimeError(2);
+        }
+    });
 }
 }

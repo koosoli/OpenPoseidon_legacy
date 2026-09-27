@@ -1,4 +1,6 @@
 #include <mutex>
+#include <memory>
+#include <Poseidon/Foundation/Threads/ThreadAffinity.hpp>
 #include <unordered_map>
 #include <unordered_set>
 #include <Poseidon/World/Model/ShapeAdapter.hpp>
@@ -816,14 +818,20 @@ void FinishOdolAdapterTail(LODShapeWithShadow* shape, const Poseidon::Model::Mod
     }
 }
 
-LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool reversed,
-                                      const AdapterBankTables* tables, bool finishTail)
+static bool ControlledMlodEligible(const Poseidon::Model::Model& model);
+
+LODShapeWithShadow* ConvertWithContext(const Poseidon::Model::Model& model, bool reversed,
+                                      const AdapterBankTables* tables, bool finishTail, bool controlledOffline)
 {
+    if (controlledOffline && (reversed || !finishTail || !tables ||
+        !tables->textures.empty() || !tables->surfMats.empty() || !tables->mlodSurfMats.empty() ||
+        !ControlledMlodEligible(model))) return nullptr;
     // Sub-bucket timers for the Phase-6 question "what inside adapt is main-thread-bound".
     // Accumulated across LODs, logged once per model when the total is worth reading.
     const auto adaptT0 = ::Poseidon::Dev::Perf::Now();
     double tanMs = 0.0, texMs = 0.0, matMs = 0.0, vfillMs = 0.0, faceMs = 0.0, areaMs = 0.0, tailMs = 0.0;
     auto shape = new LODShapeWithShadow();
+    std::unique_ptr<LODShapeWithShadow> controlledGuard(controlledOffline ? shape : nullptr);
 
     // Must match the lowered name used in ShapeBank::New
     shape->_name = model.sourcePath.c_str();
@@ -1492,7 +1500,17 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
     }
     const auto tailT0 = ::Poseidon::Dev::Perf::Now();
 
-    if (model.sourceFormat == "ODOL")
+    if (controlledOffline)
+    {
+        // No GApp/ENGINE_CONFIG quality pruning or live Pars/name-derived class,
+        // map/geometry policy. The strict wrapper has no helpers or proxies to
+        // finalize. autocenter=0 was checked, not silently authored here.
+        shape->ScanShapes();
+        shape->_autoCenter = false;
+        shape->CalculateMinMax(true);
+        shape->CalculateHints();
+    }
+    else if (model.sourceFormat == "ODOL")
     {
         for (int i = 0; i < lodCount; ++i)
         {
@@ -1703,7 +1721,89 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
                  model.sourcePath.c_str(), adaptTotal, tanMs, vfillMs, faceMs, texMs, matMs, areaMs, tailMs,
                  adaptTotal - tanMs - vfillMs - faceMs - texMs - matMs - areaMs - tailMs);
     }
+    if (controlledOffline) controlledGuard.release();
     return shape;
+}
+
+LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool reversed,
+                                      const AdapterBankTables* tables, bool finishTail)
+{
+    return ConvertWithContext(model,reversed,tables,finishTail,false);
+}
+
+static bool ControlledMlodEligible(const Poseidon::Model::Model& model)
+{
+    if (!Foundation::IsMainThread() || model.sourceFormat != "MLOD" || model.sourceVersion != 11 ||
+        model.lodLevels.size() != 2 || model.sourcePath.size() > 127 || model.mapType ||
+        model.canOcclude || model.canBeOccluded || model.allowAnimation || !model.metadata.empty() ||
+        !model.massArray.empty() || model.mass != 0 || model.special != 0 ||
+        model.memoryIdx >= 0 || model.geometryIdx >= 0 || model.geometryFireIdx >= 0 ||
+        model.geometryViewIdx >= 0 || model.landContactIdx >= 0 || model.roadwayIdx >= 0 ||
+        model.pathsIdx >= 0 || model.hitpointsIdx >= 0 || model.geometryViewPilotIdx >= 0 ||
+        model.geometryViewGunnerIdx >= 0 || model.geometryViewCommanderIdx >= 0 || model.geometryViewCargoIdx >= 0 ||
+        model.memoryLODIndex >= 0 || model.geometryLODIndex >= 0 || model.fireGeometryLODIndex >= 0 ||
+        model.viewGeometryLODIndex >= 0 || model.viewPilotLODIndex >= 0 || model.viewGunnerLODIndex >= 0 ||
+        model.viewCommanderLODIndex >= 0 || model.viewCargoLODIndex >= 0 || model.landContactLODIndex >= 0 ||
+        model.roadwayLODIndex >= 0 || model.pathsLODIndex >= 0 || model.hitpointsLODIndex >= 0)
+        return false;
+    for (unsigned char c : model.sourcePath) if (!c || c > 127) return false;
+    float previous = -1;
+    for (const auto& level : model.lodLevels)
+    {
+        const Mesh& mesh = level.mesh;
+        if (level.sourceEncoding != "P3DM" || !std::isfinite(level.resolution) ||
+            level.resolution < 0 || level.resolution >= 900 || level.resolution == previous ||
+            level.purpose != Poseidon::Model::LodPurpose::Visual || !level.uvChannels.empty() || level.uvSetCount ||
+            mesh.vertices.empty() || mesh.vertices.size() > 4096 || mesh.triangles.size() > 8192 ||
+            mesh.quads.size() > 8192 || mesh.triangles.size()*3+mesh.quads.size()*4 > 4096 ||
+            mesh.triangles.size()+mesh.quads.size() == 0 ||
+            !mesh.selections.empty() || !mesh.proxies.empty() || !mesh.frames.empty() ||
+            !mesh.vertexMass.empty() || !mesh.edges.mlodIndices.empty() || !mesh.edges.vertexIndices.empty() ||
+            mesh.materials.size() != 1 || mesh.sections.size() != 1 || mesh.properties.size() != 1 ||
+            mesh.properties[0].name != "autocenter" || mesh.properties[0].value != "0" ||
+            static_cast<uint32_t>(mesh.special) != 0)
+            return false;
+        previous = level.resolution;
+        const auto& material = mesh.materials[0];
+        if (material.name != "#default#" || !material.texturePath.empty() || !material.materialPath.empty() ||
+            !material.embeddedStages.empty() || static_cast<uint32_t>(material.flags) != 0 ||
+            material.metallic != 0 || material.roughness != 1 || material.emissive != 0)
+            return false;
+        const auto& section = mesh.sections[0];
+        if (section.materialIndex != 0 || section.startTriangle != 0 ||
+            section.triangleCount != mesh.triangles.size()+mesh.quads.size() ||
+            static_cast<uint32_t>(section.hints) != 0 || section.specialMaterial != 0 || section.faceRangeKnown ||
+            section.firstFace || section.faceCount)
+            return false;
+        for (const auto& vertex : mesh.vertices)
+        {
+            if (static_cast<uint32_t>(vertex.flags) != static_cast<uint32_t>(ClipAll) || vertex.hasTangentFrame || vertex.uv1.u != 0 || vertex.uv1.v != 0)
+                return false;
+            const float normalLength2 = vertex.normal.x*vertex.normal.x+vertex.normal.y*vertex.normal.y+vertex.normal.z*vertex.normal.z;
+            if (!std::isfinite(normalLength2) || normalLength2 < 1e-12f || normalLength2 > 1e8f) return false;
+            for (float value : {vertex.position.x,vertex.position.y,vertex.position.z,vertex.normal.x,
+                vertex.normal.y,vertex.normal.z,vertex.uv.u,vertex.uv.v,vertex.uv1.u,vertex.uv1.v})
+                if (!std::isfinite(value) || std::abs(value) > 10000) return false;
+        }
+        std::array<bool,4096> seenSourceFaces{};
+        const auto validFace = [&mesh,&seenSourceFaces](const auto& face) {
+            const size_t count = mesh.triangles.size()+mesh.quads.size();
+            if (face.originalIndex >= count || seenSourceFaces[face.originalIndex]) return false;
+            seenSourceFaces[face.originalIndex] = true;
+            if (face.materialIndex || static_cast<uint32_t>(face.flags)) return false;
+            for (uint32_t index : face.indices) if (index >= mesh.vertices.size()) return false;
+            return true;
+        };
+        for (const auto& face : mesh.triangles) if (!validFace(face)) return false;
+        for (const auto& face : mesh.quads) if (!validFace(face)) return false;
+    }
+    return true;
+}
+
+LODShapeWithShadow* ConvertControlledMlod(const Poseidon::Model::Model& model)
+{
+    const AdapterBankTables emptyBanks;
+    return ConvertWithContext(model,false,&emptyBanks,true,true);
 }
 
 } // namespace ShapeAdapter

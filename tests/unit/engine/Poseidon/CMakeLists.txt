@@ -142,6 +142,8 @@ set(POSEIDON_TEST_SOURCES
     Graphics/test_standalone_mesh_retirement_witness.cpp
     Graphics/test_geometry_page_prototype.cpp
     Graphics/test_geometry_page_shape_export.cpp
+    Graphics/test_geometry_page_controlled_mlod_asset.cpp
+    Tools/test_geometry_page_mlod_producer.cpp
     Graphics/test_geometry_page_resident_decode.cpp
     Graphics/test_geometry_page_representation_decode.cpp
     Graphics/test_authored_geometry_page_worker.cpp

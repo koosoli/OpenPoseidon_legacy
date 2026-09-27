@@ -60,6 +60,14 @@ namespace ShapeAdapter
     LODShapeWithShadow* convertToLODShape(const Model& model, bool reversed = false,
                                           const AdapterBankTables* tables = nullptr, bool finishTail = true);
 
+    // Explicit offline untextured two-visual-LOD subset only. Independent bounded
+    // IR checks precede allocation; nullptr on unsupported/wrong owner. This is
+    // not raw-source certification: the owned-byte exporter also rejects unknown
+    // on-wire tags/flags before the original parser. No config/path classification,
+    // quality LOD dropping, synthesis, proxy/bank access or runtime installation.
+    // Same existing face/vertex conversion and MeshBuild input; caller owns result.
+    LODShapeWithShadow* ConvertControlledMlod(const Model& model);
+
     // MAIN THREAD ONLY. No-op for non-ODOL models (their tail has no proxies and
     // completes inside the conversion).
     void FinishOdolAdapterTail(LODShapeWithShadow* shape, const Model& model, bool reversed);

@@ -19,6 +19,8 @@
 namespace Poseidon { namespace Model { struct Model; namespace ShapeAdapter {
     struct AdapterBankTables;
     class LODShapeWithShadow* convertToLODShape(const Model& model, bool reversed, const AdapterBankTables* tables, bool finishTail);
+    // Internal shared adapter implementation; controlled=true independently checks eligibility.
+    class LODShapeWithShadow* ConvertWithContext(const Model& model, bool reversed, const AdapterBankTables* tables, bool finishTail, bool controlledOffline);
     void CreateAdapterProxies(class LODShapeWithShadow* shape, const Model& model);
     void FinishOdolAdapterTail(class LODShapeWithShadow* shape, const Model& model, bool reversed);
 }}}
@@ -335,6 +337,7 @@ class Shape: public Poseidon::VertexTable
 	friend class ::Object;
 	friend class LODShape;
 	friend class LODShapeWithShadow* Poseidon::Model::ShapeAdapter::convertToLODShape(const Poseidon::Model::Model& model, bool reversed, const Poseidon::Model::ShapeAdapter::AdapterBankTables* tables, bool finishTail);
+	friend class LODShapeWithShadow* Poseidon::Model::ShapeAdapter::ConvertWithContext(const Poseidon::Model::Model& model, bool reversed, const Poseidon::Model::ShapeAdapter::AdapterBankTables* tables, bool finishTail, bool controlledOffline);
 	friend void Poseidon::Model::ShapeAdapter::FinishOdolAdapterTail(LODShapeWithShadow* shape, const Poseidon::Model::Model& model, bool reversed);
 	friend void Poseidon::Model::ShapeAdapter::CreateAdapterProxies(LODShapeWithShadow* shape, const Poseidon::Model::Model& model);
 	
@@ -745,6 +748,7 @@ class LODShape: public RefCountWithLinks
 	friend class ::Object;
 	friend class LODShapeWithShadow;
 	friend class LODShapeWithShadow* Poseidon::Model::ShapeAdapter::convertToLODShape(const Poseidon::Model::Model& model, bool reversed, const Poseidon::Model::ShapeAdapter::AdapterBankTables* tables, bool finishTail);
+	friend class LODShapeWithShadow* Poseidon::Model::ShapeAdapter::ConvertWithContext(const Poseidon::Model::Model& model, bool reversed, const Poseidon::Model::ShapeAdapter::AdapterBankTables* tables, bool finishTail, bool controlledOffline);
 	friend void Poseidon::Model::ShapeAdapter::FinishOdolAdapterTail(LODShapeWithShadow* shape, const Poseidon::Model::Model& model, bool reversed);
 	friend void Poseidon::Model::ShapeAdapter::CreateAdapterProxies(LODShapeWithShadow* shape, const Poseidon::Model::Model& model);
 
