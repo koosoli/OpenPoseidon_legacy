@@ -223,8 +223,15 @@ try{
                     $cut.meshesPresent -eq $cut.expectedPresentMeshes -and $cut.meshesAbsent -eq $cut.expectedAbsentMeshes
             }
             if (!$active -and $cut.meshesPresent -gt 0 -and [DateTime]::UtcNow -lt $until) {continue}
+            # Projected owner maintenance may publish a newer complete coarse cut after
+            # this explicit Observe. Accept only that active-policy supersession; all
+            # other modes and manual Fine/Abort observations retain exact request identity.
+            $observedSerial=$cut.observedRequestId -eq $request.requestId
+            if($ProjectedPrefetch -and $cut.projectedDemandActive -and $active -and !$fine){
+                $observedSerial=$cut.requestId -ge $request.requestId -and $cut.observedRequestId -eq $cut.requestId
+            }
             if ($null -eq $request.requestId -or $request.requestId -lt 1 -or $cut.requestId -lt 1 -or
-                $cut.observedRequestId -ne $request.requestId -or $cut.active -ne $active -or
+                !$observedSerial -or $cut.active -ne $active -or
                 $cut.fineSelected -ne $fine -or !$cut.mainFrameReturned -or $cut.cpuHelpersUnchanged -or
                 $cut.helperHashBefore -ne '' -or $cut.helperHashAfter -ne '' -or $cut.sourceSha256 -notmatch '^[a-fA-F0-9]{64}$' -or
                 $cut.helperHashBefore -ne $cut.helperHashAfter -or
