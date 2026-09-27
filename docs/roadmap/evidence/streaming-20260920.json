@@ -14352,6 +14352,276 @@
         "samples.jsonl": "6d1a16edd9d163ac4e4fcd361a33358863158e9cc0c419469ea46ade663df157",
         "warm-texture-job-proof.json": "12dcad0f0c5509da905fb35f0bc4fc930f296865ac91b58a0fb3ee7e1b69cbe9"
       }
+    },
+    {
+      "run": "fire-heartbeat-game-20260927-20260927-080638",
+      "classification": "PASS cleanexit0; bounded manualFire heartbeat lifecycle/default compatibility",
+      "provenance": {
+        "fixture": {
+          "absolute_model_path": true,
+          "actor": [
+            1190,
+            10,
+            1200
+          ],
+          "camera": [
+            100,
+            80,
+            100
+          ],
+          "camera_isolation_env": {
+            "WGR_OBJECT_STREAM_RADIUS_CELLS": "8",
+            "WGR_OBJECT_STREAM_WINDOW_GROWTH": "0"
+          },
+          "cell_metres": 50.0,
+          "elevation": 10.0,
+          "fire_segment": [
+            [
+              1190,
+              11.5,
+              1200
+            ],
+            [
+              1210,
+              11.5,
+              1200
+            ]
+          ],
+          "half_depth": 6.0,
+          "land_range": 32,
+          "large_wall": false,
+          "model_sha256": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+          "models": [
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\fire-heartbeat-game-20260927-20260927-080638\\fixture\\streaming_fixture\\wall.p3d"
+          ],
+          "notes": [
+            "Absolute-model mode uses original loose files without an archive mount; relative mode needs a separately configured loose-file root.",
+            "Camera at 100 is isolated from walls at 1200/1230 with growth disabled.",
+            "No ResolveObject: actor demand must admit geometry with transient leases.",
+            "Generic inventory/classification/admission must establish readiness.",
+            "Self-check is not engine parsing, collision or runtime verification."
+          ],
+          "placements": [
+            {
+              "id": 1001,
+              "model_index": 0,
+              "position": [
+                1200.0,
+                11.5,
+                1200.0
+              ]
+            },
+            {
+              "id": 1002,
+              "model_index": 0,
+              "position": [
+                1230.0,
+                11.5,
+                1200.0
+              ]
+            }
+          ],
+          "positive_warming": false,
+          "reference_all_models": false,
+          "registered_warming": false,
+          "schema": 1,
+          "terrain_range": 32,
+          "wall_world_bounds": [
+            [
+              1199.5,
+              10,
+              1194.0,
+              1200.5,
+              13,
+              1206.0
+            ],
+            [
+              1229.5,
+              10,
+              1194.0,
+              1230.5,
+              13,
+              1206.0
+            ]
+          ],
+          "world_sha256": "33cfdce55b320c6e60e9caf8a3a3d6c6a7fdc74cfca64ffc99b5aacd0d43567c"
+        },
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "23E89C2A57EED3D47343C25A1902150F63974667B88A9482C9D922D8460791C0",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "9D6078C70F41E839E014E8DFE4B731790D88B7C2B618A25BB080E6DD6FE12685",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "registeredWarming": false,
+        "shapeCacheLimit": null,
+        "installed": "codex/streaming-residency ce403313 2026-09-27_08:06 deploy-ps1",
+        "scriptSha256": "B8AB369C03DD72326F5EA5A299EFEED8581AE160D668B1734CA6E78754D1096D",
+        "head": "ce403313909c3cc01271401f938efb37b253c1ae",
+        "disabled": false
+      },
+      "summary": {
+        "passed": true,
+        "performanceAccepted": false,
+        "expiredQueryRegions": 0,
+        "expiredPollStatus": "Pending",
+        "expiredCollisionStatus": "Pending",
+        "expiredCollisionContacts": 0,
+        "automaticReadyRegions": 2,
+        "automaticLeasedPlacements": 2,
+        "borrowedModels": 1,
+        "borrowedEntries": 2,
+        "requiredObjects": 0,
+        "requeuedStatus": "Ready",
+        "recollisionStatus": "Ready",
+        "recollisionContactIds": [
+          1001
+        ],
+        "finalRequired": 0,
+        "finalReleasedLeaseCount": 0
+      },
+      "limits": "Actual2wallautomaticactor/Firechannel fixture: expiredmanualFire region logicallyPending/emptycollision beforephysicalcleanup; automatic2wallleases/model1entries2 remain. ExplicitrequeueReady contacts1001 once; fullmove/reacquire/damage/weakdelete lifecycle passes. Logical2secondTTL pollsdoNOTrenew; physicalretirement max4+soft2ms, notharddeadline; <=256modelproducer notcancelled. No gameplayconsumer migration/retailDayZ/MP/performance proof; nextcargo consumer UNBUILT/excluded. WholeplanOPEN/defaultReady-performancefalse/serviceOFF.",
+      "sha256": {
+        "engine.log": "afda7b691097c6b6157d740ac208a7570e1aaa34a931dfcacc06847a8aa867bb",
+        "harness.jsonl": "bcd42d843b5487baf309d243181c03885176a506503f09353d7d88f54abb9728",
+        "provenance.json": "8921e075435f65f4d461eeed7b4565e94d8ac09a8b4a1dc63b7fd6a88d11c687",
+        "result.json": "ead8c560aede40e7001e871fd69cd78e915a22bcaf763c877b930b174895059f",
+        "visual.png": "483906d6251808b4157c459d622484d08ecf331107bc13ab632c0b89ea1fd167"
+      }
+    },
+    {
+      "run": "fire-heartbeat-default-20260927-20260927-080730",
+      "classification": "PASS cleanexit0; bounded manualFire heartbeat lifecycle/default compatibility",
+      "provenance": {
+        "shapeCacheLimit": null,
+        "fixture": {
+          "absolute_model_path": true,
+          "actor": [
+            1190,
+            10,
+            1200
+          ],
+          "camera": [
+            100,
+            80,
+            100
+          ],
+          "camera_isolation_env": {
+            "WGR_OBJECT_STREAM_RADIUS_CELLS": "8",
+            "WGR_OBJECT_STREAM_WINDOW_GROWTH": "0"
+          },
+          "cell_metres": 50.0,
+          "elevation": 10.0,
+          "fire_segment": [
+            [
+              1190,
+              11.5,
+              1200
+            ],
+            [
+              1210,
+              11.5,
+              1200
+            ]
+          ],
+          "half_depth": 6.0,
+          "land_range": 32,
+          "large_wall": false,
+          "model_sha256": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+          "models": [
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\fire-heartbeat-default-20260927-20260927-080730\\fixture\\streaming_fixture\\wall.p3d"
+          ],
+          "notes": [
+            "Absolute-model mode uses original loose files without an archive mount; relative mode needs a separately configured loose-file root.",
+            "Camera at 100 is isolated from walls at 1200/1230 with growth disabled.",
+            "No ResolveObject: actor demand must admit geometry with transient leases.",
+            "Generic inventory/classification/admission must establish readiness.",
+            "Self-check is not engine parsing, collision or runtime verification."
+          ],
+          "placements": [
+            {
+              "id": 1001,
+              "model_index": 0,
+              "position": [
+                1200.0,
+                11.5,
+                1200.0
+              ]
+            },
+            {
+              "id": 1002,
+              "model_index": 0,
+              "position": [
+                1230.0,
+                11.5,
+                1200.0
+              ]
+            }
+          ],
+          "positive_warming": false,
+          "reference_all_models": false,
+          "registered_warming": false,
+          "schema": 1,
+          "terrain_range": 32,
+          "wall_world_bounds": [
+            [
+              1199.5,
+              10,
+              1194.0,
+              1200.5,
+              13,
+              1206.0
+            ],
+            [
+              1229.5,
+              10,
+              1194.0,
+              1230.5,
+              13,
+              1206.0
+            ]
+          ],
+          "world_sha256": "22e395cdb04a5b9f4c866d596ea2ed17e3378c316fad7a0e73edc9f9f32b6774"
+        },
+        "registeredWarming": false,
+        "scriptSha256": "B8AB369C03DD72326F5EA5A299EFEED8581AE160D668B1734CA6E78754D1096D",
+        "disabled": true,
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "23E89C2A57EED3D47343C25A1902150F63974667B88A9482C9D922D8460791C0",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "9D6078C70F41E839E014E8DFE4B731790D88B7C2B618A25BB080E6DD6FE12685",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "head": "ce403313909c3cc01271401f938efb37b253c1ae",
+        "installed": "codex/streaming-residency ce403313 2026-09-27_08:06 deploy-ps1"
+      },
+      "summary": {
+        "passed": true,
+        "performanceAccepted": false,
+        "disabled": true,
+        "created": 0,
+        "leased": 0,
+        "ownerPumps": 0,
+        "required": 0
+      },
+      "limits": "DefaultserviceOFF/Disabled/no newownerwork/required0 originalbehavior preserved. No throughput/no-regression/MP proof. Nextcargo consumer UNBUILT/excluded. WholeplanOPEN/defaultReady-performancefalse/serviceOFF.",
+      "sha256": {
+        "engine.log": "202b0c25962a024bb21cfe55cc984a9dfc82110d1ee04982f18093744ccc6b43",
+        "harness.jsonl": "08817bd23096353db8eb1a6e3ae3019239f42ba3bf7ca100b19d2724d957fee0",
+        "provenance.json": "4e6b12c7d70970cbcbcb464a633463ceac43a2dc065a724fcc356bd40331217d",
+        "result.json": "40931245d5e538dd4ebbe03a6b2c6ff07fef8f57d3cb4fe7665e5215545c069e"
+      }
     }
   ],
   "microbenchmarks": [
@@ -15617,6 +15887,15 @@
         "test-warm-window-on-20260927.log": "4d4eff555c49c52ef827e9b25afd160d0c29bceb2768b20bf1621f75ed17552d",
         "runtime-warm-window-actual-20260927.log": "b12a0e30e01961417d9408f442f633eb5166554dd83b51d69d43f626798ac532",
         "runtime-warm-window-default-20260927.log": "673ec7631de5a68f4be9b0cf0023eb747d6792f7643d055f389493e3d95d5c35"
+      }
+    },
+    {
+      "artifactRoot": "build",
+      "runtimeSourceCommit": "ce403313",
+      "result": "All5targets22scheduledstepsPASS;26769assert30casesPASS/noSKIP. Cleanmatchingce40331308:06. ManualFirelogical2secondheartbeat/pollsnotrenew; max4physicalretire+soft2msnohardphysicaldeadline, <=256producer remains. ServiceOFF/defaultunchanged. Nextcargo consumer UNBUILT/excluded; fullplanOPEN/performance-defaultReadyfalse.",
+      "sha256": {
+        "build-fire-heartbeat-20260927.log": "39d457d1245b037c503542fceaad932980733e27a9c59bebfaf876c117a866be",
+        "test-fire-heartbeat-20260927.log": "d359ca26372aee81c333a0f1ebf8b45bdc51c25d491edac585ca694b9816a091"
       }
     }
   ],

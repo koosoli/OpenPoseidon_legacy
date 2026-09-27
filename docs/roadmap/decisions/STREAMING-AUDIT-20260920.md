@@ -2673,3 +2673,20 @@ allwarm/sourceOFF0/queuestorage0. Quantiles nearest-rank/usualmedian. Defaultmax
 acceptance. Root viewed both settledlocalPOI without obvious new gaps, not
 all-route/fullmap/no-regression proof. Feature remainsOFF/unpromoted,
 wholeplanOPEN/defaultReady/performanceAcceptedfalse.
+
+## Sept27 manual Fire heartbeat expiry
+
+ce403313 all5target22scheduledstep build PASS;26769assertions/30cases PASS/noSKIP.
+Cleanmatchinginstall08:06 EXE 23E89C2A57EED3D47343C25A1902150F63974667B88A9482C9D922D8460791C0,
+DLL 9D6078C70F41E839E014E8DFE4B731790D88B7C2B618A25BB080E6DD6FE12685.
+ManualFire heartbeat logically expires after2seconds; polls do not renew it.
+Physicalretirement boundedmax4 withsoft2ms is not a hardphysical deadline;
+current <=256model producer is not cancelled. Service remainsOFF bydefault.
+
+Actualgame080638 PASS/clean0: expiredqueryRegions0/statusPending/collidePending
+with contacts0, while automatic2wallReady/leased2/borrowedModels1/entries2 remain
+intact. RequeueReady/exactFirewall1001 once, fullmove/reacquire/damage/weakdelete
+lifecycle passes/required0. Default080730 PASS/clean0 Disabled/no newownerwork/
+required0/originalbehavior. Tinyfixture only, no gameplayconsumer migration,
+generalretailDayZ/MP/performance/no-regression acceptance. Nextcargo consumer
+is unbuilt/excluded. WholeplanOPEN/defaultReady/performanceAcceptedfalse/serviceOFF.
