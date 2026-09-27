@@ -734,6 +734,13 @@ void Car::Simulate(float deltaT, SimulationImportance prec)
     {
         IsMoved();
     }
+    // TW-WATER W6a.1: a car afloat or airborne keeps simulating (as Tank does). A car starts
+    // stopped, so an empty BRDM placed on the sea hung at its placement height, dry, and its wreck
+    // never sank.
+    if (!_landContact || _waterContact)
+    {
+        IsMoved();
+    }
 
     {
         float impulse2 = _impulseForce.SquareSize();

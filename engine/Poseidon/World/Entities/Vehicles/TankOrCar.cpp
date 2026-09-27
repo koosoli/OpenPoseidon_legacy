@@ -2,6 +2,7 @@
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/World/Entities/Vehicles/TankOrCar.hpp>
 #include <Poseidon/World/Entities/Vehicles/Ground/TrackedWaterResponse.hpp>
+#include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Network/Network.hpp>
@@ -156,6 +157,14 @@ void TankOrCar::Simulate(float deltaT, SimulationImportance prec)
         if (_waterContact)
         {
             _wreckFlood = WreckFloodStep(_wreckFlood, deltaT);
+        }
+        // W6a.1: a flooded wreck gone under stops burning (as a sunk ship does, Ship.cpp)
+        if (_wreckFlood >= 1.0f && Position().Y() < GLOB_LAND->GetSeaLevel() - 1.0f)
+        {
+            if (Vehicle* smoke = GetSmoke())
+            {
+                smoke->SetDelete();
+            }
         }
     }
 
