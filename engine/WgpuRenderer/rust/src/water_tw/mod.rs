@@ -80,6 +80,14 @@ pub const AVAILABLE: bool = true;
 
 /// `WgrWaterParams::tidewater` defaults: Tidewater's own values (App.js / OceanFFT.js /
 /// WaterMaterial.js / SeaDetail.js at 4811ba48). Lane meanings are in wgpu_renderer.hpp.
+/// `WGR_TW_DEBUG=<n>` forces Tidewater's material debug view (the Water tab's "TW debug view":
+/// 6 path length, 7 sea bed seen through, 8 sea depth, ...) for a session, so a capture script can
+/// take the debug views without a Water-tab edit. Read once.
+fn debug_view_override() -> Option<f32> {
+    static V: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
+    *V.get_or_init(|| std::env::var("WGR_TW_DEBUG").ok().and_then(|v| v.trim().parse::<f32>().ok()))
+}
+
 pub const DEFAULT_PARAMS: [[f32; 4]; 4] = [
     [1.0, 0.9, 0.48, 5.0],
     [1.0, 1.0, 1.0, 1.0],
@@ -195,7 +203,11 @@ fn surface_block(p: &WgrWaterParams, f: &FrameInputs<'_>) -> TwSurface {
         // Tidewater's default heading
         [0.3494, 0.9370]
     };
-    let wind_speed = if p.fft_wind_sea[2] > 0.0 { p.fft_wind_sea[2] } else { 7.0 };
+    let mut wind_speed = if p.fft_wind_sea[2] > 0.0 { p.fft_wind_sea[2] } else { 7.0 };
+    // W3g: a sea-conditions preset brings its own wind (the spectrum uses it too, fft.rs)
+    if p.tidewater_sea[0] > 0.0 {
+        wind_speed = p.tidewater_sea[0];
+    }
     // WRL-003: the level under the camera when the producer supplied one, else the sea.
     let cam_water = if p.optics_params[3] > 0.0 { p.optics_params[2] } else { p.sea_level };
     TwSurface {
@@ -206,7 +218,7 @@ fn surface_block(p: &WgrWaterParams, f: &FrameInputs<'_>) -> TwSurface {
         // backscatter, sss, foam intensity, reflection strength
         material0: [tw[2][3], tw[2][2], tw[1][1], tw[1][3]],
         // roughness, ssr on, debug view, unused
-        material1: [tw[2][1], tw[1][2], tw[3][3], 0.0],
+        material1: [tw[2][1], tw[1][2], debug_view_override().unwrap_or(tw[3][3]), 0.0],
         absorption: [WATER_ABSORPTION[0], WATER_ABSORPTION[1], WATER_ABSORPTION[2], 0.0],
         scattering: [WATER_SCATTERING[0], WATER_SCATTERING[1], WATER_SCATTERING[2], 0.0],
         detail: [tw[3][0], tw[3][1], tw[3][2], 0.0],

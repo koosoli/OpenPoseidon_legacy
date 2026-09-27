@@ -595,6 +595,11 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
     var ssrW = 0.0;
     var dbgPath = 0.0;
     var dbgScene = vec3<f32>(0.0);
+    // (W3h colour diagnostics: debug views 20-23, see the list at the end)
+    var dbgRefl = vec3<f32>(0.0);
+    var dbgTrans = vec3<f32>(0.0);
+    var dbgIn = vec3<f32>(0.0);
+    var dbgLight = vec3<f32>(0.0);
 
     if (!viewFromBelow) {
         // ================= ABOVE WATER =================
@@ -753,6 +758,10 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
 
         let rim = smoothstep(0.0, 0.025, frontD) * smoothstep(0.1, 0.035, frontD) * uprush;
         let water = mix(transmitted, reflCol, F) + sunSpec + skyRefl * (0.22 * rim);
+        dbgRefl = reflCol * F + sunSpec;
+        dbgTrans = sceneCol * Tview * (1.0 - F);
+        dbgIn = (inSun + inAmb + sss) * (1.0 - F);
+        dbgLight = vec3<f32>(dot(sunLight, vec3<f32>(0.2126, 0.7152, 0.0722)), dot(skyIrr, vec3<f32>(0.2126, 0.7152, 0.0722)), F);
         let shaded = mix(water, foamCol + sunSpec * 0.05, sat(foam));
         let edgeAA = smoothstep(0.0, thicknessAA, thickness);
         outCol = shaded;
@@ -796,7 +805,10 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
     }
 
     // debug views (Tidewater numbering): 1 back faces red, 2 normals, 3 foam, 5 lattice,
-    // 6 path length, 7 seabed seen through, 8 sea depth, 10 SSR weight
+    // 6 path length, 7 seabed seen through, 8 sea depth, 10 SSR weight; OP additions (W3h): the
+    // above-water composite split into 20 reflection (+ sun glint), 21 sea bed transmitted,
+    // 22 in-scattered light, and 23 the light inputs (r: sun irradiance luminance / 10,
+    // g: sky irradiance luminance, b: Fresnel), all before fog
     let dbg = i32(tw.material1.z + 0.5);
     var res = min(outCol, vec3<f32>(16000.0));
     if (dbg == 1) {
@@ -815,6 +827,14 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
         res = vec3<f32>(0.0, vDepth * 0.02, 0.0);
     } else if (dbg == 10) {
         res = vec3<f32>(ssrW);
+    } else if (dbg == 20) {
+        res = dbgRefl;
+    } else if (dbg == 21) {
+        res = dbgTrans;
+    } else if (dbg == 22) {
+        res = dbgIn;
+    } else if (dbg == 23) {
+        res = dbgLight * vec3<f32>(0.1, 1.0, 1.0);
     }
     return vec4<f32>(res, 1.0);
 }
