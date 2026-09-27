@@ -1948,7 +1948,31 @@ uint64_t TextureWgpu::EnsureUploaded()
             }
         }
         if (warmPreparedSource && fromPrepared)
+        {
             render::PreparedTextureStore::Instance().NoteWarmUpload(_gpuHandle != 0, total);
+            // Optional successful source-validated upload witness, not material-slot role.
+            // First64 rows only; no reads, clocks or provenance recapture.
+            static const bool warmUploadWitness = [] {
+                const char* profile = std::getenv("WGR_OBJECT_STREAM_WARM_PROFILE");
+                return profile && std::strcmp(profile, "1") == 0 &&
+                    ArchiveSourceBinding::ModelReadScope::PurposeRequired();
+            }();
+            if (warmUploadWitness && _gpuHandle && Foundation::IsMainThread())
+            {
+                static unsigned rows = 0; // joined owner only
+                if (rows < 64)
+                {
+                    ++rows;
+                    LOG_INFO(Graphics, "Warm prepared upload witness: source={} bytes={} sourceMemberBytes={} sourceValidated=true blockUploadSucceeded=true row={} limit=64",
+                        name ? name : "", total, warmPreparedSource->Request().bytes, rows);
+                }
+                else if (rows == 64)
+                {
+                    ++rows;
+                    LOG_INFO(Graphics, "Warm prepared upload witness truncated: limit=64; observed prefix only, no material-slot or whole-model proof");
+                }
+            }
+        }
     }
 
     // Fallback (non-DXT formats, or a failed block upload): decode the whole file

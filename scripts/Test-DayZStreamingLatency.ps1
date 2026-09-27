@@ -12,11 +12,13 @@ param(
     [switch]$RegistrationQuota,
     [switch]$ArchiveSourceBindings,
     [switch]$WarmTextureJobs,
+    [switch]$RequireWarmMaterialStageUpload,
     [switch]$LegacySectionRefresh,
     [string]$Label = 'dayz-streaming-latency',
     [string]$GameDir = 'D:\SteamLibrary\steamapps\common\ARMA Cold War Assault'
 )
 $ErrorActionPreference = 'Stop'
+if ($RequireWarmMaterialStageUpload) { $WarmTextureJobs = $true; $WarmProfile = $true }
 if ($WarmTextureJobs) { $ArchiveSourceBindings = $true }
 if ($RegistrationQuota -and $AdmissionMode -ne 'Counted') { throw 'Registration quota requires counted admission' }
 if ($PaaPreparationDiagnostics -or $PaaPreparationInflight) { $PackedTextures = $true }
@@ -38,6 +40,7 @@ if (!$env:LOCK_OWNER) {
         if ($RegistrationQuota) { $argv += '-RegistrationQuota' }
         if ($ArchiveSourceBindings) { $argv += '-ArchiveSourceBindings' }
         if ($WarmTextureJobs) { $argv += '-WarmTextureJobs' }
+        if ($RequireWarmMaterialStageUpload) { $argv += '-RequireWarmMaterialStageUpload' }
         if ($LegacySectionRefresh) { $argv += '-LegacySectionRefresh' }
         & 'C:\Program Files\Git\bin\bash.exe' @argv
         if ($LASTEXITCODE) { throw "Latency screening exited $LASTEXITCODE" }
@@ -120,6 +123,7 @@ try {
         registrationQuota = [bool]$RegistrationQuota
         archiveSourceBindings = [bool]$ArchiveSourceBindings
         warmTextureJobs = [bool]$WarmTextureJobs
+        requireWarmMaterialStageUpload = [bool]$RequireWarmMaterialStageUpload
         renderCallCpuTimings = [bool]$TerrainPageTimings
         renderCallCpuTimingEnvironment = [string]$environment.WGR_RENDER_CALL_CPU_TIMINGS
         legacySectionRefresh = [bool]$LegacySectionRefresh
@@ -230,6 +234,26 @@ try {
     if (!$p.WaitForExit(15000) -or $p.ExitCode) { throw 'Owned game failed to exit cleanly' }
     if (Select-String -LiteralPath $log -Pattern 'Out of Memory|Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION' -Quiet) { throw 'Renderer error' }
     if ($WarmProfile -and !(Select-String -LiteralPath $log -Pattern 'Object stream warm update profile: row=' -Quiet)) { throw 'Warm admission profile did not observe a measured update' }
+    # Filename family does NOT establish an actual shader/material-slot role.
+    # Emitted only after current-source/layout validation and successful worker-chain upload.
+    $warmUploadRows = @(Select-String -LiteralPath $log -Pattern 'Warm prepared upload witness: source=(.*?) bytes=(\d+) sourceMemberBytes=(\d+) sourceValidated=true blockUploadSucceeded=true row=(\d+) limit=64')
+    $warmUploadObservations = @($warmUploadRows | ForEach-Object {
+        $g = $_.Matches[0].Groups
+        [pscustomobject]@{ source = [string]$g[1].Value; bytes = [uint64]$g[2].Value
+            sourceMemberBytes = [uint64]$g[3].Value; row = [uint64]$g[4].Value
+            stageFamily = [bool]($g[1].Value -match '(?i)_(nohq|smdi|dtsmdi)\.paa$') }
+    })
+    if (@($warmUploadObservations | Where-Object { $_.bytes -eq 0 -or $_.sourceMemberBytes -eq 0 -or
+        $_.sourceMemberBytes -gt 16777216 -or $_.row -lt 1 -or $_.row -gt 64 }).Count -gt 0 -or
+        $warmUploadObservations.Count -gt 64) { throw 'Malformed bounded warm-upload witness' }
+    if ($warmUploadObservations.Count -gt 0 -and (!$WarmTextureJobs -or !$WarmProfile)) { throw 'Warm-upload witness unexpectedly active outside requested flags' }
+    $warmStageFamilyObserved = @($warmUploadObservations | Where-Object { $_.stageFamily }).Count -gt 0
+    $warmStageFamilyProven = !$RequireWarmMaterialStageUpload -or ($warmJobsProven -and $warmStageFamilyObserved)
+    $warmStageFamilyProof = @{ required = [bool]$RequireWarmMaterialStageUpload; positive = [bool]$warmStageFamilyObserved
+        observations = $warmUploadObservations
+        truncated = [bool](Select-String -LiteralPath $log -Pattern 'Warm prepared upload witness truncated:' -Quiet)
+        scope = 'Successful source-validated bound worker upload of normal/specular filename family only; not shader slot role, visual quality, whole-model readiness or performance acceptance' }
+    $warmStageFamilyProof | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $out 'warm-material-stage-family-proof.json')
     $replayProof = $null
     $replayRows = @(Select-String -LiteralPath $log -Pattern 'PAA LZO replay: hits=(\d+) misses=(\d+) hitOutputBytes=(\d+) storeBytes=(\d+) peakStoreBytes=(\d+) entries=(\d+) evictions=(\d+) oversize=(\d+) admissionFailures=(\d+) budgetBytes=33554432 maxEntries=128')
     if ($PaaLzoReplay) {
@@ -342,7 +366,7 @@ try {
         rows = @($quotaRows | ForEach-Object { $_.Line })
         scope = 'Sampled existing residency log cadence; counted warm registration scheduling only, not texture readiness, total route work, a frame deadline or cross-machine determinism'}
     $quotaProof | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $out 'registration-quota-proof.json')
-    @{passed = [bool]$warmJobsProven; mode = $Mode; admissionMode = $AdmissionMode; parkedTextureRefill = [bool]$ParkedTextureRefill; lazyTextureGroups = [bool]$LazyTextureGroups; warmProfile = [bool]$WarmProfile; screeningOnly = $true; performanceAccepted = $false; terrainPageTimings = [bool]$TerrainPageTimings
+    @{passed = [bool]($warmJobsProven -and $warmStageFamilyProven); mode = $Mode; admissionMode = $AdmissionMode; parkedTextureRefill = [bool]$ParkedTextureRefill; lazyTextureGroups = [bool]$LazyTextureGroups; warmProfile = [bool]$WarmProfile; screeningOnly = $true; performanceAccepted = $false; terrainPageTimings = [bool]$TerrainPageTimings
         frameCount = $count; dropped = $dropped; enginePhaseTiming = $phases; baseline = $baseline; returned = $returned
         routeSamples = $routeSamples; postExitHashes = $finalHashes
         renderCallCpuTimings = [bool]$TerrainPageTimings; renderCallCpuTimingProof = $callCpuProof
@@ -354,11 +378,13 @@ try {
         registrationQuota = [bool]$RegistrationQuota; registrationQuotaProof = $quotaProof
         archiveSourceBindings = [bool]$ArchiveSourceBindings; archiveSourceBindingProof = $archiveBindings
         warmTextureJobs = [bool]$WarmTextureJobs; warmTextureJobProof = $warmJobProof
+        requireWarmMaterialStageUpload = [bool]$RequireWarmMaterialStageUpload; warmMaterialStageFamilyProof = $warmStageFamilyProof
         legacySectionRefresh = [bool]$LegacySectionRefresh; cullSectionRefreshEnvironment = [string]$environment.WGR_CULL_SECTION_REFRESH
         limitation = 'No automatic performance threshold, vanilla parity, cold-cache guarantee or whole-world query readiness; compare matched separate mode processes'
     } | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $out 'result.json')
     Write-Output "DayZ latency screening evidence: $out"
     if (!$warmJobsProven) { throw 'Warm preparation did not demonstrate an actual source-validated GPU upload; evidence retained' }
+    if (!$warmStageFamilyProven) { throw 'Required bound worker normal/specular filename-family upload not exercised; evidence retained, no material-slot proof claimed' }
 } finally {
     if ($client) { $client.Dispose() }
     if ($p -and !$p.HasExited) { Stop-Process -Id $p.Id -Force }
