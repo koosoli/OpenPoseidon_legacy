@@ -146,6 +146,7 @@ set(POSEIDON_TEST_SOURCES
     Graphics/test_geometry_page_controlled_mlod_asset.cpp
     Graphics/test_geometry_page_original_admission.cpp
     Graphics/test_geometry_page_camera_demand.cpp
+    Graphics/test_geometry_page_projected_demand.cpp
     Tools/test_geometry_page_mlod_producer.cpp
     Tools/test_selected_cut_surface_certificate.cpp
     Tools/test_geometry_page_surface_admission.cpp
