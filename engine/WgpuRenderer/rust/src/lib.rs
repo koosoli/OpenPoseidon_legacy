@@ -767,6 +767,9 @@ pub struct Renderer {
     // where a grazing reflection ran off the edge of the reflection target and the reflected
     // clouds ended in a visible line.
     planar_reflection_pad: f32,
+    // TW-WATER W4b: this frame's water camera slot (for Tidewater's reactive-mask pass, which runs
+    // with the tonemap, after the frame's camera list is gone)
+    water_camera_slot: Option<usize>,
     // DZ-005 — the world's river flow map, resolved to a bindless slot, and its
     // `StreamSpeedInfl`. One pair for the whole world, not one per material: Enoch's 804
     // river segments all name the same `enoch_river.emat`, and Chernarus's 4,044 water
@@ -1900,6 +1903,7 @@ impl Renderer {
             // grazing view, without giving away more angular resolution than the mip-filtered
             // planar sample can absorb.
             planar_reflection_pad: 1.35,
+            water_camera_slot: None,
             // No flow until a world publishes one; slot 0 is the bindless white fallback and
             // the shader reads it as "this world has no river flow map".
             water_flow_slot: 0,
@@ -2489,6 +2493,15 @@ impl Renderer {
                         sea,
                         self.sky.cloud_temporal_view(),
                     );
+                    // TW-WATER W4b: Tidewater's lips and spray have no motion vectors either
+                    if let (Some(slot), Some(mask), Some(cam)) = (
+                        self.water_camera_slot,
+                        self.temporal.history_control_view(),
+                        self.gfx3d.camera_bind(),
+                    ) {
+                        let off = (slot as u64 * self.gfx3d.camera_stride()) as u32;
+                        self.water.draw_reactive(encoder, mask, cam, off);
+                    }
                 }
                 // REN-TEMP-001H: moving rigid objects overwrite their camera-only
                 // reprojection with true per-object motion.
@@ -3626,6 +3639,7 @@ impl Renderer {
             .map(|batch| batch.camera as usize)
             .unwrap_or(main_scene_cam);
         let planar_sea = self.water.underwater_params().map(|p| p.0);
+        self.water_camera_slot = (!water_batches.is_empty()).then_some(water_camera);
         let ablate = *ABLATE.get_or_init(Ablate::from_env);
         // How much of the screen the water surface actually covers, 0..1. The planar reflection
         // re-renders terrain, the retained object set and a cloud march from a mirrored camera —

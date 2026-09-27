@@ -185,8 +185,9 @@ fn vs_spray(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) ->
     return o;
 }
 
-@fragment
-fn fs_spray(in: SprayOut) -> @location(0) vec4<f32> {
+// the sprite's premultiplied colour and coverage (fs_spray; fs_spray_mask writes the coverage
+// into the upscalers' reactive mask, W4b)
+fn sprayShade(in: SprayOut) -> vec4<f32> {
     let uv = in.vUV;
     if (sprayR.b.y >= 20.0) {
         if (dot(uv, uv) > 1.0) { discard; }
@@ -243,4 +244,18 @@ fn fs_spray(in: SprayOut) -> @location(0) vec4<f32> {
     let lit = (in.vCol.rgb + in.vSun * cloud) * shade + in.vFwd.xyz * (glow * cloud);
     let col = apply_fog(min(lit, vec3<f32>(16000.0)), in.rel);
     return vec4<f32>(col * aOut, aOut);
+}
+
+@fragment
+fn fs_spray(in: SprayOut) -> @location(0) vec4<f32> {
+    return sprayShade(in);
+}
+
+// (W4b, OP) the spray's coverage into the history-control ("reactive") mask: Tidewater marks
+// spray and lip pixels reactive so the temporal upscalers do not smear them (they have no
+// motion vectors of their own). R8, max-blended over the engine's sky / water mask.
+@fragment
+fn fs_spray_mask(in: SprayOut) -> @location(0) vec4<f32> {
+    let c = sprayShade(in);
+    return vec4<f32>(sat(c.a * 2.0), 0.0, 0.0, 1.0);
 }

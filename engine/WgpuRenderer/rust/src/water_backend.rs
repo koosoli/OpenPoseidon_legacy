@@ -596,6 +596,13 @@ impl WaterBackend {
         self.op().is_some_and(|op| op.water.has_curling_breaker())
     }
 
+    /// W4b: Tidewater's lips and spray into the upscalers' reactive mask (no-op otherwise).
+    pub fn draw_reactive(&self, encoder: &mut wgpu::CommandEncoder, mask: &wgpu::TextureView, camera: &wgpu::BindGroup, offset: u32) {
+        if let Some(tw) = self.tidewater() {
+            tw.draw_reactive(encoder, mask, camera, offset);
+        }
+    }
+
     pub fn draw_curling(&self, pass: &mut wgpu::RenderPass<'_>, camera: &wgpu::BindGroup, offset: u32) {
         if let Some(op) = self.op() {
             op.water.draw_curling(pass, camera, offset);

@@ -179,6 +179,17 @@ pub fn dots_texture(size: u32, count: u32) -> Vec<u8> {
     data
 }
 
+/// The upscalers' history-control ("reactive") mask target (temporal.rs: R8Unorm, render size),
+/// max-blended so the spray and lips only ever raise the engine's own sky / water values (W4b).
+pub fn mask_target() -> wgpu::ColorTargetState {
+    let max = wgpu::BlendComponent { src_factor: wgpu::BlendFactor::One, dst_factor: wgpu::BlendFactor::One, operation: wgpu::BlendOperation::Max };
+    wgpu::ColorTargetState {
+        format: wgpu::TextureFormat::R8Unorm,
+        blend: Some(wgpu::BlendState { color: max, alpha: max }),
+        write_mask: wgpu::ColorWrites::RED,
+    }
+}
+
 /// Size of the combined sprite texture.
 pub const TEX_SIZE: u32 = 128;
 
@@ -228,6 +239,8 @@ pub struct SprayGpu {
     /// r: puff noise, g: drops
     pub tex_view: wgpu::TextureView,
     pipeline: wgpu::RenderPipeline,
+    /// the sprites' coverage into the reactive mask (W4b)
+    mask_pipeline: wgpu::RenderPipeline,
     frame: u32,
     /// spray on this frame (emission and sprites)
     pub on: bool,
@@ -314,7 +327,28 @@ impl SprayGpu {
             multiview_mask: None,
             cache: None,
         });
-        Self { ring, head, params, tex_view, pipeline, frame: 0, on: false, readback, rb_state: Readback::Idle, stats: None }
+        let mask_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("tw_spray_mask"),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: shader,
+                entry_point: Some("vs_spray"),
+                compilation_options: wgpu::PipelineCompilationOptions { constants: &[("linear", linear)], ..Default::default() },
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, cull_mode: None, ..Default::default() },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: shader,
+                entry_point: Some("fs_spray_mask"),
+                compilation_options: wgpu::PipelineCompilationOptions { constants: &[("linear", linear)], ..Default::default() },
+                targets: &[Some(mask_target())],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        Self { ring, head, params, tex_view, pipeline, mask_pipeline, frame: 0, on: false, readback, rb_state: Readback::Idle, stats: None }
     }
 
     /// The spray block for this frame (Spray.update: the frame seed advances every frame).
@@ -358,6 +392,17 @@ impl SprayGpu {
                 _ => self.rb_state = Readback::Idle,
             },
         }
+    }
+
+    /// The sprites' coverage into the reactive mask (W4b).
+    pub fn draw_mask(&self, pass: &mut wgpu::RenderPass<'_>, camera: &wgpu::BindGroup, offset: u32, render_bind: &wgpu::BindGroup) {
+        if !self.on {
+            return;
+        }
+        pass.set_pipeline(&self.mask_pipeline);
+        pass.set_bind_group(0, camera, &[offset]);
+        pass.set_bind_group(1, render_bind, &[]);
+        pass.draw(0..6, 0..RING);
     }
 
     /// The sprites (after the lips, same pass).

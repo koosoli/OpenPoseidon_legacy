@@ -917,6 +917,30 @@ impl Tidewater {
         }
     }
 
+    /// W4b: the lips' and the spray's coverage into the upscalers' history-control ("reactive")
+    /// mask (R8, render size), after the engine has written its sky / water terms. `offset`: the
+    /// water camera's slot in the camera group.
+    pub fn draw_reactive(&self, encoder: &mut wgpu::CommandEncoder, mask: &wgpu::TextureView, camera: &wgpu::BindGroup, offset: u32) {
+        if self.bind_dirty || self.last_params.is_none() || !(self.spray.on || (self.brk.ns >= 2 && self.brk.lips_on)) {
+            return;
+        }
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("tw_reactive_mask"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: mask,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        self.brk.draw_mask(&mut pass, camera, offset, &self.bind);
+        self.spray.draw_mask(&mut pass, camera, offset, &self.bind);
+    }
+
     /// Spray diagnostics for the log: on this frame, stations, and the latest readback.
     pub fn spray_stats(&self) -> (bool, u32, Option<spray::SprayStats>) {
         (self.spray.on, self.brk.ns, self.spray.stats)

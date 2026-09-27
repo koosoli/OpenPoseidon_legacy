@@ -251,6 +251,8 @@ pub struct BreakersGpu {
     lip_vbuf: wgpu::Buffer,
     lip_ibuf: wgpu::Buffer,
     lip_pipeline: wgpu::RenderPipeline,
+    /// the lip's coverage into the upscalers' reactive mask (W4b)
+    lip_mask_pipeline: wgpu::RenderPipeline,
     /// stations uploaded (0: no lips)
     pub ns: u32,
     /// the lips are drawn (lip opacity > 0)
@@ -411,7 +413,45 @@ impl BreakersGpu {
             multiview_mask: None,
             cache: None,
         });
-        Self { stations, crest, kernel_layout, kernel, spray_update, kernel_bind: None, lip_vbuf, lip_ibuf, lip_pipeline, ns: 0, lips_on: true }
+        let lip_mask_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("tw_brk_lip_mask"),
+            layout: Some(&lpl),
+            vertex: wgpu::VertexState {
+                module: shader,
+                entry_point: Some("vs_lip"),
+                compilation_options: Default::default(),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: 16,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &attrs,
+                }],
+            },
+            primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, cull_mode: None, ..Default::default() },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: shader,
+                entry_point: Some("fs_lip_mask"),
+                compilation_options: wgpu::PipelineCompilationOptions { constants: &[("linear", linear)], ..Default::default() },
+                targets: &[Some(super::spray::mask_target())],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        Self {
+            stations,
+            crest,
+            kernel_layout,
+            kernel,
+            spray_update,
+            kernel_bind: None,
+            lip_vbuf,
+            lip_ibuf,
+            lip_pipeline,
+            lip_mask_pipeline,
+            ns: 0,
+            lips_on: true,
+        }
     }
 
     pub fn crest_buffer(&self) -> &wgpu::Buffer {
@@ -478,6 +518,19 @@ impl BreakersGpu {
             cp.set_bind_group(0, bind, &[]);
             cp.dispatch_workgroups(super::spray::RING.div_ceil(64), 1, 1);
         }
+    }
+
+    /// The lips' coverage into the reactive mask (W4b; a mask pass, no depth attachment).
+    pub fn draw_mask(&self, pass: &mut wgpu::RenderPass<'_>, camera: &wgpu::BindGroup, offset: u32, render_bind: &wgpu::BindGroup) {
+        if self.ns < 2 || !self.lips_on {
+            return;
+        }
+        pass.set_pipeline(&self.lip_mask_pipeline);
+        pass.set_bind_group(0, camera, &[offset]);
+        pass.set_bind_group(1, render_bind, &[]);
+        pass.set_vertex_buffer(0, self.lip_vbuf.slice(..));
+        pass.set_index_buffer(self.lip_ibuf.slice(..), wgpu::IndexFormat::Uint32);
+        pass.draw_indexed(0..lip_index_count(self.ns as usize), 0, 0..1);
     }
 
     /// The lips, over the water (same pass, after the surface).

@@ -73,8 +73,8 @@ fn vs_lip(@location(0) sheetId: vec4<f32>) -> LipOut {
     return o;
 }
 
-@fragment
-fn fs_lip(in: LipOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+// the lip's premultiplied colour and coverage (fs_lip; fs_lip_mask: the reactive mask, W4b)
+fn lipShade(in: LipOut, front: bool) -> vec4<f32> {
     let v = in.vLip.x;
     let b = in.vLip.y;
     let a = in.vLip.z;
@@ -172,4 +172,19 @@ fn fs_lip(in: LipOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f
     col = apply_fog(min(col, vec3<f32>(16000.0)), in.rel);
     let aOut = (aF + aW * (1.0 - aF)) * alpha;
     return vec4<f32>(col * alpha, aOut);
+}
+
+@fragment
+fn fs_lip(in: LipOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    return lipShade(in, front);
+}
+
+// (W4b, OP) the lip's coverage into the history-control ("reactive") mask (see fs_spray_mask)
+@fragment
+fn fs_lip_mask(in: LipOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    let c = lipShade(in, front);
+    // no depth attachment on the mask pass: behind the opaque scene (reversed Z) marks nothing
+    let dsz = vec2<f32>(textureDimensions(waterSceneDepth));
+    let hidden = in.clip.z < _waterSceneDepthAt(in.clip.xy / dsz);
+    return vec4<f32>(select(sat(c.a * 2.0), 0.0, hidden), 0.0, 0.0, 1.0);
 }
