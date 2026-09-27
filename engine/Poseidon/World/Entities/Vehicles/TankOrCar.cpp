@@ -158,8 +158,9 @@ void TankOrCar::Simulate(float deltaT, SimulationImportance prec)
         {
             _wreckFlood = WreckFloodStep(_wreckFlood, deltaT);
         }
-        // W6a.1: a flooded wreck gone under stops burning (as a sunk ship does, Ship.cpp)
-        if (_wreckFlood >= 1.0f && Position().Y() < GLOB_LAND->GetSeaLevel() - 1.0f)
+        // W6a.1 / W6c: the fire goes out when the water closes over the wreck (as a sunk ship's
+        // does, Ship.cpp), not when the flooding timer ends
+        if (_wreckFlood > 0.0f && Position().Y() < GLOB_LAND->GetSeaLevel() - 1.0f)
         {
             if (Vehicle* smoke = GetSmoke())
             {

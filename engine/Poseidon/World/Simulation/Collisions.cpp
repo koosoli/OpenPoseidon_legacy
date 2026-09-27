@@ -1069,7 +1069,7 @@ void Landscape::ExplosionDammageEffects(EntityAI* owner, Shot* shot, Object* dir
             GLOB_WORLD->AddAnimal(crater);
 #endif
         }
-        else
+        else if (RoadSurfaceY(pos) >= GetSeaLevel()) // TW-WATER W6c: no impact mark on the sea bed
         {
             LODShapeWithShadow* shape = GLOB_SCENE->Preloaded(CraterShell);
             float azimut = GRandGen.RandomValue() * H_PI * 2;
@@ -1092,7 +1092,11 @@ void Landscape::ExplosionDammageEffects(EntityAI* owner, Shot* shot, Object* dir
         float maxY = floatMax(type->indirectHitRange * 2, 0.5);
         float surfY = RoadSurfaceY(pos);
         float y = pos[1] - surfY;
-        if (y < maxY)
+        // TW-WATER W6c: no scorched crater (nor its thrown earth and dust) where the ground is
+        // under the sea. `surfY` is the sea bed there, so a vehicle exploding afloat left a burnt
+        // disk -- and a dust column -- on the bottom beneath it, seen through the water.
+        const bool underWater = surfY < GetSeaLevel();
+        if (y < maxY && !underWater)
         {
             // place explosion crater on the ground
             float hit = floatMax(type->indirectHit * type->indirectHitRange, 5);

@@ -26,11 +26,13 @@ inline float AmphibiousTrackedPropulsionScale(bool canFloat, bool landContact, b
 // its depth (the displacement springs integrate `under`, which has no ceiling), so a sinking hull
 // found an equilibrium in mid-water instead of reaching the sea bed.
 //  * flooding: from the moment of death in the water the wreck keeps a falling share of its live
-//    buoyancy -- all of it at first, WreckResidualBuoyancy after WreckFloodSeconds -- so it settles,
-//    goes under and sinks rather than dropping like a stone the instant it is hit;
+//    buoyancy -- all of it at first, WreckResidualBuoyancy after WreckFloodSeconds -- so it burns
+//    afloat while it settles, then goes under and sinks rather than dropping like a stone;
 //  * immersion: a wreck's buoyancy and water drag integrate at most WreckMaxImmersion per contact
 //    point, so once under it sinks at a steady ~3 m/s to the bottom, where the ground holds it.
-constexpr float WreckFloodSeconds = 20.0f;
+// (W6c) 60 s: a holed, burning APC stays afloat, settling, for some 20-30 s before it goes under
+// (20 s sent a BMP to the bottom about 8 s after it was hit).
+constexpr float WreckFloodSeconds = 60.0f;
 constexpr float WreckResidualBuoyancy = 0.1f;
 constexpr float WreckMaxImmersion = 1.5f;
 
