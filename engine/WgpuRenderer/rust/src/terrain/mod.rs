@@ -4,7 +4,10 @@ use wgpu::util::DeviceExt;
 use crate::ffi::{WgrTerrainMaterial, WgrTerrainNode, WgrTerrainParams};
 use crate::gfx3d::{NORMAL_FORMAT, depth_format};
 
+mod shore_wet;
 mod skyvis;
+
+pub use shore_wet::TwWetParams;
 
 fn terrain_resource_reuse() -> bool {
     static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
@@ -256,6 +259,8 @@ pub struct Terrain {
     // dedicated 1x variant avoids multiplying that secondary view by the main scene's MSAA.
     planar_pipeline: wgpu::RenderPipeline,
     max_dim: u32,
+    // TW-WATER W3b: Tidewater's wet sand (group 3; a placeholder with Current OP).
+    shore_wet: shore_wet::ShoreWet,
 }
 
 impl Terrain {
@@ -810,12 +815,14 @@ impl Terrain {
                     .clamp(0.0, 1.0),
             ),
         ];
+        let shore_wet = shore_wet::ShoreWet::new(device, queue);
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("wgr_terrain_pipeline_layout"),
             bind_group_layouts: &[
                 Some(camera_layout),
                 Some(&group1_layout),
                 Some(&group2_layout),
+                Some(shore_wet.layout()),
             ],
             immediate_size: 0,
         });
@@ -991,6 +998,7 @@ impl Terrain {
             prepass_pipeline,
             planar_pipeline,
             max_dim: device.limits().max_texture_dimension_2d,
+            shore_wet,
         }
     }
 
@@ -1552,6 +1560,17 @@ impl Terrain {
         queue.write_buffer(&self.instance_buf, 0, bytemuck::cast_slice(nodes));
     }
 
+    /// TW-WATER W3b: Tidewater's wet sand for this frame (state, lace, generation, params), or
+    /// None for OP's own coast wet band. See shore_wet.rs.
+    pub fn set_shore_wetness(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        wet: Option<(&wgpu::TextureView, &wgpu::TextureView, u64, TwWetParams)>,
+    ) {
+        self.shore_wet.set(device, queue, wet);
+    }
+
     // Draw one batch (a [first_node, first_node+node_count) run of the prepared
     // instances) with the given camera bind group + dynamic offset.
     pub fn draw(
@@ -1579,6 +1598,7 @@ impl Terrain {
         pass.set_bind_group(0, camera_bind, &[camera_offset]);
         pass.set_bind_group(1, &self.group1_bind, &[]);
         pass.set_bind_group(2, &self.group2_bind, &[]);
+        pass.set_bind_group(3, self.shore_wet.bind(), &[]);
         pass.set_vertex_buffer(0, self.grid_vbuf.slice(..));
         pass.set_vertex_buffer(1, self.instance_buf.slice(..));
         pass.set_index_buffer(self.grid_ibuf.slice(..), wgpu::IndexFormat::Uint16);

@@ -327,6 +327,14 @@ impl WaterBackend {
         }
     }
 
+    /// Tidewater's wet sand for the terrain (None with Current OP or the shore simulation off).
+    pub fn shore_wetness(&self) -> Option<crate::water_tw::ShoreWetness<'_>> {
+        match &self.active {
+            Active::Tidewater(tw) => tw.shore_wetness(),
+            _ => None,
+        }
+    }
+
     /// The terrain heightmap as the producer uploaded it (world load, terrain edit). Current OP
     /// does not need the CPU copy; Tidewater computes its shore field from it.
     pub fn set_terrain_heights(&mut self, heights: &[f32], params: crate::ffi::WgrTerrainParams) {

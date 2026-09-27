@@ -2519,6 +2519,9 @@ class Engine : public IGraphicsEngine
             float shoreCurl = 1.0f;        // plunging / bore profile weight
             float shoreRunup = 1.0f;       // swash run-up gain
             float shoreTurbidity = 0.16f;  // surf-zone sediment + bubble scattering (1/m)
+            // W3b — shore simulation (ShoreSim.js): carried / stranded foam, wet sand
+            bool shoreSim = true;
+            float shoreDryTime = 28.0f;    // s for wet sand to dry (ShoreSimParams dryTime)
         } tidewater;
         // Neutral multipliers reproduce GodotOceanWaves' authored cascade values.
         // Those physical spectrum coefficients are already metre-scaled; multiplying
@@ -2942,7 +2945,8 @@ class Engine : public IGraphicsEngine
         // TW-WATER W2 - the Tidewater Native ocean's compute (spectrum, FFT + mips).
         kTidewaterGpuRegionSpectrum = 78,
         kTidewaterGpuRegionFft = 79,
-        kGpuRegionEnd = 80, // + REN-GI + PERF-024 encode rows (WGR_GPU_TIMER_REGION_COUNT)
+        kTidewaterGpuRegionShoreSim = 80,
+        kGpuRegionEnd = 81, // + REN-GI + PERF-024 encode rows (WGR_GPU_TIMER_REGION_COUNT)
         // Regions that are physically enclosed by another region (see GpuTimerContainedBy).
         kGrassGpuRegionShadow = 24,
         kTerrainGpuRegionColor = 32,

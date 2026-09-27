@@ -3864,6 +3864,22 @@ impl Renderer {
             water_nodes,
             prepared_cameras.get(water_camera),
         );
+        // TW-WATER W3b: Tidewater's wet sand on the terrain (None: OP's own coast wet band).
+        {
+            let wet = self.water.shore_wetness();
+            self.terrain.set_shore_wetness(
+                &self.device,
+                &self.queue,
+                wet.as_ref().map(|w| {
+                    (
+                        w.state,
+                        w.lace,
+                        w.generation,
+                        crate::terrain::TwWetParams { regions: w.regions, p: [1.0, w.sea_level, 0.0, 0.0] },
+                    )
+                }),
+            );
+        }
         // GPU-driven rendering (Stage 3): upload the retained scene + this frame's cull
         // params from the main scene camera (the terrain camera, else the first 3D draw's).
         // No-op when disabled; inert until C++ registers a scene.
