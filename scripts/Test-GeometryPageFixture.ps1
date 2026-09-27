@@ -4,12 +4,14 @@ param(
     [switch]$Paged,
     [switch]$Evict,
     [switch]$Disk,
+    [ValidateSet('None','Missing','Corrupt')][string]$DiskFault='None',
     [string]$Tools,
     [string]$Label='geometry-page-fixture',
     [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',
     [string]$Python='C:\Program Files\Python311\python.exe'
 )
 $ErrorActionPreference='Stop'
+if ($DiskFault -ne 'None' -and (!$Disk -or $Disabled)) {throw '-DiskFault requires enabled -Disk'}
 if ($Disk) {$Clod=$true;$Paged=$true;$Evict=$true}
 if ($Evict -and !$Paged) {throw '-Evict requires -Paged'}
 if ($Paged -and $Clod -and !$Evict) {throw '-Clod -Paged requires -Evict for the bounded combined one-cycle proof'}
@@ -22,6 +24,7 @@ if (!$env:LOCK_OWNER) {
     if ($Paged) {$argv+='-Paged'}
     if ($Evict) {$argv+='-Evict'}
     if ($Disk) {$argv+='-Disk'}
+    if ($DiskFault -ne 'None') {$argv+=@('-DiskFault',$DiskFault)}
     if ($Tools) {$argv+=@('-Tools',$Tools)}
     $env:LOCK_OWNER='private resident geometry page fixture'
     try {& 'C:\Program Files\Git\bin\bash.exe' @argv; if ($LASTEXITCODE) {throw "Geometry fixture exited $LASTEXITCODE"}}
@@ -40,6 +43,12 @@ if ($Disk) {
     . (Join-Path $PSScriptRoot 'streaming/geometry_disk_producer_proof.ps1')
     $diskProof=New-GeometryDiskProducerProof -Tools $Tools -Out $out
     $diskProof | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $out 'disk-producer-proof.json')
+    if ($DiskFault -ne 'None') {
+        $diskFaultProof=New-GeometryDiskFaultProof -Proof $diskProof -Out $out -Mode $DiskFault
+        # Keep the independently verified producer JSON unchanged; only the requested private path differs.
+        $diskProof.path=$diskFaultProof.path
+        $diskFaultProof | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $out 'disk-fault-proof.json')
+    }
 }
 & $Python (Join-Path $PSScriptRoot 'streaming/build_simulation_residency_fixture.py') $fixture --absolute-model-path
 if ($LASTEXITCODE) {throw 'Original world fixture generation failed'}
@@ -73,7 +82,7 @@ $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0)
 $listener.Start();$port=$listener.LocalEndpoint.Port;$listener.Stop()
 $log=Join-Path $out 'engine.log'
 @{head=(& git -C $root rev-parse HEAD);installed=(Get-Content (Join-Path $GameDir 'DEPLOYED-FROM.txt'));
-    disabled=[bool]$Disabled;clod=[bool]$Clod;paged=[bool]$Paged;evict=[bool]$Evict;disk=[bool]$Disk;diskProof=$diskProof;scriptSha256=(Get-FileHash $PSCommandPath).Hash;
+    disabled=[bool]$Disabled;clod=[bool]$Clod;paged=[bool]$Paged;evict=[bool]$Evict;disk=[bool]$Disk;diskFault=$DiskFault;diskProof=$diskProof;diskFaultProof=$diskFaultProof;scriptSha256=(Get-FileHash $PSCommandPath).Hash;
     hashes=@(Get-FileHash (Join-Path $GameDir 'OpenPoseidon.exe'),(Join-Path $GameDir 'wgpu_renderer.dll'))} |
     ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $out 'provenance.json')
 $p=$null;$client=$null
@@ -284,6 +293,49 @@ try {
                 $state.fineResident -or $state.pageWorkState -ne 'CoarseResident') {throw 'Complete actual disk coarse result not published'}
             $null=Action 'coarse'
         }
+        if ($DiskFault -ne 'None') {
+            $initialFallback=PageCut (Observe $true $false)
+            if (!$initialFallback.fallbackSelected -or $initialFallback.meshCount -ne 1 -or
+                $initialFallback.meshesPresent -ne 1 -or $initialFallback.coarseResident -or $initialFallback.fineResident -or
+                $initialFallback.coarseTriangles -ne 0 -or $initialFallback.fineTriangles -ne 0) {
+                throw 'Fault fixture did not begin with only the actual authored fallback'
+            }
+            Capture 'fault-initial-fallback.png'
+            $expectedRead=if($DiskFault -eq 'Missing'){'Missing'}else{'Invalid'}
+            $until=[DateTime]::UtcNow.AddSeconds(15)
+            do {
+                $polled=PageCut (Action 'pollCoarse');$state=PageCut (Action 'status')
+                if ($state.diskReadStatus -eq $expectedRead -and $state.pageWorkState -eq 'Failed') {break}
+                if ($state.coarseResident -or $state.fineResident -or $state.diskReadStatus -eq 'Read') {
+                    throw 'Faulted disk input unexpectedly published decoded geometry'
+                }
+                Start-Sleep -Milliseconds 100
+            } while ([DateTime]::UtcNow -lt $until)
+            if ($state.diskReadStatus -ne $expectedRead -or $state.diskRequestedRepresentation -ne 'Coarse' -or
+                $state.pageWorkState -ne 'Failed') {throw 'Actual typed worker refusal was not observed before deadline'}
+            $settled=WaitPage {param($c) $c.pageLiveJobs -eq 0 -and $c.pageQueued -eq 0 -and
+                $c.pageActive -eq 0 -and $c.pageReady -eq 0 -and $c.pageReservedBytes -eq 0}
+            # No fallback/coarse command fabricates recovery: observe a new actual main-frame return after failure.
+            $after=PageCut (Observe $true $false)
+            if (!$after.fallbackSelected -or $after.coarseResident -or $after.fineResident -or
+                $after.diskReadStatus -ne $expectedRead -or $after.pageWorkState -ne 'Failed' -or
+                $after.rendererModel -ne $initialFallback.rendererModel -or $after.producerModel -ne $initialFallback.producerModel -or
+                $after.rendererInstance -ne $initialFallback.rendererInstance -or $after.producerInstance -ne $initialFallback.producerInstance -or
+                $after.meshCount -ne 1 -or $after.meshesPresent -ne 1 -or $after.meshesAbsent -ne 0 -or
+                $after.coarseTriangles -ne 0 -or $after.fineTriangles -ne 0 -or
+                $after.fineGeneration -ne $initialFallback.fineGeneration -or $after.fineEvictionCount -ne 0 -or
+                $after.pageLiveJobs -ne 0 -or $after.pageQueued -ne 0 -or $after.pageActive -ne 0 -or
+                $after.pageReady -ne 0 -or $after.pageReservedBytes -ne 0) {
+                throw 'Disk refusal changed fallback/instance/history or retained worker debt'
+            }
+            Capture 'fault-retained-fallback.png'
+            $null=Action 'abort';$retired=PageCut (Observe $false $false)
+            $finalSettled=WaitPage {param($c) $c.pageLiveJobs -eq 0 -and $c.pageQueued -eq 0 -and
+                $c.pageActive -eq 0 -and $c.pageReady -eq 0 -and $c.pageReservedBytes -eq 0}
+            $result=@{begin=$begin;disk=$true;diskFault=$DiskFault;diskFaultProof=$diskFaultProof;diskProducer=$diskProof;
+                initialFallback=$initialFallback;typedRefusal=$state;settled=$settled;retainedFallback=$after;retired=$retired;finalSettled=$finalSettled;
+                disabled=$false;scope='Actual typed disk coarse refusal; selected fallback/helper/model/instance/history unchanged after fresh main return, no partial mesh publication or worker debt; screenshots retained, no pixel/all-model census or device-free claim'}
+        } else {
         $firstFallback=$null;$fallback=$null;$fallbackReturned=$null;$oldReleased=$null
         if ($Clod) {
             $firstFallback=PageCut (Observe $true $false)
@@ -452,6 +504,7 @@ try {
             replacement=$replacement;coarse=$coarse;queued=$queued;fine=$fine;returned=$returned;fineReturned=$fineReturned;
             retired=$retired;settled=$settled;eviction=$eviction;disabled=$false;paged=$true;clod=[bool]$Clod;
             firstFallback=$firstFallback;fallback=$fallback;fallbackReturned=$fallbackReturned;disk=[bool]$Disk;diskProducer=$diskProof;oldReleased=$oldReleased}
+        }
     } else {
         $fallback=$null; $fallbackReturned=$null
         if ($Clod) {
@@ -490,7 +543,7 @@ try {
     $null=Send @{cmd='exit'}
     if (!$p.WaitForExit(15000) -or $p.ExitCode) {throw 'Game failed to exit cleanly'}
     if (Select-String -LiteralPath $log -Pattern 'Out of Memory|Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION' -Quiet) {throw 'Renderer error'}
-    $result.passed=$true;$result.cleanExit=$true;$result.scope='Private original authored resident geometry, record lifetime and fixed-instance switching; explicit authored/selected-CLOD RAM or external controlled disk worker paging only when selected; no generalized asset/DAG paging, all-pass, device-free or performance acceptance'
+    $result.passed=$true;$result.cleanExit=$true;if ($DiskFault -eq 'None') {$result.scope='Private original authored resident geometry, record lifetime and fixed-instance switching; explicit authored/selected-CLOD RAM or external controlled disk worker paging only when selected; no generalized asset/DAG paging, all-pass, device-free or performance acceptance'}
     $result | ConvertTo-Json -Depth 7 | Set-Content -LiteralPath (Join-Path $out 'result.json')
     Write-Output "Geometry page fixture evidence: $out"
 } catch {

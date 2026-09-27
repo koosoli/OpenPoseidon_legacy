@@ -69,3 +69,39 @@ function New-GeometryDiskProducerProof([string]$Tools,[string]$Out) {
         (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ine $value.fileSha256) {throw 'Actual disk artifact size/hash mismatch'}
     return @{path=$path;producer=$value;toolsPath=$Tools;toolsSha256=$initialHash;stdoutBytes=(Get-Item -LiteralPath $stdout).Length;fileSha256=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash}
 }
+
+
+function New-GeometryDiskFaultProof($Proof,[string]$Out,[ValidateSet('Missing','Corrupt')][string]$Mode) {
+    # Called only AFTER trusted fresh producer stdout + original file/manifest verification.
+    $original=[IO.Path]::GetFullPath($Proof.path);$outRoot=[IO.Path]::GetFullPath($Out).TrimEnd('\','/')
+    $prefix=$outRoot+[IO.Path]::DirectorySeparatorChar
+    if (!$original.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase) -or
+        !(Test-Path -LiteralPath $original -PathType Leaf) -or (Get-Item -LiteralPath $original).Length -ne 71652 -or
+        (Get-FileHash -LiteralPath $original -Algorithm SHA256).Hash -ine $Proof.producer.fileSha256) {
+        throw 'Trusted original disk producer artifact changed before fault injection'
+    }
+    $directory=Join-Path $outRoot ('disk-fault-'+$Mode.ToLowerInvariant())
+    if (Test-Path -LiteralPath $directory) {throw 'Fault directory must be a new private child'}
+    $null=[IO.Directory]::CreateDirectory($directory)
+    $path=[IO.Path]::GetFullPath((Join-Path $directory 'selected.gcd'))
+    if (!$path.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase) -or $path.Length -gt 1023 -or $path -match '[^\x00-\x7f]') {
+        throw 'Fault path is outside private output or unsupported'
+    }
+    $faultHash=$null;$offset=$null;$before=$null;$after=$null
+    if ($Mode -eq 'Corrupt') {
+        # Magic-byte mutation guarantees Invalid, not an unrelated Unsupported version refusal.
+        $bytes=[IO.File]::ReadAllBytes($original)
+        if ($bytes.Length -ne 71652) {throw 'Original changed during bounded copy'}
+        $offset=0;$before=[int]$bytes[0];$bytes[0]=[byte]($before -bxor 1);$after=[int]$bytes[0]
+        [IO.File]::WriteAllBytes($path,$bytes)
+        if ((Get-Item -LiteralPath $path).Length -ne 71652) {throw 'Fault copy size changed'}
+        $faultHash=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+        if ($faultHash -ieq $Proof.producer.fileSha256) {throw 'Corruption did not change content'}
+    } elseif (Test-Path -LiteralPath $path) {throw 'Missing fault path unexpectedly exists'}
+    $originalHash=(Get-FileHash -LiteralPath $original -Algorithm SHA256).Hash
+    if ($originalHash -ine $Proof.producer.fileSha256) {throw 'Fault injection modified the trusted original'}
+    return @{mode=$Mode;path=$path;originalPath=$original;originalSha256=$originalHash;faultSha256=$faultHash;
+        expectedReadStatus=if($Mode -eq 'Missing'){'Missing'}else{'Invalid'};byteOffset=$offset;byteBefore=$before;byteAfter=$after;
+        originalBytes=71652;faultBytes=if($Mode -eq 'Corrupt'){71652}else{0};
+        scope='New owned private absent path or exactly one changed magic byte in bounded copy; original producer stdout/manifest/file preserved'}
+}
