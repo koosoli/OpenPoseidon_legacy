@@ -25,6 +25,7 @@
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -43,6 +44,63 @@ namespace Poseidon
 
 namespace
 {
+// Diagnostic filename overlap only: no archive identity, cache ownership or reuse verdict.
+// Constructed only for the explicit optional PBO diagnostic. Fixed storage bounds metadata.
+// Log saturation bounds output, not instrumentation: attempt clocks/scans continue
+// while enabled, so this diagnostic is unsuitable for normal throughput acceptance.
+struct PaaAttemptDiagnostics
+{
+    struct Slot { uint64_t generation = 0; size_t length = 0, active = 0; char key[1024]{}; };
+    std::mutex mutex;
+    std::array<Slot, 128> slots{};
+    std::atomic<unsigned> rows{0};
+    unsigned NextLogRow()
+    {
+        unsigned row = rows.load(std::memory_order_relaxed);
+        while (row < 65 && !rows.compare_exchange_weak(row, row + 1, std::memory_order_relaxed)) {}
+        return row; // saturates: never wraps into another logging burst
+    }
+    struct Ticket
+    {
+        PaaAttemptDiagnostics* owner = nullptr;
+        size_t slot = 128;
+        bool overlap = false, overflow = false;
+        Ticket(PaaAttemptDiagnostics* diagnostic, const std::string& key, uint64_t generation) : owner(diagnostic)
+        {
+            if (!owner) return;
+            if (key.size() >= sizeof(Slot::key)) { overflow = true; return; }
+            std::lock_guard<std::mutex> lock(owner->mutex);
+            size_t empty = owner->slots.size();
+            for (size_t i = 0; i < owner->slots.size(); ++i)
+            {
+                auto& s = owner->slots[i];
+                if (!s.active) { if (empty == owner->slots.size()) empty = i; continue; }
+                if (s.generation == generation && s.length == key.size() &&
+                    std::memcmp(s.key, key.data(), key.size()) == 0)
+                { slot = i; overlap = true; ++s.active; return; }
+            }
+            if (empty == owner->slots.size()) { overflow = true; return; }
+            slot = empty;
+            auto& s = owner->slots[slot];
+            s.generation = generation; s.length = key.size(); s.active = 1;
+            std::memcpy(s.key, key.data(), key.size());
+        }
+        Ticket(const Ticket&) = delete;
+        Ticket& operator=(const Ticket&) = delete;
+        ~Ticket()
+        {
+            if (owner && slot < owner->slots.size())
+            { std::lock_guard<std::mutex> lock(owner->mutex); --owner->slots[slot].active; }
+        }
+    };
+};
+struct PaaAttemptRow
+{
+    uint64_t preSkipped = 0, started = 0, overlapping = 0, untracked = 0;
+    uint64_t readFailed = 0, accepted = 0, rejected = 0, cancelledBeforeRead = 0, cancelledBeforePut = 0, threw = 0;
+    double readDecodeMs = 0, rejectedReadDecodeMs = 0, rejectedReadDecodeFactsMs = 0;
+};
+
 template<class Reserve, class Release>
 bool PrepareNativeDds(const std::string& key, uint64_t generation, size_t& bytes,
                       bool prepareBc3, bool bc3Only, const Bc3EncodingObserver* observer,
@@ -242,6 +300,7 @@ struct ObjectStreamPreparer::Impl
     using State = ObjectStreamPreparer::State;
     using ModelPtr = std::shared_ptr<Model::Model>;
 
+    std::unique_ptr<PaaAttemptDiagnostics> paaAttemptDiagnostics; // diagnostic OFF adds no tracker allocation
     mutable std::mutex mutex;
     std::condition_variable cv;
     std::vector<std::thread> workers;
@@ -456,6 +515,7 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
             }
             const double convMs =
                 std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - convStart).count();
+            const auto conversionCompleted = paaAttemptDiagnostics ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
             if (shape)
             {
                 // ODOL's deferred tail never changes this scalar; MLOD already
@@ -469,6 +529,18 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                     PublishRadius(job.index, jobGen, job.radiusIdentity,
                                   shape->BoundingSphere(), RadiusProvenance::AdaptedShape);
             }
+            PaaAttemptRow attemptRow;
+            auto reportAttempts = [&](bool published, double publicationDelayMs) {
+                if (!paaAttemptDiagnostics || job.textures.empty()) return;
+                const unsigned row = paaAttemptDiagnostics->NextLogRow();
+                if (row < 64)
+                    LOG_INFO(World, "PAA prepare attempts: generation={} textureGeneration={} modelIndex={} inputs={} published={} preSkipped={} started={} filenameOverlap={} trackingOverflow={} readFailed={} putAccepted={} putRejected={} cancelledBeforeRead={} cancelledBeforePut={} threw={} successfulReadDecodeMs={:.3f} rejectedReadDecodeMs={:.3f} rejectedReadDecodeFactsMs={:.3f} conversionCompleteToTerminalMs={:.3f}",
+                        jobGen, job.textureGeneration, job.index, job.textures.size(), published, attemptRow.preSkipped, attemptRow.started,
+                        attemptRow.overlapping, attemptRow.untracked, attemptRow.readFailed, attemptRow.accepted,
+                        attemptRow.rejected, attemptRow.cancelledBeforeRead, attemptRow.cancelledBeforePut, attemptRow.threw, attemptRow.readDecodeMs,
+                        attemptRow.rejectedReadDecodeMs, attemptRow.rejectedReadDecodeFactsMs, publicationDelayMs);
+                else if (row == 64) LOG_INFO(World, "PAA prepare attempts: log truncated after 64 conversion rows; filename/generation overlap is not physical identity or full coverage");
+            };
             uint64_t prepared = 0, preparedBytes = 0, skipped = 0, unreadable = 0;
             const auto textureStart = std::chrono::steady_clock::now();
             if (shape)
@@ -478,9 +550,12 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                 {
                     {
                         std::lock_guard<std::mutex> pendingLock(mutex);
-                        if (stop || jobGen != generation.load(std::memory_order_relaxed) || stale[job.index]) break;
+                        if (stop || jobGen != generation.load(std::memory_order_relaxed) || stale[job.index]) { if (paaAttemptDiagnostics) ++attemptRow.cancelledBeforeRead; break; }
                     }
-                    if (!store.ShouldPrepare(texture.key)) { ++skipped; continue; }
+                    if (!store.ShouldPrepare(texture.key)) { ++skipped; if (paaAttemptDiagnostics) ++attemptRow.preSkipped; continue; }
+                    PaaAttemptDiagnostics::Ticket attempt(paaAttemptDiagnostics.get(), texture.key, job.textureGeneration);
+                    if (paaAttemptDiagnostics) { ++attemptRow.started; attemptRow.overlapping += attempt.overlap; attemptRow.untracked += attempt.overflow; }
+                    const auto readBegan = paaAttemptDiagnostics ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
                     try
                     {
                         PAABlockChain chain;
@@ -488,8 +563,10 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                             std::vector<char> source;
                             if (!texture.read.Read(source) || source.capacity() > 2 * PackedTextureLimit ||
                                 !ReadPAABlockChainBuffer(source.data(), source.size(),
-                                    chain, nullptr, PackedTextureLimit)) { ++unreadable; continue; }
+                                    chain, nullptr, PackedTextureLimit)) { ++unreadable; if (paaAttemptDiagnostics) ++attemptRow.readFailed; continue; }
                         }
+                        const double readDecodeMs = paaAttemptDiagnostics ? std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - readBegan).count() : 0;
+                        if (paaAttemptDiagnostics) attemptRow.readDecodeMs += readDecodeMs;
                         const size_t bytes = chain.blocks.size();
                         // Source storage has already been released. The <=16 MiB
                         // chain and compact alpha plane fit the existing 64 MiB
@@ -506,15 +583,17 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                                 facts = render::PreparedTextureStore::BuildAlphaFacts(chain, texture.read, cancelled);
                         }
                         catch (...) { } // optional analysis failure retains the original upload chain
-                        if (cancelled()) { store.NoteAlphaFactsCancelled(); break; }
+                        if (cancelled()) { store.NoteAlphaFactsCancelled(); if (paaAttemptDiagnostics) ++attemptRow.cancelledBeforePut; break; }
+                        // CPU read/decode/facts subset excludes the observer latch and Put.
+                        const double readDecodeFactsMs = paaAttemptDiagnostics ? std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - readBegan).count() : 0;
                         if (publicationObserver.beforePaaPut)
                             publicationObserver.beforePaaPut(publicationObserver.context, bool(facts));
                         if (store.Put(texture.key, std::move(chain), job.textureGeneration, std::move(facts),
                                 job.texturePublicationRequired ? &job.texturePublication : nullptr))
-                        { ++prepared; preparedBytes += bytes; }
-                        else ++skipped;
+                        { ++prepared; preparedBytes += bytes; if (paaAttemptDiagnostics) ++attemptRow.accepted; }
+                        else { ++skipped; if (paaAttemptDiagnostics) { ++attemptRow.rejected; attemptRow.rejectedReadDecodeMs += readDecodeMs; attemptRow.rejectedReadDecodeFactsMs += readDecodeFactsMs; } }
                     }
-                    catch (...) { ++unreadable; } // ordinary owner-thread decode remains the fallback
+                    catch (...) { ++unreadable; if (paaAttemptDiagnostics) ++attemptRow.threw; } // ordinary owner-thread decode remains the fallback
                 }
             }
             const double textureMs = std::chrono::duration<double, std::milli>(
@@ -530,7 +609,9 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                 ++stats.dropped;
                 stats.conversionReservedBytes -= job.reservation;
                 cv.notify_all();
+                const double terminalMs = paaAttemptDiagnostics ? std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - conversionCompleted).count() : 0;
                 lock.unlock();
+                reportAttempts(false, terminalMs);
                 delete shape;
                 job.model.reset();
                 job.tables.reset();
@@ -544,7 +625,8 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
             stats.texMs += textureMs;
             stats.convertMs += convMs;
             stats.convertMaxMs = std::max(stats.convertMaxMs, convMs);
-            if (shape && job.index < count)
+            const bool publishedShape = shape && job.index < count;
+            if (publishedShape)
             {
                 conversionBytes[job.index] = job.reservation;
                 convertedShapes[job.index] = shape;
@@ -564,9 +646,11 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                     Set(job.index, State::Failed);
                 ++stats.failed;
             }
+            const double terminalMs = paaAttemptDiagnostics ? std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - conversionCompleted).count() : 0;
             // Last references can release bank resources or large model storage.
             // Their destructors must never run under the preparer's queue mutex.
             lock.unlock();
+            reportAttempts(publishedShape, terminalMs);
             delete shape;
             job.model.reset();
             job.tables.reset();
@@ -928,6 +1012,14 @@ ObjectStreamPreparer::ObjectStreamPreparer(uint64_t readyByteBudget, const Bc3En
     : _impl(std::make_unique<Impl>())
 {
     _impl->stats.readyByteBudget = readyByteBudget;
+    static const bool attemptDiagnostic = [] {
+        const char* diag = std::getenv("WGR_PAA_PREP_ATTEMPT_DIAG");
+        const char* pbo = std::getenv("WGR_OBJECT_STREAM_PBO_TEXTURES");
+        return diag && std::strcmp(diag, "1") == 0 && pbo && pbo[0] == '1';
+    }();
+    if (attemptDiagnostic)
+        try { _impl->paaAttemptDiagnostics = std::make_unique<PaaAttemptDiagnostics>(); }
+        catch (...) { LOG_WARN(World, "PAA prepare attempts: diagnostic allocation failed; overlap coverage unavailable"); } // normal preparation remains available
     if (observer) _impl->encodingObserver = *observer;
     if (publicationObserver) _impl->publicationObserver = *publicationObserver;
 }

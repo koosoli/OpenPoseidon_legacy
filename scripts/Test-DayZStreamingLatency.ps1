@@ -6,6 +6,7 @@ param(
     [switch]$ParkedTextureRefill,
     [switch]$LazyTextureGroups,
     [switch]$PaaLzoReplay,
+    [switch]$PaaPreparationDiagnostics,
     [string]$Label = 'dayz-streaming-latency',
     [string]$GameDir = 'D:\SteamLibrary\steamapps\common\ARMA Cold War Assault'
 )
@@ -22,6 +23,7 @@ if (!$env:LOCK_OWNER) {
         if ($ParkedTextureRefill) { $argv += '-ParkedTextureRefill' }
         if ($LazyTextureGroups) { $argv += '-LazyTextureGroups' }
         if ($PaaLzoReplay) { $argv += '-PaaLzoReplay' }
+        if ($PaaPreparationDiagnostics) { $argv += '-PaaPreparationDiagnostics' }
         & 'C:\Program Files\Git\bin\bash.exe' @argv
         if ($LASTEXITCODE) { throw "Latency screening exited $LASTEXITCODE" }
     } finally { Remove-Item Env:LOCK_OWNER }
@@ -74,6 +76,10 @@ if ($ParkedTextureRefill) {
 }
 if ($LazyTextureGroups) { $environment.WGR_LAZY_TEXTURE_BIND_GROUPS = '1' }
 if ($PaaLzoReplay) { $environment.WGR_PAA_LZO_REPLAY_CACHE = '1' }
+if ($PaaPreparationDiagnostics) {
+    $environment.WGR_OBJECT_STREAM_PBO_TEXTURES = '1'
+    $environment.WGR_PAA_PREP_ATTEMPT_DIAG = '1'
+}
 # Shape trace enables on variable presence, so leave it absent in both modes.
 $clearNames = @((Get-ChildItem Env: | Where-Object { $_.Name -like 'WGR_*' -or $_.Name -like 'POSEIDON_*' } | ForEach-Object { $_.Name }))
 $changedNames = @($clearNames + @($environment.Keys) | Select-Object -Unique)
@@ -88,6 +94,7 @@ try {
     @{
         mode = $Mode; head = (& git -C $root rev-parse HEAD); scriptSha256 = (Get-FileHash $PSCommandPath).Hash
         paaLzoReplay = [bool]$PaaLzoReplay
+        paaPreparationDiagnostics = [bool]$PaaPreparationDiagnostics
         installed = (Get-Content (Join-Path $GameDir 'DEPLOYED-FROM.txt')); hashes = $initialHashes
         world = $world; environment = $environment; clearedEnvironmentNames = $clearNames
         pose = @($baseX, $baseZ, $baseY, $azimuth, $elevation); routeX = $route; poseHoldSeconds = 3
@@ -202,11 +209,21 @@ try {
         if (!$parkedProof.deferredObserved -or !$parkedProof.activationReuseObserved) { throw 'Parked refill path was not exercised through both deferral and successful activation' }
     }
     $raw | ConvertTo-Json | Set-Content (Join-Path $out 'route-frame-ms.json')
+    $attemptRows = @(Select-String -LiteralPath $log -Pattern 'PAA prepare attempts: generation=')
+    $attemptMarkers = @(Select-String -LiteralPath $log -Pattern 'PAA prepare attempts: log truncated after 64 conversion rows')
+    if ($attemptRows.Count -gt 64 -or $attemptMarkers.Count -gt 1) { throw 'PAA attempt diagnostic log bounds were exceeded' }
+    if ($PaaPreparationDiagnostics -and $attemptRows.Count -lt 1) { throw 'Optional packed PAA preparation diagnostic was not exercised' }
+    if (!$PaaPreparationDiagnostics -and ($attemptRows.Count -ne 0 -or $attemptMarkers.Count -ne 0)) { throw 'Default run unexpectedly tracked PAA preparation attempts' }
+    $attemptProof = @{enabled = [bool]$PaaPreparationDiagnostics; conversionRows = $attemptRows.Count; truncated = $attemptMarkers.Count -eq 1
+        rows = @($attemptRows | ForEach-Object { $_.Line })
+        scope = 'First at most64 texture-bearing conversions only; filename/generation whole-attempt overlap is not physical identity; continuing diagnostic work invalidates normal throughput acceptance'}
+    $attemptProof | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $out 'paa-attempt-proof.json')
     @{passed = $true; mode = $Mode; admissionMode = $AdmissionMode; parkedTextureRefill = [bool]$ParkedTextureRefill; lazyTextureGroups = [bool]$LazyTextureGroups; warmProfile = [bool]$WarmProfile; screeningOnly = $true; performanceAccepted = $false; terrainPageTimings = [bool]$TerrainPageTimings
         frameCount = $count; dropped = $dropped; enginePhaseTiming = $phases; baseline = $baseline; returned = $returned
         routeSamples = $routeSamples; postExitHashes = $finalHashes
         parkedRefillProof = $parkedProof
         paaLzoReplay = [bool]$PaaLzoReplay; paaLzoReplayProof = $replayProof
+        paaPreparationDiagnostics = [bool]$PaaPreparationDiagnostics; paaPreparationProof = $attemptProof
         limitation = 'No automatic performance threshold, vanilla parity, cold-cache guarantee or whole-world query readiness; compare matched separate mode processes'
     } | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $out 'result.json')
     Write-Output "DayZ latency screening evidence: $out"
