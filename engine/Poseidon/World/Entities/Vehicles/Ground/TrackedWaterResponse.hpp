@@ -1,14 +1,27 @@
 #pragma once
 
 #include <algorithm>
+#include <cstdlib>
 
 namespace Poseidon
 {
 // Tracked amphibians use a stiff legacy displacement spring. Let them follow
 // waves, but do not feed the full modern swell height into that spring.
+// (W6d) WGR_AMPHIB_WAVE=<m> overrides the excursion for tuning captures (default 0.35 m).
+inline float AmphibiousWaveExcursion()
+{
+    static const float v = []
+    {
+        const char* e = std::getenv("WGR_AMPHIB_WAVE");
+        const float x = e != nullptr ? static_cast<float>(std::atof(e)) : 0.0f;
+        return x > 0.0f ? x : 0.35f;
+    }();
+    return v;
+}
+
 inline float AmphibiousTrackedImmersion(float under, float underFlat)
 {
-    constexpr float MaxWaveExcursion = 0.35f;
+    const float MaxWaveExcursion = AmphibiousWaveExcursion();
     const float waveExcursion = std::clamp(under - underFlat, -MaxWaveExcursion, MaxWaveExcursion);
     return std::max(0.0f, underFlat + waveExcursion);
 }

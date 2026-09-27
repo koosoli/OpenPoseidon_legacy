@@ -21,6 +21,8 @@
 
 #include <Poseidon/Foundation/Strings/Mbcs.hpp>
 #include <float.h>
+#include <cmath>
+#include <cstdlib>
 #include <stdio.h>
 #include <string.h>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
@@ -612,6 +614,25 @@ void Car::Simulate(float deltaT, SimulationImportance prec)
     _isUpsideDown = DirectionUp().Y() < 0.3f;
     _isDead = IsDammageDestroyed();
 
+    // TW-WATER W6d diagnostic: WGR_CAR_TRACE=1 logs a floatable car's simulation state about once
+    // a second (why does a BRDM that starts on the water never move?).
+    static const bool carTrace = []
+    {
+        const char* v = std::getenv("WGR_CAR_TRACE");
+        return v != nullptr && v[0] == '1';
+    }();
+    const bool traceNow = carTrace && Type()->_canFloat && std::fmod(Glob.time.toFloat(), 1.0f) < std::max(deltaT, 0.02f);
+    if (traceNow)
+    {
+        const Vector3 p = Position();
+        LOG_INFO(Physics,
+                 "[car-trace] {} t={:.2f} dt={:.3f} prec={} stopped={} land={} water={} obj={} dead={} engineOff={} "
+                 "thrustWanted={:.2f} frozen={} pos=({:.1f}, {:.2f}, {:.1f}) sea={:.2f} ground={:.2f}",
+                 (const char*)GetDebugName(), Glob.time.toFloat(), deltaT, static_cast<int>(prec), _isStopped,
+                 _landContact, _waterContact, _objectContact, _isDead, _engineOff, _thrustWanted, CheckPredictionFrozen(),
+                 p.X(), p.Y(), p.Z(), GLOB_LAND->GetSeaLevel(), GLOB_LAND->SurfaceY(p.X(), p.Z()));
+    }
+
     MoveWeapons(deltaT);
 
     if (!SimulateUnits(deltaT))
@@ -1150,6 +1171,26 @@ void Car::Simulate(float deltaT, SimulationImportance prec)
                 GLOB_LAND->GroundCollision(gCollision, this, moveTrans, 0.05f, softFactor);
             }
 
+            if (traceNow)
+            {
+                int nWater = 0;
+                int nGround = 0;
+                float maxWater = 0.0f;
+                for (int i = 0; i < gCollision.Size(); i++)
+                {
+                    if (gCollision[i].type == GroundWater)
+                    {
+                        ++nWater;
+                        maxWater = std::max(maxWater, gCollision[i].under);
+                    }
+                    else
+                    {
+                        ++nGround;
+                    }
+                }
+                LOG_INFO(Physics, "[car-trace] {} collision: {} water (max under {:.2f}) {} ground, plane={}",
+                         (const char*)GetDebugName(), nWater, maxWater, nGround, prec >= SimulateVisibleFar);
+            }
             _landContact = false;
             _objectContact = false;
             _waterContact = false;
