@@ -40,6 +40,8 @@ class GameApplication : public GameBase
     bool ReloadGameContentWithMods(const char* modPath) override;
 
   private:
+    // Shared joined cleanup for the frame loop and explicit startup-probe refusal.
+    void ShutdownRuntime();
     bool CreateAndSetGraphicsEngine();
     int RunAfterArgumentParsing();
 

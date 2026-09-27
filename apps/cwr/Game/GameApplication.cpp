@@ -1691,26 +1691,31 @@ int GameApplication::RunAfterArgumentParsing()
     // Explicit source probe executes before the frame/harness loop. Never opens
     // a source file from Begin/RequestFine, and never allocates renderer IDs.
     const char* originalPageFlag=std::getenv("WGR_GEOMETRY_PAGE_ORIGINAL_SOURCE");
+    const auto refuseOriginalStartup=[this]() {
+        m_exitCode=2;
+        ShutdownRuntime();
+        return m_exitCode;
+    };
     const auto& originalConfig=AppConfig::Instance();
     const bool originalArguments=!originalConfig.GetGeometryOriginalPath().empty() ||
         !originalConfig.GetGeometryOriginalSha256().empty() || !originalConfig.GetGeometryOriginalKey().empty() ||
         originalConfig.GetGeometryOriginalBytes()!=0;
     if(originalArguments && (!originalPageFlag || std::strcmp(originalPageFlag,"1")!=0)) {
-        LOG_ERROR(Core,"Original geometry startup admission: explicit arguments require exact opt-in flag; no fixture published");return 2;
+        LOG_ERROR(Core,"Original geometry startup admission: explicit arguments require exact opt-in flag; no fixture published");return refuseOriginalStartup();
     }
     if(originalPageFlag && std::strcmp(originalPageFlag,"1")==0) {
         if(!GEngine) {
-            LOG_ERROR(Core,"Original geometry startup admission: graphics engine unavailable; no fixture published");return 2;
+            LOG_ERROR(Core,"Original geometry startup admission: graphics engine unavailable; no fixture published");return refuseOriginalStartup();
         }
         const auto& config=AppConfig::Instance();Engine::GeometryPageOriginalStartupInput input;
         if(!Engine::ParseGeometryPageOriginalStartupInput(config.GetGeometryOriginalPath(),config.GetGeometryOriginalSha256(),
             config.GetGeometryOriginalBytes(),config.GetGeometryOriginalKey(),input)) {
-            LOG_ERROR(Core,"Original geometry startup admission: invalid explicit arguments; no fixture published");return 2;
+            LOG_ERROR(Core,"Original geometry startup admission: invalid explicit arguments; no fixture published");return refuseOriginalStartup();
         }
         const auto admission=GEngine->AdmitGeometryPageOriginalStartup(input);
         LOG_INFO(Core,"Original geometry startup admission status={} epoch={} rawBytes={} knownRetainedBytes={} snapshotValidated={} scope=source-probe-only-no-render-consumer",
             uint32_t(admission.status),admission.epoch,admission.originalSourceBytes,admission.knownRetainedBytes,admission.snapshotValidated);
-        if(admission.status!=Engine::GeometryPageOriginalStatus::Admitted)return 2;
+        if(admission.status!=Engine::GeometryPageOriginalStatus::Admitted)return refuseOriginalStartup();
     }
 
     RunMainLoop();
@@ -2631,6 +2636,11 @@ void GameApplication::RunMainLoop()
     m_validateQuit = true;
     // --strict finalize: an error logged during boot (before the main loop, e.g.
     // --check) or anywhere else must still surface as a non-zero exit code.
+    ShutdownRuntime();
+}
+
+void GameApplication::ShutdownRuntime()
+{
     if (m_exitCode == 0 && Poseidon::Foundation::LoggingSystem::StrictTripped())
         m_exitCode = 3;
 
