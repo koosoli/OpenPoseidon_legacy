@@ -9,7 +9,7 @@ param(
 )
 $ErrorActionPreference='Stop'
 if ($Evict -and !$Paged) {throw '-Evict requires -Paged'}
-if ($Paged -and $Clod) {throw '-Paged is the authored page worker case; it cannot be combined with -Clod'}
+if ($Paged -and $Clod -and !$Evict) {throw '-Clod -Paged requires -Evict for the bounded combined one-cycle proof'}
 if (!$env:LOCK_OWNER) {
     $shellName=if ($PSVersionTable.PSEdition -eq 'Core') {'pwsh.exe'} else {'powershell.exe'}
     $argv=@((Join-Path $PSScriptRoot 'with-game-lock.sh'),(Join-Path $PSHOME $shellName).Replace('\','/'),
@@ -203,7 +203,8 @@ try {
         } while ([DateTime]::UtcNow -lt $until)
         throw 'Private geometry records did not settle before deadline'
     }
-    $begin=Action $(if($Paged){'beginPaged'}elseif($Clod){'beginClod'}else{'begin'})
+    $beginAction=if($Paged -and $Clod){'beginClodPaged'}elseif($Paged){'beginPaged'}elseif($Clod){'beginClod'}else{'begin'}
+    $begin=Action $beginAction
     if ($Disabled) {
         foreach ($field in @('status','active','meshCount','knownPayloadBytes')) {if ($null -eq $begin.$field) {throw "Missing disabled fixture field: $field"}}
         if ($begin.status -ne 'Disabled' -or $begin.active -or $begin.meshCount -or $begin.knownPayloadBytes) {throw 'Default-off fixture unexpectedly allocated'}
@@ -213,6 +214,16 @@ try {
             foreach ($field in @('pagedPilot','fineResident','pageEpoch','pageRequest','pageWorkState',
                 'pageQueued','pageActive','pageReady','pageLiveJobs','pageReservedBytes','pageCompleted','pageCancelled')) {
                 if ($null -eq $cut.$field) {throw "Missing page-worker field: $field"}
+            }
+            if ($Clod) {
+                foreach ($field in @('clodRamAdapterVersion','clodRamKnownSourceBytes','pageSourceKnownBytes','selectedCutSha256','sourceSha256','fallbackSelected')) {
+                    if ($null -eq $cut.$field) {throw "Missing selected-CLOD page field: $field"}
+                }
+                if ($cut.clodRamAdapterVersion -ne 1 -or $cut.clodRamKnownSourceBytes -le 0 -or $cut.clodRamKnownSourceBytes -gt 131072 -or
+                    $cut.pageSourceKnownBytes -le 0 -or $cut.pageSourceKnownBytes -gt 131072 -or
+                    $cut.selectedCutSha256 -notmatch '^[a-fA-F0-9]{64}$' -or $cut.selectedCutSha256 -eq $cut.sourceSha256) {
+                    throw 'Selected-cut page provenance/capacity is missing or aliases raw source identity'
+                }
             }
             if (!$cut.pagedPilot -or $cut.pageEpoch -lt 1 -or $cut.pageLiveJobs -gt 2 -or
                 $cut.pageQueued -gt 1 -or $cut.pageActive -gt 1 -or $cut.pageReady -gt 1 -or
@@ -228,7 +239,15 @@ try {
             } while ([DateTime]::UtcNow -lt $until)
             throw "Page-worker state did not settle: $($cut | ConvertTo-Json -Compress)"
         }
+        $firstFallback=$null;$fallback=$null;$fallbackReturned=$null
+        if ($Clod) {
+            $firstFallback=PageCut (Observe $true $false)
+            if (!$firstFallback.fallbackSelected) {throw 'Combined pilot did not begin on independent authored fallback'}
+            Capture 'initial-fallback.png';$null=Action 'coarse'
+        }
         $firstCoarse=PageCut (Observe $true $false)
+        if ($Clod -and ($firstCoarse.fallbackSelected -or $firstCoarse.rendererModel -eq $firstFallback.rendererModel -or
+            $firstCoarse.rendererInstance -ne $firstFallback.rendererInstance)) {throw 'Combined selected coarse did not preserve fixed fallback instance'}
         if ($firstCoarse.fineResident -or $firstCoarse.pageLiveJobs -or $firstCoarse.pageWorkState -ne 'Idle') {
             throw 'Paged begin did not publish an independent coarse-only fallback'
         }
@@ -246,7 +265,17 @@ try {
         if ($oldRetired.pageActive -ne 1 -or $oldRetired.pageLiveJobs -ne 1 -or $oldRetired.pageReservedBytes -le 0) {
             throw 'Abort released held worker ownership before the worker actually exited'
         }
-        $replacement=PageCut (Action 'beginPaged');$coarse=PageCut (Observe $true $false)
+        $replacement=PageCut (Action $beginAction)
+        if ($Clod) {
+            $fallback=PageCut (Observe $true $false)
+            if (!$fallback.fallbackSelected) {throw 'Replacement epoch lost independent authored fallback'}
+            $null=Action 'coarse'
+        }
+        $coarse=PageCut (Observe $true $false)
+        if ($Clod -and ($coarse.fallbackSelected -or $coarse.rendererModel -eq $fallback.rendererModel -or
+            $coarse.rendererInstance -ne $fallback.rendererInstance -or $coarse.producerInstance -ne $fallback.producerInstance)) {
+            throw 'Replacement selected coarse aliases fallback or changes instance'
+        }
         if ($coarse.pageEpoch -eq $firstCoarse.pageEpoch -or $coarse.fineResident -or
             $coarse.producerModel -eq $firstCoarse.producerModel) {throw 'Replacement did not create a fresh coarse epoch'}
         $queued=PageCut (Action 'requestFine')
@@ -270,10 +299,15 @@ try {
             $fine.producerInstance -ne $coarse.producerInstance -or $fine.rendererInstance -ne $coarse.rendererInstance) {
             throw 'Fine was not a fresh complete worker result on the fixed replacement instance'
         }
+        if ($Clod -and ($fine.fallbackSelected -or $fine.rendererModel -eq $fallback.rendererModel -or
+            $fine.selectedCutSha256 -ne $coarse.selectedCutSha256 -or $fine.sourceSha256 -ne $coarse.sourceSha256)) {
+            throw 'Worker fine aliases fallback or changed immutable selected/raw source identity'
+        }
         Capture 'fine.png'
         $null=Action 'coarse';$returned=PageCut (Observe $true $false)
         if (!$returned.fineResident -or $returned.rendererModel -ne $coarse.rendererModel -or
             $returned.rendererInstance -ne $coarse.rendererInstance) {throw 'Independently resident coarse fallback was lost'}
+        if ($Clod -and $returned.fallbackSelected) {throw 'Returned selected coarse incorrectly marked authored fallback'}
         Capture 'coarse.png'
         $null=Action 'fine';$fineReturned=PageCut (Observe $true $true)
         if ($fineReturned.rendererModel -ne $fine.rendererModel -or $fineReturned.rendererInstance -ne $fine.rendererInstance) {
@@ -285,6 +319,7 @@ try {
             if ($beforeEvict.fineGeneration -ne 1 -or !$beforeEvict.fineResident -or $beforeEvict.fineEvictionCount -ne 0) {
                 throw 'Initial fine generation did not qualify for one-cycle eviction'
             }
+            if ($Clod -and $beforeEvict.fallbackSelected) {throw 'Eviction attempted from authored fallback rather than selected coarse'}
             $started=PageCut (Action 'evictFine')
             if ($started.status -ne 'Pending' -or !$started.fineEvictionPending -or $started.fineResident -or
                 $started.pageRequest -ne 0 -or $started.pageWorkState -ne 'Evicting') {throw 'Fine retirement did not start transactionally'}
@@ -301,7 +336,7 @@ try {
             }
             Capture 'evicted-coarse.png'
             # Hold another fresh CPU request and cancel it without losing the
-            # coarse cut. The slot-2 model is not registered before full publication.
+            # coarse cut. The reserved refill ID is not registered before full publication.
             $null=Action 'holdFine';$refillHeldRequest=PageCut (Action 'requestFine')
             $refillHeld=WaitPage {param($c) $c.pageActive -eq 1}
             $cancelled=PageCut (Action 'cancelFine')
@@ -329,22 +364,40 @@ try {
             for ($i=0;$i -lt $evicted.meshCount;++$i) {
                 if ($refilled.rendererMeshHandles[$i] -ne $evicted.rendererMeshHandles[$i]) {throw 'Refill erased/replaced old mesh-generation history'}
             }
+            if ($Clod -and ($refilled.fallbackSelected -or $refilled.rendererModel -eq $fallback.rendererModel -or
+                $refilled.selectedCutSha256 -ne $coarse.selectedCutSha256 -or $refilled.sourceSha256 -ne $coarse.sourceSha256)) {
+                throw 'Refill aliases fallback or changed retained selected-cut/raw source provenance'
+            }
+            if ($Clod -and (@($fallback.rendererModel,$coarse.rendererModel,$fine.rendererModel,$refilled.rendererModel | Select-Object -Unique).Count -ne 4 -or
+                @($fallback.producerModel,$coarse.producerModel,$fine.producerModel,$refilled.producerModel | Select-Object -Unique).Count -ne 4)) {
+                throw 'Combined fallback/coarse/fine/refill model identities are not four distinct birth identities'
+            }
             Capture 'refilled-fine.png'
             $null=Action 'coarse';$coarseAfterRefill=PageCut (Observe $true $false)
             if ($coarseAfterRefill.rendererModel -ne $coarse.rendererModel -or $coarseAfterRefill.rendererInstance -ne $coarse.rendererInstance) {
                 throw 'Refill changed the independent coarse model or fixed instance'
             }
+            if ($Clod -and $coarseAfterRefill.fallbackSelected) {throw 'Refill return incorrectly selected authored fallback'}
             $secondEvict=Action 'evictFine'
             if ($secondEvict.status -ne 'Invalid') {throw 'A second eviction exceeded the one-cycle scope'}
             $eviction=@{before=$beforeEvict;started=$started;evicted=$evicted;heldRequest=$refillHeldRequest;held=$refillHeld;
                 cancelled=$cancelled;cancelledCoarse=$cancelledCoarse;request=$refill;refilled=$refilled;coarse=$coarseAfterRefill;secondEvict=$secondEvict}
+        }
+        if ($Clod) {
+            $null=Action 'fallback';$fallbackReturned=PageCut (Observe $true $false)
+            if (!$fallbackReturned.fallbackSelected -or $fallbackReturned.rendererModel -ne $fallback.rendererModel -or
+                $fallbackReturned.producerModel -ne $fallback.producerModel -or
+                $fallbackReturned.rendererInstance -ne $fallback.rendererInstance -or
+                $fallbackReturned.producerInstance -ne $fallback.producerInstance) {throw 'One-cycle paging lost independent authored fallback'}
+            Capture 'returned-fallback.png'
         }
         $null=Action 'abort';$retired=PageCut (Observe $false $false)
         $settled=WaitPage {param($c) $c.pageLiveJobs -eq 0 -and $c.pageQueued -eq 0 -and
             $c.pageActive -eq 0 -and $c.pageReady -eq 0 -and $c.pageReservedBytes -eq 0}
         $result=@{begin=$begin;firstCoarse=$firstCoarse;requested=$requested;held=$held;oldRetired=$oldRetired;
             replacement=$replacement;coarse=$coarse;queued=$queued;fine=$fine;returned=$returned;fineReturned=$fineReturned;
-            retired=$retired;settled=$settled;eviction=$eviction;disabled=$false;paged=$true;clod=$false}
+            retired=$retired;settled=$settled;eviction=$eviction;disabled=$false;paged=$true;clod=[bool]$Clod;
+            firstFallback=$firstFallback;fallback=$fallback;fallbackReturned=$fallbackReturned}
     } else {
         $fallback=$null; $fallbackReturned=$null
         if ($Clod) {
@@ -383,7 +436,7 @@ try {
     $null=Send @{cmd='exit'}
     if (!$p.WaitForExit(15000) -or $p.ExitCode) {throw 'Game failed to exit cleanly'}
     if (Select-String -LiteralPath $log -Pattern 'Out of Memory|Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION' -Quiet) {throw 'Renderer error'}
-    $result.passed=$true;$result.cleanExit=$true;$result.scope='Private original authored resident geometry, record lifetime and fixed-instance switching; explicit authored worker paging only when selected; no CLOD runtime paging, all-pass, device-free or performance acceptance'
+    $result.passed=$true;$result.cleanExit=$true;$result.scope='Private original authored resident geometry, record lifetime and fixed-instance switching; explicit authored or selected-CLOD RAM worker paging only when selected; no generalized asset/DAG paging, all-pass, device-free or performance acceptance'
     $result | ConvertTo-Json -Depth 7 | Set-Content -LiteralPath (Join-Path $out 'result.json')
     Write-Output "Geometry page fixture evidence: $out"
 } catch {

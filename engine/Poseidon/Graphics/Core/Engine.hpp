@@ -3137,7 +3137,7 @@ class Engine : public IGraphicsEngine
     { return {}; }
 
     // Ready is a returned-main-frame record cut, not all-pass/pixel or GPU-free proof.
-    enum class GeometryPageFixtureAction { Begin, Coarse, Fine, Observe, Snapshot, Abort, BeginClod, Fallback, BeginPaged, RequestFine, PollFine, CancelFine, HoldFine, ReleaseFine, EvictFine };
+    enum class GeometryPageFixtureAction { Begin, Coarse, Fine, Observe, Snapshot, Abort, BeginClod, Fallback, BeginPaged, RequestFine, PollFine, CancelFine, HoldFine, ReleaseFine, EvictFine, BeginClodPaged };
     struct GeometryPageFixtureReport
     {
         GeometryReportStatus status=GeometryReportStatus::Unsupported;
@@ -3178,6 +3178,9 @@ class Engine : public IGraphicsEngine
         double clodBakeMs=0;
         float coarseThreshold=0, fineThreshold=0;
         std::string clodLibraryRevision;
+        uint32_t clodRamAdapterVersion=0;
+        uint64_t clodRamKnownSourceBytes=0,pageSourceKnownBytes=0;
+        std::string selectedCutSha256; // derived selected-cut package; sourceSha256 below stays raw source
         float x=0,y=0,z=0;
         std::string helperHashBefore, helperHashAfter, sourceSha256;
     };

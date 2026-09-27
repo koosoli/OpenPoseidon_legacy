@@ -535,6 +535,7 @@ void RegisterScreenshot(HarnessServer& hs)
             if(!std::strcmp(name,"begin")) action=Engine::GeometryPageFixtureAction::Begin;
             else if(!std::strcmp(name,"beginClod")) action=Engine::GeometryPageFixtureAction::BeginClod;
             else if(!std::strcmp(name,"beginPaged")) action=Engine::GeometryPageFixtureAction::BeginPaged;
+            else if(!std::strcmp(name,"beginClodPaged")) action=Engine::GeometryPageFixtureAction::BeginClodPaged;
             else if(!std::strcmp(name,"requestFine")) action=Engine::GeometryPageFixtureAction::RequestFine;
             else if(!std::strcmp(name,"pollFine")) action=Engine::GeometryPageFixtureAction::PollFine;
             else if(!std::strcmp(name,"cancelFine")) action=Engine::GeometryPageFixtureAction::CancelFine;
@@ -577,6 +578,7 @@ void RegisterScreenshot(HarnessServer& hs)
             PAGE_FIXTURE_NUMBER(clodAdapterVersion); PAGE_FIXTURE_NUMBER(clodGroups); PAGE_FIXTURE_NUMBER(clodClusters);
             PAGE_FIXTURE_NUMBER(fallbackTriangles); PAGE_FIXTURE_NUMBER(authoredFineTriangles); PAGE_FIXTURE_NUMBER(clodBakeMs);
             PAGE_FIXTURE_NUMBER(coarseThreshold); PAGE_FIXTURE_NUMBER(fineThreshold);
+            PAGE_FIXTURE_NUMBER(clodRamAdapterVersion);PAGE_FIXTURE_NUMBER(clodRamKnownSourceBytes);PAGE_FIXTURE_NUMBER(pageSourceKnownBytes);
             PAGE_FIXTURE_NUMBER(pageEpoch); PAGE_FIXTURE_NUMBER(pageRequest); PAGE_FIXTURE_NUMBER(pageReservedBytes);
             PAGE_FIXTURE_NUMBER(pageCompleted); PAGE_FIXTURE_NUMBER(pageCancelled); PAGE_FIXTURE_NUMBER(pageQueued);
             PAGE_FIXTURE_NUMBER(pageActive); PAGE_FIXTURE_NUMBER(pageReady); PAGE_FIXTURE_NUMBER(pageLiveJobs);
@@ -619,7 +621,8 @@ void RegisterScreenshot(HarnessServer& hs)
             cJSON_AddStringToObject(result,"sourceSha256",report.sourceSha256.c_str());
             cJSON_AddStringToObject(result,"clodLibraryRevision",report.clodLibraryRevision.c_str());
             cJSON_AddStringToObject(result,"pageWorkState",report.pageWorkState.c_str());
-            cJSON_AddStringToObject(result,"scope","Private programmatically authored box/curved-grid pilot; explicit authored value-worker only in paged mode, synchronous CLOD bake scratch/latency not hard-bounded; returned main frame and full-generation record cut, not all-pass/pixel, mounted-file provenance, queue-completion or device-free proof");
+            cJSON_AddStringToObject(result,"selectedCutSha256",report.selectedCutSha256.c_str());
+            cJSON_AddStringToObject(result,"scope","Private programmatically authored box/curved-grid pilot; explicit authored/selected-CLOD value-worker only in paged mode, synchronous CLOD bake scratch/latency not hard-bounded; returned main frame and full-generation record cut, not all-pass/pixel, mounted-file provenance, queue-completion or device-free proof");
             return HarnessProtocol::JsonResponse(result);
         });
     hs.RegisterCommand({"geometry_allocations", "Request/poll bounded retained mesh allocation diagnostics", {}},
