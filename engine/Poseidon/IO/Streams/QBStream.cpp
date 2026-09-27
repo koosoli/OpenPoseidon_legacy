@@ -1202,7 +1202,8 @@ bool CaptureWarmTextureSourceBinding()
 {
     static const bool enabled = [] {
         const char* value = std::getenv("WGR_OBJECT_STREAM_WARM_TEXTURES");
-        return value && std::strcmp(value, "1") == 0;
+        const char* cold = std::getenv("WGR_OBJECT_STREAM_COLD_TEXTURE_HANDOFF");
+        return (value && std::strcmp(value, "1") == 0) || (cold && std::strcmp(cold, "1") == 0);
     }();
     return enabled;
 }
@@ -1221,7 +1222,9 @@ bool ArchiveSourceBinding::ModelReadScope::PurposeRequired()
 {
     static const bool required = [] {
         const char* jobs = std::getenv("WGR_OBJECT_STREAM_WARM_TEXTURE_JOBS");
-        return CaptureWarmTextureSourceBinding() && jobs && std::strcmp(jobs, "1") == 0;
+        const char* cold = std::getenv("WGR_OBJECT_STREAM_COLD_TEXTURE_HANDOFF");
+        return (CaptureWarmTextureSourceBinding() && jobs && std::strcmp(jobs, "1") == 0) ||
+            (cold && std::strcmp(cold, "1") == 0);
     }();
     return required;
 }

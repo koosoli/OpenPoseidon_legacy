@@ -1,3 +1,4 @@
+#include <Poseidon/Graphics/Textures/ColdPaaHandoff.hpp>
 #include "TextureWgpu.hpp"
 #include "TextureBankWgpu.hpp"
 #include "EngineWgpu.hpp" // ProducerMayTouchRenderer (REN-THR-012)
@@ -1652,6 +1653,36 @@ bool TextureWgpu::ReplaceMipTail(int firstLevel, uint64_t frame)
     return true;
 }
 
+bool TextureWgpu::CaptureColdPaaRead(render::ColdPaaRead& out) const
+{
+    if (!render::ColdPaaHandoffEnabled() || !Foundation::IsMainThread() || _gpuHandle ||
+        !_src || _dynamic || _tintDelegate || _cpuTintView || _nMipmaps <= 0 || _nMipmaps > MAX_MIPMAPS) return false;
+    auto source = CurrentArchiveSourceBinding();
+    if (!source) return false; // Actual Init-buffer provenance + current loaded mount; no fresh-name guess.
+    const char* name = SourceName(); size_t length = 0;
+    while (name && length < 8192 && name[length]) ++length;
+    if (!name || length < 4 || length >= 8192 || strcmpi(name + length - 4, ".paa") != 0) return false;
+    render::ColdPaaRead candidate;
+    candidate.key = render::PreparedTextureStore::Key(name); candidate.source = std::move(source);
+    const PacFormat format = _src->GetFormat();
+    if (format < PacDXT1 || format > PacDXT5) return false;
+    // PacFormat is not required to be numerically contiguous.
+    switch (format) {
+    case PacDXT1: candidate.magic = 0xff01; break; case PacDXT2: candidate.magic = 0xff02; break;
+    case PacDXT3: candidate.magic = 0xff03; break; case PacDXT4: candidate.magic = 0xff04; break;
+    case PacDXT5: candidate.magic = 0xff05; break; default: return false;
+    }
+    candidate.count = static_cast<size_t>(_nMipmaps);
+    for (int i = 0; i < _nMipmaps; ++i) {
+        const auto& mip = _mipmaps[i];
+        if (mip.SrcFormat() != format || mip.DstFormat() != format || mip._start < 0) return false;
+        candidate.levels[i] = {mip._w, mip._h,
+            render::mipmap::ComputeLayout(format, mip._w, mip._h).dataSize, static_cast<size_t>(mip._start)};
+    }
+    if (!candidate.Valid()) return false;
+    out = std::move(candidate); return true;
+}
+
 uint64_t TextureWgpu::EnsureUploaded()
 {
     if (_bank)
@@ -1783,13 +1814,18 @@ uint64_t TextureWgpu::EnsureUploaded()
         // firstLevel.. tightly packed at `offsets`, so the alpha handoff below is unchanged.
         bool ok = false;
         bool fromPrepared = false;
+        bool fromColdHandoff = false;
         std::shared_ptr<const ArchiveSourceBinding> warmPreparedSource;
-        if (render::PreparedTextureStore::Enabled())
+        if (render::ColdPaaHandoffEnabled() || render::PreparedTextureStore::Enabled())
         {
             PAABlockChain prepared;
             const std::string key = render::PreparedTextureStore::Key(SourceName());
             const uint64_t takeBegan = terrainTiming.enabled ? NowUs() : 0;
-            const bool taken = render::PreparedTextureStore::Instance().Take(key, prepared, &warmPreparedSource);
+            render::ColdPaaRead currentHeader;
+            if (render::ColdPaaHandoffEnabled() && CaptureColdPaaRead(currentHeader))
+                fromColdHandoff = render::ColdPaaAdmissionScope::Claim(key, currentHeader.source, currentHeader, prepared);
+            const bool taken = fromColdHandoff || (render::PreparedTextureStore::Enabled() &&
+                render::PreparedTextureStore::Instance().Take(key, prepared, &warmPreparedSource));
             if (terrainTiming.enabled)
             {
                 terrainTiming.preparedTakeMs += (NowUs() - takeBegan) / 1000.0;
@@ -1946,6 +1982,15 @@ uint64_t TextureWgpu::EnsureUploaded()
                 handoff.format = dst;
                 handoff.name.assign(name);
             }
+        }
+        if (fromColdHandoff && fromPrepared && _gpuHandle && Foundation::IsMainThread())
+        {
+            static unsigned rows = 0;
+            if (rows < 16) {
+                ++rows;
+                LOG_INFO(Graphics, "Cold PAA handoff upload: source={} bytes={} sourceValidated=true blockUploadSucceeded=true operationLocal=true row={} limit=16",
+                    SourceName(), total, rows);
+            } else if (rows == 16) { ++rows; LOG_INFO(Graphics, "Cold PAA handoff upload truncated: limit=16; prefix only, no all-texture/model performance proof"); }
         }
         if (warmPreparedSource && fromPrepared)
         {

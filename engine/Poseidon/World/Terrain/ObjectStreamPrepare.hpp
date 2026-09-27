@@ -74,6 +74,7 @@
 // recentre, is what evicts IRs the new window no longer wants, so a full ready set can never
 // be a full set of unwanted models.)
 
+#include <Poseidon/Graphics/Textures/ColdPaaHandoff.hpp>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -91,7 +92,7 @@ struct WarmTextureRead
     std::shared_ptr<const ArchiveSourceBinding> initializedSource;
 };
 struct Bc3EncodingObserver;
-namespace render { struct DdsPublicationObserver; }
+namespace render { struct DdsPublicationObserver; struct ColdPaaOwned; }
 class LODShapeWithShadow;
 namespace Model
 {
@@ -146,6 +147,8 @@ class ObjectStreamPreparer
         uint64_t readyFullParks = 0;
         uint64_t readyByteParks = 0;
         uint64_t readyPayloadBytes = 0;
+        uint64_t coldTextureSlotBytes = 0, coldTexturePrepared = 0, coldTextureRefused = 0;
+        uint64_t coldTextureReadyBytes = 0; // subset of readyPayloadBytes, known C++ capacity only
         uint64_t parseReservedBytes = 0; // includes old-generation workers until they finish
         uint64_t peakReadyPayloadBytes = 0;
         uint64_t conversionReservedBytes = 0; // IR plus estimated conversion output/workspace
@@ -343,16 +346,20 @@ class ObjectStreamPreparer
     // Snapshot/sidecar identity, generation and per-parse token must match.
     // Invalid explicit binding rejects the job; never silently converts it as
     // ordinary work. Cancellation invalidates publication even after rescue.
+    // ownerTextureAdmission is explicit for LandSave cold visual admission; CPU-only
+    // actor conversions never opt into unused texture work. Dedicated exact1 flag required.
     bool SubmitConvert(uint32_t index, std::shared_ptr<Model::Model> model,
                        std::shared_ptr<const Model::ShapeAdapter::AdapterBankTables> tables,
                        const RadiusCertificate* inventoryToken = nullptr,
-                       const SourceEnvelopeSnapshot* originalSource = nullptr);
+                       const SourceEnvelopeSnapshot* originalSource = nullptr,
+                       bool ownerTextureAdmission = false);
 
     struct ConvertedShape
     {
         LODShapeWithShadow* shape = nullptr; // ownership transfers to the caller
         std::shared_ptr<Model::Model> model; // the IR it was converted from
         SourceConversionToken sourceToken; // actual job association; ordinary jobs remain zero
+        std::unique_ptr<render::ColdPaaOwned> coldTexture; // operation-local, optional; no global TTL delivery
     };
     // Main thread. If Converted, returns the shape + IR and returns the slot to
     // Unknown; else {}. The caller MUST run CreateAdapterProxies + ShapeBank install.

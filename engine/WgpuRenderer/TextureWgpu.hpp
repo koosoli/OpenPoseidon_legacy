@@ -103,6 +103,7 @@ class TextureWgpu : public Texture
     // Owner-only metadata/native-handle observation. Never loads a bank or
     // recaptures provenance by name; unsupported/currently different mounts refuse.
     std::shared_ptr<const ArchiveSourceBinding> CurrentArchiveSourceBinding() const;
+    bool CaptureColdPaaRead(render::ColdPaaRead& out) const override;
     bool CanWarmPrepare() const { return !_gpuHandle && !_uploadTried && HasReloadableSource(); }
     // Drop only the GPU allocation while preserving the decoded file source and
     // Texture object.  Terrain page residency uses this to reload the same

@@ -65,7 +65,8 @@ class ArchiveSourceBinding
     static void NoteWrappedRead();
 public:
     // Optional model primary/material-stage Init purpose, NOT source identity or worker access.
-    // Needed only when BOTH warm-source and warm-job flags are exactly 1;
+    // Needed when BOTH warm-source and warm-job flags are exactly 1, or the
+    // dedicated cold-handoff experiment is exactly 1; both use existing model Init.
     // source-only diagnostic capture keeps its original all-PAA behaviour.
     class ModelReadScope
     {

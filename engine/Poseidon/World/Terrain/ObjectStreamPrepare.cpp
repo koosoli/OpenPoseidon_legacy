@@ -402,6 +402,7 @@ struct ObjectStreamPreparer::Impl
     struct ConvertJob
     {
         std::vector<PackedTextureRead> textures;
+        std::unique_ptr<render::ColdPaaRead> coldTexture;
         uint64_t textureGeneration = 0;
         render::DdsPublicationToken texturePublication;
         bool texturePublicationRequired = false;
@@ -452,6 +453,8 @@ struct ObjectStreamPreparer::Impl
         bool publicationRequired, PaaAttemptRow& attemptRow,
         uint64_t& prepared, uint64_t& preparedBytes, uint64_t& skipped, uint64_t& unreadable);
 
+    // Empty/default-off. Allocated only with a valid optional publication inventory.
+    std::vector<std::unique_ptr<render::ColdPaaOwned>> convertedColdTextures;
     std::vector<LODShapeWithShadow*> convertedShapes;
     std::vector<ModelPtr> convertedModels;
     std::vector<uint64_t> conversionBytes;
@@ -629,7 +632,7 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                 if (texture.read.archiveLease)
                     alphaMetadataScratch = std::max<uint64_t>(alphaMetadataScratch,
                         sizeof(render::PreparedAlphaFacts) + texture.read.archive.capacity() + 1 + 64);
-            const uint64_t textureScratch = job.textures.empty() ? 0 : 4 * PackedTextureLimit + 8192 + alphaMetadataScratch;
+            const uint64_t textureScratch = (job.textures.empty() && !job.coldTexture) ? 0 : 4 * PackedTextureLimit + 8192 + alphaMetadataScratch;
             stats.conversionReservedBytes += textureScratch;
             stats.peakConversionReservedBytes = std::max(stats.peakConversionReservedBytes, stats.conversionReservedBytes);
             const uint64_t jobGen = generation.load(std::memory_order_relaxed);
@@ -676,22 +679,43 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                         attemptRow.rejectedReadDecodeMs, attemptRow.rejectedReadDecodeFactsMs, publicationDelayMs);
                 else if (row == 64) LOG_INFO(World, "PAA prepare attempts: log truncated after 64 conversion rows; filename/generation overlap is not physical identity or full coverage");
             };
+            std::unique_ptr<render::ColdPaaOwned> ownedCold;
+            if (shape && job.coldTexture)
+            {
+                auto cancelled = [&] {
+                    std::lock_guard<std::mutex> guard(mutex);
+                    return stop || jobGen != generation.load(std::memory_order_relaxed) ||
+                        job.index >= count || stale[job.index] || !job.texturePublication.Valid();
+                };
+                ownedCold = render::PrepareColdPaa(std::move(*job.coldTexture), job.texturePublication, cancelled);
+                // Existing per-instance worker seam; no borrowed pixel/source arguments.
+                // For this branch it observes a completed chain before Converted publication, not a store Put.
+                try { if (ownedCold && publicationObserver.beforePaaPut)
+                    publicationObserver.beforePaaPut(publicationObserver.context, false); }
+                catch (...) { ownedCold.reset(); }
+                if (cancelled()) ownedCold.reset();
+            }
             uint64_t prepared = 0, preparedBytes = 0, skipped = 0, unreadable = 0;
             const auto textureStart = std::chrono::steady_clock::now();
             if (shape)
             {
                 auto& store = render::PreparedTextureStore::Instance();
                 for (const auto& texture : job.textures)
+                {
+                    if (ownedCold && texture.key == ownedCold->read.key &&
+                        texture.ReadRequest().SameArchiveMember(ownedCold->read.source->Request())) continue;
                     if (!PreparePackedTexture(texture, jobGen, job.index, job.textureGeneration,
                         job.texturePublication, job.texturePublicationRequired, attemptRow,
                         prepared, preparedBytes, skipped, unreadable)) break;
+                }
             }
 
             const double textureMs = std::chrono::duration<double, std::milli>(
                 std::chrono::steady_clock::now() - textureStart).count();
 
             lock.lock();
-            stats.conversionReservedBytes -= textureScratch;
+            // Scratch debt survives payload destruction on every terminal/cancel path.
+            if (job.coldTexture) { if (ownedCold) ++stats.coldTexturePrepared; else ++stats.coldTextureRefused; }
             if (jobGen != generation.load(std::memory_order_relaxed) || stale[job.index] ||
                 (job.sourceToken.diagnosticParseToken && !SourceBindingMatches(job.index, job.sourceToken)))
             {
@@ -704,9 +728,11 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                 lock.unlock();
                 reportAttempts(false, terminalMs);
                 delete shape;
+                ownedCold.reset(); job.coldTexture.reset();
                 job.model.reset();
                 job.tables.reset();
                 lock.lock();
+                stats.conversionReservedBytes -= textureScratch; cv.notify_all();
                 continue;
             }
             stats.texPrepared += prepared;
@@ -723,6 +749,20 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                 convertedShapes[job.index] = shape;
                 shape = nullptr; // Ownership is now in the published slot.
                 convertedModels[job.index] = std::move(job.model);
+                if (ownedCold && job.index < convertedColdTextures.size())
+                {
+                    const auto bytes = ownedCold->KnownBytes();
+                    if (stats.coldTextureReadyBytes <= render::ColdPaaOwned::ReadyLimit &&
+                        bytes <= render::ColdPaaOwned::ReadyLimit - stats.coldTextureReadyBytes &&
+                        (!stats.readyByteBudget || (stats.readyPayloadBytes <= stats.readyByteBudget &&
+                        bytes <= stats.readyByteBudget - stats.readyPayloadBytes)))
+                    {
+                        stats.readyPayloadBytes += bytes; stats.coldTextureReadyBytes += bytes;
+                        stats.peakReadyPayloadBytes = std::max(stats.peakReadyPayloadBytes, stats.readyPayloadBytes);
+                        convertedColdTextures[job.index] = std::move(ownedCold);
+                    }
+                    else ++stats.coldTextureRefused; // normal Converted geometry still progresses; owner reads normally
+                }
                 if (job.index < sourceEnvelopes.size()) sourceEnvelopes[job.index].convertedToken = job.sourceToken;
                 Set(job.index, State::Converted);
                 ++stats.converted;
@@ -743,9 +783,11 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
             lock.unlock();
             reportAttempts(publishedShape, terminalMs);
             delete shape;
+            ownedCold.reset(); job.coldTexture.reset();
             job.model.reset();
             job.tables.reset();
             lock.lock();
+            stats.conversionReservedBytes -= textureScratch; cv.notify_all();
             continue;
         }
         if (warm && !warm->queue.empty() && HasWarmByteRoom() &&
@@ -1219,8 +1261,11 @@ void ObjectStreamPreparer::Reset(const std::string* paths, size_t modelCount)
         const char* flag = std::getenv("WGR_OBJECT_STREAM_PBO_TEXTURES");
         return render::PreparedTextureStore::Enabled() && flag && flag[0] == '1';
     }();
-    auto publication = (render::PreparedTextureStore::NativeDdsEnabled() || pboTextures || WarmTextureJobsEnabled())
+    auto publication = (render::PreparedTextureStore::NativeDdsEnabled() || pboTextures || WarmTextureJobsEnabled() || render::ColdPaaHandoffEnabled())
         ? render::DdsPublicationInventory::Create(modelCount) : nullptr;
+    std::vector<std::unique_ptr<render::ColdPaaOwned>> freshCold;
+    if (render::ColdPaaHandoffEnabled() && publication)
+    { try { freshCold.resize(modelCount); } catch (...) { freshCold.clear(); } }
     std::vector<std::optional<BankReadRequest>> packedReads(modelCount);
     const char* packedFlag = std::getenv("WGR_OBJECT_STREAM_PBO");
     size_t packedCount = 0;
@@ -1255,6 +1300,9 @@ void ObjectStreamPreparer::Reset(const std::string* paths, size_t modelCount)
         _impl->stats.queued = 0;
         _impl->stats.ready = 0;
         _impl->stats.readyPayloadBytes = 0;
+        freshCold.swap(_impl->convertedColdTextures); // old payload/leases free outside queue lock
+        _impl->stats.coldTextureReadyBytes = 0;
+        _impl->stats.coldTextureSlotBytes = _impl->convertedColdTextures.capacity() * sizeof(std::unique_ptr<render::ColdPaaOwned>);
         // Do not clear parseReservedBytes: old-generation workers still own their reservation.
         _impl->payloadBytes.assign(modelCount, 0);
         _impl->queue.clear();
@@ -1468,6 +1516,7 @@ std::shared_ptr<Model::Model> ObjectStreamPreparer::Take(uint32_t index)
 
 size_t ObjectStreamPreparer::DropStale(const uint32_t* epochs, size_t count, uint32_t currentEpoch)
 {
+    std::unique_ptr<render::ColdPaaOwned> freeCold;
     std::vector<Impl::ModelPtr> freeLater;
     std::vector<LODShapeWithShadow*> freeShapes;
     std::deque<Impl::ConvertJob> freeConversions;
@@ -1501,6 +1550,13 @@ size_t ObjectStreamPreparer::DropStale(const uint32_t* epochs, size_t count, uin
             {
                 _impl->stats.conversionReservedBytes -= _impl->conversionBytes[i];
                 _impl->conversionBytes[i] = 0;
+                if (i < _impl->convertedColdTextures.size() && _impl->convertedColdTextures[i])
+                {
+                    const auto bytes = _impl->convertedColdTextures[i]->KnownBytes();
+                    _impl->stats.readyPayloadBytes -= bytes; _impl->stats.coldTextureReadyBytes -= bytes;
+                    auto retired = std::move(_impl->convertedColdTextures[i]);
+                    retired->retiredNext = std::move(freeCold); freeCold = std::move(retired);
+                }
                 if (_impl->convertedShapes[i])
                 {
                     freeShapes.push_back(_impl->convertedShapes[i]);
@@ -1564,6 +1620,7 @@ size_t ObjectStreamPreparer::DropStale(const uint32_t* epochs, size_t count, uin
     freeLater.clear();
     for (LODShapeWithShadow* sh : freeShapes)
         delete sh;
+    while (freeCold) { auto next = std::move(freeCold->retiredNext); freeCold = std::move(next); }
     return dropped;
 }
 
@@ -1646,13 +1703,34 @@ ObjectStreamPreparer::WarmTextureSubmit ObjectStreamPreparer::SubmitWarmTextures
 bool ObjectStreamPreparer::SubmitConvert(uint32_t index, std::shared_ptr<Model::Model> model,
                                          std::shared_ptr<const Model::ShapeAdapter::AdapterBankTables> tables,
                                          const RadiusCertificate* inventoryToken,
-                                         const SourceEnvelopeSnapshot* originalSource)
+                                         const SourceEnvelopeSnapshot* originalSource,
+                                         bool ownerTextureAdmission)
 {
     if (!model || !tables)
         return false;
     if (originalSource && !Foundation::IsMainThread()) return false;
     // Owner-thread snapshot only. Workers receive immutable archive spans and names,
     // never Texture pointers, bank handles, ParamFile state or the file-server MRU.
+    std::unique_ptr<render::ColdPaaRead> coldTexture;
+    if (ownerTextureAdmission && render::ColdPaaHandoffEnabled() && Foundation::IsMainThread() && WorkerCount() <= 2)
+    {
+        try {
+            size_t visits = 0;
+            for (size_t lod = 0; lod < tables->textures.size() && lod < model->lodLevels.size() && lod < 64; ++lod) {
+                const auto& level = tables->textures[lod];
+                if (++visits > 256 || coldTexture) break;
+                if (model->lodLevels[lod].purpose != Model::LodPurpose::Visual ||
+                    !model->lodLevels[lod].mesh.HasGeometry()) continue;
+                for (const auto& texture : level) {
+                    if (++visits > 256 || coldTexture) break;
+                    if (!texture || texture->IsGpuResident()) continue;
+                    render::ColdPaaRead read;
+                    if (texture->CaptureColdPaaRead(read) && read.Valid())
+                        coldTexture = std::make_unique<render::ColdPaaRead>(std::move(read));
+                }
+            }
+        } catch (...) { coldTexture.reset(); } // Optional metadata failure falls back, no model-state change.
+    }
     std::vector<Impl::PackedTextureRead> textures;
     const uint64_t textureGeneration = render::PreparedTextureStore::Instance().Generation();
     const char* flag = std::getenv("WGR_OBJECT_STREAM_PBO_TEXTURES");
@@ -1701,7 +1779,8 @@ bool ObjectStreamPreparer::SubmitConvert(uint32_t index, std::shared_ptr<Model::
     _impl->Set(index, State::Converting);
     Impl::ConvertJob job;
     job.index = index;
-    job.texturePublicationRequired = !textures.empty();
+    if (_impl->convertedColdTextures.size() != _impl->count) coldTexture.reset();
+    job.texturePublicationRequired = !textures.empty() || bool(coldTexture);
     if (job.texturePublicationRequired)
         job.texturePublication = {_impl->ddsPublication, index,
             _impl->ddsPublication ? _impl->ddsPublication->Epoch(index) : 0};
@@ -1718,6 +1797,13 @@ bool ObjectStreamPreparer::SubmitConvert(uint32_t index, std::shared_ptr<Model::
     // scheduling estimate, not a measurement of Shape allocations. Useful
     // conversions always progress; their debt parks subsequent speculative parses.
     job.reservation = 2 * Model::ResidentPayloadBytes(*model);
+    if (coldTexture)
+    {
+        if (!job.texturePublication.Valid()) coldTexture.reset();
+        else job.reservation += coldTexture->KnownMetadataBytes() +
+            job.texturePublication.inventory->MetadataBytes();
+    }
+    job.coldTexture = std::move(coldTexture);
     if (!textures.empty())
     {
         job.reservation += textures.capacity() * sizeof(Impl::PackedTextureRead);
@@ -1750,6 +1836,12 @@ ObjectStreamPreparer::ConvertedShape ObjectStreamPreparer::TakeConverted(uint32_
     _impl->cv.notify_all();
     out.shape = _impl->convertedShapes[index];
     _impl->convertedShapes[index] = nullptr;
+    if (index < _impl->convertedColdTextures.size() && _impl->convertedColdTextures[index])
+    {
+        const auto bytes = _impl->convertedColdTextures[index]->KnownBytes();
+        _impl->stats.readyPayloadBytes -= bytes; _impl->stats.coldTextureReadyBytes -= bytes;
+        out.coldTexture = std::move(_impl->convertedColdTextures[index]);
+    }
     out.model = std::move(_impl->convertedModels[index]);
     _impl->convertedModels[index].reset();
     _impl->Set(index, State::Unknown);

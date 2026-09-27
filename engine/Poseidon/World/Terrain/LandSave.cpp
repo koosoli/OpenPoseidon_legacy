@@ -4084,6 +4084,7 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
             const bool cold = warmShape == nullptr;
             std::shared_ptr<Model::Model> preparsed;
             LODShapeWithShadow* preadapted = nullptr;
+            std::unique_ptr<render::ColdPaaOwned> coldTexture;
             if (cold && asyncOn)
             {
                 const ObjectStreamPreparer::State state = _modernObjectPreparer->Query(placement.modelIndex);
@@ -4193,7 +4194,7 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                         ++tablesPrepared;
                         const auto radiusToken = _modernObjectPreparer->QueryRadius(placement.modelIndex);
                         if (_modernObjectPreparer->SubmitConvert(placement.modelIndex, std::move(preparsed),
-                                                                std::move(tables), &radiusToken))
+                                                                std::move(tables), &radiusToken, nullptr, true))
                         {
                             ++waited;
                             ++scan;
@@ -4222,6 +4223,7 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                     }
                     preadapted = conv.shape;
                     preparsed = std::move(conv.model);
+                    coldTexture = std::move(conv.coldTexture);
                 }
                 else if (state != ObjectStreamPreparer::State::NotLoose && state != ObjectStreamPreparer::State::Failed)
                 {
@@ -4269,6 +4271,8 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                 admitProfile.Reset();
                 admitProfile.active = true;
             }
+            // Same taken ConvertedShape, joined nonyielding owner operation through first GPU registration.
+            render::ColdPaaAdmissionScope coldTextureScope(coldTexture.get());
             const auto createStart = std::chrono::steady_clock::now();
             try
             {

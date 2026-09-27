@@ -15,6 +15,7 @@ namespace Poseidon
 {
 
 struct SurfaceInfo;
+namespace render { struct ColdPaaRead; }
 
 //! The surface infos for the four quadrants of a blended terrain texture.
 //! The quadrants are ordered: top-left, top-right, bottom-left, bottom-right.
@@ -118,6 +119,9 @@ class Texture : public RemoveLLinks
     void Unlock();
 
   public:
+    // Appended virtual: conservative default, no Init/load/read/upload. Owner-only.
+    virtual bool CaptureColdPaaRead(render::ColdPaaRead&) const { return false; }
+
     NoCopy(Texture)
 };
 

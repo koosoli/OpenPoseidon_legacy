@@ -1,3 +1,7 @@
+#include <Poseidon/Graphics/Textures/ColdPaaHandoff.hpp>
+#include <Poseidon/Graphics/Textures/TextureBank.hpp>
+#include <Poseidon/IO/FileServerMT.hpp>
+#include <Poseidon/IO/Streams/FileAccessPolicy.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <Poseidon/World/Terrain/ObjectStreamPrepare.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
@@ -694,4 +698,169 @@ TEST_CASE("Diagnostic demand survives camera cancellation only while an actual p
     land.Prep().DropStale(epochs.data(),epochs.size(),8);
     REQUIRE(land.Prep().SnapshotStats().readyPayloadBytes==0);
     REQUIRE(land.SnapshotModernSourceDiagnostic(0).status==Status::Interrupted);
+}
+
+#ifdef _WIN32
+namespace
+{
+// Actual original PAA Init + exact mapped buffer provenance; the test texture is
+// a no-GPU adapter-table carrier. It does not prove real Wgpu upload/pixels.
+class ColdPaaTestServer final : public Poseidon::FileServer
+{
+public:
+    Poseidon::FileCache cache;
+    void Request(const char*, float, int, int) override {} void CancelRequest(const char*, int, int) override {}
+    void Open(Poseidon::QIFStream& stream, const char* name) override { cache.Open(stream, name); }
+    void Start() override {} void Stop() override {} void FlushBank(Poseidon::QFBank* b) override { cache.FlushBank(b); }
+};
+struct ColdPaaSourceFixture
+{
+    Poseidon::Ref<Poseidon::FileServer> previous = Poseidon::GFileServer;
+    bool caching = GEnableCaching;
+    ColdPaaTestServer* server = new ColdPaaTestServer;
+    std::unique_ptr<Poseidon::ITextureSource> source;
+    Poseidon::render::ColdPaaRead read;
+    std::array<Poseidon::PacLevelMem,7> mips;
+    explicit ColdPaaSourceFixture(PaaWorkerBank& bank)
+    {
+        Poseidon::GFileServer = server; GEnableCaching = true;
+        try {
+        Poseidon::ArchiveSourceBinding::ModelReadScope modelPurpose;
+        Poseidon::QIFStreamB buffer; buffer.open(Poseidon::GFileBanks[bank.index], "member.paa");
+        server->cache.Store(buffer, bank.key.c_str());
+        auto* factory = Poseidon::SelectTextureSourceFactory(bank.key.c_str()); REQUIRE(factory);
+        source.reset(factory->Create(bank.key.c_str(), mips.data(), 7)); REQUIRE(source);
+        read.key = Poseidon::render::PreparedTextureStore::Key(bank.key);
+        read.source = source->GetArchiveSourceBinding(); REQUIRE(read.source);
+        REQUIRE(Poseidon::GFileBanks[bank.index].MatchesMountedMember("member.paa", read.source->Request()));
+        read.magic = 0xff03; read.count = size_t(source->GetMipmapCount());
+        REQUIRE(read.count > 0); REQUIRE(read.count <= 7);
+        for(size_t i=0;i<read.count;++i) read.levels[i] = {mips[i]._w,mips[i]._h,16,size_t(mips[i]._start)};
+        REQUIRE(read.Valid());
+        } catch (...) { source.reset(); read.source.reset(); Poseidon::GFileServer=previous; GEnableCaching=caching; throw; }
+    }
+    ~ColdPaaSourceFixture() { source.reset(); Poseidon::GFileServer=previous; GEnableCaching=caching; }
+};
+class ColdPaaTestTexture final : public Poseidon::Texture
+{
+    Poseidon::render::ColdPaaRead _read;
+    Poseidon::PacLevelMem _mip;
+public:
+    explicit ColdPaaTestTexture(Poseidon::render::ColdPaaRead read) : _read(std::move(read)) {}
+    bool CaptureColdPaaRead(Poseidon::render::ColdPaaRead& out) const override { out=_read; return out.Valid(); }
+    bool IsGpuResident() const override { return false; }
+    void SetMaxSize(int) override {} int AMaxSize() const override { return 4; }
+    int AWidth(int=0) const override {return 4;} int AHeight(int=0) const override {return 4;}
+    int ANMipmaps() const override {return 1;} void ASetNMipmaps(int) override {}
+    Poseidon::AbstractMipmapLevel& AMipmap(int) override {return _mip;}
+    const Poseidon::AbstractMipmapLevel& AMipmap(int) const override {return _mip;}
+    Poseidon::Color GetPixel(int,float,float) const override {return Poseidon::HBlack;}
+    bool IsTransparent() const override {return false;} bool IsAlpha() const override {return true;}
+    Poseidon::Color GetColor() override {return Poseidon::HBlack;}
+    bool VerifyChecksum(const Poseidon::MipInfo&) const override {return true;}
+};
+void RequireColdPaaCapability()
+{
+    Poseidon::Foundation::CaptureMainThread();
+    if (!Poseidon::render::ColdPaaHandoffEnabled()) SKIP("Fresh WGR_OBJECT_STREAM_COLD_TEXTURE_HANDOFF=1 process required.");
+    if (!Poseidon::QFileAccess::MappingSupported()) SKIP("Actual mapped archive source lease unavailable.");
+    if (Preparer::WorkerCount()!=1) SKIP("Deterministic worker replacement requires WGR_OBJECT_STREAM_ASYNC_WORKERS=1.");
+}
+void SubmitOriginalColdPaa(Preparer& prep, const Poseidon::render::ColdPaaRead& read)
+{
+    REQUIRE(prep.Request(0)); REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::Ready;}));
+    auto model=prep.Take(0); REQUIRE(model);
+    auto tables=std::make_shared<Poseidon::Model::ShapeAdapter::AdapterBankTables>();
+    tables->textures.resize(model->lodLevels.size());
+    // One actual visual primary dependency, paired with the original triangle.
+    model->lodLevels[0].mesh.materials.emplace_back("original-PAA-primary",read.key);
+    for(auto& triangle:model->lodLevels[0].mesh.triangles) triangle.materialIndex=0;
+    for(auto& triangle:model->lodLevels[0].mesh.triangles) triangle.materialIndex=0;
+    tables->textures[0].push_back(new ColdPaaTestTexture(read));
+    REQUIRE(prep.SubmitConvert(0,model,tables,nullptr,nullptr,true));
+}
+}
+TEST_CASE("Actual cold conversion owns the Init-bound chain independently of store visibility", "[preparer][cold-paa-handoff]")
+{
+    RequireColdPaaCapability(); SourceFile file; PaaWorkerBank bank; ColdPaaSourceFixture source(bank);
+    Preparer prep; prep.Reset(&file.path,1); RequireWorkers(prep);
+    auto& store=Poseidon::render::PreparedTextureStore::Instance(); store.Clear(); store.MarkUploaded(bank.key);
+    CHECK_FALSE(store.ShouldPrepare(bank.key));
+    SubmitOriginalColdPaa(prep,source.read);
+    REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::Converted;}));
+    REQUIRE(prep.SnapshotStats().coldTextureReadyBytes>0);
+    CHECK(prep.SnapshotStats().readyPayloadBytes>=prep.SnapshotStats().coldTextureReadyBytes);
+    auto converted=prep.TakeConverted(0); std::unique_ptr<Poseidon::LODShapeWithShadow> shape(converted.shape);
+    REQUIRE(shape); REQUIRE(converted.coldTexture); CHECK(prep.SnapshotStats().coldTextureReadyBytes==0);
+    store.Clear(); // Store Clear/generation and absent entries cannot lose the owned result.
+    Poseidon::PAABlockChain claimed;
+    { Poseidon::render::ColdPaaAdmissionScope scope(converted.coldTexture.get());
+      auto changed=source.read; ++changed.levels[0].header;
+      CHECK_FALSE(Poseidon::render::ColdPaaAdmissionScope::Claim(source.read.key,source.read.source,changed,claimed));
+      CHECK_FALSE(claimed.valid());
+      CHECK_FALSE(Poseidon::render::ColdPaaAdmissionScope::Claim(source.read.key+"wrong",source.read.source,source.read,claimed));
+      REQUIRE(Poseidon::render::ColdPaaAdmissionScope::Claim(source.read.key,source.read.source,source.read,claimed));
+      Poseidon::PAABlockChain second;
+      CHECK_FALSE(Poseidon::render::ColdPaaAdmissionScope::Claim(source.read.key,source.read.source,source.read,second)); }
+    std::vector<char> bytes; REQUIRE(source.read.source->Request().Read(bytes)); Poseidon::PAABlockChain expected;
+    REQUIRE(Poseidon::ReadPAABlockChainBuffer(bytes.data(),bytes.size(),expected)); CHECK(claimed.blocks==expected.blocks);
+    CHECK(claimed.magic==expected.magic); CHECK(claimed.levels[0].sourceHeaderOffset==source.read.levels[0].header);
+    size_t legacyBytes=0; for(size_t i=0;i<source.read.count;++i) legacyBytes+=source.read.levels[i].bytes;
+    std::vector<uint8_t> legacy(legacyBytes,0);std::vector<Poseidon::MipmapRead> legacyReads(source.read.count);
+    size_t at=0;for(size_t i=0;i<source.read.count;++i){legacyReads[i]={legacy.data()+at,&source.mips[i],int(i)};at+=source.read.levels[i].bytes;}
+    REQUIRE(source.source->GetMipmapChain(legacyReads.data(),int(legacyReads.size())));
+    CHECK(claimed.blocks==legacy); // Independent ordinary PacLevelMem source reader, not the worker parser oracle.
+
+    CHECK(prep.SnapshotStats().coldTexturePrepared==1);
+    REQUIRE(Wait([&]{return prep.SnapshotStats().conversionReservedBytes==0;}));
+    // A different actual physical archive with matching key/header cannot claim this source.
+    PaaWorkerBank otherBank; ColdPaaSourceFixture other(otherBank);
+    auto inventory=Poseidon::render::DdsPublicationInventory::Create(1);
+    auto payload=Poseidon::render::PrepareColdPaa(source.read,{inventory,0,inventory->Epoch(0)},[]{return false;}); REQUIRE(payload);
+    { Poseidon::render::ColdPaaAdmissionScope scope(payload.get()); Poseidon::PAABlockChain refused;
+      CHECK_FALSE(Poseidon::render::ColdPaaAdmissionScope::Claim(source.read.key,other.read.source,source.read,refused));
+      CHECK_FALSE(refused.valid()); }
+    store.Clear();
+}
+TEST_CASE("Cold chain cancellation keeps actual worker debt until exit and replacement progresses", "[preparer][cold-paa-handoff]")
+{
+    RequireColdPaaCapability(); SourceFile file,replacement; PaaWorkerBank bank; ColdPaaSourceFixture source(bank);
+    PaaPublicationLatch latch;
+    Poseidon::render::DdsPublicationObserver observer{nullptr,&latch,PaaPublicationLatch::Observe};
+    Preparer prep(128ull*1024*1024,nullptr,&observer);
+    struct UnblockBeforeJoin {PaaPublicationLatch& latch;~UnblockBeforeJoin(){latch.Release();}} unblock{latch};
+    prep.Reset(&file.path,1); RequireWorkers(prep); SubmitOriginalColdPaa(prep,source.read);
+    {std::unique_lock lock(latch.mutex);REQUIRE(latch.cv.wait_for(lock,std::chrono::seconds(10),[&]{return latch.entered;}));}
+    REQUIRE(prep.Query(0)==Preparer::State::Converting);
+    const auto debt=prep.SnapshotStats().conversionReservedBytes; REQUIRE(debt>=64ull*1024*1024);
+    SECTION("Same-world DropStale cannot preserve the old chain")
+    {const uint32_t epochs=0;prep.DropStale(&epochs,1,1);CHECK(prep.SnapshotStats().conversionReservedBytes==debt);}
+    SECTION("Reset cancels without depending on store Clear")
+    {const auto generation=Poseidon::render::PreparedTextureStore::Instance().Generation();
+     prep.Reset(&replacement.path,1);CHECK(Poseidon::render::PreparedTextureStore::Instance().Generation()==generation);
+     CHECK(prep.SnapshotStats().conversionReservedBytes==debt);}
+    latch.Release(); REQUIRE(Wait([&]{return prep.SnapshotStats().conversionReservedBytes==0;}));
+    CHECK_FALSE(prep.TakeConverted(0).coldTexture); CHECK(prep.SnapshotStats().coldTextureReadyBytes==0);
+    SubmitOriginalColdPaa(prep,source.read); REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::Converted;}));
+    auto converted=prep.TakeConverted(0);std::unique_ptr<Poseidon::LODShapeWithShadow> shape(converted.shape);
+    REQUIRE(shape);REQUIRE(converted.coldTexture);
+    prep.Reset(&replacement.path,1);
+    {Poseidon::render::ColdPaaAdmissionScope scope(converted.coldTexture.get());Poseidon::PAABlockChain out;
+     CHECK_FALSE(Poseidon::render::ColdPaaAdmissionScope::Claim(source.read.key,source.read.source,source.read,out));}
+}
+TEST_CASE("Cold optional Ready-byte refusal preserves ordinary converted geometry", "[preparer][cold-paa-handoff]")
+{
+    RequireColdPaaCapability();SourceFile file;PaaWorkerBank bank;ColdPaaSourceFixture source(bank);
+    Preparer prep(1);prep.Reset(&file.path,1);RequireWorkers(prep);SubmitOriginalColdPaa(prep,source.read);
+    REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::Converted;}));
+    CHECK(prep.SnapshotStats().coldTextureRefused>0);CHECK(prep.SnapshotStats().coldTextureReadyBytes==0);
+    auto converted=prep.TakeConverted(0);std::unique_ptr<Poseidon::LODShapeWithShadow> shape(converted.shape);
+    REQUIRE(shape);CHECK_FALSE(converted.coldTexture);REQUIRE(Wait([&]{return prep.SnapshotStats().conversionReservedBytes==0;}));
+}
+#endif
+TEST_CASE("Cold texture delivery stays unallocated when its dedicated option is OFF", "[preparer][cold-paa-default]")
+{
+    if(Poseidon::render::ColdPaaHandoffEnabled()) SKIP("Fresh cold handoff OFF process required.");
+    Poseidon::Foundation::CaptureMainThread();Preparer prep;const std::string path="cold-default-unused.p3d";prep.Reset(&path,1);
+    CHECK(prep.SnapshotStats().coldTextureSlotBytes==0);CHECK(prep.SnapshotStats().coldTextureReadyBytes==0);
 }
