@@ -138,4 +138,3 @@ TEST_CASE("LZO matches preserve long forward overlapping recurrence", "[foundati
         }
     }
 }
-
