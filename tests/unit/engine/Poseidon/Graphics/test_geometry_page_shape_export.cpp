@@ -20,7 +20,7 @@ Shape* Triangle(bool quad=false)
     section.beg=s->BeginFaces(); section.end=s->EndFaces(); s->AddSection(section);
     return s;
 }
-ShapeExportSelection Selection()
+ShapeExportSelection PilotSelection()
 {
     ShapeExportSelection s; s.controlledAuthoredRigid=true; s.coarseLevel=0; s.fineLevel=1;
     s.source.sourceSha256[0]=1; s.source.vertexLayout=1; s.source.materialMapping=1;
@@ -31,7 +31,7 @@ TEST_CASE("Geometry page export uses actual engine packing and transactional ref
 {
     Foundation::CaptureMainThread();
     LODShape shape; shape.AddShape(Triangle(),10); shape.AddShape(Triangle(true),1);
-    auto selected=Selection(); ShapeExport dto;
+    auto selected=PilotSelection(); ShapeExport dto;
     REQUIRE(ExportShapePair(shape,selected,dto)==ExportStatus::Exported);
     REQUIRE(dto.coarse.indices==std::vector<uint32_t>{0,1,2});
     REQUIRE(dto.fine.indices==std::vector<uint32_t>{0,1,2,0,2,3});
@@ -55,7 +55,7 @@ TEST_CASE("Geometry page export refuses unsupported sources without loading", "[
 {
     Foundation::CaptureMainThread();
     LODShape shape; shape.AddShape(Triangle(),10); shape.AddShape(Triangle(),1);
-    auto selected=Selection(); ShapeExport dto;
+    auto selected=PilotSelection(); ShapeExport dto;
     SECTION("caller certificate absent") { selected.controlledAuthoredRigid=false; }
     SECTION("animation") { shape.AllowAnimation(); }
     SECTION("conformance") { shape.Level(1)->SetClip(0,ClipLandKeep); }
@@ -67,6 +67,6 @@ TEST_CASE("Geometry page export refuses a worker before reading Shape", "[geomet
 {
     Foundation::CaptureMainThread(); LODShape shape; ShapeExport dto;
     auto status=ExportStatus::Exported;
-    std::thread worker([&] { status=ExportShapePair(shape,Selection(),dto); }); worker.join();
+    std::thread worker([&] { status=ExportShapePair(shape,PilotSelection(),dto); }); worker.join();
     REQUIRE(status==ExportStatus::WrongOwner); REQUIRE(dto.coarse.vertices.empty());
 }
