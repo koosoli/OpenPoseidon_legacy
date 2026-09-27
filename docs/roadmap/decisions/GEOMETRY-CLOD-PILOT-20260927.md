@@ -882,3 +882,54 @@ experimental reruns or capacity promotion are justified by this failed gate.
 | build/controlled-clod-producer-20260927-1422/selected.gcd | 73b0be64295f084e8051d8b9af7163c3b89810a2193956ed16426bb85d21489e |
 | build/controlled-clod-producer-20260927-1422/manifest.json | f4f689394dd80df952d944c393231f4169eb062a9938e88eb1d80de4c1d34f85 |
 | build/controlled-clod-producer-refused-20260927.log | 8f23102b161c0ec63bdad97c6a4209958ea1a4cf8dcfd0a436754de5554e9e65 |
+
+
+## 095cee22 optional acquire attribution checkpoint (27 September,14:38)
+
+The installed historical source was `095cee223225e83209b15470afd454324427464b`
+(ABI16). The five-target build passed18 steps and the focused Rust acquire
+contract passed5 tests without skips. Installed EXE SHA256
+`46F4D591CF640E00D1FBF15DAB32D733E3A704251FD09BED672A34C116A9FC74`,
+DLL SHA256 `BDFCCC08903549DD61D1B0A1552C4F4D9E9D3D2979CE9267D9BDA4D7473D6B6A`.
+The root agent verified private GitHub backup branch
+`codex/streaming-backup-20260927-143332` at this exact source. Later Disk
+fixture source/runner patches are excluded from this installed checkpoint.
+
+Actual `dayz-acquire-split-20260927-disabled-20260927-143822` passed its
+bounded screening with667 captured frames, zero dropped frames, normal
+shutdown14:39:39.746 and process exit0. Baseline/return resident and desired
+counts were19923, budget20000 and required0. Simulation, native DDS, PBO
+textures, warm texture jobs, source bindings, replay, registration quota and
+lazy groups remained OFF; ordinary PBO model preparation remained ON.
+Terrain/call-CPU diagnostics were explicitly enabled, with WarmProfile OFF.
+
+The diagnostic emitted64 acquisition rows and one cap marker. Successful
+completed-call token415 (state1/count12/status0) pairs with surface API CPU
+544.730ms and preamble0.001ms, split total544.731ms; its existing inclusive
+acquire was544.789ms and render576.5ms. Successful token501 instead reports
+submit96.487ms. The preamble includes existing diagnostic drain/locks/logging;
+the surface scope wraps exactly one `get_current_texture` call. Raw surface
+status precedes result handling and does not itself establish completed-frame
+or GPU completion. Pairing uses the existing optional call token; `None`
+adds no clocks, counters or logs. No pure GPU/compositor/shader cause, queue
+completion, FPS gain or performance acceptance follows from these CPU times.
+
+Returned geometry live713883688/capacity1275068416/retired0 bytes and object
+textures2756607636 bytes/2499 records are one route observation, not pressure
+convergence. The prior141421 and142502 stage-family upload gates remain FAILED
+NotExercised, and historical ResourceGrowth remains OPEN. Whole-plan/StageG
+readiness, full ownership/pressure closure and no-regression acceptance remain
+OPEN; defaultReady and performanceAccepted remain false. Offline producer
+and disk-worker CPU checks do not establish an Engine/game disk-file path.
+
+| Artifact | SHA256 |
+| --- | --- |
+| build/build-acquire-cpu-split-20260927.log | 7164c60064dce11e77263941911c90b6e057b6211d2cc6bd79fc60115af2565d |
+| build/test-acquire-cpu-contract-20260927.log | 713d5266bb417b704ecc5befe0507085bf8020761832a75305b8192c40ff5d09 |
+| build/stream-residency/dayz-acquire-split-20260927-disabled-20260927-143822/result.json | 8532a86743b6b096cf22cab67d9854b603dffb2e56c22244e030a7c3bcb3f17b |
+| build/stream-residency/dayz-acquire-split-20260927-disabled-20260927-143822/provenance.json | bd5e834879241334aa4f96013c09ee5a0ce8d733a9e5ad9782e3a92441b423d6 |
+| build/stream-residency/dayz-acquire-split-20260927-disabled-20260927-143822/engine.log | 43070f727432d8f56fc58e007d541e9d1ec2d09e35576b4c2fd174faa58cee27 |
+| build/stream-residency/dayz-acquire-split-20260927-disabled-20260927-143822/harness.jsonl | 65d1e0245cb9440a4bba8b63db4366284c139f95ef6699e7c8c99410de1d5725 |
+| build/stream-residency/dayz-acquire-split-20260927-disabled-20260927-143822/route-frame-ms.json | 33c31616fab92cfcdf801ce095c37298dd7d8953f338045bd35892cc38b60457 |
+| build/stream-residency/dayz-acquire-split-20260927-disabled-20260927-143822/render-call-cpu-proof.json | 8fd5b3c2dc4a6c1f89640c01b052b271bf3cc9019d2498a22284bd3dd5c0f9b9 |
+| build/stream-residency/dayz-acquire-split-20260927-disabled-20260927-143822/returned-settled.png | c36772d1117a2ad453109336722d1ebc9106dffccad2325477693fd65240d1f5 |

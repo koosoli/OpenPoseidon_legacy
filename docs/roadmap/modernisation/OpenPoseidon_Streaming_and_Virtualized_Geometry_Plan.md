@@ -892,3 +892,8 @@ belongs to139's actual operation; later bdc Tools rebuild is not that binary cla
 Bounded cached-stage prefix observes293 slot visits/147 material-cache hits and
 zero accepted stages; prefix counts are not whole-route coverage. No unchanged
 experimental reruns or capacity promotion are justified by this failed gate.
+
+
+### 095cee22 installed acquire attribution checkpoint (27 September,14:38)
+
+095cee22 historical installed checkpoint (27 September,14:38): all-five-target build18stepsPASS; Rust acquire contract5testsPASS/noSKIP. Actual143822 screening PASS667frames/drop0, normal shutdown14:39:39.746 and returned19923/required0. Optional acquire split64rows+cap pairs token415 with successful state1/count12/status0: surface API544.730ms, diagnostic preamble0.001ms, split total544.731ms versus inclusive acquire544.789ms/render576.5ms. Token501 instead has submit96.487ms. These are CPU scopes, not GPU/compositor/shader cause or completion/FPS acceptance. Profile flag1 only; None adds no new clocks/counters/logs. Prior141421/142502 stage-upload NotExercised failures and history ResourceGrowth remain OPEN; defaultReady/performanceAccepted false. Unapplied future Disk Engine/runner fixture excluded; offline disk CPU evidence is not game-file proof. Exact artifact hashes and installed pair in GEOMETRY-CLOD-PILOT-20260927.md.
