@@ -1228,7 +1228,7 @@ int PacLevelMem::LoadPaaDXT(QIStream& in, void* mem, const PacPalette* pal) cons
     // get image size
     long w = fgetiw(in);
     long h = fgetiw(in);
-    if (in.fail()) { Fail("Incomplete compressed mip header"); return -1; }
+    if (in.fail() || in.eof()) { Fail("Incomplete compressed mip header"); return -1; }
     if (w == 0 && h == 0)
     {
         return 1;
@@ -1263,7 +1263,7 @@ int PacLevelMem::LoadPaaDXT(QIStream& in, void* mem, const PacPalette* pal) cons
     // This fresh header must describe the destination metadata used by the
     // caller. In particular LZO's output bound must not use changed dimensions.
     // Keep legacy positive thin/tall heights rather than adding a new ceiling.
-    if (in.fail() || h <= 0 || _w != w || _h != h)
+    if (in.fail() || in.eof() || h <= 0 || _w != w || _h != h)
     {
         Fail("Compressed mip dimensions do not match destination");
         return -1;

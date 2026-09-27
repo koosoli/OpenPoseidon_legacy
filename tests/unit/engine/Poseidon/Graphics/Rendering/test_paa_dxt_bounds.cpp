@@ -38,7 +38,7 @@ TEST_CASE("Complete PAA terminator permits no destination but truncated terminat
     Poseidon::QIStream complete(terminator.data(),int(terminator.size()));
     REQUIRE(level.LoadPaa(complete,nullptr,&palette)==1); CHECK(complete.tellg()==4); CHECK_FALSE(complete.fail());
     Poseidon::QIStream truncated(terminator.data(),2);
-    CHECK(level.LoadPaa(truncated,nullptr,&palette)==-1); CHECK(truncated.fail());
+    CHECK(level.LoadPaa(truncated,nullptr,&palette)==-1); CHECK(truncated.eof()); CHECK_FALSE(truncated.fail());
 }
 
 TEST_CASE("Raw PAA BC mips preserve exact thin and short payloads inside canaries", "[paa-dxt-bounds]")
