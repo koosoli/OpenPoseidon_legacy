@@ -54,6 +54,7 @@ struct PaaLzoReplayReport
         static uint64_t lastHits=0,lastMisses=0;
         static unsigned rows=0;
         std::lock_guard<std::mutex> lock(logMutex);
+        if(rows>128) return;
         const auto stats=cache->Snapshot();
         if(rows && stats.hits==lastHits && stats.misses-lastMisses<32) return;
         lastHits=stats.hits; lastMisses=stats.misses;
