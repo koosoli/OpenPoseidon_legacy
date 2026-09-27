@@ -9966,14 +9966,16 @@ void EngineWgpu::CaptureWarmTextureReads(const LODShapeWithShadow* shape,
     // capture, extra bank lookup or changes to the existing shared visit budget.
     const size_t initialWork = workRemaining, initialReads = reads.size();
     size_t inspected = 0, ineligible = 0, noCurrentSource = 0, sizeOrKeyRefused = 0, lodVisits = 0;
+    size_t materialCacheHits = 0, stageSlotVisits = 0, stageAccepted = 0;
     auto report = [&](bool recorded) {
         static unsigned rows = 0; // owner-only; saturated to bound log/format work
         if (rows < 64)
         {
             ++rows;
-            LOG_INFO(World, "Warm texture capture: path={} inspected={} hotOrIneligible={} noCurrentSource={} sizeOrKeyRefused={} accepted={} lodVisits={} workStart={} workLeft={} workCapped={}",
+            LOG_INFO(World, "Warm texture capture: path={} inspected={} hotOrIneligible={} noCurrentSource={} sizeOrKeyRefused={} accepted={} lodVisits={} workStart={} workLeft={} workCapped={} materialCacheHits={} stageSlotVisits={} stageAccepted={}",
                 recorded ? "recorded" : "sections", inspected, ineligible, noCurrentSource, sizeOrKeyRefused,
-                reads.size() - initialReads, lodVisits, initialWork, workRemaining, workRemaining == 0);
+                reads.size() - initialReads, lodVisits, initialWork, workRemaining, workRemaining == 0,
+                materialCacheHits, stageSlotVisits, stageAccepted);
         }
         else if (rows == 64)
         {
@@ -10006,8 +10008,44 @@ void EngineWgpu::CaptureWarmTextureReads(const LODShapeWithShadow* shape,
         report(true);
         return;
     }
-    // Recreated registrations: primary textures of existing normal LOD sections.
-    // Lazy/unavailable LODs, unresolved material stages and proxies retain fallback.
+    // Recreated registrations lost their recorded texture vector. Inspect only
+    // already-cached normal/specular material slots, never resolve/load a stage.
+    // Every slot and texture visit shares the SAME256 recentre budget; raw names
+    // are bounded before the existing cache lookup creates its temporary key.
+    auto inspectCachedStages = [&](const ShapeSection& section)
+    {
+        if (!_wbank || !section.surfMat || !workRemaining || reads.size() >= 64) return;
+        const char* materialPath = section.surfMat->GetName().Data();
+        if (!materialPath) return;
+        size_t length = 0;
+        while (length < 8192 && materialPath[length]) ++length;
+        if (!length || length == 8192) return;
+        --workRemaining; // bounded material-cache visit, also when absent
+        const auto cached = _materialBindings.find(materialPath);
+        if (cached == _materialBindings.end()) return;
+        ++materialCacheHits;
+        bool normalSeen = false, specularSeen = false;
+        for (const auto& stage : cached->second.slots)
+        {
+            if (!workRemaining || reads.size() >= 64 || (normalSeen && specularSeen)) break;
+            --workRemaining; ++stageSlotVisits;
+            bool* seen = stage.slot == Asset::Material::MaterialSlot::NormalMap ? &normalSeen :
+                stage.slot == Asset::Material::MaterialSlot::SpecularDetail ? &specularSeen : nullptr;
+            if (!seen || *seen) continue;
+            *seen = true; // match the resolver's FIRST Find(slot), even if unsupported
+            const auto& path = stage.texture.path.canonical();
+            if (stage.texture.isProcedural || path.empty() || path.size() > 8191 ||
+                path.find('\0') != std::string::npos || !workRemaining) continue;
+            --workRemaining; // existing no-load texture-bank lookup
+            const int index = _wbank->Find(RStringB(path.c_str()));
+            if (index < 0 || index >= _wbank->NTextures()) continue;
+            const size_t before = reads.size();
+            inspect(dynamic_cast<const TextureWgpu*>(_wbank->GetTexture(index)));
+            stageAccepted += reads.size() - before;
+        }
+    };
+    // Primary textures remain unchanged. Lazy LODs, unknown material/source caches,
+    // procedural stages and proxies retain ordinary synchronous fallback.
     for (int level = 0; level < shape->NLevels() && level < 64 && workRemaining && reads.size() < 64; ++level)
     {
         --workRemaining; ++lodVisits;
@@ -10015,7 +10053,11 @@ void EngineWgpu::CaptureWarmTextureReads(const LODShapeWithShadow* shape,
         const Shape* lod = shape->LevelOpaque(level);
         if (!lod) continue;
         for (int section = 0; section < lod->NSections() && workRemaining && reads.size() < 64; ++section)
-            inspect(dynamic_cast<const TextureWgpu*>(lod->GetSection(section).properties.GetTexture()));
+        {
+            const auto& sourceSection = lod->GetSection(section);
+            inspect(dynamic_cast<const TextureWgpu*>(sourceSection.properties.GetTexture()));
+            inspectCachedStages(sourceSection);
+        }
     }
     report(false);
 }
