@@ -1,4 +1,4 @@
-//! Optional CPU metadata reuse only. Model/LOD births never recycle; no GPU memory claim.
+//! Optional bounded CPU payload reuse only. Model births never recycle; no GPU memory claim.
 use std::collections::VecDeque;
 pub(super) const MAX_OWNERS: usize = 8192;
 const MAX_RANGES: usize = 4096;
@@ -18,13 +18,14 @@ pub(super) fn valid_ownership(
 /// Bounded ON-only history. Capacity or invalid ownership disables reuse for this epoch.
 pub(super) struct SectionSpanPool {
     owners: Vec<Owner>, pending: VecDeque<Span>, free: Vec<Span>, enabled: bool,
-    activation_notice: bool, disabled_notice: bool, reuse_events: u8,
+    activation_notice: bool, disabled_notice: bool, reuse_events: u8, table: &'static str,
 }
 impl SectionSpanPool {
-    pub fn new() -> Self {
+    pub fn new() -> Self { Self::new_table("SECTION") }
+    pub fn new_table(table: &'static str) -> Self {
         Self { owners: Vec::with_capacity(MAX_OWNERS), pending: VecDeque::with_capacity(MAX_RANGES),
                free: Vec::with_capacity(MAX_RANGES), enabled: true,
-               activation_notice: true, disabled_notice: false, reuse_events: 0 }
+               activation_notice: true, disabled_notice: false, reuse_events: 0, table }
     }
     pub fn disable(&mut self) {
         if self.enabled { self.disabled_notice = true; }
@@ -35,12 +36,15 @@ impl SectionSpanPool {
             self.activation_notice = false;
             let known_payload = self.owners.capacity() * std::mem::size_of::<Owner>()
                 + (self.pending.capacity() + self.free.capacity()) * std::mem::size_of::<Span>();
-            return Some(format!("gpu SECTION reuse enabled: ownerCap={} rangeCap={} knownContainerPayloadBytes={} cleanupRows=4096 cleanupRanges=32; optionalCPUmetadata notRSS/notGPUfree",
-                MAX_OWNERS, MAX_RANGES, known_payload));
+            let work_scope = if self.table == "LOD" {
+                "retireCallRows=4096 retireCallRanges=1 noFrameGlobalBudget"
+            } else { "cleanupRows=4096 cleanupRanges=32" };
+            return Some(format!("gpu {} reuse enabled: ownerCap={} rangeCap={} knownContainerPayloadBytes={} {}; optionalCPUmetadata notRSS/notGPUfree",
+                self.table, MAX_OWNERS, MAX_RANGES, known_payload, work_scope));
         }
         if self.disabled_notice {
             self.disabled_notice = false;
-            return Some("gpu SECTION reuse disabled for renderer epoch: invalidOwnership/capacity/parallelTableOrMutableEscape; append fallback".into());
+            return Some(format!("gpu {} reuse disabled for renderer epoch: invalidOwnership/capacity/parallelTableOrMutableEscape; append fallback", self.table));
         }
         None
     }
@@ -49,19 +53,28 @@ impl SectionSpanPool {
         if !self.enabled || span.count == 0 || span.base >= old_len { return None; }
         if self.reuse_events < 64 {
             self.reuse_events += 1;
-            return Some(format!("gpu SECTION reuse committed: modelBirth={} base={} count={} sectionLength={} event={}; CPUtableindices only",
-                model, span.base, span.count, new_len, self.reuse_events));
+            let length_label = if self.table == "SECTION" { "sectionLength" } else { "lodLength" };
+            return Some(format!("gpu {} reuse committed: modelBirth={} base={} count={} {}={} event={}; CPUtableindices only",
+                self.table, model, span.base, span.count, length_label, new_len, self.reuse_events));
         }
         if self.reuse_events == 64 {
             self.reuse_events = 65;
-            return Some("gpu SECTION reuse event log truncated after64commits; reuse policy unchanged".into());
+            return Some(format!("gpu {} reuse event log truncated after64commits; reuse policy unchanged", self.table));
         }
         None
     }
-    /// Caller reserves all three destination arrays before this nonallocating commit.
+    /// Active immutable birth bounds survive sticky disable; a retired birth never reclaims them twice.
+    pub fn birth_span(&self, model: usize) -> Option<Span> {
+        self.owners.get(model).filter(|owner| !owner.retired).map(|owner| owner.span)
+    }
+    pub fn enabled(&self) -> bool { self.enabled }
+    pub fn accepts_birth(&self, model: usize, append: usize, count: usize) -> bool {
+        self.enabled && model == self.owners.len() && model < MAX_OWNERS
+            && append.checked_add(count).is_some_and(|end| end <= u32::MAX as usize)
+    }
+    /// Caller reserves every destination array before this nonallocating commit.
     pub fn register(&mut self, model: usize, append: usize, count: usize, valid: bool) -> Span {
-        if !valid || model != self.owners.len() || model >= MAX_OWNERS
-            || !append.checked_add(count).is_some_and(|end| end <= u32::MAX as usize) { self.disable(); }
+        if !valid || !self.accepts_birth(model, append, count) { self.disable(); }
         let mut span = Span { base: append, count };
         if self.enabled && count != 0 {
             if let Some(i) = self.free.iter().position(|s| s.count >= count) {
@@ -83,7 +96,7 @@ impl SectionSpanPool {
         self.pending.push_back(owner.span);
     }
     /// At most `ranges` completed spans and `rows` cleared rows. Partial spans remain unavailable.
-    /// Callback clears source, resolved and material rows together; publication follows callback.
+    /// Callback completes the owning domain transition; availability publication follows callback.
     pub fn drain(&mut self, mut rows: usize, mut ranges: usize, mut clear: impl FnMut(Span)) -> bool {
         if !self.enabled { return false; }
         let mut changed = false;
@@ -160,6 +173,18 @@ mod tests {
         assert!(pool.note_committed_reuse(2,reused,2,2).is_none());
         pool.disable();assert!(pool.take_notice().unwrap().contains("disabled"));
         pool.disable();assert!(pool.take_notice().is_none());
+    }
+    #[test] fn lod_payload_allocator_cannot_own_permanent_sentinel_and_reuses_only_retired_birth() {
+        let mut pool=SectionSpanPool::new_table("LOD");
+        assert!(pool.take_notice().unwrap().starts_with("gpu LOD reuse enabled:"));
+        let a=pool.register(0,1,2,true);let b=pool.register(1,3,1,true);
+        assert_eq!(a.base,1);assert_eq!(b.base,3);
+        pool.retire(0);assert!(pool.birth_span(0).is_none());let mut cleared=Vec::new();pool.drain(4096,1,|span|cleared.push(span));
+        assert_eq!(cleared,vec![a]);
+        let c=pool.register(2,4,2,true);assert_eq!(c,a);assert_ne!(c.base,0);
+        let line=pool.note_committed_reuse(2,c,4,4).unwrap();
+        assert!(line.starts_with("gpu LOD reuse committed:"));assert!(line.contains("lodLength=4"));
+        pool.retire(0);assert!(!pool.drain(4096,1,|_|panic!("repeat retire")));
     }
     #[test] fn capacity_fallback_is_append_only() {
         let mut pool=SectionSpanPool::new();for i in 0..MAX_OWNERS {pool.register(i,i,1,true);}

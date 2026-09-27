@@ -5,6 +5,7 @@ param(
     [switch]$Evict,
     [switch]$Disk,
     [switch]$SectionReuse,
+    [switch]$LodReuse,
     [ValidateSet('None','Missing','Corrupt')][string]$DiskFault='None',
     [string]$Tools,
     [string]$Label='geometry-page-fixture',
@@ -26,6 +27,7 @@ if (!$env:LOCK_OWNER) {
     if ($Evict) {$argv+='-Evict'}
     if ($Disk) {$argv+='-Disk'}
     if ($SectionReuse) {$argv+='-SectionReuse'}
+    if ($LodReuse) {$argv+='-LodReuse'}
     if ($DiskFault -ne 'None') {$argv+=@('-DiskFault',$DiskFault)}
     if ($Tools) {$argv+=@('-Tools',$Tools)}
     $env:LOCK_OWNER='private resident geometry page fixture'
@@ -71,6 +73,7 @@ class OutroLoose { randomSeed=3; class Intel {}; };
 [IO.File]::WriteAllText((Join-Path $env:POSEIDON_USER_DIR 'graphics.cfg'),"qualityPreset=3;`nmsaaSamples=4;`ndlssMode=0;`nvsync=0;`nfpsCap=60;`n")
 $env:WGR_GEOMETRY_PAGE_FIXTURE=if ($Disabled) {'0'} else {'1'}
 $env:WGR_CULL_SECTION_REUSE=if ($SectionReuse) {'1'} else {'0'}
+$env:WGR_CULL_LOD_REUSE=if ($LodReuse) {'1'} else {'0'}
 foreach ($key in @('WGR_GEOMETRY_OWNER_LEDGER','WGR_SIMULATION_RESIDENCY','WGR_SIMULATION_RESIDENCY_TEST',
     'WGR_SIMULATION_POSITIVE_COLD','WGR_OBJECT_STREAM_GPU_BUDGET','WGR_WATER_CURLING_BREAKER',
     'WGR_OBJECT_STREAM_WARM_TEXTURE_JOBS','WGR_OBJECT_STREAM_WARM_TEXTURES','WGR_OBJECT_STREAM_WARM_PROFILE',
@@ -85,7 +88,7 @@ $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0)
 $listener.Start();$port=$listener.LocalEndpoint.Port;$listener.Stop()
 $log=Join-Path $out 'engine.log'
 @{head=(& git -C $root rev-parse HEAD);installed=(Get-Content (Join-Path $GameDir 'DEPLOYED-FROM.txt'));
-    disabled=[bool]$Disabled;clod=[bool]$Clod;paged=[bool]$Paged;evict=[bool]$Evict;disk=[bool]$Disk;diskFault=$DiskFault;sectionReuse=[bool]$SectionReuse;sectionReuseEnvironment=$env:WGR_CULL_SECTION_REUSE;diskProof=$diskProof;diskFaultProof=$diskFaultProof;scriptSha256=(Get-FileHash $PSCommandPath).Hash;
+    disabled=[bool]$Disabled;clod=[bool]$Clod;paged=[bool]$Paged;evict=[bool]$Evict;disk=[bool]$Disk;diskFault=$DiskFault;sectionReuse=[bool]$SectionReuse;sectionReuseEnvironment=$env:WGR_CULL_SECTION_REUSE;lodReuse=[bool]$LodReuse;lodReuseEnvironment=$env:WGR_CULL_LOD_REUSE;diskProof=$diskProof;diskFaultProof=$diskFaultProof;scriptSha256=(Get-FileHash $PSCommandPath).Hash;
     hashes=@(Get-FileHash (Join-Path $GameDir 'OpenPoseidon.exe'),(Join-Path $GameDir 'wgpu_renderer.dll'))} |
     ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $out 'provenance.json')
 $p=$null;$client=$null
@@ -557,6 +560,17 @@ try {
     $result.sectionReuseProof=@{requested=[bool]$SectionReuse;activationRows=$reuseEnabled.Count;
         committedRows=$reuseCommitted.Count;disabledRows=$reuseDisabled.Count;
         scope='Bounded postcommit CPU table reuse events, not all-pass pixels or physical GPU memory freeing'}
+    $lodEnabled=@(Select-String -LiteralPath $log -SimpleMatch 'gpu LOD reuse enabled:')
+    $lodCommitted=@(Select-String -LiteralPath $log -SimpleMatch 'gpu LOD reuse committed:')
+    $lodDisabled=@(Select-String -LiteralPath $log -SimpleMatch 'gpu LOD reuse disabled for renderer epoch:')
+    if ($LodReuse -and ($lodEnabled.Count -ne 1 -or $lodDisabled.Count -ne 0 -or
+        ($Evict -and $DiskFault -eq 'None' -and $lodCommitted.Count -eq 0))) {
+        throw 'LOD reuse pilot activation/actual commit proof missing or disabled'
+    }
+    if (!$LodReuse -and ($lodEnabled.Count -or $lodCommitted.Count -or $lodDisabled.Count)) {throw 'LOD reuse activated in OFF control'}
+    $result.lodReuseProof=@{requested=[bool]$LodReuse;activationRows=$lodEnabled.Count;
+        committedRows=$lodCommitted.Count;disabledRows=$lodDisabled.Count;
+        scope='Bounded postcommit LOD index reuse with retained model tombstones, not all-pass pixels or GPU memory freeing'}
     $result.passed=$true;$result.cleanExit=$true;if ($DiskFault -eq 'None') {$result.scope='Private original authored resident geometry, record lifetime and fixed-instance switching; explicit authored/selected-CLOD RAM or external controlled disk worker paging only when selected; no generalized asset/DAG paging, all-pass, device-free or performance acceptance'}
     $result | ConvertTo-Json -Depth 7 | Set-Content -LiteralPath (Join-Path $out 'result.json')
     Write-Output "Geometry page fixture evidence: $out"

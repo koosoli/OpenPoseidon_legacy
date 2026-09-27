@@ -15,6 +15,7 @@ param(
     [switch]$RequireWarmMaterialStageUpload,
     [switch]$LegacySectionRefresh,
     [switch]$SectionReuse,
+    [switch]$LodReuse,
     [string]$Label = 'dayz-streaming-latency',
     [string]$GameDir = 'D:\SteamLibrary\steamapps\common\ARMA Cold War Assault'
 )
@@ -44,6 +45,7 @@ if (!$env:LOCK_OWNER) {
         if ($RequireWarmMaterialStageUpload) { $argv += '-RequireWarmMaterialStageUpload' }
         if ($LegacySectionRefresh) { $argv += '-LegacySectionRefresh' }
         if ($SectionReuse) { $argv += '-SectionReuse' }
+        if ($LodReuse) { $argv += '-LodReuse' }
         & 'C:\Program Files\Git\bin\bash.exe' @argv
         if ($LASTEXITCODE) { throw "Latency screening exited $LASTEXITCODE" }
     } finally { Remove-Item Env:LOCK_OWNER }
@@ -85,6 +87,7 @@ $environment = @{
     WGR_TEXTURE_STREAM_STATS = '0'; WGR_RENDER_CALL_CPU_TIMINGS = '0'
     WGR_CULL_SECTION_REFRESH = $(if ($LegacySectionRefresh) { '0' } else { '1' })
     WGR_CULL_SECTION_REUSE = $(if ($SectionReuse) { '1' } else { '0' })
+    WGR_CULL_LOD_REUSE = $(if ($LodReuse) { '1' } else { '0' })
     WGR_WATER_BACKEND = '0'
 }
 if ($TerrainPageTimings) {

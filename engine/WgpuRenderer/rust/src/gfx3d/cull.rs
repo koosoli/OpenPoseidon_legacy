@@ -528,6 +528,7 @@ pub struct CullState {
     models: Vec<ModelGpu>,
     lods: Vec<LodGpu>,
     section_spans: Option<Box<super::section_span_pool::SectionSpanPool>>,
+    lod_spans: Option<Box<super::section_span_pool::SectionSpanPool>>,
     sections: Vec<SectionGpu>,
     // Per-section shading, parallel to `sections` (same global index). Draw-side only —
     // not a compute input; bound in the GPU-driven draw pass (3b-2b).
@@ -665,6 +666,24 @@ fn retire_model_content(models: &[ModelGpu], lods: &mut [LodGpu], id: u32,
     instances.invalidate_retained_content();
     uploads.mark(TableDomain::Lod);
     true
+}
+
+// Optional retirement: index0 is an immutable empty sentinel. Clear bounded old rows,
+// then redirect the immutable model birth before the allocator can expose any old LOD index.
+fn retire_model_to_sentinel(models: &mut [ModelGpu], lods: &mut [LodGpu], id: u32,
+    birth_span: Option<super::section_span_pool::Span>, instances: &mut InstanceTable, uploads: &mut TableUploads,
+) -> (bool, Option<super::section_span_pool::Span>) {
+    let Some(model) = models.get_mut(id as usize) else { return (false, None); };
+    if model.lod_base == 0 && model.lod_count == 0 { return (false, None); }
+    let span = super::section_span_pool::Span { base: model.lod_base as usize, count: model.lod_count as usize };
+    // Do not clear/release a current range unless it is the immutable captured birth range.
+    let valid = birth_span == Some(span) && span.base != 0 && span.count <= 4096 && span.base.checked_add(span.count)
+        .is_some_and(|end| end <= lods.len());
+    if valid { for lod in &mut lods[span.base..span.base + span.count] { lod.section_count = 0; } }
+    model.lod_base = 0; model.lod_count = 0; model._pad = 0;
+    instances.invalidate_retained_content();
+    uploads.mark(TableDomain::Model); uploads.mark(TableDomain::Lod);
+    (true, valid.then_some(span))
 }
 
 const STATS_RING_SLOTS: usize = 3;
@@ -898,13 +917,16 @@ impl CullState {
             })
             .collect();
 
+        let lod_reuse = std::env::var("WGR_CULL_LOD_REUSE").ok().as_deref() == Some("1");
         Self {
             count_pipeline,
             emit_pipeline,
             scatter_pipeline,
             layout,
             models: Vec::new(),
-            lods: Vec::new(),
+            // Index0 is permanent and never owned/free-listed; count0 still dereferences it.
+            lods: if lod_reuse { vec![LodGpu::zeroed()] } else { Vec::new() },
+            lod_spans: lod_reuse.then(|| Box::new(super::section_span_pool::SectionSpanPool::new_table("LOD"))),
             section_spans: (std::env::var("WGR_CULL_SECTION_REUSE").ok().as_deref() == Some("1"))
                 .then(|| Box::new(super::section_span_pool::SectionSpanPool::new())),
             sections: Vec::new(),
@@ -1107,25 +1129,39 @@ impl CullState {
         self.lods.reserve(lods.len()); self.models.reserve(1);
         let append = self.sections.len();
         // OFF performs no ownership scan or freelist work.
-        let valid = self.section_spans.is_none() || section_ownership_valid(lods, sections.len(), materials.len());
+        let valid = (self.section_spans.is_none() && self.lod_spans.is_none())
+            || section_ownership_valid(lods, sections.len(), materials.len());
+        let model_birth = self.models.len();
+        // Validate both optional domains before taking either range; failure is sticky/global.
+        if !valid || self.section_spans.as_ref().is_some_and(|p| !p.accepts_birth(model_birth, append, sections.len()))
+            || self.lod_spans.as_ref().is_some_and(|p| !p.accepts_birth(model_birth, self.lods.len(), lods.len())) {
+            self.disable_section_reuse();
+        }
+        let lod_append = self.lods.len();
+        let lod_span = match &mut self.lod_spans {
+            Some(pool) => pool.register(model_birth, lod_append, lods.len(), valid),
+            None => super::section_span_pool::Span { base: lod_append, count: lods.len() },
+        };
         let span = match &mut self.section_spans {
             Some(pool) => pool.register(self.models.len(), append, sections.len(), valid),
             None => super::section_span_pool::Span { base: append, count: sections.len() },
         };
         let section_offset = span.base as u32;
-        let lod_offset = self.lods.len() as u32;
+        let lod_offset = lod_span.base as u32;
         super::section_span_pool::write_span(&mut self.sections, span, sections);
         // Preserve ordinary malformed-material append behavior when reuse was disabled.
         if span.base == append { self.section_materials.extend_from_slice(materials); }
         else { super::section_span_pool::write_span(&mut self.section_materials, span, materials); }
-        for lod in lods {
+        for (i, lod) in lods.iter().enumerate() {
             let mut l = *lod;
             l.section_base += section_offset;
-            self.lods.push(l);
+            if lod_span.base == lod_append { self.lods.push(l); }
+            else { self.lods[lod_span.base + i] = l; }
         }
         let model_id = self.models.len() as u32;
         self.models.push(ModelGpu {
-            lod_base: lod_offset,
+            // ON empty inputs are safe births, not aliases of a future append at vector end.
+            lod_base: if self.lod_spans.is_some() && lods.is_empty() { 0 } else { lod_offset },
             lod_count: lods.len() as u32,
             bounding_sphere,
             _pad: 0,
@@ -1140,16 +1176,42 @@ impl CullState {
         (model_id, span)
     }
 
-    // Keep append-only IDs valid for stale instance references, but make every
-    // owned LOD empty. Do not shift tables or turn zero LOD count into an invalid
-    // shader lod_base lookup. The mesh ranges have their own retirement fence.
+    // Keep append-only model IDs valid for stale instances. OFF keeps zero-count
+    // historical LOD rows; ON redirects to the permanent sentinel before payload reuse.
+    // The mesh ranges have their own retirement fence.
     pub fn retire_model(&mut self, id: u32) {
         if let Some(feedback) = &self.lod_feedback { feedback.borrow_mut().retire(id); }
         if let Some(pool) = &mut self.section_spans { pool.retire(id as usize); }
-        retire_model_content(&self.models, &mut self.lods, id,
-                             &mut self.instances, &mut self.table_uploads);
+        if self.lod_spans.is_some() {
+            let birth_span = self.lod_spans.as_ref().unwrap().birth_span(id as usize);
+            let (changed, old_span) = retire_model_to_sentinel(&mut self.models, &mut self.lods,
+                id, birth_span, &mut self.instances, &mut self.table_uploads);
+            if changed {
+                if old_span.is_none() { self.disable_section_reuse(); }
+                let pool = self.lod_spans.as_mut().unwrap();
+                // Old model is already a permanent tombstone, before its rows become available.
+                pool.retire(id as usize);
+                pool.drain(4096, 1, |_| {});
+                if !pool.enabled() { self.disable_section_reuse(); }
+            }
+        } else {
+            retire_model_content(&self.models, &mut self.lods, id,
+                                 &mut self.instances, &mut self.table_uploads);
+        }
     }
 
+    pub(super) fn take_lod_reuse_notice(&mut self) -> Option<String> {
+        self.lod_spans.as_mut().and_then(|pool| pool.take_notice())
+    }
+    pub(super) fn lod_reuse_length(&self) -> Option<usize> {
+        self.lod_spans.as_ref().map(|_| self.lods.len())
+    }
+    pub(super) fn note_committed_lod_reuse(&mut self, model: u32, old_len: Option<usize>) -> Option<String> {
+        let old_len = old_len?; let birth = self.models.get(model as usize)?;
+        let span = super::section_span_pool::Span { base: birth.lod_base as usize, count: birth.lod_count as usize };
+        let new_len = self.lods.len();
+        self.lod_spans.as_mut().and_then(|pool| pool.note_committed_reuse(model, span, old_len, new_len))
+    }
     pub(super) fn take_section_reuse_notice(&mut self) -> Option<String> {
         self.section_spans.as_mut().and_then(|pool| pool.take_notice())
     }
@@ -1161,9 +1223,10 @@ impl CullState {
     }
     pub(super) fn disable_section_reuse(&mut self) {
         if let Some(pool) = &mut self.section_spans { pool.disable(); }
+        if let Some(pool) = &mut self.lod_spans { pool.disable(); }
     }
     pub(super) fn validate_source_table_length(&mut self, source_len: usize) {
-        if self.section_spans.is_some() && self.sections.len() != source_len {
+        if (self.section_spans.is_some() || self.lod_spans.is_some()) && self.sections.len() != source_len {
             self.disable_section_reuse();
         }
     }
@@ -1178,6 +1241,7 @@ impl CullState {
             materials[span.base..span.base + span.count].fill(SectionMaterialGpu::zeroed());
         });
         if changed { self.table_uploads.mark(TableDomain::Section); self.table_uploads.mark(TableDomain::Material); }
+        if self.section_spans.as_ref().is_some_and(|pool| !pool.enabled()) { self.disable_section_reuse(); }
         changed
     }
 
@@ -4622,6 +4686,191 @@ pub(crate) mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
+    fn reused_lod_span_sentinel_with_stale_and_empty_models_all_three_views() {
+        use super::super::{Mesh, MeshKey, GpuSectionSrc, resolve_registered_section};
+        use super::super::pool::GeometryPool;
+        use slotmap::{Key, SlotMap};
+        let Some((device, queue)) = headless() else {
+            eprintln!("SKIP reused_lod_three_views: no adapter/device"); return;
+        };
+        let mut pool = GeometryPool::new(&device);
+        let mut meshes: SlotMap<MeshKey, Mesh> = SlotMap::with_key();
+        let mut verts = [crate::ffi::WgrMeshVertex::zeroed(); 3];
+        verts[0].pos = Vec3::new(-0.5, 0.0, 0.0);
+        verts[1].pos = Vec3::new(0.5, 0.0, 0.0);
+        verts[2].pos = Vec3::new(0.0, 0.5, 0.0);
+        let insert = |pool: &mut GeometryPool, meshes: &mut SlotMap<MeshKey, Mesh>| {
+            let alloc = pool.alloc(&device, &queue, &verts, &[0, 1, 2]).unwrap();
+            meshes.insert(Mesh { alloc, index_count: 3, vert_count: 3, skin: None,
+                                 aabb_min: [-0.5, 0.0, 0.0], aabb_max: [0.5, 0.5, 0.0] })
+        };
+        let a_mesh = insert(&mut pool, &mut meshes);
+        let b_mesh = insert(&mut pool, &mut meshes);
+        let source = |key: MeshKey| GpuSectionSrc { mesh: key.data().as_ffi(),
+                                                  index_begin: 0, index_count: 3, variant: 0 };
+        let old_source = source(a_mesh); // immutable literal survives clearing the source table
+        let mut sources = vec![old_source, source(b_mesh)];
+        let mut cull = CullState::new(&device);
+        cull.section_spans = None; // LOD flag is independent of SECTION reuse.
+        cull.lod_spans = Some(Box::new(super::super::section_span_pool::SectionSpanPool::new_table("LOD")));
+        if cull.lods.is_empty() { cull.lods.push(LodGpu::zeroed()); }
+        cull.variant_capacity = 16; // bounded test output; production capacity is unchanged
+        let lod = LodGpu { resolution: 1.0, section_base: 0, section_count: 1, is_decal: 0 };
+        let mut mat_a = SectionMaterialGpu::zeroed(); mat_a.emissive = [1.0, 0.1, 0.2, 1.0];
+        let mut mat_b = SectionMaterialGpu::zeroed(); mat_b.emissive = [2.0, 0.3, 0.4, 1.0];
+        let mut mat_c = SectionMaterialGpu::zeroed(); mat_c.emissive = [3.0, 0.5, 0.6, 1.0];
+        let a = cull.register_model(1.0, &[lod], &[resolve_registered_section(&meshes, &sources[0])], &[mat_a]);
+        let b = cull.register_model(1.0, &[lod], &[resolve_registered_section(&meshes, &sources[1])], &[mat_b]);
+        assert_eq!(bytemuck::bytes_of(&cull.section_materials[0]), bytemuck::bytes_of(&mat_a));
+        let instance = |model| InstanceGpu { world: Mat4::IDENTITY.to_cols_array(), center: [0.0, 0.0, 0.0, 1.0],
+            model, flags: 0, cull_radius: 0, _pad: 0, conform0: [0.0; 4], conform1: [0.0; 4], conform2: [0.0; 4] };
+        let a_instance = cull.instance_add(instance(a));
+        cull.instance_add(instance(b));
+        let empty = cull.register_model(1.0, &[], &[], &[]);
+        cull.instance_add(instance(empty));
+        assert_eq!(cull.models[empty as usize].lod_base, 0);
+        assert_eq!(cull.models[empty as usize].lod_count, 0);
+        let old_a_lod_base = cull.models[a as usize].lod_base;
+        let b_lod_before = bytemuck::bytes_of(&cull.lods[cull.models[b as usize].lod_base as usize]).to_vec();
+        // The same retirement API also isolates relative diagnostic identity from reused payload.
+        let mut feedback=super::super::lod_feedback::LodFeedback::new(&device);
+        feedback.start(101,1,&[crate::ffi::WgrLodDemandRow {
+            model_id:a,lod_count:1,lod_mask:1,state:0,..Default::default()}]);
+        cull.lod_feedback=Some(RefCell::new(Box::new(feedback)));
+        set_model_feedback_tag(&mut cull.models,&mut cull.table_uploads,a,1);
+        let eye = Vec3::new(0.0, 0.0, 10.0);
+        let mut view = Mat4::look_at_rh(eye, Vec3::ZERO, Vec3::Y);
+        view.w_axis = Vec4::new(0.0, 0.0, 0.0, 1.0);
+        let proj = Mat4::perspective_rh(60f32.to_radians(), 1.0, 0.1, 1000.0);
+        let mut main = CullParamsGpu::zeroed();
+        main.frustum = frustum_planes(proj * view);
+        main.cam_pos = [eye.x, eye.y, eye.z, 0.0]; main.objects_z2 = 1.0e6;
+        main.lod_scale = 1.0; main.lod_inv_width = 1.0; main.pixel_limit = 0.0;
+        cull.set_params(main);
+        let inputs = CullInputs { objects_z: 1000.0, lod_scale: 1.0, lod_inv_width: 1.0, pixel_limit: 0.0 };
+        cull.set_shadow_view_count(&device, 1);
+        cull.set_shadow_params(0, params_from_shadow_cascade(proj * view, eye, inputs));
+        cull.set_hiz(Some(const_hiz(&device, &queue, 64, 64, 0.0)));
+        cull.set_color_params(params_from_camera_occlude(view, proj, eye, inputs, [64.0, 64.0], 7, true));
+        let run_and_check = |cull: &mut CullState, expected: &[(u32, SectionGpu)]| {
+            assert_eq!(bytemuck::bytes_of(&cull.section_materials[1]), bytemuck::bytes_of(&mat_b),
+                       "live B material is unchanged through all coherent updates");
+            cull.prepare(&device, &queue);
+            // Production storage upload is read through a compute copy: the table itself
+            // intentionally has no COPY_SRC usage. Compare the full material table exactly.
+            let uploaded = read_table_storage_words(&device, &queue,
+                cull.section_mat_buf.buf.as_ref().unwrap(),
+                (std::mem::size_of_val(cull.section_materials.as_slice()) / 4) as u64);
+            let expected_materials: &[u32] = bytemuck::cast_slice(cull.section_materials.as_slice());
+            assert_eq!(uploaded.as_slice(), expected_materials, "actual GPU material row parity");
+            let stride = std::mem::size_of::<SectionMaterialGpu>() / 4;
+            let expected_b: &[u32] = bytemuck::cast_slice(std::slice::from_ref(&mat_b));
+            assert_eq!(&uploaded[stride..2 * stride], expected_b, "actual GPU live B sentinel survives");
+            assert_eq!(bytemuck::bytes_of(&cull.lods[0]), bytemuck::bytes_of(&LodGpu::zeroed()),
+                       "permanent sentinel never belongs to a recycled range");
+            for (buffer, words, expected) in [
+                (cull.model_buf.buf.as_ref().unwrap(), (std::mem::size_of_val(cull.models.as_slice()) / 4) as u64,
+                    bytemuck::cast_slice::<ModelGpu,u32>(cull.models.as_slice())),
+                (cull.lod_buf.buf.as_ref().unwrap(), (std::mem::size_of_val(cull.lods.as_slice()) / 4) as u64,
+                    bytemuck::cast_slice::<LodGpu,u32>(cull.lods.as_slice()))] {
+                assert_eq!(read_table_storage_words(&device, &queue, buffer, words).as_slice(), expected,
+                    "actual GPU model+LOD publication matches same owner cut");
+            }
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+            cull.dispatch(&mut encoder); cull.dispatch_shadow(&mut encoder, 0); cull.dispatch_color(&mut encoder);
+            queue.submit([encoder.finish()]);
+            let views = [("main", cull.out_args().unwrap(), cull.out_records().unwrap()),
+                         ("shadow", cull.shadow_out_args(0).unwrap(), cull.shadow_out_records(0).unwrap()),
+                         ("color", cull.color_out_args().unwrap(), cull.color_out_records().unwrap())];
+            let slots = CULL_VARIANT_COUNT as u64 * cull.variant_capacity() as u64;
+            for (label, args, records) in views {
+                let args = read_u32s(&device, &queue, args, slots * super::ARG_WORDS as u64);
+                let records = read_u32s(&device, &queue, records, slots * 2);
+                let mut seen = Vec::new();
+                for draw in args.chunks_exact(super::ARG_WORDS as usize).filter(|row| row[1] != 0) {
+                    assert_eq!(draw[1], 1, "{label}: one test instance per model section");
+                    let record = draw[4] as usize;
+                    let instance_slot = records[record * 2] as usize;
+                    let model = cull.instances.as_slice()[instance_slot].model;
+                    let (_, section) = expected.iter().find(|(id, _)| *id == model)
+                        .unwrap_or_else(|| panic!("{label}: unexpected stale model {model}"));
+                    assert_eq!(draw[0], section.index_count, "{label}: index count");
+                    assert_eq!(draw[2], section.first_index, "{label}: current pool index address");
+                    assert_eq!(draw[3], section.base_vertex, "{label}: current pool vertex address");
+                    let global_section = records[record * 2 + 1] as usize;
+                    assert!(cull.sections[global_section] == *section, "{label}: exact current section row");
+                    seen.push(model);
+                }
+                seen.sort_unstable();
+                let mut expected_models: Vec<_> = expected.iter().map(|(id, _)| *id).collect();
+                expected_models.sort_unstable();
+                assert_eq!(seen, expected_models, "{label}: each live model draws once and stale A never draws");
+            }
+        };
+        let a_section = resolve_registered_section(&meshes, &sources[0]);
+        let b_section = resolve_registered_section(&meshes, &sources[1]);
+        run_and_check(&mut cull, &[(a, a_section), (b, b_section)]);
+        let epoch = cull.instance_epoch();
+        cull.retire_model(a);
+        assert_eq!(cull.instance_epoch(), epoch.wrapping_add(1),
+                   "retained A retirement must invalidate cached scene content without removing A");
+        cull.retire_model(a);
+        cull.retire_model(u32::MAX);
+        assert_eq!(cull.instance_epoch(), epoch.wrapping_add(1), "repeat/unknown retire is inert");
+        assert!(!cull.clear_retired_sections(|_|panic!("SECTION prototype disabled")));
+        assert_eq!(cull.models[a as usize].lod_base, 0);
+        assert_eq!(cull.models[a as usize].lod_count, 0);
+        assert!(cull.allocation_lods(a).unwrap().is_empty());
+        let feedback=cull.lod_demand_report(101).unwrap();
+        assert_eq!(feedback.rows[0].model_id,a);assert_eq!(feedback.rows[0].state,2);
+        assert_eq!(feedback.rows[0].lod_mask,0);assert_eq!(cull.models[a as usize]._pad,0);
+        let old = meshes.remove(a_mesh).unwrap();
+        pool.free(&old.alloc, old.vert_count, old.index_count);
+        let resolved: Vec<_> = sources.iter().map(|s| resolve_registered_section(&meshes, s)).collect();
+        assert_eq!(resolved[0].index_count, 0);
+        cull.set_sections(&resolved);
+        run_and_check(&mut cull, &[(b, b_section)]);
+        // Keep the stale A instance throughout; normal instance cleanup is not the reason it disappears.
+        assert_eq!(cull.instances.as_slice()[raw_slot(a_instance) as usize].model, a);
+        let pool_generation = pool.generation();
+        let c_mesh = insert(&mut pool, &mut meshes);
+        assert_eq!(a_mesh.data().as_ffi() as u32, c_mesh.data().as_ffi() as u32, "actual SlotMap slot reuse");
+        assert_ne!(a_mesh.data().as_ffi(), c_mesh.data().as_ffi(), "different full mesh generation");
+        assert_eq!(pool.generation(), pool_generation, "recreation must be safe without pool relocation");
+        assert_eq!(old_source.mesh, a_mesh.data().as_ffi());
+        assert_ne!(old_source.mesh, c_mesh.data().as_ffi());
+        assert_eq!(resolve_registered_section(&meshes, &old_source).index_count, 0,
+                   "literal old full-generation source must not bind recreated C at the same slot/address");
+        let c_source = source(c_mesh);
+        let c_section = resolve_registered_section(&meshes, &c_source);
+        let (c, span) = cull.register_model_span(1.0, &[lod], &[c_section], &[mat_c]);
+        assert_eq!(span.base, 2, "SECTION remains append-only");
+        assert_eq!(cull.models[c as usize].lod_base, old_a_lod_base, "actual reuse of A LOD payload");
+        assert_eq!(cull.models[a as usize].lod_base, 0, "old A remains permanent sentinel after C overwrite");
+        assert_eq!(cull.models[a as usize].lod_count, 0);
+        assert_eq!(cull.models[c as usize]._pad,0,"new model does not inherit A feedback target");
+        assert_eq!(cull.lod_demand_report(101).unwrap().rows[0].model_id,a);
+        super::super::section_span_pool::write_span(&mut sources, span, &[c_source]);
+        assert_eq!(sources.len(), 3); assert_eq!(cull.sections.len(), 3);
+        assert_eq!(bytemuck::bytes_of(&cull.lods[cull.models[b as usize].lod_base as usize]), b_lod_before.as_slice());
+        assert!(cull.sections[1] == b_section, "live B retained its exact row");
+        assert_eq!(bytemuck::bytes_of(&cull.section_materials[2]), bytemuck::bytes_of(&mat_c));
+        assert_eq!(bytemuck::bytes_of(&cull.section_materials[1]), bytemuck::bytes_of(&mat_b));
+        assert!(a != b && b != c && a != c, "stable model IDs cannot alias retired A");
+        cull.instance_add(instance(c));
+        let resolved: Vec<_> = sources.iter().map(|s| resolve_registered_section(&meshes, s)).collect();
+        cull.set_sections(&resolved);
+        let handles=[old_source.mesh,b_mesh.data().as_ffi(),c_mesh.data().as_ffi()];
+        let (rows,summary)=super::super::registered_mesh_refs::collect(&handles,&cull.models,&cull.lods,
+            &sources, |src|src.mesh, |handle|handle!=old_source.mesh, super::super::registered_mesh_refs::LIMITS);
+        assert_eq!(summary.complete,1);assert_eq!(rows[0].section_occurrences,0);
+        assert_eq!(rows[1].distinct_model_lods,1);assert_eq!(rows[2].distinct_model_lods,1);
+        run_and_check(&mut cull, &[(b, b_section), (c, c_section)]);
+        eprintln!("PASS reused_lod_three_views: actual pool/full-generation resolver and main/shadow/color GPU readback preserve live B/C with stale A");
+    }
+
+    #[test]
     fn registered_section_ownership_overlap_unused_rows_and_global_alias_disable() {
         let lod = |base, count| LodGpu { resolution: 1.0, section_base: base, section_count: count, is_decal: 0 };
         assert!(section_ownership_valid(&[lod(0,1),lod(0,1)],2,2), "overlap within one birth and unused submitted row are safe");
@@ -4655,6 +4904,83 @@ pub(crate) mod tests {
         let (_,appended)=cull.register_model_span(1.0,&[lod(0,1)],&rows[..1],&materials[..1]);
         assert_eq!(appended.base,1);
         eprintln!("PASS section_ownership_registration: actual LodGpu/register/retire gates and parallel source ownership");
+    }
+
+    #[test]
+    fn lod_reuse_invalid_section_owner_sticky_disables_and_preserves_sentinel() {
+        let Some((device,_queue))=headless() else { eprintln!("SKIP lod_ownership_registration: no adapter/device");return; };
+        let mut cull=CullState::new(&device);cull.section_spans=None;
+        cull.lod_spans=Some(Box::new(super::super::section_span_pool::SectionSpanPool::new_table("LOD")));
+        if cull.lods.is_empty() {cull.lods.push(LodGpu::zeroed());}
+        let lod=|base|LodGpu{resolution:1.0,section_base:base,section_count:1,is_decal:0};
+        let row=[SectionGpu::zeroed()];let material=[SectionMaterialGpu::zeroed()];
+        let a=cull.register_model(1.0,&[lod(0)],&row,&material);
+        let old_base=cull.models[a as usize].lod_base;cull.retire_model(a);
+        // Even with a free old A range, new admitted escaping SECTION LOD disables all reuse.
+        let invalid=cull.register_model(1.0,&[lod(1)],&row,&material);
+        assert_ne!(cull.models[invalid as usize].lod_base,old_base);
+        let b=cull.register_model(1.0,&[lod(0)],&row,&material);
+        assert_ne!(cull.models[b as usize].lod_base,old_base);
+        assert_eq!(cull.models[a as usize].lod_base,0);assert_eq!(cull.models[a as usize].lod_count,0);
+        assert_eq!(bytemuck::bytes_of(&cull.lods[0]),bytemuck::bytes_of(&LodGpu::zeroed()));
+        assert!(!cull.lod_spans.as_ref().unwrap().enabled());
+        let mut cull=CullState::new(&device);cull.section_spans=None;
+        cull.lod_spans=Some(Box::new(super::super::section_span_pool::SectionSpanPool::new_table("LOD")));
+        if cull.lods.is_empty() {cull.lods.push(LodGpu::zeroed());}
+        let a=cull.register_model(1.0,&[lod(0)],&row,&material);
+        let b=cull.register_model(1.0,&[lod(0)],&row,&material);
+        let b_base=cull.models[b as usize].lod_base;
+        let b_bytes=bytemuck::bytes_of(&cull.lods[b_base as usize]).to_vec();
+        // Private malformed mutation simulates any future mutable escape: no foreign zero/free.
+        cull.models[a as usize].lod_base=b_base;
+        cull.retire_model(a);
+        assert_eq!(bytemuck::bytes_of(&cull.lods[b_base as usize]),b_bytes.as_slice());
+        assert_eq!(cull.models[a as usize].lod_base,0);assert_eq!(cull.models[a as usize].lod_count,0);
+        assert!(!cull.lod_spans.as_ref().unwrap().enabled());
+        let c=cull.register_model(1.0,&[lod(0)],&row,&material);
+        assert!(cull.models[c as usize].lod_base>b_base,"foreign alias disables reuse rather than clearing B");
+        eprintln!("PASS lod_ownership_registration: invalid admitted SECTION and foreign LOD alias disable reuse with B/tombstone preserved");
+    }
+
+    #[test]
+    fn lod_sentinel_retirement_transaction_marks_both_domains_and_never_realiases_old_birth() {
+        let lod=|count|LodGpu {resolution:1.0,section_base:0,section_count:count,is_decal:0};
+        let mut lods=[LodGpu::zeroed(),lod(1),lod(2),lod(3)];
+        let mut models=[ModelGpu{lod_base:1,lod_count:2,bounding_sphere:1.0,_pad:7},
+                        ModelGpu{lod_base:3,lod_count:1,bounding_sphere:2.0,_pad:0}];
+        let before_b=bytemuck::bytes_of(&models[1]).to_vec();let before_lod_b=bytemuck::bytes_of(&lods[3]).to_vec();
+        let mut instances=InstanceTable::default();let mut uploads=TableUploads::NONE;let epoch=instances.epoch;
+        let birth=Some(super::super::section_span_pool::Span{base:1,count:2});
+        let (changed,span)=retire_model_to_sentinel(&mut models,&mut lods,0,birth,&mut instances,&mut uploads);
+        assert!(changed);assert_eq!(span.unwrap(),super::super::section_span_pool::Span{base:1,count:2});
+        assert_eq!(models[0].lod_base,0);assert_eq!(models[0].lod_count,0);assert_eq!(models[0]._pad,0);
+        assert_eq!(instances.epoch,epoch.wrapping_add(1));
+        assert_eq!(uploads,TableUploads(TableDomain::Model.bit()|TableDomain::Lod.bit()));
+        assert_eq!(bytemuck::bytes_of(&models[1]),before_b.as_slice());assert_eq!(bytemuck::bytes_of(&lods[3]),before_lod_b.as_slice());
+        lods[1]=lod(99);lods[2]=lod(100); // C overwrites freed payload; A still sees permanent empty index0.
+        assert_eq!(lods[models[0].lod_base as usize].section_count,0);
+        uploads=TableUploads::NONE;
+        for id in [0,u32::MAX] {assert!(!retire_model_to_sentinel(&mut models,&mut lods,id,birth,&mut instances,&mut uploads).0);}
+        assert_eq!(uploads,TableUploads::NONE);assert_eq!(instances.epoch,epoch.wrapping_add(1));
+    }
+
+    #[test]
+    fn lod_sentinel_foreign_or_missing_birth_witness_never_clears_another_owner() {
+        let mut pool=super::super::section_span_pool::SectionSpanPool::new_table("LOD");
+        pool.register(0,1,1,true);pool.register(1,2,1,true);
+        let lod=LodGpu{resolution:1.0,section_base:0,section_count:1,is_decal:0};
+        for witness in [pool.birth_span(0),None] {
+            let mut lods=[LodGpu::zeroed(),lod,lod];
+            let mut models=[ModelGpu{lod_base:2,lod_count:1,bounding_sphere:1.0,_pad:0},
+                            ModelGpu{lod_base:2,lod_count:1,bounding_sphere:2.0,_pad:0}];
+            let before=bytemuck::cast_slice::<LodGpu,u8>(&lods).to_vec();
+            let mut instances=InstanceTable::default();let mut uploads=TableUploads::NONE;
+            let (changed,freed)=retire_model_to_sentinel(&mut models,&mut lods,0,witness,&mut instances,&mut uploads);
+            assert!(changed);assert!(freed.is_none());
+            assert_eq!(bytemuck::cast_slice::<LodGpu,u8>(&lods),before.as_slice());
+            assert_eq!(models[0].lod_base,0);assert_eq!(models[0].lod_count,0);
+            assert_eq!(models[1].lod_base,2);assert_eq!(lods[2].section_count,1);
+        }
     }
 
     #[test]

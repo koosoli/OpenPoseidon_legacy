@@ -8473,6 +8473,7 @@ impl Gfx3d {
     // This skips no mutation/cull/upload work outside the section-address refresh itself.
     fn refresh_cull_sections(&mut self) {
         if let Some(line) = self.cull.take_section_reuse_notice() { self.queued_log.push(line); }
+        if let Some(line) = self.cull.take_lod_reuse_notice() { self.queued_log.push(line); }
         self.cull.validate_source_table_length(self.gpu_section_src.len());
         let sources = &mut self.gpu_section_src;
         if self.cull.clear_retired_sections(|span| {
@@ -8635,12 +8636,16 @@ impl Gfx3d {
         // Source allocation precedes the coherent three-table commit; IDs remain append-only.
         self.gpu_section_src.reserve(srcs.len());
         let previous_source_len = self.gpu_section_src.len();
+        let previous_lod_len = self.cull.lod_reuse_length();
         self.cull.validate_source_table_length(self.gpu_section_src.len());
         let (model, span) = self.cull
             .register_model_span(bounding_sphere, &gpu_lods, &gpu_sections, &gpu_materials);
         section_span_pool::write_span(&mut self.gpu_section_src, span, &srcs);
         // Positive proof is queued only AFTER all three arrays and immutable birth IDs commit.
         if let Some(line) = self.cull.note_committed_section_reuse(model, span, previous_source_len) {
+            self.queued_log.push(line);
+        }
+        if let Some(line) = self.cull.note_committed_lod_reuse(model, previous_lod_len) {
             self.queued_log.push(line);
         }
         self.bake_model_sky_visibility(device, queue, model, lods, sections, name);
