@@ -407,16 +407,26 @@ try {
     $warmStageFamilyProof | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $out 'warm-material-stage-family-proof.json')
     # The captured-stage source must also appear in the existing successful bound upload witness.
     # This is a same-source join, not a proof of shader slot usage, pixels or causal performance.
-    $preflightRows = @(Select-String -LiteralPath $log -Pattern 'Warm material source preflight: source=(.*?) attemptedLoad=true textureReturned=(true|false) threw=(true|false) boundReadAccepted=(true|false) sourceMs=([0-9.]+) remainingAttempts=(\d+) metadataWorkLeft=(\d+) row=(\d+) limit=64')
+    $preflightRawRows = @(Select-String -LiteralPath $log -Pattern 'Warm material source preflight: source=')
+    $preflightRows = @(Select-String -LiteralPath $log -Pattern 'Warm material source preflight: source=(.*?) attemptedLoad=true textureReturned=(true|false) threw=(true|false) textureUsable=(true|false) currentSource=(true|false) rejection=(NotInspected|VisitCap|NoWgpuTexture|SourceNotInitialized|NoUsableMips|AlreadyGpuResident|UploadAlreadyTried|NonReloadable|NoInitializedBinding|NoMountedMatch|Oversize|InvalidKey|DuplicateKey|Accepted|Exception) statsComparable=(true|false) globalCaptureRefusedDelta=(\d+) globalCapacityRefusedDelta=(\d+) globalAllocationRefusedDelta=(\d+) boundReadAccepted=(true|false) sourceMs=([0-9.]+) remainingAttempts=(\d+) metadataWorkLeft=(\d+) row=(\d+) limit=64')
     $preflightObservations = @($preflightRows | ForEach-Object {
         $g = $_.Matches[0].Groups
         [pscustomobject]@{source=[string]$g[1].Value; returned=$g[2].Value -eq 'true'; threw=$g[3].Value -eq 'true'
-            accepted=$g[4].Value -eq 'true'; sourceMs=[double]::Parse($g[5].Value,[Globalization.CultureInfo]::InvariantCulture)
-            remainingAttempts=[uint64]$g[6].Value; metadataWorkLeft=[uint64]$g[7].Value; row=[uint64]$g[8].Value}
+            textureUsable=$g[4].Value -eq 'true'; currentSource=$g[5].Value -eq 'true'; rejection=[string]$g[6].Value
+            statsComparable=$g[7].Value -eq 'true'; globalCaptureRefusedDelta=[uint64]$g[8].Value
+            globalCapacityRefusedDelta=[uint64]$g[9].Value; globalAllocationRefusedDelta=[uint64]$g[10].Value
+            accepted=$g[11].Value -eq 'true'; sourceMs=[double]::Parse($g[12].Value,[Globalization.CultureInfo]::InvariantCulture)
+            remainingAttempts=[uint64]$g[13].Value; metadataWorkLeft=[uint64]$g[14].Value; row=[uint64]$g[15].Value}
     })
     if (@($preflightObservations | Where-Object { !$_.source -or $_.remainingAttempts -gt 1 -or $_.metadataWorkLeft -gt 256 -or
         $_.row -lt 1 -or $_.row -gt 64 -or ([double]::IsNaN($_.sourceMs) -or [double]::IsInfinity($_.sourceMs)) -or $_.sourceMs -lt 0 -or
-        ($_.accepted -and (!$_.returned -or $_.threw)) }).Count -gt 0 -or $preflightObservations.Count -gt 64) {throw 'Malformed bounded warm-material preflight witness'}
+        ($_.accepted -and (!$_.returned -or $_.threw -or !$_.textureUsable -or !$_.currentSource -or $_.rejection -ne 'Accepted')) -or
+        ($_.threw -ne ($_.rejection -eq 'Exception')) -or
+        ($_.currentSource -and !$_.textureUsable) -or ($_.rejection -eq 'Accepted' -and !$_.accepted) -or
+        ($_.rejection -in @('NoInitializedBinding','NoMountedMatch') -and ($_.currentSource -or !$_.textureUsable)) -or
+        (!$_.statsComparable -and ($_.globalCaptureRefusedDelta -or $_.globalCapacityRefusedDelta -or $_.globalAllocationRefusedDelta))
+    }).Count -gt 0 -or $preflightObservations.Count -gt 64 -or
+        $preflightRawRows.Count -ne $preflightObservations.Count) {throw 'Malformed bounded warm-material preflight witness'}
     if (!$WarmMaterialPreflight -and $preflightObservations.Count) {throw 'Warm-material preflight unexpectedly active in OFF control'}
     $warmUploadedStageKeys = @($warmUploadObservations | Where-Object {$_.stageFamily} | ForEach-Object {$_.source.Replace('\','/').ToLowerInvariant()})
     $joinedPreflightUploads = @($preflightObservations | Where-Object {$_.accepted -and $_.source.Replace('\','/').ToLowerInvariant() -in $warmUploadedStageKeys})
@@ -424,7 +434,7 @@ try {
     $warmPreflightProof = @{requested=[bool]$WarmMaterialPreflight; required=[bool]$RequireWarmMaterialPreflightUpload
         positive=[bool]($joinedPreflightUploads.Count -gt 0); observations=$preflightObservations; sameSourceStageUploads=$joinedPreflightUploads
         truncated=[bool](Select-String -LiteralPath $log -Pattern 'Warm material source preflight: log truncated after 64' -Quiet)
-        scope='Bounded actual owner missing-stage source loads and same-source successful bound worker filename-family upload only; not complete route, slot-role, pixel or time-budget/performance proof'}
+        scope='Bounded actual owner missing-stage loads; currentSource is exact currently mounted binding or false for absent/mismatched source. Global counter deltas include concurrent activity and are not per-load causal proof. Same-source upload join does not prove slot role, pixels or performance.'}
     $warmPreflightProof | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $out 'warm-material-preflight-proof.json')
     $retirementRows = @(Select-String -LiteralPath $log -Pattern 'Hot source proof retired: source=(.*?) ownInitProofDropped=true alphaClass=(\d+) gpuUploaded=true liveBindingsBefore=(\d+) liveBindingsAfter=(\d+) knownBindingBytesBefore=(\d+) knownBindingBytesAfter=(\d+) aliasDebtMayRemain=true row=(\d+) limit=64')
     $retirementObservations = @($retirementRows | ForEach-Object {

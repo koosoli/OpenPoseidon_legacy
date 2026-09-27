@@ -107,6 +107,11 @@ class TextureWgpu : public Texture
     // Owner-only metadata/native-handle observation. Never loads a bank or
     // recaptures provenance by name; unsupported/currently different mounts refuse.
     std::shared_ptr<const ArchiveSourceBinding> CurrentArchiveSourceBinding() const;
+    // Diagnostic-only facts about the existing Init/source; no VFS read or recapture.
+    bool HasTextureSourceObject() const { return _src != nullptr; }
+    bool HasInitializedWarmSource() const { return _src != nullptr && _nMipmaps > 0; }
+    bool HasAttemptedGpuUpload() const { return _uploadTried; }
+    bool HasInitializedArchiveBinding() const;
     bool CaptureColdPaaRead(render::ColdPaaRead& out) const override;
     bool CanWarmPrepare() const { return !_gpuHandle && !_uploadTried && HasReloadableSource(); }
     // Drop only the GPU allocation while preserving the decoded file source and

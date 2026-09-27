@@ -10668,18 +10668,61 @@ void EngineWgpu::CaptureWarmTextureReads(const LODShapeWithShadow* shape,
             LOG_INFO(World, "Warm texture capture: log truncated after 64 opt-in calls; this prefix is not full capture coverage or a source-freshness proof");
         }
     };
-    auto inspect = [&](const TextureWgpu* texture)
+    struct WarmInspectReason
     {
-        if (!workRemaining || reads.size() >= 64) return;
+        bool textureUsable = false;
+        bool currentSource = false; // Includes exact mounted member match; absence/mismatch cannot be split here.
+        const char* code = "NotInspected";
+    };
+    auto inspect = [&](const TextureWgpu* texture, WarmInspectReason* reason = nullptr)
+    {
+        if (!workRemaining || reads.size() >= 64)
+        {
+            if (reason) reason->code = "VisitCap";
+            return;
+        }
         --workRemaining; ++inspected;
-        if (!texture || !texture->CanWarmPrepare()) { ++ineligible; return; }
+        if (!texture || !texture->CanWarmPrepare())
+        {
+            ++ineligible;
+            if (reason) reason->code = !texture ? "NoWgpuTexture" :
+                !texture->HasTextureSourceObject() ? "SourceNotInitialized" :
+                !texture->HasInitializedWarmSource() ? "NoUsableMips" :
+                texture->GpuHandle() ? "AlreadyGpuResident" :
+                texture->HasAttemptedGpuUpload() ? "UploadAlreadyTried" : "NonReloadable";
+            return;
+        }
+        if (reason) reason->textureUsable = true;
         auto source = texture->CurrentArchiveSourceBinding();
-        if (!source) { ++noCurrentSource; return; }
-        if (source->Request().bytes > 16 * 1024 * 1024) { ++sizeOrKeyRefused; return; }
+        if (!source)
+        {
+            ++noCurrentSource;
+            if (reason) reason->code = texture->HasInitializedArchiveBinding() ?
+                "NoMountedMatch" : "NoInitializedBinding";
+            return;
+        }
+        if (reason) reason->currentSource = true;
+        if (source->Request().bytes > 16 * 1024 * 1024)
+        {
+            ++sizeOrKeyRefused;
+            if (reason) reason->code = "Oversize";
+            return;
+        }
         const std::string key = render::PreparedTextureStore::Key(texture->SourceName());
-        if (key.empty() || key.size() > 8191 ||
-            std::any_of(reads.begin(), reads.end(), [&](const auto& prior) { return prior.key == key; })) { ++sizeOrKeyRefused; return; }
+        if (key.empty() || key.size() > 8191)
+        {
+            ++sizeOrKeyRefused;
+            if (reason) reason->code = "InvalidKey";
+            return;
+        }
+        if (std::any_of(reads.begin(), reads.end(), [&](const auto& prior) { return prior.key == key; }))
+        {
+            ++sizeOrKeyRefused;
+            if (reason) reason->code = "DuplicateKey";
+            return;
+        }
         reads.push_back({key, std::move(source)});
+        if (reason) reason->code = "Accepted";
         if (auto* proof = Streaming::WarmTextureProvenance::Active())
         {
             BankReadMemberIdentity identity;
@@ -10750,27 +10793,52 @@ void EngineWgpu::CaptureWarmTextureReads(const LODShapeWithShadow* shape,
                     materialPreflightEnabled, false, *stageSourceAttemptsRemaining, workRemaining)) continue;
             // Two attempts across the entire owner recentre, including failures. Only cached
             // translated slots reach here; no material parsing, GPU upload, or worker bank access.
+            // These counters are process-wide, so concurrent captures can contribute to a
+            // delta. The current-source check itself is the existing no-read exact mount test.
+            static unsigned preflightRows = 0; // Owner-only, saturated to bound snapshots/logs.
+            const bool diagnosticSample = preflightRows < 64;
+            const auto sourceStatsBefore = diagnosticSample ? ArchiveSourceBinding::SnapshotStats() :
+                ArchiveSourceBinding::Stats{};
             const auto began = std::chrono::steady_clock::now();
             const size_t before = reads.size();
             bool loaded = false, threw = false;
+            WarmInspectReason inspectReason;
             try
             {
                 ArchiveSourceBinding::ModelReadScope purpose;
                 Ref<Texture> stageTexture = _wbank->Load(path.c_str());
                 loaded = stageTexture.GetRef() != nullptr;
                 // The Ref remains alive through capture; only owned initialized-source facts escape.
-                inspect(dynamic_cast<const TextureWgpu*>(stageTexture.GetRef()));
+                inspect(dynamic_cast<const TextureWgpu*>(stageTexture.GetRef()),
+                    diagnosticSample ? &inspectReason : nullptr);
             }
-            catch (...) { threw = true; } // Ordinary bank ownership/failure behavior is unchanged; no reinitialization.
+            catch (...)
+            {
+                threw = true;
+                if (diagnosticSample) inspectReason.code = "Exception";
+            } // Ordinary bank ownership/failure behavior is unchanged; no reinitialization.
             stageAccepted += reads.size() - before;
             const double elapsed = std::chrono::duration<double, std::milli>(
                 std::chrono::steady_clock::now() - began).count();
-            static unsigned preflightRows = 0; // Owner-only, no clock/format/allocation on OFF path.
+            const auto sourceStatsAfter = diagnosticSample ? ArchiveSourceBinding::SnapshotStats() :
+                ArchiveSourceBinding::Stats{};
+            const bool statsComparable = sourceStatsBefore.enabled && sourceStatsAfter.enabled &&
+                sourceStatsAfter.captureRefused >= sourceStatsBefore.captureRefused &&
+                sourceStatsAfter.capacityRefused >= sourceStatsBefore.capacityRefused &&
+                sourceStatsAfter.allocationRefused >= sourceStatsBefore.allocationRefused;
+            const auto captureRefusedDelta = statsComparable ?
+                sourceStatsAfter.captureRefused - sourceStatsBefore.captureRefused : 0;
+            const auto capacityRefusedDelta = statsComparable ?
+                sourceStatsAfter.capacityRefused - sourceStatsBefore.capacityRefused : 0;
+            const auto allocationRefusedDelta = statsComparable ?
+                sourceStatsAfter.allocationRefused - sourceStatsBefore.allocationRefused : 0;
             if (preflightRows < 64)
             {
                 ++preflightRows;
-                LOG_INFO(World, "Warm material source preflight: source={} attemptedLoad=true textureReturned={} threw={} boundReadAccepted={} sourceMs={:.3f} remainingAttempts={} metadataWorkLeft={} row={} limit=64",
-                    path, loaded, threw, reads.size() > before, elapsed,
+                LOG_INFO(World, "Warm material source preflight: source={} attemptedLoad=true textureReturned={} threw={} textureUsable={} currentSource={} rejection={} statsComparable={} globalCaptureRefusedDelta={} globalCapacityRefusedDelta={} globalAllocationRefusedDelta={} boundReadAccepted={} sourceMs={:.3f} remainingAttempts={} metadataWorkLeft={} row={} limit=64",
+                    path, loaded, threw, inspectReason.textureUsable, inspectReason.currentSource,
+                    inspectReason.code, statsComparable, captureRefusedDelta, capacityRefusedDelta,
+                    allocationRefusedDelta, reads.size() > before, elapsed,
                     *stageSourceAttemptsRemaining, workRemaining, preflightRows);
             }
             else if (preflightRows == 64)

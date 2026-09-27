@@ -1126,6 +1126,11 @@ void TextureWgpu::RetireHotSourceProof()
     }
 }
 
+bool TextureWgpu::HasInitializedArchiveBinding() const
+{
+    return Foundation::IsMainThread() && _src && !!_src->GetArchiveSourceBinding();
+}
+
 std::shared_ptr<const ArchiveSourceBinding> TextureWgpu::CurrentArchiveSourceBinding() const
 {
     if (!Foundation::IsMainThread() || !_src) return {};
