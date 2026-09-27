@@ -3,6 +3,7 @@
 
 #include <Poseidon/World/Terrain/ObjectStreamPrepare.hpp>
 #include <Poseidon/World/Terrain/ObjectStreamTextureNames.hpp>
+#include <Poseidon/World/Terrain/LoosePaaPreparation.hpp>
 #include <Poseidon/World/Terrain/PaaPreparationInflight.hpp>
 #include <Poseidon/World/Model/ShapeAdapter.hpp>
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
@@ -1049,29 +1050,15 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                         }
                         continue;
                     }
-                    PAABlockChain chain;
-                    if (!ReadPAABlockChain(key, chain))
+                    auto prepared = Streaming::PrepareLoosePaa(key, SIZE_MAX);
+                    if (prepared.kind == Streaming::LoosePaaPreparation::Kind::Unavailable)
                     {
-                        // Not a DXT chain. If it is still a READABLE loose PAA (the Reforger
-                        // corpus's PacARGB8888 *_mask.paa population -- 390 whole-file decodes
-                        // costing ~1.1 s of admission time on the Everon traverse), decode it
-                        // HERE with the pure buffer decoder and store the RGBA image, so the
-                        // main thread's fallback path uploads instead of decoding.
-                        std::ifstream file(key, std::ios::binary);
-                        if (!file)
-                        {
-                            ++texUnreadable; // not loose at all: main thread's problem
-                            continue;
-                        }
-                        std::vector<char> bytesIn((std::istreambuf_iterator<char>(file)),
-                                                  std::istreambuf_iterator<char>());
-                        const bool isPaa = key.size() >= 4 && key.compare(key.size() - 4, 4, ".paa") == 0;
-                        DecodedImage image = DecodePAABuffer(bytesIn.data(), bytesIn.size(), isPaa);
-                        if (!image.valid())
-                        {
-                            ++texUnreadable; // malformed: main thread repeats and reports
-                            continue;
-                        }
+                        ++texUnreadable; // Ordinary owner fallback retains full quality.
+                        continue;
+                    }
+                    if (prepared.kind == Streaming::LoosePaaPreparation::Kind::Rgba)
+                    {
+                        auto& image = prepared.image;
                         const size_t imageBytes = image.rgba.size();
                         if (store.PutDecoded(key, std::move(image), textureGeneration))
                         {
@@ -1084,6 +1071,7 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                         }
                         continue;
                     }
+                    auto& chain = prepared.chain;
                     const size_t bytes = chain.blocks.size();
                     if (store.Put(key, std::move(chain), textureGeneration))
                     {
