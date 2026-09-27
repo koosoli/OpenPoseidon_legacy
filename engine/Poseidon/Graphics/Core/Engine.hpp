@@ -3117,6 +3117,8 @@ class Engine : public IGraphicsEngine
         uint64_t requestId = 0, observedRequestId = 0, producer = 0, rendererHandle = 0, knownPayloadBytes = 0;
         uint32_t meshState = 0, cpuBorrowers = 0;
         bool producerOwned = false, sourceCopied = false, privateAllocation = false;
+        bool ledgerEnabled = false, ledgerRecordObserved = false, ledgerScheduledRetired = false, ledgerProducerOwned = false;
+        uint64_t ledgerCpuBorrowers = 0;
     };
     virtual SharedMeshFixtureReport ControlSharedMeshLifetimeFixture(SharedMeshFixtureAction, const Shape* = nullptr)
     { return {}; }

@@ -512,6 +512,11 @@ void RegisterScreenshot(HarnessServer& hs)
             cJSON_AddBoolToObject(result, "producerOwned", report.producerOwned);
             cJSON_AddBoolToObject(result, "sourceCopied", report.sourceCopied);
             cJSON_AddBoolToObject(result, "privateAllocation", report.privateAllocation);
+            cJSON_AddBoolToObject(result, "ledgerEnabled", report.ledgerEnabled);
+            cJSON_AddBoolToObject(result, "ledgerRecordObserved", report.ledgerRecordObserved);
+            cJSON_AddBoolToObject(result, "ledgerScheduledRetired", report.ledgerScheduledRetired);
+            cJSON_AddNumberToObject(result, "ledgerCpuBorrowers", double(report.ledgerCpuBorrowers));
+            cJSON_AddBoolToObject(result, "ledgerProducerOwned", report.ledgerProducerOwned);
             cJSON_AddStringToObject(result, "scope", "Private copied mesh lifetime and generational record state; no world rendering, queue-completion or device-free proof");
             return HarnessProtocol::JsonResponse(result);
         });

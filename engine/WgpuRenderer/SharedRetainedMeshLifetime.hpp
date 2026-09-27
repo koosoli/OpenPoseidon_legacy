@@ -67,6 +67,7 @@ public:
             _group = group; _active = true;
             return true;
         }
+        uint64_t Producer() const { return _group ? _group->Producer() : 0; }
         bool Bind(uint64_t rendererHandle)
         {
             if (!_group) return false;

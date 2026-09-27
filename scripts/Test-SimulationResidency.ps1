@@ -1,10 +1,11 @@
-param([switch]$Disabled,[switch]$Capacity,[switch]$ActiveCapacity,[switch]$MovedWatcher,[switch]$LargeWall,[switch]$SourceDiagnostic,[switch]$PositiveWarming,[switch]$ColdPositive,[switch]$RegisteredWarming,[switch]$SharedMeshLifetime,[string]$Label='simulation-residency',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',[string]$Python='C:\Program Files\Python311\python.exe')
+param([switch]$Disabled,[switch]$Capacity,[switch]$ActiveCapacity,[switch]$MovedWatcher,[switch]$LargeWall,[switch]$SourceDiagnostic,[switch]$PositiveWarming,[switch]$ColdPositive,[switch]$RegisteredWarming,[switch]$SharedMeshLifetime,[switch]$SharedMeshLedger,[string]$Label='simulation-residency',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',[string]$Python='C:\Program Files\Python311\python.exe')
 $ErrorActionPreference='Stop'
+if ($SharedMeshLedger -and !$SharedMeshLifetime) {throw 'Shared mesh ledger validation requires the private lifetime fixture'}
 if (@($Disabled,$Capacity,$ActiveCapacity,$MovedWatcher,$LargeWall,$SourceDiagnostic,$PositiveWarming,$ColdPositive,$RegisteredWarming,$SharedMeshLifetime | Where-Object {$_}).Count -gt 1) {throw 'Simulation fixture switches are separate scenarios'}
 if (!$env:LOCK_OWNER) {
  $shellName=if ($PSVersionTable.PSEdition -eq 'Core') {'pwsh.exe'} else {'powershell.exe'}
  $argv=@((Join-Path $PSScriptRoot 'with-game-lock.sh'),(Join-Path $PSHOME $shellName).Replace('\','/'),'-NoProfile','-File',$PSCommandPath,'-Label',$Label,'-GameDir',$GameDir,'-Python',$Python)
- foreach ($flag in @('Disabled','Capacity','ActiveCapacity','MovedWatcher','LargeWall','SourceDiagnostic','PositiveWarming','ColdPositive','RegisteredWarming','SharedMeshLifetime')) {if ((Get-Variable $flag -ValueOnly)) {$argv+=('-'+$flag)}}
+ foreach ($flag in @('Disabled','Capacity','ActiveCapacity','MovedWatcher','LargeWall','SourceDiagnostic','PositiveWarming','ColdPositive','RegisteredWarming','SharedMeshLifetime','SharedMeshLedger')) {if ((Get-Variable $flag -ValueOnly)) {$argv+=('-'+$flag)}}
  $env:LOCK_OWNER='simulation residency fixture'
  try {& 'C:\Program Files\Git\bin\bash.exe' @argv; if ($LASTEXITCODE) {throw "Simulation fixture exited $LASTEXITCODE"}} finally {Remove-Item Env:LOCK_OWNER}
  return
@@ -53,6 +54,7 @@ class OutroLoose { randomSeed=3; class Intel {}; };
 $env:WGR_SIMULATION_RESIDENCY=if ($Disabled -or $SourceDiagnostic -or $SharedMeshLifetime) {'0'} else {'1'}
 $env:WGR_SIMULATION_RESIDENCY_TEST=if ($Disabled -or $SourceDiagnostic -or $SharedMeshLifetime) {'0'} else {'1'}
 $env:WGR_SHARED_MESH_LIFETIME_FIXTURE=if ($SharedMeshLifetime) {'1'} else {'0'}
+$env:WGR_GEOMETRY_OWNER_LEDGER=if ($SharedMeshLedger) {'1'} else {'0'}
 $env:WGR_SIMULATION_POSITIVE_COLD=if ($ColdPositive) {'1'} else {'0'}
 $env:WGR_OBJECT_STREAM_WINDOW_GROWTH='0'
 $env:WGR_OBJECT_STREAM_RADIUS_CELLS='8'
@@ -122,6 +124,9 @@ try {
        ($expectedHandle -and $observed.rendererHandle -ne $expectedHandle)) {
     throw "Unexpected private mesh lifetime cut: $($observed | ConvertTo-Json -Compress)"
    }
+   if ($SharedMeshLedger -and (!$observed.ledgerEnabled -or !$observed.ledgerRecordObserved -or
+       $observed.ledgerCpuBorrowers -ne $borrowers -or $observed.ledgerProducerOwned -ne $producerOwned -or
+       $observed.ledgerScheduledRetired -ne ($expectedState -eq 2))) {throw "Shared retirement ledger disagreed with its owner cut: $($observed | ConvertTo-Json -Compress)"}
    $observed | Add-Member -NotePropertyName priorCuts -NotePropertyValue $priorCuts
    return $observed
   }

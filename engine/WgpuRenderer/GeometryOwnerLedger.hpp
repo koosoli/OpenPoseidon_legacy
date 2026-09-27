@@ -23,7 +23,12 @@ public:
         bool attributionComplete=false, ownershipCoverageComplete=false;
         uint64_t reclaimableBytes=0;
         size_t trackedAllocations=0, trackedBorrowerRecords=0, liveCpuBorrowers=0, modelLodLinks=0, queuedDetachEvents=0;
+        // Legacy event counters include both numeric detach and scheduling facts.
         uint64_t droppedDetachEvents=0, cancelledBeforeCreate=0;
+        uint64_t mailboxKnownCapacityBytes=0, mailboxPeakKnownCapacityBytes=0;
+        uint64_t scheduledRetirementEvents=0;
+        size_t queuedOwnershipEvents=0, queuedRetirementEvents=0;
+        uint64_t droppedOwnershipEvents=0, droppedRetirementEvents=0;
         // Producer estimates for records not scheduled-retired by this ledger.
         // Includes detached zero-owner records without retirement acknowledgement;
         // never current GPU-live bytes or physical/free-pool completion proof.
@@ -44,9 +49,24 @@ public:
         uint64_t epoch=0,incompleteReasons=0;
         bool attributionComplete=false,truncated=false;
         size_t queuedDetachEvents=0,trackedAllocations=0;
+        size_t queuedOwnershipEvents=0; // truthful total; queuedDetachEvents is the historical all-event alias
         Report ownerReport; // Same map cut as records, without a second mailbox drain.
         std::vector<HandleRecord> records;
     };
+    // Serial owner-only selected-record cut. Drains the bounded numeric mailbox,
+    // then copies one O(1) map lookup; missing evidence is explicit, never Ready.
+    bool SnapshotHandle(uint64_t epoch,uint64_t allocation,HandleRecord& result)
+    {
+        result={};
+        if(!Current(epoch)) return false;
+        DrainDetachMailbox();
+        const auto found=_allocations.find(allocation);
+        if(found==_allocations.end()) return false;
+        const auto& a=found->second;
+        result=HandleRecord{allocation,a.handle,_epoch,a.retired,a.producer,
+            static_cast<uint64_t>(a.cpu),static_cast<uint64_t>(a.models)};
+        return true;
+    }
     static constexpr size_t MaxHandleExportRecords=8192;
     GeometryOwnerLedger() : GeometryOwnerLedger(Limits{}) {}
     explicit GeometryOwnerLedger(Limits limits) : _limits(limits) {}
@@ -59,7 +79,7 @@ public:
         _allocations.clear(); _borrowers.clear(); _models.clear(); _mail.clear();
         _epoch=epoch; _mailEpoch=epoch; _open=true; _mailOpen=true;
         _reasons=observedFromStart?0:static_cast<uint32_t>(Reason::LateEnable);
-        _mailDropped=0; _drops=0; _cancelled=0; _links=0;
+        _mailDropped=0; _drops=0; _cancelled=0; _links=0; _scheduledEvents=0; _mailPeakBytes=_mail.capacity()*sizeof(MailEvent); _mailScheduledQueued=0; _mailScheduledDropped=0; _retireDrops=0;
         return true;
     }
     void CloseEpoch(uint64_t epoch)
@@ -67,7 +87,7 @@ public:
         if (!Current(epoch)) return;
         DrainDetachMailbox();
         std::lock_guard<std::mutex> lock(_mailMutex);
-        _mailOpen=false; _mail.clear(); _open=false;
+        _mailOpen=false; _mail.clear(); _mailScheduledQueued=0; _open=false;
     }
     void MarkIncomplete(uint64_t epoch, Reason reason) { if(Current(epoch)) _reasons|=static_cast<uint32_t>(reason); }
     bool AllocationCreated(uint64_t epoch,uint64_t id,uint64_t vertexBytes,uint64_t indexBytes,ProducerKind kind,uint64_t meshHandle=0)
@@ -119,22 +139,26 @@ public:
             found->second.attached=false;
         }
     }
-    // Only method callable from arbitrary destructor threads. No renderer/slot reads.
+    // Arbitrary destructor threads enqueue immutable numeric metadata only.
+    // Scheduling records are emitted only after a real destroy-dispatch callback,
+    // not when a helper merely claims a handle. Neither kind acknowledges GPU work.
     void QueueCpuBorrowerDetached(uint64_t epoch,uint64_t borrower) noexcept
-    {
-        std::lock_guard<std::mutex> lock(_mailMutex);
-        if(!_mailOpen || epoch!=_mailEpoch || !borrower) return;
-        if(_mail.size()>=_limits.mailbox) { if(_mailDropped!=std::numeric_limits<uint64_t>::max()) ++_mailDropped; return; }
-        try { _mail.push_back(borrower); } catch (...) { if(_mailDropped!=std::numeric_limits<uint64_t>::max()) ++_mailDropped; }
-    }
+    { QueueEvent(epoch,borrower,MailKind::Detach); }
+    void QueueAllocationRetirementScheduled(uint64_t epoch,uint64_t allocation) noexcept
+    { QueueEvent(epoch,allocation,MailKind::ScheduledRetire); }
     void DrainDetachMailbox()
     {
-        std::vector<uint64_t> events;
-        uint64_t dropped=0;
-        { std::lock_guard<std::mutex> lock(_mailMutex); events.swap(_mail); dropped=_mailDropped; _mailDropped=0; }
-        if(!_open) return;
-        if(dropped) { Add(_drops,dropped); MarkIncomplete(_epoch,Reason::Capacity); }
-        for(auto borrower:events) CpuBorrowerDetached(_epoch,borrower);
+        std::vector<MailEvent> events;
+        uint64_t dropped=0,retirementDrops=0,epoch=0;
+        { std::lock_guard<std::mutex> lock(_mailMutex); events.swap(_mail); dropped=_mailDropped; retirementDrops=_mailScheduledDropped;
+          _mailDropped=0; _mailScheduledDropped=0; _mailScheduledQueued=0; epoch=_mailEpoch; }
+        if(!Current(epoch)) return;
+        if(dropped) { Add(_drops,dropped); Add(_retireDrops,retirementDrops); MarkIncomplete(epoch,Reason::Capacity); }
+        for(const auto& event:events)
+        {
+            if(event.kind==MailKind::Detach) CpuBorrowerDetached(epoch,event.id);
+            else { ApplyRetirement(epoch,event.id); Add(_scheduledEvents,1); }
+        }
     }
     bool ModelLodAttached(uint64_t epoch,uint32_t model,uint32_t lod,uint64_t allocation)
     {
@@ -176,9 +200,7 @@ public:
     {
         if(!Current(epoch)) return;
         DrainDetachMailbox();
-        auto* a=Find(epoch,id); if(!a) return;
-        if(a->cpu || a->models) MarkIncomplete(epoch,Reason::Protocol);
-        a->producer=false; a->retired=true;
+        ApplyRetirement(epoch,id);
     }
     void NoteCancelledBeforeCreate(uint64_t epoch) { if(Current(epoch)) Add(_cancelled,1); }
     Report Snapshot() { DrainDetachMailbox(); return BuildSnapshot(); }
@@ -209,6 +231,7 @@ public:
         r.ownerReport=BuildSnapshot(); // No drain: records and aggregate see identical owner maps.
         r.incompleteReasons|=r.ownerReport.incompleteReasons;
         r.queuedDetachEvents=r.ownerReport.queuedDetachEvents;
+        r.queuedOwnershipEvents=r.ownerReport.queuedOwnershipEvents;
         r.attributionComplete=r.ownerReport.attributionComplete && !r.incompleteReasons && !r.truncated;
         r.ownerReport.incompleteReasons=r.incompleteReasons;
         r.ownerReport.attributionComplete=r.attributionComplete;
@@ -232,10 +255,42 @@ private:
             if(a.kind==ProducerKind::Cpu && a.cpu) { Add(r.standaloneCpuBytes,bytes); Add(r.standaloneCpuVertexBytes,a.vertex); Add(r.standaloneCpuIndexBytes,a.index); }
             if(a.producer || a.models || a.cpu) Add(r.persistentOwnerBytes,bytes); else Add(r.zeroPersistentOwnerBytes,bytes);
         }
-        { std::lock_guard<std::mutex> lock(_mailMutex); r.queuedDetachEvents=_mail.size(); if(_mailDropped) MarkIncomplete(_epoch,Reason::Capacity); }
+        { std::lock_guard<std::mutex> lock(_mailMutex); r.queuedDetachEvents=_mail.size();
+          r.queuedOwnershipEvents=_mail.size(); r.queuedRetirementEvents=_mailScheduledQueued;
+          r.mailboxKnownCapacityBytes=_mail.capacity()*sizeof(MailEvent); r.mailboxPeakKnownCapacityBytes=_mailPeakBytes;
+          if(_mailDropped) MarkIncomplete(_epoch,Reason::Capacity); }
+        r.scheduledRetirementEvents=_scheduledEvents; r.droppedOwnershipEvents=_drops; r.droppedRetirementEvents=_retireDrops;
         r.incompleteReasons=_reasons; r.attributionComplete=_open && !_reasons && r.queuedDetachEvents==0; return r;
     }
 
+    enum class MailKind : uint8_t { Detach, ScheduledRetire };
+    struct MailEvent { uint64_t id; MailKind kind; };
+    // Vector capacity is actual known C++ payload metadata, not allocator/RSS.
+    // Owner drain may transiently hold one bounded batch while producers fill
+    // another; neither batch contains slot, renderer or resource pointers.
+    void QueueEvent(uint64_t epoch,uint64_t id,MailKind kind) noexcept
+    {
+        std::lock_guard<std::mutex> lock(_mailMutex);
+        if(!_mailOpen || epoch!=_mailEpoch || !id) return;
+        if(_mail.size()>=_limits.mailbox) { NoteMailboxDrop(kind); return; }
+        try {
+            _mail.push_back(MailEvent{id,kind});
+            if(kind==MailKind::ScheduledRetire) ++_mailScheduledQueued;
+            const auto bytes=_mail.capacity()*sizeof(MailEvent);
+            if(bytes>_mailPeakBytes) _mailPeakBytes=bytes;
+        } catch (...) { NoteMailboxDrop(kind); }
+    }
+    void NoteMailboxDrop(MailKind kind)
+    {
+        if(_mailDropped!=std::numeric_limits<uint64_t>::max()) ++_mailDropped;
+        if(kind==MailKind::ScheduledRetire && _mailScheduledDropped!=std::numeric_limits<uint64_t>::max()) ++_mailScheduledDropped;
+    }
+    void ApplyRetirement(uint64_t epoch,uint64_t id)
+    {
+        auto* a=Find(epoch,id); if(!a) return;
+        if(a->cpu || a->models) MarkIncomplete(epoch,Reason::Protocol);
+        a->producer=false; a->retired=true;
+    }
     struct Allocation { uint64_t vertex,index,handle; ProducerKind kind; bool producer,retired; size_t cpu,models; };
     struct Borrower { uint64_t allocation; bool attached; };
     bool Current(uint64_t epoch) const { return _open && epoch==_epoch; }
@@ -251,15 +306,16 @@ private:
         else sum+=value;
     }
     const Limits _limits;
-    uint64_t _epoch=0,_reasons=0,_drops=0,_cancelled=0;
+    uint64_t _epoch=0,_reasons=0,_drops=0,_cancelled=0,_scheduledEvents=0,_retireDrops=0;
     bool _open=false;
     size_t _links=0;
     std::unordered_map<uint64_t,Allocation> _allocations;
     std::unordered_map<uint64_t,Borrower> _borrowers;
     std::unordered_map<uint32_t,std::unordered_map<uint32_t,std::unordered_set<uint64_t>>> _models;
     std::mutex _mailMutex;
-    uint64_t _mailEpoch=0,_mailDropped=0;
+    uint64_t _mailEpoch=0,_mailDropped=0,_mailPeakBytes=0,_mailScheduledDropped=0;
+    size_t _mailScheduledQueued=0;
     bool _mailOpen=false;
-    std::vector<uint64_t> _mail;
+    std::vector<MailEvent> _mail;
 };
 }

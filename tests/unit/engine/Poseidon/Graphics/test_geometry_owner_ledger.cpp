@@ -1,5 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <WgpuRenderer/GeometryOwnerLedger.hpp>
+#include <WgpuRenderer/SharedRetainedMeshLifetime.hpp>
+#include <array>
+#include <algorithm>
 #include <limits>
 #include <thread>
 using Poseidon::render::GeometryOwnerLedger;
@@ -164,4 +167,105 @@ TEST_CASE("Geometry handle export bound refuses complete partial evidence", "[wg
     CHECK(report.truncated); CHECK_FALSE(report.attributionComplete); CHECK_FALSE(report.ownerReport.attributionComplete); CHECK(report.ownerReport.incompleteReasons==report.incompleteReasons);
     CHECK((report.incompleteReasons & static_cast<uint32_t>(Reason::HandleExportCapacity))!=0);
     CHECK_FALSE(l.Snapshot().attributionComplete);
+}
+TEST_CASE("Shared retirement scheduling follows actual dispatch and every diagnostic CPU detach", "[wgpu][geometry-owner-ledger]")
+{
+    using namespace Poseidon::render;
+    std::array<int,3> order{0,1,2};
+    do
+    {
+        GeometryOwnerLedger ledger; REQUIRE(ledger.BeginEpoch(7));
+        REQUIRE(ledger.AllocationCreated(7,91,100,20,Kind::Retained,7001));
+        REQUIRE(ledger.CpuBorrowerAttached(7,101,91)); REQUIRE(ledger.CpuBorrowerAttached(7,102,91));
+        auto epoch=std::make_shared<SharedMeshEpoch>();
+        auto lifetime=std::make_shared<SharedRetainedMeshLifetime>(91,epoch);
+        SharedRetainedMeshLifetime::Borrower older,newer;
+        REQUIRE(older.Attach(lifetime)); REQUIRE(newer.Attach(lifetime));
+        REQUIRE(older.Bind(7001)); REQUIRE(newer.Bind(7001));
+        size_t dispatched=0;
+        for(size_t step=0;step<order.size();++step)
+        {
+            uint64_t handle=0;
+            if(order[step]==0)
+            {
+                ledger.ProducerOwnershipReleased(7,91);
+                handle=lifetime->ReleaseProducer(7001);
+                lifetime->Dispatch(handle,[&](uint64_t h) { REQUIRE(h==7001); ++dispatched; });
+                if(handle) ledger.AllocationRetired(7,91); // owner-side producer retirement path
+            }
+            else
+            {
+                auto& borrower=order[step]==1?older:newer;
+                ledger.QueueCpuBorrowerDetached(7,order[step]==1?101:102);
+                REQUIRE(borrower.Producer()==91);
+                REQUIRE(borrower.Release(handle));
+                bool actual=false;
+                borrower.Dispatch(handle,[&](uint64_t h) { REQUIRE(h==7001); ++dispatched; actual=true; });
+                if(actual) ledger.QueueAllocationRetirementScheduled(7,borrower.Producer());
+            }
+            GeometryOwnerLedger::HandleRecord record;
+            REQUIRE(ledger.SnapshotHandle(7,91,record));
+            CHECK(record.scheduledRetired==(step==2));
+            CHECK(dispatched==(step==2?1:0));
+            CHECK(ledger.Snapshot().attributionComplete);
+        }
+        const auto report=ledger.Snapshot();
+        CHECK(report.liveCpuBorrowers==0); CHECK(report.zeroPersistentOwnerBytes==0);
+        CHECK(report.observedProducerEstimatedVertexBytes==0);
+        CHECK_FALSE(report.ownershipCoverageComplete); CHECK(report.reclaimableBytes==0);
+        CHECK(report.mailboxPeakKnownCapacityBytes>0);
+    } while(std::next_permutation(order.begin(),order.end()));
+}
+
+TEST_CASE("Typed ownership mailbox is bounded and lost retirement evidence stays incomplete", "[wgpu][geometry-owner-ledger]")
+{
+    GeometryOwnerLedger ledger({8,8,8,1}); REQUIRE(ledger.BeginEpoch(1));
+    REQUIRE(ledger.AllocationCreated(1,4,10,2,Kind::Retained,44));
+    REQUIRE(ledger.CpuBorrowerAttached(1,9,4)); ledger.ProducerOwnershipReleased(1,4);
+    ledger.QueueCpuBorrowerDetached(1,9);
+    ledger.QueueAllocationRetirementScheduled(1,4); // shared cap1, not a separate allowance
+    GeometryOwnerLedger::HandleRecord record;
+    REQUIRE(ledger.SnapshotHandle(1,4,record)); CHECK(record.cpuBorrowers==0); CHECK_FALSE(record.scheduledRetired);
+    const auto report=ledger.Snapshot(); CHECK_FALSE(report.attributionComplete);
+    CHECK(report.droppedOwnershipEvents==1); CHECK(report.droppedDetachEvents==report.droppedOwnershipEvents);
+    CHECK(report.droppedRetirementEvents==1); CHECK(report.scheduledRetirementEvents==0);
+    CHECK(report.queuedOwnershipEvents==0); CHECK(report.queuedDetachEvents==0); CHECK(report.queuedRetirementEvents==0);
+    CHECK(report.mailboxKnownCapacityBytes==0); CHECK(report.mailboxPeakKnownCapacityBytes>0);
+}
+
+TEST_CASE("Scheduled retirement validates remaining owners without recursively draining", "[wgpu][geometry-owner-ledger]")
+{
+    GeometryOwnerLedger ledger; REQUIRE(ledger.BeginEpoch(1));
+    REQUIRE(ledger.AllocationCreated(1,4,10,2,Kind::Retained,44));
+    REQUIRE(ledger.CpuBorrowerAttached(1,9,4));
+    // Invalid reversed producer metadata order is not quietly reordered into
+    // complete evidence. Real destruction enqueues detach BEFORE scheduling.
+    ledger.QueueAllocationRetirementScheduled(1,4); ledger.QueueCpuBorrowerDetached(1,9);
+    const auto report=ledger.Snapshot(); CHECK(report.liveCpuBorrowers==0);
+    CHECK_FALSE(report.attributionComplete); CHECK(report.scheduledRetirementEvents==1);
+    CHECK((report.incompleteReasons&static_cast<uint32_t>(Reason::Protocol))!=0);
+}
+
+TEST_CASE("Closed or stale scheduling cannot mutate a replacement epoch", "[wgpu][geometry-owner-ledger]")
+{
+    using namespace Poseidon::render;
+    GeometryOwnerLedger ledger; REQUIRE(ledger.BeginEpoch(1));
+    REQUIRE(ledger.AllocationCreated(1,4,10,2,Kind::Retained,44));
+    auto epoch=std::make_shared<SharedMeshEpoch>();
+    auto lifetime=std::make_shared<SharedRetainedMeshLifetime>(4,epoch);
+    SharedRetainedMeshLifetime::Borrower borrower;
+    REQUIRE(borrower.Attach(lifetime)); REQUIRE(borrower.Bind(44));
+    REQUIRE(lifetime->ReleaseProducer(44)==0); epoch->Close();
+    uint64_t handle; REQUIRE(borrower.Release(handle)); CHECK(handle==0);
+    bool actual=false; borrower.Dispatch(44,[&](uint64_t) { actual=true; });
+    CHECK_FALSE(actual); CHECK(ledger.Snapshot().scheduledRetirementEvents==0);
+    ledger.CloseEpoch(1); ledger.QueueAllocationRetirementScheduled(1,4);
+    REQUIRE(ledger.BeginEpoch(2)); REQUIRE(ledger.AllocationCreated(2,4,30,4,Kind::Retained,0x20000002c));
+    ledger.QueueCpuBorrowerDetached(1,9); ledger.QueueAllocationRetirementScheduled(1,4);
+    GeometryOwnerLedger::HandleRecord record;
+    REQUIRE_FALSE(ledger.SnapshotHandle(1,4,record));
+    REQUIRE(ledger.SnapshotHandle(2,4,record)); CHECK_FALSE(record.scheduledRetired); CHECK(record.producerOwned);
+    CHECK(record.rendererHandle==0x20000002c); CHECK(ledger.Snapshot().attributionComplete);
+    CHECK(ledger.Snapshot().scheduledRetirementEvents==0);
+    CHECK_FALSE(ledger.SnapshotHandle(2,999,record)); CHECK(record.allocationId==0);
 }

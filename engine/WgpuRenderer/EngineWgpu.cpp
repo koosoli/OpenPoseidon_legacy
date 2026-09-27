@@ -1383,6 +1383,23 @@ public:
     {
         // Numeric immutable identity only: this may run outside the owner drain.
         _ledger->QueueCpuBorrowerDetached(_epoch, _borrower);
+        if (!slot) return;
+        // Diagnostic subclass only: cancel a queued create before releasing its
+        // shared association. The unchanged base destructor repeats Release0
+        // and performs normal stats/payload cleanup, never a second dispatch.
+        slot->dead = true;
+        const uint64_t producer = slot->sharedLifetime.Producer();
+        uint64_t retirement = 0;
+        bool dispatched = false;
+        if (slot->sharedLifetime.Release(retirement))
+            slot->sharedLifetime.Dispatch(retirement, [&](uint64_t handle) {
+                if (uploader) wgr_uploader_mesh_destroy(uploader, handle);
+                else if (renderer) wgr_mesh_destroy(renderer, handle);
+                else return;
+                dispatched = true;
+            });
+        // Metadata publication is outside both lifetime/epoch dispatch locks.
+        if (dispatched) _ledger->QueueAllocationRetirementScheduled(_epoch, producer);
     }
 };
 
@@ -3196,7 +3213,12 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
                     break;
                 }
                 const uint64_t retirement = op.cpu->sharedLifetime.FallBackToStandalone();
-                op.cpu->sharedLifetime.Dispatch(retirement, [&](uint64_t handle) { wgr_mesh_destroy(_renderer, handle); });
+                bool dispatched = false;
+                op.cpu->sharedLifetime.Dispatch(retirement, [&](uint64_t handle) {
+                    wgr_mesh_destroy(_renderer, handle); dispatched = true;
+                });
+                if (dispatched && _geometryOwnerLedger)
+                    _geometryOwnerLedger->AllocationRetired(_geometryOwnerEpoch, op.cpu->sharedProducer);
                 op.cpu->sharedProducer = 0; // retained mapping is gone: exact original payload fallback
             }
             GGeometryPoolFill.Note(1, op.cpu->verts.size() * sizeof(SVertex) + op.cpu->indices.size() * sizeof(uint32_t));
@@ -3389,10 +3411,18 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
                 summary.flags == 0 && summary.duplicate_handles == 0 && fact.mesh_handle == handle &&
                 fact.reserved == 0 && fact.state <= 2;
             const auto owners = fixture.lifetime->SnapshotOwners();
+            render::GeometryOwnerLedger::HandleRecord ledgerRecord;
+            const bool ledgerObserved = _geometryOwnerLedger &&
+                _geometryOwnerLedger->SnapshotHandle(_geometryOwnerEpoch, fixture.producer, ledgerRecord);
             std::lock_guard lock(fixture.mutex);
             if (fixture.report.requestId != op.sharedFixtureRequest) break;
             fixture.report.cpuBorrowers = uint32_t(owners.boundBorrowers);
             fixture.report.producerOwned = owners.producerOwned;
+            fixture.report.ledgerEnabled = bool(_geometryOwnerLedger);
+            fixture.report.ledgerRecordObserved = ledgerObserved;
+            fixture.report.ledgerScheduledRetired = ledgerObserved && ledgerRecord.scheduledRetired;
+            fixture.report.ledgerProducerOwned = ledgerObserved && ledgerRecord.producerOwned;
+            fixture.report.ledgerCpuBorrowers = ledgerObserved ? ledgerRecord.cpuBorrowers : 0;
             fixture.report.observedRequestId = op.sharedFixtureRequest;
             fixture.report.rendererHandle = handle;
             fixture.report.meshState = valid ? fact.state : 0;
