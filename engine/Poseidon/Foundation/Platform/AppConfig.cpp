@@ -699,6 +699,15 @@ void AppConfig::ParseCommandLine(int argc, char** argv)
                        ->check(CLI::Range(0, 65535)),
                    CliHelpVisibility::Dev);
 
+        showOption(debugGroup->add_option("--geometry-original-source",_geometryOriginalPath,
+            "Explicit original-MLOD startup admission probe (requires WGR_GEOMETRY_PAGE_ORIGINAL_SOURCE=1)"),CliHelpVisibility::Dev);
+        showOption(debugGroup->add_option("--geometry-original-sha256",_geometryOriginalSha256,
+            "Independently verified whole original-byte SHA256"),CliHelpVisibility::Dev);
+        showOption(debugGroup->add_option("--geometry-original-bytes",_geometryOriginalBytes,
+            "Independently verified original byte length (1..131072)"),CliHelpVisibility::Dev);
+        showOption(debugGroup->add_option("--geometry-original-key",_geometryOriginalKey,
+            "Externally verified decimal geometry:material:producer:coarse:fine:layout:mapping source key"),CliHelpVisibility::Dev);
+
         showOption(debugGroup->add_option("--test-mission,--test", _testMissionPath,
                                           "Run mission folder or mission.sqm directly and exit"),
                    CliHelpVisibility::Dev);

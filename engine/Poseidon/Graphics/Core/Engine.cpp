@@ -7,6 +7,12 @@
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 
 #include <stdarg.h>
+#include <charconv>
+#include <filesystem>
+#include <fstream>
+#include <Poseidon/Graphics/Rendering/GeometryPagePrototype.hpp>
+#include <Poseidon/Foundation/Algorithms/Sha256.hpp>
+#include <Poseidon/Foundation/Threads/ThreadAffinity.hpp>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Containers/Array.hpp>
 #include <Poseidon/Foundation/Framework/AppFrame.hpp>
@@ -339,5 +345,65 @@ void Engine::FinishDraw()
 }
 
 void Engine::NextFrame() {}
+
+// Startup-only owned byte observation. No VFS/cache/header-derived lease is used.
+bool Engine::ParseGeometryPageOriginalStartupInput(const std::string& path,const std::string& hash,
+    uint64_t bytes,const std::string& key,GeometryPageOriginalStartupInput& destination)
+{
+    if(path.empty()||path.size()>=1024||hash.size()!=64||key.empty()||key.size()>160||!bytes||bytes>128u*1024u)return false;
+    GeometryPageOriginalStartupInput result;result.expectedRawBytes=bytes;
+    for(size_t i=0;i<path.size();++i) { const auto c=uint8_t(path[i]);if(c<32||c>126)return false;result.originalPath[i]=path[i]; }
+    bool nonzero=false;
+    const auto digit=[](char c)->int {return c>='0'&&c<='9'?c-'0':c>='a'&&c<='f'?c-'a'+10:c>='A'&&c<='F'?c-'A'+10:-1;};
+    for(size_t i=0;i<32;++i) {const int a=digit(hash[i*2]),b=digit(hash[i*2+1]);if(a<0||b<0)return false;
+        result.expectedOriginal.sha256[i]=uint8_t(a*16+b);nonzero|=(a|b)!=0;}
+    if(!nonzero)return false;
+    std::array<uint64_t,7> values{};const char* at=key.data();const char* end=at+key.size();
+    for(size_t i=0;i<values.size();++i) {const char* stop=at;while(stop!=end&&*stop!=':')++stop;
+        if(stop==at)return false;const auto parsed=std::from_chars(at,stop,values[i]);
+        if(parsed.ec!=std::errc{}||parsed.ptr!=stop)return false;
+        if(i+1<values.size()) {if(stop==end)return false;at=stop+1;} else if(stop!=end)return false;}
+    for(size_t i=2;i<values.size();++i)if(values[i]>UINT32_MAX)return false;
+    if(!values[0]||!values[2]||values[3]==values[4]||!values[5]||!values[6])return false;
+    auto& identity=result.expectedOriginal;identity.geometryOptions=values[0];identity.materialOptions=values[1];
+    identity.producerVersion=uint32_t(values[2]);identity.coarseRepresentation=uint32_t(values[3]);
+    identity.fineRepresentation=uint32_t(values[4]);identity.vertexLayout=uint32_t(values[5]);identity.materialMapping=uint32_t(values[6]);
+    destination=result;return true;
+}
+bool Engine::GeometryPageOriginalIdentityMatches(const GeometryPageSourceIdentity& expected,const GeometryPages::SourceIdentity& actual)
+{
+    return expected.sha256==actual.sourceSha256&&expected.geometryOptions==actual.geometryOptions&&
+        expected.materialOptions==actual.materialOptions&&expected.producerVersion==actual.producerVersion&&
+        expected.coarseRepresentation==actual.coarseRepresentation&&expected.fineRepresentation==actual.fineRepresentation&&
+        expected.vertexLayout==actual.vertexLayout&&expected.materialMapping==actual.materialMapping;
+}
+Engine::GeometryPageOriginalStatus Engine::ReadGeometryPageOriginalSnapshot(const GeometryPageOriginalStartupInput& input,
+    std::vector<uint8_t>& destination)
+{
+    using Status=GeometryPageOriginalStatus;
+    if(!Foundation::IsMainThread())return Status::WrongOwner;
+    if(!input.expectedRawBytes||input.expectedRawBytes>128u*1024u)return Status::Capacity;
+    size_t n=0;while(n<input.originalPath.size()&&input.originalPath[n]) {const auto c=uint8_t(input.originalPath[n]);if(c<32||c>126)return Status::Invalid;++n;}
+    bool hash=false;for(auto b:input.expectedOriginal.sha256)hash|=b!=0;
+    if(!n||n==input.originalPath.size()||!hash)return Status::Invalid;
+    try {
+        const auto path=std::filesystem::path(std::string(input.originalPath.data(),n));if(!path.is_absolute())return Status::Invalid;
+        std::ifstream file(path,std::ios::binary|std::ios::ate);if(!file)return Status::IoFailure;
+        const auto end=file.tellg();if(end<0)return Status::IoFailure;
+        const auto size=uint64_t(end);if(size>128u*1024u)return Status::Capacity;
+        if(size!=input.expectedRawBytes)return Status::IdentityMismatch;
+        std::vector<uint8_t> owned(size);if(owned.capacity()>128u*1024u)return Status::Capacity;
+        file.seekg(0);if(!file)return Status::IoFailure;
+        file.read(reinterpret_cast<char*>(owned.data()),std::streamsize(size));
+        if(file.gcount()!=std::streamsize(size)||!file)return Status::IoFailure;
+        if(file.peek()!=std::char_traits<char>::eof())return Status::IdentityMismatch;
+        if(!file.eof()||file.bad())return Status::IoFailure;
+        Foundation::Sha256 sha;sha.Update(owned.data(),owned.size());const auto hex=sha.Hex();
+        const auto digit=[](char c){return uint8_t(c<='9'?c-'0':c-'a'+10);};
+        for(size_t i=0;i<32;++i)if(uint8_t(digit(hex[i*2])*16+digit(hex[i*2+1]))!=input.expectedOriginal.sha256[i])return Status::IdentityMismatch;
+        destination=std::move(owned);return Status::Admitted;
+    } catch(const std::bad_alloc&) {return Status::Capacity;}
+      catch(const std::exception&) {return Status::IoFailure;}
+}
 
 } // namespace Poseidon

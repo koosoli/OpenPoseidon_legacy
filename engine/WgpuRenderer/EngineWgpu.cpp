@@ -1,4 +1,5 @@
 #include "MeshRecordClosure.hpp"
+#include <Poseidon/Graphics/Rendering/GeometryPageControlledMlodAsset.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageRepresentationDecode.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageClodCutDecode.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageClodRamPackage.hpp>
@@ -2088,6 +2089,48 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
 }
 
 // Value-only private fixture state; no source Shape retained after owner export.
+struct EngineWgpu::GeometryPageOriginalAdmissionState
+{
+    GeometryPages::ControlledMlodAsset source;
+    GeometryPageOriginalAdmissionReport report;
+};
+Engine::GeometryPageOriginalAdmissionReport EngineWgpu::SnapshotGeometryPageOriginalAdmission() const
+{
+    if(!Foundation::IsMainThread()) {GeometryPageOriginalAdmissionReport r;r.status=GeometryPageOriginalStatus::WrongOwner;return r;}
+    return _geometryPageOriginalAdmission?_geometryPageOriginalAdmission->report:GeometryPageOriginalAdmissionReport{};
+}
+Engine::GeometryPageOriginalAdmissionReport EngineWgpu::AdmitGeometryPageOriginalStartup(const GeometryPageOriginalStartupInput& input)
+{
+    using Status=GeometryPageOriginalStatus;GeometryPageOriginalAdmissionReport report;
+    const char* enabled=std::getenv("WGR_GEOMETRY_PAGE_ORIGINAL_SOURCE");
+    if(!enabled||std::strcmp(enabled,"1")!=0)return report;
+    if(!Foundation::IsMainThread()){report.status=Status::WrongOwner;return report;}
+    if(_geometryPageOriginalAdmission){report.status=Status::Busy;return report;}
+    // Single bounded admission record, no source path retained and no GPU/worker operation.
+    std::vector<uint8_t> raw;report.status=ReadGeometryPageOriginalSnapshot(input,raw);
+    if(report.status!=Status::Admitted)return report;
+    try {
+        auto owned=std::make_shared<GeometryPageOriginalAdmissionState>();
+        const auto exported=GeometryPages::ExportControlledMlodOwned(std::move(raw),owned->source);
+        if(exported!=GeometryPages::ControlledMlodStatus::Exported) {
+            report.status=exported==GeometryPages::ControlledMlodStatus::Capacity||exported==GeometryPages::ControlledMlodStatus::AllocationFailed?
+                Status::Capacity:exported==GeometryPages::ControlledMlodStatus::Unsupported?Status::Unsupported:Status::Invalid;return report;
+        }
+        if(!GeometryPageOriginalIdentityMatches(input.expectedOriginal,owned->source.original.source)) {report.status=Status::IdentityMismatch;return report;}
+        uint64_t known=sizeof(GeometryPageOriginalAdmissionState)+64; // logical control-block guard, not allocator/RSS.
+        for(const auto* mesh:{&owned->source.original.coarse,&owned->source.original.fine}) {
+            const uint64_t bytes=uint64_t(mesh->positions.capacity())*sizeof(GeometryPages::Position)+
+                uint64_t(mesh->vertices.capacity())*sizeof(SVertex)+uint64_t(mesh->indices.capacity())*sizeof(uint32_t)+
+                uint64_t(mesh->materials.capacity())*sizeof(uint32_t);
+            if(bytes>128u*1024u||known>128u*1024u-bytes){report.status=Status::Capacity;return report;}known+=bytes;
+        }
+        report.status=Status::Admitted;report.epoch=1;report.originalSourceBytes=owned->source.originalSourceBytes;
+        report.knownRetainedBytes=known;report.snapshotValidated=true;owned->report=report;
+        _geometryPageOriginalAdmission=std::move(owned);return report;
+    } catch(const std::bad_alloc&) {report.status=Status::Capacity;return report;}
+      catch(const std::exception&) {report.status=Status::Invalid;return report;}
+}
+
 struct EngineWgpu::GeometryPageFixtureState
 {
     std::mutex mutex;
@@ -8436,6 +8479,9 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
         auto report=_geometryPageFixture->report;updatePageStats(report);return report; };
     if(action==GeometryPageFixtureAction::Snapshot) return _geometryPageFixture?copied():failure;
     try {
+        if(action==GeometryPageFixtureAction::BeginOriginalDiskClodPaged) {
+            GeometryPageFixtureReport unsupported;unsupported.status=GeometryReportStatus::Unsupported;return unsupported;
+        }
         if(action==GeometryPageFixtureAction::BeginDiskClodPaged) {
             using namespace Poseidon::GeometryPages;
             failure.diskPilot=true;failure.diskReadStatus="NotRequested";failure.diskRequestedRepresentation="Coarse";

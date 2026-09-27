@@ -815,6 +815,8 @@ class EngineWgpu : public EngineDummy
     void AbandonUnpublishedSharedMeshLifetime(uint64_t producer);
     struct SharedMeshFixtureState;
     std::shared_ptr<SharedMeshFixtureState> _sharedMeshFixture;
+    struct GeometryPageOriginalAdmissionState;
+    std::shared_ptr<const GeometryPageOriginalAdmissionState> _geometryPageOriginalAdmission;
     struct GeometryPageFixtureState;
     std::shared_ptr<GeometryPageFixtureState> _geometryPageFixture;
     std::shared_ptr<GeometryPageFixtureState> _geometryPageFixtureObservation;
@@ -1348,6 +1350,8 @@ class EngineWgpu : public EngineDummy
     SharedMeshFixtureReport ControlSharedMeshLifetimeFixture(SharedMeshFixtureAction, const Shape* = nullptr) override;
     GeometryPageFixtureReport ControlGeometryPageFixture(GeometryPageFixtureAction,
         float x=1200,float y=11.5f,float z=1200,const GeometryPageDiskFixtureInput* disk=nullptr) override;
+    GeometryPageOriginalAdmissionReport AdmitGeometryPageOriginalStartup(const GeometryPageOriginalStartupInput&) override;
+    GeometryPageOriginalAdmissionReport SnapshotGeometryPageOriginalAdmission() const override;
     void PublishGeometryPageFixtureObservation(const WgrFrame& frame, int32_t renderReturnStatus);
     std::unordered_map<uint32_t, uint32_t> _modelIdOf; // producer -> renderer (post-drain)
     void DrainResourceOps(std::vector<ResourceOp>& ops);

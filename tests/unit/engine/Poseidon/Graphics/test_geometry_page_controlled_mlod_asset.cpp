@@ -183,3 +183,78 @@ TEST_CASE("Controlled friend implementation refuses a non-isolated caller contex
         REQUIRE(Model::ShapeAdapter::ConvertWithContext(model,false,&empty,true,true)==nullptr);
     }
 }
+
+TEST_CASE("Original MLOD DTO copies actual neutral material while source Shape is alive", "[controlled-mlod-asset]")
+{
+    Foundation::CaptureMainThread();OriginalFile raw;ControlledMlodAsset exported;
+    REQUIRE(ExportControlledMlodOwned(raw.bytes,exported)==ControlledMlodStatus::Exported);
+    REQUIRE(exported.coarseMaterial==exported.fineMaterial);
+    const auto& material=exported.fineMaterial;
+    REQUIRE(material.materialType==0);REQUIRE(material.specFlags==0);REQUIRE(material.specularPower==0);
+    REQUIRE(material.ambient==std::array<float,4>{1,1,1,1});
+    REQUIRE(material.diffuse==std::array<float,4>{1,1,1,1});
+    REQUIRE(material.emissive==std::array<float,4>{0,0,0,1});
+    REQUIRE(material.specular==std::array<float,4>{0,0,0,1});
+    REQUIRE(material.forcedDiffuse==std::array<float,4>{0,0,0,1});
+    auto model=Parsed(raw.bytes);std::unique_ptr<LODShapeWithShadow> shape(Model::ShapeAdapter::ConvertControlledMlod(model));
+    REQUIRE(shape!=nullptr);const auto& actualSection=shape->Level(1)->GetSection(0);
+    TLMaterial actual;CreateMaterial(actual,HWhite,actualSection.material);
+    REQUIRE(material.ambient[0]==actual.ambient.R());REQUIRE(material.emissive[3]==actual.emmisive.A());
+    REQUIRE(material.specular[3]==actual.specular.A());
+    ControlledMlodPlainMaterial kept;kept.ambient[0]=37;
+    SECTION("unsupported shading type") {shape->Level(1)->GetSection(0).material=MSShining;}
+    SECTION("special policy") {shape->Level(1)->GetSection(0).properties.SetSpecial(NoShadow);}
+    REQUIRE(ControlledMlodAssetDetail::CapturePlainMaterial(shape->Level(1)->GetSection(0),kept)==ControlledMlodStatus::Unsupported);
+    REQUIRE(kept.ambient[0]==37);
+}
+TEST_CASE("Original MLOD radius encloses actual offset geometry without centering", "[controlled-mlod-asset]")
+{
+    Foundation::CaptureMainThread();OriginalFile raw;ControlledMlodAsset exported;
+    REQUIRE(ExportControlledMlodOwned(raw.bytes,exported)==ControlledMlodStatus::Exported);
+    REQUIRE(std::isfinite(exported.originRadius));REQUIRE(exported.originRadius>5);
+    double maximum=0;
+    for(const auto* mesh:{&exported.original.coarse,&exported.original.fine})for(const auto& vertex:mesh->vertices) {
+        const long double x=vertex.pos.X(),y=vertex.pos.Y(),z=vertex.pos.Z();
+        const long double distance=x*x+y*y+z*z;
+        REQUIRE(static_cast<long double>(exported.originRadius)*exported.originRadius>=distance);
+        maximum=std::max(maximum,double(distance));
+    }
+    REQUIRE(exported.originRadius==std::nextafter(float(std::sqrt(maximum)),std::numeric_limits<float>::infinity()));
+    // Put the farthest point in the authored fallback only: union must not bound
+    // merely the fine stream. This value helper does not mint source identity.
+    auto source=exported.original;
+    source.coarse.vertices[0].pos=Vector3P(10000,10000,10000);source.coarse.positions[0]={10000,10000,10000};
+    float radius=0;REQUIRE(ControlledMlodAssetDetail::OriginRadius(source,radius)==ControlledMlodStatus::Eligible);
+    REQUIRE(static_cast<long double>(radius)*radius>=300000000.L);
+    REQUIRE(source.coarse.vertices[0].pos.X()==10000);
+}
+TEST_CASE("Copied radius refusal is bounded and transactional", "[controlled-mlod-asset]")
+{
+    Foundation::CaptureMainThread();OriginalFile raw;ControlledMlodAsset exported;
+    REQUIRE(ExportControlledMlodOwned(raw.bytes,exported)==ControlledMlodStatus::Exported);
+    auto source=exported.original;float kept=73;auto expected=ControlledMlodStatus::Invalid;
+    SECTION("position table mismatch") {source.coarse.positions[0].x+=1;}
+    SECTION("nonfinite") {source.fine.vertices[0].pos=Vector3P(std::numeric_limits<float>::quiet_NaN(),0,0);}
+    SECTION("stream cap") {source.coarse.vertices.resize(4097);source.coarse.positions.resize(4097);expected=ControlledMlodStatus::Capacity;}
+    SECTION("outside original supported domain") {
+        source.coarse.vertices[0].pos=Vector3P(10001,0,0);source.coarse.positions[0]={10001,0,0};expected=ControlledMlodStatus::Unsupported;
+    }
+    SECTION("empty") {source.fine.vertices.clear();source.fine.positions.clear();}
+    REQUIRE(ControlledMlodAssetDetail::OriginRadius(source,kept)==expected);REQUIRE(kept==73);
+}
+
+TEST_CASE("Origin sphere rounds outward at exact representable and zero radii", "[controlled-mlod-asset]")
+{
+    Foundation::CaptureMainThread();OriginalFile raw;ControlledMlodAsset exported;
+    REQUIRE(ExportControlledMlodOwned(raw.bytes,exported)==ControlledMlodStatus::Exported);
+    for(float distance:{0.f,5.f}) {
+        auto source=exported.original;
+        for(auto* mesh:{&source.coarse,&source.fine})for(size_t i=0;i<mesh->vertices.size();++i) {
+            mesh->vertices[i].pos=Vector3P(distance,0,0);mesh->positions[i]={distance,0,0};
+        }
+        float radius=0;
+        REQUIRE(ControlledMlodAssetDetail::OriginRadius(source,radius)==ControlledMlodStatus::Eligible);
+        REQUIRE(radius==std::nextafter(distance,std::numeric_limits<float>::infinity()));
+        REQUIRE(radius>distance);
+    }
+}

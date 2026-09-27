@@ -33,6 +33,7 @@
 namespace Poseidon
 {
 struct WarmTextureRead;
+namespace GeometryPages { struct SourceIdentity; }
 
 // Per-frame draw-call counter — incremented at the GL emission seams,
 // consumed + reset by World::Simulate's FrameProfiler EndFrame.
@@ -3187,13 +3188,37 @@ class Engine : public IGraphicsEngine
     { return {}; }
 
     // Ready is a returned-main-frame record cut, not all-pass/pixel or GPU-free proof.
-    enum class GeometryPageFixtureAction { Begin, Coarse, Fine, Observe, Snapshot, Abort, BeginClod, Fallback, BeginPaged, RequestFine, PollFine, CancelFine, HoldFine, ReleaseFine, EvictFine, BeginClodPaged, BeginDiskClodPaged, RequestCoarse, PollCoarse };
+    enum class GeometryPageFixtureAction { Begin, Coarse, Fine, Observe, Snapshot, Abort, BeginClod, Fallback, BeginPaged, RequestFine, PollFine, CancelFine, HoldFine, ReleaseFine, EvictFine, BeginClodPaged, BeginDiskClodPaged, RequestCoarse, PollCoarse, BeginOriginalDiskClodPaged };
     struct GeometryPageSourceIdentity
     {
         std::array<uint8_t,32> sha256{};
         uint64_t geometryOptions=0,materialOptions=0;
         uint32_t producerVersion=0,coarseRepresentation=0,fineRepresentation=0,vertexLayout=0,materialMapping=0;
     };
+    // Explicit startup admission probe only; no renderer allocation or disk-frontier consumer.
+    enum class GeometryPageOriginalStatus : uint32_t {
+        Disabled, Admitted, Unsupported, Invalid, Capacity, WrongOwner, IoFailure, IdentityMismatch, Busy
+    };
+    struct GeometryPageOriginalStartupInput {
+        std::array<char,1024> originalPath{};
+        uint64_t expectedRawBytes=0;
+        GeometryPageSourceIdentity expectedOriginal;
+    };
+    struct GeometryPageOriginalAdmissionReport {
+        GeometryPageOriginalStatus status=GeometryPageOriginalStatus::Disabled;
+        uint64_t epoch=0, originalSourceBytes=0, knownRetainedBytes=0;
+        bool snapshotValidated=false;
+    };
+    // Full source-key numbers in decimal: geometry:material:producer:coarse:fine:layout:mapping.
+    static bool ParseGeometryPageOriginalStartupInput(const std::string& path, const std::string& sha256,
+        uint64_t bytes, const std::string& key, GeometryPageOriginalStartupInput& destination);
+    static GeometryPageOriginalStatus ReadGeometryPageOriginalSnapshot(const GeometryPageOriginalStartupInput&,
+        std::vector<uint8_t>& destination);
+    static bool GeometryPageOriginalIdentityMatches(const GeometryPageSourceIdentity&,
+        const GeometryPages::SourceIdentity&);
+    virtual GeometryPageOriginalAdmissionReport AdmitGeometryPageOriginalStartup(const GeometryPageOriginalStartupInput&)
+        { GeometryPageOriginalAdmissionReport r; r.status=GeometryPageOriginalStatus::Unsupported; return r; }
+    virtual GeometryPageOriginalAdmissionReport SnapshotGeometryPageOriginalAdmission() const { return {}; }
     // Explicit private fixture arguments FROM a separately verified offline
     // producer; no Engine file/manifest reads and no retail eligibility authority.
     struct GeometryPageDiskFixtureInput

@@ -2,6 +2,7 @@
 
 #include <Poseidon/Foundation/Strings/RString.hpp>
 #include <string>
+#include <cstdint>
 #include <vector>
 
 // Forward declaration for CLI11
@@ -334,6 +335,11 @@ class AppConfig
 
     /// TCP harness server port (--harness <port>): -1 = disabled, 0 = auto-assign, >0 = explicit
     int GetHarnessPort() const { return _harnessPort; }
+    // Separate opt-in startup source admission probe; no fine-frontier consumer yet.
+    const std::string& GetGeometryOriginalPath() const { return _geometryOriginalPath; }
+    const std::string& GetGeometryOriginalSha256() const { return _geometryOriginalSha256; }
+    const std::string& GetGeometryOriginalKey() const { return _geometryOriginalKey; }
+    uint64_t GetGeometryOriginalBytes() const { return _geometryOriginalBytes; }
 
     // Logging
 
@@ -519,6 +525,8 @@ class AppConfig
     std::string _rdcTrigger;
     int _screenshotDelay = 10;
     std::string _uiTest;
+    std::string _geometryOriginalPath, _geometryOriginalSha256, _geometryOriginalKey;
+    uint64_t _geometryOriginalBytes=0;
     int _harnessPort = -1; // -1 = disabled, 0 = auto-assign, >0 = explicit
 
     // Logging
