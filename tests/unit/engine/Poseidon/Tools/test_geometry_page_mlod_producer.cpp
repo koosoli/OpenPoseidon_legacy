@@ -1,5 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include "../../../../../apps/tools/Tools/commands/ControlledMlodPageProducer.hpp"
+#include <Poseidon/Core/Application.hpp>
+#include <Poseidon/IO/ParamFileExt.hpp>
 #include <atomic>
 #include <chrono>
 #include <iterator>
@@ -23,9 +25,11 @@ struct OriginalGrid
             Text("P3DM");U32(28);U32(256);U32((n+1)*(n+1));U32(1);U32(n*n);U32(0);
             for(unsigned z=0;z<=n;++z)for(unsigned x=0;x<=n;++x){const float px=float(x)/n*4-2,pz=float(z)/n*4-2;
                 F(px);F(.9f*(1-px*px/4)*(1-pz*pz/4));F(pz);U32(0);}
-            F(0);F(1);F(0);
+            // Match the authored Python fixture, not a global P3DM convention.
+            // Existing loader reverses winding and MeshBuild negates normals.
+            F(0);F(-1);F(0);
             for(unsigned z=0;z<n;++z)for(unsigned x=0;x<n;++x){U32(4);
-                const std::array<std::array<unsigned,2>,4> corners{{{x,z},{x,z+1},{x+1,z+1},{x+1,z}}};
+                const std::array<std::array<unsigned,2>,4> corners{{{x,z},{x+1,z},{x+1,z+1},{x,z+1}}};
                 for(auto p:corners){U32(p[1]*(n+1)+p[0]);U32(0);F(float(p[0])/n);F(float(p[1])/n);}
                 U32(0);Z(texture);Z("");}
             Text("TAGG");Tag("#Property#",128);Fixed("autocenter");Fixed("0");Tag("#EndOfFile#",0);F(level?1:10);
@@ -100,4 +104,54 @@ TEST_CASE("Original producer output failure removes only its private artifact pa
     REQUIRE(ProduceFile(files.input,files.output,kept,&refused)==ProducerStatus::IoFailure);
     REQUIRE(kept.manifest=="sentinel");REQUIRE_FALSE(std::filesystem::exists(files.output));
     REQUIRE(std::filesystem::exists(files.input));
+}
+
+TEST_CASE("Authored original grid packs upward faces and matches ordinary conversion", "[geometry-page-mlod-producer]")
+{
+    using namespace Poseidon;
+    using namespace Poseidon::GeometryPages;
+    Foundation::CaptureMainThread();OriginalGrid source;ControlledMlodAsset controlled;
+    REQUIRE(ExportControlledMlodOwned(source.bytes,controlled)==ControlledMlodStatus::Exported);
+    REQUIRE((Pars >> "CfgModels").FindEntry("offline_neutral_mesh_packing")==nullptr);
+    auto model=Asset::Formats::MLODLoader::loadFromBuffer(
+        reinterpret_cast<const char*>(source.bytes.data()),int(source.bytes.size()),"offline-neutral-mesh-packing.p3d");
+    REQUIRE(model.compile());Model::ShapeAdapter::AdapterBankTables empty;
+    std::unique_ptr<LODShapeWithShadow> legacy;
+    {
+        // TestApplication exists normally. Only this ordinary offline comparison
+        // uses the neutral tool context; restore it on assertion/exception too.
+        struct RestoreApplication {decltype(GApp) saved=GApp;~RestoreApplication(){GApp=saved;}} restore;
+        GApp=nullptr;legacy.reset(Model::ShapeAdapter::convertToLODShape(model,false,&empty));
+    }
+    REQUIRE(legacy!=nullptr);
+    ShapeExportSelection select;select.controlledAuthoredRigid=true;select.coarseLevel=0;select.fineLevel=1;
+    select.source=controlled.original.source;ShapeExport baseline;
+    REQUIRE(ExportShapePair(*legacy,select,baseline)==ExportStatus::Exported);
+    const auto upward=[](const ExportedMesh& mesh) {
+        REQUIRE_FALSE(mesh.vertices.empty());REQUIRE(mesh.indices.size()%3==0);
+        for(const auto& vertex:mesh.vertices) {
+            REQUIRE(vertex.norm.X()==0);REQUIRE(vertex.norm.Y()==1);REQUIRE(vertex.norm.Z()==0);
+        }
+        for(size_t i=0;i<mesh.indices.size();i+=3) {
+            REQUIRE(mesh.indices[i]<mesh.vertices.size());REQUIRE(mesh.indices[i+1]<mesh.vertices.size());
+            REQUIRE(mesh.indices[i+2]<mesh.vertices.size());
+            const auto& a=mesh.vertices[mesh.indices[i]].pos;
+            const auto& b=mesh.vertices[mesh.indices[i+1]].pos;
+            const auto& c=mesh.vertices[mesh.indices[i+2]].pos;
+            // Independent x/z determinant: actual packed triangle faces upward.
+            const double crossY=(double(b.Z())-a.Z())*(double(c.X())-a.X())-
+                                (double(b.X())-a.X())*(double(c.Z())-a.Z());
+            REQUIRE(std::isfinite(crossY));REQUIRE(crossY>0);
+        }
+    };
+    for(const auto pair:{std::pair{&controlled.original.coarse,&baseline.coarse},
+                         std::pair{&controlled.original.fine,&baseline.fine}}) {
+        REQUIRE(pair.first->indices==pair.second->indices);REQUIRE(pair.first->materials==pair.second->materials);
+        REQUIRE(pair.first->vertices.size()==pair.second->vertices.size());
+        REQUIRE(std::memcmp(pair.first->vertices.data(),pair.second->vertices.data(),
+            pair.first->vertices.size()*sizeof(SVertex))==0);
+        upward(*pair.first);upward(*pair.second);
+    }
+    Product selected;REQUIRE(BuildOwned(source.bytes,selected)==ProducerStatus::Produced);
+    upward(selected.selected.selectedGeometry.coarse);upward(selected.selected.selectedGeometry.fine);
 }

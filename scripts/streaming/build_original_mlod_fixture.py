@@ -65,12 +65,14 @@ def original_grid() -> bytes:
                 scalar(height)
                 scalar(pz)
                 u32(0)  # actual raw point flags
-        for normal in (0.0, 1.0, 0.0):
+        # Existing P3DM loader reverses faces; MeshBuild negates normals.
+        # Author the fixture so its actual packed triangles and normals face up.
+        for normal in (0.0, -1.0, 0.0):
             scalar(normal)
         for z in range(n):
             for x in range(n):
                 u32(4)
-                for cx, cz in ((x, z), (x, z + 1), (x + 1, z + 1), (x + 1, z)):
+                for cx, cz in ((x, z), (x + 1, z), (x + 1, z + 1), (x, z + 1)):
                     u32(cz * (n + 1) + cx)
                     u32(0)  # normal index
                     scalar(f32(float(cx) / n))
