@@ -5,11 +5,12 @@ param(
     [switch]$LodDemandReport,
     [switch]$OwnerLedger,
     [switch]$MeshAck,
+    [switch]$RegisteredRefs,
     [string]$Label = 'dayz-resource-convergence',
     [string]$GameDir = 'D:\SteamLibrary\steamapps\common\ARMA Cold War Assault'
 )
 $ErrorActionPreference = 'Stop'
-if ($MeshAck) { $OwnerLedger = $true }
+if ($MeshAck -or $RegisteredRefs) { $OwnerLedger = $true }
 if ($DiagnosticOnly -or $LodDemandReport -or $OwnerLedger) { $AllocationReport = $true }
 if (!$env:LOCK_OWNER) {
     $shellName = if ($PSVersionTable.PSEdition -eq 'Core') { 'pwsh.exe' } else { 'powershell.exe' }
@@ -23,6 +24,7 @@ if (!$env:LOCK_OWNER) {
     if ($LodDemandReport) { $lockArgs += '-LodDemandReport' }
     if ($OwnerLedger) { $lockArgs += '-OwnerLedger' }
     if ($MeshAck) { $lockArgs += '-MeshAck' }
+    if ($RegisteredRefs) { $lockArgs += '-RegisteredRefs' }
     $env:LOCK_OWNER = 'DayZ resource convergence'
     try {
         & 'C:\Program Files\Git\bin\bash.exe' @lockArgs
@@ -61,6 +63,7 @@ $environment = @{
 if ($LodDemandReport) { $environment.WGR_GEOMETRY_LOD_FEEDBACK = '1' }
 if ($OwnerLedger) { $environment.WGR_GEOMETRY_OWNER_LEDGER = '1' }
 if ($MeshAck) { $environment.WGR_GEOMETRY_MESH_ACK = '1' }
+if ($RegisteredRefs) { $environment.WGR_GEOMETRY_REGISTERED_REFS = '1' }
 # Remove inherited experiments, then restore the caller's environment on exit.
 # Ordinary terrain paging remains the installed engine default.
 $clearNames = @((Get-ChildItem Env: | Where-Object {
@@ -77,6 +80,7 @@ try {
     @{
         scriptSha256 = (Get-FileHash $PSCommandPath).Hash; head = (& git -C $root rev-parse HEAD)
         meshAck = [bool]$MeshAck
+        registeredRefs = [bool]$RegisteredRefs
         installed = (Get-Content (Join-Path $GameDir 'DEPLOYED-FROM.txt')); hashes = @(Get-FileHash $exe, $dll)
         corpus = 'DayZ'; pose = @($baseX, $baseZ, $baseY, $azimuth, $elevation); routeX = $route; cycles = $(if ($DiagnosticOnly) { 0 } else { 3 })
         environment = $environment; driverSampled = [bool]$SampleDriverMemory
@@ -255,6 +259,28 @@ try {
             if (!$MeshAck -and ($report.rendererMeshAckEnabled -or $report.rendererMeshAckTicket -ne 0 -or $report.rendererMeshAckState -ne 0)) {
                 throw 'Default-off run unexpectedly acquired a mesh queue acknowledgement ticket'
             }
+            if ($RegisteredRefs) {
+                if (!$report.rendererRegisteredRefsEnabled -or !$report.rendererRegisteredRefsValid -or !$report.rendererRegisteredRefsComplete -or
+                    $report.rendererRegisteredRefsCalls -ne 1 -or $report.rendererRegisteredRefsRows -ne $report.rendererMeshFactsRequested -or
+                    $report.rendererRegisteredRefsRows -gt 8192 -or $report.rendererRegisteredModelsVisited -gt 8192 -or
+                    $report.rendererRegisteredLodsVisited -gt 262144 -or $report.rendererRegisteredSectionsVisited -gt 1048576 -or
+                    $report.rendererRegisteredRefusalFlags -ne 0 -or $report.rendererRegisteredMissingRecords -ne 0 -or
+                    $report.rendererRegisteredReferencedMeshes -lt 1 -or $report.rendererRegisteredModelRefs -lt 1 -or
+                    $report.rendererRegisteredModelLodRefs -lt $report.rendererRegisteredModelRefs -or
+                    $report.rendererRegisteredSectionOccurrences -lt $report.rendererRegisteredModelLodRefs -or
+                    $report.rendererRegisteredSectionOccurrences -gt $report.rendererRegisteredSectionsVisited) {
+                    throw 'Actual registered-section census is incomplete, invalid or not exercised'
+                }
+                $referenceSamples = @($report.rendererRegisteredRefSamples)
+                if (!$referenceSamples.Count -or $referenceSamples.Count -gt 8) { throw 'Registered reference sample bound failed' }
+                foreach ($reference in $referenceSamples) {
+                    if ([uint64]$reference.mesh -eq 0 -or $reference.models -lt 1 -or $reference.modelLods -lt $reference.models -or
+                        $reference.sections -lt $reference.modelLods -or $reference.flags -ne 0) { throw 'Registered full-handle sample is inconsistent' }
+                }
+            } elseif ($report.rendererRegisteredRefsEnabled -or $report.rendererRegisteredRefsCalls -ne 0 -or
+                $report.rendererRegisteredRefsRows -ne 0 -or @($report.rendererRegisteredRefSamples).Count) {
+                throw 'Default-off run unexpectedly scanned registered section references'
+            }
             if ($report.registryEntriesVisited -gt $report.maxModels -or
                 ($report.modelsRequested + $report.ineligibleEntriesSkipped) -ne $report.registryEntriesVisited) { throw 'Registry sampling and negative-cache accounting disagree' }
             if ($report.missingModels -ne 0 -or $report.missingMeshes -ne 0) { throw 'Settled eligible retained models or meshes are missing' }
@@ -317,6 +343,7 @@ try {
         returns = $returns; comparison = $comparison; lateQuiet = $lateQuiet; retiredClear = $retiredClear
         processScope = 'Diagnostic private/RSS samples retained; GPU convergence does not establish process-memory convergence'
         allocationReport = $allocation; lodDemandMeasured = [bool]$LodDemandReport; ownerLedgerMeasured = [bool]$OwnerLedger; meshAckMeasured = [bool]$MeshAck
+        registeredRefsMeasured = [bool]$RegisteredRefs
     } | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $out 'result.json')
     Write-Output "Resource convergence evidence: $out ($status)"
     if (!$converged -and !$DiagnosticOnly) { throw "Convergence not established: $status (see result.json and raw samples)" }

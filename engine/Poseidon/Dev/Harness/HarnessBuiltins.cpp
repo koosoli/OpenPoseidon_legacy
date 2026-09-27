@@ -526,6 +526,27 @@ void RegisterScreenshot(HarnessServer& hs)
                 GEOMETRY_REPORT_FIELD(rendererMeshFactsPresentScheduledRetired); GEOMETRY_REPORT_FIELD(rendererMeshFactsAbsentScheduledRetired);
                 GEOMETRY_REPORT_FIELD(rendererMeshFactsAbsentWithPersistentOwners);
                 GEOMETRY_REPORT_FIELD(rendererMeshFactVertexBytes); GEOMETRY_REPORT_FIELD(rendererMeshFactIndexBytes);
+                cJSON_AddBoolToObject(result, "rendererRegisteredRefsEnabled", report.rendererRegisteredRefsEnabled);
+                cJSON_AddBoolToObject(result, "rendererRegisteredRefsValid", report.rendererRegisteredRefsValid);
+                cJSON_AddBoolToObject(result, "rendererRegisteredRefsComplete", report.rendererRegisteredRefsComplete);
+                cJSON_AddStringToObject(result, "rendererRegisteredRefsScope", "Bounded current registered model/LOD section census for requested full-generation handles; sample rows max8; excludes uploader, caller frame arrays, skin/bake and in-flight work; zero references do not prove safe reclamation");
+                GEOMETRY_REPORT_FIELD(rendererRegisteredRefsCalls); GEOMETRY_REPORT_FIELD(rendererRegisteredRefsRows);
+                GEOMETRY_REPORT_FIELD(rendererRegisteredModelsVisited); GEOMETRY_REPORT_FIELD(rendererRegisteredLodsVisited);
+                GEOMETRY_REPORT_FIELD(rendererRegisteredSectionsVisited); GEOMETRY_REPORT_FIELD(rendererRegisteredMissingRecords);
+                GEOMETRY_REPORT_FIELD(rendererRegisteredReferencedMeshes); GEOMETRY_REPORT_FIELD(rendererRegisteredModelRefs);
+                GEOMETRY_REPORT_FIELD(rendererRegisteredModelLodRefs); GEOMETRY_REPORT_FIELD(rendererRegisteredSectionOccurrences);
+                GEOMETRY_REPORT_FIELD(rendererRegisteredRefusalFlags);
+                auto* referenceSamples = cJSON_AddArrayToObject(result, "rendererRegisteredRefSamples");
+                for (const auto& row : report.rendererRegisteredRefSamples) {
+                    auto* item = cJSON_CreateObject();
+                    // Preserve the full handle even above JSON's exact number range.
+                    cJSON_AddStringToObject(item, "mesh", std::to_string(row.mesh).c_str());
+                    cJSON_AddNumberToObject(item, "models", double(row.models));
+                    cJSON_AddNumberToObject(item, "modelLods", double(row.modelLods));
+                    cJSON_AddNumberToObject(item, "sections", double(row.sections));
+                    cJSON_AddNumberToObject(item, "flags", row.flags);
+                    cJSON_AddItemToArray(referenceSamples, item);
+                }
                 cJSON_AddBoolToObject(result, "rendererMeshAckEnabled", report.rendererMeshAckEnabled);
                 cJSON_AddBoolToObject(result, "rendererMeshAckValid", report.rendererMeshAckValid);
                 cJSON_AddStringToObject(result, "rendererMeshAckScope", "Immutable mesh-record cut followed by completion of queue work preceding the labelled main submission; no future-reference, device-free or shared-pool reclamation proof");

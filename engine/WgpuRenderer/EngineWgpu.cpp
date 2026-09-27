@@ -1388,6 +1388,8 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
         _geometryOwnerLedger->BeginEpoch(_geometryOwnerEpoch, true);
         const char* meshAck = std::getenv("WGR_GEOMETRY_MESH_ACK");
         _geometryMeshAckEnabled = meshAck && std::strcmp(meshAck, "1") == 0;
+        const char* registeredRefs = std::getenv("WGR_GEOMETRY_REGISTERED_REFS");
+        _geometryRegisteredRefsEnabled = registeredRefs && std::strcmp(registeredRefs, "1") == 0;
     }
     _cpuMeshLink->engine = this; // see CpuMeshLink; nulled in ~EngineWgpu
     s_self = this;
@@ -2943,6 +2945,58 @@ void EngineWgpu::FillGeometryMeshFacts(GeometryAllocationReport& report)
             totals.handles_inspected == handles.trackedAllocations && totals.duplicate_handles == 0 &&
             report.rendererMeshFactsUnknownMappings == 0 && report.rendererMeshFactsAbsentWithPersistentOwners == 0 &&
             report.rendererMeshFactsPresentScheduledRetired == 0;
+        if (_geometryRegisteredRefsEnabled)
+        {
+            report.rendererRegisteredRefsEnabled = true;
+            std::vector<WgrRegisteredMeshRef> references(ids.size());
+            WgrRegisteredMeshRefSummary census{};
+            ++report.rendererRegisteredRefsCalls;
+            const uint32_t status = wgr_registered_mesh_refs(_renderer,
+                WgrSlice<uint64_t>{ids.data(), static_cast<uint32_t>(ids.size())}, references.data(),
+                static_cast<uint32_t>(references.size()), &census);
+            // Both observations are made consecutively on this renderer owner;
+            // no draw/submission or model mutation occurs between these calls.
+            // This does not freeze the independently owned uploader or GPU work.
+            bool referenceValid = status == 1 && census.rows_written == ids.size() && census.reserved == 0 &&
+                census.complete <= 1 && (census.refusal_flags & ~7u) == 0 &&
+                bool(census.complete) == (census.refusal_flags == 0) &&
+                census.models_visited <= 8192 && census.lods_visited <= 262144 && census.sections_visited <= 1048576;
+            uint64_t referenced = 0, modelRefs = 0, lodRefs = 0, sections = 0, missing = 0;
+            for (size_t i = 0; referenceValid && i < references.size(); ++i)
+            {
+                const auto& row = references[i];
+                referenceValid = row.mesh == ids[i] && row.reserved == 0 && (row.flags & ~1u) == 0 &&
+                    row.distinct_models <= row.distinct_model_lods && row.distinct_model_lods <= row.section_occurrences &&
+                    row.section_occurrences <= census.sections_visited &&
+                    bool(row.flags & 1u) == (row.section_occurrences != 0 && facts[i].state == 2);
+                if (!referenceValid) break;
+                referenced += row.section_occurrences != 0;
+                modelRefs += row.distinct_models; lodRefs += row.distinct_model_lods;
+                sections += row.section_occurrences; missing += (row.flags & 1u) != 0;
+                if (sections > census.sections_visited || missing > census.missing_records) referenceValid = false;
+            }
+            if (referenceValid && missing == census.missing_records)
+            {
+                report.rendererRegisteredRefsValid = true;
+                report.rendererRegisteredRefsComplete = census.complete == 1;
+                report.rendererRegisteredRefsRows = census.rows_written;
+                report.rendererRegisteredModelsVisited = census.models_visited;
+                report.rendererRegisteredLodsVisited = census.lods_visited;
+                report.rendererRegisteredSectionsVisited = census.sections_visited;
+                report.rendererRegisteredMissingRecords = census.missing_records;
+                report.rendererRegisteredRefusalFlags = census.refusal_flags;
+                report.rendererRegisteredReferencedMeshes = referenced;
+                report.rendererRegisteredModelRefs = modelRefs;
+                report.rendererRegisteredModelLodRefs = lodRefs;
+                report.rendererRegisteredSectionOccurrences = sections;
+                for (const auto& row : references)
+                {
+                    if (report.rendererRegisteredRefSamples.size() == 8) break;
+                    if (row.section_occurrences) report.rendererRegisteredRefSamples.push_back(
+                        {row.mesh, row.distinct_models, row.distinct_model_lods, row.section_occurrences, row.flags});
+                }
+            }
+        }
         if (_geometryMeshAckEnabled)
         {
             report.rendererMeshAckEnabled = true;
@@ -8795,6 +8849,59 @@ void EngineWgpu::PrepareNativeNormalSources(LODShapeWithShadow* shape)
     if (loaded)
         LOG_INFO(Graphics, "Native normal prefetch: model={} sources={} ms={:.3f}", shape->Name(), loaded,
                  std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count());
+}
+
+render::RegistrationCost EngineWgpu::QueryRegistrationCost(const LODShapeWithShadow* shape) const
+{
+    if (!Foundation::IsMainThread()) return render::RegistrationCost::Unknown;
+    if (!_gpuDriven || !_renderer) return render::RegistrationCost::Reusable;
+    if (!shape) return render::RegistrationCost::Unknown;
+    // At most one parent plus 128 direct children, each with <=128 binding checks.
+    // No recursion, section/vertex scans, native calls, or mutable residency touches.
+    const auto ownRegistration = [&](const LODShapeWithShadow* key)
+    {
+        const auto model = _gpuModels.find(key);
+        if (model == _gpuModels.end()) return render::RegistrationCost::NeedsRegistration;
+        const bool parked = _gpuModelParkedIndex.find(key) != _gpuModelParkedIndex.end();
+        const auto handles = _gpuModelTextureHandles.find(key);
+        const auto textures = _gpuModelTextures.find(key);
+        const bool complete = handles != _gpuModelTextureHandles.end() &&
+            textures != _gpuModelTextures.end() && handles->second.size() == textures->second.size();
+        const size_t count = complete ? handles->second.size() : 0;
+        // RegisterGpuModel itself does not emit nested proxies for this shape.
+        return render::ClassifyRegistrationCost(true, model->second == WGR_INVALID_MODEL,
+            false, parked, complete, count, [&](size_t i)
+            {
+                const TextureWgpu* texture = textures->second[i];
+                if (!texture || !texture->GpuHandle()) return false;
+                const auto& captured = handles->second[i];
+                return captured.handle == texture->GpuHandle() ||
+                    captured.SameSlot(texture->GpuHandle(), texture->SlotLease());
+            });
+    };
+    const auto parentCost = ownRegistration(shape);
+    if (parentCost != render::RegistrationCost::Reusable) return parentCost;
+    const auto model = _gpuModels.find(shape);
+    if (model->second == WGR_INVALID_MODEL) return render::RegistrationCost::Reusable;
+    const auto coverage = _gpuModelCoverage.find(shape);
+    if (coverage == _gpuModelCoverage.end()) return render::RegistrationCost::Unknown;
+    if (coverage->second == GpuDrawCoverage::Full) return render::RegistrationCost::Reusable;
+    if (coverage->second != GpuDrawCoverage::Partial) return render::RegistrationCost::Unknown;
+    return render::ClassifyDirectProxyRegistrationCost(shape->NLevels(),
+        [&](int level) { return shape->IsNormalLevel(level); },
+        [&](int level)
+        {
+            const Shape* lod = shape->LevelOpaque(level); // Raw getter, no lazy load.
+            return lod ? lod->NProxies() : 0;
+        },
+        [&](int level, int index)
+        {
+            const ProxyObject& proxy = shape->LevelOpaque(level)->Proxy(index);
+            const LODShapeWithShadow* child = proxy.obj ? proxy.obj->GetShape() : nullptr;
+            // ProxyHidden is a find/count-only owner lookup. Match EmitGpuProxies' skip.
+            if (!child || MapThings::ProxyHidden(shape, child)) return render::RegistrationCost::Reusable;
+            return ownRegistration(child);
+        });
 }
 
 uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)

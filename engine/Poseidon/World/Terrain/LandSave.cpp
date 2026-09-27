@@ -3866,6 +3866,26 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
     const float admitCeilingMs = ObjectStreamCeilingMs();
     // (c3) Counted mode: neither clock is consulted; cold attempts are the ration instead.
     const bool admitCounted = ObjectStreamAdmitCounted();
+    static const bool registrationQuotaOptIn = []
+    {
+        const char* value = std::getenv("WGR_OBJECT_STREAM_REGISTRATION_QUOTA");
+        return value && std::strcmp(value, "1") == 0;
+    }();
+    const bool registrationQuota = admitCounted && registrationQuotaOptIn;
+    uint32_t registrationReusable = 0, registrationNeeded = 0, registrationUnknown = 0;
+    uint32_t registrationCharged = 0, registrationPromotions = 0;
+    auto registrationCost = [&](const LODShapeWithShadow* shape)
+    {
+        const auto cost = GEngine ? GEngine->QueryRegistrationCost(shape)
+                                 : render::RegistrationCost::Reusable;
+        switch (cost)
+        {
+        case render::RegistrationCost::Reusable: ++registrationReusable; break;
+        case render::RegistrationCost::NeedsRegistration: ++registrationNeeded; break;
+        case render::RegistrationCost::Unknown: ++registrationUnknown; break;
+        }
+        return cost;
+    };
     const uint32_t admitColdBudget =
         preloading ? std::numeric_limits<uint32_t>::max() : ObjectStreamColdPerUpdate();
     uint32_t coldAttempted = 0; // cold models this update paid for, admitted or not
@@ -4008,6 +4028,17 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
             {
                 if (placement.resident && _modernLogicalOnlyObjects.contains(placement.id))
                 {
+                    if (registrationQuota)
+                    {
+                        ++attempted;
+                        ++registrationPromotions;
+                        if (render::ChargeRegistrationCost(true, false,
+                                registrationCost(placement.resident->GetShape())))
+                        {
+                            ++coldAttempted;
+                            ++registrationCharged;
+                        }
+                    }
                     RegisterModernObjectVisual(placement.resident);
                     _modernLogicalOnlyObjects.erase(placement.id);
                     if (_nativeFarActive.erase(index) && GEngine)
@@ -4023,7 +4054,8 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
             // Warm or cold? Warm = ShapeBank still holds it (an Object or the eviction cache
             // keeps it alive), and ObjectCreate below is the ~0.03 ms path. Cold is the ~90 ms
             // path, and the only one the preparer has anything to say about.
-            const bool cold = Shapes.Find(modelName, false, true) == nullptr;
+            const auto* warmShape = Shapes.Find(modelName, false, true);
+            const bool cold = warmShape == nullptr;
             std::shared_ptr<Model::Model> preparsed;
             LODShapeWithShadow* preadapted = nullptr;
             if (cold && asyncOn)
@@ -4183,6 +4215,12 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
             ++cursor;
             ++scan;
             ++attempted;
+            if (registrationQuota && !cold &&
+                render::ChargeRegistrationCost(true, false, registrationCost(warmShape)))
+            {
+                ++coldAttempted;
+                ++registrationCharged;
+            }
             Matrix4 transform;
             transform.SetDirectionAside(Vector3(placement.rows[0], placement.rows[1], placement.rows[2]));
             transform.SetDirectionUp(Vector3(placement.rows[3], placement.rows[4], placement.rows[5]));
@@ -4538,6 +4576,12 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                  prep.workerMs, prep.workerMaxMs, _modernObjectColdParseMs, _modernObjectColdAdaptMs,
                  _modernObjectColdOptimizeMs, _modernObjectColdCreateMs, _modernObjectColdModels,
                  _modernObjectAsyncInstalled, _modernObjectAsyncWaited, _modernObjectSyncCold);
+        if (registrationQuota)
+            LOG_INFO(World,
+                     "Object stream registration quota: reusable={} needed={} unknown={} warmCharged={} "
+                     "promotions={} expensiveAttempts={} limit={} ownerStateOnly=1",
+                     registrationReusable, registrationNeeded, registrationUnknown, registrationCharged,
+                     registrationPromotions, coldAttempted, admitColdBudget);
         // The `create` split and the texture-prepare pipeline, cumulative, as their own row so
         // the main row's format (which scripts already parse) is untouched. `createsplit` sums
         // to ~create above: reg (RegisterGpuModel) + other (NewObject/AddObject/lights); reg

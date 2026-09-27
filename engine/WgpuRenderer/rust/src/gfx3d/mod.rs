@@ -6,6 +6,7 @@ pub(crate) mod pool;
 mod allocation_report;
 mod mesh_facts;
 mod mesh_ack;
+mod registered_mesh_refs;
 mod local_pose_cache;
 mod lod_feedback;
 use pool::{GeometryPool, MeshAlloc};
@@ -3819,6 +3820,7 @@ struct LocalPoseTrace {
 pub struct Gfx3d {
     // Explicit snapshot diagnostic only: no allocation/callback/poll when OFF.
     mesh_ack_enabled: bool,
+    registered_mesh_refs_enabled: bool,
     mesh_ack: Option<Box<mesh_ack::MeshAck>>,
     cameras: CameraGroup,
     conform: ConformGroup,
@@ -4760,6 +4762,7 @@ impl Gfx3d {
 
         Gfx3d {
             mesh_ack_enabled: std::env::var("WGR_GEOMETRY_MESH_ACK").is_ok_and(|v| v == "1"),
+            registered_mesh_refs_enabled: std::env::var("WGR_GEOMETRY_REGISTERED_REFS").is_ok_and(|v| v == "1"),
             mesh_ack: None,
             cameras,
             conform,
@@ -5414,6 +5417,20 @@ impl Gfx3d {
             Some((u64::from(mesh.vert_count) * std::mem::size_of::<WgrMeshVertex>() as u64,
                 u64::from(mesh.index_count) * std::mem::size_of::<u32>() as u64))
         })
+    }
+
+    /// Explicit bounded census only. No current-frame/uploader/bake ownership,
+    /// queue completion, deallocation decision or cached output lifetime claim.
+    pub(crate) fn registered_mesh_refs(&self, handles: &[u64], out: &mut [crate::ffi::WgrRegisteredMeshRef],
+        summary: &mut crate::ffi::WgrRegisteredMeshRefSummary) -> u32 {
+        if !self.registered_mesh_refs_enabled { return 0; }
+        if out.len() < handles.len() || !registered_mesh_refs::valid_handles(handles) { return 2; }
+        let (models, lods) = self.cull.registered_reference_tables();
+        let (rows, totals) = registered_mesh_refs::collect(handles, models, lods, &self.gpu_section_src,
+            |src| src.mesh, |handle| self.meshes.contains_key(KeyData::from_ffi(handle).into()),
+            registered_mesh_refs::LIMITS);
+        out[..rows.len()].copy_from_slice(&rows); *summary = totals;
+        1
     }
 
     pub(crate) fn request_mesh_snapshot_ack(&mut self, epoch: u64, handles: &[u64],

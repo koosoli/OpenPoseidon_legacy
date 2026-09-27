@@ -9,10 +9,12 @@ param(
     [switch]$PaaPreparationDiagnostics,
     [switch]$PackedTextures,
     [switch]$PaaPreparationInflight,
+    [switch]$RegistrationQuota,
     [string]$Label = 'dayz-streaming-latency',
     [string]$GameDir = 'D:\SteamLibrary\steamapps\common\ARMA Cold War Assault'
 )
 $ErrorActionPreference = 'Stop'
+if ($RegistrationQuota -and $AdmissionMode -ne 'Counted') { throw 'Registration quota requires counted admission' }
 if ($PaaPreparationDiagnostics -or $PaaPreparationInflight) { $PackedTextures = $true }
 if (!$env:LOCK_OWNER) {
     $shellName = if ($PSVersionTable.PSEdition -eq 'Core') { 'pwsh.exe' } else { 'powershell.exe' }
@@ -29,6 +31,7 @@ if (!$env:LOCK_OWNER) {
         if ($PaaPreparationDiagnostics) { $argv += '-PaaPreparationDiagnostics' }
         if ($PackedTextures) { $argv += '-PackedTextures' }
         if ($PaaPreparationInflight) { $argv += '-PaaPreparationInflight' }
+        if ($RegistrationQuota) { $argv += '-RegistrationQuota' }
         & 'C:\Program Files\Git\bin\bash.exe' @argv
         if ($LASTEXITCODE) { throw "Latency screening exited $LASTEXITCODE" }
     } finally { Remove-Item Env:LOCK_OWNER }
@@ -83,6 +86,7 @@ if ($LazyTextureGroups) { $environment.WGR_LAZY_TEXTURE_BIND_GROUPS = '1' }
 if ($PaaLzoReplay) { $environment.WGR_PAA_LZO_REPLAY_CACHE = '1' }
 if ($PackedTextures) { $environment.WGR_OBJECT_STREAM_PBO_TEXTURES = '1' }
 if ($PaaPreparationInflight) { $environment.WGR_PAA_PREP_INFLIGHT = '1' }
+if ($RegistrationQuota) { $environment.WGR_OBJECT_STREAM_REGISTRATION_QUOTA = '1' }
 if ($PaaPreparationDiagnostics) {
     $environment.WGR_PAA_PREP_ATTEMPT_DIAG = '1'
 }
@@ -102,6 +106,7 @@ try {
         paaLzoReplay = [bool]$PaaLzoReplay
         paaPreparationDiagnostics = [bool]$PaaPreparationDiagnostics
         packedTextures = [bool]$PackedTextures; paaPreparationInflight = [bool]$PaaPreparationInflight
+        registrationQuota = [bool]$RegistrationQuota
         installed = (Get-Content (Join-Path $GameDir 'DEPLOYED-FROM.txt')); hashes = $initialHashes
         world = $world; environment = $environment; clearedEnvironmentNames = $clearNames
         pose = @($baseX, $baseZ, $baseY, $azimuth, $elevation); routeX = $route; poseHoldSeconds = 3
@@ -238,6 +243,21 @@ try {
         rows = @($inflightRows | ForEach-Object { $_.Line })
         scope = 'First exact immutable-member overlapping attempt suppressed; ordinary owner fallback remains. Snapshot is not route totals, pending peer publication success, physical memory or performance acceptance'}
     $inflightProof | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $out 'paa-inflight-proof.json')
+    $quotaRows = @(Select-String -LiteralPath $log -Pattern 'Object stream registration quota: reusable=(\d+) needed=(\d+) unknown=(\d+) warmCharged=(\d+) promotions=(\d+) expensiveAttempts=(\d+) limit=(\d+) ownerStateOnly=1')
+    if (!$RegistrationQuota -and $quotaRows.Count) { throw 'Default run unexpectedly applied registration-cost quota' }
+    $warmChargedObserved = $false
+    foreach ($row in $quotaRows) {
+        $m = $row.Matches[0]
+        if ([uint64]$m.Groups[6].Value -gt [uint64]$m.Groups[7].Value) { throw 'Registration quota exceeded its counted expensive-attempt limit' }
+        if ([uint64]$m.Groups[4].Value -ne ([uint64]$m.Groups[2].Value + [uint64]$m.Groups[3].Value) -or
+            [uint64]$m.Groups[4].Value -gt [uint64]$m.Groups[6].Value) { throw 'Registration quota classifications and charged work disagree' }
+        if ([uint64]$m.Groups[4].Value -gt 0 -and [uint64]$m.Groups[7].Value -eq 2) { $warmChargedObserved = $true }
+    }
+    if ($RegistrationQuota -and (!$quotaRows.Count -or !$warmChargedObserved)) { throw 'Registration quota did not exercise counted warm registration work' }
+    $quotaProof = @{enabled = [bool]$RegistrationQuota; warmChargedObserved = $warmChargedObserved
+        rows = @($quotaRows | ForEach-Object { $_.Line })
+        scope = 'Sampled existing residency log cadence; counted warm registration scheduling only, not texture readiness, total route work, a frame deadline or cross-machine determinism'}
+    $quotaProof | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $out 'registration-quota-proof.json')
     @{passed = $true; mode = $Mode; admissionMode = $AdmissionMode; parkedTextureRefill = [bool]$ParkedTextureRefill; lazyTextureGroups = [bool]$LazyTextureGroups; warmProfile = [bool]$WarmProfile; screeningOnly = $true; performanceAccepted = $false; terrainPageTimings = [bool]$TerrainPageTimings
         frameCount = $count; dropped = $dropped; enginePhaseTiming = $phases; baseline = $baseline; returned = $returned
         routeSamples = $routeSamples; postExitHashes = $finalHashes
@@ -246,6 +266,7 @@ try {
         paaPreparationDiagnostics = [bool]$PaaPreparationDiagnostics; paaPreparationProof = $attemptProof
         packedTextures = [bool]$PackedTextures; paaPreparationInflight = [bool]$PaaPreparationInflight
         paaPreparationInflightProof = $inflightProof
+        registrationQuota = [bool]$RegistrationQuota; registrationQuotaProof = $quotaProof
         limitation = 'No automatic performance threshold, vanilla parity, cold-cache guarantee or whole-world query readiness; compare matched separate mode processes'
     } | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $out 'result.json')
     Write-Output "DayZ latency screening evidence: $out"

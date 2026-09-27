@@ -6,6 +6,7 @@
 #define __ENGINE_HPP
 
 #include <Poseidon/Core/Types.hpp>
+#include <Poseidon/Graphics/Rendering/Shape/RegistrationCostPolicy.hpp>
 
 #include <cstdlib> // RFG-089: env seed for GrassSettings::enfusionBlades
 #include <Poseidon/Foundation/Math/Math3D.hpp>
@@ -1674,6 +1675,11 @@ class Engine : public IGraphicsEngine
       };
       struct GeometryAllocationReport
       {
+          struct RegisteredMeshRef
+          {
+              uint64_t mesh = 0, models = 0, modelLods = 0, sections = 0;
+              uint32_t flags = 0;
+          };
           uint64_t requestId = 0;
           std::vector<GeometryAllocationRow> rows;
           uint64_t uniqueVertexBytes = 0, uniqueIndexBytes = 0;
@@ -1718,6 +1724,17 @@ class Engine : public IGraphicsEngine
           uint64_t rendererMeshFactsPresentScheduledRetired = 0, rendererMeshFactsAbsentScheduledRetired = 0;
           uint64_t rendererMeshFactsAbsentWithPersistentOwners = 0;
           uint64_t rendererMeshFactVertexBytes = 0, rendererMeshFactIndexBytes = 0;
+          // Bounded registered section census, separate from complete allocation
+          // ownership. Zero references never imply safe reclamation.
+          bool rendererRegisteredRefsEnabled = false, rendererRegisteredRefsValid = false;
+          bool rendererRegisteredRefsComplete = false;
+          uint64_t rendererRegisteredRefsCalls = 0, rendererRegisteredRefsRows = 0;
+          uint64_t rendererRegisteredModelsVisited = 0, rendererRegisteredLodsVisited = 0;
+          uint64_t rendererRegisteredSectionsVisited = 0, rendererRegisteredMissingRecords = 0;
+          uint64_t rendererRegisteredReferencedMeshes = 0, rendererRegisteredModelRefs = 0;
+          uint64_t rendererRegisteredModelLodRefs = 0, rendererRegisteredSectionOccurrences = 0;
+          uint32_t rendererRegisteredRefusalFlags = 0;
+          std::vector<RegisteredMeshRef> rendererRegisteredRefSamples; // max8, not the full census
           // Immutable mesh cut + later completion of preceding main queue work.
           // No future cached-reference/device-free/physical reclamation proof.
           bool rendererMeshAckEnabled = false, rendererMeshAckValid = false;
@@ -3078,6 +3095,11 @@ class Engine : public IGraphicsEngine
     virtual bool SceneFarObjectCreated(uint32_t, LODShapeWithShadow*, const Matrix4&) { return false; }
     virtual void SceneFarObjectRemoved(uint32_t) {}
     virtual void ClearFarObjects() {}
+
+    // Owner-only, bounded scheduling observation; no reads/uploads or coverage promise.
+    // Appended to preserve all existing virtual slots. Other renderers retain legacy charging.
+    virtual render::RegistrationCost QueryRegistrationCost(const LODShapeWithShadow*) const
+    { return render::RegistrationCost::Reusable; }
 
   protected:
     // Post-hook fires from OnWindowResized so apps can re-run the aspect policy

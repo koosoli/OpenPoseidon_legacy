@@ -83,6 +83,16 @@ pub struct LodGpu {
     pub is_decal: u32,
 }
 
+// Same CPU table mutation used by normal retirement and the owner-only census
+// tests. Append-only model identity remains valid; historical sections do not.
+pub(super) fn retire_model_lods(models: &[ModelGpu], lods: &mut [LodGpu], id: u32) {
+    if let Some(model) = models.get(id as usize) {
+        for lod in &mut lods[model.lod_base as usize..(model.lod_base + model.lod_count) as usize] {
+            lod.section_count = 0;
+        }
+    }
+}
+
 // One drawable section = a slice of the shared geometry pool + its pipeline variant.
 #[repr(C)]
 #[derive(Clone, Copy, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
@@ -650,6 +660,9 @@ impl CullState {
         let start = model.lod_base as usize;
         self.lods.get(start..start.checked_add(model.lod_count as usize)?)
     }
+    pub(super) fn registered_reference_tables(&self) -> (&[ModelGpu], &[LodGpu]) {
+        (&self.models, &self.lods)
+    }
     // Byte size of one CullParamsGpu (the uniform is fixed-size).
     const PARAMS_SIZE: u64 = std::mem::size_of::<CullParamsGpu>() as u64;
 
@@ -1044,10 +1057,8 @@ impl CullState {
     // shader lod_base lookup. The mesh ranges have their own retirement fence.
     pub fn retire_model(&mut self, id: u32) {
         if let Some(feedback) = &self.lod_feedback { feedback.borrow_mut().retire(id); }
-        if let Some(model) = self.models.get(id as usize) {
-            for lod in &mut self.lods[model.lod_base as usize..(model.lod_base + model.lod_count) as usize] {
-                lod.section_count = 0;
-            }
+        if self.models.get(id as usize).is_some() {
+            retire_model_lods(&self.models, &mut self.lods, id);
             self.tables_dirty = true;
         }
     }

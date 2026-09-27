@@ -186,6 +186,7 @@ class EngineWgpu : public EngineDummy
     // reports whether an object is currently drawn by the GPU path, so the scene draw loop
     // suppresses its CPU colour draw while its shadow caster stays on the CPU path.
     void SceneObjectCreated(Object* obj) override;
+    render::RegistrationCost QueryRegistrationCost(const LODShapeWithShadow* shape) const override;
     bool SceneFarObjectCreated(uint32_t id, LODShapeWithShadow* shape, const Matrix4& transform) override;
     void SceneFarObjectRemoved(uint32_t id) override;
     void ClearFarObjects() override;
@@ -1316,6 +1317,7 @@ class EngineWgpu : public EngineDummy
     std::shared_ptr<render::GeometryOwnerLedger> _geometryOwnerLedger;
     uint64_t _geometryOwnerEpoch = 1;
     bool _geometryMeshAckEnabled = false;
+    bool _geometryRegisteredRefsEnabled = false;
     void FillGeometryMeshFacts(GeometryAllocationReport& report);
     std::unordered_map<uint32_t, uint32_t> _modelIdOf; // producer -> renderer (post-drain)
     void DrainResourceOps(std::vector<ResourceOp>& ops);

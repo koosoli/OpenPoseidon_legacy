@@ -3610,6 +3610,37 @@ pub struct WgrMeshHandleFactSummary {
     pub unique_index_bytes: u64,
 }
 
+/// Requested full-generation handle's registered section references. flags bit
+/// 0 means it has observed registered references but its current mesh record is
+/// absent. Absent unreferenced handles are unflagged. Zero refs do NOT mean unowned.
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct WgrRegisteredMeshRef {
+    pub mesh: u64,
+    pub distinct_models: u64,
+    pub distinct_model_lods: u64,
+    pub section_occurrences: u64,
+    pub flags: u32,
+    pub reserved: u32,
+}
+
+/// Complete ONLY for current model/LOD/section census within declared budgets;
+/// not a global lifetime/ownership proof. missing_records counts distinct
+/// REQUESTED referenced handles absent by full generation, not occurrences.
+/// refusal_flags: bit0 visit capacity, bit1 invalid span, bit2 count overflow.
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct WgrRegisteredMeshRefSummary {
+    pub models_visited: u64,
+    pub lods_visited: u64,
+    pub sections_visited: u64,
+    pub missing_records: u64,
+    pub rows_written: u32,
+    pub complete: u32,
+    pub refusal_flags: u32,
+    pub reserved: u32,
+}
+
 /// Immutable owner-cut metadata plus asynchronous queue barrier state. Epoch is
 /// the caller's diagnostic owner epoch; pool generation is the actual pool epoch.
 /// Acknowledged covers preceding queue work, NOT device free or future references.
@@ -3736,6 +3767,30 @@ pub unsafe extern "C" fn wgr_get_mesh_handle_facts(
         unsafe { *summary = totals; }
         1
     })).unwrap_or(0)
+}
+
+/// Startup opt-in WGR_GEOMETRY_REGISTERED_REFS=1. Additive optional ABI: no
+/// existing report layout/hash changes. 0 Disabled, 1 Collected (may incomplete),
+/// 2 Invalid/refused. Disabled/invalid outputs untouched. No queue wait/poll or
+/// resource mutation. Caller must separately enforce owner-ledger prerequisite.
+/// # Safety
+/// Exclusive renderer owner; declared slices/output summary valid and disjoint.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_registered_mesh_refs(
+    renderer: *mut WgrRenderer, handles: WgrSlice<u64>, rows: *mut WgrRegisteredMeshRef,
+    capacity: u32, summary: *mut WgrRegisteredMeshRefSummary,
+) -> u32 {
+    if renderer.is_null() || summary.is_null() || handles.len > 8192 || capacity > 8192 ||
+        capacity < handles.len || (handles.len != 0 && (handles.data.is_null() || rows.is_null())) { return 2; }
+    catch_unwind(AssertUnwindSafe(|| {
+        let ids = if handles.len == 0 { &[][..] } else {
+            unsafe { std::slice::from_raw_parts(handles.data, handles.len as usize) }
+        };
+        let output = if handles.len == 0 { &mut [][..] } else {
+            unsafe { std::slice::from_raw_parts_mut(rows, handles.len as usize) }
+        };
+        unsafe { &*renderer }.gfx3d.registered_mesh_refs(ids, output, unsafe { &mut *summary })
+    })).unwrap_or(2)
 }
 
 /// Request a bounded immutable mesh snapshot and a barrier at the NEXT main

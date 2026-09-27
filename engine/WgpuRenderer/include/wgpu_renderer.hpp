@@ -1848,6 +1848,21 @@ struct WgrMeshSnapshotAck
 };
 static_assert(sizeof(WgrMeshSnapshotAck) == 64);
 static_assert(offsetof(WgrMeshSnapshotAck, state) == 56);
+// On-demand registered model/LOD section references only. No current-frame,
+// uploader, in-flight, device-free or suballocation ownership guarantee.
+struct WgrRegisteredMeshRef
+{
+    uint64_t mesh, distinct_models, distinct_model_lods, section_occurrences;
+    uint32_t flags, reserved;
+};
+struct WgrRegisteredMeshRefSummary
+{
+    uint64_t models_visited, lods_visited, sections_visited, missing_records;
+    uint32_t rows_written, complete, refusal_flags, reserved;
+};
+static_assert(sizeof(WgrRegisteredMeshRef) == 40);
+static_assert(sizeof(WgrRegisteredMeshRefSummary) == 48);
+static_assert(offsetof(WgrRegisteredMeshRefSummary, rows_written) == 32);
 struct WgrLodDemandRow { uint32_t model_id, lod_count, lod_mask, state; };
 struct WgrLodDemandReport
 {
@@ -2577,6 +2592,10 @@ extern "C"
     // submit commands or wait. Zero return invalid/unavailable; no freeing proof.
     WGR_API uint32_t wgr_get_mesh_handle_facts(WgrRenderer*, WgrSlice<uint64_t> handles,
         WgrMeshHandleFact* facts, uint32_t fact_capacity, WgrMeshHandleFactSummary* summary);
+    // Status0 disabled,1 collected (possibly incomplete),2 invalid; at most8192
+    // unique nonzero full handles. Disabled/invalid leaves outputs untouched.
+    WGR_API uint32_t wgr_registered_mesh_refs(WgrRenderer*, WgrSlice<uint64_t> handles,
+        WgrRegisteredMeshRef* rows, uint32_t row_capacity, WgrRegisteredMeshRefSummary* summary);
     // States: disabled0,queued1,submitted2,acknowledged3,cancelled4,invalid5,busy6,unknown7.
     // Request captures immutable actual records; next MAIN submission fences them.
     // Poll accepts null facts/capacity0 for summary-only, never polls/waits itself.

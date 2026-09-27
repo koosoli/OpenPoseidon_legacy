@@ -138,6 +138,7 @@ set(POSEIDON_TEST_SOURCES
     
     # Graphics tests
     Graphics/test_geometry_owner_ledger.cpp
+    Graphics/test_registration_cost_policy.cpp
     Graphics/test_alpha_classify.cpp
     Graphics/test_surface_decompose.cpp
     Graphics/test_shadowmap_math.cpp
