@@ -39,9 +39,9 @@ template<class Predicate> bool Until(Predicate predicate)
     while(std::chrono::steady_clock::now()<end);
     return predicate();
 }
-void CheckOriginal(const ResidentRepresentation& decoded,const ExportedMesh& source)
+void CheckOriginal(const ResidentRepresentation& decoded,const ExportedMesh& source,Frontier expected=Frontier::Fine)
 {
-    REQUIRE(decoded.representation==Frontier::Fine);REQUIRE(decoded.indices==source.indices.size());
+    REQUIRE(decoded.representation==expected);REQUIRE(decoded.indices==source.indices.size());
     size_t triangle=0;
     for(const auto& page:decoded.pages) for(const auto& cluster:page.clusters) {
         REQUIRE(cluster.firstTriangle==triangle);
@@ -361,4 +361,43 @@ TEST_CASE("Offline actual Shape CLOD producer roundtrips selected disk file usin
     REQUIRE(worker.SubmitDisk(2,2,expected,AuthoredPageWorker::MaxReserved)==AuthoredPageWorker::SubmitStatus::Queued);
     REQUIRE(Until([&]{return worker.Snapshot().ready==1;}));auto changed=worker.Take(2,2);REQUIRE(changed);
     REQUIRE(changed->diskStatus==DiskReadStatus::Invalid);REQUIRE(changed->decoded.pages.empty());
+}
+
+TEST_CASE("Disk requests freeze explicit coarse frontier and decode exact selected coarse source", "[geometry-page-disk-frontier][geometry-page-disk-worker]")
+{
+    const auto source=DiskWorkerPilot();std::vector<uint8_t> bytes;REQUIRE(EncodeClodDisk(source,bytes)==ClodDiskStatus::Encoded);
+    DiskWorkerFiles files;files.Write(bytes);auto input=files.Input(source);input->representation=Frontier::Coarse;
+    AuthoredPageWorker worker;worker.HoldBeforeDiskOpen(true);
+    REQUIRE(worker.SubmitDisk(1,1,input,AuthoredPageWorker::MaxReserved)==AuthoredPageWorker::SubmitStatus::Queued);
+    REQUIRE(Until([&]{return worker.Snapshot().active==1;}));input->representation=Frontier::Fine;
+    worker.HoldBeforeDiskOpen(false);REQUIRE(Until([&]{return worker.Snapshot().ready==1;}));auto result=worker.Take(1,1);REQUIRE(result);
+    REQUIRE(result->requestedRepresentation==Frontier::Coarse);REQUIRE(result->ownership->disk->representation==Frontier::Coarse);
+    REQUIRE(result->diskStatus==DiskReadStatus::Read);REQUIRE(result->status==DecodeStatus::Decoded);
+    REQUIRE(result->source->identity==source.package.Identity());
+    CheckOriginal(result->decoded,source.selectedGeometry.coarse,Frontier::Coarse);
+    REQUIRE(result->decoded.pages.size()==source.package.coarsePages);REQUIRE(result->decoded.clusters==source.package.coarseClusters);
+    REQUIRE(result->decoded.indices<source.selectedGeometry.fine.indices.size());result.reset();
+    REQUIRE(Until([&]{return worker.Snapshot().liveJobs==0;}));
+    // Default input contract is still Fine, including its exact requested witness.
+    auto fine=files.Input(source);REQUIRE(fine->representation==Frontier::Fine);
+    REQUIRE(worker.SubmitDisk(2,2,fine,AuthoredPageWorker::MaxReserved)==AuthoredPageWorker::SubmitStatus::Queued);
+    REQUIRE(Until([&]{return worker.Snapshot().ready==1;}));auto next=worker.Take(2,2);REQUIRE(next);
+    REQUIRE(next->requestedRepresentation==Frontier::Fine);CheckOriginal(next->decoded,source.selectedGeometry.fine);
+}
+TEST_CASE("Disk frontier validation refuses unknown enums while failed coarse retains request witness only", "[geometry-page-disk-frontier][geometry-page-disk-worker]")
+{
+    const auto source=DiskWorkerPilot();DiskWorkerFiles files;auto input=files.Input(source);AuthoredPageWorker worker;
+    SECTION("unavailable is not a representation") {input->representation=Frontier::Unavailable;}
+    SECTION("unknown enum is not a representation") {input->representation=static_cast<Frontier>(255);}
+    SECTION("valid missing coarse returns no decoded geometry") {
+        input->representation=Frontier::Coarse;
+        REQUIRE(worker.SubmitDisk(1,1,input,AuthoredPageWorker::MaxReserved)==AuthoredPageWorker::SubmitStatus::Queued);
+        REQUIRE(Until([&]{return worker.Snapshot().ready==1;}));auto failed=worker.Take(1,1);REQUIRE(failed);
+        REQUIRE(failed->requestedRepresentation==Frontier::Coarse);REQUIRE(failed->diskStatus==DiskReadStatus::Missing);
+        REQUIRE(failed->status!=DecodeStatus::Decoded);REQUIRE(failed->decoded.representation==Frontier::Unavailable);
+        REQUIRE(failed->decoded.pages.empty());REQUIRE(failed->decoded.indices==0);failed.reset();
+        REQUIRE(Until([&]{return worker.Snapshot().liveJobs==0;}));return;
+    }
+    REQUIRE(worker.SubmitDisk(1,1,input,AuthoredPageWorker::MaxReserved)==AuthoredPageWorker::SubmitStatus::Invalid);
+    REQUIRE(worker.Snapshot().liveJobs==0);REQUIRE(worker.Snapshot().reservedBytes==0);
 }

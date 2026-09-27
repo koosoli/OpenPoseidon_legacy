@@ -64,6 +64,7 @@ public:
         uint64_t epoch=0,request=0;
         DecodeStatus status=DecodeStatus::Invalid;
         DiskReadStatus diskStatus=DiskReadStatus::NotRequested;
+        Frontier requestedRepresentation=Frontier::Fine;
         ResidentRepresentation decoded;
         std::shared_ptr<const AuthoredPageInput> source;
         // Keeps the exact request source/reservation alive through owner staging.
@@ -92,6 +93,7 @@ private:
             std::unique_ptr<Result> result;
             try {
                 result=std::make_unique<Result>(); result->epoch=job->epoch;result->request=job->request;result->ownership=job;result->source=job->input;
+                result->requestedRepresentation=job->disk?job->disk->representation:Frontier::Fine;
                 if(job->disk) {
                     ClodRamPackage loaded;result->diskStatus=ReadDiskPageSource(*job->disk,loaded,job->cancelled);
                     if(result->diskStatus==DiskReadStatus::Read && !job->cancelled.load()) {
@@ -105,7 +107,7 @@ private:
                 RepresentationDecodeLimits limits;limits.pages=8;limits.clusters=64;limits.vertexRecords=1024;limits.indices=4096;
                 limits.decodedBytes=ResultReservation;limits.serializedBytes=AuthoredPageInput::MaxSourceBytes;
                 if(result->source && !job->cancelled.load())
-                    result->status=DecodeResidentRepresentation(result->source->package,result->source->identity,Frontier::Fine,
+                    result->status=DecodeResidentRepresentation(result->source->package,result->source->identity,result->requestedRepresentation,
                         result->source->original,result->decoded,limits,&job->cancelled);
                 else if(job->cancelled.load()) result->status=DecodeStatus::Cancelled;
                 uint64_t capacity=sizeof(Result)+result->decoded.pages.capacity()*sizeof(ResidentPage);

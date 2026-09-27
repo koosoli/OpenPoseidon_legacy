@@ -11,6 +11,7 @@ struct DiskPageInput
     std::filesystem::path path;
     SourceIdentity originalSource;
     CacheIdentity selectedCut;
+    Frontier representation=Frontier::Fine; // explicit immutable requested role; old callers remain Fine
     static constexpr size_t MaxPathCharacters=1024;
 };
 inline uint64_t DiskPageKnownBytes(const DiskPageInput& input)
@@ -22,7 +23,8 @@ inline uint64_t DiskPageKnownBytes(const DiskPageInput& input)
 inline bool ValidDiskPageInput(const DiskPageInput& input)
 {
     const auto& name=input.path.native();
-    if(name.empty() || name.size()>DiskPageInput::MaxPathCharacters || DiskPageKnownBytes(input)>16*1024) return false;
+    if((input.representation!=Frontier::Coarse && input.representation!=Frontier::Fine) ||
+       name.empty() || name.size()>DiskPageInput::MaxPathCharacters || DiskPageKnownBytes(input)>16*1024) return false;
     for(auto c:name) if(!c) return false;
     bool hash=false,cut=false;for(auto b:input.originalSource.sourceSha256) hash|=b!=0;
     for(auto b:input.selectedCut.source.sourceSha256) cut|=b!=0;
