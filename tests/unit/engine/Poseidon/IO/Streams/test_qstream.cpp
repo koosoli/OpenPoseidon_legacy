@@ -729,3 +729,57 @@ TEST_CASE("LSError enum values", "[qstream][lserror]")
         }
     }
 }
+
+TEST_CASE("QIStream bounded disjoint span preserves read cursor and fallback state", "[qstream][input][disjoint-span]")
+{
+    char input[] = "abcdef";
+    char output[8]{};
+    const char* span = nullptr;
+    QIStream stream(input, 6);
+    REQUIRE(stream.TryReadDisjointSpan(3, output, sizeof(output), span));
+    CHECK(span == input); CHECK(stream.tellg() == 3);
+    CHECK_FALSE(stream.fail()); CHECK_FALSE(stream.eof());
+    CHECK_FALSE(stream.TryReadDisjointSpan(4, output, sizeof(output), span));
+    CHECK(span == nullptr); CHECK(stream.tellg() == 3); CHECK_FALSE(stream.fail());
+    stream.read(output, 4); CHECK(stream.fail()); CHECK(stream.tellg() == 3);
+    stream.seekg(0, QIOS::beg);
+    CHECK_FALSE(stream.TryReadDisjointSpan(3, input + 2, 2, span));
+    CHECK(stream.tellg() == 0); CHECK_FALSE(stream.fail());
+    REQUIRE(stream.TryReadDisjointSpan(3, input + 3, 3, span)); // adjacent ranges
+    CHECK(span == input); CHECK(stream.tellg() == 3);
+    stream.seekg(0, QIOS::beg);
+    CHECK_FALSE(stream.TryReadDisjointSpan(-1, output, sizeof(output), span));
+    CHECK_FALSE(stream.TryReadDisjointSpan(0, output, sizeof(output), span));
+    CHECK_FALSE(stream.TryReadDisjointSpan(1, nullptr, 1, span));
+    CHECK(stream.tellg() == 0); CHECK_FALSE(stream.fail());
+    stream.read(output, 7); REQUIRE(stream.fail());
+    REQUIRE(stream.TryReadDisjointSpan(1, output, sizeof(output), span));
+    CHECK(stream.fail()); // copying read does not clear an existing failure either
+    QIStream empty;
+    CHECK_FALSE(empty.TryReadDisjointSpan(1, output, sizeof(output), span));
+    CHECK(empty.fail()); CHECK_FALSE(empty.eof());
+    QIStream nullBuffer(nullptr, 6);
+    CHECK_FALSE(nullBuffer.TryReadDisjointSpan(1, output, sizeof(output), span));
+    CHECK(nullBuffer.tellg() == 0);
+}
+
+TEST_CASE("QIStream disjoint span refuses invalid declared cursor and address ranges", "[qstream][input][disjoint-span]")
+{
+    struct InvalidCursor : QIStream {
+        void Set(int length, int cursor) { _len = length; _readFrom = cursor; }
+    } stream;
+    char input[4]{}, output[4]{};
+    stream.init(input, 4);
+    const char* span = nullptr;
+    for (const auto cursor : {-1, 5})
+    {
+        stream.Set(4, cursor);
+        CHECK_FALSE(stream.TryReadDisjointSpan(1, output, sizeof(output), span));
+        CHECK(stream.tellg() == cursor); CHECK_FALSE(stream.fail());
+    }
+    stream.Set(-1, 0);
+    CHECK_FALSE(stream.TryReadDisjointSpan(1, output, sizeof(output), span));
+    stream.Set(4, 0);
+    CHECK_FALSE(stream.TryReadDisjointSpan(1, output, std::numeric_limits<size_t>::max(), span));
+    CHECK(stream.tellg() == 0);
+}

@@ -6,6 +6,9 @@
 #define _QSTREAM_HPP
 
 #include <Poseidon/Foundation/Strings/RString.hpp>
+#include <cstddef>
+#include <cstdint>
+#include <limits>
 
 #include <Poseidon/Foundation/Types/EnumDecl.hpp>
 
@@ -126,6 +129,27 @@ class QIStream
         if (n > 0)
             memcpy(buf, _buf + _readFrom, n); // memcpy is nonnull: skip the n==0 / null-buf case
         _readFrom += n;
+    }
+    // Borrow and consume only a bounded contiguous span disjoint from an
+    // immediate caller-owned write range. Refusal changes no cursor/error flags;
+    // callers can use their original copying read as fallback. Success preserves
+    // read()'s existing fail/eof flags. The span owns nothing and expires when the
+    // stream/backing buffer is closed, replaced or modified; never retain it.
+    bool TryReadDisjointSpan(int n, const void* output, std::size_t outputBytes, const char*& span)
+    {
+        span = nullptr;
+        if (!_buf || n <= 0 || _len < 0 || _readFrom < 0 || _readFrom > _len || n > _len - _readFrom ||
+            (!output && outputBytes)) return false;
+        const auto maxAddress = std::numeric_limits<std::uintptr_t>::max();
+        const auto base = reinterpret_cast<std::uintptr_t>(_buf);
+        const auto dest = reinterpret_cast<std::uintptr_t>(output);
+        if (static_cast<std::uintptr_t>(_readFrom) > maxAddress - base) return false;
+        const auto input = base + static_cast<std::uintptr_t>(_readFrom);
+        if (static_cast<std::uintptr_t>(n) > maxAddress - input || outputBytes > maxAddress - dest) return false;
+        if (outputBytes && input < dest + outputBytes && dest < input + static_cast<std::uintptr_t>(n)) return false;
+        span = _buf + _readFrom;
+        _readFrom += n;
+        return true;
     }
     void seekg(int pos, QIOS::seekdir dir)
     {

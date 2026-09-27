@@ -66,7 +66,7 @@ struct WarmMipChainTiming
     const char* source;
     int requestedMips, selectedMips = 0;
     uint64_t dxtStoredBytes = 0, dxtOutputBytes = 0;
-    int lzoMips = 0, rawDxtMips = 0;
+    int lzoMips = 0, rawDxtMips = 0, borrowedLzoMips = 0;
     double openMs = 0.0, loopMs = 0.0, packedAllocCopyMs = 0.0, lzoMs = 0.0, rawReadMs = 0.0;
     WarmMipClock::time_point began;
     WarmMipChainTiming* previous;
@@ -91,9 +91,9 @@ struct WarmMipChainTiming
         if (slot >= 128) return;
         LOG_INFO(Graphics,
             "Warm mip chain timing: source={} success={} requestedMips={} selectedMips={} "
-            "lzoMips={} rawDxtMips={} dxtStoredBytes={} dxtOutputBytes={} openOwnerMs={:.3f} "
+            "lzoMips={} borrowedLzoMips={} rawDxtMips={} dxtStoredBytes={} dxtOutputBytes={} openOwnerMs={:.3f} "
             "loopOwnerMs={:.3f} packedAllocCopyMs={:.3f} lzoMs={:.3f} rawReadMs={:.3f} totalOwnerMs={:.3f}",
-            source, success, requestedMips, selectedMips, lzoMips, rawDxtMips, dxtStoredBytes,
+            source, success, requestedMips, selectedMips, lzoMips, borrowedLzoMips, rawDxtMips, dxtStoredBytes,
             dxtOutputBytes, openMs, loopMs, packedAllocCopyMs, lzoMs, rawReadMs, totalMs);
     }
 };
@@ -1238,20 +1238,40 @@ int PacLevelMem::LoadPaaDXT(QIStream& in, void* mem, const PacPalette* pal) cons
             timing->dxtOutputBytes += expected;
         }
         WarmMipPhase packedPhase(timing ? &timing->packedAllocCopyMs : nullptr);
-        AUTO_STATIC_ARRAY(char, packed, 256 * 256);
-        packed.Resize(dSize);
-        in.read(packed.Data(), dSize);
-        if (in.fail())
+        const char* borrowed = nullptr;
+        size_t got = 0;
+        const auto decode = [&](const char* bytes) {
+            packedPhase.Stop();
+            WarmMipPhase lzoPhase(timing ? &timing->lzoMs : nullptr);
+            return Foundation::Lzo1x::Decompress(reinterpret_cast<const uint8_t*>(bytes),
+                static_cast<size_t>(dSize), static_cast<uint8_t*>(mem), expected);
+        };
+        if (in.TryReadDisjointSpan(static_cast<int>(dSize), mem, expected, borrowed))
         {
-            Fail("Compressed Read error");
-            return -1;
+            if (timing) ++timing->borrowedLzoMips;
+            if (in.fail())
+            {
+                Fail("Compressed Read error");
+                return -1;
+            }
+            // Backing data remains owned by this stream throughout the immediate
+            // decoder call. Disjoint output cannot overwrite compressed input.
+            got = decode(borrowed);
         }
-        packedPhase.Stop();
-        WarmMipPhase lzoPhase(timing ? &timing->lzoMs : nullptr);
-        const size_t got =
-            Foundation::Lzo1x::Decompress(reinterpret_cast<const uint8_t*>(packed.Data()), static_cast<size_t>(dSize),
-                                          static_cast<uint8_t*>(mem), expected);
-        lzoPhase.Stop();
+        else
+        {
+            // Retain original copying/error semantics for aliases, truncation,
+            // empty payloads or unsupported buffer/cursor invariants.
+            AUTO_STATIC_ARRAY(char, packed, 256 * 256);
+            packed.Resize(dSize);
+            in.read(packed.Data(), dSize);
+            if (in.fail())
+            {
+                Fail("Compressed Read error");
+                return -1;
+            }
+            got = decode(packed.Data());
+        }
         if (got != expected)
         {
             Fail("LZO level did not decompress to its declared size");

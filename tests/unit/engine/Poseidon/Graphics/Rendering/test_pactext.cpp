@@ -4,6 +4,9 @@
 #include <Poseidon/Foundation/Logging/Logging.hpp>
 
 #include <cstring>
+#include <array>
+#include <cstdint>
+#include <Poseidon/Foundation/Algorithms/Lzo1x.hpp>
 #include <vector>
 
 TEST_CASE("pactext.hpp compiles", "[rendering][font]")
@@ -108,4 +111,84 @@ TEST_CASE("PacLevelMem::LoadPaa accepts the signed LZW checksum", "[rendering][f
     unsigned char decoded[sizeof(pixels)] = {};
     REQUIRE(mip.LoadPaa(in, decoded, &palette) == 0);
     REQUIRE(std::memcmp(decoded, pixels, sizeof(pixels)) == 0);
+}
+
+namespace
+{
+std::vector<char> OriginalLzoMip(int w, int h, int blockBytes)
+{
+    const int outputBytes = ((w + 3) / 4) * ((h + 3) / 4) * blockBytes;
+    std::vector<char> packed{char(17 + outputBytes)};
+    for (int i = 0; i < outputBytes; ++i) packed.push_back(char((i * 37 + w * 11 + h) & 255));
+    packed.insert(packed.end(), {char(0x11), 0, 0});
+    std::vector<char> mip;
+    const auto u16 = [&](int v) { mip.push_back(char(v)); mip.push_back(char(v >> 8)); };
+    u16(w | 0x8000); u16(h);
+    const int stored = int(packed.size());
+    mip.push_back(char(stored)); mip.push_back(char(stored >> 8)); mip.push_back(char(stored >> 16));
+    mip.insert(mip.end(), packed.begin(), packed.end());
+    return mip;
+}
+// Independent copied-input reference of the original ordinary LZO mip branch.
+int CopiedLzoMipReference(Poseidon::QIStream& in, void* output, int blockBytes)
+{
+    const int w = Poseidon::fgetiw(in) & 0x7fff;
+    const int h = Poseidon::fgetiw(in);
+    const int stored = Poseidon::fgeti24(in);
+    const size_t expected = size_t((w + 3) / 4) * ((h + 3) / 4) * blockBytes;
+    std::vector<char> packed(size_t(stored), 0);
+    in.read(packed.data(), stored);
+    if (in.fail()) return -1;
+    const size_t got = Poseidon::Foundation::Lzo1x::Decompress(
+        reinterpret_cast<const uint8_t*>(packed.data()), packed.size(), static_cast<uint8_t*>(output), expected);
+    return got == expected ? 0 : -1;
+}
+Poseidon::PacLevelMem LzoLevel(Poseidon::PacFormat format, int w, int h)
+{
+    Poseidon::PacLevelMem level;
+    level._sFormat = format; level._dFormat = format;
+    level._w = short(w); level._h = short(h);
+    return level;
+}
+}
+
+TEST_CASE("PAA LZO mip disjoint input matches original copying reader", "[rendering][font][lzo-disjoint]")
+{
+    for (const auto format : {Poseidon::PacDXT1, Poseidon::PacDXT3, Poseidon::PacDXT5})
+    for (const auto dims : std::array<std::array<int,2>,4>{{{4,4}, {8,4}, {4,8}, {8,8}}})
+    {
+        const int blockBytes = format == Poseidon::PacDXT1 ? 8 : 16;
+        const size_t bytes = size_t(dims[0] / 4) * (dims[1] / 4) * blockBytes;
+        const auto original = OriginalLzoMip(dims[0], dims[1], blockBytes);
+        const auto level = LzoLevel(format, dims[0], dims[1]);
+        Poseidon::PacPalette palette;
+        for (int variant = 0; variant < 3; ++variant)
+        {
+            auto input = original;
+            if (variant == 1) input.resize(input.size() - 2); // declared payload truncated
+            if (variant == 2) input.back() = 1; // malformed end-of-stream
+            Poseidon::QIStream actual(input.data(), int(input.size())), reference(input.data(), int(input.size()));
+            std::vector<uint8_t> a(bytes + 8, 0xA7), b = a;
+            CHECK(level.LoadPaa(actual, a.data(), &palette) == CopiedLzoMipReference(reference, b.data(), blockBytes));
+            CHECK(a == b); CHECK(actual.tellg() == reference.tellg());
+            CHECK(actual.fail() == reference.fail()); CHECK(actual.eof() == reference.eof());
+        }
+    }
+}
+
+TEST_CASE("PAA LZO mip overlapping output retains copied-input semantics", "[rendering][font][lzo-disjoint]")
+{
+    const auto mip = OriginalLzoMip(4, 4, 16);
+    const auto level = LzoLevel(Poseidon::PacDXT3, 4, 4);
+    Poseidon::PacPalette palette;
+    for (const size_t outputOffset : {size_t(0), size_t(7), mip.size()})
+    {
+        auto a = mip; a.resize(a.size() + 64, char(0x5A));
+        auto b = a;
+        Poseidon::QIStream actual(a.data(), int(a.size())), reference(b.data(), int(b.size()));
+        REQUIRE(level.LoadPaa(actual, a.data() + outputOffset, &palette) == 0);
+        REQUIRE(CopiedLzoMipReference(reference, b.data() + outputOffset, 16) == 0);
+        CHECK(a == b); CHECK(actual.tellg() == reference.tellg());
+        CHECK(actual.fail() == reference.fail()); CHECK(actual.eof() == reference.eof());
+    }
 }
