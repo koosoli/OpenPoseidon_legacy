@@ -90,9 +90,9 @@ try {
     $stream=$client.GetStream();$stream.ReadTimeout=30000
     $reader=[IO.StreamReader]::new($stream);$writer=[IO.StreamWriter]::new($stream,[Text.UTF8Encoding]::new($false));$writer.AutoFlush=$true
     function Send($command) {
-        $writer.WriteLine(($command | ConvertTo-Json -Compress))
+        $writer.WriteLine(($command | ConvertTo-Json -Depth 8 -Compress))
         do {$line=$reader.ReadLine();if ($null -eq $line) {throw 'Harness closed'};$reply=$line | ConvertFrom-Json} while ($null -eq $reply.ok)
-        ($command | ConvertTo-Json -Compress) | Add-Content (Join-Path $out 'harness.jsonl')
+        ($command | ConvertTo-Json -Depth 8 -Compress) | Add-Content (Join-Path $out 'harness.jsonl')
         $line | Add-Content (Join-Path $out 'harness.jsonl')
         if (!$reply.ok) {throw $line};return $reply
     }
