@@ -537,6 +537,7 @@ void RegisterScreenshot(HarnessServer& hs)
             else if(!std::strcmp(name,"beginPaged")) action=Engine::GeometryPageFixtureAction::BeginPaged;
             else if(!std::strcmp(name,"beginClodPaged")) action=Engine::GeometryPageFixtureAction::BeginClodPaged;
             else if(!std::strcmp(name,"beginDiskClodPaged")) action=Engine::GeometryPageFixtureAction::BeginDiskClodPaged;
+            else if(!std::strcmp(name,"beginOriginalDiskClodPaged")) action=Engine::GeometryPageFixtureAction::BeginOriginalDiskClodPaged;
             else if(!std::strcmp(name,"requestCoarse")) action=Engine::GeometryPageFixtureAction::RequestCoarse;
             else if(!std::strcmp(name,"pollCoarse")) action=Engine::GeometryPageFixtureAction::PollCoarse;
             else if(!std::strcmp(name,"requestFine")) action=Engine::GeometryPageFixtureAction::RequestFine;
@@ -561,7 +562,8 @@ void RegisterScreenshot(HarnessServer& hs)
             }
             Engine::GeometryPageDiskFixtureInput disk;
             const Engine::GeometryPageDiskFixtureInput* diskArgument=nullptr;
-            if(action==Engine::GeometryPageFixtureAction::BeginDiskClodPaged) {
+            if(action==Engine::GeometryPageFixtureAction::BeginDiskClodPaged || action==Engine::GeometryPageFixtureAction::BeginOriginalDiskClodPaged) {
+                const bool originalMode=action==Engine::GeometryPageFixtureAction::BeginOriginalDiskClodPaged;
                 // These are externally captured producer keys, never refreshed from
                 // the cache file or a manifest on the owner/frame thread.
                 const auto* input=cJSON_GetObjectItemCaseSensitive(root,"disk");
@@ -611,14 +613,24 @@ void RegisterScreenshot(HarnessServer& hs)
                 const auto* packing=selected?cJSON_GetObjectItemCaseSensitive(selected,"packing"):nullptr;
                 const auto* revision=cJSON_GetObjectItemCaseSensitive(producer,"clodLibraryRevision");
                 if(!source(original,disk.original)||!source(selectedSource,disk.selected)||!cJSON_IsObject(packing) ||
-                    !number(producer,"schemaVersion",disk.schemaVersion)||!number(producer,"controlledPilotVersion",disk.pilotVersion)||
+                    !number(producer,"schemaVersion",disk.schemaVersion)||(!originalMode&&!number(producer,"controlledPilotVersion",disk.pilotVersion))||
                     !number(producer,"diskCodecSchema",disk.codecSchema)||!number(producer,"sVertexBytes",disk.vertexBytes)||
                     !word(producer,"sVertexLayoutKeyHex",disk.layoutKey)||!number(producer,"clodAdapterVersion",disk.clodAdapter)||
-                    !number(producer,"ramAdapterVersion",disk.ramAdapter)||!hexadecimal(producer,"helperSha256",disk.helperSha256.data(),32)||
+                    !number(producer,"ramAdapterVersion",disk.ramAdapter)||(!originalMode&&!hexadecimal(producer,"helperSha256",disk.helperSha256.data(),32))||
                     !number(selected,"formatVersion",disk.formatVersion)||!number(selected,"algorithmVersion",disk.algorithmVersion)||
                     !number(packing,"clusterVertices",disk.clusterVertices)||!number(packing,"clusterTriangles",disk.clusterTriangles)||
                     !number(packing,"pageBytes",disk.pageBytes)||!cJSON_IsString(revision)||!revision->valuestring)
                     return HarnessProtocol::ErrorResponse("complete exact disk pilot versions, source/cut keys, packing and helper hash required");
+                if(originalMode) {
+                    uint32_t admission=0,sourceBytes=0;
+                    const auto* type=cJSON_GetObjectItemCaseSensitive(producer,"producer");
+                    if(disk.schemaVersion!=2 || !cJSON_IsString(type)||!type->valuestring || std::strcmp(type->valuestring,"controlled-original-mlod") ||
+                        !number(producer,"originalSubsetVersion",disk.originalSubsetVersion)||disk.originalSubsetVersion!=1 ||
+                        !number(producer,"sourceBytes",sourceBytes)||!sourceBytes||sourceBytes>128*1024 ||
+                        !number(root,"sourceAdmissionEpoch",admission)||!admission)
+                        return HarnessProtocol::ErrorResponse("original source requires schema2/subset1, trusted byte length and startup sourceAdmissionEpoch");
+                    disk.sourceAdmissionEpoch=admission;disk.originalSourceBytes=sourceBytes;
+                }
                 for(size_t i=0;i<40;++i) {
                     const char c=revision->valuestring[i];
                     if(!((c>='0'&&c<='9')||(c>='a'&&c<='f')||(c>='A'&&c<='F')))
@@ -660,11 +672,14 @@ void RegisterScreenshot(HarnessServer& hs)
             PAGE_FIXTURE_NUMBER(retiredFineFirst); PAGE_FIXTURE_NUMBER(retiredFineCount);
             PAGE_FIXTURE_NUMBER(x); PAGE_FIXTURE_NUMBER(y); PAGE_FIXTURE_NUMBER(z);
             PAGE_FIXTURE_NUMBER(renderReturnStatus);
+            PAGE_FIXTURE_NUMBER(sourceAdmissionEpoch);PAGE_FIXTURE_NUMBER(originalSourceBytes);PAGE_FIXTURE_NUMBER(sourceAdmissionKnownBytes);
+            PAGE_FIXTURE_NUMBER(helperCount);PAGE_FIXTURE_NUMBER(originalOriginRadius);
 #undef PAGE_FIXTURE_NUMBER
 #define PAGE_FIXTURE_BOOL(field) cJSON_AddBoolToObject(result,#field,report.field)
             PAGE_FIXTURE_BOOL(clodPilot); PAGE_FIXTURE_BOOL(fallbackSelected);
             PAGE_FIXTURE_BOOL(pagedPilot); PAGE_FIXTURE_BOOL(fineResident); PAGE_FIXTURE_BOOL(fineEvictionPending);
             PAGE_FIXTURE_BOOL(diskPilot); PAGE_FIXTURE_BOOL(coarseResident);
+            PAGE_FIXTURE_BOOL(originalFilePilot);PAGE_FIXTURE_BOOL(sourceSnapshotValidated);PAGE_FIXTURE_BOOL(sourceAdmissionConsumed);
             PAGE_FIXTURE_BOOL(active); PAGE_FIXTURE_BOOL(fineSelected); PAGE_FIXTURE_BOOL(cpuHelpersUnchanged);
             PAGE_FIXTURE_BOOL(mainFrameReturned); PAGE_FIXTURE_BOOL(cascadeConfigured); PAGE_FIXTURE_BOOL(localShadowConfigured);
 #undef PAGE_FIXTURE_BOOL

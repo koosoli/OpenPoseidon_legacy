@@ -2145,6 +2145,8 @@ struct EngineWgpu::GeometryPageFixtureState
     std::shared_ptr<const GeometryPages::AuthoredPageInput> pageInput;
     std::shared_ptr<const GeometryPages::DiskPageInput> diskInput; // bounded frozen external-producer keys only
     WgrModelSection pageSection{}; WgrModelMaterial pageMaterial{};
+    float pageOriginRadius=5; // Actual original-file bound only when originalFilePilot.
+    std::shared_ptr<const GeometryPageOriginalAdmissionState> originalAdmission; // Optional same DTO owner, no copy.
     uint64_t pageBaseKnownBytes=0;
     size_t pageFineFirst=0;
     uint32_t pageCoarseSlot=0,pageFirstFineSlot=1,pageRefillSlot=2,pageFineSlot=1,pagePendingFineModel=UINT32_MAX;
@@ -8461,6 +8463,35 @@ GeometryPages::SourceIdentity PageExternalIdentity(const Engine::GeometryPageSou
 
 }
 
+namespace {
+bool PageOriginalPlainMaterial(const Poseidon::GeometryPages::ControlledMlodPlainMaterial& source,
+    WgrModelSection& section,WgrModelMaterial& material)
+{
+    if(source.materialType!=0||source.specFlags!=0)return false;
+    for(const auto* color:{&source.emissive,&source.ambient,&source.diffuse,&source.specular,&source.forcedDiffuse})
+        for(float f:*color)if(!std::isfinite(f))return false;
+    const render::LegacySpec split=render::SplitLegacy(0);render::BuildContext context;
+    context.isIn3DPass=true;context.shadowAlphaRef=0;
+    const auto descriptor=render::BuildRenderPassDescriptor(split,context);
+    const float alpha=AlphaRefFromDesc(descriptor);if(alpha!=0)return false;
+    section={};section.variant=0;section.flags=0;
+    material={};material.emissive={source.emissive[0],source.emissive[1],source.emissive[2],source.emissive[3]};
+    material.ambient={source.ambient[0],source.ambient[1],source.ambient[2],source.ambient[3]};
+    material.diffuse={source.diffuse[0],source.diffuse[1],source.diffuse[2],source.diffuse[3]};
+    material.specular={source.specular[0],source.specular[1],source.specular[2],float(source.specularPower)};
+    material.sampler=U32(SamplerForSpec(0));material.alpha_ref=0;
+    // Captured type0 CreateMaterialNormal has zero emission. This also closes
+    // divergence from ClassifyGpuSection's no-surface emitter scale if corrupted.
+    if(source.emissive[0]!=0||source.emissive[1]!=0||source.emissive[2]!=0)return false;
+    return true;
+}
+bool PageOriginalVertexEnclosed(const SVertex& vertex,float radius)
+{
+    const double x=vertex.pos.X(),y=vertex.pos.Y(),z=vertex.pos.Z(),r=radius;
+    return std::isfinite(x)&&std::isfinite(y)&&std::isfinite(z)&&std::isfinite(r)&&r>0&&x*x+y*y+z*z<=r*r;
+}
+}
+
 Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(GeometryPageFixtureAction action,float x,float y,float z,const GeometryPageDiskFixtureInput* disk)
 {
     static const bool enabled=[] { const char* v=std::getenv("WGR_GEOMETRY_PAGE_FIXTURE"); return v && std::strcmp(v,"1")==0; }();
@@ -8479,17 +8510,16 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
         auto report=_geometryPageFixture->report;updatePageStats(report);return report; };
     if(action==GeometryPageFixtureAction::Snapshot) return _geometryPageFixture?copied():failure;
     try {
-        if(action==GeometryPageFixtureAction::BeginOriginalDiskClodPaged) {
-            GeometryPageFixtureReport unsupported;unsupported.status=GeometryReportStatus::Unsupported;return unsupported;
-        }
-        if(action==GeometryPageFixtureAction::BeginDiskClodPaged) {
+        if(action==GeometryPageFixtureAction::BeginDiskClodPaged || action==GeometryPageFixtureAction::BeginOriginalDiskClodPaged) {
+            const bool originalMode=action==GeometryPageFixtureAction::BeginOriginalDiskClodPaged;
             using namespace Poseidon::GeometryPages;
             failure.diskPilot=true;failure.diskReadStatus="NotRequested";failure.diskRequestedRepresentation="Coarse";
             failure.pageWorkState="InvalidDiskArguments";
             if(!disk || !std::isfinite(x)||!std::isfinite(y)||!std::isfinite(z)||std::fabs(x)>1e7f||std::fabs(y)>1e7f||std::fabs(z)>1e7f ||
                 !_nextGeometryPageEpoch || !_nextGeometryPageRequest) return failure;
             if(_geometryPageFixture) {auto old=copied();if(old.active || old.status!=GeometryReportStatus::Ready || old.meshesAbsent!=old.meshCount) {old.status=GeometryReportStatus::Busy;return old;}}
-            if(disk->schemaVersion!=1 || disk->pilotVersion!=ControlledClodPilotVersion || disk->codecSchema!=ClodDiskDetail::Schema ||
+            if((originalMode?(disk->schemaVersion!=2 || disk->originalSubsetVersion!=1):
+                    (disk->schemaVersion!=1 || disk->pilotVersion!=ControlledClodPilotVersion)) || disk->codecSchema!=ClodDiskDetail::Schema ||
                disk->vertexBytes!=sizeof(SVertex) || disk->layoutKey!=ClodDiskDetail::LayoutKey() ||
                disk->clodAdapter!=ClodBake::AdapterVersion || disk->ramAdapter!=ClodRamPackage::AdapterVersion ||
                disk->libraryRevision[40] || std::memcmp(disk->libraryRevision.data(),ClodBake::LibraryRevision,40)) {
@@ -8503,39 +8533,64 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
             input->originalSource=PageExternalIdentity(disk->original);input->selectedCut={PageExternalIdentity(disk->selected),
                 {disk->clusterVertices,disk->clusterTriangles,disk->pageBytes},disk->formatVersion,disk->algorithmVersion};input->representation=Frontier::Coarse;
             if(!ValidDiskPageInput(*input)) return failure;
-            ControlledClodSource source;
-            if(BuildControlledClodSource(source)!=ControlledClodStatus::Built || !(source.original.source==input->originalSource) ||
-               source.helperSha256!=PageHashHex(disk->helperSha256)) {
-                failure.pageWorkState="IndependentSourceMismatch";return failure;
+            ControlledClodSource syntheticSource;
+            const ShapeExport* source=nullptr;std::string helperHash;
+            std::shared_ptr<const GeometryPageOriginalAdmissionState> originalOwner;
+            WgrModelSection materialSection{},selectedSection{};WgrModelMaterial material{},selectedMaterial{};
+            float radius=5;
+            if(originalMode) {
+                failure.originalFilePilot=true;failure.pageWorkState="OriginalAdmissionUnavailable";
+                if(!_geometryPageOriginalAdmission || !_geometryPageOriginalAdmission->report.snapshotValidated ||
+                    _geometryPageOriginalAdmission->report.status!=GeometryPageOriginalStatus::Admitted)return failure;
+                if(_geometryPageOriginalAdmission->report.consumed) {failure.status=GeometryReportStatus::Busy;failure.pageWorkState="OriginalAdmissionConsumed";return failure;}
+                originalOwner=_geometryPageOriginalAdmission;
+                if(disk->sourceAdmissionEpoch!=originalOwner->report.epoch || disk->originalSourceBytes!=originalOwner->report.originalSourceBytes ||
+                    !(originalOwner->source.original.source==input->originalSource)) {failure.pageWorkState="IndependentSourceMismatch";return failure;}
+                source=&originalOwner->source.original;radius=originalOwner->source.originRadius;
+                if(!std::isfinite(radius)||radius<=0 ||
+                    !PageOriginalPlainMaterial(originalOwner->source.coarseMaterial,materialSection,material) ||
+                    !PageOriginalPlainMaterial(originalOwner->source.fineMaterial,selectedSection,selectedMaterial)) {
+                    failure.pageWorkState="OriginalMaterialRefused";return failure;
+                }
+            } else {
+                if(BuildControlledClodSource(syntheticSource)!=ControlledClodStatus::Built || !(syntheticSource.original.source==input->originalSource) ||
+                    syntheticSource.helperSha256!=PageHashHex(disk->helperSha256)) {failure.pageWorkState="IndependentSourceMismatch";return failure;}
+                source=&syntheticSource.original;helperHash=syntheticSource.helperSha256;
+                auto materialShape=std::unique_ptr<Shape>(PagePilotCurvedGrid(1));AutoArray<render::mesh::MeshSection> sections;render::mesh::BuildSections(*materialShape,sections);
+                if(!ClassifyGpuSection(*materialShape,0,sections,0,materialSection,material))return failure;
+                selectedSection=materialSection;selectedMaterial=material;
             }
+            if(!material.texture_id)material.texture_id=UntexturedAlbedoHandle(false);
+            if(!selectedMaterial.texture_id)selectedMaterial.texture_id=UntexturedAlbedoHandle(false);
             failure.pageWorkState="FallbackRefused";
-            // Only the independent authored fallback is decoded on this explicit
-            // Begin. Selected CLOD coarse/fine are read+decoded on the value worker.
+            // Source preparation differs; publication and disk-worker lifecycle are common.
             Package fallbackPackage;Limits limits;limits.maxPages=8;limits.maxClusters=64;limits.payloadBytes=128*1024;
-            if(Build(source.original.coarse.Input(),source.original.fine.Input(),source.original.source,true,fallbackPackage,limits)!=Status::Built) return failure;
+            if(Build(source->coarse.Input(),source->fine.Input(),source->source,true,fallbackPackage,limits)!=Status::Built)return failure;
             ResidentRepresentation fallback;RepresentationDecodeLimits decode;decode.pages=8;decode.clusters=64;
             decode.vertexRecords=1024;decode.indices=4096;decode.decodedBytes=128*1024;decode.serializedBytes=128*1024;
-            if(DecodeResidentRepresentation(fallbackPackage,fallbackPackage.Identity(),Frontier::Coarse,source.original,fallback,decode)!=DecodeStatus::Decoded) return failure;
-            auto materialShape=std::unique_ptr<Shape>(PagePilotCurvedGrid(1));AutoArray<render::mesh::MeshSection> sections;render::mesh::BuildSections(*materialShape,sections);
-            WgrModelSection materialSection{};WgrModelMaterial material{};
-            if(!ClassifyGpuSection(*materialShape,0,sections,0,materialSection,material)) return failure;
-            if(!material.texture_id) material.texture_id=UntexturedAlbedoHandle(false);
+            if(DecodeResidentRepresentation(fallbackPackage,fallbackPackage.Identity(),Frontier::Coarse,*source,fallback,decode)!=DecodeStatus::Decoded)return failure;
             auto fixture=std::make_shared<GeometryPageFixtureState>();fixture->modelCount=4;
             fixture->pageCoarseSlot=1;fixture->pageFirstFineSlot=2;fixture->pageRefillSlot=3;fixture->pageFineSlot=1;
-            fixture->diskInput=std::move(input);fixture->pageSection=materialSection;fixture->pageMaterial=material;fixture->meshes.reserve(64);
+            fixture->diskInput=std::move(input);fixture->pageSection=selectedSection;fixture->pageMaterial=selectedMaterial;fixture->meshes.reserve(64);
+            fixture->originalAdmission=originalOwner;fixture->pageOriginRadius=radius;
             std::vector<ResourceOp> staged;staged.reserve(size_t(fallback.clusters)+2);
             uint64_t known=16384+sizeof(GeometryPageFixtureState)+DiskPageKnownBytes(*fixture->diskInput)+fixture->meshes.capacity()*sizeof(uint64_t);
             const auto meshBytes=[](const ExportedMesh& mesh) {return mesh.vertices.capacity()*sizeof(SVertex)+mesh.positions.capacity()*sizeof(Position)+
                 (mesh.indices.capacity()+mesh.materials.capacity())*sizeof(uint32_t);};
-            known+=meshBytes(source.original.coarse)+meshBytes(source.original.fine)+fallback.decodedBytes+
+            // The engine and fixture share ONE immutable DTO; do not charge its arrays twice.
+            const uint64_t admissionKnown=_geometryPageOriginalAdmission?_geometryPageOriginalAdmission->report.knownRetainedBytes:0;
+            known+=admissionKnown;
+            if(!originalMode)known+=meshBytes(source->coarse)+meshBytes(source->fine);
+            known+=fallback.decodedBytes+
                 fallback.pages.capacity()*sizeof(ResidentPage);
             for(const auto& page:fallback.pages)known+=page.clusters.capacity()*sizeof(ResidentCluster);
             for(const auto& page:fallbackPackage.pages) known+=page.bytes.capacity();
             known+=fallbackPackage.pages.capacity()*sizeof(Page)+fallbackPackage.clusters.capacity()*sizeof(Cluster);
             for(uint32_t slot=0;slot<4;++slot) {if(_nextModelHandle==WGR_INVALID_MODEL)return failure;fixture->models[slot]=_nextModelHandle++;}
-            ResourceOp model;model.kind=ResourceOp::ModelRegister;model.model=fixture->models[0];model.sphereRadius=5;model.name="private-disk-clod-fallback";
+            ResourceOp model;model.kind=ResourceOp::ModelRegister;model.model=fixture->models[0];model.sphereRadius=radius;model.name=originalMode?"private-original-disk-fallback":"private-disk-clod-fallback";
             for(const auto& page:fallback.pages)for(const auto& cluster:page.clusters) {
                 if(!_nextMeshHandle)return failure;ResourceOp mesh;mesh.kind=ResourceOp::MeshCreate;mesh.mesh=_nextMeshHandle++;
+                if(originalMode)for(const auto& v:cluster.vertices)if(!PageOriginalVertexEnclosed(v,radius))return failure;
                 mesh.verts=cluster.vertices;mesh.indices.reserve(cluster.indices.size());for(auto index:cluster.indices) {if(index>INT32_MAX)return failure;mesh.indices.push_back(VertexIndex(index));}
                 auto section=materialSection;section.mesh=mesh.mesh;section.index_begin=0;section.index_count=uint32_t(mesh.indices.size());
                 model.sections.push_back(section);model.materials.push_back(material);fixture->meshes.push_back(mesh.mesh);
@@ -8553,11 +8608,14 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
             fixture->pageBaseKnownBytes=known;auto& report=fixture->report;report.status=GeometryReportStatus::Pending;report.requestId=1;
             report.active=true;report.clodPilot=true;report.pagedPilot=true;report.diskPilot=true;report.fallbackSelected=true;
             report.pageEpoch=_nextGeometryPageEpoch++;report.pageWorkState="Idle";report.diskReadStatus="NotRequested";report.diskRequestedRepresentation="Coarse";
-            report.meshCount=uint32_t(fixture->meshes.size());report.knownPayloadBytes=known;report.cpuHelpersUnchanged=true;
-            report.helperHashBefore=source.helperSha256;report.helperHashAfter=source.helperSha256;report.sourceSha256=PageHashHex(source.original.source.sourceSha256);
+            report.meshCount=uint32_t(fixture->meshes.size());report.knownPayloadBytes=known;report.cpuHelpersUnchanged=!originalMode;
+            report.helperHashBefore=helperHash;report.helperHashAfter=helperHash;report.sourceSha256=PageHashHex(source->source.sourceSha256);
+            report.originalFilePilot=originalMode;report.helperCount=originalMode?0:3;
+            if(originalMode) {report.sourceSnapshotValidated=true;report.sourceAdmissionEpoch=originalOwner->report.epoch;
+                report.originalSourceBytes=originalOwner->report.originalSourceBytes;report.sourceAdmissionKnownBytes=admissionKnown;report.originalOriginRadius=radius;}
             report.selectedCutSha256=PageHashHex(fixture->diskInput->selectedCut.source.sourceSha256);report.clodAdapterVersion=ClodBake::AdapterVersion;
             report.clodRamAdapterVersion=ClodRamPackage::AdapterVersion;report.clodLibraryRevision=ClodBake::LibraryRevision;
-            report.fallbackTriangles=uint32_t(source.original.coarse.indices.size()/3);report.authoredFineTriangles=uint32_t(source.original.fine.indices.size()/3);
+            report.fallbackTriangles=uint32_t(source->coarse.indices.size()/3);report.authoredFineTriangles=uint32_t(source->fine.indices.size()/3);
             report.x=x;report.y=y;report.z=z;report.producerModel=fixture->models[0];
             auto& placement=fixture->placement;placement.world.m[0]=placement.world.m[5]=placement.world.m[10]=placement.world.m[15]=1;
             placement.world.m[12]=x;placement.world.m[13]=y;placement.world.m[14]=z;placement.center={x,y,z,1};placement.model=fixture->models[0];
@@ -8566,6 +8624,9 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
             if(_instFreeHandles.empty() && _nextInstanceHandle==UINT32_MAX)return failure;
             fixture->instance=EnqueueInstanceAdd(placement);report.producerInstance=fixture->instance;
             for(auto& op:staged)_resourceOps.push_back(std::move(op));_geometryPageFixture=fixture;_geometryPageFixtureActive=true;
+            // Fully published transaction consumes source admission exactly once.
+            // Abort never rearms epoch1; fine cancellation/eviction stays in this fixture.
+            if(originalMode) {_geometryPageOriginalAdmission->report.consumed=true;report.sourceAdmissionConsumed=true;}
             // Accepted fallback already owns all published IDs. An unavailable
             // budget leaves it drawing and RequestCoarse can retry; no orphan job.
             { std::lock_guard lock(fixture->mutex);
@@ -8670,6 +8731,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
             std::vector<ResourceOp> staged; staged.reserve(selectedMeshes+fixture->modelCount+1);
             fixture->meshes.reserve(pagedPilot?64:selectedMeshes);
             uint64_t known=16384+sizeof(LODShape)+5*sizeof(Shape); // fixed pilot/helper/state metadata allowance, not RSS
+            if(_geometryPageOriginalAdmission)known+=_geometryPageOriginalAdmission->report.knownRetainedBytes;
             const auto countExport=[&](const ExportedMesh& mesh) {
                 return mesh.positions.capacity()*sizeof(Position)+mesh.vertices.capacity()*sizeof(SVertex)+
                     (mesh.indices.capacity()+mesh.materials.capacity())*sizeof(uint32_t); };
@@ -8911,11 +8973,13 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
                     if(fixture->models[fixture->pageFineSlot]==WGR_INVALID_MODEL || report.requestId==UINT64_MAX) return failure;
                     std::vector<ResourceOp> staged; staged.reserve(size_t(result->decoded.clusters)+2);
                     std::vector<uint64_t> meshes;meshes.reserve(size_t(result->decoded.clusters));
-                    ResourceOp model;model.kind=ResourceOp::ModelRegister;model.model=fixture->models[fixture->pageFineSlot];model.sphereRadius=5;model.name="private-authored-fine-page";
+                    ResourceOp model;model.kind=ResourceOp::ModelRegister;model.model=fixture->models[fixture->pageFineSlot];model.sphereRadius=fixture->pageOriginRadius;model.name="private-authored-fine-page";
                     uint64_t extra=staged.capacity()*sizeof(ResourceOp)+meshes.capacity()*sizeof(uint64_t);
                     for(const auto& page:result->decoded.pages) for(const auto& cluster:page.clusters) {
                         if(!_nextMeshHandle) return failure;
                         ResourceOp mesh;mesh.kind=ResourceOp::MeshCreate;mesh.mesh=_nextMeshHandle++;
+                        if(report.originalFilePilot)for(const auto& v:cluster.vertices)
+                            if(!PageOriginalVertexEnclosed(v,fixture->pageOriginRadius)){report.pageWorkState="OriginalBoundsRefused";report.status=GeometryReportStatus::Invalid;return report;}
                         mesh.verts=cluster.vertices;mesh.indices.reserve(cluster.indices.size());
                         for(auto index:cluster.indices) {if(index>INT32_MAX) return failure;mesh.indices.push_back(VertexIndex(index));}
                         auto section=fixture->pageSection;section.mesh=mesh.mesh;section.index_begin=0;section.index_count=uint32_t(mesh.indices.size());

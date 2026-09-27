@@ -816,7 +816,7 @@ class EngineWgpu : public EngineDummy
     struct SharedMeshFixtureState;
     std::shared_ptr<SharedMeshFixtureState> _sharedMeshFixture;
     struct GeometryPageOriginalAdmissionState;
-    std::shared_ptr<const GeometryPageOriginalAdmissionState> _geometryPageOriginalAdmission;
+    std::shared_ptr<GeometryPageOriginalAdmissionState> _geometryPageOriginalAdmission;
     struct GeometryPageFixtureState;
     std::shared_ptr<GeometryPageFixtureState> _geometryPageFixture;
     std::shared_ptr<GeometryPageFixtureState> _geometryPageFixtureObservation;

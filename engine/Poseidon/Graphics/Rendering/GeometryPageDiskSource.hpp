@@ -64,7 +64,7 @@ inline DiskReadStatus ReadDiskPageSource(const DiskPageInput& input,ClodRamPacka
         stream.seekg(0,std::ios::beg);
         if(!stream.read(reinterpret_cast<char*>(bytes.data()),std::streamsize(bytes.size()))) return DiskReadStatus::ReadFailed;
         // Reject growth as well as short reads; no independently refreshed path lease.
-        if(stream.peek()!=std::char_traits<char>::eof() || stream.bad()) return DiskReadStatus::ReadFailed;
+        if(stream.peek()!=std::char_traits<char>::eof() || !stream.eof() || stream.bad()) return DiskReadStatus::ReadFailed;
         if(cancelled.load()) return DiskReadStatus::Cancelled;
         ClodRamPackage decoded;
         const auto status=DecodeClodDisk(bytes,input.originalSource,input.selectedCut,decoded);

@@ -3207,7 +3207,7 @@ class Engine : public IGraphicsEngine
     struct GeometryPageOriginalAdmissionReport {
         GeometryPageOriginalStatus status=GeometryPageOriginalStatus::Disabled;
         uint64_t epoch=0, originalSourceBytes=0, knownRetainedBytes=0;
-        bool snapshotValidated=false;
+        bool snapshotValidated=false, consumed=false; // Single source admission cannot rearm after fixture Abort.
     };
     // Full source-key numbers in decimal: geometry:material:producer:coarse:fine:layout:mapping.
     static bool ParseGeometryPageOriginalStartupInput(const std::string& path, const std::string& sha256,
@@ -3228,6 +3228,8 @@ class Engine : public IGraphicsEngine
         std::array<uint8_t,32> helperSha256{};
         std::array<char,41> libraryRevision{};
         uint64_t layoutKey=0;
+        uint64_t sourceAdmissionEpoch=0,originalSourceBytes=0;
+        uint32_t originalSubsetVersion=0; // schema2 original-file mode only; schema1 synthetic stays unchanged.
         uint32_t schemaVersion=0,pilotVersion=0,codecSchema=0,vertexBytes=0,clodAdapter=0,ramAdapter=0;
         uint32_t formatVersion=0,algorithmVersion=0,clusterVertices=0,clusterTriangles=0,pageBytes=0;
     };
@@ -3257,6 +3259,10 @@ class Engine : public IGraphicsEngine
         bool clodPilot=false, fallbackSelected=false;
         bool pagedPilot=false, fineResident=false;
         bool diskPilot=false,coarseResident=false;
+        bool originalFilePilot=false,sourceSnapshotValidated=false,sourceAdmissionConsumed=false;
+        uint64_t sourceAdmissionEpoch=0,originalSourceBytes=0,sourceAdmissionKnownBytes=0;
+        uint32_t helperCount=0; // Original subset has no helper LODs; hashes stay empty.
+        float originalOriginRadius=0;
         std::string diskReadStatus,diskRequestedRepresentation;
         // Jobs/known capacity are CPU source+decode scheduling estimates, not RSS.
         // Completed counts returned worker results; fineResident requires renderer validation.
