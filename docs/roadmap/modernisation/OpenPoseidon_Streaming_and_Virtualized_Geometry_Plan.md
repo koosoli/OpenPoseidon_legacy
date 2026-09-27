@@ -539,3 +539,64 @@ References R1–R16 and their repository links remain pinned to the original his
 [U1] [CWR-CE PR #314 — Porting instanced terrain (water) rendering](https://github.com/ofpisnotdead-com/CWR-CE/pull/314). Metadata checked through the GitHub connector: open/unmerged, head `6469b7f289e6620aae48ca367d15280976849117`, base `ce7c153746d659359260934c5470e46650e81f83`. Status is a dated observation; refresh only if selecting a specific idea/code fragment for WGPU/shared-service reuse, not to port GL33. No upstream benchmark was independently reproduced for this addendum.
 
 [U2] [Upstream `EngineGL33_Terrain.cpp` at the reviewed PR head](https://github.com/ofpisnotdead-com/CWR-CE/blob/6469b7f289e6620aae48ca367d15280976849117/engine/PoseidonGL33/EngineGL33_Terrain.cpp). Historical reference for reusable segment geometry, texture-array grouping, cell metadata and water-segment filtering. No GL33 port, tuning, index/batch-limit hardening or shader work is requested. Reuse an idea only when it addresses a measured WGPU/shared-service issue; do not copy the backend or its constraints.
+
+## Verified selected-CLOD RAM foundation and default section refresh, 12:43
+
+Clean installed `51f4e5e0` contains `1834a338` selected-CLOD RAM adapter/worker
+foundation and `e631ffee` section-refresh validity, with the repaired Rust key
+annotations. The initial three key-type inference errors are preserved in the
+failed test log. The initial 21-scheduled build and repaired five-target 18-scheduled
+build passed. C++ tests passed 19,160 assertions in 18 cases with no skips;
+Rust section-refresh tests passed seven cases, including the explicit actual-GPU
+upload/readback PASS marker and same-capacity full-generation recreation. The
+expected caught-panic test does not indicate an uncaught test failure.
+
+The selected-CLOD adapter recomputes paired selections and verifies exact original
+`SVertex` attributes, selected topology and single material before publishing a
+transactional RAM package. Its reference is the complete simplified SELECTED CUT,
+not the unsimplified fine representation. Derived identity includes source,
+library/adapter policy, thresholds, cut IDs and exact geometry. Caps remain eight
+pages, 64 clusters, 1,024 vertex records/cut, 4,096 indices/cut and 128KiB known C++
+capacity, excluding external library scratch, allocator overhead and RSS. Actual
+worker units decode these selected-cut bytes; held publication cancellation keeps
+old source/reservation debt, rejects old epoch/request results, and publishes only
+the changed-source replacement. This checkpoint proves CPU adapter/worker tests;
+combined CLOD runtime paging is still unbuilt and excluded from installed51.
+
+Default section-address refresh uses a 16-byte scalar validity latch and O(1)
+pool-generation comparison. Structural mesh/table mutations invalidate it; clean
+frames skip section resolution, vector allocation and equality comparison while
+normal cull/upload/animation work continues. Tests share the production closure
+and prove equal addresses against always-resolved output, including missing full
+generational handles. Exact startup `WGR_CULL_SECTION_REFRESH=0` retains the
+legacy per-frame refresh body; only that exact string forces rollback. Provable
+work-count reduction is not a measured FPS improvement.
+
+The real authored page lifecycle `section-refresh-page-lifecycle-20260927-20260927-124430`
+passed with a clean exit: held job1/reservation172,040 survives Abort, replacement
+queues two jobs/reservation344,080, only the current fine result publishes, the
+one-cycle eviction/refill preserves five-handle history, and final five Absent
+records/job0/reservation0 are verified. This remains record lifetime, not queue
+completion, device-free, physical-reclaim or all-pass proof.
+
+Two same-binary/script/HEAD Disabled/Counted DayZ arms passed with clean exits and
+zero dropped frames. The legacy arm sets refresh0; optimized sets refresh1.
+Provenance confirms identical other configured settings (private user paths differ).
+Raw timings use ordinary median and nearest-rank ceil(n*p)-1 tails:
+
+| Arm | Frames | Mean ms | Median ms | p95 ms | p99 ms | Max ms |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Legacy124557 | 720 | 50.050686 | 26.809 | 170.123 | 439.533 | 1045.527 |
+| Optimized124850 | 725 | 49.801603 | 26.063 | 165.745 | 451.559 | 1217.254 |
+
+Both returned19,923 residents/required0/pendingfalse, pool capacity1,275,068,416.
+Legacy geometry713,281,452 versus optimized710,383,980 bytes; textures
+2,748,656,436/2,488 versus2,748,874,868/2,490 entries; backend allocation
+5,301,160,464 versus5,301,382,352. The ordered arms have unequal allocated work
+and cache/async history. Optimized p99/max are worse, despite lower mean/median/p95;
+this mixed screen establishes no causal benefit, no-regression or performance
+acceptance. No thresholds were relaxed. Stage G/full plan remain OPEN;
+performanceAccepted/defaultReady remain false, experimental paging stays OFF.
+
+
+Artifact hashes are recorded in `../decisions/GEOMETRY-CLOD-PILOT-20260927.md`.

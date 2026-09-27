@@ -1057,6 +1057,15 @@ unbuilt_candidates: >-
       RAM pages only; no disk/autopaging/default worker allocation. Optional
       pointer fields/branches remain, not zero default cost. Fine eviction/refill,
       full ownership, physical reclaim and performance/default acceptance OPEN.
+      Clean51f4e5e0 selected-CLOD RAM adapter/actual CPU worker tests passed
+      19160 assertions/18 cases; seven Rust tests include actual GPU marker.
+      Default section-refresh cache16B/O1 has exact startup0 legacy rollback.
+      Authored lifecycle124430 passed clean with final fiveAbsent/debt0.
+      Same-binary legacy/optimized720/725-frame screen is mixed: optimized
+      p99/max451.559/1217.254ms versus439.533/1045.527ms, despite lower mean.
+      Both returned19923/required0, unequal geometry/material allocation;
+      no causal/no-regression or performance acceptance. Runtime CLOD RAM
+      paging excluded/unbuilt; full planOPEN/defaultReady false.
       Clean3d720430 one-cycle fine retirement/refill passed: history3 retains
       old fineAbsent2/coarsePresent1, cancelled held refill debt172040 retained,
       generation2 yields history5/Present3/Absent2, final allAbsent/jobs0. No

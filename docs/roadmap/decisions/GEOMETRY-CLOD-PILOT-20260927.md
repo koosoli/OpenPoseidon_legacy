@@ -1,7 +1,9 @@
 # Controlled resident CPU CLOD pilot
 
-Installed clean 3d720430 passed the explicit authored fine eviction/refill and
-actual reflection-command recording checks. The earlier bounded RAM-page worker
+Installed clean 51f4e5e0 adds the verified selected-CLOD RAM CPU adapter/worker
+foundation and default section-address refresh cache. Same-binary DayZ screening
+is mixed and establishes no performance acceptance. Historical clean3d720430
+passed explicit authored fine eviction/refill and reflection-command checks. The earlier bounded RAM-page worker
 and resident CLOD checkpoints remain historical evidence. The startup fixture
 gate remains off; normal frames perform no bake or page work. Stage G and the full
 plan remain OPEN, without performance/default or physical-reclaim acceptance.
@@ -395,3 +397,90 @@ Actual checkpoint SHA256 manifest:
 | build/stream-residency/default-after-eviction-reflection-20260927-disabled-20260927-122106/route-frame-ms.json | 1cfef78532ae7fff5178f3f5305b2f859cb056aee1cc03bffea2e7830d535bb8 |
 | build/stream-residency/default-after-eviction-reflection-20260927-disabled-20260927-122106/samples.jsonl | 7b0fcc3290232e21d1724fb1cb2c5590b14169c20f6557076d38e2a274d79a57 |
 | build/stream-residency/default-after-eviction-reflection-20260927-disabled-20260927-122106/warm-texture-job-proof.json | 908978856894f46faabad5ef2de34e55a089e443ff070341f8c404d27f6d0625 |
+
+## Actual selected-CLOD RAM foundation and section-refresh checkpoint, 12:43
+
+Clean installed `51f4e5e0` contains `1834a338` selected-CLOD RAM adapter/worker
+foundation and `e631ffee` section-refresh validity, with the repaired Rust key
+annotations. The initial three key-type inference errors are preserved in the
+failed test log. The initial 21-scheduled build and repaired five-target 18-scheduled
+build passed. C++ tests passed 19,160 assertions in 18 cases with no skips;
+Rust section-refresh tests passed seven cases, including the explicit actual-GPU
+upload/readback PASS marker and same-capacity full-generation recreation. The
+expected caught-panic test does not indicate an uncaught test failure.
+
+The selected-CLOD adapter recomputes paired selections and verifies exact original
+`SVertex` attributes, selected topology and single material before publishing a
+transactional RAM package. Its reference is the complete simplified SELECTED CUT,
+not the unsimplified fine representation. Derived identity includes source,
+library/adapter policy, thresholds, cut IDs and exact geometry. Caps remain eight
+pages, 64 clusters, 1,024 vertex records/cut, 4,096 indices/cut and 128KiB known C++
+capacity, excluding external library scratch, allocator overhead and RSS. Actual
+worker units decode these selected-cut bytes; held publication cancellation keeps
+old source/reservation debt, rejects old epoch/request results, and publishes only
+the changed-source replacement. This checkpoint proves CPU adapter/worker tests;
+combined CLOD runtime paging is still unbuilt and excluded from installed51.
+
+Default section-address refresh uses a 16-byte scalar validity latch and O(1)
+pool-generation comparison. Structural mesh/table mutations invalidate it; clean
+frames skip section resolution, vector allocation and equality comparison while
+normal cull/upload/animation work continues. Tests share the production closure
+and prove equal addresses against always-resolved output, including missing full
+generational handles. Exact startup `WGR_CULL_SECTION_REFRESH=0` retains the
+legacy per-frame refresh body; only that exact string forces rollback. Provable
+work-count reduction is not a measured FPS improvement.
+
+The real authored page lifecycle `section-refresh-page-lifecycle-20260927-20260927-124430`
+passed with a clean exit: held job1/reservation172,040 survives Abort, replacement
+queues two jobs/reservation344,080, only the current fine result publishes, the
+one-cycle eviction/refill preserves five-handle history, and final five Absent
+records/job0/reservation0 are verified. This remains record lifetime, not queue
+completion, device-free, physical-reclaim or all-pass proof.
+
+Two same-binary/script/HEAD Disabled/Counted DayZ arms passed with clean exits and
+zero dropped frames. The legacy arm sets refresh0; optimized sets refresh1.
+Provenance confirms identical other configured settings (private user paths differ).
+Raw timings use ordinary median and nearest-rank ceil(n*p)-1 tails:
+
+| Arm | Frames | Mean ms | Median ms | p95 ms | p99 ms | Max ms |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Legacy124557 | 720 | 50.050686 | 26.809 | 170.123 | 439.533 | 1045.527 |
+| Optimized124850 | 725 | 49.801603 | 26.063 | 165.745 | 451.559 | 1217.254 |
+
+Both returned19,923 residents/required0/pendingfalse, pool capacity1,275,068,416.
+Legacy geometry713,281,452 versus optimized710,383,980 bytes; textures
+2,748,656,436/2,488 versus2,748,874,868/2,490 entries; backend allocation
+5,301,160,464 versus5,301,382,352. The ordered arms have unequal allocated work
+and cache/async history. Optimized p99/max are worse, despite lower mean/median/p95;
+this mixed screen establishes no causal benefit, no-regression or performance
+acceptance. No thresholds were relaxed. Stage G/full plan remain OPEN;
+performanceAccepted/defaultReady remain false, experimental paging stays OFF.
+
+Installed pair SHA256: EXE621142A6D329861009DFD55AFF60783ACC539474FBB001EB2E5D6F0FF7D57C73,
+DLL045239CF20538B91B8E939A2DA6157C4FF1FEF87A95364145CCD3A3DFABD97A4.
+
+Actual checkpoint SHA256 manifest:
+
+| Artifact | SHA256 |
+| --- | --- |
+| build/build-section-refresh-clod-ram-20260927.log | fdd475fb7d108cc3fd38c0d7fd1d38c137f25e71adf19ca770ef9e19e5f405fa |
+| build/build-section-refresh-repaired-20260927.log | c3ecff4dbc5375b7903835092408625f2a5da71bbec3654acda02064842d099a |
+| build/test-section-refresh-initial-compile-failure-20260927.log | e2f362d2f8c414c7150b71ca31bda608d98c195a31f1e4efada6b59ecd44631f |
+| build/test-section-refresh-20260927.log | 168ec7abbc057bfeb6be71f3c16ba9ce0c0b59b36554c99d8135b9c27e941732 |
+| build/test-clod-ram-worker-20260927.log | c87298bb558bb379d33e4f039cb0fcb8866f108821ac0ca19706ba5532f33915 |
+| build/stream-residency/section-refresh-page-lifecycle-20260927-20260927-124430/result.json | a9e051a44ea57ff35ca7703deb146402c61d3f1e978bd0ee5d6c4d4854806eb5 |
+| build/stream-residency/section-refresh-page-lifecycle-20260927-20260927-124430/provenance.json | 6454cb4fff62292d91f39da9da5553fbd481ddde35149615175f1bb0a48e7f67 |
+| build/stream-residency/section-refresh-page-lifecycle-20260927-20260927-124430/engine.log | 28caa20f4e473176c395bc4fe5c45efb69b13a1fa9e882c8a803bcbe105c2819 |
+| build/stream-residency/section-refresh-page-lifecycle-20260927-20260927-124430/harness.jsonl | b79b96d294ebfdc8b0b6ba1526fdc19d017d1c5797dfcb957c2af4464fa4a022 |
+| build/stream-residency/section-refresh-legacy-20260927-disabled-20260927-124557/result.json | 7903379eb8352e7ed6a483fa20a6fb1d321b99f76f5f594143db81f8739ed578 |
+| build/stream-residency/section-refresh-legacy-20260927-disabled-20260927-124557/provenance.json | 9b7c7db3b1de1a35f41cd14e2b030cb1bb5c864076a13d8e2aae0b9f107e41bf |
+| build/stream-residency/section-refresh-legacy-20260927-disabled-20260927-124557/engine.log | 9d6422504769ebfef9613d656a8094098c6bce426eaf16d5d914f3dc85e37ace |
+| build/stream-residency/section-refresh-legacy-20260927-disabled-20260927-124557/harness.jsonl | 6da2bc3ffe9e55d5f69eeafadec7e5ad263b21486fe8ba624f91d0354ce2cc18 |
+| build/stream-residency/section-refresh-legacy-20260927-disabled-20260927-124557/route-frame-ms.json | b78b843224f03479eb4f869f6e253d28a0eedc6203a53dd3da817501d2b1443b |
+| build/stream-residency/section-refresh-legacy-20260927-disabled-20260927-124557/returned-settled.png | 48c0a8ec1a8eafd69e55f599a8fa8c3aa82db0552614dcd882ca8653449373c7 |
+| build/stream-residency/section-refresh-optimized-20260927-disabled-20260927-124850/result.json | 784ac4063e91485a5d46459cde589ea288c4dd6bcad9d034d3205713171d1d52 |
+| build/stream-residency/section-refresh-optimized-20260927-disabled-20260927-124850/provenance.json | 740e9933ef2297992c0af6ce2ea3f9b8415adc2553f871b5d58ed4c7edfe86c3 |
+| build/stream-residency/section-refresh-optimized-20260927-disabled-20260927-124850/engine.log | 3de62a5047ccadef68f54652bede813e94686b46a32d5050b8b7810fb05ba58e |
+| build/stream-residency/section-refresh-optimized-20260927-disabled-20260927-124850/harness.jsonl | 4a8093cf5b67dfffe7af3a51c46648d71322a6402dc1fddf3ebe2c0b675acb43 |
+| build/stream-residency/section-refresh-optimized-20260927-disabled-20260927-124850/route-frame-ms.json | 0fa5c396aceda91ce957147df8d06a75bbabdd34756c4bd8812c48109367ee0b |
+| build/stream-residency/section-refresh-optimized-20260927-disabled-20260927-124850/returned-settled.png | 71e9340b8c67413f85ee5cbbec695ff69a9f6347ae61033b72f5e5b89ab4fe0e |
