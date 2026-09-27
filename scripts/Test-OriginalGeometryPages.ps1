@@ -115,7 +115,7 @@ try{
  $client=[Net.Sockets.TcpClient]::new();$until=[DateTime]::UtcNow.AddSeconds(90)
  while(!$client.Connected){try{$client.Connect('127.0.0.1',$port)}catch{if($p.HasExited -or [DateTime]::UtcNow -gt $until){throw};Start-Sleep -Milliseconds 250}}
  $stream=$client.GetStream();$stream.ReadTimeout=15000;$reader=[IO.StreamReader]::new($stream);$writer=[IO.StreamWriter]::new($stream,[Text.UTF8Encoding]::new($false));$writer.AutoFlush=$true
- function Send($command){$writer.WriteLine(($command|ConvertTo-Json -Compress));do{$line=$reader.ReadLine();if($null -eq $line){throw 'Harness closed'};$r=$line|ConvertFrom-Json}while($null -eq $r.ok);($command|ConvertTo-Json -Compress)|Add-Content (Join-Path $out 'harness.jsonl');$line|Add-Content (Join-Path $out 'harness.jsonl');if(!$r.ok){throw $line};return $r}
+ function Send($command){$writer.WriteLine(($command|ConvertTo-Json -Depth 12 -Compress));do{$line=$reader.ReadLine();if($null -eq $line){throw 'Harness closed'};$r=$line|ConvertFrom-Json}while($null -eq $r.ok);($command|ConvertTo-Json -Depth 12 -Compress)|Add-Content (Join-Path $out 'harness.jsonl');$line|Add-Content (Join-Path $out 'harness.jsonl');if(!$r.ok){throw $line};return $r}
  function Require($r,$names){foreach($name in $names){if($null -eq $r -or $null -eq $r.PSObject.Properties[$name] -or $null -eq $r.$name){throw "Missing field $name"}}}
     $Clod=$true;$Paged=$true;$Evict=$true;$Disk=$true
     function Action($action) {
