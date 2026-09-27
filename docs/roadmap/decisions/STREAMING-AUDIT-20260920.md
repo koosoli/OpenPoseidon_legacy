@@ -2765,3 +2765,30 @@ performanceAcceptedfalse. Future recommendation, NOTimplemented: SoldierOldAI.cp
 FireWeapon currently renews cargo insertion interest before magazine/mode/ammo/
 GetWeaponLoaded eligibility; narrowly acquire only viableattempt/releaseinvalid
 or unloaded while preserving legacy CargoWeaponLineClear order/defaultbehavior.
+
+## Sept27 optional standalone vertex-buffer witness
+
+2c1caeb1 all5targets249scheduledPASS;14524assertions/26casesPASS/noSKIP.
+Cleaninstall09:14 EXE 9D709120B3B209B6AD712857B182B3548E18802F9FEE451FE466828C86977908,
+DLL 713F8310571D9E86251DD3AD716FD13AC6FA0AB8B24B5A36A64174633339F078.
+Optionalallocationledger witnessbudget8192/1MiB/sizeof+64controlguard is known
+metadata, not RSS/physicalbound. Defaultnullptr16Bslot+16Bengine androllbackstack
+metadata remain; no zerofootprint claim. Onlyactualstandalone failuresmark
+incomplete; shutdown/latebind/rollback callbacks retainimmutable numericfacts.
+
+Actual091511 passedtrue/rootwrapper0/engineShutdowncomplete: one realVBDynamic
+copyexisting1001/no retainedmapoverride, fullhandle4294967357/producer62
+Present1→Absent0 and exactledger scheduledfalse→true/knownpayload18360bytes.
+Witnessknown/peak11224/refused0; fixtureholds witnessalias untilAbort, so nonzero
+knownbytes atDrop is expected. This proves copiedrecord/witness lifecycle, not
+fullGPUowner/ACK/devicefree/reclaim/performance. DefaultDayZ091613 rootwrapper0/
+cleanShutdown/drop0:767frames mean46.716867/median25.242/p95131.554/p99524.008/
+max946.407ms nearest-rank/usualmedian. Returned19923/required0/geometry712475736/
+cap1275068416/textures2745685716/2485/private9666383872/workset4015218688.
+Drawinit avg17.570/p9595.434/max850.730; landobjects6.581/9.002/230.625ms.
+Mean/median/p99 worse than7f084558(40.350622/22.784/389.819); unequalmaterial/
+cache/order prevents isolatedcausal attribution and no-regression acceptance.
+Root localreturned bus/street/buildings/treecoverage compatible only. Defaultslot
+tax alternatives remain sourceonly/UNCHANGED/UNBUILT; next
+recordclosure source is unbuilt/excluded, cargoeligibleguard remainsfutureNOTdone.
+WholeplanOPEN/defaultReady-performanceAcceptedfalse/diagnosticledgerOFF.

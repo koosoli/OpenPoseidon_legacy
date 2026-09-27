@@ -15817,6 +15817,378 @@
         "provenance.json": "47793fca70f59440151a61820ab8dd6127a135078d60e3c92d0cf0c4c6b35866",
         "result.json": "5ec0f45f00cea6e2cdc4ff78e41cb0dd76be53ffe389aaae2d322fc784fae717"
       }
+    },
+    {
+      "run": "standalone-witness-20260927-20260927-091511",
+      "classification": "PASS resulttrue/rootwrapper0/engineShutdowncomplete; standalone copiedVBDynamic witness diagnostic",
+      "provenance": {
+        "disabled": false,
+        "head": "2c1caeb1ea8cea295e7e7597ce3ccf6934ab396b",
+        "shapeCacheLimit": null,
+        "installed": "codex/streaming-residency 2c1caeb1 2026-09-27_09:14 deploy-ps1",
+        "scriptSha256": "946C58793E2B025FDBE81F2FC25489BAC6C2DDDF1253539590814CA5E28CF6F8",
+        "fixture": {
+          "absolute_model_path": true,
+          "actor": [
+            1190,
+            10,
+            1200
+          ],
+          "camera": [
+            100,
+            80,
+            100
+          ],
+          "camera_isolation_env": {
+            "WGR_OBJECT_STREAM_RADIUS_CELLS": "8",
+            "WGR_OBJECT_STREAM_WINDOW_GROWTH": "0"
+          },
+          "cell_metres": 50.0,
+          "elevation": 10.0,
+          "fire_segment": [
+            [
+              1190,
+              11.5,
+              1200
+            ],
+            [
+              1210,
+              11.5,
+              1200
+            ]
+          ],
+          "half_depth": 6.0,
+          "land_range": 32,
+          "large_wall": false,
+          "model_sha256": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+          "models": [
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\standalone-witness-20260927-20260927-091511\\fixture\\streaming_fixture\\wall.p3d"
+          ],
+          "notes": [
+            "Absolute-model mode uses original loose files without an archive mount; relative mode needs a separately configured loose-file root.",
+            "Camera at 100 is isolated from walls at 1200/1230 with growth disabled.",
+            "No ResolveObject: actor demand must admit geometry with transient leases.",
+            "Generic inventory/classification/admission must establish readiness.",
+            "Self-check is not engine parsing, collision or runtime verification."
+          ],
+          "placements": [
+            {
+              "id": 1001,
+              "model_index": 0,
+              "position": [
+                1200.0,
+                11.5,
+                1200.0
+              ]
+            },
+            {
+              "id": 1002,
+              "model_index": 0,
+              "position": [
+                1230.0,
+                11.5,
+                1200.0
+              ]
+            }
+          ],
+          "positive_warming": false,
+          "reference_all_models": false,
+          "registered_warming": false,
+          "schema": 1,
+          "terrain_range": 32,
+          "wall_world_bounds": [
+            [
+              1199.5,
+              10,
+              1194.0,
+              1200.5,
+              13,
+              1206.0
+            ],
+            [
+              1229.5,
+              10,
+              1194.0,
+              1230.5,
+              13,
+              1206.0
+            ]
+          ],
+          "world_sha256": "5e796e9f2ee23ed7f962cae004ec37fa0ac28383b7018f0c7a56d9aacb9da810"
+        },
+        "registeredWarming": false,
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "9D709120B3B209B6AD712857B182B3548E18802F9FEE451FE466828C86977908",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "713F8310571D9E86251DD3AD716FD13AC6FA0AB8B24B5A36A64174633339F078",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ]
+      },
+      "summary": {
+        "passed": true,
+        "performanceAccepted": false,
+        "shutdownComplete": true,
+        "standalone": true,
+        "cases": [
+          {
+            "last": {
+              "status": "Ready",
+              "requestId": 4,
+              "observedRequestId": 4,
+              "producer": "62",
+              "rendererHandle": "4294967357",
+              "knownPayloadBytes": 18360,
+              "meshState": 2,
+              "cpuBorrowers": 0,
+              "producerOwned": false,
+              "sourceCopied": true,
+              "privateAllocation": true,
+              "ledgerEnabled": true,
+              "ledgerRecordObserved": true,
+              "ledgerScheduledRetired": true,
+              "ledgerCpuBorrowers": 0,
+              "ledgerProducerOwned": false,
+              "standalone": true,
+              "witnessKnownMetadataBytes": 11224,
+              "witnessPeakKnownMetadataBytes": 11224,
+              "witnessCapacityRefused": 0,
+              "scope": "Private copied mesh lifetime and generational record state; no world rendering, queue-completion or device-free proof",
+              "ok": true,
+              "priorCuts": []
+            },
+            "order": "standalone",
+            "created": {
+              "status": "Ready",
+              "requestId": 2,
+              "observedRequestId": 2,
+              "producer": "62",
+              "rendererHandle": "4294967357",
+              "knownPayloadBytes": 18360,
+              "meshState": 1,
+              "cpuBorrowers": 1,
+              "producerOwned": false,
+              "sourceCopied": true,
+              "privateAllocation": true,
+              "ledgerEnabled": true,
+              "ledgerRecordObserved": true,
+              "ledgerScheduledRetired": false,
+              "ledgerCpuBorrowers": 1,
+              "ledgerProducerOwned": false,
+              "standalone": true,
+              "witnessKnownMetadataBytes": 11224,
+              "witnessPeakKnownMetadataBytes": 11224,
+              "witnessCapacityRefused": 0,
+              "scope": "Private copied mesh lifetime and generational record state; no world rendering, queue-completion or device-free proof",
+              "ok": true,
+              "priorCuts": []
+            }
+          }
+        ],
+        "required": 0,
+        "simulationStatus": "Disabled",
+        "ownerPumps": 0
+      },
+      "limits": "OneactualVBDynamic privatecopyexisting1001/no retainedmapoverride; fullhandle4294967357/producer62 Present1→Absent0 ledgerScheduledfalse→true knownpayload18360. Witnessknown/peak11224/refused0, fixturealiashelduntilAbort so knownbytesatDrop not0expected. OptionalledgerON only witnessbudget8192/1MiB/sizeof+64controlguard knownmetadata notRSS/physicalbound; OFFnullptr16Bslot+16Bengine plusrollbackstack metadata. Actualstandalone failuresmarkincomplete; immutable numeric callbacks shutdown/latebind/rollback. No fullGPUownership/ACK/devicefree/reclaim/performanceproof; nextrecordclosureUNBUILT/excluded/futurecargoeligibleguardNOTdone. Defaultscreencompletedworsemean-median-p99,noacceptance/fullplanOPEN/defaultReady-performancefalse.",
+      "sha256": {
+        "engine.log": "217f314647c20f88cb327223e222d7cc3a11c86992911e5597bb127d9e5d63c2",
+        "harness.jsonl": "929551fc4fea861c16913a77aee3d6b1c1c60fd6218668bf4f69fb9fb245855a",
+        "provenance.json": "dcf8598a326882668baeec7b9f0389dd8decbb88655dac747922673707e1808f",
+        "result.json": "79b31dd719ec9e55682fa943e40b3e47b24d408b5ea88f4ea31063bc5d422962"
+      }
+    },
+    {
+      "run": "standalone-witness-default-20260927-disabled-20260927-091613",
+      "classification": "PASS defaultcompat/rootwrapper0/cleanShutdown; worsemean-median-p99 route screening",
+      "provenance": {
+        "head": "2c1caeb1ea8cea295e7e7597ce3ccf6934ab396b",
+        "poseHoldSeconds": 3,
+        "pose": [
+          5704.58,
+          2523.37,
+          73.74,
+          260.9,
+          -3.8
+        ],
+        "height": 720,
+        "routeScope": "Eight convergence400m out/return poses plus three stationary recovery holds; one process per invocation",
+        "fpsCap": 60,
+        "processScope": "Owned PID private/RSS samples; sparse owner-pump values are observations, not percentiles",
+        "environment": {
+          "WGR_LOD_GOVERNOR_RANGE": "1",
+          "WGR_GEO_POOL_PRESSURE_GROWTH": "0",
+          "WGR_NATIVE_DDS_PREPARE": "0",
+          "WGR_SKY_VOLUME_INCREMENTAL": "1",
+          "WGR_NATIVE_DDS_BC3_ONLY": "0",
+          "WGR_OBJECT_STREAM_TEST_BUDGET": "1",
+          "WGR_OBJECT_STREAM_PBO": "1",
+          "WGR_TEXTURE_STREAM_STATS": "0",
+          "WGR_OBJECT_STREAM_GPU_BUDGET": "0",
+          "WGR_SIMULATION_POSITIVE_COLD": "0",
+          "WGR_SIMULATION_RESIDENCY": "0",
+          "WGR_GEO_POOL_GROWTH": "2.0",
+          "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\standalone-witness-default-20260927-disabled-20260927-091613\\user",
+          "WGR_ADAPTIVE_TEXTURE_DETAIL": "0",
+          "POSEIDON_MODEL_DDC": "0",
+          "WGR_OBJECT_STREAM_MAX_OBJECTS": "20000",
+          "WGR_OBJECT_STREAM_PBO_TEXTURES": "0"
+        },
+        "msaaSamples": 4,
+        "mode": "Disabled",
+        "paaLzoReplay": false,
+        "clearedEnvironmentNames": [],
+        "width": 1280,
+        "paaPreparationDiagnostics": false,
+        "packedTextures": false,
+        "archiveSourceBindings": false,
+        "routeX": [
+          5804.58,
+          5904.58,
+          6004.58,
+          6104.58,
+          6004.58,
+          5904.58,
+          5804.58,
+          5704.58,
+          5704.58,
+          5704.58,
+          5704.58
+        ],
+        "warmTextureJobs": false,
+        "scriptSha256": "31B20F171E85AB206A8636C13FC113E0CBFF790BED07FE84FBB9712028723913",
+        "paaPreparationInflight": false,
+        "installed": "codex/streaming-residency 2c1caeb1 2026-09-27_09:14 deploy-ps1",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "9D709120B3B209B6AD712857B182B3548E18802F9FEE451FE466828C86977908",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "713F8310571D9E86251DD3AD716FD13AC6FA0AB8B24B5A36A64174633339F078",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "registrationQuota": false,
+        "measurementScope": "Bounded engine16384-frame route capture; screening only, no FPS acceptance, vanilla parity or full cold-cache proof",
+        "world": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\packages\\dayz-compat\\world\\chernarusplus\\chernarusplus.wrp",
+        "viewDistance": 2000
+      },
+      "summary": {
+        "passed": true,
+        "performanceAccepted": false,
+        "n": 767,
+        "meanMs": 46.71686701434161,
+        "medianMs": 25.242,
+        "p95Ms": 131.554,
+        "p99Ms": 524.008,
+        "maxMs": 946.407,
+        "quantiles": "nearest-rank ceil(n*p)-1; usual median",
+        "dropped": 0,
+        "resident": 19923,
+        "required": 0,
+        "geometry": 712475736,
+        "geometryCapacity": 1275068416,
+        "texture": 2745685716,
+        "textureCount": 2485,
+        "privateBytes": 9666383872,
+        "workingSetBytes": 4015218688,
+        "phaseTiming": [
+          {
+            "phase": "setup",
+            "avgMs": 0.352,
+            "p95Ms": 0.57,
+            "maxMs": 1.633
+          },
+          {
+            "phase": "sim:step",
+            "avgMs": 0.103,
+            "p95Ms": 0.184,
+            "maxMs": 0.746
+          },
+          {
+            "phase": "drw:init",
+            "avgMs": 17.57,
+            "p95Ms": 95.434,
+            "maxMs": 850.73
+          },
+          {
+            "phase": "drw:prep",
+            "avgMs": 0.547,
+            "p95Ms": 0.8,
+            "maxMs": 1.32
+          },
+          {
+            "phase": "land:gnd",
+            "avgMs": 1.311,
+            "p95Ms": 1.041,
+            "maxMs": 612.097
+          },
+          {
+            "phase": "land:obj",
+            "avgMs": 6.581,
+            "p95Ms": 9.002,
+            "maxMs": 230.625
+          },
+          {
+            "phase": "drw:land",
+            "avgMs": 2.421,
+            "p95Ms": 3.662,
+            "maxMs": 90.272
+          },
+          {
+            "phase": "drw:obj",
+            "avgMs": 0.071,
+            "p95Ms": 0.138,
+            "maxMs": 0.318
+          },
+          {
+            "phase": "drw:post",
+            "avgMs": 0.004,
+            "p95Ms": 0.005,
+            "maxMs": 0.015
+          },
+          {
+            "phase": "hud",
+            "avgMs": 0.016,
+            "p95Ms": 0.022,
+            "maxMs": 0.038
+          },
+          {
+            "phase": "sound",
+            "avgMs": 0.011,
+            "p95Ms": 0.016,
+            "maxMs": 0.03
+          },
+          {
+            "phase": "swap",
+            "avgMs": 17.729,
+            "p95Ms": 31.168,
+            "maxMs": 595.01
+          }
+        ]
+      },
+      "limits": "Compared7f084558mean40.350622/median22.784/p95130.902/p99389.819/max984.856, currentmean/median/p99 worse. Allocatedmaterial/cache/order differ, not isolatedcausal attribution/noacceptance/no-regressionproof. RootreturnedlocalPOI bus/street/buildings/treescompatible only. DiagnosticledgerOFF/defaultslot16B+engine16Btax remains; alternativespending/sourceonlyUNCHANGED/UNBUILT. No physicalreclaim/fullownership/performanceproof/fullplanOPEN/defaultReadyfalse.",
+      "sha256": {
+        "archive-source-binding-proof.json": "8fe3a4332e40730fde97bc5694eb6e10c793d43d85584ed81365ab122d387677",
+        "engine.log": "4b29b129423548caa140a39eb2c5b088b630abc7ba4947c17dda14e248369f12",
+        "harness.jsonl": "0c356fc6910e2f7b8cbfc17a30659ea9fb6592ed4701c44265fb22c3eb897588",
+        "paa-attempt-proof.json": "7a391ae984c0b90c3e57c1a5ec82cbb1dac74290ee8af06af980c9398ebc8cbc",
+        "paa-inflight-proof.json": "10ed62eb111b9e1f8b2c603d94bec1c2834529cfe2a71bcb5f27fd1e73fafe36",
+        "provenance.json": "569b95e091f4dab964235245650a4a0cf2c58b67ed24199ac1c49407205cc3a8",
+        "registration-quota-proof.json": "1c7bffa4c4eda170a19d72cf26d82386e71e4d2a9a1348fa7ea8bedbc354a885",
+        "result.json": "7c19d181beacc24027750a2de51872b75552a429033960ebcc8a380c3db7c2f6",
+        "returned-settled.png": "3387f5714e56185a4ac4d8401ba6f2866217dac773bd4f3ed1f099f60a68523e",
+        "route-frame-ms.json": "4565dfd7a17a753b6ab8392dcc9c393749661a2358c44acbe47d892ba085ed94",
+        "samples.jsonl": "d54500812ceb1da7bb998fbae63f829de70ffed8d6f0e03a6ee5f4633f914836",
+        "warm-texture-job-proof.json": "bf8ea8296ed52df96937981af06acf56c7dc6e7b1602cf60633f2ec1a71f5383"
+      }
     }
   ],
   "microbenchmarks": [
@@ -17134,6 +17506,17 @@
         "build-shared-retirement-ledger-20260927.log": "e64b9049731b55d7b0145249899bc95f588c89eb5490b68d879b37ffee760d00",
         "test-shared-retirement-ledger-20260927.log": "65450093171a62909d5ebfb5812f00ae98bb2df2de270193b2d6b26b545bbda0",
         "runtime-shared-retirement-ledger-20260927.log": "a2bf93af72b11bf25213f824a43035e9be1d6f18f2859f45eb383c6d55e01b29"
+      }
+    },
+    {
+      "artifactRoot": "build",
+      "runtimeSourceCommit": "2c1caeb1",
+      "result": "All5targets249scheduledPASS/test14524assert26casesPASSnoSKIP; cleanmatching2c1caeb109:14. Optionalstandalonewitness knownCppbudget8192/1MiB/sizeof+64controlguard, defaultnullptr16Bslot+16Bengine/rollbackstack notzerocost. Actualnumericimmutable callback/shutdown/latebind/rollback, onlyactualstandalone failure stickyincomplete. No defaultlayout-renderbehavior/queueACK-devicefree-reclaim-performanceclaims. NextrecordclosureUNBUILT/excluded; cargoeligibleguardfutureNOTdone.",
+      "sha256": {
+        "build-standalone-witness-20260927.log": "babcbb24d4fd761ee2d76bdfc747f9aa204827ceb92789c01cc3446ceca4ae4e",
+        "test-standalone-witness-20260927.log": "61f6a5b279b4f3ec96c30eb4402525bc6deb90d7af6d3163b2c6f6549a685713",
+        "runtime-standalone-witness-20260927.log": "a94fc3e1a5447c6feeceb5a137439441281ff0ebd4c37c2deb284ec74222addc",
+        "runtime-standalone-witness-default-20260927.log": "cf4521e8217c6687939d3b2971ceb448fe64f12c9528316b54b918452a626c63"
       }
     }
   ],
