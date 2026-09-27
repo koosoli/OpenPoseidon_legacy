@@ -2759,7 +2759,7 @@ struct WarmObjectUpdateProfile
         sums.parkHits += p.parkHits;
         sums.parkStale += p.parkStale;
     }
-    void Log(int centerX, int centerZ) const
+    void EmitSummary(int centerX, int centerZ) const
     {
         // Separate process-wide cap from individual slow rows. Many sub-2ms
         // admissions can form a slow update; every opened warm scope contributes.
@@ -4426,7 +4426,7 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                                      ? 0
                                      : _modernResidentObjectCount + created - released;
     if (warmUpdateProfile && warmUpdateProfile->totalMs >= 16.0)
-        warmUpdateProfile->Log(centerX, centerZ);
+        warmUpdateProfile->EmitSummary(centerX, centerZ);
     // CONVERGENCE. Counted idle updates, not `pending`, and that is the whole lesson of
     // this function: two earlier versions latched on `!_modernObjectResidencyPending` and
     // neither ever fired in a 1500-frame run, because a world whose requested set sits just
