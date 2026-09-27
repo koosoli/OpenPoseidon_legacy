@@ -380,6 +380,21 @@ try{
     }
     function RunCameraTupleProof($selected){
      if(!$CameraTuple){return $null}
+     $scaleSetup=$null
+     if($CameraTupleScaleRefusal){
+      # GraphicsApply may restore native scale after the startup environment.
+      # Pin the real live tuning after mission startup; keep exact dimension gates.
+      $r=Send @{cmd='eval';code='triSetRenderScale 0.75'};Require $r @('result')
+      if($r.result.Trim('"') -ne 'OK'){throw 'Actual live render-scale pin refused'}
+      $until=[DateTime]::UtcNow.AddSeconds(15)
+      do{
+       $c=PageCut (Observe $true $true)
+       Require $c @('cameraTupleEnabled','cameraTupleStatus','viewportWidth','viewportHeight','cameraTupleOutputWidth','cameraTupleOutputHeight')
+       if($c.cameraTupleEnabled -and $c.cameraTupleStatus -eq 5 -and $c.viewportWidth -eq 960 -and $c.viewportHeight -eq 540 -and $c.cameraTupleOutputWidth -eq 1280 -and $c.cameraTupleOutputHeight -eq 720){$scaleSetup=TupleCut $c;break}
+       Start-Sleep -Milliseconds 100
+      }while([DateTime]::UtcNow -lt $until)
+      if($null -eq $scaleSetup){throw 'Actual live scale did not reach960x540/output1280x720'}
+     }
      $kind='Bound';if($CameraTupleScaleRefusal){$kind='Scaled'}
      TuplePose '1184 1240 18 90 -8';$native=ObserveTuple 0 $kind;SameTupleModel $selected $native
      TuplePose '1176 1242 19 90 -8';$moved=ObserveTuple $native.cameraTupleGeneration $kind;SameTupleModel $native $moved
@@ -391,7 +406,7 @@ try{
      }
      $last=$moved;if($null -ne $clipped){$last=$clipped}
      TuplePose '1184 1240 18 90 -8';$restored=ObserveTuple $last.cameraTupleGeneration $kind;SameTupleModel $native $restored
-     $e=@{native=$native;moved=$moved;nearRefusal=$near;clippedRefusal=$clipped;restored=$restored;scaleRefusal=[bool]$CameraTupleScaleRefusal;scope='Actual copied nonjittered main camera, ideal selected-union bound/refusal only; no pixels/all-pass/GPU-completion/FPS proof'}
+     $e=@{native=$native;moved=$moved;nearRefusal=$near;clippedRefusal=$clipped;restored=$restored;liveScaleSetup=$scaleSetup;scaleRefusal=[bool]$CameraTupleScaleRefusal;scope='Actual copied nonjittered main camera, ideal selected-union bound/refusal only; no pixels/all-pass/GPU-completion/FPS proof'}
      $e|ConvertTo-Json -Depth 12|Set-Content (Join-Path $out 'camera-tuple-proof.json');return $e
     }
 
