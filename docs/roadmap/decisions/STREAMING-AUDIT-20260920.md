@@ -2715,3 +2715,31 @@ Actualsmall2wallservice+heartbeat/sharedquota082057 PASS/clean0: Readywall1001/
 expiry/requeue/independentautomatic/move/damage/delete. No broad originalworld/
 retailDayZ/MP/performance/no-regression acceptance. Nextretainedmeshmultiborrower
 repair is unbuilt/excluded; serviceOFF/fullplanOPEN/defaultReady-performancefalse.
+
+## Sept27 default shared-retained mesh borrower lifetime correction
+
+29a87291/7f5a0f48 initialbuild FAILED NamespaceIsMainThread; repairall5targets
+201scheduledPASS,8561assertions/17casesPASS/noSKIP. Clean7f08:44 EXE 0AE85C02C56F18D84E59020635C7E5316FF64A3F93F503339982CC2222882C54,
+DLL 0B01D98BEBC3FADC1C0F583C5AD19C68BE10881FFBE0D772F6BFC13548289556.
+Defaultsharing nowtickets shareableproducerbirth beforeenqueue, dedicatedshort
+mapmutex/noDrawlocks/CPUlookup only; missingbinding retains originalstandalone.
+ConstructionRollback/dead/exception/allqueuedborrowers covered; epochDispatchClose
+excludeslateenqueue. Perproducerticket/CPUslot metadata added, notzerofootprint
+or physicalreclaim guarantee. Finalborrowerscheduling gap remainsOPEN/nextunbuilt.
+
+Actualprivatefixture084457 PASS/clean0 twoorders newestfirst/producerfirst:
+CreateVB2borrowers/helpercount2, normalCPUdrain/RustfullhandlePresent withlast
+borrower, lastreleaseAbsent/0. Handles4294967357/12884901949 reuseRustslot with
+newgeneration; eachknownpayload21744bytes/cap1MiB. ServiceDisabled/pumps0/required0,
+source1001visual retained. Fixture1 optionalstate noneOFF. This proves privatecopy
+recordlifetime, NOTpixelDraw/worldmodelunregister/fullownership/queueACK/devicefree.
+
+ActualDayZBEFOREe608082335 PASS/clean0/drop0,854frames mean41.337537/median23.164/
+p95124.203/p99400.124/max1208.930ms; AFTER7f084558 PASS866frames40.350622/22.784/
+130.902/389.819/984.856, nearest-rank/usualmedian. Bothreturn19923/required0,
+geometry710542040→711520920/cap1275068416 unchanged; textures2749355508→2763554036,
+private9614004224→9642450944/workingset3833556992→4304031744. P95worse5.4%,
+othermetrics improve, but orderedunequalmaterialbytes/cache/asyncwork prevent
+causalFPS/no-regression acceptance. RootbothreturnedlocalPOI bus/buildings/trees/
+street compatible, notall-routeproof. Defaultsharingcorrectnessfixinstalledactive;
+warm/pressure/paging experimentsOFF/fullplanOPEN/performanceAccepted-defaultReadyfalse.
