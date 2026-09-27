@@ -3493,6 +3493,7 @@ impl Renderer {
         water_nodes: &[WgrWaterNode],
         water_batches: &[WgrWaterBatch],
         grass_batches: &[WgrGrassBatch],
+        mut call_timings: Option<&mut crate::gpu_timers::RenderCallCpuTimings>,
     ) -> Result<(), String> {
         self.gfx3d.begin_geometry_pass_facts(shadow);
         let setup_t0 = std::time::Instant::now();
@@ -3987,6 +3988,7 @@ impl Renderer {
 
         let acquire_t0 = std::time::Instant::now();
         let Some(frame) = self.acquire()? else {
+            if let Some(facts) = call_timings.as_deref_mut() { facts.skip(); }
             return Ok(());
         };
         let acquire_ms = acquire_t0.elapsed().as_secs_f32() * 1.0e3;
@@ -6229,6 +6231,7 @@ impl Renderer {
         self.grass.harvest_stats(&self.device);
         self.gpu_timers
             .cpu_end(crate::gpu_timers::Region::WorkerHarvest);
+        if let Some(facts) = call_timings { facts.complete(&self.gpu_timers); }
         Ok(())
     }
 

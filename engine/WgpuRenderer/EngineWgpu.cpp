@@ -3890,7 +3890,19 @@ void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing, Fr
 
     HashPublishedFrame(frame, backing);
     const auto afterHash = std::chrono::steady_clock::now();
-    const int32_t renderReturnStatus=wgr_render_frame(_renderer, &frame);
+    // Only the existing slow-block diagnostic opts into a caller-owned snapshot.
+    // The old published CPU getter is previous-begun-frame data, not this call.
+    WgrRenderCallCpuTimings callCpu; // not initialized on the normal diagnostic-OFF path
+    uint64_t callCpuToken = 0;
+    if (_slowBlockMs > 0.0)
+    {
+        callCpu = {};
+        static thread_local uint64_t sequence = 0;
+        if (sequence != UINT64_MAX) callCpuToken = ++sequence; // exhaustion fails unavailable
+    }
+    const int32_t renderReturnStatus = callCpuToken
+        ? wgr_render_frame_cpu_timings(_renderer, &frame, callCpuToken, &callCpu, sizeof(callCpu), 1)
+        : wgr_render_frame(_renderer, &frame);
     if (_geometryPageFixtureObservation) PublishGeometryPageFixtureObservation(frame,renderReturnStatus);
     if (_geometryOwnerLedger)
     {
@@ -3924,9 +3936,9 @@ void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing, Fr
     _rtLastBusyMs = ms(blockStart, blockEnd);
     if (Dev::FramePaceTraceEnabled())
     {
-        // PACE-001: the worker's side of the frame. Acquire/submit/present are this frame's
-        // CPU-side timers from the renderer (wgr_get_cpu_timings, read by PublishRendererStats
-        // just above); the GPU total is the latest HARVESTED frame, which lags by one or two.
+        // PACE-001: historical published CPU snapshot (published at the next begun frame),
+        // NOT guaranteed to describe this render call; acquire may skip without publishing.
+        // Existing trace semantics remain unchanged. GPU total is latest HARVESTED data.
         static uint32_t seq = 0;
         Dev::FramePaceWorkerRow row;
         row.seq = ++seq;
@@ -3952,13 +3964,24 @@ void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing, Fr
         // The op COUNTS as well as the times. A 300 ms resource drain of four ops and a
         // 300 ms drain of four thousand are different bugs, and the times alone cannot
         // tell them apart.
+        const bool pairedCpu = renderReturnStatus == 0 && callCpuToken != 0 &&
+            callCpu.struct_size == sizeof(callCpu) && callCpu.version == 1 &&
+            callCpu.state == 1 && callCpu.count == 12 && callCpu.call_token == callCpuToken;
+        const auto cpuAt = [&](size_t index) { return pairedCpu ? callCpu.milliseconds[index] : -1.0f; };
         LOG_INFO(Graphics,
                  "Wgpu slow block: total={:.1f} ms | settings={:.1f} resources={:.1f} (ops={}) "
-                 "drains={:.1f} hash={:.1f} render={:.1f} stats={:.1f} | d3d={} vert={} casters={} | idle_before={:.1f}",
+                 "drains={:.1f} hash={:.1f} render={:.1f} stats={:.1f} | d3d={} vert={} casters={} | idle_before={:.1f} "
+                 "| callCpuToken={} callCpuState={} callCpuCount={} callCpuPaired={} renderStatus={} "
+                 "acquireCpu={:.3f} presentCpu={:.3f} setupInclusiveCpu={:.3f} submitCpu={:.3f} harvestCpu={:.3f} "
+                 "encEarlyCpu={:.3f} encShadowCpu={:.3f} encMainInclusiveCpu={:.3f} encTailCpu={:.3f} "
+                 "encSkyCpu={:.3f} encDrawCpu={:.3f} encPostCpu={:.3f}",
                  _rtLastBusyMs, ms(blockStart, afterSettings), ms(afterSettings, afterResources),
                  resourceOpCount, ms(afterResources, afterDrains), ms(afterDrains, afterHash),
                  ms(afterHash, afterRender), ms(afterRender, blockEnd), frame.draws3d.length,
-                 frame.verts.length, frame.shadow_casters.length, _rtLastIdleMs);
+                 frame.verts.length, frame.shadow_casters.length, _rtLastIdleMs,
+                 callCpuToken, callCpu.state, callCpu.count, pairedCpu ? 1 : 0, renderReturnStatus,
+                 cpuAt(0), cpuAt(1), cpuAt(2), cpuAt(3), cpuAt(4), cpuAt(5), cpuAt(6),
+                 cpuAt(7), cpuAt(8), cpuAt(9), cpuAt(10), cpuAt(11));
     }
 }
 

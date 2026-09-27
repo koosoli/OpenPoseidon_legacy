@@ -1765,9 +1765,9 @@ pub extern "C" fn wgr_abi_version() -> u32 {
     if cfg!(debug_assertions) {
         option_env!("WGR_TEST_ABI_VERSION")
             .and_then(|value| value.parse::<u32>().ok())
-            .unwrap_or(15)
+            .unwrap_or(16)
     } else {
-        15
+        16
     }
 }
 
@@ -2073,7 +2073,7 @@ mod abi_tests {
 
     #[test]
     fn exported_abi_version_matches_the_public_contract() {
-        assert_eq!(super::wgr_abi_version(), 15); // mesh-record/pool-range scope; matched engine/DLL required
+        assert_eq!(super::wgr_abi_version(), 16); // additive paired render-call CPU entry point
     }
 
     #[test]
@@ -3215,10 +3215,40 @@ pub unsafe extern "C" fn wgr_render_frame(
     renderer: *mut WgrRenderer,
     frame: *const WgrFrame,
 ) -> i32 {
+    unsafe { render_frame_impl(renderer, frame, None) }
+}
+
+pub use crate::gpu_timers::RenderCallCpuTimings as WgrRenderCallCpuTimings;
+
+/// Additive opt-in render-call diagnostic. Existing render/get-latest APIs are unchanged.
+/// Exact size/version/nonzero token required BEFORE dereferencing renderer, frame or output.
+/// Returns ordinary render status; -4 means incompatible diagnostic layout (nothing written).
+/// # Safety
+/// Valid inputs satisfy wgr_render_frame's contract. With matching size/version, output must
+/// be aligned writable storage for exactly one WgrRenderCallCpuTimings and not alias inputs.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_render_frame_cpu_timings(
+    renderer: *mut WgrRenderer, frame: *const WgrFrame, call_token: u64,
+    output: *mut WgrRenderCallCpuTimings, output_size: u32, output_version: u32,
+) -> i32 {
+    if output.is_null() || output_size != std::mem::size_of::<WgrRenderCallCpuTimings>() as u32
+        || output_version != WgrRenderCallCpuTimings::VERSION || call_token == 0 {
+        return -4;
+    }
+    let output = unsafe { &mut *output };
+    *output = WgrRenderCallCpuTimings::new(call_token);
+    unsafe { render_frame_impl(renderer, frame, Some(output)) }
+}
+
+unsafe fn render_frame_impl(
+    renderer: *mut WgrRenderer, frame: *const WgrFrame,
+    mut call_timings: Option<&mut WgrRenderCallCpuTimings>,
+) -> i32 {
     if renderer.is_null() || frame.is_null() {
+        if let Some(facts) = call_timings { facts.fail(); }
         return -1;
     }
-    catch_unwind(AssertUnwindSafe(|| {
+    let status = catch_unwind(AssertUnwindSafe(|| {
         let renderer = unsafe { &mut *renderer };
         let frame = unsafe { &*frame };
         let cameras = unsafe { frame.cameras.as_slice() };
@@ -3257,6 +3287,7 @@ pub unsafe extern "C" fn wgr_render_frame(
             water_nodes,
             water_batches,
             grass_batches,
+            call_timings.as_deref_mut(),
         ) {
             Ok(()) => 0,
             Err(e) => {
@@ -3267,7 +3298,9 @@ pub unsafe extern "C" fn wgr_render_frame(
             }
         }
     }))
-    .unwrap_or(-3)
+    .unwrap_or(-3);
+    if status != 0 { if let Some(facts) = call_timings { facts.fail(); } }
+    status
 }
 
 /// Debug: read back the current auto-exposure scale (blocking GPU sync — dev panel
@@ -4618,4 +4651,31 @@ pub unsafe extern "C" fn wgr_geometry_pass_facts(renderer:*mut WgrRenderer,out:*
   let Some(facts)=unsafe{&*renderer}.gfx3d.geometry_pass_facts() else{return 0;};
   unsafe{*out=facts;}1
  })).unwrap_or(2)
+}
+
+#[cfg(test)]
+mod render_call_cpu_diagnostic_tests {
+    use super::*;
+    #[test]
+    fn render_call_cpu_layout_and_invalid_ffi_inputs_are_transactional() {
+        let old_pair = WgrAbiCheck { abi_version: 15, struct_size: std::mem::size_of::<WgrAbiCheck>() as u32, surface_desc_size: std::mem::size_of::<WgrSurfaceDesc>() as u32, log_callbacks_size: std::mem::size_of::<WgrLogCallbacks>() as u32, frame_size: std::mem::size_of::<WgrFrame>() as u32, required_features: WGR_ABI_FEATURE_BUILD_ID, layout_hash: wgr_abi_layout_hash() };
+        assert_eq!(unsafe { wgr_abi_validate(&old_pair) }, 0);
+        assert_eq!(std::mem::size_of::<WgrRenderCallCpuTimings>(), 72);
+        assert_eq!(std::mem::offset_of!(WgrRenderCallCpuTimings, call_token), 16);
+        assert_eq!(std::mem::offset_of!(WgrRenderCallCpuTimings, milliseconds), 24);
+        let sentinel = 1usize as *mut WgrRenderer;
+        let frame = 1usize as *const WgrFrame;
+        let mut output = WgrRenderCallCpuTimings::new(99);
+        let saved = output;
+        unsafe {
+            assert_eq!(wgr_render_frame_cpu_timings(sentinel, frame, 1, &mut output, 71, 1), -4);
+            assert_eq!(wgr_render_frame_cpu_timings(sentinel, frame, 1, &mut output, 72, 0), -4);
+            assert_eq!(wgr_render_frame_cpu_timings(sentinel, frame, 0, &mut output, 72, 1), -4);
+            assert_eq!(wgr_render_frame_cpu_timings(sentinel, frame, 1, std::ptr::null_mut(), 72, 1), -4);
+            assert_eq!(output, saved); // foreign layout/token never writes or dereferences handle.
+            assert_eq!(wgr_render_frame_cpu_timings(std::ptr::null_mut(), std::ptr::null(), 7, &mut output, 72, 1), -1);
+        }
+        assert_eq!((output.state, output.count, output.call_token), (3, 0, 7));
+        assert_eq!(output.milliseconds, [-1.0; 12]);
+    }
 }

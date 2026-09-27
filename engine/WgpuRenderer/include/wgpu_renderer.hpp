@@ -21,6 +21,7 @@
 #define WGPU_RENDERER_HPP
 
 #include <cstdint>
+#include <cstddef>
 
 // Increment when an incompatible change is made to the public C ABI.  The
 // engine checks this before creating a renderer so a matched build fails with a
@@ -34,7 +35,7 @@
 // and the handshake refuses the pair — so this number only has to move for
 // changes the hash cannot see (an added/removed entry point, a semantic change
 // to an existing one).
-#define WGR_ABI_VERSION 15u // mesh-record/pool-range scope summary; matched engine/DLL required
+#define WGR_ABI_VERSION 16u // additive paired render-call CPU timing entry point; matched engine/DLL required
 
 // Required capabilities are negotiated as a bit set inside WgrAbiCheck. A
 // newer engine can reject an older renderer DLL even if the shared layouts
@@ -1637,6 +1638,20 @@ enum WgrGpuTimerRegion : uint32_t
  * 00training it double-counts grass-shadow (0.74 ms) and the whole colour sub-pass (2.13 ms),
  * producing a "total" larger than the frame, which reads as a measurement rather than a bug.
  * Returns the enclosing region, or WGR_GPU_TIMER_NONE when the region is outermost. */
+/* Additive caller-owned CPU timing snapshot, separate from latest/harvested getters.
+ * state: 0 unobserved, 1 successful real frame, 2 acquire skipped, 3 failed/panicked.
+ * Token identifies this call only, NOT GPU completion. Existing ABI layouts remain unchanged. */
+struct WgrRenderCallCpuTimings
+{
+    uint32_t struct_size, version, state, count;
+    uint64_t call_token;
+    /* acquire,present,setup,submit,harvest,early,shadow,main,tail,sky,draw,post.
+     * Hierarchical CPU buckets overlap; -1 = unrecorded. */
+    float milliseconds[12];
+};
+static_assert(sizeof(WgrRenderCallCpuTimings) == 72, "render-call CPU layout");
+static_assert(offsetof(WgrRenderCallCpuTimings, call_token) == 16, "render-call token layout");
+static_assert(offsetof(WgrRenderCallCpuTimings, milliseconds) == 24, "render-call buckets layout");
 enum : uint32_t
 {
     WGR_GPU_TIMER_NONE = 0xFFFFFFFFu
@@ -2573,6 +2588,11 @@ extern "C"
     /* Render + present one frame. Returns 0 on success (incl. transient skipped
      * frames), negative on error. */
     WGR_API int32_t wgr_render_frame(WgrRenderer* renderer, const WgrFrame* frame);
+
+    /* Same render call with copied CPU facts; exact72/v1 and nonzero token required.
+     * -4 refuses foreign layout before any input/output dereference or rendering. */
+    WGR_API int32_t wgr_render_frame_cpu_timings(WgrRenderer*, const WgrFrame*, uint64_t call_token,
+        WgrRenderCallCpuTimings*, uint32_t output_size, uint32_t output_version);
 
     /* Debug: read back the current auto-exposure scale (blocking GPU sync; dev panel only). */
     WGR_API float wgr_get_exposure_scale(WgrRenderer* renderer);

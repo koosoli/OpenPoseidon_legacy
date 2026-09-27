@@ -222,6 +222,48 @@ struct Inner {
     latest_ms: [f32; REGION_COUNT],
 }
 
+/// Copied CPU recording facts for one explicitly observed render call. No GPU completion proof.
+/// Kept on the caller stack; ordinary render calls do not allocate or retain this object.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RenderCallCpuTimings {
+    pub struct_size: u32,
+    pub version: u32,
+    /// 0 unobserved, 1 completed real frame, 2 acquire skipped, 3 failed/panicked.
+    pub state: u32,
+    pub count: u32,
+    pub call_token: u64,
+    /// acquire,present,setup,submit,harvest,early,shadow,main,tail,sky,draw,post.
+    /// Hierarchical CPU buckets overlap; -1 means not recorded. Not GPU elapsed time.
+    pub milliseconds: [f32; 12],
+}
+impl RenderCallCpuTimings {
+    pub const VERSION: u32 = 1;
+    pub fn new(call_token: u64) -> Self {
+        Self { struct_size: std::mem::size_of::<Self>() as u32, version: Self::VERSION,
+            state: 0, count: 0, call_token, milliseconds: [-1.0; 12] }
+    }
+    pub fn skip(&mut self) { self.clear(2); }
+    pub fn fail(&mut self) { self.clear(3); }
+    fn clear(&mut self, state: u32) {
+        self.state = state; self.count = 0; self.milliseconds.fill(-1.0);
+    }
+    /// Only called at the successful real render-frame return, after present and harvest.
+    pub fn complete(&mut self, timers: &GpuTimers) {
+        let regions = [Region::WorkerAcquire, Region::WorkerPresent, Region::WorkerSetup,
+            Region::WorkerSubmit, Region::WorkerHarvest, Region::WorkerEncEarly,
+            Region::WorkerEncShadow, Region::WorkerEncMain, Region::WorkerEncTail,
+            Region::WorkerEncSky, Region::WorkerEncDraw, Region::WorkerEncPost];
+        for (dst, region) in self.milliseconds.iter_mut().zip(regions) {
+            *dst = timers.cpu_ms[region as usize].get();
+        }
+        self.count = self.milliseconds.len() as u32; self.state = 1;
+    }
+}
+const _: () = assert!(std::mem::size_of::<RenderCallCpuTimings>() == 72);
+const _: () = assert!(std::mem::offset_of!(RenderCallCpuTimings, call_token) == 16);
+const _: () = assert!(std::mem::offset_of!(RenderCallCpuTimings, milliseconds) == 24);
+
 pub struct GpuTimers {
     inner: Option<Inner>,
     // PERF-005 — CPU ENCODE time per region, deliberately OUTSIDE `Inner` so it still reports on
@@ -532,6 +574,39 @@ mod tests {
     // CPU rows are live. That is exactly the surface this test is about, and it needs no
     // adapter -- which matters, because the bug it pins was invisible to every existing
     // test precisely because nothing exercised the read/write interleaving.
+
+    #[test]
+    fn copied_render_call_cpu_facts_distinguish_current_latest_and_refused_calls() {
+        let t = cpu_only_timers();
+        t.begin_frame();
+        t.cpu_record(Region::WorkerAcquire, 17.0);
+        t.cpu_record(Region::WorkerEncMain, 31.0);
+        t.begin_frame(); // Existing getter now publishes the preceding frame.
+        t.cpu_record(Region::WorkerAcquire, 2.0);
+        t.cpu_record(Region::WorkerEncMain, 5.0);
+        let mut latest = [-1.0; REGION_COUNT];
+        t.cpu_timings(&mut latest);
+        assert_eq!(latest[Region::WorkerAcquire as usize], 17.0);
+        let mut facts = RenderCallCpuTimings::new(41);
+        assert_eq!((facts.state, facts.count), (0, 0));
+        facts.complete(&t);
+        assert_eq!((facts.state, facts.count, facts.call_token), (1, 12, 41));
+        assert_eq!(facts.milliseconds[0], 2.0);
+        assert_eq!(facts.milliseconds[7], 5.0);
+        assert_eq!(facts.milliseconds[1], -1.0);
+        t.cpu_timings(&mut latest); // New copied API does not republish/change old API.
+        assert_eq!(latest[Region::WorkerEncMain as usize], 31.0);
+        facts.skip();
+        assert_eq!((facts.state, facts.count, facts.call_token), (2, 0, 41));
+        assert_eq!(facts.milliseconds, [-1.0; 12]);
+        facts.complete(&t); facts.fail();
+        assert_eq!((facts.state, facts.count), (3, 0));
+        assert_eq!(facts.milliseconds, [-1.0; 12]);
+        let next = RenderCallCpuTimings::new(42);
+        assert_eq!(next.call_token, 42);
+        assert_eq!(next.milliseconds, [-1.0; 12]);
+    }
+
     fn cpu_only_timers() -> GpuTimers {
         GpuTimers {
             inner: None,
