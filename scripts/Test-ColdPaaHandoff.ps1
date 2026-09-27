@@ -69,11 +69,17 @@ try{
  $until=[DateTime]::UtcNow.AddSeconds(30)
  do{Start-Sleep -Milliseconds 250;$baseline=Sample}while((!$baseline.camera.valid -or $baseline.camera.pending) -and [DateTime]::UtcNow -lt $until)
  if(@($baseline.identity.objects|Where-Object {$_.present -or $_.visualResident}).Count -or !$baseline.camera.valid -or $baseline.camera.required -ne 0 -or $baseline.camera.pending -or $baseline.camera.desired -ne 0 -or $baseline.camera.resident -ne 0){throw 'Model loaded before camera demand'}
+ $archiveBefore=Send @{cmd='archive_source_bindings'};Require $archiveBefore @('enabled','liveBindings','knownCppBytes','wrappedReads','initRetains')
+ $archiveBefore|ConvertTo-Json -Depth 8|Set-Content (Join-Path $out 'archive-before.json')
+ $baseline|ConvertTo-Json -Depth 12|Set-Content (Join-Path $out 'baseline.json')
  $pose=Send @{cmd='eval';code='triFreeFlyPose "1188 1200 18 90 -8"'};Require $pose @('result');if($pose.result.Trim('"') -ne 'OK'){throw 'Pose rejected'}
  $until=[DateTime]::UtcNow.AddSeconds(60)
  do{Start-Sleep -Milliseconds 250;if($p.HasExited){throw 'Game exited before coverage'};$after=Sample}while((@($after.identity.objects|Where-Object {$_.present -and $_.visualResident -and $_.normalVertexBuffers -gt 0}).Count -ne 2 -or $after.camera.pending) -and [DateTime]::UtcNow -lt $until)
+ $after|ConvertTo-Json -Depth 12|Set-Content (Join-Path $out 'coverage.json')
  if(@($after.identity.objects|Where-Object {$_.present -and $_.visualResident -and $_.normalVertexBuffers -gt 0}).Count -ne 2 -or !$after.camera.valid -or $after.camera.pending -or $after.camera.resident -ne 2 -or $after.camera.desired -ne 2 -or $after.camera.required -ne 0 -or $after.camera.budget -ne 20000){throw 'Original two-model coverage not established'}
  Start-Sleep -Seconds 3
+ $archiveAfter=Send @{cmd='archive_source_bindings'};Require $archiveAfter @('enabled','liveBindings','knownCppBytes','wrappedReads','initRetains')
+ $archiveAfter|ConvertTo-Json -Depth 8|Set-Content (Join-Path $out 'archive-after.json')
  $null=Send @{cmd='screenshot';path=(Join-Path $out 'fixture.png')}
  $null=Send @{cmd='exit'}
  if(!$p.WaitForExit(15000) -or $p.ExitCode -ne 0){throw 'Game did not exit normally'};$normal=$true
@@ -85,7 +91,7 @@ try{
  if($Disabled){if($rows.Count){throw 'OFF emitted a cold handoff upload'}}elseif(!$useful.Count){throw 'NotExercised: no actual source-validated operation-local prepared upload'}
  $afterHashes=@(Get-FileHash -LiteralPath $exe,$dll)
  for($i=0;$i -lt 2;$i++){if($hashes[$i].Hash -ne $afterHashes[$i].Hash){throw 'Installed artifact changed during fixture'}}
- $result=@{passed=$true;disabled=[bool]$Disabled;normalShutdown=$true;forcedTermination=$false;exitCode=$p.ExitCode;baseline=$baseline;after=$after;usefulUploadRows=$useful;allColdUploadRows=$rows;scope='Actual primary archived chain upload and fixed two-model camera coverage; no pixel/all-pass/performance acceptance'}
+ $result=@{passed=$true;disabled=[bool]$Disabled;normalShutdown=$true;forcedTermination=$false;exitCode=$p.ExitCode;baseline=$baseline;after=$after;archiveBefore=$archiveBefore;archiveAfter=$archiveAfter;usefulUploadRows=$useful;allColdUploadRows=$rows;scope='Actual primary archived chain upload and fixed two-model camera coverage; no pixel/all-pass/performance acceptance'}
 }catch{$failure=$_}
 finally{
  if($p -and !$p.HasExited){try{if($client -and $client.Connected){$null=Send @{cmd='exit'};$normal=$p.WaitForExit(15000) -and $p.ExitCode -eq 0}}catch{};if(!$p.HasExited){Stop-Process -Id $p.Id -Force;$forced=$true;$p.WaitForExit(5000)|Out-Null}}

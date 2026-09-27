@@ -17,6 +17,10 @@ inline bool ColdPaaHandoffEnabled()
         return v && std::strcmp(v, "1") == 0; }();
     return enabled;
 }
+// Parse-local metadata only: MLOD preserves quads until ShapeAdapter conversion.
+// This narrow dependency gate is not a model/admission/readiness classification.
+inline bool ColdPaaPrimaryHasGeometry(size_t vertices, size_t triangles, size_t quads)
+{ return vertices != 0 && (triangles != 0 || quads != 0); }
 struct ColdPaaRead
 {
     static constexpr size_t Limit = 16 * 1024 * 1024;

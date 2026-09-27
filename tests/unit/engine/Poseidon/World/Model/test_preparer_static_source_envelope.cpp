@@ -71,16 +71,32 @@ std::vector<char> Original(bool motion)
     return b.data;
 }
 
+// Original one-LOD MLOD quad, parsed by the real ModelCache path. No triangulation
+// or manually forged DTO hides the production pre-conversion quad representation.
+std::vector<char> OriginalMlodQuad()
+{
+    Bytes b; b.data={'M','L','O','D'}; b.U32(257); b.U32(1);
+    b.data.insert(b.data.end(),{'P','3','D','M'});
+    b.U32(28); b.U32(256); b.U32(4); b.U32(1); b.U32(1); b.U32(0);
+    b.Point(0,0,0); b.U32(0); b.Point(1,0,0); b.U32(0);
+    b.Point(1,1,0); b.U32(0); b.Point(0,1,0); b.U32(0);
+    b.Point(0,0,1); b.U32(4);
+    for(uint32_t i=0;i<4;++i){b.U32(i);b.U32(0);b.F32(i==1||i==2?1.f:0.f);b.F32(i>=2?1.f:0.f);}
+    b.U32(0); b.U8(0); b.U8(0); // empty original texture/material; test adds its actual bound dependency
+    b.data.insert(b.data.end(),{'T','A','G','G'});b.U8(1);
+    const char end[]="#EndOfFile#";b.data.insert(b.data.end(),end,end+sizeof(end));b.U32(0);b.F32(1);
+    return b.data;
+}
 struct SourceFile
 {
     std::string path;
-    explicit SourceFile(bool motion=false)
+    explicit SourceFile(bool motion=false, bool mlodQuad=false)
     {
         static std::atomic<uint64_t> sequence{0};
         path=(std::filesystem::temp_directory_path()/
             ("op-envelope-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+
              "-"+std::to_string(++sequence)+".p3d")).string();
-        const auto bytes=Original(motion);
+        const auto bytes=mlodQuad ? OriginalMlodQuad() : Original(motion);
         std::ofstream file(path,std::ios::binary); file.write(bytes.data(),std::streamsize(bytes.size()));
         if (!file) throw std::runtime_error("original envelope fixture write failed");
     }
@@ -778,27 +794,38 @@ void RequireColdPaaCapability()
     if (!QFileAccess::MappingSupported()) SKIP("Actual mapped archive source lease unavailable.");
     if (Preparer::WorkerCount()!=1) SKIP("Deterministic worker replacement requires WGR_OBJECT_STREAM_ASYNC_WORKERS=1.");
 }
-void SubmitOriginalColdPaa(Preparer& prep, const Poseidon::render::ColdPaaRead& read)
+void SubmitOriginalColdPaa(Preparer& prep, const Poseidon::render::ColdPaaRead& read, bool expectedMlodQuad=false)
 {
     REQUIRE(prep.Request(0)); REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::Ready;}));
     auto model=prep.Take(0); REQUIRE(model);
+    if(expectedMlodQuad){REQUIRE(model->sourceFormat=="MLOD");REQUIRE(model->lodLevels[0].mesh.triangles.empty());
+        REQUIRE(model->lodLevels[0].mesh.quads.size()==1);REQUIRE_FALSE(model->lodLevels[0].mesh.vertices.empty());
+        CHECK_FALSE(model->lodLevels[0].mesh.HasGeometry());} // Regression: old triangles-only gate skips this valid quad.
     auto tables=std::make_shared<Poseidon::Model::ShapeAdapter::AdapterBankTables>();
     tables->textures.resize(model->lodLevels.size());
     // One actual visual primary dependency, paired with the original triangle.
+    const auto addedIndex=static_cast<uint32_t>(model->lodLevels[0].mesh.materials.size());
     model->lodLevels[0].mesh.materials.emplace_back("original-PAA-primary",read.key);
-    for(auto& triangle:model->lodLevels[0].mesh.triangles) triangle.materialIndex=0;
-    for(auto& triangle:model->lodLevels[0].mesh.triangles) triangle.materialIndex=0;
-    tables->textures[0].push_back(new ColdPaaTestTexture(read));
+    for(auto& triangle:model->lodLevels[0].mesh.triangles){triangle.materialIndex=addedIndex;
+        REQUIRE(model->lodLevels[0].mesh.materials[triangle.materialIndex].texturePath==read.key);}
+    for(auto& quad:model->lodLevels[0].mesh.quads){quad.materialIndex=addedIndex;
+        REQUIRE(model->lodLevels[0].mesh.materials[quad.materialIndex].texturePath==read.key);}
+    tables->textures[0].resize(model->lodLevels[0].mesh.materials.size());
+    tables->textures[0][addedIndex]=new ColdPaaTestTexture(read);
+    REQUIRE(model->lodLevels[0].mesh.materials[addedIndex].texturePath==read.key);
     REQUIRE(prep.SubmitConvert(0,model,tables,nullptr,nullptr,true));
 }
 }
 TEST_CASE("Actual cold conversion owns the Init-bound chain independently of store visibility", "[preparer][cold-paa-handoff]")
 {
-    RequireColdPaaCapability(); SourceFile file; PaaWorkerBank bank(true); ColdPaaSourceFixture source(bank);
+    RequireColdPaaCapability(); bool quadSource=false;
+    SECTION("original ODOL triangle") {}
+    SECTION("original MLOD quad before ShapeAdapter") {quadSource=true;}
+    SourceFile file(false,quadSource); PaaWorkerBank bank(true); ColdPaaSourceFixture source(bank);
     Preparer prep; prep.Reset(&file.path,1); RequireWorkers(prep);
     auto& store=Poseidon::render::PreparedTextureStore::Instance(); store.Clear(); store.MarkUploaded(bank.key);
     CHECK_FALSE(store.ShouldPrepare(bank.key));
-    SubmitOriginalColdPaa(prep,source.read);
+    SubmitOriginalColdPaa(prep,source.read,quadSource);
     REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::Converted;}));
     REQUIRE(prep.SnapshotStats().coldTextureReadyBytes>0);
     CHECK(prep.SnapshotStats().readyPayloadBytes>=prep.SnapshotStats().coldTextureReadyBytes);

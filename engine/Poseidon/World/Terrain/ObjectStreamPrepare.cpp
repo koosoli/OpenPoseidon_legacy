@@ -1719,8 +1719,9 @@ bool ObjectStreamPreparer::SubmitConvert(uint32_t index, std::shared_ptr<Model::
             for (size_t lod = 0; lod < tables->textures.size() && lod < model->lodLevels.size() && lod < 64; ++lod) {
                 const auto& level = tables->textures[lod];
                 if (++visits > 256 || coldTexture) break;
+                const auto& mesh = model->lodLevels[lod].mesh;
                 if (model->lodLevels[lod].purpose != Model::LodPurpose::Visual ||
-                    !model->lodLevels[lod].mesh.HasGeometry()) continue;
+                    !render::ColdPaaPrimaryHasGeometry(mesh.vertices.size(), mesh.triangles.size(), mesh.quads.size())) continue;
                 for (const auto& texture : level) {
                     if (++visits > 256 || coldTexture) break;
                     if (!texture || texture->IsGpuResident()) continue;
