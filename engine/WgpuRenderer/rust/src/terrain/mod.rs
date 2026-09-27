@@ -1020,6 +1020,16 @@ impl Terrain {
         &self.snow_buffer
     }
 
+    /// Existing sky-visibility source, borrowed only for an explicit Tidewater activation.
+    pub fn shore_height_source(&self) -> Option<(&[f32], WgrTerrainParams)> {
+        let source = self.skyvis_src.as_ref()?;
+        let mut params = self.params;
+        params.hm_width = source.w;
+        params.hm_height = source.h;
+        params.terrain_grid = source.terrain_grid;
+        Some((&source.heights, params))
+    }
+
     pub fn set_heightmap(
         &mut self,
         device: &wgpu::Device,

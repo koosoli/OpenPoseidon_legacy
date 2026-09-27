@@ -115,7 +115,7 @@ pub struct WaterBackend {
     inputs: BuildInputs,
     // Replayed into a rebuilt backend (see the module note).
     last_params: Option<WgrWaterParams>,
-    cascade_configs: Vec<Option<WgrWaterCascadeConfig>>,
+    cascade_configs: [Option<WgrWaterCascadeConfig>; MAX_REPLAYED_CASCADES],
     interaction_params: Option<WgrWaterInteractionParams>,
     // TW-WATER W3: the CPU heightmap (the shore field is computed from it). Kept for replay: the
     // producer uploads it once per world load / terrain edit, not per frame.
@@ -145,7 +145,7 @@ impl WaterBackend {
                 storage_supported,
             },
             last_params: None,
-            cascade_configs: vec![None; MAX_REPLAYED_CASCADES],
+            cascade_configs: [None; MAX_REPLAYED_CASCADES],
             interaction_params: None,
             terrain_heights: None,
             requested: WaterBackendKind::CurrentOp,
@@ -280,6 +280,9 @@ impl WaterBackend {
             ))),
         };
         self.replay(device, queue);
+        if want == WaterBackendKind::CurrentOp {
+            self.terrain_heights = None;
+        }
         self.switches += 1;
         self.refused_logged = None;
         log.log(
@@ -297,7 +300,7 @@ impl WaterBackend {
 
     fn replay(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
         let params = self.last_params;
-        let cascades = self.cascade_configs.clone();
+        let cascades = self.cascade_configs;
         let interaction = self.interaction_params;
         match &mut self.active {
             Active::CurrentOp(op) => {
@@ -337,8 +340,21 @@ impl WaterBackend {
 
     /// The terrain heightmap as the producer uploaded it (world load, terrain edit). Current OP
     /// does not need the CPU copy; Tidewater computes its shore field from it.
+    pub fn needs_terrain_heights(&self) -> bool {
+        self.wanted() == WaterBackendKind::Tidewater
+            && self.inputs.storage_supported && self.terrain_heights.is_none()
+    }
+
     pub fn set_terrain_heights(&mut self, heights: &[f32], params: crate::ffi::WgrTerrainParams) {
-        let n = params.hm_width as usize * params.hm_height as usize;
+        // No shore replay copy in normal Current OP sessions. A later explicit switch borrows
+        // Terrain's existing sky-visibility source and captures it once at that frame boundary.
+        if self.wanted() != WaterBackendKind::Tidewater || !self.inputs.storage_supported {
+            self.terrain_heights = None;
+            return;
+        }
+        let Some(n) = (params.hm_width as usize).checked_mul(params.hm_height as usize) else {
+            return;
+        };
         if n == 0 || heights.len() < n {
             return;
         }

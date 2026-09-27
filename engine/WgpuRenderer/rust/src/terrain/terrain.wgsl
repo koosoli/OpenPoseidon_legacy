@@ -1198,9 +1198,10 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     let flat = smoothstep(0.55, 0.85, n.y);
     var wet = flat * (1.0 - smoothstep(0.0, tp.wet_height, above_sea));
     // TW-WATER W3b: in Tidewater mode, Tidewater's wetness instead (see TwWet above). The lace
-    // footprint is taken here, in uniform control flow.
-    let tw_fp = length(fwidth(in.world_xz)) / TW_LACE_TILE * f32(TW_LACE_N);
+    // footprint is needed only in the Tidewater branch. This UBO selector is uniform,
+    // so the derivatives stay in uniform control flow without normal Current OP work.
     if (tww.p.x > 0.5) {
+        let tw_fp = length(fwidth(in.world_xz)) / TW_LACE_TILE * f32(TW_LACE_N);
         let h = world_y - tww.p.y;
         var sim = vec4<f32>(0.0);
         var inside = 0.0;

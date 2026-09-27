@@ -3546,6 +3546,11 @@ impl Renderer {
         self.drain_deferred_mesh_destroys();
         // TW-WATER W1 — a Water-tab backend change takes effect here, at the frame boundary,
         // before anything this frame reads the water surface.
+        if self.water.needs_terrain_heights() {
+            if let Some((heights, params)) = self.terrain.shore_height_source() {
+                self.water.set_terrain_heights(heights, params);
+            }
+        }
         self.water
             .apply_pending_switch(&self.device, &self.queue, &self.log);
         let screen = glam::Vec2::new(self.config.width as f32, self.config.height as f32);

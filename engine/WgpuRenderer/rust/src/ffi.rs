@@ -1777,9 +1777,9 @@ pub extern "C" fn wgr_abi_version() -> u32 {
     if cfg!(debug_assertions) {
         option_env!("WGR_TEST_ABI_VERSION")
             .and_then(|value| value.parse::<u32>().ok())
-            .unwrap_or(16)
+            .unwrap_or(17)
     } else {
-        16
+        17
     }
 }
 
@@ -2085,7 +2085,7 @@ mod abi_tests {
 
     #[test]
     fn exported_abi_version_matches_the_public_contract() {
-        assert_eq!(super::wgr_abi_version(), 16); // additive paired render-call CPU entry point
+        assert_eq!(super::wgr_abi_version(), 17); // appended Tidewater water lanes/timers
     }
 
     #[test]
@@ -2096,6 +2096,13 @@ mod abi_tests {
         let mut check=good_check(); check.abi_version=14;
         assert_eq!(unsafe { super::wgr_abi_validate(&check) },0);
     }
+    #[test]
+    fn pre_tidewater_version_is_refused_even_with_current_layout_hash() {
+        let mut check = good_check();
+        check.abi_version = 16;
+        assert_eq!(unsafe { super::wgr_abi_validate(&check) }, 0);
+    }
+
     #[test]
     fn matching_abi_declaration_is_accepted() {
         assert_eq!(unsafe { super::wgr_abi_validate(&good_check()) }, 1);

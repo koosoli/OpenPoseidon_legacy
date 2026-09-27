@@ -35,7 +35,7 @@
 // and the handshake refuses the pair — so this number only has to move for
 // changes the hash cannot see (an added/removed entry point, a semantic change
 // to an existing one).
-#define WGR_ABI_VERSION 16u // additive paired render-call CPU timing entry point; matched engine/DLL required
+#define WGR_ABI_VERSION 17u // appended Tidewater water lanes/timer regions; matched engine/DLL required
 
 // Required capabilities are negotiated as a bit set inside WgrAbiCheck. A
 // newer engine can reject an older renderer DLL even if the shared layouts
