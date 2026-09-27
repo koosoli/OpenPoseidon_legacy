@@ -1014,10 +1014,32 @@ unbuilt_candidates: >-
       old page textures and returned to its original bindings.
     known_gap: >-
       Rust model/LOD/section metadata is append-only when a streamed C++ model is
-      destroyed and later re-registered. GPU mesh and texture bytes are bounded,
-      but long traversal can grow this small metadata store. Model decode and
+      destroyed and later re-registered. The historical captures above do not
+      establish a bound across long traversal. The 27 September history-pruning
+      run remained ResourceGrowth: return2-to-return3 geometry grew 15,338,464
+      bytes despite quiet samples, exceeding the unchanged 8MiB allowance.
+      Diagnostic history pruning and same-cut record closure do not free GPU
+      ownership or establish physical reclamation. Model decode and
       texture transcode are also synchronous inside the 128-create batch and can
       still produce traversal micro-hitches.
+
+      Installed 86971cce adds an opt-in authored resident page fixture only:
+      74,992 logical bytes, three meshes, whole 12/48-triangle representation
+      switching and unchanged CPU helper hashes passed. Three actual records
+      were Present then Absent; disabled control allocated no fixture payload.
+      Black-box silhouette captures do not prove material or all-pass parity.
+      Pinned meshoptimizer CPU CLOD bake/cut decoding passed focused unit tests
+      but links only into Tests and is not the authored runtime fixture.
+      Standalone/shared private-copy lifetime regressions passed; no physical
+      free, complete ownership, performance or default-ready acceptance follows.
+      Fresh ownership-returns 111103 passed unchanged convergence thresholds,
+      with geometry delta -3,993,516 bytes and same-cut record closure 4109-to-4099
+      with zero residual. Truncated sampled asset/LOD unions grew despite the
+      declining pool; they do not certify exclusive or whole-world ownership.
+      The earlier +15,338,464-byte failure is retained; extra diagnostic
+      inter-route intervals and one repeat do not prove a general memory bound.
+      The streaming plan stays OPEN, with experimental features off by default.
+      See decisions/GEOMETRY-CLOD-PILOT-20260927.md for hashes and narrow scope.
     production_call_sites:
       - file: engine/Poseidon/World/Terrain/LandSave.cpp
         symbol: Landscape::UpdateModernObjectResidency

@@ -269,6 +269,31 @@ Keep terrain-detail streaming as its own analysis. A heightfield collision sampl
 
 ### Stage G — Optional hierarchical geometry-page experiment
 
+**Verified checkpoint, 27 September 2026, installed build 86971cce at 11:06.**
+The repaired five-target build and focused suite passed 30,600 assertions in
+60 cases without skips, including bounded source export, page/whole-representation
+decoding, CPU CLOD bake and exact cut decoding. The initial narrowing fixture
+fact-count build failure was repaired by 8b42afdb. Meshoptimizer links only into
+Tests. The actual game fixture uses programmatically authored box Shapes rather
+than meshoptimizer output or arbitrary retail assets. It proved fixed-instance
+whole 12/48-triangle switching, 74,992 logical bytes/three mesh records, unchanged
+CPU helper hashes and Present-to-Absent record lifetime. The disabled control
+used zero fixture payload; private standalone/shared lifetime regressions passed.
+Root inspected matching black-box silhouettes, which do not establish material,
+pixel or all-pass parity. See
+[the CLOD pilot checkpoint](../decisions/GEOMETRY-CLOD-PILOT-20260927.md) for hashes.
+
+The subsequent `ownership-returns-20260927-20260927-111103` route passed the original
+convergence thresholds with quiet returns and zero retired geometry. Geometry
+fell by 3,993,516 bytes between returns 2/3. Post-quiet record cuts closed with zero
+logical residual, while truncated asset/LOD rows increased their sampled byte
+union: they are not whole-pool or exclusive ownership evidence. This repeat does
+not erase the earlier ResourceGrowth failure of 15,338,464 bytes, prove a general
+memory bound, or establish causal performance/no-regression acceptance. The extra
+bounded inter-route diagnostic intervals remain part of the test conditions.
+Stage G and the whole plan remain OPEN; experimental paging/CLOD stays off by
+default, with complete ownership, physical reclaim and pressure gates unresolved.
+
 **27 September 2026 refinement following the owner's RTX Mega Geometry question.**
 Keep the current shared streamer and bounded authored-LOD page prototype. For
 the later continuous-LOD bake, evaluate pinned upstream meshoptimizer
