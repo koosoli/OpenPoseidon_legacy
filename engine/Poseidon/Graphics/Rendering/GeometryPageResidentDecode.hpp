@@ -15,7 +15,7 @@ struct ResidentPage
     uint32_t page=0;
     std::vector<ResidentCluster> clusters;
 };
-enum class DecodeStatus { Decoded, Invalid, Capacity, AllocationFailed };
+enum class DecodeStatus { Decoded, Invalid, Capacity, AllocationFailed, Cancelled };
 // Explicit resident pilot only: original is the immutable value DTO from the
 // controlled owner export. Its source witness is a caller fact, not a retail-file
 // freshness certificate. No GPU calls, disk parser, streaming or mesh ownership.

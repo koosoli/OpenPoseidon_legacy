@@ -1,5 +1,6 @@
 #pragma once
 #include <Poseidon/Graphics/Rendering/GeometryPageResidentDecode.hpp>
+#include <atomic>
 
 namespace Poseidon::GeometryPages
 {
@@ -29,8 +30,9 @@ struct ResidentRepresentation
 // triangles of ONE authored representation, not a simplification/error bound.
 inline DecodeStatus DecodeResidentRepresentation(const Package& package,
     const CacheIdentity& identity, Frontier representation, const ShapeExport& original,
-    ResidentRepresentation& destination, RepresentationDecodeLimits limits={})
+    ResidentRepresentation& destination, RepresentationDecodeLimits limits={}, const std::atomic<bool>* cancelled=nullptr)
 {
+    if(cancelled && cancelled->load()) return DecodeStatus::Cancelled;
     using L=RepresentationDecodeLimits;
     if (!(package.Identity()==identity) || !(original.source==identity.source) ||
         (representation!=Frontier::Coarse && representation!=Frontier::Fine) ||
@@ -74,6 +76,7 @@ inline DecodeStatus DecodeResidentRepresentation(const Package& package,
     // page decoder then checks every original attribute, index and bound again.
     for (size_t page=pageBegin;page<pageEnd;++page)
     {
+        if(cancelled && cancelled->load()) return DecodeStatus::Cancelled;
         const auto& bytes=package.pages[page].bytes;
         if (bytes.size()>identity.packing.pageBytes || bytes.size()>1024u*1024u ||
             !add(serialized,bytes.size(),limits.serializedBytes)) return DecodeStatus::Capacity;
@@ -118,11 +121,14 @@ inline DecodeStatus DecodeResidentRepresentation(const Package& package,
         result.pages.reserve(pageEnd-pageBegin);
         for (size_t page=pageBegin;page<pageEnd;++page)
         {
+            if(cancelled && cancelled->load()) return DecodeStatus::Cancelled;
             ResidentPage value;
             const auto status=DecodeResidentPage(package,identity,uint32_t(page),original,value);
             if (status!=DecodeStatus::Decoded) return status;
+            if(cancelled && cancelled->load()) return DecodeStatus::Cancelled;
             result.pages.push_back(std::move(value));
         }
+        if(cancelled && cancelled->load()) return DecodeStatus::Cancelled;
         destination=std::move(result); return DecodeStatus::Decoded;
     }
     catch (const std::bad_alloc&) { return DecodeStatus::AllocationFailed; }

@@ -3137,7 +3137,7 @@ class Engine : public IGraphicsEngine
     { return {}; }
 
     // Ready is a returned-main-frame record cut, not all-pass/pixel or GPU-free proof.
-    enum class GeometryPageFixtureAction { Begin, Coarse, Fine, Observe, Snapshot, Abort, BeginClod, Fallback };
+    enum class GeometryPageFixtureAction { Begin, Coarse, Fine, Observe, Snapshot, Abort, BeginClod, Fallback, BeginPaged, RequestFine, PollFine, CancelFine, HoldFine, ReleaseFine };
     struct GeometryPageFixtureReport
     {
         GeometryReportStatus status=GeometryReportStatus::Unsupported;
@@ -3148,7 +3148,25 @@ class Engine : public IGraphicsEngine
         uint32_t coarseTriangles=0, fineTriangles=0, coarsePages=0, finePages=0;
         bool active=false, fineSelected=false, cpuHelpersUnchanged=false;
         bool mainFrameReturned=false, cascadeConfigured=false, localShadowConfigured=false;
+        int32_t renderReturnStatus=INT32_MIN;
+        // Optional copied command-recording facts, not fixture survivors/pixels or all-pass proof.
+        // Fixed arrays; no new normal-frame capture or allocation. Valid only after successful frame/getter.
+        struct PassFacts
+        {
+            bool valid=false;
+            uint32_t version=0, structBytes=0, enabled=0, capabilities=0, required=0, pending=0, recordedThisFrame=0;
+            uint64_t frame=0, instanceEpoch=0, cascadeEpoch=0, cascadeFrame=0, giRsmEpoch=0, giRsmFrame=0;
+            uint32_t localCount=0, localDrawMask=0, localValidMask=0, interiorDrawMask=0, interiorValidMask=0;
+            uint32_t cascadeDrawMask=0, cascadeCount=0;
+            uint64_t localEpochs[24]{}, localFrames[24]{}, interiorEpochs[5]{}, interiorFrames[5]{};
+        } passFacts;
         bool clodPilot=false, fallbackSelected=false;
+        bool pagedPilot=false, fineResident=false;
+        // Jobs/known capacity are CPU source+decode scheduling estimates, not RSS.
+        // Completed counts returned worker results; fineResident requires renderer validation.
+        uint64_t pageEpoch=0,pageRequest=0,pageReservedBytes=0,pageCompleted=0,pageCancelled=0;
+        uint32_t pageQueued=0,pageActive=0,pageReady=0,pageLiveJobs=0;
+        std::string pageWorkState;
         uint32_t clodAdapterVersion=0, clodGroups=0, clodClusters=0, fallbackTriangles=0, authoredFineTriangles=0;
         double clodBakeMs=0;
         float coarseThreshold=0, fineThreshold=0;

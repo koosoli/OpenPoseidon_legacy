@@ -1,17 +1,20 @@
 param(
     [switch]$Disabled,
     [switch]$Clod,
+    [switch]$Paged,
     [string]$Label='geometry-page-fixture',
     [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',
     [string]$Python='C:\Program Files\Python311\python.exe'
 )
 $ErrorActionPreference='Stop'
+if ($Paged -and $Clod) {throw '-Paged is the authored page worker case; it cannot be combined with -Clod'}
 if (!$env:LOCK_OWNER) {
     $shellName=if ($PSVersionTable.PSEdition -eq 'Core') {'pwsh.exe'} else {'powershell.exe'}
     $argv=@((Join-Path $PSScriptRoot 'with-game-lock.sh'),(Join-Path $PSHOME $shellName).Replace('\','/'),
         '-NoProfile','-File',$PSCommandPath,'-Label',$Label,'-GameDir',$GameDir,'-Python',$Python)
     if ($Disabled) {$argv+='-Disabled'}
     if ($Clod) {$argv+='-Clod'}
+    if ($Paged) {$argv+='-Paged'}
     $env:LOCK_OWNER='private resident geometry page fixture'
     try {& 'C:\Program Files\Git\bin\bash.exe' @argv; if ($LASTEXITCODE) {throw "Geometry fixture exited $LASTEXITCODE"}}
     finally {Remove-Item Env:LOCK_OWNER}
@@ -55,7 +58,7 @@ $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0)
 $listener.Start();$port=$listener.LocalEndpoint.Port;$listener.Stop()
 $log=Join-Path $out 'engine.log'
 @{head=(& git -C $root rev-parse HEAD);installed=(Get-Content (Join-Path $GameDir 'DEPLOYED-FROM.txt'));
-    disabled=[bool]$Disabled;clod=[bool]$Clod;scriptSha256=(Get-FileHash $PSCommandPath).Hash;
+    disabled=[bool]$Disabled;clod=[bool]$Clod;paged=[bool]$Paged;scriptSha256=(Get-FileHash $PSCommandPath).Hash;
     hashes=@(Get-FileHash (Join-Path $GameDir 'OpenPoseidon.exe'),(Join-Path $GameDir 'wgpu_renderer.dll'))} |
     ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $out 'provenance.json')
 $p=$null;$client=$null
@@ -86,6 +89,7 @@ try {
         while (!(Test-Path -LiteralPath $path) -and [DateTime]::UtcNow -lt $until) {Start-Sleep -Milliseconds 100}
         if (!(Test-Path -LiteralPath $path) -or (Get-Item -LiteralPath $path).Length -le 0) {throw "Missing capture: $path"}
     }
+    $script:fixtureObservedFrame=0
     function Observe($active,$fine) {
         $until=[DateTime]::UtcNow.AddSeconds(15)
         do {
@@ -128,15 +132,129 @@ try {
                 (!$active -and ($cut.rendererInstance -ne 4294967295 -or $cut.meshesAbsent -ne $cut.meshCount))) {
                 throw "Unexpected resident cut: $($cut | ConvertTo-Json -Compress)"
             }
+            if ($null -eq $cut.renderReturnStatus -or $cut.renderReturnStatus -ne 0 -or $null -eq $cut.passFacts) {
+                throw 'Real renderer frame/getter evidence missing or failed'
+            }
+            $pass=$cut.passFacts
+            foreach ($field in @('valid','version','structBytes','enabled','frame','instanceEpoch','required','capabilities','pending',
+                'recordedThisFrame','cascadeCount','cascadeDrawMask','cascadeEpoch','cascadeFrame','localCount','localDrawMask',
+                'localValidMask','interiorDrawMask','interiorValidMask','giRsmEpoch','giRsmFrame')) {
+                if ($null -eq $pass.$field) {throw "Missing pass fact: $field"}
+            }
+            foreach ($field in @('frame','instanceEpoch','cascadeEpoch','cascadeFrame','giRsmEpoch','giRsmFrame')) {
+                $number=[double]$pass.$field
+                if ([double]::IsNaN($number) -or [double]::IsInfinity($number) -or $number -lt 0 -or
+                    $number -gt 9007199254740991 -or [Math]::Floor($number) -ne $number) {throw "Inexact pass fact: $field"}
+            }
+            foreach ($entry in @(@{name='localEpochs';count=24},@{name='localFrames';count=24},
+                @{name='interiorEpochs';count=5},@{name='interiorFrames';count=5})) {
+                if ($null -eq $pass.($entry.name) -or @($pass.($entry.name)).Count -ne $entry.count) {throw "Missing bounded array: $($entry.name)"}
+                foreach ($element in @($pass.($entry.name))) {
+                    if ($null -eq $element) {throw "Null bounded epoch/frame element: $($entry.name)"}
+                    $number=[double]$element
+                    if ([double]::IsNaN($number) -or [double]::IsInfinity($number) -or $number -lt 0 -or
+                        $number -gt 9007199254740991 -or [Math]::Floor($number) -ne $number) {throw "Inexact bounded epoch/frame element: $($entry.name)"}
+                }
+            }
+            if (!$pass.valid -or $pass.version -ne 1 -or $pass.structBytes -ne 576 -or $pass.enabled -ne 1 -or
+                $pass.frame -le $script:fixtureObservedFrame -or $pass.cascadeCount -gt 4 -or $pass.localCount -gt 24) {
+                throw 'Invalid or nonmonotonic copied renderer pass facts'
+            }
+            if ($cut.cascadeConfigured -and (($pass.required -band 1) -eq 0 -or ($pass.capabilities -band 1) -eq 0 -or
+                ($pass.pending -band 1) -ne 0 -or $pass.cascadeCount -lt 1 -or
+                $pass.cascadeDrawMask -ne ((1 -shl [int]$pass.cascadeCount)-1) -or
+                $pass.cascadeEpoch -ne $pass.instanceEpoch -or $pass.cascadeFrame -ne $pass.frame)) {
+                throw 'Configured cascade lacks actual current-epoch command-recording facts'
+            }
+            # Reflection and stale cached local/interior/GI bits may remain Pending;
+            # record them honestly rather than requiring or claiming all-pass completeness.
+            $script:fixtureObservedFrame=[double]$pass.frame
             return $cut
         } while ([DateTime]::UtcNow -lt $until)
         throw 'Private geometry records did not settle before deadline'
     }
-    $begin=Action $(if($Clod){'beginClod'}else{'begin'})
+    $begin=Action $(if($Paged){'beginPaged'}elseif($Clod){'beginClod'}else{'begin'})
     if ($Disabled) {
         foreach ($field in @('status','active','meshCount','knownPayloadBytes')) {if ($null -eq $begin.$field) {throw "Missing disabled fixture field: $field"}}
         if ($begin.status -ne 'Disabled' -or $begin.active -or $begin.meshCount -or $begin.knownPayloadBytes) {throw 'Default-off fixture unexpectedly allocated'}
         $result=@{begin=$begin;disabled=$true}
+    } elseif ($Paged) {
+        function PageCut($cut) {
+            foreach ($field in @('pagedPilot','fineResident','pageEpoch','pageRequest','pageWorkState',
+                'pageQueued','pageActive','pageReady','pageLiveJobs','pageReservedBytes','pageCompleted','pageCancelled')) {
+                if ($null -eq $cut.$field) {throw "Missing page-worker field: $field"}
+            }
+            if (!$cut.pagedPilot -or $cut.pageEpoch -lt 1 -or $cut.pageLiveJobs -gt 2 -or
+                $cut.pageQueued -gt 1 -or $cut.pageActive -gt 1 -or $cut.pageReady -gt 1 -or
+                $cut.pageReservedBytes -gt 1048576) {throw "Invalid bounded page-worker cut: $($cut | ConvertTo-Json -Compress)"}
+            return $cut
+        }
+        function WaitPage($predicate) {
+            $until=[DateTime]::UtcNow.AddSeconds(15)
+            do {
+                $cut=PageCut (Action 'status')
+                if (& $predicate $cut) {return $cut}
+                Start-Sleep -Milliseconds 100
+            } while ([DateTime]::UtcNow -lt $until)
+            throw "Page-worker state did not settle: $($cut | ConvertTo-Json -Compress)"
+        }
+        $firstCoarse=PageCut (Observe $true $false)
+        if ($firstCoarse.fineResident -or $firstCoarse.pageLiveJobs -or $firstCoarse.pageWorkState -ne 'Idle') {
+            throw 'Paged begin did not publish an independent coarse-only fallback'
+        }
+        Capture 'initial-coarse.png'
+        $null=Action 'holdFine';$requested=PageCut (Action 'requestFine')
+        if ($requested.pageRequest -lt 1) {throw 'No explicit page request was accepted'}
+        $held=WaitPage {param($c) $c.pageActive -eq 1}
+        if ($held.fineResident -or $held.fineSelected -or $held.pageReady -or
+            $held.producerModel -ne $firstCoarse.producerModel -or $held.pageReservedBytes -le 0) {
+            throw 'A held CPU decode replaced the coarse fallback or discarded active-job debt'
+        }
+        # Cancel the old fixture while its real worker is held, retire actual GPU
+        # records, then queue a replacement epoch. The worker never owns Shape/FFI.
+        $null=Action 'abort';$oldRetired=PageCut (Observe $false $false)
+        if ($oldRetired.pageActive -ne 1 -or $oldRetired.pageLiveJobs -ne 1 -or $oldRetired.pageReservedBytes -le 0) {
+            throw 'Abort released held worker ownership before the worker actually exited'
+        }
+        $replacement=PageCut (Action 'beginPaged');$coarse=PageCut (Observe $true $false)
+        if ($coarse.pageEpoch -eq $firstCoarse.pageEpoch -or $coarse.fineResident -or
+            $coarse.producerModel -eq $firstCoarse.producerModel) {throw 'Replacement did not create a fresh coarse epoch'}
+        $queued=PageCut (Action 'requestFine')
+        if ($queued.pageRequest -lt 1 -or $queued.pageRequest -eq $requested.pageRequest -or
+            $queued.pageActive -ne 1 -or $queued.pageQueued -ne 1 -or $queued.pageLiveJobs -ne 2) {
+            throw 'Replacement was not bounded to one cancelled active plus one new queued job'
+        }
+        $null=Action 'releaseFine'
+        $until=[DateTime]::UtcNow.AddSeconds(15)
+        do {
+            $polled=PageCut (Action 'pollFine');$state=PageCut (Action 'status')
+            if ($state.pageWorkState -eq 'Failed') {throw "Fine transaction refused: $($state | ConvertTo-Json -Compress)"}
+            if ($state.fineResident) {break}
+            Start-Sleep -Milliseconds 100
+        } while ([DateTime]::UtcNow -lt $until)
+        if (!$state.fineResident -or $state.pageWorkState -ne 'Resident') {throw 'Complete fresh fine result was not admitted before deadline'}
+        $fine=PageCut (Observe $true $true)
+        if ($fine.pageEpoch -ne $coarse.pageEpoch -or $fine.pageRequest -ne $queued.pageRequest -or
+            $fine.pageCancelled -le $firstCoarse.pageCancelled -or $fine.pageCompleted -lt 1 -or
+            $fine.meshCount -le $coarse.meshCount -or $fine.rendererModel -eq $coarse.rendererModel -or
+            $fine.producerInstance -ne $coarse.producerInstance -or $fine.rendererInstance -ne $coarse.rendererInstance) {
+            throw 'Fine was not a fresh complete worker result on the fixed replacement instance'
+        }
+        Capture 'fine.png'
+        $null=Action 'coarse';$returned=PageCut (Observe $true $false)
+        if (!$returned.fineResident -or $returned.rendererModel -ne $coarse.rendererModel -or
+            $returned.rendererInstance -ne $coarse.rendererInstance) {throw 'Independently resident coarse fallback was lost'}
+        Capture 'coarse.png'
+        $null=Action 'fine';$fineReturned=PageCut (Observe $true $true)
+        if ($fineReturned.rendererModel -ne $fine.rendererModel -or $fineReturned.rendererInstance -ne $fine.rendererInstance) {
+            throw 'Explicit fine switch changed the committed model or instance'
+        }
+        $null=Action 'abort';$retired=PageCut (Observe $false $false)
+        $settled=WaitPage {param($c) $c.pageLiveJobs -eq 0 -and $c.pageQueued -eq 0 -and
+            $c.pageActive -eq 0 -and $c.pageReady -eq 0 -and $c.pageReservedBytes -eq 0}
+        $result=@{begin=$begin;firstCoarse=$firstCoarse;requested=$requested;held=$held;oldRetired=$oldRetired;
+            replacement=$replacement;coarse=$coarse;queued=$queued;fine=$fine;returned=$returned;fineReturned=$fineReturned;
+            retired=$retired;settled=$settled;disabled=$false;paged=$true;clod=$false}
     } else {
         $fallback=$null; $fallbackReturned=$null
         if ($Clod) {
@@ -175,7 +293,7 @@ try {
     $null=Send @{cmd='exit'}
     if (!$p.WaitForExit(15000) -or $p.ExitCode) {throw 'Game failed to exit cleanly'}
     if (Select-String -LiteralPath $log -Pattern 'Out of Memory|Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION' -Quiet) {throw 'Renderer error'}
-    $result.passed=$true;$result.cleanExit=$true;$result.scope='Private original authored resident geometry, record lifetime and fixed-instance switching; no CLOD runtime paging, all-pass, device-free or performance acceptance'
+    $result.passed=$true;$result.cleanExit=$true;$result.scope='Private original authored resident geometry, record lifetime and fixed-instance switching; explicit authored worker paging only when selected; no CLOD runtime paging, all-pass, device-free or performance acceptance'
     $result | ConvertTo-Json -Depth 7 | Set-Content -LiteralPath (Join-Path $out 'result.json')
     Write-Output "Geometry page fixture evidence: $out"
 } catch {

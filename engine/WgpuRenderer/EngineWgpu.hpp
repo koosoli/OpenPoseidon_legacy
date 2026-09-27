@@ -38,6 +38,7 @@ struct SDL_Window;
 namespace Poseidon
 {
 namespace render { class GeometryOwnerLedger; }
+namespace GeometryPages { class AuthoredPageWorker; }
 class TextureBankWgpu;
 class TextureWgpu;
 class TerrainWgpu;
@@ -819,6 +820,8 @@ class EngineWgpu : public EngineDummy
     std::shared_ptr<GeometryPageFixtureState> _geometryPageFixtureObservation;
     uint64_t _geometryPageFixtureObservationRequest=0;
     bool _geometryPageFixtureActive=false;
+    std::unique_ptr<GeometryPages::AuthoredPageWorker> _geometryPageWorker;
+    uint64_t _nextGeometryPageEpoch=1, _nextGeometryPageRequest=1;
     std::shared_ptr<render::StandaloneMeshWitnessBudget> _standaloneWitnessBudget;
     std::unordered_map<const LODShapeWithShadow*, std::vector<TextureWgpu*>> _gpuModelTextures;
     std::unordered_map<const LODShapeWithShadow*, uint32_t> _gpuModelRefs;
@@ -1345,7 +1348,7 @@ class EngineWgpu : public EngineDummy
     SharedMeshFixtureReport ControlSharedMeshLifetimeFixture(SharedMeshFixtureAction, const Shape* = nullptr) override;
     GeometryPageFixtureReport ControlGeometryPageFixture(GeometryPageFixtureAction,
         float x=1200,float y=11.5f,float z=1200) override;
-    void PublishGeometryPageFixtureObservation(const WgrFrame& frame);
+    void PublishGeometryPageFixtureObservation(const WgrFrame& frame, int32_t renderReturnStatus);
     std::unordered_map<uint32_t, uint32_t> _modelIdOf; // producer -> renderer (post-drain)
     void DrainResourceOps(std::vector<ResourceOp>& ops);
 
