@@ -911,6 +911,8 @@ pub struct Renderer {
     // rather than every frame. The pass has had two independent triggers and a toggle that
     // did not reach one of them; "is it running right now" needs to be answerable from a log.
     underwater_engaged_logged: Option<bool>,
+    // TW-WATER W5d: the eye is clearly under the water surface this frame (see the cloud composite).
+    submerged_view: bool,
     post_source_underwater: bool,
     // Which view the bloom/exposure/tonemap chain is currently BOUND to. The rebind below is
     // conditional, so anything that swaps the post source has to be part of this state or its
@@ -2021,6 +2023,7 @@ impl Renderer {
             dof_depth_warned: false,
             underwater_size: (0, 0),
             underwater_engaged_logged: None,
+            submerged_view: false,
             post_source_underwater: false,
             post_source_dof: false,
             underwater_view: UnderwaterView {
@@ -3979,6 +3982,8 @@ impl Renderer {
                     })
                 });
         let underwater_engaged = underwater_state.is_some();
+        // TW-WATER W5d: more than a metre under the surface (flat datum or measured submersion).
+        self.submerged_view = underwater_state.as_ref().is_some_and(|(_, above, _, _)| *above < -1.0);
         if self.underwater_engaged_logged != Some(underwater_engaged) {
             self.underwater_engaged_logged = Some(underwater_engaged);
             // eprintln! rather than self.log, matching the other [wgr] renderer diagnostics —
@@ -5761,6 +5766,12 @@ impl Renderer {
                 && sky_drawn
                 && !ablate.clouds
                 && self.sky.clouds_active(&self.sky_params)
+                // TW-WATER W5d: not from under the sea. The composite is depth-aware against the
+                // resolved scene depth, and the water surface writes none, so from below every
+                // pixel of the surface whose scene behind it is sky was painted with cloud -- the
+                // clouds hung in front of Snell's window and showed through total internal
+                // reflection. (The refracted sky inside the window is the water shader's own.)
+                && !self.submerged_view
             {
                 // Ensure a resolved single-sample scene depth exists (genuinely idempotent now: the
                 // water pass above already recorded it and attaches depth read-only, so the flag
