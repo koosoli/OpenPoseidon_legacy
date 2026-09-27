@@ -3858,6 +3858,21 @@ impl Renderer {
         );
         self.terrain
             .prepare(&self.device, &self.queue, terrain_nodes);
+        // TW-WATER W3i: the light the Tidewater water is lit with, logged every ~10 s while that
+        // backend renders (colour calibration against Tidewater's units: sun E ~ 9, sky E/PI ~ 1).
+        if self.water.tidewater().is_some() {
+            static TW_LIGHT_LOG: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            let n = TW_LIGHT_LOG.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if let (0, Some(c)) = (n % 600, prepared_cameras.get(water_camera)) {
+                self.log.log(
+                    log_level::INFO,
+                    &format!(
+                        "TW light: sun_diffuse {:?} sun_ambient {:?} fog {:?} sun_dir {:?}",
+                        c.sun_diffuse, c.sun_ambient, c.fog_color, c.sun_dir_world
+                    ),
+                );
+            }
+        }
         self.water.prepare(
             &self.device,
             &self.queue,
