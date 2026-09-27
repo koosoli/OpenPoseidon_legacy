@@ -696,6 +696,12 @@ void RegisterScreenshot(HarnessServer& hs)
             PAGE_FIXTURE_NUMBER(cameraDemandRevision);PAGE_FIXTURE_NUMBER(cameraRequestedRevision);PAGE_FIXTURE_NUMBER(cameraObservations);
             PAGE_FIXTURE_NUMBER(cameraRequests);PAGE_FIXTURE_NUMBER(cameraCancels);PAGE_FIXTURE_NUMBER(cameraAttempts);
             PAGE_FIXTURE_NUMBER(cameraDistance);PAGE_FIXTURE_NUMBER(preparedProducerModel);
+            PAGE_FIXTURE_NUMBER(cameraTupleStatus);PAGE_FIXTURE_NUMBER(cameraTupleIndex);PAGE_FIXTURE_NUMBER(cameraTupleSource);
+            PAGE_FIXTURE_NUMBER(cameraTupleGeneration);PAGE_FIXTURE_NUMBER(cameraTupleModelBirth);PAGE_FIXTURE_NUMBER(cameraTupleCertificateGeneration);
+            PAGE_FIXTURE_NUMBER(cameraTupleVersion);PAGE_FIXTURE_NUMBER(cameraTupleStructBytes);
+            PAGE_FIXTURE_NUMBER(cameraTupleOutputWidth);PAGE_FIXTURE_NUMBER(cameraTupleOutputHeight);
+            PAGE_FIXTURE_NUMBER(viewportWidth);PAGE_FIXTURE_NUMBER(viewportHeight);PAGE_FIXTURE_NUMBER(projectedSurfaceStatus);
+            PAGE_FIXTURE_NUMBER(projectedSurfaceXUpper);PAGE_FIXTURE_NUMBER(projectedSurfaceYUpper);PAGE_FIXTURE_NUMBER(projectedSurfaceEuclideanUpper);
 #undef PAGE_FIXTURE_NUMBER
 #define PAGE_FIXTURE_BOOL(field) cJSON_AddBoolToObject(result,#field,report.field)
             PAGE_FIXTURE_BOOL(clodPilot); PAGE_FIXTURE_BOOL(fallbackSelected);
@@ -704,12 +710,6 @@ void RegisterScreenshot(HarnessServer& hs)
             PAGE_FIXTURE_BOOL(originalFilePilot);PAGE_FIXTURE_BOOL(sourceSnapshotValidated);PAGE_FIXTURE_BOOL(sourceAdmissionConsumed);
             PAGE_FIXTURE_BOOL(surfaceCertificateAdmitted);PAGE_FIXTURE_BOOL(surfaceSelectedVerified);
             PAGE_FIXTURE_BOOL(cameraTupleEnabled);PAGE_FIXTURE_BOOL(cameraTupleValid);PAGE_FIXTURE_BOOL(projectedSurfaceIdealBound);
-            PAGE_FIXTURE_NUMBER(cameraTupleStatus);PAGE_FIXTURE_NUMBER(cameraTupleIndex);PAGE_FIXTURE_NUMBER(cameraTupleSource);
-            PAGE_FIXTURE_NUMBER(cameraTupleGeneration);PAGE_FIXTURE_NUMBER(cameraTupleModelBirth);PAGE_FIXTURE_NUMBER(cameraTupleCertificateGeneration);
-            PAGE_FIXTURE_NUMBER(cameraTupleVersion);PAGE_FIXTURE_NUMBER(cameraTupleStructBytes);
-            PAGE_FIXTURE_NUMBER(cameraTupleOutputWidth);PAGE_FIXTURE_NUMBER(cameraTupleOutputHeight);
-            PAGE_FIXTURE_NUMBER(viewportWidth);PAGE_FIXTURE_NUMBER(viewportHeight);PAGE_FIXTURE_NUMBER(projectedSurfaceStatus);
-            PAGE_FIXTURE_NUMBER(projectedSurfaceXUpper);PAGE_FIXTURE_NUMBER(projectedSurfaceYUpper);PAGE_FIXTURE_NUMBER(projectedSurfaceEuclideanUpper);
             cJSON_AddStringToObject(result,"projectedSurfaceScope","Read-only ideal nonjittered main1:1 projected selected-union bound; excludes authored fallback, shader floating-point/raster/pixel/visibility/attributes/all-pass quality and cut selection.");
             PAGE_FIXTURE_BOOL(cameraDemandActive);PAGE_FIXTURE_BOOL(cameraDesiredFine);PAGE_FIXTURE_BOOL(cameraHasObservation);PAGE_FIXTURE_BOOL(finePrepared);
             PAGE_FIXTURE_BOOL(active); PAGE_FIXTURE_BOOL(fineSelected); PAGE_FIXTURE_BOOL(cpuHelpersUnchanged);
