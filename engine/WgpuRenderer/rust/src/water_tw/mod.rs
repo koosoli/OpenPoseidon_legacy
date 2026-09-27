@@ -1030,6 +1030,11 @@ impl Tidewater {
         self.spray.draw_mask(&mut pass, camera, offset, &self.bind);
     }
 
+    /// W6: the wakes' slots, for the log.
+    pub fn wake_stats(&self) -> String {
+        self.wake.stats()
+    }
+
     /// Spray diagnostics for the log: on this frame, stations, and the latest readback.
     pub fn spray_stats(&self) -> (bool, u32, Option<spray::SprayStats>) {
         (self.spray.on, self.brk.ns, self.spray.stats)
@@ -1131,7 +1136,9 @@ mod tests {
         assert_eq!(std::mem::offset_of!(TwSurface, sim_p1), 240);
         assert_eq!(std::mem::offset_of!(TwSurface, brk), 256);
         assert_eq!(std::mem::offset_of!(TwSurface, morph), 272);
-        assert_eq!(std::mem::size_of::<TwSurface>(), 464);
+        // W6: the wake readers' lanes after the CDLOD morph table
+        assert_eq!(std::mem::offset_of!(TwSurface, wake), 464);
+        assert_eq!(std::mem::size_of::<TwSurface>(), 592);
     }
 
     #[test]

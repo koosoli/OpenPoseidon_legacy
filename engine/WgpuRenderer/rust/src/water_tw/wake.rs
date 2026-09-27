@@ -103,7 +103,7 @@ impl WakeBoat {
     }
 
     fn dims(&self) -> [f32; 3] {
-        [self.half_beam, self.half_len, self.draft]
+        [self.half_beam, self.half_len, (self.draft * tune().draft).max(0.05)]
     }
 }
 
@@ -236,6 +236,41 @@ pub struct WakeGpu {
     slots: Vec<Slot>,
     /// `WGR_TW_WAKE=0` turns the wakes off (A/B and budget captures)
     enabled: bool,
+}
+
+/// `WGR_TW_WAKE_TUNE=foam=0.35,draft=1,source=1,wash=1,aer=1,amp=1`: look overrides for
+/// captures (foam gain, draft scale, pressure gain, wash scale, aeration gain, height scale).
+#[derive(Clone, Copy, Debug)]
+struct Tune {
+    foam: f32,
+    draft: f32,
+    source: f32,
+    wash: f32,
+    aer: f32,
+    amp: f32,
+}
+
+fn tune() -> Tune {
+    static V: std::sync::OnceLock<Tune> = std::sync::OnceLock::new();
+    *V.get_or_init(|| {
+        let mut t = Tune { foam: 0.35, draft: 1.0, source: 1.0, wash: 1.0, aer: 1.0, amp: 1.0 };
+        if let Ok(v) = std::env::var("WGR_TW_WAKE_TUNE") {
+            for kv in v.split(',') {
+                let mut it = kv.splitn(2, '=');
+                let (Some(k), Some(x)) = (it.next(), it.next().and_then(|x| x.trim().parse::<f32>().ok())) else { continue };
+                match k.trim() {
+                    "foam" => t.foam = x,
+                    "draft" => t.draft = x,
+                    "source" => t.source = x,
+                    "wash" => t.wash = x,
+                    "aer" => t.aer = x,
+                    "amp" => t.amp = x,
+                    _ => {}
+                }
+            }
+        }
+        t
+    })
 }
 
 fn env_enabled() -> bool {
@@ -566,7 +601,7 @@ impl WakeGpu {
                 lanes[i * 4] = [s.center[0] as f32 * CELL, s.center[1] as f32 * CELL, bp[0], bp[1]];
                 lanes[i * 4 + 1] = [bp[2], bp[3], 0.03, 0.08];
                 // amount, amplitude, aeration out
-                lanes[i * 4 + 2] = [s.amount, 1.0, 0.3, 0.0];
+                lanes[i * 4 + 2] = [s.amount, tune().amp, 0.3, 0.0];
                 lanes[i * 4 + 3] = s.near_box;
             }
         }
@@ -594,10 +629,19 @@ impl WakeGpu {
         true
     }
 
-    /// For the log: per slot (boat id, amount, stepping).
-    #[allow(dead_code)]
-    pub fn stats(&self) -> Vec<(Option<u32>, f32, bool)> {
-        self.slots.iter().map(|s| (s.boat, s.amount, s.step)).collect()
+    /// For the log: each slot's boat, size (half beam, half length, draft as simulated), speed,
+    /// thrust, amount and whether it stepped this frame.
+    pub fn stats(&self) -> String {
+        let mut out = format!("tune {:?}", tune());
+        for (i, s) in self.slots.iter().enumerate() {
+            let sp = s.last.map_or(0.0, |b| (b.vel[0] * b.vel[0] + b.vel[1] * b.vel[1]).sqrt());
+            let th = s.last.map_or(0.0, |b| b.throttle);
+            out += &format!(
+                "; slot {i}: boat {:?} dims [{:.2}, {:.2}, {:.2}] speed {sp:.1} m/s thrust {th:.2} amount {:.2} step {}",
+                s.boat, s.dims[0], s.dims[1], s.dims[2], s.amount, s.step
+            );
+        }
+        out
     }
 }
 
@@ -657,6 +701,7 @@ impl Slot {
             return None;
         }
         let h = dt.clamp(1.0 / 240.0, 1.0 / 30.0);
+        let tn = tune();
         let pose = self.pose.unwrap_or_default();
 
         // ---- window: keep the boat inside a box around the centre (moves by whole cells)
@@ -704,13 +749,18 @@ impl Slot {
             boat: pose,
             trim: [trim[0], trim[1], trim[2], if self.reset { 1.0 } else { 0.0 }],
             // dt, amount, source gain (0 once the boat has gone), wash
-            m0: [h, self.amount, 0.72 * (1.0 + 0.2 * plane) * present, throttle + smooth(speed, 1.5, 7.0) * 0.5 * present],
+            m0: [
+                h,
+                self.amount,
+                0.72 * (1.0 + 0.2 * plane) * present * tn.source,
+                (throttle + smooth(speed, 1.5, 7.0) * 0.5 * present) * tn.wash,
+            ],
             // bow, speed, wash half width, boil
             m1: [smooth(speed, 3.5, 9.0), speed, (0.7 + 0.6 * plane) * (beam / 1.2).clamp(0.6, 4.0), 1.2],
             // visc, dynamic head, hollow length, hollow gain
             m2: [0.006, 0.35 * speed * speed / (2.0 * GRAVITY), 0.35 + 0.015 * speed * speed, 0.3 * plane],
             // foam gain, aeration gain, near-template rate, sea level
-            m3: [0.35, 1.0, if self.reset { 1.0 } else { 1.0 - (-h / 0.25).exp() }, sea_level],
+            m3: [tn.foam, tn.aer, if self.reset { 1.0 } else { 1.0 - (-h / 0.25).exp() }, sea_level],
             hull: [x1, z0, z1 - z0, -half_len],
             near: self.near_box,
             m4: [time, 0.0, 0.0, 0.0],

@@ -3894,6 +3894,7 @@ impl Renderer {
                         log_level::INFO,
                         &format!("TW spray (W4a): on {on}, breaker stations {stations}, ring {stats:?}"),
                     );
+                    self.log.log(log_level::INFO, &format!("TW wake (W6): {}", tw.wake_stats()));
                 }
             }
         }
