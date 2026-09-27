@@ -1,4 +1,4 @@
-param([switch]$Disabled,[switch]$RequireAlphaPeek,[string]$Label='cold-paa-handoff',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',[string]$Python='C:\Program Files\Python311\python.exe')
+param([switch]$Disabled,[switch]$RequireAlphaPeek,[switch]$AlphaTagged,[string]$Label='cold-paa-handoff',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',[string]$Python='C:\Program Files\Python311\python.exe')
 $ErrorActionPreference='Stop'
 if($Disabled -and $RequireAlphaPeek){throw 'Alpha peek requires the cold handoff option'}
 if($Label -notmatch '^[a-zA-Z0-9_-]{1,64}$'){throw 'Invalid bounded label'}
@@ -7,6 +7,7 @@ if(!$env:LOCK_OWNER){
  $args=@((Join-Path $PSScriptRoot 'with-game-lock.sh'),$shell.Replace('\','/'),'-NoProfile','-File',$PSCommandPath,'-Label',$Label,'-GameDir',$GameDir,'-Python',$Python)
  if($Disabled){$args+='-Disabled'}
  if($RequireAlphaPeek){$args+='-RequireAlphaPeek'}
+ if($AlphaTagged){$args+='-AlphaTagged'}
  $env:LOCK_OWNER='cold PAA owned handoff fixture'
  try{& 'C:\Program Files\Git\bin\bash.exe' @args;if($LASTEXITCODE){throw "Fixture child failed $LASTEXITCODE"}}finally{Remove-Item Env:LOCK_OWNER}
  return
@@ -19,13 +20,14 @@ $profile=Join-Path $out 'user';$mission=Join-Path $out 'cold-paa.eden'
 New-Item -ItemType Directory $out,$profile,$mission | Out-Null
 $generator=Join-Path $PSScriptRoot 'streaming/build_cold_paa_handoff_fixture.py'
 $producerArgs=@($generator,$fixture)
-if($RequireAlphaPeek){$producerArgs+='--alpha-tagged'}
+$tagged=[bool]($RequireAlphaPeek -or $AlphaTagged)
+if($tagged){$producerArgs+='--alpha-tagged'}
 $producerLines=@(& $Python @producerArgs)
 if($LASTEXITCODE -or $producerLines.Count -ne 1 -or $producerLines[0].Length -gt 8192){throw 'Original bounded producer failed'}
 $producer=$producerLines[0]|ConvertFrom-Json
 if($producer.schema -ne 1 -or !$producer.originalGenerated -or $producer.modelCount -ne 2 -or @($producer.placements).Count -ne 2 -or $producer.chainBytes -ne 5456 -or $producer.selectedMipCount -ne 4 -or $producer.selectedChainBytes -ne 5440 -or $producer.memberBytes -gt 16777216){throw 'Producer contract mismatch'}
 foreach($field in @('alphaTagged','alphaFlag','alphaTagBytes')){if($producer.PSObject.Properties.Name -notcontains $field -or $null -eq $producer.$field){throw "Missing producer alpha provenance $field"}}
-if([bool]$producer.alphaTagged -ne [bool]$RequireAlphaPeek -or $producer.alphaFlag -ne $(if($RequireAlphaPeek){1}else{0}) -or $producer.alphaTagBytes -ne $(if($RequireAlphaPeek){16}else{0})){throw 'Actual authored alpha tag provenance mismatch'}
+if([bool]$producer.alphaTagged -ne $tagged -or $producer.alphaFlag -ne $(if($tagged){1}else{0}) -or $producer.alphaTagBytes -ne $(if($tagged){16}else{0})){throw 'Actual authored alpha tag provenance mismatch'}
 foreach($file in $producer.files){if(!(Test-Path -LiteralPath $file.path) -or (Get-Item -LiteralPath $file.path).Length -ne $file.bytes -or (Get-FileHash -LiteralPath $file.path).Hash -ne $file.sha256){throw 'Producer file hash/size mismatch'}}
 $producerLines[0]|Set-Content (Join-Path $out 'producer.json')
 @'
