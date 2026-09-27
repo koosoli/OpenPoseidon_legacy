@@ -6,15 +6,15 @@ class Mission
 	{
 		briefingName="Tidewater showcase: Everon south coast";
 		briefingDescription="Camera fly-over of a platoon landing on Everon's south-east bay (2 min).";
-		startWeather=0.25;
-		forecastWeather=0.25;
+		startWeather=0.6;
+		forecastWeather=0.6;
 		startFog=0;
 		forecastFog=0;
 		year=1985;
 		month=6;
 		day=21;
-		hour=15;
-		minute=0;
+		hour=7;
+		minute=30;
 	};
 	class Groups
 	{
@@ -83,7 +83,7 @@ class Mission
 			};
 			class Waypoints
 			{
-				items=2;
+				items=3;
 				class Item0
 				{
 					position[]={10090,0,1255};
@@ -98,11 +98,23 @@ class Mission
 				};
 				class Item1
 				{
-					position[]={9850,0,1458};
-					type="TR UNLOAD";
+					position[]={9834,0.523,1472};
 					speed="FULL";
 					combat="CARELESS";
-					completitionRadius=15;
+					completitionRadius=12;
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+				class Item2
+				{
+					position[]={9834,0.523,1472};
+					type="TR UNLOAD";
+					speed="LIMITED";
+					combat="CARELESS";
+					completitionRadius=12;
 					synchronizations[]={};
 					class Effects
 					{
@@ -133,7 +145,7 @@ class Mission
 			};
 			class Waypoints
 			{
-				items=2;
+				items=3;
 				class Item0
 				{
 					position[]={10125,0,1290};
@@ -148,11 +160,23 @@ class Mission
 				};
 				class Item1
 				{
-					position[]={9900,0,1472};
-					type="TR UNLOAD";
+					position[]={9894,0.441,1477};
 					speed="FULL";
 					combat="CARELESS";
-					completitionRadius=15;
+					completitionRadius=12;
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+				class Item2
+				{
+					position[]={9894,0.441,1477};
+					type="TR UNLOAD";
+					speed="LIMITED";
+					combat="CARELESS";
+					completitionRadius=12;
 					synchronizations[]={};
 					class Effects
 					{
@@ -183,7 +207,7 @@ class Mission
 			};
 			class Waypoints
 			{
-				items=2;
+				items=3;
 				class Item0
 				{
 					position[]={10300,0,1280};
@@ -198,11 +222,23 @@ class Mission
 				};
 				class Item1
 				{
-					position[]={9975,0,1482};
-					type="TR UNLOAD";
+					position[]={9965,0.466,1488};
 					speed="FULL";
 					combat="CARELESS";
-					completitionRadius=15;
+					completitionRadius=12;
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+				class Item2
+				{
+					position[]={9965,0.466,1488};
+					type="TR UNLOAD";
+					speed="LIMITED";
+					combat="CARELESS";
+					completitionRadius=12;
 					synchronizations[]={};
 					class Effects
 					{
@@ -233,7 +269,7 @@ class Mission
 			};
 			class Waypoints
 			{
-				items=2;
+				items=3;
 				class Item0
 				{
 					position[]={10335,0,1245};
@@ -248,11 +284,23 @@ class Mission
 				};
 				class Item1
 				{
-					position[]={10075,0,1468};
-					type="TR UNLOAD";
+					position[]={10070,0.563,1472};
 					speed="FULL";
 					combat="CARELESS";
-					completitionRadius=15;
+					completitionRadius=12;
+					synchronizations[]={};
+					class Effects
+					{
+					};
+					showWP="NEVER";
+				};
+				class Item2
+				{
+					position[]={10070,0.563,1472};
+					type="TR UNLOAD";
+					speed="LIMITED";
+					combat="CARELESS";
+					completitionRadius=12;
 					synchronizations[]={};
 					class Effects
 					{

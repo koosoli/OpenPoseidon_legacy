@@ -12,12 +12,16 @@ player moveInCargo lst1
 setViewDistance 3000
 enableRadio false
 
-; each squad: its boat, its beach point, then a rally point on the flat ground behind the beach
-; and a point further inland (all [east, north, 0])
-[s1, pbr1, [9850, 1458, 0], [9725, 1560, 0], [9690, 1610, 0]] exec "land.sqs"
-[s2, pbr2, [9900, 1472, 0], [9800, 1580, 0], [9780, 1630, 0]] exec "land.sqs"
-[s3, pbr3, [9975, 1482, 0], [9875, 1575, 0], [9870, 1625, 0]] exec "land.sqs"
-[s4, pbr4, [10075, 1468, 0], [9950, 1560, 0], [9960, 1610, 0]] exec "land.sqs"
+; each squad: its boat, its beach point, then a rally point at the edge of the town behind the
+; beach and a point in the town (all [east, north, 0])
+[s1, pbr1, [9834, 1472, 0], [9725, 1560, 0], [9690, 1610, 0]] exec "land.sqs"
+[s2, pbr2, [9894, 1477, 0], [9800, 1580, 0], [9780, 1630, 0]] exec "land.sqs"
+[s3, pbr3, [9965, 1488, 0], [9875, 1575, 0], [9870, 1625, 0]] exec "land.sqs"
+[s4, pbr4, [10070, 1472, 0], [9950, 1560, 0], [9960, 1610, 0]] exec "land.sqs"
+
+; music: Seventh - Decide
+0 fadeMusic 0.8
+playMusic "7thDecide"
 
 _cam = "camera" camCreate [10420, 880, 7]
 _cam cameraEffect ["internal", "back"]
@@ -27,11 +31,13 @@ _cam camSetFov 0.75
 _cam camSetTarget lst1
 _cam camCommit 0
 titleCut ["", "BLACK IN", 3]
-titleText ["Tidewater - Everon, south coast", "PLAIN DOWN", 1]
 
 ; --- shot 1 (0-12 s): skimming the open sea toward the LST as the boats pull away from it
 _cam camSetPos [10340, 1060, 10]
 _cam camCommit 12
+; (the title waits a moment: a resource cut at mission time 0 is not shown)
+@_time > 1
+cutRsc ["TWTitle", "PLAIN"]
 @_time > 3
 go = true
 @_time > 12
@@ -75,15 +81,22 @@ _cam camSetPos [10380, 1060, 55]
 _cam camCommit 23
 @_time > 105
 
-; --- shot 6 (105-120 s): pull back and up to reveal the whole bay, then fade out
-_cam camSetPos [10080, 1340, 22]
-_cam camSetTarget [9950, 1500, 0]
-_cam camSetFov 0.8
+; --- shot 6 (105-120 s): start low behind the troops entering the town, then pull back and up
+; over the bay (still watching them) to reveal the beached boats, the LST and the coast
+_lead = leader s2
+_p = getPos _lead
+_cam camSetPos [(_p select 0) + 7, (_p select 1) - 12, 2.5]
+_cam camSetTarget _lead
+_cam camSetFov 0.7
 _cam camCommit 0
 _cam camSetPos [10150, 760, 190]
+_cam camSetFov 0.8
 _cam camCommit 15
+@_time > 109
+cutRsc ["TWTitle", "PLAIN"]
 @_time > 116
 titleCut ["", "BLACK OUT", 3]
+4 fadeMusic 0
 @_time > 120
 ; the END1 trigger in mission.sqm ends the mission (this build has no endMission command)
 showcaseDone = true

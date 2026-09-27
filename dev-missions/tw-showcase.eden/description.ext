@@ -1,2 +1,40 @@
 // Tidewater water showcase: a 2-minute camera fly-over of a platoon landing on Everon's south coast.
-onLoadMission = "Tidewater showcase: Everon south coast";
+onLoadMission = "Open Poseidon - Tidewater Demo";
+
+class RscTitles
+{
+	titles[] = {TWTitle};
+	// the title card: big bold white letters with a drop shadow, across the top of the frame,
+	// shown at the start and again as the camera pulls away at the end
+	class TWTitle
+	{
+		idd = -1;
+		movingEnable = 0;
+		duration = 9;
+		fadein = 1.5;
+		fadeout = 2;
+		name = "TWTitle";
+		controls[] = {"Shadow", "Title"};
+		class Shadow
+		{
+			type = 0;
+			idc = -1;
+			style = 2;
+			x = 0.004;
+			y = 0.086;
+			w = 1.0;
+			h = 0.16;
+			colorBackground[] = {0, 0, 0, 0};
+			colorText[] = {0, 0, 0, 0.85};
+			font = "SteelfishB128";
+			sizeEx = 0.15;
+			text = "Open Poseidon - Tidewater Demo";
+		};
+		class Title: Shadow
+		{
+			x = 0.0;
+			y = 0.08;
+			colorText[] = {1, 1, 1, 1};
+		};
+	};
+};
