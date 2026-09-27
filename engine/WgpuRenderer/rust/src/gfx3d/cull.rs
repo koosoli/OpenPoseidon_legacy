@@ -85,12 +85,15 @@ pub struct LodGpu {
 
 // Same CPU table mutation used by normal retirement and the owner-only census
 // tests. Append-only model identity remains valid; historical sections do not.
-pub(super) fn retire_model_lods(models: &[ModelGpu], lods: &mut [LodGpu], id: u32) {
+pub(super) fn retire_model_lods(models: &[ModelGpu], lods: &mut [LodGpu], id: u32) -> bool {
+    let mut changed = false;
     if let Some(model) = models.get(id as usize) {
         for lod in &mut lods[model.lod_base as usize..(model.lod_base + model.lod_count) as usize] {
+            changed |= lod.section_count != 0;
             lod.section_count = 0;
         }
     }
+    changed
 }
 
 // One drawable section = a slice of the shared geometry pool + its pipeline variant.
@@ -387,8 +390,9 @@ pub(crate) struct InstanceTable {
     stale_ops: u64,
     /// Inclusive min..=max slot changed since the last upload.
     dirty: Option<(u32, u32)>,
-    /// REN-SKY-003: bumped on every add/update/remove. A world-space structure built from the
-    /// retained set (the interior sky-visibility maps) is valid for as long as this holds still.
+    /// Retained scene-content change counter: add/update/remove, and drawable model
+    /// retirement even when its instance remains. Cached images must observe both kinds.
+    /// This is not a revision for arbitrary mesh vertices, dynamic tails or pose palettes.
     epoch: u64,
 }
 
@@ -427,8 +431,13 @@ impl InstanceTable {
         }
     }
 
-    fn mark_dirty(&mut self, slot: u32) {
+    // Content invalidation does not mutate handles, slot generations or upload ranges.
+    fn invalidate_retained_content(&mut self) {
         self.epoch = self.epoch.wrapping_add(1);
+    }
+
+    fn mark_dirty(&mut self, slot: u32) {
+        self.invalidate_retained_content();
         self.dirty = Some(match self.dirty {
             Some((lo, hi)) => (lo.min(slot), hi.max(slot)),
             None => (slot, slot),
@@ -638,6 +647,16 @@ fn set_model_feedback_tag(models: &mut [ModelGpu], uploads: &mut TableUploads, i
             uploads.mark(TableDomain::Model);
         }
     }
+}
+
+// Same owner-side retirement transition used by CullState and device-free tests.
+// Reuse the already-required LOD walk; no instance scan or new epoch storage.
+fn retire_model_content(models: &[ModelGpu], lods: &mut [LodGpu], id: u32,
+                        instances: &mut InstanceTable, uploads: &mut TableUploads) -> bool {
+    if !retire_model_lods(models, lods, id) { return false; }
+    instances.invalidate_retained_content();
+    uploads.mark(TableDomain::Lod);
+    true
 }
 
 const STATS_RING_SLOTS: usize = 3;
@@ -1093,10 +1112,8 @@ impl CullState {
     // shader lod_base lookup. The mesh ranges have their own retirement fence.
     pub fn retire_model(&mut self, id: u32) {
         if let Some(feedback) = &self.lod_feedback { feedback.borrow_mut().retire(id); }
-        if self.models.get(id as usize).is_some() {
-            retire_model_lods(&self.models, &mut self.lods, id);
-            self.table_uploads.mark(TableDomain::Lod);
-        }
+        retire_model_content(&self.models, &mut self.lods, id,
+                             &mut self.instances, &mut self.table_uploads);
     }
 
     // Append a batch of per-tree crown centres (model space) to the global table; return the base
@@ -1942,7 +1959,8 @@ impl CullState {
     // Total retained instances (static slots incl. free-list holes + dynamic), = the value the
     // compute dispatches over. The cull-sphere debug pass draws this many instances (holes are
     // skipped in-shader by the INVALID_MODEL guard).
-    /// REN-SKY-003: changes whenever the retained instance set changes (see InstanceTable::epoch).
+    /// Retained scene-content epoch: instance mutations and drawable model retirement.
+    /// Name retained for API compatibility; not a full geometry-content revision.
     pub fn instance_epoch(&self) -> u64 {
         self.instances.epoch
     }
@@ -4319,7 +4337,13 @@ pub(crate) mod tests {
         let a_section = resolve_registered_section(&meshes, &sources[0]);
         let b_section = resolve_registered_section(&meshes, &sources[1]);
         run_and_check(&mut cull, &[(a, a_section), (b, b_section)]);
+        let epoch = cull.instance_epoch();
         cull.retire_model(a);
+        assert_eq!(cull.instance_epoch(), epoch.wrapping_add(1),
+                   "retained A retirement must invalidate cached scene content without removing A");
+        cull.retire_model(a);
+        cull.retire_model(u32::MAX);
+        assert_eq!(cull.instance_epoch(), epoch.wrapping_add(1), "repeat/unknown retire is inert");
         let old = meshes.remove(a_mesh).unwrap();
         pool.free(&old.alloc, old.vert_count, old.index_count);
         let resolved: Vec<_> = sources.iter().map(|s| resolve_registered_section(&meshes, s)).collect();
@@ -4344,6 +4368,44 @@ pub(crate) mod tests {
         cull.set_sections(&resolved);
         run_and_check(&mut cull, &[(b, b_section), (c, c_section)]);
         eprintln!("PASS retired_model_three_views: actual pool/full-generation resolver and main/shadow/color GPU readback preserve live B/C with stale A");
+    }
+
+    #[test]
+    fn model_retirement_invalidates_retained_content_only_for_actual_change() {
+        let models = [ModelGpu { lod_base: 0, lod_count: 2, bounding_sphere: 1.0, _pad: 0 },
+                      ModelGpu { lod_base: 2, lod_count: 1, bounding_sphere: 2.0, _pad: 0 }];
+        let mut lods = [LodGpu { resolution: 1.0, section_base: 0, section_count: 0, is_decal: 0 },
+                        LodGpu { resolution: 2.0, section_base: 0, section_count: 3, is_decal: 0 },
+                        LodGpu { resolution: 1.0, section_base: 3, section_count: 1, is_decal: 0 }];
+        let mut instances = InstanceTable::default();
+        let mut instance = InstanceGpu::zeroed(); instance.model = 0;
+        let handle = instances.add(instance);
+        instances.take_dirty();
+        let epoch = instances.epoch;
+        let slots = bytemuck::cast_slice::<InstanceGpu, u8>(&instances.slots).to_vec();
+        let generations = instances.generations.clone();
+        let free = instances.free_slots.clone();
+        let mut uploads = TableUploads::NONE;
+        assert!(!retire_model_content(&models, &mut lods, u32::MAX, &mut instances, &mut uploads));
+        assert_eq!(instances.epoch, epoch);
+        assert_eq!(uploads, TableUploads::NONE);
+        assert!(retire_model_content(&models, &mut lods, 0, &mut instances, &mut uploads));
+        assert_eq!(instances.epoch, epoch.wrapping_add(1));
+        assert_eq!(uploads, TableUploads(TableDomain::Lod.bit()));
+        assert_eq!(lods[0].section_count, 0); assert_eq!(lods[1].section_count, 0);
+        assert_eq!(lods[2].section_count, 1, "live neighbor remains untouched");
+        assert_eq!(instances.slot_of(handle), Some(0), "instance handle still valid");
+        assert_eq!(bytemuck::cast_slice::<InstanceGpu, u8>(&instances.slots), slots.as_slice());
+        assert_eq!(instances.generations, generations); assert_eq!(instances.free_slots, free);
+        assert!(instances.dirty.is_none(), "content epoch must not fabricate instance uploads");
+        uploads = TableUploads::NONE;
+        for id in [0, 0, u32::MAX] {
+            assert!(!retire_model_content(&models, &mut lods, id, &mut instances, &mut uploads));
+            assert_eq!(instances.epoch, epoch.wrapping_add(1));
+            assert_eq!(uploads, TableUploads::NONE);
+        }
+        assert!(retire_model_content(&models, &mut lods, 1, &mut instances, &mut uploads));
+        assert_eq!(instances.epoch, epoch.wrapping_add(2));
     }
 
 }
