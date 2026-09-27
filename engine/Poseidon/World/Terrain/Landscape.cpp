@@ -2838,6 +2838,11 @@ bool ContainsNoCase(const char* text, const char* needle)
     return false;
 }
 
+bool IsA3StaticMarkerLightSource(const char* modelName)
+{
+    return modelName && ContainsNoCase(modelName, "a3\\");
+}
+
 // Imported A3 world objects do not instantiate CfgVehicles' MarkerLights yet. Their models
 // nevertheless retain the authored light_*_pos memory points. Turn those into invisible point
 // lights so the existing WGPU local-light path illuminates terrain and nearby geometry; the
@@ -2847,7 +2852,7 @@ bool ContainsNoCase(const char* text, const char* needle)
 void AddA3StaticMarkerLights(Object* obj, LODShapeWithShadow* shape, const char* modelName,
                              RefArray<LightPoint>& ownedLights)
 {
-    if (!obj || !shape || !modelName || !ContainsNoCase(modelName, "a3\\"))
+    if (!obj || !shape || !IsA3StaticMarkerLightSource(modelName))
         return;
     Shape* memory = shape->MemoryLevel();
     if (!memory || !GLOB_SCENE)
@@ -2978,10 +2983,15 @@ Object* Landscape::ObjectCreateFromShape(int id, LODShapeWithShadow* shape, cons
         return obj;
     if (_modernObjectStreaming)
     {
-        RefArray<LightPoint>& lights = _modernObjectLightOwners[id];
-        AddA3StaticMarkerLights(obj, shape, name, lights);
-        if (lights.Size() == 0)
-            _modernObjectLightOwners.erase(id);
+        // Rejected model families never produce marker lights. Avoid creating
+        // and immediately erasing an empty owner node for every such admission.
+        if (IsA3StaticMarkerLightSource(name))
+        {
+            RefArray<LightPoint>& lights = _modernObjectLightOwners[id];
+            AddA3StaticMarkerLights(obj, shape, name, lights);
+            if (lights.Size() == 0)
+                _modernObjectLightOwners.erase(id);
+        }
     }
     else
     {
@@ -3002,7 +3012,7 @@ void Landscape::RegisterModernObjectVisual(Object* object)
     if (GEngine)
         GEngine->SceneObjectCreated(object);
     auto* shape = object->GetShape();
-    if (shape)
+    if (shape && IsA3StaticMarkerLightSource(shape->Name()))
     {
         auto& lights = _modernObjectLightOwners[object->ID()];
         AddA3StaticMarkerLights(object, shape, shape->Name(), lights);
