@@ -2347,3 +2347,19 @@ fullmemcmp and outputcapacity protect memoized result, not source/header freshne
 Fixed32MiB logical charged data excludes allocator/RSS/caller buffers. Original
 decoder and compressed content unchanged. Subsequent owner-probe source is not
 built/installed here. FullplanOPEN/performancefalse.
+Renderer mesh-record facts f88379f3 build247/Engine8373assertions10cases/
+Rust4PASS0ignored342filtered pass; cleanf88303:35 pair ON033510/OFF033623
+clean0 AllocationDiagnosticOnly zero routecycles. ON boundedcomplete2602handles
+inspected2472present130absent,130scheduled-retired allabsent/0present-retired,
+0absent-with-persistent-owner/unknown/invalid/duplicates/truncation,epoch1/calls1.
+Exact source pool spans vertex331583572/index49275720 sum380859292 match this
+live-pool cut only, not universal allocation proof. Persistent producer/model/
+CPU scope complete with2445CPU borrowers; globalownership false/reclaim0.
+Absence means generational renderer record removed, not queue completion,
+device-memory release or allocation reuse safety. Snapshot hard8192; no actual
+all-pass/cached/in-flight ownership proof. OFF enabledfalse/calls0/requested0/
+completefalse/bytes0 while normal allocation report works; no default queries.
+Root pre/post pair installed hashes match EXE02238BE88F87011E36FDB7A737CE67257D10D7AEFDCFF12C4BE0E62088D7D224
+and DLL05D8460B15E3ECFF8B5013CAD4AA36DB83A71F4679C2A4CF2EBC572DBAB9C6E9.
+No FPS/MP/reclaim/eviction/paging/performance acceptance. Future sample-fingerprint
+prototype is unbuilt/not included. FullplanOPEN.
