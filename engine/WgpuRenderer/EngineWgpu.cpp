@@ -1386,6 +1386,8 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
     {
         _geometryOwnerLedger = std::make_shared<render::GeometryOwnerLedger>(render::GeometryOwnerLedger::Limits{});
         _geometryOwnerLedger->BeginEpoch(_geometryOwnerEpoch, true);
+        const char* meshAck = std::getenv("WGR_GEOMETRY_MESH_ACK");
+        _geometryMeshAckEnabled = meshAck && std::strcmp(meshAck, "1") == 0;
     }
     _cpuMeshLink->engine = this; // see CpuMeshLink; nulled in ~EngineWgpu
     s_self = this;
@@ -2941,6 +2943,41 @@ void EngineWgpu::FillGeometryMeshFacts(GeometryAllocationReport& report)
             totals.handles_inspected == handles.trackedAllocations && totals.duplicate_handles == 0 &&
             report.rendererMeshFactsUnknownMappings == 0 && report.rendererMeshFactsAbsentWithPersistentOwners == 0 &&
             report.rendererMeshFactsPresentScheduledRetired == 0;
+        if (_geometryMeshAckEnabled)
+        {
+            report.rendererMeshAckEnabled = true;
+            if (report.rendererMeshFactsComplete)
+            {
+                std::vector<WgrMeshHandleFact> ackFacts(ids.size());
+                WgrMeshHandleFactSummary ackTotals{};
+                WgrMeshSnapshotAck ack{};
+                const uint32_t state = wgr_request_mesh_snapshot_ack(_renderer, handles.epoch,
+                    WgrSlice<uint64_t>{ids.data(), static_cast<uint32_t>(ids.size())}, ackFacts.data(),
+                    static_cast<uint32_t>(ackFacts.size()), &ackTotals, &ack);
+                report.rendererMeshAckState = state;
+                bool sameCut = state == 1 && ack.state == state && ack.ticket && ack.epoch == handles.epoch &&
+                    ack.row_count == facts.size() && ackTotals.complete == 1 && ackTotals.flags == 0 &&
+                    ackTotals.handles_requested == totals.handles_requested &&
+                    ackTotals.handles_inspected == totals.handles_inspected && ackTotals.present == totals.present &&
+                    ackTotals.absent == totals.absent && ackTotals.invalid == 0 && ackTotals.duplicate_handles == 0 &&
+                    ackTotals.unique_vertex_bytes == totals.unique_vertex_bytes && ackTotals.unique_index_bytes == totals.unique_index_bytes;
+                for (size_t i = 0; sameCut && i < facts.size(); ++i)
+                    sameCut = ackFacts[i].mesh_handle == facts[i].mesh_handle && ackFacts[i].state == facts[i].state &&
+                        ackFacts[i].vertex_bytes == facts[i].vertex_bytes && ackFacts[i].index_bytes == facts[i].index_bytes && ackFacts[i].reserved == 0;
+                if (sameCut)
+                {
+                    report.rendererMeshAckValid = true;
+                    report.rendererMeshAckTicket = ack.ticket; report.rendererMeshAckEpoch = ack.epoch;
+                    report.rendererMeshAckPoolGeneration = ack.pool_generation;
+                    report.rendererMeshAckRequested = ackTotals.handles_requested;
+                    report.rendererMeshAckPresent = ackTotals.present; report.rendererMeshAckAbsent = ackTotals.absent;
+                    report.rendererMeshAckVertexBytes = ackTotals.unique_vertex_bytes; report.rendererMeshAckIndexBytes = ackTotals.unique_index_bytes;
+                    report.rendererMeshAckPoolLiveBytes = ack.pool_live_bytes;
+                    report.rendererMeshAckPoolCapacityBytes = ack.pool_capacity_bytes; report.rendererMeshAckPoolRetiredBytes = ack.pool_retired_bytes;
+                }
+                else if (ack.ticket) wgr_cancel_mesh_snapshot_ack(_renderer, ack.ticket);
+            }
+        }
     }
     catch (...)
     {
@@ -3187,7 +3224,6 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
             report.ineligibleEntriesSkipped = op.geometryReport->ineligibleEntriesSkipped;
             report.modelsRequested = static_cast<uint32_t>(op.geometryReport->models.size());
             report.unresolvedNames = op.geometryReport->unresolvedNames;
-            if (_geometryOwnerLedger) FillGeometryMeshFacts(report);
             std::vector<uint32_t> ids;
             ids.reserve(op.geometryReport->models.size());
             for (const auto& entry : op.geometryReport->models)
@@ -3243,7 +3279,10 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
             }
             // Publication happens at the existing end-frame snapshot boundary via
             // try-lock; even a diagnostic poll cannot make the renderer wait.
-            _geometryReportUnpublished = std::make_shared<const GeometryAllocationReport>(std::move(report));
+            _geometryReportUnpublished = std::make_shared<GeometryAllocationReport>(std::move(report));
+            // Allocate the publication packet before optional fence acquisition,
+            // so allocation failure cannot leak an accepted diagnostic ticket.
+            if (_geometryOwnerLedger) FillGeometryMeshFacts(*_geometryReportUnpublished);
             break;
         }
         case ResourceOp::LodDemandStart:
@@ -12099,7 +12138,35 @@ void EngineWgpu::PublishRendererStats()
             _lodDemandUnpublished.reset();
         }
     }
-    if (_geometryReportUnpublished)
+    bool geometryPacketReady = true;
+    if (_geometryReportUnpublished && _geometryReportUnpublished->rendererMeshAckTicket &&
+        (_geometryReportUnpublished->rendererMeshAckState == 1 || _geometryReportUnpublished->rendererMeshAckState == 2))
+    {
+        auto& report = *_geometryReportUnpublished;
+        WgrMeshSnapshotAck ack{};
+        WgrMeshHandleFactSummary totals{};
+        const uint32_t state = wgr_poll_mesh_snapshot_ack(_renderer, report.rendererMeshAckTicket,
+            nullptr, 0, &totals, &ack);
+        const bool sameCut = ack.ticket == report.rendererMeshAckTicket && ack.epoch == report.rendererMeshAckEpoch &&
+            ack.state == state && ack.row_count == report.rendererMeshAckRequested && totals.complete == 1 && totals.flags == 0 &&
+            totals.handles_requested == report.rendererMeshAckRequested && totals.handles_inspected == report.rendererMeshAckRequested &&
+            totals.present == report.rendererMeshAckPresent && totals.absent == report.rendererMeshAckAbsent &&
+            totals.invalid == 0 && totals.duplicate_handles == 0 &&
+            totals.unique_vertex_bytes == report.rendererMeshAckVertexBytes && totals.unique_index_bytes == report.rendererMeshAckIndexBytes &&
+            ack.pool_generation == report.rendererMeshAckPoolGeneration && ack.pool_live_bytes == report.rendererMeshAckPoolLiveBytes &&
+            ack.pool_capacity_bytes == report.rendererMeshAckPoolCapacityBytes && ack.pool_retired_bytes == report.rendererMeshAckPoolRetiredBytes;
+        // A failed cut validation is terminal even when the foreign state was
+        // pending; publication-lock retry must not re-poll a cancelled ticket.
+        report.rendererMeshAckState = sameCut ? state : 5;
+        if (sameCut && (state == 1 || state == 2)) geometryPacketReady = false;
+        else
+        {
+            report.rendererMeshAckValid = sameCut && state == 3 && ack.main_submission_serial != 0;
+            report.rendererMeshAckSubmission = ack.main_submission_serial;
+            wgr_cancel_mesh_snapshot_ack(_renderer, report.rendererMeshAckTicket);
+        }
+    }
+    if (_geometryReportUnpublished && geometryPacketReady)
     {
         std::unique_lock<std::mutex> lock(_geometryReportMutex, std::try_to_lock);
         if (lock.owns_lock())

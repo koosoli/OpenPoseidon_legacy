@@ -1838,6 +1838,16 @@ struct WgrMeshHandleFactSummary
 static_assert(sizeof(WgrMeshHandleFact) == 32);
 static_assert(sizeof(WgrMeshHandleFactSummary) == 48);
 static_assert(offsetof(WgrMeshHandleFactSummary, unique_vertex_bytes) == 32);
+// Optional bounded snapshot fence. ACK acknowledges preceding queue work only;
+// no device-memory release or future-reference/reclaimability guarantee.
+struct WgrMeshSnapshotAck
+{
+    uint64_t ticket, epoch, pool_generation, main_submission_serial;
+    uint64_t pool_live_bytes, pool_capacity_bytes, pool_retired_bytes;
+    uint32_t state, row_count;
+};
+static_assert(sizeof(WgrMeshSnapshotAck) == 64);
+static_assert(offsetof(WgrMeshSnapshotAck, state) == 56);
 struct WgrLodDemandRow { uint32_t model_id, lod_count, lod_mask, state; };
 struct WgrLodDemandReport
 {
@@ -2567,6 +2577,14 @@ extern "C"
     // submit commands or wait. Zero return invalid/unavailable; no freeing proof.
     WGR_API uint32_t wgr_get_mesh_handle_facts(WgrRenderer*, WgrSlice<uint64_t> handles,
         WgrMeshHandleFact* facts, uint32_t fact_capacity, WgrMeshHandleFactSummary* summary);
+    // States: disabled0,queued1,submitted2,acknowledged3,cancelled4,invalid5,busy6,unknown7.
+    // Request captures immutable actual records; next MAIN submission fences them.
+    // Poll accepts null facts/capacity0 for summary-only, never polls/waits itself.
+    WGR_API uint32_t wgr_request_mesh_snapshot_ack(WgrRenderer*, uint64_t epoch, WgrSlice<uint64_t> handles,
+        WgrMeshHandleFact* facts, uint32_t fact_capacity, WgrMeshHandleFactSummary* summary, WgrMeshSnapshotAck* ack);
+    WGR_API uint32_t wgr_poll_mesh_snapshot_ack(WgrRenderer*, uint64_t ticket,
+        WgrMeshHandleFact* facts, uint32_t fact_capacity, WgrMeshHandleFactSummary* summary, WgrMeshSnapshotAck* ack);
+    WGR_API uint32_t wgr_cancel_mesh_snapshot_ack(WgrRenderer*, uint64_t ticket);
     // Explicit owner-only diagnostics; no blocking GPU wait, no asset/ownership proof.
     WGR_API uint32_t wgr_start_lod_demand(WgrRenderer*, uint64_t epoch, WgrSlice<uint32_t> models, uint32_t frames);
     WGR_API uint32_t wgr_poll_lod_demand(WgrRenderer*, uint64_t epoch, WgrLodDemandReport*);

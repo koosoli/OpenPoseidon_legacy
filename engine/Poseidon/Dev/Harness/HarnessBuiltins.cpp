@@ -526,6 +526,15 @@ void RegisterScreenshot(HarnessServer& hs)
                 GEOMETRY_REPORT_FIELD(rendererMeshFactsPresentScheduledRetired); GEOMETRY_REPORT_FIELD(rendererMeshFactsAbsentScheduledRetired);
                 GEOMETRY_REPORT_FIELD(rendererMeshFactsAbsentWithPersistentOwners);
                 GEOMETRY_REPORT_FIELD(rendererMeshFactVertexBytes); GEOMETRY_REPORT_FIELD(rendererMeshFactIndexBytes);
+                cJSON_AddBoolToObject(result, "rendererMeshAckEnabled", report.rendererMeshAckEnabled);
+                cJSON_AddBoolToObject(result, "rendererMeshAckValid", report.rendererMeshAckValid);
+                cJSON_AddStringToObject(result, "rendererMeshAckScope", "Immutable mesh-record cut followed by completion of queue work preceding the labelled main submission; no future-reference, device-free or shared-pool reclamation proof");
+                GEOMETRY_REPORT_FIELD(rendererMeshAckTicket); GEOMETRY_REPORT_FIELD(rendererMeshAckEpoch);
+                GEOMETRY_REPORT_FIELD(rendererMeshAckPoolGeneration); GEOMETRY_REPORT_FIELD(rendererMeshAckSubmission);
+                GEOMETRY_REPORT_FIELD(rendererMeshAckRequested); GEOMETRY_REPORT_FIELD(rendererMeshAckPresent); GEOMETRY_REPORT_FIELD(rendererMeshAckAbsent);
+                GEOMETRY_REPORT_FIELD(rendererMeshAckVertexBytes); GEOMETRY_REPORT_FIELD(rendererMeshAckIndexBytes);
+                GEOMETRY_REPORT_FIELD(rendererMeshAckPoolLiveBytes); GEOMETRY_REPORT_FIELD(rendererMeshAckPoolCapacityBytes); GEOMETRY_REPORT_FIELD(rendererMeshAckPoolRetiredBytes);
+                GEOMETRY_REPORT_FIELD(rendererMeshAckState);
 #undef GEOMETRY_REPORT_FIELD
                 auto* rows = cJSON_AddArrayToObject(result, "rows");
                 for (const auto& row : report.rows) {

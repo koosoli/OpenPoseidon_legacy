@@ -1718,6 +1718,15 @@ class Engine : public IGraphicsEngine
           uint64_t rendererMeshFactsPresentScheduledRetired = 0, rendererMeshFactsAbsentScheduledRetired = 0;
           uint64_t rendererMeshFactsAbsentWithPersistentOwners = 0;
           uint64_t rendererMeshFactVertexBytes = 0, rendererMeshFactIndexBytes = 0;
+          // Immutable mesh cut + later completion of preceding main queue work.
+          // No future cached-reference/device-free/physical reclamation proof.
+          bool rendererMeshAckEnabled = false, rendererMeshAckValid = false;
+          uint64_t rendererMeshAckTicket = 0, rendererMeshAckEpoch = 0;
+          uint64_t rendererMeshAckPoolGeneration = 0, rendererMeshAckSubmission = 0;
+          uint64_t rendererMeshAckRequested = 0, rendererMeshAckPresent = 0, rendererMeshAckAbsent = 0;
+          uint64_t rendererMeshAckVertexBytes = 0, rendererMeshAckIndexBytes = 0;
+          uint64_t rendererMeshAckPoolLiveBytes = 0, rendererMeshAckPoolCapacityBytes = 0, rendererMeshAckPoolRetiredBytes = 0;
+          uint32_t rendererMeshAckState = 0;
           // Row/union scope: retained meshes only, excluding direct-only meshes,
           // standalone skin/bake buffers, driver alignment and textures/materials.
           // Global pool counters also include direct meshes. Not reclaimable bytes.

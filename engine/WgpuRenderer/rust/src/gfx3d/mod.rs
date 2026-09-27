@@ -5,6 +5,7 @@ use wgpu::util::DeviceExt;
 pub(crate) mod pool;
 mod allocation_report;
 mod mesh_facts;
+mod mesh_ack;
 mod lod_feedback;
 use pool::{GeometryPool, MeshAlloc};
 
@@ -3786,6 +3787,9 @@ impl NormalResolve {
 }
 
 pub struct Gfx3d {
+    // Explicit snapshot diagnostic only: no allocation/callback/poll when OFF.
+    mesh_ack_enabled: bool,
+    mesh_ack: Option<Box<mesh_ack::MeshAck>>,
     cameras: CameraGroup,
     conform: ConformGroup,
     gi: gi::GiProbes, // REN-GI-001
@@ -4719,6 +4723,8 @@ impl Gfx3d {
         let gtao_blur = GtaoBlur::new(device);
 
         Gfx3d {
+            mesh_ack_enabled: std::env::var("WGR_GEOMETRY_MESH_ACK").is_ok_and(|v| v == "1"),
+            mesh_ack: None,
             cameras,
             conform,
             gi,
@@ -5370,6 +5376,59 @@ impl Gfx3d {
         })
     }
 
+    pub(crate) fn request_mesh_snapshot_ack(&mut self, epoch: u64, handles: &[u64],
+        out: &mut [crate::ffi::WgrMeshHandleFact], summary: &mut crate::ffi::WgrMeshHandleFactSummary,
+        ack: &mut crate::ffi::WgrMeshSnapshotAck) -> u32 {
+        *ack = Default::default();
+        if !self.mesh_ack_enabled { return mesh_ack::DISABLED; }
+        if epoch == 0 || handles.len() > mesh_facts::MAX_HANDLES || out.len() < handles.len() {
+            ack.state = mesh_ack::INVALID; return ack.state;
+        }
+        let state = self.mesh_ack.get_or_insert_with(|| Box::new(mesh_ack::MeshAck::new()));
+        let available = state.can_request(epoch, handles.len());
+        if available != mesh_ack::QUEUED { ack.state = available; return available; }
+        let mut rows = Vec::new();
+        if rows.try_reserve_exact(handles.len()).is_err() { ack.state = mesh_ack::BUSY; return ack.state; }
+        rows.resize(handles.len(), crate::ffi::WgrMeshHandleFact::default());
+        // No owner yield or policy mutation between exact generational lookup,
+        // pool metadata and request publication. Pool values stay immutable.
+        let totals = self.mesh_handle_facts(handles, &mut rows);
+        let pool = self.pool.residency();
+        let meta = crate::ffi::WgrMeshSnapshotAck {
+            pool_generation: self.pool.generation(), pool_live_bytes: pool.live_bytes,
+            pool_capacity_bytes: pool.capacity_bytes, pool_retired_bytes: pool.retired_bytes,
+            ..Default::default()
+        };
+        let state = self.mesh_ack.as_mut().unwrap();
+        let ticket = match state.request(epoch, rows, totals, meta) {
+            Ok(ticket) => ticket, Err(status) => { ack.state = status; return status; }
+        };
+        let (rows, totals, meta) = state.snapshot(ticket).unwrap();
+        out[..rows.len()].copy_from_slice(rows); *summary = totals; *ack = meta;
+        meta.state
+    }
+
+    pub(crate) fn poll_mesh_snapshot_ack(&self, ticket: u64,
+        out: Option<&mut [crate::ffi::WgrMeshHandleFact]>,
+        summary: &mut crate::ffi::WgrMeshHandleFactSummary, ack: &mut crate::ffi::WgrMeshSnapshotAck) -> u32 {
+        *ack = Default::default();
+        if !self.mesh_ack_enabled { return mesh_ack::DISABLED; }
+        let Some(state) = &self.mesh_ack else { ack.state = mesh_ack::UNKNOWN; return ack.state; };
+        let (rows, totals, meta) = match state.snapshot(ticket) {
+            Ok(snapshot) => snapshot, Err(status) => { ack.state = status; return status; }
+        };
+        if let Some(out) = out {
+            if out.len() < rows.len() { ack.state = mesh_ack::INVALID; return ack.state; }
+            out[..rows.len()].copy_from_slice(rows);
+        }
+        *summary = totals; *ack = meta; meta.state
+    }
+
+    pub(crate) fn cancel_mesh_snapshot_ack(&mut self, ticket: u64) -> u32 {
+        if !self.mesh_ack_enabled { return mesh_ack::DISABLED; }
+        self.mesh_ack.as_mut().map_or(mesh_ack::UNKNOWN, |state| state.cancel(ticket))
+    }
+
     pub(crate) fn geometry_allocation_report(&self, ids: &[u32], max_rows: usize, max_visits: usize)
         -> (Vec<crate::ffi::WgrGeometryAllocationRow>, crate::ffi::WgrGeometryAllocationSummary) {
         let models: Vec<_> = ids.iter().map(|&id| (id, self.cull.allocation_lods(id))).collect();
@@ -5391,6 +5450,14 @@ impl Gfx3d {
     }
 
     pub fn frame_submitted(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
+        // Called immediately after the MAIN queue submission. Earlier same-queue
+        // reflection work is covered too. This is not GPU/device memory release.
+        if let Some(state) = &mut self.mesh_ack {
+            state.main_submitted(|signal| queue.on_submitted_work_done(move || signal.complete()));
+            if state.completion_pending() {
+                let _ = device.poll(wgpu::PollType::Poll); // Never wait.
+            }
+        }
         // REN-RES-002: the pool may reallocate DOWN here. A shrink moves the pool buffers
         // exactly as a growth does, so it invalidates the same cache — the skin-bake binds
         // hold the vbuf at binding 0. mesh_create already does this for the growth case.

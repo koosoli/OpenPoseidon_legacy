@@ -4,10 +4,12 @@ param(
     [switch]$DiagnosticOnly,
     [switch]$LodDemandReport,
     [switch]$OwnerLedger,
+    [switch]$MeshAck,
     [string]$Label = 'dayz-resource-convergence',
     [string]$GameDir = 'D:\SteamLibrary\steamapps\common\ARMA Cold War Assault'
 )
 $ErrorActionPreference = 'Stop'
+if ($MeshAck) { $OwnerLedger = $true }
 if ($DiagnosticOnly -or $LodDemandReport -or $OwnerLedger) { $AllocationReport = $true }
 if (!$env:LOCK_OWNER) {
     $shellName = if ($PSVersionTable.PSEdition -eq 'Core') { 'pwsh.exe' } else { 'powershell.exe' }
@@ -20,6 +22,7 @@ if (!$env:LOCK_OWNER) {
     if ($DiagnosticOnly) { $lockArgs += '-DiagnosticOnly' }
     if ($LodDemandReport) { $lockArgs += '-LodDemandReport' }
     if ($OwnerLedger) { $lockArgs += '-OwnerLedger' }
+    if ($MeshAck) { $lockArgs += '-MeshAck' }
     $env:LOCK_OWNER = 'DayZ resource convergence'
     try {
         & 'C:\Program Files\Git\bin\bash.exe' @lockArgs
@@ -57,6 +60,7 @@ $environment = @{
 }
 if ($LodDemandReport) { $environment.WGR_GEOMETRY_LOD_FEEDBACK = '1' }
 if ($OwnerLedger) { $environment.WGR_GEOMETRY_OWNER_LEDGER = '1' }
+if ($MeshAck) { $environment.WGR_GEOMETRY_MESH_ACK = '1' }
 # Remove inherited experiments, then restore the caller's environment on exit.
 # Ordinary terrain paging remains the installed engine default.
 $clearNames = @((Get-ChildItem Env: | Where-Object {
@@ -72,6 +76,7 @@ try {
     $listener.Start(); $port = $listener.LocalEndpoint.Port; $listener.Stop()
     @{
         scriptSha256 = (Get-FileHash $PSCommandPath).Hash; head = (& git -C $root rev-parse HEAD)
+        meshAck = [bool]$MeshAck
         installed = (Get-Content (Join-Path $GameDir 'DEPLOYED-FROM.txt')); hashes = @(Get-FileHash $exe, $dll)
         corpus = 'DayZ'; pose = @($baseX, $baseZ, $baseY, $azimuth, $elevation); routeX = $route; cycles = $(if ($DiagnosticOnly) { 0 } else { 3 })
         environment = $environment; driverSampled = [bool]$SampleDriverMemory
@@ -229,10 +234,26 @@ try {
                     $report.rendererMeshFactsAbsentWithPersistentOwners -gt $report.rendererMeshFactsAbsent) {
                     throw 'Renderer presence and persistent owner joins disagree'
                 }
+                if ($MeshAck) {
+                    if (!$report.rendererMeshAckEnabled -or !$report.rendererMeshAckValid -or $report.rendererMeshAckState -ne 3 -or
+                        $report.rendererMeshAckTicket -lt 1 -or $report.rendererMeshAckEpoch -ne $report.rendererMeshFactEpoch -or
+                        $report.rendererMeshAckSubmission -lt 1 -or $report.rendererMeshAckPoolGeneration -lt 1 -or
+                        $report.rendererMeshAckRequested -ne $report.rendererMeshFactsRequested -or
+                        $report.rendererMeshAckPresent -ne $report.rendererMeshFactsPresent -or $report.rendererMeshAckAbsent -ne $report.rendererMeshFactsAbsent -or
+                        $report.rendererMeshAckVertexBytes -ne $report.rendererMeshFactVertexBytes -or $report.rendererMeshAckIndexBytes -ne $report.rendererMeshFactIndexBytes -or
+                        ($report.rendererMeshAckVertexBytes + $report.rendererMeshAckIndexBytes) -gt $report.rendererMeshAckPoolLiveBytes) {
+                        throw 'Actual immutable mesh cut did not receive its bounded asynchronous queue acknowledgement'
+                    }
+                } elseif ($report.rendererMeshAckEnabled -or $report.rendererMeshAckTicket -ne 0 -or $report.rendererMeshAckState -ne 0) {
+                    throw 'Owner-only run unexpectedly enabled queue acknowledgement'
+                }
             } elseif ($report.persistentAttributionEnabled) {
                 throw 'Default diagnostic unexpectedly enabled persistent owner attribution'
             } elseif ($report.rendererMeshFactsEnabled -or $report.rendererMeshFactCalls -ne 0 -or $report.rendererMeshFactsRequested -ne 0) {
                 throw 'Default-off run unexpectedly queried renderer handle facts'
+            }
+            if (!$MeshAck -and ($report.rendererMeshAckEnabled -or $report.rendererMeshAckTicket -ne 0 -or $report.rendererMeshAckState -ne 0)) {
+                throw 'Default-off run unexpectedly acquired a mesh queue acknowledgement ticket'
             }
             if ($report.registryEntriesVisited -gt $report.maxModels -or
                 ($report.modelsRequested + $report.ineligibleEntriesSkipped) -ne $report.registryEntriesVisited) { throw 'Registry sampling and negative-cache accounting disagree' }
@@ -295,7 +316,7 @@ try {
     @{passed = ($converged -or $DiagnosticOnly); convergenceMeasured = !$DiagnosticOnly; status = $status; initialCold = $initialCold; initialQuiet = $initialQuiet
         returns = $returns; comparison = $comparison; lateQuiet = $lateQuiet; retiredClear = $retiredClear
         processScope = 'Diagnostic private/RSS samples retained; GPU convergence does not establish process-memory convergence'
-        allocationReport = $allocation; lodDemandMeasured = [bool]$LodDemandReport; ownerLedgerMeasured = [bool]$OwnerLedger
+        allocationReport = $allocation; lodDemandMeasured = [bool]$LodDemandReport; ownerLedgerMeasured = [bool]$OwnerLedger; meshAckMeasured = [bool]$MeshAck
     } | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $out 'result.json')
     Write-Output "Resource convergence evidence: $out ($status)"
     if (!$converged -and !$DiagnosticOnly) { throw "Convergence not established: $status (see result.json and raw samples)" }

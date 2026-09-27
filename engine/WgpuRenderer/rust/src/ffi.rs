@@ -3610,6 +3610,25 @@ pub struct WgrMeshHandleFactSummary {
     pub unique_index_bytes: u64,
 }
 
+/// Immutable owner-cut metadata plus asynchronous queue barrier state. Epoch is
+/// the caller's diagnostic owner epoch; pool generation is the actual pool epoch.
+/// Acknowledged covers preceding queue work, NOT device free or future references.
+/// States: Disabled0, Queued1, Submitted2, Acknowledged3, Cancelled4,
+/// Invalid5, Busy6, Unknown7. New optional type; existing ABI14 types unchanged.
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct WgrMeshSnapshotAck {
+    pub ticket: u64,
+    pub epoch: u64,
+    pub pool_generation: u64,
+    pub main_submission_serial: u64,
+    pub pool_live_bytes: u64,
+    pub pool_capacity_bytes: u64,
+    pub pool_retired_bytes: u64,
+    pub state: u32,
+    pub row_count: u32,
+}
+
 /// Monotonic renderer handles only; not an asset identity or ownership proof.
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
@@ -3717,6 +3736,68 @@ pub unsafe extern "C" fn wgr_get_mesh_handle_facts(
         unsafe { *summary = totals; }
         1
     })).unwrap_or(0)
+}
+
+/// Request a bounded immutable mesh snapshot and a barrier at the NEXT main
+/// submission. Direct state return; errors leave rows/summary untouched and set
+/// ack.state when ack is valid. Exact startup WGR_GEOMETRY_MESH_ACK=1 only.
+/// # Safety
+/// Exclusive renderer owner. All declared inputs/outputs are valid disjoint
+/// allocations; non-null summary/ack required. No queue waits or lifetime policy.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_request_mesh_snapshot_ack(
+    renderer: *mut WgrRenderer, epoch: u64, handles: WgrSlice<u64>,
+    facts: *mut WgrMeshHandleFact, fact_capacity: u32,
+    summary: *mut WgrMeshHandleFactSummary, ack: *mut WgrMeshSnapshotAck,
+) -> u32 {
+    if !ack.is_null() { unsafe { *ack = WgrMeshSnapshotAck { state: 5, ..Default::default() }; } }
+    if renderer.is_null() || summary.is_null() || ack.is_null() || epoch == 0 ||
+        handles.len > 8192 || fact_capacity > 8192 || fact_capacity < handles.len ||
+        (handles.len != 0 && (handles.data.is_null() || facts.is_null())) { return 5; }
+    catch_unwind(AssertUnwindSafe(|| {
+        let ids = if handles.len == 0 { &[][..] } else {
+            unsafe { std::slice::from_raw_parts(handles.data, handles.len as usize) }
+        };
+        let out = if handles.len == 0 { &mut [][..] } else {
+            unsafe { std::slice::from_raw_parts_mut(facts, handles.len as usize) }
+        };
+        unsafe { &mut *renderer }.gfx3d.request_mesh_snapshot_ack(epoch, ids, out,
+            unsafe { &mut *summary }, unsafe { &mut *ack })
+    })).unwrap_or_else(|_| { unsafe { *ack = WgrMeshSnapshotAck { state: 5, ..Default::default() }; } 5 })
+}
+
+/// Poll only the immutable captured snapshot and callback state. No fresh mesh
+/// lookup, submission, device poll or wait. facts=null/capacity0 means summary-only.
+/// # Safety
+/// Same exclusive owner/disjoint-output requirements as request. When supplied,
+/// facts must have capacity for every captured row; no partial output is returned.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_poll_mesh_snapshot_ack(
+    renderer: *mut WgrRenderer, ticket: u64, facts: *mut WgrMeshHandleFact,
+    fact_capacity: u32, summary: *mut WgrMeshHandleFactSummary, ack: *mut WgrMeshSnapshotAck,
+) -> u32 {
+    if !ack.is_null() { unsafe { *ack = WgrMeshSnapshotAck { state: 5, ..Default::default() }; } }
+    if renderer.is_null() || summary.is_null() || ack.is_null() || ticket == 0 ||
+        fact_capacity > 8192 || (facts.is_null() && fact_capacity != 0) { return 5; }
+    catch_unwind(AssertUnwindSafe(|| {
+        let out = if facts.is_null() && fact_capacity == 0 { None } else {
+            Some(if fact_capacity == 0 { &mut [][..] } else {
+                unsafe { std::slice::from_raw_parts_mut(facts, fact_capacity as usize) }
+            })
+        };
+        unsafe { &*renderer }.gfx3d.poll_mesh_snapshot_ack(ticket, out,
+            unsafe { &mut *summary }, unsafe { &mut *ack })
+    })).unwrap_or_else(|_| { unsafe { *ack = WgrMeshSnapshotAck { state: 5, ..Default::default() }; } 5 })
+}
+
+/// Release/cancel a ticket. A late callback only changes its detached atomic,
+/// never a newer ticket. Last three cancelled IDs remain distinguishable.
+/// # Safety
+/// Renderer is exclusively owner-accessed; no callback reentry.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_cancel_mesh_snapshot_ack(renderer: *mut WgrRenderer, ticket: u64) -> u32 {
+    if renderer.is_null() || ticket == 0 { return 5; }
+    catch_unwind(AssertUnwindSafe(|| unsafe { &mut *renderer }.gfx3d.cancel_mesh_snapshot_ack(ticket))).unwrap_or(5)
 }
 
 /// Fill `out` with the latest grass instance counts. Returns 1 on success, 0 when
