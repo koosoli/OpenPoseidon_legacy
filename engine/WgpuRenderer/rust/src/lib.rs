@@ -29,6 +29,9 @@ mod upscaler;
 // REN-THR-009 — the Send + Sync upload surface for CPU-path meshes.
 mod uploader;
 mod water;
+// TW-WATER W1 — the selectable water backend (Current OP / Tidewater Native).
+mod water_backend;
+mod water_tw;
 mod water_visibility;
 
 use std::sync::{Arc, Mutex};
@@ -58,6 +61,7 @@ use crate::textures::{SharedTextures, TextureData, TextureFormat};
 use crate::tonemap::Tonemap;
 use crate::underwater::Underwater;
 use crate::water::Water;
+use crate::water_backend::WaterBackend;
 use crate::water_visibility::WaterVisibility;
 
 // Offscreen HDR scene target format (see docs/hdr-pipeline-plan.md §0.2). Alpha kept
@@ -789,7 +793,9 @@ pub struct Renderer {
     grass: Grass,
     // FAR INSTANCE TIER — one proxy per authored placement, beyond where real objects live.
     far: Far,
-    water: Water,
+    // TW-WATER W1 — the active water backend. Owns the surface AND the underwater compositor
+    // (Current OP: today's `Water` + `Underwater`, unchanged); see water_backend.rs.
+    water: WaterBackend,
     // Actual depth-tested water coverage from the previous completed frame. This corrects the
     // world-sized sea quadtree's conservative CPU bounds before paying for a planar reflection.
     water_visibility: WaterVisibility,
@@ -886,7 +892,6 @@ pub struct Renderer {
     // and offscreen targets are built against it.
     sample_count: u32,
     tonemap: Option<Tonemap>,
-    underwater: Underwater,
     // Scene-wide effect scratch. HDR writes here before the HDR post chain; LDR uses
     // it as the scene target only on submerged frames, then composites to swapchain.
     underwater_target: Option<(wgpu::Texture, wgpu::TextureView)>,
@@ -1824,6 +1829,14 @@ impl Renderer {
         }
         let tonemap = hdr_enabled.then(|| Tonemap::new(&device, config.format));
         let underwater = Underwater::new(&device, color_format, &mut composer, fft_storage_supported);
+        let water = WaterBackend::new_current_op(
+            water,
+            underwater,
+            gfx3d.camera_layout(),
+            color_format,
+            sample_count,
+            fft_storage_supported,
+        );
         let bloom = hdr_enabled.then(|| Bloom::new(&device, HDR_FORMAT));
         // God rays composite into the HDR scene target, so like bloom they only exist on the
         // HDR path. Default ON; `WGR_GODRAYS=0` ablates it for an A/B capture.
@@ -1996,7 +2009,6 @@ impl Renderer {
             last_upscaler: 0,
             sample_count,
             tonemap,
-            underwater,
             underwater_target: None,
             dof: None,
             dof_target: None,
@@ -2620,9 +2632,8 @@ impl Renderer {
             // rides this bracket until a dedicated caustics pass exists.
             self.gpu_timers
                 .begin(encoder, TimerRegion::UnderwaterComposite);
-            let displacement = self.water.underwater_displacement_view();
-            self.underwater
-                .render(&self.device, encoder, source, depth, target, &displacement);
+            self.water
+                .render_underwater(&self.device, encoder, source, depth, target);
             self.gpu_timers
                 .end(encoder, TimerRegion::UnderwaterComposite);
             post_source_tex = self.underwater_target.as_ref().map(|(t, _)| t.clone());
@@ -3533,6 +3544,10 @@ impl Renderer {
         // REN-THR-009 — before anything this frame reads `bake_bind_cache` or allocates
         // from the pool. This is the frame boundary a deferred mesh destroy waits for.
         self.drain_deferred_mesh_destroys();
+        // TW-WATER W1 — a Water-tab backend change takes effect here, at the frame boundary,
+        // before anything this frame reads the water surface.
+        self.water
+            .apply_pending_switch(&self.device, &self.queue, &self.log);
         let screen = glam::Vec2::new(self.config.width as f32, self.config.height as f32);
         self.gfx2d
             .prepare(&self.device, &self.queue, screen, fog, verts);
@@ -3685,6 +3700,7 @@ impl Renderer {
             && !ablate.planar
             && planar_fade > 0.0
             && !self.water.low_quality()
+            && self.water.uses_planar_reflection()
             && !water_batches.is_empty()
             && cameras
                 .get(water_camera)
@@ -3876,7 +3892,12 @@ impl Renderer {
         );
         self.terrain
             .prepare(&self.device, &self.queue, terrain_nodes);
-        self.water.prepare(&self.device, &self.queue, water_nodes);
+        self.water.prepare(
+            &self.device,
+            &self.queue,
+            water_nodes,
+            prepared_cameras.get(water_camera),
+        );
         // GPU-driven rendering (Stage 3): upload the retained scene + this frame's cull
         // params from the main scene camera (the terrain camera, else the first 3D draw's).
         // No-op when disabled; inert until C++ registers a scene.
@@ -4801,9 +4822,13 @@ impl Renderer {
         // The underwater volume is genuinely view-local work, so keep it completely
         // dormant above water. The FFT has already evolved and both shadow systems have
         // already rendered on this encoder; wgpu inserts the required compute-read barriers.
-        if let Some(time) = underwater_time {
+        if let (Some(time), Some(underwater), Some((fft_dynamics, fft_auxiliary))) = (
+            underwater_time,
+            self.water.underwater(),
+            self.water.underwater_fft_views(),
+        ) {
             let view = self.underwater_view;
-            self.underwater.upload(
+            underwater.upload(
                 &self.queue,
                 time,
                 view.cam_above,
@@ -4828,10 +4853,9 @@ impl Renderer {
                 &shadow_mapping,
                 &view.camera_shadow,
             );
-            let (fft_dynamics, fft_auxiliary) = self.water.underwater_fft_views();
             self.gpu_timers
                 .begin(&mut encoder, TimerRegion::UnderwaterFroxel);
-            self.underwater.render_froxel(
+            underwater.render_froxel(
                 &self.device,
                 &mut encoder,
                 &shadow_mask_view,
@@ -4840,7 +4864,7 @@ impl Renderer {
             self.gpu_timers
                 .end(&mut encoder, TimerRegion::UnderwaterFroxel);
             self.gpu_timers.begin(&mut encoder, TimerRegion::Caustics);
-            self.underwater.render_caustics(
+            underwater.render_caustics(
                 &self.device,
                 &mut encoder,
                 &fft_dynamics,
@@ -6058,15 +6082,8 @@ impl Renderer {
                     .expect("underwater depth target");
                 self.gpu_timers
                     .begin(&mut encoder, TimerRegion::UnderwaterComposite);
-                let displacement = self.water.underwater_displacement_view();
-                self.underwater.render(
-                    &self.device,
-                    &mut encoder,
-                    &scene_view,
-                    depth,
-                    &color,
-                    &displacement,
-                );
+                self.water
+                    .render_underwater(&self.device, &mut encoder, &scene_view, depth, &color);
                 self.gpu_timers
                     .end(&mut encoder, TimerRegion::UnderwaterComposite);
                 resolved = true;
@@ -6098,15 +6115,8 @@ impl Renderer {
                 .expect("underwater depth target");
             self.gpu_timers
                 .begin(&mut encoder, TimerRegion::UnderwaterComposite);
-            let displacement = self.water.underwater_displacement_view();
-            self.underwater.render(
-                &self.device,
-                &mut encoder,
-                &scene_view,
-                depth,
-                &color,
-                &displacement,
-            );
+            self.water
+                .render_underwater(&self.device, &mut encoder, &scene_view, depth, &color);
             self.gpu_timers
                 .end(&mut encoder, TimerRegion::UnderwaterComposite);
         }

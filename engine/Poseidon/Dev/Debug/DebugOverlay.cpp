@@ -6513,6 +6513,39 @@ void DrawWaterTab()
     bool changed = false;
     changed |= ResetToDefaultsButton(s);
 
+    // TW-WATER W1 — water backend selector (Tidewater Water Plan v5 §4.3). Current OP is the
+    // default and stays so until the owner accepts Tidewater Native (plan §9). Saved per map in the
+    // water profile; WGR_WATER_BACKEND=0|1 in the environment overrides it for a whole session.
+    {
+        static constexpr bool kTidewaterPorted = false; // W2 lands the open sea
+        const char* backendNames[] = {"Current OP", "Tidewater Native"};
+        const int current = (s.waterBackend == 1) ? 1 : 0;
+        if (Dev::BeginCombo("Water backend", backendNames[current]))
+        {
+            if (ImGui::Selectable(backendNames[0], current == 0) && current != 0)
+            {
+                s.waterBackend = 0;
+                changed = true;
+            }
+            const int tidewaterFlags = kTidewaterPorted ? 0 : ImGuiSelectableFlags_Disabled;
+            if (ImGui::Selectable(kTidewaterPorted ? backendNames[1] : "Tidewater Native (not ported yet)",
+                                  current == 1, tidewaterFlags) &&
+                current != 1)
+            {
+                s.waterBackend = 1;
+                changed = true;
+            }
+            ImGui::EndCombo();
+        }
+        Dev::PanelTooltip("Which water implementation draws. Current OP is today's FFT/CDLOD water and the "
+                          "default. Tidewater Native is the port of dgreenheck/tidewater; it replaces the water "
+                          "in its mode (no layering) and switching takes effect on the next frame.");
+        if (const char* env = std::getenv("WGR_WATER_BACKEND"); env != nullptr && (env[0] == '0' || env[0] == '1'))
+        {
+            Dev::PanelHelp("WGR_WATER_BACKEND=%c overrides this selection for the session.", env[0]);
+        }
+    }
+
     changed |= Dev::Checkbox("Enabled", &s.enabled);
     Dev::PanelTooltip("Off = draw no water surface (the seabed shows through), for A/B");
 
