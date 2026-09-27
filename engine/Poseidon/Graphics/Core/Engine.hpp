@@ -2482,8 +2482,11 @@ class Engine : public IGraphicsEngine
         // FFT/CDLOD water below, and the default), 1 = Tidewater Native (Tidewater Water Plan v5).
         // Saved in the water profile ("backend" group); a profile without it means 0. The
         // renderer switches at a frame boundary. WGR_WATER_BACKEND=0|1 overrides it for a session.
-        // Only the owner flips the default (plan §9), so this stays 0.
-        int waterBackend = 0;
+        // DEC'S BRANCH ONLY: Tidewater Native is the default here, on Dec's request, so it can be
+        // seen without touching the Water tab. Plan §9 reserves this flip for the owner: revert
+        // this one commit (back to 0) before anything from dec/tidewater-* reaches trunk.
+        // A saved profile's "backend" group still wins; a profile without one gets this default.
+        int waterBackend = 1;
         // TW-WATER — the Tidewater Native parameter group (read only while waterBackend == 1).
         // Defaults are Tidewater's own (dgreenheck/tidewater @4811ba48). Wind speed and heading are
         // not here: like Current OP they come from the weather (or the reference sea). Shipped to
