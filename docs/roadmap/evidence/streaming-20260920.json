@@ -12535,6 +12535,252 @@
         "route-frame-ms.json": "209e562397260d2b74292cbeeaea9eca64e3c0a6096afd7bd0ddff744bc82fcd",
         "samples.jsonl": "5c88dcf7849bba9b02e66ef536ffcb57cee4c2aeb43c571dd919f55ef536a7fe"
       }
+    },
+    {
+      "run": "archive-source-bindings-actual-20260927-disabled-20260927-063332",
+      "classification": "PASS clean exit0; opt-in actual initialized-PAA source-binding prerequisite only",
+      "provenance": {
+        "environment": {
+          "WGR_ADAPTIVE_TEXTURE_DETAIL": "0",
+          "WGR_NATIVE_DDS_BC3_ONLY": "0",
+          "WGR_TEXTURE_STREAM_STATS": "0",
+          "POSEIDON_MODEL_DDC": "0",
+          "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\archive-source-bindings-actual-20260927-disabled-20260927-063332\\user",
+          "WGR_OBJECT_STREAM_TEST_BUDGET": "1",
+          "WGR_OBJECT_STREAM_WARM_TEXTURES": "1",
+          "WGR_OBJECT_STREAM_MAX_OBJECTS": "20000",
+          "WGR_SKY_VOLUME_INCREMENTAL": "1",
+          "WGR_OBJECT_STREAM_PBO": "1",
+          "WGR_OBJECT_STREAM_GPU_BUDGET": "0",
+          "WGR_SIMULATION_RESIDENCY": "0",
+          "WGR_GEO_POOL_GROWTH": "2.0",
+          "WGR_GEO_POOL_PRESSURE_GROWTH": "0",
+          "WGR_NATIVE_DDS_PREPARE": "0",
+          "WGR_OBJECT_STREAM_PBO_TEXTURES": "0",
+          "WGR_LOD_GOVERNOR_RANGE": "1",
+          "WGR_SIMULATION_POSITIVE_COLD": "0"
+        },
+        "world": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\packages\\dayz-compat\\world\\chernarusplus\\chernarusplus.wrp",
+        "routeX": [
+          5804.58,
+          5904.58,
+          6004.58,
+          6104.58,
+          6004.58,
+          5904.58,
+          5804.58,
+          5704.58,
+          5704.58,
+          5704.58,
+          5704.58
+        ],
+        "paaPreparationDiagnostics": false,
+        "measurementScope": "Bounded engine16384-frame route capture; screening only, no FPS acceptance, vanilla parity or full cold-cache proof",
+        "paaLzoReplay": false,
+        "viewDistance": 2000,
+        "mode": "Disabled",
+        "registrationQuota": false,
+        "poseHoldSeconds": 3,
+        "clearedEnvironmentNames": [],
+        "paaPreparationInflight": false,
+        "packedTextures": false,
+        "height": 720,
+        "processScope": "Owned PID private/RSS samples; sparse owner-pump values are observations, not percentiles",
+        "routeScope": "Eight convergence400m out/return poses plus three stationary recovery holds; one process per invocation",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "DC331870863D6FD61D0FA2788B9E01FF208A3390B53CBB68F8167189C23E0789",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "DDDEE19B75F816214FB359A845A059E6120C9950B4B8649368D5E45BC94E643A",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "head": "267d590bdd64c06ede8de82006f81150d9d15e95",
+        "pose": [
+          5704.58,
+          2523.37,
+          73.74,
+          260.9,
+          -3.8
+        ],
+        "installed": "codex/streaming-residency 267d590b 2026-09-27_06:33 deploy-ps1",
+        "width": 1280,
+        "archiveSourceBindings": true,
+        "scriptSha256": "FB98717D2C66DC257D3B12BCC4CF2E16BC0189CE816A2B7BA48AAA671E4AC39A",
+        "fpsCap": 60,
+        "msaaSamples": 4
+      },
+      "summary": {
+        "passed": true,
+        "performanceAccepted": false,
+        "n": 820,
+        "meanMs": 42.38485487804881,
+        "medianMs": 23.445999999999998,
+        "p95Ms": 139.518,
+        "p99Ms": 345.758,
+        "maxMs": 922.284,
+        "quantiles": "nearest-rank ceil(n*p)-1; usual median",
+        "sourceBindingProof": {
+          "enabled": true,
+          "liveBindings": 256,
+          "knownCppBytes": 117728,
+          "capBindings": 256,
+          "capBytes": 2097152,
+          "wrappedReads": 256,
+          "initRetains": 256,
+          "captureRefused": 0,
+          "capacityRefused": 6107,
+          "allocationRefused": 0,
+          "scope": "Mapped raw PAA bytes and their initialized headers only; shared retained C++ metadata charge, excludes kernel/allocator/RSS cost; no warm worker jobs or upload-readiness proof",
+          "ok": true
+        },
+        "resident": 19923,
+        "required": 0,
+        "geometry": 711824472,
+        "texture": 2763204596,
+        "textureCount": 2503
+      },
+      "limits": "Actual mapped PAA bytes/header-init source capture only; no warm-only worker jobs, upload readiness, work moved or speed feature proven. Bound256/2MiB tracks retained known C++ metadata, not kernel/allocator/RSS. Source267 still opens temporary fresh leases before post-cap Create refusal; next saturated fast-refusal/current mounted-member match under investigation unbuilt/notincluded. Root settledON localPOI compatible without obvious missing assets, not fullmap/no-regression proof. OFF adds no captures/leases/wrapper allocations/jobs, but nullsharedbranch and16-byte sourcefield remain; not literally zerofootprint. WholeplanOPEN/defaultReady/performanceAcceptedfalse/defaultsOFF.",
+      "sha256": {
+        "archive-source-binding-proof.json": "1ec543fab4d6b02c6d41ac6fb7ce2127df45af86414268ac9e5bfd43a9151b85",
+        "engine.log": "859efd19070b1d9e28b96ce59a0cab8d912590f711f984ef66c06703589c6c35",
+        "harness.jsonl": "654004ee4d938e6381848fd68f40100e8c99a0cf1b481f156fb0f4a10f1e82ee",
+        "paa-attempt-proof.json": "2134cacd239b8f23d424a83edcaa7bd25b27b66c0125f619cddaf2b31c561f5e",
+        "paa-inflight-proof.json": "67cbc50c4b7c943b9105e753e8df89694cee87b1531a76fe4f10b98d982ae000",
+        "provenance.json": "a3b8b86323aae6be8b8bb504122dc276b6a1fd1b9b0853bea712febacc4b3e2c",
+        "registration-quota-proof.json": "ec425323ea26441bc944ff71f7623dab5d94e5c521c3dbe468f9647409255e28",
+        "result.json": "3bb337fab29d53ad71f7d042487f6c27be146111ab74cd7e5fb134065173992e",
+        "returned-settled.png": "aab3966ed6de66a8f0a7a65e70bcec0f80c3dc2092fafc4c415e584da8e7848d",
+        "route-frame-ms.json": "acfb511b20de7d19edc4d4695a3e28777a5f6398088510bfa34e47df6ad1ba08",
+        "samples.jsonl": "17f9074482670b6ba87b3b50eb86f011eef53eb93db8e3055747c0e4960f8033"
+      }
+    },
+    {
+      "run": "archive-source-bindings-default-20260927-disabled-20260927-063544",
+      "classification": "PASS clean exit0; source binding all-new-flagsOFF default compatibility",
+      "provenance": {
+        "clearedEnvironmentNames": [],
+        "packedTextures": false,
+        "head": "267d590bdd64c06ede8de82006f81150d9d15e95",
+        "fpsCap": 60,
+        "registrationQuota": false,
+        "poseHoldSeconds": 3,
+        "routeX": [
+          5804.58,
+          5904.58,
+          6004.58,
+          6104.58,
+          6004.58,
+          5904.58,
+          5804.58,
+          5704.58,
+          5704.58,
+          5704.58,
+          5704.58
+        ],
+        "msaaSamples": 4,
+        "paaPreparationInflight": false,
+        "mode": "Disabled",
+        "width": 1280,
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "DC331870863D6FD61D0FA2788B9E01FF208A3390B53CBB68F8167189C23E0789",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "DDDEE19B75F816214FB359A845A059E6120C9950B4B8649368D5E45BC94E643A",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "routeScope": "Eight convergence400m out/return poses plus three stationary recovery holds; one process per invocation",
+        "archiveSourceBindings": false,
+        "installed": "codex/streaming-residency 267d590b 2026-09-27_06:33 deploy-ps1",
+        "viewDistance": 2000,
+        "paaPreparationDiagnostics": false,
+        "processScope": "Owned PID private/RSS samples; sparse owner-pump values are observations, not percentiles",
+        "world": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\packages\\dayz-compat\\world\\chernarusplus\\chernarusplus.wrp",
+        "scriptSha256": "FB98717D2C66DC257D3B12BCC4CF2E16BC0189CE816A2B7BA48AAA671E4AC39A",
+        "environment": {
+          "WGR_NATIVE_DDS_PREPARE": "0",
+          "WGR_ADAPTIVE_TEXTURE_DETAIL": "0",
+          "WGR_GEO_POOL_GROWTH": "2.0",
+          "WGR_OBJECT_STREAM_MAX_OBJECTS": "20000",
+          "WGR_SIMULATION_RESIDENCY": "0",
+          "POSEIDON_MODEL_DDC": "0",
+          "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\archive-source-bindings-default-20260927-disabled-20260927-063544\\user",
+          "WGR_NATIVE_DDS_BC3_ONLY": "0",
+          "WGR_TEXTURE_STREAM_STATS": "0",
+          "WGR_SKY_VOLUME_INCREMENTAL": "1",
+          "WGR_LOD_GOVERNOR_RANGE": "1",
+          "WGR_GEO_POOL_PRESSURE_GROWTH": "0",
+          "WGR_SIMULATION_POSITIVE_COLD": "0",
+          "WGR_OBJECT_STREAM_PBO": "1",
+          "WGR_OBJECT_STREAM_GPU_BUDGET": "0",
+          "WGR_OBJECT_STREAM_TEST_BUDGET": "1",
+          "WGR_OBJECT_STREAM_PBO_TEXTURES": "0"
+        },
+        "height": 720,
+        "pose": [
+          5704.58,
+          2523.37,
+          73.74,
+          260.9,
+          -3.8
+        ],
+        "measurementScope": "Bounded engine16384-frame route capture; screening only, no FPS acceptance, vanilla parity or full cold-cache proof",
+        "paaLzoReplay": false
+      },
+      "summary": {
+        "passed": true,
+        "performanceAccepted": false,
+        "n": 812,
+        "meanMs": 43.71181157635465,
+        "medianMs": 23.0455,
+        "p95Ms": 128.351,
+        "p99Ms": 351.03,
+        "maxMs": 930.685,
+        "quantiles": "nearest-rank ceil(n*p)-1; usual median",
+        "dropped": 0,
+        "sourceBindingProof": {
+          "enabled": false,
+          "liveBindings": 0,
+          "knownCppBytes": 0,
+          "capBindings": 256,
+          "capBytes": 2097152,
+          "wrappedReads": 0,
+          "initRetains": 0,
+          "captureRefused": 0,
+          "capacityRefused": 0,
+          "allocationRefused": 0,
+          "scope": "Mapped raw PAA bytes and their initialized headers only; shared retained C++ metadata charge, excludes kernel/allocator/RSS cost; no warm worker jobs or upload-readiness proof",
+          "ok": true
+        },
+        "resident": 19923,
+        "required": 0,
+        "geometry": 713843212,
+        "texture": 2778451700,
+        "textureCount": 2513
+      },
+      "limits": "Sameclean267 hashes. SourcebindingOFF live/known/wrapped/init/capture/capacity/allocation counters0; no jobs/newflags/defaultpromotion. Smallnullsharedbranch/16Bsourcefield stillpresent. Root viewed OFFvsON settled localPOI without obvious geometry/material changes, not wholemap/no-regression proof. Allocatedwork/cache/order differ; ONmean42.38vsOFF43.71 and ONp95139.518vsOFF128.351 mixed no performance acceptance. Nextmounted-member match/precap refusal UNBUILT/excluded; fullplanOPEN/defaultReadyfalse/performancefalse.",
+      "sha256": {
+        "archive-source-binding-proof.json": "8f42897e4778c3f6376d1c8ea78064e33799524e9dcd95d68869ae69da119698",
+        "engine.log": "6a73fd9bfa0307917a9d775d4369ca0b18ccb6dd2d1e2b63f87663838e5c357b",
+        "harness.jsonl": "4ce67b00f4e8df15b2076b28d5455f1d2884c6138479649dab41188b859c5054",
+        "paa-attempt-proof.json": "22f9736746248f0491cf148436eb68ca8bdb3e6a6d3c05784c9b0aec4f73fce7",
+        "paa-inflight-proof.json": "67cbc50c4b7c943b9105e753e8df89694cee87b1531a76fe4f10b98d982ae000",
+        "provenance.json": "9bdd3d3b15ce8e3ad596c613616876cfccfd99c8978bab335b8188f094973f98",
+        "registration-quota-proof.json": "4e5db908df2bf05e7f2c4fdd6b68cd12ac2c94fddb7f5f2860dbabe5bbddd22c",
+        "result.json": "6599246b1a1750d44ce4bd444daa2a250d1d9ad98c827f6e2d9f4b6d1a0f51c0",
+        "returned-settled.png": "0e63aedf1126e64199de8e69b911e5919a546542caa31df2ec2696ccba994c13",
+        "route-frame-ms.json": "1e8fb43c7e1b5bf112643dcd13e9b10a5270a076dacfcc046474f261ba63b394",
+        "samples.jsonl": "b2a3d7d5e04910a3406d60594fe0ec65b84d36b0d03dba2165753dea93afdaf0"
+      }
     }
   ],
   "microbenchmarks": [
@@ -13735,6 +13981,18 @@
         "build-registered-refs-quota-20260927.log": "b9871d9edcc56e38fc02b92384b672b16a39b5006b50eeb338d8ef545ed6080d",
         "test-registered-quota-engine-20260927.log": "5bb002356f72f9fdd4b671b0672dc72b1fb0005960c629d765a1526227c9ff94",
         "test-registered-mesh-refs-rust-20260927.log": "af4c143070b081c9c6fa3bcef53120ce7631f08fb416d5101b18714a065a2785"
+      }
+    },
+    {
+      "artifactRoot": "build",
+      "runtimeSourceCommit": "267d590b",
+      "result": "All5targets704stepsPASS; separatefreshflag EngineOFF30assert2cases/ON326assert4casesPASS/noSKIP; compatibilityEngine401assert6cases [owned-read],[paa-dxt-bounds]PASS. Engine [qstream][policy] unmatched, notcovered there; actual currentbuild Core33assert6casesPASS/noSKIP covers policy. Installedclean26706:33. Sourcebinding capture prerequisite only; no warmjobs/upload-ready/workmoved claims.",
+      "sha256": {
+        "build-archive-source-bindings-20260927.log": "03202253545c49a0d9cc3f097d4714bf8bee4294a8ab8aac48598e58bd3cbec9",
+        "test-archive-source-actual-20260927.log": "eb1ffb3d6dcb230c77034a7c1555511fac49bdf1baaeb06c728013e0a7331b30",
+        "test-archive-source-default-20260927.log": "7ccbf7064b0ac3a13813a55ff2e5755a984f347481d2debd028a5d00ceb43bd6",
+        "test-archive-source-compat-20260927.log": "88098001514864efc90684fa6a10316e4aab219e952eda4f84f8f81564bbe4f4",
+        "test-archive-source-core-policy-20260927.log": "6fb3102735cb5b3d653a76323b3e0bf94b0943d7f2c48462fdbc2cd021a6b430"
       }
     }
   ],

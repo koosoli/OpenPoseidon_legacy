@@ -2524,3 +2524,36 @@ no new jobs shipped. Thereafter require
 immutable source leases, desired-generation cancellation, independent
 texture-only jobs without model-state takeover, bounded owner capture/worker
 fairness, fallback for uncovered roles and equal-work transient coverage/performance.
+
+## Sept27 initialized-PAA actual source-binding prerequisite
+
+267d590b all5targets704steps PASS; separate freshflag EngineOFF30assertions/
+2cases and ON326/4 PASS/noSKIP. CompatibilityEngine401/6 passes owned-read/
+PAA bounds; qstream/policy is unmatched there and not covered by that result.
+Actual currentbuild Core qstream/policy33/6 PASS/noSKIP separately. Installed
+clean26706:33 EXE DC331870863D6FD61D0FA2788B9E01FF208A3390B53CBB68F8167189C23E0789,
+DLL DDDEE19B75F816214FB359A845A059E6120C9950B4B8649368D5E45BC94E643A.
+
+SourcebindingsON063332 PASS/clean0: mapped raw PAA/init header capture retains
+256live bindings/117728known C++ bytes, caps256/2MiB; wrappedReads/initRetains256,
+captureRefused0/capacityRefused6107/allocationRefused0. This proves actual
+source capture only, not warm workers/upload readiness/work moved. Logical
+metadata charge excludes kernel/allocator/RSS. This267 still opens temporary
+fresh leases after the cap before Create refusal; saturated fast-refusal and
+CurrentMatchesMountedMember repairs are next unbuilt source, not included.
+OFF performs no source capture/leases/wrapper allocations/jobs, but the null
+shared branch and16-byte source field remain: not a literal zerofootprint claim.
+
+ON820frames mean42.384855/median23.446/p95139.518/p99345.758/max922.284ms,
+nearest-rank/usualmedian; returned19923/required0/geometry711824472/textures
+2763204596/2503. Root viewed settledON compatible at the localPOI without obvious
+missing assets; no wholemap/no-regression/performance acceptance. Same267 normal
+allflagsOFF063544 PASS/clean0:812frames mean43.711812/median23.0455/p95128.351/
+p99351.030/max930.685ms, dropped0, returned19923/required0/geometry713843212/
+textures2778451700/2513. Sourceenabledfalse/live/known/wrapped/init/capture/
+capacity/allocation counters0, othernewflagsOFF. Root viewed OFFversusON settled
+without obvious local geometry/material difference. Unequal allocated work/ordered
+cache and mixed ONmean42.38 versusOFF43.71, ONp95139.518 versusOFF128.351
+prevent performance/no-regression acceptance. No warm jobs or speed feature
+shipped; actual-init provenance is a prerequisite in progress, not an external
+blocker. WholeplanOPEN/defaultReady/performanceAcceptedfalse/newflagOFF.
