@@ -40,6 +40,21 @@ const MAX_PER_FRAME: f32 = 150.0;
 /// Tidewater's bollard pull (N) for the propeller race
 const MAX_THRUST_N: f32 = 26000.0;
 
+/// OP (W6i.1): white water thrown by the steady bow wave at speed, x `WGR_TW_BOAT_SPRAY=<gain>`
+/// (default 1; 0 = Tidewater's model, where a steady bow throws clear water only and the white
+/// comes from impacts). Tidewater's clear sheet and sub-pixel drops conserve the water's
+/// cross-section, which is right for a small launch at 6-8 m/s but reads as almost nothing on a
+/// patrol boat at 25 kn in a calm sea, whose bow wave breaks into a white spray sheet along the
+/// forward third of the hull. Scaled with the face's response, so it only appears at planing
+/// speeds.
+const STEADY_WHITE: f32 = 0.06;
+const STEADY_MIST: f32 = 0.015;
+
+fn white_gain() -> f32 {
+    static V: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+    *V.get_or_init(|| std::env::var("WGR_TW_BOAT_SPRAY").ok().and_then(|v| v.trim().parse::<f32>().ok()).unwrap_or(1.0).clamp(0.0, 10.0))
+}
+
 const DROPLET: f32 = 0.0;
 const MIST: f32 = 1.0;
 const LIGAMENT: f32 = 2.0;
@@ -404,10 +419,11 @@ impl BoatSpray {
             em.emit(&mut carry[1], nn * 0.025 * making * (1.0 - burst * 0.5), pa, pb, v, SHEET, 0.12 + 0.02 * r, 0.45, spread * 0.5, 0.06, 0.6);
             // ligaments torn off the sheet: the readable blobs of water
             em.emit(&mut carry[2], nn * 0.3 * smooth(r, 1.0, 5.0), pa, pb, v, LIGAMENT, 0.011 + 0.0012 * r, life, spread, 0.05, 0.6);
-            // white water only on impacts: torn white sheets
+            // white water on impacts (torn white sheets) and (OP) from the steady bow wave at speed
+            let steady = (1.0 - imp) * smooth(c.r_v, 4.0, 12.0) * white_gain();
             em.emit(
                 &mut carry[3],
-                nn * (0.06 * imp * smooth(c.r_i, 1.5, 5.0) + 0.1 * burst) * making,
+                nn * (0.06 * imp * smooth(c.r_i, 1.5, 5.0) + 0.1 * burst + STEADY_WHITE * steady) * making,
                 pa,
                 pb,
                 v,
@@ -419,7 +435,19 @@ impl BoatSpray {
                 0.6,
             );
             // a fine, faint mist on impacts that the relative wind carries aft over the boat
-            em.emit(&mut carry[4], nn * (0.04 * imp + 0.15 * burst) * making, pa, pb, scale(v, 0.6), MIST, 0.3 + 0.2 * burst, 2.0, spread * 0.5, 0.15, 0.6);
+            em.emit(
+                &mut carry[4],
+                nn * (0.04 * imp + 0.15 * burst + STEADY_MIST * steady) * making,
+                pa,
+                pb,
+                scale(v, 0.6),
+                MIST,
+                0.3 + 0.2 * burst,
+                2.0,
+                spread * 0.5,
+                0.15,
+                0.6,
+            );
         }
 
         // ---- propeller race: drops kicked up when the churn is near the surface

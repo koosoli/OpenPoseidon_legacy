@@ -127,10 +127,11 @@ fn spray_override() -> Option<(f32, f32)> {
     })
 }
 
-/// `WGR_TW_BOAT_SPRAY=0` turns the boats' bow spray off (W6i; A/B captures).
+/// `WGR_TW_BOAT_SPRAY=off` turns the boats' bow spray off (W6i; A/B captures); a number sets the
+/// steady white-water gain instead (boat_spray.rs, W6i.1).
 fn boat_spray_enabled() -> bool {
     static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *V.get_or_init(|| std::env::var("WGR_TW_BOAT_SPRAY").map_or(true, |v| v.trim() != "0"))
+    *V.get_or_init(|| std::env::var("WGR_TW_BOAT_SPRAY").map_or(true, |v| v.trim() != "off"))
 }
 
 /// `WGR_TW_GLOW=<scale>`: overrides the Water tab's water glow (W3j), for A/B captures.
