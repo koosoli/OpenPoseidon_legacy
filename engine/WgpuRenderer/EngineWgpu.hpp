@@ -18,6 +18,7 @@
 
 #include <wgpu_renderer.hpp>
 #include "SharedRetainedMeshLifetime.hpp"
+#include "StandaloneMeshRetirementWitness.hpp"
 
 #include <array>
 #include <chrono> // steady_clock, for the opt-in auto-exposure time constant (WGR_AUTO_EXPOSURE_TAU)
@@ -94,6 +95,8 @@ struct CpuMeshSlot
     // so releasing the newest borrower cannot invalidate an older live buffer.
     uint64_t sharedProducer = 0;
     render::SharedRetainedMeshLifetime::Borrower sharedLifetime;
+    // Null when ledger OFF: documented shared_ptr slot footprint, no draw use.
+    std::shared_ptr<render::StandaloneMeshRetirementWitness> standaloneWitness;
 };
 
 // REN-THR-011 -- the back edge a CPU-path vertex buffer needs and must not own outright.
@@ -813,6 +816,7 @@ class EngineWgpu : public EngineDummy
     void AbandonUnpublishedSharedMeshLifetime(uint64_t producer);
     struct SharedMeshFixtureState;
     std::shared_ptr<SharedMeshFixtureState> _sharedMeshFixture;
+    std::shared_ptr<render::StandaloneMeshWitnessBudget> _standaloneWitnessBudget;
     std::unordered_map<const LODShapeWithShadow*, std::vector<TextureWgpu*>> _gpuModelTextures;
     std::unordered_map<const LODShapeWithShadow*, uint32_t> _gpuModelRefs;
     void RetainGpuModel(const LODShapeWithShadow* shape);

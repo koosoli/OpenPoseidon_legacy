@@ -1051,6 +1051,17 @@ class VertexBufferWgpu : public VertexBuffer
             std::vector<VertexIndex>().swap(slot->indices);
             return;
         }
+        if (slot->standaloneWitness)
+        {
+            const auto retirement = slot->standaloneWitness->Release();
+            slot->standaloneWitness->Dispatch(retirement, [&](uint64_t handle) {
+                if (uploader) wgr_uploader_mesh_destroy(uploader, handle);
+                else if (renderer) wgr_mesh_destroy(renderer, handle);
+            });
+            std::vector<SVertex>().swap(slot->verts);
+            std::vector<VertexIndex>().swap(slot->indices);
+            return; // Attributed destructor already consumed it, or closed epoch.
+        }
         if (slot->renderer == 0)
         {
             std::vector<SVertex>().swap(slot->verts);
@@ -1400,6 +1411,17 @@ public:
             });
         // Metadata publication is outside both lifetime/epoch dispatch locks.
         if (dispatched) _ledger->QueueAllocationRetirementScheduled(_epoch, producer);
+        else if (slot->standaloneWitness)
+        {
+            const auto retirement = slot->standaloneWitness->Release();
+            slot->standaloneWitness->Dispatch(retirement, [&](uint64_t handle) {
+                if (uploader) wgr_uploader_mesh_destroy(uploader, handle);
+                else if (renderer) wgr_mesh_destroy(renderer, handle);
+                else return;
+                dispatched = true;
+            });
+            if (dispatched) _ledger->QueueAllocationRetirementScheduled(_epoch, slot->standaloneWitness->Producer());
+        }
     }
 };
 
@@ -1411,6 +1433,11 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
     if (ownerLedger && std::strcmp(ownerLedger, "1") == 0)
     {
         _geometryOwnerLedger = std::make_shared<render::GeometryOwnerLedger>(render::GeometryOwnerLedger::Limits{});
+        try {
+            _standaloneWitnessBudget = std::make_shared<render::StandaloneMeshWitnessBudget>();
+            if (!_sharedMeshEpoch) _sharedMeshEpoch = std::make_shared<render::SharedMeshEpoch>();
+        }
+        catch (...) { /* Optional witness refusal remains incomplete, original destruction fallback. */ }
         _geometryOwnerLedger->BeginEpoch(_geometryOwnerEpoch, true);
         const char* meshAck = std::getenv("WGR_GEOMETRY_MESH_ACK");
         _geometryMeshAckEnabled = meshAck && std::strcmp(meshAck, "1") == 0;
@@ -2061,6 +2088,8 @@ struct EngineWgpu::SharedMeshFixtureState
     std::mutex mutex;
     std::unique_ptr<VertexBuffer> older, newer;
     std::shared_ptr<render::SharedRetainedMeshLifetime> lifetime;
+    std::shared_ptr<render::StandaloneMeshRetirementWitness> standaloneWitness;
+    bool standalone = false;
     SharedMeshFixtureReport report;
     uint64_t producer = 0, knownBytes = 0;
     bool producerReleased = false;
@@ -2895,6 +2924,9 @@ void EngineWgpu::FillGeometryMeshFacts(GeometryAllocationReport& report)
     report.rendererMeshFactsEnabled = true;
     try
     {
+        const auto witnessStats = _standaloneWitnessBudget ? _standaloneWitnessBudget->Snapshot() : render::StandaloneMeshWitnessBudget::Stats{};
+        // Refusal is informational: an unused shared-buffer witness can be
+        // refused without omitting any standalone retirement evidence.
         const auto handles = _geometryOwnerLedger->SnapshotHandles();
         const auto& owners = handles.ownerReport;
         report.persistentAttributionEnabled = true;
@@ -2916,6 +2948,10 @@ void EngineWgpu::FillGeometryMeshFacts(GeometryAllocationReport& report)
         report.persistentMailboxPending = owners.queuedDetachEvents;
         report.persistentMailboxDropped = owners.droppedDetachEvents;
         report.persistentCancelledCreates = owners.cancelledBeforeCreate;
+        report.persistentStandaloneWitnessLive = witnessStats.live;
+        report.persistentStandaloneWitnessKnownBytes = witnessStats.bytes;
+        report.persistentStandaloneWitnessPeakKnownBytes = witnessStats.peak;
+        report.persistentStandaloneWitnessRefused = witnessStats.refused;
         report.persistentOwnerEstimatedBytes = owners.persistentOwnerBytes;
         report.persistentZeroOwnerEstimatedBytes = owners.zeroPersistentOwnerBytes;
         report.persistentReclaimableBytes = 0;
@@ -3221,6 +3257,8 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
                     _geometryOwnerLedger->AllocationRetired(_geometryOwnerEpoch, op.cpu->sharedProducer);
                 op.cpu->sharedProducer = 0; // retained mapping is gone: exact original payload fallback
             }
+            if (_geometryOwnerLedger && !op.cpu->standaloneWitness)
+                _geometryOwnerLedger->MarkIncomplete(_geometryOwnerEpoch, render::GeometryOwnerLedger::Reason::Capacity);
             GGeometryPoolFill.Note(1, op.cpu->verts.size() * sizeof(SVertex) + op.cpu->indices.size() * sizeof(uint32_t));
             op.cpu->renderer =
                 wgr_mesh_create(_renderer, AsMeshVerts(op.cpu->verts),
@@ -3239,6 +3277,16 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
             // The payload has done its job; a CPU mesh's later uploads go through the
             // uploader, not through the slot. Release rather than clear -- these are full
             // vertex and index arrays and there are thousands of live CPU meshes.
+            if (op.cpu->standaloneWitness)
+            {
+                const auto retirement = op.cpu->standaloneWitness->Bind(op.cpu->renderer);
+                bool dispatched = false;
+                op.cpu->standaloneWitness->Dispatch(retirement, [&](uint64_t handle) {
+                    wgr_mesh_destroy(_renderer, handle); dispatched = true;
+                });
+                if (dispatched && _geometryOwnerLedger)
+                    _geometryOwnerLedger->QueueAllocationRetirementScheduled(_geometryOwnerEpoch, op.cpu->producer);
+            }
             std::vector<SVertex>().swap(op.cpu->verts);
             std::vector<VertexIndex>().swap(op.cpu->indices);
             break;
@@ -3403,6 +3451,7 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
             uint64_t handle = op.mesh;
             if (!handle)
                 if (const auto found = _meshIdOf.find(fixture.producer); found != _meshIdOf.end()) handle = found->second;
+            if (!handle && fixture.standaloneWitness) handle = fixture.standaloneWitness->Snapshot().handle;
             WgrMeshHandleFact fact{};
             WgrMeshHandleFactSummary summary{};
             const bool valid = handle && wgr_get_mesh_handle_facts(_renderer,
@@ -3410,7 +3459,10 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
                 summary.handles_requested == 1 && summary.handles_inspected == 1 && summary.complete == 1 &&
                 summary.flags == 0 && summary.duplicate_handles == 0 && fact.mesh_handle == handle &&
                 fact.reserved == 0 && fact.state <= 2;
-            const auto owners = fixture.lifetime->SnapshotOwners();
+            const auto standaloneState = fixture.standaloneWitness ? fixture.standaloneWitness->Snapshot() : render::StandaloneMeshRetirementWitness::State{};
+            const auto owners = fixture.lifetime ? fixture.lifetime->SnapshotOwners() :
+                render::SharedRetainedMeshLifetime::Owners{standaloneState.handle && !standaloneState.released ? 1u : 0u, false};
+            const auto witnessStats = _standaloneWitnessBudget ? _standaloneWitnessBudget->Snapshot() : render::StandaloneMeshWitnessBudget::Stats{};
             render::GeometryOwnerLedger::HandleRecord ledgerRecord;
             const bool ledgerObserved = _geometryOwnerLedger &&
                 _geometryOwnerLedger->SnapshotHandle(_geometryOwnerEpoch, fixture.producer, ledgerRecord);
@@ -3423,6 +3475,9 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
             fixture.report.ledgerScheduledRetired = ledgerObserved && ledgerRecord.scheduledRetired;
             fixture.report.ledgerProducerOwned = ledgerObserved && ledgerRecord.producerOwned;
             fixture.report.ledgerCpuBorrowers = ledgerObserved ? ledgerRecord.cpuBorrowers : 0;
+            fixture.report.witnessKnownMetadataBytes = witnessStats.bytes;
+            fixture.report.witnessPeakKnownMetadataBytes = witnessStats.peak;
+            fixture.report.witnessCapacityRefused = witnessStats.refused;
             fixture.report.observedRequestId = op.sharedFixtureRequest;
             fixture.report.rendererHandle = handle;
             fixture.report.meshState = valid ? fact.state : 0;
@@ -5287,19 +5342,33 @@ VertexBuffer* EngineWgpu::CreateVertexBuffer(const Shape& src, VBType type)
         std::shared_ptr<CpuMeshSlot> slot;
         WgrRenderer* renderer;
         const WgrUploader* uploader;
+        std::shared_ptr<render::GeometryOwnerLedger> ledger;
+        uint64_t epoch;
         bool committed = false;
         ~ConstructionRollback()
         {
             if (committed) return;
             slot->dead = true;
+            if (ledger) ledger->QueueCpuBorrowerDetached(epoch, slot->producer);
+            // Do not rely on the create still being undrained during exception
+            // unwinding. A concurrently bound real handle must retire too.
+            const auto dispatch = [&](uint64_t handle) {
+                if (uploader) wgr_uploader_mesh_destroy(uploader, handle);
+                else if (renderer) wgr_mesh_destroy(renderer, handle);
+            };
             uint64_t retirement = 0;
+            bool actual = false;
             if (slot->sharedLifetime.Release(retirement))
-                slot->sharedLifetime.Dispatch(retirement, [&](uint64_t handle) {
-                    if (uploader) wgr_uploader_mesh_destroy(uploader, handle);
-                    else if (renderer) wgr_mesh_destroy(renderer, handle);
-                });
+                slot->sharedLifetime.Dispatch(retirement, [&](uint64_t handle) { dispatch(handle); actual = uploader || renderer; });
+            if (actual && ledger) ledger->QueueAllocationRetirementScheduled(epoch, slot->sharedLifetime.Producer());
+            if (slot->standaloneWitness)
+            {
+                actual = false;
+                slot->standaloneWitness->Dispatch(slot->standaloneWitness->Release(), [&](uint64_t handle) { dispatch(handle); actual = uploader || renderer; });
+                if (actual && ledger) ledger->QueueAllocationRetirementScheduled(epoch, slot->standaloneWitness->Producer());
+            }
         }
-    } rollback{slot, _renderer, uploader};
+    } rollback{slot, _renderer, uploader, _geometryOwnerLedger, _geometryOwnerEpoch};
     // RFG-088: a STATIC buffer for a level the retained path already holds draws through that
     // mesh. Measured on native Everon at 800 retained models: the retained meshes were 759 MB
     // and the direct-path buffers 880 MB of the same pool, the largest mesh 12.9 MB on both
@@ -5320,6 +5389,10 @@ VertexBuffer* EngineWgpu::CreateVertexBuffer(const Shape& src, VBType type)
             // by a later borrower. Ticket allocation failure uses exact fallback.
             if (slot->sharedLifetime.Attach(lifetime)) slot->sharedProducer = shared->second;
         }
+    }
+    if (_geometryOwnerLedger)
+    {
+        if (_standaloneWitnessBudget) slot->standaloneWitness = _standaloneWitnessBudget->Create(slot->producer, _sharedMeshEpoch);
     }
     // RFG-097 diagnostic: the first large buffers that do NOT share, by type, so "1,572 MB
     // of direct-path buffers on a streamed world" can be attributed to a producer.
@@ -5394,7 +5467,7 @@ Engine::SharedMeshFixtureReport EngineWgpu::ControlSharedMeshLifetimeFixture(Sha
     if (!Foundation::IsMainThread() || !_renderer) return result;
     const auto observe = [&] {
         auto& fixture = *_sharedMeshFixture;
-        if (!fixture.lifetime) return false;
+        if (!fixture.lifetime && !fixture.standaloneWitness) return false;
         ResourceOp op; op.kind = ResourceOp::SharedMeshFixtureObserve; op.sharedFixture = _sharedMeshFixture;
         {
             std::lock_guard lock(fixture.mutex);
@@ -5412,7 +5485,7 @@ Engine::SharedMeshFixtureReport EngineWgpu::ControlSharedMeshLifetimeFixture(Sha
     };
     try
     {
-        if (action == SharedMeshFixtureAction::Begin)
+        if (action == SharedMeshFixtureAction::Begin || action == SharedMeshFixtureAction::BeginStandalone)
         {
             if (_sharedMeshFixture) { result.status = GeometryReportStatus::Busy; return result; }
             if (!source || source->NVertex() <= 0 || source->NVertex() > 4096 || source->NSections() < 0 || source->NSections() > 128 ||
@@ -5451,6 +5524,29 @@ Engine::SharedMeshFixtureReport EngineWgpu::ControlSharedMeshLifetimeFixture(Sha
             if (known > 1024 * 1024) return result;
             _sharedMeshFixture = std::make_shared<SharedMeshFixtureState>();
             auto& fixture = *_sharedMeshFixture;
+            if (action == SharedMeshFixtureAction::BeginStandalone)
+            {
+                if (!_geometryOwnerLedger || !_standaloneWitnessBudget) throw std::runtime_error("standalone fixture requires owner ledger");
+                fixture.standalone = fixture.report.standalone = true;
+                fixture.producerReleased = true; // No retained producer was fabricated.
+                fixture.older.reset(CreateVertexBuffer(*source, VBDynamic));
+                if (!fixture.older) throw std::runtime_error("standalone fixture create failed");
+                const auto* buffer = static_cast<const VertexBufferWgpu*>(fixture.older.get());
+                fixture.producer = buffer->slot->producer;
+                fixture.standaloneWitness = buffer->slot->standaloneWitness;
+                if (!fixture.standaloneWitness) throw std::runtime_error("standalone witness refused");
+                const uint64_t actualKnown = uint64_t(buffer->slot->verts.capacity()) * sizeof(SVertex) +
+                    uint64_t(buffer->slot->indices.capacity()) * sizeof(VertexIndex) +
+                    uint64_t(buffer->sections.MaxSize()) * sizeof(render::mesh::MeshSection) +
+                    render::StandaloneMeshWitnessBudget::Charge + 16384;
+                if (actualKnown > 1024 * 1024) throw std::runtime_error("standalone fixture capacity refused");
+                fixture.knownBytes = fixture.report.knownPayloadBytes = actualKnown;
+                fixture.report.producer = fixture.producer;
+                fixture.report.sourceCopied = fixture.report.privateAllocation = true;
+                if (!observe()) throw std::runtime_error("standalone observation failed");
+                std::lock_guard lock(fixture.mutex);
+                return fixture.report;
+            }
             fixture.producer = _nextMeshHandle++;
             fixture.knownBytes = known;
             fixture.report.producer = fixture.producer;

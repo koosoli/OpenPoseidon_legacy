@@ -1711,6 +1711,8 @@ class Engine : public IGraphicsEngine
           uint64_t persistentOwnerEstimatedBytes = 0, persistentZeroOwnerEstimatedBytes = 0;
           uint64_t persistentCpuBorrowers = 0, persistentModelLodLinks = 0;
           uint64_t persistentMailboxPending = 0, persistentMailboxDropped = 0;
+          uint64_t persistentStandaloneWitnessLive = 0, persistentStandaloneWitnessKnownBytes = 0;
+          uint64_t persistentStandaloneWitnessPeakKnownBytes = 0, persistentStandaloneWitnessRefused = 0;
           uint64_t persistentCancelledCreates = 0, persistentReclaimableBytes = 0;
           // On-demand Rust record lookup over copied full-generation handles.
           // Absent proves no current renderer mesh record/range, not GPU work
@@ -3110,7 +3112,7 @@ class Engine : public IGraphicsEngine
 
     // Explicit bounded private-allocation diagnostic; never unregisters a world
     // model. Snapshot reads a copied renderer-cut observation, not live FFI.
-    enum class SharedMeshFixtureAction { Begin, DropNewest, ReleaseProducer, DropOldest, Observe, Snapshot, Abort };
+    enum class SharedMeshFixtureAction { Begin, DropNewest, ReleaseProducer, DropOldest, Observe, Snapshot, Abort, BeginStandalone };
     struct SharedMeshFixtureReport
     {
         GeometryReportStatus status = GeometryReportStatus::Unsupported;
@@ -3119,6 +3121,8 @@ class Engine : public IGraphicsEngine
         bool producerOwned = false, sourceCopied = false, privateAllocation = false;
         bool ledgerEnabled = false, ledgerRecordObserved = false, ledgerScheduledRetired = false, ledgerProducerOwned = false;
         uint64_t ledgerCpuBorrowers = 0;
+        bool standalone = false;
+        uint64_t witnessKnownMetadataBytes = 0, witnessPeakKnownMetadataBytes = 0, witnessCapacityRefused = 0;
     };
     virtual SharedMeshFixtureReport ControlSharedMeshLifetimeFixture(SharedMeshFixtureAction, const Shape* = nullptr)
     { return {}; }

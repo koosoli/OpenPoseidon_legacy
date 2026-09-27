@@ -473,6 +473,7 @@ void RegisterScreenshot(HarnessServer& hs)
             if (!name) return HarnessProtocol::ErrorResponse("fixture action required");
             Engine::SharedMeshFixtureAction action;
             if (!std::strcmp(name, "begin")) action = Engine::SharedMeshFixtureAction::Begin;
+            else if (!std::strcmp(name, "beginStandalone")) action = Engine::SharedMeshFixtureAction::BeginStandalone;
             else if (!std::strcmp(name, "dropNewest")) action = Engine::SharedMeshFixtureAction::DropNewest;
             else if (!std::strcmp(name, "dropProducer")) action = Engine::SharedMeshFixtureAction::ReleaseProducer;
             else if (!std::strcmp(name, "dropOlder")) action = Engine::SharedMeshFixtureAction::DropOldest;
@@ -481,7 +482,7 @@ void RegisterScreenshot(HarnessServer& hs)
             else if (!std::strcmp(name, "abort")) action = Engine::SharedMeshFixtureAction::Abort;
             else return HarnessProtocol::ErrorResponse("unknown fixture action");
             const Shape* source = nullptr;
-            if (action == Engine::SharedMeshFixtureAction::Begin) {
+            if (action == Engine::SharedMeshFixtureAction::Begin || action == Engine::SharedMeshFixtureAction::BeginStandalone) {
                 // FindObject and Level are existing-resident lookups. Neither
                 // resolves an authored placement nor initiates a shape load.
                 Object* object = GLandscape ? GLandscape->FindObject(1001) : nullptr;
@@ -517,6 +518,10 @@ void RegisterScreenshot(HarnessServer& hs)
             cJSON_AddBoolToObject(result, "ledgerScheduledRetired", report.ledgerScheduledRetired);
             cJSON_AddNumberToObject(result, "ledgerCpuBorrowers", double(report.ledgerCpuBorrowers));
             cJSON_AddBoolToObject(result, "ledgerProducerOwned", report.ledgerProducerOwned);
+            cJSON_AddBoolToObject(result, "standalone", report.standalone);
+            cJSON_AddNumberToObject(result, "witnessKnownMetadataBytes", double(report.witnessKnownMetadataBytes));
+            cJSON_AddNumberToObject(result, "witnessPeakKnownMetadataBytes", double(report.witnessPeakKnownMetadataBytes));
+            cJSON_AddNumberToObject(result, "witnessCapacityRefused", double(report.witnessCapacityRefused));
             cJSON_AddStringToObject(result, "scope", "Private copied mesh lifetime and generational record state; no world rendering, queue-completion or device-free proof");
             return HarnessProtocol::JsonResponse(result);
         });
@@ -587,6 +592,8 @@ void RegisterScreenshot(HarnessServer& hs)
                 GEOMETRY_REPORT_FIELD(persistentCpuBorrowers); GEOMETRY_REPORT_FIELD(persistentModelLodLinks);
                 GEOMETRY_REPORT_FIELD(persistentMailboxPending); GEOMETRY_REPORT_FIELD(persistentMailboxDropped);
                 GEOMETRY_REPORT_FIELD(persistentCancelledCreates); GEOMETRY_REPORT_FIELD(persistentReclaimableBytes);
+                GEOMETRY_REPORT_FIELD(persistentStandaloneWitnessLive); GEOMETRY_REPORT_FIELD(persistentStandaloneWitnessKnownBytes);
+                GEOMETRY_REPORT_FIELD(persistentStandaloneWitnessPeakKnownBytes); GEOMETRY_REPORT_FIELD(persistentStandaloneWitnessRefused);
                 cJSON_AddBoolToObject(result, "rendererMeshFactsEnabled", report.rendererMeshFactsEnabled);
                 cJSON_AddBoolToObject(result, "rendererMeshFactsValid", report.rendererMeshFactsValid);
                 cJSON_AddBoolToObject(result, "rendererMeshFactsComplete", report.rendererMeshFactsComplete);

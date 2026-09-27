@@ -1,11 +1,12 @@
-param([switch]$Disabled,[switch]$Capacity,[switch]$ActiveCapacity,[switch]$MovedWatcher,[switch]$LargeWall,[switch]$SourceDiagnostic,[switch]$PositiveWarming,[switch]$ColdPositive,[switch]$RegisteredWarming,[switch]$SharedMeshLifetime,[switch]$SharedMeshLedger,[string]$Label='simulation-residency',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',[string]$Python='C:\Program Files\Python311\python.exe')
+param([switch]$Disabled,[switch]$Capacity,[switch]$ActiveCapacity,[switch]$MovedWatcher,[switch]$LargeWall,[switch]$SourceDiagnostic,[switch]$PositiveWarming,[switch]$ColdPositive,[switch]$RegisteredWarming,[switch]$SharedMeshLifetime,[switch]$SharedMeshLedger,[switch]$StandaloneMesh,[string]$Label='simulation-residency',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',[string]$Python='C:\Program Files\Python311\python.exe')
 $ErrorActionPreference='Stop'
 if ($SharedMeshLedger -and !$SharedMeshLifetime) {throw 'Shared mesh ledger validation requires the private lifetime fixture'}
+if ($StandaloneMesh -and (!$SharedMeshLifetime -or !$SharedMeshLedger)) {throw 'Standalone mesh validation requires the private lifetime fixture and its owner ledger'}
 if (@($Disabled,$Capacity,$ActiveCapacity,$MovedWatcher,$LargeWall,$SourceDiagnostic,$PositiveWarming,$ColdPositive,$RegisteredWarming,$SharedMeshLifetime | Where-Object {$_}).Count -gt 1) {throw 'Simulation fixture switches are separate scenarios'}
 if (!$env:LOCK_OWNER) {
  $shellName=if ($PSVersionTable.PSEdition -eq 'Core') {'pwsh.exe'} else {'powershell.exe'}
  $argv=@((Join-Path $PSScriptRoot 'with-game-lock.sh'),(Join-Path $PSHOME $shellName).Replace('\','/'),'-NoProfile','-File',$PSCommandPath,'-Label',$Label,'-GameDir',$GameDir,'-Python',$Python)
- foreach ($flag in @('Disabled','Capacity','ActiveCapacity','MovedWatcher','LargeWall','SourceDiagnostic','PositiveWarming','ColdPositive','RegisteredWarming','SharedMeshLifetime','SharedMeshLedger')) {if ((Get-Variable $flag -ValueOnly)) {$argv+=('-'+$flag)}}
+ foreach ($flag in @('Disabled','Capacity','ActiveCapacity','MovedWatcher','LargeWall','SourceDiagnostic','PositiveWarming','ColdPositive','RegisteredWarming','SharedMeshLifetime','SharedMeshLedger','StandaloneMesh')) {if ((Get-Variable $flag -ValueOnly)) {$argv+=('-'+$flag)}}
  $env:LOCK_OWNER='simulation residency fixture'
  try {& 'C:\Program Files\Git\bin\bash.exe' @argv; if ($LASTEXITCODE) {throw "Simulation fixture exited $LASTEXITCODE"}} finally {Remove-Item Env:LOCK_OWNER}
  return
@@ -131,7 +132,17 @@ try {
    return $observed
   }
   $meshCases=@()
-  foreach ($order in @('newest-first','producer-first')) {
+  if ($StandaloneMesh) {
+   $null=Mesh 'beginStandalone';$created=Observe-Mesh 1 1 $false
+   if (!$created.standalone -or $created.witnessKnownMetadataBytes -le 0 -or
+       $created.witnessKnownMetadataBytes -gt 1048576 -or $created.witnessPeakKnownMetadataBytes -gt 1048576 -or
+       $created.witnessCapacityRefused -ne 0) {throw 'Standalone diagnostic witness exceeded its bounded metadata allowance'}
+   $null=Mesh 'dropOlder';$last=Observe-Mesh 2 0 $false $created.rendererHandle
+   if (!$last.standalone -or $last.witnessKnownMetadataBytes -gt 1048576 -or
+       $last.witnessPeakKnownMetadataBytes -gt 1048576 -or $last.witnessCapacityRefused -ne 0) {throw 'Standalone diagnostic witness metadata accounting failed'}
+   $meshCases+=@{order='standalone';created=$created;last=$last}
+   $null=Mesh 'abort'
+  } else { foreach ($order in @('newest-first','producer-first')) {
    $null=Mesh 'begin';$created=Observe-Mesh 1 2 $true
    $handle=$created.rendererHandle
    if ($order -eq 'newest-first') {
@@ -144,11 +155,12 @@ try {
    $null=Mesh 'dropOlder';$last=Observe-Mesh 2 0 $false $handle
    $meshCases+=@{order=$order;created=$created;first=$first;second=$second;last=$last}
    $null=Mesh 'abort'
-  }
+  } }
   $afterFixture=Ids;$ordinary=Send @{cmd='stream_residency'}
   if (!$afterFixture.objects[0].present -or !$afterFixture.objects[0].visualResident -or $ordinary.required -ne 0) {throw 'Private mesh fixture changed ordinary world identity or pinned its source'}
   $result=@{kind='shared-retained-mesh-lifetime';simulationOff=$simulationOff;source=$meshSource;cases=$meshCases;after=$afterFixture;ordinary=$ordinary;
-    limitation='Actual private retained mesh and two CPU borrowers through normal renderer drains; Present/Absent facts are record lifetime, not pixel drawing, complete GPU ownership, queue completion or device memory release.'}
+    standalone=$StandaloneMesh.IsPresent;
+    limitation='Actual private copied mesh through normal renderer drains; Present/Absent facts are record lifetime, not pixel drawing, complete GPU ownership, queue completion or device memory release.'}
  } elseif ($SourceDiagnostic) {
   $cold=State; $coldIds=Ids; $baseline=Send @{cmd='stream_residency'}
   if ($cold.status -ne 'Disabled' -or $cold.ownerPumps -ne 0 -or $baseline.sourceEnvelopeBytes -ne 0 -or $baseline.sourceEnvelopeScans -ne 0 -or @($coldIds.objects | Where-Object {$_.present}).Count) {throw 'Ordinary disabled fixture performed source or simulation work'}

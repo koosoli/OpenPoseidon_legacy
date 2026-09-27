@@ -139,6 +139,7 @@ set(POSEIDON_TEST_SOURCES
     # Graphics tests
     Graphics/test_geometry_owner_ledger.cpp
     Graphics/test_shared_retained_mesh_lifetime.cpp
+    Graphics/test_standalone_mesh_retirement_witness.cpp
     Graphics/test_registration_cost_policy.cpp
     Graphics/test_alpha_classify.cpp
     Graphics/test_surface_decompose.cpp
