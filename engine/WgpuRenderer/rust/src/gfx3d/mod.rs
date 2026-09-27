@@ -1204,6 +1204,26 @@ struct GpuSectionSrc {
     variant: u32,
 }
 
+fn resolve_registered_section(meshes: &SlotMap<MeshKey, Mesh>, src: &GpuSectionSrc) -> cull::SectionGpu {
+    let key: MeshKey = KeyData::from_ffi(src.mesh).into();
+    match meshes.get(key) {
+        // Bound WHOLE under indirect: base_vertex = the mesh's pool vbase, first_index =
+        // its ibase + the section's mesh-local start (indices are 0-based mesh-local).
+        Some(mesh) => cull::SectionGpu {
+            first_index: mesh.alloc.ibase + src.index_begin,
+            index_count: src.index_count,
+            base_vertex: mesh.alloc.vbase,
+            variant: src.variant,
+        },
+        None => cull::SectionGpu {
+            first_index: 0,
+            index_count: 0,
+            base_vertex: 0,
+            variant: src.variant,
+        },
+    }
+}
+
 struct ShadowTarget {
     tex: wgpu::Texture,
     layer_views: Vec<wgpu::TextureView>,
@@ -8441,23 +8461,7 @@ impl Gfx3d {
     // allocation never moves; registration and structural changes require fresh resolution. An
     // unknown mesh handle draws nothing (index_count = 0), keeping the tables parallel.
     fn resolve_section(&self, src: &GpuSectionSrc) -> cull::SectionGpu {
-        let key: MeshKey = KeyData::from_ffi(src.mesh).into();
-        match self.meshes.get(key) {
-            // Bound WHOLE under indirect: base_vertex = the mesh's pool vbase, first_index =
-            // its ibase + the section's mesh-local start (indices are 0-based mesh-local).
-            Some(mesh) => cull::SectionGpu {
-                first_index: mesh.alloc.ibase + src.index_begin,
-                index_count: src.index_count,
-                base_vertex: mesh.alloc.vbase,
-                variant: src.variant,
-            },
-            None => cull::SectionGpu {
-                first_index: 0,
-                index_count: 0,
-                base_vertex: 0,
-                variant: src.variant,
-            },
-        }
+        resolve_registered_section(&self.meshes, src)
     }
 
     // Resolve registered sections only after structural changes. MeshAlloc offsets are fixed

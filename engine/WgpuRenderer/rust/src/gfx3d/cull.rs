@@ -4234,4 +4234,116 @@ pub(crate) mod tests {
         eprintln!("PASS cull_table_domains_bootstrap: crown-first/section-first actual GPU readback matches wholesale initialization");
     }
 
+    #[test]
+    #[allow(deprecated)]
+    fn retired_model_neighbor_and_mesh_reuse_draw_only_live_models_all_three_views() {
+        use super::super::{Mesh, MeshKey, GpuSectionSrc, resolve_registered_section};
+        use super::super::pool::GeometryPool;
+        use slotmap::{Key, SlotMap};
+        let Some((device, queue)) = headless() else {
+            eprintln!("SKIP retired_model_three_views: no adapter/device"); return;
+        };
+        let mut pool = GeometryPool::new(&device);
+        let mut meshes: SlotMap<MeshKey, Mesh> = SlotMap::with_key();
+        let mut verts = [crate::ffi::WgrMeshVertex::zeroed(); 3];
+        verts[0].pos = Vec3::new(-0.5, 0.0, 0.0);
+        verts[1].pos = Vec3::new(0.5, 0.0, 0.0);
+        verts[2].pos = Vec3::new(0.0, 0.5, 0.0);
+        let insert = |pool: &mut GeometryPool, meshes: &mut SlotMap<MeshKey, Mesh>| {
+            let alloc = pool.alloc(&device, &queue, &verts, &[0, 1, 2]).unwrap();
+            meshes.insert(Mesh { alloc, index_count: 3, vert_count: 3, skin: None,
+                                 aabb_min: [-0.5, 0.0, 0.0], aabb_max: [0.5, 0.5, 0.0] })
+        };
+        let a_mesh = insert(&mut pool, &mut meshes);
+        let b_mesh = insert(&mut pool, &mut meshes);
+        let source = |key: MeshKey| GpuSectionSrc { mesh: key.data().as_ffi(),
+                                                  index_begin: 0, index_count: 3, variant: 0 };
+        let mut sources = vec![source(a_mesh), source(b_mesh)];
+        let mut cull = CullState::new(&device);
+        cull.variant_capacity = 16; // bounded test output; production capacity is unchanged
+        let lod = LodGpu { resolution: 1.0, section_base: 0, section_count: 1, is_decal: 0 };
+        let material = SectionMaterialGpu::zeroed();
+        let a = cull.register_model(1.0, &[lod], &[resolve_registered_section(&meshes, &sources[0])], &[material]);
+        let b = cull.register_model(1.0, &[lod], &[resolve_registered_section(&meshes, &sources[1])], &[material]);
+        let instance = |model| InstanceGpu { world: Mat4::IDENTITY.to_cols_array(), center: [0.0, 0.0, 0.0, 1.0],
+            model, flags: 0, cull_radius: 0, _pad: 0, conform0: [0.0; 4], conform1: [0.0; 4], conform2: [0.0; 4] };
+        let a_instance = cull.instance_add(instance(a));
+        cull.instance_add(instance(b));
+        let eye = Vec3::new(0.0, 0.0, 10.0);
+        let mut view = Mat4::look_at_rh(eye, Vec3::ZERO, Vec3::Y);
+        view.w_axis = Vec4::new(0.0, 0.0, 0.0, 1.0);
+        let proj = Mat4::perspective_rh(60f32.to_radians(), 1.0, 0.1, 1000.0);
+        let mut main = CullParamsGpu::zeroed();
+        main.frustum = frustum_planes(proj * view);
+        main.cam_pos = [eye.x, eye.y, eye.z, 0.0]; main.objects_z2 = 1.0e6;
+        main.lod_scale = 1.0; main.lod_inv_width = 1.0; main.pixel_limit = 0.0;
+        cull.set_params(main);
+        let inputs = CullInputs { objects_z: 1000.0, lod_scale: 1.0, lod_inv_width: 1.0, pixel_limit: 0.0 };
+        cull.set_shadow_view_count(&device, 1);
+        cull.set_shadow_params(0, params_from_shadow_cascade(proj * view, eye, inputs));
+        cull.set_hiz(Some(const_hiz(&device, &queue, 64, 64, 0.0)));
+        cull.set_color_params(params_from_camera_occlude(view, proj, eye, inputs, [64.0, 64.0], 7, true));
+        let run_and_check = |cull: &mut CullState, expected: &[(u32, SectionGpu)]| {
+            cull.prepare(&device, &queue);
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+            cull.dispatch(&mut encoder); cull.dispatch_shadow(&mut encoder, 0); cull.dispatch_color(&mut encoder);
+            queue.submit([encoder.finish()]);
+            let views = [("main", cull.out_args().unwrap(), cull.out_records().unwrap()),
+                         ("shadow", cull.shadow_out_args(0).unwrap(), cull.shadow_out_records(0).unwrap()),
+                         ("color", cull.color_out_args().unwrap(), cull.color_out_records().unwrap())];
+            let slots = CULL_VARIANT_COUNT as u64 * cull.variant_capacity() as u64;
+            for (label, args, records) in views {
+                let args = read_u32s(&device, &queue, args, slots * super::ARG_WORDS as u64);
+                let records = read_u32s(&device, &queue, records, slots * 2);
+                let mut seen = Vec::new();
+                for draw in args.chunks_exact(super::ARG_WORDS as usize).filter(|row| row[1] != 0) {
+                    assert_eq!(draw[1], 1, "{label}: one test instance per model section");
+                    let record = draw[4] as usize;
+                    let instance_slot = records[record * 2] as usize;
+                    let model = cull.instances.as_slice()[instance_slot].model;
+                    let (_, section) = expected.iter().find(|(id, _)| *id == model)
+                        .unwrap_or_else(|| panic!("{label}: unexpected stale model {model}"));
+                    assert_eq!(draw[0], section.index_count, "{label}: index count");
+                    assert_eq!(draw[2], section.first_index, "{label}: current pool index address");
+                    assert_eq!(draw[3], section.base_vertex, "{label}: current pool vertex address");
+                    let global_section = records[record * 2 + 1] as usize;
+                    assert!(cull.sections[global_section] == *section, "{label}: exact current section row");
+                    seen.push(model);
+                }
+                seen.sort_unstable();
+                let mut expected_models: Vec<_> = expected.iter().map(|(id, _)| *id).collect();
+                expected_models.sort_unstable();
+                assert_eq!(seen, expected_models, "{label}: each live model draws once and stale A never draws");
+            }
+        };
+        let a_section = resolve_registered_section(&meshes, &sources[0]);
+        let b_section = resolve_registered_section(&meshes, &sources[1]);
+        run_and_check(&mut cull, &[(a, a_section), (b, b_section)]);
+        cull.retire_model(a);
+        let old = meshes.remove(a_mesh).unwrap();
+        pool.free(&old.alloc, old.vert_count, old.index_count);
+        let resolved: Vec<_> = sources.iter().map(|s| resolve_registered_section(&meshes, s)).collect();
+        assert_eq!(resolved[0].index_count, 0);
+        cull.set_sections(&resolved);
+        run_and_check(&mut cull, &[(b, b_section)]);
+        // Keep the stale A instance throughout; normal instance cleanup is not the reason it disappears.
+        assert_eq!(cull.instances.as_slice()[raw_slot(a_instance) as usize].model, a);
+        let pool_generation = pool.generation();
+        let c_mesh = insert(&mut pool, &mut meshes);
+        assert_eq!(a_mesh.data().as_ffi() as u32, c_mesh.data().as_ffi() as u32, "actual SlotMap slot reuse");
+        assert_ne!(a_mesh.data().as_ffi(), c_mesh.data().as_ffi(), "different full mesh generation");
+        assert_eq!(pool.generation(), pool_generation, "recreation must be safe without pool relocation");
+        assert_eq!(resolve_registered_section(&meshes, &sources[0]).index_count, 0,
+                   "the old source must not bind a new-generation mesh even at the same pool address");
+        sources.push(source(c_mesh));
+        let c_section = resolve_registered_section(&meshes, sources.last().unwrap());
+        let c = cull.register_model(1.0, &[lod], &[c_section], &[material]);
+        assert!(a != b && b != c && a != c, "stable model IDs cannot alias retired A");
+        cull.instance_add(instance(c));
+        let resolved: Vec<_> = sources.iter().map(|s| resolve_registered_section(&meshes, s)).collect();
+        cull.set_sections(&resolved);
+        run_and_check(&mut cull, &[(b, b_section), (c, c_section)]);
+        eprintln!("PASS retired_model_three_views: actual pool/full-generation resolver and main/shadow/color GPU readback preserve live B/C with stale A");
+    }
+
 }
