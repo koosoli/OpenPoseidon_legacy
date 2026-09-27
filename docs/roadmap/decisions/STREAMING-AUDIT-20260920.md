@@ -2246,3 +2246,18 @@ Aggregate row14warm1536total887.291ms includes textureRead757.532/create86.630,
 mesh13.880/alpha0/geometry0: read problem remains. Inclusive fields overlap.
 No broader performance acceptance or default-policy change follows.
 Upcoming PacTexture subphase diagnostics are pending/not included; fullplanOPEN.
+
+## Sept27 compressed mip read subphases
+
+da3a2866 build19/deploy pass; actual022229 clean0 on matchinginstalledda3.
+Opt-in active profile scopes include cold, warm and alpha reads; first128>=2ms
+source-order cap saturates startup02:22:49.169. No complete moving-route or
+alltexture bottleneck distribution can be inferred from this truncated sample.
+Betulahumilis7mips: open.005/loop19.675/packedAllocCopy3.324/LZO15.524/raw.012/
+total19.681ms (4LZO/3raw); singlealpha mip open.003/loop20.913/packed10.733/
+LZO10.176/total20.916ms. Packed bucket includes allocation/copy; these are owner
+CPU elapsed, not GPU time. SourceRead buffer zeroing/prepared-store take are
+outside Pactext rows; this is not a partition of whole TextureWgpu read time.
+Original BC compressed payload/quality/policy unchanged,831frames diagnostic
+only/performancefalse. Zero-copy and FileCache-flush source candidates are
+being edited and not validated or included. FullplanOPEN/defaultsunchanged.
