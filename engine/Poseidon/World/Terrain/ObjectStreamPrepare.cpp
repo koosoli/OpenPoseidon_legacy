@@ -432,7 +432,11 @@ struct ObjectStreamPreparer::Impl
         std::vector<WarmJob> queue;
         std::array<WarmSlot, Streaming::WarmTextureJobPolicy::JobLimit> slots{};
         size_t captureCursor = 0; // owner-only ordinal, no persistent shape reference
-        WarmState()
+        Streaming::WarmTextureJobPolicy::FirstMemberFairness earlyFirst;
+        WarmState() : earlyFirst([] {
+            const char* flag = std::getenv("WGR_OBJECT_STREAM_WARM_EARLY_SLICE");
+            return flag && std::strcmp(flag, "1") == 0;
+        }())
         {
             queue.reserve(Streaming::WarmTextureJobPolicy::JobLimit);
             if (queue.capacity() > Streaming::WarmTextureJobPolicy::JobLimit)
@@ -449,6 +453,26 @@ struct ObjectStreamPreparer::Impl
             Streaming::WarmTextureJobPolicy::ScratchFits(stats.readyByteBudget,
             stats.readyPayloadBytes, stats.parseReservedBytes, stats.conversionReservedBytes,
             stats.textureEncodeReservedBytes, stats.warmTextureScratchBytes, stats.warmTextureMetadataBytes + WarmStorageBytes());
+    }
+    // Called only under mutex after convertQueue has had priority. The opt-in
+    // permits one first member ahead of a runnable cold parse; later members
+    // and all other warm jobs retain the existing cold-first ordering until
+    // an actual cold parse completes.
+    bool ShouldRunWarm(bool& earlySelected)
+    {
+        earlySelected = false;
+        if (!warm || warm->queue.empty() || !HasWarmByteRoom()) return false;
+        const bool coldRunnable = !queue.empty() && stats.ready < ObjectStreamPreparer::ReadyLimit() && HasParseByteRoom();
+        if (!coldRunnable) return true; // retain the existing warm-on-cold-blocked path
+        if (!warm->earlyFirst.enabled) return false; // no extra headroom work with the candidate OFF
+        if (!Streaming::WarmTextureJobPolicy::ScratchAndNextParseFit(stats.readyByteBudget,
+            stats.readyPayloadBytes, stats.parseReservedBytes, ParseReservation(),
+            stats.conversionReservedBytes, stats.textureEncodeReservedBytes,
+            stats.warmTextureScratchBytes, stats.warmTextureMetadataBytes + WarmStorageBytes()))
+            return false;
+        earlySelected = warm->earlyFirst.TryStart(true, warm->queue.front().next,
+            stats.warmTextureActive);
+        return earlySelected;
     }
     bool PreparePackedTexture(const PackedTextureRead& texture, uint64_t jobGen, uint32_t index,
         uint64_t textureGeneration, const render::DdsPublicationToken& publication,
@@ -805,9 +829,10 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
             stats.conversionReservedBytes -= textureScratch; cv.notify_all();
             continue;
         }
-        if (warm && !warm->queue.empty() && HasWarmByteRoom() &&
-            (queue.empty() || stats.ready >= ObjectStreamPreparer::ReadyLimit() || !HasParseByteRoom()))
+        bool earlyWarm = false;
+        if (ShouldRunWarm(earlyWarm))
         {
+            const size_t coldQueueAtSelection = queue.size();
             WarmJob job = std::move(warm->queue.front()); warm->queue.erase(warm->queue.begin());
             stats.warmTextureQueued = warm->queue.size(); ++stats.warmTextureActive;
             stats.warmTextureScratchBytes += Streaming::WarmTextureJobPolicy::ScratchBytes;
@@ -824,9 +849,16 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                     const auto& read = job.reads[job.next];
                     PackedTextureRead texture{read.key, {}, read.initializedSource, &read.initializedSource->Request()};
                     if (auto* proof = Streaming::WarmTextureProvenance::Active())
+                    {
+                        if (earlyWarm)
+                            Streaming::WarmTextureProvenance::Emit(proof->Stamp(
+                                Streaming::WarmTextureProvenance::Match(read.key, read.initializedSource),
+                                Streaming::WarmTextureProvenance::Event::EarlyWorkerStarted,
+                                coldQueueAtSelection, job.generation));
                         Streaming::WarmTextureProvenance::Emit(proof->Stamp(
                             Streaming::WarmTextureProvenance::Match(read.key, read.initializedSource),
                             Streaming::WarmTextureProvenance::Event::WorkerStarted, job.index, job.generation));
+                    }
                     keep = PreparePackedTexture(texture, job.generation, job.index, job.textureGeneration,
                         job.publication, true, row, prepared, bytes, skipped, unreadable);
                     ++job.next;
@@ -1116,6 +1148,8 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
         lock.lock();
         stats.parseReservedBytes -= reservation;
         cv.notify_all(); // failed/stale completion also releases its reservation
+        if (warm && gen == generation.load(std::memory_order_relaxed) && !stale[index])
+            warm->earlyFirst.ColdCompleted();
         stats.texPrepared += texPrepared;
         stats.texPreparedBytes += texPreparedBytes;
         stats.texSkipped += texSkipped;
@@ -1317,6 +1351,7 @@ void ObjectStreamPreparer::Reset(const std::string* paths, size_t modelCount)
         if (_impl->warm)
         {
             _impl->warm->captureCursor = 0;
+            _impl->warm->earlyFirst.Reset();
             for (auto& job : _impl->warm->queue) freeWarm[freeWarmCount++] = std::move(job);
             _impl->warm->queue.clear(); // moved-from entries only; preserve reserved8 storage
         }

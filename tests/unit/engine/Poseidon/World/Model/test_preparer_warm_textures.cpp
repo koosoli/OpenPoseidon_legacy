@@ -38,8 +38,29 @@ TEST_CASE("Warm texture debt bounds share the existing parse budget", "[warm-tex
     CHECK_FALSE(WarmTextureJobPolicy::ScratchFits(scratch * 2, 0, 1, 0, 0, scratch));
     CHECK(WarmTextureJobPolicy::ScratchFits(scratch * 2, 0, 0, 0, 0, scratch));
     CHECK(WarmTextureJobPolicy::ScratchFits(0, 0, 0, 0, 0, scratch * 8)); // soft budget0 alone is NOT a concurrency cap
+    const uint64_t nextParse = 16ull * 1024 * 1024;
+    CHECK(WarmTextureJobPolicy::ScratchAndNextParseFit(scratch + nextParse, 0, 0, nextParse, 0, 0, 0));
+    CHECK_FALSE(WarmTextureJobPolicy::ScratchAndNextParseFit(scratch + nextParse - 1, 0, 0, nextParse, 0, 0, 0));
+    CHECK_FALSE(WarmTextureJobPolicy::ScratchAndNextParseFit(scratch + nextParse, 1, 0, nextParse, 0, 0, 0));
+    CHECK(WarmTextureJobPolicy::ScratchAndNextParseFit(0, 0, 0, nextParse, 0, 0, 0)); // unlimited soft budget
+    CHECK_FALSE(WarmTextureJobPolicy::ScratchAndNextParseFit(0, 0, UINT64_MAX, 1, 0, 0, 0)); // no overflow
     CHECK(WarmTextureJobPolicy::ActiveRoom(0)); CHECK(WarmTextureJobPolicy::ActiveRoom(1));
     CHECK_FALSE(WarmTextureJobPolicy::ActiveRoom(2)); CHECK_FALSE(WarmTextureJobPolicy::ActiveRoom(16));
+}
+TEST_CASE("Early first warm member yields to each completed cold parse", "[warm-texture-policy]")
+{
+    WarmTextureJobPolicy::FirstMemberFairness off;
+    CHECK_FALSE(off.TryStart(true, 0, 0)); // default behavior with cold work runnable
+    WarmTextureJobPolicy::FirstMemberFairness policy(true);
+    CHECK_FALSE(policy.TryStart(false, 0, 0)); // ordinary empty/blocked-cold path does not spend allowance
+    CHECK(policy.TryStart(true, 0, 0)); // one first member may pass a nonempty runnable cold queue
+    CHECK_FALSE(policy.TryStart(true, 1, 0)); // requeued later member cannot take another early slice
+    CHECK_FALSE(policy.TryStart(true, 0, 0)); // another first member must wait for cold completion
+    CHECK_FALSE(policy.TryStart(true, 0, 1)); // concurrent warm member cannot take the early slot
+    policy.ColdCompleted();
+    CHECK(policy.TryStart(true, 0, 0));
+    policy.Reset();
+    CHECK(policy.TryStart(true, 0, 0)); // a new world inventory starts a new bounded sequence
 }
 TEST_CASE("Disabled warm jobs never change model state or allocate metadata", "[warm-texture-default]")
 {

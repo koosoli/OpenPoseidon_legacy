@@ -23,7 +23,7 @@ public:
     static constexpr uint32_t MaxRecords = 8, MaxRows = 128;
     enum class Event : uint8_t
     {
-        Accepted, Submitted, SubmitRefused, WorkerStarted, WorkerReadFailed,
+        Accepted, Submitted, SubmitRefused, WorkerStarted, EarlyWorkerStarted, WorkerReadFailed,
         WorkerPut, WorkerPutRefused, WorkerOutcomeUnknown, WorkerSkipped, WorkerSuppressed, WorkerCancelled,
         StorePut, StorePutRefused,
         OwnerExactAttempt, OwnerKeyOnlyAttempt, StoreTakeMissKeyOnly, StoreTakeWarm,
@@ -69,6 +69,7 @@ private:
         case Event::Submitted: return "submitted";
         case Event::SubmitRefused: return "submitRefused";
         case Event::WorkerStarted: return "workerStarted";
+        case Event::EarlyWorkerStarted: return "earlyWorkerStarted";
         case Event::WorkerReadFailed: return "workerReadFailed";
         case Event::WorkerPut: return "workerPut";
         case Event::WorkerPutRefused: return "workerPutRefused";

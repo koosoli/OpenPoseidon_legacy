@@ -16,6 +16,7 @@ param(
     [switch]$HotSourceProofRetirement,
     [switch]$WeakCacheProof,
     [switch]$WarmTextureProvenance,
+    [switch]$WarmEarlySlice,
     [switch]$RequireHotSourceProofRetirement,
     [switch]$RequireWarmMaterialPreflightUpload,
     [switch]$RequireWarmMaterialStageUpload,
@@ -38,6 +39,7 @@ if ($RequireWarmMaterialStageUpload) { $WarmTextureJobs = $true; $WarmProfile = 
 if ($RequireWarmMaterialPreflightUpload) { $WarmMaterialPreflight = $true }
 if ($WarmMaterialPreflight) { $WarmTextureJobs = $true; $WarmProfile = $true }
 if ($WeakCacheProof) { $HotSourceProofRetirement = $true }
+if ($WarmEarlySlice) { $WarmTextureProvenance = $true }
 if ($WarmTextureProvenance) { $WarmTextureJobs = $true; $WarmProfile = $true }
 if ($RequireHotSourceProofRetirement) { $HotSourceProofRetirement = $true }
 if ($HotSourceProofRetirement) { $WarmTextureJobs = $true; $WarmProfile = $true }
@@ -66,6 +68,7 @@ if (!$env:LOCK_OWNER) {
         if ($HotSourceProofRetirement) { $argv += '-HotSourceProofRetirement' }
         if ($WeakCacheProof) { $argv += '-WeakCacheProof' }
         if ($WarmTextureProvenance) { $argv += '-WarmTextureProvenance' }
+        if ($WarmEarlySlice) { $argv += '-WarmEarlySlice' }
         if ($RequireHotSourceProofRetirement) { $argv += '-RequireHotSourceProofRetirement' }
         if ($RequireWarmMaterialPreflightUpload) { $argv += '-RequireWarmMaterialPreflightUpload' }
         if ($RequireWarmMaterialStageUpload) { $argv += '-RequireWarmMaterialStageUpload' }
@@ -127,6 +130,7 @@ $environment = @{
     WGR_OBJECT_STREAM_WARM_MATERIAL_PREFLIGHT = $(if ($WarmMaterialPreflight) { '1' } else { '0' })
     WGR_OBJECT_STREAM_WEAK_CACHE_PROOF = $(if ($WeakCacheProof) { '1' } else { '0' })
     WGR_OBJECT_STREAM_WARM_TEXTURE_TRACE = $(if ($WarmTextureProvenance) { '1' } else { '0' })
+    WGR_OBJECT_STREAM_WARM_EARLY_SLICE = $(if ($WarmEarlySlice) { '1' } else { '0' })
     WGR_OBJECT_STREAM_HOT_SOURCE_PROOF_RETIRE = $(if ($HotSourceProofRetirement) { '1' } else { '0' })
 }
 if ($TerrainPageTimings) {
@@ -176,6 +180,7 @@ try {
         warmMaterialPreflight = [bool]$WarmMaterialPreflight
         hotSourceProofRetirement = [bool]$HotSourceProofRetirement
         weakCacheProof = [bool]$WeakCacheProof; warmTextureProvenance = [bool]$WarmTextureProvenance
+        warmEarlySlice = [bool]$WarmEarlySlice
         requireHotSourceProofRetirement = [bool]$RequireHotSourceProofRetirement
         requireWarmMaterialPreflightUpload = [bool]$RequireWarmMaterialPreflightUpload
         requireWarmMaterialStageUpload = [bool]$RequireWarmMaterialStageUpload
@@ -572,7 +577,17 @@ try {
         committedRows=$modelRowCommits.Count;truncatedRows=$modelRowTruncated.Count;
         rows=@($modelRowCommits | ForEach-Object {$_.Line});
         scope='Bounded post-queue-write partial MODEL source ranges; not driver completion, physical memory or performance acceptance'}
-    @{passed = [bool]($warmJobsProven -and $warmStageFamilyProven -and $warmPreflightProven -and $hotRetirementProven -and $coldAlphaProven -and $coldStartupProven); mode = $Mode; admissionMode = $AdmissionMode; parkedTextureRefill = [bool]$ParkedTextureRefill; lazyTextureGroups = [bool]$LazyTextureGroups; warmProfile = [bool]$WarmProfile; screeningOnly = $true; performanceAccepted = $false; terrainPageTimings = [bool]$TerrainPageTimings
+    $earlyRows = @(Select-String -LiteralPath $log -Pattern 'Warm provenance: row=\d+ token=\d+ event=earlyWorkerStarted a=(\d+) b=(\d+)')
+    foreach ($row in $earlyRows) {
+        if ([uint64]$row.Matches[0].Groups[1].Value -lt 1 -or
+            [uint64]$row.Matches[0].Groups[2].Value -lt 1) { throw 'Invalid actual early warm selection witness' }
+    }
+    if ($earlyRows.Count -gt 32 -or (!$WarmEarlySlice -and $earlyRows.Count)) { throw 'Unbounded or unexpected early warm selection' }
+    $earlyProof = @{requested=[bool]$WarmEarlySlice; witnessed=$earlyRows.Count;
+        rows=@($earlyRows | ForEach-Object {$_.Line});
+        scope='Actual first-member dequeue with a positive cold queue; not useful upload, FPS or cold-throughput acceptance'}
+    $earlyProven = !$WarmEarlySlice -or $earlyRows.Count -gt 0
+    @{passed = [bool]($warmJobsProven -and $warmStageFamilyProven -and $warmPreflightProven -and $hotRetirementProven -and $coldAlphaProven -and $coldStartupProven -and $earlyProven); mode = $Mode; admissionMode = $AdmissionMode; parkedTextureRefill = [bool]$ParkedTextureRefill; lazyTextureGroups = [bool]$LazyTextureGroups; warmProfile = [bool]$WarmProfile; screeningOnly = $true; performanceAccepted = $false; terrainPageTimings = [bool]$TerrainPageTimings
         frameCount = $count; dropped = $dropped; enginePhaseTiming = $phases; baseline = $baseline; returned = $returned
         routeSamples = $routeSamples; postExitHashes = $finalHashes
         renderCallCpuTimings = [bool]$TerrainPageTimings; renderCallCpuTimingProof = $callCpuProof
@@ -585,6 +600,7 @@ try {
         archiveSourceBindings = [bool]$ArchiveSourceBindings; archiveSourceBindingProof = $archiveBindings
         weakCacheProof = [bool]$WeakCacheProof; weakCacheProofState = $archiveBindings
         warmTextureProvenance = [bool]$WarmTextureProvenance
+        warmEarlySlice = [bool]$WarmEarlySlice; warmEarlySliceProof = $earlyProof
         hotSourceProofRetirement = [bool]$HotSourceProofRetirement; hotSourceProofRetirementProof = $hotRetirementProof
         warmMaterialPreflight = [bool]$WarmMaterialPreflight; warmMaterialPreflightProof = $warmPreflightProof
         warmTextureJobs = [bool]$WarmTextureJobs; warmTextureJobProof = $warmJobProof
@@ -599,6 +615,7 @@ try {
     if (!$coldStartupProven) { throw 'NotExercised: no positive observed initial DayZ admission alpha delta and source-validated owned upload; evidence retained' }
     if (!$coldAlphaProven) { throw 'NotExercised: no positive real DayZ route alpha peek delta and source-validated cold owned upload; evidence retained' }
     if (!$hotRetirementProven) { throw 'NotExercised: no actual owner proof drop and later successful source-validated worker stage upload; evidence retained' }
+    if (!$earlyProven) { throw 'NotExercised: no actual early warm first-member dequeue; evidence retained' }
     if (!$warmPreflightProven) { throw 'NotExercised: no same-source initialized-stage preflight and successful bound worker stage upload; evidence retained' }
     if (!$warmJobsProven) { throw 'Warm preparation did not demonstrate an actual source-validated GPU upload; evidence retained' }
     if (!$warmStageFamilyProven) { throw 'Required bound worker normal/specular filename-family upload not exercised; evidence retained, no material-slot proof claimed' }
