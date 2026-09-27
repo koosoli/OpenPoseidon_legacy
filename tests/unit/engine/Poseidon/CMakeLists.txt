@@ -301,6 +301,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     Asset/Formats/Enfusion/test_xob_collision.cpp
     Foundation/Algorithms/test_lzo1x.cpp
     Graphics/Rendering/test_paa_lzo_replay_cache.cpp
+    Graphics/Rendering/test_paa_dxt_bounds.cpp
     Foundation/Algorithms/test_lz4block.cpp
     Foundation/Algorithms/test_radixsort.cpp
     Foundation/Algorithms/test_sha256.cpp

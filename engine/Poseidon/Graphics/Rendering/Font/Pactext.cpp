@@ -3,6 +3,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
+#include <limits>
 #include <cstring>
 #include <Poseidon/Graphics/Rendering/Shape/ObjectAdmitProfile.hpp>
 #include <vector>
@@ -1216,16 +1217,23 @@ int PacLevelMem::LoadPaaDXT(QIStream& in, void* mem, const PacPalette* pal) cons
     // return>0 - no more mip-map levels available
     // return==0 - texture loaded successfully
 
+    if (in.fail())
+    {
+        Fail("Invalid compressed mip destination or stream");
+        return -1;
+    }
     PoseidonAssert(pal->_nColors == 0);
 
     // load PAA file
     // get image size
     long w = fgetiw(in);
     long h = fgetiw(in);
+    if (in.fail()) { Fail("Incomplete compressed mip header"); return -1; }
     if (w == 0 && h == 0)
     {
         return 1;
     } // mip-map list terminator
+    if (!mem) { Fail("Invalid compressed mip destination"); return -1; }
 
     // Bit 15 of the stored width marks an LZO-compressed level; the real width is
     // the low bits. Reading it raw produced widths like 34816 (0x8000 | 2048) and
@@ -1252,16 +1260,37 @@ int PacLevelMem::LoadPaaDXT(QIStream& in, void* mem, const PacPalette* pal) cons
         return -1;
     }
 
+    // This fresh header must describe the destination metadata used by the
+    // caller. In particular LZO's output bound must not use changed dimensions.
+    // Keep legacy positive thin/tall heights rather than adding a new ceiling.
+    if (in.fail() || h <= 0 || _w != w || _h != h)
+    {
+        Fail("Compressed mip dimensions do not match destination");
+        return -1;
+    }
+    const size_t blockBytes = ENUM_CAST(PacFormat, _sFormat) == ENUM_CAST(PacFormat, PacDXT1) ? 8u : 16u;
+    const size_t blocksW = (static_cast<size_t>(w) + 3) / 4;
+    const size_t blocksH = (static_cast<size_t>(h) + 3) / 4;
+    if (blocksH > std::numeric_limits<size_t>::max() / blocksW ||
+        blocksW * blocksH > std::numeric_limits<size_t>::max() / blockBytes)
+    {
+        Fail("Compressed mip size overflow");
+        return -1;
+    }
+    const size_t sourceCapacity = blocksW * blocksH * blockBytes;
+    if (lzoCompressed && ENUM_CAST(PacFormat, _dFormat) != ENUM_CAST(PacFormat, _sFormat))
+    {
+        // The LZO path emits BC blocks, not converted pixels.
+        Fail("Unsupported compressed mip conversion");
+        return -1;
+    }
     if (lzoCompressed)
     {
         // Block-compressed payload size from the level's own dimensions: DXT1
         // stores 8 bytes per 4x4 block, the rest 16. This is the decompressed
         // size the level must produce; anything else means the payload was not
         // what its header claimed.
-        const long blockBytes = ENUM_CAST(PacFormat, _sFormat) == ENUM_CAST(PacFormat, PacDXT1) ? 8 : 16;
-        const long blocksW = (w + 3) / 4;
-        const long blocksH = (h + 3) / 4;
-        const size_t expected = static_cast<size_t>(blocksW) * blocksH * blockBytes;
+        const size_t expected = sourceCapacity;
 
         WarmMipChainTiming* timing = GCurrentWarmMipChainTiming;
         if (timing)
@@ -1331,6 +1360,13 @@ int PacLevelMem::LoadPaaDXT(QIStream& in, void* mem, const PacPalette* pal) cons
 
     if (ENUM_CAST(PacFormat, _dFormat) == ENUM_CAST(PacFormat, _sFormat))
     {
+        // Short legacy raw tails intentionally leave the remainder untouched.
+        // A larger declaration cannot fit the authoritative BC block layout.
+        if (static_cast<size_t>(dSize) > sourceCapacity)
+        {
+            Fail("Compressed mip payload exceeds destination layout");
+            return -1;
+        }
         WarmMipChainTiming* timing = GCurrentWarmMipChainTiming;
         if (timing)
         {
@@ -1349,10 +1385,18 @@ int PacLevelMem::LoadPaaDXT(QIStream& in, void* mem, const PacPalette* pal) cons
     }
     else
     {
+        if (ENUM_CAST(PacFormat, _sFormat) != ENUM_CAST(PacFormat, PacDXT1) ||
+            ENUM_CAST(PacFormat, _dFormat) != ENUM_CAST(PacFormat, PacARGB1555) ||
+            (w % 4) || (h % 4) || static_cast<size_t>(dSize) != sourceCapacity)
+        {
+            Fail("Unsupported or incomplete DXT1 pixel conversion");
+            return -1;
+        }
         // load to temporary buffer and decompress
         AUTO_STATIC_ARRAY(char, temp, 256 * 256);
         temp.Resize(dSize);
         in.read(temp.Data(), dSize);
+        if (in.fail()) { Fail("Compressed Read error"); return -1; }
         // decompress from temp to mem
         DecompressDXT1(mem, temp.Data(), _w, _h);
     }
