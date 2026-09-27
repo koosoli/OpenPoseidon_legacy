@@ -2586,3 +2586,31 @@ median23.136/p95123.028/p99380.234/max1019.781ms; nearest-rank/usualmedian.
 Returned19923/required0, allwarmfields0/noqueue storage/sourceOFF0. Root viewed
 settledPOI without obvious new local geometry/material gaps, narrow default
 compatibility only. WholeplanOPEN/defaultReady/performanceAcceptedfalse/allnewflagsOFF.
+
+## Sept27 actual-slot actor expiry and retained warm-capture failure
+
+7326a1a0 all5target22step build PASS; simulation26714assertions/28cases PASS/noSKIP.
+Matchedclean732607:20 EXE 8ED3678C58F9DBEB3C5A6CA70F062B172A1F74E793FE021E85F255E8B5AE6750,
+DLL 4D218F97F3C707FB8C19E2FD1CDB2134795D0EC1D60D0765510C763A20876BA2.
+Automaticleaseclock follows actualslots, manualchannels retained; bounded4
+weakdeleted/emptyautomatic cleanup. Incomplete actorregistry membership remains,
+service defaultsOFF. Sparse64actor productionpredicate has unit coverage only.
+Smallgame072020 PASS/clean0: Ready2wall leases, independentquery roles/move/
+reacquire/Fire/damage and weakactor deletion release0leases/queryreferences,
+savedwall preserved/required0. Headless072112 PASS/clean0 automatic2wallsReady,
+CPUgeometry/Firecontact1001, rendererNone/VB0/required0; its runner does not
+exercise headlessdeparture, which is not claimed. No general MP/asset proof.
+
+Warmcapture072133 FAILEDstrictpositivegate/resultpassedfalse/runnerexit1;
+ownedgame cleanexit0. Allwarmjobs0/queue/scratch0/optionalstate1048;875frames
+mean39.893674/median22.85/p95115.770/p99379.062/max949.280ms, dropped0,
+nearest-rank/usualmedian.64loggedcapture calls are a boundedprefix:5have positive
+noCurrentSource,2are workcapped. These distinguish missing witnesses but do not
+prove global cause or individual physical-source rejection reasons. Actualsource
+256live/117728knownCppbytes/caprefused6310. Runner now retains real result/rawframes/
+sourceproof/image on strictgate failure; root viewed returnedsettled against4dbdefault
+localstreet/trees/buildings/bus without obvious new geometry/material gap. Narrow
+stillimage only, no traversal/performance acceptance/noPASS.
+Next model-owner capture-purpose source and storefixture are unbuilt/pending,
+excluded. No cap raises, usefulwarmwork/gain/defaultpromotion/performanceacceptance.
+WholeplanOPEN/defaultReadyfalse/newflagsOFF.

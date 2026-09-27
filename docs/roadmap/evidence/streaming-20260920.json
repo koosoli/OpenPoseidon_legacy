@@ -13042,6 +13042,542 @@
         "samples.jsonl": "186408e87d3de6cb1fc95c352c34fc0087eea9bef396510a552f0105a3604c6c",
         "warm-texture-job-proof.json": "ce00b41cb5992d4aa099e4bd352c52ef10e8a5a72745461972230f2ee21a6140"
       }
+    },
+    {
+      "run": "actor-expiry-game-20260927-20260927-072020",
+      "classification": "PASS cleanexit0; narrowautomatic actorlease lifecycle",
+      "provenance": {
+        "installed": "codex/streaming-residency 7326a1a0 2026-09-27_07:20 deploy-ps1",
+        "head": "7326a1a04a416ed89e1acfcf992085f35a7c24c5",
+        "disabled": false,
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "8ED3678C58F9DBEB3C5A6CA70F062B172A1F74E793FE021E85F255E8B5AE6750",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "4D218F97F3C707FB8C19E2FD1CDB2134795D0EC1D60D0765510C763A20876BA2",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "registeredWarming": false,
+        "scriptSha256": "211708D664E605E190AC8C4C264D2B7D696C9485F48ACDEA09CC452CA88A4A1C",
+        "shapeCacheLimit": null,
+        "fixture": {
+          "absolute_model_path": true,
+          "actor": [
+            1190,
+            10,
+            1200
+          ],
+          "camera": [
+            100,
+            80,
+            100
+          ],
+          "camera_isolation_env": {
+            "WGR_OBJECT_STREAM_RADIUS_CELLS": "8",
+            "WGR_OBJECT_STREAM_WINDOW_GROWTH": "0"
+          },
+          "cell_metres": 50.0,
+          "elevation": 10.0,
+          "fire_segment": [
+            [
+              1190,
+              11.5,
+              1200
+            ],
+            [
+              1210,
+              11.5,
+              1200
+            ]
+          ],
+          "half_depth": 6.0,
+          "land_range": 32,
+          "large_wall": false,
+          "model_sha256": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+          "models": [
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\actor-expiry-game-20260927-20260927-072020\\fixture\\streaming_fixture\\wall.p3d"
+          ],
+          "notes": [
+            "Absolute-model mode uses original loose files without an archive mount; relative mode needs a separately configured loose-file root.",
+            "Camera at 100 is isolated from walls at 1200/1230 with growth disabled.",
+            "No ResolveObject: actor demand must admit geometry with transient leases.",
+            "Generic inventory/classification/admission must establish readiness.",
+            "Self-check is not engine parsing, collision or runtime verification."
+          ],
+          "placements": [
+            {
+              "id": 1001,
+              "model_index": 0,
+              "position": [
+                1200.0,
+                11.5,
+                1200.0
+              ]
+            },
+            {
+              "id": 1002,
+              "model_index": 0,
+              "position": [
+                1230.0,
+                11.5,
+                1200.0
+              ]
+            }
+          ],
+          "positive_warming": false,
+          "reference_all_models": false,
+          "registered_warming": false,
+          "schema": 1,
+          "terrain_range": 32,
+          "wall_world_bounds": [
+            [
+              1199.5,
+              10,
+              1194.0,
+              1200.5,
+              13,
+              1206.0
+            ],
+            [
+              1229.5,
+              10,
+              1194.0,
+              1230.5,
+              13,
+              1206.0
+            ]
+          ],
+          "world_sha256": "9aa4f7c355479a8f2ccaf8b6c36b8a4bc9047b1d4fc3389ec7795e48a5e0b061"
+        }
+      },
+      "summary": {
+        "passed": true,
+        "performanceAccepted": false,
+        "queryStatus": "Ready",
+        "releasedStatus": "Unknown",
+        "leasedAfterRelease": 0,
+        "queryBorrowedModelsAfterRelease": 0,
+        "queryBorrowedEntriesAfterRelease": 0,
+        "releasedIds": {
+          "objects": [
+            {
+              "id": 1001,
+              "present": false
+            },
+            {
+              "id": 1002,
+              "present": true,
+              "destroyed": false,
+              "destroyPhase": 0,
+              "rawDamage": 0.25,
+              "mustBeSaved": true,
+              "visualResident": false,
+              "x": 1230,
+              "z": 1200,
+              "y": 11.5,
+              "radius": 6.20483684539795,
+              "frame": [
+                1,
+                0,
+                0,
+                0,
+                1,
+                0,
+                0,
+                0,
+                1,
+                1230,
+                11.5,
+                1200
+              ],
+              "model": "c:\\users\\mail\\onedrive\\documents\\github\\cwr-ce-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\actor-expiry-game-20260927-20260927-072020\\fixture\\streaming_fixture\\wall.p3d",
+              "hasGeometry": true,
+              "hasFireGeometry": true,
+              "hasViewGeometry": true,
+              "shapeVisualDeferred": false,
+              "normalVertexBuffers": 1
+            }
+          ],
+          "ok": true
+        },
+        "damage": {
+          "rawDamage": 0.25,
+          "mustBeSaved": true,
+          "ok": true
+        },
+        "required": 0
+      },
+      "limits": "Actualsmallgame2wallReady actor/query/move/reacquire/fire/damage/weakactor-delete cleanup:0leases/queryrefs, savedwall preserved/required0. No sparse64actor runtimeproof; productionpredicate covered byunit only. Incompleteactorregistrymembership remains; manualchannels preserved/defaultserviceOFF, no broadconsumer/MP/retailproof/performance.",
+      "sha256": {
+        "engine.log": "e8ad0cf37d07289bf84a35e2354d9bfe3d9cd47936fcc29c78b8bfa89f1f1532",
+        "harness.jsonl": "1686cb8cf11bbe2b1804492664e396e93a2e10adc04e6d4b94fff9b70a166cfd",
+        "provenance.json": "bad236c285f47a24251fe383a6da2053dbee10569513462dc742cc204d69882a",
+        "result.json": "cec33490a9ffd46ad0bbcc04e393e3423430646bfe8b4f5d8f4e2e7cb0034e89",
+        "visual.png": "55fc8df5f41bfd5125a230c5ed5d895e6383eca99e01ee9ba757861facc45797"
+      }
+    },
+    {
+      "run": "actor-expiry-headless-20260927-20260927-072112",
+      "classification": "PASS cleanexit0; narrowautomatic actorlease lifecycle",
+      "provenance": {
+        "disabled": false,
+        "coldPositive": false,
+        "serverExe": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\dist\\x64-win-rwdi\\PoseidonServer.exe",
+        "environment": {
+          "WGR_OBJECT_STREAM_PBO": "0",
+          "POSEIDON_MODEL_DDC": "0",
+          "WGR_SIMULATION_RESIDENCY_TEST": "0",
+          "WGR_ADAPTIVE_TEXTURE_DETAIL": "0",
+          "POSEIDON_REFORGER_OBJECTS": null,
+          "POSEIDON_LOCKSTEP_HZ": null,
+          "POSEIDON_REFORGER_STREAM": null,
+          "WGR_OBJECT_STREAM_RADIUS_CELLS": "8",
+          "POSEIDON_REFORGER_WORLD": null,
+          "WGR_SIMULATION_RESIDENCY": "1",
+          "WGR_OBJECT_STREAM_WINDOW_GROWTH": "0",
+          "POSEIDON_TEST_RAIN": null,
+          "WGR_NATIVE_DDS_PREPARE": "0",
+          "WGR_SIMULATION_POSITIVE_COLD": "0",
+          "WGR_OBJECT_STREAM_PBO_TEXTURES": "0",
+          "WGR_NATIVE_DDS_BC3_ONLY": "0",
+          "WGR_LOD_GOVERNOR_RANGE": null,
+          "WGR_OBJECT_STREAM_TEST_BUDGET": null,
+          "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\actor-expiry-headless-20260927-20260927-072112\\user",
+          "WGR_OBJECT_STREAM_GPU_BUDGET": "0",
+          "WGR_WATER_CURLING_BREAKER": null
+        },
+        "fixturePath": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\actor-expiry-headless-20260927-20260927-072112\\fixture",
+        "scriptSha256": "62BF165B7AF0ABBC2958F07C326D200FCE1779332D2FAF404F3770AC40BEA1C5",
+        "fixture": {
+          "absolute_model_path": true,
+          "actor": [
+            1190,
+            10,
+            1200
+          ],
+          "camera": [
+            100,
+            80,
+            100
+          ],
+          "camera_isolation_env": {
+            "WGR_OBJECT_STREAM_RADIUS_CELLS": "8",
+            "WGR_OBJECT_STREAM_WINDOW_GROWTH": "0"
+          },
+          "cell_metres": 50.0,
+          "elevation": 10.0,
+          "fire_segment": [
+            [
+              1190,
+              11.5,
+              1200
+            ],
+            [
+              1210,
+              11.5,
+              1200
+            ]
+          ],
+          "half_depth": 6.0,
+          "land_range": 32,
+          "large_wall": false,
+          "model_sha256": "0f3461d47fd0c55c304216340680f4c15c33262485d29cb6a19916c3e745022e",
+          "models": [
+            "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\actor-expiry-headless-20260927-20260927-072112\\fixture\\streaming_fixture\\wall.p3d"
+          ],
+          "notes": [
+            "Absolute-model mode uses original loose files without an archive mount; relative mode needs a separately configured loose-file root.",
+            "Camera at 100 is isolated from walls at 1200/1230 with growth disabled.",
+            "No ResolveObject: actor demand must admit geometry with transient leases.",
+            "Generic inventory/classification/admission must establish readiness.",
+            "Self-check is not engine parsing, collision or runtime verification."
+          ],
+          "placements": [
+            {
+              "id": 1001,
+              "model_index": 0,
+              "position": [
+                1200.0,
+                11.5,
+                1200.0
+              ]
+            },
+            {
+              "id": 1002,
+              "model_index": 0,
+              "position": [
+                1230.0,
+                11.5,
+                1200.0
+              ]
+            }
+          ],
+          "positive_warming": false,
+          "reference_all_models": false,
+          "registered_warming": false,
+          "schema": 1,
+          "terrain_range": 32,
+          "wall_world_bounds": [
+            [
+              1199.5,
+              10,
+              1194.0,
+              1200.5,
+              13,
+              1206.0
+            ],
+            [
+              1229.5,
+              10,
+              1194.0,
+              1230.5,
+              13,
+              1206.0
+            ]
+          ],
+          "world_sha256": "7619c031f5b4dd4f0db68ce10f3e8b1d80c5ee3d8e2abd2e68e5d62c7e4d89d2"
+        },
+        "arguments": [
+          "-C",
+          "\"D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\"",
+          "--simulate",
+          "\"C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\actor-expiry-headless-20260927-20260927-072112\\simulation-headless.eden\"",
+          "--duration",
+          "240",
+          "--stats",
+          "2",
+          "--private",
+          "--bind-address",
+          "127.0.0.1",
+          "--port",
+          "60729",
+          "--nosound",
+          "--harness",
+          "60728",
+          "--test-world",
+          "\"C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\actor-expiry-headless-20260927-20260927-072112\\fixture\\simulation-residency.wrp\"",
+          "--log-file",
+          "\"C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\actor-expiry-headless-20260927-20260927-072112\\engine.log\""
+        ],
+        "head": "7326a1a04a416ed89e1acfcf992085f35a7c24c5",
+        "serverHash": {
+          "Algorithm": "SHA256",
+          "Hash": "C08A960D40A54F646563D0E23EA3FA422AAECA4543DAF36FD6257E0017F9F5A1",
+          "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\dist\\x64-win-rwdi\\PoseidonServer.exe"
+        },
+        "networkPort": 60729,
+        "scope": "Original static two-wall fixture; does not prove generic query completeness or gameplay consumer migration",
+        "installed": "codex/streaming-residency 7326a1a0 2026-09-27_07:20 deploy-ps1",
+        "harnessPort": 60728,
+        "missionHash": {
+          "Algorithm": "SHA256",
+          "Hash": "7525FAF397AB5817AF6BBFA379682F5378B82B54E6E5D98F12CD7208C329CF67",
+          "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\actor-expiry-headless-20260927-20260927-072112\\simulation-headless.eden\\mission.sqm"
+        },
+        "gameDir": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault"
+      },
+      "summary": {
+        "passed": true,
+        "performanceAccepted": false,
+        "cleanExit": true,
+        "renderer": "None",
+        "coldStatus": "Ready",
+        "leased": 2,
+        "required": 0,
+        "fireContactIds": [
+          1001
+        ],
+        "objects": [
+          {
+            "id": 1001,
+            "present": true,
+            "hasGeometry": true,
+            "hasFireGeometry": true,
+            "hasViewGeometry": true,
+            "shapeVisualDeferred": true,
+            "normalVertexBuffers": 0
+          },
+          {
+            "id": 1002,
+            "present": true,
+            "hasGeometry": true,
+            "hasFireGeometry": true,
+            "hasViewGeometry": true,
+            "shapeVisualDeferred": true,
+            "normalVertexBuffers": 0
+          }
+        ]
+      },
+      "limits": "Actualautomatic twooriginalfixturewalls Ready/CPU3roles/Fire contact1001, rendererNone/VB0/required0. Runnerdoesnotexerciseheadlessdeparture; no such proof. Not arbitraryassets/MP/wholemap/sparse64actors/performance.",
+      "sha256": {
+        "engine.log": "9cdbf81384b60b7edd193545acc1d0d54502f8dee46ab0ca33b179048da3ee5a",
+        "harness.jsonl": "690df66bca18d3f32fd8ef9e24a05b04cc9c29bbe47573984ddfdc9d0675fff4",
+        "provenance.json": "ee33d6b1027f0a76fb5f645da749de7a300f0719297edccfadb8cfead288481d",
+        "result.json": "1abc2ad848bca4582edc0eb1221fe870525bb79f735ca6c96f2b11df5ab2dbca",
+        "stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout.log": "ca462f9661094648d5e47b301d66ffec4dd676578cb748e2eaebf18b22c0415e"
+      }
+    },
+    {
+      "run": "warm-capture-diagnostic-20260927-disabled-20260927-072133",
+      "classification": "FAILEDstrictwarm-positivegate; retaineddiagnostic evidence/ownedcleanexit0",
+      "provenance": {
+        "clearedEnvironmentNames": [],
+        "packedTextures": false,
+        "routeX": [
+          5804.58,
+          5904.58,
+          6004.58,
+          6104.58,
+          6004.58,
+          5904.58,
+          5804.58,
+          5704.58,
+          5704.58,
+          5704.58,
+          5704.58
+        ],
+        "measurementScope": "Bounded engine16384-frame route capture; screening only, no FPS acceptance, vanilla parity or full cold-cache proof",
+        "viewDistance": 2000,
+        "paaLzoReplay": false,
+        "paaPreparationInflight": false,
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "8ED3678C58F9DBEB3C5A6CA70F062B172A1F74E793FE021E85F255E8B5AE6750",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "4D218F97F3C707FB8C19E2FD1CDB2134795D0EC1D60D0765510C763A20876BA2",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "head": "7326a1a04a416ed89e1acfcf992085f35a7c24c5",
+        "poseHoldSeconds": 3,
+        "warmTextureJobs": true,
+        "msaaSamples": 4,
+        "routeScope": "Eight convergence400m out/return poses plus three stationary recovery holds; one process per invocation",
+        "pose": [
+          5704.58,
+          2523.37,
+          73.74,
+          260.9,
+          -3.8
+        ],
+        "width": 1280,
+        "registrationQuota": false,
+        "mode": "Disabled",
+        "fpsCap": 60,
+        "scriptSha256": "31B20F171E85AB206A8636C13FC113E0CBFF790BED07FE84FBB9712028723913",
+        "archiveSourceBindings": true,
+        "height": 720,
+        "environment": {
+          "WGR_GEO_POOL_GROWTH": "2.0",
+          "WGR_NATIVE_DDS_BC3_ONLY": "0",
+          "WGR_GEO_POOL_PRESSURE_GROWTH": "0",
+          "POSEIDON_MODEL_DDC": "0",
+          "WGR_LOD_GOVERNOR_RANGE": "1",
+          "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\warm-capture-diagnostic-20260927-disabled-20260927-072133\\user",
+          "WGR_TEXTURE_STREAM_STATS": "0",
+          "WGR_OBJECT_STREAM_MAX_OBJECTS": "20000",
+          "WGR_SIMULATION_RESIDENCY": "0",
+          "WGR_OBJECT_STREAM_PBO": "1",
+          "WGR_SKY_VOLUME_INCREMENTAL": "1",
+          "WGR_OBJECT_STREAM_PBO_TEXTURES": "0",
+          "WGR_ADAPTIVE_TEXTURE_DETAIL": "0",
+          "WGR_OBJECT_STREAM_WARM_TEXTURE_JOBS": "1",
+          "WGR_NATIVE_DDS_PREPARE": "0",
+          "WGR_SIMULATION_POSITIVE_COLD": "0",
+          "WGR_OBJECT_STREAM_WARM_TEXTURES": "1",
+          "WGR_OBJECT_STREAM_TEST_BUDGET": "1",
+          "WGR_OBJECT_STREAM_GPU_BUDGET": "0",
+          "WGR_OBJECT_STREAM_WARM_PROFILE": "1"
+        },
+        "installed": "codex/streaming-residency 7326a1a0 2026-09-27_07:20 deploy-ps1",
+        "world": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\packages\\dayz-compat\\world\\chernarusplus\\chernarusplus.wrp",
+        "processScope": "Owned PID private/RSS samples; sparse owner-pump values are observations, not percentiles",
+        "paaPreparationDiagnostics": false
+      },
+      "summary": {
+        "passed": false,
+        "performanceAccepted": false,
+        "runnerExitCode": 1,
+        "ownedGameExitCode": 0,
+        "warmCounters": {
+          "warmTextureJobsEnabled": true,
+          "warmTextureJobsSubmitted": 0,
+          "warmTextureJobsCompleted": 0,
+          "warmTextureJobsCancelled": 0,
+          "warmTextureJobsCoalesced": 0,
+          "warmTextureJobsRejected": 0,
+          "warmTextureMembersPrepared": 0,
+          "warmTextureMembersSkipped": 0,
+          "warmTextureMembersUnreadable": 0,
+          "warmTextureQueued": 0,
+          "warmTextureActive": 0,
+          "warmTextureMetadataBytes": 0,
+          "warmTextureMetadataBytesPeak": 0,
+          "warmTextureScratchBytes": 0,
+          "warmTextureScratchBytesPeak": 0,
+          "warmTextureQueueBytes": 1048,
+          "warmTextureMs": 0,
+          "warmPreparedPuts": 0,
+          "warmPreparedTakes": 0,
+          "warmPreparedSourceRefused": 0,
+          "warmPreparedUploads": 0,
+          "warmPreparedUploadBytes": 0,
+          "warmPreparedUploadFailed": 0
+        },
+        "archiveSourceBindingProof": {
+          "enabled": true,
+          "liveBindings": 256,
+          "knownCppBytes": 117728,
+          "capBindings": 256,
+          "capBytes": 2097152,
+          "wrappedReads": 256,
+          "initRetains": 256,
+          "captureRefused": 0,
+          "capacityRefused": 6310,
+          "allocationRefused": 0,
+          "scope": "Mapped raw PAA bytes and their initialized headers only; shared retained C++ metadata charge, excludes kernel/allocator/RSS cost; counters alone do not prove worker jobs, upload readiness or work moved",
+          "ok": true
+        },
+        "n": 875,
+        "meanMs": 39.8936742857143,
+        "medianMs": 22.85,
+        "p95Ms": 115.77,
+        "p99Ms": 379.062,
+        "maxMs": 949.28,
+        "quantiles": "nearest-rank ceil(n*p)-1; usual median",
+        "dropped": 0,
+        "resident": 19923,
+        "required": 0,
+        "captureLogRows": 64,
+        "captureNoCurrentSourcePositiveRows": 5,
+        "captureWorkCappedRows": 2,
+        "captureTruncationMarkers": 1
+      },
+      "limits": "FAILEDstrict positivegate despite ownedgamecleanexit0/runnerexit1/resultpassedfalse; warm submitted/prepared/take/uploads0, queue/scratch0/optionalstate1048.64loggedcapturecalls boundedprefix,5noCurrentSourcepositive/2workcapped; missingwitness not globalcause/pertexturephysicalreason proof. Retained result/rawframes/sourceproof/image nowactual but root viewed returnedsettled against4dbdefault localstreet/trees/buildings/bus without obvious new geometry/material gap; narrowstillimage not traversal/performance proof. No workmoved/gain/promotion; nextmodel-ownercapturepurpose and storefixture UNBUILT/pending/excluded.",
+      "sha256": {
+        "archive-source-binding-proof.json": "2ce70bda813b550e0027fe2629a529c41e5ba60d57541b196463044b841411ef",
+        "engine.log": "01ab8d0c02f7e55e76665419ff826a886cb74ce25b82b40fa3c563f30d0c3da1",
+        "harness.jsonl": "2e50c110cb96dc008d075cb155bfd5e3f7707fd5247661fae061abf27ddd8180",
+        "paa-attempt-proof.json": "c3afff659f25d8aad97805fcb8eb8b2fb51bd7f8d46201caa0cdbd98a1a8e142",
+        "paa-inflight-proof.json": "84d0ecc8f4dab7ef066c786d26c0c55e62397848686893b402edc15ce45fab98",
+        "provenance.json": "c3d21888c9b2f2161a2e1e2db7137213155cc43919be10635726a7c2a5eb681a",
+        "registration-quota-proof.json": "d2358b7d5c43466117695d2483fa80cbcc33f981e046cbccb88b2f6007e6783c",
+        "result.json": "6d605649b66c41ae59dc8f41888766b51f1c6ee03bd4405f60e2442ffec0c84b",
+        "returned-settled.png": "8c8ea948e7d5e2c7478c8d023ede1bdbdc705a284924513e82c14b6ebc211bb0",
+        "route-frame-ms.json": "92bc12c3bbb9d9998ee35533d98442be5e650349bf7848501dd9863bafe111cf",
+        "samples.jsonl": "737b0024e4d6456b07a3c1cc35dfe72cb50a5018a6475ea91c3f94215ae10c99",
+        "warm-texture-job-proof.json": "5282ca13d7ce596ff2c3c3709bbe58fe6c97fd80cf25a4b445ef3deee7145a79"
+      }
     }
   ],
   "microbenchmarks": [
@@ -14267,6 +14803,17 @@
         "test-warm-textures-workers-20260927.log": "366c7dfd14d31c3bfbad4600817016ed6b9b811490eb8a6b4521a15f7365aab9",
         "test-warm-textures-compat-20260927.log": "3667253f382095471d1d66bcf37c7e8bb8676010562e311905b0b974434723b3",
         "test-warm-textures-core-20260927.log": "d42876ecf9b39893dd16fe59c7f946b7bb8c2b92b7fd6e6c58f2c2011cf07e33"
+      }
+    },
+    {
+      "artifactRoot": "build",
+      "runtimeSourceCommit": "7326a1a0",
+      "result": "All5targets22stepsPASS; streaming-simulation-residency26714assertions28casesPASS/noSKIP. Automaticleaseclock usesactualslots; manualchannels preserved, bounded4weakdeleted/emptyautomatic cleanup. Registry membership remainsincomplete; defaultserviceOFF unchanged. Matchedcleaninstall732607:20. Capturediagnostics bounded64row prefix and runnerfailed-artifact retention verifiedactualfailure, not usefulwork proof. Nextmodel-ownercapturepurpose and pendingstorefixture unbuilt/excluded.",
+      "sha256": {
+        "build-actor-expiry-20260927.log": "a0b8db5370a1bdefa1b442b0b017265cd68ab8dcae6abf44a56e5260165b04cf",
+        "test-actor-expiry-20260927.log": "5570f5be81ba15c0e8096bba7bd790a18141399deb2cf100582772b445165186",
+        "runtime-actor-expiry-game-20260927.log": "7c6d69a690db5753701db952caabdb44fa8a9827604d559078f48d7826fb7073",
+        "runtime-actor-expiry-headless-20260927.log": "5f9094a20af3b8f5f7008e8ed0a66375b5aa69c1a5c4c9ff6e059272bc974b3c"
       }
     }
   ],
