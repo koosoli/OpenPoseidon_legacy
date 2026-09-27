@@ -2396,3 +2396,21 @@ Defaults Disabled zero created/leased/positive, None headless; no new AI/default
 enable. Narrow fixture only, no FPS/broadMP/retailDayZ/ODOLgroundproof. DayZ2352
 models/watch16384Capacity remains. Cached GPU ownership research excluded.
 FullplanOPEN/performancefalse.
+PAA BC boundsdb7579b6/EOFrepair7b92dd29 build22/final20 pass. First unit7cases
+6pass/1fail (581/582assert) assumed truncated.fail(), but byte-get sets EOFonly;
+retained failed log, repaired final583assertions7cases/noSKIP pass. Fresh mip
+metadata bounds BC capacity; header fail/eof checked, raw<=capacity keeps short/
+zero tails, valid LZO mismatched source refused. Raw converter only exact full
+4x4DXT1->1555; complete EOS nulloutput retained/truncated refused. Metadata/
+layout canary proof is not arbitrary caller buffer-capacity proof.
+Clean installed7b92 at04:17, actual041703 clean0/defaults+profiling+replayOFF
+pass.821frames mean41.998479/median23.361/p95128.245/p99437.288/max980.730ms,
+nearest-rankceil(n*p)-1. Returned19923/required0/geometry713550680/textures
+2749224436/2488. Root compared settled with earlier fingerprintOFF034452:
+same localPOI/no obvious geometry-material regression, not wholemap/performance
+acceptance. Direct deploy refused missingLOCK_OWNER before copy, subsequent
+proper locked deploy passed; no mismatchedgame run. Actual provenance binary
+hashes EXE04BF3C6A43D010B1F5A84A32BF5088734F70458E78F4FD2C2DAEACBFD8F4C43D,
+DLL39A04A78A496930022AB77796C2962A0F6F060B6AAA5B2B36914FD2845AC15E0.
+Initialized BC-read API candidate unbuilt/caller unwritten/not included.
+FullplanOPEN/performancefalse/no causalno-regression claim.
