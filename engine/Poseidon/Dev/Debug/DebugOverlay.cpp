@@ -6579,7 +6579,7 @@ void DrawWaterTab()
                                  "Seabed seen through", "Sea depth", "(9 unused)", "SSR weight"};
         changed |= Dev::Combo("TW debug view", &t.debugView, twDebug, IM_ARRAYSIZE(twDebug));
         Dev::PanelSeparator();
-        Dev::PanelHeading("Tidewater shore (W3a waves, W3b simulation)");
+        Dev::PanelHeading("Tidewater shore (W3a waves, W3b-c simulation + foam, W3d lips)");
         Dev::PanelHelp("Waves run in along the travel-time field of the whole map (computed in the background "
                        "a few seconds after the map loads, and again when the swell heading or sea level "
                        "moves), shoal, plunge, turn into bores and run up the sand. Height follows TW swell "
@@ -6603,11 +6603,13 @@ void DrawWaterTab()
                           "and OP's coast wet band.");
         ImGui::BeginDisabled(!t.shoreSim);
         changed |= Dev::SliderFloat("TW sand drying time", &t.shoreDryTime, 2.0f, 120.0f, "%.0f s");
+        changed |= Dev::SliderFloat("TW breaker lips", &t.shoreLips, 0.0f, 2.0f, "%.2f");
+        Dev::PanelTooltip("Opacity of the thrown lip of plunging breakers (W3d), along the shoreline inside the "
+                          "simulated regions. 0 = off.");
         ImGui::EndDisabled();
         ImGui::EndDisabled();
         ImGui::BeginDisabled(true);
         bool notPorted = false;
-        Dev::Checkbox("TW breaker lip sheets (not ported: W3d)", &notPorted);
         Dev::Checkbox("TW spray budget + refraction pass (not ported: W4)", &notPorted);
         Dev::Checkbox("TW underwater + caustics (not ported: W5)", &notPorted);
         Dev::Checkbox("TW boat wakes (not ported: W6)", &notPorted);

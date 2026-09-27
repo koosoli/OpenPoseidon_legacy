@@ -20,10 +20,14 @@
 //! W3c: the surf-zone foam look (SurfFoam.js, `tw_surf_foam.wgsl`): world-space lace carried by the
 //! simulated flow, whitewater lumps with self-shadowed crevices, foam lighting.
 //!
-//! Not yet, by design (later packages): Breakers (W3d),
+//! W3d: Breakers (`breakers.rs`, `tw_breakers_kernel.wgsl`, `tw_lip.wgsl`): the thrown lip of
+//! plunging breakers along the shoreline inside the simulated regions.
+//!
+//! Not yet, by design (later packages):
 //! spray and RefractionPass (W4), underwater and caustics (W5), boat wakes (W6). Inland water
 //! bodies are not drawn in this mode yet (see TW-WATER-01, open question for the owner).
 
+mod breakers;
 mod cdlod;
 mod fft;
 mod lace;
@@ -46,6 +50,17 @@ const TW_WATER_WGSL: &str = concat!(
     include_str!("tw_sim.wgsl"),
     "\n",
     include_str!("tw_surf_foam.wgsl"),
+    "\n",
+    include_str!("tw_lip.wgsl"),
+);
+
+/// The breaker crest finder: shared declarations, the shore waves, the kernel.
+const TW_BRK_KERNEL_WGSL: &str = concat!(
+    include_str!("tw_common.wgsl"),
+    "\n",
+    include_str!("tw_shore.wgsl"),
+    "\n",
+    include_str!("tw_breakers_kernel.wgsl"),
 );
 
 /// The shore simulation kernel: the shared declarations, the shore waves (shoreEvaluateWorld),
@@ -76,7 +91,7 @@ pub const DEFAULT_PARAMS: [[f32; 4]; 4] = [
 pub const DEFAULT_SHORE_PARAMS: [[f32; 4]; 3] = [
     [1.0, 9.0, 0.34, 0.55],
     [0.78, 0.13, 1.0, 1.0],
-    [0.16, 1.0, 28.0, 0.0],
+    [0.16, 1.0, 28.0, 1.0],
 ];
 
 /// The swell scale Tidewater's shore amplitude goes with (OceanFFT's swell system `scale`).
@@ -113,10 +128,11 @@ struct TwSurface {
     sim: [[f32; 4]; shore_sim::K],
     sim_p0: [f32; 4],
     sim_p1: [f32; 4],
+    brk: [f32; 4],
     morph: [[f32; 4]; cdlod::LEVELS],
 }
 
-const _: () = assert!(std::mem::size_of::<TwSurface>() == 16 * (16 + cdlod::LEVELS));
+const _: () = assert!(std::mem::size_of::<TwSurface>() == 16 * (17 + cdlod::LEVELS));
 
 /// Whether the shore simulation runs (Water tab, and only once the shore waves have a field).
 fn shore_sim_on(p: &WgrWaterParams, grid: Option<ShoreGrid>) -> bool {
@@ -164,6 +180,7 @@ struct FrameInputs<'a> {
     shore: Option<ShoreGrid>,
     sim: [[f32; 4]; shore_sim::K],
     dt: f32,
+    stations: u32,
 }
 
 fn surface_block(p: &WgrWaterParams, f: &FrameInputs<'_>) -> TwSurface {
@@ -200,6 +217,8 @@ fn surface_block(p: &WgrWaterParams, f: &FrameInputs<'_>) -> TwSurface {
         sim: f.sim,
         sim_p0,
         sim_p1,
+        // Breakers: station count, lip opacity (Tidewater `sheet`, Water tab lane)
+        brk: [f.stations as f32, p.tidewater_shore[2][3].clamp(0.0, 2.0), 0.0, 0.0],
         morph: *f.morph,
     }
 }
@@ -308,6 +327,9 @@ pub struct Tidewater {
     // W3b shore simulation
     sim: shore_sim::ShoreSim,
     coast: Vec<[f32; 2]>,
+    // W3d breakers
+    brk: breakers::BreakersGpu,
+    brk_regions: [Option<[f32; 2]>; shore_sim::K],
 }
 
 impl Tidewater {
@@ -429,6 +451,16 @@ impl Tidewater {
                 tex(16, D::D2, flt),
                 tex(17, D::D2Array, flt),
                 tex(18, D::D2, flt),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 19,
+                    visibility: vf,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         });
 
@@ -503,6 +535,17 @@ impl Tidewater {
             cache: None,
         });
 
+        let brk = breakers::BreakersGpu::new(
+            device,
+            TW_BRK_KERNEL_WGSL,
+            camera_layout,
+            &layout,
+            &shader,
+            surface_format,
+            sample_count,
+            linear,
+        );
+
         let (verts, indices) = cdlod::grid_mesh();
         let grid_vbuf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("tw_grid_vertices"),
@@ -564,6 +607,8 @@ impl Tidewater {
             terrain: None,
             sim,
             coast: Vec::new(),
+            brk,
+            brk_regions: [None; shore_sim::K],
         };
         me.rebuild_bind(device);
         me
@@ -594,8 +639,20 @@ impl Tidewater {
                 wgpu::BindGroupEntry { binding: 16, resource: R::TextureView(&self.shore_dir_view) },
                 wgpu::BindGroupEntry { binding: 17, resource: R::TextureView(self.sim.state_view()) },
                 wgpu::BindGroupEntry { binding: 18, resource: R::TextureView(&self.sim.lace_view) },
+                wgpu::BindGroupEntry { binding: 19, resource: self.brk.crest_buffer().as_entire_binding() },
             ],
         });
+        self.brk.rebuild_bind(
+            device,
+            &self.surface_ubo,
+            &self.conform_ubo,
+            &self.heightmap_view,
+            &self.shore_t_view,
+            &self.shore_dir_view,
+            self.fft.params_buffer(),
+            self.fft.displacement_view(),
+            &self.smp_linear_repeat,
+        );
         self.sim.rebuild_bind(
             device,
             &self.surface_ubo,
@@ -727,12 +784,14 @@ impl Tidewater {
         } else {
             self.sim.regions = [None; shore_sim::K];
         }
+        self.update_stations(queue, p.sea_level);
         let mut inputs = FrameInputs {
             detail_offset: self.detail_offset,
             morph: &self.cdlod.morph,
             shore: self.shore_grid,
             sim: self.sim.lanes(),
             dt,
+            stations: self.brk.ns,
         };
         let block0 = surface_block(&p, &inputs);
         self.detail_offset[0] += block0.wind[0] * block0.sea[2] * 0.7 * dt;
@@ -761,6 +820,7 @@ impl Tidewater {
             if self.sim.any_active() && !self.bind_dirty {
                 timers.begin(encoder, crate::gpu_timers::Region::TwShoreSim);
                 self.sim.dispatch(encoder);
+                self.brk.dispatch(encoder);
                 timers.end(encoder, crate::gpu_timers::Region::TwShoreSim);
             }
         }
@@ -792,6 +852,40 @@ impl Tidewater {
         pass.set_vertex_buffer(1, self.instance_buf.slice(..));
         pass.set_index_buffer(self.grid_ibuf.slice(..), wgpu::IndexFormat::Uint32);
         pass.draw_indexed(0..self.grid_index_count, 0, 0..self.instance_count);
+        // the breaker lips over the surface (Tidewater: the transparent pass after the water)
+        self.brk.draw(pass, camera, offset, &self.bind);
+    }
+
+    /// Shoreline stations for the breakers, re-traced when the simulated regions move (W3d).
+    fn update_stations(&mut self, queue: &wgpu::Queue, sea_level: f32) {
+        let now = self.sim.regions.map(|r| r.map(|r| r.centre));
+        if now == self.brk_regions {
+            return;
+        }
+        self.brk_regions = now;
+        let Some((heights, tp, generation)) = &self.terrain else {
+            self.brk.set_stations(queue, &[]);
+            return;
+        };
+        let inp = shore_field::ShoreFieldInput {
+            heights: heights.clone(),
+            hm_width: tp.hm_width,
+            hm_height: tp.hm_height,
+            origin: [tp.world_origin.x, tp.world_origin.y],
+            grid: tp.terrain_grid,
+            sea_level,
+            swell_dir: [1.0, 0.0],
+            terrain_gen: *generation,
+        };
+        let h = |x: f32, z: f32| shore_field::height_at(&inp, x, z);
+        let mut stations = Vec::new();
+        let mut run = 0u32;
+        for r in self.sim.regions.iter().flatten() {
+            let st = breakers::trace_stations(&h, r.min(), shore_sim::SIZE, sea_level, run);
+            run = st.iter().map(|s| s.run + 1).max().unwrap_or(run);
+            stations.extend(st);
+        }
+        self.brk.set_stations(queue, &stations);
     }
 
     /// Triangles submitted by the last draw (for the §7 harness).
@@ -811,8 +905,9 @@ mod tests {
         assert_eq!(std::mem::offset_of!(TwSurface, shore_grid), 176);
         assert_eq!(std::mem::offset_of!(TwSurface, sim), 192);
         assert_eq!(std::mem::offset_of!(TwSurface, sim_p1), 240);
-        assert_eq!(std::mem::offset_of!(TwSurface, morph), 256);
-        assert_eq!(std::mem::size_of::<TwSurface>(), 448);
+        assert_eq!(std::mem::offset_of!(TwSurface, brk), 256);
+        assert_eq!(std::mem::offset_of!(TwSurface, morph), 272);
+        assert_eq!(std::mem::size_of::<TwSurface>(), 464);
     }
 
     #[test]
@@ -870,6 +965,18 @@ mod tests {
         if let Err(e) = composer.make_naga_module(naga_oil::compose::NagaModuleDescriptor {
             source: TW_SIM_KERNEL_WGSL,
             file_path: "water_tw/tw_sim_kernel.wgsl",
+            ..Default::default()
+        }) {
+            panic!("{}", e.emit_to_string(&composer));
+        }
+    }
+
+    #[test]
+    fn breaker_kernel_composes() {
+        let mut composer = crate::shaders::build_composer();
+        if let Err(e) = composer.make_naga_module(naga_oil::compose::NagaModuleDescriptor {
+            source: TW_BRK_KERNEL_WGSL,
+            file_path: "water_tw/tw_breakers_kernel.wgsl",
             ..Default::default()
         }) {
             panic!("{}", e.emit_to_string(&composer));

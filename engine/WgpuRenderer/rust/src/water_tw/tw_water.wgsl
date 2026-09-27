@@ -66,6 +66,7 @@ struct OceanParams {
 @group(1) @binding(16) var shoreFieldDir: texture_2d<f32>; // rgba8snorm: direction x exposure
 @group(1) @binding(17) var shoreSimStateTex: texture_2d_array<f32>; // rgba16float, one layer per region
 @group(1) @binding(18) var shoreSimLace: texture_2d<f32>;        // rgba8unorm lace (mip 0 read with loads)
+@group(1) @binding(19) var<storage, read> breakersCrest: array<vec4<f32>>; // breaker crest records (tw_lip.wgsl)
 
 // ------------------------------------------------------------------ CDLOD.js
 
