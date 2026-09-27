@@ -8,15 +8,26 @@
 //! Owns every resource it uses; `WaterBackend` drops the whole struct when switching away, so
 //! nothing here runs or stays resident while Current OP is active (plan §4.2).
 //!
-//! Not in W2, by design (later packages): shore waves / breakers / ShoreSim / surf foam (W3),
+//! W3a: the shoreline waves — ShoreField (`shore_field.rs`, computed on a worker thread from
+//! the CPU heightmap) and ShoreWaves (`tw_shore.wgsl`): travel-time phase, Green's-law shoaling,
+//! plunge, bore, swash run-up, the per-pixel swash front, crest translucency and the surf-zone
+//! medium.
+//!
+//! Not yet, by design (later packages): Breakers / ShoreSim / surf foam / wet sand (W3b),
 //! spray and RefractionPass (W4), underwater and caustics (W5), boat wakes (W6). Inland water
 //! bodies are not drawn in this mode yet (see TW-WATER-01, open question for the owner).
 
 mod cdlod;
 mod fft;
+mod shore_field;
 mod textures;
 
+use std::sync::Arc;
+
 use crate::ffi::{WgrCamera, WgrWaterParams};
+
+/// The water shader: the material plus the shoreline-wave module appended to it (one module).
+const TW_WATER_WGSL: &str = concat!(include_str!("tw_water.wgsl"), "\n", include_str!("tw_shore.wgsl"));
 
 /// Whether this build carries a working Tidewater backend.
 pub const AVAILABLE: bool = true;
@@ -29,6 +40,24 @@ pub const DEFAULT_PARAMS: [[f32; 4]; 4] = [
     [1.0, 0.035, 1.0, 0.035],
     [1.0, 1.0, 0.3, 0.0],
 ];
+
+/// `WgrWaterParams::tidewater_shore` defaults: ShoreWaves.js ShoreParams at 4811ba48.
+pub const DEFAULT_SHORE_PARAMS: [[f32; 4]; 3] = [
+    [1.0, 9.0, 0.34, 0.55],
+    [0.78, 0.13, 1.0, 1.0],
+    [0.16, 0.0, 0.0, 0.0],
+];
+
+/// The swell scale Tidewater's shore amplitude goes with (OceanFFT's swell system `scale`).
+const DEFAULT_SWELL_SCALE: f32 = 0.48;
+
+/// Shore field placement for the shader (origin, cell, centre); None until the first field.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ShoreGrid {
+    origin: [f32; 2],
+    cell: f32,
+    centre: [f32; 2],
+}
 
 /// Tidewater's `frame.waterAbsorption` / `frame.waterScattering` defaults (Frame.js), 1/m.
 const WATER_ABSORPTION: [f32; 3] = [0.42, 0.075, 0.035];
@@ -46,13 +75,44 @@ struct TwSurface {
     absorption: [f32; 4],
     scattering: [f32; 4],
     detail: [f32; 4],
+    shore0: [f32; 4],
+    shore1: [f32; 4],
+    shore2: [f32; 4],
+    shore_grid: [f32; 4],
     morph: [[f32; 4]; cdlod::LEVELS],
 }
 
-const _: () = assert!(std::mem::size_of::<TwSurface>() == 16 * (8 + cdlod::LEVELS));
+const _: () = assert!(std::mem::size_of::<TwSurface>() == 16 * (12 + cdlod::LEVELS));
 
-fn surface_block(p: &WgrWaterParams, detail_offset: [f32; 2], morph: &[[f32; 4]; cdlod::LEVELS]) -> TwSurface {
+/// ShoreParams for the shader. The amplitude follows the swell scale relative to Tidewater's
+/// default (an OP adaptation: Tidewater has one sea state, OP's weather and reference seas move
+/// the swell), and the waves stay off until a shore field exists.
+fn shore_lanes(p: &WgrWaterParams, grid: Option<ShoreGrid>) -> ([f32; 4], [f32; 4], [f32; 4], [f32; 4]) {
+    let sh = p.tidewater_shore;
+    let swell = if p.tidewater[0][2] >= 0.0 { p.tidewater[0][2] } else { DEFAULT_SWELL_SCALE };
+    let amp = sh[0][2].max(0.0) * (swell / DEFAULT_SWELL_SCALE).clamp(0.25, 2.5);
+    let enabled = if grid.is_some() && sh[0][0] > 0.5 { 1.0 } else { 0.0 };
+    let period = if sh[0][1] > 0.5 { sh[0][1] } else { 9.0 };
+    let gamma = if sh[1][0] > 0.05 { sh[1][0] } else { 0.78 };
+    let span = if sh[1][1] > 0.01 { sh[1][1] } else { 0.13 };
+    let g = grid.unwrap_or(ShoreGrid { origin: [0.0; 2], cell: 1.0, centre: [0.0; 2] });
+    (
+        [period, amp, sh[0][3].max(0.0), gamma],
+        [span, sh[1][2].max(0.0), sh[1][3].max(0.0), enabled],
+        [sh[2][0].max(0.0), p.tidewater[0][3].to_radians(), g.centre[0], g.centre[1]],
+        [g.origin[0], g.origin[1], g.cell, 0.0],
+    )
+}
+
+/// The swell's travel direction in the world (x, z): the swell system's heading, as fft.rs uses it.
+fn swell_dir(p: &WgrWaterParams) -> [f32; 2] {
+    let a = p.tidewater[0][3].to_radians();
+    [a.cos(), a.sin()]
+}
+
+fn surface_block(p: &WgrWaterParams, detail_offset: [f32; 2], morph: &[[f32; 4]; cdlod::LEVELS], shore: Option<ShoreGrid>) -> TwSurface {
     let tw = p.tidewater;
+    let (shore0, shore1, shore2, shore_grid) = shore_lanes(p, shore);
     let wind_len = (p.fft_wind_sea[0].powi(2) + p.fft_wind_sea[1].powi(2)).sqrt();
     let wind_dir = if wind_len > 1e-4 {
         [p.fft_wind_sea[0] / wind_len, p.fft_wind_sea[1] / wind_len]
@@ -75,8 +135,51 @@ fn surface_block(p: &WgrWaterParams, detail_offset: [f32; 2], morph: &[[f32; 4];
         absorption: [WATER_ABSORPTION[0], WATER_ABSORPTION[1], WATER_ABSORPTION[2], 0.0],
         scattering: [WATER_SCATTERING[0], WATER_SCATTERING[1], WATER_SCATTERING[2], 0.0],
         detail: [tw[3][0], tw[3][1], tw[3][2], 0.0],
+        shore0,
+        shore1,
+        shore2,
+        shore_grid,
         morph: *morph,
     }
+}
+
+/// A texture with data, read by textureLoad only.
+fn data_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    label: &str,
+    format: wgpu::TextureFormat,
+    (w, h): (u32, u32),
+    bytes_per_texel: u32,
+    data: &[u8],
+) -> wgpu::TextureView {
+    let tex = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some(label),
+        size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo { texture: &tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+        data,
+        wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(w * bytes_per_texel), rows_per_image: Some(h) },
+        wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+    );
+    tex.create_view(&Default::default())
+}
+
+/// TerrainGPU's placeholder until the shore field is set (1 texel, T = 1e4, no waves).
+fn placeholder_shore_views(device: &wgpu::Device, queue: &wgpu::Queue) -> (wgpu::TextureView, wgpu::TextureView) {
+    let t: [f32; 2] = [1e4, 1e4];
+    let d: [i8; 4] = [0; 4];
+    (
+        data_texture(device, queue, "tw_shore_t_placeholder", wgpu::TextureFormat::Rg32Float, (1, 1), 8, bytemuck::cast_slice(&t)),
+        data_texture(device, queue, "tw_shore_dir_placeholder", wgpu::TextureFormat::Rgba8Snorm, (1, 1), 4, bytemuck::cast_slice(&d)),
+    )
 }
 
 fn dummy_view(device: &wgpu::Device, label: &str, format: wgpu::TextureFormat) -> wgpu::TextureView {
@@ -122,6 +225,13 @@ pub struct Tidewater {
     last_time: Option<f32>,
     detail_offset: [f32; 2],
     gens: [u64; 4], // depth, env, scene, heightmap
+    // W3a shore field
+    shore_t_view: wgpu::TextureView,
+    shore_dir_view: wgpu::TextureView,
+    shore_grid: Option<ShoreGrid>,
+    shore_stamp: Option<shore_field::FieldStamp>,
+    shore_worker: shore_field::ShoreFieldWorker,
+    terrain: Option<(Arc<[f32]>, crate::ffi::WgrTerrainParams, u64)>,
 }
 
 impl Tidewater {
@@ -192,6 +302,7 @@ impl Tidewater {
         let depth_view = dummy_view(device, "tw_dummy_depth", wgpu::TextureFormat::Depth32Float);
         let env_view = dummy_view(device, "tw_dummy_env", wgpu::TextureFormat::Rgba16Float);
         let heightmap_view = dummy_view(device, "tw_dummy_heightmap", wgpu::TextureFormat::R32Float);
+        let (shore_t_view, shore_dir_view) = placeholder_shore_views(device, queue);
 
         let vf = wgpu::ShaderStages::VERTEX_FRAGMENT;
         let uniform = |binding| wgpu::BindGroupLayoutEntry {
@@ -237,6 +348,8 @@ impl Tidewater {
                 smp(12),
                 tex(13, D::D2, S::Float { filterable: false }),
                 uniform(14),
+                tex(15, D::D2, S::Float { filterable: false }),
+                tex(16, D::D2, flt),
             ],
         });
 
@@ -245,7 +358,7 @@ impl Tidewater {
             device,
             &mut composer,
             "tw_water_shader",
-            include_str!("tw_water.wgsl"),
+            TW_WATER_WGSL,
             "water_tw/tw_water.wgsl",
         );
         let linear = if surface_format == wgpu::TextureFormat::Rgba16Float { 1.0 } else { 0.0 };
@@ -364,6 +477,12 @@ impl Tidewater {
             last_time: None,
             detail_offset: [0.0; 2],
             gens: [u64::MAX; 4],
+            shore_t_view,
+            shore_dir_view,
+            shore_grid: None,
+            shore_stamp: None,
+            shore_worker: Default::default(),
+            terrain: None,
         };
         me.rebuild_bind(device);
         me
@@ -390,6 +509,8 @@ impl Tidewater {
                 wgpu::BindGroupEntry { binding: 12, resource: R::Sampler(&self.env_sampler) },
                 wgpu::BindGroupEntry { binding: 13, resource: R::TextureView(&self.heightmap_view) },
                 wgpu::BindGroupEntry { binding: 14, resource: self.conform_ubo.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 15, resource: R::TextureView(&self.shore_t_view) },
+                wgpu::BindGroupEntry { binding: 16, resource: R::TextureView(&self.shore_dir_view) },
             ],
         });
         self.bind_dirty = false;
@@ -456,8 +577,49 @@ impl Tidewater {
         }
     }
 
+    /// The CPU heightmap for the shore field (see `WaterBackend::set_terrain_heights`).
+    pub fn set_terrain_heights(&mut self, heights: Arc<[f32]>, params: crate::ffi::WgrTerrainParams, generation: u64) {
+        self.terrain = Some((heights, params, generation));
+    }
+
+    /// Ask for a new shore field when its inputs changed; install one that has finished.
+    fn update_shore_field(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, p: &WgrWaterParams) {
+        if let Some(field) = self.shore_worker.poll() {
+            let (w, h) = (field.res_x, field.res_z);
+            self.shore_t_view = data_texture(
+                device, queue, "tw_shore_field_t", wgpu::TextureFormat::Rg32Float, (w, h), 8,
+                bytemuck::cast_slice(&field.times),
+            );
+            self.shore_dir_view = data_texture(
+                device, queue, "tw_shore_field_dir", wgpu::TextureFormat::Rgba8Snorm, (w, h), 4,
+                bytemuck::cast_slice(&field.dirs),
+            );
+            self.shore_grid = Some(ShoreGrid { origin: field.origin, cell: field.cell, centre: field.centre() });
+            self.shore_stamp = Some(field.stamp);
+            self.rebuild_bind(device);
+        }
+        let Some((heights, tp, generation)) = &self.terrain else { return };
+        if tp.hm_width < 2 || tp.hm_height < 2 || tp.terrain_grid <= 0.0 {
+            return;
+        }
+        let input = shore_field::ShoreFieldInput {
+            heights: heights.clone(),
+            hm_width: tp.hm_width,
+            hm_height: tp.hm_height,
+            origin: [tp.world_origin.x, tp.world_origin.y],
+            grid: tp.terrain_grid,
+            sea_level: p.sea_level,
+            swell_dir: swell_dir(p),
+            terrain_gen: *generation,
+        };
+        self.shore_worker.request(input, self.shore_stamp);
+    }
+
     /// CDLOD selection for this frame's water camera, plus the per-frame uniforms.
-    pub fn prepare(&mut self, _device: &wgpu::Device, queue: &wgpu::Queue, camera: Option<&WgrCamera>) {
+    pub fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, camera: Option<&WgrCamera>) {
+        if let Some(p) = self.last_params {
+            self.update_shore_field(device, queue, &p);
+        }
         let (Some(p), Some(cam)) = (self.last_params, camera) else {
             self.instance_count = 0;
             return;
@@ -466,10 +628,10 @@ impl Tidewater {
         let dt = self.last_time.map_or(0.0, |t| (p.time - t).clamp(0.0, 0.1));
         self.last_time = Some(p.time);
         // SeaDetail.update: gust patterns drift downwind at ~0.7 x the wind speed
-        let block0 = surface_block(&p, self.detail_offset, &self.cdlod.morph);
+        let block0 = surface_block(&p, self.detail_offset, &self.cdlod.morph, self.shore_grid);
         self.detail_offset[0] += block0.wind[0] * block0.sea[2] * 0.7 * dt;
         self.detail_offset[1] += block0.wind[1] * block0.sea[2] * 0.7 * dt;
-        let block = surface_block(&p, self.detail_offset, &self.cdlod.morph);
+        let block = surface_block(&p, self.detail_offset, &self.cdlod.morph, self.shore_grid);
         queue.write_buffer(&self.surface_ubo, 0, bytemuck::bytes_of(&block));
 
         let spec = fft::SpectrumInputs::from_params(&p);
@@ -518,15 +680,40 @@ mod tests {
 
     #[test]
     fn surface_block_layout_matches_the_wgsl() {
-        assert_eq!(std::mem::offset_of!(TwSurface, morph), 128);
-        assert_eq!(std::mem::size_of::<TwSurface>(), 320);
+        assert_eq!(std::mem::offset_of!(TwSurface, shore0), 128);
+        assert_eq!(std::mem::offset_of!(TwSurface, shore_grid), 176);
+        assert_eq!(std::mem::offset_of!(TwSurface, morph), 192);
+        assert_eq!(std::mem::size_of::<TwSurface>(), 384);
+    }
+
+    #[test]
+    fn shore_waves_are_off_until_a_field_exists_and_follow_the_swell() {
+        let mut p = <WgrWaterParams as bytemuck::Zeroable>::zeroed();
+        p.tidewater = DEFAULT_PARAMS;
+        p.tidewater_shore = DEFAULT_SHORE_PARAMS;
+        let (s0, s1, _, _) = shore_lanes(&p, None);
+        assert_eq!(s1[3], 0.0);
+        assert_eq!(s0[0], 9.0);
+        assert!((s0[1] - 0.34).abs() < 1e-6);
+        let g = ShoreGrid { origin: [1.0, 2.0], cell: 4.0, centre: [3.0, 4.0] };
+        let (_, s1, s2, sg) = shore_lanes(&p, Some(g));
+        assert_eq!(s1[3], 1.0);
+        assert_eq!([s2[2], s2[3]], [3.0, 4.0]);
+        assert!((s2[1] - 5.0f32.to_radians()).abs() < 1e-6); // swell heading for the along-shore axis
+        assert_eq!(sg, [1.0, 2.0, 4.0, 0.0]);
+        p.tidewater[0][2] = 0.96; // twice the default swell
+        let (s0, _, _, _) = shore_lanes(&p, Some(g));
+        assert!((s0[1] - 0.68).abs() < 1e-5);
+        p.tidewater_shore[0][0] = 0.0; // switched off in the Water tab
+        let (_, s1, _, _) = shore_lanes(&p, Some(g));
+        assert_eq!(s1[3], 0.0);
     }
 
     #[test]
     fn tidewater_water_shader_composes() {
         let mut composer = crate::shaders::build_composer();
         if let Err(e) = composer.make_naga_module(naga_oil::compose::NagaModuleDescriptor {
-            source: include_str!("tw_water.wgsl"),
+            source: TW_WATER_WGSL,
             file_path: "water_tw/tw_water.wgsl",
             ..Default::default()
         }) {
@@ -541,5 +728,9 @@ mod tests {
         assert_eq!(DEFAULT_PARAMS[2][1], 0.035); // WaterMaterial waterRoughness
         assert_eq!(DEFAULT_PARAMS[2][3], 0.035); // WaterMaterial backscatter
         assert_eq!(DEFAULT_PARAMS[3][2], 0.3); // SeaDetail streakAmount
+        assert_eq!(DEFAULT_SHORE_PARAMS[0][1], 9.0); // ShoreWaves period
+        assert_eq!(DEFAULT_SHORE_PARAMS[0][2], 0.34); // ShoreWaves amplitude
+        assert_eq!(DEFAULT_SHORE_PARAMS[1][0], 0.78); // ShoreWaves gamma
+        assert_eq!(DEFAULT_SHORE_PARAMS[2][0], 0.16); // ShoreWaves turbidity
     }
 }

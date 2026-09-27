@@ -100,6 +100,8 @@ models, textures, cloud noise files) is used.
 | `water_tw/cdlod.rs` | `src/core/CDLOD.js` |
 | `water_tw/textures.rs` | `src/ocean/SeaDetail.js` (`makeNoiseTexture`), `src/ocean/FoamTexture.js`, `src/util/Noise.js` (`mulberry32`) |
 | `water_tw/tw_water.wgsl` | `src/ocean/WaterSurface.js`, `src/ocean/SeaDetail.js`, `src/ocean/WaterMaterial.js`, `src/core/CDLOD.js` |
+| `water_tw/shore_field.rs` | `src/world/ShoreField.js` |
+| `water_tw/tw_shore.wgsl` | `src/ocean/ShoreWaves.js`, `src/world/TerrainGPU.js` (`terrainShoreSample`), `src/engine/render/wgsl/common.js` (`perlin2`) |
 
 ```
 MIT License

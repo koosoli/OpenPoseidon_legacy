@@ -2509,6 +2509,16 @@ class Engine : public IGraphicsEngine
             float slick = 1.0f;            // surfactant slicks
             float windrow = 0.3f;          // windrow foam lines
             int debugView = 0;             // Tidewater's own material debug views (0 = off)
+            // W3 — shoreline waves (ShoreWaves.js ShoreParams defaults)
+            bool shoreWaves = true;
+            float shorePeriod = 9.0f;      // s
+            float shoreAmplitude = 0.34f;  // offshore amplitude H/2 (m), x the swell energy / 0.48
+            float shoreVariation = 0.55f;  // per-wave and along-shore height variation
+            float shoreGamma = 0.78f;      // breaker index H / depth
+            float shoreBreakSpan = 0.13f;  // fraction of the break depth the lip plunges over
+            float shoreCurl = 1.0f;        // plunging / bore profile weight
+            float shoreRunup = 1.0f;       // swash run-up gain
+            float shoreTurbidity = 0.16f;  // surf-zone sediment + bubble scattering (1/m)
         } tidewater;
         // Neutral multipliers reproduce GodotOceanWaves' authored cascade values.
         // Those physical spectrum coefficients are already metre-scaled; multiplying

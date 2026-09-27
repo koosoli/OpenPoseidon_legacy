@@ -5,10 +5,11 @@
 //   src/ocean/SeaDetail.js   seaDetailSample
 //   src/ocean/WaterMaterial.js the shade() output snippet, fresnelDielectric, GGX, _waterSSR
 //
-// W2 scope (plan §6): open sea. The material is built with terrain = on (OP's heightmap),
-// shore / shore-sim / surf-foam / wake / hull mask / planar reflection / RefractionPass = off,
-// exactly the `T`-only variant of WaterMaterial._shadeWGSL. Refraction therefore samples the
-// opaque scene copy (Tidewater's own `!found` fallback), which RefractionPass replaces in W4.
+// W2 scope (plan §6): open sea. W3a adds the shoreline waves (ShoreWaves.js, tw_shore.wgsl, which
+// is appended to this file): the material is now WaterMaterial._shadeWGSL's `T && SH` variant,
+// shore-sim / surf-foam / wake / hull mask / planar reflection / RefractionPass still off (W3b,
+// W4, W6). Refraction therefore samples the opaque scene copy (Tidewater's own `!found`
+// fallback), which RefractionPass replaces in W4.
 //
 // Adaptations to OP, all mechanical and listed here once:
 // * Group 0 is OP's frame (camera-relative view, forward-Z proj + reverse_z, reversed depth
@@ -57,6 +58,10 @@ struct TwSurface {
     absorption: vec4<f32>, // rgb 1/m
     scattering: vec4<f32>, // rgb 1/m
     detail: vec4<f32>,     // gust, slick, streak amounts
+    shore0: vec4<f32>,     // ShoreParams: period (s), amplitude (H/2, m), variation, gamma
+    shore1: vec4<f32>,     // ShoreParams: breakSpan, curl, runup, enabled (0 until the field exists)
+    shore2: vec4<f32>,     // ShoreParams: turbidity (1/m), swell heading (rad, travel), shore field centre xz
+    shoreGrid: vec4<f32>,  // shore field: origin xz (world), cell size (m), unused
     morph: array<vec4<f32>, 12>, // CDLOD per level: morph start, 1/range, spacing
 };
 
@@ -83,6 +88,8 @@ struct ConformParams {
 @group(1) @binding(12) var sky_env_samp: sampler;
 @group(1) @binding(13) var seabed_heightmap: texture_2d<f32>;
 @group(1) @binding(14) var<uniform> cf: ConformParams;
+@group(1) @binding(15) var shoreFieldT: texture_2d<f32>;   // rg32float: arrival T, shoreline T
+@group(1) @binding(16) var shoreFieldDir: texture_2d<f32>; // rgba8snorm: direction x exposure
 
 // ------------------------------------------------------------------ terrain (OP heightmap)
 
@@ -141,6 +148,7 @@ fn cdlodMorph(node: vec4<f32>, grid: vec2<f32>, viewPos: vec3<f32>, y0: f32) -> 
 
 // long cascades vanish in shallow water, short ones persist until very shallow:
 // d0 = min(40, size * 0.08), floorAmt = [0, 0.05, 0.25, 0.5]
+const WATER_SHORE_DEEP: f32 = 26.0; // m: ShoreWaves' envelope smoothstep(26, 13, depth) is 0 beyond
 fn waterSurfaceCascadeAttenuation(c: i32, depth: f32) -> f32 {
     var floorAmt = array<f32, 4>(0.0, 0.05, 0.25, 0.5);
     let d0 = min(40.0, ocean.sizes[c].x * 0.08);
@@ -155,6 +163,9 @@ struct VsOut {
     @location(2) waveH: f32,
     @location(3) seaDepth: f32,
     @location(4) foam: f32,
+    @location(5) shoreN: vec3<f32>,
+    @location(6) shoreFoam: f32,
+    @location(7) surfMask: vec2<f32>, // clear plunging face, whitewater roller relief (m)
 };
 
 @vertex
@@ -184,8 +195,45 @@ fn vs_tidewater(@location(0) grid: vec2<f32>, @location(1) node: vec4<f32>) -> V
     }
     disp *= tw.surface.x;
 
-    var total = disp;
+    var extra = vec3<f32>(0.0);
+    var shoreN = vec3<f32>(0.0, 1.0, 0.0);
+    var shoreFoam = 0.0;
+    var surfMask = vec2<f32>(0.0); // clear plunging face, whitewater roller relief (m)
+    // Offshore of WATER_SHORE_DEEP the shore waves have faded out completely (their envelope is 0
+    // from 26 m of depth, see ShoreWaves) and there is no swash: most of the sea skips them.
+    // (shore waves off, or no shore field yet: Tidewater's material without ShoreWaves)
+    let nearShore = depth < WATER_SHORE_DEEP && tw.shore1.w > 0.0;
+    var swashLevel = -1e4;
+    if (nearShore) {
+        let sw = shoreEvaluate(worldXZ, depth, ground);
+        extra += sw.disp;
+        shoreN = clamp(sw.nShore, vec3<f32>(-1.0), vec3<f32>(1.0));
+        // (the foam line on the swash front is added per pixel in the water shader: on this coarse
+        // mesh it would end short of the front and follow the triangles)
+        shoreFoam = sw.foam;
+        surfMask = vec2<f32>(sw.face, sw.roller);
+        swashLevel = sw.swashLevel;
+    }
+
+    var total = disp + extra;
     var y = seaLevel + total.y;
+    if (nearShore) {
+        // thin run-up sheet on the sand: take whichever surface is higher (smooth max)
+        let k = 0.04;
+        // no run-up sheet on steep rock (cliffs, sea stacks): waves break against it instead
+        let nr = terrainNormalXZ(worldXZ);
+        let gentle = smoothstep(0.45, 0.25, length(nr));
+        let hmx = sat((swashLevel - y) / k * 0.5 + 0.5) * gentle;
+        let smax = mix(y, swashLevel, hmx) + hmx * (1.0 - hmx) * k;
+        y = smax;
+        // Where the sheet is the surface it is the sheet that is seen, not the wave below it: the
+        // sheet lies on the sand (the sand's slope, no horizontal wave motion, no plunging face or
+        // roller).
+        shoreN = normalize(mix(shoreN, vec3<f32>(nr.x, 1.0, nr.y), hmx));
+        let still = 1.0 - hmx;
+        total = vec3<f32>(total.x * still, total.y, total.z * still);
+        surfMask *= still;
+    }
     // hide the water sheet below dry land (beyond the swash zone)
     let below = select(ground - 0.06, min(ground - 2.0, seaLevel - 1.0), depth < -3.0);
     y = select(y, min(y, below), y < ground);
@@ -199,6 +247,9 @@ fn vs_tidewater(@location(0) grid: vec2<f32>, @location(1) node: vec4<f32>) -> V
     out.waveH = total.y;
     out.seaDepth = depth;
     out.foam = foam;
+    out.shoreN = shoreN;
+    out.shoreFoam = shoreFoam;
+    out.surfMask = surfMask;
     return out;
 }
 
@@ -253,10 +304,19 @@ fn rot2(v: vec2<f32>, a: f32) -> vec2<f32> {
     return vec2<f32>(v.x * c - v.y * s, v.x * s + v.y * c);
 }
 
-fn waterSurfaceFragment(lagXZ: vec2<f32>, footprint: f32, depth: f32, vertexFoam: f32) -> WaterSurfaceFrag {
+// extraFoam: foam carried by the water (ShoreSim, 0 until W3b); surfMask: clear face of a
+// plunging wave, whitewater roller relief (from the vertex stage)
+fn waterSurfaceFragment(lagXZ: vec2<f32>, footprint: f32, depth: f32, vertexFoam: f32, shoreN: vec3<f32>, shoreFoam: f32, extraFoam: f32, surfMask: vec2<f32>) -> WaterSurfaceFrag {
     var d = vec4<f32>(0.0);
-    let foamSum = 0.0;
-    let aeration = 0.0;
+    var foamSum = 0.0;
+    // the clear concave face of a plunging wave overhangs the trough: the foam carried by the
+    // (depth-averaged, world-space) shore simulation below it is not on the face
+    let face = sat(surfMask.x);
+    // (some of it stays: the lace of the previous wave is drawn up the face)
+    let simFoam = extraFoam * (1.0 - face * 0.72);
+    foamSum += simFoam;
+    // bubbles mixed into the water (milky, turquoise, hides the bottom): surf and wake
+    var aeration = 0.0;
 
     let det = seaDetailSample(lagXZ);
     let rough = det.rough;
@@ -285,7 +345,26 @@ fn waterSurfaceFragment(lagXZ: vec2<f32>, footprint: f32, depth: f32, vertexFoam
     }
     let jac = (d.z + 1.0) * (d.w + 1.0);
 
-    let normal = normalize(vec3<f32>(-slopes.x, 1.0, -slopes.y));
+    // base normal: large shoreline waves (per-vertex, can overhang) perturbed by FFT detail
+    var normal: vec3<f32>;
+    {
+        // On a coarse mesh the shore normal can flip between the vertices of a folding crest: the
+        // interpolated vector then cancels out (or is NaN). Keep it finite and facing up.
+        let sn = clamp(shoreN, vec3<f32>(-1.0), vec3<f32>(1.0)) + vec3<f32>(0.0, 1e-3, 0.0);
+        let Ns0 = sn / max(length(sn), 1e-4);
+        let Ns = normalize(vec3<f32>(Ns0.x, max(Ns0.y, 0.12), Ns0.z));
+        // the ripples and chop ride on the wave: the detail normal is rotated onto the tilted face
+        // (reoriented normal mapping) instead of being flattened by it
+        let nd = normalize(vec3<f32>(-slopes.x, 1.0, -slopes.y));
+        let tq = Ns + vec3<f32>(0.0, 1.0, 0.0);
+        let uq = vec3<f32>(slopes.x, 1.0, slopes.y) * nd.y;
+        normal = normalize(tq * (dot(tq, uq) / tq.y) - uq);
+        // (WaterSurface: shoreFoam * 0.55 with the shore simulation attached, 1.0 without)
+        foamSum += shoreFoam * 1.0;
+        // the roller and the water behind the plunge point are full of bubbles, decaying behind the
+        // bore with the foam it sheds; the clear face of a plunging wave is not
+        aeration += sat(shoreFoam * 1.2 + simFoam * 0.7) * (1.0 - face) * smoothstep(-0.1, 0.3, depth);
+    }
 
     // whitecaps: persistent (per vertex) + fresh where the surface is compressed right now;
     // more of them inside gusts, plus windrow lines in fresh wind
@@ -451,8 +530,7 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
     let dwx = dpdx(rel);
     let dwy = dpdy(rel);
     let groundH = terrainHeightAt(pos.xz);
-    let thickness = pos.y - groundH;
-    let thicknessAA = max(fwidth(thickness) * 1.5, 0.004);
+    var thickness = pos.y - groundH;
 
     let dist = length(rel);
     let V = -rel / max(dist, 1e-4);
@@ -475,20 +553,48 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
     let ter = terrain_sun_shadow(pos.xz, pos.y) * fogK;
     var sunLight = sunDiffuse * PI * (1.0 - max(csm, ter)) * cloud_sun_shadow(pos.xz);
 
-    // (no shore waves in W2: no swash front, bead or meniscus)
-    // (Tidewater's terrain-only variant: swTau stays 0, so uprush = smoothstep(0.46, 0.32, 0) = 1)
-    let frontD = 1e3;
-    let uprush = 1.0;
-    let lipW = 0.0;
+    // water film thickness at this pixel and the distance to the swash front (ShoreWaves.swashEdge):
+    // the sheet ends exactly on its analytic leading edge, not on the mesh triangles
+    var frontD = 1e3;
+    var swTau = 0.0;
+    var swRt = 0.0;
+    if (vDepth < 1.0 && tw.shore1.w > 0.0) {
+        let tRaw = thickness;
+        let se = shoreSwashEdge(pos.xz, thickness);
+        thickness = se.x; frontD = se.y; swTau = se.z; swRt = se.w;
+        // The draining sheet has no rounded front: it thins out over decimetres and breaks up where
+        // the sand drains faster (kept as a hard edge it read as a dark line ruled along the beach).
+        let backwash = smoothstep(0.32, 0.46, swTau);
+        if (backwash > 0.0 && swRt > 0.0 && frontD < 3.0) {
+            frontD += (perlin2(pos.xz * 1.1) * 0.35 + perlin2(pos.xz * 3.7 + vec2<f32>(5.3, 1.9)) * 0.15) * backwash;
+            thickness = min(tRaw, frontD * mix(0.08, 0.025, backwash));
+        }
+    }
+    // (fwidth here, in uniform control flow, of the clipped film thickness Tidewater differentiates)
+    let thicknessAA = max(fwidth(thickness) * 1.5, 0.004);
+    // the foam line riding the swash front, per pixel: a dense bubbly bead right at the edge while
+    // the sheet runs up, a thinning lace behind it; weaker in the backwash (it sinks into the sand)
+    let uprush = smoothstep(0.46, 0.32, swTau);
+    let bead = smoothstep(-0.01, 0.05, frontD) * smoothstep(0.6, 0.12, frontD);
+    let trail = smoothstep(-0.01, 0.25, frontD) * smoothstep(2.2, 0.3, frontD);
+    // patchy along the front (dense bunches and thin stretches), not an even white rope
+    var edgePatch = 1.0;
+    if (swRt > 0.0 && vDepth < 0.4) {
+        edgePatch = smoothstep(-0.45, 0.55, perlin2(pos.xz * 0.42)) * 0.7 + smoothstep(-0.3, 0.6, perlin2(pos.xz * 1.7 + vec2<f32>(3.1, 7.7))) * 0.3;
+    }
+    let edgeFoam = (bead * mix(0.45, 1.1, uprush) * mix(0.35, 1.0, edgePatch) + trail * mix(0.12, 0.4, uprush) * edgePatch) * smoothstep(0.0, 1.0, swRt) * smoothstep(0.4, -0.2, vDepth);
+    // the meniscus: the last decimetre of the advancing sheet bends down to the sand
+    let lipW = (1.0 - smoothstep(0.0, 0.14, frontD)) * uprush;
 
-    let surf = waterSurfaceFragment(lagXZ, footprint, vDepth, in.foam);
+    // (no ShoreSim until W3b: simState = 0)
+    let surf = waterSurfaceFragment(lagXZ, footprint, vDepth, in.foam, in.shoreN, in.shoreFoam + edgeFoam, 0.0, in.surfMask);
     let foam = surf.foam;
 
     // Which medium is the view ray in? (see WaterMaterial.js) The GPU WaterQuery camera slot is
     // not ported in W2: the camera's own medium against the flat sea level decides away from
     // the surface, the triangle winding near it.
     let camH = frame.cam_pos.y - tw.sea.w;
-    let folded = surf.jacobian < 0.1;
+    let folded = surf.jacobian < 0.1 || normalize(in.shoreN).y < 0.35;
     let nearSurface = abs(camH) < 1.5;
     let viewFromBelow = select(camH < 0.0, !front, nearSurface && !folded);
     let Nup = surf.normal;
@@ -563,7 +669,9 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
             Lt = max(pos.y - terrainHeightAt(pos.xz + Tv.xz * min(L1 * 0.5 + L0 * 0.5, 200.0)), 0.0) / tDown;
         }
         let Lter = clamp(Lt, 0.0, 400.0);
-        let crestT = 1e4;
+        // thin breaking crests: the refracted ray leaves through the back of the wave into the sky
+        let crestT = shoreCrestPath(lagXZ, vDepth, Tv);
+        let thruCrest = crestT < Lter;
 
         let pEndRel = rel + Tv * min(Lter, 80.0);
         let clipEnd = frame.proj * (frame.view * vec4<f32>(pEndRel, 1.0));
@@ -578,7 +686,10 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
         let valid = onScreen && surfViewZ - zO > WATER_BEHIND;
         let uvF = select(screenUV, uvR, valid);
         let dR = select(_waterSceneDepthAt(screenUV), dO, valid);
-        let sceneCol = textureSampleLevel(waterSceneColor, smpLinearClamp, uvF, 0.0).rgb;
+        var sceneCol = textureSampleLevel(waterSceneColor, smpLinearClamp, uvF, 0.0).rgb;
+        // the ray leaves a thin crest through its back: the sky behind the wave, not the seabed
+        // (a branch: select() would evaluate the sky for every pixel)
+        if (thruCrest) { sceneCol = sky_env_sample(normalize(vec3<f32>(Tv.x, max(abs(Tv.y), 0.03), Tv.z))); }
 
         // objects in front of the sea floor (rocks, piers, hulls) shorten the path
         var qDist = 1e4;
@@ -591,8 +702,13 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
         dbgScene = sceneCol;
 
         let aer = surf.aeration;
-        let sigA = tw.absorption.rgb;
-        let sigS = tw.scattering.rgb + aer * 1.6;
+        // (sandK = 1 without the shore simulation)
+        let sandK = 1.0;
+        // surf zone: sand and bubbles stirred up by the breakers (see ShoreWaves.surfMedium)
+        let surfMed = shoreSurfMedium(pos.xz, vDepth);
+        let sigA = tw.absorption.rgb + surfMed.absorb * sandK;
+        // (bubble plumes are shallow and patchy: a moderate scatterer, milky turquoise rather than a glow)
+        let sigS = tw.scattering.rgb + surfMed.scatter * sandK + aer * 1.6;
         let sigT = sigA + sigS;
 
         let Ls = -refract(-L, vec3<f32>(0.0, 1.0, 0.0), 1.0 / IOR);

@@ -6517,7 +6517,7 @@ void DrawWaterTab()
     // default and stays so until the owner accepts Tidewater Native (plan §9). Saved per map in the
     // water profile; WGR_WATER_BACKEND=0|1 in the environment overrides it for a whole session.
     {
-        static constexpr bool kTidewaterPorted = true; // W2: open sea
+        static constexpr bool kTidewaterPorted = true; // W2: open sea, W3a: shore waves
         const char* backendNames[] = {"Current OP", "Tidewater Native"};
         const int current = (s.waterBackend == 1) ? 1 : 0;
         if (Dev::BeginCombo("Water backend", backendNames[current]))
@@ -6552,7 +6552,7 @@ void DrawWaterTab()
     {
         auto& t = s.tidewater;
         Dev::PanelSeparator();
-        Dev::PanelHeading("Tidewater Native (W2: open sea)");
+        Dev::PanelHeading("Tidewater Native (W2 open sea, W3a shore waves)");
         Dev::PanelHelp("Wind speed and heading come from the weather (or the reference sea below), as for "
                        "Current OP. The Current OP controls further down do not affect this mode, except "
                        "Cascade Preset's reference seas, which map onto this group.");
@@ -6578,9 +6578,28 @@ void DrawWaterTab()
         const char* twDebug[] = {"Off", "Back faces", "Normals", "Foam", "(4 unused)", "Lattice", "Path length",
                                  "Seabed seen through", "Sea depth", "(9 unused)", "SSR weight"};
         changed |= Dev::Combo("TW debug view", &t.debugView, twDebug, IM_ARRAYSIZE(twDebug));
+        Dev::PanelSeparator();
+        Dev::PanelHeading("Tidewater shore waves (W3a)");
+        Dev::PanelHelp("Waves run in along the travel-time field of the whole map (computed in the background "
+                       "a few seconds after the map loads, and again when the swell heading or sea level "
+                       "moves), shoal, plunge, turn into bores and run up the sand. Height follows TW swell "
+                       "energy.");
+        changed |= Dev::Checkbox("TW shore waves", &t.shoreWaves);
+        ImGui::BeginDisabled(!t.shoreWaves);
+        changed |= Dev::SliderFloat("TW shore period", &t.shorePeriod, 3.0f, 20.0f, "%.1f s");
+        changed |= Dev::SliderFloat("TW shore amplitude", &t.shoreAmplitude, 0.0f, 3.0f, "%.2f m");
+        Dev::PanelTooltip("Offshore amplitude (half the wave height) at the default swell energy 0.48.");
+        changed |= Dev::SliderFloat("TW shore variation", &t.shoreVariation, 0.0f, 1.5f, "%.2f");
+        changed |= Dev::SliderFloat("TW breaker index", &t.shoreGamma, 0.3f, 1.5f, "%.2f");
+        Dev::PanelTooltip("A wave breaks where its height exceeds this x the depth (gamma).");
+        changed |= Dev::SliderFloat("TW break span", &t.shoreBreakSpan, 0.03f, 0.6f, "%.2f");
+        changed |= Dev::SliderFloat("TW curl", &t.shoreCurl, 0.0f, 1.5f, "%.2f");
+        changed |= Dev::SliderFloat("TW run-up", &t.shoreRunup, 0.0f, 3.0f, "%.2f");
+        changed |= Dev::SliderFloat("TW surf turbidity", &t.shoreTurbidity, 0.0f, 1.0f, "%.2f");
+        ImGui::EndDisabled();
         ImGui::BeginDisabled(true);
         bool notPorted = false;
-        Dev::Checkbox("TW shore waves / breakers / wet sand (not ported: W3)", &notPorted);
+        Dev::Checkbox("TW breaker lips / shore simulation / wet sand (not ported: W3b)", &notPorted);
         Dev::Checkbox("TW spray budget + refraction pass (not ported: W4)", &notPorted);
         Dev::Checkbox("TW underwater + caustics (not ported: W5)", &notPorted);
         Dev::Checkbox("TW boat wakes (not ported: W6)", &notPorted);

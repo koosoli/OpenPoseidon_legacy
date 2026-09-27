@@ -1442,6 +1442,9 @@ pub struct WgrWaterParams {
     // backend; Current OP never looks at it). See wgpu_renderer.hpp for the lane meanings.
     // (sizeof 1056 -> 1136 with the selector above, matching C++.)
     pub tidewater: [WgrVec4; 4],
+    // TW-WATER W3 — the Tidewater shoreline-wave group (ShoreWaves.js ShoreParams); lane meanings in
+    // wgpu_renderer.hpp. (sizeof 1136 -> 1184, matching C++.)
+    pub tidewater_shore: [WgrVec4; 3],
 }
 
 pub const WGR_WATER_MAX_BODIES: usize = 16;
@@ -1656,7 +1659,7 @@ const _: () = assert!(std::mem::size_of::<WgrGrassDownwash>() == 16);
 // (GrassParams.photo / .place / .photo_mix / .layer_weights[2]). 4736 + 32 for
 // the card-coverage / procedural-look pair (GrassParams.card_look / .blade_look).
 const _: () = assert!(std::mem::size_of::<WgrGrassParams>() == 4784);
-const _: () = assert!(std::mem::size_of::<WgrWaterParams>() == 1136);
+const _: () = assert!(std::mem::size_of::<WgrWaterParams>() == 1184);
 const _: () = assert!(std::mem::size_of::<WgrWaterNode>() == 40);
 const _: () = assert!(std::mem::size_of::<WgrWaterBatch>() == 16);
 const _: () = assert!(std::mem::size_of::<WgrWaterInteractionEvent>() == 64);

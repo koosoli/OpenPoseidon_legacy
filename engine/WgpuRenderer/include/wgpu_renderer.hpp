@@ -1467,6 +1467,13 @@ struct WgrWaterParams
      * The selector plus this group move sizeof 1056 -> 1136 with the Rust side (the layout hash
      * refuses a stale exe/DLL pair). */
     WgrVec4 tidewater[4];
+    /* TW-WATER W3 — the Tidewater shoreline waves (ShoreWaves.js ShoreParams). Read only by that backend.
+     * [0] x = shore waves on (1), y = wave period s (9), z = amplitude H/2 m (0.34), w = variation (0.55)
+     * [1] x = breaker index gamma (0.78), y = break span (0.13), z = curl (1), w = run-up (1)
+     * [2] x = surf-zone turbidity 1/m (0.16), y..w reserved (0)
+     * The renderer scales the amplitude with the swell scale (tidewater[0].z) relative to its default,
+     * so weather and the reference seas move the surf too. sizeof 1136 -> 1184 with the Rust side. */
+    WgrVec4 tidewater_shore[3];
 };
 
 struct WgrWaterCascadeConfig
@@ -2178,7 +2185,7 @@ static_assert(sizeof(WgrGrassDownwash) == 16, "WgrGrassDownwash layout must matc
 static_assert(sizeof(WgrSmokeShadowBlob) == 32, "WgrSmokeShadowBlob layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrSmokeVolumeParams) == 96, "WgrSmokeVolumeParams layout must match the Rust #[repr(C)] struct");
   static_assert(sizeof(WgrGrassParams) == 4784, "WgrGrassParams layout must match the Rust #[repr(C)] struct");
-static_assert(sizeof(WgrWaterParams) == 1136, "WgrWaterParams layout must match the Rust #[repr(C)] struct");
+static_assert(sizeof(WgrWaterParams) == 1184, "WgrWaterParams layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrWaterNode) == 40, "WgrWaterNode layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrWaterBatch) == 16, "WgrWaterBatch layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrWaterInteractionEvent) == 64 && alignof(WgrWaterInteractionEvent) == 16, "WgrWaterInteractionEvent must match Rust");

@@ -117,6 +117,9 @@ pub struct WaterBackend {
     last_params: Option<WgrWaterParams>,
     cascade_configs: Vec<Option<WgrWaterCascadeConfig>>,
     interaction_params: Option<WgrWaterInteractionParams>,
+    // TW-WATER W3: the CPU heightmap (the shore field is computed from it). Kept for replay: the
+    // producer uploads it once per world load / terrain edit, not per frame.
+    terrain_heights: Option<(std::sync::Arc<[f32]>, crate::ffi::WgrTerrainParams, u64)>,
     requested: WaterBackendKind,
     refused_logged: Option<WaterBackendKind>,
     switches: u64,
@@ -144,6 +147,7 @@ impl WaterBackend {
             last_params: None,
             cascade_configs: vec![None; MAX_REPLAYED_CASCADES],
             interaction_params: None,
+            terrain_heights: None,
             requested: WaterBackendKind::CurrentOp,
             refused_logged: None,
             switches: 0,
@@ -315,9 +319,27 @@ impl WaterBackend {
                 if let Some(p) = params {
                     tw.set_params(queue, p);
                 }
+                if let Some((h, tp, generation)) = &self.terrain_heights {
+                    tw.set_terrain_heights(h.clone(), *tp, *generation);
+                }
             }
             Active::Empty => {}
         }
+    }
+
+    /// The terrain heightmap as the producer uploaded it (world load, terrain edit). Current OP
+    /// does not need the CPU copy; Tidewater computes its shore field from it.
+    pub fn set_terrain_heights(&mut self, heights: &[f32], params: crate::ffi::WgrTerrainParams) {
+        let n = params.hm_width as usize * params.hm_height as usize;
+        if n == 0 || heights.len() < n {
+            return;
+        }
+        let generation = self.terrain_heights.as_ref().map_or(1, |t| t.2 + 1);
+        let arc: std::sync::Arc<[f32]> = std::sync::Arc::from(&heights[..n]);
+        if let Active::Tidewater(tw) = &mut self.active {
+            tw.set_terrain_heights(arc.clone(), params, generation);
+        }
+        self.terrain_heights = Some((arc, params, generation));
     }
 
     // ------------------------------------------------------------------ producer inputs
@@ -627,6 +649,7 @@ mod tests {
         assert_eq!(bodies, 288);
         assert_eq!(sel, 288 + 16 * 48);
         assert_eq!(std::mem::offset_of!(WgrWaterParams, tidewater), 288 + 16 * 48 + 16);
-        assert_eq!(std::mem::size_of::<WgrWaterParams>(), 1136);
+        assert_eq!(std::mem::offset_of!(WgrWaterParams, tidewater_shore), 288 + 16 * 48 + 16 + 64);
+        assert_eq!(std::mem::size_of::<WgrWaterParams>(), 1184);
     }
 }

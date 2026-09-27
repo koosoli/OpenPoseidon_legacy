@@ -13970,6 +13970,10 @@ void EngineWgpu::SyncWaterLookProfile()
                 << t.swellHeadingDeg << ' ' << t.foamCoverage << ' ' << t.foamIntensity << ' ' << (t.ssr ? 1 : 0)
                 << ' ' << t.reflectionStrength << ' ' << t.cascadeScale << ' ' << t.roughness << ' ' << t.sss << ' '
                 << t.backscatter << ' ' << t.gust << ' ' << t.slick << ' ' << t.windrow << '\n';
+            // W3 — a separate group, so a profile written by W2 still reads (shore defaults)
+            out << "tidewaterShore " << (t.shoreWaves ? 1 : 0) << ' ' << t.shorePeriod << ' ' << t.shoreAmplitude
+                << ' ' << t.shoreVariation << ' ' << t.shoreGamma << ' ' << t.shoreBreakSpan << ' ' << t.shoreCurl
+                << ' ' << t.shoreRunup << ' ' << t.shoreTurbidity << '\n';
         }
         if (out.good())
             _waterLookDirty = false;
@@ -14088,6 +14092,14 @@ void EngineWgpu::SyncWaterLookProfile()
                 t.foamIntensity >> ssr >> t.reflectionStrength >> t.cascadeScale >> t.roughness >> t.sss >>
                 t.backscatter >> t.gust >> t.slick >> t.windrow;
             t.ssr = ssr != 0;
+        }
+        else if (key == "tidewaterShore")
+        {
+            auto& t = _waterLook.tidewater;
+            int on = 1;
+            in >> on >> t.shorePeriod >> t.shoreAmplitude >> t.shoreVariation >> t.shoreGamma >> t.shoreBreakSpan >>
+                t.shoreCurl >> t.shoreRunup >> t.shoreTurbidity;
+            t.shoreWaves = on != 0;
         }
         else
             in.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
