@@ -16,6 +16,68 @@
 using namespace Poseidon;
 using namespace Poseidon::Streaming;
 
+TEST_CASE("Automatic actor expiry follows actual sparse visitation rather than pump count", "[streaming-simulation-residency]")
+{
+    SimulationResidencyState state;
+    SimulationResidencyState::Region region;
+    region.automatic = true;
+    state.automaticActorVisits = AdvanceSimulationActorVisit(state.automaticActorVisits);
+    region.automaticSeenVisit = state.automaticActorVisits;
+    // One actual slot per pump in a 64-slot registry: the old 12-pump
+    // allowance expired before the actor's next legitimate visit.
+    for (size_t pump = 0; pump < 256; ++pump)
+    {
+        ++state.tick;
+        state.automaticActorVisits = AdvanceSimulationActorVisit(state.automaticActorVisits);
+        REQUIRE_FALSE(SimulationAutomaticRegionExpired(true, true, 64,
+            state.automaticActorVisits, region.automaticSeenVisit));
+        if ((pump + 1) % 64 == 0) region.automaticSeenVisit = state.automaticActorVisits;
+    }
+    const auto lastVisit = region.automaticSeenVisit;
+    for (size_t pump = 0; pump < 1024; ++pump) ++state.tick; // Budget permits no slot work.
+    REQUIRE(state.automaticActorVisits == lastVisit);
+    REQUIRE_FALSE(SimulationAutomaticRegionExpired(true, true, 64, state.automaticActorVisits, lastVisit));
+    // At full progress retain the old grace: 12 nominal batches of 32.
+    REQUIRE_FALSE(SimulationAutomaticRegionExpired(true, true, 64, lastVisit + 384, lastVisit));
+    REQUIRE(SimulationAutomaticRegionExpired(true, true, 64, lastVisit + 385, lastVisit));
+    REQUIRE_FALSE(SimulationAutomaticRegionExpired(true, true, 1, 10, 0));
+    REQUIRE(SimulationAutomaticRegionExpired(true, true, 1, 11, 0));
+    REQUIRE_FALSE(SimulationAutomaticRegionExpired(false, true, 64, lastVisit + 1000, lastVisit));
+    const auto maximum = std::numeric_limits<uint64_t>::max();
+    REQUIRE(AdvanceSimulationActorVisit(maximum) == maximum);
+    REQUIRE_FALSE(SimulationAutomaticRegionExpired(true, true, 64, maximum, 0));
+    REQUIRE_FALSE(SimulationAutomaticRegionExpired(true, true, 64, 0, 1));
+}
+
+TEST_CASE("Empty actor registry retires only automatic leases and deleted weak actors release all purposes", "[streaming-simulation-residency]")
+{
+    Foundation::CaptureMainThread();
+    Ref<LODShapeWithShadow> shape = new LODShapeWithShadow;
+    Ref<ObjectPlain> actor = new ObjectPlain(shape, 42);
+    SimulationResidencyState state;
+    SimulationResidencyState::Region automatic, manual;
+    automatic.actor = actor.GetRef(); automatic.automatic = true;
+    manual.actor = actor.GetRef(); manual.automatic = false;
+    REQUIRE(state.AcquireLease(0)); REQUIRE(state.AcquireLease(0)); REQUIRE(state.AcquireLease(1));
+    automatic.active = {0}; automatic.activeSet = {0};
+    automatic.pending = {0, 1}; automatic.pendingSet = {0, 1}; automatic.pendingNew = 1;
+    manual.active = {0}; manual.activeSet = {0};
+    REQUIRE(SimulationAutomaticRegionExpired(automatic.automatic, static_cast<Object*>(automatic.actor) != nullptr,
+        0, state.automaticActorVisits, automatic.automaticSeenVisit));
+    REQUIRE_FALSE(SimulationAutomaticRegionExpired(manual.automatic, static_cast<Object*>(manual.actor) != nullptr,
+        0, state.automaticActorVisits, manual.automaticSeenVisit));
+    state.DropRegion(automatic);
+    REQUIRE((state.leaseCounts == std::unordered_map<uint32_t,uint32_t>{{0,1}}));
+    REQUIRE(automatic.active.empty()); REQUIRE(automatic.pending.empty());
+    actor = nullptr;
+    REQUIRE(static_cast<Object*>(manual.actor) == nullptr);
+    REQUIRE(SimulationAutomaticRegionExpired(false, false, 64, 0, 0));
+    state.DropRegion(manual);
+    REQUIRE(state.leaseCounts.empty());
+    state.DropRegion(automatic); state.DropRegion(manual);
+    REQUIRE(state.leaseCounts.empty());
+}
+
 TEST_CASE("Compact simulation metadata preflight separates complete world records from active shape work", "[streaming-simulation-residency]")
 {
     const auto production = PreflightSimulationMetadata(2971218,2352,sizeof(SimulationResidencyState::Group));

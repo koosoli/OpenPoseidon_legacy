@@ -165,6 +165,7 @@ struct SimulationResidencyState
         uint64_t positiveAdmissionGeneration = 0;
         size_t positiveValidationCursor = 0;
         uint64_t seen = 0, planGeneration = 0;
+        uint64_t automaticSeenVisit = 0;
         SimulationResidencyStatus status = SimulationResidencyStatus::Pending;
         SimulationDemand plan;
         size_t cell = 0, offset = 0, pendingNew = 0;
@@ -192,6 +193,7 @@ struct SimulationResidencyState
     std::unordered_map<RegionKey, Region, RegionKeyHash> regions;
     size_t inventoryCursor = 0, modelCursor = 0, actorCursor = 0, regionCursor = 0;
     uint64_t tick = 0, generation = 1;
+    uint64_t automaticActorVisits = 0;
     uint64_t positiveAdmissionGeneration = 1;
     std::vector<uint32_t> positiveColdWork;
     size_t positiveColdCursor = 0, legacyShapeSlots = 0;

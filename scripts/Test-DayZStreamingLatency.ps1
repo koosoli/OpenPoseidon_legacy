@@ -200,10 +200,10 @@ try {
     $warmJobProof = @{enabled = [bool]$WarmTextureJobs; state = $returned.camera
         scope = 'Bounded requested dependencies of cached CPU models; successful GPU block uploads validate initialized physical member and current loaded mount, not whole-model texture readiness or a performance benefit'}
     $warmJobProof | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $out 'warm-texture-job-proof.json')
-    if ($WarmTextureJobs -and ($returned.camera.warmTextureJobsSubmitted -lt 1 -or
-        $returned.camera.warmTextureMembersPrepared -lt 1 -or $returned.camera.warmPreparedPuts -lt 1 -or
-        $returned.camera.warmPreparedTakes -lt 1 -or $returned.camera.warmPreparedUploads -lt 1 -or
-        $returned.camera.warmPreparedUploadBytes -lt 1)) { throw 'Warm preparation did not demonstrate an actual source-validated GPU upload' }
+    $warmJobsProven = !$WarmTextureJobs -or ($returned.camera.warmTextureJobsSubmitted -ge 1 -and
+        $returned.camera.warmTextureMembersPrepared -ge 1 -and $returned.camera.warmPreparedPuts -ge 1 -and
+        $returned.camera.warmPreparedTakes -ge 1 -and $returned.camera.warmPreparedUploads -ge 1 -and
+        $returned.camera.warmPreparedUploadBytes -ge 1)
     $archiveBindings = Send @{cmd = 'archive_source_bindings'}
     if ($archiveBindings.enabled -ne [bool]$ArchiveSourceBindings -or
         $archiveBindings.liveBindings -gt $archiveBindings.capBindings -or
@@ -306,7 +306,7 @@ try {
         rows = @($quotaRows | ForEach-Object { $_.Line })
         scope = 'Sampled existing residency log cadence; counted warm registration scheduling only, not texture readiness, total route work, a frame deadline or cross-machine determinism'}
     $quotaProof | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $out 'registration-quota-proof.json')
-    @{passed = $true; mode = $Mode; admissionMode = $AdmissionMode; parkedTextureRefill = [bool]$ParkedTextureRefill; lazyTextureGroups = [bool]$LazyTextureGroups; warmProfile = [bool]$WarmProfile; screeningOnly = $true; performanceAccepted = $false; terrainPageTimings = [bool]$TerrainPageTimings
+    @{passed = [bool]$warmJobsProven; mode = $Mode; admissionMode = $AdmissionMode; parkedTextureRefill = [bool]$ParkedTextureRefill; lazyTextureGroups = [bool]$LazyTextureGroups; warmProfile = [bool]$WarmProfile; screeningOnly = $true; performanceAccepted = $false; terrainPageTimings = [bool]$TerrainPageTimings
         frameCount = $count; dropped = $dropped; enginePhaseTiming = $phases; baseline = $baseline; returned = $returned
         routeSamples = $routeSamples; postExitHashes = $finalHashes
         parkedRefillProof = $parkedProof
@@ -320,6 +320,7 @@ try {
         limitation = 'No automatic performance threshold, vanilla parity, cold-cache guarantee or whole-world query readiness; compare matched separate mode processes'
     } | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $out 'result.json')
     Write-Output "DayZ latency screening evidence: $out"
+    if (!$warmJobsProven) { throw 'Warm preparation did not demonstrate an actual source-validated GPU upload; evidence retained' }
 } finally {
     if ($client) { $client.Dispose() }
     if ($p -and !$p.HasExited) { Stop-Process -Id $p.Id -Force }

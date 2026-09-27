@@ -247,6 +247,7 @@ Status Landscape::QueueModernSimulationRegionForChannel(Object& actor, Vector3Pa
     if (static_cast<Object*>(r.actor) != &actor) { s.DropRegion(r); r = State::Region{}; r.actor = &actor; }
     if (automatic && !r.automatic && r.seen != 0) return r.status;
     r.seen = s.tick + 1;
+    if (automatic) r.automaticSeenVisit = s.automaticActorVisits;
     const auto frame = SimulationFrameSample(actor.Transform());
     const auto currentSpeed = actor.ObjectSpeed();
     if (r.from == a && r.to == b && r.radius == radius)
@@ -440,6 +441,7 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
     for (size_t count = 0; count < std::min(size_t(32), totalActors) && elapsed() < 2; ++count)
     {
         const size_t index = s.actorCursor++ % totalActors;
+        s.automaticActorVisits = AdvanceSimulationActorVisit(s.automaticActorVisits);
         Object* actor = index < size_t(_world->NVehicles()) ? _world->GetVehicle(int(index)) :
             _world->GetFastVehicle(int(index - _world->NVehicles()));
         if (!actor) continue;
@@ -450,11 +452,11 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
                                     quantized(actor->Position() + actor->ObjectSpeed() * 0.1f),
                                     std::max(75.0, double(actor->GetRadius()) + 25), true);
     }
-    const uint64_t expiry = 2 * ((totalActors + 31) / 32) + 8;
     size_t expired = 0;
     for (auto it = s.regions.begin(); it != s.regions.end();)
     {
-        if ((!static_cast<Object*>(it->second.actor) || (it->second.automatic && s.tick > it->second.seen + expiry)) &&
+        if (SimulationAutomaticRegionExpired(it->second.automatic, static_cast<Object*>(it->second.actor) != nullptr,
+                totalActors, s.automaticActorVisits, it->second.automaticSeenVisit) &&
             expired < 4 && elapsed() < 2)
         { s.DropRegion(it->second); it = s.regions.erase(it); ++expired; }
         else ++it;

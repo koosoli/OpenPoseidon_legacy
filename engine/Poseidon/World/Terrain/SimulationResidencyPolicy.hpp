@@ -9,6 +9,7 @@
 
 #include <array>
 #include <cmath>
+#include <limits>
 #include <optional>
 #include <string_view>
 
@@ -23,6 +24,33 @@ inline constexpr size_t SimulationMaxWatchedPlacements = 16384;
 inline constexpr uint64_t SimulationMaxModelPayload = 4 * 1024 * 1024;
 inline constexpr uint64_t SimulationMaxPayloadCharge = 64 * 1024 * 1024;
 inline constexpr uint64_t SimulationMaxShapeCharge = 256 * 1024 * 1024;
+
+// Automatic neighbourhoods age by actually visited registry slots, not owner
+// pumps: the shared time budget can permit fewer than the nominal 32 visits.
+// This is a grace period, not a proof of complete registry traversal/membership.
+inline uint64_t AdvanceSimulationActorVisit(uint64_t visits)
+{
+    return visits == std::numeric_limits<uint64_t>::max() ? visits : visits + 1;
+}
+
+inline bool SimulationAutomaticRegionExpired(bool automatic, bool actorAlive,
+    size_t totalActors, uint64_t visits, uint64_t lastVisit)
+{
+    if (!actorAlive) return true;
+    if (!automatic) return false; // Explicit-purpose lifetime is unchanged.
+    if (!totalActors) return true;
+    const uint64_t maximum = std::numeric_limits<uint64_t>::max();
+    if (visits == maximum || visits < lastVisit) return false;
+    const uint64_t actors = uint64_t(totalActors);
+    const uint64_t batches = actors / 32 + (actors % 32 != 0);
+    if (batches > (maximum - 8) / 2) return false;
+    const uint64_t pumps = batches * 2 + 8;
+    const uint64_t batchSize = std::min(uint64_t(32), actors);
+    if (pumps > maximum / batchSize) return false;
+    // Preserve the former grace at full batch progress; sparse/zero-progress
+    // pumps cannot expire a neighbourhood before its normal revisit.
+    return visits - lastVisit > pumps * batchSize;
+}
 
 // Convex swept L-infinity capsule containment, not endpoint-AABB containment.
 // Both endpoint boxes must fit; convexity then covers the complete requested

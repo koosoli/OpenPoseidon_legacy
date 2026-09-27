@@ -8858,16 +8858,36 @@ void EngineWgpu::CaptureWarmTextureReads(const LODShapeWithShadow* shape,
 {
     if (!ObjectStreamPreparer::WarmTextureJobsEnabled() || !Foundation::IsMainThread() ||
         !_gpuDriven || !_renderer || !shape || !workRemaining) return;
+    // Diagnostic only for this already opt-in owner path. No clocks, new source
+    // capture, extra bank lookup or changes to the existing shared visit budget.
+    const size_t initialWork = workRemaining, initialReads = reads.size();
+    size_t inspected = 0, ineligible = 0, noCurrentSource = 0, sizeOrKeyRefused = 0, lodVisits = 0;
+    auto report = [&](bool recorded) {
+        static unsigned rows = 0; // owner-only; saturated to bound log/format work
+        if (rows < 64)
+        {
+            ++rows;
+            LOG_INFO(World, "Warm texture capture: path={} inspected={} hotOrIneligible={} noCurrentSource={} sizeOrKeyRefused={} accepted={} lodVisits={} workStart={} workLeft={} workCapped={}",
+                recorded ? "recorded" : "sections", inspected, ineligible, noCurrentSource, sizeOrKeyRefused,
+                reads.size() - initialReads, lodVisits, initialWork, workRemaining, workRemaining == 0);
+        }
+        else if (rows == 64)
+        {
+            ++rows;
+            LOG_INFO(World, "Warm texture capture: log truncated after 64 opt-in calls; this prefix is not full capture coverage or a source-freshness proof");
+        }
+    };
     auto inspect = [&](const TextureWgpu* texture)
     {
         if (!workRemaining || reads.size() >= 64) return;
-        --workRemaining;
-        if (!texture || !texture->CanWarmPrepare()) return;
+        --workRemaining; ++inspected;
+        if (!texture || !texture->CanWarmPrepare()) { ++ineligible; return; }
         auto source = texture->CurrentArchiveSourceBinding();
-        if (!source || source->Request().bytes > 16 * 1024 * 1024) return;
+        if (!source) { ++noCurrentSource; return; }
+        if (source->Request().bytes > 16 * 1024 * 1024) { ++sizeOrKeyRefused; return; }
         const std::string key = render::PreparedTextureStore::Key(texture->SourceName());
         if (key.empty() || key.size() > 8191 ||
-            std::any_of(reads.begin(), reads.end(), [&](const auto& prior) { return prior.key == key; })) return;
+            std::any_of(reads.begin(), reads.end(), [&](const auto& prior) { return prior.key == key; })) { ++sizeOrKeyRefused; return; }
         reads.push_back({key, std::move(source)});
     };
     if (const auto found = _gpuModelTextures.find(shape); found != _gpuModelTextures.end())
@@ -8879,19 +8899,21 @@ void EngineWgpu::CaptureWarmTextureReads(const LODShapeWithShadow* shape,
             if (!workRemaining || reads.size() >= 64) break;
             inspect(texture);
         }
+        report(true);
         return;
     }
     // Recreated registrations: primary textures of existing normal LOD sections.
     // Lazy/unavailable LODs, unresolved material stages and proxies retain fallback.
     for (int level = 0; level < shape->NLevels() && level < 64 && workRemaining && reads.size() < 64; ++level)
     {
-        --workRemaining;
+        --workRemaining; ++lodVisits;
         if (!shape->IsNormalLevel(level)) continue;
         const Shape* lod = shape->LevelOpaque(level);
         if (!lod) continue;
         for (int section = 0; section < lod->NSections() && workRemaining && reads.size() < 64; ++section)
             inspect(dynamic_cast<const TextureWgpu*>(lod->GetSection(section).properties.GetTexture()));
     }
+    report(false);
 }
 
 render::RegistrationCost EngineWgpu::QueryRegistrationCost(const LODShapeWithShadow* shape) const
