@@ -11664,6 +11664,293 @@
         "route-frame-ms.json": "2c8c2a45a5327fc6b179aeeeb2fda2af1461eb80157b0e24686e385f4aaeb454",
         "samples.jsonl": "60d759ef650264758b7c905fc59dba9adef6789685c8b7f296edbcaedd9677bc"
       }
+    },
+    {
+      "run": "local-pose-actual-20260927-20260927-052545",
+      "classification": "PASS clean exit0 opt-in CPU local-shadow pose witness/control; no visual or performance acceptance",
+      "provenance": {
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "D181A782542A79CBE4D41E90ED83F9F5C729C146B273ED5E90BC534153C7C60F",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "EB033FC34F2EF46E8DB19FB43074E91D9165B51FC06A2FA1F290E27A5CE12CAB",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "missionHash": "4F0E032AD767C1706A1314AD9DCE8ED5AAB42E0778345D53CA4784BDC3ABFA34",
+        "installed": "codex/streaming-residency 5bd76495 2026-09-27_05:25 deploy-ps1",
+        "settleSeconds": 15,
+        "scope": "One original night fixture; fixed world/camera, sampled exact CPU pose witnesses; no retained/sky coverage or performance acceptance",
+        "disabled": false,
+        "head": "5bd76495eb1bb5c2023fb9cb041d02d4f52ea6ec",
+        "scriptHash": "326CFE2FB8BE622D58EA673601AAB89F62B1A5827432BA57560E1C32C52E588E",
+        "originalActors": [
+          "SoldierWB",
+          "Truck5t"
+        ],
+        "environment": {
+          "POSEIDON_LOCAL_SHADOW_FORCE_REFRESH": "0",
+          "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\local-pose-actual-20260927-20260927-052545\\user",
+          "WGR_EXPOSURE": "2",
+          "WGR_LOCAL_POSE_CACHE_TRACE": "1",
+          "WGR_LOCAL_SHADOW_CACHE": "1",
+          "WGR_AUTO_EXPOSURE": "0",
+          "WGR_LOCAL_SHADOW_POSE_CACHE": "1"
+        },
+        "forceRefresh": false,
+        "mission": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\dev-missions\\freefly-lights.eden"
+      },
+      "summary": {
+        "passed": true,
+        "performanceAccepted": false,
+        "n": 949,
+        "meanMs": 2.165123287671234,
+        "medianMs": 1.546,
+        "p95Ms": 2.104,
+        "p99Ms": 2.755,
+        "maxMs": 166.702,
+        "quantiles": "nearest-rankceil(n*p)-1/usualmedian",
+        "disabled": false,
+        "sampledMutationWitness": [
+          {
+            "palette": "1",
+            "event": false,
+            "raw": "[wgr] local pose cache: enabled=true cpuCasters=5 changedCasters=5 unwitnessedCasters=0 poseRefreshMask=16383 unwitnessedMask=0 rendered=14 cached=0 instanceEpoch=100843 lightDirtyMask=0 mesh=4294968130 palette=1 revision=1 worldContentKey=15079445822454082016 indexBegin=18 indexCount=12 sourcePlan=2",
+            "worldContentKey": "15079445822454082016",
+            "revision": "1",
+            "lightDirtyMask": "0",
+            "unwitnessedCasters": "0",
+            "instanceEpoch": "100843",
+            "unwitnessedMask": "0",
+            "mesh": "4294968130",
+            "changedCasters": "5",
+            "poseRefreshMask": "16383",
+            "enabled": "true",
+            "source": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\local-pose-actual-20260927-20260927-052545\\stderr.txt",
+            "sourcePlan": "2",
+            "indexCount": "12",
+            "indexBegin": "18",
+            "rendered": "14",
+            "cached": "0",
+            "cpuCasters": "5",
+            "lineNumber": 23
+          },
+          {
+            "palette": "1",
+            "event": true,
+            "raw": "[wgr] local pose cache event: enabled=true cpuCasters=5 changedCasters=5 unwitnessedCasters=0 poseRefreshMask=16383 unwitnessedMask=0 rendered=14 cached=0 instanceEpoch=100843 lightDirtyMask=0 mesh=4294968130 palette=1 revision=2 worldContentKey=15079445822454082016 indexBegin=18 indexCount=12 sourcePlan=3",
+            "worldContentKey": "15079445822454082016",
+            "revision": "2",
+            "lightDirtyMask": "0",
+            "unwitnessedCasters": "0",
+            "instanceEpoch": "100843",
+            "unwitnessedMask": "0",
+            "mesh": "4294968130",
+            "changedCasters": "5",
+            "poseRefreshMask": "16383",
+            "enabled": "true",
+            "source": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\local-pose-actual-20260927-20260927-052545\\stderr.txt",
+            "sourcePlan": "3",
+            "indexCount": "12",
+            "indexBegin": "18",
+            "rendered": "14",
+            "cached": "0",
+            "cpuCasters": "5",
+            "lineNumber": 26
+          }
+        ]
+      },
+      "limits": "Startup actual matrix mutation only, not causal scripted command transition. Same mesh4294968130/palette1/index18+12/worldContentKey15079445822454082016/epoch100843/lightDirty0 revision1->2/sourceplan2->3/refresh14mask16383 witnessed. Legacy hashedworld key not exact unhashedworld/allview proof. Later everyplan changed10CPUcasterobservations14rendered0cached; OFF0rendered14cached/no observations. Original dark images no obvious missing assets but cannot establish visible stale-shadow correction. Retained/sky/concurrentmeshwrite ownership unproven, defaultOFF/unpromoted; normalDayZ default pending. Cargo integration only design blockedmodernloader/purpose/lifecycle, not implemented.",
+      "sha256": {
+        "after.png": "5a6f164305f66cd3c9a9fafcb064fc36cee19c8eb2889d9eed743081459936fc",
+        "before.png": "8d68bbee0a386ee34fcab34b8b8b2653765d4168733dff0a448d8ece49b644f0",
+        "engine.log": "29d12c3cac98fe02ec03e2c47e0296466f1b0e7f151b34ab05e50a32762562da",
+        "frame-phases.json": "5e8c79e4326b851bc1d999f00176d26236403ef5ccee76dfc2adb108c652be02",
+        "harness.jsonl": "3ae80c7adcb4566105c9ef2dcd505b2c9dd4414323b98cf79f5fb0efaa263717",
+        "pose-trace.json": "5035e5c686c727fb6f1415ef9575c483571d345033234306dc9aaabfe5c2c901",
+        "provenance.json": "93e84c57acace4b352abade93b8651e45ea6561a4779b5dc5da882eee1675fb4",
+        "result.json": "11f3b546787bd0846846fba5af16d232d7375f664810017c22ddadea8928906f",
+        "return.png": "c1bf9f237b5e5fb587c19b961ca1a228f394aed02e12a68d0971f4f17b40501a",
+        "route-frame-ms.json": "417b13bec0c6123bba5a8032861fd4252cd134b103aae5cd3fdfabb18a810609",
+        "stderr.txt": "e1b3dfb2fafd5e027143b2ffbb8aa62c922115b5003b599db756e366a69f7314",
+        "stdout.txt": "fe2b93bcfd9283ac577cc04425acf6a80b74f8c52898eece5d7aa349f04d81bf"
+      }
+    },
+    {
+      "run": "local-pose-off-20260927-20260927-052658",
+      "classification": "PASS clean exit0 opt-in CPU local-shadow pose witness/control; no visual or performance acceptance",
+      "provenance": {
+        "forceRefresh": false,
+        "missionHash": "4F0E032AD767C1706A1314AD9DCE8ED5AAB42E0778345D53CA4784BDC3ABFA34",
+        "mission": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\dev-missions\\freefly-lights.eden",
+        "disabled": true,
+        "originalActors": [
+          "SoldierWB",
+          "Truck5t"
+        ],
+        "environment": {
+          "WGR_AUTO_EXPOSURE": "0",
+          "WGR_EXPOSURE": "2",
+          "WGR_LOCAL_POSE_CACHE_TRACE": "1",
+          "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\local-pose-off-20260927-20260927-052658\\user",
+          "POSEIDON_LOCAL_SHADOW_FORCE_REFRESH": "0",
+          "WGR_LOCAL_SHADOW_POSE_CACHE": "0",
+          "WGR_LOCAL_SHADOW_CACHE": "1"
+        },
+        "scope": "One original night fixture; fixed world/camera, sampled exact CPU pose witnesses; no retained/sky coverage or performance acceptance",
+        "installed": "codex/streaming-residency 5bd76495 2026-09-27_05:25 deploy-ps1",
+        "head": "5bd76495eb1bb5c2023fb9cb041d02d4f52ea6ec",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "D181A782542A79CBE4D41E90ED83F9F5C729C146B273ED5E90BC534153C7C60F",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "EB033FC34F2EF46E8DB19FB43074E91D9165B51FC06A2FA1F290E27A5CE12CAB",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "scriptHash": "326CFE2FB8BE622D58EA673601AAB89F62B1A5827432BA57560E1C32C52E588E",
+        "settleSeconds": 15
+      },
+      "summary": {
+        "passed": true,
+        "performanceAccepted": false,
+        "n": 951,
+        "meanMs": 1.9793838065194522,
+        "medianMs": 1.466,
+        "p95Ms": 2.055,
+        "p99Ms": 2.465,
+        "maxMs": 152.108,
+        "quantiles": "nearest-rankceil(n*p)-1/usualmedian",
+        "disabled": true,
+        "sampledMutationWitness": null
+      },
+      "limits": "Startup actual matrix mutation only, not causal scripted command transition. Same mesh4294968130/palette1/index18+12/worldContentKey15079445822454082016/epoch100843/lightDirty0 revision1->2/sourceplan2->3/refresh14mask16383 witnessed. Legacy hashedworld key not exact unhashedworld/allview proof. Later everyplan changed10CPUcasterobservations14rendered0cached; OFF0rendered14cached/no observations. Original dark images no obvious missing assets but cannot establish visible stale-shadow correction. Retained/sky/concurrentmeshwrite ownership unproven, defaultOFF/unpromoted; normalDayZ default pending. Cargo integration only design blockedmodernloader/purpose/lifecycle, not implemented.",
+      "sha256": {
+        "after.png": "2955019270b558a734dbf941ae4ee268bf1e0c57ac8ac7f32254566c92b8e44b",
+        "before.png": "f420fb66e827f418f620b9ae33b5b537d762b365c47674354caf41c9996754c2",
+        "engine.log": "92b1632aa3ec35cd68ce0ffa6e7b351e5f33801ba4ccf18b25d56d7da8e17c22",
+        "frame-phases.json": "b643af17f0d495420de26347b1095a88167f43d5ea6ab1703678b9b2c9d9c481",
+        "harness.jsonl": "6f5f87a0b91ecd5511da5ddc75583b6a206d85275bd2411affc98dbd1f6e49c0",
+        "pose-trace.json": "0814f470b9eee1e151ae2c28478d816cae8ac7ff6df88f8343ce437dffb46661",
+        "provenance.json": "4c10ade6ecaca7bf14225ddcc11f856c4e5950ed6d448fc0ff3f87af21f752ce",
+        "result.json": "b04b62b295d515956b07d1a595077b5440ce1c4a20e9ccb55ed36b4427b649b6",
+        "return.png": "047ab1f5603da08fd893ecb58baba63d41ceaf029169adf7e4f03979ecac0e56",
+        "route-frame-ms.json": "2928959a1e0ce0596bd7b44939e0d671743c0e943d1f7e2c3966c808db662dd3",
+        "stderr.txt": "74d5c2e0dd736cc38fcd86c9581290f0400ced10601644f2f8dbdf2696dfc1d8",
+        "stdout.txt": "450e7b56fb4863766e0b38ac9a242c3c50c60fd73ab019da715689af15e15d4f"
+      }
+    },
+    {
+      "run": "local-pose-default-dayz-20260927-disabled-20260927-052839",
+      "classification": "PASS clean exit0 same5bd defaultDayZ compatibility only",
+      "provenance": {
+        "viewDistance": 2000,
+        "height": 720,
+        "poseHoldSeconds": 3,
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "D181A782542A79CBE4D41E90ED83F9F5C729C146B273ED5E90BC534153C7C60F",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "EB033FC34F2EF46E8DB19FB43074E91D9165B51FC06A2FA1F290E27A5CE12CAB",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "head": "5bd76495eb1bb5c2023fb9cb041d02d4f52ea6ec",
+        "clearedEnvironmentNames": [],
+        "measurementScope": "Bounded engine16384-frame route capture; screening only, no FPS acceptance, vanilla parity or full cold-cache proof",
+        "scriptSha256": "1EA9686F1BA8A1A57A850211F18C5BC4B3E8EE025003CC57211150039551CCB6",
+        "processScope": "Owned PID private/RSS samples; sparse owner-pump values are observations, not percentiles",
+        "fpsCap": 60,
+        "paaLzoReplay": false,
+        "paaPreparationDiagnostics": false,
+        "packedTextures": false,
+        "width": 1280,
+        "routeScope": "Eight convergence400m out/return poses plus three stationary recovery holds; one process per invocation",
+        "world": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\packages\\dayz-compat\\world\\chernarusplus\\chernarusplus.wrp",
+        "pose": [
+          5704.58,
+          2523.37,
+          73.74,
+          260.9,
+          -3.8
+        ],
+        "environment": {
+          "WGR_TEXTURE_STREAM_STATS": "0",
+          "WGR_ADAPTIVE_TEXTURE_DETAIL": "0",
+          "WGR_OBJECT_STREAM_PBO": "1",
+          "WGR_OBJECT_STREAM_TEST_BUDGET": "1",
+          "WGR_SIMULATION_POSITIVE_COLD": "0",
+          "WGR_NATIVE_DDS_PREPARE": "0",
+          "WGR_GEO_POOL_PRESSURE_GROWTH": "0",
+          "WGR_GEO_POOL_GROWTH": "2.0",
+          "WGR_OBJECT_STREAM_MAX_OBJECTS": "20000",
+          "WGR_NATIVE_DDS_BC3_ONLY": "0",
+          "POSEIDON_MODEL_DDC": "0",
+          "WGR_OBJECT_STREAM_GPU_BUDGET": "0",
+          "WGR_SIMULATION_RESIDENCY": "0",
+          "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\local-pose-default-dayz-20260927-disabled-20260927-052839\\user",
+          "WGR_OBJECT_STREAM_PBO_TEXTURES": "0",
+          "WGR_LOD_GOVERNOR_RANGE": "1",
+          "WGR_SKY_VOLUME_INCREMENTAL": "1"
+        },
+        "mode": "Disabled",
+        "msaaSamples": 4,
+        "installed": "codex/streaming-residency 5bd76495 2026-09-27_05:25 deploy-ps1",
+        "routeX": [
+          5804.58,
+          5904.58,
+          6004.58,
+          6104.58,
+          6004.58,
+          5904.58,
+          5804.58,
+          5704.58,
+          5704.58,
+          5704.58,
+          5704.58
+        ],
+        "paaPreparationInflight": false
+      },
+      "summary": {
+        "passed": true,
+        "performanceAccepted": false,
+        "n": 835,
+        "meanMs": 41.49944790419161,
+        "medianMs": 23.189,
+        "p95Ms": 142.363,
+        "p99Ms": 391.592,
+        "maxMs": 1002.12,
+        "quantiles": "nearest-rankceil(n*p)-1/usualmedian",
+        "resident": 19923,
+        "required": 0,
+        "geometry": 711818480,
+        "texture": 2762855092,
+        "textureCount": 2501
+      },
+      "limits": "Samebinaryhashes/no normal pose/trace/newexperimentalflags. Differing allocated work and ordered cache prevent no-regression/FPS acceptance. Root viewed settled5bd against previousae default same localPOI, no obvious new geometry/material coverage changes, not wholemap/no-regression visual proof/fullplanOPEN.",
+      "sha256": {
+        "engine.log": "d2b12aa66e8345fd7450c7b4440b97d3e95c17fb96dc45cecace6b3a97e9befd",
+        "harness.jsonl": "7089a0e8be49cf5dea10e3e048e2415f9126d5d42bf49fe0d9ef00b8395cbfd9",
+        "paa-attempt-proof.json": "001dcb9cc384d9726cc04ce21fffe77c3cd0e7090b72def83c0658cc5bf5edcd",
+        "paa-inflight-proof.json": "a626aa21cf6f4a35ca6e41d4e6295d41a1807e822353b9e471d40958809f919a",
+        "provenance.json": "6076ce9b032ea9fea9f4722d60bb58e097728c3ca6eeed2c2236ee03821de28f",
+        "result.json": "2dbdb66e3c1dd72ecca8747cae52c1c8f9d2a12e224f19fed28cd1e11a0770c5",
+        "returned-settled.png": "38da83f9dd732709aa3978e4df1f50e97a28ca57e6318c371a48c8f0295f808a",
+        "route-frame-ms.json": "24dcaee845ae5e1182408aa6b40a998a408e8b5f7591939579d83fb5b3785183",
+        "samples.jsonl": "25b922279fb571451eeb17cc3becb47d4a20d32884dd338f96b4a98ba02899c6"
+      }
     }
   ],
   "microbenchmarks": [
@@ -12842,6 +13129,18 @@
         "deploy-paa-inflight-20260927.log": "cef03edc25db9bb4a45930b0c807a0e351875d2ee3e2c3ec6ee571a504749e89",
         "run-paa-inflight-actual-20260927.log": "b93af6e6d62dfd77188557b1157fd1b15e42ab9c82ac256efac5e99ec3bde3e6",
         "run-paa-inflight-off-20260927.log": "78086e70715f87e47518726ab8481f08a4bbca7bc0d824a5a3b04253c859857a"
+      }
+    },
+    {
+      "artifactRoot": "build",
+      "runtimeSourceCommit": "5bd76495",
+      "result": "Build18all5targetsPASS/Rustlocal_pose_cache7PASS0failed0ignored354filtered; cleaninstall5bd05:25. Exact CPU pose flagdefaultOFF,64blocks512KiBlogical/64audits1024observations, finiteexactbytes/ORmask/refuseinvalidnextframeNone/resetOFFforce;128trace rows/two types onlyON.",
+      "sha256": {
+        "build-local-shadow-pose-20260927.log": "244228ba5ca38284f3b06ee2583a923103b27d863cfe628afca56fd55398b5df",
+        "test-local-shadow-pose-rust-20260927.log": "609d182c723303e3dbc3c17774794a9529c268ef4fc90d6f3ddc128a6668790d",
+        "deploy-local-shadow-pose-20260927.log": "54ab5c91fe57199c81f173afb1160a90eec540f99e45a5d25eb258133b209308",
+        "run-local-pose-actual-20260927.log": "7a05ecf0363bb22f9dcc34430dd73dbbd7491120bf6833b69398a63e8e327377",
+        "run-local-pose-off-20260927.log": "f344caf4b1289c49702f3a1d249da4fa3e4bab821138cd3d81f4bf03aa431659"
       }
     }
   ],

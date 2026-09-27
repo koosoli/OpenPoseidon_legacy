@@ -2461,3 +2461,20 @@ settled samePOI no obvious new geometry/material change, localonly. Suppression
 OFFdefault, fullplanOPEN/performancefalse. AllflagsOFF normalcontrol was pending at this checkpoint;
 newposecache source unbuilt/not included.
 Sameae allflagsOFF051036 subsequently PASSclean0, stable installed hashes.871frames mean39.697796/median23.514/p95131.467/p99333.420/max942.080ms nearest-rank; geometry712369276/textures2749617844/2494. PBOtex/attemptdiag/inflight false, no new default work; compatibility only, not no-regression/performance acceptance. No posecaller prototype installed; fullplanOPEN.
+Local CPU pose witness5bd76495 cleaninstalled05:25 build18all5targets/Rust7PASS
+0failed0ignored354filtered. ExactflagOFF; bounded64blocks/512KiBlogical/64audits/
+1024observations, finiteexactbytes/ORmask/invalidnextframeNone/resetOFFforce;
+trace128rows(two types), no OFF tracing. ON052545/OFF052658 clean0PASS. Actual
+startup matrix mutation mesh4294968130/palette1/index18+12/legacyworldContentKey
+15079445822454082016/epoch100843/lightDirty0 revision1->2/sourceplans2->3,
+refresh14/mask16383/no unvalidated witness. Startup observation is NOT script
+commandtransition causality or exact unhashedworld/all-view contracts. Later
+plans everyposechange10casterobservations/14rendered0cached versusOFF rendered0/
+cached14/posefalse/observation0: frequent work, no performance acceptance.
+ON949frames mean2.165123/median1.546/p952.104/p992.755/max166.702 vsOFF951
+1.979384/1.466/2.055/2.465/152.108ms nearest-rank. Dark ON/OFF images root viewed
+no obvious missing assets, cannot prove a visible stale-shadow fix; no visual
+acceptance or default promotion. Retained/sky/concurrentmeshwrite coverage open.
+Default DayZ control was pending at this checkpoint; cargo source-only proposal blocked by modernloader/
+dedicatedpurpose/lease lifecycle, no unused flag shipped. FullplanOPEN.
+Same5bd defaultDayZ052839 subsequently PASSclean0/stablehashes,835frames mean41.499448/median23.189/p95142.363/p99391.592/max1002.120ms nearest-rank; returned19923/required0/geometry711818480/textures2762855092/2501. No new normal pose/trace/experimental flags; differing work/ordered caches not no-regression proof. Root viewed settled5bd versus previousae default same localPOI with no obvious new geometry/material coverage changes; narrowlocal only, not wholemap/no-regression visual proof/fullplanOPEN.
