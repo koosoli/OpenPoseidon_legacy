@@ -2478,6 +2478,35 @@ class Engine : public IGraphicsEngine
     struct WaterSettings
     {
         bool enabled = true;         // draw the GPU water surface (off = seabed only, for A/B)
+        // TW-WATER W1 — which water implementation the wgpu renderer draws: 0 = Current OP (the
+        // FFT/CDLOD water below, and the default), 1 = Tidewater Native (Tidewater Water Plan v5).
+        // Saved in the water profile ("backend" group); a profile without it means 0. The
+        // renderer switches at a frame boundary. WGR_WATER_BACKEND=0|1 overrides it for a session.
+        // Only the owner flips the default (plan §9), so this stays 0.
+        int waterBackend = 0;
+        // TW-WATER — the Tidewater Native parameter group (read only while waterBackend == 1).
+        // Defaults are Tidewater's own (dgreenheck/tidewater @4811ba48). Wind speed and heading are
+        // not here: like Current OP they come from the weather (or the reference sea). Shipped to
+        // the renderer in WgrWaterParams::tidewater; see wgpu_renderer.hpp for the lane layout.
+        struct TidewaterLook
+        {
+            float amplitude = 1.0f;        // spectrum amplitude scale
+            float choppiness = 0.9f;       // horizontal displacement (Tessendorf lambda)
+            float swellScale = 0.48f;      // energy of the distant-swell system
+            float swellHeadingDeg = 5.0f;  // heading of the distant swell, world degrees
+            float foamCoverage = 1.0f;     // whitecap / foam coverage gain
+            float foamIntensity = 1.0f;    // foam brightness
+            bool ssr = true;               // screen-space reflections of the scene
+            float reflectionStrength = 1.0f;
+            float cascadeScale = 1.0f;     // x 733 / 157 / 33.3 / 7.1 m cascade tiles
+            float roughness = 0.035f;      // base GGX roughness
+            float sss = 1.0f;              // backlit-crest subsurface gain
+            float backscatter = 0.035f;    // water-volume backscatter fraction
+            float gust = 1.0f;             // gust patches (cat's paws)
+            float slick = 1.0f;            // surfactant slicks
+            float windrow = 0.3f;          // windrow foam lines
+            int debugView = 0;             // Tidewater's own material debug views (0 = off)
+        } tidewater;
         // Neutral multipliers reproduce GodotOceanWaves' authored cascade values.
         // Those physical spectrum coefficients are already metre-scaled; multiplying
         // them by 2.4 after removing the erroneous IFFT normalization was excessive.

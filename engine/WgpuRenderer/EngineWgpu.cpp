@@ -13842,6 +13842,16 @@ void EngineWgpu::SyncWaterLookProfile()
         out << "underwater " << (s.underwaterEffect ? 1 : 0) << ' ' << s.underwaterEnterDepth << ' '
             << s.underwaterExitDepth << ' ' << s.underwaterEngageBand << ' ' << s.underwaterDensity << ' '
             << s.underwaterColorBias << ' ' << s.underwaterCausticGain << '\n';
+        // TW-WATER W1 — the backend selector. A reader that predates it skips the unknown group,
+        // and a profile written before it has no such line, which reads as 0 (Current OP).
+        out << "backend " << s.waterBackend << '\n';
+        {
+            const auto& t = s.tidewater;
+            out << "tidewater " << t.amplitude << ' ' << t.choppiness << ' ' << t.swellScale << ' '
+                << t.swellHeadingDeg << ' ' << t.foamCoverage << ' ' << t.foamIntensity << ' ' << (t.ssr ? 1 : 0)
+                << ' ' << t.reflectionStrength << ' ' << t.cascadeScale << ' ' << t.roughness << ' ' << t.sss << ' '
+                << t.backscatter << ' ' << t.gust << ' ' << t.slick << ' ' << t.windrow << '\n';
+        }
         if (out.good())
             _waterLookDirty = false;
     };
@@ -13944,6 +13954,21 @@ void EngineWgpu::SyncWaterLookProfile()
             // default (off); the current default applies. Thresholds and tuning are kept.
             if (version >= 4)
                 _waterLook.underwaterEffect = on != 0;
+        }
+        else if (key == "backend")
+        {
+            int backend = 0;
+            in >> backend;
+            _waterLook.waterBackend = (backend == 1) ? 1 : 0;
+        }
+        else if (key == "tidewater")
+        {
+            auto& t = _waterLook.tidewater;
+            int ssr = 1;
+            in >> t.amplitude >> t.choppiness >> t.swellScale >> t.swellHeadingDeg >> t.foamCoverage >>
+                t.foamIntensity >> ssr >> t.reflectionStrength >> t.cascadeScale >> t.roughness >> t.sss >>
+                t.backscatter >> t.gust >> t.slick >> t.windrow;
+            t.ssr = ssr != 0;
         }
         else
             in.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
