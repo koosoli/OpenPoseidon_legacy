@@ -2312,3 +2312,21 @@ retained. Root compared before-da3 and after-e0 profile-ON settled screenshots:
 same local bus/street/buildings/foliage/textures, not whole-route quality or A3
 compatibility. FullplanOPEN/performancefalse; future persistent GPU owner ledger
 source is not installed or verified by these runs.
+Persistent owner attribution395a3cfb/10d3206b is startup opt-in only; all-target
+250/review19 builds and123assertions/8cases pass. Clean10 stamp actual025802
+passes AllocationDiagnosticOnly, zero traversal cycles. Complete means only
+producer/model/CPU-owner facts from first create at a drained event cut;
+ownershipCoverageComplete false/reclaim0. Actual2602allocation/2506borrower
+records,2445liveCPU/1814modelLODlinks/61cancel creates, epoch1/reasons0/
+mailbox0/drops0. Estimated vertex331583572+index49275720=380859292 equals
+sampled pool-live here only, not general allocation proof. CPUreferenced
+379148808/retainedshared278823860/standalone100324948 bytes. Inspected overlap0
+despite2445CPU borrowers proves subset overlap cannot establish exclusivity.
+Caps8192allocations/32768borrowers/32768links/mail4096 and32768per-register
+LOD+section visits fail incomplete; retired links/failing allocation sticky.
+Retired metadata retained until reset; destructor numeric detach is not actual
+uploader/GPU retirement acknowledgement, cached/in-flight coverage incomplete.
+Default ordinary buffer allocation/subclass unchanged and no extra buffer heap
+OFF. Default OFF runtime was pending at this checkpoint; no FPS/MP/reclaim/paging/performance acceptance.
+FullplanOPEN.
+Same10 default-OFF025919 subsequently passes clean exit0: persistent enabledfalse/completefalse/CPU0/trackedalloc0/reclaim0, while ordinary bounded geometry report remains positive. This validates default flag gating only, not convergence, physical GPU acknowledgement or performance.
