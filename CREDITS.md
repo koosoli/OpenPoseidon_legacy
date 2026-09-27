@@ -83,3 +83,51 @@ in [`thirdparty/README.md`](thirdparty/README.md), and dependencies are declared
 *"ARMA" is a registered trademark of BOHEMIA INTERACTIVE a.s. "OPERATION FLASHPOINT" is a registered trademark of Electronic Arts Inc.
 See [`LICENSE`](LICENSE) for information concerning trademarks. This credits file is
 informational and does not constitute any grant and/or waiver of rights.*
+
+## Ported code
+
+### Tidewater (dgreenheck/tidewater)
+
+The *Tidewater Native* water backend (`engine/WgpuRenderer/rust/src/water_tw/`) is a
+source-faithful port of parts of [Tidewater](https://github.com/dgreenheck/tidewater),
+commit `4811ba48d795197de5621985f404e765c0b7c0ef`, MIT-licensed. Only code was ported. The
+foam and sea-detail textures are generated procedurally, and no Tidewater asset (audio,
+models, textures, cloud noise files) is used.
+
+| OpenPoseidon file | Ported from (Tidewater @ 4811ba48) |
+| --- | --- |
+| `water_tw/fft.rs` | `src/ocean/OceanFFT.js` |
+| `water_tw/cdlod.rs` | `src/core/CDLOD.js` |
+| `water_tw/textures.rs` | `src/ocean/SeaDetail.js` (`makeNoiseTexture`), `src/ocean/FoamTexture.js`, `src/util/Noise.js` (`mulberry32`) |
+| `water_tw/tw_water.wgsl` | `src/ocean/WaterSurface.js`, `src/ocean/SeaDetail.js`, `src/ocean/WaterMaterial.js`, `src/core/CDLOD.js` |
+| `water_tw/shore_field.rs` | `src/world/ShoreField.js` |
+| `water_tw/tw_shore.wgsl` | `src/ocean/ShoreWaves.js`, `src/world/TerrainGPU.js` (`terrainShoreSample`), `src/engine/render/wgsl/common.js` (`perlin2`) |
+| `water_tw/shore_sim.rs`, `water_tw/tw_sim.wgsl`, `water_tw/tw_sim_kernel.wgsl` | `src/ocean/ShoreSim.js` |
+| `water_tw/lace.rs` | `src/ocean/SurfFoam.js` (`makeLaceTexture`, `laceData`) |
+| `water_tw/tw_surf_foam.wgsl` | `src/ocean/SurfFoam.js` (the `SurfFoam` WGSL module) |
+| `water_tw/breakers.rs`, `water_tw/tw_breakers_kernel.wgsl`, `water_tw/tw_lip.wgsl` | `src/ocean/Breakers.js` (crest finder, lip mesh and material, `buildStations`) |
+| `terrain/shore_wet.rs`, the TW-WATER block of `terrain/terrain.wgsl` | `src/App.js` (`terrainWetness`), `src/world/Terrain.js` (wet sand, foam residue), `src/ocean/ShoreSim.js` (`shoreSimSandFoam`) |
+
+```
+MIT License
+
+Copyright (c) 2026 DRG Software Solutions LLC
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```

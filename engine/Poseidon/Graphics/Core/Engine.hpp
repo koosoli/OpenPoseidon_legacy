@@ -2479,6 +2479,51 @@ class Engine : public IGraphicsEngine
     struct WaterSettings
     {
         bool enabled = true;         // draw the GPU water surface (off = seabed only, for A/B)
+        // TW-WATER W1 — which water implementation the wgpu renderer draws: 0 = Current OP (the
+        // FFT/CDLOD water below, and the default), 1 = Tidewater Native (Tidewater Water Plan v5).
+        // Saved in the water profile ("backend" group); a profile without it means 0. The
+        // renderer switches at a frame boundary. WGR_WATER_BACKEND=0|1 overrides it for a session.
+        // Streaming integration keeps Current OP as the normal default. Tidewater smoke uses
+        // WGR_WATER_BACKEND=1; an explicitly saved backend selection still wins without override.
+        int waterBackend = 0;
+        // TW-WATER — the Tidewater Native parameter group (read only while waterBackend == 1).
+        // Defaults are Tidewater's own (dgreenheck/tidewater @4811ba48). Wind speed and heading are
+        // not here: like Current OP they come from the weather (or the reference sea). Shipped to
+        // the renderer in WgrWaterParams::tidewater; see wgpu_renderer.hpp for the lane layout.
+        struct TidewaterLook
+        {
+            float amplitude = 1.0f;        // spectrum amplitude scale
+            float choppiness = 0.9f;       // horizontal displacement (Tessendorf lambda)
+            float swellScale = 0.48f;      // energy of the distant-swell system
+            float swellHeadingDeg = 5.0f;  // heading of the distant swell, world degrees
+            float foamCoverage = 1.0f;     // whitecap / foam coverage gain
+            float foamIntensity = 1.0f;    // foam brightness
+            bool ssr = true;               // screen-space reflections of the scene
+            float reflectionStrength = 1.0f;
+            float cascadeScale = 1.0f;     // x 733 / 157 / 33.3 / 7.1 m cascade tiles
+            float roughness = 0.035f;      // base GGX roughness
+            float sss = 1.0f;              // backlit-crest subsurface gain
+            float backscatter = 0.035f;    // water-volume backscatter fraction
+            float gust = 1.0f;             // gust patches (cat's paws)
+            float slick = 1.0f;            // surfactant slicks
+            float windrow = 0.3f;          // windrow foam lines
+            int debugView = 0;             // Tidewater's own material debug views (0 = off)
+            // W3 — shoreline waves (ShoreWaves.js ShoreParams defaults)
+            bool shoreWaves = true;
+            float shorePeriod = 9.0f;      // s
+            float shoreAmplitude = 0.34f;  // offshore amplitude H/2 (m), x the swell energy / 0.48
+            float shoreVariation = 0.55f;  // per-wave and along-shore height variation
+            float shoreGamma = 0.78f;      // breaker index H / depth
+            float shoreBreakSpan = 0.13f;  // fraction of the break depth the lip plunges over
+            float shoreCurl = 1.0f;        // plunging / bore profile weight
+            float shoreRunup = 1.0f;       // swash run-up gain
+            float shoreTurbidity = 0.16f;  // surf-zone sediment + bubble scattering (1/m)
+            // W3b — shore simulation (ShoreSim.js): carried / stranded foam, wet sand
+            bool shoreSim = true;
+            float shoreDryTime = 28.0f;    // s for wet sand to dry (ShoreSimParams dryTime)
+            // W3d — breaker lip sheets (Breakers.js `sheet`: lip opacity multiplier, 0 = off)
+            float shoreLips = 1.0f;
+        } tidewater;
         // Neutral multipliers reproduce GodotOceanWaves' authored cascade values.
         // Those physical spectrum coefficients are already metre-scaled; multiplying
         // them by 2.4 after removing the erroneous IFFT normalization was excessive.
@@ -2898,7 +2943,11 @@ class Engine : public IGraphicsEngine
         // LGT-026 - the local-light shadow views, all of them, as one region. The four
         // per-cascade rows above stop at MAX_CASCADES, so the tiled local atlas was untimed.
         kLocalShadowGpuRegion = 77,
-        kGpuRegionEnd = 78, // + REN-GI + PERF-024 encode rows (WGR_GPU_TIMER_REGION_COUNT)
+        // TW-WATER W2 - the Tidewater Native ocean's compute (spectrum, FFT + mips).
+        kTidewaterGpuRegionSpectrum = 78,
+        kTidewaterGpuRegionFft = 79,
+        kTidewaterGpuRegionShoreSim = 80,
+        kGpuRegionEnd = 81, // + REN-GI + PERF-024 encode rows (WGR_GPU_TIMER_REGION_COUNT)
         // Regions that are physically enclosed by another region (see GpuTimerContainedBy).
         kGrassGpuRegionShadow = 24,
         kTerrainGpuRegionColor = 32,

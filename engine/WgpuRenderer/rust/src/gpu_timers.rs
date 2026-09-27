@@ -165,6 +165,13 @@ pub enum Region {
     // by cascade number and has exactly MAX_CASCADES entries, so `SHADOW_CASCADE_REGIONS.get(c)`
     // returned None for every local view and the whole tiled atlas was unmeasured.
     LocalShadow = 77,
+    // TW-WATER W2 — the Tidewater Native ocean's own compute, so a capture shows WHICH backend
+    // ran: in Tidewater mode the Current OP water rows (0-6, 8-12, 16-18) read n/a and these
+    // two carry the FFT; in Current OP mode it is the other way round. The draw itself stays in
+    // WaterDraw (it is the same pass for either backend).
+    TwOceanSpectrum = 78, // h0 spectrum regeneration (spectrum-dirty frames only)
+    TwOceanFft = 79,      // the two fused FFT dispatches + the compute mip chain
+    TwShoreSim = 80,      // TW-WATER W3b: the shore simulation (both regions) + its state copy
     FrameTotal = 25, // all submitted frame work; excludes acquire/present pacing
 }
 
@@ -177,7 +184,7 @@ pub const SHADOW_CASCADE_REGIONS: [Region; 4] = [
 ];
 
 /// Region count — the FFI getter's element contract (WGR_GPU_TIMER_REGION_COUNT).
-pub const REGION_COUNT: usize = 78;
+pub const REGION_COUNT: usize = 81;
 /// Water occupies [0, WATER_REGION_COUNT); grass occupies the remainder. The two
 /// debug tabs slice the shared array with these so neither shows the other's rows.
 /// Consumed on the C++ side (Engine::kWaterGpuRegionEnd) and by the layout test.
@@ -683,7 +690,9 @@ mod tests {
     // count + a few pinned indices catches accidental reordering on either side.
     #[test]
     fn region_indices_stay_ffi_stable() {
-        assert_eq!(REGION_COUNT, 78);
+        assert_eq!(REGION_COUNT, 81);
+        assert_eq!(Region::TwOceanFft as u32, 79);
+        assert_eq!(Region::TwShoreSim as u32, 80);
         assert_eq!(Region::LocalShadow as u32, 77);
         assert_eq!(Region::SpectrumInit as u32, 0);
         assert_eq!(Region::FftCompose as u32, 4);

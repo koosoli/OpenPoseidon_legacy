@@ -6513,6 +6513,110 @@ void DrawWaterTab()
     bool changed = false;
     changed |= ResetToDefaultsButton(s);
 
+    // TW-WATER W1 — water backend selector (Tidewater Water Plan v5 §4.3). Current OP is the
+    // default and stays so until the owner accepts Tidewater Native (plan §9). Saved per map in the
+    // water profile; WGR_WATER_BACKEND=0|1 in the environment overrides it for a whole session.
+    {
+        static constexpr bool kTidewaterPorted = true; // W2: open sea, W3a: shore waves
+        const char* backendNames[] = {"Current OP", "Tidewater Native"};
+        const int current = (s.waterBackend == 1) ? 1 : 0;
+        if (Dev::BeginCombo("Water backend", backendNames[current]))
+        {
+            if (ImGui::Selectable(backendNames[0], current == 0) && current != 0)
+            {
+                s.waterBackend = 0;
+                changed = true;
+            }
+            const int tidewaterFlags = kTidewaterPorted ? 0 : ImGuiSelectableFlags_Disabled;
+            if (ImGui::Selectable(kTidewaterPorted ? backendNames[1] : "Tidewater Native (not ported yet)",
+                                  current == 1, tidewaterFlags) &&
+                current != 1)
+            {
+                s.waterBackend = 1;
+                changed = true;
+            }
+            ImGui::EndCombo();
+        }
+        Dev::PanelTooltip("Which water implementation draws. Current OP is today's FFT/CDLOD water and the "
+                          "default. Tidewater Native is the port of dgreenheck/tidewater; it replaces the water "
+                          "in its mode (no layering) and switching takes effect on the next frame.");
+        if (const char* env = std::getenv("WGR_WATER_BACKEND"); env != nullptr && (env[0] == '0' || env[0] == '1'))
+        {
+            Dev::PanelHelp("WGR_WATER_BACKEND=%c overrides this selection for the session.", env[0]);
+        }
+    }
+
+    // TW-WATER — the Tidewater Native group. Every control here has a consumer in the renderer
+    // (water_tw); the parts of Tidewater not ported yet are listed greyed, not faked.
+    if (s.waterBackend == 1)
+    {
+        auto& t = s.tidewater;
+        Dev::PanelSeparator();
+        Dev::PanelHeading("Tidewater Native (W2 open sea, W3a shore waves)");
+        Dev::PanelHelp("Wind speed and heading come from the weather (or the reference sea below), as for "
+                       "Current OP. The Current OP controls further down do not affect this mode, except "
+                       "Cascade Preset's reference seas, which map onto this group.");
+        changed |= Dev::SliderFloat("TW amplitude", &t.amplitude, 0.0f, 3.0f, "%.2f");
+        Dev::PanelTooltip("Displacement scale of all four cascades (WaterSurface amplitude).");
+        changed |= Dev::SliderFloat("TW choppiness", &t.choppiness, 0.0f, 2.0f, "%.2f");
+        Dev::PanelTooltip("Horizontal displacement (lambda). Tidewater default 0.9.");
+        changed |= Dev::SliderFloat("TW swell energy", &t.swellScale, 0.0f, 2.0f, "%.2f");
+        changed |= Dev::SliderFloat("TW swell heading", &t.swellHeadingDeg, -180.0f, 180.0f, "%.0f deg");
+        Dev::PanelTooltip("Direction the distant swell travels toward, world degrees (0 = +X, 90 = +Z).");
+        changed |= Dev::SliderFloat("TW cascade scale", &t.cascadeScale, 0.25f, 4.0f, "%.2f");
+        Dev::PanelTooltip("x the Tidewater cascade tiles 733 / 157 / 33.3 / 7.1 m.");
+        changed |= Dev::SliderFloat("TW foam coverage", &t.foamCoverage, 0.0f, 3.0f, "%.2f");
+        changed |= Dev::SliderFloat("TW foam intensity", &t.foamIntensity, 0.0f, 3.0f, "%.2f");
+        changed |= Dev::Checkbox("TW screen-space reflections", &t.ssr);
+        changed |= Dev::SliderFloat("TW reflection strength", &t.reflectionStrength, 0.0f, 2.0f, "%.2f");
+        changed |= Dev::SliderFloat("TW roughness", &t.roughness, 0.0f, 0.3f, "%.3f");
+        changed |= Dev::SliderFloat("TW crest subsurface", &t.sss, 0.0f, 3.0f, "%.2f");
+        changed |= Dev::SliderFloat("TW backscatter", &t.backscatter, 0.0f, 0.3f, "%.3f");
+        changed |= Dev::SliderFloat("TW gusts", &t.gust, 0.0f, 2.0f, "%.2f");
+        changed |= Dev::SliderFloat("TW slicks", &t.slick, 0.0f, 2.0f, "%.2f");
+        changed |= Dev::SliderFloat("TW windrows", &t.windrow, 0.0f, 1.0f, "%.2f");
+        const char* twDebug[] = {"Off", "Back faces", "Normals", "Foam", "(4 unused)", "Lattice", "Path length",
+                                 "Seabed seen through", "Sea depth", "(9 unused)", "SSR weight"};
+        changed |= Dev::Combo("TW debug view", &t.debugView, twDebug, IM_ARRAYSIZE(twDebug));
+        Dev::PanelSeparator();
+        Dev::PanelHeading("Tidewater shore (W3a waves, W3b-c simulation + foam, W3d lips)");
+        Dev::PanelHelp("Waves run in along the travel-time field of the whole map (computed in the background "
+                       "a few seconds after the map loads, and again when the swell heading or sea level "
+                       "moves), shoal, plunge, turn into bores and run up the sand. Height follows TW swell "
+                       "energy.");
+        changed |= Dev::Checkbox("TW shore waves", &t.shoreWaves);
+        ImGui::BeginDisabled(!t.shoreWaves);
+        changed |= Dev::SliderFloat("TW shore period", &t.shorePeriod, 3.0f, 20.0f, "%.1f s");
+        changed |= Dev::SliderFloat("TW shore amplitude", &t.shoreAmplitude, 0.0f, 3.0f, "%.2f m");
+        Dev::PanelTooltip("Offshore amplitude (half the wave height) at the default swell energy 0.48.");
+        changed |= Dev::SliderFloat("TW shore variation", &t.shoreVariation, 0.0f, 1.5f, "%.2f");
+        changed |= Dev::SliderFloat("TW breaker index", &t.shoreGamma, 0.3f, 1.5f, "%.2f");
+        Dev::PanelTooltip("A wave breaks where its height exceeds this x the depth (gamma).");
+        changed |= Dev::SliderFloat("TW break span", &t.shoreBreakSpan, 0.03f, 0.6f, "%.2f");
+        changed |= Dev::SliderFloat("TW curl", &t.shoreCurl, 0.0f, 1.5f, "%.2f");
+        changed |= Dev::SliderFloat("TW run-up", &t.shoreRunup, 0.0f, 3.0f, "%.2f");
+        changed |= Dev::SliderFloat("TW surf turbidity", &t.shoreTurbidity, 0.0f, 1.0f, "%.2f");
+        changed |= Dev::Checkbox("TW shore simulation (W3b, W3c)", &t.shoreSim);
+        Dev::PanelTooltip("Foam carried and stranded by the water, sand that stays wet and dries, and the surf "
+                          "foam look (whitewater lumps, flowing lace), in two 380 m regions on the coast nearest "
+                          "the camera (they fade in over 3 s when placed). Off: the shore waves' own foam only, "
+                          "and OP's coast wet band.");
+        ImGui::BeginDisabled(!t.shoreSim);
+        changed |= Dev::SliderFloat("TW sand drying time", &t.shoreDryTime, 2.0f, 120.0f, "%.0f s");
+        changed |= Dev::SliderFloat("TW breaker lips", &t.shoreLips, 0.0f, 2.0f, "%.2f");
+        Dev::PanelTooltip("Opacity of the thrown lip of plunging breakers (W3d), along the shoreline inside the "
+                          "simulated regions. 0 = off.");
+        ImGui::EndDisabled();
+        ImGui::EndDisabled();
+        ImGui::BeginDisabled(true);
+        bool notPorted = false;
+        Dev::Checkbox("TW spray budget + refraction pass (not ported: W4)", &notPorted);
+        Dev::Checkbox("TW underwater + caustics (not ported: W5)", &notPorted);
+        Dev::Checkbox("TW boat wakes (not ported: W6)", &notPorted);
+        Dev::Checkbox("TW inland lakes / rivers (not drawn: owner decision pending)", &notPorted);
+        ImGui::EndDisabled();
+    }
+
     changed |= Dev::Checkbox("Enabled", &s.enabled);
     Dev::PanelTooltip("Off = draw no water surface (the seabed shows through), for A/B");
 

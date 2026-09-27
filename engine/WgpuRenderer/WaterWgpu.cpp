@@ -1093,6 +1093,51 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
     // underwater compositor engages and marches against.
     _params.optics_params = {look.sharedOptics ? 1.0f : 0.0f, look.whitecapWindGate ? 1.0f : 0.0f, cameraBodyLevel,
                              std::max(cameraBodyWave, 1.0e-3f)};
+    // TW-WATER W1 — backend selector (0 = Current OP, 1 = Tidewater Native). The renderer
+    // applies a change at the next frame boundary and ignores values it cannot build.
+    _params.water_backend = look.waterBackend == 1 ? 1u : 0u;
+    {
+        // TW-WATER — the Tidewater group, with the reference seas mapped onto it (the one table the
+        // plan asks for, §4.3; documented in docs/roadmap/decisions/TW-WATER-02-20260927.md):
+        //   preset 3 "Sheltered water"         -> amplitude x0.55, swell x0.10
+        //   preset 4 "Exposed coast / swell"   -> swell x1.90 (0.91), heading 180 deg (westward,
+        //                                          the authored incoming direction)
+        //   preset 5 "Rough open water"        -> amplitude x1.60, choppiness 1.0, swell x1.25
+        // Wind speed and heading reach Tidewater through fft_wind_sea, exactly as for Current OP.
+        auto t = look.tidewater;
+        if (look.cascadePreset == 3)
+        {
+            t.amplitude *= 0.55f;
+            t.swellScale *= 0.10f;
+        }
+        else if (look.cascadePreset == 4)
+        {
+            t.swellScale *= 1.90f;
+            t.swellHeadingDeg = 180.0f;
+        }
+        else if (look.cascadePreset == 5)
+        {
+            t.amplitude *= 1.60f;
+            t.choppiness = 1.0f;
+            t.swellScale *= 1.25f;
+        }
+        _params.tidewater[0] = {std::max(t.amplitude, 0.0f), std::clamp(t.choppiness, 0.0f, 2.0f),
+                                std::max(t.swellScale, 0.0f), t.swellHeadingDeg};
+        _params.tidewater[1] = {std::max(t.foamCoverage, 0.0f), std::max(t.foamIntensity, 0.0f), t.ssr ? 1.0f : 0.0f,
+                                std::max(t.reflectionStrength, 0.0f)};
+        _params.tidewater[2] = {std::clamp(t.cascadeScale, 0.25f, 4.0f), std::clamp(t.roughness, 0.0f, 1.0f),
+                                std::max(t.sss, 0.0f), std::clamp(t.backscatter, 0.0f, 1.0f)};
+        _params.tidewater[3] = {std::max(t.gust, 0.0f), std::max(t.slick, 0.0f), std::max(t.windrow, 0.0f),
+                                static_cast<float>(t.debugView)};
+        // TW-WATER W3 — shoreline waves (lanes in wgpu_renderer.hpp). The renderer scales the
+        // amplitude with the swell energy above, so the reference seas move the surf as well.
+        _params.tidewater_shore[0] = {t.shoreWaves ? 1.0f : 0.0f, std::clamp(t.shorePeriod, 3.0f, 20.0f),
+                                      std::clamp(t.shoreAmplitude, 0.0f, 3.0f), std::clamp(t.shoreVariation, 0.0f, 1.5f)};
+        _params.tidewater_shore[1] = {std::clamp(t.shoreGamma, 0.3f, 1.5f), std::clamp(t.shoreBreakSpan, 0.03f, 0.6f),
+                                      std::clamp(t.shoreCurl, 0.0f, 1.5f), std::clamp(t.shoreRunup, 0.0f, 3.0f)};
+        _params.tidewater_shore[2] = {std::clamp(t.shoreTurbidity, 0.0f, 1.0f), t.shoreSim ? 1.0f : 0.0f,
+                                      std::clamp(t.shoreDryTime, 2.0f, 300.0f), std::clamp(t.shoreLips, 0.0f, 2.0f)};
+    }
     _params.sea_params = {look.seaStateCoupling ? 1.0f : 0.0f,
                           look.seaStateCoupling ? SeaStateResidualAmplitude(look.waveAmp) : look.waveAmp,
                           look.lowQuality ? 1.0f : 0.0f, look.shoreWaveGain};

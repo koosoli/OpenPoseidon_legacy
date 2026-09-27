@@ -1433,6 +1433,18 @@ pub struct WgrWaterParams {
     // WRL-003 — body table: [3i] = ellipse (cx, cz, rx, rz), [3i+1] = (level, wave scale, kind,
     // profile), [3i+2] = (flow x, flow z, speed, 0). See wgpu_renderer.hpp. (sizeof 288 -> 1056.)
     pub bodies: [WgrVec4; WGR_WATER_MAX_BODIES * 3],
+    // TW-WATER W1 — which water implementation renders: 0 = Current OP (default), 1 = Tidewater
+    // Native. Appended after the body table so no WGSL-mirrored lane moves; the WGSL mirrors of
+    // WaterParams end at `bodies` and never read it. Padded to a vec4 for the uniform buffer.
+    pub water_backend: u32,
+    pub water_backend_pad: [u32; 3],
+    // TW-WATER — the Tidewater Native parameter group from the Water tab (read only by that
+    // backend; Current OP never looks at it). See wgpu_renderer.hpp for the lane meanings.
+    // (sizeof 1056 -> 1136 with the selector above, matching C++.)
+    pub tidewater: [WgrVec4; 4],
+    // TW-WATER W3 — the Tidewater shoreline-wave group (ShoreWaves.js ShoreParams); lane meanings in
+    // wgpu_renderer.hpp. (sizeof 1136 -> 1184, matching C++.)
+    pub tidewater_shore: [WgrVec4; 3],
 }
 
 pub const WGR_WATER_MAX_BODIES: usize = 16;
@@ -1647,7 +1659,7 @@ const _: () = assert!(std::mem::size_of::<WgrGrassDownwash>() == 16);
 // (GrassParams.photo / .place / .photo_mix / .layer_weights[2]). 4736 + 32 for
 // the card-coverage / procedural-look pair (GrassParams.card_look / .blade_look).
 const _: () = assert!(std::mem::size_of::<WgrGrassParams>() == 4784);
-const _: () = assert!(std::mem::size_of::<WgrWaterParams>() == 1056);
+const _: () = assert!(std::mem::size_of::<WgrWaterParams>() == 1184);
 const _: () = assert!(std::mem::size_of::<WgrWaterNode>() == 40);
 const _: () = assert!(std::mem::size_of::<WgrWaterBatch>() == 16);
 const _: () = assert!(std::mem::size_of::<WgrWaterInteractionEvent>() == 64);
@@ -1765,9 +1777,9 @@ pub extern "C" fn wgr_abi_version() -> u32 {
     if cfg!(debug_assertions) {
         option_env!("WGR_TEST_ABI_VERSION")
             .and_then(|value| value.parse::<u32>().ok())
-            .unwrap_or(16)
+            .unwrap_or(17)
     } else {
-        16
+        17
     }
 }
 
@@ -2073,7 +2085,7 @@ mod abi_tests {
 
     #[test]
     fn exported_abi_version_matches_the_public_contract() {
-        assert_eq!(super::wgr_abi_version(), 16); // additive paired render-call CPU entry point
+        assert_eq!(super::wgr_abi_version(), 17); // appended Tidewater water lanes/timers
     }
 
     #[test]
@@ -2084,6 +2096,13 @@ mod abi_tests {
         let mut check=good_check(); check.abi_version=14;
         assert_eq!(unsafe { super::wgr_abi_validate(&check) },0);
     }
+    #[test]
+    fn pre_tidewater_version_is_refused_even_with_current_layout_hash() {
+        let mut check = good_check();
+        check.abi_version = 16;
+        assert_eq!(unsafe { super::wgr_abi_validate(&check) }, 0);
+    }
+
     #[test]
     fn matching_abi_declaration_is_accepted() {
         assert_eq!(unsafe { super::wgr_abi_validate(&good_check()) }, 1);

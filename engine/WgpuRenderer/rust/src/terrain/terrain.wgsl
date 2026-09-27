@@ -167,6 +167,82 @@ struct TerrainMaterial {
 };
 @group(2) @binding(6) var<storage, read> terrain_materials: array<TerrainMaterial>;
 
+// TW-WATER W3b — Tidewater Native's wet sand (bind group 3, see shore_wet.rs). In Tidewater mode
+// the coast's wetness comes from the shore simulation's wet channel, and the foam the draining
+// water strands on the sand from its residue channel (Tidewater App.js terrainWetness; the
+// readers are ShoreSim.js's, ported in water_tw/tw_sim.wgsl, repeated here for this group).
+// With Current OP `tww.p.x` is 0 and OP's own coast wet band below is unchanged.
+struct TwWet {
+    regions: array<vec4<f32>, 2>, // per shore-simulation region: min xz, size (m), weight
+    p: vec4<f32>,                 // x = on, y = sea level
+};
+@group(3) @binding(0) var<uniform> tww: TwWet;
+@group(3) @binding(1) var tw_sim_state: texture_2d_array<f32>;
+@group(3) @binding(2) var tw_sim_lace: texture_2d<f32>;
+
+const TW_SIM_RES: f32 = 768.0;
+const TW_LACE_TILE: f32 = 3.5;
+const TW_LACE_N: i32 = 512;
+
+fn tw_sim_inside(uv: vec2<f32>) -> f32 {
+    return smoothstep(0.0, 0.02, uv.x) * smoothstep(1.0, 0.98, uv.x) * smoothstep(0.0, 0.02, uv.y) * smoothstep(1.0, 0.98, uv.y);
+}
+
+// (layer, inside x weight) of the region the point is deepest inside
+fn tw_sim_pick(xz: vec2<f32>) -> vec2<f32> {
+    var best = vec2<f32>(0.0, 0.0);
+    for (var r = 0; r < 2; r++) {
+        let uv = (xz - tww.regions[r].xy) / max(tww.regions[r].z, 1e-3);
+        var k = 0.0;
+        if (tww.regions[r].w > 0.0 && uv.x > 0.0 && uv.x < 1.0 && uv.y > 0.0 && uv.y < 1.0) {
+            k = tw_sim_inside(uv) * tww.regions[r].w;
+        }
+        if (k > best.y + 1e-4) { best = vec2<f32>(f32(r), k); }
+    }
+    return best;
+}
+
+// bilinear state (foam, wetness, residue, flow) of region r at world xz, from 4 loads
+fn tw_sim_state_at(xz: vec2<f32>, r: i32) -> vec4<f32> {
+    let uv = (xz - tww.regions[r].xy) / max(tww.regions[r].z, 1e-3);
+    let fp = clamp(uv * TW_SIM_RES - 0.5, vec2<f32>(0.0), vec2<f32>(TW_SIM_RES - 1.001));
+    let i = vec2<i32>(floor(fp));
+    let t = fract(fp);
+    let a = textureLoad(tw_sim_state, i, r, 0);
+    let b = textureLoad(tw_sim_state, i + vec2<i32>(1, 0), r, 0);
+    let c = textureLoad(tw_sim_state, i + vec2<i32>(0, 1), r, 0);
+    let d = textureLoad(tw_sim_state, i + vec2<i32>(1, 1), r, 0);
+    return mix(mix(a, b, t.x), mix(c, d, t.x), t.y);
+}
+
+fn tw_lace_load(q: vec2<f32>) -> vec4<f32> {
+    let fp = q / TW_LACE_TILE * f32(TW_LACE_N) - 0.5;
+    let i = vec2<i32>(floor(fp));
+    let t = fract(fp);
+    let m = vec2<i32>(TW_LACE_N - 1);
+    let a = textureLoad(tw_sim_lace, i & m, 0);
+    let b = textureLoad(tw_sim_lace, (i + vec2<i32>(1, 0)) & m, 0);
+    let c = textureLoad(tw_sim_lace, (i + vec2<i32>(0, 1)) & m, 0);
+    let d = textureLoad(tw_sim_lace, (i + vec2<i32>(1, 1)) & m, 0);
+    return mix(mix(a, b, t.x), mix(c, d, t.x), t.y);
+}
+
+// ShoreSim.js shoreSimSandFoam: foam left on the sand, 0..1 (fp: footprint in lace texels)
+fn tw_sand_foam(xz: vec2<f32>, s: vec4<f32>, fp: f32) -> f32 {
+    let r = s.z;
+    var out = 0.0;
+    if (r > 0.01) {
+        let lace = tw_lace_load(xz + 11.3);
+        let near = smoothstep(3.0, 1.2, fp);
+        let keep = smoothstep(lace.w * 0.55, lace.w * 0.55 + 0.08, r);
+        let lw = r * 0.1 + 0.06;
+        let strand = (1.0 - smoothstep(lw, lw + 0.07, lace.x)) * (lace.z * 0.5 + 0.6);
+        let lines = max(strand * smoothstep(0.02, 0.25, r) * keep, lace.y * keep * 0.8);
+        out = mix(smoothstep(0.08, 0.6, r) * 0.12, lines, near) * 0.85;
+    }
+    return out;
+}
+
 // The inverse of color::srgb_to_linear, for the one place the ground path has to
 // go back: the Enfusion middle tint below is applied in linear (it is a multiplier
 // on radiance, RFG-071) while the ground blend stays in gamma until the fold at
@@ -1120,7 +1196,38 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     let sea_ref = tp.sea_level + sin(6.2831853 * tp.time * tp.swash_speed) * tp.swash_amp;
     let above_sea = world_y - sea_ref;
     let flat = smoothstep(0.55, 0.85, n.y);
-    let wet = flat * (1.0 - smoothstep(0.0, tp.wet_height, above_sea));
+    var wet = flat * (1.0 - smoothstep(0.0, tp.wet_height, above_sea));
+    // TW-WATER W3b: in Tidewater mode, Tidewater's wetness instead (see TwWet above). The lace
+    // footprint is needed only in the Tidewater branch. This UBO selector is uniform,
+    // so the derivatives stay in uniform control flow without normal Current OP work.
+    if (tww.p.x > 0.5) {
+        let tw_fp = length(fwidth(in.world_xz)) / TW_LACE_TILE * f32(TW_LACE_N);
+        let h = world_y - tww.p.y;
+        var sim = vec4<f32>(0.0);
+        var inside = 0.0;
+        if (h < 3.5 && h > -8.0) {
+            let pick = tw_sim_pick(in.world_xz);
+            inside = pick.y;
+            if (inside > 0.0) { sim = tw_sim_state_at(in.world_xz, i32(pick.x)) * inside; }
+        }
+        // outside the simulated regions: Tidewater's static damp band
+        let band = smoothstep(0.45, 0.0, h);
+        // (Tidewater's landW: the seabed below the waterline is not the wet beach)
+        let land = 1.0 - smoothstep(0.12, -0.6, h);
+        let tw_wet = max(sim.y, band * (1.0 - inside)) * flat * land;
+        // Tidewater Terrain.js: wet sand is darker (wetDarken 0.58), a little more saturated and
+        // a touch cooler
+        let wet_c = rgb * 0.58;
+        let lum = dot(wet_c, vec3<f32>(0.2126, 0.7152, 0.0722));
+        let wet_albedo = mix(vec3<f32>(lum), wet_c, 1.15) * vec3<f32>(0.97, 0.98, 1.0);
+        rgb = mix(rgb, wet_albedo, tw_wet);
+        // foam stranded on the sand, lacy and popping (ShoreSim.sandFoam)
+        let residue = tw_sand_foam(in.world_xz, sim, tw_fp) * flat * land;
+        var foam_c = vec3<f32>(0.748414, 0.787412, 0.787412); // Tidewater srgb(0.88, 0.9, 0.9), linear
+        if (linear <= 0.5) { foam_c = vec3<f32>(0.88, 0.9, 0.9); }
+        rgb = mix(rgb, foam_c, residue);
+        wet = 0.0;
+    }
     rgb *= mix(1.0, tp.wet_darken, wet);
 
     // A shadow removes the direct sun (the N.L diffuse term); sky ambient and the

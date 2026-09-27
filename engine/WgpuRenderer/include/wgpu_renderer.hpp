@@ -35,7 +35,7 @@
 // and the handshake refuses the pair — so this number only has to move for
 // changes the hash cannot see (an added/removed entry point, a semantic change
 // to an existing one).
-#define WGR_ABI_VERSION 16u // additive paired render-call CPU timing entry point; matched engine/DLL required
+#define WGR_ABI_VERSION 17u // appended Tidewater water lanes/timer regions; matched engine/DLL required
 
 // Required capabilities are negotiated as a bit set inside WgrAbiCheck. A
 // newer engine can reject an older renderer DLL even if the shared layouts
@@ -1450,6 +1450,31 @@ struct WgrWaterParams
      * zero. Immutable per frame; weather and interaction inputs stay in the lanes above.
      * Appended at the struct end; sizeof moves 288 -> 1056 with the Rust side. */
     WgrVec4 bodies[WGR_WATER_MAX_BODIES * 3];
+    /* TW-WATER W1 — which water implementation the renderer draws: 0 = Current OP (the default),
+     * 1 = Tidewater Native (Tidewater Water Plan v5). Appended after the body table so no lane the
+     * WGSL mirrors of WaterParams read moves; the renderer switches backends at a frame boundary
+     * when this changes. WGR_WATER_BACKEND=0|1 in the environment overrides it for the session. */
+    uint32_t water_backend;
+    uint32_t water_backend_pad[3];
+    /* TW-WATER — the Tidewater Native parameter group of the Water tab. Read only by that backend.
+     * [0] x = spectrum amplitude scale (1), y = choppiness (0.9), z = swell scale (0.48),
+     *     w = swell heading in degrees, world frame (5)
+     * [1] x = foam coverage (1), y = foam intensity (1), z = screen-space reflections on (1),
+     *     w = reflection strength (1)
+     * [2] x = cascade size scale (1 = 733 / 157 / 33.3 / 7.1 m), y = water roughness (0.035),
+     *     z = crest subsurface gain (1), w = backscatter (0.035)
+     * [3] x = gust amount (1), y = slick amount (1), z = windrow amount (0.3), w = debug view (0)
+     * The selector plus this group move sizeof 1056 -> 1136 with the Rust side (the layout hash
+     * refuses a stale exe/DLL pair). */
+    WgrVec4 tidewater[4];
+    /* TW-WATER W3 — the Tidewater shoreline waves (ShoreWaves.js ShoreParams). Read only by that backend.
+     * [0] x = shore waves on (1), y = wave period s (9), z = amplitude H/2 m (0.34), w = variation (0.55)
+     * [1] x = breaker index gamma (0.78), y = break span (0.13), z = curl (1), w = run-up (1)
+     * [2] x = surf-zone turbidity 1/m (0.16), y = shore simulation on (1, W3b), z = wet sand
+     *     drying time s (28, ShoreSim dryTime), w = breaker lip opacity (1, W3d; 0 = no lips)
+     * The renderer scales the amplitude with the swell scale (tidewater[0].z) relative to its default,
+     * so weather and the reference seas move the surf too. sizeof 1136 -> 1184 with the Rust side. */
+    WgrVec4 tidewater_shore[3];
 };
 
 struct WgrWaterCascadeConfig
@@ -1622,7 +1647,12 @@ enum WgrGpuTimerRegion : uint32_t
      * one-per-view because the question this answers is "what does caching the
      * static ones buy", and that is a per-frame total. */
     WGR_GPU_TIMER_LOCAL_SHADOW = 77,
-    WGR_GPU_TIMER_REGION_COUNT = 78,
+    /* TW-WATER W2 - the Tidewater Native ocean's compute (outermost, encoder-level). In that mode
+     * the Current OP water rows read n/a; in Current OP mode these two do. */
+    WGR_GPU_TIMER_TW_OCEAN_SPECTRUM = 78,
+    WGR_GPU_TIMER_TW_OCEAN_FFT = 79,
+    WGR_GPU_TIMER_TW_SHORE_SIM = 80, /* TW-WATER W3b: the shore simulation regions */
+    WGR_GPU_TIMER_REGION_COUNT = 81,
 };
 
 /* PERF-005 - region nesting, and the ONLY correct way to total this array.
@@ -2157,7 +2187,7 @@ static_assert(sizeof(WgrGrassDownwash) == 16, "WgrGrassDownwash layout must matc
 static_assert(sizeof(WgrSmokeShadowBlob) == 32, "WgrSmokeShadowBlob layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrSmokeVolumeParams) == 96, "WgrSmokeVolumeParams layout must match the Rust #[repr(C)] struct");
   static_assert(sizeof(WgrGrassParams) == 4784, "WgrGrassParams layout must match the Rust #[repr(C)] struct");
-static_assert(sizeof(WgrWaterParams) == 1056, "WgrWaterParams layout must match the Rust #[repr(C)] struct");
+static_assert(sizeof(WgrWaterParams) == 1184, "WgrWaterParams layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrWaterNode) == 40, "WgrWaterNode layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrWaterBatch) == 16, "WgrWaterBatch layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrWaterInteractionEvent) == 64 && alignof(WgrWaterInteractionEvent) == 16, "WgrWaterInteractionEvent must match Rust");

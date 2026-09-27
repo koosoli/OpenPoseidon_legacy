@@ -13056,6 +13056,9 @@ const char* EngineWgpu::GetWaterGpuTimingName(int region) const
         "Worker enc: draw",                // WGR_GPU_TIMER_WORKER_ENC_DRAW (CPU column only)
         "Worker enc: post",                // WGR_GPU_TIMER_WORKER_ENC_POST (CPU column only)
         "Shadows: local lights",           // WGR_GPU_TIMER_LOCAL_SHADOW (LGT-026)
+        "Tidewater: spectrum",             // WGR_GPU_TIMER_TW_OCEAN_SPECTRUM (spectrum-dirty frames)
+        "Tidewater: FFT + mips",           // WGR_GPU_TIMER_TW_OCEAN_FFT
+        "Tidewater: shore sim",            // WGR_GPU_TIMER_TW_SHORE_SIM
     };
     return (region >= 0 && region < (int)WGR_GPU_TIMER_REGION_COUNT) ? kNames[region] : "";
 }
@@ -14127,6 +14130,22 @@ void EngineWgpu::SyncWaterLookProfile()
         out << "underwater " << (s.underwaterEffect ? 1 : 0) << ' ' << s.underwaterEnterDepth << ' '
             << s.underwaterExitDepth << ' ' << s.underwaterEngageBand << ' ' << s.underwaterDensity << ' '
             << s.underwaterColorBias << ' ' << s.underwaterCausticGain << '\n';
+        // TW-WATER W1 — the backend selector. A reader that predates it skips the unknown group,
+        // and a profile written before it has no such line, which reads as 0 (Current OP).
+        out << "backend " << s.waterBackend << '\n';
+        {
+            const auto& t = s.tidewater;
+            out << "tidewater " << t.amplitude << ' ' << t.choppiness << ' ' << t.swellScale << ' '
+                << t.swellHeadingDeg << ' ' << t.foamCoverage << ' ' << t.foamIntensity << ' ' << (t.ssr ? 1 : 0)
+                << ' ' << t.reflectionStrength << ' ' << t.cascadeScale << ' ' << t.roughness << ' ' << t.sss << ' '
+                << t.backscatter << ' ' << t.gust << ' ' << t.slick << ' ' << t.windrow << '\n';
+            // W3 — a separate group, so a profile written by W2 still reads (shore defaults)
+            out << "tidewaterShore " << (t.shoreWaves ? 1 : 0) << ' ' << t.shorePeriod << ' ' << t.shoreAmplitude
+                << ' ' << t.shoreVariation << ' ' << t.shoreGamma << ' ' << t.shoreBreakSpan << ' ' << t.shoreCurl
+                << ' ' << t.shoreRunup << ' ' << t.shoreTurbidity << '\n';
+            out << "tidewaterSim " << (t.shoreSim ? 1 : 0) << ' ' << t.shoreDryTime << '\n';
+            out << "tidewaterLips " << t.shoreLips << '\n';
+        }
         if (out.good())
             _waterLookDirty = false;
     };
@@ -14229,6 +14248,40 @@ void EngineWgpu::SyncWaterLookProfile()
             // default (off); the current default applies. Thresholds and tuning are kept.
             if (version >= 4)
                 _waterLook.underwaterEffect = on != 0;
+        }
+        else if (key == "backend")
+        {
+            int backend = 0;
+            in >> backend;
+            _waterLook.waterBackend = (backend == 1) ? 1 : 0;
+        }
+        else if (key == "tidewater")
+        {
+            auto& t = _waterLook.tidewater;
+            int ssr = 1;
+            in >> t.amplitude >> t.choppiness >> t.swellScale >> t.swellHeadingDeg >> t.foamCoverage >>
+                t.foamIntensity >> ssr >> t.reflectionStrength >> t.cascadeScale >> t.roughness >> t.sss >>
+                t.backscatter >> t.gust >> t.slick >> t.windrow;
+            t.ssr = ssr != 0;
+        }
+        else if (key == "tidewaterShore")
+        {
+            auto& t = _waterLook.tidewater;
+            int on = 1;
+            in >> on >> t.shorePeriod >> t.shoreAmplitude >> t.shoreVariation >> t.shoreGamma >> t.shoreBreakSpan >>
+                t.shoreCurl >> t.shoreRunup >> t.shoreTurbidity;
+            t.shoreWaves = on != 0;
+        }
+        else if (key == "tidewaterSim")
+        {
+            auto& t = _waterLook.tidewater;
+            int on = 1;
+            in >> on >> t.shoreDryTime;
+            t.shoreSim = on != 0;
+        }
+        else if (key == "tidewaterLips")
+        {
+            in >> _waterLook.tidewater.shoreLips;
         }
         else
             in.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
