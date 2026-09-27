@@ -25,7 +25,7 @@ struct TwSurface {
     sim: array<vec4<f32>, 2>, // ShoreSim regions: min xz (world), size (m), weight (0 = inactive, fades in)
     simP0: vec4<f32>,      // ShoreSimParams: dryTime, foamLife, surfFoamLife, residueLife (s)
     simP1: vec4<f32>,      // ShoreSimParams: foamGen, depositGain, dt (s), shore sim on
-    brk: vec4<f32>,        // Breakers: station count, lip opacity (Tidewater `sheet`), unused x2
+    brk: vec4<f32>,        // Breakers: station count, lip opacity (Tidewater `sheet`); W5b caustic tiles (fine, broad) m
     morph: array<vec4<f32>, 12>, // CDLOD per level: morph start, 1/range, spacing
 };
 

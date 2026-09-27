@@ -67,6 +67,8 @@ struct OceanParams {
 @group(1) @binding(17) var shoreSimStateTex: texture_2d_array<f32>; // rgba16float, one layer per region
 @group(1) @binding(18) var shoreSimLace: texture_2d<f32>;        // rgba8unorm lace (mip 0 read with loads)
 @group(1) @binding(19) var<storage, read> breakersCrest: array<vec4<f32>>; // breaker crest records (tw_lip.wgsl)
+@group(1) @binding(23) var causticsFineTex: texture_2d<f32>;  // W5b caustics (caustics.rs)
+@group(1) @binding(24) var causticsBroadTex: texture_2d<f32>;
 
 // ------------------------------------------------------------------ CDLOD.js
 
@@ -714,7 +716,10 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
                 let sigTc = tw.absorption.rgb + tw.scattering.rgb;
                 let LsB = refract(-L, vec3<f32>(0.0, 1.0, 0.0), 1.0 / IOR);
                 let muB = max(-LsB.y, 0.15);
-                let attDirect = exp(-sigTc * dBed / muB);
+                // (W5b) the direct light arrives focused into Tidewater's caustic networks
+                let causLvl = twCausticsLevel(footprint * 1.5, tw.brk.z);
+                let caus = twCausticsSample(causticsFineTex, causticsBroadTex, smpLinearRepeat, tw.brk.zw, bedPos, dBed, L, causLvl, false);
+                let attDirect = exp(-sigTc * dBed / muB) * caus;
                 let attAmbient = exp(-sigTc * dBed * 1.2) * 0.85 + vec3<f32>(0.0, 0.02, 0.04) * exp(dBed * -0.1);
                 let lumW = vec3<f32>(0.2126, 0.7152, 0.0722);
                 let eSun = dot(sunLight, lumW) * max(L.y, 0.0) * INV_PI;

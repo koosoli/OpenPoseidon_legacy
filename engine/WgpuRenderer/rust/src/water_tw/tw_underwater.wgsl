@@ -10,8 +10,8 @@
 //   surface there, or, seeing the sky, when it looks down; farther, the camera's medium;
 // * the water height is the sea level plus the FFT's vertical displacement (the shore waves are not
 //   evaluated here);
-// * the caustic light shafts and the diver's torch (Tidewater's half-resolution march) are not
-//   ported yet (W5b), nor the seabed caustics;
+// * the caustic light shafts are marched here at full resolution with fewer steps (W5b; Tidewater:
+//   a half-resolution pass, 20 steps, resolved by its TAA); the diver's torch is not ported;
 // * OP lights submerged surfaces as if in air: points seen below the surface get Tidewater's
 //   UnderwaterLighting attenuation here, in post (as the water material does from above, W3f);
 // * light in Tidewater's units from OP's sun and ambient (see the water material), the in-scatter
@@ -30,7 +30,7 @@ struct UwParams {
     sky_e: vec4<f32>,           // sky irradiance / PI, w: enabled
     absorption: vec4<f32>,      // 1/m
     scattering: vec4<f32>,      // 1/m, w: sea level
-    ocean: vec4<f32>,           // FFT amplitude, cascade count, unused x2
+    ocean: vec4<f32>,           // FFT amplitude, cascade count, caustic tiles (fine, broad) m
     sizes: vec4<f32>,           // FFT cascade sizes (m)
 };
 
@@ -40,6 +40,8 @@ struct UwParams {
 @group(0) @binding(3) var uwDisplacement: texture_2d_array<f32>;
 @group(0) @binding(4) var uwRepeat: sampler;
 @group(0) @binding(5) var uwClamp: sampler;
+@group(0) @binding(6) var causticsFineTex: texture_2d<f32>;  // W5b (caustics.rs)
+@group(0) @binding(7) var causticsBroadTex: texture_2d<f32>;
 
 struct UwOut {
     @builtin(position) pos: vec4<f32>,
@@ -179,7 +181,10 @@ fn fs_uw(in: UwOut) -> @location(0) vec4<f32> {
             let q = uwRelAt(uv, d) + uw.cam.xyz;
             let zq = uwWaterHeight(q.xz) - q.y;
             if (zq > 0.0) {
-                let attDirect = exp(-sigT * zq / mu);
+                // (W5b) Tidewater's caustic networks on the submerged scene, filtered over the pixel
+                let fp = length(uwRelAt(uv, d)) * 2.0 / dims.y;
+                let caus = twCausticsSample(causticsFineTex, causticsBroadTex, uwRepeat, uw.ocean.zw, q, zq, L, twCausticsLevel(fp, uw.ocean.z), false);
+                let attDirect = exp(-sigT * zq / mu) * caus;
                 let attAmbient = exp(-sigT * zq * 1.2) * 0.85 + vec3<f32>(0.0, 0.02, 0.04) * exp(zq * -0.1);
                 let lumW = vec3<f32>(0.2126, 0.7152, 0.0722);
                 let eSun = dot(uw.sun_e.rgb, lumW) * max(L.y, 0.0) / UW_PI;
@@ -200,8 +205,25 @@ fn fs_uw(in: UwOut) -> @location(0) vec4<f32> {
         let k = uw.sun_dir.w;
         let inSun = sunE * (sigS * phase + msAlb * sigT * (1.0 / UW_PI)) * uwLit(mu, sigT, zc, dir.y, dist) * k;
         let inAmb = ambE * (sigS * (1.0 / (4.0 * UW_PI)) + msAlb * sigT * (1.0 / UW_PI)) * uwLit(0.8, sigT, zc, dir.y, dist) * k;
+        // (W5b) caustic light shafts: the focused light scattered toward the eye along the view ray
+        // (the excess over the mean: the mean is in inSun), 12 jittered steps over the first 22 m
+        var shafts = vec3<f32>(0.0);
+        if (uw.ocean.z > 0.0) {
+            let steps = 12;
+            let maxD = min(dist, 22.0);
+            let ds = maxD / f32(steps);
+            let jitter = fract(fract(dot(in.pos.xy, vec2<f32>(0.06711056, 0.00583715))) * 52.9829189);
+            for (var i = 0; i < steps; i++) {
+                let s = (f32(i) + jitter) * ds;
+                let p = uw.cam.xyz + dir * s;
+                let z = max(camWater - p.y, 0.01);
+                let c = twCausticsSample(causticsFineTex, causticsBroadTex, uwRepeat, uw.ocean.zw, p, z, L, 1.5, true);
+                shafts += (c - 1.0) * exp(-sigT * (s + z / mu)) * ds;
+            }
+            shafts = max(shafts * sunE * sigS * phase * 2.5 * k, vec3<f32>(0.0));
+        }
         let T = exp(-sigT * dist);
-        result = base * T + inSun + inAmb;
+        result = base * T + inSun + inAmb + shafts;
     }
 
     // meniscus contact line and bright rim

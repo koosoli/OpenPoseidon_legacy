@@ -39,6 +39,7 @@ mod shore_field;
 mod shore_sim;
 pub mod spray;
 mod underwater;
+mod caustics;
 mod textures;
 
 use std::sync::Arc;
@@ -62,6 +63,8 @@ const TW_WATER_WGSL: &str = concat!(
     include_str!("tw_spray_common.wgsl"),
     "\n",
     include_str!("tw_spray.wgsl"),
+    "\n",
+    include_str!("tw_caustics.wgsl"),
 );
 
 /// The breaker crest finder with the spray emitters, and the spray update: shared declarations,
@@ -236,6 +239,8 @@ struct FrameInputs<'a> {
     sim: [[f32; 4]; shore_sim::K],
     dt: f32,
     stations: u32,
+    // W5b: the caustic layers' tile sizes (fine, broad), m
+    caustic_tiles: [f32; 2],
 }
 
 fn surface_block(p: &WgrWaterParams, f: &FrameInputs<'_>) -> TwSurface {
@@ -277,7 +282,7 @@ fn surface_block(p: &WgrWaterParams, f: &FrameInputs<'_>) -> TwSurface {
         sim_p0,
         sim_p1,
         // Breakers: station count, lip opacity (Tidewater `sheet`, Water tab lane)
-        brk: [f.stations as f32, p.tidewater_shore[2][3].clamp(0.0, 2.0), 0.0, 0.0],
+        brk: [f.stations as f32, p.tidewater_shore[2][3].clamp(0.0, 2.0), f.caustic_tiles[0], f.caustic_tiles[1]],
         morph: *f.morph,
     }
 }
@@ -396,6 +401,8 @@ pub struct Tidewater {
     // W5a underwater composite
     uw: underwater::TwUnderwater,
     linear: bool,
+    // W5b caustics
+    caustics: caustics::Caustics,
 }
 
 impl Tidewater {
@@ -540,6 +547,9 @@ impl Tidewater {
                     count: None,
                 },
                 tex(22, D::D2, flt),
+                // W5b caustics: fine, broad
+                tex(23, D::D2, flt),
+                tex(24, D::D2, flt),
             ],
         });
 
@@ -626,6 +636,7 @@ impl Tidewater {
         );
         let spray = spray::SprayGpu::new(device, queue, camera_layout, &layout, &shader, surface_format, sample_count, linear);
         let uw = underwater::TwUnderwater::new(device, surface_format);
+        let caustics = caustics::Caustics::new(device);
 
         let (verts, indices) = cdlod::grid_mesh();
         let grid_vbuf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -693,6 +704,7 @@ impl Tidewater {
             spray,
             uw,
             linear: linear > 0.5,
+            caustics,
         };
         me.rebuild_bind(device);
         me
@@ -727,6 +739,8 @@ impl Tidewater {
                 wgpu::BindGroupEntry { binding: 20, resource: self.spray.params.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 21, resource: self.spray.ring.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 22, resource: R::TextureView(&self.spray.tex_view) },
+                wgpu::BindGroupEntry { binding: 23, resource: R::TextureView(self.caustics.fine_view()) },
+                wgpu::BindGroupEntry { binding: 24, resource: R::TextureView(self.caustics.broad_view()) },
             ],
         });
         self.brk.rebuild_bind(
@@ -741,6 +755,7 @@ impl Tidewater {
             &self.smp_linear_repeat,
             &self.spray,
         );
+        self.caustics.rebuild_bind(device, self.fft.derivatives_view(), &self.smp_linear_repeat);
         self.sim.rebuild_bind(
             device,
             &self.surface_ubo,
@@ -889,6 +904,7 @@ impl Tidewater {
             sim: self.sim.lanes(),
             dt,
             stations: self.brk.ns,
+            caustic_tiles: self.caustics.tiles,
         };
         let block0 = surface_block(&p, &inputs);
         self.detail_offset[0] += block0.wind[0] * block0.sea[2] * 0.7 * dt;
@@ -898,10 +914,15 @@ impl Tidewater {
         queue.write_buffer(&self.surface_ubo, 0, bytemuck::bytes_of(&block));
 
         let spec = fft::SpectrumInputs::from_params(&p);
+        {
+            let d = cam.sun_dir_world;
+            let l = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt().max(1e-6);
+            self.caustics.set_frame(queue, [-d[0] / l, -d[1] / l, -d[2] / l], spec.sizes);
+        }
         // W5a: the underwater composite's block (used only while OP's compositor is engaged)
         {
             let glow = glow_override().unwrap_or(p.tidewater_fx[2]);
-            let uwp = underwater::UwParams::new(cam, &p, self.linear, glow, spec.sizes, WATER_ABSORPTION, WATER_SCATTERING, p.underwater_gate[0] > 0.5);
+            let uwp = underwater::UwParams::new(cam, &p, self.linear, glow, spec.sizes, self.caustics.tiles, WATER_ABSORPTION, WATER_SCATTERING, p.underwater_gate[0] > 0.5);
             self.uw.set_frame(queue, &uwp);
         }
         self.fft.set_frame(queue, spec, p.tidewater[0][1], p.time, dt);
@@ -920,6 +941,10 @@ impl Tidewater {
     pub fn update(&mut self, encoder: &mut wgpu::CommandEncoder, timers: &crate::gpu_timers::GpuTimers) {
         if self.last_params.is_some() {
             self.fft.dispatch(encoder, timers);
+            // W5b: the caustics follow this frame's FFT
+            if !self.bind_dirty {
+                self.caustics.dispatch(encoder);
+            }
             if self.sim.any_active() && !self.bind_dirty {
                 timers.begin(encoder, crate::gpu_timers::Region::TwShoreSim);
                 self.sim.dispatch(encoder);
@@ -944,7 +969,7 @@ impl Tidewater {
         depth: &wgpu::TextureView,
         destination: &wgpu::TextureView,
     ) {
-        self.uw.render(device, encoder, source, depth, destination, self.fft.displacement_view());
+        self.uw.render(device, encoder, source, depth, destination, self.fft.displacement_view(), (self.caustics.fine_view(), self.caustics.broad_view()));
     }
 
     /// W4b: the lips' and the spray's coverage into the upscalers' history-control ("reactive")

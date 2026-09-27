@@ -15,6 +15,9 @@
 
 use crate::ffi::{WgrCamera, WgrWaterParams};
 
+/// The composite and the caustic lookup it uses (W5b).
+const UW_WGSL: &str = concat!(include_str!("tw_underwater.wgsl"), "\n", include_str!("tw_caustics.wgsl"));
+
 /// Meniscus half-width in pixels (Tidewater's `band`).
 pub const BAND_PX: f32 = 9.0;
 /// Lowest in-scatter scale under water (see W3j.1: the water glow, at least this).
@@ -44,7 +47,7 @@ impl UwParams {
     /// pipelines' linear-lighting override; `glow`: the Water tab's water glow; `sizes`: the FFT
     /// cascade sizes; `absorption` / `scattering`: the water's coefficients (1/m).
     #[allow(clippy::too_many_arguments)]
-    pub fn new(cam: &WgrCamera, p: &WgrWaterParams, linear: bool, glow: f32, sizes: [f32; 4], absorption: [f32; 3], scattering: [f32; 3], enabled: bool) -> Self {
+    pub fn new(cam: &WgrCamera, p: &WgrWaterParams, linear: bool, glow: f32, sizes: [f32; 4], caustic_tiles: [f32; 2], absorption: [f32; 3], scattering: [f32; 3], enabled: bool) -> Self {
         let view = glam::DMat4::from_cols_array(&cam.view.map(f64::from));
         let proj = glam::DMat4::from_cols_array(&cam.proj.map(f64::from));
         let inv_vp = (view.inverse() * proj.inverse()).as_mat4().to_cols_array();
@@ -62,7 +65,7 @@ impl UwParams {
             sky_e: [lin(cam.sun_ambient[0]), lin(cam.sun_ambient[1]), lin(cam.sun_ambient[2]), if enabled { 1.0 } else { 0.0 }],
             absorption: [absorption[0], absorption[1], absorption[2], 0.0],
             scattering: [scattering[0], scattering[1], scattering[2], p.sea_level],
-            ocean: [p.tidewater[0][0], 4.0, 0.0, 0.0],
+            ocean: [p.tidewater[0][0], 4.0, caustic_tiles[0], caustic_tiles[1]],
             sizes,
         }
     }
@@ -101,11 +104,13 @@ impl TwUnderwater {
                 tex(3, S::Float { filterable: true }, D::D2Array),
                 wgpu::BindGroupLayoutEntry { binding: 4, visibility: f, ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering), count: None },
                 wgpu::BindGroupLayoutEntry { binding: 5, visibility: f, ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering), count: None },
+                tex(6, S::Float { filterable: true }, D::D2),
+                tex(7, S::Float { filterable: true }, D::D2),
             ],
         });
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("tw_underwater"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("tw_underwater.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(UW_WGSL.into()),
         });
         let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("tw_underwater"),
@@ -164,6 +169,7 @@ impl TwUnderwater {
         depth: &wgpu::TextureView,
         destination: &wgpu::TextureView,
         displacement: &wgpu::TextureView,
+        caustics: (&wgpu::TextureView, &wgpu::TextureView),
     ) {
         use wgpu::BindingResource as R;
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -176,6 +182,8 @@ impl TwUnderwater {
                 wgpu::BindGroupEntry { binding: 3, resource: R::TextureView(displacement) },
                 wgpu::BindGroupEntry { binding: 4, resource: R::Sampler(&self.repeat) },
                 wgpu::BindGroupEntry { binding: 5, resource: R::Sampler(&self.clamp) },
+                wgpu::BindGroupEntry { binding: 6, resource: R::TextureView(caustics.0) },
+                wgpu::BindGroupEntry { binding: 7, resource: R::TextureView(caustics.1) },
             ],
         });
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -208,7 +216,7 @@ mod tests {
 
     #[test]
     fn underwater_wgsl_validates() {
-        let module = naga::front::wgsl::parse_str(include_str!("tw_underwater.wgsl")).expect("parse");
+        let module = naga::front::wgsl::parse_str(UW_WGSL).expect("parse");
         naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
             .validate(&module)
             .expect("valid");
