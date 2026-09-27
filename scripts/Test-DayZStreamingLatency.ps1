@@ -7,10 +7,13 @@ param(
     [switch]$LazyTextureGroups,
     [switch]$PaaLzoReplay,
     [switch]$PaaPreparationDiagnostics,
+    [switch]$PackedTextures,
+    [switch]$PaaPreparationInflight,
     [string]$Label = 'dayz-streaming-latency',
     [string]$GameDir = 'D:\SteamLibrary\steamapps\common\ARMA Cold War Assault'
 )
 $ErrorActionPreference = 'Stop'
+if ($PaaPreparationDiagnostics -or $PaaPreparationInflight) { $PackedTextures = $true }
 if (!$env:LOCK_OWNER) {
     $shellName = if ($PSVersionTable.PSEdition -eq 'Core') { 'pwsh.exe' } else { 'powershell.exe' }
     $shellExe = (Join-Path $PSHOME $shellName).Replace('\', '/')
@@ -24,6 +27,8 @@ if (!$env:LOCK_OWNER) {
         if ($LazyTextureGroups) { $argv += '-LazyTextureGroups' }
         if ($PaaLzoReplay) { $argv += '-PaaLzoReplay' }
         if ($PaaPreparationDiagnostics) { $argv += '-PaaPreparationDiagnostics' }
+        if ($PackedTextures) { $argv += '-PackedTextures' }
+        if ($PaaPreparationInflight) { $argv += '-PaaPreparationInflight' }
         & 'C:\Program Files\Git\bin\bash.exe' @argv
         if ($LASTEXITCODE) { throw "Latency screening exited $LASTEXITCODE" }
     } finally { Remove-Item Env:LOCK_OWNER }
@@ -76,8 +81,9 @@ if ($ParkedTextureRefill) {
 }
 if ($LazyTextureGroups) { $environment.WGR_LAZY_TEXTURE_BIND_GROUPS = '1' }
 if ($PaaLzoReplay) { $environment.WGR_PAA_LZO_REPLAY_CACHE = '1' }
+if ($PackedTextures) { $environment.WGR_OBJECT_STREAM_PBO_TEXTURES = '1' }
+if ($PaaPreparationInflight) { $environment.WGR_PAA_PREP_INFLIGHT = '1' }
 if ($PaaPreparationDiagnostics) {
-    $environment.WGR_OBJECT_STREAM_PBO_TEXTURES = '1'
     $environment.WGR_PAA_PREP_ATTEMPT_DIAG = '1'
 }
 # Shape trace enables on variable presence, so leave it absent in both modes.
@@ -95,6 +101,7 @@ try {
         mode = $Mode; head = (& git -C $root rev-parse HEAD); scriptSha256 = (Get-FileHash $PSCommandPath).Hash
         paaLzoReplay = [bool]$PaaLzoReplay
         paaPreparationDiagnostics = [bool]$PaaPreparationDiagnostics
+        packedTextures = [bool]$PackedTextures; paaPreparationInflight = [bool]$PaaPreparationInflight
         installed = (Get-Content (Join-Path $GameDir 'DEPLOYED-FROM.txt')); hashes = $initialHashes
         world = $world; environment = $environment; clearedEnvironmentNames = $clearNames
         pose = @($baseX, $baseZ, $baseY, $azimuth, $elevation); routeX = $route; poseHoldSeconds = 3
@@ -218,12 +225,27 @@ try {
         rows = @($attemptRows | ForEach-Object { $_.Line })
         scope = 'First at most64 texture-bearing conversions only; filename/generation whole-attempt overlap is not physical identity; continuing diagnostic work invalidates normal throughput acceptance'}
     $attemptProof | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $out 'paa-attempt-proof.json')
+    $inflightRows = @(Select-String -LiteralPath $log -Pattern 'PAA prep inflight: actual exact-member suppression observed; suppressed=([1-9]\d*) active=(\d+) metadataBytes=(\d+) peakMetadataBytes=(\d+)')
+    if ($PaaPreparationInflight -and $inflightRows.Count -ne 1) { throw 'Exact-member in-flight experiment did not exercise its one bounded suppression proof' }
+    if (!$PaaPreparationInflight -and $inflightRows.Count -ne 0) { throw 'Default run unexpectedly suppressed in-flight PAA preparation' }
+    if ($inflightRows.Count) {
+        $m = $inflightRows[0].Matches[0]
+        if ([uint64]$m.Groups[2].Value -gt 128 -or [uint64]$m.Groups[3].Value -gt 1048576 -or [uint64]$m.Groups[4].Value -gt 1048576) {
+            throw 'Observed in-flight bookkeeping exceeded its slot or logical retained metadata cap'
+        }
+    }
+    $inflightProof = @{enabled = [bool]$PaaPreparationInflight; suppressionObserved = $inflightRows.Count -eq 1
+        rows = @($inflightRows | ForEach-Object { $_.Line })
+        scope = 'First exact immutable-member overlapping attempt suppressed; ordinary owner fallback remains. Snapshot is not route totals, pending peer publication success, physical memory or performance acceptance'}
+    $inflightProof | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $out 'paa-inflight-proof.json')
     @{passed = $true; mode = $Mode; admissionMode = $AdmissionMode; parkedTextureRefill = [bool]$ParkedTextureRefill; lazyTextureGroups = [bool]$LazyTextureGroups; warmProfile = [bool]$WarmProfile; screeningOnly = $true; performanceAccepted = $false; terrainPageTimings = [bool]$TerrainPageTimings
         frameCount = $count; dropped = $dropped; enginePhaseTiming = $phases; baseline = $baseline; returned = $returned
         routeSamples = $routeSamples; postExitHashes = $finalHashes
         parkedRefillProof = $parkedProof
         paaLzoReplay = [bool]$PaaLzoReplay; paaLzoReplayProof = $replayProof
         paaPreparationDiagnostics = [bool]$PaaPreparationDiagnostics; paaPreparationProof = $attemptProof
+        packedTextures = [bool]$PackedTextures; paaPreparationInflight = [bool]$PaaPreparationInflight
+        paaPreparationInflightProof = $inflightProof
         limitation = 'No automatic performance threshold, vanilla parity, cold-cache guarantee or whole-world query readiness; compare matched separate mode processes'
     } | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $out 'result.json')
     Write-Output "DayZ latency screening evidence: $out"

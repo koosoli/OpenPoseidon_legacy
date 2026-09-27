@@ -3,6 +3,7 @@
 
 #include <Poseidon/World/Terrain/ObjectStreamPrepare.hpp>
 #include <Poseidon/World/Terrain/ObjectStreamTextureNames.hpp>
+#include <Poseidon/World/Terrain/PaaPreparationInflight.hpp>
 #include <Poseidon/World/Model/ShapeAdapter.hpp>
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
 
@@ -96,7 +97,7 @@ struct PaaAttemptDiagnostics
 };
 struct PaaAttemptRow
 {
-    uint64_t preSkipped = 0, started = 0, overlapping = 0, untracked = 0;
+    uint64_t preSkipped = 0, inFlightSuppressed = 0, inFlightPassThrough = 0, started = 0, overlapping = 0, untracked = 0;
     uint64_t readFailed = 0, accepted = 0, rejected = 0, cancelledBeforeRead = 0, cancelledBeforePut = 0, threw = 0;
     double readDecodeMs = 0, rejectedReadDecodeMs = 0, rejectedReadDecodeFactsMs = 0;
 };
@@ -300,6 +301,8 @@ struct ObjectStreamPreparer::Impl
     using State = ObjectStreamPreparer::State;
     using ModelPtr = std::shared_ptr<Model::Model>;
 
+    std::unique_ptr<Streaming::PaaPreparationInflight> paaInflight; // experimental OFF: no allocation
+    std::atomic<bool> paaInflightProofLogged{false};
     std::unique_ptr<PaaAttemptDiagnostics> paaAttemptDiagnostics; // diagnostic OFF adds no tracker allocation
     mutable std::mutex mutex;
     std::condition_variable cv;
@@ -534,8 +537,8 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                 if (!paaAttemptDiagnostics || job.textures.empty()) return;
                 const unsigned row = paaAttemptDiagnostics->NextLogRow();
                 if (row < 64)
-                    LOG_INFO(World, "PAA prepare attempts: generation={} textureGeneration={} modelIndex={} inputs={} published={} preSkipped={} started={} filenameOverlap={} trackingOverflow={} readFailed={} putAccepted={} putRejected={} cancelledBeforeRead={} cancelledBeforePut={} threw={} successfulReadDecodeMs={:.3f} rejectedReadDecodeMs={:.3f} rejectedReadDecodeFactsMs={:.3f} conversionCompleteToTerminalMs={:.3f}",
-                        jobGen, job.textureGeneration, job.index, job.textures.size(), published, attemptRow.preSkipped, attemptRow.started,
+                    LOG_INFO(World, "PAA prepare attempts: generation={} textureGeneration={} modelIndex={} inputs={} published={} preSkipped={} inFlightSuppressed={} inFlightPassThrough={} started={} filenameOverlap={} trackingOverflow={} readFailed={} putAccepted={} putRejected={} cancelledBeforeRead={} cancelledBeforePut={} threw={} successfulReadDecodeMs={:.3f} rejectedReadDecodeMs={:.3f} rejectedReadDecodeFactsMs={:.3f} conversionCompleteToTerminalMs={:.3f}",
+                        jobGen, job.textureGeneration, job.index, job.textures.size(), published, attemptRow.preSkipped, attemptRow.inFlightSuppressed, attemptRow.inFlightPassThrough, attemptRow.started,
                         attemptRow.overlapping, attemptRow.untracked, attemptRow.readFailed, attemptRow.accepted,
                         attemptRow.rejected, attemptRow.cancelledBeforeRead, attemptRow.cancelledBeforePut, attemptRow.threw, attemptRow.readDecodeMs,
                         attemptRow.rejectedReadDecodeMs, attemptRow.rejectedReadDecodeFactsMs, publicationDelayMs);
@@ -553,6 +556,25 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                         if (stop || jobGen != generation.load(std::memory_order_relaxed) || stale[job.index]) { if (paaAttemptDiagnostics) ++attemptRow.cancelledBeforeRead; break; }
                     }
                     if (!store.ShouldPrepare(texture.key)) { ++skipped; if (paaAttemptDiagnostics) ++attemptRow.preSkipped; continue; }
+                    Streaming::PaaPreparationInflight::Result inflight{Streaming::PaaPreparationInflight::Outcome::UnleasedOrInvalid, {}};
+                    if (paaInflight && job.texturePublicationRequired)
+                    {
+                        inflight = paaInflight->Acquire(texture.key, job.textureGeneration, texture.read, job.texturePublication);
+                        if (inflight.outcome == Streaming::PaaPreparationInflight::Outcome::Suppressed)
+                        {
+                            if (paaAttemptDiagnostics) ++attemptRow.inFlightSuppressed;
+                            if (!paaInflightProofLogged.exchange(true, std::memory_order_relaxed))
+                            {
+                                const auto counters = paaInflight->Snapshot();
+                                LOG_INFO(World, "PAA prep inflight: actual exact-member suppression observed; suppressed={} active={} metadataBytes={} peakMetadataBytes={} overflow={} unsupported={} contended={} owner fallback retained",
+                                    counters.suppressed, counters.active, counters.metadataBytes, counters.peakMetadataBytes,
+                                    counters.overflow, counters.unsupported, counters.contended);
+                            }
+                            continue; // no peer payload/Ready promise: ordinary owner reader is unchanged
+                        }
+                        if (paaAttemptDiagnostics && inflight.outcome != Streaming::PaaPreparationInflight::Outcome::Tracked)
+                            ++attemptRow.inFlightPassThrough;
+                    }
                     PaaAttemptDiagnostics::Ticket attempt(paaAttemptDiagnostics.get(), texture.key, job.textureGeneration);
                     if (paaAttemptDiagnostics) { ++attemptRow.started; attemptRow.overlapping += attempt.overlap; attemptRow.untracked += attempt.overflow; }
                     const auto readBegan = paaAttemptDiagnostics ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
@@ -1020,6 +1042,14 @@ ObjectStreamPreparer::ObjectStreamPreparer(uint64_t readyByteBudget, const Bc3En
     if (attemptDiagnostic)
         try { _impl->paaAttemptDiagnostics = std::make_unique<PaaAttemptDiagnostics>(); }
         catch (...) { LOG_WARN(World, "PAA prepare attempts: diagnostic allocation failed; overlap coverage unavailable"); } // normal preparation remains available
+    static const bool inflightExperiment = [] {
+        const char* flag = std::getenv("WGR_PAA_PREP_INFLIGHT");
+        const char* pbo = std::getenv("WGR_OBJECT_STREAM_PBO_TEXTURES");
+        return flag && std::strcmp(flag, "1") == 0 && pbo && pbo[0] == '1';
+    }();
+    if (inflightExperiment)
+        try { _impl->paaInflight = std::make_unique<Streaming::PaaPreparationInflight>(); }
+        catch (...) { LOG_WARN(World, "PAA prep inflight: optional metadata allocation failed; ordinary preparation retained"); }
     if (observer) _impl->encodingObserver = *observer;
     if (publicationObserver) _impl->publicationObserver = *publicationObserver;
 }
