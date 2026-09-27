@@ -755,11 +755,15 @@ void Car::Simulate(float deltaT, SimulationImportance prec)
     {
         IsMoved();
     }
-    // TW-WATER W6a.1/W6a.2: a car afloat or airborne keeps simulating. A car starts stopped
-    // (_isStopped, constructor) and the physics below runs only when it is not, so a BRDM placed
-    // on the sea -- empty or crewed -- hung at its placement height, dry, never drove and never
-    // sank. IsMoved alone (W6a.1) does not clear the stop; CancelStop does.
-    if (!_landContact || _waterContact)
+    // TW-WATER W6a.1/W6a.2/W6e: a car afloat or airborne keeps simulating. A car starts stopped
+    // (_isStopped, constructor) and the physics below runs only when it is not. The contact flags
+    // are refreshed only BY that physics, and a new car starts with _landContact = true and
+    // _waterContact = false (WGR_CAR_TRACE, 3e99fee6), so a BRDM placed on the sea -- empty or
+    // crewed -- never ran a physics step: it hung at its placement height (its wheels on the
+    // water's surface), the engine never started, it never drove and never sank. Being over
+    // water at all now wakes it; its first step then finds the water and it floats.
+    const bool overWater = GLOB_LAND->SurfaceY(Position().X(), Position().Z()) < GLOB_LAND->GetSeaLevel();
+    if (!_landContact || _waterContact || overWater)
     {
         IsMoved();
         CancelStop();
