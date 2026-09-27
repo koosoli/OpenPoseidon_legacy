@@ -503,8 +503,10 @@ try{
       throw "Automatic camera state timed out: $($cut|ConvertTo-Json -Compress)"
      }
      if($ProjectedPrefetch){
-      CameraPose '-8800 1240 18 90 0';$projectedFar=TupleCut (PageCut (Observe $true $false));FixedCoarse $projectedFar
-      if(!$projectedFar.projectedSurfaceIdealBound -or $projectedFar.projectedSurfaceEuclideanUpper -gt 1){throw 'Far pose did not establish actual low ideal pair discrepancy'}
+      # Actual 10km cut was bounded at4.5886, above the unchanged low rail1.
+      # Use100km for this private ideal-bound test; no visibility/pixel/quality claim.
+      CameraPose '-98800 1240 18 90 0';$projectedFar=TupleCut (PageCut (Observe $true $false));FixedCoarse $projectedFar
+      if(!$projectedFar.projectedSurfaceIdealBound -or $projectedFar.cameraTupleGeneration -le $coarse.cameraTupleGeneration -or $projectedFar.projectedSurfaceEuclideanUpper -gt 1){throw 'Far pose did not establish actual low ideal pair discrepancy'}
       $follow=Send @{cmd='geometry_page_fixture';action='followProjected';enterUpper=2;leaveUpper=1;dwellMs=200;retryMs=250}
       $far=WaitCamera {param($c) $c.projectedDemandActive -and $c.projectedDemandHasBound -and $c.projectedDemandUpper -le 1 -and !$c.cameraDesiredFine -and $c.cameraObservations -ge 3}
      }else{

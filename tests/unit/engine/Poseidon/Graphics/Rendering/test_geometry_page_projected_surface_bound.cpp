@@ -140,3 +140,53 @@ TEST_CASE("Zero discrepancy and uncertain underflow overflow arithmetic do not i
     CHECK(PS::Detail::Add(1,-1,true,value));CHECK(value==0);
     CHECK(PS::Detail::Mul(0,std::numeric_limits<double>::max(),true,value));CHECK(value==0);
 }
+
+TEST_CASE("Projected model translation has a separate bounded world-unit domain", "[geometry-page-projected-surface-bound]") {
+    auto input=ProjectionInput();PS::Result tenKm,hundredKm;
+    input.minimum={-10,-10,-10};input.maximum={10,10,10};input.surfaceDistanceUpper=4;
+    input.binding.fineToCoarseUpperBits=std::bit_cast<uint64_t>(4.);
+    input.binding.coarseToFineUpperBits=std::bit_cast<uint64_t>(4.);
+    input.binding.hausdorffUpperBits=std::bit_cast<uint64_t>(4.);
+    // A valid narrow projection can still have >1 ideal pair discrepancy at10km.
+    // This mathematical example is not the captured runtime camera packet.
+    input.projection[0]=10;input.projection[5]=14;input.model[14]=10000;
+    REQUIRE(PS::Build(input,input.binding,input.cut,tenKm)==PS::Status::Bounded);
+    REQUIRE(tenKm.euclideanPixelUpper>1);IndependentPairs(input,tenKm);
+    input.model[14]=100000;
+    REQUIRE(PS::Build(input,input.binding,input.cut,hundredKm)==PS::Status::Bounded);
+    REQUIRE(hundredKm.depthMinimum>99980);REQUIRE(hundredKm.euclideanPixelUpper<1);
+    REQUIRE(hundredKm.euclideanPixelUpper<tenKm.euclideanPixelUpper/9);
+    IndependentPairs(input,hundredKm);
+    input.model[14]=1000000;PS::Result boundary;
+    REQUIRE(PS::Build(input,input.binding,input.cut,boundary)==PS::Status::Bounded);
+    IndependentPairs(input,boundary);
+    auto bad=input;bad.model[14]=std::nextafter(1000000.f,std::numeric_limits<float>::infinity());
+    PS::Result untouched=hundredKm;
+    REQUIRE(PS::Build(bad,bad.binding,bad.cut,untouched)==PS::Status::Unsupported);
+    CHECK(untouched.euclideanPixelUpper==hundredKm.euclideanPixelUpper);CHECK(untouched.tuple.model==hundredKm.tuple.model);
+    for(unsigned axis=12;axis<=14;++axis){
+        for(float value:{1000001.f,-1000001.f,std::numeric_limits<float>::quiet_NaN(),std::numeric_limits<float>::infinity(),std::numeric_limits<float>::denorm_min()}){
+            bad=input;bad.model[axis]=value;
+            REQUIRE(PS::Build(bad,bad.binding,bad.cut,untouched)==PS::Status::Unsupported);
+            CHECK(untouched.tuple.model==hundredKm.tuple.model);
+        }
+    }
+}
+TEST_CASE("Large model translation does not widen basis view projection or geometry eligibility", "[geometry-page-projected-surface-bound]") {
+    auto input=ProjectionInput();input.model[14]=100000;PS::Result result;
+    REQUIRE(PS::Build(input,input.binding,input.cut,result)==PS::Status::Bounded);
+    auto bad=input;bad.model[0]=10001;
+    REQUIRE(PS::Build(bad,bad.binding,bad.cut,result)==PS::Status::Unsupported);
+    bad=input;bad.view[0]=10001;
+    REQUIRE(PS::Build(bad,bad.binding,bad.cut,result)==PS::Status::Unsupported);
+    bad=input;bad.view[12]=1;
+    REQUIRE(PS::Build(bad,bad.binding,bad.cut,result)==PS::Status::Unsupported);
+    bad=input;bad.view[14]=100000;
+    REQUIRE(PS::Build(bad,bad.binding,bad.cut,result)==PS::Status::Unsupported);
+    bad=input;bad.projection[0]=10001;
+    REQUIRE(PS::Build(bad,bad.binding,bad.cut,result)==PS::Status::Unsupported);
+    bad=input;bad.maximum[0]=10001;
+    REQUIRE(PS::Build(bad,bad.binding,bad.cut,result)==PS::Status::Invalid);
+    bad=input;bad.model[3]=1;
+    REQUIRE(PS::Build(bad,bad.binding,bad.cut,result)==PS::Status::Unsupported);
+}

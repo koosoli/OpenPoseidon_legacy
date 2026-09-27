@@ -46,8 +46,9 @@ inline bool NormalOrZero(double v){const auto bits=std::bit_cast<uint64_t>(v)&0x
     // Bit classification must precede FP comparisons: DAZ may compare an actual
     // subnormal operand as zero. Reject such inputs/endpoints, never certify them.
     return bits==0||(bits>=0x0010000000000000ull&&bits<0x7ff0000000000000ull);}
-inline bool Float(float v){const auto bits=std::bit_cast<uint32_t>(v)&0x7fffffff;
-    return bits<0x7f800000&&(bits==0||bits>=0x00800000)&&std::abs(double(v))<=10000;}
+inline bool FloatWithin(float v,double limit){const auto bits=std::bit_cast<uint32_t>(v)&0x7fffffff;
+    return bits<0x7f800000&&(bits==0||bits>=0x00800000)&&std::abs(double(v))<=limit;}
+inline bool Float(float v){return FloatWithin(v,10000);}
 inline bool Rounded(double v,bool upper,bool exactZero,double& out){
     if(!NormalOrZero(v)||(v==0&&!exactZero))return false;
     if(v==0){out=0;return true;}
@@ -97,6 +98,15 @@ inline bool BoundIdentity(const Binding& b){
 }
 inline bool Affine(const std::array<float,16>& m){
     for(float v:m)if(!Float(v))return false;
+    return m[3]==0&&m[7]==0&&m[11]==0&&m[15]==1;
+}
+// Camera-relative MODEL translation is in world-coordinate units, unlike
+// linear coefficients. Keep the existing1e4 domain for basis/view/geometry and
+// projection; permit only model indices12..14 up to1e6. The same outward interval
+// operations still refuse nonfinite/subnormal/overflow/underflow outcomes.
+inline bool ModelAffine(const std::array<float,16>& m){
+    for(size_t i=0;i<m.size();++i)
+        if(!(i>=12&&i<=14?FloatWithin(m[i],1000000):Float(m[i])))return false;
     return m[3]==0&&m[7]==0&&m[11]==0&&m[15]==1;
 }
 inline bool Projection(const Input& v){
@@ -156,7 +166,7 @@ inline Status Build(const Input& input,const Binding& expectedBinding,const Cut&
        std::numeric_limits<double>::digits!=53||std::numeric_limits<float>::digits!=24)
         return Status::Unsupported;
     if(!Detail::Float(input.clipNear)||input.clipNear<=0||!Detail::NormalOrZero(input.surfaceDistanceUpper)||
-       input.surfaceDistanceUpper<0||input.surfaceDistanceUpper>10000||!Detail::Affine(input.model)||!Detail::Affine(input.view)||
+       input.surfaceDistanceUpper<0||input.surfaceDistanceUpper>10000||!Detail::ModelAffine(input.model)||!Detail::Affine(input.view)||
        input.view[12]!=0||input.view[13]!=0||input.view[14]!=0||!Detail::Projection(input))return Status::Unsupported;
     for(unsigned i=0;i<3;++i)if(!Detail::Float(input.minimum[i])||!Detail::Float(input.maximum[i])||input.minimum[i]>input.maximum[i])return Status::Invalid;
     std::array<std::array<Detail::Interval,4>,3> rows{};std::array<Detail::Interval,3> ranges{};std::array<double,3> norms{};
