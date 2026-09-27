@@ -13,6 +13,8 @@
 
 #include <Poseidon/Graphics/Textures/PAADecoder.hpp>
 #include <Poseidon/Graphics/Textures/PreparedTextures.hpp>
+#include <Poseidon/IO/Streams/ArchiveSourceBinding.hpp>
+#include <Poseidon/Foundation/Threads/ThreadAffinity.hpp>
 
 #include "test_fixtures.hpp"
 
@@ -711,6 +713,51 @@ TEST_CASE("Prepared alpha facts refuse mismatch cancellation and departed genera
         CHECK_FALSE(store.CopyAlphaFacts("alpha-member", fixture.read, 0xFF03, 4, 4, 16, 4, copied));
         CHECK(store.SnapshotStats().alphaFactsMisses > 0);
     }
+    store.Clear();
+}
+TEST_CASE("Source-bound warm chains require explicit claims and retain cancellation without alpha facts", "[warm-texture-store]")
+{
+    Foundation::CaptureMainThread();
+    if (!ArchiveSourceBinding::SnapshotStats().enabled) SKIP("Requires fresh WGR_OBJECT_STREAM_WARM_TEXTURES=1 process.");
+    AlphaArchiveFixture fixture;
+    auto buffer = fixture.bank.Read("member.paa"); REQUIRE(buffer);
+    auto binding = buffer->GetArchiveSourceBinding(); REQUIRE(binding);
+    auto& store = render::PreparedTextureStore::Instance();
+    store.Clear();
+    const auto generation = store.Generation();
+    auto inventory = render::DdsPublicationInventory::Create(1); REQUIRE(inventory);
+    const render::DdsPublicationToken token{inventory, 0, inventory->Epoch(0)};
+    auto publish = [&](uint64_t gen, const render::DdsPublicationToken* claim, bool bound = true) {
+        auto chain = fixture.chain;
+        return store.Put("warm-source", std::move(chain), gen, nullptr, claim, bound ? binding : nullptr);
+    };
+    store.MarkUploaded("warm-source");
+    CHECK_FALSE(publish(generation, &token, false)); // Legacy uploaded-mark behaviour is preserved.
+    CHECK(store.ShouldPrepareWarm("warm-source"));
+    CHECK_FALSE(publish(generation, nullptr)); // Binding alone does not certify current demand.
+    REQUIRE(publish(generation, &token));
+    CHECK(store.SnapshotStats().bytes >= fixture.chain.blocks.capacity() + binding->KnownCppBytes());
+    PAABlockChain output;
+    const auto refusedBefore = store.SnapshotStats().warmSourceRefused;
+    CHECK_FALSE(store.Take("warm-source", output)); // A provenance-unaware caller cannot consume it.
+    CHECK_FALSE(output.valid()); CHECK(store.SnapshotStats().warmSourceRefused == refusedBefore + 1);
+    REQUIRE(publish(generation, &token));
+    std::shared_ptr<const ArchiveSourceBinding> claimed;
+    REQUIRE(store.Take("warm-source", output, &claimed));
+    CHECK(claimed == binding); CHECK(output.blocks == fixture.chain.blocks);
+    CHECK(claimed->Request().SameArchiveMember(fixture.read));
+    CHECK_FALSE(store.HasAlphaFacts("warm-source")); // Source witness is independent of optional facts.
+    REQUIRE(publish(generation, &token));
+    inventory->CancelModel(0);
+    CHECK_FALSE(store.Take("warm-source", output, &claimed)); CHECK_FALSE(claimed);
+    CHECK_FALSE(publish(generation, &token));
+    const render::DdsPublicationToken replacement{inventory, 0, inventory->Epoch(0)};
+    REQUIRE(publish(generation, &replacement));
+    store.Clear();
+    CHECK_FALSE(publish(generation, &replacement));
+    REQUIRE(publish(store.Generation(), &replacement));
+    REQUIRE(store.Take("warm-source", output, &claimed));
+    CHECK(output.blocks == fixture.chain.blocks); CHECK(claimed == binding);
     store.Clear();
 }
 #endif

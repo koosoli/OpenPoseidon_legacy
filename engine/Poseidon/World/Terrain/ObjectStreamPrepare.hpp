@@ -77,11 +77,19 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 #include <Poseidon/World/Terrain/StaticSourceEnvelope.hpp>
 #include <Poseidon/World/Terrain/StaticPlainSourceSummary.hpp>
 
 namespace Poseidon
 {
+class ArchiveSourceBinding;
+// Captured from successful source Init, never reconstructed from a texture name.
+struct WarmTextureRead
+{
+    std::string key;
+    std::shared_ptr<const ArchiveSourceBinding> initializedSource;
+};
 struct Bc3EncodingObserver;
 namespace render { struct DdsPublicationObserver; }
 class LODShapeWithShadow;
@@ -192,6 +200,14 @@ class ObjectStreamPreparer
         uint64_t workerBc3Prepared = 0;
         uint64_t workerBc3BudgetSkipped = 0;
         double workerBc3Ms = 0.0;
+        uint64_t warmTextureJobsSubmitted = 0, warmTextureJobsCompleted = 0,
+            warmTextureJobsCancelled = 0, warmTextureJobsCoalesced = 0, warmTextureJobsRejected = 0;
+        uint64_t warmTextureMembersPrepared = 0, warmTextureMembersSkipped = 0, warmTextureMembersUnreadable = 0;
+        size_t warmTextureQueued = 0, warmTextureActive = 0;
+        uint64_t warmTextureMetadataBytes = 0, warmTextureMetadataBytesPeak = 0; // conservative active+queued job debt
+        uint64_t warmTextureQueueBytes = 0; // actual optional-state sizeof + queue capacity; not RSS
+        uint64_t warmTextureScratchBytes = 0, warmTextureScratchBytesPeak = 0;
+        double warmTextureMs = 0.0;
     };
 
     // WGR_OBJECT_STREAM_ASYNC. Read once.
@@ -205,6 +221,7 @@ class ObjectStreamPreparer
     // Conversion IR plus estimated workspace/output is charged until consumed.
     // Decoder scratch / actual converted Shape allocations are not measured.
     static uint64_t ReadyByteBudget();
+    static bool WarmTextureJobsEnabled(); // both exact opt-in flags; cached, default OFF
     // Observer is copied before workers start. Its context must remain alive
     // until this preparer's destructor has joined ALL workers. Optional CPU-only
     // observation never grants renderer access or changes reservation lifetime.
@@ -276,6 +293,15 @@ class ObjectStreamPreparer
     // Certificates survive payload Take/DropStale.
     // An unrequested model remains Unknown. Reset invalidates all certificates.
     RadiusCertificate QueryRadius(uint32_t index) const;
+    enum class WarmTextureSubmit : uint8_t
+    { Submitted, Disabled, WrongThread, InvalidInventory, Unsupported, Coalesced, Capacity };
+    // Owner-only; caller must compare every retained Init binding with the currently
+    // mounted member in the SAME nonyielding operation. No source/header load here.
+    // Unknown radius is allowed: this token binds exact inventory identity only.
+    // Up to 8 queued+active jobs, 64 members/job, 2 MiB known metadata including
+    // active jobs. No model State transition. Missing/unsupported data falls back.
+    WarmTextureSubmit SubmitWarmTextures(uint32_t index, const RadiusCertificate& inventoryToken,
+                                        std::vector<WarmTextureRead> reads);
     // Owner-thread install seam. Caller supplies the token/identity from QueryRadius
     // and the successfully installed shape's BoundingSphere; rejects stale inventories.
     bool RecordAdaptedRadius(uint32_t index, uint64_t generation,

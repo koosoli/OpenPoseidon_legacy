@@ -459,7 +459,7 @@ void RegisterScreenshot(HarnessServer& hs)
             ARCHIVE_BINDING_FIELD(captureRefused); ARCHIVE_BINDING_FIELD(capacityRefused);
             ARCHIVE_BINDING_FIELD(allocationRefused);
 #undef ARCHIVE_BINDING_FIELD
-            cJSON_AddStringToObject(result, "scope", "Mapped raw PAA bytes and their initialized headers only; shared retained C++ metadata charge, excludes kernel/allocator/RSS cost; no warm worker jobs or upload-readiness proof");
+            cJSON_AddStringToObject(result, "scope", "Mapped raw PAA bytes and their initialized headers only; shared retained C++ metadata charge, excludes kernel/allocator/RSS cost; counters alone do not prove worker jobs, upload readiness or work moved");
             return HarnessProtocol::JsonResponse(result);
         });
     hs.RegisterCommand({"geometry_allocations", "Request/poll bounded retained mesh allocation diagnostics", {}},
@@ -662,7 +662,25 @@ void RegisterScreenshot(HarnessServer& hs)
             cJSON_AddNumberToObject(result, "workerBc3Ms", state.prep.workerBc3Ms);
             cJSON_AddNumberToObject(result, "ddsPublicationBytes", static_cast<double>(state.prep.ddsPublicationBytes));
             cJSON_AddNumberToObject(result, "texturePublicationBytes", static_cast<double>(state.prep.texturePublicationBytes));
+            cJSON_AddBoolToObject(result, "warmTextureJobsEnabled", ObjectStreamPreparer::WarmTextureJobsEnabled());
+#define WARM_PREP_FIELD(field) cJSON_AddNumberToObject(result, #field, static_cast<double>(state.prep.field))
+            WARM_PREP_FIELD(warmTextureJobsSubmitted); WARM_PREP_FIELD(warmTextureJobsCompleted);
+            WARM_PREP_FIELD(warmTextureJobsCancelled); WARM_PREP_FIELD(warmTextureJobsCoalesced);
+            WARM_PREP_FIELD(warmTextureJobsRejected); WARM_PREP_FIELD(warmTextureMembersPrepared);
+            WARM_PREP_FIELD(warmTextureMembersSkipped); WARM_PREP_FIELD(warmTextureMembersUnreadable);
+            WARM_PREP_FIELD(warmTextureQueued); WARM_PREP_FIELD(warmTextureActive);
+            WARM_PREP_FIELD(warmTextureMetadataBytes); WARM_PREP_FIELD(warmTextureMetadataBytesPeak);
+            WARM_PREP_FIELD(warmTextureScratchBytes); WARM_PREP_FIELD(warmTextureScratchBytesPeak);
+            WARM_PREP_FIELD(warmTextureQueueBytes);
+            WARM_PREP_FIELD(warmTextureMs);
+#undef WARM_PREP_FIELD
             const auto texturePrep = render::PreparedTextureStore::Instance().SnapshotStats();
+            cJSON_AddNumberToObject(result, "warmPreparedPuts", static_cast<double>(texturePrep.warmPuts));
+            cJSON_AddNumberToObject(result, "warmPreparedTakes", static_cast<double>(texturePrep.warmTakes));
+            cJSON_AddNumberToObject(result, "warmPreparedSourceRefused", static_cast<double>(texturePrep.warmSourceRefused));
+            cJSON_AddNumberToObject(result, "warmPreparedUploads", static_cast<double>(texturePrep.warmUploads));
+            cJSON_AddNumberToObject(result, "warmPreparedUploadBytes", static_cast<double>(texturePrep.warmUploadBytes));
+            cJSON_AddNumberToObject(result, "warmPreparedUploadFailed", static_cast<double>(texturePrep.warmUploadFailed));
             cJSON_AddNumberToObject(result, "preparedTextureEntries", static_cast<double>(texturePrep.entries));
               cJSON_AddNumberToObject(result, "preparedTextureCapacityBytes", static_cast<double>(texturePrep.bytes));
               cJSON_AddNumberToObject(result, "preparedAlphaFactsPuts", static_cast<double>(texturePrep.alphaFactsPuts));

@@ -1277,6 +1277,30 @@ ArchiveSourceBinding::Stats ArchiveSourceBinding::SnapshotStats()
     return out;
 }
 
+bool QFBank::MatchesMountedMember(const char* member, const BankReadRequest& initializedSource) const
+{
+    if (!Foundation::IsMainThread() || !member || !_handle || _error ||
+        !initializedSource.HasArchiveIdentity()) return false;
+    // FindFileInfo normalizes in a fixed128-byte buffer. Refuse truncation aliases.
+    size_t length = 0;
+    while (length < 128 && member[length]) ++length;
+    if (!length || length >= 128) return false;
+#ifdef _WIN32
+    const auto& info = FindFileInfo(member); // const metadata lookup, no loading or insertion.
+    if (IsNull(info) || info.compressedMagic != 0 || info.startOffset < 0 || info.length <= 0 ||
+        static_cast<uint64_t>(info.startOffset) != initializedSource.offset ||
+        static_cast<uint64_t>(info.length) != initializedSource.bytes) return false;
+#if _ENABLE_PATCHING
+    if (info.loadFromFile) return false;
+#endif
+    ArchiveIdentity mounted;
+    return mounted.Capture(static_cast<HANDLE>(_handle)) &&
+        mounted.Same(initializedSource.archiveLease->identity);
+#else
+    return false;
+#endif
+}
+
 namespace
 {
 class ArchiveBoundFileBuffer final : public IFileBuffer
@@ -1380,13 +1404,23 @@ Ref<IFileBuffer> QFBank::Read(const char* name) const
             {
                 try
                 {
-                    auto request = CaptureReadRequest(name, true);
-                    // Compare against the exact metadata selected by THIS original Read.
-                    if (request && request->offset == static_cast<uint64_t>(info.startOffset) &&
-                        request->bytes == static_cast<uint64_t>(info.length))
-                        binding = ArchiveSourceBinding::Create(std::move(*request));
+                    // Advisory count refusal before opening another denial handle. Acquire
+                    // remains authoritative for byte capacity and any intervening release.
+                    auto& state = SourceBindingState();
+                    if (state.budget->Observe().bindings >= 256)
+                    {
+                        state.capacityRefused.fetch_add(1, std::memory_order_relaxed);
+                    }
                     else
-                        SourceBindingState().captureRefused.fetch_add(1, std::memory_order_relaxed);
+                    {
+                        auto request = CaptureReadRequest(name, true);
+                        // Compare against the exact metadata selected by THIS original Read.
+                        if (request && request->offset == static_cast<uint64_t>(info.startOffset) &&
+                            request->bytes == static_cast<uint64_t>(info.length))
+                            binding = ArchiveSourceBinding::Create(std::move(*request));
+                        else
+                            SourceBindingState().captureRefused.fetch_add(1, std::memory_order_relaxed);
+                    }
                 }
                 catch (...) { } // Optional provenance never changes the original read result.
             }

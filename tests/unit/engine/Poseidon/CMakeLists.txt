@@ -266,6 +266,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     World/Model/test_preparer_static_source_envelope.cpp
     World/Model/test_preparer_native_bc3.cpp
     World/Model/test_paa_preparation_inflight.cpp
+    World/Model/test_preparer_warm_textures.cpp
     World/test_simulation_object_coverage.cpp
     World/test_simulation_residency.cpp
     World/test_simulation_fire_collision.cpp

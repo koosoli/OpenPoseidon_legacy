@@ -11,10 +11,12 @@ param(
     [switch]$PaaPreparationInflight,
     [switch]$RegistrationQuota,
     [switch]$ArchiveSourceBindings,
+    [switch]$WarmTextureJobs,
     [string]$Label = 'dayz-streaming-latency',
     [string]$GameDir = 'D:\SteamLibrary\steamapps\common\ARMA Cold War Assault'
 )
 $ErrorActionPreference = 'Stop'
+if ($WarmTextureJobs) { $ArchiveSourceBindings = $true }
 if ($RegistrationQuota -and $AdmissionMode -ne 'Counted') { throw 'Registration quota requires counted admission' }
 if ($PaaPreparationDiagnostics -or $PaaPreparationInflight) { $PackedTextures = $true }
 if (!$env:LOCK_OWNER) {
@@ -34,6 +36,7 @@ if (!$env:LOCK_OWNER) {
         if ($PaaPreparationInflight) { $argv += '-PaaPreparationInflight' }
         if ($RegistrationQuota) { $argv += '-RegistrationQuota' }
         if ($ArchiveSourceBindings) { $argv += '-ArchiveSourceBindings' }
+        if ($WarmTextureJobs) { $argv += '-WarmTextureJobs' }
         & 'C:\Program Files\Git\bin\bash.exe' @argv
         if ($LASTEXITCODE) { throw "Latency screening exited $LASTEXITCODE" }
     } finally { Remove-Item Env:LOCK_OWNER }
@@ -90,6 +93,7 @@ if ($PackedTextures) { $environment.WGR_OBJECT_STREAM_PBO_TEXTURES = '1' }
 if ($PaaPreparationInflight) { $environment.WGR_PAA_PREP_INFLIGHT = '1' }
 if ($RegistrationQuota) { $environment.WGR_OBJECT_STREAM_REGISTRATION_QUOTA = '1' }
 if ($ArchiveSourceBindings) { $environment.WGR_OBJECT_STREAM_WARM_TEXTURES = '1' }
+if ($WarmTextureJobs) { $environment.WGR_OBJECT_STREAM_WARM_TEXTURE_JOBS = '1' }
 if ($PaaPreparationDiagnostics) {
     $environment.WGR_PAA_PREP_ATTEMPT_DIAG = '1'
 }
@@ -111,6 +115,7 @@ try {
         packedTextures = [bool]$PackedTextures; paaPreparationInflight = [bool]$PaaPreparationInflight
         registrationQuota = [bool]$RegistrationQuota
         archiveSourceBindings = [bool]$ArchiveSourceBindings
+        warmTextureJobs = [bool]$WarmTextureJobs
         installed = (Get-Content (Join-Path $GameDir 'DEPLOYED-FROM.txt')); hashes = $initialHashes
         world = $world; environment = $environment; clearedEnvironmentNames = $clearNames
         pose = @($baseX, $baseZ, $baseY, $azimuth, $elevation); routeX = $route; poseHoldSeconds = 3
@@ -147,6 +152,25 @@ try {
         if (!$camera.valid -or $camera.budget -ne 20000 -or $camera.required -ne 0 -or $simulation.requiredObjects -ne 0) { throw 'Coverage validity, budget or required pins changed' }
         if ($Mode -eq 'Disabled' -and ($simulation.status -ne 'Disabled' -or $simulation.positiveColdRequested -ne 0 -or $simulation.positiveColdCreated -ne 0)) { throw 'Disabled mode performed simulation residency or cold admission' }
         if ($Mode -eq 'Cold' -and (($simulation.metadataComplete -and $simulation.status -ne 'CapacityExceeded') -or $simulation.readyRegions -ne 0 -or $simulation.readyQueries -ne 0)) { throw 'Partial production service fabricated full readiness' }
+        foreach ($field in @('warmTextureJobsEnabled','warmTextureQueued','warmTextureActive',
+            'warmTextureMetadataBytesPeak','warmTextureQueueBytes','warmTextureScratchBytesPeak')) {
+            if ($null -eq $camera.$field) { throw "Missing warm preparation bound field: $field" }
+        }
+        if ($camera.warmTextureJobsEnabled -ne [bool]$WarmTextureJobs -or
+            ($camera.warmTextureQueued + $camera.warmTextureActive) -gt 8 -or
+            $camera.warmTextureMetadataBytesPeak -gt 2097152 -or
+            $camera.warmTextureQueueBytes -gt 2097152 -or
+            $camera.warmTextureScratchBytesPeak -gt (2 * (67108864 + 65536))) { throw 'Warm preparation flag or bounded work/storage invariant failed' }
+        if (!$WarmTextureJobs) {
+            foreach ($field in @('warmTextureJobsSubmitted','warmTextureJobsCompleted','warmTextureJobsCancelled',
+                'warmTextureJobsCoalesced','warmTextureJobsRejected','warmTextureMembersPrepared','warmTextureMembersSkipped',
+                'warmTextureMembersUnreadable','warmTextureQueued','warmTextureActive','warmTextureMetadataBytes',
+                'warmTextureMetadataBytesPeak','warmTextureScratchBytes','warmTextureScratchBytesPeak',
+                'warmTextureQueueBytes','warmTextureMs','warmPreparedPuts','warmPreparedTakes','warmPreparedSourceRefused',
+                'warmPreparedUploads','warmPreparedUploadBytes','warmPreparedUploadFailed')) {
+                if ($null -eq $camera.$field -or $camera.$field -ne 0) { throw "Disabled warm preparation did work or allocated queue storage: $field" }
+            }
+        }
         $p.Refresh()
         $sample = [pscustomobject]@{utc = [DateTime]::UtcNow.ToString('o'); phase = $phase; poseIndex = $poseIndex
             camera = $camera; simulation = $simulation; processPrivateBytes = $p.PrivateMemorySize64; processWorkingSetBytes = $p.WorkingSet64}
@@ -173,6 +197,13 @@ try {
     $stopped = Send @{cmd = 'eval'; code = 'triPerfCapture 0'}
     if ($stopped.result.Trim('"') -ne 'OK') { throw 'Engine capture incomplete or dropped frames' }
     $returned = Wait-Base 'returned'
+    $warmJobProof = @{enabled = [bool]$WarmTextureJobs; state = $returned.camera
+        scope = 'Bounded requested dependencies of cached CPU models; successful GPU block uploads validate initialized physical member and current loaded mount, not whole-model texture readiness or a performance benefit'}
+    $warmJobProof | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $out 'warm-texture-job-proof.json')
+    if ($WarmTextureJobs -and ($returned.camera.warmTextureJobsSubmitted -lt 1 -or
+        $returned.camera.warmTextureMembersPrepared -lt 1 -or $returned.camera.warmPreparedPuts -lt 1 -or
+        $returned.camera.warmPreparedTakes -lt 1 -or $returned.camera.warmPreparedUploads -lt 1 -or
+        $returned.camera.warmPreparedUploadBytes -lt 1)) { throw 'Warm preparation did not demonstrate an actual source-validated GPU upload' }
     $archiveBindings = Send @{cmd = 'archive_source_bindings'}
     if ($archiveBindings.enabled -ne [bool]$ArchiveSourceBindings -or
         $archiveBindings.liveBindings -gt $archiveBindings.capBindings -or
@@ -285,6 +316,7 @@ try {
         paaPreparationInflightProof = $inflightProof
         registrationQuota = [bool]$RegistrationQuota; registrationQuotaProof = $quotaProof
         archiveSourceBindings = [bool]$ArchiveSourceBindings; archiveSourceBindingProof = $archiveBindings
+        warmTextureJobs = [bool]$WarmTextureJobs; warmTextureJobProof = $warmJobProof
         limitation = 'No automatic performance threshold, vanilla parity, cold-cache guarantee or whole-world query readiness; compare matched separate mode processes'
     } | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $out 'result.json')
     Write-Output "DayZ latency screening evidence: $out"

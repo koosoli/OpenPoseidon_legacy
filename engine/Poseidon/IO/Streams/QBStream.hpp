@@ -332,6 +332,9 @@ class QFBank
     // Required identity is unsupported on POSIX and returns nullopt. The default
     // retains the existing unleased read path and performs no native capture.
     std::optional<BankReadRequest> CaptureReadRequest(const char* member, bool requireArchiveIdentity = false) const;
+    // Owner-only observation of an ALREADY loaded mount. Never Load/Open/Read/Seek;
+    // false includes unsupported/unknown. The source must retain its original lease.
+    bool MatchesMountedMember(const char* member, const BankReadRequest& initializedSource) const;
     bool FileExists(const char* name) const;
     // low level access to bank
     void Read(char* buf, long size, const char* name) const; // read raw bytes from bank

@@ -12,6 +12,7 @@
 #include <memory>
 #include <vector>
 #include <type_traits>
+#include <future>
 
 using namespace Poseidon;
 static_assert(!std::is_copy_constructible_v<ArchiveSourceBudget::Ticket>);
@@ -36,6 +37,11 @@ TEST_CASE("Archive binding debt remains charged through copied aliases", "[archi
 
 namespace
 {
+const std::string& LongMember()
+{
+    static const std::string member = std::string(123, 'a') + ".paa"; // Fits exact127-byte legacy lookup.
+    return member;
+}
 std::vector<char> OriginalPaa(unsigned char seed)
 {
     std::vector<char> data;
@@ -70,8 +76,9 @@ struct Archives
                 out.write(member, std::strlen(member) + 1);
                 for (int value : {0, 0, 0, 0, size}) out.write(reinterpret_cast<const char*>(&value), 4);
             };
-            entry("texture.paa", int(data.size())); entry("notes.bin", int(data.size())); entry("bad.paa", 0); entry("", 0);
-            out.write(data.data(), data.size()); out.write(data.data(), data.size());
+            entry("texture.paa", int(data.size())); entry("notes.bin", int(data.size()));
+            entry(LongMember().c_str(), int(data.size())); entry("bad.paa", 0); entry("", 0);
+            out.write(data.data(), data.size()); out.write(data.data(), data.size()); out.write(data.data(), data.size());
         }
         REQUIRE(first.open(RString((directory / "first").string().c_str())));
         REQUIRE(second.open(RString((directory / "second").string().c_str())));
@@ -219,6 +226,13 @@ TEST_CASE("Actual archive binding cap refuses metadata while preserving original
     const auto full = ArchiveSourceBinding::SnapshotStats();
     CHECK(full.liveBindings <= full.capBindings); CHECK(full.knownCppBytes <= full.capBytes);
     CHECK(full.capacityRefused > before.capacityRefused);
+    // A zero-length member would fail native capture if reached. Saturation refuses
+    // before CaptureReadRequest instead, preserving its original readable empty buffer.
+    const auto preSkipped = ArchiveSourceBinding::SnapshotStats();
+    auto empty = files.first.Read("bad.paa"); REQUIRE(empty); CHECK(empty->GetSize() == 0);
+    const auto skipped = ArchiveSourceBinding::SnapshotStats();
+    CHECK(skipped.capacityRefused == preSkipped.capacityRefused + 1);
+    CHECK(skipped.captureRefused == preSkipped.captureRefused);
     auto refused = files.first.Read("texture.paa"); REQUIRE(refused);
     CHECK_FALSE(refused->GetArchiveSourceBinding());
     const auto expected = OriginalPaa(13);
@@ -226,5 +240,48 @@ TEST_CASE("Actual archive binding cap refuses metadata while preserving original
     auto alias = held.front()->GetArchiveSourceBinding(); REQUIRE(alias);
     held.clear(); CHECK(ArchiveSourceBinding::SnapshotStats().liveBindings == before.liveBindings + 1);
     alias.reset(); CHECK(ArchiveSourceBinding::SnapshotStats().liveBindings == before.liveBindings);
+#endif
+}
+
+TEST_CASE("Mounted member observation never loads an unopened bank or guesses identities", "[archive-source-binding][archive-source-budget][archive-lease]")
+{
+#ifndef _WIN32
+    SKIP("Strong archive identity is Windows-only.");
+#else
+    Archives files;
+    auto request = files.first.CaptureReadRequest("texture.paa", true); REQUIRE(request);
+    CHECK(files.first.MatchesMountedMember("texture.paa", *request));
+    CHECK(files.first.MatchesMountedMember("TEXTURE.PAA", *request));
+    CHECK_FALSE(files.first.MatchesMountedMember("notes.bin", *request)); // Equal length, different offset.
+    CHECK_FALSE(files.second.MatchesMountedMember("texture.paa", *request)); // Equal metadata, different file.
+    CHECK_FALSE(files.first.MatchesMountedMember("absent.paa", *request));
+    CHECK_FALSE(files.first.MatchesMountedMember(nullptr, *request));
+    CHECK_FALSE(files.first.MatchesMountedMember("", *request));
+    for (int mutation = 0; mutation < 3; ++mutation)
+    {
+        auto changed = *request;
+        if (mutation == 0) ++changed.offset;
+        else if (mutation == 1) ++changed.bytes;
+        else changed.archive += ".wrong";
+        CHECK_FALSE(files.first.MatchesMountedMember("texture.paa", changed));
+    }
+    auto unleased = *request; unleased.archiveLease.reset();
+    CHECK_FALSE(files.first.MatchesMountedMember("texture.paa", unleased));
+    auto longRequest = files.first.CaptureReadRequest(LongMember().c_str(), true); REQUIRE(longRequest);
+    CHECK(files.first.MatchesMountedMember(LongMember().c_str(), *longRequest));
+    // Legacy FindFileInfo would truncate this128-byte alias to the previous member.
+    CHECK_FALSE(files.first.MatchesMountedMember((LongMember() + "x").c_str(), *longRequest));
+    auto wrongThread = std::async(std::launch::async, [&] {
+        return files.first.MatchesMountedMember("texture.paa", *request);
+    });
+    CHECK_FALSE(wrongThread.get());
+    QFBank unopened;
+    REQUIRE(unopened.open(RString((files.directory / "first").string().c_str())));
+    CHECK_FALSE(unopened.MatchesMountedMember("texture.paa", *request));
+    unopened.Lock();
+    CHECK(unopened.MatchesMountedMember("texture.paa", *request)); // Explicit Load is required.
+    unopened.Unlock(); unopened.close();
+    files.first.Unlock(); files.first.close();
+    CHECK_FALSE(files.first.MatchesMountedMember("texture.paa", *request));
 #endif
 }

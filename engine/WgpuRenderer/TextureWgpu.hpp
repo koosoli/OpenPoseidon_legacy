@@ -100,6 +100,10 @@ class TextureWgpu : public Texture
 
     uint64_t EnsureUploaded();
     const char* SourceName() const { return _sourceName.GetLength() ? (const char*)_sourceName : Name(); }
+    // Owner-only metadata/native-handle observation. Never loads a bank or
+    // recaptures provenance by name; unsupported/currently different mounts refuse.
+    std::shared_ptr<const ArchiveSourceBinding> CurrentArchiveSourceBinding() const;
+    bool CanWarmPrepare() const { return !_gpuHandle && !_uploadTried && HasReloadableSource(); }
     // Drop only the GPU allocation while preserving the decoded file source and
     // Texture object.  Terrain page residency uses this to reload the same
     // authored page when the camera returns to it.

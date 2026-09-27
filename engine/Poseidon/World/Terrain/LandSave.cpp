@@ -3257,6 +3257,8 @@ void Landscape::PrefetchModernObjectModels(const std::vector<ModernObjectCellCan
     // Pass 1: the distinct cold models of the new desired set, nearest first. Stamping is what
     // makes this one entry per model, and the stamp is also what DropStale reads.
     std::vector<uint32_t> wanted;
+    const bool warmTextures = ObjectStreamPreparer::WarmTextureJobsEnabled();
+    std::vector<std::pair<uint32_t, const LODShapeWithShadow*>> warmWanted;
     uint32_t alreadyWarm = 0;
     for (const ModernObjectCellCandidate& cell : candidates)
     {
@@ -3271,9 +3273,11 @@ void Landscape::PrefetchModernObjectModels(const std::vector<ModernObjectCellCan
             if (_modernObjectModelPrefetchEpoch[model] == _modernObjectPrefetchEpoch)
                 continue;
             _modernObjectModelPrefetchEpoch[model] = _modernObjectPrefetchEpoch;
-            if (Shapes.Find(_modernObjectModels[model], false, true) != nullptr)
+            if (const auto* warm = Shapes.Find(_modernObjectModels[model], false, true))
             {
                 ++alreadyWarm;
+                if (warmTextures && warmWanted.size() < 32)
+                    warmWanted.emplace_back(model, warm); // Borrowed only until this owner call returns.
                 continue;
             }
             wanted.push_back(model);
@@ -3301,6 +3305,23 @@ void Landscape::PrefetchModernObjectModels(const std::vector<ModernObjectCellCan
         if (!_modernObjectPreparer->Request(model))
             break;
         ++requested;
+    }
+    if (warmTextures && GEngine)
+    {
+        size_t workRemaining = 256; // Shared LOD/section/binding visits for this entire recentre.
+        for (const auto& [model, shape] : warmWanted)
+        {
+            if (!workRemaining) break;
+            try
+            {
+                std::vector<WarmTextureRead> reads;
+                GEngine->CaptureWarmTextureReads(shape, reads, workRemaining);
+                if (!reads.empty())
+                    _modernObjectPreparer->SubmitWarmTextures(model,
+                        _modernObjectPreparer->QueryRadius(model), std::move(reads));
+            }
+            catch (...) { } // Failure retains ordinary object admission and owner texture fallback.
+        }
     }
     if (requested > 0 || staleDropped > 0)
         LOG_INFO(World,

@@ -88,6 +88,8 @@ class PreparedTextureStore
         uint64_t paaCancelled = 0; // invalid token puts or retired cancelled PAA entries
         uint64_t skippedUploaded = 0; // ShouldPrepare said no: main thread already uploaded it
         uint64_t uploadedMarks = 0; // names currently marked Uploaded
+        uint64_t warmPuts = 0, warmTakes = 0, warmSourceRefused = 0;
+        uint64_t warmUploads = 0, warmUploadBytes = 0, warmUploadFailed = 0;
         // The RGBA8 side (non-DXT PAAs -- the Reforger mask population): whole-file
         // decodes done on a worker so the main thread's fallback path uploads instead
         // of decoding. Counted separately because the byte shapes differ wildly.
@@ -136,7 +138,8 @@ class PreparedTextureStore
     bool Put(const std::string& key, PAABlockChain&& chain,
              std::optional<uint64_t> generation = std::nullopt,
              std::unique_ptr<PreparedAlphaFacts> alphaFacts = nullptr,
-             const DdsPublicationToken* publication = nullptr);
+             const DdsPublicationToken* publication = nullptr,
+             std::shared_ptr<const ArchiveSourceBinding> warmSource = nullptr);
     // Worker-only pure analysis, <=16 MiB aggregate chain and transient plane.
     // Cancellation is checked between decode/histogram/shape/publication; the
     // callback must own its context until return. Caller supplies the unchanged
@@ -157,7 +160,15 @@ class PreparedTextureStore
         uint16_t magic, int width, int height, size_t topBytes, int sourceHeaderOffset, PreparedAlphaFacts& out);
     void NoteAlphaFactsCancelled();
     // Main thread. Moves the entry out if present.
-    bool Take(const std::string& key, PAABlockChain& out);
+    // Bound warm chains require an explicit provenance-aware consumer. An older
+    // caller cannot silently consume one without receiving its source witness.
+    bool Take(const std::string& key, PAABlockChain& out,
+              std::shared_ptr<const ArchiveSourceBinding>* warmSource = nullptr);
+    // Only for bounded owner requests that observed a missing GPU texture and
+    // verified its initialized source against the current loaded mount. This
+    // advisory bypasses uploaded marks, not entry/cancellation/byte limits.
+    bool ShouldPrepareWarm(const std::string& key);
+    void NoteWarmUpload(bool successful, size_t bytes);
 
     // The RGBA8 twin pair, for textures whose format has no DXT chain (the fallback
     // decode population): a worker decodes the whole file with the pure DecodePAABuffer

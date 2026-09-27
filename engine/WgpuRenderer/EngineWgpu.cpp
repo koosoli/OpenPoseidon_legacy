@@ -4,6 +4,8 @@
 #include <Poseidon/Dev/Diag/FramePaceTrace.hpp> // PACE-001: per-frame pacing trace
 #include "EngineWgpu.hpp"
 #include "GeometryOwnerLedger.hpp"
+#include <Poseidon/World/Terrain/ObjectStreamPrepare.hpp>
+#include <Poseidon/IO/Streams/ArchiveSourceBinding.hpp>
 #include <atomic>
 #include <Poseidon/Foundation/Threads/ThreadAffinity.hpp>
 #include <Poseidon/Core/BuildInfo.hpp>
@@ -8849,6 +8851,47 @@ void EngineWgpu::PrepareNativeNormalSources(LODShapeWithShadow* shape)
     if (loaded)
         LOG_INFO(Graphics, "Native normal prefetch: model={} sources={} ms={:.3f}", shape->Name(), loaded,
                  std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count());
+}
+
+void EngineWgpu::CaptureWarmTextureReads(const LODShapeWithShadow* shape,
+    std::vector<WarmTextureRead>& reads, size_t& workRemaining) const
+{
+    if (!ObjectStreamPreparer::WarmTextureJobsEnabled() || !Foundation::IsMainThread() ||
+        !_gpuDriven || !_renderer || !shape || !workRemaining) return;
+    auto inspect = [&](const TextureWgpu* texture)
+    {
+        if (!workRemaining || reads.size() >= 64) return;
+        --workRemaining;
+        if (!texture || !texture->CanWarmPrepare()) return;
+        auto source = texture->CurrentArchiveSourceBinding();
+        if (!source || source->Request().bytes > 16 * 1024 * 1024) return;
+        const std::string key = render::PreparedTextureStore::Key(texture->SourceName());
+        if (key.empty() || key.size() > 8191 ||
+            std::any_of(reads.begin(), reads.end(), [&](const auto& prior) { return prior.key == key; })) return;
+        reads.push_back({key, std::move(source)});
+    };
+    if (const auto found = _gpuModelTextures.find(shape); found != _gpuModelTextures.end())
+    {
+        // Only already-recorded bindings; includes material stages if they were
+        // resolved during an earlier registration. No new resolution here.
+        for (const auto* texture : found->second)
+        {
+            if (!workRemaining || reads.size() >= 64) break;
+            inspect(texture);
+        }
+        return;
+    }
+    // Recreated registrations: primary textures of existing normal LOD sections.
+    // Lazy/unavailable LODs, unresolved material stages and proxies retain fallback.
+    for (int level = 0; level < shape->NLevels() && level < 64 && workRemaining && reads.size() < 64; ++level)
+    {
+        --workRemaining;
+        if (!shape->IsNormalLevel(level)) continue;
+        const Shape* lod = shape->LevelOpaque(level);
+        if (!lod) continue;
+        for (int section = 0; section < lod->NSections() && workRemaining && reads.size() < 64; ++section)
+            inspect(dynamic_cast<const TextureWgpu*>(lod->GetSection(section).properties.GetTexture()));
+    }
 }
 
 render::RegistrationCost EngineWgpu::QueryRegistrationCost(const LODShapeWithShadow* shape) const

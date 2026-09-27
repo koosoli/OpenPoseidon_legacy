@@ -31,6 +31,7 @@
 
 namespace Poseidon
 {
+struct WarmTextureRead;
 
 // Per-frame draw-call counter — incremented at the GL emission seams,
 // consumed + reset by World::Simulate's FrameProfiler EndFrame.
@@ -3100,6 +3101,11 @@ class Engine : public IGraphicsEngine
     // Appended to preserve all existing virtual slots. Other renderers retain legacy charging.
     virtual render::RegistrationCost QueryRegistrationCost(const LODShapeWithShadow*) const
     { return render::RegistrationCost::Reusable; }
+    // Appended owner observation of already-loaded texture metadata only.
+    // Work budget is shared across the recentre; no loading, material resolution,
+    // or GPU residency mutation is permitted here.
+    virtual void CaptureWarmTextureReads(const LODShapeWithShadow*,
+        std::vector<WarmTextureRead>&, size_t&) const {}
 
   protected:
     // Post-hook fires from OnWindowResized so apps can re-run the aspect policy

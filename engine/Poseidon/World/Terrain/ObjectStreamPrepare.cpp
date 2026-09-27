@@ -21,6 +21,8 @@
 #include <Poseidon/World/Model/Model.hpp>
 #include <Poseidon/World/Model/ModelMemory.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
+#include <Poseidon/IO/Streams/ArchiveSourceBinding.hpp>
+#include <Poseidon/World/Terrain/WarmTextureJobPolicy.hpp>
 #include <Poseidon/World/Model/ModelCache.hpp>
 #include <Poseidon/World/Model/ModelDerivedCache.hpp>
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
@@ -37,6 +39,7 @@
 #include <cstring>
 #include <deque>
 #include <mutex>
+#include <new>
 #include <thread>
 #include <vector>
 
@@ -225,6 +228,17 @@ bool ReadNativeEmat(const Asset::Formats::Enfusion::EnfusionMount& mount, const 
 // Levers. All read once; the admit path logs which arm it is running.
 // ------------------------------------------------------------------------------------------
 
+bool ObjectStreamPreparer::WarmTextureJobsEnabled()
+{
+    static const bool enabled = [] {
+        const char* sources = std::getenv("WGR_OBJECT_STREAM_WARM_TEXTURES");
+        const char* jobs = std::getenv("WGR_OBJECT_STREAM_WARM_TEXTURE_JOBS");
+        return sources && std::strcmp(sources, "1") == 0 && jobs && std::strcmp(jobs, "1") == 0 &&
+            render::PreparedTextureStore::Enabled();
+    }();
+    return enabled;
+}
+
 bool ObjectStreamPreparer::AsyncEnabled()
 {
     static const bool on = []
@@ -380,6 +394,9 @@ struct ObjectStreamPreparer::Impl
     {
         std::string key;
         BankReadRequest read;
+        std::shared_ptr<const ArchiveSourceBinding> initializedSource; // null on original cold jobs
+        const BankReadRequest* initializedRead = nullptr; // borrowed ONLY from owned immutable binding
+        const BankReadRequest& ReadRequest() const { return initializedRead ? *initializedRead : read; }
     };
     static constexpr size_t PackedTextureLimit = 16 * 1024 * 1024;
     struct ConvertJob
@@ -398,6 +415,42 @@ struct ObjectStreamPreparer::Impl
         std::shared_ptr<const Model::ShapeAdapter::AdapterBankTables> tables;
     };
     std::deque<ConvertJob> convertQueue;
+    struct WarmJob
+    {
+        uint32_t index = 0;
+        uint64_t generation = 0, textureGeneration = 0, metadataBytes = 0;
+        render::DdsPublicationToken publication;
+        std::vector<WarmTextureRead> reads;
+        size_t next = 0, slot = 0;
+    };
+    struct WarmSlot { bool occupied = false; uint32_t index = 0; uint64_t generation = 0, publicationEpoch = 0; };
+    struct WarmState
+    {
+        std::vector<WarmJob> queue;
+        std::array<WarmSlot, Streaming::WarmTextureJobPolicy::JobLimit> slots{};
+        WarmState()
+        {
+            queue.reserve(Streaming::WarmTextureJobPolicy::JobLimit);
+            if (queue.capacity() > Streaming::WarmTextureJobPolicy::JobLimit)
+                throw std::bad_alloc(); // refuse optional storage outside its explicit cap
+        }
+    };
+    std::unique_ptr<WarmState> warm; // no queue/slot heap allocation until BOTH opt-in flags
+
+    uint64_t WarmStorageBytes() const
+    { return warm ? sizeof(WarmState) + warm->queue.capacity() * sizeof(WarmJob) : 0; }
+    bool HasWarmByteRoom() const
+    {
+        return Streaming::WarmTextureJobPolicy::ActiveRoom(stats.warmTextureActive) &&
+            Streaming::WarmTextureJobPolicy::ScratchFits(stats.readyByteBudget,
+            stats.readyPayloadBytes, stats.parseReservedBytes, stats.conversionReservedBytes,
+            stats.textureEncodeReservedBytes, stats.warmTextureScratchBytes, stats.warmTextureMetadataBytes + WarmStorageBytes());
+    }
+    bool PreparePackedTexture(const PackedTextureRead& texture, uint64_t jobGen, uint32_t index,
+        uint64_t textureGeneration, const render::DdsPublicationToken& publication,
+        bool publicationRequired, PaaAttemptRow& attemptRow,
+        uint64_t& prepared, uint64_t& preparedBytes, uint64_t& skipped, uint64_t& unreadable);
+
     std::vector<LODShapeWithShadow*> convertedShapes;
     std::vector<ModelPtr> convertedModels;
     std::vector<uint64_t> conversionBytes;
@@ -415,7 +468,7 @@ struct ObjectStreamPreparer::Impl
         if (!stats.readyByteBudget) return true;
         uint64_t remaining = stats.readyByteBudget;
         for (const uint64_t charge : {stats.readyPayloadBytes, stats.parseReservedBytes,
-                                     stats.conversionReservedBytes, stats.textureEncodeReservedBytes})
+                                     stats.conversionReservedBytes, stats.textureEncodeReservedBytes, stats.warmTextureScratchBytes, stats.warmTextureMetadataBytes, WarmStorageBytes()})
         {
             if (charge > remaining) return false;
             remaining -= charge;
@@ -442,6 +495,84 @@ struct ObjectStreamPreparer::Impl
 
     void WorkerMain(uint32_t workerIndex);
 };
+
+
+bool ObjectStreamPreparer::Impl::PreparePackedTexture(const PackedTextureRead& texture,
+    uint64_t jobGen, uint32_t index, uint64_t textureGeneration,
+    const render::DdsPublicationToken& publication, bool publicationRequired,
+    PaaAttemptRow& attemptRow, uint64_t& prepared, uint64_t& preparedBytes,
+    uint64_t& skipped, uint64_t& unreadable)
+{
+    auto& store = render::PreparedTextureStore::Instance();
+
+    {
+        std::lock_guard<std::mutex> pendingLock(mutex);
+        if (stop || jobGen != generation.load(std::memory_order_relaxed) || index >= count || stale[index] ||
+            (publicationRequired && !publication.Valid())) { if (paaAttemptDiagnostics) ++attemptRow.cancelledBeforeRead; return false; }
+    }
+    if (!(texture.initializedSource ? store.ShouldPrepareWarm(texture.key) : store.ShouldPrepare(texture.key))) { ++skipped; if (paaAttemptDiagnostics) ++attemptRow.preSkipped; return true; }
+    Streaming::PaaPreparationInflight::Result inflight{Streaming::PaaPreparationInflight::Outcome::UnleasedOrInvalid, {}};
+    if (paaInflight && publicationRequired)
+    {
+        inflight = paaInflight->Acquire(texture.key, textureGeneration, texture.ReadRequest(), publication);
+        if (inflight.outcome == Streaming::PaaPreparationInflight::Outcome::Suppressed)
+        {
+            if (paaAttemptDiagnostics) ++attemptRow.inFlightSuppressed;
+            if (!paaInflightProofLogged.exchange(true, std::memory_order_relaxed))
+            {
+                const auto counters = paaInflight->Snapshot();
+                LOG_INFO(World, "PAA prep inflight: actual exact-member suppression observed; suppressed={} active={} metadataBytes={} peakMetadataBytes={} overflow={} unsupported={} contended={} owner fallback retained",
+                    counters.suppressed, counters.active, counters.metadataBytes, counters.peakMetadataBytes,
+                    counters.overflow, counters.unsupported, counters.contended);
+            }
+            return true; // no peer payload/Ready promise: ordinary owner reader is unchanged
+        }
+        if (paaAttemptDiagnostics && inflight.outcome != Streaming::PaaPreparationInflight::Outcome::Tracked)
+            ++attemptRow.inFlightPassThrough;
+    }
+    PaaAttemptDiagnostics::Ticket attempt(paaAttemptDiagnostics.get(), texture.key, textureGeneration);
+    if (paaAttemptDiagnostics) { ++attemptRow.started; attemptRow.overlapping += attempt.overlap; attemptRow.untracked += attempt.overflow; }
+    const auto readBegan = paaAttemptDiagnostics ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+    try
+    {
+        PAABlockChain chain;
+        {
+            std::vector<char> source;
+            if (!texture.ReadRequest().Read(source) || source.capacity() > 2 * PackedTextureLimit ||
+                !ReadPAABlockChainBuffer(source.data(), source.size(),
+                    chain, nullptr, PackedTextureLimit)) { ++unreadable; if (paaAttemptDiagnostics) ++attemptRow.readFailed; return true; }
+        }
+        const double readDecodeMs = paaAttemptDiagnostics ? std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - readBegan).count() : 0;
+        if (paaAttemptDiagnostics) attemptRow.readDecodeMs += readDecodeMs;
+        const size_t bytes = chain.blocks.size();
+        // Source storage has already been released. The <=16 MiB
+        // chain and compact alpha plane fit the existing 64 MiB
+        // scratch reservation, including conservative growth.
+        auto cancelled = [&] {
+            std::lock_guard<std::mutex> pendingLock(mutex);
+            return stop || jobGen != generation.load(std::memory_order_relaxed) || index >= count || stale[index] ||
+                (publicationRequired && !publication.Valid());
+        };
+        std::unique_ptr<render::PreparedAlphaFacts> facts;
+        try {
+            if (store.CanRetainAlphaFacts(texture.key, chain, texture.ReadRequest(), textureGeneration,
+                    publicationRequired ? &publication : nullptr))
+                facts = render::PreparedTextureStore::BuildAlphaFacts(chain, texture.ReadRequest(), cancelled);
+        }
+        catch (...) { } // optional analysis failure retains the original upload chain
+        if (cancelled()) { store.NoteAlphaFactsCancelled(); if (paaAttemptDiagnostics) ++attemptRow.cancelledBeforePut; return false; }
+        // CPU read/decode/facts subset excludes the observer latch and Put.
+        const double readDecodeFactsMs = paaAttemptDiagnostics ? std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - readBegan).count() : 0;
+        if (publicationObserver.beforePaaPut)
+            publicationObserver.beforePaaPut(publicationObserver.context, bool(facts));
+        if (store.Put(texture.key, std::move(chain), textureGeneration, std::move(facts),
+                publicationRequired ? &publication : nullptr, texture.initializedSource))
+        { ++prepared; preparedBytes += bytes; if (paaAttemptDiagnostics) ++attemptRow.accepted; }
+        else { ++skipped; if (paaAttemptDiagnostics) { ++attemptRow.rejected; attemptRow.rejectedReadDecodeMs += readDecodeMs; attemptRow.rejectedReadDecodeFactsMs += readDecodeFactsMs; } }
+    }
+    catch (...) { ++unreadable; if (paaAttemptDiagnostics) ++attemptRow.threw; } // ordinary owner-thread decode remains the fallback
+    return true;
+}
 
 void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
 {
@@ -479,7 +610,7 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
         if (!stop && convertQueue.empty() && !queue.empty() && !HasParseByteRoom())
             ++stats.readyByteParks;
         cv.wait(lock, [&] {
-            return stop || !convertQueue.empty() ||
+            return stop || !convertQueue.empty() || (warm && !warm->queue.empty() && HasWarmByteRoom()) ||
                    (!queue.empty() && stats.ready < ObjectStreamPreparer::ReadyLimit() && HasParseByteRoom());
         });
         if (stop)
@@ -550,74 +681,11 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
             {
                 auto& store = render::PreparedTextureStore::Instance();
                 for (const auto& texture : job.textures)
-                {
-                    {
-                        std::lock_guard<std::mutex> pendingLock(mutex);
-                        if (stop || jobGen != generation.load(std::memory_order_relaxed) || stale[job.index]) { if (paaAttemptDiagnostics) ++attemptRow.cancelledBeforeRead; break; }
-                    }
-                    if (!store.ShouldPrepare(texture.key)) { ++skipped; if (paaAttemptDiagnostics) ++attemptRow.preSkipped; continue; }
-                    Streaming::PaaPreparationInflight::Result inflight{Streaming::PaaPreparationInflight::Outcome::UnleasedOrInvalid, {}};
-                    if (paaInflight && job.texturePublicationRequired)
-                    {
-                        inflight = paaInflight->Acquire(texture.key, job.textureGeneration, texture.read, job.texturePublication);
-                        if (inflight.outcome == Streaming::PaaPreparationInflight::Outcome::Suppressed)
-                        {
-                            if (paaAttemptDiagnostics) ++attemptRow.inFlightSuppressed;
-                            if (!paaInflightProofLogged.exchange(true, std::memory_order_relaxed))
-                            {
-                                const auto counters = paaInflight->Snapshot();
-                                LOG_INFO(World, "PAA prep inflight: actual exact-member suppression observed; suppressed={} active={} metadataBytes={} peakMetadataBytes={} overflow={} unsupported={} contended={} owner fallback retained",
-                                    counters.suppressed, counters.active, counters.metadataBytes, counters.peakMetadataBytes,
-                                    counters.overflow, counters.unsupported, counters.contended);
-                            }
-                            continue; // no peer payload/Ready promise: ordinary owner reader is unchanged
-                        }
-                        if (paaAttemptDiagnostics && inflight.outcome != Streaming::PaaPreparationInflight::Outcome::Tracked)
-                            ++attemptRow.inFlightPassThrough;
-                    }
-                    PaaAttemptDiagnostics::Ticket attempt(paaAttemptDiagnostics.get(), texture.key, job.textureGeneration);
-                    if (paaAttemptDiagnostics) { ++attemptRow.started; attemptRow.overlapping += attempt.overlap; attemptRow.untracked += attempt.overflow; }
-                    const auto readBegan = paaAttemptDiagnostics ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
-                    try
-                    {
-                        PAABlockChain chain;
-                        {
-                            std::vector<char> source;
-                            if (!texture.read.Read(source) || source.capacity() > 2 * PackedTextureLimit ||
-                                !ReadPAABlockChainBuffer(source.data(), source.size(),
-                                    chain, nullptr, PackedTextureLimit)) { ++unreadable; if (paaAttemptDiagnostics) ++attemptRow.readFailed; continue; }
-                        }
-                        const double readDecodeMs = paaAttemptDiagnostics ? std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - readBegan).count() : 0;
-                        if (paaAttemptDiagnostics) attemptRow.readDecodeMs += readDecodeMs;
-                        const size_t bytes = chain.blocks.size();
-                        // Source storage has already been released. The <=16 MiB
-                        // chain and compact alpha plane fit the existing 64 MiB
-                        // scratch reservation, including conservative growth.
-                        auto cancelled = [&] {
-                            std::lock_guard<std::mutex> pendingLock(mutex);
-                            return stop || jobGen != generation.load(std::memory_order_relaxed) || stale[job.index] ||
-                                (job.texturePublicationRequired && !job.texturePublication.Valid());
-                        };
-                        std::unique_ptr<render::PreparedAlphaFacts> facts;
-                        try {
-                            if (store.CanRetainAlphaFacts(texture.key, chain, texture.read, job.textureGeneration,
-                                    job.texturePublicationRequired ? &job.texturePublication : nullptr))
-                                facts = render::PreparedTextureStore::BuildAlphaFacts(chain, texture.read, cancelled);
-                        }
-                        catch (...) { } // optional analysis failure retains the original upload chain
-                        if (cancelled()) { store.NoteAlphaFactsCancelled(); if (paaAttemptDiagnostics) ++attemptRow.cancelledBeforePut; break; }
-                        // CPU read/decode/facts subset excludes the observer latch and Put.
-                        const double readDecodeFactsMs = paaAttemptDiagnostics ? std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - readBegan).count() : 0;
-                        if (publicationObserver.beforePaaPut)
-                            publicationObserver.beforePaaPut(publicationObserver.context, bool(facts));
-                        if (store.Put(texture.key, std::move(chain), job.textureGeneration, std::move(facts),
-                                job.texturePublicationRequired ? &job.texturePublication : nullptr))
-                        { ++prepared; preparedBytes += bytes; if (paaAttemptDiagnostics) ++attemptRow.accepted; }
-                        else { ++skipped; if (paaAttemptDiagnostics) { ++attemptRow.rejected; attemptRow.rejectedReadDecodeMs += readDecodeMs; attemptRow.rejectedReadDecodeFactsMs += readDecodeFactsMs; } }
-                    }
-                    catch (...) { ++unreadable; if (paaAttemptDiagnostics) ++attemptRow.threw; } // ordinary owner-thread decode remains the fallback
-                }
+                    if (!PreparePackedTexture(texture, jobGen, job.index, job.textureGeneration,
+                        job.texturePublication, job.texturePublicationRequired, attemptRow,
+                        prepared, preparedBytes, skipped, unreadable)) break;
             }
+
             const double textureMs = std::chrono::duration<double, std::milli>(
                 std::chrono::steady_clock::now() - textureStart).count();
 
@@ -676,6 +744,53 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
             delete shape;
             job.model.reset();
             job.tables.reset();
+            lock.lock();
+            continue;
+        }
+        if (warm && !warm->queue.empty() && HasWarmByteRoom() &&
+            (queue.empty() || stats.ready >= ObjectStreamPreparer::ReadyLimit() || !HasParseByteRoom()))
+        {
+            WarmJob job = std::move(warm->queue.front()); warm->queue.erase(warm->queue.begin());
+            stats.warmTextureQueued = warm->queue.size(); ++stats.warmTextureActive;
+            stats.warmTextureScratchBytes += Streaming::WarmTextureJobPolicy::ScratchBytes;
+            stats.warmTextureScratchBytesPeak = std::max(stats.warmTextureScratchBytesPeak, stats.warmTextureScratchBytes);
+            lock.unlock();
+            uint64_t prepared = 0, bytes = 0, skipped = 0, unreadable = 0;
+            PaaAttemptRow row;
+            const auto began = std::chrono::steady_clock::now();
+            bool keep = job.publication.Valid();
+            if (keep)
+            {
+                try
+                {
+                    const auto& read = job.reads[job.next];
+                    PackedTextureRead texture{read.key, {}, read.initializedSource, &read.initializedSource->Request()};
+                    keep = PreparePackedTexture(texture, job.generation, job.index, job.textureGeneration,
+                        job.publication, true, row, prepared, bytes, skipped, unreadable);
+                    ++job.next;
+                }
+                catch (...) { ++unreadable; ++job.next; }
+            }
+            const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count();
+            lock.lock();
+            --stats.warmTextureActive;
+            stats.warmTextureScratchBytes -= Streaming::WarmTextureJobPolicy::ScratchBytes;
+            stats.warmTextureMembersPrepared += prepared; stats.warmTextureMembersSkipped += skipped;
+            stats.warmTextureMembersUnreadable += unreadable; stats.warmTextureMs += ms;
+            keep = keep && !stop && job.generation == generation.load(std::memory_order_relaxed) &&
+                job.index < count && !stale[job.index] && job.publication.Valid();
+            if (keep && job.next < job.reads.size())
+            {
+                try { warm->queue.push_back(std::move(job)); stats.warmTextureQueued = warm->queue.size(); }
+                catch (...) { keep = false; }
+                if (keep) { cv.notify_all(); continue; }
+            }
+            if (!keep) ++stats.warmTextureJobsCancelled; else ++stats.warmTextureJobsCompleted;
+            stats.warmTextureMetadataBytes -= job.metadataBytes;
+            warm->slots[job.slot] = {};
+            cv.notify_all();
+            lock.unlock();
+            job.reads.clear(); job.publication = {}; // release leases outside queue mutex
             lock.lock();
             continue;
         }
@@ -1050,6 +1165,9 @@ ObjectStreamPreparer::ObjectStreamPreparer(uint64_t readyByteBudget, const Bc3En
     if (inflightExperiment)
         try { _impl->paaInflight = std::make_unique<Streaming::PaaPreparationInflight>(); }
         catch (...) { LOG_WARN(World, "PAA prep inflight: optional metadata allocation failed; ordinary preparation retained"); }
+    if (WarmTextureJobsEnabled())
+        try { _impl->warm = std::make_unique<Impl::WarmState>(); }
+        catch (...) { } // optional allocation failure leaves all owner fallback paths unchanged
     if (observer) _impl->encodingObserver = *observer;
     if (publicationObserver) _impl->publicationObserver = *publicationObserver;
 }
@@ -1100,7 +1218,7 @@ void ObjectStreamPreparer::Reset(const std::string* paths, size_t modelCount)
         const char* flag = std::getenv("WGR_OBJECT_STREAM_PBO_TEXTURES");
         return render::PreparedTextureStore::Enabled() && flag && flag[0] == '1';
     }();
-    auto publication = (render::PreparedTextureStore::NativeDdsEnabled() || pboTextures)
+    auto publication = (render::PreparedTextureStore::NativeDdsEnabled() || pboTextures || WarmTextureJobsEnabled())
         ? render::DdsPublicationInventory::Create(modelCount) : nullptr;
     std::vector<std::optional<BankReadRequest>> packedReads(modelCount);
     const char* packedFlag = std::getenv("WGR_OBJECT_STREAM_PBO");
@@ -1122,6 +1240,8 @@ void ObjectStreamPreparer::Reset(const std::string* paths, size_t modelCount)
     std::vector<Impl::ModelPtr> freeLater;
     std::vector<LODShapeWithShadow*> freeShapes;
     std::deque<Impl::ConvertJob> freeConversions;
+    std::array<Impl::WarmJob, Streaming::WarmTextureJobPolicy::JobLimit> freeWarm;
+    size_t freeWarmCount = 0;
     {
         std::lock_guard<std::mutex> lock(_impl->mutex);
         ++_impl->generation;
@@ -1139,6 +1259,20 @@ void ObjectStreamPreparer::Reset(const std::string* paths, size_t modelCount)
         _impl->queue.clear();
         // Jobs own model IR and bank-table references, not just queue indices.
         // Their last-reference destructors must not run under the queue mutex.
+        if (_impl->warm)
+        {
+            for (auto& job : _impl->warm->queue) freeWarm[freeWarmCount++] = std::move(job);
+            _impl->warm->queue.clear(); // moved-from entries only; preserve reserved8 storage
+        }
+        for (size_t i = 0; i < freeWarmCount; ++i)
+        {
+            const auto& job = freeWarm[i];
+            _impl->stats.warmTextureMetadataBytes -= job.metadataBytes;
+            _impl->warm->slots[job.slot] = {};
+            ++_impl->stats.warmTextureJobsCancelled;
+        }
+        _impl->stats.warmTextureQueued = 0;
+        // Active old-generation jobs keep both their slot and metadata debt.
         freeConversions.swap(_impl->convertQueue);
         for (const auto& job : freeConversions)
             _impl->stats.conversionReservedBytes -= job.reservation;
@@ -1335,6 +1469,8 @@ size_t ObjectStreamPreparer::DropStale(const uint32_t* epochs, size_t count, uin
     std::vector<Impl::ModelPtr> freeLater;
     std::vector<LODShapeWithShadow*> freeShapes;
     std::deque<Impl::ConvertJob> freeConversions;
+    std::array<Impl::WarmJob, Streaming::WarmTextureJobPolicy::JobLimit> freeWarm;
+    size_t freeWarmCount = 0;
     size_t dropped = 0;
     {
         std::lock_guard<std::mutex> lock(_impl->mutex);
@@ -1407,14 +1543,87 @@ size_t ObjectStreamPreparer::DropStale(const uint32_t* epochs, size_t count, uin
                 keptConversions.push_back(std::move(job));
         }
         _impl->convertQueue.swap(keptConversions);
+        if (_impl->warm) for (auto it = _impl->warm->queue.begin(); it != _impl->warm->queue.end();)
+        {
+            if (it->index >= _impl->count || _impl->stale[it->index] || !it->publication.Valid())
+            {
+                _impl->stats.warmTextureMetadataBytes -= it->metadataBytes;
+                _impl->warm->slots[it->slot] = {};
+                freeWarm[freeWarmCount++] = std::move(*it); it = _impl->warm->queue.erase(it);
+                ++_impl->stats.warmTextureJobsCancelled;
+            }
+            else ++it;
+        }
+        _impl->stats.warmTextureQueued = _impl->warm ? _impl->warm->queue.size() : 0;
         _impl->stats.dropped += dropped;
     }
-    if (dropped > 0)
+    if (dropped > 0 || freeWarmCount > 0)
         _impl->cv.notify_all(); // room in the ready set, or a shorter queue: let parked workers re-check
     freeLater.clear();
     for (LODShapeWithShadow* sh : freeShapes)
         delete sh;
     return dropped;
+}
+
+ObjectStreamPreparer::WarmTextureSubmit ObjectStreamPreparer::SubmitWarmTextures(
+    uint32_t index, const RadiusCertificate& inventoryToken, std::vector<WarmTextureRead> reads)
+{
+    if (!WarmTextureJobsEnabled()) return WarmTextureSubmit::Disabled;
+    if (!Foundation::IsMainThread()) return WarmTextureSubmit::WrongThread;
+    // Validate bounded immutable evidence before taking the queue lock. No bank
+    // lookup, source read or new source lease is performed by this API.
+    uint64_t charge = sizeof(Impl::WarmState) + Streaming::WarmTextureJobPolicy::JobLimit * sizeof(Impl::WarmJob) + 256; // conservatively charge all queue storage per live job
+    if (reads.empty() || reads.size() > Streaming::WarmTextureJobPolicy::MemberLimit ||
+        reads.capacity() > Streaming::WarmTextureJobPolicy::MemberLimit ||
+        !Streaming::WarmTextureJobPolicy::AddCharge(charge, reads.capacity() * sizeof(WarmTextureRead)))
+        return WarmTextureSubmit::Unsupported;
+    for (const auto& read : reads)
+    {
+        if (!read.initializedSource || read.key.empty() || read.key.size() >= 1024 || read.key.capacity() > 8192 ||
+            read.key.find('\0') != std::string::npos || !read.initializedSource->Request().archiveLease ||
+            !read.initializedSource->Request().bytes || read.initializedSource->Request().bytes > Impl::PackedTextureLimit ||
+            !read.initializedSource->Request().SameArchiveMember(read.initializedSource->Request()) ||
+            !Streaming::WarmTextureJobPolicy::AddCharge(charge, read.key.capacity() + 1) ||
+            !Streaming::WarmTextureJobPolicy::AddCharge(charge, read.initializedSource->KnownCppBytes()))
+            return WarmTextureSubmit::Unsupported;
+    }
+    if (!_impl->warm) return WarmTextureSubmit::Capacity;
+    Impl::WarmJob job;
+    job.index = index; job.reads = std::move(reads);
+    job.textureGeneration = render::PreparedTextureStore::Instance().Generation();
+    {
+        std::lock_guard<std::mutex> lock(_impl->mutex);
+        if (index >= _impl->count || _impl->workers.empty() || !_impl->ddsPublication ||
+            inventoryToken.generation != _impl->generation.load(std::memory_order_relaxed) ||
+            inventoryToken.modelIdentity != _impl->paths[index])
+            return WarmTextureSubmit::InvalidInventory;
+        job.generation = inventoryToken.generation;
+        job.publication = {_impl->ddsPublication, index, _impl->ddsPublication->Epoch(index)};
+        if (_impl->stale[index] || !job.publication.Valid()) return WarmTextureSubmit::InvalidInventory;
+        if (!Streaming::WarmTextureJobPolicy::AddCharge(charge, _impl->ddsPublication->MetadataBytes()))
+            return WarmTextureSubmit::Capacity;
+        size_t empty = _impl->warm->slots.size(), jobs = 0;
+        for (size_t i = 0; i < _impl->warm->slots.size(); ++i)
+        {
+            const auto& slot = _impl->warm->slots[i];
+            if (!slot.occupied) { if (empty == _impl->warm->slots.size()) empty = i; continue; }
+            ++jobs;
+            if (slot.index == index && slot.generation == job.generation && slot.publicationEpoch == job.publication.epoch)
+            { ++_impl->stats.warmTextureJobsCoalesced; return WarmTextureSubmit::Coalesced; }
+        }
+        if (!Streaming::WarmTextureJobPolicy::Admit(jobs, job.reads.size(), _impl->stats.warmTextureMetadataBytes + _impl->WarmStorageBytes(), charge))
+        { ++_impl->stats.warmTextureJobsRejected; return WarmTextureSubmit::Capacity; }
+        job.metadataBytes = charge; job.slot = empty;
+        try { _impl->warm->queue.push_back(std::move(job)); }
+        catch (...) { ++_impl->stats.warmTextureJobsRejected; return WarmTextureSubmit::Capacity; }
+        _impl->warm->slots[empty] = {true, index, inventoryToken.generation, _impl->ddsPublication->Epoch(index)};
+        _impl->stats.warmTextureMetadataBytes += charge;
+        _impl->stats.warmTextureMetadataBytesPeak = std::max(_impl->stats.warmTextureMetadataBytesPeak, _impl->stats.warmTextureMetadataBytes);
+        _impl->stats.warmTextureQueued = _impl->warm ? _impl->warm->queue.size() : 0;
+        ++_impl->stats.warmTextureJobsSubmitted;
+    }
+    _impl->cv.notify_all();
+    return WarmTextureSubmit::Submitted;
 }
 
 bool ObjectStreamPreparer::SubmitConvert(uint32_t index, std::shared_ptr<Model::Model> model,
@@ -1547,7 +1756,9 @@ ObjectStreamPreparer::ConvertedShape ObjectStreamPreparer::TakeConverted(uint32_
 ObjectStreamPreparer::Stats ObjectStreamPreparer::SnapshotStats() const
 {
     std::lock_guard<std::mutex> lock(_impl->mutex);
-    return _impl->stats;
+    auto result = _impl->stats;
+    result.warmTextureQueueBytes = _impl->WarmStorageBytes();
+    return result;
 }
 
 } // namespace Poseidon

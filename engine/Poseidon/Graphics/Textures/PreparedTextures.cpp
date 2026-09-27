@@ -1,5 +1,6 @@
 #include <Poseidon/Graphics/Textures/PreparedTextures.hpp>
 #include <Poseidon/Graphics/Textures/DdsImport.hpp>
+#include <Poseidon/IO/Streams/ArchiveSourceBinding.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -38,6 +39,7 @@ struct PreparedTextureStore::Impl
         size_t preparedDdsBytes = 0;
         DdsPublicationToken publication;
         std::unique_ptr<PreparedAlphaFacts> alphaFacts;
+        std::shared_ptr<const ArchiveSourceBinding> warmSource;
     };
     static size_t AddCharge(size_t a, size_t b)
     { return b > std::numeric_limits<size_t>::max() - a ? std::numeric_limits<size_t>::max() : a + b; }
@@ -48,7 +50,8 @@ struct PreparedTextureStore::Impl
         return AddCharge(chain.blocks.capacity(), chain.levels.capacity() * sizeof(PAABlockLevel));
     }
     static size_t EntryBytes(const Entry& entry)
-    { return ChainBytes(entry.chain) + entry.image.rgba.capacity() + (entry.dds ? entry.dds->bytes : 0) + entry.preparedDdsBytes + AlphaFactsBytes(entry.alphaFacts.get()); }
+    { return AddCharge(ChainBytes(entry.chain) + entry.image.rgba.capacity() + (entry.dds ? entry.dds->bytes : 0) + entry.preparedDdsBytes + AlphaFactsBytes(entry.alphaFacts.get()),
+                      entry.warmSource ? entry.warmSource->KnownCppBytes() : 0); }
     static size_t AlphaFactsBytes(const PreparedAlphaFacts* facts)
     {
         // Known C++ capacities plus a conservative shared_ptr control-block
@@ -372,9 +375,13 @@ void PreparedTextureStore::NoteAlphaFactsCancelled()
 
 bool PreparedTextureStore::Put(const std::string& key, PAABlockChain&& chain,
                                std::optional<uint64_t> generation, std::unique_ptr<PreparedAlphaFacts> alphaFacts,
-                               const DdsPublicationToken* publication)
+                               const DdsPublicationToken* publication,
+                               std::shared_ptr<const ArchiveSourceBinding> warmSource)
 {
     if (!Enabled() || key.empty() || !chain.valid())
+        return false;
+    if (warmSource && (!generation || !publication || !publication->Valid() ||
+        !warmSource->Request().HasArchiveIdentity() || warmSource->Request().bytes > 16 * 1024 * 1024))
         return false;
     if (alphaFacts && (!generation || alphaFacts->pairedBlocks != chain.blocks.data() || !alphaFacts->source.HasArchiveIdentity() ||
         alphaFacts->magic != chain.magic || alphaFacts->width != chain.width || alphaFacts->height != chain.height ||
@@ -385,8 +392,12 @@ bool PreparedTextureStore::Put(const std::string& key, PAABlockChain&& chain,
     std::list<Impl::Entry> pending;
     pending.emplace_back(Impl::Entry{key, std::move(chain), DecodedImage{}, Impl::Clock::now()});
     pending.back().alphaFacts = std::move(alphaFacts);
+    pending.back().warmSource = std::move(warmSource);
+    const bool boundWarm = bool(pending.back().warmSource);
     if (publication) pending.back().publication = *publication;
-    const size_t retained = Impl::AddCharge(Impl::ChainBytes(pending.back().chain), Impl::AlphaFactsBytes(pending.back().alphaFacts.get()));
+    // Conservatively charge a shared source witness per entry as well as the
+    // source-capture process cap. Neither number measures physical memory.
+    const size_t retained = Impl::EntryBytes(pending.back());
     const size_t size = pending.back().chain.blocks.size();
     std::list<Impl::Entry> freeLater;
     bool stored = false;
@@ -408,7 +419,7 @@ bool PreparedTextureStore::Put(const std::string& key, PAABlockChain&& chain,
         {
             ++_impl->stats.rejectedStale;
         }
-        else if (_impl->uploaded.count(key))
+        else if (!pending.back().warmSource && _impl->uploaded.count(key))
         {
             ++_impl->stats.skippedUploaded;
         }
@@ -430,6 +441,7 @@ bool PreparedTextureStore::Put(const std::string& key, PAABlockChain&& chain,
             _impl->order.splice(_impl->order.end(), pending);
             _impl->bytes += retained;
             ++_impl->stats.puts;
+            if (boundWarm) ++_impl->stats.warmPuts;
             _impl->stats.putBytes += size;
             _impl->stats.entries = _impl->byKey.size();
             _impl->stats.bytes = _impl->bytes;
@@ -503,9 +515,11 @@ bool PreparedTextureStore::TakeDecoded(const std::string& key, DecodedImage& out
     return out.valid();
 }
 
-bool PreparedTextureStore::Take(const std::string& key, PAABlockChain& out)
+bool PreparedTextureStore::Take(const std::string& key, PAABlockChain& out,
+                               std::shared_ptr<const ArchiveSourceBinding>* warmSource)
 {
     out = PAABlockChain{};
+    if (warmSource) warmSource->reset();
     if (!Enabled() || key.empty())
         return false;
     std::list<Impl::Entry> retired;
@@ -523,10 +537,44 @@ bool PreparedTextureStore::Take(const std::string& key, PAABlockChain& out)
         ++_impl->stats.misses;
         return false;
     }
+    if (it->second->warmSource)
+    {
+        if (!warmSource)
+        {
+            ++_impl->stats.warmSourceRefused;
+            _impl->EraseLocked(it, nullptr, nullptr, &retired);
+            ++_impl->stats.misses;
+            return false;
+        }
+        *warmSource = it->second->warmSource;
+        ++_impl->stats.warmTakes;
+    }
     _impl->EraseLocked(it, &out, nullptr, &retired);
     ++_impl->stats.takes;
     _impl->stats.takeBytes += out.blocks.size();
     return true;
+}
+
+bool PreparedTextureStore::ShouldPrepareWarm(const std::string& key)
+{
+    if (!Enabled() || key.empty()) return false;
+    std::list<Impl::Entry> retired;
+    std::lock_guard<std::mutex> lock(_impl->mutex);
+    _impl->SweepCancelledLocked(retired);
+    const auto old = _impl->byKey.find(key);
+    if (old != _impl->byKey.end() && old->second->publication.inventory && !old->second->publication.Valid())
+    {
+        _impl->CountCancelled(*old->second);
+        _impl->EraseLocked(old, nullptr, nullptr, &retired);
+    }
+    return _impl->byKey.count(key) == 0;
+}
+
+void PreparedTextureStore::NoteWarmUpload(bool successful, size_t bytes)
+{
+    std::lock_guard<std::mutex> lock(_impl->mutex);
+    if (successful) { ++_impl->stats.warmUploads; _impl->stats.warmUploadBytes += bytes; }
+    else ++_impl->stats.warmUploadFailed;
 }
 
 bool PreparedTextureStore::PutDdsPrepared(const std::string& key, std::unique_ptr<TextureSourceDDS> source,

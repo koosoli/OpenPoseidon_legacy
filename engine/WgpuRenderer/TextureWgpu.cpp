@@ -17,6 +17,8 @@
 #include <Poseidon/IO/FileServer.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
 #include <Poseidon/IO/Streams/QStream.hpp>
+#include <Poseidon/IO/Streams/ArchiveSourceBinding.hpp>
+#include <Poseidon/Foundation/Threads/ThreadAffinity.hpp>
 
 #include <Poseidon/Graphics/Textures/Bc3Encoder.hpp>
 
@@ -1084,6 +1086,23 @@ int TextureWgpu::Init()
     return 0;
 }
 
+std::shared_ptr<const ArchiveSourceBinding> TextureWgpu::CurrentArchiveSourceBinding() const
+{
+    if (!Foundation::IsMainThread() || !_src) return {};
+    auto binding = _src->GetArchiveSourceBinding();
+    if (!binding) return {};
+    const char* name = SourceName();
+    if (!name) return {};
+    size_t length = 0;
+    while (length < 8192 && name[length]) ++length;
+    if (!length || length == 8192) return {};
+    QFBank* bank = QIFStreamB::AutoBank(name); // Prefix selection only, no loading.
+    if (!bank) return {};
+    const size_t prefix = static_cast<size_t>(bank->GetPrefix().GetLength());
+    if (prefix >= length || !bank->MatchesMountedMember(name + prefix, binding->Request())) return {};
+    return binding;
+}
+
 bool TextureWgpu::ScanTopMipAlphaBlocks(AlphaScanPath& path)
 {
     // WGR_ALPHA_BLOCK_SCAN=0 falls back to the original whole-file decode.
@@ -1764,12 +1783,13 @@ uint64_t TextureWgpu::EnsureUploaded()
         // firstLevel.. tightly packed at `offsets`, so the alpha handoff below is unchanged.
         bool ok = false;
         bool fromPrepared = false;
+        std::shared_ptr<const ArchiveSourceBinding> warmPreparedSource;
         if (render::PreparedTextureStore::Enabled())
         {
             PAABlockChain prepared;
             const std::string key = render::PreparedTextureStore::Key(SourceName());
             const uint64_t takeBegan = terrainTiming.enabled ? NowUs() : 0;
-            const bool taken = render::PreparedTextureStore::Instance().Take(key, prepared);
+            const bool taken = render::PreparedTextureStore::Instance().Take(key, prepared, &warmPreparedSource);
             if (terrainTiming.enabled)
             {
                 terrainTiming.preparedTakeMs += (NowUs() - takeBegan) / 1000.0;
@@ -1780,6 +1800,11 @@ uint64_t TextureWgpu::EnsureUploaded()
                 const PacFormat preparedFormat = PacFormatFromMagic(prepared.magic);
                 bool matches = preparedFormat == dst &&
                                prepared.levels.size() >= static_cast<size_t>(firstLevel + levelCount);
+                if (matches && warmPreparedSource)
+                {
+                    const auto currentSource = CurrentArchiveSourceBinding();
+                    matches = currentSource && currentSource->Request().SameArchiveMember(warmPreparedSource->Request());
+                }
                 for (int i = 0; matches && i < levelCount; i++)
                 {
                     const PAABlockLevel& level = prepared.levels[static_cast<size_t>(firstLevel + i)];
@@ -1839,6 +1864,8 @@ uint64_t TextureWgpu::EnsureUploaded()
             if (terrainTiming.enabled) terrainTiming.blockReadMs += (NowUs() - sourceReadBegan) / 1000.0;
         }
         if (terrainTiming.enabled) terrainTiming.preparedUsed = fromPrepared;
+        if (warmPreparedSource && !fromPrepared)
+            render::PreparedTextureStore::Instance().NoteWarmUpload(false, 0);
         // The frame BYTE accumulator is unconditional: the admission loop's per-frame upload
         // budget (WGR_OBJECT_STREAM_UPLOAD_MB) reads it, and a diagnostics opt-out
         // (WGR_TEXTURE_STREAM_STATS=0) must not silently disarm a throttle. One relaxed
@@ -1920,6 +1947,8 @@ uint64_t TextureWgpu::EnsureUploaded()
                 handoff.name.assign(name);
             }
         }
+        if (warmPreparedSource && fromPrepared)
+            render::PreparedTextureStore::Instance().NoteWarmUpload(_gpuHandle != 0, total);
     }
 
     // Fallback (non-DXT formats, or a failed block upload): decode the whole file
