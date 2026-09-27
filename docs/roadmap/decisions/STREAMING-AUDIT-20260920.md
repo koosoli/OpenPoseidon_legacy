@@ -2792,3 +2792,48 @@ Root localreturned bus/street/buildings/treecoverage compatible only. Defaultslo
 tax alternatives remain sourceonly/UNCHANGED/UNBUILT; next
 recordclosure source is unbuilt/excluded, cargoeligibleguard remainsfutureNOTdone.
 WholeplanOPEN/defaultReady-performanceAcceptedfalse/diagnosticledgerOFF.
+
+## Sept27 current mesh-record closure and historical ledger saturation
+
+Source `221cb33e` builds all five targets in247 scheduled steps. C++ tests pass
+14578 assertions/27 cases with no skips; Rust meshfacts5, meshack9 and ABI10
+pass with0 ignored. The matched EXE/DLL pair uses ABI15, an80-byte mesh-fact
+summary and explicit old-ABI14 refusal. Installed09:28 SHA256 values were verified:
+EXE D2ADDBF9F202A1634D2B0D876F1C286259604D97EB9E9FCD78B701EC608C4C4F;
+DLL A69FD998541FEF6BAC0016DE618842D9355F59B36F61083A4B6862B318CD8ECF.
+Only the current live mesh-record count is O1. The opt-in report still performs
+bounded8192 handle lookups and existing free-span/retired metadata walks once;
+this is not an O1 whole-query or default frame-time claim.
+
+Actual three-cycle DayZ run `mesh-record-closure-20260927-20260927-092859`
+FAILED the strict complete owner-cut assertion (root wrapper exit1). Raw harness,
+samples, engine log, provenance, failed-allocation-cut.json and
+root-failure-diagnosis.json are retained and hashed in the evidence manifest.
+There is no result.json or queue acknowledgement. Root force-cleanup after the
+failure is not a clean game exit. Do not report this as a passed convergence run.
+
+The historical producer ledger reached8192 records, incompleteReasons3,
+mailboxDropped0 and3252 CPU borrowers. Its8192 supplied handles yielded3301
+Present/4891 Absent; all4891 scheduled-retired records were Absent, with0
+Present-scheduled-retired,0 Absent-with-persistent-owner and0 unknown mappings.
+The same renderer cut contained4084 current mesh records and721097676 bytes of
+logical pool source-range payload. Unattributed residual138346524 and
+recordClosureCompletefalse demonstrate incomplete inspected coverage, not
+exclusive ownership, an actual leak, or physical unreclaimed GPU allocation.
+Historical records consume this diagnostic cap after their renderer record is
+absent. These counts alone cannot establish a release-policy defect.
+
+All three route returns retained19923 objects/required0. Return3 recorded geometry
+capacity1275068416/retired0, object textures2744812212 bytes/2483 entries and
+process private9744814080/working-set3977060352. These are raw diagnostic values;
+no memory convergence, performance, complete ownership, reclamation or default
+readiness gate passes. Shared-pool capacity and record absence do not prove
+physical device memory free or complete all-pass/in-flight ownership.
+
+Next bounded task: confirmed-Absent historical-record pruning, with identity and
+late-event safety, is proposed but NOT implemented. Do not raise the cap or weaken
+strict completeness to pass this run. The optional standalone-footprint repair
+candidate and parallel offline geometry-page foundation are NEW/UNBUILT and
+excluded from221 runtime evidence. Cargo eligibility guard remains a future task.
+The authoritative streaming plan stays OPEN; diagnostics remain opt-in, pressure
+and paging experiments remain off, and waves remain parked.
