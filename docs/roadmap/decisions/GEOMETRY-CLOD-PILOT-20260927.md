@@ -933,3 +933,47 @@ and disk-worker CPU checks do not establish an Engine/game disk-file path.
 | build/stream-residency/dayz-acquire-split-20260927-disabled-20260927-143822/route-frame-ms.json | 33c31616fab92cfcdf801ce095c37298dd7d8953f338045bd35892cc38b60457 |
 | build/stream-residency/dayz-acquire-split-20260927-disabled-20260927-143822/render-call-cpu-proof.json | 8fd5b3c2dc4a6c1f89640c01b052b271bf3cc9019d2498a22284bd3dd5c0f9b9 |
 | build/stream-residency/dayz-acquire-split-20260927-disabled-20260927-143822/returned-settled.png | c36772d1117a2ad453109336722d1ebc9106dffccad2325477693fd65240d1f5 |
+
+## 27 September 15:06 — actual controlled file worker and Tidewater owner preview
+
+The merged source `68cd254b` includes all nine water commits and the additional exact safety `dec/tidewater-showcase` mission. The initial all-five-target build passed 246 scheduled steps; Rust water checks passed 61 with one explicitly ignored slow `lace_512_matches_js` test. Matched ABI17 includes water parameters1184 bytes and81 GPU timer regions. Current OP remains normal default0; Tidewater uses an explicit environment/profile selection. Lazy shore height capture removes the second full-heightmap copy from normal Current OP sessions. Minimal backend branches and the terrain wetness placeholder bind group remain; no zero-cost claim follows.
+
+Two historical disk attempts failed and remain evidence: `disk-tidewater-20260927-20260927-150101` refused incomplete nested producer JSON (PowerShell depth2, repaired by `a547275d` depth8); `disk-complete-proof-20260927-20260927-150220` could not release its cancelled held worker because the fixture was inactive. `dddaab9b` permits only the release action while inactive. Its all-five-target18-step build passed, and the supported deployment stamped clean dddaab9b15:06. Neither failed attempt is relabelled PASS or supplied with an invented result.
+
+Actual `disk-cancel-repaired-20260927-20260927-150656` passed/root wrapper0/cleanExittrue, with Shutdown complete15:07:10.230. The fresh external Tools producer wrote71652 bytes, SHA256 `73b0be64295f084e8051d8b9af7163c3b89810a2193956ed16426bb85d21489e`; trusted raw/derived keys and helper hash were compared independently against the controlled original Shape. No owner-thread file read or CLOD bake is claimed. File Coarse64 triangles commits after the2-triangle fallback, then Fine512 triangles commits through the existing worker. Initial coarse has2Present; fine has8Present. The held aborted job retains410190 reserved logical bytes until release/actual exit; old2Absent/jobs0 is established before replacement, so this does not claim old-active/new-fine concurrency.
+
+The actual fine eviction reports2Present/6Absent; refill generation2 has history14,8Present/6Absent. Final history14Absent, jobs/reservations0, completed4/cancelled2, known payload138555 bytes and helper hashes unchanged. Reservations are logical bounds, not RSS or a hard I/O/bake latency bound. Pass facts remain version2/592 bytes, capabilities31/required29, with current cascade/reflection command records and cached interior/GI Pending4 or12. This does not prove all-pass pixels, nonzero survivors, queue completion, physical GPU free, retail asset integration or automatic paging.
+
+Root handed the owner visible `tw-showcase.eden` on the same installed pair at1600x900, PID10668,15:08. The live log records Current OP -> Tidewater Native at15:08:19.599, switch#1 taking1555.1ms. This establishes startup selection only. The showcase ended clean0 at15:08:48.071; its now-final log hash is recorded below. The owner then requested a normal game with Tidewater1: PID9840 started15:10 without a test mission and logged switch#1/373.9ms15:10:08.568. That normal session remains interactive/live, so no final normal-log hash is recorded. Owner visual judgement and a matched normal-default performance screen are pending. No wave direction/breaking-quality, default no-regression, FPS or whole-map acceptance is recorded. Whole plan/StageG remain OPEN, experimental paging stays off, and defaultReady/performanceAccepted remain false. Previous ResourceGrowth and both stage-family-upload NotExercised failures remain historical gaps.
+
+| Artifact | SHA256 |
+| --- | --- |
+| build/build-disk-tidewater-showcase-20260927.log | dc7c879b5970e717ff1b49f3200480261b2d9dfa78fb24cfd94bb7b7f47bb88b |
+| build/test-disk-tidewater-showcase-20260927.log | 1a019232586e890aa21785f3a321946e2167753181245746d7c6e0e6e9fbf1b4 |
+| build/build-disk-cancel-latch-20260927.log | c10bac846b136ab89dbfd972a9fe64e10f955cebf995258b4636f2aa99cf495d |
+| build/runtime-disk-tidewater-20260927.log | 712b29a1b8556d1d46e2f89e2ebfa5f456b7016ea1bb08ecc799d9a72515fd34 |
+| build/runtime-disk-cancel-repaired-20260927.log | 97ddb19953791cac1af5071dd698da8e2ff7180c205dca8983c350fc176fb92c |
+| build/tidewater-showcase-owner-provenance-20260927.json | f6900ad71a5981897e82f8389c2869718c6395c24ce1e6d4c17dc8dad6344819 |
+| build/stream-residency/disk-cancel-repaired-20260927-20260927-150656/result.json | 1a278029092a7f04d49b91747f25d8bfd98c319b03ac54ec3e51b0f084f3739b |
+| build/stream-residency/disk-cancel-repaired-20260927-20260927-150656/provenance.json | 8a2d76cc222a30f2e0a8eacb6f0f51940585318048b2fa0686be9f1ca12aa83c |
+| build/stream-residency/disk-cancel-repaired-20260927-20260927-150656/engine.log | d883fb552081bfba9876230e3a6e5ad500afb97f74aa823ed10ad9f1079abb1a |
+| build/stream-residency/disk-cancel-repaired-20260927-20260927-150656/harness.jsonl | ab8f8429f86ee11df03e077d80adcf7c37e0bf833e868508f41fa9f1304492d1 |
+| build/stream-residency/disk-cancel-repaired-20260927-20260927-150656/disk-producer-proof.json | ea9a2ffa931dfd5f1931c1244b5b11a12f0c34cd9737e16df46c823bf502659b |
+| build/stream-residency/disk-cancel-repaired-20260927-20260927-150656/producer-stdout.json | e6940116453f956e3ac3c84432f179a002c3db14a70744c686d3053ef79d914b |
+| build/stream-residency/disk-cancel-repaired-20260927-20260927-150656/initial-fallback.png | 45e810482f5fdec499eb15efd2959195ceef04f693a7741421cbe02162a12e77 |
+| build/stream-residency/disk-cancel-repaired-20260927-20260927-150656/initial-coarse.png | 319664007cce411447eeaf6d49b78e3282e8ff4da302885758dd5c48613b0f97 |
+| build/stream-residency/disk-cancel-repaired-20260927-20260927-150656/fine.png | 6d9d5866dcd5390dbe94078fcb84569cd902831cdb60aa95933604695ec212cd |
+| build/stream-residency/disk-cancel-repaired-20260927-20260927-150656/evicted-coarse.png | 590e97a7b64fd6973c93b4fa7d8c40802c03c0d9df7b0c3076aff847c4e8dde0 |
+| build/stream-residency/disk-cancel-repaired-20260927-20260927-150656/refilled-fine.png | 28336e74ee8e0f546d0a3ae6efe36edac5f5a7e95921ec5e76b5a7f5fbf9eaca |
+| build/stream-residency/disk-tidewater-20260927-20260927-150101/provenance.json | e7c1f2d50438dbebbef4ccbda2ca2eb8d6a64be004ee4ccfc5525c3d4fc3237a |
+| build/stream-residency/disk-tidewater-20260927-20260927-150101/harness.jsonl | 6df5f6cbdd1a171d06a961e1222ca13b19ccdc8ec3a93fbb7c28e2f22aa6a4dc |
+| build/stream-residency/disk-tidewater-20260927-20260927-150101/engine.log | 9c190c89873f399bad5f97c94e50e5de9aae2616ad966c66f49e4a241bc5b8af |
+| build/stream-residency/disk-complete-proof-20260927-20260927-150220/provenance.json | 15edf057373affaa9d6175270cd69d741391ff88142e9d5f82a0a938e05ae187 |
+| build/stream-residency/disk-complete-proof-20260927-20260927-150220/harness.jsonl | f52f45fec68b2af3329db6881f1558e2c7eac807ae05911076e7fc006c36ea2d |
+| build/stream-residency/disk-complete-proof-20260927-20260927-150220/engine.log | ddcb76986d0a456a418f095524be5672f98c65b3e2be200e81d99a712ef37249 |
+
+Installed pair from actual150656 provenance: EXE `A23203C7D349E5FE9B377367A1896022B5D811B4B585F9441868BD7A2C620A10`, DLL `2A4B15B98421C5D9A80A08938203A23BCAA36876482F7053607B3E849D090752`; scriptSHA `C13B837FF44BE41265A2E605FC8F1C8908D60F2CD4D69A50F831AA4BE17415BF`. The owner-preview provenance records the same pair.
+
+Final owner showcase log: `build/tidewater-showcase-owner-20260927.log`, SHA256 `420c53f95b78f1c5bde9ff0f1877c70ccb3d98842c3adc192a532b23795eb985`; clean0 closure15:08:48.071 is startup/session closure, not a visual acceptance. Normal owner game log remains live/unhashed.
+
+The earlier `567c1e28` disk-fixture build also failed: standalone `Core/Engine.hpp` instantiated `std::array` without including `<array>`. The explicit include repair `1d7285cd` precedes the successful combined build; the failure is preserved in `build/build-disk-geometry-fixture-20260927.log`, SHA256 `921285c3edf2ce6f12a088b9ca15ce539504b768035d577fa023244e70ed8980`. It is not a successful build result.

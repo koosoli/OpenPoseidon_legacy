@@ -1,6 +1,6 @@
 # Tidewater series integration into the streaming branch
 
-This checkpoint ports the complete nine-commit series from the verified private safety remote `refs/heads/dec/tidewater-w3-shore`, tip `a2b9c13539301ddc2bdb7127628c098ff00595a5`, onto streaming base `095cee223225e83209b15470afd454324427464b`. The common ancestor is `3d720430c049cbd82cf3757dbf1fca1534702c4f`. Origin has no matching branch. All nine source commits were absent by patch-equivalence comparison and cherry-picked with original authors and `-x` provenance; there were no textual conflicts. This isolated source checkpoint has not been built or smoke-tested.
+This checkpoint ports the complete nine-commit series from the verified private safety remote `refs/heads/dec/tidewater-w3-shore`, tip `a2b9c13539301ddc2bdb7127628c098ff00595a5`, onto streaming base `095cee223225e83209b15470afd454324427464b`. The common ancestor is `3d720430c049cbd82cf3757dbf1fca1534702c4f`. Origin has no matching branch. All nine source commits were absent by patch-equivalence comparison and cherry-picked with original authors and `-x` provenance; there were no textual conflicts. At the original isolated-port checkpoint no build or smoke had been run; the following merged checkpoint supersedes that historical status.
 
 | Source commit | Port commit | Source scope |
 | --- | --- | --- |
@@ -40,3 +40,7 @@ $env:WGR_WATER_BACKEND = '1'
 ```
 
 A Current OP comparison sets the same environment variable to `0`; remove the session override afterwards. Game ownership/locking and supported deployment remain required. No launch was executed by the port subagent. All previous integration adaptations, including Current OP default zero, matched ABI17, lazy shore height capture and Tidewater-only shoreline derivative work, remain intact.
+
+## Merged verification and owner handoff
+
+Source merged68cd254b/all5 build246PASS, water Rust61PASS/1ignored slow lace test. Clean dddaab9b installed15:06 after the separate disk cancellation repair. ABI17/default CurrentOP0/lazy shore capture remain. Root started the visible owner showcase15:08/PID10668 with explicit backend1,1600x900; CurrentOP->Tidewater Native15:08:19.599 switch#1/1555.1ms establishes only startup activation. The showcase closed clean0 at15:08:48.071; final log SHA256 `420c53f95b78f1c5bde9ff0f1877c70ccb3d98842c3adc192a532b23795eb985`. Root then started a normal game without a test mission15:10/PID9840/Tidewater1, switch#1/373.9ms15:10:08.568. The normal log is live and not assigned a final-run hash. Visual wave quality/direction and matched normal-default performance remain pending, and Tidewater is not promoted as default. Actual snapshot provenance: `build/tidewater-showcase-owner-provenance-20260927.json`, SHA256 `f6900ad71a5981897e82f8389c2869718c6395c24ce1e6d4c17dc8dad6344819`. Full disk fixture PASS and retained historical failures are recorded in GEOMETRY-CLOD-PILOT-20260927.md.
