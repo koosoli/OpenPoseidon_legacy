@@ -536,6 +536,9 @@ void RegisterScreenshot(HarnessServer& hs)
             else if(!std::strcmp(name,"beginClod")) action=Engine::GeometryPageFixtureAction::BeginClod;
             else if(!std::strcmp(name,"beginPaged")) action=Engine::GeometryPageFixtureAction::BeginPaged;
             else if(!std::strcmp(name,"beginClodPaged")) action=Engine::GeometryPageFixtureAction::BeginClodPaged;
+            else if(!std::strcmp(name,"beginDiskClodPaged")) action=Engine::GeometryPageFixtureAction::BeginDiskClodPaged;
+            else if(!std::strcmp(name,"requestCoarse")) action=Engine::GeometryPageFixtureAction::RequestCoarse;
+            else if(!std::strcmp(name,"pollCoarse")) action=Engine::GeometryPageFixtureAction::PollCoarse;
             else if(!std::strcmp(name,"requestFine")) action=Engine::GeometryPageFixtureAction::RequestFine;
             else if(!std::strcmp(name,"pollFine")) action=Engine::GeometryPageFixtureAction::PollFine;
             else if(!std::strcmp(name,"cancelFine")) action=Engine::GeometryPageFixtureAction::CancelFine;
@@ -556,7 +559,76 @@ void RegisterScreenshot(HarnessServer& hs)
                     return HarnessProtocol::ErrorResponse("fixture position must be finite and bounded");
                 xyz[i]=float(item->valuedouble);
             }
-            const auto report=GEngine->ControlGeometryPageFixture(action,xyz[0],xyz[1],xyz[2]);
+            Engine::GeometryPageDiskFixtureInput disk;
+            const Engine::GeometryPageDiskFixtureInput* diskArgument=nullptr;
+            if(action==Engine::GeometryPageFixtureAction::BeginDiskClodPaged) {
+                // These are externally captured producer keys, never refreshed from
+                // the cache file or a manifest on the owner/frame thread.
+                const auto* input=cJSON_GetObjectItemCaseSensitive(root,"disk");
+                const auto* producer=input?cJSON_GetObjectItemCaseSensitive(input,"producer"):nullptr;
+                const auto* path=input?cJSON_GetObjectItemCaseSensitive(input,"path"):nullptr;
+                if(!cJSON_IsObject(input)||!cJSON_IsObject(producer)||!cJSON_IsString(path)||!path->valuestring)
+                    return HarnessProtocol::ErrorResponse("disk path and trusted external producer object required");
+                size_t length=0;
+                while(length<disk.path.size() && path->valuestring[length]) {
+                    const auto ch=static_cast<unsigned char>(path->valuestring[length]);
+                    if(ch<32 || ch>126)return HarnessProtocol::ErrorResponse("disk pilot path must be bounded ASCII");
+                    disk.path[length]=char(ch);++length;
+                }
+                if(!length || length==disk.path.size())return HarnessProtocol::ErrorResponse("disk pilot path exceeds 1023 characters");
+                const auto number=[](const cJSON* object,const char* key,uint32_t& value) {
+                    const auto* item=object?cJSON_GetObjectItemCaseSensitive(object,key):nullptr;
+                    if(!cJSON_IsNumber(item)||!std::isfinite(item->valuedouble)||item->valuedouble<0 ||
+                        item->valuedouble>UINT32_MAX || std::floor(item->valuedouble)!=item->valuedouble)return false;
+                    value=uint32_t(item->valuedouble);return true;
+                };
+                const auto hexadecimal=[](const cJSON* object,const char* key,uint8_t* output,size_t bytes) {
+                    const auto* item=object?cJSON_GetObjectItemCaseSensitive(object,key):nullptr;
+                    if(!cJSON_IsString(item)||!item->valuestring)return false;
+                    const auto digit=[](char c)->int {return c>='0'&&c<='9'?c-'0':c>='a'&&c<='f'?c-'a'+10:c>='A'&&c<='F'?c-'A'+10:-1;};
+                    for(size_t i=0;i<bytes;++i) {
+                        // Read sequentially: a short string must not inspect beyond its NUL.
+                        const char a=item->valuestring[i*2];if(!a)return false;
+                        const char b=item->valuestring[i*2+1];if(!b)return false;
+                        const int high=digit(a),low=digit(b);if(high<0||low<0)return false;
+                        output[i]=uint8_t((high<<4)|low);
+                    }
+                    return item->valuestring[bytes*2]==0;
+                };
+                const auto word=[&](const cJSON* object,const char* key,uint64_t& value) {
+                    uint8_t bytes[8];if(!hexadecimal(object,key,bytes,8))return false;
+                    value=0;for(auto b:bytes)value=(value<<8)|b;return true;
+                };
+                const auto source=[&](const cJSON* object,Engine::GeometryPageSourceIdentity& key) {
+                    return cJSON_IsObject(object) && hexadecimal(object,"sourceSha256",key.sha256.data(),32) &&
+                        word(object,"geometryOptionsHex",key.geometryOptions) && word(object,"materialOptionsHex",key.materialOptions) &&
+                        number(object,"producerVersion",key.producerVersion) && number(object,"coarseRepresentation",key.coarseRepresentation) &&
+                        number(object,"fineRepresentation",key.fineRepresentation) && number(object,"vertexLayout",key.vertexLayout) && number(object,"materialMapping",key.materialMapping);
+                };
+                const auto* original=cJSON_GetObjectItemCaseSensitive(producer,"originalSource");
+                const auto* selected=cJSON_GetObjectItemCaseSensitive(producer,"selectedCut");
+                const auto* selectedSource=selected?cJSON_GetObjectItemCaseSensitive(selected,"source"):nullptr;
+                const auto* packing=selected?cJSON_GetObjectItemCaseSensitive(selected,"packing"):nullptr;
+                const auto* revision=cJSON_GetObjectItemCaseSensitive(producer,"clodLibraryRevision");
+                if(!source(original,disk.original)||!source(selectedSource,disk.selected)||!cJSON_IsObject(packing) ||
+                    !number(producer,"schemaVersion",disk.schemaVersion)||!number(producer,"controlledPilotVersion",disk.pilotVersion)||
+                    !number(producer,"diskCodecSchema",disk.codecSchema)||!number(producer,"sVertexBytes",disk.vertexBytes)||
+                    !word(producer,"sVertexLayoutKeyHex",disk.layoutKey)||!number(producer,"clodAdapterVersion",disk.clodAdapter)||
+                    !number(producer,"ramAdapterVersion",disk.ramAdapter)||!hexadecimal(producer,"helperSha256",disk.helperSha256.data(),32)||
+                    !number(selected,"formatVersion",disk.formatVersion)||!number(selected,"algorithmVersion",disk.algorithmVersion)||
+                    !number(packing,"clusterVertices",disk.clusterVertices)||!number(packing,"clusterTriangles",disk.clusterTriangles)||
+                    !number(packing,"pageBytes",disk.pageBytes)||!cJSON_IsString(revision)||!revision->valuestring)
+                    return HarnessProtocol::ErrorResponse("complete exact disk pilot versions, source/cut keys, packing and helper hash required");
+                for(size_t i=0;i<40;++i) {
+                    const char c=revision->valuestring[i];
+                    if(!((c>='0'&&c<='9')||(c>='a'&&c<='f')||(c>='A'&&c<='F')))
+                        return HarnessProtocol::ErrorResponse("clod library revision must be 40 hexadecimal characters");
+                    disk.libraryRevision[i]=c;
+                }
+                if(revision->valuestring[40])return HarnessProtocol::ErrorResponse("clod library revision must be exactly 40 characters");
+                diskArgument=&disk;
+            }
+            const auto report=GEngine->ControlGeometryPageFixture(action,xyz[0],xyz[1],xyz[2],diskArgument);
             const char* status="Failed";
             switch(report.status) {
                 case Engine::GeometryReportStatus::Unsupported: status="Disabled"; break;
@@ -592,6 +664,7 @@ void RegisterScreenshot(HarnessServer& hs)
 #define PAGE_FIXTURE_BOOL(field) cJSON_AddBoolToObject(result,#field,report.field)
             PAGE_FIXTURE_BOOL(clodPilot); PAGE_FIXTURE_BOOL(fallbackSelected);
             PAGE_FIXTURE_BOOL(pagedPilot); PAGE_FIXTURE_BOOL(fineResident); PAGE_FIXTURE_BOOL(fineEvictionPending);
+            PAGE_FIXTURE_BOOL(diskPilot); PAGE_FIXTURE_BOOL(coarseResident);
             PAGE_FIXTURE_BOOL(active); PAGE_FIXTURE_BOOL(fineSelected); PAGE_FIXTURE_BOOL(cpuHelpersUnchanged);
             PAGE_FIXTURE_BOOL(mainFrameReturned); PAGE_FIXTURE_BOOL(cascadeConfigured); PAGE_FIXTURE_BOOL(localShadowConfigured);
 #undef PAGE_FIXTURE_BOOL
@@ -621,8 +694,10 @@ void RegisterScreenshot(HarnessServer& hs)
             cJSON_AddStringToObject(result,"sourceSha256",report.sourceSha256.c_str());
             cJSON_AddStringToObject(result,"clodLibraryRevision",report.clodLibraryRevision.c_str());
             cJSON_AddStringToObject(result,"pageWorkState",report.pageWorkState.c_str());
+            cJSON_AddStringToObject(result,"diskReadStatus",report.diskReadStatus.c_str());
+            cJSON_AddStringToObject(result,"diskRequestedRepresentation",report.diskRequestedRepresentation.c_str());
             cJSON_AddStringToObject(result,"selectedCutSha256",report.selectedCutSha256.c_str());
-            cJSON_AddStringToObject(result,"scope","Private programmatically authored box/curved-grid pilot; explicit authored/selected-CLOD value-worker only in paged mode, synchronous CLOD bake scratch/latency not hard-bounded; returned main frame and full-generation record cut, not all-pass/pixel, mounted-file provenance, queue-completion or device-free proof");
+            cJSON_AddStringToObject(result,"scope","Private programmatically authored box/curved-grid pilot; explicit authored/selected-CLOD RAM or private disk value-worker in paged mode; disk expected keys supplied externally and raw pilot/helper source compared independently without owner file I/O/bake; other explicit CLOD bake scratch/latency not hard-bounded; returned main frame and full-generation record cut, not all-pass/pixel, mounted-file provenance, queue-completion or device-free proof");
             return HarnessProtocol::JsonResponse(result);
         });
     hs.RegisterCommand({"geometry_allocations", "Request/poll bounded retained mesh allocation diagnostics", {}},

@@ -2,6 +2,7 @@
 #include <Poseidon/Graphics/Rendering/GeometryPageRepresentationDecode.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageClodCutDecode.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageClodRamPackage.hpp>
+#include <Poseidon/Graphics/Rendering/GeometryPageControlledClodPilot.hpp>
 #include <Poseidon/Graphics/Rendering/AuthoredGeometryPageWorker.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageEvictionPolicy.hpp>
 #include <Poseidon/Foundation/Algorithms/Sha256.hpp>
@@ -2099,12 +2100,14 @@ struct EngineWgpu::GeometryPageFixtureState
     uint32_t consumedInstance=UINT32_MAX, consumedModel=UINT32_MAX; // consumer-only association
     WgrInstance placement{};
     std::shared_ptr<const GeometryPages::AuthoredPageInput> pageInput;
+    std::shared_ptr<const GeometryPages::DiskPageInput> diskInput; // bounded frozen external-producer keys only
     WgrModelSection pageSection{}; WgrModelMaterial pageMaterial{};
     uint64_t pageBaseKnownBytes=0;
     size_t pageFineFirst=0;
     uint32_t pageCoarseSlot=0,pageFirstFineSlot=1,pageRefillSlot=2,pageFineSlot=1,pagePendingFineModel=UINT32_MAX;
     std::shared_ptr<const GeometryPages::ClodRamPackage> pageClodSource; // optional immutable raw-cut provenance
-    bool IsPageFineModel(uint32_t model) const {return model==models[pageFirstFineSlot] || model==models[pageRefillSlot];}
+    bool IsPageFineModel(uint32_t model) const {return model==models[pageFirstFineSlot] || model==models[pageRefillSlot] ||
+        (report.diskPilot && !report.coarseResident && model==models[pageCoarseSlot]);}
     uint32_t pageRetiredBegin=0,pageRetiredEnd=0;
     bool AcceptsModel(uint32_t model) { std::lock_guard lock(mutex);
         return std::find(models.begin(),models.begin()+modelCount,model)!=models.begin()+modelCount; }
@@ -3816,7 +3819,12 @@ void EngineWgpu::DrainInstanceOps(std::vector<InstanceOp>& ops)
                     if(complete) {
                         inst.model=it->second;wgr_instance_update(_renderer,_instSlotOf[op.handle],&inst);
                         fixture.consumedInstance=_instSlotOf[op.handle];fixture.consumedModel=inst.model;
-                        report.fineResident=true;report.fineSelected=true;report.fallbackSelected=false;report.producerModel=op.inst.model;report.pageWorkState="Resident";
+                        report.fallbackSelected=false;report.producerModel=op.inst.model;
+                        if(report.diskPilot && !report.coarseResident && op.inst.model==fixture.models[fixture.pageCoarseSlot]) {
+                            report.coarseResident=true;report.fineResident=false;report.fineSelected=false;
+                            fixture.pageFineSlot=fixture.pageFirstFineSlot;fixture.pageFineFirst=0;fixture.pagePendingFineModel=UINT32_MAX;
+                            report.pageRequest=0;report.pageWorkState="CoarseResident";
+                        } else {report.fineResident=true;report.fineSelected=true;report.pageWorkState="Resident";}
                     } else report.pageWorkState="Failed"; // authored coarse remains the actual instance
                     continue;
                     }
@@ -8390,9 +8398,27 @@ std::string PagePilotHelperHash(const LODShape& shape)
     }
     return hash.Hex();
 }
+std::string PageDiskReadLabel(GeometryPages::DiskReadStatus status)
+{
+    using S=GeometryPages::DiskReadStatus;
+    switch(status) {case S::NotRequested:return "NotRequested";case S::Read:return "Read";case S::Missing:return "Missing";
+        case S::Capacity:return "Capacity";case S::ReadFailed:return "ReadFailed";case S::Invalid:return "Invalid";
+        case S::Unsupported:return "Unsupported";case S::AllocationFailed:return "AllocationFailed";case S::Cancelled:return "Cancelled";}
+    return "Invalid";
+}
+std::string PageHashHex(const std::array<uint8_t,32>& hash)
+{
+    static constexpr char digits[]="0123456789abcdef";std::string text;text.reserve(64);
+    for(auto b:hash){text.push_back(digits[b>>4]);text.push_back(digits[b&15]);}return text;
+}
+GeometryPages::SourceIdentity PageExternalIdentity(const Engine::GeometryPageSourceIdentity& key)
+{
+    return {key.sha256,key.geometryOptions,key.materialOptions,key.producerVersion,key.coarseRepresentation,key.fineRepresentation,key.vertexLayout,key.materialMapping};
 }
 
-Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(GeometryPageFixtureAction action,float x,float y,float z)
+}
+
+Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(GeometryPageFixtureAction action,float x,float y,float z,const GeometryPageDiskFixtureInput* disk)
 {
     static const bool enabled=[] { const char* v=std::getenv("WGR_GEOMETRY_PAGE_FIXTURE"); return v && std::strcmp(v,"1")==0; }();
     GeometryPageFixtureReport failure;
@@ -8410,6 +8436,100 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
         auto report=_geometryPageFixture->report;updatePageStats(report);return report; };
     if(action==GeometryPageFixtureAction::Snapshot) return _geometryPageFixture?copied():failure;
     try {
+        if(action==GeometryPageFixtureAction::BeginDiskClodPaged) {
+            using namespace Poseidon::GeometryPages;
+            failure.diskPilot=true;failure.diskReadStatus="NotRequested";failure.diskRequestedRepresentation="Coarse";
+            failure.pageWorkState="InvalidDiskArguments";
+            if(!disk || !std::isfinite(x)||!std::isfinite(y)||!std::isfinite(z)||std::fabs(x)>1e7f||std::fabs(y)>1e7f||std::fabs(z)>1e7f ||
+                !_nextGeometryPageEpoch || !_nextGeometryPageRequest) return failure;
+            if(_geometryPageFixture) {auto old=copied();if(old.active || old.status!=GeometryReportStatus::Ready || old.meshesAbsent!=old.meshCount) {old.status=GeometryReportStatus::Busy;return old;}}
+            if(disk->schemaVersion!=1 || disk->pilotVersion!=ControlledClodPilotVersion || disk->codecSchema!=ClodDiskDetail::Schema ||
+               disk->vertexBytes!=sizeof(SVertex) || disk->layoutKey!=ClodDiskDetail::LayoutKey() ||
+               disk->clodAdapter!=ClodBake::AdapterVersion || disk->ramAdapter!=ClodRamPackage::AdapterVersion ||
+               disk->libraryRevision[40] || std::memcmp(disk->libraryRevision.data(),ClodBake::LibraryRevision,40)) {
+                failure.pageWorkState="DiskVersionMismatch";return failure;
+            }
+            size_t pathLength=0;while(pathLength<disk->path.size() && disk->path[pathLength]) {
+                const auto c=static_cast<unsigned char>(disk->path[pathLength]);if(c<32 || c>126)return failure;++pathLength;
+            }
+            if(!pathLength || pathLength==disk->path.size()) return failure;
+            auto input=std::make_shared<DiskPageInput>();input->path=std::filesystem::path(std::string(disk->path.data(),pathLength));
+            input->originalSource=PageExternalIdentity(disk->original);input->selectedCut={PageExternalIdentity(disk->selected),
+                {disk->clusterVertices,disk->clusterTriangles,disk->pageBytes},disk->formatVersion,disk->algorithmVersion};input->representation=Frontier::Coarse;
+            if(!ValidDiskPageInput(*input)) return failure;
+            ControlledClodSource source;
+            if(BuildControlledClodSource(source)!=ControlledClodStatus::Built || !(source.original.source==input->originalSource) ||
+               source.helperSha256!=PageHashHex(disk->helperSha256)) {
+                failure.pageWorkState="IndependentSourceMismatch";return failure;
+            }
+            failure.pageWorkState="FallbackRefused";
+            // Only the independent authored fallback is decoded on this explicit
+            // Begin. Selected CLOD coarse/fine are read+decoded on the value worker.
+            Package fallbackPackage;Limits limits;limits.maxPages=8;limits.maxClusters=64;limits.payloadBytes=128*1024;
+            if(Build(source.original.coarse.Input(),source.original.fine.Input(),source.original.source,true,fallbackPackage,limits)!=Status::Built) return failure;
+            ResidentRepresentation fallback;RepresentationDecodeLimits decode;decode.pages=8;decode.clusters=64;
+            decode.vertexRecords=1024;decode.indices=4096;decode.decodedBytes=128*1024;decode.serializedBytes=128*1024;
+            if(DecodeResidentRepresentation(fallbackPackage,fallbackPackage.Identity(),Frontier::Coarse,source.original,fallback,decode)!=DecodeStatus::Decoded) return failure;
+            auto materialShape=std::unique_ptr<Shape>(PagePilotCurvedGrid(1));AutoArray<render::mesh::MeshSection> sections;render::mesh::BuildSections(*materialShape,sections);
+            WgrModelSection materialSection{};WgrModelMaterial material{};
+            if(!ClassifyGpuSection(*materialShape,0,sections,0,materialSection,material)) return failure;
+            if(!material.texture_id) material.texture_id=UntexturedAlbedoHandle(false);
+            auto fixture=std::make_shared<GeometryPageFixtureState>();fixture->modelCount=4;
+            fixture->pageCoarseSlot=1;fixture->pageFirstFineSlot=2;fixture->pageRefillSlot=3;fixture->pageFineSlot=1;
+            fixture->diskInput=std::move(input);fixture->pageSection=materialSection;fixture->pageMaterial=material;fixture->meshes.reserve(64);
+            std::vector<ResourceOp> staged;staged.reserve(size_t(fallback.clusters)+2);
+            uint64_t known=16384+sizeof(GeometryPageFixtureState)+DiskPageKnownBytes(*fixture->diskInput)+fixture->meshes.capacity()*sizeof(uint64_t);
+            const auto meshBytes=[](const ExportedMesh& mesh) {return mesh.vertices.capacity()*sizeof(SVertex)+mesh.positions.capacity()*sizeof(Position)+
+                (mesh.indices.capacity()+mesh.materials.capacity())*sizeof(uint32_t);};
+            known+=meshBytes(source.original.coarse)+meshBytes(source.original.fine)+fallback.decodedBytes+
+                fallback.pages.capacity()*sizeof(ResidentPage);
+            for(const auto& page:fallback.pages)known+=page.clusters.capacity()*sizeof(ResidentCluster);
+            for(const auto& page:fallbackPackage.pages) known+=page.bytes.capacity();
+            known+=fallbackPackage.pages.capacity()*sizeof(Page)+fallbackPackage.clusters.capacity()*sizeof(Cluster);
+            for(uint32_t slot=0;slot<4;++slot) {if(_nextModelHandle==WGR_INVALID_MODEL)return failure;fixture->models[slot]=_nextModelHandle++;}
+            ResourceOp model;model.kind=ResourceOp::ModelRegister;model.model=fixture->models[0];model.sphereRadius=5;model.name="private-disk-clod-fallback";
+            for(const auto& page:fallback.pages)for(const auto& cluster:page.clusters) {
+                if(!_nextMeshHandle)return failure;ResourceOp mesh;mesh.kind=ResourceOp::MeshCreate;mesh.mesh=_nextMeshHandle++;
+                mesh.verts=cluster.vertices;mesh.indices.reserve(cluster.indices.size());for(auto index:cluster.indices) {if(index>INT32_MAX)return failure;mesh.indices.push_back(VertexIndex(index));}
+                auto section=materialSection;section.mesh=mesh.mesh;section.index_begin=0;section.index_count=uint32_t(mesh.indices.size());
+                model.sections.push_back(section);model.materials.push_back(material);fixture->meshes.push_back(mesh.mesh);
+                known+=mesh.verts.capacity()*sizeof(SVertex)+mesh.indices.capacity()*sizeof(VertexIndex)+2*(cluster.vertices.capacity()*sizeof(SVertex)+cluster.indices.capacity()*sizeof(uint32_t));
+                staged.push_back(std::move(mesh));
+            }
+            if(fixture->meshes.empty() || fixture->meshes.size()>64)return failure;
+            model.lods.push_back(WgrModelLod{1,0,uint32_t(model.sections.size()),0});
+            known+=model.sections.capacity()*sizeof(WgrModelSection)+model.materials.capacity()*sizeof(WgrModelMaterial)+model.lods.capacity()*sizeof(WgrModelLod)+staged.capacity()*sizeof(ResourceOp);
+            staged.push_back(std::move(model));
+            failure.pageWorkState="Capacity";
+            if(known>1024*1024)return failure;
+            if(!_geometryPageWorker)_geometryPageWorker=std::make_unique<AuthoredPageWorker>();
+            if(_geometryPageWorker->Snapshot().reservedBytes>1024*1024-known)return failure;
+            fixture->pageBaseKnownBytes=known;auto& report=fixture->report;report.status=GeometryReportStatus::Pending;report.requestId=1;
+            report.active=true;report.clodPilot=true;report.pagedPilot=true;report.diskPilot=true;report.fallbackSelected=true;
+            report.pageEpoch=_nextGeometryPageEpoch++;report.pageWorkState="Idle";report.diskReadStatus="NotRequested";report.diskRequestedRepresentation="Coarse";
+            report.meshCount=uint32_t(fixture->meshes.size());report.knownPayloadBytes=known;report.cpuHelpersUnchanged=true;
+            report.helperHashBefore=source.helperSha256;report.helperHashAfter=source.helperSha256;report.sourceSha256=PageHashHex(source.original.source.sourceSha256);
+            report.selectedCutSha256=PageHashHex(fixture->diskInput->selectedCut.source.sourceSha256);report.clodAdapterVersion=ClodBake::AdapterVersion;
+            report.clodRamAdapterVersion=ClodRamPackage::AdapterVersion;report.clodLibraryRevision=ClodBake::LibraryRevision;
+            report.fallbackTriangles=uint32_t(source.original.coarse.indices.size()/3);report.authoredFineTriangles=uint32_t(source.original.fine.indices.size()/3);
+            report.x=x;report.y=y;report.z=z;report.producerModel=fixture->models[0];
+            auto& placement=fixture->placement;placement.world.m[0]=placement.world.m[5]=placement.world.m[10]=placement.world.m[15]=1;
+            placement.world.m[12]=x;placement.world.m[13]=y;placement.world.m[14]=z;placement.center={x,y,z,1};placement.model=fixture->models[0];
+            ResourceOp observe;observe.kind=ResourceOp::GeometryPageFixtureObserve;observe.fixtureData=fixture;observe.fixtureRequest=1;staged.push_back(std::move(observe));
+            _resourceOps.reserve(_resourceOps.size()+staged.size());_instanceOps.reserve(_instanceOps.size()+1);
+            if(_instFreeHandles.empty() && _nextInstanceHandle==UINT32_MAX)return failure;
+            fixture->instance=EnqueueInstanceAdd(placement);report.producerInstance=fixture->instance;
+            for(auto& op:staged)_resourceOps.push_back(std::move(op));_geometryPageFixture=fixture;_geometryPageFixtureActive=true;
+            // Accepted fallback already owns all published IDs. An unavailable
+            // budget leaves it drawing and RequestCoarse can retry; no orphan job.
+            { std::lock_guard lock(fixture->mutex);
+                const uint64_t token=_nextGeometryPageRequest++;
+                const auto submitted=_geometryPageWorker->SubmitDisk(report.pageEpoch,token,fixture->diskInput,1024*1024-known);
+                if(submitted==AuthoredPageWorker::SubmitStatus::Queued) {report.pageRequest=token;report.pageWorkState="Queued";}
+                else report.pageWorkState="Capacity";
+            }
+            return copied();
+        }
         if(action==GeometryPageFixtureAction::Begin || action==GeometryPageFixtureAction::BeginClod || action==GeometryPageFixtureAction::BeginPaged || action==GeometryPageFixtureAction::BeginClodPaged) {
             if(!std::isfinite(x)||!std::isfinite(y)||!std::isfinite(z)||std::fabs(x)>1e7f||std::fabs(y)>1e7f||std::fabs(z)>1e7f) return failure;
             if(_geometryPageFixture) { auto old=copied(); if(old.active || old.status!=GeometryReportStatus::Ready || old.meshesAbsent!=old.meshCount) { old.status=GeometryReportStatus::Busy; return old; } }
@@ -8663,9 +8783,18 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
             (action==GeometryPageFixtureAction::Coarse || action==GeometryPageFixtureAction::Fine || action==GeometryPageFixtureAction::Fallback)) {
             auto busy=report;busy.status=GeometryReportStatus::Busy;updatePageStats(busy);return busy;
         }
-        if(report.pagedPilot && (action==GeometryPageFixtureAction::RequestFine || action==GeometryPageFixtureAction::PollFine ||
+        if(report.pagedPilot && (action==GeometryPageFixtureAction::RequestCoarse || action==GeometryPageFixtureAction::PollCoarse ||
+            action==GeometryPageFixtureAction::RequestFine || action==GeometryPageFixtureAction::PollFine ||
             action==GeometryPageFixtureAction::CancelFine || action==GeometryPageFixtureAction::HoldFine || action==GeometryPageFixtureAction::ReleaseFine)) {
             if(!_geometryPageWorker || !report.active) return failure;
+            const bool coarseRequest=action==GeometryPageFixtureAction::RequestCoarse || action==GeometryPageFixtureAction::PollCoarse;
+            if(coarseRequest && !report.diskPilot) return failure;
+            if(coarseRequest && report.coarseResident) {auto ready=report;updatePageStats(ready);return ready;}
+            if(report.diskPilot && !report.coarseResident &&
+                (action==GeometryPageFixtureAction::RequestFine || action==GeometryPageFixtureAction::PollFine)) {
+                auto busy=report;busy.status=GeometryReportStatus::Busy;updatePageStats(busy);return busy;
+            }
+            const auto requestedRole=coarseRequest?GeometryPages::Frontier::Coarse:GeometryPages::Frontier::Fine;
             // A staged-but-refused fine model is owned until Abort; never overwrite
             // its registration or append another partial set under the same identity.
             if((report.pageWorkState=="Uploading" || (fixture->pageFineFirst && !report.fineResident)) &&
@@ -8677,22 +8806,57 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
             } else if(action==GeometryPageFixtureAction::CancelFine) {
                 _geometryPageWorker->Cancel(report.pageEpoch);
                 report.pageRequest=0;report.pageWorkState=report.fineResident?"Resident":"Cancelled";
-            } else if(action==GeometryPageFixtureAction::RequestFine && !report.fineResident) {
+            } else if((action==GeometryPageFixtureAction::RequestFine && !report.fineResident) || action==GeometryPageFixtureAction::RequestCoarse) {
                 if(!_nextGeometryPageRequest) return failure;
                 // A continuing request reuses its ticket; status/observation never renews interest.
                 const uint64_t token=report.pageRequest?report.pageRequest:_nextGeometryPageRequest++;
-                const auto submitted=_geometryPageWorker->Submit(report.pageEpoch,token,fixture->pageInput,1024*1024-fixture->pageBaseKnownBytes);
+                GeometryPages::AuthoredPageWorker::SubmitStatus submitted;
+                if(report.diskPilot) {
+                    auto metadata=std::make_shared<GeometryPages::DiskPageInput>(*fixture->diskInput);
+                    metadata->representation=requestedRole;
+                    submitted=_geometryPageWorker->SubmitDisk(report.pageEpoch,token,std::move(metadata),1024*1024-fixture->pageBaseKnownBytes);
+                    report.diskRequestedRepresentation=coarseRequest?"Coarse":"Fine";report.diskReadStatus="NotRequested";
+                } else submitted=_geometryPageWorker->Submit(report.pageEpoch,token,fixture->pageInput,1024*1024-fixture->pageBaseKnownBytes);
                 if(submitted==GeometryPages::AuthoredPageWorker::SubmitStatus::Queued || submitted==GeometryPages::AuthoredPageWorker::SubmitStatus::Duplicate) {
                     report.pageRequest=token;report.pageWorkState="Queued";
                 } else {auto refused=report;refused.status=GeometryReportStatus::Busy;updatePageStats(refused);return refused;}
-            } else if(action==GeometryPageFixtureAction::PollFine && !report.fineResident && report.pageRequest) {
+            } else if(((action==GeometryPageFixtureAction::PollFine && !report.fineResident) || action==GeometryPageFixtureAction::PollCoarse) && report.pageRequest) {
                 auto result=_geometryPageWorker->Take(report.pageEpoch,report.pageRequest);
                 if(result) {
                     report.pageWorkState="Failed"; // every refusal below leaves coarse untouched
-                    if(result->epoch!=report.pageEpoch || result->request!=report.pageRequest ||
-                       result->source!=fixture->pageInput || !(result->decoded.identity==fixture->pageInput->identity) ||
+                    if(report.diskPilot) report.diskReadStatus=PageDiskReadLabel(result->diskStatus);
+                    const bool sourceMatches=report.diskPilot?
+                        (result->source && result->ownership && result->ownership->disk && fixture->diskInput &&
+                         result->diskStatus==GeometryPages::DiskReadStatus::Read && result->requestedRepresentation==requestedRole &&
+                         result->decoded.representation==requestedRole &&
+                         result->ownership->disk->representation==requestedRole &&
+                         result->ownership->disk->path==fixture->diskInput->path &&
+                         result->ownership->disk->originalSource==fixture->diskInput->originalSource &&
+                         result->ownership->disk->selectedCut==fixture->diskInput->selectedCut &&
+                         result->source->identity==fixture->diskInput->selectedCut &&
+                         result->decoded.identity==fixture->diskInput->selectedCut):
+                        (result->source==fixture->pageInput && result->decoded.identity==fixture->pageInput->identity);
+                    if(result->epoch!=report.pageEpoch || result->request!=report.pageRequest || !sourceMatches ||
                        result->status!=GeometryPages::DecodeStatus::Decoded) {
                         report.pageWorkState="Failed";updatePageStats(report);return report;
+                    }
+                    if(report.diskPilot) {
+                        const auto& package=result->source->package;
+                        const size_t coarseClusters=package.coarseClusters;
+                        if(!coarseClusters || coarseClusters>=package.clusters.size() || package.clusters.size()>64 || package.pages.size()>8)return failure;
+                        const size_t fineClusters=package.clusters.size()-coarseClusters;
+                        if(fixture->meshes.size()+(coarseRequest?coarseClusters:0)+2*fineClusters>64) return failure;
+                        // Original raw source was independently checked at Begin. The
+                        // worker validated every selected triangle and material against
+                        // the trusted derived key; this pilot supports material zero only.
+                        for(const auto* mesh:{&result->source->original.coarse,&result->source->original.fine})
+                            for(auto material:mesh->materials) if(material!=0)return failure;
+                        if(coarseRequest) {
+                            fixture->pageFineSlot=fixture->pageCoarseSlot;
+                            report.coarsePages=package.coarsePages;report.finePages=uint32_t(package.pages.size()-package.coarsePages);
+                            report.coarseTriangles=uint32_t(result->source->original.coarse.indices.size()/3);
+                            report.fineTriangles=uint32_t(result->source->original.fine.indices.size()/3);
+                        }
                     }
                     // Owner-only, complete representation transaction. No partial fine
                     // publication, background pointers, constructor/texture reads or FFI.
@@ -8721,7 +8885,8 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
                     _resourceOps.reserve(_resourceOps.size()+staged.size());_instanceOps.reserve(_instanceOps.size()+1);
                     // All capacities ready; publication is now non-allocating.
                     fixture->pageFineFirst=fixture->meshes.size();
-                    fixture->pagePendingFineModel=fineModel;report.fineGeneration=fixture->pageFineSlot==fixture->pageFirstFineSlot?1:2;
+                    fixture->pagePendingFineModel=fineModel;
+                    if(!coarseRequest) report.fineGeneration=fixture->pageFineSlot==fixture->pageFirstFineSlot?1:2;
                     for(auto mesh:meshes) fixture->meshes.push_back(mesh);
                     fixture->placement.model=fineModel;
                     EnqueueInstanceUpdate(fixture->instance,fixture->placement);
@@ -8729,14 +8894,17 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
                     // Consumer validates actual upload/registration before switching.
                     report.pageWorkState="Uploading";
                     report.meshCount=uint32_t(fixture->meshes.size());report.knownPayloadBytes=fixture->pageBaseKnownBytes+extra;
+                    if(coarseRequest) fixture->pageBaseKnownBytes+=extra; // fallback+coarse remain resident across fine eviction/refill
                     report.status=GeometryReportStatus::Pending;report.mainFrameReturned=false;report.renderReturnStatus=INT32_MIN;report.passFacts={};++report.requestId;
                 }
             }
             auto copiedReport=report;updatePageStats(copiedReport);return copiedReport;
         }
-        if((action==GeometryPageFixtureAction::RequestFine || action==GeometryPageFixtureAction::PollFine || action==GeometryPageFixtureAction::CancelFine ||
+        if((action==GeometryPageFixtureAction::RequestCoarse || action==GeometryPageFixtureAction::PollCoarse ||
+            action==GeometryPageFixtureAction::RequestFine || action==GeometryPageFixtureAction::PollFine || action==GeometryPageFixtureAction::CancelFine ||
             action==GeometryPageFixtureAction::HoldFine || action==GeometryPageFixtureAction::ReleaseFine)) return failure;
         if(report.pagedPilot && action==GeometryPageFixtureAction::Fine && !report.fineResident) return failure;
+        if(report.diskPilot && action==GeometryPageFixtureAction::Coarse && !report.coarseResident) return failure;
         if(report.requestId==UINT64_MAX) return failure;
         size_t count=1;
         if(action==GeometryPageFixtureAction::Abort && report.active) count+=fixture->modelCount+fixture->meshes.size();
@@ -8747,7 +8915,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
             EnqueueInstanceRemove(fixture->instance);
             for(uint32_t i=0;i<fixture->modelCount;++i) { ResourceOp op; op.kind=ResourceOp::ModelRetire; op.model=fixture->models[i]; _resourceOps.push_back(std::move(op)); }
             for(auto mesh:fixture->meshes) { ResourceOp op; op.kind=ResourceOp::MeshDestroy; op.mesh=mesh; _resourceOps.push_back(std::move(op)); }
-            report.active=false; report.fineSelected=false; report.fineResident=false; report.fineEvictionPending=false; fixture->pagePendingFineModel=UINT32_MAX; report.fallbackSelected=false; report.producerModel=UINT32_MAX; _geometryPageFixtureActive=false;
+            report.active=false; report.fineSelected=false; report.fineResident=false; report.coarseResident=false; report.fineEvictionPending=false; fixture->pagePendingFineModel=UINT32_MAX; report.fallbackSelected=false; report.producerModel=UINT32_MAX; _geometryPageFixtureActive=false;
         } else if(action==GeometryPageFixtureAction::Coarse||action==GeometryPageFixtureAction::Fine||action==GeometryPageFixtureAction::Fallback) {
             report.fineSelected=action==GeometryPageFixtureAction::Fine;
             report.fallbackSelected=action==GeometryPageFixtureAction::Fallback;

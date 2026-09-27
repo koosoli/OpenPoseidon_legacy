@@ -3137,7 +3137,25 @@ class Engine : public IGraphicsEngine
     { return {}; }
 
     // Ready is a returned-main-frame record cut, not all-pass/pixel or GPU-free proof.
-    enum class GeometryPageFixtureAction { Begin, Coarse, Fine, Observe, Snapshot, Abort, BeginClod, Fallback, BeginPaged, RequestFine, PollFine, CancelFine, HoldFine, ReleaseFine, EvictFine, BeginClodPaged };
+    enum class GeometryPageFixtureAction { Begin, Coarse, Fine, Observe, Snapshot, Abort, BeginClod, Fallback, BeginPaged, RequestFine, PollFine, CancelFine, HoldFine, ReleaseFine, EvictFine, BeginClodPaged, BeginDiskClodPaged, RequestCoarse, PollCoarse };
+    struct GeometryPageSourceIdentity
+    {
+        std::array<uint8_t,32> sha256{};
+        uint64_t geometryOptions=0,materialOptions=0;
+        uint32_t producerVersion=0,coarseRepresentation=0,fineRepresentation=0,vertexLayout=0,materialMapping=0;
+    };
+    // Explicit private fixture arguments FROM a separately verified offline
+    // producer; no Engine file/manifest reads and no retail eligibility authority.
+    struct GeometryPageDiskFixtureInput
+    {
+        std::array<char,1024> path{};
+        GeometryPageSourceIdentity original,selected;
+        std::array<uint8_t,32> helperSha256{};
+        std::array<char,41> libraryRevision{};
+        uint64_t layoutKey=0;
+        uint32_t schemaVersion=0,pilotVersion=0,codecSchema=0,vertexBytes=0,clodAdapter=0,ramAdapter=0;
+        uint32_t formatVersion=0,algorithmVersion=0,clusterVertices=0,clusterTriangles=0,pageBytes=0;
+    };
     struct GeometryPageFixtureReport
     {
         GeometryReportStatus status=GeometryReportStatus::Unsupported;
@@ -3163,6 +3181,8 @@ class Engine : public IGraphicsEngine
         } passFacts;
         bool clodPilot=false, fallbackSelected=false;
         bool pagedPilot=false, fineResident=false;
+        bool diskPilot=false,coarseResident=false;
+        std::string diskReadStatus,diskRequestedRepresentation;
         // Jobs/known capacity are CPU source+decode scheduling estimates, not RSS.
         // Completed counts returned worker results; fineResident requires renderer validation.
         uint64_t pageEpoch=0,pageRequest=0,pageReservedBytes=0,pageCompleted=0,pageCancelled=0;
@@ -3185,7 +3205,7 @@ class Engine : public IGraphicsEngine
         std::string helperHashBefore, helperHashAfter, sourceSha256;
     };
     virtual GeometryPageFixtureReport ControlGeometryPageFixture(GeometryPageFixtureAction,
-        float x=1200,float y=11.5f,float z=1200) { return {}; }
+        float x=1200,float y=11.5f,float z=1200,const GeometryPageDiskFixtureInput* disk=nullptr) { return {}; }
 
   protected:
     // Post-hook fires from OnWindowResized so apps can re-run the aspect policy

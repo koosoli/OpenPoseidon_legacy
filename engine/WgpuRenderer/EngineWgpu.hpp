@@ -1347,7 +1347,7 @@ class EngineWgpu : public EngineDummy
     void FillGeometryMeshFacts(GeometryAllocationReport& report);
     SharedMeshFixtureReport ControlSharedMeshLifetimeFixture(SharedMeshFixtureAction, const Shape* = nullptr) override;
     GeometryPageFixtureReport ControlGeometryPageFixture(GeometryPageFixtureAction,
-        float x=1200,float y=11.5f,float z=1200) override;
+        float x=1200,float y=11.5f,float z=1200,const GeometryPageDiskFixtureInput* disk=nullptr) override;
     void PublishGeometryPageFixtureObservation(const WgrFrame& frame, int32_t renderReturnStatus);
     std::unordered_map<uint32_t, uint32_t> _modelIdOf; // producer -> renderer (post-drain)
     void DrainResourceOps(std::vector<ResourceOp>& ops);
