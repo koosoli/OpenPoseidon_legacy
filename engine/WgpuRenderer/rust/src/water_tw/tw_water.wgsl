@@ -5,10 +5,11 @@
 //   src/ocean/SeaDetail.js   seaDetailSample
 //   src/ocean/WaterMaterial.js the shade() output snippet, fresnelDielectric, GGX, _waterSSR
 //
-// W2 scope (plan §6): open sea. W3a adds the shoreline waves (ShoreWaves.js, tw_shore.wgsl, which
-// is appended to this file): the material is now WaterMaterial._shadeWGSL's `T && SH` variant,
-// shore-sim / surf-foam / wake / hull mask / planar reflection / RefractionPass still off (W3b,
-// W4, W6). Refraction therefore samples the opaque scene copy (Tidewater's own `!found`
+// W2 scope (plan §6): open sea. W3a adds the shoreline waves (ShoreWaves.js, tw_shore.wgsl), W3b
+// the shore simulation (ShoreSim.js, tw_sim.wgsl): the material is now WaterMaterial._shadeWGSL's
+// `T && SH && SIM` variant where a simulated region covers the pixel and `T && SH` elsewhere
+// (the two blend by the region weight; Tidewater picks one at compile time for its one region).
+// Surf foam / wake / hull mask / planar reflection / RefractionPass are still off (W3c, W4, W6). Refraction therefore samples the opaque scene copy (Tidewater's own `!found`
 // fallback), which RefractionPass replaces in W4.
 //
 // Adaptations to OP, all mechanical and listed here once:
@@ -29,15 +30,10 @@
 #import shadow::shadow_strength
 #import color::srgb_to_linear
 
-const PI: f32 = 3.141592653589793;
-const INV_PI: f32 = 0.3183098861837907;
-const IOR: f32 = 1.333;
 const FFT_SIZE: f32 = 256.0;
 const CASCADES: i32 = 4;
 
 override linear: f32 = 1.0;
-
-fn sat(x: f32) -> f32 { return clamp(x, 0.0, 1.0); }
 
 struct OceanParams {
     sizes: array<vec4<f32>, 4>,
@@ -47,30 +43,6 @@ struct OceanParams {
     p0: vec4<f32>, // choppiness, foamBias, foamGain, foamDecay
     p1: vec4<f32>, // foamAdd, time, depth, dt
     seed: vec4<u32>,
-};
-
-struct TwSurface {
-    sea: vec4<f32>,        // sea level, water time, wind speed (m/s), camera water height
-    wind: vec4<f32>,       // wind dir xz (toward), sea-detail drift offset xy (m)
-    surface: vec4<f32>,    // amplitude, slope scale, foam coverage, foam pattern scale (1/m)
-    material0: vec4<f32>,  // backscatter, sss, foam intensity, reflection strength
-    material1: vec4<f32>,  // roughness, ssr on, debug view, sun-lit sky flag
-    absorption: vec4<f32>, // rgb 1/m
-    scattering: vec4<f32>, // rgb 1/m
-    detail: vec4<f32>,     // gust, slick, streak amounts
-    shore0: vec4<f32>,     // ShoreParams: period (s), amplitude (H/2, m), variation, gamma
-    shore1: vec4<f32>,     // ShoreParams: breakSpan, curl, runup, enabled (0 until the field exists)
-    shore2: vec4<f32>,     // ShoreParams: turbidity (1/m), swell heading (rad, travel), shore field centre xz
-    shoreGrid: vec4<f32>,  // shore field: origin xz (world), cell size (m), unused
-    morph: array<vec4<f32>, 12>, // CDLOD per level: morph start, 1/range, spacing
-};
-
-struct ConformParams {
-    origin: vec2<f32>,
-    terrain_grid: f32,
-    enabled: f32,
-    hm_width: u32,
-    hm_height: u32,
 };
 
 @group(1) @binding(0) var<uniform> ocean: OceanParams;
@@ -90,36 +62,8 @@ struct ConformParams {
 @group(1) @binding(14) var<uniform> cf: ConformParams;
 @group(1) @binding(15) var shoreFieldT: texture_2d<f32>;   // rg32float: arrival T, shoreline T
 @group(1) @binding(16) var shoreFieldDir: texture_2d<f32>; // rgba8snorm: direction x exposure
-
-// ------------------------------------------------------------------ terrain (OP heightmap)
-
-fn hm_load(ix: i32, iz: i32) -> f32 {
-    let cx = clamp(ix, 0, i32(cf.hm_width) - 1);
-    let cz = clamp(iz, 0, i32(cf.hm_height) - 1);
-    return textureLoad(seabed_heightmap, vec2<i32>(cx, cz), 0).x;
-}
-
-// Same triangulation as terrain.wgsl's sample_height (and water.wgsl's seabed_height), so the
-// water's idea of the ground is the ground the terrain draws. -500 without a heightmap
-// (Tidewater's "no terrain" value).
-fn terrainHeightAt(xz: vec2<f32>) -> f32 {
-    if (cf.enabled <= 0.5 || cf.hm_width < 2u || cf.hm_height < 2u) {
-        return -500.0;
-    }
-    let t = (xz - cf.origin) / max(cf.terrain_grid, 1e-4);
-    let base = floor(t);
-    let ix = i32(base.x);
-    let iz = i32(base.y);
-    let f = t - base;
-    let y00 = hm_load(ix, iz);
-    let y01 = hm_load(ix + 1, iz);
-    let y10 = hm_load(ix, iz + 1);
-    let y11 = hm_load(ix + 1, iz + 1);
-    // select, not an early return: keeps the fragment's derivatives in uniform control flow
-    let lower = y00 + (y10 - y00) * f.y + (y01 - y00) * f.x;
-    let upper = y10 + (y01 - y11) - (y10 - y11) * f.x - (y01 - y11) * f.y;
-    return select(upper, lower, f.x <= 1.0 - f.y);
-}
+@group(1) @binding(17) var shoreSimStateTex: texture_2d_array<f32>; // rgba16float, one layer per region
+@group(1) @binding(18) var shoreSimLace: texture_2d<f32>;        // rgba8unorm lace (mip 0 read with loads)
 
 // ------------------------------------------------------------------ CDLOD.js
 
@@ -306,7 +250,9 @@ fn rot2(v: vec2<f32>, a: f32) -> vec2<f32> {
 
 // extraFoam: foam carried by the water (ShoreSim, 0 until W3b); surfMask: clear face of a
 // plunging wave, whitewater roller relief (from the vertex stage)
-fn waterSurfaceFragment(lagXZ: vec2<f32>, footprint: f32, depth: f32, vertexFoam: f32, shoreN: vec3<f32>, shoreFoam: f32, extraFoam: f32, surfMask: vec2<f32>) -> WaterSurfaceFrag {
+// simIn: how much a simulated region covers the pixel (Tidewater's SIM, which it decides at
+// compile time for its one region; blended here)
+fn waterSurfaceFragment(lagXZ: vec2<f32>, footprint: f32, depth: f32, vertexFoam: f32, shoreN: vec3<f32>, shoreFoam: f32, extraFoam: f32, surfMask: vec2<f32>, simIn: f32) -> WaterSurfaceFrag {
     var d = vec4<f32>(0.0);
     var foamSum = 0.0;
     // the clear concave face of a plunging wave overhangs the trough: the foam carried by the
@@ -360,7 +306,7 @@ fn waterSurfaceFragment(lagXZ: vec2<f32>, footprint: f32, depth: f32, vertexFoam
         let uq = vec3<f32>(slopes.x, 1.0, slopes.y) * nd.y;
         normal = normalize(tq * (dot(tq, uq) / tq.y) - uq);
         // (WaterSurface: shoreFoam * 0.55 with the shore simulation attached, 1.0 without)
-        foamSum += shoreFoam * 1.0;
+        foamSum += shoreFoam * mix(1.0, 0.55, simIn);
         // the roller and the water behind the plunge point are full of bubbles, decaying behind the
         // bore with the foam it sheds; the clear face of a plunging wave is not
         aeration += sat(shoreFoam * 1.2 + simFoam * 0.7) * (1.0 - face) * smoothstep(-0.1, 0.3, depth);
@@ -586,8 +532,11 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
     // the meniscus: the last decimetre of the advancing sheet bends down to the sand
     let lipW = (1.0 - smoothstep(0.0, 0.14, frontD)) * uprush;
 
-    // (no ShoreSim until W3b: simState = 0)
-    let surf = waterSurfaceFragment(lagXZ, footprint, vDepth, in.foam, in.shoreN, in.shoreFoam + edgeFoam, 0.0, in.surfMask);
+    // the shore simulation here (0 outside the simulated regions), and how much of the pixel it covers
+    let simPick = shoreSimPick(pos.xz);
+    let simState = shoreSimStateFor(pos.xz, simPick);
+    let simIn = simPick.y * select(0.0, 1.0, tw.simP1.w > 0.5);
+    let surf = waterSurfaceFragment(lagXZ, footprint, vDepth, in.foam, in.shoreN, in.shoreFoam + edgeFoam, simState.x, in.surfMask, simIn);
     let foam = surf.foam;
 
     // Which medium is the view ray in? (see WaterMaterial.js) The GPU WaterQuery camera slot is
@@ -702,8 +651,9 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
         dbgScene = sceneCol;
 
         let aer = surf.aeration;
-        // (sandK = 1 without the shore simulation)
-        let sandK = 1.0;
+        // sand stirred up where the bores have just passed (the foam they left marks that water):
+        // clouds of sediment, not a uniform tint (1.0 without the shore simulation)
+        let sandK = mix(1.0, sat(simState.x * 2.5) * 1.8 + 0.45, simIn);
         // surf zone: sand and bubbles stirred up by the breakers (see ShoreWaves.surfMedium)
         let surfMed = shoreSurfMedium(pos.xz, vDepth);
         let sigA = tw.absorption.rgb + surfMed.absorb * sandK;

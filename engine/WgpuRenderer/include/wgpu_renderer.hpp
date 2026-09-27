@@ -1470,7 +1470,8 @@ struct WgrWaterParams
     /* TW-WATER W3 — the Tidewater shoreline waves (ShoreWaves.js ShoreParams). Read only by that backend.
      * [0] x = shore waves on (1), y = wave period s (9), z = amplitude H/2 m (0.34), w = variation (0.55)
      * [1] x = breaker index gamma (0.78), y = break span (0.13), z = curl (1), w = run-up (1)
-     * [2] x = surf-zone turbidity 1/m (0.16), y..w reserved (0)
+     * [2] x = surf-zone turbidity 1/m (0.16), y = shore simulation on (1, W3b), z = wet sand
+     *     drying time s (28, ShoreSim dryTime), w reserved (0)
      * The renderer scales the amplitude with the swell scale (tidewater[0].z) relative to its default,
      * so weather and the reference seas move the surf too. sizeof 1136 -> 1184 with the Rust side. */
     WgrVec4 tidewater_shore[3];
@@ -1650,7 +1651,8 @@ enum WgrGpuTimerRegion : uint32_t
      * the Current OP water rows read n/a; in Current OP mode these two do. */
     WGR_GPU_TIMER_TW_OCEAN_SPECTRUM = 78,
     WGR_GPU_TIMER_TW_OCEAN_FFT = 79,
-    WGR_GPU_TIMER_REGION_COUNT = 80,
+    WGR_GPU_TIMER_TW_SHORE_SIM = 80, /* TW-WATER W3b: the shore simulation regions */
+    WGR_GPU_TIMER_REGION_COUNT = 81,
 };
 
 /* PERF-005 - region nesting, and the ONLY correct way to total this array.

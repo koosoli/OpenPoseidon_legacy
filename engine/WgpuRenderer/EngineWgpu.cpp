@@ -12890,6 +12890,7 @@ const char* EngineWgpu::GetWaterGpuTimingName(int region) const
         "Shadows: local lights",           // WGR_GPU_TIMER_LOCAL_SHADOW (LGT-026)
         "Tidewater: spectrum",             // WGR_GPU_TIMER_TW_OCEAN_SPECTRUM (spectrum-dirty frames)
         "Tidewater: FFT + mips",           // WGR_GPU_TIMER_TW_OCEAN_FFT
+        "Tidewater: shore sim",            // WGR_GPU_TIMER_TW_SHORE_SIM
     };
     return (region >= 0 && region < (int)WGR_GPU_TIMER_REGION_COUNT) ? kNames[region] : "";
 }
@@ -13974,6 +13975,7 @@ void EngineWgpu::SyncWaterLookProfile()
             out << "tidewaterShore " << (t.shoreWaves ? 1 : 0) << ' ' << t.shorePeriod << ' ' << t.shoreAmplitude
                 << ' ' << t.shoreVariation << ' ' << t.shoreGamma << ' ' << t.shoreBreakSpan << ' ' << t.shoreCurl
                 << ' ' << t.shoreRunup << ' ' << t.shoreTurbidity << '\n';
+            out << "tidewaterSim " << (t.shoreSim ? 1 : 0) << ' ' << t.shoreDryTime << '\n';
         }
         if (out.good())
             _waterLookDirty = false;
@@ -14100,6 +14102,13 @@ void EngineWgpu::SyncWaterLookProfile()
             in >> on >> t.shorePeriod >> t.shoreAmplitude >> t.shoreVariation >> t.shoreGamma >> t.shoreBreakSpan >>
                 t.shoreCurl >> t.shoreRunup >> t.shoreTurbidity;
             t.shoreWaves = on != 0;
+        }
+        else if (key == "tidewaterSim")
+        {
+            auto& t = _waterLook.tidewater;
+            int on = 1;
+            in >> on >> t.shoreDryTime;
+            t.shoreSim = on != 0;
         }
         else
             in.ignore(std::numeric_limits<std::streamsize>::max(), '\n');

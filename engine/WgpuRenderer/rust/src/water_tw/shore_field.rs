@@ -36,6 +36,10 @@ pub const GRAVITY: f32 = 9.81;
 pub const BASE_CELL: f32 = 4.0;
 /// Largest field side in cells (memory: rg32float + rgba8snorm = 12 bytes per cell on the GPU).
 pub const MAX_RES: u32 = 2048;
+/// Side of the blocks the coast is indexed in for placing shore-simulation regions (half a region).
+pub const COAST_BLOCK: f32 = 190.0;
+/// A block is coast when at least this many field cells in it are surf-zone water.
+const COAST_MIN_CELLS: u32 = 12;
 
 /// What the field is computed from.
 #[derive(Clone)]
@@ -90,6 +94,9 @@ pub struct ShoreField {
     /// (dirX * exposure, dirZ * exposure) as snorm8, zw unused
     pub dirs: Vec<[i8; 4]>,
     pub stamp: FieldStamp,
+    /// Centres (world xz) of the COAST_BLOCK blocks that hold a surf zone: where shore-simulation
+    /// regions may be placed (OP: Tidewater has one fixed region over its beach).
+    pub coast: Vec<[f32; 2]>,
 }
 
 impl ShoreField {
@@ -298,6 +305,34 @@ pub fn compute(inp: &ShoreFieldInput) -> ShoreField {
         }
     }
     drop(state);
+
+    // Coast index for the shore-simulation regions: surf-zone water (up to 2 m deep, the band the
+    // simulation acts on most; `speed` clamps depths under 0.25 m), counted per COAST_BLOCK block.
+    let coast = {
+        let bx = ((rx as f32 * h) / COAST_BLOCK).ceil().max(1.0) as usize;
+        let bz = ((rz as f32 * h) / COAST_BLOCK).ceil().max(1.0) as usize;
+        let mut count = vec![0u32; bx * bz];
+        let (c_lo, c_hi) = ((GRAVITY * 0.1).sqrt(), (GRAVITY * 2.0).sqrt());
+        for j in 0..rzu {
+            for i in 0..rxu {
+                let c = speed[j * rxu + i];
+                if c >= c_lo && c <= c_hi {
+                    let bi = (((i as f32 + 0.5) * h) / COAST_BLOCK) as usize;
+                    let bj = (((j as f32 + 0.5) * h) / COAST_BLOCK) as usize;
+                    count[bj.min(bz - 1) * bx + bi.min(bx - 1)] += 1;
+                }
+            }
+        }
+        let mut out = Vec::new();
+        for bj in 0..bz {
+            for bi in 0..bx {
+                if count[bj * bx + bi] >= COAST_MIN_CELLS {
+                    out.push([ox + (bi as f32 + 0.5) * COAST_BLOCK, oz + (bj as f32 + 0.5) * COAST_BLOCK]);
+                }
+            }
+        }
+        out
+    };
     drop(speed);
 
     // Extend a field onto land one ring of cells per pass (average of the known neighbours +
@@ -407,7 +442,7 @@ pub fn compute(inp: &ShoreFieldInput) -> ShoreField {
         }
     }
 
-    ShoreField { res_x: rx, res_z: rz, cell: h, origin: [ox, oz], times, dirs, stamp: inp.stamp() }
+    ShoreField { res_x: rx, res_z: rz, cell: h, origin: [ox, oz], times, dirs, stamp: inp.stamp(), coast }
 }
 
 /// One background computation at a time; the newest request wins.
@@ -546,6 +581,11 @@ mod tests {
         let d = f.dirs[60 * rx + i];
         assert!(d[1] > 100, "dirZ*exposure {:?}", d);
         assert!(d[0].abs() < 10);
+        // the beach is indexed for the shore simulation: blocks along z ~ 400 m (the shoreline)
+        assert!(!f.coast.is_empty());
+        for c in &f.coast {
+            assert!((c[1] - 2000.0 - 380.0).abs() <= COAST_BLOCK, "{:?}", c);
+        }
         // land is reached by the extension: finite everywhere a few cells inland
         let land = (400.0 + 20.0) as usize / 4; // 20 m inland
         assert!(f.times[land * rx + i][0] < 1e5);
