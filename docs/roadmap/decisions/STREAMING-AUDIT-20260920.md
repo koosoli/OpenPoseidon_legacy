@@ -2478,3 +2478,49 @@ acceptance or default promotion. Retained/sky/concurrentmeshwrite coverage open.
 Default DayZ control was pending at this checkpoint; cargo source-only proposal blocked by modernloader/
 dedicatedpurpose/lease lifecycle, no unused flag shipped. FullplanOPEN.
 Same5bd defaultDayZ052839 subsequently PASSclean0/stablehashes,835frames mean41.499448/median23.189/p95142.363/p99391.592/max1002.120ms nearest-rank; returned19923/required0/geometry711818480/textures2762855092/2501. No new normal pose/trace/experimental flags; differing work/ordered caches not no-regression proof. Root viewed settled5bd versus previousae default same localPOI with no obvious new geometry/material coverage changes; narrowlocal only, not wholemap/no-regression visual proof/fullplanOPEN.
+
+## Sept27 registered-model census and warm registration quota
+
+3cd04d25 builds all five targets in249steps. Engine114assertions/6cases pass
+without skips for registration-cost/preparer streaming-budget; Rust current
+registered-mesh references3pass/0ignored/361filtered. Cleanmatching3cd installation
+06:07: EXE AF7C52709C40692C27E60F97A20E6A35E53BD0D601B3F1AF3E83702C5DF23452,
+DLL FAA5C45CE9CFBD8F71C51EDA1F1090693A7D0C7F2567103E2893D9D045DB38D3.
+The census inspects bounded current registered model/LOD/section references only;
+it does not certify selected draws, CPU upload owners, GPU in-flight lifetimes,
+exclusive allocations or reclaimable bytes. Actual censusON061057 PASS/clean0 AllocationDiagnosticOnly, convergenceMeasuredfalse:
+2602handle rows/490currentmodels/1814LODs/3272section visits; referenced meshes,
+model references and modelLOD references each1814, section occurrences3272.
+Calls1/validcomplete/missing0/refusal0,8bounded full-generation string samples
+with flags0. Globalownershipfalse/persistentReclaim0 remain unchanged.
+CensusOFF061233 PASS/clean0: enabledfalse/calls0/rows0/empty samples;
+ownershipCoveragefalse/reclaim0. Same3cd allflagsOFF061347 PASS/clean0,
+866frames mean40.073848/median23.7215/p95123.804/p99356.248/max903.406ms,
+nearest-rank/usualmedian, dropped0; returned19923/required0/geometry713270272/
+textures2773165460/2497. Quota/warm profile/othernewflagsOFF; root settleddefault
+againstON/OFF has no obvious local coverage/material change, not wholemap/
+no-regression acceptance.
+
+Samebinary quotaON060747 and OFF060925 both PASS/clean0. ON904frames
+mean37.955302/median22.915/p95110.707/p99277.355/max538.946ms; OFF867frames
+39.625609/23.267/125.632/362.199/1069.472ms, nearest-rank ceil(n*p)-1 and usual
+median. Sampled classification/limit assertions pass, with actual warmCharged2
+at limit2. This bounds counted registration attempts, not a frame deadline,
+texture readiness or total route work. Transient coverage is slower ON: pose0
+15382 versus17279 OFF, pose1 18021 versus19970. Both return19923/required0,
+but geometry739486152 versus703680528 and textures2928044692/2654 versus
+2736074548/2482 differ. Ordered profiled cache/allocated-work confounds and
+transient coverage prevent performance/no-regression acceptance or promotion.
+Root viewed settledON/OFF at the same localPOI without obvious coverage changes;
+this is not all-route/full-map visual proof. New flags remain OFF/fullplanOPEN.
+
+The next proposed StageD slice is bounded warm-only primary-PAA preparation on
+existing workers/store; current cachedShape prefetch bypass leaves measured
+synchronous texture reads. This is a gated recommendation, not implementation:
+implementation requires missing actual physical-member origin on texture source headers;
+current owner capture has zero certified eligible bindings. Agents are investigating
+actual-init source provenance first (unbuilt/notincluded, not an external blocker);
+no new jobs shipped. Thereafter require
+immutable source leases, desired-generation cancellation, independent
+texture-only jobs without model-state takeover, bounded owner capture/worker
+fairness, fallback for uncovered roles and equal-work transient coverage/performance.

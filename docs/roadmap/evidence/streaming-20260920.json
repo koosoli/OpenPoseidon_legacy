@@ -11951,6 +11951,590 @@
         "route-frame-ms.json": "24dcaee845ae5e1182408aa6b40a998a408e8b5f7591939579d83fb5b3785183",
         "samples.jsonl": "25b922279fb571451eeb17cc3becb47d4a20d32884dd338f96b4a98ba02899c6"
       }
+    },
+    {
+      "run": "registration-quota-actual-20260927-disabled-20260927-060747",
+      "classification": "PASS clean exit0; registration-quota scheduling screening only",
+      "provenance": {
+        "measurementScope": "Bounded engine16384-frame route capture; screening only, no FPS acceptance, vanilla parity or full cold-cache proof",
+        "fpsCap": 60,
+        "pose": [
+          5704.58,
+          2523.37,
+          73.74,
+          260.9,
+          -3.8
+        ],
+        "viewDistance": 2000,
+        "head": "3cd04d251d145af5cace24efd563df04b94240e9",
+        "world": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\packages\\dayz-compat\\world\\chernarusplus\\chernarusplus.wrp",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "AF7C52709C40692C27E60F97A20E6A35E53BD0D601B3F1AF3E83702C5DF23452",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "FAA5C45CE9CFBD8F71C51EDA1F1090693A7D0C7F2567103E2893D9D045DB38D3",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "packedTextures": false,
+        "scriptSha256": "F4CAD3D9BDEDF66F3AF29F5ADBE7EEA912FE3068478EC0CD8CA5A8509830A6BB",
+        "paaPreparationInflight": false,
+        "poseHoldSeconds": 3,
+        "height": 720,
+        "msaaSamples": 4,
+        "processScope": "Owned PID private/RSS samples; sparse owner-pump values are observations, not percentiles",
+        "mode": "Disabled",
+        "width": 1280,
+        "paaLzoReplay": false,
+        "routeScope": "Eight convergence400m out/return poses plus three stationary recovery holds; one process per invocation",
+        "paaPreparationDiagnostics": false,
+        "environment": {
+          "WGR_GEO_POOL_GROWTH": "2.0",
+          "WGR_SIMULATION_RESIDENCY": "0",
+          "WGR_TEXTURE_STREAM_STATS": "0",
+          "WGR_OBJECT_STREAM_GPU_BUDGET": "0",
+          "WGR_SIMULATION_POSITIVE_COLD": "0",
+          "WGR_OBJECT_STREAM_TEST_BUDGET": "1",
+          "WGR_NATIVE_DDS_BC3_ONLY": "0",
+          "WGR_OBJECT_STREAM_PBO": "1",
+          "WGR_SKY_VOLUME_INCREMENTAL": "1",
+          "WGR_ADAPTIVE_TEXTURE_DETAIL": "0",
+          "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\registration-quota-actual-20260927-disabled-20260927-060747\\user",
+          "WGR_LOD_GOVERNOR_RANGE": "1",
+          "WGR_GEO_POOL_PRESSURE_GROWTH": "0",
+          "WGR_OBJECT_STREAM_MAX_OBJECTS": "20000",
+          "WGR_OBJECT_STREAM_PBO_TEXTURES": "0",
+          "WGR_NATIVE_DDS_PREPARE": "0",
+          "WGR_OBJECT_STREAM_REGISTRATION_QUOTA": "1",
+          "POSEIDON_MODEL_DDC": "0",
+          "WGR_OBJECT_STREAM_WARM_PROFILE": "1"
+        },
+        "registrationQuota": true,
+        "installed": "codex/streaming-residency 3cd04d25 2026-09-27_06:07 deploy-ps1",
+        "clearedEnvironmentNames": [],
+        "routeX": [
+          5804.58,
+          5904.58,
+          6004.58,
+          6104.58,
+          6004.58,
+          5904.58,
+          5804.58,
+          5704.58,
+          5704.58,
+          5704.58,
+          5704.58
+        ]
+      },
+      "summary": {
+        "passed": true,
+        "performanceAccepted": false,
+        "n": 904,
+        "meanMs": 37.95530199115049,
+        "medianMs": 22.915,
+        "p95Ms": 110.707,
+        "p99Ms": 277.355,
+        "maxMs": 538.946,
+        "quantiles": "nearest-rank ceil(n*p)-1; usual median",
+        "quotaEnabled": true,
+        "warmChargedObserved": true,
+        "sampledQuotaRows": 424,
+        "resident": 19923,
+        "required": 0,
+        "pose0Resident": 15382,
+        "pose1Resident": 18021,
+        "geometry": 739486152,
+        "texture": 2928044692,
+        "textureCount": 2654
+      },
+      "limits": "Same clean3cd binary hashes; counted warm registration limit2/classification assertions pass and ON observed warmCharged2. Sampled owner-state rows are not frame deadlines/texture readiness/all-route totals. ON initial coverage slower: pose0 15382 vs17279, pose1 18021 vs19970 OFF; returned19923/required0 both. Different allocated geometry/textures, ordered profiled cache/work confounds prohibit no-regression/FPS acceptance/promotion. Root viewed settledON/OFF same localPOI without obvious coverage changes, not all-route/full-map proof. New flags stayOFF/fullplanOPEN.",
+      "sha256": {
+        "engine.log": "40c3ad23902e8276dd029ed9c7af4aa06a15bac29208b67f4f096239c63defdb",
+        "harness.jsonl": "7bd1ff8fc62478dbb22319e54b0c5191e875cce46333d927f286b66138ffa213",
+        "paa-attempt-proof.json": "3951cb571a3d95fd60b836c12d84d046aee15767b724417f50af83598d997cad",
+        "paa-inflight-proof.json": "3d9914ddbca54d3b7331ad2a18f00b2801bfbbc76a191e629de81fb15c66c331",
+        "provenance.json": "116994e5e6b5c9179b02f753641e87cd6db2cce9f484899b4adbd11c10e17b26",
+        "registration-quota-proof.json": "237c8e1975be2a594d4e9dcf69871084532118b5e7a5db73e86acc82287b82da",
+        "result.json": "cd0d9d58940cccba9665a9cd2e90c91280b494d6dc82797bdd616d73a6572095",
+        "returned-settled.png": "29ba4119bb6002f657bce2febad5f46d13af1daf74e5cf75c544da8e8df86e73",
+        "route-frame-ms.json": "3f19319702b39c2088e4f84bc8a51b488cde3b26cbe06e6c356614ceec00dd93",
+        "samples.jsonl": "6b7a521b24a336e9dcea3e1196b8c6192565a62bfaed83025d2677ff3abc88ff"
+      }
+    },
+    {
+      "run": "registration-quota-off-20260927-disabled-20260927-060925",
+      "classification": "PASS clean exit0; registration-quota scheduling screening only",
+      "provenance": {
+        "height": 720,
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "AF7C52709C40692C27E60F97A20E6A35E53BD0D601B3F1AF3E83702C5DF23452",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "FAA5C45CE9CFBD8F71C51EDA1F1090693A7D0C7F2567103E2893D9D045DB38D3",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "viewDistance": 2000,
+        "measurementScope": "Bounded engine16384-frame route capture; screening only, no FPS acceptance, vanilla parity or full cold-cache proof",
+        "msaaSamples": 4,
+        "registrationQuota": false,
+        "scriptSha256": "F4CAD3D9BDEDF66F3AF29F5ADBE7EEA912FE3068478EC0CD8CA5A8509830A6BB",
+        "clearedEnvironmentNames": [],
+        "packedTextures": false,
+        "pose": [
+          5704.58,
+          2523.37,
+          73.74,
+          260.9,
+          -3.8
+        ],
+        "paaPreparationInflight": false,
+        "environment": {
+          "WGR_OBJECT_STREAM_MAX_OBJECTS": "20000",
+          "WGR_LOD_GOVERNOR_RANGE": "1",
+          "WGR_NATIVE_DDS_PREPARE": "0",
+          "POSEIDON_MODEL_DDC": "0",
+          "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\registration-quota-off-20260927-disabled-20260927-060925\\user",
+          "WGR_TEXTURE_STREAM_STATS": "0",
+          "WGR_OBJECT_STREAM_PBO_TEXTURES": "0",
+          "WGR_SIMULATION_RESIDENCY": "0",
+          "WGR_OBJECT_STREAM_WARM_PROFILE": "1",
+          "WGR_OBJECT_STREAM_GPU_BUDGET": "0",
+          "WGR_ADAPTIVE_TEXTURE_DETAIL": "0",
+          "WGR_NATIVE_DDS_BC3_ONLY": "0",
+          "WGR_GEO_POOL_PRESSURE_GROWTH": "0",
+          "WGR_SIMULATION_POSITIVE_COLD": "0",
+          "WGR_SKY_VOLUME_INCREMENTAL": "1",
+          "WGR_OBJECT_STREAM_TEST_BUDGET": "1",
+          "WGR_GEO_POOL_GROWTH": "2.0",
+          "WGR_OBJECT_STREAM_PBO": "1"
+        },
+        "processScope": "Owned PID private/RSS samples; sparse owner-pump values are observations, not percentiles",
+        "head": "3cd04d251d145af5cace24efd563df04b94240e9",
+        "world": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\packages\\dayz-compat\\world\\chernarusplus\\chernarusplus.wrp",
+        "paaLzoReplay": false,
+        "width": 1280,
+        "routeScope": "Eight convergence400m out/return poses plus three stationary recovery holds; one process per invocation",
+        "fpsCap": 60,
+        "installed": "codex/streaming-residency 3cd04d25 2026-09-27_06:07 deploy-ps1",
+        "poseHoldSeconds": 3,
+        "paaPreparationDiagnostics": false,
+        "routeX": [
+          5804.58,
+          5904.58,
+          6004.58,
+          6104.58,
+          6004.58,
+          5904.58,
+          5804.58,
+          5704.58,
+          5704.58,
+          5704.58,
+          5704.58
+        ],
+        "mode": "Disabled"
+      },
+      "summary": {
+        "passed": true,
+        "performanceAccepted": false,
+        "n": 867,
+        "meanMs": 39.625608996539825,
+        "medianMs": 23.267,
+        "p95Ms": 125.632,
+        "p99Ms": 362.199,
+        "maxMs": 1069.472,
+        "quantiles": "nearest-rank ceil(n*p)-1; usual median",
+        "quotaEnabled": false,
+        "warmChargedObserved": false,
+        "sampledQuotaRows": 0,
+        "resident": 19923,
+        "required": 0,
+        "pose0Resident": 17279,
+        "pose1Resident": 19970,
+        "geometry": 703680528,
+        "texture": 2736074548,
+        "textureCount": 2482
+      },
+      "limits": "Same clean3cd binary hashes; counted warm registration limit2/classification assertions pass and ON observed warmCharged2. Sampled owner-state rows are not frame deadlines/texture readiness/all-route totals. ON initial coverage slower: pose0 15382 vs17279, pose1 18021 vs19970 OFF; returned19923/required0 both. Different allocated geometry/textures, ordered profiled cache/work confounds prohibit no-regression/FPS acceptance/promotion. Root viewed settledON/OFF same localPOI without obvious coverage changes, not all-route/full-map proof. New flags stayOFF/fullplanOPEN.",
+      "sha256": {
+        "engine.log": "a9a2700e8a48aa2115dc2717c1039b0962260dea80bd958ae7b92975ef71b54b",
+        "harness.jsonl": "8180853e387763ea69f4689a1afc46bb8b9d1eaf76eac9763a7b79c83fbbaf79",
+        "paa-attempt-proof.json": "8b2f580c756b60e3d4094337633c76d023e02d434808573476717981be08bf3c",
+        "paa-inflight-proof.json": "bae60f31fd65d4c2c615f8c602e2a559210064b5a39cc4d06b72013f16661dce",
+        "provenance.json": "5871a3d646b3dd848050d55e472dea2a519cd69231daa73051d6ecfd60105f7e",
+        "registration-quota-proof.json": "6b30f8661b8cf21a4addecc5f22bb24430f76bfffe689ec0580b3d41910a4e2c",
+        "result.json": "f82bba8c8187a70185bdfe9503b51a8927b7db72b0347e1d4b1c97004412349e",
+        "returned-settled.png": "7a4c865147b1c69865b968e01cfa35c5db01a8de7340cbf21964532f74a5dedd",
+        "route-frame-ms.json": "c9876f387c77b7c0c2c37b73f8b61ef3fe49423f230a27c31317e071ebeab2e4",
+        "samples.jsonl": "9ce9c292e202060cd3d2c3bdec8668e613a4589da633866e19ea24e76746e8d1"
+      }
+    },
+    {
+      "run": "registered-refs-actual-20260927-20260927-061057",
+      "classification": "PASS clean exit0; bounded registered-model reference diagnostic only",
+      "provenance": {
+        "meshAck": false,
+        "head": "3cd04d251d145af5cace24efd563df04b94240e9",
+        "registeredRefs": true,
+        "corpus": "DayZ",
+        "growthAllowance": "max(1% of return2, 8 MiB); texture count max(1%, 8)",
+        "cycles": 0,
+        "quietTimeoutSeconds": 30,
+        "routeX": [
+          5804.58,
+          5904.58,
+          6004.58,
+          6104.58,
+          6004.58,
+          5904.58,
+          5804.58,
+          5704.58
+        ],
+        "routePoseHoldSeconds": 3,
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "AF7C52709C40692C27E60F97A20E6A35E53BD0D601B3F1AF3E83702C5DF23452",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "FAA5C45CE9CFBD8F71C51EDA1F1090693A7D0C7F2567103E2893D9D045DB38D3",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "installed": "codex/streaming-residency 3cd04d25 2026-09-27_06:07 deploy-ps1",
+        "quietSamples": 10,
+        "driverSampled": false,
+        "processScope": "PrivateMemorySize64 and WorkingSet64 of owned game PID; diagnostic, not a GPU convergence proof",
+        "environment": {
+          "WGR_NATIVE_DDS_PREPARE": "0",
+          "WGR_OBJECT_STREAM_PBO": "0",
+          "WGR_ADAPTIVE_TEXTURE_DETAIL": "0",
+          "WGR_NATIVE_DDS_BC3_ONLY": "0",
+          "WGR_GEOMETRY_OWNER_LEDGER": "1",
+          "WGR_PASS1_STATS": "1",
+          "WGR_SKY_VOLUME_INCREMENTAL": "1",
+          "WGR_SIMULATION_RESIDENCY": "0",
+          "WGR_OBJECT_STREAM_GPU_BUDGET": "0",
+          "WGR_GEO_POOL_GROWTH": "2.0",
+          "WGR_OBJECT_STREAM_PBO_TEXTURES": "0",
+          "WGR_LOD_GOVERNOR_RANGE": "1",
+          "WGR_GEOMETRY_REGISTERED_REFS": "1",
+          "WGR_GEO_POOL_PRESSURE_GROWTH": "0",
+          "WGR_OBJECT_STREAM_TEST_BUDGET": "1",
+          "WGR_OBJECT_STREAM_MAX_OBJECTS": "20000",
+          "WGR_RESIDENCY_TRACE": "1",
+          "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\registered-refs-actual-20260927-20260927-061057\\user"
+        },
+        "scriptSha256": "2B5AA8260DC8419983D15347F2ACAEEA25333BC2A64988EFAC3C88DFC3C47265",
+        "pose": [
+          5704.58,
+          2523.37,
+          73.74,
+          260.9,
+          -3.8
+        ]
+      },
+      "summary": {
+        "passed": true,
+        "status": "AllocationDiagnosticOnly",
+        "convergenceMeasured": false,
+        "performanceAccepted": false,
+        "ownershipCoverageComplete": false,
+        "persistentReclaimableBytes": 0,
+        "rendererRegisteredRefsEnabled": true,
+        "rendererRegisteredRefsValid": true,
+        "rendererRegisteredRefsComplete": true,
+        "rendererRegisteredRefsScope": "Bounded current registered model/LOD section census for requested full-generation handles; sample rows max8; excludes uploader, caller frame arrays, skin/bake and in-flight work; zero references do not prove safe reclamation",
+        "rendererRegisteredRefsCalls": 1,
+        "rendererRegisteredRefsRows": 2602,
+        "rendererRegisteredModelsVisited": 490,
+        "rendererRegisteredLodsVisited": 1814,
+        "rendererRegisteredSectionsVisited": 3272,
+        "rendererRegisteredMissingRecords": 0,
+        "rendererRegisteredReferencedMeshes": 1814,
+        "rendererRegisteredModelRefs": 1814,
+        "rendererRegisteredModelLodRefs": 1814,
+        "rendererRegisteredSectionOccurrences": 3272,
+        "rendererRegisteredRefusalFlags": 0,
+        "rendererRegisteredRefSamples": [
+          {
+            "mesh": "4294967851",
+            "models": 1,
+            "modelLods": 1,
+            "sections": 1,
+            "flags": 0
+          },
+          {
+            "mesh": "4294968159",
+            "models": 1,
+            "modelLods": 1,
+            "sections": 1,
+            "flags": 0
+          },
+          {
+            "mesh": "4294967853",
+            "models": 1,
+            "modelLods": 1,
+            "sections": 1,
+            "flags": 0
+          },
+          {
+            "mesh": "4294967563",
+            "models": 1,
+            "modelLods": 1,
+            "sections": 1,
+            "flags": 0
+          },
+          {
+            "mesh": "4294968156",
+            "models": 1,
+            "modelLods": 1,
+            "sections": 1,
+            "flags": 0
+          },
+          {
+            "mesh": "4294969548",
+            "models": 1,
+            "modelLods": 1,
+            "sections": 3,
+            "flags": 0
+          },
+          {
+            "mesh": "4294967567",
+            "models": 1,
+            "modelLods": 1,
+            "sections": 1,
+            "flags": 0
+          },
+          {
+            "mesh": "4294969281",
+            "models": 1,
+            "modelLods": 1,
+            "sections": 2,
+            "flags": 0
+          }
+        ]
+      },
+      "limits": "2602 full-generation handles census at one renderer-owner cut;490currentmodels/1814LODs/3272section visits complete within bounds/no refusals/missing records,8bounded string samples. Excludes CPU upload callers, current-frame/retained/skin/bake/in-flight users; zero references are not safe reclamation. Globalownershipfalse/reclaim0; no traversal/convergence/performance/LOD eviction/paging proof. New flagsOFF/fullplanOPEN.",
+      "sha256": {
+        "engine.log": "857785203fb5a5a4bf211e7b9e57380188bfa61f922e293cbd3cf222fb1a93bf",
+        "geometry-allocations-bounded.json": "eecc1a9f94a014b613bdebdf265d6f1276c551e62c951dba1b2138e1362d6ed4",
+        "geometry-allocations.json": "5f5cdb5b0b6eeaa7f85309a45833a7c11344caab9c6e3c9a026a3c77acea7716",
+        "harness.jsonl": "43d2fb98e8ffe7c3d4e3ef396101ea28ab95cf7cb5c00c1bd68b4a38a330302d",
+        "provenance.json": "1f77d94f1d59df0c6a740c0204978b3431be8ab337b10eb3cfc1d38cb075dc25",
+        "result.json": "836e919cdd60e680bea438790fb6b4f3c74e69cb65ff01b1f3af249fcb7c52a7",
+        "returned-settled.png": "11f4391ef814eb69b44aefa43dbe1156499eb2d7bf3d3d29a51d680bd05b276c",
+        "samples.jsonl": "5f95b2dd209140acd8bdfa5fa31693e4513191919f77192ae477253e03332594"
+      }
+    },
+    {
+      "run": "registered-refs-off-20260927-20260927-061233",
+      "classification": "PASS clean exit0; registered census default-OFF diagnostic compatibility",
+      "provenance": {
+        "scriptSha256": "2B5AA8260DC8419983D15347F2ACAEEA25333BC2A64988EFAC3C88DFC3C47265",
+        "installed": "codex/streaming-residency 3cd04d25 2026-09-27_06:07 deploy-ps1",
+        "growthAllowance": "max(1% of return2, 8 MiB); texture count max(1%, 8)",
+        "environment": {
+          "WGR_OBJECT_STREAM_PBO": "0",
+          "WGR_LOD_GOVERNOR_RANGE": "1",
+          "WGR_PASS1_STATS": "1",
+          "WGR_SIMULATION_RESIDENCY": "0",
+          "WGR_OBJECT_STREAM_MAX_OBJECTS": "20000",
+          "WGR_SKY_VOLUME_INCREMENTAL": "1",
+          "WGR_RESIDENCY_TRACE": "1",
+          "WGR_GEO_POOL_GROWTH": "2.0",
+          "WGR_OBJECT_STREAM_PBO_TEXTURES": "0",
+          "WGR_GEOMETRY_OWNER_LEDGER": "1",
+          "WGR_OBJECT_STREAM_GPU_BUDGET": "0",
+          "WGR_NATIVE_DDS_BC3_ONLY": "0",
+          "WGR_GEO_POOL_PRESSURE_GROWTH": "0",
+          "WGR_ADAPTIVE_TEXTURE_DETAIL": "0",
+          "WGR_NATIVE_DDS_PREPARE": "0",
+          "WGR_OBJECT_STREAM_TEST_BUDGET": "1",
+          "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\registered-refs-off-20260927-20260927-061233\\user"
+        },
+        "meshAck": false,
+        "routeX": [
+          5804.58,
+          5904.58,
+          6004.58,
+          6104.58,
+          6004.58,
+          5904.58,
+          5804.58,
+          5704.58
+        ],
+        "cycles": 0,
+        "quietSamples": 10,
+        "corpus": "DayZ",
+        "head": "3cd04d251d145af5cace24efd563df04b94240e9",
+        "registeredRefs": false,
+        "pose": [
+          5704.58,
+          2523.37,
+          73.74,
+          260.9,
+          -3.8
+        ],
+        "driverSampled": false,
+        "processScope": "PrivateMemorySize64 and WorkingSet64 of owned game PID; diagnostic, not a GPU convergence proof",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "AF7C52709C40692C27E60F97A20E6A35E53BD0D601B3F1AF3E83702C5DF23452",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "FAA5C45CE9CFBD8F71C51EDA1F1090693A7D0C7F2567103E2893D9D045DB38D3",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "quietTimeoutSeconds": 30,
+        "routePoseHoldSeconds": 3
+      },
+      "summary": {
+        "passed": true,
+        "status": "AllocationDiagnosticOnly",
+        "convergenceMeasured": false,
+        "performanceAccepted": false,
+        "enabled": false,
+        "calls": 0,
+        "rows": 0,
+        "samples": [],
+        "ownershipCoverageComplete": false,
+        "persistentReclaimableBytes": 0
+      },
+      "limits": "Sameclean3cd binary pair; no registered-reference requests/census work when disabled. Original bounded allocation report remains available. Not frame performance/fullownership/reclamation proof; defaultsOFF/fullplanOPEN.",
+      "sha256": {
+        "engine.log": "03e02a6aff135f311e280dfb7e9243ba268de713a4141e0b1b17790f50947b68",
+        "geometry-allocations-bounded.json": "f6be06f489a5650490b0b781755eff586c8bb32011f9e4e88e03afd68278405b",
+        "geometry-allocations.json": "c756ef300e066df1b741fc12d6527990f14fa8a2d69789e20e3dff895b237357",
+        "harness.jsonl": "0292e85b67e006350d116bd15553c39393b54dc88253dcfa343473c2f6badb1c",
+        "provenance.json": "3ad5abd2819b8a1e8586e2d49a1f97b8571527bd473690e9d8ac6abe16a4a171",
+        "result.json": "df03b3a696fa5f9eb7837744d3e093e3f115d686672af0a751235586898af96c",
+        "returned-settled.png": "d013e6d5bc20646e3ec033aa748eb738033c32c1abe3597243c1827e4abd5b1e",
+        "samples.jsonl": "ef7019b956c852f9671fc44060e01592dfde89de916043feccf5c7b190ec8729"
+      }
+    },
+    {
+      "run": "registered-quota-default-20260927-disabled-20260927-061347",
+      "classification": "PASS clean exit0; same3cd all-new-flagsOFF normal route compatibility",
+      "provenance": {
+        "packedTextures": false,
+        "environment": {
+          "WGR_SIMULATION_RESIDENCY": "0",
+          "POSEIDON_MODEL_DDC": "0",
+          "WGR_OBJECT_STREAM_MAX_OBJECTS": "20000",
+          "WGR_OBJECT_STREAM_TEST_BUDGET": "1",
+          "WGR_SIMULATION_POSITIVE_COLD": "0",
+          "WGR_GEO_POOL_GROWTH": "2.0",
+          "WGR_NATIVE_DDS_PREPARE": "0",
+          "WGR_OBJECT_STREAM_GPU_BUDGET": "0",
+          "WGR_ADAPTIVE_TEXTURE_DETAIL": "0",
+          "WGR_GEO_POOL_PRESSURE_GROWTH": "0",
+          "WGR_TEXTURE_STREAM_STATS": "0",
+          "WGR_SKY_VOLUME_INCREMENTAL": "1",
+          "WGR_LOD_GOVERNOR_RANGE": "1",
+          "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\registered-quota-default-20260927-disabled-20260927-061347\\user",
+          "WGR_NATIVE_DDS_BC3_ONLY": "0",
+          "WGR_OBJECT_STREAM_PBO": "1",
+          "WGR_OBJECT_STREAM_PBO_TEXTURES": "0"
+        },
+        "viewDistance": 2000,
+        "routeScope": "Eight convergence400m out/return poses plus three stationary recovery holds; one process per invocation",
+        "poseHoldSeconds": 3,
+        "processScope": "Owned PID private/RSS samples; sparse owner-pump values are observations, not percentiles",
+        "world": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\packages\\dayz-compat\\world\\chernarusplus\\chernarusplus.wrp",
+        "paaPreparationInflight": false,
+        "clearedEnvironmentNames": [],
+        "paaLzoReplay": false,
+        "msaaSamples": 4,
+        "height": 720,
+        "pose": [
+          5704.58,
+          2523.37,
+          73.74,
+          260.9,
+          -3.8
+        ],
+        "paaPreparationDiagnostics": false,
+        "measurementScope": "Bounded engine16384-frame route capture; screening only, no FPS acceptance, vanilla parity or full cold-cache proof",
+        "mode": "Disabled",
+        "scriptSha256": "F4CAD3D9BDEDF66F3AF29F5ADBE7EEA912FE3068478EC0CD8CA5A8509830A6BB",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "AF7C52709C40692C27E60F97A20E6A35E53BD0D601B3F1AF3E83702C5DF23452",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "FAA5C45CE9CFBD8F71C51EDA1F1090693A7D0C7F2567103E2893D9D045DB38D3",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "registrationQuota": false,
+        "head": "3cd04d251d145af5cace24efd563df04b94240e9",
+        "fpsCap": 60,
+        "installed": "codex/streaming-residency 3cd04d25 2026-09-27_06:07 deploy-ps1",
+        "width": 1280,
+        "routeX": [
+          5804.58,
+          5904.58,
+          6004.58,
+          6104.58,
+          6004.58,
+          5904.58,
+          5804.58,
+          5704.58,
+          5704.58,
+          5704.58,
+          5704.58
+        ]
+      },
+      "summary": {
+        "passed": true,
+        "performanceAccepted": false,
+        "n": 866,
+        "meanMs": 40.07384757505775,
+        "medianMs": 23.7215,
+        "p95Ms": 123.804,
+        "p99Ms": 356.248,
+        "maxMs": 903.406,
+        "quantiles": "nearest-rank ceil(n*p)-1; usual median",
+        "dropped": 0,
+        "registrationQuota": false,
+        "warmProfile": false,
+        "resident": 19923,
+        "required": 0,
+        "geometry": 713270272,
+        "texture": 2773165460,
+        "textureCount": 2497
+      },
+      "limits": "Sameclean3cd hashes; quota/warm profile/othernewflagsOFF. Root viewed settled defaultagainstquotaON/OFF samelocalPOI without obvious new coverage/material changes, not wholemap/no-regression visual proof. Orderedcache/differingwork prevent performance acceptance. Original source-binding prerequisite under investigation/unbuilt/notincluded, not an external blocker; no warm-only jobs shipped/fullplanOPEN/defaultsOFF.",
+      "sha256": {
+        "engine.log": "261004b6dd98f20fe74b3a8f6d704abbfe800201a22bd4f280a653a604d1ad30",
+        "harness.jsonl": "16c10ed5f2062280c310f6f066ba270c4bde1ecdbebfbb425309854c4fdebb2b",
+        "paa-attempt-proof.json": "2bded548307450badf10a41fac5f6d8afa492283f4df049ee1317675b13989dd",
+        "paa-inflight-proof.json": "9e082cd176f2db94e6a9d74c5654bb17a0b90401ee0f2795b61eb3245ffd87b5",
+        "provenance.json": "9d1a843fc17b7f8a8bbc9b9e1368c151a7c08d4eb759dd9b7937ecea16ff6c64",
+        "registration-quota-proof.json": "6ac9d62b08850641d7eafb8fc197435e7a7955451f0a956bb09b4c992aafb2f7",
+        "result.json": "69f3524ddd5b54426cbe4f4a7df94fafbb4ecbebc956c8ddce1a4e31523bfa24",
+        "returned-settled.png": "d586d9791e367dceba03bf4a3ff962409bf22e6ac8d091b162a7c3ad21aef437",
+        "route-frame-ms.json": "209e562397260d2b74292cbeeaea9eca64e3c0a6096afd7bd0ddff744bc82fcd",
+        "samples.jsonl": "5c88dcf7849bba9b02e66ef536ffcb57cee4c2aeb43c571dd919f55ef536a7fe"
+      }
     }
   ],
   "microbenchmarks": [
@@ -13141,6 +13725,16 @@
         "deploy-local-shadow-pose-20260927.log": "54ab5c91fe57199c81f173afb1160a90eec540f99e45a5d25eb258133b209308",
         "run-local-pose-actual-20260927.log": "7a05ecf0363bb22f9dcc34430dd73dbbd7491120bf6833b69398a63e8e327377",
         "run-local-pose-off-20260927.log": "f344caf4b1289c49702f3a1d249da4fa3e4bab821138cd3d81f4bf03aa431659"
+      }
+    },
+    {
+      "artifactRoot": "build",
+      "runtimeSourceCommit": "3cd04d25",
+      "result": "All5targets249stepsPASS; Engine114assertions6casesPASS/noSKIP [registration-cost],[preparer][streaming-budget]; Rustregistered_mesh_refs3PASS0failed0ignored361filtered. Cleanmatchinginstall3cd06:07. Registered census boundedcurrentModelLODsections only; not current-frame selection/CPU uploader/GPU ownership/exclusivity/reclaim. Actual censusON/OFF pass clean0; boundedcurrentModelLODsection references only, no current-frame/uploader/GPU/exclusive/reclaim proof. Warm-only capture is blocked by missing original physical-member header provenance, not implemented.",
+      "sha256": {
+        "build-registered-refs-quota-20260927.log": "b9871d9edcc56e38fc02b92384b672b16a39b5006b50eeb338d8ef545ed6080d",
+        "test-registered-quota-engine-20260927.log": "5bb002356f72f9fdd4b671b0672dc72b1fb0005960c629d765a1526227c9ff94",
+        "test-registered-mesh-refs-rust-20260927.log": "af4c143070b081c9c6fa3bcef53120ce7631f08fb416d5101b18714a065a2785"
       }
     }
   ],
