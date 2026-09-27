@@ -1,10 +1,10 @@
-param([switch]$Disabled,[switch]$Capacity,[switch]$ActiveCapacity,[switch]$MovedWatcher,[switch]$LargeWall,[switch]$SourceDiagnostic,[switch]$PositiveWarming,[switch]$ColdPositive,[switch]$RegisteredWarming,[string]$Label='simulation-residency',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',[string]$Python='C:\Program Files\Python311\python.exe')
+param([switch]$Disabled,[switch]$Capacity,[switch]$ActiveCapacity,[switch]$MovedWatcher,[switch]$LargeWall,[switch]$SourceDiagnostic,[switch]$PositiveWarming,[switch]$ColdPositive,[switch]$RegisteredWarming,[switch]$SharedMeshLifetime,[string]$Label='simulation-residency',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',[string]$Python='C:\Program Files\Python311\python.exe')
 $ErrorActionPreference='Stop'
-if (@($Disabled,$Capacity,$ActiveCapacity,$MovedWatcher,$LargeWall,$SourceDiagnostic,$PositiveWarming,$ColdPositive,$RegisteredWarming | Where-Object {$_}).Count -gt 1) {throw 'Simulation fixture switches are separate scenarios'}
+if (@($Disabled,$Capacity,$ActiveCapacity,$MovedWatcher,$LargeWall,$SourceDiagnostic,$PositiveWarming,$ColdPositive,$RegisteredWarming,$SharedMeshLifetime | Where-Object {$_}).Count -gt 1) {throw 'Simulation fixture switches are separate scenarios'}
 if (!$env:LOCK_OWNER) {
  $shellName=if ($PSVersionTable.PSEdition -eq 'Core') {'pwsh.exe'} else {'powershell.exe'}
  $argv=@((Join-Path $PSScriptRoot 'with-game-lock.sh'),(Join-Path $PSHOME $shellName).Replace('\','/'),'-NoProfile','-File',$PSCommandPath,'-Label',$Label,'-GameDir',$GameDir,'-Python',$Python)
- foreach ($flag in @('Disabled','Capacity','ActiveCapacity','MovedWatcher','LargeWall','SourceDiagnostic','PositiveWarming','ColdPositive','RegisteredWarming')) {if ((Get-Variable $flag -ValueOnly)) {$argv+=('-'+$flag)}}
+ foreach ($flag in @('Disabled','Capacity','ActiveCapacity','MovedWatcher','LargeWall','SourceDiagnostic','PositiveWarming','ColdPositive','RegisteredWarming','SharedMeshLifetime')) {if ((Get-Variable $flag -ValueOnly)) {$argv+=('-'+$flag)}}
  $env:LOCK_OWNER='simulation residency fixture'
  try {& 'C:\Program Files\Git\bin\bash.exe' @argv; if ($LASTEXITCODE) {throw "Simulation fixture exited $LASTEXITCODE"}} finally {Remove-Item Env:LOCK_OWNER}
  return
@@ -50,8 +50,9 @@ class OutroWin { randomSeed=2; class Intel {}; };
 class OutroLoose { randomSeed=3; class Intel {}; };
 '@ | Set-Content (Join-Path $mission 'mission.sqm')
 [IO.File]::WriteAllText((Join-Path $env:POSEIDON_USER_DIR 'graphics.cfg'),"qualityPreset=3;`nmsaaSamples=4;`ndlssMode=0;`nvsync=0;`nfpsCap=60;`n")
-$env:WGR_SIMULATION_RESIDENCY=if ($Disabled -or $SourceDiagnostic) {'0'} else {'1'}
-$env:WGR_SIMULATION_RESIDENCY_TEST=if ($Disabled -or $SourceDiagnostic) {'0'} else {'1'}
+$env:WGR_SIMULATION_RESIDENCY=if ($Disabled -or $SourceDiagnostic -or $SharedMeshLifetime) {'0'} else {'1'}
+$env:WGR_SIMULATION_RESIDENCY_TEST=if ($Disabled -or $SourceDiagnostic -or $SharedMeshLifetime) {'0'} else {'1'}
+$env:WGR_SHARED_MESH_LIFETIME_FIXTURE=if ($SharedMeshLifetime) {'1'} else {'0'}
 $env:WGR_SIMULATION_POSITIVE_COLD=if ($ColdPositive) {'1'} else {'0'}
 $env:WGR_OBJECT_STREAM_WINDOW_GROWTH='0'
 $env:WGR_OBJECT_STREAM_RADIUS_CELLS='8'
@@ -96,7 +97,54 @@ try {
  $actor=Send @{cmd='eval';code='!(isNull streamFixtureActor)'}
  if ($actor.result -notmatch 'true') {throw 'Remote authoritative actor did not initialize'}
  $null=Send @{cmd='eval';code='getPos streamFixtureActor'}
- if ($SourceDiagnostic) {
+ if ($SharedMeshLifetime) {
+  $simulationOff=State
+  if ($simulationOff.status -ne 'Disabled' -or $simulationOff.ownerPumps -ne 0) {throw 'Mesh lifetime fixture unexpectedly enabled simulation residency'}
+  $null=Send @{cmd='eval';code='triFreeFlyPose "1188 1200 18 90 -8"'}
+  $until=[DateTime]::UtcNow.AddSeconds(60)
+  do {Start-Sleep -Milliseconds 250;$meshSource=Ids} while ((!$meshSource.objects[0].visualResident -or $meshSource.objects[0].normalVertexBuffers -eq 0) -and [DateTime]::UtcNow -lt $until)
+  if (!$meshSource.objects[0].visualResident -or $meshSource.objects[0].normalVertexBuffers -eq 0) {throw 'Original mesh fixture source was not already rendered'}
+  function Mesh($action) {Send @{cmd='shared_mesh_lifetime_test';action=$action;id=1001}}
+  function Observe-Mesh($expectedState,$borrowers,$producerOwned,$expectedHandle='') {
+   $until=[DateTime]::UtcNow.AddSeconds(15);$priorCuts=@()
+   do {
+    $request=Mesh 'observe'
+    do {Start-Sleep -Milliseconds 100;$observed=Mesh 'status'} while ($observed.status -eq 'Pending' -and [DateTime]::UtcNow -lt $until)
+    # The final CPU destructor uses the uploader queue. An earlier copied fact
+    # cut may still report Present; wait for a new owner cut, without GPU waits.
+    if ($expectedState -eq 2 -and $observed.status -eq 'Ready' -and $observed.meshState -eq 1) {$priorCuts+=,$observed}
+    else {break}
+   } while ([DateTime]::UtcNow -lt $until)
+   if ($observed.status -ne 'Ready' -or $observed.observedRequestId -ne $request.requestId -or
+       $observed.meshState -ne $expectedState -or $observed.cpuBorrowers -ne $borrowers -or
+       $observed.producerOwned -ne $producerOwned -or !$observed.sourceCopied -or !$observed.privateAllocation -or
+       $observed.knownPayloadBytes -le 0 -or $observed.knownPayloadBytes -gt 1048576 -or
+       ($expectedHandle -and $observed.rendererHandle -ne $expectedHandle)) {
+    throw "Unexpected private mesh lifetime cut: $($observed | ConvertTo-Json -Compress)"
+   }
+   $observed | Add-Member -NotePropertyName priorCuts -NotePropertyValue $priorCuts
+   return $observed
+  }
+  $meshCases=@()
+  foreach ($order in @('newest-first','producer-first')) {
+   $null=Mesh 'begin';$created=Observe-Mesh 1 2 $true
+   $handle=$created.rendererHandle
+   if ($order -eq 'newest-first') {
+    $null=Mesh 'dropNewest';$first=Observe-Mesh 1 1 $true $handle
+    $null=Mesh 'dropProducer';$second=Observe-Mesh 1 1 $false $handle
+   } else {
+    $null=Mesh 'dropProducer';$first=Observe-Mesh 1 2 $false $handle
+    $null=Mesh 'dropNewest';$second=Observe-Mesh 1 1 $false $handle
+   }
+   $null=Mesh 'dropOlder';$last=Observe-Mesh 2 0 $false $handle
+   $meshCases+=@{order=$order;created=$created;first=$first;second=$second;last=$last}
+   $null=Mesh 'abort'
+  }
+  $afterFixture=Ids;$ordinary=Send @{cmd='stream_residency'}
+  if (!$afterFixture.objects[0].present -or !$afterFixture.objects[0].visualResident -or $ordinary.required -ne 0) {throw 'Private mesh fixture changed ordinary world identity or pinned its source'}
+  $result=@{kind='shared-retained-mesh-lifetime';simulationOff=$simulationOff;source=$meshSource;cases=$meshCases;after=$afterFixture;ordinary=$ordinary;
+    limitation='Actual private retained mesh and two CPU borrowers through normal renderer drains; Present/Absent facts are record lifetime, not pixel drawing, complete GPU ownership, queue completion or device memory release.'}
+ } elseif ($SourceDiagnostic) {
   $cold=State; $coldIds=Ids; $baseline=Send @{cmd='stream_residency'}
   if ($cold.status -ne 'Disabled' -or $cold.ownerPumps -ne 0 -or $baseline.sourceEnvelopeBytes -ne 0 -or $baseline.sourceEnvelopeScans -ne 0 -or @($coldIds.objects | Where-Object {$_.present}).Count) {throw 'Ordinary disabled fixture performed source or simulation work'}
   $unrequested=Send @{cmd='stream_source_diagnostic';modelIndex=0}

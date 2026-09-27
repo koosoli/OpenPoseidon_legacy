@@ -7,6 +7,7 @@
 #include <Poseidon/World/Terrain/ObjectStreamPrepare.hpp>
 #include <Poseidon/IO/Streams/ArchiveSourceBinding.hpp>
 #include <atomic>
+#include <stdexcept>
 #include <Poseidon/Foundation/Threads/ThreadAffinity.hpp>
 #include <Poseidon/Core/BuildInfo.hpp>
 #include "TerrainWgpu.hpp"
@@ -1037,9 +1038,15 @@ class VertexBufferWgpu : public VertexBuffer
                 }
             }
         }
-        if (slot->sharedProducer != 0 && !slot->ownsShared)
+        uint64_t sharedRetirement = 0;
+        if (slot->sharedLifetime.Release(sharedRetirement))
         {
-            // RFG-088: the retained model owns the pool allocation; nothing to destroy here.
+            // One allocation serves every CPU borrower. Only the last owner
+            // returns a retirement handle; dispatch is gated against shutdown.
+            slot->sharedLifetime.Dispatch(sharedRetirement, [&](uint64_t handle) {
+                if (uploader) wgr_uploader_mesh_destroy(uploader, handle);
+                else if (renderer) wgr_mesh_destroy(renderer, handle);
+            });
             std::vector<SVertex>().swap(slot->verts);
             std::vector<VertexIndex>().swap(slot->indices);
             return;
@@ -2030,9 +2037,24 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
         [](const LODShape* shape, void* self) { static_cast<EngineWgpu*>(self)->OnShapeDestroyed(shape); }, this);
 }
 
+struct EngineWgpu::SharedMeshFixtureState
+{
+    // Buffer ownership changes on the main owner only. The renderer sees only
+    // numeric request fields and writes a small copied report under this mutex.
+    std::mutex mutex;
+    std::unique_ptr<VertexBuffer> older, newer;
+    std::shared_ptr<render::SharedRetainedMeshLifetime> lifetime;
+    SharedMeshFixtureReport report;
+    uint64_t producer = 0, knownBytes = 0;
+    bool producerReleased = false;
+};
+
 EngineWgpu::~EngineWgpu()
 {
     StopRenderThread();
+    _sharedMeshFixture.reset();
+    // Serializes against late shared-buffer destroy enqueues before wgr_destroy.
+    if (_sharedMeshEpoch) _sharedMeshEpoch->Close();
     if (_geometryOwnerLedger) _geometryOwnerLedger->CloseEpoch(_geometryOwnerEpoch);
     ClearFarObjects();
     s_self = nullptr;
@@ -3112,28 +3134,38 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
             const auto it = _meshIdOf.find(op.mesh);
             if (it != _meshIdOf.end())
             {
-                // RFG-088: a CPU buffer still drawing through this mesh takes it over; the
-                // allocation dies with that buffer instead (VertexBufferWgpu's destructor).
+                // All CPU borrowers, including queued creates, participate in
+                // the same lifetime. The newest weak slot is not an owner census.
                 bool handedOver = false;
-                if (const auto sh = _sharedSlotOf.find(op.mesh); sh != _sharedSlotOf.end())
+                std::shared_ptr<render::SharedRetainedMeshLifetime> lifetime;
                 {
-                    if (std::shared_ptr<CpuMeshSlot> slot = sh->second.lock(); slot && !slot->dead && slot->renderer != 0)
-                    {
-                        slot->ownsShared = true;
-                        handedOver = true;
-                    }
-                    _sharedSlotOf.erase(sh);
+                    std::lock_guard lock(_sharedMeshLifetimeMutex);
+                    if (const auto sh = _sharedMeshLifetime.find(op.mesh); sh != _sharedMeshLifetime.end())
+                    { lifetime = sh->second; _sharedMeshLifetime.erase(sh); }
                 }
-                if (!handedOver)
+                if (lifetime)
                 {
-                    wgr_mesh_destroy(_renderer, it->second);
+                    const uint64_t retirement = lifetime->ReleaseProducer(it->second);
+                    handedOver = retirement == 0;
+                    lifetime->Dispatch(retirement, [&](uint64_t handle) { wgr_mesh_destroy(_renderer, handle); });
                 }
+                else wgr_mesh_destroy(_renderer, it->second);
                 if (_geometryOwnerLedger)
                 {
                     _geometryOwnerLedger->ProducerOwnershipReleased(_geometryOwnerEpoch, op.mesh);
                     if (!handedOver) _geometryOwnerLedger->AllocationRetired(_geometryOwnerEpoch, op.mesh);
                 }
                 _meshIdOf.erase(it);
+            }
+            else
+            {
+                std::shared_ptr<render::SharedRetainedMeshLifetime> lifetime;
+                {
+                    std::lock_guard lock(_sharedMeshLifetimeMutex);
+                    if (const auto sh = _sharedMeshLifetime.find(op.mesh); sh != _sharedMeshLifetime.end())
+                    { lifetime = sh->second; _sharedMeshLifetime.erase(sh); }
+                }
+                if (lifetime) lifetime->ReleaseProducer(0); // No allocation was created.
             }
             break;
         }
@@ -3151,7 +3183,8 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
             {
                 // RFG-088: draw through the retained mesh if it still exists; its create
                 // was queued before this one, so `_meshIdOf` already names it.
-                if (const auto shared = _meshIdOf.find(op.cpu->sharedProducer); shared != _meshIdOf.end())
+                if (const auto shared = _meshIdOf.find(op.cpu->sharedProducer);
+                    shared != _meshIdOf.end() && op.cpu->sharedLifetime.Bind(shared->second))
                 {
                     op.cpu->renderer = shared->second;
                     if (_geometryOwnerLedger)
@@ -3162,8 +3195,9 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
                     std::vector<VertexIndex>().swap(op.cpu->indices);
                     break;
                 }
-                _sharedSlotOf.erase(op.cpu->sharedProducer);
-                op.cpu->sharedProducer = 0; // the retained mesh is gone: own copy after all
+                const uint64_t retirement = op.cpu->sharedLifetime.FallBackToStandalone();
+                op.cpu->sharedLifetime.Dispatch(retirement, [&](uint64_t handle) { wgr_mesh_destroy(_renderer, handle); });
+                op.cpu->sharedProducer = 0; // retained mapping is gone: exact original payload fallback
             }
             GGeometryPoolFill.Note(1, op.cpu->verts.size() * sizeof(SVertex) + op.cpu->indices.size() * sizeof(uint32_t));
             op.cpu->renderer =
@@ -3339,6 +3373,30 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
             // Allocate the publication packet before optional fence acquisition,
             // so allocation failure cannot leak an accepted diagnostic ticket.
             if (_geometryOwnerLedger) FillGeometryMeshFacts(*_geometryReportUnpublished);
+            break;
+        }
+        case ResourceOp::SharedMeshFixtureObserve:
+        {
+            auto& fixture = *op.sharedFixture;
+            uint64_t handle = op.mesh;
+            if (!handle)
+                if (const auto found = _meshIdOf.find(fixture.producer); found != _meshIdOf.end()) handle = found->second;
+            WgrMeshHandleFact fact{};
+            WgrMeshHandleFactSummary summary{};
+            const bool valid = handle && wgr_get_mesh_handle_facts(_renderer,
+                WgrSlice<uint64_t>{&handle, 1}, &fact, 1, &summary) != 0 &&
+                summary.handles_requested == 1 && summary.handles_inspected == 1 && summary.complete == 1 &&
+                summary.flags == 0 && summary.duplicate_handles == 0 && fact.mesh_handle == handle &&
+                fact.reserved == 0 && fact.state <= 2;
+            const auto owners = fixture.lifetime->SnapshotOwners();
+            std::lock_guard lock(fixture.mutex);
+            if (fixture.report.requestId != op.sharedFixtureRequest) break;
+            fixture.report.cpuBorrowers = uint32_t(owners.boundBorrowers);
+            fixture.report.producerOwned = owners.producerOwned;
+            fixture.report.observedRequestId = op.sharedFixtureRequest;
+            fixture.report.rendererHandle = handle;
+            fixture.report.meshState = valid ? fact.state : 0;
+            fixture.report.status = valid ? GeometryReportStatus::Ready : GeometryReportStatus::Failed;
             break;
         }
         case ResourceOp::LodDemandStart:
@@ -5120,6 +5178,32 @@ void EngineWgpu::DrawLine(const Line2DAbs& line, PackedColor c0, PackedColor c1,
     DrawPoly(mip, vertices, 4, clip, specFlags);
 }
 
+// Called only at a fresh monotonic producer admission, never by a borrower.
+// Group allocation is outside the registry lock; failure disables only sharing.
+bool EngineWgpu::PrepareSharedMeshLifetime(uint64_t producer)
+{
+    try
+    {
+        if (!producer) return false;
+        if (!_sharedMeshEpoch) _sharedMeshEpoch = std::make_shared<render::SharedMeshEpoch>();
+        auto group = std::make_shared<render::SharedRetainedMeshLifetime>(producer, _sharedMeshEpoch);
+        std::lock_guard lock(_sharedMeshLifetimeMutex);
+        return _sharedMeshLifetime.emplace(producer, std::move(group)).second;
+    }
+    catch (...) { return false; }
+}
+
+void EngineWgpu::AbandonUnpublishedSharedMeshLifetime(uint64_t producer)
+{
+    std::shared_ptr<render::SharedRetainedMeshLifetime> lifetime;
+    {
+        std::lock_guard lock(_sharedMeshLifetimeMutex);
+        if (const auto found = _sharedMeshLifetime.find(producer); found != _sharedMeshLifetime.end())
+        { lifetime = found->second; _sharedMeshLifetime.erase(found); }
+    }
+    if (lifetime) lifetime->ReleaseProducer(0);
+}
+
 VertexBuffer* EngineWgpu::CreateVertexBuffer(const Shape& src, VBType type)
 {
     if (!_renderer || src.NVertex() <= 0)
@@ -5165,6 +5249,27 @@ VertexBuffer* EngineWgpu::CreateVertexBuffer(const Shape& src, VBType type)
             GVbUpdateCounters[typeIndex].createBytes.fetch_add(bytes, std::memory_order_relaxed);
         }
     }
+    const WgrUploader* uploader = wgr_uploader_get(_renderer);
+    // Covers enqueue/construction/section-building exceptions. A queued create
+    // sees dead, and any acquired shared borrower debt is released exactly once.
+    struct ConstructionRollback
+    {
+        std::shared_ptr<CpuMeshSlot> slot;
+        WgrRenderer* renderer;
+        const WgrUploader* uploader;
+        bool committed = false;
+        ~ConstructionRollback()
+        {
+            if (committed) return;
+            slot->dead = true;
+            uint64_t retirement = 0;
+            if (slot->sharedLifetime.Release(retirement))
+                slot->sharedLifetime.Dispatch(retirement, [&](uint64_t handle) {
+                    if (uploader) wgr_uploader_mesh_destroy(uploader, handle);
+                    else if (renderer) wgr_mesh_destroy(renderer, handle);
+                });
+        }
+    } rollback{slot, _renderer, uploader};
     // RFG-088: a STATIC buffer for a level the retained path already holds draws through that
     // mesh. Measured on native Everon at 800 retained models: the retained meshes were 759 MB
     // and the direct-path buffers 880 MB of the same pool, the largest mesh 12.9 MB on both
@@ -5176,8 +5281,14 @@ VertexBuffer* EngineWgpu::CreateVertexBuffer(const Shape& src, VBType type)
     {
         if (const auto shared = _retainedMeshOfLevel.find(&src); shared != _retainedMeshOfLevel.end())
         {
-            slot->sharedProducer = shared->second;
-            _sharedSlotOf[shared->second] = slot;
+            std::shared_ptr<render::SharedRetainedMeshLifetime> lifetime;
+            {
+                std::lock_guard lock(_sharedMeshLifetimeMutex);
+                if (const auto found = _sharedMeshLifetime.find(shared->second); found != _sharedMeshLifetime.end()) lifetime = found->second;
+            }
+            // Lookup only: a renderer-retired producer can never be recreated
+            // by a later borrower. Ticket allocation failure uses exact fallback.
+            if (slot->sharedLifetime.Attach(lifetime)) slot->sharedProducer = shared->second;
         }
     }
     // RFG-097 diagnostic: the first large buffers that do NOT share, by type, so "1,572 MB
@@ -5230,18 +5341,163 @@ VertexBuffer* EngineWgpu::CreateVertexBuffer(const Shape& src, VBType type)
     // is nothing to release in the destructor. Null only if the renderer is null, which
     // the guard at the top of this function has already ruled out; the buffer falls back
     // to the renderer handle in that case rather than silently dropping uploads.
-    const WgrUploader* uploader = wgr_uploader_get(_renderer);
-    VertexBufferWgpu* buf = nullptr;
+    std::unique_ptr<VertexBufferWgpu> buf;
     if (_geometryOwnerLedger)
     {
         const uint64_t borrower = slot->producer;
-        buf = new AttributedVertexBufferWgpu(_renderer, uploader, std::move(slot), _cpuMeshLink, nv, dynamic, type,
-                                            _geometryOwnerLedger, _geometryOwnerEpoch, borrower);
+        buf.reset(new AttributedVertexBufferWgpu(_renderer, uploader, slot, _cpuMeshLink, nv, dynamic, type,
+                                            _geometryOwnerLedger, _geometryOwnerEpoch, borrower));
     }
     else
-        buf = new VertexBufferWgpu(_renderer, uploader, std::move(slot), _cpuMeshLink, nv, dynamic, type);
+        buf.reset(new VertexBufferWgpu(_renderer, uploader, slot, _cpuMeshLink, nv, dynamic, type));
     render::mesh::BuildSections(src, buf->sections);
-    return buf;
+    rollback.committed = true;
+    return buf.release();
+}
+
+Engine::SharedMeshFixtureReport EngineWgpu::ControlSharedMeshLifetimeFixture(SharedMeshFixtureAction action, const Shape* source)
+{
+    static const bool enabled = [] { const char* v = std::getenv("WGR_SHARED_MESH_LIFETIME_FIXTURE"); return v && std::strcmp(v, "1") == 0; }();
+    SharedMeshFixtureReport result;
+    if (!enabled) return result;
+    result.status = GeometryReportStatus::Invalid;
+    if (!Foundation::IsMainThread() || !_renderer) return result;
+    const auto observe = [&] {
+        auto& fixture = *_sharedMeshFixture;
+        if (!fixture.lifetime) return false;
+        ResourceOp op; op.kind = ResourceOp::SharedMeshFixtureObserve; op.sharedFixture = _sharedMeshFixture;
+        {
+            std::lock_guard lock(fixture.mutex);
+            if (fixture.report.requestId == std::numeric_limits<uint64_t>::max()) return false;
+            op.sharedFixtureRequest = fixture.report.requestId + 1;
+            op.mesh = fixture.report.rendererHandle;
+        }
+        _resourceOps.push_back(std::move(op));
+        std::lock_guard lock(fixture.mutex);
+        ++fixture.report.requestId;
+        fixture.report.status = GeometryReportStatus::Pending;
+        fixture.report.cpuBorrowers = 0; // Only the completed renderer cut supplies actual bound owners.
+        fixture.report.producerOwned = false;
+        return true;
+    };
+    try
+    {
+        if (action == SharedMeshFixtureAction::Begin)
+        {
+            if (_sharedMeshFixture) { result.status = GeometryReportStatus::Busy; return result; }
+            if (!source || source->NVertex() <= 0 || source->NVertex() > 4096 || source->NSections() < 0 || source->NSections() > 128 ||
+                !Dev::GResidencyLevers().shareRetainedMeshes) return result;
+            // Bound original polygon/section metadata walks before invoking
+            // builders; vertex/section counts alone do not bound duplicate faces.
+            size_t faceVisits = 0;
+            for (Offset o = source->BeginFaces(); o < source->EndFaces();)
+            {
+                if (++faceVisits > 4096) return result;
+                const auto& face = source->Face(o);
+                if (face.N() < 3 || face.N() > 32) return result;
+                for (int v = 0; v < face.N(); ++v)
+                    if (face.GetVertex(v) >= source->NVertex()) return result;
+                Offset next = o; source->NextFace(next);
+                if (!(o < next) || source->EndFaces() < next) return result;
+                o = next;
+            }
+            size_t sectionVisits = 0;
+            for (int i = 0; i < source->NSections(); ++i)
+            {
+                const auto& section = source->GetSection(i);
+                if (section.beg < source->BeginFaces() || source->EndFaces() < section.end || section.end < section.beg) return result;
+                for (Offset o = section.beg; o < section.end;)
+                {
+                    if (++sectionVisits > 4096) return result;
+                    Offset next = o; source->NextFace(next);
+                    if (!(o < next) || section.end < next) return result;
+                    o = next;
+                }
+            }
+            const int indices = render::mesh::CountIndices(*source);
+            if (indices <= 0 || indices > 16384) return result;
+            const uint64_t payload = uint64_t(source->NVertex()) * sizeof(SVertex) + uint64_t(indices) * sizeof(VertexIndex);
+            const uint64_t known = payload * 3 + uint64_t(source->NSections()) * sizeof(render::mesh::MeshSection) * 2 + 16384;
+            if (known > 1024 * 1024) return result;
+            _sharedMeshFixture = std::make_shared<SharedMeshFixtureState>();
+            auto& fixture = *_sharedMeshFixture;
+            fixture.producer = _nextMeshHandle++;
+            fixture.knownBytes = known;
+            fixture.report.producer = fixture.producer;
+            fixture.report.knownPayloadBytes = known;
+            fixture.report.sourceCopied = true;
+            fixture.report.privateAllocation = true;
+            ResourceOp create; create.kind = ResourceOp::MeshCreate; create.mesh = fixture.producer;
+            create.verts.resize(size_t(source->NVertex())); create.indices.resize(size_t(indices));
+            render::mesh::BuildVertices(*source, create.verts.data()); render::mesh::BuildIndices(*source, create.indices.data());
+            const uint64_t retainedCapacity = create.verts.capacity() * sizeof(SVertex) + create.indices.capacity() * sizeof(VertexIndex);
+            if (retainedCapacity > payload) throw std::runtime_error("fixture capacity refused");
+            if (!PrepareSharedMeshLifetime(fixture.producer)) throw std::runtime_error("fixture lifetime refused");
+            try { _resourceOps.push_back(std::move(create)); }
+            catch (...) { AbandonUnpublishedSharedMeshLifetime(fixture.producer); throw; }
+            const auto previous = _retainedMeshOfLevel.find(source);
+            const bool hadPrevious = previous != _retainedMeshOfLevel.end();
+            const uint64_t previousProducer = hadPrevious ? previous->second : 0;
+            // Restore exact original registration in this same non-yielding
+            // owner operation, including either CreateVertexBuffer exception.
+            struct Restore
+            {
+                std::unordered_map<const Shape*, uint64_t>& map; const Shape* source;
+                bool existed; uint64_t producer;
+                ~Restore() { if (existed) map.find(source)->second = producer; else map.erase(source); }
+            } restore{_retainedMeshOfLevel, source, hadPrevious, previousProducer};
+            _retainedMeshOfLevel[source] = fixture.producer;
+            fixture.older.reset(CreateVertexBuffer(*source, VBStatic));
+            fixture.newer.reset(CreateVertexBuffer(*source, VBStatic));
+            {
+                std::lock_guard lock(_sharedMeshLifetimeMutex);
+                if (const auto found = _sharedMeshLifetime.find(fixture.producer); found != _sharedMeshLifetime.end()) fixture.lifetime = found->second;
+            }
+            if (!fixture.older || !fixture.newer || !fixture.lifetime) throw std::runtime_error("fixture create failed");
+            const auto* older = static_cast<const VertexBufferWgpu*>(fixture.older.get());
+            const auto* newer = static_cast<const VertexBufferWgpu*>(fixture.newer.get());
+            const auto charge = [](const VertexBufferWgpu& buffer) {
+                return uint64_t(buffer.slot->verts.capacity()) * sizeof(SVertex) +
+                    uint64_t(buffer.slot->indices.capacity()) * sizeof(VertexIndex) +
+                    uint64_t(buffer.sections.MaxSize()) * sizeof(render::mesh::MeshSection);
+            };
+            const uint64_t actualKnown = retainedCapacity + charge(*older) + charge(*newer) + 16384;
+            if (actualKnown > 1024 * 1024) throw std::runtime_error("fixture capacity refused");
+            fixture.knownBytes = fixture.report.knownPayloadBytes = actualKnown;
+            if (!observe()) throw std::runtime_error("fixture observation failed");
+        }
+        else
+        {
+            if (!_sharedMeshFixture) return result;
+            auto& fixture = *_sharedMeshFixture;
+            if (action == SharedMeshFixtureAction::Snapshot)
+            { std::lock_guard lock(fixture.mutex); return fixture.report; }
+            if (action == SharedMeshFixtureAction::DropNewest) fixture.newer.reset();
+            else if (action == SharedMeshFixtureAction::DropOldest) fixture.older.reset();
+            else if (action == SharedMeshFixtureAction::ReleaseProducer || action == SharedMeshFixtureAction::Abort)
+            {
+                if (!fixture.producerReleased)
+                {
+                    ResourceOp destroy; destroy.kind = ResourceOp::MeshDestroy; destroy.mesh = fixture.producer;
+                    _resourceOps.push_back(std::move(destroy)); fixture.producerReleased = true;
+                }
+                if (action == SharedMeshFixtureAction::Abort)
+                { fixture.newer.reset(); fixture.older.reset(); _sharedMeshFixture.reset(); result.status = GeometryReportStatus::Ready; return result; }
+            }
+            else if (action != SharedMeshFixtureAction::Observe) return result;
+            if (!observe()) return result;
+        }
+        std::lock_guard lock(_sharedMeshFixture->mutex);
+        return _sharedMeshFixture->report;
+    }
+    catch (...)
+    {
+        // Keep the bounded state available for an explicit Abort/retry; no
+        // source/Shape pointer survives and no failed fixture is reported Ready.
+        if (_sharedMeshFixture) { std::lock_guard lock(_sharedMeshFixture->mutex); _sharedMeshFixture->report.status = GeometryReportStatus::Failed; }
+        result.status = GeometryReportStatus::Failed;
+        return result;
+    }
 }
 
 namespace
@@ -9438,7 +9694,9 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
             op.crownCentres = std::move(crownCentres);
             op.crownComp = std::move(crownComp);
             mesh = op.mesh;
-            _resourceOps.push_back(std::move(op));
+            if (!isForest && !(levelConform && s->OriginalPosValid())) PrepareSharedMeshLifetime(mesh);
+            try { _resourceOps.push_back(std::move(op)); }
+            catch (...) { AbandonUnpublishedSharedMeshLifetime(mesh); throw; }
         }
         _gpuMeshes.insert(mesh);
         modelMeshes.push_back(mesh);

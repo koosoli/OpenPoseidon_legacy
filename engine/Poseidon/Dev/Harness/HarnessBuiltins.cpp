@@ -26,6 +26,7 @@ using namespace Poseidon;
 #include <vector>
 #include <Poseidon/Foundation/Containers/Array.hpp>
 #include <Poseidon/Foundation/Memory/MemAlloc.hpp>
+#include <Poseidon/Foundation/Threads/ThreadAffinity.hpp>
 #include <Poseidon/Foundation/Strings/RString.hpp>
 // wingdi.h defines GetObject as a macro (GetObjectA). Undef it before the
 // network headers so INetworkManager's virtual GetObject keeps its real name
@@ -460,6 +461,58 @@ void RegisterScreenshot(HarnessServer& hs)
             ARCHIVE_BINDING_FIELD(allocationRefused);
 #undef ARCHIVE_BINDING_FIELD
             cJSON_AddStringToObject(result, "scope", "Mapped raw PAA bytes and their initialized headers only; shared retained C++ metadata charge, excludes kernel/allocator/RSS cost; counters alone do not prove worker jobs, upload readiness or work moved");
+            return HarnessProtocol::JsonResponse(result);
+        });
+    hs.RegisterCommand({"shared_mesh_lifetime_test", "Test-only private retained mesh and two CPU borrowers; no world-object resolution", {}},
+        [](const std::string&, cJSON* root) -> std::string {
+            const char* enabled = std::getenv("WGR_SHARED_MESH_LIFETIME_FIXTURE");
+            if (!enabled || std::strcmp(enabled, "1") || !IsMainThread() || !GEngine || !GWorld ||
+                GWorld->GetMode() == GModeNetware)
+                return HarnessProtocol::ErrorResponse("requires owner-thread singleplayer and WGR_SHARED_MESH_LIFETIME_FIXTURE=1");
+            const char* name = HarnessProtocol::GetString(root, "action");
+            if (!name) return HarnessProtocol::ErrorResponse("fixture action required");
+            Engine::SharedMeshFixtureAction action;
+            if (!std::strcmp(name, "begin")) action = Engine::SharedMeshFixtureAction::Begin;
+            else if (!std::strcmp(name, "dropNewest")) action = Engine::SharedMeshFixtureAction::DropNewest;
+            else if (!std::strcmp(name, "dropProducer")) action = Engine::SharedMeshFixtureAction::ReleaseProducer;
+            else if (!std::strcmp(name, "dropOlder")) action = Engine::SharedMeshFixtureAction::DropOldest;
+            else if (!std::strcmp(name, "observe")) action = Engine::SharedMeshFixtureAction::Observe;
+            else if (!std::strcmp(name, "status")) action = Engine::SharedMeshFixtureAction::Snapshot;
+            else if (!std::strcmp(name, "abort")) action = Engine::SharedMeshFixtureAction::Abort;
+            else return HarnessProtocol::ErrorResponse("unknown fixture action");
+            const Shape* source = nullptr;
+            if (action == Engine::SharedMeshFixtureAction::Begin) {
+                // FindObject and Level are existing-resident lookups. Neither
+                // resolves an authored placement nor initiates a shape load.
+                Object* object = GLandscape ? GLandscape->FindObject(1001) : nullptr;
+                const auto* shape = object ? object->GetShape() : nullptr;
+                if (!object || !object->IsVisualResident() || !shape || shape->NLevels() < 1 || !(source = shape->Level(0)))
+                    return HarnessProtocol::ErrorResponse("already visually resident original fixture object 1001 and CPU level 0 required");
+            }
+            const auto report = GEngine->ControlSharedMeshLifetimeFixture(action, source);
+            const char* status = "Failed";
+            switch (report.status) {
+                case Engine::GeometryReportStatus::Unsupported: status = "Unsupported"; break;
+                case Engine::GeometryReportStatus::Pending: status = "Pending"; break;
+                case Engine::GeometryReportStatus::Busy: status = "Busy"; break;
+                case Engine::GeometryReportStatus::Ready: status = "Ready"; break;
+                case Engine::GeometryReportStatus::Invalid: status = "Invalid"; break;
+                case Engine::GeometryReportStatus::Failed: break;
+            }
+            auto* result = cJSON_CreateObject();
+            cJSON_AddStringToObject(result, "status", status);
+            cJSON_AddNumberToObject(result, "requestId", double(report.requestId));
+            cJSON_AddNumberToObject(result, "observedRequestId", double(report.observedRequestId));
+            // Full-generation renderer identities must survive JSON transport.
+            cJSON_AddStringToObject(result, "producer", std::to_string(report.producer).c_str());
+            cJSON_AddStringToObject(result, "rendererHandle", std::to_string(report.rendererHandle).c_str());
+            cJSON_AddNumberToObject(result, "knownPayloadBytes", double(report.knownPayloadBytes));
+            cJSON_AddNumberToObject(result, "meshState", report.meshState);
+            cJSON_AddNumberToObject(result, "cpuBorrowers", report.cpuBorrowers);
+            cJSON_AddBoolToObject(result, "producerOwned", report.producerOwned);
+            cJSON_AddBoolToObject(result, "sourceCopied", report.sourceCopied);
+            cJSON_AddBoolToObject(result, "privateAllocation", report.privateAllocation);
+            cJSON_AddStringToObject(result, "scope", "Private copied mesh lifetime and generational record state; no world rendering, queue-completion or device-free proof");
             return HarnessProtocol::JsonResponse(result);
         });
     hs.RegisterCommand({"geometry_allocations", "Request/poll bounded retained mesh allocation diagnostics", {}},

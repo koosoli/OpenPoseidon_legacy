@@ -3107,6 +3107,20 @@ class Engine : public IGraphicsEngine
     virtual void CaptureWarmTextureReads(const LODShapeWithShadow*,
         std::vector<WarmTextureRead>&, size_t&) const {}
 
+
+    // Explicit bounded private-allocation diagnostic; never unregisters a world
+    // model. Snapshot reads a copied renderer-cut observation, not live FFI.
+    enum class SharedMeshFixtureAction { Begin, DropNewest, ReleaseProducer, DropOldest, Observe, Snapshot, Abort };
+    struct SharedMeshFixtureReport
+    {
+        GeometryReportStatus status = GeometryReportStatus::Unsupported;
+        uint64_t requestId = 0, observedRequestId = 0, producer = 0, rendererHandle = 0, knownPayloadBytes = 0;
+        uint32_t meshState = 0, cpuBorrowers = 0;
+        bool producerOwned = false, sourceCopied = false, privateAllocation = false;
+    };
+    virtual SharedMeshFixtureReport ControlSharedMeshLifetimeFixture(SharedMeshFixtureAction, const Shape* = nullptr)
+    { return {}; }
+
   protected:
     // Post-hook fires from OnWindowResized so apps can re-run the aspect policy
     // when the viewport changes.

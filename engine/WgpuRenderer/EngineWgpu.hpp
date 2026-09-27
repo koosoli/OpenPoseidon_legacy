@@ -17,6 +17,7 @@
 #include <Poseidon/Asset/Formats/Material/MaterialChannels.hpp>
 
 #include <wgpu_renderer.hpp>
+#include "SharedRetainedMeshLifetime.hpp"
 
 #include <array>
 #include <chrono> // steady_clock, for the opt-in auto-exposure time constant (WGR_AUTO_EXPOSURE_TAU)
@@ -89,11 +90,10 @@ struct CpuMeshSlot
     std::vector<SVertex> verts;
     std::vector<VertexIndex> indices;
     // RFG-088: when non-zero, this buffer DRAWS THROUGH the retained model's mesh for the same
-    // LOD instead of owning a second copy of the same vertices in the pool. `ownsShared` flips
-    // on if the retained model is released first: the pool allocation then belongs to this
-    // slot and dies with it. See EngineWgpu::CreateVertexBuffer.
+    // LOD instead of owning a second copy. All CPU borrowers share one lifetime,
+    // so releasing the newest borrower cannot invalidate an older live buffer.
     uint64_t sharedProducer = 0;
-    bool ownsShared = false;
+    render::SharedRetainedMeshLifetime::Borrower sharedLifetime;
 };
 
 // REN-THR-011 -- the back edge a CPU-path vertex buffer needs and must not own outright.
@@ -802,9 +802,17 @@ class EngineWgpu : public EngineDummy
     // it. Conform levels (BuildOrigVertices) and forest levels (crown-patched conform words)
     // are NOT entered: their retained bytes differ from the CPU build.
     std::unordered_map<const Shape*, uint64_t> _retainedMeshOfLevel;
-    // RFG-088: producer mesh -> the CPU slot drawing through it, for the ownership hand-over
-    // at MeshDestroy.
-    std::unordered_map<uint64_t, std::weak_ptr<CpuMeshSlot>> _sharedSlotOf;
+    // Shared lifetime metadata is bounded by producer entries plus live CPU
+    // slots. No raw Shape/slot identity is retained after producer removal.
+    // One ticket per shareable retained producer, removed at producer retirement.
+    // CPU slots may retain a retired ticket only until their own destruction.
+    std::unordered_map<uint64_t, std::shared_ptr<render::SharedRetainedMeshLifetime>> _sharedMeshLifetime;
+    std::shared_ptr<render::SharedMeshEpoch> _sharedMeshEpoch;
+    std::mutex _sharedMeshLifetimeMutex;
+    bool PrepareSharedMeshLifetime(uint64_t producer);
+    void AbandonUnpublishedSharedMeshLifetime(uint64_t producer);
+    struct SharedMeshFixtureState;
+    std::shared_ptr<SharedMeshFixtureState> _sharedMeshFixture;
     std::unordered_map<const LODShapeWithShadow*, std::vector<TextureWgpu*>> _gpuModelTextures;
     std::unordered_map<const LODShapeWithShadow*, uint32_t> _gpuModelRefs;
     void RetainGpuModel(const LODShapeWithShadow* shape);
@@ -1278,7 +1286,8 @@ class EngineWgpu : public EngineDummy
             ModelRetire,
             GeometryReport,
             LodDemandStart,
-            LodDemandCancel
+            LodDemandCancel,
+            SharedMeshFixtureObserve
         };
         Kind kind = MeshCreate;
         uint64_t mesh = 0;  // MeshCreate: the producer handle being defined; MeshDestroy: the one dying
@@ -1309,6 +1318,8 @@ class EngineWgpu : public EngineDummy
         std::unique_ptr<GeometryReportRequest> geometryReport;
         struct LodDemandRequest { uint64_t epoch = 0; uint32_t frames = 0; std::vector<uint32_t> models; };
         std::unique_ptr<LodDemandRequest> lodDemand;
+        std::shared_ptr<SharedMeshFixtureState> sharedFixture;
+        uint64_t sharedFixtureRequest = 0;
     };
     std::vector<ResourceOp> _resourceOps;
     uint64_t _nextMeshHandle = 1;  // 0 stays "no mesh", matching the FFI's failure value
@@ -1321,6 +1332,7 @@ class EngineWgpu : public EngineDummy
     bool _geometryMeshAckEnabled = false;
     bool _geometryRegisteredRefsEnabled = false;
     void FillGeometryMeshFacts(GeometryAllocationReport& report);
+    SharedMeshFixtureReport ControlSharedMeshLifetimeFixture(SharedMeshFixtureAction, const Shape* = nullptr) override;
     std::unordered_map<uint32_t, uint32_t> _modelIdOf; // producer -> renderer (post-drain)
     void DrainResourceOps(std::vector<ResourceOp>& ops);
 
