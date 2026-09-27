@@ -1,5 +1,7 @@
 #pragma once
 #include <cstddef>
+#include <array>
+#include <algorithm>
 #include <cstdint>
 #include <limits>
 #include <mutex>
@@ -16,7 +18,7 @@ class GeometryOwnerLedger
 public:
     enum class ProducerKind { Retained, Cpu };
     enum class Reason : uint32_t { Protocol=1, Capacity=2, LateEnable=4, Arithmetic=8, HandleExportCapacity=16 };
-    struct Limits { size_t allocations=8192, borrowers=32768, modelLodLinks=32768, mailbox=4096; };
+    struct Limits { size_t allocations=8192, borrowers=32768, modelLodLinks=32768, mailbox=4096, retirementCandidates=8192; };
     struct Report
     {
         uint64_t epoch=0, incompleteReasons=0;
@@ -27,6 +29,9 @@ public:
         uint64_t droppedDetachEvents=0, cancelledBeforeCreate=0;
         uint64_t mailboxKnownCapacityBytes=0, mailboxPeakKnownCapacityBytes=0;
         uint64_t scheduledRetirementEvents=0;
+        uint64_t cumulativePrunedAllocations=0,cumulativePrunedBorrowers=0;
+        size_t queuedRetirementCandidates=0,candidateKnownCapacityBytes=0;
+        size_t queuedDetachedHistory=0,borrowerKnownRecordBytes=0,selectedDiagnosticPins=0;
         size_t queuedOwnershipEvents=0, queuedRetirementEvents=0;
         uint64_t droppedOwnershipEvents=0, droppedRetirementEvents=0;
         // Producer estimates for records not scheduled-retired by this ledger.
@@ -80,6 +85,7 @@ public:
         _epoch=epoch; _mailEpoch=epoch; _open=true; _mailOpen=true;
         _reasons=observedFromStart?0:static_cast<uint32_t>(Reason::LateEnable);
         _mailDropped=0; _drops=0; _cancelled=0; _links=0; _scheduledEvents=0; _mailPeakBytes=_mail.capacity()*sizeof(MailEvent); _mailScheduledQueued=0; _mailScheduledDropped=0; _retireDrops=0;
+        _actualCreatedWatermark=0; _settledCpuWatermark=0; _candidateHead=0; _candidateCount=0; _prunedAllocations=0; _prunedBorrowers=0; _detachedHead=0; _detachedTail=0; _detachedCount=0; _selectedDiagnosticPin=0;
         return true;
     }
     void CloseEpoch(uint64_t epoch)
@@ -93,7 +99,8 @@ public:
     bool AllocationCreated(uint64_t epoch,uint64_t id,uint64_t vertexBytes,uint64_t indexBytes,ProducerKind kind,uint64_t meshHandle=0)
     {
         if(!Current(epoch)) return false;
-        if(!id || _allocations.count(id)) { MarkIncomplete(epoch,Reason::Protocol); return false; }
+        if(!id || id<=_actualCreatedWatermark || _allocations.count(id)) { MarkIncomplete(epoch,Reason::Protocol); return false; }
+        _actualCreatedWatermark=id; // production creator queue is monotonic/FIFO; no historical resurrection
         if(_allocations.size()>=_limits.allocations) { MarkIncomplete(epoch,Reason::Capacity); return false; }
         try { _allocations.emplace(id,Allocation{vertexBytes,indexBytes,meshHandle,kind,true,false,0,0}); }
         catch (...) { MarkIncomplete(epoch,Reason::Capacity); return false; }
@@ -117,6 +124,7 @@ public:
             if(found->second.allocation==allocation) return true;
             MarkIncomplete(epoch,Reason::Protocol); return false;
         }
+        if(borrower<=_settledCpuWatermark) return false; // closed old borrower ID cannot acquire a new association
         if(_borrowers.size()>=_limits.borrowers) { MarkIncomplete(epoch,Reason::Capacity); return false; }
         try { _borrowers.emplace(borrower,Borrower{allocation,true}); }
         catch (...) { MarkIncomplete(epoch,Reason::Capacity); return false; }
@@ -127,8 +135,9 @@ public:
         if(!Current(epoch) || !borrower) return;
         auto found=_borrowers.find(borrower);
         if(found==_borrowers.end()) {
+            if(borrower<=_settledCpuWatermark) return; // old duplicate detach; no new cancellation tombstone
             if(_borrowers.size()>=_limits.borrowers) { MarkIncomplete(epoch,Reason::Capacity); return; }
-            try { _borrowers.emplace(borrower,Borrower{0,false}); }
+            try { _borrowers.emplace(borrower,Borrower{0,false}); QueueDetachedBorrower(borrower); }
             catch (...) { MarkIncomplete(epoch,Reason::Capacity); }
             return;
         }
@@ -137,7 +146,10 @@ public:
             if(a!=_allocations.end() && a->second.cpu) --a->second.cpu;
             else MarkIncomplete(epoch,Reason::Protocol);
             found->second.attached=false;
+            if(a!=_allocations.end()) QueueRetirementCandidate(a->first,a->second);
         }
+        if(borrower<=_settledCpuWatermark) { UnqueueDetachedBorrower(borrower); _borrowers.erase(found); Add(_prunedBorrowers,1); }
+        else QueueDetachedBorrower(borrower);
     }
     // Arbitrary destructor threads enqueue immutable numeric metadata only.
     // Scheduling records are emitted only after a real destroy-dispatch callback,
@@ -188,7 +200,7 @@ public:
         auto m=_models.find(model); if(m==_models.end()) return;
         for(const auto& lod:m->second) for(auto allocation:lod.second) {
             auto a=_allocations.find(allocation);
-            if(a!=_allocations.end() && a->second.models) --a->second.models;
+            if(a!=_allocations.end() && a->second.models) { --a->second.models; QueueRetirementCandidate(a->first,a->second); }
             else MarkIncomplete(epoch,Reason::Protocol);
             --_links;
         }
@@ -201,6 +213,63 @@ public:
         if(!Current(epoch)) return;
         DrainDetachMailbox();
         ApplyRetirement(epoch,id);
+    }
+    // Owner calls AFTER this CPU create's attach/fallback/cancel bookkeeping.
+    // IDs originate in the single monotonic producer queue; settling out of
+    // order is a sticky refusal, never a licence to drop a pending tombstone.
+    void NoteCpuCreateSettled(uint64_t epoch,uint64_t borrower)
+    {
+        if(!Current(epoch)) return;
+        if(!borrower || borrower<=_settledCpuWatermark) { MarkIncomplete(epoch,Reason::Protocol); return; }
+        _settledCpuWatermark=borrower;
+        const auto found=_borrowers.find(borrower);
+        if(found!=_borrowers.end() && !found->second.attached) { UnqueueDetachedBorrower(borrower); _borrowers.erase(found); Add(_prunedBorrowers,1); }
+    }
+    // Exactly one private selected fixture record; owner-only and numeric.
+    // It holds metadata only, never a GPU allocation or world model lease.
+    bool SetSelectedDiagnosticPin(uint64_t epoch,uint64_t id,bool pinned)
+    {
+        if(!Current(epoch)) return false;
+        const auto found=_allocations.find(id); if(found==_allocations.end()) return false;
+        if(pinned) {
+            if(_selectedDiagnosticPin && _selectedDiagnosticPin!=id) { MarkIncomplete(epoch,Reason::Capacity); return false; }
+            _selectedDiagnosticPin=id;
+        } else if(_selectedDiagnosticPin==id) { _selectedDiagnosticPin=0; QueueRetirementCandidate(id,found->second); }
+        return true;
+    }
+    size_t TakeRetirementCandidates(uint64_t epoch,HandleRecord* out,size_t capacity)
+    {
+        if(!Current(epoch) || !out) return 0;
+        DrainDetachMailbox();
+        // Intrusive numeric history queue: no allocation, iterators or full-map
+        // scan. Includes failed-before-enqueue IDs once later FIFO progress
+        // proves their old numeric identity can never attach again.
+        const size_t borrowerVisits=std::min<size_t>(_detachedCount,32);
+        for(size_t i=0;i<borrowerVisits;++i) {
+            const auto id=_detachedHead; UnqueueDetachedBorrower(id);
+            const auto found=_borrowers.find(id); if(found==_borrowers.end()) continue;
+            if(!found->second.attached && id<=_settledCpuWatermark) { _borrowers.erase(found); Add(_prunedBorrowers,1); }
+            else if(!found->second.attached) QueueDetachedBorrower(id);
+        }
+        const size_t visits=std::min<size_t>(_candidateCount,std::min<size_t>(capacity,32));
+        size_t count=0;
+        for(size_t i=0;i<visits;++i) {
+            const auto id=_candidates[_candidateHead]; _candidateHead=(_candidateHead+1)%MaxCandidates; --_candidateCount;
+            const auto found=_allocations.find(id); if(found==_allocations.end()) continue;
+            auto& a=found->second; a.candidate=false;
+            if(!EligibleForPrune(id,a)) continue;
+            out[count++]={id,a.handle,_epoch,true,false,0,0};
+        }
+        return count;
+    }
+    bool ConfirmRetirementObservation(uint64_t epoch,uint64_t id,uint64_t fullHandle,bool exactAbsent)
+    {
+        if(!Current(epoch)) return false;
+        const auto found=_allocations.find(id); if(found==_allocations.end()) return false;
+        auto& a=found->second;
+        if(a.handle!=fullHandle || !EligibleForPrune(id,a)) return false;
+        if(!exactAbsent) { QueueRetirementCandidate(id,a); return false; }
+        _allocations.erase(found); Add(_prunedAllocations,1); return true;
     }
     void NoteCancelledBeforeCreate(uint64_t epoch) { if(Current(epoch)) Add(_cancelled,1); }
     Report Snapshot() { DrainDetachMailbox(); return BuildSnapshot(); }
@@ -259,6 +328,10 @@ private:
           r.queuedOwnershipEvents=_mail.size(); r.queuedRetirementEvents=_mailScheduledQueued;
           r.mailboxKnownCapacityBytes=_mail.capacity()*sizeof(MailEvent); r.mailboxPeakKnownCapacityBytes=_mailPeakBytes;
           if(_mailDropped) MarkIncomplete(_epoch,Reason::Capacity); }
+        r.cumulativePrunedAllocations=_prunedAllocations; r.cumulativePrunedBorrowers=_prunedBorrowers;
+        r.queuedRetirementCandidates=_candidateCount; r.candidateKnownCapacityBytes=sizeof(_candidates);
+        r.queuedDetachedHistory=_detachedCount; r.borrowerKnownRecordBytes=_borrowers.size()*sizeof(Borrower);
+        r.selectedDiagnosticPins=_selectedDiagnosticPin?1:0; // record payload only, excludes unordered-map nodes/buckets/allocator
         r.scheduledRetirementEvents=_scheduledEvents; r.droppedOwnershipEvents=_drops; r.droppedRetirementEvents=_retireDrops;
         r.incompleteReasons=_reasons; r.attributionComplete=_open && !_reasons && r.queuedDetachEvents==0; return r;
     }
@@ -290,9 +363,34 @@ private:
         auto* a=Find(epoch,id); if(!a) return;
         if(a->cpu || a->models) MarkIncomplete(epoch,Reason::Protocol);
         a->producer=false; a->retired=true;
+        QueueRetirementCandidate(id,*a);
     }
-    struct Allocation { uint64_t vertex,index,handle; ProducerKind kind; bool producer,retired; size_t cpu,models; };
-    struct Borrower { uint64_t allocation; bool attached; };
+    struct Allocation { uint64_t vertex,index,handle; ProducerKind kind; bool producer,retired; size_t cpu,models; bool candidate=false; };
+    static constexpr size_t MaxCandidates=8192;
+    bool EligibleForPrune(uint64_t id,const Allocation& a) const
+    { return id!=_selectedDiagnosticPin && a.retired && !a.producer && !a.cpu && !a.models && a.handle; }
+    void QueueRetirementCandidate(uint64_t id,Allocation& a)
+    {
+        if(a.candidate || !EligibleForPrune(id,a)) return;
+        if(_candidateCount>=std::min<size_t>(_limits.retirementCandidates,MaxCandidates)) { MarkIncomplete(_epoch,Reason::Capacity); return; }
+        _candidates[(_candidateHead+_candidateCount)%MaxCandidates]=id; ++_candidateCount; a.candidate=true;
+    }
+    struct Borrower { uint64_t allocation; bool attached; uint64_t previous=0,next=0; bool queued=false; };
+    void QueueDetachedBorrower(uint64_t id)
+    {
+        auto found=_borrowers.find(id); if(found==_borrowers.end() || found->second.attached || found->second.queued) return;
+        auto& b=found->second; b.queued=true; b.previous=_detachedTail;
+        if(_detachedTail) _borrowers.find(_detachedTail)->second.next=id; else _detachedHead=id;
+        _detachedTail=id; ++_detachedCount;
+    }
+    void UnqueueDetachedBorrower(uint64_t id)
+    {
+        auto found=_borrowers.find(id); if(found==_borrowers.end() || !found->second.queued) return;
+        auto& b=found->second;
+        if(b.previous) _borrowers.find(b.previous)->second.next=b.next; else _detachedHead=b.next;
+        if(b.next) _borrowers.find(b.next)->second.previous=b.previous; else _detachedTail=b.previous;
+        b.previous=0; b.next=0; b.queued=false; --_detachedCount;
+    }
     bool Current(uint64_t epoch) const { return _open && epoch==_epoch; }
     Allocation* Find(uint64_t epoch,uint64_t id)
     {
@@ -306,6 +404,11 @@ private:
         else sum+=value;
     }
     const Limits _limits;
+    std::array<uint64_t,MaxCandidates> _candidates{};
+    size_t _candidateHead=0,_candidateCount=0;
+    uint64_t _selectedDiagnosticPin=0;
+    uint64_t _detachedHead=0,_detachedTail=0; size_t _detachedCount=0;
+    uint64_t _actualCreatedWatermark=0,_settledCpuWatermark=0,_prunedAllocations=0,_prunedBorrowers=0;
     uint64_t _epoch=0,_reasons=0,_drops=0,_cancelled=0,_scheduledEvents=0,_retireDrops=0;
     bool _open=false;
     size_t _links=0;

@@ -594,6 +594,11 @@ void RegisterScreenshot(HarnessServer& hs)
                 GEOMETRY_REPORT_FIELD(persistentCancelledCreates); GEOMETRY_REPORT_FIELD(persistentReclaimableBytes);
                 GEOMETRY_REPORT_FIELD(persistentStandaloneWitnessLive); GEOMETRY_REPORT_FIELD(persistentStandaloneWitnessKnownBytes);
                 GEOMETRY_REPORT_FIELD(persistentStandaloneWitnessPeakKnownBytes); GEOMETRY_REPORT_FIELD(persistentStandaloneWitnessRefused);
+                GEOMETRY_REPORT_FIELD(persistentPrunedAllocations); GEOMETRY_REPORT_FIELD(persistentPrunedBorrowers);
+                GEOMETRY_REPORT_FIELD(persistentRetirementCandidates); GEOMETRY_REPORT_FIELD(persistentCleanupKnownCapacityBytes);
+                GEOMETRY_REPORT_FIELD(persistentDetachedHistory); GEOMETRY_REPORT_FIELD(persistentBorrowerKnownRecordBytes);
+                GEOMETRY_REPORT_FIELD(persistentSelectedDiagnosticPins);
+                cJSON_AddStringToObject(result, "persistentCleanupScope", "Diagnostic metadata history only; known bytes count the fixed candidate array and raw borrower records, excluding map overhead, allocator and RSS; no physical GPU release or reclaim proof");
                 cJSON_AddBoolToObject(result, "rendererMeshFactsEnabled", report.rendererMeshFactsEnabled);
                 cJSON_AddBoolToObject(result, "rendererMeshFactsValid", report.rendererMeshFactsValid);
                 cJSON_AddBoolToObject(result, "rendererMeshFactsComplete", report.rendererMeshFactsComplete);

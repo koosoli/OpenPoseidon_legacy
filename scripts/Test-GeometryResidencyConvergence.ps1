@@ -214,7 +214,21 @@ try {
                 $report.overlapWithinInspectedVertexBytes -gt $report.uniqueVertexBytes -or
                 $report.overlapWithinInspectedIndexBytes -gt $report.uniqueIndexBytes) { throw 'Inspected allocation overlap exceeds its unique union' }
             if ($report.ownershipCoverageComplete) { throw 'Diagnostic subset incorrectly claimed complete allocation ownership' }
-            if ($OwnerLedger) {
+              if ($OwnerLedger) {
+                  foreach ($field in @('persistentPrunedAllocations','persistentPrunedBorrowers',
+                      'persistentRetirementCandidates','persistentCleanupKnownCapacityBytes',
+                      'persistentDetachedHistory','persistentBorrowerKnownRecordBytes','persistentSelectedDiagnosticPins')) {
+                      if ($null -eq $report.$field) { throw "Missing bounded history field: $field" }
+                  }
+                  if ($report.persistentRetirementCandidates -gt 8192 -or
+                      $report.persistentCleanupKnownCapacityBytes -ne 65536 -or
+                      $report.persistentSelectedDiagnosticPins -ne 0 -or
+                      $report.persistentDetachedHistory -gt $report.persistentCpuBorrowers) {
+                      throw 'Owner-history metadata exceeded its declared bounds or retained a private fixture pin'
+                  }
+                  if (!$DiagnosticOnly -and ($report.persistentPrunedAllocations -lt 1 -or $report.persistentPrunedBorrowers -lt 1)) {
+                      throw 'Traversal did not establish actual allocation and borrower history pruning'
+                  }
                 if (!$report.persistentAttributionEnabled -or $report.persistentAttributionEpoch -lt 1 -or
                     $report.persistentTrackedAllocations -lt 1 -or $report.persistentCpuBorrowers -lt 1 -or
                     ($report.persistentCpuReferencedVertexBytes + $report.persistentCpuReferencedIndexBytes) -lt 1) {

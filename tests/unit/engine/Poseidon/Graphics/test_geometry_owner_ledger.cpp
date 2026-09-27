@@ -290,3 +290,79 @@ TEST_CASE("Mesh record closure refuses partial malformed and overflowing pool ev
     SECTION("present count exceeds inspected") { all.inspected=all.requested=0; CHECK_FALSE(EvaluateMeshRecordClosure(all).residualValid); }
     SECTION("present count exceeds actual records") { all.liveRecords=0; CHECK_FALSE(EvaluateMeshRecordClosure(all).residualValid); }
 }
+
+TEST_CASE("Exact absent retirement metadata prunes history without ownership or resurrection", "[wgpu][geometry-owner-ledger][geometry-history]")
+{
+    GeometryOwnerLedger l; REQUIRE(l.BeginEpoch(1)); REQUIRE(l.AllocationCreated(1,1,20,4,Kind::Cpu,0x10000000a));
+    REQUIRE(l.CpuBorrowerAttached(1,1,1)); l.ProducerOwnershipReleased(1,1); l.NoteCpuCreateSettled(1,1);
+    l.QueueCpuBorrowerDetached(1,1); l.QueueAllocationRetirementScheduled(1,1);
+    GeometryOwnerLedger::HandleRecord row; REQUIRE(l.TakeRetirementCandidates(1,&row,1)==1);
+    CHECK(row.rendererHandle==0x10000000a); CHECK_FALSE(l.ConfirmRetirementObservation(1,1,0x20000000a,true));
+    CHECK_FALSE(l.ConfirmRetirementObservation(2,1,row.rendererHandle,true));
+    CHECK_FALSE(l.ConfirmRetirementObservation(1,1,row.rendererHandle,false)); // Present / invalid cut retains metadata
+    REQUIRE(l.TakeRetirementCandidates(1,&row,1)==1);
+    CHECK(l.ConfirmRetirementObservation(1,1,row.rendererHandle,true));
+    auto report=l.Snapshot(); CHECK(report.trackedAllocations==0); CHECK(report.trackedBorrowerRecords==0);
+    CHECK(report.cumulativePrunedAllocations==1); CHECK(report.cumulativePrunedBorrowers==1);
+    CHECK(report.attributionComplete); CHECK_FALSE(report.ownershipCoverageComplete); CHECK(report.reclaimableBytes==0);
+    l.QueueCpuBorrowerDetached(1,1); CHECK(l.Snapshot().trackedBorrowerRecords==0);
+    CHECK_FALSE(l.AllocationCreated(1,1,20,4,Kind::Cpu,0x20000000a)); CHECK_FALSE(l.Snapshot().attributionComplete);
+    REQUIRE(l.BeginEpoch(2)); REQUIRE(l.AllocationCreated(2,1,20,4,Kind::Cpu,0x20000000a));
+    CHECK(l.Snapshot().cumulativePrunedAllocations==0); CHECK(l.Snapshot().attributionComplete);
+}
+TEST_CASE("Early cancellation tombstones persist until monotonic CPU operation settles", "[wgpu][geometry-owner-ledger][geometry-history]")
+{
+    GeometryOwnerLedger l; REQUIRE(l.BeginEpoch(1));
+    l.QueueCpuBorrowerDetached(1,9); l.DrainDetachMailbox(); CHECK(l.Snapshot().trackedBorrowerRecords==1);
+    REQUIRE(l.AllocationCreated(1,9,20,4,Kind::Cpu,90)); CHECK_FALSE(l.CpuBorrowerAttached(1,9,9));
+    CHECK(l.Snapshot().trackedBorrowerRecords==1); l.NoteCpuCreateSettled(1,9);
+    CHECK(l.Snapshot().trackedBorrowerRecords==0); l.QueueCpuBorrowerDetached(1,9); l.DrainDetachMailbox();
+    CHECK(l.Snapshot().trackedBorrowerRecords==0); CHECK_FALSE(l.CpuBorrowerAttached(1,9,9));
+    CHECK(l.Snapshot().attributionComplete);
+    l.NoteCpuCreateSettled(1,8); CHECK_FALSE(l.Snapshot().attributionComplete); // no silent out-of-order contract relaxation
+}
+TEST_CASE("Retirement candidate queue is bounded and never prunes Present or owned records", "[wgpu][geometry-owner-ledger][geometry-history]")
+{
+    GeometryOwnerLedger l({4,4,4,4,1}); REQUIRE(l.BeginEpoch(1));
+    REQUIRE(l.AllocationCreated(1,1,20,4,Kind::Retained,90)); REQUIRE(l.AllocationCreated(1,2,20,4,Kind::Retained,91));
+    l.AllocationRetired(1,1); l.AllocationRetired(1,2); auto report=l.Snapshot();
+    CHECK(report.queuedRetirementCandidates==1); CHECK(report.candidateKnownCapacityBytes>0); CHECK_FALSE(report.attributionComplete);
+    GeometryOwnerLedger::HandleRecord row; REQUIRE(l.TakeRetirementCandidates(1,&row,1)==1);
+    CHECK_FALSE(l.ConfirmRetirementObservation(1,row.allocationId,row.rendererHandle,false));
+    CHECK(l.Snapshot().trackedAllocations==2); CHECK(l.Snapshot().queuedRetirementCandidates==1);
+    GeometryOwnerLedger owned; REQUIRE(owned.BeginEpoch(1)); REQUIRE(owned.AllocationCreated(1,1,20,4,Kind::Retained,90));
+    REQUIRE(owned.ModelLodAttached(1,1,0,1)); owned.AllocationRetired(1,1);
+    CHECK(owned.TakeRetirementCandidates(1,&row,1)==0); CHECK_FALSE(owned.ConfirmRetirementObservation(1,1,90,true));
+    owned.ModelRetired(1,1); REQUIRE(owned.TakeRetirementCandidates(1,&row,1)==1);
+    CHECK(owned.ConfirmRetirementObservation(1,1,90,true)); CHECK_FALSE(owned.Snapshot().attributionComplete); // prior protocol sticky
+}
+TEST_CASE("Retirement maintenance consumes at most32 candidates in one batch", "[wgpu][geometry-owner-ledger][geometry-history]")
+{
+    GeometryOwnerLedger l; REQUIRE(l.BeginEpoch(1));
+    for(uint64_t id=1;id<=40;++id) { REQUIRE(l.AllocationCreated(1,id,20,4,Kind::Retained,id+90)); l.AllocationRetired(1,id); }
+    std::array<GeometryOwnerLedger::HandleRecord,40> rows;
+    CHECK(l.TakeRetirementCandidates(1,rows.data(),rows.size())==32); CHECK(l.Snapshot().queuedRetirementCandidates==8);
+}
+
+TEST_CASE("Detached failed-publication history prunes with later FIFO progress and no resurrection", "[wgpu][geometry-owner-ledger][geometry-history]")
+{
+    GeometryOwnerLedger l; REQUIRE(l.BeginEpoch(1));
+    l.QueueCpuBorrowerDetached(1,9); l.DrainDetachMailbox(); CHECK(l.Snapshot().trackedBorrowerRecords==1);
+    l.NoteCpuCreateSettled(1,10); // ID9 failed before enqueue, subsequent creator is authoritative later progress
+    GeometryOwnerLedger::HandleRecord row;
+    CHECK(l.TakeRetirementCandidates(1,&row,1)==0); CHECK(l.Snapshot().trackedBorrowerRecords==0);
+    CHECK(l.Snapshot().cumulativePrunedBorrowers==1);
+    l.QueueCpuBorrowerDetached(1,9); l.DrainDetachMailbox(); CHECK(l.Snapshot().trackedBorrowerRecords==0);
+    REQUIRE(l.AllocationCreated(1,11,20,4,Kind::Retained,91)); CHECK_FALSE(l.CpuBorrowerAttached(1,9,11));
+    CHECK(l.Snapshot().attributionComplete);
+}
+
+TEST_CASE("One selected diagnostic record survives automatic metadata retirement until explicit unpin", "[wgpu][geometry-owner-ledger][geometry-history]")
+{
+    GeometryOwnerLedger l; REQUIRE(l.BeginEpoch(1)); REQUIRE(l.AllocationCreated(1,1,20,4,Kind::Retained,90));
+    REQUIRE(l.SetSelectedDiagnosticPin(1,1,true)); l.AllocationRetired(1,1);
+    GeometryOwnerLedger::HandleRecord row; CHECK(l.TakeRetirementCandidates(1,&row,1)==0);
+    REQUIRE(l.SnapshotHandle(1,1,row)); CHECK(row.scheduledRetired); CHECK_FALSE(l.ConfirmRetirementObservation(1,1,90,true));
+    REQUIRE(l.SetSelectedDiagnosticPin(1,1,false)); REQUIRE(l.TakeRetirementCandidates(1,&row,1)==1);
+    CHECK(l.ConfirmRetirementObservation(1,1,90,true)); CHECK_FALSE(l.SnapshotHandle(1,1,row)); CHECK(l.Snapshot().attributionComplete);
+}

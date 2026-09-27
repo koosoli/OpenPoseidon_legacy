@@ -1714,6 +1714,12 @@ class Engine : public IGraphicsEngine
           uint64_t persistentStandaloneWitnessLive = 0, persistentStandaloneWitnessKnownBytes = 0;
           uint64_t persistentStandaloneWitnessPeakKnownBytes = 0, persistentStandaloneWitnessRefused = 0;
           uint64_t persistentCancelledCreates = 0, persistentReclaimableBytes = 0;
+          // Diagnostic metadata only. Cleanup capacity is the fixed numeric
+          // candidate array; borrower bytes exclude map nodes/buckets and RSS.
+          uint64_t persistentPrunedAllocations = 0, persistentPrunedBorrowers = 0;
+          uint64_t persistentRetirementCandidates = 0, persistentCleanupKnownCapacityBytes = 0;
+          uint64_t persistentDetachedHistory = 0, persistentBorrowerKnownRecordBytes = 0;
+          uint64_t persistentSelectedDiagnosticPins = 0;
           // On-demand Rust record lookup over copied full-generation handles.
           // Absent proves no current renderer mesh record/range, not GPU work
           // completion or released device memory. Scheduled retirement is separate.

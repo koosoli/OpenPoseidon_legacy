@@ -2947,6 +2947,13 @@ void EngineWgpu::FillGeometryMeshFacts(GeometryAllocationReport& report)
         report.persistentMailboxPending = owners.queuedDetachEvents;
         report.persistentMailboxDropped = owners.droppedDetachEvents;
         report.persistentCancelledCreates = owners.cancelledBeforeCreate;
+        report.persistentPrunedAllocations = owners.cumulativePrunedAllocations;
+        report.persistentPrunedBorrowers = owners.cumulativePrunedBorrowers;
+        report.persistentRetirementCandidates = owners.queuedRetirementCandidates;
+        report.persistentCleanupKnownCapacityBytes = owners.candidateKnownCapacityBytes;
+        report.persistentDetachedHistory = owners.queuedDetachedHistory;
+        report.persistentBorrowerKnownRecordBytes = owners.borrowerKnownRecordBytes;
+        report.persistentSelectedDiagnosticPins = owners.selectedDiagnosticPins;
         report.persistentStandaloneWitnessLive = witnessStats.live;
         report.persistentStandaloneWitnessKnownBytes = witnessStats.bytes;
         report.persistentStandaloneWitnessPeakKnownBytes = witnessStats.peak;
@@ -3240,6 +3247,13 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
         }
         case ResourceOp::CpuMeshCreate:
         {
+            // Source IDs are minted/enqueued on one producer in monotonic FIFO
+            // order. Advance only after attach/cancel bookkeeping, preserving
+            // detach-before-create tombstones until that operation settles.
+            struct SettledCpuCreate {
+                render::GeometryOwnerLedger* ledger; uint64_t epoch,id;
+                ~SettledCpuCreate() { if(ledger) ledger->NoteCpuCreateSettled(epoch,id); }
+            } settled{_geometryOwnerLedger.get(),_geometryOwnerEpoch,op.cpu?op.cpu->producer:op.mesh};
             // REN-THR-011. `dead` means the VertexBufferWgpu was destroyed before this drain
             // ran, so nothing can name the mesh any more: skipping the create is the whole
             // handling of that case, and it is cheaper than creating and then destroying.
@@ -3466,6 +3480,13 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
         case ResourceOp::SharedMeshFixtureObserve:
         {
             auto& fixture = *op.sharedFixture;
+            // request0 is an explicit private-fixture metadata unpin operation,
+            // never a renderer fact request/public completed observation.
+            if(!op.sharedFixtureRequest) {
+                if(_geometryOwnerLedger) _geometryOwnerLedger->SetSelectedDiagnosticPin(_geometryOwnerEpoch,fixture.producer,false);
+                break;
+            }
+            if(_geometryOwnerLedger) _geometryOwnerLedger->SetSelectedDiagnosticPin(_geometryOwnerEpoch,fixture.producer,true);
             uint64_t handle = op.mesh;
             if (!handle)
                 if (const auto found = _meshIdOf.find(fixture.producer); found != _meshIdOf.end()) handle = found->second;
@@ -3765,6 +3786,30 @@ void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing, Fr
     HashPublishedFrame(frame, backing);
     const auto afterHash = std::chrono::steady_clock::now();
     wgr_render_frame(_renderer, &frame);
+    if (_geometryOwnerLedger)
+    {
+        // Once per real renderer frame, after deferred uploader destroys drain.
+        // Metadata only: at most32 requested full-generation handles; the
+        // existing fact API also computes its allocator free-span metadata.
+        std::array<render::GeometryOwnerLedger::HandleRecord,32> candidates;
+        const auto count=_geometryOwnerLedger->TakeRetirementCandidates(_geometryOwnerEpoch,candidates.data(),candidates.size());
+        if(count)
+        {
+            std::array<uint64_t,32> ids{}; std::array<WgrMeshHandleFact,32> rows{};
+            for(size_t i=0;i<count;++i) ids[i]=candidates[i].rendererHandle;
+            WgrMeshHandleFactSummary summary{};
+            bool valid=wgr_get_mesh_handle_facts(_renderer,{ids.data(),U32(count)},rows.data(),U32(count),&summary)!=0 &&
+                summary.handles_requested==count && summary.handles_inspected==count && summary.complete==1 &&
+                summary.flags==0 && summary.invalid==0 && summary.duplicate_handles==0 && summary.record_scope_valid==1 &&
+                summary.reserved==0 && uint64_t(summary.present)+summary.absent==count;
+            for(size_t i=0;valid && i<count;++i)
+                valid=rows[i].mesh_handle==ids[i] && rows[i].reserved==0 && (rows[i].state==1 || rows[i].state==2) &&
+                    (rows[i].state!=2 || (rows[i].vertex_bytes==0 && rows[i].index_bytes==0));
+            for(size_t i=0;i<count;++i)
+                _geometryOwnerLedger->ConfirmRetirementObservation(_geometryOwnerEpoch,candidates[i].allocationId,
+                    ids[i],valid && rows[i].state==2);
+        }
+    }
     const auto afterRender = std::chrono::steady_clock::now();
     PublishRendererStats();
     const auto blockEnd = std::chrono::steady_clock::now();
@@ -5631,7 +5676,13 @@ Engine::SharedMeshFixtureReport EngineWgpu::ControlSharedMeshLifetimeFixture(Sha
                     _resourceOps.push_back(std::move(destroy)); fixture.producerReleased = true;
                 }
                 if (action == SharedMeshFixtureAction::Abort)
-                { fixture.newer.reset(); fixture.older.reset(); _sharedMeshFixture.reset(); result.status = GeometryReportStatus::Ready; return result; }
+                {
+                    if(_geometryOwnerLedger) {
+                        ResourceOp unpin; unpin.kind=ResourceOp::SharedMeshFixtureObserve; unpin.sharedFixture=_sharedMeshFixture;
+                        unpin.sharedFixtureRequest=0; _resourceOps.push_back(std::move(unpin));
+                    }
+                    fixture.newer.reset(); fixture.older.reset(); _sharedMeshFixture.reset(); result.status=GeometryReportStatus::Ready; return result;
+                }
             }
             else if (action != SharedMeshFixtureAction::Observe) return result;
             if (!observe()) return result;
