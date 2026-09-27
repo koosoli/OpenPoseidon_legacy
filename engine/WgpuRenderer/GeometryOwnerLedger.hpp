@@ -24,7 +24,10 @@ public:
         uint64_t reclaimableBytes=0;
         size_t trackedAllocations=0, trackedBorrowerRecords=0, liveCpuBorrowers=0, modelLodLinks=0, queuedDetachEvents=0;
         uint64_t droppedDetachEvents=0, cancelledBeforeCreate=0;
-        uint64_t liveEstimatedVertexBytes=0, liveEstimatedIndexBytes=0;
+        // Producer estimates for records not scheduled-retired by this ledger.
+        // Includes detached zero-owner records without retirement acknowledgement;
+        // never current GPU-live bytes or physical/free-pool completion proof.
+        uint64_t observedProducerEstimatedVertexBytes=0, observedProducerEstimatedIndexBytes=0;
         uint64_t cpuReferencedBytes=0, cpuReferencedVertexBytes=0, cpuReferencedIndexBytes=0;
         uint64_t retainedSharedWithCpuBytes=0, retainedSharedWithCpuVertexBytes=0, retainedSharedWithCpuIndexBytes=0;
         uint64_t standaloneCpuBytes=0, standaloneCpuVertexBytes=0, standaloneCpuIndexBytes=0;
@@ -120,7 +123,8 @@ public:
     }
     bool ModelLodAttached(uint64_t epoch,uint32_t model,uint32_t lod,uint64_t allocation)
     {
-        auto* a=Find(epoch,allocation); if(!a || a->retired) return false;
+        auto* a=Find(epoch,allocation); if(!a) return false;
+        if(a->retired) { MarkIncomplete(epoch,Reason::Protocol); return false; }
         auto m=_models.find(model);
         if(m!=_models.end()) {
             auto existing=m->second.find(lod);
@@ -170,7 +174,7 @@ public:
         for(const auto& pair:_allocations) {
             const auto& a=pair.second; r.liveCpuBorrowers+=a.cpu;
             if(a.retired) continue;
-            Add(r.liveEstimatedVertexBytes,a.vertex); Add(r.liveEstimatedIndexBytes,a.index);
+            Add(r.observedProducerEstimatedVertexBytes,a.vertex); Add(r.observedProducerEstimatedIndexBytes,a.index);
             uint64_t bytes=0; Add(bytes,a.vertex); Add(bytes,a.index);
             if(a.cpu) { Add(r.cpuReferencedBytes,bytes); Add(r.cpuReferencedVertexBytes,a.vertex); Add(r.cpuReferencedIndexBytes,a.index); }
             if(a.kind==ProducerKind::Retained && a.cpu && a.models) {
@@ -209,8 +213,3 @@ private:
     std::vector<uint64_t> _mail;
 };
 }
-
-
-
-
-

@@ -3013,8 +3013,19 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
             {
                 // Capture producer identities before translating sections to renderer
                 // handles; duplicates within one LOD are one persistent owner link.
-                for (uint32_t lod = 0; lod < op.lods.size(); ++lod)
+                // Bound diagnostic work independently of link insertion: duplicate
+                // sections and empty LODs must not evade the attribution limit.
+                constexpr uint32_t maxDiagnosticVisits = 32768;
+                uint32_t diagnosticVisits = 0;
+                bool diagnosticLimited = false;
+                for (uint32_t lod = 0; lod < op.lods.size() && !diagnosticLimited; ++lod)
                 {
+                    if (diagnosticVisits == maxDiagnosticVisits)
+                    {
+                        _geometryOwnerLedger->MarkIncomplete(_geometryOwnerEpoch, render::GeometryOwnerLedger::Reason::Capacity);
+                        break;
+                    }
+                    ++diagnosticVisits;
                     const auto& level = op.lods[lod];
                     const uint64_t end = uint64_t(level.section_base) + level.section_count;
                     if (end > op.sections.size())
@@ -3023,7 +3034,16 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
                         continue;
                     }
                     for (uint64_t section = level.section_base; section < end; ++section)
+                    {
+                        if (diagnosticVisits == maxDiagnosticVisits)
+                        {
+                            _geometryOwnerLedger->MarkIncomplete(_geometryOwnerEpoch, render::GeometryOwnerLedger::Reason::Capacity);
+                            diagnosticLimited = true;
+                            break;
+                        }
+                        ++diagnosticVisits;
                         _geometryOwnerLedger->ModelLodAttached(_geometryOwnerEpoch, op.model, lod, op.sections[section].mesh);
+                    }
                 }
             }
             // The sections carry producer mesh handles; the renderer gets real ones.
@@ -3064,8 +3084,8 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
                 report.persistentAttributionComplete = owners.attributionComplete;
                 report.persistentAttributionEpoch = owners.epoch;
                 report.persistentIncompleteReasons = owners.incompleteReasons;
-                report.producerEstimatedVertexBytes = owners.liveEstimatedVertexBytes;
-                report.producerEstimatedIndexBytes = owners.liveEstimatedIndexBytes;
+                report.producerEstimatedVertexBytes = owners.observedProducerEstimatedVertexBytes;
+                report.producerEstimatedIndexBytes = owners.observedProducerEstimatedIndexBytes;
                 report.persistentCpuReferencedVertexBytes = owners.cpuReferencedVertexBytes;
                 report.persistentCpuReferencedIndexBytes = owners.cpuReferencedIndexBytes;
                 report.persistentRetainedSharedCpuVertexBytes = owners.retainedSharedWithCpuVertexBytes;

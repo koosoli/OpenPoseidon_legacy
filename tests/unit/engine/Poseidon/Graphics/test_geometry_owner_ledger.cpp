@@ -20,8 +20,8 @@ TEST_CASE("Geometry owner ledger unions shared persistent estimates", "[wgpu][ge
     l.ModelRetired(1,7); CHECK(l.Snapshot().retainedSharedWithCpuBytes==0);
     l.ProducerOwnershipReleased(1,10); CHECK(l.Snapshot().persistentOwnerBytes==120);
     l.QueueCpuBorrowerDetached(1,1); r=l.Snapshot(); CHECK(r.persistentOwnerBytes==0); CHECK(r.zeroPersistentOwnerBytes==120);
-    CHECK(r.liveEstimatedVertexBytes==100); // detach cannot prove physical retirement
-    l.AllocationRetired(1,10); CHECK(l.Snapshot().liveEstimatedVertexBytes==0);
+    CHECK(r.observedProducerEstimatedVertexBytes==100); // detach cannot prove physical retirement
+    l.AllocationRetired(1,10); CHECK(l.Snapshot().observedProducerEstimatedVertexBytes==0);
 }
 
 TEST_CASE("Geometry owner cancellation tombstone prevents delayed attachment", "[wgpu][geometry-owner-ledger]")
@@ -79,7 +79,7 @@ TEST_CASE("Geometry owner caps and protocol failures remain honest", "[wgpu][geo
         GeometryOwnerLedger l; REQUIRE(l.BeginEpoch(1)); REQUIRE(l.AllocationCreated(1,1,5,7,Kind::Retained,8));
         CHECK_FALSE(l.AllocationCreated(1,1,99,7,Kind::Cpu,90)); CHECK_FALSE(l.MeshHandleAssigned(1,1,9));
         REQUIRE(l.AllocationCreated(1,2,3,4,Kind::Retained,90)); REQUIRE(l.ModelLodAttached(1,1,0,1));
-        REQUIRE(l.ModelLodAttached(1,1,0,2)); REQUIRE(l.ModelLodAttached(1,1,0,2)); CHECK(l.Snapshot().modelLodLinks==2); CHECK(l.Snapshot().liveEstimatedVertexBytes==8);
+        REQUIRE(l.ModelLodAttached(1,1,0,2)); REQUIRE(l.ModelLodAttached(1,1,0,2)); CHECK(l.Snapshot().modelLodLinks==2); CHECK(l.Snapshot().observedProducerEstimatedVertexBytes==8);
     }
     SECTION("Sum overflow saturates and cannot claim exact attribution") {
         GeometryOwnerLedger l; REQUIRE(l.BeginEpoch(1)); REQUIRE(l.AllocationCreated(1,1,std::numeric_limits<uint64_t>::max(),1,Kind::Cpu,90));
@@ -117,4 +117,14 @@ TEST_CASE("Missing renderer handle refuses complete geometry attribution", "[wgp
     REQUIRE(l.AllocationCreated(1,1,4,2,Kind::Cpu));
     CHECK_FALSE(l.Snapshot().attributionComplete);
     REQUIRE(l.MeshHandleAssigned(1,1,7)); CHECK_FALSE(l.Snapshot().attributionComplete); // sticky initial gap
+}
+
+TEST_CASE("A new model owner cannot silently join a retired producer", "[wgpu][geometry-owner-ledger]")
+{
+    GeometryOwnerLedger l; REQUIRE(l.BeginEpoch(1));
+    REQUIRE(l.AllocationCreated(1,1,10,2,Kind::Retained,8));
+    l.AllocationRetired(1,1); REQUIRE(l.Snapshot().attributionComplete);
+    CHECK_FALSE(l.ModelLodAttached(1,7,0,1));
+    auto r=l.Snapshot(); CHECK(r.modelLodLinks==0); CHECK_FALSE(r.attributionComplete);
+    CHECK((r.incompleteReasons & static_cast<uint32_t>(Reason::Protocol))!=0);
 }
