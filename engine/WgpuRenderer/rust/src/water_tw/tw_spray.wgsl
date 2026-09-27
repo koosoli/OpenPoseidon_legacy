@@ -168,7 +168,7 @@ fn vs_spray(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) ->
     // far: fade out; very near the eye: sheets and mist would fill the screen
     let maxD = sprayR.b.z;
     let distFade = smoothstep(maxD, maxD * 0.55, dist) * select(smoothstep(0.6, 3.0, dist), 1.0, water);
-    let a = select(baseA * fadeIn * fadeOut * cover * distFade * sprayR.b.y * sprayR.b.w, 1.0, dbgDots && sprayR.b.w > 0.5);
+    let a = select(baseA * fadeIn * fadeOut * cover * distFade * sprayR.b.y * sprayR.cam.w, 1.0, dbgDots && sprayR.cam.w > 0.5);
 
     var o: SprayOut;
     o.vUV = corner;

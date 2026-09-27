@@ -145,6 +145,19 @@ struct PresentationSnapshot
         uint32_t id = 0;
         bool driven = false;
         float distance2 = 0.0f; // to the camera (selection only)
+        // W6i (bow spray): the full pose -- origin = hull centre at the design waterline (world),
+        // the model forward and up axes (world, unit) -- the vertical velocity, the freeboard
+        // (sheer height above the waterline), and the CPU sea height (QueryWaterSurfaceScaled, the
+        // sea the boat floats on) at the bow contact points and at the propeller. The contact
+        // points follow the rule in WakeSprayContactPoint (PresentationSnapshot.cpp) and
+        // boat_spray.rs `contact_points`: the two must match.
+        float originY = 0.0f;
+        float fwdY = 0.0f;
+        float upX = 0.0f, upY = 1.0f, upZ = 0.0f;
+        float velY = 0.0f;
+        float freeboard = 0.8f;
+        float hwContact[6] = {};
+        float hwProp = 0.0f;
     };
     static constexpr int kMaxWakeBoats = 2;
     int wakeBoatCount = 0;

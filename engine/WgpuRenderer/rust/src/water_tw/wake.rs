@@ -56,7 +56,7 @@ struct WakeKernel {
     m4: [f32; 4],
 }
 
-/// One boat from the producer (`WgrWaterParams::tidewater_wake`, 3 lanes per boat).
+/// One boat from the producer (`WgrWaterParams::tidewater_wake`, lanes 0-2 of the boat's 8).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct WakeBoat {
     pub id: u32,
@@ -76,9 +76,9 @@ impl WakeBoat {
     pub fn from_params(p: &WgrWaterParams) -> [Option<WakeBoat>; SLOTS] {
         let mut out = [None; SLOTS];
         for (i, o) in out.iter_mut().enumerate() {
-            let a = p.tidewater_wake[i * 3];
-            let b = p.tidewater_wake[i * 3 + 1];
-            let c = p.tidewater_wake[i * 3 + 2];
+            let a = p.tidewater_wake[i * 8];
+            let b = p.tidewater_wake[i * 8 + 1];
+            let c = p.tidewater_wake[i * 8 + 2];
             let flags = c[3] as u32;
             if flags & 1 == 0 {
                 continue;

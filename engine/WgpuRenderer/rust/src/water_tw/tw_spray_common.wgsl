@@ -10,10 +10,17 @@ const SPRAY_SHEET: f32 = 4.0;
 
 // OP: the per-frame spray block (spray.rs SprayParams)
 struct SprayParams {
-    seed: vec4<u32>,  // x = frame seed, y = particle count (ring size), z/w unused
+    seed: vec4<u32>,  // x = frame seed, y = particle slots (GPU ring + CPU tail: the arrays' stride),
+                      // z = GPU ring size (power of two), w unused
     a: vec4<f32>,     // x = dt, y = time, z = unused (the budget lives in the head buffer), w = emission gain (`spray`)
-    b: vec4<f32>,     // x = emit range m, y = sprite intensity, z = max draw distance m, w = on
+    b: vec4<f32>,     // x = emit range m, y = sprite intensity, z = max draw distance m, w = breaker spray on
     cam: vec4<f32>,   // camera position (world), w unused
+    // W6i: the CPU tail (Spray.js cpuStart / cpuCount / reqCount) and the collision bodies
+    req: vec4<u32>,   // x = first tail slot of this frame's requests, y = particles requested, z = requests, w = bodies
+    // per body (the boats, up to 2), 8 lanes: origin xyz (the hull centre at the design waterline),
+    // its x / y (up) / z (forward) axes, velocity, hull at the sheer (z aft, z shoulder, z stem,
+    // half beam), at the waterline (z shoulder, z stem, half beam), sheer (y aft, y stem, y bottom)
+    bodies: array<vec4<f32>, 16>,
 };
 
 // PCG hash of a uint -> [0, 1)

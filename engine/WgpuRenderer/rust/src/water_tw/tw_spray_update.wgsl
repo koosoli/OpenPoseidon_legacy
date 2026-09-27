@@ -7,10 +7,59 @@
 //   that point and the shore waves' (Tidewater: its CPU/GPU water query, which inverts the
 //   horizontal displacement too; the difference is a few cm on the surf-zone scale the spray lives
 //   in, and the drops only use it to know when they fall back in);
-// * no CPU emit requests (boat spray) and no collision body yet;
+// * W6i: the CPU emit requests (the boats' bow spray, boat_spray.rs) spawn the tail slots after the
+//   GPU ring, and the particles collide with up to two bodies (the boats' analytic hulls; no
+//   wheelhouse box: OP's boats have no collider tags);
 // * the emission budget is steered here (sprayBudgetStep) rather than from a CPU readback;
 // * drops falling back in do not deposit foam in the shore simulation yet (its state is a
 //   texture written by its own kernel; Tidewater accumulates the deposits in a storage buffer).
+
+// W6i: CPU emit requests, 4 vec4 each (Spray.js): (a.xyz, prefix end) (b.xyz, size)
+// (vel.xyz, kind) (velSpread, posSpread, life, sizeJitter)
+@group(0) @binding(13) var<storage, read> sprayReq: array<vec4<f32>>;
+
+// Push a particle out of body j (its hull) through the nearest face; the velocity into it
+// (relative to the body) is removed and the rest damped (the water runs off as a film); drops
+// that hit it die soon after (Spray.js sprayCollideBody, without the wheelhouse box).
+fn sprayCollideBody(j: u32, p: ptr<function, vec3<f32>>, v: ptr<function, vec3<f32>>, age: f32, life: ptr<function, f32>, isMist: bool) {
+    let o = sprayP.bodies[j * 8u].xyz;
+    let X = sprayP.bodies[j * 8u + 1u].xyz;
+    let Y = sprayP.bodies[j * 8u + 2u].xyz;
+    let Z = sprayP.bodies[j * 8u + 3u].xyz;
+    let bodyVel = sprayP.bodies[j * 8u + 4u].xyz;
+    let H = sprayP.bodies[j * 8u + 5u];
+    let W = sprayP.bodies[j * 8u + 6u];
+    let S = sprayP.bodies[j * 8u + 7u];
+    let d = *p - o;
+    var q = vec3<f32>(dot(d, X), dot(d, Y), dot(d, Z));
+    let sheer = mix(S.x, S.y, sat((q.z - H.x) / max(H.z - H.x, 0.01)));
+    let fh = sat(q.y / max(sheer, 0.1));
+    let zSh = mix(W.x, H.y, fh); let zSt = mix(W.y, H.z, fh); let HB = mix(W.z, H.w, fh);
+    let bowL = max(zSt - zSh, 0.01);
+    let e = sat((q.z - zSh) / bowL);
+    let c = sqrt(max(1.0 - e * e, 0.02));
+    let hb = HB * c;
+    let inHull = q.z > H.x && q.z < zSt && abs(q.x) < hb && q.y < sheer && q.y > S.z;
+    if (inHull) {
+        var n = vec3<f32>(0.0, 1.0, 0.0);
+        let sx = select(-1.0, 1.0, q.x > 0.0);
+        if (hb - abs(q.x) < sheer - q.y) {
+            // through the side; on the bow the side faces forward too (- d hb / dz)
+            n = normalize(vec3<f32>(sx, 0.0, HB * e / (c * bowL)));
+            q.x = sx * (hb + 0.02);
+        } else {
+            q.y = sheer + 0.02;
+        }
+        let nw = normalize(X * n.x + Y * n.y + Z * n.z);
+        var vr = *v - bodyVel;
+        let vn = dot(vr, nw);
+        if (vn < 0.0) { vr -= nw * vn; }
+        *v = bodyVel + vr * 0.5;
+        *p = o + X * q.x + Y * q.y + Z * q.z;
+        // water that hits it wets it and runs off (gone); mist flows around it and settles
+        *life = min(*life, select(age, age + 0.25, isMist));
+    }
+}
 
 // per-kind constants: droplet, mist, ligament, spray, sheet
 fn sprayTau(k: f32) -> f32 { return sprayByKind(k, 3.0, 0.35, 5.0, 1.8, 2.5); }
@@ -58,7 +107,7 @@ fn sprayBudgetStep(dt: f32) {
     let rate = mix(bitcast<f32>(atomicLoad(&sprayHead[2])), emitted / dt, k);
     atomicStore(&sprayHead[2], bitcast<u32>(rate));
     let budget = bitcast<f32>(atomicLoad(&sprayHead[3]));
-    let goal = f32(sprayP.seed.y) / 2.0;
+    let goal = f32(sprayP.seed.z) / 2.0;
     let want = select(1.0, budget * sqrt(goal / rate), rate > 1.0);
     // Tidewater eases by 0.04 per (60 Hz) frame
     let eased = clamp(budget + (want - budget) * min(0.04 * dt * 60.0, 1.0), 0.05, 1.0);
@@ -77,6 +126,32 @@ fn spray_update(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     if (i >= sprayP.seed.y) { return; }
     let n = sprayP.seed.y;
+    // ---- W6i: the CPU tail, spawned from this frame's requests (Spray.js)
+    let NG = sprayP.seed.z;
+    let NC = n - NG;
+    if (i >= NG && NC > 0u) {
+        let k = (i - NG + NC - sprayP.req.x) % NC;
+        if (k < sprayP.req.y) {
+            var r = 0u;
+            for (var j = 0u; j < sprayP.req.z; j++) {
+                r = j;
+                if (f32(k) < sprayReq[j * 4u].w) { break; }
+            }
+            let r0 = sprayReq[r * 4u];
+            let r1 = sprayReq[r * 4u + 1u];
+            let r2 = sprayReq[r * 4u + 2u];
+            let r3 = sprayReq[r * 4u + 3u];
+            let h0 = sprayRand(i, 11u); let h1 = sprayRand(i, 12u); let h2 = sprayRand(i, 13u);
+            let h3 = sprayRand(i, 14u); let h4 = sprayRand(i, 15u); let h5 = sprayRand(i, 16u);
+            let h6 = sprayRand(i, 17u);
+            let along = mix(r0.xyz, r1.xyz, h0);
+            let jit = vec3<f32>(h1 - 0.5, h2 - 0.5, h3 - 0.5) * (r3.y * 2.0);
+            let vj = vec3<f32>(h4 - 0.5, h5 - 0.5, h6 - 0.5) * (r3.x * 2.0);
+            let size = r1.w * (1.0 + (h2 - 0.5) * r3.w);
+            let life0 = r3.z * (h3 * 0.5 + 0.75);
+            sprayWrite(i, along + jit, r2.xyz + vj, size, r2.w, life0, h5);
+        }
+    }
     let info = sprayBuf[2u * n + i];
     if (info.y <= 0.0) { return; }
     let P = sprayBuf[i];
@@ -104,6 +179,9 @@ fn spray_update(@builtin(global_invocation_id) gid: vec3<u32>) {
     p += v * dt;
 
     var life = info.y;
+    for (var j = 0u; j < min(sprayP.req.w, 2u); j++) {
+        sprayCollideBody(j, &p, &v, age, &life, isMist);
+    }
     // water surface and ground below
     let ground = terrainHeightAt(p.xz);
     let hw = sprayWaterHeightAt(p.xz, ground);

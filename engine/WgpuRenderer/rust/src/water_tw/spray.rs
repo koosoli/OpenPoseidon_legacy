@@ -12,8 +12,10 @@
 //!
 //! What OP changes:
 //!
-//! * **GPU emitters only.** Tidewater's ring has a CPU-owned tail for its boat (bow sheet, wake
-//!   splashes) and a collision body; OP's vessels are not wired to it yet (W4b).
+//! * **The CPU tail** (W6i): Tidewater's `cpuCapacity` slots after the GPU ring, spawned by the
+//!   update kernel from this frame's emit requests (the boats' bow spray, `boat_spray.rs`); up to
+//!   64 requests a frame (Tidewater: 32, one boat); collisions with up to two bodies (the boats'
+//!   analytic hulls; no wheelhouse box).
 //! * **Budget on the GPU.** Tidewater reads the ring head back a few frames late and steers the
 //!   emission scale on the CPU so the ring holds ~2 s of spray; here the update kernel's first
 //!   thread does the same step each frame from the head it can read directly.
@@ -24,6 +26,14 @@
 
 /// Ring size (Tidewater's `gpuCapacity`); a power of two (the ring index wraps with the head).
 pub const RING: u32 = 32768;
+/// W6i: the CPU-owned tail after the ring (Tidewater's `cpuCapacity`).
+pub const TAIL: u32 = 8192;
+/// All particle slots (the arrays' stride and the sprite instance count).
+pub const SLOTS: u32 = RING + TAIL;
+/// CPU emit requests per frame (Tidewater: 32 for its one boat; OP: two boats).
+pub const MAX_REQUESTS: usize = 64;
+/// Collision bodies (the boats with a simulated wake).
+pub const MAX_BODIES: usize = 2;
 /// Emission gain (Breakers `spray`), sprite intensity and fade distance (Spray `maxDistance`),
 /// camera range of the emitters (Breakers `emitRange`): Tidewater's defaults.
 pub const GAIN: f32 = 1.0;
@@ -33,7 +43,7 @@ pub const EMIT_RANGE: f32 = 260.0;
 /// Initial emission budget (Breakers `budget`).
 pub const BUDGET0: f32 = 0.3;
 
-/// The per-frame spray block (`SprayParams` in tw_spray_common.wgsl), 64 bytes.
+/// The per-frame spray block (`SprayParams` in tw_spray_common.wgsl), 336 bytes.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct SprayParams {
@@ -41,16 +51,73 @@ pub struct SprayParams {
     pub a: [f32; 4],
     pub b: [f32; 4],
     pub cam: [f32; 4],
+    /// W6i: first tail slot, particles requested, requests, bodies
+    pub req: [u32; 4],
+    /// W6i: 8 lanes per body (see tw_spray_common.wgsl)
+    pub bodies: [[f32; 4]; MAX_BODIES * 8],
 }
 
 impl SprayParams {
-    pub fn new(frame: u32, dt: f32, time: f32, cam: [f32; 3], gain: f32, intensity: f32, on: bool) -> Self {
+    /// `on`: the breakers emit; `draw`: the sprites are drawn (breakers or boats).
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(frame: u32, dt: f32, time: f32, cam: [f32; 3], gain: f32, intensity: f32, on: bool, draw: bool) -> Self {
         Self {
-            seed: [frame, RING, 0, 0],
+            seed: [frame, SLOTS, RING, 0],
             a: [dt, time, 0.0, gain],
             b: [EMIT_RANGE, intensity, MAX_DISTANCE, if on { 1.0 } else { 0.0 }],
-            cam: [cam[0], cam[1], cam[2], 0.0],
+            cam: [cam[0], cam[1], cam[2], if draw { 1.0 } else { 0.0 }],
+            req: [0; 4],
+            bodies: [[0.0; 4]; MAX_BODIES * 8],
         }
+    }
+}
+
+/// W6i: a CPU emit request (Spray.js `emit`): `count` particles spread along a -> b, base
+/// velocity `vel` with `spread` (m/s) and `jitter` (m) of randomness, radius `size` (m) +-
+/// `size_jitter`, lifetime `life` (s).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct EmitRequest {
+    pub a: [f32; 3],
+    pub b: [f32; 3],
+    pub vel: [f32; 3],
+    pub count: u32,
+    pub size: f32,
+    pub kind: f32,
+    pub spread: f32,
+    pub jitter: f32,
+    pub life: f32,
+    pub size_jitter: f32,
+}
+
+/// W6i: a collision body (the boats' hulls, Spray.js setBody / setBodyShape) as its 8 lanes.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Body {
+    pub origin: [f32; 3],
+    pub x: [f32; 3],
+    pub y: [f32; 3],
+    pub z: [f32; 3],
+    pub vel: [f32; 3],
+    /// z aft, z shoulder, z stem, half beam (at the sheer)
+    pub hull: [f32; 4],
+    /// z shoulder, z stem, half beam (at the waterline)
+    pub hull_wl: [f32; 3],
+    /// y sheer aft, y sheer stem, y bottom
+    pub sheer: [f32; 3],
+}
+
+impl Body {
+    fn lanes(&self) -> [[f32; 4]; 8] {
+        let v = |a: [f32; 3], w: f32| [a[0], a[1], a[2], w];
+        [
+            v(self.origin, 1.0),
+            v(self.x, 0.0),
+            v(self.y, 0.0),
+            v(self.z, 0.0),
+            v(self.vel, 0.0),
+            self.hull,
+            v(self.hull_wl, 0.0),
+            v(self.sheer, 0.0),
+        ]
     }
 }
 
@@ -232,8 +299,14 @@ fn upload_mipped(device: &wgpu::Device, queue: &wgpu::Queue, label: &str, data: 
 /// The ring, the spray block, the sprite textures and the sprite pipeline. The emitters and the
 /// update kernel live in the breaker kernel's module (breakers.rs binds these buffers).
 pub struct SprayGpu {
-    /// pos | vel | info, `RING` vec4 each
+    /// pos | vel | info, `SLOTS` vec4 each
     pub ring: wgpu::Buffer,
+    /// W6i: this frame's CPU emit requests, 4 vec4 each
+    pub requests: wgpu::Buffer,
+    /// W6i: the next free tail slot (Spray.js cpuHead)
+    cpu_head: u32,
+    /// W6i: boat spray particles emitted in the last few seconds (keeps the update and sprites on)
+    boat_live: f32,
     pub head: wgpu::Buffer,
     pub params: wgpu::Buffer,
     /// r: puff noise, g: drops
@@ -242,8 +315,10 @@ pub struct SprayGpu {
     /// the sprites' coverage into the reactive mask (W4b)
     mask_pipeline: wgpu::RenderPipeline,
     frame: u32,
-    /// spray on this frame (emission and sprites)
+    /// spray on this frame (the update and the sprites: breakers or boats)
     pub on: bool,
+    /// the breakers emit this frame
+    pub breakers_on: bool,
     readback: wgpu::Buffer,
     rb_state: Readback,
     /// the latest diagnostics read back (None until the first one arrives)
@@ -263,11 +338,17 @@ impl SprayGpu {
         linear: f64,
     ) -> Self {
         use wgpu::util::DeviceExt;
-        // pos | vel | info, RING vec4 each; starts zeroed: every slot dead (life 0)
+        // pos | vel | info, SLOTS vec4 each; starts zeroed: every slot dead (life 0)
         let ring = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("tw_spray_ring"),
-            size: RING as u64 * 3 * 16,
+            size: SLOTS as u64 * 3 * 16,
             usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
+        let requests = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("tw_spray_requests"),
+            size: (MAX_REQUESTS * 64) as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         let head = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -283,7 +364,7 @@ impl SprayGpu {
         });
         let params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("tw_spray_params"),
-            contents: bytemuck::bytes_of(&SprayParams::new(0, 0.0, 0.0, [0.0; 3], GAIN, INTENSITY, false)),
+            contents: bytemuck::bytes_of(&SprayParams::new(0, 0.0, 0.0, [0.0; 3], GAIN, INTENSITY, false, false)),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
         let tex_view = upload_mipped(device, queue, "tw_spray_tex", sprite_texture(), TEX_SIZE);
@@ -348,15 +429,74 @@ impl SprayGpu {
             multiview_mask: None,
             cache: None,
         });
-        Self { ring, head, params, tex_view, pipeline, mask_pipeline, frame: 0, on: false, readback, rb_state: Readback::Idle, stats: None }
+        Self {
+            ring,
+            requests,
+            cpu_head: 0,
+            boat_live: 0.0,
+            head,
+            params,
+            tex_view,
+            pipeline,
+            mask_pipeline,
+            frame: 0,
+            on: false,
+            breakers_on: false,
+            readback,
+            rb_state: Readback::Idle,
+            stats: None,
+        }
     }
 
     /// The spray block for this frame (Spray.update: the frame seed advances every frame).
+    /// `on`: the breakers emit. W6i: `requests` (the boats' bow spray, spawned into the tail by
+    /// this frame's update) and `bodies` (the hulls the particles collide with); the update and
+    /// the sprites run while either the breakers or recent boat spray are live.
     #[allow(clippy::too_many_arguments)]
-    pub fn set_frame(&mut self, queue: &wgpu::Queue, dt: f32, time: f32, cam: [f32; 3], gain: f32, intensity: f32, on: bool) {
+    pub fn set_frame(
+        &mut self,
+        queue: &wgpu::Queue,
+        dt: f32,
+        time: f32,
+        cam: [f32; 3],
+        gain: f32,
+        intensity: f32,
+        on: bool,
+        requests: &[EmitRequest],
+        bodies: &[Body],
+    ) {
         self.frame = self.frame.wrapping_add(1);
-        self.on = on;
-        let p = SprayParams::new(self.frame, dt, time, cam, gain.clamp(0.0, 3.0), intensity.clamp(0.0, 50.0), on);
+        // requests -> tail slots (Spray.js update: prefix ends, cpuStart / cpuCount)
+        let mut data = [[0.0f32; 4]; MAX_REQUESTS * 4];
+        let mut n = 0u32;
+        let mut nreq = 0usize;
+        for r in requests.iter().take(MAX_REQUESTS) {
+            let count = r.count.min(TAIL - n);
+            if count == 0 {
+                continue;
+            }
+            n += count;
+            let o = nreq * 4;
+            data[o] = [r.a[0], r.a[1], r.a[2], n as f32];
+            data[o + 1] = [r.b[0], r.b[1], r.b[2], r.size];
+            data[o + 2] = [r.vel[0], r.vel[1], r.vel[2], r.kind];
+            data[o + 3] = [r.spread, r.jitter, r.life, r.size_jitter];
+            nreq += 1;
+        }
+        if nreq > 0 {
+            queue.write_buffer(&self.requests, 0, bytemuck::cast_slice(&data[..nreq * 4]));
+            self.boat_live = 3.0;
+        } else {
+            self.boat_live = (self.boat_live - dt.max(0.0)).max(0.0);
+        }
+        self.breakers_on = on;
+        self.on = on || self.boat_live > 0.0;
+        let mut p = SprayParams::new(self.frame, dt, time, cam, gain.clamp(0.0, 3.0), intensity.clamp(0.0, 50.0), on, self.on);
+        p.req = [self.cpu_head, n, nreq as u32, bodies.len().min(MAX_BODIES) as u32];
+        for (i, b) in bodies.iter().take(MAX_BODIES).enumerate() {
+            p.bodies[i * 8..i * 8 + 8].copy_from_slice(&b.lanes());
+        }
+        self.cpu_head = (self.cpu_head + n) % TAIL;
         queue.write_buffer(&self.params, 0, bytemuck::bytes_of(&p));
     }
 
@@ -402,7 +542,7 @@ impl SprayGpu {
         pass.set_pipeline(&self.mask_pipeline);
         pass.set_bind_group(0, camera, &[offset]);
         pass.set_bind_group(1, render_bind, &[]);
-        pass.draw(0..6, 0..RING);
+        pass.draw(0..6, 0..SLOTS);
     }
 
     /// The sprites (after the lips, same pass).
@@ -413,7 +553,7 @@ impl SprayGpu {
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, camera, &[offset]);
         pass.set_bind_group(1, render_bind, &[]);
-        pass.draw(0..6, 0..RING);
+        pass.draw(0..6, 0..SLOTS);
     }
 }
 
@@ -423,10 +563,13 @@ mod tests {
 
     #[test]
     fn params_block_matches_the_wgsl_layout() {
-        assert_eq!(std::mem::size_of::<SprayParams>(), 64);
-        let p = SprayParams::new(7, 0.016, 3.0, [1.0, 2.0, 3.0], GAIN, INTENSITY, true);
-        assert_eq!(p.seed, [7, RING, 0, 0]);
+        assert_eq!(std::mem::size_of::<SprayParams>(), 64 + 16 + 16 * MAX_BODIES * 8);
+        assert_eq!(std::mem::offset_of!(SprayParams, req), 64);
+        assert_eq!(std::mem::offset_of!(SprayParams, bodies), 80);
+        let p = SprayParams::new(7, 0.016, 3.0, [1.0, 2.0, 3.0], GAIN, INTENSITY, true, true);
+        assert_eq!(p.seed, [7, SLOTS, RING, 0]);
         assert_eq!(p.b[3], 1.0);
+        assert_eq!(p.cam[3], 1.0);
         assert!(RING.is_power_of_two());
         assert_eq!(f32::from_bits(head_init()[3]), BUDGET0);
         let s = SprayStats::from_head(&[100, 0, 5.0f32.to_bits(), 0.5f32.to_bits(), 7, 9, 3, 0]);

@@ -676,6 +676,6 @@ mod tests {
         assert_eq!(std::mem::offset_of!(WgrWaterParams, tidewater_sea), 288 + 16 * 48 + 16 + 64 + 48);
         assert_eq!(std::mem::offset_of!(WgrWaterParams, tidewater_fx), 288 + 16 * 48 + 16 + 64 + 48 + 16);
         assert_eq!(std::mem::offset_of!(WgrWaterParams, tidewater_wake), 288 + 16 * 48 + 16 + 64 + 48 + 16 + 16);
-        assert_eq!(std::mem::size_of::<WgrWaterParams>(), 1312);
+        assert_eq!(std::mem::size_of::<WgrWaterParams>(), 1472);
     }
 }

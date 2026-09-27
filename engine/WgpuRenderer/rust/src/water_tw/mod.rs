@@ -27,10 +27,13 @@
 //! ligaments, dense spray and mist thrown by the breakers, integrated on the GPU and drawn as soft
 //! sprites after the lips.
 //!
-//! Not yet, by design (later packages):
-//! boat spray and RefractionPass (W4b), underwater and caustics (W5), boat wakes (W6). Inland water
-//! bodies are not drawn in this mode yet (see TW-WATER-01, open question for the owner).
+//! W6: boat wakes (`wake.rs`, `tw_wake_kernel.wgsl`, `tw_wake.wgsl`) for the two boats nearest the
+//! camera, and (W6i) their bow spray (`boat_spray.rs`) into the spray ring's CPU tail.
+//!
+//! Not yet: inland water bodies are not drawn in this mode (see TW-WATER-01, open question for the
+//! owner).
 
+mod boat_spray;
 mod breakers;
 mod cdlod;
 mod fft;
@@ -122,6 +125,12 @@ fn spray_override() -> Option<(f32, f32)> {
         let mut it = v.split(',').map(|x| x.trim().parse::<f32>().ok());
         Some((it.next()??, it.next().flatten().unwrap_or(1.0)))
     })
+}
+
+/// `WGR_TW_BOAT_SPRAY=0` turns the boats' bow spray off (W6i; A/B captures).
+fn boat_spray_enabled() -> bool {
+    static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *V.get_or_init(|| std::env::var("WGR_TW_BOAT_SPRAY").map_or(true, |v| v.trim() != "0"))
 }
 
 /// `WGR_TW_GLOW=<scale>`: overrides the Water tab's water glow (W3j), for A/B captures.
@@ -417,6 +426,8 @@ pub struct Tidewater {
     // W6 boat wakes
     wake: wake::WakeGpu,
     wake_lanes: [[f32; 4]; wake::SLOTS * 4],
+    // W6i boat bow spray
+    boat_spray: boat_spray::BoatSpray,
 }
 
 impl Tidewater {
@@ -726,6 +737,7 @@ impl Tidewater {
             caustics,
             wake,
             wake_lanes: [[0.0; 4]; wake::SLOTS * 4],
+            boat_spray: Default::default(),
         };
         me.rebuild_bind(device);
         me
@@ -921,7 +933,14 @@ impl Tidewater {
         self.spray.poll_stats();
         let cp = [cam.cam_pos[0], cam.cam_pos[1], cam.cam_pos[2]];
         let (gain, intensity) = spray_override().unwrap_or((p.tidewater_fx[0], p.tidewater_fx[1]));
-        self.spray.set_frame(queue, dt, p.time, cp, gain, intensity, spray_on);
+        // W6i: the boats' bow spray into the ring's CPU tail, and their hulls as collision bodies
+        let spray_boats = boat_spray::SprayBoat::from_params(&p);
+        let mut requests = Vec::new();
+        if boat_spray_enabled() {
+            self.boat_spray.update(&spray_boats, dt, &mut requests, spray::MAX_REQUESTS);
+        }
+        let bodies: Vec<spray::Body> = spray_boats.iter().flatten().map(|b| b.body()).collect();
+        self.spray.set_frame(queue, dt, p.time, cp, gain, intensity, spray_on, &requests, &bodies);
         // W6: the boats' wakes (visual only; see wake.rs)
         self.wake_lanes = self.wake.update(queue, wake::WakeBoat::from_params(&p), dt, p.time, p.sea_level);
         let mut inputs = FrameInputs {
@@ -982,9 +1001,13 @@ impl Tidewater {
             if self.sim.any_active() && !self.bind_dirty {
                 timers.begin(encoder, crate::gpu_timers::Region::TwShoreSim);
                 self.sim.dispatch(encoder);
-                self.brk.dispatch(encoder, self.spray.on);
+                self.brk.dispatch(encoder, true, self.spray.breakers_on, self.spray.on);
                 self.spray.copy_stats(encoder);
                 timers.end(encoder, crate::gpu_timers::Region::TwShoreSim);
+            } else if self.spray.on && !self.bind_dirty {
+                // W6i: the boats' spray offshore, where no shore simulation runs
+                self.brk.dispatch(encoder, false, false, true);
+                self.spray.copy_stats(encoder);
             }
         }
     }
@@ -1032,7 +1055,8 @@ impl Tidewater {
 
     /// W6: the wakes' slots, for the log.
     pub fn wake_stats(&self) -> String {
-        self.wake.stats()
+        let (particles, requests) = self.boat_spray.stats;
+        format!("{}; bow spray: {particles} particles in {requests} requests last frame, spray on {}", self.wake.stats(), self.spray.on)
     }
 
     /// Spray diagnostics for the log: on this frame, stations, and the latest readback.
