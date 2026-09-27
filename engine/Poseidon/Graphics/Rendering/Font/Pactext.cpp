@@ -25,6 +25,7 @@
 #include <string>
 #include <unordered_set>
 #include <Poseidon/Foundation/Algorithms/Lzo1x.hpp>
+#include <Poseidon/Graphics/Rendering/Font/PaaLzoReplayCache.hpp>
 
 namespace Poseidon
 {
@@ -32,6 +33,37 @@ typedef word Pixel;
 
 namespace
 {
+render::PaaLzoReplayCache* PaaLzoReplay()
+{
+    static const bool enabled=[] {
+        const char* value=std::getenv("WGR_PAA_LZO_REPLAY_CACHE");
+        return value && std::strcmp(value,"1")==0;
+    }();
+    if(!enabled) return nullptr;
+    static render::PaaLzoReplayCache cache;
+    return &cache;
+}
+struct PaaLzoReplayReport
+{
+    ~PaaLzoReplayReport() noexcept
+    try {
+        auto* cache=PaaLzoReplay(); if(!cache) return;
+        // Optional aggregate only, bounded for the entire process. No source log
+        // or clock on the ordinary disabled route.
+        static std::mutex logMutex;
+        static uint64_t lastHits=0,lastMisses=0;
+        static unsigned rows=0;
+        std::lock_guard<std::mutex> lock(logMutex);
+        const auto stats=cache->Snapshot();
+        if(rows && stats.hits==lastHits && stats.misses-lastMisses<32) return;
+        lastHits=stats.hits; lastMisses=stats.misses;
+        if(rows==128) { ++rows; LOG_INFO(Graphics,"PAA LZO replay stats truncated: limit=128"); }
+        if(rows>=128) return;
+        ++rows;
+        LOG_INFO(Graphics,"PAA LZO replay: hits={} misses={} hitOutputBytes={} storeBytes={} peakStoreBytes={} entries={} evictions={} oversize={} admissionFailures={} budgetBytes=33554432 maxEntries=128",
+            stats.hits,stats.misses,stats.hitOutputBytes,stats.storeBytes,stats.peakStoreBytes,stats.entries,stats.evictions,stats.oversize,stats.admissionFailures);
+    } catch (...) { /* Optional diagnostic cannot change texture-read success. */ }
+};
 using WarmMipClock = std::chrono::steady_clock;
 struct WarmMipChainTiming;
 thread_local WarmMipChainTiming* GCurrentWarmMipChainTiming = nullptr;
@@ -1243,8 +1275,19 @@ int PacLevelMem::LoadPaaDXT(QIStream& in, void* mem, const PacPalette* pal) cons
         const auto decode = [&](const char* bytes) {
             packedPhase.Stop();
             WarmMipPhase lzoPhase(timing ? &timing->lzoMs : nullptr);
-            return Foundation::Lzo1x::Decompress(reinterpret_cast<const uint8_t*>(bytes),
+            auto* replay=PaaLzoReplay();
+            if(replay) {
+                try {
+                    if(replay->TryCopy(reinterpret_cast<const uint8_t*>(bytes),static_cast<size_t>(dSize),expected,static_cast<uint8_t*>(mem))) return expected;
+                } catch (...) { /* Optional cache failure never replaces the decoder. */ }
+            }
+            const size_t result=Foundation::Lzo1x::Decompress(reinterpret_cast<const uint8_t*>(bytes),
                 static_cast<size_t>(dSize), static_cast<uint8_t*>(mem), expected);
+            if(replay && result==expected) {
+                try { replay->StoreSuccessful(reinterpret_cast<const uint8_t*>(bytes),static_cast<size_t>(dSize),expected,static_cast<const uint8_t*>(mem),result); }
+                catch (...) { /* Successful original decode remains successful. */ }
+            }
+            return result;
         };
         if (in.TryReadDisjointSpan(static_cast<int>(dSize), mem, expected, borrowed))
         {
@@ -2139,6 +2182,7 @@ bool TextureSourcePac::GetMipmapChain(const MipmapRead* reads, int count) const
         return count <= 0;
     }
 
+    PaaLzoReplayReport replayReport;
     WarmMipChainTiming timing(static_cast<const char*>(_name), count);
     WarmMipPhase openPhase(timing.enabled ? &timing.openMs : nullptr);
     QIFStream in;

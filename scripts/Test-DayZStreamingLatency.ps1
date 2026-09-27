@@ -5,6 +5,7 @@ param(
     [ValidateSet('Counted', 'Timed')][string]$AdmissionMode = 'Counted',
     [switch]$ParkedTextureRefill,
     [switch]$LazyTextureGroups,
+    [switch]$PaaLzoReplay,
     [string]$Label = 'dayz-streaming-latency',
     [string]$GameDir = 'D:\SteamLibrary\steamapps\common\ARMA Cold War Assault'
 )
@@ -20,6 +21,7 @@ if (!$env:LOCK_OWNER) {
         if ($WarmProfile) { $argv += '-WarmProfile' }
         if ($ParkedTextureRefill) { $argv += '-ParkedTextureRefill' }
         if ($LazyTextureGroups) { $argv += '-LazyTextureGroups' }
+        if ($PaaLzoReplay) { $argv += '-PaaLzoReplay' }
         & 'C:\Program Files\Git\bin\bash.exe' @argv
         if ($LASTEXITCODE) { throw "Latency screening exited $LASTEXITCODE" }
     } finally { Remove-Item Env:LOCK_OWNER }
@@ -71,6 +73,7 @@ if ($ParkedTextureRefill) {
     $environment.WGR_MODEL_RESIDENCY_TRACE = '1'
 }
 if ($LazyTextureGroups) { $environment.WGR_LAZY_TEXTURE_BIND_GROUPS = '1' }
+if ($PaaLzoReplay) { $environment.WGR_PAA_LZO_REPLAY_CACHE = '1' }
 # Shape trace enables on variable presence, so leave it absent in both modes.
 $clearNames = @((Get-ChildItem Env: | Where-Object { $_.Name -like 'WGR_*' -or $_.Name -like 'POSEIDON_*' } | ForEach-Object { $_.Name }))
 $changedNames = @($clearNames + @($environment.Keys) | Select-Object -Unique)
@@ -84,6 +87,7 @@ try {
     $initialHashes = @(Get-FileHash $exe, $dll)
     @{
         mode = $Mode; head = (& git -C $root rev-parse HEAD); scriptSha256 = (Get-FileHash $PSCommandPath).Hash
+        paaLzoReplay = [bool]$PaaLzoReplay
         installed = (Get-Content (Join-Path $GameDir 'DEPLOYED-FROM.txt')); hashes = $initialHashes
         world = $world; environment = $environment; clearedEnvironmentNames = $clearNames
         pose = @($baseX, $baseZ, $baseY, $azimuth, $elevation); routeX = $route; poseHoldSeconds = 3
@@ -151,6 +155,23 @@ try {
     if (!$p.WaitForExit(15000) -or $p.ExitCode) { throw 'Owned game failed to exit cleanly' }
     if (Select-String -LiteralPath $log -Pattern 'Out of Memory|Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION' -Quiet) { throw 'Renderer error' }
     if ($WarmProfile -and !(Select-String -LiteralPath $log -Pattern 'Object stream warm update profile: row=' -Quiet)) { throw 'Warm admission profile did not observe a measured update' }
+    $replayProof = $null
+    $replayRows = @(Select-String -LiteralPath $log -Pattern 'PAA LZO replay: hits=(\d+) misses=(\d+) hitOutputBytes=(\d+) storeBytes=(\d+) peakStoreBytes=(\d+) entries=(\d+) evictions=(\d+) oversize=(\d+) admissionFailures=(\d+) budgetBytes=33554432 maxEntries=128')
+    if ($PaaLzoReplay) {
+        $observed = @($replayRows | ForEach-Object {
+            $g = $_.Matches[0].Groups
+            [pscustomobject]@{hits = [uint64]$g[1].Value; misses = [uint64]$g[2].Value; hitOutputBytes = [uint64]$g[3].Value
+                storeBytes = [uint64]$g[4].Value; peakStoreBytes = [uint64]$g[5].Value; entries = [uint64]$g[6].Value
+                evictions = [uint64]$g[7].Value; oversize = [uint64]$g[8].Value; admissionFailures = [uint64]$g[9].Value}
+        })
+        $positiveHits = @($observed | Where-Object { $_.hits -gt 0 -and $_.hitOutputBytes -gt 0 }).Count -gt 0
+        $withinBounds = $observed.Count -gt 0 -and @($observed | Where-Object { $_.storeBytes -gt 33554432 -or $_.peakStoreBytes -gt 33554432 -or $_.entries -gt 128 }).Count -eq 0
+        $replayProof = @{positiveHits = $positiveHits; withinBounds = $withinBounds; observations = $observed
+            truncated = [bool](Select-String -LiteralPath $log -Pattern 'PAA LZO replay stats truncated:' -Quiet)
+            scope = 'Bounded cumulative observations of exact compressed-byte replay; retained logical bytes include fixed metadata, exclude caller buffers and allocator overhead. No RSS cap or performance acceptance.'}
+        $replayProof | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $out 'paa-lzo-replay-proof.json')
+        if (!$positiveHits -or !$withinBounds) { throw 'PAA replay lacked actual positive hits or bounded retained-storage proof' }
+    } elseif ($replayRows.Count) { throw 'Default-off run unexpectedly enabled PAA replay' }
     $finalHashes = @(Get-FileHash $exe, $dll)
     for ($i = 0; $i -lt $initialHashes.Count; $i++) { if ($initialHashes[$i].Hash -ne $finalHashes[$i].Hash) { throw 'Installed binary changed during screening' } }
     $begins = @(Select-String -LiteralPath $log -Pattern '\[tri\] triPerfCapture begin n=(\d+) dropped=(\d+)')
@@ -185,6 +206,7 @@ try {
         frameCount = $count; dropped = $dropped; enginePhaseTiming = $phases; baseline = $baseline; returned = $returned
         routeSamples = $routeSamples; postExitHashes = $finalHashes
         parkedRefillProof = $parkedProof
+        paaLzoReplay = [bool]$PaaLzoReplay; paaLzoReplayProof = $replayProof
         limitation = 'No automatic performance threshold, vanilla parity, cold-cache guarantee or whole-world query readiness; compare matched separate mode processes'
     } | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $out 'result.json')
     Write-Output "DayZ latency screening evidence: $out"
