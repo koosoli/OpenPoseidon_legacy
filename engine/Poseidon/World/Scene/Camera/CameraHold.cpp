@@ -295,6 +295,9 @@ void CameraVehicle::Simulate(float deltaT, SimulationImportance prec)
             {
                 Move(_movePos);
                 _speed = VZero;
+                // TW-WATER W5c: arrived. Forget the target so a later setPos / setPosASL on the
+                // camera is not snapped back to it every frame until the next camCommit.
+                _movePos = VZero;
             }
             else
             {
@@ -439,7 +442,10 @@ void CameraVehicle::Simulate(float deltaT, SimulationImportance prec)
                 _reportedWorldBounds = false;
             }
         }
-        float surfY = GLandscape->SurfaceYAboveWater(position[0], position[2]);
+        // TW-WATER W5c: the free camera flies under the sea too (cut-scene authoring); it is held
+        // above the ground / sea bed only. The clipboard export below keeps heights relative to
+        // the sea surface, so an underwater shot exports as a negative camSetPos height.
+        float surfY = GLandscape->SurfaceY(position[0], position[2]);
         saturateMax(position[1], surfY + 0.05);
         Move(position);
 
