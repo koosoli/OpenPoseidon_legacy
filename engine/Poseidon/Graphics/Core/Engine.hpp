@@ -3136,6 +3136,24 @@ class Engine : public IGraphicsEngine
     virtual SharedMeshFixtureReport ControlSharedMeshLifetimeFixture(SharedMeshFixtureAction, const Shape* = nullptr)
     { return {}; }
 
+    // Ready is a returned-main-frame record cut, not all-pass/pixel or GPU-free proof.
+    enum class GeometryPageFixtureAction { Begin, Coarse, Fine, Observe, Snapshot, Abort };
+    struct GeometryPageFixtureReport
+    {
+        GeometryReportStatus status=GeometryReportStatus::Unsupported;
+        uint64_t requestId=0, observedRequestId=0, knownPayloadBytes=0;
+        uint32_t producerModel=UINT32_MAX, rendererModel=UINT32_MAX;
+        uint32_t producerInstance=UINT32_MAX, rendererInstance=UINT32_MAX;
+        uint32_t meshCount=0, meshesPresent=0, meshesAbsent=0;
+        uint32_t coarseTriangles=0, fineTriangles=0, coarsePages=0, finePages=0;
+        bool active=false, fineSelected=false, cpuHelpersUnchanged=false;
+        bool mainFrameReturned=false, cascadeConfigured=false, localShadowConfigured=false;
+        float x=0,y=0,z=0;
+        std::string helperHashBefore, helperHashAfter, sourceSha256;
+    };
+    virtual GeometryPageFixtureReport ControlGeometryPageFixture(GeometryPageFixtureAction,
+        float x=1200,float y=11.5f,float z=1200) { return {}; }
+
   protected:
     // Post-hook fires from OnWindowResized so apps can re-run the aspect policy
     // when the viewport changes.

@@ -525,6 +525,58 @@ void RegisterScreenshot(HarnessServer& hs)
             cJSON_AddStringToObject(result, "scope", "Private copied mesh lifetime and generational record state; no world rendering, queue-completion or device-free proof");
             return HarnessProtocol::JsonResponse(result);
         });
+    hs.RegisterCommand({"geometry_page_fixture", "Controlled authored resident geometry page draw fixture", {}},
+        [](const std::string&, cJSON* root) -> std::string {
+            if(!Foundation::IsMainThread() || !GEngine || !GWorld || GWorld->GetMode()==GModeNetware)
+                return HarnessProtocol::ErrorResponse("requires owner-thread singleplayer; allocation additionally requires startup WGR_GEOMETRY_PAGE_FIXTURE=1");
+            const char* name=HarnessProtocol::GetString(root,"action");
+            if(!name) return HarnessProtocol::ErrorResponse("fixture action required");
+            Engine::GeometryPageFixtureAction action;
+            if(!std::strcmp(name,"begin")) action=Engine::GeometryPageFixtureAction::Begin;
+            else if(!std::strcmp(name,"coarse")) action=Engine::GeometryPageFixtureAction::Coarse;
+            else if(!std::strcmp(name,"fine")) action=Engine::GeometryPageFixtureAction::Fine;
+            else if(!std::strcmp(name,"observe")) action=Engine::GeometryPageFixtureAction::Observe;
+            else if(!std::strcmp(name,"status")) action=Engine::GeometryPageFixtureAction::Snapshot;
+            else if(!std::strcmp(name,"abort")) action=Engine::GeometryPageFixtureAction::Abort;
+            else return HarnessProtocol::ErrorResponse("unknown fixture action");
+            float xyz[3]={1200,11.5f,1200};
+            const char* keys[3]={"x","y","z"};
+            for(int i=0;i<3;++i) if(const auto* item=cJSON_GetObjectItemCaseSensitive(root,keys[i])) {
+                if(!cJSON_IsNumber(item)||!std::isfinite(item->valuedouble)||std::fabs(item->valuedouble)>1e7)
+                    return HarnessProtocol::ErrorResponse("fixture position must be finite and bounded");
+                xyz[i]=float(item->valuedouble);
+            }
+            const auto report=GEngine->ControlGeometryPageFixture(action,xyz[0],xyz[1],xyz[2]);
+            const char* status="Failed";
+            switch(report.status) {
+                case Engine::GeometryReportStatus::Unsupported: status="Disabled"; break;
+                case Engine::GeometryReportStatus::Pending: status="Pending"; break;
+                case Engine::GeometryReportStatus::Busy: status="Busy"; break;
+                case Engine::GeometryReportStatus::Ready: status="Ready"; break;
+                case Engine::GeometryReportStatus::Invalid: status="Invalid"; break;
+                case Engine::GeometryReportStatus::Failed: break;
+            }
+            auto* result=cJSON_CreateObject(); cJSON_AddStringToObject(result,"status",status);
+            cJSON_AddNumberToObject(result,"requestId",double(report.requestId));
+            cJSON_AddNumberToObject(result,"observedRequestId",double(report.observedRequestId));
+            cJSON_AddNumberToObject(result,"knownPayloadBytes",double(report.knownPayloadBytes));
+#define PAGE_FIXTURE_NUMBER(field) cJSON_AddNumberToObject(result,#field,double(report.field))
+            PAGE_FIXTURE_NUMBER(producerModel); PAGE_FIXTURE_NUMBER(rendererModel);
+            PAGE_FIXTURE_NUMBER(producerInstance); PAGE_FIXTURE_NUMBER(rendererInstance);
+            PAGE_FIXTURE_NUMBER(meshCount); PAGE_FIXTURE_NUMBER(meshesPresent); PAGE_FIXTURE_NUMBER(meshesAbsent);
+            PAGE_FIXTURE_NUMBER(coarseTriangles); PAGE_FIXTURE_NUMBER(fineTriangles); PAGE_FIXTURE_NUMBER(coarsePages); PAGE_FIXTURE_NUMBER(finePages);
+            PAGE_FIXTURE_NUMBER(x); PAGE_FIXTURE_NUMBER(y); PAGE_FIXTURE_NUMBER(z);
+#undef PAGE_FIXTURE_NUMBER
+#define PAGE_FIXTURE_BOOL(field) cJSON_AddBoolToObject(result,#field,report.field)
+            PAGE_FIXTURE_BOOL(active); PAGE_FIXTURE_BOOL(fineSelected); PAGE_FIXTURE_BOOL(cpuHelpersUnchanged);
+            PAGE_FIXTURE_BOOL(mainFrameReturned); PAGE_FIXTURE_BOOL(cascadeConfigured); PAGE_FIXTURE_BOOL(localShadowConfigured);
+#undef PAGE_FIXTURE_BOOL
+            cJSON_AddStringToObject(result,"helperHashBefore",report.helperHashBefore.c_str());
+            cJSON_AddStringToObject(result,"helperHashAfter",report.helperHashAfter.c_str());
+            cJSON_AddStringToObject(result,"sourceSha256",report.sourceSha256.c_str());
+            cJSON_AddStringToObject(result,"scope","Private programmatically authored box; returned main frame and full-generation record cut, not all-pass/pixel, mounted-file provenance, queue-completion or device-free proof");
+            return HarnessProtocol::JsonResponse(result);
+        });
     hs.RegisterCommand({"geometry_allocations", "Request/poll bounded retained mesh allocation diagnostics", {}},
         [](const std::string&, cJSON* root) -> std::string {
             if (!GEngine) return HarnessProtocol::ErrorResponse("no renderer");

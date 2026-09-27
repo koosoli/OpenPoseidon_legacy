@@ -814,6 +814,11 @@ class EngineWgpu : public EngineDummy
     void AbandonUnpublishedSharedMeshLifetime(uint64_t producer);
     struct SharedMeshFixtureState;
     std::shared_ptr<SharedMeshFixtureState> _sharedMeshFixture;
+    struct GeometryPageFixtureState;
+    std::shared_ptr<GeometryPageFixtureState> _geometryPageFixture;
+    std::shared_ptr<GeometryPageFixtureState> _geometryPageFixtureObservation;
+    uint64_t _geometryPageFixtureObservationRequest=0;
+    bool _geometryPageFixtureActive=false;
     std::shared_ptr<render::StandaloneMeshWitnessBudget> _standaloneWitnessBudget;
     std::unordered_map<const LODShapeWithShadow*, std::vector<TextureWgpu*>> _gpuModelTextures;
     std::unordered_map<const LODShapeWithShadow*, uint32_t> _gpuModelRefs;
@@ -1289,7 +1294,8 @@ class EngineWgpu : public EngineDummy
             GeometryReport,
             LodDemandStart,
             LodDemandCancel,
-            SharedMeshFixtureObserve
+            SharedMeshFixtureObserve,
+            GeometryPageFixtureObserve
         };
         Kind kind = MeshCreate;
         uint64_t mesh = 0;  // MeshCreate: the producer handle being defined; MeshDestroy: the one dying
@@ -1320,8 +1326,10 @@ class EngineWgpu : public EngineDummy
         std::unique_ptr<GeometryReportRequest> geometryReport;
         struct LodDemandRequest { uint64_t epoch = 0; uint32_t frames = 0; std::vector<uint32_t> models; };
         std::unique_ptr<LodDemandRequest> lodDemand;
-        std::shared_ptr<SharedMeshFixtureState> sharedFixture;
-        uint64_t sharedFixtureRequest = 0;
+        // Kind-discriminated optional diagnostic payload: Shared/Page never coexist.
+        // Reuses the existing fixture fields without growing ordinary ResourceOp.
+        std::shared_ptr<void> fixtureData;
+        uint64_t fixtureRequest = 0;
     };
     std::vector<ResourceOp> _resourceOps;
     uint64_t _nextMeshHandle = 1;  // 0 stays "no mesh", matching the FFI's failure value
@@ -1335,6 +1343,9 @@ class EngineWgpu : public EngineDummy
     bool _geometryRegisteredRefsEnabled = false;
     void FillGeometryMeshFacts(GeometryAllocationReport& report);
     SharedMeshFixtureReport ControlSharedMeshLifetimeFixture(SharedMeshFixtureAction, const Shape* = nullptr) override;
+    GeometryPageFixtureReport ControlGeometryPageFixture(GeometryPageFixtureAction,
+        float x=1200,float y=11.5f,float z=1200) override;
+    void PublishGeometryPageFixtureObservation(const WgrFrame& frame);
     std::unordered_map<uint32_t, uint32_t> _modelIdOf; // producer -> renderer (post-drain)
     void DrainResourceOps(std::vector<ResourceOp>& ops);
 

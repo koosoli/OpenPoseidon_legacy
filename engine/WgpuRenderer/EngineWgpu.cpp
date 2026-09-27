@@ -1,4 +1,6 @@
 #include "MeshRecordClosure.hpp"
+#include <Poseidon/Graphics/Rendering/GeometryPageRepresentationDecode.hpp>
+#include <Poseidon/Foundation/Algorithms/Sha256.hpp>
 #include <Poseidon/Dev/Diag/StreamingDiag.hpp> // RFG-085 residency levers
 #include <Poseidon/World/Scene/MapThings.hpp>    // RFG-095 hidden proxies
 #include <Poseidon/Dev/Diag/FixedStepStats.hpp> // REN-THR-004: ticks per frame beside the frame hash
@@ -2080,6 +2082,19 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
         [](const LODShape* shape, void* self) { static_cast<EngineWgpu*>(self)->OnShapeDestroyed(shape); }, this);
 }
 
+// Value-only private fixture state; no source Shape retained after owner export.
+struct EngineWgpu::GeometryPageFixtureState
+{
+    std::mutex mutex;
+    GeometryPageFixtureReport report;
+    std::array<uint32_t,2> models{};
+    std::vector<uint64_t> meshes;
+    std::array<uint64_t,64> rendererMeshes{}; // consumer-only full-generation history
+    uint32_t instance=UINT32_MAX;
+    uint32_t consumedInstance=UINT32_MAX, consumedModel=UINT32_MAX; // consumer-only association
+    WgrInstance placement{};
+};
+
 struct EngineWgpu::SharedMeshFixtureState
 {
     // Buffer ownership changes on the main owner only. The renderer sees only
@@ -3477,12 +3492,22 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
             if (_geometryOwnerLedger) FillGeometryMeshFacts(*_geometryReportUnpublished);
             break;
         }
+        case ResourceOp::GeometryPageFixtureObserve:
+        {
+            auto fixture=std::static_pointer_cast<GeometryPageFixtureState>(op.fixtureData);
+            _geometryPageFixtureObservation=fixture;
+            _geometryPageFixtureObservationRequest=op.fixtureRequest;
+            if(fixture) for(size_t i=0;i<fixture->meshes.size();++i)
+                if(const auto found=_meshIdOf.find(fixture->meshes[i]);found!=_meshIdOf.end())
+                    fixture->rendererMeshes[i]=found->second;
+            break;
+        }
         case ResourceOp::SharedMeshFixtureObserve:
         {
-            auto& fixture = *op.sharedFixture;
+            auto& fixture = *std::static_pointer_cast<SharedMeshFixtureState>(op.fixtureData);
             // request0 is an explicit private-fixture metadata unpin operation,
             // never a renderer fact request/public completed observation.
-            if(!op.sharedFixtureRequest) {
+            if(!op.fixtureRequest) {
                 if(_geometryOwnerLedger) _geometryOwnerLedger->SetSelectedDiagnosticPin(_geometryOwnerEpoch,fixture.producer,false);
                 break;
             }
@@ -3506,7 +3531,7 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
             const bool ledgerObserved = _geometryOwnerLedger &&
                 _geometryOwnerLedger->SnapshotHandle(_geometryOwnerEpoch, fixture.producer, ledgerRecord);
             std::lock_guard lock(fixture.mutex);
-            if (fixture.report.requestId != op.sharedFixtureRequest) break;
+            if (fixture.report.requestId != op.fixtureRequest) break;
             fixture.report.cpuBorrowers = uint32_t(owners.boundBorrowers);
             fixture.report.producerOwned = owners.producerOwned;
             fixture.report.ledgerEnabled = bool(_geometryOwnerLedger);
@@ -3517,7 +3542,7 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
             fixture.report.witnessKnownMetadataBytes = witnessStats.bytes;
             fixture.report.witnessPeakKnownMetadataBytes = witnessStats.peak;
             fixture.report.witnessCapacityRefused = witnessStats.refused;
-            fixture.report.observedRequestId = op.sharedFixtureRequest;
+            fixture.report.observedRequestId = op.fixtureRequest;
             fixture.report.rendererHandle = handle;
             fixture.report.meshState = valid ? fact.state : 0;
             fixture.report.status = valid ? GeometryReportStatus::Ready : GeometryReportStatus::Failed;
@@ -3734,9 +3759,22 @@ void EngineWgpu::DrainInstanceOps(std::vector<InstanceOp>& ops)
                 _instSlotOf[op.handle] = wgr_instance_add(_renderer, &inst);
             else
                 wgr_instance_update(_renderer, _instSlotOf[op.handle], &inst);
+            // Producer instance slots recycle at enqueue. Model identities are
+            // monotonic/private: a foreign Add on the same slot is not this fixture.
+            if(_geometryPageFixtureObservation && op.handle==_geometryPageFixtureObservation->instance &&
+               (op.inst.model==_geometryPageFixtureObservation->models[0] ||
+                op.inst.model==_geometryPageFixtureObservation->models[1])) {
+                _geometryPageFixtureObservation->consumedInstance=_instSlotOf[op.handle];
+                _geometryPageFixtureObservation->consumedModel=inst.model;
+            }
             break;
         }
         case InstanceOp::Remove:
+            if(_geometryPageFixtureObservation && op.handle==_geometryPageFixtureObservation->instance &&
+               _geometryPageFixtureObservation->consumedInstance==_instSlotOf[op.handle]) {
+                _geometryPageFixtureObservation->consumedInstance=UINT32_MAX;
+                _geometryPageFixtureObservation->consumedModel=UINT32_MAX;
+            }
             wgr_instance_remove(_renderer, _instSlotOf[op.handle]);
             _instSlotOf[op.handle] = InvalidInstanceSlot;
             break;
@@ -3786,6 +3824,7 @@ void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing, Fr
     HashPublishedFrame(frame, backing);
     const auto afterHash = std::chrono::steady_clock::now();
     wgr_render_frame(_renderer, &frame);
+    if (_geometryPageFixtureObservation) PublishGeometryPageFixtureObservation(frame);
     if (_geometryOwnerLedger)
     {
         // Once per real renderer frame, after deferred uploader destroys drain.
@@ -4575,7 +4614,7 @@ void EngineWgpu::NextFrame()
         // sides cannot disagree about whether the path exists.
         //
         // WGR_SHADOW_LEGACY_GATE=1 restores the old gate (and the old `_smCamPos` handling with it).
-        const bool gpuDrivenShadowCasters = _gpuDriven && !_gpuInstances.empty();
+        const bool gpuDrivenShadowCasters = _gpuDriven && (!_gpuInstances.empty() || _geometryPageFixtureActive);
         // GRASS is a third independent caster set, and the Rust side already knew that: its own
         // gate is `casters.is_empty() && !gpu_shadows && !grass.casts_shadows()` (gfx3d/mod.rs:4404).
         // Mirroring only the gpu_shadows term left a frame with no CPU casters and an empty
@@ -4858,7 +4897,7 @@ void EngineWgpu::NextFrame()
         backing.cameras = std::move(cameras);
         // What the producer knew about the retained set when it built this frame. The
         // consumer must never ask `_gpuInstances` itself -- see PushFrameBacking.
-        backing.retainedInstances = static_cast<uint32_t>(_gpuInstances.size());
+        backing.retainedInstances = static_cast<uint32_t>(_gpuInstances.size()) + uint32_t(_geometryPageFixtureActive);
 
         // Lives in the ring slot, not on this stack: with overlap the producer returns
         // from NextFrame while the worker is still reading it.
@@ -5536,11 +5575,11 @@ Engine::SharedMeshFixtureReport EngineWgpu::ControlSharedMeshLifetimeFixture(Sha
     const auto observe = [&] {
         auto& fixture = *_sharedMeshFixture;
         if (!fixture.lifetime && !fixture.standaloneWitness) return false;
-        ResourceOp op; op.kind = ResourceOp::SharedMeshFixtureObserve; op.sharedFixture = _sharedMeshFixture;
+        ResourceOp op; op.kind = ResourceOp::SharedMeshFixtureObserve; op.fixtureData = _sharedMeshFixture;
         {
             std::lock_guard lock(fixture.mutex);
             if (fixture.report.requestId == std::numeric_limits<uint64_t>::max()) return false;
-            op.sharedFixtureRequest = fixture.report.requestId + 1;
+            op.fixtureRequest = fixture.report.requestId + 1;
             op.mesh = fixture.report.rendererHandle;
         }
         _resourceOps.push_back(std::move(op));
@@ -5678,8 +5717,8 @@ Engine::SharedMeshFixtureReport EngineWgpu::ControlSharedMeshLifetimeFixture(Sha
                 if (action == SharedMeshFixtureAction::Abort)
                 {
                     if(_geometryOwnerLedger) {
-                        ResourceOp unpin; unpin.kind=ResourceOp::SharedMeshFixtureObserve; unpin.sharedFixture=_sharedMeshFixture;
-                        unpin.sharedFixtureRequest=0; _resourceOps.push_back(std::move(unpin));
+                        ResourceOp unpin; unpin.kind=ResourceOp::SharedMeshFixtureObserve; unpin.fixtureData=_sharedMeshFixture;
+                        unpin.fixtureRequest=0; _resourceOps.push_back(std::move(unpin));
                     }
                     fixture.newer.reset(); fixture.older.reset(); _sharedMeshFixture.reset(); result.status=GeometryReportStatus::Ready; return result;
                 }
@@ -8191,6 +8230,208 @@ static uint32_t BuildForestCrownComponents(const std::vector<SVertex>& verts, co
 }
 
 } // namespace
+
+namespace
+{
+Shape* PagePilotShape(int subdivisions)
+{
+    auto shape=std::make_unique<Shape>();
+    const Vector3 corners[8]={Vector3(-2,0,-2),Vector3(2,0,-2),Vector3(2,0,2),Vector3(-2,0,2),
+        Vector3(-2,3,-2),Vector3(2,3,-2),Vector3(2,3,2),Vector3(-2,3,2)};
+    const int faces[6][4]={{0,1,2,3},{4,7,6,5},{0,4,5,1},{1,5,6,2},{2,6,7,3},{3,7,4,0}};
+    const Vector3 normals[6]={Vector3(0,-1,0),Vector3(0,1,0),Vector3(0,0,-1),Vector3(1,0,0),Vector3(0,0,1),Vector3(-1,0,0)};
+    for(int f=0;f<6;++f) for(int v=0;v<subdivisions;++v) for(int u=0;u<subdivisions;++u)
+    {
+        const auto point=[&](float a,float b) {
+            return corners[faces[f][0]]*(1-a)*(1-b)+corners[faces[f][1]]*a*(1-b)+
+                corners[faces[f][2]]*a*b+corners[faces[f][3]]*(1-a)*b; };
+        const int first=shape->NVertex();
+        const float a=float(u)/subdivisions,b=float(v)/subdivisions,c=float(u+1)/subdivisions,d=float(v+1)/subdivisions;
+        shape->AddVertexFast(point(a,b),normals[f],0,a,b); shape->AddVertexFast(point(c,b),normals[f],0,c,b);
+        shape->AddVertexFast(point(c,d),normals[f],0,c,d); shape->AddVertexFast(point(a,d),normals[f],0,a,d);
+        Poly face; face.Init(); face.SetN(4);
+        for(int i=0;i<4;++i) face.Set(i,first+i);
+        shape->AddFace(face);
+    }
+    ShapeSection section; section.properties.Init(); section.material=0;
+    section.beg=shape->BeginFaces(); section.end=shape->EndFaces(); shape->AddSection(section);
+    return shape.release();
+}
+std::string PagePilotHelperHash(const LODShape& shape)
+{
+    Foundation::Sha256 hash;
+    for(int level=2;level<5;++level) {
+        const Shape& geometry=*shape.Level(level);
+        for(int i=0;i<geometry.NVertex();++i) {
+            const float p[3]={geometry.Pos(i).X(),geometry.Pos(i).Y(),geometry.Pos(i).Z()}; hash.Update(p,sizeof(p));
+        }
+        for(Offset at=geometry.BeginFaces();at<geometry.EndFaces();geometry.NextFace(at)) {
+            const auto& face=geometry.Face(at); const int n=face.N(); hash.Update(&n,sizeof(n));
+            for(int i=0;i<n;++i) { const auto index=face.GetVertex(i); hash.Update(&index,sizeof(index)); }
+        }
+    }
+    return hash.Hex();
+}
+}
+
+Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(GeometryPageFixtureAction action,float x,float y,float z)
+{
+    static const bool enabled=[] { const char* v=std::getenv("WGR_GEOMETRY_PAGE_FIXTURE"); return v && std::strcmp(v,"1")==0; }();
+    GeometryPageFixtureReport failure;
+    if(!enabled) return failure;
+    failure.status=GeometryReportStatus::Invalid;
+    if(!Foundation::IsMainThread() || !_renderer || !_gpuDriven) return failure;
+    const auto copied=[&] { std::lock_guard lock(_geometryPageFixture->mutex); return _geometryPageFixture->report; };
+    if(action==GeometryPageFixtureAction::Snapshot) return _geometryPageFixture?copied():failure;
+    try {
+        if(action==GeometryPageFixtureAction::Begin) {
+            if(!std::isfinite(x)||!std::isfinite(y)||!std::isfinite(z)||std::fabs(x)>1e7f||std::fabs(y)>1e7f||std::fabs(z)>1e7f) return failure;
+            if(_geometryPageFixture) { auto old=copied(); if(old.active || old.status!=GeometryReportStatus::Ready || old.meshesAbsent!=old.meshCount) { old.status=GeometryReportStatus::Busy; return old; } }
+            using namespace Poseidon::GeometryPages;
+            LODShape authored;
+            authored.AddShape(PagePilotShape(1),10); authored.AddShape(PagePilotShape(2),1);
+            authored.AddShape(PagePilotShape(1),1e13f); authored.AddShape(PagePilotShape(1),6e15f); authored.AddShape(PagePilotShape(1),7e15f);
+            if(authored.FindGeometryLevel()!=2 || authored.FindViewGeometryLevel()!=3 || authored.FindFireGeometryLevel()!=4) return failure;
+            const auto helperBefore=PagePilotHelperHash(authored);
+            ShapeExportSelection selection; selection.controlledAuthoredRigid=true; selection.coarseLevel=0; selection.fineLevel=1;
+            selection.source.coarseRepresentation=0; selection.source.fineRepresentation=1;
+            selection.source.vertexLayout=sizeof(SVertex); selection.source.materialMapping=1;
+            // Bootstrap only the source hash, then derive it from exact original packed records.
+            selection.source.sourceSha256[0]=1;
+            ShapeExport original;
+            if(ExportShapePair(authored,selection,original)!=ExportStatus::Exported) return failure;
+            Foundation::Sha256 digest; digest.Update(std::string("OpenPoseidon-private-page-box-v1"));
+            for(const auto* mesh:{&original.coarse,&original.fine}) {
+                digest.Update(mesh->vertices.data(),mesh->vertices.size()*sizeof(SVertex));
+                digest.Update(mesh->indices.data(),mesh->indices.size()*sizeof(uint32_t));
+                digest.Update(mesh->materials.data(),mesh->materials.size()*sizeof(uint32_t));
+            }
+            const auto sha=digest.Hex();
+            const auto hex=[](char c) { return c<='9'?c-'0':c-'a'+10; };
+            for(size_t i=0;i<32;++i) selection.source.sourceSha256[i]=uint8_t(hex(sha[i*2])*16+hex(sha[i*2+1]));
+            original.source=selection.source;
+            Package package; Limits limits; limits.maxPages=8; limits.maxClusters=64; limits.payloadBytes=1024*1024;
+            if(Build(original.coarse.Input(),original.fine.Input(),original.source,true,package,limits)!=Status::Built) return failure;
+            ResidentRepresentation coarse,fine;
+            RepresentationDecodeLimits decode; decode.pages=8; decode.clusters=64; decode.decodedBytes=1024*1024; decode.serializedBytes=1024*1024;
+            if(DecodeResidentRepresentation(package,package.Identity(),Frontier::Coarse,original,coarse,decode)!=DecodeStatus::Decoded ||
+               DecodeResidentRepresentation(package,package.Identity(),Frontier::Fine,original,fine,decode)!=DecodeStatus::Decoded) return failure;
+            const auto helperAfter=PagePilotHelperHash(authored);
+            if(helperBefore!=helperAfter || coarse.clusters+fine.clusters>64 || package.pages.size()>8) return failure;
+            AutoArray<render::mesh::MeshSection> sections; render::mesh::BuildSections(*authored.Level(0),sections);
+            WgrModelSection materialSection{}; WgrModelMaterial material{};
+            if(!ClassifyGpuSection(*authored.Level(0),0,sections,0,materialSection,material)) return failure;
+            if(!material.texture_id) material.texture_id=UntexturedAlbedoHandle(false);
+            auto fixture=std::make_shared<GeometryPageFixtureState>();
+            std::vector<ResourceOp> staged; staged.reserve(size_t(coarse.clusters+fine.clusters)+3);
+            fixture->meshes.reserve(size_t(coarse.clusters+fine.clusters));
+            uint64_t known=16384+sizeof(LODShape)+5*sizeof(Shape); // fixed pilot/helper/state metadata allowance, not RSS
+            const auto countExport=[&](const ExportedMesh& mesh) {
+                return mesh.positions.capacity()*sizeof(Position)+mesh.vertices.capacity()*sizeof(SVertex)+
+                    (mesh.indices.capacity()+mesh.materials.capacity())*sizeof(uint32_t); };
+            known+=countExport(original.coarse)+countExport(original.fine);
+            for(const auto& page:package.pages) known+=page.bytes.capacity();
+            known+=package.clusters.capacity()*sizeof(Cluster)+package.pages.capacity()*sizeof(Page);
+            for(int representation=0;representation<2;++representation) {
+                if(_nextModelHandle==WGR_INVALID_MODEL) return failure;
+                ResourceOp model; model.kind=ResourceOp::ModelRegister; model.model=_nextModelHandle++; model.sphereRadius=5;
+                fixture->models[representation]=model.model; model.name="private-page-box";
+                const auto& decoded=representation?fine:coarse;
+                for(const auto& page:decoded.pages) for(const auto& cluster:page.clusters) {
+                    if(!_nextMeshHandle) return failure;
+                    ResourceOp mesh; mesh.kind=ResourceOp::MeshCreate; mesh.mesh=_nextMeshHandle++;
+                    mesh.verts=cluster.vertices; mesh.indices.reserve(cluster.indices.size());
+                    for(auto index:cluster.indices) { if(index>INT32_MAX) return failure; mesh.indices.push_back(VertexIndex(index)); }
+                    fixture->meshes.push_back(mesh.mesh);
+                    auto section=materialSection; section.mesh=mesh.mesh; section.index_begin=0; section.index_count=uint32_t(mesh.indices.size());
+                    model.sections.push_back(section); model.materials.push_back(material);
+                    known+=2*(cluster.vertices.capacity()*sizeof(SVertex)+cluster.indices.capacity()*sizeof(uint32_t));
+                    known+=mesh.verts.capacity()*sizeof(SVertex)+mesh.indices.capacity()*sizeof(VertexIndex);
+                    staged.push_back(std::move(mesh));
+                }
+                model.lods.push_back(WgrModelLod{1,0,uint32_t(model.sections.size()),0});
+                known+=model.sections.capacity()*sizeof(WgrModelSection)+model.materials.capacity()*sizeof(WgrModelMaterial)+model.lods.capacity()*sizeof(WgrModelLod);
+                staged.push_back(std::move(model));
+            }
+            known+=staged.capacity()*sizeof(ResourceOp)+fixture->meshes.capacity()*sizeof(uint64_t);
+            if(known>1024*1024) return failure;
+            auto& report=fixture->report; report.status=GeometryReportStatus::Pending; report.requestId=1;
+            report.active=true; report.meshCount=uint32_t(fixture->meshes.size()); report.knownPayloadBytes=known;
+            report.coarseTriangles=uint32_t(original.coarse.indices.size()/3); report.fineTriangles=uint32_t(original.fine.indices.size()/3);
+            report.coarsePages=package.coarsePages; report.finePages=uint32_t(package.pages.size())-package.coarsePages;
+            report.cpuHelpersUnchanged=true; report.helperHashBefore=helperBefore; report.helperHashAfter=helperAfter; report.sourceSha256=sha;
+            report.x=x; report.y=y; report.z=z; report.producerModel=fixture->models[0];
+            auto& placement=fixture->placement; placement.world.m[0]=placement.world.m[5]=placement.world.m[10]=placement.world.m[15]=1;
+            placement.world.m[12]=x; placement.world.m[13]=y; placement.world.m[14]=z; placement.center={x,y,z,1}; placement.model=fixture->models[0];
+            ResourceOp observe; observe.kind=ResourceOp::GeometryPageFixtureObserve; observe.fixtureData=fixture; observe.fixtureRequest=1; staged.push_back(std::move(observe));
+            // Reserve every producer publication queue before publishing ANY owned ID.
+            _resourceOps.reserve(_resourceOps.size()+staged.size()); _instanceOps.reserve(_instanceOps.size()+1);
+            if(_instFreeHandles.empty() && _nextInstanceHandle==UINT32_MAX) return failure;
+            fixture->instance=EnqueueInstanceAdd(placement); report.producerInstance=fixture->instance;
+            for(auto& op:staged) _resourceOps.push_back(std::move(op));
+            _geometryPageFixture=std::move(fixture); _geometryPageFixtureActive=true;
+            return copied();
+        }
+        if(!_geometryPageFixture) return failure;
+        auto fixture=_geometryPageFixture;
+        std::lock_guard lock(fixture->mutex);
+        auto& report=fixture->report;
+        if((action==GeometryPageFixtureAction::Coarse||action==GeometryPageFixtureAction::Fine)&&!report.active) return failure;
+        if(report.requestId==UINT64_MAX) return failure;
+        size_t count=1;
+        if(action==GeometryPageFixtureAction::Abort && report.active) count+=2+fixture->meshes.size();
+        _resourceOps.reserve(_resourceOps.size()+count);
+        _instanceOps.reserve(_instanceOps.size()+1); _instFreeHandles.reserve(_instFreeHandles.size()+1);
+        if(action==GeometryPageFixtureAction::Abort && report.active) {
+            EnqueueInstanceRemove(fixture->instance);
+            for(auto model:fixture->models) { ResourceOp op; op.kind=ResourceOp::ModelRetire; op.model=model; _resourceOps.push_back(std::move(op)); }
+            for(auto mesh:fixture->meshes) { ResourceOp op; op.kind=ResourceOp::MeshDestroy; op.mesh=mesh; _resourceOps.push_back(std::move(op)); }
+            report.active=false; report.fineSelected=false; report.producerModel=UINT32_MAX; _geometryPageFixtureActive=false;
+        } else if(action==GeometryPageFixtureAction::Coarse||action==GeometryPageFixtureAction::Fine) {
+            report.fineSelected=action==GeometryPageFixtureAction::Fine;
+            report.producerModel=fixture->models[report.fineSelected?1:0]; fixture->placement.model=report.producerModel;
+            EnqueueInstanceUpdate(fixture->instance,fixture->placement);
+        }
+        report.status=GeometryReportStatus::Pending; report.mainFrameReturned=false; ++report.requestId;
+        ResourceOp observe; observe.kind=ResourceOp::GeometryPageFixtureObserve; observe.fixtureData=fixture; observe.fixtureRequest=report.requestId;
+        _resourceOps.push_back(std::move(observe));
+        return report;
+    } catch(...) { failure.status=GeometryReportStatus::Failed; return failure; }
+}
+
+void EngineWgpu::PublishGeometryPageFixtureObservation(const WgrFrame& frame)
+{
+    auto fixture=std::move(_geometryPageFixtureObservation);
+    const auto request=_geometryPageFixtureObservationRequest; _geometryPageFixtureObservationRequest=0;
+    if(!fixture) return;
+    std::lock_guard lock(fixture->mutex);
+    auto& report=fixture->report;
+    if(report.requestId!=request) return;
+    bool valid=fixture->meshes.size()<=64;
+    for(size_t i=0;i<fixture->meshes.size();++i) {
+        if(const auto found=_meshIdOf.find(fixture->meshes[i]);found!=_meshIdOf.end()) fixture->rendererMeshes[i]=found->second;
+        valid=valid && fixture->rendererMeshes[i]!=0;
+    }
+    std::array<WgrMeshHandleFact,64> facts{}; WgrMeshHandleFactSummary summary{};
+    if(valid) valid=wgr_get_mesh_handle_facts(_renderer,WgrSlice<uint64_t>{fixture->rendererMeshes.data(),fixture->meshes.size()},
+        facts.data(),fixture->meshes.size(),&summary)!=0 && summary.complete==1 && !summary.flags && !summary.duplicate_handles &&
+        summary.handles_requested==fixture->meshes.size() && summary.handles_inspected==fixture->meshes.size() &&
+        !summary.invalid && !summary.reserved && summary.record_scope_valid==1 &&
+        summary.present+summary.absent==fixture->meshes.size();
+    report.meshesPresent=report.meshesAbsent=0;
+    for(size_t i=0;valid && i<fixture->meshes.size();++i) {
+        valid=facts[i].mesh_handle==fixture->rendererMeshes[i] && facts[i].reserved==0 &&
+            ((facts[i].state==1 && facts[i].vertex_bytes>0 && facts[i].index_bytes>0) ||
+             (facts[i].state==2 && !facts[i].vertex_bytes && !facts[i].index_bytes));
+        if(facts[i].state==1) ++report.meshesPresent; else if(facts[i].state==2) ++report.meshesAbsent;
+    }
+    report.rendererModel=UINT32_MAX;
+    if(report.active) if(const auto found=_modelIdOf.find(report.producerModel);found!=_modelIdOf.end()) report.rendererModel=found->second;
+    report.rendererInstance=fixture->consumedInstance;
+    valid=valid && (report.active?(report.rendererModel!=UINT32_MAX && report.rendererInstance!=UINT32_MAX && fixture->consumedModel==report.rendererModel && report.meshesPresent==report.meshCount):report.rendererInstance==UINT32_MAX);
+    report.mainFrameReturned=true; report.cascadeConfigured=frame.shadow.count!=0; report.localShadowConfigured=frame.shadow.local_count!=0;
+    report.observedRequestId=request; report.status=valid?GeometryReportStatus::Ready:GeometryReportStatus::Failed;
+}
 
 // How much of a material's flat specular constant to apply.
 //
