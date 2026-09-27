@@ -17,7 +17,10 @@
 //! the coast nearest the camera, the lace texture (`lace.rs`), the material's SIM path, and the
 //! wet sand / stranded foam it hands to OP's terrain (`shore_wetness`).
 //!
-//! Not yet, by design (later packages): Breakers / surf foam (W3c),
+//! W3c: the surf-zone foam look (SurfFoam.js, `tw_surf_foam.wgsl`): world-space lace carried by the
+//! simulated flow, whitewater lumps with self-shadowed crevices, foam lighting.
+//!
+//! Not yet, by design (later packages): Breakers (W3d),
 //! spray and RefractionPass (W4), underwater and caustics (W5), boat wakes (W6). Inland water
 //! bodies are not drawn in this mode yet (see TW-WATER-01, open question for the owner).
 
@@ -41,6 +44,8 @@ const TW_WATER_WGSL: &str = concat!(
     include_str!("tw_shore.wgsl"),
     "\n",
     include_str!("tw_sim.wgsl"),
+    "\n",
+    include_str!("tw_surf_foam.wgsl"),
 );
 
 /// The shore simulation kernel: the shared declarations, the shore waves (shoreEvaluateWorld),

@@ -6596,17 +6596,18 @@ void DrawWaterTab()
         changed |= Dev::SliderFloat("TW curl", &t.shoreCurl, 0.0f, 1.5f, "%.2f");
         changed |= Dev::SliderFloat("TW run-up", &t.shoreRunup, 0.0f, 3.0f, "%.2f");
         changed |= Dev::SliderFloat("TW surf turbidity", &t.shoreTurbidity, 0.0f, 1.0f, "%.2f");
-        changed |= Dev::Checkbox("TW shore simulation (W3b)", &t.shoreSim);
-        Dev::PanelTooltip("Foam carried and stranded by the water, and sand that stays wet and dries, in two "
-                          "380 m regions on the coast nearest the camera (they fade in over 3 s when placed). "
-                          "Off: the shore waves' own foam only, and OP's coast wet band.");
+        changed |= Dev::Checkbox("TW shore simulation (W3b, W3c)", &t.shoreSim);
+        Dev::PanelTooltip("Foam carried and stranded by the water, sand that stays wet and dries, and the surf "
+                          "foam look (whitewater lumps, flowing lace), in two 380 m regions on the coast nearest "
+                          "the camera (they fade in over 3 s when placed). Off: the shore waves' own foam only, "
+                          "and OP's coast wet band.");
         ImGui::BeginDisabled(!t.shoreSim);
         changed |= Dev::SliderFloat("TW sand drying time", &t.shoreDryTime, 2.0f, 120.0f, "%.0f s");
         ImGui::EndDisabled();
         ImGui::EndDisabled();
         ImGui::BeginDisabled(true);
         bool notPorted = false;
-        Dev::Checkbox("TW breaker lips / surf foam look (not ported: W3c)", &notPorted);
+        Dev::Checkbox("TW breaker lip sheets (not ported: W3d)", &notPorted);
         Dev::Checkbox("TW spray budget + refraction pass (not ported: W4)", &notPorted);
         Dev::Checkbox("TW underwater + caustics (not ported: W5)", &notPorted);
         Dev::Checkbox("TW boat wakes (not ported: W6)", &notPorted);
