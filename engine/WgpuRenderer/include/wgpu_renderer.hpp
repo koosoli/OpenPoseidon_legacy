@@ -1471,7 +1471,7 @@ struct WgrWaterParams
      * [0] x = shore waves on (1), y = wave period s (9), z = amplitude H/2 m (0.34), w = variation (0.55)
      * [1] x = breaker index gamma (0.78), y = break span (0.13), z = curl (1), w = run-up (1)
      * [2] x = surf-zone turbidity 1/m (0.16), y = shore simulation on (1, W3b), z = wet sand
-     *     drying time s (28, ShoreSim dryTime), w reserved (0)
+     *     drying time s (28, ShoreSim dryTime), w = breaker lip opacity (1, W3d; 0 = no lips)
      * The renderer scales the amplitude with the swell scale (tidewater[0].z) relative to its default,
      * so weather and the reference seas move the surf too. sizeof 1136 -> 1184 with the Rust side. */
     WgrVec4 tidewater_shore[3];

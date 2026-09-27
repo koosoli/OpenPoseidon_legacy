@@ -13976,6 +13976,7 @@ void EngineWgpu::SyncWaterLookProfile()
                 << ' ' << t.shoreVariation << ' ' << t.shoreGamma << ' ' << t.shoreBreakSpan << ' ' << t.shoreCurl
                 << ' ' << t.shoreRunup << ' ' << t.shoreTurbidity << '\n';
             out << "tidewaterSim " << (t.shoreSim ? 1 : 0) << ' ' << t.shoreDryTime << '\n';
+            out << "tidewaterLips " << t.shoreLips << '\n';
         }
         if (out.good())
             _waterLookDirty = false;
@@ -14109,6 +14110,10 @@ void EngineWgpu::SyncWaterLookProfile()
             int on = 1;
             in >> on >> t.shoreDryTime;
             t.shoreSim = on != 0;
+        }
+        else if (key == "tidewaterLips")
+        {
+            in >> _waterLook.tidewater.shoreLips;
         }
         else
             in.ignore(std::numeric_limits<std::streamsize>::max(), '\n');

@@ -2522,6 +2522,8 @@ class Engine : public IGraphicsEngine
             // W3b — shore simulation (ShoreSim.js): carried / stranded foam, wet sand
             bool shoreSim = true;
             float shoreDryTime = 28.0f;    // s for wet sand to dry (ShoreSimParams dryTime)
+            // W3d — breaker lip sheets (Breakers.js `sheet`: lip opacity multiplier, 0 = off)
+            float shoreLips = 1.0f;
         } tidewater;
         // Neutral multipliers reproduce GodotOceanWaves' authored cascade values.
         // Those physical spectrum coefficients are already metre-scaled; multiplying
