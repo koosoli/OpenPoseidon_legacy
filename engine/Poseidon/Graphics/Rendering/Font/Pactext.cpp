@@ -2193,7 +2193,8 @@ bool TextureSourcePac::Init(const char* name, PacLevelMem* mips, int maxMips)
     // Old cache entries remain unsupported, even when a fresh bank name resolves.
     static const bool retainArchiveBinding = [] {
         const char* value = std::getenv("WGR_OBJECT_STREAM_WARM_TEXTURES");
-        return value && std::strcmp(value, "1") == 0;
+        const char* cold = std::getenv("WGR_OBJECT_STREAM_COLD_TEXTURE_HANDOFF");
+        return (value && std::strcmp(value, "1") == 0) || (cold && std::strcmp(cold, "1") == 0);
     }();
     if (retainArchiveBinding && _isPaa && _mipmaps > 0 && in.GetBuffer())
     {
