@@ -1,6 +1,10 @@
 #include <Poseidon/Core/Application.hpp>
 
 #include <atomic>
+#include <chrono>
+#include <cstdlib>
+#include <cstring>
+#include <Poseidon/Graphics/Rendering/Shape/ObjectAdmitProfile.hpp>
 #include <vector>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Graphics/Rendering/Font/Pactext.hpp>
@@ -25,6 +29,76 @@
 namespace Poseidon
 {
 typedef word Pixel;
+
+namespace
+{
+using WarmMipClock = std::chrono::steady_clock;
+struct WarmMipChainTiming;
+thread_local WarmMipChainTiming* GCurrentWarmMipChainTiming = nullptr;
+bool WarmMipChainTimingEnabled()
+{
+    static const bool enabled = [] {
+        const char* value = std::getenv("WGR_OBJECT_STREAM_WARM_PROFILE");
+        return value && std::strcmp(value, "1") == 0;
+    }();
+    return enabled && render::GObjectAdmitProfile.active;
+}
+class WarmMipPhase
+{
+    double* _bucket;
+    WarmMipClock::time_point _began;
+public:
+    explicit WarmMipPhase(double* bucket) : _bucket(bucket),
+        _began(bucket ? WarmMipClock::now() : WarmMipClock::time_point{}) {}
+    ~WarmMipPhase() { Stop(); }
+    void Stop()
+    {
+        if (_bucket)
+        {
+            *_bucket += std::chrono::duration<double, std::milli>(WarmMipClock::now() - _began).count();
+            _bucket = nullptr;
+        }
+    }
+};
+struct WarmMipChainTiming
+{
+    bool enabled, success = false;
+    const char* source;
+    int requestedMips, selectedMips = 0;
+    uint64_t dxtStoredBytes = 0, dxtOutputBytes = 0;
+    int lzoMips = 0, rawDxtMips = 0;
+    double openMs = 0.0, loopMs = 0.0, packedAllocCopyMs = 0.0, lzoMs = 0.0, rawReadMs = 0.0;
+    WarmMipClock::time_point began;
+    WarmMipChainTiming* previous;
+    WarmMipChainTiming(const char* name, int count)
+        : enabled(WarmMipChainTimingEnabled()), source(name), requestedMips(count),
+          began(enabled ? WarmMipClock::now() : WarmMipClock::time_point{}),
+          previous(enabled ? GCurrentWarmMipChainTiming : nullptr)
+    {
+        if (enabled) GCurrentWarmMipChainTiming = this;
+    }
+    ~WarmMipChainTiming()
+    {
+        if (!enabled) return;
+        GCurrentWarmMipChainTiming = previous; // never lend the stack scope beyond this call
+        const double totalMs = std::chrono::duration<double, std::milli>(WarmMipClock::now() - began).count();
+        if (totalMs < 2.0) return;
+        static std::atomic<unsigned> logged{0};
+        unsigned slot = logged.load(std::memory_order_relaxed);
+        while (slot < 129 && !logged.compare_exchange_weak(slot, slot + 1, std::memory_order_relaxed)) {}
+        if (slot == 128)
+            LOG_INFO(Graphics, "Warm mip chain timings truncated: limit=128 thresholdMs=2");
+        if (slot >= 128) return;
+        LOG_INFO(Graphics,
+            "Warm mip chain timing: source={} success={} requestedMips={} selectedMips={} "
+            "lzoMips={} rawDxtMips={} dxtStoredBytes={} dxtOutputBytes={} openOwnerMs={:.3f} "
+            "loopOwnerMs={:.3f} packedAllocCopyMs={:.3f} lzoMs={:.3f} rawReadMs={:.3f} totalOwnerMs={:.3f}",
+            source, success, requestedMips, selectedMips, lzoMips, rawDxtMips, dxtStoredBytes,
+            dxtOutputBytes, openMs, loopMs, packedAllocCopyMs, lzoMs, rawReadMs, totalMs);
+    }
+};
+} // namespace
+
 
 inline Pixel Conv888To555(int rgb)
 {
@@ -1156,6 +1230,14 @@ int PacLevelMem::LoadPaaDXT(QIStream& in, void* mem, const PacPalette* pal) cons
         const long blocksH = (h + 3) / 4;
         const size_t expected = static_cast<size_t>(blocksW) * blocksH * blockBytes;
 
+        WarmMipChainTiming* timing = GCurrentWarmMipChainTiming;
+        if (timing)
+        {
+            ++timing->lzoMips;
+            timing->dxtStoredBytes += static_cast<uint64_t>(dSize);
+            timing->dxtOutputBytes += expected;
+        }
+        WarmMipPhase packedPhase(timing ? &timing->packedAllocCopyMs : nullptr);
         AUTO_STATIC_ARRAY(char, packed, 256 * 256);
         packed.Resize(dSize);
         in.read(packed.Data(), dSize);
@@ -1164,9 +1246,12 @@ int PacLevelMem::LoadPaaDXT(QIStream& in, void* mem, const PacPalette* pal) cons
             Fail("Compressed Read error");
             return -1;
         }
+        packedPhase.Stop();
+        WarmMipPhase lzoPhase(timing ? &timing->lzoMs : nullptr);
         const size_t got =
             Foundation::Lzo1x::Decompress(reinterpret_cast<const uint8_t*>(packed.Data()), static_cast<size_t>(dSize),
                                           static_cast<uint8_t*>(mem), expected);
+        lzoPhase.Stop();
         if (got != expected)
         {
             Fail("LZO level did not decompress to its declared size");
@@ -1182,7 +1267,16 @@ int PacLevelMem::LoadPaaDXT(QIStream& in, void* mem, const PacPalette* pal) cons
 
     if (ENUM_CAST(PacFormat, _dFormat) == ENUM_CAST(PacFormat, _sFormat))
     {
+        WarmMipChainTiming* timing = GCurrentWarmMipChainTiming;
+        if (timing)
+        {
+            ++timing->rawDxtMips;
+            timing->dxtStoredBytes += static_cast<uint64_t>(dSize);
+            timing->dxtOutputBytes += static_cast<uint64_t>(dSize);
+        }
+        WarmMipPhase rawPhase(timing ? &timing->rawReadMs : nullptr);
         in.read(mem, dSize);
+        rawPhase.Stop();
         if (in.fail())
         {
             Fail("Compressed Read error");
@@ -2025,20 +2119,25 @@ bool TextureSourcePac::GetMipmapChain(const MipmapRead* reads, int count) const
         return count <= 0;
     }
 
+    WarmMipChainTiming timing(static_cast<const char*>(_name), count);
+    WarmMipPhase openPhase(timing.enabled ? &timing.openMs : nullptr);
     QIFStream in;
     GFileServer->Open(in, _name);
+    openPhase.Stop();
     GTextureMipOpens.fetch_add(1, std::memory_order_relaxed);
     if (in.fail())
     {
         return false;
     }
 
+    WarmMipPhase loopPhase(timing.enabled ? &timing.loopMs : nullptr);
     for (int i = 0; i < count; i++)
     {
         if (!reads[i].mip)
         {
             return false;
         }
+        if (timing.enabled) ++timing.selectedMips;
         const PacLevelMem& mip = *reads[i].mip;
         mip.SeekLevel(in);
         const int ret = _isPaa ? mip.LoadPaa(in, reads[i].mem, &_pal) : mip.LoadPac(in, reads[i].mem, &_pal);
@@ -2047,6 +2146,7 @@ bool TextureSourcePac::GetMipmapChain(const MipmapRead* reads, int count) const
             return false;
         }
     }
+    if (timing.enabled) timing.success = true;
     return true;
 }
 

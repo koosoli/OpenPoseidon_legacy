@@ -2231,3 +2231,18 @@ Source order is not ranking and does not capture whole frame/GPU elapsed.
 848frames are screening only; final19923settled/required0, geometry705016536,
 textures2734326836/count2478. Unrelated Landscape owner-marker candidate is
 uncommitted/unbuilt and not in installeda18. FullplanOPEN/performancefalse.
+
+## Sept27 unrelated marker-light owner allocation gate
+
+82cb4b80 build19/deploy pass; actual021758 passes cleanexit0 on installed
+82cb4b80+dirty stamp02:17, exact binary/provenance hashes recorded. Shared
+IsA3StaticMarkerLightSource preserves the prior case-insensitive a3-backslash
+predicate and skips empty owner-map insertion/erase at admission/promotion for
+rejected families. Accepted light construction remains unchanged by source
+inspection; DayZ rejected-family route is not an accepted A3 runtime-light proof.
+
+Warm profilingON861frames is diagnostic, not causal FPS/no-regression evidence.
+Aggregate row14warm1536total887.291ms includes textureRead757.532/create86.630,
+mesh13.880/alpha0/geometry0: read problem remains. Inclusive fields overlap.
+No broader performance acceptance or default-policy change follows.
+Upcoming PacTexture subphase diagnostics are pending/not included; fullplanOPEN.
