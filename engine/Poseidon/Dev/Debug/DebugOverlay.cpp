@@ -6517,7 +6517,7 @@ void DrawWaterTab()
     // default and stays so until the owner accepts Tidewater Native (plan §9). Saved per map in the
     // water profile; WGR_WATER_BACKEND=0|1 in the environment overrides it for a whole session.
     {
-        static constexpr bool kTidewaterPorted = false; // W2 lands the open sea
+        static constexpr bool kTidewaterPorted = true; // W2: open sea
         const char* backendNames[] = {"Current OP", "Tidewater Native"};
         const int current = (s.waterBackend == 1) ? 1 : 0;
         if (Dev::BeginCombo("Water backend", backendNames[current]))
@@ -6544,6 +6544,48 @@ void DrawWaterTab()
         {
             Dev::PanelHelp("WGR_WATER_BACKEND=%c overrides this selection for the session.", env[0]);
         }
+    }
+
+    // TW-WATER — the Tidewater Native group. Every control here has a consumer in the renderer
+    // (water_tw); the parts of Tidewater not ported yet are listed greyed, not faked.
+    if (s.waterBackend == 1)
+    {
+        auto& t = s.tidewater;
+        Dev::PanelSeparator();
+        Dev::PanelHeading("Tidewater Native (W2: open sea)");
+        Dev::PanelHelp("Wind speed and heading come from the weather (or the reference sea below), as for "
+                       "Current OP. The Current OP controls further down do not affect this mode, except "
+                       "Cascade Preset's reference seas, which map onto this group.");
+        changed |= Dev::SliderFloat("TW amplitude", &t.amplitude, 0.0f, 3.0f, "%.2f");
+        Dev::PanelTooltip("Displacement scale of all four cascades (WaterSurface amplitude).");
+        changed |= Dev::SliderFloat("TW choppiness", &t.choppiness, 0.0f, 2.0f, "%.2f");
+        Dev::PanelTooltip("Horizontal displacement (lambda). Tidewater default 0.9.");
+        changed |= Dev::SliderFloat("TW swell energy", &t.swellScale, 0.0f, 2.0f, "%.2f");
+        changed |= Dev::SliderFloat("TW swell heading", &t.swellHeadingDeg, -180.0f, 180.0f, "%.0f deg");
+        Dev::PanelTooltip("Direction the distant swell travels toward, world degrees (0 = +X, 90 = +Z).");
+        changed |= Dev::SliderFloat("TW cascade scale", &t.cascadeScale, 0.25f, 4.0f, "%.2f");
+        Dev::PanelTooltip("x the Tidewater cascade tiles 733 / 157 / 33.3 / 7.1 m.");
+        changed |= Dev::SliderFloat("TW foam coverage", &t.foamCoverage, 0.0f, 3.0f, "%.2f");
+        changed |= Dev::SliderFloat("TW foam intensity", &t.foamIntensity, 0.0f, 3.0f, "%.2f");
+        changed |= Dev::Checkbox("TW screen-space reflections", &t.ssr);
+        changed |= Dev::SliderFloat("TW reflection strength", &t.reflectionStrength, 0.0f, 2.0f, "%.2f");
+        changed |= Dev::SliderFloat("TW roughness", &t.roughness, 0.0f, 0.3f, "%.3f");
+        changed |= Dev::SliderFloat("TW crest subsurface", &t.sss, 0.0f, 3.0f, "%.2f");
+        changed |= Dev::SliderFloat("TW backscatter", &t.backscatter, 0.0f, 0.3f, "%.3f");
+        changed |= Dev::SliderFloat("TW gusts", &t.gust, 0.0f, 2.0f, "%.2f");
+        changed |= Dev::SliderFloat("TW slicks", &t.slick, 0.0f, 2.0f, "%.2f");
+        changed |= Dev::SliderFloat("TW windrows", &t.windrow, 0.0f, 1.0f, "%.2f");
+        const char* twDebug[] = {"Off", "Back faces", "Normals", "Foam", "(4 unused)", "Lattice", "Path length",
+                                 "Seabed seen through", "Sea depth", "(9 unused)", "SSR weight"};
+        changed |= Dev::Combo("TW debug view", &t.debugView, twDebug, IM_ARRAYSIZE(twDebug));
+        ImGui::BeginDisabled(true);
+        bool notPorted = false;
+        Dev::Checkbox("TW shore waves / breakers / wet sand (not ported: W3)", &notPorted);
+        Dev::Checkbox("TW spray budget + refraction pass (not ported: W4)", &notPorted);
+        Dev::Checkbox("TW underwater + caustics (not ported: W5)", &notPorted);
+        Dev::Checkbox("TW boat wakes (not ported: W6)", &notPorted);
+        Dev::Checkbox("TW inland lakes / rivers (not drawn: owner decision pending)", &notPorted);
+        ImGui::EndDisabled();
     }
 
     changed |= Dev::Checkbox("Enabled", &s.enabled);

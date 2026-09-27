@@ -2926,7 +2926,10 @@ class Engine : public IGraphicsEngine
         // LGT-026 - the local-light shadow views, all of them, as one region. The four
         // per-cascade rows above stop at MAX_CASCADES, so the tiled local atlas was untimed.
         kLocalShadowGpuRegion = 77,
-        kGpuRegionEnd = 78, // + REN-GI + PERF-024 encode rows (WGR_GPU_TIMER_REGION_COUNT)
+        // TW-WATER W2 - the Tidewater Native ocean's compute (spectrum, FFT + mips).
+        kTidewaterGpuRegionSpectrum = 78,
+        kTidewaterGpuRegionFft = 79,
+        kGpuRegionEnd = 80, // + REN-GI + PERF-024 encode rows (WGR_GPU_TIMER_REGION_COUNT)
         // Regions that are physically enclosed by another region (see GpuTimerContainedBy).
         kGrassGpuRegionShadow = 24,
         kTerrainGpuRegionColor = 32,

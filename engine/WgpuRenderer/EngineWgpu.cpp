@@ -12771,6 +12771,8 @@ const char* EngineWgpu::GetWaterGpuTimingName(int region) const
         "Worker enc: draw",                // WGR_GPU_TIMER_WORKER_ENC_DRAW (CPU column only)
         "Worker enc: post",                // WGR_GPU_TIMER_WORKER_ENC_POST (CPU column only)
         "Shadows: local lights",           // WGR_GPU_TIMER_LOCAL_SHADOW (LGT-026)
+        "Tidewater: spectrum",             // WGR_GPU_TIMER_TW_OCEAN_SPECTRUM (spectrum-dirty frames)
+        "Tidewater: FFT + mips",           // WGR_GPU_TIMER_TW_OCEAN_FFT
     };
     return (region >= 0 && region < (int)WGR_GPU_TIMER_REGION_COUNT) ? kNames[region] : "";
 }
