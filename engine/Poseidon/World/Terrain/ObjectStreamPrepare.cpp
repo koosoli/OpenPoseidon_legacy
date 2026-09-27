@@ -241,6 +241,17 @@ bool ObjectStreamPreparer::WarmTextureJobsEnabled()
     return enabled;
 }
 
+// Exact opt-in. The ordinary model/texture publication policy is unchanged.
+static bool WarmPublishedReuseEnabled()
+{
+    static const bool enabled = [] {
+        if (!ObjectStreamPreparer::WarmTextureJobsEnabled()) return false;
+        const char* value = std::getenv("WGR_OBJECT_STREAM_WARM_PUBLISHED_REUSE");
+        return value && std::strcmp(value, "1") == 0;
+    }();
+    return enabled;
+}
+
 bool ObjectStreamPreparer::AsyncEnabled()
 {
     static const bool on = []
@@ -1567,6 +1578,13 @@ size_t ObjectStreamPreparer::DropStale(const uint32_t* epochs, size_t count, uin
     {
         std::lock_guard<std::mutex> lock(_impl->mutex);
         const size_t n = std::min(count, _impl->count);
+        // Main-owner handoff is before CancelModel: only entries already Put
+        // with a still-valid model token can become source-scoped. The store
+        // scans at most 32 insertion-order entries and performs no reads.
+        // Put after this cut retains its model token and the loop below cancels it.
+        if (_impl->ddsPublication && WarmPublishedReuseEnabled() && Foundation::IsMainThread())
+            render::PreparedTextureStore::Instance().PromotePublishedWarmBeforeCancel(
+                *_impl->ddsPublication, epochs, _impl->stale, n, currentEpoch);
         bool queueTouched = false;
         for (size_t i = 0; i < n; ++i)
         {

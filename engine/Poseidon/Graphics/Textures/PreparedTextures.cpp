@@ -1,6 +1,7 @@
 #include <Poseidon/Graphics/Textures/PreparedTextures.hpp>
 #include <Poseidon/Graphics/Textures/DdsImport.hpp>
 #include <Poseidon/IO/Streams/ArchiveSourceBinding.hpp>
+#include <Poseidon/Foundation/Threads/ThreadAffinity.hpp>
 #include <Poseidon/World/Terrain/WarmTextureProvenance.hpp>
 
 #include <algorithm>
@@ -610,6 +611,36 @@ bool PreparedTextureStore::ShouldPrepareWarm(const std::string& key)
         _impl->EraseLocked(old, nullptr, nullptr, &retired, Streaming::WarmTextureProvenance::RetireReason::Cancelled);
     }
     return _impl->byKey.count(key) == 0;
+}
+
+size_t PreparedTextureStore::PromotePublishedWarmBeforeCancel(const DdsPublicationInventory& inventory,
+    const uint32_t* wantedEpochs, const std::vector<bool>& priorStale,
+    size_t count, uint32_t currentEpoch)
+{
+    if (!Foundation::IsMainThread() || !Enabled() || !wantedEpochs || !currentEpoch || !count) return 0;
+    using Proof = Streaming::WarmTextureProvenance;
+    auto* proof = Proof::Active();
+    size_t visited = 0, promoted = 0;
+    std::lock_guard<std::mutex> lock(_impl->mutex);
+    // The existing store capacity remains authoritative. This is a bounded
+    // opportunity, not a completeness scan; an unvisited entry keeps its token.
+    for (auto it = _impl->order.begin(); it != _impl->order.end() && visited < 32; ++it, ++visited)
+    {
+        if (!it->chain.valid() || !it->warmSource || !it->warmSource->Request().HasArchiveIdentity()) continue;
+        const auto& publication = it->publication;
+        if (publication.inventory.get() != &inventory || publication.index >= count ||
+            publication.index >= priorStale.size() || priorStale[publication.index] ||
+            wantedEpochs[publication.index] == currentEpoch || !publication.Valid()) continue;
+        if (proof)
+            proof->NotePublishedPromotion(Proof::Match(it->key, it->warmSource));
+        // Put finished before this lock cut. An in-flight Put cannot enter the
+        // store until this lock is released; it keeps its model token. Clear
+        // still destroys this entry and increments the world-store generation.
+        it->publication = {};
+        --_impl->tokenEntries;
+        ++promoted;
+    }
+    return promoted;
 }
 
 void PreparedTextureStore::NoteWarmUpload(bool successful, size_t bytes)

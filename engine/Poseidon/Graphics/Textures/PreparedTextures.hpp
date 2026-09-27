@@ -168,6 +168,15 @@ class PreparedTextureStore
     // verified its initialized source against the current loaded mount. This
     // advisory bypasses uploaded marks, not entry/cancellation/byte limits.
     bool ShouldPrepareWarm(const std::string& key);
+    // Optional owner cut before per-model cancellation. Inspect at most 32 already
+    // published entries in insertion order. Only a still-valid exact-source warm
+    // chain for a model transitioning to stale loses its model token; later worker
+    // Puts retain theirs and are cancelled normally. Clear/world generation,
+    // existing byte budget/TTL, and owner source+header validation still apply.
+    // A partial prefix may miss an eligible entry; this returns only actual promotions.
+    size_t PromotePublishedWarmBeforeCancel(const DdsPublicationInventory& inventory,
+        const uint32_t* wantedEpochs, const std::vector<bool>& priorStale,
+        size_t count, uint32_t currentEpoch);
     void NoteWarmUpload(bool successful, size_t bytes);
 
     // The RGBA8 twin pair, for textures whose format has no DXT chain (the fallback

@@ -29,6 +29,7 @@ public:
         OwnerExactAttempt, OwnerKeyOnlyAttempt, StoreTakeMissKeyOnly, StoreTakeWarm,
         StoreTakeCancelled, StoreTakeRefused, SourceValidated, SourceRefused, LayoutRefused,
         UploadSucceeded, UploadFailed, OrdinaryUpload,
+        StorePromotedPublished,
         StoreRetiredCancelled, StoreRetiredExpired, StoreRetiredUploadedMark,
         StoreRetiredClear, StoreRetiredOther, Count
     };
@@ -55,6 +56,7 @@ private:
         BankReadMemberIdentity member;
         std::array<std::atomic<uint8_t>, static_cast<unsigned>(Event::Count)> occurrences{};
         std::atomic<uint8_t> storeLive{0};
+        std::atomic<uint8_t> pendingPromotion{0};
         std::atomic<uint32_t> pendingRetireReasons{0};
     };
     std::shared_ptr<const ArchiveSourceBudget::Ticket> _charge;
@@ -91,6 +93,7 @@ private:
         case Event::UploadSucceeded: return "uploadSucceeded";
         case Event::UploadFailed: return "uploadFailed";
         case Event::OrdinaryUpload: return "ordinaryUpload";
+        case Event::StorePromotedPublished: return "storePromotedPublished";
         case Event::StoreRetiredCancelled: return "storeRetiredCancelled";
         case Event::StoreRetiredExpired: return "storeRetiredExpired";
         case Event::StoreRetiredUploadedMark: return "storeRetiredUploadedMark";
@@ -187,6 +190,18 @@ public:
     {
         const uint32_t count = _sources.load(std::memory_order_acquire);
         for (uint32_t i = 0; i < count; ++i) NoteRetired(i + 1, RetireReason::Clear);
+    }
+    void NotePublishedPromotion(uint32_t token) noexcept
+    {
+        if (token && token <= _sources.load(std::memory_order_acquire))
+            _records[token - 1].pendingPromotion.store(1, std::memory_order_release);
+    }
+    void FlushPromotions() noexcept
+    {
+        const uint32_t count = _sources.load(std::memory_order_acquire);
+        for (uint32_t token = 1; token <= count; ++token)
+            if (_records[token - 1].pendingPromotion.exchange(0, std::memory_order_acq_rel))
+                Emit(Stamp(token, Event::StorePromotedPublished));
     }
     uint32_t DrainRetirementReasons(uint32_t token) noexcept
     {

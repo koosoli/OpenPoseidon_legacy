@@ -452,6 +452,7 @@ void RegisterScreenshot(HarnessServer& hs)
     hs.RegisterCommand({"archive_source_bindings", "Read-only bounded actual-read PAA provenance counters", {}},
         [](const std::string&, cJSON*) -> std::string {
             auto* trace = Streaming::WarmTextureProvenance::Active();
+            if (trace) trace->FlushPromotions(); // all logging outside preparer/store mutexes
             if (trace) trace->FlushRetirements(); // bounded diagnostic cut outside store mutex
             const auto traceSummary = trace ? trace->Observe() : Streaming::WarmTextureProvenance::Summary{};
             const auto snapshot = ArchiveSourceBinding::SnapshotStats();

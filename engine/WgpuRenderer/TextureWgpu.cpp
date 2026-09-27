@@ -1889,6 +1889,7 @@ uint64_t TextureWgpu::EnsureUploaded()
                 fromColdHandoff = render::ColdPaaAdmissionScope::Claim(key, currentHeader.source, currentHeader, prepared);
             if (auto* proof = Streaming::WarmTextureProvenance::Active())
             {
+                proof->FlushPromotions(); // bounded published-entry witness, outside queue/store mutex
                 proof->FlushRetirements(); // emits outside PreparedTextureStore mutex
                 const auto current = CurrentArchiveSourceBinding(); // Existing no-read loaded-mount check, opt-in only.
                 const uint32_t token = current ? Streaming::WarmTextureProvenance::Match(key, current) : proof->KeyOnly(key);

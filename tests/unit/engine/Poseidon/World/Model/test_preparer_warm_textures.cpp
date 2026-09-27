@@ -12,6 +12,7 @@
 #include <array>
 #include <chrono>
 #include <condition_variable>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -190,6 +191,37 @@ TEST_CASE("Warm-only worker publishes original leased mip bytes without a model 
     CHECK(stats.prepared == 0); CHECK(stats.converted == 0); CHECK(stats.warmTextureJobsCompleted == 1); CHECK(stats.warmTextureQueueBytes > 0);
     CHECK(stats.warmTextureMembersPrepared == 1); CHECK(stats.warmTextureMetadataBytes == 0);
     CHECK(stats.warmTextureScratchBytes == 0); CHECK(stats.warmTextureScratchBytesPeak >= WarmTextureJobPolicy::ScratchBytes);
+    store.Clear();
+}
+TEST_CASE("Completed warm member survives the preparer's actual stale-model cut only with published reuse", "[warm-published-reuse-preparer]")
+{
+    RequireCapability();
+    const char* flag = std::getenv("WGR_OBJECT_STREAM_WARM_PUBLISHED_REUSE");
+    const bool reuse = flag && std::strcmp(flag, "1") == 0;
+    Fixture fixture;
+    auto& store = PreparedTextureStore::Instance(); store.Clear();
+    ObjectStreamPreparer preparer;
+    const std::string path = "published-cut-model.p3d";
+    preparer.Reset(&path, 1);
+    const auto token = preparer.QueryRadius(0);
+    REQUIRE(preparer.SubmitWarmTextures(0, token, fixture.Reads()) == ObjectStreamPreparer::WarmTextureSubmit::Submitted);
+    REQUIRE(WaitDone(preparer));
+    REQUIRE(store.SnapshotStats().warmPuts >= 1);
+    const uint32_t staleEpoch[1] = {0};
+    preparer.DropStale(staleEpoch, 1, 1);
+    PAABlockChain chain;
+    std::shared_ptr<const ArchiveSourceBinding> retained;
+    if (!reuse)
+    {
+        CHECK_FALSE(store.Take(fixture.key, chain, &retained));
+        CHECK_FALSE(retained);
+        store.Clear();
+        return;
+    }
+    REQUIRE(store.Take(fixture.key, chain, &retained));
+    REQUIRE(retained);
+    CHECK(retained->Request().SameArchiveMember(fixture.source->Request()));
+    CHECK(chain.valid());
     store.Clear();
 }
 TEST_CASE("Warm active cancellation retains debt and cannot claim after same-world rescue or Reset", "[warm-texture-actual]")

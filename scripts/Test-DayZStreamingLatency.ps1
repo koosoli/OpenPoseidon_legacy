@@ -17,6 +17,7 @@ param(
     [switch]$WeakCacheProof,
     [switch]$WarmTextureProvenance,
     [switch]$WarmEarlySlice,
+    [switch]$WarmPublishedReuse,
     [switch]$RequireHotSourceProofRetirement,
     [switch]$RequireWarmMaterialPreflightUpload,
     [switch]$RequireWarmMaterialStageUpload,
@@ -39,7 +40,7 @@ if ($RequireWarmMaterialStageUpload) { $WarmTextureJobs = $true; $WarmProfile = 
 if ($RequireWarmMaterialPreflightUpload) { $WarmMaterialPreflight = $true }
 if ($WarmMaterialPreflight) { $WarmTextureJobs = $true; $WarmProfile = $true }
 if ($WeakCacheProof) { $HotSourceProofRetirement = $true }
-if ($WarmEarlySlice) { $WarmTextureProvenance = $true }
+if ($WarmEarlySlice -or $WarmPublishedReuse) { $WarmTextureProvenance = $true }
 if ($WarmTextureProvenance) { $WarmTextureJobs = $true; $WarmProfile = $true }
 if ($RequireHotSourceProofRetirement) { $HotSourceProofRetirement = $true }
 if ($HotSourceProofRetirement) { $WarmTextureJobs = $true; $WarmProfile = $true }
@@ -69,6 +70,7 @@ if (!$env:LOCK_OWNER) {
         if ($WeakCacheProof) { $argv += '-WeakCacheProof' }
         if ($WarmTextureProvenance) { $argv += '-WarmTextureProvenance' }
         if ($WarmEarlySlice) { $argv += '-WarmEarlySlice' }
+        if ($WarmPublishedReuse) { $argv += '-WarmPublishedReuse' }
         if ($RequireHotSourceProofRetirement) { $argv += '-RequireHotSourceProofRetirement' }
         if ($RequireWarmMaterialPreflightUpload) { $argv += '-RequireWarmMaterialPreflightUpload' }
         if ($RequireWarmMaterialStageUpload) { $argv += '-RequireWarmMaterialStageUpload' }
@@ -131,6 +133,7 @@ $environment = @{
     WGR_OBJECT_STREAM_WEAK_CACHE_PROOF = $(if ($WeakCacheProof) { '1' } else { '0' })
     WGR_OBJECT_STREAM_WARM_TEXTURE_TRACE = $(if ($WarmTextureProvenance) { '1' } else { '0' })
     WGR_OBJECT_STREAM_WARM_EARLY_SLICE = $(if ($WarmEarlySlice) { '1' } else { '0' })
+    WGR_OBJECT_STREAM_WARM_PUBLISHED_REUSE = $(if ($WarmPublishedReuse) { '1' } else { '0' })
     WGR_OBJECT_STREAM_HOT_SOURCE_PROOF_RETIRE = $(if ($HotSourceProofRetirement) { '1' } else { '0' })
 }
 if ($TerrainPageTimings) {
@@ -181,6 +184,7 @@ try {
         hotSourceProofRetirement = [bool]$HotSourceProofRetirement
         weakCacheProof = [bool]$WeakCacheProof; warmTextureProvenance = [bool]$WarmTextureProvenance
         warmEarlySlice = [bool]$WarmEarlySlice
+        warmPublishedReuse = [bool]$WarmPublishedReuse
         requireHotSourceProofRetirement = [bool]$RequireHotSourceProofRetirement
         requireWarmMaterialPreflightUpload = [bool]$RequireWarmMaterialPreflightUpload
         requireWarmMaterialStageUpload = [bool]$RequireWarmMaterialStageUpload
@@ -587,7 +591,13 @@ try {
         rows=@($earlyRows | ForEach-Object {$_.Line});
         scope='Actual first-member dequeue with a positive cold queue; not useful upload, FPS or cold-throughput acceptance'}
     $earlyProven = !$WarmEarlySlice -or $earlyRows.Count -gt 0
-    @{passed = [bool]($warmJobsProven -and $warmStageFamilyProven -and $warmPreflightProven -and $hotRetirementProven -and $coldAlphaProven -and $coldStartupProven -and $earlyProven); mode = $Mode; admissionMode = $AdmissionMode; parkedTextureRefill = [bool]$ParkedTextureRefill; lazyTextureGroups = [bool]$LazyTextureGroups; warmProfile = [bool]$WarmProfile; screeningOnly = $true; performanceAccepted = $false; terrainPageTimings = [bool]$TerrainPageTimings
+    $promotionRows = @(Select-String -LiteralPath $log -Pattern 'Warm provenance: row=\d+ token=\d+ event=storePromotedPublished a=0 b=0')
+    if ($promotionRows.Count -gt 32 -or (!$WarmPublishedReuse -and $promotionRows.Count)) { throw 'Unbounded or unexpected published warm promotion' }
+    $promotionProof = @{requested=[bool]$WarmPublishedReuse; witnessed=$promotionRows.Count;
+        rows=@($promotionRows | ForEach-Object {$_.Line});
+        scope='Historical exact-member promotion witness; not a later Take, source match, upload, or complete 32-entry scan'}
+    $promotionProven = !$WarmPublishedReuse -or $promotionRows.Count -gt 0
+    @{passed = [bool]($warmJobsProven -and $warmStageFamilyProven -and $warmPreflightProven -and $hotRetirementProven -and $coldAlphaProven -and $coldStartupProven -and $earlyProven -and $promotionProven); mode = $Mode; admissionMode = $AdmissionMode; parkedTextureRefill = [bool]$ParkedTextureRefill; lazyTextureGroups = [bool]$LazyTextureGroups; warmProfile = [bool]$WarmProfile; screeningOnly = $true; performanceAccepted = $false; terrainPageTimings = [bool]$TerrainPageTimings
         frameCount = $count; dropped = $dropped; enginePhaseTiming = $phases; baseline = $baseline; returned = $returned
         routeSamples = $routeSamples; postExitHashes = $finalHashes
         renderCallCpuTimings = [bool]$TerrainPageTimings; renderCallCpuTimingProof = $callCpuProof
@@ -601,6 +611,7 @@ try {
         weakCacheProof = [bool]$WeakCacheProof; weakCacheProofState = $archiveBindings
         warmTextureProvenance = [bool]$WarmTextureProvenance
         warmEarlySlice = [bool]$WarmEarlySlice; warmEarlySliceProof = $earlyProof
+        warmPublishedReuse = [bool]$WarmPublishedReuse; warmPublishedReuseProof = $promotionProof
         hotSourceProofRetirement = [bool]$HotSourceProofRetirement; hotSourceProofRetirementProof = $hotRetirementProof
         warmMaterialPreflight = [bool]$WarmMaterialPreflight; warmMaterialPreflightProof = $warmPreflightProof
         warmTextureJobs = [bool]$WarmTextureJobs; warmTextureJobProof = $warmJobProof
@@ -616,6 +627,7 @@ try {
     if (!$coldAlphaProven) { throw 'NotExercised: no positive real DayZ route alpha peek delta and source-validated cold owned upload; evidence retained' }
     if (!$hotRetirementProven) { throw 'NotExercised: no actual owner proof drop and later successful source-validated worker stage upload; evidence retained' }
     if (!$earlyProven) { throw 'NotExercised: no actual early warm first-member dequeue; evidence retained' }
+    if (!$promotionProven) { throw 'NotExercised: no published warm entry promoted before model cancellation; evidence retained' }
     if (!$warmPreflightProven) { throw 'NotExercised: no same-source initialized-stage preflight and successful bound worker stage upload; evidence retained' }
     if (!$warmJobsProven) { throw 'Warm preparation did not demonstrate an actual source-validated GPU upload; evidence retained' }
     if (!$warmStageFamilyProven) { throw 'Required bound worker normal/specular filename-family upload not exercised; evidence retained, no material-slot proof claimed' }

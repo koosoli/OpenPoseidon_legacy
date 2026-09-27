@@ -19,6 +19,7 @@
 
 #include "test_fixtures.hpp"
 
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
@@ -804,5 +805,141 @@ TEST_CASE("Actual source-bound store retires the matching warm token by cause", 
     store.Clear();
     CHECK(proof->EventOccurrences(sourceToken, Proof::Event::StoreRetiredClear) == clearStamps + 1);
     CHECK(proof->DrainRetirementReasons(sourceToken) == 0); // Clear emitted after unlocking
+}
+
+TEST_CASE("Published exact-source warm PAA survives only a pre-cancel owner promotion", "[warm-published-reuse]")
+{
+    Foundation::CaptureMainThread();
+    if (!ArchiveSourceBinding::SnapshotStats().enabled)
+        SKIP("Requires fresh WGR_OBJECT_STREAM_WARM_TEXTURES=1 process.");
+    AlphaArchiveFixture fixture;
+    auto buffer = [&] { ArchiveSourceBinding::ModelReadScope scope; return fixture.bank.Read("member.paa"); }(); REQUIRE(buffer);
+    auto binding = buffer->GetArchiveSourceBinding(); REQUIRE(binding);
+    auto& store = render::PreparedTextureStore::Instance();
+    store.Clear();
+    const uint64_t generation = store.Generation();
+    auto inventory = render::DdsPublicationInventory::Create(2); REQUIRE(inventory);
+    const render::DdsPublicationToken model0{inventory, 0, inventory->Epoch(0)};
+    auto publish = [&](const char* key, const render::DdsPublicationToken& token, uint64_t gen) {
+        auto chain = fixture.chain;
+        return store.Put(key, std::move(chain), gen, nullptr, &token, binding);
+    };
+    const uint32_t epochs[2] = {1, 2};
+    const std::vector<bool> priorStale(2, false);
+    constexpr const char* key = "member.paa"; // the actual archived member read above
+    auto* trace = Streaming::WarmTextureProvenance::Active();
+    uint32_t traceToken = 0;
+    if (trace)
+    {
+        BankReadMemberIdentity identity;
+        REQUIRE(binding->Request().CopyMemberIdentity(identity));
+        traceToken = trace->Admit(key, identity);
+        REQUIRE(traceToken);
+    }
+    const uint8_t priorPromotionStamps = traceToken ?
+        trace->EventOccurrences(traceToken, Streaming::WarmTextureProvenance::Event::StorePromotedPublished) : 0;
+    REQUIRE(publish(key, model0, generation));
+    const auto before = store.SnapshotStats();
+    REQUIRE(store.PromotePublishedWarmBeforeCancel(*inventory, epochs, priorStale, 2, 2) == 1);
+    if (traceToken)
+    {
+        trace->FlushPromotions();
+        REQUIRE(priorPromotionStamps < 4); // four Catch2 SECTION reruns share the process-static trace
+        CHECK(trace->EventOccurrences(traceToken, Streaming::WarmTextureProvenance::Event::StorePromotedPublished) == priorPromotionStamps + 1);
+    }
+    CHECK(store.SnapshotStats().bytes == before.bytes); // unchanged charged chain and lease
+    inventory->CancelModel(0);
+    PAABlockChain output;
+    std::shared_ptr<const ArchiveSourceBinding> source;
+    REQUIRE(store.Take(key, output, &source));
+    CHECK(output.blocks == fixture.chain.blocks);
+    REQUIRE(source);
+    CHECK(source->Request().SameArchiveMember(binding->Request()));
+    CHECK_FALSE(store.Take(key, output, &source));
+
+    SECTION("a worker Put after the promotion cut keeps its model token")
+    {
+        store.Clear();
+        auto lateInventory = render::DdsPublicationInventory::Create(1); REQUIRE(lateInventory);
+        const render::DdsPublicationToken late{lateInventory, 0, lateInventory->Epoch(0)};
+        const uint32_t staleEpoch[1] = {1};
+        const std::vector<bool> fresh(1, false);
+        CHECK(store.PromotePublishedWarmBeforeCancel(*lateInventory, staleEpoch, fresh, 1, 2) == 0);
+        std::atomic<bool> inserted{false};
+        std::thread worker([&] { inserted.store(publish(key, late, store.Generation()), std::memory_order_release); });
+        worker.join();
+        REQUIRE(inserted.load(std::memory_order_acquire));
+        lateInventory->CancelModel(0);
+        CHECK_FALSE(store.Take(key, output, &source));
+        CHECK_FALSE(source);
+    }
+    SECTION("different inventory and prior-stale models cannot be promoted")
+    {
+        store.Clear();
+        auto other = render::DdsPublicationInventory::Create(2); REQUIRE(other);
+        auto valid = render::DdsPublicationInventory::Create(2); REQUIRE(valid);
+        const render::DdsPublicationToken own{valid, 0, valid->Epoch(0)};
+        REQUIRE(publish(key, own, store.Generation()));
+        CHECK(store.PromotePublishedWarmBeforeCancel(*other, epochs, priorStale, 2, 2) == 0);
+        const std::vector<bool> alreadyStale = {true, false};
+        CHECK(store.PromotePublishedWarmBeforeCancel(*valid, epochs, alreadyStale, 2, 2) == 0);
+        valid->CancelModel(0);
+        CHECK_FALSE(store.Take(key, output, &source));
+    }
+    SECTION("an already canceled token cannot be resurrected")
+    {
+        store.Clear();
+        auto canceled = render::DdsPublicationInventory::Create(1); REQUIRE(canceled);
+        const render::DdsPublicationToken ticket{canceled, 0, canceled->Epoch(0)};
+        REQUIRE(publish(key, ticket, store.Generation()));
+        canceled->CancelModel(0);
+        const uint32_t staleEpoch[1] = {1}; const std::vector<bool> fresh(1, false);
+        CHECK(store.PromotePublishedWarmBeforeCancel(*canceled, staleEpoch, fresh, 1, 2) == 0);
+        CHECK_FALSE(store.Take(key, output, &source));
+    }
+    SECTION("world Clear still invalidates the promoted payload and old generation")
+    {
+        store.Clear();
+        auto next = render::DdsPublicationInventory::Create(1); REQUIRE(next);
+        const render::DdsPublicationToken ticket{next, 0, next->Epoch(0)};
+        const auto freshGeneration = store.Generation();
+        REQUIRE(publish(key, ticket, freshGeneration));
+        const uint32_t staleEpoch[1] = {1};
+        const std::vector<bool> fresh(1, false);
+        REQUIRE(store.PromotePublishedWarmBeforeCancel(*next, staleEpoch, fresh, 1, 2) == 1);
+        store.Clear();
+        CHECK_FALSE(store.Take(key, output, &source));
+        CHECK_FALSE(publish(key, ticket, freshGeneration));
+    }
+    store.Clear();
+}
+
+TEST_CASE("Warm promotion visits at most 32 stored entries and misses the rest safely", "[warm-published-reuse]")
+{
+    // This is the store's metadata/cursor bound, not an assertion that 33
+    // different model names originate from the same one-member archive.
+    Foundation::CaptureMainThread();
+    if (!ArchiveSourceBinding::SnapshotStats().enabled)
+        SKIP("Requires fresh WGR_OBJECT_STREAM_WARM_TEXTURES=1 process.");
+    AlphaArchiveFixture fixture;
+    auto buffer = [&] { ArchiveSourceBinding::ModelReadScope scope; return fixture.bank.Read("member.paa"); }(); REQUIRE(buffer);
+    auto binding = buffer->GetArchiveSourceBinding(); REQUIRE(binding);
+    auto& store = render::PreparedTextureStore::Instance(); store.Clear();
+    auto inventory = render::DdsPublicationInventory::Create(1); REQUIRE(inventory);
+    const render::DdsPublicationToken ticket{inventory, 0, inventory->Epoch(0)};
+    for (unsigned i = 0; i < 33; ++i)
+    {
+        auto chain = fixture.chain;
+        REQUIRE(store.Put("bounded-promote-" + std::to_string(i), std::move(chain),
+            store.Generation(), nullptr, &ticket, binding));
+    }
+    const uint32_t epochs[1] = {1}; const std::vector<bool> priorStale(1, false);
+    REQUIRE(store.PromotePublishedWarmBeforeCancel(*inventory, epochs, priorStale, 1, 2) == 32);
+    inventory->CancelModel(0);
+    PAABlockChain output; std::shared_ptr<const ArchiveSourceBinding> source;
+    REQUIRE(store.Take("bounded-promote-0", output, &source));
+    CHECK(source == binding);
+    CHECK_FALSE(store.Take("bounded-promote-32", output, &source));
+    store.Clear();
 }
 #endif
