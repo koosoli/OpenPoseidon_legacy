@@ -11342,6 +11342,328 @@
         "route-frame-ms.json": "86a725dfbce8fbb4ee812aa12397e62159037f59eb077e5d720868eeb02164fe",
         "samples.jsonl": "76e42bb4452a46bae0a784f44b325b289d981a6cc03949e77d8d2331e414bd6a"
       }
+    },
+    {
+      "run": "paa-inflight-actual-20260927-disabled-20260927-050709",
+      "classification": "PASS clean exit0; optional exact-member suppression compatibility, remainsOFF",
+      "provenance": {
+        "world": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\packages\\dayz-compat\\world\\chernarusplus\\chernarusplus.wrp",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "B6C265EB44C112063D8DE3FDDA4960F2E8EAFCB1B11A2206981AEC7BF934C9FE",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "16791CE940B0420308FCD7A2302435C4937B2E5D13BF5E82B441E116C1F9CD07",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "height": 720,
+        "packedTextures": true,
+        "mode": "Disabled",
+        "msaaSamples": 4,
+        "measurementScope": "Bounded engine16384-frame route capture; screening only, no FPS acceptance, vanilla parity or full cold-cache proof",
+        "scriptSha256": "1EA9686F1BA8A1A57A850211F18C5BC4B3E8EE025003CC57211150039551CCB6",
+        "routeScope": "Eight convergence400m out/return poses plus three stationary recovery holds; one process per invocation",
+        "processScope": "Owned PID private/RSS samples; sparse owner-pump values are observations, not percentiles",
+        "clearedEnvironmentNames": [],
+        "paaPreparationInflight": true,
+        "fpsCap": 60,
+        "poseHoldSeconds": 3,
+        "viewDistance": 2000,
+        "pose": [
+          5704.58,
+          2523.37,
+          73.74,
+          260.9,
+          -3.8
+        ],
+        "head": "ae96556a46217b27a67e40ba2faf97b594a206b4",
+        "paaPreparationDiagnostics": true,
+        "width": 1280,
+        "routeX": [
+          5804.58,
+          5904.58,
+          6004.58,
+          6104.58,
+          6004.58,
+          5904.58,
+          5804.58,
+          5704.58,
+          5704.58,
+          5704.58,
+          5704.58
+        ],
+        "environment": {
+          "WGR_OBJECT_STREAM_GPU_BUDGET": "0",
+          "WGR_PAA_PREP_ATTEMPT_DIAG": "1",
+          "WGR_OBJECT_STREAM_MAX_OBJECTS": "20000",
+          "WGR_NATIVE_DDS_BC3_ONLY": "0",
+          "WGR_OBJECT_STREAM_PBO": "1",
+          "WGR_OBJECT_STREAM_TEST_BUDGET": "1",
+          "WGR_LOD_GOVERNOR_RANGE": "1",
+          "WGR_SIMULATION_RESIDENCY": "0",
+          "WGR_SKY_VOLUME_INCREMENTAL": "1",
+          "POSEIDON_MODEL_DDC": "0",
+          "WGR_SIMULATION_POSITIVE_COLD": "0",
+          "WGR_OBJECT_STREAM_PBO_TEXTURES": "1",
+          "WGR_ADAPTIVE_TEXTURE_DETAIL": "0",
+          "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\paa-inflight-actual-20260927-disabled-20260927-050709\\user",
+          "WGR_GEO_POOL_GROWTH": "2.0",
+          "WGR_GEO_POOL_PRESSURE_GROWTH": "0",
+          "WGR_NATIVE_DDS_PREPARE": "0",
+          "WGR_PAA_PREP_INFLIGHT": "1",
+          "WGR_TEXTURE_STREAM_STATS": "0"
+        },
+        "paaLzoReplay": false,
+        "installed": "codex/streaming-residency ae96556a 2026-09-27_05:06 deploy-ps1"
+      },
+      "summary": {
+        "passed": true,
+        "performanceAccepted": false,
+        "inflight": true,
+        "n": 911,
+        "meanMs": 39.08418441273326,
+        "medianMs": 23.831,
+        "p95Ms": 92.94,
+        "p99Ms": 319.286,
+        "maxMs": 1010.128,
+        "quantiles": "nearest-rankceil(n*p)-1/usualmedian",
+        "resident": 19923,
+        "required": 0,
+        "geometry": 709881720,
+        "texture": 2745904404,
+        "textureCount": 2487,
+        "suppressionObserved": true
+      },
+      "limits": "First suppression snapshot1suppressed1active/current21760peak41184metadata0overflow/unsupported/contended, not route totals/peerPut guarantee/RSS. Owner fallback retained. Ordered cache/asynchronous work/diagnostic cost and unequal allocation counters prevent causal acceptance. Root both settledPOI no obvious geometry/material change only. AllflagsOFF runtime pending; posecache source unbuilt/excluded/fullplanOPEN.",
+      "sha256": {
+        "engine.log": "257cf40031d4310781c46a1febc7ef54ad792becbf517a2c52380b95ebf56978",
+        "harness.jsonl": "1c71d7306d05f4bfdd4801dc309b6e0862c31a07253abea4da82ffb6d54e9628",
+        "paa-attempt-proof.json": "f0a727b14140639e5e302f5d79da36abdc76fc5bd3df23fd38b0e86c7dd6d7a1",
+        "paa-inflight-proof.json": "9a5c959a378f9ce7b45c3ca2b6529a4324e515435775b2d1086613ea9f1f814b",
+        "provenance.json": "201e4c76a4c5e09b103ae36357bbbc69315425facc84ac36e1b63bbe5019d22c",
+        "result.json": "7ab0ed6e4e84a859f68d4b6dc2975635bd2db3d6af7f905fb6d08ad84d3821d8",
+        "returned-settled.png": "7b28b7e8efdfefbac613ed716f559e4c1484d1602bdd09a075cad0feb040e91b",
+        "route-frame-ms.json": "bda5e5072075f509c41abf2c246dbc2e5b6fd97ffae6f003e3c5c50214a78e52",
+        "samples.jsonl": "e34b0924e1906a0b7ca477c1cd3cc454e8233581a591533dfe14979e9d3040fb"
+      }
+    },
+    {
+      "run": "paa-inflight-off-20260927-disabled-20260927-050847",
+      "classification": "PASS clean exit0; optional exact-member suppression compatibility, remainsOFF",
+      "provenance": {
+        "scriptSha256": "1EA9686F1BA8A1A57A850211F18C5BC4B3E8EE025003CC57211150039551CCB6",
+        "mode": "Disabled",
+        "paaPreparationInflight": false,
+        "installed": "codex/streaming-residency ae96556a 2026-09-27_05:06 deploy-ps1",
+        "head": "ae96556a46217b27a67e40ba2faf97b594a206b4",
+        "processScope": "Owned PID private/RSS samples; sparse owner-pump values are observations, not percentiles",
+        "measurementScope": "Bounded engine16384-frame route capture; screening only, no FPS acceptance, vanilla parity or full cold-cache proof",
+        "pose": [
+          5704.58,
+          2523.37,
+          73.74,
+          260.9,
+          -3.8
+        ],
+        "msaaSamples": 4,
+        "poseHoldSeconds": 3,
+        "routeScope": "Eight convergence400m out/return poses plus three stationary recovery holds; one process per invocation",
+        "viewDistance": 2000,
+        "routeX": [
+          5804.58,
+          5904.58,
+          6004.58,
+          6104.58,
+          6004.58,
+          5904.58,
+          5804.58,
+          5704.58,
+          5704.58,
+          5704.58,
+          5704.58
+        ],
+        "world": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\packages\\dayz-compat\\world\\chernarusplus\\chernarusplus.wrp",
+        "fpsCap": 60,
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "B6C265EB44C112063D8DE3FDDA4960F2E8EAFCB1B11A2206981AEC7BF934C9FE",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "16791CE940B0420308FCD7A2302435C4937B2E5D13BF5E82B441E116C1F9CD07",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "paaPreparationDiagnostics": true,
+        "paaLzoReplay": false,
+        "width": 1280,
+        "height": 720,
+        "packedTextures": true,
+        "clearedEnvironmentNames": [],
+        "environment": {
+          "WGR_OBJECT_STREAM_PBO": "1",
+          "WGR_GEO_POOL_PRESSURE_GROWTH": "0",
+          "WGR_NATIVE_DDS_BC3_ONLY": "0",
+          "WGR_NATIVE_DDS_PREPARE": "0",
+          "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\paa-inflight-off-20260927-disabled-20260927-050847\\user",
+          "WGR_TEXTURE_STREAM_STATS": "0",
+          "WGR_PAA_PREP_ATTEMPT_DIAG": "1",
+          "WGR_ADAPTIVE_TEXTURE_DETAIL": "0",
+          "WGR_OBJECT_STREAM_GPU_BUDGET": "0",
+          "WGR_OBJECT_STREAM_PBO_TEXTURES": "1",
+          "WGR_OBJECT_STREAM_TEST_BUDGET": "1",
+          "WGR_OBJECT_STREAM_MAX_OBJECTS": "20000",
+          "WGR_SIMULATION_POSITIVE_COLD": "0",
+          "WGR_GEO_POOL_GROWTH": "2.0",
+          "WGR_SKY_VOLUME_INCREMENTAL": "1",
+          "WGR_LOD_GOVERNOR_RANGE": "1",
+          "WGR_SIMULATION_RESIDENCY": "0",
+          "POSEIDON_MODEL_DDC": "0"
+        }
+      },
+      "summary": {
+        "passed": true,
+        "performanceAccepted": false,
+        "inflight": false,
+        "n": 922,
+        "meanMs": 39.29703145336222,
+        "medianMs": 24.3535,
+        "p95Ms": 85.771,
+        "p99Ms": 401.291,
+        "maxMs": 1364.731,
+        "quantiles": "nearest-rankceil(n*p)-1/usualmedian",
+        "resident": 19923,
+        "required": 0,
+        "geometry": 709824720,
+        "texture": 2745860724,
+        "textureCount": 2486,
+        "suppressionObserved": false
+      },
+      "limits": "First suppression snapshot1suppressed1active/current21760peak41184metadata0overflow/unsupported/contended, not route totals/peerPut guarantee/RSS. Owner fallback retained. Ordered cache/asynchronous work/diagnostic cost and unequal allocation counters prevent causal acceptance. Root both settledPOI no obvious geometry/material change only. AllflagsOFF runtime pending; posecache source unbuilt/excluded/fullplanOPEN.",
+      "sha256": {
+        "engine.log": "790ca8823846dc5900941d81288a04d89053edaad1482d62f12ff67b4be965f2",
+        "harness.jsonl": "9b4bfd8b79f44edeb7b399b2b8965939108fedc463daae90f087fb60f5549b34",
+        "paa-attempt-proof.json": "654d297373949322017ece178cd88aa1883097e3c689674d0dc9789c40f1f522",
+        "paa-inflight-proof.json": "a626aa21cf6f4a35ca6e41d4e6295d41a1807e822353b9e471d40958809f919a",
+        "provenance.json": "257b77c04b020f191697286a646312241b06ca8cc4d11448b1f89d03adc9990f",
+        "result.json": "e959cd34100fbc7d1aa96a8103936ffc2a7dcfb629fdcdf84c049a310d08d47e",
+        "returned-settled.png": "bd7953bd3b2e8b219cf5860d9d59f598fcbc96998dabf89cc98c5168d060e6ac",
+        "route-frame-ms.json": "8f71ade1f8c7ca8d07f61536c94f77adb295b6d5639712c7b126151c2d8c2f67",
+        "samples.jsonl": "44c6b6136ac1a082d444f82935b7d0d14b225bb97358c75b11ea286b891f65f9"
+      }
+    },
+    {
+      "run": "paa-inflight-default-20260927-disabled-20260927-051036",
+      "classification": "PASS cleanexit0 sameae normal all-experimentsOFF compatibility, not performance acceptance",
+      "provenance": {
+        "poseHoldSeconds": 3,
+        "installed": "codex/streaming-residency ae96556a 2026-09-27_05:06 deploy-ps1",
+        "width": 1280,
+        "clearedEnvironmentNames": [],
+        "routeScope": "Eight convergence400m out/return poses plus three stationary recovery holds; one process per invocation",
+        "processScope": "Owned PID private/RSS samples; sparse owner-pump values are observations, not percentiles",
+        "measurementScope": "Bounded engine16384-frame route capture; screening only, no FPS acceptance, vanilla parity or full cold-cache proof",
+        "world": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\packages\\dayz-compat\\world\\chernarusplus\\chernarusplus.wrp",
+        "paaLzoReplay": false,
+        "scriptSha256": "1EA9686F1BA8A1A57A850211F18C5BC4B3E8EE025003CC57211150039551CCB6",
+        "viewDistance": 2000,
+        "fpsCap": 60,
+        "environment": {
+          "WGR_SIMULATION_POSITIVE_COLD": "0",
+          "WGR_SKY_VOLUME_INCREMENTAL": "1",
+          "WGR_OBJECT_STREAM_PBO": "1",
+          "WGR_NATIVE_DDS_BC3_ONLY": "0",
+          "WGR_OBJECT_STREAM_GPU_BUDGET": "0",
+          "WGR_GEO_POOL_GROWTH": "2.0",
+          "WGR_TEXTURE_STREAM_STATS": "0",
+          "WGR_ADAPTIVE_TEXTURE_DETAIL": "0",
+          "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\paa-inflight-default-20260927-disabled-20260927-051036\\user",
+          "WGR_OBJECT_STREAM_PBO_TEXTURES": "0",
+          "WGR_GEO_POOL_PRESSURE_GROWTH": "0",
+          "WGR_NATIVE_DDS_PREPARE": "0",
+          "WGR_LOD_GOVERNOR_RANGE": "1",
+          "WGR_OBJECT_STREAM_MAX_OBJECTS": "20000",
+          "POSEIDON_MODEL_DDC": "0",
+          "WGR_OBJECT_STREAM_TEST_BUDGET": "1",
+          "WGR_SIMULATION_RESIDENCY": "0"
+        },
+        "msaaSamples": 4,
+        "routeX": [
+          5804.58,
+          5904.58,
+          6004.58,
+          6104.58,
+          6004.58,
+          5904.58,
+          5804.58,
+          5704.58,
+          5704.58,
+          5704.58,
+          5704.58
+        ],
+        "head": "ae96556a46217b27a67e40ba2faf97b594a206b4",
+        "mode": "Disabled",
+        "paaPreparationDiagnostics": false,
+        "height": 720,
+        "paaPreparationInflight": false,
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "B6C265EB44C112063D8DE3FDDA4960F2E8EAFCB1B11A2206981AEC7BF934C9FE",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "16791CE940B0420308FCD7A2302435C4937B2E5D13BF5E82B441E116C1F9CD07",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "packedTextures": false,
+        "pose": [
+          5704.58,
+          2523.37,
+          73.74,
+          260.9,
+          -3.8
+        ]
+      },
+      "summary": {
+        "passed": true,
+        "performanceAccepted": false,
+        "n": 871,
+        "meanMs": 39.697795637198595,
+        "medianMs": 23.514,
+        "p95Ms": 131.467,
+        "p99Ms": 333.42,
+        "maxMs": 942.08,
+        "quantiles": "nearest-rankceil(n*p)-1/usualmedian",
+        "resident": 19923,
+        "required": 0,
+        "geometry": 712369276,
+        "texture": 2749617844,
+        "textureCount": 2494,
+        "packedTextures": false,
+        "paaPreparationDiagnostics": false,
+        "paaPreparationInflight": false
+      },
+      "limits": "Sameinstalledbinaryhashes;PBOtex/attemptdiag/inflight false,no newwork default. Mixedordered route screening not no-regression/FPSproof. Posecaller prototype not installed/fullplanOPEN.",
+      "sha256": {
+        "engine.log": "bdf284378ce1573c8c984ff9d303eb52251279329f1fb8f9bcf83cc91e85cc34",
+        "harness.jsonl": "d5eeea2299125acaf82c50098cd591d521ec3ec77ee06c56678bb5316b1e387f",
+        "paa-attempt-proof.json": "86a84f3822652bac81ee6678f5f584f3540d3947e8af9aa5138390767abbc0fb",
+        "paa-inflight-proof.json": "04eca883b8bda65a4050cb2d243a7db12ccc0a97b64bffe1582463431beb9f75",
+        "provenance.json": "bc6318501ae18f9a50438b0ae6b54d485f261f605fbe8abc098ac575cf755e63",
+        "result.json": "399aa73400104578c699e7a8336e8ecc30b7ae7db1d4a10f0180e12cbba8a8fe",
+        "returned-settled.png": "a84cf7f7525ee6934951d21637d138bec74bb37e12a361e0141d23fcf867c6d4",
+        "route-frame-ms.json": "2c8c2a45a5327fc6b179aeeeb2fda2af1461eb80157b0e24686e385f4aaeb454",
+        "samples.jsonl": "60d759ef650264758b7c905fc59dba9adef6789685c8b7f296edbcaedd9677bc"
+      }
     }
   ],
   "microbenchmarks": [
@@ -12508,6 +12830,18 @@
         "test-mesh-ack-rust-20260927.log": "6cb6ff6b29526c0596e83bfeb9effa5691dd5f874b06aeb83cbf4eff52a710d8",
         "test-mesh-ack-prep-diag-engine-20260927.log": "1a48cbbb8c7ff338829fd4b32b333f55510f60e4a0a90506599305b3fa444c49",
         "deploy-mesh-ack-prep-diag-20260927.log": "26f23d64bff9a25ef0c6fe26d01a38ba2ddd7c32146a6ef1a833fc8d158281c5"
+      }
+    },
+    {
+      "artifactRoot": "build",
+      "runtimeSourceCommit": "ae96556a",
+      "result": "Build22all5targetsPASS/unit679assert13casesPASSnoSKIP clean matchingdeployae05:06; exact-member suppression remains defaultOFF.",
+      "sha256": {
+        "build-paa-inflight-20260927.log": "dac12d9c8a2516ec041ecdd0787c8229bcf8b5ab9f35913e2234ade864314231",
+        "test-paa-inflight-20260927.log": "5e9d7cd24e6b053babe56f0b3ab09882625954ca1157fb55a3aee7a0fa6a5334",
+        "deploy-paa-inflight-20260927.log": "cef03edc25db9bb4a45930b0c807a0e351875d2ee3e2c3ec6ee571a504749e89",
+        "run-paa-inflight-actual-20260927.log": "b93af6e6d62dfd77188557b1157fd1b15e42ab9c82ac256efac5e99ec3bde3e6",
+        "run-paa-inflight-off-20260927.log": "78086e70715f87e47518726ab8481f08a4bbca7bc0d824a5a3b04253c859857a"
       }
     }
   ],

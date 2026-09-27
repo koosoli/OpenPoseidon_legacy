@@ -2445,6 +2445,19 @@ workerSUM1151.309successfulreaddecode,84.603rejected/130.941includingfacts ms,
 maxconversionterminal185.529,0overflow/readfail/cancel/throw. Cannot pair individual
 overlap/rejection/Putreason; notroutewall time. GeometrydiagPBOmodel0 versus
 PAAmodel1 are different workloads. Root ON settled localPOI showed no obvious
-new material/geometry regression, OFFimage review pending at checkpoint.
+new material/geometry regression; root also viewed OFF044812 against ON044504 and older7b92041703: same localPOI/no obvious change, not whole-world/no-regression acceptance.
 No default activation/eviction/paging/FPS/performance acceptance. Future member-
 bound in-flight candidate unbuilt/untested/excluded. FullplanOPEN.
+Exact-member PAA suppressionae96556a build22all5targets/test679assertions13cases
+noSKIP pass, cleaninstalled05:06. ON050709/OFF050847 both clean0PASS. First
+observed suppression1/active1/currentmetadata21760/peak41184 bytes,0overflow/
+unsupported/contended; not route totals/RSS or guarantee peerPut publication.
+Ordinary owner fallback remains. ON911frames mean39.084184/median23.831/
+p9592.940/p99319.286/max1010.128; OFF92239.297031/24.3535/85.771/401.291/
+1364.731ms nearest-rankceil(n*p)-1/usualmedian. ONgeometry709881720/textures
+2745904404/2487 versusOFF709824720/2745860724/2486; orderedcache/asyncwork/
+diagnosticcost not matched causal/performance acceptance. Root viewed both
+settled samePOI no obvious new geometry/material change, localonly. Suppression
+OFFdefault, fullplanOPEN/performancefalse. AllflagsOFF normalcontrol was pending at this checkpoint;
+newposecache source unbuilt/not included.
+Sameae allflagsOFF051036 subsequently PASSclean0, stable installed hashes.871frames mean39.697796/median23.514/p95131.467/p99333.420/max942.080ms nearest-rank; geometry712369276/textures2749617844/2494. PBOtex/attemptdiag/inflight false, no new default work; compatibility only, not no-regression/performance acceptance. No posecaller prototype installed; fullplanOPEN.
