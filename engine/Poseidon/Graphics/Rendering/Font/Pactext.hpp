@@ -251,6 +251,10 @@ class ITextureSource
 	// Appended: evidence from the exact buffer used by successful Init. Unknown
 	// for cached unwrapped/loose/transformed sources; never recaptured by name.
 	virtual std::shared_ptr<const ArchiveSourceBinding> GetArchiveSourceBinding() const { return {}; }
+
+	// Appended owner-only optional retirement of this source's Init evidence.
+	// Does not change headers/pixels/reads; copied aliases keep their own debt.
+	virtual bool ReleaseArchiveSourceBinding() { return false; }
 };
 
 //! Count of VFS opens made to read texture mip data, process-wide since start.

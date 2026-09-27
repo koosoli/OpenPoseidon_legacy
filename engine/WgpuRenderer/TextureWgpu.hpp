@@ -58,6 +58,9 @@ class TextureWgpu : public Texture
     // every wgpu section in the opaque pass, so alpha-blended sections composited against the
     // sky fill (see-through grills/badges).
     signed char _alphaClass = -1;
+    // Optional one-shot Init-proof retirement. Reset only by actual Init, not GPU eviction.
+    bool _hotSourceProofRetireAttempted = false;
+    void RetireHotSourceProof();
     // Preserve the decoded coverage summary alongside the three-way class. TreeAdv's close LOD
     // can bind both needles and solid bark through the same foliage material; only the former
     // has clear alpha texels and may receive an alpha test.

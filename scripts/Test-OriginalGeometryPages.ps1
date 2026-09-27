@@ -1,6 +1,7 @@
-param([ValidateSet('None','Missing','Corrupt')][string]$DiskFault='None',[switch]$CameraPrefetch,[string]$Tools='',
+param([ValidateSet('None','Missing','Corrupt')][string]$DiskFault='None',[switch]$CameraPrefetch,[switch]$SurfaceCertificate,[ValidateSet('None','DigestMismatch','Malformed')][string]$SurfaceFault='None',[string]$Tools='',
  [string]$Label='original-geometry-pages',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',[string]$Python='C:\Program Files\Python311\python.exe')
 $ErrorActionPreference='Stop'
+if($SurfaceFault -ne 'None'){$SurfaceCertificate=$true}
 if($CameraPrefetch -and $DiskFault -ne 'None'){throw 'CameraPrefetch requires a valid disk artifact'}
 if($Label -notmatch '^[a-zA-Z0-9_-]{1,64}$'){throw 'Invalid bounded label'}
 if(!$env:LOCK_OWNER){
@@ -8,6 +9,8 @@ if(!$env:LOCK_OWNER){
  $argv=@((Join-Path $PSScriptRoot 'with-game-lock.sh'),$shell.Replace('\','/'),'-NoProfile','-File',$PSCommandPath,'-Label',$Label,'-GameDir',$GameDir,'-Python',$Python,'-DiskFault',$DiskFault)
  if($Tools){$argv+=@('-Tools',$Tools)}
  if($CameraPrefetch){$argv+='-CameraPrefetch'}
+ if($SurfaceCertificate){$argv+='-SurfaceCertificate'}
+ $argv+=@('-SurfaceFault',$SurfaceFault)
  $env:LOCK_OWNER='original source private paged geometry fixture'
  try{& 'C:\Program Files\Git\bin\bash.exe' @argv;if($LASTEXITCODE){throw "Original pages child failed $LASTEXITCODE"}}finally{Remove-Item Env:LOCK_OWNER};return
 }
@@ -59,7 +62,8 @@ $toolsHash=(Get-FileHash -LiteralPath $Tools).Hash
 $stdout=Join-Path $out 'original-producer-stdout.json';$stderr=Join-Path $out 'original-producer-stderr.txt';$offline=Join-Path $out 'offline-original'
 $toolProcess=$null
 try{
- $toolProcess=Start-Process -FilePath $Tools -ArgumentList @('geometry-page-mlod','--input',('"'+$OriginalSource+'"'),'--output-directory',('"'+$offline+'"')) -WindowStyle Hidden -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+ $toolArgs=@('geometry-page-mlod','--input',('"'+$OriginalSource+'"'),'--output-directory',('"'+$offline+'"'));if($SurfaceCertificate){$toolArgs+='--surface-certificate'}
+ $toolProcess=Start-Process -FilePath $Tools -ArgumentList $toolArgs -WindowStyle Hidden -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
  $until=[DateTime]::UtcNow.AddSeconds(60)
  while(!$toolProcess.HasExited){foreach($f in @($stdout,$stderr)){if((Test-Path -LiteralPath $f) -and (Get-Item -LiteralPath $f).Length -gt 8192){throw 'Offline output exceeds8192bytes'}};if([DateTime]::UtcNow -gt $until){throw 'Offline producer timed out'};Start-Sleep -Milliseconds 100}
  $toolProcess.WaitForExit();if($toolProcess.ExitCode -ne 0){throw 'Offline original producer failed'}
@@ -79,6 +83,36 @@ if((Get-FileHash -LiteralPath $OriginalSource).Hash -ine $rawHash -or (Get-FileH
 $id=$originalProducer.originalSource
 $originalKey=@([Convert]::ToUInt64($id.geometryOptionsHex,16),[Convert]::ToUInt64($id.materialOptionsHex,16),$id.producerVersion,$id.coarseRepresentation,$id.fineRepresentation,$id.vertexLayout,$id.materialMapping)-join ':'
 $suppliedHash=$rawHash
+$surfaceProof=$null;$surfaceExpectedStatus=0;$surfaceKnownUpper=0
+if($SurfaceCertificate){
+ $surfaceManifest=Join-Path $offline 'manifest.json';$surfaceDescriptor=Join-Path $offline 'surface-certificate.json'
+ if(!(Test-Path -LiteralPath $surfaceDescriptor) -or (Get-Item -LiteralPath $surfaceDescriptor).Length -gt 8192){throw 'Missing bounded actual Tools surface certificate'}
+ $surfaceManifestHash=(Get-FileHash -LiteralPath $surfaceManifest).Hash.ToLowerInvariant()
+ $surfaceDescriptorHash=(Get-FileHash -LiteralPath $surfaceDescriptor).Hash.ToLowerInvariant()
+ $surfaceDescriptorValue=Get-Content -LiteralPath $surfaceDescriptor -Raw|ConvertFrom-Json
+ if($surfaceDescriptorValue.fileBytes -ne $originalProducer.fileBytes -or $surfaceDescriptorValue.fileSha256 -cne $originalProducer.fileSha256){throw 'Surface certificate does not bind fresh selected artifact'}
+ $surfaceKnownUpper=[double]$surfaceDescriptorValue.hausdorffUpper
+ if([double]::IsNaN($surfaceKnownUpper) -or [double]::IsInfinity($surfaceKnownUpper) -or $surfaceKnownUpper -lt 0){throw 'Invalid actual Tools selected-surface bound'}
+ $surfaceExpectedStatus=1
+ if($SurfaceFault -ne 'None'){
+  # Keep the fresh trusted producer files intact. Fault only a private descriptor copy.
+  $badSurface=Join-Path $out 'surface-fault.json'
+  if($SurfaceFault -eq 'DigestMismatch'){
+   [IO.File]::WriteAllBytes($badSurface,[Text.Encoding]::ASCII.GetBytes('{}'))
+   $surfaceExpectedStatus=6
+  }else{
+   [IO.File]::WriteAllBytes($badSurface,[Text.Encoding]::ASCII.GetBytes('{"duplicate":0,"duplicate":1}'))
+   $surfaceDescriptorHash=(Get-FileHash -LiteralPath $badSurface).Hash.ToLowerInvariant()
+   $surfaceExpectedStatus=2
+  }
+  $surfaceDescriptor=$badSurface
+ }
+ $surfaceProof=@{manifest=$surfaceManifest;manifestSha256=$surfaceManifestHash;certificate=$surfaceDescriptor;certificateSha256=$surfaceDescriptorHash
+  expectedStatus=$surfaceExpectedStatus;actualToolsDescriptor=$surfaceDescriptorValue;fault=$SurfaceFault
+  scope='Fresh independently hashed actual Tools outputs; selected packed unions only, authored fallback quality remains unproved'}
+ $surfaceProof|ConvertTo-Json -Depth 14|Set-Content (Join-Path $out 'surface-startup-proof.json')
+}
+
 
 @{original=$OriginalSource;bytes=$rawBytes;rawSha256=$rawHash;suppliedSha256=$suppliedHash;fullKey=$originalKey;producer=$originalProducer;tools=$Tools;toolsSha256=$toolsHash}|ConvertTo-Json -Depth 14|Set-Content (Join-Path $out 'original-proof.json')
 
@@ -101,6 +135,7 @@ $environment=@{
  WGR_CULL_MODEL_ROW_UPLOAD='0';WGR_LOCAL_SHADOW_POSE_CACHE='0';WGR_LOCAL_POSE_CACHE_TRACE='0';WGR_LAZY_TEXTURE_BIND_GROUPS='0';WGR_GEOMETRY_OWNER_LEDGER='0';WGR_PAA_PREP_INFLIGHT='0';WGR_PAA_PREP_ATTEMPT_DIAG='0';WGR_TERRAIN_PAGE_TIMINGS='0';WGR_OBJECT_STREAM_WARM_PROFILE='0';WGR_RENDER_CALL_CPU_TIMINGS='0';WGR_GPU_MODEL_PARK_REFILL='0';WGR_OBJECT_STREAM_REGISTRATION_QUOTA='0';WGR_CULL_SECTION_REUSE='0';WGR_CULL_LOD_REUSE='0';WGR_PAA_LZO_REPLAY_CACHE='0'
 }
 $environment.WGR_GEOMETRY_PAGE_ORIGINAL_SOURCE='1';$environment.WGR_GEOMETRY_PAGE_FIXTURE='1'
+$environment.WGR_GEOMETRY_PAGE_SURFACE_CERTIFICATE=$(if($SurfaceCertificate){'1'}else{'0'})
 $old=@{};Get-ChildItem Env:|Where-Object {$_.Name -match '^(WGR_|POSEIDON_)'}|ForEach-Object {$old[$_.Name]=$_.Value}
 $p=$null;$client=$null;$normal=$false;$forced=$false;$result=$null;$failure=$null
 $exe=Join-Path $GameDir 'OpenPoseidon.exe';$dll=Join-Path $GameDir 'wgpu_renderer.dll';$log=Join-Path $out 'engine.log'
@@ -111,7 +146,8 @@ try{
  $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0);$listener.Start();$port=$listener.LocalEndpoint.Port;$listener.Stop()
  $argv=@('--render=wgpu','--window','--dev','--width','1280','--height','720','--vd','2000','--harness',[string]$port,'--test-world-freefly','1184','1240','18','90','-8','--test-world',('"'+(Join-Path $fixture 'cold-paa.wrp')+'"'),'--addon-root',('"'+(Join-Path $fixture 'addons')+'"'),'--test-mission',('"'+$mission+'"'),'--log-file',('"'+$log+'"'))
  $argv+=@('--geometry-original-source',('"'+$OriginalSource+'"'),'--geometry-original-sha256',$suppliedHash,'--geometry-original-bytes',[string]$rawBytes,'--geometry-original-key',$originalKey)
- @{head=(& git -C $root rev-parse HEAD);scriptSha256=(Get-FileHash $PSCommandPath).Hash;generatorSha256=(Get-FileHash $generator).Hash;installed=(Get-Content (Join-Path $GameDir 'DEPLOYED-FROM.txt'));hashes=$hashes;environment=$environment;argv=$argv;fixture=$producer;originalProof=$originalProducer;sourceGeneratorSha256=(Get-FileHash $originalGenerator).Hash;diskFault=$DiskFault;cameraPrefetch=[bool]$CameraPrefetch;toolsSha256=$toolsHash;scope='Actual original-source private paging; copied record cuts, no retail/all-pass/pixel/FPS proof'}|ConvertTo-Json -Depth 12|Set-Content (Join-Path $out 'provenance.json')
+ if($SurfaceCertificate){$argv+=@('--geometry-pages-surface-manifest',('"'+$surfaceManifest+'"'),$surfaceManifestHash,'--geometry-pages-surface-certificate',('"'+$surfaceDescriptor+'"'),$surfaceDescriptorHash)}
+ @{head=(& git -C $root rev-parse HEAD);scriptSha256=(Get-FileHash $PSCommandPath).Hash;generatorSha256=(Get-FileHash $generator).Hash;installed=(Get-Content (Join-Path $GameDir 'DEPLOYED-FROM.txt'));hashes=$hashes;environment=$environment;argv=$argv;fixture=$producer;originalProof=$originalProducer;sourceGeneratorSha256=(Get-FileHash $originalGenerator).Hash;diskFault=$DiskFault;surfaceCertificate=[bool]$SurfaceCertificate;surfaceFault=$SurfaceFault;surfaceProof=$surfaceProof;cameraPrefetch=[bool]$CameraPrefetch;toolsSha256=$toolsHash;scope='Actual original-source private paging; copied record cuts, no retail/all-pass/pixel/FPS proof'}|ConvertTo-Json -Depth 12|Set-Content (Join-Path $out 'provenance.json')
  $p=Start-Process -FilePath $exe -WorkingDirectory $GameDir -WindowStyle Hidden -PassThru -ArgumentList $argv
  $null=$p.Handle
  $client=[Net.Sockets.TcpClient]::new();$until=[DateTime]::UtcNow.AddSeconds(90)
@@ -281,6 +317,21 @@ try{
             Require $cut @('originalFilePilot','sourceSnapshotValidated','sourceAdmissionConsumed','sourceAdmissionEpoch','originalSourceBytes','sourceAdmissionKnownBytes','originalOriginRadius','helperCount')
             $r=[double]$cut.originalOriginRadius
             if(!$cut.originalFilePilot -or !$cut.sourceSnapshotValidated -or !$cut.sourceAdmissionConsumed -or $cut.sourceAdmissionEpoch -ne 1 -or $cut.originalSourceBytes -ne $rawBytes -or $cut.sourceAdmissionKnownBytes -lt 1 -or $cut.sourceAdmissionKnownBytes -gt 131072 -or $cut.helperCount -ne 0 -or $cut.cpuHelpersUnchanged -or $cut.helperHashBefore -ne '' -or $cut.helperHashAfter -ne '' -or [double]::IsNaN($r) -or [double]::IsInfinity($r) -or $r -le 0 -or ($cut.knownPayloadBytes+$cut.pageReservedBytes) -gt 1048576){throw 'Original source/material/bounds/admission/debt scope mismatch'}
+
+            Require $cut @('surfaceCertificateStatus','surfaceCertificateAdmitted','surfaceSelectedVerified','surfaceCertificateKnownBytes','selectedSurfaceUpper','selectedUnionMinimum','selectedUnionMaximum')
+            $expectSurface=$SurfaceCertificate -and $SurfaceFault -eq 'None'
+            if($cut.surfaceCertificateStatus -ne $surfaceExpectedStatus -or $cut.surfaceCertificateAdmitted -ne $expectSurface){throw 'Surface admission status disagrees with independent startup proof'}
+            if(!$expectSurface){
+                if($cut.surfaceSelectedVerified -or $cut.surfaceCertificateKnownBytes -ne 0 -or $cut.selectedSurfaceUpper -ne 0){throw 'Rejected/OFF optional proof published numeric authority'}
+            }else{
+                if($cut.surfaceCertificateKnownBytes -lt 1 -or $cut.surfaceCertificateKnownBytes -gt 131072 -or $cut.selectedSurfaceUpper -ne $surfaceKnownUpper){throw 'Bound selected-surface proof accounting/value mismatch'}
+                foreach($bounds in @($cut.selectedUnionMinimum,$cut.selectedUnionMaximum)){
+                    if(@($bounds).Count -ne 3){throw 'Missing selected union envelope'}
+                    foreach($component in $bounds){$v=[double]$component;if([double]::IsNaN($v) -or [double]::IsInfinity($v) -or [Math]::Abs($v) -gt 10000){throw 'Invalid actual selected union envelope'}}
+                }
+                for($axis=0;$axis -lt 3;$axis++){if($cut.selectedUnionMinimum[$axis] -gt $cut.selectedUnionMaximum[$axis]){throw 'Inverted selected union envelope'}}
+                if($cut.pageWorkState -eq 'Ready' -and $cut.diskReadStatus -eq 'Read' -and !$cut.surfaceSelectedVerified){throw 'Ready selected worker result lacks exact captured-byte surface binding'}
+            }
             return $cut
         }
         function WaitPage($predicate) {
@@ -438,7 +489,7 @@ try{
     if($CameraPrefetch){$retired=CameraCut $retired;$settled=CameraCut $settled;if($retired.cameraDemandActive -or $retired.finePrepared -or $retired.meshCount -ne $fine.meshCount -or $retired.meshesAbsent -ne $fine.meshCount -or $settled.cameraRequests -ne 2){throw 'Camera Abort failed exact cleanup/idle proof'}}
     $secondBegin=Action 'beginOriginalDiskClodPaged';Require $secondBegin @('status','pageWorkState')
     if($secondBegin.status -ne 'Busy' -or $secondBegin.pageWorkState -ne 'OriginalAdmissionConsumed'){throw 'Single source admission rearmed after Abort'}
-    $result=@{passed=$true;diskFault=$DiskFault;cameraPrefetch=[bool]$CameraPrefetch;cameraEvidence=$cameraEvidence;begin=$begin;baseline=$baseline;normalworldCoverage=$worldCoverage;normalworldCamera=$camera;fallback=$fallback;coarse=$coarse;fine=$fine;heldRequest=$heldRequest;held=$held;cancelled=$cancelled;cancelledCoarse=$cancelledCoarse;settledCancel=$settledCancel;evicted=$evicted;refilled=$refilled;returnedFallback=$returnedFallback;typedFault=$refused;retired=$retired;settled=$settled;secondBegin=$secondBegin;sourceFixture=$sourceFixture;producer=$originalProducer;scope='Original authored P3DM controlled subset, actual fallback/coarse/fine/refill record cuts; no retail/all-pass/pixel/FPS/device-free or complete ownership claim'}
+    $result=@{passed=$true;surfaceCertificate=[bool]$SurfaceCertificate;surfaceFault=$SurfaceFault;surfaceProof=$surfaceProof;diskFault=$DiskFault;cameraPrefetch=[bool]$CameraPrefetch;cameraEvidence=$cameraEvidence;begin=$begin;baseline=$baseline;normalworldCoverage=$worldCoverage;normalworldCamera=$camera;fallback=$fallback;coarse=$coarse;fine=$fine;heldRequest=$heldRequest;held=$held;cancelled=$cancelled;cancelledCoarse=$cancelledCoarse;settledCancel=$settledCancel;evicted=$evicted;refilled=$refilled;returnedFallback=$returnedFallback;typedFault=$refused;retired=$retired;settled=$settled;secondBegin=$secondBegin;sourceFixture=$sourceFixture;producer=$originalProducer;scope='Original authored P3DM controlled subset, actual fallback/coarse/fine/refill record cuts; no retail/all-pass/pixel/FPS/device-free or complete ownership claim'}
     if($CameraPrefetch){$result.scope='Actual original-file camera prefetch/held departure/complete prepared rows/coarse unchanged/manual Fine reuse/all-Absent cleanup; no eviction/refill/automatic quality/retail/all-pass/pixel/FPS/device-free/complete ownership claim'}
     $null=Send @{cmd='exit'}
     if(!$p.WaitForExit(15000) -or $p.ExitCode -ne 0){throw 'Game did not exit normally'};$normal=$true

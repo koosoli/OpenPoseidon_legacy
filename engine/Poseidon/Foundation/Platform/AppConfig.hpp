@@ -340,6 +340,8 @@ class AppConfig
     const std::string& GetGeometryOriginalSha256() const { return _geometryOriginalSha256; }
     const std::string& GetGeometryOriginalKey() const { return _geometryOriginalKey; }
     uint64_t GetGeometryOriginalBytes() const { return _geometryOriginalBytes; }
+    const std::vector<std::string>& GetGeometrySurfaceManifest() const {return _geometrySurfaceManifest;}
+    const std::vector<std::string>& GetGeometrySurfaceCertificate() const {return _geometrySurfaceCertificate;}
 
     // Logging
 
@@ -527,6 +529,7 @@ class AppConfig
     std::string _uiTest;
     std::string _geometryOriginalPath, _geometryOriginalSha256, _geometryOriginalKey;
     uint64_t _geometryOriginalBytes=0;
+    std::vector<std::string> _geometrySurfaceManifest,_geometrySurfaceCertificate;
     int _harnessPort = -1; // -1 = disabled, 0 = auto-assign, >0 = explicit
 
     // Logging

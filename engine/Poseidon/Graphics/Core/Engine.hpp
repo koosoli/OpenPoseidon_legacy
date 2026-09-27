@@ -3209,14 +3209,22 @@ class Engine : public IGraphicsEngine
     enum class GeometryPageOriginalStatus : uint32_t {
         Disabled, Admitted, Unsupported, Invalid, Capacity, WrongOwner, IoFailure, IdentityMismatch, Busy
     };
+    struct GeometryPageSurfaceStartupInput {
+        std::array<char,1024> manifestPath{},certificatePath{};
+        std::array<uint8_t,32> manifestSha256{},certificateSha256{};
+    };
     struct GeometryPageOriginalStartupInput {
         std::array<char,1024> originalPath{};
         uint64_t expectedRawBytes=0;
         GeometryPageSourceIdentity expectedOriginal;
+        std::shared_ptr<const GeometryPageSurfaceStartupInput> surface; // Optional explicit startup transport only.
     };
     struct GeometryPageOriginalAdmissionReport {
         GeometryPageOriginalStatus status=GeometryPageOriginalStatus::Disabled;
         uint64_t epoch=0, originalSourceBytes=0, knownRetainedBytes=0;
+        bool surfaceCertificateValidated=false;
+        uint32_t surfaceCertificateStatus=0; // SurfaceAdmission::Status+1; zero means not requested.
+        uint64_t surfaceCertificateKnownBytes=0;
         bool snapshotValidated=false, consumed=false; // Single source admission cannot rearm after fixture Abort.
     };
     // Full source-key numbers in decimal: geometry:material:producer:coarse:fine:layout:mapping.
@@ -3274,6 +3282,11 @@ class Engine : public IGraphicsEngine
         bool pagedPilot=false, fineResident=false;
         bool diskPilot=false,coarseResident=false;
         bool originalFilePilot=false,sourceSnapshotValidated=false,sourceAdmissionConsumed=false;
+        bool surfaceCertificateAdmitted=false,surfaceSelectedVerified=false;
+        uint32_t surfaceCertificateStatus=0;
+        uint64_t surfaceCertificateKnownBytes=0;
+        double selectedSurfaceUpper=0; // Object-space selected coarse/fine only, never authored fallback/pixels.
+        std::array<float,3> selectedUnionMinimum{},selectedUnionMaximum{};
         bool cameraDemandActive=false,cameraDesiredFine=false,cameraHasObservation=false,finePrepared=false;
         uint64_t cameraDemandRevision=0,cameraRequestedRevision=0,cameraObservations=0,cameraRequests=0,cameraCancels=0;
         uint32_t cameraAttempts=0,preparedProducerModel=UINT32_MAX;

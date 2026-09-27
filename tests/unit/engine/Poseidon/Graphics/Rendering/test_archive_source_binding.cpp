@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <Poseidon/IO/Streams/ArchiveSourceBinding.hpp>
+#include <Poseidon/Graphics/Textures/HotSourceProofRetirementPolicy.hpp>
 #include <Poseidon/IO/Streams/FileAccessPolicy.hpp>
 #include <Poseidon/IO/FileServerMT.hpp>
 #include <Poseidon/Graphics/Rendering/Font/Pactext.hpp>
@@ -374,5 +375,90 @@ TEST_CASE("Entering model purpose cannot certify a previously unwrapped cached h
     CHECK_FALSE(unknown->GetArchiveSourceBinding());
     REQUIRE(witnessed->GetArchiveSourceBinding());
     CHECK(ArchiveSourceBinding::SnapshotStats().initRetains == before.initRetains + 1);
+#endif
+}
+
+
+TEST_CASE("Hot proof policy requires actual upload and cached alpha without extending Init lifetime", "[archive-source-hot-retire]")
+{
+    using Policy = render::HotSourceProofRetirementPolicy;
+    bool attempted = false;
+    CHECK_FALSE(Policy::Reserve(false, true, 1, 0, true, false, false, attempted));
+    CHECK_FALSE(Policy::Reserve(true, false, 1, 0, true, false, false, attempted));
+    CHECK_FALSE(Policy::Reserve(true, true, 0, 0, true, false, false, attempted));
+    CHECK_FALSE(Policy::Reserve(true, true, 1, -1, true, false, false, attempted));
+    CHECK_FALSE(Policy::Reserve(true, true, 1, 0, false, false, false, attempted));
+    CHECK_FALSE(Policy::Reserve(true, true, 1, 0, true, true, false, attempted));
+    CHECK_FALSE(Policy::Reserve(true, true, 1, 0, true, false, true, attempted));
+    CHECK_FALSE(attempted);
+    REQUIRE(Policy::Reserve(true, true, 1, 0, true, false, false, attempted));
+    CHECK_FALSE(Policy::Reserve(true, true, 1, 0, true, false, false, attempted));
+    // GPU eviction does not rearm; a new actual Init is the only explicit reset.
+    CHECK_FALSE(Policy::Reserve(true, true, 0, 0, true, false, false, attempted));
+    CHECK_FALSE(Policy::Reserve(true, true, 2, 0, true, false, false, attempted));
+    attempted = false;
+    CHECK(Policy::Reserve(true, true, 2, 1, true, false, false, attempted));
+}
+
+TEST_CASE("Actual PAC Init proof retirement preserves headers reads and strong alias debt", "[archive-source-hot-retire][archive-source-actual]")
+{
+#ifndef _WIN32
+    SKIP("Strong archive identity is Windows-only.");
+#else
+    if (!ArchiveSourceBinding::SnapshotStats().enabled) SKIP("Requires fresh WARM_TEXTURES=1 process.");
+    if (!QFileAccess::MappingSupported()) SKIP("Exact mapped buffer unavailable.");
+    Archives files;
+    ServerScope scope;
+    const auto baseline = ArchiveSourceBinding::SnapshotStats();
+    ArchiveSourceBinding::ModelReadScope purpose;
+    QIFStreamB captured; captured.open(files.first, "texture.paa"); REQUIRE_FALSE(captured.fail());
+    auto alias = captured.GetBuffer()->GetArchiveSourceBinding(); REQUIRE(alias);
+    scope.server->cache.Store(captured, "hot-proof-fixture\\texture.paa");
+    std::array<PacLevelMem, 7> mips;
+    auto* factory = SelectTextureSourceFactory("hot-proof-fixture\\texture.paa"); REQUIRE(factory);
+    std::unique_ptr<ITextureSource> source(factory->Create("hot-proof-fixture\\texture.paa", mips.data(), int(mips.size())));
+    REQUIRE(source); REQUIRE(source->GetArchiveSourceBinding() == alias);
+    const auto format = source->GetFormat();
+    const auto average = source->GetAverageColor();
+    const bool alpha = source->IsAlpha(), transparent = source->IsTransparent();
+    const int count = source->GetMipmapCount(); REQUIRE(count > 0); REQUIRE(count <= 7);
+    std::vector<std::vector<char>> before(static_cast<size_t>(count)), after(static_cast<size_t>(count));
+    std::vector<MipmapRead> reads(static_cast<size_t>(count));
+    for (int i = 0; i < count; ++i)
+    {
+        mips[i].SetDestFormat(format, 8);
+        before[i].resize(static_cast<size_t>(mips[i].Size())); after[i].resize(before[i].size());
+        reads[i] = {before[i].data(), &mips[i], i};
+    }
+    REQUIRE(source->GetMipmapChain(reads.data(), count));
+    const auto authored = OriginalPaa(13);
+    size_t authoredAt = 4; // Magic/palette, then each actual seven-byte mip header.
+    for (int i = 0; i < count; ++i)
+    {
+        REQUIRE(authoredAt + 7 <= authored.size()); authoredAt += 7;
+        REQUIRE(before[i].size() <= authored.size() - authoredAt);
+        CHECK(std::memcmp(before[i].data(), authored.data() + authoredAt, before[i].size()) == 0);
+        authoredAt += before[i].size();
+    }
+    auto offOwner = std::async(std::launch::async, [&] { return source->ReleaseArchiveSourceBinding(); });
+    CHECK_FALSE(offOwner.get()); REQUIRE(source->GetArchiveSourceBinding() == alias);
+    REQUIRE(source->ReleaseArchiveSourceBinding()); CHECK_FALSE(source->ReleaseArchiveSourceBinding());
+    CHECK_FALSE(source->GetArchiveSourceBinding());
+    { ArchiveSourceBinding::ModelReadScope nested; CHECK_FALSE(source->GetArchiveSourceBinding()); }
+    CHECK(source->GetFormat() == format); CHECK(source->GetAverageColor() == average);
+    CHECK(source->IsAlpha() == alpha); CHECK(source->IsTransparent() == transparent);
+    CHECK(source->GetMipmapCount() == count);
+    for (int i = 0; i < count; ++i) reads[i].mem = after[i].data();
+    REQUIRE(source->GetMipmapChain(reads.data(), count)); CHECK(before == after);
+    const auto owned = ArchiveSourceBinding::SnapshotStats();
+    CHECK(owned.liveBindings == baseline.liveBindings + 1); // Buffer/cache/local aliases retain same charged record.
+    std::vector<char> exact;
+    REQUIRE(alias->Request().Read(exact)); CHECK(exact == OriginalPaa(13));
+    captured.DoDestruct(); scope.server->cache.FlushBank(nullptr);
+    CHECK(ArchiveSourceBinding::SnapshotStats().liveBindings == baseline.liveBindings + 1);
+    alias.reset();
+    CHECK(ArchiveSourceBinding::SnapshotStats().liveBindings == baseline.liveBindings);
+    CHECK(ArchiveSourceBinding::SnapshotStats().knownCppBytes == baseline.knownCppBytes);
+    CHECK_FALSE(source->GetArchiveSourceBinding()); // No named recapture after aliases exit.
 #endif
 }

@@ -58,6 +58,7 @@
 #include <SDL3/SDL_keycode.h>
 #include <SDL3/SDL_scancode.h>
 #include <cjson/cJSON.h>
+#include <Poseidon/Graphics/Rendering/GeometryPageSurfaceArguments.hpp>
 #include <stdint.h>
 #include <cmath>
 #include <fstream>
@@ -1697,6 +1698,12 @@ int GameApplication::RunAfterArgumentParsing()
         return m_exitCode;
     };
     const auto& originalConfig=AppConfig::Instance();
+    const bool surfaceArguments=!originalConfig.GetGeometrySurfaceManifest().empty()||!originalConfig.GetGeometrySurfaceCertificate().empty();
+    const char* surfaceFlag=std::getenv("WGR_GEOMETRY_PAGE_SURFACE_CERTIFICATE");
+    const bool surfaceEnabled=surfaceFlag&&std::strcmp(surfaceFlag,"1")==0;
+    if((surfaceArguments&&!surfaceEnabled)||(surfaceEnabled&&(!originalPageFlag||std::strcmp(originalPageFlag,"1")!=0))) {
+        LOG_ERROR(Core,"Surface certificate startup admission: exact original/surface opt-in flags required; no fixture published");return refuseOriginalStartup();
+    }
     const bool originalArguments=!originalConfig.GetGeometryOriginalPath().empty() ||
         !originalConfig.GetGeometryOriginalSha256().empty() || !originalConfig.GetGeometryOriginalKey().empty() ||
         originalConfig.GetGeometryOriginalBytes()!=0;
@@ -1712,9 +1719,24 @@ int GameApplication::RunAfterArgumentParsing()
             config.GetGeometryOriginalBytes(),config.GetGeometryOriginalKey(),input)) {
             LOG_ERROR(Core,"Original geometry startup admission: invalid explicit arguments; no fixture published");return refuseOriginalStartup();
         }
+
+        if(surfaceEnabled) {
+            Poseidon::GeometryPages::SurfaceAdmission::Arguments arguments;
+            try { if(Poseidon::GeometryPages::SurfaceAdmission::ParseArguments(config.GetGeometrySurfaceManifest(),config.GetGeometrySurfaceCertificate(),arguments)) {
+            auto transport=std::make_shared<Engine::GeometryPageSurfaceStartupInput>();
+            const auto manifest=arguments.manifestPath.string(),certificate=arguments.certificatePath.string();
+            std::copy(manifest.begin(),manifest.end(),transport->manifestPath.begin());
+            std::copy(certificate.begin(),certificate.end(),transport->certificatePath.begin());
+            transport->manifestSha256=arguments.manifestSha256;transport->certificateSha256=arguments.certificateSha256;
+            input.surface=std::move(transport);
+            } else LOG_WARN(Core,"Surface certificate startup arguments rejected; ordinary original admission remains available without proof");
+            } catch(const std::exception&) {LOG_WARN(Core,"Surface certificate startup transport unavailable; ordinary original admission remains available without proof");}
+        }
         const auto admission=GEngine->AdmitGeometryPageOriginalStartup(input);
         LOG_INFO(Core,"Original geometry startup admission status={} epoch={} rawBytes={} knownRetainedBytes={} snapshotValidated={} scope=source-probe-only-no-render-consumer",
             uint32_t(admission.status),admission.epoch,admission.originalSourceBytes,admission.knownRetainedBytes,admission.snapshotValidated);
+        if(surfaceEnabled)LOG_INFO(Core,"Surface certificate startup admission status={} validated={} knownBytes={} scope=selected-packed-unions-only-not-authored-fallback-or-pixels",
+            admission.surfaceCertificateStatus,admission.surfaceCertificateValidated,admission.surfaceCertificateKnownBytes);
         if(admission.status!=Engine::GeometryPageOriginalStatus::Admitted)return refuseOriginalStartup();
     }
 

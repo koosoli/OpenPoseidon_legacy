@@ -689,6 +689,7 @@ void RegisterScreenshot(HarnessServer& hs)
             PAGE_FIXTURE_NUMBER(renderReturnStatus);
             PAGE_FIXTURE_NUMBER(sourceAdmissionEpoch);PAGE_FIXTURE_NUMBER(originalSourceBytes);PAGE_FIXTURE_NUMBER(sourceAdmissionKnownBytes);
             PAGE_FIXTURE_NUMBER(helperCount);PAGE_FIXTURE_NUMBER(originalOriginRadius);
+            PAGE_FIXTURE_NUMBER(surfaceCertificateStatus);PAGE_FIXTURE_NUMBER(surfaceCertificateKnownBytes);PAGE_FIXTURE_NUMBER(selectedSurfaceUpper);
             PAGE_FIXTURE_NUMBER(cameraDemandRevision);PAGE_FIXTURE_NUMBER(cameraRequestedRevision);PAGE_FIXTURE_NUMBER(cameraObservations);
             PAGE_FIXTURE_NUMBER(cameraRequests);PAGE_FIXTURE_NUMBER(cameraCancels);PAGE_FIXTURE_NUMBER(cameraAttempts);
             PAGE_FIXTURE_NUMBER(cameraDistance);PAGE_FIXTURE_NUMBER(preparedProducerModel);
@@ -698,10 +699,16 @@ void RegisterScreenshot(HarnessServer& hs)
             PAGE_FIXTURE_BOOL(pagedPilot); PAGE_FIXTURE_BOOL(fineResident); PAGE_FIXTURE_BOOL(fineEvictionPending);
             PAGE_FIXTURE_BOOL(diskPilot); PAGE_FIXTURE_BOOL(coarseResident);
             PAGE_FIXTURE_BOOL(originalFilePilot);PAGE_FIXTURE_BOOL(sourceSnapshotValidated);PAGE_FIXTURE_BOOL(sourceAdmissionConsumed);
+            PAGE_FIXTURE_BOOL(surfaceCertificateAdmitted);PAGE_FIXTURE_BOOL(surfaceSelectedVerified);
             PAGE_FIXTURE_BOOL(cameraDemandActive);PAGE_FIXTURE_BOOL(cameraDesiredFine);PAGE_FIXTURE_BOOL(cameraHasObservation);PAGE_FIXTURE_BOOL(finePrepared);
             PAGE_FIXTURE_BOOL(active); PAGE_FIXTURE_BOOL(fineSelected); PAGE_FIXTURE_BOOL(cpuHelpersUnchanged);
             PAGE_FIXTURE_BOOL(mainFrameReturned); PAGE_FIXTURE_BOOL(cascadeConfigured); PAGE_FIXTURE_BOOL(localShadowConfigured);
 #undef PAGE_FIXTURE_BOOL
+            auto* unionMinimum=cJSON_AddArrayToObject(result,"selectedUnionMinimum");
+            auto* unionMaximum=cJSON_AddArrayToObject(result,"selectedUnionMaximum");
+            for(size_t i=0;i<3;++i){cJSON_AddItemToArray(unionMinimum,cJSON_CreateNumber(report.selectedUnionMinimum[i]));
+                cJSON_AddItemToArray(unionMaximum,cJSON_CreateNumber(report.selectedUnionMaximum[i]));}
+            cJSON_AddStringToObject(result,"surfaceCertificateScope","Verified selected packed coarse/fine union object-space distance only; excludes authored fallback, pixels, attributes and all-pass quality. surfaceSelectedVerified refers to the latest successful bound worker package, not render completion.");
             auto* history=cJSON_AddArrayToObject(result,"rendererMeshHandles");
             for(size_t i=0;i<std::min<size_t>(report.meshCount,64);++i)
                 cJSON_AddItemToArray(history,cJSON_CreateString(std::to_string(report.rendererMeshHandles[i]).c_str()));

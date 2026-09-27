@@ -7,6 +7,7 @@
 #include <Poseidon/Graphics/Rendering/GeometryPageClodRamPackage.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageControlledClodPilot.hpp>
 #include <Poseidon/Graphics/Rendering/AuthoredGeometryPageWorker.hpp>
+#include <Poseidon/Graphics/Rendering/GeometryPageSurfaceAdmission.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageEvictionPolicy.hpp>
 #include <Poseidon/Foundation/Algorithms/Sha256.hpp>
 #include <Poseidon/Dev/Diag/StreamingDiag.hpp> // RFG-085 residency levers
@@ -2095,6 +2096,7 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
 struct EngineWgpu::GeometryPageOriginalAdmissionState
 {
     GeometryPages::ControlledMlodAsset source;
+    std::shared_ptr<const GeometryPages::SurfaceAdmission::Proof> surface; // Only exact opt-in allocates numeric evidence.
     GeometryPageOriginalAdmissionReport report;
 };
 Engine::GeometryPageOriginalAdmissionReport EngineWgpu::SnapshotGeometryPageOriginalAdmission() const
@@ -2109,6 +2111,9 @@ Engine::GeometryPageOriginalAdmissionReport EngineWgpu::AdmitGeometryPageOrigina
     if(!enabled||std::strcmp(enabled,"1")!=0)return report;
     if(!Foundation::IsMainThread()){report.status=Status::WrongOwner;return report;}
     if(_geometryPageOriginalAdmission){report.status=Status::Busy;return report;}
+    const char* surfaceFlag=std::getenv("WGR_GEOMETRY_PAGE_SURFACE_CERTIFICATE");
+    const bool surfaceEnabled=surfaceFlag&&std::strcmp(surfaceFlag,"1")==0;
+    if(!surfaceEnabled&&input.surface){report.status=Status::Invalid;return report;}
     // Single bounded admission record, no source path retained and no GPU/worker operation.
     std::vector<uint8_t> raw;report.status=ReadGeometryPageOriginalSnapshot(input,raw);
     if(report.status!=Status::Admitted)return report;
@@ -2120,6 +2125,27 @@ Engine::GeometryPageOriginalAdmissionReport EngineWgpu::AdmitGeometryPageOrigina
                 Status::Capacity:exported==GeometryPages::ControlledMlodStatus::Unsupported?Status::Unsupported:Status::Invalid;return report;
         }
         if(!GeometryPageOriginalIdentityMatches(input.expectedOriginal,owned->source.original.source)) {report.status=Status::IdentityMismatch;return report;}
+        if(surfaceEnabled) {
+            // Optional refusal preserves independently valid original/manual admission.
+            // No proof escapes, no certificate-specific resource IDs or worker jobs.
+            report.surfaceCertificateStatus=uint32_t(GeometryPages::SurfaceAdmission::Status::Invalid)+1;
+            try { if(input.surface) {
+            GeometryPages::SurfaceAdmission::Arguments arguments;
+            const auto copyPath=[](const std::array<char,1024>& input,std::filesystem::path& path) {
+                size_t length=0;while(length<input.size()&&input[length]){const unsigned char c=input[length];if(c<32||c>126)return false;++length;}
+                if(!length||length==input.size())return false;path=std::string(input.data(),length);return true;
+            };
+            if(copyPath(input.surface->manifestPath,arguments.manifestPath)&&copyPath(input.surface->certificatePath,arguments.certificatePath)) {
+            arguments.manifestSha256=input.surface->manifestSha256;arguments.certificateSha256=input.surface->certificateSha256;
+            auto proof=std::make_shared<GeometryPages::SurfaceAdmission::Proof>();
+            const auto verified=GeometryPages::SurfaceAdmission::Prepare(arguments,owned->source.original.source,owned->source.originalSourceBytes,*proof);
+            report.surfaceCertificateStatus=uint32_t(verified)+1;
+            if(verified==GeometryPages::SurfaceAdmission::Status::Verified) {
+                report.surfaceCertificateValidated=true;report.surfaceCertificateKnownBytes=GeometryPages::SurfaceAdmission::Proof::KnownBytes();owned->surface=std::move(proof);
+            }
+            }} } catch(const std::bad_alloc&) {report.surfaceCertificateStatus=uint32_t(GeometryPages::SurfaceAdmission::Status::AllocationFailed)+1;}
+                catch(const std::exception&) {report.surfaceCertificateStatus=uint32_t(GeometryPages::SurfaceAdmission::Status::Invalid)+1;}
+        }
         uint64_t known=sizeof(GeometryPageOriginalAdmissionState)+64; // logical control-block guard, not allocator/RSS.
         for(const auto* mesh:{&owned->source.original.coarse,&owned->source.original.fine}) {
             const uint64_t bytes=uint64_t(mesh->positions.capacity())*sizeof(GeometryPages::Position)+
@@ -2127,6 +2153,11 @@ Engine::GeometryPageOriginalAdmissionReport EngineWgpu::AdmitGeometryPageOrigina
                 uint64_t(mesh->materials.capacity())*sizeof(uint32_t);
             if(bytes>128u*1024u||known>128u*1024u-bytes){report.status=Status::Capacity;return report;}known+=bytes;
         }
+        if(report.surfaceCertificateKnownBytes>128u*1024u-known){
+            owned->surface.reset();report.surfaceCertificateKnownBytes=0;report.surfaceCertificateValidated=false;
+            report.surfaceCertificateStatus=uint32_t(GeometryPages::SurfaceAdmission::Status::Capacity)+1;
+        }
+        known+=report.surfaceCertificateKnownBytes;
         report.status=Status::Admitted;report.epoch=1;report.originalSourceBytes=owned->source.originalSourceBytes;
         report.knownRetainedBytes=known;report.snapshotValidated=true;owned->report=report;
         _geometryPageOriginalAdmission=std::move(owned);return report;
@@ -8658,6 +8689,11 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
                 originalOwner=_geometryPageOriginalAdmission;
                 if(disk->sourceAdmissionEpoch!=originalOwner->report.epoch || disk->originalSourceBytes!=originalOwner->report.originalSourceBytes ||
                     !(originalOwner->source.original.source==input->originalSource)) {failure.pageWorkState="IndependentSourceMismatch";return failure;}
+                if(originalOwner->surface) {
+                    if(!(input->originalSource==originalOwner->surface->certificate.originalSource)||
+                       !(input->selectedCut==originalOwner->surface->certificate.selectedKey)){failure.pageWorkState="SurfaceCertificateKeyMismatch";return failure;}
+                    input->surfaceProof=originalOwner->surface;
+                }
                 source=&originalOwner->source.original;radius=originalOwner->source.originRadius;
                 if(!std::isfinite(radius)||radius<=0 ||
                     !PageOriginalPlainMaterial(originalOwner->source.coarseMaterial,materialSection,material) ||
@@ -8724,7 +8760,13 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
             report.helperHashBefore=helperHash;report.helperHashAfter=helperHash;report.sourceSha256=PageHashHex(source->source.sourceSha256);
             report.originalFilePilot=originalMode;report.helperCount=originalMode?0:3;
             if(originalMode) {report.sourceSnapshotValidated=true;report.sourceAdmissionEpoch=originalOwner->report.epoch;
-                report.originalSourceBytes=originalOwner->report.originalSourceBytes;report.sourceAdmissionKnownBytes=admissionKnown;report.originalOriginRadius=radius;}
+                report.originalSourceBytes=originalOwner->report.originalSourceBytes;report.sourceAdmissionKnownBytes=admissionKnown;report.originalOriginRadius=radius;
+                report.surfaceCertificateStatus=originalOwner->report.surfaceCertificateStatus;}
+            if(originalOwner&&originalOwner->surface) {
+                report.surfaceCertificateAdmitted=true;report.surfaceCertificateKnownBytes=originalOwner->report.surfaceCertificateKnownBytes;
+                report.selectedSurfaceUpper=originalOwner->surface->certificate.hausdorffUpper;
+                report.selectedUnionMinimum=originalOwner->surface->minimum;report.selectedUnionMaximum=originalOwner->surface->maximum;
+            }
             report.selectedCutSha256=PageHashHex(fixture->diskInput->selectedCut.source.sourceSha256);report.clodAdapterVersion=ClodBake::AdapterVersion;
             report.clodRamAdapterVersion=ClodRamPackage::AdapterVersion;report.clodLibraryRevision=ClodBake::LibraryRevision;
             report.fallbackTriangles=uint32_t(source->coarse.indices.size()/3);report.authoredFineTriangles=uint32_t(source->fine.indices.size()/3);
@@ -9078,7 +9120,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
                     auto metadata=std::make_shared<GeometryPages::DiskPageInput>(*fixture->diskInput);
                     metadata->representation=requestedRole;
                     submitted=_geometryPageWorker->SubmitDisk(report.pageEpoch,token,std::move(metadata),1024*1024-fixture->pageBaseKnownBytes);
-                    report.diskRequestedRepresentation=coarseRequest?"Coarse":"Fine";report.diskReadStatus="NotRequested";
+                    report.diskRequestedRepresentation=coarseRequest?"Coarse":"Fine";report.diskReadStatus="NotRequested";report.surfaceSelectedVerified=false;
                 } else submitted=_geometryPageWorker->Submit(report.pageEpoch,token,fixture->pageInput,1024*1024-fixture->pageBaseKnownBytes);
                 if(submitted==GeometryPages::AuthoredPageWorker::SubmitStatus::Queued || submitted==GeometryPages::AuthoredPageWorker::SubmitStatus::Duplicate) {
                     report.pageRequest=token;report.pageWorkState="Queued";
@@ -9097,6 +9139,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
                          result->ownership->disk->path==fixture->diskInput->path &&
                          result->ownership->disk->originalSource==fixture->diskInput->originalSource &&
                          result->ownership->disk->selectedCut==fixture->diskInput->selectedCut &&
+                         result->ownership->disk->surfaceProof==fixture->diskInput->surfaceProof &&
                          result->source->identity==fixture->diskInput->selectedCut &&
                          result->decoded.identity==fixture->diskInput->selectedCut):
                         (result->source==fixture->pageInput && result->decoded.identity==fixture->pageInput->identity);
@@ -9105,6 +9148,9 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
                         report.pageWorkState="Failed";updatePageStats(report);return report;
                     }
                     if(report.diskPilot) {
+                        // Reader verified the exact captured bytes + actual decoded unions before returning any source.
+                        // This copied evidence does not certify the independently authored fallback.
+                        report.surfaceSelectedVerified=bool(fixture->diskInput->surfaceProof);
                         const auto& package=result->source->package;
                         const size_t coarseClusters=package.coarseClusters;
                         if(!coarseClusters || coarseClusters>=package.clusters.size() || package.clusters.size()>64 || package.pages.size()>8)return failure;

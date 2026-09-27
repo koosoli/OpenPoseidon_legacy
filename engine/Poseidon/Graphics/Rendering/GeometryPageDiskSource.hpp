@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <fstream>
 #include <atomic>
+#include <Poseidon/Graphics/Rendering/GeometryPageSurfaceAdmission.hpp>
 
 namespace Poseidon::GeometryPages
 {
@@ -11,6 +12,8 @@ struct DiskPageInput
     std::filesystem::path path;
     SourceIdentity originalSource;
     CacheIdentity selectedCut;
+    // Optional immutable startup evidence. Old raw/RAM paths remain unbound.
+    std::shared_ptr<const SurfaceAdmission::Proof> surfaceProof;
     Frontier representation=Frontier::Fine; // explicit immutable requested role; old callers remain Fine
     static constexpr size_t MaxPathCharacters=1024;
 };
@@ -26,6 +29,9 @@ inline bool ValidDiskPageInput(const DiskPageInput& input)
     if((input.representation!=Frontier::Coarse && input.representation!=Frontier::Fine) ||
        name.empty() || name.size()>DiskPageInput::MaxPathCharacters || DiskPageKnownBytes(input)>16*1024) return false;
     for(auto c:name) if(!c) return false;
+    if(input.surfaceProof && (!(input.surfaceProof->certificate.originalSource==input.originalSource)||
+        !(input.surfaceProof->certificate.selectedKey==input.selectedCut)||!input.surfaceProof->encodedBytes||
+        input.surfaceProof->encodedBytes>ClodDiskDetail::MaxBytes))return false;
     bool hash=false,cut=false;for(auto b:input.originalSource.sourceSha256) hash|=b!=0;
     for(auto b:input.selectedCut.source.sourceSha256) cut|=b!=0;
     return hash && cut && input.originalSource.producerVersion && input.originalSource.vertexLayout &&
@@ -66,6 +72,9 @@ inline DiskReadStatus ReadDiskPageSource(const DiskPageInput& input,ClodRamPacka
         // Reject growth as well as short reads; no independently refreshed path lease.
         if(stream.peek()!=std::char_traits<char>::eof() || !stream.eof() || stream.bad()) return DiskReadStatus::ReadFailed;
         if(cancelled.load()) return DiskReadStatus::Cancelled;
+        // Exact bytes from THIS read are the hash authority and Decode input.
+        if(input.surfaceProof && (bytes.size()!=input.surfaceProof->encodedBytes||
+            SurfaceAdmission::Detail::Digest(bytes)!=input.surfaceProof->encodedSha256))return DiskReadStatus::Invalid;
         ClodRamPackage decoded;
         const auto status=DecodeClodDisk(bytes,input.originalSource,input.selectedCut,decoded);
         if(cancelled.load()) return DiskReadStatus::Cancelled;
@@ -75,6 +84,8 @@ inline DiskReadStatus ReadDiskPageSource(const DiskPageInput& input,ClodRamPacka
             if(status==ClodDiskStatus::AllocationFailed) return DiskReadStatus::AllocationFailed;
             return DiskReadStatus::Invalid;
         }
+        if(input.surfaceProof && !SurfaceAdmission::MatchesDecoded(*input.surfaceProof,decoded))return DiskReadStatus::Invalid;
+        if(cancelled.load())return DiskReadStatus::Cancelled;
         destination=std::move(decoded);return DiskReadStatus::Read;
     } catch(const std::bad_alloc&) {return DiskReadStatus::AllocationFailed;}
       catch(...) {return DiskReadStatus::ReadFailed;}

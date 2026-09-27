@@ -2062,6 +2062,12 @@ class TextureSourcePac : public ITextureSource
     void ForceAlpha() override { _pal._isAlpha = true; }
     std::shared_ptr<const ArchiveSourceBinding> GetArchiveSourceBinding() const override
     { return _archiveSourceBinding; }
+    bool ReleaseArchiveSourceBinding() override
+    {
+        if (!Foundation::IsMainThread() || !_archiveSourceBinding) return false;
+        _archiveSourceBinding.reset(); // Only this owner; cache/worker/store aliases remain charged.
+        return true;
+    }
 };
 
 //! all routines required to create pac/paa texture

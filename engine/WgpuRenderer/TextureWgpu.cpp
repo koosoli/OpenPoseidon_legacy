@@ -7,6 +7,7 @@
 #include <Poseidon/Graphics/Textures/BlockCompression.hpp>
 #include <Poseidon/Graphics/Textures/AlphaShapeAnalysis.hpp>
 #include <Poseidon/Graphics/Textures/DdsImport.hpp> // IsEnfusionRgNormalName (RFG-047)
+#include <Poseidon/Graphics/Textures/HotSourceProofRetirementPolicy.hpp>
 #include <Poseidon/Graphics/Textures/EnfusionTextureName.hpp> // SkipLayerTint (RFG-070)
 #include <Poseidon/Graphics/Textures/PAADecoder.hpp>
 #include <Poseidon/Graphics/Textures/PreparedTextures.hpp>     // worker-prepared mip chains
@@ -991,6 +992,7 @@ uint32_t TextureWgpu::AcquireSlotLease()
 
 int TextureWgpu::Init()
 {
+    _hotSourceProofRetireAttempted = false;
     // A procedural texture has no file behind it: `#(argb,8,8,3)color(...)` is
     // generated from its own name. Nothing in the file-source chain can open one,
     // so without this every such reference fails to upload -- which is why Arma 3's
@@ -1085,6 +1087,42 @@ int TextureWgpu::Init()
     _w = _mipmaps[0]._w;
     _h = _mipmaps[0]._h;
     return 0;
+}
+
+void TextureWgpu::RetireHotSourceProof()
+{
+    static const bool enabled = [] {
+        const char* retire = std::getenv("WGR_OBJECT_STREAM_HOT_SOURCE_PROOF_RETIRE");
+        const char* source = std::getenv("WGR_OBJECT_STREAM_WARM_TEXTURES");
+        const char* jobs = std::getenv("WGR_OBJECT_STREAM_WARM_TEXTURE_JOBS");
+        return retire && std::strcmp(retire, "1") == 0 && source && std::strcmp(source, "1") == 0 &&
+            jobs && std::strcmp(jobs, "1") == 0;
+    }();
+    if (!enabled) return; // No virtual call, snapshot, log or clock on OFF path.
+    if (!render::HotSourceProofRetirementPolicy::Reserve(true, Foundation::IsMainThread(),
+        _gpuHandle, _alphaClass, _src.NotNull(), _dynamic,
+        _tintDelegate.GetRef() != nullptr || _cpuTintView, _hotSourceProofRetireAttempted)) return;
+    // Observe numeric debt only: a temporary GetArchiveSourceBinding copy would itself pin it.
+    const auto before = ArchiveSourceBinding::SnapshotStats();
+    if (!_src->ReleaseArchiveSourceBinding()) return;
+    const auto after = ArchiveSourceBinding::SnapshotStats();
+    static unsigned rows = 0; // Owner-only actual PAC owner drops; process prefix, not coverage.
+    if (rows < 64)
+    {
+        ++rows;
+        const char* sourceName = SourceName();
+        size_t nameBytes = 0;
+        if (sourceName) while (nameBytes < 8192 && sourceName[nameBytes]) ++nameBytes;
+        if (!sourceName || nameBytes == 8192) sourceName = "<bounded-name-refused>";
+        LOG_INFO(Graphics, "Hot source proof retired: source={} ownInitProofDropped=true alphaClass={} gpuUploaded=true liveBindingsBefore={} liveBindingsAfter={} knownBindingBytesBefore={} knownBindingBytesAfter={} aliasDebtMayRemain=true row={} limit=64",
+            sourceName, int(_alphaClass), before.liveBindings, after.liveBindings,
+            before.knownCppBytes, after.knownCppBytes, rows);
+    }
+    else if (rows == 64)
+    {
+        ++rows;
+        LOG_INFO(Graphics, "Hot source proof retired: log truncated after 64 owner drops; aliases may retain debt, no physical-memory or source-freshness proof");
+    }
 }
 
 std::shared_ptr<const ArchiveSourceBinding> TextureWgpu::CurrentArchiveSourceBinding() const
@@ -1243,10 +1281,12 @@ AlphaStats::Kind TextureWgpu::GetAlphaClass()
         _alphaStats = inner->_alphaStats;
         _alphaStatsScanned = inner->_alphaStatsScanned;
         _alphaClass = static_cast<signed char>(kind);
+        RetireHotSourceProof(); // Delegated view does not forward retirement; inner manages its own proof.
         return kind;
     }
     if (_alphaClass >= 0)
     {
+        RetireHotSourceProof();
         return static_cast<AlphaStats::Kind>(_alphaClass);
     }
     // RFG-024: no source yet means NOT YET KNOWN, not opaque.
@@ -1289,6 +1329,7 @@ AlphaStats::Kind TextureWgpu::GetAlphaClass()
         if (std::strncmp(name, "enfa|", 5) == 0)
         {
             _alphaClass = static_cast<int>(AlphaStats::Cutout);
+            RetireHotSourceProof();
             return AlphaStats::Cutout;
         }
     }
@@ -1400,6 +1441,7 @@ AlphaStats::Kind TextureWgpu::GetAlphaClass()
                      _alphaStats.pctClear, _alphaStats.pctPartial);
         }
     }
+    RetireHotSourceProof();
     return kind;
 }
 
@@ -1751,6 +1793,7 @@ uint64_t TextureWgpu::EnsureUploaded()
     }
     if (_gpuHandle || _uploadTried)
     {
+        RetireHotSourceProof();
         return _gpuHandle;
     }
     TerrainColdUploadTiming terrainTiming(TerrainPageUploadTimingsEnabled() ? SourceName() : nullptr);
@@ -2260,6 +2303,7 @@ uint64_t TextureWgpu::EnsureUploaded()
         render::PreparedTextureStore::Instance().MarkUploaded(render::PreparedTextureStore::Key(SourceName()));
     }
     if (terrainTiming.enabled) terrainTiming.uploaded = _gpuHandle != 0;
+    RetireHotSourceProof(); // After Claim/current-binding validation, upload and existing handoff bookkeeping.
     return _gpuHandle;
 }
 

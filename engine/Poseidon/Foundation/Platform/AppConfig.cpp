@@ -707,6 +707,10 @@ void AppConfig::ParseCommandLine(int argc, char** argv)
             "Independently verified original byte length (1..131072)"),CliHelpVisibility::Dev);
         showOption(debugGroup->add_option("--geometry-original-key",_geometryOriginalKey,
             "Externally verified decimal geometry:material:producer:coarse:fine:layout:mapping source key"),CliHelpVisibility::Dev);
+        showOption(debugGroup->add_option("--geometry-pages-surface-manifest",_geometrySurfaceManifest,
+            "Actual producer manifest path and independently expected SHA256 (requires surface certificate opt-in)")->expected(2),CliHelpVisibility::Dev);
+        showOption(debugGroup->add_option("--geometry-pages-surface-certificate",_geometrySurfaceCertificate,
+            "Actual surface sidecar path and independently expected SHA256")->expected(2),CliHelpVisibility::Dev);
 
         showOption(debugGroup->add_option("--test-mission,--test", _testMissionPath,
                                           "Run mission folder or mission.sqm directly and exit"),

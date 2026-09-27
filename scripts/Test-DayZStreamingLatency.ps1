@@ -13,6 +13,8 @@ param(
     [switch]$ArchiveSourceBindings,
     [switch]$WarmTextureJobs,
     [switch]$WarmMaterialPreflight,
+    [switch]$HotSourceProofRetirement,
+    [switch]$RequireHotSourceProofRetirement,
     [switch]$RequireWarmMaterialPreflightUpload,
     [switch]$RequireWarmMaterialStageUpload,
     [switch]$LegacySectionRefresh,
@@ -33,6 +35,8 @@ if ($ColdPaaHandoff) { $ArchiveSourceBindings = $true }
 if ($RequireWarmMaterialStageUpload) { $WarmTextureJobs = $true; $WarmProfile = $true }
 if ($RequireWarmMaterialPreflightUpload) { $WarmMaterialPreflight = $true }
 if ($WarmMaterialPreflight) { $WarmTextureJobs = $true; $WarmProfile = $true }
+if ($RequireHotSourceProofRetirement) { $HotSourceProofRetirement = $true }
+if ($HotSourceProofRetirement) { $WarmTextureJobs = $true; $WarmProfile = $true }
 if ($WarmTextureJobs) { $ArchiveSourceBindings = $true }
 if ($RegistrationQuota -and $AdmissionMode -ne 'Counted') { throw 'Registration quota requires counted admission' }
 if ($PaaPreparationDiagnostics -or $PaaPreparationInflight) { $PackedTextures = $true }
@@ -55,6 +59,8 @@ if (!$env:LOCK_OWNER) {
         if ($ArchiveSourceBindings) { $argv += '-ArchiveSourceBindings' }
         if ($WarmTextureJobs) { $argv += '-WarmTextureJobs' }
         if ($WarmMaterialPreflight) { $argv += '-WarmMaterialPreflight' }
+        if ($HotSourceProofRetirement) { $argv += '-HotSourceProofRetirement' }
+        if ($RequireHotSourceProofRetirement) { $argv += '-RequireHotSourceProofRetirement' }
         if ($RequireWarmMaterialPreflightUpload) { $argv += '-RequireWarmMaterialPreflightUpload' }
         if ($RequireWarmMaterialStageUpload) { $argv += '-RequireWarmMaterialStageUpload' }
         if ($LegacySectionRefresh) { $argv += '-LegacySectionRefresh' }
@@ -113,6 +119,7 @@ $environment = @{
     WGR_GEO_POOL_COPY_DIAGNOSTICS = $(if ($GeometryCopyDiagnostics) { '1' } else { '0' })
     WGR_WATER_BACKEND = '0'
     WGR_OBJECT_STREAM_WARM_MATERIAL_PREFLIGHT = $(if ($WarmMaterialPreflight) { '1' } else { '0' })
+    WGR_OBJECT_STREAM_HOT_SOURCE_PROOF_RETIRE = $(if ($HotSourceProofRetirement) { '1' } else { '0' })
 }
 if ($TerrainPageTimings) {
     $environment.WGR_TERRAIN_PAGE_TIMINGS = '1'
@@ -158,6 +165,8 @@ try {
         coldPaaHandoffEnvironment = [string]$environment.WGR_OBJECT_STREAM_COLD_TEXTURE_HANDOFF
         warmTextureJobs = [bool]$WarmTextureJobs
         warmMaterialPreflight = [bool]$WarmMaterialPreflight
+        hotSourceProofRetirement = [bool]$HotSourceProofRetirement
+        requireHotSourceProofRetirement = [bool]$RequireHotSourceProofRetirement
         requireWarmMaterialPreflightUpload = [bool]$RequireWarmMaterialPreflightUpload
         requireWarmMaterialStageUpload = [bool]$RequireWarmMaterialStageUpload
         renderCallCpuTimings = [bool]$TerrainPageTimings
@@ -322,7 +331,7 @@ try {
     $warmUploadRows = @(Select-String -LiteralPath $log -Pattern 'Warm prepared upload witness: source=(.*?) bytes=(\d+) sourceMemberBytes=(\d+) sourceValidated=true blockUploadSucceeded=true row=(\d+) limit=64')
     $warmUploadObservations = @($warmUploadRows | ForEach-Object {
         $g = $_.Matches[0].Groups
-        [pscustomobject]@{ source = [string]$g[1].Value; bytes = [uint64]$g[2].Value
+        [pscustomobject]@{ lineNumber = $_.LineNumber; source = [string]$g[1].Value; bytes = [uint64]$g[2].Value
             sourceMemberBytes = [uint64]$g[3].Value; row = [uint64]$g[4].Value
             stageFamily = [bool]($g[1].Value -match '(?i)_(nohq|smdi|dtsmdi)\.paa$') }
     })
@@ -358,6 +367,33 @@ try {
         truncated=[bool](Select-String -LiteralPath $log -Pattern 'Warm material source preflight: log truncated after 64' -Quiet)
         scope='Bounded actual owner missing-stage source loads and same-source successful bound worker filename-family upload only; not complete route, slot-role, pixel or time-budget/performance proof'}
     $warmPreflightProof | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $out 'warm-material-preflight-proof.json')
+    $retirementRows = @(Select-String -LiteralPath $log -Pattern 'Hot source proof retired: source=(.*?) ownInitProofDropped=true alphaClass=(\d+) gpuUploaded=true liveBindingsBefore=(\d+) liveBindingsAfter=(\d+) knownBindingBytesBefore=(\d+) knownBindingBytesAfter=(\d+) aliasDebtMayRemain=true row=(\d+) limit=64')
+    $retirementObservations = @($retirementRows | ForEach-Object {
+        $g=$_.Matches[0].Groups
+        [pscustomobject]@{lineNumber=$_.LineNumber; source=[string]$g[1].Value; alphaClass=[uint64]$g[2].Value
+            liveBefore=[uint64]$g[3].Value; liveAfter=[uint64]$g[4].Value
+            knownBefore=[uint64]$g[5].Value; knownAfter=[uint64]$g[6].Value; row=[uint64]$g[7].Value}
+    })
+    if ($retirementObservations.Count -gt 64 -or @($retirementObservations | Where-Object {
+        !$_.source -or $_.alphaClass -gt 2 -or $_.liveBefore -lt 1 -or $_.liveBefore -gt 256 -or
+        $_.knownBefore -lt 1 -or $_.knownBefore -gt 2097152 -or $_.liveAfter -gt $_.liveBefore -or $_.knownAfter -gt $_.knownBefore -or $_.row -lt 1 -or $_.row -gt 64
+    }).Count) {throw 'Malformed bounded hot source proof retirement witness'}
+    $retirementTruncated=[bool](Select-String -LiteralPath $log -Pattern 'Hot source proof retired: log truncated after 64 owner drops;' -Quiet)
+    if (!$HotSourceProofRetirement -and ($retirementObservations.Count -or $retirementTruncated)) {throw 'Hot source proof retirement unexpectedly active in OFF control'}
+    # Preserve the outer upload line while examining prior retirement observations.
+    $laterStageUploads=@($warmUploadObservations | Where-Object {
+        $uploadLine=$_.lineNumber
+        $_.stageFamily -and @($retirementObservations | Where-Object {$_.lineNumber -lt $uploadLine}).Count -gt 0
+    })
+    $hotRetirementPositive=$retirementObservations.Count -gt 0 -and $laterStageUploads.Count -gt 0
+    $hotRetirementProven= !$RequireHotSourceProofRetirement -or $hotRetirementPositive
+    $hotRetirementProof=@{requested=[bool]$HotSourceProofRetirement;required=[bool]$RequireHotSourceProofRetirement
+        positive=[bool]$hotRetirementPositive;observations=$retirementObservations;laterSourceValidatedStageUploads=$laterStageUploads
+        observedLogicalBindingDrops=@($retirementObservations | Where-Object {$_.liveAfter -lt $_.liveBefore}).Count
+        truncated=$retirementTruncated
+        scope='Actual owner Init-proof drops and later successful source-validated bound worker filename-family uploads; retained aliases may keep logical debt. No causal capture-slot, source-freshness, physical-memory or performance proof'}
+    $hotRetirementProof | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $out 'hot-source-proof-retirement-proof.json')
+
     $replayProof = $null
     $replayRows = @(Select-String -LiteralPath $log -Pattern 'PAA LZO replay: hits=(\d+) misses=(\d+) hitOutputBytes=(\d+) storeBytes=(\d+) peakStoreBytes=(\d+) entries=(\d+) evictions=(\d+) oversize=(\d+) admissionFailures=(\d+) budgetBytes=33554432 maxEntries=128')
     if ($PaaLzoReplay) {
@@ -486,7 +522,7 @@ try {
         committedRows=$modelRowCommits.Count;truncatedRows=$modelRowTruncated.Count;
         rows=@($modelRowCommits | ForEach-Object {$_.Line});
         scope='Bounded post-queue-write partial MODEL source ranges; not driver completion, physical memory or performance acceptance'}
-    @{passed = [bool]($warmJobsProven -and $warmStageFamilyProven -and $warmPreflightProven -and $coldAlphaProven -and $coldStartupProven); mode = $Mode; admissionMode = $AdmissionMode; parkedTextureRefill = [bool]$ParkedTextureRefill; lazyTextureGroups = [bool]$LazyTextureGroups; warmProfile = [bool]$WarmProfile; screeningOnly = $true; performanceAccepted = $false; terrainPageTimings = [bool]$TerrainPageTimings
+    @{passed = [bool]($warmJobsProven -and $warmStageFamilyProven -and $warmPreflightProven -and $hotRetirementProven -and $coldAlphaProven -and $coldStartupProven); mode = $Mode; admissionMode = $AdmissionMode; parkedTextureRefill = [bool]$ParkedTextureRefill; lazyTextureGroups = [bool]$LazyTextureGroups; warmProfile = [bool]$WarmProfile; screeningOnly = $true; performanceAccepted = $false; terrainPageTimings = [bool]$TerrainPageTimings
         frameCount = $count; dropped = $dropped; enginePhaseTiming = $phases; baseline = $baseline; returned = $returned
         routeSamples = $routeSamples; postExitHashes = $finalHashes
         renderCallCpuTimings = [bool]$TerrainPageTimings; renderCallCpuTimingProof = $callCpuProof
@@ -497,6 +533,7 @@ try {
         paaPreparationInflightProof = $inflightProof
         registrationQuota = [bool]$RegistrationQuota; registrationQuotaProof = $quotaProof
         archiveSourceBindings = [bool]$ArchiveSourceBindings; archiveSourceBindingProof = $archiveBindings
+        hotSourceProofRetirement = [bool]$HotSourceProofRetirement; hotSourceProofRetirementProof = $hotRetirementProof
         warmMaterialPreflight = [bool]$WarmMaterialPreflight; warmMaterialPreflightProof = $warmPreflightProof
         warmTextureJobs = [bool]$WarmTextureJobs; warmTextureJobProof = $warmJobProof
         requireWarmMaterialStageUpload = [bool]$RequireWarmMaterialStageUpload; warmMaterialStageFamilyProof = $warmStageFamilyProof
@@ -509,6 +546,7 @@ try {
     Write-Output "DayZ latency screening evidence: $out"
     if (!$coldStartupProven) { throw 'NotExercised: no positive observed initial DayZ admission alpha delta and source-validated owned upload; evidence retained' }
     if (!$coldAlphaProven) { throw 'NotExercised: no positive real DayZ route alpha peek delta and source-validated cold owned upload; evidence retained' }
+    if (!$hotRetirementProven) { throw 'NotExercised: no actual owner proof drop and later successful source-validated worker stage upload; evidence retained' }
     if (!$warmPreflightProven) { throw 'NotExercised: no same-source initialized-stage preflight and successful bound worker stage upload; evidence retained' }
     if (!$warmJobsProven) { throw 'Warm preparation did not demonstrate an actual source-validated GPU upload; evidence retained' }
     if (!$warmStageFamilyProven) { throw 'Required bound worker normal/specular filename-family upload not exercised; evidence retained, no material-slot proof claimed' }
