@@ -1963,8 +1963,9 @@ uint64_t TextureWgpu::EnsureUploaded()
                 if (rows < 64)
                 {
                     ++rows;
+                    const char* sourceName = SourceName();
                     LOG_INFO(Graphics, "Warm prepared upload witness: source={} bytes={} sourceMemberBytes={} sourceValidated=true blockUploadSucceeded=true row={} limit=64",
-                        name ? name : "", total, warmPreparedSource->Request().bytes, rows);
+                        sourceName ? sourceName : "", total, warmPreparedSource->Request().bytes, rows);
                 }
                 else if (rows == 64)
                 {
