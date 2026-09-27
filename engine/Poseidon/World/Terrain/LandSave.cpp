@@ -2,6 +2,7 @@
 #include <Poseidon/Core/Application.hpp>
 
 #include <chrono>
+#include <optional>
 
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Terrain/AuthoredObjectIds.hpp>
@@ -2687,6 +2688,109 @@ bool Landscape::LoadOprwModern(const char* path)
 // commentary at the admission loop for why this is time and not a count.
 // WGR_OBJECT_STREAM_MS_PER_UPDATE=0 pins admission to the legacy per-frame batch,
 // so both arms of an A/B come from one binary.
+static bool ObjectStreamWarmProfileEnabled()
+{
+    static const bool on = []
+    {
+        const char* value = std::getenv("WGR_OBJECT_STREAM_WARM_PROFILE");
+        return value && std::strcmp(value, "1") == 0;
+    }();
+    return on;
+}
+
+// A child admission must not reset its parent's inclusive buckets. Cold scopes
+// retain their existing ownership and logging; this owns only an opt-in warm scope.
+class WarmObjectAdmitProfileScope
+{
+    render::ObjectAdmitProfile& _profile;
+    bool _previousActive;
+    bool _opened;
+public:
+    WarmObjectAdmitProfileScope(render::ObjectAdmitProfile& profile, bool enabled)
+        : _profile(profile), _previousActive(profile.active), _opened(enabled && !profile.active)
+    {
+        if (_opened)
+        {
+            _profile.Reset();
+            _profile.active = true;
+        }
+    }
+    bool Opened() const { return _opened; }
+    void Close()
+    {
+        if (_opened)
+        {
+            _profile.active = _previousActive;
+            _opened = false;
+        }
+    }
+    ~WarmObjectAdmitProfileScope() { Close(); }
+};
+
+struct WarmObjectUpdateProfile
+{
+    render::ObjectAdmitProfile sums;
+    uint32_t count = 0;
+    double totalMs = 0.0, geoOwnerMs = 0.0;
+    void Add(const render::ObjectAdmitProfile& p, double total, double geography)
+    {
+        ++count;
+        totalMs += total;
+        geoOwnerMs += geography;
+        sums.sceneMs += p.sceneMs;
+        sums.registerMs += p.registerMs;
+        sums.proxiesMs += p.proxiesMs;
+        sums.meshBuildMs += p.meshBuildMs;
+        sums.meshCreateMs += p.meshCreateMs;
+        sums.sectionMs += p.sectionMs;
+        sums.modelRegisterMs += p.modelRegisterMs;
+        sums.textureReadMs += p.textureReadMs;
+        sums.textureCreateMs += p.textureCreateMs;
+        sums.textureFallbackMs += p.textureFallbackMs;
+        sums.alphaScanMs += p.alphaScanMs;
+        sums.textureWindowWaitMs += p.textureWindowWaitMs;
+        sums.texHeaderLoadMs += p.texHeaderLoadMs;
+        sums.texHeaderLoads += p.texHeaderLoads;
+        sums.meshes += p.meshes;
+        sums.sections += p.sections;
+        sums.textureUploads += p.textureUploads;
+        sums.texturePrepared += p.texturePrepared;
+        sums.proxyModels += p.proxyModels;
+        sums.parkHits += p.parkHits;
+        sums.parkStale += p.parkStale;
+    }
+    void Log(int centerX, int centerZ) const
+    {
+        // Separate process-wide cap from individual slow rows. Many sub-2ms
+        // admissions can form a slow update; every opened warm scope contributes.
+        static uint32_t rows = 0;
+        static bool truncated = false;
+        if (rows < 128)
+        {
+            ++rows;
+            LOG_INFO(World,
+                     "Object stream warm update profile: row={} centre=({}, {}) warmCount={} totalMs={:.3f} "
+                     "geoOwnerMs={:.3f} sceneInclusiveMs={:.3f} registerInclusiveMs={:.3f} "
+                     "proxyInclusiveMs={:.3f} meshBuildMs={:.3f} meshCreateMs={:.3f} "
+                     "sectionInclusiveMs={:.3f} modelFfiMs={:.3f} texReadMs={:.3f} texCreateMs={:.3f} "
+                     "texFallbackMs={:.3f} alphaMs={:.3f} textureWindowWaitSubsetMs={:.3f} "
+                     "texHeaderMs={:.3f} texHeaders={} meshes={} sections={} uploads={} "
+                     "preparedUploads={} gpuChildInstances={} parkHits={} parkStale={}",
+                     rows, centerX, centerZ, count, totalMs, geoOwnerMs, sums.sceneMs, sums.registerMs,
+                     sums.proxiesMs, sums.meshBuildMs, sums.meshCreateMs, sums.sectionMs,
+                     sums.modelRegisterMs, sums.textureReadMs, sums.textureCreateMs,
+                     sums.textureFallbackMs, sums.alphaScanMs, sums.textureWindowWaitMs,
+                     sums.texHeaderLoadMs, sums.texHeaderLoads, sums.meshes, sums.sections,
+                     sums.textureUploads, sums.texturePrepared, sums.proxyModels, sums.parkHits, sums.parkStale);
+        }
+        else if (!truncated)
+        {
+            truncated = true;
+            LOG_INFO(World, "Object stream warm update profile: process summary cap 128 reached; further slow updates omitted");
+        }
+    }
+};
+
 static float ObjectStreamBudgetMs()
 {
     static const float ms = []
@@ -3702,6 +3806,12 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
     double warmMs = 0.0;    // time in ObjectCreate for objects whose model was already resident
     double coldMs = 0.0;    // time in ShapeBank + ObjectCreate for cold models, this update
     const bool asyncOn = _modernObjectPreparer != nullptr && _modernObjectPreparer->Running();
+    const bool warmProfileEnabled = ObjectStreamWarmProfileEnabled();
+    // No initialization of profile buckets, additions, clock calls or heap work
+    // in the default arm; storage becomes a measured diagnostic only when ON.
+    std::optional<WarmObjectUpdateProfile> warmUpdateProfile;
+    if (warmProfileEnabled)
+        warmUpdateProfile.emplace();
 
     // Admission is denominated in TIME, not frames.
     //
@@ -4087,6 +4197,8 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
             // (SceneObjectCreated, RegisterGpuModel, TextureWgpu::EnsureUploaded) accumulates
             // into the buckets while this is active.
             render::ObjectAdmitProfile& admitProfile = render::GObjectAdmitProfile;
+            WarmObjectAdmitProfileScope warmScope(admitProfile, !cold && warmProfileEnabled);
+            const bool warmProfiled = warmScope.Opened();
             if (cold)
             {
                 ++coldAttempted;
@@ -4121,10 +4233,22 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
             {
                 admitted = nullptr;
             }
+            double geoOwnerMs = 0.0;
             if (admitted != nullptr && _geoAccumEnabled)
-                AccumulateGeographyForObject(admitted); // RFG-101
+            {
+                if (warmProfiled)
+                {
+                    const auto geoBegan = std::chrono::steady_clock::now();
+                    AccumulateGeographyForObject(admitted); // RFG-101
+                    geoOwnerMs = std::chrono::duration<double, std::milli>(
+                        std::chrono::steady_clock::now() - geoBegan).count();
+                }
+                else
+                    AccumulateGeographyForObject(admitted); // RFG-101
+            }
             const double totalMs =
                 std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - createStart).count();
+            warmScope.Close();
             if (cold)
             {
                 admitProfile.active = false;
@@ -4197,7 +4321,46 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                          admitProfile.alphaHandoffScans, admitProfile.alphaBlockReadScans, admitProfile.alphaFullDecodeScans);
             }
             else
+            {
                 warmMs += totalMs;
+                if (warmProfiled)
+                    warmUpdateProfile->Add(admitProfile, totalMs, geoOwnerMs);
+                if (warmProfiled && totalMs >= 2.0)
+                {
+                    // Process cap, not a world/sample cap. All measured totals are
+                    // owner CPU time; inclusive scene/register/proxy buckets overlap.
+                    static uint32_t rows = 0;
+                    static bool truncated = false;
+                    if (rows < 128)
+                    {
+                        ++rows;
+                        LOG_INFO(World,
+                                 "Object stream warm profile: row={} id={} model={} admitted={} totalMs={:.3f} "
+                                 "geoOwnerMs={:.3f} sceneInclusiveMs={:.3f} "
+                                 "registerInclusiveMs={:.3f} proxyInclusiveMs={:.3f} meshBuildMs={:.3f} "
+                                 "meshCreateMs={:.3f} sectionInclusiveMs={:.3f} modelFfiMs={:.3f} "
+                                 "texReadMs={:.3f} texCreateMs={:.3f} texFallbackMs={:.3f} alphaMs={:.3f} "
+                                 "textureWindowWaitSubsetMs={:.3f} texHeaderMs={:.3f} texHeaders={} "
+                                 "meshes={} sections={} uploads={} preparedUploads={} gpuChildInstances={} "
+                                 "parkHits={} parkStale={} alphaPartsMs={:.3f}/{:.3f}/{:.3f}/{:.3f}",
+                                 rows, placement.id, (const char*)modelName, admitted != nullptr, totalMs,
+                                 geoOwnerMs, admitProfile.sceneMs, admitProfile.registerMs,
+                                 admitProfile.proxiesMs, admitProfile.meshBuildMs, admitProfile.meshCreateMs,
+                                 admitProfile.sectionMs, admitProfile.modelRegisterMs, admitProfile.textureReadMs,
+                                 admitProfile.textureCreateMs, admitProfile.textureFallbackMs, admitProfile.alphaScanMs,
+                                 admitProfile.textureWindowWaitMs, admitProfile.texHeaderLoadMs,
+                                 admitProfile.texHeaderLoads, admitProfile.meshes, admitProfile.sections,
+                                 admitProfile.textureUploads, admitProfile.texturePrepared, admitProfile.proxyModels,
+                                 admitProfile.parkHits, admitProfile.parkStale, admitProfile.alphaSourceReadMs,
+                                 admitProfile.alphaDecodeMs, admitProfile.alphaHistogramMs, admitProfile.alphaShapeMs);
+                    }
+                    else if (!truncated)
+                    {
+                        truncated = true;
+                        LOG_INFO(World, "Object stream warm profile: process row cap 128 reached; further slow rows omitted");
+                    }
+                }
+            }
             placement.resident = admitted;
             ObserveModernSimulationPlacement(index, admitted);
             if (admitted)
@@ -4262,6 +4425,8 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
     _modernResidentObjectCount = released > _modernResidentObjectCount + created
                                      ? 0
                                      : _modernResidentObjectCount + created - released;
+    if (warmUpdateProfile && warmUpdateProfile->totalMs >= 16.0)
+        warmUpdateProfile->Log(centerX, centerZ);
     // CONVERGENCE. Counted idle updates, not `pending`, and that is the whole lesson of
     // this function: two earlier versions latched on `!_modernObjectResidencyPending` and
     // neither ever fired in a 1500-frame run, because a world whose requested set sits just

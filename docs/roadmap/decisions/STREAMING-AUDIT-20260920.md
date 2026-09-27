@@ -2174,3 +2174,38 @@ alpha83.9ms, total926.4ms; this is before route capture, not the route outlier.
 Target texture/owner work separately from alpha. Lazy per-image bindgroup
 candidate is in progress and not implemented/runtime-proven in installed04a.
 First normal traversal performance fix remains pending; fullplanOPEN/defaultsOFF.
+
+## Sept27 lazy bindings rejected as default, parked refill kept opt-in
+
+58ea13c4 four-Rust lazy single-image bindings pass7 actualGPU tests in1.64s:
+firstuse/reuse/replacement/oldretirement-white behavior. 3640a97e adds defaultOFF
+bounded parked-refill gates (source/static/ref/lease) and tiny unused-layout rename;
+alltarget29/CPP87135 assertions142cases140PASS2SKIP incl4purepark cases pass.
+
+Historical364 lazy-defaultON014820 screening passes clean0 but compared04a
+Counted012836 mean39.757965→42.592059ms worsens, swap p9521.497→46.523/max
+410.252→680.191 and groundmax270.114→389.362 worsen despite p95119.825→117.480.
+Initialpayload and almostallpose counts match; finaltexture/geometry differ.
+Returnpageensure262.763→383.324ms worsens. No measured firstnormalhitchfix or
+broad no-regression acceptance. Preserve mixed evidence; do not promote default.
+
+Same364 parkedON014959 passes both strict actual positive gates:896deferred
+rows/289activation rows, totals8134checks/1451images/0failures/0leaseChangedStale.
+Repeated observations/images are not unique model counts or reclaimed bytes.
+OFF→ON p95117.480→131.149/max957.644→1213.838ms worsen, initmax856.570→
+1103.118. ONpose4pending18014vsOFF19966settled; final geometry691598216vs
+713510204, textures2708507220/2443vs2771417940/2505 differ. Budgetpressure0/
+pressuregrowth0: this proves leased-slot activation, not pressure handling,
+convergence, reclaim, fullsourcefreshness or Nanite. Prototype remainsOFF.
+
+a2c944bc guards Lazy behind WGR_LAZY_TEXTURE_BIND_GROUPS=1 and restores original
+eager group creation order with filledOnceLock. Initial compile fails E0425
+layout because old_unused_layout rename; retained failure,170fde9f repair/build18
+PASS. Default test8listed cases includes7actualGPU/1explicitflagmismatch early
+return (not adapter skip); fresh opt-inLazy1actualGPU PASS. Lazy/Parked startup
+defaultsOFF/Countedunchanged. Installedclean170015926 passes clean0 compatibility:
+877frames median22.989/mean39.331944/p95122.031/p99325.633/max909.544ms;
+final19923settled req0 geometry707679832/texture2796844308/2547/cap1275068416.
+Ordered cache/async/GPU-clock and differing allocated work exclude peak/no-reg/
+performance acceptance. Warm-profile LandSave candidate is in progress,
+not installed. FullplanOPEN; normal performance fix/pressure proof pending.

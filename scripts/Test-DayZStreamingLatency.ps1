@@ -1,6 +1,7 @@
 param(
     [ValidateSet('Disabled', 'Cold')][string]$Mode = 'Disabled',
     [switch]$TerrainPageTimings,
+    [switch]$WarmProfile,
     [ValidateSet('Counted', 'Timed')][string]$AdmissionMode = 'Counted',
     [switch]$ParkedTextureRefill,
     [switch]$LazyTextureGroups,
@@ -16,6 +17,7 @@ if (!$env:LOCK_OWNER) {
     try {
         $argv = @((Join-Path $PSScriptRoot 'with-game-lock.sh'), $shellExe, '-NoProfile', '-File', $PSCommandPath, '-Mode', $Mode, '-AdmissionMode', $AdmissionMode, '-Label', $Label, '-GameDir', $GameDir)
         if ($TerrainPageTimings) { $argv += '-TerrainPageTimings' }
+        if ($WarmProfile) { $argv += '-WarmProfile' }
         if ($ParkedTextureRefill) { $argv += '-ParkedTextureRefill' }
         if ($LazyTextureGroups) { $argv += '-LazyTextureGroups' }
         & 'C:\Program Files\Git\bin\bash.exe' @argv
@@ -62,6 +64,7 @@ if ($TerrainPageTimings) {
     $environment.WGR_TERRAIN_PAGE_TIMINGS = '1'
     $environment.POSEIDON_SLOW_FRAME_TRACE = '1'
 }
+if ($WarmProfile) { $environment.WGR_OBJECT_STREAM_WARM_PROFILE = '1' }
 if ($AdmissionMode -eq 'Timed') { $environment.WGR_OBJECT_STREAM_ADMIT = 'timed' }
 if ($ParkedTextureRefill) {
     $environment.WGR_GPU_MODEL_PARK_REFILL = '1'
@@ -147,6 +150,7 @@ try {
     $null = Send @{cmd = 'exit'}
     if (!$p.WaitForExit(15000) -or $p.ExitCode) { throw 'Owned game failed to exit cleanly' }
     if (Select-String -LiteralPath $log -Pattern 'Out of Memory|Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION' -Quiet) { throw 'Renderer error' }
+    if ($WarmProfile -and !(Select-String -LiteralPath $log -Pattern 'Object stream warm update profile: row=' -Quiet)) { throw 'Warm admission profile did not observe a measured update' }
     $finalHashes = @(Get-FileHash $exe, $dll)
     for ($i = 0; $i -lt $initialHashes.Count; $i++) { if ($initialHashes[$i].Hash -ne $finalHashes[$i].Hash) { throw 'Installed binary changed during screening' } }
     $begins = @(Select-String -LiteralPath $log -Pattern '\[tri\] triPerfCapture begin n=(\d+) dropped=(\d+)')
@@ -177,7 +181,7 @@ try {
         if (!$parkedProof.deferredObserved -or !$parkedProof.activationReuseObserved) { throw 'Parked refill path was not exercised through both deferral and successful activation' }
     }
     $raw | ConvertTo-Json | Set-Content (Join-Path $out 'route-frame-ms.json')
-    @{passed = $true; mode = $Mode; admissionMode = $AdmissionMode; parkedTextureRefill = [bool]$ParkedTextureRefill; lazyTextureGroups = [bool]$LazyTextureGroups; screeningOnly = $true; performanceAccepted = $false; terrainPageTimings = [bool]$TerrainPageTimings
+    @{passed = $true; mode = $Mode; admissionMode = $AdmissionMode; parkedTextureRefill = [bool]$ParkedTextureRefill; lazyTextureGroups = [bool]$LazyTextureGroups; warmProfile = [bool]$WarmProfile; screeningOnly = $true; performanceAccepted = $false; terrainPageTimings = [bool]$TerrainPageTimings
         frameCount = $count; dropped = $dropped; enginePhaseTiming = $phases; baseline = $baseline; returned = $returned
         routeSamples = $routeSamples; postExitHashes = $finalHashes
         parkedRefillProof = $parkedProof
