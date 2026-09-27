@@ -48,16 +48,7 @@ Status MetadataStatus(const State& s, const std::vector<RStringB>& paths, Budget
         if (status != Status::Ready) return status;
         return s.registeredMetadataDirty ? Status::Pending : Status::Ready;
     }
-    bool pending = false;
-    for (const auto& g : s.groups)
-    {
-        if (g.status == State::ModelState::CapacityExceeded) return Status::CapacityExceeded;
-        if (g.status == State::ModelState::Unknown || !g.validRows) return Status::Unknown;
-        if (g.status != State::ModelState::Ready) pending = true;
-        else if (g.memberCount && (!g.shape || g.revision == 0 || g.shape->QueryPolicyRevision() != g.revision))
-            return Status::Unknown;
-    }
-    return pending ? Status::Pending : Status::Ready;
+    return s.ValidateAdmittedMetadata(budget);
 }
 bool WatchMatches(const State& s, const State::Watch& watch)
 {
@@ -77,15 +68,14 @@ Status ObservedStatus(const State& s, const std::vector<RStringB>& paths, Budget
     // No stale incremental prefix can establish a Ready query.
     for (const auto& [index, watch] : s.watches)
     {
-        if (s.activeModelCapacityExceeded && !budget())
-        { ++s.registeredValidationBudgetRefusals; return Status::Pending; }
+        if (!budget())
+        { if (s.activeModelCapacityExceeded) ++s.registeredValidationBudgetRefusals; return Status::Pending; }
         if (!WatchMatches(s, watch)) return Status::Unknown;
     }
     return Status::Ready;
 }
 Status ObservedStatus(const State& s, const std::vector<RStringB>& paths)
 {
-    if (!s.activeModelCapacityExceeded) return ObservedStatus(s, paths, [] { return true; });
     const auto started = std::chrono::steady_clock::now();
     return ObservedStatus(s, paths, [&] { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count() < 2; });
 }
@@ -1068,8 +1058,7 @@ void Landscape::PumpModernSimulationResidency(const SimulationResidencyOwnerBoun
                 // Owner constructors may mutate query state. The same operation
                 // must validate the complete inventory and watchers again before
                 // publishing Ready; a timed-out prefix leaves pending leases.
-                const auto proof = s.activeModelCapacityExceeded ?
-                    ObservedStatus(s, _modernObjectModels, [&] { return elapsed() < 2; }) : Status::Ready;
+                const auto proof = ObservedStatus(s, _modernObjectModels, [&] { return elapsed() < 2; });
                 if (proof == Status::Ready) s.CompleteReplacement(r);
                 else r.status = proof;
             }

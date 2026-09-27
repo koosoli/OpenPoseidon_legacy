@@ -2,6 +2,7 @@
 #include <Poseidon/Foundation/Threads/ThreadAffinity.hpp>
 #include <Poseidon/World/Terrain/SimulationResidencyState.hpp>
 #include <Poseidon/World/Terrain/SimulationResidencyPolicy.hpp>
+#include <Poseidon/World/Terrain/SimulationFireCollision.hpp>
 #include <Poseidon/Asset/Formats/P3D/MLODLoader.hpp>
 #include <Poseidon/World/Model/ShapeAdapter.hpp>
 #include <Poseidon/IO/ParamFile/InitLibraryElement.hpp>
@@ -708,6 +709,86 @@ struct RegisteredPlainInventory
         }
     }
 };
+}
+
+TEST_CASE("Admitted small inventory rechecks actual off-bin geometry before fire can publish contacts", "[streaming-simulation-residency][streaming-simulation-admitted]")
+{
+    RegisteredPlainInventory fixture(2); auto& state = fixture.state;
+    REQUIRE_FALSE(state.activeModelCapacityExceeded);
+    for (size_t i = 0; i < state.groups.size(); ++i)
+    {
+        auto& group = state.groups[i]; group.shape = fixture.external[i];
+        group.radius = group.shape->BoundingSphere(); group.revision = group.shape->QueryPolicyRevision();
+        group.route = SimulationFactoryRoute::Plain; group.sourceValidated = true;
+        group.status = SimulationResidencyState::ModelState::Ready;
+    }
+    REQUIRE(state.ValidateAdmittedMetadata([] { return true; }) == SimulationResidencyStatus::Ready);
+    auto* changed = fixture.external.back().GetRef(); const auto revision = changed->QueryPolicyRevision();
+    auto* geometry = changed->GeometryLevel(); REQUIRE(geometry); REQUIRE(geometry->NPos() > 0);
+    SECTION("unversioned off-bin point escapes parent bounds") { geometry->SetPos(0) = Vector3(1000000, 0, 0); }
+    SECTION("unversioned authored LOD sphere is too small")
+    { geometry->SetMinMax(geometry->Min(), geometry->Max(), geometry->BSphereCenter(), 0); }
+    SECTION("unversioned LOD box no longer encloses its source points")
+    { geometry->MinMax()[0] = Vector3(1000000, 1000000, 1000000); }
+    SECTION("unversioned conform flag invalidates the static query contract")
+    { geometry->SetClip(0, geometry->Clip(0) | ClipLandKeep); }
+    REQUIRE(changed->QueryPolicyRevision() == revision);
+    REQUIRE(state.groups.back().origins.min[0] == 650); // Outside the selected wall's origin cells.
+    REQUIRE(state.ValidateAdmittedMetadata([] { return true; }) == SimulationResidencyStatus::Unknown);
+    Ref<ObjectPlain> wall = new ObjectPlain(fixture.external.front(), 1001); wall->SetType(Primary);
+    CollisionBuffer contacts; CollisionInfo sentinel{}; sentinel.object = wall.GetRef(); sentinel.component = 99; contacts.Add(sentinel);
+    const std::array<Object*, 1> candidates{wall.GetRef()};
+    bool traced = false;
+    const auto status = AppendSimulationFireContacts(contacts, std::span<Object* const>(candidates.data(), candidates.size()), nullptr, nullptr,
+        [&](CollisionBuffer&) { traced = true; }, [&](CollisionBuffer&, Object&) { traced = true; },
+        [&] { return state.ValidateAdmittedMetadata([] { return true; }); }, [] { return true; });
+    REQUIRE(status == SimulationResidencyStatus::Unknown); REQUIRE_FALSE(traced);
+    REQUIRE(contacts.Size() == 1); REQUIRE(contacts[0].object.GetRef() == wall.GetRef()); REQUIRE(contacts[0].component == 99);
+}
+
+TEST_CASE("Small admitted metadata shares one deadline across all referenced source shapes", "[streaming-simulation-residency][streaming-simulation-admitted]")
+{
+    RegisteredPlainInventory fixture(2); auto& state = fixture.state;
+    for (size_t i = 0; i < state.groups.size(); ++i)
+    {
+        auto& group = state.groups[i]; group.shape = fixture.external[i];
+        group.radius = group.shape->BoundingSphere(); group.revision = group.shape->QueryPolicyRevision();
+        group.route = SimulationFactoryRoute::Plain; group.status = SimulationResidencyState::ModelState::Ready;
+    }
+    size_t oneModelVisits = 0;
+    REQUIRE(SimulationResidencyState::AuditRegisteredGeometryNow(*fixture.external.front(), [&] { ++oneModelVisits; return true; }) == SimulationResidencyStatus::Ready);
+    size_t visits = 0;
+    // Allows one complete model plus its group check, then expires at the next
+    // model. A per-model budget reset would incorrectly report this world Ready.
+    REQUIRE(state.ValidateAdmittedMetadata([&] { return ++visits <= oneModelVisits + 1; }) == SimulationResidencyStatus::Pending);
+    REQUIRE(state.ValidateAdmittedMetadata([] { return true; }) == SimulationResidencyStatus::Ready);
+}
+
+TEST_CASE("Audited finite ODOL source cannot certify an undersized authored off-bin parent sphere", "[streaming-simulation-residency][streaming-simulation-admitted]")
+{
+    RegisteredPlainInventory fixture(1);
+    auto source = std::make_shared<Model::Model>(*fixture.prototype);
+    source->sourceFormat = "ODOL"; source->sourceVersion = 7; source->sourcePath = "undersized_offbin.p3d";
+    source->boundingSphere.radius = .001f;
+    source->sourceAudit.producerVersion = 1; source->sourceAudit.sourceRevision = 7;
+    source->sourceAudit.geometryCoverage = Model::SourceGeometryCoverage::DeclaredLodsDecoded;
+    source->sourceAudit.observations = Model::SourceAuditAllObservations;
+    source->sourceAudit.declaredLods = source->sourceAudit.decodedLods = uint32_t(source->lodLevels.size());
+    REQUIRE(SimulationSourceAdmissible(*source));
+    ShapeBank::CpuOnlyLoadScope cpuOnly;
+    Ref<LODShapeWithShadow> shape = fixture.bank.NewFromModel("undersized_offbin.p3d", false, true, source, nullptr);
+    REQUIRE(shape); REQUIRE(shape->BoundingSphere() == .001f);
+    REQUIRE(SimulationShapeAdmissible(*shape)); // Bounds, not missing roles, must refuse.
+    bool outsideParent = false;
+    auto* actual = shape->GeometryLevel(); REQUIRE(actual);
+    for (int i = 0; i < actual->NPos(); ++i)
+        outsideParent |= actual->Pos(i).SquareSize() > shape->BoundingSphere() * shape->BoundingSphere();
+    REQUIRE(outsideParent); // Actual adapter output, not an inferred source-space bound.
+    auto& state = fixture.state; auto& group = state.groups.front();
+    group.shape = shape; group.radius = shape->BoundingSphere(); group.revision = shape->QueryPolicyRevision();
+    group.route = SimulationFactoryRoute::Plain; group.sourceValidated = true; group.status = SimulationResidencyState::ModelState::Ready;
+    group.origins = {{650, 10, 650}, {650, 10, 650}};
+    REQUIRE(state.ValidateAdmittedMetadata([] { return true; }) == SimulationResidencyStatus::Unknown);
 }
 
 TEST_CASE("Complete registered bank metadata can select one strong model from 257 without a full source producer", "[streaming-simulation-residency]")

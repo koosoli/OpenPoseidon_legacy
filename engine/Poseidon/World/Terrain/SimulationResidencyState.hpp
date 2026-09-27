@@ -450,6 +450,34 @@ struct SimulationResidencyState
         return Status::Ready;
     }
     template<class Budget>
+    SimulationResidencyStatus ValidateAdmittedMetadata(Budget&& budget) const
+    {
+        using Status = SimulationResidencyStatus;
+        if (!Foundation::IsMainThread()) return Status::WrongOwner;
+        if (watchCapacityExceeded || stats.status == Status::CapacityExceeded || activeModelCapacityExceeded)
+            return Status::CapacityExceeded;
+        if (inventoryInvalid) return Status::Unknown;
+        if (!inventoryComplete) return Status::Pending;
+        bool pending = false;
+        for (const auto& g : groups)
+        {
+            if (!budget()) return Status::Pending;
+            if (g.status == ModelState::CapacityExceeded) return Status::CapacityExceeded;
+            if (g.status == ModelState::Unknown || !g.validRows) return Status::Unknown;
+            if (g.status != ModelState::Ready) { pending = true; continue; }
+            if (!g.memberCount) continue;
+            if (!g.shape || !g.revision || g.revision != g.shape->QueryPolicyRevision() ||
+                g.radius != g.shape->BoundingSphere() || !SimulationShapeAdmissible(*g.shape)) return Status::Unknown;
+            // Finite source vertices and a parent policy revision are not an
+            // enclosure proof: authored bounds and per-LOD setters can differ.
+            // Re-read every referenced model, including origins outside the query,
+            // under ONE caller-owned deadline. No cached/prefix verdict is Ready.
+            const auto geometry = AuditRegisteredGeometryNow(*g.shape, budget);
+            if (geometry != Status::Ready) return geometry;
+        }
+        return budget() && !pending ? Status::Ready : Status::Pending;
+    }
+    template<class Budget>
     SimulationResidencyStatus ValidateRegisteredMetadata(const ShapeBank& bank, const std::vector<RStringB>& paths,
         const ParamEntry& config, Budget&& budget) const
     {
