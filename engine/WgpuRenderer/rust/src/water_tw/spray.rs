@@ -54,9 +54,33 @@ impl SprayParams {
     }
 }
 
-/// The head buffer's initial contents: head, head at the last budget step, rate, budget.
-pub fn head_init() -> [u32; 4] {
-    [0, 0, 0f32.to_bits(), BUDGET0.to_bits()]
+/// The head buffer's initial contents: head, head at the last budget step, rate, budget, live
+/// particles (even / odd frames), frames updated, unused.
+pub fn head_init() -> [u32; 8] {
+    [0, 0, 0f32.to_bits(), BUDGET0.to_bits(), 0, 0, 0, 0]
+}
+
+/// What the spray diagnostics read back (every ~5 s): particles emitted since the start, the
+/// emission rate (particles / s) and budget, live particles, update frames.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct SprayStats {
+    pub emitted: u32,
+    pub rate: f32,
+    pub budget: f32,
+    pub live: u32,
+    pub frames: u32,
+}
+
+impl SprayStats {
+    pub fn from_head(h: &[u32; 8]) -> Self {
+        Self { emitted: h[0], rate: f32::from_bits(h[2]), budget: f32::from_bits(h[3]), live: h[4].max(h[5]), frames: h[6] }
+    }
+}
+
+enum Readback {
+    Idle,
+    Copied,
+    Mapping(std::sync::Arc<std::sync::atomic::AtomicU8>),
 }
 
 fn mip_chain(data: Vec<u8>, size: u32) -> Vec<(u32, Vec<u8>)> {
@@ -207,6 +231,10 @@ pub struct SprayGpu {
     frame: u32,
     /// spray on this frame (emission and sprites)
     pub on: bool,
+    readback: wgpu::Buffer,
+    rb_state: Readback,
+    /// the latest diagnostics read back (None until the first one arrives)
+    pub stats: Option<SprayStats>,
 }
 
 impl SprayGpu {
@@ -232,7 +260,13 @@ impl SprayGpu {
         let head = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("tw_spray_head"),
             contents: bytemuck::cast_slice(&head_init()),
-            usage: wgpu::BufferUsages::STORAGE,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        });
+        let readback = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("tw_spray_head_readback"),
+            size: 32,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
         });
         let params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("tw_spray_params"),
@@ -280,7 +314,7 @@ impl SprayGpu {
             multiview_mask: None,
             cache: None,
         });
-        Self { ring, head, params, tex_view, pipeline, frame: 0, on: false }
+        Self { ring, head, params, tex_view, pipeline, frame: 0, on: false, readback, rb_state: Readback::Idle, stats: None }
     }
 
     /// The spray block for this frame (Spray.update: the frame seed advances every frame).
@@ -290,6 +324,40 @@ impl SprayGpu {
         self.on = on;
         let p = SprayParams::new(self.frame, dt, time, cam, gain.clamp(0.0, 3.0), intensity.clamp(0.0, 3.0), on);
         queue.write_buffer(&self.params, 0, bytemuck::bytes_of(&p));
+    }
+
+    /// Diagnostics, encoder side: every 300 frames copy the head block for readback.
+    pub fn copy_stats(&mut self, encoder: &mut wgpu::CommandEncoder) {
+        if matches!(self.rb_state, Readback::Idle) && self.on && self.frame % 300 == 0 {
+            encoder.copy_buffer_to_buffer(&self.head, 0, &self.readback, 0, 32);
+            self.rb_state = Readback::Copied;
+        }
+    }
+
+    /// Diagnostics, next frame (the copy has been submitted): map it, and read it once mapped
+    /// (the renderer's per-frame device poll completes the map).
+    pub fn poll_stats(&mut self) {
+        use std::sync::atomic::{AtomicU8, Ordering};
+        match &self.rb_state {
+            Readback::Idle => {}
+            Readback::Copied => {
+                let flag = std::sync::Arc::new(AtomicU8::new(0));
+                let f = flag.clone();
+                self.readback.slice(..).map_async(wgpu::MapMode::Read, move |r| f.store(if r.is_ok() { 1 } else { 2 }, Ordering::Release));
+                self.rb_state = Readback::Mapping(flag);
+            }
+            Readback::Mapping(flag) => match flag.load(Ordering::Acquire) {
+                0 => {}
+                1 => {
+                    let mut h = [0u32; 8];
+                    h.copy_from_slice(bytemuck::cast_slice(&self.readback.slice(..).get_mapped_range()[..32]));
+                    self.readback.unmap();
+                    self.stats = Some(SprayStats::from_head(&h));
+                    self.rb_state = Readback::Idle;
+                }
+                _ => self.rb_state = Readback::Idle,
+            },
+        }
     }
 
     /// The sprites (after the lips, same pass).
@@ -316,6 +384,8 @@ mod tests {
         assert_eq!(p.b[3], 1.0);
         assert!(RING.is_power_of_two());
         assert_eq!(f32::from_bits(head_init()[3]), BUDGET0);
+        let s = SprayStats::from_head(&[100, 0, 5.0f32.to_bits(), 0.5f32.to_bits(), 7, 9, 3, 0]);
+        assert_eq!((s.emitted, s.rate, s.budget, s.live, s.frames), (100, 5.0, 0.5, 9, 3));
     }
 
     #[test]

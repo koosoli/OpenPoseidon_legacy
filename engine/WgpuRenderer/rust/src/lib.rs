@@ -3871,6 +3871,13 @@ impl Renderer {
                         c.sun_diffuse, c.sun_ambient, c.fog_color, c.sun_dir_world
                     ),
                 );
+                if let Some(tw) = self.water.tidewater() {
+                    let (on, stations, stats) = tw.spray_stats();
+                    self.log.log(
+                        log_level::INFO,
+                        &format!("TW spray (W4a): on {on}, breaker stations {stations}, ring {stats:?}"),
+                    );
+                }
             }
         }
         self.water.prepare(

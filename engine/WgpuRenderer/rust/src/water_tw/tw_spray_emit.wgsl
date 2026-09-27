@@ -13,8 +13,9 @@
 // vel: xyz, radius (m) | info: kind, life (s, 0 = dead), water height, tag
 @group(0) @binding(11) var<storage, read_write> sprayBuf: array<vec4<f32>>;
 // [0] ring head, [1] head at the last budget step, [2] emission rate (f32 bits, particles/s),
-// [3] emission budget (f32 bits; see spray_update)
-@group(0) @binding(12) var<storage, read_write> sprayHead: array<atomic<u32>, 4>;
+// [3] emission budget (f32 bits; see spray_update), [4] / [5] live particles counted by the update
+// on even / odd frames (diagnostics, read back by spray.rs), [6] frames updated, [7] unused
+@group(0) @binding(12) var<storage, read_write> sprayHead: array<atomic<u32>, 8>;
 
 // Breakers' `budget`: the emission scale that keeps the ring from wrapping
 fn sprayBudget() -> f32 { return bitcast<f32>(atomicLoad(&sprayHead[3])); }

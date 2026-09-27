@@ -37,7 +37,7 @@ mod fft;
 mod lace;
 mod shore_field;
 mod shore_sim;
-mod spray;
+pub mod spray;
 mod textures;
 
 use std::sync::Arc;
@@ -102,6 +102,16 @@ pub const AVAILABLE: bool = true;
 fn debug_view_override() -> Option<f32> {
     static V: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
     *V.get_or_init(|| std::env::var("WGR_TW_DEBUG").ok().and_then(|v| v.trim().parse::<f32>().ok()))
+}
+
+/// `WGR_TW_SPRAY=<gain>,<intensity>`: overrides the Water tab's breaker spray (W4a), for captures.
+fn spray_override() -> Option<(f32, f32)> {
+    static V: std::sync::OnceLock<Option<(f32, f32)>> = std::sync::OnceLock::new();
+    *V.get_or_init(|| {
+        let v = std::env::var("WGR_TW_SPRAY").ok()?;
+        let mut it = v.split(',').map(|x| x.trim().parse::<f32>().ok());
+        Some((it.next()??, it.next().flatten().unwrap_or(1.0)))
+    })
 }
 
 /// `WGR_TW_GLOW=<scale>`: overrides the Water tab's water glow (W3j), for A/B captures.
@@ -858,9 +868,13 @@ impl Tidewater {
         self.brk.lips_on = p.tidewater_shore[2][3] > 0.0;
         self.update_stations(queue, p.sea_level);
         // W4a: the spray lives where the breakers are (the simulated regions)
-        let spray_on = spray_on(&p) && self.sim.any_active() && self.brk.ns >= 2;
+        let spray_on = (spray_on(&p) || spray_override().is_some_and(|(g, i)| g > 0.0 && i > 0.0))
+            && self.sim.any_active()
+            && self.brk.ns >= 2;
+        self.spray.poll_stats();
         let cp = [cam.cam_pos[0], cam.cam_pos[1], cam.cam_pos[2]];
-        self.spray.set_frame(queue, dt, p.time, cp, p.tidewater_fx[0], p.tidewater_fx[1], spray_on);
+        let (gain, intensity) = spray_override().unwrap_or((p.tidewater_fx[0], p.tidewater_fx[1]));
+        self.spray.set_frame(queue, dt, p.time, cp, gain, intensity, spray_on);
         let mut inputs = FrameInputs {
             detail_offset: self.detail_offset,
             morph: &self.cdlod.morph,
@@ -897,9 +911,15 @@ impl Tidewater {
                 timers.begin(encoder, crate::gpu_timers::Region::TwShoreSim);
                 self.sim.dispatch(encoder);
                 self.brk.dispatch(encoder, self.spray.on);
+                self.spray.copy_stats(encoder);
                 timers.end(encoder, crate::gpu_timers::Region::TwShoreSim);
             }
         }
+    }
+
+    /// Spray diagnostics for the log: on this frame, stations, and the latest readback.
+    pub fn spray_stats(&self) -> (bool, u32, Option<spray::SprayStats>) {
+        (self.spray.on, self.brk.ns, self.spray.stats)
     }
 
     /// What OP's terrain needs for Tidewater's wet sand (None: keep OP's own coast wet band).

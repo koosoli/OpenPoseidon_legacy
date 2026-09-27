@@ -68,7 +68,13 @@ fn sprayBudgetStep(dt: f32) {
 @compute @workgroup_size(64, 1, 1)
 fn spray_update(@builtin(global_invocation_id) gid: vec3<u32>) {
     let i = gid.x;
-    if (i == 0u) { sprayBudgetStep(sprayP.a.x); }
+    let par = sprayP.seed.x & 1u;
+    if (i == 0u) {
+        sprayBudgetStep(sprayP.a.x);
+        // (diagnostics) this frame counts into [4 + parity]; the other slot restarts for the next
+        atomicStore(&sprayHead[5u - par], 0u);
+        atomicAdd(&sprayHead[6], 1u);
+    }
     if (i >= sprayP.seed.y) { return; }
     let n = sprayP.seed.y;
     let info = sprayBuf[2u * n + i];
@@ -120,4 +126,5 @@ fn spray_update(@builtin(global_invocation_id) gid: vec3<u32>) {
     sprayBuf[i] = vec4<f32>(p, age);
     sprayBuf[n + i] = vec4<f32>(v, size);
     sprayBuf[2u * n + i] = vec4<f32>(info.x, life, hw, info.w);
+    if (life > 0.0) { atomicAdd(&sprayHead[4u + par], 1u); }
 }
