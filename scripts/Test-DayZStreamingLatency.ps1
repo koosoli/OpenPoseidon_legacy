@@ -277,7 +277,7 @@ try {
         $paired = [uint32]$m.Groups[5].Value; $status = [int]$m.Groups[6].Value
         if ($enabled -ne [uint32][bool]$TerrainPageTimings -or $paired -gt 1) { throw 'Render-call timing startup gate disagrees with provenance' }
         if ($paired -eq 1) {
-            if ($token -eq 0 -or $state -ne 1 -or $bucketCount -ne 12 -or $status -ne 0) { throw 'Render-call CPU timing pairing metadata invalid' }
+            if ($enabled -ne 1 -or !$TerrainPageTimings -or $token -eq 0 -or $state -ne 1 -or $bucketCount -ne 12 -or $status -ne 0) { throw 'Render-call CPU timing pairing metadata invalid' }
             foreach ($field in @('acquireCpu','presentCpu','setupInclusiveCpu','submitCpu','harvestCpu','encEarlyCpu','encShadowCpu','encMainInclusiveCpu','encTailCpu','encSkyCpu','encDrawCpu','encPostCpu')) {
                 $values = [regex]::Matches($row.Line, ('(?:^|\s)' + $field + '=(-?\d+(?:\.\d+)?)'))
                 if ($values.Count -ne 1) { throw "Render-call CPU timing bucket missing/duplicated: $field" }
