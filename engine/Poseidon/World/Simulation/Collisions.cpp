@@ -900,19 +900,43 @@ void Landscape::GroundCollisionPlane(GroundCollisionBuffer& retVal, Object* with
 
     Plane plane(normal, point);
 
-    float waterY = GetSeaLevel();
+    // TW-WATER W6f: the water a hull point is in, found as GroundCollision finds it -- the
+    // containing water body's level or the sea, and the CPU wave predictor on it. This plane path
+    // compared every point with the flat sea level, and it is the path every tank takes whenever
+    // it is not the one the player is in (prec >= SimulateVisibleNear, Tank.cpp) and cars at a
+    // distance: the BMP in .tw/shots-rough-* heaved the same 0.54 m -- the tide wave alone -- in a
+    // calm sea and a rough one, with no WGR_AMPHIB_WAVE value making any difference, while the
+    // drawn sea washed over its deck.
+    static const bool waveBuoyancy = []
+    {
+        const char* v = std::getenv("WGR_WAVE_BUOYANCY");
+        return !(v && v[0] == '0');
+    }();
 
     Matrix4Val withTrans = withPos.Transform();
     for (int j = 0; j < withShape->NPos(); j++)
     {
         Vector3 jpos = withTrans * withShape->Pos(j);
-        if (jpos.Y() < waterY)
+        float localSeaLevel = _seaLevelWave;
+        float localWaveScale = 1.0f;
+        if (const WaterBody* body = GetWaterBodies().Find(jpos[0], jpos[2]))
+        {
+            localSeaLevel = body->SurfaceLevelAt(jpos[0], jpos[2]);
+            localWaveScale = body->waveScale;
+        }
+        const float waterY = waveBuoyancy ? QueryWaterSurfaceScaled(jpos[0], jpos[2], Glob.time.toFloat(), localSeaLevel,
+                                                                    localWaveScale)
+                                                .height
+                                          : localSeaLevel;
+        const float underWater = waterY - jpos.Y();
+        const float underFlat = localSeaLevel - jpos.Y();
+        if (ShouldReportWaterContact(underWater, underFlat))
         {
             UndergroundInfo& info = retVal.Append();
             info.texture = texture;
             info.obj = nullptr;
-            info.under = waterY - jpos.Y();
-            info.underFlat = info.under;
+            info.under = underWater;
+            info.underFlat = underFlat;
             info.pos = jpos;
             info.pos[1] = waterY;
             info.dX = 0;
