@@ -94,17 +94,19 @@ fn uwDist(uv: vec2<f32>, d: f32) -> f32 {
     return max(dist - uw.cam.w, 0.0);
 }
 
-// medium at the near clip plane (1 water, 0 air); camH: camera height over the water
+// medium at the near clip plane (1 water, 0 air); camH: camera height over the water.
+// (W5a.1, OP) Near the surface: whether this pixel's point ON the lens (the near plane) is below
+// the water there. Tidewater reads the side the rendered surface is seen from, which OP's water
+// pass does not write; the lens point is the same answer (the rendered surface crosses the near
+// plane exactly where it does), and the water material's view side (its triangle's facing)
+// agrees with it, so the split and the surface never disagree.
 fn uwMedium(uv: vec2<f32>, camH: f32) -> f32 {
     var water = select(0.0, 1.0, camH < 0.0);
     if (abs(camH) < UW_STRADDLE) {
-        let d = uwDepthAt(uv);
-        if (d < 1e-7) {
-            water = select(0.0, 1.0, uwDir(uv).y < 0.0);
-        } else {
-            let q = uwRelAt(uv, d) + uw.cam.xyz;
-            water = select(0.0, 1.0, q.y < uwWaterHeight(q.xz));
-        }
+        let dir = uwDir(uv);
+        let fwd = uwDir(vec2<f32>(0.5, 0.5));
+        let q = uw.cam.xyz + dir * (uw.cam.w / max(dot(dir, fwd), 0.1));
+        water = select(0.0, 1.0, q.y < uwWaterHeight(q.xz));
     }
     return water;
 }
@@ -162,8 +164,13 @@ fn fs_uw(in: UwOut) -> @location(0) vec4<f32> {
 
     if (under && uw.sky_e.w > 0.5) {
         let d = uwDepthAt(uv);
-        let dist = uwDist(uv, d);
         let dir = uwDir(uv);
+        var dist = uwDist(uv, d);
+        // (W5a.1, OP) OP's water writes no depth: a ray that meets the surface from below leaves
+        // the water there (Tidewater: the surface's own depth ends it)
+        if (dir.y > 0.01) {
+            dist = min(dist, max(camWater - uw.cam.y, 0.0) / dir.y);
+        }
 
         // (OP) UnderwaterLighting in post: OP lit the submerged scene as if it stood in air;
         // attenuate its light by the water column above it (direct along the refracted sun,
