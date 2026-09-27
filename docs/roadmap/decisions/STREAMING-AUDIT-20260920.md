@@ -2614,3 +2614,35 @@ stillimage only, no traversal/performance acceptance/noPASS.
 Next model-owner capture-purpose source and storefixture are unbuilt/pending,
 excluded. No cap raises, usefulwarmwork/gain/defaultpromotion/performanceacceptance.
 WholeplanOPEN/defaultReadyfalse/newflagsOFF.
+
+## Sept27 model-purpose witnesses: one actual warm upload, no promotion
+
+06c312eb all5targets28stepsPASS; OFF78assertions/5cases, source-only317/3,
+ON203/7, fourworkers17/1, compatibility470/9, Core33/6 allPASS/noSKIP.
+Cleanmatchinginstall07:30 EXE 5F9032D4F7FEE12FFB9E1B5DB638FAC724EE0522A95F7ED1E4E7E22FADC1BA12,
+DLL 952CBA176210BA2539EFF9080E90DEFCA055B5C437BD5DC834D31E774AEEF4FC.
+Actual model-purposeON073015 PASS/clean0/dropped0:3jobs submitted/completed,
+6members/puts,1source-matchedTake/Upload1398016bytes, failed/refused0. Finaljob
+queue/active/metadata/scratch0, but optionalqueue1048bytes remains; peakmetadata
+64392/scratch134348800. PreparedStore still1entry1573776bytes: not whole resource
+convergence0. Source256live/132864knownCppbytes, caprefused856/init-wrapped256.
+Returned19923/required0, simulationDisabled/positivework0. This proves a small
+acceptedupload only, not complete model/proxy/material/readiness/coverage or
+absence of starvation. Next faircapturecursor source is unbuilt/excluded.
+
+ON858frames mean40.093906/median23.122/p95121.468/p99462.920/max985.382ms;
+source-onlyjobsOFF+WarmProfile073223 PASS841frames42.428484/23.398/144.498/
+385.706/1135.439; normalallOFF073347 PASS867frames39.113118/23.256/115.352/
+341.659/992.337; all clean0/dropped0, nearest-rank/usualmedian. JobsOFF has
+allwarmfields/queuestorage0, defaultOFF also source0. Allreturn19923/required0,
+but ONgeometry710374528/textures2745729396/2485, jobsOFF711180832/2759884500/
+2503, default701766356/2672071604/2413 differ. Crucially source-only/jobs0 uses
+BROADcapture whereas ON uses model-purpose: not an isolated same-sourcepurpose
+cost/control. Different gating/work/order/cache prevents causal acceptance;
+ONp99 worse than both controls. Root viewed all3settled localPOI without obvious
+new gaps; stillimage not all-route/fullmap/no-regression proof. Feature remains
+OFF/unpromoted, wholeplanOPEN/defaultReady/performanceAcceptedfalse.
+
+Default model-primary calls retain a cheap disabled RAII/static-flag branch and
+numeric thread_local depth4bytes/thread evenOFF. No capture lease/wrapper/job
+allocation occursOFF; this is not a literal zerooverhead claim.
