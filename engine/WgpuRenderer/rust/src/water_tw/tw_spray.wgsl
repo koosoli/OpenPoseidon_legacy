@@ -240,11 +240,16 @@ fn sprayShade(in: SprayOut) -> vec4<f32> {
     let fadeWater = sat((pos.y - vMisc.y) / (soft * 0.6) + 0.15);
     let aOut = in.vCol.w * shape * fadeScene * fadeWater * (1.0 - farK * 0.4);
     // (OP diagnostics, WGR_TW_SPRAY_DEBUG=<n>: each live sprite as a disc whose brightness is one of
-    // its opacity factors: 1 vertex opacity (x10), 2 shape, 3 soft scene fade, 4 water fade)
+    // its opacity factors: 1 vertex opacity (x10), 2 shape, 3 soft scene fade, 4 water fade; 5-7 below)
     let dbgMode = sprayR.seed.w;
     if (dbgMode > 0u) {
         if (dot(uv, uv) > 1.0) { discard; }
-        let f = select(select(select(fadeWater, fadeScene, dbgMode == 3u), shape, dbgMode == 2u), sat(in.vCol.w * 10.0), dbgMode == 1u);
+        var f = select(select(select(fadeWater, fadeScene, dbgMode == 3u), shape, dbgMode == 2u), sat(in.vCol.w * 10.0), dbgMode == 1u);
+        // 5: particle view depth minus the opaque scene's (0.5 = equal, 1 = 10 m in front),
+        // 6: the opaque scene's view distance / 100 m, 7: the particle's view distance / 100 m
+        if (dbgMode == 5u) { f = sat(0.5 + (posViewZ - sceneZ) / 20.0); }
+        if (dbgMode == 6u) { f = sat(-sceneZ / 100.0); }
+        if (dbgMode == 7u) { f = sat(-posViewZ / 100.0); }
         return vec4<f32>(f, f * 0.2, 1.0 - f, 1.0);
     }
     if (aOut < 0.002) { discard; }
