@@ -52,6 +52,8 @@ add_executable(PoseidonTools
     commands/ShadowCommand.hpp
     commands/TextureProfileCommand.cpp
     commands/TextureProfileCommand.hpp
+    commands/GeometryPageCommand.cpp
+    commands/GeometryPageCommand.hpp
 )
 
 find_package(SDL3 CONFIG REQUIRED)
@@ -84,6 +86,9 @@ else()
             SDL3::SDL3
     )
 endif()
+
+include("${CMAKE_SOURCE_DIR}/cmake/MeshoptimizerClod.cmake")
+target_link_libraries(PoseidonTools PRIVATE OpenPoseidon::MeshoptimizerClod)
 
 target_include_directories(PoseidonTools
     PRIVATE

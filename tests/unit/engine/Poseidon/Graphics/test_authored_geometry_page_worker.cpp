@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <Poseidon/Graphics/Rendering/AuthoredGeometryPageWorker.hpp>
+#include <Poseidon/Graphics/Rendering/GeometryPageControlledClodPilot.hpp>
 #include <chrono>
 #include <cstring>
 #include <thread>
@@ -318,4 +319,46 @@ TEST_CASE("Disk worker shutdown cancels and joins a job held before actual file 
     auto worker=std::make_unique<AuthoredPageWorker>();worker->HoldBeforeDiskOpen(true);
     REQUIRE(worker->SubmitDisk(1,1,input,AuthoredPageWorker::MaxReserved)==AuthoredPageWorker::SubmitStatus::Queued);
     REQUIRE(Until([&]{return worker->Snapshot().active==1;}));worker.reset();
+}
+
+TEST_CASE("Shared controlled Shape pilot has deterministic actual packed source and unchanged helper geometry", "[geometry-page-offline-pilot]")
+{
+    Foundation::CaptureMainThread();ControlledClodSource first,second;
+    REQUIRE(BuildControlledClodSource(first)==ControlledClodStatus::Built);
+    REQUIRE(BuildControlledClodSource(second)==ControlledClodStatus::Built);
+    REQUIRE(first.original.coarse.vertices.size()==4);REQUIRE(first.original.coarse.indices.size()==6);
+    REQUIRE(first.original.fine.vertices.size()==289);REQUIRE(first.original.fine.indices.size()==512*3);
+    REQUIRE(first.original.source==second.original.source);REQUIRE(first.helperSha256==second.helperSha256);
+    REQUIRE(first.helperSha256.size()==64);
+    for(const auto* pair:{&first.original.coarse,&first.original.fine}) {
+        const auto& other=pair==&first.original.coarse?second.original.coarse:second.original.fine;
+        REQUIRE(pair->indices==other.indices);REQUIRE(pair->materials==other.materials);
+        REQUIRE(std::memcmp(pair->vertices.data(),other.vertices.data(),pair->vertices.size()*sizeof(SVertex))==0);
+        for(auto material:pair->materials)REQUIRE(material==0);
+    }
+    ControlledClodSource sentinel;sentinel.original.source.sourceSha256[0]=199;ControlledClodStatus wrong=ControlledClodStatus::Built;
+    std::thread worker([&]{wrong=BuildControlledClodSource(sentinel);});worker.join();
+    REQUIRE(wrong==ControlledClodStatus::WrongOwner);REQUIRE(sentinel.original.source.sourceSha256[0]==199);
+}
+TEST_CASE("Offline actual Shape CLOD producer roundtrips selected disk file using independently held keys", "[geometry-page-offline-pilot][geometry-page-disk-worker]")
+{
+    Foundation::CaptureMainThread();ControlledClodSource source;REQUIRE(BuildControlledClodSource(source)==ControlledClodStatus::Built);
+    ControlledClodCache cache;REQUIRE(BakeControlledClodCache(cache)==ControlledClodStatus::Built);
+    REQUIRE(cache.selected.originalSource==source.original.source);REQUIRE(cache.helperSha256==source.helperSha256);
+    REQUIRE(cache.groups>0);REQUIRE(cache.clusters>0);REQUIRE(cache.groups<=128);REQUIRE(cache.clusters<=64);
+    REQUIRE(cache.selected.selectedGeometry.coarse.indices.size()<cache.selected.selectedGeometry.fine.indices.size());
+    REQUIRE(cache.selected.package.pages.size()<=8);REQUIRE(cache.selected.knownCapacityBytes<=128*1024);
+    std::vector<uint8_t> bytes;REQUIRE(EncodeClodDisk(cache.selected,bytes)==ClodDiskStatus::Encoded);REQUIRE(bytes.size()<=128*1024);
+    DiskWorkerFiles files;files.Write(bytes);auto expected=files.Input(cache.selected);
+    // Expected identities originate in the successful original producer, not in
+    // bytes read from the disk artifact or a self-declared file header.
+    AuthoredPageWorker worker;REQUIRE(worker.SubmitDisk(1,1,expected,AuthoredPageWorker::MaxReserved)==AuthoredPageWorker::SubmitStatus::Queued);
+    REQUIRE(Until([&]{return worker.Snapshot().ready==1;}));auto result=worker.Take(1,1);REQUIRE(result);
+    REQUIRE(result->diskStatus==DiskReadStatus::Read);REQUIRE(result->status==DecodeStatus::Decoded);
+    CheckOriginal(result->decoded,cache.selected.selectedGeometry.fine);result.reset();
+    REQUIRE(Until([&]{return worker.Snapshot().liveJobs==0;}));
+    bytes.back()^=1;files.Write(bytes);
+    REQUIRE(worker.SubmitDisk(2,2,expected,AuthoredPageWorker::MaxReserved)==AuthoredPageWorker::SubmitStatus::Queued);
+    REQUIRE(Until([&]{return worker.Snapshot().ready==1;}));auto changed=worker.Take(2,2);REQUIRE(changed);
+    REQUIRE(changed->diskStatus==DiskReadStatus::Invalid);REQUIRE(changed->decoded.pages.empty());
 }
