@@ -95,8 +95,6 @@ struct CpuMeshSlot
     // so releasing the newest borrower cannot invalidate an older live buffer.
     uint64_t sharedProducer = 0;
     render::SharedRetainedMeshLifetime::Borrower sharedLifetime;
-    // Null when ledger OFF: documented shared_ptr slot footprint, no draw use.
-    std::shared_ptr<render::StandaloneMeshRetirementWitness> standaloneWitness;
 };
 
 // REN-THR-011 -- the back edge a CPU-path vertex buffer needs and must not own outright.

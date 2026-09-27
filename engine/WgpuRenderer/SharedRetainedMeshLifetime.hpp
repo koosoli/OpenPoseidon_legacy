@@ -83,12 +83,18 @@ public:
         bool Release(uint64_t& retirement)
         {
             retirement = 0;
+            if (_diagnosticStandaloneHandled.load(std::memory_order_acquire)) return true;
             if (!_group) return false;
             std::lock_guard lock(_group->_mutex);
             if (_standalone) return false;
             retirement = Detach();
             return true;
         }
+        // Optional attributed destructor took responsibility for standalone
+        // dispatch (including closed-epoch suppression). Does not change the
+        // immutable shared-group association, renderer handle or draw state.
+        void SuppressHandledStandaloneRetirement()
+        { _diagnosticStandaloneHandled.store(true,std::memory_order_release); }
         uint64_t FallBackToStandalone()
         {
             if (!_group) return 0;
@@ -111,7 +117,15 @@ public:
         // change during drain/fallback/destruction, not the shared_ptr itself.
         std::shared_ptr<SharedRetainedMeshLifetime> _group;
         bool _active = false, _standalone = false, _bound = false;
+        std::atomic<bool> _diagnosticStandaloneHandled{false};
     };
+    struct PreDiagnosticBorrowerLayout
+    {
+        std::shared_ptr<SharedRetainedMeshLifetime> group;
+        bool active,standalone,bound;
+    };
+    static_assert(sizeof(std::atomic<bool>)==sizeof(bool), "diagnostic bit must fit original bool padding");
+    static_assert(sizeof(Borrower)==sizeof(PreDiagnosticBorrowerLayout), "diagnostic bit must not grow normal borrower slots");
 private:
     uint64_t ClaimRetirement()
     {

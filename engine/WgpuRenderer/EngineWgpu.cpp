@@ -941,6 +941,13 @@ void LogVbUpdateStats()
     }
 }
 
+// Only the immutable ledger-ON factory creates this slot type. shared_ptr's
+// converting constructor retains the derived deleter; normal slots need no vptr
+// or diagnostic pointer. No worker/draw probes or RTTI classify a base slot.
+struct AttributedCpuMeshSlot final : CpuMeshSlot
+{
+    std::shared_ptr<render::StandaloneMeshRetirementWitness> standaloneWitness;
+};
 class VertexBufferWgpu : public VertexBuffer
 {
   public:
@@ -1051,17 +1058,6 @@ class VertexBufferWgpu : public VertexBuffer
             std::vector<SVertex>().swap(slot->verts);
             std::vector<VertexIndex>().swap(slot->indices);
             return;
-        }
-        if (slot->standaloneWitness)
-        {
-            const auto retirement = slot->standaloneWitness->Release();
-            slot->standaloneWitness->Dispatch(retirement, [&](uint64_t handle) {
-                if (uploader) wgr_uploader_mesh_destroy(uploader, handle);
-                else if (renderer) wgr_mesh_destroy(renderer, handle);
-            });
-            std::vector<SVertex>().swap(slot->verts);
-            std::vector<VertexIndex>().swap(slot->indices);
-            return; // Attributed destructor already consumed it, or closed epoch.
         }
         if (slot->renderer == 0)
         {
@@ -1385,12 +1381,13 @@ class AttributedVertexBufferWgpu final : public VertexBufferWgpu
 {
     std::shared_ptr<render::GeometryOwnerLedger> _ledger;
     const uint64_t _epoch, _borrower;
+    std::shared_ptr<AttributedCpuMeshSlot> _attributedSlot;
 public:
-    AttributedVertexBufferWgpu(WgrRenderer* r, const WgrUploader* up, std::shared_ptr<CpuMeshSlot> s,
+    AttributedVertexBufferWgpu(WgrRenderer* r, const WgrUploader* up, std::shared_ptr<AttributedCpuMeshSlot> s,
         std::shared_ptr<CpuMeshLink> l, int nv, bool dynamic, VBType type,
         std::shared_ptr<render::GeometryOwnerLedger> ledger, uint64_t epoch, uint64_t borrower)
-        : VertexBufferWgpu(r, up, std::move(s), std::move(l), nv, dynamic, type),
-          _ledger(std::move(ledger)), _epoch(epoch), _borrower(borrower) {}
+        : VertexBufferWgpu(r, up, s, std::move(l), nv, dynamic, type),
+          _ledger(std::move(ledger)), _epoch(epoch), _borrower(borrower), _attributedSlot(std::move(s)) {}
     ~AttributedVertexBufferWgpu() override
     {
         // Numeric immutable identity only: this may run outside the owner drain.
@@ -1412,16 +1409,17 @@ public:
             });
         // Metadata publication is outside both lifetime/epoch dispatch locks.
         if (dispatched) _ledger->QueueAllocationRetirementScheduled(_epoch, producer);
-        else if (slot->standaloneWitness)
+        else if (_attributedSlot->standaloneWitness)
         {
-            const auto retirement = slot->standaloneWitness->Release();
-            slot->standaloneWitness->Dispatch(retirement, [&](uint64_t handle) {
+            slot->sharedLifetime.SuppressHandledStandaloneRetirement();
+            const auto retirement = _attributedSlot->standaloneWitness->Release();
+            _attributedSlot->standaloneWitness->Dispatch(retirement, [&](uint64_t handle) {
                 if (uploader) wgr_uploader_mesh_destroy(uploader, handle);
                 else if (renderer) wgr_mesh_destroy(renderer, handle);
                 else return;
                 dispatched = true;
             });
-            if (dispatched) _ledger->QueueAllocationRetirementScheduled(_epoch, slot->standaloneWitness->Producer());
+            if (dispatched) _ledger->QueueAllocationRetirementScheduled(_epoch, _attributedSlot->standaloneWitness->Producer());
         }
     }
 };
@@ -3275,7 +3273,9 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
                     _geometryOwnerLedger->AllocationRetired(_geometryOwnerEpoch, op.cpu->sharedProducer);
                 op.cpu->sharedProducer = 0; // retained mapping is gone: exact original payload fallback
             }
-            if (_geometryOwnerLedger && !op.cpu->standaloneWitness)
+            const auto witness = _geometryOwnerLedger ?
+                static_cast<AttributedCpuMeshSlot*>(op.cpu.get())->standaloneWitness : nullptr;
+            if (_geometryOwnerLedger && !witness)
                 _geometryOwnerLedger->MarkIncomplete(_geometryOwnerEpoch, render::GeometryOwnerLedger::Reason::Capacity);
             GGeometryPoolFill.Note(1, op.cpu->verts.size() * sizeof(SVertex) + op.cpu->indices.size() * sizeof(uint32_t));
             op.cpu->renderer =
@@ -3295,11 +3295,11 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
             // The payload has done its job; a CPU mesh's later uploads go through the
             // uploader, not through the slot. Release rather than clear -- these are full
             // vertex and index arrays and there are thousands of live CPU meshes.
-            if (op.cpu->standaloneWitness)
+            if (witness)
             {
-                const auto retirement = op.cpu->standaloneWitness->Bind(op.cpu->renderer);
+                const auto retirement = witness->Bind(op.cpu->renderer);
                 bool dispatched = false;
-                op.cpu->standaloneWitness->Dispatch(retirement, [&](uint64_t handle) {
+                witness->Dispatch(retirement, [&](uint64_t handle) {
                     wgr_mesh_destroy(_renderer, handle); dispatched = true;
                 });
                 if (dispatched && _geometryOwnerLedger)
@@ -5337,7 +5337,10 @@ VertexBuffer* EngineWgpu::CreateVertexBuffer(const Shape& src, VBType type)
     // place the two backends can diverge" for a road, so a create that cannot fail removes
     // the divergence rather than deferring it.
     _ops.meshCreate++;
-    auto slot = std::make_shared<CpuMeshSlot>();
+    std::shared_ptr<AttributedCpuMeshSlot> attributedSlot;
+    std::shared_ptr<CpuMeshSlot> slot;
+    if (_geometryOwnerLedger) { attributedSlot=std::make_shared<AttributedCpuMeshSlot>(); slot=attributedSlot; }
+    else slot=std::make_shared<CpuMeshSlot>();
     slot->producer = _nextMeshHandle++; // one handle space with the retained meshes
     slot->type = type;
     slot->verts = std::move(verts);
@@ -5361,6 +5364,7 @@ VertexBuffer* EngineWgpu::CreateVertexBuffer(const Shape& src, VBType type)
         WgrRenderer* renderer;
         const WgrUploader* uploader;
         std::shared_ptr<render::GeometryOwnerLedger> ledger;
+        std::shared_ptr<AttributedCpuMeshSlot> attributedSlot;
         uint64_t epoch;
         bool committed = false;
         ~ConstructionRollback()
@@ -5379,14 +5383,15 @@ VertexBuffer* EngineWgpu::CreateVertexBuffer(const Shape& src, VBType type)
             if (slot->sharedLifetime.Release(retirement))
                 slot->sharedLifetime.Dispatch(retirement, [&](uint64_t handle) { dispatch(handle); actual = uploader || renderer; });
             if (actual && ledger) ledger->QueueAllocationRetirementScheduled(epoch, slot->sharedLifetime.Producer());
-            if (slot->standaloneWitness)
+            if (attributedSlot && attributedSlot->standaloneWitness)
             {
+                slot->sharedLifetime.SuppressHandledStandaloneRetirement();
                 actual = false;
-                slot->standaloneWitness->Dispatch(slot->standaloneWitness->Release(), [&](uint64_t handle) { dispatch(handle); actual = uploader || renderer; });
-                if (actual && ledger) ledger->QueueAllocationRetirementScheduled(epoch, slot->standaloneWitness->Producer());
+                attributedSlot->standaloneWitness->Dispatch(attributedSlot->standaloneWitness->Release(), [&](uint64_t handle) { dispatch(handle); actual = uploader || renderer; });
+                if (actual && ledger) ledger->QueueAllocationRetirementScheduled(epoch, attributedSlot->standaloneWitness->Producer());
             }
         }
-    } rollback{slot, _renderer, uploader, _geometryOwnerLedger, _geometryOwnerEpoch};
+    } rollback{slot, _renderer, uploader, _geometryOwnerLedger, attributedSlot, _geometryOwnerEpoch};
     // RFG-088: a STATIC buffer for a level the retained path already holds draws through that
     // mesh. Measured on native Everon at 800 retained models: the retained meshes were 759 MB
     // and the direct-path buffers 880 MB of the same pool, the largest mesh 12.9 MB on both
@@ -5410,7 +5415,7 @@ VertexBuffer* EngineWgpu::CreateVertexBuffer(const Shape& src, VBType type)
     }
     if (_geometryOwnerLedger)
     {
-        if (_standaloneWitnessBudget) slot->standaloneWitness = _standaloneWitnessBudget->Create(slot->producer, _sharedMeshEpoch);
+        if (_standaloneWitnessBudget) attributedSlot->standaloneWitness = _standaloneWitnessBudget->Create(slot->producer, _sharedMeshEpoch);
     }
     // RFG-097 diagnostic: the first large buffers that do NOT share, by type, so "1,572 MB
     // of direct-path buffers on a streamed world" can be attributed to a producer.
@@ -5466,7 +5471,7 @@ VertexBuffer* EngineWgpu::CreateVertexBuffer(const Shape& src, VBType type)
     if (_geometryOwnerLedger)
     {
         const uint64_t borrower = slot->producer;
-        buf.reset(new AttributedVertexBufferWgpu(_renderer, uploader, slot, _cpuMeshLink, nv, dynamic, type,
+        buf.reset(new AttributedVertexBufferWgpu(_renderer, uploader, attributedSlot, _cpuMeshLink, nv, dynamic, type,
                                             _geometryOwnerLedger, _geometryOwnerEpoch, borrower));
     }
     else
@@ -5551,7 +5556,7 @@ Engine::SharedMeshFixtureReport EngineWgpu::ControlSharedMeshLifetimeFixture(Sha
                 if (!fixture.older) throw std::runtime_error("standalone fixture create failed");
                 const auto* buffer = static_cast<const VertexBufferWgpu*>(fixture.older.get());
                 fixture.producer = buffer->slot->producer;
-                fixture.standaloneWitness = buffer->slot->standaloneWitness;
+                fixture.standaloneWitness = static_cast<const AttributedCpuMeshSlot*>(buffer->slot.get())->standaloneWitness;
                 if (!fixture.standaloneWitness) throw std::runtime_error("standalone witness refused");
                 const uint64_t actualKnown = uint64_t(buffer->slot->verts.capacity()) * sizeof(SVertex) +
                     uint64_t(buffer->slot->indices.capacity()) * sizeof(VertexIndex) +

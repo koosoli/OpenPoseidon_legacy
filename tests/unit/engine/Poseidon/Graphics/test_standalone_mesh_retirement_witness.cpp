@@ -75,3 +75,37 @@ TEST_CASE("Standalone witness metadata remains capped until all aliases release"
     alias.reset(); auto replacement=budget->Create(bound+1,epoch); REQUIRE(replacement);
     witnesses.clear(); replacement.reset(); CHECK(budget->Snapshot().bytes==0); CHECK(budget->Snapshot().live==0);
 }
+
+TEST_CASE("Attributed standalone suppression preserves legacy fallback until responsibility taken", "[wgpu][standalone-mesh-witness]")
+{
+    SharedRetainedMeshLifetime::Borrower plain;
+    uint64_t handle=99; CHECK_FALSE(plain.Release(handle)); CHECK(handle==0);
+    // Refused optional witness leaves the original false/standalone branch.
+    CHECK_FALSE(plain.Release(handle));
+    plain.SuppressHandledStandaloneRetirement();
+    CHECK(plain.Release(handle)); CHECK(handle==0); CHECK(plain.Release(handle));
+    CHECK(plain.Producer()==0); // no invented synthetic producer association
+}
+TEST_CASE("Standalone suppression survives pending late bind and closed epoch", "[wgpu][standalone-mesh-witness]")
+{
+    auto epoch=std::make_shared<SharedMeshEpoch>();
+    StandaloneMeshRetirementWitness witness(12,epoch);
+    SharedRetainedMeshLifetime::Borrower legacy;
+    uint64_t ignored=0; CHECK_FALSE(legacy.Release(ignored));
+    legacy.SuppressHandledStandaloneRetirement(); CHECK(witness.Release()==0);
+    size_t dispatched=0;
+    witness.Dispatch(witness.Bind(0x40000000a),[&](uint64_t h) { CHECK(h==0x40000000a); ++dispatched; });
+    CHECK(dispatched==1); CHECK(legacy.Release(ignored)); CHECK(ignored==0);
+    epoch->Close(); CHECK(legacy.Release(ignored));
+    witness.Dispatch(witness.Release(),[&](uint64_t) { ++dispatched; }); CHECK(dispatched==1);
+}
+TEST_CASE("Shared fallback suppression keeps immutable retained association detached", "[wgpu][standalone-mesh-witness]")
+{
+    auto epoch=std::make_shared<SharedMeshEpoch>();
+    auto retained=std::make_shared<SharedRetainedMeshLifetime>(3,epoch);
+    SharedRetainedMeshLifetime::Borrower borrower; REQUIRE(borrower.Attach(retained));
+    CHECK(retained->ReleaseProducer(0)==0); CHECK(borrower.FallBackToStandalone()==0);
+    uint64_t ignored=0; CHECK_FALSE(borrower.Release(ignored));
+    borrower.SuppressHandledStandaloneRetirement(); CHECK(borrower.Release(ignored)); CHECK(ignored==0);
+    CHECK(borrower.Producer()==3); CHECK(retained->SnapshotOwners().boundBorrowers==0);
+}
