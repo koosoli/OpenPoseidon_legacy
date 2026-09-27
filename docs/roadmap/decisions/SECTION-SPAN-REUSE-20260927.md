@@ -48,3 +48,19 @@ Whole streaming/StageG remain OPEN, defaultReady/performanceAccepted false. SECT
 | build/stream-residency/section-reuse-default-screen-20260927-disabled-20260927-153111/returned-settled.png | f236024c3c070eaa4f960d15ca9d55490fcf088a48abc401f3e1823517695e26 |
 
 Actual7d installed pair: EXE `17FD44063015CD778C5B59632690C7A6EBB9C4326C85820C14F7BE1E02A7BE37`, DLL `6B9E7B529AA1346F9E2D16C38B540424FA8031D098DE69DFD3775B28E4C25B7E`; ON/OFF fixture scriptSHA `7E9860E2B1C83FA0284E3ECEE70F5A217635100B3E109AF7816BBEE8F0191725`. Earlier fault runs retain their actual ddda pair and script866 hashes in provenance rather than being relabelled7d.
+
+### Additional same-binary DayZ SECTION ON screen, 15:38
+
+`section-reuse-dayz-on-20260927-disabled-20260927-153836` passed with clean exit0 and shutdown15:39:51.886 on installed7d, script/source HEADbd398893 (documentation-only after7d). Actual startup emitted one SECTION activation,64 committed reuse rows, one bounded truncation notice and no disable. This proves the optional path executes on this DayZ traversal;64 is a capped observation prefix, not total reuse. Returned19923/required0/pendingfalse. Root visually compared the two returned-POI captures and saw no obvious new missing geometry at this location; neither image is a whole-world or native-compatibility reference.
+
+The ON screen had669 frames/drop0, mean52.2914096/median26.508/nearest-rank p95184.432/p99541.259/max992.011ms. The prior same-binary OFF screen had681 frames, mean52.6898649/median24.773/p95148.261/p99511.423/max1181.802ms. Outcomes are mixed, work and cache order differ, and the ON feature is not promoted. Actual ON geometry709926296/cap1275068416, textures2641883028/2390, backend5191781264; differences from OFF are not attributed as reclaimed memory. Both instrumented screens use water0/CPU1/WarmProfileOFF. SECTION remains defaultOFF; LOD reuse is still an unbuilt candidate at this checkpoint.
+
+| Additional artifact | SHA256 |
+| --- | --- |
+| build/stream-residency/section-reuse-dayz-on-20260927-disabled-20260927-153836/result.json | f2e9b37edf05efc579e05cb3dc4121d930c14c37d999766832aa6720e6523b78 |
+| build/stream-residency/section-reuse-dayz-on-20260927-disabled-20260927-153836/provenance.json | c351f8640d6c75638c578da9d12f5d5a8f8b75abd1d6519b96f6c46f1e587ba8 |
+| build/stream-residency/section-reuse-dayz-on-20260927-disabled-20260927-153836/engine.log | a8bd790c73e469e7051f6724a38c12815355c20baf9d846c61481d3f535b0dd3 |
+| build/stream-residency/section-reuse-dayz-on-20260927-disabled-20260927-153836/harness.jsonl | 920d46596ca8936b07771ef841dc1ed0983c78b1e04f5310b99aa04de19b4702 |
+| build/stream-residency/section-reuse-dayz-on-20260927-disabled-20260927-153836/route-frame-ms.json | 33bcacc9b0306af43915e17030f83ab655fb991159f55e813de38c4893f62f49 |
+| build/stream-residency/section-reuse-dayz-on-20260927-disabled-20260927-153836/render-call-cpu-proof.json | c7c7b27135298bf4b967dbce5df1c39f88f287a00a06362bb4da9bef3a9ad77c |
+| build/stream-residency/section-reuse-dayz-on-20260927-disabled-20260927-153836/returned-settled.png | 71bc989aa70947a58e25db6f650f4ad6c1c1cb42c79d7266781185d9d62a12f4 |

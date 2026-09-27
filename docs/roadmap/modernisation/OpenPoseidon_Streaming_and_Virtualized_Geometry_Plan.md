@@ -925,3 +925,9 @@ A single same-build default-feature screen153111 passed/root0, Shutdown15:32:33.
 Whole streaming/StageG remain OPEN, defaultReady/performanceAccepted false. SECTION stays OFF. ResourceGrowth, stage-family upload NotExercised, complete ownership/pressure and broader gameplay gates remain. The next LOD reuse feasibility study has no implementation or runtime acceptance at this checkpoint.
 
 Exact artifact hash manifest: [SECTION-SPAN-REUSE-20260927.md](../decisions/SECTION-SPAN-REUSE-20260927.md).
+
+### Additional same-binary DayZ SECTION ON screen, 15:38
+
+`section-reuse-dayz-on-20260927-disabled-20260927-153836` passed with clean exit0 and shutdown15:39:51.886 on installed7d, script/source HEADbd398893 (documentation-only after7d). Actual startup emitted one SECTION activation,64 committed reuse rows, one bounded truncation notice and no disable. This proves the optional path executes on this DayZ traversal;64 is a capped observation prefix, not total reuse. Returned19923/required0/pendingfalse. Root visually compared the two returned-POI captures and saw no obvious new missing geometry at this location; neither image is a whole-world or native-compatibility reference.
+
+The ON screen had669 frames/drop0, mean52.2914096/median26.508/nearest-rank p95184.432/p99541.259/max992.011ms. The prior same-binary OFF screen had681 frames, mean52.6898649/median24.773/p95148.261/p99511.423/max1181.802ms. Outcomes are mixed, work and cache order differ, and the ON feature is not promoted. Actual ON geometry709926296/cap1275068416, textures2641883028/2390, backend5191781264; differences from OFF are not attributed as reclaimed memory. Both instrumented screens use water0/CPU1/WarmProfileOFF. SECTION remains defaultOFF; LOD reuse is still an unbuilt candidate at this checkpoint.
