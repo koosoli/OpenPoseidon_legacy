@@ -164,6 +164,9 @@ fn vs_tidewater(@location(0) grid: vec2<f32>, @location(1) node: vec4<f32>) -> V
         swashLevel = sw.swashLevel;
     }
 
+    // W6: the boats' wakes (WaterSurface.js: `extra += wakeDisplacement( worldXZ )`)
+    extra += wakeDisplacement(worldXZ);
+
     var total = disp + extra;
     var y = seaLevel + total.y;
     if (nearShore) {
@@ -308,6 +311,13 @@ fn waterSurfaceFragment(lagXZ: vec2<f32>, footprint: f32, depth: f32, vertexFoam
         slopes += g * near;
     }
     let jac = (d.z + 1.0) * (d.w + 1.0);
+    // W6: the boats' wakes (slopes, the foam they carry, the bubbles in the water)
+    {
+        let w = wakeFragment(lagXZ);
+        slopes += w.slopes;
+        foamSum += w.foam;
+        aeration += w.aeration;
+    }
 
     // base normal: large shoreline waves (per-vertex, can overhang) perturbed by FFT detail
     var normal: vec3<f32>;

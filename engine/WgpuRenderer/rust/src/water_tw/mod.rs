@@ -41,6 +41,7 @@ pub mod spray;
 mod underwater;
 mod caustics;
 mod textures;
+mod wake;
 
 use std::sync::Arc;
 
@@ -65,7 +66,12 @@ const TW_WATER_WGSL: &str = concat!(
     include_str!("tw_spray.wgsl"),
     "\n",
     include_str!("tw_caustics.wgsl"),
+    "\n",
+    include_str!("tw_wake.wgsl"),
 );
+
+/// W6: the wake simulation kernels (tw_wake_kernel.wgsl) with the shared declarations.
+const TW_WAKE_KERNEL_WGSL: &str = concat!(include_str!("tw_common.wgsl"), "\n", include_str!("tw_wake_kernel.wgsl"));
 
 /// The breaker crest finder with the spray emitters, and the spray update: shared declarations,
 /// the shore waves, the spray helpers and emitters, the kernel, the update.
@@ -182,9 +188,11 @@ struct TwSurface {
     sim_p1: [f32; 4],
     brk: [f32; 4],
     morph: [[f32; 4]; cdlod::LEVELS],
+    // W6: the wake readers' lanes, 4 per slot (tw_wake.wgsl)
+    wake: [[f32; 4]; wake::SLOTS * 4],
 }
 
-const _: () = assert!(std::mem::size_of::<TwSurface>() == 16 * (17 + cdlod::LEVELS));
+const _: () = assert!(std::mem::size_of::<TwSurface>() == 16 * (17 + cdlod::LEVELS + wake::SLOTS * 4));
 
 /// Whether the shore simulation runs (Water tab, and only once the shore waves have a field).
 /// Breaker spray on (W4a): emission gain and sprite intensity above zero (the caller also needs
@@ -241,6 +249,8 @@ struct FrameInputs<'a> {
     stations: u32,
     // W5b: the caustic layers' tile sizes (fine, broad), m
     caustic_tiles: [f32; 2],
+    // W6: the wake readers' lanes
+    wake: [[f32; 4]; wake::SLOTS * 4],
 }
 
 fn surface_block(p: &WgrWaterParams, f: &FrameInputs<'_>) -> TwSurface {
@@ -284,6 +294,7 @@ fn surface_block(p: &WgrWaterParams, f: &FrameInputs<'_>) -> TwSurface {
         // Breakers: station count, lip opacity (Tidewater `sheet`, Water tab lane)
         brk: [f.stations as f32, p.tidewater_shore[2][3].clamp(0.0, 2.0), f.caustic_tiles[0], f.caustic_tiles[1]],
         morph: *f.morph,
+        wake: f.wake,
     }
 }
 
@@ -403,6 +414,9 @@ pub struct Tidewater {
     linear: bool,
     // W5b caustics
     caustics: caustics::Caustics,
+    // W6 boat wakes
+    wake: wake::WakeGpu,
+    wake_lanes: [[f32; 4]; wake::SLOTS * 4],
 }
 
 impl Tidewater {
@@ -550,6 +564,10 @@ impl Tidewater {
                 // W5b caustics: fine, broad
                 tex(23, D::D2, flt),
                 tex(24, D::D2, flt),
+                // W6 wakes: display (h, slopes, foam), near-field template, aeration
+                tex(25, D::D2Array, flt),
+                tex(26, D::D2Array, flt),
+                tex(27, D::D2Array, flt),
             ],
         });
 
@@ -637,6 +655,7 @@ impl Tidewater {
         let spray = spray::SprayGpu::new(device, queue, camera_layout, &layout, &shader, surface_format, sample_count, linear);
         let uw = underwater::TwUnderwater::new(device, surface_format);
         let caustics = caustics::Caustics::new(device);
+        let wake = wake::WakeGpu::new(device, TW_WAKE_KERNEL_WGSL);
 
         let (verts, indices) = cdlod::grid_mesh();
         let grid_vbuf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -705,6 +724,8 @@ impl Tidewater {
             uw,
             linear: linear > 0.5,
             caustics,
+            wake,
+            wake_lanes: [[0.0; 4]; wake::SLOTS * 4],
         };
         me.rebuild_bind(device);
         me
@@ -741,8 +762,12 @@ impl Tidewater {
                 wgpu::BindGroupEntry { binding: 22, resource: R::TextureView(&self.spray.tex_view) },
                 wgpu::BindGroupEntry { binding: 23, resource: R::TextureView(self.caustics.fine_view()) },
                 wgpu::BindGroupEntry { binding: 24, resource: R::TextureView(self.caustics.broad_view()) },
+                wgpu::BindGroupEntry { binding: 25, resource: R::TextureView(self.wake.display_view()) },
+                wgpu::BindGroupEntry { binding: 26, resource: R::TextureView(self.wake.near_view()) },
+                wgpu::BindGroupEntry { binding: 27, resource: R::TextureView(self.wake.aer_view()) },
             ],
         });
+        self.wake.rebuild_bind(device, &self.heightmap_view, &self.conform_ubo);
         self.brk.rebuild_bind(
             device,
             &self.surface_ubo,
@@ -897,6 +922,8 @@ impl Tidewater {
         let cp = [cam.cam_pos[0], cam.cam_pos[1], cam.cam_pos[2]];
         let (gain, intensity) = spray_override().unwrap_or((p.tidewater_fx[0], p.tidewater_fx[1]));
         self.spray.set_frame(queue, dt, p.time, cp, gain, intensity, spray_on);
+        // W6: the boats' wakes (visual only; see wake.rs)
+        self.wake_lanes = self.wake.update(queue, wake::WakeBoat::from_params(&p), dt, p.time, p.sea_level);
         let mut inputs = FrameInputs {
             detail_offset: self.detail_offset,
             morph: &self.cdlod.morph,
@@ -905,6 +932,7 @@ impl Tidewater {
             dt,
             stations: self.brk.ns,
             caustic_tiles: self.caustics.tiles,
+            wake: self.wake_lanes,
         };
         let block0 = surface_block(&p, &inputs);
         self.detail_offset[0] += block0.wind[0] * block0.sea[2] * 0.7 * dt;
@@ -944,6 +972,12 @@ impl Tidewater {
             // W5b: the caustics follow this frame's FFT
             if !self.bind_dirty {
                 self.caustics.dispatch(encoder);
+            }
+            // W6: the boat wakes (before the water draw reads them)
+            if !self.bind_dirty {
+                timers.begin(encoder, crate::gpu_timers::Region::TwWake);
+                self.wake.dispatch(encoder);
+                timers.end(encoder, crate::gpu_timers::Region::TwWake);
             }
             if self.sim.any_active() && !self.bind_dirty {
                 timers.begin(encoder, crate::gpu_timers::Region::TwShoreSim);

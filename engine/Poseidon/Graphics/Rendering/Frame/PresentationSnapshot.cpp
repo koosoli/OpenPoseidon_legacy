@@ -10,6 +10,7 @@
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/Entities/Vehicles/Air/Helicopter.hpp>
+#include <Poseidon/World/Entities/Vehicles/Misc/Ship.hpp>
 
 #include <Poseidon/Foundation/Framework/Log.hpp>
 
@@ -268,6 +269,69 @@ static void FillPresentationSnapshot(PresentationSnapshot& snap)
             const Helicopter* helicopter = dynamic_cast<const Helicopter*>(GWorld->GetVehicle(i));
             if (helicopter && helicopter != cameraHeli)
                 addRotor(helicopter);
+        }
+
+        // TW-WATER W6: the boats for the wake simulation, nearest the camera first. A boat that
+        // has sunk below its own draft (a wreck on its way down) no longer makes a wake.
+        if (GLandscape)
+        {
+            const float sea = GLandscape->GetSeaLevel();
+            const Vector3 reference = snap.cameraPos;
+            auto addBoat = [&](const Ship* ship)
+            {
+                if (!ship || !ship->GetShape())
+                    return;
+                const auto* shape = ship->GetShape();
+                const Vector3 pos = ship->Position();
+                const Vector3 mn = shape->Min();
+                const Vector3 mx = shape->Max();
+                const float draft = sea - (pos.Y() + mn.Y());
+                if (draft < 0.05f || pos.Y() + mx.Y() < sea - 0.5f)
+                    return;
+                PresentationSnapshot::WakeBoat boat;
+                const Vector3 fwd = ship->Direction();
+                const Vector3 aside = ship->DirectionAside();
+                const float midX = 0.5f * (mn.X() + mx.X());
+                const float midZ = 0.5f * (mn.Z() + mx.Z());
+                boat.x = pos.X() + aside.X() * midX + fwd.X() * midZ;
+                boat.z = pos.Z() + aside.Z() * midX + fwd.Z() * midZ;
+                boat.fwdX = fwd.X();
+                boat.fwdZ = fwd.Z();
+                const Vector3 vel = ship->Speed();
+                boat.velX = vel.X();
+                boat.velZ = vel.Z();
+                boat.thrust = std::clamp(ship->WakeThrust(), 0.0f, 1.0f);
+                // the waterplane is narrower and shorter than the bounding box (rails, bow, motor)
+                boat.halfBeam = std::max(0.5f * (mx.X() - mn.X()) * 0.9f, 0.4f);
+                boat.halfLength = std::max(0.5f * (mx.Z() - mn.Z()) * 0.92f, 1.0f);
+                boat.draft = std::clamp(draft, 0.15f, 5.0f);
+                boat.id = static_cast<uint32_t>((reinterpret_cast<uintptr_t>(ship) >> 4u) & 0x007fffffu) + 2u;
+                boat.driven = ship->Driver() != nullptr;
+                const float dx = boat.x - reference.X();
+                const float dz = boat.z - reference.Z();
+                boat.distance2 = dx * dx + dz * dz;
+                if (snap.wakeBoatCount < PresentationSnapshot::kMaxWakeBoats)
+                {
+                    snap.wakeBoats[snap.wakeBoatCount++] = boat;
+                    return;
+                }
+                int farthest = 0;
+                for (int k = 1; k < snap.wakeBoatCount; ++k)
+                    if (snap.wakeBoats[k].distance2 > snap.wakeBoats[farthest].distance2)
+                        farthest = k;
+                if (boat.distance2 < snap.wakeBoats[farthest].distance2)
+                    snap.wakeBoats[farthest] = boat;
+            };
+            for (int i = 0; i < GWorld->NVehicles(); ++i)
+                addBoat(dynamic_cast<const Ship*>(GWorld->GetVehicle(i)));
+            // the occupied boat is not always in the vehicle list (see the rotor walk above)
+            const Ship* cameraShip = dynamic_cast<const Ship*>(cameraOn);
+            bool listed = false;
+            for (int k = 0; k < snap.wakeBoatCount; ++k)
+                listed |= cameraShip && snap.wakeBoats[k].id ==
+                    static_cast<uint32_t>((reinterpret_cast<uintptr_t>(cameraShip) >> 4u) & 0x007fffffu) + 2u;
+            if (cameraShip && !listed)
+                addBoat(cameraShip);
         }
     }
 

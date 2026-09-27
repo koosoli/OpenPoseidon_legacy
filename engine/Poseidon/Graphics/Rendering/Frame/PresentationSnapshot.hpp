@@ -132,6 +132,24 @@ struct PresentationSnapshot
     int rotorSourceCount = 0;
     RotorSource rotorSources[kMaxRotorSources] = {};
 
+    // TW-WATER W6: the boats nearest the camera, for the Tidewater wake simulation (one
+    // simulated wake per boat; the renderer keeps the ids stable across frames). Hull size from
+    // the shape's bounding box, draft from its bottom against the sea level.
+    struct WakeBoat
+    {
+        float x = 0.0f, z = 0.0f;       // hull centre (world)
+        float fwdX = 0.0f, fwdZ = 1.0f; // heading (world, unnormalised XZ of the model forward)
+        float velX = 0.0f, velZ = 0.0f; // world velocity
+        float thrust = 0.0f;            // 0..1
+        float halfBeam = 1.0f, halfLength = 3.0f, draft = 0.5f;
+        uint32_t id = 0;
+        bool driven = false;
+        float distance2 = 0.0f; // to the camera (selection only)
+    };
+    static constexpr int kMaxWakeBoats = 2;
+    int wakeBoatCount = 0;
+    WakeBoat wakeBoats[kMaxWakeBoats] = {};
+
     // --- Slice S3: local lights --------------------------------------------------------
     // The scored, camera-sorted point/spot light set for the frame, produced by ONE walk
     // of the scene's light list here instead of two walks inside the renderer's NextFrame

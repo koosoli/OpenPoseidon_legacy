@@ -12774,6 +12774,7 @@ const char* EngineWgpu::GetWaterGpuTimingName(int region) const
         "Tidewater: spectrum",             // WGR_GPU_TIMER_TW_OCEAN_SPECTRUM (spectrum-dirty frames)
         "Tidewater: FFT + mips",           // WGR_GPU_TIMER_TW_OCEAN_FFT
         "Tidewater: shore sim",            // WGR_GPU_TIMER_TW_SHORE_SIM
+        "Tidewater: boat wakes",           // WGR_GPU_TIMER_TW_WAKE (W6)
     };
     return (region >= 0 && region < (int)WGR_GPU_TIMER_REGION_COUNT) ? kNames[region] : "";
 }
@@ -13477,6 +13478,34 @@ void EngineWgpu::PublishRendererStats()
                     sumFrame = 0.0;
                     n = 0;
                 }
+            }
+        }
+        // TW-WATER W6: the wake budget, to the log (WGR_TW_WAKE_STATS=1): the boat wakes next to
+        // the rest of the Tidewater compute and the frame, as 120-sample means (-1 = did not run,
+        // counted as 0: a frame with every wake asleep spends nothing).
+        static const bool kSayWake = []
+        {
+            const char* e = std::getenv("WGR_TW_WAKE_STATS");
+            return e != nullptr && std::atoi(e) != 0;
+        }();
+        if (kSayWake && gpuN > (int)WGR_GPU_TIMER_TW_WAKE)
+        {
+            static double wake = 0.0, fft = 0.0, shore = 0.0, draw = 0.0, frame = 0.0;
+            static int n = 0;
+            auto ms = [&](int r) { return gpu[r] >= 0.0f ? (double)gpu[r] : 0.0; };
+            wake += ms(WGR_GPU_TIMER_TW_WAKE);
+            fft += ms(WGR_GPU_TIMER_TW_OCEAN_FFT);
+            shore += ms(WGR_GPU_TIMER_TW_SHORE_SIM);
+            draw += ms(WGR_GPU_TIMER_WATER_DRAW);
+            frame += ms(kFrameGpuRegionTotal);
+            if (++n >= 120)
+            {
+                LOG_INFO(Graphics,
+                         "TW-WAKE GPU ms (120-frame means): wakes {:.3f}, ocean FFT {:.3f}, shore sim {:.3f}, water "
+                         "draw {:.3f}, frame {:.3f}",
+                         wake / n, fft / n, shore / n, draw / n, frame / n);
+                wake = fft = shore = draw = frame = 0.0;
+                n = 0;
             }
         }
     }

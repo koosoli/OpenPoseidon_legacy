@@ -1486,6 +1486,13 @@ struct WgrWaterParams
      * scale of the light scattered inside the water, 0; 1 = Tidewater's formula), w unused (0).
      * sizeof 1200 -> 1216 with the Rust side. */
     WgrVec4 tidewater_fx;
+    /* TW-WATER W6 — the boats for the Tidewater wake simulation (the two nearest the camera;
+     * read only by that backend). Per boat i, three lanes:
+     * [3i]   x, z = hull centre (world), z/w = heading (world XZ of the model forward)
+     * [3i+1] x, z = world velocity, z = thrust 0..1, w = stable id (float-exact, >= 2)
+     * [3i+2] x = half beam m, y = half length m, z = draft m, w = flags (1 present, 2 driven)
+     * sizeof 1216 -> 1312 with the Rust side. */
+    WgrVec4 tidewater_wake[6];
 };
 
 struct WgrWaterCascadeConfig
@@ -1663,7 +1670,8 @@ enum WgrGpuTimerRegion : uint32_t
     WGR_GPU_TIMER_TW_OCEAN_SPECTRUM = 78,
     WGR_GPU_TIMER_TW_OCEAN_FFT = 79,
     WGR_GPU_TIMER_TW_SHORE_SIM = 80, /* TW-WATER W3b: the shore simulation regions */
-    WGR_GPU_TIMER_REGION_COUNT = 81,
+    WGR_GPU_TIMER_TW_WAKE = 81,      /* TW-WATER W6: the boat wake simulations */
+    WGR_GPU_TIMER_REGION_COUNT = 82,
 };
 
 /* PERF-005 - region nesting, and the ONLY correct way to total this array.
@@ -2184,7 +2192,7 @@ static_assert(sizeof(WgrGrassDownwash) == 16, "WgrGrassDownwash layout must matc
 static_assert(sizeof(WgrSmokeShadowBlob) == 32, "WgrSmokeShadowBlob layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrSmokeVolumeParams) == 96, "WgrSmokeVolumeParams layout must match the Rust #[repr(C)] struct");
   static_assert(sizeof(WgrGrassParams) == 4784, "WgrGrassParams layout must match the Rust #[repr(C)] struct");
-static_assert(sizeof(WgrWaterParams) == 1216, "WgrWaterParams layout must match the Rust #[repr(C)] struct");
+static_assert(sizeof(WgrWaterParams) == 1312, "WgrWaterParams layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrWaterNode) == 40, "WgrWaterNode layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrWaterBatch) == 16, "WgrWaterBatch layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrWaterInteractionEvent) == 64 && alignof(WgrWaterInteractionEvent) == 16, "WgrWaterInteractionEvent must match Rust");
