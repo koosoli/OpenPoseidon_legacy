@@ -1,6 +1,7 @@
 
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/World/Entities/Vehicles/TankOrCar.hpp>
+#include <Poseidon/World/Entities/Vehicles/Ground/TrackedWaterResponse.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Network/Network.hpp>
@@ -151,6 +152,11 @@ void TankOrCar::Simulate(float deltaT, SimulationImportance prec)
             smoke->Explode(explosionTime);
         }
         NeverDestroy();
+        // TW-WATER W6-pre: a wreck in the water floods (see TrackedWaterResponse.hpp)
+        if (_waterContact)
+        {
+            _wreckFlood = WreckFloodStep(_wreckFlood, deltaT);
+        }
     }
 
     base::Simulate(deltaT, prec);

@@ -10,6 +10,7 @@
 #include <Poseidon/World/Entities/Weapons/Ballistics.hpp>
 
 #include <Poseidon/World/Entities/Vehicles/Ground/Car.hpp>
+#include <Poseidon/World/Entities/Vehicles/Ground/TrackedWaterResponse.hpp>
 #include <Poseidon/Network/Network.hpp>
 #include <Poseidon/Graphics/Rendering/Draw/SpecLods.hpp>
 
@@ -1173,10 +1174,16 @@ void Car::Simulate(float deltaT, SimulationImportance prec)
                         // first is water is "pushing" everything up - causing some momentum
                         saturateMax(maxUnderWater, info.under);
 
-                        pForce = Vector3(0, GetMass() * 0.5f * info.under * coefNPoints, 0);
+                        // TW-WATER W6-pre: a wreck floods and sinks (TrackedWaterResponse.hpp)
+                        const float waterUnder = _isDead ? WreckImmersion(info.under) : info.under;
+                        pForce = Vector3(0, GetMass() * 0.5f * waterUnder * coefNPoints, 0);
                         if (!Type()->_canFloat)
                         {
                             pForce *= 0.1;
+                        }
+                        if (_isDead)
+                        {
+                            pForce *= WreckBuoyancyScale(_wreckFlood);
                         }
                         pCenter = info.pos - wCenter;
                         torque += pCenter.CrossProduct(pForce);
@@ -1196,7 +1203,7 @@ void Car::Simulate(float deltaT, SimulationImportance prec)
                         pForce[1] = speed[1] * fabs(speed[1]) * 15 + speed[1] * 160;
                         pForce[2] = speed[2] * fabs(speed[2]) * 6;
 
-                        pForce = DirectionModelToWorld(pForce * info.under) * GetMass() * (coefNPoints / 700);
+                        pForce = DirectionModelToWorld(pForce * waterUnder) * GetMass() * (coefNPoints / 700);
 #if ARROWS
                         AddForce(wCenter + pCenter, -pForce * InvMass());
 #endif

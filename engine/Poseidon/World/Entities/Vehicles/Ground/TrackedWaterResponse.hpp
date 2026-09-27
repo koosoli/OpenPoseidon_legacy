@@ -20,4 +20,32 @@ inline float AmphibiousTrackedPropulsionScale(bool canFloat, bool landContact, b
     // authority to make headway through quadratic hull drag and modern waves.
     return canFloat ? 0.16f : 0.1f;
 }
+
+// TW-WATER W6-pre: a destroyed vehicle in the water floods and goes to the bottom (Tank, Car).
+// Before this an amphibious wreck floated, burning, for ever, and any wreck's buoyancy grew with
+// its depth (the displacement springs integrate `under`, which has no ceiling), so a sinking hull
+// found an equilibrium in mid-water instead of reaching the sea bed.
+//  * flooding: from the moment of death in the water the wreck keeps a falling share of its live
+//    buoyancy -- all of it at first, WreckResidualBuoyancy after WreckFloodSeconds -- so it settles,
+//    goes under and sinks rather than dropping like a stone the instant it is hit;
+//  * immersion: a wreck's buoyancy and water drag integrate at most WreckMaxImmersion per contact
+//    point, so once under it sinks at a steady ~3 m/s to the bottom, where the ground holds it.
+constexpr float WreckFloodSeconds = 20.0f;
+constexpr float WreckResidualBuoyancy = 0.1f;
+constexpr float WreckMaxImmersion = 1.5f;
+
+inline float WreckFloodStep(float flood, float deltaT)
+{
+    return std::min(1.0f, flood + std::max(deltaT, 0.0f) / WreckFloodSeconds);
+}
+
+inline float WreckBuoyancyScale(float flood)
+{
+    return 1.0f - (1.0f - WreckResidualBuoyancy) * std::clamp(flood, 0.0f, 1.0f);
+}
+
+inline float WreckImmersion(float under)
+{
+    return std::min(under, WreckMaxImmersion);
+}
 }
