@@ -105,15 +105,24 @@ struct PaaWorkerBank
     std::string prefix, key;
     int index = -1;
     bool oldUseBanks = GUseFileBanks;
-    PaaWorkerBank()
+    explicit PaaWorkerBank(bool coldInitChain = false)
     {
         const auto suffix = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
         prefix = "paa_worker_" + suffix + "\\";
         key = prefix + "member.paa";
         path = std::filesystem::temp_directory_path() / ("paa_worker_" + suffix + ".pbo");
-        const std::vector<char> paa = {3, char(0xFF), 0, 0, 4, 0, 4, 0, 16, 0, 0,
+        std::vector<char> paa = {3, char(0xFF), 0, 0, 4, 0, 4, 0, 16, 0, 0,
             char(0xF0), char(0xF0), char(0xF0), char(0xF0), char(0xF0), char(0xF0), char(0xF0), char(0xF0),
             0, char(0xF8), 0, char(0xF8), 0, 0, 0, 0, 0, 0, 0, 0};
+        if (coldInitChain) {
+            // Existing Init excludes a first mip <=4; this independent raw 8x8 BC2
+            // chain has one counted/retained mip and a real ordinary terminator.
+            const std::array<char,16> block = {char(0xF0),char(0xF0),char(0xF0),char(0xF0),
+                char(0xF0),char(0xF0),char(0xF0),char(0xF0),0,char(0xF8),0,char(0xF8),0,0,0,0};
+            paa = {3,char(0xFF),0,0,8,0,8,0,64,0,0};
+            for (int i=0;i<4;++i) paa.insert(paa.end(),block.begin(),block.end());
+            paa.insert(paa.end(),4,0);
+        }
         Bytes bytes;
         const char member[] = "member.paa";
         bytes.data.insert(bytes.data.end(), member, member + sizeof(member));
@@ -734,8 +743,8 @@ struct ColdPaaSourceFixture
         read.source = source->GetArchiveSourceBinding(); REQUIRE(read.source);
         REQUIRE(Poseidon::GFileBanks[bank.index].MatchesMountedMember("member.paa", read.source->Request()));
         read.magic = 0xff03; read.count = size_t(source->GetMipmapCount());
-        REQUIRE(read.count > 0); REQUIRE(read.count <= 7);
-        for(size_t i=0;i<read.count;++i) read.levels[i] = {mips[i]._w,mips[i]._h,16,size_t(mips[i]._start)};
+        REQUIRE(read.count == 1); REQUIRE(mips[0]._w == 8); REQUIRE(mips[0]._h == 8);
+        for(size_t i=0;i<read.count;++i) read.levels[i] = {mips[i]._w,mips[i]._h,64,size_t(mips[i]._start)};
         REQUIRE(read.Valid());
         } catch (...) { source.reset(); read.source.reset(); Poseidon::GFileServer=previous; GEnableCaching=caching; throw; }
     }
@@ -749,8 +758,8 @@ public:
     explicit ColdPaaTestTexture(Poseidon::render::ColdPaaRead read) : _read(std::move(read)) {}
     bool CaptureColdPaaRead(Poseidon::render::ColdPaaRead& out) const override { out=_read; return out.Valid(); }
     bool IsGpuResident() const override { return false; }
-    void SetMaxSize(int) override {} int AMaxSize() const override { return 4; }
-    int AWidth(int=0) const override {return 4;} int AHeight(int=0) const override {return 4;}
+    void SetMaxSize(int) override {} int AMaxSize() const override { return 8; }
+    int AWidth(int=0) const override {return 8;} int AHeight(int=0) const override {return 8;}
     int ANMipmaps() const override {return 1;} void ASetNMipmaps(int) override {}
     Poseidon::AbstractMipmapLevel& AMipmap(int) override {return _mip;}
     const Poseidon::AbstractMipmapLevel& AMipmap(int) const override {return _mip;}
@@ -782,7 +791,7 @@ void SubmitOriginalColdPaa(Preparer& prep, const Poseidon::render::ColdPaaRead& 
 }
 TEST_CASE("Actual cold conversion owns the Init-bound chain independently of store visibility", "[preparer][cold-paa-handoff]")
 {
-    RequireColdPaaCapability(); SourceFile file; PaaWorkerBank bank; ColdPaaSourceFixture source(bank);
+    RequireColdPaaCapability(); SourceFile file; PaaWorkerBank bank(true); ColdPaaSourceFixture source(bank);
     Preparer prep; prep.Reset(&file.path,1); RequireWorkers(prep);
     auto& store=Poseidon::render::PreparedTextureStore::Instance(); store.Clear(); store.MarkUploaded(bank.key);
     CHECK_FALSE(store.ShouldPrepare(bank.key));
@@ -808,13 +817,14 @@ TEST_CASE("Actual cold conversion owns the Init-bound chain independently of sto
     size_t legacyBytes=0; for(size_t i=0;i<source.read.count;++i) legacyBytes+=source.read.levels[i].bytes;
     std::vector<uint8_t> legacy(legacyBytes,0);std::vector<Poseidon::MipmapRead> legacyReads(source.read.count);
     size_t at=0;for(size_t i=0;i<source.read.count;++i){legacyReads[i]={legacy.data()+at,&source.mips[i],int(i)};at+=source.read.levels[i].bytes;}
+    REQUIRE(legacyBytes == 64);
     REQUIRE(source.source->GetMipmapChain(legacyReads.data(),int(legacyReads.size())));
     CHECK(claimed.blocks==legacy); // Independent ordinary PacLevelMem source reader, not the worker parser oracle.
 
     CHECK(prep.SnapshotStats().coldTexturePrepared==1);
     REQUIRE(Wait([&]{return prep.SnapshotStats().conversionReservedBytes==0;}));
     // A different actual physical archive with matching key/header cannot claim this source.
-    PaaWorkerBank otherBank; ColdPaaSourceFixture other(otherBank);
+    PaaWorkerBank otherBank(true); ColdPaaSourceFixture other(otherBank);
     auto inventory=Poseidon::render::DdsPublicationInventory::Create(1);
     auto payload=Poseidon::render::PrepareColdPaa(source.read,{inventory,0,inventory->Epoch(0)},[]{return false;}); REQUIRE(payload);
     { Poseidon::render::ColdPaaAdmissionScope scope(payload.get()); Poseidon::PAABlockChain refused;
@@ -824,7 +834,7 @@ TEST_CASE("Actual cold conversion owns the Init-bound chain independently of sto
 }
 TEST_CASE("Cold chain cancellation keeps actual worker debt until exit and replacement progresses", "[preparer][cold-paa-handoff]")
 {
-    RequireColdPaaCapability(); SourceFile file,replacement; PaaWorkerBank bank; ColdPaaSourceFixture source(bank);
+    RequireColdPaaCapability(); SourceFile file,replacement; PaaWorkerBank bank(true); ColdPaaSourceFixture source(bank);
     PaaPublicationLatch latch;
     Poseidon::render::DdsPublicationObserver observer{nullptr,&latch,PaaPublicationLatch::Observe};
     Preparer prep(128ull*1024*1024,nullptr,&observer);
@@ -850,7 +860,7 @@ TEST_CASE("Cold chain cancellation keeps actual worker debt until exit and repla
 }
 TEST_CASE("Cold optional Ready-byte refusal preserves ordinary converted geometry", "[preparer][cold-paa-handoff]")
 {
-    RequireColdPaaCapability();SourceFile file;PaaWorkerBank bank;ColdPaaSourceFixture source(bank);
+    RequireColdPaaCapability();SourceFile file;PaaWorkerBank bank(true);ColdPaaSourceFixture source(bank);
     Preparer prep(1);prep.Reset(&file.path,1);RequireWorkers(prep);SubmitOriginalColdPaa(prep,source.read);
     REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::Converted;}));
     CHECK(prep.SnapshotStats().coldTextureRefused>0);CHECK(prep.SnapshotStats().coldTextureReadyBytes==0);
