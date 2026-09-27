@@ -1,11 +1,10 @@
 # Controlled resident CPU CLOD pilot
 
-The repaired build and focused CPU checks passed at the 11:06 installed 86971cce
-checkpoint. CLOD bake and full-DAG-cut decoding link only into Tests; the game
-submits no CLOD output. A separate opt-in authored-LOD resident fixture passed
-runtime checks. Normal defaults, gameplay geometry and streaming workers remain
-unchanged. This is partial Stage G evidence, not completion.
-
+The installed bdb02bb8 explicit resident CLOD pilot now links Renderer and passed
+runtime checks for actual paired-cut submission. Its startup gate remains off by
+default; normal frames perform no bake. This is partial Stage G evidence, not
+completion. Historically, the 11:06 installed 86971cce checkpoint linked CLOD bake
+and cut decoding only into Tests.
 The dependency is upstream meshoptimizer at
 [`9e1f07b159d3cb777f1c67ed31fc11fd117986f4`](https://github.com/zeux/meshoptimizer/tree/9e1f07b159d3cb777f1c67ed31fc11fd117986f4),
 including its `demo/clusterlod.h` example. The minimal CPU dependency retains its
@@ -53,8 +52,9 @@ paired-error cut. The focused suite passed 30,600 assertions in 60 cases without
 skips, including the later curved positive-error fixture requiring distinct fine
 and coarse selected IDs/triangle counts and exact CLOD cut-buffer decoding.
 
-The next CLOD renderer gate is a resident conventional indexed-draw pilot through the
-existing resource queue, with original authored/query geometry retained. It must
+The first resident conventional indexed-draw pilot now passed narrow runtime
+checks. The remaining CLOD renderer gates use the
+existing resource queue, with original authored/query geometry retained. They must
 prove complete cuts, material/attribute equivalence and consistent required passes
 before disk backing, asynchronous requests, eviction/refill or pressure handling.
 Draw counts, actual allocation/staging/in-flight bytes, loading and frame tails
@@ -163,3 +163,66 @@ manifest does not embed their full JSON telemetry or claim future artifact resul
 | build/stream-residency/ownership-returns-20260927-20260927-111103/result.json | ce75f3167d560d731784170142c5ee08365a6c74ad655309bbb8f7cbc03a63a1 |
 | build/stream-residency/ownership-returns-20260927-20260927-111103/returned-settled.png | 010f509d263d362e955f7e9ba1ed8878f6acfceddb44d34b2f2ccb5a4d19484e |
 | build/stream-residency/ownership-returns-20260927-20260927-111103/samples.jsonl | 8b4b16516a24608ba40fa8ed2ad443cb0f1184b92c505a80eeb6410e0bea3237 |
+
+## Actual resident CLOD checkpoint, 11:18 installed bdb02bb8+dirty
+
+The five-target build passed 257 scheduled steps and the focused cut/bake/complete
+representation suite passed 6,058 assertions in 11 cases. The installed label is
+`bdb02bb8+dirty 2026-09-27_11:18 deploy-ps1`: only these documentation changes were
+dirty at deployment, subsequently committed as e928; functional source is bdb.
+Executable SHA256 is
+`5863803b7362dc3bdc427d72e08b6986a314b062e372ce79fa97287a24bc1108`;
+DLL SHA256 is
+`f1cadf9fc4f3bc2a8afcd4e773641fcc1d59ecfe27f948c7ec0d87f70721fea2`.
+
+`clod-resident-draw-20260927-20260927-111920` passed with a clean exit. Explicit
+`BeginClod` synchronously baked a controlled curved grid into four groups and
+12 clusters, then decoded paired coarse/fine cuts of 64/512 triangles. The original
+authored fine representation also has 512 triangles; the separate authored fallback
+has two. Coarse threshold was 0.09406139701604843, fine threshold zero. Three distinct
+models switched on the same renderer instance (1). Eight actual mesh records were
+Present and later Absent. Known stored fixture bytes were 351,017; this excludes
+complete temporary scratch/peak allocation. The one explicit local bake took
+1.1831ms, which is neither an owner-frame budget nor a performance bound.
+CPU helper hashes remained identical. Meshoptimizer is now linked into Renderer
+for this explicit operation, not an automatic frame/worker bake path.
+
+The disabled CLOD control `clod-resident-disabled-20260927-20260927-112035` passed
+with a clean exit and zero fixture payload/meshes. The common publication regression
+`authored-after-clod-20260927-20260927-112142` also passed with a clean exit:
+whole authored 12/48-triangle cuts, three Present-to-Absent records, unchanged helper
+hashes and 83,896 known stored bytes. This later accounting value must not replace
+the earlier 74,992-byte checkpoint retrospectively.
+
+Root viewed actual coarse/fine curved black silhouettes. Main-frame return and
+configured cascades are observed; local shadow was not configured. These views do
+not certify pixel/material or all-pass equivalence. Source witnesses are process-local
+controlled authoring, not mounted-file or arbitrary retail eligibility evidence.
+No async paging, disk backing, eviction/refill, physical reclaim, full ownership,
+performance acceptance or normal-default promotion follows. The full plan remains
+OPEN with performanceAccepted/defaultReady false. Later candidate patches are not
+included in this installed checkpoint.
+
+Actual checkpoint SHA256 manifest:
+
+| Artifact | SHA256 |
+| --- | --- |
+| build/build-clod-draw-pilot-20260927.log | ac525dbdf51c4c8756978025c406e48a97175acea4dd6090b2f347f0d65e8880 |
+| build/test-clod-draw-pilot-20260927.log | 6cbe92e122c61ba99de69ee577abf55c64c7b7865276e2a753626ae283ec83e7 |
+| build/stream-residency/clod-resident-draw-20260927-20260927-111920/coarse.png | e2cbde8192e0f0bb30bdab3c7c91d499365665cc38a9cdfd23210da188e4531e |
+| build/stream-residency/clod-resident-draw-20260927-20260927-111920/engine.log | ba74bb46f3bb2a263e666c3d81e74506ae7bac62dc8c52170e61c7a8011675cf |
+| build/stream-residency/clod-resident-draw-20260927-20260927-111920/fallback.png | 0adfed32d4e2e33217dde6dcb46d44761406957e279c3dc077051ac0feb8720a |
+| build/stream-residency/clod-resident-draw-20260927-20260927-111920/fine.png | 7d419edfe0cb97ffb7f0b688064b42a3434724524843175d6d72ab687b480173 |
+| build/stream-residency/clod-resident-draw-20260927-20260927-111920/harness.jsonl | 2718fbbbba29947f64003393914d0b41e3709bf966da0f2f8729617285f2c88f |
+| build/stream-residency/clod-resident-draw-20260927-20260927-111920/provenance.json | 713aee5a13f0ba32495e146d7708d728ecb035e928a1b6b5bab9351e1e54d54a |
+| build/stream-residency/clod-resident-draw-20260927-20260927-111920/result.json | 307c1b557b51059c04be69068618f21db0f166c9e9468afc08efd3f10d9ee8b6 |
+| build/stream-residency/clod-resident-disabled-20260927-20260927-112035/engine.log | f0b68738e14668c7a2965d78c0bf56aa0d43e39fb11589a4f03c09d3a82f26cf |
+| build/stream-residency/clod-resident-disabled-20260927-20260927-112035/harness.jsonl | 224a65b55c14210fb40c7a0873c2d6bd7ef67a815644bbf6c45c6a0a18114dd7 |
+| build/stream-residency/clod-resident-disabled-20260927-20260927-112035/provenance.json | cb8ee4d6aa50892bb43f7e4ea61e7ff54863602dc03fca514654acaaeffeb55b |
+| build/stream-residency/clod-resident-disabled-20260927-20260927-112035/result.json | 84f6185fda7cade6b79236b6b305ef6001b23c260aa4f8b3ab3f62506676909f |
+| build/stream-residency/authored-after-clod-20260927-20260927-112142/coarse.png | cfb00a36763749ebbeff3bd7c26c51bd98b8ed40ae7314e669f6067e46657b2c |
+| build/stream-residency/authored-after-clod-20260927-20260927-112142/engine.log | 40255486171f037c2c65b61525ed96fe409cee3562428e2e5d3893fab2d91ed8 |
+| build/stream-residency/authored-after-clod-20260927-20260927-112142/fine.png | 805e418a10ed6af04a4419e947418eecf3b82e96528cc3fdceab4f865ed93da2 |
+| build/stream-residency/authored-after-clod-20260927-20260927-112142/harness.jsonl | 7b820567b701148d3ffcfeb1d5ba8fefe0d32e3794ec94a8a827232e47215285 |
+| build/stream-residency/authored-after-clod-20260927-20260927-112142/provenance.json | 141457a47b30f62a2e98159df1bd8aebe339d502982e0e636c2976cf942f37b2 |
+| build/stream-residency/authored-after-clod-20260927-20260927-112142/result.json | e901667b12862a6ff5a2280a6159b9d2972c923b739fdd7cd6b478c4cef0c4ec |

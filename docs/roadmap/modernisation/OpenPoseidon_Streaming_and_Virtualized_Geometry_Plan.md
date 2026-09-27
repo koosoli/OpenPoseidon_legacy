@@ -273,7 +273,7 @@ Keep terrain-detail streaming as its own analysis. A heightfield collision sampl
 The repaired five-target build and focused suite passed 30,600 assertions in
 60 cases without skips, including bounded source export, page/whole-representation
 decoding, CPU CLOD bake and exact cut decoding. The initial narrowing fixture
-fact-count build failure was repaired by 8b42afdb. Meshoptimizer links only into
+fact-count build failure was repaired by 8b42afdb. At this checkpoint meshoptimizer linked only into
 Tests. The actual game fixture uses programmatically authored box Shapes rather
 than meshoptimizer output or arbitrary retail assets. It proved fixed-instance
 whole 12/48-triangle switching, 74,992 logical bytes/three mesh records, unchanged
@@ -294,6 +294,21 @@ bounded inter-route diagnostic intervals remain part of the test conditions.
 Stage G and the whole plan remain OPEN; experimental paging/CLOD stays off by
 default, with complete ownership, physical reclaim and pressure gates unresolved.
 
+**Later resident CLOD checkpoint, installed bdb02bb8+dirty at 11:18.**
+The dirty label records documentation only; functional source is exact bdb.
+Five-target build passed 257 scheduled steps; focused tests passed 6,058 assertions
+in 11 cases. Explicit `BeginClod` now links Renderer and submits actual paired
+coarse/fine 64/512-triangle cuts from four groups/12 clusters, with an independent
+authored two-triangle fallback. Eight mesh records were Present then Absent,
+three models switched on one instance, and CPU helper hashes remained unchanged.
+Known stored bytes were 351,017, excluding full scratch/peak; one explicit local
+bake took 1.1831ms without a hard latency guarantee. Disabled CLOD and common
+12/48 authored publication regressions passed with clean exits (latter 83,896
+known stored bytes). Root's curved black silhouettes do not prove material/pixel
+or all-pass equivalence. Normal frames perform no bake; the startup fixture gate
+remains off. Disk backing, async paging, eviction/refill, complete ownership,
+physical reclaim and performance/default acceptance remain unresolved. Actual
+build/runtime hashes are linked in the CLOD pilot decision above.
 **27 September 2026 refinement following the owner's RTX Mega Geometry question.**
 Keep the current shared streamer and bounded authored-LOD page prototype. For
 the later continuous-LOD bake, evaluate pinned upstream meshoptimizer

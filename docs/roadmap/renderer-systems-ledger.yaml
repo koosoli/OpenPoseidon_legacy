@@ -1029,7 +1029,7 @@ unbuilt_candidates: >-
       were Present then Absent; disabled control allocated no fixture payload.
       Black-box silhouette captures do not prove material or all-pass parity.
       Pinned meshoptimizer CPU CLOD bake/cut decoding passed focused unit tests
-      but links only into Tests and is not the authored runtime fixture.
+      but at that checkpoint linked only into Tests, separate from authored runtime.
       Standalone/shared private-copy lifetime regressions passed; no physical
       free, complete ownership, performance or default-ready acceptance follows.
       Fresh ownership-returns 111103 passed unchanged convergence thresholds,
@@ -1039,6 +1039,14 @@ unbuilt_candidates: >-
       The earlier +15,338,464-byte failure is retained; extra diagnostic
       inter-route intervals and one repeat do not prove a general memory bound.
       The streaming plan stays OPEN, with experimental features off by default.
+      Later bdb02bb8+dirty (documentation-only dirt) explicit BeginClod runtime
+      passed: paired 64/512-triangle cuts, fallback2, 4 groups/12 baked clusters,
+      351017 known stored bytes, 8 mesh records Present then Absent, same instance
+      and CPU helper hashes. Disabled CLOD and authored 12/48 regressions passed.
+      Local bake 1.1831ms excludes hard latency/scratch guarantees; curved black
+      silhouettes do not prove material/all-pass equivalence. CLOD now links
+      Renderer only for explicit opt-in operation, with no normal-frame bake.
+      Defaults remain off; no paging/reclaim/performance or default acceptance.
       See decisions/GEOMETRY-CLOD-PILOT-20260927.md for hashes and narrow scope.
     production_call_sites:
       - file: engine/Poseidon/World/Terrain/LandSave.cpp
