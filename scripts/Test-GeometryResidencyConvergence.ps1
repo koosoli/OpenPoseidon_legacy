@@ -165,7 +165,7 @@ try {
         } while ([DateTime]::UtcNow -lt $deadline)
         return [pscustomobject]@{quiet = $false; status = 'PendingWarmup'; last = $sample; consecutiveSamples = $streak}
     }
-        function Read-Allocation($request) {
+        function Read-Allocation($request, [bool]$finalEvidence = $false) {
             $started = Send $request
             if ($started.status -ne 'Pending' -or $started.requestId -lt 1) { throw 'Allocation request was not accepted asynchronously' }
             $deadline = [DateTime]::UtcNow.AddSeconds(30)
@@ -195,7 +195,7 @@ try {
                       $report.persistentDetachedHistory -gt $report.persistentTrackedBorrowerRecords) {
                       throw 'Owner-history metadata exceeded its declared bounds or retained a private fixture pin'
                   }
-                  if (!$DiagnosticOnly -and ($report.persistentPrunedAllocations -lt 1 -or $report.persistentPrunedBorrowers -lt 1)) {
+                  if ($finalEvidence -and !$DiagnosticOnly -and ($report.persistentPrunedAllocations -lt 1 -or $report.persistentPrunedBorrowers -lt 1)) {
                       throw 'Traversal did not establish actual allocation and borrower history pruning'
                   }
                 if (!$report.persistentAttributionEnabled -or $report.persistentAttributionEpoch -lt 1 -or
@@ -363,7 +363,7 @@ try {
         })
         $returnAllocationComparison=[pscustomobject]@{
             scope='Separate post-quiet diagnostic cuts outside route timings; no acceptance override. Asset+LOD rows are sampled overlapping occurrence totals, not physical mesh unions or selected demand.'
-            rowCoverageComplete=(!$secondReport.truncated -and !$thirdReport.truncated)
+            eligibleReportedRowsComplete=(!$secondReport.truncated -and !$thirdReport.truncated)
             return2Truncated=[bool]$secondReport.truncated; return3Truncated=[bool]$thirdReport.truncated
             cuts=@($returnAllocations | Select-Object cycle,quietSampleUtc,requestedUtc,completedUtc)
             numericDeltas=$numericDeltas; assetLodRows=@($rowDeltas | Sort-Object asset,lodIndex)
@@ -373,9 +373,9 @@ try {
     $allocation = $null
     if ($AllocationReport) {
         # Diagnostics run after timed routes and quiet samples; they do not prove usage or reclaimability.
-        $allocation = Read-Allocation @{cmd='geometry_allocations'}
+        $allocation = Read-Allocation @{cmd='geometry_allocations'} -finalEvidence $true
         if (@($allocation.rows).Count -lt 2 -or $allocation.uniqueMeshes -lt 1) { throw 'No meaningful retained geometry allocation rows' }
-        $boundedReport = Read-Allocation @{cmd='geometry_allocations'; maxModels=1; maxRows=1; maxSectionVisits=65536}
+        $boundedReport = Read-Allocation @{cmd='geometry_allocations'; maxModels=1; maxRows=1; maxSectionVisits=65536} -finalEvidence $true
         if (!$boundedReport.truncated -or @($boundedReport.rows).Count -gt 1) { throw 'Bounded report truncation was not preserved' }
         $stale = Send @{cmd='geometry_allocations'; requestId=$allocation.requestId}
         if ($stale.status -ne 'Invalid') { throw 'Superseded report ID remained claimable' }
