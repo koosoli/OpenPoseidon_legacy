@@ -60,8 +60,6 @@ use crate::sky::Sky;
 use crate::terrain::Terrain;
 use crate::textures::{SharedTextures, TextureData, TextureFormat};
 use crate::tonemap::Tonemap;
-use crate::underwater::Underwater;
-use crate::water::Water;
 use crate::water_backend::WaterBackend;
 use crate::water_visibility::WaterVisibility;
 
@@ -1812,39 +1810,22 @@ impl Renderer {
                 .allowed_usages
                 .contains(wgpu::TextureUsages::STORAGE_BINDING)
         });
-        let water = Water::new(
-            &device,
-            &queue,
-            gfx3d.camera_layout(),
-            color_format,
-            sample_count,
-            &mut composer,
-            fft_storage_supported,
-        );
-        if water.fft_enabled() {
-            log.log(
-                log_level::INFO,
-                &format!(
-                    "Hydro FFT ocean enabled: initial {0}x{0} cascade maps; live tiers 256/512/1024",
-                    water::FFT_RESOLUTION
-                ),
-            );
-        } else {
-            log.log(
-                log_level::WARN,
-                "Hydro FFT ocean unavailable; using the analytic Gerstner fallback",
-            );
-        }
         let tonemap = hdr_enabled.then(|| Tonemap::new(&device, config.format));
-        let underwater = Underwater::new(&device, color_format, &mut composer, fft_storage_supported);
-        let water = WaterBackend::new_current_op(
-            water,
-            underwater,
-            gfx3d.camera_layout(),
-            color_format,
-            sample_count,
-            fft_storage_supported,
+        let water = WaterBackend::new(
+            &device, &queue, gfx3d.camera_layout(), color_format, sample_count,
+            &mut composer, fft_storage_supported,
         );
+        log.log(log_level::INFO, &format!("Water backend: initial {}", water.kind().label()));
+        if let Some(op) = water.current_op() {
+            if op.water.fft_enabled() {
+                log.log(log_level::INFO, &format!(
+                    "Hydro FFT ocean enabled: initial {0}x{0} cascade maps; live tiers 256/512/1024",
+                    water::FFT_RESOLUTION));
+            } else {
+                log.log(log_level::WARN,
+                    "Hydro FFT ocean unavailable; using the analytic Gerstner fallback");
+            }
+        }
         let bloom = hdr_enabled.then(|| Bloom::new(&device, HDR_FORMAT));
         // God rays composite into the HDR scene target, so like bloom they only exist on the
         // HDR path. Default ON; `WGR_GODRAYS=0` ablates it for an A/B capture.

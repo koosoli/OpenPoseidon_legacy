@@ -372,7 +372,7 @@ impl Water {
             // WRL-002 shared optics on; the C++ side pushes the Water tab's value each frame.
             optics_params: [1.0, 1.0, 0.0, 0.0],
             bodies: [[0.0; 4]; crate::ffi::WGR_WATER_MAX_BODIES * 3],
-            water_backend: 0,
+            water_backend: 1,
             water_backend_pad: [0; 3],
             tidewater: crate::water_tw::DEFAULT_PARAMS,
             tidewater_shore: crate::water_tw::DEFAULT_SHORE_PARAMS,

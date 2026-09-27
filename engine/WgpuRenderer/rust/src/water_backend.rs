@@ -9,7 +9,7 @@
 //! * `Underwater` belongs to the backend (Current OP keeps today's compositor unchanged);
 //! * the rest of the renderer reads the active surface through [`SurfaceProduct`], never
 //!   through a backend's internals;
-//! * Current OP is the default and must render byte-identically through this indirection.
+//! * Tidewater Native is the default; explicit Current OP remains a selectable legacy backend.
 //!
 //! The Current OP arm is a pure delegation to the untouched `Water` / `Underwater` types, so
 //! its behaviour cannot change by construction; every method below that exists for it is a
@@ -39,8 +39,8 @@ impl WaterBackendKind {
     /// engine must never be able to select "no water".
     pub fn from_abi(v: u32) -> Self {
         match v {
-            1 => WaterBackendKind::Tidewater,
-            _ => WaterBackendKind::CurrentOp,
+            0 => WaterBackendKind::CurrentOp,
+            _ => WaterBackendKind::Tidewater,
         }
     }
 
@@ -64,6 +64,13 @@ fn parse_env_override(v: Option<&str>) -> Option<WaterBackendKind> {
         Some("0") => Some(WaterBackendKind::CurrentOp),
         Some("1") => Some(WaterBackendKind::Tidewater),
         _ => None,
+    }
+}
+
+fn startup_kind(override_kind: Option<WaterBackendKind>, storage_supported: bool) -> WaterBackendKind {
+    match override_kind.unwrap_or(WaterBackendKind::Tidewater) {
+        WaterBackendKind::Tidewater if storage_supported => WaterBackendKind::Tidewater,
+        _ => WaterBackendKind::CurrentOp, // Explicit0 or unsupported storage: safe legacy fallback.
     }
 }
 
@@ -128,16 +135,30 @@ pub struct WaterBackend {
 const MAX_REPLAYED_CASCADES: usize = 8;
 
 impl WaterBackend {
-    pub fn new_current_op(
-        water: Water,
-        underwater: Underwater,
+    // Construct only the selected startup backend. A saved UI profile may still
+    // switch it at the existing frame boundary after the first producer params.
+    pub fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
         camera_layout: &wgpu::BindGroupLayout,
         surface_format: wgpu::TextureFormat,
         sample_count: u32,
+        composer: &mut naga_oil::compose::Composer,
         storage_supported: bool,
     ) -> Self {
+        let kind = startup_kind(env_override(), storage_supported);
+        let active = match kind {
+            WaterBackendKind::Tidewater => Active::Tidewater(Box::new(Tidewater::new(
+                device, queue, camera_layout, surface_format, sample_count,
+            ))),
+            WaterBackendKind::CurrentOp => Active::CurrentOp(Box::new(CurrentOp {
+                water: Water::new(device, queue, camera_layout, surface_format,
+                    sample_count, composer, storage_supported),
+                underwater: Underwater::new(device, surface_format, composer, storage_supported),
+            })),
+        };
         Self {
-            active: Active::CurrentOp(Box::new(CurrentOp { water, underwater })),
+            active,
             inputs: BuildInputs {
                 camera_layout: camera_layout.clone(),
                 surface_format,
@@ -148,7 +169,7 @@ impl WaterBackend {
             cascade_configs: [None; MAX_REPLAYED_CASCADES],
             interaction_params: None,
             terrain_heights: None,
-            requested: WaterBackendKind::CurrentOp,
+            requested: WaterBackendKind::Tidewater,
             refused_logged: None,
             switches: 0,
         }
@@ -666,7 +687,8 @@ mod tests {
     fn abi_values_map_to_backends_and_unknown_is_the_default() {
         assert_eq!(WaterBackendKind::from_abi(0), WaterBackendKind::CurrentOp);
         assert_eq!(WaterBackendKind::from_abi(1), WaterBackendKind::Tidewater);
-        assert_eq!(WaterBackendKind::from_abi(7), WaterBackendKind::CurrentOp);
+        assert_eq!(WaterBackendKind::from_abi(7), WaterBackendKind::Tidewater);
+        assert_eq!(WaterBackendKind::from_abi(u32::MAX), WaterBackendKind::Tidewater);
         assert_eq!(WaterBackendKind::CurrentOp as u32, 0);
         assert_eq!(WaterBackendKind::Tidewater as u32, 1);
     }
@@ -678,6 +700,16 @@ mod tests {
         assert_eq!(parse_env_override(Some("tidewater")), None);
         assert_eq!(parse_env_override(Some("")), None);
         assert_eq!(parse_env_override(None), None);
+    }
+
+    #[test]
+    fn startup_defaults_to_tidewater_but_explicit_zero_and_unsupported_storage_use_legacy() {
+        assert_eq!(startup_kind(None, true), WaterBackendKind::Tidewater);
+        assert_eq!(startup_kind(parse_env_override(Some("1")), true), WaterBackendKind::Tidewater);
+        assert_eq!(startup_kind(parse_env_override(Some("0")), true), WaterBackendKind::CurrentOp);
+        assert_eq!(startup_kind(None, false), WaterBackendKind::CurrentOp);
+        assert_eq!(startup_kind(Some(WaterBackendKind::Tidewater), false), WaterBackendKind::CurrentOp);
+        assert_eq!(startup_kind(parse_env_override(Some("invalid")), true), WaterBackendKind::Tidewater);
     }
 
     #[test]

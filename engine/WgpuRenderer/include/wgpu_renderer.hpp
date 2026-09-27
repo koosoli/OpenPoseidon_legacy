@@ -1450,8 +1450,8 @@ struct WgrWaterParams
      * zero. Immutable per frame; weather and interaction inputs stay in the lanes above.
      * Appended at the struct end; sizeof moves 288 -> 1056 with the Rust side. */
     WgrVec4 bodies[WGR_WATER_MAX_BODIES * 3];
-    /* TW-WATER W1 — which water implementation the renderer draws: 0 = Current OP (the default),
-     * 1 = Tidewater Native (Tidewater Water Plan v5). Appended after the body table so no lane the
+    /* TW-WATER W1 — which water implementation the renderer draws: 0 = Current OP (legacy),
+     * 1 = Tidewater Native (the default, Tidewater Water Plan v5). Appended after the body table so no lane the
      * WGSL mirrors of WaterParams read moves; the renderer switches backends at a frame boundary
      * when this changes. WGR_WATER_BACKEND=0|1 in the environment overrides it for the session. */
     uint32_t water_backend;

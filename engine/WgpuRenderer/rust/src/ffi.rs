@@ -1433,7 +1433,7 @@ pub struct WgrWaterParams {
     // WRL-003 — body table: [3i] = ellipse (cx, cz, rx, rz), [3i+1] = (level, wave scale, kind,
     // profile), [3i+2] = (flow x, flow z, speed, 0). See wgpu_renderer.hpp. (sizeof 288 -> 1056.)
     pub bodies: [WgrVec4; WGR_WATER_MAX_BODIES * 3],
-    // TW-WATER W1 — which water implementation renders: 0 = Current OP (default), 1 = Tidewater
+    // TW-WATER W1 — which water implementation renders: 0 = Current OP (legacy), 1 = Tidewater (default)
     // Native. Appended after the body table so no WGSL-mirrored lane moves; the WGSL mirrors of
     // WaterParams end at `bodies` and never read it. Padded to a vec4 for the uniform buffer.
     pub water_backend: u32,

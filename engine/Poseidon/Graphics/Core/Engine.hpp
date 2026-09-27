@@ -2489,13 +2489,11 @@ class Engine : public IGraphicsEngine
     struct WaterSettings
     {
         bool enabled = true;         // draw the GPU water surface (off = seabed only, for A/B)
-        // TW-WATER W1 — which water implementation the wgpu renderer draws: 0 = Current OP (the
-        // FFT/CDLOD water below, and the default), 1 = Tidewater Native (Tidewater Water Plan v5).
-        // Saved in the water profile ("backend" group); a profile without it means 0. The
-        // renderer switches at a frame boundary. WGR_WATER_BACKEND=0|1 overrides it for a session.
-        // Streaming integration keeps Current OP as the normal default. Tidewater smoke uses
-        // WGR_WATER_BACKEND=1; an explicitly saved backend selection still wins without override.
-        int waterBackend = 0;
+        // 1 = Tidewater Native (default); 0 = the legacy Current OP FFT/CDLOD water.
+        // Saved explicit profile/UI choices remain valid; an absent backend group means 1.
+        // Switching happens at a frame boundary. Exact WGR_WATER_BACKEND=0|1 overrides
+        // the profile/UI selection for a session; do not force an environment override.
+        int waterBackend = 1;
         // TW-WATER — the Tidewater Native parameter group (read only while waterBackend == 1).
         // Defaults are Tidewater's own (dgreenheck/tidewater @4811ba48). Wind speed and heading are
         // not here: like Current OP they come from the weather (or the reference sea). Shipped to

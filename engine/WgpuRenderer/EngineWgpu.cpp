@@ -14755,9 +14755,9 @@ void EngineWgpu::SyncWaterLookProfile()
         }
         else if (key == "backend")
         {
-            int backend = 0;
+            int backend = 1;
             in >> backend;
-            _waterLook.waterBackend = (backend == 1) ? 1 : 0;
+            _waterLook.waterBackend = (backend == 0) ? 0 : 1;
         }
         else if (key == "tidewater")
         {

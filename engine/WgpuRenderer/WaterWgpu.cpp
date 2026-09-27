@@ -1095,7 +1095,7 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
                              std::max(cameraBodyWave, 1.0e-3f)};
     // TW-WATER W1 — backend selector (0 = Current OP, 1 = Tidewater Native). The renderer
     // applies a change at the next frame boundary and ignores values it cannot build.
-    _params.water_backend = look.waterBackend == 1 ? 1u : 0u;
+    _params.water_backend = look.waterBackend == 0 ? 0u : 1u;
     {
         // TW-WATER — the Tidewater group, with the reference seas mapped onto it (the one table the
         // plan asks for, §4.3; documented in docs/roadmap/decisions/TW-WATER-02-20260927.md):
