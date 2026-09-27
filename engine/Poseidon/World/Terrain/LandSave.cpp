@@ -48,6 +48,7 @@
 #include <Poseidon/Graphics/Textures/PreparedTextures.hpp> // worker-prepared texture store (clear + stats)
 #include <Poseidon/World/Model/Model.hpp>              // the IR handed over by ObjectStreamPreparer
 #include <Poseidon/World/Terrain/ObjectStreamPrepare.hpp>
+#include <Poseidon/World/Terrain/WarmModelCaptureWindow.hpp>
 #include <Poseidon/Dev/Diag/StreamingDiag.hpp> // SnapshotObjectStreamDiag fills its counters
 #include <Poseidon/Asset/Formats/Material/ShaderSchema.hpp>
 #include <stdexcept>
@@ -3258,7 +3259,14 @@ void Landscape::PrefetchModernObjectModels(const std::vector<ModernObjectCellCan
     // makes this one entry per model, and the stamp is also what DropStale reads.
     std::vector<uint32_t> wanted;
     const bool warmTextures = ObjectStreamPreparer::WarmTextureJobsEnabled();
-    std::vector<std::pair<uint32_t, const LODShapeWithShadow*>> warmWanted;
+    using WarmModel = std::pair<uint32_t, const LODShapeWithShadow*>;
+    std::optional<Streaming::WarmModelCaptureWindow<WarmModel>> warmWanted;
+    ObjectStreamPreparer::WarmCaptureCursor warmCursor;
+    if (warmTextures)
+    {
+        warmCursor = _modernObjectPreparer->QueryWarmTextureCaptureCursor();
+        warmWanted.emplace(warmCursor.ordinal);
+    }
     uint32_t alreadyWarm = 0;
     for (const ModernObjectCellCandidate& cell : candidates)
     {
@@ -3276,8 +3284,7 @@ void Landscape::PrefetchModernObjectModels(const std::vector<ModernObjectCellCan
             if (const auto* warm = Shapes.Find(_modernObjectModels[model], false, true))
             {
                 ++alreadyWarm;
-                if (warmTextures && warmWanted.size() < 32)
-                    warmWanted.emplace_back(model, warm); // Borrowed only until this owner call returns.
+                if (warmWanted) warmWanted->Observe({model, warm}); // Borrowed only until this owner call returns.
                 continue;
             }
             wanted.push_back(model);
@@ -3309,19 +3316,17 @@ void Landscape::PrefetchModernObjectModels(const std::vector<ModernObjectCellCan
     if (warmTextures && GEngine)
     {
         size_t workRemaining = 256; // Shared LOD/section/binding visits for this entire recentre.
-        for (const auto& [model, shape] : warmWanted)
-        {
-            if (!workRemaining) break;
-            try
+        const auto capture = warmWanted->CaptureWhile([&] { return workRemaining != 0; },
+            [&](const WarmModel& candidate)
             {
+                const auto [model, shape] = candidate;
                 std::vector<WarmTextureRead> reads;
                 GEngine->CaptureWarmTextureReads(shape, reads, workRemaining);
                 if (!reads.empty())
                     _modernObjectPreparer->SubmitWarmTextures(model,
                         _modernObjectPreparer->QueryRadius(model), std::move(reads));
-            }
-            catch (...) { } // Failure retains ordinary object admission and owner texture fallback.
-        }
+            }); // Empty/refused/thrown attempts still advance; all retain ordinary fallback.
+        _modernObjectPreparer->RecordWarmTextureCaptureCursor(warmCursor, capture.nextCursor);
     }
     if (requested > 0 || staleDropped > 0)
         LOG_INFO(World,

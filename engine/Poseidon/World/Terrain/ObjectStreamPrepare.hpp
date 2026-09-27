@@ -293,6 +293,11 @@ class ObjectStreamPreparer
     // Certificates survive payload Take/DropStale.
     // An unrequested model remains Unknown. Reset invalidates all certificates.
     RadiusCertificate QueryRadius(uint32_t index) const;
+    struct WarmCaptureCursor { uint64_t generation = 0; size_t ordinal = 0; };
+    // Owner-only optional queue state. No bank/readiness/source queries; wrong-owner
+    // or disabled returns zero. Reset clears ordinal; recording refuses old worlds.
+    WarmCaptureCursor QueryWarmTextureCaptureCursor() const;
+    bool RecordWarmTextureCaptureCursor(WarmCaptureCursor token, size_t nextOrdinal);
     enum class WarmTextureSubmit : uint8_t
     { Submitted, Disabled, WrongThread, InvalidInventory, Unsupported, Coalesced, Capacity };
     // Owner-only; caller must compare every retained Init binding with the currently

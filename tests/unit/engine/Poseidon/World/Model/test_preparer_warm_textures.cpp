@@ -1,10 +1,14 @@
 #include <catch2/catch_test_macros.hpp>
 #include <Poseidon/World/Terrain/ObjectStreamPrepare.hpp>
 #include <Poseidon/World/Terrain/WarmTextureJobPolicy.hpp>
+#include <Poseidon/World/Terrain/WarmModelCaptureWindow.hpp>
 #include <Poseidon/IO/Streams/ArchiveSourceBinding.hpp>
 #include <Poseidon/IO/Streams/FileAccessPolicy.hpp>
 #include <Poseidon/Graphics/Textures/PreparedTextures.hpp>
 #include <Poseidon/Foundation/Threads/ThreadAffinity.hpp>
+#include <algorithm>
+#include <limits>
+#include <stdexcept>
 #include <array>
 #include <chrono>
 #include <condition_variable>
@@ -50,6 +54,8 @@ TEST_CASE("Disabled warm jobs never change model state or allocate metadata", "[
     CHECK(preparer.SnapshotStats().warmTextureMetadataBytes == 0);
     CHECK(preparer.SnapshotStats().warmTextureScratchBytes == 0);
     CHECK(preparer.SnapshotStats().warmTextureQueueBytes == 0);
+    CHECK(preparer.QueryWarmTextureCaptureCursor().generation == 0);
+    CHECK_FALSE(preparer.RecordWarmTextureCaptureCursor({}, 10));
 }
 namespace
 {
@@ -242,4 +248,99 @@ TEST_CASE("Warm slices retain a hard two-worker cap with unlimited soft budget a
     CHECK(preparer.SnapshotStats().warmTextureJobsCompleted == 3);
     CHECK(preparer.SnapshotStats().warmTextureScratchBytesPeak <= 2 * WarmTextureJobPolicy::ScratchBytes);
     store.Clear();
+}
+
+TEST_CASE("Warm capture windows rotate the existing walk without duplicates or rescans", "[warm-texture-policy]")
+{
+    using Window = Streaming::WarmModelCaptureWindow<size_t>;
+    for (size_t count : {size_t(1), size_t(16), size_t(32), size_t(64), size_t(100)})
+    {
+        size_t cursor = 0, stream = 0;
+        std::vector<size_t> coverage(count, 0);
+        for (size_t recentre = 0; recentre < (count + 31) / 32 + 2; ++recentre)
+        {
+            Window window(cursor);
+            for (size_t i = 0; i < count; ++i) window.Observe(i); // one existing walk
+            std::vector<size_t> selected;
+            const auto result = window.CaptureWhile([] { return true; }, [&](size_t ordinal) {
+                CHECK(ordinal == stream % count); ++stream; ++coverage[ordinal]; selected.push_back(ordinal);
+            });
+            CHECK(result.total == count); CHECK(result.attempted == std::min(size_t(32), count));
+            CHECK(result.selected == result.attempted); CHECK(result.nextCursor == stream % count);
+            std::sort(selected.begin(), selected.end());
+            CHECK(std::adjacent_find(selected.begin(), selected.end()) == selected.end());
+            cursor = result.nextCursor;
+        }
+        for (size_t visits : coverage) CHECK(visits > 0);
+    }
+}
+TEST_CASE("Warm capture wrap shrink and zero budget retain bounded next opportunity", "[warm-texture-policy]")
+{
+    using Window = Streaming::WarmModelCaptureWindow<size_t>;
+    auto collect = [](Window& window, size_t count) { for (size_t i = 0; i < count; ++i) window.Observe(i); };
+    SECTION("wrap retains exact cyclic order")
+    {
+        Window window(96); collect(window, 100); std::vector<size_t> selected;
+        const auto r = window.CaptureWhile([] { return true; }, [&](size_t i) { selected.push_back(i); });
+        REQUIRE(selected.size() == 32);
+        for (size_t i = 0; i < 32; ++i) CHECK(selected[i] == (96 + i) % 100);
+        CHECK(r.nextCursor == 28); CHECK_FALSE(r.shrinkAdjusted);
+    }
+    SECTION("shrink beyond old cursor restarts at first current ordinal")
+    {
+        Window window(96); collect(window, 40); std::vector<size_t> selected;
+        const auto r = window.CaptureWhile([] { return true; }, [&](size_t i) { selected.push_back(i); });
+        REQUIRE(selected.size() == 32);
+        for (size_t i = 0; i < 32; ++i) CHECK(selected[i] == i);
+        CHECK(r.nextCursor == 32); CHECK(r.shrinkAdjusted);
+    }
+    SECTION("empty inventory normalizes cursor")
+    {
+        Window window(96); bool visited = false;
+        const auto r = window.CaptureWhile([] { return true; }, [&](size_t) { visited = true; });
+        CHECK_FALSE(visited); CHECK(r.total == 0); CHECK(r.attempted == 0); CHECK(r.nextCursor == 0);
+    }
+    SECTION("no visit budget does not consume selected opportunities")
+    {
+        Window window(12); collect(window, 100);
+        const auto r = window.CaptureWhile([] { return false; }, [&](size_t) { FAIL("Budget exhausted before capture"); });
+        CHECK(r.selected == 32); CHECK(r.attempted == 0); CHECK(r.nextCursor == 12);
+    }
+    SECTION("one heavy model advances one rather than all selected32")
+    {
+        Window window(96); collect(window, 100); size_t visits = 256;
+        const auto r = window.CaptureWhile([&] { return visits != 0; }, [&](size_t i) { CHECK(i == 96); visits = 0; });
+        CHECK(r.selected == 32); CHECK(r.attempted == 1); CHECK(r.nextCursor == 97);
+    }
+    SECTION("empty refused and throwing captures all advance")
+    {
+        Window window(5); collect(window, 40); size_t attempts = 0;
+        const auto r = window.CaptureWhile([&] { return attempts < 3; }, [&](size_t i) {
+            CHECK(i == 5 + attempts); ++attempts;
+            if (attempts == 2) throw std::runtime_error("capture failed; ordinary fallback remains");
+        });
+        CHECK(attempts == 3); CHECK(r.attempted == 3); CHECK(r.nextCursor == 8);
+    }
+    SECTION("maximum stale cursor safely falls back without sum overflow")
+    {
+        Window window(std::numeric_limits<size_t>::max()); collect(window, 16); size_t calls = 0;
+        const auto r = window.CaptureWhile([] { return true; }, [&](size_t i) { CHECK(i == calls++); });
+        CHECK(r.attempted == 16); CHECK(r.nextCursor == 0); CHECK(r.shrinkAdjusted);
+    }
+}
+TEST_CASE("Warm capture cursor is optional generation-bound owner state reset by world inventory", "[warm-texture-actual]")
+{
+    RequireCapability(); Foundation::CaptureMainThread(); ObjectStreamPreparer preparer;
+    const std::string path = "capture-cursor-only.p3d"; preparer.Reset(&path, 1);
+    const auto first = preparer.QueryWarmTextureCaptureCursor(); REQUIRE(first.generation != 0); CHECK(first.ordinal == 0);
+    REQUIRE(preparer.RecordWarmTextureCaptureCursor(first, 96)); CHECK(preparer.QueryWarmTextureCaptureCursor().ordinal == 96);
+    auto worker = std::async(std::launch::async, [&] {
+        const auto unknown = preparer.QueryWarmTextureCaptureCursor();
+        return unknown.generation == 0 && unknown.ordinal == 0 && !preparer.RecordWarmTextureCaptureCursor(first, 20);
+    });
+    CHECK(worker.get()); CHECK(preparer.QueryWarmTextureCaptureCursor().ordinal == 96);
+    preparer.Reset(&path, 1); const auto next = preparer.QueryWarmTextureCaptureCursor();
+    CHECK(next.generation != first.generation); CHECK(next.ordinal == 0);
+    CHECK_FALSE(preparer.RecordWarmTextureCaptureCursor(first, 31)); CHECK(preparer.QueryWarmTextureCaptureCursor().ordinal == 0);
+    CHECK(preparer.Query(0) == ObjectStreamPreparer::State::Unknown); CHECK(preparer.SnapshotStats().requested == 0);
 }

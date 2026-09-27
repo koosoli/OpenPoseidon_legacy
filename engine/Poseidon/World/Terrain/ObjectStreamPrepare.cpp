@@ -428,6 +428,7 @@ struct ObjectStreamPreparer::Impl
     {
         std::vector<WarmJob> queue;
         std::array<WarmSlot, Streaming::WarmTextureJobPolicy::JobLimit> slots{};
+        size_t captureCursor = 0; // owner-only ordinal, no persistent shape reference
         WarmState()
         {
             queue.reserve(Streaming::WarmTextureJobPolicy::JobLimit);
@@ -1261,6 +1262,7 @@ void ObjectStreamPreparer::Reset(const std::string* paths, size_t modelCount)
         // Their last-reference destructors must not run under the queue mutex.
         if (_impl->warm)
         {
+            _impl->warm->captureCursor = 0;
             for (auto& job : _impl->warm->queue) freeWarm[freeWarmCount++] = std::move(job);
             _impl->warm->queue.clear(); // moved-from entries only; preserve reserved8 storage
         }
@@ -1563,6 +1565,21 @@ size_t ObjectStreamPreparer::DropStale(const uint32_t* epochs, size_t count, uin
     for (LODShapeWithShadow* sh : freeShapes)
         delete sh;
     return dropped;
+}
+
+ObjectStreamPreparer::WarmCaptureCursor ObjectStreamPreparer::QueryWarmTextureCaptureCursor() const
+{
+    if (!Foundation::IsMainThread() || !WarmTextureJobsEnabled()) return {};
+    std::lock_guard<std::mutex> lock(_impl->mutex);
+    return _impl->warm ? WarmCaptureCursor{_impl->generation.load(std::memory_order_relaxed), _impl->warm->captureCursor} : WarmCaptureCursor{};
+}
+bool ObjectStreamPreparer::RecordWarmTextureCaptureCursor(WarmCaptureCursor token, size_t nextOrdinal)
+{
+    if (!Foundation::IsMainThread() || !WarmTextureJobsEnabled()) return false;
+    std::lock_guard<std::mutex> lock(_impl->mutex);
+    if (!_impl->warm || !token.generation || token.generation != _impl->generation.load(std::memory_order_relaxed)) return false;
+    _impl->warm->captureCursor = nextOrdinal;
+    return true;
 }
 
 ObjectStreamPreparer::WarmTextureSubmit ObjectStreamPreparer::SubmitWarmTextures(
