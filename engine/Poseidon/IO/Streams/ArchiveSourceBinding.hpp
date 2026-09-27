@@ -64,6 +64,22 @@ class ArchiveSourceBinding
     static std::shared_ptr<const ArchiveSourceBinding> Create(BankReadRequest request);
     static void NoteWrappedRead();
 public:
+    // Optional model-primary Init purpose, NOT source identity or worker access.
+    // Needed only when BOTH warm-source and warm-job flags are exactly 1;
+    // source-only diagnostic capture keeps its original all-PAA behaviour.
+    class ModelReadScope
+    {
+        bool _entered = false;
+    public:
+        ModelReadScope();
+        ~ModelReadScope();
+        ModelReadScope(const ModelReadScope&) = delete;
+        ModelReadScope& operator=(const ModelReadScope&) = delete;
+        ModelReadScope(ModelReadScope&&) = delete;
+        ModelReadScope& operator=(ModelReadScope&&) = delete;
+        static bool PurposeRequired();
+        static bool IsActive(); // owner thread only; never grants worker bank access
+    };
     // Original raw mapped member only; names/headers are not source identity.
     // The process admission cap follows shared bindings retained by buffers/sources.
     // Subsequent worker copies must additionally be charged to their own bounded job.

@@ -1206,6 +1206,7 @@ bool CaptureWarmTextureSourceBinding()
     }();
     return enabled;
 }
+thread_local unsigned ModelReadDepth = 0; // numeric owner-purpose nesting only; no retained resources
 struct ArchiveBindingState
 {
     static constexpr size_t FixedCharge = sizeof(ArchiveSourceBudget) + 256;
@@ -1214,6 +1215,28 @@ struct ArchiveBindingState
     std::atomic<uint64_t> wrapped{0}, retained{0}, captureRefused{0}, capacityRefused{0}, allocationRefused{0};
 };
 ArchiveBindingState& SourceBindingState() { static ArchiveBindingState state; return state; }
+}
+
+bool ArchiveSourceBinding::ModelReadScope::PurposeRequired()
+{
+    static const bool required = [] {
+        const char* jobs = std::getenv("WGR_OBJECT_STREAM_WARM_TEXTURE_JOBS");
+        return CaptureWarmTextureSourceBinding() && jobs && std::strcmp(jobs, "1") == 0;
+    }();
+    return required;
+}
+ArchiveSourceBinding::ModelReadScope::ModelReadScope()
+{
+    if (PurposeRequired() && Foundation::IsMainThread() && ModelReadDepth < 64)
+    { ++ModelReadDepth; _entered = true; }
+}
+ArchiveSourceBinding::ModelReadScope::~ModelReadScope()
+{
+    if (_entered) --ModelReadDepth; // same-stack RAII; copies/moves are forbidden
+}
+bool ArchiveSourceBinding::ModelReadScope::IsActive()
+{
+    return Foundation::IsMainThread() && ModelReadDepth != 0;
 }
 
 size_t ArchiveSourceBinding::KnownCppBytes() const
@@ -1393,7 +1416,9 @@ Ref<IFileBuffer> QFBank::Read(const char* name) const
         // no compression
 
         std::shared_ptr<const ArchiveSourceBinding> binding;
-        if (CaptureWarmTextureSourceBinding() && _fileAccess && Foundation::IsMainThread() && name)
+        if (CaptureWarmTextureSourceBinding() &&
+            (!ArchiveSourceBinding::ModelReadScope::PurposeRequired() || ArchiveSourceBinding::ModelReadScope::IsActive()) &&
+            _fileAccess && Foundation::IsMainThread() && name)
         {
             size_t length = 0;
             while (length < 8192 && name[length]) ++length;

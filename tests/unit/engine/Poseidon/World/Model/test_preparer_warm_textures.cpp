@@ -88,6 +88,7 @@ struct Fixture
             entry("texture.paa", int(paa.size())); entry("", 0); out.write(paa.data(), paa.size());
         }
         REQUIRE(bank.open(RString((dir / "original").string().c_str()))); bank.Lock();
+        ArchiveSourceBinding::ModelReadScope modelPurpose;
         auto buffer = bank.Read("texture.paa"); REQUIRE(buffer); source = buffer->GetArchiveSourceBinding();
         REQUIRE(source); REQUIRE(bank.MatchesMountedMember("texture.paa", source->Request()));
     }

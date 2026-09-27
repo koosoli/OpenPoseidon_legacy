@@ -720,7 +720,7 @@ TEST_CASE("Source-bound warm chains require explicit claims and retain cancellat
     Foundation::CaptureMainThread();
     if (!ArchiveSourceBinding::SnapshotStats().enabled) SKIP("Requires fresh WGR_OBJECT_STREAM_WARM_TEXTURES=1 process.");
     AlphaArchiveFixture fixture;
-    auto buffer = fixture.bank.Read("member.paa"); REQUIRE(buffer);
+    auto buffer = [&] { ArchiveSourceBinding::ModelReadScope purpose; return fixture.bank.Read("member.paa"); }(); REQUIRE(buffer);
     auto binding = buffer->GetArchiveSourceBinding(); REQUIRE(binding);
     auto& store = render::PreparedTextureStore::Instance();
     store.Clear();

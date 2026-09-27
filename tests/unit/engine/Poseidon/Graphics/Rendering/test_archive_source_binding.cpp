@@ -13,10 +13,13 @@
 #include <vector>
 #include <type_traits>
 #include <future>
+#include <stdexcept>
 
 using namespace Poseidon;
 static_assert(!std::is_copy_constructible_v<ArchiveSourceBudget::Ticket>);
 static_assert(!std::is_move_constructible_v<ArchiveSourceBudget::Ticket>);
+static_assert(!std::is_copy_constructible_v<ArchiveSourceBinding::ModelReadScope>);
+static_assert(!std::is_move_constructible_v<ArchiveSourceBinding::ModelReadScope>);
 
 TEST_CASE("Archive binding debt remains charged through copied aliases", "[archive-source-binding][archive-source-budget]")
 {
@@ -125,6 +128,9 @@ TEST_CASE("Archive provenance never changes default bank bytes or adds OFF captu
 {
     if (ArchiveSourceBinding::SnapshotStats().enabled) SKIP("Run this default-arm case with WARM_TEXTURES unset.");
     Archives files;
+    CHECK_FALSE(ArchiveSourceBinding::ModelReadScope::PurposeRequired());
+    ArchiveSourceBinding::ModelReadScope optionalScope;
+    CHECK_FALSE(ArchiveSourceBinding::ModelReadScope::IsActive());
     auto buffer = files.first.Read("texture.paa"); REQUIRE(buffer);
     const auto expected = OriginalPaa(13);
     REQUIRE(buffer->GetSize() == int(expected.size())); CHECK_FALSE(buffer->GetError());
@@ -283,5 +289,90 @@ TEST_CASE("Mounted member observation never loads an unopened bank or guesses id
     unopened.Unlock(); unopened.close();
     files.first.Unlock(); files.first.close();
     CHECK_FALSE(files.first.MatchesMountedMember("texture.paa", *request));
+#endif
+}
+
+TEST_CASE("Model primary purpose captures actual mapped bytes and restores nested owner scope", "[archive-source-model-purpose]")
+{
+#ifndef _WIN32
+    SKIP("Required immutable source identity is Windows-only.");
+#else
+    if (!ArchiveSourceBinding::ModelReadScope::PurposeRequired()) SKIP("Fresh WARM_TEXTURES=1 WARM_TEXTURE_JOBS=1 process required.");
+    if (!QFileAccess::MappingSupported()) SKIP("Original mapped source capability unavailable.");
+    Archives files;
+    REQUIRE_FALSE(ArchiveSourceBinding::ModelReadScope::IsActive());
+    const auto before = ArchiveSourceBinding::SnapshotStats();
+    auto outside = files.first.Read("texture.paa"); REQUIRE(outside);
+    CHECK_FALSE(outside->GetArchiveSourceBinding());
+    CHECK(ArchiveSourceBinding::SnapshotStats().wrappedReads == before.wrappedReads);
+    std::shared_ptr<const ArchiveSourceBinding> retained;
+    {
+        ArchiveSourceBinding::ModelReadScope outer;
+        REQUIRE(ArchiveSourceBinding::ModelReadScope::IsActive());
+        auto actual = files.first.Read("texture.paa"); REQUIRE(actual);
+        retained = actual->GetArchiveSourceBinding(); REQUIRE(retained);
+        auto mounted = files.first.CaptureReadRequest("texture.paa", true); REQUIRE(mounted);
+        CHECK(retained->Request().SameArchiveMember(*mounted));
+        const auto expected = OriginalPaa(13);
+        CHECK(std::memcmp(actual->GetData(), expected.data(), expected.size()) == 0);
+        try
+        {
+            ArchiveSourceBinding::ModelReadScope inner;
+            REQUIRE(ArchiveSourceBinding::ModelReadScope::IsActive());
+            throw std::runtime_error("purpose unwind");
+        }
+        catch (const std::runtime_error&) {}
+        REQUIRE(ArchiveSourceBinding::ModelReadScope::IsActive());
+        auto worker = std::async(std::launch::async, [] {
+            ArchiveSourceBinding::ModelReadScope noPrivilege;
+            return ArchiveSourceBinding::ModelReadScope::IsActive();
+        });
+        CHECK_FALSE(worker.get()); // No off-owner QFBank read is attempted.
+        CHECK(ArchiveSourceBinding::ModelReadScope::IsActive());
+    }
+    REQUIRE_FALSE(ArchiveSourceBinding::ModelReadScope::IsActive());
+    auto after = files.first.Read("texture.paa"); REQUIRE(after);
+    CHECK_FALSE(after->GetArchiveSourceBinding());
+    CHECK(ArchiveSourceBinding::SnapshotStats().wrappedReads == before.wrappedReads + 1);
+    std::vector<char> bytes; REQUIRE(retained->Request().Read(bytes)); CHECK(bytes == OriginalPaa(13));
+    // A scope that throws without a surviving outer scope must clear its purpose too.
+    try { ArchiveSourceBinding::ModelReadScope scope; throw std::runtime_error("outer unwind"); }
+    catch (const std::runtime_error&) {}
+    CHECK_FALSE(ArchiveSourceBinding::ModelReadScope::IsActive());
+#endif
+}
+TEST_CASE("Entering model purpose cannot certify a previously unwrapped cached header", "[archive-source-model-purpose]")
+{
+#ifndef _WIN32
+    SKIP("Required immutable source identity is Windows-only.");
+#else
+    if (!ArchiveSourceBinding::ModelReadScope::PurposeRequired()) SKIP("Fresh WARM_TEXTURES=1 WARM_TEXTURE_JOBS=1 process required.");
+    if (!QFileAccess::MappingSupported()) SKIP("Original mapped source capability unavailable.");
+    Archives files; ServerScope server;
+    QIFStreamB earlier; earlier.open(files.first, "texture.paa"); REQUIRE_FALSE(earlier.fail());
+    CHECK_FALSE(earlier.GetBuffer()->GetArchiveSourceBinding());
+    server.server->cache.Store(earlier, R"(model-purpose-fixture\texture.paa)");
+    const auto before = ArchiveSourceBinding::SnapshotStats();
+    std::unique_ptr<ITextureSource> unknown, witnessed;
+    {
+        ArchiveSourceBinding::ModelReadScope primary;
+        unknown = CreateSource(R"(model-purpose-fixture\texture.paa)"); REQUIRE(unknown);
+        CHECK_FALSE(unknown->GetArchiveSourceBinding());
+        CHECK(ArchiveSourceBinding::SnapshotStats().wrappedReads == before.wrappedReads);
+        CHECK(ArchiveSourceBinding::SnapshotStats().initRetains == before.initRetains);
+        // Only an original subsequent raw read can carry new evidence. No fresh
+        // capture is attached to unknown's already-parsed/cached header.
+        QIFStreamB original; original.open(files.first, "texture.paa"); REQUIRE_FALSE(original.fail());
+        REQUIRE(original.GetBuffer()->GetArchiveSourceBinding());
+        server.server->cache.FlushBank(nullptr);
+        server.server->cache.Store(original, R"(model-purpose-fixture\texture.paa)");
+        witnessed = CreateSource(R"(model-purpose-fixture\texture.paa)"); REQUIRE(witnessed);
+        CHECK(witnessed->GetArchiveSourceBinding() == original.GetBuffer()->GetArchiveSourceBinding());
+        CHECK_FALSE(unknown->GetArchiveSourceBinding());
+    }
+    CHECK_FALSE(ArchiveSourceBinding::ModelReadScope::IsActive());
+    CHECK_FALSE(unknown->GetArchiveSourceBinding());
+    REQUIRE(witnessed->GetArchiveSourceBinding());
+    CHECK(ArchiveSourceBinding::SnapshotStats().initRetains == before.initRetains + 1);
 #endif
 }

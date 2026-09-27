@@ -9,6 +9,7 @@
 #include <Poseidon/Graphics/Rendering/Lighting/Material.hpp>
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
+#include <Poseidon/IO/Streams/ArchiveSourceBinding.hpp>
 #include <Poseidon/World/Scene/Object.hpp>
 #include <Poseidon/Graphics/Rendering/Draw/SpecLods.hpp>
 #include <vector>
@@ -451,12 +452,18 @@ void BuildAdapterBankTables(const Poseidon::Model::Model& model, AdapterBankTabl
                     c = c - 'A' + 'a';
             }
             auto started = trace ? Dev::Perf::Now() : Dev::Perf::Point{};
-            texRow[matIdx] = GlobLoadTexture(texPath.c_str());
-            if (trace) { loadMs += Dev::Perf::ElapsedMs(started); started = Dev::Perf::Now(); }
-            // The MLOD specials scans read IsAlpha/IsTransparent/IsAnimated, which
-            // need the headers; load them here so the conversion never has to.
-            if (!isODOL && texRow[matIdx])
-                texRow[matIdx]->LoadHeaders();
+            {
+                // Only the already-existing owner primary-texture Init/read is
+                // prioritised. Cached unwrapped headers remain Unknown; no new
+                // LoadHeaders or fresh-name capture is added for ODOL.
+                ArchiveSourceBinding::ModelReadScope sourcePurpose;
+                texRow[matIdx] = GlobLoadTexture(texPath.c_str());
+                if (trace) { loadMs += Dev::Perf::ElapsedMs(started); started = Dev::Perf::Now(); }
+                // The MLOD specials scans read IsAlpha/IsTransparent/IsAnimated, which
+                // need the headers; load them here so the conversion never has to.
+                if (!isODOL && texRow[matIdx])
+                    texRow[matIdx]->LoadHeaders();
+            }
             if (trace) { headerMs += Dev::Perf::ElapsedMs(started); ++textureCalls; }
         }
         auto& matRow = tables.surfMats[i];
