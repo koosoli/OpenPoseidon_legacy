@@ -2363,3 +2363,20 @@ Root pre/post pair installed hashes match EXE02238BE88F87011E36FDB7A737CE67257D1
 and DLL05D8460B15E3ECFF8B5013CAD4AA36DB83A71F4679C2A4CF2EBC572DBAB9C6E9.
 No FPS/MP/reclaim/eviction/paging/performance acceptance. Future sample-fingerprint
 prototype is unbuilt/not included. FullplanOPEN.
+Bounded replay fingerprint e966bb56 build20/test303assertions7casesflag1/noSKIP
+pass, clean installed03:42. Original full-byte equality still guards sampled
+fingerprint collisions, no freshness theorem. Component11unchanged PAA payloads/
+12517376decoded bytes,3warm+24rotating4arms,sameTU/O2/noLTO/fulloutputcheck
+outside timedbatch: fullFNVmiss median34.5138/max40.4774 versus samplemiss
+23.8338/29.5811; fullFNVhit6.796/7.2309 versus samplehit1.28785/1.4431ms.
+Actual baseline filename PaaLzoReplayCacheBaseline.hpp; manifests/hash provenance
+preserved. This reduces local hash cost only, not FPS. Actual ON034235/OFF034452
+both clean0 pass: ON777 mean45.151363/median22.946/p95145.379/p99525.277/
+max896.143 versusOFF89238.894854/23.1105/126.091/384.556/968.986ms, nearest-rank
+ceil(n*p)-1/evenmedianmiddlepair. Returned19923/required0, butON geometry729493612/
+textures2823455764/2547 versusOFF704386448/2817071860/2527 and transientcoverage
+differ: not matchedwork/no causalbenefit/no broadregressionproof. Startupcapped
+last146hits2250miss72548352hitout28573820store33552520peak23entries2227evicts0
+failure/oversize, not fullroute. Actual candidate unaccepted/cacheOFF/unpromoted;
+no endless repeat-screening. Future<=256 simulation audit unbuilt/not included.
+FullplanOPEN/performancefalse.
