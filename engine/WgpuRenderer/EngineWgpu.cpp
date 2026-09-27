@@ -8786,7 +8786,9 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
         if(report.pagedPilot && (action==GeometryPageFixtureAction::RequestCoarse || action==GeometryPageFixtureAction::PollCoarse ||
             action==GeometryPageFixtureAction::RequestFine || action==GeometryPageFixtureAction::PollFine ||
             action==GeometryPageFixtureAction::CancelFine || action==GeometryPageFixtureAction::HoldFine || action==GeometryPageFixtureAction::ReleaseFine)) {
-            if(!_geometryPageWorker || !report.active) return failure;
+            // Abort retains a held worker's ownership until its real exit. Allow only
+            // releasing that latch on an inactive fixture; never submit new work.
+            if(!_geometryPageWorker || (!report.active && action!=GeometryPageFixtureAction::ReleaseFine)) return failure;
             const bool coarseRequest=action==GeometryPageFixtureAction::RequestCoarse || action==GeometryPageFixtureAction::PollCoarse;
             if(coarseRequest && !report.diskPilot) return failure;
             if(coarseRequest && report.coarseResident) {auto ready=report;updatePageStats(ready);return ready;}
