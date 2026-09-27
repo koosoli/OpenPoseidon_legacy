@@ -3,6 +3,7 @@
 #include <Poseidon/World/Entities/Infantry/InfantryObservation.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/World/Scene/CargoSurface.hpp>
+#include <Poseidon/World/Scene/CargoInsertionCollision.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <cmath>
 #include <cstdlib>
@@ -136,35 +137,60 @@ bool Man::IsCargoWeaponCandidate(int weapon) const
     return seat->AcceptsWeapon(slot._weapon->GetName(), primary, mode->_ammo->_simulation == AmmoShotBullet);
 }
 
-bool Man::CargoWeaponLineClear(int weapon) const
+bool Man::CargoWeaponLineClear(int weapon, bool modernInsertion) const
 {
+    const bool modernOwner = modernInsertion && GLandscape && GLandscape->ModernSimulationResidencyEnabled() && Foundation::IsMainThread();
+    // The const clearance caller already supplies this same mutable identity to
+    // the legacy trace. No Man state is changed: owner residency owns the query.
+    auto& queryActor = *const_cast<Man*>(this);
+    const auto invalidInsertion = [&] {
+        ReleaseCargoInsertionInterest(modernOwner, false, [&] {
+            GLandscape->ReleaseModernSimulationQuery(queryActor, Streaming::SimulationQueryPurpose::Fire);
+        });
+        return false;
+    };
     const auto* seat = GetActiveCargoWeaponSeat();
     if (!seat || WeaponsDisabled() || _primaryFactor < .99f || strcmpi(Type()->GetMoveName(_primaryMove.id), seat->action) != 0 ||
         strcmpi(GetCurrentMove(), seat->action) != 0 || !GLandscape || weapon < 0 || weapon >= NMagazineSlots())
-        return false;
+        return invalidInsertion();
     if (!IsCargoWeaponCandidate(weapon))
-        return false;
+        return invalidInsertion();
     const auto* vehicle = Brain()->GetVehicleIn();
     if (Brain()->IsPlayer() && (!GWorld->UI() || InputSubsystem::Instance().IsLookAroundEnabled() ||
         !seat->ContainsDirection(vehicle->DirWorldToModel() * GWorld->UI()->GetCursorDirection())))
-        return false;
+        return invalidInsertion();
     const Vector3 direction = GetWeaponDirection(weapon).Normalized();
     if (!seat->ContainsDirection(vehicle->DirWorldToModel() * direction))
-        return false;
+        return invalidInsertion();
     Matrix4 frame;
     if (!vehicle->TryCargoWeaponFrame(this, seat->cargoIndex, frame))
-        return false;
+        return invalidInsertion();
     // Player shots resolve insertion obstruction in CargoBulletOrigin rather
     // than suppressing the trigger. The carrier remains a projectile target.
     if (seat->playerFreeAim)
+    {
+        ReleaseCargoInsertionInterest(modernOwner, false, [&] {
+            GLandscape->ReleaseModernSimulationQuery(queryActor, Streaming::SimulationQueryPurpose::Fire);
+        });
         return true;
+    }
     const Vector3 muzzle = frame.FastTransform(GetWeaponPoint(weapon));
     const Vector3 pivot = frame.FastTransform(GetWeaponCenter(weapon));
     const Vector3 end = muzzle + direction * 2.0f;
     CollisionBuffer hits;
     // Do not ignore the carrier: a muzzle outside a windscreen is not permission
     // to push the rifle through it. Check the pivot-to-muzzle segment as well.
-    GLandscape->ObjectCollision(hits, const_cast<Man*>(this), nullptr, pivot, muzzle, .02f, ObjIntersectFire);
+    const bool aiInsertion = !Brain()->IsPlayer();
+    ReleaseCargoInsertionInterest(modernOwner, aiInsertion, [&] {
+        GLandscape->ReleaseModernSimulationQuery(queryActor, Streaming::SimulationQueryPurpose::Fire);
+    });
+    TraceCargoInsertion(modernOwner && aiInsertion, hits,
+        [&] { return GLandscape->QueueModernSimulationQuery(queryActor, Streaming::SimulationQueryPurpose::Fire,
+            pivot, muzzle, double(.02f)); },
+        [&](CollisionBuffer& result) { return GLandscape->TryModernSimulationFireCollision(result, queryActor,
+            &queryActor, nullptr, pivot, muzzle, .02f); },
+        [&](CollisionBuffer& result) { GLandscape->ObjectCollision(result, &queryActor, nullptr,
+            pivot, muzzle, .02f, ObjIntersectFire); });
     for (int i = 0; i < hits.Size(); ++i)
         if (hits[i].object != this) // Carrier intersection recurses into this seated shooter too.
             return false;
@@ -1371,20 +1397,32 @@ bool Man::CombatShotSafe(int weapon, const Target* target) const
 
 bool Soldier::FireWeapon(int weapon, TargetType* target)
 {
+    // Vehicle simulation follows the joined AI owner boundary. Unusual callers
+    // are guarded rather than borrowing owner access from this method's name.
+    const bool modernOwner = GLandscape && GLandscape->ModernSimulationResidencyEnabled() && Foundation::IsMainThread();
+    const auto releaseInsertion = [&] {
+        ReleaseCargoInsertionInterest(modernOwner, false, [&] {
+            GLandscape->ReleaseModernSimulationQuery(*this, Streaming::SimulationQueryPurpose::Fire);
+        });
+    };
+    if (!Brain() || !Brain()->IsInCargo()) releaseInsertion();
     if (GetNetworkManager().IsControlsPaused())
     {
+        releaseInsertion();
         return false;
     }
     if (weapon < 0 || weapon >= NMagazineSlots())
     {
+        releaseInsertion();
         return false;
     }
     if (!IsAbleToFire())
     {
+        releaseInsertion();
         return false;
     }
 
-    if (Brain() && Brain()->IsInCargo() && !CargoWeaponLineClear(weapon))
+    if (Brain() && Brain()->IsInCargo() && !CargoWeaponLineClear(weapon, true))
         return false;
 
     if (_waterContact)

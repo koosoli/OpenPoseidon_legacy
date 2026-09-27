@@ -1,9 +1,88 @@
 #include <catch2/catch_test_macros.hpp>
 #include <Poseidon/World/Entities/Vehicles/CargoWeaponSeats.hpp>
 #include <Poseidon/World/Scene/CargoSurface.hpp>
+#include <Poseidon/World/Scene/CargoInsertionCollision.hpp>
+#include <Poseidon/World/Terrain/SimulationFireCollision.hpp>
+#include <Poseidon/Foundation/Threads/ThreadAffinity.hpp>
 #include <limits>
 
 using namespace Poseidon;
+
+TEST_CASE("AI cargo insertion enhances only Ready coverage and retains every legacy refusal path", "[cargo-weapons][cargo-streaming]")
+{
+    using Status = Streaming::SimulationResidencyStatus;
+    Foundation::CaptureMainThread();
+    Ref<LODShapeWithShadow> shape = new LODShapeWithShadow;
+    Ref<ObjectPlain> carrier = new ObjectPlain(shape, 10);
+    const Status states[] = {Status::Disabled, Status::Pending, Status::Ready, Status::Unknown,
+        Status::Invalid, Status::CapacityExceeded, Status::WrongOwner};
+    for (const auto queued : states) for (const auto traced : states)
+    {
+        CollisionBuffer hits;
+        size_t queues = 0, modern = 0, legacy = 0;
+        TraceCargoInsertion(true, hits,
+            [&] { ++queues; return queued; },
+            [&](CollisionBuffer& result) {
+                ++modern;
+                if (traced == Status::Ready) { CollisionInfo hit{}; hit.object = carrier.GetRef(); hit.component = 20; result.Add(hit); }
+                return traced;
+            },
+            [&](CollisionBuffer& result) {
+                ++legacy; CollisionInfo hit{}; hit.object = carrier.GetRef(); hit.component = 10; result.Add(hit);
+            });
+        const bool tried = queued == Status::Ready || queued == Status::Pending;
+        const bool enhanced = tried && traced == Status::Ready;
+        REQUIRE(queues == 1); REQUIRE(modern == size_t(tried)); REQUIRE(legacy == size_t(!enhanced));
+        REQUIRE(hits.Size() == 1); REQUIRE(hits[0].object.GetRef() == carrier.GetRef());
+        REQUIRE(hits[0].component == (enhanced ? 20 : 10));
+    }
+    // This same disabled dispatcher arm is used for OFF, unusual off-owner
+    // callers and read-only clearance probes. None may create/renew interest.
+    CollisionBuffer legacyOnly; size_t legacyCalls = 0;
+    TraceCargoInsertion(false, legacyOnly,
+        [&] { FAIL("Disabled/off-owner/probe acquired Fire interest"); return Status::Ready; },
+        [&](CollisionBuffer&) { FAIL("Disabled/off-owner/probe performed modern trace"); return Status::Ready; },
+        [&](CollisionBuffer& result) { ++legacyCalls; CollisionInfo hit{}; hit.object = carrier.GetRef(); result.Add(hit); });
+    REQUIRE(legacyCalls == 1); REQUIRE(legacyOnly.Size() == 1);
+}
+
+TEST_CASE("Ready cargo insertion merges actual contact buffers while retaining shooter and carrier semantics", "[cargo-weapons][cargo-streaming]")
+{
+    using Status = Streaming::SimulationResidencyStatus;
+    Foundation::CaptureMainThread();
+    Ref<LODShapeWithShadow> shape = new LODShapeWithShadow;
+    Ref<ObjectPlain> shooter = new ObjectPlain(shape, 10), carrier = new ObjectPlain(shape, 11), wall = new ObjectPlain(shape, 12);
+    shooter->SetType(Primary); carrier->SetType(Primary); wall->SetType(Primary);
+    Object* candidates[] = {shooter.GetRef(), carrier.GetRef(), wall.GetRef(), wall.GetRef()};
+    CollisionBuffer hits; size_t queued = 0, outerLegacy = 0, terrain = 0;
+    TraceCargoInsertion(true, hits, [&] { ++queued; return Status::Pending; },
+        [&](CollisionBuffer& result) {
+            return Streaming::AppendSimulationFireContacts(result, std::span<Object* const>(candidates, 4), shooter.GetRef(), nullptr,
+                [&](CollisionBuffer& staged) {
+                    CollisionInfo self{}; self.object = shooter.GetRef(); staged.Add(self);
+                    CollisionInfo vehicle{}; vehicle.object = carrier.GetRef(); staged.Add(vehicle);
+                },
+                [&](CollisionBuffer& staged, Object& object) { ++terrain; CollisionInfo obstruction{}; obstruction.object = &object; staged.Add(obstruction); },
+                [] { return Status::Ready; }, [] { return true; });
+        }, [&](CollisionBuffer&) { ++outerLegacy; });
+    REQUIRE(queued == 1); REQUIRE(outerLegacy == 0); REQUIRE(terrain == 1);
+    REQUIRE(hits.Size() == 2);
+    REQUIRE(hits[0].object.GetRef() == carrier.GetRef());
+    REQUIRE(hits[1].object.GetRef() == wall.GetRef());
+    // A carrier hit remains an insertion obstruction; it is never the ignored
+    // object. The same supplementary wall appears once, not once per candidate.
+}
+
+TEST_CASE("Cargo insertion departure releases only owner interest while valid blocked attempts retain it", "[cargo-weapons][cargo-streaming]")
+{
+    size_t releases = 0;
+    ReleaseCargoInsertionInterest(false, false, [&] { ++releases; });
+    REQUIRE(releases == 0); // OFF/off-owner/read-only probe
+    ReleaseCargoInsertionInterest(true, true, [&] { ++releases; });
+    REQUIRE(releases == 0); // Valid attempted insertion remains interested, even if blocked.
+    ReleaseCargoInsertionInterest(true, false, [&] { ++releases; });
+    REQUIRE(releases == 1); // Invalid weapon/seat, noncargo or player transition.
+}
 
 TEST_CASE("Cargo shell ray hits either face without filling cabin space", "[cargo-weapons]")
 {

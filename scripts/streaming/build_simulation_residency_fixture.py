@@ -128,15 +128,16 @@ def verify_world(payload, model_path=MODEL_PATH, model_count=1, placements=PLACE
     assert r.take(5) == bytes(5)
     assert r.grid(LAND * LAND) == bytes(LAND * LAND)
     assert r.grid(LAND * LAND) == bytes(LAND * LAND)
-    assert struct.unpack("<1024f", r.grid(LAND * LAND * 4)) == (HEIGHT,) * 1024
+    assert struct.unpack(f"<{LAND * LAND}f", r.grid(LAND * LAND * 4)) == (HEIGHT,) * (LAND * LAND)
     assert r.unpack("i") == (1,) and r.z() == "" and r.take(1) == b"\0"
     assert r.unpack("i") == (model_count,)
     assert [r.z() for _ in range(model_count)] == model_paths(model_path, model_count)
     assert r.unpack("i") == (0,)
     assert r.take(5) == bytes(5) and r.unpack("i") == (len(placements) * 60,)
     assert r.take(5) == bytes(5) and r.unpack("i") == (0,)
-    assert r.grid(1024) == bytes(1024) and r.grid(1024) == bytes(1024)
-    assert r.unpack("2i") == (max(p[0] for p in placements), 4096) and r.take(4096) == bytes(4096)
+    assert r.grid(LAND * LAND) == bytes(LAND * LAND) and r.grid(LAND * LAND) == bytes(LAND * LAND)
+    assert r.unpack("2i") == (max(p[0] for p in placements), LAND * LAND * 4)
+    assert r.take(LAND * LAND * 4) == bytes(LAND * LAND * 4)
     for index, (identity, x, y, z) in enumerate(placements):
         assert r.unpack("2i12fi") == (identity, placement_model(index, reference_all, registered_warming), 1, 0, 0, 0, 1, 0, 0, 0, 1, x, y, z, 0)
     assert r.pos == len(payload)
@@ -234,6 +235,8 @@ def generate(output, absolute_model_path=False, model_count=1, large_wall=False,
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=Path, help="Private caller-selected output directory")
+    parser.add_argument("--land-side", type=int, choices=(32, 256), default=32,
+                        help="256 preserves the existing cargo mission coordinates on an original flat modern world")
     parser.add_argument("--absolute-model-path", action="store_true", help="Embed the private absolute loose model path; --addon-root accepts archives, not loose folders")
     parser.add_argument("--model-count", type=int, choices=(1, 257, 8193), default=1, help="Unused metadata rows or bounded referenced-model fixture")
     parser.add_argument("--reference-all-models", action="store_true", help="257 original walls reference every model to test the separate active-work capacity")
@@ -241,6 +244,7 @@ if __name__ == "__main__":
     parser.add_argument("--positive-warming", action="store_true", help="Separate two camera-loaded walls from the other 255 referenced models")
     parser.add_argument("--registered-warming", action="store_true", help="258 placements reference 257 models; the two query walls share model 0")
     args = parser.parse_args()
+    LAND = args.land_side
     manifest = generate(args.output, args.absolute_model_path, args.model_count, args.large_wall, args.reference_all_models, args.positive_warming, args.registered_warming)
     print(json.dumps({"output": str(args.output.resolve()), "world_sha256": manifest["world_sha256"],
                       "model_sha256": manifest["model_sha256"]}, sort_keys=True))

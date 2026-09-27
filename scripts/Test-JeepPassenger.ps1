@@ -14,9 +14,20 @@ param([ValidateSet('M16','AK74')][string]$Rifle='M16',
       [switch]$DefaultPackage, [string]$UserMod='',
       [ValidateSet('','missing','incompatible')][string]$AutomaticOriginal='', [string]$MissionPath='',
       [string]$LoadOriginalSave='',
+      [string]$StreamingWorld='', [switch]$SimulationResidency,
       [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
+if ($StreamingWorld -and !(Test-Path -LiteralPath $StreamingWorld -PathType Leaf)) {throw 'Streaming world must exist'}
+if ($SimulationResidency -and (!$StreamingWorld -or !$NpcFire -or $NpcScenario -ne 'clear' -or $PlayerFire -or !$DefaultPackage)) {throw 'Streaming consumer fixture requires a modern world, clear AI cargo, and default package'}
+if ($StreamingWorld) {
+    $env:WGR_SIMULATION_RESIDENCY=if ($SimulationResidency) {'1'} else {'0'}
+    $env:WGR_SIMULATION_RESIDENCY_TEST=if ($SimulationResidency) {'1'} else {'0'}
+    $env:WGR_SIMULATION_POSITIVE_COLD='0'
+    $env:WGR_OBJECT_STREAM_GPU_BUDGET='0'
+    $env:WGR_OBJECT_STREAM_PBO='0'
+    $env:WGR_OBJECT_STREAM_WINDOW_GROWTH='0'
+}
 if ($InspectVehicle -and ($PlayerFire -or $NpcFire -or $DefaultPackage -or $AnimationPreview -or $ProjectileFrame)) {
     throw 'Original seat inspection requires a separate baseline launch without FFV content'
 }
@@ -56,6 +67,7 @@ $listener.Start(); $port=$listener.LocalEndpoint.Port; $listener.Stop()
 $mission=if ($MissionPath) {$MissionPath} else {Join-Path $root 'dev-missions/jeep-ffv.Intro'}
 $log=Join-Path $output 'jeep.log'
 $gameArgs=@('--render','wgpu','--window','--no-dev','--width','1280','--height','720','--harness',"$port",'--test-mission',('"'+$mission+'"'),'--log-file',('"'+$log+'"'))
+if ($StreamingWorld) {$gameArgs+=@('--test-world',('"'+$StreamingWorld+'"'))}
 if (!$DefaultPackage) {$gameArgs+='--no-vehicle-actions'}
 if (!$DefaultPackage -and ($AnimationPreview -or $NpcFire)) {
     $preview=Join-Path $root 'build/jeep-ffv/animation-preview'
@@ -84,6 +96,11 @@ if ($packArchive) {
 }
 [pscustomobject]@{rifle=$Rifle;inspectVehicle=$InspectVehicle;inspectCargoIndex=$InspectCargoIndex;installed=$stamp.Trim();args=$gameArgs;source=(& git -C $root rev-parse HEAD);pack=$packArchive;packSha256=$packHash;driverCommand=$DriverCommand;limitedDriver=[bool]$LimitedDriver;turning=[bool]$NpcTurning;turnTarget=$TurnTarget} |
     ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $output 'test-context.json')
+if ($StreamingWorld) {
+    @{scriptSha256=(Get-FileHash $PSCommandPath).Hash;world=(Get-FileHash $StreamingWorld);simulationResidency=[bool]$SimulationResidency;
+      binaries=@(Get-FileHash (Join-Path $GameDir 'OpenPoseidon.exe'),(Join-Path $GameDir 'wgpu_renderer.dll'))} |
+        ConvertTo-Json -Depth 5 | Set-Content (Join-Path $output 'streaming-provenance.json')
+}
 $p=Start-Process -FilePath (Join-Path $GameDir 'OpenPoseidon.exe') -WorkingDirectory $GameDir -WindowStyle Hidden -PassThru -ArgumentList $gameArgs
 $null=$p.Handle
 $client=$null
@@ -469,6 +486,10 @@ try {
         $null=Send @{cmd='eval';code='ffvShots'} '0'
         $null=Send @{cmd='screenshot';path=(Join-Path $output 'moving-before-fire.png')}
     }
+    if ($SimulationResidency) {
+        $beforeNaturalFire=Send @{cmd='stream_simulation_residency'}
+        if ($beforeNaturalFire.queryRegions -ne 0) {throw 'Read-only cargo diagnostics created Fire interest'}
+    }
     if (!$PlayerFire -and (!$NpcFire -or $NpcScenario -ne 'hold')) {
         $null=Send @{cmd='exec';code='ffvPassenger reveal ffvTarget; ffvPassenger doTarget ffvTarget; ffvPassenger setCombatMode "YELLOW"; ffvPassenger doFire ffvTarget'}
     }
@@ -485,6 +506,18 @@ try {
             Start-Sleep -Milliseconds 100
         } while ($clock.Elapsed.TotalSeconds -lt 10)
         $samples | ConvertTo-Json -Depth 7 | Set-Content -LiteralPath (Join-Path $output 'motion-samples.json')
+    } elseif ($SimulationResidency) {
+        # Only observe natural AI firing. Never queue from the harness or call
+        # the pose evaluator during this interval to establish consumer proof.
+        $consumerSamples=@();$consumerDeadline=[DateTime]::UtcNow.AddSeconds(10)
+        do {
+            Start-Sleep -Milliseconds 250
+            $consumerState=Send @{cmd='stream_simulation_residency'}
+            $naturalShots=Send @{cmd='eval';code='ffvShots'}
+            $consumerSamples+=@{state=$consumerState;shots=[int]$naturalShots.result}
+        } while ([DateTime]::UtcNow -lt $consumerDeadline)
+        $consumerSamples | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $output 'streaming-consumer.json')
+        if (!@($consumerSamples | Where-Object {$_.state.readyQueries -gt 0 -and $_.state.fireCollisionCalls -gt 0 -and $_.shots -gt 0}).Count) {throw 'Natural AI cargo firing did not exercise a Ready streaming query'}
     } else {Start-Sleep -Seconds 10}
     $after=Send @{cmd='eval';code=('ffvPassenger ammo "'+$Rifle+'"')}
     $seated=Send @{cmd='eval';code='vehicle ffvPassenger == ffvJeep'}

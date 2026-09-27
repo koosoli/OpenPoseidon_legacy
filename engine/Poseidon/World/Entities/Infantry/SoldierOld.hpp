@@ -781,7 +781,9 @@ class Man: public Person
     bool IsCargoWeaponCandidate(int weapon) const;
     Vector3 CargoBulletOrigin(int weapon) const;
     const CargoWeaponSeat* GetActiveCargoWeaponSeat() const;
-	bool CargoWeaponLineClear(int weapon) const;
+	// Only real firing attempts opt into owner residency. Read-only probes keep
+	// the original evaluation and neither acquire nor release query interest.
+	bool CargoWeaponLineClear(int weapon, bool modernInsertion = false) const;
 
 	float GetHandsHit() const {return GetHit(Type()->_handsHit);}
 
