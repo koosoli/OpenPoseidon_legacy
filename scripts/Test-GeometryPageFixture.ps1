@@ -3,11 +3,14 @@ param(
     [switch]$Clod,
     [switch]$Paged,
     [switch]$Evict,
+    [switch]$Disk,
+    [string]$Tools,
     [string]$Label='geometry-page-fixture',
     [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',
     [string]$Python='C:\Program Files\Python311\python.exe'
 )
 $ErrorActionPreference='Stop'
+if ($Disk) {$Clod=$true;$Paged=$true;$Evict=$true}
 if ($Evict -and !$Paged) {throw '-Evict requires -Paged'}
 if ($Paged -and $Clod -and !$Evict) {throw '-Clod -Paged requires -Evict for the bounded combined one-cycle proof'}
 if (!$env:LOCK_OWNER) {
@@ -18,6 +21,8 @@ if (!$env:LOCK_OWNER) {
     if ($Clod) {$argv+='-Clod'}
     if ($Paged) {$argv+='-Paged'}
     if ($Evict) {$argv+='-Evict'}
+    if ($Disk) {$argv+='-Disk'}
+    if ($Tools) {$argv+=@('-Tools',$Tools)}
     $env:LOCK_OWNER='private resident geometry page fixture'
     try {& 'C:\Program Files\Git\bin\bash.exe' @argv; if ($LASTEXITCODE) {throw "Geometry fixture exited $LASTEXITCODE"}}
     finally {Remove-Item Env:LOCK_OWNER}
@@ -29,6 +34,13 @@ $out=Join-Path $root ('build/stream-residency/'+$Label+'-'+(Get-Date -Format yyy
 $fixture=Join-Path $out 'fixture'; $mission=Join-Path $out 'geometry-fixture.eden'
 $env:POSEIDON_USER_DIR=Join-Path $out 'user'
 New-Item -ItemType Directory -Force $mission,$env:POSEIDON_USER_DIR | Out-Null
+$diskProof=$null
+if ($Disk) {
+    if (!$Tools) {$Tools=Join-Path $root 'build/win-x64-clang-rwdi/apps/tools/Tools/PoseidonTools.exe'}
+    . (Join-Path $PSScriptRoot 'streaming/geometry_disk_producer_proof.ps1')
+    $diskProof=New-GeometryDiskProducerProof -Tools $Tools -Out $out
+    $diskProof | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $out 'disk-producer-proof.json')
+}
 & $Python (Join-Path $PSScriptRoot 'streaming/build_simulation_residency_fixture.py') $fixture --absolute-model-path
 if ($LASTEXITCODE) {throw 'Original world fixture generation failed'}
 @'
@@ -61,7 +73,7 @@ $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0)
 $listener.Start();$port=$listener.LocalEndpoint.Port;$listener.Stop()
 $log=Join-Path $out 'engine.log'
 @{head=(& git -C $root rev-parse HEAD);installed=(Get-Content (Join-Path $GameDir 'DEPLOYED-FROM.txt'));
-    disabled=[bool]$Disabled;clod=[bool]$Clod;paged=[bool]$Paged;evict=[bool]$Evict;scriptSha256=(Get-FileHash $PSCommandPath).Hash;
+    disabled=[bool]$Disabled;clod=[bool]$Clod;paged=[bool]$Paged;evict=[bool]$Evict;disk=[bool]$Disk;diskProof=$diskProof;scriptSha256=(Get-FileHash $PSCommandPath).Hash;
     hashes=@(Get-FileHash (Join-Path $GameDir 'OpenPoseidon.exe'),(Join-Path $GameDir 'wgpu_renderer.dll'))} |
     ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $out 'provenance.json')
 $p=$null;$client=$null
@@ -84,7 +96,11 @@ try {
         $line | Add-Content (Join-Path $out 'harness.jsonl')
         if (!$reply.ok) {throw $line};return $reply
     }
-    function Action($action) {Send @{cmd='geometry_page_fixture';action=$action;x=1200;y=15;z=1240}}
+    function Action($action) {
+        $command=@{cmd='geometry_page_fixture';action=$action;x=1200;y=15;z=1240}
+        if ($Disk -and $action -eq 'beginDiskClodPaged') {$command.disk=@{path=$diskProof.path;producer=$diskProof.producer}}
+        Send $command
+    }
     function Capture($name) {
         $path=Join-Path $out $name
         $null=Send @{cmd='screenshot';path=$path}
@@ -147,9 +163,11 @@ try {
                 ($Clod -and (!$cut.clodPilot -or $cut.clodAdapterVersion -ne 1 -or
                     $cut.clodLibraryRevision -ne '9e1f07b159d3cb777f1c67ed31fc11fd117986f4' -or
                     $cut.authoredFineTriangles -ne 512 -or $cut.fallbackTriangles -ne 2 -or
-                    $cut.coarseTriangles -le 0 -or $cut.fineTriangles -le $cut.coarseTriangles -or
-                    $cut.fineTriangles -gt 512 -or $cut.clodGroups -lt 2 -or $cut.clodClusters -lt 1 -or $cut.clodClusters -gt 64 -or
-                    $cut.coarseThreshold -le 0 -or $cut.fineThreshold -ne 0 -or $cut.clodBakeMs -lt 0)) -or
+                    (!$Disk -and ($cut.coarseTriangles -le 0 -or $cut.fineTriangles -le $cut.coarseTriangles -or
+                        $cut.fineTriangles -gt 512 -or $cut.clodGroups -lt 2 -or $cut.clodClusters -lt 1 -or $cut.clodClusters -gt 64 -or
+                        $cut.coarseThreshold -le 0 -or $cut.fineThreshold -ne 0 -or $cut.clodBakeMs -lt 0)) -or
+                    ($Disk -and ($cut.clodGroups -ne 0 -or $cut.clodClusters -ne 0 -or $cut.coarseThreshold -ne 0 -or
+                        $cut.fineThreshold -ne 0 -or $cut.clodBakeMs -ne 0)))) -or
                 $cut.knownPayloadBytes -le 0 -or $cut.knownPayloadBytes -gt 1048576 -or $cut.meshCount -lt 1 -or $cut.meshCount -gt 64 -or
                 $cut.meshesPresent -lt 0 -or $cut.meshesAbsent -lt 0 -or ($cut.meshesPresent+$cut.meshesAbsent) -ne $cut.meshCount -or
                 ($active -and ($cut.rendererModel -eq 4294967295 -or $cut.rendererInstance -eq 4294967295 -or ((!$Evict -and $cut.meshesPresent -ne $cut.meshCount) -or ($Evict -and !$historyValid)))) -or
@@ -203,7 +221,7 @@ try {
         } while ([DateTime]::UtcNow -lt $until)
         throw 'Private geometry records did not settle before deadline'
     }
-    $beginAction=if($Paged -and $Clod){'beginClodPaged'}elseif($Paged){'beginPaged'}elseif($Clod){'beginClod'}else{'begin'}
+    $beginAction=if($Disk){'beginDiskClodPaged'}elseif($Paged -and $Clod){'beginClodPaged'}elseif($Paged){'beginPaged'}elseif($Clod){'beginClod'}else{'begin'}
     $begin=Action $beginAction
     if ($Disabled) {
         foreach ($field in @('status','active','meshCount','knownPayloadBytes')) {if ($null -eq $begin.$field) {throw "Missing disabled fixture field: $field"}}
@@ -219,11 +237,26 @@ try {
                 foreach ($field in @('clodRamAdapterVersion','clodRamKnownSourceBytes','pageSourceKnownBytes','selectedCutSha256','sourceSha256','fallbackSelected')) {
                     if ($null -eq $cut.$field) {throw "Missing selected-CLOD page field: $field"}
                 }
-                if ($cut.clodRamAdapterVersion -ne 1 -or $cut.clodRamKnownSourceBytes -le 0 -or $cut.clodRamKnownSourceBytes -gt 131072 -or
-                    $cut.pageSourceKnownBytes -le 0 -or $cut.pageSourceKnownBytes -gt 131072 -or
+                if ($cut.clodRamAdapterVersion -ne 1 -or
+                    (!$Disk -and ($cut.clodRamKnownSourceBytes -le 0 -or $cut.clodRamKnownSourceBytes -gt 131072 -or
+                        $cut.pageSourceKnownBytes -le 0 -or $cut.pageSourceKnownBytes -gt 131072)) -or
+                    ($Disk -and ($cut.clodRamKnownSourceBytes -ne 0 -or $cut.pageSourceKnownBytes -ne 0)) -or
                     $cut.selectedCutSha256 -notmatch '^[a-fA-F0-9]{64}$' -or $cut.selectedCutSha256 -eq $cut.sourceSha256) {
                     throw 'Selected-cut page provenance/capacity is missing or aliases raw source identity'
                 }
+            }
+            if ($Disk) {
+                foreach ($field in @('diskPilot','coarseResident','diskReadStatus','diskRequestedRepresentation')) {
+                    if ($null -eq $cut.$field) {throw "Missing disk-worker field: $field"}
+                }
+                if (!$cut.diskPilot -or $cut.diskReadStatus -notin @('NotRequested','Read','Missing','Capacity','ReadFailed','Invalid','Unsupported','AllocationFailed','Cancelled') -or
+                    $cut.diskRequestedRepresentation -notin @('Coarse','Fine') -or
+                    $cut.helperHashBefore -ne $diskProof.producer.helperSha256 -or $cut.helperHashAfter -ne $diskProof.producer.helperSha256 -or
+                    $cut.sourceSha256 -ne $diskProof.producer.originalSource.sourceSha256 -or
+                    $cut.selectedCutSha256 -ne $diskProof.producer.selectedCut.source.sourceSha256) {throw 'Disk metadata/source identity mismatch'}
+                if ($cut.coarseResident -and ($cut.coarseTriangles -ne $diskProof.producer.coarseTriangles -or
+                    $cut.fineTriangles -ne $diskProof.producer.fineTriangles)) {throw 'Decoded selected-cut counts differ from external producer'}
+                if ($cut.fineResident -and ($cut.diskReadStatus -ne 'Read' -or $cut.diskRequestedRepresentation -ne 'Fine')) {throw 'Fine residency lacks actual typed disk-read proof'}
             }
             if (!$cut.pagedPilot -or $cut.pageEpoch -lt 1 -or $cut.pageLiveJobs -gt 2 -or
                 $cut.pageQueued -gt 1 -or $cut.pageActive -gt 1 -or $cut.pageReady -gt 1 -or
@@ -239,16 +272,29 @@ try {
             } while ([DateTime]::UtcNow -lt $until)
             throw "Page-worker state did not settle: $($cut | ConvertTo-Json -Compress)"
         }
-        $firstFallback=$null;$fallback=$null;$fallbackReturned=$null
+        function BootstrapDiskCoarse {
+            $until=[DateTime]::UtcNow.AddSeconds(15)
+            do {
+                $polled=PageCut (Action 'pollCoarse');$state=PageCut (Action 'status')
+                if ($state.coarseResident) {break}
+                if ($state.pageWorkState -match 'Failed|Refused|Invalid|Mismatch|Capacity') {throw 'Disk coarse transaction refused'}
+                Start-Sleep -Milliseconds 100
+            } while ([DateTime]::UtcNow -lt $until)
+            if (!$state.coarseResident -or $state.diskReadStatus -ne 'Read' -or $state.diskRequestedRepresentation -ne 'Coarse' -or
+                $state.fineResident -or $state.pageWorkState -ne 'CoarseResident') {throw 'Complete actual disk coarse result not published'}
+            $null=Action 'coarse'
+        }
+        $firstFallback=$null;$fallback=$null;$fallbackReturned=$null;$oldReleased=$null
         if ($Clod) {
             $firstFallback=PageCut (Observe $true $false)
             if (!$firstFallback.fallbackSelected) {throw 'Combined pilot did not begin on independent authored fallback'}
-            Capture 'initial-fallback.png';$null=Action 'coarse'
+            Capture 'initial-fallback.png'
+            if ($Disk) {BootstrapDiskCoarse} else {$null=Action 'coarse'}
         }
         $firstCoarse=PageCut (Observe $true $false)
         if ($Clod -and ($firstCoarse.fallbackSelected -or $firstCoarse.rendererModel -eq $firstFallback.rendererModel -or
             $firstCoarse.rendererInstance -ne $firstFallback.rendererInstance)) {throw 'Combined selected coarse did not preserve fixed fallback instance'}
-        if ($firstCoarse.fineResident -or $firstCoarse.pageLiveJobs -or $firstCoarse.pageWorkState -ne 'Idle') {
+        if ($firstCoarse.fineResident -or $firstCoarse.pageLiveJobs -or (!$Disk -and $firstCoarse.pageWorkState -ne 'Idle')) {
             throw 'Paged begin did not publish an independent coarse-only fallback'
         }
         Capture 'initial-coarse.png'
@@ -265,11 +311,18 @@ try {
         if ($oldRetired.pageActive -ne 1 -or $oldRetired.pageLiveJobs -ne 1 -or $oldRetired.pageReservedBytes -le 0) {
             throw 'Abort released held worker ownership before the worker actually exited'
         }
+        if ($Disk) {
+            # Global worker hold covers coarse too. Preserve cancelled debt until
+            # actual exit, then release it BEFORE replacement coarse bootstrap.
+            $null=Action 'releaseFine'
+            $oldReleased=WaitPage {param($c) $c.pageLiveJobs -eq 0 -and $c.pageActive -eq 0 -and $c.pageQueued -eq 0 -and $c.pageReady -eq 0 -and $c.pageReservedBytes -eq 0}
+            if ($oldReleased.pageCancelled -le $firstCoarse.pageCancelled) {throw 'Cancelled disk worker exit not counted'}
+        }
         $replacement=PageCut (Action $beginAction)
         if ($Clod) {
             $fallback=PageCut (Observe $true $false)
             if (!$fallback.fallbackSelected) {throw 'Replacement epoch lost independent authored fallback'}
-            $null=Action 'coarse'
+            if ($Disk) {BootstrapDiskCoarse} else {$null=Action 'coarse'}
         }
         $coarse=PageCut (Observe $true $false)
         if ($Clod -and ($coarse.fallbackSelected -or $coarse.rendererModel -eq $fallback.rendererModel -or
@@ -280,7 +333,8 @@ try {
             $coarse.producerModel -eq $firstCoarse.producerModel) {throw 'Replacement did not create a fresh coarse epoch'}
         $queued=PageCut (Action 'requestFine')
         if ($queued.pageRequest -lt 1 -or $queued.pageRequest -eq $requested.pageRequest -or
-            $queued.pageActive -ne 1 -or $queued.pageQueued -ne 1 -or $queued.pageLiveJobs -ne 2) {
+            (!$Disk -and ($queued.pageActive -ne 1 -or $queued.pageQueued -ne 1 -or $queued.pageLiveJobs -ne 2)) -or
+            ($Disk -and ($queued.pageLiveJobs -gt 1 -or $queued.pageReservedBytes -le 0))) {
             throw 'Replacement was not bounded to one cancelled active plus one new queued job'
         }
         $null=Action 'releaseFine'
@@ -397,7 +451,7 @@ try {
         $result=@{begin=$begin;firstCoarse=$firstCoarse;requested=$requested;held=$held;oldRetired=$oldRetired;
             replacement=$replacement;coarse=$coarse;queued=$queued;fine=$fine;returned=$returned;fineReturned=$fineReturned;
             retired=$retired;settled=$settled;eviction=$eviction;disabled=$false;paged=$true;clod=[bool]$Clod;
-            firstFallback=$firstFallback;fallback=$fallback;fallbackReturned=$fallbackReturned}
+            firstFallback=$firstFallback;fallback=$fallback;fallbackReturned=$fallbackReturned;disk=[bool]$Disk;diskProducer=$diskProof;oldReleased=$oldReleased}
     } else {
         $fallback=$null; $fallbackReturned=$null
         if ($Clod) {
@@ -436,7 +490,7 @@ try {
     $null=Send @{cmd='exit'}
     if (!$p.WaitForExit(15000) -or $p.ExitCode) {throw 'Game failed to exit cleanly'}
     if (Select-String -LiteralPath $log -Pattern 'Out of Memory|Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION' -Quiet) {throw 'Renderer error'}
-    $result.passed=$true;$result.cleanExit=$true;$result.scope='Private original authored resident geometry, record lifetime and fixed-instance switching; explicit authored or selected-CLOD RAM worker paging only when selected; no generalized asset/DAG paging, all-pass, device-free or performance acceptance'
+    $result.passed=$true;$result.cleanExit=$true;$result.scope='Private original authored resident geometry, record lifetime and fixed-instance switching; explicit authored/selected-CLOD RAM or external controlled disk worker paging only when selected; no generalized asset/DAG paging, all-pass, device-free or performance acceptance'
     $result | ConvertTo-Json -Depth 7 | Set-Content -LiteralPath (Join-Path $out 'result.json')
     Write-Output "Geometry page fixture evidence: $out"
 } catch {
