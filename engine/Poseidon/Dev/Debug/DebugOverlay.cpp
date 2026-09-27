@@ -6556,11 +6556,22 @@ void DrawWaterTab()
         Dev::PanelHelp("Wind speed and heading come from the weather (or the reference sea below), as for "
                        "Current OP. The Current OP controls further down do not affect this mode, except "
                        "Cascade Preset's reference seas, which map onto this group.");
+        const char* twSea[] = {"Weather (Tidewater table at the weather wind)", "Calm", "Breezy (Tidewater default)",
+                               "Choppy", "Storm", "Custom (sliders)"};
+        changed |= Dev::Combo("TW sea conditions", &t.seaConditions, twSea, IM_ARRAYSIZE(twSea));
+        Dev::PanelTooltip("Tidewater's own sea presets (wind, fetch, chop, swell, surf height and period, "
+                          "whitecaps). Weather interpolates them at the weather wind: 3.5 m/s is Calm, 7 m/s "
+                          "Breezy, 12 m/s Choppy, 20 m/s Storm. Custom uses the weather wind and the chop, "
+                          "swell, surf and whitecap sliders below.");
+        const bool twCustom = t.seaConditions == 5;
         changed |= Dev::SliderFloat("TW amplitude", &t.amplitude, 0.0f, 3.0f, "%.2f");
         Dev::PanelTooltip("Displacement scale of all four cascades (WaterSurface amplitude).");
+        ImGui::BeginDisabled(!twCustom);
         changed |= Dev::SliderFloat("TW choppiness", &t.choppiness, 0.0f, 2.0f, "%.2f");
-        Dev::PanelTooltip("Horizontal displacement (lambda). Tidewater default 0.9.");
+        Dev::PanelTooltip("Horizontal displacement (lambda). Tidewater default 0.9. (Custom sea only.)");
         changed |= Dev::SliderFloat("TW swell energy", &t.swellScale, 0.0f, 2.0f, "%.2f");
+        changed |= Dev::SliderFloat("TW whitecaps", &t.whitecaps, 0.0f, 1.0f, "%.2f");
+        ImGui::EndDisabled();
         changed |= Dev::SliderFloat("TW swell heading", &t.swellHeadingDeg, -180.0f, 180.0f, "%.0f deg");
         Dev::PanelTooltip("Direction the distant swell travels toward, world degrees (0 = +X, 90 = +Z).");
         changed |= Dev::SliderFloat("TW cascade scale", &t.cascadeScale, 0.25f, 4.0f, "%.2f");
@@ -6569,6 +6580,10 @@ void DrawWaterTab()
         changed |= Dev::SliderFloat("TW foam intensity", &t.foamIntensity, 0.0f, 3.0f, "%.2f");
         changed |= Dev::Checkbox("TW screen-space reflections", &t.ssr);
         changed |= Dev::SliderFloat("TW reflection strength", &t.reflectionStrength, 0.0f, 2.0f, "%.2f");
+        changed |= Dev::SliderFloat("TW water glow", &t.waterGlow, 0.0f, 1.0f, "%.2f");
+        Dev::PanelTooltip("Light scattered inside the water toward the eye (W3j). 0 = the surface's reflection "
+                          "only (navy, as debug view 20); 1 = Tidewater's formula on OP's light (pale cyan). "
+                          "Default 0 (owner's pick): the reflection-led navy.");
         changed |= Dev::SliderFloat("TW roughness", &t.roughness, 0.0f, 0.3f, "%.3f");
         changed |= Dev::SliderFloat("TW crest subsurface", &t.sss, 0.0f, 3.0f, "%.2f");
         changed |= Dev::SliderFloat("TW backscatter", &t.backscatter, 0.0f, 0.3f, "%.3f");
@@ -6586,9 +6601,12 @@ void DrawWaterTab()
                        "energy.");
         changed |= Dev::Checkbox("TW shore waves", &t.shoreWaves);
         ImGui::BeginDisabled(!t.shoreWaves);
+        ImGui::BeginDisabled(!twCustom);
         changed |= Dev::SliderFloat("TW shore period", &t.shorePeriod, 3.0f, 20.0f, "%.1f s");
         changed |= Dev::SliderFloat("TW shore amplitude", &t.shoreAmplitude, 0.0f, 3.0f, "%.2f m");
-        Dev::PanelTooltip("Offshore amplitude (half the wave height) at the default swell energy 0.48.");
+        Dev::PanelTooltip("Offshore amplitude (half the wave height) at the default swell energy 0.48. (Custom "
+                          "sea only; the presets set the surf themselves.)");
+        ImGui::EndDisabled();
         changed |= Dev::SliderFloat("TW shore variation", &t.shoreVariation, 0.0f, 1.5f, "%.2f");
         changed |= Dev::SliderFloat("TW breaker index", &t.shoreGamma, 0.3f, 1.5f, "%.2f");
         Dev::PanelTooltip("A wave breaks where its height exceeds this x the depth (gamma).");
@@ -6606,11 +6624,17 @@ void DrawWaterTab()
         changed |= Dev::SliderFloat("TW breaker lips", &t.shoreLips, 0.0f, 2.0f, "%.2f");
         Dev::PanelTooltip("Opacity of the thrown lip of plunging breakers (W3d), along the shoreline inside the "
                           "simulated regions. 0 = off.");
+        changed |= Dev::SliderFloat("TW breaker spray", &t.spray, 0.0f, 3.0f, "%.2f");
+        Dev::PanelTooltip("Spray thrown by the breakers (W4): drops and torn strands off the lip, the splash-up "
+                          "where it lands, the roller's spray and mist drifting off with the wind. Emission gain, "
+                          "Tidewater default 1; 0 = off. The rate adapts so the 32768-particle ring holds ~2 s.");
+        changed |= Dev::SliderFloat("TW spray intensity", &t.sprayIntensity, 0.0f, 3.0f, "%.2f");
+        Dev::PanelTooltip("Opacity of the spray sprites (Tidewater default 1).");
         ImGui::EndDisabled();
         ImGui::EndDisabled();
         ImGui::BeginDisabled(true);
         bool notPorted = false;
-        Dev::Checkbox("TW spray budget + refraction pass (not ported: W4)", &notPorted);
+        Dev::Checkbox("TW boat spray + refraction pass (not ported: W4b)", &notPorted);
         Dev::Checkbox("TW underwater + caustics (not ported: W5)", &notPorted);
         Dev::Checkbox("TW boat wakes (not ported: W6)", &notPorted);
         Dev::Checkbox("TW inland lakes / rivers (not drawn: owner decision pending)", &notPorted);

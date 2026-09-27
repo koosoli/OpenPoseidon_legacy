@@ -767,6 +767,9 @@ pub struct Renderer {
     // where a grazing reflection ran off the edge of the reflection target and the reflected
     // clouds ended in a visible line.
     planar_reflection_pad: f32,
+    // TW-WATER W4b: this frame's water camera slot (for Tidewater's reactive-mask pass, which runs
+    // with the tonemap, after the frame's camera list is gone)
+    water_camera_slot: Option<usize>,
     // DZ-005 — the world's river flow map, resolved to a bindless slot, and its
     // `StreamSpeedInfl`. One pair for the whole world, not one per material: Enoch's 804
     // river segments all name the same `enoch_river.emat`, and Chernarus's 4,044 water
@@ -908,6 +911,8 @@ pub struct Renderer {
     // rather than every frame. The pass has had two independent triggers and a toggle that
     // did not reach one of them; "is it running right now" needs to be answerable from a log.
     underwater_engaged_logged: Option<bool>,
+    // TW-WATER W5d: the eye is clearly under the water surface this frame (see the cloud composite).
+    submerged_view: bool,
     post_source_underwater: bool,
     // Which view the bloom/exposure/tonemap chain is currently BOUND to. The rebind below is
     // conditional, so anything that swaps the post source has to be part of this state or its
@@ -1900,6 +1905,7 @@ impl Renderer {
             // grazing view, without giving away more angular resolution than the mip-filtered
             // planar sample can absorb.
             planar_reflection_pad: 1.35,
+            water_camera_slot: None,
             // No flow until a world publishes one; slot 0 is the bindless white fallback and
             // the shader reads it as "this world has no river flow map".
             water_flow_slot: 0,
@@ -2017,6 +2023,7 @@ impl Renderer {
             dof_depth_warned: false,
             underwater_size: (0, 0),
             underwater_engaged_logged: None,
+            submerged_view: false,
             post_source_underwater: false,
             post_source_dof: false,
             underwater_view: UnderwaterView {
@@ -2489,6 +2496,15 @@ impl Renderer {
                         sea,
                         self.sky.cloud_temporal_view(),
                     );
+                    // TW-WATER W4b: Tidewater's lips and spray have no motion vectors either
+                    if let (Some(slot), Some(mask), Some(cam)) = (
+                        self.water_camera_slot,
+                        self.temporal.history_control_view(),
+                        self.gfx3d.camera_bind(),
+                    ) {
+                        let off = (slot as u64 * self.gfx3d.camera_stride()) as u32;
+                        self.water.draw_reactive(encoder, mask, cam, off);
+                    }
                 }
                 // REN-TEMP-001H: moving rigid objects overwrite their camera-only
                 // reprojection with true per-object motion.
@@ -3665,6 +3681,7 @@ impl Renderer {
             .map(|batch| batch.camera as usize)
             .unwrap_or(main_scene_cam);
         let planar_sea = self.water.underwater_params().map(|p| p.0);
+        self.water_camera_slot = (!water_batches.is_empty()).then_some(water_camera);
         let ablate = *ABLATE.get_or_init(Ablate::from_env);
         // How much of the screen the water surface actually covers, 0..1. The planar reflection
         // re-renders terrain, the retained object set and a cloud march from a mirrored camera —
@@ -3897,6 +3914,28 @@ impl Renderer {
         );
         self.terrain
             .prepare(&self.device, &self.queue, terrain_nodes);
+        // TW-WATER W3i: the light the Tidewater water is lit with, logged every ~10 s while that
+        // backend renders (colour calibration against Tidewater's units: sun E ~ 9, sky E/PI ~ 1).
+        if self.water.tidewater().is_some() {
+            static TW_LIGHT_LOG: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            let n = TW_LIGHT_LOG.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if let (0, Some(c)) = (n % 600, prepared_cameras.get(water_camera)) {
+                self.log.log(
+                    log_level::INFO,
+                    &format!(
+                        "TW light: sun_diffuse {:?} sun_ambient {:?} fog {:?} sun_dir {:?}",
+                        c.sun_diffuse, c.sun_ambient, c.fog_color, c.sun_dir_world
+                    ),
+                );
+                if let Some(tw) = self.water.tidewater() {
+                    let (on, stations, stats) = tw.spray_stats();
+                    self.log.log(
+                        log_level::INFO,
+                        &format!("TW spray (W4a): on {on}, breaker stations {stations}, ring {stats:?}"),
+                    );
+                }
+            }
+        }
         self.water.prepare(
             &self.device,
             &self.queue,
@@ -3982,6 +4021,8 @@ impl Renderer {
                     })
                 });
         let underwater_engaged = underwater_state.is_some();
+        // TW-WATER W5d: more than a metre under the surface (flat datum or measured submersion).
+        self.submerged_view = underwater_state.as_ref().is_some_and(|(_, above, _, _)| *above < -1.0);
         if self.underwater_engaged_logged != Some(underwater_engaged) {
             self.underwater_engaged_logged = Some(underwater_engaged);
             // eprintln! rather than self.log, matching the other [wgr] renderer diagnostics —
@@ -5765,6 +5806,12 @@ impl Renderer {
                 && sky_drawn
                 && !ablate.clouds
                 && self.sky.clouds_active(&self.sky_params)
+                // TW-WATER W5d: not from under the sea. The composite is depth-aware against the
+                // resolved scene depth, and the water surface writes none, so from below every
+                // pixel of the surface whose scene behind it is sky was painted with cloud -- the
+                // clouds hung in front of Snell's window and showed through total internal
+                // reflection. (The refracted sky inside the window is the water shader's own.)
+                && !self.submerged_view
             {
                 // Ensure a resolved single-sample scene depth exists (genuinely idempotent now: the
                 // water pass above already recorded it and attaches depth read-only, so the flag

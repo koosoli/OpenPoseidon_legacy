@@ -73,6 +73,9 @@ class TankOrCar: public Transport
 	// sometimes vehicles goes "flying" - e.g. after hit (impulse)
 	Foundation::Time _freeFallUntil;
 
+	// TW-WATER W6-pre: how far a wreck in the water has flooded, 0..1 (TrackedWaterResponse.hpp)
+	float _wreckFlood = 0.0f;
+
 	public:
 	TankOrCar( VehicleType *name, Person *driver );
 

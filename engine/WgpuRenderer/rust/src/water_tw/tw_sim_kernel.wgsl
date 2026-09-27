@@ -33,7 +33,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let drops = 0.0;
 
     // far from the surf and swash zone nothing happens: just let everything decay
-    if (depth > 7.0 || ground - tw.sea.x > 3.2) {
+    // (W3n, OP: Tidewater cuts off at 7 m. Its beach falls away steeply, so nothing is there to
+    // cut; Everon's south coast is a wide shelf the bores cross at 5-7 m, and the 7 m contour of a
+    // 50 m triangle heightmap drew the foam sheet's straight-edged outline. The cutoff is now at
+    // 12 m and the surf fades into it between 4 and 9 m of smoothed depth, below.)
+    if (depth > 12.0 || ground - tw.sea.x > 3.2) {
         let k = exp(-dt / 2.0);
         textureStore(shoreSimOut, gid.xy, r, vec4<f32>(here.x * k, here.y * exp(-dt / dryTime), here.z * k, 0.0));
         return;
@@ -60,7 +64,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     // dense foam collapses within a second or two (big bubbles burst first), the lace it leaves lingers
     let lace = mix(tw.simP0.z, tw.simP0.y, swashy);
     let life = mix(0.7, mix(lace, 0.8, smoothstep(0.3, 0.8, prev.x)), cov);
-    let made = (sw.foam * 2.2 + sw.swashFoam * 1.4) * patchK * cov;
+    // (W3n) 0 in the surf zone .. 1 where Tidewater's cutoff decay takes over
+    let deepK = smoothstep(4.0, 9.0, shoreSmoothDepth(p, depth));
+    let made = (sw.foam * 2.2 + sw.swashFoam * 1.4) * patchK * cov * (1.0 - deepK);
     // the foam is diluted where the flow spreads it out (the uprush thinning as it climbs, the
     // backwash draining): d(foam)/dt = - foam * du/ds along the flow
     let h = simSize / SHORE_SIM_RES;
@@ -69,7 +75,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let uBehind = shoreSimStateAt(uv - dirH, r).w;
     let spreadRate = max((uAhead - uBehind) / (2.0 * h), 0.0);
     let splash = drops * tw.simP1.y * cov;
-    let foam = min(prev.x * exp(-dt * (1.0 / life + spreadRate)) + made * tw.simP1.x * dt + splash, 1.0);
+    let foam = min(prev.x * exp(-dt * (1.0 / life + spreadRate + deepK * 0.5)) + made * tw.simP1.x * dt + splash, 1.0);
 
     // wetness: saturated while covered, then dries
     let wet = max(here.y * exp(-dt / dryTime), cov);

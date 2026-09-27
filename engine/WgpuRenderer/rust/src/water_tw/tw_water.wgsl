@@ -67,6 +67,8 @@ struct OceanParams {
 @group(1) @binding(17) var shoreSimStateTex: texture_2d_array<f32>; // rgba16float, one layer per region
 @group(1) @binding(18) var shoreSimLace: texture_2d<f32>;        // rgba8unorm lace (mip 0 read with loads)
 @group(1) @binding(19) var<storage, read> breakersCrest: array<vec4<f32>>; // breaker crest records (tw_lip.wgsl)
+@group(1) @binding(23) var causticsFineTex: texture_2d<f32>;  // W5b caustics (caustics.rs)
+@group(1) @binding(24) var causticsBroadTex: texture_2d<f32>;
 
 // ------------------------------------------------------------------ CDLOD.js
 
@@ -595,6 +597,11 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
     var ssrW = 0.0;
     var dbgPath = 0.0;
     var dbgScene = vec3<f32>(0.0);
+    // (W3h colour diagnostics: debug views 20-23, see the list at the end)
+    var dbgRefl = vec3<f32>(0.0);
+    var dbgTrans = vec3<f32>(0.0);
+    var dbgIn = vec3<f32>(0.0);
+    var dbgLight = vec3<f32>(0.0);
 
     if (!viewFromBelow) {
         // ================= ABOVE WATER =================
@@ -694,6 +701,35 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
         let sigS = tw.scattering.rgb + surfMed.scatter * sandK + aer * 1.6;
         let sigT = sigA + sigS;
 
+        // (W3f) Light reaching what lies under the water. OP lights its sea bed (and anything else
+        // below the surface) as if it stood in air; Tidewater's UnderwaterLighting attenuates that
+        // light through the water column above it (hookDirectModulation: the sun along its refracted
+        // path, exp(-sigT d / mu); hookAmbientModulation: diffuse light over ~1.2 d, plus a little
+        // in-scattered blue). Without it every metre of sea shows sunlit sand through a thin blue
+        // filter, and deep water reads pale cyan instead of Tidewater's navy. The opaque copy holds
+        // direct + ambient light already summed, so the two attenuations are blended by the direct
+        // share of a flat bed's irradiance. Caustics are not ported here (W5).
+        if (dR > 1e-7 && !thruCrest) {
+            let bedPos = scene_rel_at(uvF, dR) + frame.cam_pos.xyz;
+            let dBed = max(tw.sea.x - bedPos.y, 0.0);
+            if (dBed > 0.0) {
+                let sigTc = tw.absorption.rgb + tw.scattering.rgb;
+                let LsB = refract(-L, vec3<f32>(0.0, 1.0, 0.0), 1.0 / IOR);
+                let muB = max(-LsB.y, 0.15);
+                // (W5b) the direct light arrives focused into Tidewater's caustic networks
+                let causLvl = twCausticsLevel(footprint * 1.5, tw.brk.z);
+                let caus = twCausticsSample(causticsFineTex, causticsBroadTex, smpLinearRepeat, tw.brk.zw, bedPos, dBed, L, causLvl, false);
+                let attDirect = exp(-sigTc * dBed / muB) * caus;
+                let attAmbient = exp(-sigTc * dBed * 1.2) * 0.85 + vec3<f32>(0.0, 0.02, 0.04) * exp(dBed * -0.1);
+                let lumW = vec3<f32>(0.2126, 0.7152, 0.0722);
+                let eSun = dot(sunLight, lumW) * max(L.y, 0.0) * INV_PI;
+                let eSky = dot(skyIrr, lumW);
+                let directShare = eSun / max(eSun + eSky, 1e-5);
+                let bedAtt = attDirect * directShare + attAmbient * (1.0 - directShare);
+                sceneCol *= mix(vec3<f32>(1.0), bedAtt, smoothstep(0.0, 0.08, dBed));
+            }
+        }
+
         let Ls = -refract(-L, vec3<f32>(0.0, 1.0, 0.0), 1.0 / IOR);
         let muS = max(Ls.y, 0.1);
         let muV = max(-Tv.y, 0.15);
@@ -718,7 +754,13 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
         let sssCol = vec3<f32>(0.12, 0.55, 0.45) * 0.06;
         let sss = sunLight * sssCol * back * crest * tw.material0.y * smoothstep(0.0, 0.25, L.y);
 
-        let transmitted = sceneCol * Tview * (1.0 - 0.3 * lipW) + inSun + inAmb + sss;
+        // (W3j) the water's own glow (light scattered inside it toward the eye) x the Water tab's
+        // "TW water glow" (tw.material1.w). Tidewater's formula; OP's lighting makes it several
+        // times brighter relative to the reflection than in Tidewater, which turned deep water
+        // pale cyan (debug view 22). The scale brings it back between Tidewater's reflection-led
+        // navy and Current OP's steel blue.
+        let glowK = tw.material1.w;
+        let transmitted = sceneCol * Tview * (1.0 - 0.3 * lipW) + (inSun + inAmb + sss) * glowK;
 
         // ---- foam: bright diffuse scatterer (albedo ~0.85), wrapped sun + sky irradiance
         var foamLit = (sunLight * (max(dot(N, L), 0.0) * 0.75 + 0.25) * INV_PI + skyIrr * 0.95) * 0.85;
@@ -727,6 +769,10 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
 
         let rim = smoothstep(0.0, 0.025, frontD) * smoothstep(0.1, 0.035, frontD) * uprush;
         let water = mix(transmitted, reflCol, F) + sunSpec + skyRefl * (0.22 * rim);
+        dbgRefl = reflCol * F + sunSpec;
+        dbgTrans = sceneCol * Tview * (1.0 - F);
+        dbgIn = (inSun + inAmb + sss) * glowK * (1.0 - F);
+        dbgLight = vec3<f32>(dot(sunLight, vec3<f32>(0.2126, 0.7152, 0.0722)), dot(skyIrr, vec3<f32>(0.2126, 0.7152, 0.0722)), F);
         let shaded = mix(water, foamCol + sunSpec * 0.05, sat(foam));
         let edgeAA = smoothstep(0.0, thicknessAA, thickness);
         outCol = shaded;
@@ -757,8 +803,8 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
         let kS = sigT * (1.0 - min(Rr.y, 0.0) / muU);
         let kA = sigT * (1.0 - min(Rr.y, 0.0) / 0.8);
         let eSunU = sunLight * (1.0 - fresnelDielectric(max(L.y, 0.02), IOR));
-        let deepCol = eSunU * (sigS * phR + albedoMS * sigT * INV_PI) / kS
-            + skyIrr * PI * (sigS * (1.0 / (4.0 * PI)) + albedoMS * sigT * INV_PI) / kA;
+        let deepCol = (eSunU * (sigS * phR + albedoMS * sigT * INV_PI) / kS
+            + skyIrr * PI * (sigS * (1.0 / (4.0 * PI)) + albedoMS * sigT * INV_PI) / kA) * max(tw.material1.w, 0.12);
 
         let sceneZ = _waterSceneZAt(screenUV);
         let hasObj = posV.z - sceneZ > 0.0 && sceneZ > -1e8;
@@ -770,7 +816,11 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
     }
 
     // debug views (Tidewater numbering): 1 back faces red, 2 normals, 3 foam, 5 lattice,
-    // 6 path length, 7 seabed seen through, 8 sea depth, 10 SSR weight
+    // 6 path length, 7 seabed seen through, 8 sea depth, 10 SSR weight; OP additions (W3h): the
+    // above-water composite split into 20 reflection (+ sun glint), 21 sea bed transmitted,
+    // 22 in-scattered light, and 23 the light inputs (r: sun irradiance luminance / 10,
+    // g: sky irradiance luminance, b: Fresnel), all before fog; W3m: 24 foam sources (r shore
+    // waves, g simulation, b region coverage), 25 (r depth / 26 m, g whitecaps, b foam coverage)
     let dbg = i32(tw.material1.z + 0.5);
     var res = min(outCol, vec3<f32>(16000.0));
     if (dbg == 1) {
@@ -789,6 +839,20 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
         res = vec3<f32>(0.0, vDepth * 0.02, 0.0);
     } else if (dbg == 10) {
         res = vec3<f32>(ssrW);
+    } else if (dbg == 20) {
+        res = dbgRefl;
+    } else if (dbg == 21) {
+        res = dbgTrans;
+    } else if (dbg == 22) {
+        res = dbgIn;
+    } else if (dbg == 24) {
+        // (W3m) the foam sources: r shore-wave foam (per vertex), g simulated foam, b region coverage
+        res = vec3<f32>(sat(in.shoreFoam), sat(simState.x), simIn);
+    } else if (dbg == 25) {
+        // (W3m) r depth / 26 m (the shore waves' reach), g whitecaps (per vertex), b foam coverage
+        res = vec3<f32>(sat(vDepth / 26.0), sat(in.foam), sat(surf.coverage));
+    } else if (dbg == 23) {
+        res = dbgLight * vec3<f32>(0.1, 1.0, 1.0);
     }
     return vec4<f32>(res, 1.0);
 }

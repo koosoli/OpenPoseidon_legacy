@@ -1105,6 +1105,56 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
         //   preset 5 "Rough open water"        -> amplitude x1.60, choppiness 1.0, swell x1.25
         // Wind speed and heading reach Tidewater through fft_wind_sea, exactly as for Current OP.
         auto t = look.tidewater;
+        // W3g — sea conditions from Tidewater's own preset table (AppUI.js SEA), so the sea state
+        // (wind, fetch, chop, swell, surf height and period, whitecaps) is Tidewater's at the same
+        // wind. Weather mode interpolates the table at the latched weather wind, so a 7 m/s day
+        // is exactly Breezy (Tidewater's defaults) and 3.5 m/s is Calm; a preset also sets the wind.
+        // The renderer scales the surf with swell / 0.48 (see tidewater_shore), so the preset
+        // surf is pre-divided by that factor here and the net surf is the preset's own.
+        struct TwSea
+        {
+            float wind, fetch, chop, swell, surf, period, whitecaps;
+        };
+        static constexpr TwSea kTwSea[4] = {
+            {3.5f, 40.0f, 0.75f, 0.28f, 0.18f, 11.0f, 0.2f},   // Calm
+            {7.0f, 120.0f, 0.9f, 0.48f, 0.34f, 9.0f, 0.5f},    // Breezy (Tidewater's defaults)
+            {12.0f, 300.0f, 1.05f, 0.68f, 0.56f, 8.5f, 0.75f}, // Choppy
+            {20.0f, 900.0f, 1.2f, 1.0f, 0.9f, 12.0f, 1.0f},    // Storm
+        };
+        float seaWindOverride = 0.0f;
+        float seaFetch = 0.0f;
+        float seaWhitecaps = std::clamp(t.whitecaps, 0.0f, 1.0f);
+        const int seaMode = std::clamp(t.seaConditions, 0, 5);
+        if (seaMode <= 4)
+        {
+            TwSea c{};
+            if (seaMode == 0)
+            {
+                const float w = _seaWindInit ? _seaWindSpeed : 7.0f;
+                int i = 0;
+                while (i < 2 && w > kTwSea[i + 1].wind)
+                {
+                    ++i;
+                }
+                const float f = std::clamp((w - kTwSea[i].wind) / (kTwSea[i + 1].wind - kTwSea[i].wind), 0.0f, 1.0f);
+                auto lerp = [f](float a, float b) { return a + (b - a) * f; };
+                const TwSea& a = kTwSea[i];
+                const TwSea& b = kTwSea[i + 1];
+                c = {w, lerp(a.fetch, b.fetch), lerp(a.chop, b.chop), lerp(a.swell, b.swell), lerp(a.surf, b.surf),
+                     lerp(a.period, b.period), lerp(a.whitecaps, b.whitecaps)};
+            }
+            else
+            {
+                c = kTwSea[seaMode - 1];
+                seaWindOverride = c.wind;
+            }
+            seaFetch = c.fetch;
+            seaWhitecaps = c.whitecaps;
+            t.choppiness = c.chop;
+            t.swellScale = c.swell;
+            t.shoreAmplitude = c.surf * 0.48f / std::max(c.swell, 0.01f);
+            t.shorePeriod = c.period;
+        }
         if (look.cascadePreset == 3)
         {
             t.amplitude *= 0.55f;
@@ -1137,6 +1187,9 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
                                       std::clamp(t.shoreCurl, 0.0f, 1.5f), std::clamp(t.shoreRunup, 0.0f, 3.0f)};
         _params.tidewater_shore[2] = {std::clamp(t.shoreTurbidity, 0.0f, 1.0f), t.shoreSim ? 1.0f : 0.0f,
                                       std::clamp(t.shoreDryTime, 2.0f, 300.0f), std::clamp(t.shoreLips, 0.0f, 2.0f)};
+        _params.tidewater_sea = {seaWindOverride, seaFetch, seaWhitecaps, static_cast<float>(seaMode)};
+        _params.tidewater_fx = {std::clamp(t.spray, 0.0f, 3.0f), std::clamp(t.sprayIntensity, 0.0f, 3.0f),
+                                std::clamp(t.waterGlow, 0.0f, 2.0f), 0.0f};
     }
     _params.sea_params = {look.seaStateCoupling ? 1.0f : 0.0f,
                           look.seaStateCoupling ? SeaStateResidualAmplitude(look.waveAmp) : look.waveAmp,

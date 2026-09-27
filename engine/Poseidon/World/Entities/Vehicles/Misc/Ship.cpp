@@ -423,8 +423,12 @@ void Ship::Simulate(float deltaT, SimulationImportance prec)
 
         if (_isDead && _waterContact && !_landContact)
         {
+            // TW-WATER W6-pre: a sunk hull goes all the way to the sea bed and stays there. The
+            // sink depth used to stop at 50 m and the wreck was deleted at twice its bounding
+            // radius, so a boat vanished part-way down; the collision below now keeps the sea bed
+            // where it is while the water level drops (see the GroundCollision call).
             _sink += deltaT * 0.33;
-            saturateMin(_sink, 50);
+            saturateMin(_sink, 2000);
             if (_sink > 3)
             {
                 // stop smoking - we are under water
@@ -433,10 +437,6 @@ void Ship::Simulate(float deltaT, SimulationImportance prec)
                 {
                     smoke->SetDelete();
                 }
-            }
-            if (_sink >= _shape->BoundingSphere() * 2)
-            {
-                SetDelete();
             }
         }
         else if (!_isDead && _sink > 0)
@@ -607,8 +607,22 @@ void Ship::Simulate(float deltaT, SimulationImportance prec)
 
                 /**/
                 GroundCollisionBuffer gCollision;
-                float above = -_sink;
-                GLandscape->GroundCollision(gCollision, this, moveTrans, above, 1);
+                // A sinking wreck sees the water surface `_sink` metres lower, which is what takes
+                // it down. Only the WATER is lowered (TW-WATER W6-pre): passing -_sink as the
+                // collision's `above` lowered the ground by the same amount, so the hull sank
+                // through the sea bed and never touched it.
+                GLandscape->GroundCollision(gCollision, this, moveTrans, 0, 1);
+                if (_sink > 0)
+                {
+                    for (int i = 0; i < gCollision.Size(); i++)
+                    {
+                        if (gCollision[i].type == GroundWater)
+                        {
+                            gCollision[i].under -= _sink;
+                            gCollision[i].underFlat -= _sink;
+                        }
+                    }
+                }
                 _landContact = false;
                 _waterContact = false;
                 if (gCollision.Size() > 0)
@@ -634,7 +648,9 @@ void Ship::Simulate(float deltaT, SimulationImportance prec)
                             const float coefNPoints = 12.0 / 12.0;
                             // first is water is "pushing" everything up - causing some momentum
                             pForce = Vector3(0, (1200000 / baseMass) * GetMass() * info.under * coefNPoints, 0);
-                            if (smallShip)
+                            // TW-WATER W6a.2: a wreck does not plane. With the lift a boat killed
+                            // at speed skimmed on for 150 m while it "sank" (twboats, 98aee494).
+                            if (smallShip && !_isDead)
                             {
                                 // PLANING LIFT. A small hull gets up to 120x the static buoyancy
                                 // as it picks up speed, which is the 2001 engine's stand-in for
@@ -679,7 +695,8 @@ void Ship::Simulate(float deltaT, SimulationImportance prec)
                             pForce[1] = speed[1] * fabs(speed[1]) * 40 + speed[1] * 30;
                             pForce[2] = (fabs(speed[2]) * 0.02 + 0.06) * speed[2] * dragDepth;
 
-                            if (_pilotBrake)
+                            // (W6a.2) a flooding wreck brakes in the water like a stopped hull
+                            if (_pilotBrake || _isDead)
                             {
                                 pForce *= 8;
                             }

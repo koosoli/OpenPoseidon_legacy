@@ -1317,9 +1317,17 @@ void World::Simulate(float deltaT, bool& enableDraw)
         float fov = 0.7;
         Matrix4 transform = camera.Transform();
         float cameraRotate = 0;
+        // TW-WATER W5c: a camera the mission scripts or flies by hand (camCreate + cameraEffect,
+        // the free camera) may go under the sea for cut-scenes; see the clamp below.
+        bool mayDive = false;
+        if (const CameraHolder* holder = dyn_cast<CameraHolder, Object>(_cameraOn))
+        {
+            mayDive = holder->GetManual();
+        }
 
         if (_cameraEffect)
         {
+            mayDive = mayDive || dyn_cast<CameraHolder, Object>(_cameraEffect->GetObject()) != nullptr;
             _cameraEffect->Simulate(deltaT);
             fov = _cameraEffect->GetFOV();
             if (fov < 0)
@@ -1653,8 +1661,12 @@ void World::Simulate(float deltaT, bool& enableDraw)
             }
         }
         {
+            // Every view stays above the ground. Player, vehicle and trigger-effect views also stay
+            // above the sea; a scripted or free camera (mayDive, TW-WATER W5c) may go under it -- the
+            // renderer's underwater compositor takes over there -- and is held only above the sea bed.
             Vector3 camPos = transform.Position();
-            float minCamY = _scene.GetLandscape()->SurfaceYAboveWater(camPos.X(), camPos.Z());
+            float minCamY = mayDive ? _scene.GetLandscape()->SurfaceY(camPos.X(), camPos.Z())
+                                    : _scene.GetLandscape()->SurfaceYAboveWater(camPos.X(), camPos.Z());
             minCamY += 0.1;
             if (camPos.Y() < minCamY)
             {

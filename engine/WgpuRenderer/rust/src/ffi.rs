@@ -1445,6 +1445,12 @@ pub struct WgrWaterParams {
     // TW-WATER W3 — the Tidewater shoreline-wave group (ShoreWaves.js ShoreParams); lane meanings in
     // wgpu_renderer.hpp. (sizeof 1136 -> 1184, matching C++.)
     pub tidewater_shore: [WgrVec4; 3],
+    // TW-WATER W3g — sea conditions: local wind override, fetch, whitecaps, mode (see
+    // wgpu_renderer.hpp). (sizeof 1184 -> 1200, matching C++.)
+    pub tidewater_sea: WgrVec4,
+    // TW-WATER W4 — effects: spray emission gain, spray sprite intensity, unused x2 (see
+    // wgpu_renderer.hpp). (sizeof 1200 -> 1216, matching C++.)
+    pub tidewater_fx: WgrVec4,
 }
 
 pub const WGR_WATER_MAX_BODIES: usize = 16;
@@ -1659,7 +1665,7 @@ const _: () = assert!(std::mem::size_of::<WgrGrassDownwash>() == 16);
 // (GrassParams.photo / .place / .photo_mix / .layer_weights[2]). 4736 + 32 for
 // the card-coverage / procedural-look pair (GrassParams.card_look / .blade_look).
 const _: () = assert!(std::mem::size_of::<WgrGrassParams>() == 4784);
-const _: () = assert!(std::mem::size_of::<WgrWaterParams>() == 1184);
+const _: () = assert!(std::mem::size_of::<WgrWaterParams>() == 1216);
 const _: () = assert!(std::mem::size_of::<WgrWaterNode>() == 40);
 const _: () = assert!(std::mem::size_of::<WgrWaterBatch>() == 16);
 const _: () = assert!(std::mem::size_of::<WgrWaterInteractionEvent>() == 64);
@@ -1777,9 +1783,9 @@ pub extern "C" fn wgr_abi_version() -> u32 {
     if cfg!(debug_assertions) {
         option_env!("WGR_TEST_ABI_VERSION")
             .and_then(|value| value.parse::<u32>().ok())
-            .unwrap_or(17)
+            .unwrap_or(18)
     } else {
-        17
+        18
     }
 }
 
@@ -2085,7 +2091,7 @@ mod abi_tests {
 
     #[test]
     fn exported_abi_version_matches_the_public_contract() {
-        assert_eq!(super::wgr_abi_version(), 17); // appended Tidewater water lanes/timers
+        assert_eq!(super::wgr_abi_version(), 18); // W3g/W4 water sea/effects lanes
     }
 
     #[test]
@@ -2101,6 +2107,16 @@ mod abi_tests {
         let mut check = good_check();
         check.abi_version = 16;
         assert_eq!(unsafe { super::wgr_abi_validate(&check) }, 0);
+    }
+
+    #[test]
+    fn pre_sea_and_effect_lanes_version_is_refused_even_with_current_hash() {
+        let mut check = good_check();
+        check.abi_version = 17;
+        assert_eq!(unsafe { super::wgr_abi_validate(&check) }, 0);
+        assert_eq!(std::mem::size_of::<super::WgrWaterParams>(), 1216);
+        assert_eq!(std::mem::offset_of!(super::WgrWaterParams, tidewater_sea), 1184);
+        assert_eq!(std::mem::offset_of!(super::WgrWaterParams, tidewater_fx), 1200);
     }
 
     #[test]

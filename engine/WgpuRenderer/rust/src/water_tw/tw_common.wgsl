@@ -14,7 +14,7 @@ struct TwSurface {
     wind: vec4<f32>,       // wind dir xz (toward), sea-detail drift offset xy (m)
     surface: vec4<f32>,    // amplitude, slope scale, foam coverage, foam pattern scale (1/m)
     material0: vec4<f32>,  // backscatter, sss, foam intensity, reflection strength
-    material1: vec4<f32>,  // roughness, ssr on, debug view, sun-lit sky flag
+    material1: vec4<f32>,  // roughness, ssr on, debug view, water glow (W3j: in-scatter scale)
     absorption: vec4<f32>, // rgb 1/m
     scattering: vec4<f32>, // rgb 1/m
     detail: vec4<f32>,     // gust, slick, streak amounts
@@ -25,7 +25,7 @@ struct TwSurface {
     sim: array<vec4<f32>, 2>, // ShoreSim regions: min xz (world), size (m), weight (0 = inactive, fades in)
     simP0: vec4<f32>,      // ShoreSimParams: dryTime, foamLife, surfFoamLife, residueLife (s)
     simP1: vec4<f32>,      // ShoreSimParams: foamGen, depositGain, dt (s), shore sim on
-    brk: vec4<f32>,        // Breakers: station count, lip opacity (Tidewater `sheet`), unused x2
+    brk: vec4<f32>,        // Breakers: station count, lip opacity (Tidewater `sheet`); W5b caustic tiles (fine, broad) m
     morph: array<vec4<f32>, 12>, // CDLOD per level: morph start, 1/range, spacing
 };
 

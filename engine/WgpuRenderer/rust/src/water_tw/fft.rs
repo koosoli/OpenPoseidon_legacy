@@ -106,6 +106,8 @@ pub struct SpectrumInputs {
     pub swell: WaveSystem,
     pub depth: f32,
     pub seed: u32,
+    /// Jacobian foam threshold (OceanFFT `foamBias`), from the whitecaps control (W3g).
+    pub foam_bias: f32,
 }
 
 impl SpectrumInputs {
@@ -132,6 +134,15 @@ impl SpectrumInputs {
         if p.fft_wind_sea[2] > 0.0 {
             local.wind_speed = p.fft_wind_sea[2];
         }
+        // W3g — sea conditions (resolved from Tidewater's preset table on the C++ side): a preset
+        // brings its own wind; every mode brings the fetch. Zero lanes keep Tidewater's defaults.
+        let sea = p.tidewater_sea;
+        if sea[0] > 0.0 {
+            local.wind_speed = sea[0];
+        }
+        if sea[1] > 0.0 {
+            local.fetch_km = sea[1];
+        }
         let mut swell = WaveSystem::SWELL;
         swell.scale = tw[0][2].max(0.0);
         swell.wind_direction_deg = tw[0][3] + 180.0;
@@ -142,7 +153,13 @@ impl SpectrumInputs {
         local.wind_direction_deg = q(local.wind_direction_deg, 1.0);
         swell.scale = q(swell.scale, 0.01);
         swell.wind_direction_deg = q(swell.wind_direction_deg, 1.0);
-        Self { sizes, local, swell, depth: 500.0, seed: 1337 }
+        local.fetch_km = q(local.fetch_km, 1.0);
+        // AppUI.js whitecaps(): more whitecaps start at less compression, and more of them in
+        // fresh wind. (Its decay term is not taken over: OceanFFT's 0.35 stays, W3g notes.)
+        // Zeroed params (no C++ side yet) read as Tidewater's 0.5.
+        let whitecaps = if sea == [0.0; 4] { 0.5 } else { sea[2].clamp(0.0, 1.0) };
+        let foam_bias = q(0.5 + 0.16 * whitecaps + 0.01 * (local.wind_speed - 7.0).clamp(-5.0, 12.0), 0.005);
+        Self { sizes, local, swell, depth: 500.0, seed: 1337, foam_bias }
     }
 
     pub fn cuts(&self) -> [[f32; 4]; 4] {
@@ -170,8 +187,9 @@ pub fn ocean_params(spec: &SpectrumInputs, choppiness: f32, time: f32, dt: f32) 
         cuts: spec.cuts(),
         sys_a: [a0, a1],
         sys_b: [b0, b1],
-        // Tidewater's foam constants (OceanFFT.js): bias 0.58, gain 3, decay 0.35, add 2.5.
-        p0: [choppiness, 0.58, 3.0, 0.35],
+        // Tidewater's foam constants (OceanFFT.js): bias 0.58 (W3g: from the whitecaps control,
+        // 0.58 at its default), gain 3, decay 0.35, add 2.5.
+        p0: [choppiness, spec.foam_bias, 3.0, 0.35],
         p1: [2.5, time, spec.depth, dt],
         seed: [spec.seed, 0, 0, 0],
     }
@@ -989,6 +1007,7 @@ mod tests {
             swell: WaveSystem::SWELL,
             depth: 500.0,
             seed: 1337,
+            foam_bias: 0.58,
         };
         let cuts = s.cuts();
         assert_eq!(cuts[0][0], 0.0001);
@@ -1004,6 +1023,24 @@ mod tests {
         let s = SpectrumInputs::from_params(&p);
         assert_eq!(s.local.wind_direction_deg, 180.0);
         assert_eq!(s.swell.wind_direction_deg, 185.0); // swell heading 5° (travels toward)
+    }
+
+    #[test]
+    fn sea_conditions_lane_overrides_wind_fetch_and_foam() {
+        let mut p = <WgrWaterParams as bytemuck::Zeroable>::zeroed();
+        p.tidewater = crate::water_tw::DEFAULT_PARAMS;
+        p.fft_wind_sea = [1.0, 0.0, 6.0, 0.3];
+        // zeroed lane: Tidewater's defaults (weather wind, 120 km, foam bias 0.58 at 7 m/s)
+        let s = SpectrumInputs::from_params(&p);
+        assert_eq!(s.local.wind_speed, 6.0);
+        assert_eq!(s.local.fetch_km, 120.0);
+        assert!((s.foam_bias - 0.57).abs() < 1e-6);
+        // Storm preset: 20 m/s, 900 km, whitecaps 1
+        p.tidewater_sea = [20.0, 900.0, 1.0, 4.0];
+        let s = SpectrumInputs::from_params(&p);
+        assert_eq!(s.local.wind_speed, 20.0);
+        assert_eq!(s.local.fetch_km, 900.0);
+        assert!((s.foam_bias - (0.5 + 0.16 + 0.12)).abs() < 1e-6);
     }
 
     #[test]

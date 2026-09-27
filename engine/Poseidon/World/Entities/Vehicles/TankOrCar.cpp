@@ -1,6 +1,8 @@
 
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/World/Entities/Vehicles/TankOrCar.hpp>
+#include <Poseidon/World/Entities/Vehicles/Ground/TrackedWaterResponse.hpp>
+#include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Network/Network.hpp>
@@ -151,6 +153,20 @@ void TankOrCar::Simulate(float deltaT, SimulationImportance prec)
             smoke->Explode(explosionTime);
         }
         NeverDestroy();
+        // TW-WATER W6-pre: a wreck in the water floods (see TrackedWaterResponse.hpp)
+        if (_waterContact)
+        {
+            _wreckFlood = WreckFloodStep(_wreckFlood, deltaT);
+        }
+        // W6a.1 / W6c: the fire goes out when the water closes over the wreck (as a sunk ship's
+        // does, Ship.cpp), not when the flooding timer ends
+        if (_wreckFlood > 0.0f && Position().Y() < GLOB_LAND->GetSeaLevel() - 1.0f)
+        {
+            if (Vehicle* smoke = GetSmoke())
+            {
+                smoke->SetDelete();
+            }
+        }
     }
 
     base::Simulate(deltaT, prec);

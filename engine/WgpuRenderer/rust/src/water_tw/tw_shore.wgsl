@@ -96,6 +96,27 @@ fn terrainShoreSample(xz: vec2<f32>) -> vec4<f32> {
     return vec4<f32>(s.x, s.yz * inside, s.w);
 }
 
+// (W3l, OP) The depth the surf decides its breaking from: the shore field's smoothed depth
+// (~20 m blur, shore_field.rs) away from the waterline, the real depth near it (so the waves still
+// run up the real beach). OP's 50 m triangle heightmaps have straight-segment depth contours, and
+// Tidewater's breaking switches sharply across a contour: the surf foam ended along polygons.
+fn shoreSmoothDepth(xz: vec2<f32>, d: f32) -> f32 {
+    let res = vec2<f32>(textureDimensions(shoreFieldDir));
+    let f = (xz - tw.shoreGrid.xy) / max(tw.shoreGrid.z, 1e-3) - 0.5;
+    let fc = clamp(f, vec2<f32>(0.0), max(res - 1.001, vec2<f32>(0.0)));
+    let i = vec2<i32>(floor(fc));
+    let t = fract(fc);
+    let mx = max(vec2<i32>(res) - 1, vec2<i32>(0));
+    let a = textureLoad(shoreFieldDir, i, 0).z;
+    let b = textureLoad(shoreFieldDir, min(i + vec2<i32>(1, 0), mx), 0).z;
+    let c = textureLoad(shoreFieldDir, min(i + vec2<i32>(0, 1), mx), 0).z;
+    let e = textureLoad(shoreFieldDir, min(i + vec2<i32>(1, 1), mx), 0).z;
+    let ds = mix(mix(a, b, t.x), mix(c, e, t.x), t.y) * 32.0;
+    // (no smoothed value: a field without it, or land all around)
+    let use_s = select(0.0, smoothstep(1.0, 4.0, d), ds > 0.05);
+    return mix(d, ds, use_s);
+}
+
 // Tidewater's terrainNormalRock(xz).xy (the terrain normal's x and z) from OP's heightmap by
 // central differences, one heightmap cell apart (Tidewater bakes a normal texture instead).
 fn terrainNormalXZ(xz: vec2<f32>) -> vec2<f32> {
@@ -350,8 +371,9 @@ fn shoreCrest( A: f32, d: f32 ) -> vec4f {
 // takes over (the profile stays continuous at u = +-0.5). u: local phase, lam: local wavelength.
 fn shoreBreakDepth( xz: vec2f, dir: vec2f, u: f32, lam: f32, d: f32 ) -> f32 {
 	let pc = xz + dir * ( u * lam );
-	let dc = tw.sea.x - terrainHeightAt( pc );
-	return mix( dc, d, smoothstep( 0.3, 0.5, abs( u ) ) );
+	// (W3l: both depths smoothed away from the waterline, see shoreSmoothDepth)
+	let dc = shoreSmoothDepth( pc, tw.sea.x - terrainHeightAt( pc ) );
+	return mix( dc, shoreSmoothDepth( xz, d ), smoothstep( 0.3, 0.5, abs( u ) ) );
 }
 
 // ------------------------------------------------------------ surf zone water

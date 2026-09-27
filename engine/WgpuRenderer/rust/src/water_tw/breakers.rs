@@ -19,7 +19,8 @@
 //!   `MAX_STATIONS_PER_REGION`), and smooths and resamples each run as Tidewater does. The side
 //!   toward the sea is where the terrain is lower. Runs are kept apart: a crest's id carries its
 //!   run, so no lip segment joins two runs.
-//! * **Spray** (the emitters in the kernel and the spray shadow) comes with the spray in W4.
+//! * **Spray** (W4a, `spray.rs`): the emitters run in this kernel for every crest found; the
+//!   particle update is a second entry point of the same module and bind group.
 //! * **Occlusion by the wave.** Tidewater's water writes depth, so the wave's back hides the
 //!   curtain from a camera on the sea side. OP's water pass keeps depth read-only (for every
 //!   backend), so the lip shader hides the part of the curtain the sight line reaches under the
@@ -244,10 +245,14 @@ pub struct BreakersGpu {
     crest: wgpu::Buffer,
     kernel_layout: wgpu::BindGroupLayout,
     kernel: wgpu::ComputePipeline,
+    /// the spray update (tw_spray_update.wgsl), same module and bind group
+    spray_update: wgpu::ComputePipeline,
     kernel_bind: Option<wgpu::BindGroup>,
     lip_vbuf: wgpu::Buffer,
     lip_ibuf: wgpu::Buffer,
     lip_pipeline: wgpu::RenderPipeline,
+    /// the lip's coverage into the upscalers' reactive mask (W4b)
+    lip_mask_pipeline: wgpu::RenderPipeline,
     /// stations uploaded (0: no lips)
     pub ns: u32,
     /// the lips are drawn (lip opacity > 0)
@@ -318,6 +323,10 @@ impl BreakersGpu {
                 },
                 buf(8, B::Storage { read_only: true }),
                 buf(9, B::Storage { read_only: false }),
+                // W4a spray: the block, the ring, the head
+                buf(10, B::Uniform),
+                buf(11, B::Storage { read_only: false }),
+                buf(12, B::Storage { read_only: false }),
             ],
         });
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -334,6 +343,14 @@ impl BreakersGpu {
             layout: Some(&kpl),
             module: &module,
             entry_point: Some("main"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
+        let spray_update = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("tw_spray_update"),
+            layout: Some(&kpl),
+            module: &module,
+            entry_point: Some("spray_update"),
             compilation_options: Default::default(),
             cache: None,
         });
@@ -396,7 +413,45 @@ impl BreakersGpu {
             multiview_mask: None,
             cache: None,
         });
-        Self { stations, crest, kernel_layout, kernel, kernel_bind: None, lip_vbuf, lip_ibuf, lip_pipeline, ns: 0, lips_on: true }
+        let lip_mask_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("tw_brk_lip_mask"),
+            layout: Some(&lpl),
+            vertex: wgpu::VertexState {
+                module: shader,
+                entry_point: Some("vs_lip"),
+                compilation_options: Default::default(),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: 16,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &attrs,
+                }],
+            },
+            primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, cull_mode: None, ..Default::default() },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: shader,
+                entry_point: Some("fs_lip_mask"),
+                compilation_options: wgpu::PipelineCompilationOptions { constants: &[("linear", linear)], ..Default::default() },
+                targets: &[Some(super::spray::mask_target())],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        Self {
+            stations,
+            crest,
+            kernel_layout,
+            kernel,
+            spray_update,
+            kernel_bind: None,
+            lip_vbuf,
+            lip_ibuf,
+            lip_pipeline,
+            lip_mask_pipeline,
+            ns: 0,
+            lips_on: true,
+        }
     }
 
     pub fn crest_buffer(&self) -> &wgpu::Buffer {
@@ -415,6 +470,7 @@ impl BreakersGpu {
         ocean_ubo: &wgpu::Buffer,
         displacement: &wgpu::TextureView,
         smp_linear_repeat: &wgpu::Sampler,
+        spray: &super::spray::SprayGpu,
     ) {
         use wgpu::BindingResource as R;
         self.kernel_bind = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -431,6 +487,9 @@ impl BreakersGpu {
                 wgpu::BindGroupEntry { binding: 7, resource: R::Sampler(smp_linear_repeat) },
                 wgpu::BindGroupEntry { binding: 8, resource: self.stations.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 9, resource: self.crest.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 10, resource: spray.params.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 11, resource: spray.ring.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 12, resource: spray.head.as_entire_binding() },
             ],
         }));
     }
@@ -443,16 +502,35 @@ impl BreakersGpu {
         self.ns = n as u32;
     }
 
-    /// The crest finder (Breakers.update).
-    pub fn dispatch(&self, encoder: &mut wgpu::CommandEncoder) {
+    /// The crest finder and the spray emitters (Breakers.update), then the spray update
+    /// (Spray.update). `spray_on`: the spray is on this frame.
+    pub fn dispatch(&self, encoder: &mut wgpu::CommandEncoder, spray_on: bool) {
         let Some(bind) = &self.kernel_bind else { return };
+        if self.ns >= 2 && (self.lips_on || spray_on) {
+            let mut cp = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("tw_brk_crests"), timestamp_writes: None });
+            cp.set_pipeline(&self.kernel);
+            cp.set_bind_group(0, bind, &[]);
+            cp.dispatch_workgroups(self.ns.div_ceil(64), 1, 1);
+        }
+        if spray_on {
+            let mut cp = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("tw_spray_update"), timestamp_writes: None });
+            cp.set_pipeline(&self.spray_update);
+            cp.set_bind_group(0, bind, &[]);
+            cp.dispatch_workgroups(super::spray::RING.div_ceil(64), 1, 1);
+        }
+    }
+
+    /// The lips' coverage into the reactive mask (W4b; a mask pass, no depth attachment).
+    pub fn draw_mask(&self, pass: &mut wgpu::RenderPass<'_>, camera: &wgpu::BindGroup, offset: u32, render_bind: &wgpu::BindGroup) {
         if self.ns < 2 || !self.lips_on {
             return;
         }
-        let mut cp = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("tw_brk_crests"), timestamp_writes: None });
-        cp.set_pipeline(&self.kernel);
-        cp.set_bind_group(0, bind, &[]);
-        cp.dispatch_workgroups(self.ns.div_ceil(64), 1, 1);
+        pass.set_pipeline(&self.lip_mask_pipeline);
+        pass.set_bind_group(0, camera, &[offset]);
+        pass.set_bind_group(1, render_bind, &[]);
+        pass.set_vertex_buffer(0, self.lip_vbuf.slice(..));
+        pass.set_index_buffer(self.lip_ibuf.slice(..), wgpu::IndexFormat::Uint32);
+        pass.draw_indexed(0..lip_index_count(self.ns as usize), 0, 0..1);
     }
 
     /// The lips, over the water (same pass, after the surface).

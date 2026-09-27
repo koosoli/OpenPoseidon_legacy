@@ -10,6 +10,7 @@
 #include <Poseidon/World/Entities/Weapons/Ballistics.hpp>
 
 #include <Poseidon/World/Entities/Vehicles/Ground/Car.hpp>
+#include <Poseidon/World/Entities/Vehicles/Ground/TrackedWaterResponse.hpp>
 #include <Poseidon/Network/Network.hpp>
 #include <Poseidon/Graphics/Rendering/Draw/SpecLods.hpp>
 
@@ -20,6 +21,8 @@
 
 #include <Poseidon/Foundation/Strings/Mbcs.hpp>
 #include <float.h>
+#include <cmath>
+#include <cstdlib>
 #include <stdio.h>
 #include <string.h>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
@@ -611,6 +614,25 @@ void Car::Simulate(float deltaT, SimulationImportance prec)
     _isUpsideDown = DirectionUp().Y() < 0.3f;
     _isDead = IsDammageDestroyed();
 
+    // TW-WATER W6d diagnostic: WGR_CAR_TRACE=1 logs a floatable car's simulation state about once
+    // a second (why does a BRDM that starts on the water never move?).
+    static const bool carTrace = []
+    {
+        const char* v = std::getenv("WGR_CAR_TRACE");
+        return v != nullptr && v[0] == '1';
+    }();
+    const bool traceNow = carTrace && Type()->_canFloat && std::fmod(Glob.time.toFloat(), 1.0f) < std::max(deltaT, 0.02f);
+    if (traceNow)
+    {
+        const Vector3 p = Position();
+        LOG_INFO(Physics,
+                 "[car-trace] {} t={:.2f} dt={:.3f} prec={} stopped={} land={} water={} obj={} dead={} engineOff={} "
+                 "thrustWanted={:.2f} frozen={} pos=({:.1f}, {:.2f}, {:.1f}) sea={:.2f} ground={:.2f}",
+                 (const char*)GetDebugName(), Glob.time.toFloat(), deltaT, static_cast<int>(prec), _isStopped,
+                 _landContact, _waterContact, _objectContact, _isDead, _engineOff, _thrustWanted, CheckPredictionFrozen(),
+                 p.X(), p.Y(), p.Z(), GLOB_LAND->GetSeaLevel(), GLOB_LAND->SurfaceY(p.X(), p.Z()));
+    }
+
     MoveWeapons(deltaT);
 
     if (!SimulateUnits(deltaT))
@@ -732,6 +754,15 @@ void Car::Simulate(float deltaT, SimulationImportance prec)
     if (fabs(_thrustWanted) > 0.1 || _speed.SquareSize() > 0.5f)
     {
         IsMoved();
+    }
+    // TW-WATER W6a.1/W6a.2: a car afloat or airborne keeps simulating. A car starts stopped
+    // (_isStopped, constructor) and the physics below runs only when it is not, so a BRDM placed
+    // on the sea -- empty or crewed -- hung at its placement height, dry, never drove and never
+    // sank. IsMoved alone (W6a.1) does not clear the stop; CancelStop does.
+    if (!_landContact || _waterContact)
+    {
+        IsMoved();
+        CancelStop();
     }
 
     {
@@ -1140,6 +1171,26 @@ void Car::Simulate(float deltaT, SimulationImportance prec)
                 GLOB_LAND->GroundCollision(gCollision, this, moveTrans, 0.05f, softFactor);
             }
 
+            if (traceNow)
+            {
+                int nWater = 0;
+                int nGround = 0;
+                float maxWater = 0.0f;
+                for (int i = 0; i < gCollision.Size(); i++)
+                {
+                    if (gCollision[i].type == GroundWater)
+                    {
+                        ++nWater;
+                        maxWater = std::max(maxWater, gCollision[i].under);
+                    }
+                    else
+                    {
+                        ++nGround;
+                    }
+                }
+                LOG_INFO(Physics, "[car-trace] {} collision: {} water (max under {:.2f}) {} ground, plane={}",
+                         (const char*)GetDebugName(), nWater, maxWater, nGround, prec >= SimulateVisibleFar);
+            }
             _landContact = false;
             _objectContact = false;
             _waterContact = false;
@@ -1173,10 +1224,16 @@ void Car::Simulate(float deltaT, SimulationImportance prec)
                         // first is water is "pushing" everything up - causing some momentum
                         saturateMax(maxUnderWater, info.under);
 
-                        pForce = Vector3(0, GetMass() * 0.5f * info.under * coefNPoints, 0);
+                        // TW-WATER W6-pre: a wreck floods and sinks (TrackedWaterResponse.hpp)
+                        const float waterUnder = _isDead ? WreckImmersion(info.under) : info.under;
+                        pForce = Vector3(0, GetMass() * 0.5f * waterUnder * coefNPoints, 0);
                         if (!Type()->_canFloat)
                         {
                             pForce *= 0.1;
+                        }
+                        if (_isDead)
+                        {
+                            pForce *= WreckBuoyancyScale(_wreckFlood);
                         }
                         pCenter = info.pos - wCenter;
                         torque += pCenter.CrossProduct(pForce);
@@ -1196,7 +1253,7 @@ void Car::Simulate(float deltaT, SimulationImportance prec)
                         pForce[1] = speed[1] * fabs(speed[1]) * 15 + speed[1] * 160;
                         pForce[2] = speed[2] * fabs(speed[2]) * 6;
 
-                        pForce = DirectionModelToWorld(pForce * info.under) * GetMass() * (coefNPoints / 700);
+                        pForce = DirectionModelToWorld(pForce * waterUnder) * GetMass() * (coefNPoints / 700);
 #if ARROWS
                         AddForce(wCenter + pCenter, -pForce * InvMass());
 #endif

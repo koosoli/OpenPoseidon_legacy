@@ -1242,13 +1242,22 @@ void Tank::Simulate(float deltaT, SimulationImportance prec)
                         // first is water is "pushing" everything up - causing some momentum
                         saturateMax(maxUnderWater, info.under);
 
-                        const float waterUnder = Type()->_canFloat
-                                                     ? AmphibiousTrackedImmersion(info.under, info.underFlat)
-                                                     : info.under;
+                        float waterUnder = Type()->_canFloat
+                                               ? AmphibiousTrackedImmersion(info.under, info.underFlat)
+                                               : info.under;
+                        if (_isDead)
+                        {
+                            // TW-WATER W6-pre: a wreck floods and sinks (TrackedWaterResponse.hpp)
+                            waterUnder = WreckImmersion(waterUnder);
+                        }
                         pForce = Vector3(0, 15000 * waterUnder * coefNPoints, 0);
                         if (!Type()->_canFloat)
                         {
                             pForce *= 0.3f;
+                        }
+                        if (_isDead)
+                        {
+                            pForce *= WreckBuoyancyScale(_wreckFlood);
                         }
                         pCenter = info.pos - wCenter;
                         torque += pCenter.CrossProduct(pForce);
