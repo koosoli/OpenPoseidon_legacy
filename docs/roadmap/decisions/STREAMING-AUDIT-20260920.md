@@ -2380,3 +2380,19 @@ last146hits2250miss72548352hitout28573820store33552520peak23entries2227evicts0
 failure/oversize, not fullroute. Actual candidate unaccepted/cacheOFF/unpromoted;
 no endless repeat-screening. Future<=256 simulation audit unbuilt/not included.
 FullplanOPEN/performancefalse.
+Small-inventory Ready audit7e23999c clean03:52 build21/tests26436assertions26cases
+noSKIP pass. Every<=256 fresh query re-audits referenced actual geometry via
+AuditRegisteredGeometryNow before Ready and after constructors, one shared2ms
+whole deadline across beginning/final/watch scans. No per-model reset; combined
+cost may remain Pending even when one scan fits. Three new unit cases use actual
+adapted shapes with synthetically labelled auditedODOL IR, NOT retail ODOLfile
+decoding. Unversioned SetPos/SetMinMax/rawClip/offbin/undersizedparent refusals
+Unknown preserve collision sentinel, shared deadline returns Pending.
+Actual gameON035221/headlessON035310/defaultgame035411/headlessdefault035424
+all clean0 pass. Game cold logical2/resident0/required0 queryReadyReady, existing
+transaction/lease/move/reacquire/Fire checks pass; mutation and saved-survivor
+remain Unknown. Headless rendererNone Ready2regions/2leases/realwallcontact.
+Defaults Disabled zero created/leased/positive, None headless; no new AI/default
+enable. Narrow fixture only, no FPS/broadMP/retailDayZ/ODOLgroundproof. DayZ2352
+models/watch16384Capacity remains. Cached GPU ownership research excluded.
+FullplanOPEN/performancefalse.
