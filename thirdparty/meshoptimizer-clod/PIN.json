@@ -1,0 +1,57 @@
+{
+  "repository": "https://github.com/zeux/meshoptimizer",
+  "revision": "9e1f07b159d3cb777f1c67ed31fc11fd117986f4",
+  "license": "MIT",
+  "files": [
+    {
+      "path": "LICENSE.md",
+      "upstreamBlob": "468827f4b86ef754465396a9e163db25af406626",
+      "sha256": "f03037ca7bad1e3eb7f4a63fa6084a8baabd5ba30d3c239a9a7f35705d873e26"
+    },
+    {
+      "path": "src/meshoptimizer.h",
+      "upstreamBlob": "ff69785b52cc5ee481315925787546d9deeb30d8",
+      "sha256": "e3688ef553f603391747895a5c221ef1528574cc7f8173782417a96cb531f61b"
+    },
+    {
+      "path": "src/allocator.cpp",
+      "upstreamBlob": "058fbf3129cae10f91df463789e5b295e5fac093",
+      "sha256": "d2cc48691fe2f4c6d097bf7a766389cfb7f83ca14a5f747e3944332656d02254"
+    },
+    {
+      "path": "src/clusterizer.cpp",
+      "upstreamBlob": "8e884e0632c9ff2a7f015236ba121432198bc374",
+      "sha256": "a2775edf77d86a9a5f0ca82f4635ce6ce741bbda79fd9a652ffc8c5dd61d3b0e"
+    },
+    {
+      "path": "src/indexgenerator.cpp",
+      "upstreamBlob": "0f29614000f5097164ae5323a740c5bd782185b7",
+      "sha256": "f362cdcd8af10016333bf699347a9364335987f413f061e5b7e8cafe3b498948"
+    },
+    {
+      "path": "src/meshletutils.cpp",
+      "upstreamBlob": "b92332addaf0160b6a84ad2c099d4214c1fe8b4c",
+      "sha256": "4813a0c9e8648c6de53f317322fa17c9486ff024f186aa9d631e7c60ba96c33e"
+    },
+    {
+      "path": "src/partition.cpp",
+      "upstreamBlob": "5f0426da696c972429a60ff995c91a12ae83aa7a",
+      "sha256": "cf34f00dd7a550c7b18b31c35d683ac2efb9e1d711bcec411649d311477d4b2d"
+    },
+    {
+      "path": "src/simplifier.cpp",
+      "upstreamBlob": "85c502524f439be82198dc451caba27a62b720de",
+      "sha256": "719303b6970398631e30724e8eebc6cd2e7e08b67fe8ab7cbf7eecafdaa08616"
+    },
+    {
+      "path": "src/spatialorder.cpp",
+      "upstreamBlob": "8a785fcd5604a7d4ed0e685706f4a18f46c70463",
+      "sha256": "9005ee0069ed8c56797606de80c0cd951ab55ffb608bc3af83c4e5b2517371b1"
+    },
+    {
+      "path": "demo/clusterlod.h",
+      "upstreamBlob": "fd83f7164fb0f215a14ec7b555950fa46df1a4ff",
+      "sha256": "71f95c1f97ef567235540c038b41906091fcef1ef68046f2933cd5989f94ea93"
+    }
+  ]
+}

@@ -143,6 +143,8 @@ set(POSEIDON_TEST_SOURCES
     Graphics/test_geometry_page_prototype.cpp
     Graphics/test_geometry_page_shape_export.cpp
     Graphics/test_geometry_page_resident_decode.cpp
+    Graphics/test_geometry_page_representation_decode.cpp
+    Graphics/test_geometry_page_clod_bake.cpp
     Graphics/test_registration_cost_policy.cpp
     Graphics/test_alpha_classify.cpp
     Graphics/test_surface_decompose.cpp
@@ -676,6 +678,8 @@ set_source_files_properties(World/test_landscape_layout_no_pch.cpp PROPERTIES
 )
 
 add_executable(PoseidonTests ${POSEIDON_TEST_SOURCES} ${POSEIDON_TEST_HEADERS})
+include("${CMAKE_SOURCE_DIR}/cmake/MeshoptimizerClod.cmake")
+target_link_libraries(PoseidonTests PRIVATE OpenPoseidon::MeshoptimizerClod)
 
 # Link against Poseidon (which now also owns the former Base and support payloads) and Catch2
 target_link_libraries(PoseidonTests PRIVATE
