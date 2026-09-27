@@ -247,6 +247,10 @@ class ITextureSource
 
 	// Force alpha blending when known from elsewhere.
 	virtual void ForceAlpha() = 0;
+
+	// Appended: evidence from the exact buffer used by successful Init. Unknown
+	// for cached unwrapped/loose/transformed sources; never recaptured by name.
+	virtual std::shared_ptr<const ArchiveSourceBinding> GetArchiveSourceBinding() const { return {}; }
 };
 
 //! Count of VFS opens made to read texture mip data, process-wide since start.

@@ -10,6 +10,7 @@ param(
     [switch]$PackedTextures,
     [switch]$PaaPreparationInflight,
     [switch]$RegistrationQuota,
+    [switch]$ArchiveSourceBindings,
     [string]$Label = 'dayz-streaming-latency',
     [string]$GameDir = 'D:\SteamLibrary\steamapps\common\ARMA Cold War Assault'
 )
@@ -32,6 +33,7 @@ if (!$env:LOCK_OWNER) {
         if ($PackedTextures) { $argv += '-PackedTextures' }
         if ($PaaPreparationInflight) { $argv += '-PaaPreparationInflight' }
         if ($RegistrationQuota) { $argv += '-RegistrationQuota' }
+        if ($ArchiveSourceBindings) { $argv += '-ArchiveSourceBindings' }
         & 'C:\Program Files\Git\bin\bash.exe' @argv
         if ($LASTEXITCODE) { throw "Latency screening exited $LASTEXITCODE" }
     } finally { Remove-Item Env:LOCK_OWNER }
@@ -87,6 +89,7 @@ if ($PaaLzoReplay) { $environment.WGR_PAA_LZO_REPLAY_CACHE = '1' }
 if ($PackedTextures) { $environment.WGR_OBJECT_STREAM_PBO_TEXTURES = '1' }
 if ($PaaPreparationInflight) { $environment.WGR_PAA_PREP_INFLIGHT = '1' }
 if ($RegistrationQuota) { $environment.WGR_OBJECT_STREAM_REGISTRATION_QUOTA = '1' }
+if ($ArchiveSourceBindings) { $environment.WGR_OBJECT_STREAM_WARM_TEXTURES = '1' }
 if ($PaaPreparationDiagnostics) {
     $environment.WGR_PAA_PREP_ATTEMPT_DIAG = '1'
 }
@@ -107,6 +110,7 @@ try {
         paaPreparationDiagnostics = [bool]$PaaPreparationDiagnostics
         packedTextures = [bool]$PackedTextures; paaPreparationInflight = [bool]$PaaPreparationInflight
         registrationQuota = [bool]$RegistrationQuota
+        archiveSourceBindings = [bool]$ArchiveSourceBindings
         installed = (Get-Content (Join-Path $GameDir 'DEPLOYED-FROM.txt')); hashes = $initialHashes
         world = $world; environment = $environment; clearedEnvironmentNames = $clearNames
         pose = @($baseX, $baseZ, $baseY, $azimuth, $elevation); routeX = $route; poseHoldSeconds = 3
@@ -169,6 +173,19 @@ try {
     $stopped = Send @{cmd = 'eval'; code = 'triPerfCapture 0'}
     if ($stopped.result.Trim('"') -ne 'OK') { throw 'Engine capture incomplete or dropped frames' }
     $returned = Wait-Base 'returned'
+    $archiveBindings = Send @{cmd = 'archive_source_bindings'}
+    if ($archiveBindings.enabled -ne [bool]$ArchiveSourceBindings -or
+        $archiveBindings.liveBindings -gt $archiveBindings.capBindings -or
+        $archiveBindings.knownCppBytes -gt $archiveBindings.capBytes) { throw 'Actual-read source binding state or cap mismatch' }
+    if ($ArchiveSourceBindings) {
+        if ($archiveBindings.capBindings -ne 256 -or $archiveBindings.capBytes -ne 2097152 -or
+            $archiveBindings.wrappedReads -lt 1 -or $archiveBindings.initRetains -lt 1 -or
+            $archiveBindings.liveBindings -lt 1) { throw 'Mapped archive provenance did not reach an initialized texture source within its bounds' }
+    } elseif ($archiveBindings.liveBindings -ne 0 -or $archiveBindings.knownCppBytes -ne 0 -or
+        $archiveBindings.wrappedReads -ne 0 -or $archiveBindings.initRetains -ne 0 -or
+        $archiveBindings.captureRefused -ne 0 -or $archiveBindings.capacityRefused -ne 0 -or
+        $archiveBindings.allocationRefused -ne 0) { throw 'Default path unexpectedly captured archive source provenance' }
+    $archiveBindings | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $out 'archive-source-binding-proof.json')
     $null = Send @{cmd = 'screenshot'; path = (Join-Path $out 'returned-settled.png')}
     $null = Send @{cmd = 'exit'}
     if (!$p.WaitForExit(15000) -or $p.ExitCode) { throw 'Owned game failed to exit cleanly' }
@@ -267,6 +284,7 @@ try {
         packedTextures = [bool]$PackedTextures; paaPreparationInflight = [bool]$PaaPreparationInflight
         paaPreparationInflightProof = $inflightProof
         registrationQuota = [bool]$RegistrationQuota; registrationQuotaProof = $quotaProof
+        archiveSourceBindings = [bool]$ArchiveSourceBindings; archiveSourceBindingProof = $archiveBindings
         limitation = 'No automatic performance threshold, vanilla parity, cold-cache guarantee or whole-world query readiness; compare matched separate mode processes'
     } | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $out 'result.json')
     Write-Output "DayZ latency screening evidence: $out"

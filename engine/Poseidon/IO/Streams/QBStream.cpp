@@ -1,4 +1,6 @@
 #include <Poseidon/IO/Streams/QBStream.hpp>
+#include <Poseidon/IO/Streams/ArchiveSourceBinding.hpp>
+#include <Poseidon/Foundation/Threads/ThreadAffinity.hpp>
 #include <Poseidon/Core/ModSystem.hpp>
 #ifndef _WIN32
 #include <climits>
@@ -11,6 +13,8 @@
 #include <sys/stat.h>
 #include <string>
 #include <fstream>
+#include <atomic>
+#include <cstdlib>
 #include <vector>
 #include <Poseidon/Foundation/Algorithms/Sha256.hpp>
 #include <Poseidon/Foundation/Containers/Array.hpp>
@@ -1192,6 +1196,105 @@ std::optional<BankReadRequest> QFBank::CaptureReadRequest(const char* member, bo
 #endif
 }
 
+namespace
+{
+bool CaptureWarmTextureSourceBinding()
+{
+    static const bool enabled = [] {
+        const char* value = std::getenv("WGR_OBJECT_STREAM_WARM_TEXTURES");
+        return value && std::strcmp(value, "1") == 0;
+    }();
+    return enabled;
+}
+struct ArchiveBindingState
+{
+    static constexpr size_t FixedCharge = sizeof(ArchiveSourceBudget) + 256;
+    std::shared_ptr<ArchiveSourceBudget> budget = std::make_shared<ArchiveSourceBudget>(256,
+        2 * 1024 * 1024 - FixedCharge);
+    std::atomic<uint64_t> wrapped{0}, retained{0}, captureRefused{0}, capacityRefused{0}, allocationRefused{0};
+};
+ArchiveBindingState& SourceBindingState() { static ArchiveBindingState state; return state; }
+}
+
+size_t ArchiveSourceBinding::KnownCppBytes() const
+{
+    return sizeof(*this) + _request.archive.capacity() + 1 + _request.ArchiveIdentityBytes() + 256;
+}
+
+std::shared_ptr<const ArchiveSourceBinding> ArchiveSourceBinding::Create(BankReadRequest request)
+{
+    if (!request.HasArchiveIdentity() || request.archive.size() > 8191 ||
+        request.ArchiveIdentityBytes() > 16384) return {};
+    try
+    {
+        // Created only by the opt-in read path. One process budget, not per source/thread.
+        auto& state = SourceBindingState();
+        const size_t charge = sizeof(ArchiveSourceBinding) + request.archive.capacity() + 1 +
+            request.ArchiveIdentityBytes() + 256;
+        bool capacity = false;
+        auto ticket = state.budget->Acquire(charge, &capacity);
+        if (!ticket)
+        {
+            (capacity ? state.capacityRefused : state.allocationRefused).fetch_add(1, std::memory_order_relaxed);
+            return {};
+        }
+        return std::shared_ptr<const ArchiveSourceBinding>(new ArchiveSourceBinding(std::move(request), std::move(ticket)));
+    }
+    catch (...)
+    {
+        try { SourceBindingState().allocationRefused.fetch_add(1, std::memory_order_relaxed); }
+        catch (...) { } // Even the optional counter state may fail to allocate.
+        return {};
+    }
+}
+
+void ArchiveSourceBinding::NoteWrappedRead()
+{
+    SourceBindingState().wrapped.fetch_add(1, std::memory_order_relaxed);
+}
+void ArchiveSourceBinding::NoteInitRetained()
+{
+    SourceBindingState().retained.fetch_add(1, std::memory_order_relaxed);
+}
+ArchiveSourceBinding::Stats ArchiveSourceBinding::SnapshotStats()
+{
+    Stats out;
+    out.enabled = CaptureWarmTextureSourceBinding();
+    if (!out.enabled) return out;
+    try
+    {
+        auto& state = SourceBindingState();
+        const auto live = state.budget->Observe();
+        out.liveBindings = live.bindings;
+        out.knownCppBytes = live.bytes + ArchiveBindingState::FixedCharge;
+        out.wrappedReads = state.wrapped.load(std::memory_order_relaxed);
+        out.initRetains = state.retained.load(std::memory_order_relaxed);
+        out.captureRefused = state.captureRefused.load(std::memory_order_relaxed);
+        out.capacityRefused = state.capacityRefused.load(std::memory_order_relaxed);
+        out.allocationRefused = state.allocationRefused.load(std::memory_order_relaxed);
+    }
+    catch (...) { out.allocationRefused = 1; }
+    return out;
+}
+
+namespace
+{
+class ArchiveBoundFileBuffer final : public IFileBuffer
+{
+    Ref<IFileBuffer> _buffer;
+    std::shared_ptr<const ArchiveSourceBinding> _binding;
+public:
+    ArchiveBoundFileBuffer(Ref<IFileBuffer> buffer, std::shared_ptr<const ArchiveSourceBinding> binding)
+        : _buffer(buffer), _binding(std::move(binding)) {}
+    bool GetError() const override { return _buffer->GetError(); }
+    const char* GetData() const override { return _buffer->GetData(); }
+    int GetSize() const override { return _buffer->GetSize(); }
+    bool IsFromBank(QFBank* bank) const override { return _buffer->IsFromBank(bank); }
+    bool IsReady() const override { return _buffer->IsReady(); }
+    std::shared_ptr<const ArchiveSourceBinding> GetArchiveSourceBinding() const override { return _binding; }
+};
+}
+
 Ref<IFileBuffer> QFBank::Read(const char* name) const
 {
     if (!Load())
@@ -1265,19 +1368,58 @@ Ref<IFileBuffer> QFBank::Read(const char* name) const
     {
         // no compression
 
+        std::shared_ptr<const ArchiveSourceBinding> binding;
+        if (CaptureWarmTextureSourceBinding() && _fileAccess && Foundation::IsMainThread() && name)
+        {
+            size_t length = 0;
+            while (length < 8192 && name[length]) ++length;
+            if (length >= 4 && length <= 8191 && name[length - 4] == '.' &&
+                std::tolower(static_cast<unsigned char>(name[length - 3])) == 'p' &&
+                std::tolower(static_cast<unsigned char>(name[length - 2])) == 'a' &&
+                std::tolower(static_cast<unsigned char>(name[length - 1])) == 'a')
+            {
+                try
+                {
+                    auto request = CaptureReadRequest(name, true);
+                    // Compare against the exact metadata selected by THIS original Read.
+                    if (request && request->offset == static_cast<uint64_t>(info.startOffset) &&
+                        request->bytes == static_cast<uint64_t>(info.length))
+                        binding = ArchiveSourceBinding::Create(std::move(*request));
+                    else
+                        SourceBindingState().captureRefused.fetch_add(1, std::memory_order_relaxed);
+                }
+                catch (...) { } // Optional provenance never changes the original read result.
+            }
+        }
+        auto bind = [&](Ref<IFileBuffer> buffer) -> Ref<IFileBuffer>
+        {
+            if (!binding || !buffer || buffer->GetError() || buffer->GetSize() != info.length) return buffer;
+            try
+            {
+                Ref<IFileBuffer> wrapped = new ArchiveBoundFileBuffer(buffer, binding);
+                ArchiveSourceBinding::NoteWrappedRead();
+                return wrapped;
+            }
+            catch (...)
+            {
+                SourceBindingState().allocationRefused.fetch_add(1, std::memory_order_relaxed);
+                return buffer;
+            }
+        };
+
 #if USE_MAPPING
         if (_fileAccess)
         {
             // use memory mapped file subsection
             Ref<IFileBuffer> data = new FileBufferSub(_fileAccess, info.startOffset, info.length);
-            return data;
+            return bind(data);
         }
 #endif
         Seek(info.startOffset);
         // read directly from file
         Ref<FileBufferMemory> data = new FileBufferMemory(info.length);
         Read(data->GetWritableData(), info.length, name);
-        return data.GetRef();
+        return data.GetRef(); // Copied IO lacks a full-read witness; provenance remains Unknown.
     }
     else
     {

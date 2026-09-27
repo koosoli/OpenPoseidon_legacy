@@ -9,11 +9,13 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <memory>
 
 #include <Poseidon/Foundation/Types/EnumDecl.hpp>
 
 namespace Poseidon
 {
+class ArchiveSourceBinding;
 using ::Poseidon::Foundation::AutoArray;
 using ::Poseidon::Foundation::Buffer;
 using ::Poseidon::Foundation::Ref;
@@ -334,6 +336,9 @@ class IFileBuffer : public RefCount
     virtual bool IsFromBank(QFBank* bank) const = 0;
     // Some sources (overlapped IO) need time before the data is available.
     virtual bool IsReady() const = 0;
+    // Appended: immutable provenance of THIS buffer's actual raw archive read.
+    // Existing/cached unwrapped, loose and transformed sources explicitly remain unknown.
+    virtual std::shared_ptr<const ArchiveSourceBinding> GetArchiveSourceBinding() const { return {}; }
 };
 
 class FileBufferMemory : public IFileBuffer

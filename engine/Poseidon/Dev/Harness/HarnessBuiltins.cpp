@@ -13,6 +13,7 @@ using namespace Poseidon;
 #include <Poseidon/Dev/Diag/PhysicsCorpus.hpp>
 #include <Poseidon/Dev/Diag/StreamingDiag.hpp>
 #include <Poseidon/Graphics/Textures/PreparedTextures.hpp>
+#include <Poseidon/IO/Streams/ArchiveSourceBinding.hpp>
 #include <Poseidon/Dev/Diag/BallisticsRecorder.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/Dev/Debug/DevPanelWidgets.hpp>
@@ -444,6 +445,21 @@ void RegisterScreenshot(HarnessServer& hs)
                     cJSON_AddStringToObject(item, "state", row.state < 4 ? states[row.state] : "Unknown"); cJSON_AddItemToArray(rows, item);
                 }
             }
+            return HarnessProtocol::JsonResponse(result);
+        });
+    hs.RegisterCommand({"archive_source_bindings", "Read-only bounded actual-read PAA provenance counters", {}},
+        [](const std::string&, cJSON*) -> std::string {
+            const auto snapshot = ArchiveSourceBinding::SnapshotStats();
+            auto* result = cJSON_CreateObject();
+            cJSON_AddBoolToObject(result, "enabled", snapshot.enabled);
+#define ARCHIVE_BINDING_FIELD(field) cJSON_AddNumberToObject(result, #field, static_cast<double>(snapshot.field))
+            ARCHIVE_BINDING_FIELD(liveBindings); ARCHIVE_BINDING_FIELD(knownCppBytes);
+            ARCHIVE_BINDING_FIELD(capBindings); ARCHIVE_BINDING_FIELD(capBytes);
+            ARCHIVE_BINDING_FIELD(wrappedReads); ARCHIVE_BINDING_FIELD(initRetains);
+            ARCHIVE_BINDING_FIELD(captureRefused); ARCHIVE_BINDING_FIELD(capacityRefused);
+            ARCHIVE_BINDING_FIELD(allocationRefused);
+#undef ARCHIVE_BINDING_FIELD
+            cJSON_AddStringToObject(result, "scope", "Mapped raw PAA bytes and their initialized headers only; shared retained C++ metadata charge, excludes kernel/allocator/RSS cost; no warm worker jobs or upload-readiness proof");
             return HarnessProtocol::JsonResponse(result);
         });
     hs.RegisterCommand({"geometry_allocations", "Request/poll bounded retained mesh allocation diagnostics", {}},

@@ -15,6 +15,7 @@
 #include <Poseidon/Foundation/Containers/StaticArray.hpp>
 #include <Poseidon/Foundation/Common/Filenames.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
+#include <Poseidon/IO/Streams/ArchiveSourceBinding.hpp>
 #include <string.h>
 #include <Poseidon/Foundation/Containers/BoolArray.hpp>
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
@@ -2022,6 +2023,7 @@ class TextureSourcePac : public ITextureSource
     PacFormat _format; //!< source file pixel format
     bool _isPaa;
     RStringB _name;
+    std::shared_ptr<const ArchiveSourceBinding> _archiveSourceBinding;
 
   public:
     TextureSourcePac();
@@ -2039,6 +2041,8 @@ class TextureSourcePac : public ITextureSource
     bool IsAlpha() const override { return _pal._isAlpha; }
     bool IsTransparent() const override { return _pal._isTransparent; }
     void ForceAlpha() override { _pal._isAlpha = true; }
+    std::shared_ptr<const ArchiveSourceBinding> GetArchiveSourceBinding() const override
+    { return _archiveSourceBinding; }
 };
 
 //! all routines required to create pac/paa texture
@@ -2080,6 +2084,7 @@ static PacFormat BasicFormat(const char* name)
 
 bool TextureSourcePac::Init(const char* name, PacLevelMem* mips, int maxMips)
 {
+    _archiveSourceBinding.reset();
     _name = name;
     QIFStream in;
     GFileServer->Open(in, name);
@@ -2164,6 +2169,18 @@ bool TextureSourcePac::Init(const char* name, PacLevelMem* mips, int maxMips)
         }
     }
     _mipmaps = i;
+
+    // The shared binding contains metadata/lease only, not the Init read buffer.
+    // Old cache entries remain unsupported, even when a fresh bank name resolves.
+    static const bool retainArchiveBinding = [] {
+        const char* value = std::getenv("WGR_OBJECT_STREAM_WARM_TEXTURES");
+        return value && std::strcmp(value, "1") == 0;
+    }();
+    if (retainArchiveBinding && _isPaa && _mipmaps > 0 && in.GetBuffer())
+    {
+        _archiveSourceBinding = in.GetBuffer()->GetArchiveSourceBinding();
+        if (_archiveSourceBinding) ArchiveSourceBinding::NoteInitRetained();
+    }
 
     return true;
 }
