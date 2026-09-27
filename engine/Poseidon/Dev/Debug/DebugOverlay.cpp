@@ -6620,11 +6620,17 @@ void DrawWaterTab()
         changed |= Dev::SliderFloat("TW breaker lips", &t.shoreLips, 0.0f, 2.0f, "%.2f");
         Dev::PanelTooltip("Opacity of the thrown lip of plunging breakers (W3d), along the shoreline inside the "
                           "simulated regions. 0 = off.");
+        changed |= Dev::SliderFloat("TW breaker spray", &t.spray, 0.0f, 3.0f, "%.2f");
+        Dev::PanelTooltip("Spray thrown by the breakers (W4): drops and torn strands off the lip, the splash-up "
+                          "where it lands, the roller's spray and mist drifting off with the wind. Emission gain, "
+                          "Tidewater default 1; 0 = off. The rate adapts so the 32768-particle ring holds ~2 s.");
+        changed |= Dev::SliderFloat("TW spray intensity", &t.sprayIntensity, 0.0f, 3.0f, "%.2f");
+        Dev::PanelTooltip("Opacity of the spray sprites (Tidewater default 1).");
         ImGui::EndDisabled();
         ImGui::EndDisabled();
         ImGui::BeginDisabled(true);
         bool notPorted = false;
-        Dev::Checkbox("TW spray budget + refraction pass (not ported: W4)", &notPorted);
+        Dev::Checkbox("TW boat spray + refraction pass (not ported: W4b)", &notPorted);
         Dev::Checkbox("TW underwater + caustics (not ported: W5)", &notPorted);
         Dev::Checkbox("TW boat wakes (not ported: W6)", &notPorted);
         Dev::Checkbox("TW inland lakes / rivers (not drawn: owner decision pending)", &notPorted);

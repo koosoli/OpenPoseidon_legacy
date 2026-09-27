@@ -2499,6 +2499,9 @@ class Engine : public IGraphicsEngine
             // 4 Storm (the preset's own wind too), 5 custom (weather wind, the sliders below as set).
             int seaConditions = 0;
             float whitecaps = 0.5f;        // custom mode: whitecap amount (AppUI whitecaps)
+            // W4 — breaker spray (Breakers `spray` emission gain, Spray sprite `intensity`); 0 = off
+            float spray = 1.0f;
+            float sprayIntensity = 1.0f;
             float amplitude = 1.0f;        // spectrum amplitude scale
             float choppiness = 0.9f;       // horizontal displacement (Tessendorf lambda)
             float swellScale = 0.48f;      // energy of the distant-swell system

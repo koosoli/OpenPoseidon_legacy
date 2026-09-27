@@ -23,8 +23,12 @@
 //! W3d: Breakers (`breakers.rs`, `tw_breakers_kernel.wgsl`, `tw_lip.wgsl`): the thrown lip of
 //! plunging breakers along the shoreline inside the simulated regions.
 //!
+//! W4a: spray (`spray.rs`, `tw_spray_emit.wgsl`, `tw_spray_update.wgsl`, `tw_spray.wgsl`): drops,
+//! ligaments, dense spray and mist thrown by the breakers, integrated on the GPU and drawn as soft
+//! sprites after the lips.
+//!
 //! Not yet, by design (later packages):
-//! spray and RefractionPass (W4), underwater and caustics (W5), boat wakes (W6). Inland water
+//! boat spray and RefractionPass (W4b), underwater and caustics (W5), boat wakes (W6). Inland water
 //! bodies are not drawn in this mode yet (see TW-WATER-01, open question for the owner).
 
 mod breakers;
@@ -33,6 +37,7 @@ mod fft;
 mod lace;
 mod shore_field;
 mod shore_sim;
+mod spray;
 mod textures;
 
 use std::sync::Arc;
@@ -52,15 +57,26 @@ const TW_WATER_WGSL: &str = concat!(
     include_str!("tw_surf_foam.wgsl"),
     "\n",
     include_str!("tw_lip.wgsl"),
+    "\n",
+    include_str!("tw_spray_common.wgsl"),
+    "\n",
+    include_str!("tw_spray.wgsl"),
 );
 
-/// The breaker crest finder: shared declarations, the shore waves, the kernel.
+/// The breaker crest finder with the spray emitters, and the spray update: shared declarations,
+/// the shore waves, the spray helpers and emitters, the kernel, the update.
 const TW_BRK_KERNEL_WGSL: &str = concat!(
     include_str!("tw_common.wgsl"),
     "\n",
     include_str!("tw_shore.wgsl"),
     "\n",
+    include_str!("tw_spray_common.wgsl"),
+    "\n",
+    include_str!("tw_spray_emit.wgsl"),
+    "\n",
     include_str!("tw_breakers_kernel.wgsl"),
+    "\n",
+    include_str!("tw_spray_update.wgsl"),
 );
 
 /// The shore simulation kernel: the shared declarations, the shore waves (shoreEvaluateWorld),
@@ -101,6 +117,9 @@ pub const DEFAULT_SHORE_PARAMS: [[f32; 4]; 3] = [
     [0.78, 0.13, 1.0, 1.0],
     [0.16, 1.0, 28.0, 1.0],
 ];
+
+/// `WgrWaterParams::tidewater_fx` defaults: Breakers `spray` and Spray `intensity` (W4).
+pub const DEFAULT_FX_PARAMS: [f32; 4] = [1.0, 1.0, 0.0, 0.0];
 
 /// The swell scale Tidewater's shore amplitude goes with (OceanFFT's swell system `scale`).
 const DEFAULT_SWELL_SCALE: f32 = 0.48;
@@ -143,6 +162,12 @@ struct TwSurface {
 const _: () = assert!(std::mem::size_of::<TwSurface>() == 16 * (17 + cdlod::LEVELS));
 
 /// Whether the shore simulation runs (Water tab, and only once the shore waves have a field).
+/// Breaker spray on (W4a): emission gain and sprite intensity above zero (the caller also needs
+/// an active shore simulation and stations).
+fn spray_on(p: &WgrWaterParams) -> bool {
+    p.tidewater_fx[0] > 0.0 && p.tidewater_fx[1] > 0.0
+}
+
 fn shore_sim_on(p: &WgrWaterParams, grid: Option<ShoreGrid>) -> bool {
     grid.is_some() && p.tidewater_shore[0][0] > 0.5 && p.tidewater_shore[2][1] > 0.5
 }
@@ -344,6 +369,8 @@ pub struct Tidewater {
     // stations per region slot, with what they were traced from (centre, terrain generation,
     // sea level in 0.1 m steps): a slot is re-traced only when that changes
     brk_slots: [Option<(([f32; 2], u64, i32), Vec<breakers::Station>)>; shore_sim::K],
+    // W4a spray
+    spray: spray::SprayGpu,
 }
 
 impl Tidewater {
@@ -475,6 +502,19 @@ impl Tidewater {
                     },
                     count: None,
                 },
+                // W4a spray: the block, the ring (tw_spray.wgsl), the sprite texture
+                uniform(20),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 21,
+                    visibility: vf,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                tex(22, D::D2, flt),
             ],
         });
 
@@ -559,6 +599,7 @@ impl Tidewater {
             sample_count,
             linear,
         );
+        let spray = spray::SprayGpu::new(device, queue, camera_layout, &layout, &shader, surface_format, sample_count, linear);
 
         let (verts, indices) = cdlod::grid_mesh();
         let grid_vbuf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -623,6 +664,7 @@ impl Tidewater {
             coast: Vec::new(),
             brk,
             brk_slots: [const { None }; shore_sim::K],
+            spray,
         };
         me.rebuild_bind(device);
         me
@@ -654,6 +696,9 @@ impl Tidewater {
                 wgpu::BindGroupEntry { binding: 17, resource: R::TextureView(self.sim.state_view()) },
                 wgpu::BindGroupEntry { binding: 18, resource: R::TextureView(&self.sim.lace_view) },
                 wgpu::BindGroupEntry { binding: 19, resource: self.brk.crest_buffer().as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 20, resource: self.spray.params.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 21, resource: self.spray.ring.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 22, resource: R::TextureView(&self.spray.tex_view) },
             ],
         });
         self.brk.rebuild_bind(
@@ -666,6 +711,7 @@ impl Tidewater {
             self.fft.params_buffer(),
             self.fft.displacement_view(),
             &self.smp_linear_repeat,
+            &self.spray,
         );
         self.sim.rebuild_bind(
             device,
@@ -800,6 +846,10 @@ impl Tidewater {
         }
         self.brk.lips_on = p.tidewater_shore[2][3] > 0.0;
         self.update_stations(queue, p.sea_level);
+        // W4a: the spray lives where the breakers are (the simulated regions)
+        let spray_on = spray_on(&p) && self.sim.any_active() && self.brk.ns >= 2;
+        let cp = [cam.cam_pos[0], cam.cam_pos[1], cam.cam_pos[2]];
+        self.spray.set_frame(queue, dt, p.time, cp, p.tidewater_fx[0], p.tidewater_fx[1], spray_on);
         let mut inputs = FrameInputs {
             detail_offset: self.detail_offset,
             morph: &self.cdlod.morph,
@@ -835,7 +885,7 @@ impl Tidewater {
             if self.sim.any_active() && !self.bind_dirty {
                 timers.begin(encoder, crate::gpu_timers::Region::TwShoreSim);
                 self.sim.dispatch(encoder);
-                self.brk.dispatch(encoder);
+                self.brk.dispatch(encoder, self.spray.on);
                 timers.end(encoder, crate::gpu_timers::Region::TwShoreSim);
             }
         }
@@ -869,6 +919,8 @@ impl Tidewater {
         pass.draw_indexed(0..self.grid_index_count, 0, 0..self.instance_count);
         // the breaker lips over the surface (Tidewater: the transparent pass after the water)
         self.brk.draw(pass, camera, offset, &self.bind);
+        // the spray over both (Tidewater: renderOrder 20, after the lips)
+        self.spray.draw(pass, camera, offset, &self.bind);
     }
 
     /// Shoreline stations for the breakers, traced per simulated region when the region, the

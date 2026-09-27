@@ -1481,6 +1481,10 @@ struct WgrWaterParams
      * (0 = Tidewater's 120), z = whitecaps (0.5), w = the conditions mode (diagnostic).
      * sizeof 1184 -> 1200 with the Rust side. */
     WgrVec4 tidewater_sea;
+    /* TW-WATER W4 — Tidewater effects. x = breaker spray emission gain (1, Breakers `spray`;
+     * 0 = no spray), y = spray sprite intensity (1, Spray `intensity`), z, w unused (0).
+     * sizeof 1200 -> 1216 with the Rust side. */
+    WgrVec4 tidewater_fx;
 };
 
 struct WgrWaterCascadeConfig
@@ -2179,7 +2183,7 @@ static_assert(sizeof(WgrGrassDownwash) == 16, "WgrGrassDownwash layout must matc
 static_assert(sizeof(WgrSmokeShadowBlob) == 32, "WgrSmokeShadowBlob layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrSmokeVolumeParams) == 96, "WgrSmokeVolumeParams layout must match the Rust #[repr(C)] struct");
   static_assert(sizeof(WgrGrassParams) == 4784, "WgrGrassParams layout must match the Rust #[repr(C)] struct");
-static_assert(sizeof(WgrWaterParams) == 1200, "WgrWaterParams layout must match the Rust #[repr(C)] struct");
+static_assert(sizeof(WgrWaterParams) == 1216, "WgrWaterParams layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrWaterNode) == 40, "WgrWaterNode layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrWaterBatch) == 16, "WgrWaterBatch layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrWaterInteractionEvent) == 64 && alignof(WgrWaterInteractionEvent) == 16, "WgrWaterInteractionEvent must match Rust");

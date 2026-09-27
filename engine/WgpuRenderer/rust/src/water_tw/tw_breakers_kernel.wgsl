@@ -1,6 +1,6 @@
-// Tidewater Native — the breaker crest finder (W3d): Breakers.js `_buildKernel` (dgreenheck/tidewater
-// @ 4811ba48, MIT, © DRG Software Solutions LLC) without the spray emitters (W4). Composed as
-// tw_common + tw_shore + this file. OP adaptations (see breakers.rs): stations carry their
+// Tidewater Native — the breaker crest finder (W3d) and spray emission (W4a): Breakers.js
+// `_buildKernel` (dgreenheck/tidewater @ 4811ba48, MIT, © DRG Software Solutions LLC). Composed as
+// tw_common + tw_shore + tw_spray_common + tw_spray_emit + this file. OP adaptations (see breakers.rs): stations carry their
 // shoreline run, which goes into the crest id so no lip spans two runs; the cascade sizes are
 // the live ones (Tidewater bakes its defaults into the code); frame.seaLevel is tw.sea.x.
 
@@ -81,6 +81,7 @@ fn breakersProcessCrest(i: u32, pc: vec2<f32>, m: f32, run: f32) {
         breakersCrestW[k] = vec4<f32>(root, b);
         breakersCrestW[k + 1u] = vec4<f32>(back, H);
         breakersCrestW[k + 2u] = vec4<f32>(dir, trough, id);
+        breakersEmit(i, slot, root, dir, b, H, trough, c, m, depth, shoreBore(A, depth));
     }
 }
 
