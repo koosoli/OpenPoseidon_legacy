@@ -126,10 +126,11 @@ pub const DEFAULT_SHORE_PARAMS: [[f32; 4]; 3] = [
 
 /// `WgrWaterParams::tidewater_fx` defaults: Breakers `spray` and Spray `intensity` (W4), the
 /// water glow (W3j: scale of the light scattered inside the water; 1 = Tidewater's formula on
-/// OP's light, which reads pale cyan).
+/// OP's light, which reads pale cyan; 0, the owner's pick, = the surface's reflection and the
+/// attenuated sea bed only).
 pub const DEFAULT_FX_PARAMS: [f32; 4] = [1.0, 1.0, GLOW_DEFAULT, 0.0];
 /// See `DEFAULT_FX_PARAMS`; must match `TidewaterLook::waterGlow` on the C++ side.
-pub const GLOW_DEFAULT: f32 = 0.12;
+pub const GLOW_DEFAULT: f32 = 0.0;
 
 /// The swell scale Tidewater's shore amplitude goes with (OceanFFT's swell system `scale`).
 const DEFAULT_SWELL_SCALE: f32 = 0.48;

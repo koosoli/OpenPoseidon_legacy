@@ -799,7 +799,7 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
         let kA = sigT * (1.0 - min(Rr.y, 0.0) / 0.8);
         let eSunU = sunLight * (1.0 - fresnelDielectric(max(L.y, 0.02), IOR));
         let deepCol = (eSunU * (sigS * phR + albedoMS * sigT * INV_PI) / kS
-            + skyIrr * PI * (sigS * (1.0 / (4.0 * PI)) + albedoMS * sigT * INV_PI) / kA) * tw.material1.w;
+            + skyIrr * PI * (sigS * (1.0 / (4.0 * PI)) + albedoMS * sigT * INV_PI) / kA) * max(tw.material1.w, 0.12);
 
         let sceneZ = _waterSceneZAt(screenUV);
         let hasObj = posV.z - sceneZ > 0.0 && sceneZ > -1e8;
