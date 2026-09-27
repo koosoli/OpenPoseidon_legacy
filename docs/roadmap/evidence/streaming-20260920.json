@@ -8828,6 +8828,203 @@
         "route-frame-ms.json": "ebe63db18d323057e02ab4dcf6193d67a8bae339e02af3c62b66184a462725f1",
         "samples.jsonl": "f0cbb08cdd436c4c3818015336adbd828344318836a1f72643f47ee17c27c35d"
       }
+    },
+    {
+      "run": "zero-copy-paa-actual-20260927-disabled-20260927-023702",
+      "classification": "Clean0 PASS installedcleane0e3c2cd02:37 originaldecoder exactretained; zero-copy/FileCacheflush runtimecompatibility profileON notperformanceacceptance. Actualboundedfirst128miprows borrowedLzoMipspositive: betulahumilis7selectedmips4LZO/borrow4/3raw open.004 loop11.937 acquisition.001 LZO11.923 raw.007 total11.941ms. packedAllocCopy historicallabel nowincludesborrowedrangeacquisition ororiginalcopyfallback, notalwaysallocation. Scopeboundedstartup/coldwarmalpha notfullroute proof. Aggregatewarmrow20 count1536 total958.266/texRead838.632/create62.582/264uploads alpha/geo0 showsremaininghitches. 879frames/performancefalse; nextprofileOFFsamebinaryroutescreen pending/notdone. Noquality/default/algorithmchange.",
+      "provenance": {
+        "fpsCap": 60,
+        "msaaSamples": 4,
+        "mode": "Disabled",
+        "scriptSha256": "E9ADAB0D138E5882831F975745F97335B3FF9596710FC640367DBC12B98CF624",
+        "pose": [
+          5704.58,
+          2523.37,
+          73.74,
+          260.9,
+          -3.8
+        ],
+        "processScope": "Owned PID private/RSS samples; sparse owner-pump values are observations, not percentiles",
+        "installed": "codex/streaming-residency e0e3c2cd 2026-09-27_02:37 deploy-ps1",
+        "head": "e0e3c2cdc9651a698b1406ebd66715100c5d7a3f",
+        "clearedEnvironmentNames": [],
+        "height": 720,
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "F396C9A8CBB10E8DDC8E0B57BD4F9A5BCF8447D967CE129C8BA4C8DB55CA9F98",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "E1F457EA81048783BEDB2EF08E58637296A6E7C6E4B46D9C942354FE046B7768",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "width": 1280,
+        "routeX": [
+          5804.58,
+          5904.58,
+          6004.58,
+          6104.58,
+          6004.58,
+          5904.58,
+          5804.58,
+          5704.58,
+          5704.58,
+          5704.58,
+          5704.58
+        ],
+        "viewDistance": 2000,
+        "poseHoldSeconds": 3,
+        "world": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\packages\\dayz-compat\\world\\chernarusplus\\chernarusplus.wrp",
+        "measurementScope": "Bounded engine16384-frame route capture; screening only, no FPS acceptance, vanilla parity or full cold-cache proof",
+        "environment": {
+          "WGR_TERRAIN_PAGE_TIMINGS": "1",
+          "WGR_OBJECT_STREAM_GPU_BUDGET": "0",
+          "WGR_OBJECT_STREAM_PBO_TEXTURES": "0",
+          "WGR_GEO_POOL_GROWTH": "2.0",
+          "POSEIDON_SLOW_FRAME_TRACE": "1",
+          "WGR_ADAPTIVE_TEXTURE_DETAIL": "0",
+          "WGR_LOD_GOVERNOR_RANGE": "1",
+          "WGR_TEXTURE_STREAM_STATS": "0",
+          "WGR_GEO_POOL_PRESSURE_GROWTH": "0",
+          "WGR_SIMULATION_POSITIVE_COLD": "0",
+          "WGR_OBJECT_STREAM_TEST_BUDGET": "1",
+          "WGR_SIMULATION_RESIDENCY": "0",
+          "WGR_OBJECT_STREAM_MAX_OBJECTS": "20000",
+          "WGR_OBJECT_STREAM_PBO": "1",
+          "WGR_OBJECT_STREAM_WARM_PROFILE": "1",
+          "POSEIDON_MODEL_DDC": "0",
+          "WGR_NATIVE_DDS_PREPARE": "0",
+          "WGR_SKY_VOLUME_INCREMENTAL": "1",
+          "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\zero-copy-paa-actual-20260927-disabled-20260927-023702\\user",
+          "WGR_NATIVE_DDS_BC3_ONLY": "0"
+        },
+        "routeScope": "Eight convergence400m out/return poses plus three stationary recovery holds; one process per invocation"
+      },
+      "sha256": {
+        "engine.log": "c4e4194865357511d9e84d94fa818af0414f9ca4da3bf8544c40d90aef01bc9e",
+        "harness.jsonl": "8ed84040ae0e1afc1cf5d03ab852d4fddd212f64ff37ebfeae5de2f3caa846a7",
+        "latency.eden/mission.sqm": "feeaec384c114c445f050845560bff3f43e023443916204908ddb932616194cc",
+        "provenance.json": "6555b50f9a486a2eec347a36079de26bcc2723c6b81879d9e358a8523e3f6f3f",
+        "result.json": "b3fde2e2e121be2608ae5699bd1aabb17dac41fe873de41371a4a27d041f3a24",
+        "returned-settled.png": "aebbca39349674bac25ca727345f15cbd1e2b1da42315cb8b21d618a3541c32d",
+        "route-frame-ms.json": "15acca4e9ffa5b45a4c39649aeef2e23554f7aab9d775ab2ec86f540ee89ee68",
+        "samples.jsonl": "06a27e2762a8a9a616415e4bbcfb0c5249e567dcd4fdecf58067ea4be523e400"
+      }
+    },
+    {
+      "run": "zero-copy-default-actual-20260927-disabled-20260927-023850",
+      "classification": "PASS clean exit 0; profile-OFF compatibility and ordered traversal screening only, no performance acceptance",
+      "provenance": {
+        "height": 720,
+        "fpsCap": 60,
+        "mode": "Disabled",
+        "viewDistance": 2000,
+        "installed": "codex/streaming-residency e0e3c2cd 2026-09-27_02:37 deploy-ps1",
+        "routeX": [
+          5804.58,
+          5904.58,
+          6004.58,
+          6104.58,
+          6004.58,
+          5904.58,
+          5804.58,
+          5704.58,
+          5704.58,
+          5704.58,
+          5704.58
+        ],
+        "scriptSha256": "E9ADAB0D138E5882831F975745F97335B3FF9596710FC640367DBC12B98CF624",
+        "width": 1280,
+        "poseHoldSeconds": 3,
+        "measurementScope": "Bounded engine16384-frame route capture; screening only, no FPS acceptance, vanilla parity or full cold-cache proof",
+        "head": "e0e3c2cdc9651a698b1406ebd66715100c5d7a3f",
+        "world": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\packages\\dayz-compat\\world\\chernarusplus\\chernarusplus.wrp",
+        "pose": [
+          5704.58,
+          2523.37,
+          73.74,
+          260.9,
+          -3.8
+        ],
+        "processScope": "Owned PID private/RSS samples; sparse owner-pump values are observations, not percentiles",
+        "hashes": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "F396C9A8CBB10E8DDC8E0B57BD4F9A5BCF8447D967CE129C8BA4C8DB55CA9F98",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "E1F457EA81048783BEDB2EF08E58637296A6E7C6E4B46D9C942354FE046B7768",
+            "Path": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\wgpu_renderer.dll"
+          }
+        ],
+        "environment": {
+          "WGR_OBJECT_STREAM_PBO": "1",
+          "WGR_SIMULATION_RESIDENCY": "0",
+          "WGR_TEXTURE_STREAM_STATS": "0",
+          "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\stream-residency\\zero-copy-default-actual-20260927-disabled-20260927-023850\\user",
+          "WGR_NATIVE_DDS_BC3_ONLY": "0",
+          "WGR_OBJECT_STREAM_GPU_BUDGET": "0",
+          "WGR_LOD_GOVERNOR_RANGE": "1",
+          "WGR_OBJECT_STREAM_PBO_TEXTURES": "0",
+          "WGR_OBJECT_STREAM_MAX_OBJECTS": "20000",
+          "WGR_GEO_POOL_PRESSURE_GROWTH": "0",
+          "WGR_SIMULATION_POSITIVE_COLD": "0",
+          "WGR_OBJECT_STREAM_TEST_BUDGET": "1",
+          "WGR_SKY_VOLUME_INCREMENTAL": "1",
+          "WGR_ADAPTIVE_TEXTURE_DETAIL": "0",
+          "WGR_NATIVE_DDS_PREPARE": "0",
+          "POSEIDON_MODEL_DDC": "0",
+          "WGR_GEO_POOL_GROWTH": "2.0"
+        },
+        "msaaSamples": 4,
+        "clearedEnvironmentNames": [],
+        "routeScope": "Eight convergence400m out/return poses plus three stationary recovery holds; one process per invocation"
+      },
+      "summary": {
+        "passed": true,
+        "performanceAccepted": false,
+        "warmProfile": false,
+        "terrainProfile": false,
+        "lazyTextureGroups": false,
+        "parkedTextureRefill": false,
+        "admissionMode": "Counted",
+        "frameCount": 912,
+        "meanMs": 37.4394309210526,
+        "medianMs": 23.0675,
+        "p95Ms": 111.124,
+        "p99Ms": 303.084,
+        "maxMs": 1087.966,
+        "returnedResident": 19923,
+        "required": 0,
+        "returnedGeometryLiveBytes": 706778992,
+        "returnedTextureBytes": 2729695956,
+        "returnedTextureCount": 2451,
+        "returnedBackendAllocationBytes": 5281929024,
+        "comparison170": {
+          "run": "eager-default-restored-actual-20260927-disabled-20260927-015926",
+          "frameCount": 877,
+          "meanMs": 39.331944,
+          "medianMs": 22.989,
+          "p95Ms": 122.031,
+          "p99Ms": 325.633,
+          "maxMs": 909.544
+        },
+        "limits": "Mixed ordered comparison with different renderer/source history, caches, asynchronous admission and allocated work; lower mean/p95/p99 but worse maximum. No FPS, no-regression or default-performance acceptance. Same e0 profile-ON/OFF binary hashes stable. Root inspected before-da3 and after-e0 profile-ON settled screenshots: same visible bus/street/buildings/foliage/textures at local POI only, not all-route quality or A3 compatibility. Persistent GPU owner ledger work is not included or verified."
+      },
+      "sha256": {
+        "engine.log": "98a7288574396f20395094dfacf8dcf8017a1c8ed1b8513318798d500e66e76f",
+        "harness.jsonl": "b191eee6ed15e8ca774017e4e712ffccd161070f118ff06b98672448715e8910",
+        "provenance.json": "ff892f0e56e2dee47d35c2777f4193053c577edbec689a4e65902272e3c4661d",
+        "result.json": "92027dc696d770a0596d35087e14900899ba258572d566f038a244e39ffcb32b",
+        "returned-settled.png": "f4786217e09455f9c8e2a708223d96fd8532469807b7024105a8260dd8a24433",
+        "route-frame-ms.json": "c2ac33b54f58f40c7d3192bd8a09e142623277acc89ba1644705c8ba502f1619",
+        "samples.jsonl": "1405c2ac6b5418ad97119a660f2a74ec1812012706cbf9513196f674c82eaf6d"
+      }
     }
   ],
   "microbenchmarks": [
@@ -9120,6 +9317,70 @@
         },
         "batches": 9,
         "sourceHead": "f5e51c5ef92cc27fd944854c9f4aa99631049871"
+      }
+    },
+    {
+      "artifactRoot": "build",
+      "classification": "REJECTED LZO fastpath CPUcomponent screening;11originalLZO mip payloads from3DayZplants.pbo members,12517376inflatedbytes. Exactbytes+consumedparity; standalone /O2 noLTO reportedroot, sourceincludesbothinlineheaders sameTU (notseparateTUs),3warm rounds+24alternatingorderinterleavedrounds. Initialold/newmedian19.4517/20.0269(+2.96%) max25.4199/24.2003ms;Threshold64 medians21.4791/21.6082 max24.7203/26.1522;FillOnly18.7603/18.9652 max25.5651/25.4946. Noacceptedbenefit; originals restored BEFOREdeployment. Values arewhole11mipbatch medians/max notframep95/GPU/FPS, warmfixedcorpusnotI/O; no causalgain/no-regclaim. Artifactsourcecurrenthashdoesnotestablishallhistoricalvariantheader/compilerinputs;3originalPAA andmips/provenance/compiledexe/resultshashedprivateonly.",
+      "results": [
+        {
+          "mips": 11,
+          "outputBytesPerBatch": 12517376,
+          "rounds": 24,
+          "oldMedianMs": 19.4517,
+          "newMedianMs": 20.0269,
+          "oldMaxMs": 25.4199,
+          "newMaxMs": 24.2003,
+          "witness": 675965358,
+          "allBytesAndConsumedEqual": true
+        },
+        {
+          "mips": 11,
+          "outputBytesPerBatch": 12517376,
+          "rounds": 24,
+          "oldMedianMs": 21.4791,
+          "newMedianMs": 21.6082,
+          "oldMaxMs": 24.7203,
+          "newMaxMs": 26.1522,
+          "witness": 675965358,
+          "allBytesAndConsumedEqual": true
+        },
+        {
+          "mips": 11,
+          "outputBytesPerBatch": 12517376,
+          "rounds": 24,
+          "oldMedianMs": 18.7603,
+          "newMedianMs": 18.9652,
+          "oldMaxMs": 25.5651,
+          "newMaxMs": 25.4946,
+          "witness": 675965358,
+          "allBytesAndConsumedEqual": true
+        }
+      ],
+      "sha256": {
+        "lzo-real-corpus/b_betulahumilis_1s_ca-0.bin": "60495d8424544eab45cb3e5b290c38900e0ae49836ba2440ba56baa722046914",
+        "lzo-real-corpus/b_betulahumilis_1s_ca-1.bin": "50f26cea483a6d792e386920075fd4ae1d8faf8da428b0a6f15be2743b923520",
+        "lzo-real-corpus/b_betulahumilis_1s_ca-2.bin": "f0fdccfc8eb9a8949780eb3d71c5b25bfa603c72f123ef210934950bdd06352e",
+        "lzo-real-corpus/b_betulahumilis_1s_ca-3.bin": "9d96c62f5cfb835f1cfce64a480a43f40dcc7f34184ae51bd0af8bb1083bb2d1",
+        "lzo-real-corpus/b_betulahumilis_1s_ca.paa": "3f0dd90f00fc96cc13b5d8cd8532095834f5523d21235ee4d80d959f379dc50d",
+        "lzo-real-corpus/benchmark-FillOnly.json": "3847d2fb0e7cb544edc4e55895ff8fa1b10542446f91a4b296902fee561b1ca1",
+        "lzo-real-corpus/benchmark-Threshold64.json": "046a355de638a6b88105b8d415824e5eb9ac828d9730f12b93158bca3c1fd06e",
+        "lzo-real-corpus/benchmark.json": "48c08df344f72457f48b18ad0028ba96728739202074c911ba7f8fb055bddf62",
+        "lzo-real-corpus/mips.json": "dc5d2b281f2f90f9853e1a174de4b2f38412600594dc6c8269cd2389f0a77d2c",
+        "lzo-real-corpus/provenance.json": "19b22d33926031b3c36cd93ddf86644d598cfd52b6c159ebfe663275e6c9cdef",
+        "lzo-real-corpus/t_betula_pendula_bark_01_co-0.bin": "b5d0894406a698b7eb67a9c2d36eab4ff2ca3d99b113a203e0bf030567fbb415",
+        "lzo-real-corpus/t_betula_pendula_bark_01_co-1.bin": "fed86c2139f3b70128842e731bbc442e16e150cd6a47936a9d2463f231911159",
+        "lzo-real-corpus/t_betula_pendula_bark_01_co-2.bin": "afe85d27e4f525a29bd72de0bc3d2427f594b6261aa5dd6c50ed4c07831bcbaf",
+        "lzo-real-corpus/t_betula_pendula_bark_01_co.paa": "eb558cfd618c88193fc08b9ce2573f730d92b521fa99b5765f05383de5e58288",
+        "lzo-real-corpus/t_fagussylvatica_leaves2_ca-0.bin": "cf087255693b164226dc04a445080584744e5f495eddc65d2f82d32ab964959a",
+        "lzo-real-corpus/t_fagussylvatica_leaves2_ca-1.bin": "474b4899ba2cd3ebd8fd720fc7a49eeac99916fac25a6074095850f121404666",
+        "lzo-real-corpus/t_fagussylvatica_leaves2_ca-2.bin": "7b30342bf4ae13c94d3f233ca7997440203161099512afdc521d59a9d4883246",
+        "lzo-real-corpus/t_fagussylvatica_leaves2_ca-3.bin": "c2d93757fa4ce393a8a271351c6c9bdcc1e240a20772c4d6aa76c7367e7bff5f",
+        "lzo-real-corpus/t_fagussylvatica_leaves2_ca.paa": "e36984378e31aefb270c1beb2ec0a7da73245f8458f9923b8bb031d7a08c9924",
+        "LzoRealBenchmark.cpp": "5985ab5b791a27e2cbbe689775e3981697e9aa5191df9660c96d26f903fef8a2",
+        "FrozenLzoReference.hpp": "c9d041ee4a23ec9d3b238d70984c37b080733b466310c952308bc1ca45ab7210",
+        "LzoRealBenchmark.exe": "b2132d1d3e73fef3d1c766890daa505564ea5fefd65dbc1b45aee5b4e84c0b75",
+        "build-lzo-real-benchmark-20260927.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
       }
     }
   ],
@@ -9568,6 +9829,32 @@
       "sha256": {
         "build-mip-read-subphase-20260927.log": "219f4112c79f99a670cd2400075ed8b2e38e9894363f57c4865d3be6d5067db7",
         "deploy-mip-read-subphase-20260927.log": "836b3eefb57ce38f4c6d62ec8c42a6ac6e4eb5c7ea8c0315a70a9cd406d1d3db"
+      }
+    },
+    {
+      "artifactRoot": "build",
+      "sourceCommits": [
+        "83845a71",
+        "768af3a3",
+        "16135e50",
+        "e0e3c2cd"
+      ],
+      "result": "Alltarget699PASS combinedFileCacheflush accounting/disjointspan/PAAread/LZOcandidate. Engine118715assert14PASS includesLZO but NOdisjoint-span/file-cache (Coreonly); Core71assert3PASS includesdisjoint-span/file-cache butNOlzo/lzo-fastpath (Engineonly). Unmatchedfilters explicitlynotexecution. LZOcandidate correctnesspass but realcomponentmediansmixed, NOTPROMOTED; e0e3c2cd restoresexactoriginalproductionheader (gitdiffagainstda3 empty), removesfrozenreference+3differentialtests toprivateartifact, retainsindependentlongrecurrence [lzo-recurrence]. Originaldecoderrebuild/runtime pending; no claimcurrentrestoredtreebuilt/installed.",
+      "sha256": {
+        "build-paa-read-and-cache-fixes-20260927.log": "f91ffd4aeaa45bf336272f11b68ecf8c590f243079a342c615a2f464a5b4ba10",
+        "test-paa-read-and-cache-engine-20260927.log": "1afa25be451fb2d332d544ed0fc16ef729d2b66b3786ce16f3efc2d70e8f32db",
+        "test-paa-read-and-cache-core-20260927.log": "44bbc00547bbad6fe97211a2780ef1a23a0ff9505e5bff8c9b9aa90606511c48"
+      }
+    },
+    {
+      "artifactRoot": "build",
+      "runtimeSourceCommit": "e0e3c2cd",
+      "result": "Restoredoriginaldecoder rebuild44PASS/deploymatchingclean; originalEngine51658assert11PASS/Core71assert3PASS noSKIP. EngineLZO/PAA andCoredisjoint/filecache scope distinct/unmatchedfiltersnotexecution. FileCacheflush budgetrepair andimmediateboundeddisjointPAAborrow retained; priorLZOcandidate NOTpromoted, productionexactoriginal. RuntimeprofileON compatibilityPASS notFPS/no-regacceptance.",
+      "sha256": {
+        "build-paa-read-original-decoder-20260927.log": "ef0bb550847d1de2e5bde0841e7d683b7ed9cc75a8d0bce2fe1d9992edd853f3",
+        "test-paa-read-original-decoder-core-20260927.log": "440d05eef8742d24588497a6be3a7ad1ee79277333f5964b05a7a66629b99eb7",
+        "test-paa-read-original-decoder-engine-20260927.log": "73f2d1268bb488124fefbda1e004a15119927803dcd20d0ac2be2f473b88a385",
+        "deploy-paa-read-original-decoder-20260927.log": "f843f0bb949069ad1fe298a6d61744aa6e5abbae261dd6724cada13b7989a790"
       }
     }
   ],

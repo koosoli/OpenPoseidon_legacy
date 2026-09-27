@@ -2261,3 +2261,54 @@ outside Pactext rows; this is not a partition of whole TextureWgpu read time.
 Original BC compressed payload/quality/policy unchanged,831frames diagnostic
 only/performancefalse. Zero-copy and FileCache-flush source candidates are
 being edited and not validated or included. FullplanOPEN/defaultsunchanged.
+
+## Sept27 source-read/cache fixes and rejected LZO match experiment
+
+83845a71 removes selectively flushed bank bytes from FileCache budget before
+deleting owning references, matching existing eviction accounting. 768af3a3
+borrows bounded contiguous disjoint input spans for immediate PAA mip inflate;
+refusal preserves cursor/flags and uses original copying fallback. Span never
+outlives backing stream; bounds/overflow/alias guards remain. Combined699target
+build passes. Targeted Engine118715assert14cases includesLZO; Core71assert3cases
+includesdisjoint-span/file-cache. Engine unmatched Core-only filters and Core
+unmatched Engine-only LZO filters are not claimed as executed coverage.
+
+16135e50 LZO distance1/disjoint fastpaths pass correctness but are NOT promoted.
+Actual11rawLZO mips from3originalplants.pbo members inflate12517376bytes with
+exact bytes/consumed parity. Standalone reported/O2/noLTO,3warm rounds and24
+alternating interleaved rounds; source includes both inline decoders in one TU.
+Initial median19.4517→20.0269ms(+2.96%), max25.4199→24.2003; Threshold64
+median21.4791→21.6082/max24.7203→26.1522; FillOnly18.7603→18.9652/
+max25.5651→25.4946. Batchmax is not framep95; warmed CPUcomponent excludes
+I/O/GPU/FPS. No variant demonstrates accepted benefit. e0e3c2cd restores exact
+original production decoder before deployment; frozen reference/3differential
+tests retired to private benchmark artifact, independent long recurrence test
+retained [lzo-recurrence]. Hashes preserve corpus/provenance/results/source/exe;
+current source does not certify every historical variant's compiler inputs.
+
+Original-decoder rebuild and actualruntime are pending at this checkpoint;
+do not infer restored tree installed from preceding candidate tests. FileCache/
+zero-copy changes retained pending runtime. FullplanOPEN/performancefalse.
+Final restored-original decoder build44/deploy now pass, matchingcleane0e3c2cd
+stamp02:37. OriginalEngine51658assert11cases/Core71assert3cases pass/noSKIP,
+with actualbinary tag scopes distinct. Actual zero-copy023702 clean0 confirms
+positive borrowedLzoMips: betulahumilis7selected/4LZO/borrow4/3raw mips open.004/
+loop11.937/rangeacquisition.001/LZO11.923/raw.007/total11.941ms. Historical
+packedAllocCopy label now covers range acquisition or original copy fallback,
+not necessarily allocation. First128 bounded startup/activeprofile rows do not
+cover all moving-route reads. Original decoder remains exact; compressed payload/
+quality unchanged. Aggregatewarmrow20 1536total958.266/read838.632/create62.582/
+264uploads alpha/geometry0 confirms remaining hitches. ProfilingON879frames
+is compatibility/attribution, not FPS/no-regression acceptance. At this historical checkpoint the profileOFF samebinary screening was pending. FullplanOPEN/defaultsunchanged.
+Profile-OFF023850 subsequently passed clean exit0 on the same clean e0 binary,
+with stable executable/DLL hashes, Warm/Terrain/Lazy/Parked OFF and Counted.
+912frames mean37.439431/median23.0675/p95111.124/p99303.084/max1087.966ms
+versus170 eager-default877frames39.331944/22.989/122.031/325.633/909.544ms.
+Lower mean/tails but worse maximum is mixed ordered screening, with renderer/
+source/cache/admission and allocated-work confounds; not FPS/no-regression
+acceptance. Returned19923/required0, geometry706778992B/textures2729695956B
+(2451), different from170. Default zero-copy is now installed; original decoder
+retained. Root compared before-da3 and after-e0 profile-ON settled screenshots:
+same local bus/street/buildings/foliage/textures, not whole-route quality or A3
+compatibility. FullplanOPEN/performancefalse; future persistent GPU owner ledger
+source is not installed or verified by these runs.
