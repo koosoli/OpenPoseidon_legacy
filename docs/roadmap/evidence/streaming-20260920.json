@@ -11231,6 +11231,137 @@
         "lzo-real-corpus/mips.json": "dc5d2b281f2f90f9853e1a174de4b2f38412600594dc6c8269cd2389f0a77d2c",
         "compile-paa-replay-benchmark-20260927.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
       }
+    },
+    {
+      "artifactRoot": "build",
+      "classification": "REJECTED UNBUILT/UNTESTED engine initialized-BC API/caller prototype; standalone component only",
+      "provenance": {
+        "measured": "Allocation + initialization + exact original LZO decode; includes no VFS, mip-chain source API, engine upload or real-game frame timings; 3 warm + 31 alternating-order rounds, median middle index15",
+        "workload": "11 original packing-0 plant PAA payloads, 12517376 output bytes; fresh per-mip vector-zero vs array-no-value-init, output equivalence outside timer",
+        "corpus": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "60495D8424544EAB45CB3E5B290C38900E0AE49836BA2440BA56BAA722046914",
+            "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\lzo-real-corpus\\b_betulahumilis_1s_ca-0.bin"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "50F26CEA483A6D792E386920075FD4AE1D8FAF8DA428B0A6F15BE2743B923520",
+            "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\lzo-real-corpus\\b_betulahumilis_1s_ca-1.bin"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "F0FDCCFC8EB9A8949780EB3D71C5B25BFA603C72F123EF210934950BDD06352E",
+            "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\lzo-real-corpus\\b_betulahumilis_1s_ca-2.bin"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "9D96C62F5CFB835F1CFCE64A480A43F40DCC7F34184AE51BD0AF8BB1083BB2D1",
+            "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\lzo-real-corpus\\b_betulahumilis_1s_ca-3.bin"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "B5D0894406A698B7EB67A9C2D36EAB4FF2CA3D99B113A203E0BF030567FBB415",
+            "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\lzo-real-corpus\\t_betula_pendula_bark_01_co-0.bin"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "FED86C2139F3B70128842E731BBC442E16E150CD6A47936A9D2463F231911159",
+            "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\lzo-real-corpus\\t_betula_pendula_bark_01_co-1.bin"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "AFE85D27E4F525A29BD72DE0BC3D2427F594B6261AA5DD6C50ED4C07831BCBAF",
+            "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\lzo-real-corpus\\t_betula_pendula_bark_01_co-2.bin"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "CF087255693B164226DC04A445080584744E5F495EDDC65D2F82D32AB964959A",
+            "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\lzo-real-corpus\\t_fagussylvatica_leaves2_ca-0.bin"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "474B4899BA2CD3EBD8FD720FC7A49EEAC99916FAC25A6074095850F121404666",
+            "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\lzo-real-corpus\\t_fagussylvatica_leaves2_ca-1.bin"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "7B30342BF4AE13C94D3F233CA7997440203161099512AFDC521D59A9D4883246",
+            "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\lzo-real-corpus\\t_fagussylvatica_leaves2_ca-2.bin"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "C2D93757FA4CE393A8A271351C6C9BDCC1E240A20772C4D6AA76C7367E7BFF5F",
+            "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\lzo-real-corpus\\t_fagussylvatica_leaves2_ca-3.bin"
+          }
+        ],
+        "candidateBuilt": false,
+        "command": "clang-cl /std:c++20 /O2 /EHsc /MD /Iengine build/InitializedBCBenchmark.cpp; standalone same-TU original LZO decoder, no LTO",
+        "originalDecoder": "03c69590d0be2998de4c2bd1f190ba108e94fb7f",
+        "head": "b08116a1915de20a496a0e357198ab719b2330ed",
+        "artifacts": [
+          {
+            "Algorithm": "SHA256",
+            "Hash": "A1D8BD922F25AE00E1EB14AE219934DC9AD9829A1A0220CD0E655FA2A5BB0E52",
+            "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\InitializedBCBenchmark.cpp"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "ABE84E37DB2DE2ADEB80FA5792B1A7A315F075EDF3F4B9B237B449F83DFCA7B6",
+            "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\InitializedBCBenchmark.exe"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "F9D6EAF988556DE41EADD4BC5345F13DE091A41E21559F24CE751E8F6D6EAE2A",
+            "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\lzo-real-corpus\\initialized-bc-benchmark.json"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855",
+            "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\compile-initialized-bc-benchmark-20260927.log"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "A7458452F81668DAABF1D5B47590B26F876B252C9A3A4C61488EAF98980157D7",
+            "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\initialized-bc-unbuilt-prototype.patch"
+          },
+          {
+            "Algorithm": "SHA256",
+            "Hash": "12D52659ED40B3903E5AA8F6778729D8B2B3DE14B9377A3B5E7FB27AD3BEA941",
+            "Path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\test_paa_initialized_bc_chain.unbuilt.cpp"
+          }
+        ],
+        "decision": "No material local benefit established; unbuilt API/caller/tests restored, existing clean installed7b92 unchanged; not a general regression or FPS claim"
+      },
+      "result": {
+        "mips": 11,
+        "outputBytes": 12517376,
+        "rounds": 31,
+        "allOutputBytesEqual": true,
+        "arms": [
+          {
+            "arm": 0,
+            "medianMs": 21.877,
+            "maxMs": 28.3649
+          },
+          {
+            "arm": 1,
+            "medianMs": 22.0143,
+            "maxMs": 28.3841
+          }
+        ],
+        "witness": 851215636
+      },
+      "limits": "OriginalLZO11unchangedplantPAApayloads12517376decoded;fresh per-mip vectorzero vs new[]uninit,3warm31alternating rounds exact full output equality outside timer. Zero21.877median28.3649max vs uninit22.0143median28.3841max(~0.6%slower), no material gain. No VFS/chainAPI/upload/FPS/causal-regression proof. Candidate API/caller/tests reviewed but never built/tested; restored/removed, private ignored patch/test preserved. No new flag/API shipped, installedclean7b92 unchanged/defaults unchanged/fullplanOPEN/performancefalse.",
+      "sha256": {
+        "lzo-real-corpus/initialized-bc-benchmark.json": "f9d6eaf988556de41eadd4bc5345f13de091a41e21559f24ce751e8f6d6eae2a",
+        "lzo-real-corpus/initialized-bc-benchmark-provenance.json": "fe42368a4e14b40bbc0cd4a15171476a89bdb818a375a452de8c6936f7e8d537",
+        "InitializedBCBenchmark.cpp": "a1d8bd922f25ae00e1eb14ae219934dc9ad9829a1a0220cd0e655fa2a5bb0e52",
+        "InitializedBCBenchmark.exe": "abe84e37db2de2adeb80fa5792b1a7a315f075edf3f4b9b237b449f83dfca7b6",
+        "compile-initialized-bc-benchmark-20260927.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "initialized-bc-unbuilt-prototype.patch": "a7458452f81668daabf1d5b47590b26f876b252c9a3a4c61488eaf98980157d7",
+        "test_paa_initialized_bc_chain.unbuilt.cpp": "12d52659ed40b3903e5aa8f6778729d8b2b3de14b9377a3b5e7fb27ad3bea941"
+      }
     }
   ],
   "buildChecks": [

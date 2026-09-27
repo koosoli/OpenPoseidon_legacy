@@ -2414,3 +2414,13 @@ hashes EXE04BF3C6A43D010B1F5A84A32BF5088734F70458E78F4FD2C2DAEACBFD8F4C43D,
 DLL39A04A78A496930022AB77796C2962A0F6F060B6AAA5B2B36914FD2845AC15E0.
 Initialized BC-read API candidate unbuilt/caller unwritten/not included.
 FullplanOPEN/performancefalse/no causalno-regression claim.
+Initialized BC destination experiment is REJECTED UNBUILT/UNTESTED. Standalone
+originalLZO11actualplant PAA payloads12517376decoded bytes:3warm+31alternating
+rounds fresh per-mip vectorzero versus new[]uninit, exact fulloutputequality
+outside timer. Zero median21.877/max28.3649 versus uninit22.0143/28.3841ms,
+about0.6%slower and no material gain; no VFS/chainAPI/upload/FPS/causalregression
+proof. API/caller/test candidate independently reviewed but NEVER built/tested,
+all restored/removed. Private ignored initialized-bc-unbuilt-prototype.patch and
+test_paa_initialized_bc_chain.unbuilt.cpp plus benchmark provenance retained.
+No flag/API shipped, installedclean7b92 unchanged. Reject complexity without
+measured gain; normaldefaults unchanged/fullplanOPEN/performancefalse.
