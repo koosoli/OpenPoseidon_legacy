@@ -8413,7 +8413,7 @@ void EngineWgpu::PublishGeometryPageFixtureObservation(const WgrFrame& frame)
         valid=valid && fixture->rendererMeshes[i]!=0;
     }
     std::array<WgrMeshHandleFact,64> facts{}; WgrMeshHandleFactSummary summary{};
-    if(valid) valid=wgr_get_mesh_handle_facts(_renderer,WgrSlice<uint64_t>{fixture->rendererMeshes.data(),fixture->meshes.size()},
+    if(valid) valid=wgr_get_mesh_handle_facts(_renderer,WgrSlice<uint64_t>{fixture->rendererMeshes.data(),uint32_t(fixture->meshes.size())},
         facts.data(),fixture->meshes.size(),&summary)!=0 && summary.complete==1 && !summary.flags && !summary.duplicate_handles &&
         summary.handles_requested==fixture->meshes.size() && summary.handles_inspected==fixture->meshes.size() &&
         !summary.invalid && !summary.reserved && summary.record_scope_valid==1 &&
