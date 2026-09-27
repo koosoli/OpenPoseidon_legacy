@@ -648,7 +648,9 @@ void Ship::Simulate(float deltaT, SimulationImportance prec)
                             const float coefNPoints = 12.0 / 12.0;
                             // first is water is "pushing" everything up - causing some momentum
                             pForce = Vector3(0, (1200000 / baseMass) * GetMass() * info.under * coefNPoints, 0);
-                            if (smallShip)
+                            // TW-WATER W6a.2: a wreck does not plane. With the lift a boat killed
+                            // at speed skimmed on for 150 m while it "sank" (twboats, 98aee494).
+                            if (smallShip && !_isDead)
                             {
                                 // PLANING LIFT. A small hull gets up to 120x the static buoyancy
                                 // as it picks up speed, which is the 2001 engine's stand-in for
@@ -693,7 +695,8 @@ void Ship::Simulate(float deltaT, SimulationImportance prec)
                             pForce[1] = speed[1] * fabs(speed[1]) * 40 + speed[1] * 30;
                             pForce[2] = (fabs(speed[2]) * 0.02 + 0.06) * speed[2] * dragDepth;
 
-                            if (_pilotBrake)
+                            // (W6a.2) a flooding wreck brakes in the water like a stopped hull
+                            if (_pilotBrake || _isDead)
                             {
                                 pForce *= 8;
                             }

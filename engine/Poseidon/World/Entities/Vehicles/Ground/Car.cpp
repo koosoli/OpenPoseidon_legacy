@@ -734,12 +734,14 @@ void Car::Simulate(float deltaT, SimulationImportance prec)
     {
         IsMoved();
     }
-    // TW-WATER W6a.1: a car afloat or airborne keeps simulating (as Tank does). A car starts
-    // stopped, so an empty BRDM placed on the sea hung at its placement height, dry, and its wreck
-    // never sank.
+    // TW-WATER W6a.1/W6a.2: a car afloat or airborne keeps simulating. A car starts stopped
+    // (_isStopped, constructor) and the physics below runs only when it is not, so a BRDM placed
+    // on the sea -- empty or crewed -- hung at its placement height, dry, never drove and never
+    // sank. IsMoved alone (W6a.1) does not clear the stop; CancelStop does.
     if (!_landContact || _waterContact)
     {
         IsMoved();
+        CancelStop();
     }
 
     {
