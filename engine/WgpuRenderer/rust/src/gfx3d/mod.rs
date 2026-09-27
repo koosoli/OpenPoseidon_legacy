@@ -4,6 +4,7 @@ use wgpu::util::DeviceExt;
 
 pub(crate) mod pool;
 mod allocation_report;
+mod mesh_facts;
 mod lod_feedback;
 use pool::{GeometryPool, MeshAlloc};
 
@@ -5357,6 +5358,16 @@ impl Gfx3d {
 
     pub fn geometry_residency(&self) -> pool::GeometryResidency {
         self.pool.residency()
+    }
+
+    pub(crate) fn mesh_handle_facts(&self, handles: &[u64], out: &mut [crate::ffi::WgrMeshHandleFact])
+        -> crate::ffi::WgrMeshHandleFactSummary {
+        mesh_facts::collect(handles, out, |handle| {
+            let key: MeshKey = KeyData::from_ffi(handle).into();
+            let mesh = self.meshes.get(key)?;
+            Some((u64::from(mesh.vert_count) * std::mem::size_of::<WgrMeshVertex>() as u64,
+                u64::from(mesh.index_count) * std::mem::size_of::<u32>() as u64))
+        })
     }
 
     pub(crate) fn geometry_allocation_report(&self, ids: &[u32], max_rows: usize, max_visits: usize)

@@ -15,7 +15,7 @@ class GeometryOwnerLedger
 {
 public:
     enum class ProducerKind { Retained, Cpu };
-    enum class Reason : uint32_t { Protocol=1, Capacity=2, LateEnable=4, Arithmetic=8 };
+    enum class Reason : uint32_t { Protocol=1, Capacity=2, LateEnable=4, Arithmetic=8, HandleExportCapacity=16 };
     struct Limits { size_t allocations=8192, borrowers=32768, modelLodLinks=32768, mailbox=4096; };
     struct Report
     {
@@ -33,6 +33,21 @@ public:
         uint64_t standaloneCpuBytes=0, standaloneCpuVertexBytes=0, standaloneCpuIndexBytes=0;
         uint64_t persistentOwnerBytes=0, zeroPersistentOwnerBytes=0;
     };
+    struct HandleRecord
+    {
+        uint64_t allocationId=0, rendererHandle=0, epoch=0;
+        bool scheduledRetired=false, producerOwned=false;
+        uint64_t cpuBorrowers=0, modelLodLinks=0;
+    };
+    struct HandleReport
+    {
+        uint64_t epoch=0,incompleteReasons=0;
+        bool attributionComplete=false,truncated=false;
+        size_t queuedDetachEvents=0,trackedAllocations=0;
+        Report ownerReport; // Same map cut as records, without a second mailbox drain.
+        std::vector<HandleRecord> records;
+    };
+    static constexpr size_t MaxHandleExportRecords=8192;
     GeometryOwnerLedger() : GeometryOwnerLedger(Limits{}) {}
     explicit GeometryOwnerLedger(Limits limits) : _limits(limits) {}
     // BeginEpoch must precede all observed creates. Epochs are monotonic/nonzero;
@@ -166,11 +181,45 @@ public:
         a->producer=false; a->retired=true;
     }
     void NoteCancelledBeforeCreate(uint64_t epoch) { if(Current(epoch)) Add(_cancelled,1); }
-    Report Snapshot()
+    Report Snapshot() { DrainDetachMailbox(); return BuildSnapshot(); }
+    // Owner-only nonyielding numeric cut. Every record is copied, including CPU
+    // standalone, zero-owner and scheduled-retired records, so an external Rust
+    // presence probe can distinguish absence from unknown unobserved handles.
+    // This creates no strong resource ownership and never infers retirement.
+    // Returned vector allocation is opt-in/on-demand only, at most 8192 records.
+    HandleReport SnapshotHandles()
     {
-        DrainDetachMailbox(); Report r; r.epoch=_epoch; r.trackedAllocations=_allocations.size();
+        DrainDetachMailbox();
+        HandleReport r; r.epoch=_epoch; r.trackedAllocations=_allocations.size();
+        const size_t count=_allocations.size()<MaxHandleExportRecords?_allocations.size():MaxHandleExportRecords;
+        if(_allocations.size()>MaxHandleExportRecords) {
+            r.truncated=true; r.incompleteReasons|=static_cast<uint32_t>(Reason::HandleExportCapacity); MarkIncomplete(_epoch,Reason::HandleExportCapacity);
+        }
+        try {
+            r.records.reserve(count);
+            for(const auto& pair:_allocations) {
+                if(r.records.size()>=count) break;
+                const auto& a=pair.second;
+                r.records.push_back(HandleRecord{pair.first,a.handle,_epoch,a.retired,a.producer,
+                    static_cast<uint64_t>(a.cpu),static_cast<uint64_t>(a.models)});
+            }
+        } catch (...) {
+            r.records.clear(); r.truncated=true; r.incompleteReasons|=static_cast<uint32_t>(Reason::Capacity); MarkIncomplete(_epoch,Reason::Capacity);
+        }
+        r.ownerReport=BuildSnapshot(); // No drain: records and aggregate see identical owner maps.
+        r.incompleteReasons|=r.ownerReport.incompleteReasons;
+        r.queuedDetachEvents=r.ownerReport.queuedDetachEvents;
+        r.attributionComplete=r.ownerReport.attributionComplete && !r.incompleteReasons && !r.truncated;
+        r.ownerReport.incompleteReasons=r.incompleteReasons;
+        r.ownerReport.attributionComplete=r.attributionComplete;
+        return r;
+    }
+private:
+    Report BuildSnapshot()
+    {
+        Report r; r.epoch=_epoch; r.trackedAllocations=_allocations.size();
         r.trackedBorrowerRecords=_borrowers.size(); r.modelLodLinks=_links; r.droppedDetachEvents=_drops; r.cancelledBeforeCreate=_cancelled;
-        { std::lock_guard<std::mutex> lock(_mailMutex); r.queuedDetachEvents=_mail.size(); }
+
         for(const auto& pair:_allocations) {
             const auto& a=pair.second; r.liveCpuBorrowers+=a.cpu;
             if(a.retired) continue;
@@ -183,9 +232,10 @@ public:
             if(a.kind==ProducerKind::Cpu && a.cpu) { Add(r.standaloneCpuBytes,bytes); Add(r.standaloneCpuVertexBytes,a.vertex); Add(r.standaloneCpuIndexBytes,a.index); }
             if(a.producer || a.models || a.cpu) Add(r.persistentOwnerBytes,bytes); else Add(r.zeroPersistentOwnerBytes,bytes);
         }
+        { std::lock_guard<std::mutex> lock(_mailMutex); r.queuedDetachEvents=_mail.size(); if(_mailDropped) MarkIncomplete(_epoch,Reason::Capacity); }
         r.incompleteReasons=_reasons; r.attributionComplete=_open && !_reasons && r.queuedDetachEvents==0; return r;
     }
-private:
+
     struct Allocation { uint64_t vertex,index,handle; ProducerKind kind; bool producer,retired; size_t cpu,models; };
     struct Borrower { uint64_t allocation; bool attached; };
     bool Current(uint64_t epoch) const { return _open && epoch==_epoch; }

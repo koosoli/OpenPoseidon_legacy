@@ -1315,6 +1315,7 @@ class EngineWgpu : public EngineDummy
     // records; buffers retain its bounded numeric destructor mailbox, not the engine.
     std::shared_ptr<render::GeometryOwnerLedger> _geometryOwnerLedger;
     uint64_t _geometryOwnerEpoch = 1;
+    void FillGeometryMeshFacts(GeometryAllocationReport& report);
     std::unordered_map<uint32_t, uint32_t> _modelIdOf; // producer -> renderer (post-drain)
     void DrainResourceOps(std::vector<ResourceOp>& ops);
 

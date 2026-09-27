@@ -1705,6 +1705,19 @@ class Engine : public IGraphicsEngine
           uint64_t persistentCpuBorrowers = 0, persistentModelLodLinks = 0;
           uint64_t persistentMailboxPending = 0, persistentMailboxDropped = 0;
           uint64_t persistentCancelledCreates = 0, persistentReclaimableBytes = 0;
+          // On-demand Rust record lookup over copied full-generation handles.
+          // Absent proves no current renderer mesh record/range, not GPU work
+          // completion or released device memory. Scheduled retirement is separate.
+          bool rendererMeshFactsEnabled = false, rendererMeshFactsValid = false;
+          bool rendererMeshFactsComplete = false, rendererMeshFactsTruncated = false;
+          uint64_t rendererMeshFactCalls = 0, rendererMeshFactEpoch = 0;
+          uint64_t rendererMeshFactsRequested = 0, rendererMeshFactsInspected = 0;
+          uint64_t rendererMeshFactsPresent = 0, rendererMeshFactsAbsent = 0;
+          uint64_t rendererMeshFactsInvalid = 0, rendererMeshFactsDuplicateHandles = 0;
+          uint64_t rendererMeshFactsUnknownMappings = 0, rendererMeshFactsScheduledRetired = 0;
+          uint64_t rendererMeshFactsPresentScheduledRetired = 0, rendererMeshFactsAbsentScheduledRetired = 0;
+          uint64_t rendererMeshFactsAbsentWithPersistentOwners = 0;
+          uint64_t rendererMeshFactVertexBytes = 0, rendererMeshFactIndexBytes = 0;
           // Row/union scope: retained meshes only, excluding direct-only meshes,
           // standalone skin/bake buffers, driver alignment and textures/materials.
           // Global pool counters also include direct meshes. Not reclaimable bytes.

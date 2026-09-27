@@ -513,6 +513,19 @@ void RegisterScreenshot(HarnessServer& hs)
                 GEOMETRY_REPORT_FIELD(persistentCpuBorrowers); GEOMETRY_REPORT_FIELD(persistentModelLodLinks);
                 GEOMETRY_REPORT_FIELD(persistentMailboxPending); GEOMETRY_REPORT_FIELD(persistentMailboxDropped);
                 GEOMETRY_REPORT_FIELD(persistentCancelledCreates); GEOMETRY_REPORT_FIELD(persistentReclaimableBytes);
+                cJSON_AddBoolToObject(result, "rendererMeshFactsEnabled", report.rendererMeshFactsEnabled);
+                cJSON_AddBoolToObject(result, "rendererMeshFactsValid", report.rendererMeshFactsValid);
+                cJSON_AddBoolToObject(result, "rendererMeshFactsComplete", report.rendererMeshFactsComplete);
+                cJSON_AddBoolToObject(result, "rendererMeshFactsTruncated", report.rendererMeshFactsTruncated);
+                cJSON_AddStringToObject(result, "rendererMeshFactsScope", "Generational renderer records and exact source pool range sizes at an owner cut; absence is record removal, not queue completion or device memory release; ownership coverage remains incomplete");
+                GEOMETRY_REPORT_FIELD(rendererMeshFactCalls); GEOMETRY_REPORT_FIELD(rendererMeshFactEpoch);
+                GEOMETRY_REPORT_FIELD(rendererMeshFactsRequested); GEOMETRY_REPORT_FIELD(rendererMeshFactsInspected);
+                GEOMETRY_REPORT_FIELD(rendererMeshFactsPresent); GEOMETRY_REPORT_FIELD(rendererMeshFactsAbsent);
+                GEOMETRY_REPORT_FIELD(rendererMeshFactsInvalid); GEOMETRY_REPORT_FIELD(rendererMeshFactsDuplicateHandles);
+                GEOMETRY_REPORT_FIELD(rendererMeshFactsUnknownMappings); GEOMETRY_REPORT_FIELD(rendererMeshFactsScheduledRetired);
+                GEOMETRY_REPORT_FIELD(rendererMeshFactsPresentScheduledRetired); GEOMETRY_REPORT_FIELD(rendererMeshFactsAbsentScheduledRetired);
+                GEOMETRY_REPORT_FIELD(rendererMeshFactsAbsentWithPersistentOwners);
+                GEOMETRY_REPORT_FIELD(rendererMeshFactVertexBytes); GEOMETRY_REPORT_FIELD(rendererMeshFactIndexBytes);
 #undef GEOMETRY_REPORT_FIELD
                 auto* rows = cJSON_AddArrayToObject(result, "rows");
                 for (const auto& row : report.rows) {

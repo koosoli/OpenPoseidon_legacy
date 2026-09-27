@@ -1822,6 +1822,22 @@ struct WgrGeometryAllocationSummary
 static_assert(sizeof(WgrGeometryAllocationSummary) == 104);
 static_assert(offsetof(WgrGeometryAllocationSummary, overlap_within_inspected_meshes) == 80);
 static_assert(offsetof(WgrGeometryAllocationSummary, overlap_within_inspected_index_bytes) == 96);
+// Additive optional owner diagnostic. State0 invalid,1 present generational mesh,
+// 2 absent. Bytes are exact source ranges, not driver/fence/reclaimable bytes.
+struct WgrMeshHandleFact
+{
+    uint64_t mesh_handle, vertex_bytes, index_bytes;
+    uint32_t state, reserved;
+};
+struct WgrMeshHandleFactSummary
+{
+    uint32_t handles_requested, handles_inspected, present, absent, invalid, duplicate_handles;
+    uint32_t complete, flags;
+    uint64_t unique_vertex_bytes, unique_index_bytes;
+};
+static_assert(sizeof(WgrMeshHandleFact) == 32);
+static_assert(sizeof(WgrMeshHandleFactSummary) == 48);
+static_assert(offsetof(WgrMeshHandleFactSummary, unique_vertex_bytes) == 32);
 struct WgrLodDemandRow { uint32_t model_id, lod_count, lod_mask, state; };
 struct WgrLodDemandReport
 {
@@ -2547,6 +2563,10 @@ extern "C"
     WGR_API uint32_t wgr_get_geometry_allocation_report(WgrRenderer* renderer,
         WgrSlice<uint32_t> models, uint32_t max_rows, uint32_t max_visits,
         WgrGeometryAllocationRow* rows, uint32_t row_capacity, WgrGeometryAllocationSummary* summary);
+    // Explicit owner-only snapshot, max8192. Does not drain deferred retirement,
+    // submit commands or wait. Zero return invalid/unavailable; no freeing proof.
+    WGR_API uint32_t wgr_get_mesh_handle_facts(WgrRenderer*, WgrSlice<uint64_t> handles,
+        WgrMeshHandleFact* facts, uint32_t fact_capacity, WgrMeshHandleFactSummary* summary);
     // Explicit owner-only diagnostics; no blocking GPU wait, no asset/ownership proof.
     WGR_API uint32_t wgr_start_lod_demand(WgrRenderer*, uint64_t epoch, WgrSlice<uint32_t> models, uint32_t frames);
     WGR_API uint32_t wgr_poll_lod_demand(WgrRenderer*, uint64_t epoch, WgrLodDemandReport*);

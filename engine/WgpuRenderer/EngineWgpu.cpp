@@ -2844,6 +2844,116 @@ struct GeometryPoolFill
 GeometryPoolFill GGeometryPoolFill;
 } // namespace
 
+void EngineWgpu::FillGeometryMeshFacts(GeometryAllocationReport& report)
+{
+    if (!_geometryOwnerLedger) return;
+    report.rendererMeshFactsEnabled = true;
+    try
+    {
+        const auto handles = _geometryOwnerLedger->SnapshotHandles();
+        const auto& owners = handles.ownerReport;
+        report.persistentAttributionEnabled = true;
+        report.persistentAttributionComplete = owners.attributionComplete;
+        report.persistentAttributionEpoch = owners.epoch;
+        report.persistentIncompleteReasons = owners.incompleteReasons;
+        report.producerEstimatedVertexBytes = owners.observedProducerEstimatedVertexBytes;
+        report.producerEstimatedIndexBytes = owners.observedProducerEstimatedIndexBytes;
+        report.persistentCpuReferencedVertexBytes = owners.cpuReferencedVertexBytes;
+        report.persistentCpuReferencedIndexBytes = owners.cpuReferencedIndexBytes;
+        report.persistentRetainedSharedCpuVertexBytes = owners.retainedSharedWithCpuVertexBytes;
+        report.persistentRetainedSharedCpuIndexBytes = owners.retainedSharedWithCpuIndexBytes;
+        report.persistentStandaloneCpuVertexBytes = owners.standaloneCpuVertexBytes;
+        report.persistentStandaloneCpuIndexBytes = owners.standaloneCpuIndexBytes;
+        report.persistentTrackedAllocations = owners.trackedAllocations;
+        report.persistentTrackedBorrowerRecords = owners.trackedBorrowerRecords;
+        report.persistentCpuBorrowers = owners.liveCpuBorrowers;
+        report.persistentModelLodLinks = owners.modelLodLinks;
+        report.persistentMailboxPending = owners.queuedDetachEvents;
+        report.persistentMailboxDropped = owners.droppedDetachEvents;
+        report.persistentCancelledCreates = owners.cancelledBeforeCreate;
+        report.persistentOwnerEstimatedBytes = owners.persistentOwnerBytes;
+        report.persistentZeroOwnerEstimatedBytes = owners.zeroPersistentOwnerBytes;
+        report.persistentReclaimableBytes = 0;
+        report.ownershipCoverageComplete = false;
+        report.rendererMeshFactEpoch = handles.epoch;
+        report.rendererMeshFactsRequested = handles.trackedAllocations;
+        report.rendererMeshFactsTruncated = handles.truncated;
+        if (!handles.attributionComplete) report.persistentAttributionComplete = false;
+        report.persistentIncompleteReasons |= handles.incompleteReasons;
+        if (handles.epoch != owners.epoch || handles.epoch != _geometryOwnerEpoch)
+            ++report.rendererMeshFactsUnknownMappings;
+        // SnapshotHandles has its own hard cap; keep the foreign-call bound
+        // explicit too, and never turn a copied prefix into complete evidence.
+        if (handles.records.size() > 8192)
+        {
+            report.rendererMeshFactsTruncated = true;
+            return;
+        }
+        std::vector<uint64_t> ids;
+        ids.reserve(handles.records.size());
+        for (const auto& record : handles.records)
+        {
+            if (record.epoch != handles.epoch || handles.epoch != _geometryOwnerEpoch || !record.rendererHandle)
+            {
+                ++report.rendererMeshFactsUnknownMappings;
+                ids.push_back(0);
+            }
+            else ids.push_back(record.rendererHandle);
+            if (record.scheduledRetired) ++report.rendererMeshFactsScheduledRetired;
+        }
+        std::vector<WgrMeshHandleFact> facts(ids.size());
+        WgrMeshHandleFactSummary totals{};
+        ++report.rendererMeshFactCalls;
+        const bool valid = wgr_get_mesh_handle_facts(_renderer,
+            WgrSlice<uint64_t>{ids.data(), U32(ids.size())}, facts.data(), U32(facts.size()), &totals) != 0;
+        if (!valid || totals.handles_requested != ids.size() || totals.handles_inspected > facts.size() ||
+            uint64_t(totals.present) + totals.absent + totals.invalid != totals.handles_inspected ||
+            totals.duplicate_handles > totals.handles_inspected || totals.complete > 1 || (totals.flags & ~3u) != 0) return;
+        report.rendererMeshFactsValid = true;
+        report.rendererMeshFactsInspected = totals.handles_inspected;
+        report.rendererMeshFactsPresent = totals.present;
+        report.rendererMeshFactsAbsent = totals.absent;
+        report.rendererMeshFactsInvalid = totals.invalid;
+        report.rendererMeshFactsDuplicateHandles = totals.duplicate_handles;
+        report.rendererMeshFactVertexBytes = totals.unique_vertex_bytes;
+        report.rendererMeshFactIndexBytes = totals.unique_index_bytes;
+        report.rendererMeshFactsTruncated = report.rendererMeshFactsTruncated || (totals.flags & 1) != 0;
+        for (size_t i = 0; i < totals.handles_inspected; ++i)
+        {
+            const auto& fact = facts[i];
+            const auto& record = handles.records[i];
+            if (fact.mesh_handle != ids[i] || fact.reserved != 0 || fact.state > 2)
+            {
+                ++report.rendererMeshFactsUnknownMappings;
+                continue;
+            }
+            if (fact.state == 1 && record.scheduledRetired)
+                ++report.rendererMeshFactsPresentScheduledRetired;
+            if (fact.state == 2)
+            {
+                if (record.scheduledRetired) ++report.rendererMeshFactsAbsentScheduledRetired;
+                if (record.producerOwned || record.cpuBorrowers || record.modelLodLinks)
+                    ++report.rendererMeshFactsAbsentWithPersistentOwners;
+            }
+        }
+        report.rendererMeshFactsComplete = handles.attributionComplete && !handles.truncated &&
+            handles.queuedDetachEvents == 0 && totals.complete == 1 && totals.flags == 0 &&
+            totals.handles_inspected == handles.trackedAllocations && totals.duplicate_handles == 0 &&
+            report.rendererMeshFactsUnknownMappings == 0 && report.rendererMeshFactsAbsentWithPersistentOwners == 0 &&
+            report.rendererMeshFactsPresentScheduledRetired == 0;
+    }
+    catch (...)
+    {
+        // An optional metadata allocation failure cannot alter the normal frame
+        // or lifetime policy. No prefix is evidence of complete range attribution.
+        _geometryOwnerLedger->MarkIncomplete(_geometryOwnerEpoch, render::GeometryOwnerLedger::Reason::Capacity);
+        report.persistentAttributionComplete = false;
+        report.persistentIncompleteReasons |= static_cast<uint64_t>(render::GeometryOwnerLedger::Reason::Capacity);
+        report.rendererMeshFactsComplete = false;
+        report.rendererMeshFactsTruncated = true;
+    }
+}
+
 void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
 {
     if (_geometryOwnerLedger) _geometryOwnerLedger->DrainDetachMailbox();
@@ -3077,35 +3187,7 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
             report.ineligibleEntriesSkipped = op.geometryReport->ineligibleEntriesSkipped;
             report.modelsRequested = static_cast<uint32_t>(op.geometryReport->models.size());
             report.unresolvedNames = op.geometryReport->unresolvedNames;
-            if (_geometryOwnerLedger)
-            {
-                const auto owners = _geometryOwnerLedger->Snapshot();
-                report.persistentAttributionEnabled = true;
-                report.persistentAttributionComplete = owners.attributionComplete;
-                report.persistentAttributionEpoch = owners.epoch;
-                report.persistentIncompleteReasons = owners.incompleteReasons;
-                report.producerEstimatedVertexBytes = owners.observedProducerEstimatedVertexBytes;
-                report.producerEstimatedIndexBytes = owners.observedProducerEstimatedIndexBytes;
-                report.persistentCpuReferencedVertexBytes = owners.cpuReferencedVertexBytes;
-                report.persistentCpuReferencedIndexBytes = owners.cpuReferencedIndexBytes;
-                report.persistentRetainedSharedCpuVertexBytes = owners.retainedSharedWithCpuVertexBytes;
-                report.persistentRetainedSharedCpuIndexBytes = owners.retainedSharedWithCpuIndexBytes;
-                report.persistentStandaloneCpuVertexBytes = owners.standaloneCpuVertexBytes;
-                report.persistentStandaloneCpuIndexBytes = owners.standaloneCpuIndexBytes;
-                report.persistentTrackedAllocations = owners.trackedAllocations;
-                report.persistentTrackedBorrowerRecords = owners.trackedBorrowerRecords;
-                report.persistentCpuBorrowers = owners.liveCpuBorrowers;
-                report.persistentModelLodLinks = owners.modelLodLinks;
-                report.persistentMailboxPending = owners.queuedDetachEvents;
-                report.persistentMailboxDropped = owners.droppedDetachEvents;
-                report.persistentCancelledCreates = owners.cancelledBeforeCreate;
-                report.persistentOwnerEstimatedBytes = owners.persistentOwnerBytes;
-                report.persistentZeroOwnerEstimatedBytes = owners.zeroPersistentOwnerBytes;
-                // Never a GPU fence/pool-free acknowledgement, including when the
-                // persistent scope is complete. Defaults remain zero/false OFF.
-                report.persistentReclaimableBytes = 0;
-                report.ownershipCoverageComplete = false;
-            }
+            if (_geometryOwnerLedger) FillGeometryMeshFacts(report);
             std::vector<uint32_t> ids;
             ids.reserve(op.geometryReport->models.size());
             for (const auto& entry : op.geometryReport->models)

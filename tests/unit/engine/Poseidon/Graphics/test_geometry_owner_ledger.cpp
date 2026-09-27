@@ -128,3 +128,40 @@ TEST_CASE("A new model owner cannot silently join a retired producer", "[wgpu][g
     auto r=l.Snapshot(); CHECK(r.modelLodLinks==0); CHECK_FALSE(r.attributionComplete);
     CHECK((r.incompleteReasons & static_cast<uint32_t>(Reason::Protocol))!=0);
 }
+
+TEST_CASE("Geometry handle export includes every numeric producer state", "[wgpu][geometry-owner-ledger]")
+{
+    GeometryOwnerLedger l; REQUIRE(l.BeginEpoch(3));
+    REQUIRE(l.AllocationCreated(3,11,10,2,Kind::Retained,91));
+    REQUIRE(l.CpuBorrowerAttached(3,1,11)); REQUIRE(l.CpuBorrowerAttached(3,2,11));
+    REQUIRE(l.ModelLodAttached(3,7,0,11)); REQUIRE(l.ModelLodAttached(3,7,1,11));
+    REQUIRE(l.AllocationCreated(3,12,8,1,Kind::Cpu,92));
+    REQUIRE(l.CpuBorrowerAttached(3,3,12)); l.ProducerOwnershipReleased(3,12);
+    REQUIRE(l.AllocationCreated(3,13,5,1,Kind::Cpu,93)); l.ProducerOwnershipReleased(3,13);
+    REQUIRE(l.AllocationCreated(3,14,5,1,Kind::Retained,94)); l.AllocationRetired(3,14);
+    l.QueueCpuBorrowerDetached(3,2);
+    const auto captured=l.SnapshotHandles(); REQUIRE(captured.attributionComplete); CHECK_FALSE(captured.truncated);
+    CHECK(captured.epoch==3); CHECK(captured.ownerReport.epoch==captured.epoch); CHECK(captured.ownerReport.liveCpuBorrowers==2); CHECK(captured.ownerReport.modelLodLinks==2); CHECK(captured.ownerReport.trackedAllocations==4); CHECK(captured.ownerReport.attributionComplete==captured.attributionComplete); REQUIRE(captured.records.size()==4); CHECK(captured.trackedAllocations==4); CHECK(captured.queuedDetachEvents==0);
+    for(const auto& row:captured.records) {
+        CHECK(row.epoch==3); CHECK(row.rendererHandle==row.allocationId+80);
+        if(row.allocationId==11) { CHECK(row.cpuBorrowers==1); CHECK(row.modelLodLinks==2); CHECK(row.producerOwned); CHECK_FALSE(row.scheduledRetired); }
+        if(row.allocationId==12) { CHECK(row.cpuBorrowers==1); CHECK_FALSE(row.producerOwned); CHECK_FALSE(row.scheduledRetired); }
+        if(row.allocationId==13) { CHECK(row.cpuBorrowers==0); CHECK(row.modelLodLinks==0); CHECK_FALSE(row.producerOwned); CHECK_FALSE(row.scheduledRetired); }
+        if(row.allocationId==14) { CHECK(row.scheduledRetired); CHECK_FALSE(row.producerOwned); }
+    }
+    // Copied evidence is a value: later owner events cannot mutate an earlier cut.
+    l.CpuBorrowerDetached(3,1); l.ModelRetired(3,7); REQUIRE(l.BeginEpoch(4));
+    const auto fresh=l.SnapshotHandles(); CHECK(fresh.records.empty()); CHECK(fresh.epoch==4);
+    CHECK(captured.records.size()==4); CHECK(captured.epoch==3);
+    l.QueueCpuBorrowerDetached(3,1); CHECK(l.SnapshotHandles().attributionComplete);
+}
+
+TEST_CASE("Geometry handle export bound refuses complete partial evidence", "[wgpu][geometry-owner-ledger]")
+{
+    GeometryOwnerLedger l({8193,1,1,1}); REQUIRE(l.BeginEpoch(1));
+    for(uint64_t id=1;id<=8193;++id) REQUIRE(l.AllocationCreated(1,id,1,1,Kind::Cpu,id+1));
+    const auto report=l.SnapshotHandles(); CHECK(report.trackedAllocations==8193); CHECK(report.records.size()==8192);
+    CHECK(report.truncated); CHECK_FALSE(report.attributionComplete); CHECK_FALSE(report.ownerReport.attributionComplete); CHECK(report.ownerReport.incompleteReasons==report.incompleteReasons);
+    CHECK((report.incompleteReasons & static_cast<uint32_t>(Reason::HandleExportCapacity))!=0);
+    CHECK_FALSE(l.Snapshot().attributionComplete);
+}

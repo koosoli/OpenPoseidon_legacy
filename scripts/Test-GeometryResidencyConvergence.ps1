@@ -215,8 +215,24 @@ try {
                     ($report.persistentAttributionComplete -and $report.persistentIncompleteReasons -ne 0)) {
                     throw 'Persistent attribution fabricated reclaimability or hid incompleteness'
                 }
+                if (!$report.rendererMeshFactsEnabled -or !$report.rendererMeshFactsValid -or !$report.rendererMeshFactsComplete -or
+                    $report.rendererMeshFactCalls -ne 1 -or $report.rendererMeshFactEpoch -ne $report.persistentAttributionEpoch -or
+                    $report.rendererMeshFactsRequested -lt 1 -or $report.rendererMeshFactsInspected -ne $report.rendererMeshFactsRequested -or
+                    $report.rendererMeshFactsRequested -gt 8192 -or $report.rendererMeshFactsPresent -lt 1 -or
+                    ($report.rendererMeshFactVertexBytes + $report.rendererMeshFactIndexBytes) -lt 1 -or
+                    $report.rendererMeshFactsInvalid -ne 0 -or $report.rendererMeshFactsDuplicateHandles -ne 0 -or
+                    $report.rendererMeshFactsUnknownMappings -ne 0 -or $report.rendererMeshFactsTruncated -or
+                    ($report.rendererMeshFactsPresent + $report.rendererMeshFactsAbsent) -ne $report.rendererMeshFactsInspected) {
+                    throw 'Renderer mesh fact probe lacked a complete bounded actual handle cut'
+                }
+                if (($report.rendererMeshFactsPresentScheduledRetired + $report.rendererMeshFactsAbsentScheduledRetired) -ne $report.rendererMeshFactsScheduledRetired -or
+                    $report.rendererMeshFactsAbsentWithPersistentOwners -gt $report.rendererMeshFactsAbsent) {
+                    throw 'Renderer presence and persistent owner joins disagree'
+                }
             } elseif ($report.persistentAttributionEnabled) {
                 throw 'Default diagnostic unexpectedly enabled persistent owner attribution'
+            } elseif ($report.rendererMeshFactsEnabled -or $report.rendererMeshFactCalls -ne 0 -or $report.rendererMeshFactsRequested -ne 0) {
+                throw 'Default-off run unexpectedly queried renderer handle facts'
             }
             if ($report.registryEntriesVisited -gt $report.maxModels -or
                 ($report.modelsRequested + $report.ineligibleEntriesSkipped) -ne $report.registryEntriesVisited) { throw 'Registry sampling and negative-cache accounting disagree' }

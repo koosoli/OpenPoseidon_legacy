@@ -3583,6 +3583,33 @@ pub struct WgrGeometryAllocationSummary {
     pub overlap_within_inspected_index_bytes: u64,
 }
 
+/// Additive owner-only diagnostic types, separate from the allocation-report ABI.
+/// State: 0 invalid, 1 present generational record, 2 absent. Absence is not a
+/// queue/fence/device-memory retirement acknowledgement.
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct WgrMeshHandleFact {
+    pub mesh_handle: u64,
+    pub vertex_bytes: u64,
+    pub index_bytes: u64,
+    pub state: u32,
+    pub reserved: u32,
+}
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct WgrMeshHandleFactSummary {
+    pub handles_requested: u32,
+    pub handles_inspected: u32,
+    pub present: u32,
+    pub absent: u32,
+    pub invalid: u32,
+    pub duplicate_handles: u32,
+    pub complete: u32,
+    pub flags: u32, // 1 output/work truncation, 2 byte-sum overflow
+    pub unique_vertex_bytes: u64,
+    pub unique_index_bytes: u64,
+}
+
 /// Monotonic renderer handles only; not an asset identity or ownership proof.
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
@@ -3662,6 +3689,32 @@ pub unsafe extern "C" fn wgr_get_geometry_allocation_report(
         let (result, totals) = unsafe { &*renderer }.gfx3d.geometry_allocation_report(
             ids, max_rows as usize, max_visits as usize);
         unsafe { std::ptr::copy_nonoverlapping(result.as_ptr(), rows, result.len()); *summary = totals; }
+        1
+    })).unwrap_or(0)
+}
+
+/// Explicit read-only renderer-owner probe, hard capped at 8192 handles. No wait,
+/// deferred-destroy drain, queue submission or lifetime mutation. Present byte
+/// counts describe actual current source ranges, not device-memory ownership.
+/// # Safety
+/// Renderer must be exclusively owner accessed. Inputs/outputs must be valid,
+/// disjoint allocations of their declared lengths; summary must be writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_get_mesh_handle_facts(
+    renderer: *mut WgrRenderer, handles: WgrSlice<u64>, facts: *mut WgrMeshHandleFact,
+    fact_capacity: u32, summary: *mut WgrMeshHandleFactSummary,
+) -> u32 {
+    if renderer.is_null() || summary.is_null() || handles.len > 8192 || fact_capacity > 8192 ||
+        fact_capacity < handles.len || (handles.len != 0 && (handles.data.is_null() || facts.is_null())) { return 0; }
+    catch_unwind(AssertUnwindSafe(|| {
+        let ids = if handles.len == 0 { &[][..] } else {
+            unsafe { std::slice::from_raw_parts(handles.data, handles.len as usize) }
+        };
+        let out = if handles.len == 0 { &mut [][..] } else {
+            unsafe { std::slice::from_raw_parts_mut(facts, handles.len as usize) }
+        };
+        let totals = unsafe { &*renderer }.gfx3d.mesh_handle_facts(ids, out);
+        unsafe { *summary = totals; }
         1
     })).unwrap_or(0)
 }
