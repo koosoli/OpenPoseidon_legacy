@@ -2113,6 +2113,16 @@ bool TextureSourcePac::Init(const char* name, PacLevelMem* mips, int maxMips)
     _name = name;
     QIFStream in;
     GFileServer->Open(in, name);
+    // This guard owns only the exact already-open Init buffer. Failure completion
+    // drops its bootstrap proof; successful parsing first retains the same binding.
+    struct InitProofCompletion
+    {
+        Ref<IFileBuffer> buffer;
+        std::shared_ptr<const ArchiveSourceBinding> initialized;
+        ~InitProofCompletion() { if (buffer) buffer->CompleteArchiveSourceInit(initialized); }
+    } completion;
+    if (ArchiveSourceBinding::CacheHandoffEnabled() && Foundation::IsMainThread())
+        completion.buffer = in.GetBuffer();
     if (in.fail())
     {
         return false;
@@ -2206,6 +2216,7 @@ bool TextureSourcePac::Init(const char* name, PacLevelMem* mips, int maxMips)
     {
         _archiveSourceBinding = in.GetBuffer()->GetArchiveSourceBinding();
         if (_archiveSourceBinding) ArchiveSourceBinding::NoteInitRetained();
+        if (completion.buffer) completion.initialized = _archiveSourceBinding;
     }
 
     return true;

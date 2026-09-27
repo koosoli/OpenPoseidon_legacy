@@ -453,14 +453,17 @@ void RegisterScreenshot(HarnessServer& hs)
             const auto snapshot = ArchiveSourceBinding::SnapshotStats();
             auto* result = cJSON_CreateObject();
             cJSON_AddBoolToObject(result, "enabled", snapshot.enabled);
+            cJSON_AddBoolToObject(result, "cacheHandoffEnabled", snapshot.cacheHandoffEnabled);
 #define ARCHIVE_BINDING_FIELD(field) cJSON_AddNumberToObject(result, #field, static_cast<double>(snapshot.field))
             ARCHIVE_BINDING_FIELD(liveBindings); ARCHIVE_BINDING_FIELD(knownCppBytes);
             ARCHIVE_BINDING_FIELD(capBindings); ARCHIVE_BINDING_FIELD(capBytes);
             ARCHIVE_BINDING_FIELD(wrappedReads); ARCHIVE_BINDING_FIELD(initRetains);
             ARCHIVE_BINDING_FIELD(captureRefused); ARCHIVE_BINDING_FIELD(capacityRefused);
             ARCHIVE_BINDING_FIELD(allocationRefused);
+            ARCHIVE_BINDING_FIELD(weakCells); ARCHIVE_BINDING_FIELD(weakKnownCppBytes); ARCHIVE_BINDING_FIELD(capWeakCells);
+            ARCHIVE_BINDING_FIELD(weakCapacityRefused); ARCHIVE_BINDING_FIELD(weakAllocationRefused);
 #undef ARCHIVE_BINDING_FIELD
-            cJSON_AddStringToObject(result, "scope", "Mapped raw PAA bytes and their initialized headers only; shared retained C++ metadata charge, excludes kernel/allocator/RSS cost; counters alone do not prove worker jobs, upload readiness or work moved");
+            cJSON_AddStringToObject(result, "scope", "Mapped raw PAA Init evidence; liveBindings counts strong native leases, weakCells counts separately charged cache/control metadata within the same total byte cap. Expired cached evidence remains Unknown; no freshness, physical-memory, useful-upload or performance proof");
             return HarnessProtocol::JsonResponse(result);
         });
     hs.RegisterCommand({"shared_mesh_lifetime_test", "Test-only private retained mesh and two CPU borrowers; no world-object resolution", {}},
@@ -700,6 +703,14 @@ void RegisterScreenshot(HarnessServer& hs)
             PAGE_FIXTURE_BOOL(diskPilot); PAGE_FIXTURE_BOOL(coarseResident);
             PAGE_FIXTURE_BOOL(originalFilePilot);PAGE_FIXTURE_BOOL(sourceSnapshotValidated);PAGE_FIXTURE_BOOL(sourceAdmissionConsumed);
             PAGE_FIXTURE_BOOL(surfaceCertificateAdmitted);PAGE_FIXTURE_BOOL(surfaceSelectedVerified);
+            PAGE_FIXTURE_BOOL(cameraTupleEnabled);PAGE_FIXTURE_BOOL(cameraTupleValid);PAGE_FIXTURE_BOOL(projectedSurfaceIdealBound);
+            PAGE_FIXTURE_NUMBER(cameraTupleStatus);PAGE_FIXTURE_NUMBER(cameraTupleIndex);PAGE_FIXTURE_NUMBER(cameraTupleSource);
+            PAGE_FIXTURE_NUMBER(cameraTupleGeneration);PAGE_FIXTURE_NUMBER(cameraTupleModelBirth);PAGE_FIXTURE_NUMBER(cameraTupleCertificateGeneration);
+            PAGE_FIXTURE_NUMBER(cameraTupleVersion);PAGE_FIXTURE_NUMBER(cameraTupleStructBytes);
+            PAGE_FIXTURE_NUMBER(cameraTupleOutputWidth);PAGE_FIXTURE_NUMBER(cameraTupleOutputHeight);
+            PAGE_FIXTURE_NUMBER(viewportWidth);PAGE_FIXTURE_NUMBER(viewportHeight);PAGE_FIXTURE_NUMBER(projectedSurfaceStatus);
+            PAGE_FIXTURE_NUMBER(projectedSurfaceXUpper);PAGE_FIXTURE_NUMBER(projectedSurfaceYUpper);PAGE_FIXTURE_NUMBER(projectedSurfaceEuclideanUpper);
+            cJSON_AddStringToObject(result,"projectedSurfaceScope","Read-only ideal nonjittered main1:1 projected selected-union bound; excludes authored fallback, shader floating-point/raster/pixel/visibility/attributes/all-pass quality and cut selection.");
             PAGE_FIXTURE_BOOL(cameraDemandActive);PAGE_FIXTURE_BOOL(cameraDesiredFine);PAGE_FIXTURE_BOOL(cameraHasObservation);PAGE_FIXTURE_BOOL(finePrepared);
             PAGE_FIXTURE_BOOL(active); PAGE_FIXTURE_BOOL(fineSelected); PAGE_FIXTURE_BOOL(cpuHelpersUnchanged);
             PAGE_FIXTURE_BOOL(mainFrameReturned); PAGE_FIXTURE_BOOL(cascadeConfigured); PAGE_FIXTURE_BOOL(localShadowConfigured);

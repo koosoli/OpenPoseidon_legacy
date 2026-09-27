@@ -339,6 +339,9 @@ class IFileBuffer : public RefCount
     // Appended: immutable provenance of THIS buffer's actual raw archive read.
     // Existing/cached unwrapped, loose and transformed sources explicitly remain unknown.
     virtual std::shared_ptr<const ArchiveSourceBinding> GetArchiveSourceBinding() const { return {}; }
+    // Appended owner-only completion for the exact buffer parsed by Init. Empty means
+    // failed/unretained Init; no names, bytes, mounting or native IO are consulted.
+    virtual bool CompleteArchiveSourceInit(const std::shared_ptr<const ArchiveSourceBinding>&) { return false; }
 };
 
 class FileBufferMemory : public IFileBuffer

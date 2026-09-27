@@ -15,6 +15,7 @@ mod gpu_timers;
 mod grass;
 mod handles;
 mod log;
+mod main_camera_tuple;
 mod planar_mips;
 mod shaders;
 mod smoke_volume;
@@ -891,6 +892,8 @@ pub struct Renderer {
     rcas_sharpener: upscaler::RcasSharpener,
     // Which backend produced the last upscaled frame (ffi::WgrTemporalInfo values).
     last_upscaler: u32,
+    // Exact startup opt-in only; OFF has no tuple allocation/copy.
+    main_camera_tuple: Option<Box<main_camera_tuple::Tracker>>,
     // MSAA sample count of the scene targets (1 = off). Fixed at startup (WGR_MSAA); pipelines
     // and offscreen targets are built against it.
     sample_count: u32,
@@ -2013,6 +2016,10 @@ impl Renderer {
                 .unwrap_or(0.25)
                 .clamp(0.0, 2.0),
             last_upscaler: 0,
+            main_camera_tuple: (std::env::var("WGR_GEOMETRY_PAGE_CAMERA_TUPLE").ok().as_deref()==Some("1") &&
+                std::env::var("WGR_GEOMETRY_PAGE_FIXTURE").ok().as_deref()==Some("1") &&
+                std::env::var("WGR_GEOMETRY_PAGE_SURFACE_CERTIFICATE").ok().as_deref()==Some("1"))
+                .then(|| Box::new(main_camera_tuple::Tracker::new())),
             sample_count,
             tonemap,
             underwater_target: None,
@@ -3555,6 +3562,7 @@ impl Renderer {
         grass_batches: &[WgrGrassBatch],
         mut call_timings: Option<&mut crate::gpu_timers::RenderCallCpuTimings>,
     ) -> Result<(), String> {
+        if let Some(tuple)=self.main_camera_tuple.as_mut(){tuple.begin();} // Failed calls invalidate old completion.
         self.gfx3d.begin_geometry_pass_facts(shadow);
         let setup_t0 = std::time::Instant::now();
         // REN-THR-009 — before anything this frame reads `bake_bind_cache` or allocates
@@ -3631,13 +3639,14 @@ impl Renderer {
         // args-buffer offset for the replay below.
         self.gfx3d
             .build_indirect(&self.device, &self.queue, draws3d, &mut plan.ops);
-        let main_scene_cam = terrain_batches
-            .first()
-            .map(|b| b.camera as usize)
-            .or_else(|| draws3d.first().map(|d| d.camera as usize))
-            .or_else(|| water_batches.first().map(|b| b.camera as usize))
-            .or_else(|| grass_batches.first().map(|b| b.camera as usize))
-            .unwrap_or(0);
+        let main_selection = main_camera_tuple::select(
+            terrain_batches.first().map(|b| b.camera as usize), draws3d.first().map(|d| d.camera as usize),
+            water_batches.first().map(|b| b.camera as usize), grass_batches.first().map(|b| b.camera as usize));
+        let main_scene_cam = main_selection.index; // Same existing front-entry priority, not a new camera policy.
+        if self.main_camera_tuple.is_some() {
+            let render=self.render_size(); let output=(self.config.width,self.config.height);
+            self.main_camera_tuple.as_mut().unwrap().capture(main_selection,cameras,render,output);
+        }
         // The Sky pass owns the cloud map and its texel snapping, so it is the only thing that
         // knows where the map landed this frame. Publishing the SAME numbers the compute pass
         // used is the point: two independently derived mappings would disagree by a texel and
@@ -6343,6 +6352,7 @@ impl Renderer {
         self.gpu_timers
             .cpu_end(crate::gpu_timers::Region::WorkerHarvest);
         if let Some(facts) = call_timings { facts.complete(&self.gpu_timers); }
+        if let Some(tuple)=self.main_camera_tuple.as_mut(){tuple.complete();} // CPU returned frame, not GPU completion.
         Ok(())
     }
 

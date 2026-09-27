@@ -81,8 +81,10 @@ struct Archives
                 for (int value : {0, 0, 0, 0, size}) out.write(reinterpret_cast<const char*>(&value), 4);
             };
             entry("texture.paa", int(data.size())); entry("notes.bin", int(data.size()));
-            entry(LongMember().c_str(), int(data.size())); entry("bad.paa", 0); entry("", 0);
+            entry(LongMember().c_str(), int(data.size())); entry("bad.paa", 0); entry("malformed.paa", 8); entry("", 0);
             out.write(data.data(), data.size()); out.write(data.data(), data.size()); out.write(data.data(), data.size());
+            const char malformed[8] = {char(0x05), char(0xff), char(1), char(1), 0, 0, 0, 0};
+            out.write(malformed, sizeof(malformed));
         }
         REQUIRE(first.open(RString((directory / "first").string().c_str())));
         REQUIRE(second.open(RString((directory / "second").string().c_str())));
@@ -460,5 +462,126 @@ TEST_CASE("Actual PAC Init proof retirement preserves headers reads and strong a
     CHECK(ArchiveSourceBinding::SnapshotStats().liveBindings == baseline.liveBindings);
     CHECK(ArchiveSourceBinding::SnapshotStats().knownCppBytes == baseline.knownCppBytes);
     CHECK_FALSE(source->GetArchiveSourceBinding()); // No named recapture after aliases exit.
+#endif
+}
+
+
+TEST_CASE("Weak cells keep separate bounded debt inside the original shared byte budget", "[archive-source-budget]")
+{
+    auto budget = std::make_shared<ArchiveSourceBudget>(1, 100, 1);
+    auto lease = budget->Acquire(40); REQUIRE(lease);
+    auto weak = budget->AcquireWeak(50); REQUIRE(weak);
+    CHECK(budget->Observe().bindings == 1); CHECK(budget->Observe().weakCells == 1);
+    CHECK(budget->Observe().bytes == 90); CHECK(budget->Observe().weakBytes == 50);
+    bool capacity = false;
+    CHECK_FALSE(budget->AcquireWeak(1, &capacity)); CHECK(capacity);
+    CHECK_FALSE(budget->Acquire(1)); // Existing strong count cap is unchanged.
+    auto alias = weak; weak.reset(); lease.reset();
+    CHECK(budget->Observe().bindings == 0); CHECK(budget->Observe().bytes == 50);
+    CHECK_FALSE(budget->Acquire(51)); // Weak/control debt survives the final lease.
+    lease = budget->Acquire(50); REQUIRE(lease);
+    alias.reset(); CHECK(budget->Observe().weakCells == 0); CHECK(budget->Observe().weakBytes == 0);
+    lease.reset(); CHECK(budget->Observe().bytes == 0);
+}
+
+TEST_CASE("Actual cached PAA hands off proof and preserves two initialized source aliases", "[archive-source-weak-cache]")
+{
+#ifndef _WIN32
+    SKIP("Strong archive identity is Windows-only.");
+#else
+    REQUIRE(ArchiveSourceBinding::CacheHandoffEnabled()); // Dedicated fresh four-flag process.
+    REQUIRE(QFileAccess::MappingSupported());
+    Archives files; ServerScope server; ArchiveSourceBinding::ModelReadScope purpose;
+    const auto before = ArchiveSourceBinding::SnapshotStats();
+    QIFStreamB cached; cached.open(files.first, "texture.paa"); REQUIRE_FALSE(cached.fail());
+    auto exact = cached.GetBuffer()->GetArchiveSourceBinding(); REQUIRE(exact);
+    auto wrongBuffer = files.second.Read("texture.paa"); REQUIRE(wrongBuffer);
+    auto wrong = wrongBuffer->GetArchiveSourceBinding(); REQUIRE(wrong);
+    CHECK_FALSE(cached.GetBuffer()->CompleteArchiveSourceInit(wrong));
+    CHECK(cached.GetBuffer()->GetArchiveSourceBinding() == exact);
+    auto offOwner = std::async(std::launch::async, [&] {
+        return cached.GetBuffer()->CompleteArchiveSourceInit(exact);
+    });
+    CHECK_FALSE(offOwner.get()); CHECK(cached.GetBuffer()->GetArchiveSourceBinding() == exact);
+    wrong.reset(); wrongBuffer.Free();
+    server.server->cache.Store(cached, R"(weak-proof-fixture\texture.paa)");
+    auto first = CreateSource(R"(weak-proof-fixture\texture.paa)"); REQUIRE(first);
+    auto second = CreateSource(R"(weak-proof-fixture\texture.paa)"); REQUIRE(second);
+    REQUIRE(first->GetArchiveSourceBinding() == exact);
+    REQUIRE(second->GetArchiveSourceBinding() == exact);
+    CHECK_FALSE(files.second.MatchesMountedMember("texture.paa", exact->Request()));
+    files.first.Unlock(); files.first.close();
+    REQUIRE(files.first.open(RString((files.directory / "second").string().c_str())));
+    files.first.Lock();
+    CHECK_FALSE(files.first.MatchesMountedMember("texture.paa", exact->Request())); // Actual same-bank remount.
+    CHECK(first->GetArchiveSourceBinding() == exact); // Stored birth evidence is never relabelled.
+    const auto owned = ArchiveSourceBinding::SnapshotStats();
+    CHECK(owned.liveBindings == before.liveBindings + 1);
+    CHECK(owned.weakCells == before.weakCells + 1);
+    REQUIRE(first->ReleaseArchiveSourceBinding());
+    REQUIRE(second->GetArchiveSourceBinding() == exact);
+    exact.reset();
+    CHECK(ArchiveSourceBinding::SnapshotStats().liveBindings == before.liveBindings + 1);
+    REQUIRE(second->ReleaseArchiveSourceBinding());
+    const auto released = ArchiveSourceBinding::SnapshotStats();
+    CHECK(released.liveBindings == before.liveBindings);
+    CHECK(released.weakCells == before.weakCells + 1);
+    CHECK(released.weakKnownCppBytes > before.weakKnownCppBytes);
+    CHECK(released.knownCppBytes == before.knownCppBytes + released.weakKnownCppBytes - before.weakKnownCppBytes);
+    CHECK_FALSE(cached.GetBuffer()->GetArchiveSourceBinding());
+    const auto bytes = OriginalPaa(13);
+    REQUIRE(cached.GetBuffer()->GetSize() == int(bytes.size()));
+    CHECK(std::memcmp(cached.GetBuffer()->GetData(), bytes.data(), bytes.size()) == 0);
+    auto expired = CreateSource(R"(weak-proof-fixture\texture.paa)"); REQUIRE(expired);
+    CHECK_FALSE(expired->GetArchiveSourceBinding()); // Existing bytes cannot recertify a new lease.
+    CHECK(ArchiveSourceBinding::SnapshotStats().wrappedReads == before.wrappedReads + 2);
+    CHECK(expired->GetMipmapCount() == first->GetMipmapCount());
+    cached.DoDestruct(); server.server->cache.FlushBank(nullptr);
+    CHECK(ArchiveSourceBinding::SnapshotStats().weakCells == before.weakCells);
+    CHECK(ArchiveSourceBinding::SnapshotStats().knownCppBytes == before.knownCppBytes);
+#endif
+}
+
+TEST_CASE("Failed actual cached PAA Init clears only its bootstrap lease and keeps bytes", "[archive-source-weak-cache]")
+{
+#ifndef _WIN32
+    SKIP("Strong archive identity is Windows-only.");
+#else
+    REQUIRE(ArchiveSourceBinding::CacheHandoffEnabled()); REQUIRE(QFileAccess::MappingSupported());
+    Archives files; ServerScope server; ArchiveSourceBinding::ModelReadScope purpose;
+    const auto before = ArchiveSourceBinding::SnapshotStats();
+    QIFStreamB cached; cached.open(files.first, "malformed.paa"); REQUIRE_FALSE(cached.fail());
+    REQUIRE(cached.GetBuffer()->GetArchiveSourceBinding());
+    server.server->cache.Store(cached, R"(weak-proof-fixture\malformed.paa)");
+    auto failed = CreateSource(R"(weak-proof-fixture\malformed.paa)"); CHECK_FALSE(failed);
+    CHECK_FALSE(cached.GetBuffer()->GetArchiveSourceBinding());
+    CHECK(cached.GetBuffer()->GetSize() == 8); CHECK_FALSE(cached.GetBuffer()->GetError());
+    CHECK(ArchiveSourceBinding::SnapshotStats().liveBindings == before.liveBindings);
+    CHECK(ArchiveSourceBinding::SnapshotStats().weakCells == before.weakCells + 1);
+    cached.DoDestruct(); server.server->cache.FlushBank(nullptr);
+    CHECK(ArchiveSourceBinding::SnapshotStats().knownCppBytes == before.knownCppBytes);
+#endif
+}
+
+TEST_CASE("Cache handoff OFF preserves the original strong mapped wrapper", "[archive-source-weak-cache-off]")
+{
+#ifndef _WIN32
+    SKIP("Strong archive identity is Windows-only.");
+#else
+    REQUIRE_FALSE(ArchiveSourceBinding::CacheHandoffEnabled());
+    REQUIRE(ArchiveSourceBinding::SnapshotStats().enabled); REQUIRE(QFileAccess::MappingSupported());
+    Archives files; ServerScope server; ArchiveSourceBinding::ModelReadScope purpose;
+    const auto before = ArchiveSourceBinding::SnapshotStats();
+    QIFStreamB cached; cached.open(files.first, "texture.paa"); REQUIRE_FALSE(cached.fail());
+    REQUIRE(cached.GetBuffer()->GetArchiveSourceBinding());
+    CHECK_FALSE(cached.GetBuffer()->CompleteArchiveSourceInit({}));
+    server.server->cache.Store(cached, R"(weak-proof-fixture\texture.paa)");
+    auto source = CreateSource(R"(weak-proof-fixture\texture.paa)"); REQUIRE(source);
+    REQUIRE(source->ReleaseArchiveSourceBinding());
+    REQUIRE(cached.GetBuffer()->GetArchiveSourceBinding());
+    CHECK(ArchiveSourceBinding::SnapshotStats().liveBindings == before.liveBindings + 1);
+    CHECK(ArchiveSourceBinding::SnapshotStats().weakCells == before.weakCells);
+    cached.DoDestruct(); server.server->cache.FlushBank(nullptr);
+    CHECK(ArchiveSourceBinding::SnapshotStats().knownCppBytes == before.knownCppBytes);
 #endif
 }

@@ -9,48 +9,61 @@ namespace Poseidon
 class ArchiveSourceBudget : public std::enable_shared_from_this<ArchiveSourceBudget>
 {
 public:
-    struct Snapshot { size_t bindings = 0, bytes = 0; };
+    struct Snapshot { size_t bindings = 0, bytes = 0, weakCells = 0, weakBytes = 0; };
     class Ticket
     {
         friend class ArchiveSourceBudget;
         struct Key { private: Key() = default; friend class ArchiveSourceBudget; };
         std::shared_ptr<ArchiveSourceBudget> _budget;
         size_t _bytes;
+        bool _weak;
     public:
-        Ticket(Key, std::shared_ptr<ArchiveSourceBudget> budget, size_t bytes) noexcept
-            : _budget(std::move(budget)), _bytes(bytes) {}
+        Ticket(Key, std::shared_ptr<ArchiveSourceBudget> budget, size_t bytes, bool weak) noexcept
+            : _budget(std::move(budget)), _bytes(bytes), _weak(weak) {}
         Ticket(const Ticket&) = delete;
         Ticket& operator=(const Ticket&) = delete;
         Ticket(Ticket&&) = delete;
         Ticket& operator=(Ticket&&) = delete;
-        ~Ticket() { _budget->Release(_bytes); }
+        ~Ticket() { _budget->Release(_bytes, _weak); }
     };
-    ArchiveSourceBudget(size_t bindings, size_t bytes) : _maxBindings(bindings), _maxBytes(bytes) {}
+    ArchiveSourceBudget(size_t bindings, size_t bytes, size_t weakCells = 1024)
+        : _maxBindings(bindings), _maxBytes(bytes), _maxWeakCells(weakCells) {}
     std::shared_ptr<const Ticket> Acquire(size_t bytes, bool* capacityRefused = nullptr)
+    { return AcquireImpl(bytes, false, capacityRefused); }
+    std::shared_ptr<const Ticket> AcquireWeak(size_t bytes, bool* capacityRefused = nullptr)
+    { return AcquireImpl(bytes, true, capacityRefused); }
+private:
+    std::shared_ptr<const Ticket> AcquireImpl(size_t bytes, bool weak, bool* capacityRefused)
     {
         if (capacityRefused) *capacityRefused = false;
         std::lock_guard<std::mutex> lock(_mutex);
-        if (!bytes || _live.bindings >= _maxBindings || bytes > _maxBytes - _live.bytes)
+        if (!bytes || (weak ? _live.weakCells >= _maxWeakCells : _live.bindings >= _maxBindings) ||
+            bytes > _maxBytes - _live.bytes)
         { if (capacityRefused) *capacityRefused = true; return {}; }
         try
         {
             // make_shared allocates BEFORE this noexcept constructor. Failed allocation
             // cannot destroy an uncharged Ticket or reenter our locked Release path.
-            auto ticket = std::make_shared<const Ticket>(Ticket::Key{}, shared_from_this(), bytes);
-            ++_live.bindings; _live.bytes += bytes;
+            auto ticket = std::make_shared<const Ticket>(Ticket::Key{}, shared_from_this(), bytes, weak);
+            if (weak) { ++_live.weakCells; _live.weakBytes += bytes; }
+            else ++_live.bindings;
+            _live.bytes += bytes;
             return ticket;
         }
         catch (...) { return {}; }
     }
+public:
     Snapshot Observe() const { std::lock_guard<std::mutex> lock(_mutex); return _live; }
 private:
-    void Release(size_t bytes)
+    void Release(size_t bytes, bool weak)
     {
         std::lock_guard<std::mutex> lock(_mutex);
-        --_live.bindings; _live.bytes -= bytes;
+        if (weak) { --_live.weakCells; _live.weakBytes -= bytes; }
+        else --_live.bindings;
+        _live.bytes -= bytes;
     }
     mutable std::mutex _mutex;
-    const size_t _maxBindings, _maxBytes;
+    const size_t _maxBindings, _maxBytes, _maxWeakCells;
     Snapshot _live;
 };
 
@@ -88,9 +101,15 @@ public:
     {
         bool enabled = false;
         size_t liveBindings = 0, knownCppBytes = 0, capBindings = 256, capBytes = 2 * 1024 * 1024;
+        bool cacheHandoffEnabled = false;
+        size_t weakCells = 0, weakKnownCppBytes = 0, capWeakCells = 1024;
+        uint64_t weakCapacityRefused = 0, weakAllocationRefused = 0;
         uint64_t wrappedReads = 0, initRetains = 0, captureRefused = 0,
             capacityRefused = 0, allocationRefused = 0;
     };
+    // Separate non-lease cells share the unchanged byte budget; no source-cap raise.
+    static bool CacheHandoffEnabled();
+    static std::shared_ptr<const ArchiveSourceBudget::Ticket> ReserveWeakCell(size_t bytes);
     static Stats SnapshotStats();
     static void NoteInitRetained(); // Called only after successful Init retaining buffer evidence.
     const BankReadRequest& Request() const { return _request; }

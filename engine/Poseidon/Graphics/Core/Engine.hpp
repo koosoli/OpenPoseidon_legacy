@@ -3299,6 +3299,13 @@ class Engine : public IGraphicsEngine
         uint64_t surfaceCertificateKnownBytes=0;
         double selectedSurfaceUpper=0; // Object-space selected coarse/fine only, never authored fallback/pixels.
         std::array<float,3> selectedUnionMinimum{},selectedUnionMaximum{};
+        // Read-only successful returned-frame ideal selected-union projection. Never selects a cut or proves pixels/all-pass quality.
+        bool cameraTupleEnabled=false,cameraTupleValid=false,projectedSurfaceIdealBound=false;
+        uint32_t cameraTupleStatus=0,cameraTupleIndex=UINT32_MAX,cameraTupleSource=0,viewportWidth=0,viewportHeight=0;
+        uint64_t cameraTupleGeneration=0,cameraTupleModelBirth=0,cameraTupleCertificateGeneration=0;
+        uint32_t cameraTupleVersion=0,cameraTupleStructBytes=0,cameraTupleOutputWidth=0,cameraTupleOutputHeight=0;
+        uint32_t projectedSurfaceStatus=0; // ProjectedSurface::Status+1, zero not requested.
+        double projectedSurfaceXUpper=0,projectedSurfaceYUpper=0,projectedSurfaceEuclideanUpper=0;
         bool cameraDemandActive=false,cameraDesiredFine=false,cameraHasObservation=false,finePrepared=false;
         uint64_t cameraDemandRevision=0,cameraRequestedRevision=0,cameraObservations=0,cameraRequests=0,cameraCancels=0;
         uint32_t cameraAttempts=0,preparedProducerModel=UINT32_MAX;

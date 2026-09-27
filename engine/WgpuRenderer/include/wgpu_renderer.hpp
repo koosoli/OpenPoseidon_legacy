@@ -2215,6 +2215,18 @@ static_assert(sizeof(WgrAbiCheck) == 28, "WgrAbiCheck layout must match Rust");
 
 // Additive fixture-only ABI; existing ABI15 structures remain unchanged.
 // Recorded indirect commands, NOT survivor/pixel/queue completion or all-pass proof.
+// Optional additive camera tuple v1: unjittered original main scene camera from a successful returned frame.
+// status1 captured,2 no source/index,3 nonfinite,4 viewport,5 non1:1,6 serial exhaustion.
+// source1 terrain/2 Draw3D/3 water/4 grass; source0 fallback is refused. Full main attachment viewport origin0.
+struct WgrMainCameraTuple {
+ uint32_t version,struct_bytes,status,camera_index; uint64_t generation;
+ uint32_t source,render_width,render_height,output_width,output_height,reserved;
+ float camera_position[4],projection[16],view[16];
+};
+static_assert(sizeof(WgrMainCameraTuple)==192);
+static_assert(offsetof(WgrMainCameraTuple,generation)==16);
+static_assert(offsetof(WgrMainCameraTuple,projection)==64);
+// Getter0 unavailable/disabled,1 copied,2 invalid; output untouched on0/2. Never waits/polls.
 struct WgrGeometryPassFacts {
  uint32_t version,struct_bytes,enabled,capabilities,required,pending,recorded_this_frame,reserved;
  uint64_t frame,instance_epoch,cascade_epoch,cascade_frame,gi_rsm_epoch,gi_rsm_frame;
@@ -2669,6 +2681,7 @@ extern "C"
     WGR_API uint32_t wgr_get_memory_stats(WgrRenderer* renderer, WgrMemoryStats* out);
     // Status0 disabled/1 copied/2 invalid; size592/version2 required; exclusive renderer owner.
     WGR_API uint32_t wgr_geometry_pass_facts(WgrRenderer*,WgrGeometryPassFacts*,uint32_t bytes,uint32_t version);
+    WGR_API uint32_t wgr_main_camera_tuple(WgrRenderer*,WgrMainCameraTuple*,uint32_t bytes,uint32_t version);
     WGR_API uint32_t wgr_get_geometry_allocation_report(WgrRenderer* renderer,
         WgrSlice<uint32_t> models, uint32_t max_rows, uint32_t max_visits,
         WgrGeometryAllocationRow* rows, uint32_t row_capacity, WgrGeometryAllocationSummary* summary);

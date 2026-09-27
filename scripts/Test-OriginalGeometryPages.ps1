@@ -1,7 +1,9 @@
-param([ValidateSet('None','Missing','Corrupt')][string]$DiskFault='None',[switch]$CameraPrefetch,[switch]$SurfaceCertificate,[ValidateSet('None','DigestMismatch','Malformed')][string]$SurfaceFault='None',[string]$Tools='',
+param([ValidateSet('None','Missing','Corrupt')][string]$DiskFault='None',[switch]$CameraPrefetch,[switch]$CameraTuple,[switch]$CameraTupleScaleRefusal,[switch]$SurfaceCertificate,[ValidateSet('None','DigestMismatch','Malformed')][string]$SurfaceFault='None',[string]$Tools='',
  [string]$Label='original-geometry-pages',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',[string]$Python='C:\Program Files\Python311\python.exe')
 $ErrorActionPreference='Stop'
 if($SurfaceFault -ne 'None'){$SurfaceCertificate=$true}
+if($CameraTupleScaleRefusal){$CameraTuple=$true}
+if($CameraTuple){$SurfaceCertificate=$true;if($DiskFault -ne 'None' -or $SurfaceFault -ne 'None'){throw 'CameraTuple requires valid disk and surface artifacts'}}
 if($CameraPrefetch -and $DiskFault -ne 'None'){throw 'CameraPrefetch requires a valid disk artifact'}
 if($Label -notmatch '^[a-zA-Z0-9_-]{1,64}$'){throw 'Invalid bounded label'}
 if(!$env:LOCK_OWNER){
@@ -9,6 +11,8 @@ if(!$env:LOCK_OWNER){
  $argv=@((Join-Path $PSScriptRoot 'with-game-lock.sh'),$shell.Replace('\','/'),'-NoProfile','-File',$PSCommandPath,'-Label',$Label,'-GameDir',$GameDir,'-Python',$Python,'-DiskFault',$DiskFault)
  if($Tools){$argv+=@('-Tools',$Tools)}
  if($CameraPrefetch){$argv+='-CameraPrefetch'}
+ if($CameraTuple){$argv+='-CameraTuple'}
+ if($CameraTupleScaleRefusal){$argv+='-CameraTupleScaleRefusal'}
  if($SurfaceCertificate){$argv+='-SurfaceCertificate'}
  $argv+=@('-SurfaceFault',$SurfaceFault)
  $env:LOCK_OWNER='original source private paged geometry fixture'
@@ -136,6 +140,8 @@ $environment=@{
 }
 $environment.WGR_GEOMETRY_PAGE_ORIGINAL_SOURCE='1';$environment.WGR_GEOMETRY_PAGE_FIXTURE='1'
 $environment.WGR_GEOMETRY_PAGE_SURFACE_CERTIFICATE=$(if($SurfaceCertificate){'1'}else{'0'})
+$environment.WGR_GEOMETRY_PAGE_CAMERA_TUPLE=$(if($CameraTuple){'1'}else{'0'})
+if($CameraTuple){$environment.WGR_HDR='1';$environment.WGR_RENDER_SCALE=$(if($CameraTupleScaleRefusal){'75'}else{'100'})}
 $old=@{};Get-ChildItem Env:|Where-Object {$_.Name -match '^(WGR_|POSEIDON_)'}|ForEach-Object {$old[$_.Name]=$_.Value}
 $p=$null;$client=$null;$normal=$false;$forced=$false;$result=$null;$failure=$null
 $exe=Join-Path $GameDir 'OpenPoseidon.exe';$dll=Join-Path $GameDir 'wgpu_renderer.dll';$log=Join-Path $out 'engine.log'
@@ -147,7 +153,7 @@ try{
  $argv=@('--render=wgpu','--window','--dev','--width','1280','--height','720','--vd','2000','--harness',[string]$port,'--test-world-freefly','1184','1240','18','90','-8','--test-world',('"'+(Join-Path $fixture 'cold-paa.wrp')+'"'),'--addon-root',('"'+(Join-Path $fixture 'addons')+'"'),'--test-mission',('"'+$mission+'"'),'--log-file',('"'+$log+'"'))
  $argv+=@('--geometry-original-source',('"'+$OriginalSource+'"'),'--geometry-original-sha256',$suppliedHash,'--geometry-original-bytes',[string]$rawBytes,'--geometry-original-key',$originalKey)
  if($SurfaceCertificate){$argv+=@('--geometry-pages-surface-manifest',('"'+$surfaceManifest+'"'),$surfaceManifestHash,'--geometry-pages-surface-certificate',('"'+$surfaceDescriptor+'"'),$surfaceDescriptorHash)}
- @{head=(& git -C $root rev-parse HEAD);scriptSha256=(Get-FileHash $PSCommandPath).Hash;generatorSha256=(Get-FileHash $generator).Hash;installed=(Get-Content (Join-Path $GameDir 'DEPLOYED-FROM.txt'));hashes=$hashes;environment=$environment;argv=$argv;fixture=$producer;originalProof=$originalProducer;sourceGeneratorSha256=(Get-FileHash $originalGenerator).Hash;diskFault=$DiskFault;surfaceCertificate=[bool]$SurfaceCertificate;surfaceFault=$SurfaceFault;surfaceProof=$surfaceProof;cameraPrefetch=[bool]$CameraPrefetch;toolsSha256=$toolsHash;scope='Actual original-source private paging; copied record cuts, no retail/all-pass/pixel/FPS proof'}|ConvertTo-Json -Depth 12|Set-Content (Join-Path $out 'provenance.json')
+ @{head=(& git -C $root rev-parse HEAD);scriptSha256=(Get-FileHash $PSCommandPath).Hash;generatorSha256=(Get-FileHash $generator).Hash;installed=(Get-Content (Join-Path $GameDir 'DEPLOYED-FROM.txt'));hashes=$hashes;environment=$environment;argv=$argv;fixture=$producer;originalProof=$originalProducer;sourceGeneratorSha256=(Get-FileHash $originalGenerator).Hash;diskFault=$DiskFault;surfaceCertificate=[bool]$SurfaceCertificate;surfaceFault=$SurfaceFault;surfaceProof=$surfaceProof;cameraPrefetch=[bool]$CameraPrefetch;cameraTuple=[bool]$CameraTuple;cameraTupleScaleRefusal=[bool]$CameraTupleScaleRefusal;toolsSha256=$toolsHash;scope='Actual original-source private paging; copied record cuts, no retail/all-pass/pixel/FPS proof'}|ConvertTo-Json -Depth 12|Set-Content (Join-Path $out 'provenance.json')
  $p=Start-Process -FilePath $exe -WorkingDirectory $GameDir -WindowStyle Hidden -PassThru -ArgumentList $argv
  $null=$p.Handle
  $client=[Net.Sockets.TcpClient]::new();$until=[DateTime]::UtcNow.AddSeconds(90)
@@ -334,6 +340,61 @@ try{
             }
             return $cut
         }
+
+    # Copied successful main-frame tuple + ideal projection only; no pixel/all-pass/GPU-completion claim.
+    function TupleCut($c) {
+     Require $c @('cameraTupleEnabled','cameraTupleValid','projectedSurfaceIdealBound','cameraTupleStatus','cameraTupleGeneration','cameraTupleIndex','cameraTupleSource','cameraTupleVersion','cameraTupleStructBytes','cameraTupleOutputWidth','cameraTupleOutputHeight','viewportWidth','viewportHeight','cameraTupleModelBirth','cameraTupleCertificateGeneration','projectedSurfaceStatus','projectedSurfaceXUpper','projectedSurfaceYUpper','projectedSurfaceEuclideanUpper')
+     foreach($field in @('cameraTupleEnabled','cameraTupleValid','projectedSurfaceIdealBound')){if($c.$field -isnot [bool]){throw "Invalid tuple Boolean $field"}}
+     foreach($field in @('cameraTupleGeneration','cameraTupleModelBirth','cameraTupleCertificateGeneration','cameraTupleStatus','cameraTupleIndex','cameraTupleSource','cameraTupleVersion','cameraTupleStructBytes','cameraTupleOutputWidth','cameraTupleOutputHeight','viewportWidth','viewportHeight','projectedSurfaceStatus')){
+      $raw=$c.$field;if($raw -is [string] -or $raw -is [bool]){throw "Invalid tuple integer type $field"};$v=[double]$raw
+      if([double]::IsNaN($v) -or [double]::IsInfinity($v) -or $v -lt 0 -or $v -gt 9007199254740991 -or [Math]::Floor($v) -ne $v){throw "Invalid tuple integer $field"}
+     }
+     foreach($field in @('projectedSurfaceXUpper','projectedSurfaceYUpper','projectedSurfaceEuclideanUpper')){
+      $raw=$c.$field;if($raw -is [string] -or $raw -is [bool]){throw "Invalid tuple bound type $field"};$v=[double]$raw
+      if([double]::IsNaN($v) -or [double]::IsInfinity($v) -or $v -lt 0 -or $v -gt 9007199254740991){throw "Invalid tuple bound $field"}
+     }
+     if(!$c.cameraTupleEnabled -or $c.cameraTupleVersion -ne 1 -or $c.cameraTupleStructBytes -ne 192 -or $c.cameraTupleOutputWidth -ne 1280 -or $c.cameraTupleOutputHeight -ne 720 -or $c.cameraTupleGeneration -lt 1 -or $c.cameraTupleIndex -eq 4294967295 -or $c.cameraTupleSource -notin @(1,2,3,4)){throw 'Missing actual versioned main-camera authority'}
+     $w=1280;$h=720;if($CameraTupleScaleRefusal){$w=960;$h=540}
+     if($c.viewportWidth -ne $w -or $c.viewportHeight -ne $h){throw 'Actual renderer dimensions disagree with explicit render-scale arm'}
+     if($c.projectedSurfaceIdealBound){if(!$c.cameraTupleValid -or $c.cameraTupleStatus -ne 1 -or $c.projectedSurfaceStatus -ne 1 -or $c.cameraTupleModelBirth -ne (1+[double]$c.producerModel) -or $c.cameraTupleCertificateGeneration -ne $c.sourceAdmissionEpoch -or !$c.surfaceSelectedVerified){throw 'Ideal bound lacks exact source/model/certificate join'}}
+     elseif($c.projectedSurfaceXUpper -ne 0 -or $c.projectedSurfaceYUpper -ne 0 -or $c.projectedSurfaceEuclideanUpper -ne 0){throw 'Refused projection exposed numeric bound'}
+     return $c
+    }
+    function TuplePose($pose){$r=Send @{cmd='eval';code=('triFreeFlyPose "'+$pose+'"')};Require $r @('result');if($r.result.Trim('"') -ne 'OK'){throw 'Actual camera pose refused'}}
+    function ObserveTuple($previous,$kind){
+     $until=[DateTime]::UtcNow.AddSeconds(15)
+     do{$c=TupleCut (PageCut (Observe $true $true));$fresh=$c.cameraTupleGeneration -gt $previous
+      $ok=switch($kind){
+       'Bound' {$c.cameraTupleValid -and $c.cameraTupleStatus -eq 1 -and $c.projectedSurfaceIdealBound}
+       'Near' {$c.cameraTupleValid -and $c.cameraTupleStatus -eq 1 -and !$c.projectedSurfaceIdealBound -and $c.projectedSurfaceStatus -eq 5}
+       'Clipped' {$c.cameraTupleValid -and $c.cameraTupleStatus -eq 1 -and !$c.projectedSurfaceIdealBound -and $c.projectedSurfaceStatus -eq 6}
+       'Scaled' {!$c.cameraTupleValid -and !$c.projectedSurfaceIdealBound -and $c.cameraTupleStatus -eq 5 -and $c.projectedSurfaceStatus -eq 0}
+      }
+      if($fresh -and $ok){return $c};Start-Sleep -Milliseconds 100
+     }while([DateTime]::UtcNow -lt $until)
+     throw "Camera tuple $kind did not settle: $($c|ConvertTo-Json -Compress)"
+    }
+    function SameTupleModel($a,$b){
+     foreach($f in @('producerModel','rendererModel','producerInstance','rendererInstance','sourceAdmissionEpoch','meshCount')){if($a.$f -ne $b.$f){throw "Camera movement changed private $f"}}
+     for($i=0;$i -lt $a.meshCount;$i++){if($a.rendererMeshHandles[$i] -ne $b.rendererMeshHandles[$i]){throw 'Camera movement changed full-generation mesh history'}}
+    }
+    function RunCameraTupleProof($selected){
+     if(!$CameraTuple){return $null}
+     $kind='Bound';if($CameraTupleScaleRefusal){$kind='Scaled'}
+     TuplePose '1184 1240 18 90 -8';$native=ObserveTuple 0 $kind;SameTupleModel $selected $native
+     TuplePose '1176 1242 19 90 -8';$moved=ObserveTuple $native.cameraTupleGeneration $kind;SameTupleModel $native $moved
+     if(!$CameraTupleScaleRefusal -and $moved.projectedSurfaceEuclideanUpper -eq $native.projectedSurfaceEuclideanUpper){throw 'Movement did not change the actual ideal projection bound'}
+     $near=$null;$clipped=$null
+     if(!$CameraTupleScaleRefusal){
+      TuplePose '1200 1240 15.5 90 0';$near=ObserveTuple $moved.cameraTupleGeneration 'Near';SameTupleModel $native $near
+      TuplePose '1184 1240 18 30 -8';$clipped=ObserveTuple $near.cameraTupleGeneration 'Clipped';SameTupleModel $native $clipped
+     }
+     $last=$moved;if($null -ne $clipped){$last=$clipped}
+     TuplePose '1184 1240 18 90 -8';$restored=ObserveTuple $last.cameraTupleGeneration $kind;SameTupleModel $native $restored
+     $e=@{native=$native;moved=$moved;nearRefusal=$near;clippedRefusal=$clipped;restored=$restored;scaleRefusal=[bool]$CameraTupleScaleRefusal;scope='Actual copied nonjittered main camera, ideal selected-union bound/refusal only; no pixels/all-pass/GPU-completion/FPS proof'}
+     $e|ConvertTo-Json -Depth 12|Set-Content (Join-Path $out 'camera-tuple-proof.json');return $e
+    }
+
         function WaitPage($predicate) {
             $until=[DateTime]::UtcNow.AddSeconds(15)
             do {
@@ -444,6 +505,7 @@ try{
      if($fine.producerModel -ne $prepared.preparedProducerModel -or $fine.rendererModel -eq $coarse.rendererModel -or $fine.producerInstance -ne $coarse.producerInstance -or $fine.rendererInstance -ne $coarse.rendererInstance -or $fine.meshCount -ne $prepared.meshCount -or $fine.pageCompleted -ne $prepared.pageCompleted -or $fine.cameraRequests -ne 2 -or $fine.pageLiveJobs -ne 0 -or $fine.pageReservedBytes -ne 0){throw 'Fine selection did not reuse prepared resources'}
      for($i=0;$i -lt $prepared.meshCount;$i++){if($fine.rendererMeshHandles[$i] -ne $prepared.rendererMeshHandles[$i]){throw 'Manual selection recreated prepared meshes'}}
      Capture 'camera-manual-fine.png'
+     $cameraTupleEvidence=RunCameraTupleProof $fine
      $cameraEvidence=@{follow=$follow;far=$far;held=$held;cancelled=$cancelled;settledCancel=$settledCancel;automaticPrepared=$automaticPrepared;prepared=$prepared;stop=$stop;manualFine=$fine;scope='Actual camera distance prefetch, fixed coarse during preparation, manual Fine reuse; no automatic quality/all-pass/pixel/FPS claim'}
     }else{
      BootstrapDiskCoarse;$coarse=PageCut (Observe $true $false)
@@ -468,6 +530,7 @@ try{
      $fine=AdmitFine
      if($fine.fallbackSelected -or $fine.fineGeneration -ne 1 -or $fine.fineTriangles -ne 512 -or $fine.rendererModel -eq $coarse.rendererModel -or $fine.rendererInstance -ne $coarse.rendererInstance -or $fine.producerInstance -ne $coarse.producerInstance){throw 'First actual fine cut identity mismatch'}
      Capture 'original-fine.png'
+     $cameraTupleEvidence=RunCameraTupleProof $fine
      $null=Action 'coarse';$returnedCoarse=PageCut (Observe $true $false)
      if($returnedCoarse.rendererModel -ne $coarse.rendererModel -or $returnedCoarse.rendererInstance -ne $coarse.rendererInstance -or $returnedCoarse.fallbackSelected){throw 'Coarse return lost fixed identity'}
      Capture 'original-returned-coarse.png'
@@ -479,6 +542,7 @@ try{
      for($i=0;$i -lt $evicted.meshCount;$i++){if($evicted.rendererMeshHandles[$i] -ne $fine.rendererMeshHandles[$i] -or $refilled.rendererMeshHandles[$i] -ne $evicted.rendererMeshHandles[$i]){throw 'Refill replaced retained full-generation history'}}
      if(@($fallback.rendererModel,$coarse.rendererModel,$fine.rendererModel,$refilled.rendererModel|Select-Object -Unique).Count -ne 4 -or @($fallback.producerModel,$coarse.producerModel,$fine.producerModel,$refilled.producerModel|Select-Object -Unique).Count -ne 4){throw 'Four birth identities alias'}
      Capture 'original-refilled-fine.png'
+     if($CameraTuple){$finalTuple=ObserveTuple $cameraTupleEvidence.restored.cameraTupleGeneration $(if($CameraTupleScaleRefusal){'Scaled'}else{'Bound'});SameTupleModel $refilled $finalTuple;$cameraTupleEvidence.finalRefill=$finalTuple;$cameraTupleEvidence|ConvertTo-Json -Depth 12|Set-Content (Join-Path $out 'camera-tuple-proof.json')}
      $null=Action 'fallback';$returnedFallback=PageCut (Observe $true $false)
      if(!$returnedFallback.fallbackSelected -or $returnedFallback.rendererModel -ne $fallback.rendererModel -or $returnedFallback.rendererInstance -ne $fallback.rendererInstance){throw 'Authored fallback was lost'}
      Capture 'original-returned-fallback.png'
@@ -487,9 +551,10 @@ try{
     $null=Action 'abort';$retired=PageCut (Observe $false $false)
     $settled=WaitPage {param($c) $c.pageLiveJobs -eq 0 -and $c.pageQueued -eq 0 -and $c.pageActive -eq 0 -and $c.pageReady -eq 0 -and $c.pageReservedBytes -eq 0}
     if($CameraPrefetch){$retired=CameraCut $retired;$settled=CameraCut $settled;if($retired.cameraDemandActive -or $retired.finePrepared -or $retired.meshCount -ne $fine.meshCount -or $retired.meshesAbsent -ne $fine.meshCount -or $settled.cameraRequests -ne 2){throw 'Camera Abort failed exact cleanup/idle proof'}}
+    if($CameraTuple){Require $retired @('cameraTupleValid','projectedSurfaceIdealBound');if($retired.cameraTupleValid -or $retired.projectedSurfaceIdealBound){throw 'Abort retained camera projection authority'}}
     $secondBegin=Action 'beginOriginalDiskClodPaged';Require $secondBegin @('status','pageWorkState')
     if($secondBegin.status -ne 'Busy' -or $secondBegin.pageWorkState -ne 'OriginalAdmissionConsumed'){throw 'Single source admission rearmed after Abort'}
-    $result=@{passed=$true;surfaceCertificate=[bool]$SurfaceCertificate;surfaceFault=$SurfaceFault;surfaceProof=$surfaceProof;diskFault=$DiskFault;cameraPrefetch=[bool]$CameraPrefetch;cameraEvidence=$cameraEvidence;begin=$begin;baseline=$baseline;normalworldCoverage=$worldCoverage;normalworldCamera=$camera;fallback=$fallback;coarse=$coarse;fine=$fine;heldRequest=$heldRequest;held=$held;cancelled=$cancelled;cancelledCoarse=$cancelledCoarse;settledCancel=$settledCancel;evicted=$evicted;refilled=$refilled;returnedFallback=$returnedFallback;typedFault=$refused;retired=$retired;settled=$settled;secondBegin=$secondBegin;sourceFixture=$sourceFixture;producer=$originalProducer;scope='Original authored P3DM controlled subset, actual fallback/coarse/fine/refill record cuts; no retail/all-pass/pixel/FPS/device-free or complete ownership claim'}
+    $result=@{passed=$true;surfaceCertificate=[bool]$SurfaceCertificate;surfaceFault=$SurfaceFault;surfaceProof=$surfaceProof;diskFault=$DiskFault;cameraPrefetch=[bool]$CameraPrefetch;cameraTuple=[bool]$CameraTuple;cameraTupleScaleRefusal=[bool]$CameraTupleScaleRefusal;cameraEvidence=$cameraEvidence;cameraTupleEvidence=$cameraTupleEvidence;begin=$begin;baseline=$baseline;normalworldCoverage=$worldCoverage;normalworldCamera=$camera;fallback=$fallback;coarse=$coarse;fine=$fine;heldRequest=$heldRequest;held=$held;cancelled=$cancelled;cancelledCoarse=$cancelledCoarse;settledCancel=$settledCancel;evicted=$evicted;refilled=$refilled;returnedFallback=$returnedFallback;typedFault=$refused;retired=$retired;settled=$settled;secondBegin=$secondBegin;sourceFixture=$sourceFixture;producer=$originalProducer;scope='Original authored P3DM controlled subset, actual fallback/coarse/fine/refill record cuts; no retail/all-pass/pixel/FPS/device-free or complete ownership claim'}
     if($CameraPrefetch){$result.scope='Actual original-file camera prefetch/held departure/complete prepared rows/coarse unchanged/manual Fine reuse/all-Absent cleanup; no eviction/refill/automatic quality/retail/all-pass/pixel/FPS/device-free/complete ownership claim'}
     $null=Send @{cmd='exit'}
     if(!$p.WaitForExit(15000) -or $p.ExitCode -ne 0){throw 'Game did not exit normally'};$normal=$true

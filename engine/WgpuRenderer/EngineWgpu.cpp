@@ -1,5 +1,6 @@
 #include "MeshRecordClosure.hpp"
 #include <Poseidon/Graphics/Rendering/GeometryPageCameraDemand.hpp>
+#include <Poseidon/Graphics/Rendering/GeometryPageProjectedSurfaceBound.hpp>
 #include <Poseidon/Graphics/Rendering/Frame/PresentationSnapshot.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageControlledMlodAsset.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageRepresentationDecode.hpp>
@@ -2165,6 +2166,25 @@ Engine::GeometryPageOriginalAdmissionReport EngineWgpu::AdmitGeometryPageOrigina
       catch(const std::exception&) {report.status=Status::Invalid;return report;}
 }
 
+namespace {
+bool PageCameraTupleEnabled() {
+    static const bool enabled=[] {
+        const char* tuple=std::getenv("WGR_GEOMETRY_PAGE_CAMERA_TUPLE");
+        const char* fixture=std::getenv("WGR_GEOMETRY_PAGE_FIXTURE");
+        const char* surface=std::getenv("WGR_GEOMETRY_PAGE_SURFACE_CERTIFICATE");
+        return tuple&&std::strcmp(tuple,"1")==0&&fixture&&std::strcmp(fixture,"1")==0&&surface&&std::strcmp(surface,"1")==0;
+    }();return enabled;
+}
+void PageInvalidateCameraTuple(Engine::GeometryPageFixtureReport& report) {
+    report.cameraTupleValid=false;report.projectedSurfaceIdealBound=false;
+    report.cameraTupleStatus=0;report.projectedSurfaceStatus=0;report.cameraTupleGeneration=0;
+    report.cameraTupleModelBirth=0;report.cameraTupleCertificateGeneration=0;
+    report.cameraTupleVersion=0;report.cameraTupleStructBytes=0;report.cameraTupleOutputWidth=0;report.cameraTupleOutputHeight=0;
+    report.cameraTupleIndex=UINT32_MAX;report.cameraTupleSource=0;report.viewportWidth=0;report.viewportHeight=0;
+    report.projectedSurfaceXUpper=report.projectedSurfaceYUpper=report.projectedSurfaceEuclideanUpper=0;
+}
+} // namespace
+
 struct EngineWgpu::GeometryPageFixtureState
 {
     std::mutex mutex;
@@ -2181,6 +2201,9 @@ struct EngineWgpu::GeometryPageFixtureState
     WgrModelSection pageSection{}; WgrModelMaterial pageMaterial{};
     float pageOriginRadius=5; // Actual original-file bound only when originalFilePilot.
     std::shared_ptr<const GeometryPageOriginalAdmissionState> originalAdmission; // Optional same DTO owner, no copy.
+    // Only exact opt-in+verified original certificate allocates one copied immutable successful tuple/result.
+    std::unique_ptr<GeometryPages::ProjectedSurface::Result> projectedSurfaceResult;
+    uint64_t cameraLastGeneration=0; // Renderer-call provenance, no wallclock.
     uint64_t pageBaseKnownBytes=0;
     std::unique_ptr<GeometryPages::CameraPageDemand> cameraDemand; // Allocated only by explicit followCamera.
     bool pagePrefetchPending=false; // Same complete MODEL/MESH cut, never selects the instance.
@@ -8723,6 +8746,10 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
             fixture->originalAdmission=originalOwner;fixture->pageOriginRadius=radius;
             std::vector<ResourceOp> staged;staged.reserve(size_t(fallback.clusters)+2);
             uint64_t known=16384+sizeof(GeometryPageFixtureState)+DiskPageKnownBytes(*fixture->diskInput)+fixture->meshes.capacity()*sizeof(uint64_t);
+            if(PageCameraTupleEnabled()&&originalOwner&&originalOwner->surface) {
+                fixture->projectedSurfaceResult=std::make_unique<GeometryPages::ProjectedSurface::Result>();
+                known+=sizeof(GeometryPages::ProjectedSurface::Result)+64+2*sizeof(WgrMainCameraTuple)+64; // Result plus bounded Rust tracker/guards in existing1MiB; not RSS.
+            }
             const auto meshBytes=[](const ExportedMesh& mesh) {return mesh.vertices.capacity()*sizeof(SVertex)+mesh.positions.capacity()*sizeof(Position)+
                 (mesh.indices.capacity()+mesh.materials.capacity())*sizeof(uint32_t);};
             // The engine and fixture share ONE immutable DTO; do not charge its arrays twice.
@@ -9039,7 +9066,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
             report.retiredFineFirst=first;report.retiredFineCount=end-first;report.fineEvictionCount=1;report.fineEvictionPending=true;
             report.fineResident=false;report.finePrepared=false;report.preparedProducerModel=UINT32_MAX;
             report.pageRequest=0;report.pageWorkState="Evicting";
-            report.status=GeometryReportStatus::Pending;report.mainFrameReturned=false;report.renderReturnStatus=INT32_MIN;report.passFacts={};++report.requestId;
+            report.status=GeometryReportStatus::Pending;report.mainFrameReturned=false;PageInvalidateCameraTuple(report);report.renderReturnStatus=INT32_MIN;report.passFacts={};++report.requestId;
             for(auto& op:staged) _resourceOps.push_back(std::move(op));
             auto cut=report;updatePageStats(cut);return cut;
         }
@@ -9120,7 +9147,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
                     auto metadata=std::make_shared<GeometryPages::DiskPageInput>(*fixture->diskInput);
                     metadata->representation=requestedRole;
                     submitted=_geometryPageWorker->SubmitDisk(report.pageEpoch,token,std::move(metadata),1024*1024-fixture->pageBaseKnownBytes);
-                    report.diskRequestedRepresentation=coarseRequest?"Coarse":"Fine";report.diskReadStatus="NotRequested";report.surfaceSelectedVerified=false;
+                    report.diskRequestedRepresentation=coarseRequest?"Coarse":"Fine";report.diskReadStatus="NotRequested";report.surfaceSelectedVerified=false;PageInvalidateCameraTuple(report);
                 } else submitted=_geometryPageWorker->Submit(report.pageEpoch,token,fixture->pageInput,1024*1024-fixture->pageBaseKnownBytes);
                 if(submitted==GeometryPages::AuthoredPageWorker::SubmitStatus::Queued || submitted==GeometryPages::AuthoredPageWorker::SubmitStatus::Duplicate) {
                     report.pageRequest=token;report.pageWorkState="Queued";
@@ -9208,7 +9235,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
                     report.pageWorkState="Uploading";
                     report.meshCount=uint32_t(fixture->meshes.size());report.knownPayloadBytes=fixture->pageBaseKnownBytes+extra;
                     if(coarseRequest) fixture->pageBaseKnownBytes+=extra; // fallback+coarse remain resident across fine eviction/refill
-                    report.status=GeometryReportStatus::Pending;report.mainFrameReturned=false;report.renderReturnStatus=INT32_MIN;report.passFacts={};++report.requestId;
+                    report.status=GeometryReportStatus::Pending;report.mainFrameReturned=false;PageInvalidateCameraTuple(report);report.renderReturnStatus=INT32_MIN;report.passFacts={};++report.requestId;
                 }
             }
             auto copiedReport=report;updatePageStats(copiedReport);return copiedReport;
@@ -9240,7 +9267,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
             report.producerModel=fixture->models[model]; fixture->placement.model=report.producerModel;
             EnqueueInstanceUpdate(fixture->instance,fixture->placement);
         }
-        report.status=GeometryReportStatus::Pending; report.mainFrameReturned=false; report.renderReturnStatus=INT32_MIN; report.passFacts={}; ++report.requestId;
+        report.status=GeometryReportStatus::Pending; report.mainFrameReturned=false;PageInvalidateCameraTuple(report); report.renderReturnStatus=INT32_MIN; report.passFacts={}; ++report.requestId;
         ResourceOp observe; observe.kind=ResourceOp::GeometryPageFixtureObserve; observe.fixtureData=fixture; observe.fixtureRequest=report.requestId;
         _resourceOps.push_back(std::move(observe));
         return report;
@@ -9258,6 +9285,7 @@ void EngineWgpu::PublishGeometryPageFixtureObservation(const WgrFrame& frame, in
     report.renderReturnStatus=renderReturnStatus;
     report.mainFrameReturned=renderReturnStatus==0;
     report.passFacts={}; // Failed frame/getter must never expose a prior valid cut.
+    report.cameraTupleEnabled=PageCameraTupleEnabled();PageInvalidateCameraTuple(report);
     if(report.mainFrameReturned) {
         WgrGeometryPassFacts f{};
         if(wgr_geometry_pass_facts(_renderer,&f,sizeof(f),2)==1 &&
@@ -9329,6 +9357,71 @@ void EngineWgpu::PublishGeometryPageFixtureObservation(const WgrFrame& frame, in
     // remain mandatory for caller cleanup proof. Active eviction never skips expectations.
     report.status=valid && (!report.active || expectations)?GeometryReportStatus::Ready:
         valid && report.fineEvictionPending?GeometryReportStatus::Pending:GeometryReportStatus::Failed;
+    if(report.cameraTupleEnabled) {
+        // Same serialized renderer-owner operation, after actual render status0 and full private association cut.
+        // No live GScene/Camera getters, no new I/O/worker work, and no selection mutation.
+        WgrMainCameraTuple tuple{};report.cameraTupleStatus=7;
+        if(report.mainFrameReturned&&wgr_main_camera_tuple(_renderer,&tuple,sizeof(tuple),1)==1&&
+            tuple.version==1&&tuple.struct_bytes==sizeof(tuple)&&!tuple.reserved&&tuple.status>=1&&tuple.status<=6) {
+            report.cameraTupleStatus=tuple.status;report.cameraTupleGeneration=tuple.generation;
+            report.cameraTupleVersion=tuple.version;report.cameraTupleStructBytes=tuple.struct_bytes;
+            report.cameraTupleOutputWidth=tuple.output_width;report.cameraTupleOutputHeight=tuple.output_height;
+            report.cameraTupleIndex=tuple.camera_index;report.cameraTupleSource=tuple.source;
+            report.viewportWidth=tuple.render_width;report.viewportHeight=tuple.render_height;
+            if(tuple.status==1) {
+                const auto* cameras=frame.cameras.data;
+                const bool fresh=tuple.generation>fixture->cameraLastGeneration&&tuple.generation!=UINT64_MAX;
+                const bool packet=cameras&&tuple.camera_index<frame.cameras.len&&tuple.source>=1&&tuple.source<=4&&
+                    tuple.render_width==tuple.output_width&&tuple.render_height==tuple.output_height&&
+                    std::memcmp(tuple.projection,cameras[tuple.camera_index].proj.m,sizeof(tuple.projection))==0&&
+                    std::memcmp(tuple.view,cameras[tuple.camera_index].view.m,sizeof(tuple.view))==0&&
+                    tuple.camera_position[0]==cameras[tuple.camera_index].cam_pos.x&&
+                    tuple.camera_position[1]==cameras[tuple.camera_index].cam_pos.y&&
+                    tuple.camera_position[2]==cameras[tuple.camera_index].cam_pos.z&&tuple.camera_position[3]==0;
+                report.cameraTupleValid=fresh&&packet;
+                report.cameraTupleStatus=!fresh?8:!packet?9:1;
+                if(fresh)fixture->cameraLastGeneration=tuple.generation;
+                const auto owner=fixture->originalAdmission;const auto proof=owner?owner->surface:nullptr;
+                const bool selected=report.producerModel==fixture->models[fixture->pageCoarseSlot]||
+                    report.producerModel==fixture->models[fixture->pageFirstFineSlot]||report.producerModel==fixture->models[fixture->pageRefillSlot];
+                if(report.cameraTupleValid) {
+                    if(!report.active||report.status!=GeometryReportStatus::Ready) {report.cameraTupleValid=false;report.cameraTupleStatus=11;}
+                    else if(!proof||!fixture->projectedSurfaceResult||!report.surfaceSelectedVerified||report.fallbackSelected||!selected||
+                        fixture->placement.flags||fixture->placement.conform2.z!=0)report.cameraTupleStatus=10;
+                    else {
+                        using namespace GeometryPages::ProjectedSurface;
+                        const auto& certificate=proof->certificate;Input input;
+                        auto& binding=input.binding;binding.originalSource=certificate.originalSource;binding.selectedKey=certificate.selectedKey;
+                        binding.coarsePackedSha256=certificate.coarsePackedSha256;binding.finePackedSha256=certificate.finePackedSha256;
+                        binding.coarseCut=certificate.coarseCut;binding.fineCut=certificate.fineCut;
+                        binding.coarseCutCount=certificate.coarseCutCount;binding.fineCutCount=certificate.fineCutCount;
+                        binding.coarseThresholdBits=certificate.coarseThresholdBits;binding.fineThresholdBits=certificate.fineThresholdBits;
+                        binding.certificateAlgorithmVersion=GeometryPages::SurfaceCertificate::Certificate::AlgorithmVersion;
+                        binding.fineToCoarseUpperBits=std::bit_cast<uint64_t>(certificate.fineToCoarse);
+                        binding.coarseToFineUpperBits=std::bit_cast<uint64_t>(certificate.coarseToFine);
+                        binding.hausdorffUpperBits=std::bit_cast<uint64_t>(certificate.hausdorffUpper);
+                        input.cut={tuple.generation,uint64_t(report.producerModel)+1,owner->report.epoch}; // Bijective birth0->1, never renderer slot.
+                        input.minimum=proof->minimum;input.maximum=proof->maximum;input.surfaceDistanceUpper=certificate.hausdorffUpper;
+                        input.viewportWidth=tuple.render_width;input.viewportHeight=tuple.render_height;input.clipNear=-tuple.projection[14];
+                        std::copy(std::begin(tuple.projection),std::end(tuple.projection),input.projection.begin());
+                        std::copy(std::begin(tuple.view),std::end(tuple.view),input.view.begin());
+                        std::copy(std::begin(fixture->placement.world.m),std::end(fixture->placement.world.m),input.model.begin());
+                        // Ideal mathematical camera-relative affine basis; not a shader-FP/raster equivalence claim.
+                        for(size_t axis=0;axis<3;++axis)input.model[12+axis]-=tuple.camera_position[axis];
+                        const auto bound=Build(input,binding,input.cut,*fixture->projectedSurfaceResult);
+                        report.projectedSurfaceStatus=uint32_t(bound)+1;
+                        report.cameraTupleModelBirth=input.cut.modelBirth;report.cameraTupleCertificateGeneration=input.cut.certificateGeneration;
+                        if(bound==Status::Bounded) {
+                            report.projectedSurfaceIdealBound=true;
+                            report.projectedSurfaceXUpper=fixture->projectedSurfaceResult->pixelXUpper;
+                            report.projectedSurfaceYUpper=fixture->projectedSurfaceResult->pixelYUpper;
+                            report.projectedSurfaceEuclideanUpper=fixture->projectedSurfaceResult->euclideanPixelUpper;
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 // How much of a material's flat specular constant to apply.

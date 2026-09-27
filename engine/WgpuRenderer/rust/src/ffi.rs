@@ -4714,3 +4714,31 @@ mod render_call_cpu_diagnostic_tests {
         assert_eq!(output.milliseconds, [-1.0; 12]);
     }
 }
+
+
+/// Additive optional camera tuple v1. Existing ABI18 layouts/hash are unchanged.
+/// 0 unavailable/disabled,1 copied,2 invalid arguments/panic. Output untouched on0/2.
+/// # Safety
+/// Exclusive renderer-owner access and192 writable output bytes. No polling/wait/renderer mutation.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_main_camera_tuple(renderer:*mut WgrRenderer,out:*mut crate::main_camera_tuple::WgrMainCameraTuple,bytes:u32,version:u32)->u32 {
+    if renderer.is_null()||out.is_null()||bytes!=crate::main_camera_tuple::BYTES||version!=crate::main_camera_tuple::VERSION{return 2;}
+    catch_unwind(AssertUnwindSafe(||{
+        let Some(tuple)=unsafe{&*renderer}.main_camera_tuple.as_ref().and_then(|t|t.snapshot()) else{return 0;};
+        unsafe{*out=tuple;}1
+    })).unwrap_or(2)
+}
+
+#[cfg(test)]
+mod main_camera_tuple_getter_tests {
+    use super::*;
+    #[test] fn invalid_layout_and_null_leave_output_untouched() {
+        let mut output=crate::main_camera_tuple::WgrMainCameraTuple{generation:77,..Default::default()};
+        let before=output;let sentinel=1usize as *mut WgrRenderer;
+        assert_eq!(unsafe{wgr_main_camera_tuple(sentinel,&mut output,191,1)},2);
+        assert_eq!(unsafe{wgr_main_camera_tuple(sentinel,&mut output,192,0)},2);
+        assert_eq!(unsafe{wgr_main_camera_tuple(std::ptr::null_mut(),&mut output,192,1)},2);
+        assert_eq!(unsafe{wgr_main_camera_tuple(sentinel,std::ptr::null_mut(),192,1)},2);
+        assert_eq!(output,before);
+    }
+}

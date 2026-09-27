@@ -14,6 +14,7 @@ param(
     [switch]$WarmTextureJobs,
     [switch]$WarmMaterialPreflight,
     [switch]$HotSourceProofRetirement,
+    [switch]$WeakCacheProof,
     [switch]$RequireHotSourceProofRetirement,
     [switch]$RequireWarmMaterialPreflightUpload,
     [switch]$RequireWarmMaterialStageUpload,
@@ -35,6 +36,7 @@ if ($ColdPaaHandoff) { $ArchiveSourceBindings = $true }
 if ($RequireWarmMaterialStageUpload) { $WarmTextureJobs = $true; $WarmProfile = $true }
 if ($RequireWarmMaterialPreflightUpload) { $WarmMaterialPreflight = $true }
 if ($WarmMaterialPreflight) { $WarmTextureJobs = $true; $WarmProfile = $true }
+if ($WeakCacheProof) { $HotSourceProofRetirement = $true }
 if ($RequireHotSourceProofRetirement) { $HotSourceProofRetirement = $true }
 if ($HotSourceProofRetirement) { $WarmTextureJobs = $true; $WarmProfile = $true }
 if ($WarmTextureJobs) { $ArchiveSourceBindings = $true }
@@ -60,6 +62,7 @@ if (!$env:LOCK_OWNER) {
         if ($WarmTextureJobs) { $argv += '-WarmTextureJobs' }
         if ($WarmMaterialPreflight) { $argv += '-WarmMaterialPreflight' }
         if ($HotSourceProofRetirement) { $argv += '-HotSourceProofRetirement' }
+        if ($WeakCacheProof) { $argv += '-WeakCacheProof' }
         if ($RequireHotSourceProofRetirement) { $argv += '-RequireHotSourceProofRetirement' }
         if ($RequireWarmMaterialPreflightUpload) { $argv += '-RequireWarmMaterialPreflightUpload' }
         if ($RequireWarmMaterialStageUpload) { $argv += '-RequireWarmMaterialStageUpload' }
@@ -119,6 +122,7 @@ $environment = @{
     WGR_GEO_POOL_COPY_DIAGNOSTICS = $(if ($GeometryCopyDiagnostics) { '1' } else { '0' })
     WGR_WATER_BACKEND = '0'
     WGR_OBJECT_STREAM_WARM_MATERIAL_PREFLIGHT = $(if ($WarmMaterialPreflight) { '1' } else { '0' })
+    WGR_OBJECT_STREAM_WEAK_CACHE_PROOF = $(if ($WeakCacheProof) { '1' } else { '0' })
     WGR_OBJECT_STREAM_HOT_SOURCE_PROOF_RETIRE = $(if ($HotSourceProofRetirement) { '1' } else { '0' })
 }
 if ($TerrainPageTimings) {
@@ -166,6 +170,7 @@ try {
         warmTextureJobs = [bool]$WarmTextureJobs
         warmMaterialPreflight = [bool]$WarmMaterialPreflight
         hotSourceProofRetirement = [bool]$HotSourceProofRetirement
+        weakCacheProof = [bool]$WeakCacheProof
         requireHotSourceProofRetirement = [bool]$RequireHotSourceProofRetirement
         requireWarmMaterialPreflightUpload = [bool]$RequireWarmMaterialPreflightUpload
         requireWarmMaterialStageUpload = [bool]$RequireWarmMaterialStageUpload
@@ -276,10 +281,25 @@ try {
     if ($archiveBindings.enabled -ne [bool]$ArchiveSourceBindings -or
         $archiveBindings.liveBindings -gt $archiveBindings.capBindings -or
         $archiveBindings.knownCppBytes -gt $archiveBindings.capBytes) { throw 'Actual-read source binding state or cap mismatch' }
+    foreach($name in @('cacheHandoffEnabled','weakCells','weakKnownCppBytes','capWeakCells','weakCapacityRefused','weakAllocationRefused')) {
+        if($null -eq $archiveBindings.PSObject.Properties[$name]){throw "Missing weak-cache proof state $name"}
+    }
+    if($archiveBindings.cacheHandoffEnabled -isnot [bool]){throw 'Invalid weak-cache enabled flag type'}
+    foreach($name in @('weakCells','weakKnownCppBytes','capWeakCells','weakCapacityRefused','weakAllocationRefused','liveBindings','knownCppBytes')) {
+        $value=$archiveBindings.$name
+        if($null -eq $value -or $value -is [bool] -or $value -is [string]){throw "Invalid weak-cache counter type $name"}
+        $number=[double]$value
+        if([double]::IsNaN($number) -or [double]::IsInfinity($number) -or $number -lt 0 -or $number -gt 9007199254740991 -or [Math]::Floor($number) -ne $number){throw "Invalid weak-cache counter value $name"}
+    }
+    if($archiveBindings.cacheHandoffEnabled -ne [bool]$WeakCacheProof -or $archiveBindings.capWeakCells -ne 1024 -or
+        $archiveBindings.weakCells -gt 1024 -or $archiveBindings.weakKnownCppBytes -gt $archiveBindings.knownCppBytes){throw 'Weak-cache metadata flag/cap/accounting mismatch'}
+    if(!$WeakCacheProof -and ($archiveBindings.weakCells -ne 0 -or $archiveBindings.weakKnownCppBytes -ne 0 -or
+        $archiveBindings.weakCapacityRefused -ne 0 -or $archiveBindings.weakAllocationRefused -ne 0)){throw 'Weak-cache handoff unexpectedly active in OFF control'}
+    if($WeakCacheProof -and ($archiveBindings.weakCells -lt 1 -or $archiveBindings.weakKnownCppBytes -lt 1)){throw 'NotExercised: no actual retained bounded weak-cache metadata observed'}
     if ($ArchiveSourceBindings) {
         if ($archiveBindings.capBindings -ne 256 -or $archiveBindings.capBytes -ne 2097152 -or
             $archiveBindings.wrappedReads -lt 1 -or $archiveBindings.initRetains -lt 1 -or
-            $archiveBindings.liveBindings -lt 1) { throw 'Mapped archive provenance did not reach an initialized texture source within its bounds' }
+            (!$WeakCacheProof -and $archiveBindings.liveBindings -lt 1)) { throw 'Mapped archive provenance did not reach an initialized texture source within its bounds' }
     } elseif ($archiveBindings.liveBindings -ne 0 -or $archiveBindings.knownCppBytes -ne 0 -or
         $archiveBindings.wrappedReads -ne 0 -or $archiveBindings.initRetains -ne 0 -or
         $archiveBindings.captureRefused -ne 0 -or $archiveBindings.capacityRefused -ne 0 -or
@@ -533,6 +553,7 @@ try {
         paaPreparationInflightProof = $inflightProof
         registrationQuota = [bool]$RegistrationQuota; registrationQuotaProof = $quotaProof
         archiveSourceBindings = [bool]$ArchiveSourceBindings; archiveSourceBindingProof = $archiveBindings
+        weakCacheProof = [bool]$WeakCacheProof; weakCacheProofState = $archiveBindings
         hotSourceProofRetirement = [bool]$HotSourceProofRetirement; hotSourceProofRetirementProof = $hotRetirementProof
         warmMaterialPreflight = [bool]$WarmMaterialPreflight; warmMaterialPreflightProof = $warmPreflightProof
         warmTextureJobs = [bool]$WarmTextureJobs; warmTextureJobProof = $warmJobProof

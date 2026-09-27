@@ -1214,8 +1214,36 @@ struct ArchiveBindingState
     std::shared_ptr<ArchiveSourceBudget> budget = std::make_shared<ArchiveSourceBudget>(256,
         2 * 1024 * 1024 - FixedCharge);
     std::atomic<uint64_t> wrapped{0}, retained{0}, captureRefused{0}, capacityRefused{0}, allocationRefused{0};
+    std::atomic<uint64_t> weakCapacityRefused{0}, weakAllocationRefused{0};
 };
 ArchiveBindingState& SourceBindingState() { static ArchiveBindingState state; return state; }
+}
+
+bool ArchiveSourceBinding::CacheHandoffEnabled()
+{
+    static const bool enabled = [] {
+        for (const char* name : {"WGR_OBJECT_STREAM_WEAK_CACHE_PROOF", "WGR_OBJECT_STREAM_HOT_SOURCE_PROOF_RETIRE",
+            "WGR_OBJECT_STREAM_WARM_TEXTURES", "WGR_OBJECT_STREAM_WARM_TEXTURE_JOBS"})
+        {
+            const char* value = std::getenv(name);
+            if (!value || std::strcmp(value, "1") != 0) return false;
+        }
+        return true;
+    }();
+    return enabled;
+}
+std::shared_ptr<const ArchiveSourceBudget::Ticket> ArchiveSourceBinding::ReserveWeakCell(size_t bytes)
+{
+    if (!CacheHandoffEnabled()) return {};
+    try
+    {
+        auto& state = SourceBindingState();
+        bool capacity = false;
+        auto ticket = state.budget->AcquireWeak(bytes, &capacity);
+        if (!ticket) (capacity ? state.weakCapacityRefused : state.weakAllocationRefused).fetch_add(1, std::memory_order_relaxed);
+        return ticket;
+    }
+    catch (...) { return {}; } // Optional refusal preserves original strong wrapper.
 }
 
 bool ArchiveSourceBinding::ModelReadScope::PurposeRequired()
@@ -1291,6 +1319,11 @@ ArchiveSourceBinding::Stats ArchiveSourceBinding::SnapshotStats()
     {
         auto& state = SourceBindingState();
         const auto live = state.budget->Observe();
+        out.cacheHandoffEnabled = CacheHandoffEnabled();
+        out.weakCells = live.weakCells;
+        out.weakKnownCppBytes = live.weakBytes;
+        out.weakCapacityRefused = state.weakCapacityRefused.load(std::memory_order_relaxed);
+        out.weakAllocationRefused = state.weakAllocationRefused.load(std::memory_order_relaxed);
         out.liveBindings = live.bindings;
         out.knownCppBytes = live.bytes + ArchiveBindingState::FixedCharge;
         out.wrappedReads = state.wrapped.load(std::memory_order_relaxed);
@@ -1329,6 +1362,44 @@ bool QFBank::MatchesMountedMember(const char* member, const BankReadRequest& ini
 
 namespace
 {
+// One cell per opted-in wrapper, bounded separately from live immutable native
+// leases. Charge survives weak binding/control-block retention. Members destroy
+// weak and strong aliases BEFORE releasing their conservative metadata ticket.
+class ArchiveCacheProofCell
+{
+    std::shared_ptr<const ArchiveSourceBudget::Ticket> _charge;
+    std::shared_ptr<const ArchiveSourceBinding> _initial;
+    std::weak_ptr<const ArchiveSourceBinding> _weak;
+public:
+    ArchiveCacheProofCell(std::shared_ptr<const ArchiveSourceBinding> binding,
+        std::shared_ptr<const ArchiveSourceBudget::Ticket> charge)
+        : _charge(std::move(charge)), _initial(std::move(binding)), _weak(_initial) {}
+    std::shared_ptr<const ArchiveSourceBinding> Get() const
+    { return Foundation::IsMainThread() ? (_initial ? _initial : _weak.lock()) : nullptr; }
+    bool Complete(const std::shared_ptr<const ArchiveSourceBinding>& initialized)
+    {
+        if (!Foundation::IsMainThread()) return false;
+        if (initialized && initialized != Get()) return false; // Wrong source cannot drop debt.
+        _initial.reset(); // Source owns successful exact binding; failure leaves no proof.
+        return true;
+    }
+};
+class ArchiveCacheHandoffFileBuffer final : public IFileBuffer
+{
+    Ref<IFileBuffer> _buffer;
+    std::shared_ptr<ArchiveCacheProofCell> _proof;
+public:
+    ArchiveCacheHandoffFileBuffer(Ref<IFileBuffer> buffer, std::shared_ptr<ArchiveCacheProofCell> proof)
+        : _buffer(buffer), _proof(std::move(proof)) {}
+    bool GetError() const override { return _buffer->GetError(); }
+    const char* GetData() const override { return _buffer->GetData(); }
+    int GetSize() const override { return _buffer->GetSize(); }
+    bool IsFromBank(QFBank* bank) const override { return _buffer->IsFromBank(bank); }
+    bool IsReady() const override { return _buffer->IsReady(); }
+    std::shared_ptr<const ArchiveSourceBinding> GetArchiveSourceBinding() const override { return _proof->Get(); }
+    bool CompleteArchiveSourceInit(const std::shared_ptr<const ArchiveSourceBinding>& initialized) override
+    { return _proof->Complete(initialized); }
+};
 class ArchiveBoundFileBuffer final : public IFileBuffer
 {
     Ref<IFileBuffer> _buffer;
@@ -1458,7 +1529,24 @@ Ref<IFileBuffer> QFBank::Read(const char* name) const
             if (!binding || !buffer || buffer->GetError() || buffer->GetSize() != info.length) return buffer;
             try
             {
-                Ref<IFileBuffer> wrapped = new ArchiveBoundFileBuffer(buffer, binding);
+                Ref<IFileBuffer> wrapped;
+                if (ArchiveSourceBinding::CacheHandoffEnabled())
+                {
+                    // Allowance covers cell, wrapper and both shared control blocks,
+                    // including the expired binding control retained by weak_ptr.
+                    const size_t bytes = sizeof(ArchiveCacheProofCell) + sizeof(ArchiveCacheHandoffFileBuffer) + 512;
+                    auto charge = ArchiveSourceBinding::ReserveWeakCell(bytes);
+                    if (charge)
+                    {
+                        try
+                        {
+                            auto cell = std::make_shared<ArchiveCacheProofCell>(binding, std::move(charge));
+                            wrapped = new ArchiveCacheHandoffFileBuffer(buffer, std::move(cell));
+                        }
+                        catch (...) { SourceBindingState().weakAllocationRefused.fetch_add(1, std::memory_order_relaxed); }
+                    }
+                }
+                if (!wrapped) wrapped = new ArchiveBoundFileBuffer(buffer, binding);
                 ArchiveSourceBinding::NoteWrappedRead();
                 return wrapped;
             }
