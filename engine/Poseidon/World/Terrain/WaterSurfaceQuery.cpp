@@ -1,9 +1,12 @@
 #include <Poseidon/World/Terrain/WaterSurfaceQuery.hpp>
 
+#include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
+#include <Poseidon/World/Terrain/Landscape.hpp>
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 
 namespace Poseidon
 {
@@ -41,6 +44,63 @@ constexpr WaveComponent Waves[] = {
     {WindX / WindLength, WindZ / WindLength, 432.0f, SeaState * 3.30f, 0.113f},
     {0.710f, 0.704f, 1296.0f, SeaState * 3.80f, 0.191f},
 };
+// TW-WATER — the sea the predictor follows while Tidewater Native draws the water.
+//
+// The Current OP branch below scales every band by `waveAmp / 0.40`. The Water tab's amplitude
+// has defaulted to 1.00 since the renderer's reference re-baseline, so that ratio is 2.5: six
+// components of 1.1-2.1 m, a significant wave height near 10 m. Tidewater Native never draws
+// from `waveAmp` -- its sea comes from its own spectrum (TidewaterLook::amplitude, the swell
+// system and the cascade scale) -- so in that mode a boat was heaving and rolling on a storm that
+// is not on screen (Dec, 2026-09-27: PBRs "bouncing off the water and tipping to the side").
+//
+// In Tidewater mode the bands therefore follow the Tidewater look instead:
+//  * amplitude: TidewaterLook::amplitude, referenced to 1.0. At the defaults that is the
+//    predictor's tuned reference sea (Hs ~4.1 m), which is also close to the significant height
+//    of Tidewater's default spectrum (local 7 m/s + 0.48 swell: Hs ~3.9 m by integrating the
+//    JONSWAP systems in water_tw/fft.rs). The swell term scales with the swell energy lane:
+//    kTidewaterSwellShare is the swell system's share of that variance at the defaults (m0 ratio
+//    4.64, taken from the same integration), so swell 0 leaves only the local wind sea.
+//  * wavelength: TidewaterLook::cascadeScale (Tidewater's cascades stretch with it); no
+//    sea-state stretch, which belongs to the Current OP spectrum.
+//  * shallow water: every band fades with depth exactly as Tidewater's surface does it
+//    (WaterSurface.cascadeAttenuation, the same curve tw_breakers_kernel.wgsl uses): a band of
+//    length L keeps full height below min(40 m, 0.08 L) and fades to a small floor on the beach.
+//    Without this the 400 m and 1300 m bands kept their full height in a metre of water, which
+//    is exactly where the boats in a beach landing are.
+//
+// Still the CPU predictor: deterministic, no GPU texture, the same on a server (where GEngine is
+// absent and the reference sea is used, as before). WGR_WATER_BACKEND overrides the Water-tab
+// selection here exactly as it does in the renderer.
+constexpr float kTidewaterDefaultSwell = 0.48f;
+constexpr float kTidewaterSwellShare = 4.64f;
+
+int EffectiveWaterBackend(const Engine::WaterSettings& look)
+{
+    static const int env = []
+    {
+        const char* v = std::getenv("WGR_WATER_BACKEND");
+        return (v != nullptr && (v[0] == '0' || v[0] == '1') && v[1] == '\0') ? v[0] - '0' : -1;
+    }();
+    return env >= 0 ? env : look.waterBackend;
+}
+
+float SmoothStep(float edge0, float edge1, float x)
+{
+    const float t = std::clamp((x - edge0) / (edge1 - edge0), 0.0f, 1.0f);
+    return t * t * (3.0f - 2.0f * t);
+}
+
+// Tidewater's per-cascade shallow-water attenuation for a band of wavelength `length` at `depth`
+// metres of water. Tidewater's floors are per cascade (733 / 157 / 33 / 7 m: 0, 0.05, 0.25, 0.5);
+// a band takes the floor of the cascade its wavelength falls in.
+float ShoalAttenuation(float length, float depth)
+{
+    const float floorAmount = length >= 400.0f ? 0.0f : length >= 90.0f ? 0.05f : length >= 20.0f ? 0.25f : 0.5f;
+    const float fullDepth = std::min(40.0f, length * 0.08f);
+    const float full = SmoothStep(0.0f, fullDepth, depth);
+    const float floor = floorAmount * SmoothStep(0.0f, 0.6f, depth);
+    return floor + (1.0f - floor) * full;
+}
 } // namespace
 
 WaterSurfaceSample QueryWaterSurface(float worldX, float worldZ, float time, float seaLevel)
@@ -61,9 +121,19 @@ WaterSurfaceSample QueryWaterSurfaceScaled(float worldX, float worldZ, float tim
     float amplitudeScale = 1.0f;
     float speedScale = 1.0f;
     float lengthScale = 1.0f;
-    if (GEngine != nullptr)
+    bool shoal = false;
+    const Engine::WaterSettings look = GEngine != nullptr ? GEngine->GetWaterSettings() : Engine::WaterSettings{};
+    if (GEngine != nullptr && EffectiveWaterBackend(look) == 1)
     {
-        const Engine::WaterSettings look = GEngine->GetWaterSettings();
+        // Tidewater Native: follow the Tidewater look (see the block comment above).
+        const float swell = std::max(look.tidewater.swellScale, 0.0f) / kTidewaterDefaultSwell;
+        amplitudeScale = std::clamp(look.tidewater.amplitude, 0.0f, 4.0f) *
+                         std::sqrt((1.0f + kTidewaterSwellShare * swell) / (1.0f + kTidewaterSwellShare));
+        lengthScale = std::max(look.tidewater.cascadeScale, 0.01f);
+        shoal = true;
+    }
+    else if (GEngine != nullptr)
+    {
         constexpr float referenceAmplitude = 0.40f;
         amplitudeScale = std::clamp(look.waveAmp, 0.0f, 4.0f) / referenceAmplitude;
         speedScale = std::clamp(look.waveSpeed, 0.0f, 4.0f);
@@ -77,10 +147,22 @@ WaterSurfaceSample QueryWaterSurfaceScaled(float worldX, float worldZ, float tim
         }
     }
 
+    // Water depth for the shallow-water fade (Tidewater mode only). Sea bed from the landscape,
+    // which is simulation data, so this stays deterministic and server-side safe.
+    float depth = 1.0e4f;
+    if (shoal && GLandscape != nullptr)
+    {
+        depth = std::max(seaLevel - GLandscape->SurfaceY(worldX, worldZ), 0.0f);
+    }
+
     for (const WaveComponent& wave : Waves)
     {
         const float length = std::max(wave.length * lengthScale, 1.0f);
-        const float amplitude = wave.amplitude * amplitudeScale * std::max(waveScale, 0.0f);
+        float amplitude = wave.amplitude * amplitudeScale * std::max(waveScale, 0.0f);
+        if (shoal)
+        {
+            amplitude *= ShoalAttenuation(length, depth);
+        }
         const float waveNumber = Pi2 / length;
         // Deep-water dispersion, nudged by the stable renderer wind-speed default.
         const float angularSpeed = std::sqrt(Gravity * waveNumber) * (0.75f + WindSpeed * 0.12f) * speedScale;
