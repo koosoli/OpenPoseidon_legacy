@@ -77,11 +77,12 @@ $environment = @{
     WGR_OBJECT_STREAM_PBO = '1'; WGR_OBJECT_STREAM_PBO_TEXTURES = '0'
     WGR_NATIVE_DDS_PREPARE = '0'; WGR_NATIVE_DDS_BC3_ONLY = '0'
     WGR_ADAPTIVE_TEXTURE_DETAIL = '0'; WGR_LOD_GOVERNOR_RANGE = '1'; WGR_SKY_VOLUME_INCREMENTAL = '1'
-    WGR_TEXTURE_STREAM_STATS = '0'
+    WGR_TEXTURE_STREAM_STATS = '0'; WGR_RENDER_CALL_CPU_TIMINGS = '0'
     WGR_CULL_SECTION_REFRESH = $(if ($LegacySectionRefresh) { '0' } else { '1' })
 }
 if ($TerrainPageTimings) {
     $environment.WGR_TERRAIN_PAGE_TIMINGS = '1'
+    $environment.WGR_RENDER_CALL_CPU_TIMINGS = '1'
     $environment.POSEIDON_SLOW_FRAME_TRACE = '1'
 }
 if ($WarmProfile) { $environment.WGR_OBJECT_STREAM_WARM_PROFILE = '1' }
@@ -119,6 +120,8 @@ try {
         registrationQuota = [bool]$RegistrationQuota
         archiveSourceBindings = [bool]$ArchiveSourceBindings
         warmTextureJobs = [bool]$WarmTextureJobs
+        renderCallCpuTimings = [bool]$TerrainPageTimings
+        renderCallCpuTimingEnvironment = [string]$environment.WGR_RENDER_CALL_CPU_TIMINGS
         legacySectionRefresh = [bool]$LegacySectionRefresh
         cullSectionRefreshEnvironment = [string]$environment.WGR_CULL_SECTION_REFRESH
         installed = (Get-Content (Join-Path $GameDir 'DEPLOYED-FROM.txt')); hashes = $initialHashes
@@ -263,6 +266,34 @@ try {
     $expectedPhases = @('setup', 'sim:step', 'drw:init', 'drw:prep', 'land:gnd', 'land:obj', 'drw:land', 'drw:obj', 'drw:post', 'hud', 'sound', 'swap')
     if ($phases.Count -ne $expectedPhases.Count) { throw 'Engine phase timing evidence incomplete' }
     foreach ($phase in $expectedPhases) { if (@($phases | Where-Object { $_.phase -eq $phase }).Count -ne 1) { throw "Engine phase timing missing or duplicated: $phase" } }
+    # Post-exit proof from existing slow rows; no sampled-route command or renderer work.
+    # No positive paired row means NotExercised, never diagnostic/performance success.
+    $callCpuRows = @(Select-String -LiteralPath $log -Pattern 'Wgpu slow block: .*callCpuEnabled=(\d+) callCpuToken=(\d+) callCpuState=(\d+) callCpuCount=(\d+) callCpuPaired=(\d+) renderStatus=(-?\d+)')
+    $pairedCpuRows = @()
+    foreach ($row in $callCpuRows) {
+        $m = $row.Matches[0]
+        $enabled = [uint32]$m.Groups[1].Value; $token = [uint64]$m.Groups[2].Value
+        $state = [uint32]$m.Groups[3].Value; $bucketCount = [uint32]$m.Groups[4].Value
+        $paired = [uint32]$m.Groups[5].Value; $status = [int]$m.Groups[6].Value
+        if ($enabled -ne [uint32][bool]$TerrainPageTimings -or $paired -gt 1) { throw 'Render-call timing startup gate disagrees with provenance' }
+        if ($paired -eq 1) {
+            if ($token -eq 0 -or $state -ne 1 -or $bucketCount -ne 12 -or $status -ne 0) { throw 'Render-call CPU timing pairing metadata invalid' }
+            foreach ($field in @('acquireCpu','presentCpu','setupInclusiveCpu','submitCpu','harvestCpu','encEarlyCpu','encShadowCpu','encMainInclusiveCpu','encTailCpu','encSkyCpu','encDrawCpu','encPostCpu')) {
+                $values = [regex]::Matches($row.Line, ('(?:^|\s)' + $field + '=(-?\d+(?:\.\d+)?)'))
+                if ($values.Count -ne 1) { throw "Render-call CPU timing bucket missing/duplicated: $field" }
+                $value = [double]::Parse($values[0].Groups[1].Value, $culture)
+                if ([double]::IsNaN($value) -or [double]::IsInfinity($value) -or ($value -lt 0 -and $value -ne -1)) { throw "Render-call CPU timing bucket invalid: $field" }
+            }
+            $pairedCpuRows += $row.Line
+        } elseif (!$TerrainPageTimings -and ($token -ne 0 -or $state -ne 0 -or $bucketCount -ne 0)) {
+            throw 'Default run unexpectedly collected render-call CPU timing data'
+        }
+    }
+    $callCpuProof = @{enabled = [bool]$TerrainPageTimings; slowRows = $callCpuRows.Count; pairedRows = $pairedCpuRows.Count
+        rows = @($callCpuRows | ForEach-Object { $_.Line })
+        scope = 'Exact observed render-call CPU buckets only; hierarchy overlaps, not GPU elapsed/submission completion, frame percentiles or performance acceptance'}
+    $callCpuProof | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $out 'render-call-cpu-proof.json')
+    if ($TerrainPageTimings -and $pairedCpuRows.Count -lt 1) { throw 'Render-call CPU timing was not exercised by a completed paired slow row; evidence retained' }
     $parkedProof = $null
     if ($ParkedTextureRefill) {
         $deferredRows = @(Select-String -LiteralPath $log -Pattern 'Wgpu parked refill deferred: models=([1-9]\d*)')
@@ -314,6 +345,7 @@ try {
     @{passed = [bool]$warmJobsProven; mode = $Mode; admissionMode = $AdmissionMode; parkedTextureRefill = [bool]$ParkedTextureRefill; lazyTextureGroups = [bool]$LazyTextureGroups; warmProfile = [bool]$WarmProfile; screeningOnly = $true; performanceAccepted = $false; terrainPageTimings = [bool]$TerrainPageTimings
         frameCount = $count; dropped = $dropped; enginePhaseTiming = $phases; baseline = $baseline; returned = $returned
         routeSamples = $routeSamples; postExitHashes = $finalHashes
+        renderCallCpuTimings = [bool]$TerrainPageTimings; renderCallCpuTimingProof = $callCpuProof
         parkedRefillProof = $parkedProof
         paaLzoReplay = [bool]$PaaLzoReplay; paaLzoReplayProof = $replayProof
         paaPreparationDiagnostics = [bool]$PaaPreparationDiagnostics; paaPreparationProof = $attemptProof

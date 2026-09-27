@@ -3876,6 +3876,12 @@ void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing, Fr
         return true;
     }();
 
+    // Independent exact startup opt-in: slow-block logging itself defaults to100ms.
+    // No per-renderer field, allocation, new clock or per-frame environment read.
+    static const bool renderCallCpuEnabled = [] {
+        const char* value = std::getenv("WGR_RENDER_CALL_CPU_TIMINGS");
+        return value && std::strcmp(value, "1") == 0;
+    }();
     const auto blockStart = std::chrono::steady_clock::now();
     ApplyPendingRendererSettings(q.settings);
     const auto afterSettings = std::chrono::steady_clock::now();
@@ -3890,11 +3896,11 @@ void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing, Fr
 
     HashPublishedFrame(frame, backing);
     const auto afterHash = std::chrono::steady_clock::now();
-    // Only the existing slow-block diagnostic opts into a caller-owned snapshot.
+    // Exact startup opt-in AND existing slow-block gate permit the copied snapshot.
     // The old published CPU getter is previous-begun-frame data, not this call.
     WgrRenderCallCpuTimings callCpu; // not initialized on the normal diagnostic-OFF path
     uint64_t callCpuToken = 0;
-    if (_slowBlockMs > 0.0)
+    if (renderCallCpuEnabled && _slowBlockMs > 0.0)
     {
         callCpu = {};
         static thread_local uint64_t sequence = 0;
@@ -3971,7 +3977,7 @@ void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing, Fr
         LOG_INFO(Graphics,
                  "Wgpu slow block: total={:.1f} ms | settings={:.1f} resources={:.1f} (ops={}) "
                  "drains={:.1f} hash={:.1f} render={:.1f} stats={:.1f} | d3d={} vert={} casters={} | idle_before={:.1f} "
-                 "| callCpuToken={} callCpuState={} callCpuCount={} callCpuPaired={} renderStatus={} "
+                 "| callCpuEnabled={} callCpuToken={} callCpuState={} callCpuCount={} callCpuPaired={} renderStatus={} "
                  "acquireCpu={:.3f} presentCpu={:.3f} setupInclusiveCpu={:.3f} submitCpu={:.3f} harvestCpu={:.3f} "
                  "encEarlyCpu={:.3f} encShadowCpu={:.3f} encMainInclusiveCpu={:.3f} encTailCpu={:.3f} "
                  "encSkyCpu={:.3f} encDrawCpu={:.3f} encPostCpu={:.3f}",
@@ -3979,7 +3985,9 @@ void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing, Fr
                  resourceOpCount, ms(afterResources, afterDrains), ms(afterDrains, afterHash),
                  ms(afterHash, afterRender), ms(afterRender, blockEnd), frame.draws3d.length,
                  frame.verts.length, frame.shadow_casters.length, _rtLastIdleMs,
-                 callCpuToken, callCpu.state, callCpu.count, pairedCpu ? 1 : 0, renderReturnStatus,
+                 renderCallCpuEnabled ? 1 : 0, callCpuToken,
+                 callCpuToken ? callCpu.state : 0u, callCpuToken ? callCpu.count : 0u,
+                 pairedCpu ? 1 : 0, renderReturnStatus,
                  cpuAt(0), cpuAt(1), cpuAt(2), cpuAt(3), cpuAt(4), cpuAt(5), cpuAt(6),
                  cpuAt(7), cpuAt(8), cpuAt(9), cpuAt(10), cpuAt(11));
     }
