@@ -2,7 +2,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 
 namespace Poseidon::Foundation
 {
@@ -70,18 +69,13 @@ class Lzo1x
             op += count;
             return true;
         };
-        // Bulk copy only where it preserves the forward match recurrence.
+        // Byte-at-a-time on purpose: an LZO match may overlap its own output (a
+        // run-length fill is encoded as distance 1), so a bulk copy is wrong.
         auto copyMatch = [&](size_t from, size_t count) -> bool {
             if (from > op || count > dstCapacity - op)
                 return false;
-            const size_t distance = op - from;
-            if (count != 0 && distance == 1)
-                std::memset(dst + op, dst[from], count);
-            else if (count != 0 && distance >= count)
-                std::memcpy(dst + op, dst + from, count);
-            else
-                for (size_t k = 0; k < count; ++k)
-                    dst[op + k] = dst[from + k];
+            for (size_t k = 0; k < count; ++k)
+                dst[op + k] = dst[from + k];
             op += count;
             return true;
         };
