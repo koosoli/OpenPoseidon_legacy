@@ -719,12 +719,16 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
         if (horizonOcc > 0.0 || frontD < 0.1) { skyRefl = sky_env_sample(R); }
         var reflCol = mix(horizon * 0.35, skyRefl, horizonOcc);
 
-        if (Rraw.y < 0.45 && F > 0.05 && tw.material1.y > 0.5) {
+        // (W9g, OP) no screen-space reflections from high up (fading out 400-1200 m over the sea):
+        // there they only reflect the sea into itself, and far off they drew faint white dashes
+        // along the horizon from 8 km up
+        let ssrAlt = 1.0 - smoothstep(400.0, 1200.0, frame.cam_pos.y - tw.sea.x);
+        if (Rraw.y < 0.45 && F > 0.05 && tw.material1.y > 0.5 && ssrAlt > 0.0) {
             let Rv = normalize(twView(vec4<f32>(Rraw, 0.0)));
             if (Rv.z < 0.5) {
                 let r = _waterSSR(posV, Rv, pos.y, Rraw.y);
-                reflCol = mix(reflCol, r.rgb, r.a);
-                ssrW = r.a;
+                reflCol = mix(reflCol, r.rgb, r.a * ssrAlt);
+                ssrW = r.a * ssrAlt;
             }
         }
         reflCol *= tw.material0.w;
