@@ -61,6 +61,7 @@ have been.
 | `WGR_TW_SPRAY_DEBUG` | Rust | TW-WATER W6i.3. `1`..`11` switches the spray sprites to a diagnostic output (fade terms, depth, kind, ...; see `tw_spray.wgsl`). Diagnostic only. |
 | `WGR_TW_LEGACY_BOAT_FX` | C++ (`Ship.cpp`) | TW-WATER W6i.6. `1` keeps the legacy WaterSource boat sprites (the grey bow/stern puffs) in Tidewater mode, where they are otherwise skipped because Tidewater draws its own wake and spray. |
 | `WGR_FRAME_STATS` | C++ bridge | TW-WATER W7. `1` logs every 5 s: wall-clock and GPU frame p50/p95/p99, the Current OP and Tidewater water GPU regions, backend allocations, the render worker's CPU phases, and (Tidewater) the CPU cost of the water `prepare` and its shore-station updates. Diagnostic only; used for the W7 parity report. |
+| `WGR_TW_EARLY_SUBMIT` | Rust | TW-WATER W7e. `1` submits the early part of a Tidewater frame (water simulation, culls, far field, GI) as its own command buffer, as the planar-reflection split does in Current OP mode, so the GPU starts while the rest of the frame is recorded. Off by default until measured (W7 parity report). |
 | `WGR_VB_UPDATE_STATS` | C++ bridge | Logs two-second, per-`VBType` create/destroy/cancel and update/build/hash/upload counts, bytes, total time and maximum call time. Diagnostic only; unset/`0` avoids timers and atomics in `VertexBufferWgpu`. |
 
 ## Engine switches added by TW-WATER (outside the renderer)

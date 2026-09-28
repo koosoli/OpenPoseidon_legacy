@@ -4621,6 +4621,23 @@ impl Renderer {
             .gi_dispatch(&mut encoder, self.main_cam_off, &self.gpu_timers);
         encoder.pop_debug_group();
 
+        // TW-WATER W7e: in Tidewater mode there is no planar reflection, so nothing splits the
+        // frame above and the GPU sits idle until the single submit at the end (~3 ms of CPU in
+        // W7b's P1 rows, on top of the GPU time). With WGR_TW_EARLY_SUBMIT=1 the early work (the
+        // water simulation, culls, far field, GI) is submitted here, as the planar split does, so
+        // the GPU runs it while the rest of the frame is recorded. Every upload made so far is
+        // flushed with it; an upload made later lands before the second submit only.
+        if reflected_camera.is_none() && self.water.tidewater().is_some() && tw_early_submit() {
+            let early = std::mem::replace(
+                &mut encoder,
+                self.device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("wgr_frame_main"),
+                    }),
+            );
+            self.queue.submit(std::iter::once(early.finish()));
+        }
+
         // Cascade shadow depth passes run first so every segment's draws can
         // sample the completed map, regardless of submission order. Debug groups
         // (here and below) name each phase in a RenderDoc capture.
@@ -6815,4 +6832,11 @@ mod residency_budget_tests {
         let (bytes, _) = residency_budget_from(None, Ok(64 * MB));
         assert!(bytes > 0 && bytes < 64 * MB, "got {bytes} bytes");
     }
+}
+
+/// TW-WATER W7e: `WGR_TW_EARLY_SUBMIT=1` submits the early part of a Tidewater frame on its own
+/// (A/B for the W7 parity report; off by default until measured).
+fn tw_early_submit() -> bool {
+    static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *V.get_or_init(|| std::env::var("WGR_TW_EARLY_SUBMIT").is_ok_and(|v| v.trim() == "1"))
 }
