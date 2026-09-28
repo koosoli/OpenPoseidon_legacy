@@ -1710,8 +1710,9 @@ struct WgrRenderCallCpuTimings
 static_assert(sizeof(WgrRenderCallCpuTimings) == 72, "render-call CPU layout");
 static_assert(offsetof(WgrRenderCallCpuTimings, call_token) == 16, "render-call token layout");
 static_assert(offsetof(WgrRenderCallCpuTimings, milliseconds) == 24, "render-call buckets layout");
-/* Private, main-view-only GPU COUNT diagnostic. The caller owns token and
- * source_generation; zero count is meaningful only with state ABSENT. */
+/* Private GPU COUNT diagnostic. The request samples main and cascade 0
+ * independently; each getter reports its own status. The caller owns token
+ * and source_generation; zero count is meaningful only with state ABSENT. */
 struct WgrMainTargetCountRequest
 {
     uint32_t struct_size, version;
@@ -2713,6 +2714,11 @@ extern "C"
         const WgrMainTargetCountRequest*, uint32_t request_size, uint32_t request_version,
         WgrMainTargetCountResult*, uint32_t output_size, uint32_t output_version);
     WGR_API uint32_t wgr_main_target_count_fact(WgrRenderer*, WgrMainTargetCountResult*,
+        uint32_t output_size, uint32_t output_version);
+    /* Same opt-in request, separate cascade-0 cull counter. UNKNOWN unless its
+     * depth pass closed and the copied sample was committed after final submit.
+     * A view-level zero does not prove pixels or permit residency release. */
+    WGR_API uint32_t wgr_shadow0_target_count_fact(WgrRenderer*, WgrMainTargetCountResult*,
         uint32_t output_size, uint32_t output_version);
 
     /* Debug: read back the current auto-exposure scale (blocking GPU sync; dev panel only). */

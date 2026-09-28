@@ -4035,6 +4035,9 @@ pub struct Gfx3d {
     // Fixture-only dispatch witness; reset before the frame and consumed after a closed
     // shadow depth pass. A prepared view alone is not proof that its cull ran.
     geometry_shadow_cull_mask: std::cell::Cell<u32>,
+    // One opt-in cascade-0 depth-draw closure. A prepared view or cull dispatch
+    // alone cannot authorize an absence readback.
+    shadow0_target_draw_closed: std::cell::Cell<bool>,
     local_view_key: [Option<u64>; MAX_LOCAL_SHADOWS],
     // Exact bounded CPU-caster pose witnesses; lazily allocated only when a
     // cached local view has an actual skinned caster. Retained/sky and concurrent
@@ -4876,6 +4879,7 @@ impl Gfx3d {
                 Some(Box::new(std::cell::Cell::new(geometry_pass_facts::WgrGeometryPassFacts::new())))
             } else {None},
             geometry_shadow_cull_mask: std::cell::Cell::new(0),
+            shadow0_target_draw_closed: std::cell::Cell::new(false),
             local_view_key: [None; MAX_LOCAL_SHADOWS],
             local_pose_cache: None,
             local_pose_cache_enabled: std::env::var("WGR_LOCAL_SHADOW_POSE_CACHE").is_ok_and(|v| v == "1"),
@@ -6599,6 +6603,7 @@ impl Gfx3d {
     // Optional fixture recorder; no planning epoch is exported as a draw witness.
     pub fn begin_geometry_pass_facts(&self,shadow:&WgrShadowPass) {
         self.geometry_shadow_cull_mask.set(0);
+        self.shadow0_target_draw_closed.set(false);
         if let Some(cell)=&self.geometry_pass_facts {let mut f=cell.get();f.begin(self.cull.instance_epoch(),shadow.count,shadow.local_count);cell.set(f);}
     }
     pub fn geometry_pass_reflection_configured(&self,active:bool) {
@@ -7233,6 +7238,10 @@ impl Gfx3d {
             // The pass must CLOSE before the encoder-level end timestamp — writing it while `rp`
             // is alive is a validation error, not a slightly wrong number.
             drop(rp);
+            if c == 0 && self.cull.shadow0_count_armed() && gpu_depth_draw_recorded &&
+                self.geometry_shadow_cull_mask.get() & 1 != 0 {
+                self.shadow0_target_draw_closed.set(true);
+            }
             if let Some(cell)=&self.geometry_pass_facts {
                 if gpu_depth_draw_recorded && c < u32::BITS as usize &&
                     self.geometry_shadow_cull_mask.get() & (1 << c) != 0 {
@@ -9806,6 +9815,15 @@ impl Gfx3d {
     pub fn copy_main_target_count(&mut self, encoder: &mut wgpu::CommandEncoder) -> bool {
         self.cull.copy_main_target_count(encoder)
     }
+    pub fn copy_shadow0_target_count(&mut self, encoder: &mut wgpu::CommandEncoder) -> bool {
+        self.shadow0_target_draw_closed.get() && self.cull.copy_shadow0_target_count(encoder)
+    }
+    pub fn shadow0_target_count_before_submit(&mut self, token: u64) -> bool {
+        self.cull.shadow0_target_count_before_submit(token)
+    }
+    pub fn shadow0_target_count_submitted(&mut self, token: u64) -> bool {
+        self.cull.shadow0_target_count_submitted(token)
+    }
     pub fn main_target_count_before_submit(&mut self, token: u64) -> bool {
         self.cull.main_target_count_before_submit(token)
     }
@@ -9813,10 +9831,13 @@ impl Gfx3d {
         self.cull.main_target_count_submitted(token)
     }
     pub fn main_target_count_commit(&mut self, token: u64) -> bool {
-        self.cull.main_target_count_commit(token)
+        let main = self.cull.main_target_count_commit(token);
+        if main { self.cull.shadow0_target_count_commit(token); }
+        main
     }
     pub fn main_target_count_abort(&mut self, token: u64) {
         self.cull.main_target_count_abort(token);
+        self.cull.shadow0_target_count_abort(token);
     }
     pub fn main_target_count_fact(&mut self, device: &wgpu::Device) -> cull::MainCountFact {
         self.cull.harvest_main_target_count(device);
@@ -9824,6 +9845,10 @@ impl Gfx3d {
     }
     pub fn main_target_count_snapshot(&self) -> cull::MainCountFact {
         self.cull.main_target_count_fact()
+    }
+    pub fn shadow0_target_count_fact(&mut self, device: &wgpu::Device) -> cull::MainCountFact {
+        self.cull.harvest_shadow0_target_count(device);
+        self.cull.shadow0_target_count_fact()
     }
 
     pub fn cull_dispatch(
@@ -10184,7 +10209,9 @@ impl Gfx3d {
             if c >= n_cascades && !self.local_view_refresh.contains(&(c - n_cascades)) {
                 continue;
             }
-            if self.cull.dispatch_shadow(encoder, c) && self.geometry_pass_facts.is_some() &&
+            if self.cull.dispatch_shadow(encoder, c) &&
+                (self.geometry_pass_facts.is_some() ||
+                 (c == 0 && self.cull.shadow0_count_armed())) &&
                 c < u32::BITS as usize {
                 self.geometry_shadow_cull_mask.set(self.geometry_shadow_cull_mask.get() | (1 << c));
             }

@@ -6332,6 +6332,11 @@ impl Renderer {
         let main_count_copied = main_count_armed
             && main_world_draw_closed
             && self.gfx3d.copy_main_target_count(&mut encoder);
+        // This private cascade counter is copied from its own cull buffer only
+        // after the cascade-0 depth pass closed. It stays Unknown if that view
+        // was disabled, skipped, or lacked an actual GPU-driven draw.
+        let shadow0_count_copied = main_count_armed
+            && self.gfx3d.copy_shadow0_target_count(&mut encoder);
         self.gfx3d.resolve_lod_demand();
         self.gfx3d.resolve_mip_feedback(&mut encoder);
         self.water_visibility.resolve(&mut encoder);
@@ -6342,9 +6347,16 @@ impl Renderer {
         let main_commands = encoder.finish();
         let main_count_ready = main_count_copied && main_count_request.is_some_and(|(token, _, _)|
             self.gfx3d.main_target_count_before_submit(token));
+        let shadow0_count_ready = shadow0_count_copied && main_count_request.is_some_and(|(token, _, _)|
+            self.gfx3d.shadow0_target_count_before_submit(token));
         self.queue.submit(std::iter::once(main_commands));
         let main_count_submitted = main_count_ready && main_count_request.is_some_and(|(token, _, _)|
             self.gfx3d.main_target_count_submitted(token));
+        if shadow0_count_ready {
+            if let Some((token, _, _)) = main_count_request {
+                self.gfx3d.shadow0_target_count_submitted(token);
+            }
+        }
         self.gpu_timers
             .cpu_end(crate::gpu_timers::Region::WorkerSubmit);
         // Geometry-pool growth may have happened after an earlier pass recorded

@@ -2240,7 +2240,7 @@ struct EngineWgpu::GeometryPageFixtureState
         return std::find(models.begin(),models.begin()+modelCount,model)!=models.begin()+modelCount; }
 };
 
-// One private main-view diagnostic at a time. The owner compares these copied
+// One private main/cascade-0 diagnostic at a time. The owner compares these copied
 // identities again when the asynchronous GPU result arrives; this is never a
 // Fine-page release certificate or a persistent reference to a world object.
 struct EngineWgpu::GeometryMainCountPending
@@ -2249,6 +2249,7 @@ struct EngineWgpu::GeometryMainCountPending
     uint64_t token=0, pageEpoch=0, admissionEpoch=0, requestId=0, sourceGeneration=0, cullEpoch=0;
     uint32_t producerModel=UINT32_MAX, rendererModel=UINT32_MAX;
     unsigned ageFrames=0;
+    bool mainReported=false, shadowReported=false;
 };
 
 struct EngineWgpu::SharedMeshFixtureState
@@ -4124,7 +4125,7 @@ void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing, Fr
             (fact.state == WGR_MAIN_TARGET_COUNT_PRESENT || fact.state == WGR_MAIN_TARGET_COUNT_ABSENT) &&
             (fact.state != WGR_MAIN_TARGET_COUNT_ABSENT || fact.count == 0) &&
             (fact.state != WGR_MAIN_TARGET_COUNT_PRESENT || fact.count > 0);
-        if (ready)
+        if (ready && !pending.mainReported)
         {
             if (auto fixture = pending.fixture.lock())
             {
@@ -4153,8 +4154,53 @@ void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing, Fr
                             fact.cull_epoch, fact.state, fact.count);
                 }
             }
+            pending.mainReported = true;
         }
-        if (ready || ++pending.ageFrames >= 16) _geometryMainCountPending.reset();
+        WgrMainTargetCountResult shadowFact{};
+        const bool shadowReady = wgr_shadow0_target_count_fact(_renderer, &shadowFact,
+                sizeof(shadowFact), 1) == 1 &&
+            shadowFact.struct_size == sizeof(shadowFact) && shadowFact.version == 1 &&
+            shadowFact.submitted == 1 && shadowFact.token == pending.token &&
+            shadowFact.model_id == pending.rendererModel &&
+            shadowFact.source_generation == pending.sourceGeneration &&
+            shadowFact.cull_epoch == pending.cullEpoch &&
+            (shadowFact.state == WGR_MAIN_TARGET_COUNT_PRESENT ||
+             shadowFact.state == WGR_MAIN_TARGET_COUNT_ABSENT) &&
+            (shadowFact.state != WGR_MAIN_TARGET_COUNT_ABSENT || shadowFact.count == 0) &&
+            (shadowFact.state != WGR_MAIN_TARGET_COUNT_PRESENT || shadowFact.count > 0);
+        if (shadowReady && !pending.shadowReported)
+        {
+            if (auto fixture = pending.fixture.lock())
+            {
+                bool publish = false;
+                {
+                    std::lock_guard lock(fixture->mutex);
+                    const auto& report = fixture->report;
+                    const auto model = _modelIdOf.find(pending.producerModel);
+                    publish = report.active && report.originalFilePilot && fixture->originalAdmission &&
+                        report.pageEpoch == pending.pageEpoch && report.requestId == pending.requestId &&
+                        report.sourceAdmissionEpoch == pending.admissionEpoch &&
+                        fixture->originalAdmission->report.epoch == pending.admissionEpoch &&
+                        report.producerModel == pending.producerModel &&
+                        fixture->consumedModel == pending.rendererModel &&
+                        fixture->consumedInstance != UINT32_MAX && fixture->instance < _instSlotOf.size() &&
+                        _instSlotOf[fixture->instance] == fixture->consumedInstance &&
+                        model != _modelIdOf.end() && model->second == pending.rendererModel;
+                }
+                if (publish)
+                {
+                    static unsigned rows = 0;
+                    if (rows++ < 16)
+                        LOG_INFO(World, "Private cascade-0 GPU COUNT: token={} pageEpoch={} admissionEpoch={} request={} model={} rendererModel={} sourceGeneration={} cullEpoch={} state={} count={} (closed depth pass; no Fine release)",
+                            pending.token, pending.pageEpoch, pending.admissionEpoch, pending.requestId,
+                            pending.producerModel, pending.rendererModel, pending.sourceGeneration,
+                            shadowFact.cull_epoch, shadowFact.state, shadowFact.count);
+                }
+            }
+            pending.shadowReported = true;
+        }
+        if ((pending.mainReported && pending.shadowReported) || ++pending.ageFrames >= 16)
+            _geometryMainCountPending.reset();
     }
 
     HashPublishedFrame(frame, backing);
