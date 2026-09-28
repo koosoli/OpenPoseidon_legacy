@@ -1,7 +1,7 @@
 //! A private COUNT answer belongs to one published GI RSM image, never merely
 //! to a readback token. View 5 is independent of solar shadow view 4.
 
-use super::{cull::{CountCullInputKey, MainCountFact, MainCountIdentity, MainCountStatus}, SkyVisView};
+use super::{cached_count_equivalence::{self, Relation}, cull::{CountCullInputKey, MainCountFact, MainCountIdentity, MainCountStatus}, SkyVisView};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Key {
@@ -59,6 +59,18 @@ impl CachedCount {
         let Some((key, fact)) = self.bound else { return MainCountFact::default(); };
         if Some(key) == current { fact } else { MainCountFact::default() }
     }
+
+    pub fn diagnose(&self, candidate: Option<Key>, target: Option<(u32, u64, u64)>,
+                    current_epoch: u64) -> Relation {
+        let (Some((key, fact)), Some(candidate)) = (self.bound, candidate) else {
+            return Relation::Unknown;
+        };
+        let same_image = key.publication == candidate.publication &&
+            key.image == candidate.image && key.view == candidate.view &&
+            key.epoch == candidate.epoch;
+        cached_count_equivalence::classify(fact, same_image, key.cull == candidate.cull,
+            target, key.epoch, current_epoch)
+    }
 }
 
 #[cfg(test)]
@@ -78,6 +90,14 @@ mod tests {
         params.objects_z2 = 1.0;
         let changed = Key { cull: CountCullInputKey::from_params(&params), ..old };
         assert_eq!(cache.fact(Some(changed)).status, MainCountStatus::Unknown);
+        assert_eq!(cache.diagnose(Some(changed), Some((4, 9, 1)), 8),
+            Relation::CountInputsChanged);
+        assert_eq!(cache.diagnose(Some(old), Some((4, 9, 1)), 8),
+            Relation::CountEquivalentImageStale);
+        assert_eq!(cache.diagnose(Some(Key { image: 4, ..old }), Some((4, 9, 1)), 8),
+            Relation::Unknown);
+        assert_eq!(cache.fact(Some(Key { epoch: 8, ..old })).status,
+            MainCountStatus::Unknown);
     }
 
     fn key(generation: u64) -> Key {

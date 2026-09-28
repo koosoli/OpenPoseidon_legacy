@@ -13,6 +13,7 @@ mod section_span_pool;
 mod local_pose_cache;
 mod interior_publication;
 mod interior_cached_count;
+mod cached_count_equivalence;
 mod local_cached_count;
 mod gi_rsm_publication;
 mod gi_rsm_cached_count;
@@ -10567,6 +10568,75 @@ impl Gfx3d {
             & snapshot.unknown & snapshot.required).count_ones();
         snapshot.dropped_samples = u32::MAX;
         snapshot
+    }
+
+    /// Internal read-only diagnostic. A matching COUNT input across unrelated
+    /// epoch churn is *not* a current image and cannot enter the all-view
+    /// absence mask. This does not harvest, dispatch, copy or mutate a cache.
+    pub fn cached_count_epoch_diagnostic(&self) -> cached_count_equivalence::Snapshot {
+        use cached_count_equivalence::Snapshot;
+        let mut out = Snapshot::default();
+        let Some(plan) = self.view_applicability else { return out; };
+        let target = self.cull.retained_target_revision().and_then(|(model, revision)|
+            (model == plan.identity.model_id && revision != 0)
+                .then_some((model, plan.identity.source_generation, revision)));
+        let epoch = self.cull.instance_epoch();
+        if let Some(caches) = &self.local_cached_counts {
+            for tile in 0..self.local_publication_scope {
+                if plan.required & (1u64 << (5 + tile)) != 0 {
+                    out.record(5 + tile, caches[tile].diagnose(
+                        self.local_count_diagnostic_candidate(tile), target, epoch));
+                }
+            }
+        }
+        if let Some(caches) = &self.interior_cached_counts {
+            for direction in 0..sky_vis::DIRECTION_COUNT {
+                if plan.required & (1u64 << (29 + direction)) != 0 {
+                    out.record(29 + direction, caches[direction].diagnose(
+                        self.interior_count_diagnostic_candidate(direction), target, epoch));
+                }
+            }
+        }
+        if let Some(cache) = &self.gi_rsm_cached_count {
+            if plan.required & (1u64 << 34) != 0 {
+                out.record(34, cache.diagnose(self.gi_rsm_count_diagnostic_candidate(), target, epoch));
+            }
+        }
+        out
+    }
+
+    fn gi_rsm_count_diagnostic_candidate(&self) -> Option<gi_rsm_cached_count::Key> {
+        if !self.interior_sky_active() || !self.gi.rsm_eligible.get() ||
+            self.gi.rsm_refresh.get() { return None; }
+        let (generation, epoch) = self.gi_rsm_publication.as_ref()?.get().published()?;
+        let (view, rendered_epoch, image) = self.gi_rsm_published_view?;
+        if epoch != rendered_epoch || image != self.gi.rsm_image_generation ||
+            !same_sky_view(view, self.gi.rsm_view) { return None; }
+        let cull = self.cull.sky_count_cull_key(sky_vis::DIRECTION_COUNT)?;
+        Some(gi_rsm_cached_count::Key::new(generation, image, view, epoch, cull))
+    }
+
+    fn local_count_diagnostic_candidate(&self, index: usize) -> Option<local_cached_count::Key> {
+        if index >= self.local_publication_scope || index >= self.local_shadow_count { return None; }
+        let (publication, tile) = self.local_publications.as_ref()?.get(index)?.get().published()?;
+        if tile.tile_index != index { return None; }
+        let target = self.shadow_target.as_ref()?;
+        let first_local = self.cull.shadow_view_count().checked_sub(self.local_shadow_count)?;
+        let shape = (target.res, first_local, self.local_shadow_count as u32, self.shadow_gen);
+        let cull = self.cull.shadow_count_cull_key(tile.cull_index)?;
+        local_cached_count::Key::current(publication, tile, shape, self.local_cache_shape,
+            target.layers, self.local_view_key[index], tile.instance_epoch, cull)
+    }
+
+    fn interior_count_diagnostic_candidate(&self, i: usize) -> Option<interior_cached_count::Key> {
+        if !self.interior_sky_active() || i >= sky_vis::DIRECTION_COUNT { return None; }
+        let (generation, direction, epoch) = self.interior_publications.as_ref()?
+            .get(i)?.get().published()?;
+        let (view, rendered_epoch) = self.interior_sky_rendered[i]?;
+        if direction != i || epoch != rendered_epoch ||
+            !same_sky_view(view, self.interior_sky_views[i]) { return None; }
+        let cull = self.cull.sky_count_cull_key(i)?;
+        Some(interior_cached_count::Key::new(i, generation, self.interior_sky_gen, view, epoch, cull))
     }
     pub fn shadow_target_count_fact(&mut self, device: &wgpu::Device,
                                     cascade: usize) -> cull::MainCountFact {

@@ -1,7 +1,7 @@
 //! Private COUNT retained only for the exact published local shadow tile.
 //! The request identity is separate from the atlas allocation and tile image identity.
 
-use super::{cull::{CountCullInputKey, MainCountFact, MainCountIdentity, MainCountStatus}, local_publication::LocalTileIdentity};
+use super::{cached_count_equivalence::{self, Relation}, cull::{CountCullInputKey, MainCountFact, MainCountIdentity, MainCountStatus}, local_publication::LocalTileIdentity};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Key {
@@ -63,6 +63,16 @@ impl CachedCount {
         let Some((key, fact)) = self.bound else { return MainCountFact::default(); };
         if Some(key) == current { fact } else { MainCountFact::default() }
     }
+
+    pub fn diagnose(&self, candidate: Option<Key>, target: Option<(u32, u64, u64)>,
+                    current_epoch: u64) -> Relation {
+        let (Some((key, fact)), Some(candidate)) = (self.bound, candidate) else {
+            return Relation::Unknown;
+        };
+        let same_image = key.publication == candidate.publication && key.tile == candidate.tile;
+        cached_count_equivalence::classify(fact, same_image, key.cull == candidate.cull,
+            target, key.tile.instance_epoch, current_epoch)
+    }
 }
 
 #[cfg(test)]
@@ -82,6 +92,14 @@ mod tests {
         params.frustum[0][0] = 1.0;
         let changed = Key { cull: CountCullInputKey::from_params(&params), ..old };
         assert_eq!(cache.fact(Some(changed)).status, MainCountStatus::Unknown);
+        assert_eq!(cache.diagnose(Some(changed), Some((4, 9, 1)), 8),
+            Relation::CountInputsChanged);
+        assert_eq!(cache.diagnose(Some(old), Some((4, 9, 1)), 8),
+            Relation::CountEquivalentImageStale);
+        assert_eq!(cache.diagnose(Some(Key { publication: 2, ..old }), Some((4, 9, 1)), 8),
+            Relation::Unknown);
+        assert_eq!(cache.fact(Some(Key { tile: LocalTileIdentity {
+            instance_epoch: 8, ..old.tile }, ..old })).status, MainCountStatus::Unknown);
     }
 
     fn key(generation: u64, solar: usize) -> Key {
