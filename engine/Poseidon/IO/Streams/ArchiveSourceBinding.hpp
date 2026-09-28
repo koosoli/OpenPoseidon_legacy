@@ -2,6 +2,7 @@
 #include <Poseidon/IO/Streams/QBStream.hpp>
 #include <mutex>
 #include <memory>
+#include <limits>
 
 namespace Poseidon
 {
@@ -30,19 +31,22 @@ public:
     };
     ArchiveSourceBudget(size_t bindings, size_t bytes, size_t weakCells = 1024)
         : _maxBindings(bindings), _maxBytes(bytes), _maxWeakCells(weakCells) {}
-    std::shared_ptr<const Ticket> Acquire(size_t bytes, bool* capacityRefused = nullptr)
-    { return AcquireImpl(bytes, Ticket::Kind::Binding, capacityRefused); }
+    std::shared_ptr<const Ticket> Acquire(size_t bytes, bool* capacityRefused = nullptr,
+        size_t bindingLimit = std::numeric_limits<size_t>::max())
+    { return AcquireImpl(bytes, Ticket::Kind::Binding, capacityRefused, bindingLimit); }
     std::shared_ptr<const Ticket> AcquireWeak(size_t bytes, bool* capacityRefused = nullptr)
     { return AcquireImpl(bytes, Ticket::Kind::Weak, capacityRefused); }
     std::shared_ptr<const Ticket> AcquireTrace(size_t bytes, bool* capacityRefused = nullptr)
     { return AcquireImpl(bytes, Ticket::Kind::Trace, capacityRefused); }
 private:
-    std::shared_ptr<const Ticket> AcquireImpl(size_t bytes, Ticket::Kind kind, bool* capacityRefused)
+    std::shared_ptr<const Ticket> AcquireImpl(size_t bytes, Ticket::Kind kind, bool* capacityRefused,
+        size_t bindingLimit = std::numeric_limits<size_t>::max())
     {
         if (capacityRefused) *capacityRefused = false;
         std::lock_guard<std::mutex> lock(_mutex);
         if (!bytes || (kind == Ticket::Kind::Weak ? _live.weakCells >= _maxWeakCells :
-             kind == Ticket::Kind::Binding && _live.bindings >= _maxBindings) ||
+             kind == Ticket::Kind::Binding &&
+                 (_live.bindings >= _maxBindings || _live.bindings >= bindingLimit)) ||
             bytes > _maxBytes - _live.bytes)
         { if (capacityRefused) *capacityRefused = true; return {}; }
         try
@@ -97,8 +101,10 @@ public:
     class ModelReadScope
     {
         bool _entered = false;
+        bool _materialPreflightEntered = false;
     public:
-        ModelReadScope();
+        enum class Intent : uint8_t { Model, MaterialPreflight };
+        explicit ModelReadScope(Intent intent = Intent::Model);
         ~ModelReadScope();
         ModelReadScope(const ModelReadScope&) = delete;
         ModelReadScope& operator=(const ModelReadScope&) = delete;
@@ -106,6 +112,9 @@ public:
         ModelReadScope& operator=(ModelReadScope&&) = delete;
         static bool PurposeRequired();
         static bool IsActive(); // owner thread only; never grants worker bank access
+        static bool MaterialPreflightReservationEnabled();
+        static bool IsMaterialPreflightActive();
+        static size_t BindingLimit(); // 254 ordinary/256 stage when explicitly enabled; 256 otherwise
     };
     // Original raw mapped member only; names/headers are not source identity.
     // The process admission cap follows shared bindings retained by buffers/sources.

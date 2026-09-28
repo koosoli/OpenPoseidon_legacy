@@ -259,6 +259,112 @@ TEST_CASE("Actual archive binding cap refuses metadata while preserving original
 #endif
 }
 
+TEST_CASE("Actual material preflight retains two existing archive slots after ordinary captures stop",
+    "[archive-source-material-reserve][archive-source-actual]")
+{
+#ifndef _WIN32
+    SKIP("Strong archive identity is Windows-only.");
+#else
+    if (!ArchiveSourceBinding::ModelReadScope::MaterialPreflightReservationEnabled())
+        SKIP("Requires fresh WARM_TEXTURES=1 WARM_TEXTURE_JOBS=1 WARM_MATERIAL_PREFLIGHT=1 process.");
+    if (!QFileAccess::MappingSupported()) SKIP("Exact raw mapped buffer capability unavailable.");
+    Archives files;
+    const auto before = ArchiveSourceBinding::SnapshotStats();
+    REQUIRE(before.enabled);
+    REQUIRE(before.liveBindings < 254);
+    REQUIRE(ArchiveSourceBinding::ModelReadScope::BindingLimit() == 254);
+    std::vector<Ref<IFileBuffer>> held;
+    held.reserve(256 - before.liveBindings);
+    {
+        ArchiveSourceBinding::ModelReadScope normal;
+        while (ArchiveSourceBinding::SnapshotStats().liveBindings < 254)
+        {
+            auto read = files.first.Read("texture.paa"); REQUIRE(read);
+            REQUIRE(read->GetArchiveSourceBinding());
+            held.push_back(read);
+        }
+        auto refused = files.first.Read("texture.paa"); REQUIRE(refused);
+        CHECK_FALSE(refused->GetArchiveSourceBinding());
+        const auto original = OriginalPaa(13);
+        CHECK(std::memcmp(refused->GetData(), original.data(), original.size()) == 0);
+        CHECK(ArchiveSourceBinding::SnapshotStats().liveBindings == 254);
+        {
+            ArchiveSourceBinding::ModelReadScope stage(
+                ArchiveSourceBinding::ModelReadScope::Intent::MaterialPreflight);
+            REQUIRE(ArchiveSourceBinding::ModelReadScope::IsMaterialPreflightActive());
+            REQUIRE(ArchiveSourceBinding::ModelReadScope::BindingLimit() == 256);
+            auto first = files.first.Read("texture.paa"); REQUIRE(first);
+            auto firstBinding = first->GetArchiveSourceBinding(); REQUIRE(firstBinding);
+            auto actualMember = files.first.CaptureReadRequest("texture.paa", true); REQUIRE(actualMember);
+            CHECK(firstBinding->Request().SameArchiveMember(*actualMember));
+            CHECK(std::memcmp(first->GetData(), original.data(), original.size()) == 0);
+            held.push_back(first);
+            {
+                ArchiveSourceBinding::ModelReadScope nestedNormal;
+                REQUIRE(ArchiveSourceBinding::ModelReadScope::IsMaterialPreflightActive());
+                auto second = files.first.Read("texture.paa"); REQUIRE(second);
+                REQUIRE(second->GetArchiveSourceBinding());
+                held.push_back(second);
+            }
+            CHECK(ArchiveSourceBinding::SnapshotStats().liveBindings == 256);
+            auto full = files.first.Read("texture.paa"); REQUIRE(full);
+            CHECK_FALSE(full->GetArchiveSourceBinding());
+        }
+        CHECK_FALSE(ArchiveSourceBinding::ModelReadScope::IsMaterialPreflightActive());
+        CHECK(ArchiveSourceBinding::ModelReadScope::BindingLimit() == 254);
+        auto stillOrdinaryRefused = files.first.Read("texture.paa"); REQUIRE(stillOrdinaryRefused);
+        CHECK_FALSE(stillOrdinaryRefused->GetArchiveSourceBinding());
+    }
+    CHECK_FALSE(ArchiveSourceBinding::ModelReadScope::IsActive());
+    auto worker = std::async(std::launch::async, [] {
+        ArchiveSourceBinding::ModelReadScope stage(
+            ArchiveSourceBinding::ModelReadScope::Intent::MaterialPreflight);
+        return ArchiveSourceBinding::ModelReadScope::IsActive() ||
+            ArchiveSourceBinding::ModelReadScope::IsMaterialPreflightActive();
+    });
+    CHECK_FALSE(worker.get());
+    held.clear();
+    CHECK(ArchiveSourceBinding::SnapshotStats().liveBindings == before.liveBindings);
+    CHECK(ArchiveSourceBinding::SnapshotStats().knownCppBytes <= before.capBytes);
+#endif
+}
+
+TEST_CASE("Material preflight reservation OFF leaves ordinary actual PBO reads eligible through 256",
+    "[archive-source-material-reserve-off][archive-source-actual]")
+{
+#ifndef _WIN32
+    SKIP("Strong archive identity is Windows-only.");
+#else
+    if (ArchiveSourceBinding::ModelReadScope::MaterialPreflightReservationEnabled())
+        SKIP("Requires fresh WARM_TEXTURES=1 WARM_TEXTURE_JOBS=1 WARM_MATERIAL_PREFLIGHT=0 process.");
+    if (!ArchiveSourceBinding::ModelReadScope::PurposeRequired())
+        SKIP("Requires fresh WARM_TEXTURES=1 WARM_TEXTURE_JOBS=1 process.");
+    if (!QFileAccess::MappingSupported()) SKIP("Exact raw mapped buffer capability unavailable.");
+    Archives files;
+    const auto before = ArchiveSourceBinding::SnapshotStats();
+    REQUIRE(before.enabled);
+    REQUIRE(before.liveBindings < before.capBindings);
+    REQUIRE(ArchiveSourceBinding::ModelReadScope::BindingLimit() == before.capBindings);
+    std::vector<Ref<IFileBuffer>> held;
+    held.reserve(before.capBindings - before.liveBindings);
+    ArchiveSourceBinding::ModelReadScope normal;
+    while (ArchiveSourceBinding::SnapshotStats().liveBindings < before.capBindings)
+    {
+        auto read = files.first.Read("texture.paa"); REQUIRE(read);
+        REQUIRE(read->GetArchiveSourceBinding());
+        held.push_back(read);
+    }
+    ArchiveSourceBinding::ModelReadScope stage(
+        ArchiveSourceBinding::ModelReadScope::Intent::MaterialPreflight);
+    CHECK_FALSE(ArchiveSourceBinding::ModelReadScope::IsMaterialPreflightActive());
+    auto full = files.first.Read("texture.paa"); REQUIRE(full);
+    CHECK_FALSE(full->GetArchiveSourceBinding());
+    CHECK(ArchiveSourceBinding::SnapshotStats().liveBindings == before.capBindings);
+    held.clear();
+    CHECK(ArchiveSourceBinding::SnapshotStats().liveBindings == before.liveBindings);
+#endif
+}
+
 TEST_CASE("Mounted member observation never loads an unopened bank or guesses identities", "[archive-source-binding][archive-source-budget][archive-lease]")
 {
 #ifndef _WIN32

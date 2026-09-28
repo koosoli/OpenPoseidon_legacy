@@ -1224,6 +1224,7 @@ bool CaptureWarmTextureSourceBinding()
     return enabled;
 }
 thread_local unsigned ModelReadDepth = 0; // numeric owner-purpose nesting only; no retained resources
+thread_local unsigned MaterialPreflightDepth = 0; // owner-only nested stage intent; no names or resources
 struct ArchiveBindingState
 {
     static constexpr size_t FixedCharge = sizeof(ArchiveSourceBudget) + 256;
@@ -1278,18 +1279,45 @@ bool ArchiveSourceBinding::ModelReadScope::PurposeRequired()
     }();
     return required;
 }
-ArchiveSourceBinding::ModelReadScope::ModelReadScope()
+bool ArchiveSourceBinding::ModelReadScope::MaterialPreflightReservationEnabled()
+{
+    static const bool enabled = [] {
+        const char* source = std::getenv("WGR_OBJECT_STREAM_WARM_TEXTURES");
+        const char* jobs = std::getenv("WGR_OBJECT_STREAM_WARM_TEXTURE_JOBS");
+        const char* preflight = std::getenv("WGR_OBJECT_STREAM_WARM_MATERIAL_PREFLIGHT");
+        return source && std::strcmp(source, "1") == 0 &&
+            jobs && std::strcmp(jobs, "1") == 0 &&
+            preflight && std::strcmp(preflight, "1") == 0;
+    }();
+    return enabled;
+}
+ArchiveSourceBinding::ModelReadScope::ModelReadScope(Intent intent)
 {
     if (PurposeRequired() && Foundation::IsMainThread() && ModelReadDepth < 64)
-    { ++ModelReadDepth; _entered = true; }
+    {
+        ++ModelReadDepth; _entered = true;
+        if (intent == Intent::MaterialPreflight && MaterialPreflightReservationEnabled() &&
+            MaterialPreflightDepth < 64)
+        { ++MaterialPreflightDepth; _materialPreflightEntered = true; }
+    }
 }
 ArchiveSourceBinding::ModelReadScope::~ModelReadScope()
 {
+    if (_materialPreflightEntered) --MaterialPreflightDepth;
     if (_entered) --ModelReadDepth; // same-stack RAII; copies/moves are forbidden
 }
 bool ArchiveSourceBinding::ModelReadScope::IsActive()
 {
     return Foundation::IsMainThread() && ModelReadDepth != 0;
+}
+bool ArchiveSourceBinding::ModelReadScope::IsMaterialPreflightActive()
+{
+    return Foundation::IsMainThread() && ModelReadDepth != 0 && MaterialPreflightDepth != 0 &&
+        MaterialPreflightReservationEnabled();
+}
+size_t ArchiveSourceBinding::ModelReadScope::BindingLimit()
+{
+    return MaterialPreflightReservationEnabled() && !IsMaterialPreflightActive() ? 254 : 256;
 }
 
 size_t ArchiveSourceBinding::KnownCppBytes() const
@@ -1308,7 +1336,9 @@ std::shared_ptr<const ArchiveSourceBinding> ArchiveSourceBinding::Create(BankRea
         const size_t charge = sizeof(ArchiveSourceBinding) + request.archive.capacity() + 1 +
             request.ArchiveIdentityBytes() + 256;
         bool capacity = false;
-        auto ticket = state.budget->Acquire(charge, &capacity);
+        // The budget mutex rechecks the same owner intent after the advisory QFBank
+        // count check. Neither path can exceed the original 256/2-MiB hard limits.
+        auto ticket = state.budget->Acquire(charge, &capacity, ModelReadScope::BindingLimit());
         if (!ticket)
         {
             (capacity ? state.capacityRefused : state.allocationRefused).fetch_add(1, std::memory_order_relaxed);
@@ -1552,7 +1582,8 @@ Ref<IFileBuffer> QFBank::Read(const char* name) const
                     // Advisory count refusal before opening another denial handle. Acquire
                     // remains authoritative for byte capacity and any intervening release.
                     auto& state = SourceBindingState();
-                    if (state.budget->Observe().bindings >= 256)
+                    if (state.budget->Observe().bindings >=
+                        ArchiveSourceBinding::ModelReadScope::BindingLimit())
                     {
                         state.capacityRefused.fetch_add(1, std::memory_order_relaxed);
                     }

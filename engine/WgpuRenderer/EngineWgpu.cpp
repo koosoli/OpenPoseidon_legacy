@@ -10805,7 +10805,8 @@ void EngineWgpu::CaptureWarmTextureReads(const LODShapeWithShadow* shape,
             WarmInspectReason inspectReason;
             try
             {
-                ArchiveSourceBinding::ModelReadScope purpose;
+                ArchiveSourceBinding::ModelReadScope purpose(
+                    ArchiveSourceBinding::ModelReadScope::Intent::MaterialPreflight);
                 Ref<Texture> stageTexture = _wbank->Load(path.c_str());
                 loaded = stageTexture.GetRef() != nullptr;
                 // The Ref remains alive through capture; only owned initialized-source facts escape.
