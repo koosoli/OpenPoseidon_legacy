@@ -13,6 +13,7 @@ mod section_span_pool;
 mod local_pose_cache;
 mod interior_publication;
 mod interior_cached_count;
+mod local0_cached_count;
 mod gi_rsm_publication;
 mod gi_rsm_cached_count;
 mod local_publication;
@@ -4134,6 +4135,8 @@ pub struct Gfx3d {
     local_publications: Option<Box<[std::cell::Cell<local_publication::LocalTilePublication>; MAX_LOCAL_SHADOWS]>>,
     local_publication_scope: usize,
     local_publication_rows: u8,
+    // Default-off COUNT binding for the exact published local tile zero.
+    local0_cached_count: Option<local0_cached_count::CachedCount>,
     // Exact bounded CPU-caster pose witnesses; lazily allocated only when a
     // cached local view has an actual skinned caster. Retained/sky and concurrent
     // vertex-update freshness are separate contracts, not solved by this field.
@@ -5008,6 +5011,8 @@ impl Gfx3d {
             }))),
             local_publication_scope,
             local_publication_rows: 0,
+            local0_cached_count: (local_publication_scope != 0)
+                .then(local0_cached_count::CachedCount::default),
             local_pose_cache: None,
             local_pose_cache_enabled: std::env::var("WGR_LOCAL_SHADOW_POSE_CACHE").is_ok_and(|v| v == "1"),
             local_pose_trace: std::env::var("WGR_LOCAL_POSE_CACHE_TRACE").is_ok_and(|v| v == "1")
@@ -6790,6 +6795,9 @@ impl Gfx3d {
         let shape = (pass.resolution, count, local as u32, self.shadow_gen);
         let shape_changed = shape != self.local_cache_shape;
         self.local_cache_shape = shape;
+        if shape_changed {
+            if let Some(cache) = &mut self.local0_cached_count { cache.invalidate(); }
+        }
         if shape_changed {if let Some(cell)=&self.geometry_pass_facts {let mut f=cell.get();f.local_valid_mask=0;cell.set(f);}}
         if let Some(cells) = &self.local_publications {
             // A removed light or rebuilt atlas cannot retain a publication for
@@ -6902,6 +6910,9 @@ impl Gfx3d {
             });
             let stale = local_shadow_refresh_needed(stale, unpublished);
             if !cache_on || forced || shape_changed || stale || pose_refresh_mask & (1u32 << k) != 0 {
+                if k == 0 {
+                    if let Some(cache) = &mut self.local0_cached_count { cache.invalidate(); }
+                }
                 self.local_view_refresh.push(k);
                 if let Some(cell)=&self.geometry_pass_facts {let mut f=cell.get();f.invalidate_local(k);cell.set(f);}
                 // Refused pose witnesses may draw, but cannot certify cached
@@ -10114,6 +10125,10 @@ impl Gfx3d {
             self.cull.harvest_shadow_target_count(device, 4);
             cache.observe(self.cull.shadow_target_count_fact(4));
         }
+        if let Some(cache) = &mut self.local0_cached_count {
+            self.cull.harvest_local0_target_count(device);
+            cache.observe(self.cull.local0_target_count_fact());
+        }
         let armed = self.gpu_driven_enabled && self.cull.arm_main_target_count(
             device, token, model_id, source_generation);
         if armed {
@@ -10123,11 +10138,13 @@ impl Gfx3d {
                 for cache in caches { cache.source_changed(identity); }
             }
             if let Some(cache) = &mut self.gi_rsm_cached_count { cache.source_changed(identity); }
+            if let Some(cache) = &mut self.local0_cached_count { cache.source_changed(identity); }
         } else if let Some(caches) = &mut self.interior_cached_counts {
             for cache in caches { cache.invalidate(); }
         }
         if !armed {
             if let Some(cache) = &mut self.gi_rsm_cached_count { cache.invalidate(); }
+            if let Some(cache) = &mut self.local0_cached_count { cache.invalidate(); }
         }
         armed
     }
@@ -10259,6 +10276,9 @@ impl Gfx3d {
             };
             let publication = state.commit(current);
             cell.set(state);
+            if k == 0 {
+                if let Some(cache) = &mut self.local0_cached_count { cache.invalidate(); }
+            }
             if let Some((generation, identity)) = publication {
                 self.local_view_key[k] = Some(identity.key);
                 if self.local_publication_rows < 16 {
@@ -10272,6 +10292,7 @@ impl Gfx3d {
         }
     }
     pub fn abort_local_publications(&mut self) {
+        if let Some(cache) = &mut self.local0_cached_count { cache.invalidate(); }
         if let Some(cells) = &self.local_publications {
             for (k, cell) in cells.iter().enumerate().take(self.local_publication_scope) {
                 let mut state = cell.get(); state.abort(); cell.set(state);
@@ -10375,7 +10396,13 @@ impl Gfx3d {
                     }
                 }
             }
-            self.cull.local0_target_count_commit(token);
+            if self.cull.local0_target_count_commit(token) {
+                let identity = self.cull.local0_target_count_fact().identity;
+                let key = self.local0_current_count_key();
+                if let (Some(cache), Some(key)) = (&mut self.local0_cached_count, key) {
+                    if identity.token == token { cache.publish(key, identity); }
+                }
+            }
             self.cull.reflection_target_count_commit(token);
             let sky0_committed = self.cull.sky0_target_count_commit(token);
             if sky0_committed && self.interior_count_published_mask & 1 != 0 {
@@ -10407,6 +10434,7 @@ impl Gfx3d {
             for cache in caches { cache.invalidate(); }
         }
         if let Some(cache) = &mut self.gi_rsm_cached_count { cache.invalidate(); }
+        if let Some(cache) = &mut self.local0_cached_count { cache.invalidate(); }
         if let Some(witness) = self.main_count_completion.as_mut() { witness.abort(token); }
         self.cull.main_target_count_abort(token);
         for cascade in 0..5 { self.cull.shadow_target_count_abort(token, cascade); }
@@ -10453,7 +10481,22 @@ impl Gfx3d {
     }
     pub fn local0_target_count_fact(&mut self, device: &wgpu::Device) -> cull::MainCountFact {
         self.cull.harvest_local0_target_count(device);
-        self.cull.local0_target_count_fact()
+        let raw = self.cull.local0_target_count_fact();
+        let key = self.local0_current_count_key();
+        if let Some(cache) = &mut self.local0_cached_count {
+            cache.observe(raw);
+            cache.fact(key)
+        } else { raw }
+    }
+
+    fn local0_current_count_key(&self) -> Option<local0_cached_count::Key> {
+        if self.local_publication_scope == 0 || self.local_shadow_count == 0 { return None; }
+        let (publication, tile) = self.local_publications.as_ref()?.first()?.get().published()?;
+        let target = self.shadow_target.as_ref()?;
+        let first_local = self.cull.shadow_view_count().checked_sub(self.local_shadow_count)?;
+        let shape = (target.res, first_local, self.local_shadow_count as u32, self.shadow_gen);
+        local0_cached_count::Key::current(publication, tile, shape, self.local_cache_shape,
+            target.layers, self.local_view_key[0], self.cull.instance_epoch())
     }
 
     pub fn reflection_target_count_fact(&mut self, device: &wgpu::Device) -> cull::MainCountFact {

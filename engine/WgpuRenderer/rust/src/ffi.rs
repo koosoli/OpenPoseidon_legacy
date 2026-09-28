@@ -3530,8 +3530,9 @@ pub unsafe extern "C" fn wgr_gi_target_count_fact(
 }
 
 /// Nonblocking exact target-model COUNT for local shadow tile 0. Its cull index
-/// follows the active solar cascades and can be zero at night. Cached tiles,
-/// missing fresh cull/draw/closed pass, and failed submit remain Unknown.
+/// follows the active solar cascades and can be zero at night. With the opt-in
+/// publication witness, mapped COUNT follows its exact cached tile image.
+/// Missing fresh cull/draw/closed pass and failed submit remain Unknown.
 /// This is a diagnostic view count, never pixel or residency-release proof.
 /// # Safety
 /// Same live renderer and exact writable output contract as the main getter.

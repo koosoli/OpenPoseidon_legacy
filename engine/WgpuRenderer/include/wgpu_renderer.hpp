@@ -2743,7 +2743,9 @@ extern "C"
     WGR_API uint32_t wgr_gi_target_count_fact(WgrRenderer*, WgrMainTargetCountResult*,
         uint32_t output_size, uint32_t output_version);
     /* Local shadow tile 0, distinct from solar cascade 0 even at night.
-     * Only a fresh cull plus closed indirect depth draw may publish COUNT;
+     * With the opt-in publication witness, a mapped COUNT stays attached to
+     * the exact cached tile and retains its original request token. A fresh
+     * cull and closed indirect depth draw are required to bind it. Other
      * cached/skipped tiles stay UNKNOWN. No residency-release authority. */
     WGR_API uint32_t wgr_local_shadow0_target_count_fact(WgrRenderer*, WgrMainTargetCountResult*,
         uint32_t output_size, uint32_t output_version);

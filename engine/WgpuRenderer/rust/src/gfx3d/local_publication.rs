@@ -91,7 +91,6 @@ impl LocalTilePublication {
         self.submitted = false;
     }
 
-    #[cfg(test)]
     pub fn published(self) -> Option<(u64, LocalTileIdentity)> {
         self.published
     }

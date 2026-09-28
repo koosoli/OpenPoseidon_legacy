@@ -1,0 +1,143 @@
+//! Private COUNT retained only for the exact published local shadow tile zero.
+//! The request identity is separate from the atlas allocation and tile image identity.
+
+use super::{cull::{MainCountFact, MainCountIdentity, MainCountStatus}, local_publication::LocalTileIdentity};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Key {
+    pub publication: u64,
+    pub tile: LocalTileIdentity,
+}
+
+impl Key {
+    pub fn current(publication: u64, tile: LocalTileIdentity,
+                   target_shape: (u32, usize, u32, u64),
+                   cache_shape: (u32, usize, u32, u64), target_layers: u32,
+                   rendered_key: Option<u64>, epoch: u64) -> Option<Self> {
+        let (res, first_local, local_count, _) = target_shape;
+        (publication != 0 && tile.tile_index == 0 && res != 0 && local_count != 0 &&
+            tile.shape == target_shape && cache_shape == target_shape &&
+            first_local.checked_add(1).is_some_and(|layers| layers == target_layers as usize) &&
+            tile.cull_index == first_local && tile.instance_epoch == epoch &&
+            rendered_key == Some(tile.key))
+            .then_some(Self { publication, tile })
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CachedCount {
+    bound: Option<(Key, MainCountFact)>,
+}
+
+impl CachedCount {
+    pub fn invalidate(&mut self) { self.bound = None; }
+
+    pub fn source_changed(&mut self, identity: MainCountIdentity) {
+        if self.bound.is_some_and(|(_, fact)|
+            fact.identity.model_id != identity.model_id ||
+            fact.identity.source_generation != identity.source_generation) {
+            self.invalidate();
+        }
+    }
+
+    pub fn publish(&mut self, key: Key, identity: MainCountIdentity) {
+        self.bound = (key.publication != 0 && key.tile.tile_index == 0 &&
+            key.tile.instance_epoch == identity.cull_epoch &&
+            identity.token != 0 && identity.source_generation != 0)
+            .then_some((key, MainCountFact { identity, ..MainCountFact::default() }));
+    }
+
+    pub fn observe(&mut self, raw: MainCountFact) {
+        let Some((_, fact)) = self.bound.as_mut() else { return; };
+        if raw.identity != fact.identity { return; }
+        if matches!(raw.status, MainCountStatus::Present) && raw.count > 0 ||
+            matches!(raw.status, MainCountStatus::Absent) && raw.count == 0 {
+            *fact = raw;
+        }
+    }
+
+    pub fn fact(&self, current: Option<Key>) -> MainCountFact {
+        let Some((key, fact)) = self.bound else { return MainCountFact::default(); };
+        if Some(key) == current { fact } else { MainCountFact::default() }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key(generation: u64, solar: usize) -> Key {
+        Key { publication: generation, tile: LocalTileIdentity {
+            tile_index: 0, key: 42, instance_epoch: 7,
+            shape: (2048, solar, 1, 5), cull_index: solar,
+        }}
+    }
+    fn id(token: u64, source_generation: u64) -> MainCountIdentity {
+        MainCountIdentity { token, model_id: 4, source_generation, cull_epoch: 7 }
+    }
+
+    #[test]
+    fn mapped_results_follow_only_the_exact_published_tile() {
+        for (status, count) in [(MainCountStatus::Present, 8), (MainCountStatus::Absent, 0)] {
+            let mut cache = CachedCount::default();
+            let original = key(1, 4);
+            cache.publish(original, id(2, 9));
+            assert_eq!(cache.fact(Some(original)).status, MainCountStatus::Unknown);
+            cache.observe(MainCountFact { identity: id(2, 9), status, count });
+            assert_eq!(cache.fact(Some(original)).status, status);
+            assert_eq!(cache.fact(Some(original)).count, count);
+            for changed in [
+                key(2, 4), key(1, 0),
+                Key { tile: LocalTileIdentity { key: 43, ..original.tile }, ..original },
+                Key { tile: LocalTileIdentity { instance_epoch: 8, ..original.tile }, ..original },
+                Key { tile: LocalTileIdentity { shape: (1024, 4, 1, 5), ..original.tile }, ..original },
+                Key { tile: LocalTileIdentity { shape: (2048, 4, 1, 6), ..original.tile }, ..original },
+            ] {
+                assert_eq!(cache.fact(Some(changed)).status, MainCountStatus::Unknown);
+            }
+            cache.source_changed(id(3, 9));
+            assert_eq!(cache.fact(Some(original)).status, status);
+            let mut new_model = id(4, 9); new_model.model_id += 1;
+            cache.source_changed(new_model);
+            assert_eq!(cache.fact(Some(original)).status, MainCountStatus::Unknown);
+        }
+    }
+
+    #[test]
+    fn refresh_abort_and_late_map_cannot_revive_a_fact() {
+        let mut cache = CachedCount::default();
+        cache.publish(key(1, 4), id(2, 9));
+        cache.invalidate();
+        cache.observe(MainCountFact { identity: id(2, 9), status: MainCountStatus::Absent, count: 0 });
+        assert_eq!(cache.fact(Some(key(1, 4))).status, MainCountStatus::Unknown);
+        cache.publish(key(2, 0), id(3, 9));
+        cache.observe(MainCountFact { identity: id(2, 9), status: MainCountStatus::Present, count: 8 });
+        assert_eq!(cache.fact(Some(key(2, 0))).status, MainCountStatus::Unknown);
+        cache.observe(MainCountFact { identity: id(3, 9), status: MainCountStatus::Present, count: 8 });
+        assert_eq!(cache.fact(Some(key(2, 0))).status, MainCountStatus::Present);
+        cache.invalidate();
+        assert_eq!(cache.fact(Some(key(2, 0))).status, MainCountStatus::Unknown);
+    }
+
+    #[test]
+    fn current_key_requires_exact_live_atlas_and_day_night_route() {
+        for solar in [0, 4] {
+            let original = key(1, solar);
+            let tile = original.tile;
+            let shape = tile.shape;
+            let current = |publication, tile, target_shape, cache_shape, layers, rendered_key, epoch|
+                Key::current(publication, tile, target_shape, cache_shape, layers, rendered_key, epoch);
+            assert_eq!(current(1, tile, shape, shape, solar as u32 + 1, Some(42), 7), Some(original));
+            assert_eq!(current(0, tile, shape, shape, solar as u32 + 1, Some(42), 7), None);
+            assert_eq!(current(1, tile, shape, shape, solar as u32, Some(42), 7), None);
+            assert_eq!(current(1, tile, shape, shape, solar as u32 + 1, Some(43), 7), None);
+            assert_eq!(current(1, tile, shape, shape, solar as u32 + 1, Some(42), 8), None);
+            let resized = (1024, solar, 1, shape.3);
+            assert_eq!(current(1, tile, resized, resized, solar as u32 + 1, Some(42), 7), None);
+            let reallocated = (shape.0, solar, 1, shape.3 + 1);
+            assert_eq!(current(1, tile, reallocated, reallocated, solar as u32 + 1, Some(42), 7), None);
+            let shifted = (shape.0, solar + 1, 1, shape.3);
+            assert_eq!(current(1, tile, shifted, shifted, solar as u32 + 2, Some(42), 7), None);
+        }
+    }
+}
