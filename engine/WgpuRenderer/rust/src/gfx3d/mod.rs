@@ -10,7 +10,7 @@ mod registered_mesh_refs;
 mod section_refresh;
 mod section_span_pool;
 mod local_pose_cache;
-mod interior0_publication;
+mod interior_publication;
 mod local0_publication;
 pub(crate) mod geometry_pass_facts;
 mod lod_feedback;
@@ -3136,16 +3136,38 @@ fn unpublished_local0_retries_without_refreshing_other_cached_tiles() {
     assert!(!local_shadow_refresh_needed(0, false, false));
 }
 
-fn interior_sky_refresh_needed(view: usize, cache_stale: bool, sky0_unpublished: bool) -> bool {
-    cache_stale || (view == 0 && sky0_unpublished)
+fn interior_sky_refresh_needed(cache_stale: bool, unpublished: bool) -> bool {
+    cache_stale || unpublished
+}
+
+fn same_sky_view(a: SkyVisView, b: SkyVisView) -> bool {
+    a.view_proj.to_cols_array().map(f32::to_bits) == b.view_proj.to_cols_array().map(f32::to_bits) &&
+        a.kernel_uv.to_bits() == b.kernel_uv.to_bits() && a.bias_ndc.to_bits() == b.bias_ndc.to_bits()
 }
 
 #[test]
-fn unpublished_zenith_retries_without_refreshing_other_cached_directions() {
-    assert!(interior_sky_refresh_needed(0, false, true));
-    assert!(!interior_sky_refresh_needed(1, false, true));
-    assert!(!interior_sky_refresh_needed(0, false, false));
-    assert!(interior_sky_refresh_needed(3, true, false));
+fn unpublished_direction_retries_without_refreshing_other_cached_directions() {
+    let unpublished = [false, false, true, false, false];
+    assert!(!interior_sky_refresh_needed(false, unpublished[1]));
+    assert!(interior_sky_refresh_needed(false, unpublished[2]));
+    assert!(!interior_sky_refresh_needed(false, unpublished[3]));
+    assert!(interior_sky_refresh_needed(true, false));
+}
+
+#[test]
+fn sky_publication_view_identity_includes_sampling_constants() {
+    let settings = SkyVisSettings::default();
+    let a = sky_vis::build_views(glam::Vec3::ZERO, &settings)[2];
+    let mut b = a;
+    assert!(same_sky_view(a, b));
+    b.kernel_uv = f32::from_bits(b.kernel_uv.to_bits() ^ 1);
+    assert!(!same_sky_view(a, b));
+    b = a;
+    b.bias_ndc = f32::from_bits(b.bias_ndc.to_bits() ^ 1);
+    assert!(!same_sky_view(a, b));
+    b = a;
+    b.view_proj.x_axis.x = f32::from_bits(b.view_proj.x_axis.x.to_bits() ^ 1);
+    assert!(!same_sky_view(a, b));
 }
 
 /// LGT-026: local-light shadow views are cached per view and re-rendered only when something
@@ -4194,9 +4216,9 @@ pub struct Gfx3d {
     interior_sky_rendered: [Option<(SkyVisView, u64)>; sky_vis::DIRECTION_COUNT],
     // Private CPU-only cache publication witness. None by default: no COUNT copy,
     // staging buffer, or additional view dispatch is created by this state.
-    interior0_publication: Option<std::cell::Cell<interior0_publication::Interior0Publication>>,
-    interior0_pending_view: Option<(SkyVisView, u64)>,
-    interior0_publication_rows: u8,
+    interior_publications: Option<[std::cell::Cell<interior_publication::InteriorPublication>; sky_vis::DIRECTION_COUNT]>,
+    interior_pending_views: [Option<(SkyVisView, u64, u64)>; sky_vis::DIRECTION_COUNT],
+    interior_publication_rows: u8,
     interior_sky_cursor: usize,
     // The layers to cull and draw this frame.
     interior_sky_refresh: Vec<usize>,
@@ -5009,10 +5031,10 @@ impl Gfx3d {
             interior_sky_view: None,
             interior_sky_views: sky_vis::build_views(glam::Vec3::ZERO, &SkyVisSettings::default()),
             interior_sky_rendered: [None; sky_vis::DIRECTION_COUNT],
-            interior0_publication: (std::env::var("WGR_GEOMETRY_INTERIOR0_PUBLICATION").as_deref() == Ok("1"))
-                .then(|| std::cell::Cell::new(interior0_publication::Interior0Publication::default())),
-            interior0_pending_view: None,
-            interior0_publication_rows: 0,
+            interior_publications: (std::env::var("WGR_GEOMETRY_INTERIOR0_PUBLICATION").as_deref() == Ok("1"))
+                .then(|| std::array::from_fn(|_| std::cell::Cell::new(interior_publication::InteriorPublication::default()))),
+            interior_pending_views: [None; sky_vis::DIRECTION_COUNT],
+            interior_publication_rows: 0,
             interior_sky_cursor: 0,
             interior_sky_refresh: Vec::new(),
             gpu_sky_group1: Vec::new(),
@@ -9239,17 +9261,14 @@ impl Gfx3d {
     // half-working — a map containing only some of the world would darken by accident.
     fn select_interior_sky_refresh(&mut self, i: usize, view: SkyVisView, epoch: u64) {
         self.interior_sky_views[i] = view;
-        if i == 0 {
-            if let Some(cell) = &self.interior0_publication {
-                let mut state = cell.get();
-                let planned = state.plan(epoch);
-                cell.set(state);
-                // The old cached image remains the published one until the final
-                // submit and successful render return. Abort leaves it unchanged.
-                self.interior0_pending_view = planned.then_some((view, epoch));
-            } else {
-                self.interior_sky_rendered[i] = Some((view, epoch));
-            }
+        if let Some(cells) = &self.interior_publications {
+            let cell = &cells[i];
+            let mut state = cell.get();
+            let planned = state.plan(i, epoch);
+            cell.set(state);
+            // The previous cache entry stays unpublished until the exact selected
+            // direction's cull, closed draw, final submit, and render success.
+            self.interior_pending_views[i] = planned.then_some((view, epoch, self.interior_sky_gen));
         } else {
             self.interior_sky_rendered[i] = Some((view, epoch));
         }
@@ -9263,7 +9282,7 @@ impl Gfx3d {
                 self.interior_sky_gen += 1;
             }
             self.interior_sky_view = None;
-            self.abort_interior0_publication();
+            self.abort_interior_publications();
             return;
         }
         let res = self.interior_sky.resolution.max(1);
@@ -9308,7 +9327,7 @@ impl Gfx3d {
             self.interior_sky_target = Some((tex, layer_views, sample_view));
             self.interior_sky_gen += 1;
             self.interior_sky_rendered = [None; sky_vis::DIRECTION_COUNT];
-            self.abort_interior0_publication();
+            self.abort_interior_publications();
             if let Some(cell)=&self.geometry_pass_facts {let mut f=cell.get();f.interior_valid_mask=0;cell.set(f);}
         }
         if let Some(cell)=&self.geometry_pass_facts {let mut f=cell.get();f.required|=geometry_pass_facts::INTERIOR;
@@ -9333,9 +9352,9 @@ impl Gfx3d {
                     Some((v, e)) => v.view_proj != fresh[i].view_proj || e != epoch,
                     None => true,
                 };
-                let stale = interior_sky_refresh_needed(i, stale,
-                    self.interior0_publication.as_ref()
-                        .is_some_and(|cell| cell.get().needs_refresh()));
+                let stale = interior_sky_refresh_needed(stale,
+                    self.interior_publications.as_ref()
+                        .is_some_and(|cells| cells[i].get().needs_refresh()));
                 if stale {
                     self.select_interior_sky_refresh(i, fresh[i], epoch);
                     self.interior_sky_cursor = (i + 1) % n;
@@ -9359,9 +9378,10 @@ impl Gfx3d {
         }
         timers.begin(encoder, crate::gpu_timers::Region::InteriorSkyCull);
         for &i in &self.interior_sky_refresh {
-            if i < self.cull.sky_view_count() && self.cull.dispatch_sky(encoder, i) && i == 0 {
-                if let Some(cell) = &self.interior0_publication {
-                    let mut state = cell.get(); state.cull_recorded(); cell.set(state);
+            if i < self.cull.sky_view_count() && self.cull.dispatch_sky(encoder, i) {
+                if let Some(cells) = &self.interior_publications {
+                    let cell = &cells[i];
+                    let mut state = cell.get(); state.cull_recorded(i); cell.set(state);
                 }
             }
         }
@@ -9427,10 +9447,11 @@ impl Gfx3d {
                 self.cull.sky_counter_buf(i),
             );
             drop(rp);
-            if i == 0 && drew_gpu {
-                self.sky0_target_draw_closed.set(true);
-                if let Some(cell) = &self.interior0_publication {
-                    let mut state = cell.get(); state.draw_closed(); cell.set(state);
+            if drew_gpu {
+                if i == 0 { self.sky0_target_draw_closed.set(true); }
+                if let Some(cells) = &self.interior_publications {
+                    let cell = &cells[i];
+                    let mut state = cell.get(); state.draw_closed(i); cell.set(state);
                 }
             }
             if let Some(cell)=&self.geometry_pass_facts {
@@ -9996,9 +10017,11 @@ impl Gfx3d {
     // Called strictly after the final main encoder's Queue::submit returns.
     // The FFI success/abort boundary below decides whether this submission can
     // become a published cache generation. This does not poll or copy the GPU.
-    pub fn interior0_publication_submitted(&self) {
-        if let Some(cell) = &self.interior0_publication {
-            let mut state = cell.get(); state.final_submit_accepted(); cell.set(state);
+    pub fn interior_publications_submitted(&self) {
+        if let Some(cells) = &self.interior_publications {
+            for cell in cells {
+                let mut state = cell.get(); state.final_submit_accepted(); cell.set(state);
+            }
         }
     }
     pub fn local0_publication_submitted(&self) {
@@ -10038,30 +10061,40 @@ impl Gfx3d {
             self.local_view_key[0] = None;
         }
     }
-    pub fn commit_interior0_publication(&mut self) {
-        let Some(cell) = &self.interior0_publication else { return; };
-        let mut state = cell.get();
-        let pending = self.interior0_pending_view.take();
-        if let Some(epoch) = state.planned_epoch() {
-            if !pending.as_ref().is_some_and(|(_, selected_epoch)| *selected_epoch == epoch) {
-                state.abort(); cell.set(state); return;
+    pub fn commit_interior_publications(&mut self) {
+        let Some(cells) = &self.interior_publications else { return; };
+        for i in 0..sky_vis::DIRECTION_COUNT {
+            let cell = &cells[i];
+            let mut state = cell.get();
+            let pending = self.interior_pending_views[i].take();
+            let Some((view, epoch, target_gen)) = pending else {
+                if state.planned().is_some() { state.abort(); cell.set(state); }
+                continue;
+            };
+            if state.planned() != Some((i, epoch)) ||
+                !self.interior_sky_active() || self.interior_sky_gen != target_gen ||
+                self.cull.instance_epoch() != epoch ||
+                !same_sky_view(self.interior_sky_views[i], view) {
+                state.abort(); cell.set(state); continue;
             }
-        }
-        let publication = state.commit();
-        cell.set(state);
-        if let (Some((generation, epoch)), Some((view, selected_epoch))) = (publication, pending) {
-            debug_assert_eq!(epoch, selected_epoch);
-            self.interior_sky_rendered[0] = Some((view, epoch));
-            if self.interior0_publication_rows < 16 {
-                self.interior0_publication_rows += 1;
-                eprintln!("[wgr] interior sky0 publication: generation={generation} instanceEpoch={epoch} committed=true (CPU submit witness; no GPU completion or all-view proof)");
+            let publication = state.commit(i, epoch);
+            cell.set(state);
+            if let Some((generation, selected, selected_epoch)) = publication {
+                debug_assert_eq!((selected, selected_epoch), (i, epoch));
+                self.interior_sky_rendered[i] = Some((view, epoch));
+                if self.interior_publication_rows < 16 {
+                    self.interior_publication_rows += 1;
+                    eprintln!("[wgr] interior sky publication: direction={i} generation={generation} instanceEpoch={epoch} committed=true (CPU submit witness; no GPU completion or all-view proof)");
+                }
             }
         }
     }
-    pub fn abort_interior0_publication(&mut self) {
-        self.interior0_pending_view = None;
-        if let Some(cell) = &self.interior0_publication {
-            let mut state = cell.get(); state.abort(); cell.set(state);
+    pub fn abort_interior_publications(&mut self) {
+        self.interior_pending_views = [None; sky_vis::DIRECTION_COUNT];
+        if let Some(cells) = &self.interior_publications {
+            for cell in cells {
+                let mut state = cell.get(); state.abort(); cell.set(state);
+            }
         }
     }
     pub fn sky0_target_count_before_submit(&mut self, token: u64) -> bool {
