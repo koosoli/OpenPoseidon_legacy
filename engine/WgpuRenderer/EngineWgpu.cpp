@@ -10746,8 +10746,9 @@ Engine::WarmPatnikProbeReport EngineWgpu::ProbeWarmPatnikStage() const
     if (!Trace::TargetOnly()) return out;
     if (!Foundation::IsMainThread()) { out.status = WarmPatnikProbeStatus::WrongOwner; return out; }
     if (!_wbank) { out.status = WarmPatnikProbeStatus::Unsupported; return out; }
+    const auto target = Trace::TargetKey();
+    if (target.empty()) { out.status = WarmPatnikProbeStatus::Unsupported; return out; }
     out.status = WarmPatnikProbeStatus::Ready;
-    constexpr auto target = Trace::TargetKey();
     const std::string key(target);
     const int index = _wbank->Find(RStringB(key.c_str())); // existing bank entry only; no Load
     if (index < 0 || index >= _wbank->NTextures()) return out;

@@ -1495,10 +1495,11 @@ public:
 
 Ref<IFileBuffer> QFBank::Read(const char* name) const
 {
-    const bool patnik = PatnikArchiveReason::Enabled() && PatnikArchiveReason::Matches(name);
+    const bool targeted = PatnikArchiveReason::Enabled() &&
+        PatnikArchiveReason::MatchesJoined((const char*)GetPrefix(), name);
     auto reason = [&](const char* why, bool bound)
     {
-        if (!patnik || !PatnikArchiveReason::ReserveRow()) return;
+        if (!targeted || !PatnikArchiveReason::ReserveRow()) return;
         try
         {
             const auto stats = ArchiveSourceBinding::SnapshotStats();
@@ -1630,7 +1631,7 @@ Ref<IFileBuffer> QFBank::Read(const char* name) const
                 catch (...) { captureReason = "captureException"; } // Original read result is unchanged.
             }
         }
-        if (patnik && std::strcmp(captureReason, "captureDisabled") == 0 &&
+        if (targeted && std::strcmp(captureReason, "captureDisabled") == 0 &&
             CaptureWarmTextureSourceBinding())
         {
             if (ArchiveSourceBinding::ModelReadScope::PurposeRequired() &&

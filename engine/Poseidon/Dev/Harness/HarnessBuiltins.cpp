@@ -176,8 +176,7 @@ void RegisterStreamingProbes(HarnessServer& hs)
             cJSON_AddNumberToObject(result, "sourcePayloadBytes", double(latest.envelope.PayloadBytes()));
             return HarnessProtocol::JsonResponse(result);
         });
-    hs.RegisterCommand({"stream_warm_patnik_probe", "Read-only exact patnik SpecularDetail texture/store state", {}},
-        [](const std::string&, cJSON*) -> std::string {
+    const auto selectedWarmStageProbe = [](const std::string&, cJSON*) -> std::string {
             if (!Foundation::IsMainThread() || !GEngine)
                 return HarnessProtocol::ErrorResponse("owner renderer required");
             const auto report = GEngine->ProbeWarmPatnikStage();
@@ -185,7 +184,8 @@ void RegisterStreamingProbes(HarnessServer& hs)
             const char* statuses[] = {"Disabled", "WrongOwner", "Unsupported", "Ready"};
             const auto ordinal = static_cast<unsigned>(report.status);
             cJSON_AddStringToObject(result, "status", ordinal < 4 ? statuses[ordinal] : "Unsupported");
-            cJSON_AddStringToObject(result, "source", R"(dz\structures\residential\misc\data\patnik_smdi.paa)");
+            const auto target = Streaming::WarmTextureProvenance::TargetKey();
+            cJSON_AddStringToObject(result, "source", target.empty() ? "" : target.data());
 #define PATNIK_BOOL(field) cJSON_AddBoolToObject(result, #field, report.field)
             PATNIK_BOOL(textureFound); PATNIK_BOOL(targetKeyMatched);
             PATNIK_BOOL(gpuResident); PATNIK_BOOL(uploadTried);
@@ -202,7 +202,11 @@ void RegisterStreamingProbes(HarnessServer& hs)
             cJSON_AddNumberToObject(result, "traceRows", report.traceRows);
             cJSON_AddStringToObject(result, "scope", "Existing bank and exact mounted member only; store peek does not Take or sweep. Trace token is exact only while currentBinding=true; numeric events require matching token and untruncated rows. No upload, eviction, pixels or general source freshness claim.");
             return HarnessProtocol::JsonResponse(result);
-        });
+        };
+    hs.RegisterCommand({"stream_warm_stage_probe", "Read-only selected fixed material-stage texture/store state", {}},
+        selectedWarmStageProbe);
+    hs.RegisterCommand({"stream_warm_patnik_probe", "Legacy alias for selected fixed material-stage probe", {}},
+        selectedWarmStageProbe);
     hs.RegisterCommand({"stream_identity_probe", "Read world IDs and geometry presence without retaining objects", {}},
         [](const std::string&, cJSON* root) -> std::string {
             if (!GLandscape) return HarnessProtocol::ErrorResponse("no landscape");

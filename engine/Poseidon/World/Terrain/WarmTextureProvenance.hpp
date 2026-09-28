@@ -1,5 +1,6 @@
 #pragma once
 #include <Poseidon/IO/Streams/ArchiveSourceBinding.hpp>
+#include <Poseidon/IO/Streams/PatnikArchiveReason.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <array>
 #include <algorithm>
@@ -107,8 +108,8 @@ private:
 public:
     // One explicitly selected real renderer stage, diagnostic only. Filtering trace
     // records does not alter warm admission, source capture, or upload decisions.
-    static constexpr std::string_view TargetKey() noexcept
-    { return R"(dz\structures\residential\misc\data\patnik_smdi.paa)"; }
+    static std::string_view TargetKey() noexcept
+    { return PatnikArchiveReason::TargetKey(); }
     static bool TargetOnly() noexcept
     {
         static const bool enabled = [] {

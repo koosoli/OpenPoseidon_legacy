@@ -23,14 +23,21 @@ static_assert(!std::is_move_constructible_v<ArchiveSourceBudget::Ticket>);
 static_assert(!std::is_copy_constructible_v<ArchiveSourceBinding::ModelReadScope>);
 static_assert(!std::is_move_constructible_v<ArchiveSourceBinding::ModelReadScope>);
 
-TEST_CASE("Patnik reason probe matches only the bounded member name", "[archive-source-binding][patnik-reason]")
+TEST_CASE("Selected warm-stage archive reasons accept only two exact bounded paths", "[archive-source-binding][stage-reason]")
 {
-    CHECK(PatnikArchiveReason::Matches("ca\\roads\\patnik_smdi.paa"));
-    CHECK(PatnikArchiveReason::Matches("PATNIK_SMDI.PAA"));
-    CHECK_FALSE(PatnikArchiveReason::Matches("patnik_smdi.paa.bak"));
-    CHECK_FALSE(PatnikArchiveReason::Matches("other_patnik_smdi.paa"));
-    CHECK_FALSE(PatnikArchiveReason::Matches(nullptr));
-    CHECK_FALSE(PatnikArchiveReason::Matches(std::string(8192, 'a').c_str()));
+    using namespace PatnikArchiveReason;
+    CHECK(Select(nullptr) == Patnik);
+    CHECK(Select("patnik") == Patnik);
+    CHECK(Select("tree") == Tree);
+    CHECK(Select("other").empty());
+    CHECK(Matches(Patnik, R"(dz\structures\residential\misc\data\patnik_smdi.paa)"));
+    CHECK(Matches(Tree, R"(DZ/PLANTS/TREE/DATA/T_PICEAABIES_TRUNK_NO.PAA)"));
+    CHECK_FALSE(Matches(Patnik, R"(other\patnik_smdi.paa)"));
+    CHECK_FALSE(Matches(Tree, R"(dz\plants\tree\data\t_piceaabies_trunk_no.paa.bak)"));
+    CHECK(MatchesJoined(Tree, R"(dz\plants\tree\)", R"(data\t_piceaabies_trunk_no.paa)"));
+    CHECK_FALSE(MatchesJoined(Tree, R"(other\plants\tree\)", R"(data\t_piceaabies_trunk_no.paa)"));
+    CHECK_FALSE(Matches(Patnik, nullptr));
+    CHECK_FALSE(Matches(Patnik, std::string(8192, 'a').c_str()));
 }
 
 TEST_CASE("Archive binding debt remains charged through copied aliases", "[archive-source-binding][archive-source-budget]")
