@@ -11043,10 +11043,12 @@ bool EngineWgpu::CaptureWarmRapStageRead(const char* key, WarmTextureRead& out) 
         const char* value = std::getenv("WGR_OBJECT_STREAM_RAP_STAGE_WARM_CAPTURE");
         return value && std::strcmp(value, "1") == 0;
     }();
+    const bool selectedStage = key &&
+        (std::strcmp(key, R"(dz\plants\tree\data\t_piceaabies_trunk_no.paa)") == 0 ||
+         std::strcmp(key, R"(dz\plants\tree\data\t_piceaabies_trunk_dxt5.paa)") == 0);
     if (!exactFixtureEnabled || !ObjectStreamPreparer::WarmTextureJobsEnabled() ||
         !ArchiveSourceBinding::ModelReadScope::MaterialPreflightReservationEnabled() ||
-        !Foundation::IsMainThread() || !_gpuDriven || !_renderer || !_wbank || !key ||
-        std::strcmp(key, R"(dz\plants\tree\data\t_piceaabies_trunk_no.paa)") != 0)
+        !Foundation::IsMainThread() || !_gpuDriven || !_renderer || !_wbank || !selectedStage)
         return false;
     try
     {

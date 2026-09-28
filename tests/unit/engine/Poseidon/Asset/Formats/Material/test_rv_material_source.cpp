@@ -245,6 +245,45 @@ TEST_CASE("raP owner candidate is bounded names-only metadata", "[preparer][rap-
     CHECK_FALSE(tooLong.Bounded());
 }
 
+TEST_CASE("raP tree warm stages select the second trunk map once and only from its material",
+          "[preparer][rap-stage-names]")
+{
+    using Poseidon::RapStageCandidateHandoff;
+    using Poseidon::SelectTreeFixtureWarmStages;
+    RapStageCandidateHandoff handoff;
+    handoff.generation = 7;
+    handoff.modelIndex = 3;
+    handoff.materials = {
+        {R"(dz\plants\tree\data\t_piceaabies_2d_trunk.rvmat)",
+         R"(dz\plants\tree\data\t_piceaabies_trunk_no.paa)"},
+        {R"(dz\plants\tree\data\t_piceaabies_2d_trunk.rvmat)",
+         R"(dz\plants\tree\data\t_piceaabies_trunk_dxt5.paa)"},
+        {R"(dz\plants\tree\data\d_piceaabies_stumpb_trunk_a.rvmat)",
+         R"(dz\plants\tree\data\t_piceaabies_trunk_no.paa)"},
+    };
+    REQUIRE(handoff.Bounded());
+    auto selected = SelectTreeFixtureWarmStages(handoff);
+    REQUIRE(selected[0]);
+    REQUIRE(selected[1]);
+    CHECK(*selected[0] == R"(dz\plants\tree\data\t_piceaabies_trunk_dxt5.paa)");
+    CHECK(*selected[1] == R"(dz\plants\tree\data\t_piceaabies_trunk_no.paa)");
+
+    handoff.materials[1].key = R"(dz\plants\tree\data\d_piceaabies_stumpb_trunk_a.rvmat)";
+    REQUIRE(handoff.Bounded());
+    selected = SelectTreeFixtureWarmStages(handoff);
+    CHECK(selected[0] == nullptr); // same filename in a different material grants no authority
+    CHECK(selected[1] != nullptr);
+
+    handoff.materials[1].key = R"(dz\plants\tree\data\t_piceaabies_2d_trunk.rvmat)";
+    handoff.materials[1].stageName = R"(dz\plants\tree\data\other_dxt5.paa)";
+    selected = SelectTreeFixtureWarmStages(handoff);
+    CHECK(selected[0] == nullptr);
+    handoff.generation = 0;
+    selected = SelectTreeFixtureWarmStages(handoff);
+    CHECK(selected[0] == nullptr);
+    CHECK(selected[1] == nullptr);
+}
+
 static const char* kSuper = R"CFG(
 ambient[]={1.0,1.0,1.0,1.0};
 diffuse[]={1.0,1.0,1.0,1.0};

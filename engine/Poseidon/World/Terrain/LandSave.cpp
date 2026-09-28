@@ -4275,7 +4275,7 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                     }
                     if (conv.rapStages) try
                     {
-                        // One exact DayZ tree stage, under an additional default-off switch.
+                        // At most two exact DayZ tree stages, under an additional default-off switch.
                         // Candidate names are advisory until this owner captures a current
                         // initialized PAA binding; the worker never touches a mounted bank.
                         static const bool rapStageWarm = [] {
@@ -4291,33 +4291,38 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                             if (token.generation == conv.rapStages->generation &&
                                 token.modelIdentity == conv.model->sourcePath)
                             {
-                                for (const auto& material : conv.rapStages->materials)
+                                std::vector<WarmTextureRead> reads;
+                                reads.reserve(2);
+                                for (const std::string* stage :
+                                     SelectTreeFixtureWarmStages(*conv.rapStages))
                                 {
-                                    const bool exactMaterial =
-                                        material.key == R"(dz\plants\tree\data\t_piceaabies_2d_trunk.rvmat)" ||
-                                        material.key == R"(dz\plants\tree\data\d_piceaabies_stumpb_trunk_a.rvmat)";
-                                    if (!exactMaterial || material.stageName !=
-                                        R"(dz\plants\tree\data\t_piceaabies_trunk_no.paa)") continue;
+                                    if (!stage) continue;
                                     WarmTextureRead read;
                                     const bool captured = GEngine->CaptureWarmRapStageRead(
-                                        material.stageName.c_str(), read);
+                                        stage->c_str(), read);
                                     if (captured)
                                     {
-                                        std::vector<WarmTextureRead> reads;
                                         reads.push_back(std::move(read));
-                                        const auto submitted = _modernObjectPreparer->SubmitWarmTextures(
-                                            placement.modelIndex, token, std::move(reads));
                                         static std::atomic<unsigned> rapWarmRows{0};
-                                        if (rapWarmRows.fetch_add(1, std::memory_order_relaxed) < 2)
-                                            LOG_INFO(World, "RVMAT raP stage warm admission: modelIndex={} source={} captured=true submit={} (current PAA source; no Take/upload proof)",
-                                                placement.modelIndex, material.stageName,
-                                                static_cast<unsigned>(submitted));
-                                        break; // the two exact materials share this one stage
+                                        if (rapWarmRows.fetch_add(1, std::memory_order_relaxed) < 4)
+                                            LOG_INFO(World, "RVMAT raP stage warm admission: modelIndex={} source={} captured=true (current PAA source; no Take/upload proof)",
+                                                placement.modelIndex, *stage);
+                                        continue;
                                     }
                                     static std::atomic<unsigned> rapWarmRefusals{0};
-                                    if (rapWarmRefusals.fetch_add(1, std::memory_order_relaxed) < 2)
+                                    if (rapWarmRefusals.fetch_add(1, std::memory_order_relaxed) < 4)
                                         LOG_INFO(World, "RVMAT raP stage warm admission: modelIndex={} source={} captured=false (ordinary upload fallback)",
-                                            placement.modelIndex, material.stageName);
+                                            placement.modelIndex, *stage);
+                                }
+                                if (!reads.empty())
+                                {
+                                    const size_t count = reads.size();
+                                    const auto submitted = _modernObjectPreparer->SubmitWarmTextures(
+                                        placement.modelIndex, token, std::move(reads));
+                                    static std::atomic<unsigned> rapSubmitRows{0};
+                                    if (rapSubmitRows.fetch_add(1, std::memory_order_relaxed) < 2)
+                                        LOG_INFO(World, "RVMAT raP stage warm submit: modelIndex={} captured={} submit={} (no Take/upload proof)",
+                                            placement.modelIndex, count, static_cast<unsigned>(submitted));
                                 }
                             }
                         }
