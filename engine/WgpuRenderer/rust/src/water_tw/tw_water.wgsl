@@ -778,7 +778,13 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
         if (dR > 1e-7) {
             qDist = length(scene_rel_at(uvF, dR) - rel);
         }
-        var pathLen = clamp(min(Lter, qDist), 0.0, 400.0);
+        // (W9f, OP) Beyond ~2 km the scene behind the water is not taken from the depth buffer:
+        // there it is tens of metres of sea over kilometres of view, and the scene point it gives
+        // came out in steps from one pixel row to the next (debug views 6 and 21 from 15 km up:
+        // regular one-pixel rows of short path and bright sea bed -- the owner's cyan and white
+        // lines). The heightmap's path (Lter) and sea bed stand there instead.
+        let farT = smoothstep(1500.0, 2500.0, length(rel));
+        var pathLen = clamp(mix(min(Lter, qDist), Lter, farT), 0.0, 400.0);
         pathLen = min(pathLen, crestT);
         dbgPath = pathLen;
         dbgScene = sceneCol;
@@ -802,8 +808,8 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
         // filter, and deep water reads pale cyan instead of Tidewater's navy. The opaque copy holds
         // direct + ambient light already summed, so the two attenuations are blended by the direct
         // share of a flat bed's irradiance. Caustics are not ported here (W5).
-        if (dR > 1e-7 && !thruCrest) {
-            let bedPos = scene_rel_at(uvF, dR) + frame.cam_pos.xyz;
+        if ((dR > 1e-7 || farT > 0.5) && !thruCrest) {
+            let bedPos = select(scene_rel_at(uvF, dR) + frame.cam_pos.xyz, pos + Tv * min(Lter, 400.0), farT > 0.5);
             let dBed = max(tw.sea.x - bedPos.y, 0.0);
             if (dBed > 0.0) {
                 let sigTc = tw.absorption.rgb + tw.scattering.rgb;
