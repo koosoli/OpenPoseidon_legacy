@@ -1,5 +1,8 @@
 # TW-WATER W7 — performance pass and parity report
 
+> Later changes (W8–W12d: explosions on the water, the waterline, surf, boats, infantry) are in
+> `docs/tw-water-w8-w12-report.md`.
+
 Tidewater Native (`WGR_WATER_BACKEND=1`) against Current OP (`WGR_WATER_BACKEND=0`) on the W7
 camera paths. Plan: `.tw/probe/plan.md` §7 (performance), §8 (tests), §9 (when may the old path
 go), §12 (this template). Updated after W5e, W6j–W6l, W7h and W7j (storm, night, second coast,

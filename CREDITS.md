@@ -113,6 +113,12 @@ models, textures, cloud noise files) is used.
 | `water_tw/wake.rs`, `water_tw/tw_wake_kernel.wgsl`, `water_tw/tw_wake.wgsl` | `src/ocean/WakeSim.js` |
 | `water_tw/boat_spray.rs` (with the boat bodies and CPU-emitted tail in `spray.rs` / `tw_spray_update.wgsl`) | `src/player/BoatSpray.js` — its contact model is noted in the source as being "after threejs-water-pro", a product by the same author; it is used here under Tidewater's MIT grant on the repository owner's decision |
 
+Written for OpenPoseidon, with no Tidewater counterpart (not ported; listed so the table above
+reads as complete): `water_tw/impacts.rs` and `water_tw/tw_impact.wgsl` (shells and bullets on
+the water, TW-WATER W8b), `water_tw/probe.rs` and `water_tw/tw_probe.wgsl` (the drawn surface
+around the camera for the underwater split, W9a/W12d), `water_tw/tw_common.wgsl` and the
+backend plumbing in `water_tw/mod.rs` / `water_backend.rs`.
+
 ```
 MIT License
 

@@ -1,0 +1,84 @@
+; shells.sqs -- shell splashes in the water in front of the camera (Tidewater's plumes, ring
+; waves and foam). init.sqs keeps shellCam (the scripted camera) and what it is looking at
+; (shellTgtObj, or the point shellTgtPos when that is objNull) up to date for each shot. Every
+; 2.5-4 s a 120 mm or 125 mm HE round is dropped straight into the sea at a point in the camera's
+; view: 80-450 m from the camera toward what it looks at, up to a third of that distance to the
+; side, from 25 m up.
+;
+; They must not hurt anything: a point is used only if it is at least 60 m from every boat, man
+; and aircraft in the mission (their positions on the map; the aircraft are treated as if at sea
+; level, which only makes the check stricter) and 130 m from the LST's centre, and if it and four
+; points 30 m around it are all open water (a camera object set down there reads the sea level,
+; not ground). 120/125 mm HE does its indirect damage within about a metre of the burst
+; (indirectHitRange 1); at 35 m the harness still measured a few thousandths of damage on a boat,
+; at 60 m none. A point that fails is skipped rather than moved.
+_boats = [pbr1, pbr2, pbr3, pbr4]
+_air = [h1, h2, ch1, cb1, a1, a2, a3, a4]
+_n = 0
+shellsFired = 0
+@_time > 4
+
+#next
+~(2.5 + random 1.5)
+?_time > 110 : exit
+_cp = getPos shellCam
+_tp = shellTgtPos
+?!(isNull shellTgtObj) : _tp = getPos shellTgtObj
+_fx = (_tp select 0) - (_cp select 0)
+_fy = (_tp select 1) - (_cp select 1)
+_fl = sqrt (_fx * _fx + _fy * _fy)
+?_fl < 1 : goto "next"
+_fx = _fx / _fl
+_fy = _fy / _fl
+_dmax = _fl + 150
+?_dmax > 450 : _dmax = 450
+?_dmax < 120 : _dmax = 120
+_try = 0
+
+#pick
+_try = _try + 1
+?_try > 12 : goto "next"
+_d = 80 + random (_dmax - 80)
+_s = (random 2 - 1) * _d * 0.33
+_px = (_cp select 0) + _fx * _d - _fy * _s
+_py = (_cp select 1) + _fy * _d + _fx * _s
+
+; clear of everything that could be hurt
+_ok = true
+_lp = getPos lst1
+_dx = (_lp select 0) - _px
+_dy = (_lp select 1) - _py
+?(_dx * _dx + _dy * _dy) < 16900 : _ok = false
+_list = _boats + _air + (units s1) + (units s2) + (units s3) + (units s4) + [player]
+_i = 0
+#clear
+?(!_ok) or (_i >= count _list) : goto "checked"
+_p = getPos (_list select _i)
+_dx = (_p select 0) - _px
+_dy = (_p select 1) - _py
+?(_dx * _dx + _dy * _dy) < 3600 : _ok = false
+_i = _i + 1
+goto "clear"
+#checked
+?!_ok : goto "pick"
+
+; open water: the point and four points 30 m around it read the sea level, not ground
+_w = [[0, 0], [30, 0], [-30, 0], [0, 30], [0, -30]]
+_i = 0
+#water
+?_i >= count _w : goto "fire"
+_o = "camera" camCreate [_px + ((_w select _i) select 0), _py + ((_w select _i) select 1), 0]
+_z = (getPosASL _o) select 2
+camDestroy _o
+?_z > 4.3 : goto "pick"
+_i = _i + 1
+goto "water"
+
+#fire
+_ammo = "Shell125"
+?(_n mod 2) == 0 : _ammo = "Shell120"
+_s = _ammo camCreate [_px, _py, 25]
+_s setVelocity [0, 0, -250]
+_n = _n + 1
+shellsFired = _n
+goto "next"

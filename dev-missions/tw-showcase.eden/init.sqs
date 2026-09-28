@@ -1,0 +1,103 @@
+; Tidewater water showcase: Everon, south-east bay (map ~9800-10400 E, 1000-1600 N).
+; A 2-minute scripted camera over a platoon landing: an LST offshore, four PBRs running in to the
+; beach, UH-60s / a Chinook / a Cobra over the bay and two A-10 passes. Ends itself at 120 s.
+; Positions here are [east, north, height above the ground or sea surface].
+
+go = false
+go2 = false
+setViewDistance 3000
+showCinemaBorder false
+enableRadio false
+
+; music: Seventh - I'm Gonna Fly
+0 fadeMusic 0.8
+playMusic "7thIAmGonaFly"
+
+_cam = "camera" camCreate [10450, 690, 6]
+_cam cameraEffect ["internal", "back"]
+_cam camSetFov 0.75
+_cam camSetTarget lst1
+_cam camCommit 0
+titleCut ["", "BLACK IN", 3]
+titleText ["Tidewater - Everon, south coast", "PLAIN DOWN", 1]
+; shell splashes in the water in front of the camera, from 4 s to 110 s (never near anything:
+; shells.sqs); each shot below tells it what the camera looks at
+shellCam = _cam
+shellTgtObj = lst1
+shellTgtPos = [0, 0, 0]
+[] exec "shells.sqs"
+
+; --- shot 1 (0-18 s): skimming the open sea toward the LST and the boats alongside it
+_cam camSetPos [10380, 905, 9]
+_cam camCommit 18
+@_time > 17.5
+go = true
+
+; --- shot 2 (18-40 s): chasing PBR 2 on its run to the beach (A-10s cross the coast ~30 s)
+_cam camSetTarget pbr2
+_cam camSetRelPos [9, -24, 5]
+_cam camCommit 0
+shellTgtObj = pbr2
+#chase
+_cam camSetRelPos [9, -24, 5]
+_cam camCommit 0.25
+~0.25
+?_time < 40 : goto "chase"
+
+; --- shot 3 (40-62 s): from the sand at the west end of the beach, the boats arriving through the surf
+_cam camSetPos [9785, 1405, 2.5]
+_cam camSetTarget pbr1
+shellTgtObj = pbr1
+_cam camSetFov 0.6
+_cam camCommit 0
+_cam camSetPos [9800, 1415, 3.5]
+_cam camCommit 22
+@_time > 62
+
+; --- shot 4 (62-85 s): crane up over the surf as the squads wade ashore and run for the dunes
+_cam camSetPos [10010, 1370, 10]
+_cam camSetTarget [9890, 1520, 2]
+shellTgtObj = objNull
+shellTgtPos = [9890, 1520, 0]
+_cam camSetFov 0.75
+_cam camCommit 0
+_cam camSetPos [9905, 1415, 28]
+_cam camCommit 23
+; make sure nobody is left aboard a boat that has reached the beach -- only a boat that has
+; stopped: ordered out of a boat still under way, men were thrown out and 10-12 of the 24 died
+; (harness runs on dec/tidewater-w12d, with the legacy boat lift too)
+"if ((vehicle _x != _x) and (speed (vehicle _x) < 3)) then {unassignVehicle _x; _x action [""GETOUT"", vehicle _x]}" forEach (units s1 + units s2 + units s3 + units s4)
+go2 = true
+@_time > 85
+
+; --- shot 5 (85-105 s): behind the LST looking at the coast, the second A-10 pair crossing the beachhead
+_cam camSetPos [10560, 1160, 40]
+_cam camSetTarget [9950, 1520, 0]
+shellTgtObj = objNull
+shellTgtPos = [9950, 1520, 0]
+_cam camSetFov 0.7
+_cam camCommit 0
+_cam camSetPos [10360, 1010, 55]
+_cam camCommit 20
+@_time > 105
+
+; --- shot 6 (105-120 s): pull back and up to reveal the whole bay, then fade out
+_cam camSetPos [10150, 1250, 18]
+_cam camSetTarget [9950, 1500, 0]
+shellTgtObj = objNull
+shellTgtPos = [9950, 1500, 0]
+_cam camSetFov 0.8
+_cam camCommit 0
+_cam camSetPos [10260, 780, 190]
+_cam camCommit 15
+@_time > 116
+titleCut ["", "BLACK OUT", 3]
+3 fadeMusic 0
+@_time > 120
+; The dev-mission runner does not register the legacy endMission script operator.
+; A live camera effect also gates the normal mission-end transition.
+player cameraEffect ["terminate", "back"]
+camDestroy _cam
+; Use the supported dev mission-end command; the launcher always uses --dev.
+triEndMission "end1"
+exit
