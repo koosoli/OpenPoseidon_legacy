@@ -10543,7 +10543,16 @@ impl Gfx3d {
                 published_cached |= 1u64 << 34;
             }
         }
-        aggregate_existing_counts(completion, &facts, published_cached, self.view_applicability)
+        let mut snapshot = aggregate_existing_counts(completion, &facts,
+            published_cached, self.view_applicability);
+        // Count only exact current-request copies that are still in-flight and
+        // still Unknown in the applicable set. The existing rings do not track
+        // dropped copies, so report an explicit unavailable sentinel instead
+        // of a misleading zero. Neither field changes the status/proof gates.
+        snapshot.pending_samples = (self.cull.pending_target_count_mask(completion.identity)
+            & snapshot.unknown & snapshot.required).count_ones();
+        snapshot.dropped_samples = u32::MAX;
+        snapshot
     }
     pub fn shadow_target_count_fact(&mut self, device: &wgpu::Device,
                                     cascade: usize) -> cull::MainCountFact {

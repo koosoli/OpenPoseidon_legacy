@@ -695,6 +695,17 @@ enum MainCountSlot {
     Mapping { identity: MainCountIdentity, committed: bool, aborted: bool,
         done: mpsc::Receiver<Result<(), wgpu::BufferAsyncError>> },
 }
+impl MainCountSlot {
+    // Only a committed, non-aborted copy for this exact request can still
+    // resolve into a fact. Encoded and older in-flight slots are not pending
+    // evidence for the current diagnostic snapshot.
+    fn pending_for(&self, request: MainCountIdentity) -> bool {
+        matches!(self,
+            Self::Submitted { identity, committed: true, aborted: false } |
+            Self::Mapping { identity, committed: true, aborted: false, .. }
+            if *identity == request)
+    }
+}
 
 // The remaining 27 required views share three 108-byte frame slots. A slot is
 // never reused while its submitted copy can still be in flight.
@@ -707,12 +718,26 @@ enum BatchCountSlot {
     Mapping { identity: MainCountIdentity, copied: u32, committed: bool, aborted: bool,
         done: mpsc::Receiver<Result<(), wgpu::BufferAsyncError>> },
 }
+impl BatchCountSlot {
+    fn pending_copied_for(&self, request: MainCountIdentity) -> u32 {
+        match self {
+            Self::Submitted { identity, copied, committed: true, aborted: false } |
+            Self::Mapping { identity, copied, committed: true, aborted: false, .. }
+                if *identity == request => *copied,
+            _ => 0,
+        }
+    }
+}
 struct BatchCountRing {
     slots: Vec<(wgpu::Buffer, BatchCountSlot)>,
     armed: Option<MainCountIdentity>,
     latest: [MainCountFact; BATCH_COUNT_VIEWS],
 }
 impl BatchCountRing {
+    fn pending_mask(&self, request: MainCountIdentity) -> u32 {
+        self.slots.iter().fold(0, |mask, (_, state)|
+            mask | state.pending_copied_for(request))
+    }
     fn new(device: &wgpu::Device) -> Self {
         let slots = (0..3).map(|i| (device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(&format!("wgr_view_target_count_batch_{i}")),
@@ -1514,6 +1539,37 @@ impl CullState {
     }
     pub fn batch_target_count_fact(&self, index: usize) -> MainCountFact {
         self.batch_count.as_ref().map_or(MainCountFact::default(), |b| b.fact(index, self.instance_epoch()))
+    }
+
+    /// Exact current-request COUNT copies still awaiting their map result.
+    /// This observes only existing opt-in rings; it never queues or polls GPU
+    /// work. Bits follow the private 36-view diagnostic layout.
+    pub fn pending_target_count_mask(&self, request: MainCountIdentity) -> u64 {
+        fn ring_pending(ring: &Option<Vec<(wgpu::Buffer, MainCountSlot)>>,
+                        request: MainCountIdentity) -> bool {
+            ring.as_ref().is_some_and(|slots|
+                slots.iter().any(|(_, state)| state.pending_for(request)))
+        }
+        if request.token == 0 || request.cull_epoch != self.instance_epoch() {
+            return 0;
+        }
+        let mut mask = 0u64;
+        if ring_pending(&self.main_count_slots, request) { mask |= 1; }
+        for i in 0..4 {
+            if ring_pending(&self.shadow_count_slots[i], request) { mask |= 1u64 << (1 + i); }
+        }
+        if ring_pending(&self.local0_count_slots, request) { mask |= 1u64 << 5; }
+        if ring_pending(&self.sky0_count_slots, request) { mask |= 1u64 << 29; }
+        if ring_pending(&self.shadow_count_slots[4], request) { mask |= 1u64 << 34; }
+        if ring_pending(&self.reflection_count_slots, request) { mask |= 1u64 << 35; }
+        let batch = self.batch_count.as_ref().map_or(0, |ring| ring.pending_mask(request));
+        for direction in 1..5 {
+            if batch & (1 << (direction - 1)) != 0 { mask |= 1u64 << (29 + direction); }
+        }
+        for tile in 1..24 {
+            if batch & (1 << (4 + tile - 1)) != 0 { mask |= 1u64 << (5 + tile); }
+        }
+        mask
     }
 
     /// `view_index` is the actual shadow cull index, solar_count + local tile 0.
@@ -4206,6 +4262,33 @@ fn upload_slice<T: bytemuck::Pod>(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    fn pending_count_copy_requires_exact_committed_request() {
+        let current = MainCountIdentity { token: 7, model_id: 3,
+            source_generation: 11, cull_epoch: 13 };
+        let old = MainCountIdentity { token: 6, ..current };
+        assert!(!MainCountSlot::Encoded(current).pending_for(current));
+        assert!(!MainCountSlot::Submitted { identity: current, committed: false,
+            aborted: false }.pending_for(current));
+        assert!(!MainCountSlot::Submitted { identity: current, committed: true,
+            aborted: true }.pending_for(current));
+        let submitted = MainCountSlot::Submitted { identity: current,
+            committed: true, aborted: false };
+        assert!(submitted.pending_for(current));
+        assert!(!submitted.pending_for(old));
+        let (_tx, rx) = mpsc::channel();
+        let mapping = MainCountSlot::Mapping { identity: current,
+            committed: true, aborted: false, done: rx };
+        assert!(mapping.pending_for(current));
+        let copied = (1 << 0) | (1 << 4) | (1 << 26);
+        assert_eq!(BatchCountSlot::Submitted { identity: current, copied,
+            committed: true, aborted: false }.pending_copied_for(current), copied);
+        assert_eq!(BatchCountSlot::Submitted { identity: current, copied,
+            committed: true, aborted: true }.pending_copied_for(current), 0);
+        assert_eq!(BatchCountSlot::Submitted { identity: old, copied,
+            committed: true, aborted: false }.pending_copied_for(current), 0);
+    }
 
     #[test]
     fn cull_wgsl_validates() {

@@ -110,9 +110,12 @@ pub struct TargetIdentity {
     pub source_generation: u64,
 }
 
-/// Copied private ABI record. The renderer getter always sets `required=VIEW_MASK`.
-/// `status=0` means the current request's final queue completion is unproven;
-/// `1` means all 36 COUNT facts are known; `2` has at least one Unknown.
+/// Copied private ABI record. The renderer getter uses the exact frozen
+/// applicability mask. `status=0` means the current request's final queue
+/// completion is unproven; `1` means all required COUNT facts are known;
+/// `2` has at least one Unknown. Its `pending_samples` counts exact current
+/// request copies still in flight and Unknown; `dropped_samples=u32::MAX`
+/// means existing producer rings provide no reliable drop counter.
 /// No status means pixel visibility or safe mesh release.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

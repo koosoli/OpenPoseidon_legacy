@@ -2296,6 +2296,8 @@ static_assert(offsetof(WgrGeometryPassFacts,reflection_frame)==584);
 // 1=all required views known, 2=Unknown remains among required views.
 // Cached facts keep their original token but must match the current target and
 // exact published image. No state certifies pixels or Fine release/reclaim.
+// pending_samples counts current-request copies still awaiting map completion;
+// dropped_samples is UINT32_MAX because these existing rings do not count drops.
 struct WgrViewReferenceFacts {
  uint32_t version,struct_bytes,status,view_count;
  uint64_t render_token,instance_epoch,required,present,absent,unknown,cached;
