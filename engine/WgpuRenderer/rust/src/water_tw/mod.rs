@@ -440,6 +440,8 @@ pub struct Tidewater {
     wake_lanes: [[f32; 4]; wake::SLOTS * 4],
     // W6i boat bow spray
     boat_spray: boat_spray::BoatSpray,
+    // W5e: the frame's spot lights (the diver's torch is picked from them in prepare)
+    spots: Vec<crate::ffi::WgrLight>,
     // W7b: prepare CPU ms: sum, max, station update max, CDLOD selection sum, frames;
     // W7c: traces started, cache hits
     prep_stats: [f32; 7],
@@ -751,6 +753,7 @@ impl Tidewater {
             st_rx,
             st_pending: Vec::new(),
             st_cache: Vec::new(),
+            spots: Vec::new(),
             spray,
             uw,
             linear: linear > 0.5,
@@ -1002,7 +1005,8 @@ impl Tidewater {
         // W5a: the underwater composite's block (used only while OP's compositor is engaged)
         {
             let glow = glow_override().unwrap_or(p.tidewater_fx[2]);
-            let uwp = underwater::UwParams::new(cam, &p, self.linear, glow, spec.sizes, self.caustics.tiles, WATER_ABSORPTION, WATER_SCATTERING, p.underwater_gate[0] > 0.5);
+            let torch = underwater::pick_torch(&self.spots, [cam.cam_pos[0], cam.cam_pos[1], cam.cam_pos[2]]);
+            let uwp = underwater::UwParams::new(cam, &p, self.linear, glow, spec.sizes, self.caustics.tiles, WATER_ABSORPTION, WATER_SCATTERING, p.underwater_gate[0] > 0.5, torch);
             self.uw.set_frame(queue, &uwp);
         }
         self.fft.set_frame(queue, spec, p.tidewater[0][1], p.time, dt);
@@ -1089,6 +1093,13 @@ impl Tidewater {
     }
 
     /// W6: the wakes' slots, for the log.
+    /// W5e: this frame's lights; the spot lights are kept for the diver's torch (picked in
+    /// `prepare`, where the water camera is known).
+    pub fn set_lights(&mut self, lights: &[crate::ffi::WgrLight]) {
+        self.spots.clear();
+        self.spots.extend(lights.iter().filter(|l| l.dir[3] > 0.5).take(32).copied());
+    }
+
     /// W6j.1: the bow-spray diagnostics windows since the last call, one line each (drained).
     pub fn take_spray_diag(&mut self) -> Vec<String> {
         self.boat_spray

@@ -3906,6 +3906,10 @@ impl Renderer {
                 }
             }
         }
+        // W5e: the spot lights, for the Tidewater diver's torch
+        if let Some(tw) = self.water.tidewater_mut() {
+            tw.set_lights(lights);
+        }
         self.water.prepare(
             &self.device,
             &self.queue,
