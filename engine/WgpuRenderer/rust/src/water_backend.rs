@@ -431,8 +431,11 @@ impl WaterBackend {
     }
 
     pub fn submit_interactions(&mut self, queue: &wgpu::Queue, events: &[WgrWaterInteractionEvent]) {
-        if let Some(op) = self.op_mut() {
-            op.water.submit_interactions(queue, events);
+        match &mut self.active {
+            Active::CurrentOp(op) => op.water.submit_interactions(queue, events),
+            // TW-WATER W8b: explosions and bullets on the water become Tidewater splashes
+            Active::Tidewater(tw) => tw.submit_interactions(events),
+            Active::Empty => {}
         }
     }
 
