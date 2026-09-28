@@ -43,7 +43,8 @@ void writeU32(std::vector<uint8_t>& out, size_t offset, uint32_t value)
         out[offset + shift / 8] = static_cast<uint8_t>(value >> shift);
 }
 
-std::vector<uint8_t> minimalRap(const char* stageTexture = "a3\\rocks_f\\data\\stone_nohq.paa")
+std::vector<uint8_t> minimalRap(const char* stageTexture = "a3\\rocks_f\\data\\stone_nohq.paa",
+    const char* shader = "Super", int stageIndex = 1)
 {
     std::vector<uint8_t> out{0, 'r', 'a', 'P', 0, 0, 0, 0, 8, 0, 0, 0, 0x0a, 0x06, 0, 0};
     appendString(out, ""); // Root's binary parent-reference field.
@@ -52,7 +53,7 @@ std::vector<uint8_t> minimalRap(const char* stageTexture = "a3\\rocks_f\\data\\s
     out.push_back(1);
     out.push_back(0);
     appendString(out, "PixelShaderID");
-    appendString(out, "Super");
+    appendString(out, shader);
     out.push_back(2);
     appendString(out, "numbers");
     out.push_back(2);
@@ -66,7 +67,8 @@ std::vector<uint8_t> minimalRap(const char* stageTexture = "a3\\rocks_f\\data\\s
     appendU32(out, 0);
 
     out.push_back(0);
-    appendString(out, "Stage1");
+    const std::string stageName = "Stage" + std::to_string(stageIndex);
+    appendString(out, stageName.c_str());
     const size_t stageOffset = out.size();
     appendU32(out, 0);
 
@@ -174,10 +176,20 @@ TEST_CASE("Owned raP stage names are complete or refused", "[preparer][rap-stage
     const auto valid = extract(minimalRap());
     REQUIRE(valid.status == RapStageNamesStatus::Complete);
     REQUIRE(valid.names == std::vector<std::string>{"a3\\rocks_f\\data\\stone_nohq.paa"});
+    CHECK(valid.normalMapName == "a3\\rocks_f\\data\\stone_nohq.paa");
+
+    const auto macro = extract(minimalRap("dz\\plants\\tree\\data\\trunk_dxt5.paa", "TreeAdvTrunk", 2));
+    REQUIRE(macro.status == RapStageNamesStatus::Complete);
+    CHECK(macro.names.size() == 1);
+    CHECK(macro.normalMapName.empty()); // Stage2 has no WGPU MacroAmbient texture consumer.
+    const auto unknownShader = extract(minimalRap("a3\\rocks_f\\data\\stone_nohq.paa", "UnknownShader"));
+    CHECK(unknownShader.status == RapStageNamesStatus::Complete);
+    CHECK(unknownShader.normalMapName.empty());
 
     const auto procedural = extract(minimalRap("#(argb,8,8,3)color(1,1,1,1)"));
     CHECK(procedural.status == RapStageNamesStatus::Complete);
     CHECK(procedural.names.empty());
+    CHECK(procedural.normalMapName.empty());
 
     const auto unsupported = extract(minimalRap("a3/rocks_f/data/stone.png"));
     CHECK(unsupported.status == RapStageNamesStatus::Unsupported);
@@ -211,38 +223,40 @@ TEST_CASE("Owned raP stage names are complete or refused", "[preparer][rap-stage
     CHECK(extract(minimalRap(), "C:/host/stone.rvmat").status == RapStageNamesStatus::Unsupported);
 }
 
-TEST_CASE("raP owner candidate is bounded names-only metadata", "[preparer][rap-stage-names]")
+TEST_CASE("raP owner candidate is bounded NormalMap metadata with physical material identity", "[preparer][rap-stage-names]")
 {
+    Poseidon::BankReadMemberIdentity member;
+    member.archiveBytes = 4096; member.offset = 100; member.bytes = 925; member.fileId[0] = 17;
     Poseidon::RapStageCandidateHandoff handoff;
     CHECK_FALSE(handoff.Bounded());
     handoff.generation = 7; handoff.modelIndex = 3;
     handoff.materials.push_back({"dz\\plants\\tree\\data\\t_piceaabies_2d_trunk.rvmat",
-        "dz\\plants\\tree\\data\\t_piceaabies_trunk_no.paa"});
+        "dz\\plants\\tree\\data\\t_piceaabies_trunk_no.paa",
+        Poseidon::RapStageCandidateHandoff::Consumer::NormalMap, member});
     REQUIRE(handoff.Bounded());
     auto moved = std::make_unique<Poseidon::RapStageCandidateHandoff>(std::move(handoff));
     REQUIRE(moved->Bounded());
     CHECK(moved->modelIndex == 3);
     CHECK(moved->materials[0].stageName == "dz\\plants\\tree\\data\\t_piceaabies_trunk_no.paa");
-    moved->materials.push_back({"dz\\plants\\tree\\data\\t_piceaabies_2d_trunk.rvmat",
-        "dz\\plants\\tree\\data\\t_piceaabies_trunk_dxt5.paa"});
+    CHECK(moved->materials[0].SameCurrentMember(member));
+    auto replaced = member; ++replaced.offset;
+    CHECK_FALSE(moved->materials[0].SameCurrentMember(replaced));
     moved->materials.push_back({"dz\\plants\\tree\\data\\d_piceaabies_stumpb_trunk_a.rvmat",
-        "dz\\plants\\tree\\data\\t_piceaabies_trunk_no.paa"});
+        "dz\\plants\\tree\\data\\t_piceaabies_trunk_no.paa",
+        Poseidon::RapStageCandidateHandoff::Consumer::NormalMap, member});
     CHECK(moved->Bounded());
     moved->materials.push_back({"dz\\plants\\tree\\data\\d_piceaabies_stumpb_trunk_a.rvmat",
-        "dz\\plants\\tree\\data\\t_piceaabies_trunk_dxt5.paa"});
-    CHECK(moved->Bounded());
-    const std::string secondMaterial = moved->materials[3].key;
-    moved->materials[3].key = "third.rvmat";
-    CHECK_FALSE(moved->Bounded()); // only two exact material identities
-    moved->materials[3].key = moved->materials[0].key;
-    CHECK_FALSE(moved->Bounded()); // at most two stages for one material
-    moved->materials[3].key = secondMaterial;
-    moved->materials.push_back({"third.rvmat", "third.paa"});
-    CHECK_FALSE(moved->Bounded());
+        "dz\\plants\\tree\\data\\t_piceaabies_trunk_dxt5.paa",
+        Poseidon::RapStageCandidateHandoff::Consumer::NormalMap, member});
+    CHECK_FALSE(moved->Bounded()); // one consumed normal per material
     Poseidon::RapStageCandidateHandoff tooLong;
     tooLong.generation = 7;
-    tooLong.materials.push_back({"material.rvmat", std::string(241, 'x')});
+    tooLong.materials.push_back({"material.rvmat", std::string(241, 'x'),
+        Poseidon::RapStageCandidateHandoff::Consumer::NormalMap, member});
     CHECK_FALSE(tooLong.Bounded());
+    moved->materials.pop_back();
+    moved->materials[0].sourceMember.bytes = 0;
+    CHECK_FALSE(moved->Bounded());
 }
 
 static const char* kSuper = R"CFG(

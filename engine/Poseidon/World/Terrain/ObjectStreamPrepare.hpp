@@ -75,6 +75,7 @@
 // be a full set of unwanted models.)
 
 #include <Poseidon/Graphics/Textures/ColdPaaHandoff.hpp>
+#include <Poseidon/IO/Streams/QBStream.hpp>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -92,12 +93,21 @@ struct WarmTextureRead
     std::shared_ptr<const ArchiveSourceBinding> initializedSource;
 };
 
-// Advisory names from a completed, exact-source raP read. No texture or source
-// authority travels with this payload; the owner must recapture/validate later.
+// Advisory NormalMap names from a completed, exact-source raP read. No texture
+// authority travels with this payload; the owner rechecks the material member
+// and recaptures the current PAA binding before optional warm preparation.
 struct RapStageCandidateHandoff
 {
-    struct Material { std::string key, stageName; };
-    static constexpr size_t MaxMaterials = 2, MaxStagesPerMaterial = 2;
+    enum class Consumer : uint8_t { NormalMap };
+    struct Material
+    {
+        std::string key, stageName;
+        Consumer consumer = Consumer::NormalMap;
+        BankReadMemberIdentity sourceMember;
+        bool SameCurrentMember(const BankReadMemberIdentity& current) const noexcept
+        { return sourceMember == current; }
+    };
+    static constexpr size_t MaxMaterials = 2, MaxStagesPerMaterial = 1;
     static constexpr size_t MaxCandidates = MaxMaterials * MaxStagesPerMaterial;
     uint64_t generation = 0;
     uint32_t modelIndex = 0;
@@ -116,6 +126,9 @@ struct RapStageCandidateHandoff
             const auto& material = materials[i];
             if (material.key.empty() || material.key.size() > 240 ||
                 material.stageName.empty() || material.stageName.size() > 240 ||
+                material.consumer != Consumer::NormalMap || !material.sourceMember.bytes ||
+                material.sourceMember.offset > material.sourceMember.archiveBytes ||
+                material.sourceMember.bytes > material.sourceMember.archiveBytes - material.sourceMember.offset ||
                 !add(material.key.capacity() + 1) || !add(material.stageName.capacity() + 1))
                 return false;
             size_t appearances = 0;

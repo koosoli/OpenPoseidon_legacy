@@ -427,7 +427,7 @@ struct ObjectStreamPreparer::Impl
     struct ConvertJob
     {
         std::vector<PackedTextureRead> textures;
-        std::vector<CapturedRapMaterial> rapMaterials; // names-only owner handoff, no PAA work
+        std::vector<CapturedRapMaterial> rapMaterials; // typed NormalMap owner handoff, no PAA work
 
         std::unique_ptr<render::ColdPaaRead> coldTexture;
         uint64_t textureGeneration = 0;
@@ -780,16 +780,18 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                                 if (!observed.names.empty()) observed.names += ';';
                                 observed.names += name;
                             }
-                            if (result.status == Streaming::RapStageNamesStatus::Complete && !result.names.empty() &&
-                                result.names.size() <= RapStageCandidateHandoff::MaxStagesPerMaterial)
+                            if (result.status == Streaming::RapStageNamesStatus::Complete &&
+                                !result.normalMapName.empty())
                             {
                                 if (!rapHandoff)
                                 {
                                     rapHandoff = std::make_unique<RapStageCandidateHandoff>();
                                     rapHandoff->generation = jobGen; rapHandoff->modelIndex = job.index;
                                 }
-                                for (auto& name : result.names)
-                                    rapHandoff->materials.push_back({selected.key, std::move(name)});
+                                rapHandoff->materials.push_back({selected.key,
+                                    std::move(result.normalMapName),
+                                    RapStageCandidateHandoff::Consumer::NormalMap,
+                                    observed.member});
                             }
                         }
                         rapObservations.push_back(std::move(observed));

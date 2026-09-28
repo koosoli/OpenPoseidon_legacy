@@ -4275,9 +4275,9 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                     }
                     if (conv.rapStages) try
                     {
-                        // One exact DayZ tree stage, under an additional default-off switch.
-                        // Candidate names are advisory until this owner captures a current
-                        // initialized PAA binding; the worker never touches a mounted bank.
+                        // One exact DayZ tree NormalMap, under an additional default-off switch.
+                        // The worker's raP name is historical. Recheck the physical material
+                        // member before this owner captures the current initialized PAA binding.
                         static const bool rapStageWarm = [] {
                             const char* flag = std::getenv("WGR_OBJECT_STREAM_RAP_STAGE_WARM_CAPTURE");
                             return flag && std::strcmp(flag, "1") == 0 &&
@@ -4296,8 +4296,27 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                                     const bool exactMaterial =
                                         material.key == R"(dz\plants\tree\data\t_piceaabies_2d_trunk.rvmat)" ||
                                         material.key == R"(dz\plants\tree\data\d_piceaabies_stumpb_trunk_a.rvmat)";
-                                    if (!exactMaterial || material.stageName !=
+                                    if (!exactMaterial || material.consumer !=
+                                        RapStageCandidateHandoff::Consumer::NormalMap || material.stageName !=
                                         R"(dz\plants\tree\data\t_piceaabies_trunk_no.paa)") continue;
+                                    bool sameMaterialMember = false;
+                                    if (QFBank* bank = QIFStreamB::AutoBank(material.key.c_str()))
+                                    {
+                                        const RString prefix = bank->GetPrefix();
+                                        if (prefix.GetLength() >= 0 &&
+                                            static_cast<size_t>(prefix.GetLength()) < material.key.size() &&
+                                            !CmpStartStr(material.key.c_str(), prefix))
+                                        {
+                                            const char* member = material.key.c_str() + prefix.GetLength();
+                                            if (auto current = bank->CaptureReadRequest(member, true))
+                                            {
+                                                BankReadMemberIdentity currentMember;
+                                                sameMaterialMember = current->CopyMemberIdentity(currentMember) &&
+                                                    material.SameCurrentMember(currentMember);
+                                            }
+                                        }
+                                    }
+                                    if (!sameMaterialMember) continue; // Ordinary material path handles remounts.
                                     WarmTextureRead read;
                                     const bool captured = GEngine->CaptureWarmRapStageRead(
                                         material.stageName.c_str(), read);

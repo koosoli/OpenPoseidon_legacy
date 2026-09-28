@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Poseidon/Asset/Formats/Material/RvMaterialSource.hpp>
+#include <Poseidon/Asset/Formats/Material/ShaderSchema.hpp>
 
 #include <algorithm>
 #include <cstdint>
@@ -27,6 +28,7 @@ struct RapStageNames
 {
     RapStageNamesStatus status = RapStageNamesStatus::Invalid;
     std::vector<std::string> names; // canonical virtual .paa/.pac keys, no source lease
+    std::string normalMapName; // shader-schema NormalMap slot, not a filename-suffix guess
 };
 
 inline RapStageNames ExtractOwnedRapStageNames(std::span<const char> ownedBytes,
@@ -69,6 +71,13 @@ inline RapStageNames ExtractOwnedRapStageNames(std::span<const char> ownedBytes,
                 return {RapStageNamesStatus::Unsupported, {}};
             if (std::find(result.names.begin(), result.names.end(), path.canonical()) == result.names.end())
                 result.names.push_back(path.canonical());
+        }
+        const auto translated = Asset::Material::TranslateMaterial(material);
+        if (translated.schemaKnown)
+        {
+            const auto& normal = translated.Slot(Asset::Material::MaterialSlot::NormalMap);
+            if (normal.present && !normal.texture.isProcedural)
+                result.normalMapName = normal.texture.path.canonical();
         }
         return result;
     }
