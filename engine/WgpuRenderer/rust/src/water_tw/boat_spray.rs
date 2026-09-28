@@ -56,7 +56,10 @@ const STEADY_MIST: f32 = 0.015;
 
 /// W6k: `WGR_TW_BOAT_SPRAY_TUNE=cap=..,drop=..,lig=..,white=..,mist=..,up=..` (any subset) scales
 /// the per-frame particle cap, the drops, ligaments, white water, mist and the upward launch
-/// speed, for tuning captures. All 1 by default.
+/// speed, for tuning captures, relative to W6i.8's levels. Defaults (W6l, arm C of
+/// .tw/shots-spray-tune*): at W6i.8's levels a patrol boat settling its bow back in at 17 m/s
+/// disappeared in white from the quarter view (both the PBR and BoatE); these keep the bow sheet
+/// and the wings of spray along the forward third without burying the hull.
 #[derive(Clone, Copy, Debug)]
 struct Tune {
     cap: f32,
@@ -70,7 +73,7 @@ struct Tune {
 fn tune() -> Tune {
     static V: std::sync::OnceLock<Tune> = std::sync::OnceLock::new();
     *V.get_or_init(|| {
-        let mut t = Tune { cap: 1.0, drop: 1.0, lig: 1.0, white: 1.0, mist: 1.0, up: 1.0 };
+        let mut t = Tune { cap: 0.45, drop: 1.0, lig: 0.35, white: 0.35, mist: 0.15, up: 0.8 };
         if let Ok(v) = std::env::var("WGR_TW_BOAT_SPRAY_TUNE") {
             for kv in v.split(',') {
                 let mut it = kv.splitn(2, '=');
