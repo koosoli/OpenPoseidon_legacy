@@ -218,7 +218,8 @@ impl ViewReferenceFacts {
     /// submit before the main encoder; later queued-but-unsubmitted copies remain Unknown.
     /// Nonzero submitted bits also keep this staging buffer occupied through abort.
     pub fn mark_submitted(&mut self, token: u64, views: u64) -> bool {
-        if views == 0 { return false; }
+        // A late submit cannot retroactively certify a committed render attempt.
+        if token == 0 || token != self.token || self.committed || views == 0 { return false; }
         for p in self.pending.iter_mut().flatten() {
             if p.token == token && views & !p.copied == 0 {
                 p.submitted |= views;
@@ -231,7 +232,7 @@ impl ViewReferenceFacts {
     /// Accept this render call only after it returned successfully and all copied command
     /// buffers were submitted. This still does not mean GPU completion.
     pub fn commit(&mut self, token: u64) -> bool {
-        if token != self.token || self.committed { return false; }
+        if token == 0 || token != self.token || self.committed { return false; }
         for p in self.pending.iter_mut().flatten() {
             if p.token == token { p.committed = true; }
         }
@@ -441,6 +442,20 @@ mod tests {
         assert_eq!(facts.snapshot().pending_samples, 2);
         assert!(!facts.resolve(aborted, Some(&counts())));
         assert_eq!(facts.snapshot().unknown, 0b11);
+    }
+
+    #[test]
+    fn commit_cannot_precede_or_invent_a_submit() {
+        let mut facts = ViewReferenceFacts::default();
+        assert!(!facts.commit(0), "an unstarted frame cannot commit");
+        assert!(!facts.mark_submitted(0, 1));
+        assert!(facts.begin(1, 8, target(1), 1, 1, generations(1)));
+        let ticket = facts.queue_copy(0).unwrap();
+        assert!(facts.commit(1));
+        assert!(!facts.mark_submitted(1, 1), "a late submit cannot repair this frame");
+        assert!(!facts.resolve(ticket, Some(&counts())));
+        assert_eq!(facts.snapshot().unknown, 1);
+        assert_eq!(facts.snapshot().absent, 0);
     }
 
     #[test]
