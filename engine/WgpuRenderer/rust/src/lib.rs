@@ -6341,6 +6341,10 @@ impl Renderer {
                     self.gfx3d.copy_shadow_target_count(&mut encoder, cascade);
             }
         }
+        // GI RSM view 5 has its own COUNT word. A cached RSM, disabled GI,
+        // failed cull or missing indirect draw stays Unknown for this request.
+        let gi_count_copied = main_count_copied &&
+            self.gfx3d.copy_gi_target_count(&mut encoder);
         self.gfx3d.resolve_lod_demand();
         self.gfx3d.resolve_mip_feedback(&mut encoder);
         self.water_visibility.resolve(&mut encoder);
@@ -6360,6 +6364,9 @@ impl Renderer {
                 }
             }
         }
+        let gi_count_ready = gi_count_copied && main_count_ready &&
+            main_count_request.is_some_and(|(token, _, _)|
+                self.gfx3d.shadow_target_count_before_submit(token, 4));
         self.queue.submit(std::iter::once(main_commands));
         let main_count_submitted = main_count_ready && main_count_request.is_some_and(|(token, _, _)|
             self.gfx3d.main_target_count_submitted(token));
@@ -6368,6 +6375,9 @@ impl Renderer {
                 if shadow_count_ready[cascade] {
                     self.gfx3d.shadow_target_count_submitted(token, cascade);
                 }
+            }
+            if gi_count_ready {
+                self.gfx3d.shadow_target_count_submitted(token, 4);
             }
         }
         self.gpu_timers

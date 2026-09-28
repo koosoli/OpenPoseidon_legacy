@@ -596,9 +596,12 @@ pub struct CullState {
     main_dispatch_recorded: Cell<bool>,
     // Each solar cascade shares the explicit main request identity, but never
     // a counter or answer. All staging remains absent until the opt-in request.
-    shadow_count_slots: [Option<Vec<(wgpu::Buffer, MainCountSlot)>>; 4],
-    shadow_count_armed: [Option<MainCountIdentity>; 4],
-    shadow_count_latest: [MainCountFact; 4],
+    // Index 4 is the GI sun-proxy view, backed by sky cull view 5. It uses the
+    // same private request and slot state machine, but never a solar counter.
+    shadow_count_slots: [Option<Vec<(wgpu::Buffer, MainCountSlot)>>; 5],
+    shadow_count_armed: [Option<MainCountIdentity>; 5],
+    shadow_count_latest: [MainCountFact; 5],
+    gi_dispatch_recorded: Cell<bool>,
     bind: Option<wgpu::BindGroup>,
 
     // Per-cascade shadow views (§6 multi-view). Length = active cascade count this frame
@@ -1081,8 +1084,9 @@ impl CullState {
             main_count_last_token: 0,
             main_dispatch_recorded: Cell::new(false),
             shadow_count_slots: std::array::from_fn(|_| None),
-            shadow_count_armed: [None; 4],
-            shadow_count_latest: [MainCountFact::default(); 4],
+            shadow_count_armed: [None; 5],
+            shadow_count_latest: [MainCountFact::default(); 5],
+            gi_dispatch_recorded: Cell::new(false),
             bind: None,
             shadow_views: Vec::new(),
             reflection_view: None,
@@ -1115,7 +1119,7 @@ impl CullState {
         // An earlier failed render may have submitted an aborted cascade copy
         // without leaving a C++ pending getter. Reclaim it on the next explicit
         // request; the ordinary frame never polls this private ring.
-        for cascade in 0..4 {
+        for cascade in 0..5 {
             if self.shadow_count_slots[cascade].is_some() {
                 self.harvest_shadow_target_count(device, cascade);
             }
@@ -1124,8 +1128,9 @@ impl CullState {
         self.main_count_armed = None;
         self.main_count_latest = MainCountFact::default();
         self.main_dispatch_recorded.set(false);
-        self.shadow_count_armed = [None; 4];
-        self.shadow_count_latest = [MainCountFact::default(); 4];
+        self.shadow_count_armed = [None; 5];
+        self.shadow_count_latest = [MainCountFact::default(); 5];
+        self.gi_dispatch_recorded.set(false);
         let epoch = self.instance_epoch();
         if token == 0 || token == u64::MAX || token <= self.main_count_last_token ||
             model_id == INVALID_MODEL || model_id as usize >= self.models.len() ||
@@ -1147,11 +1152,15 @@ impl CullState {
         self.main_count_last_token = token;
         self.main_count_armed = Some(identity);
         self.main_count_latest.identity = identity;
-        for cascade in 0..4 {
+        for cascade in 0..5 {
             if self.shadow_count_slots[cascade].is_none() {
                 self.shadow_count_slots[cascade] = Some((0..3).map(|i| {
                     (device.create_buffer(&wgpu::BufferDescriptor {
-                        label: Some(&format!("wgr_shadow{cascade}_target_count_{i}")),
+                        label: Some(&if cascade == 4 {
+                            format!("wgr_gi_target_count_{i}")
+                        } else {
+                            format!("wgr_shadow{cascade}_target_count_{i}")
+                        }),
                         size: 4,
                         usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
                         mapped_at_creation: false,
@@ -1168,14 +1177,20 @@ impl CullState {
         self.shadow_count_armed.get(cascade).is_some_and(Option::is_some)
     }
 
-    /// The owner calls this only after this solar cascade's actual cull and depth draw
-    /// were recorded and its render pass was closed. The counter is private to
-    /// that cascade; a zero from the main view cannot substitute for it.
+    /// The owner calls this only after the selected view's actual cull and indirect
+    /// draw were recorded and its render pass was closed. 0..3 are solar depth
+    /// views; internal slot 4 is the GI RSM sky view. Each counter is private.
     pub fn copy_shadow_target_count(&mut self, encoder: &mut wgpu::CommandEncoder,
                                     cascade: usize) -> bool {
         let Some(armed) = self.shadow_count_armed.get(cascade) else { return false; };
         let Some(identity) = *armed else { return false; };
-        let Some(view) = self.shadow_views.get(cascade) else { return false; };
+        let view = if cascade == 4 {
+            if !self.gi_dispatch_recorded.get() { return false; }
+            self.sky_views.get(super::sky_vis::DIRECTION_COUNT)
+        } else {
+            self.shadow_views.get(cascade)
+        };
+        let Some(view) = view else { return false; };
         if self.instance_epoch() != identity.cull_epoch ||
             view.params.target_count_enabled == 0 ||
             view.params.target_model_id != identity.model_id { return false; }
@@ -2379,6 +2394,9 @@ impl CullState {
             &self.scatter_pipeline,
             view.stats_view,
         );
+        if i == super::sky_vis::DIRECTION_COUNT && self.shadow_count_armed[4].is_some() {
+            self.gi_dispatch_recorded.set(true);
+        }
     }
 
     // Record the color-occlusion cull (Hi-Z): frustum + distance + LOD + occlusion, collapsed.
@@ -4578,6 +4596,8 @@ pub(crate) mod tests {
         for cascade in 0..4 {
             cull.set_shadow_params(cascade, if cascade % 2 == 0 { params } else { empty_params });
         }
+        cull.set_sky_view_count(&device, super::super::sky_vis::DIRECTION_COUNT + 1);
+        cull.set_sky_params(super::super::sky_vis::DIRECTION_COUNT, params);
         assert!(cull.arm_main_target_count(&device, 1, model, 17));
         cull.prepare(&device, &queue);
 
@@ -4586,26 +4606,34 @@ pub(crate) mod tests {
         cull.begin_frame_stats(&mut enc);
         cull.dispatch(&mut enc);
         for cascade in 0..4 { assert!(cull.dispatch_shadow(&mut enc, cascade)); }
+        assert!(!cull.copy_shadow_target_count(&mut enc, 4),
+            "a prepared GI view without its cull cannot publish a zero");
+        cull.dispatch_sky(&mut enc, super::super::sky_vis::DIRECTION_COUNT);
         assert!(cull.copy_main_target_count(&mut enc));
         for cascade in 0..4 { assert!(cull.copy_shadow_target_count(&mut enc, cascade)); }
+        assert!(cull.copy_shadow_target_count(&mut enc, 4));
         cull.resolve_stats(&mut enc);
         let commands = enc.finish();
         assert!(cull.main_target_count_before_submit(1));
         for cascade in 0..4 { assert!(cull.shadow_target_count_before_submit(1, cascade)); }
+        assert!(cull.shadow_target_count_before_submit(1, 4));
         queue.submit(std::iter::once(commands));
         assert!(cull.main_target_count_submitted(1));
         for cascade in 0..4 { assert!(cull.shadow_target_count_submitted(1, cascade)); }
+        assert!(cull.shadow_target_count_submitted(1, 4));
         assert!(cull.main_target_count_commit(1));
         for cascade in 0..4 { assert!(cull.shadow_target_count_commit(1, cascade)); }
+        assert!(cull.shadow_target_count_commit(1, 4));
         // The harvest is deliberately non-blocking, so pump it until the ring drains rather than
         // asserting on the first (necessarily empty) attempt.
         for _ in 0..64 {
             cull.harvest_stats(&device);
             cull.harvest_main_target_count(&device);
             for cascade in 0..4 { cull.harvest_shadow_target_count(&device, cascade); }
+            cull.harvest_shadow_target_count(&device, 4);
             if cull.stats().valid &&
                 cull.main_target_count_fact().status == MainCountStatus::Present &&
-                (0..4).all(|cascade| cull.shadow_target_count_fact(cascade).status != MainCountStatus::Unknown) {
+                (0..5).all(|view| cull.shadow_target_count_fact(view).status != MainCountStatus::Unknown) {
                 break;
             }
             let _ = device.poll(wgpu::PollType::wait_indefinitely());
@@ -4626,6 +4654,10 @@ pub(crate) mod tests {
                 MainCountStatus::Absent
             } else { MainCountStatus::Present });
         }
+        let gi = cull.shadow_target_count_fact(4);
+        assert_eq!(gi.identity, first.identity);
+        assert_eq!(gi.status, MainCountStatus::Present);
+        assert_eq!(gi.count, 8, "GI must read sky view 5's dispatched counter");
         let m = stats.views[STATS_VIEW_MAIN];
         assert_eq!(
             m.instances, 8,
@@ -4659,6 +4691,8 @@ pub(crate) mod tests {
         other_instance.model = other;
         cull.instance_add(other_instance);
         assert!(cull.arm_main_target_count(&device, 2, model, 29));
+        assert_eq!(cull.shadow_target_count_fact(4).status, MainCountStatus::Unknown,
+            "a new request cannot inherit a cached RSM count");
         cull.prepare(&device, &queue);
         let mut second = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         cull.begin_frame_stats(&mut second);
@@ -4682,23 +4716,30 @@ pub(crate) mod tests {
         cull.begin_frame_stats(&mut third);
         cull.dispatch(&mut third);
         for cascade in 0..4 { assert!(cull.dispatch_shadow(&mut third, cascade)); }
+        cull.dispatch_sky(&mut third, super::super::sky_vis::DIRECTION_COUNT);
         assert!(cull.copy_main_target_count(&mut third));
         for cascade in 0..4 { assert!(cull.copy_shadow_target_count(&mut third, cascade)); }
+        assert!(cull.copy_shadow_target_count(&mut third, 4));
         let commands = third.finish();
         assert!(cull.main_target_count_before_submit(3));
         for cascade in 0..4 { assert!(cull.shadow_target_count_before_submit(3, cascade)); }
+        assert!(cull.shadow_target_count_before_submit(3, 4));
         queue.submit(std::iter::once(commands));
         assert!(cull.main_target_count_submitted(3));
         for cascade in 0..4 { assert!(cull.shadow_target_count_submitted(3, cascade)); }
+        assert!(cull.shadow_target_count_submitted(3, 4));
         assert!(cull.main_target_count_commit(3));
         for cascade in 0..3 { assert!(cull.shadow_target_count_commit(3, cascade)); }
+        assert!(cull.shadow_target_count_commit(3, 4));
         cull.shadow_target_count_abort(3, 3);
         assert_eq!(cull.main_target_count_fact().status, MainCountStatus::Unknown);
         for _ in 0..64 {
             cull.harvest_main_target_count(&device);
             for cascade in 0..4 { cull.harvest_shadow_target_count(&device, cascade); }
+            cull.harvest_shadow_target_count(&device, 4);
             if cull.main_target_count_fact().status == MainCountStatus::Absent &&
-                (0..3).all(|cascade| cull.shadow_target_count_fact(cascade).status == MainCountStatus::Absent) { break; }
+                (0..3).all(|cascade| cull.shadow_target_count_fact(cascade).status == MainCountStatus::Absent) &&
+                cull.shadow_target_count_fact(4).status == MainCountStatus::Absent { break; }
             let _ = device.poll(wgpu::PollType::wait_indefinitely());
         }
         let absent = cull.main_target_count_fact();
@@ -4714,6 +4755,10 @@ pub(crate) mod tests {
         }
         assert_eq!(cull.shadow_target_count_fact(3).status, MainCountStatus::Unknown,
             "aborted cascade must not inherit another cascade's absence");
+        let gi_absent = cull.shadow_target_count_fact(4);
+        assert_eq!(gi_absent.identity, absent.identity);
+        assert_eq!(gi_absent.status, MainCountStatus::Absent);
+        assert_eq!(gi_absent.count, 0, "GI zero needs its own current cull and commit");
         eprintln!("PASS exact target-model GPU COUNT: main and four isolated solar cascades");
     }
 

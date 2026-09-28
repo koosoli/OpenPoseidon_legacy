@@ -4038,6 +4038,7 @@ pub struct Gfx3d {
     // One opt-in cascade-0 depth-draw closure. A prepared view or cull dispatch
     // alone cannot authorize an absence readback.
     shadow_target_draw_closed_mask: std::cell::Cell<u32>,
+    gi_target_draw_closed: std::cell::Cell<bool>,
     local_view_key: [Option<u64>; MAX_LOCAL_SHADOWS],
     // Exact bounded CPU-caster pose witnesses; lazily allocated only when a
     // cached local view has an actual skinned caster. Retained/sky and concurrent
@@ -4880,6 +4881,7 @@ impl Gfx3d {
             } else {None},
             geometry_shadow_cull_mask: std::cell::Cell::new(0),
             shadow_target_draw_closed_mask: std::cell::Cell::new(0),
+            gi_target_draw_closed: std::cell::Cell::new(false),
             local_view_key: [None; MAX_LOCAL_SHADOWS],
             local_pose_cache: None,
             local_pose_cache_enabled: std::env::var("WGR_LOCAL_SHADOW_POSE_CACHE").is_ok_and(|v| v == "1"),
@@ -6604,6 +6606,7 @@ impl Gfx3d {
     pub fn begin_geometry_pass_facts(&self,shadow:&WgrShadowPass) {
         self.geometry_shadow_cull_mask.set(0);
         self.shadow_target_draw_closed_mask.set(0);
+        self.gi_target_draw_closed.set(false);
         if let Some(cell)=&self.geometry_pass_facts {let mut f=cell.get();f.begin(self.cull.instance_epoch(),shadow.count,shadow.local_count);cell.set(f);}
     }
     pub fn geometry_pass_reflection_configured(&self,active:bool) {
@@ -9055,7 +9058,7 @@ impl Gfx3d {
         });
         let off = ((SKY_UBO_SLOT + i) as u64 * self.shadow_pass_ubo.stride) as u32;
         rp.set_bind_group(0, pass_bind, &[off]);
-        self.draw_gpu_driven_with(
+        let drew_gpu = self.draw_gpu_driven_with(
             &mut rp,
             &self.gpu_rsm_pipeline,
             textures,
@@ -9066,7 +9069,11 @@ impl Gfx3d {
         );
         drop(rp);
         timers.end(encoder, crate::gpu_timers::Region::GiRsm);
+        if !drew_gpu { return; }
         self.gi.mark_rsm_drawn();
+        if self.cull.shadow_count_armed(4) {
+            self.gi_target_draw_closed.set(true);
+        }
         if let Some(cell)=&self.geometry_pass_facts {
             if self.geometry_depth_recordable(self.gpu_sky_group1.get(i).and_then(|b|b.as_ref()),self.cull.sky_out_args(i),self.cull.sky_counter_buf(i)) {
                 let mut f=cell.get();f.record_gi();cell.set(f);
@@ -9824,6 +9831,9 @@ impl Gfx3d {
         cascade < 4 && self.shadow_target_draw_closed_mask.get() & (1 << cascade) != 0 &&
             self.cull.copy_shadow_target_count(encoder, cascade)
     }
+    pub fn copy_gi_target_count(&mut self, encoder: &mut wgpu::CommandEncoder) -> bool {
+        self.gi_target_draw_closed.get() && self.cull.copy_shadow_target_count(encoder, 4)
+    }
     pub fn shadow_target_count_before_submit(&mut self, token: u64, cascade: usize) -> bool {
         self.cull.shadow_target_count_before_submit(token, cascade)
     }
@@ -9839,13 +9849,13 @@ impl Gfx3d {
     pub fn main_target_count_commit(&mut self, token: u64) -> bool {
         let main = self.cull.main_target_count_commit(token);
         if main {
-            for cascade in 0..4 { self.cull.shadow_target_count_commit(token, cascade); }
+            for cascade in 0..5 { self.cull.shadow_target_count_commit(token, cascade); }
         }
         main
     }
     pub fn main_target_count_abort(&mut self, token: u64) {
         self.cull.main_target_count_abort(token);
-        for cascade in 0..4 { self.cull.shadow_target_count_abort(token, cascade); }
+        for cascade in 0..5 { self.cull.shadow_target_count_abort(token, cascade); }
     }
     pub fn main_target_count_fact(&mut self, device: &wgpu::Device) -> cull::MainCountFact {
         self.cull.harvest_main_target_count(device);
@@ -9858,6 +9868,9 @@ impl Gfx3d {
                                     cascade: usize) -> cull::MainCountFact {
         self.cull.harvest_shadow_target_count(device, cascade);
         self.cull.shadow_target_count_fact(cascade)
+    }
+    pub fn gi_target_count_fact(&mut self, device: &wgpu::Device) -> cull::MainCountFact {
+        self.shadow_target_count_fact(device, 4)
     }
 
     pub fn cull_dispatch(
