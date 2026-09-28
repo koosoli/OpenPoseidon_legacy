@@ -633,6 +633,9 @@ void Ship::Simulate(float deltaT, SimulationImportance prec)
 
                     Vector3 gFriction(VZero);
                     float maxUnder = 0;
+                    // W11d diagnostic (POSEIDON_BOAT_DIAG): what holds the hull at its height
+                    int diagWaterN = 0;
+                    float diagUnder = 0, diagUnderFlat = 0, diagLift = 0, diagGain = 0;
                     for (int i = 0; i < gCollision.Size(); i++)
                     {
                         // info.pos is world space
@@ -694,11 +697,16 @@ void Ship::Simulate(float deltaT, SimulationImportance prec)
                                 // from W11b alone). 9x at rest (about 0.5 m for the PBR), 12x flat out.
                                 const float gain = legacyPlaning ? legacyGain : 9 + floatMin(fwd * 0.2f, 3.0f);
                                 planingDragScale = gain / legacyGain;
+                                diagGain = gain;
                                 const float flat = floatMax(info.underFlat, 0.0f);
                                 const float wave = info.under - flat;
                                 const float lift = (flat * gain + wave) * Inv(floatMax(info.under, 1e-3f));
                                 pForce *= floatMax(lift, 1.0f);
                             }
+                            ++diagWaterN;
+                            diagUnder += info.under;
+                            diagUnderFlat += info.underFlat;
+                            diagLift += pForce.Y();
                             pCenter = info.pos - wCenter;
                             torque += pCenter.CrossProduct(pForce * 0.2);
                             totForce += pForce;
@@ -808,6 +816,20 @@ void Ship::Simulate(float deltaT, SimulationImportance prec)
                             AddForce(wCenter + pCenter, -pForce * InvMass(), Color(1, 0, 1, 0.5));
 #endif
                             friction += pForce;
+                        }
+                    }
+                    static const bool buoyDiag = std::getenv("POSEIDON_BOAT_DIAG") != nullptr;
+                    if (buoyDiag && diagWaterN > 0)
+                    {
+                        static std::unordered_map<uint32_t, float> nextBuoy;
+                        float& next = nextBuoy[RenderId()];
+                        if (Glob.time.toFloat() >= next)
+                        {
+                            next = Glob.time.toFloat() + 1.0f;
+                            LOG_INFO(Physics, "Boat buoyancy: t={:.1f} object={} points={}/{} under sum={:.3f} mean={:.3f} flat mean={:.3f} gain={:.1f} lift/weight={:.3f} y={:.2f} sea={:.2f}",
+                                     Glob.time.toFloat(), RenderId(), diagWaterN, gCollision.Size(), diagUnder,
+                                     diagUnder / diagWaterN, diagUnderFlat / diagWaterN, diagGain,
+                                     diagLift / floatMax(GetMass() * G_CONST, 1.0f), Position().Y(), GLandscape->GetSeaLevel());
                         }
                     }
                     if (_waterContact && _sink < 2)
