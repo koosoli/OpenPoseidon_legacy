@@ -5767,6 +5767,12 @@ impl Gfx3d {
         }
         let vbase = mesh.alloc.vbase;
         self.pool.update_verts(queue, vbase, verts);
+        // The pool handle can be shared by multiple model sections. Until a
+        // complete reverse owner map exists, advance the optional per-model
+        // witness after a successful on-renderer vertex update. Old samples
+        // fail; new samples can use the new serial. The off-handle uploader
+        // remains a separate unobserved path.
+        self.cull.advance_retained_target_revision_for_geometry();
     }
 
     // REN-THR-009 — the three reads an off-handle upload needs, exposed without the

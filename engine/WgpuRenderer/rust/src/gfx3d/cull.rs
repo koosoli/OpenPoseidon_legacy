@@ -459,6 +459,17 @@ impl InstanceTable {
         }
     }
 
+    /// The changed section/mesh may belong to the armed model. Advance its
+    /// serial conservatively, so old samples fail but fresh samples can follow.
+    /// Only overflow permanently invalidates the witness.
+    fn advance_target_revision_for_unattributed_geometry(&mut self) {
+        if let Some(witness) = &mut self.target_revision {
+            if witness.revision != 0 {
+                witness.revision = witness.revision.checked_add(1).unwrap_or(0);
+            }
+        }
+    }
+
     fn handle(slot: u32, generation: u8) -> u32 {
         debug_assert!(slot < 0x00FF_FFFE, "instance slot space exhausted");
         (slot + 1) | ((generation as u32) << 24)
@@ -601,6 +612,15 @@ fn replace_dynamic_instances(dynamic: &mut Vec<InstanceGpu>, next: &[InstanceGpu
     }
     dynamic.clear();
     dynamic.extend_from_slice(next);
+}
+
+fn resolved_sections_changed(previous: &[SectionGpu], next: &[SectionGpu],
+                             instances: &mut InstanceTable) -> bool {
+    if previous == next { return false; }
+    // This comparison already belonged to set_sections. Unknown reverse
+    // ownership advances only an explicitly armed target witness.
+    instances.advance_target_revision_for_unattributed_geometry();
+    true
 }
 
 pub struct CullState {
@@ -2601,7 +2621,10 @@ impl CullState {
     // re-upload only when something actually changed, so a quiet frame costs nothing. The LOD
     // section_base offsets index this table and are unaffected (order is preserved).
     pub fn set_sections(&mut self, sections: &[SectionGpu]) {
-        if self.sections.as_slice() != sections {
+        if resolved_sections_changed(&self.sections, sections, &mut self.instances) {
+            // Resolved mesh ranges can change without an instance-table mutation.
+            // Without a reverse section->model owner, the optional target witness
+            // cannot safely identify which model changed.
             if self.sections.len() != sections.len() {
                 if let Some(pool) = &mut self.section_spans { pool.disable(); }
             }
@@ -2635,6 +2658,13 @@ impl CullState {
 
     pub fn retained_target_revision(&self) -> Option<(u32, u64)> {
         self.instances.target_revision()
+    }
+
+    /// An audited geometry mutation without reverse target-model ownership may
+    /// affect the armed model. Invalidate old samples by advancing its serial;
+    /// the next exact sample can use the new value. Visual policy is unchanged.
+    pub fn advance_retained_target_revision_for_geometry(&mut self) {
+        self.instances.advance_target_revision_for_unattributed_geometry();
     }
 
     /// Handles refused by the retained instance table since startup (ID-3). Nonzero means
@@ -6773,6 +6803,48 @@ pub(crate) mod tests {
             "target-row reorder conservatively invalidates");
         assert_eq!(static_instances.epoch, global_epoch,
             "diagnostic witness never changes global visual-cache scheduling");
+    }
+
+    #[test]
+    fn unknown_geometry_dependency_advances_revision_and_old_fact_mismatches() {
+        let mut table = InstanceTable::default();
+        table.advance_target_revision_for_unattributed_geometry();
+        assert_eq!(table.target_revision(), None, "unarmed normal path stays empty");
+        assert_eq!(table.arm_target_revision(7), Some(1));
+        let old_fact_revision = table.target_revision().unwrap().1;
+        table.changed_target_model(8, INVALID_MODEL);
+        assert_eq!(table.target_revision(), Some((7, 1)));
+        table.advance_target_revision_for_unattributed_geometry();
+        assert_eq!(table.target_revision(), Some((7, 2)));
+        assert_ne!(table.target_revision().unwrap().1, old_fact_revision,
+            "an earlier cached COUNT stamp cannot match after geometry changes");
+        let mut row = InstanceGpu::zeroed(); row.model = 7;
+        table.add(row);
+        assert_eq!(table.arm_target_revision(7), Some(3));
+        assert_eq!(table.arm_target_revision(8), Some(4));
+        table.target_revision.as_mut().unwrap().revision = u64::MAX;
+        table.advance_target_revision_for_unattributed_geometry();
+        assert_eq!(table.arm_target_revision(7), None,
+            "only serial overflow permanently refuses future samples");
+    }
+
+    #[test]
+    fn changed_resolved_sections_advance_only_an_armed_witness() {
+        let old = [SectionGpu::zeroed()];
+        let mut changed = old;
+        changed[0].index_count = 3;
+        let mut table = InstanceTable::default();
+        assert!(!resolved_sections_changed(&old, &old, &mut table));
+        assert!(resolved_sections_changed(&old, &changed, &mut table));
+        assert_eq!(table.target_revision(), None, "default path remains unarmed");
+        assert_eq!(table.arm_target_revision(7), Some(1));
+        assert!(!resolved_sections_changed(&old, &old, &mut table));
+        assert_eq!(table.target_revision(), Some((7, 1)));
+        assert!(resolved_sections_changed(&old, &changed, &mut table));
+        assert_eq!(table.target_revision(), Some((7, 2)));
+        assert!(resolved_sections_changed(&changed, &old, &mut table));
+        assert_eq!(table.target_revision(), Some((7, 3)),
+            "a fresh sample after each change has a usable new serial");
     }
 
 
