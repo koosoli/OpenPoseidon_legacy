@@ -6359,6 +6359,10 @@ impl Renderer {
         // failed cull or missing indirect draw stays Unknown for this request.
         let gi_count_copied = main_count_copied &&
             self.gfx3d.copy_gi_target_count(&mut encoder);
+        // Zenith is sky view 0, separate from GI view 5. A cached layer,
+        // skipped cull or missing indirect depth draw leaves this Unknown.
+        let sky0_count_copied = main_count_copied &&
+            self.gfx3d.copy_sky0_target_count(&mut encoder);
         // Tile 0 is a separate local-light view; its cull index moves with the
         // number of active solar cascades and can be zero at night. Only a fresh
         // tile pass, never a cache reuse, authorizes this private counter copy.
@@ -6386,6 +6390,9 @@ impl Renderer {
         let gi_count_ready = gi_count_copied && main_count_ready &&
             main_count_request.is_some_and(|(token, _, _)|
                 self.gfx3d.shadow_target_count_before_submit(token, 4));
+        let sky0_count_ready = sky0_count_copied && main_count_ready &&
+            main_count_request.is_some_and(|(token, _, _)|
+                self.gfx3d.sky0_target_count_before_submit(token));
         let local0_count_ready = local0_count_copied && main_count_ready &&
             main_count_request.is_some_and(|(token, _, _)|
                 self.gfx3d.local0_target_count_before_submit(token));
@@ -6400,6 +6407,9 @@ impl Renderer {
             }
             if gi_count_ready {
                 self.gfx3d.shadow_target_count_submitted(token, 4);
+            }
+            if sky0_count_ready {
+                self.gfx3d.sky0_target_count_submitted(token);
             }
             if local0_count_ready {
                 self.gfx3d.local0_target_count_submitted(token);

@@ -614,6 +614,12 @@ pub struct CullState {
     reflection_count_armed: Option<MainCountIdentity>,
     reflection_count_latest: MainCountFact,
     reflection_dispatch_recorded: Cell<bool>,
+    // Interior sky zenith is index 0; GI sun proxy is index 5 and has its
+    // own request state. A cached zenith layer cannot create a new sample.
+    sky0_count_slots: Option<Vec<(wgpu::Buffer, MainCountSlot)>>,
+    sky0_count_armed: Option<MainCountIdentity>,
+    sky0_count_latest: MainCountFact,
+    sky0_dispatch_recorded: Cell<bool>,
     bind: Option<wgpu::BindGroup>,
 
     // Per-cascade shadow views (§6 multi-view). Length = active cascade count this frame
@@ -1106,6 +1112,10 @@ impl CullState {
             reflection_count_armed: None,
             reflection_count_latest: MainCountFact::default(),
             reflection_dispatch_recorded: Cell::new(false),
+            sky0_count_slots: None,
+            sky0_count_armed: None,
+            sky0_count_latest: MainCountFact::default(),
+            sky0_dispatch_recorded: Cell::new(false),
             bind: None,
             shadow_views: Vec::new(),
             reflection_view: None,
@@ -1149,6 +1159,9 @@ impl CullState {
         if self.reflection_count_slots.is_some() {
             self.harvest_reflection_target_count(device);
         }
+        if self.sky0_count_slots.is_some() {
+            self.harvest_sky0_target_count(device);
+        }
         self.target_model_id = self.target_model_default;
         self.main_count_armed = None;
         self.main_count_latest = MainCountFact::default();
@@ -1160,6 +1173,9 @@ impl CullState {
         self.reflection_count_armed = None;
         self.reflection_count_latest = MainCountFact::default();
         self.reflection_dispatch_recorded.set(false);
+        self.sky0_count_armed = None;
+        self.sky0_count_latest = MainCountFact::default();
+        self.sky0_dispatch_recorded.set(false);
         self.gi_dispatch_recorded.set(false);
         let epoch = self.instance_epoch();
         if token == 0 || token == u64::MAX || token <= self.main_count_last_token ||
@@ -1224,6 +1240,18 @@ impl CullState {
         }
         self.reflection_count_armed = Some(identity);
         self.reflection_count_latest.identity = identity;
+        if self.sky0_count_slots.is_none() {
+            self.sky0_count_slots = Some((0..3).map(|i| {
+                (device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some(&format!("wgr_sky0_target_count_{i}")),
+                    size: 4,
+                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                    mapped_at_creation: false,
+                }), MainCountSlot::Idle)
+            }).collect());
+        }
+        self.sky0_count_armed = Some(identity);
+        self.sky0_count_latest.identity = identity;
         true
     }
 
@@ -1250,6 +1278,26 @@ impl CullState {
         *state = MainCountSlot::Encoded(identity);
         self.reflection_count_armed = None;
         self.reflection_dispatch_recorded.set(false);
+        true
+    }
+
+    /// The caller must additionally prove a fresh zenith layer and a closed
+    /// indirect depth pass. This only checks the exact cull/counter owner.
+    pub fn copy_sky0_target_count(&mut self, encoder: &mut wgpu::CommandEncoder) -> bool {
+        let Some(identity) = self.sky0_count_armed else { return false; };
+        if !self.sky0_dispatch_recorded.get() ||
+            self.instance_epoch() != identity.cull_epoch { return false; }
+        let Some(view) = self.sky_views.first() else { return false; };
+        if view.params.target_count_enabled == 0 ||
+            view.params.target_model_id != identity.model_id { return false; }
+        let Some(slots) = self.sky0_count_slots.as_mut() else { return false; };
+        let Some((dst, state)) = slots.iter_mut()
+            .find(|(_, state)| matches!(state, MainCountSlot::Idle)) else { return false; };
+        encoder.copy_buffer_to_buffer(&view.counter_buf,
+            TARGET_MODEL_COUNT_BYTE_OFFSET, dst, 0, 4);
+        *state = MainCountSlot::Encoded(identity);
+        self.sky0_count_armed = None;
+        self.sky0_dispatch_recorded.set(false);
         true
     }
 
@@ -1680,6 +1728,126 @@ impl CullState {
         }
         fact
     }
+
+    /// Private zenith-view diagnostic: only the encoder containing its copied
+    /// counter may submit; a failed final frame aborts even an accepted copy.
+    pub fn sky0_target_count_before_submit(&mut self, token: u64) -> bool {
+        let Some(slots) = self.sky0_count_slots.as_mut() else { return false; };
+        for (_, state) in slots {
+            if let MainCountSlot::Encoded(identity) = state {
+                if identity.token == token {
+                    *state = MainCountSlot::Submitted {
+                        identity: *identity, committed: false, aborted: true };
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    pub fn sky0_target_count_submitted(&mut self, token: u64) -> bool {
+        let Some(slots) = self.sky0_count_slots.as_mut() else { return false; };
+        for (_, state) in slots {
+            if let MainCountSlot::Submitted { identity, committed, aborted } = state {
+                if identity.token == token {
+                    *committed = false;
+                    *aborted = false;
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    pub fn sky0_target_count_commit(&mut self, token: u64) -> bool {
+        let Some(slots) = self.sky0_count_slots.as_mut() else { return false; };
+        for (_, state) in slots {
+            if let MainCountSlot::Submitted { identity, committed, aborted } = state {
+                if identity.token == token && !*aborted {
+                    *committed = true;
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    pub fn sky0_target_count_abort(&mut self, token: u64) {
+        if self.sky0_count_latest.identity.token == token {
+            self.sky0_count_latest.status = MainCountStatus::Unknown;
+            self.sky0_count_latest.count = 0;
+        }
+        if self.sky0_count_armed.is_some_and(|id| id.token == token) {
+            self.sky0_count_armed = None;
+        }
+        self.sky0_dispatch_recorded.set(false);
+        if let Some(slots) = self.sky0_count_slots.as_mut() {
+            for (_, state) in slots {
+                match state {
+                    MainCountSlot::Encoded(id) if id.token == token => *state = MainCountSlot::Idle,
+                    MainCountSlot::Submitted { identity, aborted, .. } if identity.token == token =>
+                        *aborted = true,
+                    MainCountSlot::Mapping { identity, aborted, .. } if identity.token == token =>
+                        *aborted = true,
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    pub fn harvest_sky0_target_count(&mut self, device: &wgpu::Device) {
+        let current_epoch = self.instance_epoch();
+        let Some(slots) = self.sky0_count_slots.as_mut() else { return; };
+        for (buf, state) in slots.iter_mut() {
+            if let MainCountSlot::Submitted { identity, committed, aborted } = state {
+                if !*committed && !*aborted { continue; }
+                let (tx, rx) = mpsc::channel();
+                buf.slice(..).map_async(wgpu::MapMode::Read, move |r| { let _ = tx.send(r); });
+                *state = MainCountSlot::Mapping {
+                    identity: *identity, committed: *committed, aborted: *aborted, done: rx };
+            }
+        }
+        let _ = device.poll(wgpu::PollType::Poll);
+        for (buf, state) in slots.iter_mut() {
+            let current = std::mem::replace(state, MainCountSlot::Idle);
+            match current {
+                MainCountSlot::Mapping { identity, committed, aborted, done } => {
+                    match done.try_recv() {
+                        Ok(Ok(())) => {
+                            let data = buf.slice(..).get_mapped_range();
+                            let count = u32::from_le_bytes(data[..4].try_into().unwrap());
+                            drop(data);
+                            buf.unmap();
+                            if committed && !aborted &&
+                                identity == self.sky0_count_latest.identity &&
+                                current_epoch == identity.cull_epoch {
+                                self.sky0_count_latest.count = count;
+                                self.sky0_count_latest.status = if count == 0 {
+                                    MainCountStatus::Absent
+                                } else { MainCountStatus::Present };
+                            }
+                        }
+                        Ok(Err(_)) | Err(mpsc::TryRecvError::Disconnected) => {}
+                        Err(mpsc::TryRecvError::Empty) => {
+                            *state = MainCountSlot::Mapping {
+                                identity, committed, aborted, done };
+                        }
+                    }
+                }
+                other => *state = other,
+            }
+        }
+    }
+
+    pub fn sky0_target_count_fact(&self) -> MainCountFact {
+        let mut fact = self.sky0_count_latest;
+        if self.instance_epoch() != fact.identity.cull_epoch {
+            fact.status = MainCountStatus::Unknown;
+            fact.count = 0;
+        }
+        fact
+    }
+
     pub fn local0_target_count_before_submit(&mut self, token: u64) -> bool {
         let Some(slots) = self.local0_count_slots.as_mut() else { return false; };
         for (_, state) in slots {
@@ -2700,19 +2868,19 @@ impl CullState {
     // Record the interior sky-visibility cull (top-down ortho box). Recorded before the sky
     // depth pass so wgpu barriers the compute writes -> that pass's indirect reads. No-op until
     // set_sky_params + prepare() have run with instances present.
-    pub fn dispatch_sky(&self, encoder: &mut wgpu::CommandEncoder, i: usize) {
+    pub fn dispatch_sky(&self, encoder: &mut wgpu::CommandEncoder, i: usize) -> bool {
         if self.params.instance_count == 0 {
-            return;
+            return false;
         }
         let Some(view) = self.sky_views.get(i) else {
-            return;
+            return false;
         };
         let (Some(bind), Some(args), Some(sec)) = (
             view.bind.as_ref(),
             view.out_args.as_ref(),
             view.sec_count.as_ref(),
         ) else {
-            return;
+            return false;
         };
         self.record_collapse(
             encoder,
@@ -2726,9 +2894,13 @@ impl CullState {
             &self.scatter_pipeline,
             view.stats_view,
         );
+        if i == 0 && self.sky0_count_armed.is_some() {
+            self.sky0_dispatch_recorded.set(true);
+        }
         if i == super::sky_vis::DIRECTION_COUNT && self.shadow_count_armed[4].is_some() {
             self.gi_dispatch_recorded.set(true);
         }
+        true
     }
 
     // Record the color-occlusion cull (Hi-Z): frustum + distance + LOD + occlusion, collapsed.
@@ -6312,5 +6484,125 @@ pub(crate) mod tests {
         assert!(cull.reflection_count_slots.as_ref().unwrap().iter()
             .all(|(_, state)| matches!(state, MainCountSlot::Idle)),
             "an aborted early submission must drain its staging slot");
+    }
+#[test]
+    fn sky0_target_count_present_absent_cache_and_abort() {
+        let Some((device, queue)) = headless() else { return; };
+        let mut cull = CullState::new(&device);
+        let sections = [SectionGpu {
+            first_index: 0, index_count: 3, base_vertex: 0, variant: 0,
+        }];
+        let lods = [LodGpu {
+            resolution: 0.0, section_base: 0, section_count: 1, is_decal: 0,
+        }];
+        let materials = [SectionMaterialGpu::zeroed()];
+        let model = cull.register_model(1.0, &lods, &sections, &materials);
+        let absent_model = cull.register_model(1.0, &lods, &sections, &materials);
+        assert!(cull.sky0_count_slots.is_none());
+        assert!(!cull.arm_main_target_count(&device, 1, model, 0));
+        assert!(cull.sky0_count_slots.is_none(),
+            "invalid request cannot allocate zenith diagnostic staging");
+        for _ in 0..8 {
+            cull.instance_add(InstanceGpu {
+                world: Mat4::IDENTITY.to_cols_array(),
+                center: [0.0, 0.0, 0.0, 1.0],
+                model, flags: 0, cull_radius: 0, _pad: 0,
+                conform0: [0.0; 4], conform1: [0.0; 4], conform2: [0.0; 4],
+            });
+        }
+        let eye = Vec3::new(0.0, 0.0, 10.0);
+        let mut view = Mat4::look_at_rh(eye, Vec3::ZERO, Vec3::Y);
+        view.w_axis = Vec4::new(0.0, 0.0, 0.0, 1.0);
+        let proj = Mat4::perspective_infinite_reverse_rh(60f32.to_radians(), 1.0, 0.1);
+        let mut params = CullParamsGpu::zeroed();
+        params.frustum = frustum_planes(proj * view);
+        params.cam_pos = [eye.x, eye.y, eye.z, 0.0];
+        params.objects_z2 = 1.0e6;
+        params.lod_scale = 1.0;
+        params.lod_inv_width = 1.0;
+        cull.set_params(params);
+        cull.set_sky_view_count(&device, super::super::sky_vis::DIRECTION_COUNT + 1);
+        cull.set_sky_params(0, params);
+        cull.set_sky_params(super::super::sky_vis::DIRECTION_COUNT, params);
+
+        assert!(cull.arm_main_target_count(&device, 2, model, 17));
+        cull.prepare(&device, &queue);
+        let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        cull.begin_frame_stats(&mut enc);
+        assert!(!cull.copy_sky0_target_count(&mut enc),
+            "prepared but undispatched zenith cannot publish zero");
+        assert!(cull.dispatch_sky(&mut enc, super::super::sky_vis::DIRECTION_COUNT));
+        assert!(!cull.copy_sky0_target_count(&mut enc),
+            "GI view 5 must not witness zenith view 0");
+        assert!(cull.dispatch_sky(&mut enc, 0));
+        assert!(cull.copy_sky0_target_count(&mut enc));
+        assert!(cull.sky0_target_count_before_submit(2));
+        queue.submit(std::iter::once(enc.finish()));
+        assert!(cull.sky0_target_count_submitted(2));
+        assert!(cull.sky0_target_count_commit(2));
+        for _ in 0..64 {
+            cull.harvest_sky0_target_count(&device);
+            if cull.sky0_target_count_fact().status == MainCountStatus::Present { break; }
+            let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        }
+        let present = cull.sky0_target_count_fact();
+        assert_eq!(present.identity.source_generation, 17);
+        assert_eq!(present.status, MainCountStatus::Present);
+        assert_eq!(present.count, 8);
+
+        // Production caches this layer until the snapped VP or instance epoch
+        // changes. A new token with no refresh has no fresh cull or draw.
+        assert!(cull.arm_main_target_count(&device, 3, model, 18));
+        cull.prepare(&device, &queue);
+        let mut cached = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        cull.begin_frame_stats(&mut cached);
+        assert!(cull.dispatch_sky(&mut cached, super::super::sky_vis::DIRECTION_COUNT));
+        assert!(!cull.copy_sky0_target_count(&mut cached));
+        assert!(!super::super::sky0_count_pass_ready(true, &[], true));
+        assert!(!super::super::sky0_count_pass_ready(true, &[1], true));
+        assert!(!super::super::sky0_count_pass_ready(true, &[0], false));
+        assert!(!super::super::sky0_count_pass_ready(false, &[0], true));
+        assert!(super::super::sky0_count_pass_ready(true, &[0], true));
+        assert_eq!(cull.sky0_target_count_fact().status, MainCountStatus::Unknown);
+        cull.sky0_target_count_abort(3);
+
+        assert!(cull.arm_main_target_count(&device, 4, absent_model, 19));
+        cull.prepare(&device, &queue);
+        let mut zero = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        cull.begin_frame_stats(&mut zero);
+        assert!(cull.dispatch_sky(&mut zero, 0));
+        assert!(cull.copy_sky0_target_count(&mut zero));
+        assert!(cull.sky0_target_count_before_submit(4));
+        queue.submit(std::iter::once(zero.finish()));
+        assert!(cull.sky0_target_count_submitted(4));
+        assert!(cull.sky0_target_count_commit(4));
+        for _ in 0..64 {
+            cull.harvest_sky0_target_count(&device);
+            if cull.sky0_target_count_fact().status == MainCountStatus::Absent { break; }
+            let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        }
+        let absent = cull.sky0_target_count_fact();
+        assert_eq!(absent.identity.model_id, absent_model);
+        assert_eq!(absent.status, MainCountStatus::Absent);
+        assert_eq!(absent.count, 0);
+
+        assert!(cull.arm_main_target_count(&device, 5, model, 20));
+        cull.prepare(&device, &queue);
+        let mut aborted = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        cull.begin_frame_stats(&mut aborted);
+        assert!(cull.dispatch_sky(&mut aborted, 0));
+        assert!(cull.copy_sky0_target_count(&mut aborted));
+        assert!(cull.sky0_target_count_before_submit(5));
+        queue.submit(std::iter::once(aborted.finish()));
+        assert!(cull.sky0_target_count_submitted(5));
+        cull.sky0_target_count_abort(5);
+        for _ in 0..64 {
+            cull.harvest_sky0_target_count(&device);
+            let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        }
+        assert_eq!(cull.sky0_target_count_fact().status, MainCountStatus::Unknown);
+        assert!(cull.sky0_count_slots.as_ref().unwrap().iter()
+            .all(|(_, state)| matches!(state, MainCountSlot::Idle)),
+            "aborted submitted copy must drain");
     }
 }

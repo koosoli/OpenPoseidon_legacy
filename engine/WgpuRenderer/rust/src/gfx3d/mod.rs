@@ -3118,6 +3118,11 @@ pub(crate) fn interior_sky_cache() -> bool {
     })
 }
 
+// A cached layer is useful for lighting but cannot answer a new COUNT request.
+pub(crate) fn sky0_count_pass_ready(active: bool, refresh: &[usize], draw_closed: bool) -> bool {
+    active && refresh.contains(&0) && draw_closed
+}
+
 /// LGT-026: local-light shadow views are cached per view and re-rendered only when something
 /// that can change their contents changes. Default ON; WGR_LOCAL_SHADOW_CACHE=0 redraws every
 /// view every frame (the pre-cache behaviour, and the A/B arm every measurement here is against).
@@ -4062,6 +4067,7 @@ pub struct Gfx3d {
     local0_target_draw_closed: std::cell::Cell<bool>,
     gi_target_draw_closed: std::cell::Cell<bool>,
     reflection_target_draw_closed: std::cell::Cell<bool>,
+    sky0_target_draw_closed: std::cell::Cell<bool>,
     local_view_key: [Option<u64>; MAX_LOCAL_SHADOWS],
     // Exact bounded CPU-caster pose witnesses; lazily allocated only when a
     // cached local view has an actual skinned caster. Retained/sky and concurrent
@@ -4907,6 +4913,7 @@ impl Gfx3d {
             local0_target_draw_closed: std::cell::Cell::new(false),
             gi_target_draw_closed: std::cell::Cell::new(false),
             reflection_target_draw_closed: std::cell::Cell::new(false),
+            sky0_target_draw_closed: std::cell::Cell::new(false),
             local_view_key: [None; MAX_LOCAL_SHADOWS],
             local_pose_cache: None,
             local_pose_cache_enabled: std::env::var("WGR_LOCAL_SHADOW_POSE_CACHE").is_ok_and(|v| v == "1"),
@@ -6634,6 +6641,7 @@ impl Gfx3d {
         self.local0_target_draw_closed.set(false);
         self.gi_target_draw_closed.set(false);
         self.reflection_target_draw_closed.set(false);
+        self.sky0_target_draw_closed.set(false);
         if let Some(cell)=&self.geometry_pass_facts {let mut f=cell.get();f.begin(self.cull.instance_epoch(),shadow.count,shadow.local_count);cell.set(f);}
     }
     pub fn geometry_pass_reflection_configured(&self,active:bool) {
@@ -9318,7 +9326,7 @@ impl Gfx3d {
             });
             let off = ((SKY_UBO_SLOT + i) as u64 * self.shadow_pass_ubo.stride) as u32;
             rp.set_bind_group(0, pass_bind, &[off]);
-            self.draw_gpu_driven_depth(
+            let drew_gpu = self.draw_gpu_driven_depth(
                 &mut rp,
                 textures,
                 off,
@@ -9327,6 +9335,9 @@ impl Gfx3d {
                 self.cull.sky_counter_buf(i),
             );
             drop(rp);
+            if i == 0 && drew_gpu {
+                self.sky0_target_draw_closed.set(true);
+            }
             if let Some(cell)=&self.geometry_pass_facts {
                 if self.geometry_depth_recordable(self.gpu_sky_group1.get(i).and_then(|b|b.as_ref()),self.cull.sky_out_args(i),self.cull.sky_counter_buf(i)) {
                     let mut f=cell.get();f.record_interior(i);cell.set(f);
@@ -9883,6 +9894,16 @@ impl Gfx3d {
         self.reflection_target_draw_closed.get() &&
             self.cull.copy_reflection_target_count(encoder)
     }
+    pub fn copy_sky0_target_count(&mut self, encoder: &mut wgpu::CommandEncoder) -> bool {
+        sky0_count_pass_ready(self.interior_sky_active(), &self.interior_sky_refresh,
+            self.sky0_target_draw_closed.get()) && self.cull.copy_sky0_target_count(encoder)
+    }
+    pub fn sky0_target_count_before_submit(&mut self, token: u64) -> bool {
+        self.cull.sky0_target_count_before_submit(token)
+    }
+    pub fn sky0_target_count_submitted(&mut self, token: u64) -> bool {
+        self.cull.sky0_target_count_submitted(token)
+    }
     pub fn reflection_target_count_before_submit(&mut self, token: u64) -> bool {
         self.cull.reflection_target_count_before_submit(token)
     }
@@ -9913,6 +9934,7 @@ impl Gfx3d {
             for cascade in 0..5 { self.cull.shadow_target_count_commit(token, cascade); }
             self.cull.local0_target_count_commit(token);
             self.cull.reflection_target_count_commit(token);
+            self.cull.sky0_target_count_commit(token);
         }
         main
     }
@@ -9921,6 +9943,7 @@ impl Gfx3d {
         for cascade in 0..5 { self.cull.shadow_target_count_abort(token, cascade); }
         self.cull.local0_target_count_abort(token);
         self.cull.reflection_target_count_abort(token);
+        self.cull.sky0_target_count_abort(token);
     }
     pub fn main_target_count_fact(&mut self, device: &wgpu::Device) -> cull::MainCountFact {
         self.cull.harvest_main_target_count(device);
@@ -9945,6 +9968,10 @@ impl Gfx3d {
     pub fn reflection_target_count_fact(&mut self, device: &wgpu::Device) -> cull::MainCountFact {
         self.cull.harvest_reflection_target_count(device);
         self.cull.reflection_target_count_fact()
+    }
+    pub fn sky0_target_count_fact(&mut self, device: &wgpu::Device) -> cull::MainCountFact {
+        self.cull.harvest_sky0_target_count(device);
+        self.cull.sky0_target_count_fact()
     }
 
     pub fn cull_dispatch(

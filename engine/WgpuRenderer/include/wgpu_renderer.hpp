@@ -2739,6 +2739,10 @@ extern "C"
      * a closed indirect draw. Diagnostic only, never residency authority. */
     WGR_API uint32_t wgr_reflection_target_count_fact(WgrRenderer*, WgrMainTargetCountResult*,
         uint32_t output_size, uint32_t output_version);
+    /* Interior sky-visibility zenith view 0, distinct from GI sky view 5.
+     * Cached/skipped layers stay UNKNOWN; this never authorizes residency release. */
+    WGR_API uint32_t wgr_sky0_target_count_fact(WgrRenderer*, WgrMainTargetCountResult*,
+        uint32_t output_size, uint32_t output_version);
 
     /* Debug: read back the current auto-exposure scale (blocking GPU sync; dev panel only). */
     WGR_API float wgr_get_exposure_scale(WgrRenderer* renderer);
