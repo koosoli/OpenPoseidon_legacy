@@ -967,12 +967,14 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
         if (preview_multi) {
             let uv0 = in.uv * sm.layer_uv[0].xy + sm.layer_uv[0].zw;
             let normal_sample = textureSampleBias(textures[sm.specular_slot], samplers[sm.sampler_idx], uv0, frame.renscale.x);
-            normal_ts = decode_nohq_packed(normal_sample, normal_rg);
+            // NMO_1 contributes its material channels. Keep the established
+            // global normal in normal_slot: replacing it with this tiling normal
+            // swung whole roof slopes toward the sun in the first A/B.
             let base_weight = 1.0 - min(layer_w.x + layer_w.y + layer_w.z, 1.0);
             pbr_metal = normal_sample.b * base_weight;
             pbr_ao = normal_sample.a * base_weight;
             pbr_sampled = true;
-        } else
+        }
 #endif
         if (sm.normal_slot != 0u) {
             let uv0 = select(in.uv * sm.layer_uv[0].xy + sm.layer_uv[0].zw, in.uv1,
@@ -981,7 +983,7 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
             normal_ts = decode_nohq_packed(normal_sample,
                 normal_rg);
 #ifdef NATIVE_PBR_PREVIEW
-            if ((sm.flags & SECTION_NATIVE_PBR_PREVIEW) != 0u) {
+            if ((sm.flags & SECTION_NATIVE_PBR_PREVIEW) != 0u && !preview_multi) {
                 pbr_metal = clamp(normal_sample.b, 0.0, 1.0);
                 pbr_ao = clamp(normal_sample.a, 0.0, 1.0);
                 pbr_sampled = true;
