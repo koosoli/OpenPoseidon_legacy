@@ -1180,7 +1180,13 @@ impl Tidewater {
             self.sim.regions.iter().flatten().count()
         );
         self.prep_stats = [0.0; 7];
-        s
+        // W7j: where the shore field found coast (16 samples), to pick a second coast for captures
+        let n = self.coast.len();
+        let samples: Vec<String> = (0..16.min(n)).map(|i| {
+            let c = self.coast[i * n / 16.min(n).max(1)];
+            format!("{:.0},{:.0}", c[0], c[1])
+        }).collect();
+        format!("{s} | coast blocks {n}: {}", samples.join(" "))
     }
 
     /// Spray diagnostics for the log: on this frame, stations, and the latest readback.

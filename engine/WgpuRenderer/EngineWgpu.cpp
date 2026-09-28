@@ -13531,7 +13531,7 @@ void EngineWgpu::PublishRendererStats()
                                            WGR_GPU_TIMER_WORKER_ENC_POST, WGR_GPU_TIMER_WORKER_SUBMIT,
                                            WGR_GPU_TIMER_WORKER_PRESENT};
             static double cpuSum[9] = {};
-            static double twParts[6] = {};
+            static double twParts[7] = {};
             static int nW = 0;
             static std::chrono::steady_clock::time_point lastFrame{}, lastLog{};
             const auto nowT = std::chrono::steady_clock::now();
@@ -13558,6 +13558,7 @@ void EngineWgpu::PublishRendererStats()
             twParts[3] += pos(WGR_GPU_TIMER_TW_CAUSTICS);
             twParts[4] += pos(WGR_GPU_TIMER_TW_WAKE);
             twParts[5] += pos(WGR_GPU_TIMER_WATER_DRAW);
+            twParts[6] += pos(WGR_GPU_TIMER_UNDERWATER_COMPOSITE); // W7j: either backend's composite
             for (int k = 0; k < 9; ++k)
                 if (kCpuRows[k] < cpuN && cpu[kCpuRows[k]] > 0.0f)
                     cpuSum[k] += cpu[kCpuRows[k]];
@@ -13589,9 +13590,9 @@ void EngineWgpu::PublishRendererStats()
                          cpuSum[5] * inv, cpuSum[6] * inv, cpuSum[7] * inv, cpuSum[8] * inv);
                 LOG_INFO(Graphics,
                          "W7 water GPU ms mean: TW spectrum+FFT {:.3f} shore sim {:.3f} breakers+spray {:.3f} caustics {:.3f} "
-                         "wakes {:.3f} | water draw {:.3f}",
+                         "wakes {:.3f} | water draw {:.3f} | underwater composite {:.3f}",
                          twParts[0] * inv, twParts[1] * inv, twParts[2] * inv, twParts[3] * inv, twParts[4] * inv,
-                         twParts[5] * inv);
+                         twParts[5] * inv, twParts[6] * inv);
                 for (double& c : twParts)
                     c = 0.0;
                 for (double& c : cpuSum)
