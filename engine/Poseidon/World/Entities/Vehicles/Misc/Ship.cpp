@@ -633,7 +633,9 @@ void Ship::Simulate(float deltaT, SimulationImportance prec)
 
                     Vector3 gFriction(VZero);
                     float maxUnder = 0;
-                    // W11d diagnostic (POSEIDON_BOAT_DIAG): what holds the hull at its height
+                    // W11d diagnostic (POSEIDON_BOAT_DIAG): what holds the hull at its height.
+                    // Leave the normal per-contact path free of diagnostic accumulation.
+                    static const bool buoyDiag = std::getenv("POSEIDON_BOAT_DIAG") != nullptr;
                     int diagWaterN = 0;
                     float diagUnder = 0, diagUnderFlat = 0, diagLift = 0, diagGain = 0;
                     for (int i = 0; i < gCollision.Size(); i++)
@@ -697,16 +699,19 @@ void Ship::Simulate(float deltaT, SimulationImportance prec)
                                 // from W11b alone). 9x at rest (about 0.5 m for the PBR), 12x flat out.
                                 const float gain = legacyPlaning ? legacyGain : 9 + floatMin(fwd * 0.2f, 3.0f);
                                 planingDragScale = gain / legacyGain;
-                                diagGain = gain;
+                                if (buoyDiag) diagGain = gain;
                                 const float flat = floatMax(info.underFlat, 0.0f);
                                 const float wave = info.under - flat;
                                 const float lift = (flat * gain + wave) * Inv(floatMax(info.under, 1e-3f));
                                 pForce *= floatMax(lift, 1.0f);
                             }
-                            ++diagWaterN;
-                            diagUnder += info.under;
-                            diagUnderFlat += info.underFlat;
-                            diagLift += pForce.Y();
+                            if (buoyDiag)
+                            {
+                                ++diagWaterN;
+                                diagUnder += info.under;
+                                diagUnderFlat += info.underFlat;
+                                diagLift += pForce.Y();
+                            }
                             pCenter = info.pos - wCenter;
                             torque += pCenter.CrossProduct(pForce * 0.2);
                             totForce += pForce;
@@ -818,7 +823,6 @@ void Ship::Simulate(float deltaT, SimulationImportance prec)
                             friction += pForce;
                         }
                     }
-                    static const bool buoyDiag = std::getenv("POSEIDON_BOAT_DIAG") != nullptr;
                     if (buoyDiag && diagWaterN > 0)
                     {
                         static std::unordered_map<uint32_t, float> nextBuoy;

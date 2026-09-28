@@ -1,0 +1,5 @@
+# Tidewater W11d integration, 28 September 2026
+
+Oliver requested the commits still missing from `dec/tidewater-w11d-buoyancy-diag`. The isolated port found exactly two and replayed them in source order without conflict: W11c `649fa616` reduces small-boat planing lift to 9x at rest and 12x flat out for a deeper hull draft; W11d `7dc107e6` adds `POSEIDON_BOAT_DIAG` to log buoyancy, water-contact and sea-level values at a bounded rate. Both are patch-equivalent to source according to `git range-diff`; no earlier Tidewater patch was missing. The W11c gain supersedes W11b's initial 20x/26x default; `POSEIDON_BOAT_LEGACY_PLANING=1` still restores the original gain.
+
+One integration follow-up guards W11d diagnostic accumulation behind its opt-in flag, avoiding additional arithmetic at every water contact in ordinary play. This changes no diagnostic output when enabled. The combined game/test build passed; a targeted ship plus streamer revision test run passed 45 assertions in seven cases. Installed water/boat runtime and visual judgment remain pending at this checkpoint. No GeometryPage default or Fine-release policy changes.
