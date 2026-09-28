@@ -2118,19 +2118,19 @@ impl CullState {
     // buffers with the main dispatch; writes this cascade's own args/records/counters/scratch.
     // wgpu barriers the compute writes -> the depth pass's indirect reads. No-op until prepare()
     // has run with instances present.
-    pub fn dispatch_shadow(&self, encoder: &mut wgpu::CommandEncoder, i: usize) {
+    pub fn dispatch_shadow(&self, encoder: &mut wgpu::CommandEncoder, i: usize) -> bool {
         if self.params.instance_count == 0 {
-            return;
+            return false;
         }
         let Some(view) = self.shadow_views.get(i) else {
-            return;
+            return false;
         };
         let (Some(bind), Some(args), Some(sec)) = (
             view.bind.as_ref(),
             view.out_args.as_ref(),
             view.sec_count.as_ref(),
         ) else {
-            return;
+            return false;
         };
         self.record_collapse(
             encoder,
@@ -2144,6 +2144,7 @@ impl CullState {
             &self.scatter_pipeline,
             view.stats_view,
         );
+        true
     }
 
     pub fn dispatch_reflection(&self, encoder: &mut wgpu::CommandEncoder) {
@@ -3912,7 +3913,8 @@ pub(crate) mod tests {
         let mut enc =
             device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         cull.dispatch(&mut enc);
-        cull.dispatch_shadow(&mut enc, 0);
+        assert!(cull.dispatch_shadow(&mut enc, 0), "cascade cull was encoded");
+        assert!(!cull.dispatch_shadow(&mut enc, 1), "missing cascade cannot claim a dispatch");
         queue.submit(std::iter::once(enc.finish()));
 
         // The shadow view's own args: exactly the front instance drew (LOD 1's section).

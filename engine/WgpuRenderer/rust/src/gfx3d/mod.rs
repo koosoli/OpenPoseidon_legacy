@@ -4032,6 +4032,9 @@ pub struct Gfx3d {
     // cannot pass for movement.
     // Eight-byte optional pointer tax; allocation ONLY in explicit private fixture mode.
     geometry_pass_facts: Option<Box<std::cell::Cell<geometry_pass_facts::WgrGeometryPassFacts>>>,
+    // Fixture-only dispatch witness; reset before the frame and consumed after a closed
+    // shadow depth pass. A prepared view alone is not proof that its cull ran.
+    geometry_shadow_cull_mask: std::cell::Cell<u32>,
     local_view_key: [Option<u64>; MAX_LOCAL_SHADOWS],
     // Exact bounded CPU-caster pose witnesses; lazily allocated only when a
     // cached local view has an actual skinned caster. Retained/sky and concurrent
@@ -4872,6 +4875,7 @@ impl Gfx3d {
             geometry_pass_facts: if std::env::var("WGR_GEOMETRY_PAGE_FIXTURE").as_deref()==Ok("1") {
                 Some(Box::new(std::cell::Cell::new(geometry_pass_facts::WgrGeometryPassFacts::new())))
             } else {None},
+            geometry_shadow_cull_mask: std::cell::Cell::new(0),
             local_view_key: [None; MAX_LOCAL_SHADOWS],
             local_pose_cache: None,
             local_pose_cache_enabled: std::env::var("WGR_LOCAL_SHADOW_POSE_CACHE").is_ok_and(|v| v == "1"),
@@ -6594,6 +6598,7 @@ impl Gfx3d {
 
     // Optional fixture recorder; no planning epoch is exported as a draw witness.
     pub fn begin_geometry_pass_facts(&self,shadow:&WgrShadowPass) {
+        self.geometry_shadow_cull_mask.set(0);
         if let Some(cell)=&self.geometry_pass_facts {let mut f=cell.get();f.begin(self.cull.instance_epoch(),shadow.count,shadow.local_count);cell.set(f);}
     }
     pub fn geometry_pass_reflection_configured(&self,active:bool) {
@@ -7204,7 +7209,7 @@ impl Gfx3d {
 
             // GPU-driven retained set casts into this cascade (no-op when GPU-driven is off,
             // or when the cascade has no survivors). Drawn last into the same depth attachment.
-            self.draw_gpu_driven_shadow(&mut rp, textures, pass_ubo_off, c);
+            let gpu_depth_draw_recorded = self.draw_gpu_driven_shadow(&mut rp, textures, pass_ubo_off, c);
             // GRASS SHADOWS ARE THE ENTIRE SHADOW COST, AND MOST OF IT IS SPENT OFF-SCREEN.
             //
             // draw_shadow has no cascade awareness: it submits the near-ring blade instances
@@ -7229,7 +7234,8 @@ impl Gfx3d {
             // is alive is a validation error, not a slightly wrong number.
             drop(rp);
             if let Some(cell)=&self.geometry_pass_facts {
-                if self.geometry_depth_recordable(self.gpu_shadow_group1.get(c).and_then(|b|b.as_ref()),self.cull.shadow_out_args(c),self.cull.shadow_counter_buf(c)) {
+                if gpu_depth_draw_recorded && c < u32::BITS as usize &&
+                    self.geometry_shadow_cull_mask.get() & (1 << c) != 0 {
                     let mut f=cell.get();f.record_shadow(c,count as usize);cell.set(f);
                 }
             }
@@ -10178,7 +10184,10 @@ impl Gfx3d {
             if c >= n_cascades && !self.local_view_refresh.contains(&(c - n_cascades)) {
                 continue;
             }
-            self.cull.dispatch_shadow(encoder, c);
+            if self.cull.dispatch_shadow(encoder, c) && self.geometry_pass_facts.is_some() &&
+                c < u32::BITS as usize {
+                self.geometry_shadow_cull_mask.set(self.geometry_shadow_cull_mask.get() | (1 << c));
+            }
         }
         timers.end(encoder, crate::gpu_timers::Region::ObjCullShadow);
         timers.cpu_end(crate::gpu_timers::Region::ObjCullShadow);
@@ -10195,7 +10204,7 @@ impl Gfx3d {
         textures: &SharedTextures,
         pass_ubo_off: u32,
         c: usize,
-    ) {
+    ) -> bool {
         self.draw_gpu_driven_depth(
             pass,
             textures,
@@ -10203,7 +10212,7 @@ impl Gfx3d {
             self.gpu_shadow_group1.get(c).and_then(|b| b.as_ref()),
             self.cull.shadow_out_args(c),
             self.cull.shadow_counter_buf(c),
-        );
+        )
     }
 
     // Depth-only GPU-driven draw for ONE view whose VP lives in the shadow pass UBO: a shadow
@@ -10218,8 +10227,8 @@ impl Gfx3d {
         group1: Option<&wgpu::BindGroup>,
         args: Option<&wgpu::Buffer>,
         counters: Option<&wgpu::Buffer>,
-    ) {
-        self.draw_gpu_driven_with(pass, &self.gpu_shadow_pipeline, textures, pass_ubo_off, group1, args, counters);
+    ) -> bool {
+        self.draw_gpu_driven_with(pass, &self.gpu_shadow_pipeline, textures, pass_ubo_off, group1, args, counters)
     }
 
     // The depth draw over a cull view's records with the given pipeline (the shadow one, or
@@ -10234,15 +10243,17 @@ impl Gfx3d {
         group1: Option<&wgpu::BindGroup>,
         args: Option<&wgpu::Buffer>,
         counters: Option<&wgpu::Buffer>,
-    ) {
+    ) -> bool {
         if !self.gpu_driven_enabled {
-            return;
+            return false;
         }
         let (Some(pass_bind), Some(group1), Some(args)) =
             (self.shadow_pass_ubo.bind.as_ref(), group1, args)
         else {
-            return;
+            return false;
         };
+        let cap = self.cull.variant_capacity();
+        if cap == 0 { return false; }
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, pass_bind, &[pass_ubo_off]);
         pass.set_bind_group(1, group1, &[]);
@@ -10253,10 +10264,9 @@ impl Gfx3d {
         }
         pass.set_vertex_buffer(0, self.pool.vbuf().slice(..));
         pass.set_index_buffer(self.pool.ibuf().slice(..), wgpu::IndexFormat::Uint32);
-        let cap = self.cull.variant_capacity();
         if self.multi_draw_count_enabled {
             let Some(counters) = counters else {
-                return;
+                return false;
             };
             for v in 0..cull::CULL_VARIANT_COUNT {
                 let offset = v as u64 * cap as u64 * INDIRECT_ARG_SIZE;
@@ -10268,6 +10278,7 @@ impl Gfx3d {
                 pass.multi_draw_indexed_indirect(args, offset, cap);
             }
         }
+        true
     }
 
     // Draw the GPU-driven opaque set into the colour pass: one multi_draw per pipeline-
