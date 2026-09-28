@@ -166,6 +166,8 @@ fn vs_tidewater(@location(0) grid: vec2<f32>, @location(1) node: vec4<f32>) -> V
 
     // W6: the boats' wakes (WaterSurface.js: `extra += wakeDisplacement( worldXZ )`)
     extra += wakeDisplacement(worldXZ);
+    // W8b: explosions on the water (ring wave, cavity)
+    extra += impactDisplacement(worldXZ);
 
     var total = disp + extra;
     var y = seaLevel + total.y;
@@ -317,6 +319,13 @@ fn waterSurfaceFragment(lagXZ: vec2<f32>, footprint: f32, depth: f32, vertexFoam
         slopes += w.slopes;
         foamSum += w.foam;
         aeration += w.aeration;
+    }
+    // W8b: explosions on the water (the ring's slopes, the foam and bubbles they leave)
+    {
+        let im = impactFragment(lagXZ);
+        slopes += im.slopes;
+        foamSum += im.foam;
+        aeration += im.aeration;
     }
 
     // base normal: large shoreline waves (per-vertex, can overhang) perturbed by FFT detail

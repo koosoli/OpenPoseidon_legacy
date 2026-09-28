@@ -28,6 +28,7 @@ struct TwSurface {
     brk: vec4<f32>,        // Breakers: station count, lip opacity (Tidewater `sheet`); W5b caustic tiles (fine, broad) m
     morph: array<vec4<f32>, 12>, // CDLOD per level: morph start, 1/range, spacing
     wake: array<vec4<f32>, 8>,   // W6: the wake readers' lanes, 4 per slot (tw_wake.wgsl)
+    impacts: array<vec4<f32>, 8>, // W8b: explosions in the surface, 2 lanes per slot (tw_impact.wgsl)
 };
 
 struct ConformParams {

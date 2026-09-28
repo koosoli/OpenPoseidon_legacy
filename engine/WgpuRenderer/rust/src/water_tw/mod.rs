@@ -34,6 +34,7 @@
 //! owner).
 
 mod boat_spray;
+mod impacts;
 mod breakers;
 mod cdlod;
 mod fft;
@@ -76,6 +77,8 @@ const TW_WATER_WGSL: &str = concat!(
     include_str!("tw_caustics.wgsl"),
     "\n",
     include_str!("tw_wake.wgsl"),
+    "\n",
+    include_str!("tw_impact.wgsl"),
 );
 
 /// W6: the wake simulation kernels (tw_wake_kernel.wgsl) with the shared declarations.
@@ -205,9 +208,11 @@ struct TwSurface {
     morph: [[f32; 4]; cdlod::LEVELS],
     // W6: the wake readers' lanes, 4 per slot (tw_wake.wgsl)
     wake: [[f32; 4]; wake::SLOTS * 4],
+    // W8b: explosions in the surface, 2 lanes per slot (tw_impact.wgsl)
+    impacts: [[f32; 4]; impacts::SURFACE_SLOTS * 2],
 }
 
-const _: () = assert!(std::mem::size_of::<TwSurface>() == 16 * (17 + cdlod::LEVELS + wake::SLOTS * 4));
+const _: () = assert!(std::mem::size_of::<TwSurface>() == 16 * (17 + cdlod::LEVELS + wake::SLOTS * 4 + impacts::SURFACE_SLOTS * 2));
 
 /// Whether the shore simulation runs (Water tab, and only once the shore waves have a field).
 /// Breaker spray on (W4a): emission gain and sprite intensity above zero (the caller also needs
@@ -266,6 +271,7 @@ struct FrameInputs<'a> {
     caustic_tiles: [f32; 2],
     // W6: the wake readers' lanes
     wake: [[f32; 4]; wake::SLOTS * 4],
+    impacts: [[f32; 4]; impacts::SURFACE_SLOTS * 2],
 }
 
 fn surface_block(p: &WgrWaterParams, f: &FrameInputs<'_>) -> TwSurface {
@@ -310,6 +316,7 @@ fn surface_block(p: &WgrWaterParams, f: &FrameInputs<'_>) -> TwSurface {
         brk: [f.stations as f32, p.tidewater_shore[2][3].clamp(0.0, 2.0), f.caustic_tiles[0], f.caustic_tiles[1]],
         morph: *f.morph,
         wake: f.wake,
+        impacts: f.impacts,
     }
 }
 
@@ -440,6 +447,8 @@ pub struct Tidewater {
     wake_lanes: [[f32; 4]; wake::SLOTS * 4],
     // W6i boat bow spray
     boat_spray: boat_spray::BoatSpray,
+    // W8b: splashes from the engine's water-interaction events
+    impacts: impacts::Impacts,
     // W5e: the frame's spot lights (the diver's torch is picked from them in prepare)
     spots: Vec<crate::ffi::WgrLight>,
     // W7b: prepare CPU ms: sum, max, station update max, CDLOD selection sum, frames;
@@ -754,6 +763,7 @@ impl Tidewater {
             st_pending: Vec::new(),
             st_cache: Vec::new(),
             spots: Vec::new(),
+            impacts: Default::default(),
             spray,
             uw,
             linear: linear > 0.5,
@@ -975,6 +985,8 @@ impl Tidewater {
         if boat_spray_enabled() {
             self.boat_spray.update(&spray_boats, dt, &mut requests, spray::MAX_REQUESTS);
         }
+        // W8b: shells, rockets, bombs and bullets hitting the water (the engine's events)
+        self.impacts.update(dt, cp, &mut requests, spray::MAX_REQUESTS);
         let bodies: Vec<spray::Body> = spray_boats.iter().flatten().map(|b| b.body()).collect();
         self.spray.set_frame(queue, dt, p.time, cp, gain, intensity, spray_on, &requests, &bodies);
         // W6: the boats' wakes (visual only; see wake.rs)
@@ -988,6 +1000,7 @@ impl Tidewater {
             stations: self.brk.ns,
             caustic_tiles: self.caustics.tiles,
             wake: self.wake_lanes,
+            impacts: self.impacts.lanes(),
         };
         let block0 = surface_block(&p, &inputs);
         self.detail_offset[0] += block0.wind[0] * block0.sea[2] * 0.7 * dt;
@@ -1100,6 +1113,13 @@ impl Tidewater {
     }
 
     /// W6: the wakes' slots, for the log.
+    /// W8b: the engine's water-interaction events (explosions and bullets with their ammo) become
+    /// splashes; the rest are Current OP's (ripples, wakes) and ignored here.
+    pub fn submit_interactions(&mut self, events: &[crate::ffi::WgrWaterInteractionEvent]) {
+        let sea = self.last_params.map_or(0.0, |p| p.sea_level);
+        self.impacts.submit(events, sea);
+    }
+
     /// W5e: this frame's lights; the spot lights are kept for the diver's torch (picked in
     /// `prepare`, where the water camera is known).
     pub fn set_lights(&mut self, lights: &[crate::ffi::WgrLight]) {
@@ -1158,7 +1178,14 @@ impl Tidewater {
                 d.pose[3]
             );
         }
-        format!("{}; bow spray: {particles} particles in {requests} requests last frame, spray on {}{diag}", self.wake.stats(), self.spray.on)
+        format!(
+            "{}; bow spray: {particles} particles in {requests} requests last frame, spray on {}{diag}; (W8b) water impacts: {} received, {} emitting, {} particles last frame",
+            self.wake.stats(),
+            self.spray.on,
+            self.impacts.received,
+            self.impacts.active(),
+            self.impacts.particles
+        )
     }
 
     /// W7b: the CPU cost of `prepare` since the last call (mean / max ms, the largest shore
@@ -1335,7 +1362,8 @@ mod tests {
         assert_eq!(std::mem::offset_of!(TwSurface, morph), 272);
         // W6: the wake readers' lanes after the CDLOD morph table
         assert_eq!(std::mem::offset_of!(TwSurface, wake), 464);
-        assert_eq!(std::mem::size_of::<TwSurface>(), 592);
+        assert_eq!(std::mem::offset_of!(TwSurface, impacts), 592);
+        assert_eq!(std::mem::size_of::<TwSurface>(), 720);
     }
 
     #[test]
