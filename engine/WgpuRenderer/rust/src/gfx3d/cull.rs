@@ -1905,6 +1905,11 @@ impl CullState {
         view.params.instance_count = instance_count as u32;
         view.params.variant_capacity = self.variant_capacity;
         view.params.variant_count = CULL_VARIANT_COUNT;
+        // Standalone reflection/sky/GI views must use the same opt-in target as
+        // main and cascades. Otherwise their COUNT word stays zero even when the
+        // selected model survives, making a later absence readback vacuous.
+        view.params.target_model_id = self.target_model_id.unwrap_or(0);
+        view.params.target_count_enabled = u32::from(self.target_model_id.is_some());
         queue.write_buffer(&view.params_buf, 0, bytemuck::bytes_of(&view.params));
         if shared_grew || view_grew || view.bind.is_none() {
             view.bind = match (
@@ -4036,10 +4041,12 @@ pub(crate) mod tests {
         };
         cull.set_sky_view_count(&device, super::super::sky_vis::DIRECTION_COUNT);
         cull.set_sky_params(0, params_from_shadow_cascade(vp_rel, eye, inputs));
+        cull.target_model_id = Some(model);
 
         cull.prepare(&device, &queue);
         let mut enc =
             device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        cull.begin_frame_stats(&mut enc);
         cull.dispatch(&mut enc);
         cull.dispatch_sky(&mut enc, 0);
         queue.submit(std::iter::once(enc.finish()));
@@ -4063,6 +4070,33 @@ pub(crate) mod tests {
             recs[rec_slot as usize * 2],
             raw_slot(under),
             "the surviving record is the instance under the camera"
+        );
+        let target_word = TARGET_MODEL_COUNT_BYTE_OFFSET / 4;
+        let sky_count = read_u32s(
+            &device, &queue, cull.sky_counter_buf(0).unwrap(), target_word + 1,
+        );
+        assert_eq!(
+            sky_count[target_word as usize], 1,
+            "standalone sky COUNT must see its selected surviving model"
+        );
+
+        // Keep the same live sky instance, select a model that has no instances,
+        // and reset the frame stats exactly as the renderer does. A real dispatch
+        // must now write zero, rather than reusing the previous positive word.
+        let absent_model = cull.register_model(4.0, &lods, &sections, &materials);
+        cull.target_model_id = Some(absent_model);
+        cull.prepare(&device, &queue);
+        let mut absent =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        cull.begin_frame_stats(&mut absent);
+        cull.dispatch_sky(&mut absent, 0);
+        queue.submit(std::iter::once(absent.finish()));
+        let absent_count = read_u32s(
+            &device, &queue, cull.sky_counter_buf(0).unwrap(), target_word + 1,
+        );
+        assert_eq!(
+            absent_count[target_word as usize], 0,
+            "standalone sky COUNT must clear and reject an absent selected model"
         );
 
         // Disabling the view must actually release it — a stale sky view would keep drawing an
