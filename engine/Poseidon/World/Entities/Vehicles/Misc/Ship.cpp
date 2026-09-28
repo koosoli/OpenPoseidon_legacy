@@ -10,6 +10,7 @@
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <Poseidon/Core/Global.hpp>
+#include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Random/randomGen.hpp>
 #include <Poseidon/Graphics/Rendering/Draw/SpecLods.hpp>
 #include <Poseidon/Graphics/Rendering/WaterInteractionBridge.hpp>
@@ -935,6 +936,27 @@ void Ship::Simulate(float deltaT, SimulationImportance prec)
                 Vector3 spdR = Speed() * 0.4 - sideV;
                 Vector3 spdEngL = Direction() * (-3.0 * _thrustL) + Speed() * 0.2;
                 Vector3 spdEngR = Direction() * (-3.0 * _thrustR) + Speed() * 0.2;
+                // TW-WATER W6i.6: in the Tidewater water mode the boat's wake (WakeSim), its bow spray
+                // (BoatSpray) and its propeller wash replace these legacy smoke-like water sprites,
+                // which also wrote the depth the new spray is soft-faded against and so hid it.
+                // WGR_TW_LEGACY_BOAT_FX=1 keeps them; the Current OP mode is unchanged.
+                static const bool keepLegacy = []
+                {
+                    const char* v = std::getenv("WGR_TW_LEGACY_BOAT_FX");
+                    return v != nullptr && v[0] == '1';
+                }();
+                static const int envBackend = []
+                {
+                    const char* v = std::getenv("WGR_WATER_BACKEND");
+                    return (v != nullptr && (v[0] == '0' || v[0] == '1') && v[1] == '\0') ? v[0] - '0' : -1;
+                }();
+                const int backend = envBackend >= 0 ? envBackend
+                                    : (GEngine != nullptr ? GEngine->GetWaterSettings().waterBackend : 0);
+                if (backend == 1 && !keepLegacy)
+                {
+                    dens = 0.0f;
+                    densEngL = densEngR = 0.0f;
+                }
                 if (dens > 0.1)
                 {
                     _leftWater.SetSize(size, 0.1);

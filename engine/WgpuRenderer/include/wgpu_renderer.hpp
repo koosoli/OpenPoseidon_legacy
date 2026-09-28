@@ -1487,6 +1487,19 @@ struct WgrWaterParams
      * scale of the light scattered inside the water, 0; 1 = Tidewater's formula), w unused (0).
      * sizeof 1200 -> 1216 with the Rust side. */
     WgrVec4 tidewater_fx;
+    /* TW-WATER W6 — the boats for the Tidewater wake simulation and bow spray (the two nearest
+     * the camera; read only by that backend). Per boat i, eight lanes from [8i]:
+     * [+0] x, z = hull centre (world), z/w = heading (world XZ of the model forward)
+     * [+1] x, z = world velocity, z = thrust 0..1, w = stable id (float-exact, >= 2)
+     * [+2] x = half beam m, y = half length m, z = design draft m, w = flags (1 present, 2 driven)
+     * [+3] (W6i) x = design waterline height at the hull centre (world y), y = vertical velocity,
+     *      z = freeboard m, w = CPU sea height at the propeller
+     * [+4] (W6i) the model forward axis xyz (world, unit), w unused
+     * [+5] (W6i) the model up axis xyz (world, unit), w unused
+     * [+6] (W6i) CPU sea height at bow contacts 0-3, [+7] xy = contacts 4-5 (see
+     *      PresentationSnapshot.cpp WakeSprayContactPoint), zw unused
+     * sizeof 1216 -> 1472 with the Rust side (W6h: 1312). */
+    WgrVec4 tidewater_wake[16];
 };
 
 struct WgrWaterCascadeConfig
@@ -1664,7 +1677,10 @@ enum WgrGpuTimerRegion : uint32_t
     WGR_GPU_TIMER_TW_OCEAN_SPECTRUM = 78,
     WGR_GPU_TIMER_TW_OCEAN_FFT = 79,
     WGR_GPU_TIMER_TW_SHORE_SIM = 80, /* TW-WATER W3b: the shore simulation regions */
-    WGR_GPU_TIMER_REGION_COUNT = 81,
+    WGR_GPU_TIMER_TW_WAKE = 81,      /* TW-WATER W6: the boat wake simulations */
+    WGR_GPU_TIMER_TW_CAUSTICS = 82,  /* TW-WATER W7h: the caustic splats + mip chains */
+    WGR_GPU_TIMER_TW_BREAKERS = 83,  /* TW-WATER W7h: crest finder, breaker spray, spray update */
+    WGR_GPU_TIMER_REGION_COUNT = 84,
 };
 
 /* PERF-005 - region nesting, and the ONLY correct way to total this array.
@@ -2223,7 +2239,7 @@ static_assert(sizeof(WgrGrassDownwash) == 16, "WgrGrassDownwash layout must matc
 static_assert(sizeof(WgrSmokeShadowBlob) == 32, "WgrSmokeShadowBlob layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrSmokeVolumeParams) == 96, "WgrSmokeVolumeParams layout must match the Rust #[repr(C)] struct");
   static_assert(sizeof(WgrGrassParams) == 4784, "WgrGrassParams layout must match the Rust #[repr(C)] struct");
-static_assert(sizeof(WgrWaterParams) == 1216, "WgrWaterParams layout must match the Rust #[repr(C)] struct");
+static_assert(sizeof(WgrWaterParams) == 1472, "WgrWaterParams layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrWaterNode) == 40, "WgrWaterNode layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrWaterBatch) == 16, "WgrWaterBatch layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrWaterInteractionEvent) == 64 && alignof(WgrWaterInteractionEvent) == 16, "WgrWaterInteractionEvent must match Rust");

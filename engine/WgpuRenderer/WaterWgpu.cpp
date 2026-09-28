@@ -1191,6 +1191,31 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
         _params.tidewater_fx = {std::clamp(t.spray, 0.0f, 3.0f), std::clamp(t.sprayIntensity, 0.0f, 3.0f),
                                 std::clamp(t.waterGlow, 0.0f, 2.0f), 0.0f};
     }
+    // TW-WATER W6 — the boats for the Tidewater wake simulation, from the frame's captured block
+    // (the two nearest the camera; lanes in wgpu_renderer.hpp). Current OP ignores them.
+    {
+        const render::frame::PresentationSnapshot& boatSnap = render::frame::GPresentationSnapshot();
+        for (int i = 0; i < 2; ++i)
+        {
+            WgrVec4* lanes = &_params.tidewater_wake[i * 8];
+            if (i >= boatSnap.wakeBoatCount)
+            {
+                for (int k = 0; k < 8; ++k)
+                    lanes[k] = {0.0f, 0.0f, 0.0f, 0.0f};
+                continue;
+            }
+            const render::frame::PresentationSnapshot::WakeBoat& b = boatSnap.wakeBoats[i];
+            lanes[0] = {b.x, b.z, b.fwdX, b.fwdZ};
+            lanes[1] = {b.velX, b.velZ, b.thrust, static_cast<float>(b.id)};
+            lanes[2] = {b.halfBeam, b.halfLength, b.draft, b.driven ? 3.0f : 1.0f};
+            // W6i: the bow spray's pose and sea
+            lanes[3] = {b.originY, b.velY, b.freeboard, b.hwProp};
+            lanes[4] = {b.fwdX, b.fwdY, b.fwdZ, 0.0f};
+            lanes[5] = {b.upX, b.upY, b.upZ, 0.0f};
+            lanes[6] = {b.hwContact[0], b.hwContact[1], b.hwContact[2], b.hwContact[3]};
+            lanes[7] = {b.hwContact[4], b.hwContact[5], 0.0f, 0.0f};
+        }
+    }
     _params.sea_params = {look.seaStateCoupling ? 1.0f : 0.0f,
                           look.seaStateCoupling ? SeaStateResidualAmplitude(look.waveAmp) : look.waveAmp,
                           look.lowQuality ? 1.0f : 0.0f, look.shoreWaveGain};

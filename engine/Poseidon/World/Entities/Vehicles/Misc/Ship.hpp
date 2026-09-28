@@ -156,6 +156,9 @@ class Ship: public Transport
 	void ResetStatus() override;
 
 	LSError Serialize(ParamArchive &ar) override;
+
+	// TW-WATER W6: the engines' thrust (0..1) for the renderer's wake (PresentationSnapshot)
+	float WakeThrust() const {return 0.5f*(fabs(_thrustL)+fabs(_thrustR));}
 };
 
 class ShipWithAI: public Ship

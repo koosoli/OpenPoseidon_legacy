@@ -10,6 +10,8 @@
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/Entities/Vehicles/Air/Helicopter.hpp>
+#include <Poseidon/World/Entities/Vehicles/Misc/Ship.hpp>
+#include <Poseidon/World/Terrain/WaterSurfaceQuery.hpp>
 
 #include <Poseidon/Foundation/Framework/Log.hpp>
 
@@ -19,6 +21,7 @@
 #include <array>
 #include <atomic>
 #include <cstdlib>
+#include <unordered_map>
 #include <vector>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Weather/RainVolume.hpp>
@@ -27,6 +30,57 @@
 
 namespace Poseidon::render::frame
 {
+
+namespace
+{
+// TW-WATER W6i: the bow spray's contact points in the boat frame (x across, y up from the design
+// waterline, z forward from the hull centre), for half beam b and half length l: three segments
+// per side along the analytic waterline (wake.rs `bottom_at`: parallel aft, a fine entry B (1 - e^1.3) over the
+// forward 45 %) from the stem aft to where it has opened to 92 % of the beam, stations bunched
+// toward the stem. Index 0-2: +x side, 3-5: -x side (segment mids). MUST MATCH boat_spray.rs.
+float WakeWaterlineHalfBeam(float b, float l, float z)
+{
+    const float u = (z + l) / (2.0f * l);
+    if (u < 0.0f || u > 1.0f)
+        return 0.0f;
+    if (u < 0.55f)
+        return b;
+    const float e = (u - 0.55f) / 0.45f;
+    return b * std::max(1.0f - std::pow(e, 1.3f), 0.0f);
+}
+
+void WakeSprayContactPoint(float b, float l, int k, float& x, float& z)
+{
+    const float side = k < 3 ? 1.0f : -1.0f;
+    const int seg = k % 3;
+    const float zStem = l - 0.02f;
+    const float zShoulder = 0.2287f * l;
+    auto station = [&](int i, float& sx, float& sz)
+    {
+        const float f = std::pow(static_cast<float>(i) / 3.0f, 1.3f);
+        sz = zStem + (zShoulder - zStem) * f;
+        sx = side * (WakeWaterlineHalfBeam(b, l, sz) + 0.03f);
+    };
+    float ax, az, bx, bz;
+    station(seg, ax, az);
+    station(seg + 1, bx, bz);
+    x = 0.5f * (ax + bx);
+    z = 0.5f * (az + bz);
+}
+
+// the design draft per boat: a slow mean of the measured one, so heave and pitch show up as
+// motion of the hull against the water instead of moving the waterline with the boat
+float WakeDesignDraft(uint32_t id, float draft)
+{
+    static std::unordered_map<uint32_t, float> means;
+    auto [it, fresh] = means.try_emplace(id, draft);
+    if (!fresh)
+        it->second += (draft - it->second) * 0.01f;
+    if (means.size() > 64)
+        means.clear();
+    return it->second;
+}
+} // namespace
 
 // --- The ring ----------------------------------------------------------------------
 //
@@ -268,6 +322,97 @@ static void FillPresentationSnapshot(PresentationSnapshot& snap)
             const Helicopter* helicopter = dynamic_cast<const Helicopter*>(GWorld->GetVehicle(i));
             if (helicopter && helicopter != cameraHeli)
                 addRotor(helicopter);
+        }
+
+        // TW-WATER W6: the boats for the wake simulation, nearest the camera first. A boat that
+        // has sunk below its own draft (a wreck on its way down) no longer makes a wake.
+        if (GLandscape)
+        {
+            const float sea = GLandscape->GetSeaLevel();
+            const Vector3 reference = snap.cameraPos;
+            auto addBoat = [&](const Ship* ship)
+            {
+                if (!ship || !ship->GetShape())
+                    return;
+                const auto* shape = ship->GetShape();
+                const Vector3 pos = ship->Position();
+                const Vector3 mn = shape->Min();
+                const Vector3 mx = shape->Max();
+                const float draft = sea - (pos.Y() + mn.Y());
+                if (draft < 0.05f || pos.Y() + mx.Y() < sea - 0.5f)
+                    return;
+                PresentationSnapshot::WakeBoat boat;
+                const Vector3 fwd = ship->Direction();
+                const Vector3 aside = ship->DirectionAside();
+                const float midX = 0.5f * (mn.X() + mx.X());
+                const float midZ = 0.5f * (mn.Z() + mx.Z());
+                boat.x = pos.X() + aside.X() * midX + fwd.X() * midZ;
+                boat.z = pos.Z() + aside.Z() * midX + fwd.Z() * midZ;
+                boat.fwdX = fwd.X();
+                boat.fwdZ = fwd.Z();
+                const Vector3 vel = ship->Speed();
+                boat.velX = vel.X();
+                boat.velZ = vel.Z();
+                boat.thrust = std::clamp(ship->WakeThrust(), 0.0f, 1.0f);
+                // the waterplane is narrower and shorter than the bounding box (rails, bow, motor)
+                boat.halfLength = std::max(0.5f * (mx.Z() - mn.Z()) * 0.92f, 1.0f);
+                // (the box is wider than the hull -- crew and gun proxies: the PBR's reads 7.4 m for a
+                // ~3.5 m beam; no displacement hull is wider than ~0.42 x its length)
+                boat.halfBeam = std::min(std::max(0.5f * (mx.X() - mn.X()) * 0.9f, 0.4f), 0.42f * boat.halfLength);
+                boat.id = static_cast<uint32_t>((reinterpret_cast<uintptr_t>(ship) >> 4u) & 0x007fffffu) + 2u;
+                const float designDraft = WakeDesignDraft(boat.id, std::clamp(draft, 0.15f, 5.0f));
+                boat.draft = designDraft;
+                boat.driven = ship->Driver() != nullptr;
+                // W6i: pose, freeboard and the sea at the bow contacts / propeller
+                const Vector3 up = ship->DirectionUp();
+                boat.fwdY = fwd.Y();
+                boat.upX = up.X();
+                boat.upY = up.Y();
+                boat.upZ = up.Z();
+                boat.velY = vel.Y();
+                boat.originY = pos.Y() + mn.Y() + designDraft;
+                boat.freeboard = std::clamp(pos.Y() + mx.Y() - boat.originY, 0.3f, std::max(0.3f, 0.3f * boat.halfLength));
+                {
+                    // x axis = up x forward, written out (the same formula as boat_spray.rs)
+                    const float ax = up.Y() * fwd.Z() - up.Z() * fwd.Y();
+                    const float az = up.X() * fwd.Y() - up.Y() * fwd.X();
+                    const float time = Glob.time.toFloat();
+                    for (int k = 0; k < 6; ++k)
+                    {
+                        float cx, cz;
+                        WakeSprayContactPoint(boat.halfBeam, boat.halfLength, k, cx, cz);
+                        const float wx = boat.x + ax * cx + fwd.X() * cz;
+                        const float wz = boat.z + az * cx + fwd.Z() * cz;
+                        boat.hwContact[k] = QueryWaterSurfaceScaled(wx, wz, time, sea, 1.0f).height;
+                    }
+                    const float pz = -boat.halfLength + 0.3f;
+                    boat.hwProp = QueryWaterSurfaceScaled(boat.x + fwd.X() * pz, boat.z + fwd.Z() * pz, time, sea, 1.0f).height;
+                }
+                const float dx = boat.x - reference.X();
+                const float dz = boat.z - reference.Z();
+                boat.distance2 = dx * dx + dz * dz;
+                if (snap.wakeBoatCount < PresentationSnapshot::kMaxWakeBoats)
+                {
+                    snap.wakeBoats[snap.wakeBoatCount++] = boat;
+                    return;
+                }
+                int farthest = 0;
+                for (int k = 1; k < snap.wakeBoatCount; ++k)
+                    if (snap.wakeBoats[k].distance2 > snap.wakeBoats[farthest].distance2)
+                        farthest = k;
+                if (boat.distance2 < snap.wakeBoats[farthest].distance2)
+                    snap.wakeBoats[farthest] = boat;
+            };
+            for (int i = 0; i < GWorld->NVehicles(); ++i)
+                addBoat(dynamic_cast<const Ship*>(GWorld->GetVehicle(i)));
+            // the occupied boat is not always in the vehicle list (see the rotor walk above)
+            const Ship* cameraShip = dynamic_cast<const Ship*>(cameraOn);
+            bool listed = false;
+            for (int k = 0; k < snap.wakeBoatCount; ++k)
+                listed |= cameraShip && snap.wakeBoats[k].id ==
+                    static_cast<uint32_t>((reinterpret_cast<uintptr_t>(cameraShip) >> 4u) & 0x007fffffu) + 2u;
+            if (cameraShip && !listed)
+                addBoat(cameraShip);
         }
     }
 

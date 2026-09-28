@@ -3,8 +3,8 @@
 // (dgreenheck/tidewater @ 4811ba48, MIT, © DRG Software Solutions LLC). Composed into the breaker
 // kernel after tw_spray_common; breakersProcessCrest calls breakersEmit for every crest it finds.
 //
-// OP adaptations (see spray.rs): the spray ring is GPU-only (Tidewater's CPU tail, the boat's
-// bow spray, is not ported yet); Breakers' `spray`, `emitRange` and cameraPos, and the frame's
+// OP adaptations (see spray.rs): the GPU emitters write the first `seed.z` slots (W6i: the CPU
+// tail after them carries the boats' bow spray, spawned by spray_update); Breakers' `spray`, `emitRange` and cameraPos, and the frame's
 // dt, come from OP's spray block; the wind is the water's (tw.wind.xy, tw.sea.z); the budget is
 // steered on the GPU (spray_update) instead of from a CPU readback of the head.
 
@@ -22,7 +22,7 @@ fn sprayBudget() -> f32 { return bitcast<f32>(atomicLoad(&sprayHead[3])); }
 
 // Reserve n ring slots; returns the base (pass it to spraySlot)
 fn sprayReserve(n: u32) -> u32 { return atomicAdd(&sprayHead[0], n); }
-fn spraySlot(base: u32, i: u32) -> u32 { return (base + i) & (sprayP.seed.y - 1u); }
+fn spraySlot(base: u32, i: u32) -> u32 { return (base + i) & (sprayP.seed.z - 1u); }
 
 fn sprayWrite(slot: u32, p: vec3<f32>, v: vec3<f32>, size: f32, kind: f32, life: f32, seed: f32) {
     let n = sprayP.seed.y;

@@ -12,7 +12,14 @@ waves to break.
   over the landing, behind the LST toward the coast, and a pull-back reveal. At 120 s it fades
   out and ends (`endMission "END1"`).
 
-Morning, 21 June 1985, light cloud. The player is an officer riding in the LST and never
-seen. `init.sqs` holds the whole timeline; positions in it are `[east, north, height above
+Morning, 21 June 1985, light cloud. The player is an officer safely placed on dry ground and never
+seen; the independent scripted camera covers the bay. This avoids ending the demo if an attempted
+LST cargo assignment fails and the player would otherwise be left in the water. `init.sqs` holds
+the whole timeline; positions in it are `[east, north, height above
 the surface]`. `mission.sqm` is generated from Everon's heightfield so every beach point sits
 at the waterline.
+
+For the full two-minute interactive showcase, run `scripts/Start-TidewaterShowcase.ps1` from
+PowerShell. It selects Tidewater, launches this mission without an automatic test exit, and writes
+a dated log. Do not add `--check` or `--test-type screenshot`: those bounded smoke-test modes exit
+shortly after mission startup or screenshot capture. The mission itself ends after 120 seconds.

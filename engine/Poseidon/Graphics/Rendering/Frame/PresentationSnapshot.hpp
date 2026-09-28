@@ -132,6 +132,37 @@ struct PresentationSnapshot
     int rotorSourceCount = 0;
     RotorSource rotorSources[kMaxRotorSources] = {};
 
+    // TW-WATER W6: the boats nearest the camera, for the Tidewater wake simulation (one
+    // simulated wake per boat; the renderer keeps the ids stable across frames). Hull size from
+    // the shape's bounding box, draft from its bottom against the sea level.
+    struct WakeBoat
+    {
+        float x = 0.0f, z = 0.0f;       // hull centre (world)
+        float fwdX = 0.0f, fwdZ = 1.0f; // heading (world, unnormalised XZ of the model forward)
+        float velX = 0.0f, velZ = 0.0f; // world velocity
+        float thrust = 0.0f;            // 0..1
+        float halfBeam = 1.0f, halfLength = 3.0f, draft = 0.5f;
+        uint32_t id = 0;
+        bool driven = false;
+        float distance2 = 0.0f; // to the camera (selection only)
+        // W6i (bow spray): the full pose -- origin = hull centre at the design waterline (world),
+        // the model forward and up axes (world, unit) -- the vertical velocity, the freeboard
+        // (sheer height above the waterline), and the CPU sea height (QueryWaterSurfaceScaled, the
+        // sea the boat floats on) at the bow contact points and at the propeller. The contact
+        // points follow the rule in WakeSprayContactPoint (PresentationSnapshot.cpp) and
+        // boat_spray.rs `contact_points`: the two must match.
+        float originY = 0.0f;
+        float fwdY = 0.0f;
+        float upX = 0.0f, upY = 1.0f, upZ = 0.0f;
+        float velY = 0.0f;
+        float freeboard = 0.8f;
+        float hwContact[6] = {};
+        float hwProp = 0.0f;
+    };
+    static constexpr int kMaxWakeBoats = 2;
+    int wakeBoatCount = 0;
+    WakeBoat wakeBoats[kMaxWakeBoats] = {};
+
     // --- Slice S3: local lights --------------------------------------------------------
     // The scored, camera-sorted point/spot light set for the frame, produced by ONE walk
     // of the scene's light list here instead of two walks inside the renderer's NextFrame

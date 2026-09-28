@@ -47,7 +47,7 @@ class Mission
 				items=1;
 				class Item0
 				{
-					position[]={10250,0,1050};
+					position[]={9950,11.52,1560};
 					azimut=0;
 					id=1;
 					side="WEST";
@@ -57,7 +57,7 @@ class Mission
 					rank="LIEUTENANT";
 					skill=0.7;
 					text="plt";
-					init="go = false; go2 = false; this moveInCargo lst1; this setCaptive true";
+					init="go = false; go2 = false; this setCaptive true";
 				};
 			};
 		};

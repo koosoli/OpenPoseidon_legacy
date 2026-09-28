@@ -164,6 +164,9 @@ fn vs_tidewater(@location(0) grid: vec2<f32>, @location(1) node: vec4<f32>) -> V
         swashLevel = sw.swashLevel;
     }
 
+    // W6: the boats' wakes (WaterSurface.js: `extra += wakeDisplacement( worldXZ )`)
+    extra += wakeDisplacement(worldXZ);
+
     var total = disp + extra;
     var y = seaLevel + total.y;
     if (nearShore) {
@@ -308,6 +311,13 @@ fn waterSurfaceFragment(lagXZ: vec2<f32>, footprint: f32, depth: f32, vertexFoam
         slopes += g * near;
     }
     let jac = (d.z + 1.0) * (d.w + 1.0);
+    // W6: the boats' wakes (slopes, the foam they carry, the bubbles in the water)
+    {
+        let w = wakeFragment(lagXZ);
+        slopes += w.slopes;
+        foamSum += w.foam;
+        aeration += w.aeration;
+    }
 
     // base normal: large shoreline waves (per-vertex, can overhang) perturbed by FFT detail
     var normal: vec3<f32>;
@@ -424,21 +434,37 @@ fn _waterSceneDepthAt(uv: vec2<f32>) -> f32 {
     return textureLoad(waterSceneDepth, p, 0);
 }
 
+// W6i.7: Tidewater's material works in a view space with -z forward (three.js). OP's has +z
+// forward (its projection's w is +z: proj column 2 = (0, 0, a, 1)), so every view-space depth
+// test was inverted: the SSR march stopped at its first step (p.z > -0.1), the refraction never
+// found its sample valid, and the soft fade of the spray sprites removed them all. The material's
+// view space is OP's with z mirrored when OP's is +z forward (detected from the projection, so a
+// -z projection would pass through unchanged); helpers convert both ways.
+fn twViewSign() -> f32 {
+    return select(1.0, -1.0, frame.proj[2].w > 0.0);
+}
+fn twView(v: vec4<f32>) -> vec3<f32> {
+    let q = (frame.view * v).xyz;
+    return vec3<f32>(q.x, q.y, q.z * twViewSign());
+}
+
 // View-space z (negative in front of the camera) of the opaque scene at uv. Sky -> very far.
 fn _waterSceneZAt(uv: vec2<f32>) -> f32 {
     let d = _waterSceneDepthAt(uv);
     if (d <= 1e-7) { return -1e9; }
-    return (frame.view * vec4<f32>(scene_rel_at(uv, d), 1.0)).z;
+    return twView(vec4<f32>(scene_rel_at(uv, d), 1.0)).z;
 }
 
-fn viewToRel(v: vec3<f32>) -> vec3<f32> {
-    // view is a rotation (camera-relative rendering) plus whatever translation it carries
+fn viewToRel(v0: vec3<f32>) -> vec3<f32> {
+    // (back to OP's view space first) view is a rotation (camera-relative rendering) plus
+    // whatever translation it carries
+    let v = vec3<f32>(v0.x, v0.y, v0.z * twViewSign());
     let r = mat3x3<f32>(frame.view[0].xyz, frame.view[1].xyz, frame.view[2].xyz);
     return transpose(r) * (v - frame.view[3].xyz);
 }
 
 fn _waterProject(p: vec3<f32>) -> vec2<f32> {
-    let clip = frame.proj * vec4<f32>(p, 1.0);
+    let clip = frame.proj * vec4<f32>(p.x, p.y, p.z * twViewSign(), 1.0);
     let ndc = clip.xy / max(clip.w, 1e-4);
     return vec2<f32>(ndc.x * 0.5 + 0.5, ndc.y * -0.5 + 0.5);
 }
@@ -498,7 +524,7 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
     let rel = in.rel;
     let pos = rel + frame.cam_pos.xyz;
     let screenUV = in.clip.xy / vec2<f32>(textureDimensions(waterSceneDepth));
-    let posV = (frame.view * vec4<f32>(rel, 1.0)).xyz;
+    let posV = twView(vec4<f32>(rel, 1.0));
     let lagXZ = in.lagXZ;
     let vDepth = in.seaDepth;
     let vHeight = in.waveH;
@@ -627,7 +653,7 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
         var reflCol = mix(horizon * 0.35, skyRefl, horizonOcc);
 
         if (Rraw.y < 0.45 && F > 0.05 && tw.material1.y > 0.5) {
-            let Rv = normalize((frame.view * vec4<f32>(Rraw, 0.0)).xyz);
+            let Rv = normalize(twView(vec4<f32>(Rraw, 0.0)));
             if (Rv.z < 0.5) {
                 let r = _waterSSR(posV, Rv, pos.y, Rraw.y);
                 reflCol = mix(reflCol, r.rgb, r.a);
