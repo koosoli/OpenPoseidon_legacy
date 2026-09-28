@@ -2249,7 +2249,7 @@ struct EngineWgpu::GeometryMainCountPending
     uint64_t token=0, pageEpoch=0, admissionEpoch=0, requestId=0, sourceGeneration=0, cullEpoch=0;
     uint32_t producerModel=UINT32_MAX, rendererModel=UINT32_MAX;
     unsigned ageFrames=0;
-    bool mainReported=false;
+    bool mainReported=false, giReported=false;
     uint32_t shadowReportedMask=0;
 };
 
@@ -4203,7 +4203,55 @@ void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing, Fr
             }
             pending.shadowReportedMask |= bit;
         }
-        if ((pending.mainReported && pending.shadowReportedMask == 0xf) || ++pending.ageFrames >= 16)
+        WgrMainTargetCountResult giFact{};
+        const bool giReady = wgr_gi_target_count_fact(_renderer, &giFact,
+                sizeof(giFact), 1) == 1 &&
+            giFact.struct_size == sizeof(giFact) && giFact.version == 1 &&
+            giFact.submitted == 1 && giFact.token == pending.token &&
+            giFact.model_id == pending.rendererModel &&
+            giFact.source_generation == pending.sourceGeneration &&
+            giFact.cull_epoch == pending.cullEpoch &&
+            (giFact.state == WGR_MAIN_TARGET_COUNT_PRESENT ||
+             giFact.state == WGR_MAIN_TARGET_COUNT_ABSENT) &&
+            (giFact.state != WGR_MAIN_TARGET_COUNT_ABSENT || giFact.count == 0) &&
+            (giFact.state != WGR_MAIN_TARGET_COUNT_PRESENT || giFact.count > 0);
+        if (giReady && !pending.giReported)
+        {
+            if (auto fixture = pending.fixture.lock())
+            {
+                bool publish = false;
+                {
+                    std::lock_guard lock(fixture->mutex);
+                    const auto& report = fixture->report;
+                    const auto model = _modelIdOf.find(pending.producerModel);
+                    publish = report.active && report.originalFilePilot && fixture->originalAdmission &&
+                        report.pageEpoch == pending.pageEpoch && report.requestId == pending.requestId &&
+                        report.sourceAdmissionEpoch == pending.admissionEpoch &&
+                        fixture->originalAdmission->report.epoch == pending.admissionEpoch &&
+                        report.producerModel == pending.producerModel &&
+                        fixture->consumedModel == pending.rendererModel &&
+                        fixture->consumedInstance != UINT32_MAX && fixture->instance < _instSlotOf.size() &&
+                        _instSlotOf[fixture->instance] == fixture->consumedInstance &&
+                        model != _modelIdOf.end() && model->second == pending.rendererModel;
+                }
+                if (publish)
+                {
+                    static unsigned rows = 0;
+                    if (rows++ < 16)
+                        LOG_INFO(World, "Private GI sun-proxy GPU COUNT: token={} pageEpoch={} admissionEpoch={} request={} model={} rendererModel={} sourceGeneration={} cullEpoch={} state={} count={} (closed RSM pass; no Fine release)",
+                            pending.token, pending.pageEpoch, pending.admissionEpoch, pending.requestId,
+                            pending.producerModel, pending.rendererModel, pending.sourceGeneration,
+                            giFact.cull_epoch, giFact.state, giFact.count);
+                }
+            }
+            pending.giReported = true;
+        }
+        ++pending.ageFrames;
+        // GI redraws less often than the solar cascades. A short extra map window
+        // observes an in-flight copy without pinning this opt-in probe to one
+        // GI refresh phase for the whole fixture.
+        if ((pending.mainReported && pending.shadowReportedMask == 0xf &&
+             (pending.giReported || pending.ageFrames >= 3)) || pending.ageFrames >= 16)
             _geometryMainCountPending.reset();
     }
 
