@@ -687,16 +687,13 @@ bool TextureSourceDDS::InitFromMemoryWithOptions(const void* data, size_t size, 
         // the whole of "many houses look transparent or as if walls were missing":
         // Everon's buildings are BC7 `_BCR` albedos to a texture.
         //
-        // Forced opaque rather than merely not flagged, because `_hasAlpha` is only
-        // one of the two readers: the alpha-class scan looks at the PIXELS. A leaf's
-        // real coverage arrives through the `enfa|` composite path in Init(), which
-        // writes this channel afterwards, so nothing that genuinely has a cutout
-        // loses it here.
-        if (LowerCopy(who).find("_bcr") != std::string::npos)
+        // Keep the authored roughness for future native PBR shading. The texture
+        // source still reports no coverage; TextureWgpu::Init must also avoid
+        // ForceAlpha for this exact source name so its pixel classifier never
+        // mistakes roughness for holes. An enfa| composite replaces this channel
+        // with its separate coverage image after the decode.
+        if (Enfusion::IsOriginalBcrRoughnessName(who))
         {
-            for (DDSMipLevel& level : _levels)
-                for (size_t i = 3; i < level.data.size(); i += 4)
-                    level.data[i] = 255;
             _hasAlpha = false;
         }
     }
@@ -1060,7 +1057,6 @@ class TextureSourceDDSLinearTint final : public ITextureSource
         for (size_t i = 0; i < decoded.data.size(); i += 4)
         {
             std::swap(decoded.data[i], decoded.data[i + 2]);
-            decoded.data[i + 3] = 255; // Same BCR roughness-not-coverage rule as forced decode.
         }
         output._levels.push_back(std::move(decoded));
         ApplyEnfusionLayerTintWithMode(output._levels, _rgb, true);

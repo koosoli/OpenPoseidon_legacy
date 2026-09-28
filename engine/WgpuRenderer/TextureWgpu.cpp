@@ -1059,7 +1059,12 @@ int TextureWgpu::Init()
     }
 
     format = _src->GetFormat();
-    if (format == PacARGB4444 || format == PacAI88 || format == PacARGB8888)
+    // An original Enfusion BCR's fourth channel is roughness data. The DDS
+    // source declares it non-coverage, and forcing alpha here would otherwise
+    // send decoded BCR pixels through the cutout/blend classifier. enfa|
+    // composites are excluded: their fourth channel was replaced by coverage.
+    if ((format == PacARGB4444 || format == PacAI88 || format == PacARGB8888) &&
+        !Enfusion::IsOriginalBcrRoughnessName(Name()))
     {
         // Original-engine behaviour (TextureD3D::Init did the same): a multi-bit-alpha
         // FORMAT is treated as an alpha texture whether or not the file carries a FLAG
@@ -1325,19 +1330,13 @@ AlphaStats::Kind TextureWgpu::GetAlphaClass()
     // one. Blended, the cards draw back-to-front with no alpha-to-coverage, so a stand of
     // birch loses its edges and washes out into a pale, flat mass -- the thing that keeps
     // being reported as the trees looking wrong, after the coverage itself was fixed.
-    if (const char* name = Name())
+    // RFG-070: look through a tint wrapper; tint changes RGB only, while the
+    // composite's separate OpacityMap remains a cutout even with soft edges.
+    if (Enfusion::IsOpacityCompositeName(Name()))
     {
-        // RFG-070: through the tint wrapper. A shared layer tile rescaled to its material's
-        // own colour is the same image it was for this question -- a tinted cutout is still
-        // a cutout, and a tinted opaque wall must still answer Opaque, which it does because
-        // the tint writes only RGB and never alpha.
-        name = Enfusion::SkipLayerTint(name);
-        if (std::strncmp(name, "enfa|", 5) == 0)
-        {
-            _alphaClass = static_cast<int>(AlphaStats::Cutout);
-            RetireHotSourceProof();
-            return AlphaStats::Cutout;
-        }
+        _alphaClass = static_cast<int>(AlphaStats::Cutout);
+        RetireHotSourceProof();
+        return AlphaStats::Cutout;
     }
 
     AlphaStats::Kind kind = AlphaStats::Opaque;

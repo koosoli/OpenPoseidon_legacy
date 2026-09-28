@@ -71,6 +71,34 @@ inline const char* SkipLayerTint(const char* name)
     return SplitLayerTintName(name, rgb, &inner) ? inner : name;
 }
 
+inline bool IsOpacityCompositeName(const char* name)
+{
+    const char* inner = SkipLayerTint(name);
+    return inner != nullptr && std::strncmp(inner, "enfa|", 5) == 0;
+}
+
+//! An original Enfusion BCR image stores roughness, not coverage, in alpha.
+//! A tint wrapper changes RGB only; an enfa| composite replaces alpha with
+//! coverage and must never take this route.
+inline bool IsOriginalBcrRoughnessName(const char* name)
+{
+    const char* inner = SkipLayerTint(name);
+    if (inner == nullptr || std::strchr(inner, '|') != nullptr)
+        return false;
+    constexpr char suffix[] = "_bcr.edds";
+    constexpr size_t suffixLength = sizeof(suffix) - 1;
+    const size_t length = std::strlen(inner);
+    if (length < suffixLength)
+        return false;
+    for (size_t i = 0; i < suffixLength; ++i)
+    {
+        const char c = inner[length - suffixLength + i];
+        if (c != suffix[i] && !(c >= 'A' && c <= 'Z' && c - 'A' + 'a' == suffix[i]))
+            return false;
+    }
+    return true;
+}
+
 //! Build `enft|r,g,b|<inner>`. Four decimals, which is what keeps two materials that
 //! share a tile but not a colour apart in the texture bank's name-keyed cache -- the
 //! same precision the converting exporter uses for its own per-tint file key

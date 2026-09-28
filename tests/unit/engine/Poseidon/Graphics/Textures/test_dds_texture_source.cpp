@@ -15,6 +15,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <Poseidon/Graphics/Textures/DdsImport.hpp>
+#include <Poseidon/Graphics/Textures/PAADecoder.hpp>
 #include <Poseidon/Graphics/Textures/PreparedTextures.hpp>
 #include <Poseidon/Graphics/Textures/EnfusionTextureName.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/PakArchive.hpp>
@@ -135,6 +136,25 @@ std::vector<uint8_t> BcrBc7Chain()
         }
     }
     file.insert(file.end(), payload.begin(), payload.end());
+    return file;
+}
+
+std::vector<uint8_t> BcrBc7Alpha200()
+{
+    // Synthetic BC7 mode 6, all texels RGBA=(128,128,40,200).
+    uint8_t block[16]{};
+    unsigned bit = 0;
+    auto write = [&](unsigned value, unsigned bits) {
+        for (unsigned i = 0; i < bits; ++i, ++bit)
+            block[bit / 8] |= ((value >> i) & 1u) << (bit % 8);
+    };
+    write(1u << 6, 7);
+    for (unsigned value : {64u, 64u, 20u, 100u}) { write(value, 7); write(value, 7); }
+    write(0, 1); write(0, 1); write(0, 3);
+    for (int i = 1; i < 16; ++i) write(0, 4);
+    auto file = Header(4, 4, 1, "DX10");
+    for (uint32_t word : {98u, 3u, 0u, 1u, 0u, 0x59504F43u, 16u}) AppendU32(file, word);
+    file.insert(file.end(), block, block + 16);
     return file;
 }
 } // namespace
@@ -323,15 +343,110 @@ TEST_CASE("Enfusion RG normals use red rather than cavity or occlusion for X", "
         {
             REQUIRE(pixels[i + 2] == 128);
             REQUIRE(pixels[i + 1] == 128);
-            // BCR roughness is deliberately not forwarded as coverage by this
-            // existing source path. An ordinary RGBA image retains its alpha.
-            // Native RG decoding must retain independent height/transmission B
-            // and AO/cavity A, exactly as the compressed upload does.
+            // BCR roughness survives as data, while IsAlpha stays false so it
+            // cannot become coverage. Native RG decoding likewise retains
+            // independent height/transmission B and AO/cavity A.
             REQUIRE(pixels[i] == 40);
-            const unsigned alpha = std::strcmp(name, "test_bcr.edds") == 0 ? 255 : 200;
-            REQUIRE(static_cast<unsigned>(pixels[i + 3]) == alpha);
+            REQUIRE(static_cast<unsigned>(pixels[i + 3]) == 200);
+        }
+        if (std::strcmp(name, "test_bcr.edds") == 0)
+            REQUIRE_FALSE(source.IsAlpha());
+    }
+}
+
+TEST_CASE("Original BCR roughness survives compressed, decoded and tinted routes without opacity",
+          "[graphics][edds][bcr-roughness]")
+{
+    const auto file = BcrBc7Alpha200();
+    const auto reader = [&](const char*, std::vector<uint8_t>& out) { out = file; return true; };
+    REQUIRE(Poseidon::Enfusion::IsOriginalBcrRoughnessName("Assets/WaterTank_01_MLOD_BCR.edds"));
+    REQUIRE(Poseidon::Enfusion::IsOriginalBcrRoughnessName(
+        "enft|0.3,0.4,0.5|Assets/WaterTank_01_MLOD_BCR.edds"));
+    REQUIRE_FALSE(Poseidon::Enfusion::IsOriginalBcrRoughnessName("Assets/WaterTank_01_MLOD_BCR.paa"));
+    REQUIRE_FALSE(Poseidon::Enfusion::IsOriginalBcrRoughnessName(
+        "enfa|coverage.edds|Assets/WaterTank_01_MLOD_BCR.edds"));
+    REQUIRE(Poseidon::Enfusion::IsOpacityCompositeName(
+        "enft|0.3,0.4,0.5|enfa|coverage.edds|Assets/WaterTank_01_MLOD_BCR.edds"));
+    for (bool compressed : {false, true})
+    {
+        auto options = Poseidon::CaptureDdsPreparationOptions();
+        options.compressedPassthrough = compressed;
+        const char* name = "Assets/WaterTank_01_MLOD_BCR.edds";
+        TextureSourceDDS source;
+        PacLevelMem mips[16]{};
+        REQUIRE(source.InitFromReader(name, mips, 16, reader, options));
+        REQUIRE_FALSE(source.IsAlpha());
+        REQUIRE(Poseidon::ClassifyTextureAlpha(source.IsAlpha(), source.IsTransparent(), false, nullptr) ==
+                Poseidon::AlphaStats::Opaque);
+        if (compressed)
+        {
+            REQUIRE(source.GetFormat() == Poseidon::PacBC7);
+            mips[0].SetDestFormat(Poseidon::PacBC7, 8);
+            uint8_t block[16]{};
+            REQUIRE(source.GetMipmapData(block, mips[0], 0));
+            REQUIRE(std::memcmp(block, file.data() + file.size() - 16, 16) == 0);
+        }
+        else
+        {
+            REQUIRE(source.GetFormat() == PacARGB8888);
+            mips[0].SetDestFormat(PacARGB8888, 8);
+            uint8_t pixels[64]{};
+            REQUIRE(source.GetMipmapData(pixels, mips[0], 0));
+            for (int i = 0; i < 64; i += 4)
+                REQUIRE(pixels[i + 3] == 200);
         }
     }
+    const float tint[3] = {0.3f, 0.4f, 0.5f};
+    const auto tinted = Poseidon::Enfusion::MakeLayerTintName(tint, "Assets/WaterTank_01_MLOD_BCR.edds");
+    TextureSourceDDS tintedSource;
+    PacLevelMem tintedMips[16]{};
+    REQUIRE(tintedSource.InitFromReader(tinted.c_str(), tintedMips, 16, reader,
+                                        {true, true, 1024}));
+    REQUIRE_FALSE(tintedSource.IsAlpha());
+    tintedMips[0].SetDestFormat(PacARGB8888, 8);
+    uint8_t tintedPixels[64]{};
+    REQUIRE(tintedSource.GetMipmapData(tintedPixels, tintedMips[0], 0));
+    for (int i = 0; i < 64; i += 4)
+        REQUIRE(tintedPixels[i + 3] == 200);
+    TextureSourceDDS compressedBase;
+    PacLevelMem baseMips[16]{}, viewMips[16]{};
+    REQUIRE(compressedBase.InitFromReader("Assets/WaterTank_01_MLOD_BCR.edds", baseMips, 16, reader,
+                                          {true, true, 1024}));
+    auto view = compressedBase.CreateLinearTintView(tint, viewMips, 16);
+    REQUIRE(view);
+    REQUIRE_FALSE(view->IsAlpha());
+    viewMips[0].SetDestFormat(PacARGB8888, 8);
+    uint8_t viewPixels[64]{};
+    REQUIRE(view->GetMipmapData(viewPixels, viewMips[0], 0));
+    for (int i = 0; i < 64; i += 4)
+        REQUIRE(viewPixels[i + 3] == 200);
+}
+
+TEST_CASE("Enfusion opacity composite replaces BCR roughness with coverage",
+          "[graphics][edds][bcr-roughness]")
+{
+    const auto bcr = BcrBc7Alpha200();
+    const auto coverage = Bgra2x2();
+    const auto reader = [&](const char* name, std::vector<uint8_t>& out) {
+        if (std::strcmp(name, "coverage.edds") == 0) out = coverage;
+        else if (std::strcmp(name, "colour_BCR.edds") == 0) out = bcr;
+        else return false;
+        return true;
+    };
+    TextureSourceDDS source;
+    PacLevelMem mips[16]{};
+    REQUIRE(source.InitFromReader("enfa|coverage.edds|colour_BCR.edds", mips, 16, reader,
+                                  {true, true, 1024}));
+    REQUIRE(source.IsAlpha());
+    REQUIRE(Poseidon::Enfusion::IsOpacityCompositeName("enfa|coverage.edds|colour_BCR.edds"));
+    REQUIRE(source.GetFormat() == PacARGB8888);
+    mips[0].SetDestFormat(PacARGB8888, 8);
+    uint8_t pixels[64]{};
+    REQUIRE(source.GetMipmapData(pixels, mips[0], 0));
+    REQUIRE(pixels[3] == 0x30);
+    REQUIRE(pixels[2 * 4 + 3] == 0x31);
+    REQUIRE(pixels[2 * 4 * 4 + 3] == 0x32);
+    REQUIRE(pixels[(2 * 4 + 2) * 4 + 3] == 0x33);
 }
 
 TEST_CASE("DDS composition uses only its supplied reader", "[graphics][edds][streaming]")
