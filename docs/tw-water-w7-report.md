@@ -2,11 +2,12 @@
 
 Tidewater Native (`WGR_WATER_BACKEND=1`) against Current OP (`WGR_WATER_BACKEND=0`) on the W7
 camera paths. Plan: `.tw/probe/plan.md` §7 (performance), §8 (tests), §9 (when may the old path
-go), §12 (this template). Updated after W5e, W6j–W6l and W7h.
+go), §12 (this template). Updated after W5e, W6j–W6l, W7h and W7j (storm, night, second coast,
+underwater composite, parameter audit).
 
 ```
-Package: W7   Branch/commit: dec/tidewater-w7h-measurements 145f123c
-Deploy stamp: dec/tidewater-w7h-measurements 145f123c 2026-09-28_11:57 deploy-ps1
+Package: W7   Branch/commit: dec/tidewater-w7h-measurements 145f123c (tables); W7j e995a2f5 (storm, night, coast)
+Deploy stamps: dec/tidewater-w7h-measurements 145f123c 2026-09-28_11:57, dec/tidewater-w7j-underwater-stats e995a2f5 2026-09-28_12:19
 Status: measured (one machine, one run per path and backend; see "Not done")
 Captures: .tw/shots-w7h-{p1,p2,p3}-{b0,b1}, .tw/shots-w7h-p{1,3}-grid{64,96}, .tw/shots-w7h-soak,
           .tw/shots-w7f-{p1,p3}-b0-noplanar
@@ -127,10 +128,16 @@ trace and was not attributed further.
 4. **Shore per region (done):** 2 simulated regions: `shore sim` 0.042 ms (≈0.02 per region),
    breakers + spray 0.056–0.064 ms. Region warm-up is 3 s of weight ramp, no GPU spike; the
    ShoreField and the stations are computed on worker threads (untimed, off the frame).
-5. **Spray (partly):** breaker and boat spray share `breakers + spray` (0.06 ms on P1–P3, where
-   no boat is near). Overdraw was not measured.
-6. **Underwater resolution (not done):** Tidewater's underwater composite runs at full
-   resolution in OP (Tidewater: half-resolution shafts + TAA) and has no GPU region yet.
+5. **Spray (done as far as P1 allows, W7j):** breaker and boat spray share `breakers + spray`
+   (0.05–0.06 ms on P1–P3). With both spray sources off (`WGR_TW_SPRAY=0,1`,
+   `WGR_TW_BOAT_SPRAY=off`) P1's water draw (which includes the spray sprites) is 0.445 vs 0.443 ms
+   and the frame is identical: on these calm-sea paths the spray's draw and overdraw are below
+   the noise. On the boat runs the whole bow spray is capped at ~50 particles per 60 Hz frame
+   (W6l).
+6. **Underwater resolution (done, W7j):** the underwater composite (region 17, either backend)
+   over the P2 run: Tidewater 0.008 ms mean, 0.059 ms in the worst 5 s window; Current OP 0.012 /
+   0.312 ms. Tidewater's full-resolution composite (8–12 step marches) is already cheaper than
+   Current OP's, so the half-resolution variant Tidewater uses was not ported.
 
 ## Backend switch soak (§8, done, W7h)
 
@@ -149,6 +156,37 @@ trace and was not attributed further.
   while texture memory stays flat: the counter decrements for textures it never counted (it goes
   negative from the first switch). Memory says there is no leak; the counter itself was not
   investigated further.
+
+## Storm, dusk / night, second coast (W7j / W7k)
+
+| Run | Backend | wall p50 / p95 / p99 | GPU p50 | water GPU |
+| --- | --- | --- | --- | --- |
+| P1 storm (weather 1.0) | Current OP | 8.27 / 9.21 / 9.82 | 7.46 | 2.48 |
+| P1 storm (weather 1.0) | Tidewater | 6.79 / 7.85 / 8.48 | 5.62 | 0.82 |
+| P1 night (21:30) | Current OP | 7.97 / 9.06 / 10.82 | 7.12 | 2.50 |
+| P1 night (21:30) | Tidewater | 6.48 / 7.49 / 8.14 | 5.21 | 0.86 |
+| Second coast (Everon west, 1045 / 6175) | Current OP | 9.02 / 9.77 / 11.43 | 8.20 | 3.04 |
+| Second coast (Everon west, 1045 / 6175) | Tidewater | 7.06 / 8.07 / 8.62 | 5.80 | 0.79 |
+
+(19:45 "dusk" is already night on this date and measured the same as 21:30.) Backend
+allocations at night are ~1295–1302 MB in both backends (the night scene's lights), otherwise
+941–948 MB. The second coast was picked from the shore field's own coast list (the prepare line
+since W7j); two shore regions simulated there as on P1. Captures:
+`.tw/shots-w7j-{storm,dusk,night}-{b0,b1}`, `.tw/shots-w7k-coast2-{b0,b1}`. In the storm Tidewater
+draws a dark grey, streaked sea with a white surf line; Current OP a bright blue sea with foam
+patches: for the owner's eyes.
+
+## Water-tab parameters (§9 criterion 4, static audit)
+
+Every lane the Water tab's Tidewater group packs (WaterWgpu.cpp: `tidewater[0..3]`,
+`tidewater_shore[0..2]`, `tidewater_sea`, `tidewater_fx`) has a consumer in the renderer:
+amplitude, choppiness, swell scale / heading (FFT and shore waves); foam coverage / intensity, SSR,
+reflection strength, cascade scale, roughness, SSS, backscatter, gust / slick / windrow, debug view
+(surface block, spectrum); shore waves on, period, amplitude, variation, gamma, break span, curl,
+run-up, turbidity, simulation on, dry time, lips (shore lanes, simulation, breakers); sea wind,
+fetch, whitecaps (spectrum; the sea-conditions mode is resolved on the C++ side into these); spray
+gain / intensity, water glow. This is a code audit: whether each one's effect is *visible* at its
+range was not checked slider by slider.
 
 ## Parity work since the first report
 
@@ -193,9 +231,16 @@ trace and was not attributed further.
 
 ## Not done / not verified
 
-- One run per path and backend on one machine and resolution (1280×720); no storm pass, no second
-  coast, no DLSS/FSR runs (§8 manual captures), no LOD-governor lock.
-- Experiments 3 and 6, overdraw for 5, and GPU regions for the underwater composite.
+- One run per path and backend on one machine and resolution (1280×720); no LOD-governor lock.
+- Upscalers: this build is compiled without DLSS (`POSEIDON_DLSS=OFF`, the log says so). The FSR 1
+  run (`WGR_RENDER_SCALE=67`) did not engage: the log accepts 67 % but the game's temporal tuning
+  (graphics.cfg `renderScale` / the dev panel) resets it to 100 % at start-up, and the frame and
+  the image are identical to native. Testing FSR 1 needs `renderScale` changed in the owner's
+  graphics.cfg, which I did not touch. MSAA was not run.
+- Experiment 3 (FFT layout).
+- Inland water (§9 criterion 3): rivers, lakes and ponds are still not drawn in Tidewater mode
+  (TW-WATER-01's open owner decision: ocean only / flat Tidewater sheets / keep Current OP for
+  bodies). Server, multiplayer and save/load were not tested.
 - The early submit assumes no pass in the early command buffer reads an upload made later in
   the frame; captures and validation show no difference, but a one-frame lag of something
   culled or simulated early would only show in motion.
