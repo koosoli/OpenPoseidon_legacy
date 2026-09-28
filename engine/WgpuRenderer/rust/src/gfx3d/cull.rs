@@ -441,6 +441,31 @@ pub(crate) struct InstanceTable {
     /// edits. The global epoch also omits dynamic-tail changes. Neither witness
     /// authorizes cached COUNT reuse or Fine retirement.
     target_revision: Option<Box<InstanceTargetRevision>>,
+    /// Optional, source-local provenance for epoch churn. It classifies only
+    /// retained-static table mutations; dynamic, material, texture and pose
+    /// changes are outside this witness and still forbid image reuse.
+    static_noop_epoch: Option<Box<StaticNoopEpochWitness>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StaticEpochOrigin {
+    BitIdenticalUpdate,
+    ChangedOrUnknown,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum StaticEpochRelation {
+    NoMutation,
+    OnlyBitIdenticalUpdates,
+    ChangedOrUnknown,
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct StaticNoopEpochWitness {
+    start_epoch: u64,
+    last_epoch: u64,
+    only_noop_updates: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -454,6 +479,28 @@ struct InstanceTargetRevision {
 }
 
 impl InstanceTable {
+    /// Private diagnostic arm. This does not change the renderer's epoch,
+    /// dirty uploads, target revision, COUNT facts or cache validity.
+    fn arm_static_noop_epoch(&mut self) -> u64 {
+        let epoch = self.epoch;
+        self.static_noop_epoch = Some(Box::new(StaticNoopEpochWitness {
+            start_epoch: epoch, last_epoch: epoch, only_noop_updates: true,
+        }));
+        epoch
+    }
+
+    fn static_noop_epoch_relation(&self, start_epoch: u64) -> StaticEpochRelation {
+        let Some(witness) = self.static_noop_epoch.as_deref() else {
+            return StaticEpochRelation::Unknown;
+        };
+        if witness.start_epoch != start_epoch || witness.last_epoch != self.epoch {
+            return StaticEpochRelation::Unknown;
+        }
+        if !witness.only_noop_updates { return StaticEpochRelation::ChangedOrUnknown; }
+        if self.epoch == start_epoch { StaticEpochRelation::NoMutation }
+        else { StaticEpochRelation::OnlyBitIdenticalUpdates }
+    }
+
     /// Start observing a retained model explicitly. Reselecting a model advances
     /// the serial even when no instance changed, so an older binding cannot alias.
     fn arm_target_revision(&mut self, model_id: u32) -> Option<u64> {
@@ -545,12 +592,24 @@ impl InstanceTable {
     }
 
     // Content invalidation does not mutate handles, slot generations or upload ranges.
-    fn invalidate_retained_content(&mut self) {
+    fn invalidate_retained_content(&mut self, origin: StaticEpochOrigin) {
+        let previous = self.epoch;
         self.epoch = self.epoch.wrapping_add(1);
+        if let Some(witness) = &mut self.static_noop_epoch {
+            // An epoch wrap could alias old facts. Fail closed permanently
+            // until a new explicit diagnostic arm.
+            if previous == u64::MAX || witness.last_epoch != previous {
+                witness.only_noop_updates = false;
+            }
+            witness.last_epoch = self.epoch;
+            if origin != StaticEpochOrigin::BitIdenticalUpdate {
+                witness.only_noop_updates = false;
+            }
+        }
     }
 
-    fn mark_dirty(&mut self, slot: u32) {
-        self.invalidate_retained_content();
+    fn mark_dirty(&mut self, slot: u32, origin: StaticEpochOrigin) {
+        self.invalidate_retained_content(origin);
         self.dirty = Some(match self.dirty {
             Some((lo, hi)) => (lo.min(slot), hi.max(slot)),
             None => (slot, slot),
@@ -570,7 +629,7 @@ impl InstanceTable {
             self.generations.push(0);
             (self.slots.len() - 1) as u32
         };
-        self.mark_dirty(slot);
+        self.mark_dirty(slot, StaticEpochOrigin::ChangedOrUnknown);
         self.changed_target_model(new_model, INVALID_MODEL);
         Self::handle(slot, self.generations[slot as usize])
     }
@@ -584,8 +643,14 @@ impl InstanceTable {
         if let Some(e) = self.slots.get_mut(slot as usize) {
             let old_model = e.model;
             let new_model = inst.model;
+            let origin = if self.static_noop_epoch.is_some() &&
+                bytemuck::bytes_of(e) == bytemuck::bytes_of(&inst) {
+                StaticEpochOrigin::BitIdenticalUpdate
+            } else {
+                StaticEpochOrigin::ChangedOrUnknown
+            };
             *e = inst;
-            self.mark_dirty(slot);
+            self.mark_dirty(slot, origin);
             self.changed_target_model(old_model, new_model);
         }
     }
@@ -602,7 +667,7 @@ impl InstanceTable {
             e.model = INVALID_MODEL;
             self.generations[slot as usize] = self.generations[slot as usize].wrapping_add(1);
             self.free_slots.push(slot);
-            self.mark_dirty(slot);
+            self.mark_dirty(slot, StaticEpochOrigin::ChangedOrUnknown);
             self.changed_target_model(old_model, INVALID_MODEL);
         }
     }
@@ -1078,7 +1143,7 @@ fn set_model_feedback_tag(models: &mut [ModelGpu], uploads: &mut TableUploads, i
 fn retire_model_content(models: &[ModelGpu], lods: &mut [LodGpu], id: u32,
                         instances: &mut InstanceTable, uploads: &mut TableUploads) -> bool {
     if !retire_model_lods(models, lods, id) { return false; }
-    instances.invalidate_retained_content();
+    instances.invalidate_retained_content(StaticEpochOrigin::ChangedOrUnknown);
     instances.changed_target_model(id, INVALID_MODEL);
     uploads.mark(TableDomain::Lod);
     true
@@ -1097,7 +1162,7 @@ fn retire_model_to_sentinel(models: &mut [ModelGpu], lods: &mut [LodGpu], id: u3
         .is_some_and(|end| end <= lods.len());
     if valid { for lod in &mut lods[span.base..span.base + span.count] { lod.section_count = 0; } }
     model.lod_base = 0; model.lod_count = 0; model._pad = 0;
-    instances.invalidate_retained_content();
+    instances.invalidate_retained_content(StaticEpochOrigin::ChangedOrUnknown);
     instances.changed_target_model(id, INVALID_MODEL);
     uploads.mark(TableDomain::Model); uploads.mark(TableDomain::Lod);
     (true, valid.then_some(span))
@@ -2698,6 +2763,18 @@ impl CullState {
 
     pub fn retained_target_revision(&self) -> Option<(u32, u64)> {
         self.instances.target_revision()
+    }
+
+    /// Opt-in source-local provenance for global-epoch churn caused by the
+    /// retained static table. It is never evidence that a cached image is
+    /// current: dynamic instances, mesh/material/texture/pose edits and other
+    /// casters require separate provenance.
+    pub(crate) fn arm_static_noop_epoch(&mut self) -> u64 {
+        self.instances.arm_static_noop_epoch()
+    }
+
+    pub(crate) fn static_noop_epoch_relation(&self, start_epoch: u64) -> StaticEpochRelation {
+        self.instances.static_noop_epoch_relation(start_epoch)
     }
 
     fn target_revision_matches(&self, identity: MainCountIdentity) -> bool {
@@ -6905,6 +6982,70 @@ pub(crate) mod tests {
         assert_eq!(table.target_revision(), Some((8, 8)));
         assert_eq!(table.arm_target_revision(7), Some(9),
             "switching back cannot alias an older A fact");
+    }
+
+    #[test]
+    fn static_noop_epoch_witness_only_accepts_bit_identical_valid_updates() {
+        let mut table = InstanceTable::default();
+        let original = inst(7);
+        let live = table.add(original);
+        let dead = table.add(inst(8));
+        table.remove(dead);
+        assert_eq!(table.static_noop_epoch_relation(table.epoch), StaticEpochRelation::Unknown,
+            "the default path is unarmed");
+
+        let start = table.arm_static_noop_epoch();
+        assert_eq!(table.static_noop_epoch_relation(start), StaticEpochRelation::NoMutation);
+        table.update(live, original);
+        table.update(live, original);
+        assert_eq!(table.epoch, start + 2, "the existing global epoch still advances");
+        assert_eq!(table.static_noop_epoch_relation(start),
+            StaticEpochRelation::OnlyBitIdenticalUpdates);
+        assert_eq!(table.static_noop_epoch_relation(start + 1), StaticEpochRelation::Unknown,
+            "a fact may only bind to its own explicitly armed baseline");
+
+        let before_stale = table.epoch;
+        table.update(dead, original);
+        assert_eq!(table.epoch, before_stale, "a stale handle never changes the table");
+        assert_eq!(table.static_noop_epoch_relation(start),
+            StaticEpochRelation::OnlyBitIdenticalUpdates);
+
+        let mut changed = original;
+        changed.world[0] = 1.0;
+        table.update(live, changed);
+        assert_eq!(table.static_noop_epoch_relation(start), StaticEpochRelation::ChangedOrUnknown);
+        table.update(live, changed);
+        assert_eq!(table.static_noop_epoch_relation(start), StaticEpochRelation::ChangedOrUnknown,
+            "a later no-op cannot erase an earlier change");
+
+        let fresh = table.arm_static_noop_epoch();
+        table.update(live, changed);
+        assert_eq!(table.static_noop_epoch_relation(fresh),
+            StaticEpochRelation::OnlyBitIdenticalUpdates);
+        table.remove(live);
+        assert_eq!(table.static_noop_epoch_relation(fresh), StaticEpochRelation::ChangedOrUnknown);
+    }
+
+    #[test]
+    fn static_noop_epoch_witness_fails_closed_on_retirement_and_epoch_wrap() {
+        let mut table = InstanceTable::default();
+        let live = table.add(inst(7));
+        let start = table.arm_static_noop_epoch();
+        let models = [ModelGpu { lod_base: 0, lod_count: 1,
+            bounding_sphere: 1.0, _pad: 0 }];
+        let mut lods = [LodGpu { resolution: 1.0, section_base: 0,
+            section_count: 1, is_decal: 0 }];
+        let mut uploads = TableUploads::NONE;
+        assert!(retire_model_content(&models, &mut lods, 0, &mut table, &mut uploads));
+        assert_eq!(table.static_noop_epoch_relation(start), StaticEpochRelation::ChangedOrUnknown,
+            "drawable retirement and unattributed invalidation are never no-ops");
+
+        table.epoch = u64::MAX;
+        let wrapped_start = table.arm_static_noop_epoch();
+        table.update(live, inst(7));
+        assert_eq!(table.epoch, 0);
+        assert_eq!(table.static_noop_epoch_relation(wrapped_start),
+            StaticEpochRelation::ChangedOrUnknown, "wrapping must not alias an old image");
     }
 
     #[test]

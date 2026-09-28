@@ -1,0 +1,7 @@
+# Retained-static no-op epoch provenance (2026-09-28)
+
+`InstanceTable::update` deliberately continues to increment the global retained-instance epoch and mark the slot dirty even when the replacement `InstanceGpu` row is bit-identical. The opt-in, boxed `StaticNoopEpochWitness` classifies that narrow source of epoch churn without changing render behavior. It compares all bytes in the GPU row only while explicitly armed. From its arm epoch, it reports `OnlyBitIdenticalUpdates` only if every subsequent retained-static epoch increment came from such an update. Valid add/remove, changed update, drawable retirement, unattributed invalidation, or epoch wrap fail closed as `ChangedOrUnknown`. An unarmed or mismatched baseline is `Unknown`.
+
+This proves only that **the retained-static rows** did not change across the observed epoch increments. Dynamic instances, mesh/section uploads, material/texture changes, animation poses, and other casters remain outside this witness. It cannot establish image currency or permit cached COUNT reuse, Fine release, reclamation, or default policy promotion. Existing global epoch, upload, target revision, source and published-image gates remain unchanged.
+
+Isolated source validation: two device-free Rust tests passed. The root integrator owns the paired desktop build and installed-game check after cherry-picking this commit; no game deployment was attempted here.
