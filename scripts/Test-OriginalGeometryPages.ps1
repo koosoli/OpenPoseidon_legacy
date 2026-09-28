@@ -490,6 +490,9 @@ try{
             } while ([DateTime]::UtcNow -lt $until)
             if (!$state.coarseResident -or $state.diskReadStatus -ne 'Read' -or $state.diskRequestedRepresentation -ne 'Coarse' -or
                 $state.fineResident -or $state.pageWorkState -ne 'CoarseResident') {throw 'Complete actual disk coarse result not published'}
+            # Keep pollCoarse's request current until the asynchronous COUNT maps.
+            # Action coarse starts a new request and the owner rightly rejects stale rows.
+            RequireMainCountPublication $state 'original-coarse-current'
             $null=Action 'coarse'
         }
 
@@ -717,6 +720,9 @@ try{
       $until=[DateTime]::UtcNow.AddSeconds(15)
       do{$null=Action 'pollFine';$state=PageCut (Action 'status');if($state.pageWorkState -match 'Failed|Refused|Invalid|Capacity'){throw 'Fine transaction refused'};if($state.fineResident){break};Start-Sleep -Milliseconds 100}while([DateTime]::UtcNow -lt $until)
       if(!$state.fineResident -or $state.diskReadStatus -ne 'Read' -or $state.diskRequestedRepresentation -ne 'Fine'){throw 'Actual fine disk result not committed'}
+      # Observe starts another request. Let the current Fine request publish
+      # before it is superseded, for both first admission and refill.
+      RequireMainCountPublication $state 'original-fine-current'
       return (PageCut (Observe $true $true))
      }
      $fine=AdmitFine
