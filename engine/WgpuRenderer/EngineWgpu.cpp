@@ -12503,9 +12503,9 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
                     reportedNativeCavity = true;
                 }
             }
-            // RFG-047: tell the shader which two channels the normal is in. Only ever set
-            // for a compressed Enfusion `_NMO`; a decoded one keeps RFG-045's R-into-A copy
-            // and leaves this clear, so the two forms of the same file shade identically.
+            // RFG-047: tell the shader which two channels the normal is in. Both
+            // compressed and decoded Enfusion RG normals preserve the independent
+            // data in B/A, so neither may read normal X from alpha.
             if (normalRgPacked)
             {
                 sec.flags |= WGR_MODEL_SECTION_NORMAL_RG;

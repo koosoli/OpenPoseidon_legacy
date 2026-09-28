@@ -18,6 +18,7 @@
 #include <Poseidon/Graphics/Textures/PAADecoder.hpp>
 #include <Poseidon/Graphics/Textures/PreparedTextures.hpp>
 #include <Poseidon/Graphics/Textures/EnfusionTextureName.hpp>
+#include <Poseidon/Graphics/Textures/NativeNormalChannels.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/PakArchive.hpp>
 
 #include <algorithm>
@@ -352,6 +353,38 @@ TEST_CASE("Enfusion RG normals use red rather than cavity or occlusion for X", "
         if (std::strcmp(name, "test_bcr.edds") == 0)
             REQUIRE_FALSE(source.IsAlpha());
     }
+}
+
+TEST_CASE("Native NTC cavity survives compressed and decoded DDS upload classification",
+          "[graphics][edds][ntc-cavity]")
+{
+    const auto file = BcrBc7Alpha200(); // Synthetic RGBA=(128,128,40,200), no game asset.
+    const char* name = "Assets/Trees/Leaf_NTC.edds";
+    const auto reader = [&](const char*, std::vector<uint8_t>& out) { out = file; return true; };
+    REQUIRE(Poseidon::IsEnfusionRgNormalName(name));
+    for (bool compressed : {false, true})
+    {
+        Poseidon::DdsPreparationOptions options{compressed, true, 1024};
+        TextureSourceDDS source;
+        PacLevelMem mips[16]{};
+        REQUIRE(source.InitFromReader(name, mips, 16, reader, options));
+        const auto format = source.GetFormat();
+        REQUIRE(format == (compressed ? Poseidon::PacBC7 : PacARGB8888));
+        REQUIRE(Poseidon::NativeNtcCavityChannelAvailable(format, !compressed, true, name));
+        if (!compressed)
+        {
+            mips[0].SetDestFormat(PacARGB8888, 8);
+            uint8_t pixels[64]{};
+            REQUIRE(source.GetMipmapData(pixels, mips[0], 0));
+            for (int i = 0; i < 64; i += 4)
+                CHECK(pixels[i + 3] == 200); // Authored cavity, not repacked normal X.
+        }
+    }
+    CHECK_FALSE(Poseidon::NativeNtcCavityChannelAvailable(PacARGB8888, false, true, name));
+    CHECK_FALSE(Poseidon::NativeNtcCavityChannelAvailable(Poseidon::PacBC5, true, true, name));
+    CHECK_FALSE(Poseidon::NativeNtcCavityChannelAvailable(Poseidon::PacBC7, false, false, name));
+    CHECK_FALSE(Poseidon::NativeNtcCavityChannelAvailable(Poseidon::PacBC7, false, true,
+                                                           "Assets/Trees/Leaf_NMO.edds"));
 }
 
 TEST_CASE("Original BCR roughness survives compressed, decoded and tinted routes without opacity",

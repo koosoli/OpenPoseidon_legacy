@@ -424,13 +424,10 @@ enum WgrModelSectionFlags : uint32_t
      * `decode_nohq` reads (alpha, green) -- the DXT5nm convention of every `_nohq.paa` in
      * the OFP/Arma corpus. Enfusion's `_NMO` maps put x/y in (r, g); BC5 is a two-channel
      * format and can do nothing else, and Reforger's BC7 `_NMO` uses the remaining two
-     * channels for roughness and metalness, so reading X out of alpha reads METALNESS.
+     * channels for metalness and occlusion, so reading X out of alpha reads OCCLUSION.
      *
-     * While those textures were DECODED, RFG-045 fixed this on the data side by copying R
-     * into A. A compressed upload has no CPU-side pixel to write, so the convention has to
-     * ride to the shader instead -- which is what this bit is. Set only for a section whose
-     * bound normal map was uploaded compressed; on the decoded path RFG-045's copy still
-     * happens and this bit stays clear, so both forms shade identically. */
+     * Both compressed and decoded native DDS retain RG normal XY and the independent B/A
+     * material channels. The bit keeps shader decoding identical in both upload modes. */
     WGR_MODEL_SECTION_NORMAL_RG = 8u,
     WGR_MODEL_SECTION_NATIVE_CAVITY = 16u,
     /* The global normal map (`GlobalNMOMap`, `UVSrcGlobNormal "UV set 2"`) is

@@ -164,11 +164,9 @@ class TextureWgpu : public Texture
 
     // RFG-047: true when this texture, used as a normal map, packs X in RED.
     //
-    // Answered from the form it was actually LOADED in, not from the file on disk: the
-    // same `_NMO` reaching the decode path keeps RFG-045's R-into-A copy and must return
-    // false, or the shader would read the copy out of the wrong channel and the fix would
-    // invert itself. That is why this asks the destination format rather than the name
-    // alone. Cheap and const: two integer compares plus, for BC7, one substring test.
+    // Answered from the form it was actually loaded in. Original Enfusion `_NMO`/`_NTC`
+    // maps retain R/G normal XY and their separate B/A data in BC7 and decoded DDS;
+    // legacy BC5 normals still follow their existing packing rule.
     bool NormalIsRgPacked() const;
     bool NormalHasNativeCavity() const;
 

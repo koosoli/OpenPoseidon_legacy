@@ -7,6 +7,7 @@
 #include <Poseidon/Graphics/Textures/BlockCompression.hpp>
 #include <Poseidon/Graphics/Textures/AlphaShapeAnalysis.hpp>
 #include <Poseidon/Graphics/Textures/DdsImport.hpp> // IsEnfusionRgNormalName (RFG-047)
+#include <Poseidon/Graphics/Textures/NativeNormalChannels.hpp>
 #include <Poseidon/Graphics/Textures/HotSourceProofRetirementPolicy.hpp>
 #include <Poseidon/Graphics/Textures/EnfusionTextureName.hpp> // SkipLayerTint (RFG-070)
 #include <Poseidon/Graphics/Textures/PAADecoder.hpp>
@@ -1483,15 +1484,12 @@ bool TextureWgpu::HasAlphaHoles()
 
 bool TextureWgpu::NormalHasNativeCavity() const
 {
-    // Decoded DDS currently repacks R into A; BC5 has no auxiliary alpha at all.
-    if (_nMipmaps <= 0 || _mipmaps[0].DstFormat() != PacBC7 || !NormalIsRgPacked())
+    if (_nMipmaps <= 0)
         return false;
-    std::string name = Name();
-    for (char& c : name)
-        if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
-    const size_t dot = name.find_last_of('.');
-    const size_t end = dot == std::string::npos ? name.size() : dot;
-    return end >= 4 && name.compare(end - 4, 4, "_ntc") == 0;
+    const bool decodedDds = _mipmaps[0].DstFormat() == PacARGB8888 &&
+        dynamic_cast<TextureSourceDDS*>(static_cast<ITextureSource*>(_src)) != nullptr;
+    return NativeNtcCavityChannelAvailable(_mipmaps[0].DstFormat(), decodedDds,
+                                            NormalIsRgPacked(), Name());
 }
 
 bool TextureWgpu::NormalIsRgPacked() const
@@ -1510,8 +1508,9 @@ bool TextureWgpu::NormalIsRgPacked() const
     // BC7 keeps four channels and is also what every ordinary Enfusion ALBEDO is, so the
     // name has to decide. NMO and NTC store normal XY in RG; their alpha is
     // occlusion or cavity, respectively. Reading X from alpha flattens tree lighting.
-    // Decoded DDS normals retain R as well as copying it to A. Keeping the RG
-    // declaration also prevents the direct shader from treating R as POM height.
+    // Decoded Enfusion normals retain both R and the independent A data channel.
+    // Keeping the RG declaration also prevents the direct shader from treating
+    // R as POM height.
     const bool decodedDds =
         dst == PacARGB8888 && dynamic_cast<TextureSourceDDS*>(static_cast<ITextureSource*>(_src)) != nullptr;
     return (dst == PacBC7 || decodedDds) && IsEnfusionRgNormalName(Name());
