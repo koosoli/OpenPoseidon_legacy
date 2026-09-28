@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageProjectedDemand.hpp>
+#include <Poseidon/Graphics/Rendering/GeometryPagePrivateAutoFine.hpp>
 #include <limits>
 #include <initializer_list>
 using namespace Poseidon::GeometryPages;
@@ -57,4 +58,29 @@ TEST_CASE("Projected policy refuses malformed values time and binding without pr
     ProjectedPageDemand empty({},{});empty.Observe(1,Bound(1,3));REQUIRE_FALSE(empty.DesiredFinePreparation());
     for(auto settings:{ProjectedDemandSettings{1,1,0,50},ProjectedDemandSettings{2,-1,0,50},ProjectedDemandSettings{2,1,2001,50},ProjectedDemandSettings{2,1,0,49}}){ProjectedPageDemand invalid(Pair,settings);invalid.Observe(1,Bound(1,3));REQUIRE_FALSE(invalid.CanAttempt(1,1,false,false,false));}
     ProjectedPageDemand generations(Pair,{2,1,0,50});generations.Observe(1,Bound(1,3));REQUIRE(generations.Observe(2,Bound(0,3)));generations.Observe(3,Bound(2,3));REQUIRE(generations.Observe(4,Bound(UINT64_MAX,3)));generations.Observe(5,Bound(3,3));REQUIRE_FALSE(generations.DesiredFinePreparation());
+}
+TEST_CASE("Private Auto-Fine needs the actual prepared and joined completed cut", "[geometry-page-projected-demand]") {
+    ProjectedPageDemand demand(Pair,{2,1,0,50});
+    demand.Observe(10,Bound(1,3));REQUIRE(demand.DesiredFinePreparation());
+    PrivateAutoFineCut cut;
+    cut.enabled=cut.active=cut.readyReturned=cut.sourceVerified=cut.projectedBound=cut.desiredFine=true;
+    cut.coarseSelected=cut.finePrepared=cut.fineResident=cut.completeRows=cut.noWork=true;
+    cut.fixtureEpoch=1;cut.sourceEpoch=cut.ownerEpoch=cut.certificateEpoch=2;
+    cut.cameraGeneration=cut.demandGeneration=cut.policyGeneration=demand.LastGeneration();
+    cut.requestId=cut.observedRequestId=7;cut.currentModel=cut.coarseModel=41;
+    cut.preparedModel=cut.fineModel=43;
+    REQUIRE(cut.Eligible());
+    cut.finePrepared=false;REQUIRE_FALSE(cut.Eligible());cut.finePrepared=true;
+    cut.noWork=false;REQUIRE_FALSE(cut.Eligible());cut.noWork=true;
+    cut.completeRows=false;REQUIRE_FALSE(cut.Eligible());cut.completeRows=true;
+    cut.observedRequestId=6;REQUIRE_FALSE(cut.Eligible());cut.observedRequestId=7;
+    cut.certificateEpoch=3;REQUIRE_FALSE(cut.Eligible());cut.certificateEpoch=2;
+    cut.preparedModel=44;REQUIRE_FALSE(cut.Eligible());cut.preparedModel=43;
+    cut.demandGeneration=2;REQUIRE_FALSE(cut.Eligible());cut.demandGeneration=1;
+    cut.enabled=false;REQUIRE_FALSE(cut.Eligible());cut.enabled=true;
+    cut.alreadyCommitted=true;REQUIRE_FALSE(cut.Eligible());cut.alreadyCommitted=false;
+    auto rejected=Bound(2,0);rejected.validatedIdealPairBound=false;
+    REQUIRE(demand.Observe(11,rejected));cut.desiredFine=demand.DesiredFinePreparation();
+    cut.policyGeneration=demand.LastGeneration();cut.cameraGeneration=cut.demandGeneration=2;
+    REQUIRE_FALSE(cut.Eligible());
 }

@@ -3223,7 +3223,7 @@ class Engine : public IGraphicsEngine
     { return {}; }
 
     // Ready is a returned-main-frame record cut, not all-pass/pixel or GPU-free proof.
-    enum class GeometryPageFixtureAction { Begin, Coarse, Fine, Observe, Snapshot, Abort, BeginClod, Fallback, BeginPaged, RequestFine, PollFine, CancelFine, HoldFine, ReleaseFine, EvictFine, BeginClodPaged, BeginDiskClodPaged, RequestCoarse, PollCoarse, BeginOriginalDiskClodPaged, FollowCamera, StopCamera, PollFinePrefetch, RequestFinePrefetch, FollowProjected };
+    enum class GeometryPageFixtureAction { Begin, Coarse, Fine, Observe, Snapshot, Abort, BeginClod, Fallback, BeginPaged, RequestFine, PollFine, CancelFine, HoldFine, ReleaseFine, EvictFine, BeginClodPaged, BeginDiskClodPaged, RequestCoarse, PollCoarse, BeginOriginalDiskClodPaged, FollowCamera, StopCamera, PollFinePrefetch, RequestFinePrefetch, FollowProjected, PrivateAutoFine };
     struct GeometryPageSourceIdentity
     {
         std::array<uint8_t,32> sha256{};
@@ -3332,6 +3332,8 @@ class Engine : public IGraphicsEngine
         uint64_t projectedDemandGeneration=0;
         uint32_t projectedDemandStatus=0; // Last consumed projection status; preserved across pending Observe.
         double projectedDemandUpper=0; // Last authenticated pair discrepancy, not source error or pixels.
+        bool privateAutoFineEnabled=false,privateAutoFineCommitted=false; // Historical one-way fixture action only.
+        uint64_t privateAutoFineCameraGeneration=0,privateAutoFineSourceRequest=0; // Completed Observe request, not worker pageRequest.
         uint64_t sourceAdmissionEpoch=0,originalSourceBytes=0,sourceAdmissionKnownBytes=0;
         uint32_t helperCount=0; // Original subset has no helper LODs; hashes stay empty.
         float originalOriginRadius=0;

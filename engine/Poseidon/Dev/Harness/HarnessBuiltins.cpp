@@ -744,6 +744,7 @@ void RegisterScreenshot(HarnessServer& hs)
             PAGE_FIXTURE_NUMBER(cameraRequests);PAGE_FIXTURE_NUMBER(cameraCancels);PAGE_FIXTURE_NUMBER(cameraAttempts);
             PAGE_FIXTURE_NUMBER(cameraDistance);PAGE_FIXTURE_NUMBER(preparedProducerModel);
             PAGE_FIXTURE_NUMBER(projectedDemandGeneration);PAGE_FIXTURE_NUMBER(projectedDemandStatus);PAGE_FIXTURE_NUMBER(projectedDemandUpper);
+            PAGE_FIXTURE_NUMBER(privateAutoFineCameraGeneration);PAGE_FIXTURE_NUMBER(privateAutoFineSourceRequest);
             PAGE_FIXTURE_NUMBER(cameraTupleStatus);PAGE_FIXTURE_NUMBER(cameraTupleIndex);PAGE_FIXTURE_NUMBER(cameraTupleSource);
             PAGE_FIXTURE_NUMBER(cameraTupleGeneration);PAGE_FIXTURE_NUMBER(cameraTupleModelBirth);PAGE_FIXTURE_NUMBER(cameraTupleCertificateGeneration);
             PAGE_FIXTURE_NUMBER(cameraTupleVersion);PAGE_FIXTURE_NUMBER(cameraTupleStructBytes);
@@ -761,6 +762,7 @@ void RegisterScreenshot(HarnessServer& hs)
             PAGE_FIXTURE_BOOL(cameraTupleEnabled);PAGE_FIXTURE_BOOL(cameraTupleValid);PAGE_FIXTURE_BOOL(projectedSurfaceIdealBound);
             cJSON_AddStringToObject(result,"projectedSurfaceScope","Read-only ideal nonjittered main1:1 projected selected-union bound; excludes authored fallback, shader floating-point/raster/pixel/visibility/attributes/all-pass quality and cut selection.");
             PAGE_FIXTURE_BOOL(projectedDemandActive);PAGE_FIXTURE_BOOL(projectedDemandHasBound);
+            PAGE_FIXTURE_BOOL(privateAutoFineEnabled);PAGE_FIXTURE_BOOL(privateAutoFineCommitted);
             PAGE_FIXTURE_BOOL(cameraDemandActive);PAGE_FIXTURE_BOOL(cameraDesiredFine);PAGE_FIXTURE_BOOL(cameraHasObservation);PAGE_FIXTURE_BOOL(finePrepared);
             PAGE_FIXTURE_BOOL(active); PAGE_FIXTURE_BOOL(fineSelected); PAGE_FIXTURE_BOOL(cpuHelpersUnchanged);
             PAGE_FIXTURE_BOOL(mainFrameReturned); PAGE_FIXTURE_BOOL(cascadeConfigured); PAGE_FIXTURE_BOOL(localShadowConfigured);
