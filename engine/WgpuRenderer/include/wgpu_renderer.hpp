@@ -2720,6 +2720,10 @@ extern "C"
      * A view-level zero does not prove pixels or permit residency release. */
     WGR_API uint32_t wgr_shadow0_target_count_fact(WgrRenderer*, WgrMainTargetCountResult*,
         uint32_t output_size, uint32_t output_version);
+    /* Indexed solar cascade (0..3) variant of the same diagnostic. Invalid
+     * indices fail without touching output; inactive sun views remain UNKNOWN. */
+    WGR_API uint32_t wgr_shadow_target_count_fact(WgrRenderer*, uint32_t cascade,
+        WgrMainTargetCountResult*, uint32_t output_size, uint32_t output_version);
 
     /* Debug: read back the current auto-exposure scale (blocking GPU sync; dev panel only). */
     WGR_API float wgr_get_exposure_scale(WgrRenderer* renderer);

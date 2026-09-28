@@ -6332,11 +6332,15 @@ impl Renderer {
         let main_count_copied = main_count_armed
             && main_world_draw_closed
             && self.gfx3d.copy_main_target_count(&mut encoder);
-        // This private cascade counter is copied from its own cull buffer only
-        // after the cascade-0 depth pass closed. It stays Unknown if that view
-        // was disabled, skipped, or lacked an actual GPU-driven draw.
-        let shadow0_count_copied = main_count_copied
-            && self.gfx3d.copy_shadow0_target_count(&mut encoder);
+        // Each solar cascade copies its own counter only after its depth pass
+        // closed. A missing cascade, skipped cull, or missing draw remains Unknown.
+        let mut shadow_count_copied = [false; 4];
+        if main_count_copied {
+            for cascade in 0..4 {
+                shadow_count_copied[cascade] =
+                    self.gfx3d.copy_shadow_target_count(&mut encoder, cascade);
+            }
+        }
         self.gfx3d.resolve_lod_demand();
         self.gfx3d.resolve_mip_feedback(&mut encoder);
         self.water_visibility.resolve(&mut encoder);
@@ -6347,14 +6351,23 @@ impl Renderer {
         let main_commands = encoder.finish();
         let main_count_ready = main_count_copied && main_count_request.is_some_and(|(token, _, _)|
             self.gfx3d.main_target_count_before_submit(token));
-        let shadow0_count_ready = main_count_ready && shadow0_count_copied && main_count_request.is_some_and(|(token, _, _)|
-            self.gfx3d.shadow0_target_count_before_submit(token));
+        let mut shadow_count_ready = [false; 4];
+        if main_count_ready {
+            if let Some((token, _, _)) = main_count_request {
+                for cascade in 0..4 {
+                    shadow_count_ready[cascade] = shadow_count_copied[cascade] &&
+                        self.gfx3d.shadow_target_count_before_submit(token, cascade);
+                }
+            }
+        }
         self.queue.submit(std::iter::once(main_commands));
         let main_count_submitted = main_count_ready && main_count_request.is_some_and(|(token, _, _)|
             self.gfx3d.main_target_count_submitted(token));
-        if shadow0_count_ready {
-            if let Some((token, _, _)) = main_count_request {
-                self.gfx3d.shadow0_target_count_submitted(token);
+        if let Some((token, _, _)) = main_count_request {
+            for cascade in 0..4 {
+                if shadow_count_ready[cascade] {
+                    self.gfx3d.shadow_target_count_submitted(token, cascade);
+                }
             }
         }
         self.gpu_timers

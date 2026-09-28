@@ -3347,6 +3347,11 @@ mod main_target_count_ffi_tests {
                 &mut output, 48, 1), -4);
             assert_eq!(wgr_main_target_count_fact(renderer, &mut output, 47, 1), 0);
             assert_eq!(wgr_shadow0_target_count_fact(renderer, &mut output, 47, 1), 0);
+            for cascade in 0..4 {
+                assert_eq!(wgr_shadow_target_count_fact(renderer, cascade,
+                    &mut output, 47, 1), 0);
+            }
+            assert_eq!(wgr_shadow_target_count_fact(renderer, 4, &mut output, 48, 1), 0);
         }
         assert_eq!(output.token, 99);
     }
@@ -3413,14 +3418,30 @@ pub unsafe extern "C" fn wgr_shadow0_target_count_fact(
     renderer: *mut WgrRenderer, output: *mut WgrMainTargetCountResult,
     output_size: u32, output_version: u32,
 ) -> u32 {
+    unsafe { wgr_shadow_target_count_fact(renderer, 0, output, output_size, output_version) }
+}
+
+/// Nonblocking target-model COUNT for one solar cascade (0..3). The exact
+/// request identity and cull epoch are shared with the main diagnostic, but
+/// each cascade has its own counter, staging ring, and independent answer.
+/// An inactive sun view, including a night-time local shadow tile, is Unknown.
+/// # Safety
+/// Same live renderer and exact writable output contract as the main getter.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_shadow_target_count_fact(
+    renderer: *mut WgrRenderer, cascade: u32,
+    output: *mut WgrMainTargetCountResult,
+    output_size: u32, output_version: u32,
+) -> u32 {
     if renderer.is_null() || output.is_null() ||
+        cascade >= 4 ||
         output_size != std::mem::size_of::<WgrMainTargetCountResult>() as u32 ||
         output_version != WgrMainTargetCountResult::VERSION { return 0; }
     let output = unsafe { &mut *output };
     *output = WgrMainTargetCountResult::empty();
     catch_unwind(AssertUnwindSafe(|| {
         let renderer = unsafe { &mut *renderer };
-        let fact = renderer.gfx3d.shadow0_target_count_fact(&renderer.device);
+        let fact = renderer.gfx3d.shadow_target_count_fact(&renderer.device, cascade as usize);
         *output = WgrMainTargetCountResult::from_fact(fact);
     })).is_ok() as u32
 }
