@@ -6696,7 +6696,11 @@ pub(crate) mod tests {
     }
 #[test]
     fn sky0_target_count_present_absent_cache_and_abort() {
-        let Some((device, queue)) = headless() else { return; };
+        let Some((device, queue)) = headless() else {
+            assert_ne!(std::env::var("WGR_REQUIRE_TEST_GPU").as_deref(), Ok("1"),
+                "GPU COUNT test required an adapter");
+            return;
+        };
         let mut cull = CullState::new(&device);
         let sections = [SectionGpu {
             first_index: 0, index_count: 3, base_vertex: 0, variant: 0,
