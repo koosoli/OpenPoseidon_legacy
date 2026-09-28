@@ -420,6 +420,20 @@ TEST_CASE("Original BCR roughness survives compressed, decoded and tinted routes
     REQUIRE(view->GetMipmapData(viewPixels, viewMips[0], 0));
     for (int i = 0; i < 64; i += 4)
         REQUIRE(viewPixels[i + 3] == 200);
+    // The lazy tint factory also accepts legacy *_BCR.dds names. Their alpha
+    // semantics are not certified as Enfusion roughness, so keep the old
+    // opaque-alpha output instead of accidentally turning them into coverage.
+    TextureSourceDDS legacyBase;
+    PacLevelMem legacyMips[16]{}, legacyViewMips[16]{};
+    REQUIRE(legacyBase.InitFromReader("Assets/WaterTank_01_MLOD_BCR.dds", legacyMips, 16, reader,
+                                      {true, true, 1024}));
+    auto legacyView = legacyBase.CreateLinearTintView(tint, legacyViewMips, 16);
+    REQUIRE(legacyView);
+    legacyViewMips[0].SetDestFormat(PacARGB8888, 8);
+    uint8_t legacyPixels[64]{};
+    REQUIRE(legacyView->GetMipmapData(legacyPixels, legacyViewMips[0], 0));
+    for (int i = 0; i < 64; i += 4)
+        REQUIRE(legacyPixels[i + 3] == 255);
 }
 
 TEST_CASE("Enfusion opacity composite replaces BCR roughness with coverage",

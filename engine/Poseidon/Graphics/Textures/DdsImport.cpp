@@ -1054,9 +1054,16 @@ class TextureSourceDDSLinearTint final : public ITextureSource
         if (!ConvertPixels(source.data.data(), decoded.data.data(), source.width, source.height,
                            PixelFormat::BC7, PixelFormat::RGBA8888))
             return false;
+        const bool preserveRoughnessAlpha =
+            Enfusion::IsOriginalBcrRoughnessName(static_cast<const char*>(_base._name));
         for (size_t i = 0; i < decoded.data.size(); i += 4)
         {
             std::swap(decoded.data[i], decoded.data[i + 2]);
+            // The lazy view also accepts legacy *_BCR.dds. Preserve data alpha
+            // only for original Enfusion EDDS; legacy DDS keeps its former
+            // opaque-alpha behavior until its channel semantics are proven.
+            if (!preserveRoughnessAlpha)
+                decoded.data[i + 3] = 255;
         }
         output._levels.push_back(std::move(decoded));
         ApplyEnfusionLayerTintWithMode(output._levels, _rgb, true);
