@@ -2249,7 +2249,7 @@ struct EngineWgpu::GeometryMainCountPending
     uint64_t token=0, pageEpoch=0, admissionEpoch=0, requestId=0, sourceGeneration=0, cullEpoch=0;
     uint32_t producerModel=UINT32_MAX, rendererModel=UINT32_MAX;
     unsigned ageFrames=0;
-    bool mainReported=false, giReported=false, local0Reported=false;
+    bool mainReported=false, giReported=false, local0Reported=false, reflectionReported=false;
     uint32_t shadowReportedMask=0;
 };
 
@@ -4289,10 +4289,53 @@ void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing, Fr
             }
             pending.local0Reported = true;
         }
+        WgrMainTargetCountResult reflectionFact{};
+        const bool reflectionReady = wgr_reflection_target_count_fact(_renderer, &reflectionFact,
+                sizeof(reflectionFact), 1) == 1 &&
+            reflectionFact.struct_size == sizeof(reflectionFact) && reflectionFact.version == 1 &&
+            reflectionFact.submitted == 1 && reflectionFact.token == pending.token &&
+            reflectionFact.model_id == pending.rendererModel &&
+            reflectionFact.source_generation == pending.sourceGeneration &&
+            reflectionFact.cull_epoch == pending.cullEpoch &&
+            (reflectionFact.state == WGR_MAIN_TARGET_COUNT_PRESENT ||
+             reflectionFact.state == WGR_MAIN_TARGET_COUNT_ABSENT) &&
+            (reflectionFact.state != WGR_MAIN_TARGET_COUNT_ABSENT || reflectionFact.count == 0) &&
+            (reflectionFact.state != WGR_MAIN_TARGET_COUNT_PRESENT || reflectionFact.count > 0);
+        if (reflectionReady && !pending.reflectionReported)
+        {
+            if (auto fixture = pending.fixture.lock())
+            {
+                bool publish = false;
+                {
+                    std::lock_guard lock(fixture->mutex);
+                    const auto& report = fixture->report;
+                    const auto model = _modelIdOf.find(pending.producerModel);
+                    publish = report.active && report.originalFilePilot && fixture->originalAdmission &&
+                        report.pageEpoch == pending.pageEpoch && report.requestId == pending.requestId &&
+                        report.sourceAdmissionEpoch == pending.admissionEpoch &&
+                        fixture->originalAdmission->report.epoch == pending.admissionEpoch &&
+                        report.producerModel == pending.producerModel &&
+                        fixture->consumedModel == pending.rendererModel &&
+                        fixture->consumedInstance != UINT32_MAX && fixture->instance < _instSlotOf.size() &&
+                        _instSlotOf[fixture->instance] == fixture->consumedInstance &&
+                        model != _modelIdOf.end() && model->second == pending.rendererModel;
+                }
+                if (publish)
+                {
+                    static unsigned rows = 0;
+                    if (rows++ < 16)
+                        LOG_INFO(World, "Private planar reflection GPU COUNT: token={} pageEpoch={} admissionEpoch={} request={} model={} rendererModel={} sourceGeneration={} cullEpoch={} state={} count={} (early submitted pass; no Fine release)",
+                            pending.token, pending.pageEpoch, pending.admissionEpoch, pending.requestId,
+                            pending.producerModel, pending.rendererModel, pending.sourceGeneration,
+                            reflectionFact.cull_epoch, reflectionFact.state, reflectionFact.count);
+                }
+            }
+            pending.reflectionReported = true;
+        }
         ++pending.ageFrames;
-        // GI and local tiles redraw less often than the solar cascades. A short
-        // extra map window observes in-flight copies without pinning the probe
-        // to one cache refresh phase for the whole fixture.
+        // GI and local tiles redraw less often than the solar cascades; the
+        // planar mirror may be disabled altogether. A short extra map window
+        // observes in-flight copies without waiting for a future refresh.
         if ((pending.mainReported && pending.shadowReportedMask == 0xf &&
              (pending.giReported || pending.ageFrames >= 3)) || pending.ageFrames >= 16)
             _geometryMainCountPending.reset();
