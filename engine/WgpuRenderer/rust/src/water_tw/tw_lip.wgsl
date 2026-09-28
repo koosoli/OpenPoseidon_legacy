@@ -172,8 +172,10 @@ fn lipShade(in: LipOut, front: bool) -> vec4<f32> {
     let aF = aer * 0.92;
     var col = foamLit * mix(1.0, clumps * 0.4 + 0.75, wh) * aF + cW * (1.0 - aF);
     col = apply_fog(min(col, vec3<f32>(16000.0)), in.rel);
-    let aOut = (aF + aW * (1.0 - aF)) * alpha;
-    return vec4<f32>(col * alpha, aOut);
+    // (W10b, OP) premultiplied coverage above 1 subtracts the water behind the lip (red and cyan
+    // specks along the crests where the Water tab's lip opacity is above 1): coverage stays <= 1
+    let aOut = min((aF + aW * (1.0 - aF)) * alpha, 1.0);
+    return vec4<f32>(col * min(alpha, 1.0), aOut);
 }
 
 @fragment

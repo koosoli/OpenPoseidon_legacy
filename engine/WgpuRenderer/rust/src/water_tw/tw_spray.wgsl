@@ -46,6 +46,12 @@ fn sprayWaveShadow(p: vec3<f32>, seedTag: f32, L: vec3<f32>) -> f32 {
     return out;
 }
 
+// (W10b, OP) the forward-scattering lobes are capped: looking toward a low sun through the
+// breakers' spray, Tidewater's Henyey-Greenstein peaks (up to ~6.5 x the sun for g = 0.85) summed
+// over hundreds of overlapping sprites into a blinding white band with a bloom star (the owner's
+// glowing surf). 0.9 keeps the backlit glow of spray, about 1/7 of the drops' peak.
+const SPRAY_LOBE_MAX: f32 = 0.9;
+
 struct SprayOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) rel: vec3<f32>,
@@ -145,17 +151,17 @@ fn vs_spray(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) ->
     let sun = sunDiffuse * PI * sunVis;
     // clear water (drop, ligament): the bright sky it refracts and reflects, a strong forward lobe
     // when backlit, a small glint from any side
-    let sWater = sun * (sprayPhaseHG(cosT, 0.85) * 1.2 + 0.12);
+    let sWater = sun * (min(sprayPhaseHG(cosT, 0.85), SPRAY_LOBE_MAX) * 1.2 + 0.12);
     // dense spray: multiply scattered, white from any side (a diffuse sphere), plus a forward lobe
     let lambert = (sqrt(max(1.0 - cosA * cosA, 0.0)) + (PI - acos(clamp(cosA, -1.0, 1.0))) * cosA) / PI;
     let sSpray = sun * ((lambert * 0.65 + 0.35) / PI);
-    let fSpray = sun * (sprayPhaseHG(cosT, 0.6) * 0.9);
+    let fSpray = sun * (min(sprayPhaseHG(cosT, 0.6), SPRAY_LOBE_MAX) * 0.9);
     // mist: a thin veil of fine drops, strongly forward scattering, tinted by the sky
     let sMist = sun * (0.25 / PI);
-    let fMist = sun * sprayPhaseHG(cosT, 0.75);
+    let fMist = sun * min(sprayPhaseHG(cosT, 0.75), SPRAY_LOBE_MAX);
     // clear sheet: thin water, the sky it shows and a little sun off its surface
     let sClear = sun * 0.05;
-    let fClear = sun * (sprayPhaseHG(cosT, 0.8) * 1.1);
+    let fClear = sun * (min(sprayPhaseHG(cosT, 0.8), SPRAY_LOBE_MAX) * 1.1);
     let skyK = select(select(select(1.15, 0.95, isClear), 0.9, isMist), 0.9, water);
     let col = skyIrr * skyK;
     let sunCol = select(select(select(sSpray, sClear, isClear), sMist, isMist), sWater, water);
@@ -239,7 +245,9 @@ fn sprayShade(in: SprayOut) -> vec4<f32> {
     let fadeScene = sat((posViewZ - sceneZ) / soft);
     let pos = in.rel + frame.cam_pos.xyz;
     let fadeWater = sat((pos.y - vMisc.y) / (soft * 0.6) + 0.15);
-    let aOut = in.vCol.w * shape * fadeScene * fadeWater * (1.0 - farK * 0.4);
+    // (W10b, OP) coverage <= 1: the sprite intensity lane multiplies it, and premultiplied
+    // coverage above 1 subtracts the scene behind the spray
+    let aOut = min(in.vCol.w * shape * fadeScene * fadeWater * (1.0 - farK * 0.4), 1.0);
     // (OP diagnostics, WGR_TW_SPRAY_DEBUG=<n>: each live sprite as a disc whose brightness is one of
     // its opacity factors: 1 vertex opacity (x10), 2 shape, 3 soft scene fade, 4 water fade; 5-7 below)
     let dbgMode = sprayR.seed.w;
