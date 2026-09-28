@@ -59,6 +59,7 @@ private:
         std::atomic<uint8_t> pendingPromotion{0};
         std::atomic<uint32_t> pendingRetireReasons{0};
     };
+    const bool _targetOnly;
     std::shared_ptr<const ArchiveSourceBudget::Ticket> _charge;
     std::array<Record, MaxRecords> _records{};
     std::atomic<uint32_t> _sources{0}, _rows{0};
@@ -104,8 +105,20 @@ private:
         return "invalid";
     }
 public:
-    explicit WarmTextureProvenance(std::shared_ptr<const ArchiveSourceBudget::Ticket> charge = {})
-        : _charge(std::move(charge)) {}
+    // One explicitly selected real renderer stage, diagnostic only. Filtering trace
+    // records does not alter warm admission, source capture, or upload decisions.
+    static constexpr std::string_view TargetKey() noexcept
+    { return R"(dz\structures\residential\misc\data\patnik_smdi.paa)"; }
+    static bool TargetOnly() noexcept
+    {
+        static const bool enabled = [] {
+            const char* value = std::getenv("WGR_WARM_PATNIK_STAGE_PROBE");
+            return value && std::strcmp(value, "1") == 0;
+        }();
+        return enabled;
+    }
+    explicit WarmTextureProvenance(std::shared_ptr<const ArchiveSourceBudget::Ticket> charge = {},
+        bool targetOnly = TargetOnly()) : _targetOnly(targetOnly), _charge(std::move(charge)) {}
     WarmTextureProvenance(const WarmTextureProvenance&) = delete;
     WarmTextureProvenance& operator=(const WarmTextureProvenance&) = delete;
     static bool Enabled() noexcept
@@ -134,7 +147,7 @@ public:
     }
     uint32_t Admit(std::string_view key, const BankReadMemberIdentity& member) noexcept
     {
-        if (key.empty() || key.size() >= sizeof(Record::key)) return 0;
+        if (key.empty() || key.size() >= sizeof(Record::key) || (_targetOnly && key != TargetKey())) return 0;
         const uint32_t count = _sources.load(std::memory_order_acquire);
         for (uint32_t i = 0; i < count; ++i)
             if (_records[i].keyBytes == key.size() &&

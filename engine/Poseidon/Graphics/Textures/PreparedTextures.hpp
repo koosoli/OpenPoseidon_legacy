@@ -164,6 +164,16 @@ class PreparedTextureStore
     // caller cannot silently consume one without receiving its source witness.
     bool Take(const std::string& key, PAABlockChain& out,
               std::shared_ptr<const ArchiveSourceBinding>* warmSource = nullptr);
+    // Read-only diagnostic. Copies scalars while holding the existing store mutex;
+    // no TTL sweep, Take, lease retention, publication or upload side effect.
+    struct WarmEntryProbe
+    {
+        bool entryPresent = false, validChain = false, warmBound = false;
+        bool publicationValid = false, withinTtl = false, sameMember = false;
+        bool uploadedMarkPresent = false;
+        uint64_t storeGeneration = 0;
+    };
+    WarmEntryProbe ProbeWarmEntry(const std::string& key, const BankReadRequest* expected) const;
     // Only for bounded owner requests that observed a missing GPU texture and
     // verified its initialized source against the current loaded mount. This
     // advisory bypasses uploaded marks, not entry/cancellation/byte limits.

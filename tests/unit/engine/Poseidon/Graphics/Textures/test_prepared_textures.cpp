@@ -738,6 +738,11 @@ TEST_CASE("Source-bound warm chains require explicit claims and retain cancellat
     CHECK(store.ShouldPrepareWarm("warm-source"));
     CHECK_FALSE(publish(generation, nullptr)); // Binding alone does not certify current demand.
     REQUIRE(publish(generation, &token));
+    const auto exact = store.ProbeWarmEntry("warm-source", &binding->Request());
+    CHECK(exact.entryPresent); CHECK(exact.validChain); CHECK(exact.warmBound);
+    CHECK(exact.publicationValid); CHECK(exact.withinTtl); CHECK(exact.sameMember);
+    auto wrongMember = binding->Request(); ++wrongMember.offset;
+    CHECK_FALSE(store.ProbeWarmEntry("warm-source", &wrongMember).sameMember);
     CHECK(store.SnapshotStats().bytes >= fixture.chain.blocks.capacity() + binding->KnownCppBytes());
     PAABlockChain output;
     const auto refusedBefore = store.SnapshotStats().warmSourceRefused;
@@ -751,6 +756,8 @@ TEST_CASE("Source-bound warm chains require explicit claims and retain cancellat
     CHECK_FALSE(store.HasAlphaFacts("warm-source")); // Source witness is independent of optional facts.
     REQUIRE(publish(generation, &token));
     inventory->CancelModel(0);
+    const auto cancelled = store.ProbeWarmEntry("warm-source", &binding->Request());
+    CHECK(cancelled.entryPresent); CHECK_FALSE(cancelled.publicationValid);
     CHECK_FALSE(store.Take("warm-source", output, &claimed)); CHECK_FALSE(claimed);
     CHECK_FALSE(publish(generation, &token));
     const render::DdsPublicationToken replacement{inventory, 0, inventory->Epoch(0)};
@@ -943,3 +950,26 @@ TEST_CASE("Warm promotion visits at most 32 stored entries and misses the rest s
     store.Clear();
 }
 #endif
+
+TEST_CASE("Read-only warm-entry probe does not consume or reclassify an ordinary chain", "[Graphics][PAA][streaming]")
+{
+    auto& store = render::PreparedTextureStore::Instance();
+    if (!store.Enabled()) SKIP("Requires texture preparation");
+    store.Clear();
+    const auto bytes = TinyDxt1Paa();
+    PAABlockChain chain;
+    REQUIRE(ReadPAABlockChainBuffer(bytes.data(), bytes.size(), chain));
+    REQUIRE(store.Put("diagnostic-chain", std::move(chain)));
+    const auto before = store.SnapshotStats();
+    const auto absent = store.ProbeWarmEntry("not-present", nullptr);
+    CHECK_FALSE(absent.entryPresent);
+    const auto found = store.ProbeWarmEntry("diagnostic-chain", nullptr);
+    CHECK(found.entryPresent);
+    CHECK(found.validChain);
+    CHECK_FALSE(found.warmBound);
+    CHECK_FALSE(found.sameMember);
+    CHECK(store.SnapshotStats().takes == before.takes);
+    CHECK(store.SnapshotStats().entries == before.entries);
+    REQUIRE(store.Take("diagnostic-chain", chain));
+    store.Clear();
+}

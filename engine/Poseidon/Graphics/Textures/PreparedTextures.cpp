@@ -598,6 +598,33 @@ bool PreparedTextureStore::Take(const std::string& key, PAABlockChain& out,
     return true;
 }
 
+PreparedTextureStore::WarmEntryProbe PreparedTextureStore::ProbeWarmEntry(
+    const std::string& key, const BankReadRequest* expected) const
+{
+    WarmEntryProbe result;
+    if (!Enabled() || key.empty()) return result;
+    std::lock_guard<std::mutex> lock(_impl->mutex);
+    result.storeGeneration = _impl->generation;
+    result.uploadedMarkPresent = _impl->uploaded.count(key) != 0;
+    const auto found = _impl->byKey.find(key);
+    if (found == _impl->byKey.end()) return result;
+    const auto& entry = *found->second;
+    result.entryPresent = true;
+    result.validChain = entry.chain.valid();
+    result.warmBound = bool(entry.warmSource);
+    result.publicationValid = !entry.publication.inventory || entry.publication.Valid();
+    const double ttl = TtlSeconds();
+    result.withinTtl = ttl <= 0.0 ||
+        std::chrono::duration<double>(Impl::Clock::now() - entry.stored).count() < ttl;
+    if (expected && entry.warmSource)
+    {
+        BankReadMemberIdentity a, b;
+        result.sameMember = expected->CopyMemberIdentity(a) &&
+            entry.warmSource->Request().CopyMemberIdentity(b) && a == b;
+    }
+    return result;
+}
+
 bool PreparedTextureStore::ShouldPrepareWarm(const std::string& key)
 {
     if (!Enabled() || key.empty()) return false;

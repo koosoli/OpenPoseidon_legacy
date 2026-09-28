@@ -3190,6 +3190,21 @@ class Engine : public IGraphicsEngine
         std::vector<WarmTextureRead>&, size_t&, size_t* = nullptr) const {}
 
 
+    // Exact opt-in owner diagnostic for one existing real material stage. No source
+    // load, texture upload, eviction, store consumption or strong lease escapes.
+    enum class WarmPatnikProbeStatus : uint8_t { Disabled, WrongOwner, Unsupported, Ready };
+    struct WarmPatnikProbeReport
+    {
+        WarmPatnikProbeStatus status = WarmPatnikProbeStatus::Disabled;
+        bool textureFound = false, targetKeyMatched = false, gpuResident = false;
+        bool uploadTried = false, initializedMips = false, initializedBinding = false;
+        bool currentBinding = false, canWarmPrepare = false;
+        bool storeEntry = false, storeChain = false, storeWarmBound = false;
+        bool storePublicationValid = false, storeWithinTtl = false, storeSameMember = false;
+        bool storeUploadedMark = false, traceEnabled = false, traceTruncated = false;
+        uint32_t traceExactToken = 0, traceSources = 0, traceRows = 0;
+        uint64_t storeGeneration = 0;
+    };
     // Explicit bounded private-allocation diagnostic; never unregisters a world
     // model. Snapshot reads a copied renderer-cut observation, not live FFI.
     enum class SharedMeshFixtureAction { Begin, DropNewest, ReleaseProducer, DropOldest, Observe, Snapshot, Abort, BeginStandalone };
@@ -3342,6 +3357,7 @@ class Engine : public IGraphicsEngine
     virtual GeometryPageFixtureReport ControlGeometryPageFixture(GeometryPageFixtureAction,
         float x=1200,float y=11.5f,float z=1200,const GeometryPageDiskFixtureInput* disk=nullptr,
         const GeometryPageCameraDemandInput* camera=nullptr) { return {}; }
+    virtual WarmPatnikProbeReport ProbeWarmPatnikStage() const { return {}; } // append virtual slot
 
   protected:
     // Post-hook fires from OnWindowResized so apps can re-run the aspect policy

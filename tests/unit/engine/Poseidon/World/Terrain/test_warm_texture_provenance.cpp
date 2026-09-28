@@ -101,3 +101,17 @@ TEST_CASE("Warm trace latches only actually stored exact-source retirement and d
     CHECK(trace.DrainRetirementReasons(old) == 0);
     CHECK(trace.DrainRetirementReasons(remount) == (1u << unsigned(P::RetireReason::Clear)));
 }
+
+TEST_CASE("Targeted warm trace leaves unrelated records unadmitted without changing event stamps", "[warm-provenance]")
+{
+    WarmTextureProvenance trace({}, true);
+    const auto id = Identity(1, 32);
+    CHECK(trace.Admit("unrelated.paa", id) == 0);
+    CHECK(trace.Observe().sources == 0);
+    const auto token = trace.Admit(WarmTextureProvenance::TargetKey(), id);
+    REQUIRE(token == 1);
+    CHECK(trace.Find(WarmTextureProvenance::TargetKey(), id) == token);
+    CHECK(trace.Stamp(token, WarmTextureProvenance::Event::StorePut));
+    CHECK(trace.EventOccurrences(token, WarmTextureProvenance::Event::StorePut) == 1);
+    CHECK(trace.Observe().sources == 1);
+}

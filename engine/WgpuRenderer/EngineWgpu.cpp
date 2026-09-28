@@ -10637,6 +10637,57 @@ void EngineWgpu::PrepareNativeNormalSources(LODShapeWithShadow* shape)
                  std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count());
 }
 
+Engine::WarmPatnikProbeReport EngineWgpu::ProbeWarmPatnikStage() const
+{
+    WarmPatnikProbeReport out;
+    using Trace = Streaming::WarmTextureProvenance;
+    if (!Trace::TargetOnly()) return out;
+    if (!Foundation::IsMainThread()) { out.status = WarmPatnikProbeStatus::WrongOwner; return out; }
+    if (!_wbank) { out.status = WarmPatnikProbeStatus::Unsupported; return out; }
+    out.status = WarmPatnikProbeStatus::Ready;
+    constexpr auto target = Trace::TargetKey();
+    const std::string key(target);
+    const int index = _wbank->Find(RStringB(key.c_str())); // existing bank entry only; no Load
+    if (index < 0 || index >= _wbank->NTextures()) return out;
+    const auto* texture = dynamic_cast<const TextureWgpu*>(_wbank->GetTexture(index));
+    if (!texture) return out;
+    out.textureFound = true;
+    out.targetKeyMatched = render::PreparedTextureStore::Key(texture->SourceName()) == key;
+    if (!out.targetKeyMatched) return out; // alias cannot certify the requested source
+    out.gpuResident = texture->GpuHandle() != 0;
+    out.uploadTried = texture->HasAttemptedGpuUpload();
+    out.initializedMips = texture->HasInitializedWarmSource();
+    out.initializedBinding = texture->HasInitializedArchiveBinding();
+    out.canWarmPrepare = texture->CanWarmPrepare();
+    auto current = texture->CurrentArchiveSourceBinding(); // read-only mounted-member check
+    out.currentBinding = bool(current);
+    const auto store = render::PreparedTextureStore::Instance().ProbeWarmEntry(
+        key, current ? &current->Request() : nullptr);
+    out.storeEntry = store.entryPresent;
+    out.storeChain = store.validChain;
+    out.storeWarmBound = store.warmBound;
+    out.storePublicationValid = store.publicationValid;
+    out.storeWithinTtl = store.withinTtl;
+    out.storeSameMember = store.sameMember;
+    out.storeUploadedMark = store.uploadedMarkPresent;
+    out.storeGeneration = store.storeGeneration;
+    if (auto* trace = Trace::Active())
+    {
+        out.traceEnabled = true;
+        const auto summary = trace->Observe();
+        out.traceSources = summary.sources;
+        out.traceRows = summary.rows;
+        out.traceTruncated = summary.truncated;
+        if (current)
+        {
+            BankReadMemberIdentity member;
+            if (current->Request().CopyMemberIdentity(member))
+                out.traceExactToken = trace->Find(key, member);
+        }
+    }
+    return out; // current alias drops here; never retained in the report
+}
+
 void EngineWgpu::CaptureWarmTextureReads(const LODShapeWithShadow* shape,
     std::vector<WarmTextureRead>& reads, size_t& workRemaining, size_t* stageSourceAttemptsRemaining) const
 {
