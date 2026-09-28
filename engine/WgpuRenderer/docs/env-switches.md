@@ -54,7 +54,23 @@ have been.
 | `WGR_TW_DEBUG` | Rust | TW-WATER W3h. Forces the Tidewater material debug view for the session (Water tab "TW debug view" numbering: 6 path length, 7 sea bed seen through, 8 sea depth, 10 SSR weight). Diagnostic only. |
 | `WGR_TW_GLOW` | Rust | TW-WATER W3j. Overrides the Water tab's "TW water glow" (scale of the light scattered inside the water; 0 = reflection only, 1 = Tidewater's formula on OP's light) for the session. For A/B captures. |
 | `WGR_TW_SPRAY` | Rust | TW-WATER W4a. `<gain>,<intensity>` overrides the Water tab's breaker spray emission gain and sprite intensity for the session (e.g. `1,8` makes every particle easy to see). For captures. |
+| `WGR_TW_WAKE` | Rust | TW-WATER W6h. `0` turns the Tidewater boat wakes (`water_tw/wake.rs`) off for the session; boats then leave no simulated wake in Tidewater mode. For A/B captures. |
+| `WGR_TW_WAKE_STATS` | C++ bridge | TW-WATER W6h. `1` logs the wake slots (boat, Froude number, schedule) and the bow-spray particle / request counts with the periodic Tidewater log line. Diagnostic only. |
+| `WGR_TW_WAKE_TUNE` | Rust | TW-WATER W6h.1. `foam=..,draft=..,source=..,wash=..,aer=..,amp=..` (any subset) scales the wake's foam, hull draft, source strength, propeller wash, aeration and displacement. Defaults are OP's tuned values (foam 0.2, draft 0.7, wash 0.8, the rest 1). For tuning captures. |
+| `WGR_TW_BOAT_SPRAY` | Rust | TW-WATER W6i. `off` disables the boats' bow spray (`water_tw/boat_spray.rs`); a number scales the white water and mist thrown by the steady bow wave (default 1). |
+| `WGR_TW_SPRAY_DEBUG` | Rust | TW-WATER W6i.3. `1`..`11` switches the spray sprites to a diagnostic output (fade terms, depth, kind, ...; see `tw_spray.wgsl`). Diagnostic only. |
+| `WGR_TW_LEGACY_BOAT_FX` | C++ (`Ship.cpp`) | TW-WATER W6i.6. `1` keeps the legacy WaterSource boat sprites (the grey bow/stern puffs) in Tidewater mode, where they are otherwise skipped because Tidewater draws its own wake and spray. |
+| `WGR_FRAME_STATS` | C++ bridge | TW-WATER W7. `1` logs every 5 s: wall-clock and GPU frame p50/p95/p99, the Current OP and Tidewater water GPU regions, backend allocations, the render worker's CPU phases, and (Tidewater) the CPU cost of the water `prepare` and its shore-station updates. Diagnostic only; used for the W7 parity report. |
 | `WGR_VB_UPDATE_STATS` | C++ bridge | Logs two-second, per-`VBType` create/destroy/cancel and update/build/hash/upload counts, bytes, total time and maximum call time. Diagnostic only; unset/`0` avoids timers and atomics in `VertexBufferWgpu`. |
+
+## Engine switches added by TW-WATER (outside the renderer)
+
+Read by the game engine, not by `engine/WgpuRenderer/`, so the scan below does not find them.
+
+| Switch | Read by | Notes |
+| --- | --- | --- |
+| `WGR_AMPHIB_WAVE` | `World/Entities/Vehicles/Ground/TrackedWaterResponse.hpp` | TW-WATER W6d. `<m>` overrides how far a tracked amphibian's buoyancy follows the wave height (default 0.35 m). For tuning captures. |
+| `WGR_CAR_TRACE` | `World/Entities/Vehicles/Ground/Car.cpp` | TW-WATER W6d. `1` logs a floatable car's simulation state about once a second. Diagnostic only. |
 
 ## Regenerating
 

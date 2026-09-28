@@ -107,6 +107,11 @@ models, textures, cloud noise files) is used.
 | `water_tw/tw_surf_foam.wgsl` | `src/ocean/SurfFoam.js` (the `SurfFoam` WGSL module) |
 | `water_tw/breakers.rs`, `water_tw/tw_breakers_kernel.wgsl`, `water_tw/tw_lip.wgsl` | `src/ocean/Breakers.js` (crest finder, lip mesh and material, `buildStations`) |
 | `terrain/shore_wet.rs`, the TW-WATER block of `terrain/terrain.wgsl` | `src/App.js` (`terrainWetness`), `src/world/Terrain.js` (wet sand, foam residue), `src/ocean/ShoreSim.js` (`shoreSimSandFoam`) |
+| `water_tw/spray.rs`, `water_tw/tw_spray_common.wgsl`, `water_tw/tw_spray_emit.wgsl`, `water_tw/tw_spray_update.wgsl`, `water_tw/tw_spray.wgsl` | `src/fx/Spray.js` (particle ring, emitter API, update, sprite material), `src/ocean/Breakers.js` (`_emitCode`, `breakersSprayShadow`) |
+| `water_tw/underwater.rs`, `water_tw/tw_underwater.wgsl` | `src/post/Underwater.js` (`underwaterMedium`, `underwaterComposite`) |
+| `water_tw/caustics.rs`, `water_tw/tw_caustics_splat.wgsl`, `water_tw/tw_caustics.wgsl` | `src/ocean/Caustics.js` (`CausticLayer`, `_causticsSample`) |
+| `water_tw/wake.rs`, `water_tw/tw_wake_kernel.wgsl`, `water_tw/tw_wake.wgsl` | `src/ocean/WakeSim.js` |
+| `water_tw/boat_spray.rs` (with the boat bodies and CPU-emitted tail in `spray.rs` / `tw_spray_update.wgsl`) | `src/player/BoatSpray.js` — its contact model is noted in the source as being "after threejs-water-pro", a product by the same author; it is used here under Tidewater's MIT grant on the repository owner's decision |
 
 ```
 MIT License
