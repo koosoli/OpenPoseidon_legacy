@@ -1324,10 +1324,14 @@ impl Tidewater {
     /// behind it were painted over it (owner: "water explosions have the clouds clip through them
     /// when looked at from an angle"). The engine's own order is the same: clouds are background.
     pub fn draw_spray(&self, pass: &mut wgpu::RenderPass<'_>, camera: &wgpu::BindGroup, offset: u32) {
-        if self.bind_dirty || spray_early() {
+        if !self.has_spray_pass() {
             return;
         }
         self.spray.draw(pass, camera, offset, &self.bind);
+    }
+
+    pub fn has_spray_pass(&self) -> bool {
+        self.spray.on && !self.bind_dirty && !spray_early()
     }
 
     /// Shoreline stations for the breakers, traced per simulated region when the region, the

@@ -678,7 +678,7 @@ impl WaterBackend {
     }
 
     pub fn has_spray_pass(&self) -> bool {
-        self.tidewater().is_some()
+        self.tidewater().is_some_and(|tw| tw.has_spray_pass())
     }
 
     pub fn draw_curling(&self, pass: &mut wgpu::RenderPass<'_>, camera: &wgpu::BindGroup, offset: u32) {
