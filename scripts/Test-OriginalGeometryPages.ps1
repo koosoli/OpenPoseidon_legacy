@@ -353,7 +353,7 @@ try{
 
     # Copied successful main-frame tuple + ideal projection only; no pixel/all-pass/GPU-completion claim.
     function TupleCut($c) {
-     Require $c @('cameraTupleEnabled','cameraTupleValid','projectedSurfaceIdealBound','cameraTupleStatus','cameraTupleGeneration','cameraTupleIndex','cameraTupleSource','cameraTupleVersion','cameraTupleStructBytes','cameraTupleOutputWidth','cameraTupleOutputHeight','cameraTuplePosition','viewportWidth','viewportHeight','cameraTupleModelBirth','cameraTupleCertificateGeneration','projectedSurfaceStatus','projectedSurfaceXUpper','projectedSurfaceYUpper','projectedSurfaceEuclideanUpper')
+     Require $c @('cameraTupleEnabled','cameraTupleValid','projectedSurfaceIdealBound','cameraTupleStatus','cameraTupleGeneration','cameraTupleIndex','cameraTupleSource','cameraTupleVersion','cameraTupleStructBytes','cameraTupleOutputWidth','cameraTupleOutputHeight','cameraTuplePosition','cameraTupleClipNear','cameraTupleProjectionXScale','cameraTupleProjectionYScale','viewportWidth','viewportHeight','cameraTupleModelBirth','cameraTupleCertificateGeneration','projectedSurfaceStatus','projectedSurfaceDepthMinimum','projectedSurfaceXUpper','projectedSurfaceYUpper','projectedSurfaceEuclideanUpper')
      if(@($c.cameraTuplePosition).Count -ne 3){throw 'Missing copied actual camera position'}
      foreach($coordinate in @($c.cameraTuplePosition)){
       if($null -eq $coordinate -or $coordinate -is [string] -or $coordinate -is [bool]){throw 'Invalid copied camera coordinate type'}
@@ -366,15 +366,18 @@ try{
       $raw=$c.$field;if($raw -is [string] -or $raw -is [bool]){throw "Invalid tuple integer type $field"};$v=[double]$raw
       if([double]::IsNaN($v) -or [double]::IsInfinity($v) -or $v -lt 0 -or $v -gt 9007199254740991 -or [Math]::Floor($v) -ne $v){throw "Invalid tuple integer $field"}
      }
-     foreach($field in @('projectedSurfaceXUpper','projectedSurfaceYUpper','projectedSurfaceEuclideanUpper')){
+     foreach($field in @('cameraTupleClipNear','cameraTupleProjectionXScale','cameraTupleProjectionYScale','projectedSurfaceDepthMinimum','projectedSurfaceXUpper','projectedSurfaceYUpper','projectedSurfaceEuclideanUpper')){
       $raw=$c.$field;if($raw -is [string] -or $raw -is [bool]){throw "Invalid tuple bound type $field"};$v=[double]$raw
       if([double]::IsNaN($v) -or [double]::IsInfinity($v) -or $v -lt 0 -or $v -gt 9007199254740991){throw "Invalid tuple bound $field"}
      }
      if(!$c.cameraTupleEnabled -or $c.cameraTupleVersion -ne 1 -or $c.cameraTupleStructBytes -ne 192 -or $c.cameraTupleOutputWidth -ne 1280 -or $c.cameraTupleOutputHeight -ne 720 -or $c.cameraTupleGeneration -lt 1 -or $c.cameraTupleIndex -eq 4294967295 -or $c.cameraTupleSource -notin @(1,2,3,4)){throw 'Missing actual versioned main-camera authority'}
      $w=1280;$h=720;if($CameraTupleScaleRefusal){$w=960;$h=540}
      if($c.viewportWidth -ne $w -or $c.viewportHeight -ne $h){throw 'Actual renderer dimensions disagree with explicit render-scale arm'}
-     if($c.projectedSurfaceIdealBound){if(!$c.cameraTupleValid -or $c.cameraTupleStatus -ne 1 -or $c.projectedSurfaceStatus -ne 1 -or $c.cameraTupleModelBirth -ne (1+[double]$c.producerModel) -or $c.cameraTupleCertificateGeneration -ne $c.sourceAdmissionEpoch -or !$c.surfaceSelectedVerified){throw 'Ideal bound lacks exact source/model/certificate join'}}
-     elseif($c.projectedSurfaceXUpper -ne 0 -or $c.projectedSurfaceYUpper -ne 0 -or $c.projectedSurfaceEuclideanUpper -ne 0){throw 'Refused projection exposed numeric bound'}
+     if($c.projectedSurfaceIdealBound){
+      if(!$c.cameraTupleValid -or $c.cameraTupleStatus -ne 1 -or $c.projectedSurfaceStatus -ne 1 -or $c.cameraTupleModelBirth -ne (1+[double]$c.producerModel) -or $c.cameraTupleCertificateGeneration -ne $c.sourceAdmissionEpoch -or !$c.surfaceSelectedVerified){throw 'Ideal bound lacks exact source/model/certificate join'}
+      if($c.cameraTupleClipNear -le 0 -or $c.cameraTupleProjectionXScale -le 0 -or $c.cameraTupleProjectionYScale -le 0 -or $c.projectedSurfaceDepthMinimum -le $c.cameraTupleClipNear){throw 'Same-frame projection limits are absent or do not enclose selected union'}
+     }elseif($c.projectedSurfaceDepthMinimum -ne 0 -or $c.projectedSurfaceXUpper -ne 0 -or $c.projectedSurfaceYUpper -ne 0 -or $c.projectedSurfaceEuclideanUpper -ne 0){throw 'Refused projection exposed numeric bound'}
+     if(!$c.cameraTupleValid -and ($c.cameraTupleClipNear -ne 0 -or $c.cameraTupleProjectionXScale -ne 0 -or $c.cameraTupleProjectionYScale -ne 0)){throw 'Refused tuple exposed projection packet'}
      return $c
     }
     function TuplePose($pose){$r=Send @{cmd='eval';code=('triFreeFlyPose "'+$pose+'"')};Require $r @('result');if($r.result.Trim('"') -ne 'OK'){throw 'Actual camera pose refused'}}
@@ -522,6 +525,19 @@ try{
       # This remains an ideal main-camera pair bound, not a pixel/visibility claim.
       CameraPose '1200 1240 100000 0 -89';$projectedFar=TupleCut (PageCut (Observe $true $false));FixedCoarse $projectedFar
       $actual=@($projectedFar.cameraTuplePosition)
+      # Persist the copied packet and interval gate before any pose/threshold assertion.
+      # Every value below belongs to this one returned-frame Observe, not a later camera query.
+      $farPoseProof=@{requestedPose=@(1200,100000,1240);actualPosition=$actual;
+       requestId=$projectedFar.requestId;observedRequestId=$projectedFar.observedRequestId;
+       cameraGeneration=$projectedFar.cameraTupleGeneration;cameraStatus=$projectedFar.cameraTupleStatus;
+       cameraValid=$projectedFar.cameraTupleValid;idealBoundValid=$projectedFar.projectedSurfaceIdealBound;
+       mainFrameReturned=$projectedFar.mainFrameReturned;renderReturnStatus=$projectedFar.renderReturnStatus;
+       viewport=@($projectedFar.viewportWidth,$projectedFar.viewportHeight);
+       projectionScale=@($projectedFar.cameraTupleProjectionXScale,$projectedFar.cameraTupleProjectionYScale);
+       clipNear=$projectedFar.cameraTupleClipNear;selectedUnionDepthMinimum=$projectedFar.projectedSurfaceDepthMinimum;
+       selectedPairPixelUpper=$projectedFar.projectedSurfaceEuclideanUpper;projectionStatus=$projectedFar.projectedSurfaceStatus;
+       scope='One actual returned main-camera frame; selected-union ideal interval bound only, not source-error, pixels, visibility or all-pass quality'}
+      $farPoseProof|ConvertTo-Json -Depth 5|Set-Content (Join-Path $out 'projected-far-pose-proof.json')
       if(!$projectedFar.cameraTupleValid -or [Math]::Abs([double]$actual[0]-1200) -gt 2 -or
          [Math]::Abs([double]$actual[1]-100000) -gt 2 -or [Math]::Abs([double]$actual[2]-1240) -gt 2){
        throw 'Actual rendered camera did not reach the in-world high-altitude pose'

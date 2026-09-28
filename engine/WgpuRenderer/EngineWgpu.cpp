@@ -2187,8 +2187,9 @@ void PageInvalidateCameraTuple(Engine::GeometryPageFixtureReport& report) {
     report.cameraTupleModelBirth=0;report.cameraTupleCertificateGeneration=0;
     report.cameraTupleVersion=0;report.cameraTupleStructBytes=0;report.cameraTupleOutputWidth=0;report.cameraTupleOutputHeight=0;
     report.cameraTuplePosition={};
+    report.cameraTupleClipNear=report.cameraTupleProjectionXScale=report.cameraTupleProjectionYScale=0;
     report.cameraTupleIndex=UINT32_MAX;report.cameraTupleSource=0;report.viewportWidth=0;report.viewportHeight=0;
-    report.projectedSurfaceXUpper=report.projectedSurfaceYUpper=report.projectedSurfaceEuclideanUpper=0;
+    report.projectedSurfaceDepthMinimum=report.projectedSurfaceXUpper=report.projectedSurfaceYUpper=report.projectedSurfaceEuclideanUpper=0;
 }
 } // namespace
 
@@ -9474,8 +9475,17 @@ void EngineWgpu::PublishGeometryPageFixtureObservation(const WgrFrame& frame, in
                 report.cameraTupleValid=fresh&&packet;
                 report.cameraTupleStatus=!fresh?8:!packet?9:1;
                 if(fresh)fixture->cameraLastGeneration=tuple.generation;
-                if(report.cameraTupleValid&&report.active&&report.status==GeometryReportStatus::Ready)
+                if(report.cameraTupleValid&&report.active&&report.status==GeometryReportStatus::Ready) {
                     report.cameraTuplePosition={tuple.camera_position[0],tuple.camera_position[1],tuple.camera_position[2]};
+                    // These are from the exact packet compared above, never a later live camera.
+                    if(std::isfinite(tuple.projection[0])&&tuple.projection[0]>0&&
+                        std::isfinite(tuple.projection[5])&&tuple.projection[5]>0&&
+                        std::isfinite(tuple.projection[14])&&tuple.projection[14]<0) {
+                        report.cameraTupleProjectionXScale=tuple.projection[0];
+                        report.cameraTupleProjectionYScale=tuple.projection[5];
+                        report.cameraTupleClipNear=-tuple.projection[14];
+                    }
+                }
                 const auto owner=fixture->originalAdmission;const auto proof=owner?owner->surface:nullptr;
                 const bool selected=report.producerModel==fixture->models[fixture->pageCoarseSlot]||
                     report.producerModel==fixture->models[fixture->pageFirstFineSlot]||report.producerModel==fixture->models[fixture->pageRefillSlot];
@@ -9509,6 +9519,7 @@ void EngineWgpu::PublishGeometryPageFixtureObservation(const WgrFrame& frame, in
                         report.cameraTupleModelBirth=input.cut.modelBirth;report.cameraTupleCertificateGeneration=input.cut.certificateGeneration;
                         if(bound==Status::Bounded) {
                             report.projectedSurfaceIdealBound=true;
+                            report.projectedSurfaceDepthMinimum=fixture->projectedSurfaceResult->depthMinimum;
                             report.projectedSurfaceXUpper=fixture->projectedSurfaceResult->pixelXUpper;
                             report.projectedSurfaceYUpper=fixture->projectedSurfaceResult->pixelYUpper;
                             report.projectedSurfaceEuclideanUpper=fixture->projectedSurfaceResult->euclideanPixelUpper;

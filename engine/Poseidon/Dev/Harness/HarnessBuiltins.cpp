@@ -749,7 +749,8 @@ void RegisterScreenshot(HarnessServer& hs)
             PAGE_FIXTURE_NUMBER(cameraTupleVersion);PAGE_FIXTURE_NUMBER(cameraTupleStructBytes);
             PAGE_FIXTURE_NUMBER(cameraTupleOutputWidth);PAGE_FIXTURE_NUMBER(cameraTupleOutputHeight);
             PAGE_FIXTURE_NUMBER(viewportWidth);PAGE_FIXTURE_NUMBER(viewportHeight);PAGE_FIXTURE_NUMBER(projectedSurfaceStatus);
-            PAGE_FIXTURE_NUMBER(projectedSurfaceXUpper);PAGE_FIXTURE_NUMBER(projectedSurfaceYUpper);PAGE_FIXTURE_NUMBER(projectedSurfaceEuclideanUpper);
+            PAGE_FIXTURE_NUMBER(cameraTupleClipNear);PAGE_FIXTURE_NUMBER(cameraTupleProjectionXScale);PAGE_FIXTURE_NUMBER(cameraTupleProjectionYScale);
+            PAGE_FIXTURE_NUMBER(projectedSurfaceDepthMinimum);PAGE_FIXTURE_NUMBER(projectedSurfaceXUpper);PAGE_FIXTURE_NUMBER(projectedSurfaceYUpper);PAGE_FIXTURE_NUMBER(projectedSurfaceEuclideanUpper);
 #undef PAGE_FIXTURE_NUMBER
 #define PAGE_FIXTURE_BOOL(field) cJSON_AddBoolToObject(result,#field,report.field)
             PAGE_FIXTURE_BOOL(clodPilot); PAGE_FIXTURE_BOOL(fallbackSelected);
