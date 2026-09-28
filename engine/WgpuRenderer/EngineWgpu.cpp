@@ -9687,7 +9687,21 @@ uint64_t EngineWgpu::ResolveMaterialSpecularMap(const ShapeSection& section)
     {
         return report(0, "empty path", "");
     }
-    Ref<Texture> texture = _wbank->Load(loadName.c_str());
+    // The only callers are the sections retained after ClassifyGpuSection. Under the
+    // existing warm-material opt-in, allow their real file header Init to use the
+    // two reserved provenance slots. End the intent before EnsureUploaded: mip reads
+    // and GPU work must not consume a reserved header slot.
+    Ref<Texture> texture = [&]() -> Ref<Texture>
+    {
+        if (!spec->texture.isProcedural &&
+            ArchiveSourceBinding::ModelReadScope::MaterialPreflightReservationEnabled())
+        {
+            ArchiveSourceBinding::ModelReadScope stage(
+                ArchiveSourceBinding::ModelReadScope::Intent::MaterialPreflight);
+            return _wbank->Load(loadName.c_str());
+        }
+        return _wbank->Load(loadName.c_str());
+    }();
     auto*        wgpuTexture = static_cast<TextureWgpu*>(texture.GetRef());
     const uint64_t handle = wgpuTexture ? wgpuTexture->EnsureUploaded() : 0;
     return report(handle, handle ? "" : "upload failed", loadName);
@@ -9770,7 +9784,18 @@ uint64_t EngineWgpu::ResolveMaterialNormalMap(const ShapeSection& section, bool*
     {
         return report(0, "empty path", "");
     }
-    Ref<Texture> texture = _wbank->Load(loadName.c_str());
+    // Same narrow header-only reservation as SpecularDetail above.
+    Ref<Texture> texture = [&]() -> Ref<Texture>
+    {
+        if (!normal->texture.isProcedural &&
+            ArchiveSourceBinding::ModelReadScope::MaterialPreflightReservationEnabled())
+        {
+            ArchiveSourceBinding::ModelReadScope stage(
+                ArchiveSourceBinding::ModelReadScope::Intent::MaterialPreflight);
+            return _wbank->Load(loadName.c_str());
+        }
+        return _wbank->Load(loadName.c_str());
+    }();
     auto*        wgpuTexture = static_cast<TextureWgpu*>(texture.GetRef());
     const uint64_t handle = wgpuTexture ? wgpuTexture->EnsureUploaded() : 0;
     // RFG-047: asked AFTER the upload, because the answer depends on the form the texture
