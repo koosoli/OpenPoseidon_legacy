@@ -678,7 +678,7 @@ void Ship::Simulate(float deltaT, SimulationImportance prec)
                                 // matches its weight, it floated at 1/6 of its resting depth at full
                                 // speed -- keel on top of the water, with any backend. The gain now
                                 // rises only from 20x to 26x (the hull keeps ~3/4 of its resting
-                                // depth when flat out). The water drag is computed from the depth the
+                                // depth when flat out; W11c below lowers both). The water drag is computed from the depth the
                                 // legacy lift gave (planingDragScale), so top speed, acceleration and
                                 // turning stay as they were. POSEIDON_BOAT_LEGACY_PLANING=1 restores
                                 // the legacy lift.
@@ -689,7 +689,10 @@ void Ship::Simulate(float deltaT, SimulationImportance prec)
                                 }();
                                 const float fwd = floatMax(speed[2], 0);
                                 const float legacyGain = 20 + floatMin(fwd * 6, 100);
-                                const float gain = legacyPlaning ? legacyGain : 20 + floatMin(fwd * 0.4f, 6.0f);
+                                // W11c: 20x at rest was itself the reason the hulls look perched on
+                                // the water (the PBR drew 0.24 m, W11b captures: no visible change
+                                // from W11b alone). 9x at rest (about 0.5 m for the PBR), 12x flat out.
+                                const float gain = legacyPlaning ? legacyGain : 9 + floatMin(fwd * 0.2f, 3.0f);
                                 planingDragScale = gain / legacyGain;
                                 const float flat = floatMax(info.underFlat, 0.0f);
                                 const float wave = info.under - flat;
