@@ -186,12 +186,11 @@ try{
         while (!(Test-Path -LiteralPath $path) -and [DateTime]::UtcNow -lt $until) {Start-Sleep -Milliseconds 100}
         if (!(Test-Path -LiteralPath $path) -or (Get-Item -LiteralPath $path).Length -le 0) {throw "Missing capture: $path"}
     }
-    function RequireMainCountPublication($cut) {
-        if(!$MainCountProbe){return}
+    function MainCountPublished($cut) {
+        if(!(Test-Path -LiteralPath $log)){return $false}
         # Observe may advance requestId without changing the selected model.
         # A prior COUNT still proves that same live generation. Producer handles
         # never recycle, and all five rows must share token, revision and cull.
-        if(!(Test-Path -LiteralPath $log)){throw 'Main COUNT log missing'}
         $rows=Get-Content -LiteralPath $log -Raw -ErrorAction Stop
         $pattern='Private (?<pass>main|cascade-[0-3]) GPU COUNT: token=(?<token>[1-9][0-9]*) pageEpoch='+$cut.pageEpoch+
             ' admissionEpoch='+$cut.sourceAdmissionEpoch+' request=(?<request>[1-9][0-9]*) model='+$cut.producerModel+
@@ -203,7 +202,19 @@ try{
                 $match.Groups['source'].Value+':'+$match.Groups['cull'].Value
             if(!$groups.ContainsKey($key)){$groups[$key]=@{}}
             $groups[$key][$match.Groups['pass'].Value]=$true
-            if($groups[$key].Count -eq 5){return}
+            if($groups[$key].Count -eq 5){return $true}
+        }
+        return $false
+    }
+    function RequireMainCountPublication($cut,$label) {
+        if(!$MainCountProbe){return}
+        $until=[DateTime]::UtcNow.AddSeconds(3)
+        for($attempt=0;$attempt -le 3;$attempt++){
+            if(MainCountPublished $cut){return}
+            if($attempt -eq 3 -or [DateTime]::UtcNow -ge $until){break}
+            # A passive sleep does not pump this harness's renderer. Request one
+            # bounded screenshot to advance a frame and poll the pending GPU map.
+            Capture "$label-count-poll-$attempt.png"
         }
         throw "Main COUNT publication absent for selected model $($cut.producerModel), request <= $($cut.requestId)"
     }
@@ -691,7 +702,7 @@ try{
      BootstrapDiskCoarse;$coarse=PageCut (Observe $true $false)
      if($coarse.fallbackSelected -or $coarse.rendererModel -eq $fallback.rendererModel -or $coarse.rendererInstance -ne $fallback.rendererInstance -or $coarse.coarseTriangles -ne $originalProducer.coarseTriangles){throw 'Selected coarse not committed on fixed instance'}
      Capture 'original-coarse.png'
-     RequireMainCountPublication $coarse
+     RequireMainCountPublication $coarse 'original-coarse'
      $null=Action 'holdFine';$heldRequest=PageCut (Action 'requestFine');if($heldRequest.pageRequest -lt 1){throw 'No held request accepted'}
      $held=WaitPage {param($c) $c.pageActive -eq 1}
      $cancelled=PageCut (Action 'cancelFine')
@@ -711,7 +722,7 @@ try{
      $fine=AdmitFine
      if($fine.fallbackSelected -or $fine.fineGeneration -ne 1 -or $fine.fineTriangles -ne 512 -or $fine.rendererModel -eq $coarse.rendererModel -or $fine.rendererInstance -ne $coarse.rendererInstance -or $fine.producerInstance -ne $coarse.producerInstance){throw 'First actual fine cut identity mismatch'}
      Capture 'original-fine.png'
-     RequireMainCountPublication $fine
+     RequireMainCountPublication $fine 'original-fine'
      $cameraTupleEvidence=RunCameraTupleProof $fine
      $null=Action 'coarse';$returnedCoarse=PageCut (Observe $true $false)
      if($returnedCoarse.rendererModel -ne $coarse.rendererModel -or $returnedCoarse.rendererInstance -ne $coarse.rendererInstance -or $returnedCoarse.fallbackSelected){throw 'Coarse return lost fixed identity'}
@@ -724,7 +735,7 @@ try{
      for($i=0;$i -lt $evicted.meshCount;$i++){if($evicted.rendererMeshHandles[$i] -ne $fine.rendererMeshHandles[$i] -or $refilled.rendererMeshHandles[$i] -ne $evicted.rendererMeshHandles[$i]){throw 'Refill replaced retained full-generation history'}}
      if(@($fallback.rendererModel,$coarse.rendererModel,$fine.rendererModel,$refilled.rendererModel|Select-Object -Unique).Count -ne 4 -or @($fallback.producerModel,$coarse.producerModel,$fine.producerModel,$refilled.producerModel|Select-Object -Unique).Count -ne 4){throw 'Four birth identities alias'}
      Capture 'original-refilled-fine.png'
-     RequireMainCountPublication $refilled
+     RequireMainCountPublication $refilled 'original-refilled-fine'
      if($CameraTuple){$finalTuple=ObserveTuple $cameraTupleEvidence.restored.cameraTupleGeneration $(if($CameraTupleScaleRefusal){'Scaled'}else{'Bound'});SameTupleModel $refilled $finalTuple;$cameraTupleEvidence.finalRefill=$finalTuple;$cameraTupleEvidence|ConvertTo-Json -Depth 12|Set-Content (Join-Path $out 'camera-tuple-proof.json')}
      $null=Action 'fallback';$returnedFallback=PageCut (Observe $true $false)
      if(!$returnedFallback.fallbackSelected -or $returnedFallback.rendererModel -ne $fallback.rendererModel -or $returnedFallback.rendererInstance -ne $fallback.rendererInstance){throw 'Authored fallback was lost'}
