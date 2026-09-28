@@ -6345,6 +6345,11 @@ impl Renderer {
         // failed cull or missing indirect draw stays Unknown for this request.
         let gi_count_copied = main_count_copied &&
             self.gfx3d.copy_gi_target_count(&mut encoder);
+        // Tile 0 is a separate local-light view; its cull index moves with the
+        // number of active solar cascades and can be zero at night. Only a fresh
+        // tile pass, never a cache reuse, authorizes this private counter copy.
+        let local0_count_copied = main_count_copied &&
+            self.gfx3d.copy_local0_target_count(&mut encoder);
         self.gfx3d.resolve_lod_demand();
         self.gfx3d.resolve_mip_feedback(&mut encoder);
         self.water_visibility.resolve(&mut encoder);
@@ -6367,6 +6372,9 @@ impl Renderer {
         let gi_count_ready = gi_count_copied && main_count_ready &&
             main_count_request.is_some_and(|(token, _, _)|
                 self.gfx3d.shadow_target_count_before_submit(token, 4));
+        let local0_count_ready = local0_count_copied && main_count_ready &&
+            main_count_request.is_some_and(|(token, _, _)|
+                self.gfx3d.local0_target_count_before_submit(token));
         self.queue.submit(std::iter::once(main_commands));
         let main_count_submitted = main_count_ready && main_count_request.is_some_and(|(token, _, _)|
             self.gfx3d.main_target_count_submitted(token));
@@ -6378,6 +6386,9 @@ impl Renderer {
             }
             if gi_count_ready {
                 self.gfx3d.shadow_target_count_submitted(token, 4);
+            }
+            if local0_count_ready {
+                self.gfx3d.local0_target_count_submitted(token);
             }
         }
         self.gpu_timers

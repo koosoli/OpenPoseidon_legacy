@@ -162,6 +162,26 @@ const MAX_LOCAL_SHADOWS: usize = 24;
 const LOCAL_ATLAS_GRID: u32 = 8; // 8x8 tiles in the one local layer
 const LOCAL_UBO_SLOT: usize = SKY_UBO_SLOT + sky_vis::DIRECTION_COUNT + 1;
 
+// Local tile k=0 follows active solar views in the cull array. Keep this
+// routing separate from solar cascade 0, especially when solar_count is zero.
+fn local0_count_view_index(solar_count: usize, local_count: usize,
+                           refresh: &[usize], closed: bool, cull_mask: u32) -> Option<usize> {
+    let c = solar_count;
+    (local_count > 0 && refresh.contains(&0) && closed && c < u32::BITS as usize &&
+        cull_mask & (1 << c) != 0).then_some(c)
+}
+
+#[cfg(test)]
+#[test]
+fn local0_count_route_requires_fresh_closed_tile_at_day_and_night() {
+    assert_eq!(local0_count_view_index(4, 1, &[0], true, 1 << 4), Some(4));
+    assert_eq!(local0_count_view_index(0, 1, &[0], true, 1), Some(0));
+    assert_eq!(local0_count_view_index(4, 1, &[], true, 1 << 4), None);
+    assert_eq!(local0_count_view_index(0, 0, &[0], true, 1), None);
+    assert_eq!(local0_count_view_index(0, 1, &[0], false, 1), None);
+    assert_eq!(local0_count_view_index(0, 1, &[0], true, 0), None);
+}
+
 // Polygon-offset variants (mirror GL33's SetPolygonOffsetForDecals / ..ForShadows):
 // decals nudge coplanar overlays toward the camera; ZBias overlay faces (signs) get
 // a stronger, level-scaled push; shadows need a much stronger, angle-independent
@@ -4038,6 +4058,8 @@ pub struct Gfx3d {
     // One opt-in cascade-0 depth-draw closure. A prepared view or cull dispatch
     // alone cannot authorize an absence readback.
     shadow_target_draw_closed_mask: std::cell::Cell<u32>,
+    // Distinct from solar bit zero: at night local tile zero uses cull index zero.
+    local0_target_draw_closed: std::cell::Cell<bool>,
     gi_target_draw_closed: std::cell::Cell<bool>,
     local_view_key: [Option<u64>; MAX_LOCAL_SHADOWS],
     // Exact bounded CPU-caster pose witnesses; lazily allocated only when a
@@ -4881,6 +4903,7 @@ impl Gfx3d {
             } else {None},
             geometry_shadow_cull_mask: std::cell::Cell::new(0),
             shadow_target_draw_closed_mask: std::cell::Cell::new(0),
+            local0_target_draw_closed: std::cell::Cell::new(false),
             gi_target_draw_closed: std::cell::Cell::new(false),
             local_view_key: [None; MAX_LOCAL_SHADOWS],
             local_pose_cache: None,
@@ -6606,6 +6629,7 @@ impl Gfx3d {
     pub fn begin_geometry_pass_facts(&self,shadow:&WgrShadowPass) {
         self.geometry_shadow_cull_mask.set(0);
         self.shadow_target_draw_closed_mask.set(0);
+        self.local0_target_draw_closed.set(false);
         self.gi_target_draw_closed.set(false);
         if let Some(cell)=&self.geometry_pass_facts {let mut f=cell.get();f.begin(self.cull.instance_epoch(),shadow.count,shadow.local_count);cell.set(f);}
     }
@@ -7248,6 +7272,11 @@ impl Gfx3d {
                 debug_assert!(count > c as u32);
                 self.shadow_target_draw_closed_mask.set(
                     self.shadow_target_draw_closed_mask.get() | (1 << c));
+            }
+            if is_local && local_index == 0 && self.cull.local0_count_armed() &&
+                gpu_depth_draw_recorded &&
+                self.geometry_shadow_cull_mask.get() & (1 << c) != 0 {
+                self.local0_target_draw_closed.set(true);
             }
             if let Some(cell)=&self.geometry_pass_facts {
                 if gpu_depth_draw_recorded && c < u32::BITS as usize &&
@@ -9837,6 +9866,19 @@ impl Gfx3d {
     pub fn copy_gi_target_count(&mut self, encoder: &mut wgpu::CommandEncoder) -> bool {
         self.gi_target_draw_closed.get() && self.cull.copy_shadow_target_count(encoder, 4)
     }
+    pub fn copy_local0_target_count(&mut self, encoder: &mut wgpu::CommandEncoder) -> bool {
+        let solar_count = self.cull.shadow_view_count().saturating_sub(self.local_shadow_count);
+        let Some(c) = local0_count_view_index(solar_count, self.local_shadow_count,
+            &self.local_view_refresh, self.local0_target_draw_closed.get(),
+            self.geometry_shadow_cull_mask.get()) else { return false; };
+        self.cull.copy_local0_target_count(encoder, c)
+    }
+    pub fn local0_target_count_before_submit(&mut self, token: u64) -> bool {
+        self.cull.local0_target_count_before_submit(token)
+    }
+    pub fn local0_target_count_submitted(&mut self, token: u64) -> bool {
+        self.cull.local0_target_count_submitted(token)
+    }
     pub fn shadow_target_count_before_submit(&mut self, token: u64, cascade: usize) -> bool {
         self.cull.shadow_target_count_before_submit(token, cascade)
     }
@@ -9853,12 +9895,14 @@ impl Gfx3d {
         let main = self.cull.main_target_count_commit(token);
         if main {
             for cascade in 0..5 { self.cull.shadow_target_count_commit(token, cascade); }
+            self.cull.local0_target_count_commit(token);
         }
         main
     }
     pub fn main_target_count_abort(&mut self, token: u64) {
         self.cull.main_target_count_abort(token);
         for cascade in 0..5 { self.cull.shadow_target_count_abort(token, cascade); }
+        self.cull.local0_target_count_abort(token);
     }
     pub fn main_target_count_fact(&mut self, device: &wgpu::Device) -> cull::MainCountFact {
         self.cull.harvest_main_target_count(device);
@@ -9874,6 +9918,10 @@ impl Gfx3d {
     }
     pub fn gi_target_count_fact(&mut self, device: &wgpu::Device) -> cull::MainCountFact {
         self.shadow_target_count_fact(device, 4)
+    }
+    pub fn local0_target_count_fact(&mut self, device: &wgpu::Device) -> cull::MainCountFact {
+        self.cull.harvest_local0_target_count(device);
+        self.cull.local0_target_count_fact()
     }
 
     pub fn cull_dispatch(
@@ -10236,7 +10284,8 @@ impl Gfx3d {
             }
             if self.cull.dispatch_shadow(encoder, c) &&
                 (self.geometry_pass_facts.is_some() ||
-                 (c < n_cascades && self.cull.shadow_count_armed(c))) &&
+                 (c < n_cascades && self.cull.shadow_count_armed(c)) ||
+                 (c == n_cascades && self.cull.local0_count_armed())) &&
                 c < u32::BITS as usize {
                 self.geometry_shadow_cull_mask.set(self.geometry_shadow_cull_mask.get() | (1 << c));
             }

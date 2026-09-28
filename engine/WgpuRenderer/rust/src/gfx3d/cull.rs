@@ -602,6 +602,12 @@ pub struct CullState {
     shadow_count_armed: [Option<MainCountIdentity>; 5],
     shadow_count_latest: [MainCountFact; 5],
     gi_dispatch_recorded: Cell<bool>,
+    // Tile k=0 has a distinct identity from solar cascade 0: at night both use
+    // shadow cull index zero. Allocate this private readback ring only on an
+    // explicit diagnostic request; cached tiles never produce a new COUNT.
+    local0_count_slots: Option<Vec<(wgpu::Buffer, MainCountSlot)>>,
+    local0_count_armed: Option<MainCountIdentity>,
+    local0_count_latest: MainCountFact,
     bind: Option<wgpu::BindGroup>,
 
     // Per-cascade shadow views (§6 multi-view). Length = active cascade count this frame
@@ -1087,6 +1093,9 @@ impl CullState {
             shadow_count_armed: [None; 5],
             shadow_count_latest: [MainCountFact::default(); 5],
             gi_dispatch_recorded: Cell::new(false),
+            local0_count_slots: None,
+            local0_count_armed: None,
+            local0_count_latest: MainCountFact::default(),
             bind: None,
             shadow_views: Vec::new(),
             reflection_view: None,
@@ -1124,12 +1133,17 @@ impl CullState {
                 self.harvest_shadow_target_count(device, cascade);
             }
         }
+        if self.local0_count_slots.is_some() {
+            self.harvest_local0_target_count(device);
+        }
         self.target_model_id = self.target_model_default;
         self.main_count_armed = None;
         self.main_count_latest = MainCountFact::default();
         self.main_dispatch_recorded.set(false);
         self.shadow_count_armed = [None; 5];
         self.shadow_count_latest = [MainCountFact::default(); 5];
+        self.local0_count_armed = None;
+        self.local0_count_latest = MainCountFact::default();
         self.gi_dispatch_recorded.set(false);
         let epoch = self.instance_epoch();
         if token == 0 || token == u64::MAX || token <= self.main_count_last_token ||
@@ -1170,11 +1184,44 @@ impl CullState {
             self.shadow_count_armed[cascade] = Some(identity);
             self.shadow_count_latest[cascade].identity = identity;
         }
+        if self.local0_count_slots.is_none() {
+            self.local0_count_slots = Some((0..3).map(|i| {
+                (device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some(&format!("wgr_local_shadow0_target_count_{i}")),
+                    size: 4,
+                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                    mapped_at_creation: false,
+                }), MainCountSlot::Idle)
+            }).collect());
+        }
+        self.local0_count_armed = Some(identity);
+        self.local0_count_latest.identity = identity;
         true
     }
 
     pub fn shadow_count_armed(&self, cascade: usize) -> bool {
         self.shadow_count_armed.get(cascade).is_some_and(Option::is_some)
+    }
+
+    pub fn local0_count_armed(&self) -> bool { self.local0_count_armed.is_some() }
+
+    /// `view_index` is the actual shadow cull index, solar_count + local tile 0.
+    /// The owner alone can prove a fresh tile draw and a closed pass.
+    pub fn copy_local0_target_count(&mut self, encoder: &mut wgpu::CommandEncoder,
+                                    view_index: usize) -> bool {
+        let Some(identity) = self.local0_count_armed else { return false; };
+        let Some(view) = self.shadow_views.get(view_index) else { return false; };
+        if self.instance_epoch() != identity.cull_epoch ||
+            view.params.target_count_enabled == 0 ||
+            view.params.target_model_id != identity.model_id { return false; }
+        let Some(slots) = self.local0_count_slots.as_mut() else { return false; };
+        let Some((dst, state)) = slots.iter_mut()
+            .find(|(_, state)| matches!(state, MainCountSlot::Idle)) else { return false; };
+        encoder.copy_buffer_to_buffer(&view.counter_buf,
+            TARGET_MODEL_COUNT_BYTE_OFFSET, dst, 0, 4);
+        *state = MainCountSlot::Encoded(identity);
+        self.local0_count_armed = None;
+        true
     }
 
     /// The owner calls this only after the selected view's actual cull and indirect
@@ -1460,6 +1507,122 @@ impl CullState {
     pub fn shadow_target_count_fact(&self, cascade: usize) -> MainCountFact {
         let Some(&latest) = self.shadow_count_latest.get(cascade) else { return MainCountFact::default(); };
         let mut fact = latest;
+        if self.instance_epoch() != fact.identity.cull_epoch {
+            fact.status = MainCountStatus::Unknown;
+            fact.count = 0;
+        }
+        fact
+    }
+
+    pub fn local0_target_count_before_submit(&mut self, token: u64) -> bool {
+        let Some(slots) = self.local0_count_slots.as_mut() else { return false; };
+        for (_, state) in slots {
+            if let MainCountSlot::Encoded(identity) = state {
+                if identity.token == token {
+                    *state = MainCountSlot::Submitted {
+                        identity: *identity, committed: false, aborted: true };
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    pub fn local0_target_count_submitted(&mut self, token: u64) -> bool {
+        let Some(slots) = self.local0_count_slots.as_mut() else { return false; };
+        for (_, state) in slots {
+            if let MainCountSlot::Submitted { identity, committed, aborted } = state {
+                if identity.token == token {
+                    *committed = false;
+                    *aborted = false;
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    pub fn local0_target_count_commit(&mut self, token: u64) -> bool {
+        let Some(slots) = self.local0_count_slots.as_mut() else { return false; };
+        for (_, state) in slots {
+            if let MainCountSlot::Submitted { identity, committed, aborted } = state {
+                if identity.token == token && !*aborted {
+                    *committed = true;
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    pub fn local0_target_count_abort(&mut self, token: u64) {
+        if self.local0_count_latest.identity.token == token {
+            self.local0_count_latest.status = MainCountStatus::Unknown;
+            self.local0_count_latest.count = 0;
+        }
+        if self.local0_count_armed.is_some_and(|id| id.token == token) {
+            self.local0_count_armed = None;
+        }
+        if let Some(slots) = self.local0_count_slots.as_mut() {
+            for (_, state) in slots {
+                match state {
+                    MainCountSlot::Encoded(id) if id.token == token => *state = MainCountSlot::Idle,
+                    MainCountSlot::Submitted { identity, aborted, .. } if identity.token == token =>
+                        *aborted = true,
+                    MainCountSlot::Mapping { identity, aborted, .. } if identity.token == token =>
+                        *aborted = true,
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    pub fn harvest_local0_target_count(&mut self, device: &wgpu::Device) {
+        let current_epoch = self.instance_epoch();
+        let Some(slots) = self.local0_count_slots.as_mut() else { return; };
+        for (buf, state) in slots.iter_mut() {
+            if let MainCountSlot::Submitted { identity, committed, aborted } = state {
+                if !*committed && !*aborted { continue; }
+                let (tx, rx) = mpsc::channel();
+                buf.slice(..).map_async(wgpu::MapMode::Read, move |r| { let _ = tx.send(r); });
+                *state = MainCountSlot::Mapping {
+                    identity: *identity, committed: *committed, aborted: *aborted, done: rx };
+            }
+        }
+        let _ = device.poll(wgpu::PollType::Poll);
+        for (buf, state) in slots.iter_mut() {
+            let current = std::mem::replace(state, MainCountSlot::Idle);
+            match current {
+                MainCountSlot::Mapping { identity, committed, aborted, done } => {
+                    match done.try_recv() {
+                        Ok(Ok(())) => {
+                            let data = buf.slice(..).get_mapped_range();
+                            let count = u32::from_le_bytes(data[..4].try_into().unwrap());
+                            drop(data);
+                            buf.unmap();
+                            if committed && !aborted &&
+                                identity == self.local0_count_latest.identity &&
+                                current_epoch == identity.cull_epoch {
+                                self.local0_count_latest.count = count;
+                                self.local0_count_latest.status = if count == 0 {
+                                    MainCountStatus::Absent
+                                } else { MainCountStatus::Present };
+                            }
+                        }
+                        Ok(Err(_)) | Err(mpsc::TryRecvError::Disconnected) => {}
+                        Err(mpsc::TryRecvError::Empty) => {
+                            *state = MainCountSlot::Mapping {
+                                identity, committed, aborted, done };
+                        }
+                    }
+                }
+                other => *state = other,
+            }
+        }
+    }
+
+    pub fn local0_target_count_fact(&self) -> MainCountFact {
+        let mut fact = self.local0_count_latest;
         if self.instance_epoch() != fact.identity.cull_epoch {
             fact.status = MainCountStatus::Unknown;
             fact.count = 0;
@@ -4554,10 +4717,12 @@ pub(crate) mod tests {
         let model = cull.register_model(1.0, &lods, &sections, &materials);
         assert!(cull.shadow_count_slots.iter().all(Option::is_none),
             "the ordinary renderer must not allocate diagnostic staging");
+        assert!(cull.local0_count_slots.is_none());
         assert!(!cull.arm_main_target_count(&device, 1, model, 0),
             "unknown source generation cannot produce an absence fact");
         assert!(cull.shadow_count_slots.iter().all(Option::is_none),
             "a rejected request must not allocate diagnostic staging");
+        assert!(cull.local0_count_slots.is_none());
         let mk = |z: f32| InstanceGpu {
             world: Mat4::IDENTITY.to_cols_array(),
             center: [0.0, 0.0, z, 1.0],
@@ -4588,7 +4753,7 @@ pub(crate) mod tests {
         params.lod_inv_width = 1.0;
         params.pixel_limit = 0.0;
         cull.set_params(params);
-        cull.set_shadow_view_count(&device, 4);
+        cull.set_shadow_view_count(&device, 5);
         let mut empty_params = params;
         let far_eye = Vec3::new(10_000.0, 0.0, 10.0);
         empty_params.frustum = frustum_planes(proj *
@@ -4596,6 +4761,7 @@ pub(crate) mod tests {
         for cascade in 0..4 {
             cull.set_shadow_params(cascade, if cascade % 2 == 0 { params } else { empty_params });
         }
+        cull.set_shadow_params(4, params); // daytime local tile 0 follows four solar views
         cull.set_sky_view_count(&device, super::super::sky_vis::DIRECTION_COUNT + 1);
         cull.set_sky_params(super::super::sky_vis::DIRECTION_COUNT, params);
         assert!(cull.arm_main_target_count(&device, 1, model, 17));
@@ -4606,23 +4772,28 @@ pub(crate) mod tests {
         cull.begin_frame_stats(&mut enc);
         cull.dispatch(&mut enc);
         for cascade in 0..4 { assert!(cull.dispatch_shadow(&mut enc, cascade)); }
+        assert!(cull.dispatch_shadow(&mut enc, 4));
         assert!(!cull.copy_shadow_target_count(&mut enc, 4),
             "a prepared GI view without its cull cannot publish a zero");
         cull.dispatch_sky(&mut enc, super::super::sky_vis::DIRECTION_COUNT);
         assert!(cull.copy_main_target_count(&mut enc));
         for cascade in 0..4 { assert!(cull.copy_shadow_target_count(&mut enc, cascade)); }
+        assert!(cull.copy_local0_target_count(&mut enc, 4));
         assert!(cull.copy_shadow_target_count(&mut enc, 4));
         cull.resolve_stats(&mut enc);
         let commands = enc.finish();
         assert!(cull.main_target_count_before_submit(1));
         for cascade in 0..4 { assert!(cull.shadow_target_count_before_submit(1, cascade)); }
+        assert!(cull.local0_target_count_before_submit(1));
         assert!(cull.shadow_target_count_before_submit(1, 4));
         queue.submit(std::iter::once(commands));
         assert!(cull.main_target_count_submitted(1));
         for cascade in 0..4 { assert!(cull.shadow_target_count_submitted(1, cascade)); }
+        assert!(cull.local0_target_count_submitted(1));
         assert!(cull.shadow_target_count_submitted(1, 4));
         assert!(cull.main_target_count_commit(1));
         for cascade in 0..4 { assert!(cull.shadow_target_count_commit(1, cascade)); }
+        assert!(cull.local0_target_count_commit(1));
         assert!(cull.shadow_target_count_commit(1, 4));
         // The harvest is deliberately non-blocking, so pump it until the ring drains rather than
         // asserting on the first (necessarily empty) attempt.
@@ -4630,10 +4801,12 @@ pub(crate) mod tests {
             cull.harvest_stats(&device);
             cull.harvest_main_target_count(&device);
             for cascade in 0..4 { cull.harvest_shadow_target_count(&device, cascade); }
+            cull.harvest_local0_target_count(&device);
             cull.harvest_shadow_target_count(&device, 4);
             if cull.stats().valid &&
                 cull.main_target_count_fact().status == MainCountStatus::Present &&
-                (0..5).all(|view| cull.shadow_target_count_fact(view).status != MainCountStatus::Unknown) {
+                (0..5).all(|view| cull.shadow_target_count_fact(view).status != MainCountStatus::Unknown) &&
+                cull.local0_target_count_fact().status != MainCountStatus::Unknown {
                 break;
             }
             let _ = device.poll(wgpu::PollType::wait_indefinitely());
@@ -4658,6 +4831,10 @@ pub(crate) mod tests {
         assert_eq!(gi.identity, first.identity);
         assert_eq!(gi.status, MainCountStatus::Present);
         assert_eq!(gi.count, 8, "GI must read sky view 5's dispatched counter");
+        let local = cull.local0_target_count_fact();
+        assert_eq!(local.identity, first.identity);
+        assert_eq!(local.status, MainCountStatus::Present);
+        assert_eq!(local.count, 8, "local tile must read its own cull index 4");
         let m = stats.views[STATS_VIEW_MAIN];
         assert_eq!(
             m.instances, 8,
@@ -4693,53 +4870,87 @@ pub(crate) mod tests {
         assert!(cull.arm_main_target_count(&device, 2, model, 29));
         assert_eq!(cull.shadow_target_count_fact(4).status, MainCountStatus::Unknown,
             "a new request cannot inherit a cached RSM count");
+        assert_eq!(cull.local0_target_count_fact().status, MainCountStatus::Unknown,
+            "a new request cannot inherit a cached local tile count");
+        cull.set_shadow_view_count(&device, 1);
+        cull.set_shadow_params(0, params); // night: tile 0 is cull index 0, not solar cascade 0
         cull.prepare(&device, &queue);
         let mut second = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         cull.begin_frame_stats(&mut second);
         cull.dispatch(&mut second);
+        assert!(cull.dispatch_shadow(&mut second, 0));
+        assert!(cull.copy_main_target_count(&mut second));
+        assert!(cull.copy_local0_target_count(&mut second, 0));
         cull.resolve_stats(&mut second);
+        assert!(cull.main_target_count_before_submit(2));
+        assert!(cull.local0_target_count_before_submit(2));
         queue.submit(std::iter::once(second.finish()));
+        assert!(cull.main_target_count_submitted(2));
+        assert!(cull.local0_target_count_submitted(2));
+        assert!(cull.main_target_count_commit(2));
+        assert!(cull.local0_target_count_commit(2));
         for _ in 0..64 {
             cull.harvest_stats(&device);
-            if cull.stats().views[STATS_VIEW_MAIN].instances == 9 { break; }
+            cull.harvest_local0_target_count(&device);
+            if cull.stats().views[STATS_VIEW_MAIN].instances == 9 &&
+                cull.local0_target_count_fact().status == MainCountStatus::Present { break; }
             let _ = device.poll(wgpu::PollType::wait_indefinitely());
         }
         let second_main = cull.stats().views[STATS_VIEW_MAIN];
         assert_eq!(second_main.instances, 9, "decoy model must survive this view");
         assert_eq!(second_main.target_model_count, 8, "decoy must not alter exact model COUNT");
+        assert_eq!(cull.local0_target_count_fact().count, 8,
+            "night local tile 0 must read cull index 0");
+        assert_eq!(cull.shadow_target_count_fact(0).status, MainCountStatus::Unknown,
+            "night local tile 0 must never publish as solar cascade 0");
         cull.main_target_count_abort(2);
+        cull.local0_target_count_abort(2);
+        assert_eq!(cull.local0_target_count_fact().status, MainCountStatus::Unknown,
+            "an aborted local tile copy cannot remain a present fact");
         // A real dispatched frame with nine other survivors must return a tagged zero.
         let absent_model = cull.register_model(1.0, &lods, &sections, &materials);
         assert!(cull.arm_main_target_count(&device, 3, absent_model, 30));
+        cull.set_shadow_view_count(&device, 5);
+        for cascade in 0..4 {
+            cull.set_shadow_params(cascade, if cascade % 2 == 0 { params } else { empty_params });
+        }
+        cull.set_shadow_params(4, params);
         cull.prepare(&device, &queue);
         let mut third = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         cull.begin_frame_stats(&mut third);
         cull.dispatch(&mut third);
         for cascade in 0..4 { assert!(cull.dispatch_shadow(&mut third, cascade)); }
+        assert!(cull.dispatch_shadow(&mut third, 4));
         cull.dispatch_sky(&mut third, super::super::sky_vis::DIRECTION_COUNT);
         assert!(cull.copy_main_target_count(&mut third));
         for cascade in 0..4 { assert!(cull.copy_shadow_target_count(&mut third, cascade)); }
+        assert!(cull.copy_local0_target_count(&mut third, 4));
         assert!(cull.copy_shadow_target_count(&mut third, 4));
         let commands = third.finish();
         assert!(cull.main_target_count_before_submit(3));
         for cascade in 0..4 { assert!(cull.shadow_target_count_before_submit(3, cascade)); }
+        assert!(cull.local0_target_count_before_submit(3));
         assert!(cull.shadow_target_count_before_submit(3, 4));
         queue.submit(std::iter::once(commands));
         assert!(cull.main_target_count_submitted(3));
         for cascade in 0..4 { assert!(cull.shadow_target_count_submitted(3, cascade)); }
+        assert!(cull.local0_target_count_submitted(3));
         assert!(cull.shadow_target_count_submitted(3, 4));
         assert!(cull.main_target_count_commit(3));
         for cascade in 0..3 { assert!(cull.shadow_target_count_commit(3, cascade)); }
         assert!(cull.shadow_target_count_commit(3, 4));
+        assert!(cull.local0_target_count_commit(3));
         cull.shadow_target_count_abort(3, 3);
         assert_eq!(cull.main_target_count_fact().status, MainCountStatus::Unknown);
         for _ in 0..64 {
             cull.harvest_main_target_count(&device);
             for cascade in 0..4 { cull.harvest_shadow_target_count(&device, cascade); }
             cull.harvest_shadow_target_count(&device, 4);
+            cull.harvest_local0_target_count(&device);
             if cull.main_target_count_fact().status == MainCountStatus::Absent &&
                 (0..3).all(|cascade| cull.shadow_target_count_fact(cascade).status == MainCountStatus::Absent) &&
-                cull.shadow_target_count_fact(4).status == MainCountStatus::Absent { break; }
+                cull.shadow_target_count_fact(4).status == MainCountStatus::Absent &&
+                cull.local0_target_count_fact().status == MainCountStatus::Absent { break; }
             let _ = device.poll(wgpu::PollType::wait_indefinitely());
         }
         let absent = cull.main_target_count_fact();
@@ -4759,6 +4970,10 @@ pub(crate) mod tests {
         assert_eq!(gi_absent.identity, absent.identity);
         assert_eq!(gi_absent.status, MainCountStatus::Absent);
         assert_eq!(gi_absent.count, 0, "GI zero needs its own current cull and commit");
+        let local_absent = cull.local0_target_count_fact();
+        assert_eq!(local_absent.identity, absent.identity);
+        assert_eq!(local_absent.status, MainCountStatus::Absent);
+        assert_eq!(local_absent.count, 0, "local zero needs its own fresh cull and commit");
         eprintln!("PASS exact target-model GPU COUNT: main and four isolated solar cascades");
     }
 

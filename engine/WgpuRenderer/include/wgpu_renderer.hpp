@@ -2729,6 +2729,11 @@ extern "C"
      * No pixel proof or residency-release authority. */
     WGR_API uint32_t wgr_gi_target_count_fact(WgrRenderer*, WgrMainTargetCountResult*,
         uint32_t output_size, uint32_t output_version);
+    /* Local shadow tile 0, distinct from solar cascade 0 even at night.
+     * Only a fresh cull plus closed indirect depth draw may publish COUNT;
+     * cached/skipped tiles stay UNKNOWN. No residency-release authority. */
+    WGR_API uint32_t wgr_local_shadow0_target_count_fact(WgrRenderer*, WgrMainTargetCountResult*,
+        uint32_t output_size, uint32_t output_version);
 
     /* Debug: read back the current auto-exposure scale (blocking GPU sync; dev panel only). */
     WGR_API float wgr_get_exposure_scale(WgrRenderer* renderer);
