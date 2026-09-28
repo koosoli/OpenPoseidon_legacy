@@ -303,6 +303,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     World/Model/test_model_source_audit.cpp
     Graphics/Textures/test_bc3_prepared_sidecar.cpp
     World/Model/test_stream_texture_names.cpp
+    World/Model/test_stream_tree_fixture.cpp
     World/Model/test_owned_model_read.cpp
 
 

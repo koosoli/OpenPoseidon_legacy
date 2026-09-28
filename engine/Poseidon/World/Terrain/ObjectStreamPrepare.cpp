@@ -4,6 +4,9 @@
 #include <Poseidon/World/Terrain/ObjectStreamPrepare.hpp>
 #include <Poseidon/World/Terrain/WarmTextureProvenance.hpp>
 #include <Poseidon/World/Terrain/ObjectStreamTextureNames.hpp>
+#include <Poseidon/World/Terrain/ObjectStreamRapStageNames.hpp>
+#include <Poseidon/World/Terrain/ObjectStreamTreeFixture.hpp>
+#include <Poseidon/Asset/Addon/VirtualPath.hpp>
 #include <Poseidon/World/Terrain/LoosePaaPreparation.hpp>
 #include <Poseidon/World/Terrain/PaaPreparationInflight.hpp>
 #include <Poseidon/World/Model/ShapeAdapter.hpp>
@@ -394,6 +397,8 @@ struct ObjectStreamPreparer::Impl
         return true;
     }
     std::vector<std::optional<BankReadRequest>> packedReads;
+    // Owner-only, reset per world: one exact capture attempt per selected fixture.
+    uint8_t rapFixtureAttempts = 0;
     std::unique_ptr<std::atomic<uint8_t>[]> states;
     std::vector<ModelPtr> models;
     // Protected by mutex. In-flight slots stay occupied until their worker exits.
@@ -412,9 +417,17 @@ struct ObjectStreamPreparer::Impl
         const BankReadRequest& ReadRequest() const { return initializedRead ? *initializedRead : read; }
     };
     static constexpr size_t PackedTextureLimit = 16 * 1024 * 1024;
+    static constexpr size_t RapMaterialLimit = 256 * 1024;
+    struct CapturedRapMaterial
+    {
+        std::string key;
+        BankReadRequest read; // exact immutable physical member; never a QFBank pointer
+    };
     struct ConvertJob
     {
         std::vector<PackedTextureRead> textures;
+        std::vector<CapturedRapMaterial> rapMaterials; // diagnostic-only, no PAA work
+
         std::unique_ptr<render::ColdPaaRead> coldTexture;
         uint64_t textureGeneration = 0;
         render::DdsPublicationToken texturePublication;
@@ -682,7 +695,9 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                 if (texture.read.archiveLease)
                     alphaMetadataScratch = std::max<uint64_t>(alphaMetadataScratch,
                         sizeof(render::PreparedAlphaFacts) + texture.read.archive.capacity() + 1 + 64);
-            const uint64_t textureScratch = (job.textures.empty() && !job.coldTexture) ? 0 : 4 * PackedTextureLimit + 8192 + alphaMetadataScratch;
+            const uint64_t rapScratch = job.rapMaterials.empty() ? 0 : RapMaterialLimit + 2 * 16 * 240 + 8192;
+            const uint64_t textureScratch = ((job.textures.empty() && !job.coldTexture) ? 0 :
+                4 * PackedTextureLimit + 8192 + alphaMetadataScratch) + rapScratch;
             stats.conversionReservedBytes += textureScratch;
             stats.peakConversionReservedBytes = std::max(stats.peakConversionReservedBytes, stats.conversionReservedBytes);
             const uint64_t jobGen = generation.load(std::memory_order_relaxed);
@@ -716,6 +731,55 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                     (job.model->sourceFormat == "ODOL" || job.model->sourceFormat == "MLOD"))
                     PublishRadius(job.index, jobGen, job.radiusIdentity,
                                   shape->BoundingSphere(), RadiusProvenance::AdaptedShape);
+            }
+            // Opt-in first handoff only. A successful read is from the owner's
+            // identity-leased physical .rvmat member; it is not a current texture
+            // binding, a prepared PAA, or a StoreTake. Never publish observations
+            // from an obsolete model generation or invalid source association.
+            struct RapObservation
+            {
+                std::string key, names;
+                int status = -1; // -1 = physical read refused
+                size_t count = 0;
+                BankReadMemberIdentity member;
+            };
+            std::vector<RapObservation> rapObservations;
+            if (shape && job.radiusIdentityAccepted && job.radiusGeneration == jobGen &&
+                !job.rapMaterials.empty())
+            {
+                try
+                {
+                    for (const auto& selected : job.rapMaterials)
+                    {
+                        {
+                            std::lock_guard<std::mutex> guard(mutex);
+                            if (stop || jobGen != generation.load(std::memory_order_relaxed) ||
+                                job.index >= count || stale[job.index] || paths[job.index] != conversionPath ||
+                                (job.sourceToken.diagnosticParseToken &&
+                                 !SourceBindingMatches(job.index, job.sourceToken)))
+                                break;
+                        }
+                        RapObservation observed;
+                        observed.key = selected.key;
+                        if (!selected.read.CopyMemberIdentity(observed.member)) break;
+                        std::vector<char> bytes;
+                        if (selected.read.bytes <= RapMaterialLimit && selected.read.Read(bytes) &&
+                            bytes.size() == selected.read.bytes)
+                        {
+                            const auto result = Streaming::ExtractOwnedRapStageNames(
+                                std::span<const char>(bytes.data(), bytes.size()), selected.key);
+                            observed.status = static_cast<int>(result.status);
+                            observed.count = result.names.size();
+                            for (const auto& name : result.names)
+                            {
+                                if (!observed.names.empty()) observed.names += ';';
+                                observed.names += name;
+                            }
+                        }
+                        rapObservations.push_back(std::move(observed));
+                    }
+                }
+                catch (...) { rapObservations.clear(); } // Optional diagnostic cannot fail geometry conversion.
             }
             PaaAttemptRow attemptRow;
             auto reportAttempts = [&](bool published, double publicationDelayMs) {
@@ -779,6 +843,8 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                 reportAttempts(false, terminalMs);
                 delete shape;
                 ownedCold.reset(); job.coldTexture.reset();
+                job.rapMaterials.clear(); // release archive leases OUTSIDE queue mutex
+                rapObservations.clear();
                 job.model.reset();
                 job.tables.reset();
                 lock.lock();
@@ -832,8 +898,27 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
             // Their destructors must never run under the preparer's queue mutex.
             lock.unlock();
             reportAttempts(publishedShape, terminalMs);
+            if (publishedShape && !rapObservations.empty())
+            {
+                try
+                {
+                    static std::atomic<unsigned> rapRows{0};
+                    for (const auto& observed : rapObservations)
+                    {
+                        const unsigned row = rapRows.fetch_add(1, std::memory_order_relaxed);
+                        if (row >= 16) break;
+                        LOG_INFO(World, "RVMAT raP source discovery: generation={} modelIndex={} model={} material={} status={} stages={} memberOffset={} memberBytes={} archiveBytes={} volume={} names={} (diagnostic only; no PAA capture/Take/upload)",
+                            jobGen, job.index, conversionPath, observed.key, observed.status, observed.count,
+                            observed.member.offset, observed.member.bytes, observed.member.archiveBytes,
+                            observed.member.volume, observed.names);
+                    }
+                }
+                catch (...) {} // Diagnostic logging must not kill the worker.
+            }
             delete shape;
             ownedCold.reset(); job.coldTexture.reset();
+            job.rapMaterials.clear(); // release archive leases OUTSIDE queue mutex
+            rapObservations.clear();
             job.model.reset();
             job.tables.reset();
             lock.lock();
@@ -911,7 +996,7 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
         const bool prepareEnvelope = index < sourceEnvelopes.size() && sourceEnvelopes[index].requested;
         const render::DdsPublicationToken publication{ddsPublication, index,
             ddsPublication ? ddsPublication->Epoch(index) : 0};
-        const auto packedRead = packedReads[index];
+        auto packedRead = packedReads[index];
         Set(index, State::Parsing);
         stats.parseReservedBytes += reservation;
         lock.unlock();
@@ -986,6 +1071,10 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
             opened = true;
             error = "unknown exception";
         }
+        // An identity-leased narrow PBO source may be the final archive handle
+        // after Reset retires its inventory. Release it while unlocked, on every
+        // parse success/failure path, before reacquiring the preparer queue mutex.
+        packedRead.reset();
         const double ms =
             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
         // Canonical loaders (including owned DDC deserialization) return a fresh
@@ -1319,21 +1408,57 @@ void ObjectStreamPreparer::Reset(const std::string* paths, size_t modelCount)
     { try { freshCold.resize(modelCount); } catch (...) { freshCold.clear(); } }
     std::vector<std::optional<BankReadRequest>> packedReads(modelCount);
     const char* packedFlag = std::getenv("WGR_OBJECT_STREAM_PBO");
+    const char* treeFlag = std::getenv("WGR_OBJECT_STREAM_PBO_TREE_FIXTURE");
+    const bool broadPacked = packedFlag && packedFlag[0] == '1';
+    const bool narrowTree = !broadPacked && treeFlag && std::strcmp(treeFlag, "1") == 0;
     size_t packedCount = 0;
-    if (packedFlag && packedFlag[0] == '1' && GUseFileBanks && !ModelDerivedCache::Instance().Enabled())
+    uint8_t attemptedTree = 0;
+    if (narrowTree && (!GUseFileBanks || ModelDerivedCache::Instance().Enabled()))
+        LOG_INFO(World, "Tree fixture PBO source unavailable: fileBanks={} modelDdcEnabled={}",
+            GUseFileBanks, ModelDerivedCache::Instance().Enabled());
+    if ((broadPacked || narrowTree) && GUseFileBanks && !ModelDerivedCache::Instance().Enabled())
     {
         for (size_t i = 0; i < modelCount; ++i)
         {
             const auto& path = paths[i];
-            if (path.size() < 4 || path.substr(path.size() - 4) != ".p3d") continue;
-            if (auto* bank = QIFStreamB::AutoBank(path.c_str()))
+            if (narrowTree)
             {
-                packedReads[i] = bank->CaptureReadRequest(path.c_str() + bank->GetPrefix().GetLength());
-                packedCount += packedReads[i].has_value();
+                const int ordinal = Streaming::TreeFixtureModelOrdinal(path);
+                if (ordinal < 0 || (attemptedTree & (1u << ordinal))) continue;
+                attemptedTree |= static_cast<uint8_t>(1u << ordinal); // one archive lookup per fixture
+            }
+            if (path.size() < 4 || path.substr(path.size() - 4) != ".p3d") continue;
+            try
+            {
+                if (auto* bank = QIFStreamB::AutoBank(path.c_str()))
+                {
+                    const char* member = path.c_str() + bank->GetPrefix().GetLength();
+                    auto read = bank->CaptureReadRequest(member, narrowTree);
+                    if (read && (!narrowTree ||
+                        (read->HasArchiveIdentity() && Streaming::EligibleTreeFixtureBytes(read->bytes))))
+                    {
+                        packedReads[i] = std::move(read);
+                        ++packedCount;
+                    }
+                    else if (narrowTree)
+                        LOG_INFO(World, "Tree fixture PBO source refused: model={} reason=identity-or-size", path);
+                }
+                else if (narrowTree)
+                    LOG_INFO(World, "Tree fixture PBO source refused: model={} reason=no-mounted-bank", path);
+            }
+            catch (...)
+            {
+                if (narrowTree) LOG_INFO(World, "Tree fixture PBO source refused: model={} reason=capture-exception", path);
+                else throw;
             }
         }
     }
-    if (packedCount) LOG_INFO(World, "Object stream prepare: {} owned PBO read requests", packedCount);
+    if (packedCount)
+    {
+        if (narrowTree) LOG_INFO(World, "Tree fixture PBO source: {} exact identity-leased read requests", packedCount);
+        else LOG_INFO(World, "Object stream prepare: {} owned PBO read requests", packedCount);
+    }
+    std::vector<std::optional<BankReadRequest>> retiredPackedReads;
     std::vector<Impl::ModelPtr> freeLater;
     std::vector<LODShapeWithShadow*> freeShapes;
     std::deque<Impl::ConvertJob> freeConversions;
@@ -1356,6 +1481,7 @@ void ObjectStreamPreparer::Reset(const std::string* paths, size_t modelCount)
         _impl->stats.coldTextureSlotBytes = _impl->convertedColdTextures.capacity() * sizeof(std::unique_ptr<render::ColdPaaOwned>);
         // Do not clear parseReservedBytes: old-generation workers still own their reservation.
         _impl->payloadBytes.assign(modelCount, 0);
+        _impl->rapFixtureAttempts = 0;
         _impl->queue.clear();
         // Jobs own model IR and bank-table references, not just queue indices.
         // Their last-reference destructors must not run under the queue mutex.
@@ -1410,7 +1536,8 @@ void ObjectStreamPreparer::Reset(const std::string* paths, size_t modelCount)
             _impl->radiusCertificates.capacity() * sizeof(Impl::RadiusSlot);
         std::vector<Impl::SourceEnvelopeSlot>().swap(_impl->sourceEnvelopes);
         _impl->stats.sourceEnvelopeBytes = 0;
-        _impl->packedReads = std::move(packedReads);
+        retiredPackedReads.swap(_impl->packedReads); // old identity leases retire outside queue mutex
+        _impl->packedReads.swap(packedReads);
         _impl->count = modelCount;
         _impl->states = modelCount > 0 ? std::make_unique<std::atomic<uint8_t>[]>(modelCount) : nullptr;
         for (size_t i = 0; i < modelCount; ++i)
@@ -1811,6 +1938,80 @@ bool ObjectStreamPreparer::SubmitConvert(uint32_t index, std::shared_ptr<Model::
             }
         } catch (...) { coldTexture.reset(); } // Optional metadata failure falls back, no model-state change.
     }
+    std::vector<Impl::CapturedRapMaterial> rapMaterials;
+    // Exact selected DayZ fixtures only. No lookup, bank load or allocation in
+    // the default path. A fixture is attempted at most once per world, whether
+    // capture succeeds or not; it cannot grow per-model admission work unboundedly.
+    static const bool rapDiscovery = [] {
+        const char* value = std::getenv("WGR_OBJECT_STREAM_RAP_STAGE_SOURCE");
+        return value && std::strcmp(value, "1") == 0;
+    }();
+    bool rapCandidateAdmissible = false;
+    if (rapDiscovery && Streaming::SelectedTreeFixtureModel(model->sourcePath) &&
+        !originalSource && ownerTextureAdmission && Foundation::IsMainThread() && GUseFileBanks)
+    {
+        std::lock_guard<std::mutex> guard(_impl->mutex);
+        rapCandidateAdmissible = index < _impl->count && !_impl->workers.empty() &&
+            _impl->Get(index) == State::Unknown && _impl->paths[index] == model->sourcePath;
+    }
+    if (rapCandidateAdmissible &&
+        (_impl->rapFixtureAttempts & 3u) != 3u)
+    {
+        constexpr std::array<const char*, 2> fixtures{{
+            R"(dz\plants\tree\data\t_piceaabies_2d_trunk.rvmat)",
+            R"(dz\plants\tree\data\d_piceaabies_stumpb_trunk_a.rvmat)"}};
+        try
+        {
+        size_t visited = 0;
+        for (const auto& level : model->lodLevels)
+        {
+            if (visited >= 256 || rapMaterials.size() >= fixtures.size()) break;
+            if (level.purpose != Model::LodPurpose::Visual) continue;
+            for (const auto& material : level.mesh.materials)
+            {
+                if (++visited > 256 || rapMaterials.size() >= fixtures.size()) break;
+                const auto path = Asset::VirtualPath::Parse(material.materialPath);
+                if (path.empty() || path.looksHostAbsolute() || path.canonical().size() > 240) continue;
+                for (size_t fixture = 0; fixture < fixtures.size(); ++fixture)
+                {
+                    if (path.canonical() != fixtures[fixture] ||
+                        (_impl->rapFixtureAttempts & (1u << fixture))) continue;
+                    _impl->rapFixtureAttempts |= static_cast<uint8_t>(1u << fixture);
+                    const char* refusal = "no-mounted-bank";
+                    try
+                    {
+                        if (QFBank* bank = QIFStreamB::AutoBank(path.canonical().c_str()))
+                        {
+                            refusal = "prefix-mismatch";
+                            const RString prefix = bank->GetPrefix();
+                            if (prefix.GetLength() >= 0 &&
+                                static_cast<size_t>(prefix.GetLength()) < path.canonical().size() &&
+                                !CmpStartStr(path.canonical().c_str(), prefix))
+                            {
+                                const char* member = path.canonical().c_str() + prefix.GetLength();
+                                auto read = bank->CaptureReadRequest(member, true);
+                                refusal = !read ? "identity-capture-refused" :
+                                    (!read->HasArchiveIdentity() ? "no-physical-identity" :
+                                    (read->bytes > Impl::RapMaterialLimit ? "material-over-256KiB" : nullptr));
+                                if (!refusal)
+                                    rapMaterials.push_back({path.canonical(), std::move(*read)});
+                            }
+                        }
+                    }
+                    catch (...) { refusal = "capture-exception"; }
+                    if (refusal)
+                    {
+                        static std::atomic<unsigned> refusalRows{0};
+                        if (refusalRows.fetch_add(1, std::memory_order_relaxed) < 16)
+                            LOG_INFO(World, "RVMAT raP source capture refused: fixture={} material={} reason={} (owner-only diagnostic; ordinary admission unchanged)",
+                                fixture, path.canonical(), refusal);
+                    }
+                }
+            }
+        }
+        }
+        catch (...) { rapMaterials.clear(); } // Optional diagnostic must not affect admission.
+    }
     std::vector<Impl::PackedTextureRead> textures;
     const uint64_t textureGeneration = render::PreparedTextureStore::Instance().Generation();
     const char* flag = std::getenv("WGR_OBJECT_STREAM_PBO_TEXTURES");
@@ -1884,6 +2085,14 @@ bool ObjectStreamPreparer::SubmitConvert(uint32_t index, std::shared_ptr<Model::
             job.texturePublication.inventory->MetadataBytes();
     }
     job.coldTexture = std::move(coldTexture);
+    if (!rapMaterials.empty())
+    {
+        job.reservation += rapMaterials.capacity() * sizeof(Impl::CapturedRapMaterial);
+        for (const auto& material : rapMaterials)
+            job.reservation += material.key.capacity() + 1 + material.read.archive.capacity() + 1 +
+                material.read.ArchiveIdentityBytes() + 64;
+    }
+    job.rapMaterials = std::move(rapMaterials);
     if (!textures.empty())
     {
         job.reservation += textures.capacity() * sizeof(Impl::PackedTextureRead);
