@@ -1,4 +1,4 @@
-//! Private COUNT retained only for the exact published zenith cache image.
+//! Private COUNT retained only for the exact published interior cache image.
 //! The readback identity is a request identity; the cache identity also needs
 //! the publication and texture generations and the view used to draw it.
 
@@ -6,6 +6,7 @@ use super::{cull::{MainCountFact, MainCountIdentity, MainCountStatus}, SkyVisVie
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Key {
+    pub direction: usize,
     pub publication: u64,
     pub target: u64,
     pub view: [u32; 18],
@@ -13,12 +14,12 @@ pub struct Key {
 }
 
 impl Key {
-    pub fn new(publication: u64, target: u64, view: SkyVisView, epoch: u64) -> Self {
+    pub fn new(direction: usize, publication: u64, target: u64, view: SkyVisView, epoch: u64) -> Self {
         let mut bits = [0; 18];
         bits[..16].copy_from_slice(&view.view_proj.to_cols_array().map(f32::to_bits));
         bits[16] = view.kernel_uv.to_bits();
         bits[17] = view.bias_ndc.to_bits();
-        Self { publication, target, view: bits, epoch }
+        Self { direction, publication, target, view: bits, epoch }
     }
 }
 
@@ -64,7 +65,7 @@ mod tests {
     use super::*;
 
     fn key(generation: u64) -> Key {
-        Key::new(generation, 3, super::super::sky_vis::build_views(
+        Key::new(0, generation, 3, super::super::sky_vis::build_views(
             glam::Vec3::ZERO, &super::super::sky_vis::SkyVisSettings::default())[0], 7)
     }
     fn id(token: u64, source_generation: u64) -> MainCountIdentity {
@@ -85,6 +86,8 @@ mod tests {
             changed = key(1); changed.view[0] ^= 1;
             assert_eq!(cache.fact(Some(changed)).status, MainCountStatus::Unknown);
             changed = key(1); changed.epoch += 1;
+            assert_eq!(cache.fact(Some(changed)).status, MainCountStatus::Unknown);
+            changed = key(1); changed.direction = 1;
             assert_eq!(cache.fact(Some(changed)).status, MainCountStatus::Unknown);
             cache.source_changed(id(3, 9));
             assert_eq!(cache.fact(Some(key(1))).status, status);

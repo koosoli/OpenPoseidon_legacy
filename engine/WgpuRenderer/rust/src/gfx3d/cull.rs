@@ -1485,6 +1485,16 @@ impl CullState {
     pub fn batch_target_count_commit(&mut self, token: u64) -> bool {
         self.batch_count.as_mut().is_some_and(|b| b.commit(token))
     }
+    /// Sky words actually copied by the accepted, committed batch. A direction
+    /// that only has an armed identity must never bind to a published image.
+    pub fn batch_target_count_committed_sky_mask(&self, token: u64) -> u8 {
+        self.batch_count.as_ref().map_or(0, |batch| batch.slots.iter()
+            .find_map(|(_, state)| match state {
+                BatchCountSlot::Submitted { identity, copied, committed: true, aborted: false }
+                    if identity.token == token => Some(*copied as u8 & 0x0f),
+                _ => None,
+            }).unwrap_or(0))
+    }
     pub fn batch_target_count_abort(&mut self, token: u64) {
         if let Some(b) = &mut self.batch_count { b.abort(token); }
         self.batch_sky_dispatch_mask.set(0);
@@ -6741,9 +6751,9 @@ pub(crate) mod tests {
         assert!(cull.sky0_target_count_commit(2));
         let sky_view = super::super::sky_vis::build_views(glam::Vec3::ZERO,
             &super::super::sky_vis::SkyVisSettings::default())[0];
-        let cache_key = super::super::sky0_cached_count::Key::new(
-            1, 1, sky_view, cull.instance_epoch());
-        let mut cached_count = super::super::sky0_cached_count::CachedCount::default();
+        let cache_key = super::super::interior_cached_count::Key::new(
+            0, 1, 1, sky_view, cull.instance_epoch());
+        let mut cached_count = super::super::interior_cached_count::CachedCount::default();
         cached_count.publish(cache_key, cull.sky0_target_count_fact().identity);
         for _ in 0..64 {
             cull.harvest_sky0_target_count(&device);
@@ -6785,8 +6795,8 @@ pub(crate) mod tests {
         queue.submit(std::iter::once(zero.finish()));
         assert!(cull.sky0_target_count_submitted(4));
         assert!(cull.sky0_target_count_commit(4));
-        let absent_key = super::super::sky0_cached_count::Key::new(
-            2, 1, sky_view, cull.instance_epoch());
+        let absent_key = super::super::interior_cached_count::Key::new(
+            0, 2, 1, sky_view, cull.instance_epoch());
         cached_count.publish(absent_key, cull.sky0_target_count_fact().identity);
         for _ in 0..64 {
             cull.harvest_sky0_target_count(&device);
@@ -6839,6 +6849,16 @@ pub(crate) mod tests {
         queue.submit(std::iter::once(batch.finish()));
         assert!(cull.batch_target_count_submitted(6));
         assert!(cull.batch_target_count_commit(6));
+        assert_eq!(cull.batch_target_count_committed_sky_mask(6), 0b1111);
+        let sky_views = super::super::sky_vis::build_views(glam::Vec3::ZERO,
+            &super::super::sky_vis::SkyVisSettings::default());
+        let mut interior_caches = [super::super::interior_cached_count::CachedCount::default(); 4];
+        let interior_keys = std::array::from_fn::<_, 4, _>(|index|
+            super::super::interior_cached_count::Key::new(index + 1, 1, 1,
+                sky_views[index + 1], cull.instance_epoch()));
+        for index in 0..4 {
+            interior_caches[index].publish(interior_keys[index], cull.batch_target_count_fact(index).identity);
+        }
         for _ in 0..64 {
             cull.harvest_batch_target_count(&device);
             if cull.batch_target_count_fact(4).status == MainCountStatus::Present { break; }
@@ -6848,12 +6868,25 @@ pub(crate) mod tests {
             let fact = cull.batch_target_count_fact(i);
             assert_eq!((fact.status, fact.count), (MainCountStatus::Present, 8));
             assert_eq!(fact.identity.source_generation, 21);
+            if i < 4 {
+                interior_caches[i].observe(fact);
+                assert_eq!(interior_caches[i].fact(Some(interior_keys[i])), fact);
+            }
+        }
+        for i in 0..4 {
+            let mut wrong_direction = interior_keys[i];
+            wrong_direction.direction = (i + 2) % 5;
+            assert_eq!(interior_caches[i].fact(Some(wrong_direction)).status, MainCountStatus::Unknown);
         }
         assert_eq!(cull.batch_target_count_fact(5).status, MainCountStatus::Unknown);
         assert!(cull.batch_count.as_ref().unwrap().slots.iter()
             .all(|(_, state)| matches!(state, BatchCountSlot::Idle)));
 
         assert!(cull.arm_main_target_count(&device, 7, absent_model, 22));
+        for (index, cache) in interior_caches.iter_mut().enumerate() {
+            cache.source_changed(cull.batch_target_count_fact(index).identity);
+            assert_eq!(cache.fact(Some(interior_keys[index])).status, MainCountStatus::Unknown);
+        }
         cull.prepare(&device, &queue);
         let mut zero_batch = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         cull.begin_frame_stats(&mut zero_batch);
@@ -6864,12 +6897,19 @@ pub(crate) mod tests {
         queue.submit(std::iter::once(zero_batch.finish()));
         assert!(cull.batch_target_count_submitted(7));
         assert!(cull.batch_target_count_commit(7));
+        assert_eq!(cull.batch_target_count_committed_sky_mask(7), 0b0010);
+        let absent_interior_key = super::super::interior_cached_count::Key::new(
+            2, 2, 1, sky_views[2], cull.instance_epoch());
+        interior_caches[1].publish(absent_interior_key, cull.batch_target_count_fact(1).identity);
         for _ in 0..64 {
             cull.harvest_batch_target_count(&device);
             if cull.batch_target_count_fact(4).status == MainCountStatus::Absent { break; }
             let _ = device.poll(wgpu::PollType::wait_indefinitely());
         }
         assert_eq!(cull.batch_target_count_fact(1).status, MainCountStatus::Absent);
+        interior_caches[1].observe(cull.batch_target_count_fact(1));
+        assert_eq!(interior_caches[1].fact(Some(absent_interior_key)).status, MainCountStatus::Absent);
+        assert_eq!(interior_caches[1].fact(Some(interior_keys[1])).status, MainCountStatus::Unknown);
         assert_eq!(cull.batch_target_count_fact(4).status, MainCountStatus::Absent);
         assert_eq!(cull.batch_target_count_fact(0).status, MainCountStatus::Unknown,
             "a cached or draw-less direction must not inherit a zero");
@@ -6884,11 +6924,15 @@ pub(crate) mod tests {
         queue.submit(std::iter::once(abort_batch.finish()));
         assert!(cull.batch_target_count_submitted(8));
         cull.batch_target_count_abort(8);
+        assert_eq!(cull.batch_target_count_committed_sky_mask(8), 0);
+        interior_caches[1].invalidate();
         for _ in 0..64 {
             cull.harvest_batch_target_count(&device);
             let _ = device.poll(wgpu::PollType::wait_indefinitely());
         }
         assert_eq!(cull.batch_target_count_fact(0).status, MainCountStatus::Unknown);
+        interior_caches[1].observe(cull.batch_target_count_fact(1));
+        assert_eq!(interior_caches[1].fact(Some(absent_interior_key)).status, MainCountStatus::Unknown);
         assert!(cull.batch_count.as_ref().unwrap().slots.iter()
             .all(|(_, state)| matches!(state, BatchCountSlot::Idle)));
         // With no solar cascade, the same local tile is cull index 1.

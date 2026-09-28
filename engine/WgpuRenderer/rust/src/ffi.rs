@@ -3602,8 +3602,10 @@ pub unsafe extern "C" fn wgr_sky0_target_count_fact(
     })).is_ok() as u32
 }
 
-/// Private nonblocking COUNT for interior directions 1..4. Each is copied only
-/// after its own fresh cull and closed indirect depth draw; cached layers stay Unknown.
+/// Private nonblocking COUNT for interior directions 1..4. With the opt-in
+/// interior publication witness, each mapped batch word is bound to its exact
+/// published direction, cache/texture generation, view, epoch and source.
+/// Otherwise only a fresh cull and closed indirect draw can produce a fact.
 /// # Safety
 /// Same live renderer and exact writable output contract as the main getter.
 #[unsafe(no_mangle)]

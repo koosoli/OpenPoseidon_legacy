@@ -2755,14 +2755,19 @@ extern "C"
     /* Interior sky-visibility zenith view 0, distinct from GI sky view 5.
      * With the opt-in publication witness, a mapped count stays attached to
      * its exact cached generation and keeps its original request token. Other
-     * cached/skipped layers stay UNKNOWN. No residency-release authority. */
+     * cached/skipped layers without that exact publication stay UNKNOWN.
+     * No residency-release authority. */
     WGR_API uint32_t wgr_sky0_target_count_fact(WgrRenderer*, WgrMainTargetCountResult*,
         uint32_t output_size, uint32_t output_version);
-    /* The remaining interior directions 1..4 and local shadow tiles 1..23.
-     * Each private v1 result needs its own fresh cull and closed indirect draw.
-     * Cached, skipped, failed, or draw-less views stay UNKNOWN. */
+    /* Interior directions 1..4 use separate words in the bounded batch ring.
+     * With the opt-in publication witness, a mapped count remains attached to
+     * its exact cached direction/generation/view/source and original token.
+     * Without it, only a fresh cull and closed indirect draw can return COUNT.
+     * Failed or draw-less views stay UNKNOWN. No residency-release authority. */
     WGR_API uint32_t wgr_interior_target_count_fact(WgrRenderer*, uint32_t direction,
         WgrMainTargetCountResult*, uint32_t output_size, uint32_t output_version);
+    /* Local shadow tiles 1..23 require a fresh cull and closed indirect draw.
+     * Cached or skipped tiles stay UNKNOWN. */
     WGR_API uint32_t wgr_local_shadow_target_count_fact(WgrRenderer*, uint32_t tile,
         WgrMainTargetCountResult*, uint32_t output_size, uint32_t output_version);
 
