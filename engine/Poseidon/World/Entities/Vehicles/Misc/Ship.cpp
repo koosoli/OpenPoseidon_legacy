@@ -654,8 +654,9 @@ void Ship::Simulate(float deltaT, SimulationImportance prec)
                             const float coefNPoints = 12.0 / 12.0;
                             // first is water is "pushing" everything up - causing some momentum
                             pForce = Vector3(0, (1200000 / baseMass) * GetMass() * info.under * coefNPoints, 0);
-                            // W11b: the water drag below reads the depth the legacy lift would give
-                            float planingDragScale = 1.0f;
+                            // W11b/W11e: the water drag below reads the depth the legacy lift would
+                            // give: this point's depth less the extra the lower gain lets it sink
+                            float planingDepthShift = 0.0f;
                             // TW-WATER W6a.2: a wreck does not plane. With the lift a boat killed
                             // at speed skimmed on for 150 m while it "sank" (twboats, 98aee494).
                             if (smallShip && !_isDead)
@@ -684,7 +685,7 @@ void Ship::Simulate(float deltaT, SimulationImportance prec)
                                 // speed -- keel on top of the water, with any backend. The gain now
                                 // rises only from 20x to 26x (the hull keeps ~3/4 of its resting
                                 // depth when flat out; W11c below lowers both). The water drag is computed from the depth the
-                                // legacy lift gave (planingDragScale), so top speed, acceleration and
+                                // legacy lift gave (planingDepthShift), so top speed, acceleration and
                                 // turning stay as they were. POSEIDON_BOAT_LEGACY_PLANING=1 restores
                                 // the legacy lift.
                                 static const bool legacyPlaning = []
@@ -698,7 +699,10 @@ void Ship::Simulate(float deltaT, SimulationImportance prec)
                                 // the water (the PBR drew 0.24 m, W11b captures: no visible change
                                 // from W11b alone). 9x at rest (about 0.5 m for the PBR), 12x flat out.
                                 const float gain = legacyPlaning ? legacyGain : 9 + floatMin(fwd * 0.2f, 3.0f);
-                                planingDragScale = gain / legacyGain;
+                                // W11e: the hull sits deeper against the mean sea by flat * (1 - gain /
+                                // legacyGain) (depth against the mean sea ~ 1 / gain); scaling the
+                                // drag depth by the ratio (W11b) cost the PBR ~8 % of its speed
+                                planingDepthShift = floatMax(info.underFlat, 0.0f) * (1.0f - gain / legacyGain);
                                 if (buoyDiag) diagGain = gain;
                                 const float flat = floatMax(info.underFlat, 0.0f);
                                 const float wave = info.under - flat;
@@ -726,9 +730,9 @@ void Ship::Simulate(float deltaT, SimulationImportance prec)
                                 const char* v = std::getenv("POSEIDON_BOAT_WAVE_DRAG");
                                 return !(v && v[0] == '0');
                             }();
-                            const float dragDepth = (smallShip && waveDrag
-                                                         ? PlaningWaterDragDepth(info.under, info.underFlat)
-                                                         : info.under) * planingDragScale;
+                            const float dUnder = floatMax(info.under - planingDepthShift, 0.0f);
+                            const float dFlat = info.underFlat - planingDepthShift;
+                            const float dragDepth = smallShip && waveDrag ? PlaningWaterDragDepth(dUnder, dFlat) : dUnder;
                             pForce[0] = speed[0] * fabs(speed[0]) * 0.50 * dragDepth + speed[0] * dragDepth * 4;
                             pForce[1] = speed[1] * fabs(speed[1]) * 40 + speed[1] * 30;
                             pForce[2] = (fabs(speed[2]) * 0.02 + 0.06) * speed[2] * dragDepth;
