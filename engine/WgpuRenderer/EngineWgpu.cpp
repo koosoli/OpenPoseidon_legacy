@@ -2249,7 +2249,8 @@ struct EngineWgpu::GeometryMainCountPending
     uint64_t token=0, pageEpoch=0, admissionEpoch=0, requestId=0, sourceGeneration=0, cullEpoch=0;
     uint32_t producerModel=UINT32_MAX, rendererModel=UINT32_MAX;
     unsigned ageFrames=0;
-    bool mainReported=false, giReported=false, local0Reported=false, reflectionReported=false;
+    bool mainReported=false, giReported=false, local0Reported=false, reflectionReported=false,
+         sky0Reported=false;
     uint32_t shadowReportedMask=0;
 };
 
@@ -4331,6 +4332,49 @@ void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing, Fr
                 }
             }
             pending.reflectionReported = true;
+        }
+        WgrMainTargetCountResult sky0Fact{};
+        const bool sky0Ready = wgr_sky0_target_count_fact(_renderer, &sky0Fact,
+                sizeof(sky0Fact), 1) == 1 &&
+            sky0Fact.struct_size == sizeof(sky0Fact) && sky0Fact.version == 1 &&
+            sky0Fact.submitted == 1 && sky0Fact.token == pending.token &&
+            sky0Fact.model_id == pending.rendererModel &&
+            sky0Fact.source_generation == pending.sourceGeneration &&
+            sky0Fact.cull_epoch == pending.cullEpoch &&
+            (sky0Fact.state == WGR_MAIN_TARGET_COUNT_PRESENT ||
+             sky0Fact.state == WGR_MAIN_TARGET_COUNT_ABSENT) &&
+            (sky0Fact.state != WGR_MAIN_TARGET_COUNT_ABSENT || sky0Fact.count == 0) &&
+            (sky0Fact.state != WGR_MAIN_TARGET_COUNT_PRESENT || sky0Fact.count > 0);
+        if (sky0Ready && !pending.sky0Reported)
+        {
+            if (auto fixture = pending.fixture.lock())
+            {
+                bool publish = false;
+                {
+                    std::lock_guard lock(fixture->mutex);
+                    const auto& report = fixture->report;
+                    const auto model = _modelIdOf.find(pending.producerModel);
+                    publish = report.active && report.originalFilePilot && fixture->originalAdmission &&
+                        report.pageEpoch == pending.pageEpoch && report.requestId == pending.requestId &&
+                        report.sourceAdmissionEpoch == pending.admissionEpoch &&
+                        fixture->originalAdmission->report.epoch == pending.admissionEpoch &&
+                        report.producerModel == pending.producerModel &&
+                        fixture->consumedModel == pending.rendererModel &&
+                        fixture->consumedInstance != UINT32_MAX && fixture->instance < _instSlotOf.size() &&
+                        _instSlotOf[fixture->instance] == fixture->consumedInstance &&
+                        model != _modelIdOf.end() && model->second == pending.rendererModel;
+                }
+                if (publish)
+                {
+                    static unsigned rows = 0;
+                    if (rows++ < 16)
+                        LOG_INFO(World, "Private zenith sky GPU COUNT: token={} pageEpoch={} admissionEpoch={} request={} model={} rendererModel={} sourceGeneration={} cullEpoch={} state={} count={} (fresh sky view 0; no Fine release)",
+                            pending.token, pending.pageEpoch, pending.admissionEpoch, pending.requestId,
+                            pending.producerModel, pending.rendererModel, pending.sourceGeneration,
+                            sky0Fact.cull_epoch, sky0Fact.state, sky0Fact.count);
+                }
+            }
+            pending.sky0Reported = true;
         }
         ++pending.ageFrames;
         // GI and local tiles redraw less often than the solar cascades; the
