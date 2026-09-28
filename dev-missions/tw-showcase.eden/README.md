@@ -10,7 +10,7 @@ waves to break.
 - Two UH-60s, a Chinook and a Cobra fly over the bay; two A-10 pairs pass at about 30 s and 95 s.
 - Six camera shots: open sea toward the LST, a chase on PBR 2, the surf from the sand, a crane
   over the landing, behind the LST toward the coast, and a pull-back reveal. At 120 s it fades
-  out and ends (`endMission "END1"`).
+  out and ends via the dev runner's `triEndMission "end1"` command.
 
 Morning, 21 June 1985, light cloud. The player is an officer safely placed on dry ground and never
 seen; the independent scripted camera covers the bay. This avoids ending the demo if an attempted

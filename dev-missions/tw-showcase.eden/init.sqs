@@ -71,5 +71,7 @@ _cam camCommit 15
 @_time > 116
 titleCut ["", "BLACK OUT", 3]
 @_time > 120
-endMission "END1"
+; The dev-mission runner does not register the legacy endMission script operator.
+; Use its supported mission-end command; the showcase launcher always uses --dev.
+triEndMission "end1"
 exit
