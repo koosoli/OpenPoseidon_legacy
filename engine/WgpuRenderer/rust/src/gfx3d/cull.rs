@@ -423,6 +423,9 @@ struct InstanceTargetRevision {
     model_id: u32,
     // Zero is permanently invalid after overflow; never wrap into an old fact.
     revision: u64,
+    // Last completed off-handle uploader write observed under its exclusive
+    // CPU lock. None forces the first observation to invalidate old samples.
+    uploader_serial: Option<u64>,
 }
 
 impl InstanceTable {
@@ -434,12 +437,13 @@ impl InstanceTable {
             Some(witness) if witness.model_id == model_id => {},
             Some(witness) => {
                 witness.model_id = model_id;
+                witness.uploader_serial = None;
                 if witness.revision != 0 {
                     witness.revision = witness.revision.checked_add(1).unwrap_or(0);
                 }
             }
             None => self.target_revision = Some(Box::new(InstanceTargetRevision {
-                model_id, revision: 1,
+                model_id, revision: 1, uploader_serial: None,
             })),
         }
         self.target_revision().map(|(_, revision)| revision)
@@ -467,6 +471,17 @@ impl InstanceTable {
             if witness.revision != 0 {
                 witness.revision = witness.revision.checked_add(1).unwrap_or(0);
             }
+        }
+    }
+
+    fn observe_uploader_mutation_serial(&mut self, serial: u64) {
+        let Some(witness) = &mut self.target_revision else { return; };
+        if witness.revision == 0 { return; }
+        if serial == 0 || witness.uploader_serial.is_some_and(|old| serial < old) {
+            witness.revision = 0; // serial wrapped or retreated: no safe identity
+        } else if witness.uploader_serial != Some(serial) {
+            witness.uploader_serial = Some(serial);
+            witness.revision = witness.revision.checked_add(1).unwrap_or(0);
         }
     }
 
@@ -2665,6 +2680,12 @@ impl CullState {
     /// the next exact sample can use the new value. Visual policy is unchanged.
     pub fn advance_retained_target_revision_for_geometry(&mut self) {
         self.instances.advance_target_revision_for_unattributed_geometry();
+    }
+
+    /// Completed off-handle writes may belong to any registered model. This
+    /// private witness advances conservatively; COUNT/cache policy ignores it.
+    pub fn observe_uploader_mutation_serial(&mut self, serial: u64) {
+        self.instances.observe_uploader_mutation_serial(serial);
     }
 
     /// Handles refused by the retained instance table since startup (ID-3). Nonzero means
@@ -6845,6 +6866,31 @@ pub(crate) mod tests {
         assert!(resolved_sections_changed(&changed, &old, &mut table));
         assert_eq!(table.target_revision(), Some((7, 3)),
             "a fresh sample after each change has a usable new serial");
+    }
+
+    #[test]
+    fn completed_uploader_serial_invalidates_old_target_samples_once() {
+        let mut table = InstanceTable::default();
+        table.observe_uploader_mutation_serial(1);
+        assert_eq!(table.target_revision(), None, "unarmed observation is inert");
+        assert_eq!(table.arm_target_revision(7), Some(1));
+        table.observe_uploader_mutation_serial(1); // first enable covers untracked history
+        let first = table.target_revision().unwrap().1;
+        assert_eq!(first, 2);
+        table.observe_uploader_mutation_serial(1);
+        assert_eq!(table.target_revision(), Some((7, first)));
+        table.observe_uploader_mutation_serial(3); // two completed writes since last read
+        assert_eq!(table.target_revision(), Some((7, first + 1)));
+        assert_ne!(table.target_revision().unwrap().1, first,
+            "a cached fact stamped before off-handle writes must mismatch");
+        assert_eq!(table.arm_target_revision(8), Some(first + 2));
+        table.observe_uploader_mutation_serial(3);
+        assert_eq!(table.target_revision(), Some((8, first + 3)),
+            "target switch cannot inherit a previous model's observed serial");
+        table.observe_uploader_mutation_serial(0); // uploader serial overflow
+        assert_eq!(table.arm_target_revision(7), None);
+        table.observe_uploader_mutation_serial(4);
+        assert_eq!(table.target_revision(), None, "overflow remains fail-closed");
     }
 
 

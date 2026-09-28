@@ -5775,6 +5775,14 @@ impl Gfx3d {
         self.cull.advance_retained_target_revision_for_geometry();
     }
 
+    pub fn retained_target_revision(&self) -> Option<(u32, u64)> {
+        self.cull.retained_target_revision()
+    }
+
+    pub fn observe_uploader_mutation_serial(&mut self, serial: u64) {
+        self.cull.observe_uploader_mutation_serial(serial);
+    }
+
     // REN-THR-009 — the three reads an off-handle upload needs, exposed without the
     // `&mut self` that `mesh_update` carries for no reason. `vbase` and `vert_count` are
     // fixed for the life of a mesh (the pool never compacts); the pool buffer is NOT, which

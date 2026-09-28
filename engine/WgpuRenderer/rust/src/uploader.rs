@@ -46,6 +46,7 @@
 //    has not made. This comment is here so the next person knows it is an assumption.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, RwLock};
 
 use crate::ffi::WgrMeshVertex;
@@ -68,6 +69,9 @@ struct Published {
     vbuf: Option<wgpu::Buffer>,
     epoch: u64,
     meshes: HashMap<u64, MeshUpload>,
+    // Allocated only for the private target-revision diagnostic. Mesh updates
+    // already hold this record's read lock through Queue::write_buffer.
+    mutation_serial: Option<AtomicU64>,
 }
 
 /// A `Send + Sync` upload surface for CPU-path meshes. Handed out by `wgr_uploader_get`
@@ -93,6 +97,7 @@ impl Uploader {
                 vbuf: None,
                 epoch: u64::MAX, // no epoch yet; the first publish always takes.
                 meshes: HashMap::new(),
+                mutation_serial: None,
             }),
             pending_destroy: Mutex::new(Vec::new()),
         }
@@ -159,7 +164,32 @@ impl Uploader {
             u64::from(meta.vbase) * VERT_SIZE,
             bytemuck::cast_slice(verts),
         );
+        if let Some(serial) = &cur.mutation_serial {
+            // A successful CPU queue write precedes the Release publication.
+            // Zero is a permanent overflow sentinel; never alias an old sample.
+            let _ = serial.fetch_update(Ordering::AcqRel, Ordering::Acquire,
+                |n| Some(if n == 0 { 0 } else { n.checked_add(1).unwrap_or(0) }));
+        }
         true
+    }
+
+    /// Opt-in at the diagnostic read boundary. The exclusive lock waits for any
+    /// in-progress mesh_update read guard to finish, then returns a CPU-only
+    /// linearization point. A newly enabled serial requires the caller to
+    /// invalidate earlier untracked samples once.
+    pub fn enable_mutation_serial_snapshot(&self) -> (u64, bool) {
+        let mut cur = self.published.write().expect("uploader published lock");
+        let newly_enabled = cur.mutation_serial.is_none();
+        let serial = cur.mutation_serial.get_or_insert_with(|| AtomicU64::new(1))
+            .load(Ordering::Acquire);
+        (serial, newly_enabled)
+    }
+
+    /// Same CPU-only lock boundary after a diagnostic getter. Never waits on GPU
+    /// completion or scans the mesh table.
+    pub fn mutation_serial_snapshot(&self) -> Option<u64> {
+        self.published.write().expect("uploader published lock")
+            .mutation_serial.as_ref().map(|serial| serial.load(Ordering::Acquire))
     }
 
     /// Park a destroy for the renderer to run at its own frame start. The metadata entry
@@ -326,8 +356,16 @@ mod tests {
             },
         );
 
+        assert_eq!(up.mutation_serial_snapshot(), None, "normal path has no serial");
+        assert_eq!(up.enable_mutation_serial_snapshot(), (1, true));
+        assert_eq!(up.enable_mutation_serial_snapshot(), (1, false));
+        assert!(!up.mesh_update(999, &av), "unknown handle must not advance serial");
+        assert_eq!(up.mutation_serial_snapshot(), Some(1));
+
         let (fresh, _) = tagged(64, 7777.0);
         assert!(up.mesh_update(2, &fresh), "a registered update must upload");
+        assert_eq!(up.mutation_serial_snapshot(), Some(2),
+            "only the completed queue write advances the serial");
 
         let got_b = read_back(&device, &queue, &pool, b.vbase, 64);
         assert_eq!(got_b[0], 7777.0, "mesh b did not receive the new vertices");
@@ -363,9 +401,12 @@ mod tests {
                 vert_count: 32,
             },
         );
+        assert_eq!(up.enable_mutation_serial_snapshot(), (1, true));
 
         let (too_many, _) = tagged(64, 9999.0);
         assert!(!up.mesh_update(1, &too_many), "oversized update must refuse");
+        assert_eq!(up.mutation_serial_snapshot(), Some(1),
+            "refused update cannot appear as a successful mutation");
         assert_eq!(
             read_back(&device, &queue, &pool, b.vbase, 1)[0],
             5000.0,
