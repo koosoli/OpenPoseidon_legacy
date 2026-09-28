@@ -780,14 +780,16 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                                 if (!observed.names.empty()) observed.names += ';';
                                 observed.names += name;
                             }
-                            if (result.status == Streaming::RapStageNamesStatus::Complete && !result.names.empty())
+                            if (result.status == Streaming::RapStageNamesStatus::Complete && !result.names.empty() &&
+                                result.names.size() <= RapStageCandidateHandoff::MaxStagesPerMaterial)
                             {
                                 if (!rapHandoff)
                                 {
                                     rapHandoff = std::make_unique<RapStageCandidateHandoff>();
                                     rapHandoff->generation = jobGen; rapHandoff->modelIndex = job.index;
                                 }
-                                rapHandoff->materials.push_back({selected.key, std::move(result.names.front())});
+                                for (auto& name : result.names)
+                                    rapHandoff->materials.push_back({selected.key, std::move(name)});
                             }
                         }
                         rapObservations.push_back(std::move(observed));

@@ -223,9 +223,20 @@ TEST_CASE("raP owner candidate is bounded names-only metadata", "[preparer][rap-
     REQUIRE(moved->Bounded());
     CHECK(moved->modelIndex == 3);
     CHECK(moved->materials[0].stageName == "dz\\plants\\tree\\data\\t_piceaabies_trunk_no.paa");
+    moved->materials.push_back({"dz\\plants\\tree\\data\\t_piceaabies_2d_trunk.rvmat",
+        "dz\\plants\\tree\\data\\t_piceaabies_trunk_dxt5.paa"});
     moved->materials.push_back({"dz\\plants\\tree\\data\\d_piceaabies_stumpb_trunk_a.rvmat",
         "dz\\plants\\tree\\data\\t_piceaabies_trunk_no.paa"});
     CHECK(moved->Bounded());
+    moved->materials.push_back({"dz\\plants\\tree\\data\\d_piceaabies_stumpb_trunk_a.rvmat",
+        "dz\\plants\\tree\\data\\t_piceaabies_trunk_dxt5.paa"});
+    CHECK(moved->Bounded());
+    const std::string secondMaterial = moved->materials[3].key;
+    moved->materials[3].key = "third.rvmat";
+    CHECK_FALSE(moved->Bounded()); // only two exact material identities
+    moved->materials[3].key = moved->materials[0].key;
+    CHECK_FALSE(moved->Bounded()); // at most two stages for one material
+    moved->materials[3].key = secondMaterial;
     moved->materials.push_back({"third.rvmat", "third.paa"});
     CHECK_FALSE(moved->Bounded());
     Poseidon::RapStageCandidateHandoff tooLong;

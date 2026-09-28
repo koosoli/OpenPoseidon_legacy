@@ -97,22 +97,37 @@ struct WarmTextureRead
 struct RapStageCandidateHandoff
 {
     struct Material { std::string key, stageName; };
+    static constexpr size_t MaxMaterials = 2, MaxStagesPerMaterial = 2;
+    static constexpr size_t MaxCandidates = MaxMaterials * MaxStagesPerMaterial;
     uint64_t generation = 0;
     uint32_t modelIndex = 0;
     std::vector<Material> materials;
     static constexpr size_t MaxKnownBytes = 2 * 1024;
     bool Bounded() const
     {
-        if (!generation || materials.empty() || materials.size() > 2 || materials.capacity() > 2) return false;
+        if (!generation || materials.empty() || materials.size() > MaxCandidates ||
+            materials.capacity() > MaxCandidates) return false;
         size_t charge = sizeof(*this);
         auto add = [&](size_t bytes) { if (bytes > MaxKnownBytes - charge) return false; charge += bytes; return true; };
         if (!add(materials.capacity() * sizeof(Material))) return false;
-        for (const auto& material : materials)
+        size_t uniqueMaterials = 0;
+        for (size_t i = 0; i < materials.size(); ++i)
         {
+            const auto& material = materials[i];
             if (material.key.empty() || material.key.size() > 240 ||
                 material.stageName.empty() || material.stageName.size() > 240 ||
                 !add(material.key.capacity() + 1) || !add(material.stageName.capacity() + 1))
                 return false;
+            size_t appearances = 0;
+            bool seenEarlier = false;
+            for (size_t j = 0; j < materials.size(); ++j)
+                if (materials[j].key == material.key)
+                {
+                    ++appearances;
+                    if (j < i) seenEarlier = true;
+                }
+            if (appearances > MaxStagesPerMaterial ||
+                (!seenEarlier && ++uniqueMaterials > MaxMaterials)) return false;
         }
         return true;
     }
