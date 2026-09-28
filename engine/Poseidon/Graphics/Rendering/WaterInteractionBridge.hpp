@@ -59,4 +59,11 @@ uint32_t LastWaterInteractionsDrained();
 void SetRifleWaterImpactSprayEnabled(bool enabled);
 bool RifleWaterImpactSprayEnabled();
 
+// TW-WATER W8a: in the Tidewater water mode an explosion on open water (sea bed more than
+// 0.5 m down, the burst at the surface) is drawn by the renderer as a water plume sized from the
+// ammo (the explosion's water-interaction event carries indirectHit and indirectHitRange), so the
+// legacy fireball / smoke Explosion and the CPU droplets are not spawned there.
+// WGR_TW_LEGACY_WATER_FX=1 keeps them; the Current OP water mode is unchanged.
+bool TidewaterWaterBurst(float x, float y, float z);
+
 } // namespace Poseidon

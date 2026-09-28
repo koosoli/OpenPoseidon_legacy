@@ -1067,27 +1067,38 @@ void ShotShell::Simulate(float deltaT, SimulationImportance prec)
                         (hitSea || segmentCrossedSea)
                             ? Vector3(lPos.X() + lDirNorm.X() * t, seaLevel, lPos.Z() + lDirNorm.Z() * t)
                             : isect;
-                    HydroWaterInteractionEvent event{};
-                    event.positionRadius[0] = waterPoint.X();
-                    event.positionRadius[1] = waterPoint.Z();
-                    event.positionRadius[2] = Type()->explosive ? 3.5f : 1.8f; // Radius
-                    event.positionRadius[3] = Type()->explosive ? 4.5f : 3.8f; // Strength
-                    event.velocityKind[0] = lDirNorm.X() * 15.0f;
-                    event.velocityKind[1] = lDirNorm.Z() * 15.0f;
-                    event.velocityKind[2] = -25.0f; // Downward entry velocity
-                    event.velocityKind[3] =
-                        Type()->explosive ? HydroWaterInteractionExplosion : HydroWaterInteractionBullet;
-                    event.timeLifeFoamMass[1] = 1.8f;
-                    event.timeLifeFoamMass[2] = 1.0f; // Foam density
-                    event.directionDepthFlags[0] = lDirNorm.X();
-                    event.directionDepthFlags[1] = lDirNorm.Z();
-                    event.directionDepthFlags[3] = HydroWaterInteractionPendingImpulse;
-                    SubmitWaterInteraction(event);
+                    // TW-WATER W8a: an explosive round's water event is submitted by
+                    // Landscape::ExplosionDammageEffects (with its blast, on every client); a
+                    // bullet's here, its `hit` in the mass lane and indirectHitRange in the depth
+                    // lane for the Tidewater spout.
+                    if (!Type()->explosive)
+                    {
+                        HydroWaterInteractionEvent event{};
+                        event.positionRadius[0] = waterPoint.X();
+                        event.positionRadius[1] = waterPoint.Z();
+                        event.positionRadius[2] = 1.8f; // Radius
+                        event.positionRadius[3] = 3.8f; // Strength
+                        event.velocityKind[0] = lDirNorm.X() * 15.0f;
+                        event.velocityKind[1] = lDirNorm.Z() * 15.0f;
+                        event.velocityKind[2] = -25.0f; // Downward entry velocity
+                        event.velocityKind[3] = HydroWaterInteractionBullet;
+                        event.timeLifeFoamMass[1] = 1.8f;
+                        event.timeLifeFoamMass[2] = 1.0f; // Foam density
+                        event.timeLifeFoamMass[3] = std::max(Type()->hit, 0.1f);
+                        event.directionDepthFlags[0] = lDirNorm.X();
+                        event.directionDepthFlags[1] = lDirNorm.Z();
+                        event.directionDepthFlags[2] = std::max(Type()->indirectHitRange, 0.01f);
+                        event.directionDepthFlags[3] = HydroWaterInteractionPendingImpulse;
+                        SubmitWaterInteraction(event);
+                    }
 
                     // Ordinary rifle impacts use the ripple field by default. The optional
                     // CPU droplet emitter is exposed in the dev Water tab for A/B inspection.
+                    // (W8a) In the Tidewater mode an explosive round's plume replaces the droplets.
                     const bool explosiveImpact = Type()->explosive;
-                    if (explosiveImpact || RifleWaterImpactSprayEnabled())
+                    const bool twBurst =
+                        explosiveImpact && TidewaterWaterBurst(waterPoint.X(), waterPoint.Y(), waterPoint.Z());
+                    if (!twBurst && (explosiveImpact || RifleWaterImpactSprayEnabled()))
                     {
                         WaterSource waterSplash;
                         waterSplash.SetSize(explosiveImpact ? 0.35f : 0.055f, explosiveImpact ? 0.65f : 0.10f);
@@ -1152,7 +1163,8 @@ void ShotShell::Simulate(float deltaT, SimulationImportance prec)
                 if (IsLocal() && (!_waterImpactDone || showLegacyWaterImpact))
                 {
                     Vector3 exploPos = position;
-                    if (Type()->explosive)
+                    // (W8a) no fireball on open water in the Tidewater mode: its plume is the burst
+                    if (Type()->explosive && !TidewaterWaterBurst(position.X(), position.Y(), position.Z()))
                     {
                         float size = Type()->hit * 0.003;
                         saturate(size, MinExplosion, MaxExplosion);
@@ -1629,12 +1641,17 @@ void Missile::Simulate(float deltaT, SimulationImportance prec)
 
         if (forceExplosion)
         {
-            float size = Type()->hit * 0.003;
-            saturate(size, MinExplosion, MaxExplosion);
-            Explosion* explosion = new Explosion(nullptr, _parent, size);
-            explosion->SetPosition(lPos);
-            GLOB_WORLD->AddAnimal(explosion);
-            GetNetworkManager().CreateVehicle(explosion, VLTAnimal, "", -1);
+            // (W8a) a rocket, missile or bomb into open water: in the Tidewater mode the water
+            // plume (from ExplosionDammageEffects' water event) replaces the fireball
+            if (!TidewaterWaterBurst(lPos.X(), lPos.Y(), lPos.Z()))
+            {
+                float size = Type()->hit * 0.003;
+                saturate(size, MinExplosion, MaxExplosion);
+                Explosion* explosion = new Explosion(nullptr, _parent, size);
+                explosion->SetPosition(lPos);
+                GLOB_WORLD->AddAnimal(explosion);
+                GetNetworkManager().CreateVehicle(explosion, VLTAnimal, "", -1);
+            }
             GLandscape->ExplosionDammage(_parent, this, nullptr, lPos, VUp, Type());
             _delete = true;
 #if _ENABLE_CHEATS
