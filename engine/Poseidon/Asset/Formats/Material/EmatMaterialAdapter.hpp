@@ -434,6 +434,18 @@ inline bool IsOriginalBcrTexture(std::string_view path)
            EmatMaterial::NameMatches(path.substr(path.size() - suffix.size()), suffix);
 }
 
+inline bool EmatPbrProvenanceEnabled()
+{
+    // Read once at process startup. The normal route pays one predictable
+    // branch per translated EMAT, with no extra key scans or allocations.
+    static const bool enabled = []
+    {
+        const char* value = std::getenv("WGR_REFORGER_PBR_PROVENANCE");
+        return value && value[0] == '1' && value[1] == '\0';
+    }();
+    return enabled;
+}
+
 // Translates an `.emat` into the engine's material form. `family` is carried through from
 // the rvmat that pointed here.
 inline TranslatedMaterial TranslateEmat(const EmatMaterial& emat, const std::string& origin, const std::string& family)
@@ -538,31 +550,35 @@ inline TranslatedMaterial TranslateEmat(const EmatMaterial& emat, const std::str
     // OpacityMap/AlphaTest, glass, foliage and decals are not opaque solids;
     // converter-deployed PAAs also are not original BCR textures. In particular,
     // an enfa| face composite has replaced its BCR alpha with coverage.
-    if (EmatIsOpaqueSolid(emat))
+    if (EmatPbrProvenanceEnabled())
     {
-        const std::string baseBcr = emat.TextureOf(baseIsLayerTile ? "BCR_1" : "BCRMap");
-        out.ematPbr.bcrAlphaIsRoughness[0] =
-            out.Find(MaterialSlot::BaseColour) && IsOriginalBcrTexture(baseBcr);
-        const MaterialSlot layerSlots[3] = {MaterialSlot::LayerColour1, MaterialSlot::LayerColour2,
-                                            MaterialSlot::LayerColour3};
-        for (int i = 1; i < 4; ++i)
+        auto pbr = std::make_shared<EmatPbrProvenance>();
+        if (EmatIsOpaqueSolid(emat))
         {
-            std::string bcr = emat.TextureOf("BCR_" + std::to_string(i + 1));
-            if (i == 1 && bcr.empty())
-                bcr = emat.TextureOf("BCRMap2");
-            out.ematPbr.bcrAlphaIsRoughness[i] = out.Find(layerSlots[i - 1]) && IsOriginalBcrTexture(bcr);
+            const std::string baseBcr = emat.TextureOf(baseIsLayerTile ? "BCR_1" : "BCRMap");
+            pbr->bcrAlphaIsRoughness[0] = out.Find(MaterialSlot::BaseColour) && IsOriginalBcrTexture(baseBcr);
+            const MaterialSlot layerSlots[3] = {MaterialSlot::LayerColour1, MaterialSlot::LayerColour2,
+                                                MaterialSlot::LayerColour3};
+            for (int i = 1; i < 4; ++i)
+            {
+                std::string bcr = emat.TextureOf("BCR_" + std::to_string(i + 1));
+                if (i == 1 && bcr.empty())
+                    bcr = emat.TextureOf("BCRMap2");
+                pbr->bcrAlphaIsRoughness[i] = out.Find(layerSlots[i - 1]) && IsOriginalBcrTexture(bcr);
+            }
         }
+        for (int i = 0; i < 4; ++i)
+        {
+            const std::string index = std::to_string(i + 1);
+            pbr->roughness[i] = ReadEmatPbrScalar(emat, "Roughness_" + index);
+            pbr->metalness[i] = ReadEmatPbrScalar(emat, "Metalness_" + index);
+        }
+        pbr->roughnessScale = ReadEmatPbrScalar(emat, "RoughnessScale");
+        pbr->metalnessScale = ReadEmatPbrScalar(emat, "MetalnessScale");
+        pbr->roughnessScale2 = ReadEmatPbrScalar(emat, "RoughnessScale2");
+        pbr->metalnessScale2 = ReadEmatPbrScalar(emat, "MetalnessScale2");
+        out.ematPbr = std::move(pbr);
     }
-    for (int i = 0; i < 4; ++i)
-    {
-        const std::string index = std::to_string(i + 1);
-        out.ematPbr.roughness[i] = ReadEmatPbrScalar(emat, "Roughness_" + index);
-        out.ematPbr.metalness[i] = ReadEmatPbrScalar(emat, "Metalness_" + index);
-    }
-    out.ematPbr.roughnessScale = ReadEmatPbrScalar(emat, "RoughnessScale");
-    out.ematPbr.metalnessScale = ReadEmatPbrScalar(emat, "MetalnessScale");
-    out.ematPbr.roughnessScale2 = ReadEmatPbrScalar(emat, "RoughnessScale2");
-    out.ematPbr.metalnessScale2 = ReadEmatPbrScalar(emat, "MetalnessScale2");
 
     // Each layer at its own scale. Without this every layer samples at the section's raw
     // UV, which collapses a 1.3x brick and a 0.7x roof tile onto one frame -- the scale

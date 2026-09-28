@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Poseidon/Asset/Formats/Material/ShaderSchema.hpp>
+#include <memory>
 
 namespace Poseidon::Asset::Material
 {
@@ -239,8 +240,9 @@ struct TranslatedMaterial
     // double-sided (wire mesh, glass panes). False for every material that
     // names no Cull key, and all legacy.
     bool                 doubleSided = false;
-    // Diagnostic-only native source provenance. No GPU field or shading effect.
-    EmatPbrProvenance    ematPbr;
+    // Default-null diagnostic. No per-material provenance allocation in normal
+    // gameplay and no GPU field or shading effect.
+    std::shared_ptr<const EmatPbrProvenance> ematPbr;
 
     const TranslatedSlot* Find(MaterialSlot slot) const
     {
