@@ -441,6 +441,10 @@ pub(crate) struct InstanceTable {
     /// edits. The global epoch also omits dynamic-tail changes. Neither witness
     /// authorizes cached COUNT reuse or Fine retirement.
     target_revision: Option<Box<InstanceTargetRevision>>,
+    /// Optional source-local witness for *all* dynamic GPU rows, including
+    /// foreign casters omitted by the selected target-model revision. This
+    /// cannot establish cached-image currency on its own.
+    dynamic_image_mutation: Option<Box<DynamicImageMutationWitness>>,
     /// Optional, source-local provenance for epoch churn. It classifies only
     /// retained-static table mutations; dynamic, material, texture and pose
     /// changes are outside this witness and still forbid image reuse.
@@ -478,7 +482,44 @@ struct InstanceTargetRevision {
     uploader_serial: Option<u64>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DynamicRowRelation {
+    Unchanged,
+    ChangedOrUnknown,
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct DynamicImageMutationWitness {
+    // Zero is permanently invalid after overflow, so an old stamp cannot alias.
+    serial: u64,
+}
+
 impl InstanceTable {
+    fn arm_dynamic_image_mutation(&mut self) -> Option<u64> {
+        let witness = self.dynamic_image_mutation.get_or_insert_with(||
+            Box::new(DynamicImageMutationWitness { serial: 1 }));
+        (witness.serial != 0).then_some(witness.serial)
+    }
+
+    fn dynamic_row_relation(&self, stamp: u64) -> DynamicRowRelation {
+        match self.dynamic_image_mutation.as_deref() {
+            Some(witness) if stamp != 0 && witness.serial != 0 && witness.serial == stamp =>
+                DynamicRowRelation::Unchanged,
+            Some(witness) if stamp != 0 && witness.serial != 0 =>
+                DynamicRowRelation::ChangedOrUnknown,
+            _ => DynamicRowRelation::Unknown,
+        }
+    }
+
+    fn advance_dynamic_image_mutation(&mut self) {
+        if let Some(witness) = &mut self.dynamic_image_mutation {
+            if witness.serial != 0 {
+                witness.serial = witness.serial.checked_add(1).unwrap_or(0);
+            }
+        }
+    }
+
     /// Private diagnostic arm. This does not change the renderer's epoch,
     /// dirty uploads, target revision, COUNT facts or cache validity.
     fn arm_static_noop_epoch(&mut self) -> u64 {
@@ -710,6 +751,12 @@ fn same_target_dynamic_rows(previous: &[InstanceGpu], next: &[InstanceGpu], mode
 
 fn replace_dynamic_instances(dynamic: &mut Vec<InstanceGpu>, next: &[InstanceGpu],
                              static_instances: &mut InstanceTable) {
+    // The full-row comparison is opt-in. A foreign caster can change the
+    // published image while leaving the selected model's COUNT unchanged.
+    if static_instances.dynamic_image_mutation.as_ref().is_some_and(|w| w.serial != 0) &&
+        bytemuck::cast_slice::<_, u8>(dynamic) != bytemuck::cast_slice::<_, u8>(next) {
+        static_instances.advance_dynamic_image_mutation();
+    }
     if let Some((model_id, _)) = static_instances.target_revision() {
         if !same_target_dynamic_rows(dynamic, next, model_id) {
             static_instances.changed_target_model(model_id, INVALID_MODEL);
@@ -2775,6 +2822,16 @@ impl CullState {
 
     pub(crate) fn static_noop_epoch_relation(&self, start_epoch: u64) -> StaticEpochRelation {
         self.instances.static_noop_epoch_relation(start_epoch)
+    }
+
+    /// Private source-local evidence only. It watches the ordered bytes of
+    /// every dynamic GPU row; unchanged rows do not prove a cached image current.
+    pub(crate) fn arm_dynamic_image_mutation(&mut self) -> Option<u64> {
+        self.instances.arm_dynamic_image_mutation()
+    }
+
+    pub(crate) fn dynamic_row_relation(&self, stamp: u64) -> DynamicRowRelation {
+        self.instances.dynamic_row_relation(stamp)
     }
 
     fn target_revision_matches(&self, identity: MainCountIdentity) -> bool {
@@ -7117,6 +7174,60 @@ pub(crate) mod tests {
             "target-row reorder conservatively invalidates");
         assert_eq!(static_instances.epoch, global_epoch,
             "diagnostic witness never changes global visual-cache scheduling");
+    }
+
+    #[test]
+    fn dynamic_image_witness_detects_foreign_rows_without_changing_target_or_epoch() {
+        let row = |model, x| {
+            let mut value = InstanceGpu::zeroed();
+            value.model = model;
+            value.center[0] = x;
+            value
+        };
+        let target = row(7, 1.0);
+        let foreign = row(8, 2.0);
+        let mut table = InstanceTable::default();
+        let mut dynamic = Vec::new();
+        replace_dynamic_instances(&mut dynamic, &[target, foreign], &mut table);
+        assert_eq!(table.dynamic_row_relation(1), DynamicRowRelation::Unknown);
+        assert_eq!(table.arm_target_revision(7), Some(1));
+        let stamp = table.arm_dynamic_image_mutation().unwrap();
+        let epoch = table.epoch;
+
+        replace_dynamic_instances(&mut dynamic, &[target, foreign], &mut table);
+        assert_eq!(table.dynamic_row_relation(stamp), DynamicRowRelation::Unchanged);
+        replace_dynamic_instances(&mut dynamic, &[target, row(8, 3.0)], &mut table);
+        assert_eq!(table.target_revision(), Some((7, 1)), "target COUNT rows stayed equal");
+        assert_eq!(table.dynamic_row_relation(stamp), DynamicRowRelation::ChangedOrUnknown,
+            "a foreign caster may have changed the cached image");
+        assert_eq!(table.epoch, epoch, "this witness never changes visual-cache scheduling");
+
+        let fresh = table.arm_dynamic_image_mutation().unwrap();
+        assert_ne!(stamp, fresh);
+        assert_eq!(table.dynamic_row_relation(fresh), DynamicRowRelation::Unchanged);
+        replace_dynamic_instances(&mut dynamic, &[row(8, 3.0), target], &mut table);
+        assert_eq!(table.dynamic_row_relation(fresh), DynamicRowRelation::ChangedOrUnknown,
+            "row reorder is conservatively treated as an image mutation");
+        let again = table.arm_dynamic_image_mutation().unwrap();
+        replace_dynamic_instances(&mut dynamic, &[target], &mut table);
+        assert_eq!(table.dynamic_row_relation(again), DynamicRowRelation::ChangedOrUnknown,
+            "foreign row removal must invalidate the prior stamp");
+    }
+
+    #[test]
+    fn dynamic_image_witness_overflow_fails_closed_and_cannot_rearm() {
+        let mut table = InstanceTable::default();
+        let mut dynamic = Vec::new();
+        assert_eq!(table.arm_dynamic_image_mutation(), Some(1));
+        table.dynamic_image_mutation.as_mut().unwrap().serial = u64::MAX;
+        let mut row = InstanceGpu::zeroed();
+        row.model = 7;
+        replace_dynamic_instances(&mut dynamic, &[row], &mut table);
+        assert_eq!(table.arm_dynamic_image_mutation(), None);
+        assert_eq!(table.dynamic_row_relation(u64::MAX), DynamicRowRelation::Unknown);
+        replace_dynamic_instances(&mut dynamic, &[], &mut table);
+        assert_eq!(table.arm_dynamic_image_mutation(), None);
+        assert_eq!(table.dynamic_row_relation(1), DynamicRowRelation::Unknown);
     }
 
     #[test]
