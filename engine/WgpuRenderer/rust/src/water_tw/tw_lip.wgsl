@@ -82,7 +82,9 @@ fn lipShade(in: LipOut, front: bool) -> vec4<f32> {
     let pos = in.rel + frame.cam_pos.xyz;
     let V = normalize(-in.rel);
     let Nw = normalize(in.vLipN);
-    let N0 = select(-Nw, Nw, front);
+    // (W10a, OP) front_facing is the other side in OP's left-handed world (see the water
+    // material's view side, W9d): the curtain was shaded with its normal turned away from the eye
+    let N0 = select(Nw, -Nw, front);
     let t = tw.sea.y;
     // the water of the jet is stretched along the flow: streaks and ripples running down the curtain
     let flowS = v * len - t * 1.1;
