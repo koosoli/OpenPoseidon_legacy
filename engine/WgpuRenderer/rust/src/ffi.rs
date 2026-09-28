@@ -3250,7 +3250,7 @@ pub unsafe extern "C" fn wgr_render_frame(
     renderer: *mut WgrRenderer,
     frame: *const WgrFrame,
 ) -> i32 {
-    unsafe { render_frame_impl(renderer, frame, None) }
+    unsafe { render_frame_impl(renderer, frame, None, None, None) }
 }
 
 pub use crate::gpu_timers::RenderCallCpuTimings as WgrRenderCallCpuTimings;
@@ -3272,17 +3272,143 @@ pub unsafe extern "C" fn wgr_render_frame_cpu_timings(
     }
     let output = unsafe { &mut *output };
     *output = WgrRenderCallCpuTimings::new(call_token);
-    unsafe { render_frame_impl(renderer, frame, Some(output)) }
+    unsafe { render_frame_impl(renderer, frame, Some(output), None, None) }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct WgrMainTargetCountRequest {
+    pub struct_size: u32,
+    pub version: u32,
+    pub token: u64,
+    pub model_id: u32,
+    pub reserved: u32,
+    pub source_generation: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct WgrMainTargetCountResult {
+    pub struct_size: u32,
+    pub version: u32,
+    pub state: u32,
+    pub submitted: u32,
+    pub token: u64,
+    pub model_id: u32,
+    pub count: u32,
+    pub source_generation: u64,
+    pub cull_epoch: u64,
+}
+
+impl WgrMainTargetCountResult {
+    const VERSION: u32 = 1;
+    fn empty() -> Self {
+        Self { struct_size: std::mem::size_of::<Self>() as u32,
+            version: Self::VERSION, ..Self::default() }
+    }
+    fn from_fact(fact: crate::gfx3d::cull::MainCountFact) -> Self {
+        Self { state: match fact.status {
+                crate::gfx3d::cull::MainCountStatus::Unknown => 0,
+                crate::gfx3d::cull::MainCountStatus::Present => 1,
+                crate::gfx3d::cull::MainCountStatus::Absent => 2,
+            },
+            submitted: u32::from(fact.status != crate::gfx3d::cull::MainCountStatus::Unknown),
+            token: fact.identity.token, model_id: fact.identity.model_id,
+            count: fact.count, source_generation: fact.identity.source_generation,
+            cull_epoch: fact.identity.cull_epoch, ..Self::empty() }
+    }
+}
+
+#[cfg(test)]
+mod main_target_count_ffi_tests {
+    use super::*;
+    #[test]
+    fn versioned_request_rejects_foreign_layout_before_renderer_access() {
+        assert_eq!(std::mem::size_of::<WgrMainTargetCountRequest>(), 32);
+        assert_eq!(std::mem::size_of::<WgrMainTargetCountResult>(), 48);
+        let renderer = 1usize as *mut WgrRenderer;
+        let frame = 1usize as *const WgrFrame;
+        let request = WgrMainTargetCountRequest { struct_size: 32, version: 1,
+            token: 7, model_id: 3, reserved: 0, source_generation: 11 };
+        let mut output = WgrMainTargetCountResult { token: 99,
+            ..WgrMainTargetCountResult::empty() };
+        unsafe {
+            assert_eq!(wgr_render_frame_main_target_count(renderer, frame, &request, 31, 1,
+                &mut output, 48, 1), -4);
+            assert_eq!(wgr_render_frame_main_target_count(renderer, frame, &request, 32, 1,
+                &mut output, 47, 1), -4);
+            assert_eq!(wgr_render_frame_main_target_count(renderer, frame, &request, 32, 2,
+                &mut output, 48, 1), -4);
+            let invalid = WgrMainTargetCountRequest { source_generation: 0, ..request };
+            assert_eq!(wgr_render_frame_main_target_count(renderer, frame, &invalid, 32, 1,
+                &mut output, 48, 1), -4);
+            assert_eq!(wgr_main_target_count_fact(renderer, &mut output, 47, 1), 0);
+        }
+        assert_eq!(output.token, 99);
+    }
+}
+
+/// Versioned, opt-in main COUNT render call. Invalid layouts or identity return
+/// -4 before renderer/frame dereference. A successful skipped acquire has status
+/// zero but submitted zero; COUNT remains Unknown until a later getter poll.
+/// # Safety
+/// With exact layouts, pointers follow wgr_render_frame's input contract and
+/// output points to one aligned, writable, non-aliasing result.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_render_frame_main_target_count(
+    renderer: *mut WgrRenderer, frame: *const WgrFrame,
+    request: *const WgrMainTargetCountRequest, request_size: u32, request_version: u32,
+    output: *mut WgrMainTargetCountResult, output_size: u32, output_version: u32,
+) -> i32 {
+    if request.is_null() || output.is_null() ||
+        request_size != std::mem::size_of::<WgrMainTargetCountRequest>() as u32 ||
+        request_version != 1 ||
+        output_size != std::mem::size_of::<WgrMainTargetCountResult>() as u32 ||
+        output_version != WgrMainTargetCountResult::VERSION { return -4; }
+    let request = unsafe { *request };
+    if request.struct_size != request_size || request.version != request_version ||
+        request.reserved != 0 || request.token == 0 || request.token == u64::MAX ||
+        request.model_id == u32::MAX || request.source_generation == 0 { return -4; }
+    let output = unsafe { &mut *output };
+    *output = WgrMainTargetCountResult { token: request.token,
+        model_id: request.model_id, source_generation: request.source_generation,
+        ..WgrMainTargetCountResult::empty() };
+    unsafe { render_frame_impl(renderer, frame, None, Some(request), Some(output)) }
+}
+
+/// Nonblocking poll of the latest private main COUNT result. Returns one for
+/// a valid renderer/layout, including an Unknown pending or failed sample.
+/// # Safety
+/// `renderer` must be live; `output` must be aligned writable storage of the
+/// exact declared size and must not alias the renderer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_main_target_count_fact(
+    renderer: *mut WgrRenderer, output: *mut WgrMainTargetCountResult,
+    output_size: u32, output_version: u32,
+) -> u32 {
+    if renderer.is_null() || output.is_null() ||
+        output_size != std::mem::size_of::<WgrMainTargetCountResult>() as u32 ||
+        output_version != WgrMainTargetCountResult::VERSION { return 0; }
+    let output = unsafe { &mut *output };
+    *output = WgrMainTargetCountResult::empty();
+    catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        let fact = renderer.gfx3d.main_target_count_fact(&renderer.device);
+        *output = WgrMainTargetCountResult::from_fact(fact);
+    })).is_ok() as u32
 }
 
 unsafe fn render_frame_impl(
     renderer: *mut WgrRenderer, frame: *const WgrFrame,
     mut call_timings: Option<&mut WgrRenderCallCpuTimings>,
+    main_count_request: Option<WgrMainTargetCountRequest>,
+    mut main_count_output: Option<&mut WgrMainTargetCountResult>,
 ) -> i32 {
     if renderer.is_null() || frame.is_null() {
         if let Some(facts) = call_timings { facts.fail(); }
         return -1;
     }
+    let mut main_count_submitted = false;
     let status = catch_unwind(AssertUnwindSafe(|| {
         let renderer = unsafe { &mut *renderer };
         let frame = unsafe { &*frame };
@@ -3323,8 +3449,18 @@ unsafe fn render_frame_impl(
             water_batches,
             grass_batches,
             call_timings.as_deref_mut(),
+            main_count_request.map(|request|
+                (request.token, request.model_id, request.source_generation)),
         ) {
-            Ok(()) => 0,
+            Ok(submitted) => {
+                if let Some(request) = main_count_request {
+                    if submitted {
+                        main_count_submitted = true;
+                        renderer.gfx3d.main_target_count_commit(request.token);
+                    } else { renderer.gfx3d.main_target_count_abort(request.token); }
+                }
+                0
+            },
             Err(e) => {
                 renderer
                     .log
@@ -3335,6 +3471,20 @@ unsafe fn render_frame_impl(
     }))
     .unwrap_or(-3);
     if status != 0 { if let Some(facts) = call_timings { facts.fail(); } }
+    if let Some(request) = main_count_request {
+        if status != 0 && !renderer.is_null() {
+            let _ = catch_unwind(AssertUnwindSafe(|| {
+                unsafe { &mut *renderer }.gfx3d.main_target_count_abort(request.token);
+            }));
+        }
+        if let Some(output) = main_count_output.as_deref_mut() {
+            output.submitted = u32::from(status == 0 && main_count_submitted);
+            if status == 0 && main_count_submitted && !renderer.is_null() {
+                let fact = unsafe { &*renderer }.gfx3d.main_target_count_snapshot();
+                if fact.identity.token == request.token { output.cull_epoch = fact.identity.cull_epoch; }
+            }
+        }
+    }
     status
 }
 

@@ -9792,6 +9792,34 @@ impl Gfx3d {
         self.cull.harvest_stats(device);
     }
 
+    pub fn arm_main_target_count(&mut self, device: &wgpu::Device, token: u64,
+                                 model_id: u32, source_generation: u64) -> bool {
+        self.gpu_driven_enabled && self.cull.arm_main_target_count(
+            device, token, model_id, source_generation)
+    }
+    pub fn copy_main_target_count(&mut self, encoder: &mut wgpu::CommandEncoder) -> bool {
+        self.cull.copy_main_target_count(encoder)
+    }
+    pub fn main_target_count_before_submit(&mut self, token: u64) -> bool {
+        self.cull.main_target_count_before_submit(token)
+    }
+    pub fn main_target_count_submitted(&mut self, token: u64) -> bool {
+        self.cull.main_target_count_submitted(token)
+    }
+    pub fn main_target_count_commit(&mut self, token: u64) -> bool {
+        self.cull.main_target_count_commit(token)
+    }
+    pub fn main_target_count_abort(&mut self, token: u64) {
+        self.cull.main_target_count_abort(token);
+    }
+    pub fn main_target_count_fact(&mut self, device: &wgpu::Device) -> cull::MainCountFact {
+        self.cull.harvest_main_target_count(device);
+        self.cull.main_target_count_fact()
+    }
+    pub fn main_target_count_snapshot(&self) -> cull::MainCountFact {
+        self.cull.main_target_count_fact()
+    }
+
     pub fn cull_dispatch(
         &self,
         encoder: &mut wgpu::CommandEncoder,

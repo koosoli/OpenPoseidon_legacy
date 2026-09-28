@@ -587,6 +587,7 @@ pub struct CullState {
     debug_flags: u32,
     // CPU diagnostic selection only; no readback or residency policy consumes it.
     target_model_id: Option<u32>,
+    target_model_default: Option<u32>,
     // Private one-shot main COUNT readback. None costs no GPU staging allocation.
     main_count_slots: Option<Vec<(wgpu::Buffer, MainCountSlot)>>,
     main_count_armed: Option<MainCountIdentity>,
@@ -1024,6 +1025,9 @@ impl CullState {
             .collect();
 
         let lod_reuse = std::env::var("WGR_CULL_LOD_REUSE").ok().as_deref() == Some("1");
+        let target_model_default = std::env::var("WGR_GPU_VIEW_TARGET_MODEL_ID")
+            .ok().and_then(|s| s.parse::<u32>().ok())
+            .filter(|&id| id != INVALID_MODEL);
         Self {
             count_pipeline,
             emit_pipeline,
@@ -1064,9 +1068,8 @@ impl CullState {
             } else {
                 0
             },
-            target_model_id: std::env::var("WGR_GPU_VIEW_TARGET_MODEL_ID")
-                .ok().and_then(|s| s.parse::<u32>().ok())
-                .filter(|&id| id != INVALID_MODEL),
+            target_model_id: target_model_default,
+            target_model_default,
             main_count_slots: None,
             main_count_armed: None,
             main_count_latest: MainCountFact::default(),
@@ -1101,6 +1104,7 @@ impl CullState {
     /// residency path calls this API. Invalid input clears any previous answer.
     pub fn arm_main_target_count(&mut self, device: &wgpu::Device, token: u64,
                                  model_id: u32, source_generation: u64) -> bool {
+        self.target_model_id = self.target_model_default;
         self.main_count_armed = None;
         self.main_count_latest = MainCountFact::default();
         self.main_dispatch_recorded.set(false);
@@ -1143,19 +1147,36 @@ impl CullState {
         encoder.copy_buffer_to_buffer(&self.counter_buf,
             TARGET_MODEL_COUNT_BYTE_OFFSET, dst, 0, 4);
         *state = MainCountSlot::Encoded(identity);
+        self.target_model_id = self.target_model_default;
         self.main_count_armed = None;
         self.main_dispatch_recorded.set(false);
         true
+    }
+
+    /// Conservatively reserve the slot before queue.submit: a panic during submit
+    /// cannot prove whether the GPU accepted the copy, so abort must drain it.
+    pub fn main_target_count_before_submit(&mut self, token: u64) -> bool {
+        let Some(slots) = self.main_count_slots.as_mut() else { return false; };
+        for (_, state) in slots {
+            if let MainCountSlot::Encoded(identity) = state {
+                if identity.token == token {
+                    *state = MainCountSlot::Submitted {
+                        identity: *identity, committed: false, aborted: true };
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     /// Call only after queue.submit accepted the encoder containing this copy.
     pub fn main_target_count_submitted(&mut self, token: u64) -> bool {
         let Some(slots) = self.main_count_slots.as_mut() else { return false; };
         for (_, state) in slots {
-            if let MainCountSlot::Encoded(identity) = state {
+            if let MainCountSlot::Submitted { identity, committed, aborted } = state {
                 if identity.token == token {
-                    *state = MainCountSlot::Submitted {
-                        identity: *identity, committed: false, aborted: false };
+                    *committed = false;
+                    *aborted = false;
                     return true;
                 }
             }
@@ -1182,6 +1203,7 @@ impl CullState {
         if self.main_count_latest.identity.token == token {
             self.main_count_latest.status = MainCountStatus::Unknown;
             self.main_count_latest.count = 0;
+            self.target_model_id = self.target_model_default;
         }
         if self.main_count_armed.is_some_and(|id| id.token == token) {
             self.main_count_armed = None;
@@ -1227,8 +1249,7 @@ impl CullState {
                             buf.unmap();
                             if committed && !aborted &&
                                 identity == self.main_count_latest.identity &&
-                                current_epoch == identity.cull_epoch &&
-                                self.target_model_id == Some(identity.model_id) {
+                                current_epoch == identity.cull_epoch {
                                 self.main_count_latest.count = count;
                                 self.main_count_latest.status = if count == 0 {
                                     MainCountStatus::Absent
@@ -1249,8 +1270,7 @@ impl CullState {
 
     pub fn main_target_count_fact(&self) -> MainCountFact {
         let mut fact = self.main_count_latest;
-        if self.instance_epoch() != fact.identity.cull_epoch ||
-            self.target_model_id != Some(fact.identity.model_id) {
+        if self.instance_epoch() != fact.identity.cull_epoch {
             fact.status = MainCountStatus::Unknown;
             fact.count = 0;
         }
@@ -4344,7 +4364,9 @@ pub(crate) mod tests {
         cull.dispatch(&mut enc);
         assert!(cull.copy_main_target_count(&mut enc));
         cull.resolve_stats(&mut enc);
-        queue.submit(std::iter::once(enc.finish()));
+        let commands = enc.finish();
+        assert!(cull.main_target_count_before_submit(1));
+        queue.submit(std::iter::once(commands));
         assert!(cull.main_target_count_submitted(1));
         assert!(cull.main_target_count_commit(1));
         // The harvest is deliberately non-blocking, so pump it until the ring drains rather than
@@ -4397,6 +4419,7 @@ pub(crate) mod tests {
         let mut other_instance = mk(5.0);
         other_instance.model = other;
         cull.instance_add(other_instance);
+        assert!(cull.arm_main_target_count(&device, 2, model, 29));
         cull.prepare(&device, &queue);
         let mut second = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         cull.begin_frame_stats(&mut second);
@@ -4411,17 +4434,20 @@ pub(crate) mod tests {
         let second_main = cull.stats().views[STATS_VIEW_MAIN];
         assert_eq!(second_main.instances, 9, "decoy model must survive this view");
         assert_eq!(second_main.target_model_count, 8, "decoy must not alter exact model COUNT");
+        cull.main_target_count_abort(2);
         // A real dispatched frame with nine other survivors must return a tagged zero.
         let absent_model = cull.register_model(1.0, &lods, &sections, &materials);
-        assert!(cull.arm_main_target_count(&device, 2, absent_model, 29));
+        assert!(cull.arm_main_target_count(&device, 3, absent_model, 30));
         cull.prepare(&device, &queue);
         let mut third = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         cull.begin_frame_stats(&mut third);
         cull.dispatch(&mut third);
         assert!(cull.copy_main_target_count(&mut third));
-        queue.submit(std::iter::once(third.finish()));
-        assert!(cull.main_target_count_submitted(2));
-        assert!(cull.main_target_count_commit(2));
+        let commands = third.finish();
+        assert!(cull.main_target_count_before_submit(3));
+        queue.submit(std::iter::once(commands));
+        assert!(cull.main_target_count_submitted(3));
+        assert!(cull.main_target_count_commit(3));
         assert_eq!(cull.main_target_count_fact().status, MainCountStatus::Unknown);
         for _ in 0..64 {
             cull.harvest_main_target_count(&device);
@@ -4430,7 +4456,7 @@ pub(crate) mod tests {
         }
         let absent = cull.main_target_count_fact();
         assert_eq!(absent.identity.model_id, absent_model);
-        assert_eq!(absent.identity.source_generation, 29);
+        assert_eq!(absent.identity.source_generation, 30);
         assert_eq!(absent.status, MainCountStatus::Absent);
         assert_eq!(absent.count, 0);
         eprintln!("PASS exact target-model GPU COUNT: tagged main 8 and 0");

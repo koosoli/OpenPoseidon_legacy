@@ -825,6 +825,9 @@ class EngineWgpu : public EngineDummy
     std::shared_ptr<GeometryPageFixtureState> _geometryPageFixture;
     std::shared_ptr<GeometryPageFixtureState> _geometryPageFixtureObservation;
     uint64_t _geometryPageFixtureObservationRequest=0;
+    struct GeometryMainCountPending;
+    std::unique_ptr<GeometryMainCountPending> _geometryMainCountPending; // opt-in only
+    uint64_t _nextGeometryMainCountToken=1;
     bool _geometryPageFixtureActive=false;
     std::unique_ptr<GeometryPages::AuthoredPageWorker> _geometryPageWorker;
     uint64_t _nextGeometryPageEpoch=1, _nextGeometryPageRequest=1;

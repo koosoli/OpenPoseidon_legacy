@@ -1694,6 +1694,30 @@ struct WgrRenderCallCpuTimings
 static_assert(sizeof(WgrRenderCallCpuTimings) == 72, "render-call CPU layout");
 static_assert(offsetof(WgrRenderCallCpuTimings, call_token) == 16, "render-call token layout");
 static_assert(offsetof(WgrRenderCallCpuTimings, milliseconds) == 24, "render-call buckets layout");
+/* Private, main-view-only GPU COUNT diagnostic. The caller owns token and
+ * source_generation; zero count is meaningful only with state ABSENT. */
+struct WgrMainTargetCountRequest
+{
+    uint32_t struct_size, version;
+    uint64_t token;
+    uint32_t model_id, reserved;
+    uint64_t source_generation;
+};
+struct WgrMainTargetCountResult
+{
+    uint32_t struct_size, version, state, submitted;
+    uint64_t token;
+    uint32_t model_id, count;
+    uint64_t source_generation, cull_epoch;
+};
+static_assert(sizeof(WgrMainTargetCountRequest) == 32, "main COUNT request layout");
+static_assert(sizeof(WgrMainTargetCountResult) == 48, "main COUNT result layout");
+enum : uint32_t
+{
+    WGR_MAIN_TARGET_COUNT_UNKNOWN = 0,
+    WGR_MAIN_TARGET_COUNT_PRESENT = 1,
+    WGR_MAIN_TARGET_COUNT_ABSENT = 2,
+};
 enum : uint32_t
 {
     WGR_GPU_TIMER_NONE = 0xFFFFFFFFu
@@ -2663,6 +2687,16 @@ extern "C"
      * -4 refuses foreign layout before any input/output dereference or rendering. */
     WGR_API int32_t wgr_render_frame_cpu_timings(WgrRenderer*, const WgrFrame*, uint64_t call_token,
         WgrRenderCallCpuTimings*, uint32_t output_size, uint32_t output_version);
+
+    /* Diagnostic opt-in; exact v1 sizes required before pointer dereference.
+     * submitted=1 means the main encoder containing COUNT copy was accepted;
+     * render status 0 alone also includes a skipped surface acquisition.
+     * The result state remains UNKNOWN until a later nonblocking fact poll. */
+    WGR_API int32_t wgr_render_frame_main_target_count(WgrRenderer*, const WgrFrame*,
+        const WgrMainTargetCountRequest*, uint32_t request_size, uint32_t request_version,
+        WgrMainTargetCountResult*, uint32_t output_size, uint32_t output_version);
+    WGR_API uint32_t wgr_main_target_count_fact(WgrRenderer*, WgrMainTargetCountResult*,
+        uint32_t output_size, uint32_t output_version);
 
     /* Debug: read back the current auto-exposure scale (blocking GPU sync; dev panel only). */
     WGR_API float wgr_get_exposure_scale(WgrRenderer* renderer);

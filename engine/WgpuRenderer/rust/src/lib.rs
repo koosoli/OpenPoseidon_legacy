@@ -3542,7 +3542,8 @@ impl Renderer {
         water_batches: &[WgrWaterBatch],
         grass_batches: &[WgrGrassBatch],
         mut call_timings: Option<&mut crate::gpu_timers::RenderCallCpuTimings>,
-    ) -> Result<(), String> {
+        main_count_request: Option<(u64, u32, u64)>,
+    ) -> Result<bool, String> {
         if let Some(tuple)=self.main_camera_tuple.as_mut(){tuple.begin();} // Failed calls invalidate old completion.
         self.gfx3d.begin_geometry_pass_facts(shadow);
         let setup_t0 = std::time::Instant::now();
@@ -3948,6 +3949,12 @@ impl Renderer {
                 }),
             );
         }
+        // Arm only after retained-scene preparation, before prepare_cull uploads its
+        // target-model uniform. A missing main camera leaves the request Unknown.
+        let main_count_armed = if let (Some(&(token, model_id, source_generation)), Some(_)) =
+            (main_count_request.as_ref(), cameras.get(main_scene_cam)) {
+            self.gfx3d.arm_main_target_count(&self.device, token, model_id, source_generation)
+        } else { false };
         // GPU-driven rendering (Stage 3): upload the retained scene + this frame's cull
         // params from the main scene camera (the terrain camera, else the first 3D draw's).
         // No-op when disabled; inert until C++ registers a scene.
@@ -4095,7 +4102,7 @@ impl Renderer {
         let acquire_t0 = std::time::Instant::now();
         let Some(frame) = self.acquire(call_timings.as_deref().map(|facts| facts.call_token))? else {
             if let Some(facts) = call_timings.as_deref_mut() { facts.skip(); }
-            return Ok(());
+            return Ok(false);
         };
         let acquire_ms = acquire_t0.elapsed().as_secs_f32() * 1.0e3;
         let screenshot_staging = if self.screenshot_requested {
@@ -6248,6 +6255,7 @@ impl Renderer {
         self.gpu_timers
             .cpu_begin(crate::gpu_timers::Region::WorkerEncTail);
         self.gfx3d.resolve_object_stats(&mut encoder);
+        let main_count_copied = main_count_armed && self.gfx3d.copy_main_target_count(&mut encoder);
         self.gfx3d.resolve_lod_demand();
         self.gfx3d.resolve_mip_feedback(&mut encoder);
         self.water_visibility.resolve(&mut encoder);
@@ -6255,7 +6263,12 @@ impl Renderer {
             .cpu_end(crate::gpu_timers::Region::WorkerEncTail);
         self.gpu_timers
             .cpu_begin(crate::gpu_timers::Region::WorkerSubmit);
-        self.queue.submit(std::iter::once(encoder.finish()));
+        let main_commands = encoder.finish();
+        let main_count_ready = main_count_copied && main_count_request.is_some_and(|(token, _, _)|
+            self.gfx3d.main_target_count_before_submit(token));
+        self.queue.submit(std::iter::once(main_commands));
+        let main_count_submitted = main_count_ready && main_count_request.is_some_and(|(token, _, _)|
+            self.gfx3d.main_target_count_submitted(token));
         self.gpu_timers
             .cpu_end(crate::gpu_timers::Region::WorkerSubmit);
         // Geometry-pool growth may have happened after an earlier pass recorded
@@ -6334,7 +6347,7 @@ impl Renderer {
             .cpu_end(crate::gpu_timers::Region::WorkerHarvest);
         if let Some(facts) = call_timings { facts.complete(&self.gpu_timers); }
         if let Some(tuple)=self.main_camera_tuple.as_mut(){tuple.complete();} // CPU returned frame, not GPU completion.
-        Ok(())
+        Ok(main_count_submitted)
     }
 
     fn texture_create(

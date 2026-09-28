@@ -25,6 +25,7 @@
 #include <Poseidon/World/Terrain/WarmMaterialStagePreflightPolicy.hpp>
 #include <Poseidon/IO/Streams/ArchiveSourceBinding.hpp>
 #include <atomic>
+#include <optional>
 #include <stdexcept>
 #include <Poseidon/Foundation/Threads/ThreadAffinity.hpp>
 #include <Poseidon/Core/BuildInfo.hpp>
@@ -2239,6 +2240,17 @@ struct EngineWgpu::GeometryPageFixtureState
         return std::find(models.begin(),models.begin()+modelCount,model)!=models.begin()+modelCount; }
 };
 
+// One private main-view diagnostic at a time. The owner compares these copied
+// identities again when the asynchronous GPU result arrives; this is never a
+// Fine-page release certificate or a persistent reference to a world object.
+struct EngineWgpu::GeometryMainCountPending
+{
+    std::weak_ptr<GeometryPageFixtureState> fixture;
+    uint64_t token=0, pageEpoch=0, admissionEpoch=0, requestId=0, sourceGeneration=0, cullEpoch=0;
+    uint32_t producerModel=UINT32_MAX, rendererModel=UINT32_MAX;
+    unsigned ageFrames=0;
+};
+
 struct EngineWgpu::SharedMeshFixtureState
 {
     // Buffer ownership changes on the main owner only. The renderer sees only
@@ -4083,6 +4095,10 @@ void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing, Fr
         const char* value = std::getenv("WGR_RENDER_CALL_CPU_TIMINGS");
         return value && std::strcmp(value, "1") == 0;
     }();
+    static const bool mainCountProbeEnabled = [] {
+        const char* value = std::getenv("WGR_GEOMETRY_MAIN_COUNT_PROBE");
+        return value && std::strcmp(value, "1") == 0;
+    }();
     const auto blockStart = std::chrono::steady_clock::now();
     ApplyPendingRendererSettings(q.settings);
     const auto afterSettings = std::chrono::steady_clock::now();
@@ -4094,6 +4110,52 @@ void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing, Fr
     TranslateOverlayDrawHandles(backing.overlayDraws);
     PatchPendingMeshHandles(backing.draws3d, backing.shadowCasters, q.draws3dPendingMesh, q.castersPendingMesh);
     const auto afterDrains = std::chrono::steady_clock::now();
+
+    // A previous GPU map is polled without waiting. The copied owner identity must
+    // still describe the same original-source fixture before a diagnostic is logged.
+    if (mainCountProbeEnabled && _geometryMainCountPending)
+    {
+        auto& pending = *_geometryMainCountPending;
+        WgrMainTargetCountResult fact{};
+        const bool ready = wgr_main_target_count_fact(_renderer, &fact, sizeof(fact), 1) == 1 &&
+            fact.struct_size == sizeof(fact) && fact.version == 1 && fact.submitted == 1 &&
+            fact.token == pending.token && fact.model_id == pending.rendererModel &&
+            fact.source_generation == pending.sourceGeneration && fact.cull_epoch == pending.cullEpoch &&
+            (fact.state == WGR_MAIN_TARGET_COUNT_PRESENT || fact.state == WGR_MAIN_TARGET_COUNT_ABSENT) &&
+            (fact.state != WGR_MAIN_TARGET_COUNT_ABSENT || fact.count == 0) &&
+            (fact.state != WGR_MAIN_TARGET_COUNT_PRESENT || fact.count > 0);
+        if (ready)
+        {
+            if (auto fixture = pending.fixture.lock())
+            {
+                bool publish = false;
+                {
+                    std::lock_guard lock(fixture->mutex);
+                    const auto& report = fixture->report;
+                    const auto model = _modelIdOf.find(pending.producerModel);
+                    publish = report.active && report.originalFilePilot && fixture->originalAdmission &&
+                        report.pageEpoch == pending.pageEpoch && report.requestId == pending.requestId &&
+                        report.sourceAdmissionEpoch == pending.admissionEpoch &&
+                        fixture->originalAdmission->report.epoch == pending.admissionEpoch &&
+                        report.producerModel == pending.producerModel &&
+                        fixture->consumedModel == pending.rendererModel &&
+                        fixture->consumedInstance != UINT32_MAX && fixture->instance < _instSlotOf.size() &&
+                        _instSlotOf[fixture->instance] == fixture->consumedInstance &&
+                        model != _modelIdOf.end() && model->second == pending.rendererModel;
+                }
+                if (publish)
+                {
+                    static unsigned rows = 0;
+                    if (rows++ < 16)
+                        LOG_INFO(World, "Private main GPU COUNT: token={} pageEpoch={} admissionEpoch={} request={} model={} rendererModel={} sourceGeneration={} cullEpoch={} state={} count={} (main only; no Fine release)",
+                            pending.token, pending.pageEpoch, pending.admissionEpoch, pending.requestId,
+                            pending.producerModel, pending.rendererModel, pending.sourceGeneration,
+                            fact.cull_epoch, fact.state, fact.count);
+                }
+            }
+        }
+        if (ready || ++pending.ageFrames >= 16) _geometryMainCountPending.reset();
+    }
 
     HashPublishedFrame(frame, backing);
     const auto afterHash = std::chrono::steady_clock::now();
@@ -4107,9 +4169,68 @@ void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing, Fr
         static thread_local uint64_t sequence = 0;
         if (sequence != UINT64_MAX) callCpuToken = ++sequence; // exhaustion fails unavailable
     }
-    const int32_t renderReturnStatus = callCpuToken
-        ? wgr_render_frame_cpu_timings(_renderer, &frame, callCpuToken, &callCpu, sizeof(callCpu), 1)
-        : wgr_render_frame(_renderer, &frame);
+    WgrMainTargetCountRequest mainRequest;
+    WgrMainTargetCountResult mainResult;
+    std::optional<GeometryMainCountPending> requested;
+    bool requestMainCount = false;
+    if (mainCountProbeEnabled && !_geometryMainCountPending && _geometryPageFixtureObservation &&
+        _nextGeometryMainCountToken != UINT64_MAX)
+    {
+        auto fixture = _geometryPageFixtureObservation;
+        std::lock_guard lock(fixture->mutex);
+        const auto& report = fixture->report;
+        if (report.active && report.originalFilePilot && report.sourceSnapshotValidated &&
+            report.surfaceSelectedVerified && report.pageEpoch && report.sourceAdmissionEpoch &&
+            report.requestId == _geometryPageFixtureObservationRequest &&
+            report.producerModel != UINT32_MAX && fixture->consumedInstance != UINT32_MAX &&
+            fixture->originalAdmission && fixture->originalAdmission->surface &&
+            fixture->originalAdmission->report.epoch == report.sourceAdmissionEpoch)
+        {
+            const auto found = _modelIdOf.find(report.producerModel);
+            if (found != _modelIdOf.end() && found->second != WGR_INVALID_MODEL &&
+                found->second == fixture->consumedModel)
+            {
+                requested.emplace();
+                requested->fixture = fixture;
+                requested->token = _nextGeometryMainCountToken++;
+                requested->pageEpoch = report.pageEpoch;
+                requested->admissionEpoch = report.sourceAdmissionEpoch;
+                requested->requestId = report.requestId;
+                requested->sourceGeneration = uint64_t(report.producerModel) + 1;
+                requested->producerModel = report.producerModel;
+                requested->rendererModel = found->second;
+                mainRequest = {sizeof(mainRequest), 1, requested->token,
+                    requested->rendererModel, 0, requested->sourceGeneration};
+                requestMainCount = true;
+            }
+        }
+    }
+    // The explicit diagnostic replaces the optional CPU-timing call for this frame.
+    // An Ok(None) acquire still returns 0, so only submitted=1 arms a pending map.
+    if (requestMainCount) { callCpuToken = 0; mainResult = {}; }
+    const int32_t renderReturnStatus = requestMainCount
+        ? wgr_render_frame_main_target_count(_renderer, &frame, &mainRequest,
+            sizeof(mainRequest), 1, &mainResult, sizeof(mainResult), 1)
+        : callCpuToken
+            ? wgr_render_frame_cpu_timings(_renderer, &frame, callCpuToken, &callCpu, sizeof(callCpu), 1)
+            : wgr_render_frame(_renderer, &frame);
+    if (requestMainCount)
+    {
+        static unsigned rows = 0;
+        if (rows++ < 16)
+            LOG_INFO(World, "Private main GPU COUNT request: token={} pageEpoch={} model={} rendererModel={} renderStatus={} submitted={} (diagnostic only)",
+                requested->token, requested->pageEpoch, requested->producerModel,
+                requested->rendererModel, renderReturnStatus, mainResult.submitted);
+    }
+    if (requestMainCount && renderReturnStatus == 0 && mainResult.struct_size == sizeof(mainResult) &&
+        mainResult.version == 1 && mainResult.submitted == 1 && mainResult.token == requested->token &&
+        mainResult.model_id == requested->rendererModel &&
+        mainResult.source_generation == requested->sourceGeneration && mainResult.cull_epoch != 0)
+    {
+        requested->cullEpoch = mainResult.cull_epoch;
+        try { _geometryMainCountPending = std::make_unique<GeometryMainCountPending>(*requested); }
+        catch (...) {} // a diagnostic allocation cannot fail the normal renderer frame
+    }
     if (_geometryPageFixtureObservation) PublishGeometryPageFixtureObservation(frame,renderReturnStatus);
     if (_geometryOwnerLedger)
     {
