@@ -8,8 +8,11 @@
 //   material writes (OP's water pass has one colour target): near the surface (|camera height
 //   over the water| < UW_STRADDLE) a pixel is water when the point it sees is below the water
 //   surface there, or, seeing the sky, when it looks down; farther, the camera's medium;
-// * the water height is the sea level plus the FFT's vertical displacement (the shore waves are not
-//   evaluated here);
+// * (W9a) the water height is the drawn surface's own near the camera -- FFT, shore waves and swash
+//   sheet, wakes, bursts -- from the probe grid (probe.rs, tw_probe.wgsl), so the split at the lens
+//   follows the surface drawn wherever the camera is (in the surf, under a breaking crest, bobbing
+//   at the waterline); beyond the grid (scene points further than 4 m) the sea level plus the
+//   FFT's vertical displacement;
 // * the caustic light shafts are marched here at full resolution with fewer steps (W5b; Tidewater:
 //   a half-resolution pass, 20 steps, resolved by its TAA);
 // * (W5e) the diver's torch is OP's own spot light at the eye (the dev head torch, or any spot
@@ -20,7 +23,9 @@
 // * light in Tidewater's units from OP's sun and ambient (see the water material), the in-scatter
 //   scaled as the water's own glow seen from below (W3j.1: TW water glow, at least 0.12).
 
-const UW_STRADDLE: f32 = 0.35;
+// (W9a) within this of the surface the medium is decided per pixel on the lens (was 0.35 m while
+// the camera's height came from the FFT alone; the probe's is the drawn surface's own)
+const UW_STRADDLE: f32 = 1.0;
 const UW_BAND: i32 = 16;
 const UW_IOR: f32 = 1.333;
 const UW_PI: f32 = 3.141592653589793;
@@ -39,6 +44,7 @@ struct UwParams {
     torch_dir: vec4<f32>,       // beam direction, w: cos^2 of the outer cone
     torch_col: vec4<f32>,       // irradiance in the core (Tidewater units), w: core radius (m)
     torch_shape: vec4<f32>,     // x: cone shaping exponent, y: beam in-scatter strength
+    probe: vec4<f32>,           // (W9a) the probe grid: camera x, z, step (m), size (0 = none)
 };
 
 @group(0) @binding(0) var<uniform> uw: UwParams;
@@ -49,6 +55,7 @@ struct UwParams {
 @group(0) @binding(5) var uwClamp: sampler;
 @group(0) @binding(6) var causticsFineTex: texture_2d<f32>;  // W5b (caustics.rs)
 @group(0) @binding(7) var causticsBroadTex: texture_2d<f32>;
+@group(0) @binding(8) var uwProbe: texture_2d<f32>;           // (W9a) r32float surface heights
 
 struct UwOut {
     @builtin(position) pos: vec4<f32>,
@@ -66,8 +73,27 @@ fn vs_uw(@builtin(vertex_index) vi: u32) -> UwOut {
 
 fn uwSat(x: f32) -> f32 { return clamp(x, 0.0, 1.0); }
 
-// water surface height at xz: sea level + the FFT's vertical displacement
+// (W9a) the drawn surface's height at xz from the probe grid (bilinear over exact loads);
+// y = 0 outside the grid or without one
+fn uwProbeHeight(xz: vec2<f32>) -> vec2<f32> {
+    let n = uw.probe.w;
+    if (n < 2.0) { return vec2<f32>(0.0); }
+    let f = (xz - uw.probe.xy) / uw.probe.z + (n - 1.0) * 0.5;
+    if (any(f < vec2<f32>(0.0)) || any(f > vec2<f32>(n - 1.0))) { return vec2<f32>(0.0); }
+    let i = min(vec2<i32>(floor(f)), vec2<i32>(i32(n) - 2));
+    let t = f - vec2<f32>(i);
+    let h00 = textureLoad(uwProbe, i, 0).x;
+    let h10 = textureLoad(uwProbe, i + vec2<i32>(1, 0), 0).x;
+    let h01 = textureLoad(uwProbe, i + vec2<i32>(0, 1), 0).x;
+    let h11 = textureLoad(uwProbe, i + vec2<i32>(1, 1), 0).x;
+    return vec2<f32>(mix(mix(h00, h10, t.x), mix(h01, h11, t.x), t.y), 1.0);
+}
+
+// water surface height at xz: the drawn surface near the camera (W9a), else sea level + the FFT's
+// vertical displacement
 fn uwWaterHeight(xz: vec2<f32>) -> f32 {
+    let near = uwProbeHeight(xz);
+    if (near.y > 0.5) { return near.x; }
     var y = 0.0;
     let n = i32(uw.ocean.y);
     for (var c = 0; c < 4; c++) {
