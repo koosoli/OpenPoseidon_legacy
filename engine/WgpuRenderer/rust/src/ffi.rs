@@ -3356,6 +3356,10 @@ mod main_target_count_ffi_tests {
             assert_eq!(wgr_local_shadow0_target_count_fact(renderer, &mut output, 47, 1), 0);
             assert_eq!(wgr_reflection_target_count_fact(renderer, &mut output, 47, 1), 0);
             assert_eq!(wgr_sky0_target_count_fact(renderer, &mut output, 47, 1), 0);
+            assert_eq!(wgr_interior_target_count_fact(renderer, 1, &mut output, 47, 1), 0);
+            assert_eq!(wgr_interior_target_count_fact(renderer, 5, &mut output, 48, 1), 0);
+            assert_eq!(wgr_local_shadow_target_count_fact(renderer, 1, &mut output, 47, 1), 0);
+            assert_eq!(wgr_local_shadow_target_count_fact(renderer, 24, &mut output, 48, 1), 0);
         }
         assert_eq!(output.token, 99);
     }
@@ -3538,6 +3542,49 @@ pub unsafe extern "C" fn wgr_sky0_target_count_fact(
     catch_unwind(AssertUnwindSafe(|| {
         let renderer = unsafe { &mut *renderer };
         let fact = renderer.gfx3d.sky0_target_count_fact(&renderer.device);
+        *output = WgrMainTargetCountResult::from_fact(fact);
+    })).is_ok() as u32
+}
+
+/// Private nonblocking COUNT for interior directions 1..4. Each is copied only
+/// after its own fresh cull and closed indirect depth draw; cached layers stay Unknown.
+/// # Safety
+/// Same live renderer and exact writable output contract as the main getter.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_interior_target_count_fact(
+    renderer: *mut WgrRenderer, direction: u32,
+    output: *mut WgrMainTargetCountResult, output_size: u32, output_version: u32,
+) -> u32 {
+    if renderer.is_null() || output.is_null() || !(1..=4).contains(&direction) ||
+        output_size != std::mem::size_of::<WgrMainTargetCountResult>() as u32 ||
+        output_version != WgrMainTargetCountResult::VERSION { return 0; }
+    let output = unsafe { &mut *output };
+    *output = WgrMainTargetCountResult::empty();
+    catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        let fact = renderer.gfx3d.batch_target_count_fact(&renderer.device, (direction - 1) as usize);
+        *output = WgrMainTargetCountResult::from_fact(fact);
+    })).is_ok() as u32
+}
+
+/// Private nonblocking COUNT for local shadow tiles 1..23. Fresh cull, closed
+/// indirect depth draw, final submit and successful render are required.
+/// # Safety
+/// Same live renderer and exact writable output contract as the main getter.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_local_shadow_target_count_fact(
+    renderer: *mut WgrRenderer, tile: u32,
+    output: *mut WgrMainTargetCountResult, output_size: u32, output_version: u32,
+) -> u32 {
+    if renderer.is_null() || output.is_null() || !(1..=23).contains(&tile) ||
+        output_size != std::mem::size_of::<WgrMainTargetCountResult>() as u32 ||
+        output_version != WgrMainTargetCountResult::VERSION { return 0; }
+    let output = unsafe { &mut *output };
+    *output = WgrMainTargetCountResult::empty();
+    catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        let index = 4 + (tile - 1) as usize;
+        let fact = renderer.gfx3d.batch_target_count_fact(&renderer.device, index);
         *output = WgrMainTargetCountResult::from_fact(fact);
     })).is_ok() as u32
 }

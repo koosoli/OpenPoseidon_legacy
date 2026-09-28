@@ -2743,6 +2743,13 @@ extern "C"
      * Cached/skipped layers stay UNKNOWN; this never authorizes residency release. */
     WGR_API uint32_t wgr_sky0_target_count_fact(WgrRenderer*, WgrMainTargetCountResult*,
         uint32_t output_size, uint32_t output_version);
+    /* The remaining interior directions 1..4 and local shadow tiles 1..23.
+     * Each private v1 result needs its own fresh cull and closed indirect draw.
+     * Cached, skipped, failed, or draw-less views stay UNKNOWN. */
+    WGR_API uint32_t wgr_interior_target_count_fact(WgrRenderer*, uint32_t direction,
+        WgrMainTargetCountResult*, uint32_t output_size, uint32_t output_version);
+    WGR_API uint32_t wgr_local_shadow_target_count_fact(WgrRenderer*, uint32_t tile,
+        WgrMainTargetCountResult*, uint32_t output_size, uint32_t output_version);
 
     /* Debug: read back the current auto-exposure scale (blocking GPU sync; dev panel only). */
     WGR_API float wgr_get_exposure_scale(WgrRenderer* renderer);

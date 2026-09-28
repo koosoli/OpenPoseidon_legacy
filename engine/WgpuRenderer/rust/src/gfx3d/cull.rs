@@ -620,6 +620,9 @@ pub struct CullState {
     sky0_count_armed: Option<MainCountIdentity>,
     sky0_count_latest: MainCountFact,
     sky0_dispatch_recorded: Cell<bool>,
+    // One bounded staging ring for sky directions 1..4 and local tiles 1..23.
+    batch_count: Option<BatchCountRing>,
+    batch_sky_dispatch_mask: Cell<u8>,
     bind: Option<wgpu::BindGroup>,
 
     // Per-cascade shadow views (§6 multi-view). Length = active cascade count this frame
@@ -691,6 +694,129 @@ enum MainCountSlot {
     Submitted { identity: MainCountIdentity, committed: bool, aborted: bool },
     Mapping { identity: MainCountIdentity, committed: bool, aborted: bool,
         done: mpsc::Receiver<Result<(), wgpu::BufferAsyncError>> },
+}
+
+// The remaining 27 required views share three 108-byte frame slots. A slot is
+// never reused while its submitted copy can still be in flight.
+const BATCH_COUNT_VIEWS: usize = 27; // sky 1..4, then local tiles 1..23
+const BATCH_SKY_VIEWS: usize = 4;
+enum BatchCountSlot {
+    Idle,
+    Encoded { identity: MainCountIdentity, copied: u32 },
+    Submitted { identity: MainCountIdentity, copied: u32, committed: bool, aborted: bool },
+    Mapping { identity: MainCountIdentity, copied: u32, committed: bool, aborted: bool,
+        done: mpsc::Receiver<Result<(), wgpu::BufferAsyncError>> },
+}
+struct BatchCountRing {
+    slots: Vec<(wgpu::Buffer, BatchCountSlot)>,
+    armed: Option<MainCountIdentity>,
+    latest: [MainCountFact; BATCH_COUNT_VIEWS],
+}
+impl BatchCountRing {
+    fn new(device: &wgpu::Device) -> Self {
+        let slots = (0..3).map(|i| (device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(&format!("wgr_view_target_count_batch_{i}")),
+            size: (BATCH_COUNT_VIEWS * 4) as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        }), BatchCountSlot::Idle)).collect();
+        Self { slots, armed: None, latest: [MainCountFact::default(); BATCH_COUNT_VIEWS] }
+    }
+    fn arm(&mut self, identity: MainCountIdentity) {
+        self.armed = Some(identity);
+        self.latest = [MainCountFact { identity, ..MainCountFact::default() }; BATCH_COUNT_VIEWS];
+    }
+    fn before_submit(&mut self, token: u64) -> bool {
+        for (_, state) in &mut self.slots {
+            if let BatchCountSlot::Encoded { identity, copied } = state {
+                if identity.token == token {
+                    *state = BatchCountSlot::Submitted { identity: *identity, copied: *copied,
+                        committed: false, aborted: true };
+                    return true;
+                }
+            }
+        }
+        false
+    }
+    fn submitted(&mut self, token: u64) -> bool {
+        for (_, state) in &mut self.slots {
+            if let BatchCountSlot::Submitted { identity, aborted, .. } = state {
+                if identity.token == token { *aborted = false; return true; }
+            }
+        }
+        false
+    }
+    fn commit(&mut self, token: u64) -> bool {
+        for (_, state) in &mut self.slots {
+            if let BatchCountSlot::Submitted { identity, committed, aborted, .. } = state {
+                if identity.token == token && !*aborted { *committed = true; return true; }
+            }
+        }
+        false
+    }
+    fn abort(&mut self, token: u64) {
+        if self.armed.is_some_and(|id| id.token == token) { self.armed = None; }
+        for fact in &mut self.latest {
+            if fact.identity.token == token { fact.status = MainCountStatus::Unknown; fact.count = 0; }
+        }
+        for (_, state) in &mut self.slots {
+            match state {
+                BatchCountSlot::Encoded { identity, .. } if identity.token == token =>
+                    *state = BatchCountSlot::Idle,
+                BatchCountSlot::Submitted { identity, aborted, .. } |
+                BatchCountSlot::Mapping { identity, aborted, .. } if identity.token == token =>
+                    *aborted = true,
+                _ => {}
+            }
+        }
+    }
+    fn harvest(&mut self, device: &wgpu::Device, epoch: u64) {
+        for (buf, state) in &mut self.slots {
+            if let BatchCountSlot::Submitted { identity, copied, committed, aborted } = state {
+                if !*committed && !*aborted { continue; }
+                let (tx, rx) = mpsc::channel();
+                buf.slice(..).map_async(wgpu::MapMode::Read, move |r| { let _ = tx.send(r); });
+                *state = BatchCountSlot::Mapping { identity: *identity, copied: *copied,
+                    committed: *committed, aborted: *aborted, done: rx };
+            }
+        }
+        let _ = device.poll(wgpu::PollType::Poll);
+        for (buf, state) in &mut self.slots {
+            let current = std::mem::replace(state, BatchCountSlot::Idle);
+            match current {
+                BatchCountSlot::Mapping { identity, copied, committed, aborted, done } => {
+                    match done.try_recv() {
+                        Ok(Ok(())) => {
+                            let data = buf.slice(..).get_mapped_range();
+                            if committed && !aborted && epoch == identity.cull_epoch {
+                                for (i, fact) in self.latest.iter_mut().enumerate() {
+                                    if copied & (1 << i) != 0 && fact.identity == identity {
+                                        let count = u32::from_le_bytes(data[i*4..i*4+4].try_into().unwrap());
+                                        fact.count = count;
+                                        fact.status = if count == 0 { MainCountStatus::Absent }
+                                            else { MainCountStatus::Present };
+                                    }
+                                }
+                            }
+                            drop(data);
+                            buf.unmap();
+                        }
+                        Ok(Err(_)) | Err(mpsc::TryRecvError::Disconnected) => {},
+                        Err(mpsc::TryRecvError::Empty) => {
+                            *state = BatchCountSlot::Mapping { identity, copied, committed, aborted, done };
+                        }
+                    }
+                }
+                other => *state = other,
+            }
+        }
+    }
+    fn fact(&self, index: usize, epoch: u64) -> MainCountFact {
+        let Some(&mut_fact) = self.latest.get(index) else { return MainCountFact::default(); };
+        let mut fact = mut_fact;
+        if epoch != fact.identity.cull_epoch { fact.status = MainCountStatus::Unknown; fact.count = 0; }
+        fact
+    }
 }
 
 // Dirty domains for immutable-index retained tables. One byte replaces the old bool;
@@ -1116,6 +1242,8 @@ impl CullState {
             sky0_count_armed: None,
             sky0_count_latest: MainCountFact::default(),
             sky0_dispatch_recorded: Cell::new(false),
+            batch_count: None,
+            batch_sky_dispatch_mask: Cell::new(0),
             bind: None,
             shadow_views: Vec::new(),
             reflection_view: None,
@@ -1162,6 +1290,7 @@ impl CullState {
         if self.sky0_count_slots.is_some() {
             self.harvest_sky0_target_count(device);
         }
+        if self.batch_count.is_some() { self.harvest_batch_target_count(device); }
         self.target_model_id = self.target_model_default;
         self.main_count_armed = None;
         self.main_count_latest = MainCountFact::default();
@@ -1176,6 +1305,8 @@ impl CullState {
         self.sky0_count_armed = None;
         self.sky0_count_latest = MainCountFact::default();
         self.sky0_dispatch_recorded.set(false);
+        self.batch_sky_dispatch_mask.set(0);
+        if let Some(batch) = &mut self.batch_count { batch.armed = None; batch.latest = [MainCountFact::default(); BATCH_COUNT_VIEWS]; }
         self.gi_dispatch_recorded.set(false);
         let epoch = self.instance_epoch();
         if token == 0 || token == u64::MAX || token <= self.main_count_last_token ||
@@ -1252,6 +1383,7 @@ impl CullState {
         }
         self.sky0_count_armed = Some(identity);
         self.sky0_count_latest.identity = identity;
+        self.batch_count.get_or_insert_with(|| BatchCountRing::new(device)).arm(identity);
         true
     }
 
@@ -1260,6 +1392,9 @@ impl CullState {
     }
 
     pub fn local0_count_armed(&self) -> bool { self.local0_count_armed.is_some() }
+    pub fn batch_target_count_armed(&self) -> bool {
+        self.batch_count.as_ref().is_some_and(|b| b.armed.is_some())
+    }
 
     /// Copy the mirror's selected-model COUNT into its own encoder after a
     /// real cull and a closed indirect object pass.
@@ -1299,6 +1434,67 @@ impl CullState {
         self.sky0_count_armed = None;
         self.sky0_dispatch_recorded.set(false);
         true
+    }
+
+    /// Copy only freshly culled, closed indirect views into one 27-word slot.
+    /// `sky_closed` uses bits 0..3 for directions 1..4; `local_closed`
+    /// uses tile-index bits. The owner supplies the actual cull-index dispatch mask.
+    pub fn copy_batch_target_count(&mut self, encoder: &mut wgpu::CommandEncoder,
+                                   sky_closed: u8, local_closed: u32,
+                                   solar_count: usize, local_culled: u32) -> bool {
+        let epoch = self.instance_epoch();
+        let Some(batch) = self.batch_count.as_mut() else { return false; };
+        let Some(identity) = batch.armed else { return false; };
+        if epoch != identity.cull_epoch { return false; }
+        let Some((dst, state)) = batch.slots.iter_mut()
+            .find(|(_, state)| matches!(state, BatchCountSlot::Idle)) else { return false; };
+        let mut copied = 0u32;
+        let sky_ready = sky_closed & self.batch_sky_dispatch_mask.get();
+        for i in 0..BATCH_SKY_VIEWS {
+            if sky_ready & (1 << i) == 0 { continue; }
+            let Some(view) = self.sky_views.get(i + 1) else { continue; };
+            if view.params.target_count_enabled == 0 || view.params.target_model_id != identity.model_id { continue; }
+            encoder.copy_buffer_to_buffer(&view.counter_buf, TARGET_MODEL_COUNT_BYTE_OFFSET,
+                dst, (i * 4) as u64, 4);
+            copied |= 1 << i;
+        }
+        for k in 1..=23usize {
+            let c = solar_count + k;
+            if c >= u32::BITS as usize || local_closed & (1 << k) == 0 ||
+                local_culled & (1 << c) == 0 { continue; }
+            let Some(view) = self.shadow_views.get(c) else { continue; };
+            if view.params.target_count_enabled == 0 || view.params.target_model_id != identity.model_id { continue; }
+            let i = BATCH_SKY_VIEWS + k - 1;
+            encoder.copy_buffer_to_buffer(&view.counter_buf, TARGET_MODEL_COUNT_BYTE_OFFSET,
+                dst, (i * 4) as u64, 4);
+            copied |= 1 << i;
+        }
+        if copied == 0 { return false; }
+        *state = BatchCountSlot::Encoded { identity, copied };
+        batch.armed = None;
+        self.batch_sky_dispatch_mask.set(0);
+        true
+    }
+
+    pub fn batch_target_count_before_submit(&mut self, token: u64) -> bool {
+        self.batch_count.as_mut().is_some_and(|b| b.before_submit(token))
+    }
+    pub fn batch_target_count_submitted(&mut self, token: u64) -> bool {
+        self.batch_count.as_mut().is_some_and(|b| b.submitted(token))
+    }
+    pub fn batch_target_count_commit(&mut self, token: u64) -> bool {
+        self.batch_count.as_mut().is_some_and(|b| b.commit(token))
+    }
+    pub fn batch_target_count_abort(&mut self, token: u64) {
+        if let Some(b) = &mut self.batch_count { b.abort(token); }
+        self.batch_sky_dispatch_mask.set(0);
+    }
+    pub fn harvest_batch_target_count(&mut self, device: &wgpu::Device) {
+        let epoch = self.instance_epoch();
+        if let Some(b) = &mut self.batch_count { b.harvest(device, epoch); }
+    }
+    pub fn batch_target_count_fact(&self, index: usize) -> MainCountFact {
+        self.batch_count.as_ref().map_or(MainCountFact::default(), |b| b.fact(index, self.instance_epoch()))
     }
 
     /// `view_index` is the actual shadow cull index, solar_count + local tile 0.
@@ -2896,6 +3092,9 @@ impl CullState {
         );
         if i == 0 && self.sky0_count_armed.is_some() {
             self.sky0_dispatch_recorded.set(true);
+        }
+        if (1..=BATCH_SKY_VIEWS).contains(&i) && self.batch_count.as_ref().is_some_and(|b| b.armed.is_some()) {
+            self.batch_sky_dispatch_mask.set(self.batch_sky_dispatch_mask.get() | (1 << (i - 1)));
         }
         if i == super::sky_vis::DIRECTION_COUNT && self.shadow_count_armed[4].is_some() {
             self.gi_dispatch_recorded.set(true);
@@ -6604,5 +6803,94 @@ pub(crate) mod tests {
         assert!(cull.sky0_count_slots.as_ref().unwrap().iter()
             .all(|(_, state)| matches!(state, MainCountSlot::Idle)),
             "aborted submitted copy must drain");
+
+        // The four tilted sky views and local tile 1 use independent words in
+        // one staging slot. Tile 1's daytime cull index follows four cascades.
+        for i in 1..=4 { cull.set_sky_params(i, params); }
+        cull.set_shadow_view_count(&device, 6);
+        cull.set_shadow_params(5, params);
+        assert!(cull.arm_main_target_count(&device, 6, model, 21));
+        cull.prepare(&device, &queue);
+        let mut batch = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        cull.begin_frame_stats(&mut batch);
+        for i in 1..=4 { assert!(cull.dispatch_sky(&mut batch, i)); }
+        assert!(cull.dispatch_shadow(&mut batch, 5));
+        assert!(cull.copy_batch_target_count(&mut batch, 0b1111, 1 << 1, 4, 1 << 5));
+        assert!(cull.batch_target_count_before_submit(6));
+        queue.submit(std::iter::once(batch.finish()));
+        assert!(cull.batch_target_count_submitted(6));
+        assert!(cull.batch_target_count_commit(6));
+        for _ in 0..64 {
+            cull.harvest_batch_target_count(&device);
+            if cull.batch_target_count_fact(4).status == MainCountStatus::Present { break; }
+            let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        }
+        for i in 0..=4 {
+            let fact = cull.batch_target_count_fact(i);
+            assert_eq!((fact.status, fact.count), (MainCountStatus::Present, 8));
+            assert_eq!(fact.identity.source_generation, 21);
+        }
+        assert_eq!(cull.batch_target_count_fact(5).status, MainCountStatus::Unknown);
+        assert!(cull.batch_count.as_ref().unwrap().slots.iter()
+            .all(|(_, state)| matches!(state, BatchCountSlot::Idle)));
+
+        assert!(cull.arm_main_target_count(&device, 7, absent_model, 22));
+        cull.prepare(&device, &queue);
+        let mut zero_batch = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        cull.begin_frame_stats(&mut zero_batch);
+        assert!(cull.dispatch_sky(&mut zero_batch, 2));
+        assert!(cull.dispatch_shadow(&mut zero_batch, 5));
+        assert!(cull.copy_batch_target_count(&mut zero_batch, 0b1111, 1 << 1, 4, 1 << 5));
+        assert!(cull.batch_target_count_before_submit(7));
+        queue.submit(std::iter::once(zero_batch.finish()));
+        assert!(cull.batch_target_count_submitted(7));
+        assert!(cull.batch_target_count_commit(7));
+        for _ in 0..64 {
+            cull.harvest_batch_target_count(&device);
+            if cull.batch_target_count_fact(4).status == MainCountStatus::Absent { break; }
+            let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        }
+        assert_eq!(cull.batch_target_count_fact(1).status, MainCountStatus::Absent);
+        assert_eq!(cull.batch_target_count_fact(4).status, MainCountStatus::Absent);
+        assert_eq!(cull.batch_target_count_fact(0).status, MainCountStatus::Unknown,
+            "a cached or draw-less direction must not inherit a zero");
+
+        assert!(cull.arm_main_target_count(&device, 8, model, 23));
+        cull.prepare(&device, &queue);
+        let mut abort_batch = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        cull.begin_frame_stats(&mut abort_batch);
+        assert!(cull.dispatch_sky(&mut abort_batch, 1));
+        assert!(cull.copy_batch_target_count(&mut abort_batch, 1, 0, 4, 0));
+        assert!(cull.batch_target_count_before_submit(8));
+        queue.submit(std::iter::once(abort_batch.finish()));
+        assert!(cull.batch_target_count_submitted(8));
+        cull.batch_target_count_abort(8);
+        for _ in 0..64 {
+            cull.harvest_batch_target_count(&device);
+            let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        }
+        assert_eq!(cull.batch_target_count_fact(0).status, MainCountStatus::Unknown);
+        assert!(cull.batch_count.as_ref().unwrap().slots.iter()
+            .all(|(_, state)| matches!(state, BatchCountSlot::Idle)));
+        // With no solar cascade, the same local tile is cull index 1.
+        cull.set_shadow_view_count(&device, 2);
+        cull.set_shadow_params(1, params);
+        assert!(cull.arm_main_target_count(&device, 9, model, 24));
+        cull.prepare(&device, &queue);
+        let mut night = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        cull.begin_frame_stats(&mut night);
+        assert!(cull.dispatch_shadow(&mut night, 1));
+        assert!(cull.copy_batch_target_count(&mut night, 0, 1 << 1, 0, 1 << 1));
+        assert!(cull.batch_target_count_before_submit(9));
+        queue.submit(std::iter::once(night.finish()));
+        assert!(cull.batch_target_count_submitted(9));
+        assert!(cull.batch_target_count_commit(9));
+        for _ in 0..64 {
+            cull.harvest_batch_target_count(&device);
+            if cull.batch_target_count_fact(4).status == MainCountStatus::Present { break; }
+            let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        }
+        assert_eq!(cull.batch_target_count_fact(4).count, 8);
+        assert_eq!(cull.batch_target_count_fact(4).identity.source_generation, 24);
     }
 }

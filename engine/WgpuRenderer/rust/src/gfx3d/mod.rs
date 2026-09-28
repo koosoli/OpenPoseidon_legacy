@@ -4120,6 +4120,8 @@ pub struct Gfx3d {
     gi_rsm_publication_rows: u8,
     reflection_target_draw_closed: std::cell::Cell<bool>,
     sky0_target_draw_closed: std::cell::Cell<bool>,
+    batch_sky_draw_closed_mask: std::cell::Cell<u8>,
+    batch_local_draw_closed_mask: std::cell::Cell<u32>,
     local_view_key: [Option<u64>; MAX_LOCAL_SHADOWS],
     // Optional CPU-only publication gates. The legacy flag covers tile zero;
     // WGR_GEOMETRY_LOCAL_PUBLICATION=1 covers every active tile. No default allocation.
@@ -4985,6 +4987,8 @@ impl Gfx3d {
             gi_rsm_publication_rows: 0,
             reflection_target_draw_closed: std::cell::Cell::new(false),
             sky0_target_draw_closed: std::cell::Cell::new(false),
+            batch_sky_draw_closed_mask: std::cell::Cell::new(0),
+            batch_local_draw_closed_mask: std::cell::Cell::new(0),
             local_view_key: [None; MAX_LOCAL_SHADOWS],
             local_publications: (local_publication_scope != 0).then(|| Box::new(std::array::from_fn(|_| {
                 std::cell::Cell::new(local_publication::LocalTilePublication::default())
@@ -6722,6 +6726,8 @@ impl Gfx3d {
         self.gi_target_draw_closed.set(false);
         self.reflection_target_draw_closed.set(false);
         self.sky0_target_draw_closed.set(false);
+        self.batch_sky_draw_closed_mask.set(0);
+        self.batch_local_draw_closed_mask.set(0);
         if let Some(cell)=&self.geometry_pass_facts {let mut f=cell.get();f.begin(self.cull.instance_epoch(),shadow.count,shadow.local_count);cell.set(f);}
     }
     pub fn geometry_pass_reflection_configured(&self,active:bool) {
@@ -7410,6 +7416,11 @@ impl Gfx3d {
                 gpu_depth_draw_recorded &&
                 self.geometry_shadow_cull_mask.get() & (1 << c) != 0 {
                 self.local0_target_draw_closed.set(true);
+            }
+            if is_local && (1..MAX_LOCAL_SHADOWS).contains(&local_index) &&
+                self.cull.batch_target_count_armed() && gpu_depth_draw_recorded &&
+                c < u32::BITS as usize && self.geometry_shadow_cull_mask.get() & (1 << c) != 0 {
+                self.batch_local_draw_closed_mask.set(self.batch_local_draw_closed_mask.get() | (1 << local_index));
             }
             if is_local && local_index < self.local_publication_scope && gpu_depth_draw_recorded {
                 if let Some(cells) = &self.local_publications {
@@ -9508,6 +9519,9 @@ impl Gfx3d {
             drop(rp);
             if drew_gpu {
                 if i == 0 { self.sky0_target_draw_closed.set(true); }
+                if (1..sky_vis::DIRECTION_COUNT).contains(&i) && self.cull.batch_target_count_armed() {
+                    self.batch_sky_draw_closed_mask.set(self.batch_sky_draw_closed_mask.get() | (1 << (i - 1)));
+                }
                 if let Some(cells) = &self.interior_publications {
                     let cell = &cells[i];
                     let mut state = cell.get(); state.draw_closed(i); cell.set(state);
@@ -10073,6 +10087,23 @@ impl Gfx3d {
         sky0_count_pass_ready(self.interior_sky_active(), &self.interior_sky_refresh,
             self.sky0_target_draw_closed.get()) && self.cull.copy_sky0_target_count(encoder)
     }
+    pub fn copy_batch_target_count(&mut self, encoder: &mut wgpu::CommandEncoder) -> bool {
+        let solar_count = self.cull.shadow_view_count().saturating_sub(self.local_shadow_count);
+        let local_closed = self.batch_local_draw_closed_mask.get();
+        let sky_closed = if self.interior_sky_active() { self.batch_sky_draw_closed_mask.get() } else { 0 };
+        self.cull.copy_batch_target_count(encoder, sky_closed, local_closed,
+            solar_count, self.geometry_shadow_cull_mask.get())
+    }
+    pub fn batch_target_count_before_submit(&mut self, token: u64) -> bool {
+        self.cull.batch_target_count_before_submit(token)
+    }
+    pub fn batch_target_count_submitted(&mut self, token: u64) -> bool {
+        self.cull.batch_target_count_submitted(token)
+    }
+    pub fn batch_target_count_fact(&mut self, device: &wgpu::Device, index: usize) -> cull::MainCountFact {
+        self.cull.harvest_batch_target_count(device);
+        self.cull.batch_target_count_fact(index)
+    }
     // Called strictly after the final main encoder's Queue::submit returns.
     // The FFI success/abort boundary below decides whether this submission can
     // become a published cache generation. This does not poll or copy the GPU.
@@ -10237,6 +10268,7 @@ impl Gfx3d {
             self.cull.local0_target_count_commit(token);
             self.cull.reflection_target_count_commit(token);
             self.cull.sky0_target_count_commit(token);
+            self.cull.batch_target_count_commit(token);
         }
         main
     }
@@ -10246,6 +10278,7 @@ impl Gfx3d {
         self.cull.local0_target_count_abort(token);
         self.cull.reflection_target_count_abort(token);
         self.cull.sky0_target_count_abort(token);
+        self.cull.batch_target_count_abort(token);
     }
     pub fn main_target_count_fact(&mut self, device: &wgpu::Device) -> cull::MainCountFact {
         self.cull.harvest_main_target_count(device);
@@ -10643,7 +10676,8 @@ impl Gfx3d {
             if dispatched &&
                 (self.geometry_pass_facts.is_some() ||
                  (c < n_cascades && self.cull.shadow_count_armed(c)) ||
-                 (c == n_cascades && self.cull.local0_count_armed())) &&
+                 (c == n_cascades && self.cull.local0_count_armed()) ||
+                 (c >= n_cascades && self.cull.batch_target_count_armed())) &&
                 c < u32::BITS as usize {
                 self.geometry_shadow_cull_mask.set(self.geometry_shadow_cull_mask.get() | (1 << c));
             }

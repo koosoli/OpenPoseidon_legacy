@@ -6416,6 +6416,8 @@ impl Renderer {
         // tile pass, never a cache reuse, authorizes this private counter copy.
         let local0_count_copied = main_count_copied &&
             self.gfx3d.copy_local0_target_count(&mut encoder);
+        let batch_count_copied = main_count_copied &&
+            self.gfx3d.copy_batch_target_count(&mut encoder);
         self.gfx3d.resolve_lod_demand();
         self.gfx3d.resolve_mip_feedback(&mut encoder);
         self.water_visibility.resolve(&mut encoder);
@@ -6444,6 +6446,9 @@ impl Renderer {
         let local0_count_ready = local0_count_copied && main_count_ready &&
             main_count_request.is_some_and(|(token, _, _)|
                 self.gfx3d.local0_target_count_before_submit(token));
+        let batch_count_ready = batch_count_copied && main_count_ready &&
+            main_count_request.is_some_and(|(token, _, _)|
+                self.gfx3d.batch_target_count_before_submit(token));
         self.queue.submit(std::iter::once(main_commands));
         self.gfx3d.interior_publications_submitted();
         self.gfx3d.gi_rsm_publication_submitted();
@@ -6464,6 +6469,9 @@ impl Renderer {
             }
             if local0_count_ready {
                 self.gfx3d.local0_target_count_submitted(token);
+            }
+            if batch_count_ready {
+                self.gfx3d.batch_target_count_submitted(token);
             }
         }
         self.gpu_timers
