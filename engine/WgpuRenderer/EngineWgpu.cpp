@@ -20,6 +20,7 @@
 #include <Poseidon/Dev/Diag/FramePaceTrace.hpp> // PACE-001: per-frame pacing trace
 #include "EngineWgpu.hpp"
 #include "GeometryOwnerLedger.hpp"
+#include "GeometrySourceRevisions.hpp"
 #include <Poseidon/World/Terrain/ObjectStreamPrepare.hpp>
 #include <Poseidon/World/Terrain/WarmTextureProvenance.hpp>
 #include <Poseidon/World/Terrain/WarmMaterialStagePreflightPolicy.hpp>
@@ -1447,15 +1448,18 @@ public:
 EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.useWindow)
 {
     const char* sourceProbe = std::getenv("WGR_GEOMETRY_MAIN_COUNT_PROBE");
-    _geometrySourceRevisionEnabled = sourceProbe && std::strcmp(sourceProbe, "1") == 0;
-    if (_geometrySourceRevisionEnabled)
+    if (sourceProbe && std::strcmp(sourceProbe, "1") == 0)
     {
         // No incarnation is ever reused, including after counter exhaustion.
         static std::atomic<uint64_t> nextIncarnation{1};
         uint64_t next = nextIncarnation.load();
         while (next != UINT64_MAX &&
             !nextIncarnation.compare_exchange_weak(next, next + 1)) {}
-        if (next != UINT64_MAX) _geometrySourceIncarnation = next;
+        if (next != UINT64_MAX)
+        {
+            try { _geometrySourceRevisions = std::make_unique<render::GeometrySourceRevisions>(next); }
+            catch (const std::bad_alloc&) {} // optional probe remains unavailable
+        }
     }
     const char* ownerLedger = std::getenv("WGR_GEOMETRY_OWNER_LEDGER");
     if (ownerLedger && std::strcmp(ownerLedger, "1") == 0)
@@ -3383,31 +3387,19 @@ void EngineWgpu::FillGeometryMeshFacts(GeometryAllocationReport& report, const r
 
 uint32_t EngineWgpu::AllocateProducerModel()
 {
-    // UINT32_MAX is the sentinel. Leaving the counter there makes exhaustion
-    // sticky instead of silently recycling the first producer handle.
-    return _nextModelHandle == WGR_INVALID_MODEL ? WGR_INVALID_MODEL : _nextModelHandle++;
+    return render::GeometrySourceRevisions::TakeModelHandle(_nextModelHandle);
 }
 
 uint64_t EngineWgpu::AllocateProducerMesh()
 {
-    // Keep UINT64_MAX unused so increment can never wrap to the first handle.
-    return _nextMeshHandle == UINT64_MAX ? 0 : _nextMeshHandle++;
-}
-
-uint64_t EngineWgpu::NextGeometrySourceRevision()
-{
-    if (!_geometrySourceIncarnation || !_nextGeometrySourceRevision ||
-        _nextGeometrySourceRevision == UINT64_MAX) return 0;
-    return _nextGeometrySourceRevision++;
+    return render::GeometrySourceRevisions::TakeMeshHandle(_nextMeshHandle);
 }
 
 bool EngineWgpu::GeometrySourceFresh(uint32_t producer, uint32_t renderer,
     uint64_t incarnation, uint64_t revision) const
 {
-    if (!revision || !incarnation || incarnation != _geometrySourceIncarnation) return false;
-    const auto source = _geometrySourceOf.find(producer);
-    return source != _geometrySourceOf.end() && source->second.valid &&
-        source->second.revision == revision && source->second.rendererModel == renderer;
+    return _geometrySourceRevisions &&
+        _geometrySourceRevisions->Fresh(producer, renderer, incarnation, revision);
 }
 
 void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
@@ -3448,9 +3440,7 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
             {
                 // A duplicate live producer must not overwrite the allocation that
                 // an already registered model may still reference.
-                for (auto& [producer, source] : _geometrySourceOf)
-                    if (std::find(source.meshes.begin(), source.meshes.end(), op.mesh) != source.meshes.end())
-                    { source.revision = NextGeometrySourceRevision(); source.valid = false; }
+                if (_geometrySourceRevisions) _geometrySourceRevisions->MeshChanged(op.mesh);
                 break;
             }
             const uint64_t ownerVertexBytes = _geometryOwnerLedger ? op.verts.size() * sizeof(SVertex) : 0;
@@ -3481,9 +3471,7 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
         }
         case ResourceOp::MeshDestroy:
         {
-            for (auto& [producer, source] : _geometrySourceOf)
-                if (std::find(source.meshes.begin(), source.meshes.end(), op.mesh) != source.meshes.end())
-                { source.revision = NextGeometrySourceRevision(); source.valid = false; }
+            if (_geometrySourceRevisions) _geometrySourceRevisions->MeshChanged(op.mesh);
             const auto it = _meshIdOf.find(op.mesh);
             if (it != _meshIdOf.end())
             {
@@ -3615,7 +3603,7 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
         }
         case ResourceOp::ModelRetire:
         {
-            _geometrySourceOf.erase(op.model);
+            if (_geometrySourceRevisions) _geometrySourceRevisions->Retire(op.model);
             if (_geometryOwnerLedger) _geometryOwnerLedger->ModelRetired(_geometryOwnerEpoch, op.model);
             if (const auto it = _modelIdOf.find(op.model); it != _modelIdOf.end())
             {
@@ -3630,25 +3618,24 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
             {
                 // Fail closed on a duplicate live handle. Preserve the original
                 // Rust registration for its normal retirement, but poison facts.
-                if (const auto source = _geometrySourceOf.find(op.model);
-                    source != _geometrySourceOf.end())
-                { source->second.revision = NextGeometrySourceRevision(); source->second.valid = false; }
+                if (_geometrySourceRevisions) _geometrySourceRevisions->Duplicate(op.model);
                 if (_geometryOwnerLedger)
                     _geometryOwnerLedger->MarkIncomplete(_geometryOwnerEpoch, render::GeometryOwnerLedger::Reason::Protocol);
                 break;
             }
-            GeometrySourceRecord source;
-            if (_geometrySourceRevisionEnabled)
+            std::vector<uint64_t> sourceMeshes;
+            bool sourceMeshesLive = false;
+            if (_geometrySourceRevisions)
             {
                 try
                 {
-                    source.meshes.reserve(op.sections.size());
-                    for (const auto& section : op.sections) source.meshes.push_back(section.mesh);
+                    sourceMeshes.reserve(op.sections.size());
+                    for (const auto& section : op.sections) sourceMeshes.push_back(section.mesh);
                     // A missing section mesh cannot substantiate this content revision.
-                    source.valid = !source.meshes.empty() && std::all_of(source.meshes.begin(), source.meshes.end(),
+                    sourceMeshesLive = !sourceMeshes.empty() && std::all_of(sourceMeshes.begin(), sourceMeshes.end(),
                         [this](uint64_t mesh) { const auto it = _meshIdOf.find(mesh); return it != _meshIdOf.end() && it->second; });
                 }
-                catch (const std::bad_alloc&) { source.valid = false; source.meshes.clear(); }
+                catch (const std::bad_alloc&) { sourceMeshesLive = false; sourceMeshes.clear(); }
             }
             if (_geometryOwnerLedger)
             {
@@ -3697,14 +3684,9 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
                 _renderer, op.sphereRadius, WgrSlice<WgrModelLod>{op.lods.data(), U32(op.lods.size())},
                 WgrSlice<WgrModelSection>{op.sections.data(), U32(op.sections.size())},
                 WgrSlice<WgrModelMaterial>{op.materials.data(), U32(op.materials.size())}, op.name.c_str());
-            if (_geometrySourceRevisionEnabled && _modelIdOf[op.model] != WGR_INVALID_MODEL)
-            {
-                source.rendererModel = _modelIdOf[op.model];
-                source.revision = NextGeometrySourceRevision();
-                source.valid = source.valid && source.revision != 0;
-                try { _geometrySourceOf[op.model] = std::move(source); }
-                catch (const std::bad_alloc&) { _geometrySourceOf.clear(); _geometrySourceRevisionEnabled = false; }
-            }
+            if (_geometrySourceRevisions && _modelIdOf[op.model] != WGR_INVALID_MODEL)
+                _geometrySourceRevisions->Register(op.model, _modelIdOf[op.model],
+                    std::move(sourceMeshes), sourceMeshesLive);
             if (_geometryOwnerLedger && _modelIdOf[op.model] == WGR_INVALID_MODEL)
             {
                 _geometryOwnerLedger->ModelRetired(_geometryOwnerEpoch, op.model);
@@ -4518,11 +4500,12 @@ void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing, Fr
             fixture->originalAdmission->report.epoch == report.sourceAdmissionEpoch)
         {
             const auto found = _modelIdOf.find(report.producerModel);
-            const auto source = _geometrySourceOf.find(report.producerModel);
+            const uint64_t sourceRevision = _geometrySourceRevisions && found != _modelIdOf.end() ?
+                _geometrySourceRevisions->Revision(report.producerModel, found->second) : 0;
             if (found != _modelIdOf.end() && found->second != WGR_INVALID_MODEL &&
-                found->second == fixture->consumedModel && source != _geometrySourceOf.end() &&
+                found->second == fixture->consumedModel && sourceRevision &&
                 GeometrySourceFresh(report.producerModel, found->second,
-                    _geometrySourceIncarnation, source->second.revision))
+                    _geometrySourceRevisions->Incarnation(), sourceRevision))
             {
                 requested.emplace();
                 requested->fixture = fixture;
@@ -4530,8 +4513,8 @@ void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing, Fr
                 requested->pageEpoch = report.pageEpoch;
                 requested->admissionEpoch = report.sourceAdmissionEpoch;
                 requested->requestId = report.requestId;
-                requested->sourceGeneration = source->second.revision;
-                requested->sourceIncarnation = _geometrySourceIncarnation;
+                requested->sourceGeneration = sourceRevision;
+                requested->sourceIncarnation = _geometrySourceRevisions->Incarnation();
                 requested->producerModel = report.producerModel;
                 requested->rendererModel = found->second;
                 mainRequest = {sizeof(mainRequest), 1, requested->token,

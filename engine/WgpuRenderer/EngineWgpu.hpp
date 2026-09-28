@@ -38,7 +38,7 @@ struct SDL_Window;
 
 namespace Poseidon
 {
-namespace render { class GeometryOwnerLedger; }
+namespace render { class GeometryOwnerLedger; class GeometrySourceRevisions; }
 namespace GeometryPages { class AuthoredPageWorker; }
 class TextureBankWgpu;
 class TextureWgpu;
@@ -828,20 +828,9 @@ class EngineWgpu : public EngineDummy
     struct GeometryMainCountPending;
     std::unique_ptr<GeometryMainCountPending> _geometryMainCountPending; // opt-in only
     uint64_t _nextGeometryMainCountToken=1;
-    // Private count diagnostics only. LODs and materials are immutable after
-    // ModelRegister; changing them retires and re-registers the model. A
-    // revision names those contents and their live meshes, not a numeric slot.
-    struct GeometrySourceRecord
-    {
-        uint64_t revision=0;
-        uint32_t rendererModel=UINT32_MAX;
-        bool valid=false;
-        std::vector<uint64_t> meshes;
-    };
-    bool _geometrySourceRevisionEnabled=false;
-    uint64_t _geometrySourceIncarnation=0, _nextGeometrySourceRevision=1;
-    std::unordered_map<uint32_t, GeometrySourceRecord> _geometrySourceOf;
-    uint64_t NextGeometrySourceRevision();
+    // Allocated only for the private count diagnostic. LOD/material contents
+    // are immutable after registration; retirement and re-registration revise them.
+    std::unique_ptr<render::GeometrySourceRevisions> _geometrySourceRevisions;
     bool GeometrySourceFresh(uint32_t producer, uint32_t renderer, uint64_t incarnation,
         uint64_t revision) const;
     bool _geometryPageFixtureActive=false;
