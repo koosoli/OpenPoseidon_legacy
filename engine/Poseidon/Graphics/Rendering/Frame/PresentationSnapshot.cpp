@@ -335,15 +335,21 @@ static void FillPresentationSnapshot(PresentationSnapshot& snap)
                 if (!ship || !ship->GetShape())
                     return;
                 const auto* shape = ship->GetShape();
-                const Vector3 pos = ship->Position();
+                // W11a: the pose the hull is DRAWN at this frame (render interpolation between the
+                // last two 60 Hz ticks), not the latest tick's: at 17 m/s the tick pose runs up to
+                // 0.3 m ahead of the drawn hull, by an amount that changes every frame, and the
+                // wake's hull depression, the bow spray and its collision body jittered against the
+                // hull (owner: "boats are stuttering")
+                const Matrix4 pose = ship->RenderTransform();
+                const Vector3 pos = pose.Position();
                 const Vector3 mn = shape->Min();
                 const Vector3 mx = shape->Max();
                 const float draft = sea - (pos.Y() + mn.Y());
                 if (draft < 0.05f || pos.Y() + mx.Y() < sea - 0.5f)
                     return;
                 PresentationSnapshot::WakeBoat boat;
-                const Vector3 fwd = ship->Direction();
-                const Vector3 aside = ship->DirectionAside();
+                const Vector3 fwd = pose.Direction();
+                const Vector3 aside = pose.DirectionAside();
                 const float midX = 0.5f * (mn.X() + mx.X());
                 const float midZ = 0.5f * (mn.Z() + mx.Z());
                 boat.x = pos.X() + aside.X() * midX + fwd.X() * midZ;
@@ -364,7 +370,7 @@ static void FillPresentationSnapshot(PresentationSnapshot& snap)
                 boat.draft = designDraft;
                 boat.driven = ship->Driver() != nullptr;
                 // W6i: pose, freeboard and the sea at the bow contacts / propeller
-                const Vector3 up = ship->DirectionUp();
+                const Vector3 up = pose.DirectionUp();
                 boat.fwdY = fwd.Y();
                 boat.upX = up.X();
                 boat.upY = up.Y();
